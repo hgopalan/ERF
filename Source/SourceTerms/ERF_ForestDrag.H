@@ -2,9 +2,6 @@
 #define ERF_FORESTDRAG_H_
 
 #include <memory>
-#include <iostream>
-#include <fstream>
-#include <string>
 #include <AMReX_MultiFab.H>
 
 /*
@@ -16,13 +13,13 @@ class ForestDrag
 {
 public:
 
-    ForestDrag (std::string forestfile);
+    explicit ForestDrag (std::string forestfile);
 
     ~ForestDrag () = default;
 
     void
-    define_drag_field (amrex::BoxArray ba,
-                       amrex::DistributionMapping dm,
+    define_drag_field (const amrex::BoxArray& ba,
+                       const amrex::DistributionMapping& dm,
                        amrex::Geometry& geom,
                        amrex::MultiFab* z_phys_nd);
 
@@ -39,6 +36,5 @@ private:
     amrex::Vector<amrex::Real> m_lai_forest;
     amrex::Vector<amrex::Real> m_laimax_forest;
     std::unique_ptr<amrex::MultiFab> m_forest_drag;
-    std::unique_ptr<int> iptr;
 };
 #endif

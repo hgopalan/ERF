@@ -29,8 +29,8 @@ ForestDrag::ForestDrag (std::string forestfile)
 }
 
 void
-ForestDrag::define_drag_field (BoxArray ba,
-                               DistributionMapping dm,
+ForestDrag::define_drag_field (const BoxArray& ba,
+                               const DistributionMapping& dm,
                                Geometry& geom,
                                MultiFab* z_phys_nd)
 {
@@ -40,15 +40,8 @@ ForestDrag::define_drag_field (BoxArray ba,
 
     // Allocate the forest drag MF
     // NOTE: 1 ghost cell for averaging to faces
-    //m_forest_drag.reset();
-    //m_forest_drag = std::make_unique<MultiFab>(ba,dm,1,1);
-    Print() << "CHECK: " << ba << ' '
-            << dm << "\n";
-    MultiFab Test;
-    Test.define(ba,dm,1,1);
-    iptr = std::make_unique<int>(2);
-    exit(0);
-
+    m_forest_drag.reset();
+    m_forest_drag = std::make_unique<MultiFab>(ba,dm,1,1);
     m_forest_drag->setVal(0.);
 
     // Loop over forest types and pre-compute factors
@@ -137,3 +130,4 @@ ForestDrag::define_drag_field (BoxArray ba,
     m_forest_drag->FillBoundary(geom.periodicity());
 
 } // init_drag_field
+

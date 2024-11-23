@@ -1590,7 +1590,7 @@ ERF::ReadParameters ()
         std::string forestfile;
         auto do_forest = pp.query("forest_file", forestfile);
         if (do_forest) {
-            for (int lev = 0; lev < max_level; ++lev) {
+            for (int lev = 0; lev <= max_level; ++lev) {
                 m_forest[lev] = std::make_unique<ForestDrag>(forestfile);
             }
         }
