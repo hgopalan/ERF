@@ -46,7 +46,7 @@ erf.Cs              = 0.1
 
 erf.init_type = "uniform"
 
-erf.forest_file = erf_forest_def
+#erf.forest_file = erf_forest_def
 
 # PROBLEM PARAMETERS
 prob.rho_0 = 1.0

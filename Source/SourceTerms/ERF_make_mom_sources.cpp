@@ -89,6 +89,7 @@ void make_mom_sources (int level,
     // *****************************************************************************
     const bool l_use_ndiff    = solverChoice.use_NumDiff;
     const bool use_terrain    = solverChoice.terrain_type != TerrainType::None;
+    const bool l_do_forest    = solverChoice.do_forest;
 
     // *****************************************************************************
     // Data for Coriolis forcing
@@ -490,7 +491,7 @@ void make_mom_sources (int level,
         // *****************************************************************************
         // 9. Add CANOPY source terms
         // *****************************************************************************
-        if (forest_drag) {
+        if (l_do_forest) {
             ParallelFor(tbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
             {
                 const Real ux = u(i, j, k);

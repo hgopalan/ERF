@@ -59,7 +59,8 @@
                      input_sounding_data, turbPert);
 
         // Canopy data for mom sources
-        MultiFab* forest_drag = m_forest[level]->get_drag_field();
+        MultiFab* forest_drag = nullptr;
+        if (solverChoice.do_forest) { forest_drag = m_forest[level]->get_drag_field(); }
 
         // Moving terrain
         if ( solverChoice.terrain_type == TerrainType::Moving )
@@ -428,7 +429,8 @@
         Real* dptr_v_geos = solverChoice.have_geo_wind_profile ? d_v_geos[level].data(): nullptr;
 
         // Canopy data for mom sources
-        MultiFab* forest_drag = m_forest[level]->get_drag_field();
+        MultiFab* forest_drag = nullptr;
+        if (solverChoice.do_forest) { forest_drag = m_forest[level]->get_drag_field(); }
 
         make_sources(level, nrk, slow_dt, old_stage_time, S_data, S_prim, cc_src, z_phys_cc[level],
 #if defined(ERF_USE_RRTMGP)
