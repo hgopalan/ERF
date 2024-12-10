@@ -547,7 +547,7 @@ void make_mom_sources (int level,
             const Real drag_coefficient=10.0/dz;
             const Real tiny = std::numeric_limits<amrex::Real>::epsilon();
             ParallelFor(tbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
-            {        
+            {
                 const Real ux = u(i, j, k);
                 const Real uy = 0.25 * ( v(i, j  , k  ) + v(i-1, j  , k  )
                                        + v(i, j+1, k  ) + v(i-1, j+1, k  ) );
@@ -559,7 +559,7 @@ void make_mom_sources (int level,
                 xmom_src_arr(i, j, k) -= t_blank * CdM * ux * windspeed;
             });
             ParallelFor(tby, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
-            {                
+            {
                 const Real ux = 0.25 * ( u(i  , j  , k  ) + u(i  , j-1, k  )
                                        + u(i+1, j  , k  ) + u(i+1, j-1, k  ) );
                 const Real uy = v(i, j, k);
@@ -571,7 +571,7 @@ void make_mom_sources (int level,
                 ymom_src_arr(i, j, k) -= t_blank * CdM * uy * windspeed;
             });
             ParallelFor(tbz, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
-            {               
+            {
                 const amrex::Real ux = 0.25 * ( u(i  , j  , k  ) + u(i+1, j  , k  )
                                               + u(i  , j  , k-1) + u(i+1, j  , k-1) );
                 const amrex::Real uy = 0.25 * ( v(i  , j  , k  ) + v(i  , j+1, k  )

@@ -133,7 +133,7 @@ ERF::ERF_shared ()
     m_forest.resize(nlevs_max);
     for (int lev = 0; lev < max_level; ++lev) { m_forest[lev] = nullptr;}
 
-    // Immersed Forcing 
+    // Immersed Forcing
     m_terrain.resize(nlevs_max);
     for (int lev = 0; lev < max_level; ++lev) { m_terrain[lev] = nullptr;}
 
@@ -1626,7 +1626,7 @@ ERF::ReadParameters ()
             }
         }
 
-        //Query the terrain file name 
+        //Query the terrain file name
         std::string terrainfile;
         solverChoice.do_terrain = pp.query("terrain_file", terrainfile);
         if (solverChoice.do_terrain) {
