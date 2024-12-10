@@ -63,7 +63,7 @@
         // Canopy data for mom sources
         MultiFab* forest_drag = nullptr;
         if (solverChoice.do_forest) { forest_drag = m_forest[level]->get_drag_field(); }
-        // Immersed Forcing 
+        // Immersed Forcing
         MultiFab* terrain_blank = nullptr;
         if(solverChoice.do_terrain) { terrain_blank = m_terrain[level]->get_terrain_blank_field(); }
 
@@ -436,7 +436,7 @@
         // Canopy data for mom sources
         MultiFab* forest_drag = nullptr;
         if (solverChoice.do_forest) { forest_drag = m_forest[level]->get_drag_field(); }
-        // Immersed Forcing 
+        // Immersed Forcing
         MultiFab* terrain_blank = nullptr;
         if(solverChoice.do_terrain) { terrain_blank = m_terrain[level]->get_terrain_blank_field(); }
 

@@ -87,15 +87,15 @@ void make_mom_sources (int level,
     //    6. nudging towards input sounding data
     //    7. numerical diffusion for (xmom,ymom,zmom)
     //    8. sponge
-    //    9. Forest canopy 
-    //   10. Immersed Forcing 
+    //    9. Forest canopy
+    //   10. Immersed Forcing
     // *****************************************************************************
     const bool l_use_ndiff    = solverChoice.use_NumDiff;
     const bool use_terrain    = solverChoice.terrain_type != TerrainType::None;
     const bool l_do_forest    = solverChoice.do_forest;
     const bool l_do_terrain   = solverChoice.do_terrain;
 
-    // Check if terrain and immersed terrain clash 
+    // Check if terrain and immersed terrain clash
     if(use_terrain && l_do_terrain){
         amrex::Error(" Cannot use immersed forcing with terrain");
     }
@@ -555,7 +555,7 @@ void make_mom_sources (int level,
                                        + w(i, j  , k+1) + w(i-1, j  , k+1) );
                 const Real windspeed = std::sqrt(ux * ux + uy * uy + uz * uz);
                 const Real t_blank = 0.5 * (t_blank_arr(i, j, k) + t_blank_arr(i-1, j, k));
-                const Real CdM = std::min(drag_coefficient / (windspeed + tiny), 1000.0);                   
+                const Real CdM = std::min(drag_coefficient / (windspeed + tiny), 1000.0);
                 xmom_src_arr(i, j, k) -= t_blank * CdM * ux * windspeed;
             });
             ParallelFor(tby, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
@@ -567,7 +567,7 @@ void make_mom_sources (int level,
                                        + w(i  , j  , k+1) + w(i  , j-1, k+1) );
                 const amrex::Real windspeed = std::sqrt(ux * ux + uy * uy + uz * uz);
                 const Real t_blank = 0.5 * (t_blank_arr(i, j, k) + t_blank_arr(i, j-1, k));
-                const Real CdM = std::min(drag_coefficient / (windspeed + tiny), 1000.0);                   
+                const Real CdM = std::min(drag_coefficient / (windspeed + tiny), 1000.0);
                 ymom_src_arr(i, j, k) -= t_blank * CdM * uy * windspeed;
             });
             ParallelFor(tbz, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
@@ -579,7 +579,7 @@ void make_mom_sources (int level,
                 const amrex::Real uz = w(i, j, k);
                 const amrex::Real windspeed = std::sqrt(ux * ux + uy * uy + uz * uz);
                 const Real t_blank = 0.5 * (t_blank_arr(i, j, k) + t_blank_arr(i, j, k-1));
-                const Real CdM = std::min(drag_coefficient / (windspeed + tiny), 1000.0);                   
+                const Real CdM = std::min(drag_coefficient / (windspeed + tiny), 1000.0);
                 zmom_src_arr(i, j, k) -= t_blank * CdM * uz * windspeed;
             });
         }

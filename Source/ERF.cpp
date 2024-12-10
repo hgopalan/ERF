@@ -131,11 +131,11 @@ ERF::ERF_shared ()
 
     // NOTE: size canopy model before readparams (if file exists, we construct)
     m_forest.resize(nlevs_max);
-    for (int lev = 0; lev < max_level; ++lev) { m_forest[lev] = nullptr; }
+    for (int lev = 0; lev < max_level; ++lev) { m_forest[lev] = nullptr;}
 
     // Immersed Forcing 
     m_terrain.resize(nlevs_max);
-    for (int lev = 0; lev < max_level; ++lev) { m_terrain[lev] = nullptr; }
+    for (int lev = 0; lev < max_level; ++lev) { m_terrain[lev] = nullptr;}
 
 
     ReadParameters();
@@ -1633,7 +1633,7 @@ ERF::ReadParameters ()
             for (int lev = 0; lev <= max_level; ++lev) {
                 m_terrain[lev] = std::make_unique<TerrainDrag>(terrainfile);
             }
-        }        
+        }
 
         // AmrMesh iterate on grids?
         bool iterate(true);

@@ -1,4 +1,4 @@
-import numpy as np 
+import numpy as np
 
 target=open("erf_terrain_def","w")
 
