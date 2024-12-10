@@ -46,6 +46,7 @@
 #include <ERF_FillPatcher.H>
 #include <ERF_SampleData.H>
 #include <ERF_ForestDrag.H>
+#include <ERF_TerrainDrag.H>
 
 #ifdef ERF_USE_PARTICLES
 #include "ERF_ParticleData.H"
@@ -1140,6 +1141,7 @@ private:
     std::unique_ptr<ReadBndryPlanes>  m_r2d  = nullptr;
     std::unique_ptr<ABLMost>          m_most = nullptr;
     amrex::Vector<std::unique_ptr<ForestDrag>> m_forest;
+    amrex::Vector<std::unique_ptr<TerrainDrag>> m_terrain;
 
     //
     // Holds info for dynamically generated tagging criteria
