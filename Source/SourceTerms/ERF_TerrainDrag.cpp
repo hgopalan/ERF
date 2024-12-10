@@ -69,10 +69,6 @@ TerrainDrag::define_terrain_blank_field (const BoxArray& ba,
                 const Real radius = std::sqrt((x - xt) * (x - xt) +
                                               (y - yt) * (y - yt));
                 bool terrain_point=(radius<=cell_radius && z<=ht)? 1:0;
-                if(terrain_point==1)
-                {
-                    amrex::Print()<<x<<"  "<<y<<"   "<<z<<"  "<<xt<<"  "<<yt<<std::endl;
-                }
                 levelBlank(i, j, k) = terrain_point;
             });
         } // mfi
