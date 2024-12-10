@@ -53,7 +53,7 @@ TerrainDrag::define_terrain_blank_field(
         d_zterrain.begin());
     const auto* xterrain_ptr = d_xterrain.data();
     const auto* yterrain_ptr = d_yterrain.data();
-    const auto* zterrain_ptr = d_zterrain.data();  
+    const auto* zterrain_ptr = d_zterrain.data();
   // Set the terrain blank data
   for (MFIter mfi(*m_terrain_blank); mfi.isValid(); ++mfi) {
     Box gtbx = mfi.growntilebox();
