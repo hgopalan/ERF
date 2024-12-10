@@ -966,7 +966,9 @@ private:
                                                     "Lturb",
                                                     // moisture vars
                                                     "qt", "qv", "qc", "qi", "qp", "qrain", "qsnow", "qgraup", "qsat",
-                                                    "rain_accum", "snow_accum", "graup_accum"
+                                                    "rain_accum", "snow_accum", "graup_accum",
+                                                    // Terrain IB mask
+                                                    "terrain_IB_mask"
 #ifdef ERF_USE_EB
                                                     // EB variables
                                                     ,"volfrac",
