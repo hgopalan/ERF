@@ -281,11 +281,11 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
                 Real grad_Ri_in_cloud = CONST_GRAV / theta * dthetadz / wind_shear; // clear sky
                 Real cloud_water = Real(0.0);
                 Real cloud_ice = Real(0.0);
-                if (moisture_indices.qc_comp >= 0) {
-                    cloud_water = amrex::max(cell_data(i, j, k, moisture_indices.qc_comp) / cell_data(i, j, k, Rho_comp), Real(0.0));
+                if (moisture_indices.qc >= 0) {
+                    cloud_water = amrex::max(cell_data(i, j, k, moisture_indices.qc) / cell_data(i, j, k, Rho_comp), Real(0.0));
                 }
-                if (moisture_indices.qi_comp >= 0) {
-                    cloud_ice = amrex::max(cell_data(i, j, k, moisture_indices.qi_comp) / cell_data(i, j, k, Rho_comp), Real(0.0));
+                if (moisture_indices.qi >= 0) {
+                    cloud_ice = amrex::max(cell_data(i, j, k, moisture_indices.qi) / cell_data(i, j, k, Rho_comp), Real(0.0));
                 }
                 const Real total_cloud = cloud_water + cloud_ice;
                 const Real cloud_threshold = Real(1.0e-6);  // WRF-typical threshold
