@@ -376,6 +376,19 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
             K_turb(i, j, k, EddyDiff::Turb_lengthscale) = pblh_arr(i, j, 0);
         });
 
+        // ====== STORE PBL HEIGHT TO DIAGNOSTIC OUTPUT ======
+        // Store the corrected PBLH for use in output files/diagnostics
+        if (SurfLayer) {
+            auto pblh_ptr = SurfLayer->get_pblh(level);
+            if (pblh_ptr) {
+                auto pblh_diag_arr = pblh_ptr->array(mfi);
+                ParallelFor(xybx, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept
+                {
+                    pblh_diag_arr(i, j, 0) = pblh_corr_arr(i, j, 0);
+                });
+            }
+        }
+
         // FOEXTRAP top and bottom ghost cells
         ParallelFor(xybx, [=] AMREX_GPU_DEVICE(int i, int j, int ) noexcept
         {
