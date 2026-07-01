@@ -29,9 +29,14 @@ geometry.is_periodic = 1 1 0
 # MOST BOUNDARY WITH WATER SURFACE DISCRIMINATION
 zlo.type = "surface_layer"
 erf.most.z0   = 0.0001     # smooth sea surface roughness
-erf.most.zref = 10.0
+erf.most.zref = 48.0
 erf.most.surf_temp = 298.0 # warm sea surface temperature
 erf.most.surf_temp_flux = 0.01 # weak sensible heat flux over marine layer
+
+# ABL DRIVER CONFIGURATION
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 6.0 0.0 0.0
+erf.use_coriolis = true
 
 # To force sea classification, we can utilize roughness types or landmask configurations
 # consistent with ocean/water body parameterizations.
@@ -84,11 +89,9 @@ erf.input_sounding_file = "input_sounding_MRF_marine"
 erf.active_moisture_vars = qv qc qi
 
 # PBL CONFIGURATION - MRF PBL with water/land-aware moisture diffusivity
-erf.pbl_type = "MRF"
-erf.pbl_mrf_Ribcr = 0.5
-erf.pbl_mrf_const_b = 7.8
-erf.pbl_mrf_sf = 0.1
-erf.enable_mrf_countergradient = true
-erf.mrf_moistvars = true
 
-# Weak perturbations
+# ABL DRIVER CONFIGURATION
+erf.pbl_type = "MRF"
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 6.0 0.0 0.0
+erf.use_coriolis = true

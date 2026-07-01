@@ -36,10 +36,14 @@ geometry.is_periodic = 1 1 0
 # MOST BOUNDARY - Moderate heating with weak wind
 zlo.type = "surface_layer"
 erf.most.z0   = 0.1      # roughness length [m]
-erf.most.zref = 10.0     # reference height [m]
+erf.most.zref = 48.0     # reference height [m]
 erf.most.surf_temp = 303.0  # warm surface (tropical conditions)
 erf.most.surf_heating_rate = 5.0  # strong heating but very weak wind
 
+# ABL DRIVER CONFIGURATION
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 0.2 0.0 0.0
+erf.use_coriolis = true
 # Upper boundary - stable layer
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.008   # stable layer [K/m]
@@ -93,22 +97,9 @@ erf.input_sounding_file = "input_sounding_MRF_calm_conditions"
 # Small perturbations to trigger turbulence despite weak wind
 
 # PBL CONFIGURATION - MRF with countergradient
+
+# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.pbl_mrf_Ribcr = 0.5   # critical bulk Richardson number
-erf.pbl_mrf_const_b = 7.8 # surface layer factor
-erf.pbl_mrf_sf = 0.1      # surface layer fraction
-
-# Enable countergradient corrections
-erf.enable_mrf_countergradient = true
-
-# Enable moisture diffusivity
-erf.mrf_moistvars = false
-
-# Use HIGH-RESOLUTION diffusivity bounds for calm conditions
-# Allows smaller minimum K to adapt to low wind shear
-erf.pbl_mrf_highres_bounds = true  # Uses Kmin = ckz*dz instead of 0.1 m²/s
-
-# CORIOLIS EFFECT
-erf.latitude = 5.0   # tropical latitude for realistic calm conditions
-
-# END OF INPUT FILE
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 0.2 0.0 0.0
+erf.use_coriolis = true

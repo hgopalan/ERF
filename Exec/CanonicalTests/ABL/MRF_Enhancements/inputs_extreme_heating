@@ -37,10 +37,14 @@ geometry.is_periodic = 1 1 0
 # Very strong surface heating rate (15-20 K/h) representing heat wave or desert
 zlo.type = "surface_layer"
 erf.most.z0   = 0.01    # roughness length [m] (desert-like, sparse vegetation)
-erf.most.zref = 10.0    # reference height [m]
+erf.most.zref = 48.0    # reference height [m]
 erf.most.surf_temp = 320.0  # very hot surface temperature [K]
 erf.most.surf_heating_rate = 15.0  # EXTREME heating rate [K/h]
 
+# ABL DRIVER CONFIGURATION
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 4.0 0.0 0.0
+erf.use_coriolis = true
 # Upper boundary - weak stable layer (will be overcome by extreme heating)
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.001  # very weak inversion [K/m]
@@ -91,21 +95,9 @@ erf.input_sounding_file = "input_sounding_MRF_extreme_heating"
 # Moderate perturbations for turbulence initiation
 
 # PBL CONFIGURATION - MRF with countergradient enabled
+
+# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.pbl_mrf_Ribcr = 0.5   # critical bulk Richardson number
-erf.pbl_mrf_const_b = 7.8 # surface layer factor
-erf.pbl_mrf_sf = 0.1      # surface layer fraction
-
-# Enable countergradient corrections - test GAMCRT limit
-erf.enable_mrf_countergradient = true
-
-# Enable moisture diffusivity
-erf.mrf_moistvars = false
-
-# Use conservative (strict) diffusivity bounds for extreme conditions
-erf.pbl_mrf_highres_bounds = false  # Uses standard Kmin=0.1, Kmax=300 m²/s
-
-# CORIOLIS EFFECT
-erf.latitude = 30.0  # subtropical latitude (realistic for extreme heat)
-
-# END OF INPUT FILE
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 4.0 0.0 0.0
+erf.use_coriolis = true

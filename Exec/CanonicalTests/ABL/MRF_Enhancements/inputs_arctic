@@ -27,10 +27,14 @@ geometry.is_periodic = 1 1 0
 # MOST BOUNDARY WITH INTENSE COOLING
 zlo.type = "surface_layer"
 erf.most.z0   = 0.1
-erf.most.zref = 10.0
+erf.most.zref = 48.0
 erf.most.surf_temp = 260.0 # very cold Arctic surface
 erf.most.surf_heating_rate = -1.0 # intense radiative surface cooling (-1.0 K/h)
 
+# ABL DRIVER CONFIGURATION
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 5.0 0.0 0.0
+erf.use_coriolis = true
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.01
 
@@ -77,9 +81,9 @@ erf.input_sounding_file = "input_sounding_MRF_arctic"
 # Extremely weak perturbations (quickly suppressed)
 
 # PBL CONFIGURATION - MRF under extreme polar cooling
+
+# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.pbl_mrf_Ribcr = 0.5
-erf.pbl_mrf_const_b = 7.8
-erf.pbl_mrf_sf = 0.1
-erf.enable_mrf_countergradient = false
-erf.mrf_moistvars = false
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 5.0 0.0 0.0
+erf.use_coriolis = true

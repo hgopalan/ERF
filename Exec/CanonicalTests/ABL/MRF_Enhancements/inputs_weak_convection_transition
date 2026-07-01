@@ -38,10 +38,14 @@ geometry.is_periodic = 1 1 0
 # This mimics realistic pre-dawn warming: starts neutral, becomes weakly unstable
 zlo.type = "surface_layer"
 erf.most.z0   = 0.1      # roughness length [m]
-erf.most.zref = 10.0     # reference height [m]
+erf.most.zref = 48.0     # reference height [m]
 erf.most.surf_temp = 300.0   # initial surface temperature [K]
 erf.most.surf_heating_rate = 0.5  # average heating rate [K/h] (varies with time)
 
+# ABL DRIVER CONFIGURATION
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 8.0 0.0 0.0
+erf.use_coriolis = true
 # Upper boundary - stable layer
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.005   # weak stable layer [K/m] (typical for tropical mornings)
@@ -92,19 +96,9 @@ erf.input_sounding_file = "input_sounding_MRF_weak_convection_transition"
 
 
 # PBL CONFIGURATION - MRF with countergradient enabled (tests smooth activation)
+
+# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.pbl_mrf_Ribcr = 0.5   # critical bulk Richardson number
-erf.pbl_mrf_const_b = 7.8 # surface layer factor (WRF CFAC)
-erf.pbl_mrf_sf = 0.1      # surface layer fraction (WRF SFAC)
-
-# Enable countergradient corrections - THIS IS THE KEY TEST
-# The correction should activate smoothly as heat flux increases
-erf.enable_mrf_countergradient = true
-
-# Enable moisture diffusivity (optional)
-erf.mrf_moistvars = false
-
-# CORIOLIS EFFECT
-erf.latitude = 45.0  # mid-latitude (f = 1.0e-4 s^-1)
-
-# END OF INPUT FILE
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 8.0 0.0 0.0
+erf.use_coriolis = true
