@@ -46,6 +46,7 @@ erf.most.surf_heating_rate = 0.5  # average heating rate [K/h] (varies with time
 erf.abl_driver_type = "GeostrophicWind"
 erf.abl_geo_wind = 8.0 0.0 0.0
 erf.use_coriolis = true
+
 # Upper boundary - stable layer
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.005   # weak stable layer [K/m] (typical for tropical mornings)
@@ -68,10 +69,6 @@ amr.max_level       = 0       # maximum level number allowed
 # CHECKPOINT FILES
 erf.check_file      = chk_weak_convection    # root name of checkpoint file
 erf.check_int       = 50000                  # checkpoint every ~5400 s (90 min)
-
-# DATA COLLECTION
-erf.data_log    = unstable_hist.dat unstable_profiles.dat
-erf.profile_int = 10
 
 # PLOTFILES
 erf.plot_file_1     = plt_unstable      # prefix of plotfile name
@@ -96,9 +93,19 @@ erf.input_sounding_file = "input_sounding_MRF_weak_convection_transition"
 
 
 # PBL CONFIGURATION - MRF with countergradient enabled (tests smooth activation)
-
-# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.abl_driver_type = "GeostrophicWind"
-erf.abl_geo_wind = 8.0 0.0 0.0
-erf.use_coriolis = true
+erf.pbl_mrf_Ribcr = 0.5   # critical bulk Richardson number
+erf.pbl_mrf_const_b = 7.8 # surface layer factor (WRF CFAC)
+erf.pbl_mrf_sf = 0.1      # surface layer fraction (WRF SFAC)
+
+# Enable countergradient corrections - THIS IS THE KEY TEST
+# The correction should activate smoothly as heat flux increases
+erf.enable_mrf_countergradient = true
+
+# Enable moisture diffusivity (optional)
+erf.mrf_moistvars = false
+
+# CORIOLIS EFFECT
+erf.latitude = 45.0  # mid-latitude (f = 1.0e-4 s^-1)
+
+# END OF INPUT FILE

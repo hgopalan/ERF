@@ -40,6 +40,7 @@ erf.most.surf_heating_rate = 1.0  # Dynamic heating rate [K/h] to trigger transi
 erf.abl_driver_type = "GeostrophicWind"
 erf.abl_geo_wind = 8.0 0.0 0.0
 erf.use_coriolis = true
+
 zhi.type = "SlipWall"
 
 # TIME STEP CONTROL
@@ -80,9 +81,14 @@ erf.sounding_type = Ideal
 erf.input_sounding_file = "input_sounding_MRF_diurnal"
 
 # PBL CONFIGURATION - MRF PBL with transition-capable countergradient
-
-# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.abl_driver_type = "GeostrophicWind"
-erf.abl_geo_wind = 8.0 0.0 0.0
-erf.use_coriolis = true
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = true
+
+# PROBLEM PARAMETERS
+
+
+# Perturbations to trigger transition turbulence

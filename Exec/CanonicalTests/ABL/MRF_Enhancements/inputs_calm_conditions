@@ -44,6 +44,7 @@ erf.most.surf_heating_rate = 5.0  # strong heating but very weak wind
 erf.abl_driver_type = "GeostrophicWind"
 erf.abl_geo_wind = 0.2 0.0 0.0
 erf.use_coriolis = true
+
 # Upper boundary - stable layer
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.008   # stable layer [K/m]
@@ -66,10 +67,6 @@ amr.max_level       = 0       # maximum level number allowed
 # CHECKPOINT FILES
 erf.check_file      = chk_calm      # root name of checkpoint file
 erf.check_int       = 100000         # checkpoint every ~10000 s
-
-# DATA COLLECTION
-erf.data_log    = unstable_hist.dat unstable_profiles.dat
-erf.profile_int = 10
 
 # PLOTFILES
 erf.plot_file_1     = plt_unstable      # prefix of plotfile name
@@ -97,9 +94,22 @@ erf.input_sounding_file = "input_sounding_MRF_calm_conditions"
 # Small perturbations to trigger turbulence despite weak wind
 
 # PBL CONFIGURATION - MRF with countergradient
-
-# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.abl_driver_type = "GeostrophicWind"
-erf.abl_geo_wind = 0.2 0.0 0.0
-erf.use_coriolis = true
+erf.pbl_mrf_Ribcr = 0.5   # critical bulk Richardson number
+erf.pbl_mrf_const_b = 7.8 # surface layer factor
+erf.pbl_mrf_sf = 0.1      # surface layer fraction
+
+# Enable countergradient corrections
+erf.enable_mrf_countergradient = true
+
+# Enable moisture diffusivity
+erf.mrf_moistvars = false
+
+# Use HIGH-RESOLUTION diffusivity bounds for calm conditions
+# Allows smaller minimum K to adapt to low wind shear
+erf.pbl_mrf_highres_bounds = true  # Uses Kmin = ckz*dz instead of 0.1 m²/s
+
+# CORIOLIS EFFECT
+erf.latitude = 5.0   # tropical latitude for realistic calm conditions
+
+# END OF INPUT FILE

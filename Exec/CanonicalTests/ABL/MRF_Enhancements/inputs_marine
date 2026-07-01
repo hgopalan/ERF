@@ -33,15 +33,15 @@ erf.most.zref = 48.0
 erf.most.surf_temp = 298.0 # warm sea surface temperature
 erf.most.surf_temp_flux = 0.01 # weak sensible heat flux over marine layer
 
-# ABL DRIVER CONFIGURATION
-erf.abl_driver_type = "GeostrophicWind"
-erf.abl_geo_wind = 6.0 0.0 0.0
-erf.use_coriolis = true
-
 # To force sea classification, we can utilize roughness types or landmask configurations
 # consistent with ocean/water body parameterizations.
 # In the test, HGAMQ is zeroed over water surfaces if lmask_arr is 0 (water).
 erf.most.roughness_type_sea = charnock
+
+# ABL DRIVER CONFIGURATION
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 6.0 0.0 0.0
+erf.use_coriolis = true
 
 zhi.type = "SlipWall"
 
@@ -89,9 +89,11 @@ erf.input_sounding_file = "input_sounding_MRF_marine"
 erf.active_moisture_vars = qv qc qi
 
 # PBL CONFIGURATION - MRF PBL with water/land-aware moisture diffusivity
-
-# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.abl_driver_type = "GeostrophicWind"
-erf.abl_geo_wind = 6.0 0.0 0.0
-erf.use_coriolis = true
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = true
+
+# Weak perturbations

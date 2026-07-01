@@ -45,6 +45,7 @@ erf.most.surf_heating_rate = -0.1  # weak cooling [K/h]
 erf.abl_driver_type = "GeostrophicWind"
 erf.abl_geo_wind = 5.0 0.0 0.0
 erf.use_coriolis = true
+
 # Upper boundary - stable layer
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.01   # stable inversion [K/m]
@@ -69,10 +70,6 @@ amr.max_level       = 0       # maximum level number allowed
 erf.check_file      = chk_fine_dt        # root name of checkpoint file
 erf.check_int       = 50000              # checkpoint every 500 s (~8 min)
 
-# DATA COLLECTION
-erf.data_log    = unstable_hist.dat unstable_profiles.dat
-erf.profile_int = 10
-
 # PLOTFILES
 erf.plot_file_1     = plt_unstable      # prefix of plotfile name
 erf.plot_int_1      = 15                # number of timesteps between plotfiles
@@ -96,9 +93,18 @@ erf.input_sounding_file = "input_sounding_MRF_fine_dt_stable"
 # Small perturbations for turbulence
 
 # PBL CONFIGURATION - Standard MRF
-
-# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.abl_driver_type = "GeostrophicWind"
-erf.abl_geo_wind = 5.0 0.0 0.0
-erf.use_coriolis = true
+erf.pbl_mrf_Ribcr = 0.5   # critical bulk Richardson number
+erf.pbl_mrf_const_b = 7.8 # surface layer factor
+erf.pbl_mrf_sf = 0.1      # surface layer fraction
+
+# Standard configuration for stable case
+erf.enable_mrf_countergradient = false  # not needed for stable conditions
+
+# Enable moisture diffusivity (to test its time-marching too)
+erf.mrf_moistvars = false
+
+# CORIOLIS EFFECT
+erf.latitude = 60.0  # higher latitude for stable conditions
+
+# END OF INPUT FILE

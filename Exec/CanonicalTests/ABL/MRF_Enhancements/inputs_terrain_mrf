@@ -39,6 +39,7 @@ erf.most.surf_heating_rate = 1.0 # gentle surface heating
 erf.abl_driver_type = "GeostrophicWind"
 erf.abl_geo_wind = 10.0 0.0 0.0
 erf.use_coriolis = true
+
 zhi.type = "SlipWall"
 
 # TIME STEP CONTROL
@@ -90,9 +91,9 @@ prob.L = 500.0          # hill length [m]
 # Perturbations
 
 # PBL CONFIGURATION - MRF over Complex Terrain
-
-# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.abl_driver_type = "GeostrophicWind"
-erf.abl_geo_wind = 10.0 0.0 0.0
-erf.use_coriolis = true
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = false

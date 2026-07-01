@@ -38,6 +38,7 @@ erf.most.surf_heating_rate = 0.0  # zero heat flux for neutral conditions
 erf.abl_driver_type = "GeostrophicWind"
 erf.abl_geo_wind = 10.0 0.0 0.0
 erf.use_coriolis = true
+
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.0  # adiabatic upper boundary
 
@@ -79,9 +80,16 @@ erf.sounding_type = Ideal
 erf.input_sounding_file = "input_sounding_MRF_neutral"
 
 # PBL CONFIGURATION - Baseline MRF (neutral case)
-
-# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.abl_driver_type = "GeostrophicWind"
-erf.abl_geo_wind = 10.0 0.0 0.0
-erf.use_coriolis = true
+erf.pbl_mrf_Ribcr = 0.5   # critical bulk Richardson number
+erf.pbl_mrf_const_b = 7.8 # surface layer factor (WRF CFAC)
+erf.pbl_mrf_sf = 0.1      # surface layer fraction (WRF SFAC)
+
+# Disable countergradient corrections (not relevant for neutral conditions)
+erf.enable_mrf_countergradient = false
+
+# Enable moisture diffusivity for completeness (but no moisture in neutral case)
+erf.mrf_moistvars = false
+
+# CORIOLIS EFFECT
+erf.latitude = 45.0  # mid-latitude (f = 1.0e-4 s^-1)

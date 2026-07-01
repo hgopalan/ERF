@@ -43,8 +43,9 @@ erf.most.surf_heating_rate = -0.25  # strong cooling rate [K/h] (from Beare et a
 
 # ABL DRIVER CONFIGURATION
 erf.abl_driver_type = "GeostrophicWind"
-erf.abl_geo_wind = 10.0 0.0 0.0
+erf.abl_geo_wind = 8.0 0.0 0.0
 erf.use_coriolis = true
+
 # Upper boundary - capping inversion
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.01   # strong stable layer [K/m] (from Beare et al. 2006)
@@ -68,10 +69,6 @@ amr.max_level       = 0       # maximum level number allowed
 erf.check_file      = chk_stable      # root name of checkpoint file
 erf.check_int       = 1200            # number of timesteps between checkpoints
 
-# DATA COLLECTION
-erf.data_log    = unstable_hist.dat unstable_profiles.dat
-erf.profile_int = 10
-
 # PLOTFILES
 erf.plot_file_1     = plt_unstable      # prefix of plotfile name
 erf.plot_int_1      = 15                # number of timesteps between plotfiles
@@ -93,9 +90,17 @@ erf.input_sounding_file = "input_sounding_GABLS1"
 
 
 # PBL CONFIGURATION - MRF for stable boundary layer
-
-# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.abl_driver_type = "GeostrophicWind"
-erf.abl_geo_wind = 10.0 0.0 0.0
-erf.use_coriolis = true
+erf.pbl_mrf_Ribcr = 0.5   # critical bulk Richardson number
+erf.pbl_mrf_const_b = 7.8 # surface layer factor (WRF CFAC)
+erf.pbl_mrf_sf = 0.1      # surface layer fraction (WRF SFAC)
+
+# DISABLE COUNTERGRADIENT CORRECTIONS (not applicable for stable conditions)
+# In stable PBL, flux gradients are downgradient (no countergradient term)
+erf.enable_mrf_countergradient = false
+
+# Disable moisture diffusivity (dry stable case from GABLS1)
+erf.mrf_moistvars = false
+
+# CORIOLIS EFFECT - High latitude for strong inertial oscillations
+erf.latitude = 73.3  # GABLS1 latitude near Cabauw, Netherlands
