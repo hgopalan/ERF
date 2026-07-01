@@ -37,10 +37,14 @@ geometry.is_periodic = 1 1 0
 # Use stable boundary layer to focus on numerical aspects
 zlo.type = "surface_layer"
 erf.most.z0   = 0.1      # roughness length [m]
-erf.most.zref = 10.0     # reference height [m]
+erf.most.zref = 48.0     # reference height [m]
 erf.most.surf_temp = 280.0  # cooler surface (stable)
 erf.most.surf_heating_rate = -0.1  # weak cooling [K/h]
 
+# ABL DRIVER CONFIGURATION
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 5.0 0.0 0.0
+erf.use_coriolis = true
 # Upper boundary - stable layer
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.01   # stable inversion [K/m]
@@ -92,18 +96,9 @@ erf.input_sounding_file = "input_sounding_MRF_fine_dt_stable"
 # Small perturbations for turbulence
 
 # PBL CONFIGURATION - Standard MRF
+
+# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.pbl_mrf_Ribcr = 0.5   # critical bulk Richardson number
-erf.pbl_mrf_const_b = 7.8 # surface layer factor
-erf.pbl_mrf_sf = 0.1      # surface layer fraction
-
-# Standard configuration for stable case
-erf.enable_mrf_countergradient = false  # not needed for stable conditions
-
-# Enable moisture diffusivity (to test its time-marching too)
-erf.mrf_moistvars = false
-
-# CORIOLIS EFFECT
-erf.latitude = 60.0  # higher latitude for stable conditions
-
-# END OF INPUT FILE
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 5.0 0.0 0.0
+erf.use_coriolis = true

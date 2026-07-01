@@ -28,10 +28,15 @@ geometry.is_periodic = 1 1 0
 # MOST BOUNDARY
 zlo.type = "surface_layer"
 erf.most.z0   = 0.1
-erf.most.zref = 8.0
+erf.most.zref = 48.0
 
 # Neutral, adiabatic conditions
 erf.most.surf_temp_flux = 0.0
+
+# ABL DRIVER CONFIGURATION
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 35.0 0.0 0.0
+erf.use_coriolis = true
 
 zhi.type = "SlipWall"
 

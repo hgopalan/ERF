@@ -40,10 +40,14 @@ geometry.is_periodic = 1 1 0
 # This rapid transition tests numerical stability of HOL calculations
 zlo.type = "surface_layer"
 erf.most.z0   = 0.1      # roughness length [m]
-erf.most.zref = 10.0     # reference height [m]
+erf.most.zref = 48.0     # reference height [m]
 erf.most.surf_temp = 300.0  # initial surface temperature [K]
 erf.most.surf_heating_rate = 1.0  # average rate (will vary with time/procedure)
 
+# ABL DRIVER CONFIGURATION
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 7.0 0.0 0.0
+erf.use_coriolis = true
 # Upper boundary - stable layer
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.005   # stable layer [K/m]
@@ -94,18 +98,9 @@ erf.input_sounding_file = "input_sounding_MRF_rapid_cooling"
 # Perturbations for turbulence initiation
 
 # PBL CONFIGURATION - MRF with countergradient
+
+# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.pbl_mrf_Ribcr = 0.5   # critical bulk Richardson number
-erf.pbl_mrf_const_b = 7.8 # surface layer factor
-erf.pbl_mrf_sf = 0.1      # surface layer fraction
-
-# Enable countergradient corrections - tests smooth deactivation during cooling
-erf.enable_mrf_countergradient = true
-
-# Enable moisture diffusivity
-erf.mrf_moistvars = false
-
-# CORIOLIS EFFECT
-erf.latitude = 60.0  # higher latitude for realistic cooling rates
-
-# END OF INPUT FILE
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 7.0 0.0 0.0
+erf.use_coriolis = true

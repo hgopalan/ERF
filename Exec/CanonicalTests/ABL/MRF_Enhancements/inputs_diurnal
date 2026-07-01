@@ -29,13 +29,17 @@ geometry.is_periodic = 1 1 0
 # MOST BOUNDARY WITH DIURNAL CYCLE CAPABILITY
 zlo.type = "surface_layer"
 erf.most.z0   = 0.1
-erf.most.zref = 8.0
+erf.most.zref = 48.0
 
 # Diurnal temperature cycle parameters:
 # Start with neutral, then heat, then cool
 erf.most.surf_temp = 295.0
 erf.most.surf_heating_rate = 1.0  # Dynamic heating rate [K/h] to trigger transition
 
+# ABL DRIVER CONFIGURATION
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 8.0 0.0 0.0
+erf.use_coriolis = true
 zhi.type = "SlipWall"
 
 # TIME STEP CONTROL
@@ -76,14 +80,9 @@ erf.sounding_type = Ideal
 erf.input_sounding_file = "input_sounding_MRF_diurnal"
 
 # PBL CONFIGURATION - MRF PBL with transition-capable countergradient
+
+# ABL DRIVER CONFIGURATION
 erf.pbl_type = "MRF"
-erf.pbl_mrf_Ribcr = 0.5
-erf.pbl_mrf_const_b = 7.8
-erf.pbl_mrf_sf = 0.1
-erf.enable_mrf_countergradient = true
-erf.mrf_moistvars = true
-
-# PROBLEM PARAMETERS
-
-
-# Perturbations to trigger transition turbulence
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 8.0 0.0 0.0
+erf.use_coriolis = true
