@@ -194,4 +194,50 @@ amrex::Real ComputeStratificationForSmagorinsky (int i, int j, int k,
     }
 }
 
+/**
+ * Compute liquid-water virtual potential temperature
+ * Combines virtual temperature effects with liquid water evaporative cooling
+ * and ice sublimation cooling. Used in YSU top-down PBL extensions.
+ * theta_li = theta * (1 + 0.61*qv - qc - qi) - (L_v/Cp)*qc - (L_s/Cp)*qi
+ */
+AMREX_GPU_DEVICE
+AMREX_FORCE_INLINE
+amrex::Real ComputeLiquidWaterVirtualPotentialTemperature (amrex::Real theta,
+                                                           amrex::Real qv,
+                                                           amrex::Real qc_liquid,
+                                                           amrex::Real qc_ice)
+{
+    // Virtual effect from water vapor and cloud water loading
+    amrex::Real qc_total = qc_liquid + qc_ice;
+    amrex::Real theta_v_like = theta * (one + amrex::Real(0.61)*qv - qc_total);
+    
+    // Evaporative cooling from cloud liquid water
+    // L_v/Cp ~ 2.5e6/1004 ~ 2490
+    amrex::Real xlv_over_cp = amrex::Real(2.5e6) / amrex::Real(1004.0);
+    
+    // Sublimation cooling from cloud ice  
+    // (L_v + L_i)/Cp ~ (2.5e6 + 2.834e6)/1004 ~ 5189
+    amrex::Real xls_over_cp = (amrex::Real(2.5e6) + amrex::Real(2.834e6)) / amrex::Real(1004.0);
+    
+    // Total liquid-water virtual potential temperature
+    return theta_v_like - xlv_over_cp * qc_liquid - xls_over_cp * qc_ice;
+}
+
+/**
+ * Wrapper around ComputeLiquidWaterVirtualPotentialTemperature
+ */
+AMREX_GPU_DEVICE
+AMREX_FORCE_INLINE
+amrex::Real GetThetavl (int i, int j, int k,
+                        const amrex::Array4<amrex::Real const>& cell_data,
+                        const MoistureComponentIndices& moisture_indices)
+{
+    amrex::Real qv, qcl, qci;
+    GetMoistureVars(i, j, k, cell_data, qv, qcl, qci, moisture_indices);
+    
+    amrex::Real theta = cell_data(i, j, k, RhoTheta_comp) / cell_data(i, j, k, Rho_comp);
+    
+    return ComputeLiquidWaterVirtualPotentialTemperature(theta, qv, qcl, qci);
+}
+
 #endif

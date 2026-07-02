@@ -4,6 +4,7 @@
 #include "ERF_Constants.H"
 #include "ERF_TurbStruct.H"
 #include "ERF_PBLModels.H"
+#include "ERF_MoistUtils.H"
 
 using namespace amrex;
 
@@ -16,7 +17,7 @@ ComputeDiffusivityYSU (const MultiFab& xvel,
                        const TurbChoice& turbChoice,
                        std::unique_ptr<SurfaceLayer>& SurfLayer,
                        bool use_terrain_fitted_coords,
-                       bool /*use_moisture*/,
+                       bool use_moisture,
                        int level,
                        const BCRec* bc_ptr,
                        bool /*vert_only*/,
@@ -156,6 +157,66 @@ ComputeDiffusivityYSU (const MultiFab& xvel,
             pbli_arr(i,j,0) = kpbl;
         });
 
+        // -- FIX 1: θ_li PBLH Extension Scan (WRF lines 733–769) --
+        // Extend PBL height upward using liquid-water virtual potential temperature
+        // when enable_ysu_topdown && use_moisture are true
+        const bool enable_ysu_topdown = turbChoice.enable_ysu_topdown;
+        const bool enable_ysu_liquid_theta = turbChoice.enable_ysu_liquid_theta;
+        const int klo = geom.Domain().smallEnd(2);
+        const int khi = geom.Domain().bigEnd(2) + 1;
+        
+        if (enable_ysu_topdown && use_moisture && enable_ysu_liquid_theta) {
+            ParallelFor(xybx, [=] AMREX_GPU_DEVICE (int i, int j, int) noexcept
+            {
+                // Starting PBL index from Pass 1
+                int kpblold = pbli_arr(i,j,0);
+                bool definebrup = false;
+                constexpr Real brcr = zero;  // Critical Ri for theta-li scan (no inversion)
+                
+                // Compute liquid-theta virtual pot. temp. at surface
+                const Real thermalli = GetThetavl(i, j, klo, cell_data, moisture_indices);
+                
+                // Scan upward from kpblold to khi-1 looking for cells where
+                // thlix-based Ri is still unstable
+                for (int kk = kpblold; kk < khi; ++kk) {
+                    // Wind speed at this level (same as Rib calculation)
+                    const Real ws2 = amrex::max(
+                        fourth * ((uvel(i,j,kk)+uvel(i+1,j,kk))*(uvel(i,j,kk)+uvel(i+1,j,kk))
+                                 + (vvel(i,j,kk)+vvel(i,j+1,kk))*(vvel(i,j,kk)+vvel(i,j+1,kk))),
+                        amrex::Real(1.0)
+                    );
+                    
+                    // Height at current level
+                    const Real zval_kk = use_terrain_fitted_coords ?
+                                        Compute_Zrel_AtCellCenter(i,j,kk,z_nd_arr) :
+                                        gdata.ProbLo(2) + (kk + myhalf)*gdata.CellSize(2);
+                    
+                    // Liquid-theta virtual pot. temps at current and surface levels
+                    const Real thlix_kk = GetThetavl(i, j, kk, cell_data, moisture_indices);
+                    const Real thlix_klo = GetThetavl(i, j, klo, cell_data, moisture_indices);
+                    
+                    // Bulk Richardson number using theta-li
+                    const Real bruptmp = CONST_GRAV * zval_kk * (thlix_kk - thermalli) / 
+                                        (ws2 * thlix_klo);
+                    
+                    const bool stable = (bruptmp >= brcr);
+                    
+                    if (definebrup && stable) {
+                        pbli_arr(i,j,0) = kk;
+                        definebrup = false;
+                        break;  // Found the extension, exit scan
+                    }
+                    
+                    if (!stable) {  // still mixed/unstable: keep scanning
+                        definebrup = true;
+                    }
+                    
+                    // Safety: don't go beyond domain
+                    if (kk >= izmax) break;
+                }
+            });
+        }
+
         // -- Compute nonlocal/countergradient mixing parameters --
         // Not included for stable so nothing to do until unstable treatment is added
 
@@ -204,6 +265,58 @@ ComputeDiffusivityYSU (const MultiFab& xvel,
                 wscalek = std::max(u_star_arr(i,j,0) / phi_term, Real(0.001)); // Real(0.001) limit appears in WRF but not papers
                 K_turb(i,j,k,EddyDiff::Mom_v) = rho * wscalek * KAPPA * zval * std::pow(zfac, pfac);
                 K_turb(i,j,k,EddyDiff::Theta_v) = K_turb(i,j,k,EddyDiff::Mom_v);
+                
+                // -- FIX 2: Cloudy entrainment correction (WRF lines 840–875) --
+                // Apply cloud buoyancy-based correction to K at the PBL top when qc+qi > 0.01e-3
+                if (enable_ysu_topdown && use_moisture && enable_ysu_liquid_theta) {
+                    // Check if we're at or near the PBL top (within 2 cells of pbli_arr)
+                    const int kpbl = pbli_arr(i,j,0);
+                    if (k >= kpbl - 2 && k < kpbl && kpbl >= klo + 2) {
+                        // Check cloud water + ice at cell just below PBL top
+                        const int k_below = amrex::max(kpbl - 1, klo);
+                        const Real rho_k_below = cell_data(i, j, k_below, Rho_comp);
+                        
+                        Real qc_below = zero;
+                        if (moisture_indices.qc >= 0) {
+                            qc_below = cell_data(i, j, k_below, moisture_indices.qc) / rho_k_below;
+                        }
+                        
+                        Real qi_below = zero;
+                        if (moisture_indices.qi >= 0) {
+                            qi_below = cell_data(i, j, k_below, moisture_indices.qi) / rho_k_below;
+                        }
+                        
+                        constexpr Real cloud_thresh_entr = amrex::Real(0.01e-3);  // 0.01 g/kg threshold
+                        
+                        if ((qc_below + qi_below) > cloud_thresh_entr) {
+                            // Cloud-top entrainment correction active
+                            // Compute entrainment efficiency from liquid water content
+                            
+                            // Get liquid-theta virtual pot. temps at relevant levels
+                            const int k_p2 = amrex::min(kpbl + 1, izmax);
+                            const Real thlix_kbelow = GetThetavl(i, j, k_below, cell_data, moisture_indices);
+                            const Real thlix_kp2 = GetThetavl(i, j, k_p2, cell_data, moisture_indices);
+                            
+                            // dthvx using theta-li jump
+                            const Real dthvx_li = amrex::max(thlix_kp2 - thlix_kbelow, amrex::Real(0.1));
+                            
+                            // Entrainment efficiency from liquid water
+                            // ent_eff = min(0.2 * 8 * (xlv/cp) * qc_below / dthvx_li, 0.4)
+                            constexpr Real xlv_over_cp = amrex::Real(2.5e6) / amrex::Real(1004.0);
+                            const Real ent_eff = amrex::min(amrex::Real(0.2) * amrex::Real(8.0)
+                                                            * xlv_over_cp * qc_below / dthvx_li,
+                                                            amrex::Real(0.4));
+                            
+                            // Apply entrainment efficiency correction to K at PBL top
+                            // Enhance K based on cloud buoyancy effects
+                            const Real K_cloud_factor = one + ent_eff;
+                            K_turb(i,j,k,EddyDiff::Mom_v) = 
+                                amrex::min(K_turb(i,j,k,EddyDiff::Mom_v) * K_cloud_factor, 
+                                          amrex::Real(1000.0) * rho);  // Apply reasonable cap
+                            K_turb(i,j,k,EddyDiff::Theta_v) = K_turb(i,j,k,EddyDiff::Mom_v);
+                        }
+                    }
+                }
             } else {
                 // -- Compute coefficients in free stream above PBL
                 constexpr Real lam0 = Real(30.0);

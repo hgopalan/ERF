@@ -168,6 +168,10 @@ public:
           pp, "pbl_ysu_land_Ribcr", pbl_ysu_land_Ribcr, lev, max_level);
         query_one_or_per_level(
           pp, "pbl_ysu_unst_Ribcr", pbl_ysu_unst_Ribcr, lev, max_level);
+        query_one_or_per_level(
+          pp, "enable_ysu_topdown", enable_ysu_topdown, lev, max_level);
+        query_one_or_per_level(
+          pp, "enable_ysu_liquid_theta", enable_ysu_liquid_theta, lev, max_level);
       } else if (pbl_type == PBLType::MRF) {
         query_one_or_per_level(
           pp, "pbl_mrf_coriolis_freq", pbl_mrf_coriolis_freq, lev, max_level);
@@ -413,6 +417,10 @@ public:
                      << pbl_ysu_land_Ribcr << std::endl;
       amrex::Print() << "    pbl_ysu_unst_Ribcr              : "
                      << pbl_ysu_unst_Ribcr << std::endl;
+      amrex::Print() << "    enable_ysu_topdown              : "
+                     << enable_ysu_topdown << std::endl;
+      amrex::Print() << "    enable_ysu_liquid_theta         : "
+                     << enable_ysu_liquid_theta << std::endl;
     } else if (pbl_type == PBLType::MRF) {
       amrex::Print() << "    pbl_mrf_coriolis_freq : " << pbl_mrf_coriolis_freq
                      << std::endl;
@@ -541,6 +549,10 @@ public:
     fourth; // Critical Bulk Richardson number of Land for stable conditions
   amrex::Real pbl_ysu_unst_Ribcr =
     zero; // Critical Bulk Richardson number for unstable conditions
+  bool enable_ysu_topdown =
+    false; // Enable YSU top-down/cloudy PBL extensions (WRF Hong 2010 + cloudy)
+  bool enable_ysu_liquid_theta =
+    true; // Use liquid-water virtual potential temperature in stability calcs
   // Model coefficients - MRF
   amrex::Real pbl_mrf_coriolis_freq = amrex::Real(1.0e-4);
   amrex::Real pbl_mrf_Ribcr   = amrex::Real(0.5); // Critical Bulk Richardson number for MRF PBL model
