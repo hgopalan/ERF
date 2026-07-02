@@ -193,11 +193,10 @@ ComputeDiffusivityYSU (const MultiFab& xvel,
                     
                     // Liquid-theta virtual pot. temps at current and surface levels
                     const Real thlix_kk = GetThetavl(i, j, kk, cell_data, moisture_indices);
-                    const Real thlix_klo = GetThetavl(i, j, klo, cell_data, moisture_indices);
                     
                     // Bulk Richardson number using theta-li
                     const Real bruptmp = CONST_GRAV * zval_kk * (thlix_kk - thermalli) / 
-                                        (ws2 * thlix_klo);
+                                        (ws2 * thermalli);
                     
                     const bool stable = (bruptmp >= brcr);
                     
