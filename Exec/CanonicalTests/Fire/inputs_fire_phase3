@@ -17,8 +17,12 @@ amr.max_grid_size = 100
 amr.max_grid_size_z = 50
 
 # Surface layer boundary condition (REQUIRED for fire)
-erf.phys_bc_type.zlo = "surface_layer"
-erf.phys_bc_type.zhi = "SlipWall"
+xlo.type = "Outflow"
+xhi.type = "Outflow"
+ylo.type = "Outflow"
+yhi.type = "Outflow"
+zlo.type = "surface_layer"
+zhi.type = "SlipWall"
 
 # MOST parameters (REQUIRED for fire wind extraction)
 erf.most.z0 = 0.1
@@ -51,6 +55,7 @@ erf.plot_vars_1 = density rhoadv_0 x_velocity y_velocity z_velocity pressure tem
 
 # Fire module parameters (Phase 3)
 erf.fire.enable = true
+erf.fire.fire_debug = true
 erf.fire.grid_ratio = 5              # 10 m × 10 m fire cells (5 times finer than 50 m atm)
 erf.fire.fuel_model_id = 1            # GR1 (Short grass) Anderson FBFM13 model
 erf.fire.moisture_1hr = 0.08
