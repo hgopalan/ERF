@@ -11,6 +11,8 @@
 #include "ERF_Rothermel.H"
 #include "ERF.H"
 #include <AMReX_Print.H>
+#include <AMReX_MultiFab.H>
+#include <AMReX_ParallelDescriptor.H>
 
 void FireLayer::initialize(const ERF& erf, const FireParams& fire_params)
 {
@@ -88,10 +90,14 @@ void FireLayer::initialize(const ERF& erf, const FireParams& fire_params)
         });
     }
 
-    // Set ignition condition
+    // Set ignition condition using physical coordinates
     amrex::Real ign_x = fire_params.ignition_x;
     amrex::Real ign_y = fire_params.ignition_y;
     amrex::Real ign_r = fire_params.ignition_r;
+    amrex::Real dx_fire = m_fire_grid->geom.CellSize(0);
+    amrex::Real dy_fire = m_fire_grid->geom.CellSize(1);
+    amrex::Real prob_lo_x = m_fire_grid->geom.ProbLo(0);
+    amrex::Real prob_lo_y = m_fire_grid->geom.ProbLo(1);
 
     for (amrex::MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
         auto phi = fire_phi->array(mfi);
@@ -101,10 +107,9 @@ void FireLayer::initialize(const ERF& erf, const FireParams& fire_params)
             int i = iv[0];
             int j = iv[1];
 
-            // Convert to physical coordinates (simplified: just use indices * cell_size)
-            // Note: for proper implementation, should use geom to get cell centers
-            amrex::Real x_phys = static_cast<amrex::Real>(i) * 10.0;  // placeholder
-            amrex::Real y_phys = static_cast<amrex::Real>(j) * 10.0;
+            // Convert to physical coordinates
+            amrex::Real x_phys = prob_lo_x + (static_cast<amrex::Real>(i) + 0.5) * dx_fire;
+            amrex::Real y_phys = prob_lo_y + (static_cast<amrex::Real>(j) + 0.5) * dy_fire;
 
             amrex::Real dist = std::sqrt((x_phys - ign_x) * (x_phys - ign_x) +
                                         (y_phys - ign_y) * (y_phys - ign_y));
@@ -168,18 +173,35 @@ void FireLayer::advance(amrex::Real dt, const SurfaceLayer& surface_layer)
                                                     m_fire_params.moisture_100hr);
     compute_ros_field(*fire_ros, *fire_wind_eff, *fire_slopes, rc);
 
-    // Diagnostic output
+    // Diagnostic output: compute max and mean ROS
     amrex::Real max_ros = fire_ros->max(0);
+    
+    // Compute mean ROS by summing and dividing
     amrex::Real sum_ros = 0.0;
+    amrex::Real n_cells = 0.0;
     for (amrex::MFIter mfi(*fire_ros); mfi.isValid(); ++mfi) {
         auto ros = fire_ros->const_array(mfi);
         const auto& box = mfi.tilebox();
-        amrex::ParallelFor(box, [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) {
-            sum_ros += ros(iv);
-        });
+        for (int k = box.smallEnd(2); k <= box.bigEnd(2); ++k) {
+            for (int j = box.smallEnd(1); j <= box.bigEnd(1); ++j) {
+                for (int i = box.smallEnd(0); i <= box.bigEnd(0); ++i) {
+                    sum_ros += ros(i, j, k);
+                    n_cells += 1.0;
+                }
+            }
+        }
     }
-    amrex::Real mean_ros = (fire_ros->size() > 0) ? sum_ros / fire_ros->size() : 0.0;
 
-    amrex::Print() << "[FIRE] t= " << 0.0 << " max_ROS= " << max_ros
-                   << " m/s  mean_ROS= " << mean_ros << " m/s\n";
+    // MPI reduction for sum_ros and n_cells
+    amrex::ParallelDescriptor::ReduceRealSum(sum_ros);
+    amrex::ParallelDescriptor::ReduceRealSum(n_cells);
+
+    amrex::Real mean_ros = (n_cells > 0.0) ? sum_ros / n_cells : 0.0;
+
+    // Print diagnostic info
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "[FIRE] t= " << 0.0 << " max_ROS= " << max_ros
+                       << " m/s  mean_ROS= " << mean_ros << " m/s\n";
+    }
 }
+

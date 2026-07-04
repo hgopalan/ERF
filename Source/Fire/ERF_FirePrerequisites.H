@@ -23,10 +23,12 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
+#include <AMReX_GpuArray.H>
 #include <AMReX_Print.h>
 
 #include "ERF_SurfaceLayer.H"
 #include "ERF_FireParams.H"
+#include "ERF_IndexDefines.H"
 
 /**
  * \brief Verify that fire module prerequisites are satisfied.
@@ -58,7 +60,7 @@
  * 12. Domain height >= wind reference height (6.1 m default)
  */
 void verify_fire_prerequisites(
-    const amrex::Vector<amrex::BCRec>& phys_bc_type,
+    const amrex::GpuArray<ERF_BC, AMREX_SPACEDIM*2>& phys_bc_type,
     const SurfaceLayer* surface_layer,
     const amrex::Vector<amrex::BoxArray>& grids,
     const amrex::Vector<amrex::DistributionMapping>& dmap,

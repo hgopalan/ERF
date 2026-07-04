@@ -9,7 +9,7 @@
 #include <AMReX_Orientation.H>
 
 void verify_fire_prerequisites(
-    const amrex::Vector<amrex::BCRec>& phys_bc_type,
+    const amrex::GpuArray<ERF_BC, AMREX_SPACEDIM*2>& phys_bc_type,
     const SurfaceLayer* surface_layer,
     const amrex::Vector<amrex::BoxArray>& grids,
     const amrex::Vector<amrex::DistributionMapping>& dmap,
@@ -18,10 +18,10 @@ void verify_fire_prerequisites(
     int lev)
 {
     using amrex::Orientation;
+    using amrex::Direction;
 
     // Check 1: Surface layer BC type must be "surface_layer"
-    amrex::BCRec bc_rec_zlo = phys_bc_type[Orientation(amrex::Direction::z, Orientation::low)];
-    ERF_BC bc_type_zlo = bc_rec_zlo.lo(2);  // Get the z-low boundary condition
+    ERF_BC bc_type_zlo = phys_bc_type[Orientation(Direction::z, Orientation::low)];
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
         bc_type_zlo == ERF_BC::surface_layer,
         "Fire module requires z-boundary type to be 'surface_layer'.\n"
