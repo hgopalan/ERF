@@ -17,3 +17,7 @@ CEXE_headers += ERF_Derive.H
 ifeq ($(USE_WW3_COUPLING),TRUE)
 CEXE_sources += ERF_ReadWaves.cpp
 endif
+
+ifdef ENABLE_FIRE_SUPPORT
+include $(SRCDIR)/Fire/Make.package
+endif

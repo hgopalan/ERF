@@ -1,0 +1,5 @@
+CEXE_headers += ERF_Fire.H
+CEXE_headers += ERF_FarsiteEllipse.H
+CEXE_headers += ERF_FireIgnition.H
+
+CEXE_sources += ERF_Fire.cpp
