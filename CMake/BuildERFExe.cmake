@@ -204,6 +204,14 @@ function(build_erf_lib erf_lib_name)
     target_link_libraries_system(${erf_lib_name} PUBLIC NoahMP::noahmp)
   endif()
 
+  ########################### FIRE ##################################
+  if(ERF_ENABLE_FIRE)
+    target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/Fire>)
+    target_sources(${erf_lib_name} PRIVATE
+                   ${SRC_DIR}/Fire/ERF_Fire.cpp)
+    target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_FIRE)
+  endif()
+
   ########################### GPU defs for KOKKOS #################################
   if(ERF_ENABLE_CUDA)
       target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_CUDA)
@@ -540,6 +548,7 @@ function(build_erf_lib erf_lib_name)
   target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/DataStructs>)
   target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/Diffusion>)
   target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/EB>)
+  target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/Fire>)
   target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/Initialization>)
   target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/IO>)
   target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/LinearSolvers>)

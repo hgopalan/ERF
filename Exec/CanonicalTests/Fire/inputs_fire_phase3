@@ -1,0 +1,68 @@
+# ------------------  INPUTS TO MAIN PROGRAM  -------------------
+# Phase 3 Fire Regression Test: FARSITE Elliptical Propagation
+#
+# Tests the Richards (1990) elliptical fire propagation model with
+# Anderson (1983) L/W ratio parameterization.
+
+erf.prob_name = "Fire Phase 3"
+
+erf.init_type = Isentropic
+
+# SIMULATION TIME
+stop_time = 1800.0  # 30 minutes
+max_step  = 1000000
+
+# PROBLEM SIZE & GEOMETRY
+geometry.prob_extent = 4000.0 4000.0 1000.0  # 4 km x 4 km x 1 km domain
+amr.n_cell           = 32 32 10             # 125m resolution at level 0
+
+geometry.is_periodic = 0 0 0
+
+# BOUNDARY CONDITIONS
+zlo.type = "SlipWall"
+zhi.type = "SlipWall"
+xlo.type = "Outflow"
+xhi.type = "Outflow"
+ylo.type = "Outflow"
+yhi.type = "Outflow"
+
+# TERRAIN
+erf.terrain_type = Flat
+
+# TIMESTEP CONTROL
+erf.fixed_dt = 1.0  # 1 second atmospheric timestep
+
+# DIAGNOSTICS & VERBOSITY
+erf.sum_interval = -1       # timesteps between computing mass
+erf.v            = 1        # verbosity in ERF.cpp
+amr.v            = 0        # verbosity in Amr.cpp
+
+# REFINEMENT / REGRIDDING
+amr.max_level = 0           # no AMR refinement
+
+# CHECKPOINT FILES
+erf.check_file = chk        # root name of checkpoint file
+erf.check_int  = -1         # disabled
+
+# PLOTFILES
+erf.plot_file_1 = plt       # prefix of plotfile name
+erf.plot_int_1  = 100       # output every 100 timesteps (100 seconds)
+
+# ==================== FIRE MODULE CONFIGURATION ====================
+
+# FARSITE Elliptical Spread Parameters
+erf.fire.farsite.use_anderson_lw = 1      # use Anderson (1983) L/W ratio
+erf.fire.farsite.cfl_fire        = 0.5    # CFL number for fire substeps
+erf.fire.farsite.gaussian_sigma  = -1.0   # single-cell stamping
+
+# Grid refinement (fire grid = atmospheric grid * grid_ratio)
+erf.fire.grid_ratio = 5
+
+# Ignition parameters
+# Initial ignition at center of domain (2000, 2000) with 20m radius
+erf.fire.ignition_x = 2000.0
+erf.fire.ignition_y = 2000.0
+erf.fire.ignition_r = 20.0
+
+# Fuel model (1=GR1 short grass)
+erf.fire.fuel_model_id = 1
