@@ -139,6 +139,15 @@ ERF::Advance (int lev, Real time, Real dt_lev, int iteration, int /*ncycle*/)
     // **************************************************************************************
     advance_radiation(lev, S_old, dt_lev);
 
+#ifdef ERF_ENABLE_FIRE
+    // **************************************************************************************
+    // Update the fire simulation (only at level 0)
+    // **************************************************************************************
+    if (lev == 0 && m_fire_layer) {
+        m_fire_layer->advance(dt_lev, *m_SurfaceLayer);
+    }
+#endif
+
 #if defined(ERF_USE_EAMXX_SHOC) || defined(ERF_USE_NATIVE_SHOC)
     // **************************************************************************************
     // Update the "old" state using SHOC

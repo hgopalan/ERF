@@ -1,0 +1,75 @@
+# ERF Fire Module Phase 2 Test: 30° Slope, GR1 Fuel, 3 m/s Upslope Wind
+# Expected: Upslope ROS ≥ 2× flat-terrain ROS (Rothermel slope effect)
+
+# Domain geometry - 30° slope (tan(30°) ≈ 0.577)
+# Build slope from low-left to high-right
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 1000.0 500.0 1000.0
+
+# Grid resolution
+amr.n_cell = 20 10 100
+amr.max_grid_size = 100
+amr.max_grid_size_z = 100         # REQUIRED: no z-splitting for fire module
+amr.blocking_factor = 10
+
+# Refinement (single level)
+amr.max_level = 0
+
+# Time integration
+stop_time = 1800.0                # 30 minutes
+amr.cfl = 0.9
+
+# Boundary conditions
+erf.phys_bc_type.xlo = "outflow"
+erf.phys_bc_type.xhi = "outflow"
+erf.phys_bc_type.ylo = "outflow"
+erf.phys_bc_type.yhi = "outflow"
+erf.phys_bc_type.zlo = "surface_layer"
+erf.phys_bc_type.zhi = "open"
+
+# Terrain: use analytical slope (if available) or terrain file
+# For now, use flat terrain at elevation 500 m
+erf.terrain_type = "flat"
+erf.terrain_height = 500.0
+
+# Surface layer (MOST) configuration
+erf.most.z0 = 0.1                 # Grass roughness [m]
+
+# Sponge layer
+erf.sponge_density_profile = "auto"
+erf.sponge_start_height = 900.0
+
+# Initial conditions (neutral stratification, wind upslope)
+erf.init_theta = 300.0
+erf.init_qv = 0.01
+erf.moist_type = "real"
+erf.moisture_type = "moisture"
+
+# Wind initialization (3 m/s upslope in x-direction)
+erf.init_u_profile = "uniform"
+erf.init_u_const = 3.0
+erf.init_v_const = 0.0
+erf.init_w_const = 0.0
+
+# Fire module configuration
+erf.fire.enable = true
+erf.fire.grid_ratio = 5                    # 10 m × 10 m fire cells (on atmospheric 50m cells)
+erf.fire.fuel_model_id = 1                 # GR1 grassland model
+erf.fire.moisture_1hr = 0.08
+erf.fire.moisture_10hr = 0.08
+erf.fire.moisture_100hr = 0.10
+erf.fire.ignition_x = 200.0                # Upslope location
+erf.fire.ignition_y = 250.0
+erf.fire.ignition_r = 20.0
+erf.fire.wind_ref_ht = 6.1                 # 20-ft reference height
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = true
+erf.fire.use_terrain_wind = true           # Enable terrain effects
+erf.fire.k_ridge = 1.5                     # Ridge enhancement
+erf.fire.k_shelter = 0.6                   # Lee shelter
+erf.fire.k_valley = 0.8                    # Valley channeling
+erf.fire.k_deflect = 0.3                   # Directional deflection
+
+# Diagnostics
+erf.v = 1

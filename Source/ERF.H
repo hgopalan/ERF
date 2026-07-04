@@ -63,6 +63,11 @@
 #include "ERF_WindFarm.H"
 #endif
 
+#ifdef ERF_ENABLE_FIRE
+#include "ERF_FireLayer.H"
+#include "ERF_FireParams.H"
+#endif
+
 #include <ERF_RadiationModels.H>
 
 #ifdef ERF_USE_EAMXX_SHOC
@@ -1445,6 +1450,11 @@ private:
     std::unique_ptr<ReadBndryPlanes>  m_r2d  = nullptr;
     std::unique_ptr<SurfaceLayer>     m_SurfaceLayer = nullptr;
     amrex::Vector<std::unique_ptr<ForestDrag>> m_forest_drag;
+
+#ifdef ERF_ENABLE_FIRE
+    std::unique_ptr<FireLayer>        m_fire_layer = nullptr;
+    FireParams                        m_fire_params;
+#endif
 
     //
     // Holds info for dynamically generated tagging criteria

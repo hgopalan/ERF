@@ -1,0 +1,59 @@
+# ERF Fire Module Phase 2 Test: Flat Domain, GR1 Fuel, 5 m/s Wind
+# Expected: ROS ≈ 0.06–0.10 m/s for GR1 at 5 m/s wind, 8% moisture, flat terrain with WAF ≈ 0.4
+
+# Domain geometry
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 2000.0 2000.0 500.0
+
+# Grid resolution
+amr.n_cell = 40 40 50
+amr.max_grid_size = 100
+amr.max_grid_size_z = 50          # REQUIRED: no z-splitting for fire module
+amr.blocking_factor = 16
+
+# Refinement (single level)
+amr.max_level = 0
+
+# Time integration
+stop_time = 1800.0                # 30 minutes
+amr.cfl = 0.9
+
+# Boundary conditions
+erf.phys_bc_type.xlo = "outflow"
+erf.phys_bc_type.xhi = "outflow"
+erf.phys_bc_type.ylo = "outflow"
+erf.phys_bc_type.yhi = "outflow"
+erf.phys_bc_type.zlo = "surface_layer"
+erf.phys_bc_type.zhi = "open"
+
+# Surface layer (MOST) configuration
+erf.most.z0 = 0.1                 # Grass roughness [m]
+
+# Sponge layer
+erf.sponge_density_profile = "auto"
+erf.sponge_start_height = 400.0
+
+# Initial conditions (neutral stratification)
+erf.init_theta = 300.0
+erf.init_qv = 0.01
+erf.moist_type = "real"
+erf.moisture_type = "moisture"
+
+# Fire module configuration
+erf.fire.enable = true
+erf.fire.grid_ratio = 5                    # 10 m × 10 m fire cells
+erf.fire.fuel_model_id = 1                 # GR1 grassland model
+erf.fire.moisture_1hr = 0.08
+erf.fire.moisture_10hr = 0.08
+erf.fire.moisture_100hr = 0.10
+erf.fire.ignition_x = 1000.0
+erf.fire.ignition_y = 1000.0
+erf.fire.ignition_r = 20.0
+erf.fire.wind_ref_ht = 6.1                 # 20-ft reference height
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = true
+erf.fire.use_terrain_wind = false          # Flat domain
+
+# Diagnostics
+erf.v = 1
