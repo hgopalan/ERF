@@ -1123,6 +1123,10 @@ private:
     static amrex::Real last_plot2d_file_time_2;
     static amrex::Real last_check_file_time;
 
+#ifdef ERF_ENABLE_FIRE
+    static amrex::Real last_fire_plot_time;
+#endif
+
     amrex::Vector<int> last_subvol_step;
     amrex::Vector<amrex::Real> last_subvol_time;
 
@@ -1454,6 +1458,9 @@ private:
 #ifdef ERF_ENABLE_FIRE
     std::unique_ptr<FireLayer>        m_fire_layer = nullptr;
     FireParams                        m_fire_params;
+    std::string m_fire_plot_file {"plt_fire_"};
+    int         m_fire_plot_int  = -1;
+    amrex::Real m_fire_plot_per  = -1.0;
 #endif
 
 
