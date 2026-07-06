@@ -12,6 +12,8 @@
 #include <ERF_FuelMoisture.H>
 #include <ERF_MoistureExtinction.H>
 #include <ERF_FireStatsOutput.H>
+#include <ERF_FireHeatFlux.H>
+#include <ERF_FireDiagnostics.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -232,6 +234,33 @@ public:
     }
 
     /**
+     * @brief Get fuel load for plotfile output.
+     * @return Pointer to fire_fuel_load MultiFab [kg/m²].
+     */
+    const amrex::MultiFab* get_fuel_load() const
+    {
+        return fire_fuel_load.get();
+    }
+
+    /**
+     * @brief Get fireline intensity for diagnostics and plotfile output.
+     * @return Pointer to fire_fireline_intensity MultiFab [kW/m].
+     */
+    const amrex::MultiFab* get_fireline_intensity() const
+    {
+        return fire_fireline_intensity.get();
+    }
+
+    /**
+     * @brief Get flame length for diagnostics and plotfile output.
+     * @return Pointer to fire_flame_length MultiFab [m].
+     */
+    const amrex::MultiFab* get_flame_length() const
+    {
+        return fire_flame_length.get();
+    }
+
+    /**
      * @brief Get fire grid reference for plotfile output.
      * @return Const reference to the FireGrid.
      */
@@ -259,6 +288,8 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_spread_vec;   // FARSITE scratch
     std::unique_ptr<amrex::MultiFab>         fire_arrival_time; // Fire arrival time [s]
     std::unique_ptr<amrex::MultiFab>         fire_disp_accum;   // Persistent displacement accumulator (2 comp)
+    std::unique_ptr<amrex::MultiFab>         fire_fireline_intensity; // Byram fireline intensity [kW/m]
+    std::unique_ptr<amrex::MultiFab>         fire_flame_length;       // Thomas flame length [m]
 
     // Precomputed Rothermel coefficients
     RothermelComputed                        m_rc;
@@ -276,6 +307,9 @@ private:
 
     // Fuel bed depth [ft] (fuel-model dependent)
     amrex::Real                              m_fuel_bed_depth_ft = 6.5;
+
+    // Initial fuel load [kg/m²] for diagnostics (Phase 5)
+    amrex::Real                              m_fuel_load_initial_kg_m2 = 0.0_rt;
 
     // Ignition parameters
     amrex::Real                              m_ignition_x = 0.0;
@@ -306,6 +340,19 @@ private:
     void advance_fuel_moisture(amrex::Real dt_s,
                                const amrex::MultiFab& T_atm_k0,
                                const amrex::MultiFab& RH_atm_k0);
+
+    /**
+     * @brief Compute heat flux and deplete fuel load for one atmospheric timestep (Phase 5).
+     *
+     * Called from advance() after fire_subcycle. Computes:
+     * - Sensible heat flux [W/m²] in fire_heat_flux
+     * - Fuel load depletion via exponential burnout model
+     * - Byram fireline intensity [kW/m] in fire_fireline_intensity
+     * - Thomas flame length [m] in fire_flame_length
+     *
+     * @param[in] dt_fire_s  Last fire subcycle timestep [s]
+     */
+    void compute_heat_flux_and_diagnostics(amrex::Real dt_fire_s);
 
 };
 
