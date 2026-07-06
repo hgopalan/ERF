@@ -239,10 +239,10 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
 
     // 7. (Phase 3) Advance level-set using FARSITE subcycle
 
-    // Step A: Reset phi to unburned everywhere (this is the reset that was
-    // previously done inside advance_farsite_one_step, now done here where
-    // the arrival time record is available).
-    fire_phi->setVal(1.0_rt);
+    // Step A: Reset phi to 0 (neutral, between burned=-1 and unburned=+1).
+    // This is the reset that was previously done inside advance_farsite_one_step,
+    // now done here where the arrival time record is available.
+    fire_phi->setVal(0.0_rt);
 
     // Step B: Restore all previously burned cells from arrival time record.
     // Any cell with at >= 0 has been burned at some point; stamp it as burned.
@@ -257,7 +257,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     // Step C: Fill ghost cells so gradient stencils in Pass 1 see correct phi
     fire_phi->FillBoundary(m_fg.geom.periodicity());
 
-    // Step D: Run FARSITE subcycle. phi now has burned=-1, unburned=+1.
+    // Step D: Run FARSITE subcycle. phi now has burned=-1, unburned=+anything >=0.
     // advance_farsite_one_step will find the front (cells near phi=0 boundary),
     // compute spread, and stamp newly burned cells as phi=-1.
     // It must NOT call phi.setVal() internally.
