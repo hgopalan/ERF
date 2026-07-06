@@ -39,6 +39,7 @@ void FireLayer::initialize(const ERF& erf,
     fire_heat_flux  = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_spread_vec = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 0);
     fire_arrival_time = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+    fire_disp_accum   = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 0);
 
     // Initialize values
     fire_phi->setVal(1.0);  // All unburned initially
@@ -47,6 +48,8 @@ void FireLayer::initialize(const ERF& erf,
     fire_slopes->setVal(0.0);
     fire_curvature->setVal(0.0);
     fire_ros->setVal(0.0);
+    fire_arrival_time->setVal(-1.0_rt);  // -1 means unburned
+    fire_disp_accum->setVal(0.0_rt);     // zero accumulated displacement
 
     // Set fuel load [kg/m²]
     FuelModelParams fp = get_anderson_fuel_params(fire_params.fuel_model_id);
@@ -93,7 +96,6 @@ void FireLayer::initialize(const ERF& erf,
     fire_phi->FillBoundary(m_fg.geom.periodicity());
 
     // Initialize fire arrival time: -1 means unburned, ignition cells are marked as t=0
-    fire_arrival_time->setVal(-1.0_rt);  // -1 means unburned
     // Mark ignition cells as burned at t=0
     for (MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
         auto phi_arr = fire_phi->const_array(mfi);

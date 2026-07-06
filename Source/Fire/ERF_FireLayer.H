@@ -257,6 +257,7 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_heat_flux;    // Heat flux (stub)
     std::unique_ptr<amrex::MultiFab>         fire_spread_vec;   // FARSITE scratch
     std::unique_ptr<amrex::MultiFab>         fire_arrival_time; // Fire arrival time [s]
+    std::unique_ptr<amrex::MultiFab>         fire_disp_accum;   // Persistent displacement accumulator (2 comp)
 
     // Precomputed Rothermel coefficients
     RothermelComputed                        m_rc;
