@@ -217,8 +217,9 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     fire_phi->FillBoundary(m_fg.geom.periodicity());
 
     // Phase 5: Compute heat flux, deplete fuel load, and derive diagnostics
-    Real dt_fire_for_hf = compute_fire_dt(*fire_ros, m_fg.geom, dt, m_fp.cfl_fire);
-    compute_heat_flux_and_diagnostics(dt_fire_for_hf);
+    // Was: Real dt_fire_for_hf = compute_fire_dt(*fire_ros, m_fg.geom, dt, m_fp.cfl_fire);
+    // Fix: use the full atmospheric dt for heat flux / fuel depletion (called once per atm step)
+    compute_heat_flux_and_diagnostics(dt);   // pass `dt`, not the CFL substep
 
     amrex::Print() << "[FIRE] t=" << m_current_time
                    << "  substeps=" << n_substeps
