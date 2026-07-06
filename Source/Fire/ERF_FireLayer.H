@@ -309,7 +309,7 @@ private:
     amrex::Real                              m_fuel_bed_depth_ft = 6.5;
 
     // Initial fuel load [kg/m²] for diagnostics (Phase 5)
-    amrex::Real                              m_fuel_load_initial_kg_m2 = 0.0_rt;
+    amrex::Real                              m_fuel_load_initial_kg_m2 = 0.0;
 
     // Ignition parameters
     amrex::Real                              m_ignition_x = 0.0;
