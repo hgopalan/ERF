@@ -14,6 +14,7 @@
 #include <ERF_FireStatsOutput.H>
 #include <ERF_FireHeatFlux.H>
 #include <ERF_FireDiagnostics.H>
+#include <ERF_FireAtmCoupling.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -278,6 +279,65 @@ public:
         return m_fg;
     }
 
+    /**
+     * @brief Get coarsened sensible heat flux on atmospheric grid from previous timestep.
+     * @return Pointer to m_Q_atm_prev MultiFab (nullptr until first advance).
+     */
+    const amrex::MultiFab* get_Q_atm_prev() const
+    {
+        return m_Q_atm_prev.get();
+    }
+
+    /**
+     * @brief Get coarsened latent heat flux on atmospheric grid from previous timestep.
+     * @return Pointer to m_Q_lat_atm_prev MultiFab (nullptr until first advance).
+     */
+    const amrex::MultiFab* get_Q_lat_atm_prev() const
+    {
+        return m_Q_lat_atm_prev.get();
+    }
+
+    /**
+     * @brief Get fire latent heat flux on fire grid.
+     * @return Pointer to fire_latent_flux MultiFab [W/m²].
+     */
+    const amrex::MultiFab* get_latent_flux() const
+    {
+        return fire_latent_flux.get();
+    }
+
+    /**
+     * @brief Store the current fire heat flux into the previous-step buffer.
+     *
+     * Called from ERF::Advance() at the END of the fire advance, after
+     * compute_heat_flux_and_diagnostics() has filled fire_heat_flux.
+     * Coarsens fire_heat_flux from fire grid to atmospheric grid and
+     * computes latent flux.
+     *
+     * @param[in] geom_atm  Atmospheric geometry (used for coarsening)
+     */
+    void update_atm_flux_buffer(const amrex::Geometry& geom_atm);
+
+    /**
+     * @brief Apply the previous-step fire fluxes to cc_source using WRF-Fire profile.
+     *
+     * Injects the one-step-lagged fire flux from previous timestep into cc_source
+     * using the exponential distribution profile. Called from ERF::Advance()
+     * BEFORE advance_dycore().
+     *
+     * @param[in,out] cc_source    3D source array for conserved variables
+     * @param[in]     S_old        atmospheric conserved state at time n (for density)
+     * @param[in]     z_phys_cc    cell-centre terrain height [m]
+     * @param[in]     geom_atm     atmospheric geometry
+     * @param[in]     has_moisture whether moisture is active
+     */
+    void apply_fire_coupling_to_cc_source(
+        amrex::MultiFab& cc_source,
+        const amrex::MultiFab& S_old,
+        const amrex::MultiFab& z_phys_cc,
+        const amrex::Geometry& geom_atm,
+        bool has_moisture);
+
 private:
 
     // Fire grid and geometry
@@ -299,6 +359,14 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_disp_accum;   // Persistent displacement accumulator (2 comp)
     std::unique_ptr<amrex::MultiFab>         fire_fireline_intensity; // Byram fireline intensity [kW/m]
     std::unique_ptr<amrex::MultiFab>         fire_flame_length;       // Thomas flame length [m]
+     
+    // Phase 6: fire-atmosphere coupling MultiFabs
+    // Coarsened fire fluxes on the atmospheric level-0 grid (nx × ny × 1).
+    // These hold fire fluxes from the previous timestep for injection into
+    // cc_source at the start of the next timestep (one-step explicit lag).
+    std::unique_ptr<amrex::MultiFab>         m_Q_atm_prev;            // sensible [W/m²]
+    std::unique_ptr<amrex::MultiFab>         m_Q_lat_atm_prev;        // latent   [W/m²]
+    std::unique_ptr<amrex::MultiFab>         fire_latent_flux;        // latent heat flux on fire grid [W/m²]
 
     // Precomputed Rothermel coefficients
     RothermelComputed                        m_rc;
