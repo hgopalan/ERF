@@ -18,8 +18,7 @@ void FireLayer::initialize(const ERF& erf,
     // Verify prerequisites
     verify_fire_prerequisites(erf, surface_layer_ptr, fire_params);
 
-    // Create fire grid using public AmrCore accessor (boxArray) instead of
-    // protected AmrMesh::grids
+    // Create fire grid
     m_fg = create_fire_grid(erf.boxArray(0), erf.DistributionMap(0),
                             erf.Geom(0), fire_params.grid_ratio);
 
@@ -50,12 +49,12 @@ void FireLayer::initialize(const ERF& erf,
     fire_curvature->setVal(0.0);
     fire_ros->setVal(0.0);
     fire_arrival_time->setVal(-1.0_rt);  // -1 means unburned
-    fire_disp_accum->setVal(0.0_rt);     // zero accumulated displacement
+    fire_disp_accum->setVal(0.0_rt);
 
     // Set fuel load [kg/m²]
     FuelModelParams fp = get_anderson_fuel_params(fire_params.fuel_model_id);
     Real fuel_load_lb_ft2 = fp.w_d1 + fp.w_d10 + fp.w_d100 + fp.w_lh + fp.w_lw;
-    Real fuel_load_kg_m2  = fuel_load_lb_ft2 * 4.88243;  // Convert lb/ft² → kg/m²
+    Real fuel_load_kg_m2  = fuel_load_lb_ft2 * 4.88243;
     fire_fuel_load->setVal(fuel_load_kg_m2);
 
     // Store fuel bed depth from fuel model [ft]
@@ -72,8 +71,7 @@ void FireLayer::initialize(const ERF& erf,
         });
     }
 
-    // Initialize moisture of extinction (Phase 4)
-    // Use weighted SAV of dead fuels
+    // Initialize moisture of extinction
     Real dead_load = fp.w_d1 + fp.w_d10 + fp.w_d100;
     Real sigma_weighted = dead_load > 0.0_rt
         ? (fp.w_d1 * fp.sigma_d1) / dead_load
@@ -81,23 +79,21 @@ void FireLayer::initialize(const ERF& erf,
     Real M_x = compute_moisture_of_extinction(sigma_weighted);
     fire_mext->setVal(M_x);
 
-    // Compute terrain slopes and curvature (static fields, computed once at init)
+    // Compute terrain slopes and curvature (static, computed once at init)
     compute_terrain_slopes(*fire_slopes, z_phys_nd_atm, erf.Geom(0), m_fg, m_params.terrain_file_name);
-    // Fill ghost cells of slopes before computing curvature (curvature uses i±1, j±1 stencil)
     fire_slopes->FillBoundary(m_fg.geom.periodicity());
     compute_terrain_curvature(*fire_curvature, *fire_slopes, m_fg.geom);
 
-    // Store ignition parameters for phase 3
+    // Store ignition parameters
     m_ignition_x = fire_params.ignition_x;
     m_ignition_y = fire_params.ignition_y;
     m_ignition_r = fire_params.ignition_r;
 
-    // Initialize ignition using phase 3 function
+    // Initialize ignition
     initialize_ignition(*fire_phi, m_fg.geom, m_ignition_x, m_ignition_y, m_ignition_r);
     fire_phi->FillBoundary(m_fg.geom.periodicity());
 
-    // Initialize fire arrival time: -1 means unburned, ignition cells are marked as t=0
-    // Mark ignition cells as burned at t=0
+    // Mark ignition cells in arrival_time as burned at t=0
     for (MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
         auto phi_arr = fire_phi->const_array(mfi);
         auto at_arr  = fire_arrival_time->array(mfi);
@@ -125,7 +121,6 @@ void FireLayer::initialize(const ERF& erf,
                    << "fuel_model=" << fire_params.fuel_model_id << ", "
                    << "grid=" << m_fg.ba.size() << " boxes" << std::endl;
 
-    // Debug: Print fire grid mesh resolution
     if (m_params.fire_debug) {
         IntVect max_extent = m_fg.geom.Domain().size();
         RealBox prob_domain = m_fg.geom.ProbDomain();
@@ -138,8 +133,6 @@ void FireLayer::initialize(const ERF& erf,
     }
 }
 
-// surface_layer is non-const because SurfaceLayer's get_u_star / get_z0 /
-// get_olen accessors are not marked const.
 void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                         const MultiFab& xvel,
                         const MultiFab& yvel,
@@ -154,7 +147,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         amrex::Print() << "[FIRE DEBUG] Starting fire advance step with dt=" << dt << std::endl;
     }
 
-    // 1. Extract wind at reference height using direct vertical interpolation
+    // 1. Extract wind at reference height
     fill_fire_wind_from_interpolation(*fire_wind_ref,
                                       xvel, yvel, z_phys_cc,
                                       m_fg, m_params.wind_ref_ht, m_nz);
@@ -175,7 +168,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         apply_waf_to_wind();
     }
 
-    // 4. Apply terrain wind corrections (FARSITE) if enabled
+    // 4. Apply terrain wind corrections if enabled
     if (m_params.use_terrain_wind) {
         if (m_params.fire_debug) {
             amrex::Print() << "[FIRE DEBUG] Applying FARSITE terrain wind corrections" << std::endl;
@@ -190,8 +183,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         amrex::Print() << "[FIRE DEBUG] Effective wind computed. Max effective wind: " << max_wind_eff << " m/s" << std::endl;
     }
 
-    // 5. Update fuel moisture from atmospheric state (Phase 2)
-    // Called before ROS computation so updated moisture affects fire spread
+    // 5. Update fuel moisture from atmospheric state
     if (m_params.fire_debug) {
         amrex::Print() << "[FIRE DEBUG] Updating fuel moisture from atmospheric state" << std::endl;
     }
@@ -202,8 +194,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         amrex::Print() << "[FIRE DEBUG] Fuel moisture update completed. Max 1-hour moisture: " << max_mc_1hr << std::endl;
     }
 
-    // 5b. Recompute Rothermel coefficients with updated moisture
-    //     (only when dynamic moisture is enabled — static case uses m_rc from init)
+    // 5b. Recompute Rothermel coefficients with updated moisture (if dynamic)
     if (m_params.moisture_dynamic) {
         long num_cells = fire_fuel_mc->boxArray().numPts();
         Real avg_mc_1hr   = (num_cells > 0) ? fire_fuel_mc->sum(0) / Real(num_cells) : m_params.moisture_1hr;
@@ -235,14 +226,11 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         amrex::Print() << "[FIRE DEBUG] Rate-of-spread computed. Max: " << max_ros_temp << " m/s, Mean: " << mean_ros_temp << " m/s" << std::endl;
     }
 
-    // 7. (Phase 3) Advance level-set using FARSITE subcycle
-
-    // Restore burned cells to phi=-1 from arrival time record before calling
-    // advance_farsite_one_step. This gives Pass 1 a clean -1/0 boundary so
-    // gradient computation produces nonzero values at the fire perimeter.
-    // The phi.setVal(0.0) reset happens INSIDE advance_farsite_one_step (after
-    // Pass 2 collects positions, before stamping), matching the reference
-    // implementation in wildfire_levelset/src/farsite_ellipse.H.
+    // 7. Advance level-set using FARSITE subcycle
+    //
+    // Restore burned cells to phi=-1 from arrival_time before calling
+    // advance_fire_subcycle. This ensures Pass 1 sees a clean -1/0 boundary
+    // so gradient computation is nonzero at the fire perimeter.
     for (MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
         auto p  = fire_phi->array(mfi);
         auto at = fire_arrival_time->const_array(mfi);
@@ -254,14 +242,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     // Fill ghost cells so gradient stencils in Pass 1 see correct phi
     fire_phi->FillBoundary(m_fg.geom.periodicity());
 
-    // Run FARSITE subcycle.
-    // advance_farsite_one_step:
-    //   - Pass 1: computes spread vectors from phi (-1/0 field)
-    //   - Pass 2: collects nonzero spread positions (current perimeter +
-    //             accumulated interior from fire_spread_vec history)
-    //   - Internally calls phi.setVal(0.0) then stamps collected positions as -1
+    // FIX: pass *fire_arrival_time so advance_farsite_one_step can restore
+    // the burned interior after the internal phi.setVal(0.0) reset.
+    // Previously this argument was absent, causing active fire cells to drop
+    // to 0 after the first substep.
     int n_substeps = advance_fire_subcycle(*fire_phi, *fire_spread_vec,
                                            *fire_wind_eff, *fire_ros,
+                                           *fire_arrival_time,          // <-- FIX
                                            m_fg.geom, dt, m_fp);
 
     // Record arrival times for newly burned cells
@@ -279,7 +266,6 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     if (m_params.fire_debug) {
         amrex::Print() << "[FIRE DEBUG] Level-set propagation completed with " << n_substeps << " fire subcycles" << std::endl;
 
-        // Count number of cells with active fire (phi < 0)
         long num_fire_cells = 0;
         for (MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
             const Box& bx = mfi.tilebox();
@@ -298,8 +284,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         amrex::Print() << "[FIRE DEBUG] Number of active fire cells: " << num_fire_cells << std::endl;
     }
 
-    // Fill ghost cells after propagation so gradient stencils in the next
-    // atmospheric step are valid.
+    // Fill ghost cells after propagation
     fire_phi->FillBoundary(m_fg.geom.periodicity());
 
     // Diagnostics
@@ -312,19 +297,14 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                    << "  phi_min=" << phi_min
                    << "  max_ROS=" << max_ros << " m/s"
                    << "  mean_ROS=" << mean_ros << " m/s" << std::endl;
-
-    // (Phase 6) Heat flux: not implemented in Phase 3
 }
 
 
 void FireLayer::apply_waf_to_wind()
 {
-    // Wind Adjustment Factor — uses fuel bed depth from fuel model
-
     Real waf = 0.4_rt;  // Default fallback
 
     if (m_params.waf_formula == "andrews") {
-        // Andrews (1982) unsheltered WAF for given fuel-bed depth
         waf = compute_waf_unsheltered(m_fuel_bed_depth_ft);
     } else if (m_params.waf_formula == "behaviorplus") {
         waf = compute_waf_behaviorplus(m_fuel_bed_depth_ft);
@@ -342,22 +322,16 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
                                       const MultiFab& RH_atm_k0)
 {
     if (!m_params.moisture_dynamic) {
-        return;  // Skip if moisture evolution is disabled
+        return;
     }
 
-    // Convert time step from seconds to hours
     Real dt_hours = dt_s / 3600.0_rt;
 
-    // Get fuel model parameters for weighted SAV computation
     FuelModelParams fp = get_anderson_fuel_params(m_params.fuel_model_id);
 
-    // Precipitation rate (uniform, scalar)
     Real precip_mm_hr = m_params.precip_rate_mm_hr;
-
-    // Refinement factor C
     int C = m_fg.C;
 
-    // Create fire-grid versions of atmospheric fields
     MultiFab T_fire(fire_fuel_mc->boxArray(), fire_fuel_mc->DistributionMap(), 1, 0);
     MultiFab RH_fire(fire_fuel_mc->boxArray(), fire_fuel_mc->DistributionMap(), 1, 0);
 
@@ -389,7 +363,7 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
             int i_f = iv_f[0];
             int j_f = iv_f[1];
 
-            Real T_K    = T_f(i_f, j_f, 0);
+            Real T_K     = T_f(i_f, j_f, 0);
             Real RH_frac = RH_f(i_f, j_f, 0);
             Real T_C = T_K - 273.15_rt;
             Real RH  = RH_frac * 100.0_rt;
