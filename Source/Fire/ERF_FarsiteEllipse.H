@@ -26,7 +26,8 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real anderson_LW_ratio(amrex::Real wind_speed_mph) noexcept
 {
     if (wind_speed_mph < 1.0) { return 1.0; }
-    amrex::Real lw = 0.936 * std::exp(0.2566 * wind_speed_mph) - 0.397 * std::sqrt(wind_speed_mph);
+    amrex::Real lw = 0.936 * std::exp(0.2566 * wind_speed_mph)
+                   - 0.397 * std::sqrt(wind_speed_mph);
     return amrex::max(1.0, amrex::min(lw, 8.0));
 }
 
@@ -39,24 +40,17 @@ void LW_ratio_to_richards_coefficients(amrex::Real LW_ratio,
     coeff_b = (coeff_a + coeff_c) / (2.0 * LW_ratio);
 }
 
-/**
- * @brief Advance fire front phi by one fire substep with sub-cell accumulation.
- *
- * arrival_time is updated IN-PLACE for newly stamped cells (phi < 0, at < 0)
- * so that Step B of the NEXT substep correctly restores them. Without this,
- * perimeter cells from the previous timestep are lost on every phi reset.
- */
 inline
 void advance_farsite_one_step(
     amrex::MultiFab& phi,
     amrex::MultiFab& farsite_work,
     amrex::MultiFab& disp_accum,
-    amrex::MultiFab& arrival_time,       // now NON-CONST: updated after stamping
+    amrex::MultiFab& arrival_time,
     const amrex::MultiFab& vel_eff,
     const amrex::MultiFab& R_mf,
     const amrex::Geometry& geom_fire,
     amrex::Real dt_fire,
-    amrex::Real current_time,            // simulation time for arrival_time stamp
+    amrex::Real current_time,
     const FarsiteParams& fp)
 {
     using namespace amrex;
@@ -70,30 +64,27 @@ void advance_farsite_one_step(
     farsite_work.setVal(0.0_rt);
 
     // -------------------------------------------------------------------------
-    // Pass 1: accumulate spread; write target coords when threshold met
+    // Pass 1: GPU — accumulate displacement; stamp when threshold crossed.
+    // Use validbox (no tiling) so the written cell is always in scope for Pass 2.
     // -------------------------------------------------------------------------
-    for (MFIter mfi(R_mf); mfi.isValid(); ++mfi) {
-        const Box& bx   = mfi.tilebox();
+    for (MFIter mfi(R_mf, false); mfi.isValid(); ++mfi) {
+        const Box& bx   = mfi.validbox();
         auto phi_arr    = phi.array(mfi);
         auto spread_arr = farsite_work.array(mfi);
         auto disp_arr   = disp_accum.array(mfi);
         auto vel_arr    = vel_eff.const_array(mfi);
         auto ros_arr    = R_mf.const_array(mfi);
-        auto at_arr     = arrival_time.const_array(mfi);
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept
         {
             int i = iv[0], j = iv[1], k = iv[2];
 
-            // Only process front cells (burned or near-front, not deep unburned)
             if (phi_arr(iv) > fp.phi_threshold) { return; }
 
-            // Gradient of phi
             Real dphi_dx = (phi_arr(i+1,j,k) - phi_arr(i-1,j,k)) * dxi * 0.5;
             Real dphi_dy = (phi_arr(i,j+1,k) - phi_arr(i,j-1,k)) * dyi * 0.5;
             Real grad_mag = std::sqrt(dphi_dx*dphi_dx + dphi_dy*dphi_dy);
 
-            // Skip deep burned interior (flat phi, no gradient)
             if (grad_mag < 1.0e-10) { return; }
 
             Real nx = dphi_dx / grad_mag;
@@ -139,12 +130,13 @@ void advance_farsite_one_step(
     amrex::Gpu::streamSynchronize();
 
     // -------------------------------------------------------------------------
-    // Pass 2: collect, MPI gather
+    // Pass 2: host — collect stamped positions.
+    // Use validbox + no tiling to match the cells written by Pass 1.
     // -------------------------------------------------------------------------
     std::vector<Real> xarray, yarray;
 
-    for (MFIter mfi(farsite_work); mfi.isValid(); ++mfi) {
-        const Box& bx   = mfi.tilebox();
+    for (MFIter mfi(farsite_work, false); mfi.isValid(); ++mfi) {
+        const Box& bx   = mfi.validbox();
         auto spread_arr = farsite_work.const_array(mfi);
         for (int k = bx.smallEnd()[2]; k <= bx.bigEnd()[2]; ++k)
             for (int j = bx.smallEnd()[1]; j <= bx.bigEnd()[1]; ++j)
@@ -158,6 +150,9 @@ void advance_farsite_one_step(
                 }
     }
 
+    // -------------------------------------------------------------------------
+    // MPI all-gather
+    // -------------------------------------------------------------------------
     int npts_local = static_cast<int>(xarray.size());
     std::vector<int> npts_all(ParallelDescriptor::NProcs());
     ParallelAllGather::AllGather(&npts_local, 1, npts_all.data(),
@@ -185,25 +180,34 @@ void advance_farsite_one_step(
     yarray_all = yarray;
 #endif
 
+    // Diagnostic — after npts_global is computed
+    {
+        Real max_disp_x = disp_accum.norminf(0);
+        Real max_disp_y = disp_accum.norminf(1);
+        Real max_work_x = farsite_work.norminf(0);
+        amrex::Print() << "[FIRE DIAG] max_disp=(" << max_disp_x << ", " << max_disp_y
+                       << ")  max_work_x=" << max_work_x
+                       << "  threshold=" << stamp_threshold
+                       << "  npts_global=" << npts_global << "\n";
+    }
+
     // -------------------------------------------------------------------------
     // Step A: reset phi to 0
-    // Step B: restore ALL burned cells (arrival_time >= 0) to phi = -1
+    // Step B: restore burned interior from arrival_time
     // Step C: stamp new perimeter positions
-    // Step D: update arrival_time for newly burned cells (KEY FIX)
+    // Step D: update arrival_time for newly burned cells
     // -------------------------------------------------------------------------
     phi.setVal(0.0_rt);
 
-    // Step B
-    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+    for (MFIter mfi(phi, false); mfi.isValid(); ++mfi) {
         auto p  = phi.array(mfi);
         auto at = arrival_time.const_array(mfi);
-        amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
+        amrex::ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
             if (at(iv) >= 0.0_rt) p(iv) = -1.0_rt;
         });
     }
     amrex::Gpu::streamSynchronize();
 
-    // Step C: stamp new positions
     if (npts_global > 0) {
         if (fp.gaussian_sigma < 0.0) {
             amrex::Gpu::DeviceVector<Real> d_x(npts_global), d_y(npts_global);
@@ -215,8 +219,8 @@ void advance_farsite_one_step(
             const Real* yp = d_y.data();
             int npts = npts_global;
 
-            for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
-                const Box& bx = mfi.tilebox();
+            for (MFIter mfi(phi, false); mfi.isValid(); ++mfi) {
+                const Box& bx = mfi.validbox();
                 auto p = phi.array(mfi);
                 amrex::ParallelFor(npts, [=] AMREX_GPU_DEVICE (int n) noexcept {
                     int ii = static_cast<int>(
@@ -233,7 +237,7 @@ void advance_farsite_one_step(
             const Real* x_ptr = xarray_all.data();
             const Real* y_ptr = yarray_all.data();
             int npts = npts_global;
-            for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+            for (MFIter mfi(phi, false); mfi.isValid(); ++mfi) {
                 auto p = phi.array(mfi);
                 const Box& bx = mfi.validbox();
                 ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
@@ -249,16 +253,13 @@ void advance_farsite_one_step(
         }
     }
 
-    // Step D: KEY FIX — record arrival time for newly burned cells immediately
-    // so that the next substep's Step B can restore them.
-    // Without this, cells stamped this substep have arrival_time < 0 and are
-    // reset to phi=0 (unburned) at the start of the next substep.
+    // Step D: record arrival time for newly burned cells
     {
         const Real t_now = current_time;
-        for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        for (MFIter mfi(phi, false); mfi.isValid(); ++mfi) {
             auto p  = phi.const_array(mfi);
             auto at = arrival_time.array(mfi);
-            amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
+            amrex::ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
                 if (p(iv) < 0.0_rt && at(iv) < 0.0_rt) {
                     at(iv) = t_now;
                 }
@@ -281,18 +282,12 @@ amrex::Real compute_fire_dt(
     return cfl_fire * amrex::min(dx[0], dx[1]) / max_ros;
 }
 
-/**
- * @brief Advance through multiple substeps to cover dt_atm.
- *
- * arrival_time and current_time are now passed through so each substep
- * immediately records newly burned cells.
- */
 inline
 int advance_fire_subcycle(
     amrex::MultiFab& phi,
     amrex::MultiFab& farsite_work,
     amrex::MultiFab& disp_accum,
-    amrex::MultiFab& arrival_time,       // non-const: updated each substep
+    amrex::MultiFab& arrival_time,
     const amrex::MultiFab& vel_eff,
     const amrex::MultiFab& R_mf,
     const amrex::Geometry& geom_fire,
