@@ -237,8 +237,15 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         amrex::Print() << "[FIRE DEBUG] Rate-of-spread computed. Max: " << max_ros_temp << " m/s, Mean: " << mean_ros_temp << " m/s" << std::endl;
     }
 
-    // Re-apply burned interior from arrival time record before subcycle
-    // This ensures the burned region is preserved through the reset in FARSITE
+    // 7. (Phase 3) Advance level-set using FARSITE subcycle
+
+    // Step A: Reset phi to 0 (neutral, between burned=-1 and unburned=+1).
+    // This is the reset that was previously done inside advance_farsite_one_step,
+    // now done here where the arrival time record is available.
+    fire_phi->setVal(0.0_rt);
+
+    // Step B: Restore all previously burned cells from arrival time record.
+    // Any cell with at >= 0 has been burned at some point; stamp it as burned.
     for (MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
         auto p  = fire_phi->array(mfi);
         auto at = fire_arrival_time->const_array(mfi);
@@ -247,7 +254,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         });
     }
 
-    // 7. (Phase 3) Advance level-set using FARSITE subcycle
+    // Step C: Fill ghost cells so gradient stencils in Pass 1 see correct phi
+    fire_phi->FillBoundary(m_fg.geom.periodicity());
+
+    // Step D: Run FARSITE subcycle. phi now has burned=-1, unburned=+anything >=0.
+    // advance_farsite_one_step will find the front (cells near phi=0 boundary),
+    // compute spread, and stamp newly burned cells as phi=-1.
+    // It must NOT call phi.setVal() internally.
     int n_substeps = advance_fire_subcycle(*fire_phi, *fire_spread_vec,
                                            *fire_wind_eff, *fire_ros,
                                            m_fg.geom, dt, m_fp);
