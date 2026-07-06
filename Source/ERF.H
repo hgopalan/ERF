@@ -691,6 +691,9 @@ public:
     // read checkpoint file from disk -- called after instantiating m_SurfaceLayer
     void ReadCheckpointFileSurfaceLayer ();
 
+    // read fire state from checkpoint -- called after FireLayer::initialize()
+    void ReadCheckpointFileFire ();
+
     void init_zphys            (int lev, amrex::Real elapsed_time);
     void remake_zphys          (int lev, std::unique_ptr<amrex::MultiFab>& temp_zphys_nd);
     void update_terrain_arrays (int lev);
