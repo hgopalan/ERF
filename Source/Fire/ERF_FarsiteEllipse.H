@@ -135,7 +135,20 @@ void advance_farsite_one_step(
     // -------------------------------------------------------------------------
     std::vector<Real> xarray, yarray;
 
-    for (MFIter mfi(farsite_work, false); mfi.isValid(); ++mfi) {
+    // for (MFIter mfi(farsite_work, false); mfi.isValid(); ++mfi) {
+    //     const Box& bx   = mfi.validbox();
+    //     auto spread_arr = farsite_work.const_array(mfi);
+    //     for (int k = bx.smallEnd()[2]; k <= bx.bigEnd()[2]; ++k)
+    //         for (int j = bx.smallEnd()[1]; j <= bx.bigEnd()[1]; ++j)
+    //             for (int i = bx.smallEnd()[0]; i <= bx.bigEnd()[0]; ++i) {
+    //                 Real sx = spread_arr(i,j,k,0);
+    //                 Real sy = spread_arr(i,j,k,1);
+    //                 if (sx != 0.0_rt || sy != 0.0_rt) {
+    //                     xarray.push_back(sx);
+    //                     yarray.push_back(sy);
+    //                 }
+//}
+        for (MFIter mfi(farsite_work, false); mfi.isValid(); ++mfi) {
         const Box& bx   = mfi.validbox();
         auto spread_arr = farsite_work.const_array(mfi);
         for (int k = bx.smallEnd()[2]; k <= bx.bigEnd()[2]; ++k)
@@ -144,11 +157,15 @@ void advance_farsite_one_step(
                     Real sx = spread_arr(i,j,k,0);
                     Real sy = spread_arr(i,j,k,1);
                     if (sx != 0.0_rt || sy != 0.0_rt) {
+                        amrex::Print() << "[FIRE PASS2] found nonzero at ("
+                                       << i << "," << j << "," << k << ")"
+                                       << " sx=" << sx << " sy=" << sy << "\n";
                         xarray.push_back(sx);
                         yarray.push_back(sy);
                     }
                 }
     }
+    
 
     // -------------------------------------------------------------------------
     // MPI all-gather
