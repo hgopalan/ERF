@@ -550,16 +550,39 @@ ERF::post_timestep (int nstep, double time, Real dt_lev0)
     if ( solverChoice.init_type==InitType::WRFInput and
          solverChoice.io_hurricane_eye_tracker and
          (nstep == 0 or (nstep+1)%m_plot3d_int_1 == 0)) {
+
+        int levc=finest_level;
+
         HurricaneEyeTracker_WRF (solverChoice);
+
+        MultiFab& U_new = vars_new[levc][Vars::xvel];
+        MultiFab& V_new = vars_new[levc][Vars::yvel];
+        MultiFab& W_new = vars_new[levc][Vars::zvel];
+
+        MultiFab mf_cc_vel(grids[levc], dmap[levc], AMREX_SPACEDIM, IntVect(0,0,0));
+        average_face_to_cellcenter(mf_cc_vel,0,{AMREX_D_DECL(&U_new,&V_new,&W_new)},0);
+
+        HurricaneMaxVelTracker_WRF(geom[levc],
+                               mf_cc_vel,
+                               t_new[0]);
+
+        HurricaneMinPressureTracker_WRF(solverChoice.moisture_type,
+                                    geom[levc],
+                                    vars_new[levc][Vars::cons],
+                                    t_new[0]);
 
         std::string filename_tracker = MakeVTKFilename_TrackerCircle(nstep);
         std::string filename_xy      = MakeVTKFilename_EyeTracker_xy(nstep);
         std::string filename_latlon  = MakeFilename_EyeTracker_latlon(nstep);
+        std::string filename_maxvel  = MakeFilename_EyeTracker_maxvel(nstep);
+        std::string filename_minpressure  = MakeFilename_EyeTracker_minpressure(nstep);
 
         if (ParallelDescriptor::IOProcessor()) {
             WriteVTKPolyline(filename_tracker, hurricane_tracker_circle);
             WriteVTKPolyline(filename_xy, hurricane_eye_track_xy);
             WriteLinePlot(filename_latlon, hurricane_eye_track_latlon);
+            WriteLinePlot(filename_maxvel, hurricane_maxvel_vs_time);
+            WriteLinePlot(filename_minpressure, hurricane_minpressure_vs_time);
         }
     }
 
@@ -2395,14 +2418,14 @@ ERF::ReadParameters ()
     // write_erfbdy must be false for restarts.
     // write_erfbdy defaults to true for clean starts of the metgrid or wrfinput pathways.
     {
-        ParmParse pp(pp_prefix);
+        ParmParse pp_erfbdy(pp_prefix);
         bool is_restart = !restart_chkfile.empty();
         if (is_restart) {
             if (write_erfbdy) {
                 Abort("Cannot set erf.write_erfbdy = true during restart. erfbdy should only be written during initial runs.");
             }
         } else {
-            if (!pp.contains("write_erfbdy")) {
+            if (!pp_erfbdy.contains("write_erfbdy")) {
                 if ((solverChoice.init_type == InitType::Metgrid) || (solverChoice.init_type == InitType::WRFInput)) {
                     write_erfbdy = true;
                 }
