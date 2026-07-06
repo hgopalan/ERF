@@ -64,7 +64,7 @@ void advance_farsite_one_step(
     farsite_work.setVal(0.0_rt);
 
     // -------------------------------------------------------------------------
-    // Pass 1: GPU — accumulate displacement; stamp when threshold crossed
+    // Pass 1: accumulate displacement; stamp absolute target when threshold met
     // -------------------------------------------------------------------------
     for (MFIter mfi(R_mf, false); mfi.isValid(); ++mfi) {
         const Box& bx   = mfi.validbox();
@@ -83,7 +83,6 @@ void advance_farsite_one_step(
             Real dphi_dx = (phi_arr(i+1,j,k) - phi_arr(i-1,j,k)) * dxi * 0.5;
             Real dphi_dy = (phi_arr(i,j+1,k) - phi_arr(i,j-1,k)) * dyi * 0.5;
             Real grad_mag = std::sqrt(dphi_dx*dphi_dx + dphi_dy*dphi_dy);
-
             if (grad_mag < 1.0e-10) { return; }
 
             Real nx = dphi_dx / grad_mag;
@@ -129,7 +128,7 @@ void advance_farsite_one_step(
     amrex::Gpu::streamSynchronize();
 
     // -------------------------------------------------------------------------
-    // Pass 2: host — collect stamped target positions
+    // Pass 2: collect stamped positions on host
     // -------------------------------------------------------------------------
     std::vector<Real> xarray, yarray;
 
@@ -149,19 +148,30 @@ void advance_farsite_one_step(
     }
 
     // -------------------------------------------------------------------------
-    // MPI all-gather so every rank has the complete global perimeter
+    // MPI all-gather: use MPI_Allgather directly to avoid AMReX wrapper issues.
+    // Falls back to a simple copy on non-MPI builds.
     // -------------------------------------------------------------------------
     int npts_local = static_cast<int>(xarray.size());
-    std::vector<int> npts_all(ParallelDescriptor::NProcs());
-    ParallelAllGather::AllGather(&npts_local, 1, npts_all.data(),
-                                 ParallelDescriptor::Communicator());
+    int nranks     = ParallelDescriptor::NProcs();
 
-    std::vector<int> displs(ParallelDescriptor::NProcs() + 1, 0);
-    for (int r = 0; r < ParallelDescriptor::NProcs(); ++r)
+    std::vector<int> npts_all(nranks, 0);
+    std::vector<int> displs(nranks + 1, 0);
+
+#ifdef AMREX_USE_MPI
+    // Gather per-rank counts
+    MPI_Allgather(&npts_local, 1, MPI_INT,
+                  npts_all.data(), 1, MPI_INT,
+                  ParallelDescriptor::Communicator());
+#else
+    npts_all[0] = npts_local;
+#endif
+
+    for (int r = 0; r < nranks; ++r)
         displs[r+1] = displs[r] + npts_all[r];
-    int npts_global = displs[ParallelDescriptor::NProcs()];
+    int npts_global = displs[nranks];
 
     std::vector<Real> xarray_all(npts_global), yarray_all(npts_global);
+
 #ifdef AMREX_USE_MPI
     MPI_Allgatherv(xarray.data(), npts_local,
                    ParallelDescriptor::Mpi_typemap<Real>::type(),
@@ -183,8 +193,8 @@ void advance_farsite_one_step(
     // -------------------------------------------------------------------------
     // Step A: reset phi to 0
     // Step B: restore burned interior from arrival_time
-    // Step C: stamp new perimeter positions into phi
-    // Step D: update arrival_time for newly stamped cells
+    // Step C: stamp new perimeter positions
+    // Step D: update arrival_time for newly burned cells
     // -------------------------------------------------------------------------
     phi.setVal(0.0_rt);
 
@@ -199,7 +209,6 @@ void advance_farsite_one_step(
 
     if (npts_global > 0) {
         if (fp.gaussian_sigma < 0.0) {
-            // Single-cell stamping
             amrex::Gpu::DeviceVector<Real> d_x(npts_global), d_y(npts_global);
             amrex::Gpu::copy(amrex::Gpu::hostToDevice,
                              xarray_all.begin(), xarray_all.end(), d_x.begin());
@@ -223,7 +232,6 @@ void advance_farsite_one_step(
                 });
             }
         } else {
-            // Gaussian/SDF stamping
             Real sigma = (fp.gaussian_sigma > 0.0) ? fp.gaussian_sigma : dx[0];
             const Real* x_ptr = xarray_all.data();
             const Real* y_ptr = yarray_all.data();
