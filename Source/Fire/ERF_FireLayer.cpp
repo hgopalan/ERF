@@ -48,6 +48,22 @@ void FireLayer::initialize(const ERF& erf,
     fire_disp_accum->setVal(0.0_rt);
     fire_fireline_intensity->setVal(0.0_rt);
     fire_flame_length->setVal(0.0_rt);
+     
+    // Phase 6: fire-atmosphere coupling MultiFabs
+    // Allocate coarsened fire flux buffers on the atmospheric grid.
+    // These are 2D (nx × ny × 1) with the same BA/DM as the atm level-0 grid.
+    const BoxArray& ba_atm = erf.boxArray(0);
+    const DistributionMapping& dm_atm = erf.DistributionMap(0);
+    // Create 2D BoxArray from atmospheric level-0 (k=0 slice)
+    BoxArray ba_atm_2d = ba_atm;
+    ba_atm_2d.coarsen(IntVect(1, 1, erf.Geom(0).Domain().length(2)));
+    m_Q_atm_prev = std::make_unique<MultiFab>(ba_atm_2d, dm_atm, 1, 0);
+    m_Q_lat_atm_prev = std::make_unique<MultiFab>(ba_atm_2d, dm_atm, 1, 0);
+    m_Q_atm_prev->setVal(0.0_rt);
+    m_Q_lat_atm_prev->setVal(0.0_rt);
+     
+    fire_latent_flux = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+    fire_latent_flux->setVal(0.0_rt);
 
     FuelModelParams fp = get_anderson_fuel_params(fire_params.fuel_model_id);
     fire_fuel_load->setVal((fp.w_d1+fp.w_d10+fp.w_d100+fp.w_lh+fp.w_lw)*4.88243);
@@ -348,4 +364,76 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
     fill_fire_diagnostics(*fire_fireline_intensity, *fire_flame_length,
                           *fire_phi, *fire_ros, *fire_fuel_load,
                           m_fuel_load_initial_kg_m2, h_kJ_per_kg);
+}
+void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
+{
+    if (!m_params.one_way_coupling) { return; }
+    if (!fire_heat_flux || !m_Q_atm_prev) { return; }
+
+    // Coarsen sensible heat flux from fire grid to atmospheric grid.
+    coarsen_fire_flux_to_atm(*m_Q_atm_prev, *fire_heat_flux,
+                             geom_atm, m_fg.geom, m_fg.C);
+
+    // Compute and coarsen latent heat flux if injection is enabled.
+    if (m_params.inject_latent && m_Q_lat_atm_prev) {
+        FuelModelParams fp = get_anderson_fuel_params(m_params.fuel_model_id);
+        amrex::Real h_fuel_Jkg = fp.heat_content * 2326.0_rt;
+
+        // Domain-averaged fuel moisture for bmst computation.
+        amrex::Real M_f = m_params.moisture_1hr;   // fallback
+        if (m_params.moisture_dynamic && fire_fuel_mc) {
+            long nc = fire_fuel_mc->boxArray().numPts();
+            amrex::Real avg1   = (nc > 0) ? fire_fuel_mc->sum(0) / amrex::Real(nc) : m_params.moisture_1hr;
+            amrex::Real avg10  = (nc > 0) ? fire_fuel_mc->sum(1) / amrex::Real(nc) : m_params.moisture_10hr;
+            amrex::Real avg100 = (nc > 0) ? fire_fuel_mc->sum(2) / amrex::Real(nc) : m_params.moisture_100hr;
+            amrex::Real dead_load = fp.w_d1 + fp.w_d10 + fp.w_d100;
+            M_f = (dead_load > 1e-10_rt)
+                ? (fp.w_d1*avg1 + fp.w_d10*avg10 + fp.w_d100*avg100) / dead_load
+                : avg1;
+        }
+
+        // Compute latent flux on fire grid from sensible flux and fuel moisture.
+        compute_fire_latent_flux(*fire_latent_flux, *fire_heat_flux, M_f, h_fuel_Jkg);
+
+        // Coarsen to atmospheric grid.
+        coarsen_fire_flux_to_atm(*m_Q_lat_atm_prev, *fire_latent_flux,
+                                 geom_atm, m_fg.geom, m_fg.C);
+    } else {
+        m_Q_lat_atm_prev->setVal(0.0_rt);
+    }
+}
+
+void FireLayer::apply_fire_coupling_to_cc_source(
+    amrex::MultiFab& cc_source,
+    const amrex::MultiFab& S_old,
+    const amrex::MultiFab& z_phys_cc,
+    const amrex::Geometry& geom_atm,
+    bool has_moisture)
+{
+    if (!m_params.one_way_coupling) { return; }
+    if (!m_Q_atm_prev) { return; }
+    if (m_params.fire_atm_feedback <= 0.0_rt) { return; }
+
+    const amrex::MultiFab* Q_lat_ptr = (m_params.inject_latent && has_moisture)
+        ? m_Q_lat_atm_prev.get() : nullptr;
+
+    apply_fire_tendency_to_cc_source(
+        cc_source,
+        *m_Q_atm_prev,
+        Q_lat_ptr,
+        z_phys_cc,
+        S_old,
+        geom_atm,
+        m_params.heat_flux_alfg,
+        m_params.fire_atm_feedback,
+        has_moisture);
+
+    if (m_params.fire_debug) {
+        amrex::Print() << "[FIRE COUPLING] Q_atm_max=" << m_Q_atm_prev->max(0)
+                       << " W/m2  alfg=" << m_params.heat_flux_alfg << " m\n";
+        if (Q_lat_ptr) {
+            amrex::Print() << "[FIRE COUPLING] Q_lat_atm_max=" << m_Q_lat_atm_prev->max(0)
+                           << " W/m2\n";
+        }
+    }
 }
