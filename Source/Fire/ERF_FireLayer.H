@@ -11,6 +11,7 @@
 #include <ERF_FireIgnition.H>
 #include <ERF_FuelMoisture.H>
 #include <ERF_MoistureExtinction.H>
+#include <ERF_FireStatsOutput.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -268,6 +269,7 @@ private:
     // Time tracking for fire advancement
     amrex::Real                              m_current_time = 0.0;
     amrex::Real                              m_dt_atm       = 0.0;
+    int                                      m_step         = 0;  ///< Simulation step counter
 
     // Vertical levels
     int                                      m_nz = 0;
