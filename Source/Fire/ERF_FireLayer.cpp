@@ -44,7 +44,7 @@ void FireLayer::initialize(const ERF& erf,
     fire_curvature->setVal(0.0);
     fire_ros->setVal(0.0);
     fire_arrival_time->setVal(-1.0_rt);
-    fire_disp_accum->setVal(0.0_rt);   // zero accumulated displacement
+    fire_disp_accum->setVal(0.0_rt);
 
     FuelModelParams fp = get_anderson_fuel_params(fire_params.fuel_model_id);
     Real fuel_load_lb_ft2 = fp.w_d1 + fp.w_d10 + fp.w_d100 + fp.w_lh + fp.w_lw;
@@ -196,19 +196,18 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                        << " m/s" << std::endl;
     }
 
-    // Restore burned interior before Pass 1 so gradient stencil is correct
-    for (MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
-        auto p  = fire_phi->array(mfi);
-        auto at = fire_arrival_time->const_array(mfi);
-        ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv) {
-            if (at(iv) >= 0.0_rt) p(iv) = -1.0_rt;
-        });
-    }
+    // FIX: removed pre-call phi restore block.
+    // The arrival-time restore (phi=-1 for burned cells) is already performed
+    // inside advance_farsite_one_step after the phi.setVal(0) reset. Doing it
+    // here BEFORE Pass 1 overwrites the smooth phi front ring with hard -1
+    // values, making those cells look like burned interior (flat gradient),
+    // preventing the accumulator from building up. The FillBoundary below is
+    // still needed to ensure ghost cells are consistent for the gradient stencil.
     fire_phi->FillBoundary(m_fg.geom.periodicity());
 
     // Advance with sub-cell displacement accumulation
     int n_substeps = advance_fire_subcycle(*fire_phi, *fire_spread_vec,
-                                           *fire_disp_accum,        // <-- accumulator
+                                           *fire_disp_accum,
                                            *fire_wind_eff, *fire_ros,
                                            *fire_arrival_time,
                                            m_fg.geom, dt, m_fp);
