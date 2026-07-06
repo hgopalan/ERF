@@ -43,6 +43,7 @@ void FireLayer::initialize(const ERF& erf,
 
     // Initialize values
     fire_phi->setVal(1.0);  // All unburned initially
+    fire_spread_vec->setVal(0.0_rt);
     fire_wind_ref->setVal(0.0);
     fire_wind_eff->setVal(0.0);
     fire_slopes->setVal(0.0);
@@ -238,21 +239,6 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     }
 
     // 7. (Phase 3) Advance level-set using FARSITE subcycle
-
-    // Step A: Reset phi to 0 (neutral, between burned=-1 and unburned=+1).
-    // This is the reset that was previously done inside advance_farsite_one_step,
-    // now done here where the arrival time record is available.
-    fire_phi->setVal(0.0_rt);
-
-    // Step B: Restore all previously burned cells from arrival time record.
-    // Any cell with at >= 0 has been burned at some point; stamp it as burned.
-    for (MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
-        auto p  = fire_phi->array(mfi);
-        auto at = fire_arrival_time->const_array(mfi);
-        ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv) {
-            if (at(iv) >= 0.0_rt) p(iv) = -1.0_rt;
-        });
-    }
 
     // Step C: Fill ghost cells so gradient stencils in Pass 1 see correct phi
     fire_phi->FillBoundary(m_fg.geom.periodicity());

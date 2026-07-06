@@ -303,10 +303,8 @@ void advance_farsite_one_step(
     yarray_all = yarray;
 #endif
 
-    // NOTE: Reset of phi to unburned state is now handled by FireLayer::advance()
-    // before calling advance_fire_subcycle. The arrival time record preserves the
-    // burned interior across timesteps, and the reset responsibility belongs with
-    // the owner of that record.
+    // Reset phi to 0 (neutral) before stamping new front positions
+    phi.setVal(0.0_rt);
 
     // Stamp propagated front positions into phi
     if (npts_global > 0) {
