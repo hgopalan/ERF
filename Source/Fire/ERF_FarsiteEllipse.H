@@ -183,9 +183,10 @@ void advance_farsite_one_step(
             Real grad_mag = std::sqrt(dphi_dx*dphi_dx + dphi_dy*dphi_dy);
 
             if (grad_mag < 1.0e-50) {
-                spread_arr(iv, 0) = 0.0;
-                spread_arr(iv, 1) = 0.0;
-                return;
+                // Flat phi — either burned interior or unresolved front.
+                // Do NOT overwrite spread_arr: leave any previously accumulated
+                // nonzero spread value intact so Pass 2 can reconstruct the interior.
+                return;   // KEY FIX: was previously writing 0.0 here, which destroyed history
             }
 
             // Outward normal
@@ -341,7 +342,7 @@ void advance_farsite_one_step(
                     int jj = static_cast<int>((y - prob_lo[1]) * dyi);
 
                     if (bx.contains(amrex::IntVect(ii, jj, 0))) {
-                        p(ii, jj, 0) = -1.0_rt;
+                        p(ii, jj, 0) = amrex::min(p(ii, jj, 0), -1.0_rt);
                     }
                 });
             }
