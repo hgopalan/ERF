@@ -6,11 +6,6 @@
  * @brief FARSITE elliptical fire growth model and level-set propagation
  *
  * Richards (1990) elliptical fire growth model.
- * Richards, G.D. (1990). An elliptical growth model of forest fire fronts
- *   and its numerical solution. Int. J. Numer. Meth. Eng. 30(6):1163-1179.
- *
- * Ported from hgopalan/wildfire_levelset src/farsite_ellipse.H.
- * That file implements compute_farsite_spread() operating on AMReX MultiFabs.
  *
  * The fire front is represented by a signed level-set field phi:
  *   phi < 0  : burned
@@ -19,20 +14,11 @@
  *
  * Propagation is two-pass:
  *   Pass 1 (GPU): compute spread vector at each front cell from ROS field
- *                 and Richards ellipse coefficients.
- *   Pass 2 (host): collect propagated positions, MPI_Allgatherv so every
- *                  rank holds the global front, then stamp phi.
- *
- * The MPI_Allgatherv call transfers O(perimeter / dx_fire) Real values.
- * For a 2 km perimeter on a 10 m fire grid this is ~200 points per rank,
- * and the all-gather transfers ~200 * nranks * 8 bytes — negligible overhead.
- *
- * Assumptions:
- *   - Single AMR level (no AMR refinement in z between fire and atm grids).
- *   - The fire grid uses the same x-y MPI decomposition as the atmospheric
- *     level-0 grid; each rank owns the same x-y columns in both.
- *   - fire_phi has 1 ghost cell in x and y for gradient stencils.
- *   - wind_eff has no ghost cells required (read at owned cells only).
+ *                 and Richards ellipse coefficients. Spread is accumulated
+ *                 into disp_accum (persistent across timesteps) so that
+ *                 sub-cell displacements are not lost.
+ *   Pass 2 (host): collect cells whose accumulated displacement >= cell_size,
+ *                  MPI_Allgatherv, stamp phi, reset those accumulators.
  */
 
 #include <AMReX_Config.H>
@@ -60,38 +46,14 @@ struct FarsiteParams
     amrex::Real cfl_fire        = 0.5;  ///< fire CFL number for subcycle timestep control
 };
 
-/**
- * @brief Anderson (1983) L/W ratio as a function of midflame wind speed.
- *
- * Anderson, H.E. (1983). Predicting wind-driven wildland fire size and shape.
- *   USDA Forest Service Research Paper INT-305.
- *
- * Returns L/W in [1.0, 8.0].
- *
- * @param[in] wind_speed_mph Midflame wind speed [mph]
- * @return Length-to-width ratio L/W
- */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real anderson_LW_ratio(amrex::Real wind_speed_mph) noexcept
 {
-    if (wind_speed_mph < 1.0) {
-        return 1.0;
-    }
-    // Clamp to [1.0, 8.0]
+    if (wind_speed_mph < 1.0) { return 1.0; }
     amrex::Real lw = 0.936 * std::exp(0.2566 * wind_speed_mph) - 0.397 * std::sqrt(wind_speed_mph);
     return amrex::max(1.0, amrex::min(lw, 8.0));
 }
 
-/**
- * @brief Convert Anderson L/W ratio to Richards (1990) ellipse coefficients.
- *
- * Sets coeff_a=1.0, coeff_c=0.2*coeff_a, coeff_b=(a+c)/(2*LW).
- *
- * @param[in]  LW_ratio Length-to-width ratio
- * @param[out] coeff_a  Richards head coefficient (set to 1.0)
- * @param[out] coeff_b  Richards flank coefficient
- * @param[out] coeff_c  Richards backing coefficient (set to 0.2)
- */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 void LW_ratio_to_richards_coefficients(amrex::Real LW_ratio,
     amrex::Real& coeff_a, amrex::Real& coeff_b, amrex::Real& coeff_c) noexcept
@@ -103,23 +65,27 @@ void LW_ratio_to_richards_coefficients(amrex::Real LW_ratio,
 
 /**
  * @brief Advance fire front phi by one fire substep dt_fire using Richards (1990)
- * elliptical expansion.
+ * elliptical expansion with sub-cell displacement accumulation.
  *
- * Two-pass algorithm:
- * Pass 1 (GPU): Compute spread vectors from ROS and ellipse coefficients.
- * Pass 2 (host): Collect front positions, global gather, stamp phi.
+ * KEY DESIGN: spread distances per atmospheric timestep (~0.024 m) are far
+ * smaller than the fire grid cell size (~25 m). Without accumulation, the
+ * Huygens points are always stamped back into their origin cell and the front
+ * never moves. disp_accum (comp 0 = x, comp 1 = y) stores the unresolved
+ * displacement carried forward across timesteps. A cell stamps a new position
+ * only once the accumulated displacement magnitude reaches the cell diagonal.
  *
- * The burned interior (arrival_time >= 0) is preserved across the internal phi
- * reset: after collecting the new perimeter positions, phi is reset to 0 only
- * for unburned cells, then the arrival_time array is used to re-stamp all
- * previously burned cells as phi = -1 before the new perimeter is stamped.
- * This matches the reference wildfire_levelset/src/farsite_ellipse.H behaviour.
+ * Pass 1 (GPU): Compute the spread vector for each front cell and ADD it to
+ *               disp_accum. When |disp_accum| >= stamp_threshold, write the
+ *               accumulated target position to farsite_work and zero-out
+ *               disp_accum for that cell.
+ * Pass 2 (host/MPI): Collect nonzero farsite_work entries, all-gather, stamp phi.
  *
  * @param[in,out] phi          Level-set field
- * @param[in,out] farsite_work Scratch for spread vectors (2 comp)
+ * @param[in,out] farsite_work Scratch for ready-to-stamp positions (2 comp)
+ * @param[in,out] disp_accum   Persistent sub-cell displacement accumulator (2 comp)
  * @param[in]     vel_eff      Effective wind field [m/s], 2 comp
  * @param[in]     R_mf         ROS field [m/s]
- * @param[in]     arrival_time Fire arrival time field: >= 0 means burned, < 0 unburned
+ * @param[in]     arrival_time Fire arrival time: >= 0 burned, < 0 unburned
  * @param[in]     geom_fire    Fire grid geometry
  * @param[in]     dt_fire      Fire substep [s]
  * @param[in]     fp           FARSITE parameters
@@ -128,6 +94,7 @@ inline
 void advance_farsite_one_step(
     amrex::MultiFab& phi,
     amrex::MultiFab& farsite_work,
+    amrex::MultiFab& disp_accum,
     const amrex::MultiFab& vel_eff,
     const amrex::MultiFab& R_mf,
     const amrex::MultiFab& arrival_time,
@@ -142,84 +109,91 @@ void advance_farsite_one_step(
     const Real dxi = 1.0 / dx[0];
     const Real dyi = 1.0 / dx[1];
 
+    // Stamp threshold: fire front stamps a new cell once accumulated
+    // displacement reaches one cell width in either direction.
+    // Using min(dx,dy) ensures we stamp before skipping a cell.
+    const Real stamp_threshold = amrex::min(dx[0], dx[1]);
+
+    // Clear farsite_work — only cells that cross the threshold this step
+    // will write nonzero values into it.
+    farsite_work.setVal(0.0_rt);
+
     // -------------------------------------------------------------------------
-    // Pass 1: GPU — compute spread vectors at fire-front cells
+    // Pass 1: GPU — accumulate spread; write to farsite_work when threshold met
     // -------------------------------------------------------------------------
     for (MFIter mfi(R_mf); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
-        auto phi_arr     = phi.array(mfi);
-        auto spread_arr  = farsite_work.array(mfi);
-        auto vel_arr     = vel_eff.const_array(mfi);
-        auto ros_arr     = R_mf.const_array(mfi);
+        auto phi_arr    = phi.array(mfi);
+        auto spread_arr = farsite_work.array(mfi);
+        auto disp_arr   = disp_accum.array(mfi);
+        auto vel_arr    = vel_eff.const_array(mfi);
+        auto ros_arr    = R_mf.const_array(mfi);
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept
         {
             int i = iv[0], j = iv[1], k = iv[2];
             Real phi_val = phi_arr(iv);
 
-            // Skip cells clearly inside the unburned region
+            // Only process front cells
             if (phi_val > fp.phi_threshold) {
-                spread_arr(iv, 0) = 0.0;
-                spread_arr(iv, 1) = 0.0;
                 return;
             }
 
-            // Compute centered-difference gradient of phi
+            // Compute gradient of phi
             Real dphi_dx = (phi_arr(i+1, j, k) - phi_arr(i-1, j, k)) * dxi * 0.5;
             Real dphi_dy = (phi_arr(i, j+1, k) - phi_arr(i, j-1, k)) * dyi * 0.5;
-
             Real grad_mag = std::sqrt(dphi_dx*dphi_dx + dphi_dy*dphi_dy);
 
-            if (grad_mag < 1.0e-50) {
-                // Flat phi — burned interior.  Leave spread_arr at zero; the
-                // burned interior is restored via the arrival_time array below.
-                spread_arr(iv, 0) = 0.0;
-                spread_arr(iv, 1) = 0.0;
-                return;
-            }
+            if (grad_mag < 1.0e-50) { return; }  // burned interior
 
-            // Outward normal (points toward unburned region)
+            // Outward normal
             Real nx = dphi_dx / grad_mag;
             Real ny = dphi_dy / grad_mag;
 
-            // Wind components
+            // Wind
             Real ux = vel_arr(iv, 0);
             Real uy = vel_arr(iv, 1);
             Real wind_mag = std::sqrt(ux*ux + uy*uy);
 
-            // Richards ellipse scale factor (default: isotropic, scale=1)
+            // Richards ellipse scale factor
             Real scale = 1.0;
-
             if (wind_mag > 1.0e-10) {
-                Real wind_unit_x = ux / wind_mag;
-                Real wind_unit_y = uy / wind_mag;
-
-                Real cos_theta = nx * wind_unit_x + ny * wind_unit_y;
-                cos_theta = amrex::max(-1.0, amrex::min(cos_theta, 1.0));
+                Real wx = ux / wind_mag;
+                Real wy = uy / wind_mag;
+                Real cos_theta = amrex::max(-1.0, amrex::min(nx*wx + ny*wy, 1.0));
                 Real sin_theta = std::sqrt(1.0 - cos_theta*cos_theta);
-
-                Real a = fp.coeff_a;
-                Real b = fp.coeff_b;
-                Real c = fp.coeff_c;
-
+                Real a = fp.coeff_a, b = fp.coeff_b, c = fp.coeff_c;
                 if (fp.use_anderson_lw != 0) {
-                    Real wind_mph = wind_mag * 2.237;  // m/s → mph
-                    Real lw_ratio = anderson_LW_ratio(wind_mph);
-                    LW_ratio_to_richards_coefficients(lw_ratio, a, b, c);
+                    LW_ratio_to_richards_coefficients(
+                        anderson_LW_ratio(wind_mag * 2.237), a, b, c);
                 }
-
-                if (cos_theta > 0.0) {
-                    scale = a * cos_theta + b * sin_theta;
-                } else {
-                    scale = b * sin_theta - c * cos_theta;
-                }
+                scale = (cos_theta > 0.0)
+                    ? a * cos_theta + b * sin_theta
+                    : b * sin_theta - c * cos_theta;
             }
 
-            Real R_head = ros_arr(iv);
-            Real spread_dist = amrex::max(scale, 0.0) * R_head * dt_fire;
+            // Incremental spread [m] this substep
+            Real ds = amrex::max(scale, 0.0) * ros_arr(iv) * dt_fire;
 
-            spread_arr(iv, 0) = spread_dist * nx;
-            spread_arr(iv, 1) = spread_dist * ny;
+            // Accumulate displacement
+            disp_arr(iv, 0) += ds * nx;
+            disp_arr(iv, 1) += ds * ny;
+
+            // Check accumulated magnitude against threshold
+            Real accum_mag = std::sqrt(disp_arr(iv,0)*disp_arr(iv,0)
+                                     + disp_arr(iv,1)*disp_arr(iv,1));
+            if (accum_mag >= stamp_threshold) {
+                // Write accumulated target position to farsite_work
+                // (physical coords of the source cell + accumulated vector)
+                Real x_src = prob_lo[0] + (i + 0.5) * dx[0];
+                Real y_src = prob_lo[1] + (j + 0.5) * dx[1];
+                spread_arr(iv, 0) = x_src + disp_arr(iv, 0);
+                spread_arr(iv, 1) = y_src + disp_arr(iv, 1);
+
+                // Reset accumulator for this cell
+                disp_arr(iv, 0) = 0.0;
+                disp_arr(iv, 1) = 0.0;
+            }
         });
     }
 
@@ -227,7 +201,7 @@ void advance_farsite_one_step(
     amrex::Gpu::streamSynchronize();
 
     // -------------------------------------------------------------------------
-    // Pass 2: Host — collect propagated perimeter positions, MPI gather
+    // Pass 2: Host — collect stamping positions, MPI gather
     // -------------------------------------------------------------------------
     std::vector<Real> xarray, yarray;
 
@@ -238,29 +212,27 @@ void advance_farsite_one_step(
         for (int k = bx.smallEnd()[2]; k <= bx.bigEnd()[2]; ++k) {
             for (int j = bx.smallEnd()[1]; j <= bx.bigEnd()[1]; ++j) {
                 for (int i = bx.smallEnd()[0]; i <= bx.bigEnd()[0]; ++i) {
-                    Real spread_x = spread_arr(i, j, k, 0);
-                    Real spread_y = spread_arr(i, j, k, 1);
-
-                    if (std::abs(spread_x) > 1.0e-14 || std::abs(spread_y) > 1.0e-14) {
-                        Real x = prob_lo[0] + (i + 0.5) * dx[0];
-                        Real y = prob_lo[1] + (j + 0.5) * dx[1];
-                        xarray.push_back(x + spread_x);
-                        yarray.push_back(y + spread_y);
+                    Real sx = spread_arr(i, j, k, 0);
+                    Real sy = spread_arr(i, j, k, 1);
+                    // farsite_work stores absolute target coords when threshold met
+                    if (sx != 0.0 || sy != 0.0) {
+                        xarray.push_back(sx);
+                        yarray.push_back(sy);
                     }
                 }
             }
         }
     }
 
-    // MPI all-gather so every rank holds the complete global fire perimeter
+    // MPI all-gather
     int npts_local = static_cast<int>(xarray.size());
     std::vector<int> npts_all(ParallelDescriptor::NProcs());
     ParallelAllGather::AllGather(&npts_local, 1, npts_all.data(),
                                  ParallelDescriptor::Communicator());
 
     std::vector<int> displs(ParallelDescriptor::NProcs() + 1, 0);
-    for (int i = 0; i < ParallelDescriptor::NProcs(); ++i) {
-        displs[i+1] = displs[i] + npts_all[i];
+    for (int r = 0; r < ParallelDescriptor::NProcs(); ++r) {
+        displs[r+1] = displs[r] + npts_all[r];
     }
     int npts_global = displs[ParallelDescriptor::NProcs()];
 
@@ -283,90 +255,61 @@ void advance_farsite_one_step(
 #endif
 
     // -------------------------------------------------------------------------
-    // Reset phi, then restore the burned interior, then stamp new perimeter.
-    //
-    // BUG FIX: the original code called phi.setVal(0.0) here which wiped the
-    // entire burned interior.  Pass 1 only produces nonzero spread vectors at
-    // the thin perimeter ring (interior cells have flat phi → grad_mag≈0 →
-    // spread=0), so Pass 2 only collects perimeter points.  After the global
-    // reset, stamping only those points left the interior as phi=0 (unburned),
-    // causing active fire cells to drop to 0 after the first substep.
-    //
-    // Fix: reset phi to 0, then immediately re-stamp all previously burned
-    // cells (arrival_time >= 0) as phi = -1 before stamping the new perimeter.
-    // This matches the reference wildfire_levelset behaviour where the interior
-    // is never lost.
+    // Step A: reset phi to 0
+    // Step B: re-stamp burned interior from arrival_time
+    // Step C: stamp new front positions (only if any perimeter cells crossed threshold)
     // -------------------------------------------------------------------------
-
-    // Step A: reset all cells to 0 (neutral / unburned)
     phi.setVal(0.0_rt);
 
-    // Step B: re-stamp the burned interior from arrival_time
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         auto p  = phi.array(mfi);
         auto at = arrival_time.const_array(mfi);
         amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
-            if (at(iv) >= 0.0_rt) {
-                p(iv) = -1.0_rt;
-            }
+            if (at(iv) >= 0.0_rt) p(iv) = -1.0_rt;
         });
     }
     amrex::Gpu::streamSynchronize();
 
-    // Step C: stamp the new propagated perimeter positions
     if (npts_global > 0) {
-        const Real* x_ptr = xarray_all.data();
-        const Real* y_ptr = yarray_all.data();
-        int npts = npts_global;
-
         if (fp.gaussian_sigma < 0.0) {
-            // Single-cell stamping (default): copy to device, use ParallelFor
+            // Single-cell stamping
             amrex::Gpu::DeviceVector<Real> d_x(npts_global), d_y(npts_global);
             amrex::Gpu::copy(amrex::Gpu::hostToDevice,
                              xarray_all.begin(), xarray_all.end(), d_x.begin());
             amrex::Gpu::copy(amrex::Gpu::hostToDevice,
                              yarray_all.begin(), yarray_all.end(), d_y.begin());
-
             const Real* xp = d_x.data();
             const Real* yp = d_y.data();
+            int npts = npts_global;
 
             for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
                 const Box& bx = mfi.tilebox();
                 auto p = phi.array(mfi);
-
                 amrex::ParallelFor(npts, [=] AMREX_GPU_DEVICE (int n) noexcept {
-                    Real x = xp[n];
-                    Real y = yp[n];
-
-                    int ii = static_cast<int>(std::round((x - prob_lo[0]) / dx[0] - 0.5_rt));
-                    int jj = static_cast<int>(std::round((y - prob_lo[1]) / dx[1] - 0.5_rt));
-
+                    int ii = static_cast<int>(std::round((xp[n] - prob_lo[0]) / dx[0] - 0.5_rt));
+                    int jj = static_cast<int>(std::round((yp[n] - prob_lo[1]) / dx[1] - 0.5_rt));
                     if (bx.contains(amrex::IntVect(ii, jj, 0))) {
                         p(ii, jj, 0) = amrex::min(p(ii, jj, 0), -1.0_rt);
                     }
                 });
             }
         } else {
-            // Gaussian/SDF stamping path
+            // Gaussian/SDF stamping
             Real sigma = (fp.gaussian_sigma > 0.0) ? fp.gaussian_sigma : dx[0];
+            const Real* x_ptr = xarray_all.data();
+            const Real* y_ptr = yarray_all.data();
+            int npts = npts_global;
 
             for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
                 auto p = phi.array(mfi);
                 const Box& bx = mfi.validbox();
-
                 ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
                     Real x_cell = prob_lo[0] + (iv[0] + 0.5) * dx[0];
                     Real y_cell = prob_lo[1] + (iv[1] + 0.5) * dx[1];
-
                     for (int n = 0; n < npts; ++n) {
-                        Real x_pt = x_ptr[n];
-                        Real y_pt = y_ptr[n];
-
-                        Real dist = std::sqrt((x_cell - x_pt)*(x_cell - x_pt) +
-                                             (y_cell - y_pt)*(y_cell - y_pt));
-                        Real phi_sdf = amrex::max(dist - sigma, -1.0_rt);
-
-                        p(iv) = amrex::min(p(iv), phi_sdf);
+                        Real dist = std::sqrt((x_cell-x_ptr[n])*(x_cell-x_ptr[n])
+                                            + (y_cell-y_ptr[n])*(y_cell-y_ptr[n]));
+                        p(iv) = amrex::min(p(iv), amrex::max(dist - sigma, -1.0_rt));
                     }
                 });
             }
@@ -375,17 +318,7 @@ void advance_farsite_one_step(
 }
 
 /**
- * @brief Compute the maximum fire substep satisfying the CFL condition.
- *
- * dt_fire = cfl * min(dx, dy) / max(R_mf)
- *
- * Returns dt_atm if R_mf is zero everywhere (no active fire).
- *
- * @param[in] R_mf       ROS field [m/s]
- * @param[in] geom_fire  Fire grid geometry
- * @param[in] dt_atm     Atmospheric timestep [s]
- * @param[in] cfl_fire   CFL number
- * @return Fire substep [s]
+ * @brief Compute fire CFL-limited substep.
  */
 inline
 amrex::Real compute_fire_dt(
@@ -395,32 +328,21 @@ amrex::Real compute_fire_dt(
     amrex::Real cfl_fire)
 {
     using namespace amrex;
-
     Real max_ros = R_mf.max(0);
-
-    if (max_ros < 1.0e-10) {
-        return dt_atm;
-    }
-
+    if (max_ros < 1.0e-10) { return dt_atm; }
     const auto* dx = geom_fire.CellSize();
-    Real min_dx = std::min(dx[0], dx[1]);
-
-    return cfl_fire * min_dx / max_ros;
+    return cfl_fire * amrex::min(dx[0], dx[1]) / max_ros;
 }
 
 /**
  * @brief Advance the fire front through multiple substeps to cover one atmospheric timestep.
  *
- * Each substep calls advance_farsite_one_step(), which internally uses
- * arrival_time to preserve the burned interior across the phi reset.
- *
- * Returns the number of fire substeps taken.
- *
  * @param[in,out] phi          Level-set field
- * @param[in,out] farsite_work Scratch for spread vectors
+ * @param[in,out] farsite_work Scratch for ready-to-stamp positions (2 comp)
+ * @param[in,out] disp_accum   Persistent sub-cell displacement accumulator (2 comp)
  * @param[in]     vel_eff      Effective wind field [m/s], 2 comp
  * @param[in]     R_mf         ROS field [m/s]
- * @param[in]     arrival_time Fire arrival time field (>= 0 burned, < 0 unburned)
+ * @param[in]     arrival_time Fire arrival time (>= 0 burned, < 0 unburned)
  * @param[in]     geom_fire    Fire grid geometry
  * @param[in]     dt_atm       Atmospheric timestep [s]
  * @param[in]     fp           FARSITE parameters
@@ -430,6 +352,7 @@ inline
 int advance_fire_subcycle(
     amrex::MultiFab& phi,
     amrex::MultiFab& farsite_work,
+    amrex::MultiFab& disp_accum,
     const amrex::MultiFab& vel_eff,
     const amrex::MultiFab& R_mf,
     const amrex::MultiFab& arrival_time,
@@ -443,11 +366,13 @@ int advance_fire_subcycle(
     int n_substeps = 0;
 
     while (time_remaining > 1.0e-14) {
-        Real dt_fire = compute_fire_dt(R_mf, geom_fire, time_remaining, fp.cfl_fire);
-        dt_fire = std::min(dt_fire, time_remaining);
+        Real dt_fire = amrex::min(
+            compute_fire_dt(R_mf, geom_fire, time_remaining, fp.cfl_fire),
+            time_remaining);
 
-        advance_farsite_one_step(phi, farsite_work, vel_eff, R_mf,
-                                 arrival_time, geom_fire, dt_fire, fp);
+        advance_farsite_one_step(phi, farsite_work, disp_accum,
+                                 vel_eff, R_mf, arrival_time,
+                                 geom_fire, dt_fire, fp);
 
         time_remaining -= dt_fire;
         n_substeps++;
