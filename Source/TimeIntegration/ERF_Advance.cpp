@@ -268,21 +268,6 @@ ERF::Advance (int lev, Real time, Real dt_lev, int iteration, int /*ncycle*/)
     }
 
     // **************************************************************************************
-    // Phase 6: Inject fire-to-atmosphere coupling before the dycore
-    // **************************************************************************************
-#ifdef ERF_ENABLE_FIRE
-    if (lev == 0 && m_fire_layer && m_fire_layer->get_Q_atm_prev()) {
-        bool has_moisture = (solverChoice.moisture_type != MoistureType::None);
-        m_fire_layer->apply_fire_coupling_to_cc_source(
-            cc_source,
-            S_old,
-            *z_phys_cc[lev],
-            Geom(lev),
-            has_moisture);
-    }
-#endif
-
-    // **************************************************************************************
     // Update the dycore
     // **************************************************************************************
     advance_dycore(lev, state_old, state_new,
