@@ -334,7 +334,9 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 fire_fuel_load.get(),
                 &fuel_sys,
                 m_params.fuel_model_id,
-                m_params.fire_debug);
+                m_params.fire_debug,
+                fire_fuel_load.get(),
+                m_fuel_load_initial_kg_m2);
         }
     }
 
