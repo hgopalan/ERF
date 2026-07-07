@@ -22,6 +22,7 @@ void FireLayer::initialize(const ERF& erf,
     fire_phi        = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 1);
     fire_wind_ref   = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 0);
     fire_wind_eff   = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 0);
+    fire_wind_extract_z = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_slopes     = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 1);
     fire_curvature  = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_ros        = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
@@ -32,6 +33,8 @@ void FireLayer::initialize(const ERF& erf,
     fire_spread_vec = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 0);
     fire_arrival_time = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_disp_accum   = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 0);
+    fire_surface_temp = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+    fire_surface_rh   = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
 
     // Phase 5: Heat flux and diagnostics fields
     fire_fireline_intensity = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
@@ -41,11 +44,14 @@ void FireLayer::initialize(const ERF& erf,
     fire_spread_vec->setVal(0.0_rt);
     fire_wind_ref->setVal(0.0);
     fire_wind_eff->setVal(0.0);
+    fire_wind_extract_z->setVal(0.0);
     fire_slopes->setVal(0.0);
     fire_curvature->setVal(0.0);
     fire_ros->setVal(0.0);
     fire_arrival_time->setVal(-1.0_rt);
     fire_disp_accum->setVal(0.0_rt);
+    fire_surface_temp->setVal(0.0);
+    fire_surface_rh->setVal(0.0);
     fire_fireline_intensity->setVal(0.0_rt);
     fire_flame_length->setVal(0.0_rt);
 
@@ -148,7 +154,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     if (m_params.fire_debug)
         amrex::Print() << "[FIRE DEBUG] Starting fire advance step with dt=" << dt << std::endl;
 
-    fill_fire_wind_from_interpolation(*fire_wind_ref, xvel, yvel, z_phys_cc,
+    fill_fire_wind_from_interpolation(*fire_wind_ref, *fire_wind_extract_z, xvel, yvel, z_phys_cc,
                                       m_fg, m_params.wind_ref_ht, m_nz);
     if (m_params.fire_debug)
         amrex::Print() << "[FIRE DEBUG] Wind extraction completed. Max reference wind: "
@@ -278,12 +284,10 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
     Real precip_mm_hr = m_params.precip_rate_mm_hr;
     int C = m_fg.C;
 
-    MultiFab T_fire(fire_fuel_mc->boxArray(), fire_fuel_mc->DistributionMap(), 1, 0);
-    MultiFab RH_fire(fire_fuel_mc->boxArray(), fire_fuel_mc->DistributionMap(), 1, 0);
-
-    for (MFIter mfi(T_fire, false); mfi.isValid(); ++mfi) {
-        Array4<Real> T_f  = T_fire.array(mfi);
-        Array4<Real> RH_f = RH_fire.array(mfi);
+    // Map atmospheric T and RH to fire grid and store persistently
+    for (MFIter mfi(*fire_surface_temp, false); mfi.isValid(); ++mfi) {
+        Array4<Real> T_f  = fire_surface_temp->array(mfi);
+        Array4<Real> RH_f = fire_surface_rh->array(mfi);
         Array4<const Real> T_atm  = T_atm_k0.const_array(mfi);
         Array4<const Real> RH_atm = RH_atm_k0.const_array(mfi);
         amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv_f) {
@@ -296,8 +300,8 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
     for (MFIter mfi(*fire_fuel_mc); mfi.isValid(); ++mfi) {
         Array4<Real> mc   = fire_fuel_mc->array(mfi);
         Array4<Real> mext = fire_mext->array(mfi);
-        Array4<const Real> T_f  = T_fire.array(mfi);
-        Array4<const Real> RH_f = RH_fire.array(mfi);
+        Array4<const Real> T_f  = fire_surface_temp->const_array(mfi);
+        Array4<const Real> RH_f = fire_surface_rh->const_array(mfi);
         amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv_f) {
             int i = iv_f[0], j = iv_f[1];
             Real T_C = T_f(i,j,0) - 273.15_rt;
