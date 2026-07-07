@@ -328,8 +328,8 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
     int C = m_fg.C;
 
     // Map atmospheric T and RH to fire grid and store persistently.
-    // This must run every timestep regardless of moisture_dynamic so that
-    // fire_surface_temp and fire_surface_rh are populated for plotfile output.
+    // This operation runs every timestep to ensure
+    // fire_surface_temp and fire_surface_rh are available for plotfile output.
     for (MFIter mfi(*fire_surface_temp, false); mfi.isValid(); ++mfi) {
         Array4<Real> T_f  = fire_surface_temp->array(mfi);
         Array4<Real> RH_f = fire_surface_rh->array(mfi);
