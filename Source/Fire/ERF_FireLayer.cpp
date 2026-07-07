@@ -124,6 +124,15 @@ void FireLayer::initialize(const ERF& erf,
         amrex::Print() << "[FIRE DEBUG] Fire grid: dx=" << dx_fire << " m, dy=" << dy_fire
                        << " m, extent=" << max_extent[0] << "x" << max_extent[1]
                        << ", grid_ratio=" << m_fg.C << std::endl;
+        amrex::Print() << "[FIRE DEBUG] Coupling type: " << fire_params.coupling_type
+                       << " (passive=" << fire_params.is_passive()
+                       << ", lagged=" << fire_params.is_lagged()
+                       << ", synchronous=" << fire_params.is_synchronous() << ")" << std::endl;
+        amrex::Print() << "[FIRE DEBUG] Fire-atmosphere feedback multiplier: "
+                       << fire_params.fire_atm_feedback << std::endl;
+        amrex::Print() << "[FIRE DEBUG] Heat flux alfg (e-folding height): "
+                       << fire_params.heat_flux_alfg << " m" << std::endl;
+        amrex::Print() << "[FIRE DEBUG] Inject latent heat: " << fire_params.inject_latent << std::endl;
     }
 }
 
@@ -344,8 +353,19 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
 
 void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
 {
-    if (!m_params.injects_flux()) { return; }
+    if (!m_params.injects_flux()) {
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Skipping flux buffer update: coupling_type is passive (injects_flux=false)" << std::endl;
+        }
+        return;
+    }
     if (!fire_heat_flux || !m_Q_atm_prev) { return; }
+
+    if (m_params.fire_debug) {
+        amrex::Print() << "[FIRE DEBUG] Updating atmosphere flux buffer for coupling_type="
+                       << m_params.coupling_type << ". Current max heat flux: "
+                       << fire_heat_flux->max(0) << " W/m2" << std::endl;
+    }
 
     coarsen_fire_flux_to_atm(*m_Q_atm_prev, *fire_heat_flux,
                              geom_atm, m_fg.geom, m_fg.C);
@@ -369,7 +389,14 @@ void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
         compute_fire_latent_flux(*fire_latent_flux, *fire_heat_flux, M_f, h_fuel_Jkg);
         coarsen_fire_flux_to_atm(*m_Q_lat_atm_prev, *fire_latent_flux,
                                  geom_atm, m_fg.geom, m_fg.C);
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Latent heat flux computed. Max latent flux: "
+                           << fire_latent_flux->max(0) << " W/m2, fuel moisture: " << M_f << std::endl;
+        }
     } else {
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Skipping latent heat injection (inject_latent=false or no moisture)" << std::endl;
+        }
         m_Q_lat_atm_prev->setVal(0.0_rt);
     }
 }
@@ -384,6 +411,12 @@ void FireLayer::apply_fire_coupling_to_cc_source(
     if (!m_params.injects_flux()) { return; }
     if (!m_Q_atm_prev) { return; }
     if (m_params.fire_atm_feedback <= 0.0_rt) { return; }
+
+    if (m_params.fire_debug) {
+        amrex::Print() << "[FIRE DEBUG] Applying fire coupling to atmosphere (coupling_type="
+                       << m_params.coupling_type << ", feedback=" << m_params.fire_atm_feedback
+                       << ", max_Q_prev=" << m_Q_atm_prev->max(0) << " W/m2)" << std::endl;
+    }
 
     const amrex::MultiFab* Q_lat_ptr = (m_params.inject_latent && has_moisture)
         ? m_Q_lat_atm_prev.get() : nullptr;
