@@ -343,8 +343,36 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     if (m_params.fire_debug) {
         amrex::Real phi_min  = fire_phi->min(0, 0);   // nghost=0
         amrex::Real phi_max  = fire_phi->max(0, 0);
-        amrex::Real ros_max  = fire_ros->max(0);
-        amrex::Real ros_mean = fire_ros->sum(0) / fire_ros->boxArray().numPts();
+        
+        // Compute masked ROS diagnostics (only for burning cells where phi < 0)
+        amrex::Real ros_max_burning = 0.0_rt;
+        amrex::Real ros_sum_burning = 0.0_rt;
+        long n_burning_cells = 0;
+
+        for (amrex::MFIter mfi(*fire_ros); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.tilebox();
+            auto ros_arr = fire_ros->const_array(mfi);
+            auto phi_arr = fire_phi->const_array(mfi);
+            
+            amrex::LoopOnCpu(bx, [&](int i, int j, int k) {
+                if (phi_arr(i, j, k, 0) < 0.0_rt) {
+                    amrex::Real ros_val = ros_arr(i, j, k, 0);
+                    if (ros_val > ros_max_burning) {
+                        ros_max_burning = ros_val;
+                    }
+                    ros_sum_burning += ros_val;
+                    ++n_burning_cells;
+                }
+            });
+        }
+
+        amrex::ParallelDescriptor::ReduceRealMax(ros_max_burning);
+        amrex::ParallelDescriptor::ReduceRealSum(ros_sum_burning);
+        amrex::ParallelDescriptor::ReduceLongSum(n_burning_cells);
+
+        amrex::Real ros_max = ros_max_burning;
+        amrex::Real ros_mean = (n_burning_cells > 0) ? ros_sum_burning / static_cast<amrex::Real>(n_burning_cells) : 0.0_rt;
+        
         amrex::Real Q_max    = fire_heat_flux ? fire_heat_flux->max(0) : 0.0;
         amrex::Real I_B_max  = fire_fireline_intensity ? fire_fireline_intensity->max(0) : 0.0;
         amrex::Real L_max    = fire_flame_length ? fire_flame_length->max(0) : 0.0;
