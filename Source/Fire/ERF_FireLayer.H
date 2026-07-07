@@ -18,6 +18,9 @@
 #include <ERF_AlbiniSpotting.H>
 #include <ERF_ScottSpottingTable.H>
 #include <ERF_CrownFire.H>
+#include <ERF_FuelMap.H>
+#include <ERF_FireBreak.H>
+#include <ERF_FuelBlending.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -434,6 +437,18 @@ public:
      */
     const FireParams& get_params() const { return m_params; }
 
+    /**
+     * @brief Get the per-cell fuel model MultiFab (Phase 10).
+     * @return Const pointer to fire_fuel_model MultiFab (nullptr if uniform fuel).
+     */
+    const amrex::MultiFab* get_fuel_model() const { return fire_fuel_model.get(); }
+
+    /**
+     * @brief Check if spatial fuel map is active (Phase 10).
+     * @return true if per-cell fuel model is loaded and active.
+     */
+    bool has_spatial_fuel() const { return m_has_spatial_fuel; }
+
 private:
 
     // Fire grid and geometry
@@ -472,6 +487,11 @@ private:
     // comp 0: lofting height H_z [m], comp 1: brand count,
     // comp 2: max landing dist [m], comp 3: active spot flag
     std::unique_ptr<amrex::MultiFab>         fire_albini_data;
+     
+    // Phase 10: Per-cell fuel model (non-null when fuel_map.file is non-empty)
+    std::unique_ptr<amrex::MultiFab>         fire_fuel_model;  // integer code stored as Real
+    amrex::Gpu::DeviceVector<int>            m_d_fuel_codes;   // device copy of integer codes
+    bool                                     m_has_spatial_fuel = false;
      
     // Phase 6: fire-atmosphere coupling MultiFabs
     // Coarsened fire fluxes on the atmospheric level-0 grid (nx × ny × 1).

@@ -139,6 +139,52 @@ void FireLayer::initialize(const ERF& erf,
         });
     }
 
+    // Phase 10: Load spatial fuel map from file when specified.
+    // File reading is CPU-only on rank 0; broadcast to all ranks; copy to device.
+    if (!m_params.fuel_map.fuel_map_file.empty()) {
+        const int fire_nx = m_fg.ba.minimalBox().length(0);
+        const int fire_ny = m_fg.ba.minimalBox().length(1);
+        std::vector<int> h_fuel_codes;
+        int nodata_val = -9999;
+        bool ok = false;
+        if (m_params.fuel_map.fuel_map_format == "lcp") {
+            ok = read_lcp_fuel_map(m_params.fuel_map.fuel_map_file,
+                                   fire_nx, fire_ny, h_fuel_codes);
+        } else {
+            ok = read_ascii_fuel_map(m_params.fuel_map.fuel_map_file,
+                                     fire_nx, fire_ny, h_fuel_codes, nodata_val);
+        }
+        if (ok) {
+            m_d_fuel_codes.resize(h_fuel_codes.size());
+            amrex::Gpu::copy(amrex::Gpu::hostToDevice,
+                             h_fuel_codes.begin(), h_fuel_codes.end(),
+                             m_d_fuel_codes.begin());
+            fire_fuel_model = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+            fill_fuel_model_mf(*fire_fuel_model, m_d_fuel_codes.data(),
+                               m_fg.geom, fire_nx);
+            m_has_spatial_fuel = true;
+            if (m_params.fire_debug) {
+                amrex::Print() << "[FIRE DEBUG] Loaded spatial fuel map '"
+                               << m_params.fuel_map.fuel_map_file << "': "
+                               << fire_nx << "x" << fire_ny << " cells\n";
+            }
+        } else {
+            amrex::Print() << "[FIRE] WARNING: Cannot read fuel map '"
+                           << m_params.fuel_map.fuel_map_file
+                           << "'; using uniform fuel_model_id="
+                           << m_params.fuel_model_id << "\n";
+        }
+    }
+
+    // Phase 10: Apply firebreak barriers after ignition stamp.
+    if (!m_params.firebreaks.empty() && fire_phi) {
+        apply_firebreaks(*fire_phi, m_params.firebreaks, m_fg.geom);
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Applied "
+                           << m_params.n_firebreaks << " firebreak(s)\n";
+        }
+    }
+
     m_fp.phi_threshold      = fire_params.farsite_phi_threshold;
     m_fp.coeff_a            = fire_params.farsite_coeff_a;
     m_fp.coeff_b            = fire_params.farsite_coeff_b;
@@ -281,6 +327,14 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         amrex::Print() << "[FIRE DEBUG] Rate-of-spread computed. Max: " << ros_max_burning
                        << " m/s, Mean: " << ros_mean_burning
                        << " m/s" << std::endl;
+    }
+
+    // Phase 10: Fuel boundary blending when spatial fuel map is active.
+    if (m_has_spatial_fuel &&
+        m_params.fuel_map.blending_fraction > 0.0_rt &&
+        fire_fuel_model && fire_ros) {
+        apply_fuel_boundary_blending(*fire_ros, *fire_fuel_model,
+                                      m_params.fuel_map.blending_fraction);
     }
 
     fire_phi->FillBoundary(m_fg.geom.periodicity());
@@ -501,7 +555,8 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
 
     fill_fire_heat_flux(*fire_heat_flux, *fire_fuel_load,
                         *fire_phi, *fire_ros, fp,
-                        m_fg.geom.CellSize(0), tau_sav_floor, dt_fire_s);
+                        m_fg.geom.CellSize(0), tau_sav_floor, dt_fire_s,
+                        m_has_spatial_fuel ? fire_fuel_model.get() : nullptr);
 
     const Real h_kJ_per_kg = fp.heat_content * 2.326_rt;
     const Real h_fuel_Jkg = fp.heat_content * 2326.0_rt;
