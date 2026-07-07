@@ -226,6 +226,15 @@ public:
     }
 
     /**
+     * @brief Get wind extraction height for plotfile output.
+     * @return Pointer to fire_wind_extract_z MultiFab [m].
+     */
+    const amrex::MultiFab* get_wind_extract_z() const
+    {
+        return fire_wind_extract_z.get();
+    }
+
+    /**
      * @brief Get terrain slopes for plotfile output.
      * @return Pointer to fire_slopes MultiFab [dz/dx, dz/dy].
      */
@@ -250,6 +259,24 @@ public:
     const amrex::MultiFab* get_fuel_load() const
     {
         return fire_fuel_load.get();
+    }
+
+    /**
+     * @brief Get surface temperature for plotfile output.
+     * @return Pointer to fire_surface_temp MultiFab [K].
+     */
+    const amrex::MultiFab* get_surface_temp() const
+    {
+        return fire_surface_temp.get();
+    }
+
+    /**
+     * @brief Get surface relative humidity for plotfile output.
+     * @return Pointer to fire_surface_rh MultiFab [0-1].
+     */
+    const amrex::MultiFab* get_surface_rh() const
+    {
+        return fire_surface_rh.get();
     }
 
     /**
@@ -353,6 +380,7 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_phi;          // Level-set
     std::unique_ptr<amrex::MultiFab>         fire_wind_ref;     // Wind at z_ref
     std::unique_ptr<amrex::MultiFab>         fire_wind_eff;     // Effective wind
+    std::unique_ptr<amrex::MultiFab>         fire_wind_extract_z; // Wind extraction height [m] (z_surf + z_ref)
     std::unique_ptr<amrex::MultiFab>         fire_slopes;       // Terrain slopes
     std::unique_ptr<amrex::MultiFab>         fire_curvature;    // Terrain curvature
     std::unique_ptr<amrex::MultiFab>         fire_ros;          // Rate of spread
@@ -363,6 +391,8 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_spread_vec;   // FARSITE scratch
     std::unique_ptr<amrex::MultiFab>         fire_arrival_time; // Fire arrival time [s]
     std::unique_ptr<amrex::MultiFab>         fire_disp_accum;   // Persistent displacement accumulator (2 comp)
+    std::unique_ptr<amrex::MultiFab>         fire_surface_temp; // Surface temperature [K] (Phase 2)
+    std::unique_ptr<amrex::MultiFab>         fire_surface_rh;   // Surface relative humidity [0-1] (Phase 2)
     std::unique_ptr<amrex::MultiFab>         fire_fireline_intensity; // Byram fireline intensity [kW/m]
     std::unique_ptr<amrex::MultiFab>         fire_flame_length;       // Thomas flame length [m]
      
