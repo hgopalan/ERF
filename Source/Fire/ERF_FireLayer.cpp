@@ -68,6 +68,17 @@ void FireLayer::initialize(const ERF& erf,
     fire_latent_flux = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_latent_flux->setVal(0.0_rt);
 
+    // Phase 8: Albini spotting diagnostics
+    if (m_params.spotting.enable) {
+        fire_albini_data = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 4, 0);
+        fire_albini_data->setVal(0.0_rt);
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Albini spotting enabled: "
+                           << "I_B_min=" << m_params.spotting.I_B_min << " kW/m, "
+                           << "P_base=" << m_params.spotting.P_base << "\n";
+        }
+    }
+
     FuelModelParams fp = get_anderson_fuel_params(fire_params.fuel_model_id);
     fire_fuel_load->setVal((fp.w_d1+fp.w_d10+fp.w_d100+fp.w_lh+fp.w_lw)*4.88243);
     m_fuel_load_initial_kg_m2 = (fp.w_d1+fp.w_d10+fp.w_d100+fp.w_lh+fp.w_lw)*4.88243_rt;
@@ -252,6 +263,30 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
 
     compute_heat_flux_and_diagnostics(dt);
 
+    // Phase 8: Albini ember spotting
+    // Apply stochastic spotting at the specified interval.
+    // fire_wind_eff provides the 2-D wind field for trajectory integration.
+    // fire_fuel_load provides residual fuel for re-entry filtering.
+    if (m_params.spotting.enable && fire_albini_data && fire_wind_eff) {
+        if (m_step % m_params.spotting.spotting_interval == 0) {
+            fire_albini_data->setVal(0.0_rt);
+            FuelModelParams fp_sp = get_anderson_fuel_params(m_params.fuel_model_id);
+            std::string fuel_sys  = m_params.spotting.fuel_system;
+            compute_albini_spotting(
+                *fire_phi,
+                *fire_albini_data,
+                *fire_wind_eff,
+                *fire_ros,
+                m_fg.geom,
+                fp_sp,
+                m_params.spotting,
+                m_step,
+                fire_fuel_load.get(),
+                &fuel_sys,
+                m_params.fuel_model_id);
+        }
+    }
+
     amrex::Print() << "[FIRE] t=" << m_current_time
                    << "  substeps=" << n_substeps
                    << "  phi_min=" << fire_phi->min(0)
@@ -271,7 +306,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         }
         append_fire_stats(*fire_phi, *fire_arrival_time, m_fg.geom,
                          m_step, m_current_time, m_params.fire_stats_csv_file,
-                         fire_ros.get(), fire_heat_flux.get());
+                         fire_ros.get(), fire_heat_flux.get(), fire_albini_data.get());
     }
 }
 

@@ -15,6 +15,8 @@
 #include <ERF_FireHeatFlux.H>
 #include <ERF_FireDiagnostics.H>
 #include <ERF_FireAtmCoupling.H>
+#include <ERF_AlbiniSpotting.H>
+#include <ERF_ScottSpottingTable.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -298,6 +300,15 @@ public:
     }
 
     /**
+     * @brief Get Albini spotting diagnostics for plotfile output.
+     * @return Pointer to fire_albini_data MultiFab (nullptr when spotting disabled).
+     */
+    const amrex::MultiFab* get_albini_data() const
+    {
+        return fire_albini_data.get();
+    }
+
+    /**
      * @brief Get fire grid reference for plotfile output.
      * @return Const reference to the FireGrid.
      */
@@ -395,6 +406,11 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_surface_rh;   // Surface relative humidity [0-1] (Phase 2)
     std::unique_ptr<amrex::MultiFab>         fire_fireline_intensity; // Byram fireline intensity [kW/m]
     std::unique_ptr<amrex::MultiFab>         fire_flame_length;       // Thomas flame length [m]
+
+    // Phase 8: Albini spotting diagnostics (4 comp, on fire grid)
+    // comp 0: lofting height H_z [m], comp 1: brand count,
+    // comp 2: max landing dist [m], comp 3: active spot flag
+    std::unique_ptr<amrex::MultiFab>         fire_albini_data;
      
     // Phase 6: fire-atmosphere coupling MultiFabs
     // Coarsened fire fluxes on the atmospheric level-0 grid (nx × ny × 1).
