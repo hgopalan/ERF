@@ -44,9 +44,11 @@ amr.max_level       = 0
 erf.check_file      = chk
 erf.check_int       = -1
 
-# PLOTFILES
+# Plot files (2D fire variables on fire grid)
 erf.fire_plot_file = plt_fire_
-erf.fire_plot_int  = 10
+erf.fire_plot_int  = 100
+
+# PLOTFILES
 
 # DATA COLLECTION
 erf.data_log        = surf_hist.dat mean_profiles.dat flux_profiles.dat sfs_profiles.dat
