@@ -17,6 +17,7 @@
 #include <ERF_FireAtmCoupling.H>
 #include <ERF_AlbiniSpotting.H>
 #include <ERF_ScottSpottingTable.H>
+#include <ERF_CrownFire.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -57,6 +58,9 @@ class ERF;
  * | fire_mext      | 1     | Moisture of extinction [fraction] (Phase 4)  |
  * | fire_heat_flux | 1     | Heat flux [W/m²] (Phase 6, stub)             |
  * | fire_spread_vec| 2     | Scratch for FARSITE spread direction (Phase 3)|
+ * | fire_crown_active  | 1 | Crown fire status: 1=active crown, 0=surface fire (Phase 9) |
+ * | fire_crown_load    | 1 | Remaining crown fuel load [kg/m²] (Phase 9)                 |
+ * | fire_flame_temp    | 1 | Flame temperature [K] (Phase 9)                             |
  */
 class FireLayer
 {
@@ -406,6 +410,13 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_surface_rh;   // Surface relative humidity [0-1] (Phase 2)
     std::unique_ptr<amrex::MultiFab>         fire_fireline_intensity; // Byram fireline intensity [kW/m]
     std::unique_ptr<amrex::MultiFab>         fire_flame_length;       // Thomas flame length [m]
+    std::unique_ptr<amrex::MultiFab>         fire_flame_temp;         // Flame temperature [K] (Phase 9)
+
+    // Phase 9: Crown fire diagnostics (2 comp, on fire grid)
+    // comp 0: crown fire status (1.0 = active crown, 0.0 = surface),
+    // comp 1: remaining crown fuel load [kg/m²]
+    std::unique_ptr<amrex::MultiFab>         fire_crown_active;       // Crown fire status: 1=active, 0=surface (Phase 9)
+    std::unique_ptr<amrex::MultiFab>         fire_crown_load;         // Remaining crown fuel load [kg/m²] (Phase 9)
 
     // Phase 8: Albini spotting diagnostics (4 comp, on fire grid)
     // comp 0: lofting height H_z [m], comp 1: brand count,
