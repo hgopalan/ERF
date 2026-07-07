@@ -17,6 +17,7 @@
 #include <ERF_FireAtmCoupling.H>
 #include <ERF_AlbiniSpotting.H>
 #include <ERF_ScottSpottingTable.H>
+#include <ERF_CrownFire.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -57,6 +58,11 @@ class ERF;
  * | fire_mext      | 1     | Moisture of extinction [fraction] (Phase 4)  |
  * | fire_heat_flux | 1     | Heat flux [W/m²] (Phase 6, stub)             |
  * | fire_spread_vec| 2     | Scratch for FARSITE spread direction (Phase 3)|
+ * | fire_crown_active  | 1 | Crown fire status: 1=active crown, 0=surface fire (Phase 9) |
+ * | fire_crown_load    | 1 | Remaining crown fuel load [kg/m²] (Phase 9)                 |
+ * | fire_crown_fraction_burned | 1 | Crown fraction burned [0-1] (Phase 9)            |
+ * | fire_flame_tilt    | 1 | Flame tilt angle [deg from vertical] (Phase 9)             |
+ * | fire_flame_temp    | 1 | Flame temperature [K] (Phase 9)                             |
  */
 class FireLayer
 {
@@ -299,6 +305,52 @@ public:
         return fire_flame_length.get();
     }
 
+
+    /**
+     * @brief Get flame temperature for diagnostics and plotfile output.
+     * @return Pointer to fire_flame_temp MultiFab [K].
+     */
+    const amrex::MultiFab* get_flame_temp() const
+    {
+        return fire_flame_temp.get();
+    }
+
+    /**
+     * @brief Get flame tilt angle for diagnostics and plotfile output.
+     * @return Pointer to fire_flame_tilt MultiFab [deg from vertical], or nullptr when disabled.
+     */
+    const amrex::MultiFab* get_flame_tilt() const
+    {
+        return fire_flame_tilt.get();
+    }
+
+    /**
+     * @brief Get crown fire activation field for diagnostics and plotfile output.
+     * @return Pointer to fire_crown_active MultiFab, or nullptr when crown fire is disabled.
+     */
+    const amrex::MultiFab* get_crown_active() const
+    {
+        return fire_crown_active.get();
+    }
+
+    /**
+     * @brief Get remaining crown fuel load for diagnostics and plotfile output.
+     * @return Pointer to fire_crown_load MultiFab [kg/m²], or nullptr when crown fire is disabled.
+     */
+    const amrex::MultiFab* get_crown_load() const
+    {
+        return fire_crown_load.get();
+    }
+
+    /**
+     * @brief Get crown fraction burned diagnostic for plotfile output.
+     * @return Pointer to fire_crown_fraction_burned MultiFab [0-1].
+     */
+    const amrex::MultiFab* get_crown_fraction_burned() const
+    {
+        return fire_crown_fraction_burned.get();
+    }
+
     /**
      * @brief Get Albini spotting diagnostics for plotfile output.
      * @return Pointer to fire_albini_data MultiFab (nullptr when spotting disabled).
@@ -406,6 +458,15 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_surface_rh;   // Surface relative humidity [0-1] (Phase 2)
     std::unique_ptr<amrex::MultiFab>         fire_fireline_intensity; // Byram fireline intensity [kW/m]
     std::unique_ptr<amrex::MultiFab>         fire_flame_length;       // Thomas flame length [m]
+    std::unique_ptr<amrex::MultiFab>         fire_flame_tilt;         // Flame tilt angle [deg from vertical] (Phase 9)
+    std::unique_ptr<amrex::MultiFab>         fire_flame_temp;         // Flame temperature [K] (Phase 9)
+
+    // Phase 9: Crown fire diagnostics (2 comp, on fire grid)
+    // comp 0: crown fire status (1.0 = active crown, 0.0 = surface),
+    // comp 1: remaining crown fuel load [kg/m²]
+    std::unique_ptr<amrex::MultiFab>         fire_crown_active;       // Crown fire status: 1=active, 0=surface (Phase 9)
+    std::unique_ptr<amrex::MultiFab>         fire_crown_load;         // Remaining crown fuel load [kg/m²] (Phase 9)
+    std::unique_ptr<amrex::MultiFab>         fire_crown_fraction_burned; // Crown fraction burned [0-1] (Phase 9)
 
     // Phase 8: Albini spotting diagnostics (4 comp, on fire grid)
     // comp 0: lofting height H_z [m], comp 1: brand count,
