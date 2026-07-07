@@ -305,20 +305,29 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 m_step,
                 fire_fuel_load.get(),
                 &fuel_sys,
-                m_params.fuel_model_id);
+                m_params.fuel_model_id,
+                m_params.fire_debug);
         }
     }
 
-    amrex::Print() << "[FIRE] t=" << m_current_time
-                   << "  substeps=" << n_substeps
-                   << "  phi_min=" << fire_phi->min(0)
-                   << "  max_ROS=" << fire_ros->max(0) << " m/s"
-                   << "  mean_ROS=" << fire_ros->sum(0)/fire_ros->boxArray().numPts()
-                   << " m/s"
-                   << "  Q_max=" << fire_heat_flux->max(0) << " W/m2"
-                   << "  I_B_max=" << fire_fireline_intensity->max(0) << " kW/m"
-                   << "  L_max=" << fire_flame_length->max(0) << " m"
-                   << std::endl;
+    if (m_params.fire_debug) {
+        amrex::Real phi_min  = fire_phi->min(0, 0);   // nghost=0
+        amrex::Real phi_max  = fire_phi->max(0, 0);
+        amrex::Real ros_max  = fire_ros->max(0);
+        amrex::Real ros_mean = fire_ros->sum(0) / fire_ros->boxArray().numPts();
+        amrex::Real Q_max    = fire_heat_flux ? fire_heat_flux->max(0) : 0.0;
+        amrex::Real I_B_max  = fire_fireline_intensity ? fire_fireline_intensity->max(0) : 0.0;
+        amrex::Real L_max    = fire_flame_length ? fire_flame_length->max(0) : 0.0;
+        amrex::Print() << "[FIRE] t=" << m_current_time
+                       << "  substeps=" << n_substeps
+                       << "  phi_min=" << phi_min
+                       << "  phi_max=" << phi_max
+                       << "  max_ROS=" << ros_max << " m/s"
+                       << "  mean_ROS=" << ros_mean << " m/s"
+                       << "  Q_max=" << Q_max << " W/m2"
+                       << "  I_B_max=" << I_B_max << " kW/m"
+                       << "  L_max=" << L_max << " m\n";
+    }
 
     if (m_params.write_fire_stats_csv) {
         static bool csv_header_written = false;
@@ -527,12 +536,13 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
     if (fire_flame_temp) {
         fill_flame_temperature(*fire_flame_temp, *fire_fireline_intensity, *fire_phi,
                                m_params.flame_temp_method, h_fuel_Jkg, M_f,
-                               m_params.flame_temp_T_amb);
+                               m_params.flame_temp_T_amb, m_params.fire_debug);
     }
 
     if (fire_flame_tilt) {
         fill_flame_tilt_angle(*fire_flame_tilt, *fire_fireline_intensity, *fire_wind_eff,
-                              m_params.flame_tilt_rho_air, m_params.flame_tilt_T_amb);
+                              m_params.flame_tilt_rho_air, m_params.flame_tilt_T_amb,
+                              m_params.fire_debug);
     }
 }
 
