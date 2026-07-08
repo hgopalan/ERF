@@ -337,7 +337,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                   m_current_time,
                                   m_current_time - dt);
         // fill_boundary after any phi modification to propagate ghost cells
-        amrex::fill_boundary(*fire_phi, m_fg.geom);
+        //amrex::FillBoundary(*fire_phi, m_fg.geom);
+        fire_phi->FillBoundary(m_fg.geom.periodicity());        
     }
 
     compute_ros_field(*fire_ros, *fire_wind_eff, *fire_slopes, m_rc);
