@@ -101,6 +101,24 @@ void FireLayer::initialize(const ERF& erf,
         }
     }
 
+    // Phase 12: Allocate per-cell acceleration state for temporal model.
+    // Only allocated when both enable and use_temporal are true.
+    // When disabled or size-based, fire_accel_state stays nullptr.
+    if (m_params.accel.enable && m_params.accel.use_temporal) {
+        fire_accel_state = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 3, 0);
+        fire_accel_state->setVal(0.0_rt);
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Fire acceleration enabled (temporal model): "
+                           << "A_point=" << m_params.accel.A_point << " 1/min, "
+                           << "A_line=" << m_params.accel.A_line << " 1/min\n";
+        }
+    } else if (m_params.accel.enable) {
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Fire acceleration enabled (size-based model): "
+                           << "L_acc=" << m_params.accel.L_acc << " m\n";
+        }
+    }
+
     FuelModelParams fp = get_anderson_fuel_params(fire_params.fuel_model_id);
     fire_fuel_load->setVal((fp.w_d1+fp.w_d10+fp.w_d100+fp.w_lh+fp.w_lw)*4.88243);
     m_fuel_load_initial_kg_m2 = (fp.w_d1+fp.w_d10+fp.w_d100+fp.w_lh+fp.w_lw)*4.88243_rt;
@@ -384,6 +402,16 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     }
 
     fire_phi->FillBoundary(m_fg.geom.periodicity());
+
+    // Phase 12: Apply fire acceleration scaling to ROS.
+    // Reduces ROS for small fires not yet at quasi-steady-state.
+    // Returns immediately when accel.enable = false (zero cost when disabled).
+    if (m_params.accel.enable && fire_ros && fire_phi) {
+        apply_fire_acceleration(*fire_ros, *fire_phi, m_fg.geom,
+                                m_params.accel, dt,
+                                fire_accel_state.get(),
+                                m_params.fire_debug);
+    }
 
     int n_substeps = advance_fire_subcycle(*fire_phi, *fire_spread_vec,
                                            *fire_disp_accum,

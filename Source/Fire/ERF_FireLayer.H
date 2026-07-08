@@ -23,6 +23,7 @@
 #include <ERF_FuelBlending.H>
 #include <ERF_IgnitionSchedule.H>
 #include <ERF_PolygonIgnition.H>
+#include <ERF_FireAcceleration.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -489,6 +490,12 @@ private:
     // comp 0: lofting height H_z [m], comp 1: brand count,
     // comp 2: max landing dist [m], comp 3: active spot flag
     std::unique_ptr<amrex::MultiFab>         fire_albini_data;
+     
+    // Phase 12: Per-cell acceleration state for temporal model (3 components).
+    // comp 0: ROS_current [m/s], comp 1: elapsed_time [s], comp 2: ROS_equilibrium [m/s].
+    // Only allocated when accel.enable = true AND accel.use_temporal = true.
+    // nullptr when acceleration is disabled or size-based model is used.
+    std::unique_ptr<amrex::MultiFab>  fire_accel_state;
      
     // Phase 10: Per-cell fuel model (non-null when fuel_map.file is non-empty)
     std::unique_ptr<amrex::MultiFab>         fire_fuel_model;  // integer code stored as Real
