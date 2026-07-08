@@ -21,6 +21,8 @@
 #include <ERF_FuelMap.H>
 #include <ERF_FireBreak.H>
 #include <ERF_FuelBlending.H>
+#include <ERF_IgnitionSchedule.H>
+#include <ERF_PolygonIgnition.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -492,6 +494,10 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_fuel_model;  // integer code stored as Real
     amrex::Gpu::DeviceVector<int>            m_d_fuel_codes;   // device copy of integer codes
     bool                                     m_has_spatial_fuel = false;
+     
+    // Phase 11: Multi-ignition schedule runtime state
+    IgnitionSchedule  m_ignition_schedule;   // loaded from ignition_schedule_file
+    bool              m_has_schedule = false;
      
     // Phase 6: fire-atmosphere coupling MultiFabs
     // Coarsened fire fluxes on the atmospheric level-0 grid (nx × ny × 1).

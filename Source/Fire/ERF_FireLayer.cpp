@@ -185,6 +185,40 @@ void FireLayer::initialize(const ERF& erf,
         }
     }
 
+    // Phase 11: Polygon ignition (initial fire perimeter from vertex file).
+    // Applied at t=0 as part of initialization, before the schedule.
+    if (!m_params.ignition.polygon_file.empty()) {
+        std::vector<amrex::Real> xs, ys;
+        // Vertex file is read on rank 0 only; broadcast to all ranks inside
+        // read_polygon_vertices() before returning.
+        read_polygon_vertices(m_params.ignition.polygon_file, xs, ys);
+        if (m_params.ignition.polygon_type == "polyline") {
+            init_phi_from_polyline(*fire_phi, m_fg.geom, xs, ys,
+                                   m_params.ignition.polyline_width);
+        } else {
+            init_phi_from_polygon(*fire_phi, m_fg.geom, xs, ys);
+        }
+        fire_phi->FillBoundary(m_fg.geom.periodicity());
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Polygon ignition applied from '"
+                           << m_params.ignition.polygon_file << "' ("
+                           << m_params.ignition.polygon_type << ")\n";
+        }
+    }
+
+    // Phase 11: Load ignition schedule if specified.
+    // File reading and broadcast are handled inside load_ignition_schedule().
+    if (!m_params.ignition.ignition_schedule_file.empty()) {
+        load_ignition_schedule(m_params.ignition.ignition_schedule_file,
+                               m_ignition_schedule);
+        m_has_schedule = true;
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Loaded ignition schedule: "
+                           << m_ignition_schedule.events.size()
+                           << " events\n";
+        }
+    }
+
     m_fp.phi_threshold      = fire_params.farsite_phi_threshold;
     m_fp.coeff_a            = fire_params.farsite_coeff_a;
     m_fp.coeff_b            = fire_params.farsite_coeff_b;
@@ -293,6 +327,17 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             amrex::Print() << "[FIRE DEBUG] Updated Rothermel coefficients with avg moisture: "
                            << "M_1hr=" << avg1 << " M_10hr=" << avg10
                            << " M_100hr=" << avg100 << " R0=" << m_rc.R0 << " m/s" << std::endl;
+    }
+
+    // Phase 11: Apply any scheduled ignition events due this timestep.
+    // Time window: (m_current_time - dt, m_current_time].
+    if (m_has_schedule && fire_phi) {
+        apply_scheduled_ignitions(*fire_phi, m_fg.geom,
+                                  m_ignition_schedule,
+                                  m_current_time,
+                                  m_current_time - dt);
+        // fill_boundary after any phi modification to propagate ghost cells
+        amrex::fill_boundary(*fire_phi, m_fg.geom);
     }
 
     compute_ros_field(*fire_ros, *fire_wind_eff, *fire_slopes, m_rc);
