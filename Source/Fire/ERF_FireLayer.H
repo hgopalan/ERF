@@ -32,6 +32,10 @@
 #include <ERF_MacArthurModel.H>
 // Phase 15: BEHAVE multi-class Rothermel
 #include <ERF_BehaveModel.H>
+// Level-set propagation headers
+#include <ERF_NumericalSchemes.H>
+#include <ERF_Reinitialize.H>
+#include <ERF_LevelSetAdvection.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -539,6 +543,9 @@ private:
     amrex::Real                              m_current_time = 0.0;
     amrex::Real                              m_dt_atm       = 0.0;
     int                                      m_step         = 0;  ///< Simulation step counter
+
+    // Level-set propagation tracking
+    int                                      m_levelset_subcycle_count = 0;  ///< Counts fire subcycles for reinit scheduling
 
     // Vertical levels
     int                                      m_nz = 0;

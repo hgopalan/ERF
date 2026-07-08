@@ -19,7 +19,7 @@ void FireLayer::initialize(const ERF& erf,
                             erf.Geom(0), fire_params.grid_ratio);
     m_nz = erf.Geom(0).Domain().length(2);
 
-    fire_phi        = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 1);
+    fire_phi        = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 3);
     fire_wind_ref   = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 0);
     fire_wind_eff   = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 0);
     fire_wind_extract_z = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
@@ -531,13 +531,58 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                 m_params.fire_debug);
     }
 
-    int n_substeps = advance_fire_subcycle(*fire_phi, *fire_spread_vec,
-                                           *fire_disp_accum,
-                                           *fire_arrival_time,
-                                           *fire_wind_eff, *fire_ros,
-                                           m_fg.geom, dt,
-                                           m_current_time,
-                                           m_fp);
+    int n_substeps = 0;
+    
+    if (m_params.propagation_method == "levelset") {
+        // --- Level-set path ---
+        // CFL-based subcycling (same structure as FARSITE)
+        amrex::Real time_remaining = dt;
+        while (time_remaining > 1.0e-14) {
+            amrex::Real max_ros = fire_ros->max(0);
+            amrex::Real dt_ls   = (max_ros > 1.0e-10)
+                ? m_params.levelset_cfl * std::min(m_fg.geom.CellSize()[0],
+                                                   m_fg.geom.CellSize()[1]) / max_ros
+                : time_remaining;
+            dt_ls = std::min(dt_ls, time_remaining);
+
+            advect_levelset_weno5z_rk3(*fire_phi, *fire_wind_eff,
+                                       *fire_ros, m_fg.geom, dt_ls);
+            fire_phi->FillBoundary(m_fg.geom.periodicity());
+
+            ++m_levelset_subcycle_count;
+            if (m_levelset_subcycle_count % m_params.levelset_reinit_every == 0) {
+                amrex::Real dtau = (m_params.levelset_reinit_dtau > 0.0)
+                    ? m_params.levelset_reinit_dtau
+                    : 0.5 * std::min(m_fg.geom.CellSize()[0], m_fg.geom.CellSize()[1]);
+                reinitialize_phi(*fire_phi, m_fg.geom,
+                                 m_params.levelset_reinit_iters, dtau);
+                fire_phi->FillBoundary(m_fg.geom.periodicity());
+            }
+
+            // Update arrival time for newly burned cells (phi < 0)
+            {
+                const amrex::Real t_now = m_current_time + (dt - time_remaining);
+                for (amrex::MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
+                    auto p  = fire_phi->const_array(mfi);
+                    auto at = fire_arrival_time->array(mfi);
+                    amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) noexcept {
+                        if (p(iv) < 0.0_rt && at(iv) < 0.0_rt) at(iv) = t_now;
+                    });
+                }
+            }
+            time_remaining -= dt_ls;
+        }
+        n_substeps = m_levelset_subcycle_count;
+    } else {
+        // --- Default: FARSITE Lagrangian path (unchanged) ---
+        n_substeps = advance_fire_subcycle(*fire_phi, *fire_spread_vec,
+                                          *fire_disp_accum,
+                                          *fire_arrival_time,
+                                          *fire_wind_eff, *fire_ros,
+                                          m_fg.geom, dt,
+                                          m_current_time,
+                                          m_fp);
+    }
 
     if (m_params.fire_debug) {
         amrex::Print() << "[FIRE DEBUG] Fire front propagation completed with "
