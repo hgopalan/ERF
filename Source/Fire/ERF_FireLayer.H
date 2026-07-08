@@ -30,6 +30,8 @@
 #include <ERF_BalbiModel.H>
 #include <ERF_CheneyGouldModel.H>
 #include <ERF_MacArthurModel.H>
+// Phase 15: BEHAVE multi-class Rothermel
+#include <ERF_BehaveModel.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -66,7 +68,7 @@ class ERF;
  * | fire_curvature | 1     | Terrain curvature (static, at init)          |
  * | fire_ros       | 1     | Rate of spread [m/s]                         |
  * | fire_fuel_load | 1     | Fuel load [kg/m²]                            |
- * | fire_fuel_mc   | 3     | M_1hr, M_10hr, M_100hr [fraction]           |
+ * | fire_fuel_mc   | 5     | M_1hr, M_10hr, M_100hr, M_lh, M_lw [fraction] |
  * | fire_mext      | 1     | Moisture of extinction [fraction] (Phase 4)  |
  * | fire_heat_flux | 1     | Heat flux [W/m²] (Phase 6, stub)             |
  * | fire_spread_vec| 2     | Scratch for FARSITE spread direction (Phase 3)|
@@ -75,6 +77,13 @@ class ERF;
  * | fire_crown_fraction_burned | 1 | Crown fraction burned [0-1] (Phase 9)            |
  * | fire_flame_tilt    | 1 | Flame tilt angle [deg from vertical] (Phase 9)             |
  * | fire_flame_temp    | 1 | Flame temperature [K] (Phase 9)                             |
+ *
+ * **fire_fuel_mc component layout (Phase 15, 5 components):**
+ *   - comp 0: M_1hr      [fraction] — 1-hour dead fuel moisture (single-class path)
+ *   - comp 1: M_10hr     [fraction] — 10-hour dead fuel moisture (single-class path)
+ *   - comp 2: M_100hr    [fraction] — 100-hour dead fuel moisture (single-class path)
+ *   - comp 3: M_lh       [fraction] — Live herbaceous moisture (BEHAVE multi-class path only)
+ *   - comp 4: M_lw       [fraction] — Live woody moisture (BEHAVE multi-class path only)
  */
 class FireLayer
 {
@@ -549,6 +558,10 @@ private:
     BalbiComputed                            m_bc_default;      // Balbi global default (uniform fuel)
     CheneyGouldComputed                      m_cgc;             // Cheney-Gould computed params
     amrex::Gpu::DeviceVector<BalbiComputed>  m_d_balbi_table;   // per-fuel Balbi table (spatial fuel)
+
+    // Phase 15: BEHAVE pre-computed state (set in initialize from domain-avg moisture,
+    // updated in advance when moisture_dynamic = false)
+    BehaveState                              m_bs_default;
 
     // Ignition parameters
     amrex::Real                              m_ignition_x = 0.0;

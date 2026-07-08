@@ -27,7 +27,7 @@ void FireLayer::initialize(const ERF& erf,
     fire_curvature  = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_ros        = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_fuel_load  = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
-    fire_fuel_mc    = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 3, 0);
+    fire_fuel_mc    = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 5, 0);
     fire_mext       = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_heat_flux  = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_spread_vec = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 0);
@@ -131,6 +131,8 @@ void FireLayer::initialize(const ERF& erf,
             mc(iv,0) = fire_params.moisture_1hr;
             mc(iv,1) = fire_params.moisture_10hr;
             mc(iv,2) = fire_params.moisture_100hr;
+            mc(iv,3) = fire_params.moisture_live;  // live herbaceous (Phase 15, new component)
+            mc(iv,4) = fire_params.moisture_live;  // live woody      (Phase 15, new component)
         });
     }
 
@@ -287,6 +289,19 @@ void FireLayer::initialize(const ERF& erf,
                                << "moisture=" << m_params.cheney_gould.moisture
                                << "%, curing=" << m_params.cheney_gould.curing << "\n";
             }
+        } else if (m_params.ros_model == "behave") {
+            // Phase 15: Pre-compute BEHAVE multi-class coefficients.
+            FuelModelParams fp_bh = get_anderson_fuel_params(m_params.fuel_model_id);
+            m_bs_default = compute_behave_state(fp_bh,
+                                                m_params.moisture_1hr,
+                                                m_params.moisture_10hr,
+                                                m_params.moisture_100hr,
+                                                m_params.moisture_live,
+                                                m_params.moisture_live);
+            if (m_params.fire_debug) {
+                amrex::Print() << "[FIRE DEBUG] ROS model: BEHAVE multi-class Rothermel, "
+                               << "R0=" << m_bs_default.r_0 * 0.00508_rt << " m/s\n";
+            }
         } else if (m_params.ros_model == "macarthur") {
             if (m_params.fire_debug) {
                 amrex::Print() << "[FIRE DEBUG] ROS model: MacArthur (1966) Australian formula\n";
@@ -412,6 +427,17 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             cgp_cur.moisture = avg1 * 100.0_rt;  // fraction → percent
             m_cgc = compute_cheney_gould_params(cgp_cur);
         }
+        // Phase 15: Update BEHAVE state when dynamic moisture is enabled.
+        if (m_params.moisture_dynamic && m_params.ros_model == "behave") {
+            FuelModelParams fp_bh = get_anderson_fuel_params(m_params.fuel_model_id);
+            // Domain-average live moisture from components 3 and 4
+            long nc_live = fire_fuel_mc->boxArray().numPts();
+            Real avg_lh  = (nc_live > 0) ? fire_fuel_mc->sum(3) / Real(nc_live) : m_params.moisture_live;
+            Real avg_lw  = (nc_live > 0) ? fire_fuel_mc->sum(4) / Real(nc_live) : m_params.moisture_live;
+            avg_lh = amrex::max(0.30_rt, amrex::min(avg_lh, 2.50_rt));
+            avg_lw = amrex::max(0.30_rt, amrex::min(avg_lw, 2.50_rt));
+            m_bs_default = compute_behave_state(fp_bh, avg1, avg10, avg100, avg_lh, avg_lw);
+        }
     }
 
     // Phase 11: Apply any scheduled ignition events due this timestep.
@@ -438,6 +464,14 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                        d_tbl_ptr, tbl_sz);
     } else if (m_params.ros_model == "cheney_gould") {
         fill_cheney_gould_ros(*fire_ros, *fire_wind_eff, m_cgc);
+    } else if (m_params.ros_model == "behave") {
+        // Phase 15: BEHAVE multi-class Rothermel model
+        FuelModelParams fp_behave = get_anderson_fuel_params(m_params.fuel_model_id);
+        fill_behave_ros(*fire_ros, *fire_wind_eff, *fire_slopes,
+                        fp_behave,
+                        m_bs_default,
+                        m_params.moisture_dynamic ? fire_fuel_mc.get() : nullptr,
+                        m_params.moisture_dynamic);
     } else if (m_params.ros_model == "macarthur") {
         fill_macarthur_ros(*fire_ros, *fire_wind_eff);
     } else {
@@ -657,9 +691,19 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
             int i = iv_f[0], j = iv_f[1];
             Real T_C = T_f(i,j,0) - 273.15_rt;
             Real RH  = RH_f(i,j,0) * 100.0_rt;
+            // Existing 3 dead fuel classes (unchanged)
             mc(i,j,0,0) = advance_fuel_moisture_one_class(mc(i,j,0,0),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_1HR);
             mc(i,j,0,1) = advance_fuel_moisture_one_class(mc(i,j,0,1),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_10HR);
             mc(i,j,0,2) = advance_fuel_moisture_one_class(mc(i,j,0,2),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_100HR);
+            // Phase 15: live fuel moisture (components 3 and 4)
+            // Live fuels respond slowly to atmospheric conditions.
+            // Use TAU_100HR as a lower bound; live moisture is bounded [0.30, 2.50].
+            if (mc.nComp() >= 5) {
+                Real lh_new = advance_fuel_moisture_one_class(mc(i,j,0,3),RH,T_C,0.0_rt,dt_hours,FuelMoistureConst::TAU_100HR);
+                Real lw_new = advance_fuel_moisture_one_class(mc(i,j,0,4),RH,T_C,0.0_rt,dt_hours,FuelMoistureConst::TAU_100HR);
+                mc(i,j,0,3) = amrex::max(0.30_rt, amrex::min(lh_new, 2.50_rt));  // live herba: 30%–250%
+                mc(i,j,0,4) = amrex::max(0.30_rt, amrex::min(lw_new, 2.50_rt));  // live woody: 30%–250%
+            }
             Real dead_load = fp.w_d1+fp.w_d10+fp.w_d100;
             Real sw = dead_load>0.0_rt ? (fp.w_d1*fp.sigma_d1)/dead_load : fp.sigma_d1;
             mext(i,j,0) = compute_moisture_of_extinction(sw);
