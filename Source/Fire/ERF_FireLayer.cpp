@@ -545,7 +545,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 : time_remaining;
             dt_ls = std::min(dt_ls, time_remaining);
 
-            ERF::advect_levelset_weno5z_rk3(*fire_phi, *fire_wind_eff,
+            fire_levelset::advect_levelset_weno5z_rk3(*fire_phi, *fire_wind_eff,
                                             *fire_ros, m_fg.geom, dt_ls);
             fire_phi->FillBoundary(m_fg.geom.periodicity());
 
@@ -554,7 +554,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 amrex::Real dtau = (m_params.levelset_reinit_dtau > 0.0)
                     ? m_params.levelset_reinit_dtau
                     : 0.5 * std::min(m_fg.geom.CellSize()[0], m_fg.geom.CellSize()[1]);
-                ERF::reinitialize_phi(*fire_phi, m_fg.geom,
+                fire_levelset::reinitialize_phi(*fire_phi, m_fg.geom,
                                       m_params.levelset_reinit_iters, dtau);
                 fire_phi->FillBoundary(m_fg.geom.periodicity());
             }
