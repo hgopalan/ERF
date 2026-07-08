@@ -24,6 +24,11 @@
 #include <ERF_IgnitionSchedule.H>
 #include <ERF_PolygonIgnition.H>
 #include <ERF_FireAcceleration.H>
+// Phase 13A: Per-fuel wind height
+#include <ERF_FuelWindHeight.H>
+// Phase 13B: ROS models (forward declarations for now; defined later)
+// #include <ERF_BalbiModel.H>
+// #include <ERF_CheneyGouldModel.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -533,6 +538,16 @@ private:
 
     // Initial fuel load [kg/m²] for diagnostics (Phase 5)
     amrex::Real                              m_fuel_load_initial_kg_m2 = 0.0;
+
+    // Phase 13A: Per-fuel wind height device tables
+    amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcwh;          // fcwh[0..13], device copy
+    amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcz0;          // fcz0[0..13], device copy
+    bool                                     m_use_per_fuel_wind_ht = false;
+
+    // Phase 13B: Pre-computed ROS model coefficients (set in initialize, used in advance)
+    // Note: Forward-declared structs from Balbi and Cheney-Gould models
+    // These will be defined in separate header files (ERF_BalbiModel.H, ERF_CheneyGouldModel.H)
+    // For now, we use placeholder comments; actual members added after Phase 13 model headers created
 
     // Ignition parameters
     amrex::Real                              m_ignition_x = 0.0;
