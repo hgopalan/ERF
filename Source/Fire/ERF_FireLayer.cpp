@@ -249,6 +249,56 @@ void FireLayer::initialize(const ERF& erf,
                                     fire_params.moisture_10hr,
                                     fire_params.moisture_100hr);
 
+    // Phase 13A: Build per-fuel wind height tables and copy to device.
+    // When use_per_fuel_wind_ht = false, all entries equal wind_ref_ht (no-op).
+    m_use_per_fuel_wind_ht = m_params.use_per_fuel_wind_ht;
+    {
+        auto h_fcwh = build_fcwh_table(m_params.wind_ref_ht, m_params.use_per_fuel_wind_ht);
+        auto h_fcz0 = build_fcz0_table();
+        m_d_fcwh.resize(h_fcwh.size());
+        m_d_fcz0.resize(h_fcz0.size());
+        amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_fcwh.begin(), h_fcwh.end(), m_d_fcwh.begin());
+        amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_fcz0.begin(), h_fcz0.end(), m_d_fcz0.begin());
+        if (m_params.fire_debug && m_params.use_per_fuel_wind_ht) {
+            amrex::Print() << "[FIRE DEBUG] Per-fuel wind height enabled. "
+                           << "FM1 fcwh=" << h_fcwh[1] << " m, FM4 fcwh=" << h_fcwh[4] << " m\n";
+        }
+    }
+
+    // Phase 13B: Pre-compute alternative ROS model coefficients.
+    {
+        FuelModelParams fp_ros = get_anderson_fuel_params(m_params.fuel_model_id);
+        if (m_params.ros_model == "balbi") {
+            m_bc_default = compute_balbi_params(fp_ros, m_params.balbi);
+            // Build per-fuel Balbi table when spatial fuel map is active
+            if (m_has_spatial_fuel) {
+                // TODO: Implement build_fuel_balbi_table if per-fuel variation is needed
+                // For now, just use default for all cells
+            }
+            if (m_params.fire_debug) {
+                amrex::Print() << "[FIRE DEBUG] ROS model: Balbi (2009), A_coeff="
+                               << m_bc_default.A_coeff << " m/s, v_b="
+                               << m_bc_default.v_b << " m/s\n";
+            }
+        } else if (m_params.ros_model == "cheney_gould") {
+            m_cgc = compute_cheney_gould_params(m_params.cheney_gould);
+            if (m_params.fire_debug) {
+                amrex::Print() << "[FIRE DEBUG] ROS model: Cheney-Gould (1998), "
+                               << "moisture=" << m_params.cheney_gould.moisture
+                               << "%, curing=" << m_params.cheney_gould.curing << "\n";
+            }
+        } else if (m_params.ros_model == "macarthur") {
+            if (m_params.fire_debug) {
+                amrex::Print() << "[FIRE DEBUG] ROS model: MacArthur (1966) Australian formula\n";
+            }
+        } else {
+            // Default: Rothermel — already initialised above via m_rc
+            if (m_params.fire_debug) {
+                amrex::Print() << "[FIRE DEBUG] ROS model: Rothermel (1972)\n";
+            }
+        }
+    }
+
     amrex::Print() << "[FIRE] FireLayer initialized: C=" << m_fg.C
                    << ", fuel_model=" << fire_params.fuel_model_id
                    << ", grid=" << m_fg.ba.size() << " boxes" << std::endl;
@@ -286,7 +336,10 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         amrex::Print() << "[FIRE DEBUG] Starting fire advance step with dt=" << dt << std::endl;
 
     fill_fire_wind_from_interpolation(*fire_wind_ref, *fire_wind_extract_z, xvel, yvel, z_phys_cc,
-                                      m_fg, m_params.wind_ref_ht, m_nz);
+                                      m_fg, m_params.wind_ref_ht, m_nz,
+                                      m_use_per_fuel_wind_ht ? fire_fuel_model.get() : nullptr,
+                                      m_use_per_fuel_wind_ht ? m_d_fcwh.data() : nullptr,
+                                      m_use_per_fuel_wind_ht ? 13 : 0);
     if (m_params.fire_debug) {
         amrex::Print() << "[FIRE DEBUG] Wind extraction completed. Max reference wind: "
                        << fire_wind_ref->max(0) << " m/s" << std::endl;
@@ -345,6 +398,20 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             amrex::Print() << "[FIRE DEBUG] Updated Rothermel coefficients with avg moisture: "
                            << "M_1hr=" << avg1 << " M_10hr=" << avg10
                            << " M_100hr=" << avg100 << " R0=" << m_rc.R0 << " m/s" << std::endl;
+        
+        // Phase 13B: Moisture coupling for Balbi and Cheney-Gould models
+        if (m_params.moisture_dynamic && m_params.ros_model == "balbi") {
+            // Recompute Balbi coefficients with updated moisture
+            FuelModelParams fp_balbi = get_anderson_fuel_params(m_params.fuel_model_id);
+            fp_balbi.Mx = avg1;  // Use 1-hr moisture as representative
+            m_bc_default = compute_balbi_params(fp_balbi, m_params.balbi);
+        }
+        if (m_params.moisture_dynamic && m_params.ros_model == "cheney_gould") {
+            // Update Cheney-Gould with current 1-hr moisture converted to percent
+            FireParams::CheneyGouldParams cgp_cur = m_params.cheney_gould;
+            cgp_cur.moisture = avg1 * 100.0_rt;  // fraction → percent
+            m_cgc = compute_cheney_gould_params(cgp_cur);
+        }
     }
 
     // Phase 11: Apply any scheduled ignition events due this timestep.
@@ -359,7 +426,24 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         fire_phi->FillBoundary(m_fg.geom.periodicity());        
     }
 
-    compute_ros_field(*fire_ros, *fire_wind_eff, *fire_slopes, m_rc);
+    // Phase 13B: ROS model dispatch.
+    // All models write into fire_ros [m/s].
+    // Rothermel is the default (ros_model = "rothermel" or unrecognised string).
+    if (m_params.ros_model == "balbi") {
+        const BalbiComputed* d_tbl_ptr = m_d_balbi_table.empty() ? nullptr : m_d_balbi_table.data();
+        int tbl_sz = static_cast<int>(m_d_balbi_table.size());
+        fill_balbi_ros(*fire_ros, *fire_wind_eff, *fire_slopes,
+                       m_bc_default,
+                       m_has_spatial_fuel ? fire_fuel_model.get() : nullptr,
+                       d_tbl_ptr, tbl_sz);
+    } else if (m_params.ros_model == "cheney_gould") {
+        fill_cheney_gould_ros(*fire_ros, *fire_wind_eff, m_cgc);
+    } else if (m_params.ros_model == "macarthur") {
+        fill_macarthur_ros(*fire_ros, *fire_wind_eff);
+    } else {
+        // Default: Rothermel (1972) — existing code path, unchanged
+        compute_ros_field(*fire_ros, *fire_wind_eff, *fire_slopes, m_rc);
+    }
     if (m_params.fire_debug) {
         // Compute masked ROS diagnostics (only for burning cells where phi < 0)
         amrex::Real ros_max_burning = 0.0_rt;
