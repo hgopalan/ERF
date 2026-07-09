@@ -1,0 +1,76 @@
+# Full MRF enhancements test
+# Auto-generated from canonical template
+
+erf.prob_name = "ABL"
+stop_time = 10000
+
+amrex.fpe_trap_invalid = 0
+
+fabarray.mfiter_tile_size = 1024 1024 1024
+
+# PROBLEM SIZE & GEOMETRY
+geometry.prob_extent = 8000  8000  2048
+amr.n_cell           =  8   8   64
+amrex.max_grid_size_z = 128
+geometry.is_periodic = 1 1 0
+
+# MOST BOUNDARY CONDITIONS
+zlo.type = "surface_layer"
+erf.most.z0   = 0.1
+erf.most.zref = 48.0
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.24
+
+zhi.type = "SlipWall"
+zhi.theta_grad = 0.003
+erf.fixed_dt = 0.5
+
+# DIAGNOSTICS & VERBOSITY
+erf.sum_interval   = 1
+erf.v              = 1
+amr.v              = 1
+
+# REFINEMENT / REGRIDDING
+amr.max_level       = 0
+
+# CHECKPOINT FILES
+erf.check_file      = chk_full_enhancements
+erf.check_int       = -1
+
+# DATA COLLECTION
+erf.data_log    = hist.dat profiles.dat
+erf.profile_int = 10
+
+# PLOTFILES
+erf.plot_file_1     = plt_full_enhancements
+erf.plot_int_1      = 100
+erf.plot_vars_1     = x_velocity y_velocity z_velocity theta
+
+# SOLVER CHOICE
+erf.use_gravity = true
+
+erf.molec_diff_type = "None"
+# When using a PBL model, LES closure should be disabled
+erf.les_type        = "None"
+erf.Cs = 0.11
+erf.theta_ref = 300.0
+
+# INITIALIZATION - from sounding file
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+erf.input_sounding_file = "input_sounding_MRF_full_enhancements"
+
+# PBL CONFIGURATION - MRF
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = false
+
+# CORIOLIS EFFECT
+erf.latitude = 45.0
+erf.use_coriolis = true
+
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 10.0 0.0 0.0
