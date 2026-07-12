@@ -643,6 +643,7 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
                 K_turb(i, j, k, EddyDiff::Q_v)     = Real(0);
                 K_turb(i, j, k, EddyDiff::HGAMT_v) = Real(0);
                 K_turb(i, j, k, EddyDiff::HGAMQ_v) = Real(0);
+                K_turb(i, j, k, EddyDiff::HGAMM_v) = Real(0);
                 K_turb(i, j, k, EddyDiff::Turb_lengthscale) = Real(0);
                 return;
             }
@@ -839,6 +840,8 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
                 K_turb(i, j, k, EddyDiff::HGAMT_v) = Real(0);
                 K_turb(i, j, k, EddyDiff::HGAMQ_v) = Real(0);
             }
+            // HGAMM_v is YSU-specific; MRF does not use momentum counter gradient per Hong & Pan (1996)
+            K_turb(i, j, k, EddyDiff::HGAMM_v) = Real(0);
         });
 
         // FOEXTRAP top and bottom ghost cells
@@ -849,12 +852,14 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
             K_turb(i, j, klo-1, EddyDiff::Q_v    ) = K_turb(i, j, klo, EddyDiff::Q_v    );
             K_turb(i, j, klo-1, EddyDiff::HGAMT_v) = K_turb(i, j, klo, EddyDiff::HGAMT_v);
             K_turb(i, j, klo-1, EddyDiff::HGAMQ_v) = K_turb(i, j, klo, EddyDiff::HGAMQ_v);
+            K_turb(i, j, klo-1, EddyDiff::HGAMM_v) = K_turb(i, j, klo, EddyDiff::HGAMM_v);
             K_turb(i, j, klo-1, EddyDiff::Turb_lengthscale) = K_turb(i, j, klo, EddyDiff::Turb_lengthscale);
             K_turb(i, j, khi+1, EddyDiff::Mom_v  ) = K_turb(i, j, khi, EddyDiff::Mom_v  );
             K_turb(i, j, khi+1, EddyDiff::Theta_v) = K_turb(i, j, khi, EddyDiff::Theta_v);
             K_turb(i, j, khi+1, EddyDiff::Q_v    ) = K_turb(i, j, khi, EddyDiff::Q_v    );
             K_turb(i, j, khi+1, EddyDiff::HGAMT_v) = K_turb(i, j, khi, EddyDiff::HGAMT_v);
             K_turb(i, j, khi+1, EddyDiff::HGAMQ_v) = K_turb(i, j, khi, EddyDiff::HGAMQ_v);
+            K_turb(i, j, khi+1, EddyDiff::HGAMM_v) = K_turb(i, j, khi, EddyDiff::HGAMM_v);
             K_turb(i, j, khi+1, EddyDiff::Turb_lengthscale) = K_turb(i, j, khi, EddyDiff::Turb_lengthscale);
         });
     }// mfi

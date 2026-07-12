@@ -29,6 +29,23 @@ ComputeDiffusivityYSU (const MultiFab& xvel,
       Further Modifications from S.-Y. Hong, Q. J. R. Meteorol. Soc., 2010 [H10]
 
       Implementation follows WRF as of early 2024 with some simplifications
+
+      COUNTER GRADIENT (NONLOCAL) MIXING:
+      -----------------------------------
+      YSU includes explicit counter gradient (nonlocal) transport terms in the momentum,
+      heat, and moisture equations. These terms represent transport by large-scale eddies
+      that extend across the PBL depth and are particularly important for unstable
+      convective boundary layers.
+
+      Current Implementation Notes:
+      - Currently supports stable boundary layer conditions only
+      - Counter gradient for momentum (HGAMM_v) structure is prepared but set to zero
+        pending implementation of unstable PBL support
+      - When unstable support is added, HGAMM_v will follow Hong et al. (2006) Appendix A:
+        HGAMM = -const_c * u_* / w_*  where:
+        * const_c is the momentum counter gradient coefficient
+        * u_* is the friction velocity
+        * w_* is the convective velocity scale
     */
 
     const Real most_zref = SurfLayer->get_zref(level);
@@ -157,7 +174,9 @@ ComputeDiffusivityYSU (const MultiFab& xvel,
         });
 
         // -- Compute nonlocal/countergradient mixing parameters --
-        // Not included for stable so nothing to do until unstable treatment is added
+        // Counter gradient terms represent nonlocal transport by large-scale eddies
+        // Currently for stable conditions, these terms are zero
+        // HGAMM_v (momentum counter gradient) will be added when unstable support is implemented
 
         // -- Compute entrainment parameters --
         // 0 for stable so nothing to do?
@@ -244,6 +263,10 @@ ComputeDiffusivityYSU (const MultiFab& xvel,
             K_turb(i,j,k,EddyDiff::Mom_v) = std::max(std::min(K_turb(i,j,k,EddyDiff::Mom_v) ,rhoKmax), rhoKmin);
             K_turb(i,j,k,EddyDiff::Theta_v) = std::max(std::min(K_turb(i,j,k,EddyDiff::Theta_v) ,rhoKmax), rhoKmin);
             K_turb(i,j,k,EddyDiff::Turb_lengthscale) = pblh_arr(i,j,0);
+
+            // Initialize counter gradient terms to zero for stable PBL conditions
+            // HGAMM_v (momentum counter gradient) will be computed when unstable support is added
+            K_turb(i,j,k,EddyDiff::HGAMM_v) = Real(0);
         });
 
         // HACK set bottom ghost cell to 1st cell
@@ -252,6 +275,7 @@ ComputeDiffusivityYSU (const MultiFab& xvel,
             if (k==-1) {
                 K_turb(i,j,k,EddyDiff::Mom_v) = K_turb(i,j,0,EddyDiff::Mom_v);
                 K_turb(i,j,k,EddyDiff::Theta_v) = K_turb(i,j,0,EddyDiff::Theta_v);
+                K_turb(i,j,k,EddyDiff::HGAMM_v) = K_turb(i,j,0,EddyDiff::HGAMM_v);
             }
         });
     } // mfi
