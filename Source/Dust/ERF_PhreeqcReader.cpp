@@ -1,6 +1,8 @@
 #ifdef ERF_USE_DUST
 
 #include <ERF_PhreeqcReader.H>
+#include <ERF_DustParams.H>
+#include <ERF_DustLayer.H>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -9,24 +11,6 @@
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Gpu.H>
 #include <AMReX_Print.H>
-
-// Forward declarations - these must be defined in DustLayer context
-struct DustGrid {
-    amrex::BoxArray ba;
-    amrex::DistributionMapping dm;
-};
-
-struct DustParams {
-    std::string phreeqc_output_file;
-    std::string phreeqc_crust_var;
-    std::string phreeqc_silt_var;
-    std::string phreeqc_efflor_var;
-    std::string phreeqc_supp_var;
-    std::string phreeqc_metal_var;
-    amrex::Real alpha_crust;
-    amrex::Real alpha_efflor;
-    amrex::Real phreeqc_update_interval_s;
-};
 
 using namespace amrex;
 
