@@ -171,6 +171,15 @@ function(build_erf_lib erf_lib_name)
     target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_PARTICLES)
   endif()
 
+  ########################## DUST ##################################
+  if(ERF_ENABLE_DUST)
+    target_sources(${erf_lib_name} PRIVATE
+                   ${SRC_DIR}/Dust/ERF_DustLayer.cpp
+                   ${SRC_DIR}/Dust/ERF_PhreeqcReader.cpp)
+    target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/Dust>)
+    target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_DUST)
+  endif()
+
   if(ERF_ENABLE_FFT)
     target_sources(${erf_lib_name} PRIVATE
                    ${SRC_DIR}/LinearSolvers/ERF_SolveWithFFT.cpp)
@@ -547,6 +556,7 @@ function(build_erf_lib erf_lib_name)
   target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/BoundaryConditions>)
   target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/DataStructs>)
   target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/Diffusion>)
+  target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/Dust>)
   target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/EB>)
   target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/Initialization>)
   target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/IO>)

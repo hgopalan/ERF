@@ -1,0 +1,7 @@
+# Dust module (ERF-Dust)
+# Phase 3-4 implementation
+
+ifeq ($(USE_DUST), TRUE)
+  CEXE_sources += ERF_DustLayer.cpp
+  CEXE_sources += ERF_PhreeqcReader.cpp
+endif
