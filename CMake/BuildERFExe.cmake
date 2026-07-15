@@ -286,7 +286,8 @@ function(build_erf_lib erf_lib_name)
       ${SRC_DIR}/LNG/ERF_LNGPrerequisites.cpp
       ${SRC_DIR}/LNG/ERF_LNGLayer.cpp
     )
-    target_include_directories(${erf_lib_name} PRIVATE ${SRC_DIR}/LNG)
+    #target_include_directories(${erf_lib_name} PRIVATE ${SRC_DIR}/LNG)
+    target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${SRC_DIR}/LNG>)
     target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_LNG)
     message(STATUS "ERF-LNG: hazardous gas dispersion module ENABLED")
   endif()
