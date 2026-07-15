@@ -185,6 +185,12 @@ struct LNGParams {
     ///          Phase 4: wind at zref is interpolated from ATM field and used for evaporation.
     amrex::Real zref = 10.0;
     
+    /// Aerodynamic roughness length over LNG pool [m]
+    /// @details Used in mass transfer coefficient calculation: k_mass ~ u* / ln(z_ref/z0).
+    ///          Brighton (1990): smooth liquid surfaces ~0.01 m. Typical range 0.001–0.1 m.
+    ///          Phase 2: directly affects evaporation flux magnitude.
+    amrex::Real z0_lng = 0.01;
+    
     /** @} */
     
     /**
@@ -299,6 +305,7 @@ struct LNGParams {
         pp.query("grid_ratio", grid_ratio);
         pp.query("atm_feedback", atm_feedback);
         pp.query("zref", zref);
+        pp.query("z0_lng", z0_lng);
         
         // Test placeholders
         pp.query("test_wind_speed", test_wind_speed);

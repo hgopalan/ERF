@@ -3,16 +3,20 @@
  * @brief LNG container class implementation
  * @details
  * Implements LNGLayer methods for grid construction, MultiFab allocation,
- * and timestep cycling (all stubs in Phase 1).
+ * and timestep cycling. Phase 1 is zero-physics stub; Phase 2 adds evaporation.
+ * @note Phase 2: pool evaporation model, pool depletion, mass tracking
  */
 
 #include "ERF_LNGLayer.H"
 #include "ERF_LNGPrerequisites.H"
 #include "ERF_LNGStatsOutput.H"
+#include "ERF_LNGEvaporation.H"
+#include "ERF_LNGPool.H"
 #include "ERF.H"
 #include <AMReX_MultiFab.H>
 #include <AMReX_Print.H>
 #include <cmath>
+#include <iomanip>
 
 void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
 {
@@ -93,12 +97,45 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
         });
     }
     
+    // Phase 2: Set atmospheric placeholders and initialize pool tracking
+    m_lg_z0 = params.z0_lng;
+    
+    // Set pool center (or use domain center if -1)
+    if (m_pool_cx < 0.0 || m_pool_cy < 0.0) {
+       m_pool_cx = 0.5 * (prob_domain.lo(0) + prob_domain.hi(0));
+       m_pool_cy = 0.5 * (prob_domain.lo(1) + prob_domain.hi(1));
+    }
+    
+    // Set atmospheric placeholders (Phase 4 will replace with live extraction)
+    m_lng_ustar->setVal(params.test_ustar);
+    m_lng_tsfc->setVal(params.test_surf_temp_K);
+    
+    // Compute initial pool diagnostics for debug output
+    amrex::Real pool_mass_init = compute_pool_mass(*m_lng_pool_depth, geom_lng, params.rho_LNG);
+    amrex::Real pool_area_init = compute_pool_area(*m_lng_pool_mask, geom_lng);
+    
+    // Phase 2 initialization debug output
+    if (params.lng_debug || params.verbose >= 1) {
+       amrex::Print() << "[LNG DEBUG] Phase 2: pool evaporation model initialized\n"
+                      << "[LNG DEBUG] Phase 2:   pool_centre=(" << m_pool_cx << ", " << m_pool_cy << ") m\n"
+                      << "[LNG DEBUG] Phase 2:   pool_area_init=" << pool_area_init << " m^2  "
+                      << "pool_depth_init=" << params.pool_depth_init_m << " m\n"
+                      << "[LNG DEBUG] Phase 2:   pool_mass_init=" << pool_mass_init << " kg\n"
+                      << "[LNG DEBUG] Phase 2:   rho_LNG=" << params.rho_LNG << " kg/m^3  "
+                      << "Hv=" << params.Hv_LNG << " J/kg  "
+                      << "rho_vapor_ref=" << params.rho_vapor_ref << " kg/m^3\n"
+                      << "[LNG DEBUG] Phase 2:   test_ustar=" << params.test_ustar << " m/s  "
+                      << "test_surf_temp=" << params.test_surf_temp_K << " K\n"
+                      << "[LNG DEBUG] Phase 2:   z0_lng=" << m_lg_z0 << " m  zref=" << params.zref << " m\n"
+                      << "[LNG DEBUG] Phase 2:   evap model: k_mass = u* * kappa / (Sc^(2/3) * ln(zref/z0))\n";
+    }
+    
     // Write CSV diagnostic header
     write_lng_stats_header(params.lng_diag_file);
     
     // Print per-step debug header if enabled
     if (params.lng_debug) {
-       int pool_cells = amrex::ReduceSum(*m_lng_pool_mask, 0,
+      int pool_cells = amrex::ReduceSum(*m_lng_pool_mask, 0,
             [=] (amrex::Box const& bx, amrex::Array4<amrex::Real const> const& arr) -> int
             {
                 int count = 0;
@@ -107,11 +144,11 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
                 });
                 return count;
             });
-        
-        amrex::Print() << "[LNG DEBUG] Step  " << std::setw(4) << m_step 
+         
+        amrex::Print() << "[LNG DEBUG] Initial Step  " << std::setw(4) << m_step 
                        << "  time=" << std::scientific << std::setprecision(3) << m_time 
                        << "  pool_cells=" << pool_cells
-                       << "  evap_flux_max=0.000e+00 kg/m^2/s  vapor_conc_max=0.000e+00 kg/m^3\n";
+                       << "  pool_mass=" << pool_mass_init << " kg\n";
     }
 }
 
@@ -123,42 +160,123 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
                        const amrex::Geometry* geom_atm,
                        int nz)
 {
-    // Phase 1 stub: no physics, just housekeeping
+    // Phase 2: Full evaporation physics sequence
+    
+    // Step A: Update m_step and m_time
     ++m_step;
     m_time += dt;
     
+    // Step B: Per-step entry debug print
     if (params.lng_debug) {
-        amrex::Print() << "[LNG DEBUG] Step " << std::setw(4) << m_step 
-                       << "  time=" << std::scientific << std::setprecision(3) << m_time 
-                       << "  advance() stub — no physics in Phase 1\n";
+        amrex::Real pool_mass = compute_pool_mass(*m_lng_pool_depth, m_lg.geom, params.rho_LNG);
+        amrex::Real ef_max = m_lng_evap_flux->max(0);
+        amrex::Real vc_max = m_lng_vapor_conc->max(0);
         
-        // Check for NaNs in all MultiFabs
-        bool has_nan = false;
-        if (m_lng_pool_depth->contains_nan(0))   has_nan = true;
-        if (m_lng_pool_mask->contains_nan(0))    has_nan = true;
-        if (m_lng_evap_flux->contains_nan(0))    has_nan = true;
-        if (m_lng_latent_flux->contains_nan(0))  has_nan = true;
-        if (m_lng_vapor_conc->contains_nan(0))   has_nan = true;
-        if (m_lng_wind_ref->contains_nan(0))     has_nan = true;
-        if (m_lng_wind_ref->contains_nan(1))     has_nan = true;
-        
-        if (has_nan) {
-            amrex::Abort("[LNG] NaN detected in MultiFab at step " + std::to_string(m_step));
+        amrex::Print() << "[LNG DEBUG] advance: step=" << m_step 
+                       << "  time=" << std::scientific << std::setprecision(3) << m_time << " s"
+                       << "  dt=" << dt << " s"
+                       << "  pool_mass=" << pool_mass << " kg"
+                       << "  evap_flux_max=" << ef_max << " kg/m^2/s"
+                       << "  vapor_conc_max=" << vc_max << " kg/m^3\n";
+    }
+    
+    // Step C: Set atmospheric state (placeholder path for Phase 2)
+    bool have_atm = (xvel_mf && yvel_mf && z_phys_cc_mf && nz > 0);
+    
+    if (have_atm) {
+        if (params.lng_debug) {
+            amrex::Print() << "[LNG DEBUG] Phase 2: have_atm=true but ATM extraction not yet active (Phase 4)\n";
         }
-        amrex::Print() << "[LNG DEBUG] NaN check PASSED\n";
+    }
+    
+    // Always use placeholders in Phase 2
+    m_lng_ustar->setVal(params.test_ustar);
+    m_lng_tsfc->setVal(params.test_surf_temp_K);
+    
+    if (params.lng_debug) {
+        amrex::Print() << "[LNG DEBUG] Phase 2: using placeholder u*=" << params.test_ustar
+                       << " m/s  T_sfc=" << params.test_surf_temp_K << " K\n";
+    }
+    
+    // Step D: Apply spill source
+    if (params.spill_rate_kg_s > 0.0 && dt > 0.0) {
+        apply_spill_source(*m_lng_pool_depth, m_lg.geom,
+                           params.spill_rate_kg_s, params.rho_LNG,
+                           params.pool_area_m2, m_pool_cx, m_pool_cy, dt);
+        if (params.lng_debug) {
+            amrex::Print() << "[LNG DEBUG] Phase 2: spill source applied  rate="
+                           << params.spill_rate_kg_s << " kg/s  dt=" << dt << " s\n";
+        }
+    }
+    
+    // Step E: Compute evaporation flux
+    compute_lng_evap_flux(*m_lng_evap_flux, *m_lng_latent_flux,
+                          *m_lng_pool_mask, *m_lng_ustar,
+                          params.zref, m_lg_z0,
+                          params.rho_vapor_ref, params.Hv_LNG,
+                          params.lng_debug);
+    
+    // Step F: Deplete pool from evaporation
+    if (dt > 0.0) {
+        deplete_pool_from_evaporation(*m_lng_pool_depth, *m_lng_evap_flux,
+                                      params.rho_LNG, dt, params.lng_debug);
+    }
+    
+    // Step G: Update pool mask
+    update_pool_mask(*m_lng_pool_mask, *m_lng_pool_depth);
+    
+    // Step H: Compute and print mass budget
+    amrex::Real pool_mass  = compute_pool_mass(*m_lng_pool_depth, m_lg.geom, params.rho_LNG);
+    amrex::Real pool_area  = compute_pool_area(*m_lng_pool_mask,  m_lg.geom);
+    amrex::Real ef_max     = m_lng_evap_flux->max(0);
+    amrex::Real ef_sum     = m_lng_evap_flux->sum(0);
+    amrex::Real lf_max     = m_lng_latent_flux->max(0);
+    amrex::Real mask_cells = m_lng_pool_mask->sum(0);
+    
+    if (params.lng_debug) {
+        amrex::Print() << "[LNG DEBUG] Phase 2: step=" << m_step
+                       << "  pool_mass=" << pool_mass << " kg"
+                       << "  pool_area=" << pool_area << " m^2"
+                       << "  active_cells=" << (long)mask_cells << "\n"
+                       << "[LNG DEBUG] Phase 2:   evap_flux_max=" << ef_max << " kg/m^2/s"
+                       << "  evap_flux_sum=" << ef_sum << " kg/m^2/s"
+                       << "  latent_flux_max=" << lf_max << " W/m^2\n";
+    }
+    
+    // Step I: NaN check
+    if (params.lng_debug) {
+        bool nan_found = false;
+        if (m_lng_pool_depth->contains_nan(0))   nan_found = true;
+        if (m_lng_pool_mask->contains_nan(0))    nan_found = true;
+        if (m_lng_evap_flux->contains_nan(0))    nan_found = true;
+        if (m_lng_latent_flux->contains_nan(0))  nan_found = true;
+        if (m_lng_vapor_conc->contains_nan(0))   nan_found = true;
+        if (m_lng_ustar->contains_nan(0))        nan_found = true;
+        if (m_lng_tsfc->contains_nan(0))         nan_found = true;
+        
+        if (nan_found) {
+            amrex::Abort("[LNG] NaN detected in LNG MultiFab at step " + std::to_string(m_step));
+        } else {
+            amrex::Print() << "[LNG DEBUG] NaN check PASSED step=" << m_step << "\n";
+        }
     }
     
     // Verbose=3: print min/max of all fields
     if (params.verbose >= 3) {
-        amrex::Print() << "[LNG DEBUG3]   lng_pool_depth   min=" << std::scientific 
+        amrex::Print() << "[LNG DEBUG3] step=" << m_step << "\n"
+                       << "[LNG DEBUG3]   lng_pool_depth   min=" << std::scientific 
                        << std::setprecision(3) << m_lng_pool_depth->min(0) << "  max=" 
-                       << m_lng_pool_depth->max(0) << "  m\n";
-        amrex::Print() << "[LNG DEBUG3]   lng_evap_flux    min=" << std::scientific 
-                       << std::setprecision(3) << m_lng_evap_flux->min(0) << "  max=" 
-                       << m_lng_evap_flux->max(0) << "  kg/m^2/s\n";
-        amrex::Print() << "[LNG DEBUG3]   lng_vapor_conc   min=" << std::scientific 
-                       << std::setprecision(3) << m_lng_vapor_conc->min(0) << "  max=" 
-                       << m_lng_vapor_conc->max(0) << "  kg/m^3\n";
+                       << m_lng_pool_depth->max(0) << "  m\n"
+                       << "[LNG DEBUG3]   lng_pool_mask    min=" << m_lng_pool_mask->min(0) << "  max=" 
+                       << m_lng_pool_mask->max(0) << "\n"
+                       << "[LNG DEBUG3]   lng_evap_flux    min=" << m_lng_evap_flux->min(0) << "  max=" 
+                       << m_lng_evap_flux->max(0) << "  kg/m^2/s\n"
+                       << "[LNG DEBUG3]   lng_latent_flux  min=" << m_lng_latent_flux->min(0) << "  max=" 
+                       << m_lng_latent_flux->max(0) << "  W/m^2\n"
+                       << "[LNG DEBUG3]   lng_ustar        min=" << m_lng_ustar->min(0) << "  max=" 
+                       << m_lng_ustar->max(0) << "  m/s\n"
+                       << "[LNG DEBUG3]   lng_tsfc         min=" << m_lng_tsfc->min(0) << "  max=" 
+                       << m_lng_tsfc->max(0) << "  K\n";
     }
 }
 
@@ -182,14 +300,16 @@ void LNGLayer::write_output(int nstep, double cur_time, bool is_final)
     }
     
     if (m_params.lng_debug) {
-        // Append CSV row with all zeros (no physics in Phase 1)
-        append_lng_stats(nstep, cur_time, m_params.lng_diag_file,
-                         m_lng_evap_flux.get(), m_lng_tsfc.get(), m_lng_vapor_conc.get());
+        // Phase 2: Append CSV row with pool diagnostics
+        append_lng_stats_phase2(nstep, cur_time, m_params.lng_diag_file,
+                                m_lng_pool_depth.get(), m_lng_pool_mask.get(),
+                                m_lng_evap_flux.get(), m_lng_vapor_conc.get(),
+                                m_lg.geom, m_params.rho_LNG);
+        
+        amrex::Real pool_mass = compute_pool_mass(*m_lng_pool_depth, m_lg.geom, m_params.rho_LNG);
         
         amrex::Print() << "[LNG DEBUG] write_output step=" << nstep 
                        << "  time=" << std::scientific << std::setprecision(3) << cur_time 
-                       << "  total_pool_mass=0.000 kg  total_vapor_mass=0.000 kg\n";
+                       << "  pool_mass=" << pool_mass << " kg\n";
     }
 }
-
-#include <iomanip>

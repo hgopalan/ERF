@@ -1,25 +1,55 @@
 # ERF-LNG Phase 1 build/init regression test
-# Tests: CMake build with ERF_USE_LNG=ON, LNGParams ParmParse,
+# Tests: CMake build with USE_LNG=TRUE, LNGParams ParmParse,
 #        LNGGrid construction, MultiFab allocation, debug output,
-#        advance() stub, write_output() stub, CSV header creation.
+#        advance() physics, write_output() CSV, and ATM coupling stub.
+# 
+# This test uses a neutral ABL atmospheric setup to validate that LNG
+# can be initialized alongside a realistic atmospheric environment,
+# preparing for Phase 3 (ATM coupling) and Phase 4 (wind extraction).
 
+# ── ERF ATM configuration (from DustCriticalMaterials) ─────────────────
+erf.prob_name = "ABL"
 max_step = 5
-stop_time = 5.0
-
-amr.n_cell = 16 16 8
 amr.max_level = 0
-amr.blocking_factor = 8
-
-geometry.prob_lo =  0.  0.  0.
-geometry.prob_hi =  500. 500. 200.
+amrex.fpe_trap_invalid = 0
+fabarray.mfiter_tile_size = 1024 1024 1024
+geometry.prob_extent = 500.0 500.0 200.0
+amr.n_cell = 16 16 8
 geometry.is_periodic = 1 1 0
-
+amrex.max_grid_size_z = 128
+zlo.type = "surface_layer"
+erf.most.z0 = 0.1
+erf.most.zref = 24.0
+erf.most.surf_temp_flux = 0.0
+zhi.type = "SlipWall"
+zhi.theta_grad = 0.003
 erf.fixed_dt = 1.0
 erf.no_substepping = 1
+erf.sum_interval = 1
+erf.v = 1
+amr.v = 1
+erf.check_int = -1
+erf.plot_int_1 = -1
+erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta
+erf.use_gravity = true
+erf.molec_diff_type = "None"
+erf.les_type = "None"
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+erf.input_sounding_file = "sounding_neutral_abl"
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = false
+erf.use_coriolis = true
+erf.latitude = 45.0
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 15.0 0.0 0.0
+erf.transport_scalar = true
 
-erf.init_type = "uniform"
-
-# ── LNG module ─────────────────────────────────────────────────────────
+# ── LNG module — Phase 1 (with Phase 2 parameters) ──────────────────────
 erf.lng.enable            = true
 erf.lng.verbose           = 2
 erf.lng.lng_debug         = true
@@ -35,11 +65,16 @@ erf.lng.n2_mole_fraction  = 0.02
 erf.lng.rho_LNG           = 425.0
 erf.lng.lng_boil_temp_K   = 111.7
 erf.lng.Hv_LNG            = 509000.0
+erf.lng.rho_vapor_ref     = 1.76
 erf.lng.lfl_vol_fraction  = 0.05
 erf.lng.ufl_vol_fraction  = 0.15
 
+erf.lng.z0_lng            = 0.01
+erf.lng.zref              = 24.0
 erf.lng.grid_ratio        = 1
 erf.lng.atm_feedback      = 0.0
+
+# Placeholder ATM state (Phase 4 replaces with live extraction)
 erf.lng.test_wind_speed   = 3.0
 erf.lng.test_surf_temp_K  = 293.15
 erf.lng.test_ustar        = 0.15
@@ -50,4 +85,3 @@ erf.lng.lng_diag_file     = "lng_diag.csv"
 # ── Standard ERF output ─────────────────────────────────────────────────
 amr.plot_int = 5
 amr.plot_file = "plt"
-amr.v = 1

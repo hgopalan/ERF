@@ -2,17 +2,31 @@
 
 ## Purpose
 
-This regression test validates Phase 1 of the ERF-LNG hazardous gas dispersion module:
-- **CMake integration**: Verifies that the ERF code compiles cleanly with `-DERF_ENABLE_LNG=ON`
+This regression test validates **Phase 1** build/initialization and **Phase 2** physics of the ERF-LNG hazardous gas dispersion module:
+
+- **CMake integration**: Verifies that the ERF code compiles cleanly with `-DERF_USE_LNG=ON`
 - **GNUmake integration**: Verifies that the code builds with `USE_LNG=TRUE`
-- **LNGParams ParmParse**: Confirms that all 32 parameters are read from the input file with correct defaults and units
-- **LNGGrid construction**: Tests 2D grid refinement algorithm (extract k=0 ATM slab, refine by `grid_ratio`)
-- **MultiFab allocation**: Verifies that all 13 LNG MultiFabs are allocated without out-of-memory errors
-- **Initialization debug output**: Ensures initialization summary and per-step debug prints appear in stdout
-- **Prerequisite validation**: Tests that all 5 prerequisite checks execute without aborting
-- **Zero-physics stub behavior**: Confirms that `advance()` and coupling methods return without error
-- **CSV header creation**: Validates that `lng_diag.csv` is created with the correct header line
-- **NaN detection**: Ensures no `NaN` or `Inf` appears in any LNG MultiFab after 5 steps
+- **LNGParams ParmParse**: Confirms that all parameters are read from the input file with correct defaults
+- **LNGGrid construction**: Tests 2D grid extraction and refinement algorithm
+- **MultiFab allocation**: Verifies that all LNG MultiFabs allocate correctly
+- **Initialization with ATM**: Tests LNG initialization alongside a neutral ABL atmospheric domain
+- **Phase 2 physics**: Validates evaporation kernel, pool depletion, and debug output
+- **CSV diagnostics**: Confirms that time-series diagnostics are written correctly
+- **NaN detection**: Ensures no NaN/Inf appears in MultiFabs after 5 steps
+
+## Atmospheric Configuration
+
+Unlike Phase 1 (uniform initialization), this test now includes a **neutral ABL** setup to validate LNG in a realistic atmospheric context:
+
+- **Domain**: 500 m × 500 m × 200 m (smaller than CanonicalTests for faster regression)
+- **Grid**: 16 × 16 × 8 cells
+- **PBL type**: MRF with standard settings (Ribcr=0.5, const_b=7.8, sf=0.1)
+- **Wind**: Geostrophic wind = 15 m/s (West-East) at latitude 45°N
+- **Sounding**: Neutral ABL from `sounding_neutral_abl` file
+- **MOST**: z0 = 0.1 m, zref = 24.0 m
+- **Temporal**: 5 steps, dt = 1.0 s, total = 5.0 s
+
+This ATM setup is a scaled-down version of the CanonicalTests configuration, suitable for fast regression testing.
 
 ## How to Build
 
@@ -22,7 +36,7 @@ This regression test validates Phase 1 of the ERF-LNG hazardous gas dispersion m
 cd /path/to/ERF
 mkdir build_lng
 cd build_lng
-cmake -DERF_ENABLE_LNG=ON -DERF_ENABLE_DUST=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake -DERF_USE_LNG=ON -DCMAKE_BUILD_TYPE=Release ..
 make -j 8
 ```
 

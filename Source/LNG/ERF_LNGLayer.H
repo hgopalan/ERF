@@ -172,6 +172,11 @@ private:
     int         m_step = 0;        ///< Number of advance() calls completed
     amrex::Real m_time = 0.0;      ///< Cumulative simulation time [s]
     
+    // Phase 2 pool tracking
+    amrex::Real m_pool_cx = -1.0;  ///< Pool centre x [m]; -1 = domain centre
+    amrex::Real m_pool_cy = -1.0;  ///< Pool centre y [m]; -1 = domain centre
+    amrex::Real m_lg_z0 = 0.01;    ///< Aerodynamic roughness for LNG surface [m]
+    
     // Scalar component index (for coupling to atmosphere)
     int         m_lng_scalar_comp = 0;  ///< Index of LNG scalar in ATM (Phase 3+)
     
