@@ -64,6 +64,11 @@
 #include "ERF_WindFarm.H"
 #endif
 
+#ifdef ERF_USE_LNG
+#include "ERF_LNGParams.H"
+#include "ERF_LNGLayer.H"
+#endif
+
 #include <ERF_RadiationModels.H>
 
 #ifdef ERF_USE_EAMXX_SHOC
@@ -1777,6 +1782,12 @@ private:
     // Vector over levels of Vector over subdomains of solvers
     amrex::Vector<amrex::Vector<std::unique_ptr<amrex::FFT::Poisson<amrex::MultiFab>>>> m_3D_poisson;
     amrex::Vector<amrex::Vector<std::unique_ptr<amrex::FFT::PoissonHybrid<amrex::MultiFab>>>> m_2D_poisson;
+#endif
+
+#ifdef ERF_USE_LNG
+    // LNG module
+    std::unique_ptr<class LNGLayer>  m_lng_layer;
+    struct LNGParams m_lng_params;
 #endif
 
 public:

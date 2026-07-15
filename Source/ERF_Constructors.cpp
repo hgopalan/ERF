@@ -113,6 +113,13 @@ ERF::ERF_shared ()
     initializeWindFarm(nlevs_max);
 #endif
 
+#ifdef ERF_USE_LNG
+    m_lng_params = LNGParams();   // reads erf.lng.* from ParmParse
+    if (m_lng_params.enable) {
+        m_lng_layer = std::make_unique<LNGLayer>();
+    }
+#endif
+
 #ifdef ERF_USE_EAMXX_SHOC
     eamxx_shoc_interface.resize(nlevs_max);
     for (int lev = 0; lev <= max_level; ++lev) {

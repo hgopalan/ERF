@@ -280,6 +280,17 @@ function(build_erf_lib erf_lib_name)
     target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_WSM6_FORT)
   endif()
 
+  if(ERF_ENABLE_LNG)
+    target_sources(${erf_lib_name} PRIVATE
+      ${SRC_DIR}/LNG/ERF_LNGGrid.cpp
+      ${SRC_DIR}/LNG/ERF_LNGPrerequisites.cpp
+      ${SRC_DIR}/LNG/ERF_LNGLayer.cpp
+    )
+    target_include_directories(${erf_lib_name} PRIVATE ${SRC_DIR}/LNG)
+    target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_LNG)
+    message(STATUS "ERF-LNG: hazardous gas dispersion module ENABLED")
+  endif()
+
   if(ERF_ENABLE_WINDFARM)
     target_sources(${erf_lib_name} PRIVATE
       ${SRC_DIR}/Initialization/ERF_InitWindFarm.cpp
