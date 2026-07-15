@@ -1,0 +1,53 @@
+# ERF-LNG Phase 1 build/init regression test
+# Tests: CMake build with ERF_USE_LNG=ON, LNGParams ParmParse,
+#        LNGGrid construction, MultiFab allocation, debug output,
+#        advance() stub, write_output() stub, CSV header creation.
+
+max_step = 5
+stop_time = 5.0
+
+amr.n_cell = 16 16 8
+amr.max_level = 0
+amr.blocking_factor = 8
+
+geometry.prob_lo =  0.  0.  0.
+geometry.prob_hi =  500. 500. 200.
+geometry.is_periodic = 1 1 0
+
+erf.fixed_dt = 1.0
+erf.no_substepping = 1
+
+erf.init_type = "uniform"
+
+# ── LNG module ─────────────────────────────────────────────────────────
+erf.lng.enable            = true
+erf.lng.verbose           = 2
+erf.lng.lng_debug         = true
+
+erf.lng.pool_area_m2      = 100.0
+erf.lng.pool_depth_init_m = 0.01
+erf.lng.spill_rate_kg_s   = 10.0
+
+erf.lng.mol_weight_LNG    = 17.4
+erf.lng.ch4_mole_fraction = 0.90
+erf.lng.c2h6_mole_fraction = 0.08
+erf.lng.n2_mole_fraction  = 0.02
+erf.lng.rho_LNG           = 425.0
+erf.lng.lng_boil_temp_K   = 111.7
+erf.lng.Hv_LNG            = 509000.0
+erf.lng.lfl_vol_fraction  = 0.05
+erf.lng.ufl_vol_fraction  = 0.15
+
+erf.lng.grid_ratio        = 1
+erf.lng.atm_feedback      = 0.0
+erf.lng.test_wind_speed   = 3.0
+erf.lng.test_surf_temp_K  = 293.15
+erf.lng.test_ustar        = 0.15
+
+erf.lng.lng_plot_int      = 2
+erf.lng.lng_diag_file     = "lng_diag.csv"
+
+# ── Standard ERF output ─────────────────────────────────────────────────
+amr.plot_int = 5
+amr.plot_file = "plt"
+amr.v = 1

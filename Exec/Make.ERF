@@ -216,6 +216,14 @@ ifeq ($(USE_WINDFARM), TRUE)
     INCLUDE_LOCATIONS += $(ERF_WINDFARM_GENERALAD_DIR)
 endif
 
+ifeq ($(USE_LNG), TRUE)
+    DEFINES += -DERF_USE_LNG
+    ERF_LNG_DIR = $(ERF_SOURCE_DIR)/LNG
+    include $(ERF_LNG_DIR)/Make.package
+    VPATH_LOCATIONS += $(ERF_LNG_DIR)
+    INCLUDE_LOCATIONS += $(ERF_LNG_DIR)
+endif
+
 ifeq ($(USE_FFT),TRUE)
     DEFINES += -DERF_USE_FFT
 endif

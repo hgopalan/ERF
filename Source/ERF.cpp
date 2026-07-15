@@ -270,6 +270,12 @@ ERF::WriteAtIntermediateTime(int step, double cur_time)
         WriteCheckpointFile();
         if (m_check_per > zero) {last_check_file_time += m_check_per;}
     }
+
+#ifdef ERF_USE_LNG
+    if (m_lng_layer) {
+        m_lng_layer->write_output(step+1, cur_time, /*is_final=*/false);
+    }
+#endif
 }
 
 void
@@ -304,6 +310,12 @@ ERF::WriteAtFinalTime()
         WriteCheckpointFile();
         if (m_check_per > zero) {last_check_file_time += m_check_per;}
     }
+
+#ifdef ERF_USE_LNG
+    if (m_lng_layer) {
+        m_lng_layer->write_output(istep[0], time[0], /*is_final=*/true);
+    }
+#endif
 }
 
 // Called after every coarse timestep
@@ -504,6 +516,12 @@ ERF::post_timestep (int nstep, double time, double dt_lev0)
             WriteLinePlot(filename_minpressure, hurricane_minpressure_vs_time);
         }
     }
+
+#ifdef ERF_USE_LNG
+    if (m_lng_layer) {
+        m_lng_layer->advance(dt_lev0, m_lng_params);
+    }
+#endif
 
 } // post_timestep
 
@@ -1495,6 +1513,12 @@ ERF::InitData_post ()
             WriteEBSurface(grids[finest_level],dmap[finest_level],Geom(finest_level),&EBFactory(finest_level));
         }
     }
+
+#ifdef ERF_USE_LNG
+    if (m_lng_layer) {
+        m_lng_layer->initialize(*this, m_lng_params);
+    }
+#endif
 }
 
 void
