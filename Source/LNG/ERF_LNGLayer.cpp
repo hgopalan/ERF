@@ -75,12 +75,12 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     // Fill pool_mask and pool_depth
     for (amrex::MFIter mfi(*m_lng_pool_mask); mfi.isValid(); ++mfi) {
         const auto& bx = mfi.validbox();
-        auto& pool_mask_arr = (*m_lng_pool_mask)[mfi];
-        auto& pool_depth_arr = (*m_lng_pool_depth)[mfi];
+        auto pool_mask_arr = (*m_lng_pool_mask)[mfi].array();
+        auto pool_depth_arr = (*m_lng_pool_depth)[mfi].array();
         
         amrex::ParallelFor(bx, [=] (amrex::IntVect const& iv) noexcept {
-            amrex::Real x = geom_lng.CellCenter(iv, 0);
-            amrex::Real y = geom_lng.CellCenter(iv, 1);
+            amrex::Real x = geom_lng.CellCenter(iv[0], 0);
+            amrex::Real y = geom_lng.CellCenter(iv[1], 1);
             amrex::Real r = std::sqrt((x - pool_center_x)*(x - pool_center_x) + 
                                       (y - pool_center_y)*(y - pool_center_y));
             if (r <= pool_radius) {
@@ -98,15 +98,16 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     
     // Print per-step debug header if enabled
     if (params.lng_debug) {
-        int pool_cells = 0;
-        for (amrex::MFIter mfi(*m_lng_pool_mask); mfi.isValid(); ++mfi) {
-            const auto& pool_mask_arr = (*m_lng_pool_mask)[mfi];
-            pool_cells += amrex::ReduceOps::Sum<int>::value(
-                amrex::ReduceData<amrex::ReduceOps::Sum<int>>,
-                mfi.validbox(),
-                pool_mask_arr,
-                [=] (amrex::IntVect const& iv) { return (pool_mask_arr(iv) > 0.5) ? 1 : 0; });
-        }
+       int pool_cells = amrex::ReduceSum(*m_lng_pool_mask, 0,
+            [=] (amrex::Box const& bx, amrex::Array4<amrex::Real const> const& arr) -> int
+            {
+                int count = 0;
+                amrex::Loop(bx, [&] (amrex::IntVect const& iv) {
+                    if (arr(iv) > 0.5) ++count;
+                });
+                return count;
+            });
+        
         amrex::Print() << "[LNG DEBUG] Step  " << std::setw(4) << m_step 
                        << "  time=" << std::scientific << std::setprecision(3) << m_time 
                        << "  pool_cells=" << pool_cells

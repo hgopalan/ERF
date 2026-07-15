@@ -26,14 +26,14 @@ void LNGGrid::build(const amrex::BoxArray& atm_ba,
     refined_ba.refine(amrex::IntVect(ratio, ratio, 1));
     
     // Convert to 2D: set nz=1 (k from 0 to 0, which is 1 cell)
-    amrex::BoxArray lng_ba;
+    amrex::BoxList lng_bl;
     for (int i = 0; i < refined_ba.size(); ++i) {
         amrex::Box b = refined_ba[i];
         b.setSmall(2, 0);      // ksmall = 0
         b.setBig(2, 0);        // kbig = 0 (1 cell in z)
-        lng_ba.push_back(b);
+        lng_bl.push_back(b);
     }
-    ba = lng_ba;
+    ba = amrex::BoxArray(lng_bl);
     
     // Create 2D Geometry
     // Physical domain: same x,y as ATM; z spans single LNG cell
@@ -53,8 +53,8 @@ void LNGGrid::build(const amrex::BoxArray& atm_ba,
     lng_domain.setBig(amrex::IntVect(ihi*ratio+1, jhi*ratio+1, 0));
     
     // Create geometry (all periodic in x,y; non-periodic in z)
-    amrex::Array<int> is_periodic = {{1, 1, 0}};  // x,y periodic; z not
-    geom.define(lng_domain, &lng_prob_domain, amrex::CoordSys::Cartesian, is_periodic.data());
+    amrex::Array<int, 3> is_periodic = {{1, 1, 0}};  // x,y periodic; z not
+    geom.define(lng_domain, &lng_prob_domain, amrex::CoordSys::cartesian, is_periodic.data());
     
     // Reuse atmospheric distribution mapping (refined boxes preserve load balance)
     dm = atm_dm;

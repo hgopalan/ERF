@@ -313,7 +313,8 @@ ERF::WriteAtFinalTime()
 
 #ifdef ERF_USE_LNG
     if (m_lng_layer) {
-        m_lng_layer->write_output(istep[0], time[0], /*is_final=*/true);
+        //m_lng_layer->write_output(istep[0], time[0], /*is_final=*/true);
+        m_lng_layer->write_output(istep[0], t_new[0], /*is_final=*/true);
     }
 #endif
 }
