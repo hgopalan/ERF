@@ -1,3 +1,4 @@
 if (ERF_ENABLE_LNG)
+  add_subdirectory(LNG_BuildOnly)
   add_subdirectory(PoolEvap)
 endif()

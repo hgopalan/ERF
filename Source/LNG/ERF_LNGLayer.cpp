@@ -299,13 +299,13 @@ void LNGLayer::write_output(int nstep, double cur_time, bool is_final)
         amrex::Print() << "[LNG] Plotfile write stub at step " << nstep << "\n";
     }
     
+    // Always write CSV row (not gated on lng_debug)
+    append_lng_stats_phase2(nstep, cur_time, m_params.lng_diag_file,
+                            m_lng_pool_depth.get(), m_lng_pool_mask.get(),
+                            m_lng_evap_flux.get(), m_lng_vapor_conc.get(),
+                            m_lg.geom, m_params.rho_LNG);
+    
     if (m_params.lng_debug) {
-        // Phase 2: Append CSV row with pool diagnostics
-        append_lng_stats_phase2(nstep, cur_time, m_params.lng_diag_file,
-                                m_lng_pool_depth.get(), m_lng_pool_mask.get(),
-                                m_lng_evap_flux.get(), m_lng_vapor_conc.get(),
-                                m_lg.geom, m_params.rho_LNG);
-        
         amrex::Real pool_mass = compute_pool_mass(*m_lng_pool_depth, m_lg.geom, m_params.rho_LNG);
         
         amrex::Print() << "[LNG DEBUG] write_output step=" << nstep 
