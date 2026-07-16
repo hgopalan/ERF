@@ -17,11 +17,11 @@ The ERF-LNG module simulates liquefied natural gas (LNG) spill evaporation and v
 
 | Phase | Title | Key Deliverables | Status |
 |-------|-------|------------------|--------|
-| 1 | **Build & Initialize** | Fully compilable stub; parameter reading; grid construction; debug output | **COMPLETE** |
-| 2 | **Evaporation & Pool Spreading** | Heat transfer model; Clausius-Clapeyron; gravity current spreading | **COMPLETE** |
-| 3 | **ATM Coupling (Phase I)** | Energy injection to atmosphere; sensible/latent heat source terms | **COMPLETE** |
-| 4 | **Wind & BL Extraction** | Wind field interpolation at zref; u* mapping; PBL height feedback | **COMPLETE** |
-| 5 | **Flammability Tracking** | LFL/UFL exceedance zones; buoyancy-driven dispersion; plume rise | TODO |
+| 1 | **Build & Initialize** | Fully compilable stub; parameter reading; grid construction; debug output | ✅ COMPLETE |
+| 2 | **Evaporation & Pool Spreading** | Heat transfer model; Clausius-Clapeyron; gravity current spreading | ✅ COMPLETE |
+| 3 | **ATM Coupling (Phase I)** | Energy injection to atmosphere; sensible/latent heat source terms | ✅ COMPLETE |
+| 4 | **Wind & BL Extraction** | Wind field interpolation at zref; u* mapping; PBL height feedback | ✅ COMPLETE |
+| 5 | **Gravity Current & Flammability** | 2D shallow-water PDEs; Richardson transition; LFL/UFL zones | 🔄 IN PROGRESS |
 | 6 | **Output & Visualization** | Plotfile writes; receptor point sampling; CSV output expansion | TODO |
 | 7 | **Regulatory Compliance** | NFPA 59A exclusion zone calculation; threshold mapping | TODO |
 | 8 | **Spill Scheduling** | Time-dependent release rates; inventory tracking; multi-event scenarios | TODO |
@@ -945,9 +945,211 @@ When `lng_debug=true`:
 
 ---
 
-## Phase 5+: Future Work
+---
 
-Phase 5 will implement gravity current spreading and flammability diagnostics using the now-live u* and wind fields extracted in Phase 4. Subsequent phases (6–8) will complete visualization, regulatory compliance output, and advanced release scenarios.
+## Phase 3 Post-Merge Bug Fixes (Commits July 2026)
 
+Seven critical bugs were discovered after Phase 3 PR #164 merge and fixed directly on `ERF-HazGas`:
+
+| Commit | Bug | Symptom | Fix | Rule |
+|--------|-----|---------|-----|------|
+| `73c6db7` | Grid domain off-by-one in coarsening | Coarse grid index out of bounds | Use `(ihi+1)*ratio - 1` instead of `ihi*ratio+1` | Always compute upper coarse bound from `(fine_hi + 1) / ratio - 1` |
+| `5f7b07d` | `geom.CellCenter()` missing for GPU | Compile error: no such method on Geometry | Use `ProbLo + (i+0.5)*dx` in ParallelFor instead | Access cell center via manual formula; no GPU-device Geometry methods |
+| `04c6435` | Injection zeroed by RK sub-stages | Evaporation flux present after advection but zero after full RK step | Place all source terms in `ERF_TI_slow_rhs_pre.H` after `make_sources`, NOT in `apply_to_cc_source` | Source terms must survive RK time-integration; use single explicit injection point |
+| `f02e9c0` | Wrong parameter names (`LFL_percent` vs `lfl_vol_fraction`) | Input file reads wrong parameter; flammability disabled silently | Verify all parameter names against struct fields in `ERF_LNGParams.H`; use exact names | Always query `ERF_LNGParams.H` before accessing `params.*` fields |
+| `65d9bb2` | Missing include `<AMReX_MultiFabUtil.H>`; `average_down` linker error | Linker undefined reference for `average_down` | Include `AMReX_MultiFabUtil.H`; use `MultiFab::Copy` for `grid_ratio=1` fallback | Add include; handle edge case where refinement ratio = 1 (no coarsening needed) |
+| `cb05999` | `#ifdef ERF_USE_LNG` wrapped `.cpp` file body | Entire implementation conditionally compiled; link failure if `USE_LNG=FALSE` | Never wrap `.cpp` implementation bodies in `#ifdef`; only wrap headers/declarations | `.cpp` files are included in build only when USE_LNG=TRUE; wrapping is redundant and confusing |
+| `41aa403` | Mass distributed by geometry not actual active cell count | Evaporation flux per-cell off by ratio of empty to filled cells | Use `ReduceSum` to count actual pool_mask=1 cells; divide total mass by that count | Always count active cells explicitly; geometry-based cell count is unreliable |
+
+**Key takeaway**: When in doubt, consult the Dust module (`Source/Dust/`), which is the reference implementation for all LNG patterns (grid refinement, source injection, MultiFab layout, coupling).
+
+---
+
+## Phase 5: Gravity Current, Richardson Transition & Flammability
+
+### Overview
+
+Phase 5 implements three interconnected pieces of physics on the 2D LNG grid:
+
+1. **Shallow-water gravity current PDEs** — evolve dense vapor cloud spreading on 2D slab before vertical mixing dominates
+2. **Richardson transition criterion** — determines when gravity current regime ends and 3D ERF takes over
+3. **ATM return fields + flammability diagnostics** — extract RhoLNG from 3D state back to 2D slab, compute LFL/UFL exceedance masks
+
+### Key Physics
+
+**Shallow-water governing equations** (depth-averaged on 2D slab):
+
+```
+∂h/∂t   + ∂(hu)/∂x + ∂(hv)/∂y = F_evap/ρ_vapor            [mass]
+∂(hu)/∂t + ∂(hu²)/∂x = -g'·h·∂h/∂x - Cd·u·|u|             [x-momentum]
+∂(hv)/∂t + ∂(hv²)/∂y = -g'·h·∂h/∂y - Cd·v·|v|             [y-momentum]
+```
+
+where:
+- `g' = g*(ρ_vapor - ρ_air)/ρ_air` — reduced gravity [m/s²]
+- `Cd` — surface drag coefficient [-]
+- `u, v` — depth-averaged velocity [m/s]
+- `h` — cloud depth [m]
+
+**Richardson number criterion**:
+```
+Ri = g'*h / u*²
+
+Ri > Ri_crit (0.25)  → gravity current regime (2D model active)
+Ri < Ri_crit         → well-mixed regime (3D ERF dispersion dominates)
+```
+
+References: Webber & Brighton (1987), Didden & Maxworthy (1982), Benjamin (1968).
+
+### Files Created/Modified
+
+**New:**
+- `Source/LNG/ERF_LNGGravityCurrent.H` — GPU device kernels + advance signature
+- `Source/LNG/ERF_LNGGravityCurrent.cpp` — shallow-water PDE solver (explicit first-order)
+- `Source/LNG/ERF_LNGFlammability.H` — volume fraction & mask computation kernels
+- `Source/LNG/ERF_LNGFlammability.cpp` — flammability zone area calculator
+
+**Updated:**
+- `Source/LNG/ERF_LNGParams.H` — add `enable_gravity_current`, `gc_drag_coeff`, `gc_ri_crit`
+- `Source/LNG/ERF_LNGLayer.H` — add gc_h, gc_u, gc_v, gc_ri_flag MultiFabs; method declarations
+- `Source/LNG/ERF_LNGLayer.cpp` — allocate Phase 5 MultiFabs, add Step G2 (gravity current), implement methods
+- `Source/LNG/Make.package` — add Phase 5 files to build
+- `CMake/BuildERFExe.cmake` — add Phase 5 files to CMake
+- `Exec/CanonicalTests/LNG/CMakeLists.txt` — add `add_subdirectory(LNG_GravityCurrent)`
+
+**Test:**
+- `Exec/CanonicalTests/LNG/LNG_GravityCurrent/` — 20-step test verifying all three components
+
+### New Parameters (ERF_LNGParams.H)
+
+```cpp
+bool enable_gravity_current = false;    // Enable 2D shallow-water PDEs [Phase 5]
+Real gc_drag_coeff = 2.0e-3;           // Surface drag Cd [-], Webber & Brighton (1987)
+Real gc_ri_crit = 0.25;                 // Richardson transition threshold [-], Benjamin (1968)
+```
+
+### New MultiFabs (LNGLayer)
+
+```cpp
+m_lng_gc_h         // Cloud depth [m]
+m_lng_gc_u         // Depth-averaged u [m/s]
+m_lng_gc_v         // Depth-averaged v [m/s]
+m_lng_gc_ri_flag   // 0=gravity current active, 1=mixed regime
+m_lfl_area         // LFL zone area [m²]
+m_ufl_area         // UFL zone area [m²]
+```
+
+### Implementation Details
+
+**Step 1: Allocate Phase 5 MultiFabs** (initialize()):
+- Four gravity current MultiFabs allocated, initialized to 0.0
+- Debug prints include g_prime estimate and Ri_crit value
+
+**Step 2: Time-step gravity current** (advance() Step G2, if enabled):
+- Call `advance_gravity_current()` with evap flux and u* fields
+- Kernel updates h, u, v using explicit first-order Euler
+- Pressure gradient: `-g'*h*∂h/∂x` (central differences with boundary handling)
+- Drag: `-Cd*u*|u|` (quadratic)
+- Richardson number computed per cell; ri_flag=0 where Ri > Ri_crit
+- Debug output: h_max, u_max, g_prime, Ri_max/min, gc_active_cells, mixed_cells
+
+**Step 3: Check NaN** (advance() Step I):
+- Include Phase 5 MultiFabs in NaN scan if `enable_gravity_current=true`
+
+**Step 4: Extract atmosphere concentration** (advance() Step J):
+- Call `fill_lng_conc_from_atm()` to map RhoLNG(k=0) from 3D grid to LNG grid
+- Debug output: conc_sfc_max, conc_sfc_sum
+
+**Step 5: Compute flammability** (advance() Step J2):
+- Call `compute_flammability_masks()` to compare vol_frac vs LFL/UFL thresholds
+- Call `compute_lfl_area()`, `compute_ufl_area()` to get zone areas
+- Store in m_lfl_area, m_ufl_area for CSV output
+- Debug output: lfl_area, ufl_area, conc_max, vol_frac_max
+
+### Analytic Verification
+
+**Didden (1982) similarity for instantaneous release:**
+- Initial pool radius: `R₀ = √(area/π)`
+- Expected GC speed: `u ~ √(g'*h_init)` for small times
+- For test: `g' = 9.81*(1.76-1.225)/1.225 = 4.08 m/s²`, `h_init = 0.05 m`
+  → `u_est ≈ √(4.08*0.05) ≈ 0.45 m/s`
+- Richardson: `Ri = 4.08*0.05/0.5² ≈ 0.816`
+  Since `0.816 > Ri_crit (0.25)`, gravity current is active ✓
+
+### Canonical Test: LNG_GravityCurrent
+
+**Location:** `Exec/CanonicalTests/LNG/LNG_GravityCurrent/`
+
+**Configuration:**
+- 32×32 ATM grid, 64×64 LNG grid (grid_ratio=2)
+- 16 vertical levels, neutral ABL
+- 500 m² pool, 0.05 m depth, 20 kg/s spill
+- 20 timesteps, dt=0.5 s
+
+**Pass criteria (12 total):**
+1. Build with `-DERF_USE_LNG=ON`, exit 0, 20 steps
+2. `[LNG DEBUG] Phase 5: gravity_current` lines present
+3. h_max > 0, u_max > 0 from step 1 onward
+4. gc_active_cells > 0 for initial steps
+5. `[LNG DEBUG] Phase 5: extract_atm_return_fields` present every step
+6. conc_sfc_max > 0 by step 10+
+7. `[LNG DEBUG] Phase 5: flammability` present every step
+8. lfl_area, ufl_area columns in CSV, non-negative
+9. NaN check PASSED 20 times
+10. With enable_gravity_current=false: no GC debug lines
+11. With track_flammability=false: no flammability lines
+12. All 4 prior LNG tests pass (regression)
+
+### Build System
+
+- `Source/LNG/Make.package`: Add ERF_LNGGravityCurrent.cpp, ERF_LNGFlammability.cpp
+- `CMake/BuildERFExe.cmake`: Add to target_sources()
+- `Exec/CanonicalTests/LNG/CMakeLists.txt`: Add subdirectory
+
+### Debug Output
+
+**Per step** (when `lng_debug=true`):
+```
+[LNG DEBUG] Phase 5: gravity_current  h_max=0.045 m  u_max=0.42 m/s  v_max=0.001 m/s
+[LNG DEBUG] Phase 5:   g_prime=4.08 m/s^2  Ri_max=0.84 Ri_min=0.12  gc_active_cells=24  mixed_cells=16
+[LNG DEBUG] Phase 5: extract_atm_return_fields step=5  conc_sfc_max=0.00 kg/m^3  conc_sfc_sum=0.00
+[LNG DEBUG] Phase 5: flammability step=5  lfl_area=0.00 m^2  ufl_area=0.00 m^2  conc_sfc_max=0.00 kg/m^3  vol_frac_max=0.00
+```
+
+### Documentation
+
+- This Phase 5 section
+- `Exec/CanonicalTests/LNG/LNG_GravityCurrent/README.md` — comprehensive test guide
+
+### Phase 5 Checklist
+
+- [x] Create ERF_LNGGravityCurrent.H (kernels + advance signature)
+- [x] Create ERF_LNGGravityCurrent.cpp (PDE solver)
+- [x] Create ERF_LNGFlammability.H (volume fraction & mask kernels)
+- [x] Create ERF_LNGFlammability.cpp (area computation)
+- [x] Update ERF_LNGParams.H with new parameters
+- [x] Update ERF_LNGLayer.H with gc_h/u/v/ri_flag MultiFabs and methods
+- [x] Update ERF_LNGLayer.cpp::initialize() to allocate Phase 5 MultiFabs
+- [x] Update ERF_LNGLayer.cpp::advance() Step G2, Step I, Step J
+- [x] Implement extract_atm_return_fields()
+- [x] Implement compute_flammability_diagnostics()
+- [x] Update Source/LNG/Make.package
+- [x] Update CMake/BuildERFExe.cmake
+- [x] Create Exec/CanonicalTests/LNG/LNG_GravityCurrent/ test
+- [x] Update LNG_DEVELOPMENT.md
+- [ ] Build with `-DERF_USE_LNG=ON` (verify no compile/linker errors)
+- [ ] Run LNG_GravityCurrent and verify 12 pass criteria
+- [ ] Run prior LNG tests (regression check)
+- [ ] CodeQL security scan
+
+---
+
+**Phase 5 In Progress: Shallow-water gravity current PDEs, Richardson transition, and flammability zone tracking**
+
+---
+
+## Phase 6+: Future Work
+
+Phase 6 will implement plotfile output and CSV column expansion. Subsequent phases (7–8) will complete regulatory compliance (NFPA 59A exclusion zones) and advanced spill scheduling.
 
 

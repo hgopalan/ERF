@@ -15,6 +15,8 @@
 #include "ERF_LNGAtmCoupling.H"
 #include "ERF_LNGWindExtract.H"
 #include "ERF_LNGAtmReturn.H"
+#include "ERF_LNGGravityCurrent.H"
+#include "ERF_LNGFlammability.H"
 #include "ERF.H"
 #include "ERF_IndexDefines.H"
 #include <AMReX_MultiFab.H>
@@ -82,6 +84,16 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     m_lng_conc_sfc->setVal(0.0);
     m_lng_lfl_mask->setVal(0.0);
     m_lng_ufl_mask->setVal(0.0);
+    
+    // Phase 5: gravity current state
+    m_lng_gc_h       = std::make_unique<amrex::MultiFab>(m_lg.ba, m_lg.dm, ncomp, nghost);
+    m_lng_gc_u       = std::make_unique<amrex::MultiFab>(m_lg.ba, m_lg.dm, ncomp, nghost);
+    m_lng_gc_v       = std::make_unique<amrex::MultiFab>(m_lg.ba, m_lg.dm, ncomp, nghost);
+    m_lng_gc_ri_flag = std::make_unique<amrex::MultiFab>(m_lg.ba, m_lg.dm, ncomp, nghost);
+    m_lng_gc_h->setVal(0.0);
+    m_lng_gc_u->setVal(0.0);
+    m_lng_gc_v->setVal(0.0);
+    m_lng_gc_ri_flag->setVal(0.0);  // 0 = GC active initially
     
     // Set initial pool region: circle of radius sqrt(area/π) at domain center
     amrex::Real pool_radius = std::sqrt(params.pool_area_m2 / M_PI);
@@ -155,6 +167,14 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
                        << "[LNG DEBUG] Phase 1: MultiFabs allocated (pool_depth, pool_mask, evap_flux, "
                        << "latent_flux, vapor_conc, flux_atm, wind_ref, ustar, tsfc, pblh, conc_sfc, "
                        << "lfl_mask, ufl_mask) ncomp=1\n"
+                       << "[LNG DEBUG] Phase 5: gravity current MultiFabs allocated"
+                       << " (gc_h, gc_u, gc_v, gc_ri_flag)\n"
+                       << "[LNG DEBUG] Phase 5:   enable_gravity_current=" << params.enable_gravity_current
+                       << "  Cd=" << params.gc_drag_coeff
+                       << "  Ri_crit=" << params.gc_ri_crit << "\n"
+                       << "[LNG DEBUG] Phase 5:   g_prime_est="
+                       << 9.81 * (params.rho_vapor_ref - params.rho_air) / params.rho_air
+                       << " m/s^2  (g*(rho_v - rho_a)/rho_a)\n"
                        << "[LNG DEBUG] Phase 3: lng_scalar_comp=" << m_lng_scalar_comp
                        << " (RhoLNG_comp)\n";
     }
@@ -312,6 +332,29 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
     // Step G: Update pool mask
     update_pool_mask(*m_lng_pool_mask, *m_lng_pool_depth);
     
+    // Step G2: Advance gravity current (Phase 5)
+    if (params.enable_gravity_current && dt > 0.0) {
+        advance_gravity_current(*m_lng_gc_h, *m_lng_gc_u, *m_lng_gc_v,
+                                *m_lng_gc_ri_flag,
+                                *m_lng_evap_flux, *m_lng_ustar,
+                                m_lg.geom,
+                                params.rho_vapor_ref, params.rho_air,
+                                params.gc_drag_coeff, dt,
+                                params.lng_debug);
+        
+        if (params.lng_debug) {
+            amrex::Real h_max  = m_lng_gc_h->max(0);
+            amrex::Real u_max  = m_lng_gc_u->max(0);
+            amrex::Real ri_sum = m_lng_gc_ri_flag->sum(0);
+            amrex::Long gc_cells = m_lng_gc_h->size() - (long)ri_sum;
+            amrex::Print() << "[LNG DEBUG] Phase 5: step=" << m_step
+                           << "  gc_h_max=" << h_max << " m"
+                           << "  gc_u_max=" << u_max << " m/s"
+                           << "  gc_active_cells=" << gc_cells
+                           << "  mixed_cells=" << (long)ri_sum << "\n";
+        }
+    }
+    
     // Step H: Compute and print mass budget
     amrex::Real pool_mass  = compute_pool_mass(*m_lng_pool_depth, m_lg.geom, params.rho_LNG);
     amrex::Real pool_area  = compute_pool_area(*m_lng_pool_mask,  m_lg.geom);
@@ -340,6 +383,11 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
         if (m_lng_vapor_conc->contains_nan(0))   nan_found = true;
         if (m_lng_ustar->contains_nan(0))        nan_found = true;
         if (m_lng_tsfc->contains_nan(0))         nan_found = true;
+        if (params.enable_gravity_current) {
+            if (m_lng_gc_h->contains_nan(0))     nan_found = true;
+            if (m_lng_gc_u->contains_nan(0))     nan_found = true;
+            if (m_lng_gc_v->contains_nan(0))     nan_found = true;
+        }
         
         if (nan_found) {
             amrex::Abort("[LNG] NaN detected in LNG MultiFab at step " + std::to_string(m_step));
@@ -355,10 +403,13 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
         fill_lng_conc_from_atm(*m_lng_conc_sfc, *m_S_cons_ptr,
                                 m_lng_scalar_comp, *m_geom_atm_ptr, m_lg.grid_ratio);
         if (params.lng_debug)
-            amrex::Print() << "[LNG DEBUG] Phase 4: conc_sfc extracted"
+            amrex::Print() << "[LNG DEBUG] Phase 5: extract_atm_return_fields step=" << m_step
                            << "  conc_sfc_max=" << m_lng_conc_sfc->max(0)
                            << " kg/m^3  conc_sfc_sum=" << m_lng_conc_sfc->sum(0) << "\n";
     }
+    
+    // Step J2: Compute flammability diagnostics (Phase 5)
+    compute_flammability_diagnostics(dt, m_time, m_step);
     
     // Verbose=3: print min/max of all fields
     if (params.verbose >= 3) {
@@ -414,7 +465,48 @@ void LNGLayer::apply_to_cc_source(amrex::MultiFab& cc_source,
 void LNGLayer::extract_atm_return_fields(const amrex::MultiFab& S_new_cons,
                                          const amrex::Geometry& geom_atm)
 {
-    // Phase 1 stub: no atmosphere extraction yet
+    // Phase 5: Extract concentration from atmosphere and map to LNG grid
+    if (!m_lng_conc_sfc) return;
+    
+    fill_lng_conc_from_atm(*m_lng_conc_sfc, S_new_cons,
+                            m_lng_scalar_comp, geom_atm, m_lg.grid_ratio);
+
+    if (m_params.lng_debug) {
+        amrex::Real conc_max = m_lng_conc_sfc->max(0);
+        amrex::Real conc_sum = m_lng_conc_sfc->sum(0);
+        amrex::Print() << "[LNG DEBUG] Phase 5: extract_atm_return_fields step=" << m_step
+                       << "  conc_sfc_max=" << conc_max << " kg/m^3"
+                       << "  conc_sfc_sum=" << conc_sum << "\n";
+    }
+}
+
+void LNGLayer::compute_flammability_diagnostics(amrex::Real dt, amrex::Real cur_time, int nstep)
+{
+    // Phase 5: Compute flammability zones from concentration field
+    if (!m_lng_conc_sfc) return;
+    if (!m_params.track_flammability) return;
+
+    compute_flammability_masks(*m_lng_lfl_mask, *m_lng_ufl_mask,
+                               *m_lng_conc_sfc,
+                               m_params.rho_vapor_ref, m_params.mol_weight_LNG,
+                               m_params.lfl_vol_fraction, m_params.ufl_vol_fraction);
+
+    m_lfl_area = compute_lfl_area(*m_lng_lfl_mask, m_lg.geom);
+    m_ufl_area = compute_ufl_area(*m_lng_ufl_mask, m_lg.geom);
+
+    if (m_params.lng_debug) {
+        amrex::Real conc_max = m_lng_conc_sfc->max(0);
+        amrex::Real vol_frac_max = 0.0;
+        if (m_params.rho_vapor_ref > 1.0e-10) {
+            vol_frac_max = (conc_max / m_params.rho_vapor_ref) * 
+                          (28.97 / m_params.mol_weight_LNG);
+        }
+        amrex::Print() << "[LNG DEBUG] Phase 5: flammability step=" << nstep
+                       << "  lfl_area=" << m_lfl_area << " m^2"
+                       << "  ufl_area=" << m_ufl_area << " m^2"
+                       << "  conc_sfc_max=" << conc_max << " kg/m^3"
+                       << "  vol_frac_max=" << vol_frac_max << "\n";
+    }
 }
 
 void LNGLayer::write_output(int nstep, double cur_time, bool is_final)

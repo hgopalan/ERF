@@ -289,6 +289,8 @@ function(build_erf_lib erf_lib_name)
       ${SRC_DIR}/LNG/ERF_LNGPool.cpp
       ${SRC_DIR}/LNG/ERF_LNGAtmCoupling.cpp
       ${SRC_DIR}/LNG/ERF_LNGWindExtract.cpp
+      ${SRC_DIR}/LNG/ERF_LNGGravityCurrent.cpp
+      ${SRC_DIR}/LNG/ERF_LNGFlammability.cpp
     )
     #target_include_directories(${erf_lib_name} PRIVATE ${SRC_DIR}/LNG)
     target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${SRC_DIR}/LNG>)
