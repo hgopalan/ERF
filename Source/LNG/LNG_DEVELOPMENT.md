@@ -21,8 +21,8 @@ The ERF-LNG module simulates liquefied natural gas (LNG) spill evaporation and v
 | 2 | **Evaporation & Pool Spreading** | Heat transfer model; Clausius-Clapeyron; gravity current spreading | ✅ COMPLETE |
 | 3 | **ATM Coupling (Phase I)** | Energy injection to atmosphere; sensible/latent heat source terms | ✅ COMPLETE |
 | 4 | **Wind & BL Extraction** | Wind field interpolation at zref; u* mapping; PBL height feedback | ✅ COMPLETE |
-| 5 | **Gravity Current & Flammability** | 2D shallow-water PDEs; Richardson transition; LFL/UFL zones | 🔄 IN PROGRESS |
-| 6 | **Output & Visualization** | Plotfile writes; receptor point sampling; CSV output expansion | TODO |
+| 5 | **Gravity Current & Flammability** | 2D shallow-water PDEs; Richardson transition; LFL/UFL zones | ✅ COMPLETE |
+| 6 | **Output & Visualization** | Plotfile writes; receptor point sampling; CSV output expansion | 🔄 IN PROGRESS |
 | 7 | **Regulatory Compliance** | NFPA 59A exclusion zone calculation; threshold mapping | TODO |
 | 8 | **Spill Scheduling** | Time-dependent release rates; inventory tracking; multi-event scenarios | TODO |
 
@@ -1137,19 +1137,185 @@ m_ufl_area         // UFL zone area [m²]
 - [x] Update CMake/BuildERFExe.cmake
 - [x] Create Exec/CanonicalTests/LNG/LNG_GravityCurrent/ test
 - [x] Update LNG_DEVELOPMENT.md
-- [ ] Build with `-DERF_USE_LNG=ON` (verify no compile/linker errors)
-- [ ] Run LNG_GravityCurrent and verify 12 pass criteria
-- [ ] Run prior LNG tests (regression check)
-- [ ] CodeQL security scan
+- [x] Build with `-DERF_USE_LNG=ON` (verify no compile/linker errors)
+- [x] Run LNG_GravityCurrent and verify 12 pass criteria
+- [x] Run prior LNG tests (regression check)
+- [x] CodeQL security scan
 
 ---
 
-**Phase 5 In Progress: Shallow-water gravity current PDEs, Richardson transition, and flammability zone tracking**
+## Phase 5 Post-Merge Bug Fixes
+
+After PR #166 merged, 8 critical MPI/grid bugs were found during integration testing
+and fixed directly on `ERF-HazGas` branch. These bugs would have caused hangs or wrong
+results on multi-rank runs. The summary table below is the canonical reference for all
+Phase 5+ development. Every new LNG phase must verify these fixes are still in place.
+
+**Summary Table — Bugs 1–8 Found and Fixed (Post-PR#166)**
+
+| # | Bug | Phase Found | Symptom | File(s) Fixed | Rule |
+|---|---|---|---|---|---|
+| 1 | `IOProcessor()` guard before `MultiFab::sum/max` | Post-PR#166 | Hang after step 1 `write_output` | `ERF_LNGStatsOutput.H` | B1 |
+| 2 | Z-decomposition not prevented | Post-PR#166 | Wrong `gc_active_cells`, partial slab operations | inputs file + `ERF_LNGPrerequisites.cpp` | B2 |
+| 3 | Cross-rank ATM array access in wind extraction | Post-PR#165 | Hang in `fill_lng_wind_from_interpolation` with `grid_ratio>1` | `ERF_LNGLayer.cpp` (ParallelCopy scratch) | B3 |
+| 4 | `FillBoundary` without periodicity | Post-PR#164 | Stale ghost cells at rank boundaries → wrong physics | `ERF_LNGPool.cpp`, `ERF_LNGGravityCurrent.cpp` | B4 |
+| 5 | `average_down` without geometry arguments | Post-PR#164 | Wrong coarsening on 2+ ranks → wrong scalar injection | `ERF_LNGAtmCoupling.H` | B5 |
+| 6 | `atm_ba[0]` for LNG domain extents | Post-PR#163 | Wrong LNG grid size with 2+ ranks | `ERF_LNGGrid.cpp` | C1 |
+| 7 | `ReduceSum` with host `Loop` not MPI-collective | Post-PR#166 | Wrong `gc_active_cells=8190`, diagnostic hang | `ERF_LNGGravityCurrent.cpp` | B6 |
+| 8 | `MultiFab::size()` used for cell count | Post-PR#166 | `gc_active_cells=-2` displayed | `ERF_LNGLayer.cpp` | C2 |
+
+All 8 bugs and the MPI rules that prevent them are documented in detail in `LNG_MPI_SKILLS.md`
+(Rules A–E). Phase 6+ must apply these patterns and update this table if new bugs are discovered.
+
+---
+
+**Phase 5 Complete: Shallow-water gravity current PDEs, Richardson transition, and flammability zone tracking**
+
+---
+
+## Phase 6: Output & Visualization
+
+Phase 6 implements output and visualization infrastructure for LNG dispersion:
+1. **2D plotfiles** on native LNG grid — `VisMF::Write` + `WriteGenericPlotfileHeader` + `LNGMetadata.json` sidecar
+2. **Receptor point sampling** — per-step concentration CSV at user-defined (x,y) points
+3. **Updated CSV diagnostics** — `lfl_area_m2` and `ufl_area_m2` now carry real Phase 5 values
+
+### New Files
+
+**Header-only (Phase 6 interface):**
+- `ERF_LNGPlotfileCatalog.H` — ordered list of 17 output variables + ncomp
+- `ERF_LNGReceptorOutput.H` — receptor sampling CSV functions (MPI-safe with Rule B1)
+
+**Implementation:**
+- `ERF_LNGPlotfile.cpp` — VisMF plotfile writer, 5-step MPI pattern (Rule B1)
+
+**Test:**
+- `Exec/CanonicalTests/LNG/LNG_Output/` — comprehensive test with 2 receptors
+
+### New Parameters (ERF_LNGParams.H)
+
+```cpp
+Vector<string> lng_receptor_names;  // Receptor point names
+Vector<Real>   lng_receptor_x;      // Receptor x [m]
+Vector<Real>   lng_receptor_y;      // Receptor y [m]
+```
+
+ParmParse: `lng_receptor_names`, `lng_receptor_x`, `lng_receptor_y` (via `queryarr`)
+
+### Plotfile Format
+
+**17 variables** in order (matched to `ERF_LNGPlotfileCatalog.H`):
+```
+ 0: lng_pool_depth       [m]
+ 1: lng_pool_mask        [0/1]
+ 2: lng_evap_flux        [kg/m^2/s]
+ 3: lng_latent_flux      [W/m^2]
+ 4: lng_vapor_conc       [kg/m^3]
+ 5: lng_ustar            [m/s]
+ 6: lng_tsfc             [K]
+ 7: lng_pblh             [m]
+ 8: lng_conc_sfc         [kg/m^3]
+ 9: lng_lfl_mask         [0/1]
+10: lng_ufl_mask         [0/1]
+11: lng_wind_u           [m/s]
+12: lng_wind_v           [m/s]
+13: lng_gc_h             [m]
+14: lng_gc_u             [m/s]
+15: lng_gc_v             [m/s]
+16: lng_gc_ri_flag       [0/1]
+```
+
+**Directory structure:**
+```
+plt_lng_NNNNN/
+  ├── Header           (AMReX header)
+  ├── Level_0/Cell     (VisMF binary, all 17 components)
+  └── LNGMetadata.json (JSON sidecar: format_version, time, step, grid_ratio, n_variables)
+```
+
+### Receptor CSV Format
+
+One file per receptor: `lng_receptor_<name>.csv`
+
+Columns:
+```
+step,time_s,conc_sfc_kg_m3,vol_fraction,lfl_flag
+```
+
+### Updated CSV Diagnostics
+
+`append_lng_stats_phase2()` now accepts `lfl_area` and `ufl_area` parameters (Phase 6 update):
+- `lfl_area_m2` column: real value from Phase 5 `compute_flammability_diagnostics()`
+- `ufl_area_m2` column: real value from Phase 5 `compute_flammability_diagnostics()`
+- Previously both columns were hardcoded 0.0
+
+### MPI Rules Applied
+
+| Rule | Implementation |
+|------|---|
+| **B1** | `WriteLNGPlotfile`: ALL ranks call VisMF::Write (MPI-collective in Step 2); IOProcessor writes Header/JSON after (Step 3). `append_receptor_sample`: all reductions before IOProcessor guard. |
+| **B4** | No new FillBoundary calls (Phase 6 has only output, no new physics). |
+| **A2** | `ERF_LNGPlotfile.cpp` registered in both `Make.package` and `CMake/BuildERFExe.cmake`. |
+| **E1** | `write_output` has `m_last_output_step` duplicate guard (already present from Phase 5). |
+
+### Implementation Checklist
+
+- [x] Create `ERF_LNGPlotfileCatalog.H` (17 variables, ncomp)
+- [x] Update `ERF_LNGPlotfile.H` with function declaration
+- [x] Create `ERF_LNGPlotfile.cpp` (5-step MPI pattern)
+- [x] Create `ERF_LNGReceptorOutput.H` (MPI-safe sampling)
+- [x] Add Phase 6 parameters to `ERF_LNGParams.H`
+- [x] Update `ERF_LNGLayer.cpp::initialize()` — receptor header creation
+- [x] Update `ERF_LNGLayer.cpp::advance()` — receptor sampling
+- [x] Update `ERF_LNGLayer.cpp::write_output()` — plotfile writing
+- [x] Update `ERF_LNGStatsOutput.H::append_lng_stats_phase2()` — accept Phase 5 areas
+- [x] Add includes to `ERF_LNGLayer.cpp`
+- [x] Update `Source/LNG/Make.package`
+- [x] Update `CMake/BuildERFExe.cmake`
+- [x] Create `Exec/CanonicalTests/LNG/LNG_Output/` test
+- [x] Update `LNG_DEVELOPMENT.md`
+
+### Debug Output
+
+Per-step when `lng_debug=true`:
+
+```
+[LNG DEBUG] Phase 6: <n> receptor file(s) initialized
+[LNG DEBUG] Phase 6: receptor sampling step=<N>  n_receptors=<n>
+[LNG DEBUG] Phase 6: plotfile written step=<N>  is_final=<0|1>
+```
+
+### Test: LNG_Output
+
+**Pass criteria (12 items):**
+1. Exit code 0, 20 steps complete
+2. `[LNG] Writing LNG plotfile` at steps 5, 10, 15, 20
+3. Five plotfile directories: `plt_lng_00005` through `plt_lng_00020`
+4. Each plotfile has `Header` and `Level_0/Cell`
+5. Each plotfile has valid `LNGMetadata.json` with `"n_variables": 17`
+6. Two receptor CSV files: `lng_receptor_center.csv`, `lng_receptor_downwind.csv`
+7. Each receptor CSV has exactly 21 lines (1 header + 20 data rows)
+8. Receptor CSV columns: `step,time_s,conc_sfc_kg_m3,vol_fraction,lfl_flag`
+9. `lng_diag.csv` has 21 lines; `lfl_area_m2` and `ufl_area_m2` are non-negative real (no longer 0.0)
+10. `[LNG DEBUG] NaN check PASSED` at all 20 steps
+11. Regression: all 5 prior LNG tests pass
+12. Build: no linker errors, no new warnings with `-DERF_USE_LNG=ON`
+
+### Reference
+
+- **Pattern source:** `Source/Dust/ERF_DustPlotfile.cpp`
+- **MPI skills:** `Source/LNG/LNG_MPI_SKILLS.md` Rules B1, A2, E1
+- **Phase 5 bug table:** See "Phase 5 Post-Merge Bug Fixes" section above
+
+---
+
+**Phase 6 In Progress: Plotfile output, receptor sampling, CSV diagnostics expansion**
 
 ---
 
 ## Phase 6+: Future Work
 
-Phase 6 will implement plotfile output and CSV column expansion. Subsequent phases (7–8) will complete regulatory compliance (NFPA 59A exclusion zones) and advanced spill scheduling.
+Phase 7 will implement regulatory compliance (NFPA 59A exclusion zones). Phase 8 will complete
+spill scheduling with time-dependent release rates and inventory tracking.
 
 

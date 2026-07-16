@@ -273,6 +273,26 @@ struct LNGParams {
     /** @} */
     
     /**
+     * @name Phase 6: Receptor Sampling
+     * @{
+     */
+    
+    /// Receptor point names [vector of strings]
+    /// @details Human-readable identifiers (e.g., "center", "downwind", "northeast").
+    ///          Phase 6: one CSV file per receptor with time-series concentration samples.
+    amrex::Vector<std::string> lng_receptor_names;
+    
+    /// Receptor point x-coordinates [m, vector of reals]
+    /// @details Parallel to lng_receptor_names. Must have same length.
+    amrex::Vector<amrex::Real> lng_receptor_x;
+    
+    /// Receptor point y-coordinates [m, vector of reals]
+    /// @details Parallel to lng_receptor_names. Must have same length.
+    amrex::Vector<amrex::Real> lng_receptor_y;
+    
+    /** @} */
+    
+    /**
      * @name Regulatory Thresholds
      * @{
      */
@@ -345,10 +365,15 @@ struct LNGParams {
         pp.query("rho_air", rho_air);
         
         // Output
-        pp.query("lng_plot_int", lng_plot_int);
+         pp.query("lng_plot_int", lng_plot_int);
         pp.query("lng_plot_prefix", lng_plot_prefix);
         pp.query("lng_diag_file", lng_diag_file);
         pp.query("lng_receptor_file", lng_receptor_file);
+        
+        // Phase 6: Receptor sampling
+        pp.queryarr("lng_receptor_names", lng_receptor_names);
+        pp.queryarr("lng_receptor_x", lng_receptor_x);
+        pp.queryarr("lng_receptor_y", lng_receptor_y);
         
         // Regulatory
         pp.query("nfpa59a_exclusion_conc", nfpa59a_exclusion_conc);

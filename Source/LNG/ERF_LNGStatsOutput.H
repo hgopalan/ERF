@@ -57,7 +57,9 @@ inline void append_lng_stats_phase2(int                           step,
                                     const amrex::MultiFab*        evap_flux_mf,
                                     const amrex::MultiFab*        conc_mf,
                                     const amrex::Geometry&        geom_lng,
-                                    amrex::Real                   rho_LNG)
+                                    amrex::Real                   rho_LNG,
+                                    amrex::Real                   lfl_area = 0.0,
+                                    amrex::Real                   ufl_area = 0.0)
 {
     // ── ALL MPI-collective reductions first (every rank participates) ─────
     double pool_mass_kg          = 0.0;
@@ -104,8 +106,8 @@ inline void append_lng_stats_phase2(int                           step,
         << std::scientific << std::setprecision(6) << 0.0             << ","
         << std::scientific << std::setprecision(6) << evap_flux_max_kg_m2_s << ","
         << std::scientific << std::setprecision(6) << vapor_conc_max_kg_m3  << ","
-        << std::scientific << std::setprecision(6) << 0.0             << ","
-        << std::scientific << std::setprecision(6) << 0.0             << "\n";
+        << std::scientific << std::setprecision(6) << lfl_area        << ","
+        << std::scientific << std::setprecision(6) << ufl_area        << "\n";
     out.close();
 }
 
