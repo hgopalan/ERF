@@ -62,7 +62,8 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     m_lng_evap_flux->setVal(0.0);
     m_lng_latent_flux->setVal(0.0);
     m_lng_vapor_conc->setVal(0.0);
-    m_lng_flux_atm->setVal(0.0);
+    //m_lng_flux_atm->setVal(0.0);
+    m_lng_flux_atm->setVal(0.0, 0, 1, nghost);  // fill valid + ghost cells
     m_lng_wind_ref->setVal(0.0);
     m_lng_ustar->setVal(0.0);
     m_lng_tsfc->setVal(params.test_surf_temp_K);  // Set to test temperature
@@ -79,22 +80,27 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     amrex::Real pool_center_y = 0.5 * (prob_domain.lo(1) + prob_domain.hi(1));
     
     // Fill pool_mask and pool_depth
+    // Use effective_radius = max(pool_radius, half-diagonal) so at least 1 cell is always seeded
+    const auto& dx_lng = geom_lng.CellSize();
+    amrex::Real effective_radius = amrex::max(pool_radius,
+                                              0.5 * std::sqrt(dx_lng[0]*dx_lng[0] + dx_lng[1]*dx_lng[1]));
+
     for (amrex::MFIter mfi(*m_lng_pool_mask); mfi.isValid(); ++mfi) {
         const auto& bx = mfi.validbox();
-        auto pool_mask_arr = (*m_lng_pool_mask)[mfi].array();
+        auto pool_mask_arr  = (*m_lng_pool_mask)[mfi].array();
         auto pool_depth_arr = (*m_lng_pool_depth)[mfi].array();
-        
-        amrex::ParallelFor(bx, [=] (amrex::IntVect const& iv) noexcept {
-            amrex::Real x = geom_lng.CellCenter(iv[0], 0);
-            amrex::Real y = geom_lng.CellCenter(iv[1], 1);
-            amrex::Real r = std::sqrt((x - pool_center_x)*(x - pool_center_x) + 
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            amrex::Real x = geom_lng.ProbLo(0) + (i + 0.5) * dx_lng[0];
+            amrex::Real y = geom_lng.ProbLo(1) + (j + 0.5) * dx_lng[1];
+            amrex::Real r = std::sqrt((x - pool_center_x)*(x - pool_center_x) +
                                       (y - pool_center_y)*(y - pool_center_y));
-            if (r <= pool_radius) {
-                pool_mask_arr(iv) = 1.0;
-                pool_depth_arr(iv) = params.pool_depth_init_m;
+            if (r <= effective_radius) {
+                pool_mask_arr(i, j, k)  = 1.0;
+                pool_depth_arr(i, j, k) = params.pool_depth_init_m;
             } else {
-                pool_mask_arr(iv) = 0.0;
-                pool_depth_arr(iv) = 0.0;
+                pool_mask_arr(i, j, k)  = 0.0;
+                pool_depth_arr(i, j, k) = 0.0;
             }
         });
     }

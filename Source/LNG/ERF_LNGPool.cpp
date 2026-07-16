@@ -37,9 +37,32 @@ void apply_spill_source(amrex::MultiFab& lng_pool_depth,
 {
     if (spill_rate_kg_s <= 0.0 || dt <= 0.0) return;
 
-    const auto& dx = geom_lng.CellSize();
-    amrex::Real pool_radius  = std::sqrt(pool_area_m2 / M_PI);
-    amrex::Real dh_per_cell  = (spill_rate_kg_s * dt) / (rho_LNG * pool_area_m2);
+    const auto& dx       = geom_lng.CellSize();
+    amrex::Real cell_area = dx[0] * dx[1];
+    amrex::Real pool_radius = std::sqrt(pool_area_m2 / M_PI);
+
+    // Use max(pool_radius, half-diagonal of one cell) so at least one cell is always seeded
+    amrex::Real effective_radius = amrex::max(pool_radius, 0.5 * std::sqrt(dx[0]*dx[0] + dx[1]*dx[1]));
+
+    // Count active cells (those inside effective_radius) to distribute mass correctly
+    int n_cells = amrex::ReduceSum(lng_pool_depth, 0,
+        [=] (amrex::Box const& bx, amrex::Array4<amrex::Real const> const&) -> int {
+            int count = 0;
+            amrex::Loop(bx, [&] (int i, int j, int k) {
+                amrex::Real x_cell = geom_lng.ProbLo(0) + (i + 0.5) * dx[0];
+                amrex::Real y_cell = geom_lng.ProbLo(1) + (j + 0.5) * dx[1];
+                amrex::Real r = std::sqrt((x_cell-cx)*(x_cell-cx) + (y_cell-cy)*(y_cell-cy));
+                if (r <= effective_radius) ++count;
+            });
+            return count;
+        });
+
+    if (n_cells < 1) n_cells = 1;
+
+    // Distribute total spilled volume over active cells
+    // dh = (spill_rate * dt / rho_LNG) / (n_cells * cell_area)
+    amrex::Real total_volume = spill_rate_kg_s * dt / rho_LNG;  // [m^3]
+    amrex::Real dh_per_cell  = total_volume / (n_cells * cell_area);
 
     for (amrex::MFIter mfi(lng_pool_depth, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
@@ -47,17 +70,10 @@ void apply_spill_source(amrex::MultiFab& lng_pool_depth,
         auto       depth_arr = lng_pool_depth[mfi].array();
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-            // Compute cell center coordinates
             amrex::Real x_cell = geom_lng.ProbLo(0) + (i + 0.5) * dx[0];
             amrex::Real y_cell = geom_lng.ProbLo(1) + (j + 0.5) * dx[1];
-
-            // Distance from pool center
-            amrex::Real dx_pool = x_cell - cx;
-            amrex::Real dy_pool = y_cell - cy;
-            amrex::Real r_pool  = std::sqrt(dx_pool*dx_pool + dy_pool*dy_pool);
-
-            // Add source if inside pool radius
-            if (r_pool <= pool_radius) {
+            amrex::Real r = std::sqrt((x_cell-cx)*(x_cell-cx) + (y_cell-cy)*(y_cell-cy));
+            if (r <= effective_radius) {
                 depth_arr(i, j, k) += dh_per_cell;
             }
         });
