@@ -38,6 +38,7 @@
 #define RhoKE_comp     (Rho_comp+2) // for Deardorff LES Model, k-equation RANS, or MYNN PBL Model
 
 #define RhoScalar_comp (RhoKE_comp+1)
+#define RhoLNG_comp     (RhoScalar_comp+1)   // LNG vapor scalar (Phase 3+)
 
 #define RhoQ1_comp     (RhoScalar_comp+NSCALARS)
 #define RhoQ2_comp     (RhoQ1_comp+1)

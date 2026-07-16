@@ -120,7 +120,7 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
      
     // Phase 3: Set scalar component index for atmosphere coupling
     // Use RhoScalar_comp + 1 (same pattern as Dust: m_dust_scalar_comp = RhoScalar_comp + 1)
-    m_lng_scalar_comp = RhoScalar_comp + 1;
+    m_lng_scalar_comp = RhoLNG_comp; //RhoScalar_comp + 1;
      
     // Compute initial pool diagnostics for debug output
     amrex::Real pool_mass_init = compute_pool_mass(*m_lng_pool_depth, geom_lng, params.rho_LNG);
