@@ -178,7 +178,7 @@ private:
     amrex::Real m_lg_z0 = 0.01;    ///< Aerodynamic roughness for LNG surface [m]
     
     // Scalar component index (for coupling to atmosphere)
-    int         m_lng_scalar_comp = 0;  ///< Index of LNG scalar in ATM (Phase 3+)
+    int         m_lng_scalar_comp = -1;  ///< Index of LNG scalar in ATM (Phase 3+), -1 = unset
     
     // LNG state MultiFabs (all allocated in initialize())
     std::unique_ptr<amrex::MultiFab>  m_lng_pool_depth;      ///< Pool depth [m]

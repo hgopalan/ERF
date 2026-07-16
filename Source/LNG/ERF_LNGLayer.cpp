@@ -12,7 +12,9 @@
 #include "ERF_LNGStatsOutput.H"
 #include "ERF_LNGEvaporation.H"
 #include "ERF_LNGPool.H"
+#include "ERF_LNGAtmCoupling.H"
 #include "ERF.H"
+#include "ERF_IndexDefines.H"
 #include <AMReX_MultiFab.H>
 #include <AMReX_Print.H>
 #include <cmath>
@@ -109,11 +111,44 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     // Set atmospheric placeholders (Phase 4 will replace with live extraction)
     m_lng_ustar->setVal(params.test_ustar);
     m_lng_tsfc->setVal(params.test_surf_temp_K);
-    
+     
+    // Phase 3: Set scalar component index for atmosphere coupling
+    // Use RhoScalar_comp + 1 (same pattern as Dust: m_dust_scalar_comp = RhoScalar_comp + 1)
+    m_lng_scalar_comp = RhoScalar_comp + 1;
+     
     // Compute initial pool diagnostics for debug output
     amrex::Real pool_mass_init = compute_pool_mass(*m_lng_pool_depth, geom_lng, params.rho_LNG);
     amrex::Real pool_area_init = compute_pool_area(*m_lng_pool_mask, geom_lng);
-    
+     
+    // Phase 1 initialization debug output
+    if (params.lng_debug) {
+        amrex::Print() << "[LNG] ===== ERF-LNG Phase 1 initialized =====\n"
+                       << "[LNG DEBUG] Phase 1: pool_centre=(" << m_pool_cx << ", " << m_pool_cy << ") m  "
+                       << "area=" << pool_area_init << " m^2  "
+                       << "depth=" << params.pool_depth_init_m << " m\n"
+                       << "[LNG DEBUG] Phase 1: mol_weight_LNG=" << params.mol_weight_LNG << " g/mol  "
+                       << "LFL=" << params.LFL_percent << "%  "
+                       << "UFL=" << params.UFL_percent << "%\n"
+                       << "[LNG DEBUG] Phase 1: grid_ratio=" << params.grid_ratio << "  "
+                       << "feedback=" << params.atm_feedback << "  "
+                       << "verbose=" << params.verbose << "  "
+                       << "debug=" << (params.lng_debug ? "ON" : "OFF") << "\n"
+                       << "[LNG DEBUG] Phase 1: LNGGrid created " << m_lg.ba.size() 
+                       << " boxes, grid_ratio=" << params.grid_ratio << "\n"
+                       << "[LNG DEBUG] Phase 1: MultiFabs allocated (pool_depth, pool_mask, evap_flux, "
+                       << "latent_flux, vapor_conc, flux_atm, wind_ref, ustar, tsfc, pblh, conc_sfc, "
+                       << "lfl_mask, ufl_mask) ncomp=1\n"
+                       << "[LNG DEBUG] Phase 3: lng_scalar_comp=" << m_lng_scalar_comp
+                       << " (RhoScalar_comp+1)\n";
+    }
+     
+    // Write CSV diagnostic header
+    write_lng_stats_header(params.lng_diag_file);
+     
+    if (params.lng_debug) {
+        amrex::Print() << "[LNG DEBUG] Phase 1: lng_diag.csv header written\n";
+    }
+     
     // Phase 2 initialization debug output
     if (params.lng_debug || params.verbose >= 1) {
        amrex::Print() << "[LNG DEBUG] Phase 2: pool evaporation model initialized\n"
@@ -129,10 +164,7 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
                       << "[LNG DEBUG] Phase 2:   z0_lng=" << m_lg_z0 << " m  zref=" << params.zref << " m\n"
                       << "[LNG DEBUG] Phase 2:   evap model: k_mass = u* * kappa / (Sc^(2/3) * ln(zref/z0))\n";
     }
-    
-    // Write CSV diagnostic header
-    write_lng_stats_header(params.lng_diag_file);
-    
+     
     // Print per-step debug header if enabled
     if (params.lng_debug) {
       int pool_cells = amrex::ReduceSum(*m_lng_pool_mask, 0,
@@ -144,7 +176,7 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
                 });
                 return count;
             });
-         
+          
         amrex::Print() << "[LNG DEBUG] Initial Step  " << std::setw(4) << m_step 
                        << "  time=" << std::scientific << std::setprecision(3) << m_time 
                        << "  pool_cells=" << pool_cells
@@ -284,7 +316,33 @@ void LNGLayer::apply_to_cc_source(amrex::MultiFab& cc_source,
                                   const amrex::MultiFab& z_phys_cc,
                                   const amrex::Geometry& geom_atm)
 {
-    // Phase 1 stub: no atmosphere coupling yet
+    if (!m_lng_flux_atm) return;
+    if (m_params.atm_feedback <= 0.0) return;
+
+    // Step 1: zero the ATM-grid flux buffer
+    m_lng_flux_atm->setVal(0.0);
+
+    // Step 2: sum all evap flux into single-component flux buffer
+    amrex::MultiFab::Copy(*m_lng_flux_atm, *m_lng_evap_flux, 0, 0, 1,
+                          amrex::IntVect(0));
+
+    // Step 3: coarsen from LNG grid to ATM level-0 2D slab
+    coarsen_lng_flux_to_atm(*m_lng_flux_atm, *m_lng_evap_flux,
+                             m_lg.geom, geom_atm, m_lg.grid_ratio);
+
+    // Step 4: inject into cc_source at k=0
+    apply_lng_tendency_to_cc_source(cc_source, *m_lng_flux_atm, z_phys_cc,
+                                    geom_atm, m_lng_scalar_comp,
+                                    m_params.atm_feedback,
+                                    m_params.lng_debug);
+
+    if (m_params.lng_debug) {
+        amrex::Real F_max = m_lng_flux_atm->max(0);
+        amrex::Print() << "[LNG DEBUG] Phase 3: apply_to_cc_source step=" << m_step
+                       << "  F_evap_atm_max=" << F_max << " kg/m^2/s"
+                       << "  scalar_comp=" << m_lng_scalar_comp
+                       << "  feedback=" << m_params.atm_feedback << "\n";
+    }
 }
 
 void LNGLayer::extract_atm_return_fields(const amrex::MultiFab& S_new_cons,

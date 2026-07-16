@@ -1,0 +1,89 @@
+# ERF-LNG Phase 3 regression test — 2D→3D Scalar Injection Coupling
+#
+# Tests: LNG → ATM coupling via 2D evaporation flux injected into 3D passive scalar.
+#        Validates one-step explicit lag (flux from step n injected at step n+1).
+#        Sounding and ATM configuration copied from DustCriticalMaterials.
+#
+# Pass criteria (checked by README and CTest):
+#   (1) Compiles and runs 5 steps, exit code 0.
+#   (2) [LNG COUPLING] Phase 3: F_evap_max appears 5 times in stdout (one per step).
+#   (3) [LNG DEBUG] Phase 3: apply_to_cc_source appears 5 times in stdout.
+#   (4) RhoLNG_tend_sum > 0 every step (vapor mass is being injected).
+#   (5) With atm_feedback=0.0: no [LNG COUPLING] prints appear (injection is gated).
+#   (6) lng_diag.csv has 1 header + 5 data rows.
+#   (7) No NaN in any LNG MultiFab ([LNG DEBUG] NaN check PASSED 5 times).
+
+# ── ERF ATM configuration (from DustCriticalMaterials) ─────────────────
+erf.prob_name = "ABL"
+max_step = 5
+amr.max_level = 0
+amrex.fpe_trap_invalid = 0
+fabarray.mfiter_tile_size = 1024 1024 1024
+geometry.prob_extent = 3000 3000 1024
+amr.n_cell = 8 8 64
+geometry.is_periodic = 1 1 0
+amrex.max_grid_size_z = 128
+zlo.type = "surface_layer"
+erf.most.z0 = 0.1
+erf.most.zref = 24.0
+erf.most.surf_temp_flux = 0.0
+zhi.type = "SlipWall"
+zhi.theta_grad = 0.003
+erf.fixed_dt = 0.5
+erf.sum_interval = 1
+erf.v = 1
+amr.v = 1
+erf.check_int = -1
+erf.plot_int_1 = -1
+erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta
+erf.use_gravity = true
+erf.molec_diff_type = "None"
+erf.les_type = "None"
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+erf.input_sounding_file = "sounding_neutral_abl"
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = false
+erf.use_coriolis = true
+erf.latitude = 45.0
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 15.0 0.0 0.0
+erf.transport_scalar = true
+
+# ── LNG module — Phase 3 ───────────────────────────────────────────────
+erf.lng.enable              = true
+erf.lng.verbose             = 3
+erf.lng.lng_debug           = true
+
+erf.lng.pool_area_m2        = 500.0
+erf.lng.pool_depth_init_m   = 0.05
+erf.lng.spill_rate_kg_s     = 20.0
+
+erf.lng.mol_weight_LNG      = 17.4
+erf.lng.ch4_mole_fraction   = 0.90
+erf.lng.c2h6_mole_fraction  = 0.08
+erf.lng.n2_mole_fraction    = 0.02
+erf.lng.rho_LNG             = 425.0
+erf.lng.lng_boil_temp_K     = 111.7
+erf.lng.Hv_LNG              = 509000.0
+erf.lng.rho_vapor_ref       = 1.76
+erf.lng.lfl_vol_fraction    = 0.05
+erf.lng.ufl_vol_fraction    = 0.15
+
+erf.lng.z0_lng              = 0.01
+erf.lng.zref                = 24.0
+erf.lng.grid_ratio          = 1
+erf.lng.atm_feedback        = 1.0
+
+# Placeholder ATM state (Phase 4 replaces with live extraction)
+erf.lng.test_ustar          = 0.5
+erf.lng.test_surf_temp_K    = 293.15
+erf.lng.test_wind_speed     = 15.0
+
+erf.lng.lng_plot_int        = 5
+erf.lng.lng_plot_prefix     = "plt_lng_"
+erf.lng.lng_diag_file       = "lng_diag.csv"

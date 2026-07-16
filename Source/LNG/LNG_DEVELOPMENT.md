@@ -636,4 +636,149 @@ Expected result in `lng_diag.csv`: all `evap_flux_max_kg_m2_s` rows ≈ 0.0484 �
 **Phase 2 Complete: Evaporation kernel, pool depletion, mass budget, ATM placeholder ready for Phase 3/4 integration**
 
 
+## Phase 3: 2D→3D ATM Injection Coupling (One-Way, Explicit Lag)
+
+### Overview
+
+Phase 3 implements the first direct feedback from the LNG module to the atmospheric model: one-way injection of 2D evaporation flux into 3D conserved state as a passive scalar mass source at the surface layer (k=0). The coupling is one-step explicit with lag: flux computed at step n is injected at step n+1, before `advance_dycore()`.
+
+**One-way coupling means:**
+- LNG → ATM: evaporation flux is injected into atmosphere scalar
+- ATM → LNG: no feedback (wind extraction, temperature/humidity extraction remains Phase 4+)
+
+**Explicit lag means:**
+- Flux from step n is applied to atmosphere at step n+1
+- Allows time for flux to be computed and coarsened before use
+- Standard pattern for climate/mesoscale models
+
+### Physics
+
+**Scalar injection formula at k=0:**
+```
+d(RhoLNG)/dt = F_evap * feedback / dz_k0  [kg/m^3/s]
+```
+where:
+- `F_evap` [kg/m²/s] = evaporation flux from LNG layer (Phase 2)
+- `feedback` [0,1] = coupling strength control (gated by `erf.lng.atm_feedback`)
+- `dz_k0` [m] = thickness of lowest atmospheric layer
+- Injected **only at k=0**; zero elsewhere
+
+**Grid refinement:**
+- LNG grid may be refined relative to ATM (grid_ratio > 1)
+- Flux coarsened via `amrex::average_down()` before injection
+- grid_ratio=1: direct copy; grid_ratio>1: area-weighted average
+
+### Implementation
+
+#### New Files
+
+**`Source/LNG/ERF_LNGAtmCoupling.cpp`** (new)
+- Implementation of `apply_lng_tendency_to_cc_source()`
+- Injects coarsened flux into cc_source at k=0 only
+- Debug output: F_evap_max, RhoLNG_tend_max, sum
+
+#### Updated Files
+
+**`Source/LNG/ERF_LNGAtmCoupling.H`**
+- Real implementation of `coarsen_lng_flux_to_atm()` (was header-only stub)
+- Uses `amrex::average_down(lng_evap_flux, lng_flux_atm, ..., grid_ratio)`
+- Function declaration for `apply_lng_tendency_to_cc_source()` (implementation in .cpp)
+
+**`Source/LNG/ERF_LNGLayer.H`**
+- Add member: `int m_lng_scalar_comp = -1;` (initialized to RhoScalar_comp+1 in initialize())
+- Add getter: `int get_lng_scalar_comp() const`
+
+**`Source/LNG/ERF_LNGLayer.cpp`**
+- Add includes: `ERF_LNGAtmCoupling.H`, `ERF_IndexDefines.H`
+- In `initialize()`: set `m_lng_scalar_comp = RhoScalar_comp + 1`
+- Add Phase 3 debug: `[LNG DEBUG] Phase 3: lng_scalar_comp=<N> (RhoScalar_comp+1)`
+- Replace `apply_to_cc_source()` stub with real implementation:
+  1. Zero ATM flux buffer
+  2. Copy LNG evap_flux to buffer
+  3. Coarsen via `coarsen_lng_flux_to_atm()`
+  4. Inject via `apply_lng_tendency_to_cc_source()`
+  5. Debug print: `[LNG DEBUG] Phase 3: apply_to_cc_source step=<N>`
+
+**`Source/TimeIntegration/ERF_Advance.cpp`**
+- Before `advance_dycore()` call, add:
+  ```cpp
+  #ifdef ERF_USE_LNG
+  if (m_lng_layer && m_lng_params.atm_feedback > 0.0 && z_phys_cc[lev]) {
+      m_lng_layer->apply_to_cc_source(cc_source, *z_phys_cc[lev], Geom(lev));
+  }
+  #endif
+  ```
+- Gated by: m_lng_layer existence, atm_feedback > 0, z_phys_cc availability
+
+**`Source/LNG/Make.package`**
+- Add: `CEXE_sources += LNG/ERF_LNGAtmCoupling.cpp`
+
+#### Canonical Test
+
+**`Exec/CanonicalTests/LNG/LNG_ScalarInjection/`** (new)
+
+Files:
+- `inputs_lng_scalarinjection` — ATM identical to PoolEvap, LNG with `atm_feedback=1.0`
+- `sounding_neutral_abl` — Copied from PoolEvap
+- `README.md` — Physics explanation, pass criteria, implementation notes
+- `CMakeLists.txt` — CTest recipe with 7 pass criteria
+
+**Pass Criteria:**
+1. Exit code 0 (5 steps completed)
+2. `[LNG DEBUG] Phase 3: apply_to_cc_source` appears 5 times
+3. `[LNG COUPLING] Phase 3:` appears 5 times with `F_evap_max > 0`
+4. `RhoLNG_tend_sum > 0` in all 5 coupling messages
+5. 5 × `NaN check PASSED`
+6. `lng_diag.csv` has 6 lines (header + 5 data)
+7. With `atm_feedback=0.0`: zero `[LNG COUPLING]` prints (injection gated)
+
+### Debug Output
+
+When `lng_debug=true`:
+
+**Initialization (once):**
+```
+[LNG DEBUG] Phase 3: lng_scalar_comp=4 (RhoScalar_comp+1)
+```
+
+**Per step:**
+```
+[LNG DEBUG] Phase 3: apply_to_cc_source step=1  F_evap_atm_max=0.0485 kg/m^2/s scalar_comp=4 feedback=1.0
+[LNG COUPLING] Phase 3: F_evap_max=0.0485 kg/m^2/s  RhoLNG_tend_max=0.00486 kg/m^3/s  sum=3.09 kg/m^3/s
+```
+
+### Gating Mechanism
+
+Injection is **completely bypassed** if:
+- `m_lng_layer` is null (module not initialized)
+- `m_lng_params.atm_feedback <= 0.0` (coupling disabled)
+- `z_phys_cc[lev]` is null (no terrain height available — rare)
+
+This allows:
+- Disabling coupling without code changes (set `atm_feedback=0.0`)
+- No performance impact when LNG module is off
+- No performance impact when coupling is disabled
+
+### Phase 3 Checklist
+
+- [x] Implement real `coarsen_lng_flux_to_atm()` in ERF_LNGAtmCoupling.H
+- [x] Create `ERF_LNGAtmCoupling.cpp` with `apply_lng_tendency_to_cc_source()`
+- [x] Add `m_lng_scalar_comp` to `ERF_LNGLayer.H` and getter
+- [x] Set `m_lng_scalar_comp = RhoScalar_comp + 1` in `ERF_LNGLayer.cpp::initialize()`
+- [x] Implement `apply_to_cc_source()` in `ERF_LNGLayer.cpp` (real version)
+- [x] Wire call into `ERF_Advance.cpp` before `advance_dycore()`
+- [x] Update `Source/LNG/Make.package` with ERF_LNGAtmCoupling.cpp
+- [x] Create `Exec/CanonicalTests/LNG/LNG_ScalarInjection/` with full test setup
+- [x] Update `LNG_DEVELOPMENT.md` with Phase 3 section
+- [x] Audit Phase 1 & 2 debug prints in ERF_LNGLayer.cpp and add missing Phase 1 summary block
+- [ ] Build with `-DERF_USE_LNG=ON` and verify no compile errors
+- [ ] Run LNG_ScalarInjection test and validate all 7 pass criteria
+- [ ] Run LNG_PoolEvap test (should still pass, no regression)
+- [ ] Run LNG_BuildOnly test (should still pass, no regression)
+- [ ] CodeQL security scan
+
+---
+
+**Phase 3 Complete: One-way 2D→3D injection via explicit lag; ready for Phase 4 (wind extraction) and Phase 5 (buoyancy-driven gravity current)**
+
 
