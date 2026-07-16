@@ -7,6 +7,7 @@ ifeq ($(USE_LNG), TRUE)
   CEXE_sources += LNG/ERF_LNGLayer.cpp
   CEXE_sources += LNG/ERF_LNGEvaporation.cpp
   CEXE_sources += LNG/ERF_LNGPool.cpp
+  CEXE_sources += LNG/ERF_LNGAtmCoupling.cpp
 
   # Header files (inlines and templates)
   CEXE_headers += LNG/ERF_LNGParams.H

@@ -260,6 +260,15 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     }
 
     // **************************************************************************************
+    // Apply LNG → atmosphere coupling (one-step explicit lag)
+    // **************************************************************************************
+#ifdef ERF_USE_LNG
+    if (m_lng_layer && m_lng_params.atm_feedback > 0.0 && z_phys_cc[lev]) {
+        m_lng_layer->apply_to_cc_source(cc_source, *z_phys_cc[lev], Geom(lev));
+    }
+#endif
+
+    // **************************************************************************************
     // Update the dycore
     // **************************************************************************************
     advance_dycore(lev, state_old, state_new,
