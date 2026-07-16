@@ -1,9 +1,9 @@
 # ERF-LNG Module — Development Skills & Bug Fix Reference
 
-Complete record of lessons learned across all PRs (#161–#166) during the
-development of the ERF-LNG hazardous gas dispersion module on the
-`ERF-HazGas` branch. Use this as a checklist before merging any new
-AMReX sub-grid 2D module into ERF.
+Complete record of lessons learned across all PRs (#161–#166 plus Phase 6
+post-merge fixes) during the development of the ERF-LNG hazardous gas
+dispersion module on the `ERF-HazGas` branch. Use this as a checklist before
+merging any new AMReX sub-grid 2D module into ERF.
 
 ---
 
@@ -17,6 +17,7 @@ AMReX sub-grid 2D module into ERF.
 | [#164](https://github.com/hgopalan/ERF/pull/164) | LNG Phase 3: one-way 2D→3D vapor injection coupling | 3 | 2026-07-16 |
 | [#165](https://github.com/hgopalan/ERF/pull/165) | LNG Phase 4: live wind & surface field extraction | 4 | 2026-07-16 |
 | [#166](https://github.com/hgopalan/ERF/pull/166) | LNG Phase 5: gravity current PDEs, Richardson transition, flammability | 5 | 2026-07-16 |
+| Phase 6 | Output & Visualization: plotfile, receptor sampling, CSV (post-merge fixes) | 6 | 2026-07-16 |
 
 Post-merge multi-rank bugs were found during integration testing and fixed
 directly on `ERF-HazGas` (not via additional PRs).
@@ -39,6 +40,7 @@ primary source of all bugs found in this project.
 | `ERF_LNGAtmCoupling.H/cpp` | `ERF_DustAtmCoupling.H/cpp` |
 | `ERF_LNGWindExtract.H/cpp` | `ERF_DustWindExtract.H/cpp` |
 | `ERF_LNGStatsOutput.H` | `ERF_DustStatsOutput.H` |
+| `ERF_LNGPlotfile.H/cpp` | `ERF_DustPlotfile.H/cpp` |
 
 ### A2. Build System — Register in Both Make and CMake
 
@@ -62,6 +64,9 @@ endif()
 **Lesson from PR #165:** `ERF_LNGWindExtract.cpp` was added to `Make.package`
 but initially omitted from `CMake/BuildERFExe.cmake` → CMake linker error.
 
+**Lesson from Phase 6:** `ERF_LNGPlotfile.cpp` — same issue. Check both files
+every time a new source is added.
+
 ### A3. Test Case Domain Must Match the Dust Reference Baseline
 
 All LNG canonical tests use the same ATM domain as `DustCriticalMaterials`:
@@ -74,6 +79,11 @@ zlo.type             = "surface_layer"
 erf.pbl_type         = "MRF"
 erf.transport_scalar = true
 ```
+
+The `LNG_Output` Phase 6 test uses `amr.n_cell = 32 32 64` with
+`grid_ratio = 4` (128×128 LNG grid) — the most demanding configuration.
+All previous single-rank domains work; the multi-rank configuration is the
+definitive integration test.
 
 **Lesson from PR #163:** LNG_BuildOnly originally used a toy 16×16×8 domain
 that was incompatible with SurfaceLayer → had to be updated to match Dust.
@@ -93,6 +103,23 @@ if (m_params.lng_debug) {
 
 **Lesson from PR #163:** CSV rows were originally inside `if (lng_debug)` →
 silent data loss in production runs.
+
+### A5. `amrex::Vector` Cannot Be Implicitly Constructed from `std::vector`
+
+`amrex::Vector<T>` is built on `std::vector<T>` but does not define an
+implicit conversion constructor. Any function returning `std::vector<std::string>`
+(such as `lng_plotfile_var_names()`) must be explicitly converted.
+
+```cpp
+// ❌ WRONG — compile error: no viable conversion
+amrex::Vector<std::string> var_vec = lng_plotfile_var_names();
+
+// ✅ CORRECT — explicit range construction
+auto std_vec = lng_plotfile_var_names();
+amrex::Vector<std::string> var_vec(std_vec.begin(), std_vec.end());
+```
+
+**File fixed:** `ERF_LNGPlotfile.cpp` line 126
 
 ---
 
@@ -121,6 +148,9 @@ if (!amrex::ParallelDescriptor::IOProcessor()) return;  // only rank 0 writes
 **Checklist:** Search every stats/output header for `IOProcessor()` guards.
 If any `MultiFab` operation follows the guard, it is a bug.
 
+**The exception:** `write_lng_stats_header()` is safe because it contains
+no MultiFab operations — the guard can come first there.
+
 ### B2. Z-Decomposition Must Be Prevented
 
 AMReX splits the domain in z when `amrex.max_grid_size_z` is not set.
@@ -140,6 +170,14 @@ for (int i = 0; i < ba_atm.size(); ++i) {
         ba_atm[i].length(2) == domain_nz,
         "[LNG] Cannot decompose in z. Set: amrex.max_grid_size_z = <nz>");
 }
+```
+
+**Note:** `amrex.max_grid_size_z` is an **unrecognised** ParmParse key for
+the ATM solver — it will appear in the "Unused ParmParse Variables" summary
+at the end of the run. This is expected and harmless:
+```
+Unused ParmParse Variables:
+  [TOP]::amrex.max_grid_size_z(nvals = 1)  :: [64]
 ```
 
 ### B3. MPI-Safe Wind Extraction via ParallelCopy
@@ -164,8 +202,9 @@ fill_lng_wind_from_interpolation(
     *m_lng_wind_ref, *m_xvel_atm, *m_yvel_atm, *m_zphys_atm, ...);
 ```
 
-Scratch MFs are allocated on the **ATM BoxArray/DistributionMapping** in
-`initialize()` and declared as `unique_ptr<MultiFab>` in `ERF_LNGLayer.H`.
+Scratch MFs (`m_xvel_atm`, `m_yvel_atm`, `m_zphys_atm`) are allocated on the
+**ATM BoxArray/DistributionMapping** in `initialize()` and declared as
+`unique_ptr<MultiFab>` members in `ERF_LNGLayer.H`.
 
 ### B4. FillBoundary Must Pass Periodicity
 
@@ -227,6 +266,37 @@ For Ri max/min: write into a scratch `MultiFab` via `ParallelFor`, then call
 
 **File fixed:** `ERF_LNGGravityCurrent.cpp` debug block
 
+### B7. Plotfile Write: 4-Step MPI-Safe Pattern
+
+Plotfile writing must follow this strict 4-step pattern to avoid race
+conditions with file system operations on multi-rank runs:
+
+```cpp
+// Step 1: IOProcessor creates directories; Barrier before collective write
+if (amrex::ParallelDescriptor::IOProcessor()) {
+    amrex::UtilCreateDirectory(plotfilename, 0755);
+    amrex::UtilCreateDirectory(plotfilename + "/Level_0", 0755);
+}
+amrex::ParallelDescriptor::Barrier();   // ALL ranks wait for dirs to exist
+
+// Step 2: ALL ranks write their owned FABs (MPI-collective)
+amrex::VisMF::Write(mf, plotfilename + "/Level_0/Cell");
+
+// Step 3: IOProcessor writes Header and metadata (IOProcessor guard safe here
+//         — no MPI collectives inside)
+if (amrex::ParallelDescriptor::IOProcessor()) {
+    // write Header file
+    // write JSON sidecar
+}
+amrex::ParallelDescriptor::Barrier();   // ALL ranks wait for Header to exist
+```
+
+The `Barrier()` after directory creation in Step 1 is **required** — without
+it, non-IO ranks may call `VisMF::Write` before the directory exists on the
+shared filesystem.
+
+**File:** `ERF_LNGPlotfile.cpp`
+
 ---
 
 ## Part C — Grid Construction Rules
@@ -278,6 +348,23 @@ lng_pool_depth.FillBoundary(geom_lng.periodicity());
 lng_pool_mask.FillBoundary(geom_lng.periodicity());
 ```
 
+### C4. Multi-Component MultiFabs: Correct Component Indexing
+
+For a 2-component MultiFab (e.g. `m_lng_wind_ref` storing u and v), use
+component indices 0 and 1 explicitly when copying to a single-component
+output MultiFab:
+
+```cpp
+// m_lng_wind_ref has ncomp=2: comp 0 = u, comp 1 = v
+// Copy into plotfile MultiFab at components 11 and 12:
+amrex::MultiFab::Copy(mf, *lng_layer.get_wind_ref(), 0, 11, 1, 0);  // u
+amrex::MultiFab::Copy(mf, *lng_layer.get_wind_ref(), 1, 12, 1, 0);  // v
+```
+
+Wrong component indexing produces silent zero values in the plotfile.
+
+**File:** `ERF_LNGPlotfile.cpp`
+
 ---
 
 ## Part D — Function Signature Rules
@@ -286,7 +373,8 @@ lng_pool_mask.FillBoundary(geom_lng.periodicity());
 
 When pool functions need `FillBoundary`, they must receive the geometry
 to get the periodicity. Add `const amrex::Geometry& geom_lng` to the
-signature rather than deriving it from the MultiFab.
+signature rather than deriving it from the MultiFab (MultiFab does not
+store its geometry).
 
 ```cpp
 // ✅ Correct signatures (post-fix)
@@ -313,7 +401,8 @@ void deplete_pool_from_evaporation(amrex::MultiFab& lng_pool_depth,
 ### E1. `write_output` Duplicate-Call Guard
 
 `write_output` is called from both `WriteAtIntermediateTime` and
-`WriteAtFinalTime`. Without a guard, the last step writes two CSV rows.
+`WriteAtFinalTime`. Without a guard, the last step writes two CSV rows
+and potentially two plotfiles.
 
 ```cpp
 // In ERF_LNGLayer.H private section:
@@ -329,17 +418,53 @@ m_last_output_step = nstep;
 Adding `amrex::Print()` before/after suspected hang points does NOT synchronise
 ranks. To diagnose hangs, use explicit `ParallelDescriptor::Barrier()` calls
 temporarily, then **remove them before merging** — they impose a global sync
-at every call site.
+at every call site and will show in benchmarks.
+
+```cpp
+// ✅ Temporary hang diagnosis — REMOVE before merging
+amrex::Print() << "[LNG DEBUG] PRE-WIND rank=" 
+               << amrex::ParallelDescriptor::MyProc() << "\n";
+amrex::ParallelDescriptor::Barrier();
+// ... suspect call ...
+amrex::Print() << "[LNG DEBUG] POST-WIND rank=" 
+               << amrex::ParallelDescriptor::MyProc() << "\n";
+amrex::ParallelDescriptor::Barrier();
+```
+
+The first `POST-` that only appears from one rank identifies the hang location.
 
 ### E3. `[LNG DEBUG]` vs `[LNG]` Prefix Convention
 
 | Prefix | When to use |
 |---|---|
-| `[LNG]` | Always-on info (init summary, phase summaries) |
+| `[LNG]` | Always-on info (init summary, phase summaries, plotfile writes) |
 | `[LNG DEBUG]` | `if (lng_debug)` per-step diagnostics |
 | `[LNG DEBUG3]` | `if (verbose >= 3)` field min/max tables |
-| `[LNG COUPLING]` | Phase 3 source term application (from ERF_Advance.cpp) |
+| `[LNG COUPLING]` | Phase 3 source term (from `ERF_Advance.cpp`) |
 | `[LNG WARNING]` | Non-fatal issues (file open failures, etc.) |
+
+### E4. Receptor Sampling Must Reduce Across Ranks
+
+Point receptor sampling involves locating a cell by physical coordinate
+across the LNG grid. The cell may be owned by any rank. The correct pattern
+is to check ownership locally and then reduce:
+
+```cpp
+// Each rank checks if it owns the receptor cell
+amrex::Real local_val = 0.0;
+for (amrex::MFIter mfi(conc_sfc); mfi.isValid(); ++mfi) {
+    if (mfi.validbox().contains(receptor_iv)) {
+        local_val = conc_sfc[mfi](receptor_iv, 0);
+    }
+}
+// MPI reduce — all ranks participate
+amrex::ParallelDescriptor::ReduceRealSum(local_val);
+// IOProcessor writes
+if (amrex::ParallelDescriptor::IOProcessor())
+    out << local_val << "\n";
+```
+
+**Never use IOProcessor guard before the `ReduceRealSum`** — same rule as B1.
 
 ---
 
@@ -351,6 +476,7 @@ them causes silent misconfiguration or a hang.
 ```
 # ── Mandatory for any LNG run with 2+ MPI ranks ──────────────────────────────
 amrex.max_grid_size_z = <same as amr.n_cell z>   # prevents z-decomposition
+# Note: will appear in "Unused ParmParse Variables" — this is expected.
 
 # ── ERF ATM baseline (must match DustCriticalMaterials) ──────────────────────
 erf.prob_name         = "ABL"
@@ -364,7 +490,7 @@ zhi.type              = "SlipWall"
 erf.pbl_type          = "MRF"
 erf.transport_scalar  = true
 erf.use_gravity       = true
-erf.sum_interval      = 1    # required (must call all-ranks reduction, now fixed)
+erf.sum_interval      = 1    # required — all-ranks reduction fixed in ERF_LNGStatsOutput.H
 
 # ── LNG mandatory parameters ──────────────────────────────────────────────────
 erf.lng.enable        = true
@@ -372,6 +498,16 @@ erf.lng.grid_ratio    = <integer>       # must divide amr.n_cell x,y
 erf.lng.atm_feedback  = 1.0
 erf.lng.lfl_vol_fraction = 0.05
 erf.lng.ufl_vol_fraction = 0.15
+
+# ── Phase 6 output (optional but recommended) ─────────────────────────────────
+erf.lng.lng_plot_int     = 5            # write plotfile every 5 steps
+erf.lng.lng_plot_prefix  = "plt_lng_"
+erf.lng.lng_diag_file    = "lng_diag.csv"
+
+# ── Phase 6 receptor sampling (optional) ─────────────────────────────────────
+erf.lng.lng_receptor_names = "center" "downwind"
+erf.lng.lng_receptor_x     = 1500.0   1700.0
+erf.lng.lng_receptor_y     = 1500.0   1500.0
 ```
 
 ---
@@ -385,33 +521,41 @@ Use this checklist before opening a PR for any new LNG phase:
 - [ ] All `FillBoundary` calls pass `geom_lng.periodicity()`
 - [ ] No `amrex::ReduceSum` with `amrex::Loop` for cross-rank quantities
 - [ ] No `average_down` calls without geometry arguments
-- [ ] No direct `.array(mfi)` access on a MultiFab from a different grid when iterating
+- [ ] No direct `.array(mfi)` access on a MultiFab from a different grid
+- [ ] Plotfile write follows the 4-step Barrier pattern (Rule B7)
+- [ ] Point receptor sampling uses `ReduceRealSum` (Rule E4)
 
 **Grid Construction**
 - [ ] Domain extents use `atm_geom.Domain()`, not `atm_ba[0]`
 - [ ] Cell counts use `boxArray().numPts()`, not `size()`
 - [ ] New MultiFabs live on the correct BoxArray/DM (LNG grid or ATM grid)
 - [ ] ATM-grid scratch MFs allocated for any cross-grid access
+- [ ] Multi-component MultiFab copies use explicit component indices
 
 **Build System**
 - [ ] New `.cpp` files registered in `Make.package`
 - [ ] New `.cpp` files registered in `CMake/BuildERFExe.cmake`
+- [ ] No `std::vector` → `amrex::Vector` implicit conversions
 
 **Testing**
 - [ ] `amrex.max_grid_size_z = <nz>` in inputs file
 - [ ] Test runs with 1 proc (single-rank correctness)
-- [ ] Test runs with 2 procs (multi-rank MPI safety)
-- [ ] `erf.sum_interval = 1` set and simulation completes all steps
+- [ ] Test runs with 2 procs `mpirun -n 2` (multi-rank MPI safety)
+- [ ] `erf.sum_interval = 1` set and all steps complete
+- [ ] "Unused ParmParse Variables: max_grid_size_z" appears at end (expected)
+- [ ] `RHO LNG > 0` in `TIME=` summary by step 2 (confirms scalar injection)
 
 **Output**
 - [ ] CSV writes NOT gated on `lng_debug`
 - [ ] `write_output` has `m_last_output_step` duplicate guard
 - [ ] All console prints use correct `[LNG]` prefix tier
+- [ ] Plotfile written at correct intervals (check `[LNG] Writing LNG plotfile`)
 
 **Documentation**
 - [ ] `LNG_DEVELOPMENT.md` updated with new phase section
 - [ ] New parameters added to `ERF_LNGParams.H` with Doxygen comments
 - [ ] Pass criteria listed in PR description
+- [ ] `LNG_MPI_SKILLS.md` updated with any new bugs/fixes
 
 ---
 
@@ -433,3 +577,27 @@ Use this checklist before opening a PR for any new LNG phase:
 | 12 | `ERF_LNGWindExtract.cpp` not in CMake | PR#165 | CMake linker error | `CMake/BuildERFExe.cmake` | A2 |
 | 13 | LNG_BuildOnly on toy 16×16×8 domain | PR#163 | SurfaceLayer incompatible | inputs_lng_buildonly | A3 |
 | 14 | `debug Barrier()` left in production code | Post-PR#166 | Global MPI sync at every step | `ERF_LNGLayer.cpp` | E2 |
+| 15 | `std::vector` → `amrex::Vector` implicit conversion | Phase 6 | Compile error in `ERF_LNGPlotfile.cpp` line 126 | `ERF_LNGPlotfile.cpp` | A5 |
+| 16 | Plotfile missing `Barrier` after dir creation | Phase 6 | Race condition: non-IO ranks call VisMF before dir exists | `ERF_LNGPlotfile.cpp` | B7 |
+| 17 | `ERF_LNGPlotfile.cpp` not in CMake | Phase 6 | CMake linker error | `CMake/BuildERFExe.cmake` | A2 |
+
+---
+
+## Confirmed Working Configurations
+
+The following have been verified to complete all 20 steps without hanging:
+
+| Configuration | n_cell | grid_ratio | LNG cells | Procs | Status |
+|---|---|---|---|---|---|
+| LNG_GravityCurrent baseline | 8×8×64 | 2 | 16×16 | 1 | ✅ |
+| LNG_GravityCurrent multi-rank | 32×32×64 | 4 | 128×128 | 2 | ✅ |
+| LNG_Output Phase 6 | 32×32×64 | 4 | 128×128 | 2 | ✅ |
+| DustIntegration (reference) | 32×32×64 | 4 | 128×128 | 2 | ✅ |
+
+Key observable indicators of a healthy run:
+- `[LNG DEBUG] Prerequisite check 3 passed` at startup
+- `RHO LNG > 0` in `TIME=` summary from step 2 onward
+- `gc_active_cells` equals `boxArray().numPts()` (16384 for 128×128)
+- `[LNG] Writing LNG plotfile plt_lng_XXXXX` at correct intervals
+- `[LNG DEBUG] Phase 6: receptor sampling step=N  n_receptors=2`
+- `Unused ParmParse Variables: amrex.max_grid_size_z` at end (expected)

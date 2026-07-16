@@ -123,7 +123,9 @@ void WriteLNGPlotfile(const std::string& plotfile_prefix,
         if (!hfile.good()) amrex::FileOpenFailed(header_path);
 
         amrex::Vector<amrex::BoxArray>  ba_vec   = {lg.ba};
-        amrex::Vector<std::string>      var_vec  = varnames;
+        //amrex::Vector<std::string>      var_vec  = varnames;
+        auto varnames_std = lng_plotfile_var_names();
+        amrex::Vector<std::string> var_vec(varnames_std.begin(), varnames_std.end());
         amrex::Vector<amrex::Geometry>  geom_vec = {lg.geom};
         amrex::Vector<int>              steps    = {step};
         amrex::Vector<amrex::IntVect>   rr       = {};
