@@ -13,7 +13,7 @@
 #define NDRY       3
 
 // This defines the ACTUAL number of non-moisture scalar vars
-#define NSCALARS   1
+#define NSCALARS   2
 
 // This defines the MAXIMUM number of moisture vars (six q's plus five n's)
 #define NMOIST_max 11
