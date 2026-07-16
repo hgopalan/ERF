@@ -2,16 +2,17 @@
 # Tests all three Phase 5 physics components.
 # ATM configuration follows LNG_WindExtraction (neutral ABL with SurfaceLayer).
 
-# ── ERF ATM configuration (from LNG_WindExtraction / DustCriticalMaterials) ──────────────────
+# ── ERF ATM configuration ────────────────────────────────────────────────────
 erf.prob_name = "ABL"
 max_step = 20
 amr.max_level = 0
 amrex.fpe_trap_invalid = 0
 fabarray.mfiter_tile_size = 1024 1024 1024
 geometry.prob_extent = 3000 3000 1024
-amr.n_cell = 8 8 64
+amr.n_cell = 32 32 64
 geometry.is_periodic = 1 1 0
-amrex.max_grid_size_z = 128
+# Prevent z-decomposition — required by LNG (and Dust) for 2D slab operations
+amrex.max_grid_size_z = 64
 zlo.type = "surface_layer"
 erf.most.z0 = 0.1
 erf.most.zref = 24.0
@@ -43,7 +44,7 @@ erf.abl_driver_type = "GeostrophicWind"
 erf.abl_geo_wind = 15.0 0.0 0.0
 erf.transport_scalar = true
 
-# ── LNG module — Phase 5 (Gravity Current) ────────────────────────────────
+# ── LNG module — Phase 5 (Gravity Current) ───────────────────────────────────
 erf.lng.enable              = true
 erf.lng.verbose             = 2
 erf.lng.lng_debug           = true
@@ -64,8 +65,8 @@ erf.lng.Hv_LNG              = 509000.0
 erf.lng.rho_vapor_ref       = 1.76
 erf.lng.rho_air             = 1.225
 
-# Grid coupling
-erf.lng.grid_ratio          = 2
+# Grid coupling — grid_ratio=4 with n_cell=32 gives 128x128 LNG grid
+erf.lng.grid_ratio          = 4
 erf.lng.atm_feedback        = 1.0
 erf.lng.zref                = 24.0
 erf.lng.z0_lng              = 0.01
