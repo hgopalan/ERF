@@ -402,6 +402,8 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
             amrex::Print() << "[LNG DEBUG] NaN check PASSED step=" << m_step << "\n";
         }
     }
+amrex::Print() << "[LNG DEBUG] advance: STEP " << m_step << " COMPLETE\n";
+amrex::ParallelDescriptor::Barrier();  // confirm all ranks reached here
     
     // Step J: Extract return fields from 3D solver (Phase 4)
     // Called with the conserved state from the CURRENT timestep.
