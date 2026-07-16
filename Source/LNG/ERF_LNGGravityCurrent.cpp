@@ -1,7 +1,7 @@
 /**
  * @file ERF_LNGGravityCurrent.cpp
  * @brief Implementation of shallow-water gravity current PDEs for LNG Phase 5
- * 
+ *
  * Solves the depth-averaged shallow-water equations using explicit first-order
  * time-stepping. See ERF_LNGGravityCurrent.H for governing equations and references.
  */
@@ -17,6 +17,14 @@
 
 /**
  * @brief Advance shallow-water gravity current one timestep (explicit Euler)
+ *
+ * MPI-safe implementation:
+ *  - ParallelFor kernels work correctly with any number of MPI ranks.
+ *  - FillBoundary called with geom_lng.periodicity() so ghost cells are
+ *    exchanged across rank boundaries (fixes hang with >1 MPI rank).
+ *  - All debug diagnostics use MultiFab::max/min/sum which are MPI-collective
+ *    and correct across ranks. The previous ReduceSum with amrex::Loop was a
+ *    CPU host lambda — not MPI-reduced — causing wrong counts and hangs.
  */
 void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
                               amrex::MultiFab&       lng_gc_u,
@@ -31,161 +39,142 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
                               amrex::Real            dt,
                               bool                   lng_debug)
 {
-    // Compute reduced gravity g'
-    amrex::Real g_prime = compute_reduced_gravity(rho_vapor, rho_air);
-    
-    // Mesh spacing
-    const auto& dx = geom_lng.CellSize();
-    amrex::Real dx_inv = 1.0 / dx[0];
-    
-    // Time step coefficients
+    amrex::Real g_prime     = compute_reduced_gravity(rho_vapor, rho_air);
+    const auto& dx          = geom_lng.CellSize();
+    amrex::Real dx_inv      = 1.0 / dx[0];
     amrex::Real dt_over_rho = dt / rho_vapor;
-    
-    // MFIter loop over all boxes
+
+    // -------------------------------------------------------------------------
+    // Physics update — one MFIter tile at a time
+    // -------------------------------------------------------------------------
     for (amrex::MFIter mfi(lng_gc_h, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
-        
-        auto h_arr    = lng_gc_h.array(mfi);
-        auto u_arr    = lng_gc_u.array(mfi);
-        auto v_arr    = lng_gc_v.array(mfi);
-        auto ri_flag  = lng_gc_ri_flag.array(mfi);
-        auto evap     = lng_evap_flux.const_array(mfi);
-        auto ustar    = lng_ustar.const_array(mfi);
-        
-        // Temporary arrays for updated state
+
+        auto h_arr   = lng_gc_h.array(mfi);
+        auto u_arr   = lng_gc_u.array(mfi);
+        auto v_arr   = lng_gc_v.array(mfi);
+        auto ri_flag = lng_gc_ri_flag.array(mfi);
+        auto evap    = lng_evap_flux.const_array(mfi);
+        auto ustar   = lng_ustar.const_array(mfi);
+
+        // Temporary FABs for the updated state (GPU-safe arena)
         amrex::FArrayBox h_new(bx, 1, amrex::The_Async_Arena());
         amrex::FArrayBox u_new(bx, 1, amrex::The_Async_Arena());
         amrex::FArrayBox v_new(bx, 1, amrex::The_Async_Arena());
         auto h_new_arr = h_new.array();
         auto u_new_arr = u_new.array();
         auto v_new_arr = v_new.array();
-        
-        // Step 1: Update from evaporation source and pressure gradients
+
+        // Step 1: explicit Euler update of depth and momentum
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-            amrex::Real h_old = h_arr(i, j, k);
-            amrex::Real u_old = u_arr(i, j, k);
-            amrex::Real v_old = v_arr(i, j, k);
-            
+            amrex::Real h_old  = h_arr(i, j, k);
+            amrex::Real u_old  = u_arr(i, j, k);
+            amrex::Real v_old  = v_arr(i, j, k);
             amrex::Real hu_old = h_old * u_old;
             amrex::Real hv_old = h_old * v_old;
-            
-            amrex::Real evap_src = evap(i, j, k) * dt_over_rho;
-            
-            amrex::Real h_new_val = amrex::max(h_old + evap_src, 0.0);
-            
-            // Pressure gradient using central/one-sided differences
-            amrex::Real dhx = 0.0;
-            amrex::Real dhy = 0.0;
-            
-            if (i > bx.loVect()[0] && i < bx.hiVect()[0]) {
-                dhx = (h_arr(i+1, j, k) - h_arr(i-1, j, k)) * 0.5 * dx_inv;
-            } else if (i < bx.hiVect()[0]) {
-                dhx = (h_arr(i+1, j, k) - h_arr(i, j, k)) * dx_inv;
-            } else if (i > bx.loVect()[0]) {
-                dhx = (h_arr(i, j, k) - h_arr(i-1, j, k)) * dx_inv;
-            }
-            
-            if (j > bx.loVect()[1] && j < bx.hiVect()[1]) {
-                dhy = (h_arr(i, j+1, k) - h_arr(i, j-1, k)) * 0.5 * dx_inv;
-            } else if (j < bx.hiVect()[1]) {
-                dhy = (h_arr(i, j+1, k) - h_arr(i, j, k)) * dx_inv;
-            } else if (j > bx.loVect()[1]) {
-                dhy = (h_arr(i, j, k) - h_arr(i, j-1, k)) * dx_inv;
-            }
-            
-            amrex::Real h_avg = 0.5 * (h_old + h_new_val);
-            amrex::Real pressure_grad_x = -g_prime * h_avg * dhx;
-            amrex::Real pressure_grad_y = -g_prime * h_avg * dhy;
-            
-            amrex::Real drag_x = -Cd * u_old * std::abs(u_old);
-            amrex::Real drag_y = -Cd * v_old * std::abs(v_old);
-            
-            amrex::Real hu_new_val = hu_old + (pressure_grad_x + drag_x) * dt;
-            amrex::Real hv_new_val = hv_old + (pressure_grad_y + drag_y) * dt;
-            
-            amrex::Real u_new_val = 0.0;
-            amrex::Real v_new_val = 0.0;
-            
+
+            // Depth update from evaporation source
+            amrex::Real h_new_val = amrex::max(h_old + evap(i, j, k) * dt_over_rho, 0.0);
+
+            // Pressure gradient ∂h/∂x, ∂h/∂y — central differences with one-sided at boundaries
+            amrex::Real dhx = 0.0, dhy = 0.0;
+
+            if (i > bx.loVect()[0] && i < bx.hiVect()[0])
+                dhx = (h_arr(i+1,j,k) - h_arr(i-1,j,k)) * 0.5 * dx_inv;
+            else if (i < bx.hiVect()[0])
+                dhx = (h_arr(i+1,j,k) - h_arr(i,j,k)) * dx_inv;
+            else if (i > bx.loVect()[0])
+                dhx = (h_arr(i,j,k) - h_arr(i-1,j,k)) * dx_inv;
+
+            if (j > bx.loVect()[1] && j < bx.hiVect()[1])
+                dhy = (h_arr(i,j+1,k) - h_arr(i,j-1,k)) * 0.5 * dx_inv;
+            else if (j < bx.hiVect()[1])
+                dhy = (h_arr(i,j+1,k) - h_arr(i,j,k)) * dx_inv;
+            else if (j > bx.loVect()[1])
+                dhy = (h_arr(i,j,k) - h_arr(i,j-1,k)) * dx_inv;
+
+            // Pressure gradient force: -g'*h_avg*∂h/∂x  (semi-implicit: use average depth)
+            amrex::Real h_avg    = 0.5 * (h_old + h_new_val);
+            amrex::Real hu_new_val = hu_old + (-g_prime*h_avg*dhx - Cd*u_old*std::abs(u_old)) * dt;
+            amrex::Real hv_new_val = hv_old + (-g_prime*h_avg*dhy - Cd*v_old*std::abs(v_old)) * dt;
+
+            // Recover velocities; zero out if depth too small
+            amrex::Real u_new_val = 0.0, v_new_val = 0.0;
             if (h_new_val > LNGGravityConst::H_MIN) {
                 u_new_val = hu_new_val / h_new_val;
                 v_new_val = hv_new_val / h_new_val;
             } else {
                 h_new_val = 0.0;
             }
-            
+
+            // Clamp velocities to prevent runaway
             u_new_val = amrex::max(amrex::min(u_new_val,  LNGGravityConst::U_MAX),
                                                -LNGGravityConst::U_MAX);
             v_new_val = amrex::max(amrex::min(v_new_val,  LNGGravityConst::U_MAX),
                                                -LNGGravityConst::U_MAX);
-            
+
             h_new_arr(i, j, k) = h_new_val;
             u_new_arr(i, j, k) = u_new_val;
             v_new_arr(i, j, k) = v_new_val;
         });
-        
-        // Step 2: Copy updated state back and compute Richardson number
+
+        // Step 2: write back updated state and compute Richardson flag
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-            amrex::Real h_val     = h_new_arr(i, j, k);
-            amrex::Real u_val     = u_new_arr(i, j, k);
-            amrex::Real v_val     = v_new_arr(i, j, k);
-            amrex::Real ustar_val = ustar(i, j, k);
-            
-            h_arr(i, j, k) = h_val;
-            u_arr(i, j, k) = u_val;
-            v_arr(i, j, k) = v_val;
-            
-            amrex::Real Ri = compute_richardson(g_prime, h_val, ustar_val);
+            amrex::Real h_val = h_new_arr(i, j, k);
+            h_arr(i, j, k)   = h_val;
+            u_arr(i, j, k)   = u_new_arr(i, j, k);
+            v_arr(i, j, k)   = v_new_arr(i, j, k);
+            // ri_flag = 0 → gravity current active; 1 → mixed (3D dispersion) regime
+            amrex::Real Ri   = compute_richardson(g_prime, h_val, ustar(i, j, k));
             ri_flag(i, j, k) = is_gravity_current_active(Ri) ? 0.0 : 1.0;
         });
     }
-    
-    // Optional debug output — use standalone AMReX reduce functions
+
+    // -------------------------------------------------------------------------
+    // FillBoundary with periodicity — REQUIRED for >1 MPI rank.
+    // Without this, ghost cells at inter-rank boundaries are stale, causing
+    // wrong pressure gradients in the next step or an MPI deadlock.
+    // -------------------------------------------------------------------------
+    lng_gc_h.FillBoundary(geom_lng.periodicity());
+    lng_gc_u.FillBoundary(geom_lng.periodicity());
+    lng_gc_v.FillBoundary(geom_lng.periodicity());
+    lng_gc_ri_flag.FillBoundary(geom_lng.periodicity());
+
+    // -------------------------------------------------------------------------
+    // Debug diagnostics — ALL using MPI-collective MultiFab operations.
+    // DO NOT use amrex::ReduceSum/Max/Min with amrex::Loop: those are CPU-only
+    // host lambdas and are NOT reduced across MPI ranks, producing wrong counts
+    // and causing hangs on multi-rank runs.
+    // -------------------------------------------------------------------------
     if (lng_debug) {
+        // max/min/sum on MultiFab are MPI-collective — safe with any rank count
         amrex::Real h_max_val = lng_gc_h.max(0);
         amrex::Real u_max_val = lng_gc_u.max(0);
         amrex::Real v_max_val = lng_gc_v.max(0);
 
-        // Count gravity-current-active cells (ri_flag == 0) using ReduceSum
-        amrex::Long gc_active_cells = amrex::ReduceSum(lng_gc_ri_flag, 0,
-            [=] (amrex::Box const& bx,
-                 amrex::Array4<amrex::Real const> const& flag) -> amrex::Long
-            {
-                amrex::Long cnt = 0;
-                amrex::Loop(bx, [&](int i, int j, int k) {
-                    if (flag(i,j,k) < 0.5) ++cnt;
-                });
-                return cnt;
-            });
+        // Active cells: ri_flag==0 → active; ri_flag==1 → mixed
+        // sum(ri_flag) = number of mixed cells; total - mixed = active
+        amrex::Long total_cells     = static_cast<amrex::Long>(lng_gc_ri_flag.boxArray().numPts());
+        amrex::Real ri_flag_sum     = lng_gc_ri_flag.sum(0);
+        amrex::Long mixed_cells     = static_cast<amrex::Long>(ri_flag_sum);
+        amrex::Long gc_active_cells = total_cells - mixed_cells;
 
-        // Compute Ri max and min over all cells
-        amrex::Real ri_max_val = amrex::ReduceMax(lng_gc_h, lng_ustar, 0,
-            [=] (amrex::Box const& bx,
-                 amrex::Array4<amrex::Real const> const& h,
-                 amrex::Array4<amrex::Real const> const& us) -> amrex::Real
-            {
-                amrex::Real mx = -1.0e30;
-                amrex::Loop(bx, [&](int i, int j, int k) {
-                    amrex::Real Ri = compute_richardson(g_prime, h(i,j,k), us(i,j,k));
-                    mx = amrex::max(mx, Ri);
-                });
-                return mx;
+        // Richardson min/max: compute into scratch MultiFab, then use MF::max/min
+        amrex::MultiFab ri_scratch(lng_gc_h.boxArray(),
+                                   lng_gc_h.DistributionMap(), 1, 0);
+        for (amrex::MFIter mfi(ri_scratch, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.tilebox();
+            auto ri_arr = ri_scratch.array(mfi);
+            auto h_arr  = lng_gc_h.const_array(mfi);
+            auto us_arr = lng_ustar.const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+                ri_arr(i, j, k) = compute_richardson(g_prime,
+                                                     h_arr(i, j, k),
+                                                     us_arr(i, j, k));
             });
-
-        amrex::Real ri_min_val = amrex::ReduceMin(lng_gc_h, lng_ustar, 0,
-            [=] (amrex::Box const& bx,
-                 amrex::Array4<amrex::Real const> const& h,
-                 amrex::Array4<amrex::Real const> const& us) -> amrex::Real
-            {
-                amrex::Real mn = 1.0e30;
-                amrex::Loop(bx, [&](int i, int j, int k) {
-                    amrex::Real Ri = compute_richardson(g_prime, h(i,j,k), us(i,j,k));
-                    mn = amrex::min(mn, Ri);
-                });
-                return mn;
-            });
-
-        amrex::Long total_cells  = static_cast<amrex::Long>(lng_gc_ri_flag.boxArray().numPts());
-        amrex::Long mixed_cells  = total_cells - gc_active_cells;
+        }
+        amrex::Real ri_max_val = ri_scratch.max(0);
+        amrex::Real ri_min_val = ri_scratch.min(0);
 
         amrex::Print() << "[LNG DEBUG] Phase 5: gravity_current"
                        << "  h_max=" << h_max_val << " m"
