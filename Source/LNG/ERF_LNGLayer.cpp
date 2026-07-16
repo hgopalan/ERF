@@ -349,8 +349,11 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
         if (params.lng_debug) {
             amrex::Real h_max  = m_lng_gc_h->max(0);
             amrex::Real u_max  = m_lng_gc_u->max(0);
+            //amrex::Real ri_sum = m_lng_gc_ri_flag->sum(0);
+            //amrex::Long gc_cells = m_lng_gc_h->size() - (long)ri_sum;
             amrex::Real ri_sum = m_lng_gc_ri_flag->sum(0);
-            amrex::Long gc_cells = m_lng_gc_h->size() - (long)ri_sum;
+            amrex::Long total_gc_cells = static_cast<amrex::Long>(m_lng_gc_h->boxArray().numPts());
+            amrex::Long gc_cells = total_gc_cells - static_cast<amrex::Long>(ri_sum);
             amrex::Print() << "[LNG DEBUG] Phase 5: step=" << m_step
                            << "  gc_h_max=" << h_max << " m"
                            << "  gc_u_max=" << u_max << " m/s"
