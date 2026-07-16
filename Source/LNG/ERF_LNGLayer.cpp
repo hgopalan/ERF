@@ -500,8 +500,12 @@ void LNGLayer::write_output(int nstep, double cur_time, bool is_final)
 
     // Phase 6: plotfile output
     bool write_plt = false;
-    if (m_params.lng_plot_int > 0) write_plt = (nstep % m_params.lng_plot_int == 0);
-    if (is_final && nstep > m_last_output_step) write_plt = true;
+    if (m_params.lng_plot_int > 0) {
+        write_plt = (nstep % m_params.lng_plot_int == 0);
+    }
+    if (is_final) {
+        write_plt = true;
+    }
 
     if (write_plt) {
         WriteLNGPlotfile(m_params.lng_plot_prefix, *this, cur_time, nstep);
