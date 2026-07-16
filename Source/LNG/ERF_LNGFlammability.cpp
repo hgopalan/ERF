@@ -11,7 +11,7 @@
 
 #include <AMReX_MFIter.H>
 #include <AMReX_Reduce.H>
-#include <AMReX_Print.h>
+#include <AMReX_Print.H>
 
 /**
  * @brief Compute LFL and UFL exceedance masks from concentration field
