@@ -13,6 +13,8 @@
 #include "ERF_LNGAtmReturn.H"
 #include "ERF_LNGGravityCurrent.H"
 #include "ERF_LNGFlammability.H"
+#include "ERF_LNGPlotfile.H"
+#include "ERF_LNGReceptorOutput.H"
 #include "ERF.H"
 #include "ERF_IndexDefines.H"
 #include <AMReX_MultiFab.H>
@@ -173,6 +175,17 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     write_lng_stats_header(params.lng_diag_file);
     if (params.lng_debug)
         amrex::Print() << "[LNG DEBUG] Phase 1: lng_diag.csv header written\n";
+
+    // Phase 6: create receptor CSV header files
+    for (int r = 0; r < (int)m_params.lng_receptor_names.size(); ++r) {
+        write_lng_receptor_header(
+            "lng_receptor_" + m_params.lng_receptor_names[r] + ".csv",
+            m_params.lng_receptor_names[r],
+            m_params.lng_receptor_x[r], m_params.lng_receptor_y[r]);
+    }
+    if (m_params.lng_debug && !m_params.lng_receptor_names.empty())
+        amrex::Print() << "[LNG DEBUG] Phase 6: " << m_params.lng_receptor_names.size()
+                       << " receptor file(s) initialized\n";
 
     if (params.lng_debug || params.verbose >= 1) {
         amrex::Print() << "[LNG DEBUG] Phase 2: pool evaporation model initialized\n"
@@ -380,6 +393,22 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
 
     compute_flammability_diagnostics(dt, m_time, m_step);
 
+    // Phase 6: receptor point sampling
+    if (m_lng_conc_sfc && !m_params.lng_receptor_names.empty()) {
+        for (int r = 0; r < (int)m_params.lng_receptor_names.size(); ++r) {
+            append_receptor_sample(m_step, m_time,
+                "lng_receptor_" + m_params.lng_receptor_names[r] + ".csv",
+                m_params.lng_receptor_names[r],
+                m_params.lng_receptor_x[r], m_params.lng_receptor_y[r],
+                *m_lng_conc_sfc, m_lg.geom,
+                m_params.rho_vapor_ref, m_params.mol_weight_LNG,
+                m_params.lfl_vol_fraction);
+        }
+        if (m_params.lng_debug)
+            amrex::Print() << "[LNG DEBUG] Phase 6: receptor sampling step=" << m_step
+                           << "  n_receptors=" << m_params.lng_receptor_names.size() << "\n";
+    }
+
     if (params.verbose >= 3) {
         amrex::Print() << "[LNG DEBUG3] step=" << m_step << "\n"
                        << "[LNG DEBUG3]   lng_pool_depth   min=" << std::scientific
@@ -469,13 +498,25 @@ void LNGLayer::write_output(int nstep, double cur_time, bool is_final)
     if (nstep == m_last_output_step) return;
     m_last_output_step = nstep;
 
-    if (m_params.lng_plot_int > 0 && nstep % m_params.lng_plot_int == 0)
-        amrex::Print() << "[LNG] Plotfile write stub at step " << nstep << "\n";
+    // Phase 6: plotfile output
+    bool write_plt = false;
+    if (m_params.lng_plot_int > 0) write_plt = (nstep % m_params.lng_plot_int == 0);
+    if (is_final && nstep > m_last_output_step) write_plt = true;
 
+    if (write_plt) {
+        WriteLNGPlotfile(m_params.lng_plot_prefix, *this, cur_time, nstep);
+        if (m_params.lng_debug)
+            amrex::Print() << "[LNG DEBUG] Phase 6: plotfile written step=" << nstep
+                           << "  is_final=" << is_final << "\n";
+    }
+
+    // MPI rule (LNG_MPI_SKILLS.md B1): all reductions before IOProcessor guard
+    // lfl_area and ufl_area are scalar reals computed in advance() — no new reduction needed here
     append_lng_stats_phase2(nstep, cur_time, m_params.lng_diag_file,
                             m_lng_pool_depth.get(), m_lng_pool_mask.get(),
                             m_lng_evap_flux.get(), m_lng_vapor_conc.get(),
-                            m_lg.geom, m_params.rho_LNG);
+                            m_lg.geom, m_params.rho_LNG,
+                            m_lfl_area, m_ufl_area);
 
     if (m_params.lng_debug) {
         amrex::Real pool_mass = compute_pool_mass(*m_lng_pool_depth, m_lg.geom, m_params.rho_LNG);
