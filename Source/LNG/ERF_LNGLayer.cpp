@@ -326,12 +326,15 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
     
     // Step F: Deplete pool from evaporation
     if (dt > 0.0) {
+        /*deplete_pool_from_evaporation(*m_lng_pool_depth, *m_lng_evap_flux,
+                                      params.rho_LNG, dt, params.lng_debug);*/
         deplete_pool_from_evaporation(*m_lng_pool_depth, *m_lng_evap_flux,
-                                      params.rho_LNG, dt, params.lng_debug);
+                                    m_lg.geom, params.rho_LNG, dt, params.lng_debug);
     }
     
     // Step G: Update pool mask
-    update_pool_mask(*m_lng_pool_mask, *m_lng_pool_depth);
+    //update_pool_mask(*m_lng_pool_mask, *m_lng_pool_depth);
+    update_pool_mask(*m_lng_pool_mask, *m_lng_pool_depth, m_lg.geom);
     
     // Step G2: Advance gravity current (Phase 5)
     if (params.enable_gravity_current && dt > 0.0) {

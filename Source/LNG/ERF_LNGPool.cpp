@@ -1,16 +1,10 @@
-/**
- * @file ERF_LNGPool.cpp
- * @brief Implementation of LNG pool dynamics and geometry functions
- * @note Phase 2: Basic pool evolution (no gravity current spreading yet)
- * @ref ERF_LNGPool.H — function declarations and theory
- */
-
 #include "ERF_LNGPool.H"
 #include <AMReX_MFIter.H>
 #include <cmath>
 
 void update_pool_mask(amrex::MultiFab& lng_pool_mask,
                       const amrex::MultiFab& lng_pool_depth,
+                      const amrex::Geometry& geom_lng,
                       amrex::Real depth_threshold)
 {
     for (amrex::MFIter mfi(lng_pool_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
@@ -23,8 +17,7 @@ void update_pool_mask(amrex::MultiFab& lng_pool_mask,
             mask_arr(i, j, k) = (depth_arr(i, j, k) > depth_threshold) ? 1.0 : 0.0;
         });
     }
-
-    lng_pool_mask.FillBoundary();
+    lng_pool_mask.FillBoundary(geom_lng.periodicity());
 }
 
 void apply_spill_source(amrex::MultiFab& lng_pool_depth,
@@ -37,14 +30,12 @@ void apply_spill_source(amrex::MultiFab& lng_pool_depth,
 {
     if (spill_rate_kg_s <= 0.0 || dt <= 0.0) return;
 
-    const auto& dx       = geom_lng.CellSize();
+    const auto& dx        = geom_lng.CellSize();
     amrex::Real cell_area = dx[0] * dx[1];
     amrex::Real pool_radius = std::sqrt(pool_area_m2 / M_PI);
+    amrex::Real effective_radius = amrex::max(pool_radius,
+                                              0.5 * std::sqrt(dx[0]*dx[0] + dx[1]*dx[1]));
 
-    // Use max(pool_radius, half-diagonal of one cell) so at least one cell is always seeded
-    amrex::Real effective_radius = amrex::max(pool_radius, 0.5 * std::sqrt(dx[0]*dx[0] + dx[1]*dx[1]));
-
-    // Count active cells (those inside effective_radius) to distribute mass correctly
     int n_cells = amrex::ReduceSum(lng_pool_depth, 0,
         [=] (amrex::Box const& bx, amrex::Array4<amrex::Real const> const&) -> int {
             int count = 0;
@@ -59,9 +50,7 @@ void apply_spill_source(amrex::MultiFab& lng_pool_depth,
 
     if (n_cells < 1) n_cells = 1;
 
-    // Distribute total spilled volume over active cells
-    // dh = (spill_rate * dt / rho_LNG) / (n_cells * cell_area)
-    amrex::Real total_volume = spill_rate_kg_s * dt / rho_LNG;  // [m^3]
+    amrex::Real total_volume = spill_rate_kg_s * dt / rho_LNG;
     amrex::Real dh_per_cell  = total_volume / (n_cells * cell_area);
 
     for (amrex::MFIter mfi(lng_pool_depth, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
@@ -78,12 +67,12 @@ void apply_spill_source(amrex::MultiFab& lng_pool_depth,
             }
         });
     }
-
-    lng_pool_depth.FillBoundary();
+    lng_pool_depth.FillBoundary(geom_lng.periodicity());
 }
 
 void deplete_pool_from_evaporation(amrex::MultiFab& lng_pool_depth,
                                    const amrex::MultiFab& lng_evap_flux,
+                                   const amrex::Geometry& geom_lng,
                                    amrex::Real rho_LNG,
                                    amrex::Real dt,
                                    bool lng_debug)
@@ -102,8 +91,7 @@ void deplete_pool_from_evaporation(amrex::MultiFab& lng_pool_depth,
             depth_arr(i, j, k)  = amrex::max(0.0, depth_arr(i, j, k) - dh_evap);
         });
     }
-
-    lng_pool_depth.FillBoundary();
+    lng_pool_depth.FillBoundary(geom_lng.periodicity());
 
     if (lng_debug) {
         amrex::Real depth_max = lng_pool_depth.max(0);
