@@ -29,7 +29,8 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     m_params = params;
     
     // Validate prerequisites
-    check_lng_prerequisites(params, erf.Geom(0));
+    //check_lng_prerequisites(params, erf.Geom(0));
+    check_lng_prerequisites(params, erf.Geom(0), erf.boxArray(0));
     
     // Build 2D LNG grid from ATM level-0 grid
     m_lg.build(erf.boxArray(0), erf.DistributionMap(0), erf.Geom(0), params.grid_ratio);

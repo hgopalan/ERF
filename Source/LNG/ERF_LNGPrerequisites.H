@@ -49,6 +49,7 @@
  * @throws amrex::Abort if fatal prerequisites violated
  */
 void check_lng_prerequisites(const LNGParams& params,
-                              const amrex::Geometry& geom_atm);
+                              const amrex::Geometry& geom_atm,
+                              const amrex::BoxArray& ba_atm);
 
 #endif /* ERF_LNG_PREREQUISITES_H */
