@@ -6,7 +6,6 @@
  * Uses one-step explicit lag (flux from step n injected at step n+1, before advance_dycore()).
  */
 
-#ifdef ERF_USE_LNG
 #include <ERF_LNGAtmCoupling.H>
 #include <AMReX_MFIter.H>
 #include <AMReX_Print.H>
@@ -55,4 +54,3 @@ void apply_lng_tendency_to_cc_source(
                        << " kg/m^3/s  sum=" << tend_sum << " kg/m^3/s\n";
     }
 }
-#endif
