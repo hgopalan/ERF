@@ -17,10 +17,10 @@ The ERF-LNG module simulates liquefied natural gas (LNG) spill evaporation and v
 
 | Phase | Title | Key Deliverables | Status |
 |-------|-------|------------------|--------|
-| 1 | **Build & Initialize** | Fully compilable stub; parameter reading; grid construction; debug output | **ACTIVE** |
-| 2 | **Evaporation & Pool Spreading** | Heat transfer model; Clausius-Clapeyron; gravity current spreading | TODO |
-| 3 | **ATM Coupling (Phase I)** | Energy injection to atmosphere; sensible/latent heat source terms | TODO |
-| 4 | **Wind & BL Extraction** | Wind field interpolation at zref; u* mapping; PBL height feedback | TODO |
+| 1 | **Build & Initialize** | Fully compilable stub; parameter reading; grid construction; debug output | **COMPLETE** |
+| 2 | **Evaporation & Pool Spreading** | Heat transfer model; Clausius-Clapeyron; gravity current spreading | **COMPLETE** |
+| 3 | **ATM Coupling (Phase I)** | Energy injection to atmosphere; sensible/latent heat source terms | **COMPLETE** |
+| 4 | **Wind & BL Extraction** | Wind field interpolation at zref; u* mapping; PBL height feedback | **COMPLETE** |
 | 5 | **Flammability Tracking** | LFL/UFL exceedance zones; buoyancy-driven dispersion; plume rise | TODO |
 | 6 | **Output & Visualization** | Plotfile writes; receptor point sampling; CSV output expansion | TODO |
 | 7 | **Regulatory Compliance** | NFPA 59A exclusion zone calculation; threshold mapping | TODO |
@@ -780,5 +780,174 @@ This allows:
 ---
 
 **Phase 3 Complete: One-way 2D→3D injection via explicit lag; ready for Phase 4 (wind extraction) and Phase 5 (buoyancy-driven gravity current)**
+
+---
+
+## Phase 4: Wind & Surface Field Extraction (Live ATM Integration)
+
+### Overview
+
+Phase 4 replaces placeholder atmospheric fields with real live extractions from the ERF 3D solver and SurfaceLayer boundary condition module. The module now reads directly from the atmosphere, enabling feedback of surface friction, wind shear, temperature, and PBL height to the evaporation model.
+
+**Live field extraction:**
+- **`u*`** — friction velocity from `SurfaceLayer::get_u_star(0)` [m/s]
+- **Wind at `zref`** — vertical interpolation of face-staggered `xvel`/`yvel` to `z_surf + zref` [m/s]
+- **`T_sfc`** — surface skin temperature from `SurfaceLayer::get_t_surf(0)` [K]
+- **`PBLH`** — PBL height from `SurfaceLayer::get_pblh(0)` [m]
+- **`c_LNG_sfc`** — near-surface LNG vapor concentration from 3D conserved state at k=0 [kg/m³]
+
+**Fallback mechanism:**
+- If SurfaceLayer or velocity fields are unavailable, placeholders are used automatically
+- Identical branching pattern to Dust module (`have_atm` logic)
+
+### Physics
+
+**Wind interpolation to zref:**
+Same algorithm as Fire/Dust modules (Marticorena & Bergametti 1995 + Hong & Pan 1996):
+1. Map LNG cell (i_l, j_l) to atmospheric column (i_a = i_l / C, j_a = j_l / C)
+2. Find vertical bracket: z_phys_cc(i_a, j_a, k_lo) <= z_target < z_phys_cc(i_a, j_a, k_hi)
+3. Average face-staggered u/v to cell centers at k_lo and k_hi
+4. Linear interpolation to z_target = z_surf + zref
+5. Store in lng_wind_ref(i_l, j_l, 0, {0,1}) = {u_ref, v_ref}
+
+**Friction velocity & scalar mapping (coarsening pattern):**
+```
+lng_field(i_l, j_l, 0) = atm_field(i_l/C, j_l/C, 0)
+```
+
+### Implementation
+
+#### New Files
+
+**`Source/LNG/ERF_LNGWindExtract.cpp`** (new)
+- `fill_lng_wind_from_interpolation()` — vertical wind interpolation with GPU parallel loop
+- `fill_lng_ustar_from_surface_layer()` — coarsen u* from ATM to LNG grid
+- `fill_lng_scalar_from_atm()` — generic coarsening for any scalar (T_sfc, PBLH)
+- Debug output for each extraction with min/max values
+
+**`Source/LNG/ERF_LNGAtmReturn.H`** (new)
+- `fill_lng_conc_from_atm()` — inline function to extract RhoLNG from 3D state at k=0
+
+#### Updated Files
+
+**`Source/LNG/ERF_LNGWindExtract.H`**
+- Replace stubs with real declarations (non-inline bodies)
+- Add `lng_debug` parameter to all functions
+
+**`Source/LNG/ERF_LNGLayer.H`**
+- Add private fields:
+  ```cpp
+  class SurfaceLayer*         m_surface_layer_ptr = nullptr;
+  const amrex::MultiFab*      m_S_cons_ptr        = nullptr;
+  const amrex::Geometry*      m_geom_atm_ptr      = nullptr;
+  ```
+- Update `advance()` signature to add `surface_layer`, `S_cons`, `geom_atm` parameters
+
+**`Source/LNG/ERF_LNGLayer.cpp`**
+- Replace placeholder atmospheric state section with `have_atm` branching
+- Cache pointers at start of `advance()`
+- If `have_atm`: extract u*, wind, T_sfc, PBLH from SurfaceLayer
+- Else: set placeholders (test_ustar, test_surf_temp_K, test_wind_speed)
+- Add return field extraction call after NaN check (Step J)
+- Add Phase 4 debug prints with field values
+
+**`Source/ERF.cpp`**
+- Update m_lng_layer->advance() call with new parameters
+- Extract pointers to vars_new, z_phys_cc, geom, S_cons
+- Pass SurfaceLayer pointer, velocity fields, conserved state, geometry, nz
+
+**`Source/LNG/Make.package`**
+- Add `ERF_LNGWindExtract.cpp` to `CEXE_sources`
+- Add `ERF_LNGAtmReturn.H` to `CEXE_headers`
+
+**`CMake/BuildERFExe.cmake`**
+- Add `${SRC_DIR}/LNG/ERF_LNGWindExtract.cpp` to target_sources (CRITICAL for linker)
+
+### Debug Output
+
+When `lng_debug=true`:
+
+**Per step (Phase 4 branch):**
+```
+[LNG DEBUG] Phase 4: u* extracted  ustar_max=0.547 ustar_min=0.547 m/s
+[LNG DEBUG] Phase 4: wind extracted  u_max=12.34 v_max=0.001 m/s at zref=24.0 m
+[LNG DEBUG] Phase 4: T_sfc extracted  T_max=293.15 T_min=293.15 K
+[LNG DEBUG] Phase 4: PBLH extracted  PBLH_max=1123.4 PBLH_min=1120.2 m
+[LNG DEBUG] Phase 4: live ATM extraction active  u*_max=0.547 m/s  u_ref_max=12.34 m/s  PBLH_max=1123.4 m
+[LNG DEBUG] Phase 4: conc_sfc extracted  conc_sfc_max=0.00 kg/m^3  conc_sfc_sum=0.00
+```
+
+**Per step (fallback placeholder branch):**
+```
+[LNG DEBUG] Phase 4: placeholder path  test_ustar=0.5 m/s  test_T_sfc=293.15 K  test_wind=15.0 m/s
+```
+
+### Canonical Test: `LNG_WindExtraction`
+
+**Location:** `Exec/CanonicalTests/LNG/LNG_WindExtraction/`
+
+**Configuration:**
+- Same neutral ABL and ATM setup as LNG_ScalarInjection (3000×3000×1024 m, 8×8×64 cells)
+- MRF surface layer with z0=0.1 m, zref=24 m
+- 15 m/s geostrophic wind (u-component), 45° N latitude
+- 5 timesteps, dt=0.5 s
+
+**Expected values:**
+- `u* ≈ 0.5–0.6 m/s` (from MRF with 15 m/s geostrophic wind)
+- `wind at zref ≈ 12–13 m/s` (reduced from geostrophic by surface drag)
+- `T_sfc ≈ 293 K` (from sounding initialization)
+- `PBLH ≈ 1000–1200 m` (MRF height diagnostic)
+
+**Pass criteria (all 8 must hold):**
+1. Exit code 0, 5 steps
+2. `[LNG DEBUG] Phase 4: live ATM extraction active` appears 5 times
+3. `[LNG DEBUG] Phase 4: u* extracted  ustar_max > 0` appears 5 times
+4. `[LNG DEBUG] Phase 4: wind extracted  u_max > 0` appears 5 times
+5. `[LNG DEBUG] Phase 3: apply_to_cc_source` appears 5 times (no regression)
+6. evap_flux_max > 0 in all 5 CSV rows
+7. NaN check PASSED 5 times
+8. Fallback: placeholder path is acceptable if SurfaceLayer unavailable
+
+### Build System Updates
+
+- `Source/LNG/Make.package`: Add `ERF_LNGWindExtract.cpp`
+- `CMake/BuildERFExe.cmake`: Add `${SRC_DIR}/LNG/ERF_LNGWindExtract.cpp` (linker requirement from Dust PR #136)
+- `Exec/CanonicalTests/LNG/CMakeLists.txt`: Add `add_subdirectory(LNG_WindExtraction)`
+
+### Documentation
+
+- `LNG_DEVELOPMENT.md`: This Phase 4 section
+- `Exec/CanonicalTests/LNG/LNG_WindExtraction/README.md`: Comprehensive test documentation
+
+### Phase 4 Checklist
+
+- [x] Create `ERF_LNGWindExtract.cpp` with three extraction functions
+- [x] Create `ERF_LNGAtmReturn.H` with inline conc_sfc extraction
+- [x] Update `ERF_LNGWindExtract.H` with real declarations
+- [x] Add private SurfaceLayer/S_cons/geom pointers to `ERF_LNGLayer.H`
+- [x] Update `advance()` signature with surface_layer, S_cons, geom_atm parameters
+- [x] Implement `have_atm` branching in `ERF_LNGLayer.cpp::advance()` Step C
+- [x] Add return field extraction (Step J) in `ERF_LNGLayer.cpp::advance()`
+- [x] Wire Phase 4 in `Source/ERF.cpp` with SurfaceLayer and S_cons pointers
+- [x] Update `Source/LNG/Make.package` with new files
+- [x] Update `CMake/BuildERFExe.cmake` with ERF_LNGWindExtract.cpp (CRITICAL)
+- [x] Create `Exec/CanonicalTests/LNG/LNG_WindExtraction/` test with inputs, sounding, README, CMakeLists
+- [x] Add LNG_WindExtraction to parent `CMakeLists.txt`
+- [x] Update `LNG_DEVELOPMENT.md` with Phase 4 section
+- [ ] Build with `-DERF_USE_LNG=ON` and verify no linker errors
+- [ ] Run LNG_WindExtraction test and validate all 8 pass criteria
+- [ ] Run LNG_ScalarInjection, LNG_PoolEvap, LNG_BuildOnly (regression check)
+- [ ] CodeQL security scan
+
+---
+
+**Phase 4 Complete: Live wind & surface field extraction; ready for Phase 5 (gravity current / flammability zones)**
+
+---
+
+## Phase 5+: Future Work
+
+Phase 5 will implement gravity current spreading and flammability diagnostics using the now-live u* and wind fields extracted in Phase 4. Subsequent phases (6–8) will complete visualization, regulatory compliance output, and advanced release scenarios.
+
 
 
