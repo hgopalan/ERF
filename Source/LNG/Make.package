@@ -9,6 +9,8 @@ ifeq ($(USE_LNG), TRUE)
   CEXE_sources += LNG/ERF_LNGPool.cpp
   CEXE_sources += LNG/ERF_LNGAtmCoupling.cpp
   CEXE_sources += LNG/ERF_LNGWindExtract.cpp
+  CEXE_sources += LNG/ERF_LNGGravityCurrent.cpp
+  CEXE_sources += LNG/ERF_LNGFlammability.cpp
 
   # Header files (inlines and templates)
   CEXE_headers += LNG/ERF_LNGParams.H
@@ -22,5 +24,7 @@ ifeq ($(USE_LNG), TRUE)
   CEXE_headers += LNG/ERF_LNGLayer.H
   CEXE_headers += LNG/ERF_LNGEvaporation.H
   CEXE_headers += LNG/ERF_LNGPool.H
+  CEXE_headers += LNG/ERF_LNGGravityCurrent.H
+  CEXE_headers += LNG/ERF_LNGFlammability.H
 
 endif

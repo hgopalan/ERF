@@ -138,6 +138,30 @@ struct LNGParams {
     /** @} */
     
     /**
+     * @name Phase 5: Gravity Current & Richardson Transition
+     * @{
+     */
+    
+    /// Enable 2D shallow-water gravity current PDEs [boolean]
+    /// @details If true, Phase 5 solves for depth-averaged velocity and depth on 2D LNG grid.
+    ///          Richardson number Ri = g'*h / u*^2 controls 2D→3D handoff to ERF solver.
+    ///          Phase 5: core dense gas near-field model (replaces DEGADIS).
+    bool enable_gravity_current = false;
+    
+    /// Surface drag coefficient for gravity current [-]
+    /// @details Typically 1e-3 to 5e-3. Default 2e-3 from Webber & Brighton (1987).
+    ///          Used in momentum equations: -Cd*u*|u|. Phase 5: tuned for LNG.
+    amrex::Real gc_drag_coeff = 2.0e-3;
+    
+    /// Richardson number transition threshold [-]
+    /// @details When Ri exceeds this, gravity current regime is active.
+    ///          When Ri < threshold, transition to well-mixed (3D ERF dispersion).
+    ///          Default 0.25 from Benjamin (1968). Phase 5: used for automatic handoff.
+    amrex::Real gc_ri_crit = 0.25;
+    
+    /** @} */
+    
+    /**
      * @name Pool Geometry and Release Schedule
      * @{
      */
@@ -294,6 +318,11 @@ struct LNGParams {
         pp.query("lfl_vol_fraction", lfl_vol_fraction);
         pp.query("ufl_vol_fraction", ufl_vol_fraction);
         pp.query("track_flammability", track_flammability);
+        
+        // Phase 5: Gravity current & Richardson transition
+        pp.query("enable_gravity_current", enable_gravity_current);
+        pp.query("gc_drag_coeff", gc_drag_coeff);
+        pp.query("gc_ri_crit", gc_ri_crit);
         
         // Pool geometry and release
         pp.query("pool_area_m2", pool_area_m2);

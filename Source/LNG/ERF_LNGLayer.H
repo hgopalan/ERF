@@ -122,6 +122,17 @@ public:
                                    const amrex::Geometry& geom_atm);
     
     /**
+     * @brief Compute flammability diagnostics (Phase 5)
+     * @param[in] dt        Timestep [s]
+     * @param[in] cur_time  Current simulation time [s]
+     * @param[in] nstep     Current timestep number
+     * @details
+     * Phase 5: Computes LFL and UFL exceedance masks from lng_conc_sfc field,
+     * and calculates total flammable zone areas. Updates m_lfl_area and m_ufl_area.
+     */
+    void compute_flammability_diagnostics(amrex::Real dt, amrex::Real cur_time, int nstep);
+    
+    /**
      * @brief Write output (plotfiles, diagnostics)
      * @param[in] nstep             Current timestep number
      * @param[in] cur_time          Current simulation time [s]
@@ -155,6 +166,17 @@ public:
     const amrex::MultiFab* get_conc_sfc()         const { return m_lng_conc_sfc.get(); }
     const amrex::MultiFab* get_lfl_mask()         const { return m_lng_lfl_mask.get(); }
     const amrex::MultiFab* get_ufl_mask()         const { return m_lng_ufl_mask.get(); }
+    
+    /// @name Phase 5: Gravity Current MultiFabs
+    /// @{
+    const amrex::MultiFab* get_gc_h()             const { return m_lng_gc_h.get(); }
+    const amrex::MultiFab* get_gc_u()             const { return m_lng_gc_u.get(); }
+    const amrex::MultiFab* get_gc_v()             const { return m_lng_gc_v.get(); }
+    const amrex::MultiFab* get_gc_ri_flag()       const { return m_lng_gc_ri_flag.get(); }
+    /// @}
+    
+    amrex::Real get_lfl_area()                     const { return m_lfl_area; }
+    amrex::Real get_ufl_area()                     const { return m_ufl_area; }
     
     const LNGGrid&         get_lng_grid()         const { return m_lg; }
     const amrex::Geometry& get_lng_geom()         const { return m_lg.geom; }
@@ -202,6 +224,16 @@ private:
     std::unique_ptr<amrex::MultiFab>  m_lng_conc_sfc;        ///< Conc. at surface [kg/m^3]
     std::unique_ptr<amrex::MultiFab>  m_lng_lfl_mask;        ///< LFL exceedance [0/1]
     std::unique_ptr<amrex::MultiFab>  m_lng_ufl_mask;        ///< UFL exceedance [0/1]
+    
+    // Phase 5: gravity current state (2D shallow-water)
+    std::unique_ptr<amrex::MultiFab>  m_lng_gc_h;            ///< Cloud depth [m]
+    std::unique_ptr<amrex::MultiFab>  m_lng_gc_u;            ///< Depth-averaged u [m/s]
+    std::unique_ptr<amrex::MultiFab>  m_lng_gc_v;            ///< Depth-averaged v [m/s]
+    std::unique_ptr<amrex::MultiFab>  m_lng_gc_ri_flag;      ///< 0=GC active, 1=mixed
+    
+    // Phase 5: tracking
+    amrex::Real m_lfl_area = 0.0;                 ///< LFL zone area [m^2]
+    amrex::Real m_ufl_area = 0.0;                 ///< UFL zone area [m^2]
 };
 
 #endif /* ERF_LNG_LAYER_H */
