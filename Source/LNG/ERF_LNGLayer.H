@@ -70,26 +70,29 @@ public:
     
     /**
      * @brief Advance LNG state by one timestep
-     * @param[in] dt        Timestep [s]
-     * @param[in] params    LNG parameters
-     * @param[in] xvel_mf   Atmospheric u-velocity [m/s] (optional, Phase 4+)
-     * @param[in] yvel_mf   Atmospheric v-velocity [m/s] (optional, Phase 4+)
-     * @param[in] zvel_mf   Atmospheric w-velocity [m/s] (optional, Phase 4+)
-     * @param[in] z_phys_cc_mf  Atmospheric physical height [m] (optional, Phase 4+)
-     * @param[in] geom_atm  Atmospheric geometry (optional, Phase 3+)
-     * @param[in] nz        Number of ATM z-levels (optional, Phase 4+)
+     * @param[in] dt              Timestep [s]
+     * @param[in] params          LNG parameters
+     * @param[in] surface_layer   SurfaceLayer pointer for extracting u*, T_sfc, PBLH (Phase 4, optional)
+     * @param[in] xvel_mf         Atmospheric u-velocity [m/s] (optional, Phase 4+)
+     * @param[in] yvel_mf         Atmospheric v-velocity [m/s] (optional, Phase 4+)
+     * @param[in] zvel_mf         Atmospheric w-velocity [m/s] (optional, Phase 4+)
+     * @param[in] z_phys_cc_mf    Atmospheric physical height [m] (optional, Phase 4+)
+     * @param[in] S_cons          Atmospheric conserved state (for conc_sfc extraction, Phase 4+)
+     * @param[in] geom_atm        Atmospheric geometry (optional, Phase 4+)
+     * @param[in] nz              Number of ATM z-levels (optional, Phase 4+)
      * @details
-     * Phase 1 stub: simply increments m_step and m_time, then returns.
-     * If lng_debug = true, prints:
-     *   [LNG DEBUG] Step <N>  time=<T>  advance() stub — no physics in Phase 1
-     * If lng_debug = true, also checks for NaN in all MultiFabs and aborts if found.
+     * Phase 2: Evaporation with placeholder atmospheric fields.
+     * Phase 4: Live field extraction from atmosphere or fallback to placeholders.
+     * If lng_debug = true, prints per-field debug diagnostics.
      * If verbose >= 3, prints per-field min/max statistics.
      */
     void advance(amrex::Real dt, const LNGParams& params,
+                 class SurfaceLayer* surface_layer = nullptr,
                  const amrex::MultiFab* xvel_mf = nullptr,
                  const amrex::MultiFab* yvel_mf = nullptr,
                  const amrex::MultiFab* zvel_mf = nullptr,
                  const amrex::MultiFab* z_phys_cc_mf = nullptr,
+                 const amrex::MultiFab* S_cons = nullptr,
                  const amrex::Geometry* geom_atm = nullptr,
                  int nz = 0);
     
@@ -179,6 +182,11 @@ private:
     
     // Scalar component index (for coupling to atmosphere)
     int         m_lng_scalar_comp = -1;  ///< Index of LNG scalar in ATM (Phase 3+), -1 = unset
+    
+    // Phase 4: ATM state pointers (set from ERF.cpp each timestep, non-owning)
+    class SurfaceLayer*         m_surface_layer_ptr = nullptr;
+    const amrex::MultiFab*      m_S_cons_ptr        = nullptr;
+    const amrex::Geometry*      m_geom_atm_ptr      = nullptr;
     
     // LNG state MultiFabs (all allocated in initialize())
     std::unique_ptr<amrex::MultiFab>  m_lng_pool_depth;      ///< Pool depth [m]

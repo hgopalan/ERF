@@ -13,6 +13,8 @@
 #include "ERF_LNGEvaporation.H"
 #include "ERF_LNGPool.H"
 #include "ERF_LNGAtmCoupling.H"
+#include "ERF_LNGWindExtract.H"
+#include "ERF_LNGAtmReturn.H"
 #include "ERF.H"
 #include "ERF_IndexDefines.H"
 #include <AMReX_MultiFab.H>
@@ -185,14 +187,21 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
 }
 
 void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
+                       class SurfaceLayer* surface_layer,
                        const amrex::MultiFab* xvel_mf,
                        const amrex::MultiFab* yvel_mf,
                        const amrex::MultiFab* zvel_mf,
                        const amrex::MultiFab* z_phys_cc_mf,
+                       const amrex::MultiFab* S_cons,
                        const amrex::Geometry* geom_atm,
                        int nz)
 {
     // Phase 2: Full evaporation physics sequence
+    
+    // Cache atmospheric pointers for Phase 4 extraction
+    m_surface_layer_ptr = surface_layer;
+    m_S_cons_ptr        = S_cons;
+    m_geom_atm_ptr      = geom_atm;
     
     // Step A: Update m_step and m_time
     ++m_step;
@@ -212,22 +221,53 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
                        << "  vapor_conc_max=" << vc_max << " kg/m^3\n";
     }
     
-    // Step C: Set atmospheric state (placeholder path for Phase 2)
+    // Step C: Extract ATM fields or fall back to placeholders (Phase 4)
     bool have_atm = (xvel_mf && yvel_mf && z_phys_cc_mf && nz > 0);
-    
+
     if (have_atm) {
-        if (params.lng_debug) {
-            amrex::Print() << "[LNG DEBUG] Phase 2: have_atm=true but ATM extraction not yet active (Phase 4)\n";
+        // Extract u* from SurfaceLayer (passed through advance() signature)
+        // SurfaceLayer is accessible via ERF.cpp — see DustLayer pattern for wiring
+        if (m_surface_layer_ptr && m_surface_layer_ptr->get_u_star(0)) {
+            fill_lng_ustar_from_surface_layer(
+                *m_lng_ustar, *m_surface_layer_ptr->get_u_star(0), m_lg,
+                params.lng_debug);
         }
-    }
-    
-    // Always use placeholders in Phase 2
-    m_lng_ustar->setVal(params.test_ustar);
-    m_lng_tsfc->setVal(params.test_surf_temp_K);
-    
-    if (params.lng_debug) {
-        amrex::Print() << "[LNG DEBUG] Phase 2: using placeholder u*=" << params.test_ustar
-                       << " m/s  T_sfc=" << params.test_surf_temp_K << " K\n";
+
+        // Extract wind at zref via vertical interpolation
+        fill_lng_wind_from_interpolation(
+            *m_lng_wind_ref, *xvel_mf, *yvel_mf, *z_phys_cc_mf,
+            m_lg, params.zref, nz, params.lng_debug);
+
+        // Extract T_sfc from SurfaceLayer
+        if (m_surface_layer_ptr && m_surface_layer_ptr->get_t_surf(0)) {
+            fill_lng_scalar_from_atm(
+                *m_lng_tsfc, *m_surface_layer_ptr->get_t_surf(0), m_lg,
+                params.lng_debug, "T_sfc");
+        }
+
+        // Extract PBLH from SurfaceLayer
+        if (m_surface_layer_ptr && m_surface_layer_ptr->get_pblh(0)) {
+            fill_lng_scalar_from_atm(
+                *m_lng_pblh, *m_surface_layer_ptr->get_pblh(0), m_lg,
+                params.lng_debug, "PBLH");
+        }
+
+        if (params.lng_debug)
+            amrex::Print() << "[LNG DEBUG] Phase 4: live ATM extraction active"
+                           << "  u*_max=" << m_lng_ustar->max(0)
+                           << " m/s  u_ref_max=" << m_lng_wind_ref->max(0)
+                           << " m/s  PBLH_max=" << m_lng_pblh->max(0) << " m\n";
+    } else {
+        // Placeholder path — active when no ATM coupling yet
+        m_lng_ustar->setVal(params.test_ustar);
+        m_lng_tsfc->setVal(params.test_surf_temp_K);
+        m_lng_wind_ref->setVal(params.test_wind_speed);
+
+        if (params.lng_debug)
+            amrex::Print() << "[LNG DEBUG] Phase 4: placeholder path"
+                           << "  test_ustar=" << params.test_ustar
+                           << " m/s  test_T_sfc=" << params.test_surf_temp_K
+                           << " K  test_wind=" << params.test_wind_speed << " m/s\n";
     }
     
     // Step D: Apply spill source
@@ -291,6 +331,18 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
         } else {
             amrex::Print() << "[LNG DEBUG] NaN check PASSED step=" << m_step << "\n";
         }
+    }
+    
+    // Step J: Extract return fields from 3D solver (Phase 4)
+    // Called with the conserved state from the CURRENT timestep.
+    // Fills lng_conc_sfc for future loading feedback.
+    if (have_atm && m_S_cons_ptr && m_geom_atm_ptr) {
+        fill_lng_conc_from_atm(*m_lng_conc_sfc, *m_S_cons_ptr,
+                                m_lng_scalar_comp, *m_geom_atm_ptr, m_lg.grid_ratio);
+        if (params.lng_debug)
+            amrex::Print() << "[LNG DEBUG] Phase 4: conc_sfc extracted"
+                           << "  conc_sfc_max=" << m_lng_conc_sfc->max(0)
+                           << " kg/m^3  conc_sfc_sum=" << m_lng_conc_sfc->sum(0) << "\n";
     }
     
     // Verbose=3: print min/max of all fields

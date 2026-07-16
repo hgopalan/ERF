@@ -1,11 +1,22 @@
 /**
  * @file ERF_LNGWindExtract.H
- * @brief Wind extraction from atmosphere (Phase 4+)
- * @details
- * Header-only stubs for extracting wind and boundary layer data from atmosphere.
- * These will be implemented in Phase 4 when ATM coupling is added.
- * 
- * @see Source/Dust/ERF_DustWindExtract.H — Dust module wind extraction pattern (reference)
+ * @brief Wind and surface field extraction from ERF 3D solver to the 2D LNG grid.
+ *
+ * The wind interpolation algorithm copies fill_fire_wind_from_interpolation
+ * from Source/Fire/ERF_FireWindExtract.cpp, substituting LNGGrid for FireGrid
+ * and grid_ratio for C. 
+ *
+ * SurfaceLayer accessors used:
+ *   get_u_star(0)  — friction velocity [m/s]
+ *   get_t_surf(0)  — surface skin temperature [K]
+ *   get_pblh(0)    — PBL height [m]
+ *
+ * References:
+ *   Source/Dust/ERF_DustWindExtract.H (Phase 9 analog):
+ *     Dust module wind extraction pattern
+ *   Source/Fire/ERF_FireWindExtract.H (algorithm source)
+ *   Hong & Pan (1996). Mon. Wea. Rev., 124, 2322.
+ *     https://doi.org/10.1175/1520-0493(1996)124<2322:NBLVDI>2.0.CO;2
  */
 
 #ifndef ERF_LNG_WIND_EXTRACT_H
@@ -14,52 +25,38 @@
 #ifdef ERF_USE_LNG
 
 #include <AMReX_MultiFab.H>
-#include <AMReX_Geometry.H>
+#include <ERF_LNGGrid.H>
 
-/**
- * @brief Fill LNG wind field by interpolating from atmosphere at reference height
- * @param[in,out] lng_wind_ref   Output wind on LNG grid [m/s] (2 components: u, v)
- * @param[in] xvel_mf            ATM u-velocity
- * @param[in] yvel_mf            ATM v-velocity
- * @param[in] z_phys_cc_mf       ATM physical height [m]
- * @param[in] geom_atm           ATM geometry
- * @param[in] zref               Reference height [m]
- * @param[in] grid_ratio         LNG refinement ratio
- * @details
- * Phase 1: stub (does nothing).
- * Phase 4: will interpolate wind to reference height zref (default 10 m),
- *          map from ATM columns to LNG grid, and fill output MultiFab.
- */
-inline void fill_lng_wind_from_interpolation(
-    amrex::MultiFab&       lng_wind_ref,
+// Vertical wind interpolation to zref. Direct analog of fill_dust_wind_from_interpolation
+// in Source/Dust/ERF_DustWindExtract.cpp. Steps per LNG cell:
+//   - map to ATM column: i_a = i_l / grid_ratio, j_a = j_l / grid_ratio
+//   - find k bracket at z_surf + zref
+//   - average face-staggered u/v to cell centres
+//   - linearly interpolate to z_target
+void fill_lng_wind_from_interpolation(
+    amrex::MultiFab&       lng_wind_ref,   // ncomp=2, u and v [m/s]
     const amrex::MultiFab& xvel_mf,
     const amrex::MultiFab& yvel_mf,
     const amrex::MultiFab& z_phys_cc_mf,
-    const amrex::Geometry& geom_atm,
+    const LNGGrid&         lg,
     amrex::Real            zref,
-    int                    grid_ratio)
-{
-    // Phase 1: stub
-}
+    int                    nz,
+    bool                   lng_debug = false);
 
-/**
- * @brief Fill LNG friction velocity from surface layer
- * @param[in,out] lng_ustar      Output u* on LNG grid [m/s]
- * @param[in] ustar_atm          ATM friction velocity [m/s]
- * @param[in] geom_atm           ATM geometry
- * @param[in] grid_ratio         LNG refinement ratio
- * @details
- * Phase 1: stub (does nothing).
- * Phase 4: will map ATM u* to LNG grid cells (replicating ATM value within each LNG block).
- */
-inline void fill_lng_ustar_from_surface_layer(
+// Map u* from SurfaceLayer::get_u_star(0) to LNG grid (i_a=i/C, j_a=j/C, k=0).
+void fill_lng_ustar_from_surface_layer(
     amrex::MultiFab&       lng_ustar,
     const amrex::MultiFab& ustar_atm,
-    const amrex::Geometry& geom_atm,
-    int                    grid_ratio)
-{
-    // Phase 1: stub
-}
+    const LNGGrid&         lg,
+    bool                   lng_debug = false);
+
+// Generic: map any scalar ATM k=0 field to LNG grid. Used for T_sfc and PBLH.
+void fill_lng_scalar_from_atm(
+    amrex::MultiFab&       lng_field,
+    const amrex::MultiFab& atm_field,
+    const LNGGrid&         lg,
+    bool                   lng_debug = false,
+    const std::string&     field_name = "");
 
 #endif /* ERF_USE_LNG */
 

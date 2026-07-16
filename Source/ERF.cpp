@@ -519,8 +519,22 @@ ERF::post_timestep (int nstep, double time, double dt_lev0)
     }
 
 #ifdef ERF_USE_LNG
-    if (m_lng_layer) {
-        m_lng_layer->advance(dt_lev0, m_lng_params);
+    if (m_lng_layer && m_lng_params.enable) {
+        const amrex::MultiFab* xvel_ptr   = &vars_new[0][Vars::xvel];
+        const amrex::MultiFab* yvel_ptr   = &vars_new[0][Vars::yvel];
+        const amrex::MultiFab* zphys_ptr  = z_phys_cc[0].get();
+        const amrex::MultiFab* scons_ptr  = &vars_new[0][Vars::cons];
+        const amrex::Geometry* geom_ptr   = &geom[0];
+        int nz = geom[0].Domain().length(2);
+
+        m_lng_layer->advance(dt_lev0, m_lng_params,
+                             m_SurfaceLayer.get(),   // Phase 4: SurfaceLayer pointer
+                             xvel_ptr, yvel_ptr,
+                             nullptr,                 // zvel not needed in Phase 4
+                             zphys_ptr,
+                             scons_ptr,               // Phase 4: conserved state for conc_sfc
+                             geom_ptr,                // Phase 4: geometry for conc_sfc
+                             nz);
     }
 #endif
 
