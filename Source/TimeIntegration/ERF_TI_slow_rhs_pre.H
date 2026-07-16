@@ -112,6 +112,20 @@
                       (solverChoice.hindcast_surface_bcs? &surface_state_interp[level] : nullptr),
                      input_sounding_data, turbPert, true);
 
+        // ******************************************************************************
+        // Phase 3: Add LNG vapor flux to cc_src
+        // Must happen AFTER make_sources (which zeroes cc_src every RK stage).
+        // Mirrors the Dust module pattern in ERF_TI_slow_rhs_pre.H lines 114-129.
+        // ******************************************************************************
+#ifdef ERF_USE_LNG
+        if (m_lng_layer && level == 0 && m_lng_params.atm_feedback > 0.0) {
+            const amrex::MultiFab* zphys_ptr = (z_phys_cc.size() > 0) ? z_phys_cc[level].get() : nullptr;
+            if (zphys_ptr) {
+                m_lng_layer->apply_to_cc_source(cc_src, *zphys_ptr, fine_geom);
+            }
+        }
+#endif
+
         // *****************************************************************************
         // Add nudging terms on moist variables if we have a non-zero relaxation region
         // *****************************************************************************

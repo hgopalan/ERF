@@ -47,10 +47,11 @@ void LNGGrid::build(const amrex::BoxArray& atm_ba,
     lng_prob_domain.setHi(1, atm_prob_domain.hi(1));
     lng_prob_domain.setHi(2, atm_prob_domain.lo(2) + (atm_geom.CellSize(2)));  // One ATM cell height
     
-    // Index-space domain: [0, ihi*ratio] x [0, jhi*ratio] x [0, 0]
+    // Index-space domain: [0, (ihi+1)*ratio - 1] x [0, (jhi+1)*ratio - 1] x [0, 0]
+    // This matches the refined BoxArray which covers (ihi+1)*ratio cells in x,y.
     amrex::Box lng_domain;
     lng_domain.setSmall(amrex::IntVect(0, 0, 0));
-    lng_domain.setBig(amrex::IntVect(ihi*ratio+1, jhi*ratio+1, 0));
+    lng_domain.setBig(amrex::IntVect((ihi+1)*ratio - 1, (jhi+1)*ratio - 1, 0));
     
     // Create geometry (all periodic in x,y; non-periodic in z)
     amrex::Array<int, 3> is_periodic = {{1, 1, 0}};  // x,y periodic; z not

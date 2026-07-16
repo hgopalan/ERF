@@ -40,13 +40,23 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     m_lng_evap_flux     = std::make_unique<amrex::MultiFab>(m_lg.ba, m_lg.dm, ncomp, nghost);
     m_lng_latent_flux   = std::make_unique<amrex::MultiFab>(m_lg.ba, m_lg.dm, ncomp, nghost);
     m_lng_vapor_conc    = std::make_unique<amrex::MultiFab>(m_lg.ba, m_lg.dm, ncomp, nghost);
-    
-    // ATM-grid flux (to be coarsened)
-    const int natm_ratio = params.grid_ratio;
-    amrex::BoxArray atm_ba_coarse = erf.boxArray(0);
-    if (natm_ratio > 1) atm_ba_coarse.coarsen(natm_ratio);
-    m_lng_flux_atm      = std::make_unique<amrex::MultiFab>(atm_ba_coarse, erf.DistributionMap(0), ncomp, nghost);
-    
+
+    // ATM-grid flux on the ATM k=0 slab — same BoxArray as cc_source, matching Dust pattern.
+    // Must NOT be coarsened: const_array(mfi) must be valid when iterating over cc_source.
+    {
+        amrex::BoxArray ba_atm = erf.boxArray(0);
+        amrex::Vector<amrex::Box> bl;
+        for (int b = 0; b < ba_atm.size(); ++b) {
+            amrex::Box bx = ba_atm[b];
+            bx.setSmall(2, 0);
+            bx.setBig(2, 0);
+            bl.push_back(bx);
+        }
+        amrex::BoxArray ba2d(amrex::BoxList(std::move(bl)));
+        m_lng_flux_atm = std::make_unique<amrex::MultiFab>(
+            ba2d, erf.DistributionMap(0), ncomp, amrex::IntVect(1,1,0));
+    }
+
     // Wind field (2 components: u, v)
     m_lng_wind_ref      = std::make_unique<amrex::MultiFab>(m_lg.ba, m_lg.dm, 2, nghost);
     
@@ -67,8 +77,8 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     m_lng_flux_atm->setVal(0.0);
     m_lng_wind_ref->setVal(0.0);
     m_lng_ustar->setVal(0.0);
-    m_lng_tsfc->setVal(params.test_surf_temp_K);  // Set to test temperature
-    m_lng_pblh->setVal(1000.0);  // Placeholder 1 km PBL height
+    m_lng_tsfc->setVal(params.test_surf_temp_K);
+    m_lng_pblh->setVal(1000.0);
     m_lng_conc_sfc->setVal(0.0);
     m_lng_lfl_mask->setVal(0.0);
     m_lng_ufl_mask->setVal(0.0);
@@ -81,22 +91,27 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     amrex::Real pool_center_y = 0.5 * (prob_domain.lo(1) + prob_domain.hi(1));
     
     // Fill pool_mask and pool_depth
+    // Use effective_radius = max(pool_radius, half-diagonal) so at least 1 cell is always seeded
+    const auto& dx_lng = geom_lng.CellSize();
+    amrex::Real effective_radius = amrex::max(pool_radius,
+                                              0.5 * std::sqrt(dx_lng[0]*dx_lng[0] + dx_lng[1]*dx_lng[1]));
+
     for (amrex::MFIter mfi(*m_lng_pool_mask); mfi.isValid(); ++mfi) {
         const auto& bx = mfi.validbox();
-        auto pool_mask_arr = (*m_lng_pool_mask)[mfi].array();
+        auto pool_mask_arr  = (*m_lng_pool_mask)[mfi].array();
         auto pool_depth_arr = (*m_lng_pool_depth)[mfi].array();
-        
-        amrex::ParallelFor(bx, [=] (amrex::IntVect const& iv) noexcept {
-            amrex::Real x = geom_lng.CellCenter(iv[0], 0);
-            amrex::Real y = geom_lng.CellCenter(iv[1], 1);
-            amrex::Real r = std::sqrt((x - pool_center_x)*(x - pool_center_x) + 
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            amrex::Real x = geom_lng.ProbLo(0) + (i + 0.5) * dx_lng[0];
+            amrex::Real y = geom_lng.ProbLo(1) + (j + 0.5) * dx_lng[1];
+            amrex::Real r = std::sqrt((x - pool_center_x)*(x - pool_center_x) +
                                       (y - pool_center_y)*(y - pool_center_y));
-            if (r <= pool_radius) {
-                pool_mask_arr(iv) = 1.0;
-                pool_depth_arr(iv) = params.pool_depth_init_m;
+            if (r <= effective_radius) {
+                pool_mask_arr(i, j, k)  = 1.0;
+                pool_depth_arr(i, j, k) = params.pool_depth_init_m;
             } else {
-                pool_mask_arr(iv) = 0.0;
-                pool_depth_arr(iv) = 0.0;
+                pool_mask_arr(i, j, k)  = 0.0;
+                pool_depth_arr(i, j, k) = 0.0;
             }
         });
     }
@@ -115,8 +130,8 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     m_lng_tsfc->setVal(params.test_surf_temp_K);
      
     // Phase 3: Set scalar component index for atmosphere coupling
-    // Use RhoScalar_comp + 1 (same pattern as Dust: m_dust_scalar_comp = RhoScalar_comp + 1)
-    m_lng_scalar_comp = RhoScalar_comp + 1;
+    // Use RhoLNG_comp = RhoScalar_comp + 1 (same pattern as Dust)
+    m_lng_scalar_comp = RhoLNG_comp;
      
     // Compute initial pool diagnostics for debug output
     amrex::Real pool_mass_init = compute_pool_mass(*m_lng_pool_depth, geom_lng, params.rho_LNG);
@@ -129,8 +144,8 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
                        << "area=" << pool_area_init << " m^2  "
                        << "depth=" << params.pool_depth_init_m << " m\n"
                        << "[LNG DEBUG] Phase 1: mol_weight_LNG=" << params.mol_weight_LNG << " g/mol  "
-                       << "LFL=" << params.LFL_percent << "%  "
-                       << "UFL=" << params.UFL_percent << "%\n"
+                       << "LFL=" << params.lfl_vol_fraction * 100.0 << "%  "
+                       << "UFL=" << params.ufl_vol_fraction * 100.0 << "%\n"
                        << "[LNG DEBUG] Phase 1: grid_ratio=" << params.grid_ratio << "  "
                        << "feedback=" << params.atm_feedback << "  "
                        << "verbose=" << params.verbose << "  "
@@ -141,7 +156,7 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
                        << "latent_flux, vapor_conc, flux_atm, wind_ref, ustar, tsfc, pblh, conc_sfc, "
                        << "lfl_mask, ufl_mask) ncomp=1\n"
                        << "[LNG DEBUG] Phase 3: lng_scalar_comp=" << m_lng_scalar_comp
-                       << " (RhoScalar_comp+1)\n";
+                       << " (RhoLNG_comp)\n";
     }
      
     // Write CSV diagnostic header
@@ -374,15 +389,14 @@ void LNGLayer::apply_to_cc_source(amrex::MultiFab& cc_source,
     // Step 1: zero the ATM-grid flux buffer
     m_lng_flux_atm->setVal(0.0);
 
-    // Step 2: sum all evap flux into single-component flux buffer
-    amrex::MultiFab::Copy(*m_lng_flux_atm, *m_lng_evap_flux, 0, 0, 1,
-                          amrex::IntVect(0));
-
-    // Step 3: coarsen from LNG grid to ATM level-0 2D slab
+    // Step 2: coarsen evap flux from LNG fine grid → ATM k=0 slab
+    // m_lng_flux_atm is on ATM BoxArray (k=0 slab) — same as cc_source x,y layout.
+    // coarsen_lng_flux_to_atm averages m_lng_evap_flux down by grid_ratio.
     coarsen_lng_flux_to_atm(*m_lng_flux_atm, *m_lng_evap_flux,
                              m_lg.geom, geom_atm, m_lg.grid_ratio);
 
-    // Step 4: inject into cc_source at k=0
+    // Step 3: inject into cc_source at k=0
+    // m_lng_flux_atm now has matching BoxArray to cc_source — const_array(mfi) is valid.
     apply_lng_tendency_to_cc_source(cc_source, *m_lng_flux_atm, z_phys_cc,
                                     geom_atm, m_lng_scalar_comp,
                                     m_params.atm_feedback,

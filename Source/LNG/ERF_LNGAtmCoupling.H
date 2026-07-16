@@ -13,6 +13,7 @@
 #ifdef ERF_USE_LNG
 
 #include <AMReX_MultiFab.H>
+#include <AMReX_MultiFabUtil.H>
 #include <AMReX_Geometry.H>
 
 /**
@@ -33,10 +34,12 @@ inline void coarsen_lng_flux_to_atm(
     const amrex::Geometry& geom_atm,
     int                    grid_ratio)
 {
-    amrex::average_down(lng_evap_flux, lng_flux_atm,
-                        geom_lng, geom_atm,
-                        0, 1,
-                        amrex::IntVect(grid_ratio, grid_ratio, 1));
+    if (grid_ratio == 1) {
+        amrex::MultiFab::Copy(lng_flux_atm, lng_evap_flux, 0, 0, 1, 0);
+    } else {
+        amrex::average_down(lng_evap_flux, lng_flux_atm,
+                            0, 1, amrex::IntVect(grid_ratio, grid_ratio, 1));
+    }
 }
 
 /**

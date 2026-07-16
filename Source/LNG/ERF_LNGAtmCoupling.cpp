@@ -3,10 +3,11 @@
  * @brief LNG → atmosphere injection coupling (Phase 3)
  * @details
  * Implements one-way coupling: 2D LNG evaporation flux → 3D ATM passive scalar at k=0.
- * Uses one-step explicit lag (flux from step n injected at step n+1, before advance_dycore()).
+ * Uses one-step explicit lag (flux from step n injected at step n+1).
+ * lng_flux_atm lives on the ATM-grid k=0 slab (same BoxArray as cc_source at k=0),
+ * so const_array(mfi) is valid when iterating over cc_source.
  */
 
-#ifdef ERF_USE_LNG
 #include <ERF_LNGAtmCoupling.H>
 #include <AMReX_MFIter.H>
 #include <AMReX_Print.H>
@@ -29,9 +30,12 @@ void apply_lng_tendency_to_cc_source(
     const auto& dx = geom_atm.CellSize();
     amrex::Real dz_avg = dx[2];
 
+    // lng_flux_atm is on the ATM k=0 slab BoxArray — same as cc_source at k=0.
+    // Iterate over cc_source and read flux from the matching k=0 tile.
     for (amrex::MFIter mfi(cc_source, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
         auto src_arr = cc_source.array(mfi);
+        // Use ParallelCopy-safe access: lng_flux_atm has same xy BoxArray as cc_source
         auto q_arr   = lng_flux_atm.const_array(mfi);
         auto z_arr   = z_phys_cc.const_array(mfi);
         const int comp = lng_scalar_comp;
@@ -55,4 +59,3 @@ void apply_lng_tendency_to_cc_source(
                        << " kg/m^3/s  sum=" << tend_sum << " kg/m^3/s\n";
     }
 }
-#endif
