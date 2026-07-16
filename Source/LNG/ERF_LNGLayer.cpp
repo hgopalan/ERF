@@ -16,7 +16,7 @@
 #include "ERF.H"
 #include "ERF_IndexDefines.H"
 #include <AMReX_MultiFab.H>
-#include <AMReX_Print.h>
+#include <AMReX_Print.H>
 #include <cmath>
 #include <iomanip>
 
