@@ -55,7 +55,6 @@ void load_lng_spill_schedule(const std::string& filename,
             // Copy name with bounds checking (max 63 chars + null terminator)
             std::strncpy(event.name, name_str.c_str(), sizeof(event.name) - 1);
             event.name[sizeof(event.name) - 1] = '\0';
-            }
 
             events_vec.push_back(event);
         }
@@ -120,7 +119,7 @@ void apply_spill_schedule(amrex::MultiFab&       lng_pool_depth,
                           event.rate_kg_s, rho_LNG,
                           pool_area_m2, event.cx_m, event.cy_m, dt);
 
-        // Debug print (all ranks print independently, safe for collective calls above)
+        // Debug print
         if (lng_debug) {
             amrex::Print() << "[LNG DEBUG] Phase 8: spill event '" << event.name
                           << "' ACTIVE  rate=" << event.rate_kg_s << " kg/s"
@@ -136,15 +135,13 @@ amrex::Real compute_total_released_mass(const LNGSpillSchedule& schedule,
     amrex::Real total_mass_kg = 0.0;
 
     for (const auto& event : schedule.events) {
-        if (cur_time < event.start_time_s) continue;  // Event hasn't started
+        if (cur_time < event.start_time_s) continue;
 
         amrex::Real time_active_s = 0.0;
 
         if (event.end_time_s < 0.0) {
-            // Entire period from start to current time
             time_active_s = cur_time - event.start_time_s;
         } else {
-            // Period from start to min(end, current time)
             amrex::Real end_time = amrex::min(event.end_time_s, cur_time);
             time_active_s = end_time - event.start_time_s;
         }
