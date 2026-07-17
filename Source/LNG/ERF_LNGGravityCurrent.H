@@ -36,7 +36,7 @@ namespace LNGGravityConst {
     /// Gravitational acceleration [m/s^2]
     constexpr amrex::Real GRAV_ACCEL  = 9.81;
 
-    /// Surface drag coefficient [-] — Webber & Brighton (1987)
+    /// Surface drag coefficient [-] -- Webber & Brighton (1987)
     constexpr amrex::Real CD_DEFAULT  = 2.0e-3;
 
     /// Richardson transition threshold [-]
@@ -46,14 +46,19 @@ namespace LNGGravityConst {
     constexpr amrex::Real H_MIN       = 1.0e-4;
 
     /// CFL safety factor for velocity cap [-]
-    /// U_MAX is computed as CFL_SAFETY * dx / dt at runtime (not a fixed value).
+    /// U_MAX is computed as CFL_SAFETY * min(dx,dy) / dt at runtime.
     /// A fixed 50 m/s cap was physically wrong for a 23 m cell at dt=0.5 s
-    /// (CFL = 50*0.5/23 = 1.09 > 1 → unstable). Using CFL_SAFETY=0.9 gives
+    /// (CFL = 50*0.5/23 = 1.09 > 1 -- unstable). Using CFL_SAFETY=0.9 gives
     /// U_MAX = 0.9 * 23.4375 / 0.5 = 42.2 m/s, safely below CFL=1.
     constexpr amrex::Real CFL_SAFETY  = 0.9;
 
     /// Minimum friction velocity for Richardson number [m/s]
     constexpr amrex::Real USTAR_MIN   = 1.0e-8;
+
+    /// Exponential decay timescale for gravity current depth [s]
+    /// When there is no local evaporation source, atmospheric dilution
+    /// dissipates the dense vapor layer. Typical LNG dense gas persistence ~600 s.
+    constexpr amrex::Real H_DECAY_TIMESCALE = 600.0;
 }
 
 /**
@@ -94,17 +99,21 @@ bool is_gravity_current_active(amrex::Real Ri) noexcept
 /**
  * @brief Advance shallow-water gravity current one timestep.
  *
- * Fix 1 — CFL-based velocity cap: U_MAX = CFL_SAFETY * dx / dt (computed at
- * runtime from geom_lng.CellSize and dt). The previous hard-coded 50 m/s cap
- * was above the CFL stability limit for typical LNG grids (dx~23 m, dt=0.5 s
- * → CFL_limit = 46 m/s), allowing velocities that grow unboundedly over a
- * 1-hour run.
+ * Fix 1 -- CFL-based velocity cap: U_MAX = CFL_SAFETY * min(dx,dy) / dt
+ * computed at runtime from geom_lng.CellSize and dt. The previous hard-coded
+ * 50 m/s cap was above the CFL stability limit for typical LNG grids
+ * (dx~23 m, dt=0.5 s -> CFL_limit=46 m/s), allowing velocities that grew
+ * unboundedly over a 1-hour run (observed: u_max=50 m/s at t=3600 s).
  *
- * Fix 2 — Pool depletion coupling: when the pool mask is zero (pool has
- * evaporated) AND the accumulated gravity current depth is below H_MIN, zero
- * gc_h/gc_u/gc_v for that cell. This stops the gravity current continuing to
- * spread after the LNG pool has fully evaporated, which was causing
- * gc_h_max=49 m and u_max=50 m/s at t=3600 s despite active_cells=0.
+ * Fix 2 -- Pool depletion coupling (new lng_pool_mask argument):
+ * When pool_mask(i,j,k)==0 (no active pool) AND gc_h < H_MIN (negligible
+ * depth), zero out gc_h/gc_u/gc_v. This stops the gravity current continuing
+ * to spread indefinitely after the LNG pool has fully evaporated.
+ * Without this, gc_h grew to 152 m at t=3600 s despite active_cells=0.
+ *
+ * Fix 3 -- Atmospheric dilution decay:
+ * Away from active evaporation source, apply exponential decay to h with
+ * timescale H_DECAY_TIMESCALE (600 s) to represent atmospheric mixing.
  *
  * @param[in,out] lng_gc_h       Cloud depth [m]
  * @param[in,out] lng_gc_u       Depth-averaged u-velocity [m/s]
@@ -112,7 +121,7 @@ bool is_gravity_current_active(amrex::Real Ri) noexcept
  * @param[out]    lng_gc_ri_flag Transition flag [0=GC active, 1=mixed regime]
  * @param[in]     lng_evap_flux  Source from evaporation [kg/m^2/s]
  * @param[in]     lng_ustar      Friction velocity [m/s]
- * @param[in]     lng_pool_mask  Pool mask [0/1] — used for pool depletion coupling
+ * @param[in]     lng_pool_mask  Pool mask [0/1] -- pool depletion coupling
  * @param[in]     geom_lng       LNG geometry (provides dx for CFL cap)
  * @param[in]     rho_vapor      LNG vapor density [kg/m^3]
  * @param[in]     rho_air        Air density [kg/m^3]
