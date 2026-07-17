@@ -430,10 +430,10 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
     // ── Phase 7: regulatory compliance ───────────────────────────────────────
     if (m_lng_conc_sfc && m_lng_conc_1h_avg && m_lng_exceed_flag) {
             // Update 1-hour running average
-            update_lng_1h_average(*m_lng_conc_1h_avg, *m_lng_conc_sfc, dt);
-
+            //update_lng_1h_average(*m_lng_conc_1h_avg, *m_lng_conc_sfc, dt);
+            update_lng_1h_average(*m_lng_conc_1h_avg, *m_lng_conc_sfc, m_lg.geom, dt);
             // Compute NFPA exceedance (uses nfpa59a_exclusion_conc = 1/2 LFL)
-            compute_lng_exceedance(*m_lng_exceed_flag, *m_lng_conc_1h_avg,
+            compute_lng_exceedance(*m_lng_exceed_flag, *m_lng_conc_1h_avg,m_lg.geom,
                                     m_params.rho_vapor_ref, m_params.mol_weight_LNG,
                                     m_params.nfpa59a_exclusion_conc);
 
