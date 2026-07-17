@@ -2,31 +2,31 @@
  * @file ERF_LNGGravityCurrent.cpp
  * @brief Implementation of shallow-water gravity current PDEs for LNG Phase 5
  *
- * Four fixes applied vs the original implementation:
+ * Fixes applied vs the original implementation:
  *
  * Fix 1 -- CFL-based velocity cap (replaces hard-coded U_MAX=50 m/s):
  *   U_MAX = CFL_SAFETY * min(dx,dy) / dt
- *   For a 3000 m domain on 128 cells (grid_ratio=4, n_cell=32):
- *     dx = 3000/128 = 23.4375 m
- *     U_MAX = 0.9 * 23.4375 / 0.5 = 42.2 m/s  (CFL = 0.9, stable)
- *   The previous 50 m/s cap allowed CFL > 1 -> velocities grew unboundedly.
  *
- * Fix 2 -- Pool depletion coupling (new lng_pool_mask argument):
- *   When pool_mask==0 AND gc_h < H_MIN, zero gc_h/gc_u/gc_v.
- *   Stops gravity current spreading after pool evaporates.
+ * Fix 2 -- Pool depletion coupling:
+ *   Zero gc_h/gc_u/gc_v when pool_mask==0 AND h < H_MIN.
  *
  * Fix 3 -- Atmospheric dilution decay:
- *   Away from active evaporation source (evap==0), apply exponential decay
- *   to h with timescale H_DECAY_TIMESCALE=600 s.
+ *   Exponential decay of h with timescale H_DECAY_TIMESCALE=600 s away
+ *   from active evaporation source.
  *
- * Fix 4 -- Spreading threshold (H_SPREAD_MIN = 1 cm):
- *   Skip the pressure gradient in off-pool cells where h_old < H_SPREAD_MIN.
- *   Without this, negligible-depth cells (h > H_MIN = 0.1 mm but < 1 cm)
- *   still computed the pressure gradient and accumulated depth from adjacent
- *   pool cells, causing gc_h_max to grow to 152 m at t=3600 s even with
- *   an active 200 kg/s spill maintaining the pool.
- *   Physical interpretation: a 1 cm vapor layer is too thin to sustain
- *   gravity-current-driven spreading away from the pool source region.
+ * Fix 5 -- Pool confinement (replaces Fix 4 H_SPREAD_MIN approach):
+ *   After the Euler update, explicitly zero gc_h/gc_u/gc_v in ALL cells
+ *   where pool_mask == 0. This strictly confines the shallow-water gravity
+ *   current to the active pool footprint.
+ *
+ *   Physical justification: the shallow-water GC model represents the dense
+ *   vapor layer directly above the liquid pool. Vapor that has left the pool
+ *   region is tracked by the 3D ERF scalar (RhoLNG) via Phase 3 coupling.
+ *   Allowing off-pool cells to accumulate gc_h via the pressure gradient
+ *   caused gc_h_max to grow to 152 m at t=3600 s despite pool_depth ~0.38 m.
+ *
+ *   The H_SPREAD_MIN threshold (Fix 4) did not work because the pressure
+ *   gradient pushed h > 1 cm into all cells within ~2 timesteps.
  */
 
 #include "ERF_LNGGravityCurrent.H"
@@ -97,8 +97,7 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
             // Depth update from evaporation source
             amrex::Real h_new_val = amrex::max(h_old + evap(i,j,k) * dt_over_rho, 0.0);
 
-            // Fix 2: pool depletion coupling.
-            // If pool has evaporated (mask==0) and depth is negligible, zero out.
+            // Fix 2: pool depletion coupling -- zero when no pool and negligible depth
             if (pmask(i,j,k) < 0.5 && h_new_val < LNGGravityConst::H_MIN) {
                 h_new_arr(i,j,k) = 0.0;
                 u_new_arr(i,j,k) = 0.0;
@@ -110,19 +109,6 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
             if (evap(i,j,k) < 1.0e-10 && h_new_val > 0.0) {
                 h_new_val *= decay_factor;
                 h_new_val  = amrex::max(h_new_val, 0.0);
-            }
-
-            // Fix 4: spreading threshold.
-            // Off-pool cells with h < H_SPREAD_MIN do not participate in the
-            // shallow-water pressure gradient. Without this, thin off-pool cells
-            // accumulate depth from adjacent pool cells via pressure spreading,
-            // causing gc_h to grow to unphysical values (152 m at t=3600 s).
-            if (pmask(i,j,k) < 0.5 && h_old < LNGGravityConst::H_SPREAD_MIN) {
-                // Apply decay only; no pressure gradient, no momentum transfer
-                h_new_arr(i,j,k) = h_new_val;
-                u_new_arr(i,j,k) = 0.0;
-                v_new_arr(i,j,k) = 0.0;
-                return;
             }
 
             // Pressure gradient dh/dx, dh/dy -- central differences
@@ -164,7 +150,7 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
             v_new_arr(i,j,k) = v_new_val;
         });
 
-        // Step 2: write back updated state and compute Richardson flag
+        // Step 2: write back and compute Richardson flag
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
             amrex::Real h_val = h_new_arr(i,j,k);
             h_arr(i,j,k)     = h_val;
@@ -173,10 +159,25 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
             amrex::Real Ri   = compute_richardson(g_prime, h_val, ustar(i,j,k));
             ri_flag(i,j,k)   = is_gravity_current_active(Ri) ? 0.0 : 1.0;
         });
+
+        // Fix 5: pool confinement -- zero gc state in all off-pool cells.
+        // The shallow-water GC is only valid above the liquid pool. Off-pool
+        // vapor is already tracked by the 3D ERF scalar via Phase 3 coupling.
+        // This MUST run after Step 2 and BEFORE FillBoundary so the zeroed
+        // state is what gets exchanged across MPI rank boundaries.
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+            if (pmask(i,j,k) < 0.5) {
+                h_arr(i,j,k)     = 0.0;
+                u_arr(i,j,k)     = 0.0;
+                v_arr(i,j,k)     = 0.0;
+                ri_flag(i,j,k)   = 0.0;  // treat as GC-active so it reactivates if pool spreads
+            }
+        });
     }
 
     // -------------------------------------------------------------------------
     // FillBoundary -- REQUIRED for >1 MPI rank (Rule B4)
+    // Pool-confined state is exchanged here.
     // -------------------------------------------------------------------------
     lng_gc_h.FillBoundary(geom_lng.periodicity());
     lng_gc_u.FillBoundary(geom_lng.periodicity());
