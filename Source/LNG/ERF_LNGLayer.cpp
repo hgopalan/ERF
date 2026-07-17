@@ -336,9 +336,17 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
 
     // ── Phase 5: gravity current ─────────────────────────────────────────────
     if (params.enable_gravity_current && dt > 0.0) {
+        /*advance_gravity_current(*m_lng_gc_h, *m_lng_gc_u, *m_lng_gc_v,
+                                *m_lng_gc_ri_flag,
+                                *m_lng_evap_flux, *m_lng_ustar,
+                                m_lg.geom,
+                                params.rho_vapor_ref, params.rho_air,
+                                params.gc_drag_coeff, dt,
+                                params.lng_debug);*/
         advance_gravity_current(*m_lng_gc_h, *m_lng_gc_u, *m_lng_gc_v,
                                 *m_lng_gc_ri_flag,
                                 *m_lng_evap_flux, *m_lng_ustar,
+                                *m_lng_pool_mask,          // Fix 2: pool depletion
                                 m_lg.geom,
                                 params.rho_vapor_ref, params.rho_air,
                                 params.gc_drag_coeff, dt,
