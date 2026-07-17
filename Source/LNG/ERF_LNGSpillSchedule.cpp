@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iomanip>
 #include <cmath>
+#include <cstring>
 
 void load_lng_spill_schedule(const std::string& filename,
                               LNGSpillSchedule& schedule)
@@ -42,12 +43,18 @@ void load_lng_spill_schedule(const std::string& filename,
             // Parse line
             std::istringstream iss(line);
             LNGSpillEvent event;
+            std::string name_str;  // Use temporary string for safe parsing
 
-            if (!(iss >> event.name >> event.start_time_s >> event.end_time_s
+            if (!(iss >> name_str >> event.start_time_s >> event.end_time_s
                      >> event.cx_m >> event.cy_m >> event.radius_m >> event.rate_kg_s)) {
                 amrex::Print() << "[LNG] WARNING: parse error at line " << line_num
                               << " in " << filename << "\n";
                 continue;
+            }
+
+            // Copy name with bounds checking (max 63 chars + null terminator)
+            std::strncpy(event.name, name_str.c_str(), sizeof(event.name) - 1);
+            event.name[sizeof(event.name) - 1] = '\0';
             }
 
             events_vec.push_back(event);
