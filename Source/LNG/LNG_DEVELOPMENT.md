@@ -13,7 +13,7 @@ The ERF-LNG module simulates liquefied natural gas (LNG) spill evaporation and v
 
 ---
 
-## Eight-Phase Implementation Roadmap
+## Twelve-Phase Implementation Roadmap
 
 | Phase | Title | Key Deliverables | Status |
 |-------|-------|------------------|--------|
@@ -25,6 +25,10 @@ The ERF-LNG module simulates liquefied natural gas (LNG) spill evaporation and v
 | 6 | **Output & Visualization** | Plotfile writes; receptor point sampling; CSV output expansion | ✅ COMPLETE |
 | 7 | **Regulatory Compliance** | NFPA 59A exclusion zone calculation; threshold mapping | ✅ COMPLETE |
 | 8 | **Spill Scheduling** | Time-dependent release rates; inventory tracking; multi-event scenarios | 🔄 IN PROGRESS |
+| 9 | **Restart Continuity & Time Synchronisation** | Fix `m_time` init, receptor CSV append on restart, `vol_fraction` formula | 🔲 PLANNED |
+| 10 | **Multi-Scenario Ensemble & Parameter Sweep** | `LNGEnsemble` class, per-member output, ensemble diagnostics | 🔲 PLANNED |
+| 11 | **Passive Tracer Comparison & Field Validation** | Passive tracer injection, Pasquill-Gifford Gaussian ref, validation CSV | 🔲 PLANNED |
+| 12 | **Terrain-Following Pool Spreading & Slope Effects** | `m_lng_z_topo` MultiFab, gravity current terrain coupling | 🔲 PLANNED |
 
 ---
 
@@ -1701,5 +1705,272 @@ spill_secondary  5.0   15.0  1600.0  1400.0   5.0    10.0
 - **Pattern source (time-window):** `ERF_DustRoadSchedule.H` (time-windowed activation periods)
 - **MPI skills:** `Source/LNG/LNG_MPI_SKILLS.md` Rules A2, A4, B1
 - **Existing spill function:** `apply_spill_source()` in `Source/LNG/ERF_LNGPool.H/cpp`
+
+---
+
+## Phase 8 Post-Merge Bug Fixes (Burro 8 Validation)
+
+After Phase 8 completion, four critical bugs were discovered during Burro 8 validation testing on restart:
+
+| Bug | Description | Impact | Fix |
+|-----|---|---|---|
+| `m_time` not initialised from restart | `m_time` remains 0 after restart; `apply_spill_schedule` never activates events with `start_time_s>0` | Spill schedule events fail to activate on restart despite `lng_spill_diag.csv` showing correct times (misleading mismatch) | Initialize `m_time = t_new[0]` in `LNGLayer::initialize()` using ERF restart time, not wall-clock zero |
+| Receptor CSV truncated on restart | `write_lng_receptor_header` uses `ios::trunc` → file wiped on restart; all pre-restart data lost | Loss of all receptor measurements before restart; CSV history broken | Use `ios::app` on restart with `# Restart at t=<time> s` separator line in `write_lng_receptor_header` |
+| `vol_fraction` 1.8× inflation for CH₄ | Formula uses `(conc/rho_vapor)*(28.97/MW_LNG)` = (conc/1.76) * 1.67 ≈ 0.95×conc for CH₄ instead of actual vol/vol | Flammable zone radius inflated ~1.8× for methane; exclusion zone overpredicted | Replace with `conc/rho_vapor` only; `rho_vapor_ref` is already pure vapor density, no MW ratio needed |
+| Receptor coordinates upstream of source | Coordinates use Burro site bearing convention not ERF domain convention; e.g., wind FROM 200° → receptors placed at bearing+180° | Receptors positioned diametrically opposite intended locations; all concentration measurements mislocated | Use ERF wind vector convention: `x_ERF = -sin(bearing)*dist`, `y_ERF = +cos(bearing)*dist` (see Phase 9 F2 for detailed example) |
+
+---
+
+## Phase 9: Restart Continuity & Time Synchronisation
+
+Phase 9 fixes the three restart bugs discovered in Burro 8 validation and introduces checkpoint/restart capability for
+time-domain continuity of spill scheduling, receptor measurements, and pool state.
+
+### Overview
+
+Restart capability enables multi-segment simulations with schedule continuity. Key challenges:
+- `m_time` must synchronise with ERF's restart time, not reset to 0
+- Receptor CSV must append with explicit restart marker
+- `vol_fraction` formula must correctly compute volume ratios without molecular-weight scaling
+
+### Goals
+
+1. Initialise `m_time` from ERF restart time in `LNGLayer::initialize()` (fixes event activation on restart)
+2. Fix receptor CSV write to append on restart with separator line (preserves historical data)
+3. Correct `vol_fraction` formula: remove MW ratio factor (fixes 1.8× inflation)
+4. Verify spill schedule times activate correctly after restart (no lost events)
+5. Test checkpoint/restart cycle with continuous receptor monitoring
+
+### Key Files Changed
+
+- `LNGLayer::initialize()` — read ERF `t_new[0]` instead of zero-init
+- `ERF_LNGReceptorOutput.H` — receptor header write function with restart logic
+- Evaporation model — `vol_fraction` computation in `ERF_LNGEvaporation.cpp`
+
+### New Parameters
+
+None (all three fixes are bug corrections, not feature additions).
+
+### Canonical Test
+
+**Test name:** `LNG_RestartContinuity`
+
+**Setup:**
+- 20×40×32 ATM grid, grid_ratio=2 → 40×80 LNG grid
+- dt=0.5 s, 20 total steps
+- Spill schedule with event starting at t=5.0 s
+- Checkpoint at step 10 (t=5.0 s, during active spill)
+- Restart from checkpoint, continue to step 20
+
+**Pass criteria:**
+1. Checkpoint created at step 10: `chk00010` directory with all LNG state
+2. Restart completes all 10 remaining steps (t=5.0 s → 10.0 s)
+3. Receptor CSV has no duplicate header; only one `# Restart at t=5.0 s` separator line
+4. Time column strictly monotonic across restart (5.0 → 10.0 s)
+5. `vol_fraction` values consistent pre/post-restart (no 1.8× jump)
+
+### Implementation Checklist
+
+- [ ] In `LNGLayer::initialize()`: read `m_time = t_new[0]` from ERF instead of zero-init
+- [ ] In receptor header write: check for existing file and use `ios::app` with restart separator
+- [ ] In `ERF_LNGEvaporation.cpp`: change `vol_fraction = (conc/rho_vapor)*(28.97/MW_LNG)` to `vol_fraction = conc/rho_vapor`
+- [ ] Update checkpoint/restart documentation in Phase 1 parameter list
+- [ ] Create `Exec/CanonicalTests/LNG/LNG_RestartContinuity/` test case
+
+---
+
+## Phase 10: Multi-Scenario Ensemble & Parameter Sweep
+
+Phase 10 extends the LNG module to support ensemble simulations with multiple spill scenarios,
+per-member output isolation, and ensemble diagnostics aggregation.
+
+### Overview
+
+Ensemble capability enables parameter exploration and uncertainty quantification for spill scenarios.
+Each ensemble member runs independently on the same atmospheric domain, with separate output directories
+and a summary CSV tracking ensemble-wide statistics.
+
+### Goals
+
+1. Implement `LNGEnsemble` class as container for `std::vector<LNGLayer>` (one per member)
+2. Route per-member output to isolated directories `lng_ensemble_<id>/`
+3. Aggregate ensemble diagnostics to `lng_ensemble_summary.csv` with min/max/mean columns per metric
+4. Manage multi-member spill schedules with member-specific rates
+5. Support independent pool geometries per member (optional)
+
+### Key Files Changed
+
+- `ERF_LNGEnsemble.H/.cpp` — new ensemble container class
+- `ERF_LNGLayer.cpp` — modified output path generation
+- `ERF_LNGParams.H` — add ensemble parameters
+
+### New Parameters
+
+```
+int     n_ensemble         = 1              # Number of ensemble members [Phase 10]
+string  ensemble_spill_files = ""           # CSV file with member-specific spill rates [Phase 10]
+```
+
+### Canonical Test
+
+**Test name:** `LNG_Ensemble`
+
+**Setup:**
+- 2 ensemble members on 32×32×64 ATM domain
+- Member 1: spill at (1500, 1500) @ 20 kg/s
+- Member 2: spill at (1600, 1400) @ 10 kg/s (50% rate)
+- Run 20 steps, dt=0.5 s
+- Check per-member output directories and summary CSV
+
+**Pass criteria:**
+1. Exit code 0, 20 timesteps completed for both members
+2. Directory structure: `lng_ensemble_0/` and `lng_ensemble_1/` created
+3. Each member has independent `plt_lng_XXXXX`, `lng_diag.csv`, `lng_regulatory.csv`
+4. `lng_ensemble_summary.csv` with columns: `step`, `time_s`, `member_0_pool_mass_kg`, `member_1_pool_mass_kg`, `pool_mass_mean`, `pool_mass_max`
+5. Member 1 pool_mass consistently > Member 2 (2× spill rate)
+6. No crosstalk between members (independent random seed, if applicable)
+7. Backward compatibility: with `n_ensemble=1` (default), output identical to single-member Phase 8
+
+### Implementation Checklist
+
+- [ ] Create `ERF_LNGEnsemble.H` (container class, initialization, loop over members)
+- [ ] Create `ERF_LNGEnsemble.cpp` (ensemble advance, diagnostics aggregation)
+- [ ] Modify `ERF_LNGLayer.cpp` output paths to include ensemble ID
+- [ ] Add ensemble parameters to `ERF_LNGParams.H`
+- [ ] Create ensemble spill schedule parser (member-specific rates)
+- [ ] Create `Exec/CanonicalTests/LNG/LNG_Ensemble/` test
+- [ ] Register new files in `Make.package` and `CMake/BuildERFExe.cmake`
+
+---
+
+## Phase 11: Passive Tracer Comparison & Field Validation
+
+Phase 11 introduces a passive scalar tracer injected with the same rate as LNG vapor,
+enabling direct comparison with Pasquill-Gifford Gaussian plume model predictions for field validation.
+
+### Overview
+
+Passive tracer allows decoupling of concentration prediction from complex evaporation/gravity-current dynamics.
+Cross-validation with Gaussian reference solution provides quantitative confidence in dispersion model:
+- Pasquill-Gifford reference solution pre-computed per stability class
+- Per-receptor ERF/passive/Gaussian ratio CSV for validation metrics
+- Neutral ABL target: ERF/Gaussian ratio within factor 3 at downwind distances
+
+### Goals
+
+1. Inject passive scalar at same mass flux as LNG evaporation (using `apply_to_cc_source`)
+2. Implement Pasquill-Gifford Gaussian plume model in `ERF_LNGGaussianRef.H`
+3. Compute Gaussian concentration at receptor locations and write to validation CSV
+4. Per-receptor: time-series of ERF concentration, passive concentration, Gaussian prediction, and ratios
+5. Enable stability-class selection (neutral/stable/unstable for model variants)
+
+### Key Files Changed
+
+- `ERF_LNGEvaporation.cpp` — add passive tracer injection (new scalar component)
+- New file `ERF_LNGGaussianRef.H` — Pasquill-Gifford model implementation
+- `ERF_LNGReceptorOutput.H` — validation output to `lng_validation.csv`
+- `ERF_LNGParams.H` — new parameters for Gaussian model
+
+### New Parameters
+
+```
+bool    track_passive_tracer = false       # Inject passive tracer [Phase 11]
+string  stability_class       = "neutral"  # PG stability class [Phase 11]
+string  lng_validation_file   = "lng_validation.csv"  # Validation output [Phase 11]
+```
+
+### Canonical Test
+
+**Test name:** `LNG_Validation`
+
+**Setup:**
+- 32×32×64 ATM neutral ABL, grid_ratio=4 → 128×128 LNG grid
+- dt=0.5 s, 50 timesteps (t=0–25 s)
+- Continuous spill 20 kg/s at domain centre (1500, 1500)
+- Receptors at: centre (1500, 1500), downwind S57 (1500, 2000), S121 (1500, 2500)
+- `track_passive_tracer = true`, `stability_class = "neutral"`
+
+**Pass criteria:**
+1. Three CSV columns written: `t`, `conc_ERF_S57`, `conc_passive_S57`, `conc_gaussian_S57`, `ratio_ERF_Gaussian`, `ratio_passive_Gaussian`
+2. Passive tracer concentration at S57 peaks ~8–12 s (6–8 min after start)
+3. Gaussian prediction within 50% of passive at S57 (neutral, downwind)
+4. ERF/Gaussian ratio at S121 within factor 3 (turbulent dispersion adds variability)
+5. `lng_validation.csv` 51 lines (1 header + 50 data)
+6. No NaN values in validation columns
+7. Passive tracer evolves smoothly (no spurious oscillations)
+
+### Implementation Checklist
+
+- [ ] Allocate new scalar component for passive tracer in `ERF_LNGLayer::initialize()`
+- [ ] Create `ERF_LNGGaussianRef.H` with Pasquill-Gifford model functions
+- [ ] Modify `ERF_LNGEvaporation.cpp` to inject passive tracer at same rate as LNG
+- [ ] Update `ERF_LNGReceptorOutput.H` to compute Gaussian at receptor locations
+- [ ] Add validation CSV write in `write_output()`
+- [ ] Create `Exec/CanonicalTests/LNG/LNG_Validation/` test
+- [ ] Register new files in build systems
+
+---
+
+## Phase 12: Terrain-Following Pool Spreading & Slope Effects
+
+Phase 12 extends the gravity current model to terrain-following coordinates,
+enabling realistic pool spreading on sloped surfaces and terrain-induced flow redirection.
+
+### Overview
+
+Terrain-following vertical coordinate decouples gravity current from flat-surface assumptions.
+Pool spreading accelerates downslope, decelerates upslope; flow diverges around topography.
+Critical for orographic-complex sites (e.g., coastal cliff scenarios in Burro campaigns).
+
+### Goals
+
+1. Fill new `m_lng_z_topo` MultiFab on LNG grid from atmospheric `z_phys_cc` (terrain elevation)
+2. Modify `advance_gravity_current()` to use `h + z_topo` in shallow-water pressure gradient
+3. Add parameter `enable_terrain_spreading` (default false) for backward compatibility
+4. Compute effective gravity vector accounting for local slope
+5. Validate on sinusoidal terrain: downhill spreading >10% faster than uphill
+
+### Key Files Changed
+
+- `ERF_LNGLayer.H/.cpp` — allocate `m_lng_z_topo`, initialize from ATM
+- `ERF_LNGGravityCurrent.H/cpp` — modify pressure gradient computation
+- `ERF_LNGParams.H` — new parameter
+
+### New Parameters
+
+```
+bool    enable_terrain_spreading = false   # Use terrain in GC pressure gradient [Phase 12]
+```
+
+### Canonical Test
+
+**Test name:** `LNG_TerrainSpreading`
+
+**Setup:**
+- 32×32×64 ATM domain with sinusoidal terrain: z_topo(x) = 100 sin(2π x / 3000) m
+- grid_ratio=4 → 128×128 LNG grid
+- Spill at terrain peak (x=0, z≈100m): circular pool radius 10 m
+- Run 40 steps, dt=0.5 s
+- `enable_terrain_spreading = true`
+
+**Pass criteria:**
+1. Pool spreads downhill (x>0, z→0) at u_gc >10% faster than uphill (x<0, z→0)
+2. At t=10 s: downhill extent >uphill extent by >10% (quantify from pool_depth_max per direction)
+3. `[LNG DEBUG] Phase 12: terrain spreading active  z_topo_max=...` printed once at init
+4. No NaN in pool height or velocity
+5. Concentration plume deflects downslope (matches physical intuition)
+6. With `enable_terrain_spreading = false`: spreading symmetric (symmetric pool)
+
+### Implementation Checklist
+
+- [ ] Add `m_lng_z_topo` MultiFab to `ERF_LNGLayer.H`
+- [ ] In `initialize()`: extract `z_phys_cc` and coarsen/interpolate to LNG grid
+- [ ] Modify `advance_gravity_current()` shallow-water pressure gradient
+- [ ] Add `enable_terrain_spreading` parameter to `ERF_LNGParams.H`
+- [ ] Update pressure gradient computation to include `dz_topo/dx`, `dz_topo/dy` terms
+- [ ] Create `Exec/CanonicalTests/LNG/LNG_TerrainSpreading/` test
+- [ ] Generate sinusoidal terrain inputs file
+
+---
 
 
