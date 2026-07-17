@@ -16,6 +16,8 @@
 #include "ERF_LNGPlotfile.H"
 #include "ERF_LNGReceptorOutput.H"
 #include "ERF_LNGRegulatory.H"
+#include "ERF_LNGSpillSchedule.H"
+#include "ERF_LNGSpillScheduleDiag.H"
 #include "ERF.H"
 #include "ERF_IndexDefines.H"
 #include <AMReX_MultiFab.H>
@@ -203,6 +205,32 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
                        << m_params.nfpa59a_exclusion_conc << " vol/vol (1/2 LFL)\n"
                        << "[LNG DEBUG] Phase 7:   regulatory_file=" << m_params.lng_regulatory_file << "\n";
 
+    // Phase 8: load spill schedule
+    if (!m_params.spill_schedule_file.empty()) {
+        load_lng_spill_schedule(m_params.spill_schedule_file, m_spill_schedule);
+        if (m_params.lng_debug)
+            amrex::Print() << "[LNG DEBUG] Phase 8: spill_schedule_file="
+                           << m_params.spill_schedule_file
+                           << "  n_events=" << m_spill_schedule.events.size() << "\n";
+        // Per-event debug
+        for (int i = 0; i < static_cast<int>(m_spill_schedule.events.size()); ++i) {
+            const auto& ev = m_spill_schedule.events[i];
+            if (m_params.lng_debug)
+                amrex::Print() << "[LNG DEBUG] Phase 8:   event " << i
+                               << " name=" << ev.name
+                               << " t=[" << ev.start_time_s << "," << ev.end_time_s << "] s"
+                               << " rate=" << ev.rate_kg_s << " kg/s"
+                               << " at (" << ev.cx_m << "," << ev.cy_m << ") m"
+                               << " radius=" << ev.radius_m << " m\n";
+        }
+    } else {
+        if (m_params.lng_debug)
+            amrex::Print() << "[LNG DEBUG] Phase 8: spill_schedule_file empty"
+                           << " — using constant spill_rate_kg_s=" << m_params.spill_rate_kg_s << " kg/s\n";
+    }
+    // Write spill diagnostics header
+    write_spill_schedule_header(m_params.spill_diag_file, m_spill_schedule);
+
     if (params.lng_debug || params.verbose >= 1) {
         amrex::Print() << "[LNG DEBUG] Phase 2: pool evaporation model initialized\n"
                        << "[LNG DEBUG] Phase 2:   pool_centre=(" << m_pool_cx << ", " << m_pool_cy << ") m\n"
@@ -312,14 +340,20 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
                            << " K  test_wind=" << params.test_wind_speed << " m/s\n";
     }
 
-    // ── Phase 2: pool physics ────────────────────────────────────────────────
-    if (params.spill_rate_kg_s > 0.0 && dt > 0.0) {
+    // ── Phase 8: scheduled spill — supersedes constant spill_rate_kg_s ──────────
+    if (m_spill_schedule.loaded && !m_spill_schedule.events.empty()) {
+        // CSV schedule active: apply all time-windowed events
+        apply_spill_schedule(*m_lng_pool_depth, m_lg.geom,
+                              m_spill_schedule, m_time, dt,
+                              m_params.rho_LNG, m_params.lng_debug);
+    } else if (m_params.spill_rate_kg_s > 0.0 && dt > 0.0) {
+        // Fallback: constant rate from Phase 2 (backward compatible)
         apply_spill_source(*m_lng_pool_depth, m_lg.geom,
-                           params.spill_rate_kg_s, params.rho_LNG,
-                           params.pool_area_m2, m_pool_cx, m_pool_cy, dt);
-        if (params.lng_debug)
-            amrex::Print() << "[LNG DEBUG] Phase 2: spill source applied  rate="
-                           << params.spill_rate_kg_s << " kg/s  dt=" << dt << " s\n";
+                           m_params.spill_rate_kg_s, m_params.rho_LNG,
+                           m_params.pool_area_m2, m_pool_cx, m_pool_cy, dt);
+        if (m_params.lng_debug)
+            amrex::Print() << "[LNG DEBUG] Phase 2: spill source applied (constant)  rate="
+                           << m_params.spill_rate_kg_s << " kg/s  dt=" << dt << " s\n";
     }
 
     compute_lng_evap_flux(*m_lng_evap_flux, *m_lng_latent_flux,
@@ -570,6 +604,12 @@ void LNGLayer::write_output(int nstep, double cur_time, bool is_final)
                                   m_exclusion_radius_m,
                                   *m_lng_conc_1h_avg,
                                   *m_lng_exceed_flag);
+    }
+
+    // Phase 8: spill diagnostics CSV (always write, not gated on lng_debug — Rule A4)
+    if (m_spill_schedule.loaded) {
+        append_spill_schedule_row(nstep, cur_time, m_params.spill_diag_file,
+                                   m_spill_schedule, cur_time);
     }
 
     if (m_params.lng_debug) {

@@ -23,8 +23,8 @@ The ERF-LNG module simulates liquefied natural gas (LNG) spill evaporation and v
 | 4 | **Wind & BL Extraction** | Wind field interpolation at zref; u* mapping; PBL height feedback | ✅ COMPLETE |
 | 5 | **Gravity Current & Flammability** | 2D shallow-water PDEs; Richardson transition; LFL/UFL zones | ✅ COMPLETE |
 | 6 | **Output & Visualization** | Plotfile writes; receptor point sampling; CSV output expansion | ✅ COMPLETE |
-| 7 | **Regulatory Compliance** | NFPA 59A exclusion zone calculation; threshold mapping | 🔄 IN PROGRESS |
-| 8 | **Spill Scheduling** | Time-dependent release rates; inventory tracking; multi-event scenarios | TODO |
+| 7 | **Regulatory Compliance** | NFPA 59A exclusion zone calculation; threshold mapping | ✅ COMPLETE |
+| 8 | **Spill Scheduling** | Time-dependent release rates; inventory tracking; multi-event scenarios | 🔄 IN PROGRESS |
 
 ---
 
@@ -1485,9 +1485,221 @@ Per-step when `lng_debug=true`:
 
 ---
 
-## Phase 6+: Future Work
+## Phase 7 Post-Merge Bug Fixes (Commit 50cb7e7)
 
-Phase 7 will implement regulatory compliance (NFPA 59A exclusion zones). Phase 8 will complete
-spill scheduling with time-dependent release rates and inventory tracking.
+After PR #168 merged, one critical fix was applied directly to `ERF-HazGas`:
+
+**Commit 50cb7e7** — "Fix gravity current: CFL-based velocity cap + pool depletion coupling" (2026-07-16 by hgopalan)
+
+1. **CFL-based velocity cap (Fix 1)**
+   - **Issue:** Hard-coded `U_MAX=50 m/s` violated CFL stability for fine grids
+   - **Resolution:** Compute cap dynamically: `U_MAX = CFL_SAFETY * min(dx,dy) / dt`
+   - **Example:** For dx=23.4m (grid_ratio=4), dy=23.4m, dt=0.5s: `U_MAX = 0.9 * 23.4 / 0.5 = 42.2 m/s` (CFL=0.9)
+   - **Impact:** Prevents spurious velocity spikes in gravity current dynamics
+
+2. **Pool depletion coupling (Fix 2)**
+   - **Issue:** Gravity current (gc_h, gc_u, gc_v) grew indefinitely after pool evaporated
+   - **Resolution:** Zero gc fields when `pool_mask==0 AND h<H_MIN`
+   - **Example:** At t=3600s, old code had gc_h=152m with active_cells=0; fixed code correctly terminates when pool drains
+   - **Impact:** Correctly implements termination of hazard zones when source exhausted
+
+**Files modified:**
+- `Source/LNG/ERF_LNGGravityCurrent.H` (39 lines changed)
+- `Source/LNG/ERF_LNGGravityCurrent.cpp` (131 lines, 100 insertions / 70 deletions)
+- `Source/LNG/ERF_LNGLayer.cpp` (call site updated: `advance_gravity_current()` now takes `lng_pool_mask` argument)
+
+**Test impact:** LNG_GravityCurrent canonical test adjusted for CFL-based cap; results still physically accurate.
+
+---
+
+## Phase 8: Spill Scheduling (Time-Varying Multi-Source Release)
+
+Phase 8 implements time-varying, multi-source, multi-event spill scheduling from a CSV file.
+This is the LNG analog of ERF Dust module's spill blast scheduling (time-indexed release events)
+combined with pool source activation (time-windowed activity periods).
+
+### Goals
+
+1. **CSV spill schedule** — Parse a CSV file defining multiple spill events (start/end time, location, radius, rate)
+2. **Time-windowed activation** — Each event active only when `t >= start_time_s AND (end_time_s < 0 OR t <= end_time_s)`
+3. **Multi-source pools** — Multiple simultaneous circular spill regions contribute independently to `lng_pool_depth`
+4. **Inventory tracking** — Track total mass released per event; cumulative spill; CSV diagnostic output
+5. **Backward compatibility** — `spill_rate_kg_s` still works when no schedule file given
+
+### New Files
+
+**Header-only (Phase 8 interfaces):**
+- `ERF_LNGSpillSchedule.H` — CSV schedule struct, POD event definition, function declarations
+- `ERF_LNGSpillScheduleDiag.H` — Spill diagnostics CSV output (header write + row append)
+
+**Implementation:**
+- `ERF_LNGSpillSchedule.cpp` — CSV parsing (Rank 0 reads, MPI broadcast), time-window logic, mass tracking
+
+**Test:**
+- `Exec/CanonicalTests/LNG/LNG_SpillSchedule/` — multi-event scheduling with backward-compatibility fallback
+
+### New Parameters (ERF_LNGParams.H)
+
+`spill_schedule_file` — registered in Phase 1 as placeholder; now activated in Phase 8
+```cpp
+std::string spill_schedule_file = "";  // CSV file with spill events [Phase 8]
+std::string spill_diag_file = "lng_spill_diag.csv";  // Diagnostics output [Phase 8]
+```
+
+### New Data Structure
+
+```cpp
+/// Single spill event (POD for MPI_Bcast)
+struct LNGSpillEvent {
+    char   name[64]     = {};      // Event label
+    double start_time_s = 0.0;     // Activation start [s]
+    double end_time_s   = -1.0;    // Activation end [s]; -1 = entire simulation
+    double cx_m         = 0.0;     // Pool center x [m]
+    double cy_m         = 0.0;     // Pool center y [m]
+    double radius_m     = 10.0;    // Spill radius [m]
+    double rate_kg_s    = 0.0;     // Release rate [kg/s]
+};
+
+/// Container for all events (loaded once at initialize)
+struct LNGSpillSchedule {
+    std::vector<LNGSpillEvent> events;
+    bool loaded = false;
+};
+```
+
+### CSV Format
+
+Space or comma delimited; `#` = comment:
+```
+event_name  start_time_s  end_time_s  cx_m     cy_m     radius_m  rate_kg_s
+spill_1     0.0           -1          1500.0   1500.0   10.0      50.0
+spill_2     30.0          90.0        1600.0   1400.0   5.0       25.0
+```
+
+- `end_time_s = -1` means event active for entire simulation
+- Events can overlap temporally and spatially; contributions additive
+
+### Physics Implementation
+
+#### CSV Loading (MPI-safe, Rule B1)
+
+```cpp
+void load_lng_spill_schedule(const std::string& filename, LNGSpillSchedule& schedule)
+```
+
+- **Rank 0 only:** Opens file, parses line-by-line, skips comments
+- **All ranks:** Receive via `MPI_Bcast` (POD struct array) — NOT gated by IOProcessor for broadcast
+- **Post-broadcast:** All ranks execute identically; debug print per event on all ranks
+
+#### Time-Windowed Activation
+
+```cpp
+void apply_spill_schedule(..., LNGSpillSchedule& schedule, ..., amrex::Real cur_time, ...)
+```
+
+- For each event: check `cur_time >= start_time_s AND (end_time_s < 0 OR cur_time <= end_time_s)`
+- If active: call `apply_spill_source()` to add liquid to pool
+- Multiple events can contribute to same cell (additive)
+- Debug print per active event: `[LNG DEBUG] Phase 8: spill event '<name>' ACTIVE rate=<> kg/s at (<cx>,<cy>) m`
+
+#### Mass Inventory Tracking
+
+```cpp
+amrex::Real compute_total_released_mass(const LNGSpillSchedule& schedule, amrex::Real cur_time)
+```
+
+- Sum `rate_kg_s * (time_active)` for all events that have started by `cur_time`
+- No MPI reduction needed (pure scalar arithmetic from schedule struct, same on all ranks)
+
+#### Diagnostics CSV Output
+
+```cpp
+inline void write_spill_schedule_header(..., LNGSpillSchedule& schedule)
+inline void append_spill_schedule_row(..., LNGSpillSchedule& schedule, ...)
+```
+
+Per timestep: `step, time_s, n_active_events, total_released_mass_kg, event_1_rate, event_2_rate, ...`
+- Header written once at initialize
+- Row appended after each step (not gated on `lng_debug` per Rule A4)
+
+### Integration in LNGLayer
+
+**In `initialize()`:**
+- Load spill schedule: `load_lng_spill_schedule(params.spill_schedule_file, m_spill_schedule)`
+- Write diagnostics header: `write_spill_schedule_header(..., m_spill_schedule)`
+- Debug print: per-event schedule info, count of events
+
+**In `advance()` (Step D, replaces constant spill):**
+```cpp
+if (m_spill_schedule.loaded && !m_spill_schedule.events.empty()) {
+    // CSV schedule active: apply all time-windowed events
+    apply_spill_schedule(*m_lng_pool_depth, m_lg.geom, m_spill_schedule, m_time, dt, ...);
+} else if (m_params.spill_rate_kg_s > 0.0 && dt > 0.0) {
+    // Fallback: constant rate (Phase 2, backward compatible)
+    apply_spill_source(*m_lng_pool_depth, m_lg.geom, params.spill_rate_kg_s, ...);
+}
+```
+
+**In `write_output()`:**
+- Append spill diagnostics row: `append_spill_schedule_row(..., m_spill_schedule, ...)`
+- No gatekeeping on `lng_debug` (Rule A4)
+
+### Test: LNG_SpillSchedule
+
+**ATM configuration (copied verbatim from LNG_Regulatory):**
+- 32 × 32 × 64 cells, grid_ratio=4 → 128 × 128 LNG grid
+- dt=0.5 s, 20 timesteps = 10 s total
+- `amrex.max_grid_size_z=64` (mandatory)
+- `erf.sum_interval=1`
+
+**Spill schedule test file (`spill_schedule.csv`):**
+```
+spill_main       0.0   -1    1500.0  1500.0   10.0   20.0
+spill_secondary  5.0   15.0  1600.0  1400.0   5.0    10.0
+```
+
+- `spill_main`: Active entire run (t ∈ [0, 10] s), rate 20 kg/s
+- `spill_secondary`: Active t ∈ [5.0, 15.0] s (overlaps steps ~11–30 at dt=0.5 s)
+
+**Pass criteria (12 items):**
+1. Exit code 0, 20 timesteps
+2. `[LNG DEBUG] Phase 8: spill schedule loaded, 2 events` in stdout
+3. `spill_main` event: active steps 1–20 → `[LNG DEBUG] Phase 8: spill event 'spill_main' ACTIVE` 20 times
+4. `spill_secondary` event: active steps ~11–30 (t ∈ [5.0, 15.0] s at dt=0.5) → appears only during window
+5. `lng_spill_diag.csv` created with 21 lines (1 header + 20 rows)
+6. `n_active_events` column = 1 for steps 1–10, = 2 for steps 11–30, = 1 for remaining
+7. `pool_mass` in `lng_diag.csv` higher during steps 11–30 (two sources) vs. before/after
+8. Backward compatibility: with `spill_schedule_file=""` and `spill_rate_kg_s=20.0`:
+   - Fallback activates: `[LNG DEBUG] Phase 2: spill source applied (constant)` appears 20 times
+9. `lng_regulatory.csv` generated normally (no regression from Phase 7)
+10. Receptor CSVs and plotfiles generated correctly (no regression from Phases 6–7)
+11. `[LNG DEBUG] NaN check PASSED` 20 times
+12. Build: no linker errors with `-DERF_USE_LNG=ON`
+
+### Implementation Checklist
+
+- [ ] Create `ERF_LNGSpillSchedule.H` (header-only, structs + declarations)
+- [ ] Create `ERF_LNGSpillSchedule.cpp` (CSV parsing, time-window logic, mass tracking)
+- [ ] Create `ERF_LNGSpillScheduleDiag.H` (header-only, CSV output)
+- [ ] Add `spill_diag_file` parameter to `ERF_LNGParams.H`
+- [ ] Add `m_spill_schedule` field to `ERF_LNGLayer.H`
+- [ ] Update `ERF_LNGLayer.cpp::initialize()` — load schedule, write diag header
+- [ ] Update `ERF_LNGLayer.cpp::advance()` — replace Step D with scheduled spill
+- [ ] Update `ERF_LNGLayer.cpp::write_output()` — append spill diagnostics
+- [ ] Add `#include "ERF_LNGSpillSchedule.H"` and `#include "ERF_LNGSpillScheduleDiag.H"` to `ERF_LNGLayer.cpp`
+- [ ] Update `Source/LNG/Make.package` — register `.cpp` and `.H`
+- [ ] Update `CMake/BuildERFExe.cmake` — register `.cpp`
+- [ ] Create `Exec/CanonicalTests/LNG/LNG_SpillSchedule/` test
+- [ ] Create `inputs_lng_spillschedule` (copy ATM verbatim + add Phase 8 params)
+- [ ] Create `sounding_neutral_abl` (verbatim copy from regulatory)
+- [ ] Create `spill_schedule.csv` (two events, time-overlap)
+- [ ] Create `README.md` with full specification and pass criteria
+
+### References
+
+- **Pattern source (CSV + MPI):** `ERF_DustBlastSchedule.H` (time-indexed blast events with Rank-0 read + broadcast)
+- **Pattern source (time-window):** `ERF_DustRoadSchedule.H` (time-windowed activation periods)
+- **MPI skills:** `Source/LNG/LNG_MPI_SKILLS.md` Rules A2, A4, B1
+- **Existing spill function:** `apply_spill_source()` in `Source/LNG/ERF_LNGPool.H/cpp`
 
 
