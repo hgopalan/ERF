@@ -169,6 +169,12 @@ public:
     const amrex::MultiFab* get_gc_ri_flag()  const { return m_lng_gc_ri_flag.get(); }
     /// @}
 
+    /// @name Phase 7: Regulatory Compliance MultiFabs
+    /// @{
+    const amrex::MultiFab* get_conc_1h_avg()   const { return m_lng_conc_1h_avg.get(); }
+    const amrex::MultiFab* get_exceed_flag()   const { return m_lng_exceed_flag.get(); }
+    /// @}
+
     amrex::Real get_lfl_area()               const { return m_lfl_area; }
     amrex::Real get_ufl_area()               const { return m_ufl_area; }
 
@@ -229,6 +235,11 @@ private:
     // ── Phase 5: flammability diagnostics ─────────────────────────────────
     amrex::Real m_lfl_area = 0.0;  ///< Area within LFL zone [m^2]
     amrex::Real m_ufl_area = 0.0;  ///< Area within UFL zone [m^2]
+
+    // ── Phase 7: regulatory diagnostics ──────────────────────────────────
+    std::unique_ptr<amrex::MultiFab> m_lng_conc_1h_avg;  ///< 1-hr avg conc [kg/m^3]
+    std::unique_ptr<amrex::MultiFab> m_lng_exceed_flag;   ///< NFPA exceedance [0/1]
+    amrex::Real m_exclusion_radius_m = 0.0;  ///< NFPA 59A exclusion zone radius [m]
 
     // ── Phase 4: ATM-resolution scratch MFs for MPI-safe wind extraction ──
     // These live on the ATM BoxArray / DistributionMapping so that

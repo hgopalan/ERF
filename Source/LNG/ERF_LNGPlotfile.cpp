@@ -98,6 +98,8 @@ void WriteLNGPlotfile(const std::string& plotfile_prefix,
     copy_if(lng_layer.get_gc_u(),        14);
     copy_if(lng_layer.get_gc_v(),        15);
     copy_if(lng_layer.get_gc_ri_flag(),  16);
+    copy_if(lng_layer.get_conc_1h_avg(), 17);
+    copy_if(lng_layer.get_exceed_flag(), 18);
 
     std::string plotfilename = amrex::Concatenate(plotfile_prefix, step, 5);
 
