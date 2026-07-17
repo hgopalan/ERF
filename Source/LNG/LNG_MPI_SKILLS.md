@@ -18,6 +18,7 @@ merging any new AMReX sub-grid 2D module into ERF.
 | [#165](https://github.com/hgopalan/ERF/pull/165) | LNG Phase 4: live wind & surface field extraction | 4 | 2026-07-16 |
 | [#166](https://github.com/hgopalan/ERF/pull/166) | LNG Phase 5: gravity current PDEs, Richardson transition, flammability | 5 | 2026-07-16 |
 | [#167](https://github.com/hgopalan/ERF/pull/167) | LNG Phase 6: Output & Visualization: plotfile, receptor sampling, CSV | 6 | 2026-07-16 |
+| Phase 7 | Regulatory Compliance: NFPA 59A 1h-average, exclusion zone, exceedance CSV (post-merge fixes) | 7 | 2026-07-17 |
 
 Post-merge multi-rank bugs were found during integration testing and fixed
 directly on `ERF-HazGas` (not via additional PRs). Phase 7 will be implemented
@@ -395,6 +396,33 @@ void deplete_pool_from_evaporation(amrex::MultiFab& lng_pool_depth,
 **Files fixed:** `ERF_LNGPool.H`, `ERF_LNGPool.cpp`, call sites in
 `ERF_LNGLayer.cpp`
 
+### D2. `FillBoundary` Does Not Accept an `amrex::IntVect` Argument
+
+`MultiFab::FillBoundary` has three valid overloads:
+1. No arguments — fills all ghost cells, assumes non-periodic
+2. `const Periodicity&` — fills ghost cells with correct periodic exchange
+3. `int scomp, int ncomp` — fills a subset of components
+
+Passing an `amrex::IntVect` (e.g. `TheUnitVector()` or `TheZeroVector()`) is
+**not a valid overload** and produces a compile error.
+
+```cpp
+// ❌ WRONG — not a valid overload, compile error
+lng_conc_1h_avg.FillBoundary(lng_conc_1h_avg.nGrow() > 0
+    ? amrex::IntVect::TheUnitVector()
+    : amrex::IntVect::TheZeroVector());
+
+// ✅ CORRECT — use Periodicity overload (Rule B4), guard with nGrow check
+if (lng_conc_1h_avg.nGrow() > 0)
+    lng_conc_1h_avg.FillBoundary(geom_lng.periodicity());
+```
+
+The `nGrow() > 0` guard avoids a no-op `FillBoundary` call on MultiFabs
+allocated with zero ghost cells (e.g. some plotfile scratch MFs).
+
+**File fixed:** `ERF_LNGRegulatory.cpp` — `update_lng_1h_average` and
+`compute_lng_exceedance`
+
 ---
 
 ## Part E — Output & Diagnostics Rules
@@ -509,6 +537,10 @@ erf.lng.lng_diag_file    = "lng_diag.csv"
 erf.lng.lng_receptor_names = "center" "downwind"
 erf.lng.lng_receptor_x     = 1500.0   1700.0
 erf.lng.lng_receptor_y     = 1500.0   1500.0
+
+# ── Phase 7 regulatory (optional) ───────────────────────────────────────────
+erf.lng.nfpa59a_exclusion_conc = 0.025   # 1/2 LFL threshold [vol/vol]
+erf.lng.lng_regulatory_file    = "lng_regulatory.csv"
 ```
 
 ---
@@ -551,6 +583,8 @@ Use this checklist before opening a PR for any new LNG phase:
 - [ ] `write_output` has `m_last_output_step` duplicate guard
 - [ ] All console prints use correct `[LNG]` prefix tier
 - [ ] Plotfile written at correct intervals (check `[LNG] Writing LNG plotfile`)
+- [ ] `FillBoundary` uses `geom_lng.periodicity()` overload, NOT `IntVect` (Rule D2)
+- [ ] `nGrow() > 0` guard before `FillBoundary` on zero-ghost MultiFabs
 
 **Documentation**
 - [ ] `LNG_DEVELOPMENT.md` updated with new phase section
@@ -581,6 +615,8 @@ Use this checklist before opening a PR for any new LNG phase:
 | 15 | `std::vector` → `amrex::Vector` implicit conversion | Phase 6 | Compile error in `ERF_LNGPlotfile.cpp` line 126 | `ERF_LNGPlotfile.cpp` | A5 |
 | 16 | Plotfile missing `Barrier` after dir creation | Phase 6 | Race condition: non-IO ranks call VisMF before dir exists | `ERF_LNGPlotfile.cpp` | B7 |
 | 17 | `ERF_LNGPlotfile.cpp` not in CMake | Phase 6 | CMake linker error | `CMake/BuildERFExe.cmake` | A2 |
+| 18 | `FillBoundary(IntVect)` not a valid AMReX overload | Phase 7 | Compile error in `ERF_LNGRegulatory.cpp` line 32 | `ERF_LNGRegulatory.H/cpp` | B4, D1 |
+| 19 | Missing `geom_lng` argument at call sites in `ERF_LNGLayer.cpp` | Phase 7 | Compile error: `update_lng_1h_average` requires 4 args, 3 provided | `ERF_LNGLayer.cpp` lines 433, 436 | D1 |
 
 ---
 
@@ -593,6 +629,7 @@ The following have been verified to complete all 20 steps without hanging:
 | LNG_GravityCurrent baseline | 8×8×64 | 2 | 16×16 | 1 | ✅ |
 | LNG_GravityCurrent multi-rank | 32×32×64 | 4 | 128×128 | 2 | ✅ |
 | LNG_Output Phase 6 | 32×32×64 | 4 | 128×128 | 2 | ✅ |
+| LNG_Regulatory Phase 7 | 32×32×64 | 4 | 128×128 | 2 | ✅ |
 | DustIntegration (reference) | 32×32×64 | 4 | 128×128 | 2 | ✅ |
 
 Key observable indicators of a healthy run:
