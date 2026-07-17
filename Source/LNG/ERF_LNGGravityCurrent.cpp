@@ -152,12 +152,13 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
         });
 
         // Fix 5: pool confinement — zero ALL off-pool cells
+        // Fix 5: pool confinement
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
             if (pmask(i,j,k) < 0.5) {
                 h_arr(i,j,k)   = 0.0;
                 u_arr(i,j,k)   = 0.0;
                 v_arr(i,j,k)   = 0.0;
-                ri_flag(i,j,k) = 0.0;
+                ri_flag(i,j,k) = 1.0;  // mark as mixed (inactive), not GC-active
             }
         });
     }

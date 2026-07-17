@@ -45,7 +45,7 @@ erf.transport_scalar = true
 # ── LNG module — Phase 7 ──────────────────────────────────────────────────────
 erf.lng.enable              = true
 erf.lng.verbose             = 1
-erf.lng.lng_debug           = false
+erf.lng.lng_debug           = true
 
 erf.lng.pool_area_m2        = 5000.0
 erf.lng.pool_depth_init_m   = 0.5
