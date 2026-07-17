@@ -2,26 +2,31 @@
  * @file ERF_LNGGravityCurrent.cpp
  * @brief Implementation of shallow-water gravity current PDEs for LNG Phase 5
  *
- * Three fixes applied vs the original implementation:
+ * Four fixes applied vs the original implementation:
  *
  * Fix 1 -- CFL-based velocity cap (replaces hard-coded U_MAX=50 m/s):
  *   U_MAX = CFL_SAFETY * min(dx,dy) / dt
  *   For a 3000 m domain on 128 cells (grid_ratio=4, n_cell=32):
  *     dx = 3000/128 = 23.4375 m
  *     U_MAX = 0.9 * 23.4375 / 0.5 = 42.2 m/s  (CFL = 0.9, stable)
- *   The previous 50 m/s cap allowed CFL > 1 -> velocities grew unboundedly
- *   over long runs (observed: u_max=50 m/s at t=3600 s).
+ *   The previous 50 m/s cap allowed CFL > 1 -> velocities grew unboundedly.
  *
  * Fix 2 -- Pool depletion coupling (new lng_pool_mask argument):
- *   When pool_mask(i,j,k) == 0 (no active pool) AND gc_h < H_MIN (negligible
- *   depth), zero out gc_h/gc_u/gc_v. This stops the gravity current continuing
- *   to spread indefinitely after the LNG pool has fully evaporated.
- *   Without this, gc_h grew to 152 m at t=3600 s despite active_cells=0.
+ *   When pool_mask==0 AND gc_h < H_MIN, zero gc_h/gc_u/gc_v.
+ *   Stops gravity current spreading after pool evaporates.
  *
  * Fix 3 -- Atmospheric dilution decay:
  *   Away from active evaporation source (evap==0), apply exponential decay
- *   to h with timescale H_DECAY_TIMESCALE=600 s. This represents atmospheric
- *   mixing dissipating the dense vapor layer once the source is removed.
+ *   to h with timescale H_DECAY_TIMESCALE=600 s.
+ *
+ * Fix 4 -- Spreading threshold (H_SPREAD_MIN = 1 cm):
+ *   Skip the pressure gradient in off-pool cells where h_old < H_SPREAD_MIN.
+ *   Without this, negligible-depth cells (h > H_MIN = 0.1 mm but < 1 cm)
+ *   still computed the pressure gradient and accumulated depth from adjacent
+ *   pool cells, causing gc_h_max to grow to 152 m at t=3600 s even with
+ *   an active 200 kg/s spill maintaining the pool.
+ *   Physical interpretation: a 1 cm vapor layer is too thin to sustain
+ *   gravity-current-driven spreading away from the pool source region.
  */
 
 #include "ERF_LNGGravityCurrent.H"
@@ -53,8 +58,6 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
     amrex::Real dt_over_rho = dt / rho_vapor;
 
     // Fix 1: CFL-based velocity cap computed at runtime.
-    // U_MAX = CFL_SAFETY * min(dx,dy) / dt ensures the gravity current
-    // never exceeds the advective CFL stability limit.
     const amrex::Real u_max_cfl = LNGGravityConst::CFL_SAFETY
                                   * amrex::min(dx[0], dx[1]) / dt;
 
@@ -95,8 +98,7 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
             amrex::Real h_new_val = amrex::max(h_old + evap(i,j,k) * dt_over_rho, 0.0);
 
             // Fix 2: pool depletion coupling.
-            // If pool has evaporated (mask==0) and accumulated depth is negligible,
-            // zero the gravity current so it does not spread indefinitely.
+            // If pool has evaporated (mask==0) and depth is negligible, zero out.
             if (pmask(i,j,k) < 0.5 && h_new_val < LNGGravityConst::H_MIN) {
                 h_new_arr(i,j,k) = 0.0;
                 u_new_arr(i,j,k) = 0.0;
@@ -104,10 +106,23 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
                 return;
             }
 
-            // Fix 3: atmospheric dilution decay away from source
+            // Fix 3: atmospheric dilution decay away from active source
             if (evap(i,j,k) < 1.0e-10 && h_new_val > 0.0) {
                 h_new_val *= decay_factor;
                 h_new_val  = amrex::max(h_new_val, 0.0);
+            }
+
+            // Fix 4: spreading threshold.
+            // Off-pool cells with h < H_SPREAD_MIN do not participate in the
+            // shallow-water pressure gradient. Without this, thin off-pool cells
+            // accumulate depth from adjacent pool cells via pressure spreading,
+            // causing gc_h to grow to unphysical values (152 m at t=3600 s).
+            if (pmask(i,j,k) < 0.5 && h_old < LNGGravityConst::H_SPREAD_MIN) {
+                // Apply decay only; no pressure gradient, no momentum transfer
+                h_new_arr(i,j,k) = h_new_val;
+                u_new_arr(i,j,k) = 0.0;
+                v_new_arr(i,j,k) = 0.0;
+                return;
             }
 
             // Pressure gradient dh/dx, dh/dy -- central differences

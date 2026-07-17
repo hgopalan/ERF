@@ -4,18 +4,18 @@
  * @note Phase 5
  *
  * Governing equations on the 2D slab (depth h [m], depth-averaged velocity u,v [m/s]):
- *   ∂h/∂t   + ∂(hu)/∂x + ∂(hv)/∂y = F_evap/ρ_vapor            [mass]
- *   ∂(hu)/∂t + ∂(hu²)/∂x = -g'·h·∂h/∂x - Cd·u·|u|             [x-momentum]
- *   ∂(hv)/∂t + ∂(hv²)/∂y = -g'·h·∂h/∂y - Cd·v·|v|             [y-momentum]
+ *   dh/dt   + d(hu)/dx + d(hv)/dy = F_evap/rho_vapor            [mass]
+ *   d(hu)/dt + d(hu^2)/dx = -g'*h*dh/dx - Cd*u*|u|             [x-momentum]
+ *   d(hv)/dt + d(hv^2)/dy = -g'*h*dh/dy - Cd*v*|v|             [y-momentum]
  *
  * where:
- *   g' = g*(ρ_vapor - ρ_air)/ρ_air  [reduced gravity, m/s^2]
+ *   g' = g*(rho_vapor - rho_air)/rho_air  [reduced gravity, m/s^2]
  *   Cd  = surface drag coefficient [-]
  *
  * Richardson transition criterion:
- *   Ri = g'*h / u*²
- *   Ri > Ri_crit (~0.25) → gravity current regime (2D model active)
- *   Ri < Ri_crit         → well-mixed regime (3D ERF dispersion dominates)
+ *   Ri = g'*h / u*^2
+ *   Ri > Ri_crit (~0.25) -> gravity current regime (2D model active)
+ *   Ri < Ri_crit         -> well-mixed regime (3D ERF dispersion dominates)
  *
  * References:
  *   Webber, D.M. & Brighton, P.W.M. (1987) UKAEA SRD R390.
@@ -43,7 +43,16 @@ namespace LNGGravityConst {
     constexpr amrex::Real RI_CRIT     = 0.25;
 
     /// Minimum cloud depth before zeroing velocity [m]
+    /// Cells with h < H_MIN are treated as dry and zeroed out.
     constexpr amrex::Real H_MIN       = 1.0e-4;
+
+    /// Minimum cloud depth for pressure gradient propagation [m]
+    /// Cells with h < H_SPREAD_MIN outside the active pool do NOT participate
+    /// in the shallow-water pressure gradient. This prevents negligible-depth
+    /// off-pool cells from accumulating vapor via pressure spreading, which
+    /// caused gc_h_max to grow to 152 m at t=3600 s.
+    /// H_SPREAD_MIN = 0.01 m (1 cm) = 100 * H_MIN.
+    constexpr amrex::Real H_SPREAD_MIN = 1.0e-2;
 
     /// CFL safety factor for velocity cap [-]
     /// U_MAX is computed as CFL_SAFETY * min(dx,dy) / dt at runtime.
@@ -99,21 +108,18 @@ bool is_gravity_current_active(amrex::Real Ri) noexcept
 /**
  * @brief Advance shallow-water gravity current one timestep.
  *
- * Fix 1 -- CFL-based velocity cap: U_MAX = CFL_SAFETY * min(dx,dy) / dt
- * computed at runtime from geom_lng.CellSize and dt. The previous hard-coded
- * 50 m/s cap was above the CFL stability limit for typical LNG grids
- * (dx~23 m, dt=0.5 s -> CFL_limit=46 m/s), allowing velocities that grew
- * unboundedly over a 1-hour run (observed: u_max=50 m/s at t=3600 s).
+ * Fix 1 -- CFL-based velocity cap: U_MAX = CFL_SAFETY * min(dx,dy) / dt.
  *
- * Fix 2 -- Pool depletion coupling (new lng_pool_mask argument):
- * When pool_mask(i,j,k)==0 (no active pool) AND gc_h < H_MIN (negligible
- * depth), zero out gc_h/gc_u/gc_v. This stops the gravity current continuing
- * to spread indefinitely after the LNG pool has fully evaporated.
- * Without this, gc_h grew to 152 m at t=3600 s despite active_cells=0.
+ * Fix 2 -- Pool depletion coupling: zero gc_h/u/v when pool_mask==0 AND
+ * h < H_MIN to stop spreading after pool evaporates.
  *
- * Fix 3 -- Atmospheric dilution decay:
- * Away from active evaporation source, apply exponential decay to h with
- * timescale H_DECAY_TIMESCALE (600 s) to represent atmospheric mixing.
+ * Fix 3 -- Atmospheric dilution decay: exponential decay of h away from
+ * evaporation source with timescale H_DECAY_TIMESCALE=600 s.
+ *
+ * Fix 4 -- Spreading threshold: skip pressure gradient in off-pool cells
+ * where h < H_SPREAD_MIN (1 cm). This prevents negligible-depth cells from
+ * accumulating vapor via the shallow-water pressure gradient and growing to
+ * unphysical depths (observed: 152 m at t=3600 s with active spill).
  *
  * @param[in,out] lng_gc_h       Cloud depth [m]
  * @param[in,out] lng_gc_u       Depth-averaged u-velocity [m/s]
