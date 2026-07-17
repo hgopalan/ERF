@@ -2,31 +2,22 @@
  * @file ERF_LNGGravityCurrent.cpp
  * @brief Implementation of shallow-water gravity current PDEs for LNG Phase 5
  *
- * Fixes applied vs the original implementation:
+ * Fixes applied:
  *
- * Fix 1 -- CFL-based velocity cap (replaces hard-coded U_MAX=50 m/s):
- *   U_MAX = CFL_SAFETY * min(dx,dy) / dt
+ * Fix 1 -- CFL-based velocity cap (replaces hard-coded U_MAX=50 m/s).
  *
- * Fix 2 -- Pool depletion coupling:
- *   Zero gc_h/gc_u/gc_v when pool_mask==0 AND h < H_MIN.
+ * Fix 2 -- Pool depletion coupling: zero gc state when pool_mask==0 AND h < H_MIN.
  *
- * Fix 3 -- Atmospheric dilution decay:
- *   Exponential decay of h with timescale H_DECAY_TIMESCALE=600 s away
- *   from active evaporation source.
+ * Fix 3 -- Atmospheric dilution decay: exponential decay of h away from source.
  *
- * Fix 5 -- Pool confinement (replaces Fix 4 H_SPREAD_MIN approach):
- *   After the Euler update, explicitly zero gc_h/gc_u/gc_v in ALL cells
- *   where pool_mask == 0. This strictly confines the shallow-water gravity
- *   current to the active pool footprint.
+ * Fix 5 -- Pool confinement: zero gc state in ALL off-pool cells after Euler update.
  *
- *   Physical justification: the shallow-water GC model represents the dense
- *   vapor layer directly above the liquid pool. Vapor that has left the pool
- *   region is tracked by the 3D ERF scalar (RhoLNG) via Phase 3 coupling.
- *   Allowing off-pool cells to accumulate gc_h via the pressure gradient
- *   caused gc_h_max to grow to 152 m at t=3600 s despite pool_depth ~0.38 m.
- *
- *   The H_SPREAD_MIN threshold (Fix 4) did not work because the pressure
- *   gradient pushed h > 1 cm into all cells within ~2 timesteps.
+ * Fix 6 -- Source accumulation cap (THIS FIX):
+ *   The depth equation h += F_evap*dt/rho_vapor has no sink in pool cells,
+ *   causing h to grow to ~131 m over 7200 steps (= 0.064/1.76 * 0.5 * 7200).
+ *   gc_h represents the DENSE VAPOR CLOUD HEIGHT above the pool, which is
+ *   physically bounded by the pool depth. After the Euler update, cap h at
+ *   pool_depth in all cells where pool_mask==1.
  */
 
 #include "ERF_LNGGravityCurrent.H"
@@ -45,6 +36,7 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
                               const amrex::MultiFab& lng_evap_flux,
                               const amrex::MultiFab& lng_ustar,
                               const amrex::MultiFab& lng_pool_mask,
+                              const amrex::MultiFab& lng_pool_depth,
                               const amrex::Geometry& geom_lng,
                               amrex::Real            rho_vapor,
                               amrex::Real            rho_air,
@@ -57,28 +49,25 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
     amrex::Real dx_inv      = 1.0 / dx[0];
     amrex::Real dt_over_rho = dt / rho_vapor;
 
-    // Fix 1: CFL-based velocity cap computed at runtime.
+    // Fix 1: CFL-based velocity cap
     const amrex::Real u_max_cfl = LNGGravityConst::CFL_SAFETY
                                   * amrex::min(dx[0], dx[1]) / dt;
 
-    // Fix 3: decay factor for atmospheric dilution away from source
+    // Fix 3: atmospheric dilution decay factor
     const amrex::Real decay_factor = 1.0 - dt / LNGGravityConst::H_DECAY_TIMESCALE;
 
-    // -------------------------------------------------------------------------
-    // Physics update -- one MFIter tile at a time
-    // -------------------------------------------------------------------------
     for (amrex::MFIter mfi(lng_gc_h, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
 
-        auto h_arr   = lng_gc_h.array(mfi);
-        auto u_arr   = lng_gc_u.array(mfi);
-        auto v_arr   = lng_gc_v.array(mfi);
-        auto ri_flag = lng_gc_ri_flag.array(mfi);
-        auto evap    = lng_evap_flux.const_array(mfi);
-        auto ustar   = lng_ustar.const_array(mfi);
-        auto pmask   = lng_pool_mask.const_array(mfi);
+        auto h_arr    = lng_gc_h.array(mfi);
+        auto u_arr    = lng_gc_u.array(mfi);
+        auto v_arr    = lng_gc_v.array(mfi);
+        auto ri_flag  = lng_gc_ri_flag.array(mfi);
+        auto evap     = lng_evap_flux.const_array(mfi);
+        auto ustar    = lng_ustar.const_array(mfi);
+        auto pmask    = lng_pool_mask.const_array(mfi);
+        auto pdepth   = lng_pool_depth.const_array(mfi);  // Fix 6
 
-        // Temporary FABs for the updated state (GPU-safe arena)
         amrex::FArrayBox h_new(bx, 1, amrex::The_Async_Arena());
         amrex::FArrayBox u_new(bx, 1, amrex::The_Async_Arena());
         amrex::FArrayBox v_new(bx, 1, amrex::The_Async_Arena());
@@ -86,7 +75,7 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
         auto u_new_arr = u_new.array();
         auto v_new_arr = v_new.array();
 
-        // Step 1: explicit Euler update of depth and momentum
+        // Step 1: Euler update
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
             amrex::Real h_old  = h_arr(i, j, k);
             amrex::Real u_old  = u_arr(i, j, k);
@@ -94,10 +83,9 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
             amrex::Real hu_old = h_old * u_old;
             amrex::Real hv_old = h_old * v_old;
 
-            // Depth update from evaporation source
             amrex::Real h_new_val = amrex::max(h_old + evap(i,j,k) * dt_over_rho, 0.0);
 
-            // Fix 2: pool depletion coupling -- zero when no pool and negligible depth
+            // Fix 2: zero off-pool cells with negligible depth
             if (pmask(i,j,k) < 0.5 && h_new_val < LNGGravityConst::H_MIN) {
                 h_new_arr(i,j,k) = 0.0;
                 u_new_arr(i,j,k) = 0.0;
@@ -105,13 +93,18 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
                 return;
             }
 
-            // Fix 3: atmospheric dilution decay away from active source
+            // Fix 3: dilution decay away from active source
             if (evap(i,j,k) < 1.0e-10 && h_new_val > 0.0) {
-                h_new_val *= decay_factor;
-                h_new_val  = amrex::max(h_new_val, 0.0);
+                h_new_val = amrex::max(h_new_val * decay_factor, 0.0);
             }
 
-            // Pressure gradient dh/dx, dh/dy -- central differences
+            // Fix 6: cap gc_h at pool_depth in pool cells
+            // gc_h is the dense vapor cloud height, bounded by the liquid depth.
+            if (pmask(i,j,k) >= 0.5) {
+                h_new_val = amrex::min(h_new_val, amrex::max(pdepth(i,j,k), 0.0));
+            }
+
+            // Pressure gradient (central differences)
             amrex::Real dhx = 0.0, dhy = 0.0;
             if (i > bx.loVect()[0] && i < bx.hiVect()[0])
                 dhx = (h_arr(i+1,j,k) - h_arr(i-1,j,k)) * 0.5 * dx_inv;
@@ -127,12 +120,10 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
             else if (j > bx.loVect()[1])
                 dhy = (h_arr(i,j,k) - h_arr(i,j-1,k)) * dx_inv;
 
-            // Pressure gradient + drag: semi-implicit depth average
             amrex::Real h_avg      = 0.5 * (h_old + h_new_val);
             amrex::Real hu_new_val = hu_old + (-g_prime*h_avg*dhx - Cd*u_old*std::abs(u_old)) * dt;
             amrex::Real hv_new_val = hv_old + (-g_prime*h_avg*dhy - Cd*v_old*std::abs(v_old)) * dt;
 
-            // Recover velocities; zero out if depth too small
             amrex::Real u_new_val = 0.0, v_new_val = 0.0;
             if (h_new_val > LNGGravityConst::H_MIN) {
                 u_new_val = hu_new_val / h_new_val;
@@ -141,7 +132,7 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
                 h_new_val = 0.0;
             }
 
-            // Fix 1: CFL-based cap (replaces hard-coded 50 m/s)
+            // Fix 1: CFL cap
             u_new_val = amrex::max(amrex::min(u_new_val,  u_max_cfl), -u_max_cfl);
             v_new_val = amrex::max(amrex::min(v_new_val,  u_max_cfl), -u_max_cfl);
 
@@ -150,7 +141,7 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
             v_new_arr(i,j,k) = v_new_val;
         });
 
-        // Step 2: write back and compute Richardson flag
+        // Step 2: write back + Richardson flag
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
             amrex::Real h_val = h_new_arr(i,j,k);
             h_arr(i,j,k)     = h_val;
@@ -160,33 +151,22 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
             ri_flag(i,j,k)   = is_gravity_current_active(Ri) ? 0.0 : 1.0;
         });
 
-        // Fix 5: pool confinement -- zero gc state in all off-pool cells.
-        // The shallow-water GC is only valid above the liquid pool. Off-pool
-        // vapor is already tracked by the 3D ERF scalar via Phase 3 coupling.
-        // This MUST run after Step 2 and BEFORE FillBoundary so the zeroed
-        // state is what gets exchanged across MPI rank boundaries.
+        // Fix 5: pool confinement — zero ALL off-pool cells
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
             if (pmask(i,j,k) < 0.5) {
-                h_arr(i,j,k)     = 0.0;
-                u_arr(i,j,k)     = 0.0;
-                v_arr(i,j,k)     = 0.0;
-                ri_flag(i,j,k)   = 0.0;  // treat as GC-active so it reactivates if pool spreads
+                h_arr(i,j,k)   = 0.0;
+                u_arr(i,j,k)   = 0.0;
+                v_arr(i,j,k)   = 0.0;
+                ri_flag(i,j,k) = 0.0;
             }
         });
     }
 
-    // -------------------------------------------------------------------------
-    // FillBoundary -- REQUIRED for >1 MPI rank (Rule B4)
-    // Pool-confined state is exchanged here.
-    // -------------------------------------------------------------------------
     lng_gc_h.FillBoundary(geom_lng.periodicity());
     lng_gc_u.FillBoundary(geom_lng.periodicity());
     lng_gc_v.FillBoundary(geom_lng.periodicity());
     lng_gc_ri_flag.FillBoundary(geom_lng.periodicity());
 
-    // -------------------------------------------------------------------------
-    // Debug diagnostics -- ALL MPI-collective MultiFab operations (Rule B6)
-    // -------------------------------------------------------------------------
     if (lng_debug) {
         amrex::Real h_max_val = lng_gc_h.max(0);
         amrex::Real u_max_val = lng_gc_u.max(0);
@@ -203,10 +183,10 @@ void advance_gravity_current(amrex::MultiFab&       lng_gc_h,
         for (amrex::MFIter mfi(ri_scratch, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
             const amrex::Box& bx = mfi.tilebox();
             auto ri_arr = ri_scratch.array(mfi);
-            auto h_arr  = lng_gc_h.const_array(mfi);
+            auto h_a    = lng_gc_h.const_array(mfi);
             auto us_arr = lng_ustar.const_array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-                ri_arr(i,j,k) = compute_richardson(g_prime, h_arr(i,j,k), us_arr(i,j,k));
+                ri_arr(i,j,k) = compute_richardson(g_prime, h_a(i,j,k), us_arr(i,j,k));
             });
         }
         amrex::Real ri_max_val = ri_scratch.max(0);
