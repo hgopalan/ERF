@@ -18,7 +18,7 @@ merging any new AMReX sub-grid 2D module into ERF.
 | [#165](https://github.com/hgopalan/ERF/pull/165) | LNG Phase 4: live wind & surface field extraction | 4 | 2026-07-16 |
 | [#166](https://github.com/hgopalan/ERF/pull/166) | LNG Phase 5: gravity current PDEs, Richardson transition, flammability | 5 | 2026-07-16 |
 | [#167](https://github.com/hgopalan/ERF/pull/167) | LNG Phase 6: Output & Visualization: plotfile, receptor sampling, CSV | 6 | 2026-07-16 |
-| Phase 7 | Regulatory Compliance: NFPA 59A 1h-average, exclusion zone, exceedance CSV (post-merge fixes) | 7 | 2026-07-17 |
+| [#168](https://github.com/hgopalan/ERF/pull/168) | LNG Phase 7: Regulatory Compliance — NFPA 59A 1h-average, exclusion zone, exceedance CSV | 7 | 2026-07-17 |
 
 Post-merge multi-rank bugs were found during integration testing and fixed
 directly on `ERF-HazGas` (not via additional PRs). Phase 7 will be implemented
