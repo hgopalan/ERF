@@ -1,0 +1,102 @@
+# ERF-LNG Phase 7: Regulatory Compliance (NFPA 59A) Test
+# Tests 1-hour running average concentration, NFPA 59A exclusion zone calculation,
+# exceedance flags, and regulatory CSV output
+# ATM configuration copied verbatim from LNG_Output (Phase 6)
+
+# ── ERF ATM configuration (COPIED VERBATIM FROM LNG_Output) ────────
+erf.prob_name = "ABL"
+max_step = 20
+amr.max_level = 0
+amrex.fpe_trap_invalid = 0
+fabarray.mfiter_tile_size = 1024 1024 1024
+geometry.prob_extent = 3000 3000 1024
+amr.n_cell = 32 32 64
+geometry.is_periodic = 1 1 0
+# Prevent z-decomposition — required by LNG (and Dust) for 2D slab operations
+amrex.max_grid_size_z = 64
+zlo.type = "surface_layer"
+erf.most.z0 = 0.1
+erf.most.zref = 24.0
+erf.most.surf_temp_flux = 0.0
+zhi.type = "SlipWall"
+zhi.theta_grad = 0.003
+erf.fixed_dt = 0.5
+erf.sum_interval = 1
+erf.v = 1
+amr.v = 1
+erf.check_int = -1
+erf.plot_int_1 = -1
+erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta
+erf.use_gravity = true
+erf.molec_diff_type = "None"
+erf.les_type = "None"
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+erf.input_sounding_file = "sounding_neutral_abl"
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = false
+erf.use_coriolis = true
+erf.latitude = 45.0
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 15.0 0.0 0.0
+erf.transport_scalar = true
+
+# ── LNG module — Phase 7 (Regulatory Compliance) ────────────────────────────
+erf.lng.enable              = true
+erf.lng.verbose             = 2
+erf.lng.lng_debug           = true
+
+# Pool configuration
+erf.lng.pool_area_m2        = 500.0
+erf.lng.pool_depth_init_m   = 0.05
+erf.lng.spill_rate_kg_s     = 20.0
+
+# LNG physical properties
+erf.lng.mol_weight_LNG      = 17.4
+erf.lng.ch4_mole_fraction   = 0.90
+erf.lng.c2h6_mole_fraction  = 0.08
+erf.lng.n2_mole_fraction    = 0.02
+erf.lng.rho_LNG             = 425.0
+erf.lng.lng_boil_temp_K     = 111.7
+erf.lng.Hv_LNG              = 509000.0
+erf.lng.rho_vapor_ref       = 1.76
+erf.lng.rho_air             = 1.225
+
+# Grid coupling — grid_ratio=4 with n_cell=32 gives 128x128 LNG grid
+erf.lng.grid_ratio          = 4
+erf.lng.atm_feedback        = 1.0
+erf.lng.zref                = 24.0
+erf.lng.z0_lng              = 0.01
+
+# Placeholder ATM state (replaced by live extraction when SurfaceLayer available)
+erf.lng.test_ustar          = 0.5
+erf.lng.test_surf_temp_K    = 293.15
+erf.lng.test_wind_speed     = 15.0
+
+# Flammability tracking
+erf.lng.lfl_vol_fraction    = 0.05
+erf.lng.ufl_vol_fraction    = 0.15
+erf.lng.track_flammability  = true
+
+# Phase 5: Gravity current & Richardson transition
+erf.lng.enable_gravity_current = true
+erf.lng.gc_drag_coeff          = 2.0e-3
+erf.lng.gc_ri_crit             = 0.25
+
+# Phase 6: plotfile output
+erf.lng.lng_plot_int        = 10
+erf.lng.lng_plot_prefix     = "plt_lng_"
+erf.lng.lng_diag_file       = "lng_diag.csv"
+
+# Phase 6: receptor points
+erf.lng.lng_receptor_names  = "center" "downwind"
+erf.lng.lng_receptor_x      = 1500.0   1700.0
+erf.lng.lng_receptor_y      = 1500.0   1500.0
+
+# Phase 7: regulatory compliance (NFPA 59A)
+erf.lng.nfpa59a_exclusion_conc = 0.025   # 1/2 LFL [vol/vol]
+erf.lng.lng_regulatory_file    = "lng_regulatory.csv"
