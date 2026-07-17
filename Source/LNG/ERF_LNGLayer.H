@@ -24,6 +24,7 @@
 
 #include "ERF_LNGParams.H"
 #include "ERF_LNGGrid.H"
+#include "ERF_LNGSpillSchedule.H"
 #include <AMReX_MultiFab.H>
 #include <memory>
 
