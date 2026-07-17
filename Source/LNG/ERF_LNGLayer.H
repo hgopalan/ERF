@@ -241,6 +241,9 @@ private:
     std::unique_ptr<amrex::MultiFab> m_lng_exceed_flag;   ///< NFPA exceedance [0/1]
     amrex::Real m_exclusion_radius_m = 0.0;  ///< NFPA 59A exclusion zone radius [m]
 
+    // ── Phase 8: spill schedule ──────────────────────────────────────────
+    LNGSpillSchedule m_spill_schedule;  ///< Loaded once in initialize(), used every advance()
+
     // ── Phase 4: ATM-resolution scratch MFs for MPI-safe wind extraction ──
     // These live on the ATM BoxArray / DistributionMapping so that
     // ParallelCopy from xvel_mf / yvel_mf / z_phys_cc_mf is always

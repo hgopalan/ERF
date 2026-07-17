@@ -181,6 +181,11 @@ struct LNGParams {
     ///          Phase 8: overrides pool_area_m2 and spill_rate_kg_s if provided.
     std::string spill_schedule_file = "";
     
+    /// CSV filename for spill schedule diagnostics [string]
+    /// @details Written by Phase 8. Columns: step, time_s, n_active_events, total_released_mass_kg, event_rates.
+    ///          Always written (not gated on lng_debug per Rule A4).
+    std::string spill_diag_file = "lng_spill_diag.csv";
+    
     /// Initial depth of LNG pool [m]
     /// @details Typical range 0.01–0.5 m for spreading scenarios. Phase 1: used as initial condition.
     ///          Phase 2: updated as pool spreads and evaporates.
@@ -348,6 +353,7 @@ struct LNGParams {
         pp.query("pool_area_m2", pool_area_m2);
         pp.query("spill_rate_kg_s", spill_rate_kg_s);
         pp.query("spill_schedule_file", spill_schedule_file);
+        pp.query("spill_diag_file", spill_diag_file);
         pp.query("pool_depth_init_m", pool_depth_init_m);
         
         // Grid and coupling
