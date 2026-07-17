@@ -1,0 +1,5 @@
+add_test(
+  NAME LNG_Regulatory
+  COMMAND ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} 1
+          ${CMAKE_BINARY_DIR}/Exec/ERF inputs_lng_regulatory
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

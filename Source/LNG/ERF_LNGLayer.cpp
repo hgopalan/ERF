@@ -15,6 +15,7 @@
 #include "ERF_LNGFlammability.H"
 #include "ERF_LNGPlotfile.H"
 #include "ERF_LNGReceptorOutput.H"
+#include "ERF_LNGRegulatory.H"
 #include "ERF.H"
 #include "ERF_IndexDefines.H"
 #include <AMReX_MultiFab.H>
@@ -87,6 +88,12 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     m_lng_gc_u->setVal(0.0);
     m_lng_gc_v->setVal(0.0);
     m_lng_gc_ri_flag->setVal(0.0);
+
+    // Phase 7: regulatory diagnostics
+    m_lng_conc_1h_avg = std::make_unique<amrex::MultiFab>(m_lg.ba, m_lg.dm, ncomp, nghost);
+    m_lng_exceed_flag = std::make_unique<amrex::MultiFab>(m_lg.ba, m_lg.dm, ncomp, nghost);
+    m_lng_conc_1h_avg->setVal(0.0);
+    m_lng_exceed_flag->setVal(0.0);
 
     // ── ATM-resolution copies for wind extraction ─────────────────────────
     // These live on the ATM BoxArray (same DM as ATM) so ParallelCopy from
@@ -186,6 +193,15 @@ void LNGLayer::initialize(const ERF& erf, const LNGParams& params)
     if (m_params.lng_debug && !m_params.lng_receptor_names.empty())
         amrex::Print() << "[LNG DEBUG] Phase 6: " << m_params.lng_receptor_names.size()
                        << " receptor file(s) initialized\n";
+
+    // Phase 7: write regulatory CSV header
+    write_lng_regulatory_header(m_params.lng_regulatory_file);
+
+    if (m_params.lng_debug)
+        amrex::Print() << "[LNG DEBUG] Phase 7: regulatory diagnostics initialized\n"
+                       << "[LNG DEBUG] Phase 7:   nfpa59a_exclusion_conc="
+                       << m_params.nfpa59a_exclusion_conc << " vol/vol (1/2 LFL)\n"
+                       << "[LNG DEBUG] Phase 7:   regulatory_file=" << m_params.lng_regulatory_file << "\n";
 
     if (params.lng_debug || params.verbose >= 1) {
         amrex::Print() << "[LNG DEBUG] Phase 2: pool evaporation model initialized\n"
@@ -375,6 +391,8 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
             if (m_lng_gc_u->contains_nan(0))    nan_found = true;
             if (m_lng_gc_v->contains_nan(0))    nan_found = true;
         }
+        if (m_lng_conc_1h_avg && m_lng_conc_1h_avg->contains_nan(0)) nan_found = true;
+        if (m_lng_exceed_flag  && m_lng_exceed_flag->contains_nan(0))  nan_found = true;
         if (nan_found)
             amrex::Abort("[LNG] NaN detected in LNG MultiFab at step " + std::to_string(m_step));
         else
@@ -407,6 +425,27 @@ void LNGLayer::advance(amrex::Real dt, const LNGParams& params,
         if (m_params.lng_debug)
             amrex::Print() << "[LNG DEBUG] Phase 6: receptor sampling step=" << m_step
                            << "  n_receptors=" << m_params.lng_receptor_names.size() << "\n";
+    }
+
+    // ── Phase 7: regulatory compliance ───────────────────────────────────────
+    if (m_lng_conc_sfc && m_lng_conc_1h_avg && m_lng_exceed_flag) {
+            // Update 1-hour running average
+            update_lng_1h_average(*m_lng_conc_1h_avg, *m_lng_conc_sfc, dt);
+
+            // Compute NFPA exceedance (uses nfpa59a_exclusion_conc = 1/2 LFL)
+            compute_lng_exceedance(*m_lng_exceed_flag, *m_lng_conc_1h_avg,
+                                    m_params.rho_vapor_ref, m_params.mol_weight_LNG,
+                                    m_params.nfpa59a_exclusion_conc);
+
+            // Estimate exclusion zone radius
+            m_exclusion_radius_m = compute_exclusion_zone_radius(
+                *m_lng_exceed_flag, m_lg.geom, m_pool_cx, m_pool_cy);
+
+            if (m_params.lng_debug)
+                amrex::Print() << "[LNG DEBUG] Phase 7: step=" << m_step
+                               << "  exclusion_radius=" << m_exclusion_radius_m << " m"
+                               << "  conc_1h_max=" << m_lng_conc_1h_avg->max(0) << " kg/m^3"
+                               << "  n_exceed=" << (long)m_lng_exceed_flag->sum(0) << "\n";
     }
 
     if (params.verbose >= 3) {
@@ -521,6 +560,15 @@ void LNGLayer::write_output(int nstep, double cur_time, bool is_final)
                             m_lng_evap_flux.get(), m_lng_vapor_conc.get(),
                             m_lg.geom, m_params.rho_LNG,
                             m_lfl_area, m_ufl_area);
+
+    // Phase 7: regulatory CSV (always write, not gated on lng_debug — Rule A4)
+    if (m_lng_conc_1h_avg && m_lng_exceed_flag) {
+        append_lng_regulatory_row(nstep, cur_time,
+                                  m_params.lng_regulatory_file,
+                                  m_exclusion_radius_m,
+                                  *m_lng_conc_1h_avg,
+                                  *m_lng_exceed_flag);
+    }
 
     if (m_params.lng_debug) {
         amrex::Real pool_mass = compute_pool_mass(*m_lng_pool_depth, m_lg.geom, m_params.rho_LNG);

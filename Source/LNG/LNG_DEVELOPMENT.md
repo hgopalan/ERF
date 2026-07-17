@@ -22,8 +22,8 @@ The ERF-LNG module simulates liquefied natural gas (LNG) spill evaporation and v
 | 3 | **ATM Coupling (Phase I)** | Energy injection to atmosphere; sensible/latent heat source terms | ✅ COMPLETE |
 | 4 | **Wind & BL Extraction** | Wind field interpolation at zref; u* mapping; PBL height feedback | ✅ COMPLETE |
 | 5 | **Gravity Current & Flammability** | 2D shallow-water PDEs; Richardson transition; LFL/UFL zones | ✅ COMPLETE |
-| 6 | **Output & Visualization** | Plotfile writes; receptor point sampling; CSV output expansion | 🔄 IN PROGRESS |
-| 7 | **Regulatory Compliance** | NFPA 59A exclusion zone calculation; threshold mapping | TODO |
+| 6 | **Output & Visualization** | Plotfile writes; receptor point sampling; CSV output expansion | ✅ COMPLETE |
+| 7 | **Regulatory Compliance** | NFPA 59A exclusion zone calculation; threshold mapping | 🔄 IN PROGRESS |
 | 8 | **Spill Scheduling** | Time-dependent release rates; inventory tracking; multi-event scenarios | TODO |
 
 ---
@@ -1310,6 +1310,178 @@ Per-step when `lng_debug=true`:
 ---
 
 **Phase 6 In Progress: Plotfile output, receptor sampling, CSV diagnostics expansion**
+
+---
+
+## Phase 7: Regulatory Compliance (NFPA 59A)
+
+Phase 7 implements NFPA 59A regulatory compliance output for LNG hazard zone delineation:
+
+1. **1-hour running exponential moving average** of `lng_conc_sfc` at each LNG grid cell
+2. **Exceedance flags** where 1h-average ≥ 1/2 LFL (NFPA 59A exclusion threshold = 2.5 vol%)
+3. **Exclusion zone radius** estimation: furthest distance from pool center with non-zero exceedance
+4. **Regulatory CSV output** (`lng_regulatory.csv`): per-timestep fence-line concentrations, exclusion zone radius, exceedance count
+
+### New Files
+
+**Header-only (Phase 7 interface):**
+- `ERF_LNGRegulatory.H` — regulatory compliance functions (1h average, exceedance, exclusion radius, CSV output)
+
+**Implementation:**
+- `ERF_LNGRegulatory.cpp` — `update_lng_1h_average`, `compute_lng_exceedance`, `compute_exclusion_zone_radius` implementations (MPI-safe, Rule B1)
+
+**Test:**
+- `Exec/CanonicalTests/LNG/LNG_Regulatory/` — comprehensive regulatory compliance test
+
+### New Parameters (ERF_LNGParams.H)
+
+```cpp
+Real    nfpa59a_exclusion_conc = 0.025;  // 1/2 LFL [vol/vol]
+string  lng_regulatory_file = "lng_regulatory.csv";
+```
+
+Both parameters were registered in Phase 1 as placeholders and are now activated in Phase 7.
+
+### New MultiFabs in LNGLayer
+
+```cpp
+std::unique_ptr<amrex::MultiFab> m_lng_conc_1h_avg;   ///< 1-hr avg [kg/m^3]
+std::unique_ptr<amrex::MultiFab> m_lng_exceed_flag;    ///< NFPA exceedance [0/1]
+amrex::Real m_exclusion_radius_m = 0.0;                ///< Exclusion zone radius [m]
+```
+
+### Physics Implementation
+
+#### 1-Hour Running Average (Exponential Moving Average)
+
+```cpp
+// Update each cell with exponential weighting:
+C_avg(t) = C_avg(t-dt) * (T-dt)/T + C_now * dt/T, T=3600 s
+```
+
+- **GPU-safe kernel:** Uses `ParallelFor` with `tilebox()`
+- **MPI-safe:** Followed by `FillBoundary` with periodicity
+- **No collectives:** Every rank computes its own tiles independently
+
+#### Exceedance Flag Computation
+
+Cells where 1h-average ≥ threshold in vol/vol (2.5% NFPA 59A):
+- **Conversion:** threshold_vol_frac × rho_vapor = conc_threshold [kg/m³]
+- **GPU-safe kernel:** Uses `ParallelFor` with `tilebox()`
+- **MPI-safe:** Followed by `FillBoundary` with periodicity
+
+#### Exclusion Zone Radius Estimation
+
+- **Step 1 (CPU-local):** Each rank finds its local max radius where exceed_flag > 0.5 using `LoopOnCpu`
+- **Step 2 (MPI-collective):** `ReduceRealMax` broadcasts max to all ranks
+- **Rule B1:** Collective reduction precedes any IOProcessor guard
+
+### MPI Rules Applied
+
+| Rule | Implementation |
+|------|---|
+| **B1** | `append_lng_regulatory_row`: `MultiFab::max` and `sum` calls before `IOProcessor()` guard. `compute_exclusion_zone_radius`: `LoopOnCpu` followed by `ReduceRealMax` (all ranks participate). |
+| **B4** | All `FillBoundary` calls pass `geom_lng.periodicity()` |
+| **A2** | `ERF_LNGRegulatory.cpp` registered in both `Make.package` (inside `USE_LNG` guard) and `CMake/BuildERFExe.cmake` (inside `if(ERF_ENABLE_LNG)` block). |
+| **A4** | Regulatory CSV row written unconditionally (not gated on `lng_debug`). Only console debug print is gated. |
+
+### CSV Output Format
+
+`lng_regulatory.csv` columns:
+```
+step,time_s,exclusion_zone_radius_m,conc_1h_max_kg_m3,n_cells_exceed
+```
+
+### Integration in LNGLayer
+
+**In `initialize()`:**
+- Allocate `m_lng_conc_1h_avg` and `m_lng_exceed_flag` on LNG grid
+- Initialize to 0.0
+- Write regulatory CSV header
+
+**In `advance()` (after Phase 6 receptor sampling):**
+- Update 1h-average: `update_lng_1h_average(m_lng_conc_1h_avg, m_lng_conc_sfc, dt)`
+- Compute exceedance: `compute_lng_exceedance(m_lng_exceed_flag, m_lng_conc_1h_avg, ...)`
+- Estimate exclusion radius: `m_exclusion_radius_m = compute_exclusion_zone_radius(...)`
+- Emit debug print if `lng_debug=true`
+
+**In `write_output()`:**
+- Append regulatory CSV row: `append_lng_regulatory_row(...)`
+- No gatekeeping on `lng_debug` (Rule A4)
+
+**In NaN check (advance, after Phase 5):**
+- Check `m_lng_conc_1h_avg->contains_nan(0)`
+- Check `m_lng_exceed_flag->contains_nan(0)`
+
+### Plotfile Addition
+
+Updated `ERF_LNGPlotfileCatalog.H`:
+- **Variables increased from 17 to 19:**
+  - Index 17: `lng_conc_1h_avg` [kg/m³]
+  - Index 18: `lng_exceed_flag` [0/1]
+- **ncomp() returns 19** (was 17)
+
+Updated `ERF_LNGPlotfile.cpp`:
+- Added two `copy_if()` calls for indices 17–18
+
+### Debug Output
+
+Per-step when `lng_debug=true`:
+
+```
+[LNG DEBUG] Phase 7: step=<N>  exclusion_radius=<> m  conc_1h_max=<> kg/m^3  n_exceed=<>
+```
+
+### Test: LNG_Regulatory
+
+**Configuration (copied verbatim from LNG_Output):**
+- ATM: 32 × 32 × 64, grid_ratio=4 → 128 × 128 LNG
+- dt=0.5 s, 20 timesteps = 10 s total
+- `amrex.max_grid_size_z=64` (mandatory)
+- `erf.sum_interval=1`
+
+**Pass criteria (12 items):**
+1. Exit code 0, 20 steps complete
+2. `lng_regulatory.csv` created with NFPA 59A header block
+3. CSV structure: `step,time_s,exclusion_zone_radius_m,conc_1h_max_kg_m3,n_cells_exceed`
+4. Exactly 20 data rows (steps 0–19)
+5. Early steps: `exclusion_zone_radius_m=0.0` (insufficient vapor)
+6. `conc_1h_max_kg_m3` increases monotonically in early steps
+7. `n_cells_exceed=0` early, may increase later as 1h-average accumulates
+8. `[LNG DEBUG] Phase 7:` appears exactly 20 times in stdout
+9. Two plotfiles (steps 0 and 10); each has `"n_variables": 19` with new fields
+10. `lng_diag.csv` still has 21 lines; receptor CSVs written
+11. `[LNG DEBUG] NaN check PASSED` appears 20 times
+12. Build: no linker errors with `-DERF_USE_LNG=ON`
+
+### Implementation Checklist
+
+- [x] Create `ERF_LNGRegulatory.H` with function declarations and inline helpers
+- [x] Create `ERF_LNGRegulatory.cpp` with implementations
+- [x] Add `m_lng_conc_1h_avg`, `m_lng_exceed_flag`, `m_exclusion_radius_m` to `ERF_LNGLayer.H`
+- [x] Add Phase 7 getters to `ERF_LNGLayer.H`
+- [x] Update `ERF_LNGLayer.cpp::initialize()` — allocate Phase 7 MultiFabs, write regulatory header
+- [x] Update `ERF_LNGLayer.cpp::advance()` — update averages, compute exceedance, estimate radius
+- [x] Update `ERF_LNGLayer.cpp::write_output()` — append regulatory CSV row
+- [x] Add Phase 7 NaN checks to `ERF_LNGLayer.cpp::advance()`
+- [x] Update `ERF_LNGPlotfileCatalog.H` — add 2 variables, update ncomp to 19
+- [x] Update `ERF_LNGPlotfile.cpp` — add 2 copy_if calls
+- [x] Add `#include "ERF_LNGRegulatory.H"` to `ERF_LNGLayer.cpp`
+- [x] Update `Source/LNG/Make.package` — register `.cpp` and `.H`
+- [x] Update `CMake/BuildERFExe.cmake` — register `.cpp`
+- [x] Create `Exec/CanonicalTests/LNG/LNG_Regulatory/` test
+- [x] Create `inputs_lng_regulatory` (copy ATM from LNG_Output + add Phase 7 params)
+- [x] Create `sounding_neutral_abl` (verbatim copy)
+- [x] Create `README.md` with full specification
+- [x] Update parent `Exec/CanonicalTests/LNG/CMakeLists.txt` — add subdirectory
+
+### References
+
+- **NFPA 59A (2023):** *Standard for the Production, Storage, and Handling of Liquefied Natural Gas (LNG)*
+- **49 CFR Part 193:** U.S. federal LNG facility regulations (exclusion zones)
+- **Koopman, R.P., 1982:** "Burro LNG spill test series final report"
+- **Pattern source:** `Source/Dust/ERF_DustNAAQSOutput.H` (EPA NAAQS PM₂.₅ 24h averaging adapted for NFPA 59A 1h averaging)
+- **MPI skills:** `Source/LNG/LNG_MPI_SKILLS.md` Rules B1, B4, A2, A4
 
 ---
 

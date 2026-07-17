@@ -20,7 +20,7 @@
 
 /**
  * @brief Get ordered list of LNG plotfile variable names
- * @return Vector of 17 variable name strings
+* @return Vector of 19 variable name strings
  * @details
  * Order:
  *   0: lng_pool_depth       [m]
@@ -40,10 +40,12 @@
  *  14: lng_gc_u             [m/s]
  *  15: lng_gc_v             [m/s]
  *  16: lng_gc_ri_flag       [0/1]
- */
+*  17: lng_conc_1h_avg      [kg/m^3]  (Phase 7)
+*  18: lng_exceed_flag      [0/1]     (Phase 7)
+*/
 inline std::vector<std::string> lng_plotfile_var_names()
 {
-    return {
+   return {
         "lng_pool_depth",    // 0  [m]
         "lng_pool_mask",     // 1  [0/1]
         "lng_evap_flux",     // 2  [kg/m^2/s]
@@ -60,17 +62,19 @@ inline std::vector<std::string> lng_plotfile_var_names()
         "lng_gc_h",          // 13 [m]
         "lng_gc_u",          // 14 [m/s]
         "lng_gc_v",          // 15 [m/s]
-        "lng_gc_ri_flag"     // 16 [0/1]
+        "lng_gc_ri_flag",    // 16 [0/1]
+        "lng_conc_1h_avg",   // 17 [kg/m^3]
+        "lng_exceed_flag"    // 18 [0/1]
     };
 }
 
 /**
  * @brief Get number of LNG plotfile components
- * @return 17 (number of output variables)
+ * @return 19 (number of output variables)
  */
 inline int lng_plotfile_ncomp()
 {
-    return 17;
+    return 19;
 }
 
 #endif /* ERF_USE_LNG */
