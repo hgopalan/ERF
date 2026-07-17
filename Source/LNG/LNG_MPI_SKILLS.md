@@ -19,6 +19,7 @@ merging any new AMReX sub-grid 2D module into ERF.
 | [#166](https://github.com/hgopalan/ERF/pull/166) | LNG Phase 5: gravity current PDEs, Richardson transition, flammability | 5 | 2026-07-16 |
 | [#167](https://github.com/hgopalan/ERF/pull/167) | LNG Phase 6: Output & Visualization: plotfile, receptor sampling, CSV | 6 | 2026-07-16 |
 | [#168](https://github.com/hgopalan/ERF/pull/168) | LNG Phase 7: Regulatory Compliance — NFPA 59A 1h-average, exclusion zone, exceedance CSV | 7 | 2026-07-17 |
+| [#169](https://github.com/hgopalan/ERF/pull/169) | LNG Phase 8: Spill Scheduling — time-varying multi-source release with inventory tracking | 8 | In Progress |
 
 Post-merge multi-rank bugs were found during integration testing and fixed
 directly on `ERF-HazGas` (not via additional PRs). Phase 7 will be implemented
@@ -423,6 +424,73 @@ allocated with zero ghost cells (e.g. some plotfile scratch MFs).
 **File fixed:** `ERF_LNGRegulatory.cpp` — `update_lng_1h_average` and
 `compute_lng_exceedance`
 
+### D3. `m_time` Must Be Initialised from ERF Restart Time
+
+When ERF restarts from a checkpoint, `m_time` must be initialised to `t_new[0]` (ERF's current
+restart time), not 0. Otherwise, spill schedule events with `start_time_s > 0` never activate
+on restart because `apply_spill_schedule` checks `cur_time >= start_time_s`, which fails if
+`m_time` was reset.
+
+**The bug:** `m_time` remains 0 after restart, so all scheduled events with non-zero start times
+appear to have not started yet. Meanwhile, `lng_spill_diag.csv` appears correct because it uses
+ERF's `cur_time` directly — creating a misleading mismatch between diagnostics and actual spill activity.
+
+```cpp
+// ❌ WRONG — m_time reset to 0, schedule events never activate on restart
+void LNGLayer::initialize(const LNGParams& params, ...) {
+    m_time = 0.0;  // BUG: should use ERF restart time
+}
+
+// ✅ CORRECT — use ERF's t_new[0]
+void LNGLayer::initialize(const LNGParams& params,
+                         const amrex::Vector<amrex::Real>& t_new, ...) {
+    m_time = t_new[0];  // Synchronise with ERF restart time
+}
+
+// In apply_spill_schedule(...):
+// Event activates only if: cur_time >= start_time_s AND (end_time_s < 0 OR cur_time <= end_time_s)
+// If m_time was 0 (old code) but cur_time is 3600s (after restart from checkpoint at t=3600),
+// event with start_time_s=1800 looks like "started at t=1800, cur_time=3600, still active" — WRONG
+// With fix: m_time=3600, event correctly checks "3600 >= 1800" — CORRECT
+```
+
+**Key point:** The two sources of time (`m_time` for schedule logic, `cur_time` from ERF for
+diagnostics) must remain synchronised. `m_time` is used in `apply_spill_schedule` for window
+checks; `lng_spill_diag.csv` uses `cur_time`. On restart, both must reflect the restarted time
+or logic will diverge from observations.
+
+**File to fix:** `ERF_LNGLayer.cpp::initialize()` — add `t_new[0]` parameter and use it instead
+of zero-init.
+
+### D4. Pool Centre Must Use Spill Schedule `cx_m`/`cy_m` When Schedule Is Loaded
+
+When a spill schedule is loaded from CSV, the pool centre coordinates `cx_m`, `cy_m` are defined
+per event in the schedule, not globally. The code must not always use the domain midpoint; instead,
+when a schedule is active, use the event-specific coordinates.
+
+```cpp
+// ❌ WRONG — ignores schedule cx_m/cy_m, always uses domain midpoint
+amrex::Real cx = m_params.pool_center_x;  // domain midpoint
+amrex::Real cy = m_params.pool_center_y;
+
+// ✅ CORRECT — use schedule coordinates when loaded
+amrex::Real cx = cx_m;  // from event struct or params, depends on source
+amrex::Real cy = cy_m;
+
+// In apply_spill_schedule(...):
+for (auto& event : schedule.events) {
+    if (event_active) {
+        apply_spill_source(..., event.cx_m, event.cy_m, event.rate_kg_s, ...);
+    }
+}
+```
+
+The distinction matters when multiple events have different locations: each event must spill
+into its own region, not the global pool centre.
+
+**File to fix:** `ERF_LNGLayer.cpp` — ensure `apply_spill_schedule` passes event-specific
+coordinates, not global pool centre.
+
 ---
 
 ## Part E — Output & Diagnostics Rules
@@ -495,6 +563,62 @@ if (amrex::ParallelDescriptor::IOProcessor())
 
 **Never use IOProcessor guard before the `ReduceRealSum`** — same rule as B1.
 
+### E5. Receptor Files Must Use `ios::app` on Restart With `# Restart` Separator
+
+When restarting from a checkpoint, receptor CSV files must append (not truncate) and include
+a separator line marking the restart point. This preserves all pre-restart data and makes the
+restart time visible in the CSV.
+
+```cpp
+// ❌ WRONG — uses ios::trunc, wiping pre-restart data
+if (first_call) {
+    std::ofstream out(filename, std::ios::trunc);  // BUG: always truncates
+    out << "# Receptor file header\n";
+}
+
+// ✅ CORRECT — use ios::app on restart, include separator
+std::ios_base::openmode mode = file_exists(filename) ? std::ios::app : std::ios::trunc;
+std::ofstream out(filename, mode);
+if (mode == std::ios::app && cur_time > 0.0) {
+    out << "# Restart at t=" << cur_time << " s\n";  // separator
+}
+out << "time, conc, ...\n";  // data row
+```
+
+**Burro 8 example:** Spill for 100 s, checkpoint at t=50s, restart to t=100s.
+- Old code: receptor CSV has only rows from t=50–100s (first 50s lost)
+- New code: receptor CSV has rows from t=0–100s with `# Restart at t=50 s` marker
+
+**Files to fix:** `ERF_LNGReceptorOutput.H` — `write_lng_receptor_header` and receptor output logic.
+
+### E6. `vol_fraction` Must Not Include Molecular Weight Ratio Factor
+
+The volume fraction (concentration divided by vapor density) should be `conc / rho_vapor` only.
+The factor `(28.97 / mol_weight_LNG)` is incorrect and inflates `vol_fraction` by ~1.8× for methane.
+
+**Root cause:** `rho_vapor_ref` is already the pure-vapor density at boiling point (e.g., 1.76 kg/m³
+for methane). The ratio `conc / rho_vapor` directly gives volume per volume. The MW factor applies
+only when converting from molar concentrations; here, mass concentration is already used.
+
+```cpp
+// ❌ WRONG — 1.8× inflation for CH4
+amrex::Real MW_ratio = 28.97 / m_params.mol_weight_LNG;  // = 28.97 / 17.4 ≈ 1.67
+amrex::Real vol_fraction = (conc / m_params.rho_vapor_ref) * MW_ratio;  // WRONG
+
+// Example for CH4:
+// conc = 1.0 kg/m³, rho_vapor = 1.76 kg/m³ (CH4 density at 111.7K)
+// Wrong: vol_frac = (1.0 / 1.76) * 1.67 = 0.95  (incorrect)
+// Correct: vol_frac = 1.0 / 1.76 = 0.568  (correct)
+
+// ✅ CORRECT — remove MW ratio
+amrex::Real vol_fraction = conc / m_params.rho_vapor_ref;
+```
+
+**Consequence:** Flammable zone (LFL/UFL) thresholds based on inflated `vol_fraction` will be
+reached at lower mass concentrations than reality. Exclusion zones overpredicted by ~1.8×.
+
+**File to fix:** `ERF_LNGEvaporation.cpp` — remove MW ratio factor from `vol_fraction` computation.
+
 ---
 
 ## Part F — Inputs File Checklist
@@ -543,6 +667,44 @@ erf.lng.nfpa59a_exclusion_conc = 0.025   # 1/2 LFL threshold [vol/vol]
 erf.lng.lng_regulatory_file    = "lng_regulatory.csv"
 ```
 
+### F2. Receptor Coordinates Must Follow ERF Wind Vector Sign Convention
+
+Receptor coordinates must be transformed using the ERF wind vector sign convention, not the
+Burro site bearing convention. This is critical when converting site survey data into simulation coordinates.
+
+**Formula (ERF wind vector convention):**
+```
+x_ERF = -sin(bearing_deg) * distance_m
+y_ERF = +cos(bearing_deg) * distance_m
+```
+
+Where `bearing_deg` is the direction FROM which wind blows (meteorological convention).
+This matches the ERF velocity vector: wind WITH bearing blows toward `(+x, +y)`.
+
+**Burro 8 example:**
+- Site survey: Wind FROM 200° (SW), receptor at distance 50 m from source
+- Old code (Burro convention): receptor at `(+19.5, +53.6)` — WRONG
+- New code (ERF convention): receptor at `(-19.5, +53.6)` — CORRECT
+
+```
+bearing = 200° (wind FROM SW):
+  sin(200°) = -0.342, cos(200°) = -0.940
+  x_ERF = -(-0.342) * 50 = +17.1 m  (WRONG sign leads to upstream)
+  y_ERF = +(-0.940) * 50 = -47.0 m  (WRONG sign leads to upstream)
+
+Corrected:
+  bearing is FROM 200°, so wind blows TO 20° (NE)
+  -sin(200°) = +0.342, cos(200°) = -0.940
+  x_ERF = 0.342 * 50 = +17.1 m ✓
+  y_ERF = -0.940 * 50 = -47.0 m ✓
+```
+
+**Common mistake:** Using bearing directly as wind TO direction (aviation convention) instead
+of FROM direction (meteorology). Always use `bearing_FROM` and apply the formula above.
+
+**File to check:** Any code that reads receptor coordinates from site survey or test inputs.
+Verify transformation applied before writing to `lng_receptor_x`, `lng_receptor_y`.
+
 ---
 
 ## Part G — Pre-Merge Checklist for New LNG Phases
@@ -586,6 +748,14 @@ Use this checklist before opening a PR for any new LNG phase:
 - [ ] `FillBoundary` uses `geom_lng.periodicity()` overload, NOT `IntVect` (Rule D2)
 - [ ] `nGrow() > 0` guard before `FillBoundary` on zero-ghost MultiFabs
 
+**Restart Safety** (new for Phase 9+)
+- [ ] `m_time` initialised from ERF `t_new[0]` (Rule D3)
+- [ ] Receptor CSV appends on restart with `# Restart at t=<time> s` separator (Rule E5)
+- [ ] `vol_fraction = conc/rho_vapor` only, no MW ratio factor (Rule E6)
+- [ ] Spill schedule times verified against corrected `m_time` (Rule D3)
+- [ ] Pool centre uses schedule `cx_m`/`cy_m` when loaded (Rule D4)
+- [ ] Receptor coordinates verified against Rule F2 (ERF wind vector convention)
+
 **Documentation**
 - [ ] `LNG_DEVELOPMENT.md` updated with new phase section
 - [ ] New parameters added to `ERF_LNGParams.H` with Doxygen comments
@@ -617,6 +787,11 @@ Use this checklist before opening a PR for any new LNG phase:
 | 17 | `ERF_LNGPlotfile.cpp` not in CMake | Phase 6 | CMake linker error | `CMake/BuildERFExe.cmake` | A2 |
 | 18 | `FillBoundary(IntVect)` not a valid AMReX overload | Phase 7 | Compile error in `ERF_LNGRegulatory.cpp` line 32 | `ERF_LNGRegulatory.H/cpp` | B4, D1 |
 | 19 | Missing `geom_lng` argument at call sites in `ERF_LNGLayer.cpp` | Phase 7 | Compile error: `update_lng_1h_average` requires 4 args, 3 provided | `ERF_LNGLayer.cpp` lines 433, 436 | D1 |
+| 20 | `m_time` not initialised from restart → schedule events never activate | Phase 8 validation | Spill schedule events with `start_time_s>0` inactive after restart; `lng_spill_diag.csv` shows correct times (misleading mismatch) | `ERF_LNGLayer.cpp::initialize()` | D3 |
+| 21 | Receptor CSV truncated on restart (`ios::trunc` always used) | Phase 8 validation | Loss of all pre-restart receptor data; CSV history broken | `ERF_LNGReceptorOutput.H::write_lng_receptor_header` | E5 |
+| 22 | `vol_fraction = (conc/rho_vapor)*(28.97/MW_LNG)` → 1.8× inflation for CH₄ | Phase 8 validation | Flammable zone radius inflated ~1.8×; exclusion zone overpredicted | `ERF_LNGEvaporation.cpp` | E6 |
+| 23 | Pool centre ignores schedule `cx_m`/`cy_m` when multiple events active | Phase 8 validation | Multi-source events spill into wrong regions; overlapping pools mislocated | `ERF_LNGLayer.cpp::apply_spill_schedule()` | D4 |
+| 24 | Receptor coordinates use Burro bearing convention not ERF wind vector convention | Phase 8 validation | Receptors placed diametrically opposite intended locations; all measurements mislocated | Site survey → domain coords transformation | F2 |
 
 ---
 
@@ -631,6 +806,8 @@ The following have been verified to complete all 20 steps without hanging:
 | LNG_Output Phase 6 | 32×32×64 | 4 | 128×128 | 2 | ✅ |
 | LNG_Regulatory Phase 7 | 32×32×64 | 4 | 128×128 | 2 | ✅ |
 | DustIntegration (reference) | 32×32×64 | 4 | 128×128 | 2 | ✅ |
+| Burro 8 spinup (Phase 8 validation) | 50×100×64 | 1 | 50×100 | 1 | 🔄 In Progress |
+| Burro 8 spill no-restart (Phase 8 validation) | 50×100×64 | 1 | 50×100 | 1 | 🔄 In Progress |
 
 Key observable indicators of a healthy run:
 - `[LNG DEBUG] Prerequisite check 3 passed` at startup
