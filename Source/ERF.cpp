@@ -27,6 +27,7 @@
 
 #ifdef ERF_ENABLE_FIRE
 #include "ERF_FirePlotfile.H"
+#include "ERF_FireSpeciesEmission.H"
 #endif
 #ifdef ERF_USE_DUST
 #include "ERF_DustAtmCoupling.H"

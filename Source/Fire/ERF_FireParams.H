@@ -228,6 +228,15 @@ struct FireParams
     amrex::Real  smoke_emission_factor  = 0.02;       // kg smoke / kg fuel [-]
     amrex::Real  smoke_heat_of_comb     = 18700000.0; // J/kg fuel
 
+    // Phase 6: multi-species emission (CO, CO2, BC)
+    bool  co_enable              = false;
+    amrex::Real  co_emission_factor     = 0.065;      // kg CO / kg fuel
+    bool  co2_enable             = false;
+    amrex::Real  co2_emission_factor    = 1.650;      // kg CO2 / kg fuel
+    bool  bc_enable              = false;
+    amrex::Real  bc_emission_factor     = 0.0056;     // kg BC / kg fuel
+    // heat_of_combustion is shared with smoke — reuse smoke_heat_of_comb
+
     /**
      * @brief Construct FireParams from ParmParse
      *
@@ -307,6 +316,14 @@ struct FireParams
        pp.query("smoke_enable", smoke_enable);
        pp.query("smoke_emission_factor", smoke_emission_factor);
        pp.query("smoke_heat_of_comb", smoke_heat_of_comb);
+
+       // Phase 6: multi-species emission parameters
+       pp.query("co_enable",           co_enable);
+       pp.query("co_emission_factor",  co_emission_factor);
+       pp.query("co2_enable",          co2_enable);
+       pp.query("co2_emission_factor", co2_emission_factor);
+       pp.query("bc_enable",           bc_enable);
+       pp.query("bc_emission_factor",  bc_emission_factor);
 
        // Phase 8: Albini (1983) ember spotting parameters
        auto& sp = spotting;

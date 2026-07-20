@@ -13,17 +13,19 @@
 #define NDRY       3
 
 // Phase 4 (Smoke): Passive tracer emitted from fire heat flux [kg/m^3]
+// Phase 6: CO, CO2, BC multi-species emission from fire
 #ifdef ERF_ENABLE_FIRE
-#define NSCALARS_SMOKE 1
+#define NSCALARS_FIRE  4   // smoke + CO + CO2 + BC
 #else
-#define NSCALARS_SMOKE 0
+#define NSCALARS_FIRE  0
 #endif
+#define NSCALARS_SMOKE (NSCALARS_FIRE > 0 ? 1 : 0)  // keep for compatibility
 
 // This defines the ACTUAL number of non-moisture scalar vars
 #ifdef ERF_USE_DUST
-#define NSCALARS   (2 + NSCALARS_SMOKE)
+#define NSCALARS   (2 + NSCALARS_FIRE)
 #else
-#define NSCALARS   (1 + NSCALARS_SMOKE)
+#define NSCALARS   (1 + NSCALARS_FIRE)
 #endif
 
 // This defines the MAXIMUM number of moisture vars (six q's plus five n's)
@@ -69,13 +71,20 @@
 
 // Phase 4 (Smoke): Passive tracer from fire smoke emission [kg/m^3]
 // Injected at k=0 proportional to fire heat flux when ERF_ENABLE_FIRE is defined.
+// Phase 6: CO, CO2, BC multi-species extension
 #ifdef ERF_ENABLE_FIRE
 #  ifdef ERF_USE_DUST
 #    define RhoSmoke_comp  (RhoAdv_comp+1)
-#    define RhoQ1_comp     (RhoAdv_comp+2)
+#    define RhoCO_comp     (RhoAdv_comp+2)
+#    define RhoCO2_comp    (RhoAdv_comp+3)
+#    define RhoBC_comp     (RhoAdv_comp+4)
+#    define RhoQ1_comp     (RhoAdv_comp+5)
 #  else
 #    define RhoSmoke_comp  (RhoScalar_comp+1)
-#    define RhoQ1_comp     (RhoScalar_comp+2)
+#    define RhoCO_comp     (RhoScalar_comp+2)
+#    define RhoCO2_comp    (RhoScalar_comp+3)
+#    define RhoBC_comp     (RhoScalar_comp+4)
+#    define RhoQ1_comp     (RhoScalar_comp+5)
 #  endif
 #else
 #  ifdef ERF_USE_DUST

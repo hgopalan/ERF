@@ -3,6 +3,7 @@
 #ifdef ERF_ENABLE_FIRE
 #include <ERF_FireLayer.H>
 #include <ERF_FireSmokeEmission.H>
+#include <ERF_FireSpeciesEmission.H>
 #endif
 
 /**
@@ -167,6 +168,50 @@
                 RhoSmoke_comp,
                 m_fire_layer->get_params().fire_debug,
                 istep[level]);
+        }
+
+        // Phase 6: Inject multi-species scalars from fire heat flux AFTER smoke injection
+        // *****************************************************************************
+        if (level == 0 && m_fire_layer && m_fire_layer->get_Q_atm_prev()) {
+            if (m_fire_layer->get_params().co_enable) {
+                inject_species_from_fire(
+                    cc_src,
+                    *m_fire_layer->get_Q_atm_prev(),
+                    *zpc_to_use,
+                    fine_geom,
+                    m_fire_layer->get_params().co_emission_factor,
+                    m_fire_layer->get_params().smoke_heat_of_comb,
+                    RhoCO_comp,
+                    "CO",
+                    m_fire_layer->get_params().fire_debug,
+                    istep[level]);
+            }
+            if (m_fire_layer->get_params().co2_enable) {
+                inject_species_from_fire(
+                    cc_src,
+                    *m_fire_layer->get_Q_atm_prev(),
+                    *zpc_to_use,
+                    fine_geom,
+                    m_fire_layer->get_params().co2_emission_factor,
+                    m_fire_layer->get_params().smoke_heat_of_comb,
+                    RhoCO2_comp,
+                    "CO2",
+                    m_fire_layer->get_params().fire_debug,
+                    istep[level]);
+            }
+            if (m_fire_layer->get_params().bc_enable) {
+                inject_species_from_fire(
+                    cc_src,
+                    *m_fire_layer->get_Q_atm_prev(),
+                    *zpc_to_use,
+                    fine_geom,
+                    m_fire_layer->get_params().bc_emission_factor,
+                    m_fire_layer->get_params().smoke_heat_of_comb,
+                    RhoBC_comp,
+                    "BC",
+                    m_fire_layer->get_params().fire_debug,
+                    istep[level]);
+            }
         }
 #endif
 

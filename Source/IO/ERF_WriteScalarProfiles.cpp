@@ -34,6 +34,12 @@ ERF::sum_integrated_quantities (double time)
 #ifdef ERF_ENABLE_FIRE
     Real smoke_sl = zero;
     Real smoke_ml = zero;
+    Real co_sl = zero;
+    Real co_ml = zero;
+    Real co2_sl = zero;
+    Real co2_ml = zero;
+    Real bc_sl = zero;
+    Real bc_ml = zero;
 #endif
 
     bool local = true;
@@ -70,6 +76,9 @@ ERF::sum_integrated_quantities (double time)
 #ifdef ERF_ENABLE_FIRE
     if (m_fire_layer) {
         smoke_sl = volWgtSumMF(0, vars_new[0][Vars::cons], RhoSmoke_comp, dJ0, mfx0, mfy0, false);
+        co_sl = volWgtSumMF(0, vars_new[0][Vars::cons], RhoCO_comp, dJ0, mfx0, mfy0, false);
+        co2_sl = volWgtSumMF(0, vars_new[0][Vars::cons], RhoCO2_comp, dJ0, mfx0, mfy0, false);
+        bc_sl = volWgtSumMF(0, vars_new[0][Vars::cons], RhoBC_comp, dJ0, mfx0, mfy0, false);
     }
 #endif
 
@@ -94,6 +103,9 @@ ERF::sum_integrated_quantities (double time)
 #ifdef ERF_ENABLE_FIRE
         if (m_fire_layer) {
             smoke_ml += volWgtSumMF(lev, vars_new[lev][Vars::cons], RhoSmoke_comp, dJ, mfx, mfy, true);
+            co_ml += volWgtSumMF(lev, vars_new[lev][Vars::cons], RhoCO_comp, dJ, mfx, mfy, true);
+            co2_ml += volWgtSumMF(lev, vars_new[lev][Vars::cons], RhoCO2_comp, dJ, mfx, mfy, true);
+            bc_ml += volWgtSumMF(lev, vars_new[lev][Vars::cons], RhoBC_comp, dJ, mfx, mfy, true);
         }
 #endif
     }
@@ -121,11 +133,11 @@ ERF::sum_integrated_quantities (double time)
     }
 
 #if defined(ERF_USE_DUST) && defined(ERF_ENABLE_FIRE)
-    const int nfoo = 12;
-    Real foo[nfoo] = {mass_sl,rhth_sl,scal_sl,mois_sl,dust_sl,smoke_sl,mass_ml,rhth_ml,scal_ml,mois_ml,dust_ml,smoke_ml};
+    const int nfoo = 20;
+    Real foo[nfoo] = {mass_sl,rhth_sl,scal_sl,mois_sl,dust_sl,smoke_sl,co_sl,co2_sl,bc_sl,mass_ml,rhth_ml,scal_ml,mois_ml,dust_ml,smoke_ml,co_ml,co2_ml,bc_ml};
 #elif defined(ERF_ENABLE_FIRE)
-    const int nfoo = 10;
-    Real foo[nfoo] = {mass_sl,rhth_sl,scal_sl,mois_sl,smoke_sl,mass_ml,rhth_ml,scal_ml,mois_ml,smoke_ml};
+    const int nfoo = 18;
+    Real foo[nfoo] = {mass_sl,rhth_sl,scal_sl,mois_sl,smoke_sl,co_sl,co2_sl,bc_sl,mass_ml,rhth_ml,scal_ml,mois_ml,smoke_ml,co_ml,co2_ml,bc_ml};
 #elif defined(ERF_USE_DUST)
     const int nfoo = 10;
     Real foo[nfoo] = {mass_sl,rhth_sl,scal_sl,mois_sl,dust_sl,mass_ml,rhth_ml,scal_ml,mois_ml,dust_ml};
@@ -151,6 +163,9 @@ ERF::sum_integrated_quantities (double time)
 #endif
 #ifdef ERF_ENABLE_FIRE
          smoke_sl = foo[i++];
+         co_sl = foo[i++];
+         co2_sl = foo[i++];
+         bc_sl = foo[i++];
 #endif
          mass_ml = foo[i++];
          rhth_ml = foo[i++];
@@ -161,6 +176,10 @@ ERF::sum_integrated_quantities (double time)
 #endif
 #ifdef ERF_ENABLE_FIRE
          smoke_ml = foo[i++];
+         co_ml = foo[i++];
+         co2_ml = foo[i++];
+         bc_ml = foo[i++];
+#endif
 #endif
 
         Print() << '\n';
@@ -178,7 +197,12 @@ ERF::sum_integrated_quantities (double time)
            if (m_DustLayer) { Print() << " RHO DUST   = " << dust_sl << '\n'; }
 #endif
 #ifdef ERF_ENABLE_FIRE
-           if (m_fire_layer) { Print() << " RHO SMOKE  = " << smoke_sl << '\n'; }
+           if (m_fire_layer) { 
+               Print() << " RHO SMOKE  = " << smoke_sl << '\n'; 
+               Print() << " RHO CO     = " << co_sl << '\n'; 
+               Print() << " RHO CO2    = " << co2_sl << '\n'; 
+               Print() << " RHO BC     = " << bc_sl << '\n'; 
+           }
 #endif
         } else {
 #if 1
@@ -193,7 +217,12 @@ ERF::sum_integrated_quantities (double time)
            if (m_DustLayer) { Print() << " RHO DUST   SL/ML = " << dust_sl << " " << dust_ml << '\n'; }
 #endif
 #ifdef ERF_ENABLE_FIRE
-           if (m_fire_layer) { Print() << " RHO SMOKE  SL/ML = " << smoke_sl << " " << smoke_ml << '\n'; }
+           if (m_fire_layer) { 
+               Print() << " RHO SMOKE  SL/ML = " << smoke_sl << " " << smoke_ml << '\n'; 
+               Print() << " RHO CO     SL/ML = " << co_sl << " " << co_ml << '\n'; 
+               Print() << " RHO CO2    SL/ML = " << co2_sl << " " << co2_ml << '\n'; 
+               Print() << " RHO BC     SL/ML = " << bc_sl << " " << bc_ml << '\n'; 
+           }
 #endif
         }
 
