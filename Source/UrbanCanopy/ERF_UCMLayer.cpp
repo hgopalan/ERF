@@ -17,6 +17,7 @@
 #include <UrbanCanopy/ERF_UCMLayer.H>
 #include <UrbanCanopy/ERF_UCMSlabConduction.H>
 #include <AMReX_ParallelDescriptor.H>
+#include <ERF_Constants.H>
 #include <cmath>
 
 // ============================================================================
