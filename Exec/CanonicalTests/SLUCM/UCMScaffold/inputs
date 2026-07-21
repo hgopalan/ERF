@@ -60,8 +60,17 @@ erf.init_type = "input_sounding"
 erf.sounding_type = Ideal
 erf.input_sounding_file = "sounding_neutral_abl"
 
-# PBL CONFIGURATION
-erf.pbl_type = "MYNN2.5"
+# PBL CONFIGURATION - Baseline MRF (neutral case)
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr = 0.5   # critical bulk Richardson number
+erf.pbl_mrf_const_b = 7.8 # surface layer factor (WRF CFAC)
+erf.pbl_mrf_sf = 0.1      # surface layer fraction (WRF SFAC)
+
+# Disable countergradient corrections (not relevant for neutral conditions)
+erf.enable_mrf_countergradient = true
+
+# Enable moisture diffusivity for completeness (but no moisture in neutral case)
+erf.mrf_moistvars = false
 
 # CORIOLIS / GEOSTROPHIC FORCING
 erf.latitude = 45.0
