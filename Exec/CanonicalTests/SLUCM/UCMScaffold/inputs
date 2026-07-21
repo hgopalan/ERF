@@ -1,0 +1,68 @@
+# Canonical test for ERF-SLUCM Phase 1.1 scaffold
+# Tests: module enables without crash, prerequisites pass, debug messages print
+# Expected: exit code 0 at step 2, UCM startup banner, no physics runs
+
+# AMR configuration
+amr.n_cell           = 8 8 16
+amr.max_level        = 0
+geometry.prob_extent = 3000.0 3000.0 1024.0
+
+# Time stepping
+amr.dt_shrink        = 0.9
+amr.max_step         = 2
+amr.fixed_dt         = 1.0
+
+# Domain setup
+zlo.type             = "surface_layer"
+zhi.type             = "slip_wall"
+xlo.type             = "periodic"
+xhi.type             = "periodic"
+ylo.type             = "periodic"
+yhi.type             = "periodic"
+
+# Physics
+erf.pbl_type         = "MYNN2.5"
+erf.use_moisture     = false
+erf.use_terrain      = false
+erf.transport_scalar = false
+
+# Diagnostics and output
+amr.plot_int         = -1
+amr.check_int        = -1
+amrex.fpe_trap_invalid = 0
+
+# MPI safety: prevent z-decomposition
+amrex.max_grid_size_z = 16
+
+# ========================================================================
+# SLUCM Configuration (Phase 1.1)
+# ========================================================================
+
+erf.ucm.enable             = true
+erf.ucm.ucm_debug          = true
+erf.ucm.anchor_level       = 0
+erf.ucm.static_refinement  = true
+erf.ucm.grid_ratio         = 1
+erf.ucm.allow_steep_terrain = false
+
+erf.ucm.atm_feedback       = 0.0
+erf.ucm.zref               = 2.0
+erf.ucm.alpha_ucm          = 10.0
+
+erf.ucm.H_bldg_uniform     = 10.0
+erf.ucm.W_road_uniform     = 10.0
+erf.ucm.W_roof_uniform     = 10.0
+
+erf.ucm.albedo_roof        = 0.20
+erf.ucm.albedo_wall        = 0.20
+erf.ucm.albedo_road        = 0.15
+
+erf.ucm.emissivity_roof    = 0.90
+erf.ucm.emissivity_wall    = 0.90
+erf.ucm.emissivity_road    = 0.94
+
+erf.ucm.ucm_plot_int       = -1
+erf.ucm.ucm_diag_file      = "ucm_diag.dat"
+
+erf.ucm.test_ustar         = 0.0
+erf.ucm.test_surf_temp_K   = 293.15

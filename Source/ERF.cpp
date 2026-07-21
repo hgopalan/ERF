@@ -1221,6 +1221,14 @@ ERF::InitData_post ()
         }
     }
 
+    // UCM Phase 1.1: Check prerequisites and initialize
+    #ifdef ERF_USE_UCM
+    if (m_ucm_params.enable) {
+        check_ucm_prerequisites(m_ucm_params, max_level, finest_level,
+                                solverChoice.use_terrain, m_ucm_params.anchor_level);
+    }
+    #endif
+
     // Fill time averaged velocities before first plot file
     if (solverChoice.time_avg_vel) {
         for (int lev = 0; lev <= finest_level; ++lev) {
@@ -2466,6 +2474,13 @@ ERF::ReadParameters ()
     } else {
         Abort("Dont know this LandSurfaceType!") ;
     }
+
+    // UCM Phase 1.1: Read UCM parameters from ParmParse
+    #ifdef ERF_USE_UCM
+    if (m_ucm_params.enable) {
+        m_ucm_params.read_from_parmparse(0);
+    }
+    #endif
 
     if (verbose > 0) {
         solverChoice.display(max_level,pp_prefix);

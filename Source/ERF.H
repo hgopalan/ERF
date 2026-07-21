@@ -66,6 +66,11 @@
 
 #include <ERF_RadiationModels.H>
 
+// UCM Phase 1.1: Include UCM module header if enabled
+#ifdef ERF_USE_UCM
+#include "UrbanCanopy/ERF_UCM.H"
+#endif
+
 #ifdef ERF_USE_EAMXX_SHOC
 #include "ERF_ShocInterface.H"
 #endif
@@ -994,6 +999,14 @@ private:
     amrex::Vector<std::unique_ptr<IRadiation>> rad; // Radiation model at each level
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> qheating_rates;  // radiation heating rate source terms (SW, LW) (DYCORE)
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> rad_fluxes;      // radiation fluxes (SW up/dn, LW up/dn) (OUTPUT ONLY)
+
+    // UCM Phase 1.1: SLUCM module parameters and grid
+    #ifdef ERF_USE_UCM
+    UCMParams m_ucm_params;
+    amrex::Vector<std::unique_ptr<UCMGrid>> m_ucm_grid;
+    amrex::Vector<std::unique_ptr<amrex::iMultiFab>> ucm_is_urban;  // UCM Phase 1.2: allocation; Phase 4.1: use
+    #endif
+
 #ifdef ERF_USE_EAMXX_SHOC
     amrex::Vector<std::unique_ptr<SHOCInterface>> eamxx_shoc_interface; // EAMxx SHOC model at each level
 #endif
