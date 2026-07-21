@@ -1225,7 +1225,7 @@ ERF::InitData_post ()
     #ifdef ERF_USE_UCM
     if (m_ucm_params.enable) {
         check_ucm_prerequisites(m_ucm_params, max_level, finest_level,
-                                solverChoice.use_terrain, m_ucm_params.anchor_level);
+                                (solverChoice.terrain_type != TerrainType::None), m_ucm_params.anchor_level);
     }
     #endif
 
