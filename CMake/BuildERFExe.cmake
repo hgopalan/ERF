@@ -300,9 +300,12 @@ function(build_erf_lib erf_lib_name)
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMGrid.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMPrerequisites.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMParams.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMAllocate.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCM.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMParams.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMGrid.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMFields.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMAllocate.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMPrerequisites.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCM.H)
 

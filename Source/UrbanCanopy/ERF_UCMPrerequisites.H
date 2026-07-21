@@ -24,6 +24,10 @@
 
 #include <ERF_UCMParams.H>
 
+// Forward declarations
+struct UCMGrid;
+struct UCMFields;
+
 /**
  * @brief Verify ERF configuration requirements for the SLUCM module
  *
@@ -56,5 +60,22 @@ void check_ucm_prerequisites(const UCMParams& params,
                               int finest_level,
                               bool use_terrain,
                               int lev = 0);
+
+/**
+ * @brief Verify UCM grid and fields are properly allocated (Phase 1.2 post-allocation check)
+ *
+ * Called after allocate_ucm_fields() to verify all MultiFabs were successfully
+ * allocated and to print the Phase 1.2 grid verification banner.
+ *
+ * @param[in] params      SLUCM configuration parameters
+ * @param[in] ucm_grid    Constructed UCM grid (checked for consistency)
+ * @param[in] ucm_fields  Allocated UCM MultiFab fields (checked for completeness)
+ * @param[in] lev         AMR level (default 0)
+ * @throws                Aborts if any field is not allocated
+ */
+void check_ucm_grid_and_fields(const UCMParams& params,
+                                const UCMGrid& ucm_grid,
+                                const UCMFields& ucm_fields,
+                                int lev = 0);
 
 #endif // ERF_UCM_PREREQUISITES_H

@@ -16,8 +16,8 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 
 | Part | Phase | Title | Key Deliverables | Status |
 |------|-------|-------|------------------|--------|
-| 1 | 1.1 | **Scaffold, ParmParse, Prerequisites, lev-aware API** | UCMParams, UCMGrid, check_ucm_prerequisites, canonical test scaffold | ✅ COMPLETE |
-| 1 | 1.2 | 2D UCM grid + homogeneous URBPARM reader + is_urban stub | ERF_UCMLayer, urban morphology allocation, is_urban iMultiFab | 🔲 PLANNED |
+| 1 | 1.1 | **Scaffold, ParmParse, Prerequisites, lev-aware API** | UCMParams, UCMGrid, check_ucm_prerequisites, canonical test scaffold | ✅ COMPLETE (with post-merge bug fixes) |
+| 1 | 1.2 | **UCM 2D grid + homogeneous URBPARM reader + is_urban mask** | ERF_UCMFields, allocate_ucm_fields, fill_ucm_fields_homogeneous, Phase 1.2 test | 🟢 IN PROGRESS |
 | 1 | 1.3 | Slab conduction + SLUCM SEB core + wind/scalar extraction | Vertical heat diffusion, sensible heat balance, wind interpolation at zref | 🔲 PLANNED |
 | 1 | 1.4 | One-way exponential injection + diagnostics + plotfile + homogeneous regression | ATM coupling, CSV output, plotfile writer, baseline test | 🔲 PLANNED |
 | 2 | 2.1 | Building-layout CSV reader + material library CSV | ERF_UCMBuildingReader, morphology per cell (H, W_road, W_roof, fabric) | 🔲 PLANNED |
@@ -192,3 +192,155 @@ Expected output:
   - Source/Dust/ERF_DustPrerequisites.H
   - Source/LNG/ERF_LNGParams.H
   - Source/LNG/ERF_LNGPrerequisites.H
+
+---
+
+## Phase 1.1 Post-Merge Bug Fixes
+
+Phase 1.1 was merged to `ERF-SLUCM` branch but produced five bugs that the maintainer fixed by hand:
+
+### Bug 1 — Wrong PBL scheme and broken atmospheric config in the canonical test
+
+**Fix commits:**
+- [`7bb380d`](https://github.com/hgopalan/ERF/commit/7bb380d47738c24a47e3af8c7729a23dc815053e) — Update SLUCM UCMScaffold inputs to use neutral ABL atmospheric setup with sounding file
+- [`1705e38`](https://github.com/hgopalan/ERF/commit/1705e3844eb232da04151f263cfa38e49b67539a) — Switch SLUCM UCMScaffold PBL to MRF (match neutral_abl)
+
+**Root cause:** Agent synthesized fake sounding instead of using reference file; used wrong sounding column format, wrong `n_cell`, `amr.dt_shrink` (not applicable), wrong boundary types (`slip_wall` vs `SlipWall`), omitted `erf.prob_name`, omitted surface-layer roughness, omitted Coriolis, used `MYNN2.5` instead of `MRF`.
+
+**Phase 1.2 rule:** Use merged `Exec/CanonicalTests/SLUCM/UCMScaffold/inputs` as verbatim baseline. Copy `sounding_neutral_abl` byte-for-byte. Do NOT synthesize soundings.
+
+### Bug 2 — Wrong SolverChoice member for terrain check
+
+**Fix commit:** [`3744d41`](https://github.com/hgopalan/ERF/commit/3744d41f8c42684bc6b8f1ecd356a03886000221) — Fix ERF.cpp
+
+**Root cause:** Called `solverChoice.use_terrain` which is not a member of `SolverChoice`. The correct expression is `(solverChoice.terrain_type != TerrainType::None)`.
+
+**Phase 1.2 rule:** Any terrain-availability check MUST use `(solverChoice.terrain_type != TerrainType::None)`. Do not invent member names.
+
+### Bug 3 — ParmParse read guarded by the very field it was supposed to populate
+
+**Fix commit:** [`927700f`](https://github.com/hgopalan/ERF/commit/927700ff7b4507ff7230498dc817a9bb2ee29306) — Missing Params
+
+**Root cause:** Wrote `if (m_ucm_params.enable) { m_ucm_params.read_from_parmparse(0); }` — but `enable` starts at `false`, so the read never happens and every parameter stays at default. Correct pattern is unconditional read.
+
+**Phase 1.2 rule:** `read_from_parmparse` MUST be called unconditionally at ERF startup. Guards go only on downstream setup (grid creation, allocation), never on the read.
+
+### Bug 4 — Debug messages missing or sparse
+
+Phase 1.1 emitted a startup banner but no per-function debug traces. Users cannot tell whether a UCM code path ran or what intermediate state looks like.
+
+**Phase 1.2 rule (NEW, MANDATORY):** Every non-trivial UCM function MUST emit `[UCM][1.2]` debug message when `params.ucm_debug == true`. See "Debug Message Contract" section below.
+
+### Bug 5 — Hardcoded `0` slipped into level-argument positions
+
+Not yet fixed, but grep the Phase 1.1 code before starting Phase 1.2. If any UCM public function passes hardcoded `0` for a level argument (not a component index), fix as Phase 1.2 drive-by.
+
+**Phase 1.2 rule:** Continue enforcing lev-aware API contract from Phase 1.1.
+
+---
+
+## Phase 1.2: UCM 2D Grid + Homogeneous URBPARM MultiFabs + is_urban Mask
+
+Phase 1.2 builds the **UCM 2D grid infrastructure** and **homogeneous URBPARM MultiFab fields**, plus declares and allocates the `is_urban(i, j)` mask. **No physics computations are performed yet.** After Phase 1.2:
+
+- `create_ucm_grid` is implemented (no longer a stub) and returns a properly-refined 2D BoxArray aligned with ATM DistributionMapping
+- All homogeneous URBPARM parameters are broadcast into per-cell MultiFabs on UCM grid
+- `ucm_is_urban` iMultiFab is allocated and filled to `1` everywhere (fully urban homogeneous patch)
+- A canonical test runs to completion, verifies grid dimensions, spot-checks MultiFab values, bit-for-bit ATM regression
+- Every UCM function emits `[UCM][1.2]` debug messages under `ucm_debug = true`
+
+### Phase 1.2 Algorithm — Mirror Dust/Fire Pattern Exactly
+
+#### `create_ucm_grid(ba_atm, dm_atm, geom_atm, grid_ratio, lev)`
+
+1. Extract k=0 slab from each Box in `ba_atm` by explicit Box manipulation (`setSmall(2,0)`, `setBig(2,0)`)
+2. Refine 2D BoxArray by `IntVect(grid_ratio, grid_ratio, 1)` using `amrex::refine()`
+3. Reuse `dm_atm` directly — refinement preserves box count, so box `i` in refined array is owned by same rank
+4. Construct refined 2D Geometry: hi-index = `old_hi * grid_ratio + (grid_ratio - 1)`; physical domain x-y from ATM, z set to dummy 1 m
+
+#### `allocate_ucm_fields(fields, ucm_grid, params, lev)`
+
+Allocates 16 MultiFabs on UCM BoxArray with ghost `IntVect(1,1,0)` and `ncomp=1`:
+
+- **Morphology:** `H_bldg`, `W_road`, `W_roof`
+- **Shortwave albedos:** `albedo_roof`, `albedo_wall`, `albedo_road`
+- **Longwave emissivities:** `emissivity_roof`, `emissivity_wall`, `emissivity_road`
+- **Temperatures (placeholder, Phase 1.3 SEB replaces):** `T_skin_roof`, `T_skin_wall`, `T_skin_road`, `T_canyon_air`
+- **Fluxes (placeholder, Phase 1.3 SEB replaces):** `H_sensible`, `LE_latent`
+- **Urban mask:** `is_urban` (iMultiFab, 0/1 mask)
+
+#### `fill_ucm_fields_homogeneous(fields, params, lev)`
+
+Sets every field to uniform value from `UCMParams`:
+
+- Morphology ← `params.H_bldg_uniform`, `W_road_uniform`, `W_roof_uniform`
+- Albedos ← `params.albedo_roof`, `albedo_wall`, `albedo_road`
+- Emissivities ← `params.emissivity_roof`, `emissivity_wall`, `emissivity_road`
+- `T_skin_*`, `T_canyon_air` ← `params.test_surf_temp_K`
+- `H_sensible`, `LE_latent` ← `0.0`
+- `is_urban` ← `1` (everywhere — homogeneous urban patch)
+
+### Debug Message Contract (Phase 1.2)
+
+Every non-trivial UCM function MUST emit debug output when `params.ucm_debug == true`. Format:
+
+```
+[UCM][1.2][<function_name>] <description with key values>
+```
+
+**Minimum required traces:**
+
+1. **`create_ucm_grid`** — (a) ATM `ba` size and box count, (b) ATM domain extents, (c) `grid_ratio`, (d) UCM `ba` size and box count, (e) UCM domain extents. One message per line.
+2. **`allocate_ucm_fields`** — Per-MultiFab: name, box count, ngrow, ncomp. Summary: "allocated N MultiFabs on UCM grid at lev=X"
+3. **`fill_ucm_fields_homogeneous`** — Per-field value being set
+4. **`all_allocated`** — No output on success; per-field "MISSING: <name>" if any pointer null
+5. **`check_ucm_grid_and_fields`** — Phase 1.2 grid-check banner: UCM extents, refinement ratio, ghost cells, allocation status
+
+**Rate-limiting rules:**
+
+- All debug via `amrex::Print()` (IO rank only)
+- Never `amrex::AllPrint` (per-rank)
+- No debug inside `ParallelFor` kernels
+- Emit once per call (not per box/cell)
+
+### Canonical Test (UCMHomogeneousGrid)
+
+New test directory: `Exec/CanonicalTests/SLUCM/UCMHomogeneousGrid/`
+
+**Test configuration:**
+
+- ATM domain: `8 × 8 × 64` cells, MRF PBL, neutral ABL
+- UCM grid: `8 × 8 × 1` → refined `16 × 16 × 1` (grid_ratio=2)
+- Fields: All homogeneous from ParmParse
+- Sounding: Byte-for-byte copy of `UCMScaffold/sounding_neutral_abl`
+- Steps: 2 @ 1.0 s `fixed_dt`
+
+**Pass criteria:**
+
+1. Exit code 0 at step 2
+2. UCM grid extents `16 × 16 × 1`
+3. All Phase 1.2 debug banners printed (see Debug Message Contract above)
+4. Spot-checks on MultiFab values match ParmParse (e.g., `H_bldg=10.0`, `albedo_roof=0.20`)
+5. Bit-for-bit ATM regression: run with and without UCM enabled; final-step `Rho`, `RhoTheta`, `U`, `V`, `W` identical
+
+### Phase 1.2 Deliverables
+
+All files in `Source/UrbanCanopy/`:
+
+1. **ERF_UCMFields.H** – Struct with 16 MultiFab fields (3 morphology, 6 radiative, 4 temp, 2 flux, 1 mask)
+2. **ERF_UCMAllocate.H/.cpp** – `allocate_ucm_fields()`, `fill_ucm_fields_homogeneous()`, `UCMFields::all_allocated()`
+3. **ERF_UCMGrid.cpp** – Full implementation with debug messages (replacing Phase 1.1 stub)
+4. **ERF_UCMPrerequisites.cpp** – New `check_ucm_grid_and_fields()` function
+5. **Modified ERF.H** – Change `ucm_is_urban` standalone iMultiFab to `m_ucm_fields` UCMFields struct Vector
+6. **Modified ERF.cpp** – Add grid/field allocation calls in `InitData_post()`
+7. **CMake/BuildERFExe.cmake** – Register new files
+8. **Make.package** – Register new files
+9. **Exec/CanonicalTests/SLUCM/UCMHomogeneousGrid/** – Test directory with inputs, sounding, CMakeLists.txt, README
+
+### Build Integration (Phase 1.2)
+
+- Add `ERF_UCMAllocate.cpp` to both `Make.package` and `CMake/BuildERFExe.cmake`
+- Add `ERF_UCMFields.H` and `ERF_UCMAllocate.H` to `CEXE_headers`
+- Ensure build succeeds with `-DERF_ENABLE_UCM=ON` and `-DERF_ENABLE_UCM=OFF`
+
+---

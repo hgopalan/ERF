@@ -10,20 +10,32 @@ This file will grow phase by phase as new technical challenges are discovered an
 
 ### A1. Follow the Dust and Fire Module Patterns Exactly
 
-**TODO(UCM Phase 1.2):** Document specific Dust/Fire analogs as they are replicated. When in doubt, copy the reference implementation and substitute UCM for module name.
+Every UCM sub-system has a proven Dust analog. When in doubt, copy the Dust implementation and substitute UCM for module name.
 
 | UCM Component | Reference Analog |
 |---------------|------------------|
+| `ERF_UCMParams.H` | `Source/Dust/ERF_DustParams.H` |
 | `ERF_UCMGrid.H/cpp` | `Source/Dust/ERF_DustGrid.H/cpp` |
 | `ERF_UCMPrerequisites.H/cpp` | `Source/Dust/ERF_DustPrerequisites.H/cpp` |
-| `ERF_UCMParams.H` | `Source/Dust/ERF_DustParams.H` |
-| `(Phase 1.2) ERF_UCMLayer.H/cpp` | `(Phase 2) Source/Dust/ERF_DustLayer.H/cpp` |
+| `(Phase 1.2) ERF_UCMFields.H` | `(Phase 2) Source/Dust/ERF_DustLayer.H` (field container pattern) |
+| `(Phase 1.2) ERF_UCMAllocate.H/cpp` | `Source/LNG/ERF_LNGLayer.cpp` (allocation pattern) |
 | `(Phase 1.3) ERF_UCMAtmCoupling.H/cpp` | `Source/Dust/ERF_DustAtmCoupling.H/cpp` |
 | `(Phase 1.3) ERF_UCMWindExtract.H/cpp` | `Source/Dust/ERF_DustWindExtract.H/cpp` |
 
 Diverging silently is the primary source of bugs. Document deviations with `TODO(UCM PhaseX.Y): rationale` comments.
 
-### A2. Build System — Register in Both Make.package and CMake
+### A1.1 Grid Alignment and DistributionMapping Reuse (Phase 1.2 NEW)
+
+The UCM 2D grid is constructed using the exact algorithm from `Source/Dust/ERF_DustGrid.cpp`:
+
+1. **Extract 2D slab:** Take k=0 slice from each box in `ba_atm` via explicit `Box::setSmall(2,0)` and `setBig(2,0)`
+2. **Refine BoxArray:** Apply `amrex::refine()` by `IntVect(grid_ratio, grid_ratio, 1)` — this increases box sizes but does NOT change the number of boxes
+3. **Reuse DistributionMapping:** Because refinement preserves box count, we reuse `dm_atm` directly — box `i` in refined array is owned by the same rank as box `i` in atmospheric array
+4. **Construct 2D Geometry:** Hi-index formula `new_hi = old_hi * grid_ratio + (grid_ratio - 1)`; physical domain x-y unchanged from ATM; z extent set to dummy 1 m
+
+**Critical invariant:** Box `i` in `ba_ucm` is ALWAYS owned by the same rank as box `i` in `ba_atm`. This eliminates inter-rank communication during UCM–ATM coupling, dramatically improving performance.
+
+**Reference:** `Source/LNG/LNG_MPI_SKILLS.md` Section B5 and `Source/Dust/ERF_DustGrid.cpp`
 
 Every new `.cpp` file must be registered in **both** build systems or one will produce linker errors.
 
