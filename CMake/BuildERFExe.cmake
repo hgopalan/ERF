@@ -302,12 +302,17 @@ function(build_erf_lib erf_lib_name)
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMParams.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMAllocate.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCM.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMWindExtract.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMLayer.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMParams.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMGrid.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMFields.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMAllocate.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMPrerequisites.H
-                   ${SRC_DIR}/UrbanCanopy/ERF_UCM.H)
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCM.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMWindExtract.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMSlabConduction.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMLayer.H)
 
     target_include_directories(${erf_lib_name} PUBLIC
                                $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/UrbanCanopy>)

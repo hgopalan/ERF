@@ -1005,6 +1005,9 @@ private:
     UCMParams m_ucm_params;
     amrex::Vector<std::unique_ptr<UCMGrid>> m_ucm_grid;
     amrex::Vector<std::unique_ptr<UCMFields>> m_ucm_fields;  // Phase 1.2: all MultiFabs (morphology, radiative properties, state, is_urban mask)
+    // Phase 1.3: physics driver and forcing container
+    amrex::Vector<std::unique_ptr<UCMLayer>> m_ucm_layer;
+    amrex::Vector<std::unique_ptr<UCMForcing>> m_ucm_forcing;
     #endif
 
 #ifdef ERF_USE_EAMXX_SHOC

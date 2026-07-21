@@ -100,6 +100,9 @@ ERF::ERF_shared ()
     #ifdef ERF_USE_UCM
     m_ucm_grid.resize(nlevs_max);
     m_ucm_fields.resize(nlevs_max);
+    // Phase 1.3: Initialize physics driver and forcing containers
+    m_ucm_layer.resize(nlevs_max);
+    m_ucm_forcing.resize(nlevs_max);
     #endif
 
     rhotheta_src.resize(nlevs_max);

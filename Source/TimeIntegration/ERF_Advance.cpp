@@ -132,6 +132,33 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         }
     }
 
+    // **************************************************************************************
+    // Phase 1.3: Advance SLUCM facet SEB and slab conduction
+    // **************************************************************************************
+    #ifdef ERF_USE_UCM
+    if (m_ucm_params.enable && m_ucm_layer[lev] != nullptr && m_SurfaceLayer) {
+        // Create temporary MultiFabs for scalar extraction if needed
+        amrex::MultiFab T_atm_mf(vars_old[lev][Vars::cons].boxArray(),
+                                vars_old[lev][Vars::cons].DistributionMap(),
+                                1, amrex::IntVect(1,1,0));
+        amrex::MultiFab q_atm_mf(vars_old[lev][Vars::cons].boxArray(),
+                                vars_old[lev][Vars::cons].DistributionMap(),
+                                1, amrex::IntVect(1,1,0));
+
+        // Extract atmospheric forcing from SurfaceLayer diagnostics and ATM state
+        m_ucm_layer[lev]->advance(*m_ucm_fields[lev], *m_ucm_forcing[lev], *m_ucm_grid[lev],
+                                 m_SurfaceLayer->get_u_star()[lev],
+                                 m_SurfaceLayer->get_theta_star()[lev],
+                                 m_SurfaceLayer->get_q_star()[lev],
+                                 vars_old[lev][Vars::xvel],
+                                 vars_old[lev][Vars::yvel],
+                                 z_phys_cc[lev].get(),
+                                 T_atm_mf,
+                                 q_atm_mf,
+                                 Geom(lev), time, dt_lev, 1, lev);
+    }
+    #endif
+
 #if defined(ERF_USE_WINDFARM)
     // **************************************************************************************
     // Update the windfarm sources

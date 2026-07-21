@@ -91,6 +91,18 @@ struct UCMParams
     amrex::Real alpha_ucm      = 10.0;      ///< Exponential injection e-folding depth [m]
 
     // =========================================================================
+    // Section 4b: Slab conduction solver parameters (Phase 1.3+)
+    // =========================================================================
+
+    int     slab_N_layers      = 4;         ///< Number of soil/material layers in slab [-]
+    amrex::Real slab_T_deep    = 287.0;     ///< Deep (bottom BC) temperature [K]
+    amrex::Real slab_L         = 0.3;       ///< Total slab thickness [m]
+    amrex::Real k_therm_uniform = 1.5;      ///< Uniform thermal conductivity [W/m/K]
+    amrex::Real rho_cp_uniform = 2.0e6;     ///< Uniform volumetric heat capacity [J/m^3/K]
+    int     newton_max_iter    = 20;        ///< Max Newton iterations for facet SEB [-]
+    amrex::Real newton_tol_K   = 0.01;      ///< Temperature convergence tolerance [K]
+
+    // =========================================================================
     // Section 5: Building morphology (homogeneous, overridden by CSV in Phase 2)
     // =========================================================================
 

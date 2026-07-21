@@ -7,6 +7,9 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_sources += UrbanCanopy/ERF_UCMParams.cpp
   CEXE_sources += UrbanCanopy/ERF_UCMAllocate.cpp
   CEXE_sources += UrbanCanopy/ERF_UCM.cpp
+  # Phase 1.3 additions
+  CEXE_sources += UrbanCanopy/ERF_UCMWindExtract.cpp
+  CEXE_sources += UrbanCanopy/ERF_UCMLayer.cpp
 
   # Headers (complete list)
   CEXE_headers += UrbanCanopy/ERF_UCM.H
@@ -15,5 +18,9 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_headers += UrbanCanopy/ERF_UCMFields.H
   CEXE_headers += UrbanCanopy/ERF_UCMAllocate.H
   CEXE_headers += UrbanCanopy/ERF_UCMPrerequisites.H
+  # Phase 1.3 header-only and interface headers
+  CEXE_headers += UrbanCanopy/ERF_UCMWindExtract.H
+  CEXE_headers += UrbanCanopy/ERF_UCMSlabConduction.H
+  CEXE_headers += UrbanCanopy/ERF_UCMLayer.H
 
 endif

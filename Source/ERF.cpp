@@ -1268,6 +1268,10 @@ ERF::InitData_post ()
 
         // Post-allocation Phase 1.2 grid check
         check_ucm_grid_and_fields(m_ucm_params, *m_ucm_grid[lev], *m_ucm_fields[lev], lev);
+
+        // Phase 1.3: Initialize physics driver and forcing container
+        m_ucm_layer[lev] = std::make_unique<UCMLayer>(m_ucm_params, lev);
+        m_ucm_forcing[lev] = std::make_unique<UCMForcing>();
     }
     #endif
 
