@@ -34,6 +34,15 @@ void UCMParams::read_from_parmparse(int lev)
     // Section 4: Vertical structure
     pp.query("alpha_ucm", alpha_ucm);
 
+    // Section 4b: Slab conduction solver parameters (Phase 1.3+)
+    pp.query("slab_N_layers", slab_N_layers);
+    pp.query("slab_T_deep", slab_T_deep);
+    pp.query("slab_L", slab_L);
+    pp.query("k_therm_uniform", k_therm_uniform);
+    pp.query("rho_cp_uniform", rho_cp_uniform);
+    pp.query("newton_max_iter", newton_max_iter);
+    pp.query("newton_tol_K", newton_tol_K);
+
     // Section 5: Building morphology (homogeneous)
     pp.query("H_bldg_uniform", H_bldg_uniform);
     pp.query("W_road_uniform", W_road_uniform);

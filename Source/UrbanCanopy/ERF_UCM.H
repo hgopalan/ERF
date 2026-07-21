@@ -99,9 +99,11 @@
 #include <UrbanCanopy/ERF_UCMFields.H>
 #include <UrbanCanopy/ERF_UCMAllocate.H>
 #include <UrbanCanopy/ERF_UCMPrerequisites.H>
+#include <UrbanCanopy/ERF_UCMWindExtract.H>
+#include <UrbanCanopy/ERF_UCMSlabConduction.H>
+#include <UrbanCanopy/ERF_UCMLayer.H>
 
 // Forward declarations for future phases
-// class UCMLayer;
 // class UCMAtmCoupling;
 // class UCMPlotfile;
 
