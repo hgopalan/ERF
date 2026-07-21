@@ -344,3 +344,153 @@ All files in `Source/UrbanCanopy/`:
 - Ensure build succeeds with `-DERF_ENABLE_UCM=ON` and `-DERF_ENABLE_UCM=OFF`
 
 ---
+
+## Phase 1.3: Slab Conduction + SLUCM SEB + Terrain-Aware Extraction
+
+Phase 1.3 implements the **Surface Energy Balance (SEB) solver** for the UCM canopy, extracting wind and scalar fields from the atmosphere at the canopy reference height, and computing surface temperatures and sensible/latent heat fluxes.
+
+### Phase 1.3 Status: ✅ COMPLETE
+
+**Post-merge bug fixes** (learned in development):
+
+**Bug 7** – `[f0b2ef3](https://github.com/hgopalan/ERF/commit/f0b2ef3)` "Fix UCMWindExtract: use array() by value, correct ParallelFor lambda signature"
+- **Wrong:** Used `MultiFab[mfi].array()` returning by reference (`auto&`)
+- **Correct:** Use `mf.array(mfi)` (by value) or `mf.const_array(mfi)` (read-only)
+- **Also wrong:** ParallelFor signature `[=] AMREX_GPU_DEVICE(amrex::Box const& tbx) { LoopConcurrentOnCpu(...); }`
+- **Correct:** `[=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept { ... }`
+- **Also wrong:** `amrex::Copy(...)` (does not exist)
+- **Correct:** `amrex::MultiFab::Copy(dst, src, srccomp, dstcomp, ncomp, ngrow)`
+
+**Bug 8** – `[8c1cddb](https://github.com/hgopalan/ERF/commit/8c1cddb)` "Fix UCM advance call: SurfaceLayer accessors take lev arg and return MultiFab*"
+- **Wrong:** Called `m_SurfaceLayer->get_u_star()[lev]` (missing `lev` argument)
+- **Correct:** `m_SurfaceLayer->get_u_star(lev)` returns `MultiFab*` (single pointer, not a Vector)
+- **Also wrong:** `m_SurfaceLayer->get_theta_star()` (does not exist)
+- **Correct:** Use `get_t_star(lev)`, `get_q_star(lev)` for theta and moisture star values
+- **Dereferencing:** All SurfaceLayer accessors return `MultiFab*`, so use `*m_SurfaceLayer->get_u_star(lev)` to pass by reference
+
+### Phase 1.3 Deliverables
+
+1. **`ERF_UCMLayer.H/cpp`** — Core SEB solver class with `advance()` method
+2. **`ERF_UCMSlabConduction.H`** — Vertical heat conduction kernel (terrain-aware)
+3. **`ERF_UCMWindExtract.H/cpp`** — Terrain-following ATM wind/scalar extraction at canopy reference height
+4. **Canonical test:** `Exec/CanonicalTests/SLUCM/UCMHomogeneousGrid/` — 1 diurnal cycle with SEB on
+
+### Phase 1.3 Physics
+
+- **Wind extraction:** ATM wind interpolated to height `z_target = z_phys_cc(i,j,klo) + H_bldg(i,j) + zref` using log-law profile
+- **Scalar extraction:** Similar interpolation for temperature and moisture
+- **SEB:** Canyon air temperature solved via energy balance of sensible/latent fluxes; roof/wall/road temperatures from slab conduction
+- **Latent heat:** Computed but set to 0 in Phase 1.3 (placeholder for Phase 2.3 anthropogenic heat)
+- **Urban mask:** `is_urban` guarding enforced in every kernel
+
+### Phase 1.3 AMReX API Rules (MANDATORY for Phase 1.4+)
+
+These rules prevent GPU/MPI correctness bugs:
+
+1. **ParallelFor signature:** Always use `[=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept { ... }`. Never use `auto&` for Array4 or Box-based lambdas.
+2. **Array4 access:** Use `mf.array(mfi)` (by value) or `mf.const_array(mfi)` for read-only. Never `mf[mfi].array()` with `auto&`.
+3. **MultiFab copy:** Use `amrex::MultiFab::Copy(dst, src, srccomp, dstcomp, ncomp, ngrow)`. Never bare `amrex::Copy(...)`.
+4. **SurfaceLayer accessors:** All take `lev` argument and return `MultiFab*` (single pointer). Dereference with `*get_u_star(lev)` etc. Never `get_theta_star()` — use `get_t_star(lev)` instead.
+
+---
+
+## Phase 1.4: One-Way Exponential Injection + Diagnostics + Plotfile
+
+Phase 1.4 turns UCM into a **fully one-way coupled** module. The sensible and latent heat fluxes computed in Phase 1.3 are coarsened to the ATM grid and injected back into `cc_source` using the WRF-SFIRE exponential-decay pattern (Mandel 2011). This is the first phase where UCM affects atmospheric state.
+
+### Phase 1.4 Deliverables
+
+1. **`ERF_UCMAtmCoupling.H/cpp`** — Coarsen + exponential injection pipeline
+   - `coarsen_ucm_flux_to_atm()` — Downsample UCM fluxes using `amrex::average_down` when `grid_ratio > 1`
+   - `apply_ucm_tendency_to_cc_source()` — Inject vertical exponential tendency into `RhoTheta_comp` and optionally `RhoQ1_comp`
+
+2. **`ERF_UCMPlotfile.H/cpp` + `ERF_UCMPlotfileCatalog.H`** — Output writer
+   - `UCMPlotfile` class produces `plt_ucm_NNNNN` files on the native UCM grid
+   - 16-component catalog: morphology, albedo/emissivity, temperatures, fluxes, urban mask
+   - Called via ERF plotfile hook when `ucm_plot_int > 0`
+
+3. **`ERF_UCMDiagnostics.H/cpp`** — CSV statistics logger
+   - Append per-step row to `ucm_diag.dat`: `step, time_s, T_skin_roof_max, T_skin_wall_max, T_skin_road_max, T_canyon_max, H_sensible_max, H_sensible_sum, LE_latent_max`
+   - MPI-safe reductions (AllReduce min/max/sum before rank-0 write)
+   - Duplicate-write guard; called every step when `ucm_diag_file` specified
+
+4. **Modified `ERF_UCMPrerequisites.cpp`** — Relaxed validation
+   - `atm_feedback` now allowed in `[0.0, 1.0]` (was hard-locked at `0.0`)
+   - Abort if `atm_feedback < 0.0` or `> 1.0`
+   - Startup banner now lists Phase 1.4 parameters: `alpha_ucm`, `atm_feedback`, `ucm_plot_int`, `ucm_diag_file`
+
+5. **Canonical test:** `Exec/CanonicalTests/SLUCM/UCMOneWayInject/`
+   - 12-hour diurnal cycle @ hourly steps
+   - `atm_feedback = 1.0` (full coupling)
+   - `alpha_ucm = 15.0 m` (e-folding depth)
+   - Produces `plt_ucm_NNNNN` and `ucm_diag.dat` with injection effects on ATM state
+
+### Phase 1.4 Physics Algorithm
+
+**Exponential vertical injection** (Mandel et al., 2011; mirrors Fire module):
+
+For each ATM column at (i, j):
+1. Define surface height: `z_sfc = z_phys_cc(i, j, klo)`
+2. For each level k, compute height-above-surface: `z_k = z_phys_cc(i, j, k) - z_sfc`
+3. Compute sensible heat tendency:
+   ```
+   hfx_k = (H_sensible(i, j) / Cp_d) * exp(-z_k / alpha_ucm)
+   theta_tend(k) = -rho(k) * (hfx_{k+1} - hfx_k) / dz(k)
+   cc_source(i, j, k, RhoTheta_comp) += atm_feedback * theta_tend(k)
+   ```
+4. If moisture present and `LE_latent` available:
+   ```
+   le_tendency(k) = -rho(k) * (le_{k+1} - le_k) / dz(k)
+   cc_source(i, j, k, RhoQ1_comp) += atm_feedback * le_tendency(k) / L_v
+   ```
+
+**Coarsening:** When `grid_ratio > 1`, use `amrex::average_down(src_ucm, dst_atm, 0, 1, IntVect(grid_ratio, grid_ratio, 1))` to downsample fluxes from UCM to ATM grid, preserving area-weighting.
+
+### Phase 1.4 Parameters (ParmParse)
+
+```
+erf.ucm.alpha_ucm          [Real] = 15.0 m     # E-folding depth for exponential injection
+erf.ucm.atm_feedback       [Real] = 0.0        # Coupling strength: 0=one-way (no feedback), 1=full
+erf.ucm.ucm_plot_int       [int]  = 0          # Plotfile interval; 0 = disabled
+erf.ucm.ucm_diag_file      [str]  = "ucm_diag.dat"  # CSV diagnostics filename
+erf.ucm.sum_interval       [int]  = 1          # Diagnostics write interval (steps)
+```
+
+### Phase 1.4 Debug Tracing (MANDATORY)
+
+Format: `[UCM][1.4][<function>] <values>`. Emitted once per call on rank 0:
+
+- **`coarsen_ucm_flux_to_atm`** — min/max flux before/after coarsening; grid_ratio used
+- **`apply_ucm_tendency_to_cc_source`** — min/max RhoTheta tendency; k=0 rho and dz; alpha_ucm; atm_feedback; expected surface magnitude
+- **`UCMPlotfile::write`** — output filename, step, sim time, component list
+- **`UCMDiagnostics::append`** — one-liner CSV row just appended
+- **`UCMLayer::advance`** — Phase 1.3 trace + Phase 1.4 "post-injection" line showing whether injection ran
+
+### Phase 1.4 Requirements & Assumptions
+
+- **Still homogeneous:** Phase 1.4 uses homogeneous URBPARM (no CSV). Heterogeneous morphology is Phase 2.1.
+- **Radiation coupling deferred:** Analytic diurnal SW/LW is Phase 4.2. Phase 1.4 uses dummy `albedo` and `emissivity` parameters.
+- **MRF stability adjustments deferred:** Neutral log-law for exchange coefficient from Phase 1.3. MRF stability-aware tuning is Phase 3.3.
+- **One-way only:** Even with `atm_feedback = 1.0`, the ATM state is NOT fed back into UCM (true two-way is Phase 3.2).
+- **Latent heat placeholder:** `LE_latent = 0` still in Phase 1.4. Anthropogenic heat injection is Phase 2.3; plant transpiration is Phase 5.3.
+- **Backward regression:** With `atm_feedback = 0.0`, must produce identical ATM state as `enable = false` (bit-for-bit).
+
+### Phase 1.4 Build Integration
+
+- Add `ERF_UCMAtmCoupling.cpp`, `ERF_UCMPlotfile.cpp`, `ERF_UCMDiagnostics.cpp` to `Make.package` and `CMake/BuildERFExe.cmake`
+- Add `.H` files to `CEXE_headers`
+- Modified: `Source/TimeIntegration/ERF_Advance.cpp` — coarsen and inject after SEB, before dycore advance
+- Modified: `Source/ERF.H`, `Source/ERF_Constructors.cpp` — Phase 1.4 member vectors
+
+### Acceptance Criteria (Phase 1.4)
+
+See main problem statement for full checklist. Key items:
+
+1. Builds with `-DERF_ENABLE_UCM=ON` and `=OFF`
+2. Phase 1.1, 1.2, 1.3 tests still pass (no regression)
+3. Phase 1.4 canonical test exits 0, produces plotfiles + CSV
+4. Injection-effect check: `atm_feedback=1.0` vs `0.0` ATM state differs >0.5 K at daytime steps
+5. Backward regression: `atm_feedback=0.0` matches `enable=false` bit-for-bit
+6. All acceptance criteria from problem statement met (20 items total)
+
+---

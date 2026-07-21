@@ -9,7 +9,7 @@
 erf.prob_name = "ABL"
 
 # Time stepping (kept short for scaffold test)
-amr.max_step         = 2
+max_step         = 2
 erf.fixed_dt         = 1.0
 amrex.fpe_trap_invalid = 0
 
