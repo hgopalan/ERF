@@ -1,0 +1,7 @@
+# Neutral ABL Sounding File
+# Format: height [m], theta [K], theta_e [K], qv [kg/kg], u [m/s], v [m/s]
+# Neutral atmosphere: constant theta, no moisture, uniform wind
+
+0.0     293.15   293.15   0.0   5.0   0.0
+500.0   293.15   293.15   0.0   5.0   0.0
+1024.0  293.15   293.15   0.0   5.0   0.0

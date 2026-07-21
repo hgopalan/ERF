@@ -292,6 +292,26 @@ function(build_erf_lib erf_lib_name)
     target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_WINDFARM)
   endif()
 
+  ########################## SLUCM #################################
+  if(ERF_ENABLE_UCM)
+    target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_UCM)
+
+    target_sources(${erf_lib_name} PRIVATE
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMGrid.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMPrerequisites.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMParams.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCM.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMParams.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMGrid.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMPrerequisites.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCM.H)
+
+    target_include_directories(${erf_lib_name} PUBLIC
+                               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/UrbanCanopy>)
+
+    message(STATUS "ERF-SLUCM module enabled")
+  endif()
+
   if(ERF_BUILD_LIBRARY_ONLY)
     # In library-only superbuild mode, archive extraction + weak amrex_probinit
     # requires a forced reference path (see ERF.cpp/ERF_Prob.cpp link anchor).
