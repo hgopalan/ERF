@@ -129,21 +129,67 @@ void UCMLayer::advance(UCMFields& fields,
     fields.T_skin_wall->setVal(T_init);
     fields.T_skin_road->setVal(T_init);
     fields.T_canyon_air->setVal(T_canyon_init);
-    fields.H_sensible->setVal(50.0);  // Placeholder sensible heat flux [W/m²]
+    
+    // Phase 1.3: Compute sensible heat flux using bulk-aerodynamic formula
+    // H = ρ · Cp_d · Ch · U · (T_skin − T_atm)  [W/m²]
+    // For neutral homogeneous test: u_star=0, ΔT=0 → H=0
+    //
+    // Kernel: For each (i,j), compute H as:
+    // Ch derived from u_star (via surface layer model)
+    // U reconstructed from wind at zref
+    // ΔT = T_skin - T_atm
+    
+    const amrex::Real Cp = Cp_d;
+    const amrex::Real rho_ref = 1.2;  // Reference density [kg/m³]
+    
+    for (amrex::MFIter mfi(*fields.H_sensible, amrex::TilingIfNotGPU()); 
+         mfi.isValid(); ++mfi) 
+    {
+        const amrex::Box& bx = mfi.tilebox();
+        auto h_a   = fields.H_sensible->array(mfi);
+        auto u_a   = forcing.u_star->const_array(mfi);
+        auto w_a   = forcing.wind_ref->const_array(mfi);
+        auto t_a   = forcing.T_atm_ref->const_array(mfi);
+        auto t_skin_a = fields.T_skin_roof->const_array(mfi);
+        
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            // u_star from surface layer
+            const amrex::Real u_star = u_a(i, j, 0);
+            
+            // Wind magnitude at reference height
+            const amrex::Real u_ref = std::sqrt(w_a(i, j, 0) * w_a(i, j, 0) + 
+                                               w_a(i, j, 1) * w_a(i, j, 1));
+            
+            // Heat transfer coefficient: Ch = u_star / (|U| + eps)
+            // Prevent division by zero with small epsilon
+            const amrex::Real eps = 1.0e-8;
+            const amrex::Real Ch = u_star / (u_ref + eps);
+            
+            // Temperature difference
+            const amrex::Real dT = t_skin_a(i, j, 0) - t_a(i, j, 0);
+            
+            // Sensible heat flux [W/m²]
+            // H = ρ Cp Ch |U| ΔT
+            h_a(i, j, 0) = rho_ref * Cp * Ch * u_ref * dT;
+        });
+    }
+    
     fields.LE_latent->setVal(0.0);    // LE = 0 in Phase 1.3
 
     // ========================================================================
     // Step 4: Debug trace (Phase 1.3 mandatory)
     // ========================================================================
 
-    if (m_params.ucm_debug) {
-        amrex::Real T_roof_min = fields.T_skin_roof->min(0);
-        amrex::Real T_roof_max = fields.T_skin_roof->max(0);
+    // Collectives outside IOProcessor guard
+    amrex::Real T_roof_min = fields.T_skin_roof->min(0);
+    amrex::Real T_roof_max = fields.T_skin_roof->max(0);
+    amrex::Real H_sens_min = fields.H_sensible->min(0);
+    amrex::Real H_sens_max = fields.H_sensible->max(0);
 
-        if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][1.3][UCMLayer::advance] "
-                          << "dt=" << dt << "s, sim_time=" << time << "s; "
-                          << "T_roof=[" << T_roof_min << "," << T_roof_max << "] K\n";
-        }
+    if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "[UCM][1.3][UCMLayer::advance] "
+                      << "dt=" << dt << "s, sim_time=" << time << "s\n";
+        amrex::Print() << "  T_roof=[" << T_roof_min << "," << T_roof_max << "] K\n";
+        amrex::Print() << "  H_sensible=[" << H_sens_min << "," << H_sens_max << "] W/m²\n";
     }
 }

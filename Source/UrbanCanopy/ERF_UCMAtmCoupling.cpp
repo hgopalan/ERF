@@ -21,45 +21,59 @@
  *
  * Implementation of the coarsen pattern. When grid_ratio==1, performs a direct copy.
  * When grid_ratio>1, uses amrex::average_down to spatially average the UCM flux to ATM.
+ * 
+ * The UCM fluxes live on a 2D slab, while Q_atm_out is a 3D MultiFab.
+ * We create a 2D slab at k=klo on the ATM x-y decomposition, coarsen into it,
+ * then ParallelCopy into the k=klo plane of Q_atm_out.
  */
 void coarsen_ucm_flux_to_atm(
     amrex::MultiFab&       Q_atm_out,
     const amrex::MultiFab& Q_ucm,
     const amrex::Geometry& /*geom_ucm*/,
-    const amrex::Geometry& /*geom_atm*/,
+    const amrex::Geometry& geom_atm,
     int                    grid_ratio,
     int                    /*lev*/)
 {
+    using namespace amrex;
+    
+    Q_atm_out.setVal(0.0);
+
+    // Build a 2D ATM slab BoxArray at k = klo of the ATM domain.
+    const int klo_atm = geom_atm.Domain().smallEnd(2);
+
+    BoxList bl;
+    for (int i = 0; i < Q_atm_out.boxArray().size(); ++i) {
+       Box b = Q_atm_out.boxArray()[i];
+       b.setSmall(2, klo_atm);
+       b.setBig(2,   klo_atm);
+       bl.push_back(b);
+    }
+    BoxArray ba_atm_slab(std::move(bl));
+
+    MultiFab atm_slab(ba_atm_slab, Q_atm_out.DistributionMap(), 1, 0);
+    atm_slab.setVal(0.0);
+
     if (grid_ratio == 1) {
-        // Direct copy when grids are aligned
-        amrex::MultiFab::Copy(Q_atm_out, Q_ucm, 0, 0, 1, 0);
+       MultiFab::Copy(atm_slab, Q_ucm, 0, 0, 1, 0);
     } else {
-        // Use average_down to coarsen from UCM grid to ATM grid
-        amrex::average_down(Q_ucm, Q_atm_out, 0, 1, grid_ratio);
+       // Coarsen UCM (2D) to ATM slab (2D) with ratio (grid_ratio, grid_ratio, 1)
+       average_down(Q_ucm, atm_slab, 0, 1, IntVect(grid_ratio, grid_ratio, 1));
     }
 
-   /* // Debug trace: print min/max before and after
-    if (amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Real min_ucm = Q_ucm.min(0);
-        amrex::Real max_ucm = Q_ucm.max(0);
-        amrex::Real min_atm = Q_atm_out.min(0);
-        amrex::Real max_atm = Q_atm_out.max(0);
+    // ParallelCopy the slab into k=klo_atm of Q_atm_out (only that plane overlaps).
+    Q_atm_out.ParallelCopy(atm_slab, 0, 0, 1);
 
-        amrex::Print() << "[UCM][1.4][coarsen_ucm_flux_to_atm]\n";
-        amrex::Print() << "  grid_ratio=" << grid_ratio << "\n";
-        amrex::Print() << "  before: Q_ucm   min=" << min_ucm << " max=" << max_ucm << "\n";
-        amrex::Print() << "  after:  Q_atm   min=" << min_atm << " max=" << max_atm << "\n";
-    }*/
-    // Debug trace: min/max are collectives — all ranks must call them
-    amrex::Real min_ucm = Q_ucm.min(0);
-    amrex::Real max_ucm = Q_ucm.max(0);
-    amrex::Real min_atm = Q_atm_out.min(0);
-    amrex::Real max_atm = Q_atm_out.max(0);
-    if (amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "[UCM][1.4][coarsen_ucm_flux_to_atm]\n";
-        amrex::Print() << "  grid_ratio=" << grid_ratio << "\n";
-        amrex::Print() << "  before: Q_ucm   min=" << min_ucm << " max=" << max_ucm << "\n";
-        amrex::Print() << "  after:  Q_atm   min=" << min_atm << " max=" << max_atm << "\n";
+    // Collectives on all ranks (do not put inside IOProcessor() guard).
+    Real min_ucm = Q_ucm.min(0);
+    Real max_ucm = Q_ucm.max(0);
+    Real min_atm = Q_atm_out.min(0);
+    Real max_atm = Q_atm_out.max(0);
+    if (ParallelDescriptor::IOProcessor()) {
+       Print() << "[UCM][1.4][coarsen_ucm_flux_to_atm]\n"
+               << "  grid_ratio=" << grid_ratio << "\n"
+               << "  before: Q_ucm  min=" << min_ucm << " max=" << max_ucm << "\n"
+               << "  after:  Q_atm  min=" << min_atm << " max=" << max_atm
+               << " (only k=" << klo_atm << " plane written)\n";
     }
 }
 
@@ -69,6 +83,8 @@ void coarsen_ucm_flux_to_atm(
  * Exponential injection pattern after Mandel 2011 / WRF-SFIRE fire_tendency.
  * Distributes surface sensible heat flux (and optionally latent heat) vertically
  * with exponential decay over alpha_ucm depth scale.
+ * 
+ * Includes safety clamp to prevent runaway tendencies from unit bugs.
  */
 void apply_ucm_tendency_to_cc_source(
     amrex::MultiFab&       cc_source,
@@ -100,12 +116,18 @@ void apply_ucm_tendency_to_cc_source(
 
     // Get grid parameters
     const auto& dom_lo = geom_atm.Domain().loVect();
+    const auto& dom_hi = geom_atm.Domain().hiVect();
     const auto  dx     = geom_atm.CellSizeArray();
     const amrex::Real dz = dx[2];
     const int klo = dom_lo[2];
+    const int khi = dom_hi[2];
 
     // Physical constants
     const amrex::Real Cp = Cp_d;
+    
+    // Safety clamp for theta tendency (K/s absolute)
+    constexpr amrex::Real theta_tend_cap = 0.05;
+    static bool warned_clamp_exceeded = false;
 
     // Hoist LE availability out of the kernel
     const bool have_le = (has_moisture && LE_atm != nullptr);
@@ -126,7 +148,7 @@ void apply_ucm_tendency_to_cc_source(
             ? LE_atm->const_array(mfi)
             : amrex::Array4<const amrex::Real>{};
 
-        // Kernel: exponential injection
+        // Kernel: exponential injection with bounds checking and safety clamp
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
         {
             // Guard: skip non-urban cells
@@ -146,12 +168,24 @@ void apply_ucm_tendency_to_cc_source(
             const amrex::Real rho_k = s_a(i, j, k, Rho_comp);
 
             // Vertical divergence of exponential flux at k+1/2
-            const amrex::Real z_k_plus       = z_a(i, j, k+1) - z_sfc;
+            // Guard: clamp k+1 to khi to avoid out-of-bounds access
+            const int kp1 = amrex::min(k + 1, khi);
+            const amrex::Real z_k_plus       = z_a(i, j, kp1) - z_sfc;
             const amrex::Real exp_factor_plus = std::exp(-z_k_plus / alpha_ucm);
             const amrex::Real h_tend_plus    = (h_a(i, j, 0) / Cp) * exp_factor_plus;
 
             // Tendency for potential temperature equation (per unit volume)
             const amrex::Real theta_tend = rho_k * (h_tend - h_tend_plus) / dz;
+
+            // Safety clamp: skip if tendency exceeds physical bounds
+            if (std::abs(theta_tend / rho_k) > theta_tend_cap) {
+                // Skip this cell; will set warning flag for logging outside parallel region
+                #ifdef AMREX_PRAGMA_OMP_ATOMIC
+                #pragma omp atomic write
+                #endif
+                warned_clamp_exceeded = true;
+                return;
+            }
 
             // Apply feedback coupling coefficient and accumulate
             cc_src_a(i, j, k, RhoTheta_comp) += feedback * theta_tend;
@@ -166,13 +200,20 @@ void apply_ucm_tendency_to_cc_source(
         });
     }
 
-    // Debug trace
-    if (ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Real min_h    = H_atm.min(0);
-        amrex::Real max_h    = H_atm.max(0);
-        amrex::Real min_tend = cc_source.min(0, RhoTheta_comp);
-        amrex::Real max_tend = cc_source.max(0, RhoTheta_comp);
+    // Emit warning if clamp was exceeded
+    if (warned_clamp_exceeded && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "[UCM][1.4][WARN] apply_ucm_tendency_to_cc_source: "
+                       << "|theta_tend|/rho exceeded " << theta_tend_cap << " K/s, "
+                       << "skipping affected cells.\n";
+    }
 
+    // Debug trace (collectives outside IOProcessor guard)
+    amrex::Real min_h    = H_atm.min(0);
+    amrex::Real max_h    = H_atm.max(0);
+    amrex::Real min_tend = cc_source.min(0, RhoTheta_comp);
+    amrex::Real max_tend = cc_source.max(0, RhoTheta_comp);
+
+    if (ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
         // Estimate expected surface tendency magnitude
         const amrex::Real rho_0 = 1.2;  // approximate surface density
         const amrex::Real exp_factor_dz  = std::exp(-dz / alpha_ucm);
