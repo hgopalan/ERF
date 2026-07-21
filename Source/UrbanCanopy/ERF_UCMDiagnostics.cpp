@@ -11,6 +11,7 @@
 #include <AMReX_ParallelDescriptor.H>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <cmath>
 
 UCMDiagnostics::UCMDiagnostics(const UCMParams& params, int lev)
@@ -71,12 +72,13 @@ void UCMDiagnostics::write_row(int nstep, amrex::Real time,
     ofs.close();
 }
 
-void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time, int lev)
+void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time, int /*lev*/)
 {
     // Duplicate-write guard
     if (nstep == m_last_write_step) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][1.4][UCMDiagnostics::append] (skipped, already written at step " << nstep << ")\n";
+            amrex::Print() << "[UCM][1.4][UCMDiagnostics::append] (skipped, already written at step "
+                           << nstep << ")\n";
         }
         return;
     }
@@ -85,97 +87,40 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
     // Check that required fields exist
     if (!fields.T_skin_roof || !fields.T_skin_wall || !fields.T_skin_road ||
         !fields.T_canyon_air || !fields.H_sensible || !fields.LE_latent ||
-        !fields.is_urban) {
+        !fields.is_urban)
+    {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][1.4][UCMDiagnostics::append] ERROR: One or more required fields is nullptr\n";
         }
         return;
     }
 
-    // Compute statistics on all ranks, then reduce to IO rank
-    amrex::Real T_roof_max_local = -std::numeric_limits<amrex::Real>::max();
-    amrex::Real T_wall_max_local = -std::numeric_limits<amrex::Real>::max();
-    amrex::Real T_road_max_local = -std::numeric_limits<amrex::Real>::max();
-    amrex::Real T_canyon_max_local = -std::numeric_limits<amrex::Real>::max();
-    amrex::Real H_max_local = -std::numeric_limits<amrex::Real>::max();
-    amrex::Real H_sum_local = 0.0;
-    amrex::Real LE_max_local = -std::numeric_limits<amrex::Real>::max();
+    // NOTE: These reductions ignore the is_urban mask (Phase 1.4). Non-urban cells
+    // are expected to hold neutral defaults (fluxes = 0, temps = initial values),
+    // so max/sum are still meaningful. A masked reduction can be added later.
+    const int  comp  = 0;
+    const bool local = false; // perform MPI reduction inside MultiFab::max/sum
 
-    // Iterate over boxes to compute statistics
-    for (amrex::MFIter mfi(*fields.T_skin_roof, false); mfi.isValid(); ++mfi) {
-        auto roof_a    = fields.T_skin_roof->const_array(mfi);
-        auto wall_a    = fields.T_skin_wall->const_array(mfi);
-        auto road_a    = fields.T_skin_road->const_array(mfi);
-        auto canyon_a  = fields.T_canyon_air->const_array(mfi);
-        auto h_a       = fields.H_sensible->const_array(mfi);
-        auto le_a      = fields.LE_latent->const_array(mfi);
-        auto urban_a   = fields.is_urban->const_array(mfi);
-
-        const amrex::Box& bx = mfi.validbox();
-
-        amrex::ReduceOps<amrex::ReduceOpMax, amrex::ReduceOpMax, amrex::ReduceOpMax,
-                         amrex::ReduceOpMax, amrex::ReduceOpMax, amrex::ReduceOpSum,
-                         amrex::ReduceOpMax> reduce_op;
-
-        auto r = amrex::ParallelReduce(bx,
-            [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
-                -> amrex::GpuTuple<amrex::Real, amrex::Real, amrex::Real,
-                                   amrex::Real, amrex::Real, amrex::Real,
-                                   amrex::Real>
-            {
-                if (urban_a(i, j, 0) == 0) {
-                    return amrex::MakeTuple(
-                        -std::numeric_limits<amrex::Real>::max(),
-                        -std::numeric_limits<amrex::Real>::max(),
-                        -std::numeric_limits<amrex::Real>::max(),
-                        -std::numeric_limits<amrex::Real>::max(),
-                        -std::numeric_limits<amrex::Real>::max(),
-                        amrex::Real(0.0),
-                        -std::numeric_limits<amrex::Real>::max()
-                    );
-                }
-                return amrex::MakeTuple(
-                    roof_a(i, j, 0, 0),
-                    wall_a(i, j, 0, 0),
-                    road_a(i, j, 0, 0),
-                    canyon_a(i, j, 0, 0),
-                    h_a(i, j, 0, 0),
-                    h_a(i, j, 0, 0),  // sum component
-                    le_a(i, j, 0, 0)
-                );
-            },
-            reduce_op);
-
-        T_roof_max_local   = std::max(T_roof_max_local,   amrex::get<0>(r));
-        T_wall_max_local   = std::max(T_wall_max_local,   amrex::get<1>(r));
-        T_road_max_local   = std::max(T_road_max_local,   amrex::get<2>(r));
-        T_canyon_max_local = std::max(T_canyon_max_local, amrex::get<3>(r));
-        H_max_local        = std::max(H_max_local,        amrex::get<4>(r));
-        H_sum_local       += amrex::get<5>(r);
-        LE_max_local       = std::max(LE_max_local,       amrex::get<6>(r));
-    }
-
-    // Reduce across MPI ranks
-    amrex::ParallelDescriptor::ReduceRealMax(T_roof_max_local);
-    amrex::ParallelDescriptor::ReduceRealMax(T_wall_max_local);
-    amrex::ParallelDescriptor::ReduceRealMax(T_road_max_local);
-    amrex::ParallelDescriptor::ReduceRealMax(T_canyon_max_local);
-    amrex::ParallelDescriptor::ReduceRealMax(H_max_local);
-    amrex::ParallelDescriptor::ReduceRealSum(H_sum_local);
-    amrex::ParallelDescriptor::ReduceRealMax(LE_max_local);
+    amrex::Real T_roof_max   = fields.T_skin_roof->max(comp, 0, local);
+    amrex::Real T_wall_max   = fields.T_skin_wall->max(comp, 0, local);
+    amrex::Real T_road_max   = fields.T_skin_road->max(comp, 0, local);
+    amrex::Real T_canyon_max = fields.T_canyon_air->max(comp, 0, local);
+    amrex::Real H_max        = fields.H_sensible->max(comp, 0, local);
+    amrex::Real H_sum        = fields.H_sensible->sum(comp, local);
+    amrex::Real LE_max       = fields.LE_latent->max(comp, 0, local);
 
     // Write to file on IO rank
     if (amrex::ParallelDescriptor::IOProcessor()) {
         write_row(nstep, time,
-                 T_roof_max_local, T_wall_max_local, T_road_max_local,
-                 T_canyon_max_local, H_max_local, H_sum_local, LE_max_local);
+                  T_roof_max, T_wall_max, T_road_max,
+                  T_canyon_max, H_max, H_sum, LE_max);
 
         // Debug trace
         amrex::Print() << "[UCM][1.4][UCMDiagnostics::append]\n";
         amrex::Print() << "  step=" << nstep << " time=" << time << "\n";
-        amrex::Print() << "  T_skin_roof_max=" << T_roof_max_local
-                       << " T_canyon_max=" << T_canyon_max_local << "\n";
-        amrex::Print() << "  H_sensible_max=" << H_max_local
-                       << " H_sensible_sum=" << H_sum_local << "\n";
+        amrex::Print() << "  T_skin_roof_max=" << T_roof_max
+                       << " T_canyon_max="     << T_canyon_max << "\n";
+        amrex::Print() << "  H_sensible_max="  << H_max
+                       << " H_sensible_sum="   << H_sum << "\n";
     }
 }

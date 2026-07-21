@@ -125,6 +125,6 @@ void UCMPlotfile::write(const UCMFields& fields, const UCMGrid& grid,
             if (i < UCMPlot_ncomp - 1) amrex::Print() << ", ";
         }
         amrex::Print() << ")\n";
-        amrex::Print() << "  grid: " << grid.ba_ucm.size() << " boxes\n";
+        amrex::Print() << "  grid: " << grid.ba.size() << " boxes\n";
     }
 }
