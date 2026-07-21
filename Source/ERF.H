@@ -1004,7 +1004,7 @@ private:
     #ifdef ERF_USE_UCM
     UCMParams m_ucm_params;
     amrex::Vector<std::unique_ptr<UCMGrid>> m_ucm_grid;
-    amrex::Vector<std::unique_ptr<amrex::iMultiFab>> ucm_is_urban;  // UCM Phase 1.2: allocation; Phase 4.1: use
+    amrex::Vector<std::unique_ptr<UCMFields>> m_ucm_fields;  // Phase 1.2: all MultiFabs (morphology, radiative properties, state, is_urban mask)
     #endif
 
 #ifdef ERF_USE_EAMXX_SHOC

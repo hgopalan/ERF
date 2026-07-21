@@ -80,9 +80,26 @@ create_ucm_grid(const BoxArray& ba_atm,
     ug.dm = dm_ucm;
     ug.geom = geom_ucm_2d;
 
-    // Phase 1.1 debug message
+    // Phase 1.2: Emit detailed debug messages per the spec
     if (amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "[UCM DEBUG] create_ucm_grid stub called (Phase 1.1 no-op)\n";
+        const Box atm_dom = geom_atm.Domain();
+        const Box ucm_dom = geom_ucm_2d.Domain();
+        const RealBox atm_rb = geom_atm.ProbDomain();
+        const RealBox ucm_rb = geom_ucm_2d.ProbDomain();
+
+        amrex::Print() << "[UCM][1.2][create_ucm_grid] ATM input: ba.size()=" << ba_atm.size()
+                       << " boxes, domain=" << atm_dom << "\n";
+        amrex::Print() << "[UCM][1.2][create_ucm_grid] ATM physical extent: x=["
+                       << atm_rb.lo(0) << ", " << atm_rb.hi(0) << "], y=["
+                       << atm_rb.lo(1) << ", " << atm_rb.hi(1) << "], z=["
+                       << atm_rb.lo(2) << ", " << atm_rb.hi(2) << "] m\n";
+        amrex::Print() << "[UCM][1.2][create_ucm_grid] grid_ratio = " << grid_ratio << "\n";
+        amrex::Print() << "[UCM][1.2][create_ucm_grid] UCM output: ba.size()=" << ba_ucm.size()
+                       << " boxes, domain=" << ucm_dom << "\n";
+        amrex::Print() << "[UCM][1.2][create_ucm_grid] UCM physical extent: x=["
+                       << ucm_rb.lo(0) << ", " << ucm_rb.hi(0) << "], y=["
+                       << ucm_rb.lo(1) << ", " << ucm_rb.hi(1) << "], z=["
+                       << ucm_rb.lo(2) << ", " << ucm_rb.hi(2) << "] m\n";
     }
 
     return ug;

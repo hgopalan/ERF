@@ -1226,6 +1226,34 @@ ERF::InitData_post ()
     if (m_ucm_params.enable) {
         check_ucm_prerequisites(m_ucm_params, max_level, finest_level,
                                 (solverChoice.terrain_type != TerrainType::None), m_ucm_params.anchor_level);
+
+        // UCM Phase 1.2: build UCM grid and fields for anchor_level
+        const int lev = m_ucm_params.anchor_level;
+
+        // Resize vectors to hold anchor_level
+        m_ucm_grid.resize(finest_level + 1);
+        m_ucm_fields.resize(finest_level + 1);
+
+        if (m_ucm_params.ucm_debug) {
+            amrex::Print() << "[UCM][1.2][ERF] calling create_ucm_grid for lev=" << lev << "\n";
+        }
+        m_ucm_grid[lev] = std::make_unique<UCMGrid>(
+            create_ucm_grid(grids[lev], dmap[lev], geom[lev],
+                            m_ucm_params.grid_ratio, lev));
+
+        if (m_ucm_params.ucm_debug) {
+            amrex::Print() << "[UCM][1.2][ERF] calling allocate_ucm_fields for lev=" << lev << "\n";
+        }
+        m_ucm_fields[lev] = std::make_unique<UCMFields>();
+        allocate_ucm_fields(*m_ucm_fields[lev], *m_ucm_grid[lev], m_ucm_params, lev);
+
+        if (m_ucm_params.ucm_debug) {
+            amrex::Print() << "[UCM][1.2][ERF] calling fill_ucm_fields_homogeneous for lev=" << lev << "\n";
+        }
+        fill_ucm_fields_homogeneous(*m_ucm_fields[lev], m_ucm_params, lev);
+
+        // Post-allocation Phase 1.2 grid check
+        check_ucm_grid_and_fields(m_ucm_params, *m_ucm_grid[lev], *m_ucm_fields[lev], lev);
     }
     #endif
 

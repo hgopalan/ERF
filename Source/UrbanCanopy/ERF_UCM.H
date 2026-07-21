@@ -96,6 +96,8 @@
 
 #include <UrbanCanopy/ERF_UCMParams.H>
 #include <UrbanCanopy/ERF_UCMGrid.H>
+#include <UrbanCanopy/ERF_UCMFields.H>
+#include <UrbanCanopy/ERF_UCMAllocate.H>
 #include <UrbanCanopy/ERF_UCMPrerequisites.H>
 
 // Forward declarations for future phases

@@ -5,12 +5,15 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_sources += UrbanCanopy/ERF_UCMGrid.cpp
   CEXE_sources += UrbanCanopy/ERF_UCMPrerequisites.cpp
   CEXE_sources += UrbanCanopy/ERF_UCMParams.cpp
+  CEXE_sources += UrbanCanopy/ERF_UCMAllocate.cpp
   CEXE_sources += UrbanCanopy/ERF_UCM.cpp
 
   # Headers (complete list)
   CEXE_headers += UrbanCanopy/ERF_UCM.H
   CEXE_headers += UrbanCanopy/ERF_UCMParams.H
   CEXE_headers += UrbanCanopy/ERF_UCMGrid.H
+  CEXE_headers += UrbanCanopy/ERF_UCMFields.H
+  CEXE_headers += UrbanCanopy/ERF_UCMAllocate.H
   CEXE_headers += UrbanCanopy/ERF_UCMPrerequisites.H
 
 endif

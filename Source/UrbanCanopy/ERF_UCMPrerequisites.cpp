@@ -140,4 +140,38 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   ucm_diag_file       = " << params.ucm_diag_file << "\n";
     amrex::Print() << "[UCM] =========================================================\n";
     amrex::Print() << "\n";
+
+    // Phase 1.2 grid check banner (post-allocation) will be emitted after 
+    // allocate_ucm_fields() completes in ERF::InitData_post()
+}
+
+void check_ucm_grid_and_fields(const UCMParams& params,
+                                const UCMGrid& ucm_grid,
+                                const UCMFields& ucm_fields,
+                                int lev)
+{
+    // Check that all fields are allocated
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+        ucm_fields.all_allocated(),
+        "[UCM] Not all UCMFields are allocated! Check the list above.");
+
+    // Phase 1.2: Grid check banner (post-allocation)
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        const amrex::Box& ucm_domain = ucm_grid.geom.Domain();
+        int nx_ucm = ucm_domain.bigEnd(0) - ucm_domain.smallEnd(0) + 1;
+        int ny_ucm = ucm_domain.bigEnd(1) - ucm_domain.smallEnd(1) + 1;
+
+        amrex::Print() << "\n";
+        amrex::Print() << "[UCM] =========================================================\n";
+        amrex::Print() << "[UCM] Phase 1.2 — Grid and Fields Check\n";
+        amrex::Print() << "[UCM] =========================================================\n";
+        amrex::Print() << "[UCM]   UCM grid extents   = " << nx_ucm << " × " << ny_ucm 
+                       << " × 1 (cells)\n";
+        amrex::Print() << "[UCM]   Refinement ratio   = " << ucm_grid.grid_ratio << "\n";
+        amrex::Print() << "[UCM]   Ghost cells        = IntVect(1, 1, 0)\n";
+        amrex::Print() << "[UCM]   All fields allocated: true\n";
+        amrex::Print() << "[UCM]   is_urban set to 1 everywhere (homogeneous patch)\n";
+        amrex::Print() << "[UCM] =========================================================\n";
+        amrex::Print() << "\n";
+    }
 }
