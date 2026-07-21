@@ -38,13 +38,24 @@ void coarsen_ucm_flux_to_atm(
         amrex::average_down(Q_ucm, Q_atm_out, 0, 1, grid_ratio);
     }
 
-    // Debug trace: print min/max before and after
+   /* // Debug trace: print min/max before and after
     if (amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Real min_ucm = Q_ucm.min(0);
         amrex::Real max_ucm = Q_ucm.max(0);
         amrex::Real min_atm = Q_atm_out.min(0);
         amrex::Real max_atm = Q_atm_out.max(0);
 
+        amrex::Print() << "[UCM][1.4][coarsen_ucm_flux_to_atm]\n";
+        amrex::Print() << "  grid_ratio=" << grid_ratio << "\n";
+        amrex::Print() << "  before: Q_ucm   min=" << min_ucm << " max=" << max_ucm << "\n";
+        amrex::Print() << "  after:  Q_atm   min=" << min_atm << " max=" << max_atm << "\n";
+    }*/
+    // Debug trace: min/max are collectives — all ranks must call them
+    amrex::Real min_ucm = Q_ucm.min(0);
+    amrex::Real max_ucm = Q_ucm.max(0);
+    amrex::Real min_atm = Q_atm_out.min(0);
+    amrex::Real max_atm = Q_atm_out.max(0);
+    if (amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "[UCM][1.4][coarsen_ucm_flux_to_atm]\n";
         amrex::Print() << "  grid_ratio=" << grid_ratio << "\n";
         amrex::Print() << "  before: Q_ucm   min=" << min_ucm << " max=" << max_ucm << "\n";

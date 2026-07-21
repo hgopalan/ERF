@@ -59,7 +59,7 @@
  * @note All ParallelFor kernels respect is_urban mask and GPU-safe (noexcept).
  * @note Ghost cells are properly handled by average_down.
  */
-inline void coarsen_ucm_flux_to_atm(
+void coarsen_ucm_flux_to_atm(
     amrex::MultiFab&       Q_atm_out,
     const amrex::MultiFab& Q_ucm,
     const amrex::Geometry& geom_ucm,
