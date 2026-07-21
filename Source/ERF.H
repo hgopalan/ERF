@@ -1008,6 +1008,12 @@ private:
     // Phase 1.3: physics driver and forcing container
     amrex::Vector<std::unique_ptr<UCMLayer>> m_ucm_layer;
     amrex::Vector<std::unique_ptr<UCMForcing>> m_ucm_forcing;
+    // Phase 1.4: atmospheric coupling, plotfile, diagnostics
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_atm;         // Coarsened sensible flux on ATM grid
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_LE_atm;        // Coarsened latent flux on ATM grid
+    amrex::Vector<std::unique_ptr<amrex::iMultiFab>> m_ucm_is_urban_atm; // Coarsened is_urban mask on ATM grid
+    amrex::Vector<std::unique_ptr<UCMPlotfile>> m_ucm_plotfile;
+    amrex::Vector<std::unique_ptr<UCMDiagnostics>> m_ucm_diagnostics;
     #endif
 
 #ifdef ERF_USE_EAMXX_SHOC

@@ -14,7 +14,7 @@
 #include <ERF_Constants.H>
 #include <AMReX_MultiFabUtil.H>
 #include <AMReX_ParallelFor.H>
-#include <AMReEx_Print.H>
+#include <AMReX_Print.H>
 
 /**
  * @brief Coarsen UCM fluxes to ATM grid.
