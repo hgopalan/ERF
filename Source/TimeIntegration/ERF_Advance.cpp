@@ -153,7 +153,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                                  *m_SurfaceLayer->get_q_star(lev),
                                  vars_old[lev][Vars::xvel],
                                  vars_old[lev][Vars::yvel],
-                                 z_phys_cc[lev].get(),
+                                 *z_phys_cc[lev].get(),
                                  T_atm_mf,
                                  q_atm_mf,
                                  Geom(lev), time, dt_lev, 1, lev);
