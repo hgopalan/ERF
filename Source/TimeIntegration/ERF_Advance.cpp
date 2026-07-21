@@ -145,11 +145,12 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                                 vars_old[lev][Vars::cons].DistributionMap(),
                                 1, amrex::IntVect(1,1,0));
 
-        // Extract atmospheric forcing from SurfaceLayer diagnostics and ATM state
+        // Extract atmospheric forcing from SurfaceLayer diagnostics and ATM state.
+        // NOTE: SurfaceLayer accessors take `lev` and return MultiFab*; deref to pass by reference.
         m_ucm_layer[lev]->advance(*m_ucm_fields[lev], *m_ucm_forcing[lev], *m_ucm_grid[lev],
-                                 m_SurfaceLayer->get_u_star()[lev],
-                                 m_SurfaceLayer->get_theta_star()[lev],
-                                 m_SurfaceLayer->get_q_star()[lev],
+                                 *m_SurfaceLayer->get_u_star(lev),
+                                 *m_SurfaceLayer->get_t_star(lev),
+                                 *m_SurfaceLayer->get_q_star(lev),
                                  vars_old[lev][Vars::xvel],
                                  vars_old[lev][Vars::yvel],
                                  z_phys_cc[lev].get(),
