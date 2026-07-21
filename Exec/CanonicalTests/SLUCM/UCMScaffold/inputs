@@ -1,38 +1,73 @@
 # Canonical test for ERF-SLUCM Phase 1.1 scaffold
 # Tests: module enables without crash, prerequisites pass, debug messages print
 # Expected: exit code 0 at step 2, UCM startup banner, no physics runs
+#
+# Atmospheric setup mirrors the neutral ABL canonical test
+# (Exec/CanonicalTests/ABL/MRF_Enhancements/canonical/neutral_abl),
+# using an input sounding for initialization. Terrain is left as-is (none).
 
-# AMR configuration
-amr.n_cell           = 8 8 16
-amr.max_level        = 0
-geometry.prob_extent = 3000.0 3000.0 1024.0
+erf.prob_name = "ABL"
 
-# Time stepping
-amr.dt_shrink        = 0.9
+# Time stepping (kept short for scaffold test)
 amr.max_step         = 2
-amr.fixed_dt         = 1.0
-
-# Domain setup
-zlo.type             = "surface_layer"
-zhi.type             = "slip_wall"
-xlo.type             = "periodic"
-xhi.type             = "periodic"
-ylo.type             = "periodic"
-yhi.type             = "periodic"
-
-# Physics
-erf.pbl_type         = "MYNN2.5"
-erf.use_moisture     = false
-erf.use_terrain      = false
-erf.transport_scalar = false
-
-# Diagnostics and output
-amr.plot_int         = -1
-amr.check_int        = -1
+erf.fixed_dt         = 1.0
 amrex.fpe_trap_invalid = 0
 
-# MPI safety: prevent z-decomposition
-amrex.max_grid_size_z = 16
+fabarray.mfiter_tile_size = 1024 1024 1024
+
+# AMR / geometry
+geometry.prob_extent = 3000.0 3000.0 1024.0
+amr.n_cell           = 8 8 64
+amrex.max_grid_size_z = 128
+geometry.is_periodic = 1 1 0
+
+# Domain boundaries
+zlo.type = "surface_layer"
+erf.most.z0   = 0.1      # roughness length [m]
+erf.most.zref = 24.0     # reference height [m]
+erf.most.surf_temp_flux = 0.0
+zhi.type = "SlipWall"
+zhi.theta_grad = 0.003   # adiabatic upper boundary
+
+# DIAGNOSTICS & VERBOSITY
+erf.sum_interval   = 1
+erf.v              = 1
+amr.v              = 1
+
+# REFINEMENT / REGRIDDING
+amr.max_level       = 0
+
+# CHECKPOINT / PLOTFILES (disabled for scaffold)
+amr.plot_int         = -1
+amr.check_int        = -1
+erf.check_int        = -1
+
+# SOLVER CHOICE
+erf.use_gravity = true
+erf.molec_diff_type = "None"
+# When using a PBL model, LES closure should be disabled
+erf.les_type        = "None"
+erf.Cs = 0.11
+erf.theta_ref = 300.0
+
+# Terrain: keep as-is (no terrain)
+erf.terrain_type     = None
+erf.use_moisture     = false
+erf.transport_scalar = false
+
+# INITIALIZATION - from sounding file (same as neutral_abl)
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+erf.input_sounding_file = "sounding_neutral_abl"
+
+# PBL CONFIGURATION
+erf.pbl_type = "MYNN2.5"
+
+# CORIOLIS / GEOSTROPHIC FORCING
+erf.latitude = 45.0
+erf.use_coriolis = true
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 15.0 0.0 0.0
 
 # ========================================================================
 # SLUCM Configuration (Phase 1.1)
