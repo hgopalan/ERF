@@ -2477,9 +2477,10 @@ ERF::ReadParameters ()
 
     // UCM Phase 1.1: Read UCM parameters from ParmParse
     #ifdef ERF_USE_UCM
-    if (m_ucm_params.enable) {
-        m_ucm_params.read_from_parmparse(0);
-    }
+    //if (m_ucm_params.enable) {
+    //    m_ucm_params.read_from_parmparse(0);
+    //}
+    m_ucm_params.read_from_parmparse(0);
     #endif
 
     if (verbose > 0) {
