@@ -103,6 +103,12 @@ ERF::ERF_shared ()
     // Phase 1.3: Initialize physics driver and forcing containers
     m_ucm_layer.resize(nlevs_max);
     m_ucm_forcing.resize(nlevs_max);
+    // Phase 1.4: Initialize coupling and diagnostics containers
+    m_ucm_H_atm.resize(nlevs_max);
+    m_ucm_LE_atm.resize(nlevs_max);
+    m_ucm_is_urban_atm.resize(nlevs_max);
+    m_ucm_plotfile.resize(nlevs_max);
+    m_ucm_diagnostics.resize(nlevs_max);
     #endif
 
     rhotheta_src.resize(nlevs_max);

@@ -102,6 +102,10 @@
 #include <UrbanCanopy/ERF_UCMWindExtract.H>
 #include <UrbanCanopy/ERF_UCMSlabConduction.H>
 #include <UrbanCanopy/ERF_UCMLayer.H>
+// Phase 1.4: atmospheric coupling, plotfile, diagnostics
+#include <UrbanCanopy/ERF_UCMAtmCoupling.H>
+#include <UrbanCanopy/ERF_UCMPlotfile.H>
+#include <UrbanCanopy/ERF_UCMDiagnostics.H>
 
 // Forward declarations for future phases
 // class UCMAtmCoupling;

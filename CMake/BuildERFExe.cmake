@@ -304,6 +304,9 @@ function(build_erf_lib erf_lib_name)
                    ${SRC_DIR}/UrbanCanopy/ERF_UCM.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMWindExtract.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMLayer.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMAtmCoupling.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMPlotfile.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMDiagnostics.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMParams.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMGrid.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMFields.H
@@ -312,7 +315,11 @@ function(build_erf_lib erf_lib_name)
                    ${SRC_DIR}/UrbanCanopy/ERF_UCM.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMWindExtract.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMSlabConduction.H
-                   ${SRC_DIR}/UrbanCanopy/ERF_UCMLayer.H)
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMLayer.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMAtmCoupling.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMPlotfile.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMDiagnostics.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMPlotfileCatalog.H)
 
     target_include_directories(${erf_lib_name} PUBLIC
                                $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/UrbanCanopy>)

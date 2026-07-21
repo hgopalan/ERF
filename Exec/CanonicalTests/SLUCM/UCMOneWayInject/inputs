@@ -1,16 +1,24 @@
-# Canonical test for ERF-SLUCM Phase 1.1 scaffold
-# Tests: module enables without crash, prerequisites pass, debug messages print
-# Expected: exit code 0 at step 2, UCM startup banner, no physics runs
+# Canonical test for ERF-SLUCM Phase 1.4
+# Tests: One-way exponential injection + diagnostics + plotfile
+# Expected: exit code 0 at step 12, ATM state measurably different from atm_feedback=0.0 run
 #
-# Atmospheric setup mirrors the neutral ABL canonical test
-# (Exec/CanonicalTests/ABL/MRF_Enhancements/canonical/neutral_abl),
-# using an input sounding for initialization. Terrain is left as-is (none).
+# This test exercises the Phase 1.4 coupling pipeline:
+# 1. UCM computes sensible heat flux (H_sensible)
+# 2. Flux is coarsened from UCM grid to ATM grid
+# 3. Exponential vertical injection into cc_source (with feedback=1.0)
+# 4. Diagnostics CSV output to ucm_diag.dat
+# 5. Plotfile output to plt_ucm_NNNNN
+#
+# Atmospheric setup: same as UCMHomogeneousGrid (neutral ABL via input sounding)
+# Urban canopy: homogeneous 10m buildings, 10m roads/roofs
+# Grid ratio: 2 (16x16 UCM, 8x8 ATM)
+# Duration: 12 hours (720 minutes), hourly timesteps = 12 steps total
 
 erf.prob_name = "ABL"
 
-# Time stepping (kept short for scaffold test)
-max_step         = 2
-erf.fixed_dt         = 1.0
+# Time stepping (12 hours of simulation = 720 minutes)
+max_step         = 12
+erf.fixed_dt     = 3600.0
 amrex.fpe_trap_invalid = 0
 
 fabarray.mfiter_tile_size = 1024 1024 1024
@@ -37,8 +45,8 @@ amr.v              = 1
 # REFINEMENT / REGRIDDING
 amr.max_level       = 0
 
-# CHECKPOINT / PLOTFILES (disabled for scaffold)
-amr.plot_int         = -1
+# CHECKPOINT / PLOTFILES
+amr.plot_int         = 12    # ATM plotfile every 12 hours
 amr.check_int        = -1
 erf.check_int        = -1
 
@@ -79,34 +87,35 @@ erf.abl_driver_type = "GeostrophicWind"
 erf.abl_geo_wind = 15.0 0.0 0.0
 
 # ========================================================================
-# SLUCM Configuration (Phase 1.1)
+# SLUCM Configuration (Phase 1.4 — One-way exponential injection active)
 # ========================================================================
-
-erf.ucm.enable             = true
-erf.ucm.ucm_debug          = true
-erf.ucm.anchor_level       = 0
-erf.ucm.static_refinement  = true
-erf.ucm.grid_ratio         = 1
+erf.ucm.enable              = true
+erf.ucm.ucm_debug           = true
+erf.ucm.anchor_level        = 0
+erf.ucm.static_refinement   = true
+erf.ucm.grid_ratio          = 2
 erf.ucm.allow_steep_terrain = false
 
-erf.ucm.atm_feedback       = 0.0
-erf.ucm.zref               = 2.0
-erf.ucm.alpha_ucm          = 10.0
+# Phase 1.4: Injection coupling active
+erf.ucm.atm_feedback        = 1.0
+erf.ucm.zref                = 2.0
+erf.ucm.alpha_ucm           = 15.0   # e-folding depth ~ 1.5×H_bldg
 
-erf.ucm.H_bldg_uniform     = 10.0
-erf.ucm.W_road_uniform     = 10.0
-erf.ucm.W_roof_uniform     = 10.0
+erf.ucm.H_bldg_uniform      = 10.0
+erf.ucm.W_road_uniform      = 10.0
+erf.ucm.W_roof_uniform      = 10.0
 
-erf.ucm.albedo_roof        = 0.20
-erf.ucm.albedo_wall        = 0.20
-erf.ucm.albedo_road        = 0.15
+erf.ucm.albedo_roof         = 0.20
+erf.ucm.albedo_wall         = 0.20
+erf.ucm.albedo_road         = 0.15
 
-erf.ucm.emissivity_roof    = 0.90
-erf.ucm.emissivity_wall    = 0.90
-erf.ucm.emissivity_road    = 0.94
+erf.ucm.emissivity_roof     = 0.90
+erf.ucm.emissivity_wall     = 0.90
+erf.ucm.emissivity_road     = 0.94
 
-erf.ucm.ucm_plot_int       = -1
-erf.ucm.ucm_diag_file      = "ucm_diag.dat"
+# Phase 1.4 diagnostics output
+erf.ucm.ucm_plot_int        = 12    # Plotfile every 12 hours
+erf.ucm.ucm_diag_file       = "ucm_diag.dat"
 
-erf.ucm.test_ustar         = 0.0
-erf.ucm.test_surf_temp_K   = 293.15
+erf.ucm.test_ustar          = 0.0
+erf.ucm.test_surf_temp_K    = 293.15

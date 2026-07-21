@@ -99,6 +99,11 @@ void check_ucm_prerequisites(const UCMParams& params,
         params.emissivity_road >= 0.0 && params.emissivity_road <= 1.0,
         "[UCM] emissivity_road must be in [0,1]. Set: erf.ucm.emissivity_road = 0.94");
 
+    // Check 10: Phase 1.4 — atm_feedback in [0.0, 1.0]
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+        params.atm_feedback >= 0.0 && params.atm_feedback <= 1.0,
+        "[UCM] atm_feedback must be in [0.0, 1.0]. Phase 1.4: 0=one-way (compute but don't inject), 1=full injection.");
+
     // Check 12: Phase 1.3+ slab conduction parameters
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
         params.slab_N_layers >= 1,
@@ -134,7 +139,7 @@ void check_ucm_prerequisites(const UCMParams& params,
     // Startup banner with all parameter values
     amrex::Print() << "\n";
     amrex::Print() << "[UCM] =========================================================\n";
-    amrex::Print() << "[UCM] SLUCM Module Initialization Summary (Phase 1.1-1.3)\n";
+    amrex::Print() << "[UCM] SLUCM Module Initialization Summary (Phase 1.1-1.4)\n";
     amrex::Print() << "[UCM] =========================================================\n";
     amrex::Print() << "[UCM]   enable              = " << (params.enable ? "true" : "false") << "\n";
     amrex::Print() << "[UCM]   ucm_debug           = " << (params.ucm_debug ? "true" : "false") << "\n";
@@ -142,9 +147,8 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   static_refinement   = " << (params.static_refinement ? "true" : "false") << "\n";
     amrex::Print() << "[UCM]   grid_ratio          = " << params.grid_ratio << "\n";
     amrex::Print() << "[UCM]   allow_steep_terrain = " << (params.allow_steep_terrain ? "true" : "false") << "\n";
-    amrex::Print() << "[UCM]   atm_feedback        = " << params.atm_feedback << " (Phase 1.3: locked 0.0)\n";
     amrex::Print() << "[UCM]   zref [m]            = " << params.zref << "\n";
-    amrex::Print() << "[UCM]   alpha_ucm [m]       = " << params.alpha_ucm << "\n";
+    amrex::Print() << "[UCM]   --- Phase 1.3 Slab Conduction Parameters ---\n";
     amrex::Print() << "[UCM]   H_bldg_uniform [m]  = " << params.H_bldg_uniform << "\n";
     amrex::Print() << "[UCM]   W_road_uniform [m]  = " << params.W_road_uniform << "\n";
     amrex::Print() << "[UCM]   W_roof_uniform [m]  = " << params.W_roof_uniform << "\n";
@@ -154,7 +158,6 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   emissivity_roof     = " << params.emissivity_roof << "\n";
     amrex::Print() << "[UCM]   emissivity_wall     = " << params.emissivity_wall << "\n";
     amrex::Print() << "[UCM]   emissivity_road     = " << params.emissivity_road << "\n";
-    amrex::Print() << "[UCM]   --- Phase 1.3 Slab Conduction Parameters ---\n";
     amrex::Print() << "[UCM]   slab_N_layers [#]   = " << params.slab_N_layers << "\n";
     amrex::Print() << "[UCM]   slab_T_deep [K]     = " << params.slab_T_deep << "\n";
     amrex::Print() << "[UCM]   slab_L [m]          = " << params.slab_L << "\n";
@@ -162,6 +165,9 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   rho_cp [J/m^3/K]    = " << params.rho_cp_uniform << "\n";
     amrex::Print() << "[UCM]   newton_max_iter     = " << params.newton_max_iter << "\n";
     amrex::Print() << "[UCM]   newton_tol_K        = " << params.newton_tol_K << "\n";
+    amrex::Print() << "[UCM]   --- Phase 1.4 Injection Parameters ---\n";
+    amrex::Print() << "[UCM]   atm_feedback        = " << params.atm_feedback << " [0,1]\n";
+    amrex::Print() << "[UCM]   alpha_ucm [m]       = " << params.alpha_ucm << "\n";
     amrex::Print() << "[UCM]   ucm_plot_int        = " << params.ucm_plot_int << "\n";
     amrex::Print() << "[UCM]   ucm_diag_file       = " << params.ucm_diag_file << "\n";
     amrex::Print() << "[UCM] =========================================================\n";

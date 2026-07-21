@@ -99,6 +99,69 @@ auto std_vec = ucm_plotfile_var_names();
 amrex::Vector<std::string> var_vec(std_vec.begin(), std_vec.end());
 ```
 
+## Part C — Terrain and Atmospheric Coupling
+
+### C1. Always Use `z_phys_cc(i, j, k) - z_phys_cc(i, j, klo)` for Height-Above-Surface
+
+**TODO(UCM Phase 1.3):** All vertical operations must use terrain-aware coordinate. Contract 3 enforces this:
+
+```cpp
+// CORRECT:
+amrex::Real h_above_surface = z_phys_cc(i, j, k) - z_phys_cc(i, j, klo);
+amrex::Real decay = std::exp(-h_above_surface / alpha);
+
+// WRONG (hardcoded z):
+amrex::Real decay = std::exp(-z_phys_cc(i, j, k) / alpha);  // ✗
+```
+
+**Grep check:** No patterns `z_phys_cc.*k.*0\.0` or `z_phys_cc.*=.*[0-9]` in `Source/UrbanCanopy/`.
+
+### C2. Wind Extraction Reference Height Formula
+
+**TODO(UCM Phase 1.3):** Extract ATM wind at height:
+
+```cpp
+z_target = z_phys_cc(i, j, klo) + H_bldg(i, j) + zref
+```
+
+where `klo` is k-index of first ATM level, `H_bldg` is local building height, `zref` is `erf.ucm.zref` parameter (default 2 m above roof).
+
+### C3. Coarsen + Inject: UCM → ATM Coupling (Phase 1.4 NEW)
+
+**Pattern:** Mirror exactly from `Source/Fire/ERF_FireAtmCoupling.H` and `Source/Dust/ERF_DustAtmCoupling.H`.
+
+```cpp
+// Step 1: Coarsen UCM grid flux to ATM grid
+coarsen_ucm_flux_to_atm(Q_atm_out, Q_ucm, geom_ucm, geom_atm, grid_ratio, lev);
+
+// Step 2: Apply exponential vertical decay to cc_source
+apply_ucm_tendency_to_cc_source(cc_source, Q_atm, z_phys_cc, S_old, geom_atm,
+                                is_urban_atm, alpha, feedback, has_moisture, lev);
+```
+
+**Coarsening rules:**
+- When `grid_ratio == 1`: use `amrex::MultiFab::Copy(dst, src, 0, 0, 1, 0)`
+- When `grid_ratio > 1`: use `amrex::average_down(src, dst, 0, 1, IntVect(grid_ratio, grid_ratio, 1))`
+- Result is on ATM grid; proceed to injection
+
+**Exponential injection algorithm:**
+```cpp
+// For each ATM column (i, j):
+for (int k = klo; k <= khi; ++k) {
+    Real z_sfc = z_phys_cc(i, j, klo);
+    Real z_k = z_phys_cc(i, j, k) - z_sfc;
+    Real hfx_k = (Q_sfc / Cp) * std::exp(-z_k / alpha);
+    
+    // Finite difference to get divergence
+    Real hfx_kp1 = (Q_sfc / Cp) * std::exp(-(z_k + dz(k)) / alpha);
+    Real theta_tend = -rho(k) * (hfx_kp1 - hfx_k) / dz(k);
+    
+    cc_source(i, j, k, RhoTheta_comp) += feedback * theta_tend;
+}
+```
+
+**Critical for MPI:** When grid_ratio > 1 and multiple ranks, UCM and ATM grids are **colocated on the same ranks** (Phase 1.2 contract: DistributionMapping reuse). This eliminates inter-rank communication during coarsening.
+
 ---
 
 ## Part B — MPI Multi-Rank Rules
@@ -276,6 +339,65 @@ Run same inputs with UCM enabled and disabled, verify plotfiles identical (no ph
 - [ ] All public functions have `@param[in]`, `@return`, `@throws` Doxygen blocks
 - [ ] Test builds and runs with `-DERF_ENABLE_UCM=ON` and `=OFF`
 - [ ] No new compiler warnings (`-Wall -Wextra -Wpedantic`)
+
+---
+
+---
+
+## Known Issues & Workarounds
+
+### Phase 1.3 – Bug 7: ParallelFor + Array4 API Misuse (Fixed [`f0b2ef3`](https://github.com/hgopalan/ERF/commit/f0b2ef3))
+
+**Issue:** Phase 1.3 agent incorrectly used AMReX ParallelFor and Array4 APIs:
+1. Used `MultiFab[mfi].array()` returning by reference → GPU/memory safety bug
+2. Used box-based ParallelFor lambda `[=] AMREX_GPU_DEVICE(const Box& tbx)` → incompatible with AMReX kernel signature
+3. Inside ParallelFor, called `LoopConcurrentOnCpu(tbx, ...)` → nested loop incorrect
+4. Used `amrex::Copy(...)` function → does not exist in AMReX
+
+**Workaround/Fix:**
+- **Always:** Use `mf.array(mfi)` (by value) or `mf.const_array(mfi)` (read-only). Never `mf[mfi].array()` with `auto&`.
+- **ParallelFor signature:** `[=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept { ... }`. Triple int signature, not Box-based.
+- **No nested loops:** No `LoopConcurrentOnCpu` inside a `ParallelFor` lambda. Use flat kernel.
+- **MultiFab copy:** Use `amrex::MultiFab::Copy(dst, src, srccomp, dstcomp, ncomp, ngrow)` only.
+
+**Prevention:** All Phase 1.4+ code must follow these rules. Grep checklist (acceptance criteria):
+```
+grep -rn "\[mfi\]\.array()" Source/UrbanCanopy/  → MUST be 0 hits
+grep -rn "LoopConcurrentOnCpu" Source/UrbanCanopy/  → MUST be 0 hits (inside ParallelFor)
+grep -rn "amrex::Copy(" Source/UrbanCanopy/  → MUST be 0 hits (only MultiFab::Copy)
+```
+
+### Phase 1.3 – Bug 8: SurfaceLayer Accessor API Misuse (Fixed [`8c1cddb`](https://github.com/hgopalan/ERF/commit/8c1cddb))
+
+**Issue:** Phase 1.3 agent misunderstood SurfaceLayer's public API:
+1. Called `m_SurfaceLayer->get_u_star()[lev]` — missing `lev` argument
+2. Called `m_SurfaceLayer->get_theta_star()` — function does not exist
+3. Assumed accessors return `Vector<MultiFab*>` → actually return single `MultiFab*`
+
+**Workaround/Fix:**
+- **Accessor signature:** All star-value accessors take `int lev` argument: `get_u_star(lev)`, `get_t_star(lev)`, `get_q_star(lev)`.
+- **No vector indexing:** Never `get_u_star()[lev]`. Always pass `lev` directly: `get_u_star(lev)`.
+- **No theta_star:** Use `get_t_star(lev)` for potential temperature star, not `get_theta_star()`.
+- **Dereferencing:** All return `MultiFab*`, so dereference: `*m_SurfaceLayer->get_u_star(lev)` to use by reference.
+
+**Correct usage pattern:**
+```cpp
+// Phase 1.3 advance call:
+auto& u_star = *m_SurfaceLayer->get_u_star(lev);
+auto& t_star = *m_SurfaceLayer->get_t_star(lev);
+auto& q_star = *m_SurfaceLayer->get_q_star(lev);
+
+// Then use u_star, t_star, q_star as MultiFab references
+// (not subscript: u_star[lev] is wrong; u_star is already at lev)
+```
+
+**Prevention:** Phase 1.4+ grep checklist:
+```
+grep -rn "get_theta_star" Source/UrbanCanopy/  → MUST be 0 hits
+grep -rn "get_u_star()\[" Source/UrbanCanopy/  → MUST be 0 hits
+grep -rn "get_t_star()\[" Source/UrbanCanopy/  → MUST be 0 hits
+grep -rn "get_q_star()\[" Source/UrbanCanopy/  → MUST be 0 hits
+```
 
 ---
 
