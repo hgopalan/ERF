@@ -99,7 +99,7 @@ ERF::ERF_shared ()
     // UCM Phase 1.1: Initialize UCM grid vector
     #ifdef ERF_USE_UCM
     m_ucm_grid.resize(nlevs_max);
-    ucm_is_urban.resize(nlevs_max);
+    m_ucm_fields.resize(nlevs_max);
     #endif
 
     rhotheta_src.resize(nlevs_max);
