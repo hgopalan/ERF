@@ -251,6 +251,72 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     MultiFab zmom_source(ba_z,dm,1,1); zmom_source.setVal(0);
     MultiFab    buoyancy(ba_z,dm,1,1); buoyancy.setVal(0);
 
+    // **************************************************************************************
+    // Phase 1.4: Apply UCM atmospheric coupling (exponential injection)
+    // **************************************************************************************
+    #ifdef ERF_USE_UCM
+    if (m_ucm_params.enable && m_ucm_layer[lev] != nullptr && m_ucm_params.atm_feedback > 0.0) {
+        // Coarsen UCM fluxes to ATM grid (if not already done)
+        if (!m_ucm_H_atm[lev]) {
+            m_ucm_H_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_H_atm[lev]->setVal(0.0);
+        }
+        if (solverChoice.moisture_type != MoistureType::None && !m_ucm_LE_atm[lev]) {
+            m_ucm_LE_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_LE_atm[lev]->setVal(0.0);
+        }
+
+        // Coarsen UCM fluxes from UCM grid to ATM grid
+        coarsen_ucm_flux_to_atm(*m_ucm_H_atm[lev], *m_ucm_fields[lev]->H_sensible,
+                                m_ucm_grid[lev]->geom, Geom(lev),
+                                m_ucm_params.grid_ratio, lev);
+        if (solverChoice.moisture_type != MoistureType::None && m_ucm_fields[lev]->LE_latent) {
+            coarsen_ucm_flux_to_atm(*m_ucm_LE_atm[lev], *m_ucm_fields[lev]->LE_latent,
+                                    m_ucm_grid[lev]->geom, Geom(lev),
+                                    m_ucm_params.grid_ratio, lev);
+        }
+
+        // Apply exponential vertical injection to cc_source
+        const bool has_moisture = (solverChoice.moisture_type != MoistureType::None);
+        if (!m_ucm_is_urban_atm[lev]) {
+            // Build coarsened is_urban mask (homogeneous: all 1s for Phase 1.4)
+            m_ucm_is_urban_atm[lev] = std::make_unique<amrex::iMultiFab>(ba, dm, 1, 0);
+            m_ucm_is_urban_atm[lev]->setVal(1);
+        }
+
+        apply_ucm_tendency_to_cc_source(
+            cc_source,
+            *m_ucm_H_atm[lev],
+            has_moisture ? m_ucm_LE_atm[lev].get() : nullptr,
+            *z_phys_cc[lev].get(),
+            S_old,
+            Geom(lev),
+            *m_ucm_is_urban_atm[lev],
+            m_ucm_params.alpha_ucm,
+            m_ucm_params.atm_feedback,
+            has_moisture,
+            m_ucm_params.ucm_debug,
+            lev);
+
+        // Diagnostics output
+        if (m_ucm_params.ucm_diag_file.size() > 0) {
+            if (!m_ucm_diagnostics[lev]) {
+                m_ucm_diagnostics[lev] = std::make_unique<UCMDiagnostics>(m_ucm_params, lev);
+            }
+            m_ucm_diagnostics[lev]->append(*m_ucm_fields[lev], iteration, time, lev);
+        }
+
+        // Plotfile output
+        if (m_ucm_params.ucm_plot_int > 0 && (iteration % m_ucm_params.ucm_plot_int == 0)) {
+            if (!m_ucm_plotfile[lev]) {
+                m_ucm_plotfile[lev] = std::make_unique<UCMPlotfile>(m_ucm_params, lev);
+            }
+            m_ucm_plotfile[lev]->write(*m_ucm_fields[lev], *m_ucm_grid[lev],
+                                       iteration, time, false, lev);
+        }
+    }
+    #endif
+
     amrex::Vector<MultiFab> state_old;
     amrex::Vector<MultiFab> state_new;
 
