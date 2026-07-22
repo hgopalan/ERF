@@ -16,6 +16,7 @@
 
 #include <UrbanCanopy/ERF_UCMLayer.H>
 #include <UrbanCanopy/ERF_UCMSlabConduction.H>
+#include <UrbanCanopy/ERF_UCMAllocate.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <ERF_Constants.H>
 #include <cmath>
@@ -64,6 +65,11 @@ void UCMLayer::advance(UCMFields& fields,
     
     fields.H_sensible->setVal(0.0);
     fields.LE_latent->setVal(0.0);
+
+    // Phase 2.3: zero-init facet-split fluxes
+    fields.H_road->setVal(0.0);
+    fields.H_wall->setVal(0.0);
+    fields.H_roof->setVal(0.0);
 
     // Collectives on all ranks
     amrex::Real ust_min = atm_u_star.min(0), ust_max = atm_u_star.max(0);
@@ -182,50 +188,121 @@ void UCMLayer::advance(UCMFields& fields,
     fields.T_skin_road->setVal(T_init);
     fields.T_canyon_air->setVal(T_canyon_init);
     
-    // Phase 1.3: Compute sensible heat flux using MOST identity
+    // Phase 2.3: Compute anthropogenic heat
+    compute_anthropogenic_heat(*fields.AH, *fields.ah_profile_id, *fields.is_urban,
+                              m_params, time, lev);
+    
+    // Phase 2.3: Compute facet-split sensible heat flux using MOST identity
     // H = - ρ · Cp_d · u_star · t_star  [W/m²]
+    // Split into road/wall/roof weighted by area fractions
     // Zero-safe: identically 0 when u_star == 0 or t_star == 0
     
     const amrex::Real Cp = Cp_d;
     const amrex::Real rho_ref = 1.2;  // Reference density [kg/m³]
     
-    // Iterate over atm_t_star (on UCM grid) to compute H_sensible
-    for (amrex::MFIter mfi(atm_t_star, amrex::TilingIfNotGPU()); 
-         mfi.isValid(); ++mfi) 
+    // Iterate over forcing.u_star (on UCM grid) to compute facet fluxes
+    for (amrex::MFIter mfi(*forcing.u_star, amrex::TilingIfNotGPU()); 
+        mfi.isValid(); ++mfi) 
     {
-        const amrex::Box& bx = mfi.tilebox();
-        auto h_a    = fields.H_sensible->array(mfi);
-        auto u_a    = forcing.u_star->const_array(mfi);
-        auto t_st_a = atm_t_star.const_array(mfi);
-        auto is_urban_a = fields.is_urban->const_array(mfi);
+       const amrex::Box& bx = mfi.tilebox();
         
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            // Skip non-urban cells: they do not contribute to sensible heat
-            if (is_urban_a(i, j, 0) == 0) {
-                h_a(i, j, 0) = 0.0;
-                return;
-            }
-            
-            // MOST identity: H = - ρ Cp u* t*
-            const amrex::Real u_star = u_a(i, j, 0);
-            const amrex::Real t_star = t_st_a(i, j, 0);
-            
-            amrex::Real H_sensible = - rho_ref * Cp * u_star * t_star;
-            
-            // Guard against non-finite values
-            if (!std::isfinite(H_sensible)) {
-                H_sensible = 0.0;
-            }
-            
-            h_a(i, j, 0) = H_sensible;
-        });
+       // Input arrays
+       auto const plan_a   = fields.plan_area_frac->const_array(mfi);
+       auto const Hbldg_a  = fields.H_bldg->const_array(mfi);
+       auto const Wrd_a    = fields.W_road->const_array(mfi);
+       auto const Wrf_a    = fields.W_roof->const_array(mfi);
+       auto const ah_a     = fields.AH->const_array(mfi);
+       auto const is_urb_a = fields.is_urban->const_array(mfi);
+       auto const u_star_a = forcing.u_star->const_array(mfi);
+       auto const t_star_a = atm_t_star.const_array(mfi);
+        
+       // Output arrays
+       auto       h_road_a = fields.H_road->array(mfi);
+       auto       h_wall_a = fields.H_wall->array(mfi);
+       auto       h_roof_a = fields.H_roof->array(mfi);
+       auto       h_sens_a = fields.H_sensible->array(mfi);
+        
+       amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+           if (is_urb_a(i,j,0) == 0) {
+               h_road_a(i,j,0) = 0.0;
+               h_wall_a(i,j,0) = 0.0;
+               h_roof_a(i,j,0) = 0.0;
+               h_sens_a(i,j,0) = 0.0;
+               return;
+           }
+
+           const amrex::Real pf   = plan_a(i,j,0);
+           const amrex::Real Hb   = Hbldg_a(i,j,0);
+           const amrex::Real Wsum = std::max(Wrd_a(i,j,0) + Wrf_a(i,j,0), 1.0e-6);
+           const amrex::Real f_road = 1.0 - pf;
+           const amrex::Real f_roof = pf;
+           const amrex::Real f_wall = 2.0 * pf * Hb / Wsum;
+
+           const amrex::Real u_star = u_star_a(i,j,0);
+           const amrex::Real t_star = t_star_a(i,j,0);
+           const amrex::Real H_base = -rho_ref * Cp * u_star * t_star;
+
+           amrex::Real Hr = f_road * H_base;
+           amrex::Real Hw = f_wall * H_base;
+           amrex::Real Hf = f_roof * H_base;
+
+           // NaN/inf safety
+           if (!amrex::Math::isfinite(Hr)) Hr = 0.0;
+           if (!amrex::Math::isfinite(Hw)) Hw = 0.0;
+           if (!amrex::Math::isfinite(Hf)) Hf = 0.0;
+           // Physical clamp
+           Hr = amrex::max(-1500.0, amrex::min(1500.0, Hr));
+           Hw = amrex::max(-1500.0, amrex::min(1500.0, Hw));
+           Hf = amrex::max(-1500.0, amrex::min(1500.0, Hf));
+
+           // Anthropogenic heat added to roof (rooftop HVAC convention).
+           // TODO(UCM Phase 6.2): Move AH to building-energy model.
+           Hf += ah_a(i,j,0);
+
+           h_road_a(i,j,0) = Hr;
+           h_wall_a(i,j,0) = Hw;
+           h_roof_a(i,j,0) = Hf;
+           h_sens_a(i,j,0) = Hr + Hw + Hf;  // diagnostic sum for injection
+       });
     }
     
-    fields.LE_latent->setVal(0.0);    // LE = 0 in Phase 1.3
+    fields.LE_latent->setVal(0.0);    // LE = 0 in Phase 2.3
 
     // ========================================================================
     // Step 4: Debug trace (Phase 1.3 mandatory)
     // ========================================================================
+
+    // Phase 2.3: One-time extended BANNER for facet-split fields
+    static bool banner_23_printed = false;
+    if (!banner_23_printed && m_params.ucm_debug &&
+        amrex::ParallelDescriptor::IOProcessor()) {
+        banner_23_printed = true;
+        // Collectives before IOProcessor guard
+        amrex::Real plan_min = fields.plan_area_frac->min(0);
+        amrex::Real plan_max = fields.plan_area_frac->max(0);
+        amrex::Real hr_min = fields.H_road->min(0);
+        amrex::Real hr_max = fields.H_road->max(0);
+        amrex::Real hw_min = fields.H_wall->min(0);
+        amrex::Real hw_max = fields.H_wall->max(0);
+        amrex::Real hf_min = fields.H_roof->min(0);
+        amrex::Real hf_max = fields.H_roof->max(0);
+        amrex::Real ah_min = fields.AH->min(0);
+        amrex::Real ah_max = fields.AH->max(0);
+        
+        amrex::Print() << "\n[UCM][2.3][BANNER] Phase 2.3 facet-split fluxes and AH active:\n"
+                       << "  plan_area_frac min=" << plan_min
+                       << " max=" << plan_max << "\n"
+                       << "  H_road min="  << hr_min
+                       << " max="     << hr_max << " W/m^2\n"
+                       << "  H_wall min="  << hw_min
+                       << " max="     << hw_max << " W/m^2\n"
+                       << "  H_roof min="  << hf_min
+                       << " max="     << hf_max << " W/m^2\n"
+                       << "  AH min="      << ah_min
+                       << " max="     << ah_max << " W/m^2\n"
+                       << "  H_sum (=H_road+H_wall+H_roof+AH) matches H_sensible? "
+                       << "check by (H_sensible.max - (H_road.max+H_wall.max+H_roof.max)) below\n\n";
+    }
 
     // Collectives outside IOProcessor guard
     amrex::Real T_roof_min = fields.T_skin_roof->min(0);

@@ -45,7 +45,8 @@ void UCMDiagnostics::initialize_file()
     if (!file_exists || ofs.tellp() == 0) {
         // Write header
         ofs << "step,time_s,T_skin_roof_max,T_skin_wall_max,T_skin_road_max,";
-        ofs << "T_canyon_max,H_sensible_max,H_sensible_sum,LE_latent_max\n";
+        ofs << "T_canyon_max,H_sensible_max,H_sensible_sum,LE_latent_max,";
+        ofs << "H_road_max,H_wall_max,H_roof_max,AH_max\n";
     }
 
     ofs.close();
@@ -54,7 +55,9 @@ void UCMDiagnostics::initialize_file()
 void UCMDiagnostics::write_row(int nstep, amrex::Real time,
                                amrex::Real T_roof_max, amrex::Real T_wall_max, amrex::Real T_road_max,
                                amrex::Real T_canyon_max, amrex::Real H_max, amrex::Real H_sum,
-                               amrex::Real LE_max)
+                               amrex::Real LE_max,
+                               amrex::Real H_road_max, amrex::Real H_wall_max, 
+                               amrex::Real H_roof_max, amrex::Real AH_max)
 {
     if (!amrex::ParallelDescriptor::IOProcessor()) return;
 
@@ -68,7 +71,11 @@ void UCMDiagnostics::write_row(int nstep, amrex::Real time,
         << T_canyon_max << ","
         << H_max << ","
         << H_sum << ","
-        << LE_max << "\n";
+        << LE_max << ","
+        << H_road_max << ","
+        << H_wall_max << ","
+        << H_roof_max << ","
+        << AH_max << "\n";
     ofs.close();
 }
 
@@ -87,10 +94,10 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
     // Check that required fields exist
     if (!fields.T_skin_roof || !fields.T_skin_wall || !fields.T_skin_road ||
         !fields.T_canyon_air || !fields.H_sensible || !fields.LE_latent ||
-        !fields.is_urban)
+        !fields.is_urban || !fields.H_road || !fields.H_wall || !fields.H_roof || !fields.AH)
     {
         if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][1.4][UCMDiagnostics::append] ERROR: One or more required fields is nullptr\n";
+            amrex::Print() << "[UCM][2.3][UCMDiagnostics::append] ERROR: One or more required fields is nullptr\n";
         }
         return;
     }
@@ -101,6 +108,7 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
     const int  comp  = 0;
     const bool local = false; // perform MPI reduction inside MultiFab::max/sum
 
+    // Phase 2.2 diagnostics
     amrex::Real T_roof_max   = fields.T_skin_roof->max(comp, 0, local);
     amrex::Real T_wall_max   = fields.T_skin_wall->max(comp, 0, local);
     amrex::Real T_road_max   = fields.T_skin_road->max(comp, 0, local);
@@ -109,18 +117,29 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
     amrex::Real H_sum        = fields.H_sensible->sum(comp, local);
     amrex::Real LE_max       = fields.LE_latent->max(comp, 0, local);
 
+    // Phase 2.3: Facet-split fluxes and AH (computed OUTSIDE IOProcessor guard)
+    amrex::Real H_road_max   = fields.H_road->max(comp, 0, local);
+    amrex::Real H_wall_max   = fields.H_wall->max(comp, 0, local);
+    amrex::Real H_roof_max   = fields.H_roof->max(comp, 0, local);
+    amrex::Real AH_max       = fields.AH->max(comp, 0, local);
+
     // Write to file on IO rank
     if (amrex::ParallelDescriptor::IOProcessor()) {
         write_row(nstep, time,
                   T_roof_max, T_wall_max, T_road_max,
-                  T_canyon_max, H_max, H_sum, LE_max);
+                  T_canyon_max, H_max, H_sum, LE_max,
+                  H_road_max, H_wall_max, H_roof_max, AH_max);
 
         // Debug trace
-        amrex::Print() << "[UCM][1.4][UCMDiagnostics::append]\n";
+        amrex::Print() << "[UCM][2.3][UCMDiagnostics::append]\n";
         amrex::Print() << "  step=" << nstep << " time=" << time << "\n";
         amrex::Print() << "  T_skin_roof_max=" << T_roof_max
                        << " T_canyon_max="     << T_canyon_max << "\n";
         amrex::Print() << "  H_sensible_max="  << H_max
                        << " H_sensible_sum="   << H_sum << "\n";
+        amrex::Print() << "  H_road_max=" << H_road_max
+                       << " H_wall_max=" << H_wall_max
+                       << " H_roof_max=" << H_roof_max
+                       << " AH_max=" << AH_max << "\n";
     }
 }

@@ -207,9 +207,46 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
     }
 
+    // Phase 2.3: Facet-split fluxes and anthropogenic heat
+    fields.H_road = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.3][allocate_ucm_fields] H_road: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.H_wall = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.3][allocate_ucm_fields] H_wall: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.H_roof = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.3][allocate_ucm_fields] H_roof: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.AH = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.3][allocate_ucm_fields] AH: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.plan_area_frac = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.3][allocate_ucm_fields] plan_area_frac: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.ah_profile_id = std::make_unique<iMultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.3][allocate_ucm_fields] ah_profile_id (iMultiFab): "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
     // Summary message
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
-        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 19 MultiFabs on UCM grid "
+        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 25 MultiFabs on UCM grid "
                 << "at lev=" << lev << "\n";
     }
 
@@ -263,6 +300,14 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.slab_L_road->setVal(0.0);
     fields.z0_ucm->setVal(0.0);
     fields.d_disp_ucm->setVal(0.0);
+
+    // Phase 2.3: zero out facet-split fluxes and anthropogenic heat
+    fields.H_road->setVal(0.0);
+    fields.H_wall->setVal(0.0);
+    fields.H_roof->setVal(0.0);
+    fields.AH->setVal(0.0);
+    fields.plan_area_frac->setVal(0.0);
+    fields.ah_profile_id->setVal(0);
 
     // Get const references to the broadcast data
     const auto& rows = building_reader.rows();
@@ -321,6 +366,10 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
             auto slab_L_roof_arr = fields.slab_L_roof->array(mfi);
             auto slab_L_wall_arr = fields.slab_L_wall->array(mfi);
             auto slab_L_road_arr = fields.slab_L_road->array(mfi);
+
+            // Phase 2.3: facet-split fluxes and anthropogenic heat
+            auto plan_area_frac_arr = fields.plan_area_frac->array(mfi);
+            auto ah_profile_id_arr = fields.ah_profile_id->array(mfi);
 
             // Loop over cells in this box
             for (int i_ucm = bx.smallEnd(0); i_ucm <= bx.bigEnd(0); ++i_ucm) {
@@ -385,6 +434,15 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                             slab_L_roof_arr(iv, 0) = 0.3;
                             slab_L_wall_arr(iv, 0) = 0.3;
                             slab_L_road_arr(iv, 0) = 0.3;
+                        }
+                        
+                        // Phase 2.3: populate plan_area_frac and ah_profile_id for urban cells
+                        if (row.is_urban == 1) {
+                            plan_area_frac_arr(iv, 0) = static_cast<amrex::Real>(row.plan_area_frac);
+                            ah_profile_id_arr(iv, 0) = row.ah_profile_id;
+                        } else {
+                            plan_area_frac_arr(iv, 0) = 0.0;
+                            ah_profile_id_arr(iv, 0) = 0;
                         }
                         
                         // Set initial temperatures
@@ -584,6 +642,38 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
                 << params.slab_L << " m\n";
     }
 
+    // Phase 2.3: Facet-split sensible heat and anthropogenic heat
+    fields.H_road->setVal(0.0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.3][fill_ucm_fields_homogeneous] H_road = 0.0 W/m^2\n";
+    }
+
+    fields.H_wall->setVal(0.0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.3][fill_ucm_fields_homogeneous] H_wall = 0.0 W/m^2\n";
+    }
+
+    fields.H_roof->setVal(0.0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.3][fill_ucm_fields_homogeneous] H_roof = 0.0 W/m^2\n";
+    }
+
+    fields.AH->setVal(0.0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.3][fill_ucm_fields_homogeneous] AH = 0.0 W/m^2\n";
+    }
+
+    fields.plan_area_frac->setVal(params.plan_area_frac_uniform);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.3][fill_ucm_fields_homogeneous] plan_area_frac = "
+                << params.plan_area_frac_uniform << "\n";
+    }
+
+    fields.ah_profile_id->setVal(0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.3][fill_ucm_fields_homogeneous] ah_profile_id = 0\n";
+    }
+
     // Note: z0 and d_disp are filled by fill_ucm_z0_and_disp, not here
 }
 
@@ -771,6 +861,42 @@ bool UCMFields::all_allocated() const
         }
         result = false;
     }
+    if (!H_road) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.3][all_allocated] MISSING: H_road\n";
+        }
+        result = false;
+    }
+    if (!H_wall) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.3][all_allocated] MISSING: H_wall\n";
+        }
+        result = false;
+    }
+    if (!H_roof) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.3][all_allocated] MISSING: H_roof\n";
+        }
+        result = false;
+    }
+    if (!AH) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.3][all_allocated] MISSING: AH\n";
+        }
+        result = false;
+    }
+    if (!plan_area_frac) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.3][all_allocated] MISSING: plan_area_frac\n";
+        }
+        result = false;
+    }
+    if (!ah_profile_id) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.3][all_allocated] MISSING: ah_profile_id\n";
+        }
+        result = false;
+    }
 
     return result;
 }
@@ -814,5 +940,44 @@ void fill_ucm_z0_and_disp(UCMFields& f,
                       << " max=" << z0_max
                       << " d_disp min=" << dd_min
                       << " max=" << dd_max << "\n";
+    }
+}
+
+void compute_anthropogenic_heat(amrex::MultiFab&        AH_out,
+                               const amrex::iMultiFab& ah_profile_id,
+                               const amrex::iMultiFab& is_urban,
+                               const UCMParams&        params,
+                               amrex::Real             time,
+                               int                     lev)
+{
+    const amrex::Real AH_const = params.AH_uniform_Wm2;
+    const amrex::Real AH_peak  = params.AH_daytime_peak;
+    const amrex::Real day_len  = 86400.0;
+    const amrex::Real phase    = 2.0 * M_PI * (time / day_len) - 0.5 * M_PI;
+    const amrex::Real diurnal  = std::max(0.0, std::cos(phase));
+
+    for (amrex::MFIter mfi(AH_out, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+       const amrex::Box& bx = mfi.tilebox();
+       auto       ah_a = AH_out.array(mfi);
+       auto const id_a = ah_profile_id.const_array(mfi);
+       auto const ur_a = is_urban.const_array(mfi);
+       amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+           if (ur_a(i,j,0) == 0) { 
+               ah_a(i,j,0) = 0.0; 
+               return; 
+           }
+           const int pid = id_a(i,j,0);
+           if      (pid == 1) ah_a(i,j,0) = AH_peak * diurnal;
+           else               ah_a(i,j,0) = AH_const;
+       });
+    }
+
+    if (params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+       amrex::Real ah_min = AH_out.min(0);
+       amrex::Real ah_max = AH_out.max(0);
+       amrex::Print() << "[UCM][2.3][compute_anthropogenic_heat] time=" << time
+                      << "s AH min=" << ah_min
+                      << " max=" << ah_max << " W/m^2"
+                      << " diurnal_factor=" << diurnal << "\n";
     }
 }

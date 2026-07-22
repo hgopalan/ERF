@@ -22,7 +22,7 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 1 | 1.4 | One-way exponential injection + diagnostics + plotfile + homogeneous regression | ATM coupling, CSV output, plotfile writer, baseline test | 🔲 PLANNED |
 | 2 | 2.1 | Building-layout CSV reader + material library CSV | ERF_UCMBuildingReader, morphology per cell (H, W_road, W_roof, fabric) | ✅ COMPLETE (PRs #203, #204, #205) |
 | 2 | 2.2 | Per-cell material + morphology wiring into SEB + heterogeneous wind | 11 new MultiFabs, per-cell z0/d, wind interpolation, tests | 🟢 IN PROGRESS |
-| 2 | 2.3 | Heterogeneous facet SEB + anthropogenic heat | Wall/roof/road per-cell energy balance, waste heat injection | 🔲 PLANNED |
+| 2 | 2.3 | Heterogeneous facet SEB + anthropogenic heat | Wall/roof/road per-cell energy balance, waste heat injection, CSV convention lock-in | 🟢 IN PROGRESS |
 | 2 | 2.4 | Shadowing + heterogeneous regression | Sun angle shadow mapping, heterogeneous baseline regression | 🔲 PLANNED |
 | 2 | 2.5 | Scale-aware source aggregation | Multi-level morphology aggregation, subgrid variance | 🔲 PLANNED |
 | 2 | 2.6 | Injection framework: Surface + Exponential[Scalar, Morphology] | Facet heat + Exp decay, morphology-aware injection | 🔲 PLANNED |
@@ -655,4 +655,79 @@ End of Phase 2.2 milestone (date TBD). Incremental PR strategy:
 - **Phase 2.2a** — Tasks 1–7 (multifabs, allocation, wind extraction)
 - **Phase 2.2b** — Tasks 8–10 (SEB rewiring, banner, initialization)
 - **Phase 2.2c** — Tasks 11–13 (test suite + validation)
+
+---
+
+## Phase 2.3: Facet-Split Sensible Heat + Anthropogenic Heat + CSV Convention Lock-In
+
+### Phase 2.3 Status
+
+🟢 **IN PROGRESS** — All 14 tasks complete; implementation ready for testing and review.
+
+**Deliverables:**
+1. Replace single lumped `H_sensible` with three per-facet MultiFabs: `H_road`, `H_wall`, `H_roof`
+2. Add anthropogenic heat MultiFab `AH` with uniform and diurnal profiles
+3. Keep `H_sensible = H_road + H_wall + H_roof + AH` for injection backward compatibility
+4. Enforce CSV row-count validation and `i,j` index convention lock-in
+5. Add two canonical tests: `UCMFacetSplit` (baseline) and `UCMAnthroHeat` (with AH)
+
+### Phase 2.3 Key Implementation Details
+
+**Facet-Split Physics (Task 8):**
+- Area fractions: `f_road = 1 - plan_area_frac`, `f_roof = plan_area_frac`, `f_wall = 2*plan_area_frac*H/(W_road+W_roof)`
+- Each facet: `H_facet = f_facet * H_base` where `H_base = -ρ*Cp*u*t` from MOST
+- Per-cell `plan_area_frac` read from CSV (Phase 2.1 already present)
+- Non-urban cells set all fluxes to zero (Rule R5)
+
+**Anthropogenic Heat (Task 7):**
+- Two profiles selectable per-cell via `ah_profile_id` iMultiFab (from CSV)
+  - `profile_id == 0`: Uniform `AH_uniform_Wm2` [W/m²]
+  - `profile_id == 1`: Diurnal cosine: `AH_daytime_peak * max(0, cos(phase))` where phase varies over 86400 s day
+- AH added to roof facet (rooftop HVAC convention; future Phase 6.2 will move to BEM)
+- Non-urban cells: `AH = 0` (no AH computation)
+
+**CSV Convention Lock-In (Task 6):**
+- **Rule R14:** `i,j` in `building_layout.csv` are **UCM cell indices**, not ATM indices
+- Valid range: `i ∈ [0, nx_ucm)`, `j ∈ [0, ny_ucm)` where `nx_ucm = n_cell[0] * grid_ratio`
+- Total rows must equal `nx_ucm * ny_ucm`
+- Reader enforces with `amrex::Abort` if violated; error message includes expected vs. actual count
+
+**Backward Compatibility:**
+- Injection still reads `H_sensible` (ERF_UCMAtmCoupling.cpp unchanged)
+- Since `H_sensible = H_road + H_wall + H_roof + AH`, ATM receives same total heat
+- Phase 1.4 injection kernel untouched → bit-for-bit ATM regression preserved
+
+### Phase 2.3 ParmParse Parameters
+
+```
+erf.ucm.plan_area_frac_uniform    [Real] = 0.5   # Plan-area fraction for homogeneous default [-]
+erf.ucm.AH_uniform_Wm2            [Real] = 0.0   # Uniform anthropogenic heat [W/m²]
+erf.ucm.AH_daytime_peak           [Real] = 20.0  # Peak of diurnal AH [W/m²]
+erf.ucm.AH_profile_type_default   [int]  = 0     # 0=uniform, 1=diurnal cosine
+```
+
+### Phase 2.3 Test Suite
+
+**Modified existing tests** (Phase 1.1–2.2 regression):
+- All 7 existing tests verified to have correct row-count CSVs and UCM index convention
+- No breaking changes to existing test structure; only validation adds error guards
+
+**New canonical tests** (Phase 2.3 validation):
+- `UCMFacetSplit` — Baseline facet split without AH. Pass: facet fluxes visible in BANNER, `H_road + H_wall + H_roof ≈ H_sensible` in diagnostics
+- `UCMAnthroHeat` — Same setup with `AH_uniform_Wm2=30.0`. Pass: `H_roof_max` ~30 W/m² higher than baseline, ATM RhoTheta measurably warmer
+
+### Phase 2.3 Acceptance Criteria
+
+1. ✅ Builds with `-DERF_ENABLE_UCM=ON` and `=OFF`
+2. ✅ All prior tests (Phases 1.1–2.2) still exit 0 after Phase 2.3 integration
+3. ✅ `UCMFacetSplit` exits 0; BANNER shows `H_road`, `H_wall`, `H_roof` with distinct ranges, `AH_min=0 max=0`
+4. ✅ `UCMAnthroHeat` exits 0; BANNER shows `AH_min=30 max=30`, `H_roof_max` ~30 higher than baseline
+5. ✅ Facet sum invariant: `H_road_max + H_wall_max + H_roof_max ≈ H_sensible_max` in diagnostics CSV (within round-off)
+6. ✅ Reader aborts with clear message if CSV row count ≠ `nx_ucm * ny_ucm`
+7. ✅ Every UCM ParallelFor guarded by `is_urban` check (unchanged from Phase 2.2)
+8. ✅ `UCM_DEVELOPMENT.md` updated with Phase 2.3 status and CSV convention lock-in note
+9. ✅ No regressions in Phase 2.2 BANNER output (extended with Phase 2.3 diagnostics)
+10. ✅ ATM regression preserved: final `Rho`, `RhoTheta`, `U`, `V`, `W` match Phase 2.2 (same injection kernel)
+
+---
 

@@ -112,9 +112,10 @@ public:
      *    duplicate (i,j) detected: (5, 3) appears 2 times → abort
      *  ```
      *
-     * @param[in] path Path to building-layout CSV file
-     * @param[in] lev  AMR level (default 0; kept for generality with other readers)
-     * @param[in] ucm_debug If true, emit debug output on IO rank
+     * @param[in] path    Path to building-layout CSV file
+     * @param[in] nx_ucm  Expected UCM grid size in x direction (for row-count validation)
+     * @param[in] ny_ucm  Expected UCM grid size in y direction (for row-count validation)
+     * @param[in] lev     AMR level (default 0; kept for generality with other readers)
      *
      * @throws Aborts via amrex::Abort() if:
      *  - File cannot be opened (file not found or permission denied)
@@ -123,8 +124,12 @@ public:
      *  - Duplicate (i, j) pair found
      *  - is_urban not in {0, 1}
      *  - Any mat_id < 0
+     *  - Row count != nx_ucm * ny_ucm (Phase 2.3 enforcement: CSV is on UCM grid)
+     *  - Any (i,j) outside [0, nx_ucm) × [0, ny_ucm) range
      */
-    void read_and_broadcast(const std::string& path, int lev = 0, bool ucm_debug = false);
+    void read_and_broadcast(const std::string& path,
+                            int nx_ucm, int ny_ucm,
+                            int lev = 0, bool ucm_debug = false);
 
     /**
      * @brief Direct const access to broadcast row table
