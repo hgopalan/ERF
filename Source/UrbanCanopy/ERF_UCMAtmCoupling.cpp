@@ -225,7 +225,9 @@ void apply_ucm_tendency_to_cc_source(
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
         {
             // Guard: skip non-urban cells
-            if (urban_a(i, j, 0) == 0) return;
+//            if (urban_a(i, j, 0) == 0) return;
+
+            if (h_a(i, j, 0) == 0.0) return;
 
             // Height-above-surface
             const amrex::Real z_sfc = z_a(i, j, klo);
