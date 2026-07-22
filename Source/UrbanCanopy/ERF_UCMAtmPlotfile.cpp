@@ -62,8 +62,33 @@ void UCMAtmPlotfile::write(int                       step,
 
     std::string plotfile_name = get_plotfile_name(step);
 
-    // Create a temporary MultiFab to hold all 6 components on the ATM grid
-    amrex::MultiFab atm_plot(f_urb_atm.boxArray(), f_urb_atm.DistributionMap(), 6, 0);
+    // Extract 2D slab (k=klo only) from the 3D ATM geometry/MFs
+    const int klo = geom.Domain().smallEnd(2);
+    
+    // Build slab domain: same x,y extent, z limited to klo only
+    Box slab_domain = geom.Domain();
+    slab_domain.setSmall(2, klo);
+    slab_domain.setBig(2, klo);
+
+    // Build slab BoxArray by restricting each input box to k=klo
+    BoxArray slab_ba = f_urb_atm.boxArray();
+    BoxList bl;
+    for (int i = 0; i < slab_ba.size(); ++i) {
+        Box b = slab_ba[i];
+        b.setSmall(2, klo);
+        b.setBig(2, klo);
+        bl.push_back(b);
+    }
+    slab_ba = BoxArray(std::move(bl));
+
+    // Build slab Geometry: same x,y extent as ATM, z limited to one cell
+    Real dz = geom.CellSize(2);
+    RealBox slab_rb({geom.ProbLo(0), geom.ProbLo(1), geom.ProbLo(2) + klo*dz},
+                    {geom.ProbHi(0), geom.ProbHi(1), geom.ProbLo(2) + (klo+1)*dz});
+    Geometry slab_geom(slab_domain, slab_rb, geom.Coord(), geom.isPeriodic());
+
+    // Build 6-component slab MultiFab and copy each input
+    MultiFab slab_mf(slab_ba, f_urb_atm.DistributionMap(), 6, 0);
 
     // Component numbering
     static const int comp_f_urb = 0;
@@ -74,12 +99,12 @@ void UCMAtmPlotfile::write(int                       step,
     static const int comp_H_atm = 5;
 
     // Copy fields into components
-    MultiFab::Copy(atm_plot, f_urb_atm,        0, comp_f_urb,        1, 0);
-    MultiFab::Copy(atm_plot, H_bldg_mean_atm,  0, comp_H_bldg_mean,  1, 0);
-    MultiFab::Copy(atm_plot, H_bldg_std_atm,   0, comp_H_bldg_std,   1, 0);
-    MultiFab::Copy(atm_plot, lambda_p_atm,     0, comp_lambda_p,     1, 0);
-    MultiFab::Copy(atm_plot, lambda_f_atm,     0, comp_lambda_f,     1, 0);
-    MultiFab::Copy(atm_plot, H_atm,            0, comp_H_atm,        1, 0);
+    MultiFab::Copy(slab_mf, f_urb_atm,        0, comp_f_urb,        1, 0);
+    MultiFab::Copy(slab_mf, H_bldg_mean_atm,  0, comp_H_bldg_mean,  1, 0);
+    MultiFab::Copy(slab_mf, H_bldg_std_atm,   0, comp_H_bldg_std,   1, 0);
+    MultiFab::Copy(slab_mf, lambda_p_atm,     0, comp_lambda_p,     1, 0);
+    MultiFab::Copy(slab_mf, lambda_f_atm,     0, comp_lambda_f,     1, 0);
+    MultiFab::Copy(slab_mf, H_atm,            0, comp_H_atm,        1, 0);
 
     // Build component names vector
     Vector<std::string> varnames(6);
@@ -90,19 +115,19 @@ void UCMAtmPlotfile::write(int                       step,
     varnames[comp_lambda_f]     = "lambda_f";
     varnames[comp_H_atm]        = "H_atm";
 
-    // Write plotfile using WriteSingleLevelPlotfile (handles directory, Header, Level_0/)
-    amrex::WriteSingleLevelPlotfile(plotfile_name,
-                                    atm_plot,
-                                    varnames,
-                                    geom,
-                                    time,
-                                    step);
+    // Write plotfile using WriteSingleLevelPlotfile with slab geometry
+    WriteSingleLevelPlotfile(plotfile_name,
+                             slab_mf,
+                             varnames,
+                             slab_geom,
+                             time,
+                             step);
 
     // Debug trace
     if (ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][2.5-followup][UCMAtmPlotfile::write]\n";
         Print() << "  step=" << step << " time=" << time << " s\n";
-        Print() << "  plotfile: " << plotfile_name << "/  (directory)\n";
+        Print() << "  plotfile: " << plotfile_name << "/  (directory, 2D slab nz=1)\n";
         Print() << "  ncomp=6 (f_urb, H_bldg_mean, H_bldg_std, lambda_p, lambda_f, H_atm)\n";
     }
 }
