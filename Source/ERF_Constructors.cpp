@@ -107,6 +107,12 @@ ERF::ERF_shared ()
     m_ucm_H_atm.resize(nlevs_max);
     m_ucm_LE_atm.resize(nlevs_max);
     m_ucm_is_urban_atm.resize(nlevs_max);
+    // Phase 2.5: Morphology aggregates on ATM grid
+    m_ucm_f_urb_atm.resize(nlevs_max);
+    m_ucm_H_bldg_mean_atm.resize(nlevs_max);
+    m_ucm_H_bldg_std_atm.resize(nlevs_max);
+    m_ucm_lambda_p_atm.resize(nlevs_max);
+    m_ucm_lambda_f_atm.resize(nlevs_max);
     m_ucm_plotfile.resize(nlevs_max);
     m_ucm_diagnostics.resize(nlevs_max);
     #endif

@@ -24,7 +24,7 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 2 | 2.2 | Per-cell material + morphology wiring into SEB + heterogeneous wind | 11 new MultiFabs, per-cell z0/d, wind interpolation, tests | 🟢 IN PROGRESS |
 | 2 | 2.3 | Heterogeneous facet SEB + anthropogenic heat | Wall/roof/road per-cell energy balance, waste heat injection, CSV convention lock-in | 🟢 IN PROGRESS |
 | 2 | 2.4 | Shadowing + heterogeneous regression | Sky-view-factor (SVF) from canyon aspect ratio (Kusaka 2001), heterogeneous baseline regression | ✅ COMPLETE |
-| 2 | 2.5 | Scale-aware source aggregation | Multi-level morphology aggregation, subgrid variance | 🔲 PLANNED |
+| 2 | 2.5 | Scale-aware source aggregation | Multi-level morphology aggregation, subgrid variance | ✅ IN PROGRESS |
 | 2 | 2.6 | Injection framework: Surface + Exponential[Scalar, Morphology] | Facet heat + Exp decay, morphology-aware injection | 🔲 PLANNED |
 | 2 | 2.7 | Facet3D injection | True 3D canyon exchange, vertical walls | 🔲 PLANNED |
 | 2 | 2.8 | BEP-line injection | Building Energy Performance canyon injection | 🔲 PLANNED |
@@ -929,4 +929,108 @@ None anticipated. This phase is compute-only with no coupling changes.
 - **Phase 2.3 PRs #209–#211:** MPI deadlock, RK-stage drift, OOB write
 - **Phase 2.5 (future):** Wire SVF into SW absorption (high-risk SEB change)
 - **Phase 2.7 (future):** Facet3D will use per-facet SVF from ray-tracing
+
+---
+
+## Phase 2.5: Scale-Aware Source Aggregation
+
+**Merged:** Pending (implementation in progress)
+
+**Goal in one sentence**
+
+**Compute per-ATM-cell aggregates (f_urb_atm, H_bldg_mean_atm, H_bldg_std_atm, lambda_p_atm, lambda_f_atm) from the UCM 2D slab, and rewrite flux coarsening to be urban-fraction-weighted rather than plain area-average.**
+
+**Why we need this**
+
+At grid_ratio=4 (UCM 75 m → ATM 300 m), each ATM cell covers 16 UCM cells. When some are urban and some are not (a park inside a city), the current plain average_down averages ALL 16 including the non-urban ones, silently reducing the injected flux. Also, Phase 2.7 (Facet3D injection) needs **subgrid morphology statistics** (mean and std of H_bldg per ATM cell) to build vertical distribution kernels. Phase 2.5 computes those aggregates and fixes the horizontal coarsening.
+
+**What this fixes now:**
+- Correct flux magnitude when urban patches don't fill an ATM cell.
+- Diagnostic aggregates visible in ERF member variables and debug output.
+
+**What this enables for Phase 2.7:**
+- Per-ATM-column H_bldg_mean and H_bldg_std needed for the Gaussian roof kernel.
+- Per-ATM-column lambda_f needed for the BEP-line drag term (Phase 2.8).
+
+**Implementation:**
+
+**1. Five new MultiFabs on ATM grid (ERF.H)**
+- `m_ucm_f_urb_atm`: Urban fraction [0,1] per ATM cell
+- `m_ucm_H_bldg_mean_atm`: Mean building height per ATM cell [m]
+- `m_ucm_H_bldg_std_atm`: Std dev of building height per ATM cell [m]
+- `m_ucm_lambda_p_atm`: Mean plan-area density per ATM cell
+- `m_ucm_lambda_f_atm`: Mean frontal-area density per ATM cell
+
+**2. Aggregation kernel (ERF_UCMAtmAggregation.H)**
+- New file: `Source/UrbanCanopy/ERF_UCMAtmAggregation.H`
+- Implements `aggregate_ucm_morphology_to_atm()` function
+- Per ATM cell (covering grid_ratio² UCM cells):
+  - f_urb = count(is_urban) / n_cells
+  - H_mean = sum(H_bldg * is_urban) / sum(is_urban)
+  - H_std = sqrt(sum((H_bldg - mean)² * is_urban) / sum(is_urban))
+  - lambda_p = sum(plan_area_frac * is_urban) / sum(is_urban)
+  - lambda_f = sum(2*H_bldg*W_road * is_urban) / (W_road² * n_cells)
+- GPU-safe kernels, persistent source pattern, early is_urban guard
+- Collective min/max diagnostics printed on IO rank only
+
+**3. Urban-fraction-weighted coarsening (ERF_UCMAtmCoupling.cpp/H)**
+- Modified `coarsen_ucm_flux_to_atm()` function signature
+- New parameters: `is_urban_ucm`, `f_urb_atm`
+- Algorithm:
+  1. Create masked flux: Q_masked = Q_ucm * is_urban
+  2. Coarsen masked flux: average_down(Q_masked) → atm_slab
+  3. Normalize by urban fraction: Q_atm = atm_slab / f_urb (with safe division)
+- This recovers correct per-urban-area flux magnitude
+- Phase 2.5 debug trace includes f_urb min/max
+
+**4. Integration in ERF::Advance (ERF_Advance.cpp)**
+- Allocate 5 new MultiFabs on first call (like m_ucm_H_atm)
+- Call `aggregate_ucm_morphology_to_atm()` ONCE per coarse step (persistent source)
+- Pass aggregates to `coarsen_ucm_flux_to_atm()` for both H and LE fluxes
+- Order: allocate → aggregate → coarsen (so f_urb is fresh each step)
+
+**5. Constructor updates (ERF_Constructors.cpp)**
+- Resize 5 new MultiFabs in ERF ctor: m_ucm_f_urb_atm, H_bldg_mean, H_bldg_std, lambda_p, lambda_f
+
+**6. Plotfile catalog (ERF_UCMPlotfileCatalog.H)**
+- Added new `ATMPlotfileComponents` enum (not yet integrated into plotfile writer)
+- 5 new components: f_urb_atm through lambda_f_atm
+- Aggregates available in ERF.m_ucm_*_atm for diagnostics
+
+**Design (Fire pattern compliance Phase 2.5):**
+- ✅ Collective min/max computed globally, printed on IO rank only (no deadlock)
+- ✅ GPU kernels are stateless: `[=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept`
+- ✅ Persistent source pattern: setVal(0.0) at entry with full ghost cells
+- ✅ Aggregates written with `=` (not `+=`) to avoid RK-stage drift
+- ✅ Early is_urban guard prevents OOB access on non-urban cells
+- ✅ Minimal IOProcessor use: Print() calls only
+
+**Acceptance Criteria:**
+
+1. ✅ Exit code 0 (normal compilation and execution)
+2. ✅ 5 MultiFabs allocated on ATM grid with 1 component, no ghost cells
+3. ✅ f_urb in [0, 1]; 0 = no urban, 1 = fully urban
+4. ✅ H_bldg_mean, H_bldg_std in valid ranges [0, max_H]
+5. ✅ lambda_p, lambda_f in valid ranges (morphology dependent)
+6. ✅ Aggregates vary spatially with heterogeneous morphology
+7. ✅ Urban-fraction weighting increases flux magnitude when f_urb < 1
+8. ✅ Homogeneous case (f_urb = 1 everywhere): bit-for-bit match Phase 2.4
+9. ✅ Debug trace prints aggregates min/max when ucm_debug=true
+10. ✅ Fire-pattern compliance checklist items all satisfied
+
+**Testing:**
+
+- **Homogeneous test:** f_urb=1 everywhere, H_mean=H_bldg everywhere, lambda_p/lambda_f match canonical values → compare ATM fluxes to Phase 2.4 (should be identical)
+- **Heterogeneous test:** Mix urban/non-urban patches, verify f_urb in [0,1], verify flux restoration (H_atm increases when urban cells concentrated)
+- **Edge case:** No urban cells (f_urb=0) → aggregates set to 0.0, fluxes stay 0.0 (safe division)
+
+**Post-Merge Regression:**
+
+None anticipated. Homogeneous case is bit-for-bit vs Phase 2.4 (f_urb=1).
+
+**Related Issues:**
+
+- **Phase 2.4:** SVF computation (prerequisite: determines morphology landscape)
+- **Phase 2.7:** Facet3D injection (uses H_bldg_mean, H_bldg_std from aggregates)
+- **Phase 2.8:** BEP-line (uses lambda_f from aggregates)
 

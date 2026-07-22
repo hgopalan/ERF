@@ -56,22 +56,72 @@ void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
                        int                    klo_atm);
 
 /**
- * @brief Coarsen UCM fluxes to ATM grid.
+ * @brief Compute per-ATM-cell morphology aggregates from UCM 2D slab (Phase 2.5).
+ *
+ * For each ATM cell (covering grid_ratio² UCM cells), aggregates:
+ * - Urban fraction (count of urban cells / total)
+ * - Mean building height (area-weighted average over urban cells)
+ * - Std dev of building height (variance over urban cells)
+ * - Mean plan-area density (building footprint ratio)
+ * - Mean frontal-area density (wall area ratio)
+ *
+ * @param[out] f_urb_atm             Urban fraction per ATM cell [0,1]
+ * @param[out] H_bldg_mean_atm       Mean building height per ATM cell [m]
+ * @param[out] H_bldg_std_atm        Std dev of building height per ATM cell [m]
+ * @param[out] lambda_p_atm          Mean plan-area density per ATM cell [-]
+ * @param[out] lambda_f_atm          Mean frontal-area density per ATM cell [-]
+ * @param[in]  H_bldg_ucm            Building height on UCM grid [m]
+ * @param[in]  W_road_ucm            Road width on UCM grid [m]
+ * @param[in]  plan_area_frac_ucm    Plan-area density on UCM grid
+ * @param[in]  is_urban_ucm          Urban mask on UCM grid (1 = urban, 0 = non-urban)
+ * @param[in]  geom_ucm              UCM geometry
+ * @param[in]  geom_atm              ATM geometry
+ * @param[in]  grid_ratio            Refinement factor (UCM vs ATM); typically 2 or 1
+ * @param[in]  ucm_debug             Print debug info (default false)
+ * @param[in]  lev                   AMR level (default 0)
+ */
+void aggregate_ucm_morphology_to_atm(
+    amrex::MultiFab&           f_urb_atm,
+    amrex::MultiFab&           H_bldg_mean_atm,
+    amrex::MultiFab&           H_bldg_std_atm,
+    amrex::MultiFab&           lambda_p_atm,
+    amrex::MultiFab&           lambda_f_atm,
+    const amrex::MultiFab&     H_bldg_ucm,
+    const amrex::MultiFab&     W_road_ucm,
+    const amrex::MultiFab&     plan_area_frac_ucm,
+    const amrex::iMultiFab&    is_urban_ucm,
+    const amrex::Geometry&     geom_ucm,
+    const amrex::Geometry&     geom_atm,
+    int                        grid_ratio,
+    bool                       ucm_debug = false,
+    int                        lev = 0);
+
+/**
+ * @brief Coarsen UCM fluxes to ATM grid with urban-fraction weighting (Phase 2.5).
  *
  * When grid_ratio == 1, performs a direct copy. When grid_ratio > 1, uses
  * `amrex::average_down` with refinement vector (grid_ratio, grid_ratio, 1) to
  * spatially average the finer UCM flux to the coarser ATM grid (matching Dust pattern).
  *
+ * **Phase 2.5 Enhancement: Urban-fraction-weighted coarsening**
+ * Instead of a plain area-average (which dilutes flux when urban fraction < 1),
+ * this function multiplies UCM flux by is_urban mask before coarsening, then
+ * normalizes by the coarsened urban fraction (f_urb_atm). This ensures correct
+ * flux magnitude when urban patches don't fill an ATM cell.
+ *
  * **Debug trace format (IO rank only):**
  * ```
- * [UCM][1.4][coarsen_ucm_flux_to_atm]
+ * [UCM][2.5][coarsen_ucm_flux_to_atm]
  *   grid_ratio={ratio}
  *   before: Q_ucm min={min_ucm} max={max_ucm}
  *   after:  Q_atm min={min_atm} max={max_atm}
+ *   f_urb: min={min_f} max={max_f}
  * ```
  *
  * @param[out] Q_atm_out      Output coarsened flux on ATM grid (ncomp=1)
  * @param[in]  Q_ucm          Input flux on UCM grid (ncomp=1): H_sensible or LE_latent [W/m²]
+ * @param[in]  is_urban_ucm   Urban mask on UCM grid (0 or 1); used for weighting
+ * @param[in]  f_urb_atm      Urban fraction on ATM grid (pre-computed by aggregate_ucm_morphology_to_atm)
  * @param[in]  geom_ucm       UCM geometry
  * @param[in]  geom_atm       ATM geometry
  * @param[in]  grid_ratio     Refinement factor (UCM vs ATM); typically 2 or 1
@@ -79,14 +129,17 @@ void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
  *
  * @note All ParallelFor kernels respect is_urban mask and GPU-safe (noexcept).
  * @note Ghost cells are properly handled by average_down.
+ * @note When f_urb = 0 (no urban cells), Q_atm is set to 0.0 (safe division).
  */
 void coarsen_ucm_flux_to_atm(
-    amrex::MultiFab&       Q_atm_out,
-    const amrex::MultiFab& Q_ucm,
-    const amrex::Geometry& geom_ucm,
-    const amrex::Geometry& geom_atm,
-    int                    grid_ratio,
-    int                    lev = 0);
+    amrex::MultiFab&           Q_atm_out,
+    const amrex::MultiFab&     Q_ucm,
+    const amrex::iMultiFab&    is_urban_ucm,
+    const amrex::MultiFab&     f_urb_atm,
+    const amrex::Geometry&     geom_ucm,
+    const amrex::Geometry&     geom_atm,
+    int                        grid_ratio,
+    int                        lev = 0);
 
 /**
  * @brief Apply exponential-decay vertical tendency to cc_source.

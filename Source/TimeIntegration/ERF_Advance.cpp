@@ -319,12 +319,52 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             m_ucm_LE_atm[lev]->setVal(0.0);
         }
 
+        // Phase 2.5: Allocate morphology aggregates on ATM grid (first call)
+        if (!m_ucm_f_urb_atm[lev]) {
+            m_ucm_f_urb_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_f_urb_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_H_bldg_mean_atm[lev]) {
+            m_ucm_H_bldg_mean_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_H_bldg_mean_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_H_bldg_std_atm[lev]) {
+            m_ucm_H_bldg_std_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_H_bldg_std_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_lambda_p_atm[lev]) {
+            m_ucm_lambda_p_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_lambda_p_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_lambda_f_atm[lev]) {
+            m_ucm_lambda_f_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_lambda_f_atm[lev]->setVal(0.0);
+        }
+
+        // Phase 2.5: Compute morphology aggregates from UCM grid to ATM grid
+        aggregate_ucm_morphology_to_atm(
+            *m_ucm_f_urb_atm[lev],
+            *m_ucm_H_bldg_mean_atm[lev],
+            *m_ucm_H_bldg_std_atm[lev],
+            *m_ucm_lambda_p_atm[lev],
+            *m_ucm_lambda_f_atm[lev],
+            *m_ucm_fields[lev]->H_bldg,
+            *m_ucm_fields[lev]->W_road,
+            *m_ucm_fields[lev]->plan_area_frac,
+            *m_ucm_fields[lev]->is_urban,
+            m_ucm_grid[lev]->geom, Geom(lev),
+            m_ucm_params.grid_ratio,
+            m_ucm_params.ucm_debug, lev);
+
         // Coarsen UCM fluxes from UCM grid to ATM grid (lagged; constant across RK stages)
+        // Phase 2.5: Use urban-fraction-weighted coarsening
         coarsen_ucm_flux_to_atm(*m_ucm_H_atm[lev], *m_ucm_fields[lev]->H_sensible,
+                                *m_ucm_fields[lev]->is_urban, *m_ucm_f_urb_atm[lev],
                                 m_ucm_grid[lev]->geom, Geom(lev),
                                 m_ucm_params.grid_ratio, lev);
         if (solverChoice.moisture_type != MoistureType::None && m_ucm_fields[lev]->LE_latent) {
             coarsen_ucm_flux_to_atm(*m_ucm_LE_atm[lev], *m_ucm_fields[lev]->LE_latent,
+                                    *m_ucm_fields[lev]->is_urban, *m_ucm_f_urb_atm[lev],
                                     m_ucm_grid[lev]->geom, Geom(lev),
                                     m_ucm_params.grid_ratio, lev);
         }

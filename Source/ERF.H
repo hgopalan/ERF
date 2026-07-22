@@ -1016,6 +1016,12 @@ private:
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_atm;         // Coarsened sensible flux on ATM grid
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_LE_atm;        // Coarsened latent flux on ATM grid
     amrex::Vector<std::unique_ptr<amrex::iMultiFab>> m_ucm_is_urban_atm; // Coarsened is_urban mask on ATM grid
+    // Phase 2.5: morphology aggregates on ATM grid for scale-aware source aggregation
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_f_urb_atm;         // Urban fraction per ATM cell [0,1]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_bldg_mean_atm;   // Mean building height per ATM cell [m]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_bldg_std_atm;    // Std dev of building height per ATM cell [m]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_lambda_p_atm;      // Mean plan-area density per ATM cell [-]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_lambda_f_atm;      // Mean frontal-area density per ATM cell [-]
     amrex::Vector<std::unique_ptr<UCMPlotfile>> m_ucm_plotfile;
     amrex::Vector<std::unique_ptr<UCMDiagnostics>> m_ucm_diagnostics;
     #endif
