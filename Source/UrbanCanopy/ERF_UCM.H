@@ -107,6 +107,10 @@
 #include <UrbanCanopy/ERF_UCMPlotfile.H>
 #include <UrbanCanopy/ERF_UCMDiagnostics.H>
 
+// Phase 2.1: CSV readers for heterogeneous inputs
+#include <UrbanCanopy/ERF_UCMBuildingLayoutReader.H>
+#include <UrbanCanopy/ERF_UCMMaterialRegistry.H>
+
 // Forward declarations for future phases
 // class UCMAtmCoupling;
 // class UCMPlotfile;

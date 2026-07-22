@@ -122,9 +122,27 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
     }
 
+    fields.mat_id_roof = std::make_unique<iMultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.1][allocate_ucm_fields] mat_id_roof (iMultiFab): "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.mat_id_wall = std::make_unique<iMultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.1][allocate_ucm_fields] mat_id_wall (iMultiFab): "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.mat_id_road = std::make_unique<iMultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.1][allocate_ucm_fields] mat_id_road (iMultiFab): "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
     // Summary message
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
-        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 16 MultiFabs on UCM grid "
+        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 19 MultiFabs on UCM grid "
                 << "at lev=" << lev << "\n";
     }
 
@@ -238,6 +256,22 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
         Print() << "[UCM][1.2][fill_ucm_fields_homogeneous] is_urban = 1 everywhere "
                 << "on UCM grid at lev=" << lev << "\n";
     }
+
+    // Fill material ID fields (Phase 2.1: default to 0; CSV fill Phase 2.1+ will override)
+    fields.mat_id_roof->setVal(0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.1][fill_ucm_fields_homogeneous] mat_id_roof = 0 (default)\n";
+    }
+
+    fields.mat_id_wall->setVal(0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.1][fill_ucm_fields_homogeneous] mat_id_wall = 0 (default)\n";
+    }
+
+    fields.mat_id_road->setVal(0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.1][fill_ucm_fields_homogeneous] mat_id_road = 0 (default)\n";
+    }
 }
 
 bool UCMFields::all_allocated() const
@@ -337,6 +371,24 @@ bool UCMFields::all_allocated() const
     if (!is_urban) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][1.2][all_allocated] MISSING: is_urban\n";
+        }
+        result = false;
+    }
+    if (!mat_id_roof) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.1][all_allocated] MISSING: mat_id_roof\n";
+        }
+        result = false;
+    }
+    if (!mat_id_wall) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.1][all_allocated] MISSING: mat_id_wall\n";
+        }
+        result = false;
+    }
+    if (!mat_id_road) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.1][all_allocated] MISSING: mat_id_road\n";
         }
         result = false;
     }
