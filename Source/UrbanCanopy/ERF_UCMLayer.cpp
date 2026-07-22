@@ -86,32 +86,33 @@ void UCMLayer::advance(UCMFields& fields,
 
     // Phase 2.2: One-time banner to verify per-cell wiring
     static bool banner_printed = false;
-    if (!banner_printed && m_params.ucm_debug &&
-        amrex::ParallelDescriptor::IOProcessor()) {
+    if (!banner_printed && m_params.ucm_debug) {
         banner_printed = true;
-        // Collectives before IOProcessor guard
-        amrex::Real H_min = fields.H_bldg->min(0);
-        amrex::Real H_max = fields.H_bldg->max(0);
-        amrex::Real alb_min = fields.albedo_roof->min(0);
-        amrex::Real alb_max = fields.albedo_roof->max(0);
-        amrex::Real k_min = fields.k_therm_roof->min(0);
-        amrex::Real k_max = fields.k_therm_roof->max(0);
-        amrex::Real z0_min = fields.z0_ucm->min(0);
-        amrex::Real z0_max = fields.z0_ucm->max(0);
-        amrex::Real d_min = fields.d_disp_ucm->min(0);
-        amrex::Real d_max = fields.d_disp_ucm->max(0);
-         
-        amrex::Print() << "\n[UCM][2.2][BANNER] Phase 2.2 per-cell wiring active:\n"
-                       << "  H_bldg      min=" << H_min
-                       << " max=" << H_max << " m\n"
-                       << "  albedo_roof min=" << alb_min
-                       << " max=" << alb_max << "\n"
-                       << "  k_therm_roof min=" << k_min
-                       << " max=" << k_max << " W/m/K\n"
-                       << "  z0          min=" << z0_min
-                       << " max=" << z0_max << " m\n"
-                       << "  d_disp      min=" << d_min
-                       << " max=" << d_max << " m\n\n";
+        // Collectives on ALL ranks (must be outside IOProcessor guard)
+        amrex::Real H_min = fields.H_bldg->min(0, 0);
+        amrex::Real H_max = fields.H_bldg->max(0, 0);
+        amrex::Real alb_min = fields.albedo_roof->min(0, 0);
+        amrex::Real alb_max = fields.albedo_roof->max(0, 0);
+        amrex::Real k_min = fields.k_therm_roof->min(0, 0);
+        amrex::Real k_max = fields.k_therm_roof->max(0, 0);
+        amrex::Real z0_min = fields.z0_ucm->min(0, 0);
+        amrex::Real z0_max = fields.z0_ucm->max(0, 0);
+        amrex::Real d_min = fields.d_disp_ucm->min(0, 0);
+        amrex::Real d_max = fields.d_disp_ucm->max(0, 0);
+
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "\n[UCM][2.2][BANNER] Phase 2.2 per-cell wiring active:\n"
+                           << "  H_bldg      min=" << H_min
+                           << " max=" << H_max << " m\n"
+                           << "  albedo_roof min=" << alb_min
+                           << " max=" << alb_max << "\n"
+                           << "  k_therm_roof min=" << k_min
+                           << " max=" << k_max << " W/m/K\n"
+                           << "  z0          min=" << z0_min
+                           << " max=" << z0_max << " m\n"
+                           << "  d_disp      min=" << d_min
+                           << " max=" << d_max << " m\n\n";
+        }
     }
 
     // ========================================================================
@@ -274,41 +275,42 @@ void UCMLayer::advance(UCMFields& fields,
 
     // Phase 2.3: One-time extended BANNER for facet-split fields
     static bool banner_23_printed = false;
-    if (!banner_23_printed && m_params.ucm_debug &&
-        amrex::ParallelDescriptor::IOProcessor()) {
+    if (!banner_23_printed && m_params.ucm_debug) {
         banner_23_printed = true;
-        // Collectives before IOProcessor guard
-        amrex::Real plan_min = fields.plan_area_frac->min(0);
-        amrex::Real plan_max = fields.plan_area_frac->max(0);
-        amrex::Real hr_min = fields.H_road->min(0);
-        amrex::Real hr_max = fields.H_road->max(0);
-        amrex::Real hw_min = fields.H_wall->min(0);
-        amrex::Real hw_max = fields.H_wall->max(0);
-        amrex::Real hf_min = fields.H_roof->min(0);
-        amrex::Real hf_max = fields.H_roof->max(0);
-        amrex::Real ah_min = fields.AH->min(0);
-        amrex::Real ah_max = fields.AH->max(0);
-        
-        amrex::Print() << "\n[UCM][2.3][BANNER] Phase 2.3 facet-split fluxes and AH active:\n"
-                       << "  plan_area_frac min=" << plan_min
-                       << " max=" << plan_max << "\n"
-                       << "  H_road min="  << hr_min
-                       << " max="     << hr_max << " W/m^2\n"
-                       << "  H_wall min="  << hw_min
-                       << " max="     << hw_max << " W/m^2\n"
-                       << "  H_roof min="  << hf_min
-                       << " max="     << hf_max << " W/m^2\n"
-                       << "  AH min="      << ah_min
-                       << " max="     << ah_max << " W/m^2\n"
-                       << "  H_sum (=H_road+H_wall+H_roof+AH) matches H_sensible? "
-                       << "check by (H_sensible.max - (H_road.max+H_wall.max+H_roof.max)) below\n\n";
+        // Collectives on ALL ranks (must be outside IOProcessor guard)
+        amrex::Real plan_min = fields.plan_area_frac->min(0, 0);
+        amrex::Real plan_max = fields.plan_area_frac->max(0, 0);
+        amrex::Real hr_min = fields.H_road->min(0, 0);
+        amrex::Real hr_max = fields.H_road->max(0, 0);
+        amrex::Real hw_min = fields.H_wall->min(0, 0);
+        amrex::Real hw_max = fields.H_wall->max(0, 0);
+        amrex::Real hf_min = fields.H_roof->min(0, 0);
+        amrex::Real hf_max = fields.H_roof->max(0, 0);
+        amrex::Real ah_min = fields.AH->min(0, 0);
+        amrex::Real ah_max = fields.AH->max(0, 0);
+
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "\n[UCM][2.3][BANNER] Phase 2.3 facet-split fluxes and AH active:\n"
+                           << "  plan_area_frac min=" << plan_min
+                           << " max=" << plan_max << "\n"
+                           << "  H_road min="  << hr_min
+                           << " max="     << hr_max << " W/m^2\n"
+                           << "  H_wall min="  << hw_min
+                           << " max="     << hw_max << " W/m^2\n"
+                           << "  H_roof min="  << hf_min
+                           << " max="     << hf_max << " W/m^2\n"
+                           << "  AH min="      << ah_min
+                           << " max="     << ah_max << " W/m^2\n"
+                           << "  H_sum (=H_road+H_wall+H_roof+AH) matches H_sensible? "
+                           << "check by (H_sensible.max - (H_road.max+H_wall.max+H_roof.max)) below\n\n";
+        }
     }
 
-    // Collectives outside IOProcessor guard
-    amrex::Real T_roof_min = fields.T_skin_roof->min(0);
-    amrex::Real T_roof_max = fields.T_skin_roof->max(0);
-    amrex::Real H_sens_min = fields.H_sensible->min(0);
-    amrex::Real H_sens_max = fields.H_sensible->max(0);
+    // Collectives on ALL ranks (valid cells only, nghost=0)
+    amrex::Real T_roof_min = fields.T_skin_roof->min(0, 0);
+    amrex::Real T_roof_max = fields.T_skin_roof->max(0, 0);
+    amrex::Real H_sens_min = fields.H_sensible->min(0, 0);
+    amrex::Real H_sens_max = fields.H_sensible->max(0, 0);
 
     if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "[UCM][1.3][UCMLayer::advance] "

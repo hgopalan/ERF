@@ -972,12 +972,14 @@ void compute_anthropogenic_heat(amrex::MultiFab&        AH_out,
        });
     }
 
-    if (params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
-       amrex::Real ah_min = AH_out.min(0);
-       amrex::Real ah_max = AH_out.max(0);
-       amrex::Print() << "[UCM][2.3][compute_anthropogenic_heat] time=" << time
-                      << "s AH min=" << ah_min
-                      << " max=" << ah_max << " W/m^2"
-                      << " diurnal_factor=" << diurnal << "\n";
+    if (params.ucm_debug) {
+       amrex::Real ah_min = AH_out.min(0, 0);
+       amrex::Real ah_max = AH_out.max(0, 0);
+       if (amrex::ParallelDescriptor::IOProcessor()) {
+           amrex::Print() << "[UCM][2.3][compute_anthropogenic_heat] time=" << time
+                          << "s AH min=" << ah_min
+                          << " max=" << ah_max << " W/m^2"
+                          << " diurnal_factor=" << diurnal << "\n";
+       }
     }
 }
