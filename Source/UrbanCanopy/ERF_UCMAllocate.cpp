@@ -12,6 +12,8 @@
 
 #include <ERF_UCMAllocate.H>
 #include <AMReX_Print.H>
+#include <unordered_map>
+#include <cstdint>
 
 using namespace amrex;
 
@@ -286,6 +288,10 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     AMREX_ALWAYS_ASSERT(building_reader.size() > 0);
     AMREX_ALWAYS_ASSERT(material_registry.size() > 0);
 
+    // grid_ratio no longer used here — CSV rows are UCM-indexed as of Phase 2.5-fix3.
+    // Kept in the signature for ABI stability; will be removed in Phase 2.6.
+    (void)grid_ratio;
+
     // Zero out all fields initially
     fields.H_bldg->setVal(0.0);
     fields.W_road->setVal(0.0);
@@ -331,146 +337,127 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     // Get const references to the broadcast data
     const auto& rows = building_reader.rows();
 
-    // Properly set values using MFIter loop to respect domain decomposition
+    // Phase 2.5-fix3: CSV rows are UCM-indexed (one row per UCM cell).
+    // Build a (i_ucm, j_ucm) -> row_index lookup so each UCM cell can be filled directly.
+    std::unordered_map<std::int64_t, int> row_by_ucm_ij;
+    row_by_ucm_ij.reserve(rows.size());
     int n_urban = 0, n_non_urban = 0;
-    for (int row_idx = 0; row_idx < building_reader.size(); ++row_idx) {
-        const auto& row = rows[row_idx];
-        int i_atm = row.i;
-        int j_atm = row.j;
-        
-        // Count urban/non-urban cells for debug output
-        if (row.is_urban == 1) {
-            ++n_urban;
-        } else {
-            ++n_non_urban;
-        }
-        
-        // Look up and pre-compute material properties only for urban cells
-        const UCMMaterial* roof_mat = nullptr;
-        const UCMMaterial* wall_mat = nullptr;
-        const UCMMaterial* road_mat = nullptr;
-        
-        if (row.is_urban == 1) {
-            roof_mat = &material_registry.lookup(row.roof_mat_id);
-            wall_mat = &material_registry.lookup(row.wall_mat_id);
-            road_mat = &material_registry.lookup(row.road_mat_id);
-        }
-        
-        // For each UCM cell in the domain, if it maps to this ATM cell, fill it
-        for (MFIter mfi(*(fields.H_bldg)); mfi.isValid(); ++mfi) {
-            const Box& bx = mfi.validbox();
-            auto H_bldg_arr = fields.H_bldg->array(mfi);
-            auto W_road_arr = fields.W_road->array(mfi);
-            auto W_roof_arr = fields.W_roof->array(mfi);
-            auto albedo_roof_arr = fields.albedo_roof->array(mfi);
-            auto albedo_wall_arr = fields.albedo_wall->array(mfi);
-            auto albedo_road_arr = fields.albedo_road->array(mfi);
-            auto emissivity_roof_arr = fields.emissivity_roof->array(mfi);
-            auto emissivity_wall_arr = fields.emissivity_wall->array(mfi);
-            auto emissivity_road_arr = fields.emissivity_road->array(mfi);
-            auto T_skin_roof_arr = fields.T_skin_roof->array(mfi);
-            auto T_skin_wall_arr = fields.T_skin_wall->array(mfi);
-            auto T_skin_road_arr = fields.T_skin_road->array(mfi);
-            auto T_canyon_air_arr = fields.T_canyon_air->array(mfi);
-            auto is_urban_arr = fields.is_urban->array(mfi);
-            auto mat_id_roof_arr = fields.mat_id_roof->array(mfi);
-            auto mat_id_wall_arr = fields.mat_id_wall->array(mfi);
-            auto mat_id_road_arr = fields.mat_id_road->array(mfi);
-            auto k_therm_roof_arr = fields.k_therm_roof->array(mfi);
-            auto k_therm_wall_arr = fields.k_therm_wall->array(mfi);
-            auto k_therm_road_arr = fields.k_therm_road->array(mfi);
-            auto rho_cp_roof_arr = fields.rho_cp_roof->array(mfi);
-            auto rho_cp_wall_arr = fields.rho_cp_wall->array(mfi);
-            auto rho_cp_road_arr = fields.rho_cp_road->array(mfi);
-            auto slab_L_roof_arr = fields.slab_L_roof->array(mfi);
-            auto slab_L_wall_arr = fields.slab_L_wall->array(mfi);
-            auto slab_L_road_arr = fields.slab_L_road->array(mfi);
+    for (int r = 0; r < static_cast<int>(rows.size()); ++r) {
+        const auto& row = rows[r];
+        const std::int64_t key = (static_cast<std::int64_t>(row.i) << 32) |
+                                 static_cast<std::uint32_t>(row.j);
+        row_by_ucm_ij[key] = r;
+        if (row.is_urban == 1) ++n_urban; else ++n_non_urban;
+    }
 
-            // Phase 2.3: facet-split fluxes and anthropogenic heat
-            auto plan_area_frac_arr = fields.plan_area_frac->array(mfi);
-            auto ah_profile_id_arr = fields.ah_profile_id->array(mfi);
+    // Iterate the UCM grid and populate each cell from its matching CSV row.
+    for (MFIter mfi(*(fields.H_bldg)); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto H_bldg_arr        = fields.H_bldg->array(mfi);
+        auto W_road_arr        = fields.W_road->array(mfi);
+        auto W_roof_arr        = fields.W_roof->array(mfi);
+        auto albedo_roof_arr   = fields.albedo_roof->array(mfi);
+        auto albedo_wall_arr   = fields.albedo_wall->array(mfi);
+        auto albedo_road_arr   = fields.albedo_road->array(mfi);
+        auto emissivity_roof_arr = fields.emissivity_roof->array(mfi);
+        auto emissivity_wall_arr = fields.emissivity_wall->array(mfi);
+        auto emissivity_road_arr = fields.emissivity_road->array(mfi);
+        auto T_skin_roof_arr   = fields.T_skin_roof->array(mfi);
+        auto T_skin_wall_arr   = fields.T_skin_wall->array(mfi);
+        auto T_skin_road_arr   = fields.T_skin_road->array(mfi);
+        auto T_canyon_air_arr  = fields.T_canyon_air->array(mfi);
+        auto is_urban_arr      = fields.is_urban->array(mfi);
+        auto mat_id_roof_arr   = fields.mat_id_roof->array(mfi);
+        auto mat_id_wall_arr   = fields.mat_id_wall->array(mfi);
+        auto mat_id_road_arr   = fields.mat_id_road->array(mfi);
+        auto k_therm_roof_arr  = fields.k_therm_roof->array(mfi);
+        auto k_therm_wall_arr  = fields.k_therm_wall->array(mfi);
+        auto k_therm_road_arr  = fields.k_therm_road->array(mfi);
+        auto rho_cp_roof_arr   = fields.rho_cp_roof->array(mfi);
+        auto rho_cp_wall_arr   = fields.rho_cp_wall->array(mfi);
+        auto rho_cp_road_arr   = fields.rho_cp_road->array(mfi);
+        auto slab_L_roof_arr   = fields.slab_L_roof->array(mfi);
+        auto slab_L_wall_arr   = fields.slab_L_wall->array(mfi);
+        auto slab_L_road_arr   = fields.slab_L_road->array(mfi);
+        auto plan_area_frac_arr = fields.plan_area_frac->array(mfi);
+        auto ah_profile_id_arr  = fields.ah_profile_id->array(mfi);
 
-            // Loop over cells in this box
+        for (int j_ucm = bx.smallEnd(1); j_ucm <= bx.bigEnd(1); ++j_ucm) {
             for (int i_ucm = bx.smallEnd(0); i_ucm <= bx.bigEnd(0); ++i_ucm) {
-                for (int j_ucm = bx.smallEnd(1); j_ucm <= bx.bigEnd(1); ++j_ucm) {
-                    // Map UCM grid indices to ATM grid indices
-                    int i_atm_cell = i_ucm / grid_ratio;
-                    int j_atm_cell = j_ucm / grid_ratio;
-                    
-                    // If this UCM cell corresponds to the current building row, fill it
-                    if (i_atm_cell == i_atm && j_atm_cell == j_atm) {
-                        IntVect iv(i_ucm, j_ucm, 0);
-                        
-                        // Always populate morphology + is_urban + raw mat_id fields
-                        H_bldg_arr(iv, 0) = row.height_m;
-                        W_road_arr(iv, 0) = row.W_road_m;
-                        W_roof_arr(iv, 0) = row.W_roof_m;
-                        is_urban_arr(iv, 0) = row.is_urban;
-                        
-                        // Store raw material IDs (diagnostic, including 0 for non-urban)
-                        mat_id_roof_arr(iv, 0) = row.roof_mat_id;
-                        mat_id_wall_arr(iv, 0) = row.wall_mat_id;
-                        mat_id_road_arr(iv, 0) = row.road_mat_id;
-                        
-                        if (row.is_urban == 1) {
-                            // Urban cell: populate material properties from registry
-                            albedo_roof_arr(iv, 0) = roof_mat->albedo;
-                            albedo_wall_arr(iv, 0) = wall_mat->albedo;
-                            albedo_road_arr(iv, 0) = road_mat->albedo;
-                            
-                            emissivity_roof_arr(iv, 0) = roof_mat->emissivity;
-                            emissivity_wall_arr(iv, 0) = wall_mat->emissivity;
-                            emissivity_road_arr(iv, 0) = road_mat->emissivity;
-                            
-                            // Phase 2.2: thermal properties from material registry
-                            k_therm_roof_arr(iv, 0) = roof_mat->k_therm_W_per_mK;
-                            k_therm_wall_arr(iv, 0) = wall_mat->k_therm_W_per_mK;
-                            k_therm_road_arr(iv, 0) = road_mat->k_therm_W_per_mK;
-                            rho_cp_roof_arr(iv, 0) = roof_mat->rho_cp_J_per_m3K;
-                            rho_cp_wall_arr(iv, 0) = wall_mat->rho_cp_J_per_m3K;
-                            rho_cp_road_arr(iv, 0) = road_mat->rho_cp_J_per_m3K;
-                            slab_L_roof_arr(iv, 0) = roof_mat->thickness_m;
-                            slab_L_wall_arr(iv, 0) = wall_mat->thickness_m;
-                            slab_L_road_arr(iv, 0) = road_mat->thickness_m;
-                        } else {
-                            // Non-urban cell: set to physically inert defaults
-                            // so downstream kernels that don't check is_urban still produce sensible numbers
-                            albedo_roof_arr(iv, 0) = 0.0;
-                            albedo_wall_arr(iv, 0) = 0.0;
-                            albedo_road_arr(iv, 0) = 0.0;
-                            
-                            emissivity_roof_arr(iv, 0) = 0.0;
-                            emissivity_wall_arr(iv, 0) = 0.0;
-                            emissivity_road_arr(iv, 0) = 0.0;
-                            
-                            // Phase 2.2: non-urban thermal defaults (never used by SEB, but avoid zeros)
-                            k_therm_roof_arr(iv, 0) = 0.1;
-                            k_therm_wall_arr(iv, 0) = 0.1;
-                            k_therm_road_arr(iv, 0) = 0.1;
-                            rho_cp_roof_arr(iv, 0) = 1.0e5;
-                            rho_cp_wall_arr(iv, 0) = 1.0e5;
-                            rho_cp_road_arr(iv, 0) = 1.0e5;
-                            slab_L_roof_arr(iv, 0) = 0.3;
-                            slab_L_wall_arr(iv, 0) = 0.3;
-                            slab_L_road_arr(iv, 0) = 0.3;
-                        }
-                        
-                        // Phase 2.3: populate plan_area_frac and ah_profile_id for urban cells
-                        if (row.is_urban == 1) {
-                            plan_area_frac_arr(iv, 0) = static_cast<amrex::Real>(row.plan_area_frac);
-                            ah_profile_id_arr(iv, 0) = row.ah_profile_id;
-                        } else {
-                            plan_area_frac_arr(iv, 0) = 0.0;
-                            ah_profile_id_arr(iv, 0) = 0;
-                        }
-                        
-                        // Set initial temperatures
-                        T_skin_roof_arr(iv, 0) = 293.15;
-                        T_skin_wall_arr(iv, 0) = 293.15;
-                        T_skin_road_arr(iv, 0) = 293.15;
-                        T_canyon_air_arr(iv, 0) = 293.15;
-                    }
+                const std::int64_t key = (static_cast<std::int64_t>(i_ucm) << 32) |
+                                         static_cast<std::uint32_t>(j_ucm);
+                auto it = row_by_ucm_ij.find(key);
+                if (it == row_by_ucm_ij.end()) {
+                    // No CSV row for this UCM cell — leave zero-initialized.
+                    continue;
                 }
+                const auto& row = rows[it->second];
+
+                IntVect iv(i_ucm, j_ucm, 0);
+
+                // Always populate morphology + is_urban + raw mat_id.
+                H_bldg_arr(iv, 0) = row.height_m;
+                W_road_arr(iv, 0) = row.W_road_m;
+                W_roof_arr(iv, 0) = row.W_roof_m;
+                is_urban_arr(iv, 0) = row.is_urban;
+                mat_id_roof_arr(iv, 0) = row.roof_mat_id;
+                mat_id_wall_arr(iv, 0) = row.wall_mat_id;
+                mat_id_road_arr(iv, 0) = row.road_mat_id;
+
+                if (row.is_urban == 1) {
+                    const auto& roof_mat = material_registry.lookup(row.roof_mat_id);
+                    const auto& wall_mat = material_registry.lookup(row.wall_mat_id);
+                    const auto& road_mat = material_registry.lookup(row.road_mat_id);
+
+                    albedo_roof_arr(iv, 0) = roof_mat.albedo;
+                    albedo_wall_arr(iv, 0) = wall_mat.albedo;
+                    albedo_road_arr(iv, 0) = road_mat.albedo;
+
+                    emissivity_roof_arr(iv, 0) = roof_mat.emissivity;
+                    emissivity_wall_arr(iv, 0) = wall_mat.emissivity;
+                    emissivity_road_arr(iv, 0) = road_mat.emissivity;
+
+                    // Phase 2.2: thermal properties from material registry
+                    k_therm_roof_arr(iv, 0) = roof_mat.k_therm_W_per_mK;
+                    k_therm_wall_arr(iv, 0) = wall_mat.k_therm_W_per_mK;
+                    k_therm_road_arr(iv, 0) = road_mat.k_therm_W_per_mK;
+                    rho_cp_roof_arr(iv, 0) = roof_mat.rho_cp_J_per_m3K;
+                    rho_cp_wall_arr(iv, 0) = wall_mat.rho_cp_J_per_m3K;
+                    rho_cp_road_arr(iv, 0) = road_mat.rho_cp_J_per_m3K;
+                    slab_L_roof_arr(iv, 0) = roof_mat.thickness_m;
+                    slab_L_wall_arr(iv, 0) = wall_mat.thickness_m;
+                    slab_L_road_arr(iv, 0) = road_mat.thickness_m;
+
+                    // Phase 2.3: morphology-derived + AH profile id
+                    plan_area_frac_arr(iv, 0) = static_cast<amrex::Real>(row.plan_area_frac);
+                    ah_profile_id_arr(iv, 0)  = row.ah_profile_id;
+                } else {
+                    // Non-urban cell: physically inert defaults so downstream kernels
+                    // that don't check is_urban still produce sensible numbers.
+                    albedo_roof_arr(iv, 0) = 0.0;
+                    albedo_wall_arr(iv, 0) = 0.0;
+                    albedo_road_arr(iv, 0) = 0.0;
+                    emissivity_roof_arr(iv, 0) = 0.0;
+                    emissivity_wall_arr(iv, 0) = 0.0;
+                    emissivity_road_arr(iv, 0) = 0.0;
+                    k_therm_roof_arr(iv, 0) = 0.1;
+                    k_therm_wall_arr(iv, 0) = 0.1;
+                    k_therm_road_arr(iv, 0) = 0.1;
+                    rho_cp_roof_arr(iv, 0) = 1.0e5;
+                    rho_cp_wall_arr(iv, 0) = 1.0e5;
+                    rho_cp_road_arr(iv, 0) = 1.0e5;
+                    slab_L_roof_arr(iv, 0) = 0.3;
+                    slab_L_wall_arr(iv, 0) = 0.3;
+                    slab_L_road_arr(iv, 0) = 0.3;
+                    plan_area_frac_arr(iv, 0) = 0.0;
+                    ah_profile_id_arr(iv, 0)  = 0;
+                }
+
+                // Initial temperatures (same for urban and non-urban).
+                T_skin_roof_arr(iv, 0) = 293.15;
+                T_skin_wall_arr(iv, 0) = 293.15;
+                T_skin_road_arr(iv, 0) = 293.15;
+                T_canyon_air_arr(iv, 0) = 293.15;
             }
         }
     }
