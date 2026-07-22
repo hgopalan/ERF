@@ -47,7 +47,8 @@ void UCMDiagnostics::initialize_file()
         // Write header
         ofs << "step,time_s,T_skin_roof_max,T_skin_wall_max,T_skin_road_max,";
         ofs << "T_canyon_max,H_sensible_max,H_sensible_sum,LE_latent_max,";
-        ofs << "H_road_max,H_wall_max,H_roof_max,AH_max\n";
+        ofs << "H_road_max,H_wall_max,H_roof_max,AH_max,";
+        ofs << "f_urb_max,H_bldg_mean_max,H_bldg_std_max,lambda_f_max\n";
     }
 
     ofs.close();
@@ -58,7 +59,9 @@ void UCMDiagnostics::write_row(int nstep, amrex::Real time,
                                amrex::Real T_canyon_max, amrex::Real H_max, amrex::Real H_sum,
                                amrex::Real LE_max,
                                amrex::Real H_road_max, amrex::Real H_wall_max,
-                               amrex::Real H_roof_max, amrex::Real AH_max)
+                               amrex::Real H_roof_max, amrex::Real AH_max,
+                               amrex::Real f_urb_max, amrex::Real H_bldg_mean_max,
+                               amrex::Real H_bldg_std_max, amrex::Real lambda_f_max)
 {
     if (!amrex::ParallelDescriptor::IOProcessor()) return;
 
@@ -76,16 +79,25 @@ void UCMDiagnostics::write_row(int nstep, amrex::Real time,
         << H_road_max << ","
         << H_wall_max << ","
         << H_roof_max << ","
-        << AH_max << "\n";
+        << AH_max << ","
+        << f_urb_max << ","
+        << H_bldg_mean_max << ","
+        << H_bldg_std_max << ","
+        << lambda_f_max << "\n";
     ofs.close();
 }
 
-void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time, int /*lev*/)
+void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time,
+                           const amrex::MultiFab* f_urb_atm,
+                           const amrex::MultiFab* H_bldg_mean_atm,
+                           const amrex::MultiFab* H_bldg_std_atm,
+                           const amrex::MultiFab* lambda_f_atm,
+                           int /*lev*/)
 {
     // Duplicate-write guard
     if (nstep == m_last_write_step) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][1.4][UCMDiagnostics::append] (skipped, already written at step "
+            amrex::Print() << "[UCM][2.5-followup][UCMDiagnostics::append] (skipped, already written at step "
                            << nstep << ")\n";
         }
         return;
@@ -98,7 +110,7 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
         !fields.is_urban || !fields.H_road || !fields.H_wall || !fields.H_roof || !fields.AH)
     {
         if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][2.3][UCMDiagnostics::append] ERROR: One or more required fields is nullptr\n";
+            amrex::Print() << "[UCM][2.5-followup][UCMDiagnostics::append] ERROR: One or more required fields is nullptr\n";
         }
         return;
     }
@@ -124,16 +136,32 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
     amrex::Real H_roof_max   = fields.H_roof->max(comp, 0, local);
     amrex::Real AH_max       = fields.AH->max(comp, 0, local);
 
+    // Phase 2.5: ATM-grid aggregates (computed OUTSIDE IOProcessor guard, PR #209 rule)
+    amrex::Real f_urb_max = 0.0, H_bldg_mean_max = 0.0, H_bldg_std_max = 0.0, lambda_f_max = 0.0;
+    if (f_urb_atm != nullptr) {
+        f_urb_max = f_urb_atm->max(comp, 0, local);
+    }
+    if (H_bldg_mean_atm != nullptr) {
+        H_bldg_mean_max = H_bldg_mean_atm->max(comp, 0, local);
+    }
+    if (H_bldg_std_atm != nullptr) {
+        H_bldg_std_max = H_bldg_std_atm->max(comp, 0, local);
+    }
+    if (lambda_f_atm != nullptr) {
+        lambda_f_max = lambda_f_atm->max(comp, 0, local);
+    }
+
     // Write to file on IO rank
     if (amrex::ParallelDescriptor::IOProcessor()) {
         write_row(nstep, time,
                   T_roof_max, T_wall_max, T_road_max,
                   T_canyon_max, H_max, H_sum, LE_max,
-                  H_road_max, H_wall_max, H_roof_max, AH_max);
+                  H_road_max, H_wall_max, H_roof_max, AH_max,
+                  f_urb_max, H_bldg_mean_max, H_bldg_std_max, lambda_f_max);
 
         // Debug trace (gated: avoids noisy output every diagnostic write step)
         if (m_params.ucm_debug) {
-            amrex::Print() << "[UCM][2.3][UCMDiagnostics::append]\n";
+            amrex::Print() << "[UCM][2.5-followup][UCMDiagnostics::append]\n";
             amrex::Print() << "  step=" << nstep << " time=" << time << "\n";
             amrex::Print() << "  T_skin_roof_max=" << T_roof_max
                            << " T_canyon_max="     << T_canyon_max << "\n";
@@ -143,6 +171,10 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
                            << " H_wall_max="  << H_wall_max
                            << " H_roof_max="  << H_roof_max
                            << " AH_max="      << AH_max << " W/m2\n";
+            amrex::Print() << "  [aggregates] f_urb_max=" << f_urb_max
+                           << " H_bldg_mean_max=" << H_bldg_mean_max << " m"
+                           << " H_bldg_std_max="  << H_bldg_std_max << " m"
+                           << " lambda_f_max="    << lambda_f_max << "\n";
 
             // ------------------------------------------------------------------
             // Phase 2.3.1 sum-invariant check (area-weighted).

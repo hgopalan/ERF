@@ -307,6 +307,7 @@ function(build_erf_lib erf_lib_name)
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMAtmCoupling.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMPlotfile.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMDiagnostics.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMAtmPlotfile.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMBuildingLayoutReader.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMMaterialRegistry.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMParams.H
@@ -322,6 +323,7 @@ function(build_erf_lib erf_lib_name)
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMPlotfile.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMDiagnostics.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMPlotfileCatalog.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMAtmPlotfile.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMBuildingLayoutReader.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMMaterialRegistry.H)
 

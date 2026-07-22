@@ -133,6 +133,7 @@ struct UCMParams
     // =========================================================================
 
     int     ucm_plot_int       = -1;        ///< Plotfile interval [steps] (-1 disabled; Phase 1.4)
+    int     ucm_atm_plot_int   = -1;        ///< ATM-grid plotfile interval [steps] (-1 disabled; Phase 2.5)
     std::string ucm_diag_file  = "ucm_diag.dat"; ///< Diagnostics CSV filename
 
     // =========================================================================

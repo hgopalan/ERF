@@ -58,7 +58,6 @@ void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
                        const amrex::MultiFab& Q_atm_in,
                        int                    grid_ratio,
                        int                    klo_atm)
-{
     using namespace amrex;
 
     // Step 1: build a 2D ATM slab at k = klo_atm covering Q_atm_in's BA
@@ -128,6 +127,16 @@ void coarsen_ucm_flux_to_atm(
     int                        /*lev*/)
 {
     using namespace amrex;
+
+    // Phase 2.5 convention A (weighted-divide):
+    //   Q_atm(I,J) = sum over N=grid_ratio^2 UCM cells of (is_urban * Q_ucm) / f_urb_atm
+    // where f_urb_atm = sum(is_urban) / N.
+    // This gives the average flux per urban cell. The injection kernel must multiply
+    // back by f_urb_atm on the receiving side to recover the area-averaged tendency
+    // in partially-urban ATM cells.
+    // Conservative convention (B): total flux is NOT automatically preserved without
+    // injection-side reweighting; must verify apply_ucm_tendency_to_cc_source multiplies
+    // by f_urb_atm or does NOT need to (depends on physics choice).
 
     Q_atm_out.setVal(0.0);
 

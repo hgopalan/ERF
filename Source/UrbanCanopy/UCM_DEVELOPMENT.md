@@ -1034,3 +1034,34 @@ None anticipated. Homogeneous case is bit-for-bit vs Phase 2.4 (f_urb=1).
 - **Phase 2.7:** Facet3D injection (uses H_bldg_mean, H_bldg_std from aggregates)
 - **Phase 2.8:** BEP-line (uses lambda_f from aggregates)
 
+---
+
+## Phase 2.5 Follow-Up: ATM-Grid Plotfile, Diagnostics, and Canonical Test
+
+**Status:** ✅ COMPLETE
+
+**Scope:** PR #213 shipped the scale-aware aggregation physics (Task 1–5 above) but deferred three critical plumbing items:
+1. Native ATM-grid plotfile writer for the 5 aggregates (`ERF_UCMAtmPlotfile.H/cpp`)
+2. Extension of per-timestep diagnostics CSV to include 4 aggregate maxima
+3. Canonical test with conservation-check post-processor
+
+This follow-up PR completes those items.
+
+**Deliverables:**
+
+- **`ERF_UCMAtmPlotfile.H/cpp`** — Writes 5 aggregates (f_urb, H_bldg_mean, H_bldg_std, lambda_p, lambda_f) as native 2D ATM-grid plotfiles (plt_ucm_atm_NNNNN). Follows Fire reference on ERF-Hazard branch. Uses ATM geometry and boxarray, NOT coarsened UCM arrays. Duplicate-write guard prevents re-writing same step.
+- **ParmParse parameter `ucm_atm_plot_int`** — Steps between ATM plotfile writes; -1 = off. Added to startup BANNER alongside `ucm_plot_int`.
+- **UCM diagnostics CSV extension** — 4 new columns: `f_urb_max`, `H_bldg_mean_max`, `H_bldg_std_max`, `lambda_f_max`. Aggregates are static (same per timestep per ATM cell), so values repeat. Computation follows PR #209 rule: collectives outside IOProcessor guard, only Print() inside.
+- **BANNER for aggregates** — One-time debug output after `aggregate_ucm_morphology_to_atm()` call. Prints min/max of f_urb, H_bldg_mean, H_bldg_std, lambda_p, lambda_f. Wrapped in `static bool aggregate_banner_printed = false` guard.
+- **Conservation convention audit** — Confirmed Phase 2.5 uses Convention A (weighted-divide): `Q_atm = sum(is_urban*Q_ucm) / f_urb`. Injection kernel (`apply_ucm_tendency_to_cc_source`) verifies it multiplies back by `f_urb_atm` for proper area-weighted tendency. Added comment above `coarsen_ucm_flux_to_atm` explaining convention with one-sentence conservation argument.
+- **`UCMScaleAwareAggregation` canonical test** — New directory in `Exec/CanonicalTests/SLUCM/`. Domain: 4×4 ATM (small for visible refinement), grid_ratio=4 (16×16 UCM). Diagonal urban wedge pattern (cells with i+j < 12 are urban) produces f_urb spectrum [0, 1] across ATM cells. Includes `gen_csv.py` CSV generator and `check_conservation.py` post-processor that verifies f_urb∈[0,1], H_bldg_mean≈10 m, H_bldg_std≈0 m, ATM plotfile written.
+
+**Code quality checks:**
+
+- ✅ Builds with `-DERF_ENABLE_UCM=ON` and `-DERF_ENABLE_UCM=OFF`
+- ✅ All 5 entries in `Make.package` and `CMake/BuildERFExe.cmake` (verified via grep)
+- ✅ PR #209 MPI rule: collectives outside IOProcessor guards
+- ✅ PR #213 physics untouched: only plumbing added
+- ✅ All 8 Phase 2.5 tasks complete; acceptance checklist all green
+- ✅ Existing tests (`UCMShadowCanyon`, etc.) still exit 0 (regression-free)
+

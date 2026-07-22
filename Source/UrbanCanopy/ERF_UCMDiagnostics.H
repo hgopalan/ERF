@@ -10,10 +10,12 @@
  * ```
  * step, time_s, T_skin_roof_max, T_skin_wall_max, T_skin_road_max,
  * T_canyon_max, H_sensible_max, H_sensible_sum, LE_latent_max,
- * H_road_max, H_wall_max, H_roof_max, AH_max
+ * H_road_max, H_wall_max, H_roof_max, AH_max,
+ * f_urb_max, H_bldg_mean_max, H_bldg_std_max, lambda_f_max
  * ```
  *
- * One row per call, on IO rank only.
+ * Note: Aggregates (f_urb, H_bldg_mean, etc.) are ~constant (static refinement),
+ * so they will show the same value every row.
  *
  * References:
  *  - Source/Dust/ERF_DustDiagnostics.H
@@ -91,9 +93,18 @@ public:
      * @param[in] fields   UCMFields container (all MultiFabs on UCM grid)
      * @param[in] nstep    Current timestep number
      * @param[in] time     Simulation time [s]
+     * @param[in] f_urb_atm    Urban fraction on ATM grid [optional, Phase 2.5]
+     * @param[in] H_bldg_mean_atm  Mean building height on ATM grid [optional, Phase 2.5]
+     * @param[in] H_bldg_std_atm   Std dev building height on ATM grid [optional, Phase 2.5]
+     * @param[in] lambda_f_atm     Frontal-area density on ATM grid [optional, Phase 2.5]
      * @param[in] lev      AMR level (default 0)
      */
-    void append(const UCMFields& fields, int nstep, amrex::Real time, int lev = 0);
+    void append(const UCMFields& fields, int nstep, amrex::Real time,
+                const amrex::MultiFab* f_urb_atm = nullptr,
+                const amrex::MultiFab* H_bldg_mean_atm = nullptr,
+                const amrex::MultiFab* H_bldg_std_atm = nullptr,
+                const amrex::MultiFab* lambda_f_atm = nullptr,
+                int lev = 0);
 
 private:
     const UCMParams& m_params;          ///< Reference to parameters
@@ -127,13 +138,19 @@ private:
      * @param[in] H_wall_max    Max wall sensible flux [W/m²] (Phase 2.3)
      * @param[in] H_roof_max    Max roof sensible flux [W/m²] (Phase 2.3)
      * @param[in] AH_max        Max anthropogenic heat [W/m²] (Phase 2.3)
+     * @param[in] f_urb_max     Max urban fraction (Phase 2.5, nullable)
+     * @param[in] H_bldg_mean_max  Max mean building height [m] (Phase 2.5, nullable)
+     * @param[in] H_bldg_std_max   Max std dev building height [m] (Phase 2.5, nullable)
+     * @param[in] lambda_f_max     Max frontal-area density (Phase 2.5, nullable)
      */
     void write_row(int nstep, amrex::Real time,
                   amrex::Real T_roof_max, amrex::Real T_wall_max, amrex::Real T_road_max,
                   amrex::Real T_canyon_max, amrex::Real H_max, amrex::Real H_sum,
                   amrex::Real LE_max,
                   amrex::Real H_road_max, amrex::Real H_wall_max, 
-                  amrex::Real H_roof_max, amrex::Real AH_max);
+                  amrex::Real H_roof_max, amrex::Real AH_max,
+                  amrex::Real f_urb_max = 0.0, amrex::Real H_bldg_mean_max = 0.0,
+                  amrex::Real H_bldg_std_max = 0.0, amrex::Real lambda_f_max = 0.0);
 };
 
 #endif  // ERF_UCM_DIAGNOSTICS_H

@@ -356,6 +356,28 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             m_ucm_params.grid_ratio,
             m_ucm_params.ucm_debug, lev);
 
+        // Phase 2.5: One-time BANNER for aggregates (collective min/max outside IOProcessor guard)
+        static bool aggregate_banner_printed = false;
+        if (!aggregate_banner_printed && m_ucm_params.ucm_debug) {
+            aggregate_banner_printed = true;
+            // Collectives outside IOProcessor guard (PR #209 rule)
+            const amrex::Real fu_min = m_ucm_f_urb_atm[lev]->min(0, 0);
+            const amrex::Real fu_max = m_ucm_f_urb_atm[lev]->max(0, 0);
+            const amrex::Real Hm_min = m_ucm_H_bldg_mean_atm[lev]->min(0, 0);
+            const amrex::Real Hm_max = m_ucm_H_bldg_mean_atm[lev]->max(0, 0);
+            const amrex::Real Hs_max = m_ucm_H_bldg_std_atm[lev]->max(0, 0);
+            const amrex::Real lp_max = m_ucm_lambda_p_atm[lev]->max(0, 0);
+            const amrex::Real lf_max = m_ucm_lambda_f_atm[lev]->max(0, 0);
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "\n[UCM][2.5-followup][BANNER] ATM-grid aggregates:\n"
+                               << "  f_urb        min=" << fu_min << " max=" << fu_max << "\n"
+                               << "  H_bldg_mean  min=" << Hm_min << " max=" << Hm_max << " m\n"
+                               << "  H_bldg_std   max=" << Hs_max << " m\n"
+                               << "  lambda_p     max=" << lp_max << "\n"
+                               << "  lambda_f     max=" << lf_max << "\n\n";
+            }
+        }
+
         // Coarsen UCM fluxes from UCM grid to ATM grid (lagged; constant across RK stages)
         // Phase 2.5: Use urban-fraction-weighted coarsening
         coarsen_ucm_flux_to_atm(*m_ucm_H_atm[lev], *m_ucm_fields[lev]->H_sensible,
@@ -380,7 +402,12 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             if (!m_ucm_diagnostics[lev]) {
                 m_ucm_diagnostics[lev] = std::make_unique<UCMDiagnostics>(m_ucm_params, lev);
             }
-            m_ucm_diagnostics[lev]->append(*m_ucm_fields[lev], iteration, time, lev);
+            m_ucm_diagnostics[lev]->append(*m_ucm_fields[lev], iteration, time,
+                                           m_ucm_f_urb_atm[lev].get(),
+                                           m_ucm_H_bldg_mean_atm[lev].get(),
+                                           m_ucm_H_bldg_std_atm[lev].get(),
+                                           m_ucm_lambda_f_atm[lev].get(),
+                                           lev);
         }
 
         // Plotfile output (once per coarse step)
@@ -390,6 +417,20 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             }
             m_ucm_plotfile[lev]->write(*m_ucm_fields[lev], *m_ucm_grid[lev],
                                        iteration, time, false, lev);
+        }
+        
+        // Phase 2.5: ATM-grid aggregate plotfile output (once per coarse step)
+        if (m_ucm_params.ucm_atm_plot_int > 0 && (iteration % m_ucm_params.ucm_atm_plot_int == 0)) {
+            m_ucm_atm_plotfile->write(
+                iteration, time,
+                *m_ucm_f_urb_atm[lev],
+                *m_ucm_H_bldg_mean_atm[lev],
+                *m_ucm_H_bldg_std_atm[lev],
+                *m_ucm_lambda_p_atm[lev],
+                *m_ucm_lambda_f_atm[lev],
+                Geom(lev),
+                m_ucm_params.ucm_debug,
+                lev);
         }
     }
     #endif

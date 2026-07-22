@@ -401,6 +401,44 @@ grep -rn "get_q_star()\[" Source/UrbanCanopy/  → MUST be 0 hits
 
 ---
 
+## Phase 2.5: Manual weighted aggregation UCM (2D) -> ATM (2D slab)
+
+Unlike Phase 1.4's `amrex::average_down`, Phase 2.5 aggregation needs
+per-cell urban-mask weighting and running statistics (`sum` for mean,
+`sum_of_squares` for variance). Use a two-nested loop inside a ParallelFor
+on the ATM box:
+
+```cpp
+ParallelFor(bx_atm, [=] AMREX_GPU_DEVICE (int I, int J, int K) noexcept {
+    int n_urb = 0;
+    Real Hsum = 0.0, Hsum2 = 0.0;
+    for (int dj = 0; dj < gr; ++dj)
+    for (int di = 0; di < gr; ++di) {
+        const int i_ucm = I*gr + di;
+        const int j_ucm = J*gr + dj;
+        if (ur_a(i_ucm, j_ucm, 0) == 1) {
+            n_urb += 1;
+            const Real Hb = Hb_a(i_ucm, j_ucm, 0);
+            Hsum  += Hb;
+            Hsum2 += Hb * Hb;
+        }
+    }
+    // ... compute mean and std ...
+});
+```
+
+Conservation convention: total flux is preserved with `(1/N_total)` weighting,
+NOT `(1/N_urban)`. Comment above the kernel MUST state which convention is in use.
+
+For Phase 2.5 convention A (weighted-divide, currently in use):
+```cpp
+Q_atm = sum(is_urban * Q_ucm) / f_urb_atm
+```
+This requires the injection kernel (`apply_ucm_tendency_to_cc_source`) to
+multiply back by `f_urb_atm` to recover the area-averaged tendency.
+
+---
+
 ## Known Issues & Workarounds (None Yet — Phase 1.1)
 
 As bugs are discovered and fixed in later phases, document here:

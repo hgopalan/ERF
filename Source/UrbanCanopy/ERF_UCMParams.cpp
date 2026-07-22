@@ -62,6 +62,7 @@ void UCMParams::read_from_parmparse(int lev)
 
     // Section 8: Output and diagnostics
     pp.query("ucm_plot_int", ucm_plot_int);
+    pp.query("ucm_atm_plot_int", ucm_atm_plot_int);
     pp.query("ucm_diag_file", ucm_diag_file);
 
     // Section 9: CSV readers for heterogeneous inputs (Phase 2.1)
