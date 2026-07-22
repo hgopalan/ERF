@@ -97,8 +97,8 @@ void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
     }
 
     // Collective min/max on ALL ranks; print on IO rank only.
-    Real qmin = Q_ucm_out.min(0);
-    Real qmax = Q_ucm_out.max(0);
+    Real qmin = Q_ucm_out.min(0, 0);
+    Real qmax = Q_ucm_out.max(0, 0);
     if (ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][1.4][refine_atm_to_ucm] gr=" << grid_ratio
                 << " klo_atm=" << klo_atm
