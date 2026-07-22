@@ -112,5 +112,5 @@ erf.ucm.test_ustar          = 0.0
 erf.ucm.test_surf_temp_K    = 293.15
 
 # CSV-based heterogeneous setup (Phase 2.1)
-erf.ucm.building_layout_csv = "building_layout.csv"
-erf.ucm.material_library_csv = "materials.csv"
+erf.ucm.building_layout_csv_path = "building_layout.csv"
+erf.ucm.material_library_csv_path = "materials.csv"
