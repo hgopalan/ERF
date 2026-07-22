@@ -103,7 +103,8 @@ void UCMLayer::advance(UCMFields& fields,
 
     // Extract wind via log-law interpolation to z_target
     fill_ucm_wind_from_interpolation(*forcing.wind_ref, xvel, yvel, z_phys_cc,
-                                     *fields.H_bldg, m_params.zref, ucm_grid, nz_atm, lev);
+                                     *fields.H_bldg, *fields.z0_ucm, *fields.d_disp_ucm, 
+                                     m_params.zref, ucm_grid, nz_atm, lev);
 
     // Extract temperature from ATM lowest level
     fill_ucm_scalar_from_atm(*forcing.T_atm_ref, T_atm_lowest, ucm_grid, geom_atm, 0, lev);
