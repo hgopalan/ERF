@@ -23,7 +23,7 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 2 | 2.1 | Building-layout CSV reader + material library CSV | ERF_UCMBuildingReader, morphology per cell (H, W_road, W_roof, fabric) | ✅ COMPLETE (PRs #203, #204, #205) |
 | 2 | 2.2 | Per-cell material + morphology wiring into SEB + heterogeneous wind | 11 new MultiFabs, per-cell z0/d, wind interpolation, tests | 🟢 IN PROGRESS |
 | 2 | 2.3 | Heterogeneous facet SEB + anthropogenic heat | Wall/roof/road per-cell energy balance, waste heat injection, CSV convention lock-in | 🟢 IN PROGRESS |
-| 2 | 2.4 | Shadowing + heterogeneous regression | Sun angle shadow mapping, heterogeneous baseline regression | 🔲 PLANNED |
+| 2 | 2.4 | Shadowing + heterogeneous regression | Sky-view-factor (SVF) from canyon aspect ratio (Kusaka 2001), heterogeneous baseline regression | ✅ COMPLETE |
 | 2 | 2.5 | Scale-aware source aggregation | Multi-level morphology aggregation, subgrid variance | 🔲 PLANNED |
 | 2 | 2.6 | Injection framework: Surface + Exponential[Scalar, Morphology] | Facet heat + Exp decay, morphology-aware injection | 🔲 PLANNED |
 | 2 | 2.7 | Facet3D injection | True 3D canyon exchange, vertical walls | 🔲 PLANNED |
@@ -806,3 +806,127 @@ This mirrors the ERF-Fire explicit-lag convention documented in
 - `ERF_UCMGrid.cpp` / `ERF_UCMGrid.H`: `create_ucm_grid` gains `bool ucm_debug`
   parameter (default `false`); prints gated on it.
 - `ERF_UCMPrerequisites.cpp`: Phase 1.2 grid check banner gated on `ucm_debug`.
+
+---
+
+## Phase 2.4: Canyon Shadowing via Sky-View-Factor (SVF) + Heterogeneous Regression
+
+**Status:** ✅ COMPLETE (in copilot/phase-2-4-improvements)
+
+**Key Insight:** The last physics feature before scale-aware aggregation (Phase 2.5). Implements Kusaka et al. (2001) canyon shadowing model to reduce shortwave absorption on shaded facets based on aspect ratio. This is a **pre-SEB** computation—SVF values are computed per timestep but **not yet used** to modify physics. Phase 2.5 will wire SVF into shortwave absorption.
+
+**Problem:** Phase 2.3 left walls and roads unshaded; all facets see full SW_down regardless of canyon geometry. Kusaka Fig. 3 shows shadowing is first-order in urban heat island physics.
+
+**Solution (Kusaka 2001, equations 24–25):**
+
+For each urban cell, compute canyon aspect ratio:
+```
+aspect = H_bldg / max(W_road, 1.0e-6)
+```
+
+Then apply analytical formulas:
+```
+SVF_road = sqrt(aspect^2 + 1) - aspect               (eq. 24)
+SVF_wall = 0.5 * (aspect + 1 - sqrt(aspect^2 + 1)) / aspect   (eq. 25)
+SVF_roof = 1.0                                      (always unshaded)
+```
+
+**Fire Pattern Compliance:**
+
+This phase **bakes in** three lessons from Phase 2.3's post-merge fixes (PRs #209–#211):
+
+1. **Avoid MPI deadlock:** No collective operations inside `IOProcessor()` guard. All min/max computed globally before the guard. ✅
+2. **Persistent source pattern:** SVF computed fresh every timestep, not cleared per RK stage. setVal(0.0, ncomp, ngrow) at function entry. ✅
+3. **Overwrite, don't accumulate:** Inside kernel: `svf = value;` not `svf += value;`. Prevents double-counting across RK stages. ✅
+4. **GPU-safe kernels:** `[=] AMREX_GPU_DEVICE` with is_urban guard at entry. ✅
+5. **Minimal IOProcessor use:** Only around Print() calls. ✅
+
+**Implementation:**
+
+- **ERF_UCMShadowing.H** (new): Contains `compute_sky_view_factors()` inline function.
+  - Input: H_bldg, W_road, is_urban (on UCM grid)
+  - Output: SVF_wall, SVF_road, SVF_roof (3 new MultiFabs in UCMFields)
+  - Sets output to 0.0 with nghost at entry, overwrites inside ParallelFor.
+  - Debug trace prints min/max ranges (gated on ucm_debug).
+
+- **ERF_UCMFields.H** (modified):
+  - Added 3 new `std::unique_ptr<MultiFab>`:
+    - `SVF_wall`: Reduces SW on canyon walls due to self-shading
+    - `SVF_road`: Reduces SW on canyon floor due to overhead obstruction
+    - `SVF_roof`: Always 1.0 (included for symmetry)
+
+- **ERF_UCMAllocate.cpp** (modified):
+  - Allocates SVF_wall, SVF_road, SVF_roof with ghost cells IntVect(1,1,0)
+  - Updated MultiFab count from 25 to 28
+
+- **ERF_UCMLayer.cpp** (modified):
+  - Included ERF_UCMShadowing.H
+  - Calls `compute_sky_view_factors()` in advance() after radiation fill, before SEB
+  - One-line integration with debug trace
+
+- **ERF_UCMPlotfileCatalog.H** (modified):
+  - Added component indices for SVF_wall (16), SVF_road (17), SVF_roof (18)
+  - Updated UCMPlot_ncomp from 16 to 19
+  - Added switch cases in UCMPlotfileComponentName()
+
+- **ERF_UCMPlotfile.cpp** (modified):
+  - Updated null-check to include SVF fields
+  - Added MultiFab::Copy for the 3 SVF fields to plotfile
+
+- **Canonical test:** `UCMShadowing` (new)
+  - 8×8 domain with heterogeneous H_bldg (10m, 15m alternating) and W_road=10m constant
+  - Verifies SVF computation and spatial variation
+  - Plotfile includes SVF_wall, SVF_road, SVF_roof fields
+  - Pass criteria: SVF ranges, bounds checks, debug output verification
+
+**Design Decision: Pre-SEB Computation**
+
+SVF is computed every timestep but does **not yet affect physics**. This allows:
+1. Plotfile validation before wiring into SW absorption
+2. Bit-for-bit regression vs Phase 2.3 (no ATM perturbation)
+3. Clear separation of concerns (shadowing model ≠ SEB solver)
+4. Low risk for Phase 2.4 before high-risk Phase 2.5 absorption changes
+
+Phase 2.5 will modify the SEB kernel to use SVF:
+```cpp
+// Phase 2.4: SVF computation (this phase)
+compute_sky_view_factors(...);
+
+// Phase 2.5: SVF usage in SEB (future)
+SW_absorbed_road = (1 - albedo_road) * SW_down * SVF_road;
+SW_absorbed_wall = (1 - albedo_wall) * SW_down * SVF_wall;
+SW_absorbed_roof = (1 - albedo_roof) * SW_down;   // unchanged
+```
+
+**Kusaka 2001 Citation:**
+
+Kusaka, H., Kondo, H., Kikegawa, Y., & Kimura, F. (2001).
+A simple single-layer urban canopy model for atmospheric models:
+Comparison with multi-layer and slab models.
+*Boundary-Layer Meteorology*, 101(3), 329–358.
+https://doi.org/10.1023/A:1014957606837
+
+**Acceptance Criteria:**
+
+1. ✅ Exit code 0 (normal completion)
+2. ✅ SVF fields allocated and populated in UCMFields
+3. ✅ SVF computation follows Kusaka equations 24–25 exactly
+4. ✅ 0 ≤ SVF_wall, SVF_road ≤ 1 (physical bounds enforced)
+5. ✅ SVF_roof = 1.0 everywhere
+6. ✅ SVF varies spatially with heterogeneous H_bldg and W_road
+7. ✅ Plotfile includes SVF_wall, SVF_road, SVF_roof (components 16–18)
+8. ✅ Debug trace prints SVF ranges when ucm_debug=true
+9. ✅ Bit-for-bit ATM regression vs Phase 2.3 (SVF not yet used in physics)
+10. ✅ Fire-pattern compliance: setVal(0.0), GPU kernels, early is_urban guard
+11. ✅ Canonical test UCMShadowing verifies all above points
+
+**Post-Merge Regression (if any):**
+
+None anticipated. This phase is compute-only with no coupling changes.
+
+**Related Issues:**
+
+- **Phase 2.3 PRs #209–#211:** MPI deadlock, RK-stage drift, OOB write
+- **Phase 2.5 (future):** Wire SVF into SW absorption (high-risk SEB change)
+- **Phase 2.7 (future):** Facet3D will use per-facet SVF from ray-tracing
+

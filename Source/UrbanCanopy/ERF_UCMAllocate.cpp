@@ -917,6 +917,28 @@ bool UCMFields::all_allocated() const
         result = false;
     }
 
+    // Phase 2.4: Sky view factors (shadowing)
+    if (!fields.SVF_wall) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.4][all_allocated] MISSING: SVF_wall\n";
+        }
+        result = false;
+    }
+
+    if (!fields.SVF_road) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.4][all_allocated] MISSING: SVF_road\n";
+        }
+        result = false;
+    }
+
+    if (!fields.SVF_roof) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.4][all_allocated] MISSING: SVF_roof\n";
+        }
+        result = false;
+    }
+
     return result;
 }
 
