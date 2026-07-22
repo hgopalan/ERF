@@ -188,15 +188,29 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     const auto& rows = building_reader.rows();
 
     // Properly set values using MFIter loop to respect domain decomposition
+    int n_urban = 0, n_non_urban = 0;
     for (int row_idx = 0; row_idx < building_reader.size(); ++row_idx) {
         const auto& row = rows[row_idx];
         int i_atm = row.i;
         int j_atm = row.j;
         
-        // Look up and pre-compute material properties
-        const UCMMaterial& roof_mat = material_registry.lookup(row.roof_mat_id);
-        const UCMMaterial& wall_mat = material_registry.lookup(row.wall_mat_id);
-        const UCMMaterial& road_mat = material_registry.lookup(row.road_mat_id);
+        // Count urban/non-urban cells for debug output
+        if (row.is_urban == 1) {
+            ++n_urban;
+        } else {
+            ++n_non_urban;
+        }
+        
+        // Look up and pre-compute material properties only for urban cells
+        const UCMMaterial* roof_mat = nullptr;
+        const UCMMaterial* wall_mat = nullptr;
+        const UCMMaterial* road_mat = nullptr;
+        
+        if (row.is_urban == 1) {
+            roof_mat = &material_registry.lookup(row.roof_mat_id);
+            wall_mat = &material_registry.lookup(row.wall_mat_id);
+            road_mat = &material_registry.lookup(row.road_mat_id);
+        }
         
         // For each UCM cell in the domain, if it maps to this ATM cell, fill it
         for (MFIter mfi(*(fields.H_bldg)); mfi.isValid(); ++mfi) {
@@ -230,25 +244,37 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                     if (i_atm_cell == i_atm && j_atm_cell == j_atm) {
                         IntVect iv(i_ucm, j_ucm, 0);
                         
-                        // Fill building morphology
+                        // Always populate morphology + is_urban + raw mat_id fields
                         H_bldg_arr(iv, 0) = row.height_m;
                         W_road_arr(iv, 0) = row.W_road_m;
                         W_roof_arr(iv, 0) = row.W_roof_m;
                         is_urban_arr(iv, 0) = row.is_urban;
                         
-                        // Store material IDs
+                        // Store raw material IDs (diagnostic, including 0 for non-urban)
                         mat_id_roof_arr(iv, 0) = row.roof_mat_id;
                         mat_id_wall_arr(iv, 0) = row.wall_mat_id;
                         mat_id_road_arr(iv, 0) = row.road_mat_id;
                         
-                        // Fill material properties
-                        albedo_roof_arr(iv, 0) = roof_mat.albedo;
-                        albedo_wall_arr(iv, 0) = wall_mat.albedo;
-                        albedo_road_arr(iv, 0) = road_mat.albedo;
-                        
-                        emissivity_roof_arr(iv, 0) = roof_mat.emissivity;
-                        emissivity_wall_arr(iv, 0) = wall_mat.emissivity;
-                        emissivity_road_arr(iv, 0) = road_mat.emissivity;
+                        if (row.is_urban == 1) {
+                            // Urban cell: populate material properties from registry
+                            albedo_roof_arr(iv, 0) = roof_mat->albedo;
+                            albedo_wall_arr(iv, 0) = wall_mat->albedo;
+                            albedo_road_arr(iv, 0) = road_mat->albedo;
+                            
+                            emissivity_roof_arr(iv, 0) = roof_mat->emissivity;
+                            emissivity_wall_arr(iv, 0) = wall_mat->emissivity;
+                            emissivity_road_arr(iv, 0) = road_mat->emissivity;
+                        } else {
+                            // Non-urban cell: set to physically inert defaults
+                            // so downstream kernels that don't check is_urban still produce sensible numbers
+                            albedo_roof_arr(iv, 0) = 0.0;
+                            albedo_wall_arr(iv, 0) = 0.0;
+                            albedo_road_arr(iv, 0) = 0.0;
+                            
+                            emissivity_roof_arr(iv, 0) = 0.0;
+                            emissivity_wall_arr(iv, 0) = 0.0;
+                            emissivity_road_arr(iv, 0) = 0.0;
+                        }
                         
                         // Set initial temperatures
                         T_skin_roof_arr(iv, 0) = 293.15;
@@ -263,7 +289,9 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
 
     if (ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][2.1][fill_ucm_fields_from_csv] "
-                << "populated fields from CSV at lev=" << lev << "\n";
+                << "populated fields from CSV at lev=" << lev
+                << ": urban_cells=" << n_urban
+                << ", non_urban_cells=" << n_non_urban << "\n";
     }
 }
 

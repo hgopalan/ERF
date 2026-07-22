@@ -166,8 +166,15 @@ void UCMLayer::advance(UCMFields& fields,
         auto h_a    = fields.H_sensible->array(mfi);
         auto u_a    = forcing.u_star->const_array(mfi);
         auto t_st_a = atm_t_star.const_array(mfi);
+        auto is_urban_a = fields.is_urban->const_array(mfi);
         
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            // Skip non-urban cells: they do not contribute to sensible heat
+            if (is_urban_a(i, j, 0) == 0) {
+                h_a(i, j, 0) = 0.0;
+                return;
+            }
+            
             // MOST identity: H = - ρ Cp u* t*
             const amrex::Real u_star = u_a(i, j, 0);
             const amrex::Real t_star = t_st_a(i, j, 0);

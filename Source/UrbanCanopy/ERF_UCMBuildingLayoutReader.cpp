@@ -101,11 +101,25 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path, int le
                                 " at (i,j) = (" + std::to_string(row.i) + "," + std::to_string(row.j) + ")");
                 }
 
-                // Validate mat_ids
-                if (row.roof_mat_id < 0 || row.wall_mat_id < 0 || row.road_mat_id < 0) {
-                    amrex::Abort("[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast] "
-                                "All mat_ids must be >= 0 at (i,j) = (" + std::to_string(row.i) + "," +
-                                std::to_string(row.j) + ")");
+                // Validate mat_ids based on is_urban
+                if (row.is_urban == 1) {
+                    // Urban cells require all mat_ids >= 1
+                    if (row.roof_mat_id < 1 || row.wall_mat_id < 1 || row.road_mat_id < 1) {
+                        amrex::Abort("[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast] "
+                                    "Urban cell at (i,j) = (" + std::to_string(row.i) + "," +
+                                    std::to_string(row.j) + ") must have all mat_ids >= 1; "
+                                    "got roof=" + std::to_string(row.roof_mat_id) +
+                                    ", wall=" + std::to_string(row.wall_mat_id) +
+                                    ", road=" + std::to_string(row.road_mat_id));
+                    }
+                } else {
+                    // Non-urban cells: mat_ids may be 0 (sentinel) or any nonnegative value;
+                    // they will not be dereferenced by fill_ucm_fields_from_csv.
+                    if (row.roof_mat_id < 0 || row.wall_mat_id < 0 || row.road_mat_id < 0) {
+                        amrex::Abort("[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast] "
+                                    "Non-urban cell at (i,j) = (" + std::to_string(row.i) + "," +
+                                    std::to_string(row.j) + ") has negative mat_id");
+                    }
                 }
 
                 // Check for duplicate (i,j)
