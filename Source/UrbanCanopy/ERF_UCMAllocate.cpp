@@ -942,3 +942,42 @@ void fill_ucm_z0_and_disp(UCMFields& f,
                       << " max=" << dd_max << "\n";
     }
 }
+
+void compute_anthropogenic_heat(amrex::MultiFab&        AH_out,
+                               const amrex::iMultiFab& ah_profile_id,
+                               const amrex::iMultiFab& is_urban,
+                               const UCMParams&        params,
+                               amrex::Real             time,
+                               int                     lev)
+{
+    const amrex::Real AH_const = params.AH_uniform_Wm2;
+    const amrex::Real AH_peak  = params.AH_daytime_peak;
+    const amrex::Real day_len  = 86400.0;
+    const amrex::Real phase    = 2.0 * M_PI * (time / day_len) - 0.5 * M_PI;
+    const amrex::Real diurnal  = std::max(0.0, std::cos(phase));
+
+    for (amrex::MFIter mfi(AH_out, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+       const amrex::Box& bx = mfi.tilebox();
+       auto       ah_a = AH_out.array(mfi);
+       auto const id_a = ah_profile_id.const_array(mfi);
+       auto const ur_a = is_urban.const_array(mfi);
+       amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+           if (ur_a(i,j,0) == 0) { 
+               ah_a(i,j,0) = 0.0; 
+               return; 
+           }
+           const int pid = id_a(i,j,0);
+           if      (pid == 1) ah_a(i,j,0) = AH_peak * diurnal;
+           else               ah_a(i,j,0) = AH_const;
+       });
+    }
+
+    if (params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+       amrex::Real ah_min = AH_out.min(0);
+       amrex::Real ah_max = AH_out.max(0);
+       amrex::Print() << "[UCM][2.3][compute_anthropogenic_heat] time=" << time
+                      << "s AH min=" << ah_min
+                      << " max=" << ah_max << " W/m^2"
+                      << " diurnal_factor=" << diurnal << "\n";
+    }
+}

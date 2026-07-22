@@ -134,4 +134,34 @@ void fill_ucm_z0_and_disp(UCMFields& fields,
                           const UCMParams& params,
                           int lev = 0);
 
+/**
+ * @brief Compute anthropogenic heat (AH) from profile type and time of day
+ *
+ * Phase 2.3 new function:
+ *  - For urban cells (is_urban == 1):
+ *    - Profile type 0 (uniform): AH = AH_uniform_Wm2 [constant]
+ *    - Profile type 1 (diurnal): AH = AH_daytime_peak * max(0, cos(phase)) [W/m²]
+ *      where phase = 2π * time / 86400 - π/2
+ *  - For non-urban cells: AH = 0
+ *
+ * Called once per timestep in UCMLayer::advance() BEFORE the SEB kernel.
+ *
+ * @param[out] AH_out           Anthropogenic heat MultiFab to fill [W/m²]
+ * @param[in] ah_profile_id     Per-cell profile type (0=uniform, 1=diurnal)
+ * @param[in] is_urban          Urban mask (0 or 1)
+ * @param[in] params            UCM parameters (AH_uniform_Wm2, AH_daytime_peak, debug flag)
+ * @param[in] time              Current simulation time [seconds since start]
+ * @param[in] lev               AMR level (default 0; Phase 1.1 only uses lev=0)
+ *
+ * @precondition AH_out allocated
+ * @precondition ah_profile_id and is_urban already populated
+ * @postcondition AH_out contains per-cell anthropogenic heat [W/m²]
+ */
+void compute_anthropogenic_heat(amrex::MultiFab&        AH_out,
+                                const amrex::iMultiFab& ah_profile_id,
+                                const amrex::iMultiFab& is_urban,
+                                const UCMParams&        params,
+                                amrex::Real             time,
+                                int                     lev = 0);
+
 #endif // ERF_UCM_ALLOCATE_H
