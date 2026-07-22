@@ -75,10 +75,10 @@ void UCMLayer::advance(UCMFields& fields,
     // Debug: per-step ATM forcing summary on UCM grid (gated; prints every step)
     if (m_params.ucm_debug) {
         // Collectives on ALL ranks (must be outside IOProcessor guard)
-        amrex::Real ust_min = atm_u_star.min(0), ust_max = atm_u_star.max(0);
-        amrex::Real tst_min = atm_t_star.min(0), tst_max = atm_t_star.max(0);
-        amrex::Real Tat_min = T_atm_lowest.min(0), Tat_max = T_atm_lowest.max(0);
-        amrex::Real Uat_min = xvel.min(0), Uat_max = xvel.max(0);
+        amrex::Real ust_min = atm_u_star.min(0, 0), ust_max = atm_u_star.max(0, 0);
+        amrex::Real tst_min = atm_t_star.min(0, 0), tst_max = atm_t_star.max(0, 0);
+        amrex::Real Tat_min = T_atm_lowest.min(0, 0), Tat_max = T_atm_lowest.max(0, 0);
+        amrex::Real Uat_min = xvel.min(0, 0), Uat_max = xvel.max(0, 0);
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][1.3][UCMLayer::advance] ATM forcing on UCM grid:"
                            << " u_star=[" << ust_min << "," << ust_max << "] m/s"
@@ -303,13 +303,15 @@ void UCMLayer::advance(UCMFields& fields,
            const amrex::Real H_base = -rho_ref * Cp * u_star * t_star;
            const amrex::Real AH_val = ah_a(i,j,0);
 
-           // Per-facet-area diagnostic fluxes. In this simplified split all
-           // facets are driven by the same MOST t_star (see TODO above), so
-           // road and roof carry H_base directly and wall carries the
-           // frontal-area-scaled value for reporting.
-           amrex::Real Hr = H_base;
-           amrex::Real Hw = H_base * lam_f;
-           amrex::Real Hf = H_base;
+           // Phase 2.5-fix2: enforce pre-weighted facet-split convention (Phase 2.3 spec).
+           // H_road, H_wall, H_roof are each already scaled by their area fraction so
+           // they sum to the ATM-cell sensible flux. Phase 2.7 Facet3D injection assumes
+           // this convention.
+           //
+           // Per-facet pre-weighted contributions [W/m^2 of ATM cell area].
+           amrex::Real Hr = f_road * H_base;
+           amrex::Real Hw = 2.0 * pf * Hb / Wsum * H_base;  // f_wall = 2.0*pf*Hb/Wsum
+           amrex::Real Hf = f_roof * H_base;
 
            if (!amrex::Math::isfinite(Hr)) Hr = 0.0;
            if (!amrex::Math::isfinite(Hw)) Hw = 0.0;
@@ -327,15 +329,11 @@ void UCMLayer::advance(UCMFields& fields,
            h_wall_a(i,j,0) = Hw;
            h_roof_a(i,j,0) = Hf;
 
-           // Lumped plan-area sensible flux to ATM. Wall does NOT enter this
-           // sum -- wall fluxes belong to the canyon-air budget (Phase 2.4+).
-           // AH was added into Hf per unit plan area, so we subtract it here
-           // before area-weighting and re-add it after, keeping AH conservation
-           // exact regardless of pf.
-           const amrex::Real H_lumped =
-                 f_road * Hr
-               + f_roof * (Hf - AH_val)
-               + AH_val;
+           // Lumped plan-area sensible flux to ATM.
+           // Since Hr, Hw, Hf are now pre-weighted by their area fractions,
+           // they sum directly to give the ATM-cell sensible heat flux.
+           // Wall does NOT enter this sum -- wall fluxes belong to canyon-air budget (Phase 2.4+).
+           const amrex::Real H_lumped = Hr + Hw + Hf;
 
            h_sens_a(i,j,0) = H_lumped;
        });
