@@ -55,8 +55,27 @@ enum UCMPlotfileComponents {
     UCMPlot_SVF_road         = 17,  ///< Road sky view factor [-]
     UCMPlot_SVF_roof         = 18,  ///< Roof sky view factor [-] (always 1.0)
 
-    // Total
-    UCMPlot_ncomp            = 19   ///< Total number of components
+    // Total (Phase 2.4)
+    UCMPlot_ncomp            = 19   ///< Total number of components (Phase 2.4)
+};
+
+/**
+ * @enum ATMPlotfileComponents
+ * @brief Component indices for ATM-grid aggregates in UCM plotfile (Phase 2.5)
+ *
+ * These are computed per ATM cell from the UCM 2D slab.
+ * Total ncomp = 5 in Phase 2.5.
+ * Written to a separate section of the plotfile or separate file if needed.
+ */
+enum ATMPlotfileComponents {
+    ATMPlot_f_urb_atm         = 0,   ///< Urban fraction per ATM cell [0,1] (Phase 2.5)
+    ATMPlot_H_bldg_mean_atm   = 1,   ///< Mean building height per ATM cell [m] (Phase 2.5)
+    ATMPlot_H_bldg_std_atm    = 2,   ///< Std dev building height per ATM cell [m] (Phase 2.5)
+    ATMPlot_lambda_p_atm      = 3,   ///< Mean plan-area density per ATM cell [-] (Phase 2.5)
+    ATMPlot_lambda_f_atm      = 4,   ///< Mean frontal-area density per ATM cell [-] (Phase 2.5)
+
+    // Total (Phase 2.5)
+    ATMPlot_ncomp             = 5    ///< Total number of ATM-grid components (Phase 2.5)
 };
 
 /**
