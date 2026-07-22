@@ -13,6 +13,7 @@
 #include <sstream>
 #include <algorithm>
 #include <iomanip>
+#include <set>
 
 // Verify POD struct is MPI_Bcast safe
 static_assert(std::is_trivially_copyable_v<UCMMaterial>,
