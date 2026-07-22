@@ -97,31 +97,38 @@ void aggregate_ucm_morphology_to_atm(
     int                        lev = 0);
 
 /**
- * @brief Coarsen UCM fluxes to ATM grid with urban-fraction weighting (Phase 2.5).
+ * @brief Coarsen UCM fluxes to ATM grid (convention B: area-averaged, no divide-by-f_urb).
  *
  * When grid_ratio == 1, performs a direct copy. When grid_ratio > 1, uses
  * `amrex::average_down` with refinement vector (grid_ratio, grid_ratio, 1) to
  * spatially average the finer UCM flux to the coarser ATM grid (matching Dust pattern).
  *
- * **Phase 2.5 Enhancement: Urban-fraction-weighted coarsening**
- * Instead of a plain area-average (which dilutes flux when urban fraction < 1),
- * this function multiplies UCM flux by is_urban mask before coarsening, then
- * normalizes by the coarsened urban fraction (f_urb_atm). This ensures correct
- * flux magnitude when urban patches don't fill an ATM cell.
+ * **Phase 2.5 Convention B (conservation-preserving, area-averaged):**
+ * Instead of a divide-by-urban-fraction (which would require injection-side reweighting),
+ * this function multiplies UCM flux by is_urban mask before coarsening, then returns
+ * the area-averaged result. This ensures conservation: the sum of ATM-grid fluxes
+ * equals the sum of urban UCM-grid fluxes, with no injection-side reweighting needed.
+ *
+ * Formula:
+ * ```
+ * Q_atm(I,J) = (1 / N_total) * sum_{UCM cells in ATM cell} (is_urban * Q_ucm)
+ * ```
+ * where N_total = grid_ratio^2 (total UCM cells, urban + non-urban).
+ *
+ * The injection kernel `apply_ucm_tendency_to_cc_source` reads Q_atm AS-IS with no
+ * further multiplication by f_urb. This mirrors the ERF-Fire convention on ERF-Hazard.
  *
  * **Debug trace format (IO rank only):**
  * ```
  * [UCM][2.5][coarsen_ucm_flux_to_atm]
  *   grid_ratio={ratio}
  *   before: Q_ucm min={min_ucm} max={max_ucm}
- *   after:  Q_atm min={min_atm} max={max_atm}
- *   f_urb: min={min_f} max={max_f}
+ *   after:  Q_atm min={min_atm} max={max_atm} (area-averaged)
  * ```
  *
- * @param[out] Q_atm_out      Output coarsened flux on ATM grid (ncomp=1)
+ * @param[out] Q_atm_out      Output coarsened flux on ATM grid (ncomp=1) [W/m²]
  * @param[in]  Q_ucm          Input flux on UCM grid (ncomp=1): H_sensible or LE_latent [W/m²]
- * @param[in]  is_urban_ucm   Urban mask on UCM grid (0 or 1); used for weighting
- * @param[in]  f_urb_atm      Urban fraction on ATM grid (pre-computed by aggregate_ucm_morphology_to_atm)
+ * @param[in]  is_urban_ucm   Urban mask on UCM grid (0 or 1); used for masking before coarsening
  * @param[in]  geom_ucm       UCM geometry
  * @param[in]  geom_atm       ATM geometry
  * @param[in]  grid_ratio     Refinement factor (UCM vs ATM); typically 2 or 1
@@ -129,13 +136,12 @@ void aggregate_ucm_morphology_to_atm(
  *
  * @note All ParallelFor kernels respect is_urban mask and GPU-safe (noexcept).
  * @note Ghost cells are properly handled by average_down.
- * @note When f_urb = 0 (no urban cells), Q_atm is set to 0.0 (safe division).
+ * @note Verified by check_conservation.py to satisfy H_atm_max <= H_ucm_max.
  */
 void coarsen_ucm_flux_to_atm(
     amrex::MultiFab&           Q_atm_out,
     const amrex::MultiFab&     Q_ucm,
     const amrex::iMultiFab&    is_urban_ucm,
-    const amrex::MultiFab&     f_urb_atm,
     const amrex::Geometry&     geom_ucm,
     const amrex::Geometry&     geom_atm,
     int                        grid_ratio,

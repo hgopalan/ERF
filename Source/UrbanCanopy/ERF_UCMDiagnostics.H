@@ -6,12 +6,12 @@
  * containing key scalar quantities that characterize the UCM state:
  * max/min skin temperatures, max canyon temperature, fluxes, etc.
  *
- * **CSV Format (Phase 2.3+):**
+ * **CSV Format (Phase 2.5+):**
  * ```
  * step, time_s, T_skin_roof_max, T_skin_wall_max, T_skin_road_max,
  * T_canyon_max, H_sensible_max, H_sensible_sum, LE_latent_max,
  * H_road_max, H_wall_max, H_roof_max, AH_max,
- * f_urb_max, H_bldg_mean_max, H_bldg_std_max, lambda_f_max
+ * f_urb_max, H_bldg_mean_max, H_bldg_std_max, lambda_f_max, H_atm_max
  * ```
  *
  * Note: Aggregates (f_urb, H_bldg_mean, etc.) are ~constant (static refinement),
@@ -77,14 +77,16 @@ public:
      * - H_sensible_max:  maximum sensible heat flux [W/m²]
      * - H_sensible_sum:  domain-sum sensible heat flux [W]
      * - LE_latent_max:   maximum latent heat flux [W/m²]
+     * - H_atm_max:       maximum ATM-grid aggregated flux [W/m²] (Phase 2.5)
      *
      * Only processes cells where is_urban(i,j,0) == 1.
      *
      * **Debug trace format (IO rank only):**
      * ```
-     * [UCM][1.4][UCMDiagnostics::append] step={nstep} time={time}
+     * [UCM][2.5][UCMDiagnostics::append] step={nstep} time={time}
      *   T_skin_roof_max={T_roof_max} T_canyon_max={T_canyon_max}
      *   H_sensible_max={H_max} H_sensible_sum={H_sum}
+     *   H_atm_max={H_atm_max}
      * ```
      *
      * Duplicate-write check: if nstep == m_last_write_step, function
@@ -97,6 +99,7 @@ public:
      * @param[in] H_bldg_mean_atm  Mean building height on ATM grid [optional, Phase 2.5]
      * @param[in] H_bldg_std_atm   Std dev building height on ATM grid [optional, Phase 2.5]
      * @param[in] lambda_f_atm     Frontal-area density on ATM grid [optional, Phase 2.5]
+     * @param[in] H_atm            Aggregated ATM-grid sensible heat flux [optional, Phase 2.5]
      * @param[in] lev      AMR level (default 0)
      */
     void append(const UCMFields& fields, int nstep, amrex::Real time,
@@ -104,6 +107,7 @@ public:
                 const amrex::MultiFab* H_bldg_mean_atm = nullptr,
                 const amrex::MultiFab* H_bldg_std_atm = nullptr,
                 const amrex::MultiFab* lambda_f_atm = nullptr,
+                const amrex::MultiFab* H_atm = nullptr,
                 int lev = 0);
 
 private:
@@ -142,6 +146,7 @@ private:
      * @param[in] H_bldg_mean_max  Max mean building height [m] (Phase 2.5, nullable)
      * @param[in] H_bldg_std_max   Max std dev building height [m] (Phase 2.5, nullable)
      * @param[in] lambda_f_max     Max frontal-area density (Phase 2.5, nullable)
+     * @param[in] H_atm_max        Max ATM-grid aggregated flux [W/m²] (Phase 2.5, nullable)
      */
     void write_row(int nstep, amrex::Real time,
                   amrex::Real T_roof_max, amrex::Real T_wall_max, amrex::Real T_road_max,
@@ -150,7 +155,8 @@ private:
                   amrex::Real H_road_max, amrex::Real H_wall_max, 
                   amrex::Real H_roof_max, amrex::Real AH_max,
                   amrex::Real f_urb_max = 0.0, amrex::Real H_bldg_mean_max = 0.0,
-                  amrex::Real H_bldg_std_max = 0.0, amrex::Real lambda_f_max = 0.0);
+                  amrex::Real H_bldg_std_max = 0.0, amrex::Real lambda_f_max = 0.0,
+                  amrex::Real H_atm_max = 0.0);
 };
 
 #endif  // ERF_UCM_DIAGNOSTICS_H

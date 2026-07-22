@@ -430,12 +430,26 @@ ParallelFor(bx_atm, [=] AMREX_GPU_DEVICE (int I, int J, int K) noexcept {
 Conservation convention: total flux is preserved with `(1/N_total)` weighting,
 NOT `(1/N_urban)`. Comment above the kernel MUST state which convention is in use.
 
-For Phase 2.5 convention A (weighted-divide, currently in use):
+**Phase 2.5 convention B (conservation-preserving, area-averaged, no injection-side reweight):**
 ```cpp
-Q_atm = sum(is_urban * Q_ucm) / f_urb_atm
+Q_atm = (1 / N_total) * sum(is_urban * Q_ucm)
 ```
-This requires the injection kernel (`apply_ucm_tendency_to_cc_source`) to
-multiply back by `f_urb_atm` to recover the area-averaged tendency.
+This is the reference convention, used on ERF-Hazard branch. The injection kernel
+(`apply_ucm_tendency_to_cc_source`) reads Q_atm AS-IS with NO multiplication by `f_urb_atm`.
+Total urban heat production is preserved by construction:
+  ```
+  sum_over_ATM(Q_atm * dA_atm) = sum_over_UCM_urban(Q_ucm * dA_ucm)
+  ```
+Advantages:
+- No division-by-zero risk when f_urb=0.
+- No silent over-injection in partial-urban ATM cells.
+- Matches ERF-Fire convention (Source/Fire/ERF_FireAtmCoupling.H).
+
+**Lesson (Phase 2.5 conservation fix):** Do NOT post-hoc divide an area-averaged flux
+by `f_urb` on the coarsening side unless the injection side multiplies it back (convention A).
+Convention B (pure area average, no divide, no reweight) is the reference. Anything else
+silently over-injects in partial-urban ATM cells by a factor of `1/f_urb` (e.g., 4× too high
+in a 25%-urban cell).
 
 ---
 
