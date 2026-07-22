@@ -350,6 +350,9 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             z_cc_ptr = &z_phys_flat;
         }
 
+           if (rhotheta_src.size() <= (size_t)lev) {
+        rhotheta_src.resize(lev + 1);
+            }
         if (!rhotheta_src[lev]) {
             rhotheta_src[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 1);
         }
