@@ -59,6 +59,26 @@ void UCMLayer::advance(UCMFields& fields,
                        int lev)
 {
     // ========================================================================
+    // Initialize output flux fields and debug print refined ATM inputs
+    // ========================================================================
+    
+    fields.H_sensible->setVal(0.0);
+    fields.LE_latent->setVal(0.0);
+
+    // Collectives on all ranks
+    amrex::Real ust_min = atm_u_star.min(0), ust_max = atm_u_star.max(0);
+    amrex::Real tst_min = atm_t_star.min(0), tst_max = atm_t_star.max(0);
+    amrex::Real Tat_min = T_atm_lowest.min(0), Tat_max = T_atm_lowest.max(0);
+    amrex::Real Uat_min = xvel.min(0), Uat_max = xvel.max(0);
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "[UCM][debug] on UCM grid:"
+                       << " u_star=["  << ust_min << "," << ust_max << "]"
+                       << " t_star=["  << tst_min << "," << tst_max << "]"
+                       << " T_atm=["   << Tat_min << "," << Tat_max << "]"
+                       << " U_atm=["   << Uat_min << "," << Uat_max << "]\n";
+    }
+
+    // ========================================================================
     // Step 1: Allocate and extract forcing (u*, wind, T, q, SW/LW)
     // ========================================================================
 
@@ -131,47 +151,35 @@ void UCMLayer::advance(UCMFields& fields,
     fields.T_skin_road->setVal(T_init);
     fields.T_canyon_air->setVal(T_canyon_init);
     
-    // Phase 1.3: Compute sensible heat flux using bulk-aerodynamic formula
-    // H = ρ · Cp_d · Ch · U · (T_skin − T_atm)  [W/m²]
-    // For neutral homogeneous test: u_star=0, ΔT=0 → H=0
-    //
-    // Kernel: For each (i,j), compute H as:
-    // Ch derived from u_star (via surface layer model)
-    // U reconstructed from wind at zref
-    // ΔT = T_skin - T_atm
+    // Phase 1.3: Compute sensible heat flux using MOST identity
+    // H = - ρ · Cp_d · u_star · t_star  [W/m²]
+    // Zero-safe: identically 0 when u_star == 0 or t_star == 0
     
     const amrex::Real Cp = Cp_d;
     const amrex::Real rho_ref = 1.2;  // Reference density [kg/m³]
     
-    for (amrex::MFIter mfi(*fields.H_sensible, amrex::TilingIfNotGPU()); 
+    // Iterate over atm_t_star (on UCM grid) to compute H_sensible
+    for (amrex::MFIter mfi(atm_t_star, amrex::TilingIfNotGPU()); 
          mfi.isValid(); ++mfi) 
     {
         const amrex::Box& bx = mfi.tilebox();
-        auto h_a   = fields.H_sensible->array(mfi);
-        auto u_a   = forcing.u_star->const_array(mfi);
-        auto w_a   = forcing.wind_ref->const_array(mfi);
-        auto t_a   = forcing.T_atm_ref->const_array(mfi);
-        auto t_skin_a = fields.T_skin_roof->const_array(mfi);
+        auto h_a    = fields.H_sensible->array(mfi);
+        auto u_a    = forcing.u_star->const_array(mfi);
+        auto t_st_a = atm_t_star.const_array(mfi);
         
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            // u_star from surface layer
+            // MOST identity: H = - ρ Cp u* t*
             const amrex::Real u_star = u_a(i, j, 0);
+            const amrex::Real t_star = t_st_a(i, j, 0);
             
-            // Wind magnitude at reference height
-            const amrex::Real u_ref = std::sqrt(w_a(i, j, 0) * w_a(i, j, 0) + 
-                                               w_a(i, j, 1) * w_a(i, j, 1));
+            amrex::Real H_sensible = - rho_ref * Cp * u_star * t_star;
             
-            // Heat transfer coefficient: Ch = u_star / (|U| + eps)
-            // Prevent division by zero with small epsilon
-            const amrex::Real eps = 1.0e-8;
-            const amrex::Real Ch = u_star / (u_ref + eps);
+            // Guard against non-finite values
+            if (!std::isfinite(H_sensible)) {
+                H_sensible = 0.0;
+            }
             
-            // Temperature difference
-            const amrex::Real dT = t_skin_a(i, j, 0) - t_a(i, j, 0);
-            
-            // Sensible heat flux [W/m²]
-            // H = ρ Cp Ch |U| ΔT
-            h_a(i, j, 0) = rho_ref * Cp * Ch * u_ref * dT;
+            h_a(i, j, 0) = H_sensible;
         });
     }
     

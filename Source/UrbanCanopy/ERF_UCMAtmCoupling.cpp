@@ -17,6 +17,71 @@
 #include <AMReX_Print.H>
 
 /**
+ * @brief Refine an ATM-grid MultiFab onto the UCM 2D slab grid.
+ *
+ * Piecewise-constant injection: each ATM cell (i,j) in the slab is replicated
+ * into a grid_ratio x grid_ratio block of UCM cells.
+ *
+ * Implementation:
+ * 1. Extract 2D slab from Q_atm_in at k=klo_atm
+ * 2. Build coarse MultiFab on UCM DM with coarsened UCM BA
+ * 3. ParallelCopy from slab to coarse
+ * 4. Inject coarse → fine using division of cell indices
+ */
+void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
+                       const amrex::MultiFab& Q_atm_in,
+                       int                    grid_ratio,
+                       int                    klo_atm)
+{
+    using namespace amrex;
+
+    // Step 1: build a 2D ATM slab at k = klo_atm covering Q_atm_in's BA
+    BoxList bl;
+    for (int i = 0; i < Q_atm_in.boxArray().size(); ++i) {
+        Box b = Q_atm_in.boxArray()[i];
+        b.setSmall(2, klo_atm);
+        b.setBig(2,   klo_atm);
+        bl.push_back(b);
+    }
+    BoxArray ba_atm_slab(std::move(bl));
+    MultiFab atm_slab(ba_atm_slab, Q_atm_in.DistributionMap(), 1, 0);
+    atm_slab.setVal(0.0);
+    atm_slab.ParallelCopy(Q_atm_in, 0, 0, 1);
+
+    if (grid_ratio == 1) {
+        Q_ucm_out.ParallelCopy(atm_slab, 0, 0, 1);
+        return;
+    }
+
+    // Step 2: align ranks: build a coarse MF on the UCM DM but with the
+    // coarsened UCM BA, then ParallelCopy from ATM slab.
+    BoxArray ba_ucm_coarsened = Q_ucm_out.boxArray();
+    ba_ucm_coarsened.coarsen(IntVect(grid_ratio, grid_ratio, 1));
+    MultiFab coarse_on_ucm_dm(ba_ucm_coarsened, Q_ucm_out.DistributionMap(), 1, 0);
+    coarse_on_ucm_dm.setVal(0.0);
+    coarse_on_ucm_dm.ParallelCopy(atm_slab, 0, 0, 1);
+
+    // Step 3: piecewise-constant inject coarse -> fine on the UCM grid
+    for (MFIter mfi(Q_ucm_out, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.tilebox();
+        auto       fine_a = Q_ucm_out.array(mfi);
+        auto const crse_a = coarse_on_ucm_dm.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            fine_a(i, j, k) = crse_a(i / grid_ratio, j / grid_ratio, k);
+        });
+    }
+
+    // Collective min/max on ALL ranks; print on IO rank only.
+    Real qmin = Q_ucm_out.min(0);
+    Real qmax = Q_ucm_out.max(0);
+    if (ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][1.4][refine_atm_to_ucm] gr=" << grid_ratio
+                << " klo_atm=" << klo_atm
+                << " Q_ucm=[" << qmin << ", " << qmax << "]\n";
+    }
+}
+
+/**
  * @brief Coarsen UCM fluxes to ATM grid.
  *
  * Implementation of the coarsen pattern. When grid_ratio==1, performs a direct copy.
