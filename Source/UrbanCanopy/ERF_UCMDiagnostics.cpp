@@ -141,5 +141,15 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
                        << " H_wall_max=" << H_wall_max
                        << " H_roof_max=" << H_roof_max
                        << " AH_max=" << AH_max << "\n";
+
+        // Phase 2.3 sum-invariant check: is H_sensible == H_road + H_wall + H_roof ?
+        const amrex::Real facet_raw_sum = H_road_max + H_wall_max + H_roof_max;
+        const amrex::Real residual_raw  = H_max - facet_raw_sum;
+        amrex::Print() << "  [sum_check] H_sensible=" << H_max
+                       << "  raw_sum(H_road+H_wall+H_roof)=" << facet_raw_sum
+                       << "  residual=" << residual_raw
+                       << (std::abs(residual_raw) < 1.0e-6 * std::max(1.0, std::abs(H_max))
+                               ? "  [OK]" : "  [FAIL]")
+                       << "\n";
     }
 }
