@@ -68,6 +68,12 @@ void UCMParams::read_from_parmparse(int lev)
     pp.query("building_layout_csv_path", building_layout_csv_path);
     pp.query("material_library_csv_path", material_library_csv_path);
 
+    // Section 9b: Phase 2.3 — Facet-split sensible heat and anthropogenic heat
+    pp.query("plan_area_frac_uniform", plan_area_frac_uniform);
+    pp.query("AH_uniform_Wm2", AH_uniform_Wm2);
+    pp.query("AH_daytime_peak", AH_daytime_peak);
+    pp.query("AH_profile_type_default", AH_profile_type_default);
+
     // Section 9a: Test placeholders
     pp.query("test_ustar", test_ustar);
     pp.query("test_surf_temp_K", test_surf_temp_K);

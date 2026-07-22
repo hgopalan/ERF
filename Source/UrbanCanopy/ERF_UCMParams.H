@@ -143,6 +143,15 @@ struct UCMParams
     std::string material_library_csv_path = ""; ///< Path to materials.csv (empty = homogeneous)
 
     // =========================================================================
+    // Section 9b: Phase 2.3 — Facet-split sensible heat and anthropogenic heat
+    // =========================================================================
+
+    amrex::Real plan_area_frac_uniform = 0.5;   ///< Default plan-area fraction [-]
+    amrex::Real AH_uniform_Wm2         = 0.0;   ///< Uniform anthropogenic heat [W/m^2]
+    amrex::Real AH_daytime_peak        = 20.0;  ///< Peak of diurnal AH [W/m^2]
+    int         AH_profile_type_default = 0;    ///< 0 = uniform, 1 = diurnal cosine
+
+    // =========================================================================
     // Section 9a: Test placeholders (Phase 1.1 only; replaced Phase 1.3+)
     // =========================================================================
 

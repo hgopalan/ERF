@@ -182,6 +182,28 @@ struct UCMFields
     std::unique_ptr<amrex::MultiFab> d_disp_ucm;
 
     // =========================================================================
+    // Phase 2.3: Facet-split sensible heat and anthropogenic heat
+    // =========================================================================
+
+    /// Road sensible heat flux [W/m²]. Phase 2.3: facet split from H_sensible.
+    std::unique_ptr<amrex::MultiFab> H_road;
+
+    /// Wall sensible heat flux [W/m²]. Phase 2.3: facet split from H_sensible.
+    std::unique_ptr<amrex::MultiFab> H_wall;
+
+    /// Roof sensible heat flux [W/m²]. Phase 2.3: facet split from H_sensible.
+    std::unique_ptr<amrex::MultiFab> H_roof;
+
+    /// Anthropogenic heat flux [W/m²]. Phase 2.3: added to roof; distributed by Profile.
+    std::unique_ptr<amrex::MultiFab> AH;
+
+    /// Plan-area fraction (building footprint / grid cell area) [-]. Phase 2.3: needed for facet split.
+    std::unique_ptr<amrex::MultiFab> plan_area_frac;
+
+    /// Anthropogenic heat profile selector [0=uniform, 1=diurnal]. Phase 2.3: per-cell from CSV.
+    std::unique_ptr<amrex::iMultiFab> ah_profile_id;
+
+    // =========================================================================
     // Public methods
     // =========================================================================
 

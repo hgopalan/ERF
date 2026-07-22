@@ -19,7 +19,9 @@
 static_assert(std::is_trivially_copyable_v<UCMBuildingRow>,
               "UCMBuildingRow must be trivially copyable for MPI_Bcast");
 
-void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path, int lev, bool ucm_debug)
+void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path, 
+                                                  int nx_ucm, int ny_ucm,
+                                                  int lev, bool ucm_debug)
 {
     // Clear any previous data
     m_rows.clear();
@@ -166,12 +168,31 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path, int le
             amrex::Abort(duplicate_msg);
         }
 
+        // Phase 2.3: Validate row count == nx_ucm * ny_ucm
+        const int expected_rows = nx_ucm * ny_ucm;
+        if (n_rows != expected_rows) {
+            amrex::Abort("[UCM][2.3][UCMBuildingLayoutReader] CSV row count mismatch. "
+                         "Got " + std::to_string(n_rows) + " rows, expected " +
+                         std::to_string(expected_rows) + " (= nx_ucm * ny_ucm = " +
+                         std::to_string(nx_ucm) + " * " + std::to_string(ny_ucm) + "). "
+                         "CSV i,j MUST be UCM indices, not ATM indices.");
+        }
+
+        // Phase 2.3: Validate (i,j) ranges for all rows
+        for (const auto& r : m_rows) {
+            if (r.i < 0 || r.i >= nx_ucm || r.j < 0 || r.j >= ny_ucm) {
+                amrex::Abort("[UCM][2.3][UCMBuildingLayoutReader] Row (i=" + std::to_string(r.i) +
+                             ",j=" + std::to_string(r.j) + ") out of UCM range [0," +
+                             std::to_string(nx_ucm) + ")x[0," + std::to_string(ny_ucm) + ").");
+            }
+        }
+
         // Debug trace
         if (ucm_debug) {
             amrex::Print()
                 << "\n[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast]\n"
                 << "  path = " << path << "\n"
-                << "  rows_parsed = " << n_rows << "\n";
+                << "  rows_parsed = " << n_rows << " (expected " << expected_rows << ")\n";
             if (n_rows > 0) {
                 amrex::Print()
                     << "  bldg_id: min=" << min_vals.bldg_id << ", max=" << max_vals.bldg_id << "\n"

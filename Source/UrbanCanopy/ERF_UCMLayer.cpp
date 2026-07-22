@@ -65,6 +65,11 @@ void UCMLayer::advance(UCMFields& fields,
     fields.H_sensible->setVal(0.0);
     fields.LE_latent->setVal(0.0);
 
+    // Phase 2.3: zero-init facet-split fluxes
+    fields.H_road->setVal(0.0);
+    fields.H_wall->setVal(0.0);
+    fields.H_roof->setVal(0.0);
+
     // Collectives on all ranks
     amrex::Real ust_min = atm_u_star.min(0), ust_max = atm_u_star.max(0);
     amrex::Real tst_min = atm_t_star.min(0), tst_max = atm_t_star.max(0);

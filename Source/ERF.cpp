@@ -1285,8 +1285,15 @@ ERF::InitData_post ()
             
             // Instantiate and load building layout reader
             m_ucm_building_reader = std::make_unique<UCMBuildingLayoutReader>();
+            
+            // Compute UCM grid dimensions from domain
+            amrex::Box domain_box = m_ucm_grid[lev]->geom.Domain();
+            int nx_ucm = domain_box.length(0);
+            int ny_ucm = domain_box.length(1);
+            
             m_ucm_building_reader->read_and_broadcast(
-                m_ucm_params.building_layout_csv_path, lev, m_ucm_params.ucm_debug);
+                m_ucm_params.building_layout_csv_path, nx_ucm, ny_ucm, 
+                lev, m_ucm_params.ucm_debug);
             
             // Fill UCM fields from CSV data
             fill_ucm_fields_from_csv(*m_ucm_fields[lev], *m_ucm_grid[lev],
