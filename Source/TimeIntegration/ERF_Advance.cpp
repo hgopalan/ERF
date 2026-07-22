@@ -137,26 +137,68 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     // **************************************************************************************
     #ifdef ERF_USE_UCM
     if (m_ucm_params.enable && m_ucm_layer[lev] != nullptr && m_SurfaceLayer) {
-        // Create temporary MultiFabs for scalar extraction if needed
-        amrex::MultiFab T_atm_mf(vars_old[lev][Vars::cons].boxArray(),
-                                vars_old[lev][Vars::cons].DistributionMap(),
-                                1, amrex::IntVect(1,1,0));
-        amrex::MultiFab q_atm_mf(vars_old[lev][Vars::cons].boxArray(),
-                                vars_old[lev][Vars::cons].DistributionMap(),
-                                1, amrex::IntVect(1,1,0));
 
-        // Extract atmospheric forcing from SurfaceLayer diagnostics and ATM state.
-        // NOTE: SurfaceLayer accessors take `lev` and return MultiFab*; deref to pass by reference.
+        const int gr      = m_ucm_params.grid_ratio;
+        const int klo_atm = Geom(lev).Domain().smallEnd(2);
+
+        // --- Build ATM-grid T_atm and q_atm (θ = ρθ/ρ, q = ρq/ρ) with 1 ghost ---
+        amrex::MultiFab T_atm_3d(S_old.boxArray(), S_old.DistributionMap(), 1, amrex::IntVect(1,1,0));
+        T_atm_3d.setVal(0.0);
+        amrex::MultiFab::Copy  (T_atm_3d, S_old, RhoTheta_comp, 0, 1, T_atm_3d.nGrowVect());
+        amrex::MultiFab::Divide(T_atm_3d, S_old, Rho_comp,      0, 1, T_atm_3d.nGrowVect());
+
+        amrex::MultiFab q_atm_3d(S_old.boxArray(), S_old.DistributionMap(), 1, amrex::IntVect(1,1,0));
+        q_atm_3d.setVal(0.0);
+        if (solverChoice.moisture_type != MoistureType::None) {
+            amrex::MultiFab::Copy  (q_atm_3d, S_old, RhoQ1_comp, 0, 1, q_atm_3d.nGrowVect());
+            amrex::MultiFab::Divide(q_atm_3d, S_old, Rho_comp,   0, 1, q_atm_3d.nGrowVect());
+        }
+
+        // --- Interpolate U,V to cell centers on ATM (2D horizontal slab at k=klo) ---
+        amrex::MultiFab U_cc_atm(S_old.boxArray(), S_old.DistributionMap(), 1, 0);
+        amrex::MultiFab V_cc_atm(S_old.boxArray(), S_old.DistributionMap(), 1, 0);
+        U_cc_atm.setVal(0.0);
+        V_cc_atm.setVal(0.0);
+        for (amrex::MFIter mfi(U_cc_atm, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.tilebox();
+            auto ucc = U_cc_atm.array(mfi);
+            auto vcc = V_cc_atm.array(mfi);
+            auto const uf = U_old.const_array(mfi);
+            auto const vf = V_old.const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                ucc(i,j,k) = amrex::Real(0.5) * (uf(i,j,k) + uf(i+1,j,k));
+                vcc(i,j,k) = amrex::Real(0.5) * (vf(i,j,k) + vf(i,j+1,k));
+            });
+        }
+
+        // --- Allocate UCM-grid scratch and refine each ATM input onto UCM ---
+        const auto& ba_u = m_ucm_grid[lev]->ba;
+        const auto& dm_u = m_ucm_grid[lev]->dm;
+
+        amrex::MultiFab T_atm_ucm(ba_u, dm_u, 1, 0);
+        amrex::MultiFab q_atm_ucm(ba_u, dm_u, 1, 0);
+        amrex::MultiFab U_atm_ucm(ba_u, dm_u, 1, 0);
+        amrex::MultiFab V_atm_ucm(ba_u, dm_u, 1, 0);
+        amrex::MultiFab ustar_ucm(ba_u, dm_u, 1, 0);
+        amrex::MultiFab tstar_ucm(ba_u, dm_u, 1, 0);
+        amrex::MultiFab qstar_ucm(ba_u, dm_u, 1, 0);
+
+        refine_atm_to_ucm(T_atm_ucm, T_atm_3d,                                     gr, klo_atm);
+        refine_atm_to_ucm(q_atm_ucm, q_atm_3d,                                     gr, klo_atm);
+        refine_atm_to_ucm(U_atm_ucm, U_cc_atm,                                     gr, klo_atm);
+        refine_atm_to_ucm(V_atm_ucm, V_cc_atm,                                     gr, klo_atm);
+        refine_atm_to_ucm(ustar_ucm, *m_SurfaceLayer->get_u_star(lev),             gr, klo_atm);
+        refine_atm_to_ucm(tstar_ucm, *m_SurfaceLayer->get_t_star(lev),             gr, klo_atm);
+        refine_atm_to_ucm(qstar_ucm, *m_SurfaceLayer->get_q_star(lev),             gr, klo_atm);
+
+        // --- Call UCMLayer::advance with UCM-grid inputs and UCM geometry ---
         m_ucm_layer[lev]->advance(*m_ucm_fields[lev], *m_ucm_forcing[lev], *m_ucm_grid[lev],
-                                 *m_SurfaceLayer->get_u_star(lev),
-                                 *m_SurfaceLayer->get_t_star(lev),
-                                 *m_SurfaceLayer->get_q_star(lev),
-                                 vars_old[lev][Vars::xvel],
-                                 vars_old[lev][Vars::yvel],
-                                 *z_phys_cc[lev].get(),
-                                 T_atm_mf,
-                                 q_atm_mf,
-                                 Geom(lev), time, dt_lev, 1, lev);
+                                  ustar_ucm, tstar_ucm, qstar_ucm,
+                                  U_atm_ucm, V_atm_ucm,
+                                  *z_phys_cc[lev].get(),
+                                  T_atm_ucm, q_atm_ucm,
+                                  m_ucm_grid[lev]->geom,
+                                  time, dt_lev, 1, lev);
     }
     #endif
 

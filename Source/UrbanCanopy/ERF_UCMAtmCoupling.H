@@ -35,6 +35,15 @@
 #include <AMReX_Geometry.H>
 
 /**
+ * Refine an ATM-grid MultiFab onto the UCM 2D slab grid via piecewise-constant
+ * injection. Handles both 3D ATM MFs (uses k = klo_atm plane) and 2D ATM slab MFs.
+ */
+void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
+                       const amrex::MultiFab& Q_atm_in,
+                       int                    grid_ratio,
+                       int                    klo_atm);
+
+/**
  * @brief Coarsen UCM fluxes to ATM grid.
  *
  * When grid_ratio == 1, performs a direct copy. When grid_ratio > 1, uses
