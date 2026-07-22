@@ -78,6 +78,36 @@ void UCMLayer::advance(UCMFields& fields,
                        << " U_atm=["   << Uat_min << "," << Uat_max << "]\n";
     }
 
+    // Phase 2.2: One-time banner to verify per-cell wiring
+    static bool banner_printed = false;
+    if (!banner_printed && m_params.ucm_debug &&
+        amrex::ParallelDescriptor::IOProcessor()) {
+        banner_printed = true;
+        // Collectives before IOProcessor guard
+        amrex::Real H_min = fields.H_bldg->min(0);
+        amrex::Real H_max = fields.H_bldg->max(0);
+        amrex::Real alb_min = fields.albedo_roof->min(0);
+        amrex::Real alb_max = fields.albedo_roof->max(0);
+        amrex::Real k_min = fields.k_therm_roof->min(0);
+        amrex::Real k_max = fields.k_therm_roof->max(0);
+        amrex::Real z0_min = fields.z0_ucm->min(0);
+        amrex::Real z0_max = fields.z0_ucm->max(0);
+        amrex::Real d_min = fields.d_disp_ucm->min(0);
+        amrex::Real d_max = fields.d_disp_ucm->max(0);
+         
+        amrex::Print() << "\n[UCM][2.2][BANNER] Phase 2.2 per-cell wiring active:\n"
+                       << "  H_bldg      min=" << H_min
+                       << " max=" << H_max << " m\n"
+                       << "  albedo_roof min=" << alb_min
+                       << " max=" << alb_max << "\n"
+                       << "  k_therm_roof min=" << k_min
+                       << " max=" << k_max << " W/m/K\n"
+                       << "  z0          min=" << z0_min
+                       << " max=" << z0_max << " m\n"
+                       << "  d_disp      min=" << d_min
+                       << " max=" << d_max << " m\n\n";
+    }
+
     // ========================================================================
     // Step 1: Allocate and extract forcing (u*, wind, T, q, SW/LW)
     // ========================================================================
