@@ -12,7 +12,6 @@
 
 #include <ERF_UCMAllocate.H>
 #include <AMReX_Print.H>
-#include <unordered_map>
 
 using namespace amrex;
 
