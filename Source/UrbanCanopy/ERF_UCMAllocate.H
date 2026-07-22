@@ -44,6 +44,40 @@ void allocate_ucm_fields(UCMFields& fields,
                          int lev = 0);
 
 /**
+ * @brief Fill all UCMFields with heterogeneous values from CSV data
+ *
+ * Phase 2.1 heterogeneous fill pattern:
+ *  - Maps each (i_ucm, j_ucm) to ATM coordinates (i_atm, j_atm) using grid_ratio
+ *  - Looks up corresponding UCMBuildingRow from building_layout_csv
+ *  - Retrieves material properties from material_library_csv via mat_ids
+ *  - Writes H_bldg, W_road, W_roof, albedo_*, emissivity_*, is_urban to MultiFabs
+ *
+ * Debug output emitted per-unique-mat_id when params.ucm_debug is true,
+ * prefixed as [UCM][2.1][fill_ucm_fields_from_csv].
+ *
+ * @param[in,out] fields            UCMFields struct to fill
+ * @param[in] ucm_grid              UCM grid (needed for domain information)
+ * @param[in] building_reader       Building layout reader (broadcast data)
+ * @param[in] material_registry     Material library registry (broadcast data)
+ * @param[in] grid_ratio            UCM-to-ATM refinement ratio
+ * @param[in] lev                   AMR level (default 0; Phase 1.1 only uses lev=0)
+ * @param[in] ucm_debug             Debug flag for output
+ *
+ * @precondition all_allocated() == true (fields already allocated)
+ * @precondition building_reader.read_and_broadcast() completed
+ * @precondition material_registry.load_and_broadcast() completed
+ * @postcondition all MultiFabs contain heterogeneous values from CSV
+ * @throws Aborts if building row lookup fails or material lookup fails
+ */
+void fill_ucm_fields_from_csv(UCMFields& fields,
+                              const UCMGrid& ucm_grid,
+                              const UCMBuildingLayoutReader& building_reader,
+                              const UCMMaterialRegistry& material_registry,
+                              int grid_ratio,
+                              int lev = 0,
+                              bool ucm_debug = false);
+
+/**
  * @brief Fill all UCMFields with homogeneous values from ParmParse
  *
  * Sets every field to its uniform value from UCMParams. Called once after

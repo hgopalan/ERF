@@ -1003,6 +1003,10 @@ private:
     // UCM Phase 1.1: SLUCM module parameters and grid
     #ifdef ERF_USE_UCM
     UCMParams m_ucm_params;
+    // Phase 2.1: CSV readers for heterogeneous inputs (created on-demand during init)
+    std::unique_ptr<UCMMaterialRegistry> m_ucm_material_registry;
+    std::unique_ptr<UCMBuildingLayoutReader> m_ucm_building_reader;
+    // Phase 1.2: grid and fields
     amrex::Vector<std::unique_ptr<UCMGrid>> m_ucm_grid;
     amrex::Vector<std::unique_ptr<UCMFields>> m_ucm_fields;  // Phase 1.2: all MultiFabs (morphology, radiative properties, state, is_urban mask)
     // Phase 1.3: physics driver and forcing container

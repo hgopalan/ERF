@@ -1261,10 +1261,44 @@ ERF::InitData_post ()
         m_ucm_fields[lev] = std::make_unique<UCMFields>();
         allocate_ucm_fields(*m_ucm_fields[lev], *m_ucm_grid[lev], m_ucm_params, lev);
 
-        if (m_ucm_params.ucm_debug) {
-            amrex::Print() << "[UCM][1.2][ERF] calling fill_ucm_fields_homogeneous for lev=" << lev << "\n";
+        // Log which field init source will be used
+        if (m_ucm_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.1] Field init source: ";
+            if (!m_ucm_params.building_layout_csv_path.empty() &&
+                !m_ucm_params.material_library_csv_path.empty()) {
+                amrex::Print() << "CSV (" << m_ucm_params.building_layout_csv_path
+                               << ", " << m_ucm_params.material_library_csv_path << ")\n";
+            } else {
+                amrex::Print() << "Phase 1.4 uniforms (H_bldg="
+                               << m_ucm_params.H_bldg_uniform << ", ...)\n";
+            }
         }
-        fill_ucm_fields_homogeneous(*m_ucm_fields[lev], m_ucm_params, lev);
+
+        // Phase 2.1: Load CSV readers if paths are provided
+        if (!m_ucm_params.building_layout_csv_path.empty() &&
+            !m_ucm_params.material_library_csv_path.empty()) {
+            
+            // Instantiate and load material registry
+            m_ucm_material_registry = std::make_unique<UCMMaterialRegistry>();
+            m_ucm_material_registry->load_and_broadcast(
+                m_ucm_params.material_library_csv_path, lev, m_ucm_params.ucm_debug);
+            
+            // Instantiate and load building layout reader
+            m_ucm_building_reader = std::make_unique<UCMBuildingLayoutReader>();
+            m_ucm_building_reader->read_and_broadcast(
+                m_ucm_params.building_layout_csv_path, lev, m_ucm_params.ucm_debug);
+            
+            // Fill UCM fields from CSV data
+            fill_ucm_fields_from_csv(*m_ucm_fields[lev], *m_ucm_grid[lev],
+                                     *m_ucm_building_reader, *m_ucm_material_registry,
+                                     m_ucm_params.grid_ratio, lev, m_ucm_params.ucm_debug);
+        } else {
+            // Phase 1.4 fallback: fill with homogeneous parameters
+            if (m_ucm_params.ucm_debug) {
+                amrex::Print() << "[UCM][1.2][ERF] calling fill_ucm_fields_homogeneous for lev=" << lev << "\n";
+            }
+            fill_ucm_fields_homogeneous(*m_ucm_fields[lev], m_ucm_params, lev);
+        }
 
         // Post-allocation Phase 1.2 grid check
         check_ucm_grid_and_fields(m_ucm_params, *m_ucm_grid[lev], *m_ucm_fields[lev], lev);
