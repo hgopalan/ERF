@@ -30,6 +30,8 @@ void UCMParams::read_from_parmparse(int lev)
     // Section 3: Atmosphere coupling
     pp.query("atm_feedback", atm_feedback);
     pp.query("zref", zref);
+    pp.query("z0_over_H", z0_over_H);
+    pp.query("d_over_H", d_over_H);
 
     // Section 4: Vertical structure
     pp.query("alpha_ucm", alpha_ucm);

@@ -116,7 +116,7 @@ void fill_ucm_ustar_from_surface_layer(amrex::MultiFab& ucm_ustar,
                                        int lev = 0);
 
 /**
- * @brief Interpolate ATM wind to z_target via log-law profile
+ * @brief Interpolate ATM wind to z_target via log-law profile with per-cell z0 and displacement
  *
  * Extracts horizontal wind (u, v) from ATM at lowest level and interpolates
  * vertically to target height using Monin-Obukhov similarity (log-law under
@@ -130,14 +130,14 @@ void fill_ucm_ustar_from_surface_layer(amrex::MultiFab& ucm_ustar,
  * where klo is the lowest ATM cell index (typically klo=0 for non-terrain,
  * or adjusted for terrain-following coords).
  *
- * **Interpolation (neutral, log-law):**
+ * **Interpolation (neutral, log-law with displacement height):**
  * \f[
- *   U(z) = \frac{u_*}{\kappa} \ln\left(\frac{z + z_0}{z_0}\right)
+ *   U(z) = \frac{u_*}{\kappa} \ln\left(\frac{z - d + z_0}{z_0}\right)
  * \f]
  *
- * Roughness length z_0 = 0.1 m (urban typical, currently hardcoded;
- * Phase 2.1+ allows heterogeneous). Obukhov-length stability correction
- * deferred to Phase 1.4.
+ * Roughness length z_0 and displacement height d are now per-cell (Phase 2.2);
+ * they come from z0_ucm and d_disp_ucm MultiFabs.
+ * Obukhov-length stability correction deferred to Phase 1.4.
  *
  * **Debug Trace (if ucm_debug=true):**
  * Emits [UCM][1.3][fill_ucm_wind_from_interpolation] z_target at (0,0);
@@ -148,20 +148,24 @@ void fill_ucm_ustar_from_surface_layer(amrex::MultiFab& ucm_ustar,
  * @param[in]  yvel           ATM v-velocity [m/s]
  * @param[in]  z_phys_cc      ATM physical z at cell centers [m]
  * @param[in]  H_bldg         Building height from UCMFields [m]
+ * @param[in]  z0_ucm         Per-cell aerodynamic roughness [m] (Phase 2.2)
+ * @param[in]  d_disp_ucm     Per-cell displacement height [m] (Phase 2.2)
  * @param[in]  zref           Reference height above roof from UCMParams [m]
  * @param[in]  ucm_grid       UCM grid geometry and layout
  * @param[in]  nz_atm         Number of vertical ATM levels
  * @param[in]  lev            AMR level (default 0)
  */
 void fill_ucm_wind_from_interpolation(amrex::MultiFab& ucm_wind_ref,
-                                      const amrex::MultiFab& xvel,
-                                      const amrex::MultiFab& yvel,
-                                      const amrex::MultiFab& z_phys_cc,
-                                      const amrex::MultiFab& H_bldg,
-                                      amrex::Real zref,
-                                      const UCMGrid& ucm_grid,
-                                      int nz_atm,
-                                      int lev = 0);
+                                     const amrex::MultiFab& xvel,
+                                     const amrex::MultiFab& yvel,
+                                     const amrex::MultiFab& z_phys_cc,
+                                     const amrex::MultiFab& H_bldg,
+                                     const amrex::MultiFab& z0_ucm,
+                                     const amrex::MultiFab& d_disp_ucm,
+                                     amrex::Real zref,
+                                     const UCMGrid& ucm_grid,
+                                     int nz_atm,
+                                     int lev = 0);
 
 /**
  * @brief Extract atmospheric scalars (T, q) from lowest ATM level to UCM

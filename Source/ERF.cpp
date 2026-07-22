@@ -1300,6 +1300,12 @@ ERF::InitData_post ()
             fill_ucm_fields_homogeneous(*m_ucm_fields[lev], m_ucm_params, lev);
         }
 
+        // Phase 2.2: Fill z0 and displacement height (after homogeneous or CSV fill)
+        if (m_ucm_params.ucm_debug) {
+            amrex::Print() << "[UCM][2.2][ERF] filling z0 and d_disp for lev=" << lev << "\n";
+        }
+        fill_ucm_z0_and_disp(*m_ucm_fields[lev], m_ucm_params, lev);
+
         // Post-allocation Phase 1.2 grid check
         check_ucm_grid_and_fields(m_ucm_params, *m_ucm_grid[lev], *m_ucm_fields[lev], lev);
 

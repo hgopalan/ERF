@@ -134,6 +134,54 @@ struct UCMFields
     std::unique_ptr<amrex::iMultiFab> mat_id_road;
 
     // =========================================================================
+    // Per-cell thermal properties (Phase 2.2 NEW; material-dependent)
+    // =========================================================================
+
+    /// Roof thermal conductivity [W/m/K]. Phase 2.2: filled from material registry.
+    /// Phase 1.2 (homogeneous fallback): set to k_therm_uniform.
+    std::unique_ptr<amrex::MultiFab> k_therm_roof;
+
+    /// Wall thermal conductivity [W/m/K]. Phase 2.2: filled from material registry.
+    /// Phase 1.2 (homogeneous fallback): set to k_therm_uniform.
+    std::unique_ptr<amrex::MultiFab> k_therm_wall;
+
+    /// Road thermal conductivity [W/m/K]. Phase 2.2: filled from material registry.
+    /// Phase 1.2 (homogeneous fallback): set to k_therm_uniform.
+    std::unique_ptr<amrex::MultiFab> k_therm_road;
+
+    /// Roof volumetric heat capacity [J/m³/K]. Phase 2.2: from material registry.
+    /// Phase 1.2 (homogeneous fallback): set to rho_cp_uniform.
+    std::unique_ptr<amrex::MultiFab> rho_cp_roof;
+
+    /// Wall volumetric heat capacity [J/m³/K]. Phase 2.2: from material registry.
+    /// Phase 1.2 (homogeneous fallback): set to rho_cp_uniform.
+    std::unique_ptr<amrex::MultiFab> rho_cp_wall;
+
+    /// Road volumetric heat capacity [J/m³/K]. Phase 2.2: from material registry.
+    /// Phase 1.2 (homogeneous fallback): set to rho_cp_uniform.
+    std::unique_ptr<amrex::MultiFab> rho_cp_road;
+
+    /// Roof slab thickness [m]. Phase 2.2: from material registry.
+    /// Phase 1.2 (homogeneous fallback): set to slab_L.
+    std::unique_ptr<amrex::MultiFab> slab_L_roof;
+
+    /// Wall slab thickness [m]. Phase 2.2: from material registry.
+    /// Phase 1.2 (homogeneous fallback): set to slab_L.
+    std::unique_ptr<amrex::MultiFab> slab_L_wall;
+
+    /// Road slab thickness [m]. Phase 2.2: from material registry.
+    /// Phase 1.2 (homogeneous fallback): set to slab_L.
+    std::unique_ptr<amrex::MultiFab> slab_L_road;
+
+    /// Aerodynamic roughness length [m]. Phase 2.2: from z0 = z0_over_H * H_bldg.
+    /// Phase 1.2 (homogeneous fallback): set to 0.1 m (MOST default).
+    std::unique_ptr<amrex::MultiFab> z0_ucm;
+
+    /// Displacement height [m]. Phase 2.2: from d = d_over_H * H_bldg.
+    /// Phase 1.2 (homogeneous fallback): set to 0.0 m.
+    std::unique_ptr<amrex::MultiFab> d_disp_ucm;
+
+    // =========================================================================
     // Public methods
     // =========================================================================
 

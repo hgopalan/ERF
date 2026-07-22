@@ -82,7 +82,7 @@ erf.abl_driver_type = "GeostrophicWind"
 erf.abl_geo_wind = 15.0 0.0 0.0
 
 # ========================================================================
-# SLUCM Configuration (Phase 2.1 — CSV reader testing with heterogeneity)
+# SLUCM Configuration (Phase 2.2 — Per-cell morphology wiring test)
 # ========================================================================
 erf.ucm.enable              = true
 erf.ucm.ucm_debug           = true
@@ -96,9 +96,13 @@ erf.ucm.atm_feedback        = 1.0
 erf.ucm.zref                = 2.0
 erf.ucm.alpha_ucm           = 15.0   # e-folding depth ~ 1.5×H_bldg
 
+# Phase 2.2: Aerodynamic parameters (z0 and displacement height)
+erf.ucm.z0_over_H           = 0.1
+erf.ucm.d_over_H            = 0.7
+
 # Phase 2.1: CSV readers for heterogeneous inputs
-# Heterogeneous case: 16×16 grid with 4×4 non-urban patch and two materials
-erf.ucm.building_layout_csv_path = "building_layout.csv"
+# Heterogeneous case: 16×16 grid with varying building height (5m and 25m)
+erf.ucm.building_layout_csv_path = "building_hetero_morph.csv"
 erf.ucm.material_library_csv_path = "materials.csv"
 
 # Phase 1.4 homogeneous fallback values (not used when CSV paths specified)
@@ -114,8 +118,8 @@ erf.ucm.emissivity_roof     = 0.90
 erf.ucm.emissivity_wall     = 0.90
 erf.ucm.emissivity_road     = 0.94
 
-# Phase 1.4 diagnostics output
-erf.ucm.ucm_plot_int        = 12    # Plotfile every 12 hours
+# Phase 2.2 diagnostics output
+erf.ucm.ucm_plot_int        = 100   # Plotfile at end
 erf.ucm.ucm_diag_file       = "ucm_diag.dat"
 
 erf.ucm.test_ustar          = 0.0

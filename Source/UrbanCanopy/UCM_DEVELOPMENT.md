@@ -20,8 +20,8 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 1 | 1.2 | **UCM 2D grid + homogeneous URBPARM reader + is_urban mask** | ERF_UCMFields, allocate_ucm_fields, fill_ucm_fields_homogeneous, Phase 1.2 test | 🟢 IN PROGRESS |
 | 1 | 1.3 | Slab conduction + SLUCM SEB core + wind/scalar extraction | Vertical heat diffusion, sensible heat balance, wind interpolation at zref | 🔲 PLANNED |
 | 1 | 1.4 | One-way exponential injection + diagnostics + plotfile + homogeneous regression | ATM coupling, CSV output, plotfile writer, baseline test | 🔲 PLANNED |
-| 2 | 2.1 | Building-layout CSV reader + material library CSV | ERF_UCMBuildingReader, morphology per cell (H, W_road, W_roof, fabric) | 🔲 PLANNED |
-| 2 | 2.2 | Per-cell morphology + heterogeneous canopy wind | Heterogeneous tower morphologies, per-cell wind extraction | 🔲 PLANNED |
+| 2 | 2.1 | Building-layout CSV reader + material library CSV | ERF_UCMBuildingReader, morphology per cell (H, W_road, W_roof, fabric) | ✅ COMPLETE (PRs #203, #204, #205) |
+| 2 | 2.2 | Per-cell material + morphology wiring into SEB + heterogeneous wind | 11 new MultiFabs, per-cell z0/d, wind interpolation, tests | 🟢 IN PROGRESS |
 | 2 | 2.3 | Heterogeneous facet SEB + anthropogenic heat | Wall/roof/road per-cell energy balance, waste heat injection | 🔲 PLANNED |
 | 2 | 2.4 | Shadowing + heterogeneous regression | Sun angle shadow mapping, heterogeneous baseline regression | 🔲 PLANNED |
 | 3 | 3.1 | Finest-level anchoring turned on + multi-level regression | anchor_level > 0 enabled, multi-AMR-level UCM slab | 🔲 PLANNED |
@@ -494,3 +494,160 @@ See main problem statement for full checklist. Key items:
 6. All acceptance criteria from problem statement met (20 items total)
 
 ---
+
+---
+
+## Phase 2.1: Building-Layout CSV Reader + Material Library CSV
+
+### Phase 2.1 Status
+
+✅ **COMPLETE** — Merged via PRs #203, #204, #205.
+
+**Phase 2.1 Deliverables (from merged PRs):**
+
+1. **`ERF_UCMBuildingReader.H/cpp`** — CSV parsing for building layout
+   - Reads `building_layout.csv` with columns: `i, j, height_m, W_road_m, W_roof_m, is_urban, roof_mat_id, wall_mat_id, road_mat_id`
+   - Grid-ratio-aware cell mapping (CSV in UCM grid coords)
+   - Per-cell `H_bldg`, `W_road`, `W_roof`, `is_urban` mask, material IDs populated
+
+2. **`ERF_UCMMaterialReader.H/cpp`** — CSV parsing for material properties
+   - Reads `materials.csv` with columns: `mat_id, albedo, emissivity, k_therm_W_per_mK, rho_cp_J_per_m3K, thickness_m`
+   - Populates in-memory `UCMMaterialRegistry` for O(1) lookup by `mat_id`
+   - Per-material `UCMMaterial` struct: thermal and optical properties
+
+3. **Modified `fill_ucm_fields_from_csv`** in `ERF_UCMAllocate.cpp`
+   - Calls building reader to populate UCM morphology MultiFabs
+   - Calls material reader to populate registry
+   - Phase 2.1 Bug #12 fixed: `is_urban == 1` guard around all registry lookups
+
+4. **Canonical test:** `Exec/CanonicalTests/SLUCM/UCMHeterogeneousBlock/`
+   - 16×16 uniform morphology via CSV (not hardcoded)
+   - Verifies CSV parsing + registry lookup work end-to-end
+
+---
+
+## Phase 2.2: Per-Cell Material + Morphology Wiring into SEB
+
+### Phase 2.2 Status
+
+🟢 **IN PROGRESS** — Tasks 1–13 implementation in active development. Goal: wire per-cell material properties (`albedo`, `emissivity`, `k_therm`, `rho_cp`, `slab_L`) and aerodynamic properties (`z0`, `d_disp`) through to SEB and wind extraction kernels.
+
+### Phase 2.2 Deliverables
+
+**Task 1: Add 11 new MultiFabs to UCMFields**
+- `k_therm_roof`, `k_therm_wall`, `k_therm_road` — Thermal conductivity [W/m/K] per material
+- `rho_cp_roof`, `rho_cp_wall`, `rho_cp_road` — Heat capacity density [J/m³/K]
+- `slab_L_roof`, `slab_L_wall`, `slab_L_road` — Material thickness [m]
+- `z0_ucm`, `d_disp_ucm` — Aerodynamic roughness and displacement height [m]
+
+**Task 2: Allocate new MultiFabs**
+- All 11 fields allocated in `allocate_ucm_fields` with ghost = `IntVect(1,1,0)`
+
+**Task 3: Fill defaults in homogeneous path**
+- Homogeneous initialization via `fill_ucm_fields_homogeneous` reads uniform params and broadcasts to all cells
+
+**Task 4: Fill from CSV**
+- CSV pathway: `fill_ucm_fields_from_csv` loops per-cell, looks up material via registry, assigns per-cell property
+- Phase 2.1 Bug #12 rule enforced: `is_urban == 1` guard around all registry accesses
+
+**Task 5: New function `fill_ucm_z0_and_disp`**
+- Computes per-cell `z0 = z0_over_H * H_bldg` and `d_disp = d_over_H * H_bldg`
+- One-time initialization (GPU-friendly ParallelFor)
+- Safety defaults for non-urban cells
+
+**Task 6: Add ParmParse parameters**
+- `z0_over_H` (default 0.1, MacDonald 1998)
+- `d_over_H` (default 0.7, WRF convention)
+- Both printed in startup banner
+
+**Task 7: Extend wind extraction for per-cell z0/d**
+- Modified `fill_ucm_wind_from_interpolation` signature to accept `z0_ucm` and `d_disp_ucm`
+- Log-law kernel rewired: `ln((z - d) / z0)` instead of hardcoded `z0=0.1, d=0`
+
+**Task 8: Rewire SEB kernel for per-cell material properties**
+- `ERF_UCMLayer.cpp::advance` SEB section reads per-cell `k_therm`, `rho_cp`, `slab_L` arrays
+- Replaces scalar `params.k_therm_uniform`, etc. with `k_therm_roof_arr(i,j,0)`, etc.
+- Physics unchanged; pure wiring
+
+**Task 9: Call `fill_ucm_z0_and_disp` from `ERF.cpp`**
+- Immediately after homogeneous or CSV field fill
+- Ensures z0/d computed before any wind extraction
+
+**Task 10: Add Phase 2.2 banner**
+- Static one-print verification at top of `UCMLayer::advance`
+- Displays min/max of H_bldg, albedo_roof, k_therm_roof, z0, d_disp
+- Defense against silent regressions in heterogeneous CSV pipeline
+
+**Task 11: Fix all existing test inputs**
+- Removed `erf.fixed_dt` (deprecated timestepping)
+- Added `erf.cfl = 0.5` (adaptive dt)
+- Adjusted `max_step` for CI compatibility
+
+**Task 12: Create `UCMHeterogeneousMorphology` test**
+- 16×16 domain with two-region morphology (5 m vs. 25 m buildings)
+- Expected z0 range: 0.5 m – 2.5 m
+- Expected d_disp range: 3.5 m – 17.5 m
+- Pass: BANNER shows heterogeneous ranges (if collapsed → regression)
+
+**Task 13: Create `UCMHeterogeneousMaterials` test**
+- 16×16 domain with uniform 15 m morphology
+- Checkerboard material pattern: cool roof (albedo=0.6, k=0.2) vs. dark roof (albedo=0.1, k=2.0)
+- Pass: BANNER shows uniform H_bldg but heterogeneous albedo
+
+### Phase 2.2 Parameters (ParmParse)
+
+```
+erf.ucm.z0_over_H          [Real] = 0.1     # z0 = z0_over_H * H_bldg
+erf.ucm.d_over_H           [Real] = 0.7     # d_disp = d_over_H * H_bldg
+```
+
+### Phase 2.2 Key Design Rules
+
+- **R5 (is_urban guard):** Every UCM ParallelFor kernel must start `if (is_urb_a(i,j,0) == 0) return;`
+- **R6 (registry safety):** Every `registry.lookup(mat_id)` is inside `if (is_urban == 1) { ... }`
+- **R2 (Array4 access):** Use `mf.array(mfi)` (write), never `mf[mfi].array()`
+- **R4 (collectives):** `mf.min(0)`, `.max(0)` OUTSIDE `IOProcessor()` blocks
+
+### Phase 2.2 Code Paths
+
+**Homogeneous:**
+1. `ERF.cpp` calls `fill_ucm_fields_homogeneous` → broadcasts scalar params to all cells
+2. `ERF.cpp` calls `fill_ucm_z0_and_disp` → computes z0, d from H_bldg and params
+3. Wind extraction uses per-cell z0, d (even though uniform in this path)
+
+**Heterogeneous (CSV):**
+1. `ERF.cpp` calls `fill_ucm_fields_from_csv` → reads CSV, populates per-cell morphology and material registry
+2. CSV fill loop guards all registry lookups with `is_urban == 1`
+3. `ERF.cpp` calls `fill_ucm_z0_and_disp` → computes per-cell z0, d from heterogeneous H_bldg
+4. Wind extraction uses per-cell z0, d (truly heterogeneous)
+
+### Phase 2.2 Test Suite
+
+**Modified existing tests** (Phase 1.1–1.4 regression):
+- `UCMScaffold`, `UCMHomogeneousGrid`, `UCMHomogeneousSEB`, `UCMOneWayInject`, `UCMHomogeneousViaCSV`
+- All now use `erf.cfl = 0.5` instead of deprecated `erf.fixed_dt`
+
+**New canonical tests** (Phase 2.2 validation):
+- `UCMHeterogeneousMorphology` — Two building heights, two material IDs
+- `UCMHeterogeneousMaterials` — One building height, checkerboard materials
+
+### Phase 2.2 Acceptance Criteria
+
+1. ✅ Builds with `-DERF_ENABLE_UCM=ON` and `=OFF`
+2. ✅ All prior tests (1.1–1.4) still exit 0 after cfl conversion
+3. ✅ `UCMHeterogeneousMorphology` exits 0; BANNER shows `H_bldg min=5 max=25`, `z0 min=0.5 max=2.5`, `d_disp min=3.5 max=17.5`
+4. ✅ `UCMHeterogeneousMaterials` exits 0; BANNER shows uniform `H_bldg` but `albedo_roof min=0.1 max=0.6`
+5. ✅ No `erf.fixed_dt` in any test input
+6. ✅ No `amr.max_step` (all converted to `max_step`)
+7. ✅ No `get_theta_star` in UCM code
+8. ✅ Every UCM ParallelFor guarded by `is_urban` check
+9. ✅ Every registry lookup inside `is_urban == 1` block
+10. ✅ All collectives (min/max) OUTSIDE `IOProcessor()` guards
+
+### Phase 2.2 Expected Merge Date
+
+End of Phase 2.2 milestone (date TBD). Incremental PR strategy:
+- **Phase 2.2a** — Tasks 1–7 (multifabs, allocation, wind extraction)
+- **Phase 2.2b** — Tasks 8–10 (SEB rewiring, banner, initialization)
+- **Phase 2.2c** — Tasks 11–13 (test suite + validation)
+

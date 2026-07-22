@@ -148,6 +148,8 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   grid_ratio          = " << params.grid_ratio << "\n";
     amrex::Print() << "[UCM]   allow_steep_terrain = " << (params.allow_steep_terrain ? "true" : "false") << "\n";
     amrex::Print() << "[UCM]   zref [m]            = " << params.zref << "\n";
+    amrex::Print() << "[UCM]   z0_over_H           = " << params.z0_over_H << "\n";
+    amrex::Print() << "[UCM]   d_over_H            = " << params.d_over_H << "\n";
     amrex::Print() << "[UCM]   --- Phase 1.3 Slab Conduction Parameters ---\n";
     amrex::Print() << "[UCM]   H_bldg_uniform [m]  = " << params.H_bldg_uniform << "\n";
     amrex::Print() << "[UCM]   W_road_uniform [m]  = " << params.W_road_uniform << "\n";

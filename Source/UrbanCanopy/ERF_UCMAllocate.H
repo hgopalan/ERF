@@ -109,4 +109,26 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
                                   const UCMParams& params,
                                   int lev = 0);
 
+/**
+ * @brief Fill z0_ucm and d_disp_ucm from building height and morphology ratios
+ *
+ * Phase 2.2 new function:
+ *  - z0_ucm(i,j) = z0_over_H * H_bldg(i,j) for urban cells
+ *  - d_disp_ucm(i,j) = d_over_H * H_bldg(i,j) for urban cells
+ *  - Non-urban cells: z0_ucm = 0.1 m (MOST default), d_disp_ucm = 0.0 m
+ *
+ * Called AFTER fill_ucm_fields_homogeneous or fill_ucm_fields_from_csv.
+ *
+ * @param[in,out] fields    UCMFields struct to fill
+ * @param[in] params        UCM parameters (z0_over_H, d_over_H, debug flag)
+ * @param[in] lev           AMR level (default 0; Phase 1.1 only uses lev=0)
+ *
+ * @precondition all_allocated() == true (fields already allocated)
+ * @precondition H_bldg and is_urban already filled
+ * @postcondition z0_ucm and d_disp_ucm contain per-cell values
+ */
+void fill_ucm_z0_and_disp(UCMFields& fields,
+                          const UCMParams& params,
+                          int lev = 0);
+
 #endif // ERF_UCM_ALLOCATE_H
