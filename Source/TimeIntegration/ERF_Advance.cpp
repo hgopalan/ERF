@@ -350,8 +350,13 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             z_cc_ptr = &z_phys_flat;
         }
 
+        if (!rhotheta_src[lev]) {
+            rhotheta_src[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 1);
+        }
+        rhotheta_src[lev]->setVal(0.0);
+
         apply_ucm_tendency_to_cc_source(
-            cc_source,
+            *rhotheta_src[lev],
             *m_ucm_H_atm[lev],
             has_moisture ? m_ucm_LE_atm[lev].get() : nullptr,
             *z_cc_ptr,
