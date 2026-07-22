@@ -326,11 +326,35 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             m_ucm_is_urban_atm[lev]->setVal(1);
         }
 
+        // -----------------------------------------------------------------------
+        // Build a flat-terrain z_phys_cc scratch when terrain is not active.
+        // z_phys_cc[lev] is null when erf.terrain_type = None; the injection
+        // kernel needs cell-center heights above surface to compute the
+        // exponential profile.  For flat terrain: z_cc(i,j,k) = (k+0.5)*dz.
+        // -----------------------------------------------------------------------
+        amrex::MultiFab z_phys_flat;
+        const amrex::MultiFab* z_cc_ptr = z_phys_cc[lev].get();
+        if (!z_cc_ptr) {
+            const auto dxArr = Geom(lev).CellSizeArray();
+            const int  klo_f = Geom(lev).Domain().smallEnd(2);
+            z_phys_flat.define(ba, dm, 1, 1);
+            for (amrex::MFIter mfi(z_phys_flat, amrex::TilingIfNotGPU());
+                 mfi.isValid(); ++mfi) {
+                const amrex::Box& bx = mfi.growntilebox();
+                auto z_a = z_phys_flat.array(mfi);
+                amrex::ParallelFor(bx,
+                    [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                        z_a(i, j, k) = (k - klo_f + amrex::Real(0.5)) * dxArr[2];
+                    });
+            }
+            z_cc_ptr = &z_phys_flat;
+        }
+
         apply_ucm_tendency_to_cc_source(
             cc_source,
             *m_ucm_H_atm[lev],
             has_moisture ? m_ucm_LE_atm[lev].get() : nullptr,
-            *z_phys_cc[lev].get(),
+            *z_cc_ptr,
             S_old,
             Geom(lev),
             *m_ucm_is_urban_atm[lev],
@@ -520,23 +544,6 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             //     on to the coarse/fine boundary at the fine resolution
             //
             Interpolater* mapper_f = &face_cons_linear_interp;
-
-            // PhysBCFunctNoOp null_bc;
-            // MultiFab tempx(vars_new[lev+1][Vars::xvel].boxArray(),vars_new[lev+1][Vars::xvel].DistributionMap(),1,0);
-            // tempx.setVal(0);
-            // xmom_crse_rhs[lev+1].setVal(0);
-            // FPr_u[lev].FillSet(tempx               , time       , null_bc, domain_bcs_type);
-            // FPr_u[lev].FillSet(xmom_crse_rhs[lev+1], time+dt_lev, null_bc, domain_bcs_type);
-            // MultiFab::Subtract(xmom_crse_rhs[lev+1],tempx,0,0,1,IntVect{0});
-            // xmom_crse_rhs[lev+1].mult(one/dt_lev,0,1,0);
-
-            // MultiFab tempy(vars_new[lev+1][Vars::yvel].boxArray(),vars_new[lev+1][Vars::yvel].DistributionMap(),1,0);
-            // tempy.setVal(0);
-            // ymom_crse_rhs[lev+1].setVal(0);
-            // FPr_v[lev].FillSet(tempy               , time       , null_bc, domain_bcs_type);
-            // FPr_v[lev].FillSet(ymom_crse_rhs[lev+1], time+dt_lev, null_bc, domain_bcs_type);
-            // MultiFab::Subtract(ymom_crse_rhs[lev+1],tempy,0,0,1,IntVect{0});
-            // ymom_crse_rhs[lev+1].mult(one/dt_lev,0,1,0);
 
             MultiFab temp_state(zmom_crse_rhs[lev+1].boxArray(),zmom_crse_rhs[lev+1].DistributionMap(),1,0);
             InterpFromCoarseLevel(temp_state,            IntVect{0}, IntVect{0}, state_old[IntVars::zmom], 0, 0, 1,
