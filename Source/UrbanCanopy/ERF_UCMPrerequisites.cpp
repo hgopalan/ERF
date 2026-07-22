@@ -189,8 +189,8 @@ void check_ucm_grid_and_fields(const UCMParams& params,
         ucm_fields.all_allocated(),
         "[UCM] Not all UCMFields are allocated! Check the list above.");
 
-    // Phase 1.2: Grid check banner (post-allocation)
-    if (amrex::ParallelDescriptor::IOProcessor()) {
+    // Phase 1.2: Grid check banner (post-allocation, gated on ucm_debug)
+    if (params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
         const amrex::Box& ucm_domain = ucm_grid.geom.Domain();
         int nx_ucm = ucm_domain.bigEnd(0) - ucm_domain.smallEnd(0) + 1;
         int ny_ucm = ucm_domain.bigEnd(1) - ucm_domain.smallEnd(1) + 1;

@@ -199,6 +199,13 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                                   T_atm_ucm, q_atm_ucm,
                                   m_ucm_grid[lev]->geom,
                                   time, dt_lev, 1, lev);
+
+        // One-per-step confirmation that SEB ran (appears once between consecutive
+        // "Making slow rhs" lines, confirming the once-per-coarse-step contract)
+        if (m_ucm_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][step] SEB advanced at time=" << time
+                           << " dt=" << dt_lev << " lev=" << lev << "\n";
+        }
     }
     #endif
 
@@ -294,11 +301,15 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     MultiFab    buoyancy(ba_z,dm,1,1); buoyancy.setVal(0);
 
     // **************************************************************************************
-    // Phase 1.4: Apply UCM atmospheric coupling (exponential injection)
+    // Phase 1.4: Cache UCM ATM fluxes once per coarse step.
+    // The actual per-RK-stage injection happens in ERF_TI_slow_rhs_pre.H via
+    // apply_ucm_tendency_to_cc_source(), which overwrites cc_src[RhoTheta_comp]
+    // after each make_sources() reset.  See ERF_UCMAtmCoupling.cpp for the
+    // RK-stage safety contract.
     // **************************************************************************************
     #ifdef ERF_USE_UCM
     if (m_ucm_params.enable && m_ucm_layer[lev] != nullptr && m_ucm_params.atm_feedback > 0.0) {
-        // Coarsen UCM fluxes to ATM grid (if not already done)
+        // Allocate cached ATM-grid flux MultiFabs on first call
         if (!m_ucm_H_atm[lev]) {
             m_ucm_H_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
             m_ucm_H_atm[lev]->setVal(0.0);
@@ -308,7 +319,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             m_ucm_LE_atm[lev]->setVal(0.0);
         }
 
-        // Coarsen UCM fluxes from UCM grid to ATM grid
+        // Coarsen UCM fluxes from UCM grid to ATM grid (lagged; constant across RK stages)
         coarsen_ucm_flux_to_atm(*m_ucm_H_atm[lev], *m_ucm_fields[lev]->H_sensible,
                                 m_ucm_grid[lev]->geom, Geom(lev),
                                 m_ucm_params.grid_ratio, lev);
@@ -318,61 +329,13 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                                     m_ucm_params.grid_ratio, lev);
         }
 
-        // Apply exponential vertical injection to cc_source
-        const bool has_moisture = (solverChoice.moisture_type != MoistureType::None);
+        // Build is_urban mask on ATM grid if not already allocated
         if (!m_ucm_is_urban_atm[lev]) {
-            // Build coarsened is_urban mask (homogeneous: all 1s for Phase 1.4)
             m_ucm_is_urban_atm[lev] = std::make_unique<amrex::iMultiFab>(ba, dm, 1, 0);
             m_ucm_is_urban_atm[lev]->setVal(1);
         }
 
-        // -----------------------------------------------------------------------
-        // Build a flat-terrain z_phys_cc scratch when terrain is not active.
-        // z_phys_cc[lev] is null when erf.terrain_type = None; the injection
-        // kernel needs cell-center heights above surface to compute the
-        // exponential profile.  For flat terrain: z_cc(i,j,k) = (k+0.5)*dz.
-        // -----------------------------------------------------------------------
-        amrex::MultiFab z_phys_flat;
-        const amrex::MultiFab* z_cc_ptr = z_phys_cc[lev].get();
-        if (!z_cc_ptr) {
-            const auto dxArr = Geom(lev).CellSizeArray();
-            const int  klo_f = Geom(lev).Domain().smallEnd(2);
-            z_phys_flat.define(ba, dm, 1, 1);
-            for (amrex::MFIter mfi(z_phys_flat, amrex::TilingIfNotGPU());
-                 mfi.isValid(); ++mfi) {
-                const amrex::Box& bx = mfi.growntilebox();
-                auto z_a = z_phys_flat.array(mfi);
-                amrex::ParallelFor(bx,
-                    [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                        z_a(i, j, k) = (k - klo_f + amrex::Real(0.5)) * dxArr[2];
-                    });
-            }
-            z_cc_ptr = &z_phys_flat;
-        }
-
-           if (rhotheta_src.size() <= (size_t)lev) {
-        rhotheta_src.resize(lev + 1);
-            }
-        if (!rhotheta_src[lev]) {
-            rhotheta_src[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 1);
-        }
-        rhotheta_src[lev]->setVal(0.0);
-
-        apply_ucm_tendency_to_cc_source(
-            *rhotheta_src[lev],
-            *m_ucm_H_atm[lev],
-            has_moisture ? m_ucm_LE_atm[lev].get() : nullptr,
-            *z_cc_ptr,
-            S_old,
-            Geom(lev),
-            *m_ucm_is_urban_atm[lev],
-            m_ucm_params.alpha_ucm,
-            m_ucm_params.atm_feedback,
-            has_moisture,
-            m_ucm_params.ucm_debug,
-            lev);
-
-        // Diagnostics output
+        // Diagnostics output (once per coarse step)
         if (m_ucm_params.ucm_diag_file.size() > 0) {
             if (!m_ucm_diagnostics[lev]) {
                 m_ucm_diagnostics[lev] = std::make_unique<UCMDiagnostics>(m_ucm_params, lev);
@@ -380,7 +343,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             m_ucm_diagnostics[lev]->append(*m_ucm_fields[lev], iteration, time, lev);
         }
 
-        // Plotfile output
+        // Plotfile output (once per coarse step)
         if (m_ucm_params.ucm_plot_int > 0 && (iteration % m_ucm_params.ucm_plot_int == 0)) {
             if (!m_ucm_plotfile[lev]) {
                 m_ucm_plotfile[lev] = std::make_unique<UCMPlotfile>(m_ucm_params, lev);
@@ -437,12 +400,12 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         check_for_negative_theta(S_old);
     }
     // Before calling advance_dycore, enable the rhotheta_src path for UCM
+    // NOTE: UCM injection now happens per-RK-stage in ERF_TI_slow_rhs_pre.H via
+    //       apply_ucm_tendency_to_cc_source() with overwrite semantics.
+    //       The custom_rhotheta_forcing path is NOT used for UCM — do NOT set it here.
     #ifdef ERF_USE_UCM
-    if (m_ucm_params.enable && m_ucm_params.atm_feedback > 0.0) {
-        solverChoice.custom_rhotheta_forcing = true;
-        solverChoice.spatial_rhotheta_forcing = true;  // 3D spatial source
-        solverChoice.custom_forcing_prim_vars = false;  // source is already rho*theta units
-    }
+    // (no custom_rhotheta_forcing for UCM — see RK-stage safety contract in
+    //  Source/UrbanCanopy/ERF_UCMAtmCoupling.cpp)
     #endif
 
     // **************************************************************************************

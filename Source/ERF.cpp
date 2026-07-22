@@ -1253,7 +1253,8 @@ ERF::InitData_post ()
         }
         m_ucm_grid[lev] = std::make_unique<UCMGrid>(
             create_ucm_grid(grids[lev], dmap[lev], geom[lev],
-                            m_ucm_params.grid_ratio, lev));
+                            m_ucm_params.grid_ratio, lev,
+                            m_ucm_params.ucm_debug));
 
         if (m_ucm_params.ucm_debug) {
             amrex::Print() << "[UCM][1.2][ERF] calling allocate_ucm_fields for lev=" << lev << "\n";

@@ -11,6 +11,18 @@
  * 2. **apply_ucm_tendency_to_cc_source**: Apply exponential-decay vertical injection
  *    (after Mandel 2011 / WRF-SFIRE fire_tendency pattern) to cc_source at every k.
  *
+ * **RK-stage safety contract (Phase 2.3):**
+ * `apply_ucm_tendency_to_cc_source` OWNS `cc_source[RhoTheta_comp]` (and
+ * optionally `cc_source[RhoQ1_comp]`) for the duration of each RK stage.
+ * It zeros those components at the top and writes with `=` (not `+=`), so
+ * calling it once per RK stage after `make_sources` resets `cc_src` gives
+ * the correct stage-invariant tendency.  The lagged fluxes (`m_ucm_H_atm`,
+ * `m_ucm_LE_atm`) are computed ONCE per coarse step in `ERF::Advance` before
+ * the MRI integrator starts, mirroring the ERF-Fire explicit-lag convention.
+ * If any other physics module writes into those same slots per stage on the
+ * same cells, this function must be moved to a pre-integrator path and
+ * semantics changed back to `+=`.
+ *
  * **Key Design Rules (Phase 1.4):**
  * - All ParallelFor kernels use: `[=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept { ... }`
  * - Array4 access via `mf.array(mfi)` / `mf.const_array(mfi)` (by value), never `mf[mfi].array()` with `auto&`
@@ -24,7 +36,7 @@
  *  - Mandel et al. (2011) "Coupled atmosphere-wildland fire modeling"
  *  - WRF Module: module_sf_urban.F / module_fire_tendency
  *  - Source/Dust/ERF_DustAtmCoupling.H (coarsen pattern)
- *  - Source/Fire/ERF_FireAtmCoupling.H (exponential injection pattern)
+ *  - Source/Fire/ERF_FireAtmCoupling.H (exponential injection pattern, ERF-Hazard branch)
  */
 
 #ifndef ERF_UCM_ATM_COUPLING_H

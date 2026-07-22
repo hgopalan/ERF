@@ -158,7 +158,7 @@
                 m_ucm_params.alpha_ucm,
                 m_ucm_params.atm_feedback,
                 has_moisture_ucm,
-                false,   // no per-RK debug spam; debug was printed before advance_dycore
+                m_ucm_params.ucm_debug,   // print per-RK banner when debug is on
                 level);
         }
 #endif

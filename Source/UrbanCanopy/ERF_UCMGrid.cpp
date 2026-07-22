@@ -24,7 +24,8 @@ create_ucm_grid(const BoxArray& ba_atm,
                 const DistributionMapping& dm_atm,
                 const Geometry& geom_atm,
                 int grid_ratio,
-                int lev)
+                int lev,
+                bool ucm_debug)
 {
     UCMGrid ug;
     ug.grid_ratio = grid_ratio;
@@ -80,8 +81,8 @@ create_ucm_grid(const BoxArray& ba_atm,
     ug.dm = dm_ucm;
     ug.geom = geom_ucm_2d;
 
-    // Phase 1.2: Emit detailed debug messages per the spec
-    if (amrex::ParallelDescriptor::IOProcessor()) {
+    // Phase 1.2: Emit debug messages (gated on ucm_debug)
+    if (ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
         const Box atm_dom = geom_atm.Domain();
         const Box ucm_dom = geom_ucm_2d.Domain();
         const RealBox atm_rb = geom_atm.ProbDomain();

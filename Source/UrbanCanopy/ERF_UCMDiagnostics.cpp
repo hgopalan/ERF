@@ -130,16 +130,18 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
                   T_canyon_max, H_max, H_sum, LE_max,
                   H_road_max, H_wall_max, H_roof_max, AH_max);
 
-        // Debug trace
-        amrex::Print() << "[UCM][2.3][UCMDiagnostics::append]\n";
-        amrex::Print() << "  step=" << nstep << " time=" << time << "\n";
-        amrex::Print() << "  T_skin_roof_max=" << T_roof_max
-                       << " T_canyon_max="     << T_canyon_max << "\n";
-        amrex::Print() << "  H_sensible_max="  << H_max
-                       << " H_sensible_sum="   << H_sum << "\n";
-        amrex::Print() << "  H_road_max=" << H_road_max
-                       << " H_wall_max=" << H_wall_max
-                       << " H_roof_max=" << H_roof_max
-                       << " AH_max=" << AH_max << "\n";
+        // Debug trace (gated: avoids noisy output every diagnostic write step)
+        if (m_params.ucm_debug) {
+            amrex::Print() << "[UCM][2.3][UCMDiagnostics::append]\n";
+            amrex::Print() << "  step=" << nstep << " time=" << time << "\n";
+            amrex::Print() << "  T_skin_roof_max=" << T_roof_max
+                           << " T_canyon_max="     << T_canyon_max << "\n";
+            amrex::Print() << "  H_sensible_max="  << H_max
+                           << " H_sensible_sum="   << H_sum << "\n";
+            amrex::Print() << "  H_road_max=" << H_road_max
+                           << " H_wall_max="  << H_wall_max
+                           << " H_roof_max="  << H_roof_max
+                           << " AH_max="      << AH_max << " W/m2\n";
+        }
     }
 }
