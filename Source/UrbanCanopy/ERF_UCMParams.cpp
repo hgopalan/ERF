@@ -62,7 +62,11 @@ void UCMParams::read_from_parmparse(int lev)
     pp.query("ucm_plot_int", ucm_plot_int);
     pp.query("ucm_diag_file", ucm_diag_file);
 
-    // Section 9: Test placeholders
+    // Section 9: CSV readers for heterogeneous inputs (Phase 2.1)
+    pp.query("building_layout_csv_path", building_layout_csv_path);
+    pp.query("material_library_csv_path", material_library_csv_path);
+
+    // Section 9a: Test placeholders
     pp.query("test_ustar", test_ustar);
     pp.query("test_surf_temp_K", test_surf_temp_K);
 }

@@ -115,6 +115,25 @@ struct UCMFields
     std::unique_ptr<amrex::iMultiFab> is_urban;
 
     // =========================================================================
+    // Per-cell material IDs (Phase 2.1 NEW; index into UCMMaterialRegistry)
+    // =========================================================================
+
+    /// Material ID for roof surface (index into UCMMaterialRegistry).
+    /// Phase 2.1: filled from building_layout.csv roof_mat_id field.
+    /// Phase 1.2 (homogeneous fallback): set to default material ID (typically 0 or 1).
+    std::unique_ptr<amrex::iMultiFab> mat_id_roof;
+
+    /// Material ID for wall surface (index into UCMMaterialRegistry).
+    /// Phase 2.1: filled from building_layout.csv wall_mat_id field.
+    /// Phase 1.2 (homogeneous fallback): set to default material ID.
+    std::unique_ptr<amrex::iMultiFab> mat_id_wall;
+
+    /// Material ID for road surface (index into UCMMaterialRegistry).
+    /// Phase 2.1: filled from building_layout.csv road_mat_id field.
+    /// Phase 1.2 (homogeneous fallback): set to default material ID.
+    std::unique_ptr<amrex::iMultiFab> mat_id_road;
+
+    // =========================================================================
     // Public methods
     // =========================================================================
 

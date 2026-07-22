@@ -134,7 +134,14 @@ struct UCMParams
     std::string ucm_diag_file  = "ucm_diag.dat"; ///< Diagnostics CSV filename
 
     // =========================================================================
-    // Section 9: Test placeholders (Phase 1.1 only; replaced Phase 1.3+)
+    // Section 9: CSV readers for heterogeneous inputs (Phase 2.1)
+    // =========================================================================
+
+    std::string building_layout_csv_path = "";  ///< Path to building-layout.csv (empty = homogeneous)
+    std::string material_library_csv_path = ""; ///< Path to materials.csv (empty = homogeneous)
+
+    // =========================================================================
+    // Section 9a: Test placeholders (Phase 1.1 only; replaced Phase 1.3+)
     // =========================================================================
 
     amrex::Real test_ustar     = 0.0;       ///< Placeholder u* before Phase 1.3 [m/s]
