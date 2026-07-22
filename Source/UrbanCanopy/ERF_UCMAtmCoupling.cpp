@@ -174,6 +174,14 @@ void apply_ucm_tendency_to_cc_source(
         warned_feedback_zero = true;
     }
 
+    // Phase 2.3: One-time debug message
+    static bool debug_injection_once = false;
+    if (!debug_injection_once && ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+        debug_injection_once = true;
+        amrex::Print() << "[UCM][2.3][ATM_COUPLING] injection uses lumped H_sensible = "
+                       << "H_road + H_wall + H_roof + AH. Facet3D is Phase 2.7.\n";
+    }
+
     // Early return if coupling is off
     if (feedback == 0.0) {
         return;
