@@ -34,6 +34,7 @@
  */
 
 #include <UrbanCanopy/ERF_UCMAtmCoupling.H>
+#include <UrbanCanopy/ERF_UCMAtmAggregation.H>
 #include <ERF_IndexDefines.H>
 #include <ERF_Constants.H>
 #include <AMReX_MultiFabUtil.H>
@@ -117,12 +118,14 @@ void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
  * then ParallelCopy into the k=klo plane of Q_atm_out.
  */
 void coarsen_ucm_flux_to_atm(
-    amrex::MultiFab&       Q_atm_out,
-    const amrex::MultiFab& Q_ucm,
-    const amrex::Geometry& /*geom_ucm*/,
-    const amrex::Geometry& geom_atm,
-    int                    grid_ratio,
-    int                    /*lev*/)
+    amrex::MultiFab&           Q_atm_out,
+    const amrex::MultiFab&     Q_ucm,
+    const amrex::iMultiFab&    is_urban_ucm,
+    const amrex::MultiFab&     f_urb_atm,
+    const amrex::Geometry&     /*geom_ucm*/,
+    const amrex::Geometry&     geom_atm,
+    int                        grid_ratio,
+    int                        /*lev*/)
 {
     using namespace amrex;
 
@@ -146,8 +149,41 @@ void coarsen_ucm_flux_to_atm(
     if (grid_ratio == 1) {
        MultiFab::Copy(atm_slab, Q_ucm, 0, 0, 1, 0);
     } else {
-       // Coarsen UCM (2D) to ATM slab (2D) with ratio (grid_ratio, grid_ratio, 1)
-       average_down(Q_ucm, atm_slab, 0, 1, IntVect(grid_ratio, grid_ratio, 1));
+       // Create masked flux: multiply UCM flux by is_urban to zero non-urban cells
+       MultiFab Q_masked(Q_ucm.boxArray(), Q_ucm.DistributionMap(), 1, Q_ucm.nGrow());
+       Q_masked.setVal(0.0);
+
+       for (MFIter mfi(Q_masked, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+           const Box& bx = mfi.tilebox();
+           auto q_masked_a = Q_masked.array(mfi);
+           auto const q_a = Q_ucm.const_array(mfi);
+           auto const is_urban_a = is_urban_ucm.const_array(mfi);
+
+           ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+               q_masked_a(i, j, k) = q_a(i, j, k) * static_cast<Real>(is_urban_a(i, j, 0));
+           });
+       }
+
+       // Coarsen masked flux via average_down
+       average_down(Q_masked, atm_slab, 0, 1, IntVect(grid_ratio, grid_ratio, 1));
+
+       // Normalize by urban fraction to recover flux per unit area of urban cells
+       // atm_slab currently has: sum(Q_ucm * is_urban) / n_cells
+       // We want: sum(Q_ucm * is_urban) / sum(is_urban) = atm_slab / f_urb
+       for (MFIter mfi(atm_slab, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+           const Box& atm_box_2d = mfi.tilebox();
+           auto slab_a = atm_slab.array(mfi);
+           auto const f_urb_a = f_urb_atm.const_array(mfi);
+
+           ParallelFor(atm_box_2d, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+               Real f_urb = f_urb_a(i, j, klo_atm);
+               if (f_urb > 1.0e-8) {
+                   slab_a(i, j, k) /= f_urb;
+               } else {
+                   slab_a(i, j, k) = 0.0;
+               }
+           });
+       }
     }
 
     // ParallelCopy the slab into k=klo_atm of Q_atm_out (only that plane overlaps).
@@ -158,12 +194,16 @@ void coarsen_ucm_flux_to_atm(
     Real max_ucm = Q_ucm.max(0);
     Real min_atm = Q_atm_out.min(0);
     Real max_atm = Q_atm_out.max(0);
+    Real min_f_urb = f_urb_atm.min(0);
+    Real max_f_urb = f_urb_atm.max(0);
+
     if (ParallelDescriptor::IOProcessor()) {
-       Print() << "[UCM][1.4][coarsen_ucm_flux_to_atm]\n"
+       Print() << "[UCM][2.5][coarsen_ucm_flux_to_atm]\n"
                << "  grid_ratio=" << grid_ratio << "\n"
                << "  before: Q_ucm  min=" << min_ucm << " max=" << max_ucm << "\n"
                << "  after:  Q_atm  min=" << min_atm << " max=" << max_atm
-               << " (only k=" << klo_atm << " plane written)\n";
+               << " (urban-fraction-weighted, only k=" << klo_atm << " plane written)\n"
+               << "  f_urb: min=" << min_f_urb << " max=" << max_f_urb << "\n";
     }
 }
 
