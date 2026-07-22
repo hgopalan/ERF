@@ -17,6 +17,9 @@
 #include <ERF_UCMFields.H>
 #include <ERF_UCMGrid.H>
 #include <ERF_UCMParams.H>
+#include <UrbanCanopy/ERF_UCMBuildingLayoutReader.H>
+#include <UrbanCanopy/ERF_UCMMaterialRegistry.H>
+
 
 /**
  * @brief Allocate all UCMFields MultiFabs on the UCM grid
