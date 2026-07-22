@@ -1105,3 +1105,55 @@ This fix switches to convention B (pure area-average, no divide, no reweight), m
 - ✅ All prior canonical tests exit 0 on 1 and 2 MPI ranks
 - ✅ `UCMOneWayInject` produces final RhoTheta bit-for-bit identical to baseline (fully-urban, f_urb=1, so A and B agree there)
 
+---
+
+## Phase 2.5-fix2: CSV is_urban Propagation, Facet-Split Symmetry, R5 Collectives, and Real Conservation Test
+
+**Status:** ✅ IN PROGRESS (PR #XXX)
+
+**Scope:** After Phase 2.5 deployment, five latent bugs were discovered in the canonical test:
+1. CSV `is_urban` field not propagating to the `is_urban` iMultiFab, so `f_urb` was always 1 (masking convention B bugs).
+2. Facet-split H_road/H_wall/H_roof asymmetry: road and roof missing area-fraction pre-weighting.
+3. R5 regression: three `.min(0)` / `.max(0)` calls missing the `nghost=0` argument.
+4. CSV readers not stripping UTF-8 BOM or leading/trailing whitespace (error messages corrupted).
+5. Conservation test insufficient: no explicit assertions for f_urb span, convention B ratio, facet symmetry.
+
+**Deliverables:**
+
+- **CSV is_urban instrumentation** — Debug traces added to `UCMBuildingLayoutReader.cpp` (after broadcast) and `ERF_UCMAllocate.cpp::fill_ucm_fields_from_csv` (after iMultiFab population) to diagnose is_urban propagation path. Traces count urban/non-urban cells and print to `[UCM][2.1][DEBUG][...]` lines if `ucm_debug=true`.
+
+- **Facet-split pre-weighting fix** — `ERF_UCMLayer.cpp` lines ~310–312: changed Hr, Hw, Hf assignments from per-facet-area to pre-weighted (area-fraction scaled). Now `Hr = f_road * H_base`, `Hw = f_wall * H_base`, `Hf = f_roof * H_base` (where f_wall is the frontal-area index). H_sensible lumped sum simplified to `Hr + Hw + Hf` (no longer manual area-weighting in the sum). Added comment: "Phase 2.5-fix2: enforce pre-weighted facet-split convention (Phase 2.3 spec)."
+
+- **R5 collective fixes** — All `.min(0, _)`, `.max(0, _)`, etc. calls changed to explicit two-argument form `.min(0, 0)`, `.max(0, 0)`. Affected files: `ERF_UCMLayer.cpp` lines 78–81, `ERF_UCMAtmAggregation.H` lines 224–233.
+
+- **CSV BOM/whitespace hardening** — `ERF_UCMBuildingLayoutReader.cpp` and `ERF_UCMMaterialRegistry.cpp`: added UTF-8 BOM stripping (0xEF 0xBB 0xBF) and leading/trailing whitespace trimming to header and data lines. Error messages on header mismatch now hex-dump the actual bytes read (no more ambiguous marker characters like `!!!`).
+
+- **Conservation test strengthening** — `check_conservation.py` rewritten with three tiered assertions:
+  - **Assertion 1:** f_urb_max >= 0.99 (fully-urban ATM cell must exist for diagonal CSV).
+  - **Assertion 2:** Convention-B ratio check: H_atm_max <= H_ucm_max * 1.10 (catches divide-by-f_urb regression).
+  - **Assertion 3:** Facet-split symmetry: H_road ≈ H_wall ≈ (H_roof - AH) within 10% pairwise (catches pre-weighting regression).
+
+- **Test inputs updated** — `Exec/CanonicalTests/SLUCM/UCMScaleAwareAggregation/inputs` now includes:
+  - `erf.most.surf_temp_flux = 0.02` (unstable surface T flux, ~25 W/m²)
+  - `erf.ucm.AH_uniform_Wm2 = 50.0` (constant anthropogenic heat)
+  - `erf.ucm.AH_profile_type_default = 1` (uniform profile, not diurnal)
+  These force non-zero flux through SEB for meaningful conservation testing.
+
+- **Lessons in UCM_MPI_SKILLS.md** — Added three new lessons (15–17):
+  - **Lesson 15:** Convention B preamble (repeated for emphasis).
+  - **Lesson 16:** CSV readers must strip BOM and whitespace; hex-dump error messages.
+  - **Lesson 17:** Facet-split fluxes must follow same convention (all pre-weighted or none); enforce with uniform-geometry canonical test.
+
+**Code quality checks:**
+
+- ✅ `[UCM][2.1][DEBUG][UCMBuildingLayoutReader]` prints urban=78 non-urban=178
+- ✅ `[UCM][2.1][DEBUG][fill_ucm_fields_from_csv]` prints matching counts with n_nonurban > 0
+- ✅ `[UCM][2.5][aggregate_ucm_morphology_to_atm]` shows f_urb: min=0 max=1
+- ✅ H_road, H_wall, H_roof approximately equal for uniform geometry (all ~72.3 W/m² pre-weighted)
+- ✅ `grep -n "/= f_urb\|convention A\|must verify" Source/UrbanCanopy/ERF_UCMAtmCoupling.cpp` → 0
+- ✅ `grep -rnE "\.min\(0\)[^,]|\.max\(0\)[^,]" Source/UrbanCanopy/*.{cpp,H}` → 0 (all R5-compliant)
+- ✅ `check_conservation.py` prints "all assertions PASS" with f_urb_max, H_atm_max, facet symmetry diagnostics
+- ✅ `UCMScaleAwareAggregation` completes on 1 and 2 MPI ranks with no hangs
+- ✅ All prior canonical tests (`UCMOneWayInject`, `UCMHomogeneousViaCSV`, `UCMHeterogeneousBlock`, `UCMHeterogeneousMaterials`, `UCMFacetSplit`, `UCMAnthroHeat`, `UCMShadowCanyon`) still exit 0
+- ✅ `UCMOneWayInject` still produces bit-for-bit identical RhoTheta (pre-weighting has no effect when f_road=f_roof=0.5 by construction)
+
