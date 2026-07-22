@@ -13,6 +13,7 @@
 #include <sstream>
 #include <algorithm>
 #include <iomanip>
+#include <cstring>
 #include <set>
 
 // Verify POD struct is MPI_Bcast safe
@@ -78,15 +79,13 @@ void UCMMaterialRegistry::load_and_broadcast(const std::string& path, int lev, b
             UCMMaterial mat{};
             std::stringstream ss(line);
             std::string field;
-            char name_str[256] = {0};
-            char desc_str[256] = {0};
 
             try {
                 // Parse fields (name and description need special handling for spaces)
                 std::getline(ss, field, ','); mat.mat_id = std::stoi(field);
 
                 // Name: read until next comma
-                std::getline(ss, field, ','); name_str[0] = '\0';
+                std::getline(ss, field, ',');
                 if (field.size() < 64) {
                     std::strncpy(mat.name, field.c_str(), 63);
                     mat.name[63] = '\0';
@@ -179,7 +178,8 @@ void UCMMaterialRegistry::load_and_broadcast(const std::string& path, int lev, b
     }
 
     // =========================================================================
-    // All ranks: MPI_Bcast material data
+    // All ranks: MPI_Bcast material data (as raw bytes to avoid needing
+    // amrex::ParallelDescriptor::Mpi_typemap<UCMMaterial> specialization).
     // =========================================================================
 
     // Broadcast material count
@@ -191,10 +191,11 @@ void UCMMaterialRegistry::load_and_broadcast(const std::string& path, int lev, b
         m_table.resize(n_materials);
     }
 
-    // Broadcast material data as bytes
+    // Broadcast material data as bytes (selects the char*/byte-count overload)
     if (n_materials > 0) {
         amrex::ParallelDescriptor::Bcast(
-            m_table.dataPtr(), n_materials * sizeof(UCMMaterial),
+            reinterpret_cast<char*>(m_table.dataPtr()),
+            static_cast<std::size_t>(n_materials) * sizeof(UCMMaterial),
             amrex::ParallelDescriptor::IOProcessorNumber());
 
         // Reconstruct m_id_to_idx on all ranks

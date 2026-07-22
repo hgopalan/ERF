@@ -169,7 +169,8 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path, int le
     }
 
     // =========================================================================
-    // All ranks: MPI_Bcast row data
+    // All ranks: MPI_Bcast row data (as raw bytes to avoid needing
+    // amrex::ParallelDescriptor::Mpi_typemap<UCMBuildingRow> specialization).
     // =========================================================================
 
     // Broadcast row count
@@ -180,10 +181,11 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path, int le
         m_rows.resize(n_rows);
     }
 
-    // Broadcast row data as bytes
+    // Broadcast row data as bytes (selects the char*/byte-count overload)
     if (n_rows > 0) {
         amrex::ParallelDescriptor::Bcast(
-            m_rows.dataPtr(), n_rows * sizeof(UCMBuildingRow),
+            reinterpret_cast<char*>(m_rows.dataPtr()),
+            static_cast<std::size_t>(n_rows) * sizeof(UCMBuildingRow),
             amrex::ParallelDescriptor::IOProcessorNumber());
 
         if (amrex::ParallelDescriptor::IOProcessor() && ucm_debug) {
