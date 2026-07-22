@@ -434,6 +434,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                 *m_ucm_H_bldg_std_atm[lev],
                 *m_ucm_lambda_p_atm[lev],
                 *m_ucm_lambda_f_atm[lev],
+                *m_ucm_H_atm[lev],
                 Geom(lev),
                 m_ucm_params.ucm_debug,
                 lev);
