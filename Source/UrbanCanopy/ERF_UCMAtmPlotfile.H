@@ -23,8 +23,8 @@
  * @class UCMAtmPlotfile
  * @brief Writes ATM 2D aggregated UCM field diagnostics to AMReX plotfile format
  *
- * Takes 5 pre-computed aggregates on the ATM 2D slab grid (f_urb, H_bldg_mean,
- * H_bldg_std, lambda_p, lambda_f) and writes them to a plt_ucm_atm_NNNNN directory
+ * Takes 6 pre-computed aggregates on the ATM 2D slab grid (f_urb, H_bldg_mean,
+ * H_bldg_std, lambda_p, lambda_f, H_atm) and writes them to a plt_ucm_atm_NNNNN directory
  * containing binary (or ASCII) data readable by standard AMReX tools (AMRVis, yt, etc).
  *
  * **File naming:** `plt_ucm_atm_NNNNNN` where NNNNNN = zero-padded step number.
@@ -49,7 +49,7 @@ public:
     /**
      * @brief Write plotfile at current step
      *
-     * Gathers 5 aggregated UCM scalar fields, packs into a temporary MultiFab with 5
+     * Gathers 6 aggregated UCM scalar fields, packs into a temporary MultiFab with 6
      * components, and writes to plt_ucm_atm_NNNNN using WriteSingleLevelPlotfile.
      *
      * **Debug trace format (IO rank only):**
@@ -57,7 +57,7 @@ public:
      * [UCM][2.5-followup][UCMAtmPlotfile::write]
      *   step={step} time={time} s
      *   filename: {full_path}/plt_ucm_atm_NNNNNN
-     *   ncomp=5 (f_urb, H_bldg_mean, H_bldg_std, lambda_p, lambda_f)
+     *   ncomp=6 (f_urb, H_bldg_mean, H_bldg_std, lambda_p, lambda_f, H_atm)
      *   grid: {nx_atm} x {ny_atm} x 1 (ATM grid)
      * ```
      *
@@ -71,6 +71,7 @@ public:
      * @param[in] H_bldg_std_atm         Std dev building height on ATM grid [m]
      * @param[in] lambda_p_atm           Mean plan-area density on ATM grid [-]
      * @param[in] lambda_f_atm           Mean frontal-area density on ATM grid [-]
+     * @param[in] H_atm                  Sensible heat flux on ATM grid [W/m^2]
      * @param[in] geom                    ATM geometry
      * @param[in] ucm_debug              Print debug info (default false)
      * @param[in] lev                    AMR level (default 0)
@@ -82,6 +83,7 @@ public:
                const amrex::MultiFab&    H_bldg_std_atm,
                const amrex::MultiFab&    lambda_p_atm,
                const amrex::MultiFab&    lambda_f_atm,
+               const amrex::MultiFab&    H_atm,
                const amrex::Geometry&    geom,
                bool                      ucm_debug = false,
                int                       lev = 0);
