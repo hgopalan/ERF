@@ -83,6 +83,8 @@ struct UCMParams
 
     amrex::Real atm_feedback   = 0.0;       ///< Coupling strength [0,1] [Phase 1.1 must be 0.0]
     amrex::Real zref           = 2.0;       ///< Wind extraction ref height above roof [m]
+    amrex::Real z0_over_H      = 0.1;       ///< z0 as fraction of building height (MacDonald 1998) [-] [Phase 2.2]
+    amrex::Real d_over_H       = 0.7;       ///< d as fraction of building height (WRF SLUCM) [-] [Phase 2.2]
 
     // =========================================================================
     // Section 4: Vertical structure (slab conduction, Phase 1.3+)
