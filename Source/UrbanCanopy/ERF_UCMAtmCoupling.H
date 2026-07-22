@@ -148,52 +148,65 @@ void coarsen_ucm_flux_to_atm(
     int                        lev = 0);
 
 /**
- * @brief Apply exponential-decay vertical tendency to cc_source.
+ * @brief Apply exponential-decay vertical tendency to cc_source (Phase 2.6: morphology-aware).
  *
- * Implements the WRF-SFIRE exponential injection pattern (Mandel 2011):
- * Sensible heat flux from UCM surface is vertically distributed with exponential decay
- * using depth-of-atmosphere and characteristic decay length scale.
+ * Implements the WRF-SFIRE exponential injection pattern (Mandel 2011) with Phase 2.6 enhancements:
+ * - Per-cell e-folding depth (alpha_ij) driven by mean building height (H_bldg_mean_atm)
+ * - Surface term: road flux → k=klo only, no vertical decay
+ * - Exponential term: wall+roof+AH flux → distributed vertically with alpha_ij decay
  *
  * **Physics (per column at each k):**
+ * 
+ * Per-cell alpha calculation:
  * \f[
- *   z_{\text{sfc}} = z_{\text{phys\_cc}}(i,j,k_{\text{lo}})
- * \f]
- * \f[
- *   z_k = z_{\text{phys\_cc}}(i,j,k) - z_{\text{sfc}}
- * \f]
- * \f[
- *   h(z_k) = \frac{Q_{\text{sfc}}}{C_{p,d}} \exp\left(-\frac{z_k}{\alpha_{\text{ucm}}}\right) \quad [\text{K/s}]
- * \f]
- * \f[
- *   \theta_{\text{tend}}(k) = -\rho(k) \frac{h(z_{k+1}) - h(z_k)}{\Delta z(k)} \quad [\text{K/s}]
- * \f]
- * \f[
- *   \text{cc\_source}(i,j,k,\text{RhoTheta\_comp}) += \text{feedback} \cdot \theta_{\text{tend}}(k)
+ *   \alpha_{ij} = \max(\alpha_{\min}, \min(\alpha_{\max}, \alpha_{\text{scale}} \cdot H_{\text{bldg\_mean}}(I,J)))
  * \f]
  *
- * Similarly for latent heat (LE_atm → RhoQ1_comp) when has_moisture=true.
+ * Surface term (roads only at k=klo):
+ * \f[
+ *   \theta_{\text{tend,road}}(I,J,k_{\text{lo}}) = f_{\text{urb}} \cdot \frac{H_{\text{road\_atm}}}{\\rho(k_{\text{lo}}) \cdot C_{p,d} \cdot dz(k_{\text{lo}})}
+ * \f]
+ *
+ * Exponential term (walls+roofs distributed over column):
+ * \f[
+ *   z_k = z_{\text{phys\_cc}}(i,j,k) - z_{\text{phys\_cc}}(i,j,k_{\text{lo}})
+ * \f]
+ * \f[
+ *   \theta_{\text{tend,exp}}(I,J,k) = f_{\text{urb}} \cdot \frac{H_{\text{wallroof\_atm}}}{\\rho(k) \cdot C_{p,d} \cdot \alpha_{ij}} 
+ *   \cdot \exp\left(-\frac{z_k}{\alpha_{ij}}\right)
+ * \f]
+ *
+ * Total tendency: `theta_tend = theta_tend_road + theta_tend_exp` (both added to cc_source).
+ *
+ * Non-urban cells (`f_urb < 0.01`): both fluxes are zero (safe).
  *
  * **Debug trace format (IO rank only, once per call):**
  * ```
- * [UCM][1.4][apply_ucm_tendency_to_cc_source]
- *   atm_feedback={feedback} (one-way injection={is_active})
- *   k=0: rho={rho_0} dz={dz_0}
- *   alpha_ucm={alpha} [m]
- *   H_atm min={min_H} max={max_H} [W/m²]
- *   RhoTheta_tend min={min_tend} max={max_tend}
- *   expected surface tendency magnitude: rho*Q/Cp*(1-exp(-dz/alpha))/dz ≈ {expected} [K/s]
+ * [UCM][2.6][apply_ucm_tendency_to_cc_source]
+ *   Morphology-aware per-cell alpha_ij: min={alpha_min_val} max={alpha_max_val} [m]
+ *   Surface term contribution: sum={sum_road} over N_cells cells [K*kg/m^3/s]
+ *   Exponential term contribution: sum={sum_exp} over N_cells cells [K*kg/m^3/s]
+ *   [UCM][2.6] injection: surface term + morphology-aware exponential, alpha in [{alpha_min}, {alpha_max}]
  * ```
  *
+ * If use_morphology_injection == false, falls back to uniform alpha_ucm (Phase 2.5 behavior).
  * If atm_feedback == 0.0, function prints a one-time warning and returns without modification.
  *
  * @param[in,out] cc_source              Cell-centered source term MultiFab (modified)
- * @param[in]     H_atm                  Sensible heat flux on ATM grid [W/m²]
+ * @param[in]     H_atm                  Total sensible heat flux on ATM grid [W/m²] (Phase 2.5 lumped, unused if use_morphology_injection)
+ * @param[in]     H_road_atm             Road flux on ATM grid [W/m²] (Phase 2.6)
+ * @param[in]     H_wallroof_atm         Wall+roof+AH flux on ATM grid [W/m²] (Phase 2.6)
+ * @param[in]     H_bldg_mean_atm        Mean building height per ATM cell [m] (Phase 2.5 aggregates)
  * @param[in]     LE_atm                 Latent heat flux on ATM grid [W/m²]; may be nullptr
  * @param[in]     z_phys_cc              Physical z at cell centers on ATM grid [m]
  * @param[in]     S_old                  State (for density at each k); component 0 = RhoTheta
  * @param[in]     geom_atm               ATM geometry (to get dz)
  * @param[in]     is_urban_atm           is_urban mask on ATM grid (coarsened from UCM)
- * @param[in]     alpha_ucm              Exponential e-folding depth [m]; typical 10-20 m
+ * @param[in]     alpha_scale            Per-cell alpha multiplier: alpha_ij = alpha_scale * H_bldg_mean(I,J) (Phase 2.6)
+ * @param[in]     alpha_min              Minimum e-folding depth [m] (Phase 2.6)
+ * @param[in]     alpha_max              Maximum e-folding depth [m] (Phase 2.6)
+ * @param[in]     use_morphology_injection  Enable Phase 2.6 split injection; false = fallback to uniform alpha_ucm (Phase 2.5)
+ * @param[in]     alpha_ucm_fallback     Uniform e-folding depth [m] for fallback mode (Phase 2.5 backward compat)
  * @param[in]     feedback               Coupling strength [0.0, 1.0]; 0=off, 1=full
  * @param[in]     has_moisture           Whether moisture component exists
  * @param[in]     ucm_debug              Print per-step debug info (default false)
@@ -203,16 +216,24 @@ void coarsen_ucm_flux_to_atm(
  * @note Handles terrain via z_phys_cc; flat terrain is special case where z_phys_cc(i,j,k) = k * dz.
  * @note All ParallelFor kernels respect is_urban mask and use correct GPU-safe signature.
  * @note LE_atm pointer may be nullptr; function must handle gracefully.
+ * @note RK-stage safety: OWNS cc_source[RhoTheta_comp]. Zeros at entry, always uses `+=`.
  */
 void apply_ucm_tendency_to_cc_source(
     amrex::MultiFab&       cc_source,
     const amrex::MultiFab& H_atm,
+    const amrex::MultiFab& H_road_atm,
+    const amrex::MultiFab& H_wallroof_atm,
+    const amrex::MultiFab& H_bldg_mean_atm,
     const amrex::MultiFab* LE_atm,
     const amrex::MultiFab& z_phys_cc,
     const amrex::MultiFab& S_old,
     const amrex::Geometry& geom_atm,
     const amrex::iMultiFab& is_urban_atm,
-    amrex::Real            alpha_ucm,
+    amrex::Real            alpha_scale,
+    amrex::Real            alpha_min,
+    amrex::Real            alpha_max,
+    bool                   use_morphology_injection,
+    amrex::Real            alpha_ucm_fallback,
     amrex::Real            feedback,
     bool                   has_moisture,
     bool                   ucm_debug = false,

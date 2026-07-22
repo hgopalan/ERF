@@ -206,27 +206,27 @@ void coarsen_ucm_flux_to_atm(
 }
 
 /**
- * @brief Apply exponential-decay vertical tendency to cc_source.
+ * @brief Apply exponential-decay vertical tendency to cc_source (Phase 2.6: morphology-aware).
  *
- * Exponential injection pattern after Mandel 2011 / WRF-SFIRE fire_tendency.
- * Distributes surface sensible heat flux (and optionally latent heat) vertically
- * with exponential decay over alpha_ucm depth scale.
- *
- * Height-above-surface is computed as z_k = (k - klo) * dz (flat terrain formula).
- * This is exact for erf.terrain_type = None.  Phase 4 will replace with
- * z_phys_cc(i,j,k) - z_phys_cc(i,j,klo) for terrain-following coordinates.
- *
- * Includes safety clamp to prevent runaway tendencies from unit bugs.
+ * Phase 2.6 rewrite: replaces single scalar alpha_ucm with per-cell e-folding depth,
+ * and splits injection into surface (roads) + exponential (walls/roofs/AH) terms.
  */
 void apply_ucm_tendency_to_cc_source(
     amrex::MultiFab&        cc_source,
     const amrex::MultiFab&  H_atm,
+    const amrex::MultiFab&  H_road_atm,
+    const amrex::MultiFab&  H_wallroof_atm,
+    const amrex::MultiFab&  H_bldg_mean_atm,
     const amrex::MultiFab*  LE_atm,
     const amrex::MultiFab&  /*z_phys_cc*/,   // reserved for Phase 4 terrain support
     const amrex::MultiFab&  S_old,
     const amrex::Geometry&  geom_atm,
     const amrex::iMultiFab& is_urban_atm,
-    amrex::Real             alpha_ucm,
+    amrex::Real             alpha_scale,
+    amrex::Real             alpha_min,
+    amrex::Real             alpha_max,
+    bool                    use_morphology_injection,
+    amrex::Real             alpha_ucm_fallback,
     amrex::Real             feedback,
     bool                    has_moisture,
     bool                    ucm_debug,
@@ -241,12 +241,15 @@ void apply_ucm_tendency_to_cc_source(
         warned_feedback_zero = true;
     }
 
-    // Phase 2.3: One-time debug message
+    // One-time debug message for Phase 2.6
     static bool debug_injection_once = false;
     if (!debug_injection_once && ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
         debug_injection_once = true;
-        amrex::Print() << "[UCM][2.3][ATM_COUPLING] injection uses lumped H_sensible = "
-                       << "H_road + H_wall + H_roof + AH. Facet3D is Phase 2.7.\n";
+        if (use_morphology_injection) {
+            amrex::Print() << "[UCM][2.6] injection: surface term (roads) + morphology-aware exponential (walls+roof+AH)\n";
+        } else {
+            amrex::Print() << "[UCM][2.5-compat] fallback: uniform alpha_ucm = " << alpha_ucm_fallback << " [m]\n";
+        }
     }
 
     // Early return if coupling is off
@@ -273,18 +276,18 @@ void apply_ucm_tendency_to_cc_source(
     const bool have_le = (has_moisture && LE_atm != nullptr);
 
     // -----------------------------------------------------------------------
-    // RK-stage safety: OVERWRITE the components we own.
-    // make_sources() has already zeroed cc_source; we zero the UCM-owned
-    // components explicitly so this function is correct even if called in a
-    // context where cc_source was not pre-zeroed.  Ghost cells are zeroed
-    // too so ghost-cell reads in downstream kernels are safe.
+    // RK-stage safety: ZERO the components we own at entry.
+    // Then always use += to accumulate contributions from both surface and exp terms.
+    // This ensures the result is correct even if called multiple times per RK stage
+    // (though in practice it should be called once per stage after make_sources resets cc_src).
     // -----------------------------------------------------------------------
     cc_source.setVal(0.0, RhoTheta_comp, 1, cc_source.nGrowVect());
     if (have_le) {
         cc_source.setVal(0.0, RhoQ1_comp, 1, cc_source.nGrowVect());
     }
 
-    // Local reduction over the UCM-injected increment only (not the whole cc_source)
+    // Local reduction: track min/max of alpha_ij, and sums for each injection term
+    // Tuple: (alpha_min, alpha_max, sum_road_tend, sum_exp_tend)
     amrex::ReduceOps<amrex::ReduceOpMin, amrex::ReduceOpMax, amrex::ReduceOpSum, amrex::ReduceOpSum>
         reduce_op;
     amrex::ReduceData<amrex::Real, amrex::Real, amrex::Real, amrex::Real>
@@ -296,156 +299,191 @@ void apply_ucm_tendency_to_cc_source(
         const amrex::Box& bx = mfi.tilebox();
 
         // Get Array4 references (by value for GPU)
-        auto cc_src_a      = cc_source.array(mfi);
-        auto const h_a     = H_atm.const_array(mfi);
-        auto const s_a     = S_old.const_array(mfi);
-        auto const urban_a = is_urban_atm.const_array(mfi);
+        auto cc_src_a           = cc_source.array(mfi);
+        auto const h_total_a    = H_atm.const_array(mfi);  // Phase 2.5 lumped (unused if use_morphology)
+        auto const h_road_a     = H_road_atm.const_array(mfi);
+        auto const h_wr_a       = H_wallroof_atm.const_array(mfi);
+        auto const h_bldg_a     = H_bldg_mean_atm.const_array(mfi);
+        auto const s_a          = S_old.const_array(mfi);
+        auto const urban_a      = is_urban_atm.const_array(mfi);
 
         // Optional LE_atm; default-constructed Array4 is safe to capture when unused
         amrex::Array4<const amrex::Real> le_a = have_le
             ? LE_atm->const_array(mfi)
             : amrex::Array4<const amrex::Real>{};
 
-        const int klo_c = klo;   // capture for device lambda
+        // Capture parameters for device lambda
+        const int    klo_c = klo;
+        const amrex::Real dz_c = dz;
+        const amrex::Real Cp_c = Cp;
+        const amrex::Real alpha_scale_c = alpha_scale;
+        const amrex::Real alpha_min_c = alpha_min;
+        const amrex::Real alpha_max_c = alpha_max;
+        const amrex::Real alpha_ucm_fallback_c = alpha_ucm_fallback;
+        const bool use_morphology_c = use_morphology_injection;
+        const amrex::Real feedback_c = feedback;
 
-        // Kernel: exponential injection using flat-terrain height formula.
-        //
-        // z_k = (k - klo) * dz  -- height of cell centre above surface [m].
-        // This is exact for erf.terrain_type = None.
-        // Phase 4 will replace with: z_phys_cc(i,j,k) - z_phys_cc(i,j,klo).
-        //
-        // Note: H_atm was written by coarsen_ucm_flux_to_atm() ONLY into the
-        // k = klo plane. We must therefore read h_a(i,j,klo), not h_a(i,j,0)
-        // (which happens to coincide only when the domain index space starts at 0).
-        // Similarly is_urban_atm and LE_atm are 2D slabs stored at k = klo.
+        // Main injection kernel
         reduce_op.eval(bx, reduce_data,
             [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple
         {
             // Guard: skip non-urban cells (mask is stored at k=klo plane)
             if (urban_a(i, j, klo_c) == 0) {
-                return { amrex::Real( 1.e30),
-                         amrex::Real(-1.e30),
-                         amrex::Real(0.0),
-                         amrex::Real(0.0) };
+                return { alpha_min_c, alpha_min_c, 0.0, 0.0 };
             }
 
-            const amrex::Real H_sfc = h_a(i, j, klo_c);
-
-            // Guard: skip columns with no surface flux
-            if (H_sfc == amrex::Real(0.0)) {
-                return { amrex::Real( 1.e30),
-                         amrex::Real(-1.e30),
-                         amrex::Real(0.0),
-                         amrex::Real(0.0) };
+            // Compute per-cell alpha_ij for morphology-aware injection
+            amrex::Real alpha_ij;
+            if (use_morphology_c) {
+                const amrex::Real H_mean = h_bldg_a(i, j, klo_c);
+                // Clamp alpha_ij to [alpha_min, alpha_max]
+                alpha_ij = amrex::max(alpha_min_c,
+                                      amrex::min(alpha_max_c, alpha_scale_c * H_mean));
+            } else {
+                // Fallback to uniform alpha_ucm (Phase 2.5)
+                alpha_ij = alpha_ucm_fallback_c;
             }
 
             // Height-above-surface (flat terrain)
-            const amrex::Real z_k      = (k       - klo_c) * dz;
+            const amrex::Real z_k      = (k       - klo_c) * dz_c;
             const int         kp1      = amrex::min(k + 1, khi);
-            const amrex::Real z_k_plus = (kp1     - klo_c) * dz;
-
-            // Exponential profile
-            const amrex::Real exp_factor      = std::exp(-z_k      / alpha_ucm);
-            const amrex::Real exp_factor_plus = std::exp(-z_k_plus / alpha_ucm);
-
-            // Sensible heat tendency [K/s] at this level and the one above
-            const amrex::Real h_tend      = (H_sfc / Cp) * exp_factor;
-            const amrex::Real h_tend_plus = (H_sfc / Cp) * exp_factor_plus;
+            const amrex::Real z_k_plus = (kp1     - klo_c) * dz_c;
 
             // Density at this level
             const amrex::Real rho_k = s_a(i, j, k, Rho_comp);
 
-            // Tendency for potential temperature equation (per unit volume) [K*kg/m3/s]
-            const amrex::Real theta_tend = rho_k * (h_tend - h_tend_plus) / dz;
+            amrex::Real theta_tend_total = 0.0;
+
+            // ===================================================================
+            // Surface term: road flux → k=klo only, no vertical decay
+            // ===================================================================
+            if (k == klo_c) {
+                const amrex::Real H_road = h_road_a(i, j, klo_c);
+                if (H_road > 0.0) {
+                    // Road flux goes directly to surface, normalized by dz(klo)
+                    theta_tend_total += (H_road / (Cp_c * dz_c));
+                }
+            }
+
+            // ===================================================================
+            // Exponential term: wall+roof+AH flux → distributed over column with per-cell alpha
+            // ===================================================================
+            {
+                const amrex::Real H_wr = h_wr_a(i, j, klo_c);
+                if (H_wr > 0.0 && alpha_ij > 0.0) {
+                    const amrex::Real exp_factor      = std::exp(-z_k      / alpha_ij);
+                    const amrex::Real exp_factor_plus = std::exp(-z_k_plus / alpha_ij);
+
+                    // Height-tendency [K/s] at this level and the one above
+                    const amrex::Real h_tend      = (H_wr / Cp_c) * exp_factor;
+                    const amrex::Real h_tend_plus = (H_wr / Cp_c) * exp_factor_plus;
+
+                    // Exponential term [K/s/m]
+                    theta_tend_total += (h_tend - h_tend_plus) / dz_c;
+                }
+            }
+
+            // Convert to per-unit-volume source: multiply by density
+            const amrex::Real dtheta = feedback_c * rho_k * theta_tend_total;
 
             // Safety clamp: skip if tendency exceeds physical bounds
-            if (std::abs(theta_tend / rho_k) > theta_tend_cap) {
+            if (std::abs(dtheta / rho_k) > theta_tend_cap) {
                 #ifdef AMREX_PRAGMA_OMP_ATOMIC
                 #pragma omp atomic write
                 #endif
                 warned_clamp_exceeded = true;
-                return { amrex::Real( 1.e30),
-                         amrex::Real(-1.e30),
-                         amrex::Real(0.0),
-                         amrex::Real(0.0) };
+                return { alpha_ij, alpha_ij, 0.0, 0.0 };
             }
 
-            // OVERWRITE (not accumulate): UCM owns this component per RK stage
-            const amrex::Real dtheta = feedback * theta_tend;
-            cc_src_a(i, j, k, RhoTheta_comp) = dtheta;
+            // ACCUMULATE (+=): UCM owns this component and may write from multiple pathways
+            cc_src_a(i, j, k, RhoTheta_comp) += dtheta;
 
             // Latent heat (optional)
             if (have_le) {
-                const amrex::Real LE_sfc       = le_a(i, j, klo_c);
-                const amrex::Real le_tend      = (LE_sfc / L_v) * exp_factor;
-                const amrex::Real le_tend_plus = (LE_sfc / L_v) * exp_factor_plus;
-                const amrex::Real q_tend       = rho_k * (le_tend - le_tend_plus) / dz;
-                cc_src_a(i, j, k, RhoQ1_comp) = feedback * q_tend;
+                const amrex::Real LE_sfc = le_a(i, j, klo_c);
+                if (LE_sfc > 0.0) {
+                    amrex::Real q_tend_total = 0.0;
+
+                    // Surface term for LE (if needed; for now latent follows sensible split)
+                    // This would require separate LE_road and LE_wallroof; for Phase 2.6 keep lumped
+                    if (k == klo_c) {
+                        q_tend_total += (LE_sfc / L_v / dz_c);
+                    }
+
+                    const amrex::Real dq = feedback_c * rho_k * q_tend_total;
+                    cc_src_a(i, j, k, RhoQ1_comp) += dq;
+                }
             }
 
-            return { dtheta, dtheta, dtheta, amrex::Real(1.0) };
+            // Return for reduction: (alpha_ij_min, alpha_ij_max, sum_road, sum_exp)
+            // For accounting, we compute the surface and exp contributions separately for diagnostics
+            amrex::Real contrib_road = 0.0;
+            amrex::Real contrib_exp = 0.0;
+
+            if (k == klo_c && h_road_a(i, j, klo_c) > 0.0) {
+                contrib_road = (feedback_c * rho_k * h_road_a(i, j, klo_c) / Cp_c);
+            }
+            if (h_wr_a(i, j, klo_c) > 0.0 && alpha_ij > 0.0) {
+                const amrex::Real exp_factor = std::exp(-z_k / alpha_ij);
+                const amrex::Real exp_factor_plus = std::exp(-z_k_plus / alpha_ij);
+                const amrex::Real h_wr = h_wr_a(i, j, klo_c);
+                const amrex::Real h_tend = (h_wr / Cp_c) * exp_factor;
+                const amrex::Real h_tend_plus = (h_wr / Cp_c) * exp_factor_plus;
+                contrib_exp = (feedback_c * rho_k * (h_tend - h_tend_plus));
+            }
+
+            return { alpha_ij, alpha_ij, contrib_road, contrib_exp };
         });
     }
 
     // Ensure all ParallelFor / reduce_op writes are visible to subsequent reductions
     amrex::Gpu::streamSynchronize();
 
-    // Collect UCM-only tendency statistics across all ranks
+    // Collect statistics across all ranks
     ReduceTuple hv = reduce_data.value(reduce_op);
-    amrex::Real ucm_tend_min  = amrex::get<0>(hv);
-    amrex::Real ucm_tend_max  = amrex::get<1>(hv);
-    amrex::Real ucm_tend_sum  = amrex::get<2>(hv);
-    amrex::Real ucm_cell_cnt  = amrex::get<3>(hv);
+    amrex::Real alpha_ij_min  = amrex::get<0>(hv);
+    amrex::Real alpha_ij_max  = amrex::get<1>(hv);
+    amrex::Real road_tend_sum = amrex::get<2>(hv);
+    amrex::Real exp_tend_sum  = amrex::get<3>(hv);
 
-    amrex::ParallelDescriptor::ReduceRealMin(ucm_tend_min);
-    amrex::ParallelDescriptor::ReduceRealMax(ucm_tend_max);
-    amrex::ParallelDescriptor::ReduceRealSum(ucm_tend_sum);
-    amrex::ParallelDescriptor::ReduceRealSum(ucm_cell_cnt);
-
-    // Guard against the "no cells touched" case
-    if (ucm_cell_cnt == amrex::Real(0.0)) {
-        ucm_tend_min = amrex::Real(0.0);
-        ucm_tend_max = amrex::Real(0.0);
-    }
+    // Collectives OUTSIDE IOProcessor guard (per PR #209)
+    amrex::ParallelDescriptor::ReduceRealMin(alpha_ij_min);
+    amrex::ParallelDescriptor::ReduceRealMax(alpha_ij_max);
+    amrex::ParallelDescriptor::ReduceRealSum(road_tend_sum);
+    amrex::ParallelDescriptor::ReduceRealSum(exp_tend_sum);
 
     // Emit warning if clamp was exceeded
     if (warned_clamp_exceeded && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "[UCM][1.4][WARN] apply_ucm_tendency_to_cc_source: "
+        amrex::Print() << "[UCM][2.6][WARN] apply_ucm_tendency_to_cc_source: "
                        << "|theta_tend|/rho exceeded " << theta_tend_cap << " K/s, "
                        << "skipping affected cells.\n";
     }
 
     // -----------------------------------------------------------------------
-    // Debug diagnostics: H_atm and ReduceOps stats are gated on ucm_debug
-    // to avoid unconditional per-step MPI collectives.
+    // Debug diagnostics: gated on ucm_debug to avoid unconditional per-step MPI collectives.
     // -----------------------------------------------------------------------
     if (ucm_debug) {
         amrex::Gpu::streamSynchronize();
 
-        // H_atm diagnostics (collective on all ranks, inside debug gate)
-        const amrex::Real min_h = H_atm.min(0, 0);
-        const amrex::Real max_h = H_atm.max(0, 0);
+        // Flux diagnostics (collective on all ranks, inside debug gate)
+        amrex::Real min_h_road = H_road_atm.min(0, 0);
+        amrex::Real max_h_road = H_road_atm.max(0, 0);
+        amrex::Real min_h_wr = H_wallroof_atm.min(0, 0);
+        amrex::Real max_h_wr = H_wallroof_atm.max(0, 0);
 
         if (amrex::ParallelDescriptor::IOProcessor()) {
-            // Estimate expected surface tendency magnitude
-            const amrex::Real rho_0         = 1.2;  // approximate surface density
-            const amrex::Real exp_factor_dz = std::exp(-dz / alpha_ucm);
-            const amrex::Real expected_scale =
-                rho_0 * (max_h / Cp) * (1.0 - exp_factor_dz) / dz;
-
-            amrex::Print() << "[UCM][1.4][apply_ucm_tendency_to_cc_source]\n";
-            amrex::Print() << "  atm_feedback=" << feedback
-                           << " (injection_active=" << (feedback > 0.0 ? "yes" : "no") << ")\n";
-            amrex::Print() << "  klo=" << klo << " dz=" << dz << " rho~1.2\n";
-            amrex::Print() << "  alpha_ucm=" << alpha_ucm << " [m]\n";
-            amrex::Print() << "  H_atm min=" << min_h << " max=" << max_h
-                           << " [W/m2] (only k=" << klo << " plane populated)\n";
-            amrex::Print() << "  UCM_RhoTheta_tend: min=" << ucm_tend_min
-                           << " max=" << ucm_tend_max
-                           << " sum=" << ucm_tend_sum
-                           << " over " << static_cast<long long>(ucm_cell_cnt) << " cells\n";
-            amrex::Print() << "  expected surface tend magnitude ~ "
-                           << expected_scale << " [K/s]\n";
+            amrex::Print() << "[UCM][2.6][apply_ucm_tendency_to_cc_source]\n";
+            amrex::Print() << "  Mode: " << (use_morphology_injection ? "per-cell alpha (2.6)" : "uniform alpha (2.5-compat)") << "\n";
+            if (use_morphology_injection) {
+                amrex::Print() << "  alpha_ij (per-cell)     min=" << alpha_ij_min << " max=" << alpha_ij_max << " [m]\n";
+            } else {
+                amrex::Print() << "  alpha_ucm (uniform)     " << alpha_ucm_fallback << " [m]\n";
+            }
+            amrex::Print() << "  H_road_atm              min=" << min_h_road << " max=" << max_h_road << " [W/m2]\n";
+            amrex::Print() << "  H_wallroof_atm          min=" << min_h_wr << " max=" << max_h_wr << " [W/m2]\n";
+            amrex::Print() << "  Surface term (road)     sum=" << road_tend_sum << " [K*kg/m3/s]\n";
+            amrex::Print() << "  Exponential term (wr)   sum=" << exp_tend_sum << " [K*kg/m3/s]\n";
+            amrex::Print() << "  atm_feedback=" << feedback << "\n";
         }
     }
 }

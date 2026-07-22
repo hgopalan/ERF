@@ -147,18 +147,26 @@
                 z_cc_ucm_ptr = &z_phys_flat_ucm;
             }
 
+            // Phase 2.6: Updated call with per-cell alpha and facet-split injection
             apply_ucm_tendency_to_cc_source(
                 cc_src,
-                *m_ucm_H_atm[level],
+                *m_ucm_H_atm[level],                       // Phase 2.5 lumped (unused if use_morphology_injection)
+                *m_ucm_H_road_atm[level],                  // Phase 2.6: road flux
+                *m_ucm_H_wallroof_atm[level],              // Phase 2.6: wall+roof+AH flux
+                *m_ucm_H_bldg_mean_atm[level],             // Phase 2.5 aggregates: mean building height
                 has_moisture_ucm ? m_ucm_LE_atm[level].get() : nullptr,
                 *z_cc_ucm_ptr,
                 S_data[IntVars::cons],
                 fine_geom,
                 *m_ucm_is_urban_atm[level],
-                m_ucm_params.alpha_ucm,
+                m_ucm_params.alpha_scale,                  // Phase 2.6: per-cell alpha multiplier
+                m_ucm_params.alpha_min,                    // Phase 2.6: minimum alpha
+                m_ucm_params.alpha_max,                    // Phase 2.6: maximum alpha
+                m_ucm_params.use_morphology_injection,     // Phase 2.6: enable split injection
+                m_ucm_params.alpha_ucm,                    // Phase 2.5 fallback: uniform alpha
                 m_ucm_params.atm_feedback,
                 has_moisture_ucm,
-                m_ucm_params.ucm_debug,   // print per-RK banner when debug is on
+                m_ucm_params.ucm_debug,
                 level);
         }
 #endif

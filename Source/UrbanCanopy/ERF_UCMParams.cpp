@@ -36,7 +36,12 @@ void UCMParams::read_from_parmparse(int lev)
     // Section 4: Vertical structure
     pp.query("alpha_ucm", alpha_ucm);
 
-    // Section 4b: Slab conduction solver parameters (Phase 1.3+)
+    // Section 4.1: Phase 2.6 — Morphology-aware injection parameters
+    pp.query("alpha_scale", alpha_scale);
+    pp.query("alpha_min", alpha_min);
+    pp.query("alpha_max", alpha_max);
+    pp.query("use_morphology_injection", use_morphology_injection);
+
     pp.query("slab_N_layers", slab_N_layers);
     pp.query("slab_T_deep", slab_T_deep);
     pp.query("slab_L", slab_L);
