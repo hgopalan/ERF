@@ -14,6 +14,7 @@
 #include <ERF_Constants.H>
 #include <AMReX_MultiFabUtil.H>
 #include <AMReX_GpuLaunch.H>
+#include <AMReX_Reduce.H>
 #include <AMReX_Print.H>
 
 /**
@@ -209,6 +210,13 @@ void apply_ucm_tendency_to_cc_source(
     // Hoist LE availability out of the kernel
     const bool have_le = (has_moisture && LE_atm != nullptr);
 
+    // Local reduction over the UCM-injected increment only (not the whole cc_source)
+    amrex::ReduceOps<amrex::ReduceOpMin, amrex::ReduceOpMax, amrex::ReduceOpSum, amrex::ReduceOpSum>
+        reduce_op;
+    amrex::ReduceData<amrex::Real, amrex::Real, amrex::Real, amrex::Real>
+        reduce_data(reduce_op);
+    using ReduceTuple = typename decltype(reduce_data)::Type;
+
     // Iteration over boxes with tiling
     for (amrex::MFIter mfi(cc_source, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
@@ -224,31 +232,51 @@ void apply_ucm_tendency_to_cc_source(
             ? LE_atm->const_array(mfi)
             : amrex::Array4<const amrex::Real>{};
 
+        const int klo_c = klo;   // capture for device lambda
+
         // Kernel: exponential injection using flat-terrain height formula.
         //
         // z_k = (k - klo) * dz  -- height of cell centre above surface [m].
         // This is exact for erf.terrain_type = None.
         // Phase 4 will replace with: z_phys_cc(i,j,k) - z_phys_cc(i,j,klo).
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+        //
+        // Note: H_atm was written by coarsen_ucm_flux_to_atm() ONLY into the
+        // k = klo plane. We must therefore read h_a(i,j,klo), not h_a(i,j,0)
+        // (which happens to coincide only when the domain index space starts at 0).
+        // Similarly is_urban_atm and LE_atm are 2D slabs stored at k = klo.
+        reduce_op.eval(bx, reduce_data,
+            [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple
         {
-            // Guard: skip non-urban cells
-            if (urban_a(i, j, 0) == 0) return;
+            // Guard: skip non-urban cells (mask is stored at k=klo plane)
+            if (urban_a(i, j, klo_c) == 0) {
+                return { amrex::Real( 1.e30),
+                         amrex::Real(-1.e30),
+                         amrex::Real(0.0),
+                         amrex::Real(0.0) };
+            }
 
-            // Guard: skip cells with no surface flux
-            if (h_a(i, j, 0) == amrex::Real(0.0)) return;
+            const amrex::Real H_sfc = h_a(i, j, klo_c);
+
+            // Guard: skip columns with no surface flux
+            if (H_sfc == amrex::Real(0.0)) {
+                return { amrex::Real( 1.e30),
+                         amrex::Real(-1.e30),
+                         amrex::Real(0.0),
+                         amrex::Real(0.0) };
+            }
 
             // Height-above-surface (flat terrain)
-            const amrex::Real z_k      = (k       - klo) * dz;
+            const amrex::Real z_k      = (k       - klo_c) * dz;
             const int         kp1      = amrex::min(k + 1, khi);
-            const amrex::Real z_k_plus = (kp1     - klo) * dz;
+            const amrex::Real z_k_plus = (kp1     - klo_c) * dz;
 
             // Exponential profile
             const amrex::Real exp_factor      = std::exp(-z_k      / alpha_ucm);
             const amrex::Real exp_factor_plus = std::exp(-z_k_plus / alpha_ucm);
 
             // Sensible heat tendency [K/s] at this level and the one above
-            const amrex::Real h_tend      = (h_a(i, j, 0) / Cp) * exp_factor;
-            const amrex::Real h_tend_plus = (h_a(i, j, 0) / Cp) * exp_factor_plus;
+            const amrex::Real h_tend      = (H_sfc / Cp) * exp_factor;
+            const amrex::Real h_tend_plus = (H_sfc / Cp) * exp_factor_plus;
 
             // Density at this level
             const amrex::Real rho_k = s_a(i, j, k, Rho_comp);
@@ -262,20 +290,48 @@ void apply_ucm_tendency_to_cc_source(
                 #pragma omp atomic write
                 #endif
                 warned_clamp_exceeded = true;
-                return;
+                return { amrex::Real( 1.e30),
+                         amrex::Real(-1.e30),
+                         amrex::Real(0.0),
+                         amrex::Real(0.0) };
             }
 
             // Apply feedback coupling coefficient and accumulate
-            cc_src_a(i, j, k, RhoTheta_comp) += feedback * theta_tend;
+            const amrex::Real dtheta = feedback * theta_tend;
+            cc_src_a(i, j, k, RhoTheta_comp) += dtheta;
 
             // Latent heat (optional)
             if (have_le) {
-                const amrex::Real le_tend      = (le_a(i, j, 0) / L_v) * exp_factor;
-                const amrex::Real le_tend_plus = (le_a(i, j, 0) / L_v) * exp_factor_plus;
+                const amrex::Real LE_sfc       = le_a(i, j, klo_c);
+                const amrex::Real le_tend      = (LE_sfc / L_v) * exp_factor;
+                const amrex::Real le_tend_plus = (LE_sfc / L_v) * exp_factor_plus;
                 const amrex::Real q_tend       = rho_k * (le_tend - le_tend_plus) / dz;
                 cc_src_a(i, j, k, RhoQ1_comp) += feedback * q_tend;
             }
+
+            return { dtheta, dtheta, dtheta, amrex::Real(1.0) };
         });
+    }
+
+    // Ensure all ParallelFor / reduce_op writes are visible to subsequent reductions
+    amrex::Gpu::streamSynchronize();
+
+    // Collect UCM-only tendency statistics across all ranks
+    ReduceTuple hv = reduce_data.value(reduce_op);
+    amrex::Real ucm_tend_min  = amrex::get<0>(hv);
+    amrex::Real ucm_tend_max  = amrex::get<1>(hv);
+    amrex::Real ucm_tend_sum  = amrex::get<2>(hv);
+    amrex::Real ucm_cell_cnt  = amrex::get<3>(hv);
+
+    amrex::ParallelDescriptor::ReduceRealMin(ucm_tend_min);
+    amrex::ParallelDescriptor::ReduceRealMax(ucm_tend_max);
+    amrex::ParallelDescriptor::ReduceRealSum(ucm_tend_sum);
+    amrex::ParallelDescriptor::ReduceRealSum(ucm_cell_cnt);
+
+    // Guard against the "no cells touched" case
+    if (ucm_cell_cnt == amrex::Real(0.0)) {
+        ucm_tend_min = amrex::Real(0.0);
+        ucm_tend_max = amrex::Real(0.0);
     }
 
     // Emit warning if clamp was exceeded
@@ -284,12 +340,10 @@ void apply_ucm_tendency_to_cc_source(
                        << "|theta_tend|/rho exceeded " << theta_tend_cap << " K/s, "
                        << "skipping affected cells.\n";
     }
-    amrex::Gpu::streamSynchronize();   // <-- ensure all ParallelFor writes are visible
-    // Debug trace (collectives outside IOProcessor guard)
-    amrex::Real min_h    = H_atm.min(0);
-    amrex::Real max_h    = H_atm.max(0);
-    amrex::Real min_tend = cc_source.min(0, RhoTheta_comp);
-    amrex::Real max_tend = cc_source.max(0, RhoTheta_comp);
+
+    // Also report the H_atm min/max for context
+    amrex::Real min_h = H_atm.min(0);
+    amrex::Real max_h = H_atm.max(0);
 
     if (ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
         // Estimate expected surface tendency magnitude
@@ -300,10 +354,13 @@ void apply_ucm_tendency_to_cc_source(
         amrex::Print() << "[UCM][1.4][apply_ucm_tendency_to_cc_source]\n";
         amrex::Print() << "  atm_feedback=" << feedback
                        << " (injection_active=" << (feedback > 0.0 ? "yes" : "no") << ")\n";
-        amrex::Print() << "  k=0: rho~1.2 dz=" << dz << "\n";
+        amrex::Print() << "  klo=" << klo << " dz=" << dz << " rho~1.2\n";
         amrex::Print() << "  alpha_ucm=" << alpha_ucm << " [m]\n";
-        amrex::Print() << "  H_atm min=" << min_h << " max=" << max_h << " [W/m2]\n";
-        amrex::Print() << "  RhoTheta_tend min=" << min_tend << " max=" << max_tend << "\n";
+        amrex::Print() << "  H_atm min=" << min_h << " max=" << max_h << " [W/m2] (only k=klo plane populated)\n";
+        amrex::Print() << "  UCM_RhoTheta_tend: min=" << ucm_tend_min
+                       << " max=" << ucm_tend_max
+                       << " sum=" << ucm_tend_sum
+                       << " over " << static_cast<long long>(ucm_cell_cnt) << " cells\n";
         amrex::Print() << "  expected surface tend magnitude ~ " << expected_scale << " [K/s]\n";
     }
 }
