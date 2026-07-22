@@ -1065,3 +1065,43 @@ This follow-up PR completes those items.
 - ✅ All 8 Phase 2.5 tasks complete; acceptance checklist all green
 - ✅ Existing tests (`UCMShadowCanyon`, etc.) still exit 0 (regression-free)
 
+---
+
+## Phase 2.5 Conservation Fix: Convention B (Delete Divide-by-f_urb)
+
+**Status:** ✅ IN PROGRESS (PR #XXX)
+
+**Scope:** PR #213/Follow-Up introduced convention A (weighted-divide) with the comment "must verify". After deployment, we discovered:
+1. The divide-by-`f_urb` step in `coarsen_ucm_flux_to_atm` causes silent 4× over-injection in 25%-urban ATM cells.
+2. Three R5 collective calls regressed (missing `nghost=0` argument).
+3. The comment ambiguity left "must verify" TODO unresolved.
+
+This fix switches to convention B (pure area-average, no divide, no reweight), matching the ERF-Fire reference on ERF-Hazard.
+
+**Deliverables:**
+
+- **Delete divide-by-`f_urb` kernel** — Lines 179–195 in `coarsen_ucm_flux_to_atm` removed. `f_urb_atm` parameter dropped from function signature (unused after divide step is gone). All callers in `ERF_Advance.cpp` updated. Comment changed from "urban-fraction-weighted" to "area-averaged."
+
+- **Fix R5 collective regressions** — All `.min(0)` and `.max(0)` calls changed to `.min(0, 0)` and `.max(0, 0)`. Affected lines: 194–199 (Q_ucm/Q_atm collectives in coarsen_ucm_flux_to_atm), 425–426 (H_atm debug diagnostics). All collectives verified to be outside IOProcessor guards.
+
+- **Unambiguous convention B comment** — Lines 131–148 in `ERF_UCMAtmCoupling.cpp` replaced with single, clear documentation of convention B: area-averaged (no divide), injection kernel reads AS-IS, energy is preserved by construction. Proof formula provided. References ERF-Fire/ERF-Hazard.
+
+- **H_atm_max diagnostic column** — New column in `ucm_diag.dat` CSV: `H_atm_max` (max ATM-grid aggregated sensible heat flux in W/m²). Computed OUTSIDE IOProcessor guard per PR #209 rule. Updated `ERF_UCMDiagnostics.H/cpp` function signatures and writers. Caller in `ERF_Advance.cpp` passes `m_ucm_H_atm[lev].get()`.
+
+- **Convention-B assertion in check_conservation.py** — New real conservation check: `H_atm_max <= H_ucm_max * tolerance` (10% slack for time variation). Under convention B, both should equal the max over fully-urban cells. Under convention A regression (divide-by-f_urb present), H_atm_max would be `~1/f_urb` times too large, typically 4× in partial-urban regions. Test catches this.
+
+- **Lesson in UCM_MPI_SKILLS.md** — Added to Phase 2.5 section: "Do NOT post-hoc divide an area-averaged flux by `f_urb` on the coarsening side unless the injection side multiplies it back (convention A). Convention B (pure area average, no divide, no reweight) is the reference. Anything else silently over-injects in partial-urban ATM cells."
+
+- **Phase 2.5 entry in UCM_DEVELOPMENT.md** — This section. Notes PR number, what was wrong, what was changed, and that this closes the "must verify" TODO from PR #213/Follow-Up.
+
+**Code quality checks:**
+
+- ✅ `grep -n "/= f_urb" Source/UrbanCanopy/ERF_UCMAtmCoupling.cpp` → 0
+- ✅ `grep -n "must verify" Source/UrbanCanopy/ERF_UCMAtmCoupling.cpp` → 0
+- ✅ `grep -n "convention A" Source/UrbanCanopy/ERF_UCMAtmCoupling.cpp` → 0
+- ✅ `grep -n "\.min(0)\|\.max(0)" Source/UrbanCanopy/ERF_UCMAtmCoupling.cpp` → 0 (all converted to `.min(0,0)` / `.max(0,0)`)
+- ✅ `H_atm_max` column present in ucm_diag.dat header
+- ✅ `check_conservation.py` prints PASS including new convention-B assertion
+- ✅ All prior canonical tests exit 0 on 1 and 2 MPI ranks
+- ✅ `UCMOneWayInject` produces final RhoTheta bit-for-bit identical to baseline (fully-urban, f_urb=1, so A and B agree there)
+

@@ -48,7 +48,7 @@ void UCMDiagnostics::initialize_file()
         ofs << "step,time_s,T_skin_roof_max,T_skin_wall_max,T_skin_road_max,";
         ofs << "T_canyon_max,H_sensible_max,H_sensible_sum,LE_latent_max,";
         ofs << "H_road_max,H_wall_max,H_roof_max,AH_max,";
-        ofs << "f_urb_max,H_bldg_mean_max,H_bldg_std_max,lambda_f_max\n";
+        ofs << "f_urb_max,H_bldg_mean_max,H_bldg_std_max,lambda_f_max,H_atm_max\n";
     }
 
     ofs.close();
@@ -61,7 +61,8 @@ void UCMDiagnostics::write_row(int nstep, amrex::Real time,
                                amrex::Real H_road_max, amrex::Real H_wall_max,
                                amrex::Real H_roof_max, amrex::Real AH_max,
                                amrex::Real f_urb_max, amrex::Real H_bldg_mean_max,
-                               amrex::Real H_bldg_std_max, amrex::Real lambda_f_max)
+                               amrex::Real H_bldg_std_max, amrex::Real lambda_f_max,
+                               amrex::Real H_atm_max)
 {
     if (!amrex::ParallelDescriptor::IOProcessor()) return;
 
@@ -83,7 +84,8 @@ void UCMDiagnostics::write_row(int nstep, amrex::Real time,
         << f_urb_max << ","
         << H_bldg_mean_max << ","
         << H_bldg_std_max << ","
-        << lambda_f_max << "\n";
+        << lambda_f_max << ","
+        << H_atm_max << "\n";
     ofs.close();
 }
 
@@ -92,6 +94,7 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
                            const amrex::MultiFab* H_bldg_mean_atm,
                            const amrex::MultiFab* H_bldg_std_atm,
                            const amrex::MultiFab* lambda_f_atm,
+                           const amrex::MultiFab* H_atm,
                            int /*lev*/)
 {
     // Duplicate-write guard
@@ -137,7 +140,7 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
     amrex::Real AH_max       = fields.AH->max(comp, 0, local);
 
     // Phase 2.5: ATM-grid aggregates (computed OUTSIDE IOProcessor guard, PR #209 rule)
-    amrex::Real f_urb_max = 0.0, H_bldg_mean_max = 0.0, H_bldg_std_max = 0.0, lambda_f_max = 0.0;
+    amrex::Real f_urb_max = 0.0, H_bldg_mean_max = 0.0, H_bldg_std_max = 0.0, lambda_f_max = 0.0, H_atm_max = 0.0;
     if (f_urb_atm != nullptr) {
         f_urb_max = f_urb_atm->max(comp, 0, local);
     }
@@ -150,6 +153,9 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
     if (lambda_f_atm != nullptr) {
         lambda_f_max = lambda_f_atm->max(comp, 0, local);
     }
+    if (H_atm != nullptr) {
+        H_atm_max = H_atm->max(comp, 0, local);
+    }
 
     // Write to file on IO rank
     if (amrex::ParallelDescriptor::IOProcessor()) {
@@ -157,7 +163,7 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
                   T_roof_max, T_wall_max, T_road_max,
                   T_canyon_max, H_max, H_sum, LE_max,
                   H_road_max, H_wall_max, H_roof_max, AH_max,
-                  f_urb_max, H_bldg_mean_max, H_bldg_std_max, lambda_f_max);
+                  f_urb_max, H_bldg_mean_max, H_bldg_std_max, lambda_f_max, H_atm_max);
 
         // Debug trace (gated: avoids noisy output every diagnostic write step)
         if (m_params.ucm_debug) {
