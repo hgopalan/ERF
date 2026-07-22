@@ -10,6 +10,7 @@
 
 #include <UrbanCanopy/ERF_UCMAtmPlotfile.H>
 #include <AMReX_VisMF.H>
+#include <AMReX_PlotFileUtil.H>
 #include <AMReX_Print.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <sstream>
@@ -85,26 +86,19 @@ void UCMAtmPlotfile::write(int                       step,
     varnames[comp_lambda_p]     = "lambda_p";
     varnames[comp_lambda_f]     = "lambda_f";
 
-    // Write plotfile with VisMF
-    VisMF::Write(atm_plot, plotfile_name);
-
-    // Write ASCII header
-    if (ParallelDescriptor::IOProcessor()) {
-        std::string header_file = plotfile_name + "/Header";
-        std::ofstream ofs(header_file.c_str());
-        ofs << "Step = " << step << "\n";
-        ofs << "Time = " << time << "\n";
-        ofs << "ncomp = 5\n";
-        for (int i = 0; i < 5; ++i) {
-            ofs << "  " << varnames[i] << "\n";
-        }
-        ofs.close();
-    }
+    // Write plotfile using WriteSingleLevelPlotfile (handles directory, Header, Level_0/)
+    amrex::WriteSingleLevelPlotfile(plotfile_name,
+                                    atm_plot,
+                                    varnames,
+                                    geom,
+                                    time,
+                                    step);
 
     // Debug trace
     if (ucm_debug && ParallelDescriptor::IOProcessor()) {
-        Print() << "[UCM][2.5-followup][UCMAtmPlotfile::write] "
-                << "wrote plt_ucm_atm_" << std::setw(5) << std::setfill('0') << step
-                << " at t=" << time << " s\n";
+        Print() << "[UCM][2.5-followup][UCMAtmPlotfile::write]\n";
+        Print() << "  step=" << step << " time=" << time << " s\n";
+        Print() << "  plotfile: " << plotfile_name << "/  (directory)\n";
+        Print() << "  ncomp=5 (f_urb, H_bldg_mean, H_bldg_std, lambda_p, lambda_f)\n";
     }
 }
