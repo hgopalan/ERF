@@ -379,14 +379,14 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         }
 
         // Coarsen UCM fluxes from UCM grid to ATM grid (lagged; constant across RK stages)
-        // Phase 2.5: Use urban-fraction-weighted coarsening
+        // Phase 2.5: Use area-averaged coarsening (convention B)
         coarsen_ucm_flux_to_atm(*m_ucm_H_atm[lev], *m_ucm_fields[lev]->H_sensible,
-                                *m_ucm_fields[lev]->is_urban, *m_ucm_f_urb_atm[lev],
+                                *m_ucm_fields[lev]->is_urban,
                                 m_ucm_grid[lev]->geom, Geom(lev),
                                 m_ucm_params.grid_ratio, lev);
         if (solverChoice.moisture_type != MoistureType::None && m_ucm_fields[lev]->LE_latent) {
             coarsen_ucm_flux_to_atm(*m_ucm_LE_atm[lev], *m_ucm_fields[lev]->LE_latent,
-                                    *m_ucm_fields[lev]->is_urban, *m_ucm_f_urb_atm[lev],
+                                    *m_ucm_fields[lev]->is_urban,
                                     m_ucm_grid[lev]->geom, Geom(lev),
                                     m_ucm_params.grid_ratio, lev);
         }

@@ -120,7 +120,6 @@ void coarsen_ucm_flux_to_atm(
     amrex::MultiFab&           Q_atm_out,
     const amrex::MultiFab&     Q_ucm,
     const amrex::iMultiFab&    is_urban_ucm,
-    const amrex::MultiFab&     f_urb_atm,
     const amrex::Geometry&     /*geom_ucm*/,
     const amrex::Geometry&     geom_atm,
     int                        grid_ratio,
@@ -128,15 +127,24 @@ void coarsen_ucm_flux_to_atm(
 {
     using namespace amrex;
 
-    // Phase 2.5 convention A (weighted-divide):
-    //   Q_atm(I,J) = sum over N=grid_ratio^2 UCM cells of (is_urban * Q_ucm) / f_urb_atm
-    // where f_urb_atm = sum(is_urban) / N.
-    // This gives the average flux per urban cell. The injection kernel must multiply
-    // back by f_urb_atm on the receiving side to recover the area-averaged tendency
-    // in partially-urban ATM cells.
-    // Conservative convention (B): total flux is NOT automatically preserved without
-    // injection-side reweighting; must verify apply_ucm_tendency_to_cc_source multiplies
-    // by f_urb_atm or does NOT need to (depends on physics choice).
+    // Phase 2.5 aggregation, convention B (conservation-preserving, no injection-side reweight):
+    //
+    //   Q_atm(I,J) = (1 / N_total) * sum over N=grid_ratio^2 UCM cells of (is_urban * Q_ucm)
+    //
+    // where N_total = grid_ratio^2 counts ALL UCM cells inside the ATM cell (urban + non-urban).
+    //
+    // Total column-integrated flux is preserved by construction. Proof:
+    //   sum_over_ATM(Q_atm * dA_atm)
+    //     = sum_over_ATM(Q_atm * N_total * dA_ucm)
+    //     = sum_over_ATM(sum_over_N(is_urban * Q_ucm) * dA_ucm)
+    //     = sum_over_UCM_urban(Q_ucm * dA_ucm)
+    //     = total urban heat production.
+    //
+    // The injection kernel `apply_ucm_tendency_to_cc_source` reads Q_atm AS-IS.
+    // It does NOT multiply by f_urb_atm. Mirrors `Source/Fire/ERF_FireAtmCoupling.H`
+    // on branch ERF-Hazard.
+    //
+    // Verified by `Exec/CanonicalTests/SLUCM/UCMScaleAwareAggregation/check_conservation.py`.
 
     Q_atm_out.setVal(0.0);
 
@@ -173,46 +181,26 @@ void coarsen_ucm_flux_to_atm(
            });
        }
 
+
        // Coarsen masked flux via average_down
        average_down(Q_masked, atm_slab, 0, 1, IntVect(grid_ratio, grid_ratio, 1));
-
-       // Normalize by urban fraction to recover flux per unit area of urban cells
-       // atm_slab currently has: sum(Q_ucm * is_urban) / n_cells
-       // We want: sum(Q_ucm * is_urban) / sum(is_urban) = atm_slab / f_urb
-       for (MFIter mfi(atm_slab, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-           const Box& atm_box_2d = mfi.tilebox();
-           auto slab_a = atm_slab.array(mfi);
-           auto const f_urb_a = f_urb_atm.const_array(mfi);
-
-           ParallelFor(atm_box_2d, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-               Real f_urb = f_urb_a(i, j, klo_atm);
-               if (f_urb > 1.0e-8) {
-                   slab_a(i, j, k) /= f_urb;
-               } else {
-                   slab_a(i, j, k) = 0.0;
-               }
-           });
-       }
     }
 
     // ParallelCopy the slab into k=klo_atm of Q_atm_out (only that plane overlaps).
     Q_atm_out.ParallelCopy(atm_slab, 0, 0, 1);
 
     // Collectives on all ranks (do not put inside IOProcessor() guard).
-    Real min_ucm = Q_ucm.min(0);
-    Real max_ucm = Q_ucm.max(0);
-    Real min_atm = Q_atm_out.min(0);
-    Real max_atm = Q_atm_out.max(0);
-    Real min_f_urb = f_urb_atm.min(0);
-    Real max_f_urb = f_urb_atm.max(0);
+    Real min_ucm = Q_ucm.min(0, 0);
+    Real max_ucm = Q_ucm.max(0, 0);
+    Real min_atm = Q_atm_out.min(0, 0);
+    Real max_atm = Q_atm_out.max(0, 0);
 
     if (ParallelDescriptor::IOProcessor()) {
        Print() << "[UCM][2.5][coarsen_ucm_flux_to_atm]\n"
                << "  grid_ratio=" << grid_ratio << "\n"
                << "  before: Q_ucm  min=" << min_ucm << " max=" << max_ucm << "\n"
                << "  after:  Q_atm  min=" << min_atm << " max=" << max_atm
-               << " (urban-fraction-weighted, only k=" << klo_atm << " plane written)\n"
-               << "  f_urb: min=" << min_f_urb << " max=" << max_f_urb << "\n";
+               << " (area-averaged, only k=" << klo_atm << " plane written)\n";
     }
 }
 
@@ -434,8 +422,8 @@ void apply_ucm_tendency_to_cc_source(
         amrex::Gpu::streamSynchronize();
 
         // H_atm diagnostics (collective on all ranks, inside debug gate)
-        const amrex::Real min_h = H_atm.min(0);
-        const amrex::Real max_h = H_atm.max(0);
+        const amrex::Real min_h = H_atm.min(0, 0);
+        const amrex::Real max_h = H_atm.max(0, 0);
 
         if (amrex::ParallelDescriptor::IOProcessor()) {
             // Estimate expected surface tendency magnitude
