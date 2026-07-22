@@ -18,6 +18,15 @@
 
 /**
  * @brief Refine an ATM-grid MultiFab onto the UCM 2D slab grid.
+ *
+ * Piecewise-constant injection: each ATM cell (i,j) in the slab is replicated
+ * into a grid_ratio x grid_ratio block of UCM cells.
+ *
+ * Implementation:
+ * 1. Extract 2D slab from Q_atm_in at k=klo_atm
+ * 2. Build coarse MultiFab on UCM DM with coarsened UCM BA
+ * 3. ParallelCopy from slab to coarse
+ * 4. Inject coarse -> fine using division of cell indices
  */
 void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
                        const amrex::MultiFab& Q_atm_in,
@@ -74,6 +83,13 @@ void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
 
 /**
  * @brief Coarsen UCM fluxes to ATM grid.
+ *
+ * Implementation of the coarsen pattern. When grid_ratio==1, performs a direct copy.
+ * When grid_ratio>1, uses amrex::average_down to spatially average the UCM flux to ATM.
+ *
+ * The UCM fluxes live on a 2D slab, while Q_atm_out is a 3D MultiFab.
+ * We create a 2D slab at k=klo on the ATM x-y decomposition, coarsen into it,
+ * then ParallelCopy into the k=klo plane of Q_atm_out.
  */
 void coarsen_ucm_flux_to_atm(
     amrex::MultiFab&       Q_atm_out,
@@ -84,7 +100,7 @@ void coarsen_ucm_flux_to_atm(
     int                    /*lev*/)
 {
     using namespace amrex;
-    
+
     Q_atm_out.setVal(0.0);
 
     // Build a 2D ATM slab BoxArray at k = klo of the ATM domain.
@@ -133,24 +149,25 @@ void coarsen_ucm_flux_to_atm(
  * Distributes surface sensible heat flux (and optionally latent heat) vertically
  * with exponential decay over alpha_ucm depth scale.
  *
- * When z_phys_cc is flat terrain (z_phys_cc(i,j,k) = (k+0.5)*dz), the kernel
- * uses geom_atm dz directly: z_k = (k - klo) * dz.  This is correct for
- * erf.terrain_type = None cases where z_phys_cc contains analytically-filled
- * cell-centre heights.
+ * Height-above-surface is computed as z_k = (k - klo) * dz (flat terrain formula).
+ * This is exact for erf.terrain_type = None.  Phase 4 will replace with
+ * z_phys_cc(i,j,k) - z_phys_cc(i,j,klo) for terrain-following coordinates.
+ *
+ * Includes safety clamp to prevent runaway tendencies from unit bugs.
  */
 void apply_ucm_tendency_to_cc_source(
-    amrex::MultiFab&       cc_source,
-    const amrex::MultiFab& H_atm,
-    const amrex::MultiFab* LE_atm,
-    const amrex::MultiFab& z_phys_cc,
-    const amrex::MultiFab& S_old,
-    const amrex::Geometry& geom_atm,
+    amrex::MultiFab&        cc_source,
+    const amrex::MultiFab&  H_atm,
+    const amrex::MultiFab*  LE_atm,
+    const amrex::MultiFab&  /*z_phys_cc*/,   // reserved for Phase 4 terrain support
+    const amrex::MultiFab&  S_old,
+    const amrex::Geometry&  geom_atm,
     const amrex::iMultiFab& is_urban_atm,
-    amrex::Real            alpha_ucm,
-    amrex::Real            feedback,
-    bool                   has_moisture,
-    bool                   ucm_debug,
-    int                    /*lev*/)
+    amrex::Real             alpha_ucm,
+    amrex::Real             feedback,
+    bool                    has_moisture,
+    bool                    ucm_debug,
+    int                     /*lev*/)
 {
     // One-time warning if feedback is zero
     static bool warned_feedback_zero = false;
@@ -184,7 +201,7 @@ void apply_ucm_tendency_to_cc_source(
 
     // Physical constants
     const amrex::Real Cp = Cp_d;
-    
+
     // Safety clamp for theta tendency (K/s absolute)
     constexpr amrex::Real theta_tend_cap = 0.05;
     static bool warned_clamp_exceeded = false;
@@ -208,18 +225,19 @@ void apply_ucm_tendency_to_cc_source(
             : amrex::Array4<const amrex::Real>{};
 
         // Kernel: exponential injection using flat-terrain height formula.
+        //
         // z_k = (k - klo) * dz  -- height of cell centre above surface [m].
-        // This is exact for erf.terrain_type = None; for terrain-following
-        // coordinates Phase 4 will replace with z_phys_cc(i,j,k) - z_phys_cc(i,j,klo).
+        // This is exact for erf.terrain_type = None.
+        // Phase 4 will replace with: z_phys_cc(i,j,k) - z_phys_cc(i,j,klo).
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
         {
-            // Guard: skip cells with no flux
-            if (h_a(i, j, 0) == 0.0) return;
-
             // Guard: skip non-urban cells
             if (urban_a(i, j, 0) == 0) return;
 
-            // Height-above-surface using uniform dz (flat terrain)
+            // Guard: skip cells with no surface flux
+            if (h_a(i, j, 0) == amrex::Real(0.0)) return;
+
+            // Height-above-surface (flat terrain)
             const amrex::Real z_k      = (k       - klo) * dz;
             const int         kp1      = amrex::min(k + 1, khi);
             const amrex::Real z_k_plus = (kp1     - klo) * dz;
@@ -235,7 +253,7 @@ void apply_ucm_tendency_to_cc_source(
             // Density at this level
             const amrex::Real rho_k = s_a(i, j, k, Rho_comp);
 
-            // Tendency for potential temperature equation (per unit volume)
+            // Tendency for potential temperature equation (per unit volume) [K*kg/m3/s]
             const amrex::Real theta_tend = rho_k * (h_tend - h_tend_plus) / dz;
 
             // Safety clamp: skip if tendency exceeds physical bounds
@@ -282,10 +300,10 @@ void apply_ucm_tendency_to_cc_source(
         amrex::Print() << "[UCM][1.4][apply_ucm_tendency_to_cc_source]\n";
         amrex::Print() << "  atm_feedback=" << feedback
                        << " (injection_active=" << (feedback > 0.0 ? "yes" : "no") << ")\n";
-        amrex::Print() << "  k=0: rho≈1.2 dz=" << dz << "\n";
+        amrex::Print() << "  k=0: rho~1.2 dz=" << dz << "\n";
         amrex::Print() << "  alpha_ucm=" << alpha_ucm << " [m]\n";
-        amrex::Print() << "  H_atm min=" << min_h << " max=" << max_h << " [W/m²]\n";
+        amrex::Print() << "  H_atm min=" << min_h << " max=" << max_h << " [W/m2]\n";
         amrex::Print() << "  RhoTheta_tend min=" << min_tend << " max=" << max_tend << "\n";
-        amrex::Print() << "  expected surface tend magnitude ≈ " << expected_scale << " [K/s]\n";
+        amrex::Print() << "  expected surface tend magnitude ~ " << expected_scale << " [K/s]\n";
     }
 }
