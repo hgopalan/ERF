@@ -18,15 +18,6 @@
 
 /**
  * @brief Refine an ATM-grid MultiFab onto the UCM 2D slab grid.
- *
- * Piecewise-constant injection: each ATM cell (i,j) in the slab is replicated
- * into a grid_ratio x grid_ratio block of UCM cells.
- *
- * Implementation:
- * 1. Extract 2D slab from Q_atm_in at k=klo_atm
- * 2. Build coarse MultiFab on UCM DM with coarsened UCM BA
- * 3. ParallelCopy from slab to coarse
- * 4. Inject coarse → fine using division of cell indices
  */
 void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
                        const amrex::MultiFab& Q_atm_in,
@@ -83,13 +74,6 @@ void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
 
 /**
  * @brief Coarsen UCM fluxes to ATM grid.
- *
- * Implementation of the coarsen pattern. When grid_ratio==1, performs a direct copy.
- * When grid_ratio>1, uses amrex::average_down to spatially average the UCM flux to ATM.
- * 
- * The UCM fluxes live on a 2D slab, while Q_atm_out is a 3D MultiFab.
- * We create a 2D slab at k=klo on the ATM x-y decomposition, coarsen into it,
- * then ParallelCopy into the k=klo plane of Q_atm_out.
  */
 void coarsen_ucm_flux_to_atm(
     amrex::MultiFab&       Q_atm_out,
@@ -148,8 +132,11 @@ void coarsen_ucm_flux_to_atm(
  * Exponential injection pattern after Mandel 2011 / WRF-SFIRE fire_tendency.
  * Distributes surface sensible heat flux (and optionally latent heat) vertically
  * with exponential decay over alpha_ucm depth scale.
- * 
- * Includes safety clamp to prevent runaway tendencies from unit bugs.
+ *
+ * When z_phys_cc is flat terrain (z_phys_cc(i,j,k) = (k+0.5)*dz), the kernel
+ * uses geom_atm dz directly: z_k = (k - klo) * dz.  This is correct for
+ * erf.terrain_type = None cases where z_phys_cc contains analytically-filled
+ * cell-centre heights.
  */
 void apply_ucm_tendency_to_cc_source(
     amrex::MultiFab&       cc_source,
@@ -212,7 +199,6 @@ void apply_ucm_tendency_to_cc_source(
         // Get Array4 references (by value for GPU)
         auto cc_src_a      = cc_source.array(mfi);
         auto const h_a     = H_atm.const_array(mfi);
-        auto const z_a     = z_phys_cc.const_array(mfi);
         auto const s_a     = S_old.const_array(mfi);
         auto const urban_a = is_urban_atm.const_array(mfi);
 
@@ -221,40 +207,39 @@ void apply_ucm_tendency_to_cc_source(
             ? LE_atm->const_array(mfi)
             : amrex::Array4<const amrex::Real>{};
 
-        // Kernel: exponential injection with bounds checking and safety clamp
+        // Kernel: exponential injection using flat-terrain height formula.
+        // z_k = (k - klo) * dz  -- height of cell centre above surface [m].
+        // This is exact for erf.terrain_type = None; for terrain-following
+        // coordinates Phase 4 will replace with z_phys_cc(i,j,k) - z_phys_cc(i,j,klo).
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
         {
-            // Guard: skip non-urban cells
-//            if (urban_a(i, j, 0) == 0) return;
-
+            // Guard: skip cells with no flux
             if (h_a(i, j, 0) == 0.0) return;
 
-            // Height-above-surface
-            const amrex::Real z_sfc = z_a(i, j, klo);
-            const amrex::Real z_k   = z_a(i, j, k) - z_sfc;
+            // Guard: skip non-urban cells
+            if (urban_a(i, j, 0) == 0) return;
 
-            // Exponential profile at this level
-            const amrex::Real exp_factor = std::exp(-z_k / alpha_ucm);
+            // Height-above-surface using uniform dz (flat terrain)
+            const amrex::Real z_k      = (k       - klo) * dz;
+            const int         kp1      = amrex::min(k + 1, khi);
+            const amrex::Real z_k_plus = (kp1     - klo) * dz;
 
-            // Sensible heat tendency at k [K/s]
-            const amrex::Real h_tend = (h_a(i, j, 0) / Cp) * exp_factor;
+            // Exponential profile
+            const amrex::Real exp_factor      = std::exp(-z_k      / alpha_ucm);
+            const amrex::Real exp_factor_plus = std::exp(-z_k_plus / alpha_ucm);
+
+            // Sensible heat tendency [K/s] at this level and the one above
+            const amrex::Real h_tend      = (h_a(i, j, 0) / Cp) * exp_factor;
+            const amrex::Real h_tend_plus = (h_a(i, j, 0) / Cp) * exp_factor_plus;
 
             // Density at this level
             const amrex::Real rho_k = s_a(i, j, k, Rho_comp);
-
-            // Vertical divergence of exponential flux at k+1/2
-            // Guard: clamp k+1 to khi to avoid out-of-bounds access
-            const int kp1 = amrex::min(k + 1, khi);
-            const amrex::Real z_k_plus       = z_a(i, j, kp1) - z_sfc;
-            const amrex::Real exp_factor_plus = std::exp(-z_k_plus / alpha_ucm);
-            const amrex::Real h_tend_plus    = (h_a(i, j, 0) / Cp) * exp_factor_plus;
 
             // Tendency for potential temperature equation (per unit volume)
             const amrex::Real theta_tend = rho_k * (h_tend - h_tend_plus) / dz;
 
             // Safety clamp: skip if tendency exceeds physical bounds
             if (std::abs(theta_tend / rho_k) > theta_tend_cap) {
-                // Skip this cell; will set warning flag for logging outside parallel region
                 #ifdef AMREX_PRAGMA_OMP_ATOMIC
                 #pragma omp atomic write
                 #endif
