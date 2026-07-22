@@ -29,7 +29,7 @@ geometry.is_periodic = 1 1 0
 zlo.type = "surface_layer"
 erf.most.z0   = 0.1      # roughness length [m]
 erf.most.zref = 24.0     # reference height [m]
-erf.most.surf_temp_flux = 0.0
+erf.most.surf_temp_flux = 0.12
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.003   # adiabatic upper boundary
 
@@ -103,7 +103,7 @@ erf.ucm.d_over_H            = 0.7
 
 # Phase 2.3: Facet-split and anthropogenic heat
 erf.ucm.plan_area_frac_uniform = 0.5      # Default plan-area fraction [-]
-erf.ucm.AH_uniform_Wm2         = 0.0      # Uniform AH for this test [W/m^2]
+erf.ucm.AH_uniform_Wm2         = 30.0      # Uniform AH for this test [W/m^2]
 erf.ucm.AH_daytime_peak        = 20.0     # Peak of diurnal AH [W/m^2] (not used)
 erf.ucm.AH_profile_type_default = 0       # 0 = uniform, 1 = diurnal cosine
 
