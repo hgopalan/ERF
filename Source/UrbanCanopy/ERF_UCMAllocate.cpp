@@ -244,9 +244,28 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
     }
 
+    // Phase 2.4: Sky view factors (shadowing model)
+    fields.SVF_wall = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.4][allocate_ucm_fields] SVF_wall: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.SVF_road = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.4][allocate_ucm_fields] SVF_road: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.SVF_roof = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.4][allocate_ucm_fields] SVF_roof: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
     // Summary message
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
-        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 25 MultiFabs on UCM grid "
+        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 28 MultiFabs on UCM grid "
                 << "at lev=" << lev << "\n";
     }
 
@@ -894,6 +913,28 @@ bool UCMFields::all_allocated() const
     if (!ah_profile_id) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][2.3][all_allocated] MISSING: ah_profile_id\n";
+        }
+        result = false;
+    }
+
+    // Phase 2.4: Sky view factors (shadowing)
+    if (!fields.SVF_wall) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.4][all_allocated] MISSING: SVF_wall\n";
+        }
+        result = false;
+    }
+
+    if (!fields.SVF_road) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.4][all_allocated] MISSING: SVF_road\n";
+        }
+        result = false;
+    }
+
+    if (!fields.SVF_roof) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.4][all_allocated] MISSING: SVF_roof\n";
         }
         result = false;
     }

@@ -204,6 +204,24 @@ struct UCMFields
     std::unique_ptr<amrex::iMultiFab> ah_profile_id;
 
     // =========================================================================
+    // Phase 2.4: Sky view factors (shadowing model)
+    // =========================================================================
+
+    /// Sky view factor for wall surface [-]. Phase 2.4: from canyon aspect ratio (Kusaka 2001).
+    /// Reduces incoming shortwave on canyon walls due to building self-shading.
+    /// Computed from H_bldg / max(W_road, 1.0e-6); typical range: 0.3-0.8.
+    std::unique_ptr<amrex::MultiFab> SVF_wall;
+
+    /// Sky view factor for road surface [-]. Phase 2.4: from canyon aspect ratio (Kusaka 2001).
+    /// Reduces incoming shortwave on canyon floor due to building overhead obstruction.
+    /// Computed from H_bldg / max(W_road, 1.0e-6); typical range: 0.3-0.8.
+    std::unique_ptr<amrex::MultiFab> SVF_road;
+
+    /// Sky view factor for roof surface [-]. Phase 2.4: always 1.0 (unshaded from above).
+    /// Included for symmetry; not used in SEB (roof always sees full SW_down).
+    std::unique_ptr<amrex::MultiFab> SVF_roof;
+
+    // =========================================================================
     // Public methods
     // =========================================================================
 

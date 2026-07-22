@@ -53,7 +53,7 @@ void UCMPlotfile::write(const UCMFields& fields, const UCMGrid& grid,
         !fields.emissivity_roof || !fields.emissivity_wall || !fields.emissivity_road ||
         !fields.T_skin_roof || !fields.T_skin_wall || !fields.T_skin_road ||
         !fields.T_canyon_air || !fields.H_sensible || !fields.LE_latent ||
-        !fields.is_urban) {
+        !fields.is_urban || !fields.SVF_wall || !fields.SVF_road || !fields.SVF_roof) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][1.4][UCMPlotfile::write] ERROR: One or more required fields is nullptr\n";
         }
@@ -91,6 +91,11 @@ void UCMPlotfile::write(const UCMFields& fields, const UCMGrid& grid,
                 dst(i, j, k, UCMPlot_is_urban) = static_cast<amrex::Real>(src(i, j, k, 0));
             });
     }
+
+    // Phase 2.4: SVF (sky view factors) from shadowing model
+    amrex::MultiFab::Copy(ucm_plot, *fields.SVF_wall,        0, UCMPlot_SVF_wall,        1, 0);
+    amrex::MultiFab::Copy(ucm_plot, *fields.SVF_road,        0, UCMPlot_SVF_road,        1, 0);
+    amrex::MultiFab::Copy(ucm_plot, *fields.SVF_roof,        0, UCMPlot_SVF_roof,        1, 0);
 
     // Build component names vector
     amrex::Vector<std::string> varnames(UCMPlot_ncomp);

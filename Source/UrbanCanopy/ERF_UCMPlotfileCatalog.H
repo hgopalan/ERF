@@ -17,7 +17,7 @@
  * @brief Component indices for UCM plotfile output
  *
  * All fields are on the native UCM 2D slab grid.
- * Total ncomp = 19 in Phase 1.4.
+ * Total ncomp = 19 in Phase 2.4.
  */
 enum UCMPlotfileComponents {
     // Morphology (1–3)
@@ -50,8 +50,13 @@ enum UCMPlotfileComponents {
     // Mask (15)
     UCMPlot_is_urban         = 15,  ///< Urban mask (0/1) [-]
 
+    // Phase 2.4: Sky view factors (shadowing) (16–18)
+    UCMPlot_SVF_wall         = 16,  ///< Wall sky view factor [-]
+    UCMPlot_SVF_road         = 17,  ///< Road sky view factor [-]
+    UCMPlot_SVF_roof         = 18,  ///< Roof sky view factor [-] (always 1.0)
+
     // Total
-    UCMPlot_ncomp            = 16   ///< Total number of components
+    UCMPlot_ncomp            = 19   ///< Total number of components
 };
 
 /**
@@ -81,6 +86,9 @@ inline const char* UCMPlotfileComponentName(int comp)
         case UCMPlot_H_sensible:       return "H_sensible";
         case UCMPlot_LE_latent:        return "LE_latent";
         case UCMPlot_is_urban:         return "is_urban";
+        case UCMPlot_SVF_wall:         return "SVF_wall";
+        case UCMPlot_SVF_road:         return "SVF_road";
+        case UCMPlot_SVF_roof:         return "SVF_roof";
         default:                       return "unknown";
     }
 }

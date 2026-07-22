@@ -17,6 +17,7 @@
 #include <UrbanCanopy/ERF_UCMLayer.H>
 #include <UrbanCanopy/ERF_UCMSlabConduction.H>
 #include <UrbanCanopy/ERF_UCMAllocate.H>
+#include <UrbanCanopy/ERF_UCMShadowing.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <ERF_Constants.H>
 #include <cmath>
@@ -191,6 +192,16 @@ void UCMLayer::advance(UCMFields& fields,
         }
         m_warn_radiation_placeholder_printed = true;
     }
+
+    // ========================================================================
+    // Step 2.4: Compute sky view factors (Kusaka 2001 canyon shadowing model)
+    // ========================================================================
+    // Phase 2.4: Compute per-cell SVF from canyon aspect ratio.
+    // SVF_road and SVF_wall reduce SW absorption on shaded facets.
+    // SVF_roof = 1.0 always (unshaded from above).
+    compute_sky_view_factors(*fields.SVF_wall, *fields.SVF_road, *fields.SVF_roof,
+                             *fields.H_bldg, *fields.W_road, *fields.is_urban,
+                             lev, m_params.ucm_debug);
 
     // ========================================================================
     // Step 3: Solve facet SEB and advance slab conduction
