@@ -9,9 +9,9 @@
  * **CSV Format (Phase 2.5+):**
  * ```
  * step, time_s, T_skin_roof_max, T_skin_wall_max, T_skin_road_max,
- * T_canyon_max, H_sensible_max, H_sensible_sum, LE_latent_max,
+ * T_canyon_max, H_sensible_max, H_sensible_sum, H_atm_max, LE_latent_max,
  * H_road_max, H_wall_max, H_roof_max, AH_max,
- * f_urb_max, H_bldg_mean_max, H_bldg_std_max, lambda_f_max, H_atm_max
+ * f_urb_max, f_urb_min, H_bldg_mean_max, H_bldg_std_max, lambda_f_max
  * ```
  *
  * Note: Aggregates (f_urb, H_bldg_mean, etc.) are ~constant (static refinement),
@@ -76,17 +76,18 @@ public:
      * - T_canyon_max:    maximum canyon-air temperature [K]
      * - H_sensible_max:  maximum sensible heat flux [W/m²]
      * - H_sensible_sum:  domain-sum sensible heat flux [W]
-     * - LE_latent_max:   maximum latent heat flux [W/m²]
      * - H_atm_max:       maximum ATM-grid aggregated flux [W/m²] (Phase 2.5)
+     * - LE_latent_max:   maximum latent heat flux [W/m²]
+     * - f_urb_min:       minimum urban fraction (Phase 2.5)
      *
      * Only processes cells where is_urban(i,j,0) == 1.
      *
      * **Debug trace format (IO rank only):**
      * ```
-     * [UCM][2.5][UCMDiagnostics::append] step={nstep} time={time}
+     * [UCM][2.5-followup][UCMDiagnostics::append] step={nstep} time={time}
      *   T_skin_roof_max={T_roof_max} T_canyon_max={T_canyon_max}
      *   H_sensible_max={H_max} H_sensible_sum={H_sum}
-     *   H_atm_max={H_atm_max}
+     *   [aggregates] f_urb_max={f_urb_max} f_urb_min={f_urb_min} H_atm_max={H_atm_max}
      * ```
      *
      * Duplicate-write check: if nstep == m_last_write_step, function
@@ -137,26 +138,27 @@ private:
      * @param[in] T_canyon_max  Max canyon-air temp [K]
      * @param[in] H_max         Max sensible flux [W/m²]
      * @param[in] H_sum         Sum sensible flux [W]
+     * @param[in] H_atm_max     Max ATM-grid aggregated flux [W/m²] (Phase 2.5)
      * @param[in] LE_max        Max latent flux [W/m²]
      * @param[in] H_road_max    Max road sensible flux [W/m²] (Phase 2.3)
      * @param[in] H_wall_max    Max wall sensible flux [W/m²] (Phase 2.3)
      * @param[in] H_roof_max    Max roof sensible flux [W/m²] (Phase 2.3)
      * @param[in] AH_max        Max anthropogenic heat [W/m²] (Phase 2.3)
      * @param[in] f_urb_max     Max urban fraction (Phase 2.5, nullable)
+     * @param[in] f_urb_min     Min urban fraction (Phase 2.5, nullable)
      * @param[in] H_bldg_mean_max  Max mean building height [m] (Phase 2.5, nullable)
      * @param[in] H_bldg_std_max   Max std dev building height [m] (Phase 2.5, nullable)
      * @param[in] lambda_f_max     Max frontal-area density (Phase 2.5, nullable)
-     * @param[in] H_atm_max        Max ATM-grid aggregated flux [W/m²] (Phase 2.5, nullable)
      */
     void write_row(int nstep, amrex::Real time,
-                  amrex::Real T_roof_max, amrex::Real T_wall_max, amrex::Real T_road_max,
-                  amrex::Real T_canyon_max, amrex::Real H_max, amrex::Real H_sum,
-                  amrex::Real LE_max,
-                  amrex::Real H_road_max, amrex::Real H_wall_max, 
-                  amrex::Real H_roof_max, amrex::Real AH_max,
-                  amrex::Real f_urb_max = 0.0, amrex::Real H_bldg_mean_max = 0.0,
-                  amrex::Real H_bldg_std_max = 0.0, amrex::Real lambda_f_max = 0.0,
-                  amrex::Real H_atm_max = 0.0);
+                 amrex::Real T_roof_max, amrex::Real T_wall_max, amrex::Real T_road_max,
+                 amrex::Real T_canyon_max, amrex::Real H_max, amrex::Real H_sum,
+                 amrex::Real H_atm_max, amrex::Real LE_max,
+                 amrex::Real H_road_max, amrex::Real H_wall_max, 
+                 amrex::Real H_roof_max, amrex::Real AH_max,
+                 amrex::Real f_urb_max, amrex::Real f_urb_min,
+                 amrex::Real H_bldg_mean_max, amrex::Real H_bldg_std_max,
+                 amrex::Real lambda_f_max);
 };
 
 #endif  // ERF_UCM_DIAGNOSTICS_H
