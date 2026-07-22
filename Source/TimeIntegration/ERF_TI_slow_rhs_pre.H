@@ -113,6 +113,57 @@
                      input_sounding_data, turbPert, true);
 
         // *****************************************************************************
+        // Phase 1.4: Inject UCM exponential tendency into cc_src each RK stage.
+        //
+        // make_sources() calls cc_src.setVal(0.) at the top, so any UCM tendency
+        // written into cc_src before advance_dycore is erased.  We re-inject it
+        // here, after make_sources(), so it survives into erf_slow_rhs_pre.
+        // *****************************************************************************
+#ifdef ERF_USE_UCM
+        if (m_ucm_params.enable &&
+            m_ucm_H_atm[level] && m_ucm_is_urban_atm[level] &&
+            m_ucm_params.atm_feedback > 0.0)
+        {
+            const bool has_moisture_ucm = (solverChoice.moisture_type != MoistureType::None);
+
+            // Build flat-terrain z_phys_cc if terrain is inactive
+            amrex::MultiFab z_phys_flat_ucm;
+            const amrex::MultiFab* z_cc_ucm_ptr = z_phys_cc[level].get();
+            if (!z_cc_ucm_ptr) {
+                const auto dxArr_ucm = fine_geom.CellSizeArray();
+                const int  klo_ucm   = fine_geom.Domain().smallEnd(2);
+                z_phys_flat_ucm.define(cc_src.boxArray(),
+                                       cc_src.DistributionMap(), 1, 1);
+                for (amrex::MFIter mfi_z(z_phys_flat_ucm,
+                                         amrex::TilingIfNotGPU());
+                     mfi_z.isValid(); ++mfi_z) {
+                    const amrex::Box& bx_z = mfi_z.growntilebox();
+                    auto z_a = z_phys_flat_ucm.array(mfi_z);
+                    amrex::ParallelFor(bx_z,
+                        [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                            z_a(i,j,k) = (k - klo_ucm + amrex::Real(0.5)) * dxArr_ucm[2];
+                        });
+                }
+                z_cc_ucm_ptr = &z_phys_flat_ucm;
+            }
+
+            apply_ucm_tendency_to_cc_source(
+                cc_src,
+                *m_ucm_H_atm[level],
+                has_moisture_ucm ? m_ucm_LE_atm[level].get() : nullptr,
+                *z_cc_ucm_ptr,
+                S_data[IntVars::cons],
+                fine_geom,
+                *m_ucm_is_urban_atm[level],
+                m_ucm_params.alpha_ucm,
+                m_ucm_params.atm_feedback,
+                has_moisture_ucm,
+                false,   // no per-RK debug spam; debug was printed before advance_dycore
+                level);
+        }
+#endif
+
+        // *****************************************************************************
         // Add nudging terms on moist variables if we have a non-zero relaxation region
         // *****************************************************************************
 #if defined(ERF_USE_NETCDF)
