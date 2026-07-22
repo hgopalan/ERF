@@ -10,6 +10,7 @@
 #include <UrbanCanopy/ERF_UCMPlotfile.H>
 #include <UrbanCanopy/ERF_UCMPlotfileCatalog.H>
 #include <AMReX_VisMF.H>
+#include <AMReX_PlotFileUtil.H>
 #include <AMReX_Print.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <sstream>
@@ -103,27 +104,19 @@ void UCMPlotfile::write(const UCMFields& fields, const UCMGrid& grid,
         varnames[i] = UCMPlotfileComponentName(i);
     }
 
-    // Write plotfile with VisMF
-    amrex::VisMF::Write(ucm_plot, plotfile_name);
-
-    // Write ASCII header (similar to Dust pattern)
-    if (amrex::ParallelDescriptor::IOProcessor()) {
-        std::string header_file = plotfile_name + "/Header";
-        std::ofstream ofs(header_file.c_str());
-        ofs << "Step = " << nstep << "\n";
-        ofs << "Time = " << time << "\n";
-        ofs << "ncomp = " << UCMPlot_ncomp << "\n";
-        for (int i = 0; i < UCMPlot_ncomp; ++i) {
-            ofs << "  " << varnames[i] << "\n";
-        }
-        ofs.close();
-    }
+    // Write plotfile using WriteSingleLevelPlotfile (handles directory, Header, Level_0/)
+    amrex::WriteSingleLevelPlotfile(plotfile_name,
+                                    ucm_plot,
+                                    varnames,
+                                    grid.geom,
+                                    time,
+                                    nstep);
 
     // Debug trace
     if (amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "[UCM][1.4][UCMPlotfile::write]\n";
         amrex::Print() << "  step=" << nstep << " time=" << time << " s\n";
-        amrex::Print() << "  filename: " << plotfile_name << "\n";
+        amrex::Print() << "  plotfile: " << plotfile_name << "/  (directory)\n";
         amrex::Print() << "  ncomp=" << UCMPlot_ncomp << " (";
         for (int i = 0; i < UCMPlot_ncomp; ++i) {
             amrex::Print() << varnames[i];

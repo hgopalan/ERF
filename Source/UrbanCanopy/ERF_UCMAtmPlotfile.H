@@ -50,7 +50,7 @@ public:
      * @brief Write plotfile at current step
      *
      * Gathers 5 aggregated UCM scalar fields, packs into a temporary MultiFab with 5
-     * components, and writes to plt_ucm_atm_NNNNN using VisMF::Write + ASCII header.
+     * components, and writes to plt_ucm_atm_NNNNN using WriteSingleLevelPlotfile.
      *
      * **Debug trace format (IO rank only):**
      * ```

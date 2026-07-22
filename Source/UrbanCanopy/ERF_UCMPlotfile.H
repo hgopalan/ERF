@@ -54,7 +54,7 @@ public:
      * @brief Write plotfile at current step
      *
      * Gathers all UCM fields, packs into a temporary MultiFab with UCMPlot_ncomp
-     * components, and writes to plt_ucm_NNNNN using VisMF::Write + ASCII header.
+     * components, and writes to plt_ucm_NNNNN using WriteSingleLevelPlotfile.
      *
      * **Debug trace format (IO rank only):**
      * ```
