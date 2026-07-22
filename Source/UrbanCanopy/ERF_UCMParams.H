@@ -93,8 +93,15 @@ struct UCMParams
     amrex::Real alpha_ucm      = 10.0;      ///< Exponential injection e-folding depth [m]
 
     // =========================================================================
-    // Section 4b: Slab conduction solver parameters (Phase 1.3+)
+    // Section 4.1: Phase 2.6 — Morphology-aware injection parameters
     // =========================================================================
+
+    amrex::Real alpha_scale              = 1.5;       ///< Multiplier: alpha_ij = alpha_scale * H_bldg_mean (per-cell e-folding) [-]
+    amrex::Real alpha_min                = 1.0;       ///< Minimum e-folding depth [m] (avoid divide-by-zero for non-urban)
+    amrex::Real alpha_max                = 50.0;      ///< Maximum e-folding depth [m] (cap for tall towers)
+    bool        use_morphology_injection  = true;      ///< Phase 2.6: morphology-aware split injection; false = fall back to uniform alpha_ucm
+
+
 
     int     slab_N_layers      = 4;         ///< Number of soil/material layers in slab [-]
     amrex::Real slab_T_deep    = 287.0;     ///< Deep (bottom BC) temperature [K]

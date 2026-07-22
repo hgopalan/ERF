@@ -392,6 +392,50 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                                     m_ucm_params.grid_ratio, lev);
         }
 
+        // Phase 2.6: Separate coarsening for road and wall+roof+AH channels.
+        // H_road_ucm is already populated by SEB; H_wall + H_roof already include AH per Phase 2.3.
+        if (!m_ucm_H_road_atm[lev]) {
+            m_ucm_H_road_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_H_road_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_H_wallroof_atm[lev]) {
+            m_ucm_H_wallroof_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_H_wallroof_atm[lev]->setVal(0.0);
+        }
+
+        coarsen_ucm_flux_to_atm(*m_ucm_H_road_atm[lev], *m_ucm_fields[lev]->H_road,
+                                *m_ucm_fields[lev]->is_urban,
+                                m_ucm_grid[lev]->geom, Geom(lev),
+                                m_ucm_params.grid_ratio, lev);
+
+        // Build a temporary UCM-grid MultiFab holding (H_wall + H_roof), then coarsen it.
+        // H_roof already includes AH per Phase 2.3, so no separate AH coarsening needed.
+        {
+            amrex::MultiFab H_wallroof_ucm(m_ucm_fields[lev]->H_wall->boxArray(),
+                                           m_ucm_fields[lev]->H_wall->DistributionMap(),
+                                           1, 0);
+            amrex::MultiFab::Copy(H_wallroof_ucm, *m_ucm_fields[lev]->H_wall, 0, 0, 1, 0);
+            amrex::MultiFab::Add (H_wallroof_ucm, *m_ucm_fields[lev]->H_roof, 0, 0, 1, 0);
+
+            coarsen_ucm_flux_to_atm(*m_ucm_H_wallroof_atm[lev], H_wallroof_ucm,
+                                    *m_ucm_fields[lev]->is_urban,
+                                    m_ucm_grid[lev]->geom, Geom(lev),
+                                    m_ucm_params.grid_ratio, lev);
+        }
+
+        // Debug print for Phase 2.6 fields
+        if (m_ucm_params.ucm_debug) {
+            const amrex::Real h_road_min = m_ucm_H_road_atm[lev]->min(0, 0);
+            const amrex::Real h_road_max = m_ucm_H_road_atm[lev]->max(0, 0);
+            const amrex::Real h_wr_min = m_ucm_H_wallroof_atm[lev]->min(0, 0);
+            const amrex::Real h_wr_max = m_ucm_H_wallroof_atm[lev]->max(0, 0);
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "[UCM][2.6][coarsen_ucm_flux_to_atm] Facet-split fluxes:\n"
+                               << "  H_road_atm     min=" << h_road_min << " max=" << h_road_max << " [W/m2]\n"
+                               << "  H_wallroof_atm min=" << h_wr_min << " max=" << h_wr_max << " [W/m2]\n";
+            }
+        }
+
         // Build is_urban mask on ATM grid if not already allocated
         if (!m_ucm_is_urban_atm[lev]) {
             m_ucm_is_urban_atm[lev] = std::make_unique<amrex::iMultiFab>(ba, dm, 1, 0);

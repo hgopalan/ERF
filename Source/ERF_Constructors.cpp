@@ -107,6 +107,9 @@ ERF::ERF_shared ()
     m_ucm_H_atm.resize(nlevs_max);
     m_ucm_LE_atm.resize(nlevs_max);
     m_ucm_is_urban_atm.resize(nlevs_max);
+    // Phase 2.6: Facet-split fluxes on ATM grid (lazy construction like m_ucm_H_atm)
+    m_ucm_H_road_atm.resize(nlevs_max);
+    m_ucm_H_wallroof_atm.resize(nlevs_max);
     // Phase 2.5: Morphology aggregates on ATM grid
     m_ucm_f_urb_atm.resize(nlevs_max);
     m_ucm_H_bldg_mean_atm.resize(nlevs_max);
