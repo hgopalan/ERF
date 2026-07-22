@@ -420,7 +420,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         }
         
         // Phase 2.5: ATM-grid aggregate plotfile output (once per coarse step)
-        if (m_ucm_params.ucm_atm_plot_int > 0 && (iteration % m_ucm_params.ucm_atm_plot_int == 0)) {
+        /*if (m_ucm_params.ucm_atm_plot_int > 0 && (iteration % m_ucm_params.ucm_atm_plot_int == 0)) {
             m_ucm_atm_plotfile->write(
                 iteration, time,
                 *m_ucm_f_urb_atm[lev],
@@ -431,6 +431,11 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                 Geom(lev),
                 m_ucm_params.ucm_debug,
                 lev);
+        }*/
+             if (m_ucm_params.ucm_atm_plot_int > 0 && (iteration % m_ucm_params.ucm_atm_plot_int == 0)) {
+            m_ucm_atm_plotfile->write(
+                *m_ucm_fields[lev], *m_ucm_grid[lev],
+                iteration, time, false, lev);
         }
     }
     #endif

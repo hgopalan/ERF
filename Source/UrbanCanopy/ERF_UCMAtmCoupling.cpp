@@ -58,6 +58,7 @@ void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
                        const amrex::MultiFab& Q_atm_in,
                        int                    grid_ratio,
                        int                    klo_atm)
+{
     using namespace amrex;
 
     // Step 1: build a 2D ATM slab at k = klo_atm covering Q_atm_in's BA

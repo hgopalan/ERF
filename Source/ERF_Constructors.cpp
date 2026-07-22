@@ -114,7 +114,7 @@ ERF::ERF_shared ()
     m_ucm_lambda_p_atm.resize(nlevs_max);
     m_ucm_lambda_f_atm.resize(nlevs_max);
     m_ucm_plotfile.resize(nlevs_max);
-    m_ucm_atm_plotfile = std::make_unique<UCMAtmPlotfile>();
+    m_ucm_atm_plotfile = std::make_unique<UCMPlotfile>(m_ucm_params);
     m_ucm_diagnostics.resize(nlevs_max);
     #endif
 
