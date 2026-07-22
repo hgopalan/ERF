@@ -49,15 +49,15 @@ public:
     /**
      * @brief Write plotfile at current step
      *
-     * Gathers 6 aggregated UCM scalar fields, packs into a temporary MultiFab with 6
+     * Gathers 8 aggregated UCM scalar fields (Phase 2.6), packs into a temporary MultiFab with 8
      * components, and writes to plt_ucm_atm_NNNNN using WriteSingleLevelPlotfile.
      *
      * **Debug trace format (IO rank only):**
      * ```
-     * [UCM][2.5-followup][UCMAtmPlotfile::write]
+     * [UCM][2.6-followup][UCMAtmPlotfile::write]
      *   step={step} time={time} s
      *   filename: {full_path}/plt_ucm_atm_NNNNNN
-     *   ncomp=6 (f_urb, H_bldg_mean, H_bldg_std, lambda_p, lambda_f, H_atm)
+     *   ncomp=8 (f_urb, H_bldg_mean, H_bldg_std, lambda_p, lambda_f, H_atm, H_road_atm, H_wallroof_atm)
      *   grid: {nx_atm} x {ny_atm} x 1 (ATM grid)
      * ```
      *
@@ -72,6 +72,8 @@ public:
      * @param[in] lambda_p_atm           Mean plan-area density on ATM grid [-]
      * @param[in] lambda_f_atm           Mean frontal-area density on ATM grid [-]
      * @param[in] H_atm                  Sensible heat flux on ATM grid [W/m^2]
+     * @param[in] H_road_atm             Road flux on ATM grid [W/m^2] (Phase 2.6)
+     * @param[in] H_wallroof_atm         Wall+roof+AH flux on ATM grid [W/m^2] (Phase 2.6)
      * @param[in] geom                    ATM geometry
      * @param[in] ucm_debug              Print debug info (default false)
      * @param[in] lev                    AMR level (default 0)
@@ -84,6 +86,8 @@ public:
                const amrex::MultiFab&    lambda_p_atm,
                const amrex::MultiFab&    lambda_f_atm,
                const amrex::MultiFab&    H_atm,
+               const amrex::MultiFab&    H_road_atm,       ///< Phase 2.6
+               const amrex::MultiFab&    H_wallroof_atm,   ///< Phase 2.6
                const amrex::Geometry&    geom,
                bool                      ucm_debug = false,
                int                       lev = 0);
