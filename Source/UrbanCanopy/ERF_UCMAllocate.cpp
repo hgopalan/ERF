@@ -164,19 +164,6 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     AMREX_ALWAYS_ASSERT(building_reader.size() > 0);
     AMREX_ALWAYS_ASSERT(material_registry.size() > 0);
 
-    // Build a map from (i_atm, j_atm) to building row index for fast lookup
-    // Only rank 0 builds the map, then we scatter the results
-    std::unordered_map<int, int> atm_to_row_index;
-    
-    if (ParallelDescriptor::IOProcessor()) {
-        for (int row_idx = 0; row_idx < building_reader.size(); ++row_idx) {
-            const auto& row = building_reader.rows()[row_idx];
-            // Create a unique key for (i_atm, j_atm)
-            int key = row.i * 1000000 + row.j;  // Simple hash assuming i,j < 1000
-            atm_to_row_index[key] = row_idx;
-        }
-    }
-
     // Zero out all fields initially
     fields.H_bldg->setVal(0.0);
     fields.W_road->setVal(0.0);
@@ -198,86 +185,101 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.mat_id_wall->setVal(0);
     fields.mat_id_road->setVal(0);
 
-    // Iterate over UCM grid cells and populate fields from CSV data
-    // Since the data has been broadcast, all ranks have it
+    // Get const references to the broadcast data
     const auto& rows = building_reader.rows();
-    
-    for (MFIter mfi(*(fields.H_bldg)); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.validbox();
-        auto H_bldg_arr = fields.H_bldg->array(mfi);
-        auto W_road_arr = fields.W_road->array(mfi);
-        auto W_roof_arr = fields.W_roof->array(mfi);
-        auto albedo_roof_arr = fields.albedo_roof->array(mfi);
-        auto albedo_wall_arr = fields.albedo_wall->array(mfi);
-        auto albedo_road_arr = fields.albedo_road->array(mfi);
-        auto emissivity_roof_arr = fields.emissivity_roof->array(mfi);
-        auto emissivity_wall_arr = fields.emissivity_wall->array(mfi);
-        auto emissivity_road_arr = fields.emissivity_road->array(mfi);
-        auto T_skin_roof_arr = fields.T_skin_roof->array(mfi);
-        auto T_skin_wall_arr = fields.T_skin_wall->array(mfi);
-        auto T_skin_road_arr = fields.T_skin_road->array(mfi);
-        auto T_canyon_air_arr = fields.T_canyon_air->array(mfi);
-        auto is_urban_arr = fields.is_urban->array(mfi);
-        auto mat_id_roof_arr = fields.mat_id_roof->array(mfi);
-        auto mat_id_wall_arr = fields.mat_id_wall->array(mfi);
-        auto mat_id_road_arr = fields.mat_id_road->array(mfi);
 
-        ParallelFor(bx, [=] (const IntVect& iv) noexcept
-        {
-            int i_ucm = iv.x;
-            int j_ucm = iv.y;
-            
-            // Map UCM grid indices to ATM grid indices
-            int i_atm = i_ucm / grid_ratio;
-            int j_atm = j_ucm / grid_ratio;
-            
-            // Look up building row from CSV
-            int key = i_atm * 1000000 + j_atm;
-            
-            // Check if row exists in the building layout
-            bool found = false;
-            const UCMBuildingRow* row_ptr = nullptr;
-            
-            for (const auto& row : rows) {
-                if (row.i == i_atm && row.j == j_atm) {
-                    found = true;
-                    row_ptr = &row;
-                    break;
+    // Iterate over each building row and fill corresponding UCM grid cells
+    // Each building row covers a single ATM grid cell, which maps to grid_ratio x grid_ratio UCM cells
+    for (const auto& row : rows) {
+        int i_atm = row.i;
+        int j_atm = row.j;
+        
+        // Look up and pre-compute material properties
+        const UCMMaterial& roof_mat = material_registry.lookup(row.roof_mat_id);
+        const UCMMaterial& wall_mat = material_registry.lookup(row.wall_mat_id);
+        const UCMMaterial& road_mat = material_registry.lookup(row.road_mat_id);
+        
+        // Fill all UCM cells that correspond to this ATM cell
+        for (int i_ucm = i_atm * grid_ratio; i_ucm < (i_atm + 1) * grid_ratio; ++i_ucm) {
+            for (int j_ucm = j_atm * grid_ratio; j_ucm < (j_atm + 1) * grid_ratio; ++j_ucm) {
+                // Use AMReX looping to safely fill cells on all grids
+                // We need to iterate over the MFIter and find cells matching (i_ucm, j_ucm)
+            }
+        }
+    }
+
+    // Properly set values using MFIter loop to respect domain decomposition
+    for (int row_idx = 0; row_idx < building_reader.size(); ++row_idx) {
+        const auto& row = rows[row_idx];
+        int i_atm = row.i;
+        int j_atm = row.j;
+        
+        // Look up and pre-compute material properties
+        const UCMMaterial& roof_mat = material_registry.lookup(row.roof_mat_id);
+        const UCMMaterial& wall_mat = material_registry.lookup(row.wall_mat_id);
+        const UCMMaterial& road_mat = material_registry.lookup(row.road_mat_id);
+        
+        // For each UCM cell in the domain, if it maps to this ATM cell, fill it
+        for (MFIter mfi(*(fields.H_bldg)); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            auto H_bldg_arr = fields.H_bldg->array(mfi);
+            auto W_road_arr = fields.W_road->array(mfi);
+            auto W_roof_arr = fields.W_roof->array(mfi);
+            auto albedo_roof_arr = fields.albedo_roof->array(mfi);
+            auto albedo_wall_arr = fields.albedo_wall->array(mfi);
+            auto albedo_road_arr = fields.albedo_road->array(mfi);
+            auto emissivity_roof_arr = fields.emissivity_roof->array(mfi);
+            auto emissivity_wall_arr = fields.emissivity_wall->array(mfi);
+            auto emissivity_road_arr = fields.emissivity_road->array(mfi);
+            auto T_skin_roof_arr = fields.T_skin_roof->array(mfi);
+            auto T_skin_wall_arr = fields.T_skin_wall->array(mfi);
+            auto T_skin_road_arr = fields.T_skin_road->array(mfi);
+            auto T_canyon_air_arr = fields.T_canyon_air->array(mfi);
+            auto is_urban_arr = fields.is_urban->array(mfi);
+            auto mat_id_roof_arr = fields.mat_id_roof->array(mfi);
+            auto mat_id_wall_arr = fields.mat_id_wall->array(mfi);
+            auto mat_id_road_arr = fields.mat_id_road->array(mfi);
+
+            // Loop over cells in this box
+            for (int i_ucm = bx.smallEnd(0); i_ucm <= bx.bigEnd(0); ++i_ucm) {
+                for (int j_ucm = bx.smallEnd(1); j_ucm <= bx.bigEnd(1); ++j_ucm) {
+                    // Map UCM grid indices to ATM grid indices
+                    int i_atm_cell = i_ucm / grid_ratio;
+                    int j_atm_cell = j_ucm / grid_ratio;
+                    
+                    // If this UCM cell corresponds to the current building row, fill it
+                    if (i_atm_cell == i_atm && j_atm_cell == j_atm) {
+                        IntVect iv(i_ucm, j_ucm, 0);
+                        
+                        // Fill building morphology
+                        H_bldg_arr(iv, 0) = row.height_m;
+                        W_road_arr(iv, 0) = row.W_road_m;
+                        W_roof_arr(iv, 0) = row.W_roof_m;
+                        is_urban_arr(iv, 0) = row.is_urban;
+                        
+                        // Store material IDs
+                        mat_id_roof_arr(iv, 0) = row.roof_mat_id;
+                        mat_id_wall_arr(iv, 0) = row.wall_mat_id;
+                        mat_id_road_arr(iv, 0) = row.road_mat_id;
+                        
+                        // Fill material properties
+                        albedo_roof_arr(iv, 0) = roof_mat.albedo;
+                        albedo_wall_arr(iv, 0) = wall_mat.albedo;
+                        albedo_road_arr(iv, 0) = road_mat.albedo;
+                        
+                        emissivity_roof_arr(iv, 0) = roof_mat.emissivity;
+                        emissivity_wall_arr(iv, 0) = wall_mat.emissivity;
+                        emissivity_road_arr(iv, 0) = road_mat.emissivity;
+                        
+                        // Set initial temperatures
+                        T_skin_roof_arr(iv, 0) = 293.15;
+                        T_skin_wall_arr(iv, 0) = 293.15;
+                        T_skin_road_arr(iv, 0) = 293.15;
+                        T_canyon_air_arr(iv, 0) = 293.15;
+                    }
                 }
             }
-            
-            if (found && row_ptr != nullptr) {
-                // Fill building morphology
-                H_bldg_arr(iv, 0) = row_ptr->height_m;
-                W_road_arr(iv, 0) = row_ptr->W_road_m;
-                W_roof_arr(iv, 0) = row_ptr->W_roof_m;
-                is_urban_arr(iv, 0) = row_ptr->is_urban;
-                
-                // Store material IDs
-                mat_id_roof_arr(iv, 0) = row_ptr->roof_mat_id;
-                mat_id_wall_arr(iv, 0) = row_ptr->wall_mat_id;
-                mat_id_road_arr(iv, 0) = row_ptr->road_mat_id;
-                
-                // Look up and fill material properties
-                const UCMMaterial& roof_mat = material_registry.lookup(row_ptr->roof_mat_id);
-                const UCMMaterial& wall_mat = material_registry.lookup(row_ptr->wall_mat_id);
-                const UCMMaterial& road_mat = material_registry.lookup(row_ptr->road_mat_id);
-                
-                albedo_roof_arr(iv, 0) = roof_mat.albedo;
-                albedo_wall_arr(iv, 0) = wall_mat.albedo;
-                albedo_road_arr(iv, 0) = road_mat.albedo;
-                
-                emissivity_roof_arr(iv, 0) = roof_mat.emissivity;
-                emissivity_wall_arr(iv, 0) = wall_mat.emissivity;
-                emissivity_road_arr(iv, 0) = road_mat.emissivity;
-                
-                // Set initial temperatures
-                T_skin_roof_arr(iv, 0) = 293.15;
-                T_skin_wall_arr(iv, 0) = 293.15;
-                T_skin_road_arr(iv, 0) = 293.15;
-                T_canyon_air_arr(iv, 0) = 293.15;
-            }
-        });
+        }
     }
 
     if (ucm_debug && ParallelDescriptor::IOProcessor()) {
