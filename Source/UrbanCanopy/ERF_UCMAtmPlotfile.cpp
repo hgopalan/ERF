@@ -62,8 +62,22 @@ void UCMAtmPlotfile::write(int                       step,
 
     std::string plotfile_name = get_plotfile_name(step);
 
-    // Create a temporary MultiFab to hold all 6 components on the ATM grid
-    amrex::MultiFab atm_plot(f_urb_atm.boxArray(), f_urb_atm.DistributionMap(), 6, 0);
+    // Extract klo_atm from geometry (k-index of first ATM level)
+    const int klo_atm = geom.Domain().smallEnd(2);
+
+    // Build a 2D slab BoxArray at k=klo_atm
+    BoxList bl;
+    for (int i = 0; i < f_urb_atm.boxArray().size(); ++i) {
+        Box b = f_urb_atm.boxArray()[i];
+        b.setSmall(2, klo_atm);
+        b.setBig(2,   klo_atm);
+        bl.push_back(b);
+    }
+    BoxArray ba_slab(std::move(bl));
+
+    // Create a 2D slab MultiFab to hold all 6 components
+    amrex::MultiFab atm_plot_slab(ba_slab, f_urb_atm.DistributionMap(), 6, 0);
+    atm_plot_slab.setVal(0.0);
 
     // Component numbering
     static const int comp_f_urb = 0;
@@ -73,13 +87,13 @@ void UCMAtmPlotfile::write(int                       step,
     static const int comp_lambda_f = 4;
     static const int comp_H_atm = 5;
 
-    // Copy fields into components
-    MultiFab::Copy(atm_plot, f_urb_atm,        0, comp_f_urb,        1, 0);
-    MultiFab::Copy(atm_plot, H_bldg_mean_atm,  0, comp_H_bldg_mean,  1, 0);
-    MultiFab::Copy(atm_plot, H_bldg_std_atm,   0, comp_H_bldg_std,   1, 0);
-    MultiFab::Copy(atm_plot, lambda_p_atm,     0, comp_lambda_p,     1, 0);
-    MultiFab::Copy(atm_plot, lambda_f_atm,     0, comp_lambda_f,     1, 0);
-    MultiFab::Copy(atm_plot, H_atm,            0, comp_H_atm,        1, 0);
+    // Copy fields into slab components using ParallelCopy
+    atm_plot_slab.ParallelCopy(f_urb_atm,        0, comp_f_urb,        1, 0, 0);
+    atm_plot_slab.ParallelCopy(H_bldg_mean_atm,  0, comp_H_bldg_mean,  1, 0, 0);
+    atm_plot_slab.ParallelCopy(H_bldg_std_atm,   0, comp_H_bldg_std,   1, 0, 0);
+    atm_plot_slab.ParallelCopy(lambda_p_atm,     0, comp_lambda_p,     1, 0, 0);
+    atm_plot_slab.ParallelCopy(lambda_f_atm,     0, comp_lambda_f,     1, 0, 0);
+    atm_plot_slab.ParallelCopy(H_atm,            0, comp_H_atm,        1, 0, 0);
 
     // Build component names vector
     Vector<std::string> varnames(6);
@@ -90,11 +104,31 @@ void UCMAtmPlotfile::write(int                       step,
     varnames[comp_lambda_f]     = "lambda_f";
     varnames[comp_H_atm]        = "H_atm";
 
+    // Build a 2D geometry matching the slab (same x,y domain, z thickness = 1 cell)
+    // Extract the domain box from geometry, modify Z dimension
+    IntVect domain_lo = geom.Domain().smallEnd();
+    IntVect domain_hi = geom.Domain().bigEnd();
+    domain_lo[2] = klo_atm;
+    domain_hi[2] = klo_atm;  // 1-cell thickness in Z
+    Box domain_slab(domain_lo, domain_hi);
+
+    // Get coordinate arrays from original geometry (for x and y)
+    const Real* prob_lo = geom.ProbLo();
+    const Real* prob_hi = geom.ProbHi();
+    const Real* dx      = geom.CellSize();
+
+    // Compute new prob_hi[2] and dx[2] for 1-cell thickness
+    Real prob_lo_slab[3] = {prob_lo[0], prob_lo[1], prob_lo[2]};
+    Real prob_hi_slab[3] = {prob_hi[0], prob_hi[1], prob_lo[2] + dx[2]};  // 1 cell thickness
+
+    // Create the 2D slab geometry
+    Geometry geom_slab(domain_slab, RealBox(prob_lo_slab, prob_hi_slab));
+
     // Write plotfile using WriteSingleLevelPlotfile (handles directory, Header, Level_0/)
     amrex::WriteSingleLevelPlotfile(plotfile_name,
-                                    atm_plot,
+                                    atm_plot_slab,
                                     varnames,
-                                    geom,
+                                    geom_slab,
                                     time,
                                     step);
 
@@ -104,5 +138,7 @@ void UCMAtmPlotfile::write(int                       step,
         Print() << "  step=" << step << " time=" << time << " s\n";
         Print() << "  plotfile: " << plotfile_name << "/  (directory)\n";
         Print() << "  ncomp=6 (f_urb, H_bldg_mean, H_bldg_std, lambda_p, lambda_f, H_atm)\n";
+        Print() << "  grid (2D slab): " << domain_slab.smallEnd()[0] << "-" << domain_slab.bigEnd()[0] 
+                << " x " << domain_slab.smallEnd()[1] << "-" << domain_slab.bigEnd()[1] << " x " << klo_atm << "\n";
     }
 }
