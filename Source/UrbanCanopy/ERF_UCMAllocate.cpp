@@ -188,26 +188,6 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     // Get const references to the broadcast data
     const auto& rows = building_reader.rows();
 
-    // Iterate over each building row and fill corresponding UCM grid cells
-    // Each building row covers a single ATM grid cell, which maps to grid_ratio x grid_ratio UCM cells
-    for (const auto& row : rows) {
-        int i_atm = row.i;
-        int j_atm = row.j;
-        
-        // Look up and pre-compute material properties
-        const UCMMaterial& roof_mat = material_registry.lookup(row.roof_mat_id);
-        const UCMMaterial& wall_mat = material_registry.lookup(row.wall_mat_id);
-        const UCMMaterial& road_mat = material_registry.lookup(row.road_mat_id);
-        
-        // Fill all UCM cells that correspond to this ATM cell
-        for (int i_ucm = i_atm * grid_ratio; i_ucm < (i_atm + 1) * grid_ratio; ++i_ucm) {
-            for (int j_ucm = j_atm * grid_ratio; j_ucm < (j_atm + 1) * grid_ratio; ++j_ucm) {
-                // Use AMReX looping to safely fill cells on all grids
-                // We need to iterate over the MFIter and find cells matching (i_ucm, j_ucm)
-            }
-        }
-    }
-
     // Properly set values using MFIter loop to respect domain decomposition
     for (int row_idx = 0; row_idx < building_reader.size(); ++row_idx) {
         const auto& row = rows[row_idx];
