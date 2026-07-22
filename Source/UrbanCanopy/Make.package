@@ -14,6 +14,8 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_sources += UrbanCanopy/ERF_UCMAtmCoupling.cpp
   CEXE_sources += UrbanCanopy/ERF_UCMPlotfile.cpp
   CEXE_sources += UrbanCanopy/ERF_UCMDiagnostics.cpp
+  # Phase 2.5 additions (ATM-grid plumbing)
+  CEXE_sources += UrbanCanopy/ERF_UCMAtmPlotfile.cpp
   # Phase 2.1 additions (CSV readers)
   CEXE_sources += UrbanCanopy/ERF_UCMBuildingLayoutReader.cpp
   CEXE_sources += UrbanCanopy/ERF_UCMMaterialRegistry.cpp
@@ -34,6 +36,8 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_headers += UrbanCanopy/ERF_UCMPlotfile.H
   CEXE_headers += UrbanCanopy/ERF_UCMDiagnostics.H
   CEXE_headers += UrbanCanopy/ERF_UCMPlotfileCatalog.H
+  # Phase 2.5 headers (ATM-grid plumbing)
+  CEXE_headers += UrbanCanopy/ERF_UCMAtmPlotfile.H
   # Phase 2.1 headers (CSV readers)
   CEXE_headers += UrbanCanopy/ERF_UCMBuildingLayoutReader.H
   CEXE_headers += UrbanCanopy/ERF_UCMMaterialRegistry.H

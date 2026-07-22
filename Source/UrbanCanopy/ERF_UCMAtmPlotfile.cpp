@@ -1,0 +1,110 @@
+/**
+ * @file ERF_UCMAtmPlotfile.cpp
+ * @brief Implementation of plotfile writer for UCM ATM-grid aggregates
+ *
+ * References:
+ *  - Source/Fire/ERF_FirePlotfile.cpp on ERF-Hazard
+ *  - Source/UrbanCanopy/ERF_UCMPlotfile.cpp
+ *  - AMReX_VisMF.H
+ */
+
+#include <UrbanCanopy/ERF_UCMAtmPlotfile.H>
+#include <AMReX_VisMF.H>
+#include <AMReX_Print.H>
+#include <AMReX_ParallelDescriptor.H>
+#include <sstream>
+#include <iomanip>
+#include <fstream>
+
+std::string UCMAtmPlotfile::get_plotfile_name(int step) const
+{
+    // Use plot_file_base if available, otherwise current directory
+    std::string base_dir = ".";  // Default to current directory
+    
+    // Format: plt_ucm_atm_000000
+    std::ostringstream oss;
+    oss << base_dir << "/plt_ucm_atm_" << std::setfill('0') << std::setw(6) << step;
+    return oss.str();
+}
+
+void UCMAtmPlotfile::write(int                       step,
+                           amrex::Real               time,
+                           const amrex::MultiFab&    f_urb_atm,
+                           const amrex::MultiFab&    H_bldg_mean_atm,
+                           const amrex::MultiFab&    H_bldg_std_atm,
+                           const amrex::MultiFab&    lambda_p_atm,
+                           const amrex::MultiFab&    lambda_f_atm,
+                           const amrex::Geometry&    geom,
+                           bool                      ucm_debug,
+                           int                       lev)
+{
+    using namespace amrex;
+
+    // Duplicate-write guard
+    if (step == m_last_write_step) {
+        if (ParallelDescriptor::IOProcessor()) {
+            Print() << "[UCM][2.5-followup][UCMAtmPlotfile::write] (skipped, already written at step " << step << ")\n";
+        }
+        return;
+    }
+    m_last_write_step = step;
+
+    // Check that all required fields are present
+    if (!f_urb_atm.ok() || !H_bldg_mean_atm.ok() || !H_bldg_std_atm.ok() ||
+        !lambda_p_atm.ok() || !lambda_f_atm.ok()) {
+        if (ParallelDescriptor::IOProcessor()) {
+            Print() << "[UCM][2.5-followup][UCMAtmPlotfile::write] ERROR: One or more input MultiFabs is invalid\n";
+        }
+        return;
+    }
+
+    std::string plotfile_name = get_plotfile_name(step);
+
+    // Create a temporary MultiFab to hold all 5 components on the ATM grid
+    amrex::MultiFab atm_plot(f_urb_atm.boxArray(), f_urb_atm.DistributionMap(), 5, 0);
+
+    // Component numbering
+    static const int comp_f_urb = 0;
+    static const int comp_H_bldg_mean = 1;
+    static const int comp_H_bldg_std = 2;
+    static const int comp_lambda_p = 3;
+    static const int comp_lambda_f = 4;
+
+    // Copy fields into components
+    MultiFab::Copy(atm_plot, f_urb_atm,        0, comp_f_urb,        1, 0);
+    MultiFab::Copy(atm_plot, H_bldg_mean_atm,  0, comp_H_bldg_mean,  1, 0);
+    MultiFab::Copy(atm_plot, H_bldg_std_atm,   0, comp_H_bldg_std,   1, 0);
+    MultiFab::Copy(atm_plot, lambda_p_atm,     0, comp_lambda_p,     1, 0);
+    MultiFab::Copy(atm_plot, lambda_f_atm,     0, comp_lambda_f,     1, 0);
+
+    // Build component names vector
+    Vector<std::string> varnames(5);
+    varnames[comp_f_urb]        = "f_urb";
+    varnames[comp_H_bldg_mean]  = "H_bldg_mean";
+    varnames[comp_H_bldg_std]   = "H_bldg_std";
+    varnames[comp_lambda_p]     = "lambda_p";
+    varnames[comp_lambda_f]     = "lambda_f";
+
+    // Write plotfile with VisMF
+    VisMF::Write(atm_plot, plotfile_name);
+
+    // Write ASCII header
+    if (ParallelDescriptor::IOProcessor()) {
+        std::string header_file = plotfile_name + "/Header";
+        std::ofstream ofs(header_file.c_str());
+        ofs << "Step = " << step << "\n";
+        ofs << "Time = " << time << "\n";
+        ofs << "ncomp = 5\n";
+        for (int i = 0; i < 5; ++i) {
+            ofs << "  " << varnames[i] << "\n";
+        }
+        ofs.close();
+    }
+
+    // Debug trace
+    if (ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.5-followup][UCMAtmPlotfile::write] "
+                << "wrote plt_ucm_atm_" << std::setw(5) << std::setfill('0') << step
+                << " at t=" << time << " s\n";
+    }
+}

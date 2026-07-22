@@ -171,6 +171,7 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   atm_feedback        = " << params.atm_feedback << " [0,1]\n";
     amrex::Print() << "[UCM]   alpha_ucm [m]       = " << params.alpha_ucm << "\n";
     amrex::Print() << "[UCM]   ucm_plot_int        = " << params.ucm_plot_int << "\n";
+    amrex::Print() << "[UCM]   ucm_atm_plot_int    = " << params.ucm_atm_plot_int << "\n";
     amrex::Print() << "[UCM]   ucm_diag_file       = " << params.ucm_diag_file << "\n";
     amrex::Print() << "[UCM] =========================================================\n";
     amrex::Print() << "\n";
