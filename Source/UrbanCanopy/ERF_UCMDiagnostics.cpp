@@ -131,54 +131,49 @@ void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time
                   T_canyon_max, H_max, H_sum, LE_max,
                   H_road_max, H_wall_max, H_roof_max, AH_max);
 
-        // Debug trace
-        amrex::Print() << "[UCM][2.3][UCMDiagnostics::append]\n";
-        amrex::Print() << "  step=" << nstep << " time=" << time << "\n";
-        amrex::Print() << "  T_skin_roof_max=" << T_roof_max
-                       << " T_canyon_max="     << T_canyon_max << "\n";
-        amrex::Print() << "  H_sensible_max="  << H_max
-                       << " H_sensible_sum="   << H_sum << "\n";
-        amrex::Print() << "  H_road_max=" << H_road_max
-                       << " H_wall_max=" << H_wall_max
-                       << " H_roof_max=" << H_roof_max
-                       << " AH_max=" << AH_max << "\n";
+        // Debug trace (gated: avoids noisy output every diagnostic write step)
+        if (m_params.ucm_debug) {
+            amrex::Print() << "[UCM][2.3][UCMDiagnostics::append]\n";
+            amrex::Print() << "  step=" << nstep << " time=" << time << "\n";
+            amrex::Print() << "  T_skin_roof_max=" << T_roof_max
+                           << " T_canyon_max="     << T_canyon_max << "\n";
+            amrex::Print() << "  H_sensible_max="  << H_max
+                           << " H_sensible_sum="   << H_sum << "\n";
+            amrex::Print() << "  H_road_max=" << H_road_max
+                           << " H_wall_max="  << H_wall_max
+                           << " H_roof_max="  << H_roof_max
+                           << " AH_max="      << AH_max << " W/m2\n";
 
-        // ------------------------------------------------------------------
-        // Phase 2.3.1 sum-invariant check (area-weighted).
-        //
-        // After the ERF_UCMLayer.cpp physics fix, H_sensible fed to the ATM is
-        //   H_sensible = (1 - lam_p) * H_road
-        //              +        lam_p  * (H_roof - AH)
-        //              +                  AH
-        // where lam_p is the plan-area fraction (roof cover). Walls do NOT
-        // enter this lumped sum; they belong to the canyon-air budget.
-        //
-        // This check uses the scalar plan_area_frac_uniform as a first-order
-        // proxy. For heterogeneous lam_p a full MultiFab-weighted reduction
-        // is needed -- flagged as [WEIGHTED-APPROX] until then.
-        //
-        // Old raw-sum invariant (H = H_road + H_wall + H_roof) is also printed
-        // so log diffs against pre-fix runs are self-explanatory.
-        // ------------------------------------------------------------------
-        const amrex::Real lam_p = m_params.plan_area_frac_uniform;
-        const amrex::Real facet_raw_sum = H_road_max + H_wall_max + H_roof_max;
-        const amrex::Real facet_lumped  =
-              (1.0 - lam_p) * H_road_max
-            +         lam_p  * (H_roof_max - AH_max)
-            +                    AH_max;
-        const amrex::Real residual_raw    = H_max - facet_raw_sum;
-        const amrex::Real residual_lumped = H_max - facet_lumped;
-        const amrex::Real tol = 1.0e-3 * std::max(1.0, std::abs(H_max));
+            // ------------------------------------------------------------------
+            // Phase 2.3.1 sum-invariant check (area-weighted).
+            //
+            // After the ERF_UCMLayer.cpp physics fix, H_sensible fed to the ATM is
+            //   H_sensible = (1 - lam_p) * H_road
+            //              +        lam_p  * (H_roof - AH)
+            //              +                  AH
+            // where lam_p is the plan-area fraction (roof cover). Walls do NOT
+            // enter this lumped sum; they belong to the canyon-air budget.
+            // ------------------------------------------------------------------
+            const amrex::Real lam_p = m_params.plan_area_frac_uniform;
+            const amrex::Real facet_raw_sum = H_road_max + H_wall_max + H_roof_max;
+            const amrex::Real facet_lumped  =
+                  (1.0 - lam_p) * H_road_max
+                +         lam_p  * (H_roof_max - AH_max)
+                +                    AH_max;
+            const amrex::Real residual_raw    = H_max - facet_raw_sum;
+            const amrex::Real residual_lumped = H_max - facet_lumped;
+            const amrex::Real tol = 1.0e-3 * std::max(1.0, std::abs(H_max));
 
-        amrex::Print() << "  [sum_check] H_sensible=" << H_max
-                       << "  lumped((1-lam_p)*H_road + lam_p*(H_roof-AH) + AH; lam_p="
-                       << lam_p << ")=" << facet_lumped
-                       << "  residual_lumped=" << residual_lumped
-                       << (std::abs(residual_lumped) < tol
-                               ? "  [OK]" : "  [FAIL(area-weighted)]")
-                       << "\n";
-        amrex::Print() << "              raw_sum(H_road+H_wall+H_roof)=" << facet_raw_sum
-                       << "  residual_raw=" << residual_raw
-                       << "  [WEIGHTED-APPROX: heterogeneous lam_p not yet integrated]\n";
+            amrex::Print() << "  [sum_check] H_sensible=" << H_max
+                           << "  lumped((1-lam_p)*H_road + lam_p*(H_roof-AH) + AH; lam_p="
+                           << lam_p << ")=" << facet_lumped
+                           << "  residual_lumped=" << residual_lumped
+                           << (std::abs(residual_lumped) < tol
+                                   ? "  [OK]" : "  [FAIL(area-weighted)]")
+                           << "\n";
+            amrex::Print() << "              raw_sum(H_road+H_wall+H_roof)=" << facet_raw_sum
+                           << "  residual_raw=" << residual_raw
+                           << "  [WEIGHTED-APPROX: heterogeneous lam_p not yet integrated]\n";
+        }
     }
 }

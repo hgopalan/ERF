@@ -2,6 +2,30 @@
  * @file ERF_UCMAtmCoupling.cpp
  * @brief Implementation of atmospheric coupling for UCM (coarsen and inject fluxes)
  *
+ * **RK-stage safety contract (Phase 2.3 fix)**
+ *
+ * `apply_ucm_tendency_to_cc_source` OWNS `cc_source[RhoTheta_comp]` (and
+ * optionally `cc_source[RhoQ1_comp]`) for the duration of each RK stage.
+ * It zeros those components at the top of each call and writes with `=`
+ * (not `+=`), so the result is the UCM tendency alone — independent of how
+ * many times it is called per coarse step.
+ *
+ * Call-site contract:
+ *  - `UCMLayer::advance` (SEB + flux computation) runs ONCE per coarse step,
+ *    in `ERF::Advance`, before the MRI integrator starts.
+ *  - `coarsen_ucm_flux_to_atm` also runs ONCE per coarse step to cache
+ *    `m_ucm_H_atm[lev]` and `m_ucm_LE_atm[lev]`.
+ *  - `apply_ucm_tendency_to_cc_source` is then called ONCE PER RK STAGE
+ *    from `slow_rhs_fun_pre` in `ERF_TI_slow_rhs_pre.H`, after `make_sources`
+ *    has reset `cc_src` to zero.
+ *
+ * This mirrors the ERF-Fire convention documented in
+ * `Source/Fire/ERF_FireAtmCoupling.H` (ERF-Hazard branch).
+ *
+ * If any other physics module needs to write into `cc_source[RhoTheta_comp]`
+ * per RK stage on the same cells, this function must be moved to a
+ * pre-integrator path and semantics changed back to `+=`.
+ *
  * References:
  *  - WRF Single-Layer Urban Canopy Model (Chen et al., 2011)
  *  - WRF module_sf_urban.F / module_fire_tendency.F
@@ -210,6 +234,18 @@ void apply_ucm_tendency_to_cc_source(
     // Hoist LE availability out of the kernel
     const bool have_le = (has_moisture && LE_atm != nullptr);
 
+    // -----------------------------------------------------------------------
+    // RK-stage safety: OVERWRITE the components we own.
+    // make_sources() has already zeroed cc_source; we zero the UCM-owned
+    // components explicitly so this function is correct even if called in a
+    // context where cc_source was not pre-zeroed.  Ghost cells are zeroed
+    // too so ghost-cell reads in downstream kernels are safe.
+    // -----------------------------------------------------------------------
+    cc_source.setVal(0.0, RhoTheta_comp, 1, cc_source.nGrowVect());
+    if (have_le) {
+        cc_source.setVal(0.0, RhoQ1_comp, 1, cc_source.nGrowVect());
+    }
+
     // Local reduction over the UCM-injected increment only (not the whole cc_source)
     amrex::ReduceOps<amrex::ReduceOpMin, amrex::ReduceOpMax, amrex::ReduceOpSum, amrex::ReduceOpSum>
         reduce_op;
@@ -296,9 +332,9 @@ void apply_ucm_tendency_to_cc_source(
                          amrex::Real(0.0) };
             }
 
-            // Apply feedback coupling coefficient and accumulate
+            // OVERWRITE (not accumulate): UCM owns this component per RK stage
             const amrex::Real dtheta = feedback * theta_tend;
-            cc_src_a(i, j, k, RhoTheta_comp) += dtheta;
+            cc_src_a(i, j, k, RhoTheta_comp) = dtheta;
 
             // Latent heat (optional)
             if (have_le) {
@@ -306,7 +342,7 @@ void apply_ucm_tendency_to_cc_source(
                 const amrex::Real le_tend      = (LE_sfc / L_v) * exp_factor;
                 const amrex::Real le_tend_plus = (LE_sfc / L_v) * exp_factor_plus;
                 const amrex::Real q_tend       = rho_k * (le_tend - le_tend_plus) / dz;
-                cc_src_a(i, j, k, RhoQ1_comp) += feedback * q_tend;
+                cc_src_a(i, j, k, RhoQ1_comp) = feedback * q_tend;
             }
 
             return { dtheta, dtheta, dtheta, amrex::Real(1.0) };
@@ -341,26 +377,37 @@ void apply_ucm_tendency_to_cc_source(
                        << "skipping affected cells.\n";
     }
 
-    // Also report the H_atm min/max for context
-    amrex::Real min_h = H_atm.min(0);
-    amrex::Real max_h = H_atm.max(0);
+    // -----------------------------------------------------------------------
+    // Debug diagnostics: H_atm and ReduceOps stats are gated on ucm_debug
+    // to avoid unconditional per-step MPI collectives.
+    // -----------------------------------------------------------------------
+    if (ucm_debug) {
+        amrex::Gpu::streamSynchronize();
 
-    if (ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
-        // Estimate expected surface tendency magnitude
-        const amrex::Real rho_0 = 1.2;  // approximate surface density
-        const amrex::Real exp_factor_dz  = std::exp(-dz / alpha_ucm);
-        const amrex::Real expected_scale = rho_0 * (max_h / Cp) * (1.0 - exp_factor_dz) / dz;
+        // H_atm diagnostics (collective on all ranks, inside debug gate)
+        const amrex::Real min_h = H_atm.min(0);
+        const amrex::Real max_h = H_atm.max(0);
 
-        amrex::Print() << "[UCM][1.4][apply_ucm_tendency_to_cc_source]\n";
-        amrex::Print() << "  atm_feedback=" << feedback
-                       << " (injection_active=" << (feedback > 0.0 ? "yes" : "no") << ")\n";
-        amrex::Print() << "  klo=" << klo << " dz=" << dz << " rho~1.2\n";
-        amrex::Print() << "  alpha_ucm=" << alpha_ucm << " [m]\n";
-        amrex::Print() << "  H_atm min=" << min_h << " max=" << max_h << " [W/m2] (only k=klo plane populated)\n";
-        amrex::Print() << "  UCM_RhoTheta_tend: min=" << ucm_tend_min
-                       << " max=" << ucm_tend_max
-                       << " sum=" << ucm_tend_sum
-                       << " over " << static_cast<long long>(ucm_cell_cnt) << " cells\n";
-        amrex::Print() << "  expected surface tend magnitude ~ " << expected_scale << " [K/s]\n";
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            // Estimate expected surface tendency magnitude
+            const amrex::Real rho_0         = 1.2;  // approximate surface density
+            const amrex::Real exp_factor_dz = std::exp(-dz / alpha_ucm);
+            const amrex::Real expected_scale =
+                rho_0 * (max_h / Cp) * (1.0 - exp_factor_dz) / dz;
+
+            amrex::Print() << "[UCM][1.4][apply_ucm_tendency_to_cc_source]\n";
+            amrex::Print() << "  atm_feedback=" << feedback
+                           << " (injection_active=" << (feedback > 0.0 ? "yes" : "no") << ")\n";
+            amrex::Print() << "  klo=" << klo << " dz=" << dz << " rho~1.2\n";
+            amrex::Print() << "  alpha_ucm=" << alpha_ucm << " [m]\n";
+            amrex::Print() << "  H_atm min=" << min_h << " max=" << max_h
+                           << " [W/m2] (only k=" << klo << " plane populated)\n";
+            amrex::Print() << "  UCM_RhoTheta_tend: min=" << ucm_tend_min
+                           << " max=" << ucm_tend_max
+                           << " sum=" << ucm_tend_sum
+                           << " over " << static_cast<long long>(ucm_cell_cnt) << " cells\n";
+            amrex::Print() << "  expected surface tend magnitude ~ "
+                           << expected_scale << " [K/s]\n";
+        }
     }
 }

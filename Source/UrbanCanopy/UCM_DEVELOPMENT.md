@@ -731,3 +731,78 @@ erf.ucm.AH_profile_type_default   [int]  = 0     # 0=uniform, 1=diurnal cosine
 
 ---
 
+## Phase 2.3 Bug Fix: RK-Stage Injection Contract
+
+### Problem
+
+In the SLUCM UCMAnthroHeat canonical test, the global `RHO THETA` barely moved
+per step (~6.5e4 units vs. the expected ~6e5).  Root cause: the injection call in
+`ERF::Advance` was writing into `rhotheta_src[lev]` (a 1-component `MultiFab`),
+but `apply_ucm_tendency_to_cc_source` accessed component `RhoTheta_comp = 1` on
+that 1-component buffer → out-of-bounds write (silent UB / zeros on GPU).
+Additionally the `custom_rhotheta_forcing` path double-counted with the per-stage
+injection in `ERF_TI_slow_rhs_pre.H`.
+
+### Fix (this commit)
+
+**`Source/UrbanCanopy/ERF_UCMAtmCoupling.cpp`**
+- `apply_ucm_tendency_to_cc_source` now has **overwrite semantics**: it zeroes
+  `cc_source[RhoTheta_comp]` (and `cc_source[RhoQ1_comp]` when moisture is on)
+  at the top of each call, then writes with `=` (not `+=`).  This is safe because
+  `make_sources()` already zeroed `cc_src` before the per-stage injection runs.
+- Diagnostic block upgraded: uses `MultiFab::min/max/sum` on the UCM-owned
+  component (which equals the UCM tendency only, thanks to overwrite semantics)
+  and reports `sum` and cell count, matching the expected debug output.
+- Guards indexing `h_a(i, j, klo)` / `urban_a(i, j, klo)` instead of `(i,j,0)`
+  (portability fix for non-zero `dom_lo[2]`).
+
+**`Source/TimeIntegration/ERF_Advance.cpp`**
+- Removed the redundant `apply_ucm_tendency_to_cc_source(*rhotheta_src[lev], ...)`
+  call from the Phase 1.4 block. The only injection path is now per-RK-stage in
+  `ERF_TI_slow_rhs_pre.H`.
+- Removed `solverChoice.custom_rhotheta_forcing = true` block: UCM does NOT use
+  the `rhotheta_src` / `custom_rhotheta_forcing` path.
+- `UCMLayer::advance` (SEB) still runs **once per coarse step** here; a new
+  `[UCM][step] SEB advanced` print gated on `ucm_debug` confirms this.
+
+**`Source/TimeIntegration/ERF_TI_slow_rhs_pre.H`**
+- Per-stage `apply_ucm_tendency_to_cc_source(cc_src, ...)` call now passes
+  `m_ucm_params.ucm_debug` (was hardcoded `false`), so the diagnostic banner
+  appears once per "Making slow rhs" line — three times per RK3 coarse step —
+  with identical `sum` across stages (confirming the lagged-flux contract).
+
+### RK-stage safety contract (recorded here for future maintainers)
+
+`apply_ucm_tendency_to_cc_source` **OWNS** `cc_source[RhoTheta_comp]` (and
+optionally `cc_source[RhoQ1_comp]`) for the duration of each RK stage:
+
+1. `UCMLayer::advance` runs **once** per coarse step in `ERF::Advance`.
+2. `coarsen_ucm_flux_to_atm` runs **once** per coarse step, caching the lagged
+   flux in `m_ucm_H_atm[lev]` / `m_ucm_LE_atm[lev]`.
+3. `apply_ucm_tendency_to_cc_source` is called **once per RK stage** from
+   `slow_rhs_fun_pre`, after `make_sources()` resets `cc_src` to zero.
+4. The function zeros its owned components first and writes with `=`, so the
+   stage result is always the UCM-only tendency regardless of prior state.
+
+If any other physics writes into `cc_source[RhoTheta_comp]` per stage on the
+same cells, the UCM injection must be moved to a pre-integrator path and
+semantics must change back to `+=`.
+
+This mirrors the ERF-Fire explicit-lag convention documented in
+`Source/Fire/ERF_FireAtmCoupling.H` on the ERF-Hazard branch.
+
+### Debug comment improvements (same commit)
+
+- `ERF_UCMLayer.cpp`: per-step ATM forcing print now gated on `ucm_debug`
+  (was unconditional — printed every timestep).
+- `ERF_UCMLayer.cpp`: expensive per-step `min/max` collectives moved inside
+  the `ucm_debug` guard (was always computed even with debug off).
+- `ERF_UCMLayer.cpp`: per-step debug trace extended with `H_road`, `H_wall`,
+  `H_roof`, `AH` min/max.
+- `ERF_UCMLayer.cpp`: extraction debug trace added (u*, wind, T_ref stats)
+  gated on `ucm_debug`.
+- `ERF_UCMDiagnostics.cpp`: verbose CSV append trace now gated on `ucm_debug`
+  (was unconditional inside `IOProcessor()` block).
+- `ERF_UCMGrid.cpp` / `ERF_UCMGrid.H`: `create_ucm_grid` gains `bool ucm_debug`
+  parameter (default `false`); prints gated on it.
+- `ERF_UCMPrerequisites.cpp`: Phase 1.2 grid check banner gated on `ucm_debug`.

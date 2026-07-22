@@ -84,6 +84,7 @@ UCMGrid create_ucm_grid(const amrex::BoxArray&          ba_atm,
                         const amrex::DistributionMapping& dm_atm,
                         const amrex::Geometry&          geom_atm,
                         int                             grid_ratio,
-                        int                             lev = 0);
+                        int                             lev = 0,
+                        bool                            ucm_debug = false);
 
 #endif // ERF_UCM_GRID_H
