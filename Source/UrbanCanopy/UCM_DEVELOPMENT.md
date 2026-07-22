@@ -24,6 +24,11 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 2 | 2.2 | Per-cell material + morphology wiring into SEB + heterogeneous wind | 11 new MultiFabs, per-cell z0/d, wind interpolation, tests | 🟢 IN PROGRESS |
 | 2 | 2.3 | Heterogeneous facet SEB + anthropogenic heat | Wall/roof/road per-cell energy balance, waste heat injection | 🔲 PLANNED |
 | 2 | 2.4 | Shadowing + heterogeneous regression | Sun angle shadow mapping, heterogeneous baseline regression | 🔲 PLANNED |
+| 2 | 2.5 | Scale-aware source aggregation | Multi-level morphology aggregation, subgrid variance | 🔲 PLANNED |
+| 2 | 2.6 | Injection framework: Surface + Exponential[Scalar, Morphology] | Facet heat + Exp decay, morphology-aware injection | 🔲 PLANNED |
+| 2 | 2.7 | Facet3D injection | True 3D canyon exchange, vertical walls | 🔲 PLANNED |
+| 2 | 2.8 | BEP-line injection | Building Energy Performance canyon injection | 🔲 PLANNED |
+| 2 | **2.9** | **CSV generator toolchain (ideal + real-city GIS)** | Synthetic pattern generators, OSM + WUDAPT ingestion, UTM-guard | 🟢 IN PROGRESS |
 | 3 | 3.1 | Finest-level anchoring turned on + multi-level regression | anchor_level > 0 enabled, multi-AMR-level UCM slab | 🔲 PLANNED |
 | 3 | 3.2 | Two-way feedback + MRF audit + PBLH consumer guard | Inverse coupling (atm_feedback > 0), MRF re-audit for divergence | 🔲 PLANNED |
 | 3 | 3.3 | Stability-aware canyon-atm exchange | Obukhov-length dependent exchange, skipping during neutral | 🔲 PLANNED |

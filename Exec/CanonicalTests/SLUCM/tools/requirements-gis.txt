@@ -1,0 +1,11 @@
+# ERF-SLUCM CSV toolchain (real-city ingestion)
+# Install: pip install -r requirements-gis.txt
+osmnx>=1.9
+geopandas>=0.14
+shapely>=2.0
+rasterio>=1.3
+rioxarray>=0.15
+pyproj>=3.6
+numpy>=1.24
+pandas>=2.0
+requests>=2.31
