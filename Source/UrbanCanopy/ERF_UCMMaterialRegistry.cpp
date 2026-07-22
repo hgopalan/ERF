@@ -14,6 +14,10 @@
 #include <algorithm>
 #include <iomanip>
 
+// Verify POD struct is MPI_Bcast safe
+static_assert(std::is_trivially_copyable_v<UCMMaterial>,
+              "UCMMaterial must be trivially copyable for MPI_Bcast");
+
 void UCMMaterialRegistry::load_and_broadcast(const std::string& path, int lev, bool ucm_debug)
 {
     // Store debug flag for use in lookup()

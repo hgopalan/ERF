@@ -15,6 +15,10 @@
 #include <limits>
 #include <set>
 
+// Verify POD struct is MPI_Bcast safe
+static_assert(std::is_trivially_copyable_v<UCMBuildingRow>,
+              "UCMBuildingRow must be trivially copyable for MPI_Bcast");
+
 void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path, int lev, bool ucm_debug)
 {
     // Clear any previous data
