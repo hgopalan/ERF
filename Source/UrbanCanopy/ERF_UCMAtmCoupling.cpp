@@ -284,7 +284,7 @@ void apply_ucm_tendency_to_cc_source(
                        << "|theta_tend|/rho exceeded " << theta_tend_cap << " K/s, "
                        << "skipping affected cells.\n";
     }
-
+    amrex::Gpu::streamSynchronize();   // <-- ensure all ParallelFor writes are visible
     // Debug trace (collectives outside IOProcessor guard)
     amrex::Real min_h    = H_atm.min(0);
     amrex::Real max_h    = H_atm.max(0);
