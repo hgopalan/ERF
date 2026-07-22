@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <limits>
 #include <set>
+#include <iomanip>
 
 // Verify POD struct is MPI_Bcast safe
 static_assert(std::is_trivially_copyable_v<UCMBuildingRow>,
@@ -50,6 +51,20 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
                         "CSV file is empty: " + path);
         }
 
+        // Phase 2.5-fix2: Task 6 — Strip UTF-8 BOM and leading/trailing whitespace
+        if (header_line.size() >= 3 &&
+            static_cast<unsigned char>(header_line[0]) == 0xEF &&
+            static_cast<unsigned char>(header_line[1]) == 0xBB &&
+            static_cast<unsigned char>(header_line[2]) == 0xBF) {
+            header_line.erase(0, 3);
+        }
+        // Strip leading whitespace (space, tab, CR).
+        const auto first = header_line.find_first_not_of(" \t\r");
+        if (first != std::string::npos && first > 0) header_line.erase(0, first);
+        // Strip trailing whitespace.
+        const auto last = header_line.find_last_not_of(" \t\r\n");
+        if (last != std::string::npos) header_line.erase(last + 1);
+
         // Expected header (allow whitespace around delimiters)
         const std::string expected_header = "i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
                                            "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,is_urban";
@@ -60,9 +75,15 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
             return s;
         };
         if (remove_spaces(header_line) != remove_spaces(expected_header)) {
-            amrex::Abort("[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast] "
-                        "CSV header mismatch. Expected:\n" + expected_header +
-                        "\nGot:\n" + header_line);
+            std::ostringstream oss;
+            oss << "[UCM][2.1] CSV header mismatch.\n"
+                << "  Expected: " << expected_header << "\n"
+                << "  Got:      " << header_line << "\n"
+                << "  Got bytes (hex): ";
+            for (unsigned char c : header_line) {
+                oss << std::hex << std::setw(2) << std::setfill('0') << int(c) << " ";
+            }
+            amrex::Abort(oss.str());
         }
 
         // Read data rows
@@ -75,6 +96,20 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
             if (line.empty() || line.find_first_not_of(" \t\r\n") == std::string::npos) {
                 continue;
             }
+
+            // Phase 2.5-fix2: Task 6 — Strip UTF-8 BOM and whitespace from data rows
+            if (line.size() >= 3 &&
+                static_cast<unsigned char>(line[0]) == 0xEF &&
+                static_cast<unsigned char>(line[1]) == 0xBB &&
+                static_cast<unsigned char>(line[2]) == 0xBF) {
+                line.erase(0, 3);
+            }
+            // Strip leading whitespace (space, tab, CR).
+            const auto first = line.find_first_not_of(" \t\r");
+            if (first != std::string::npos && first > 0) line.erase(0, first);
+            // Strip trailing whitespace.
+            const auto last = line.find_last_not_of(" \t\r\n");
+            if (last != std::string::npos) line.erase(last + 1);
 
             UCMBuildingRow row{};
             std::stringstream ss(line);
@@ -228,5 +263,17 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
                 << "  MPI_Bcast: " << n_rows << " rows ("
                 << (n_rows * sizeof(UCMBuildingRow)) << " bytes) to all ranks\n";
         }
+    }
+
+    // Phase 2.5-fix2: Task 1 — Debug instrumentation for CSV is_urban propagation
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        int n_urban = 0, n_nonurban = 0;
+        for (const auto& row : m_rows) {
+            if (row.is_urban == 1) ++n_urban;
+            else ++n_nonurban;
+        }
+        amrex::Print() << "[UCM][2.1][DEBUG][UCMBuildingLayoutReader] parsed "
+                       << m_rows.size() << " rows: urban=" << n_urban
+                       << " non-urban=" << n_nonurban << "\n";
     }
 }

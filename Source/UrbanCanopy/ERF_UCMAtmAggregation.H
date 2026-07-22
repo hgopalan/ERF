@@ -221,16 +221,16 @@ void aggregate_ucm_morphology_to_atm(
     }
 
     // Compute global min/max for diagnostics (collectives, not inside IOProcessor)
-    Real f_urb_min = f_urb_atm.min(0);
-    Real f_urb_max = f_urb_atm.max(0);
-    Real H_mean_min = H_bldg_mean_atm.min(0);
-    Real H_mean_max = H_bldg_mean_atm.max(0);
-    Real H_std_min = H_bldg_std_atm.min(0);
-    Real H_std_max = H_bldg_std_atm.max(0);
-    Real lambda_p_min = lambda_p_atm.min(0);
-    Real lambda_p_max = lambda_p_atm.max(0);
-    Real lambda_f_min = lambda_f_atm.min(0);
-    Real lambda_f_max = lambda_f_atm.max(0);
+    Real f_urb_min = f_urb_atm.min(0, 0);
+    Real f_urb_max = f_urb_atm.max(0, 0);
+    Real H_mean_min = H_bldg_mean_atm.min(0, 0);
+    Real H_mean_max = H_bldg_mean_atm.max(0, 0);
+    Real H_std_min = H_bldg_std_atm.min(0, 0);
+    Real H_std_max = H_bldg_std_atm.max(0, 0);
+    Real lambda_p_min = lambda_p_atm.min(0, 0);
+    Real lambda_p_max = lambda_p_atm.max(0, 0);
+    Real lambda_f_min = lambda_f_atm.min(0, 0);
+    Real lambda_f_max = lambda_f_atm.max(0, 0);
 
     if (ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][2.5][aggregate_ucm_morphology_to_atm]\n"

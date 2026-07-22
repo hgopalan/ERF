@@ -451,9 +451,24 @@ Convention B (pure area average, no divide, no reweight) is the reference. Anyth
 silently over-injects in partial-urban ATM cells by a factor of `1/f_urb` (e.g., 4× too high
 in a 25%-urban cell).
 
+### Phase 2.5-fix2: Three More Lessons
+
+**Lesson 15 (Phase 2.5-fix2):** Do NOT post-hoc divide an area-averaged flux by `f_urb` on the
+coarsening side unless the injection side multiplies it back. Convention B (pure area average, no divide)
+is the reference. Anything else silently over-injects in partial-urban ATM cells.
+
+**Lesson 16 (Phase 2.5-fix2):** CSV readers must strip UTF-8 BOM and leading/trailing whitespace
+before header comparison. Error messages on header mismatch must hex-dump the actual bytes read;
+do not use marker characters like `!!!` that can visually corrupt the display.
+
+**Lesson 17 (Phase 2.5-fix2):** Facet-split fluxes (H_road, H_wall, H_roof) must all follow the same
+convention: pre-weighted by their area fraction. Never mix per-facet-area and pre-weighted conventions
+in the same set. Enforce with a canonical test containing uniform geometry (all three fractions equal),
+which forces the three fluxes to be equal.
+
 ---
 
-## Known Issues & Workarounds (None Yet — Phase 1.1)
+## Known Issues & Workarounds
 
 As bugs are discovered and fixed in later phases, document here:
 

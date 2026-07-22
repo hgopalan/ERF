@@ -481,6 +481,29 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                 << ": urban_cells=" << n_urban
                 << ", non_urban_cells=" << n_non_urban << "\n";
     }
+
+    // Phase 2.5-fix2: Task 1 — Debug instrumentation for is_urban iMultiFab propagation
+    if (ucm_debug) {
+        // Collective OUTSIDE IOProcessor (PR #209 rule).
+        const int urb_min = fields.is_urban->min(0, 0);
+        const int urb_max = fields.is_urban->max(0, 0);
+        long n1 = 0, n0 = 0;
+        for (amrex::MFIter mfi(*(fields.is_urban)); mfi.isValid(); ++mfi) {
+            auto const a = fields.is_urban->const_array(mfi);
+            const auto& bx = mfi.validbox();
+            amrex::LoopOnCpu(bx, [&](int i, int j, int k) noexcept {
+                if (a(i,j,k) == 1) ++n1; else ++n0;
+            });
+        }
+        amrex::ParallelDescriptor::ReduceLongSum(n1);
+        amrex::ParallelDescriptor::ReduceLongSum(n0);
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.1][DEBUG][fill_ucm_fields_from_csv] "
+                           << "is_urban iMultiFab populated: n_urban=" << n1
+                           << " n_nonurban=" << n0
+                           << " (min=" << urb_min << " max=" << urb_max << ")\n";
+        }
+    }
 }
 
 void fill_ucm_fields_homogeneous(UCMFields& fields,

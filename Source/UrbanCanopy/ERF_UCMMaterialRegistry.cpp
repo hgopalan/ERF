@@ -50,6 +50,20 @@ void UCMMaterialRegistry::load_and_broadcast(const std::string& path, int lev, b
                         "CSV file is empty: " + path);
         }
 
+        // Phase 2.5-fix2: Task 6 — Strip UTF-8 BOM and leading/trailing whitespace
+        if (header_line.size() >= 3 &&
+            static_cast<unsigned char>(header_line[0]) == 0xEF &&
+            static_cast<unsigned char>(header_line[1]) == 0xBB &&
+            static_cast<unsigned char>(header_line[2]) == 0xBF) {
+            header_line.erase(0, 3);
+        }
+        // Strip leading whitespace (space, tab, CR).
+        const auto first = header_line.find_first_not_of(" \t\r");
+        if (first != std::string::npos && first > 0) header_line.erase(0, first);
+        // Strip trailing whitespace.
+        const auto last = header_line.find_last_not_of(" \t\r\n");
+        if (last != std::string::npos) header_line.erase(last + 1);
+
         // Expected header (allow whitespace around delimiters)
         const std::string expected_header = "mat_id,name,albedo,emissivity,k_therm_W_per_mK,"
                                            "rho_cp_J_per_m3K,thickness_m,description";
@@ -60,9 +74,15 @@ void UCMMaterialRegistry::load_and_broadcast(const std::string& path, int lev, b
             return s;
         };
         if (remove_spaces(header_line) != remove_spaces(expected_header)) {
-            amrex::Abort("[UCM][2.1][UCMMaterialRegistry::load_and_broadcast] "
-                        "CSV header mismatch. Expected:\n" + expected_header +
-                        "\nGot:\n" + header_line);
+            std::ostringstream oss;
+            oss << "[UCM][2.1] CSV header mismatch.\n"
+                << "  Expected: " << expected_header << "\n"
+                << "  Got:      " << header_line << "\n"
+                << "  Got bytes (hex): ";
+            for (unsigned char c : header_line) {
+                oss << std::hex << std::setw(2) << std::setfill('0') << int(c) << " ";
+            }
+            amrex::Abort(oss.str());
         }
 
         // Read data rows
@@ -75,6 +95,20 @@ void UCMMaterialRegistry::load_and_broadcast(const std::string& path, int lev, b
             if (line.empty() || line.find_first_not_of(" \t\r\n") == std::string::npos) {
                 continue;
             }
+
+            // Phase 2.5-fix2: Task 6 — Strip UTF-8 BOM and whitespace from data rows
+            if (line.size() >= 3 &&
+                static_cast<unsigned char>(line[0]) == 0xEF &&
+                static_cast<unsigned char>(line[1]) == 0xBB &&
+                static_cast<unsigned char>(line[2]) == 0xBF) {
+                line.erase(0, 3);
+            }
+            // Strip leading whitespace (space, tab, CR).
+            const auto first = line.find_first_not_of(" \t\r");
+            if (first != std::string::npos && first > 0) line.erase(0, first);
+            // Strip trailing whitespace.
+            const auto last = line.find_last_not_of(" \t\r\n");
+            if (last != std::string::npos) line.erase(last + 1);
 
             UCMMaterial mat{};
             std::stringstream ss(line);
