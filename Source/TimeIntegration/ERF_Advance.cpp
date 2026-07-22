@@ -433,6 +433,14 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         }
         check_for_negative_theta(S_old);
     }
+    // Before calling advance_dycore, enable the rhotheta_src path for UCM
+    #ifdef ERF_USE_UCM
+    if (m_ucm_params.enable && m_ucm_params.atm_feedback > 0.0) {
+        solverChoice.custom_rhotheta_forcing = true;
+        solverChoice.spatial_rhotheta_forcing = true;  // 3D spatial source
+        solverChoice.custom_forcing_prim_vars = false;  // source is already rho*theta units
+    }
+    #endif
 
     // **************************************************************************************
     // Update the dycore
