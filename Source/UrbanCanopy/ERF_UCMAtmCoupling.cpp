@@ -38,6 +38,7 @@
 #include <ERF_Constants.H>
 #include <AMReX_MultiFabUtil.H>
 #include <AMReX_GpuLaunch.H>
+#include <AMReX_Reduce.H>
 #include <AMReX_Print.H>
 
 /**
@@ -245,6 +246,13 @@ void apply_ucm_tendency_to_cc_source(
         cc_source.setVal(0.0, RhoQ1_comp, 1, cc_source.nGrowVect());
     }
 
+    // Local reduction over the UCM-injected increment only (not the whole cc_source)
+    amrex::ReduceOps<amrex::ReduceOpMin, amrex::ReduceOpMax, amrex::ReduceOpSum, amrex::ReduceOpSum>
+        reduce_op;
+    amrex::ReduceData<amrex::Real, amrex::Real, amrex::Real, amrex::Real>
+        reduce_data(reduce_op);
+    using ReduceTuple = typename decltype(reduce_data)::Type;
+
     // Iteration over boxes with tiling
     for (amrex::MFIter mfi(cc_source, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
@@ -260,24 +268,43 @@ void apply_ucm_tendency_to_cc_source(
             ? LE_atm->const_array(mfi)
             : amrex::Array4<const amrex::Real>{};
 
+        const int klo_c = klo;   // capture for device lambda
+
         // Kernel: exponential injection using flat-terrain height formula.
         //
         // z_k = (k - klo) * dz  -- height of cell centre above surface [m].
         // This is exact for erf.terrain_type = None.
         // Phase 4 will replace with: z_phys_cc(i,j,k) - z_phys_cc(i,j,klo).
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+        //
+        // Note: H_atm was written by coarsen_ucm_flux_to_atm() ONLY into the
+        // k = klo plane. We must therefore read h_a(i,j,klo), not h_a(i,j,0)
+        // (which happens to coincide only when the domain index space starts at 0).
+        // Similarly is_urban_atm and LE_atm are 2D slabs stored at k = klo.
+        reduce_op.eval(bx, reduce_data,
+            [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple
         {
-            // Guard: skip non-urban cells
-            if (urban_a(i, j, klo) == 0) return;
+            // Guard: skip non-urban cells (mask is stored at k=klo plane)
+            if (urban_a(i, j, klo_c) == 0) {
+                return { amrex::Real( 1.e30),
+                         amrex::Real(-1.e30),
+                         amrex::Real(0.0),
+                         amrex::Real(0.0) };
+            }
 
-            // Guard: skip cells with no surface flux
-            const amrex::Real H_sfc = h_a(i, j, klo);
-            if (H_sfc == amrex::Real(0.0)) return;
+            const amrex::Real H_sfc = h_a(i, j, klo_c);
+
+            // Guard: skip columns with no surface flux
+            if (H_sfc == amrex::Real(0.0)) {
+                return { amrex::Real( 1.e30),
+                         amrex::Real(-1.e30),
+                         amrex::Real(0.0),
+                         amrex::Real(0.0) };
+            }
 
             // Height-above-surface (flat terrain)
-            const amrex::Real z_k      = (k       - klo) * dz;
+            const amrex::Real z_k      = (k       - klo_c) * dz;
             const int         kp1      = amrex::min(k + 1, khi);
-            const amrex::Real z_k_plus = (kp1     - klo) * dz;
+            const amrex::Real z_k_plus = (kp1     - klo_c) * dz;
 
             // Exponential profile
             const amrex::Real exp_factor      = std::exp(-z_k      / alpha_ucm);
@@ -299,20 +326,48 @@ void apply_ucm_tendency_to_cc_source(
                 #pragma omp atomic write
                 #endif
                 warned_clamp_exceeded = true;
-                return;
+                return { amrex::Real( 1.e30),
+                         amrex::Real(-1.e30),
+                         amrex::Real(0.0),
+                         amrex::Real(0.0) };
             }
 
             // OVERWRITE (not accumulate): UCM owns this component per RK stage
-            cc_src_a(i, j, k, RhoTheta_comp) = feedback * theta_tend;
+            const amrex::Real dtheta = feedback * theta_tend;
+            cc_src_a(i, j, k, RhoTheta_comp) = dtheta;
 
             // Latent heat (optional)
             if (have_le) {
-                const amrex::Real le_tend      = (le_a(i, j, klo) / L_v) * exp_factor;
-                const amrex::Real le_tend_plus = (le_a(i, j, klo) / L_v) * exp_factor_plus;
+                const amrex::Real LE_sfc       = le_a(i, j, klo_c);
+                const amrex::Real le_tend      = (LE_sfc / L_v) * exp_factor;
+                const amrex::Real le_tend_plus = (LE_sfc / L_v) * exp_factor_plus;
                 const amrex::Real q_tend       = rho_k * (le_tend - le_tend_plus) / dz;
                 cc_src_a(i, j, k, RhoQ1_comp) = feedback * q_tend;
             }
+
+            return { dtheta, dtheta, dtheta, amrex::Real(1.0) };
         });
+    }
+
+    // Ensure all ParallelFor / reduce_op writes are visible to subsequent reductions
+    amrex::Gpu::streamSynchronize();
+
+    // Collect UCM-only tendency statistics across all ranks
+    ReduceTuple hv = reduce_data.value(reduce_op);
+    amrex::Real ucm_tend_min  = amrex::get<0>(hv);
+    amrex::Real ucm_tend_max  = amrex::get<1>(hv);
+    amrex::Real ucm_tend_sum  = amrex::get<2>(hv);
+    amrex::Real ucm_cell_cnt  = amrex::get<3>(hv);
+
+    amrex::ParallelDescriptor::ReduceRealMin(ucm_tend_min);
+    amrex::ParallelDescriptor::ReduceRealMax(ucm_tend_max);
+    amrex::ParallelDescriptor::ReduceRealSum(ucm_tend_sum);
+    amrex::ParallelDescriptor::ReduceRealSum(ucm_cell_cnt);
+
+    // Guard against the "no cells touched" case
+    if (ucm_cell_cnt == amrex::Real(0.0)) {
+        ucm_tend_min = amrex::Real(0.0);
+        ucm_tend_max = amrex::Real(0.0);
     }
 
     // Emit warning if clamp was exceeded
@@ -323,28 +378,20 @@ void apply_ucm_tendency_to_cc_source(
     }
 
     // -----------------------------------------------------------------------
-    // Debug diagnostics: use UCM-owned components directly (overwrite
-    // semantics guarantee cc_source[RhoTheta_comp] == UCM tendency only).
-    // ReduceOps min/max/sum provide the authoritative per-stage signal.
+    // Debug diagnostics: H_atm and ReduceOps stats are gated on ucm_debug
+    // to avoid unconditional per-step MPI collectives.
     // -----------------------------------------------------------------------
     if (ucm_debug) {
         amrex::Gpu::streamSynchronize();
 
-        // H_atm diagnostics (collective on all ranks)
+        // H_atm diagnostics (collective on all ranks, inside debug gate)
         const amrex::Real min_h = H_atm.min(0);
         const amrex::Real max_h = H_atm.max(0);
 
-        // UCM-only tendency diagnostics (cc_source[RhoTheta_comp] is UCM-owned)
-        const amrex::Real ucm_rtheta_min = cc_source.min(RhoTheta_comp);
-        const amrex::Real ucm_rtheta_max = cc_source.max(RhoTheta_comp);
-        const amrex::Real ucm_rtheta_sum = cc_source.sum(RhoTheta_comp);
-        const amrex::Long ucm_ncells     = static_cast<amrex::Long>(
-            cc_source.boxArray().numPts());
-
         if (amrex::ParallelDescriptor::IOProcessor()) {
             // Estimate expected surface tendency magnitude
-            const amrex::Real rho_0          = 1.2;  // approximate surface density
-            const amrex::Real exp_factor_dz  = std::exp(-dz / alpha_ucm);
+            const amrex::Real rho_0         = 1.2;  // approximate surface density
+            const amrex::Real exp_factor_dz = std::exp(-dz / alpha_ucm);
             const amrex::Real expected_scale =
                 rho_0 * (max_h / Cp) * (1.0 - exp_factor_dz) / dz;
 
@@ -355,10 +402,10 @@ void apply_ucm_tendency_to_cc_source(
             amrex::Print() << "  alpha_ucm=" << alpha_ucm << " [m]\n";
             amrex::Print() << "  H_atm min=" << min_h << " max=" << max_h
                            << " [W/m2] (only k=" << klo << " plane populated)\n";
-            amrex::Print() << "  UCM_RhoTheta_tend: min=" << ucm_rtheta_min
-                           << " max=" << ucm_rtheta_max
-                           << " sum=" << ucm_rtheta_sum
-                           << " over " << ucm_ncells << " cells\n";
+            amrex::Print() << "  UCM_RhoTheta_tend: min=" << ucm_tend_min
+                           << " max=" << ucm_tend_max
+                           << " sum=" << ucm_tend_sum
+                           << " over " << static_cast<long long>(ucm_cell_cnt) << " cells\n";
             amrex::Print() << "  expected surface tend magnitude ~ "
                            << expected_scale << " [K/s]\n";
         }

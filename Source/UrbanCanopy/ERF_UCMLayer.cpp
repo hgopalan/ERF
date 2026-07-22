@@ -62,7 +62,7 @@ void UCMLayer::advance(UCMFields& fields,
     // ========================================================================
     // Initialize output flux fields and debug print refined ATM inputs
     // ========================================================================
-    
+
     fields.H_sensible->setVal(0.0);
     fields.LE_latent->setVal(0.0);
 
@@ -143,7 +143,7 @@ void UCMLayer::advance(UCMFields& fields,
 
     // Extract wind via log-law interpolation to z_target
     fill_ucm_wind_from_interpolation(*forcing.wind_ref, xvel, yvel, z_phys_cc,
-                                     *fields.H_bldg, *fields.z0_ucm, *fields.d_disp_ucm, 
+                                     *fields.H_bldg, *fields.z0_ucm, *fields.d_disp_ucm,
                                      m_params.zref, ucm_grid, nz_atm, lev);
 
     // Extract temperature from ATM lowest level
@@ -206,25 +206,49 @@ void UCMLayer::advance(UCMFields& fields,
     fields.T_skin_wall->setVal(T_init);
     fields.T_skin_road->setVal(T_init);
     fields.T_canyon_air->setVal(T_canyon_init);
-    
+
     // Phase 2.3: Compute anthropogenic heat
     compute_anthropogenic_heat(*fields.AH, *fields.ah_profile_id, *fields.is_urban,
                               m_params, time, lev);
-    
-    // Phase 2.3: Compute facet-split sensible heat flux using MOST identity
-    // H = - ρ · Cp_d · u_star · t_star  [W/m²]
-    // Split into road/wall/roof weighted by area fractions
-    // Zero-safe: identically 0 when u_star == 0 or t_star == 0
-    
+
+    // ------------------------------------------------------------------------
+    // Phase 2.3 facet-split sensible heat flux (Phase 2.3.1 physics fix)
+    //
+    // BUG HISTORY: Original Phase 2.3 code multiplied the plan-area MOST flux
+    //   H_base = -rho * Cp * u_star * t_star  [W/m^2 of plan area]
+    // by all three of (f_road, f_wall, f_roof) and summed them into
+    // H_sensible. Because f_road + f_roof = 1 (plan-area partition of unity)
+    // but f_wall = 2*lam_p*H/W is a FRONTAL-area index (may exceed 1), the
+    // "sum" over-injected heat into the atmosphere by a factor of
+    // ~ (1 + f_wall) = ~2 for typical lam_p=0.5, H/W=1. See
+    // Exec/CanonicalTests/SLUCM/UCMFacetSplit  logs showing
+    // H_sensible = 283 W/m^2 vs. H_base ~ 141 W/m^2 for identical inputs.
+    //
+    // FIX: Treat H_base as the plan-area lumped flux already. Facet arrays
+    // H_road/H_wall/H_roof are reported as per-facet-area diagnostics (road
+    // and roof see H_base directly; wall is scaled by the frontal-area index
+    // for its own diagnostic only). The lumped flux written to H_sensible and
+    // fed to the ATM injection is the plan-area partition:
+    //     H_sensible = f_road*H_road + f_roof*(H_roof - AH) + AH
+    // which reduces to (H_base + AH) in the simplified Phase 2.3 split where
+    // road/roof share a single MOST-driven t_star. AH is treated as already
+    // area-integrated (W/m^2 of plan area, per compute_anthropogenic_heat).
+    //
+    // TODO(UCM Phase 2.4): drive road/wall/roof with per-facet resistances
+    // and per-facet ΔT (T_skin_facet - T_canyon or T_atm) so the three facets
+    // can diverge. In the current simplified split they share a single
+    // driving t_star, so H_road == H_roof by construction.
+    // ------------------------------------------------------------------------
+
     const amrex::Real Cp = Cp_d;
-    const amrex::Real rho_ref = 1.2;  // Reference density [kg/m³]
-    
+    const amrex::Real rho_ref = 1.2;  // Reference density [kg/m^3]
+
     // Iterate over forcing.u_star (on UCM grid) to compute facet fluxes
-    for (amrex::MFIter mfi(*forcing.u_star, amrex::TilingIfNotGPU()); 
-        mfi.isValid(); ++mfi) 
+    for (amrex::MFIter mfi(*forcing.u_star, amrex::TilingIfNotGPU());
+        mfi.isValid(); ++mfi)
     {
        const amrex::Box& bx = mfi.tilebox();
-        
+
        // Input arrays
        auto const plan_a   = fields.plan_area_frac->const_array(mfi);
        auto const Hbldg_a  = fields.H_bldg->const_array(mfi);
@@ -234,13 +258,13 @@ void UCMLayer::advance(UCMFields& fields,
        auto const is_urb_a = fields.is_urban->const_array(mfi);
        auto const u_star_a = forcing.u_star->const_array(mfi);
        auto const t_star_a = atm_t_star.const_array(mfi);
-        
+
        // Output arrays
        auto       h_road_a = fields.H_road->array(mfi);
        auto       h_wall_a = fields.H_wall->array(mfi);
        auto       h_roof_a = fields.H_roof->array(mfi);
        auto       h_sens_a = fields.H_sensible->array(mfi);
-        
+
        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
            if (is_urb_a(i,j,0) == 0) {
                h_road_a(i,j,0) = 0.0;
@@ -252,39 +276,60 @@ void UCMLayer::advance(UCMFields& fields,
 
            const amrex::Real pf   = plan_a(i,j,0);
            const amrex::Real Hb   = Hbldg_a(i,j,0);
-           const amrex::Real Wsum = std::max(Wrd_a(i,j,0) + Wrf_a(i,j,0), 1.0e-6);
+           const amrex::Real Wsum = amrex::max(Wrd_a(i,j,0) + Wrf_a(i,j,0), 1.0e-6);
+
+           // Plan-area partition of unity (road + roof cover the ground plane).
            const amrex::Real f_road = 1.0 - pf;
            const amrex::Real f_roof = pf;
-           const amrex::Real f_wall = 2.0 * pf * Hb / Wsum;
+           // Wall frontal-area INDEX (per unit ground area). NOT a plan-area
+           // fraction; may exceed 1 for tall/narrow canyons. Used only for the
+           // per-wall-area diagnostic flux below.
+           const amrex::Real lam_f  = 2.0 * pf * Hb / Wsum;
 
            const amrex::Real u_star = u_star_a(i,j,0);
            const amrex::Real t_star = t_star_a(i,j,0);
+           // MOST bulk sensible flux -- already per unit plan area [W/m^2].
            const amrex::Real H_base = -rho_ref * Cp * u_star * t_star;
+           const amrex::Real AH_val = ah_a(i,j,0);
 
-           amrex::Real Hr = f_road * H_base;
-           amrex::Real Hw = f_wall * H_base;
-           amrex::Real Hf = f_roof * H_base;
+           // Per-facet-area diagnostic fluxes. In this simplified split all
+           // facets are driven by the same MOST t_star (see TODO above), so
+           // road and roof carry H_base directly and wall carries the
+           // frontal-area-scaled value for reporting.
+           amrex::Real Hr = H_base;
+           amrex::Real Hw = H_base * lam_f;
+           amrex::Real Hf = H_base;
 
-           // NaN/inf safety
            if (!amrex::Math::isfinite(Hr)) Hr = 0.0;
            if (!amrex::Math::isfinite(Hw)) Hw = 0.0;
            if (!amrex::Math::isfinite(Hf)) Hf = 0.0;
-           // Physical clamp
+
            Hr = amrex::max(-1500.0, amrex::min(1500.0, Hr));
            Hw = amrex::max(-1500.0, amrex::min(1500.0, Hw));
            Hf = amrex::max(-1500.0, amrex::min(1500.0, Hf));
 
            // Anthropogenic heat added to roof (rooftop HVAC convention).
            // TODO(UCM Phase 6.2): Move AH to building-energy model.
-           Hf += ah_a(i,j,0);
+           Hf += AH_val;
 
            h_road_a(i,j,0) = Hr;
            h_wall_a(i,j,0) = Hw;
            h_roof_a(i,j,0) = Hf;
-           h_sens_a(i,j,0) = Hr + Hw + Hf;  // diagnostic sum for injection
+
+           // Lumped plan-area sensible flux to ATM. Wall does NOT enter this
+           // sum -- wall fluxes belong to the canyon-air budget (Phase 2.4+).
+           // AH was added into Hf per unit plan area, so we subtract it here
+           // before area-weighting and re-add it after, keeping AH conservation
+           // exact regardless of pf.
+           const amrex::Real H_lumped =
+                 f_road * Hr
+               + f_roof * (Hf - AH_val)
+               + AH_val;
+
+           h_sens_a(i,j,0) = H_lumped;
        });
     }
-    
+
     fields.LE_latent->setVal(0.0);    // LE = 0 in Phase 2.3
 
     // ========================================================================
