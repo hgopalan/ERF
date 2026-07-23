@@ -972,7 +972,7 @@ void apply_ucm_implicit_drag_correction(
 
     // Debug output
     if (ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "[UCM][2.8][anelastic-stub] applied post-projection drag correction\n";
+        amrex::Print() << "[UCM][2.8][anelastic-stub] STUB — no-op; actual anelastic drag deferred to Phase 2.8b\n";
         amrex::Print() << "  WARNING: anelastic drag path is code-complete but NOT extensively validated.\n";
         amrex::Print() << "  Full validation deferred to Phase 2.8b (future PR).\n";
     }
