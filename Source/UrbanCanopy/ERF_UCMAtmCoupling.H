@@ -45,6 +45,7 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_iMultiFab.H>
 #include <AMReX_Geometry.H>
+#include "ERF_UCMParams.H"
 
 /**
  * Refine an ATM-grid MultiFab onto the UCM 2D slab grid via piecewise-constant
@@ -308,6 +309,7 @@ void apply_ucm_tendency_to_cc_source(
  *
  * @cite Martilli, Clappier & Rotach (2002), Boundary-Layer Meteorology 104:261–304, Section 4
  */
+ 
 void apply_ucm_momentum_drag_to_source(
     amrex::MultiFab&       xmom_src,
     amrex::MultiFab&       ymom_src,

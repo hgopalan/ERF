@@ -256,7 +256,7 @@
             m_ucm_params.wall_drag_mode != WallDragMode::Off &&
             m_ucm_params.atm_feedback > 0.0)
         {
-            const amrex::MultiFab* z_nd_ucm_ptr = (z_phys_nd != nullptr)
+            const amrex::MultiFab* z_nd_ucm_ptr = (z_phys_nd[level] != nullptr)
                 ? z_phys_nd[level].get()
                 : nullptr;
             
