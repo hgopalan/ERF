@@ -1019,7 +1019,9 @@ private:
     amrex::Vector<std::unique_ptr<amrex::iMultiFab>> m_ucm_is_urban_atm; // Coarsened is_urban mask on ATM grid
     // Phase 2.6: facet-split fluxes on ATM grid for morphology-aware injection
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_road_atm;      // Road flux on ATM grid [W/m^2]
-    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_wallroof_atm;  // Wall+roof+AH flux on ATM grid [W/m^2]
+    // Phase 2.7: facet-split wall and roof fluxes (replace Phase 2.6 wall+roof combined)
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_wall_atm;   // Wall flux on ATM grid [W/m^2]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_roof_atm;   // Roof flux on ATM grid (incl AH) [W/m^2]
     // Phase 2.5: morphology aggregates on ATM grid for scale-aware source aggregation
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_f_urb_atm;         // Urban fraction per ATM cell [0,1]
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_bldg_mean_atm;   // Mean building height per ATM cell [m]
