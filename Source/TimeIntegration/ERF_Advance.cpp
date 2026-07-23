@@ -471,19 +471,11 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         }
         
         // Phase 2.5: ATM-grid aggregate plotfile output (once per coarse step)
-        // Phase 2.7: Now with separate wall and roof fluxes (plotfile update in Task 6)
+        // Phase 2.7: Now with separate wall and roof fluxes
         if (m_ucm_params.ucm_atm_plot_int > 0 &&
-            (iteration % m_ucm_params.ucm_atm_plot_int == 0))
+           (iteration % m_ucm_params.ucm_atm_plot_int == 0))
         {
-           // Phase 2.7: Create temporary H_wallroof by summing H_wall + H_roof (Task 6 will split this)
-           amrex::MultiFab H_wallroof_temp(m_ucm_H_wall_atm[lev]->boxArray(),
-                                          m_ucm_H_wall_atm[lev]->DistributionMap(),
-                                          1, 0);
-           amrex::MultiFab::Copy(H_wallroof_temp, *m_ucm_H_wall_atm[lev], 0, 0, 1, 0);
-           amrex::MultiFab::Add(H_wallroof_temp, *m_ucm_H_roof_atm[lev], 0, 0, 1, 0);
-
-           // Phase 2.6: Updated call with 8 components (added H_road_atm, H_wallroof_atm)
-           // Phase 2.7: This will be updated in Task 6 to pass separate H_wall_atm and H_roof_atm
+           // Phase 2.7: Updated call with 9 components (split H_wallroof into H_wall and H_roof)
            m_ucm_atm_plotfile[lev]->write(
                iteration,
                time,
@@ -494,7 +486,8 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                *m_ucm_lambda_f_atm[lev],
                *m_ucm_H_atm[lev],
                *m_ucm_H_road_atm[lev],       // Phase 2.6: road flux
-               H_wallroof_temp,               // Phase 2.7: wall+roof sum (temporary, plotfile will split in Task 6)
+               *m_ucm_H_wall_atm[lev],       // Phase 2.7: wall flux
+               *m_ucm_H_roof_atm[lev],       // Phase 2.7: roof flux (incl AH)
                Geom(lev),
                m_ucm_params.ucm_debug,
                lev);

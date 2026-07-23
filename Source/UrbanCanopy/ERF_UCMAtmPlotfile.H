@@ -73,24 +73,26 @@ public:
      * @param[in] lambda_f_atm           Mean frontal-area density on ATM grid [-]
      * @param[in] H_atm                  Sensible heat flux on ATM grid [W/m^2]
      * @param[in] H_road_atm             Road flux on ATM grid [W/m^2] (Phase 2.6)
-     * @param[in] H_wallroof_atm         Wall+roof+AH flux on ATM grid [W/m^2] (Phase 2.6)
+     * @param[in] H_wall_atm             Wall flux on ATM grid [W/m^2] (Phase 2.7)
+     * @param[in] H_roof_atm             Roof+AH flux on ATM grid [W/m^2] (Phase 2.7)
      * @param[in] geom                    ATM geometry
      * @param[in] ucm_debug              Print debug info (default false)
      * @param[in] lev                    AMR level (default 0)
      */
     void write(int                       step,
-               amrex::Real               time,
-               const amrex::MultiFab&    f_urb_atm,
-               const amrex::MultiFab&    H_bldg_mean_atm,
-               const amrex::MultiFab&    H_bldg_std_atm,
-               const amrex::MultiFab&    lambda_p_atm,
-               const amrex::MultiFab&    lambda_f_atm,
-               const amrex::MultiFab&    H_atm,
-               const amrex::MultiFab&    H_road_atm,       ///< Phase 2.6
-               const amrex::MultiFab&    H_wallroof_atm,   ///< Phase 2.6
-               const amrex::Geometry&    geom,
-               bool                      ucm_debug = false,
-               int                       lev = 0);
+              amrex::Real               time,
+              const amrex::MultiFab&    f_urb_atm,
+              const amrex::MultiFab&    H_bldg_mean_atm,
+              const amrex::MultiFab&    H_bldg_std_atm,
+              const amrex::MultiFab&    lambda_p_atm,
+              const amrex::MultiFab&    lambda_f_atm,
+              const amrex::MultiFab&    H_atm,
+              const amrex::MultiFab&    H_road_atm,       ///< Phase 2.6
+              const amrex::MultiFab&    H_wall_atm,       ///< Phase 2.7
+              const amrex::MultiFab&    H_roof_atm,       ///< Phase 2.7
+              const amrex::Geometry&    geom,
+              bool                      ucm_debug = false,
+              int                       lev = 0);
 
 private:
     int m_last_write_step{-1};  ///< Track last written step (duplicate guard)

@@ -90,8 +90,8 @@ void UCMAtmPlotfile::write(int                       step,
                     {geom.ProbHi(0), geom.ProbHi(1), geom.ProbLo(2) + (klo+1)*dz});
     Geometry slab_geom(slab_domain, slab_rb, geom.Coord(), geom.isPeriodic());
 
-    // Build 8-component slab MultiFab (Phase 2.6: increased from 6 to 8) and copy each input
-    MultiFab slab_mf(slab_ba, f_urb_atm.DistributionMap(), 8, 0);
+    // Build 9-component slab MultiFab (Phase 2.7: increased from 8 to 9, split H_wallroof into H_wall and H_roof)
+    MultiFab slab_mf(slab_ba, f_urb_atm.DistributionMap(), 9, 0);
 
     // Component numbering
     static const int comp_f_urb = 0;
@@ -101,7 +101,9 @@ void UCMAtmPlotfile::write(int                       step,
     static const int comp_lambda_f = 4;
     static const int comp_H_atm = 5;
     static const int comp_H_road_atm = 6;      // Phase 2.6
-    static const int comp_H_wallroof_atm = 7;  // Phase 2.6
+    static const int comp_H_wall_atm = 7;      // Phase 2.7
+    static const int comp_H_roof_atm = 8;      // Phase 2.7
+    static const int comp_H_atm_sum = 9;       // Phase 2.7: H_road + H_wall + H_roof (for conservation check, only 9 comps total)
 
     // Copy fields into components
     MultiFab::Copy(slab_mf, f_urb_atm,        0, comp_f_urb,        1, 0);
@@ -111,10 +113,11 @@ void UCMAtmPlotfile::write(int                       step,
     MultiFab::Copy(slab_mf, lambda_f_atm,     0, comp_lambda_f,     1, 0);
     MultiFab::Copy(slab_mf, H_atm,            0, comp_H_atm,        1, 0);
     MultiFab::Copy(slab_mf, H_road_atm,       0, comp_H_road_atm,   1, 0);  // Phase 2.6
-    MultiFab::Copy(slab_mf, H_wallroof_atm,   0, comp_H_wallroof_atm, 1, 0);  // Phase 2.6
+    MultiFab::Copy(slab_mf, H_wall_atm,       0, comp_H_wall_atm,   1, 0);  // Phase 2.7
+    MultiFab::Copy(slab_mf, H_roof_atm,       0, comp_H_roof_atm,   1, 0);  // Phase 2.7
 
-    // Build component names vector (Phase 2.6: expanded to 8)
-    Vector<std::string> varnames(8);
+    // Build component names vector (Phase 2.7: expanded to 9)
+    Vector<std::string> varnames(9);
     varnames[comp_f_urb]        = "f_urb";
     varnames[comp_H_bldg_mean]  = "H_bldg_mean";
     varnames[comp_H_bldg_std]   = "H_bldg_std";
@@ -122,21 +125,22 @@ void UCMAtmPlotfile::write(int                       step,
     varnames[comp_lambda_f]     = "lambda_f";
     varnames[comp_H_atm]        = "H_atm";
     varnames[comp_H_road_atm]   = "H_road_atm";       // Phase 2.6
-    varnames[comp_H_wallroof_atm] = "H_wallroof_atm"; // Phase 2.6
+    varnames[comp_H_wall_atm]   = "H_wall_atm";       // Phase 2.7
+    varnames[comp_H_roof_atm]   = "H_roof_atm";       // Phase 2.7
 
     // Write plotfile using WriteSingleLevelPlotfile with slab geometry
     WriteSingleLevelPlotfile(plotfile_name,
-                             slab_mf,
-                             varnames,
-                             slab_geom,
-                             time,
-                             step);
+                            slab_mf,
+                            varnames,
+                            slab_geom,
+                            time,
+                            step);
 
     // Debug trace
     if (ucm_debug && ParallelDescriptor::IOProcessor()) {
-        Print() << "[UCM][2.6-followup][UCMAtmPlotfile::write]\n";
-        Print() << "  step=" << step << " time=" << time << " s\n";
-        Print() << "  plotfile: " << plotfile_name << "/  (directory, 2D slab nz=1)\n";
-        Print() << "  ncomp=8 (f_urb, H_bldg_mean, H_bldg_std, lambda_p, lambda_f, H_atm, H_road_atm, H_wallroof_atm)\n";
+       Print() << "[UCM][2.7][UCMAtmPlotfile::write]\n";
+       Print() << "  step=" << step << " time=" << time << " s\n";
+       Print() << "  plotfile: " << plotfile_name << "/  (directory, 2D slab nz=1)\n";
+       Print() << "  ncomp=9 (f_urb, H_bldg_mean, H_bldg_std, lambda_p, lambda_f, H_atm, H_road_atm, H_wall_atm, H_roof_atm)\n";
     }
 }
