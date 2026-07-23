@@ -30,6 +30,10 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
     int n_rows = 0;
     UCMBuildingRow min_vals{}, max_vals{};
     int count_is_urban_zero = 0;
+    int count_AH_Wm2_populated = 0;  // Phase 2.9: track non-zero AH_Wm2
+    amrex::Real min_AH_Wm2 = std::numeric_limits<amrex::Real>::infinity();
+    amrex::Real max_AH_Wm2 = -std::numeric_limits<amrex::Real>::infinity();
+    amrex::Real sum_AH_Wm2 = 0.0;
     bool has_duplicate = false;
     std::string duplicate_msg;
 
@@ -66,19 +70,32 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
         if (last != std::string::npos) header_line.erase(last + 1);
 
         // Expected header (allow whitespace around delimiters)
-        const std::string expected_header = "i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
-                                           "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,is_urban";
+        // Phase 2.9: Accept both old header (without AH_Wm2) and new header (with AH_Wm2)
+        const std::string expected_header_new = "i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
+                                               "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,AH_Wm2,is_urban";
+        const std::string expected_header_old = "i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
+                                               "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,is_urban";
 
         // Simple header validation: remove spaces and compare
         auto remove_spaces = [](std::string s) {
             s.erase(std::remove(s.begin(), s.end(), ' '), s.end());
             return s;
         };
-        if (remove_spaces(header_line) != remove_spaces(expected_header)) {
+        
+        std::string header_no_spaces = remove_spaces(header_line);
+        bool has_AH_Wm2 = false;
+        
+        if (header_no_spaces == remove_spaces(expected_header_new)) {
+            has_AH_Wm2 = true;  // New header with AH_Wm2
+        } else if (header_no_spaces == remove_spaces(expected_header_old)) {
+            has_AH_Wm2 = false; // Old header without AH_Wm2 (Phase 2.9 backward compat)
+        } else {
             std::ostringstream oss;
-            oss << "[UCM][2.1] CSV header mismatch.\n"
-                << "  Expected: " << expected_header << "\n"
-                << "  Got:      " << header_line << "\n"
+            oss << "[UCM][2.9][UCMBuildingLayoutReader::read_and_broadcast] "
+                << "CSV header mismatch.\n"
+                << "  Expected (new): " << expected_header_new << "\n"
+                << "  Or (old):       " << expected_header_old << "\n"
+                << "  Got:            " << header_line << "\n"
                 << "  Got bytes (hex): ";
             for (unsigned char c : header_line) {
                 oss << std::hex << std::setw(2) << std::setfill('0') << int(c) << " ";
@@ -116,7 +133,7 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
             std::string field;
 
             try {
-                // Parse all 13 fields
+                // Parse all fields (13 for old format, 14 for new format with AH_Wm2)
                 std::getline(ss, field, ','); row.i               = std::stoi(field);
                 std::getline(ss, field, ','); row.j               = std::stoi(field);
                 std::getline(ss, field, ','); row.bldg_id         = std::stoi(field);
@@ -129,12 +146,28 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
                 std::getline(ss, field, ','); row.road_mat_id     = std::stoi(field);
                 std::getline(ss, field, ','); row.orientation_deg = std::stod(field);
                 std::getline(ss, field, ','); row.ah_profile_id   = std::stoi(field);
-                std::getline(ss, field, ','); row.is_urban        = std::stoi(field);
+                
+                // Phase 2.9: Handle AH_Wm2 column (new format only)
+                if (has_AH_Wm2) {
+                    std::getline(ss, field, ','); row.AH_Wm2     = std::stod(field);
+                    std::getline(ss, field, ','); row.is_urban    = std::stoi(field);
+                } else {
+                    // Old format: no AH_Wm2, default to 0.0
+                    row.AH_Wm2 = 0.0;
+                    std::getline(ss, field, ','); row.is_urban    = std::stoi(field);
+                }
 
                 // Validate is_urban
                 if (row.is_urban != 0 && row.is_urban != 1) {
                     amrex::Abort("[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast] "
                                 "is_urban must be 0 or 1; got " + std::to_string(row.is_urban) +
+                                " at (i,j) = (" + std::to_string(row.i) + "," + std::to_string(row.j) + ")");
+                }
+
+                // Phase 2.9: Validate AH_Wm2 >= 0
+                if (row.AH_Wm2 < 0.0) {
+                    amrex::Abort("[UCM][2.9][UCMBuildingLayoutReader::read_and_broadcast] "
+                                "AH_Wm2 must be >= 0; got " + std::to_string(row.AH_Wm2) +
                                 " at (i,j) = (" + std::to_string(row.i) + "," + std::to_string(row.j) + ")");
                 }
 
@@ -187,6 +220,14 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
                     ++count_is_urban_zero;
                 }
 
+                // Phase 2.9: Track AH_Wm2 statistics
+                if (row.AH_Wm2 > 0.0) {
+                    ++count_AH_Wm2_populated;
+                    min_AH_Wm2 = std::min(min_AH_Wm2, row.AH_Wm2);
+                    max_AH_Wm2 = std::max(max_AH_Wm2, row.AH_Wm2);
+                    sum_AH_Wm2 += row.AH_Wm2;
+                }
+
                 m_rows.push_back(row);
                 ++n_rows;
 
@@ -225,7 +266,7 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
         // Debug trace
         if (ucm_debug) {
             amrex::Print()
-                << "\n[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast]\n"
+                << "\n[UCM][2.9][UCMBuildingLayoutReader::read_and_broadcast]\n"
                 << "  path = " << path << "\n"
                 << "  rows_parsed = " << n_rows << " (expected " << expected_rows << ")\n";
             if (n_rows > 0) {
@@ -234,6 +275,14 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
                     << "  height_m: min=" << min_vals.height_m << ", max=" << max_vals.height_m << "\n"
                     << "  plan_area_frac: min=" << min_vals.plan_area_frac << ", max=" << max_vals.plan_area_frac << "\n"
                     << "  is_urban=0 count: " << count_is_urban_zero << "\n";
+                // Phase 2.9: Log AH_Wm2 stats if populated
+                if (count_AH_Wm2_populated > 0) {
+                    amrex::Real median_AH_Wm2 = sum_AH_Wm2 / count_AH_Wm2_populated;
+                    amrex::Print()
+                        << "  AH_Wm2: populated_count=" << count_AH_Wm2_populated 
+                        << ", min=" << min_AH_Wm2 << ", max=" << max_AH_Wm2
+                        << ", mean=" << median_AH_Wm2 << " W/m^2\n";
+                }
             }
         }
     }

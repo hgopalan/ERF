@@ -234,6 +234,13 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
     }
 
+    // Phase 2.9: Per-cell anthropogenic heat override
+    fields.AH_Wm2_ucm = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][2.9][allocate_ucm_fields] AH_Wm2_ucm: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
     fields.plan_area_frac = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][2.3][allocate_ucm_fields] plan_area_frac: "
@@ -331,6 +338,7 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.H_wall->setVal(0.0);
     fields.H_roof->setVal(0.0);
     fields.AH->setVal(0.0);
+    fields.AH_Wm2_ucm->setVal(0.0);  // Phase 2.9: zero out per-cell AH override
     fields.plan_area_frac->setVal(0.0);
     fields.ah_profile_id->setVal(0);
 
@@ -381,6 +389,7 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
         auto slab_L_road_arr   = fields.slab_L_road->array(mfi);
         auto plan_area_frac_arr = fields.plan_area_frac->array(mfi);
         auto ah_profile_id_arr  = fields.ah_profile_id->array(mfi);
+        auto AH_Wm2_ucm_arr     = fields.AH_Wm2_ucm->array(mfi);  // Phase 2.9
 
         for (int j_ucm = bx.smallEnd(1); j_ucm <= bx.bigEnd(1); ++j_ucm) {
             for (int i_ucm = bx.smallEnd(0); i_ucm <= bx.bigEnd(0); ++i_ucm) {
@@ -431,6 +440,9 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                     // Phase 2.3: morphology-derived + AH profile id
                     plan_area_frac_arr(iv, 0) = static_cast<amrex::Real>(row.plan_area_frac);
                     ah_profile_id_arr(iv, 0)  = row.ah_profile_id;
+                    
+                    // Phase 2.9: per-cell AH override from CSV
+                    AH_Wm2_ucm_arr(iv, 0) = row.AH_Wm2;
                 } else {
                     // Non-urban cell: physically inert defaults so downstream kernels
                     // that don't check is_urban still produce sensible numbers.
@@ -997,6 +1009,7 @@ void fill_ucm_z0_and_disp(UCMFields& f,
 void compute_anthropogenic_heat(amrex::MultiFab&        AH_out,
                                const amrex::iMultiFab& ah_profile_id,
                                const amrex::iMultiFab& is_urban,
+                               const amrex::MultiFab&  AH_Wm2_ucm,  // Phase 2.9: per-cell override
                                const UCMParams&        params,
                                amrex::Real             time,
                                int                     lev)
@@ -1007,30 +1020,66 @@ void compute_anthropogenic_heat(amrex::MultiFab&        AH_out,
     const amrex::Real phase    = 2.0 * M_PI * (time / day_len) - 0.5 * M_PI;
     const amrex::Real diurnal  = std::max(0.0, std::cos(phase));
 
+    // Phase 2.9: Track per-cell override stats
+    int n_overridden = 0;
+    amrex::Real min_override = std::numeric_limits<amrex::Real>::infinity();
+    amrex::Real max_override = -std::numeric_limits<amrex::Real>::infinity();
+
     for (amrex::MFIter mfi(AH_out, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
        const amrex::Box& bx = mfi.tilebox();
        auto       ah_a = AH_out.array(mfi);
        auto const id_a = ah_profile_id.const_array(mfi);
        auto const ur_a = is_urban.const_array(mfi);
+       auto const ah_csv_a = AH_Wm2_ucm.const_array(mfi);  // Phase 2.9
        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+           // Phase 2.9: First-line guard for urban cells
            if (ur_a(i,j,0) == 0) { 
                ah_a(i,j,0) = 0.0; 
                return; 
            }
-           const int pid = id_a(i,j,0);
-           if      (pid == 1) ah_a(i,j,0) = AH_peak * diurnal;
-           else               ah_a(i,j,0) = AH_const;
+           
+           // Phase 2.9: Use per-cell AH override if > 0, else use ParmParse fallback
+           const amrex::Real AH_csv = ah_csv_a(i,j,0);
+           if (AH_csv > 0.0) {
+               // Use per-cell override (no diurnal scaling for CSV-provided values)
+               ah_a(i,j,0) = AH_csv;
+           } else {
+               // Use ParmParse fallback (with diurnal factor as before)
+               const int pid = id_a(i,j,0);
+               if      (pid == 1) ah_a(i,j,0) = AH_peak * diurnal;
+               else               ah_a(i,j,0) = AH_const;
+           }
        });
+    }
+
+    // Phase 2.9: Compute stats for per-cell overrides (reduction)
+    for (amrex::MFIter mfi(AH_out); mfi.isValid(); ++mfi) {
+        auto const ah_csv_a = AH_Wm2_ucm.const_array(mfi);
+        auto const ur_a = is_urban.const_array(mfi);
+        const amrex::Box& bx = mfi.validbox();
+        amrex::LoopConcurrentOnCpu(bx, [&](int i, int j, int k) {
+            if (ur_a(i,j,0) > 0 && ah_csv_a(i,j,0) > 0.0) {
+                n_overridden++;
+                min_override = std::min(min_override, ah_csv_a(i,j,0));
+                max_override = std::max(max_override, ah_csv_a(i,j,0));
+            }
+        });
     }
 
     if (params.ucm_debug) {
        amrex::Real ah_min = AH_out.min(0, 0);
        amrex::Real ah_max = AH_out.max(0, 0);
        if (amrex::ParallelDescriptor::IOProcessor()) {
-           amrex::Print() << "[UCM][2.3][compute_anthropogenic_heat] time=" << time
+           amrex::Print() << "[UCM][2.9][compute_anthropogenic_heat] time=" << time
                           << "s AH min=" << ah_min
                           << " max=" << ah_max << " W/m^2"
                           << " diurnal_factor=" << diurnal << "\n";
+           // Phase 2.9: Log per-cell override stats
+           if (n_overridden > 0 && min_override < std::numeric_limits<amrex::Real>::infinity()) {
+               amrex::Print() << "[UCM][2.9][AH] per-cell override applied to " << n_overridden
+                              << " cells, min=" << min_override << " max=" << max_override
+                              << " W/m^2\n";
+           }
        }
     }
 }

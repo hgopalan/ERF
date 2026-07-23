@@ -29,7 +29,9 @@ def uniform_urban(H_bldg=10.0, plan_frac=0.5, W_road=10.0, W_roof=10.0,
                     W_road_m=W_road, W_roof_m=W_roof,
                     roof_mat_id=roof_mat_id, wall_mat_id=wall_mat_id,
                     road_mat_id=road_mat_id, orientation_deg=0.0,
-                    ah_profile_id=ah_profile_id, is_urban=1)
+                    ah_profile_id=ah_profile_id,
+                    AH_Wm2=0.0,              # NEW Phase 2.9
+                    is_urban=1)
     return fn
 
 
@@ -71,7 +73,9 @@ def with_nonurban_box(base, i0, i1, j0, j1) -> Callable[[int, int], Mapping]:
             return dict(i=i, j=j, bldg_id=1, height_m=0.0,
                         plan_area_frac=0.0, W_road_m=0.0, W_roof_m=0.0,
                         roof_mat_id=0, wall_mat_id=0, road_mat_id=0,
-                        orientation_deg=0.0, ah_profile_id=0, is_urban=0)
+                        orientation_deg=0.0, ah_profile_id=0,
+                        AH_Wm2=0.0,          # NEW Phase 2.9
+                        is_urban=0)
         return base(i, j)
     return fn
 
@@ -103,6 +107,8 @@ def two_halves_heights(H_short=5.0, H_tall=25.0, split_axis="i",
             return dict(i=i, j=j, bldg_id=1, height_m=H,
                         plan_area_frac=0.5, W_road_m=10.0, W_roof_m=10.0,
                         roof_mat_id=m, wall_mat_id=m, road_mat_id=1,
-                        orientation_deg=0.0, ah_profile_id=0, is_urban=1)
+                        orientation_deg=0.0, ah_profile_id=0,
+                        AH_Wm2=0.0,          # NEW Phase 2.9
+                        is_urban=1)
         return inner
     return factory

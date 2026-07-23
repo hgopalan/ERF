@@ -154,14 +154,15 @@ void fill_ucm_z0_and_disp(UCMFields& fields,
  * @param[in] lev               AMR level (default 0; Phase 1.1 only uses lev=0)
  *
  * @precondition AH_out allocated
- * @precondition ah_profile_id and is_urban already populated
+ * @precondition ah_profile_id, is_urban, and AH_Wm2_ucm already populated
  * @postcondition AH_out contains per-cell anthropogenic heat [W/m²]
  */
 void compute_anthropogenic_heat(amrex::MultiFab&        AH_out,
                                 const amrex::iMultiFab& ah_profile_id,
                                 const amrex::iMultiFab& is_urban,
-                                const UCMParams&        params,
-                                amrex::Real             time,
-                                int                     lev = 0);
+                               const amrex::MultiFab&  AH_Wm2_ucm,  // Phase 2.9: per-cell override
+                               const UCMParams&        params,
+                               amrex::Real             time,
+                               int                     lev = 0);
 
 #endif // ERF_UCM_ALLOCATE_H

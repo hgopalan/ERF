@@ -197,6 +197,9 @@ struct UCMFields
     /// Anthropogenic heat flux [W/m²]. Phase 2.3: added to roof; distributed by Profile.
     std::unique_ptr<amrex::MultiFab> AH;
 
+    /// Per-cell anthropogenic heat override [W/m²]. Phase 2.9: from CSV; 0 → use ParmParse fallback.
+    std::unique_ptr<amrex::MultiFab> AH_Wm2_ucm;
+
     /// Plan-area fraction (building footprint / grid cell area) [-]. Phase 2.3: needed for facet split.
     std::unique_ptr<amrex::MultiFab> plan_area_frac;
 

@@ -220,6 +220,7 @@ void UCMLayer::advance(UCMFields& fields,
 
     // Phase 2.3: Compute anthropogenic heat
     compute_anthropogenic_heat(*fields.AH, *fields.ah_profile_id, *fields.is_urban,
+                              *fields.AH_Wm2_ucm,  // Phase 2.9: per-cell override
                               m_params, time, lev);
 
     // ------------------------------------------------------------------------

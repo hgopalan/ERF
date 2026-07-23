@@ -161,3 +161,63 @@ def test_write_materials_success():
         assert len(rows) == 2
         assert int(rows[0]["mat_id"]) == 1
         assert int(rows[1]["mat_id"]) == 2
+
+
+def test_write_layout_AH_Wm2_roundtrip():
+    """Round-trip test with AH_Wm2 = 42.0 (Phase 2.9 new column)."""
+    def cell_fn(i, j):
+        row = uniform_urban()(i, j)
+        row["AH_Wm2"] = 42.0  # Override with non-zero value
+        return row
+
+    nx_ucm, ny_ucm = 2, 2
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "test.csv")
+        write_layout(path, nx_ucm, ny_ucm, cell_fn)
+
+        with open(path, "r") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        assert len(rows) == nx_ucm * ny_ucm
+        for row in rows:
+            assert float(row["AH_Wm2"]) == 42.0
+            assert int(row["is_urban"]) == 1
+
+
+def test_write_layout_AH_Wm2_default_backward_compat():
+    """Backward compatibility: if cell_fn omits AH_Wm2, defaults to 0.0."""
+    # This generator does NOT provide AH_Wm2 (simulating old code)
+    # but write_layout should add it via setdefault
+    def old_style_cell_fn(i, j):
+        # Deliberately omit AH_Wm2 to test backward compat
+        return dict(i=i, j=j, bldg_id=1, height_m=10.0,
+                    plan_area_frac=0.5, W_road_m=10.0, W_roof_m=10.0,
+                    roof_mat_id=1, wall_mat_id=1, road_mat_id=1,
+                    orientation_deg=0.0, ah_profile_id=0, is_urban=1)
+
+    nx_ucm, ny_ucm = 2, 2
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "test.csv")
+        write_layout(path, nx_ucm, ny_ucm, old_style_cell_fn)
+
+        with open(path, "r") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        assert len(rows) == nx_ucm * ny_ucm
+        for row in rows:
+            assert float(row["AH_Wm2"]) == 0.0  # Should default to 0.0
+
+
+def test_write_layout_AH_Wm2_negative_raises():
+    """Negative AH_Wm2 raises ValueError."""
+    def bad_cell_fn(i, j):
+        row = uniform_urban()(i, j)
+        row["AH_Wm2"] = -5.0  # Invalid: negative
+        return row
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "test.csv")
+        with pytest.raises(ValueError, match="AH_Wm2 must be"):
+            write_layout(path, 2, 2, bad_cell_fn)

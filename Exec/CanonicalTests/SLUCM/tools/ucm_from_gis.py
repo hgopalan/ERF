@@ -14,17 +14,49 @@ WHY UTM
   latitudes. UTM zones are constant-metric within the zone and are the
   correct choice for a domain up to ~500 km wide.
 """
-from pyproj import CRS
-import geopandas as gpd
-import pandas as pd
-import numpy as np
+from dataclasses import dataclass
 import os
 import csv
+
+try:
+    from pyproj import CRS
+except Exception:
+    CRS = None
+
+try:
+    import geopandas as gpd
+except Exception:
+    gpd = None
+
+try:
+    import numpy as np
+except Exception:
+    np = None
+
+try:
+    from shapely.geometry import box
+except Exception:
+    box = None
+
 from ucm_csv import write_layout, write_materials
+from ucm_fusion import fuse_footprints
+from ucm_sources import (
+    fetch_google_open_buildings,
+    fetch_microsoft_ml_footprints,
+    fetch_osm_buildings,
+    fetch_wudapt_lcz,
+)
 
 UTM_NORTH_EPSG_RANGE = range(32601, 32661)
 UTM_SOUTH_EPSG_RANGE = range(32701, 32761)
 _UTM_EPSGS = set(UTM_NORTH_EPSG_RANGE) | set(UTM_SOUTH_EPSG_RANGE)
+
+
+@dataclass
+class SourceStatus:
+    name: str
+    ok: bool
+    detail: str
 
 
 def _abort_if_not_utm(crs_input) -> CRS:
@@ -39,6 +71,8 @@ def _abort_if_not_utm(crs_input) -> CRS:
     Raises:
         SystemExit: If CRS is not UTM.
     """
+    if CRS is None:
+        raise RuntimeError("pyproj is required for CRS validation")
     crs = CRS.from_user_input(crs_input)
     epsg = crs.to_epsg()
     if epsg in _UTM_EPSGS:
@@ -142,8 +176,13 @@ def build_ucm_from_location(
         lcz_source: "wudapt" or "manual".
         lcz_manual_class: LCZ class (1-10) if lcz_source=="manual".
     """
+    if any(mod is None for mod in (np, gpd, box)):
+        print("[ucm_from_gis] WARNING: GIS dependencies missing; skipping build.")
+        return None
+
     crs = _abort_if_not_utm(crs)
     print(f"[ucm_from_gis] CRS validated: {crs.name}")
+    source_status = []
 
     x_min, y_min, x_max, y_max = domain_bbox_m
     print(f"[ucm_from_gis] domain bbox (UTM): "
@@ -155,24 +194,44 @@ def build_ucm_from_location(
     print(f"[ucm_from_gis] UCM grid: {nx_ucm} x {ny_ucm} cells "
           f"(dx={ucm_dx_m:.1f} m)")
 
+    domain_bbox = (x_min, y_min, x_max, y_max)
+    empty_buildings = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=crs)
+
     if footprints_source == "osm":
-        print("[ucm_from_gis] fetching OSM buildings (this may take a minute)...")
-        try:
-            import osmnx as ox
-            tags = {"building": True}
-            buildings = ox.features_from_bbox(
-                north=y_max, south=y_min, east=x_max, west=x_min, tags=tags
-            )
-            buildings = gpd.GeoDataFrame(buildings, crs="EPSG:4326")
-            buildings = buildings[buildings.geom_type == "Polygon"]
-            buildings = buildings.to_crs(crs)
-            print(f"[ucm_from_gis] fetched {len(buildings)} OSM buildings")
-        except Exception as e:
-            print(f"[ucm_from_gis] WARNING: OSM fetch failed ({e}). "
-                  f"Using zero buildings.")
-            buildings = gpd.GeoDataFrame(geometry=[], crs=crs)
+        buildings = fetch_osm_buildings(domain_bbox, crs)
+        buildings = buildings if buildings is not None else empty_buildings
+        source_status.append(SourceStatus("OSM", len(buildings) > 0, f"{len(buildings)} footprints"))
+    elif footprints_source == "microsoft":
+        country = os.environ.get("SLUCM_MICROSOFT_COUNTRY", "US")
+        buildings = fetch_microsoft_ml_footprints(country, domain_bbox, crs)
+        buildings = buildings if buildings is not None else empty_buildings
+        source_status.append(SourceStatus("MICROSOFT", len(buildings) > 0, f"{len(buildings)} footprints"))
+    elif footprints_source == "google":
+        s2_cell = os.environ.get("SLUCM_GOOGLE_S2_CELL", "")
+        buildings = fetch_google_open_buildings(s2_cell, domain_bbox, crs) if s2_cell else None
+        buildings = buildings if buildings is not None else empty_buildings
+        source_status.append(SourceStatus("GOOGLE", len(buildings) > 0,
+                                         f"{len(buildings)} footprints" if len(buildings) > 0 else "missing SLUCM_GOOGLE_S2_CELL or fetch failed"))
+    elif footprints_source == "auto":
+        country = os.environ.get("SLUCM_MICROSOFT_COUNTRY", "US")
+        s2_cell = os.environ.get("SLUCM_GOOGLE_S2_CELL", "")
+        osm_buildings = fetch_osm_buildings(domain_bbox, crs)
+        ms_buildings = fetch_microsoft_ml_footprints(country, domain_bbox, crs)
+        google_buildings = fetch_google_open_buildings(s2_cell, domain_bbox, crs) if s2_cell else None
+        buildings = fuse_footprints(osm=osm_buildings, microsoft=ms_buildings, google=google_buildings)
+        buildings = buildings if buildings is not None else empty_buildings
+        source_status.extend([
+            SourceStatus("OSM", osm_buildings is not None and len(osm_buildings) > 0,
+                         "used in auto fusion" if osm_buildings is not None and len(osm_buildings) > 0 else "unavailable"),
+            SourceStatus("MICROSOFT", ms_buildings is not None and len(ms_buildings) > 0,
+                         "used in auto fusion" if ms_buildings is not None and len(ms_buildings) > 0 else "unavailable"),
+            SourceStatus("GOOGLE", google_buildings is not None and len(google_buildings) > 0,
+                         "used in auto fusion" if google_buildings is not None and len(google_buildings) > 0 else "unavailable"),
+        ])
     else:
         raise ValueError(f"Unknown footprints_source: {footprints_source}")
+
+    print(f"[ucm_from_gis] using {len(buildings)} building footprints")
 
     print("[ucm_from_gis] rasterizing buildings into UCM grid...")
     morphology = {}
@@ -183,7 +242,6 @@ def build_ucm_from_location(
             x1 = x0 + ucm_dx_m
             y1 = y0 + ucm_dx_m
 
-            from shapely.geometry import box
             cell_box = box(x0, y0, x1, y1)
 
             footprint_area = 0.0
@@ -231,13 +289,33 @@ def build_ucm_from_location(
     print(f"[ucm_from_gis] morphology rasterization complete")
 
     if lcz_source == "manual":
+        source_status.append(SourceStatus("MANUAL_LCZ", True, f"class {lcz_manual_class}"))
         print(f"[ucm_from_gis] using manual LCZ class {lcz_manual_class}")
         lcz_map = {(i, j): lcz_manual_class for i in range(nx_ucm)
                    for j in range(ny_ucm)}
     elif lcz_source == "wudapt":
-        print("[ucm_from_gis] TODO: WUDAPT LCZ raster download not yet "
-              "implemented in Phase 2.9. Using manual fallback LCZ=6.")
-        lcz_map = {(i, j): 6 for i in range(nx_ucm) for j in range(ny_ucm)}
+        city_slug = os.environ.get("SLUCM_WUDAPT_CITY", "")
+        lcz_polygons = fetch_wudapt_lcz(city_slug, domain_bbox, crs) if city_slug else None
+        if lcz_polygons is not None and len(lcz_polygons) > 0:
+            source_status.append(SourceStatus("WUDAPT", True, f"{len(lcz_polygons)} polygons"))
+            lcz_map = {}
+            for i in range(nx_ucm):
+                for j in range(ny_ucm):
+                    x0 = x_min + i * ucm_dx_m
+                    y0 = y_min + j * ucm_dx_m
+                    x1 = x0 + ucm_dx_m
+                    y1 = y0 + ucm_dx_m
+                    cell_box = box(x0, y0, x1, y1)
+                    matches = lcz_polygons[lcz_polygons.geometry.intersects(cell_box)]
+                    if len(matches) == 0:
+                        lcz_map[(i, j)] = 6
+                    else:
+                        values = matches.get("lcz")
+                        lcz_map[(i, j)] = int(float(values.iloc[0])) if values is not None else 6
+        else:
+            source_status.append(SourceStatus("WUDAPT", False, "fallback to LCZ=6"))
+            print("[ucm_from_gis] WARNING: WUDAPT unavailable, using manual fallback LCZ=6.")
+            lcz_map = {(i, j): 6 for i in range(nx_ucm) for j in range(ny_ucm)}
     else:
         raise ValueError(f"Unknown lcz_source: {lcz_source}")
 
@@ -281,4 +359,8 @@ def build_ucm_from_location(
     materials_path = os.path.join(output_dir, "materials.csv")
     write_materials(materials_path, materials_list)
 
+    print("[ucm_from_gis] SourceStatus summary:")
+    for item in source_status:
+        state = "OK" if item.ok else "FALLBACK"
+        print(f"[ucm_from_gis]   - {item.name}: {state} ({item.detail})")
     print(f"[ucm_from_gis] complete. CSVs written to {output_dir}/")
