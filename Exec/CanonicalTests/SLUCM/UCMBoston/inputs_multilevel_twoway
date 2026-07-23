@@ -1,0 +1,11 @@
+# ============================================================================
+# UCMBoston multi-level two-way (Phase 3.10 — DO NOT RUN YET)
+# ============================================================================
+# This input file is a placeholder reserved by Phase 2.11.
+# It will be populated by Phase 3.10 with the full Part 3 stack:
+#   - 3-level AMR (same as Phase 3.6)
+#   - atm_feedback = 1.0 (two-way)
+#   - Stability-aware exchange (Phase 3.4)
+#
+# Requires Phases 3.1 through 3.9 to work.
+# ============================================================================
