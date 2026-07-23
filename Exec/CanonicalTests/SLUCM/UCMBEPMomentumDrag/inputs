@@ -12,7 +12,7 @@
 erf.prob_name = "ABL"
 
 # Time stepping
-max_step         = 10
+max_step         = 256
 erf.cfl                = 0.5
 amrex.fpe_trap_invalid = 0
 
@@ -41,10 +41,12 @@ amr.v              = 1
 amr.max_level       = 0
 
 # CHECKPOINT / PLOTFILES (Phase 2.8 test needs main plotfile for velocity check)
-amr.plot_int         = 5
 amr.check_int        = -1
 erf.check_int        = -1
-
+#erf.plot_int_1        = 5
+erf.plot_file_1     = plt_      # prefix of plotfile name
+erf.plot_int_1      = 5             # number of timesteps between plotfiles
+erf.plot_vars_1     = x_velocity y_velocity z_velocity theta
 # SOLVER CHOICE
 erf.use_gravity = true
 erf.molec_diff_type = "None"
@@ -76,7 +78,7 @@ erf.mrf_moistvars = false
 erf.latitude = 45.0
 erf.use_coriolis = true
 erf.abl_driver_type = "GeostrophicWind"
-erf.abl_geo_wind = 15.0 0.0 0.0
+erf.abl_geo_wind = 8.0 0.0 0.0
 
 # ========================================================================
 # SLUCM Configuration (Phase 2.7 heat injection enabled + Phase 2.8 drag)
@@ -97,8 +99,8 @@ erf.ucm.alpha_ucm           = 10.0
 # Defensive default (used only if CSV data is missing or incomplete)
 erf.ucm.H_bldg_uniform      = 10.0
 
-erf.ucm.W_road_uniform      = 0.0
-erf.ucm.W_roof_uniform      = 0.0
+erf.ucm.W_road_uniform      = 10.0
+erf.ucm.W_roof_uniform      = 10.0
 
 erf.ucm.albedo_roof         = 0.20
 erf.ucm.albedo_wall         = 0.20
