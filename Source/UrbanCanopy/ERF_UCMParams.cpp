@@ -42,6 +42,11 @@ void UCMParams::read_from_parmparse(int lev)
     pp.query("alpha_max", alpha_max);
     pp.query("use_morphology_injection", use_morphology_injection);
 
+    // Section 4.2: Phase 2.7 — Facet3D BEP-style geometric injection parameters
+    pp.query("use_facet3d_injection", use_facet3d_injection);
+    pp.query("use_gaussian_height_distribution", use_gaussian_height_distribution);
+    pp.query("height_std_threshold_m", height_std_threshold_m);
+
     pp.query("slab_N_layers", slab_N_layers);
     pp.query("slab_T_deep", slab_T_deep);
     pp.query("slab_L", slab_L);

@@ -101,7 +101,13 @@ struct UCMParams
     amrex::Real alpha_max                = 50.0;      ///< Maximum e-folding depth [m] (cap for tall towers)
     bool        use_morphology_injection  = true;      ///< Phase 2.6: morphology-aware split injection; false = fall back to uniform alpha_ucm
 
+    // =========================================================================
+    // Section 4.2: Phase 2.7 — Facet3D BEP-style geometric injection parameters
+    // =========================================================================
 
+    bool        use_facet3d_injection              = true;       ///< Phase 2.7: enable facet-3D geometric injection with BEP-style overlap; false = fall back to Phase 2.6
+    bool        use_gaussian_height_distribution  = false;      ///< Phase 2.7: use continuous Gaussian PDF for wall height dist (true) vs sharp 1-class BEP (false)
+    amrex::Real height_std_threshold_m            = 0.1;        ///< Phase 2.7: below this threshold, Gaussian mode falls back to sharp [m]
 
     int     slab_N_layers      = 4;         ///< Number of soil/material layers in slab [-]
     amrex::Real slab_T_deep    = 287.0;     ///< Deep (bottom BC) temperature [K]

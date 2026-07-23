@@ -125,8 +125,11 @@
             m_ucm_params.atm_feedback > 0.0)
         {
             const bool has_moisture_ucm = (solverChoice.moisture_type != MoistureType::None);
+            const bool use_terrain_ucm = (solverChoice.terrain_type != TerrainType::None);
 
-            // Build flat-terrain z_phys_cc if terrain is inactive
+            // Build flat-terrain z_phys_cc only for the no-terrain path. The
+            // Facet3D terrain kernel uses z_phys_nd directly so the local AGL
+            // thickness is consistent with the fitted mesh geometry.
             amrex::MultiFab z_phys_flat_ucm;
             const amrex::MultiFab* z_cc_ucm_ptr = z_phys_cc[level].get();
             if (!z_cc_ucm_ptr) {
@@ -147,23 +150,32 @@
                 z_cc_ucm_ptr = &z_phys_flat_ucm;
             }
 
-            // Phase 2.6: Updated call with per-cell alpha and facet-split injection
+            const amrex::MultiFab* z_nd_ucm_ptr = use_terrain_ucm ? z_phys_nd[level].get() : nullptr;
+            if (use_terrain_ucm) {
+                AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+                    z_nd_ucm_ptr != nullptr,
+                    "[UCM][2.7] Terrain-enabled UCM coupling requires z_phys_nd.");
+            }
+
             apply_ucm_tendency_to_cc_source(
                 cc_src,
-                *m_ucm_H_atm[level],                       // Phase 2.5 lumped (unused if use_morphology_injection)
-                *m_ucm_H_road_atm[level],                  // Phase 2.6: road flux
-                *m_ucm_H_wallroof_atm[level],              // Phase 2.6: wall+roof+AH flux
-                *m_ucm_H_bldg_mean_atm[level],             // Phase 2.5 aggregates: mean building height
+                *m_ucm_H_atm[level],
+                *m_ucm_H_road_atm[level],
+                *m_ucm_H_wall_atm[level],
+                *m_ucm_H_roof_atm[level],
+                *m_ucm_H_bldg_mean_atm[level],
+                *m_ucm_H_bldg_std_atm[level],
+                *m_ucm_lambda_p_atm[level],
+                *m_ucm_lambda_f_atm[level],
                 has_moisture_ucm ? m_ucm_LE_atm[level].get() : nullptr,
+                z_nd_ucm_ptr,
                 *z_cc_ucm_ptr,
                 S_data[IntVars::cons],
                 fine_geom,
                 *m_ucm_is_urban_atm[level],
-                m_ucm_params.alpha_scale,                  // Phase 2.6: per-cell alpha multiplier
-                m_ucm_params.alpha_min,                    // Phase 2.6: minimum alpha
-                m_ucm_params.alpha_max,                    // Phase 2.6: maximum alpha
-                m_ucm_params.use_morphology_injection,     // Phase 2.6: enable split injection
-                m_ucm_params.alpha_ucm,                    // Phase 2.5 fallback: uniform alpha
+                m_ucm_params.use_facet3d_injection,
+                m_ucm_params.use_gaussian_height_distribution,
+                m_ucm_params.height_std_threshold_m,
                 m_ucm_params.atm_feedback,
                 has_moisture_ucm,
                 m_ucm_params.ucm_debug,

@@ -173,6 +173,15 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   ucm_plot_int        = " << params.ucm_plot_int << "\n";
     amrex::Print() << "[UCM]   ucm_atm_plot_int    = " << params.ucm_atm_plot_int << "\n";
     amrex::Print() << "[UCM]   ucm_diag_file       = " << params.ucm_diag_file << "\n";
+    amrex::Print() << "[UCM]   --- Phase 2.6 Morphology-Aware Injection ---\n";
+    amrex::Print() << "[UCM]   use_morphology_injection = " << (params.use_morphology_injection ? "true" : "false") << "\n";
+    amrex::Print() << "[UCM]   alpha_scale         = " << params.alpha_scale << "\n";
+    amrex::Print() << "[UCM]   alpha_min [m]       = " << params.alpha_min << "\n";
+    amrex::Print() << "[UCM]   alpha_max [m]       = " << params.alpha_max << "\n";
+    amrex::Print() << "[UCM]   --- Phase 2.7 Facet3D BEP-Continuous-TF ---\n";
+    amrex::Print() << "[UCM]   use_facet3d_injection = " << (params.use_facet3d_injection ? "true" : "false") << "\n";
+    amrex::Print() << "[UCM]   use_gaussian_height_distribution = " << (params.use_gaussian_height_distribution ? "true" : "false") << "\n";
+    amrex::Print() << "[UCM]   height_std_threshold_m = " << params.height_std_threshold_m << "\n";
     amrex::Print() << "[UCM] =========================================================\n";
     amrex::Print() << "\n";
 

@@ -217,23 +217,52 @@ void coarsen_ucm_flux_to_atm(
  * @note All ParallelFor kernels respect is_urban mask and use correct GPU-safe signature.
  * @note LE_atm pointer may be nullptr; function must handle gracefully.
  * @note RK-stage safety: OWNS cc_source[RhoTheta_comp]. Zeros at entry, always uses `+=`.
+ *
+ * @param cc_source         Coarse-grid source term to be populated [output]
+ * @param H_atm             Phase 2.5 lumped sensible flux (unused if use_facet3d_injection or use_morphology_injection)
+ * @param H_road_atm        Phase 2.6+: road sensible flux [W/m²]
+ * @param H_wall_atm        Phase 2.7+: wall sensible flux [W/m²]
+ * @param H_roof_atm        Phase 2.7+: roof sensible flux including anthropogenic heat [W/m²]
+ * @param H_bldg_mean_atm   Mean building height per ATM cell [m]
+ * @param H_bldg_std_atm    Std dev of building height per ATM cell [m] (for continuous Gaussian mode)
+ * @param lambda_p_atm      Plan-area density per ATM cell [-]
+ * @param lambda_f_atm      Frontal-area density per ATM cell [-]
+ * @param LE_atm            Latent heat flux (optional)
+ * @param z_phys_nd         Physical z at nodes (terrain-following; nullptr for flat)
+ * @param z_phys_cc         Physical z at cell centers (for reference)
+ * @param S_old             Current state (for density extraction)
+ * @param geom_atm          Coarse geometry
+ * @param is_urban_atm      Urban mask on ATM grid
+ * @param use_facet3d_injection       Phase 2.7: enable facet-3D geometric injection (default true)
+ * @param use_gaussian_height_distribution  Phase 2.7: use continuous Gaussian mode (default false)
+ * @param height_std_threshold_m      Phase 2.7: below this, Gaussian falls back to sharp [m]
+ * @param feedback          Coupling strength [0, 1]
+ * @param has_moisture      Whether moisture variables are present
+ * @param ucm_debug         Enable debug output
+ * @param lev               AMR level (default 0)
+ *
+ * @cite Martilli, Clappier & Rotach (2002), Boundary-Layer Meteorology 104:261–304
+ * @cite Coceal & Belcher (2004), QJRMS 130:1349–1372
  */
 void apply_ucm_tendency_to_cc_source(
     amrex::MultiFab&       cc_source,
     const amrex::MultiFab& H_atm,
     const amrex::MultiFab& H_road_atm,
-    const amrex::MultiFab& H_wallroof_atm,
+    const amrex::MultiFab& H_wall_atm,
+    const amrex::MultiFab& H_roof_atm,
     const amrex::MultiFab& H_bldg_mean_atm,
+    const amrex::MultiFab& H_bldg_std_atm,
+    const amrex::MultiFab& lambda_p_atm,
+    const amrex::MultiFab& lambda_f_atm,
     const amrex::MultiFab* LE_atm,
+    const amrex::MultiFab* z_phys_nd,
     const amrex::MultiFab& z_phys_cc,
     const amrex::MultiFab& S_old,
     const amrex::Geometry& geom_atm,
     const amrex::iMultiFab& is_urban_atm,
-    amrex::Real            alpha_scale,
-    amrex::Real            alpha_min,
-    amrex::Real            alpha_max,
-    bool                   use_morphology_injection,
-    amrex::Real            alpha_ucm_fallback,
+    bool                   use_facet3d_injection,
+    bool                   use_gaussian_height_distribution,
+    amrex::Real            height_std_threshold_m,
     amrex::Real            feedback,
     bool                   has_moisture,
     bool                   ucm_debug = false,
