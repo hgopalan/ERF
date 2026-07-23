@@ -165,6 +165,17 @@ build_ucm_from_location(
 )
 ```
 
+### `ucm_sources.py` / `ucm_fusion.py` / `ucm_plot.py`
+
+Phase 2.9 close-out adds:
+
+- `ucm_sources.py` — fail-safe adapters for OSM, Microsoft ML, Google Open
+  Buildings, Copernicus GHSL Built-H, and WUDAPT LCZ.
+- `ucm_fusion.py` — deduplicating footprint fusion with priority
+  `OSM > MICROSOFT > GOOGLE`.
+- `ucm_plot.py` — static QA plotting (`urban_mask`, `height`,
+  `plan_area_frac`, `lambda_f`, `materials`, `AH_Wm2`).
+
 ## Materials and LCZ
 
 The toolchain ships `materials_lcz.csv`, a hand-curated mapping of the 10 urban Local Climate Zone (LCZ) classes (Stewart & Oke, 2012) to material properties based on Oke et al. (2017).
@@ -276,6 +287,14 @@ mat_id,name,albedo,emissivity,k_therm_W_per_mK,rho_cp_J_per_m3K,thickness_m,desc
 - Stewart, I. D., & Oke, T. R. (2012). Local Climate Zone classification and its performance over the urban-rural scale. *Journal of Applied Meteorology and Climatology*, 51(8), 1506–1526.
 - Oke, T. R., Mills, G., Christen, A., & Voogt, J. A. (2017). Urban Climates. Cambridge University Press.
 - WUDAPT project: https://www.wudapt.org/
+
+## Data source attribution
+
+- OpenStreetMap building footprints: © OpenStreetMap contributors.
+- Microsoft Global ML Building Footprints: Microsoft.
+- Google Open Buildings: Google Research / Google Open Buildings.
+- Copernicus GHSL Built-H: European Commission, Joint Research Centre.
+- WUDAPT LCZ: WUDAPT community contributors.
 
 ## Contact
 
