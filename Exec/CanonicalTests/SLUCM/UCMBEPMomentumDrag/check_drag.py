@@ -15,6 +15,7 @@ obvious bugs in drag kernel (e.g., double-counting, missing geometry).
 """
 
 import os
+import re
 import sys
 import glob
 import numpy as np
@@ -32,28 +33,34 @@ except ImportError:
     sys.exit(1)
 
 
-def find_final_plotfile(max_step=10):
+def find_final_plotfile():
     """Find the final MAIN ATM plotfile (excludes plt_ucm_* companion files).
 
-    The UCM writes several plotfile families to the run directory:
-      - plt_NNNNN            → main ATM state (u, v, w, rho, theta) -- what we want
-      - plt_ucm_NNNNN        → UCM 2D slab (SVF, temperatures, fluxes)
-      - plt_ucm_atm_NNNNN    → ATM-grid aggregates (f_urb, H_bldg_mean, etc.)
+    ERF plotfile families in the run directory:
+      - plt_NNNNN         → main ATM state (u, v, w, rho, theta)   ← WE WANT THIS
+      - plt_ucm_NNNNN     → UCM 2D slab
+      - plt_ucm_atm_NNNNN → UCM ATM-grid aggregates
 
-    The glob pattern 'plt_*_??????' matches all three; alphabetical sort makes
-    'plt_ucm_atm_*' win. We filter out any 'plt_ucm*' file here so we always
-    grab the main ATM plotfile.
+    Main ATM plotfiles use `plt_` followed directly by digits (no underscore).
+    UCM companion plotfiles have `plt_ucm...` prefix. Match with regex.
     """
-    all_files = sorted(glob.glob("plt_*_??????"))
-    files = [f for f in all_files if not os.path.basename(f).startswith("plt_ucm")]
-    if not files:
-        print("ERROR: No main ATM plotfiles found matching 'plt_*_??????' (excluding plt_ucm_*)")
+    # Collect all directories starting with plt_
+    all_entries = sorted(glob.glob("plt_*"))
+    # Filter: keep only 'plt_' + digits (main ATM plotfiles).
+    # Reject anything starting with 'plt_ucm' regardless.
+    pattern = re.compile(r"^plt_\d+$")
+    main_files = [
+        f for f in all_entries
+        if pattern.match(os.path.basename(f))
+        and not os.path.basename(f).startswith("plt_ucm")
+    ]
+    if not main_files:
+        print("ERROR: No main ATM plotfiles found matching 'plt_NNNNN'")
         print("       Set 'amr.plot_int > 0' in inputs to write main ATM plotfiles.")
-        # Diagnostic: list what we did find
-        if all_files:
-            print(f"       Found only UCM companion files: {all_files}")
+        if all_entries:
+            print(f"       Found only UCM companion files: {all_entries}")
         return None
-    return files[-1]
+    return main_files[-1]  # highest step number
 
 
 def load_field_3d(ds, field_name, covering_grid_level=0):
