@@ -1,8 +1,9 @@
-# Canonical test for ERF-SLUCM Phase 2.7: Facet3D BEP-Continuous-TF
-# Tests: geometric overlap (sharp + Gaussian modes), terrain-following coordinates
-# Expected: exit code 0 at step 2, plt_ucm_atm_000000 exists with 9 components,
-#           left ATM cells (tall buildings) have H_bldg_mean~30m, right cells~5m,
-#           wall/roof fluxes split, vertical distribution based on geometric overlap
+# Canonical test for ERF-SLUCM Phase 2.8: BEP Momentum Drag (Compressible)
+# Tests: wall drag vertical distribution, roof drag placement, wind decay inside/above canopy
+# Expected: exit code 0 at step 10, plt_*_000010 exists with 5 ATM components (u,v,w + 2 passive),
+#           left ATM cells (tall buildings) show 50%+ wind reduction inside canopy,
+#           right ATM cells (short buildings) show less reduction,
+#           above-canopy wind ≈ freestream within 20%
 #
 # Grid: ATM 4x4 (small), grid_ratio=4 -> UCM 16x16
 # dz = 4m, nz = 256 => 1024m tall, 30m building spans ~7-8 ATM cells
@@ -11,7 +12,7 @@
 erf.prob_name = "ABL"
 
 # Time stepping
-max_step         = 2
+max_step         = 10
 erf.cfl                = 0.5
 amrex.fpe_trap_invalid = 0
 
@@ -39,8 +40,8 @@ amr.v              = 1
 # REFINEMENT / REGRIDDING
 amr.max_level       = 0
 
-# CHECKPOINT / PLOTFILES (disabled for canonical test)
-amr.plot_int         = -1
+# CHECKPOINT / PLOTFILES (Phase 2.8 test needs main plotfile for velocity check)
+amr.plot_int         = 5
 amr.check_int        = -1
 erf.check_int        = -1
 
@@ -51,7 +52,7 @@ erf.les_type        = "None"
 erf.Cs = 0.11
 erf.theta_ref = 300.0
 
-# Terrain: keep as-is (no terrain)
+# Terrain: keep as-is (no terrain in Phase 2.8 test; Phase 2.9 will add terrain test)
 erf.terrain_type     = None
 erf.use_moisture     = false
 erf.transport_scalar = false
@@ -78,7 +79,7 @@ erf.abl_driver_type = "GeostrophicWind"
 erf.abl_geo_wind = 15.0 0.0 0.0
 
 # ========================================================================
-# SLUCM Configuration (Phase 2.7)
+# SLUCM Configuration (Phase 2.7 heat injection enabled + Phase 2.8 drag)
 # ========================================================================
 erf.ucm.enable              = true
 erf.ucm.ucm_debug           = 1
@@ -107,7 +108,7 @@ erf.ucm.emissivity_roof     = 0.90
 erf.ucm.emissivity_wall     = 0.90
 erf.ucm.emissivity_road     = 0.94
 
-erf.ucm.ucm_plot_int        = 2
+erf.ucm.ucm_plot_int        = 10
 erf.ucm.ucm_atm_plot_int    = 1
 erf.ucm.ucm_diag_file       = "ucm_diag.dat"
 
@@ -124,19 +125,21 @@ erf.ucm.AH_profile_type_default = 1         # uniform profile
 erf.ucm.alpha_scale              = 1.5      # multiplier: alpha_ij = alpha_scale * H_bldg_mean
 erf.ucm.alpha_min                = 1.0      # minimum e-folding depth [m]
 erf.ucm.alpha_max                = 50.0     # maximum e-folding depth [m]
-erf.ucm.use_morphology_injection = 0        # disabled in Phase 2.7 (use facet3d instead)
+erf.ucm.use_morphology_injection = 0        # disabled (use facet3d instead)
 
 # ========================================================================
 # Phase 2.7 Facet3D BEP-Continuous-TF Parameters
 # ========================================================================
-erf.ucm.use_facet3d_injection              = 1    # enable Phase 2.7 facet3D geometric injection
-erf.ucm.use_gaussian_height_distribution   = 0    # sharp mode (1 for Gaussian continuous mode)
+erf.ucm.use_facet3d_injection              = 1    # enable Phase 2.7 facet3D geometric heat injection
+erf.ucm.use_gaussian_height_distribution   = 0    # sharp mode
 erf.ucm.height_std_threshold_m             = 0.1  # fallback threshold for Gaussian [m]
 
 # ========================================================================
-# Phase 2.8 Momentum Drag (Regression: disabled for Phase 2.7 test)
+# Phase 2.8 BEP Momentum Drag Parameters
 # ========================================================================
-erf.ucm.wall_drag_mode                     = "off"         # disable Phase 2.8 drag (backward compat)
+erf.ucm.wall_drag_mode                     = "explicit"   # force compressible path (explicit RHS)
+erf.ucm.Cd_wall                            = 0.4          # wall drag coefficient (Martilli 2002)
+erf.ucm.Cd_roof                            = 0.15         # roof drag coefficient (BEP-BEM standard)
 
 # CSV-based heterogeneous setup
 erf.ucm.building_layout_csv_path = "building_layout.csv"

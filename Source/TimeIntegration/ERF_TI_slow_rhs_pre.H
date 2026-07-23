@@ -248,6 +248,42 @@
                               thin_xforce[level], thin_yforce[level], thin_zforce[level]);
 
         // *****************************************************************************
+        // Phase 2.8: Add BEP-style momentum drag (UCM compressible explicit mode)
+        // *****************************************************************************
+#ifdef ERF_USE_UCM
+        if (m_ucm_params.enable &&
+            m_ucm_H_bldg_mean_atm[level] && m_ucm_is_urban_atm[level] &&
+            m_ucm_params.wall_drag_mode != WallDragMode::Off &&
+            m_ucm_params.atm_feedback > 0.0)
+        {
+            const amrex::MultiFab* z_nd_ucm_ptr = (z_phys_nd != nullptr)
+                ? z_phys_nd[level].get()
+                : nullptr;
+            
+            apply_ucm_momentum_drag_to_source(
+                xmom_src, ymom_src,
+                S_data[IntVars::cons],
+                S_data[IntVars::xmom],
+                S_data[IntVars::ymom],
+                *m_ucm_H_bldg_mean_atm[level],
+                *m_ucm_H_bldg_std_atm[level],
+                *m_ucm_lambda_p_atm[level],
+                *m_ucm_lambda_f_atm[level],
+                z_nd_ucm_ptr,
+                *m_ucm_is_urban_atm[level],
+                fine_geom,
+                m_ucm_params.wall_drag_mode,
+                m_ucm_params.Cd_wall,
+                m_ucm_params.Cd_roof,
+                m_ucm_params.atm_feedback,
+                m_ucm_params.use_gaussian_height_distribution,
+                m_ucm_params.height_std_threshold_m,
+                m_ucm_params.ucm_debug,
+                level);
+        }
+#endif
+
+        // *****************************************************************************
         // Define RHS for rho, rho_theta and momenta
         // *****************************************************************************
         erf_slow_rhs_pre(level, finest_level, nrk, slow_dt, S_rhs, S_old, S_data,

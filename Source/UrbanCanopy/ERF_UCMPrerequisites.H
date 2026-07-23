@@ -62,6 +62,24 @@ void check_ucm_prerequisites(const UCMParams& params,
                               int lev = 0);
 
 /**
+ * @brief Resolve wall drag mode based on user input and solver configuration
+ *
+ * Phase 2.8: auto-resolves wall_drag_mode to explicit (compressible) or implicit
+ * (anelastic) based on solverChoice and the requested mode string.
+ *
+ * @param[in] wall_drag_mode_str User-specified mode string from input
+ * @param[in] is_anelastic       True if anelastic mode, false for compressible
+ * @param[out] resolved_mode     Resolved WallDragMode enum
+ *
+ * @return "auto" → explicit (compressible) or implicit (anelastic)
+ *         "explicit", "implicit", "off" → as specified
+ *         Invalid string → error abort
+ */
+void resolve_wall_drag_mode(const std::string& wall_drag_mode_str,
+                             bool is_anelastic,
+                             WallDragMode& resolved_mode);
+
+/**
  * @brief Verify UCM grid and fields are properly allocated (Phase 1.2 post-allocation check)
  *
  * Called after allocate_ucm_fields() to verify all MultiFabs were successfully
