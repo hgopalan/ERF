@@ -663,3 +663,249 @@ void apply_ucm_tendency_to_cc_source(
         }
     }
 }
+
+
+/**
+ * @brief Apply BEP momentum drag to xmom_src and ymom_src (Phase 2.8 compressible)
+ *
+ * Adds momentum drag following Martilli et al. (2002) wall and roof formulations.
+ * Reuses Phase 2.7 geometry (wall_overlap_fraction, is_roof_cell helpers).
+ * MOST owns k=klo momentum; drag is skipped at k=klo.
+ */
+void apply_ucm_momentum_drag_to_source(
+    amrex::MultiFab&       xmom_src,
+    amrex::MultiFab&       ymom_src,
+    const amrex::MultiFab& S_cons,
+    const amrex::MultiFab& S_xmom,
+    const amrex::MultiFab& S_ymom,
+    const amrex::MultiFab& H_bldg_mean_atm,
+    const amrex::MultiFab& H_bldg_std_atm,
+    const amrex::MultiFab& lambda_p_atm,
+    const amrex::MultiFab& lambda_f_atm,
+    const amrex::MultiFab* z_phys_nd,
+    const amrex::iMultiFab& is_urban_atm,
+    const amrex::Geometry& geom_atm,
+    WallDragMode           drag_mode,
+    amrex::Real            Cd_wall,
+    amrex::Real            Cd_roof,
+    amrex::Real            feedback,
+    bool                   use_gaussian_height_distribution,
+    amrex::Real            height_std_threshold_m,
+    bool                   ucm_debug,
+    int                    /*lev*/)
+{
+    // Early return if drag is disabled
+    if (drag_mode == WallDragMode::Off || feedback < 1.0e-10) {
+        return;
+    }
+
+    using namespace amrex;
+
+    // Early return if compressible mode is not matching drag_mode
+    if (drag_mode != WallDragMode::Explicit) {
+        return;  // Only compressible mode (explicit) is handled in this Phase 2.8 PR
+    }
+
+    // Get grid parameters
+    const auto& dom_lo = geom_atm.Domain().loVect();
+    const auto& dom_hi = geom_atm.Domain().hiVect();
+    const auto  dx     = geom_atm.CellSizeArray();
+    const amrex::Real dz = dx[2];
+    const int klo = dom_lo[2];
+    const int khi = dom_hi[2];
+
+    // Physical constants
+    constexpr amrex::Real min_cell_thickness = 1.0e-6;
+    constexpr amrex::Real min_density = 1.0e-12;
+
+    // Hoist terrain support to avoid device pointer branching
+    const bool use_terrain = (z_phys_nd != nullptr);
+
+    // Local reduction for debug accounting
+    amrex::ReduceOps<
+        amrex::ReduceOpSum, amrex::ReduceOpSum> reduce_op;
+    amrex::ReduceData<
+        amrex::Real, amrex::Real> reduce_data(reduce_op);
+    using ReduceTuple = typename decltype(reduce_data)::Type;
+
+    // Iteration over boxes with tiling
+    for (amrex::MFIter mfi(xmom_src, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.tilebox();
+
+        auto xmom_a      = xmom_src.array(mfi);
+        auto ymom_a      = ymom_src.array(mfi);
+        auto const s_cons_a  = S_cons.const_array(mfi);
+        auto const s_xmom_a  = S_xmom.const_array(mfi);
+        auto const s_ymom_a  = S_ymom.const_array(mfi);
+        auto const h_bldg_a  = H_bldg_mean_atm.const_array(mfi);
+        auto const h_std_a   = H_bldg_std_atm.const_array(mfi);
+        auto const lam_p_a   = lambda_p_atm.const_array(mfi);
+        auto const lam_f_a   = lambda_f_atm.const_array(mfi);
+        auto const urban_a   = is_urban_atm.const_array(mfi);
+
+        amrex::Array4<const amrex::Real> z_nd_a = use_terrain
+            ? z_phys_nd->const_array(mfi)
+            : amrex::Array4<const amrex::Real>{};
+
+        const int klo_c = klo;
+        const int khi_c = khi;
+        const amrex::Real dz_c = dz;
+        const amrex::Real Cd_wall_c = Cd_wall;
+        const amrex::Real Cd_roof_c = Cd_roof;
+        const amrex::Real feedback_c = feedback;
+        const bool use_gaussian_c = use_gaussian_height_distribution;
+        const amrex::Real hstd_threshold_c = height_std_threshold_m;
+        const bool use_terrain_c = use_terrain;
+
+        if (use_terrain_c) {
+            reduce_op.eval(bx, reduce_data,
+                [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple
+            {
+                // MOST owns k=klo momentum
+                if (k == klo_c) {
+                    return {0.0, 0.0};
+                }
+
+                // Skip non-urban cells
+                if (urban_a(i, j, klo_c) < 0.01) {
+                    return {0.0, 0.0};
+                }
+
+                // Terrain-following: convert nodal metric to local above-ground-layer thickness
+                const amrex::Real z0 = 0.25 * (
+                    z_nd_a(i  , j  , klo_c) + z_nd_a(i+1, j  , klo_c) +
+                    z_nd_a(i  , j+1, klo_c) + z_nd_a(i+1, j+1, klo_c));
+                const amrex::Real z_lo = 0.25 * (
+                    z_nd_a(i  , j  , k) + z_nd_a(i+1, j  , k) +
+                    z_nd_a(i  , j+1, k) + z_nd_a(i+1, j+1, k)) - z0;
+                const amrex::Real z_hi = 0.25 * (
+                    z_nd_a(i  , j  , k+1) + z_nd_a(i+1, j  , k+1) +
+                    z_nd_a(i  , j+1, k+1) + z_nd_a(i+1, j+1, k+1)) - z0;
+                const amrex::Real dz_local = amrex::max(z_hi - z_lo, min_cell_thickness);
+                
+                const amrex::Real rho_k = s_cons_a(i, j, k, 0);  // Rho_comp = 0
+                const amrex::Real rho_safe = amrex::max(rho_k, min_density);
+                const amrex::Real rho_u = s_xmom_a(i, j, k);
+                const amrex::Real rho_v = s_ymom_a(i, j, k);
+                const amrex::Real u_k = rho_u / rho_safe;
+                const amrex::Real v_k = rho_v / rho_safe;
+                const amrex::Real Uh = amrex::max(std::sqrt(u_k*u_k + v_k*v_k), 1.0e-10);
+
+                const amrex::Real H_mean = h_bldg_a(i, j, klo_c);
+                const amrex::Real H_std  = h_std_a(i, j, klo_c);
+                const amrex::Real lam_p  = amrex::max(0.0, lam_p_a(i, j, klo_c));
+                const amrex::Real lam_f  = amrex::max(0.0, lam_f_a(i, j, klo_c));
+
+                amrex::Real wall_fraction = wall_overlap_fraction_sharp(z_lo, z_hi, H_mean);
+                if (use_gaussian_c && H_std > hstd_threshold_c) {
+                    wall_fraction = wall_overlap_fraction_gaussian(z_lo, z_hi, H_mean, H_std);
+                }
+                wall_fraction = amrex::max(0.0, amrex::min(1.0, wall_fraction));
+
+                const bool roof_cell = is_roof_cell(k, klo_c, khi_c, z_lo, z_hi, H_mean);
+
+                // Wall drag: s_wall = 2 * lambda_f * wall_fraction / H_bldg_mean
+                amrex::Real Fx_wall = 0.0;
+                amrex::Real Fy_wall = 0.0;
+                if (wall_fraction > 0.0 && lam_f > 0.0 && H_mean > 0.01) {
+                    const amrex::Real s_wall = 2.0 * lam_f * wall_fraction / H_mean;
+                    Fx_wall = -feedback_c * s_wall * Cd_wall_c * Uh * u_k;
+                    Fy_wall = -feedback_c * s_wall * Cd_wall_c * Uh * v_k;
+                }
+
+                // Roof drag: only at roof cell
+                amrex::Real Fx_roof = 0.0;
+                amrex::Real Fy_roof = 0.0;
+                if (roof_cell && lam_p > 0.0) {
+                    const amrex::Real s_roof = lam_p * Cd_roof_c / dz_local;
+                    Fx_roof = -feedback_c * s_roof * Uh * u_k;
+                    Fy_roof = -feedback_c * s_roof * Uh * v_k;
+                }
+
+                // Accumulate with rho multiplier (momentum RHS)
+                xmom_a(i, j, k) += rho_safe * (Fx_wall + Fx_roof);
+                ymom_a(i, j, k) += rho_safe * (Fy_wall + Fy_roof);
+
+                const amrex::Real n_wall = (wall_fraction > 0.0 && lam_f > 0.0) ? 1.0 : 0.0;
+                return {n_wall, Fx_wall};
+            });
+        } else {
+            reduce_op.eval(bx, reduce_data,
+                [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple
+            {
+                // MOST owns k=klo momentum
+                if (k == klo_c) {
+                    return {0.0, 0.0};
+                }
+
+                // Skip non-urban cells
+                if (urban_a(i, j, klo_c) < 0.01) {
+                    return {0.0, 0.0};
+                }
+
+                // Flat terrain: explicit geometry
+                const amrex::Real z_lo = (k - klo_c) * dz_c;
+                const amrex::Real z_hi = (k - klo_c + 1) * dz_c;
+                const amrex::Real dz_local = dz_c;
+                
+                const amrex::Real rho_k = s_cons_a(i, j, k, 0);  // Rho_comp = 0
+                const amrex::Real rho_safe = amrex::max(rho_k, min_density);
+                const amrex::Real rho_u = s_xmom_a(i, j, k);
+                const amrex::Real rho_v = s_ymom_a(i, j, k);
+                const amrex::Real u_k = rho_u / rho_safe;
+                const amrex::Real v_k = rho_v / rho_safe;
+                const amrex::Real Uh = amrex::max(std::sqrt(u_k*u_k + v_k*v_k), 1.0e-10);
+
+                const amrex::Real H_mean = h_bldg_a(i, j, klo_c);
+                const amrex::Real H_std  = h_std_a(i, j, klo_c);
+                const amrex::Real lam_p  = amrex::max(0.0, lam_p_a(i, j, klo_c));
+                const amrex::Real lam_f  = amrex::max(0.0, lam_f_a(i, j, klo_c));
+
+                amrex::Real wall_fraction = wall_overlap_fraction_sharp(z_lo, z_hi, H_mean);
+                if (use_gaussian_c && H_std > hstd_threshold_c) {
+                    wall_fraction = wall_overlap_fraction_gaussian(z_lo, z_hi, H_mean, H_std);
+                }
+                wall_fraction = amrex::max(0.0, amrex::min(1.0, wall_fraction));
+
+                const bool roof_cell = is_roof_cell(k, klo_c, khi_c, z_lo, z_hi, H_mean);
+
+                // Wall drag: s_wall = 2 * lambda_f * wall_fraction / H_bldg_mean
+                amrex::Real Fx_wall = 0.0;
+                amrex::Real Fy_wall = 0.0;
+                if (wall_fraction > 0.0 && lam_f > 0.0 && H_mean > 0.01) {
+                    const amrex::Real s_wall = 2.0 * lam_f * wall_fraction / H_mean;
+                    Fx_wall = -feedback_c * s_wall * Cd_wall_c * Uh * u_k;
+                    Fy_wall = -feedback_c * s_wall * Cd_wall_c * Uh * v_k;
+                }
+
+                // Roof drag: only at roof cell
+                amrex::Real Fx_roof = 0.0;
+                amrex::Real Fy_roof = 0.0;
+                if (roof_cell && lam_p > 0.0) {
+                    const amrex::Real s_roof = lam_p * Cd_roof_c / dz_local;
+                    Fx_roof = -feedback_c * s_roof * Uh * u_k;
+                    Fy_roof = -feedback_c * s_roof * Uh * v_k;
+                }
+
+                // Accumulate with rho multiplier (momentum RHS)
+                xmom_a(i, j, k) += rho_safe * (Fx_wall + Fx_roof);
+                ymom_a(i, j, k) += rho_safe * (Fy_wall + Fy_roof);
+
+                const amrex::Real n_wall = (wall_fraction > 0.0 && lam_f > 0.0) ? 1.0 : 0.0;
+                return {n_wall, Fx_wall};
+            });
+        }
+    }
+
+    // Debug output (gather reductions)
+    if (ucm_debug) {
+        auto [wall_cells, sum_Fx_wall] = reduce_data.value();
+        
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][2.8][apply_ucm_momentum_drag_to_source]\n";
+            amrex::Print() << "  Mode: explicit  Cd_wall=" << Cd_wall << "  Cd_roof=" << Cd_roof << "\n";
+            amrex::Print() << "  Wall drag: N_cells=" << static_cast<long long>(wall_cells + 0.5)
+                           << "  sum_Fx=" << sum_Fx_wall << "  [N/m^3]\n";
+        }
+    }
+}
