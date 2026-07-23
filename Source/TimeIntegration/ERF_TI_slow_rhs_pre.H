@@ -122,7 +122,7 @@
 #ifdef ERF_USE_UCM
         if (m_ucm_params.enable &&
             m_ucm_H_atm[level] && m_ucm_is_urban_atm[level] &&
-            m_ucm_params.atm_feedback > 0.0)
+            (m_ucm_params.atm_feedback_heat > 0.0 || m_ucm_params.atm_feedback_moisture > 0.0))
         {
             const bool has_moisture_ucm = (solverChoice.moisture_type != MoistureType::None);
             const bool use_terrain_ucm = (solverChoice.terrain_type != TerrainType::None);
@@ -176,7 +176,8 @@
                 m_ucm_params.use_facet3d_injection,
                 m_ucm_params.use_gaussian_height_distribution,
                 m_ucm_params.height_std_threshold_m,
-                m_ucm_params.atm_feedback,
+                m_ucm_params.atm_feedback_heat,
+                m_ucm_params.atm_feedback_moisture,
                 has_moisture_ucm,
                 m_ucm_params.ucm_debug,
                 level);
@@ -254,7 +255,7 @@
         if (m_ucm_params.enable &&
             m_ucm_H_bldg_mean_atm[level] && m_ucm_is_urban_atm[level] &&
             m_ucm_params.wall_drag_mode != WallDragMode::Off &&
-            m_ucm_params.atm_feedback > 0.0)
+            m_ucm_params.atm_feedback_momentum > 0.0)
         {
             const amrex::MultiFab* z_nd_ucm_ptr = (z_phys_nd[level] != nullptr)
                 ? z_phys_nd[level].get()
@@ -275,7 +276,7 @@
                 m_ucm_params.wall_drag_mode,
                 m_ucm_params.Cd_wall,
                 m_ucm_params.Cd_roof,
-                m_ucm_params.atm_feedback,
+                m_ucm_params.atm_feedback_momentum,
                 m_ucm_params.use_gaussian_height_distribution,
                 m_ucm_params.height_std_threshold_m,
                 m_ucm_params.ucm_debug,

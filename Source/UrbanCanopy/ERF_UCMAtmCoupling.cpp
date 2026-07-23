@@ -233,17 +233,22 @@ void apply_ucm_tendency_to_cc_source(
     bool                    use_facet3d_injection,
     bool                    use_gaussian_height_distribution,
     amrex::Real             height_std_threshold_m,
-    amrex::Real             feedback,
+    amrex::Real             feedback_heat,
+    amrex::Real             feedback_moisture,
     bool                    has_moisture,
     bool                    ucm_debug,
     int                     /*lev*/)
 {
+    // Phase 2.11-fix: feedback now split into per-process knobs.
+    // Gate on heat feedback for warning; if both are zero, we return early.
+    amrex::Real feedback = amrex::max(feedback_heat, feedback_moisture);
+
     // One-time warning if feedback is zero
     static bool warned_feedback_zero = false;
     if (feedback == 0.0 && !warned_feedback_zero && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "[UCM][1.4][apply_ucm_tendency_to_cc_source]\n";
-        amrex::Print() << "  WARNING: atm_feedback = 0.0 (one-way coupling OFF)\n";
-        amrex::Print() << "  Tendency IS computed but NOT injected. Set atm_feedback in (0,1] to enable.\n";
+        amrex::Print() << "[UCM][2.11][apply_ucm_tendency_to_cc_source]\n";
+        amrex::Print() << "  WARNING: both atm_feedback_heat and atm_feedback_moisture are 0.0 (heat/moisture feedback OFF)\n";
+        amrex::Print() << "  Tendencies are computed but NOT injected. Set per-process knobs in (0,1] to enable.\n";
         warned_feedback_zero = true;
     }
 
@@ -347,7 +352,8 @@ void apply_ucm_tendency_to_cc_source(
         const int khi_c = khi;
         const amrex::Real dz_c = dz;
         const amrex::Real Cp_c = Cp;
-        const amrex::Real feedback_c = feedback;
+        const amrex::Real feedback_heat_c = feedback_heat;
+        const amrex::Real feedback_moisture_c = feedback_moisture;
         const bool use_gaussian_c = use_gaussian_height_distribution;
         const amrex::Real hstd_threshold_c = height_std_threshold_m;
         const bool have_le_c = have_le;
@@ -410,15 +416,15 @@ void apply_ucm_tendency_to_cc_source(
                         return {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0};
                     }
 
-                    const amrex::Real dtheta_road = feedback_c * rho_safe * theta_tend_road;
-                    const amrex::Real dtheta_wall = feedback_c * rho_safe * theta_tend_wall;
-                    const amrex::Real dtheta_roof = feedback_c * rho_safe * theta_tend_roof;
+                    const amrex::Real dtheta_road = feedback_heat_c * rho_safe * theta_tend_road;
+                    const amrex::Real dtheta_wall = feedback_heat_c * rho_safe * theta_tend_wall;
+                    const amrex::Real dtheta_roof = feedback_heat_c * rho_safe * theta_tend_roof;
                     cc_src_a(i, j, k, RhoTheta_comp) += dtheta_road + dtheta_wall + dtheta_roof;
 
                     if (have_le_c && k == klo_c) {
                         const amrex::Real LE_sfc = le_a(i, j, klo_c);
                         if (LE_sfc != 0.0) {
-                            cc_src_a(i, j, k, RhoQ1_comp) += feedback_c * rho_safe * (LE_sfc / L_v / dz_local);
+                            cc_src_a(i, j, k, RhoQ1_comp) += feedback_moisture_c * rho_safe * (LE_sfc / L_v / dz_local);
                         }
                     }
 
@@ -477,15 +483,15 @@ void apply_ucm_tendency_to_cc_source(
                         return {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0};
                     }
 
-                    const amrex::Real dtheta_road = feedback_c * rho_safe * theta_tend_road;
-                    const amrex::Real dtheta_wall = feedback_c * rho_safe * theta_tend_wall;
-                    const amrex::Real dtheta_roof = feedback_c * rho_safe * theta_tend_roof;
+                    const amrex::Real dtheta_road = feedback_heat_c * rho_safe * theta_tend_road;
+                    const amrex::Real dtheta_wall = feedback_heat_c * rho_safe * theta_tend_wall;
+                    const amrex::Real dtheta_roof = feedback_heat_c * rho_safe * theta_tend_roof;
                     cc_src_a(i, j, k, RhoTheta_comp) += dtheta_road + dtheta_wall + dtheta_roof;
 
                     if (have_le_c && k == klo_c) {
                         const amrex::Real LE_sfc = le_a(i, j, klo_c);
                         if (LE_sfc != 0.0) {
-                            cc_src_a(i, j, k, RhoQ1_comp) += feedback_c * rho_safe * (LE_sfc / L_v / dz_local);
+                            cc_src_a(i, j, k, RhoQ1_comp) += feedback_moisture_c * rho_safe * (LE_sfc / L_v / dz_local);
                         }
                     }
 
@@ -534,15 +540,15 @@ void apply_ucm_tendency_to_cc_source(
                     return {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0};
                 }
 
-                const amrex::Real dtheta_road = feedback_c * rho_safe * theta_tend_road;
-                const amrex::Real dtheta_wall = feedback_c * rho_safe * theta_tend_wall;
-                const amrex::Real dtheta_roof = feedback_c * rho_safe * theta_tend_roof;
+                const amrex::Real dtheta_road = feedback_heat_c * rho_safe * theta_tend_road;
+                const amrex::Real dtheta_wall = feedback_heat_c * rho_safe * theta_tend_wall;
+                const amrex::Real dtheta_roof = feedback_heat_c * rho_safe * theta_tend_roof;
                 cc_src_a(i, j, k, RhoTheta_comp) += dtheta_road + dtheta_wall + dtheta_roof;
 
                 if (have_le_c && k == klo_c) {
                     const amrex::Real LE_sfc = le_a(i, j, klo_c);
                     if (LE_sfc != 0.0) {
-                        cc_src_a(i, j, k, RhoQ1_comp) += feedback_c * rho_safe * (LE_sfc / L_v / dz_local);
+                        cc_src_a(i, j, k, RhoQ1_comp) += feedback_moisture_c * rho_safe * (LE_sfc / L_v / dz_local);
                     }
                 }
 
@@ -584,15 +590,15 @@ void apply_ucm_tendency_to_cc_source(
                     return {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0};
                 }
 
-                const amrex::Real dtheta_road = feedback_c * rho_safe * theta_tend_road;
-                const amrex::Real dtheta_wall = feedback_c * rho_safe * theta_tend_wall;
-                const amrex::Real dtheta_roof = feedback_c * rho_safe * theta_tend_roof;
+                const amrex::Real dtheta_road = feedback_heat_c * rho_safe * theta_tend_road;
+                const amrex::Real dtheta_wall = feedback_heat_c * rho_safe * theta_tend_wall;
+                const amrex::Real dtheta_roof = feedback_heat_c * rho_safe * theta_tend_roof;
                 cc_src_a(i, j, k, RhoTheta_comp) += dtheta_road + dtheta_wall + dtheta_roof;
 
                 if (have_le_c && k == klo_c) {
                     const amrex::Real LE_sfc = le_a(i, j, klo_c);
                     if (LE_sfc != 0.0) {
-                        cc_src_a(i, j, k, RhoQ1_comp) += feedback_c * rho_safe * (LE_sfc / L_v / dz_local);
+                        cc_src_a(i, j, k, RhoQ1_comp) += feedback_moisture_c * rho_safe * (LE_sfc / L_v / dz_local);
                     }
                 }
 
@@ -688,14 +694,15 @@ void apply_ucm_momentum_drag_to_source(
     WallDragMode           drag_mode,
     amrex::Real            Cd_wall,
     amrex::Real            Cd_roof,
-    amrex::Real            feedback,
+    amrex::Real            feedback_momentum,
     bool                   use_gaussian_height_distribution,
     amrex::Real            height_std_threshold_m,
     bool                   ucm_debug,
     int                    /*lev*/)
 {
-    // Early return if drag is disabled
-    if (drag_mode == WallDragMode::Off || feedback < 1.0e-10) {
+    // Gate wall drag on momentum feedback (independent of heat feedback).
+    // Early return if drag is disabled or momentum feedback is zero.
+    if (drag_mode == WallDragMode::Off || feedback_momentum < 1.0e-10) {
         return;
     }
 
@@ -752,7 +759,7 @@ void apply_ucm_momentum_drag_to_source(
         const amrex::Real dz_c = dz;
         const amrex::Real Cd_wall_c = Cd_wall;
         const amrex::Real Cd_roof_c = Cd_roof;
-        const amrex::Real feedback_c = feedback;
+        const amrex::Real feedback_c = feedback_momentum;
         const bool use_gaussian_c = use_gaussian_height_distribution;
         const amrex::Real hstd_threshold_c = height_std_threshold_m;
         const bool use_terrain_c = use_terrain;

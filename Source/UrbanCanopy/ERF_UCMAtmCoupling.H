@@ -264,7 +264,8 @@ void apply_ucm_tendency_to_cc_source(
     bool                   use_facet3d_injection,
     bool                   use_gaussian_height_distribution,
     amrex::Real            height_std_threshold_m,
-    amrex::Real            feedback,
+    amrex::Real            feedback_heat,           ///< Heat feedback strength [0,1] [Phase 2.11]
+    amrex::Real            feedback_moisture,       ///< Moisture feedback strength [0,1] [Phase 2.11]
     bool                   has_moisture,
     bool                   ucm_debug = false,
     int                    lev = 0);
@@ -326,7 +327,7 @@ void apply_ucm_momentum_drag_to_source(
     WallDragMode           drag_mode,
     amrex::Real            Cd_wall,
     amrex::Real            Cd_roof,
-    amrex::Real            feedback,
+    amrex::Real            feedback_momentum,     ///< Momentum drag feedback strength [0,1] [Phase 2.11]
     bool                   use_gaussian_height_distribution,
     amrex::Real            height_std_threshold_m,
     bool                   ucm_debug = false,

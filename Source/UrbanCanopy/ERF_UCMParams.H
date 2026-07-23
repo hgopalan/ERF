@@ -95,7 +95,18 @@ struct UCMParams
     // Section 3: Atmosphere coupling
     // =========================================================================
 
-    amrex::Real atm_feedback   = 0.0;       ///< Coupling strength [0,1] [Phase 1.1 must be 0.0]
+    // Phase 2.11-fix: Split atm_feedback into per-process knobs for physical correctness.
+    // Momentum drag is always active (buildings always block wind).
+    // Heat/moisture feedback is opt-in (TBD in later phases).
+    amrex::Real atm_feedback_momentum = 1.0;  ///< Momentum drag feedback strength [0,1] [Phase 2.11]
+    amrex::Real atm_feedback_heat     = 0.0;  ///< Heat injection feedback strength [0,1] [Phase 2.11]
+    amrex::Real atm_feedback_moisture = 0.0;  ///< Moisture injection feedback strength [0,1] [Phase 2.11]
+
+    // Legacy scalar. Retained for backward compatibility.
+    // Sentinel value -1.0 means "not set by user in input file".
+    // When set explicitly by user (>= 0), initializes all three per-process knobs above.
+    amrex::Real atm_feedback   = -1.0;       ///< Legacy: coupling strength [0,1] (Phase 1.1-2.10)
+
     amrex::Real zref           = 2.0;       ///< Wind extraction ref height above roof [m]
     amrex::Real z0_over_H      = 0.1;       ///< z0 as fraction of building height (MacDonald 1998) [-] [Phase 2.2]
     amrex::Real d_over_H       = 0.7;       ///< d as fraction of building height (WRF SLUCM) [-] [Phase 2.2]

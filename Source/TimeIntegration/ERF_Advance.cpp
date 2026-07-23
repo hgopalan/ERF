@@ -309,7 +309,8 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     // RK-stage safety contract.
     // **************************************************************************************
     #ifdef ERF_USE_UCM
-    if (m_ucm_params.enable && m_ucm_layer[lev] != nullptr && m_ucm_params.atm_feedback > 0.0) {
+    if (m_ucm_params.enable && m_ucm_layer[lev] != nullptr && 
+        (m_ucm_params.atm_feedback_heat > 0.0 || m_ucm_params.atm_feedback_moisture > 0.0 || m_ucm_params.atm_feedback_momentum > 0.0)) {
         // Allocate cached ATM-grid flux MultiFabs on first call
         if (!m_ucm_H_atm[lev]) {
             m_ucm_H_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
