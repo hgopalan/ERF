@@ -330,4 +330,56 @@ void apply_ucm_momentum_drag_to_source(
     bool                   ucm_debug = false,
     int                    lev = 0);
 
+/**
+ * @brief Apply post-projection multiplicative momentum drag correction (Phase 2.8 anelastic stub)
+ *
+ * **STUB FOR PHASE 2.8b VALIDATION:**
+ * Implements unconditionally stable post-projection momentum decay as used in DALES.
+ * After the anelastic projection enforces divergence-free flow, apply:
+ *
+ *   u^(n+1) ← u^(n+1) / (1 + dt * f_urb * s_wall * Cd_wall * |U^n|)
+ *   v^(n+1) ← v^(n+1) / (1 + dt * f_urb * s_wall * Cd_wall * |U^n|)
+ *
+ * This path is code-complete but NOT extensively tested in this PR.
+ * Validation deferred to Phase 2.8b (future PR with anelastic canonical test).
+ *
+ * @param[in,out] S_new                   Updated state after projection [modified]
+ * @param[in]     H_bldg_mean_atm         Mean building height per ATM cell [m]
+ * @param[in]     H_bldg_std_atm          Std dev of building height per ATM cell [m]
+ * @param[in]     lambda_p_atm            Plan-area density per ATM cell [-]
+ * @param[in]     lambda_f_atm            Frontal-area density per ATM cell [-]
+ * @param[in]     z_phys_nd               Physical z at nodes (terrain-following; nullptr for flat)
+ * @param[in]     is_urban_atm            Urban mask on ATM grid
+ * @param[in]     geom_atm                Coarse geometry
+ * @param[in]     Cd_wall                 Wall drag coefficient
+ * @param[in]     Cd_roof                 Roof drag coefficient
+ * @param[in]     dt                      Time step [s]
+ * @param[in]     feedback                Coupling strength [0, 1]
+ * @param[in]     use_gaussian_height_distribution  Phase 2.7: use continuous Gaussian mode
+ * @param[in]     height_std_threshold_m  Phase 2.7: below this, Gaussian falls back to sharp
+ * @param[in]     ucm_debug               Enable debug output
+ * @param[in]     lev                     AMR level (default 0)
+ *
+ * @note Hook location: called after anelastic NodalProjectionSolve completes.
+ * @note Slightly violates divergence-free (~O(dt·Cd·|U|·s_wall)) but next projection cleans up.
+ * @cite Heus & Jonker (2008), DALES post-projection drag approach
+ */
+void apply_ucm_implicit_drag_correction(
+    amrex::MultiFab&       S_new,
+    const amrex::MultiFab& H_bldg_mean_atm,
+    const amrex::MultiFab& H_bldg_std_atm,
+    const amrex::MultiFab& lambda_p_atm,
+    const amrex::MultiFab& lambda_f_atm,
+    const amrex::MultiFab* z_phys_nd,
+    const amrex::iMultiFab& is_urban_atm,
+    const amrex::Geometry& geom_atm,
+    amrex::Real            Cd_wall,
+    amrex::Real            Cd_roof,
+    amrex::Real            dt,
+    amrex::Real            feedback,
+    bool                   use_gaussian_height_distribution,
+    amrex::Real            height_std_threshold_m,
+    bool                   ucm_debug = false,
+    int                    lev = 0);
+
 #endif  // ERF_UCM_ATM_COUPLING_H
