@@ -76,7 +76,11 @@ erf.ucm.enable                = true
 erf.ucm.ucm_debug             = 1
 erf.ucm.anchor_level          = 0
 erf.ucm.grid_ratio            = 4
-erf.ucm.atm_feedback          = 0.0
+# Phase 2.11 baseline: momentum drag active (BEP-required for tall buildings),
+# heat feedback OFF (deferred to Phase 3.2 two-way heat coupling).
+erf.ucm.atm_feedback_momentum = 1.0
+erf.ucm.atm_feedback_heat     = 0.0
+erf.ucm.atm_feedback_moisture = 0.0
 erf.ucm.zref                  = 2.0
 # H_bldg_uniform, W_road_uniform, W_roof_uniform ignored when
 # building_layout_csv_path is set (CSV drives per-cell morphology).

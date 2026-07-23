@@ -97,7 +97,10 @@ erf.ucm.grid_ratio          = 2
 erf.ucm.allow_steep_terrain = false
 
 # Phase 1.4: Injection coupling active
-erf.ucm.atm_feedback        = 1.0
+# Two-way baseline: all feedback active.
+erf.ucm.atm_feedback_momentum = 1.0
+erf.ucm.atm_feedback_heat     = 1.0
+erf.ucm.atm_feedback_moisture = 0.0
 erf.ucm.zref                = 2.0
 erf.ucm.alpha_ucm           = 15.0   # e-folding depth ~ 1.5×H_bldg
 

@@ -1713,3 +1713,115 @@ python3 check_boston_singlelevel.py # verify output
 - **Inflow/outflow architecture:** Askervein reference case (`Exec/CanonicalTests/Real_Terrain/Askervein/`)
 
 **Phase 2.11 Complete:** First real-city single-level baseline established and verified. Part 2 closes. Phase 3.6 begins multi-level AMR extension targeting this baseline.
+
+---
+
+## Phase 2.11-fix: Split `atm_feedback` into Per-Process Knobs
+
+**Scope:** Architectural correction of the single `erf.ucm.atm_feedback` scalar identified during Phase 2.11 UCMBoston one-way baseline validation. The legacy knob gates both momentum drag and heat injection simultaneously; this is physically incorrect:
+- **Momentum drag is geometric** — buildings block wind regardless of feedback setting
+- **Heat feedback is opt-in** — subject to Phase 3.2 two-way validation
+
+Setting `atm_feedback = 0.0` to disable heat injection inadvertently disabled drag, producing 100-meter tall buildings with zero wind reduction (wind actually 5% faster downtown). Diagnosis: **task 5551ae9c**.
+
+**Deliverables:**
+
+1. **Three per-process feedback knobs** with physically correct defaults:
+   ```
+   erf.ucm.atm_feedback_momentum = 1.0   (drag always active)
+   erf.ucm.atm_feedback_heat     = 0.0   (opt-in; Phase 3.2 TBD)
+   erf.ucm.atm_feedback_moisture = 0.0   (opt-in; Phase 4+ TBD)
+   ```
+
+2. **Legacy backward-compatibility layer:**
+   - Old `erf.ucm.atm_feedback = X` still works (sentinel default -1.0 = not set)
+   - If set: propagates to all three per-process knobs
+   - If both old and new set: WARNING, new knobs win
+   - Will be removed after Phase 4 completion
+
+3. **Updated all canonical test inputs** to explicit per-process knobs:
+   - **One-way baseline** (UCMBoston, UCMHomogeneousGrid, UCMScaffold):
+     ```
+     atm_feedback_momentum = 1.0
+     atm_feedback_heat     = 0.0
+     atm_feedback_moisture = 0.0
+     ```
+   - **Two-way baseline** (all others):
+     ```
+     atm_feedback_momentum = 1.0
+     atm_feedback_heat     = 1.0
+     atm_feedback_moisture = 0.0
+     ```
+
+4. **Refactored functions to accept independent feedback strengths:**
+   - `apply_ucm_tendency_to_cc_source(... feedback_heat, feedback_moisture ...)`
+   - `apply_ucm_momentum_drag_to_source(... feedback_momentum ...)`
+   - Comments added: "Gate wall drag on momentum feedback (independent of heat feedback)"
+
+### Design Rationale
+
+| Process | Driver | Dependency | Phase | Default | Rationale |
+|---------|--------|-----------|-------|---------|-----------|
+| Momentum drag | Building geometry | None (geometric) | 1.0 | Always 1.0 | Drag is instantaneous; not a feedback loop |
+| Heat injection | Surface energy balance | Phase 3.2 two-way validation | 3.2 | 0.0 (opt-in) | Deferred until ATM→UCM feedback tested |
+| Moisture injection | Latent cooling | Phase 4+ validation | 4+ | 0.0 (opt-in) | Deferred; depends on heat infrastructure |
+
+### Migration Examples
+
+**Old code:**
+```bash
+# Disable all feedback (wrong: also kills drag)
+erf.ucm.atm_feedback = 0.0
+```
+
+**New code:**
+```bash
+# One-way baseline: momentum drag active, heat off (correct)
+erf.ucm.atm_feedback_momentum = 1.0
+erf.ucm.atm_feedback_heat     = 0.0
+erf.ucm.atm_feedback_moisture = 0.0
+```
+
+**Old code:**
+```bash
+# Enable all feedback
+erf.ucm.atm_feedback = 1.0
+```
+
+**New code:**
+```bash
+# Two-way baseline: all feedback active
+erf.ucm.atm_feedback_momentum = 1.0
+erf.ucm.atm_feedback_heat     = 1.0
+erf.ucm.atm_feedback_moisture = 0.0
+```
+
+### Backward Compatibility
+
+Legacy `erf.ucm.atm_feedback` input still works unchanged:
+```bash
+# Old syntax still valid (will be removed Phase 4+)
+erf.ucm.atm_feedback = 0.5   # sets all three to 0.5
+```
+
+New code checks for legacy set-but-unused pattern and warns:
+```
+[UCM][2.11] WARNING: Both legacy atm_feedback and per-process knobs set!
+  Using per-process values: momentum=1.0, heat=0.0, moisture=0.0
+  (Legacy atm_feedback=0.5 is ignored.)
+```
+
+### Validation (UCMBoston Post-Fix)
+
+After Phase 2.11-fix, UCMBoston re-run with corrected knobs must show:
+- Downtown wind reduction **10–25%** at k=1 (not 0% or +5%)
+- Correct UHI structure (ΔT_surface ≈ 8 K downtown vs suburban)
+- No NaN or unphysical transients
+
+### References
+
+- **Design gap diagnosis:** task 5551ae9c
+- **Phase 2.11 baseline:** PR #226 (already merged to ERF-SLUCM)
+- **Momentum drag citation:** Martilli, Clappier & Rotach (2002), *Boundary-Layer Meteorology* 104:261–304, Section 4
+
+**Phase 2.11-fix Complete:** Architectural correction of feedback gating applied. Phase 3.2 can now proceed with two-way heat coupling validation on correct momentum baseline.

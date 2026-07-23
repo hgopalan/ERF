@@ -90,7 +90,10 @@ erf.ucm.static_refinement   = true
 erf.ucm.grid_ratio          = 2
 erf.ucm.allow_steep_terrain = false
 
-erf.ucm.atm_feedback        = 0.0
+# One-way baseline: momentum drag active, heat feedback OFF.
+erf.ucm.atm_feedback_momentum = 1.0
+erf.ucm.atm_feedback_heat     = 0.0
+erf.ucm.atm_feedback_moisture = 0.0
 erf.ucm.zref                = 2.0
 erf.ucm.alpha_ucm           = 10.0
 

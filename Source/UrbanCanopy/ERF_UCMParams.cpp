@@ -28,7 +28,32 @@ void UCMParams::read_from_parmparse(int lev)
     pp.query("allow_steep_terrain", allow_steep_terrain);
 
     // Section 3: Atmosphere coupling
+    // Phase 2.11-fix: Try to read per-process knobs first, then legacy scalar for backward compat.
+    pp.query("atm_feedback_momentum", atm_feedback_momentum);
+    pp.query("atm_feedback_heat", atm_feedback_heat);
+    pp.query("atm_feedback_moisture", atm_feedback_moisture);
+
+    // Also try to read legacy scalar (sentinel -1.0 = not set).
     pp.query("atm_feedback", atm_feedback);
+
+    // Resolution logic:
+    // If legacy was explicitly set (>= 0) and no new knobs were set yet, propagate legacy to all three.
+    if (atm_feedback >= 0.0 && atm_feedback_momentum == 1.0 && atm_feedback_heat == 0.0 && atm_feedback_moisture == 0.0) {
+        // Only propagate if the new knobs are still at their defaults (not user-set).
+        // Since defaults are distinct (1.0, 0.0, 0.0), if all are default and legacy is set,
+        // we can safely assume legacy was the intent.
+        atm_feedback_momentum = atm_feedback;
+        atm_feedback_heat     = atm_feedback;
+        atm_feedback_moisture = atm_feedback;
+    } else if (atm_feedback >= 0.0 && (atm_feedback_momentum != 1.0 || atm_feedback_heat != 0.0 || atm_feedback_moisture != 0.0)) {
+        // Both legacy and new knobs set: warn and let new knobs win.
+        amrex::Print() << "[UCM][2.11] WARNING: Both legacy atm_feedback and per-process knobs set!\n"
+                       << "  Using per-process values: momentum=" << atm_feedback_momentum
+                       << ", heat=" << atm_feedback_heat
+                       << ", moisture=" << atm_feedback_moisture << "\n"
+                       << "  (Legacy atm_feedback=" << atm_feedback << " is ignored.)\n";
+    }
+
     pp.query("zref", zref);
     pp.query("z0_over_H", z0_over_H);
     pp.query("d_over_H", d_over_H);

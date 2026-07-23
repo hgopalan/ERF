@@ -122,10 +122,18 @@ void check_ucm_prerequisites(const UCMParams& params,
         params.emissivity_road >= 0.0 && params.emissivity_road <= 1.0,
         "[UCM] emissivity_road must be in [0,1]. Set: erf.ucm.emissivity_road = 0.94");
 
-    // Check 10: Phase 1.4 — atm_feedback in [0.0, 1.0]
+    // Check 10: Phase 2.11-fix — Per-process feedback knobs in [0.0, 1.0]
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
-        params.atm_feedback >= 0.0 && params.atm_feedback <= 1.0,
-        "[UCM] atm_feedback must be in [0.0, 1.0]. Phase 1.4: 0=one-way (compute but don't inject), 1=full injection.");
+        params.atm_feedback_momentum >= 0.0 && params.atm_feedback_momentum <= 1.0,
+        "[UCM] atm_feedback_momentum must be in [0.0, 1.0]. Set: erf.ucm.atm_feedback_momentum = 1.0");
+
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+        params.atm_feedback_heat >= 0.0 && params.atm_feedback_heat <= 1.0,
+        "[UCM] atm_feedback_heat must be in [0.0, 1.0]. Set: erf.ucm.atm_feedback_heat = 0.0");
+
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+        params.atm_feedback_moisture >= 0.0 && params.atm_feedback_moisture <= 1.0,
+        "[UCM] atm_feedback_moisture must be in [0.0, 1.0]. Set: erf.ucm.atm_feedback_moisture = 0.0");
 
     // Check 12: Phase 1.3+ slab conduction parameters
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
@@ -191,7 +199,15 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   newton_max_iter     = " << params.newton_max_iter << "\n";
     amrex::Print() << "[UCM]   newton_tol_K        = " << params.newton_tol_K << "\n";
     amrex::Print() << "[UCM]   --- Phase 1.4 Injection Parameters ---\n";
-    amrex::Print() << "[UCM]   atm_feedback        = " << params.atm_feedback << " [0,1]\n";
+    amrex::Print() << "[UCM]   [SLUCM] Feedback configuration:\n";
+    amrex::Print() << "[UCM]     atm_feedback_momentum = " << params.atm_feedback_momentum << " (drag always active)\n";
+    amrex::Print() << "[UCM]     atm_feedback_heat     = " << params.atm_feedback_heat << " (opt-in; Phase 3.2 TBD)\n";
+    amrex::Print() << "[UCM]     atm_feedback_moisture = " << params.atm_feedback_moisture << " (opt-in; Phase 4+ TBD)\n";
+    if (params.atm_feedback >= 0.0) {
+        amrex::Print() << "[UCM]     (legacy atm_feedback  = " << params.atm_feedback << " was propagated to all three)\n";
+    } else {
+        amrex::Print() << "[UCM]     (legacy atm_feedback  = -1.0, not set)\n";
+    }
     amrex::Print() << "[UCM]   alpha_ucm [m]       = " << params.alpha_ucm << "\n";
     amrex::Print() << "[UCM]   ucm_plot_int        = " << params.ucm_plot_int << "\n";
     amrex::Print() << "[UCM]   ucm_atm_plot_int    = " << params.ucm_atm_plot_int << "\n";
