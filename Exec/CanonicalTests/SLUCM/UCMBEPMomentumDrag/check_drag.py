@@ -33,15 +33,27 @@ except ImportError:
 
 
 def find_final_plotfile(max_step=10):
-    """Find the final plotfile (plt_*_000010 or highest available)."""
-    pattern = "plt_*_??????"
-    files = sorted(glob.glob(pattern))
+    """Find the final MAIN ATM plotfile (excludes plt_ucm_* companion files).
+
+    The UCM writes several plotfile families to the run directory:
+      - plt_NNNNN            → main ATM state (u, v, w, rho, theta) -- what we want
+      - plt_ucm_NNNNN        → UCM 2D slab (SVF, temperatures, fluxes)
+      - plt_ucm_atm_NNNNN    → ATM-grid aggregates (f_urb, H_bldg_mean, etc.)
+
+    The glob pattern 'plt_*_??????' matches all three; alphabetical sort makes
+    'plt_ucm_atm_*' win. We filter out any 'plt_ucm*' file here so we always
+    grab the main ATM plotfile.
+    """
+    all_files = sorted(glob.glob("plt_*_??????"))
+    files = [f for f in all_files if not os.path.basename(f).startswith("plt_ucm")]
     if not files:
-        print("ERROR: No plotfiles found matching pattern 'plt_*_??????'")
+        print("ERROR: No main ATM plotfiles found matching 'plt_*_??????' (excluding plt_ucm_*)")
+        print("       Set 'amr.plot_int > 0' in inputs to write main ATM plotfiles.")
+        # Diagnostic: list what we did find
+        if all_files:
+            print(f"       Found only UCM companion files: {all_files}")
         return None
-    # Find highest step number
-    latest = files[-1]
-    return latest
+    return files[-1]
 
 
 def load_field_3d(ds, field_name, covering_grid_level=0):
@@ -99,6 +111,10 @@ def main():
         field_list = []
     
     print(f"    Available fields: {len(field_list)} total")
+    if len(field_list) > 0:
+        # Print first few field names for diagnostic
+        for f in field_list[:12]:
+            print(f"      {f}")
     
     # Load velocity components
     print(f"\n[3] Loading velocity field (u, v, w)")
@@ -108,6 +124,8 @@ def main():
     
     if u_data is None or v_data is None or w_data is None:
         print("FAIL: Could not load velocity components")
+        print("       Verify plotfile has x_velocity, y_velocity, z_velocity fields.")
+        print(f"       Available fields listed above; got main plotfile: {plotfile}")
         return False
     
     print(f"    u shape: {u_data.shape}, v shape: {v_data.shape}, w shape: {w_data.shape}")
