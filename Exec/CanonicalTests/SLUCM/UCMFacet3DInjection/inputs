@@ -87,7 +87,10 @@ erf.ucm.static_refinement   = true
 erf.ucm.grid_ratio          = 4
 erf.ucm.allow_steep_terrain = false
 
-erf.ucm.atm_feedback        = 1.0
+# Two-way baseline: all feedback active.
+erf.ucm.atm_feedback_momentum = 1.0
+erf.ucm.atm_feedback_heat     = 1.0
+erf.ucm.atm_feedback_moisture = 0.0
 erf.ucm.zref                = 2.0
 
 # Phase 2.5 fallback (unused when use_facet3d_injection=true)
