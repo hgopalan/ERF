@@ -21,7 +21,12 @@ import numpy as np
 
 try:
     import yt
-    yt.suppress_stream_stdout()
+    # Silence yt INFO chatter; keep errors visible.
+    # (Older code called yt.suppress_stream_stdout() which does not exist.)
+    try:
+        yt.set_log_level("error")
+    except Exception:
+        pass
 except ImportError:
     print("ERROR: yt not found. Install with: pip install yt")
     sys.exit(1)
