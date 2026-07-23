@@ -1,5 +1,4 @@
-/**
- * @file ERF_UCMBuildingLayoutReader.H
+/** @file ERF_UCMBuildingLayoutReader.H
  * @brief Building-layout CSV reader for the ERF-SLUCM module (Phase 2.1)
  *
  * Provides a POD struct for building rows and a rank-0-read + MPI_Bcast CSV
@@ -8,7 +7,7 @@
  * ## CSV Schema
  * Expected header (exact string, whitespace tolerated):
  * ```
- * i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,is_urban
+ * i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,AH_Wm2,is_urban
  * ```
  *
  * Each data row contains:
@@ -21,6 +20,7 @@
  * - roof_mat_id, wall_mat_id, road_mat_id: indices into UCMMaterialRegistry (integers)
  * - orientation_deg: canyon orientation in degrees (float, Phase 2.2+)
  * - ah_profile_id: anthropogenic heat profile id (integer, Phase 2.3+)
+ * - AH_Wm2: per-cell anthropogenic heat override in W/m^2 (float, Phase 2.9+); 0 → use ParmParse fallback
  * - is_urban: urban/non-urban flag (0 or 1); controls LSM/MOST bypass (Phase 4.1)
  *
  * ## References
@@ -35,8 +35,7 @@
 #include <AMReX_Vector.H>
 #include <string>
 
-/**
- * @struct UCMBuildingRow
+/** @struct UCMBuildingRow
  * @brief POD struct for a single building-layout CSV row
  *
  * Safe for MPI_Bcast as raw bytes (std::is_trivially_copyable_v<UCMBuildingRow> == true).
@@ -45,6 +44,7 @@
  * Phase 2.1: used for basic morphology (height, road/roof widths, is_urban mask).
  * Phase 2.2+: orientation_deg, plan_area_frac used for heterogeneous canopy wind.
  * Phase 2.3+: ah_profile_id used for heterogeneous anthropogenic heat.
+ * Phase 2.9+: AH_Wm2 used for per-cell anthropogenic heat override.
  * Phase 4.1: is_urban used to bypass LSM/MOST.
  */
 struct UCMBuildingRow
@@ -61,6 +61,7 @@ struct UCMBuildingRow
     int    road_mat_id;        ///< Index into UCMMaterialRegistry for road
     amrex::Real orientation_deg;///< Canyon orientation [degrees], Phase 2.2+
     int    ah_profile_id;      ///< Anthropogenic heat profile ID, Phase 2.3+
+    amrex::Real AH_Wm2;        ///< Per-cell AH override [W/m^2], Phase 2.9+; 0 → use ParmParse fallback
     int    is_urban;           ///< Urban mask [0 or 1]; 0 = LSM/MOST, 1 = UCM
 };
 
