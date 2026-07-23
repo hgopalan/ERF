@@ -14,6 +14,29 @@
 #include <ERF.H>
 #include <AMReX_Print.H>
 
+void resolve_wall_drag_mode(const std::string& wall_drag_mode_str,
+                             bool is_anelastic,
+                             WallDragMode& resolved_mode)
+{
+    if (wall_drag_mode_str == "auto") {
+        if (is_anelastic) {
+            resolved_mode = WallDragMode::Implicit;
+        } else {
+            resolved_mode = WallDragMode::Explicit;
+        }
+    } else if (wall_drag_mode_str == "explicit") {
+        resolved_mode = WallDragMode::Explicit;
+    } else if (wall_drag_mode_str == "implicit") {
+        resolved_mode = WallDragMode::Implicit;
+    } else if (wall_drag_mode_str == "off") {
+        resolved_mode = WallDragMode::Off;
+    } else {
+        std::string msg = "[UCM] Invalid wall_drag_mode: \"" + wall_drag_mode_str + "\". "
+                        + "Valid options: \"auto\", \"explicit\", \"implicit\", \"off\".";
+        amrex::Abort(msg);
+    }
+}
+
 void check_ucm_prerequisites(const UCMParams& params,
                               int max_level,
                               int finest_level,
@@ -182,6 +205,16 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   use_facet3d_injection = " << (params.use_facet3d_injection ? "true" : "false") << "\n";
     amrex::Print() << "[UCM]   use_gaussian_height_distribution = " << (params.use_gaussian_height_distribution ? "true" : "false") << "\n";
     amrex::Print() << "[UCM]   height_std_threshold_m = " << params.height_std_threshold_m << "\n";
+    amrex::Print() << "[UCM]   --- Phase 2.8 BEP Momentum Drag ---\n";
+    amrex::Print() << "[UCM]   wall_drag_mode      = \"" << params.wall_drag_mode_str << "\" (resolved: ";
+    switch (params.wall_drag_mode) {
+        case WallDragMode::Off:      amrex::Print() << "off"; break;
+        case WallDragMode::Explicit: amrex::Print() << "explicit"; break;
+        case WallDragMode::Implicit: amrex::Print() << "implicit"; break;
+    }
+    amrex::Print() << ")\n";
+    amrex::Print() << "[UCM]   Cd_wall             = " << params.Cd_wall << "\n";
+    amrex::Print() << "[UCM]   Cd_roof             = " << params.Cd_roof << "\n";
     amrex::Print() << "[UCM] =========================================================\n";
     amrex::Print() << "\n";
 

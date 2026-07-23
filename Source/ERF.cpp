@@ -1241,9 +1241,19 @@ ERF::InitData_post ()
         check_ucm_prerequisites(m_ucm_params, max_level, finest_level,
                                 (solverChoice.terrain_type != TerrainType::None), m_ucm_params.anchor_level);
 
-        // UCM Phase 1.2: build UCM grid and fields for anchor_level
+        // Phase 2.8: Resolve wall drag mode based on solver type
         const int lev = m_ucm_params.anchor_level;
+        bool is_anelastic = (solverChoice.substepping_type[lev] == SubsteppingType::None);
+        resolve_wall_drag_mode(m_ucm_params.wall_drag_mode_str, is_anelastic, m_ucm_params.wall_drag_mode);
+        
+        if (m_ucm_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+            const char* mode_str = (m_ucm_params.wall_drag_mode == WallDragMode::Off) ? "off"
+                                 : (m_ucm_params.wall_drag_mode == WallDragMode::Explicit) ? "explicit"
+                                 : "implicit";
+            amrex::Print() << "[UCM][2.8] wall_drag_mode auto -> " << mode_str << "\n";
+        }
 
+        // UCM Phase 1.2: build UCM grid and fields for anchor_level
         // Resize vectors to hold anchor_level
         m_ucm_grid.resize(finest_level + 1);
         m_ucm_fields.resize(finest_level + 1);

@@ -50,6 +50,20 @@
 #include <string>
 
 /**
+ * @enum WallDragMode
+ * @brief Resolved wall drag application mode for momentum coupling
+ *
+ * Determined at initialization based on erf.ucm.wall_drag_mode and solver type.
+ * Phase 2.8: Compressible uses explicit; anelastic uses implicit (stub for validation deferred to 2.8b).
+ */
+enum class WallDragMode
+{
+    Off = 0,       ///< Drag disabled (backward-compatible default)
+    Explicit = 1,  ///< Apply drag directly to momentum RHS (compressible)
+    Implicit = 2   ///< Post-projection multiplicative correction (anelastic stub)
+};
+
+/**
  * @struct UCMParams
  * @brief Container for all SLUCM configuration parameters read from ParmParse
  *
@@ -108,6 +122,15 @@ struct UCMParams
     bool        use_facet3d_injection              = true;       ///< Phase 2.7: enable facet-3D geometric injection with BEP-style overlap; false = fall back to Phase 2.6
     bool        use_gaussian_height_distribution  = false;      ///< Phase 2.7: use continuous Gaussian PDF for wall height dist (true) vs sharp 1-class BEP (false)
     amrex::Real height_std_threshold_m            = 0.1;        ///< Phase 2.7: below this threshold, Gaussian mode falls back to sharp [m]
+
+    // =========================================================================
+    // Section 4.3: Phase 2.8 — BEP-style momentum drag parameters
+    // =========================================================================
+
+    std::string wall_drag_mode_str = "auto";   ///< Phase 2.8: "auto" | "explicit" | "implicit" | "off" [string]
+    WallDragMode wall_drag_mode = WallDragMode::Off;  ///< Phase 2.8: resolved mode (auto-determined at init)
+    amrex::Real Cd_wall          = 0.4;        ///< Phase 2.8: BEP wall drag coefficient (Martilli 2002) [-]
+    amrex::Real Cd_roof          = 0.15;       ///< Phase 2.8: BEP roof drag coefficient [-]
 
     int     slab_N_layers      = 4;         ///< Number of soil/material layers in slab [-]
     amrex::Real slab_T_deep    = 287.0;     ///< Deep (bottom BC) temperature [K]

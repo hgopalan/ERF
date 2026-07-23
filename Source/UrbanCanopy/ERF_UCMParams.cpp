@@ -47,6 +47,11 @@ void UCMParams::read_from_parmparse(int lev)
     pp.query("use_gaussian_height_distribution", use_gaussian_height_distribution);
     pp.query("height_std_threshold_m", height_std_threshold_m);
 
+    // Section 4.3: Phase 2.8 — BEP-style momentum drag parameters
+    pp.query("wall_drag_mode", wall_drag_mode_str);
+    pp.query("Cd_wall", Cd_wall);
+    pp.query("Cd_roof", Cd_roof);
+
     pp.query("slab_N_layers", slab_N_layers);
     pp.query("slab_T_deep", slab_T_deep);
     pp.query("slab_L", slab_L);
