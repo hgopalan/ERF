@@ -1,0 +1,100 @@
+# Compressible dycore + MRF PBL (matches Phase 2.8 validated path)
+max_step         = 1800
+erf.cfl          = 0.5
+amrex.fpe_trap_invalid = 0
+
+fabarray.mfiter_tile_size = 1024 1024 1024
+
+# Domain: 5 km × 500 m × 1280 m; ATM 10×10×64 → UCM 40×40 (grid_ratio=4)
+geometry.prob_extent  = 5000.0  500.0  1280.0
+amr.n_cell            = 10       10     64
+geometry.is_periodic  = 0        1      0
+
+# Boundary conditions (Askervein inflow/outflow pattern)
+xlo.type = "Inflow"
+xlo.dirichlet_file = "inflow_kanda.txt"
+xhi.type = "Outflow"
+
+zlo.type              = "surface_layer"
+erf.most.z0           = 0.5
+erf.most.zref         = 24.0
+erf.most.surf_temp_flux = 0.0
+zhi.type              = "SlipWall"
+zhi.theta_grad        = 0.003
+
+# Sponge at inflow (Askervein pattern; L=250 m scaled to our 5 km x-extent)
+erf.sponge_type = "input_sponge"
+erf.input_sponge_file = "inflow_kanda.txt"
+erf.sponge_strength = 0.2
+erf.use_xlo_sponge_damping = true
+erf.xlo_sponge_end = -1750.0
+
+# Rayleigh damping at top
+erf.rayleigh_damp_W = true
+erf.rayleigh_dampcoef = 0.2
+erf.rayleigh_zdamp = 250.0
+
+# Initialization
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "sounding_kanda"
+
+# PBL: MRF (compressible-validated in Phase 2.8)
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = false
+
+# Solver / physics
+erf.terrain_type     = None
+erf.use_moisture     = false
+erf.use_gravity      = true
+erf.molec_diff_type  = "None"
+erf.les_type         = "None"
+erf.theta_ref        = 300.0
+erf.transport_scalar = false
+
+# Diagnostics
+erf.sum_interval     = 50
+erf.v                = 1
+amr.v                = 1
+amr.max_level        = 0
+
+# Plotfiles
+erf.plot_file_1      = "plt_"
+erf.plot_int_1       = 300
+erf.plot_vars_1      = x_velocity y_velocity z_velocity theta
+amr.plot_int         = 300
+amr.check_int        = -1
+erf.check_int        = -1
+
+# SLUCM
+erf.ucm.enable                = true
+erf.ucm.ucm_debug             = 1
+erf.ucm.anchor_level          = 0
+erf.ucm.grid_ratio            = 4
+erf.ucm.atm_feedback          = 1.0
+erf.ucm.zref                  = 2.0
+erf.ucm.H_bldg_uniform        = 15.0
+erf.ucm.W_road_uniform        = 0.0
+erf.ucm.W_roof_uniform        = 0.0
+erf.ucm.albedo_roof           = 0.20
+erf.ucm.albedo_wall           = 0.20
+erf.ucm.albedo_road           = 0.15
+erf.ucm.emissivity_roof       = 0.90
+erf.ucm.emissivity_wall       = 0.90
+erf.ucm.emissivity_road       = 0.94
+erf.ucm.ucm_plot_int          = 300
+erf.ucm.ucm_atm_plot_int      = 300
+erf.ucm.ucm_diag_file         = "ucm_diag.dat"
+erf.ucm.test_surf_temp_K      = 300.0
+erf.ucm.AH_uniform_Wm2        = 0.0
+erf.ucm.AH_profile_type_default = 1
+erf.ucm.use_facet3d_injection = 0
+erf.ucm.use_gaussian_height_distribution = 0
+erf.ucm.wall_drag_mode        = "explicit"
+erf.ucm.Cd_wall               = 0.4
+erf.ucm.Cd_roof               = 0.15
+erf.ucm.building_layout_csv_path = "building_layout.csv"
+erf.ucm.material_library_csv_path = "materials.csv"

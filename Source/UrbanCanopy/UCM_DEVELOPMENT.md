@@ -1483,7 +1483,7 @@ Mirror of Phase 2.7 `UCMFacet3DInjection/`:
 4. RK-stage safety: own `xmom_src`, `ymom_src` only within this function; zero at entry (handled by caller `make_mom_sources`), accumulate via `+=`.
 5. Reuse Phase 2.7 helpers (`wall_overlap_fraction_sharp`, `wall_overlap_fraction_gaussian`, `is_roof_cell`) — do NOT redefine.
 6. Terrain guard: separate flat vs terrain ParallelFor; flat kernel never reads `z_phys_nd`; terrain kernel asserts `z_phys_nd != nullptr`.
-7. Anelastic path: code-present, debug print `[UCM][2.8][anelastic-stub] applied post-projection drag correction`, but no extensive validation (Phase 2.8b).
+7. Anelastic path: code-present, debug print `[UCM][2.8][anelastic-stub] STUB — no-op; actual anelastic drag deferred to Phase 2.8b`, but no extensive validation (Phase 2.8b).
 
 **Backward compatibility:**
 
@@ -1517,3 +1517,56 @@ Mirror of Phase 2.7 `UCMFacet3DInjection/`:
 - **Heterogeneous Cd_wall, Cd_roof** — Currently uniform per-domain; CSV override ready for Phase 2.9+.
 
 **Phase 2.8 Complete:** Compressible drag fully integrated and tested. Anelastic path code-complete with stub validation, full anelastic testing and refinement deferred to Phase 2.8b (future PR).
+
+---
+
+## Phase 2.10: Inflow/Outflow Validation Cases (Salamanca + Kanda)
+
+**Scope:** Phase 2.10 closes Part 2 by adding first non-periodic inflow/outflow canonical validation cases for the SLUCM stack (Phases 2.1–2.9), with first observation-facing comparisons.
+
+**Architecture template:** Both cases follow the Askervein inflow/outflow structure (`Exec/CanonicalTests/Real_Terrain/Askervein/`) for ParmParse section layout, inflow profile file format, sponge setup, and plotfile conventions, but run the **compressible dycore + MRF PBL** path used in Phase 2.8 (not anelastic + kEqn).
+
+### Case A: `UCMSalamancaMadrid` (thermal, daytime UHI)
+
+- Reference: Salamanca, Krpo, Martilli & Clappier (2011), *Theoretical and Applied Climatology* 99:331–344.
+- Purpose: validate Phase 2.3–2.7 heat-injection stack plus Phase 2.9 per-cell AH override in inflow/outflow mode.
+- Setup highlights:
+  - `geometry.is_periodic = 0 1 0` (periodic y, inflow/outflow x).
+  - `erf.terrain_type = None` (no DEM terrain file; buildings from SLUCM CSV).
+  - Facet3D heat injection enabled, AH set to noon representative value (`AH_Wm2=40`).
+  - Noon LST focus (12:00) for strongest daytime UHI signal in first canonical.
+- Diagnostics target: near-surface urban vs upwind-rural surrogate temperature signal, canyon-air theta profile, and reduced low-level wind.
+
+### Case B: `UCMKandaWindTunnel` (momentum, drag-only)
+
+- Reference: Kanda, Moriwaki & Kasamatsu (2004), *Boundary-Layer Meteorology* 112:343–368.
+- Purpose: validate Phase 2.8 BEP momentum drag response across four packing densities (`lambda_p = 0.11, 0.25, 0.33, 0.44`) in one striped domain.
+- Setup highlights:
+  - `geometry.is_periodic = 0 1 0`, `erf.terrain_type = None`.
+  - MRF + MOST retained, with neutral surface forcing (`erf.most.surf_temp_flux = 0.0`).
+  - Heat injection off (`use_facet3d_injection=0`, `AH=0`) to isolate momentum drag.
+  - `wall_drag_mode = "explicit"` with Phase 2.8 coefficients (`Cd_wall=0.4`, `Cd_roof=0.15`).
+- Diagnostics target: normalized `U(z)/U_H` profiles and monotonic interior velocity decrease with increasing `lambda_p`.
+
+### Validation interpretation
+
+**Phase 2.10 is qualitative validation only.** Lack of tight quantitative agreement is expected until later dependencies are integrated:
+
+- two-way ATM→UCM feedback (Phase 3.2),
+- radiation coupling (Phase 4.2),
+- stability-aware exchange refinements and broader coupled physics.
+
+### Known limitations (explicit)
+
+- No two-way ATM→UCM feedback (Phase 3.2).
+- No radiation coupling (Phase 4.2).
+- No LSM/non-urban interface coupling (Phase 4.1).
+- Kanda lower boundary deviates from paper LES (neutral MOST used instead of slip lower BC) to preserve MRF `u_star` computation; canopy momentum-drag physics under test is unchanged.
+- Salamanca uses periodic y (city has no y-edge in this first canonical approximation).
+- Salamanca currently targets noon LST only; full nocturnal cycle deferred.
+
+### References
+
+- Salamanca, F., Krpo, A., Martilli, A., & Clappier, A. (2011). *Theor. Appl. Climatol.* 99:331–344. doi:10.1007/s00704-009-0142-9
+- Kanda, M., Moriwaki, R., & Kasamatsu, F. (2004). *Boundary-Layer Meteorol.* 112:343–368. doi:10.1023/B:BOUN.0000027909.44797.b0
+- Wagenbrenner et al. (2019), *Atmosphere* (Askervein inflow/outflow architecture reference)
