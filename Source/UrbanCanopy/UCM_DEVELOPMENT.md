@@ -1570,3 +1570,146 @@ Mirror of Phase 2.7 `UCMFacet3DInjection/`:
 - Salamanca, F., Krpo, A., Martilli, A., & Clappier, A. (2011). *Theor. Appl. Climatol.* 99:331–344. doi:10.1007/s00704-009-0142-9
 - Kanda, M., Moriwaki, R., & Kasamatsu, F. (2004). *Boundary-Layer Meteorol.* 112:343–368. doi:10.1023/B:BOUN.0000027909.44797.b0
 - Wagenbrenner et al. (2019), *Atmosphere* (Askervein inflow/outflow architecture reference)
+
+---
+
+## Phase 2.11: UCMBoston Single-Level One-Way Baseline + Shared Boston Test Infrastructure
+
+**Scope:** Phase 2.11 closes Part 2 by establishing the **first real-city canonical test** for SLUCM using a Boston-stylized concentric urban layout. This is the single-level one-way baseline that Phase 3.6 (multi-level one-way) and Phase 3.10 (multi-level two-way) will compare against.
+
+**Deliverables:**
+
+1. **Shared infrastructure:** `Exec/CanonicalTests/SLUCM/UCMBoston/` containing:
+   - `gen_boston.py` — pure-Python generator producing 80×80 UCM grid with 5 concentric ring zones
+   - `building_layout.csv` (6400 rows) and `materials.csv` (4 materials) committed to repo
+   - `sounding_boston` — neutral θ profile (θ_ref=295 K, gradient 0.001 K/m)
+   - `inflow_boston.txt` — log-law wind profile (z₀=1.5 m urban roughness, U=5 m/s at 30 m hub height)
+
+2. **Working single-level one-way case:**
+   - `inputs_singlelevel` — full Phase 2 physics stack (Phases 2.1–2.9) + Phase 2.7 facet3D + Phase 2.8 momentum drag
+   - Domain: 20 km × 20 km × 1280 m (ATM 20×20×64, UCM 80×80)
+   - Inflow/outflow BCs (`is_periodic = 0 1 0`), compressible dycore + MRF PBL
+   - One-way coupling (`atm_feedback = 0.0`)
+   - Simulation time: 3600 s at CFL=0.5
+
+3. **Stub input files reserved for Phase 3.6 and 3.10:**
+   - `inputs_multilevel_oneway` — placeholder for Phase 3.6 (3-level AMR with downtown refinement)
+   - `inputs_multilevel_twoway` — placeholder for Phase 3.10 (3-level AMR + two-way feedback)
+
+4. **Verification and documentation:**
+   - `check_boston_singlelevel.py` — loose physical assertions (UHI structure, canopy wind reduction, NaN check) + diagnostic profiles
+   - `README.md` — 5-zone layout documentation, downtown refinement extents for Phase 3.6/3.10, synthetic-not-GIS caveat
+   - `CMakeLists.txt` — mirrors UCMSalamancaMadrid pattern
+   - `UCM_DEVELOPMENT.md` Phase 2.11 section (this section)
+
+### Concentric Ring Layout (Chebyshev/L-infinity distance)
+
+Distance from center: `d = max(|i - 39.5|, |j - 39.5|)` in 80×80 UCM grid.
+
+| Ring | d (UCM cells) | Type | λ_p | H (m) | AH (W/m²) | Material |
+|------|---------------|------|-----|-------|-----------|----------|
+| Downtown core | 0–7 | Financial District style | 0.55 | 100 | 60 | glass/steel (mat_id=1) |
+| Dense mid-rise | 8–15 | Back Bay / Beacon Hill | 0.50 | 40 | 45 | brick/concrete (mat_id=2) |
+| Residential dense | 16–24 | South End / Cambridge | 0.35 | 15 | 30 | brick/concrete (mat_id=2) |
+| Residential sparse | 25–32 | Somerville / Brookline | 0.20 | 8 | 15 | wood/vinyl (mat_id=3) |
+| Suburban / rural | 33–39 | Newton / outer metro | 0.05 | 5 | 5 | wood/vinyl (mat_id=3) |
+
+**Rationale:** Boston UHI validation requires concentric rings mirroring actual urban morphology (high-rise downtown core, mid-rise mid-zone, dense and sparse residential, suburban transition). This is a **synthetic stylized layout**, not a GIS-authentic WUDAPT/OSM reproduction; Phase 2.9's `gen_real_boston_full.py` can regenerate with real data for manual QA in Phase 4+.
+
+### Physics Stack under Test
+
+- **Full Phase 2:** Phase 2.1 CSV → 2.9 per-cell AH override
+- **Phase 2.7:** Facet3D BEP-continuous injection (wall/roof/road 3D geometric splitting)
+- **Phase 2.8:** Explicit momentum drag (`Cd_wall=0.4`, `Cd_roof=0.15`)
+- **Compressible dycore + MRF PBL** (validated Phase 2.8 path)
+- **Multi-material heterogeneity:** 3 urban materials (glass/steel, brick/concrete, wood/vinyl) + reserved grassland material
+- **Urban-rural contrast:** downtown core surrounded by suburbs and outer rural
+- **One-way coupling only:** `atm_feedback = 0.0`
+- **Inflow/outflow:** log-law wind profile (`z₀=1.5 m`, U=5 m/s @ 30 m) with sponge damping
+
+### Not Tested Here (Explicit)
+
+- Two-way ATM→UCM feedback (Phase 3.2)
+- Radiation coupling (Phase 4.2)
+- Multi-level AMR (Phase 3.1, reserved for Phase 3.6 and Phase 3.10)
+- Quantitative field-campaign match (Phase 4+)
+
+### Downtown Core Extent for Phase 3.6/3.10 Refinement
+
+Reserved coordinates for future AMR refinement:
+
+- **UCM grid:** i, j ∈ [32, 47] (16×16 UCM cells, d ≤ 7)
+- **ATM level=0 (coarse):** i, j ∈ [8, 11] (4×4 ATM cells)
+- **ATM level=1 (Phase 3.6):** refined to 2× resolution over [8, 11]
+- **ATM level=2 (Phase 3.10):** further refined innermost 4×4 UCM block (UCM 36–43 / ATM 9–10)
+
+### Verification Script
+
+`check_boston_singlelevel.py` implements loose physical assertions suitable for baseline validation:
+
+1. **Plotfile discovery** — main ATM plotfile `plt_NNNNN` exists and loads with yt
+2. **Concentric UHI** — near-surface θ at downtown (i≈10) is ≥0.05 K warmer than domain edge (i=0)
+3. **Canopy wind reduction** — wind speed at downtown is ≥10% less than upwind rural
+4. **No NaN** — all θ, u, v fields are finite everywhere
+5. **Diagnostic profiles** — vertical θ profile (downtown vs upwind) and ring temperature summary (informational)
+
+Expected output: positive urban–rural ΔT (~0.5–2.0 K at ~30 m AGL), 15–30% canopy wind reduction, smooth vertical structure.
+
+### Input File Details
+
+**`inputs_singlelevel`** — Standard Phase 2 compressible run:
+
+```
+max_step = 3600
+erf.cfl = 0.5
+geometry.prob_extent = 20000.0 20000.0 1280.0
+amr.n_cell = 20 20 64
+geometry.is_periodic = 0 1 0
+amr.max_level = 0
+erf.terrain_type = None
+erf.pbl_type = "MRF"
+erf.theta_ref = 295.0
+
+# Critical: plotfile output block for main ATM plotfiles
+erf.plot_file_1 = "plt_"
+erf.plot_int_1 = 600
+erf.plot_vars_1 = x_velocity y_velocity z_velocity theta
+amr.plot_int = 600
+
+# SLUCM configuration
+erf.ucm.enable = true
+erf.ucm.atm_feedback = 0.0  # One-way baseline
+erf.ucm.grid_ratio = 4
+erf.ucm.use_facet3d_injection = 1
+erf.ucm.wall_drag_mode = "explicit"
+erf.ucm.building_layout_csv_path = "building_layout.csv"
+erf.ucm.material_library_csv_path = "materials.csv"
+```
+
+**`inputs_multilevel_oneway`** and **`inputs_multilevel_twoway`** — header-only placeholders (Phase 3.6 and 3.10 reserved).
+
+### Workflow
+
+```bash
+python3 gen_boston.py              # generate or verify CSVs
+./erf_ucm_boston inputs_singlelevel # ~5 min on 4 cores
+python3 check_boston_singlelevel.py # verify output
+```
+
+### Known Limitations (Explicit)
+
+- **Synthetic layout:** Boston-stylized concentric domain, not real WUDAPT/OSM. Real-city generation via `gen_real_boston_full.py` deferred to Phase 2.9 extension / Phase 4 manual QA.
+- **No radiation:** Constant albedo/emissivity; no shortwave/longwave coupling (Phase 4.2).
+- **One-way only:** UCM does not feed back to ATM (Phase 2.11 design; Phase 3.2 reverses this).
+- **Neutral sounding:** Noon LST fixed; no actual Boston radiosonde data.
+- **Loose assertions:** Verification uses physically motivated but non-quantitative bounds suitable for baseline, not field-campaign comparison.
+
+### References
+
+- **Phase 2.10 predecessor:** Salamanca et al. (2011), *Theor. Appl. Climatol.* 99:331–344
+- **Phase 2.8 momentum drag:** Martilli, Clappier & Rotach (2002), *Boundary-Layer Meteorology* 104:261–304
+- **Phase 2.7 Facet3D:** Referenced in Phase 2.7 PR; BEP-continuous injection geometry
+- **Phase 2.9 CSV toolchain:** `Exec/CanonicalTests/SLUCM/tools/ucm_csv.py`
+- **Inflow/outflow architecture:** Askervein reference case (`Exec/CanonicalTests/Real_Terrain/Askervein/`)
+
+**Phase 2.11 Complete:** First real-city single-level baseline established and verified. Part 2 closes. Phase 3.6 begins multi-level AMR extension targeting this baseline.
