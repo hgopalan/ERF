@@ -13,7 +13,9 @@ BUILDING_HEADER = [
     "i", "j", "bldg_id", "height_m", "plan_area_frac",
     "W_road_m", "W_roof_m",
     "roof_mat_id", "wall_mat_id", "road_mat_id",
-    "orientation_deg", "ah_profile_id", "is_urban",
+    "orientation_deg", "ah_profile_id",
+    "AH_Wm2",          # NEW Phase 2.9: per-cell AH override; 0 → use ParmParse fallback
+    "is_urban",
 ]
 MATERIAL_HEADER = [
     "mat_id", "name", "albedo", "emissivity",
@@ -40,6 +42,7 @@ def write_layout(path: str, nx_ucm: int, ny_ucm: int,
                 row = dict(cell_fn(i, j))
                 row.setdefault("i", i)
                 row.setdefault("j", j)
+                row.setdefault("AH_Wm2", 0.0)  # NEW Phase 2.9: backward compat
                 _validate_row(i, j, row)
                 w.writerow([row[k] for k in BUILDING_HEADER])
                 n += 1
@@ -85,6 +88,9 @@ def _validate_row(i, j, row):
                          f"got {row['plan_area_frac']}")
     if float(row["height_m"]) < 0.0:
         raise ValueError(f"({i},{j}): height_m must be >= 0")
+    if float(row["AH_Wm2"]) < 0.0:  # NEW Phase 2.9: validate AH_Wm2 >= 0
+        raise ValueError(f"({i},{j}): AH_Wm2 must be >= 0, "
+                         f"got {row['AH_Wm2']}")
 
 
 def _validate_material(m, seen):
