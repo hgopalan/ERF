@@ -13,7 +13,7 @@
 #include <ERF_UCMParams.H>
 #include <AMReX_ParmParse.H>
 
-void UCMParams::read_from_parmparse(int lev)
+void UCMParams::read_from_parmparse()
 {
     amrex::ParmParse pp("erf.ucm");
 

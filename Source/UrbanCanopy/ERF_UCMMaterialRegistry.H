@@ -122,7 +122,7 @@ public:
      *  - Albedo or emissivity not in [0, 1]
      *  - k_therm, rho_cp, or thickness not > 0
      */
-    void load_and_broadcast(const std::string& path, int lev = 0, bool ucm_debug = false);
+    void load_and_broadcast(const std::string& path, int lev, bool ucm_debug = false);
 
     /**
      * @brief Look up material by ID

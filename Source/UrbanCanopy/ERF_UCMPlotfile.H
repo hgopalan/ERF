@@ -41,9 +41,9 @@ public:
      * @brief Construct UCMPlotfile writer
      *
      * @param[in] params  UCMParams configuration (stored by reference)
-     * @param[in] lev     AMR level (default 0)
+     * @param[in] lev     AMR level
      */
-    UCMPlotfile(const UCMParams& params, int lev = 0);
+    UCMPlotfile(const UCMParams& params, int lev);
 
     /**
      * @brief Destructor
@@ -73,11 +73,11 @@ public:
      * @param[in] nstep            Current timestep number
      * @param[in] time             Simulation time [s]
      * @param[in] is_final         If true, writes regardless of ucm_plot_int
-     * @param[in] lev              AMR level (default 0)
+     * @param[in] lev              AMR level
      */
     void write(const UCMFields& fields, const UCMGrid& grid,
                int nstep, amrex::Real time, bool is_final = false,
-               int lev = 0);
+               int lev);
 
 private:
     const UCMParams& m_params;          ///< Reference to parameters

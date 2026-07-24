@@ -74,9 +74,9 @@ public:
      * (Phase 1.1: only level 0 permitted).
      *
      * @param[in] params  SLUCM configuration (copied)
-     * @param[in] lev     AMR level (default 0; Phase 1.1 only)
+     * @param[in] lev     AMR level
      */
-    UCMLayer(const UCMParams& params, int lev = 0);
+    UCMLayer(const UCMParams& params, int lev);
 
     /**
      * @brief Advance SLUCM one timestep (main physics driver)
@@ -160,7 +160,7 @@ public:
                  amrex::Real time,
                  amrex::Real dt,
                  int nz_atm,
-                 int lev = 0);
+                 int lev);
 
 private:
     UCMParams m_params;  ///< Copy of SLUCM parameters (immutable during run)

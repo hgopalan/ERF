@@ -113,7 +113,7 @@ struct UCMForcing
 void fill_ucm_ustar_from_surface_layer(amrex::MultiFab& ucm_ustar,
                                        const amrex::MultiFab& atm_u_star,
                                        const UCMGrid& ucm_grid,
-                                       int lev = 0);
+                                       int lev);
 
 /**
  * @brief Interpolate ATM wind to z_target via log-law profile with per-cell z0 and displacement
@@ -165,7 +165,7 @@ void fill_ucm_wind_from_interpolation(amrex::MultiFab& ucm_wind_ref,
                                      amrex::Real zref,
                                      const UCMGrid& ucm_grid,
                                      int nz_atm,
-                                     int lev = 0);
+                                     int lev);
 
 /**
  * @brief Extract atmospheric scalars (T, q) from lowest ATM level to UCM
@@ -190,13 +190,13 @@ void fill_ucm_wind_from_interpolation(amrex::MultiFab& ucm_wind_ref,
  * @param[in]  ucm_grid      UCM grid geometry and layout
  * @param[in]  geom_atm      ATM Geometry (for coordinate transformations)
  * @param[in]  comp          Component index in atm_scalar (default 0)
- * @param[in]  lev           AMR level (default 0)
+ * @param[in]  lev           AMR level
  */
 void fill_ucm_scalar_from_atm(amrex::MultiFab& ucm_scalar,
                               const amrex::MultiFab& atm_scalar,
                               const UCMGrid& ucm_grid,
                               const amrex::Geometry& geom_atm,
                               int comp = 0,
-                              int lev = 0);
+                              int lev);
 
 #endif  // ERF_UCM_WIND_EXTRACT_H

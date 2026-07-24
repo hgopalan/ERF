@@ -77,14 +77,14 @@ struct UCMGrid
  * @param[in] dm_atm        Atmospheric level-0 DistributionMapping
  * @param[in] geom_atm      Atmospheric level-0 Geometry
  * @param[in] grid_ratio    Horizontal refinement factor (>= 1, default 1)
- * @param[in] lev           ATM level (default 0; Phase 1.1 only uses lev=0)
+ * @param[in] lev           ATM level
  * @return                  UCMGrid with refined 2D domain
  */
 UCMGrid create_ucm_grid(const amrex::BoxArray&          ba_atm,
                         const amrex::DistributionMapping& dm_atm,
                         const amrex::Geometry&          geom_atm,
                         int                             grid_ratio,
-                        int                             lev = 0,
+                        int                             lev,
                         bool                            ucm_debug = false);
 
 #endif // ERF_UCM_GRID_H

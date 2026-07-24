@@ -44,7 +44,7 @@
 void allocate_ucm_fields(UCMFields& fields,
                          const UCMGrid& ucm_grid,
                          const UCMParams& params,
-                         int lev = 0);
+                         int lev);
 
 /**
  * @brief Fill all UCMFields with heterogeneous values from CSV data
@@ -77,7 +77,7 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                               const UCMBuildingLayoutReader& building_reader,
                               const UCMMaterialRegistry& material_registry,
                               int grid_ratio,
-                              int lev = 0,
+                              int lev,
                               bool ucm_debug = false);
 
 /**
@@ -110,7 +110,7 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
  */
 void fill_ucm_fields_homogeneous(UCMFields& fields,
                                   const UCMParams& params,
-                                  int lev = 0);
+                                  int lev);
 
 /**
  * @brief Fill z0_ucm and d_disp_ucm from building height and morphology ratios
@@ -132,7 +132,7 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
  */
 void fill_ucm_z0_and_disp(UCMFields& fields,
                           const UCMParams& params,
-                          int lev = 0);
+                          int lev);
 
 /**
  * @brief Compute anthropogenic heat (AH) from profile type and time of day
@@ -163,6 +163,6 @@ void compute_anthropogenic_heat(amrex::MultiFab&        AH_out,
                                const amrex::MultiFab&  AH_Wm2_ucm,  // Phase 2.9: per-cell override
                                const UCMParams&        params,
                                amrex::Real             time,
-                               int                     lev = 0);
+                               int                     lev);
 
 #endif // ERF_UCM_ALLOCATE_H

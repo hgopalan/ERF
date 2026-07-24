@@ -217,9 +217,8 @@ struct UCMParams
      * All parameter names follow pattern "erf.ucm.name". ParmParse::query() is
      * used to preserve defaults if a parameter is not specified.
      *
-     * @param[in] lev  AMR level (future use for level-specific params; default 0)
      */
-    void read_from_parmparse(int lev = 0);
+    void read_from_parmparse();
 };
 
 #endif // ERF_UCM_PARAMS_H

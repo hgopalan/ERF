@@ -2584,7 +2584,7 @@ ERF::ReadParameters ()
     //if (m_ucm_params.enable) {
     //    m_ucm_params.read_from_parmparse(0);
     //}
-    m_ucm_params.read_from_parmparse(0);
+    m_ucm_params.read_from_parmparse();
     #endif
 
     if (verbose > 0) {

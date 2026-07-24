@@ -52,12 +52,12 @@ void check_ucm_prerequisites(const UCMParams& params,
         params.anchor_level <= finest_level,
         "[UCM] anchor_level must be <= finest_level. Reduce erf.ucm.anchor_level");
 
-    // Check 2: Phase 1.1 constraint - anchor_level must be 0
+    // Phase 3.1b: anchor_level > 0 is now supported. Validation is limited to
+    // the bounds check above (0 <= anchor_level <= finest_level). Stress test
+    // with anchor_level > 0 is scheduled for Phase 3.7 (anchor_level=2 nested).
     if (params.anchor_level > 0) {
-        std::string msg = std::string("[UCM] anchor_level > 0 not supported in Phase 1.1. ")
-                        + "Set: erf.ucm.anchor_level = 0 or wait for Phase 3.1 multi-level support. "
-                        + "See: Source/UrbanCanopy/UCM_DEVELOPMENT.md";
-        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(false, msg.c_str());
+        amrex::Print() << "[UCM] anchor_level = " << params.anchor_level
+                       << " (multi-level UCM enabled; Phase 3.7 will stress-test)\n";
     }
 
     // Check 3: static_refinement must be true
