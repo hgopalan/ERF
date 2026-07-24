@@ -55,9 +55,9 @@ public:
      * Writes header row if file is empty.
      *
      * @param[in] params  UCMParams configuration (stored by reference)
-     * @param[in] lev     AMR level (default 0)
+     * @param[in] lev     AMR level
      */
-    UCMDiagnostics(const UCMParams& params, int lev = 0);
+    UCMDiagnostics(const UCMParams& params, int lev);
 
     /**
      * @brief Destructor
@@ -109,7 +109,7 @@ public:
                 const amrex::MultiFab* H_bldg_std_atm = nullptr,
                 const amrex::MultiFab* lambda_f_atm = nullptr,
                 const amrex::MultiFab* H_atm = nullptr,
-                int lev = 0);
+                int lev);
 
 private:
     const UCMParams& m_params;          ///< Reference to parameters

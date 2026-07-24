@@ -71,7 +71,7 @@ inline void compute_sky_view_factors(
     const amrex::MultiFab& H_bldg,
     const amrex::MultiFab& W_road,
     const amrex::iMultiFab& is_urban,
-    int lev = 0,
+    int lev,
     bool debug = false)
 {
     using namespace amrex;

@@ -130,7 +130,7 @@ public:
      */
     void read_and_broadcast(const std::string& path,
                             int nx_ucm, int ny_ucm,
-                            int lev = 0, bool ucm_debug = false);
+                            int lev, bool ucm_debug = false);
 
     /**
      * @brief Direct const access to broadcast row table

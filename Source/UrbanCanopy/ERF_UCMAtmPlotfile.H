@@ -92,7 +92,7 @@ public:
               const amrex::MultiFab&    H_roof_atm,       ///< Phase 2.7
               const amrex::Geometry&    geom,
               bool                      ucm_debug = false,
-              int                       lev = 0);
+              int                       lev);
 
 private:
     int m_last_write_step{-1};  ///< Track last written step (duplicate guard)
