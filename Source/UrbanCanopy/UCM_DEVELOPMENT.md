@@ -1825,3 +1825,85 @@ After Phase 2.11-fix, UCMBoston re-run with corrected knobs must show:
 - **Momentum drag citation:** Martilli, Clappier & Rotach (2002), *Boundary-Layer Meteorology* 104:261–304, Section 4
 
 **Phase 2.11-fix Complete:** Architectural correction of feedback gating applied. Phase 3.2 can now proceed with two-way heat coupling validation on correct momentum baseline.
+
+---
+
+## Phase 3.1b — Level-awareness fixes (unblock + API hygiene)
+
+**Status:** Phase 3.1b removes 2 hard blockers and eliminates 27 ambiguous API default arguments to prepare for Phase 3.7 multi-level anchor_level > 0 stress testing.
+
+### Summary of Changes
+
+1. **Unblock anchor_level > 0:**
+   - Removed startup abort that rejected `anchor_level > 0` in `ERF_UCMPrerequisites.cpp`
+   - Replaced with informational Print statement
+   - Parameter read now simplified (unused `lev` parameter removed entirely)
+
+2. **API hygiene — remove all `int lev = 0` defaults:**
+   - Removed default arguments from 27 AMBIGUOUS sites in 11 header files
+   - All call sites already pass explicit `lev` arguments (verified against Phase 3.1a audit)
+   - Compiler now enforces explicit level threading throughout UCM public interfaces
+
+### Technical Details
+
+**Category A: Blockers (2 sites)**
+- `ERF_UCMPrerequisites.cpp:56` — Removed `if (params.anchor_level > 0) { amrex::Abort(...) }`
+- `ERF_UCMParams.cpp:16` — Removed unused `int lev` parameter from `read_from_parmparse()`
+
+**Category B: API defaults (27 sites across 11 files)**
+
+| File | Lines removed | Total |
+|------|---|---|
+| ERF_UCMAllocate.H | 47, 80, 113, 135, 166 | 5 |
+| ERF_UCMAtmCoupling.H | 98, 149, 271, 334, 386 | 5 |
+| ERF_UCMAtmPlotfile.H | 95 | 1 |
+| ERF_UCMBuildingLayoutReader.H | 133 | 1 |
+| ERF_UCMDiagnostics.H | 60, 112 | 2 |
+| ERF_UCMGrid.H | 87 | 1 |
+| ERF_UCMLayer.H | 79, 163 | 2 |
+| ERF_UCMMaterialRegistry.H | 125 | 1 |
+| ERF_UCMPlotfile.H | 46, 80 | 2 |
+| ERF_UCMPrerequisites.H | 62, 97 | 2 |
+| ERF_UCMShadowing.H | 74 | 1 |
+| ERF_UCMWindExtract.H | 116, 168, 200 | 3 |
+| **TOTAL** | | **27** |
+
+### Explicit Note: Phase 3.1b Does NOT Include `anchor_level > 0` Tests
+
+- **anchor_level > 0 is now permitted** (no longer aborted at startup)
+- **Validation is deferred to Phase 3.7** (targeted multi-level nested test: anchor_level=2)
+- All canonical tests continue to use anchor_level=0 (default)
+- Bit-for-bit equivalence with pre-3.1b binary expected for all existing tests
+
+### Phase 3.1b Regression Test Protocol (User Runs Post-Merge)
+
+For each canonical test, run once with pre-3.1b binary and once with post-3.1b binary, then compare plotfiles bit-for-bit:
+
+1. UCMBoston (inputs_singlelevel)
+2. UCMSalamancaMadrid (inputs)
+3. UCMBEPMomentumDrag (inputs)
+4. UCMFacet3DInjection (inputs)
+
+Expected: plotfiles bit-for-bit identical with `anchor_level = 0` (default).
+
+Compare with:
+```bash
+fcompare pre_3_1b/plt_NNNNN post_3_1b/plt_NNNNN
+```
+
+Any non-zero diff indicates an inadvertent behavior change and must be investigated before Phase 3.2 kickoff.
+
+**No `anchor_level > 0` test is included in this PR** — deferred to Phase 3.7 comprehensive multi-level audit.
+
+### Design Rationale
+
+- **Explicit argument threading:** Removes all silent level-0 fallbacks from the public UCM API
+- **Compiler enforcement:** Missing `lev` arguments now cause compile-time errors (not runtime surprises)
+- **Phase 3.7 readiness:** UCM code is now geometrically level-aware; Phase 3.7 will stress-test with actual refinement
+- **Zero behavior change:** With anchor_level=0 (default), all call paths identical to pre-3.1b
+
+### References
+
+- **Phase 3.1a audit report:** `Source/UrbanCanopy/PHASE_3_1A_LEVEL_AUDIT.md` (Sections 3, 4, 6, 7 applied)
+- **Phase 3.1a merge:** https://github.com/hgopalan/ERF/pull/230
+- **Phase 3.7 scope:** Nested multi-level UCM (anchor_level > 0 comprehensive test)
