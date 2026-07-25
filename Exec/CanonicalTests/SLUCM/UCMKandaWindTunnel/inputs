@@ -80,8 +80,9 @@ erf.ucm.atm_feedback_heat     = 1.0
 erf.ucm.atm_feedback_moisture = 0.0
 erf.ucm.zref                  = 2.0
 erf.ucm.H_bldg_uniform        = 15.0
-erf.ucm.W_road_uniform        = 0.0
-erf.ucm.W_roof_uniform        = 0.0
+# Non-zero fallback (10.0 m) prevents assertion failure; CSV drives per-cell widths
+erf.ucm.W_road_uniform        = 10.0
+erf.ucm.W_roof_uniform        = 10.0
 erf.ucm.albedo_roof           = 0.20
 erf.ucm.albedo_wall           = 0.20
 erf.ucm.albedo_road           = 0.15
