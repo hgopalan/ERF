@@ -189,7 +189,7 @@
             if (m_ucm_params.ucm_debug) {
                 amrex::Real cc_src_rho_theta_max_after = cc_src.max(RhoTheta_comp, 0);
                 if (amrex::ParallelDescriptor::IOProcessor()) {
-                    amrex::Print() << "[UCM][3.2][rk-stage-inject] lev=" << level << " rk_stage=" << istage << "\n"
+                    amrex::Print() << "[UCM][3.2][rk-stage-inject] lev=" << level << " rk_stage=" << nrk << "\n"
                                    << "  cc_source[RhoTheta] before: max=" << cc_src_rho_theta_max_before << "\n"
                                    << "  cc_source[RhoTheta] after:  max=" << cc_src_rho_theta_max_after << "\n";
                 }
