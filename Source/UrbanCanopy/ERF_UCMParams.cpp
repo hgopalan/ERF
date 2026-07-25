@@ -118,4 +118,9 @@ void UCMParams::read_from_parmparse()
     // Section 9a: Test placeholders
     pp.query("test_ustar", test_ustar);
     pp.query("test_surf_temp_K", test_surf_temp_K);
+
+    // Section 10: Phase 3.4 — Stability-aware canyon-atmosphere exchange
+    pp.query("use_stability_correction", use_stability_correction);
+    pp.query("zeta_max_stable", zeta_max_stable);
+    pp.query("zeta_min_unstable", zeta_min_unstable);
 }

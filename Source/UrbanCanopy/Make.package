@@ -19,6 +19,8 @@ ifeq ($(USE_UCM), TRUE)
   # Phase 2.1 additions (CSV readers)
   CEXE_sources += UrbanCanopy/ERF_UCMBuildingLayoutReader.cpp
   CEXE_sources += UrbanCanopy/ERF_UCMMaterialRegistry.cpp
+  # Phase 3.4 additions (Stability-aware canyon-atmosphere exchange)
+  CEXE_sources += UrbanCanopy/ERF_UCMStabilityCorrection.cpp
 
   # Headers (complete list)
   CEXE_headers += UrbanCanopy/ERF_UCM.H
@@ -41,5 +43,7 @@ ifeq ($(USE_UCM), TRUE)
   # Phase 2.1 headers (CSV readers)
   CEXE_headers += UrbanCanopy/ERF_UCMBuildingLayoutReader.H
   CEXE_headers += UrbanCanopy/ERF_UCMMaterialRegistry.H
+  # Phase 3.4 headers (Stability-aware canyon-atmosphere exchange)
+  CEXE_headers += UrbanCanopy/ERF_UCMStabilityCorrection.H
 
 endif
