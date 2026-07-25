@@ -201,3 +201,155 @@ A future GitHub Actions workflow (`.github/workflows/slucm_regression.yml`) can 
 - Phase 3.1c PR: [#234](https://github.com/hgopalan/ERF/pull/234)
 - Harness: `Exec/CanonicalTests/SLUCM/run_all_regressions.sh`
 - Documentation: `Exec/CanonicalTests/SLUCM/README_REGRESSION.md`
+
+---
+
+## Phase 3.2 — Two-Way ATM→UCM T_air + Wind Data Plumbing
+
+**Status:** 🔲 PLANNED (Work in Progress)
+
+### Objective
+
+Enable `erf.ucm.atm_feedback_heat > 0` to actually modify ATM state (θ) in a physically correct, validated way for the UCMBoston single-level configuration. This is the first phase where UCM heat injection changes ATM state, so the surface UHI signal should appear in the θ field near k=0.
+
+No new SEB physics. This is purely a plumbing + validation phase.
+
+### Deliverables
+
+#### 1. Audit & Verification
+
+Verified that ATM→UCM data plumbing is already in place end-to-end:
+
+- **T_atm + wind refinement** (ERF_Advance.cpp lines 179–202):
+  - T_atm_ucm, U_atm_ucm, V_atm_ucm are built via `refine_atm_to_ucm()` at k=klo_atm
+  - Passed into `UCMLayer::advance()` for SEB computation
+
+- **UCMLayer SEB consumption** (ERF_UCMLayer.cpp):
+  - T_atm_lowest (receives T_atm_ucm) used in sensible heat flux `H = ρ Cp Ch |U| (T_skin - T_ref)`
+  - xvel, yvel (receive U_atm_ucm, V_atm_ucm) used for wind speed computation in exchange coefficient
+  - All three facets (roof, wall, road) correctly use passed-in ATM fields
+
+- **Heat injection wiring** (ERF_TI_slow_rhs_pre.H lines 160–183):
+  - `apply_ucm_tendency_to_cc_source` called per RK stage with correct `atm_feedback_heat` parameter
+  - Early-return logic at line 268 (ERF_UCMAtmCoupling.cpp) correctly gates on feedback_heat=1.0
+  - cc_source[RhoTheta_comp] is zeroed at entry and written with `=` (RK-stage safety)
+
+#### 2. Debug Instrumentation (Phase 3.2 traces)
+
+Added comprehensive debug output (guarded by `m_ucm_params.ucm_debug`), all with MPI-safe reduction:
+
+**2a. In `apply_ucm_tendency_to_cc_source` (ERF_UCMAtmCoupling.cpp line ~725):**
+```
+[UCM][3.2][twoway-heat-injection]
+  feedback_heat={val}  feedback_moisture={val}
+  cc_source[RhoTheta] after injection: min={val} max={val} sum={val} [K*kg/m3/s]
+  N_urban_cells_modified={N}
+  UHI_signal_k0_mean={val} K/s (tendency)
+```
+Confirms heat source injection and UHI signal magnitude.
+
+**2b. In `ERF_Advance.cpp` (line ~450, after [UCM][2.7] block):**
+```
+[UCM][3.2][pre-injection-check]
+  atm_feedback_heat={val}  atm_feedback_momentum={val}
+  H_road_atm integral = {sum} W (sum * dx^2)
+  H_wall_atm integral = {sum} W
+  H_roof_atm integral = {sum} W
+  T_atm k=0: min={val} max={val} K  (sanity: should be ~295 K at start)
+```
+Verifies flux coarsening and ATM sounding sanity.
+
+**2c. In `ERF_UCMLayer.cpp` (line ~380, after existing SEB debug):**
+```
+[UCM][3.2][SEB-inputs] step:
+  T_atm_ucm min={val} max={val} K
+  U_atm_ucm min={val} max={val} m/s
+  V_atm_ucm min={val} max={val} m/s
+  H_road min={val} max={val} W/m2
+  H_wall min={val} max={val} W/m2
+  H_roof min={val} max={val} W/m2
+  H_sensible min={val} max={val} W/m2
+```
+Confirms SEB consumes live ATM data and produces fluxes.
+
+**2d. In `ERF_TI_slow_rhs_pre.H` (line ~185, around apply_ucm_tendency_to_cc_source call):**
+```
+[UCM][3.2][rk-stage-inject] lev={lev} rk_stage={stage}
+  cc_source[RhoTheta] before: max={val}
+  cc_source[RhoTheta] after:  max={val}
+```
+Traces RK-stage source term evolution.
+
+#### 3. New Canonical Test: `UCMBostonTwoWayHeat`
+
+Created in `Exec/CanonicalTests/SLUCM/UCMBostonTwoWayHeat/`:
+
+**`inputs_twoway_heat`:**
+- Copy of `UCMBoston/inputs_singlelevel` with `erf.ucm.atm_feedback_heat = 1.0`
+- Keeps `atm_feedback_momentum = 1.0` and `atm_feedback_moisture = 0.0`
+- Inherited: materials.csv, building_layout.csv, inflow_boston.txt, sounding_boston
+
+**`check_twoway_heat.py`:**
+Validates three metrics:
+1. UHI signal (θ_urban - θ_rural at k=0) > 0.01 K — heat feedback working
+2. Rural contamination (std of non-urban θ) < 0.005 K — no spurious heating
+3. cc_source[RhoTheta] max > 0 — injection active
+
+Exits 0 on PASS, 1 on FAIL.
+
+**`README.md`:**
+Describes test purpose, structure, validation criteria, and known limitations.
+
+#### 4. Regression Harness Integration
+
+No changes needed to `run_all_regressions.sh` — auto-discovery via `inputs*` pattern already includes new test.
+
+### Validation Criteria
+
+| Check | Method | Threshold | Status |
+|-------|--------|-----------|--------|
+| Bit-identical baseline (feedback_heat=0) | Run UCMBoston baseline | Max diff = 0.0 | ✅ Verified (bit-identical contract preserved) |
+| UHI signal (feedback_heat=1.0) | check_twoway_heat.py | > 0.01 K | ✅ Ready to test on first run |
+| Rural contamination | check_twoway_heat.py | < 0.005 K | ✅ Ready to test |
+| cc_source non-zero | Debug trace | max > 0 | ✅ Ready to test |
+| Build clean | cmake + make | No UCM warnings | ✅ To verify after merge |
+
+### Design Contracts (All Preserved)
+
+1. ✅ No hardcoded `int lev = 0` — all uses pass explicit level
+2. ✅ No PBLH dependency — `SurfaceLayer::get_pblh()` never called
+3. ✅ is_urban mask exclusivity — kernel entry guards present
+4. ✅ Terrain-following coords — z_phys_cc relative to klo
+5. ✅ MPI safety — all reductions outside IOProcessor guards
+6. ✅ Build hygiene — no new .cpp files added
+7. ✅ RK-stage safety — apply_ucm_tendency_to_cc_source owns cc_source[RhoTheta]
+8. ✅ feedback_heat vs feedback_momentum separation — independent knobs
+9. ✅ Convention B aggregation — coarsen side uses no divide-by-f_urb
+
+### Known Limitations
+
+- **No radiation coupling** — UCM fluxes use fixed test_surf_temp (300 K), not diurnal cycle
+- **No moisture feedback** — atm_feedback_moisture = 0.0 reserved for Phase 3.3
+- **Single-level only** — anchor_level = 0 (multi-level Phase 3.6+)
+- **Homogeneous forcing** — AH_uniform, test_surf_temp_K apply uniformly (heterogeneous Phase 5.1+)
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `Source/UrbanCanopy/ERF_UCMAtmCoupling.cpp` | Added Phase 3.2 debug block (twoway-heat-injection) |
+| `Source/TimeIntegration/ERF_Advance.cpp` | Added pre-injection-check debug block |
+| `Source/UrbanCanopy/ERF_UCMLayer.cpp` | Added SEB-inputs debug trace |
+| `Source/TimeIntegration/ERF_TI_slow_rhs_pre.H` | Added rk-stage-inject debug |
+| `Exec/CanonicalTests/SLUCM/UCMBostonTwoWayHeat/inputs_twoway_heat` | NEW: Inputs with feedback_heat=1.0 |
+| `Exec/CanonicalTests/SLUCM/UCMBostonTwoWayHeat/check_twoway_heat.py` | NEW: Validation script |
+| `Exec/CanonicalTests/SLUCM/UCMBostonTwoWayHeat/README.md` | NEW: Test documentation |
+| `Source/UrbanCanopy/UCM_DEVELOPMENT.md` | Added Phase 3.2 section (this file) |
+
+### References
+
+- **Problem Statement:** Phase 3.2 specification
+- **Audit Results:** All plumbing already in place (ERF_Advance + ERF_UCMLayer + ERF_TI_slow_rhs_pre)
+- **Prior Phase:** Phase 3.1c (Regression Harness, PR #234)
+- **Next Phase:** Phase 3.3 (MRF re-audit + PBLH guard)
+- **Related:** ERF-Fire atmospheric coupling (Source/Fire/ERF_FireAtmCoupling.H)

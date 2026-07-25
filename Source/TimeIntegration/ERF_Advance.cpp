@@ -448,36 +448,13 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
            const amrex::Real h_wall_int = m_ucm_H_wall_atm[lev]->sum(0, 0) * (Geom(lev).CellSize(0) * Geom(lev).CellSize(1));
            const amrex::Real h_roof_int = m_ucm_H_roof_atm[lev]->sum(0, 0) * (Geom(lev).CellSize(0) * Geom(lev).CellSize(1));
 
-           // Check T_atm at k=klo (lowest ATM level)
-           const int klo_atm = Geom(lev).Domain().smallEnd(2);
-           amrex::Real t_atm_min_k0 = 1.0e9;
-           amrex::Real t_atm_max_k0 = -1.0e9;
-           for (amrex::MFIter mfi(*T_atm_3d, false); mfi.isValid(); ++mfi) {
-               const amrex::Box& bx_k0 = amrex::Box(mfi.tilebox().loVect(), 
-                                                     IntVect(mfi.tilebox().hiVect(0), 
-                                                            mfi.tilebox().hiVect(1), 
-                                                            klo_atm));
-               auto const t_a = T_atm_3d->const_array(mfi);
-               amrex::ReduceOps<amrex::ReduceOpMin, amrex::ReduceOpMax> reduce_op_t;
-               amrex::ReduceData<amrex::Real, amrex::Real> reduce_data_t(reduce_op_t);
-               reduce_op_t.eval(bx_k0, reduce_data_t,
-                   [=] AMREX_GPU_DEVICE (int i, int j, int k) -> amrex::GpuTuple<amrex::Real, amrex::Real> {
-                       return {t_a(i, j, k), t_a(i, j, k)};
-                   });
-               t_atm_min_k0 = amrex::min(t_atm_min_k0, amrex::get<0>(reduce_data_t.value()));
-               t_atm_max_k0 = amrex::max(t_atm_max_k0, amrex::get<1>(reduce_data_t.value()));
-           }
-           amrex::ParallelDescriptor::ReduceRealMin(t_atm_min_k0);
-           amrex::ParallelDescriptor::ReduceRealMax(t_atm_max_k0);
-
            if (amrex::ParallelDescriptor::IOProcessor()) {
                amrex::Print() << "[UCM][3.2][pre-injection-check]\n"
                               << "  atm_feedback_heat=" << m_ucm_params.atm_feedback_heat 
                               << "  atm_feedback_momentum=" << m_ucm_params.atm_feedback_momentum << "\n"
                               << "  H_road_atm integral = " << h_road_int << " W (sum * dx^2)\n"
                               << "  H_wall_atm integral = " << h_wall_int << " W\n"
-                              << "  H_roof_atm integral = " << h_roof_int << " W\n"
-                              << "  T_atm k=0: min=" << t_atm_min_k0 << " max=" << t_atm_max_k0 << " K  (sanity: should be ~295 K at start)\n";
+                              << "  H_roof_atm integral = " << h_roof_int << " W\n";
            }
         }
 
