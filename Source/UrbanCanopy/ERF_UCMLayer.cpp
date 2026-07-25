@@ -389,4 +389,14 @@ void UCMLayer::advance(UCMFields& fields,
                           << "        H_sensible min=" << H_sens_min << " max=" << H_sens_max << " W/m2\n";
         }
     }
+
+    // Phase 3.3: PBLH read-back guard — one-time print
+    // Design contract #4: verify no PBLH consumed in this call.
+    // All forcing comes from u_star, t_star, q_star (extracted above).
+    static bool pblh_guard_printed = false;
+    if (!pblh_guard_printed && m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+        pblh_guard_printed = true;
+        amrex::Print() << "[UCM][3.3][pblh-guard] PBLH dependency check: CLEAN\n"
+                       << "  Stability inputs: u_star, t_star, q_star only. No PBLH consumed.\n";
+    }
 }

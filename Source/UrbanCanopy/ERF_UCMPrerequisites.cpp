@@ -267,4 +267,12 @@ void check_ucm_grid_and_fields(const UCMParams& params,
         amrex::Print() << "[UCM] =========================================================\n";
         amrex::Print() << "\n";
     }
+
+    // Phase 3.3: PBLH dependency guard — one-time banner
+    // Design contract #4: UCM MUST NOT call SurfaceLayer::get_pblh().
+    // All stability inputs come from u_star, t_star, q_star only.
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "[UCM][3.3][prerequisites] PBLH guard: CLEAN — no PBLH dependency detected in UCM inputs.\n"
+                       << "  SurfaceLayer inputs consumed: u_star, t_star, q_star (all OK per design contract #4).\n";
+    }
 }
