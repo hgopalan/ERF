@@ -667,6 +667,65 @@ void apply_ucm_tendency_to_cc_source(
             amrex::Print() << "  Road injection: N_cells=" << static_cast<long long>(road_cells + 0.5)
                            << "  sum_tend=" << road_tend_sum << "  [K*kg/m^3/s]\n";
         }
+
+        // Phase 3.2: Two-way ATM plumbing — verify feedback and injection
+        // Compute cc_source[RhoTheta] statistics for UHI signal diagnostic
+        const amrex::Real cc_src_rho_theta_min = cc_source.min(RhoTheta_comp, 0);
+        const amrex::Real cc_src_rho_theta_max = cc_source.max(RhoTheta_comp, 0);
+        const amrex::Real cc_src_rho_theta_sum = cc_source.sum(RhoTheta_comp, 0);
+
+        // Count urban cells modified in cc_source at k=klo and compute UHI signal
+        amrex::Real n_urban_cells_modified = 0.0;
+        amrex::Real uhi_signal_k0_sum      = 0.0;
+        amrex::ReduceOps<
+            amrex::ReduceOpSum,
+            amrex::ReduceOpSum> reduce_op_3p2;
+        amrex::ReduceData<
+            amrex::Real,
+            amrex::Real> reduce_data_3p2(reduce_op_3p2);
+        using ReduceTuple_3p2 = typename decltype(reduce_data_3p2)::Type;
+
+        for (amrex::MFIter mfi(cc_source, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.tilebox();
+            auto const cc_src_a = cc_source.const_array(mfi);
+            auto const urban_a  = is_urban_atm.const_array(mfi);
+            auto const s_a      = S_old.const_array(mfi);
+
+            reduce_op_3p2.eval(bx, reduce_data_3p2,
+                [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple_3p2 {
+                    amrex::Real cnt = 0.0;
+                    amrex::Real sig = 0.0;
+                    if (k == klo && urban_a(i, j, k) > 0.01) {
+                        const amrex::Real rho = s_a(i, j, k, Rho_comp);
+                        if (rho > min_density) {
+                            cnt = 1.0;
+                            // Tendency in K/s = cc_src[RhoTheta] / rho
+                            sig = cc_src_a(i, j, k, RhoTheta_comp) / rho;
+                        }
+                    }
+                    return {cnt, sig};
+                });
+        }
+
+        n_urban_cells_modified = get<0>(reduce_data_3p2.value());
+        uhi_signal_k0_sum      = get<1>(reduce_data_3p2.value());
+        amrex::ParallelDescriptor::ReduceRealSum(n_urban_cells_modified);
+        amrex::ParallelDescriptor::ReduceRealSum(uhi_signal_k0_sum);
+
+        amrex::Real uhi_signal_k0_mean = 0.0;
+        if (n_urban_cells_modified > 0.5) {
+            uhi_signal_k0_mean = uhi_signal_k0_sum / n_urban_cells_modified;
+        }
+
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.2][twoway-heat-injection]\n";
+            amrex::Print() << "  feedback_heat=" << feedback_heat << "  feedback_moisture=" << feedback_moisture << "\n";
+            amrex::Print() << "  cc_source[RhoTheta] after injection: min=" << cc_src_rho_theta_min
+                           << " max=" << cc_src_rho_theta_max << " sum=" << cc_src_rho_theta_sum
+                           << " [K*kg/m^3/s]\n";
+            amrex::Print() << "  N_urban_cells_modified=" << static_cast<long long>(n_urban_cells_modified + 0.5) << "\n";
+            amrex::Print() << "  UHI_signal_k0_mean=" << uhi_signal_k0_mean << " K/s (tendency)\n";
+        }
     }
 }
 
