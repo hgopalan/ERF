@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# =====================================================================
+# SLUCM Canonical Regression Harness
+#
+# Runs every canonical test in Exec/CanonicalTests/SLUCM/, invokes each
+# canonical's Python check script, and reports pass/fail summary.
+#
+# Usage:
+#   ./run_all_regressions.sh                    # run all canonicals
+#   ./run_all_regressions.sh UCMBoston          # run one canonical
+#   ./run_all_regressions.sh UCMBoston UCMSalamancaMadrid  # run subset
+#
+# Environment:
+#   ERF_BUILD_DIR      — path to a build directory containing erf_ucm_* executables
+#                        (default: assume executable lives inside each canonical dir)
+#   PYTHON             — Python interpreter (default: python3)
+#   MAX_STEPS          — override max_step for quick smoke tests (default: use inputs value)
+#   KEEP_OUTPUT        — 1 to keep plotfiles after run (default: 0 = cleanup)
+#
+# Exit codes:
+#   0 — all canonicals passed
+#   1 — one or more canonicals failed
+#   2 — harness setup error (missing executable, script, etc.)
+# =====================================================================
+
+set -uo pipefail
+
+HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON="${PYTHON:-python3}"
+RESULTS_DIR="${HARNESS_DIR}/_regression_results_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$RESULTS_DIR"
+
+# Discover all canonical directories (must contain an inputs* file)
+ALL_CANONICALS=()
+for d in "$HARNESS_DIR"/*/; do
+    if compgen -G "${d}inputs*" > /dev/null; then
+        ALL_CANONICALS+=("$(basename "$d")")
+    fi
+done
+
+# If arguments provided, run only those canonicals
+if [ $# -gt 0 ]; then
+    CANONICALS=("$@")
+else
+    CANONICALS=("${ALL_CANONICALS[@]}")
+fi
+
+echo "======================================================================"
+echo "SLUCM Regression Harness"
+echo "  Harness dir:  $HARNESS_DIR"
+echo "  Results dir:  $RESULTS_DIR"
+echo "  Canonicals:   ${CANONICALS[*]}"
+echo "======================================================================"
+
+declare -a PASSED FAILED SKIPPED
+
+for canon in "${CANONICALS[@]}"; do
+    CANON_DIR="$HARNESS_DIR/$canon"
+    if [ ! -d "$CANON_DIR" ]; then
+        echo "[SKIP]   $canon — directory not found"
+        SKIPPED+=("$canon (no dir)")
+        continue
+    fi
+
+    echo ""
+    echo "----------------------------------------------------------------------"
+    echo "[$canon] Starting"
+    echo "----------------------------------------------------------------------"
+
+    cd "$CANON_DIR"
+
+    # Find executable: prefer local, fall back to ERF_BUILD_DIR
+    EXEC=""
+    for candidate in ./erf_ucm_* ./main3d.*; do
+        [ -x "$candidate" ] && EXEC="$candidate" && break
+    done
+    if [ -z "$EXEC" ] && [ -n "${ERF_BUILD_DIR:-}" ]; then
+        for candidate in "$ERF_BUILD_DIR"/erf_ucm_* "$ERF_BUILD_DIR"/main3d.*; do
+            [ -x "$candidate" ] && EXEC="$candidate" && break
+        done
+    fi
+    if [ -z "$EXEC" ]; then
+        echo "[$canon] SKIP — no executable found (build first, or set ERF_BUILD_DIR)"
+        SKIPPED+=("$canon (no exe)")
+        cd "$HARNESS_DIR"
+        continue
+    fi
+
+    # Find inputs file — prefer inputs_singlelevel, then inputs, then any inputs*
+    INPUTS=""
+    for candidate in inputs_singlelevel inputs inputs*; do
+        [ -f "$candidate" ] && INPUTS="$candidate" && break
+    done
+    if [ -z "$INPUTS" ]; then
+        echo "[$canon] SKIP — no inputs file found"
+        SKIPPED+=("$canon (no inputs)")
+        cd "$HARNESS_DIR"
+        continue
+    fi
+
+    # Cleanup old output before run
+    rm -rf plt_* ucm_diag.dat 2>/dev/null || true
+
+    # Build override args
+    OVERRIDE_ARGS=""
+    if [ -n "${MAX_STEPS:-}" ]; then
+        OVERRIDE_ARGS="max_step=$MAX_STEPS"
+    fi
+
+    # Run the case
+    RUN_LOG="$RESULTS_DIR/${canon}_run.log"
+    echo "[$canon] Running: $EXEC $INPUTS $OVERRIDE_ARGS"
+    if "$EXEC" "$INPUTS" $OVERRIDE_ARGS > "$RUN_LOG" 2>&1; then
+        echo "[$canon] Run completed"
+    else
+        echo "[$canon] FAIL — run crashed (see $RUN_LOG)"
+        FAILED+=("$canon (run)")
+        cd "$HARNESS_DIR"
+        continue
+    fi
+
+    # Find and run check script
+    CHECK_SCRIPT=""
+    for candidate in check_*.py; do
+        [ -f "$candidate" ] && CHECK_SCRIPT="$candidate" && break
+    done
+
+    if [ -z "$CHECK_SCRIPT" ]; then
+        echo "[$canon] FAIL — no check_*.py script in canonical directory"
+        FAILED+=("$canon (no check)")
+        cd "$HARNESS_DIR"
+        continue
+    fi
+
+    CHECK_LOG="$RESULTS_DIR/${canon}_check.log"
+    echo "[$canon] Verifying with: $PYTHON $CHECK_SCRIPT"
+    if "$PYTHON" "$CHECK_SCRIPT" > "$CHECK_LOG" 2>&1; then
+        echo "[$canon] PASS"
+        PASSED+=("$canon")
+    else
+        echo "[$canon] FAIL — check script returned non-zero (see $CHECK_LOG)"
+        tail -20 "$CHECK_LOG"
+        FAILED+=("$canon (check)")
+    fi
+
+    # Optional cleanup
+    if [ "${KEEP_OUTPUT:-0}" != "1" ]; then
+        rm -rf plt_* ucm_diag.dat 2>/dev/null || true
+    fi
+
+    cd "$HARNESS_DIR"
+done
+
+# Summary
+echo ""
+echo "======================================================================"
+echo "SLUCM Regression Summary"
+echo "======================================================================"
+echo "Passed  (${#PASSED[@]}): ${PASSED[*]:-<none>}"
+echo "Failed  (${#FAILED[@]}): ${FAILED[*]:-<none>}"
+echo "Skipped (${#SKIPPED[@]}): ${SKIPPED[*]:-<none>}"
+echo ""
+echo "Full logs: $RESULTS_DIR"
+echo "======================================================================"
+
+if [ ${#FAILED[@]} -gt 0 ]; then
+    exit 1
+fi
+exit 0

@@ -156,8 +156,8 @@ struct UCMParams
     // =========================================================================
 
     amrex::Real H_bldg_uniform = 10.0;      ///< Uniform building height [m]
-    amrex::Real W_road_uniform = 10.0;      ///< Uniform road width [m]
-    amrex::Real W_roof_uniform = 10.0;      ///< Uniform roof width [m]
+    amrex::Real W_road_uniform = 10.0;      ///< Uniform road width [m] (non-zero default allows CSV-driven canonicals to bypass assertion)
+    amrex::Real W_roof_uniform = 10.0;      ///< Uniform roof width [m] (non-zero default allows CSV-driven canonicals to bypass assertion)
 
     // =========================================================================
     // Section 6: Radiative properties (shortwave albedo, Phase 1.4+ diagnostics)

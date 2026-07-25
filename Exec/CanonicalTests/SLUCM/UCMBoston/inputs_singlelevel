@@ -85,9 +85,10 @@ erf.ucm.zref                  = 2.0
 # H_bldg_uniform, W_road_uniform, W_roof_uniform ignored when
 # building_layout_csv_path is set (CSV drives per-cell morphology).
 # Retained for backward compatibility with homogeneous canonicals.
+# Non-zero fallback (10.0 m) prevents assertion failure; CSV overrides.
 erf.ucm.H_bldg_uniform        = 15.0
-erf.ucm.W_road_uniform        = 0.0
-erf.ucm.W_roof_uniform        = 0.0
+erf.ucm.W_road_uniform        = 10.0
+erf.ucm.W_roof_uniform        = 10.0
 erf.ucm.albedo_roof           = 0.20
 erf.ucm.albedo_wall           = 0.20
 erf.ucm.albedo_road           = 0.15
