@@ -468,7 +468,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                 m_ucm_plotfile[lev] = std::make_unique<UCMPlotfile>(m_ucm_params, lev);
             }
             m_ucm_plotfile[lev]->write(*m_ucm_fields[lev], *m_ucm_grid[lev],
-                                       iteration, time, false, lev);
+                                       iteration, time, lev, false);
         }
         
         // Phase 2.5: ATM-grid aggregate plotfile output (once per coarse step)
