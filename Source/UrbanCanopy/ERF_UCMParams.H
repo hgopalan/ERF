@@ -207,6 +207,14 @@ struct UCMParams
     amrex::Real test_surf_temp_K = 293.15;  ///< Placeholder T_sfc before Phase 1.3 [K]
 
     // =========================================================================
+    // Section 10: Phase 3.4 — Stability-aware canyon-atmosphere exchange
+    // =========================================================================
+
+    bool use_stability_correction = false;  ///< Phase 3.4: Enable Obukhov-corrected heat exchange coefficient
+    amrex::Real zeta_max_stable   = 2.0;   ///< Phase 3.4: Clip zeta > 0 at this value (prevent Ch → 0) [-]
+    amrex::Real zeta_min_unstable = -5.0;  ///< Phase 3.4: Clip zeta < 0 at this value (prevent Ch blow-up) [-]
+
+    // =========================================================================
     // Public methods
     // =========================================================================
 

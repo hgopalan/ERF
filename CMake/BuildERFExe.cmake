@@ -310,6 +310,7 @@ function(build_erf_lib erf_lib_name)
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMAtmPlotfile.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMBuildingLayoutReader.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMMaterialRegistry.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMStabilityCorrection.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMParams.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMGrid.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMFields.H
@@ -325,7 +326,8 @@ function(build_erf_lib erf_lib_name)
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMPlotfileCatalog.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMAtmPlotfile.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMBuildingLayoutReader.H
-                   ${SRC_DIR}/UrbanCanopy/ERF_UCMMaterialRegistry.H)
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMMaterialRegistry.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMStabilityCorrection.H)
 
     target_include_directories(${erf_lib_name} PUBLIC
                                $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/UrbanCanopy>)
