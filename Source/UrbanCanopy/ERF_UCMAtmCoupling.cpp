@@ -236,8 +236,8 @@ void apply_ucm_tendency_to_cc_source(
     amrex::Real             feedback_heat,
     amrex::Real             feedback_moisture,
     bool                    has_moisture,
-    bool                    ucm_debug,
-    int                     /*lev*/)
+    int                     /*lev*/,
+    bool                    ucm_debug)
 {
     // Phase 2.11-fix: feedback now split into per-process knobs.
     // Gate on heat feedback for warning; if both are zero, we return early.
@@ -697,8 +697,8 @@ void apply_ucm_momentum_drag_to_source(
     amrex::Real            feedback_momentum,
     bool                   use_gaussian_height_distribution,
     amrex::Real            height_std_threshold_m,
-    bool                   ucm_debug,
-    int                    /*lev*/)
+    int                    /*lev*/,
+    bool                   ucm_debug)
 {
     // Gate wall drag on momentum feedback (independent of heat feedback).
     // Early return if drag is disabled or momentum feedback is zero.
@@ -939,8 +939,8 @@ void apply_ucm_implicit_drag_correction(
     amrex::Real            feedback,
     bool                   use_gaussian_height_distribution,
     amrex::Real            height_std_threshold_m,
-    bool                   ucm_debug,
-    int                    /*lev*/)
+    int                    /*lev*/,
+    bool                   ucm_debug)
 {
     using namespace amrex;
 

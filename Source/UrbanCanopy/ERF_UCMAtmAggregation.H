@@ -109,8 +109,8 @@ void aggregate_ucm_morphology_to_atm(
     const amrex::Geometry&     geom_ucm,
     const amrex::Geometry&     geom_atm,
     int                        grid_ratio,
-    bool                       ucm_debug,
-    int                        lev)
+    int                        lev,
+    bool                       ucm_debug)
 {
     using namespace amrex;
 

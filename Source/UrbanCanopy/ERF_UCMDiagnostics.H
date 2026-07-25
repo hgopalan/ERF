@@ -103,17 +103,15 @@ public:
      * @param[in] H_atm            Aggregated ATM-grid sensible heat flux [optional, Phase 2.5]
      * @param[in] lev      AMR level (default 0)
      */
-    void append(const UCMFields& fields, int nstep, amrex::Real time,
+    void append(const UCMFields& fields, int nstep, amrex::Real time, int lev,
                 const amrex::MultiFab* f_urb_atm = nullptr,
                 const amrex::MultiFab* H_bldg_mean_atm = nullptr,
                 const amrex::MultiFab* H_bldg_std_atm = nullptr,
                 const amrex::MultiFab* lambda_f_atm = nullptr,
-                const amrex::MultiFab* H_atm = nullptr,
-                int lev);
+                const amrex::MultiFab* H_atm = nullptr);
 
 private:
     const UCMParams& m_params;          ///< Reference to parameters
-    int              m_lev;             ///< AMR level
     int              m_last_write_step{-1};  ///< Track last written step (duplicate guard)
     std::string      m_diag_file;       ///< Full path to CSV file
 

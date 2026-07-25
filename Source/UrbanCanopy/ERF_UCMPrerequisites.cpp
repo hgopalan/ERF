@@ -38,10 +38,10 @@ void resolve_wall_drag_mode(const std::string& wall_drag_mode_str,
 }
 
 void check_ucm_prerequisites(const UCMParams& params,
-                              int max_level,
+                              int /*max_level*/,
                               int finest_level,
-                              bool use_terrain,
-                              int lev)
+                              bool /*use_terrain*/,
+                              int /*lev*/)
 {
     // Check 1: anchor_level within bounds
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
@@ -241,7 +241,7 @@ void check_ucm_prerequisites(const UCMParams& params,
 void check_ucm_grid_and_fields(const UCMParams& params,
                                 const UCMGrid& ucm_grid,
                                 const UCMFields& ucm_fields,
-                                int lev)
+                                int /*lev*/)
 {
     // Check that all fields are allocated
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(

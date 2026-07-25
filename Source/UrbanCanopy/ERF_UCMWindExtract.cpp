@@ -115,8 +115,8 @@ void fill_ucm_scalar_from_atm(amrex::MultiFab& ucm_scalar,
                               const amrex::MultiFab& atm_scalar,
                               const UCMGrid& /*ucm_grid*/,
                               const amrex::Geometry& /*geom_atm*/,
-                              int comp,
-                              int /*lev*/)
+                              int /*lev*/,
+                              int comp)
 {
     // Extract scalar from ATM lowest level to UCM grid
     const int klo = 0;

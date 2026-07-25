@@ -148,11 +148,11 @@ void UCMLayer::advance(UCMFields& fields,
                                      m_params.zref, ucm_grid, nz_atm, lev);
 
     // Extract temperature from ATM lowest level
-    fill_ucm_scalar_from_atm(*forcing.T_atm_ref, T_atm_lowest, ucm_grid, geom_atm, 0, lev);
+    fill_ucm_scalar_from_atm(*forcing.T_atm_ref, T_atm_lowest, ucm_grid, geom_atm, lev, 0);
 
     // Extract water vapor (if available; null-safe)
     if (q_atm_lowest.boxArray().size() > 0) {
-        fill_ucm_scalar_from_atm(*forcing.q_atm_ref, q_atm_lowest, ucm_grid, geom_atm, 0, lev);
+        fill_ucm_scalar_from_atm(*forcing.q_atm_ref, q_atm_lowest, ucm_grid, geom_atm, lev, 0);
     }
 
     // Debug: verify extraction results (gated; collectives only when needed)

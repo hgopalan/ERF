@@ -94,8 +94,8 @@ void aggregate_ucm_morphology_to_atm(
     const amrex::Geometry&     geom_ucm,
     const amrex::Geometry&     geom_atm,
     int                        grid_ratio,
-    bool                       ucm_debug = false,
-    int                        lev);
+    int                        lev,
+    bool                       ucm_debug = false);
 
 /**
  * @brief Coarsen UCM fluxes to ATM grid (convention B: area-averaged, no divide-by-f_urb).
@@ -267,8 +267,8 @@ void apply_ucm_tendency_to_cc_source(
     amrex::Real            feedback_heat,           ///< Heat feedback strength [0,1] [Phase 2.11]
     amrex::Real            feedback_moisture,       ///< Moisture feedback strength [0,1] [Phase 2.11]
     bool                   has_moisture,
-    bool                   ucm_debug = false,
-    int                    lev);
+    int                    lev,
+    bool                   ucm_debug = false);
 
 /**
  * @brief Apply BEP momentum drag to xmom_src and ymom_src (Phase 2.8 compressible mode)
@@ -330,8 +330,8 @@ void apply_ucm_momentum_drag_to_source(
     amrex::Real            feedback_momentum,     ///< Momentum drag feedback strength [0,1] [Phase 2.11]
     bool                   use_gaussian_height_distribution,
     amrex::Real            height_std_threshold_m,
-    bool                   ucm_debug = false,
-    int                    lev);
+    int                    lev,
+    bool                   ucm_debug = false);
 
 /**
  * @brief Apply post-projection multiplicative momentum drag correction (Phase 2.8 anelastic stub)
@@ -382,7 +382,7 @@ void apply_ucm_implicit_drag_correction(
     amrex::Real            feedback,
     bool                   use_gaussian_height_distribution,
     amrex::Real            height_std_threshold_m,
-    bool                   ucm_debug = false,
-    int                    lev);
+    int                    lev,
+    bool                   ucm_debug = false);
 
 #endif  // ERF_UCM_ATM_COUPLING_H

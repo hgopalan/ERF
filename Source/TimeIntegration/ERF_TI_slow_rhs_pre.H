@@ -179,8 +179,8 @@
                 m_ucm_params.atm_feedback_heat,
                 m_ucm_params.atm_feedback_moisture,
                 has_moisture_ucm,
-                m_ucm_params.ucm_debug,
-                level);
+                level,
+                m_ucm_params.ucm_debug);
         }
 #endif
 
@@ -279,8 +279,8 @@
                 m_ucm_params.atm_feedback_momentum,
                 m_ucm_params.use_gaussian_height_distribution,
                 m_ucm_params.height_std_threshold_m,
-                m_ucm_params.ucm_debug,
-                level);
+                level,
+                m_ucm_params.ucm_debug);
         }
 #endif
 
