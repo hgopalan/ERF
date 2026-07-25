@@ -454,13 +454,12 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             if (!m_ucm_diagnostics[lev]) {
                 m_ucm_diagnostics[lev] = std::make_unique<UCMDiagnostics>(m_ucm_params, lev);
             }
-            m_ucm_diagnostics[lev]->append(*m_ucm_fields[lev], iteration, time,
+            m_ucm_diagnostics[lev]->append(*m_ucm_fields[lev], iteration, time, lev,
                                            m_ucm_f_urb_atm[lev].get(),
                                            m_ucm_H_bldg_mean_atm[lev].get(),
                                            m_ucm_H_bldg_std_atm[lev].get(),
                                            m_ucm_lambda_f_atm[lev].get(),
-                                           m_ucm_H_atm[lev].get(),
-                                           lev);
+                                           m_ucm_H_atm[lev].get());
         }
 
         // Plotfile output (once per coarse step)
