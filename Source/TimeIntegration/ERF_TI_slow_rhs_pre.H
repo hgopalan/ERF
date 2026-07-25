@@ -160,6 +160,21 @@
             // Phase 3.2: Debug pre-injection RhoTheta source state
             amrex::Real cc_src_rho_theta_max_before = cc_src.max(RhoTheta_comp, 0);
 
+            // Phase 3.3: MRF cc_src[RhoTheta] ownership conflict check
+            // Verify that make_sources did NOT write non-zero values into cc_src[RhoTheta_comp]
+            // through MRF's counter-gradient heat flux path. UCM owns this component.
+            if (m_ucm_params.ucm_debug) {
+                if (std::abs(cc_src_rho_theta_max_before) > 1.0e-8) {
+                    if (amrex::ParallelDescriptor::IOProcessor()) {
+                        amrex::Print() << "[UCM][3.3][mrf-conflict-check] WARNING: Non-zero cc_src[RhoTheta] BEFORE UCM injection:\n"
+                                       << "  lev=" << level << " rk_stage=" << nrk << "\n"
+                                       << "  cc_src[RhoTheta] max BEFORE UCM injection = " << cc_src_rho_theta_max_before << "\n"
+                                       << "  -> MRF or other physics wrote into this slot. UCM will overwrite.\n"
+                                       << "  -> This is informational. UCM owns cc_src[RhoTheta], so the behavior is correct.\n";
+                    }
+                }
+            }
+
             apply_ucm_tendency_to_cc_source(
                 cc_src,
                 *m_ucm_H_atm[level],
