@@ -76,8 +76,8 @@ public:
      * @param[in] lev              AMR level
      */
     void write(const UCMFields& fields, const UCMGrid& grid,
-               int nstep, amrex::Real time, bool is_final = false,
-               int lev);
+               int nstep, amrex::Real time, int lev,
+               bool is_final = false);
 
 private:
     const UCMParams& m_params;          ///< Reference to parameters

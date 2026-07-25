@@ -91,8 +91,8 @@ public:
               const amrex::MultiFab&    H_wall_atm,       ///< Phase 2.7
               const amrex::MultiFab&    H_roof_atm,       ///< Phase 2.7
               const amrex::Geometry&    geom,
-              bool                      ucm_debug = false,
-              int                       lev);
+              int                       lev,
+              bool                      ucm_debug = false);
 
 private:
     int m_last_write_step{-1};  ///< Track last written step (duplicate guard)

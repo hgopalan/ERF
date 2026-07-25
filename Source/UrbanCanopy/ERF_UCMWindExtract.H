@@ -196,7 +196,7 @@ void fill_ucm_scalar_from_atm(amrex::MultiFab& ucm_scalar,
                               const amrex::MultiFab& atm_scalar,
                               const UCMGrid& ucm_grid,
                               const amrex::Geometry& geom_atm,
-                              int comp = 0,
-                              int lev);
+                              int lev,
+                              int comp = 0);
 
 #endif  // ERF_UCM_WIND_EXTRACT_H

@@ -356,7 +356,8 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             *m_ucm_fields[lev]->is_urban,
             m_ucm_grid[lev]->geom, Geom(lev),
             m_ucm_params.grid_ratio,
-            m_ucm_params.ucm_debug, lev);
+            lev,
+            m_ucm_params.ucm_debug);
 
         // Phase 2.5: One-time BANNER for aggregates (collective min/max outside IOProcessor guard)
         static bool aggregate_banner_printed = false;

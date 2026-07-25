@@ -40,8 +40,8 @@ void UCMAtmPlotfile::write(int                       step,
                            const amrex::MultiFab&    H_wall_atm,       ///< Phase 2.7
                            const amrex::MultiFab&    H_roof_atm,       ///< Phase 2.7
                            const amrex::Geometry&    geom,
-                           bool                      ucm_debug,
-                           int                       lev)
+                           int                       lev,
+                           bool                      ucm_debug)
 {
     using namespace amrex;
 

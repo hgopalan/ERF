@@ -16,7 +16,7 @@
 #include <algorithm>
 
 UCMDiagnostics::UCMDiagnostics(const UCMParams& params, int lev)
-    : m_params(params), m_lev(lev)
+    : m_params(params)
 {
     // Build full path to diagnostics file
     m_diag_file = params.ucm_diag_file;
@@ -90,13 +90,12 @@ void UCMDiagnostics::write_row(int nstep, amrex::Real time,
     ofs.close();
 }
 
-void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time,
+void UCMDiagnostics::append(const UCMFields& fields, int nstep, amrex::Real time, int lev,
                            const amrex::MultiFab* f_urb_atm,
                            const amrex::MultiFab* H_bldg_mean_atm,
                            const amrex::MultiFab* H_bldg_std_atm,
                            const amrex::MultiFab* lambda_f_atm,
-                           const amrex::MultiFab* H_atm,
-                           int /*lev*/)
+                           const amrex::MultiFab* H_atm)
 {
     // Duplicate-write guard
     if (nstep == m_last_write_step) {

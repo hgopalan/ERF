@@ -36,8 +36,8 @@ std::string UCMPlotfile::get_plotfile_name(int nstep) const
 }
 
 void UCMPlotfile::write(const UCMFields& fields, const UCMGrid& grid,
-                       int nstep, amrex::Real time, bool is_final,
-                       int lev)
+                       int nstep, amrex::Real time, int lev,
+                       bool is_final)
 {
     // Duplicate-write guard
     if (nstep == m_last_write_step) {
