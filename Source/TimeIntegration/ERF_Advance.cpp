@@ -491,8 +491,8 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                *m_ucm_H_wall_atm[lev],       // Phase 2.7: wall flux
                *m_ucm_H_roof_atm[lev],       // Phase 2.7: roof flux (incl AH)
                Geom(lev),
-               m_ucm_params.ucm_debug,
-               lev);
+               lev,
+               m_ucm_params.ucm_debug);
         }
     }
     #endif
