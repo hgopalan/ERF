@@ -441,6 +441,21 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                               << "  H_wall_atm  min=" << h_wall_min << " max=" << h_wall_max << " [W/m2]\n"
                               << "  H_roof_atm  min=" << h_roof_min << " max=" << h_roof_max << " [W/m2]\n";
            }
+
+           // Phase 3.2: Pre-injection check for ATM data plumbing
+           // Verify T_atm and wind fields reaching injection point
+           const amrex::Real h_road_int = m_ucm_H_road_atm[lev]->sum(0, 0) * (Geom(lev).CellSize(0) * Geom(lev).CellSize(1));
+           const amrex::Real h_wall_int = m_ucm_H_wall_atm[lev]->sum(0, 0) * (Geom(lev).CellSize(0) * Geom(lev).CellSize(1));
+           const amrex::Real h_roof_int = m_ucm_H_roof_atm[lev]->sum(0, 0) * (Geom(lev).CellSize(0) * Geom(lev).CellSize(1));
+
+           if (amrex::ParallelDescriptor::IOProcessor()) {
+               amrex::Print() << "[UCM][3.2][pre-injection-check]\n"
+                              << "  atm_feedback_heat=" << m_ucm_params.atm_feedback_heat 
+                              << "  atm_feedback_momentum=" << m_ucm_params.atm_feedback_momentum << "\n"
+                              << "  H_road_atm integral = " << h_road_int << " W (sum * dx^2)\n"
+                              << "  H_wall_atm integral = " << h_wall_int << " W\n"
+                              << "  H_roof_atm integral = " << h_roof_int << " W\n";
+           }
         }
 
         // Build is_urban mask on ATM grid if not already allocated

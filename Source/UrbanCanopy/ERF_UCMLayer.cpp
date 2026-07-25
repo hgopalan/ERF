@@ -372,5 +372,21 @@ void UCMLayer::advance(UCMFields& fields,
             amrex::Print() << "  H_sensible min=" << H_sens_min << " max=" << H_sens_max << " W/m2"
                           << " (= H_road+H_wall+H_roof; AH already in H_roof)\n";
         }
+
+        // Phase 3.2: SEB-inputs diagnostic — verify ATM fields are being consumed
+        amrex::Real tat_min = T_atm_lowest.min(0, 0), tat_max = T_atm_lowest.max(0, 0);
+        amrex::Real uat_min = xvel.min(0, 0), uat_max = xvel.max(0, 0);
+        amrex::Real vat_min = yvel.min(0, 0), vat_max = yvel.max(0, 0);
+
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.2][SEB-inputs] step: "
+                          << "T_atm_ucm min=" << tat_min << " max=" << tat_max << " K\n"
+                          << "        U_atm_ucm min=" << uat_min << " max=" << uat_max << " m/s\n"
+                          << "        V_atm_ucm min=" << vat_min << " max=" << vat_max << " m/s\n"
+                          << "        H_road min=" << H_road_min << " max=" << H_road_max << " W/m2\n"
+                          << "        H_wall min=" << H_wall_min << " max=" << H_wall_max << " W/m2\n"
+                          << "        H_roof min=" << H_roof_min << " max=" << H_roof_max << " W/m2\n"
+                          << "        H_sensible min=" << H_sens_min << " max=" << H_sens_max << " W/m2\n";
+        }
     }
 }

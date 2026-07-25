@@ -157,6 +157,9 @@
                     "[UCM][2.7] Terrain-enabled UCM coupling requires z_phys_nd.");
             }
 
+            // Phase 3.2: Debug pre-injection RhoTheta source state
+            amrex::Real cc_src_rho_theta_max_before = cc_src.max(RhoTheta_comp, 0);
+
             apply_ucm_tendency_to_cc_source(
                 cc_src,
                 *m_ucm_H_atm[level],
@@ -181,6 +184,16 @@
                 has_moisture_ucm,
                 level,
                 m_ucm_params.ucm_debug);
+
+            // Phase 3.2: Debug post-injection RhoTheta source state
+            if (m_ucm_params.ucm_debug) {
+                amrex::Real cc_src_rho_theta_max_after = cc_src.max(RhoTheta_comp, 0);
+                if (amrex::ParallelDescriptor::IOProcessor()) {
+                    amrex::Print() << "[UCM][3.2][rk-stage-inject] lev=" << level << " rk_stage=" << nrk << "\n"
+                                   << "  cc_source[RhoTheta] before: max=" << cc_src_rho_theta_max_before << "\n"
+                                   << "  cc_source[RhoTheta] after:  max=" << cc_src_rho_theta_max_after << "\n";
+                }
+            }
         }
 #endif
 
