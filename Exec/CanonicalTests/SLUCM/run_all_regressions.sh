@@ -11,8 +11,8 @@
 #   ./run_all_regressions.sh UCMBoston UCMSalamancaMadrid  # run subset
 #
 # Environment:
-#   ERF_BUILD_DIR      — path to a build directory containing erf_ucm_* executables
-#                        (default: assume executable lives inside each canonical dir)
+#   ERF_EXEC           — path to the erf_exec binary (default: searches
+#                        for 'erf_exec' in each canonical dir, then $PATH)
 #   PYTHON             — Python interpreter (default: python3)
 #   MAX_STEPS          — override max_step for quick smoke tests (default: use inputs value)
 #   KEEP_OUTPUT        — 1 to keep plotfiles after run (default: 0 = cleanup)
@@ -29,6 +29,28 @@ HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON="${PYTHON:-python3}"
 RESULTS_DIR="${HARNESS_DIR}/_regression_results_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$RESULTS_DIR"
+
+# -----------------------------------------------------------------------
+# Resolve the single shared executable.
+# Priority:
+#   1. ERF_EXEC env var (explicit path)
+#   2. erf_exec in the harness directory
+#   3. erf_exec on $PATH
+# -----------------------------------------------------------------------
+if [ -n "${ERF_EXEC:-}" ]; then
+    GLOBAL_EXEC="$ERF_EXEC"
+elif [ -x "$HARNESS_DIR/erf_exec" ]; then
+    GLOBAL_EXEC="$HARNESS_DIR/erf_exec"
+elif command -v erf_exec &>/dev/null; then
+    GLOBAL_EXEC="$(command -v erf_exec)"
+else
+    echo "ERROR: erf_exec not found."
+    echo "  Set ERF_EXEC=/path/to/erf_exec, copy erf_exec into $HARNESS_DIR,"
+    echo "  or add erf_exec to your PATH."
+    exit 2
+fi
+
+echo "  Executable:   $GLOBAL_EXEC"
 
 # Discover all canonical directories (must contain an inputs* file)
 ALL_CANONICALS=()
@@ -49,6 +71,7 @@ echo "======================================================================"
 echo "SLUCM Regression Harness"
 echo "  Harness dir:  $HARNESS_DIR"
 echo "  Results dir:  $RESULTS_DIR"
+echo "  Executable:   $GLOBAL_EXEC"
 echo "  Canonicals:   ${CANONICALS[*]}"
 echo "======================================================================"
 
@@ -68,23 +91,6 @@ for canon in "${CANONICALS[@]}"; do
     echo "----------------------------------------------------------------------"
 
     cd "$CANON_DIR"
-
-    # Find executable: prefer local, fall back to ERF_BUILD_DIR
-    EXEC=""
-    for candidate in ./erf_ucm_* ./main3d.*; do
-        [ -x "$candidate" ] && EXEC="$candidate" && break
-    done
-    if [ -z "$EXEC" ] && [ -n "${ERF_BUILD_DIR:-}" ]; then
-        for candidate in "$ERF_BUILD_DIR"/erf_ucm_* "$ERF_BUILD_DIR"/main3d.*; do
-            [ -x "$candidate" ] && EXEC="$candidate" && break
-        done
-    fi
-    if [ -z "$EXEC" ]; then
-        echo "[$canon] SKIP — no executable found (build first, or set ERF_BUILD_DIR)"
-        SKIPPED+=("$canon (no exe)")
-        cd "$HARNESS_DIR"
-        continue
-    fi
 
     # Find inputs file — prefer inputs_singlelevel, then inputs, then any inputs*
     INPUTS=""
@@ -109,8 +115,8 @@ for canon in "${CANONICALS[@]}"; do
 
     # Run the case
     RUN_LOG="$RESULTS_DIR/${canon}_run.log"
-    echo "[$canon] Running: $EXEC $INPUTS $OVERRIDE_ARGS"
-    if "$EXEC" "$INPUTS" $OVERRIDE_ARGS > "$RUN_LOG" 2>&1; then
+    echo "[$canon] Running: $GLOBAL_EXEC $INPUTS $OVERRIDE_ARGS"
+    if "$GLOBAL_EXEC" "$INPUTS" $OVERRIDE_ARGS > "$RUN_LOG" 2>&1; then
         echo "[$canon] Run completed"
     else
         echo "[$canon] FAIL — run crashed (see $RUN_LOG)"
