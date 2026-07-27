@@ -1,0 +1,121 @@
+# Compressible dycore + MRF PBL (matches Phase 2.8 validated path)
+max_step         = 600
+erf.cfl          = 0.5
+amrex.fpe_trap_invalid = 0
+
+fabarray.mfiter_tile_size = 1024 1024 1024
+
+# Domain: 20 km × 20 km × 1280 m; ATM 20×20×64 → UCM 80×80 (grid_ratio=4)
+geometry.prob_extent  = 20000.0 20000.0 1280.0
+amr.n_cell            = 20      20      64
+geometry.is_periodic  = 0        1      0
+
+# Boundary conditions (inflow/outflow in x, periodic in y, flat terrain)
+xlo.type = "Inflow"
+xlo.dirichlet_file = "inflow_boston.txt"
+xhi.type = "Outflow"
+
+# MOST reference height must be above tallest building (H=100 m downtown).
+# Set to 200 m ~= 2*H_max for surface-layer similarity theory to hold.
+zlo.type              = "surface_layer"
+erf.most.z0           = 1.5
+erf.most.zref         = 200.0
+erf.most.surf_temp_flux = 0.02
+zhi.type              = "SlipWall"
+zhi.theta_grad        = 0.001
+
+# Sponge at inflow (scaled to 20 km x-extent: xlo_sponge_end = -7000 m)
+#erf.sponge_type = "input_sponge"
+#erf.input_sponge_file = "inflow_boston.txt"
+#erf.sponge_strength = 0.2
+#erf.use_xlo_sponge_damping = true
+#erf.xlo_sponge_end = -7000.0
+
+# Rayleigh damping at top
+erf.rayleigh_damp_W = true
+erf.rayleigh_dampcoef = 0.2
+erf.rayleigh_zdamp = 250.0
+
+# Initialization
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "sounding_boston"
+
+# PBL: MRF (compressible-validated in Phase 2.8)
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = false
+
+# Solver / physics
+erf.terrain_type     = None
+erf.use_moisture     = false
+erf.use_gravity      = true
+erf.molec_diff_type  = "None"
+erf.les_type         = "None"
+erf.theta_ref        = 295.0
+erf.transport_scalar = false
+
+# Diagnostics
+erf.sum_interval     = 50
+erf.v                = 1
+amr.v                = 1
+amr.max_level        = 1
+amr.ref_ratio        = 2
+amr.blocking_factor  = 4
+amr.max_grid_size    = 32
+amr.n_error_buf      = 2
+amr.regrid_int       = -1
+
+# Plotfiles
+erf.plot_file_1      = "plt_multilevel_"
+erf.plot_int_1       = 100
+erf.plot_vars_1      = x_velocity y_velocity z_velocity theta
+amr.plot_int         = 100
+amr.check_int        = -1
+erf.check_int        = -1
+
+# Phase 3.6: static refinement over the urban core (center 10 km x 10 km)
+erf.refinement_indicators = urban_core
+erf.urban_core.max_level  = 1
+erf.urban_core.in_box_lo  = 5000.0 5000.0
+erf.urban_core.in_box_hi  = 15000.0 15000.0
+
+# SLUCM — one-way coupling (Phase 2.11 baseline)
+erf.ucm.enable                = true
+erf.ucm.ucm_debug             = 1
+erf.ucm.anchor_level          = 1
+erf.ucm.grid_ratio            = 4
+# Phase 2.11 baseline: momentum drag active (BEP-required for tall buildings),
+# heat feedback OFF (deferred to Phase 3.2 two-way heat coupling).
+erf.ucm.atm_feedback_momentum = 1.0
+erf.ucm.atm_feedback_heat     = 0.0
+erf.ucm.atm_feedback_moisture = 0.0
+erf.ucm.zref                  = 2.0
+# H_bldg_uniform, W_road_uniform, W_roof_uniform ignored when
+# building_layout_csv_path is set (CSV drives per-cell morphology).
+# Retained for backward compatibility with homogeneous canonicals.
+# Non-zero fallback (10.0 m) prevents assertion failure; CSV overrides.
+erf.ucm.H_bldg_uniform        = 15.0
+erf.ucm.W_road_uniform        = 10.0
+erf.ucm.W_roof_uniform        = 10.0
+erf.ucm.albedo_roof           = 0.20
+erf.ucm.albedo_wall           = 0.20
+erf.ucm.albedo_road           = 0.15
+erf.ucm.emissivity_roof       = 0.90
+erf.ucm.emissivity_wall       = 0.90
+erf.ucm.emissivity_road       = 0.94
+erf.ucm.ucm_plot_int          = 100
+erf.ucm.ucm_atm_plot_int      = 100
+erf.ucm.ucm_diag_file         = "ucm_diag.dat"
+erf.ucm.test_surf_temp_K      = 300.0
+erf.ucm.AH_uniform_Wm2        = 30.0
+erf.ucm.AH_profile_type_default = 1
+erf.ucm.use_facet3d_injection = 1
+erf.ucm.use_gaussian_height_distribution = 0
+erf.ucm.wall_drag_mode        = "explicit"
+erf.ucm.Cd_wall               = 0.4
+erf.ucm.Cd_roof               = 0.15
+erf.ucm.building_layout_csv_path = "building_layout.csv"
+erf.ucm.material_library_csv_path = "materials.csv"
