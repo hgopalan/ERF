@@ -446,8 +446,7 @@ void UCMLayer::advance(UCMFields& fields,
         amrex::ParallelDescriptor::ReduceLongSum(&n_diverged_road, 1);
 
         if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][3.5A-hotfix][clamp-count] step=" << 0  // TODO: pass step
-                           << " time=" << time
+            amrex::Print() << "[UCM][3.5A-hotfix][clamp-count] time=" << time
                            << "\n  Clamped to T_skin_min=260K:  roof=" << n_clamped_roof
                            << "  wall=" << n_clamped_wall
                            << "  road=" << n_clamped_road

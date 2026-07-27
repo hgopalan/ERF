@@ -189,22 +189,23 @@ def main():
     for lf in log_files:
         try:
             with open(lf) as f:
-                for line in f:
-                    if "[UCM][3.5A-hotfix][clamp-count]" in line:
-                        # Parse "Clamped to T_skin_min=260K:  roof=N  wall=N  road=N"
-                        import re
-                        # Extract clamped counts
-                        match_clamped = re.search(r"roof=(\d+)\s+wall=(\d+)\s+road=(\d+)", line)
-                        if match_clamped:
-                            max_clamped_roof = max(max_clamped_roof, int(match_clamped.group(1)))
-                            max_clamped_wall = max(max_clamped_wall, int(match_clamped.group(2)))
-                            max_clamped_road = max(max_clamped_road, int(match_clamped.group(3)))
-                        # Extract diverged counts
-                        match_diverged = re.search(r"roof=(\d+)\s+wall=(\d+)\s+road=(\d+)", line.split("Newton diverged")[1] if "Newton diverged" in line else "")
-                        if match_diverged:
-                            max_diverged_roof = max(max_diverged_roof, int(match_diverged.group(1)))
-                            max_diverged_wall = max(max_diverged_wall, int(match_diverged.group(2)))
-                            max_diverged_road = max(max_diverged_road, int(match_diverged.group(3)))
+                content = f.read()
+                # Find all clamp-count blocks (multiline)
+                import re
+                blocks = re.findall(r'\[UCM\]\[3\.5A-hotfix\]\[clamp-count\].*?(?=\n\[|$)', content, re.DOTALL)
+                for block in blocks:
+                    # Extract clamped counts from line like "Clamped to T_skin_min=260K:  roof=3  wall=5  road=7"
+                    match_clamped = re.search(r'Clamped to T_skin_min=260K:.*?roof=(\d+)\s+wall=(\d+)\s+road=(\d+)', block)
+                    if match_clamped:
+                        max_clamped_roof = max(max_clamped_roof, int(match_clamped.group(1)))
+                        max_clamped_wall = max(max_clamped_wall, int(match_clamped.group(2)))
+                        max_clamped_road = max(max_clamped_road, int(match_clamped.group(3)))
+                    # Extract diverged counts from line like "Newton diverged (hit max_iter): roof=0  wall=0  road=0"
+                    match_diverged = re.search(r'Newton diverged.*?roof=(\d+)\s+wall=(\d+)\s+road=(\d+)', block)
+                    if match_diverged:
+                        max_diverged_roof = max(max_diverged_roof, int(match_diverged.group(1)))
+                        max_diverged_wall = max(max_diverged_wall, int(match_diverged.group(2)))
+                        max_diverged_road = max(max_diverged_road, int(match_diverged.group(3)))
         except Exception:
             pass
 
