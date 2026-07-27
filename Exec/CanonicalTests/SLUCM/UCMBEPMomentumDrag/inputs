@@ -118,7 +118,7 @@ erf.ucm.ucm_atm_plot_int    = 1
 erf.ucm.ucm_diag_file       = "ucm_diag.dat"
 
 erf.ucm.test_ustar          = 0.0
-erf.ucm.test_surf_temp_K    = 293.15
+erf.ucm.T_init_uniform_K      = 293.15
 
 # Phase 2.6 anthropogenic heat (for testing injection)
 erf.ucm.AH_uniform_Wm2          = 50.0      # constant [W/m^2]

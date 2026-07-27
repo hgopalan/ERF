@@ -133,6 +133,9 @@ void UCMParams::read_from_parmparse()
     pp.query("T_skin_init_K", T_skin_init_K);
     pp.query("T_canyon_init_K", T_canyon_init_K);
 
+    // Section 11b: Phase 3.5a-hotfix4 — Unified initial temperature
+    pp.query("T_init_uniform_K", T_init_uniform_K);
+
     // Section 12: Phase 3.5B — Prescribed diurnal SW/LW radiation forcing
     pp.query("use_prescribed_radiation", use_prescribed_radiation);
     pp.query("lat_deg", lat_deg);
