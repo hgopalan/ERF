@@ -44,6 +44,7 @@
 #define ERF_UCM_STABILITY_CORRECTION_H
 
 #include <AMReX_REAL.H>
+#include <AMReX_GpuQualifiers.H>
 #include <cmath>
 
 /**
@@ -180,13 +181,14 @@ compute_ch_stability_correction (amrex::Real Ch_base,
     // Compute dimensionless stability parameter
     amrex::Real zeta = zref / olen;
 
-    // Clip zeta to physically reasonable range
+    // Clip zeta to physically reasonable range using ternary operators
+    // (compatible with both host and device code)
     if (zeta > 0.0) {
         // Stable: clip to [0, zeta_max_stable]
-        zeta = std::min(zeta, zeta_max_stable);
+        zeta = (zeta > zeta_max_stable) ? zeta_max_stable : zeta;
     } else {
         // Unstable: clip to [zeta_min_unstable, 0]
-        zeta = std::max(zeta, zeta_min_unstable);
+        zeta = (zeta < zeta_min_unstable) ? zeta_min_unstable : zeta;
     }
 
     // Compute stability correction multiplier: 1 / Phi_h(zeta)
