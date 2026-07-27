@@ -97,6 +97,36 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
 
+    // Phase 3.5A-diag: T_slab state at UCMLayer::advance() entry.
+    // Compares slab-top (comp 0) to slab-deep (last comp) to detect
+    // initialization bugs or slab-conduction corruption between steps.
+    if (m_params.ucm_debug) {
+        // Collectives on ALL ranks
+        amrex::Real T1_roof_min = fields.T_slab_roof->min(0, 0);
+        amrex::Real T1_roof_max = fields.T_slab_roof->max(0, 0);
+        amrex::Real T1_wall_min = fields.T_slab_wall->min(0, 0);
+        amrex::Real T1_wall_max = fields.T_slab_wall->max(0, 0);
+        amrex::Real T1_road_min = fields.T_slab_road->min(0, 0);
+        amrex::Real T1_road_max = fields.T_slab_road->max(0, 0);
+        const int nlyr = fields.T_slab_roof->nComp() - 1;
+        amrex::Real TN_roof_min = fields.T_slab_roof->min(nlyr, 0);
+        amrex::Real TN_roof_max = fields.T_slab_roof->max(nlyr, 0);
+        amrex::Real TN_wall_min = fields.T_slab_wall->min(nlyr, 0);
+        amrex::Real TN_wall_max = fields.T_slab_wall->max(nlyr, 0);
+        amrex::Real TN_road_min = fields.T_slab_road->min(nlyr, 0);
+        amrex::Real TN_road_max = fields.T_slab_road->max(nlyr, 0);
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.5A-diag][slab-top-ENTRY] "
+                           << "T_slab_roof[0]=[" << T1_roof_min << "," << T1_roof_max << "] K "
+                           << "T_slab_wall[0]=[" << T1_wall_min << "," << T1_wall_max << "] K "
+                           << "T_slab_road[0]=[" << T1_road_min << "," << T1_road_max << "] K\n"
+                           << "[UCM][3.5A-diag][slab-deep-ENTRY] "
+                           << "T_slab_roof[" << nlyr << "]=[" << TN_roof_min << "," << TN_roof_max << "] K "
+                           << "T_slab_wall[" << nlyr << "]=[" << TN_wall_min << "," << TN_wall_max << "] K "
+                           << "T_slab_road[" << nlyr << "]=[" << TN_road_min << "," << TN_road_max << "] K\n";
+        }
+    }
+
     // Debug: per-step ATM forcing summary on UCM grid (gated; prints every step)
     if (m_params.ucm_debug) {
         // Collectives on ALL ranks (must be outside IOProcessor guard)
@@ -635,6 +665,35 @@ void UCMLayer::advance(UCMFields& fields,
             fields.rho_cp_road->array(mfi),
             fields.is_urban->array(mfi),
             bx, dt, N_layers, slab_L, T_deep);
+    }
+
+    // Phase 3.5A-diag: T_slab state after slab conduction advance.
+    // Compare to slab-top-ENTRY: dT1/dt should be small over one timestep.
+    // Large delta = slab conduction is receiving bad H or has a numerics bug.
+    if (m_params.ucm_debug) {
+        amrex::Real T1_roof_min = fields.T_slab_roof->min(0, 0);
+        amrex::Real T1_roof_max = fields.T_slab_roof->max(0, 0);
+        amrex::Real T1_wall_min = fields.T_slab_wall->min(0, 0);
+        amrex::Real T1_wall_max = fields.T_slab_wall->max(0, 0);
+        amrex::Real T1_road_min = fields.T_slab_road->min(0, 0);
+        amrex::Real T1_road_max = fields.T_slab_road->max(0, 0);
+        // Also grab H_roof/wall/road that DROVE the conduction (Newton values)
+        amrex::Real Hr_min = fields.H_roof->min(0, 0);
+        amrex::Real Hr_max = fields.H_roof->max(0, 0);
+        amrex::Real Hw_min = fields.H_wall->min(0, 0);
+        amrex::Real Hw_max = fields.H_wall->max(0, 0);
+        amrex::Real Hd_min = fields.H_road->min(0, 0);
+        amrex::Real Hd_max = fields.H_road->max(0, 0);
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.5A-diag][slab-top-AFTER-CONDUCTION] "
+                           << "T_slab_roof[0]=[" << T1_roof_min << "," << T1_roof_max << "] K "
+                           << "T_slab_wall[0]=[" << T1_wall_min << "," << T1_wall_max << "] K "
+                           << "T_slab_road[0]=[" << T1_road_min << "," << T1_road_max << "] K\n"
+                           << "[UCM][3.5A-diag][H-into-slab] "
+                           << "H_roof=[" << Hr_min << "," << Hr_max << "] W/m2 "
+                           << "H_wall=[" << Hw_min << "," << Hw_max << "] W/m2 "
+                           << "H_road=[" << Hd_min << "," << Hd_max << "] W/m2\n";
+        }
     }
 
     // Phase 3.5A: Update canyon-air temperature using Newton-computed H (for consistency)
