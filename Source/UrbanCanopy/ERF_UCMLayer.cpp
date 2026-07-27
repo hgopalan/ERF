@@ -264,6 +264,14 @@ void UCMLayer::advance(UCMFields& fields,
     amrex::Long n_diverged_wall = 0;
     amrex::Long n_diverged_road = 0;
 
+        // ← ADD THESE 6 LINES HERE (after line 265):
+    amrex::Long* p_clamped_roof  = &n_clamped_roof;
+    amrex::Long* p_diverged_roof = &n_diverged_roof;
+    amrex::Long* p_clamped_wall  = &n_clamped_wall;
+    amrex::Long* p_diverged_wall = &n_diverged_wall;
+    amrex::Long* p_clamped_road  = &n_clamped_road;
+    amrex::Long* p_diverged_road = &n_diverged_road;
+
     // Scratch MultiFab for per-cell diagnostics
     // Components: 0=T_final, 1=T_unclamped, 2=residual, 3=n_iter,
     //             4=SW_abs, 5=LW_abs, 6=H_sens, 7=G_cond
@@ -355,10 +363,10 @@ void UCMLayer::advance(UCMFields& fields,
                 constexpr amrex::Real T_min_K = 260.0;
                 constexpr amrex::Real T_clamp_tol = 0.01;
                 if (std::abs(Tskin_rf(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
-                    amrex::Gpu::Atomic::AddNoRet(&n_clamped_roof, amrex::Long(1));
+                    amrex::Gpu::Atomic::AddNoRet(p_clamped_roof, amrex::Long(1));
                 }
                 if (n_iter >= max_iter && residual > tol_K) {
-                    amrex::Gpu::Atomic::AddNoRet(&n_diverged_roof, amrex::Long(1));
+                    amrex::Gpu::Atomic::AddNoRet(p_diverged_roof, amrex::Long(1));
                 }
             }
 
@@ -390,10 +398,10 @@ void UCMLayer::advance(UCMFields& fields,
                 constexpr amrex::Real T_min_K = 260.0;
                 constexpr amrex::Real T_clamp_tol = 0.01;
                 if (std::abs(Tskin_wl(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
-                    amrex::Gpu::Atomic::AddNoRet(&n_clamped_wall, amrex::Long(1));
+                    amrex::Gpu::Atomic::AddNoRet(p_clamped_wall, amrex::Long(1));
                 }
                 if (n_iter >= max_iter && residual > tol_K) {
-                    amrex::Gpu::Atomic::AddNoRet(&n_diverged_wall, amrex::Long(1));
+                    amrex::Gpu::Atomic::AddNoRet(p_diverged_wall, amrex::Long(1));
                 }
             }
 
@@ -425,10 +433,10 @@ void UCMLayer::advance(UCMFields& fields,
                 constexpr amrex::Real T_min_K = 260.0;
                 constexpr amrex::Real T_clamp_tol = 0.01;
                 if (std::abs(Tskin_rd(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
-                    amrex::Gpu::Atomic::AddNoRet(&n_clamped_road, amrex::Long(1));
+                    amrex::Gpu::Atomic::AddNoRet(p_clamped_road, amrex::Long(1));
                 }
                 if (n_iter >= max_iter && residual > tol_K) {
-                    amrex::Gpu::Atomic::AddNoRet(&n_diverged_road, amrex::Long(1));
+                    amrex::Gpu::Atomic::AddNoRet(p_diverged_road, amrex::Long(1));
                 }
             }
 
