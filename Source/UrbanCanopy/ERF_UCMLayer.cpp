@@ -16,6 +16,7 @@
 
 #include <UrbanCanopy/ERF_UCMLayer.H>
 #include <UrbanCanopy/ERF_UCMSlabConduction.H>
+#include <UrbanCanopy/ERF_UCMSEBSolver.H>
 #include <UrbanCanopy/ERF_UCMAllocate.H>
 #include <UrbanCanopy/ERF_UCMShadowing.H>
 #include <UrbanCanopy/ERF_UCMStabilityCorrection.H>
@@ -209,16 +210,139 @@ void UCMLayer::advance(UCMFields& fields,
     // Step 3: Solve facet SEB and advance slab conduction
     // ========================================================================
 
-    // Simplified placeholder: Initialize with reasonable values
-    // Full implementation deferred to ensure compilation success
+    // Phase 3.5A: per-facet Newton-iteration SEB solve
+    // T_skin_* are persistent (not reset); solver updates them in-place.
+    // Slab T1 comes from fields.T_slab_* (top interior layer, comp=0).
 
-    amrex::Real T_init = 293.0;  // Initial skin temperature [K]
-    amrex::Real T_canyon_init = 290.0;  // Initial canyon air temperature [K]
+    const amrex::Real sigma_sb = 5.670374419e-8;
+    const amrex::Real rho_cp   = 1.2 * Cp_d;   // [J/m^3/K]
+    const amrex::Real Ch_roof  = m_params.Ch_roof;
+    const amrex::Real Ch_wall  = m_params.Ch_wall;
+    const amrex::Real Ch_road  = m_params.Ch_road;
+    const amrex::Real dz_slab  = m_params.slab_dz;
+    const int         max_iter = m_params.newton_max_iter;
+    const amrex::Real tol_K    = m_params.newton_tol_K;
+    const amrex::Real SW_val   = sw_val;   // from Step 2 (analytical)
+    const amrex::Real LW_val   = 350.0;
 
-    fields.T_skin_roof->setVal(T_init);
-    fields.T_skin_wall->setVal(T_init);
-    fields.T_skin_road->setVal(T_init);
-    fields.T_canyon_air->setVal(T_canyon_init);
+    for (amrex::MFIter mfi(*fields.T_skin_roof, amrex::TilingIfNotGPU());
+         mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& bx = mfi.tilebox();
+
+        auto const is_urb   = fields.is_urban->const_array(mfi);
+        auto const svf_wall = fields.SVF_wall->const_array(mfi);
+        auto const svf_road = fields.SVF_road->const_array(mfi);
+        auto const alb_rf   = fields.albedo_roof->const_array(mfi);
+        auto const alb_wl   = fields.albedo_wall->const_array(mfi);
+        auto const alb_rd   = fields.albedo_road->const_array(mfi);
+        auto const eps_rf   = fields.emissivity_roof->const_array(mfi);
+        auto const eps_wl   = fields.emissivity_wall->const_array(mfi);
+        auto const eps_rd   = fields.emissivity_road->const_array(mfi);
+        auto const k_rf     = fields.k_therm_roof->const_array(mfi);
+        auto const k_wl     = fields.k_therm_wall->const_array(mfi);
+        auto const k_rd     = fields.k_therm_road->const_array(mfi);
+        auto const U_a      = forcing.wind_ref->const_array(mfi);  // comp 0 = U
+        auto const T_can_a  = fields.T_canyon_air->const_array(mfi);
+
+        // Slab top-layer T (comp=0 of T_slab_* is the uppermost interior node)
+        auto const T1_rf    = fields.T_slab_roof->const_array(mfi);   // comp 0
+        auto const T1_wl    = fields.T_slab_wall->const_array(mfi);
+        auto const T1_rd    = fields.T_slab_road->const_array(mfi);
+
+        auto Tskin_rf = fields.T_skin_roof->array(mfi);
+        auto Tskin_wl = fields.T_skin_wall->array(mfi);
+        auto Tskin_rd = fields.T_skin_road->array(mfi);
+        auto h_roof_a = fields.H_roof->array(mfi);
+        auto h_wall_a = fields.H_wall->array(mfi);
+        auto h_road_a = fields.H_road->array(mfi);
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            if (is_urb(i,j,0) == 0) return;
+
+            amrex::Real U = amrex::max(amrex::sqrt(U_a(i,j,0)*U_a(i,j,0)), 0.01);
+            amrex::Real T_can = T_can_a(i,j,0);
+
+            // Effective SW per facet (SVF-scaled)
+            amrex::Real SW_roof = SW_val;                    // roof unshaded
+            amrex::Real SW_wall = SW_val * svf_wall(i,j,0);
+            amrex::Real SW_road = SW_val * svf_road(i,j,0);
+
+            amrex::Real H_rf, H_wl, H_rd;
+
+            Tskin_rf(i,j,0) = solve_facet_seb(
+                Tskin_rf(i,j,0), T1_rf(i,j,0), T_can,
+                SW_roof, LW_val,
+                alb_rf(i,j,0), eps_rf(i,j,0),
+                k_rf(i,j,0), dz_slab,
+                Ch_roof, U, rho_cp, max_iter, tol_K, H_rf);
+
+            Tskin_wl(i,j,0) = solve_facet_seb(
+                Tskin_wl(i,j,0), T1_wl(i,j,0), T_can,
+                SW_wall, LW_val,
+                alb_wl(i,j,0), eps_wl(i,j,0),
+                k_wl(i,j,0), dz_slab,
+                Ch_wall, U, rho_cp, max_iter, tol_K, H_wl);
+
+            Tskin_rd(i,j,0) = solve_facet_seb(
+                Tskin_rd(i,j,0), T1_rd(i,j,0), T_can,
+                SW_road, LW_val,
+                alb_rd(i,j,0), eps_rd(i,j,0),
+                k_rd(i,j,0), dz_slab,
+                Ch_road, U, rho_cp, max_iter, tol_K, H_rd);
+
+            h_roof_a(i,j,0) = H_rf;
+            h_wall_a(i,j,0) = H_wl;
+            h_road_a(i,j,0) = H_rd;
+        });
+    }
+
+    // Phase 3.5A: Advance slab conduction using SEB-derived H as surface BC
+    const int N_layers = m_params.slab_N_layers;
+    const amrex::Real slab_L = m_params.slab_L;
+    const amrex::Real T_deep = m_params.slab_T_deep;
+
+    // Advance roof slab conduction
+    for (amrex::MFIter mfi(*fields.T_slab_roof, amrex::TilingIfNotGPU());
+         mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& bx = mfi.tilebox();
+        advance_slab_conduction_mfi(
+            fields.T_slab_roof->array(mfi),
+            fields.H_roof->const_array(mfi),
+            fields.k_therm_roof->const_array(mfi),
+            fields.rho_cp_roof->const_array(mfi),
+            fields.is_urban->const_array(mfi),
+            bx, dt, N_layers, slab_L, T_deep);
+    }
+
+    // Advance wall slab conduction
+    for (amrex::MFIter mfi(*fields.T_slab_wall, amrex::TilingIfNotGPU());
+         mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& bx = mfi.tilebox();
+        advance_slab_conduction_mfi(
+            fields.T_slab_wall->array(mfi),
+            fields.H_wall->const_array(mfi),
+            fields.k_therm_wall->const_array(mfi),
+            fields.rho_cp_wall->const_array(mfi),
+            fields.is_urban->const_array(mfi),
+            bx, dt, N_layers, slab_L, T_deep);
+    }
+
+    // Advance road slab conduction
+    for (amrex::MFIter mfi(*fields.T_slab_road, amrex::TilingIfNotGPU());
+         mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& bx = mfi.tilebox();
+        advance_slab_conduction_mfi(
+            fields.T_slab_road->array(mfi),
+            fields.H_road->const_array(mfi),
+            fields.k_therm_road->const_array(mfi),
+            fields.rho_cp_road->const_array(mfi),
+            fields.is_urban->const_array(mfi),
+            bx, dt, N_layers, slab_L, T_deep);
+    }
 
     // Phase 2.3: Compute anthropogenic heat
     compute_anthropogenic_heat(*fields.AH, *fields.ah_profile_id, *fields.is_urban,
@@ -361,6 +485,47 @@ void UCMLayer::advance(UCMFields& fields,
 
     fields.LE_latent->setVal(0.0);    // LE = 0 in Phase 2.3
 
+    // Phase 3.5A: Update canyon-air temperature from Kusaka (2001) Eq. 21 weighted average
+    // T_canyon = (H_road/(rho*Cp*Ch_road) + 2*(H/W)*(H_wall/(rho*Cp*Ch_wall)) + T_atm)
+    //          / (1 + 1/Ch_road + 2*(H/W)/Ch_wall)
+    for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU());
+         mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& bx = mfi.tilebox();
+        auto const is_urb   = fields.is_urban->const_array(mfi);
+        auto const H_rd     = fields.H_road->const_array(mfi);
+        auto const H_wl     = fields.H_wall->const_array(mfi);
+        auto const H_bldg   = fields.H_bldg->const_array(mfi);
+        auto const W_road   = fields.W_road->const_array(mfi);
+        auto const T_atm    = forcing.T_atm_ref->const_array(mfi);
+        auto T_canyon_a     = fields.T_canyon_air->array(mfi);
+
+        amrex::Real rho_cp_inv = 1.0 / (1.2 * Cp_d);  // [m^3*K/J]
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            if (is_urb(i,j,0) == 0) return;
+
+            amrex::Real H_road = H_rd(i,j,0);
+            amrex::Real H_wall = H_wl(i,j,0);
+            amrex::Real Hb = H_bldg(i,j,0);
+            amrex::Real W = W_road(i,j,0) + 1.0e-6;  // Avoid division by zero
+
+            // Aspect ratio factor
+            amrex::Real HoW = Hb / W;
+            amrex::Real wall_factor = 2.0 * HoW;
+
+            // Kusaka Eq. 21 numerator and denominator
+            amrex::Real numer = H_road * rho_cp_inv * (1.0 / Ch_road) +
+                               wall_factor * H_wall * rho_cp_inv * (1.0 / Ch_wall) +
+                               T_atm(i,j,0);
+            amrex::Real denom = 1.0 + (1.0 / Ch_road) +
+                               wall_factor * (1.0 / Ch_wall);
+
+            denom = amrex::max(denom, 1.0e-10);  // Avoid division by zero
+            T_canyon_a(i,j,0) = numer / denom;
+        });
+    }
+
     // ========================================================================
     // Step 4: Debug trace (Phase 1.3 mandatory; Phase 2.3 extended)
     // ========================================================================
@@ -369,6 +534,12 @@ void UCMLayer::advance(UCMFields& fields,
         // Collectives on ALL ranks (valid cells only, nghost=0)
         amrex::Real T_roof_min  = fields.T_skin_roof->min(0, 0);
         amrex::Real T_roof_max  = fields.T_skin_roof->max(0, 0);
+        amrex::Real T_wall_min  = fields.T_skin_wall->min(0, 0);
+        amrex::Real T_wall_max  = fields.T_skin_wall->max(0, 0);
+        amrex::Real T_road_min  = fields.T_skin_road->min(0, 0);
+        amrex::Real T_road_max  = fields.T_skin_road->max(0, 0);
+        amrex::Real T_can_min   = fields.T_canyon_air->min(0, 0);
+        amrex::Real T_can_max   = fields.T_canyon_air->max(0, 0);
         amrex::Real H_sens_min  = fields.H_sensible->min(0, 0);
         amrex::Real H_sens_max  = fields.H_sensible->max(0, 0);
         amrex::Real H_roof_min  = fields.H_roof->min(0, 0);
@@ -381,13 +552,15 @@ void UCMLayer::advance(UCMFields& fields,
         amrex::Real AH_max      = fields.AH->max(0, 0);
 
         if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][1.3][UCMLayer::advance] SEB advanced:"
-                          << " dt=" << dt << "s, sim_time=" << time << "s\n";
-            amrex::Print() << "  T_skin_roof=["  << T_roof_min << "," << T_roof_max << "] K\n";
-            amrex::Print() << "  H_road min="    << H_road_min << " max=" << H_road_max << " W/m2\n";
-            amrex::Print() << "  H_wall min="    << H_wall_min << " max=" << H_wall_max << " W/m2\n";
-            amrex::Print() << "  H_roof min="    << H_roof_min << " max=" << H_roof_max << " W/m2\n";
-            amrex::Print() << "  AH min="        << AH_min     << " max=" << AH_max     << " W/m2\n";
+            amrex::Print() << "[UCM][3.5A][SEB] dt=" << dt << "s, sim_time=" << time << "s\n";
+            amrex::Print() << "  T_skin_roof=[" << T_roof_min << "," << T_roof_max << "] K\n";
+            amrex::Print() << "  T_skin_wall=[" << T_wall_min << "," << T_wall_max << "] K\n";
+            amrex::Print() << "  T_skin_road=[" << T_road_min << "," << T_road_max << "] K\n";
+            amrex::Print() << "  T_canyon_air=[" << T_can_min << "," << T_can_max << "] K\n";
+            amrex::Print() << "  H_roof min=" << H_roof_min << " max=" << H_roof_max << " W/m2\n";
+            amrex::Print() << "  H_wall min=" << H_wall_min << " max=" << H_wall_max << " W/m2\n";
+            amrex::Print() << "  H_road min=" << H_road_min << " max=" << H_road_max << " W/m2\n";
+            amrex::Print() << "  AH min=" << AH_min << " max=" << AH_max << " W/m2\n";
             amrex::Print() << "  H_sensible min=" << H_sens_min << " max=" << H_sens_max << " W/m2"
                           << " (= H_road+H_wall+H_roof; AH already in H_roof)\n";
         }

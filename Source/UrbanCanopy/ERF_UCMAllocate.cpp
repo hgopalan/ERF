@@ -309,10 +309,10 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.emissivity_roof->setVal(0.0);
     fields.emissivity_wall->setVal(0.0);
     fields.emissivity_road->setVal(0.0);
-    fields.T_skin_roof->setVal(293.15);
-    fields.T_skin_wall->setVal(293.15);
-    fields.T_skin_road->setVal(293.15);
-    fields.T_canyon_air->setVal(293.15);
+    fields.T_skin_roof->setVal(params.T_skin_init_K);
+    fields.T_skin_wall->setVal(params.T_skin_init_K);
+    fields.T_skin_road->setVal(params.T_skin_init_K);
+    fields.T_canyon_air->setVal(params.T_canyon_init_K);
     fields.H_sensible->setVal(0.0);
     fields.LE_latent->setVal(0.0);
     fields.is_urban->setVal(0);
@@ -569,29 +569,29 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
                 << params.emissivity_road << "\n";
     }
 
-    // Fill temperature fields (Phase 1.2: placeholders from test_surf_temp_K)
-    fields.T_skin_roof->setVal(params.test_surf_temp_K);
+    // Fill temperature fields (Phase 3.5A: use T_skin_init_K and T_canyon_init_K)
+    fields.T_skin_roof->setVal(params.T_skin_init_K);
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][1.2][fill_ucm_fields_homogeneous] T_skin_roof = "
-                << params.test_surf_temp_K << " K\n";
+                << params.T_skin_init_K << " K\n";
     }
 
-    fields.T_skin_wall->setVal(params.test_surf_temp_K);
+    fields.T_skin_wall->setVal(params.T_skin_init_K);
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][1.2][fill_ucm_fields_homogeneous] T_skin_wall = "
-                << params.test_surf_temp_K << " K\n";
+                << params.T_skin_init_K << " K\n";
     }
 
-    fields.T_skin_road->setVal(params.test_surf_temp_K);
+    fields.T_skin_road->setVal(params.T_skin_init_K);
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][1.2][fill_ucm_fields_homogeneous] T_skin_road = "
-                << params.test_surf_temp_K << " K\n";
+                << params.T_skin_init_K << " K\n";
     }
 
-    fields.T_canyon_air->setVal(params.test_surf_temp_K);
+    fields.T_canyon_air->setVal(params.T_canyon_init_K);
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][1.2][fill_ucm_fields_homogeneous] T_canyon_air = "
-                << params.test_surf_temp_K << " K\n";
+                << params.T_canyon_init_K << " K\n";
     }
 
     // Fill flux fields (Phase 1.2: zero; Phase 1.3+ computed by SEB)

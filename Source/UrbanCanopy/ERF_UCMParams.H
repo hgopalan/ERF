@@ -215,6 +215,17 @@ struct UCMParams
     amrex::Real zeta_min_unstable = -5.0;  ///< Phase 3.4: Clip zeta < 0 at this value (prevent Ch blow-up) [-]
 
     // =========================================================================
+    // Section 11: Phase 3.5A — SEB Newton solver exchange coefficients
+    // =========================================================================
+
+    amrex::Real Ch_roof = 0.01;      ///< Roof heat exchange coefficient [-]
+    amrex::Real Ch_wall = 0.01;      ///< Wall heat exchange coefficient [-]
+    amrex::Real Ch_road = 0.01;      ///< Road heat exchange coefficient [-]
+    amrex::Real slab_dz  = 0.05;     ///< Top slab layer half-thickness [m]
+    amrex::Real T_skin_init_K = 300.0;    ///< Initial facet skin temperature [K]
+    amrex::Real T_canyon_init_K = 295.0;  ///< Initial canyon air temperature [K]
+
+    // =========================================================================
     // Public methods
     // =========================================================================
 
