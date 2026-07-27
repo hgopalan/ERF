@@ -384,6 +384,37 @@ void UCMLayer::advance(UCMFields& fields,
             amrex::Real SW_wall = SW_down * svf_wall(i,j,0);    // wall SVF-weighted
             amrex::Real SW_road = SW_down * svf_road(i,j,0);    // road SVF-weighted
 
+            // Phase 3.5c-hotfix2: Full canyon LW balance for shaded facets.
+            // Real wall/road LW balance (Kusaka 2001, Chen 2011):
+            //   Absorbed = ε*[SVF*LW_sky + (1-SVF)*σ*T_canyon⁴]
+            //   Emitted  = ε * SVF * σ * T_skin⁴  (only SVF fraction escapes)
+            // The solver internally uses:  LW_abs = ε*(LW_down_input - σ*T_skin⁴)
+            // Setting these equal and solving for effective LW_down_input:
+            //   LW_down_input = SVF*LW_sky + (1-SVF)*σ*T_can⁴ + (1-SVF)*σ*T_skin⁴
+            // The last term "adds back" the emission that doesn't actually escape
+            // (it's absorbed by opposite walls and re-emitted; net effect is trapped).
+            constexpr amrex::Real sigma_sb_local = 5.670374419e-8;
+            const amrex::Real T_can_val = T_can_a(i,j,0);
+            const amrex::Real T_can4 = T_can_val*T_can_val*T_can_val*T_can_val;
+            // Use previous T_skin for the "trapped emission" term (lag by one step; small err)
+            const amrex::Real T_skin_prev_rf = Tskin_rf(i,j,0);
+            const amrex::Real T_skin_prev_wl = Tskin_wl(i,j,0);
+            const amrex::Real T_skin_prev_rd = Tskin_rd(i,j,0);
+            const amrex::Real T_skin4_rf = T_skin_prev_rf*T_skin_prev_rf*T_skin_prev_rf*T_skin_prev_rf;
+            const amrex::Real T_skin4_wl = T_skin_prev_wl*T_skin_prev_wl*T_skin_prev_wl*T_skin_prev_wl;
+            const amrex::Real T_skin4_rd = T_skin_prev_rd*T_skin_prev_rd*T_skin_prev_rd*T_skin_prev_rd;
+            
+            const amrex::Real svf_w = svf_wall(i,j,0);
+            const amrex::Real svf_r = svf_road(i,j,0);
+            
+            const amrex::Real LW_roof_eff = LW_down;   // SVF_roof = 1
+            const amrex::Real LW_wall_eff = svf_w * LW_down 
+                                          + (1.0 - svf_w) * sigma_sb_local * T_can4
+                                          + (1.0 - svf_w) * sigma_sb_local * T_skin4_wl;
+            const amrex::Real LW_road_eff = svf_r * LW_down 
+                                          + (1.0 - svf_r) * sigma_sb_local * T_can4
+                                          + (1.0 - svf_r) * sigma_sb_local * T_skin4_rd;
+
     /*if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "[UCM][3.5B-diag] time=" << time
                        << "s  time_s_local=" << (m_params.solar_time_start_s + time)
@@ -400,7 +431,7 @@ void UCMLayer::advance(UCMFields& fields,
                 int n_iter;
                 solve_facet_seb_with_diag(
                     Tskin_rf(i,j,0), T1_rf(i,j,0), T_can,
-                    SW_roof, LW_down,
+                    SW_roof, LW_roof_eff,
                     alb_rf(i,j,0), eps_rf(i,j,0),
                     k_rf(i,j,0), dz_slab,
                     Ch_roof, U, rho_cp, max_iter, tol_K,
@@ -435,7 +466,7 @@ void UCMLayer::advance(UCMFields& fields,
                 int n_iter;
                 solve_facet_seb_with_diag(
                     Tskin_wl(i,j,0), T1_wl(i,j,0), T_can,
-                    SW_wall, LW_down,
+                    SW_wall, LW_wall_eff,
                     alb_wl(i,j,0), eps_wl(i,j,0),
                     k_wl(i,j,0), dz_slab,
                     Ch_wall, U, rho_cp, max_iter, tol_K,
@@ -470,7 +501,7 @@ void UCMLayer::advance(UCMFields& fields,
                 int n_iter;
                 solve_facet_seb_with_diag(
                     Tskin_rd(i,j,0), T1_rd(i,j,0), T_can,
-                    SW_road, LW_down,
+                    SW_road, LW_road_eff,
                     alb_rd(i,j,0), eps_rd(i,j,0),
                     k_rd(i,j,0), dz_slab,
                     Ch_road, U, rho_cp, max_iter, tol_K,
