@@ -26,11 +26,11 @@ zhi.type              = "SlipWall"
 zhi.theta_grad        = 0.001
 
 # Sponge at inflow (scaled to 20 km x-extent: xlo_sponge_end = -7000 m)
-erf.sponge_type = "input_sponge"
-erf.input_sponge_file = "inflow_boston.txt"
-erf.sponge_strength = 0.2
-erf.use_xlo_sponge_damping = true
-erf.xlo_sponge_end = -7000.0
+#erf.sponge_type = "input_sponge"
+#erf.input_sponge_file = "inflow_boston.txt"
+#erf.sponge_strength = 0.2
+#erf.use_xlo_sponge_damping = true
+#erf.xlo_sponge_end = -7000.0
 
 # Rayleigh damping at top
 erf.rayleigh_damp_W = true

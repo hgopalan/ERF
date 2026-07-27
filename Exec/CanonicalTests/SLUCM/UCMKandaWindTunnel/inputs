@@ -23,11 +23,11 @@ zhi.type              = "SlipWall"
 zhi.theta_grad        = 0.003
 
 # Sponge at inflow (Askervein pattern; L=250 m scaled to our 5 km x-extent)
-erf.sponge_type = "input_sponge"
-erf.input_sponge_file = "inflow_kanda.txt"
-erf.sponge_strength = 0.2
-erf.use_xlo_sponge_damping = true
-erf.xlo_sponge_end = -1750.0
+#erf.sponge_type = "input_sponge"
+#erf.input_sponge_file = "inflow_kanda.txt"
+#erf.sponge_strength = 0.2
+#erf.use_xlo_sponge_damping = true
+#erf.xlo_sponge_end = -1750.0
 
 # Rayleigh damping at top
 erf.rayleigh_damp_W = true
