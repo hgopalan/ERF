@@ -794,3 +794,133 @@ eps_sky ≈ 0.70 + 0.05 * e_vapor  [for clear skies]
 - **Prior Phase:** Phase 3.5a Newton SEB solver on T_skin (PR #239)
 - **Next Phase:** Phase 3.5 full integration test (end-to-end two-way MRF+SLUCM with radiation)
 - **Later Phase:** Phase 4.2 Radiation coupling (SW/LW from RRTM/RRTMG module)
+---
+
+## Phase 3.5a-hotfix — Newton clamp instrumentation
+
+**Status:** ✅ COMPLETE (PR #XXX — Phase 3.5a-hotfix)
+
+**Objective:** Find out WHY the Newton solver's T_skin_min=260 K clamp fires silently on cells, per-cell, without changing physics.
+
+### Background
+
+The Newton solver introduced in PR #239 has a `T_skin_min = 260 K` clamp that fires silently on cells where the SEB residual has no positive input (no SW absorbed, LW-only loss). UCMBostonStabilityCorrection test passes (4/4), UHI aloft +0.095 K, but logs show:
+
+```
+T_skin_roof=[260, 287.6920384] K
+T_skin_wall=[260, 287.6920384] K
+T_skin_road=[260, 287.5420689] K
+```
+
+The min is exactly 260 K on all three facets — cells are hitting the floor silently. No warning is emitted, no diagnostic count is printed, and the check script cannot detect it. This is a landmine: any future canonical where more cells clamp than converge will produce a "passing" test with physically wrong SEB.
+
+### Changes
+
+1. **Instrumented SEB solver** (`ERF_UCMSEBSolver.H`)
+   - New function `solve_facet_seb_with_diag()` captures:
+     - T_skin before and after clamping
+     - Number of Newton iterations to convergence (or max_iter if diverged)
+     - Final residual F value
+     - All 4 flux components (SW_abs, LW_abs, H_sens, G_cond)
+   - Old function `solve_facet_seb()` unchanged (backward compatible)
+
+2. **Per-cell clamp counters** (`ERF_UCMLayer.cpp`)
+   - Six `amrex::Long` atomic counters (roof, wall, road × clamped/diverged)
+   - Incremented inside ParallelFor when:
+     - `T_final == 260 K` and `T_unclamped < 260 K` → clamped
+     - `n_iter >= max_iter` and `residual > tol_K` → diverged
+   - MPI-reduced after loop; printed once per step if `ucm_debug=1`
+
+3. **Per-cell trace diagnostics** (`ERF_UCMLayer.cpp`)
+   - Scratch MultiFab `newton_diag_*` with 8 components per cell:
+     - [0] T_final (after clamp)
+     - [1] T_unclamped (before clamp)
+     - [2] residual (|F| at convergence)
+     - [3] n_iter (iterations to convergence or max)
+     - [4–7] SW_abs, LW_abs, H_sens, G_cond
+   - Post-loop on host: scan for clamped cells, print first N (controlled by newton_trace_ncells)
+   - Output includes SEB balance = SW+LW-H-G (should be ~0 for converged, <0 = losing heat)
+
+4. **ParmParse parameter** (`ERF_UCMParams.H/cpp`)
+   - `erf.ucm.newton_trace_ncells` [int] = 5
+   - Max number of clamped cells to trace per step (0 = disable)
+   - Printed in startup banner
+
+5. **Check script enhancement** (`check_stability_correction.py`)
+   - New assertion [5] parses `[UCM][3.5A-hotfix][clamp-count]` lines from logs
+   - Extracts max clamp counts across all steps (roof, wall, road)
+   - Fails if `total_clamped > 10` cell-steps (arbitrary threshold; adjust for domain size)
+   - Warns (but doesn't fail) if `total_diverged > 0`
+   - Passes if both are zero
+
+6. **Documentation** (`UCM_DEVELOPMENT.md`, this section)
+   - Explains context: no radiation forcing in Phase 3.5a → SEB collapses to floor
+   - Design decision: clamp value stays at 260 K (removing it allows unphysical negative-K)
+   - Trace output shows exactly which cells clamp and why → fix target is unambiguous
+
+### Output Examples
+
+**Clamp-count line (step summary):**
+```
+[UCM][3.5A-hotfix][clamp-count] step=0 time=0
+  Clamped to T_skin_min=260K:  roof=3  wall=5  road=7
+  Newton diverged (hit max_iter): roof=0  wall=0  road=0
+```
+
+**Clamp-trace line (per-cell detail, first 5 clamped cells):**
+```
+[UCM][3.5A-hotfix][clamp-trace] ROOF cell (i=10, j=5)
+  T_initial=259.8  T_final=260.0  residual=0.025  n_iter=20
+  SW_abs=0.0 W/m2  LW_abs=45.0 W/m2  H_sens=60.0 W/m2  G_cond=22.0 W/m2
+  Balance: SW+LW-H-G = -37.0 W/m2 (should be ~0 for converged, negative = losing heat)
+```
+
+### Physics Notes
+
+**Why the clamp fires:** UCMBostonStabilityCorrection has no radiation forcing (Phase 4.2 pending, or must use Phase 3.5b prescribed radiation). The SEB balance is:
+
+```
+F(T_skin) = [SW_absorbed + LW_down - sigma*T_skin^4*emiss] - H_sensible - G_conduction
+          = [0 + 350 - 350 - H_sens - G_cond]      (SW=0, LW_down≈LW_emitted)
+          = -H_sens - G_cond
+```
+
+This has no positive input term, so Newton drives T_skin downward until it hits the floor. The trace output reveals which cells are affected and the imbalance magnitude.
+
+**Resolution:** Phase 3.5b (prescribed diurnal SW/LW forcing) or Phase 4.2 (radiation module) will provide the missing input; then clamp count should drop to zero on daytime canonicals and remain >0 only on nighttime/overcast cells.
+
+### Design Decisions
+
+1. **Clamp value stays at 260 K:** Removing the floor would allow unphysical negative-Kelvin solutions on pathological cells. Instrumenting it reveals exactly which cells hit the floor and why (trace output), making the fix target (radiation input) unambiguous.
+
+2. **Atomic counters only on GPU:** `amrex::Gpu::Atomic::AddNoRet` used for thread-safe increments inside ParallelFor; MPI reduction done outside (collective, safe).
+
+3. **Post-loop trace on host:** MultiFab data is copied to host and scanned sequentially to find clamped cells; one I/O call per cell (gated on IOProcessor). Avoids GPU-hostile Print() inside kernel.
+
+4. **Sentinel for no data:** If `ucm_debug=0`, no diagnostics are printed. Check script handles "not found" case gracefully.
+
+### Backward Compatibility
+
+- Old `solve_facet_seb()` function unchanged; new code path via `solve_facet_seb_with_diag()`
+- Parameter `newton_trace_ncells=5` default is non-zero; set to 0 to disable if trace output is too verbose
+- Check script tolerance `CLAMP_THRESHOLD=10` is conservative; may need tuning per domain size
+
+### Acceptance Criteria (All Met)
+
+1. ✅ Base branch `ERF-SLUCM`
+2. ✅ Three clamp counters + three divergence counters, MPI-reduced correctly
+3. ✅ Per-step `[UCM][3.5A-hotfix][clamp-count]` line printed when `ucm_debug=1`
+4. ✅ Per-cell `[UCM][3.5A-hotfix][clamp-trace]` lines for first `newton_trace_ncells` clamped cells
+5. ✅ `newton_trace_ncells` ParmParse parameter added and printed in startup banner
+6. ✅ Check script assertion [5] parses clamp-count lines and asserts total < 10 cell-steps
+7. ✅ Builds clean on `-DERF_ENABLE_UCM=ON` and `-DERF_ENABLE_UCM=OFF`
+8. ✅ Newton solver algorithm, tolerance, max_iter, and clamp value UNCHANGED
+9. ✅ No changes to SVF, aggregation, injection, drag, or radiation code
+10. ✅ `UCM_DEVELOPMENT.md` Phase 3.5a-hotfix section added
+11. ✅ PR targets `ERF-SLUCM`
+
+### Known Limitations / Deferred
+
+- **Diurnal cycle:** Trace output will show clamping on all cells when SW=0 (nighttime); this is physically expected and will be fixed by Phase 3.5b radiation forcing.
+- **Heterogeneous clamping:** If domain has some urban and some non-urban, clamping will occur only on urban cells; check script applies global threshold (may need domain-aware tuning).
+

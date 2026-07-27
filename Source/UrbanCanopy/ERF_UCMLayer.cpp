@@ -254,6 +254,27 @@ void UCMLayer::advance(UCMFields& fields,
     const amrex::Real slab_L   = m_params.slab_L;
     const amrex::Real T_deep   = m_params.slab_T_deep;
 
+    // Phase 3.5a-hotfix: Per-cell clamp counters
+    amrex::Long n_clamped_roof = 0;
+    amrex::Long n_clamped_wall = 0;
+    amrex::Long n_clamped_road = 0;
+    amrex::Long n_diverged_roof = 0;
+    amrex::Long n_diverged_wall = 0;
+    amrex::Long n_diverged_road = 0;
+
+    // Scratch MultiFab for per-cell diagnostics
+    // Components: 0=T_final, 1=T_unclamped, 2=residual, 3=n_iter,
+    //             4=SW_abs, 5=LW_abs, 6=H_sens, 7=G_cond
+    amrex::MultiFab newton_diag_roof(fields.T_skin_roof->boxArray(),
+                                     fields.T_skin_roof->DistributionMap(), 8, 0);
+    amrex::MultiFab newton_diag_wall(fields.T_skin_wall->boxArray(),
+                                     fields.T_skin_wall->DistributionMap(), 8, 0);
+    amrex::MultiFab newton_diag_road(fields.T_skin_road->boxArray(),
+                                     fields.T_skin_road->DistributionMap(), 8, 0);
+    newton_diag_roof.setVal(0.0);
+    newton_diag_wall.setVal(0.0);
+    newton_diag_road.setVal(0.0);
+
     for (amrex::MFIter mfi(*fields.T_skin_roof, amrex::TilingIfNotGPU());
          mfi.isValid(); ++mfi)
     {
@@ -286,6 +307,11 @@ void UCMLayer::advance(UCMFields& fields,
         auto h_wall_a = fields.H_wall->array(mfi);
         auto h_road_a = fields.H_road->array(mfi);
 
+        // Phase 3.5a-hotfix: diagnostics
+        auto diag_rf = newton_diag_roof.array(mfi);
+        auto diag_wl = newton_diag_wall.array(mfi);
+        auto diag_rd = newton_diag_road.array(mfi);
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
             if (is_urb(i,j,0) == 0) return;
 
@@ -299,31 +325,241 @@ void UCMLayer::advance(UCMFields& fields,
 
             amrex::Real H_rf, H_wl, H_rd;
 
-            Tskin_rf(i,j,0) = solve_facet_seb(
-                Tskin_rf(i,j,0), T1_rf(i,j,0), T_can,
-                SW_roof, LW_down,
-                alb_rf(i,j,0), eps_rf(i,j,0),
-                k_rf(i,j,0), dz_slab,
-                Ch_roof, U, rho_cp, max_iter, tol_K, H_rf);
+            // ROOF
+            {
+                amrex::Real T_unclamped, residual, SW_abs, LW_abs, H_sens, G_cond;
+                int n_iter;
+                solve_facet_seb_with_diag(
+                    Tskin_rf(i,j,0), T1_rf(i,j,0), T_can,
+                    SW_roof, LW_down,
+                    alb_rf(i,j,0), eps_rf(i,j,0),
+                    k_rf(i,j,0), dz_slab,
+                    Ch_roof, U, rho_cp, max_iter, tol_K,
+                    Tskin_rf(i,j,0), H_rf,
+                    T_unclamped, n_iter, residual,
+                    SW_abs, LW_abs, H_sens, G_cond);
 
-            Tskin_wl(i,j,0) = solve_facet_seb(
-                Tskin_wl(i,j,0), T1_wl(i,j,0), T_can,
-                SW_wall, LW_down,
-                alb_wl(i,j,0), eps_wl(i,j,0),
-                k_wl(i,j,0), dz_slab,
-                Ch_wall, U, rho_cp, max_iter, tol_K, H_wl);
+                // Store diagnostics
+                diag_rf(i,j,0,0) = Tskin_rf(i,j,0);  // T_final
+                diag_rf(i,j,0,1) = T_unclamped;      // T_unclamped
+                diag_rf(i,j,0,2) = residual;         // residual
+                diag_rf(i,j,0,3) = static_cast<amrex::Real>(n_iter);
+                diag_rf(i,j,0,4) = SW_abs;
+                diag_rf(i,j,0,5) = LW_abs;
+                diag_rf(i,j,0,6) = H_sens;
+                diag_rf(i,j,0,7) = G_cond;
 
-            Tskin_rd(i,j,0) = solve_facet_seb(
-                Tskin_rd(i,j,0), T1_rd(i,j,0), T_can,
-                SW_road, LW_down,
-                alb_rd(i,j,0), eps_rd(i,j,0),
-                k_rd(i,j,0), dz_slab,
-                Ch_road, U, rho_cp, max_iter, tol_K, H_rd);
+                // Track clamping/divergence
+                constexpr amrex::Real T_min_K = 260.0;
+                constexpr amrex::Real T_clamp_tol = 0.01;
+                if (std::abs(Tskin_rf(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
+                    amrex::Gpu::Atomic::AddNoRet(&n_clamped_roof, 1L);
+                }
+                if (n_iter >= max_iter && residual > tol_K) {
+                    amrex::Gpu::Atomic::AddNoRet(&n_diverged_roof, 1L);
+                }
+            }
+
+            // WALL
+            {
+                amrex::Real T_unclamped, residual, SW_abs, LW_abs, H_sens, G_cond;
+                int n_iter;
+                solve_facet_seb_with_diag(
+                    Tskin_wl(i,j,0), T1_wl(i,j,0), T_can,
+                    SW_wall, LW_down,
+                    alb_wl(i,j,0), eps_wl(i,j,0),
+                    k_wl(i,j,0), dz_slab,
+                    Ch_wall, U, rho_cp, max_iter, tol_K,
+                    Tskin_wl(i,j,0), H_wl,
+                    T_unclamped, n_iter, residual,
+                    SW_abs, LW_abs, H_sens, G_cond);
+
+                // Store diagnostics
+                diag_wl(i,j,0,0) = Tskin_wl(i,j,0);
+                diag_wl(i,j,0,1) = T_unclamped;
+                diag_wl(i,j,0,2) = residual;
+                diag_wl(i,j,0,3) = static_cast<amrex::Real>(n_iter);
+                diag_wl(i,j,0,4) = SW_abs;
+                diag_wl(i,j,0,5) = LW_abs;
+                diag_wl(i,j,0,6) = H_sens;
+                diag_wl(i,j,0,7) = G_cond;
+
+                // Track clamping/divergence
+                constexpr amrex::Real T_min_K = 260.0;
+                constexpr amrex::Real T_clamp_tol = 0.01;
+                if (std::abs(Tskin_wl(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
+                    amrex::Gpu::Atomic::AddNoRet(&n_clamped_wall, 1L);
+                }
+                if (n_iter >= max_iter && residual > tol_K) {
+                    amrex::Gpu::Atomic::AddNoRet(&n_diverged_wall, 1L);
+                }
+            }
+
+            // ROAD
+            {
+                amrex::Real T_unclamped, residual, SW_abs, LW_abs, H_sens, G_cond;
+                int n_iter;
+                solve_facet_seb_with_diag(
+                    Tskin_rd(i,j,0), T1_rd(i,j,0), T_can,
+                    SW_road, LW_down,
+                    alb_rd(i,j,0), eps_rd(i,j,0),
+                    k_rd(i,j,0), dz_slab,
+                    Ch_road, U, rho_cp, max_iter, tol_K,
+                    Tskin_rd(i,j,0), H_rd,
+                    T_unclamped, n_iter, residual,
+                    SW_abs, LW_abs, H_sens, G_cond);
+
+                // Store diagnostics
+                diag_rd(i,j,0,0) = Tskin_rd(i,j,0);
+                diag_rd(i,j,0,1) = T_unclamped;
+                diag_rd(i,j,0,2) = residual;
+                diag_rd(i,j,0,3) = static_cast<amrex::Real>(n_iter);
+                diag_rd(i,j,0,4) = SW_abs;
+                diag_rd(i,j,0,5) = LW_abs;
+                diag_rd(i,j,0,6) = H_sens;
+                diag_rd(i,j,0,7) = G_cond;
+
+                // Track clamping/divergence
+                constexpr amrex::Real T_min_K = 260.0;
+                constexpr amrex::Real T_clamp_tol = 0.01;
+                if (std::abs(Tskin_rd(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
+                    amrex::Gpu::Atomic::AddNoRet(&n_clamped_road, 1L);
+                }
+                if (n_iter >= max_iter && residual > tol_K) {
+                    amrex::Gpu::Atomic::AddNoRet(&n_diverged_road, 1L);
+                }
+            }
 
             h_roof_a(i,j,0) = H_rf;
             h_wall_a(i,j,0) = H_wl;
             h_road_a(i,j,0) = H_rd;
         });
+    }
+
+    // Phase 3.5a-hotfix: MPI reduction and diagnostic output
+    {
+        amrex::ParallelDescriptor::ReduceLongSum(&n_clamped_roof, 1);
+        amrex::ParallelDescriptor::ReduceLongSum(&n_clamped_wall, 1);
+        amrex::ParallelDescriptor::ReduceLongSum(&n_clamped_road, 1);
+        amrex::ParallelDescriptor::ReduceLongSum(&n_diverged_roof, 1);
+        amrex::ParallelDescriptor::ReduceLongSum(&n_diverged_wall, 1);
+        amrex::ParallelDescriptor::ReduceLongSum(&n_diverged_road, 1);
+
+        if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.5A-hotfix][clamp-count] time=" << time
+                           << "\n  Clamped to T_skin_min=260K:  roof=" << n_clamped_roof
+                           << "  wall=" << n_clamped_wall
+                           << "  road=" << n_clamped_road
+                           << "\n  Newton diverged (hit max_iter): roof=" << n_diverged_roof
+                           << "  wall=" << n_diverged_wall
+                           << "  road=" << n_diverged_road
+                           << "\n";
+        }
+
+        // Per-cell trace for first N clamped cells
+        if (m_params.ucm_debug && m_params.newton_trace_ncells > 0 &&
+            (n_clamped_roof > 0 || n_clamped_wall > 0 || n_clamped_road > 0)) {
+            int n_traced = 0;
+            const int n_trace_max = m_params.newton_trace_ncells;
+            constexpr amrex::Real T_min_K = 260.0;
+            constexpr amrex::Real T_clamp_tol = 0.01;
+
+            // Trace roof clamped cells
+            for (amrex::MFIter mfi(newton_diag_roof); mfi.isValid() && n_traced < n_trace_max; ++mfi) {
+                auto const diag = newton_diag_roof.const_array(mfi);
+                auto const is_urb = fields.is_urban->const_array(mfi);
+                const amrex::Box& bx = mfi.validbox();
+                for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+                    for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                        if (is_urb(i,j,0) > 0 && std::abs(diag(i,j,0,0) - T_min_K) < T_clamp_tol &&
+                            diag(i,j,0,1) < T_min_K) {
+                            if (amrex::ParallelDescriptor::IOProcessor()) {
+                                amrex::Print() << "[UCM][3.5A-hotfix][clamp-trace] ROOF cell (i=" << i << ", j=" << j << ")"
+                                               << "\n  T_initial=" << diag(i,j,0,1)
+                                               << "  T_final=" << diag(i,j,0,0)
+                                               << "  residual=" << diag(i,j,0,2)
+                                               << "  n_iter=" << static_cast<int>(diag(i,j,0,3))
+                                               << "\n  SW_abs=" << diag(i,j,0,4) << " W/m2"
+                                               << "  LW_abs=" << diag(i,j,0,5) << " W/m2"
+                                               << "  H_sens=" << diag(i,j,0,6) << " W/m2"
+                                               << "  G_cond=" << diag(i,j,0,7) << " W/m2"
+                                               << "\n  Balance: SW+LW-H-G = "
+                                               << (diag(i,j,0,4) + diag(i,j,0,5) - diag(i,j,0,6) - diag(i,j,0,7))
+                                               << " W/m2 (should be ~0 for converged, negative = losing heat)"
+                                               << "\n";
+                            }
+                            n_traced++;
+                            if (n_traced >= n_trace_max) break;
+                        }
+                    }
+                    if (n_traced >= n_trace_max) break;
+                }
+            }
+
+            // Trace wall clamped cells
+            for (amrex::MFIter mfi(newton_diag_wall); mfi.isValid() && n_traced < n_trace_max; ++mfi) {
+                auto const diag = newton_diag_wall.const_array(mfi);
+                auto const is_urb = fields.is_urban->const_array(mfi);
+                const amrex::Box& bx = mfi.validbox();
+                for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+                    for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                        if (is_urb(i,j,0) > 0 && std::abs(diag(i,j,0,0) - T_min_K) < T_clamp_tol &&
+                            diag(i,j,0,1) < T_min_K) {
+                            if (amrex::ParallelDescriptor::IOProcessor()) {
+                                amrex::Print() << "[UCM][3.5A-hotfix][clamp-trace] WALL cell (i=" << i << ", j=" << j << ")"
+                                               << "\n  T_initial=" << diag(i,j,0,1)
+                                               << "  T_final=" << diag(i,j,0,0)
+                                               << "  residual=" << diag(i,j,0,2)
+                                               << "  n_iter=" << static_cast<int>(diag(i,j,0,3))
+                                               << "\n  SW_abs=" << diag(i,j,0,4) << " W/m2"
+                                               << "  LW_abs=" << diag(i,j,0,5) << " W/m2"
+                                               << "  H_sens=" << diag(i,j,0,6) << " W/m2"
+                                               << "  G_cond=" << diag(i,j,0,7) << " W/m2"
+                                               << "\n  Balance: SW+LW-H-G = "
+                                               << (diag(i,j,0,4) + diag(i,j,0,5) - diag(i,j,0,6) - diag(i,j,0,7))
+                                               << " W/m2 (should be ~0 for converged, negative = losing heat)"
+                                               << "\n";
+                            }
+                            n_traced++;
+                            if (n_traced >= n_trace_max) break;
+                        }
+                    }
+                    if (n_traced >= n_trace_max) break;
+                }
+            }
+
+            // Trace road clamped cells
+            for (amrex::MFIter mfi(newton_diag_road); mfi.isValid() && n_traced < n_trace_max; ++mfi) {
+                auto const diag = newton_diag_road.const_array(mfi);
+                auto const is_urb = fields.is_urban->const_array(mfi);
+                const amrex::Box& bx = mfi.validbox();
+                for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+                    for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                        if (is_urb(i,j,0) > 0 && std::abs(diag(i,j,0,0) - T_min_K) < T_clamp_tol &&
+                            diag(i,j,0,1) < T_min_K) {
+                            if (amrex::ParallelDescriptor::IOProcessor()) {
+                                amrex::Print() << "[UCM][3.5A-hotfix][clamp-trace] ROAD cell (i=" << i << ", j=" << j << ")"
+                                               << "\n  T_initial=" << diag(i,j,0,1)
+                                               << "  T_final=" << diag(i,j,0,0)
+                                               << "  residual=" << diag(i,j,0,2)
+                                               << "  n_iter=" << static_cast<int>(diag(i,j,0,3))
+                                               << "\n  SW_abs=" << diag(i,j,0,4) << " W/m2"
+                                               << "  LW_abs=" << diag(i,j,0,5) << " W/m2"
+                                               << "  H_sens=" << diag(i,j,0,6) << " W/m2"
+                                               << "  G_cond=" << diag(i,j,0,7) << " W/m2"
+                                               << "\n  Balance: SW+LW-H-G = "
+                                               << (diag(i,j,0,4) + diag(i,j,0,5) - diag(i,j,0,6) - diag(i,j,0,7))
+                                               << " W/m2 (should be ~0 for converged, negative = losing heat)"
+                                               << "\n";
+                            }
+                            n_traced++;
+                            if (n_traced >= n_trace_max) break;
+                        }
+                    }
+                    if (n_traced >= n_trace_max) break;
+                }
+            }
+        }
     }
 
     // Phase 3.5A: Advance slab conduction using SEB-derived H as surface BC

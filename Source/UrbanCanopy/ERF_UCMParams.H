@@ -150,6 +150,7 @@ struct UCMParams
     amrex::Real rho_cp_uniform = 2.0e6;     ///< Uniform volumetric heat capacity [J/m^3/K]
     int     newton_max_iter    = 20;        ///< Max Newton iterations for facet SEB [-]
     amrex::Real newton_tol_K   = 0.01;      ///< Temperature convergence tolerance [K]
+    int     newton_trace_ncells = 5;        ///< Phase 3.5a-hotfix: max clamped cells to trace per step (0=disable) [-]
 
     // =========================================================================
     // Section 5: Building morphology (homogeneous, overridden by CSV in Phase 2)

@@ -198,6 +198,7 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   rho_cp [J/m^3/K]    = " << params.rho_cp_uniform << "\n";
     amrex::Print() << "[UCM]   newton_max_iter     = " << params.newton_max_iter << "\n";
     amrex::Print() << "[UCM]   newton_tol_K        = " << params.newton_tol_K << "\n";
+    amrex::Print() << "[UCM]   newton_trace_ncells = " << params.newton_trace_ncells << " (Phase 3.5a-hotfix)\n";
     amrex::Print() << "[UCM]   --- Phase 1.4 Injection Parameters ---\n";
     amrex::Print() << "[UCM]   [SLUCM] Feedback configuration:\n";
     amrex::Print() << "[UCM]     atm_feedback_momentum = " << params.atm_feedback_momentum << " (drag always active)\n";

@@ -175,35 +175,68 @@ def main():
     fail_count += not theta_bounded
 
     # ------------------------------------------------------------------
-    # [5] Phase 3.5B: Skin temperature floor check (Newton solver clamping)
+    # [5] Phase 3.5a-hotfix: Newton clamp landmine detection
     # ------------------------------------------------------------------
-    # Phase 3.5B raises T_skin floor to 260 K to reduce clamping.
-    # With prescribed radiation, floor hits should be rare or absent.
-    print(f"\n[5] Phase 3.5B: Skin temperature floor check (informational)")
-    print(f"    (Clamping to T_skin_min=260 K should be rare with radiation forcing)")
+    print(f"\n[5] Phase 3.5a-hotfix: Newton clamp landmine check")
     log_files = glob.glob("*.log") + glob.glob("run*.log")
-    found_clamp_warn = False
-    clamp_count = 0
+    max_clamped_roof = 0
+    max_clamped_wall = 0
+    max_clamped_road = 0
+    max_diverged_roof = 0
+    max_diverged_wall = 0
+    max_diverged_road = 0
+    
     for lf in log_files:
         try:
             with open(lf) as f:
-                for line in f:
-                    if "[UCM][3.5a][WARN]" in line and "clamped" in line:
-                        found_clamp_warn = True
-                        # Try to extract clamp count
-                        import re
-                        match = re.search(r"clamped (\d+) cells", line)
-                        if match:
-                            clamp_count += int(match.group(1))
+                content = f.read()
+                # Find all clamp-count blocks (multiline)
+                import re
+                blocks = re.findall(r'\[UCM\]\[3\.5A-hotfix\]\[clamp-count\].*?(?=\n\[|$)', content, re.DOTALL)
+                for block in blocks:
+                    # Extract clamped counts from line like "Clamped to T_skin_min=260K:  roof=3  wall=5  road=7"
+                    match_clamped = re.search(r'Clamped to T_skin_min=260K:.*?roof=(\d+)\s+wall=(\d+)\s+road=(\d+)', block)
+                    if match_clamped:
+                        max_clamped_roof = max(max_clamped_roof, int(match_clamped.group(1)))
+                        max_clamped_wall = max(max_clamped_wall, int(match_clamped.group(2)))
+                        max_clamped_road = max(max_clamped_road, int(match_clamped.group(3)))
+                    # Extract diverged counts from line like "Newton diverged (hit max_iter): roof=0  wall=0  road=0"
+                    match_diverged = re.search(r'Newton diverged.*?roof=(\d+)\s+wall=(\d+)\s+road=(\d+)', block)
+                    if match_diverged:
+                        max_diverged_roof = max(max_diverged_roof, int(match_diverged.group(1)))
+                        max_diverged_wall = max(max_diverged_wall, int(match_diverged.group(2)))
+                        max_diverged_road = max(max_diverged_road, int(match_diverged.group(3)))
         except Exception:
             pass
+
+    total_clamped = max_clamped_roof + max_clamped_wall + max_clamped_road
+    total_diverged = max_diverged_roof + max_diverged_wall + max_diverged_road
     
-    if found_clamp_warn:
-        print(f"    INFO: Newton solver clamped {clamp_count} cells to T_skin_min=260 K")
-        if clamp_count > 100:
-            print(f"          (WARNING: high clamp count suggests unphysical setup)")
+    CLAMP_THRESHOLD = 10  # arbitrary; adjust based on domain size
+    
+    clamp_check_pass = None  # default: None = no data / informational
+    if total_clamped > 0 or total_diverged > 0:
+        print(f"    Newton clamp/diverge log entries detected:")
+        if total_clamped > 0:
+            print(f"      Clamped: roof={max_clamped_roof}  wall={max_clamped_wall}  road={max_clamped_road}  (total={total_clamped})")
+        if total_diverged > 0:
+            print(f"      Diverged: roof={max_diverged_roof}  wall={max_diverged_wall}  road={max_diverged_road}  (total={total_diverged})")
+        
+        if total_clamped > CLAMP_THRESHOLD:
+            print(f"    FAIL: {total_clamped} cell-steps hit T_skin_min=260K (threshold: <{CLAMP_THRESHOLD})")
+            clamp_check_pass = False
+        elif total_diverged > 0:
+            print(f"    WARN: {total_diverged} cell-steps failed to converge (Newton hit max_iter)")
+            clamp_check_pass = None  # warn but don't fail
+        else:
+            print(f"    PASS: clamping detected but within tolerance")
+            clamp_check_pass = True
     else:
-        print(f"    INFO: no clamp warnings found (all T_skin converged normally)")
+        print(f"    INFO: no clamp/divergence log entries found (all Newton converged normally, or ucm_debug=0)")
+    
+    if clamp_check_pass is not None:
+        pass_count += clamp_check_pass
+        fail_count += not clamp_check_pass
 
     # ------------------------------------------------------------------
     # [6] Stability correction log check (informational)
