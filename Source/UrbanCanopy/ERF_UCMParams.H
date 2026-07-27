@@ -226,6 +226,21 @@ struct UCMParams
     amrex::Real T_canyon_init_K = 295.0;  ///< Initial canyon air temperature [K]
 
     // =========================================================================
+    // Section 12: Phase 3.5B — Prescribed diurnal SW/LW radiation forcing
+    // =========================================================================
+    // Bridge analytic radiation formulae to unblock SEB closure until Phase 4.2.
+    // At Phase 4.2, SW_down/LW_down will come from RRTM/RRTMG module instead.
+
+    bool        use_prescribed_radiation = true;   ///< Phase 3.5b: Enable analytic SW/LW; false = wait for Phase 4.2
+    amrex::Real lat_deg           = 42.36;         ///< Domain center latitude [°N] (Boston default)
+    amrex::Real lon_deg           = -71.06;        ///< Domain center longitude [°E] (Boston default)
+    amrex::Real julian_day        = 172.0;         ///< Day of year [1–365] (172 = summer solstice)
+    amrex::Real solar_time_start_s = 21600.0;      ///< Local Solar Time at t=0 [s] (default 06:00 LST)
+    amrex::Real solar_constant    = 1361.0;        ///< Top-of-atmosphere solar constant [W/m²]
+    amrex::Real sw_transmission   = 0.7;           ///< Clear-sky bulk optical depth [-] (0.5–0.8)
+    amrex::Real sky_emissivity    = 0.83;          ///< Clear-sky LW emissivity [-] (0.70–0.95)
+
+    // =========================================================================
     // Public methods
     // =========================================================================
 

@@ -131,4 +131,14 @@ void UCMParams::read_from_parmparse()
     pp.query("slab_dz", slab_dz);
     pp.query("T_skin_init_K", T_skin_init_K);
     pp.query("T_canyon_init_K", T_canyon_init_K);
+
+    // Section 12: Phase 3.5B — Prescribed diurnal SW/LW radiation forcing
+    pp.query("use_prescribed_radiation", use_prescribed_radiation);
+    pp.query("lat_deg", lat_deg);
+    pp.query("lon_deg", lon_deg);
+    pp.query("julian_day", julian_day);
+    pp.query("solar_time_start_s", solar_time_start_s);
+    pp.query("solar_constant", solar_constant);
+    pp.query("sw_transmission", sw_transmission);
+    pp.query("sky_emissivity", sky_emissivity);
 }
