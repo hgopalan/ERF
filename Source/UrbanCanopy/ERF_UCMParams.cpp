@@ -84,6 +84,7 @@ void UCMParams::read_from_parmparse()
     pp.query("rho_cp_uniform", rho_cp_uniform);
     pp.query("newton_max_iter", newton_max_iter);
     pp.query("newton_tol_K", newton_tol_K);
+    pp.query("newton_trace_ncells", newton_trace_ncells);
 
     // Section 5: Building morphology (homogeneous)
     pp.query("H_bldg_uniform", H_bldg_uniform);

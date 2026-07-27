@@ -19,7 +19,7 @@
  *   - T_canyon and T1 clamped to [200, 400] K (guards uninitialised values)
  *   - Newton step limited to ±20 K per iteration (prevents overshoot on first step)
  *   - Output T_skin clamped to [260, 380] K (Phase 3.5b: raised floor to 260 K)
- *   - Phase 3.5b: clamps count unphysical convergence to floor
+ *   - Phase 3.5a-hotfix: diagnostics track clamping and divergence per cell
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real solve_facet_seb(
@@ -98,4 +98,106 @@ amrex::Real solve_facet_seb(
     return T_skin;
 }
 
+/**
+ * @brief Phase 3.5a-hotfix: Instrumented SEB solver returning diagnostics.
+ *
+ * Same physics as solve_facet_seb(), but captures:
+ *   - T_skin before clamping
+ *   - Number of Newton iterations to convergence (or max_iter if diverged)
+ *   - Final residual F value
+ *   - All 4 flux components (SW_abs, LW_abs, H_sens, G_cond)
+ * for later per-cell tracing.
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+void solve_facet_seb_with_diag(
+    amrex::Real T_skin_in,
+    amrex::Real T1,
+    amrex::Real T_canyon,
+    amrex::Real SW_down,
+    amrex::Real LW_down,
+    amrex::Real alpha,
+    amrex::Real emiss,
+    amrex::Real k_th,
+    amrex::Real dz_slab,
+    amrex::Real Ch,
+    amrex::Real U_ref,
+    amrex::Real rho_cp,
+    int         max_iter,
+    amrex::Real tol_K,
+    // Output: final T_skin (clamped)
+    amrex::Real& T_skin_out,
+    // Output: H_sensible
+    amrex::Real& H_out,
+    // Output: diagnostics
+    amrex::Real& T_skin_unclamped,    // T before clamp
+    int&         n_iter,              // iterations to convergence or max
+    amrex::Real& residual_final,      // |F| at convergence or last iter
+    amrex::Real& SW_abs_out,
+    amrex::Real& LW_abs_out,
+    amrex::Real& H_sens_out,
+    amrex::Real& G_cond_out)
+{
+    constexpr amrex::Real sigma_sb       = 5.670374419e-8;
+    constexpr amrex::Real T_min_K        = 260.0;
+    constexpr amrex::Real T_max_K        = 380.0;
+    constexpr amrex::Real U_min          = 0.01;
+    constexpr amrex::Real jacobian_min   = 1.e-10;
+    constexpr amrex::Real conduction_min = 1.e-6;
+    constexpr amrex::Real T_ref_min      = 200.0;
+    constexpr amrex::Real T_ref_max      = 400.0;
+    constexpr amrex::Real max_step_K     = 20.0;
+
+    amrex::Real U     = amrex::max(std::abs(U_ref), U_min);
+    amrex::Real T_can = amrex::max(amrex::min(T_canyon, T_ref_max), T_ref_min);
+    amrex::Real T1_s  = amrex::max(amrex::min(T1,      T_ref_max), T_ref_min);
+
+    amrex::Real G_coeff = 0.0;
+    if (dz_slab >= conduction_min) {
+        G_coeff = 2.0 * k_th / dz_slab;
+    }
+
+    amrex::Real H_coeff = rho_cp * Ch * U;
+    SW_abs_out  = (1.0 - alpha) * amrex::max(SW_down, amrex::Real(0.0));
+
+    // Clamp initial iterate to physical range
+    amrex::Real T_skin = amrex::max(amrex::min(T_skin_in, T_max_K), T_min_K);
+
+    n_iter = 0;
+    for (int iter = 0; iter < max_iter; ++iter) {
+        n_iter = iter + 1;  // track iterations
+
+        amrex::Real T3    = T_skin * T_skin * T_skin;
+        amrex::Real T4    = T3 * T_skin;
+        LW_abs_out = emiss * (LW_down - sigma_sb * T4);
+        amrex::Real Rn    = SW_abs_out + LW_abs_out;
+        H_sens_out = H_coeff * (T_skin - T_can);
+        G_cond_out = G_coeff * (T_skin - T1_s);
+        amrex::Real F     = Rn - H_sens_out - G_cond_out;
+        residual_final    = std::abs(F);
+
+        amrex::Real F_prime = -4.0 * emiss * sigma_sb * T3 - H_coeff - G_coeff;
+        if (std::abs(F_prime) < jacobian_min) break;
+
+        // Raw Newton step
+        amrex::Real step = -F / F_prime;
+
+        // Limit step size
+        if (step >  max_step_K) step =  max_step_K;
+        if (step < -max_step_K) step = -max_step_K;
+
+        amrex::Real T_new = T_skin + step;
+        T_new = amrex::max(amrex::min(T_new, T_max_K), T_min_K);
+
+        amrex::Real dT = std::abs(T_new - T_skin);
+        T_skin = T_new;
+        if (dT < tol_K) break;
+    }
+
+    // Capture T before final clamp (for diagnostics)
+    T_skin_unclamped = T_skin;
+
+    // Final clamp and H
+    T_skin_out = amrex::max(amrex::min(T_skin, T_max_K), T_min_K);
+    H_out  = H_coeff * (T_skin_out - T_can);
+}
 #endif  // ERF_UCM_SEB_SOLVER_H
