@@ -16,17 +16,25 @@
  *   \rho c_p \frac{T_i^{n+1} - T_i^n}{\Delta t} = k \frac{T_{i+1}^{n+1} - 2T_i^{n+1} + T_{i-1}^{n+1}}{dz^2}
  * \f]
  *
- * Rearranged into tridiagonal form:
+ * Rearranged into standard tridiagonal all-plus form:
  * \f[
- *   -a_i T_{i-1}^{n+1} + b_i T_i^{n+1} - c_i T_{i+1}^{n+1} = d_i
+ *   a_i T_{i-1}^{n+1} + b_i T_i^{n+1} + c_i T_{i+1}^{n+1} = d_i
  * \f]
  *
- * where:
- * - \f$ a_i = c_i = \frac{k \Delta t}{\rho c_p dz^2} \f$ (interior)
- * - \f$ b_i = 1 + 2\frac{k \Delta t}{\rho c_p dz^2} \f$ (interior)
+ * where (all-plus convention):
+ * - \f$ a_i = c_i = -\frac{k \Delta t}{\rho c_p dz^2} = -Fo \f$ (interior; NEGATIVE)
+ * - \f$ b_i = 1 + 2\frac{k \Delta t}{\rho c_p dz^2} = 1 + 2Fo \f$ (interior)
  * - \f$ d_i = T_i^n \f$ (interior)
  * - Top BC (i=0): \f$ k \frac{\partial T}{\partial z}\big|_{\text{top}} = Q_{\text{top}} \f$
  * - Bottom BC (i=N-1): \f$ T = T_{\text{deep}} \f$
+ *
+ * **Sign convention note (Phase 3.5c-hotfix2):**
+ * The all-plus TDMA convention requires the superdiagonal (c) and subdiagonal (a)
+ * coefficients from a Laplacian discretization to be NEGATIVE, because the
+ * physical equation produces `-k*(T_{i+1} - 2*T_i + T_{i-1})/dz^2` = `+2k/dz^2 * T_i - k/dz^2 * (T_{i+1} + T_{i-1})`.
+ * Under-storing them as positive causes standard back-substitution
+ * `T_i = gamma_i - alpha_i * T_{i+1}` to drift T_i downward each step even at
+ * steady state (approximately -2*Fo*T_reference per step). Bug fixed.
  *
  * **Thomas Algorithm (TDMA):**
  * Forward elimination, back substitution. Stable when coefficients satisfy
@@ -111,98 +119,84 @@ inline void advance_slab_conduction_column(amrex::Real* T,
                                            amrex::Real dt,
                                            int N_layers)
 {
-    // Courant-like number (but unconditional stability)
-    amrex::Real Fo = k_therm * dt / (rho_cp * dz * dz);  // Fourier number
+    // Fourier number (dimensionless diffusion parameter)
+    amrex::Real Fo = k_therm * dt / (rho_cp * dz * dz);
 
-    // Tridiagonal coefficients (uniform grid)
-    // Interior stencil: -a*T_{i-1} + b*T_i - c*T_{i+1} = d_i
-    amrex::Real a_coeff = Fo;   // subdiagonal
-    amrex::Real b_coeff = 1.0 + 2.0*Fo;  // diagonal
-    amrex::Real c_coeff = Fo;   // superdiagonal
+    // ------------------------------------------------------------------------
+    // Tridiagonal coefficients — ALL-PLUS TDMA convention
+    //   a * T_{i-1} + b * T_i + c * T_{i+1} = d
+    // Physical Laplacian -k*(T_{i+1} - 2*T_i + T_{i-1})/dz² produces
+    // NEGATIVE off-diagonal terms in this convention.
+    // Phase 3.5c-hotfix2: fixed sign of a and c (were incorrectly stored as +Fo).
+    // ------------------------------------------------------------------------
+    amrex::Real a_coeff = -Fo;         // subdiagonal (NEGATIVE)
+    amrex::Real b_coeff = 1.0 + 2.0*Fo; // diagonal (positive)
+    amrex::Real c_coeff = -Fo;         // superdiagonal (NEGATIVE)
 
-    // Allocate work arrays on stack (max 50 layers allows stack, typically N=4)
-    // For larger N, caller should use heap or GPU dynamic allocation.
+    // Stack work arrays (typical N=4; hard cap at 50 for safety)
     amrex::Real alpha[50];  // Forward elimination coefficients
     amrex::Real gamma[50];  // Forward elimination RHS
     amrex::Real T_old[50];  // Copy of input
 
-    // Sanity check
     if (N_layers > 50) {
-        // On device, we cannot print; on host, print warning once per process
-        // This should not happen in normal Phase 1.3 usage (N_layers = 4)
-        // Caller is responsible for respecting max layer count.
-        return;
+        return;  // Safety check (caller must respect this cap)
     }
 
-    // Save original temps
     for (int i = 0; i < N_layers; ++i) {
         T_old[i] = T[i];
     }
 
-    // =========================================================================
-    // Top boundary condition: Neumann at i=0
-    // =========================================================================
-    // Flux BC: k*dT/dz|_top = Q_top
-    // Discretization: (T_1 - T_0)/dz = Q_top/k
-    // Rearranged: T_1 - T_0 = Q_top*dz/k
-    // Tridiagonal row 0: -c_0*T_1 + (rho_cp/dt + k/dz²)*T_0 = rho_cp/dt*T_0^old + Q_top/dz
+    // ------------------------------------------------------------------------
+    // Top boundary condition: Neumann flux BC
+    //   k * dT/dz|_top = Q_top  (positive Q_top = heat INTO slab from top)
     //
-    // Simplified (using Fo definition):
-    // b_0 = (1/Fo) + 1  [modified from interior b_coeff due to flux BC]
-    // c_0 = 1  (after dividing out Fo)
-    // d_0 = T_0^old + Q_top*dz/k = T_0^old + Q_top/(rho_cp*Fo/dt)
-
-    /*amrex::Real b_top = 1.0/Fo + 1.0;  // Modified diagonal for flux BC
-    amrex::Real c_top = 1.0;
-    amrex::Real d_top = T_old[0] + Q_top*dz/k_therm;*/
-
-    // Correct discretization of Neumann flux BC at top (see docstring above).
-    // Row 0: (1 + Fo) * T_0^{n+1} - Fo * T_1^{n+1} = T_0^n + Q_top * dt / (rho_cp * dz)
-    amrex::Real b_top = 1.0 + Fo;                              // Was 1.0/Fo + 1.0 (WRONG)
-    amrex::Real c_top = Fo;                                    // Was 1.0 (WRONG)
-    amrex::Real d_top = T_old[0] + Q_top * dt / (rho_cp * dz); // Was T_old[0] + Q_top*dz/k_therm (WRONG)
+    // Discretization (control-volume around cell 0 of thickness dz):
+    //   rho_cp * dz * (T_0^{n+1} - T_0^n) / dt = Q_top - k*(T_0^{n+1} - T_1^{n+1})/dz
+    //
+    // Rearranged into all-plus form:
+    //   (1 + Fo) * T_0^{n+1}  +  (-Fo) * T_1^{n+1}  =  T_0^n + Q_top*dt/(rho_cp*dz)
+    //
+    // Phase 3.5c-hotfix2: c_top sign now matches all-plus TDMA convention
+    // (was +Fo, correct value is -Fo). This eliminated the spurious ~0.09 K
+    // per-step cooling drift observed even at steady-state initial conditions.
+    // ------------------------------------------------------------------------
+    amrex::Real b_top = 1.0 + Fo;
+    amrex::Real c_top = -Fo;                                    // NEGATIVE (all-plus convention)
+    amrex::Real d_top = T_old[0] + Q_top * dt / (rho_cp * dz);
 
     // Forward elimination, row 0
     alpha[0] = c_top / b_top;
     gamma[0] = d_top / b_top;
 
-    // =========================================================================
-    // Interior rows i = 1 to N-2
-    // =========================================================================
+    // ------------------------------------------------------------------------
+    // Interior rows i = 1 to N-2 (standard Thomas forward sweep)
+    //   b_mod  = b - a * alpha_{i-1}
+    //   gamma_i = (d_i - a * gamma_{i-1}) / b_mod
+    //   alpha_i = c / b_mod
+    // ------------------------------------------------------------------------
     for (int i = 1; i < N_layers - 1; ++i) {
         amrex::Real b_mod = b_coeff - a_coeff * alpha[i-1];
         gamma[i] = (T_old[i] - a_coeff * gamma[i-1]) / b_mod;
         alpha[i] = c_coeff / b_mod;
     }
 
-    // =========================================================================
-    // Bottom boundary condition: Dirichlet at i=N-1
-    // =========================================================================
-    // b_{N-1} T_{N-1} - a_{N-1} T_{N-2} = rho_cp/dt * T_{N-1}^old
-    // Simplified: b_{N-1} = b_coeff (interior), a_{N-1} = a_coeff
-    // d_{N-1} = T_{N-1}^old
-    // But we enforce T_{N-1} = T_deep via Dirichlet BC.
-    // So we integrate the constraint into the modified diagonal.
+    // ------------------------------------------------------------------------
+    // Bottom boundary condition: Dirichlet
+    //   T_{N-1} = T_deep (imposed in back-substitution).
     //
-    // Actually, for Dirichlet BC, the standard approach is:
-    // Row N-1 becomes simply: T_{N-1} = T_deep
-    // But in the tridiagonal solver context with flux BC above,
-    // we modify the diagonal to enforce Dirichlet strongly.
-    //
-    // Simpler approach: in back substitution, set T[N-1] = T_deep directly.
-    // Forward elimination proceeds normally through row N-2.
+    // The last interior row (i = N-2) is finalized in the loop above.
+    // Phase 3.5c-hotfix2: removed erroneous re-computation of gamma[N-2] that
+    // was reading and overwriting the same slot with incorrect index math.
+    // Standard Thomas correctly handles the top-most interior row via loop.
+    // ------------------------------------------------------------------------
 
-    int i_last = N_layers - 2;
-    {
-        amrex::Real b_mod = b_coeff - a_coeff * alpha[i_last];
-        gamma[i_last] = (T_old[i_last] - a_coeff * gamma[i_last]) / b_mod;
-        // No alpha[i_last] needed (no row below)
-    }
-
-    // =========================================================================
+    // ------------------------------------------------------------------------
     // Back substitution
-    // =========================================================================
-    T[N_layers - 1] = T_deep;  // Dirichlet BC
+    //   T_i = gamma_i - alpha_i * T_{i+1}   for i = N-2 down to 0
+    // With the correct all-plus signs on a and c, this reduces to the
+    // identity mapping when Q_top = 0 and all T_i = T_deep (validated).
+    // ------------------------------------------------------------------------
+    T[N_layers - 1] = T_deep;  // Enforce Dirichlet at bottom
 
     for (int i = N_layers - 2; i >= 0; --i) {
         T[i] = gamma[i] - alpha[i] * T[i + 1];
@@ -216,7 +210,10 @@ inline void advance_slab_conduction_column(amrex::Real* T,
  * Thread-safe GPU kernel.
  *
  * @param[in,out] T_slab      Temperature MultiFab (N_layers components)
- * @param[in]     H_flux      Sensible heat flux MultiFab (scalar input BC)
+ * @param[in]     H_flux      Sensible heat flux MultiFab (scalar input BC).
+ *                            Uses Newton H convention: positive = surface loses
+ *                            heat to atm. The wrapper negates internally to
+ *                            match slab Q_top convention (positive = into slab).
  * @param[in]     k_therm     Thermal conductivity MultiFab
  * @param[in]     rho_cp      Volumetric heat capacity MultiFab
  * @param[in]     is_urban    Urban mask iMultiFab
@@ -242,7 +239,7 @@ void advance_slab_conduction_mfi(
 
         // Stack array for single-column temps (max 50 layers per header)
         amrex::Real T_col[50];
-        
+
         if (N_layers > 50) {
             return;  // Safety check
         }
@@ -255,16 +252,14 @@ void advance_slab_conduction_mfi(
         // Compute layer thickness
         amrex::Real dz = slab_L / static_cast<amrex::Real>(N_layers);
 
-        // Call column solver
-        //amrex::Real Q_top = H_flux_arr(i, j, 0);
         // Phase 3.5c-hotfix: Sign convention reconciliation.
-        // Newton H convention: positive = surface loses heat to atm (surface cooling).
+        // Newton H convention: positive = surface loses heat to atm (cooling).
         // Slab top BC convention: positive = heat flows INTO slab from top.
-        // These are OPPOSITE conventions: when H<0 (atm heats surface),
+        // These are OPPOSITE conventions: when H < 0 (atm heats surface),
         // heat enters the slab from above, i.e., Q_top > 0. Hence negate.
         amrex::Real Q_top = -H_flux_arr(i, j, 0);
         amrex::Real kcond = k_therm_arr(i, j, 0);
-        amrex::Real rhcp = rho_cp_arr(i, j, 0);
+        amrex::Real rhcp  = rho_cp_arr(i, j, 0);
 
         advance_slab_conduction_column(T_col, Q_top, T_deep, kcond, rhcp, dz, dt, N_layers);
 

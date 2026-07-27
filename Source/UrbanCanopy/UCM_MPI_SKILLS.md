@@ -468,6 +468,157 @@ which forces the three fluxes to be equal.
 
 ---
 
+---
+
+## Phase 3.5a-hotfix Cascade — Lessons 18-24
+
+Seven interrelated bugs discovered and fixed during Phase 3.5a → 3.5c integration on `UCMBostonStabilityCorrection`. Full technical narrative in `UCM_DEVELOPMENT.md`; grep patterns and prevention checks below.
+
+### Lesson 18: Numerical Impossibility Is a Coefficient Bug, Not a Physics Bug
+
+If a simulated system exhibits energy loss (or gain) at a rate that exceeds any physical mechanism (e.g., slab cooling at 0.09 K/step ≈ 28 kW/m²), the root cause is almost always a numerical coefficient error, NOT a physics gap.
+
+**Diagnostic pattern:**
+```
+1. Compute the observed dT/dt from the log
+2. Multiply by (rho_cp * dz) to get the implied energy flux [W/m²]
+3. Compare to the maximum possible physical flux (SW peak ~1000, LW ~500, sensible ~500)
+4. If observed >> physical maximum: it's a coefficient/sign bug in the solver
+```
+
+**Anti-pattern:** Speculating about missing physics (radiation trapping, moisture, etc.) when the arithmetic doesn't match any physical mechanism.
+
+### Lesson 19: Compensating Bugs Are the Worst Bugs
+
+When two bugs partially cancel each other's effect, fixing one in isolation makes the simulation WORSE, not better. This misleads developers into reverting the correct fix.
+
+**Case study (Phase 3.5a-hotfix):**
+- Bug (old): Wall LW absorbed used full sky LW (~356 W/m²) — over-count
+- Bug (still): Wall LW emitted full T_skin⁴ (~410 W/m²) — over-count
+
+Both bugs made wall lose ~50 W/m² net. When we "fixed" absorption to use SVF (correctly reducing to ~103 W/m²), emission was still full — now wall lost ~300 W/m² net. Simulation collapsed harder.
+
+**Prevention:**
+- When fixing a physics component, list ALL related terms that could have compensating errors
+- Fix them together as a coherent physical unit, not piecemeal
+- Test the fix under conditions where each term dominates individually (e.g., no SW, uniform canyon T, high SW noon)
+
+**Grep check for future LW code:**
+```
+grep -n "LW_down\|LW_absorbed\|LW_emitted\|sigma_sb.*T_skin" Source/UrbanCanopy/
+```
+Each match must document its SVF/canyon geometry assumption.
+
+### Lesson 20: Sign Convention Documentation Must Live at BOTH Ends of an Interface
+
+Bug 5 (slab-BC sign) occurred because Newton's `ERF_UCMSEBSolver.H` documented "positive H = surface to atm" and Slab's `ERF_UCMSlabConduction.H` documented "positive Q_top = into slab from top." Both docstrings were correct in isolation. The bug lived in the WRAPPER (`advance_slab_conduction_mfi()`), which passed H → Q_top without noting these are OPPOSITE conventions.
+
+**Rule:** Every function boundary where signed physical quantities cross must have an inline comment at the call site documenting BOTH conventions and the reconciliation. Don't rely on docstrings alone — the interface point is where the bug lives.
+
+**Grep check:**
+```
+grep -B2 -A2 "H_flux\|Q_top\|Q_ucm\|Q_atm" Source/UrbanCanopy/ | grep -v "//"
+```
+Any signed flux passed across a function boundary without a preceding comment justifying its sign is a latent bug.
+
+### Lesson 21: Tridiagonal Solvers Need a Unit-Test Conservation Check
+
+Bug 6 (TDMA all-plus) would have been caught in seconds by a 3-line unit test:
+
+```cpp
+Real T[4] = {293.15, 293.15, 293.15, 293.15};
+advance_slab_conduction_column(T, 0.0, 293.15, 1.0, 1.8e6, 0.075, 1.0, 4);
+// Assert T[i] == 293.15 for all i to machine precision
+```
+
+Zero forcing + uniform IC = zero change. Any drift = coefficient error.
+
+**Rule for future numerical kernels:**
+- Every tridiagonal, pentadiagonal, or matrix inversion solver in `Source/UrbanCanopy/` must have a paired unit test verifying its identity behavior with zero forcing.
+- Test lives in `Exec/CanonicalTests/SLUCM/UnitTests/` (create if not exists).
+- CI runs unit tests on every PR.
+
+### Lesson 22: Astronomical Formulae Must Cite Reference and Include Sentinel Check
+
+Bug 4 (hour angle from midnight vs. noon) fell through the cracks because:
+1. The reference (Michalsky 1988) was cited in the docstring but no equation number given
+2. No sentinel value ("at noon at Boston in summer, cos_zenith ≈ 0.94, SW ≈ 880 W/m²") was documented
+3. The formula was "reviewed" but not tested against a known input/output pair
+
+**Rule for future physics formulae with strong convention dependencies:**
+- Cite specific equation number, not just paper (Michalsky 1988, Eq. 3, not just "Michalsky 1988")
+- Include a comment with an expected input/output pair for verification
+- Add a startup diagnostic printing the sentinel value; a mismatch is immediate cause for investigation
+
+**Example (correct format for the fixed radiation code):**
+```cpp
+// Michalsky (1988), Eq. 3: solar zenith angle
+// Sentinel test: at t_local=noon (12:00 LST), lat=42.36°N, day=172 (June 21):
+//   Expected cos_zenith ≈ 0.945, SW_down ≈ 883 W/m² with τ=0.7
+// If your startup diagnostic prints values > 5% off these, the formula is wrong.
+```
+
+### Lesson 23: Instrumentation-First Debugging Beats Speculative Coding
+
+Every one of the seven bugs was fixed by first adding a diagnostic that produced a specific number violating expectation, and only then changing code. Attempts to jump to speculative fixes (used with a coding agent early in the cycle) produced multiple wrong fixes that had to be reverted, wasting hours per iteration.
+
+**Rule:**
+- Before proposing any code change, propose an instrumentation change that would reveal whether the code is producing correct or incorrect intermediate values.
+- Run with instrumentation. Get a specific number. Compare to expected. Only THEN change code.
+- Log the instrumentation itself as a `[UCM][phase-tag][diagnostic]` line so it can be retained or removed later as a unit.
+
+**Anti-pattern (to avoid):** "Let me fix the LW trapping and the sign convention and the Newton solver all at once." When five things change at once and the sim gets worse, you've lost causality.
+
+### Lesson 24: CSV Material Parameters Are Physics, Not Configuration
+
+Bug 2 (`k_therm = 50 W/m/K` for a wall assembly) illustrates that CSV inputs are not just user preferences — they encode physical assumptions that must be validated.
+
+**Rule:**
+- Every `materials.csv` row must have a `description` field with a citation source (WRF UDA, ASHRAE handbook, etc.) — the field was in the reference schema but silently dropped during copy-paste from a docs example.
+- The `description` should include the physical interpretation: "brick_concrete" is fine, but "brick_concrete: effective wall assembly, k=1.1 (ASHRAE 90.1 Table 5.5-4, wall type W12)" is auditable.
+- Prerequisite check should sanity-bound: `k_therm ∈ [0.05, 5.0] W/m/K` for building assemblies; `k_therm ∈ [0.1, 3.0] W/m/K` for pavements. Values outside these bounds should FAIL prerequisites with a clear error message pointing to the CSV row and the expected range.
+
+**CSV header validation reminder (Lesson 16 from Phase 2.5-fix2):**
+- Reader must strip UTF-8 BOM and leading/trailing whitespace
+- Error messages on mismatch must hex-dump actual bytes read
+- **Do NOT use marker characters like `!!!`** that can visually corrupt display
+
+---
+
+## Consolidated Grep Checklist for Phase 3.5a-hotfix
+
+Add to `run_all_regressions.sh` or CI:
+
+```bash
+# Bug 1 & 6 (TDMA coefficients)
+grep -E "a_coeff|c_coeff|c_top" Source/UrbanCanopy/ERF_UCMSlabConduction.H | \
+  grep -v "^\s*//" | grep -v "\-Fo" && echo "WARNING: positive Fo in TDMA off-diagonal"
+
+# Bug 3 (MOST sign)
+grep -E "rho_ref \* Cp \* u_star \* t_star" Source/UrbanCanopy/ERF_UCMLayer.cpp | \
+  grep "\-rho" && echo "WARNING: minus sign in H_base; check WRF sign convention"
+
+# Bug 4 (hour angle)
+grep -E "hour_angle.*=.*time_s.*/.*3600" Source/UrbanCanopy/ERF_UCMRadiationForcing.H | \
+  grep -v "12\.0\|noon" && echo "WARNING: hour_angle not measured from noon"
+
+# Bug 5 (slab BC sign)
+grep -A1 "Q_top =" Source/UrbanCanopy/ERF_UCMSlabConduction.H | \
+  grep "H_flux_arr" | grep -v "\-H_flux" && echo "WARNING: Q_top not negated from H_flux"
+
+# Bug 7 (canyon LW)
+grep -E "LW_wall_eff|LW_road_eff|LW_canyon" Source/UrbanCanopy/ERF_UCMLayer.cpp | \
+  head -1 || echo "WARNING: canyon LW trapping not implemented"
+
+# CSV sanity
+awk -F, 'NR>1 && $5 > 5.0 {print "WARNING: k_therm=" $5 " exceeds building assembly bound"}' \
+  Exec/CanonicalTests/SLUCM/*/materials.csv
+```
+
+Any WARNING output from the above is a merge-blocker for Phase 3.5+ code.
+
+---
+
 ## Known Issues & Workarounds
 
 As bugs are discovered and fixed in later phases, document here:
