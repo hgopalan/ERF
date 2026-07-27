@@ -1,0 +1,2 @@
+material_id,name,wall_emissivity,wall_albedo,roof_emissivity,roof_albedo
+1,concrete,0.9,0.2,0.9,0.2

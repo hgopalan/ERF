@@ -1,0 +1,2 @@
+mat_id,name,albedo,emissivity,k_therm_W_per_mK,rho_cp_J_per_m3K,thickness_m,description
+1,kanda_concrete,0.2,0.9,1.1,1800000.0,0.3,Neutral momentum-only canonical material

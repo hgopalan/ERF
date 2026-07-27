@@ -1,5 +1,6 @@
 #include <ERF.H>
 #include <ERF_Utils.H>
+#include <ERF_UCMAtmPlotfile.H>
 
 #ifdef ERF_USE_WINDFARM
 #include <ERF_WindFarm.H>
@@ -132,6 +133,90 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         }
     }
 
+    // **************************************************************************************
+    // Phase 1.3: Advance SLUCM facet SEB and slab conduction
+    // **************************************************************************************
+    #ifdef ERF_USE_UCM
+    if (m_ucm_params.enable && m_ucm_layer[lev] != nullptr && m_SurfaceLayer) {
+
+        const int gr      = m_ucm_params.grid_ratio;
+        const int klo_atm = Geom(lev).Domain().smallEnd(2);
+
+        // --- Build ATM-grid T_atm and q_atm (θ = ρθ/ρ, q = ρq/ρ) with 1 ghost ---
+        amrex::MultiFab T_atm_3d(S_old.boxArray(), S_old.DistributionMap(), 1, amrex::IntVect(1,1,0));
+        T_atm_3d.setVal(0.0);
+        amrex::MultiFab::Copy  (T_atm_3d, S_old, RhoTheta_comp, 0, 1, T_atm_3d.nGrowVect());
+        amrex::MultiFab::Divide(T_atm_3d, S_old, Rho_comp,      0, 1, T_atm_3d.nGrowVect());
+
+        amrex::MultiFab q_atm_3d(S_old.boxArray(), S_old.DistributionMap(), 1, amrex::IntVect(1,1,0));
+        q_atm_3d.setVal(0.0);
+        if (solverChoice.moisture_type != MoistureType::None) {
+            amrex::MultiFab::Copy  (q_atm_3d, S_old, RhoQ1_comp, 0, 1, q_atm_3d.nGrowVect());
+            amrex::MultiFab::Divide(q_atm_3d, S_old, Rho_comp,   0, 1, q_atm_3d.nGrowVect());
+        }
+
+        // --- Interpolate U,V to cell centers on ATM (2D horizontal slab at k=klo) ---
+        amrex::MultiFab U_cc_atm(S_old.boxArray(), S_old.DistributionMap(), 1, 0);
+        amrex::MultiFab V_cc_atm(S_old.boxArray(), S_old.DistributionMap(), 1, 0);
+        U_cc_atm.setVal(0.0);
+        V_cc_atm.setVal(0.0);
+        for (amrex::MFIter mfi(U_cc_atm, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.tilebox();
+            auto ucc = U_cc_atm.array(mfi);
+            auto vcc = V_cc_atm.array(mfi);
+            auto const uf = U_old.const_array(mfi);
+            auto const vf = V_old.const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                ucc(i,j,k) = amrex::Real(0.5) * (uf(i,j,k) + uf(i+1,j,k));
+                vcc(i,j,k) = amrex::Real(0.5) * (vf(i,j,k) + vf(i,j+1,k));
+            });
+        }
+
+        // --- Allocate UCM-grid scratch and refine each ATM input onto UCM ---
+        const auto& ba_u = m_ucm_grid[lev]->ba;
+        const auto& dm_u = m_ucm_grid[lev]->dm;
+
+        amrex::MultiFab T_atm_ucm(ba_u, dm_u, 1, 0);
+        amrex::MultiFab q_atm_ucm(ba_u, dm_u, 1, 0);
+        amrex::MultiFab U_atm_ucm(ba_u, dm_u, 1, 0);
+        amrex::MultiFab V_atm_ucm(ba_u, dm_u, 1, 0);
+        amrex::MultiFab ustar_ucm(ba_u, dm_u, 1, 0);
+        amrex::MultiFab tstar_ucm(ba_u, dm_u, 1, 0);
+        amrex::MultiFab qstar_ucm(ba_u, dm_u, 1, 0);
+        // Phase 3.4/3.5: Obukhov length on UCM grid for stability correction
+        amrex::MultiFab olen_ucm(ba_u, dm_u, 1, 0);
+
+        refine_atm_to_ucm(T_atm_ucm, T_atm_3d,                                     gr, klo_atm);
+        refine_atm_to_ucm(q_atm_ucm, q_atm_3d,                                     gr, klo_atm);
+        refine_atm_to_ucm(U_atm_ucm, U_cc_atm,                                     gr, klo_atm);
+        refine_atm_to_ucm(V_atm_ucm, V_cc_atm,                                     gr, klo_atm);
+        refine_atm_to_ucm(ustar_ucm, *m_SurfaceLayer->get_u_star(lev),             gr, klo_atm);
+        refine_atm_to_ucm(tstar_ucm, *m_SurfaceLayer->get_t_star(lev),             gr, klo_atm);
+        refine_atm_to_ucm(qstar_ucm, *m_SurfaceLayer->get_q_star(lev),             gr, klo_atm);
+        // Phase 3.4/3.5: Refine Obukhov length from ATM grid to UCM grid
+        if (m_SurfaceLayer && m_SurfaceLayer->get_olen(lev)) {
+            refine_atm_to_ucm(olen_ucm, *m_SurfaceLayer->get_olen(lev),            gr, klo_atm);
+        }
+
+        // --- Call UCMLayer::advance with UCM-grid inputs and UCM geometry ---
+        m_ucm_layer[lev]->advance(*m_ucm_fields[lev], *m_ucm_forcing[lev], *m_ucm_grid[lev],
+                                  ustar_ucm, tstar_ucm, qstar_ucm,
+                                  U_atm_ucm, V_atm_ucm,
+                                  *z_phys_cc[lev].get(),
+                                  T_atm_ucm, q_atm_ucm,
+                                  olen_ucm,
+                                  m_ucm_grid[lev]->geom,
+                                  time, dt_lev, 1, lev);
+
+        // One-per-step confirmation that SEB ran (appears once between consecutive
+        // "Making slow rhs" lines, confirming the once-per-coarse-step contract)
+        if (m_ucm_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][step] SEB advanced at time=" << time
+                           << " dt=" << dt_lev << " lev=" << lev << "\n";
+        }
+    }
+    #endif
+
 #if defined(ERF_USE_WINDFARM)
     // **************************************************************************************
     // Update the windfarm sources
@@ -223,6 +308,227 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     MultiFab zmom_source(ba_z,dm,1,1); zmom_source.setVal(0);
     MultiFab    buoyancy(ba_z,dm,1,1); buoyancy.setVal(0);
 
+    // **************************************************************************************
+    // Phase 1.4: Cache UCM ATM fluxes once per coarse step.
+    // The actual per-RK-stage injection happens in ERF_TI_slow_rhs_pre.H via
+    // apply_ucm_tendency_to_cc_source(), which overwrites cc_src[RhoTheta_comp]
+    // after each make_sources() reset.  See ERF_UCMAtmCoupling.cpp for the
+    // RK-stage safety contract.
+    // **************************************************************************************
+    #ifdef ERF_USE_UCM
+    if (m_ucm_params.enable && m_ucm_layer[lev] != nullptr && 
+        (m_ucm_params.atm_feedback_heat > 0.0 || m_ucm_params.atm_feedback_moisture > 0.0 || m_ucm_params.atm_feedback_momentum > 0.0)) {
+        // Allocate cached ATM-grid flux MultiFabs on first call
+        if (!m_ucm_H_atm[lev]) {
+            m_ucm_H_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_H_atm[lev]->setVal(0.0);
+        }
+        if (solverChoice.moisture_type != MoistureType::None && !m_ucm_LE_atm[lev]) {
+            m_ucm_LE_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_LE_atm[lev]->setVal(0.0);
+        }
+
+        // Phase 2.5: Allocate morphology aggregates on ATM grid (first call)
+        if (!m_ucm_f_urb_atm[lev]) {
+            m_ucm_f_urb_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_f_urb_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_H_bldg_mean_atm[lev]) {
+            m_ucm_H_bldg_mean_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_H_bldg_mean_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_H_bldg_std_atm[lev]) {
+            m_ucm_H_bldg_std_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_H_bldg_std_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_lambda_p_atm[lev]) {
+            m_ucm_lambda_p_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_lambda_p_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_lambda_f_atm[lev]) {
+            m_ucm_lambda_f_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_lambda_f_atm[lev]->setVal(0.0);
+        }
+        // Phase 3.4/3.5: Allocate Obukhov length on ATM grid (first call)
+        if (!m_ucm_olen_atm[lev]) {
+            m_ucm_olen_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_olen_atm[lev]->setVal(0.0);
+        }
+
+        // Phase 2.5: Compute morphology aggregates from UCM grid to ATM grid
+        aggregate_ucm_morphology_to_atm(
+            *m_ucm_f_urb_atm[lev],
+            *m_ucm_H_bldg_mean_atm[lev],
+            *m_ucm_H_bldg_std_atm[lev],
+            *m_ucm_lambda_p_atm[lev],
+            *m_ucm_lambda_f_atm[lev],
+            *m_ucm_fields[lev]->H_bldg,
+            *m_ucm_fields[lev]->W_road,
+            *m_ucm_fields[lev]->plan_area_frac,
+            *m_ucm_fields[lev]->is_urban,
+            m_ucm_grid[lev]->geom, Geom(lev),
+            m_ucm_params.grid_ratio,
+            lev,
+            m_ucm_params.ucm_debug);
+
+        // Phase 2.5: One-time BANNER for aggregates (collective min/max outside IOProcessor guard)
+        static bool aggregate_banner_printed = false;
+        if (!aggregate_banner_printed && m_ucm_params.ucm_debug) {
+            aggregate_banner_printed = true;
+            // Collectives outside IOProcessor guard (PR #209 rule)
+            const amrex::Real fu_min = m_ucm_f_urb_atm[lev]->min(0, 0);
+            const amrex::Real fu_max = m_ucm_f_urb_atm[lev]->max(0, 0);
+            const amrex::Real Hm_min = m_ucm_H_bldg_mean_atm[lev]->min(0, 0);
+            const amrex::Real Hm_max = m_ucm_H_bldg_mean_atm[lev]->max(0, 0);
+            const amrex::Real Hs_max = m_ucm_H_bldg_std_atm[lev]->max(0, 0);
+            const amrex::Real lp_max = m_ucm_lambda_p_atm[lev]->max(0, 0);
+            const amrex::Real lf_max = m_ucm_lambda_f_atm[lev]->max(0, 0);
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "\n[UCM][2.5-followup][BANNER] ATM-grid aggregates:\n"
+                               << "  f_urb        min=" << fu_min << " max=" << fu_max << "\n"
+                               << "  H_bldg_mean  min=" << Hm_min << " max=" << Hm_max << " m\n"
+                               << "  H_bldg_std   max=" << Hs_max << " m\n"
+                               << "  lambda_p     max=" << lp_max << "\n"
+                               << "  lambda_f     max=" << lf_max << "\n\n";
+            }
+        }
+
+        // Coarsen UCM fluxes from UCM grid to ATM grid (lagged; constant across RK stages)
+        // Phase 2.5: Use area-averaged coarsening (convention B)
+        coarsen_ucm_flux_to_atm(*m_ucm_H_atm[lev], *m_ucm_fields[lev]->H_sensible,
+                                *m_ucm_fields[lev]->is_urban,
+                                m_ucm_grid[lev]->geom, Geom(lev),
+                                m_ucm_params.grid_ratio, lev);
+        if (solverChoice.moisture_type != MoistureType::None && m_ucm_fields[lev]->LE_latent) {
+            coarsen_ucm_flux_to_atm(*m_ucm_LE_atm[lev], *m_ucm_fields[lev]->LE_latent,
+                                    *m_ucm_fields[lev]->is_urban,
+                                    m_ucm_grid[lev]->geom, Geom(lev),
+                                    m_ucm_params.grid_ratio, lev);
+        }
+
+        // Phase 3.4/3.5: Copy Obukhov length from SurfaceLayer to ATM grid
+        if (m_SurfaceLayer && m_SurfaceLayer->get_olen(lev)) {
+            amrex::MultiFab::Copy(*m_ucm_olen_atm[lev], *m_SurfaceLayer->get_olen(lev),
+                                  0, 0, 1, 0);
+        }
+
+        // Phase 2.6: Separate coarsening for road and wall+roof+AH channels.
+        // Phase 2.7: Further split roof and wall into separate ATM-grid fields.
+        // H_road_ucm is already populated by SEB; H_wall + H_roof already include AH per Phase 2.3.
+        if (!m_ucm_H_road_atm[lev]) {
+           m_ucm_H_road_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+           m_ucm_H_road_atm[lev]->setVal(0.0);
+        }
+        // Phase 2.7: Create separate wall and roof ATM-grid fields
+        if (!m_ucm_H_wall_atm[lev]) {
+           m_ucm_H_wall_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+           m_ucm_H_wall_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_H_roof_atm[lev]) {
+           m_ucm_H_roof_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+           m_ucm_H_roof_atm[lev]->setVal(0.0);
+        }
+
+        coarsen_ucm_flux_to_atm(*m_ucm_H_road_atm[lev], *m_ucm_fields[lev]->H_road,
+                               *m_ucm_fields[lev]->is_urban,
+                               m_ucm_grid[lev]->geom, Geom(lev),
+                               m_ucm_params.grid_ratio, lev);
+
+        // Phase 2.7: Coarsen wall and roof fluxes separately
+        coarsen_ucm_flux_to_atm(*m_ucm_H_wall_atm[lev], *m_ucm_fields[lev]->H_wall,
+                               *m_ucm_fields[lev]->is_urban,
+                               m_ucm_grid[lev]->geom, Geom(lev),
+                               m_ucm_params.grid_ratio, lev);
+
+        coarsen_ucm_flux_to_atm(*m_ucm_H_roof_atm[lev], *m_ucm_fields[lev]->H_roof,
+                               *m_ucm_fields[lev]->is_urban,
+                               m_ucm_grid[lev]->geom, Geom(lev),
+                               m_ucm_params.grid_ratio, lev);
+
+        // Debug print for Phase 2.6/2.7 fields
+        if (m_ucm_params.ucm_debug) {
+           const amrex::Real h_road_min = m_ucm_H_road_atm[lev]->min(0, 0);
+           const amrex::Real h_road_max = m_ucm_H_road_atm[lev]->max(0, 0);
+           const amrex::Real h_wall_min = m_ucm_H_wall_atm[lev]->min(0, 0);
+           const amrex::Real h_wall_max = m_ucm_H_wall_atm[lev]->max(0, 0);
+           const amrex::Real h_roof_min = m_ucm_H_roof_atm[lev]->min(0, 0);
+           const amrex::Real h_roof_max = m_ucm_H_roof_atm[lev]->max(0, 0);
+           if (amrex::ParallelDescriptor::IOProcessor()) {
+               amrex::Print() << "[UCM][2.7][coarsen_ucm_flux_to_atm] Facet-split fluxes:\n"
+                              << "  H_road_atm  min=" << h_road_min << " max=" << h_road_max << " [W/m2]\n"
+                              << "  H_wall_atm  min=" << h_wall_min << " max=" << h_wall_max << " [W/m2]\n"
+                              << "  H_roof_atm  min=" << h_roof_min << " max=" << h_roof_max << " [W/m2]\n";
+           }
+
+           // Phase 3.2: Pre-injection check for ATM data plumbing
+           // Verify T_atm and wind fields reaching injection point
+           const amrex::Real h_road_int = m_ucm_H_road_atm[lev]->sum(0, 0) * (Geom(lev).CellSize(0) * Geom(lev).CellSize(1));
+           const amrex::Real h_wall_int = m_ucm_H_wall_atm[lev]->sum(0, 0) * (Geom(lev).CellSize(0) * Geom(lev).CellSize(1));
+           const amrex::Real h_roof_int = m_ucm_H_roof_atm[lev]->sum(0, 0) * (Geom(lev).CellSize(0) * Geom(lev).CellSize(1));
+
+           if (amrex::ParallelDescriptor::IOProcessor()) {
+               amrex::Print() << "[UCM][3.2][pre-injection-check]\n"
+                              << "  atm_feedback_heat=" << m_ucm_params.atm_feedback_heat 
+                              << "  atm_feedback_momentum=" << m_ucm_params.atm_feedback_momentum << "\n"
+                              << "  H_road_atm integral = " << h_road_int << " W (sum * dx^2)\n"
+                              << "  H_wall_atm integral = " << h_wall_int << " W\n"
+                              << "  H_roof_atm integral = " << h_roof_int << " W\n";
+           }
+        }
+
+        // Build is_urban mask on ATM grid if not already allocated
+        if (!m_ucm_is_urban_atm[lev]) {
+            m_ucm_is_urban_atm[lev] = std::make_unique<amrex::iMultiFab>(ba, dm, 1, 0);
+            m_ucm_is_urban_atm[lev]->setVal(1);
+        }
+
+        // Diagnostics output (once per coarse step)
+        if (m_ucm_params.ucm_diag_file.size() > 0) {
+            if (!m_ucm_diagnostics[lev]) {
+                m_ucm_diagnostics[lev] = std::make_unique<UCMDiagnostics>(m_ucm_params, lev);
+            }
+            m_ucm_diagnostics[lev]->append(*m_ucm_fields[lev], iteration, time, lev,
+                                           m_ucm_f_urb_atm[lev].get(),
+                                           m_ucm_H_bldg_mean_atm[lev].get(),
+                                           m_ucm_H_bldg_std_atm[lev].get(),
+                                           m_ucm_lambda_f_atm[lev].get(),
+                                           m_ucm_H_atm[lev].get());
+        }
+
+        // Plotfile output (once per coarse step)
+        if (m_ucm_params.ucm_plot_int > 0 && (iteration % m_ucm_params.ucm_plot_int == 0)) {
+            if (!m_ucm_plotfile[lev]) {
+                m_ucm_plotfile[lev] = std::make_unique<UCMPlotfile>(m_ucm_params, lev);
+            }
+            m_ucm_plotfile[lev]->write(*m_ucm_fields[lev], *m_ucm_grid[lev],
+                                       iteration, time, lev, false);
+        }
+        
+        // Phase 2.5: ATM-grid aggregate plotfile output (once per coarse step)
+        // Phase 2.7: Now with separate wall and roof fluxes
+        if (m_ucm_params.ucm_atm_plot_int > 0 &&
+           (iteration % m_ucm_params.ucm_atm_plot_int == 0))
+        {
+           // Phase 2.7: Updated call with 9 components (split H_wallroof into H_wall and H_roof)
+           m_ucm_atm_plotfile[lev]->write(
+               iteration,
+               time,
+               *m_ucm_f_urb_atm[lev],
+               *m_ucm_H_bldg_mean_atm[lev],
+               *m_ucm_H_bldg_std_atm[lev],
+               *m_ucm_lambda_p_atm[lev],
+               *m_ucm_lambda_f_atm[lev],
+               *m_ucm_H_atm[lev],
+               *m_ucm_H_road_atm[lev],       // Phase 2.6: road flux
+               *m_ucm_H_wall_atm[lev],       // Phase 2.7: wall flux
+               *m_ucm_H_roof_atm[lev],       // Phase 2.7: roof flux (incl AH)
+               Geom(lev),
+               lev,
+               m_ucm_params.ucm_debug);
+        }
+    }
+    #endif
+
     amrex::Vector<MultiFab> state_old;
     amrex::Vector<MultiFab> state_new;
 
@@ -268,6 +574,14 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         }
         check_for_negative_theta(S_old);
     }
+    // Before calling advance_dycore, enable the rhotheta_src path for UCM
+    // NOTE: UCM injection now happens per-RK-stage in ERF_TI_slow_rhs_pre.H via
+    //       apply_ucm_tendency_to_cc_source() with overwrite semantics.
+    //       The custom_rhotheta_forcing path is NOT used for UCM — do NOT set it here.
+    #ifdef ERF_USE_UCM
+    // (no custom_rhotheta_forcing for UCM — see RK-stage safety contract in
+    //  Source/UrbanCanopy/ERF_UCMAtmCoupling.cpp)
+    #endif
 
     // **************************************************************************************
     // Update the dycore
@@ -384,23 +698,6 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             //     on to the coarse/fine boundary at the fine resolution
             //
             Interpolater* mapper_f = &face_cons_linear_interp;
-
-            // PhysBCFunctNoOp null_bc;
-            // MultiFab tempx(vars_new[lev+1][Vars::xvel].boxArray(),vars_new[lev+1][Vars::xvel].DistributionMap(),1,0);
-            // tempx.setVal(0);
-            // xmom_crse_rhs[lev+1].setVal(0);
-            // FPr_u[lev].FillSet(tempx               , time       , null_bc, domain_bcs_type);
-            // FPr_u[lev].FillSet(xmom_crse_rhs[lev+1], time+dt_lev, null_bc, domain_bcs_type);
-            // MultiFab::Subtract(xmom_crse_rhs[lev+1],tempx,0,0,1,IntVect{0});
-            // xmom_crse_rhs[lev+1].mult(one/dt_lev,0,1,0);
-
-            // MultiFab tempy(vars_new[lev+1][Vars::yvel].boxArray(),vars_new[lev+1][Vars::yvel].DistributionMap(),1,0);
-            // tempy.setVal(0);
-            // ymom_crse_rhs[lev+1].setVal(0);
-            // FPr_v[lev].FillSet(tempy               , time       , null_bc, domain_bcs_type);
-            // FPr_v[lev].FillSet(ymom_crse_rhs[lev+1], time+dt_lev, null_bc, domain_bcs_type);
-            // MultiFab::Subtract(ymom_crse_rhs[lev+1],tempy,0,0,1,IntVect{0});
-            // ymom_crse_rhs[lev+1].mult(one/dt_lev,0,1,0);
 
             MultiFab temp_state(zmom_crse_rhs[lev+1].boxArray(),zmom_crse_rhs[lev+1].DistributionMap(),1,0);
             InterpFromCoarseLevel(temp_state,            IntVect{0}, IntVect{0}, state_old[IntVars::zmom], 0, 0, 1,

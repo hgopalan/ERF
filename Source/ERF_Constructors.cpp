@@ -96,6 +96,38 @@ ERF::ERF_shared ()
     lsm_data.resize(nlevs_max);
     lsm_flux.resize(nlevs_max);
 
+    // UCM Phase 1.1: Initialize UCM grid vector
+    #ifdef ERF_USE_UCM
+    m_ucm_grid.resize(nlevs_max);
+    m_ucm_fields.resize(nlevs_max);
+    // Phase 1.3: Initialize physics driver and forcing containers
+    m_ucm_layer.resize(nlevs_max);
+    m_ucm_forcing.resize(nlevs_max);
+    // Phase 1.4: Initialize coupling and diagnostics containers
+    m_ucm_H_atm.resize(nlevs_max);
+    m_ucm_LE_atm.resize(nlevs_max);
+    m_ucm_is_urban_atm.resize(nlevs_max);
+    // Phase 2.6: Facet-split fluxes on ATM grid (lazy construction like m_ucm_H_atm)
+    m_ucm_H_road_atm.resize(nlevs_max);
+    // Phase 2.7: Facet-split wall and roof fluxes (replace Phase 2.6 combined)
+    m_ucm_H_wall_atm.resize(nlevs_max);
+    m_ucm_H_roof_atm.resize(nlevs_max);
+    // Phase 2.5: Morphology aggregates on ATM grid
+    m_ucm_f_urb_atm.resize(nlevs_max);
+    m_ucm_H_bldg_mean_atm.resize(nlevs_max);
+    m_ucm_H_bldg_std_atm.resize(nlevs_max);
+    m_ucm_lambda_p_atm.resize(nlevs_max);
+    m_ucm_lambda_f_atm.resize(nlevs_max);
+    // Phase 3.4/3.5: Obukhov length on ATM grid for stability correction
+    m_ucm_olen_atm.resize(nlevs_max);
+    m_ucm_plotfile.resize(nlevs_max);
+    m_ucm_atm_plotfile.resize(nlevs_max);
+    for (int lev = 0; lev <= max_level; ++lev) {
+        m_ucm_atm_plotfile[lev] = std::make_unique<UCMAtmPlotfile>();
+    }
+    m_ucm_diagnostics.resize(nlevs_max);
+    #endif
+
     rhotheta_src.resize(nlevs_max);
     rhoqt_src.resize(nlevs_max);
 

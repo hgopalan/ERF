@@ -1,0 +1,11 @@
+# ============================================================================
+# UCMBoston multi-level one-way (Phase 3.6 — DO NOT RUN YET)
+# ============================================================================
+# This input file is a placeholder reserved by Phase 2.11.
+# It will be populated by Phase 3.6 with:
+#   - 3-level AMR configuration (base + 2 refinement patches)
+#   - Downtown refinement centered on UCM i,j = 32..47, 32..47 (see README)
+#   - Same physics as inputs_singlelevel; only AMR settings change
+#
+# Requires Phase 3.1 (level-aware allocation) to work.
+# ============================================================================

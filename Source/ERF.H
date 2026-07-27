@@ -66,6 +66,12 @@
 
 #include <ERF_RadiationModels.H>
 
+// UCM Phase 1.1: Include UCM module header if enabled
+#ifdef ERF_USE_UCM
+#include "UrbanCanopy/ERF_UCM.H"
+#include <ERF_UCMAtmPlotfile.H>
+#endif
+
 #ifdef ERF_USE_EAMXX_SHOC
 #include "ERF_ShocInterface.H"
 #endif
@@ -994,6 +1000,42 @@ private:
     amrex::Vector<std::unique_ptr<IRadiation>> rad; // Radiation model at each level
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> qheating_rates;  // radiation heating rate source terms (SW, LW) (DYCORE)
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> rad_fluxes;      // radiation fluxes (SW up/dn, LW up/dn) (OUTPUT ONLY)
+
+    // UCM Phase 1.1: SLUCM module parameters and grid
+    #ifdef ERF_USE_UCM
+    UCMParams m_ucm_params;
+    // Phase 2.1: CSV readers for heterogeneous inputs (created on-demand during init)
+    std::unique_ptr<UCMMaterialRegistry> m_ucm_material_registry;
+    std::unique_ptr<UCMBuildingLayoutReader> m_ucm_building_reader;
+    // Phase 1.2: grid and fields
+    amrex::Vector<std::unique_ptr<UCMGrid>> m_ucm_grid;
+    amrex::Vector<std::unique_ptr<UCMFields>> m_ucm_fields;  // Phase 1.2: all MultiFabs (morphology, radiative properties, state, is_urban mask)
+    // Phase 1.3: physics driver and forcing container
+    amrex::Vector<std::unique_ptr<UCMLayer>> m_ucm_layer;
+    amrex::Vector<std::unique_ptr<UCMForcing>> m_ucm_forcing;
+    // Phase 1.4: atmospheric coupling, plotfile, diagnostics
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_atm;         // Coarsened sensible flux on ATM grid
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_LE_atm;        // Coarsened latent flux on ATM grid
+    amrex::Vector<std::unique_ptr<amrex::iMultiFab>> m_ucm_is_urban_atm; // Coarsened is_urban mask on ATM grid
+    // Phase 2.6: facet-split fluxes on ATM grid for morphology-aware injection
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_road_atm;      // Road flux on ATM grid [W/m^2]
+    // Phase 2.7: facet-split wall and roof fluxes (replace Phase 2.6 wall+roof combined)
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_wall_atm;   // Wall flux on ATM grid [W/m^2]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_roof_atm;   // Roof flux on ATM grid (incl AH) [W/m^2]
+    // Phase 2.5: morphology aggregates on ATM grid for scale-aware source aggregation
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_f_urb_atm;         // Urban fraction per ATM cell [0,1]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_bldg_mean_atm;   // Mean building height per ATM cell [m]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_bldg_std_atm;    // Std dev of building height per ATM cell [m]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_lambda_p_atm;      // Mean plan-area density per ATM cell [-]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_lambda_f_atm;      // Mean frontal-area density per ATM cell [-]
+    // Phase 3.4/3.5: Obukhov length on ATM grid for stability correction
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_olen_atm;          // Obukhov length per ATM cell [m]
+    amrex::Vector<std::unique_ptr<UCMPlotfile>> m_ucm_plotfile;
+    amrex::Vector<std::unique_ptr<UCMAtmPlotfile>> m_ucm_atm_plotfile;
+    // std::unique_ptr<UCMAtmPlotfile> m_ucm_atm_plotfile;                       // Phase 2.5: ATM-grid aggregate plotfile writer
+    amrex::Vector<std::unique_ptr<UCMDiagnostics>> m_ucm_diagnostics;
+    #endif
+
 #ifdef ERF_USE_EAMXX_SHOC
     amrex::Vector<std::unique_ptr<SHOCInterface>> eamxx_shoc_interface; // EAMxx SHOC model at each level
 #endif

@@ -1,0 +1,131 @@
+# Canonical test for ERF-SLUCM Phase 2.4 — Canyon Shadowing (SVF)
+# Tests: Sky view factor (SVF) computation from canyon aspect ratio (Kusaka 2001)
+# Expected: Exit code 0, SVF values in range [0, 1], SVF_roof = 1.0 always
+#
+# This test verifies:
+# 1. SVF_wall and SVF_road computed from H_bldg and W_road (canyon aspect ratio)
+# 2. SVF formulas match Kusaka et al. (2001) equations 24-25
+# 3. SVF_roof = 1.0 (unshaded from above)
+# 4. 0 ≤ SVF_wall ≤ 1, 0 ≤ SVF_road ≤ 1 (physical bounds)
+# 5. SVF varies spatially with heterogeneous H_bldg and W_road
+# 6. Plotfile includes SVF_wall, SVF_road, SVF_roof fields
+
+erf.prob_name = "ABL"
+
+# Time stepping (short run for SVF verification)
+max_step         = 1
+erf.cfl                = 0.5
+amrex.fpe_trap_invalid = 0
+
+fabarray.mfiter_tile_size = 1024 1024 1024
+
+# AMR / geometry (small domain for quick testing)
+geometry.prob_extent = 6000.0 6000.0 1024.0
+amr.n_cell           = 8 8 32
+amrex.max_grid_size_z = 128
+geometry.is_periodic = 1 1 0
+
+# Domain boundaries
+zlo.type = "surface_layer"
+erf.most.z0   = 0.1      # roughness length [m]
+erf.most.zref = 24.0     # reference height [m]
+erf.most.surf_temp_flux = 0.12
+zhi.type = "SlipWall"
+zhi.theta_grad = 0.003   # adiabatic upper boundary
+
+# DIAGNOSTICS & VERBOSITY
+erf.sum_interval   = 1
+erf.v              = 1
+amr.v              = 1
+
+# REFINEMENT / REGRIDDING
+amr.max_level       = 0
+
+# CHECKPOINT / PLOTFILES
+amr.plot_int         = 1     # ATM plotfile every step
+amr.check_int        = -1
+erf.check_int        = -1
+
+# SOLVER CHOICE
+erf.use_gravity = true
+erf.molec_diff_type = "None"
+erf.les_type        = "None"
+erf.Cs = 0.11
+erf.theta_ref = 300.0
+
+# Terrain: keep as-is (no terrain)
+erf.terrain_type     = None
+erf.use_moisture     = false
+erf.transport_scalar = false
+
+# INITIALIZATION - from sounding file
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+erf.input_sounding_file = "sounding_neutral_abl"
+
+# PBL CONFIGURATION - Baseline MRF (neutral case)
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+
+# Enable moisture diffusivity
+erf.mrf_moistvars = false
+
+# CORIOLIS / GEOSTROPHIC FORCING
+erf.latitude = 45.0
+erf.use_coriolis = true
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 15.0 0.0 0.0
+
+# ========================================================================
+# SLUCM Configuration (Phase 2.4 — Canyon Shadowing + SVF)
+# ========================================================================
+erf.ucm.enable              = true
+erf.ucm.ucm_debug           = true
+erf.ucm.anchor_level        = 0
+erf.ucm.static_refinement   = true
+erf.ucm.grid_ratio          = 1
+erf.ucm.allow_steep_terrain = false
+
+# Phase 1.4 injection coupling
+# Two-way baseline: all feedback active.
+erf.ucm.atm_feedback_momentum = 1.0
+erf.ucm.atm_feedback_heat     = 1.0
+erf.ucm.atm_feedback_moisture = 0.0
+erf.ucm.zref                = 2.0
+erf.ucm.alpha_ucm           = 15.0
+
+# Phase 2.2: Aerodynamic parameters
+erf.ucm.z0_over_H           = 0.1
+erf.ucm.d_over_H            = 0.7
+
+# Phase 2.3: Facet-split (used by shadowing test)
+erf.ucm.plan_area_frac_uniform = 0.5
+erf.ucm.AH_uniform_Wm2         = 0.0
+erf.ucm.AH_profile_type_default = 0
+
+# Phase 2.1: CSV readers for heterogeneous canyon geometry
+# This test uses heterogeneous H_bldg and W_road to verify SVF spatial variation
+erf.ucm.building_layout_csv_path = "building_layout.csv"
+erf.ucm.material_library_csv_path = "materials.csv"
+
+# Phase 1.4 homogeneous fallback (not used when CSV specified)
+erf.ucm.H_bldg_uniform      = 10.0
+erf.ucm.W_road_uniform      = 10.0
+erf.ucm.W_roof_uniform      = 10.0
+
+erf.ucm.albedo_roof         = 0.20
+erf.ucm.albedo_wall         = 0.20
+erf.ucm.albedo_road         = 0.15
+
+erf.ucm.emissivity_roof     = 0.90
+erf.ucm.emissivity_wall     = 0.90
+erf.ucm.emissivity_road     = 0.94
+
+# Phase 2.4 diagnostics output (includes SVF fields)
+erf.ucm.ucm_plot_int        = 1      # Plotfile every step
+erf.ucm.ucm_diag_file       = "ucm_diag.dat"
+
+erf.ucm.test_ustar          = 0.0
+erf.ucm.test_surf_temp_K    = 293.15

@@ -1,0 +1,2 @@
+mat_id,name,albedo,emissivity,k_therm_W_per_mK,rho_cp_J_per_m3K,thickness_m,description
+1,Urban_Material,0.2,0.9,1.5,2000000.0,0.3,Standard urban material for Phase 2.1 testing

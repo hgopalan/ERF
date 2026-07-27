@@ -113,6 +113,106 @@
                      input_sounding_data, turbPert, true);
 
         // *****************************************************************************
+        // Phase 1.4: Inject UCM exponential tendency into cc_src each RK stage.
+        //
+        // make_sources() calls cc_src.setVal(0.) at the top, so any UCM tendency
+        // written into cc_src before advance_dycore is erased.  We re-inject it
+        // here, after make_sources(), so it survives into erf_slow_rhs_pre.
+        // *****************************************************************************
+#ifdef ERF_USE_UCM
+        if (m_ucm_params.enable &&
+            m_ucm_H_atm[level] && m_ucm_is_urban_atm[level] &&
+            (m_ucm_params.atm_feedback_heat > 0.0 || m_ucm_params.atm_feedback_moisture > 0.0))
+        {
+            const bool has_moisture_ucm = (solverChoice.moisture_type != MoistureType::None);
+            const bool use_terrain_ucm = (solverChoice.terrain_type != TerrainType::None);
+
+            // Build flat-terrain z_phys_cc only for the no-terrain path. The
+            // Facet3D terrain kernel uses z_phys_nd directly so the local AGL
+            // thickness is consistent with the fitted mesh geometry.
+            amrex::MultiFab z_phys_flat_ucm;
+            const amrex::MultiFab* z_cc_ucm_ptr = z_phys_cc[level].get();
+            if (!z_cc_ucm_ptr) {
+                const auto dxArr_ucm = fine_geom.CellSizeArray();
+                const int  klo_ucm   = fine_geom.Domain().smallEnd(2);
+                z_phys_flat_ucm.define(cc_src.boxArray(),
+                                       cc_src.DistributionMap(), 1, 1);
+                for (amrex::MFIter mfi_z(z_phys_flat_ucm,
+                                         amrex::TilingIfNotGPU());
+                     mfi_z.isValid(); ++mfi_z) {
+                    const amrex::Box& bx_z = mfi_z.growntilebox();
+                    auto z_a = z_phys_flat_ucm.array(mfi_z);
+                    amrex::ParallelFor(bx_z,
+                        [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                            z_a(i,j,k) = (k - klo_ucm + amrex::Real(0.5)) * dxArr_ucm[2];
+                        });
+                }
+                z_cc_ucm_ptr = &z_phys_flat_ucm;
+            }
+
+            const amrex::MultiFab* z_nd_ucm_ptr = use_terrain_ucm ? z_phys_nd[level].get() : nullptr;
+            if (use_terrain_ucm) {
+                AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+                    z_nd_ucm_ptr != nullptr,
+                    "[UCM][2.7] Terrain-enabled UCM coupling requires z_phys_nd.");
+            }
+
+            // Phase 3.2: Debug pre-injection RhoTheta source state
+            amrex::Real cc_src_rho_theta_max_before = cc_src.max(RhoTheta_comp, 0);
+
+            // Phase 3.3: MRF cc_src[RhoTheta] ownership conflict check
+            // Verify that make_sources did NOT write non-zero values into cc_src[RhoTheta_comp]
+            // through MRF's counter-gradient heat flux path. UCM owns this component.
+            if (m_ucm_params.ucm_debug) {
+                if (std::abs(cc_src_rho_theta_max_before) > 1.0e-8) {
+                    if (amrex::ParallelDescriptor::IOProcessor()) {
+                        amrex::Print() << "[UCM][3.3][mrf-conflict-check] WARNING: Non-zero cc_src[RhoTheta] BEFORE UCM injection:\n"
+                                       << "  lev=" << level << " rk_stage=" << nrk << "\n"
+                                       << "  cc_src[RhoTheta] max BEFORE UCM injection = " << cc_src_rho_theta_max_before << "\n"
+                                       << "  -> MRF or other physics wrote into this slot. UCM will overwrite.\n"
+                                       << "  -> This is informational. UCM owns cc_src[RhoTheta], so the behavior is correct.\n";
+                    }
+                }
+            }
+
+            apply_ucm_tendency_to_cc_source(
+                cc_src,
+                *m_ucm_H_atm[level],
+                *m_ucm_H_road_atm[level],
+                *m_ucm_H_wall_atm[level],
+                *m_ucm_H_roof_atm[level],
+                *m_ucm_H_bldg_mean_atm[level],
+                *m_ucm_H_bldg_std_atm[level],
+                *m_ucm_lambda_p_atm[level],
+                *m_ucm_lambda_f_atm[level],
+                has_moisture_ucm ? m_ucm_LE_atm[level].get() : nullptr,
+                z_nd_ucm_ptr,
+                *z_cc_ucm_ptr,
+                S_data[IntVars::cons],
+                fine_geom,
+                *m_ucm_is_urban_atm[level],
+                m_ucm_params.use_facet3d_injection,
+                m_ucm_params.use_gaussian_height_distribution,
+                m_ucm_params.height_std_threshold_m,
+                m_ucm_params.atm_feedback_heat,
+                m_ucm_params.atm_feedback_moisture,
+                has_moisture_ucm,
+                level,
+                m_ucm_params.ucm_debug);
+
+            // Phase 3.2: Debug post-injection RhoTheta source state
+            if (m_ucm_params.ucm_debug) {
+                amrex::Real cc_src_rho_theta_max_after = cc_src.max(RhoTheta_comp, 0);
+                if (amrex::ParallelDescriptor::IOProcessor()) {
+                    amrex::Print() << "[UCM][3.2][rk-stage-inject] lev=" << level << " rk_stage=" << nrk << "\n"
+                                   << "  cc_source[RhoTheta] before: max=" << cc_src_rho_theta_max_before << "\n"
+                                   << "  cc_source[RhoTheta] after:  max=" << cc_src_rho_theta_max_after << "\n";
+                }
+            }
+        }
+#endif
+
+        // *****************************************************************************
         // Add nudging terms on moist variables if we have a non-zero relaxation region
         // *****************************************************************************
 #if defined(ERF_USE_NETCDF)
@@ -175,6 +275,42 @@
         add_thin_body_sources(xmom_src, ymom_src, zmom_src,
                               xflux_imask[level], yflux_imask[level], zflux_imask[level],
                               thin_xforce[level], thin_yforce[level], thin_zforce[level]);
+
+        // *****************************************************************************
+        // Phase 2.8: Add BEP-style momentum drag (UCM compressible explicit mode)
+        // *****************************************************************************
+#ifdef ERF_USE_UCM
+        if (m_ucm_params.enable &&
+            m_ucm_H_bldg_mean_atm[level] && m_ucm_is_urban_atm[level] &&
+            m_ucm_params.wall_drag_mode != WallDragMode::Off &&
+            m_ucm_params.atm_feedback_momentum > 0.0)
+        {
+            const amrex::MultiFab* z_nd_ucm_ptr = (z_phys_nd[level] != nullptr)
+                ? z_phys_nd[level].get()
+                : nullptr;
+            
+            apply_ucm_momentum_drag_to_source(
+                xmom_src, ymom_src,
+                S_data[IntVars::cons],
+                S_data[IntVars::xmom],
+                S_data[IntVars::ymom],
+                *m_ucm_H_bldg_mean_atm[level],
+                *m_ucm_H_bldg_std_atm[level],
+                *m_ucm_lambda_p_atm[level],
+                *m_ucm_lambda_f_atm[level],
+                z_nd_ucm_ptr,
+                *m_ucm_is_urban_atm[level],
+                fine_geom,
+                m_ucm_params.wall_drag_mode,
+                m_ucm_params.Cd_wall,
+                m_ucm_params.Cd_roof,
+                m_ucm_params.atm_feedback_momentum,
+                m_ucm_params.use_gaussian_height_distribution,
+                m_ucm_params.height_std_threshold_m,
+                level,
+                m_ucm_params.ucm_debug);
+        }
+#endif
 
         // *****************************************************************************
         // Define RHS for rho, rho_theta and momenta

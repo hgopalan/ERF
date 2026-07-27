@@ -1,0 +1,151 @@
+# Canonical test for ERF-SLUCM Phase 2.8: BEP Momentum Drag (Compressible)
+# Tests: wall drag vertical distribution, roof drag placement, wind decay inside/above canopy
+# Expected: exit code 0 at step 10, plt_*_000010 exists with 5 ATM components (u,v,w + 2 passive),
+#           left ATM cells (tall buildings) show 50%+ wind reduction inside canopy,
+#           right ATM cells (short buildings) show less reduction,
+#           above-canopy wind ≈ freestream within 20%
+#
+# Grid: ATM 4x4 (small), grid_ratio=4 -> UCM 16x16
+# dz = 4m, nz = 256 => 1024m tall, 30m building spans ~7-8 ATM cells
+# Pattern: two vertical stripes (left=tall dense, right=short sparse)
+
+erf.prob_name = "ABL"
+
+# Time stepping
+max_step         = 256
+erf.cfl                = 0.5
+amrex.fpe_trap_invalid = 0
+
+fabarray.mfiter_tile_size = 1024 1024 1024
+
+# AMR / geometry: tall domain for better vertical resolution
+geometry.prob_extent = 400.0 400.0 1024.0
+amr.n_cell           = 4 4 256
+amrex.max_grid_size_z = 128
+geometry.is_periodic = 1 1 0
+
+# Domain boundaries
+zlo.type = "surface_layer"
+erf.most.z0   = 0.1      # roughness length [m]
+erf.most.zref = 24.0     # reference height [m]
+erf.most.surf_temp_flux = 0.02   # small unstable T flux [K m/s]
+zhi.type = "SlipWall"
+zhi.theta_grad = 0.003   # adiabatic upper boundary
+
+# DIAGNOSTICS & VERBOSITY
+erf.sum_interval   = 1
+erf.v              = 1
+amr.v              = 1
+
+# REFINEMENT / REGRIDDING
+amr.max_level       = 0
+
+# CHECKPOINT / PLOTFILES (Phase 2.8 test needs main plotfile for velocity check)
+amr.check_int        = -1
+erf.check_int        = -1
+#erf.plot_int_1        = 5
+erf.plot_file_1     = plt_      # prefix of plotfile name
+erf.plot_int_1      = 5             # number of timesteps between plotfiles
+erf.plot_vars_1     = x_velocity y_velocity z_velocity theta
+# SOLVER CHOICE
+erf.use_gravity = true
+erf.molec_diff_type = "None"
+erf.les_type        = "None"
+erf.Cs = 0.11
+erf.theta_ref = 300.0
+
+# Terrain: keep as-is (no terrain in Phase 2.8 test; Phase 2.9 will add terrain test)
+erf.terrain_type     = None
+erf.use_moisture     = false
+erf.transport_scalar = false
+
+# INITIALIZATION - from sounding file
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+erf.input_sounding_file = "sounding_neutral_abl"
+
+# PBL CONFIGURATION - Baseline MRF (neutral case)
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+
+# Disable countergradient corrections
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = false
+
+# CORIOLIS / GEOSTROPHIC FORCING
+erf.latitude = 45.0
+erf.use_coriolis = true
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 8.0 0.0 0.0
+
+# ========================================================================
+# SLUCM Configuration (Phase 2.7 heat injection enabled + Phase 2.8 drag)
+# ========================================================================
+erf.ucm.enable              = true
+erf.ucm.ucm_debug           = 1
+erf.ucm.anchor_level        = 0
+erf.ucm.static_refinement   = true
+erf.ucm.grid_ratio          = 4
+erf.ucm.allow_steep_terrain = false
+
+# Two-way baseline: all feedback active.
+erf.ucm.atm_feedback_momentum = 1.0
+erf.ucm.atm_feedback_heat     = 1.0
+erf.ucm.atm_feedback_moisture = 0.0
+erf.ucm.zref                = 2.0
+
+# Phase 2.5 fallback (unused when use_facet3d_injection=true)
+erf.ucm.alpha_ucm           = 10.0
+
+# Defensive default (used only if CSV data is missing or incomplete)
+erf.ucm.H_bldg_uniform      = 10.0
+
+erf.ucm.W_road_uniform      = 10.0
+erf.ucm.W_roof_uniform      = 10.0
+
+erf.ucm.albedo_roof         = 0.20
+erf.ucm.albedo_wall         = 0.20
+erf.ucm.albedo_road         = 0.15
+
+erf.ucm.emissivity_roof     = 0.90
+erf.ucm.emissivity_wall     = 0.90
+erf.ucm.emissivity_road     = 0.94
+
+erf.ucm.ucm_plot_int        = 10
+erf.ucm.ucm_atm_plot_int    = 1
+erf.ucm.ucm_diag_file       = "ucm_diag.dat"
+
+erf.ucm.test_ustar          = 0.0
+erf.ucm.test_surf_temp_K    = 293.15
+
+# Phase 2.6 anthropogenic heat (for testing injection)
+erf.ucm.AH_uniform_Wm2          = 50.0      # constant [W/m^2]
+erf.ucm.AH_profile_type_default = 1         # uniform profile
+
+# ========================================================================
+# Phase 2.6 Morphology-Aware Injection Parameters (fallback)
+# ========================================================================
+erf.ucm.alpha_scale              = 1.5      # multiplier: alpha_ij = alpha_scale * H_bldg_mean
+erf.ucm.alpha_min                = 1.0      # minimum e-folding depth [m]
+erf.ucm.alpha_max                = 50.0     # maximum e-folding depth [m]
+erf.ucm.use_morphology_injection = 0        # disabled (use facet3d instead)
+
+# ========================================================================
+# Phase 2.7 Facet3D BEP-Continuous-TF Parameters
+# ========================================================================
+erf.ucm.use_facet3d_injection              = 1    # enable Phase 2.7 facet3D geometric heat injection
+erf.ucm.use_gaussian_height_distribution   = 0    # sharp mode
+erf.ucm.height_std_threshold_m             = 0.1  # fallback threshold for Gaussian [m]
+
+# ========================================================================
+# Phase 2.8 BEP Momentum Drag Parameters
+# ========================================================================
+erf.ucm.wall_drag_mode                     = "explicit"   # force compressible path (explicit RHS)
+erf.ucm.Cd_wall                            = 0.4          # wall drag coefficient (Martilli 2002)
+erf.ucm.Cd_roof                            = 0.15         # roof drag coefficient (BEP-BEM standard)
+
+# CSV-based heterogeneous setup
+erf.ucm.building_layout_csv_path = "building_layout.csv"
+erf.ucm.material_library_csv_path = "materials.csv"
