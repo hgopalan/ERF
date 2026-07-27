@@ -1028,6 +1028,8 @@ private:
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_bldg_std_atm;    // Std dev of building height per ATM cell [m]
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_lambda_p_atm;      // Mean plan-area density per ATM cell [-]
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_lambda_f_atm;      // Mean frontal-area density per ATM cell [-]
+    // Phase 3.4/3.5: Obukhov length on ATM grid for stability correction
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_olen_atm;          // Obukhov length per ATM cell [m]
     amrex::Vector<std::unique_ptr<UCMPlotfile>> m_ucm_plotfile;
     amrex::Vector<std::unique_ptr<UCMAtmPlotfile>> m_ucm_atm_plotfile;
     // std::unique_ptr<UCMAtmPlotfile> m_ucm_atm_plotfile;                       // Phase 2.5: ATM-grid aggregate plotfile writer

@@ -18,6 +18,7 @@
 #include <UrbanCanopy/ERF_UCMSlabConduction.H>
 #include <UrbanCanopy/ERF_UCMAllocate.H>
 #include <UrbanCanopy/ERF_UCMShadowing.H>
+#include <UrbanCanopy/ERF_UCMStabilityCorrection.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <ERF_Constants.H>
 #include <cmath>
@@ -54,6 +55,7 @@ void UCMLayer::advance(UCMFields& fields,
                        const amrex::MultiFab& z_phys_cc,
                        const amrex::MultiFab& T_atm_lowest,
                        const amrex::MultiFab& q_atm_lowest,
+                       const amrex::MultiFab& atm_olen,
                        const amrex::Geometry& geom_atm,
                        amrex::Real time,
                        amrex::Real dt,
@@ -254,6 +256,7 @@ void UCMLayer::advance(UCMFields& fields,
 
     const amrex::Real Cp = Cp_d;
     const amrex::Real rho_ref = 1.2;  // Reference density [kg/m^3]
+    const amrex::Real zref = 2.0;     // Reference height above roof [m]
 
     // Iterate over forcing.u_star (on UCM grid) to compute facet fluxes
     for (amrex::MFIter mfi(*forcing.u_star, amrex::TilingIfNotGPU());
@@ -270,12 +273,19 @@ void UCMLayer::advance(UCMFields& fields,
        auto const is_urb_a = fields.is_urban->const_array(mfi);
        auto const u_star_a = forcing.u_star->const_array(mfi);
        auto const t_star_a = atm_t_star.const_array(mfi);
+       // Phase 3.4/3.5: Obukhov length for stability correction
+       auto const olen_a   = atm_olen.const_array(mfi);
 
        // Output arrays
        auto       h_road_a = fields.H_road->array(mfi);
        auto       h_wall_a = fields.H_wall->array(mfi);
        auto       h_roof_a = fields.H_roof->array(mfi);
        auto       h_sens_a = fields.H_sensible->array(mfi);
+
+       // Phase 3.4/3.5: Stability correction parameters
+       const bool use_stab_corr = m_params.use_stability_correction;
+       const amrex::Real zeta_max_stable = m_params.zeta_max_stable;
+       const amrex::Real zeta_min_unstable = m_params.zeta_min_unstable;
 
        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
            if (is_urb_a(i,j,0) == 0) {
@@ -301,8 +311,17 @@ void UCMLayer::advance(UCMFields& fields,
            const amrex::Real u_star = u_star_a(i,j,0);
            const amrex::Real t_star = t_star_a(i,j,0);
            // MOST bulk sensible flux -- already per unit plan area [W/m^2].
-           const amrex::Real H_base = -rho_ref * Cp * u_star * t_star;
+           amrex::Real H_base = -rho_ref * Cp * u_star * t_star;
            const amrex::Real AH_val = ah_a(i,j,0);
+
+           // Phase 3.4/3.5: Apply stability correction if enabled
+           if (use_stab_corr) {
+               const amrex::Real olen = olen_a(i,j,0);
+               // compute_ch_stability_correction expects Ch_base and returns Ch_corrected
+               // For the sensible heat flux: H_corrected = H_base * correction_factor
+               H_base = compute_ch_stability_correction(H_base, olen, zref, 
+                                                        zeta_max_stable, zeta_min_unstable);
+           }
 
            // Phase 2.5-fix2: enforce pre-weighted facet-split convention (Phase 2.3 spec).
            // H_road, H_wall, H_roof are each already scaled by their area fraction so

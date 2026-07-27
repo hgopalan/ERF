@@ -183,6 +183,8 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         amrex::MultiFab ustar_ucm(ba_u, dm_u, 1, 0);
         amrex::MultiFab tstar_ucm(ba_u, dm_u, 1, 0);
         amrex::MultiFab qstar_ucm(ba_u, dm_u, 1, 0);
+        // Phase 3.4/3.5: Obukhov length on UCM grid for stability correction
+        amrex::MultiFab olen_ucm(ba_u, dm_u, 1, 0);
 
         refine_atm_to_ucm(T_atm_ucm, T_atm_3d,                                     gr, klo_atm);
         refine_atm_to_ucm(q_atm_ucm, q_atm_3d,                                     gr, klo_atm);
@@ -191,6 +193,10 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         refine_atm_to_ucm(ustar_ucm, *m_SurfaceLayer->get_u_star(lev),             gr, klo_atm);
         refine_atm_to_ucm(tstar_ucm, *m_SurfaceLayer->get_t_star(lev),             gr, klo_atm);
         refine_atm_to_ucm(qstar_ucm, *m_SurfaceLayer->get_q_star(lev),             gr, klo_atm);
+        // Phase 3.4/3.5: Refine Obukhov length from ATM grid to UCM grid
+        if (m_SurfaceLayer && m_SurfaceLayer->get_olen(lev)) {
+            refine_atm_to_ucm(olen_ucm, *m_SurfaceLayer->get_olen(lev),            gr, klo_atm);
+        }
 
         // --- Call UCMLayer::advance with UCM-grid inputs and UCM geometry ---
         m_ucm_layer[lev]->advance(*m_ucm_fields[lev], *m_ucm_forcing[lev], *m_ucm_grid[lev],
@@ -198,6 +204,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                                   U_atm_ucm, V_atm_ucm,
                                   *z_phys_cc[lev].get(),
                                   T_atm_ucm, q_atm_ucm,
+                                  olen_ucm,
                                   m_ucm_grid[lev]->geom,
                                   time, dt_lev, 1, lev);
 
@@ -342,6 +349,11 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             m_ucm_lambda_f_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
             m_ucm_lambda_f_atm[lev]->setVal(0.0);
         }
+        // Phase 3.4/3.5: Allocate Obukhov length on ATM grid (first call)
+        if (!m_ucm_olen_atm[lev]) {
+            m_ucm_olen_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_olen_atm[lev]->setVal(0.0);
+        }
 
         // Phase 2.5: Compute morphology aggregates from UCM grid to ATM grid
         aggregate_ucm_morphology_to_atm(
@@ -392,6 +404,12 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                                     *m_ucm_fields[lev]->is_urban,
                                     m_ucm_grid[lev]->geom, Geom(lev),
                                     m_ucm_params.grid_ratio, lev);
+        }
+
+        // Phase 3.4/3.5: Copy Obukhov length from SurfaceLayer to ATM grid
+        if (m_SurfaceLayer && m_SurfaceLayer->get_olen(lev)) {
+            amrex::MultiFab::Copy(*m_ucm_olen_atm[lev], *m_SurfaceLayer->get_olen(lev),
+                                  0, 0, 1, 0);
         }
 
         // Phase 2.6: Separate coarsening for road and wall+roof+AH channels.

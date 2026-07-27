@@ -118,6 +118,8 @@ ERF::ERF_shared ()
     m_ucm_H_bldg_std_atm.resize(nlevs_max);
     m_ucm_lambda_p_atm.resize(nlevs_max);
     m_ucm_lambda_f_atm.resize(nlevs_max);
+    // Phase 3.4/3.5: Obukhov length on ATM grid for stability correction
+    m_ucm_olen_atm.resize(nlevs_max);
     m_ucm_plotfile.resize(nlevs_max);
     m_ucm_atm_plotfile.resize(nlevs_max);
     for (int lev = 0; lev <= max_level; ++lev) {
