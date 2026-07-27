@@ -251,10 +251,10 @@ void advance_slab_conduction_mfi(
 
         // Call column solver
         amrex::Real Q_top = H_flux_arr(i, j, 0);
-        amrex::Real k = k_therm_arr(i, j, 0);
+        amrex::Real kcond = k_therm_arr(i, j, 0);
         amrex::Real rhcp = rho_cp_arr(i, j, 0);
 
-        advance_slab_conduction_column(T_col, Q_top, T_deep, k, rhcp, dz, dt, N_layers);
+        advance_slab_conduction_column(T_col, Q_top, T_deep, kcond, rhcp, dz, dt, N_layers);
 
         // Store updated temps back to MultiFab
         for (int n = 0; n < N_layers; ++n) {
