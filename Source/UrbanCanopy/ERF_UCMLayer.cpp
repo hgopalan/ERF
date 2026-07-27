@@ -616,6 +616,61 @@ void UCMLayer::advance(UCMFields& fields,
             bx, dt, N_layers, slab_L, T_deep);
     }
 
+    // Phase 3.5A: Update canyon-air temperature using Newton-computed H (for consistency)
+    // This runs AFTER slab conduction (which uses Newton H) but BEFORE MOST loop,
+    // ensuring self-consistency: Newton produces T_skin → slab advances T1 →
+    // canyon air T is computed from Newton H → next step's Newton uses this T_canyon
+    for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU());
+         mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& bx = mfi.tilebox();
+        auto const is_urb   = fields.is_urban->const_array(mfi);
+        auto const H_rd     = fields.H_road->const_array(mfi);
+        auto const H_wl     = fields.H_wall->const_array(mfi);
+        auto const H_bldg   = fields.H_bldg->const_array(mfi);
+        auto const W_road   = fields.W_road->const_array(mfi);
+        auto const T_atm    = forcing.T_atm_ref->const_array(mfi);
+        auto T_canyon_a     = fields.T_canyon_air->array(mfi);
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
+            if (is_urb(i,j,0) == 0) return;
+
+            amrex::Real Hb  = H_bldg(i,j,0);
+            amrex::Real W   = amrex::max(W_road(i,j,0), amrex::Real(1.0e-6));
+            amrex::Real HoW = Hb / W;
+
+            // Bulk conductance for canyon-air temperature calculation [W/m^2/K]
+            // Using representative in-canyon wind speed 2 m/s and Ch=0.01
+            constexpr amrex::Real rho_cp_c   = 1.2 * 1005.0;  // [J/m^3/K]
+            constexpr amrex::Real U_canyon    = 2.0;           // [m/s]
+            constexpr amrex::Real Ch_c        = 0.01;          // [-]
+            amrex::Real conductance = amrex::max(rho_cp_c * Ch_c * U_canyon,
+                                                  amrex::Real(1.0e-6));
+
+            // H_road and H_wall are pre-weighted [W/m^2 of ATM plan area].
+            // Convert to temperature perturbation above T_atm.
+            amrex::Real dT_rd = H_rd(i,j,0) / conductance;
+            amrex::Real dT_wl = H_wl(i,j,0) / conductance;
+
+            // Weighted canyon-air temperature:
+            // road and wall heat the canyon; ATM inflow dilutes it.
+            amrex::Real T_ref = T_atm(i,j,0);
+            amrex::Real w_rd  = 1.0;
+            amrex::Real w_wl  = 2.0 * HoW;
+            amrex::Real w_atm = 1.0;
+            amrex::Real w_tot = amrex::max(w_rd + w_wl + w_atm, amrex::Real(1.0e-6));
+
+            amrex::Real T_canyon_new = (w_rd  * (T_ref + dT_rd) +
+                                        w_wl  * (T_ref + dT_wl) +
+                                        w_atm *  T_ref) / w_tot;
+
+            // Clamp to physical range
+            T_canyon_new = amrex::max(amrex::min(T_canyon_new, amrex::Real(380.0)),
+                                       amrex::Real(200.0));
+            T_canyon_a(i,j,0) = T_canyon_new;
+        });
+    }
+
     // Phase 2.3: Compute anthropogenic heat
     compute_anthropogenic_heat(*fields.AH, *fields.ah_profile_id, *fields.is_urban,
                               *fields.AH_Wm2_ucm,  // Phase 2.9: per-cell override
@@ -676,6 +731,10 @@ void UCMLayer::advance(UCMFields& fields,
        auto       h_road_a = fields.H_road->array(mfi);
        auto       h_wall_a = fields.H_wall->array(mfi);
        auto       h_roof_a = fields.H_roof->array(mfi);
+       // Phase 3.5A-hotfix2: MOST-derived fluxes for ATM injection (separate from Newton)
+       auto       h_road_atm_a = fields.H_road_atm->array(mfi);
+       auto       h_wall_atm_a = fields.H_wall_atm->array(mfi);
+       auto       h_roof_atm_a = fields.H_roof_atm->array(mfi);
        auto       h_sens_a = fields.H_sensible->array(mfi);
 
        // Phase 3.4/3.5: Stability correction parameters
@@ -685,9 +744,9 @@ void UCMLayer::advance(UCMFields& fields,
 
        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
            if (is_urb_a(i,j,0) == 0) {
-               h_road_a(i,j,0) = 0.0;
-               h_wall_a(i,j,0) = 0.0;
-               h_roof_a(i,j,0) = 0.0;
+               h_road_atm_a(i,j,0) = 0.0;
+               h_wall_atm_a(i,j,0) = 0.0;
+               h_roof_atm_a(i,j,0) = 0.0;
                h_sens_a(i,j,0) = 0.0;
                return;
            }
@@ -720,9 +779,9 @@ void UCMLayer::advance(UCMFields& fields,
            }
 
            // Phase 2.5-fix2: enforce pre-weighted facet-split convention (Phase 2.3 spec).
-           // H_road, H_wall, H_roof are each already scaled by their area fraction so
-           // they sum to the ATM-cell sensible flux. Phase 2.7 Facet3D injection assumes
-           // this convention.
+           // H_road_atm, H_wall_atm, H_roof_atm are MOST-derived and each already scaled 
+           // by their area fraction so they sum to the ATM-cell sensible flux for injection.
+           // Phase 2.7 Facet3D injection assumes this convention.
            //
            // Per-facet pre-weighted contributions [W/m^2 of ATM cell area].
            amrex::Real Hr = f_road * H_base;
@@ -741,9 +800,10 @@ void UCMLayer::advance(UCMFields& fields,
            // TODO(UCM Phase 6.2): Move AH to building-energy model.
            Hf += AH_val;
 
-           h_road_a(i,j,0) = Hr;
-           h_wall_a(i,j,0) = Hw;
-           h_roof_a(i,j,0) = Hf;
+           // Phase 3.5A-hotfix2: Write MOST-derived H to ATM fields (not Newton fields)
+           h_road_atm_a(i,j,0) = Hr;
+           h_wall_atm_a(i,j,0) = Hw;
+           h_roof_atm_a(i,j,0) = Hf;
 
            // Lumped plan-area sensible flux to ATM.
            // Since Hr, Hw, Hf are now pre-weighted by their area fractions,
@@ -756,63 +816,6 @@ void UCMLayer::advance(UCMFields& fields,
     }
 
     fields.LE_latent->setVal(0.0);    // LE = 0 in Phase 2.3
-
-    // Phase 3.5A: Update canyon-air temperature
-    // Uses a flux-weighted perturbation above T_atm:
-    //   dT = H_facet / (rho_cp * Ch * U_canyon)
-    //   T_canyon = weighted_mean(T_atm + dT_road, T_atm + dT_wall, T_atm)
-    // This replaces the original Kusaka Eq. 21 implementation which had a
-    // dimensional error: H * rho_cp_inv * (1/Ch) has units [K*m/s], not [K].
-    for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU());
-         mfi.isValid(); ++mfi)
-    {
-        const amrex::Box& bx = mfi.tilebox();
-        auto const is_urb   = fields.is_urban->const_array(mfi);
-        auto const H_rd     = fields.H_road->const_array(mfi);
-        auto const H_wl     = fields.H_wall->const_array(mfi);
-        auto const H_bldg   = fields.H_bldg->const_array(mfi);
-        auto const W_road   = fields.W_road->const_array(mfi);
-        auto const T_atm    = forcing.T_atm_ref->const_array(mfi);
-        auto T_canyon_a     = fields.T_canyon_air->array(mfi);
-
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
-            if (is_urb(i,j,0) == 0) return;
-
-            amrex::Real Hb  = H_bldg(i,j,0);
-            amrex::Real W   = amrex::max(W_road(i,j,0), amrex::Real(1.0e-6));
-            amrex::Real HoW = Hb / W;
-
-            // Bulk conductance for canyon-air temperature calculation [W/m^2/K]
-            // Using representative in-canyon wind speed 2 m/s and Ch=0.01
-            constexpr amrex::Real rho_cp_c   = 1.2 * 1005.0;  // [J/m^3/K]
-            constexpr amrex::Real U_canyon    = 2.0;           // [m/s]
-            constexpr amrex::Real Ch_c        = 0.01;          // [-]
-            amrex::Real conductance = amrex::max(rho_cp_c * Ch_c * U_canyon,
-                                                  amrex::Real(1.0e-6));
-
-            // H_road and H_wall are pre-weighted [W/m^2 of ATM plan area].
-            // Convert to temperature perturbation above T_atm.
-            amrex::Real dT_rd = H_rd(i,j,0) / conductance;
-            amrex::Real dT_wl = H_wl(i,j,0) / conductance;
-
-            // Weighted canyon-air temperature:
-            // road and wall heat the canyon; ATM inflow dilutes it.
-            amrex::Real T_ref = T_atm(i,j,0);
-            amrex::Real w_rd  = 1.0;
-            amrex::Real w_wl  = 2.0 * HoW;
-            amrex::Real w_atm = 1.0;
-            amrex::Real w_tot = amrex::max(w_rd + w_wl + w_atm, amrex::Real(1.0e-6));
-
-            amrex::Real T_canyon_new = (w_rd  * (T_ref + dT_rd) +
-                                        w_wl  * (T_ref + dT_wl) +
-                                        w_atm *  T_ref) / w_tot;
-
-            // Clamp to physical range
-            T_canyon_new = amrex::max(amrex::min(T_canyon_new, amrex::Real(380.0)),
-                                       amrex::Real(200.0));
-            T_canyon_a(i,j,0) = T_canyon_new;
-        });
-    }
 
     // ========================================================================
     // Step 4: Debug trace (Phase 1.3 mandatory; Phase 2.3 extended)
@@ -839,6 +842,14 @@ void UCMLayer::advance(UCMFields& fields,
         amrex::Real AH_min      = fields.AH->min(0, 0);
         amrex::Real AH_max      = fields.AH->max(0, 0);
 
+        // Phase 3.5A-hotfix2: Compare Newton vs MOST H for self-consistency diagnostics
+        amrex::Real H_roof_atm_min = fields.H_roof_atm->min(0, 0);
+        amrex::Real H_roof_atm_max = fields.H_roof_atm->max(0, 0);
+        amrex::Real H_road_atm_min = fields.H_road_atm->min(0, 0);
+        amrex::Real H_road_atm_max = fields.H_road_atm->max(0, 0);
+        amrex::Real H_wall_atm_min = fields.H_wall_atm->min(0, 0);
+        amrex::Real H_wall_atm_max = fields.H_wall_atm->max(0, 0);
+
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][3.5A][SEB] dt=" << dt << "s, sim_time=" << time << "s\n";
             amrex::Print() << "  T_skin_roof=[" << T_roof_min << "," << T_roof_max << "] K\n";
@@ -851,6 +862,17 @@ void UCMLayer::advance(UCMFields& fields,
             amrex::Print() << "  AH min=" << AH_min << " max=" << AH_max << " W/m2\n";
             amrex::Print() << "  H_sensible min=" << H_sens_min << " max=" << H_sens_max << " W/m2"
                           << " (= H_road+H_wall+H_roof; AH already in H_roof)\n";
+        }
+
+        // Phase 3.5A-hotfix2: SEB solver self-consistency check — Newton vs MOST H
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.5A-hotfix2][consistency] time=" << time << " s\n"
+                          << "  Newton  H_roof min=" << H_roof_min << " max=" << H_roof_max << " W/m2  (drives slab conduction)\n"
+                          << "  MOST    H_roof min=" << H_roof_atm_min << " max=" << H_roof_atm_max << " W/m2  (drives ATM injection)\n"
+                          << "  Newton  H_road min=" << H_road_min << " max=" << H_road_max << " W/m2\n"
+                          << "  MOST    H_road min=" << H_road_atm_min << " max=" << H_road_atm_max << " W/m2\n"
+                          << "  Newton  H_wall min=" << H_wall_min << " max=" << H_wall_max << " W/m2\n"
+                          << "  MOST    H_wall min=" << H_wall_atm_min << " max=" << H_wall_atm_max << " W/m2\n";
         }
 
         // Phase 3.2: SEB-inputs diagnostic — verify ATM fields are being consumed

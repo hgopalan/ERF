@@ -248,6 +248,25 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
     }
 
+    // Phase 3.5A-hotfix2: ATM injection heat fluxes (MOST-derived)
+    fields.H_roof_atm = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.5A-hotfix2][allocate_ucm_fields] H_roof_atm: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.H_wall_atm = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.5A-hotfix2][allocate_ucm_fields] H_wall_atm: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.H_road_atm = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.5A-hotfix2][allocate_ucm_fields] H_road_atm: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
     fields.AH = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][2.3][allocate_ucm_fields] AH: "
@@ -361,6 +380,10 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.H_road->setVal(0.0);
     fields.H_wall->setVal(0.0);
     fields.H_roof->setVal(0.0);
+    // Phase 3.5A-hotfix2: zero out ATM injection fluxes
+    fields.H_road_atm->setVal(0.0);
+    fields.H_wall_atm->setVal(0.0);
+    fields.H_roof_atm->setVal(0.0);
     fields.AH->setVal(0.0);
     fields.AH_Wm2_ucm->setVal(0.0);  // Phase 2.9: zero out per-cell AH override
     fields.plan_area_frac->setVal(0.0);
@@ -752,6 +775,22 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
         Print() << "[UCM][2.3][fill_ucm_fields_homogeneous] H_roof = 0.0 W/m^2\n";
     }
 
+    // Phase 3.5A-hotfix2: ATM injection heat fluxes
+    fields.H_road_atm->setVal(0.0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.5A-hotfix2][fill_ucm_fields_homogeneous] H_road_atm = 0.0 W/m^2\n";
+    }
+
+    fields.H_wall_atm->setVal(0.0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.5A-hotfix2][fill_ucm_fields_homogeneous] H_wall_atm = 0.0 W/m^2\n";
+    }
+
+    fields.H_roof_atm->setVal(0.0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.5A-hotfix2][fill_ucm_fields_homogeneous] H_roof_atm = 0.0 W/m^2\n";
+    }
+
     fields.AH->setVal(0.0);
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][2.3][fill_ucm_fields_homogeneous] AH = 0.0 W/m^2\n";
@@ -988,6 +1027,24 @@ bool UCMFields::all_allocated() const
     if (!H_roof) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][2.3][all_allocated] MISSING: H_roof\n";
+        }
+        result = false;
+    }
+    if (!H_roof_atm) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.5A-hotfix2][all_allocated] MISSING: H_roof_atm\n";
+        }
+        result = false;
+    }
+    if (!H_wall_atm) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.5A-hotfix2][all_allocated] MISSING: H_wall_atm\n";
+        }
+        result = false;
+    }
+    if (!H_road_atm) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.5A-hotfix2][all_allocated] MISSING: H_road_atm\n";
         }
         result = false;
     }
