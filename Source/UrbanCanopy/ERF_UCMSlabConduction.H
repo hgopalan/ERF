@@ -256,7 +256,13 @@ void advance_slab_conduction_mfi(
         amrex::Real dz = slab_L / static_cast<amrex::Real>(N_layers);
 
         // Call column solver
-        amrex::Real Q_top = H_flux_arr(i, j, 0);
+        //amrex::Real Q_top = H_flux_arr(i, j, 0);
+        // Phase 3.5c-hotfix: Sign convention reconciliation.
+        // Newton H convention: positive = surface loses heat to atm (surface cooling).
+        // Slab top BC convention: positive = heat flows INTO slab from top.
+        // These are OPPOSITE conventions: when H<0 (atm heats surface),
+        // heat enters the slab from above, i.e., Q_top > 0. Hence negate.
+        amrex::Real Q_top = -H_flux_arr(i, j, 0);
         amrex::Real kcond = k_therm_arr(i, j, 0);
         amrex::Real rhcp = rho_cp_arr(i, j, 0);
 
