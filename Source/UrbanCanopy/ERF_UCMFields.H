@@ -26,7 +26,8 @@
  * @brief Container for all SLUCM 2D MultiFab fields on the UCM grid
  *
  * All fields are allocated on the UCM BoxArray with ghost cells IntVect(1,1,0)
- * and ncomp=1. Homogeneous fill in Phase 1.2; heterogeneous CSV fill Phase 2.1.
+ * and ncomp=1 (or ncomp=N_layers for slab temperature fields). Homogeneous fill 
+ * in Phase 1.2; heterogeneous CSV fill Phase 2.1.
  *
  * Phase 1.2 allocates and fills all fields with uniform values from UCMParams.
  * Future phases will populate spatially-varying morphology and state.
@@ -91,6 +92,23 @@ struct UCMFields
     /// Canyon air temperature [K]. Prognostic variable driven by SEB and mixing.
     /// Phase 1.2: initialized to test_surf_temp_K; Phase 1.3: time-integrated.
     std::unique_ptr<amrex::MultiFab>  T_canyon_air;
+
+    // =========================================================================
+    // Slab temperature profiles (Phase 3.5A NEW; multi-layer thermal conduction)
+    // =========================================================================
+
+    /// Roof slab temperature profile [K]. ncomp = N_layers.
+    /// Phase 3.5A: multi-layer representation (comp 0 = top/surface, comp N_layers-1 = deep).
+    /// Boundary conditions: T_skin_roof at comp=0, T_deep at comp=N_layers-1.
+    std::unique_ptr<amrex::MultiFab>  T_slab_roof;
+
+    /// Wall slab temperature profile [K]. ncomp = N_layers.
+    /// Phase 3.5A: multi-layer representation.
+    std::unique_ptr<amrex::MultiFab>  T_slab_wall;
+
+    /// Road slab temperature profile [K]. ncomp = N_layers.
+    /// Phase 3.5A: multi-layer representation.
+    std::unique_ptr<amrex::MultiFab>  T_slab_road;
 
     // =========================================================================
     // Sensible and latent heat fluxes (Phase 1.3+ SEB products)

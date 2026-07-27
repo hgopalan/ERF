@@ -225,6 +225,11 @@ void UCMLayer::advance(UCMFields& fields,
     const amrex::Real SW_val   = sw_val;   // from Step 2 (analytical)
     const amrex::Real LW_val   = 350.0;
 
+    // Slab conduction parameters (declared here, used in both SEB and slab loops)
+    const int         N_layers = m_params.slab_N_layers;
+    const amrex::Real slab_L   = m_params.slab_L;
+    const amrex::Real T_deep   = m_params.slab_T_deep;
+
     for (amrex::MFIter mfi(*fields.T_skin_roof, amrex::TilingIfNotGPU());
          mfi.isValid(); ++mfi)
     {
@@ -257,10 +262,10 @@ void UCMLayer::advance(UCMFields& fields,
         auto h_wall_a = fields.H_wall->array(mfi);
         auto h_road_a = fields.H_road->array(mfi);
 
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
             if (is_urb(i,j,0) == 0) return;
 
-            amrex::Real U = amrex::max(amrex::sqrt(U_a(i,j,0)*U_a(i,j,0)), 0.01);
+            amrex::Real U = amrex::max(std::sqrt(U_a(i,j,0)*U_a(i,j,0)), 0.01);
             amrex::Real T_can = T_can_a(i,j,0);
 
             // Effective SW per facet (SVF-scaled)
@@ -298,9 +303,6 @@ void UCMLayer::advance(UCMFields& fields,
     }
 
     // Phase 3.5A: Advance slab conduction using SEB-derived H as surface BC
-    const int N_layers = m_params.slab_N_layers;
-    const amrex::Real slab_L = m_params.slab_L;
-    const amrex::Real T_deep = m_params.slab_T_deep;
 
     // Advance roof slab conduction
     for (amrex::MFIter mfi(*fields.T_slab_roof, amrex::TilingIfNotGPU());
@@ -309,10 +311,10 @@ void UCMLayer::advance(UCMFields& fields,
         const amrex::Box& bx = mfi.tilebox();
         advance_slab_conduction_mfi(
             fields.T_slab_roof->array(mfi),
-            fields.H_roof->const_array(mfi),
-            fields.k_therm_roof->const_array(mfi),
-            fields.rho_cp_roof->const_array(mfi),
-            fields.is_urban->const_array(mfi),
+            fields.H_roof->array(mfi),
+            fields.k_therm_roof->array(mfi),
+            fields.rho_cp_roof->array(mfi),
+            fields.is_urban->array(mfi),
             bx, dt, N_layers, slab_L, T_deep);
     }
 
@@ -323,10 +325,10 @@ void UCMLayer::advance(UCMFields& fields,
         const amrex::Box& bx = mfi.tilebox();
         advance_slab_conduction_mfi(
             fields.T_slab_wall->array(mfi),
-            fields.H_wall->const_array(mfi),
-            fields.k_therm_wall->const_array(mfi),
-            fields.rho_cp_wall->const_array(mfi),
-            fields.is_urban->const_array(mfi),
+            fields.H_wall->array(mfi),
+            fields.k_therm_wall->array(mfi),
+            fields.rho_cp_wall->array(mfi),
+            fields.is_urban->array(mfi),
             bx, dt, N_layers, slab_L, T_deep);
     }
 
@@ -337,10 +339,10 @@ void UCMLayer::advance(UCMFields& fields,
         const amrex::Box& bx = mfi.tilebox();
         advance_slab_conduction_mfi(
             fields.T_slab_road->array(mfi),
-            fields.H_road->const_array(mfi),
-            fields.k_therm_road->const_array(mfi),
-            fields.rho_cp_road->const_array(mfi),
-            fields.is_urban->const_array(mfi),
+            fields.H_road->array(mfi),
+            fields.k_therm_road->array(mfi),
+            fields.rho_cp_road->array(mfi),
+            fields.is_urban->array(mfi),
             bx, dt, N_layers, slab_L, T_deep);
     }
 
@@ -411,7 +413,7 @@ void UCMLayer::advance(UCMFields& fields,
        const amrex::Real zeta_max_stable = m_params.zeta_max_stable;
        const amrex::Real zeta_min_unstable = m_params.zeta_min_unstable;
 
-       amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+       amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
            if (is_urb_a(i,j,0) == 0) {
                h_road_a(i,j,0) = 0.0;
                h_wall_a(i,j,0) = 0.0;
@@ -443,7 +445,7 @@ void UCMLayer::advance(UCMFields& fields,
                const amrex::Real olen = olen_a(i,j,0);
                // compute_ch_stability_correction expects Ch_base and returns Ch_corrected
                // For the sensible heat flux: H_corrected = H_base * correction_factor
-               H_base = compute_ch_stability_correction(H_base, olen, zref, 
+               H_base = compute_ch_stability_correction(H_base, olen, zref,
                                                         zeta_max_stable, zeta_min_unstable);
            }
 
@@ -502,7 +504,7 @@ void UCMLayer::advance(UCMFields& fields,
 
         amrex::Real rho_cp_inv = 1.0 / (1.2 * Cp_d);  // [m^3*K/J]
 
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
             if (is_urb(i,j,0) == 0) return;
 
             amrex::Real H_road = H_rd(i,j,0);

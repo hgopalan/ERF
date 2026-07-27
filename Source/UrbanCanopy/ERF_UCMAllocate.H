@@ -26,7 +26,7 @@
  *
  * Allocates every field in the UCMFields struct on the provided UCM BoxArray
  * and DistributionMapping. All MultiFabs are created with:
- *  - ncomp = 1 (scalar field per cell)
+ *  - ncomp = 1 (scalar field per cell, except T_slab_* which have ncomp=N_layers)
  *  - ngrow = IntVect(1, 1, 0) (1 ghost cell in x,y; 0 in z per Phase 1.2 contract)
  *  - Initialized to zero
  *
@@ -35,7 +35,7 @@
  *
  * @param[out] fields       UCMFields struct to populate
  * @param[in] ucm_grid      UCM grid (contains ba, dm for allocation)
- * @param[in] params        UCM parameters (for debug output control)
+ * @param[in] params        UCM parameters (for debug output control and slab layer count)
  * @param[in] lev           AMR level (default 0; Phase 1.1 only uses lev=0)
  *
  * @note Postcondition: all_allocated() == true
@@ -50,19 +50,20 @@ void allocate_ucm_fields(UCMFields& fields,
  * @brief Fill all UCMFields with heterogeneous values from CSV data
  *
  * Phase 2.1 heterogeneous fill pattern:
- *  - Maps each (i_ucm, j_ucm) to ATM coordinates (i_atm, j_atm) using grid_ratio
- *  - Looks up corresponding UCMBuildingRow from building_layout_csv
+ *  - Maps each (i_ucm, j_ucm) to its corresponding UCMBuildingRow
  *  - Retrieves material properties from material_library_csv via mat_ids
  *  - Writes H_bldg, W_road, W_roof, albedo_*, emissivity_*, is_urban to MultiFabs
+ *  - Populates thermal properties and slab temperatures from material registry
  *
- * Debug output emitted per-unique-mat_id when params.ucm_debug is true,
+ * Debug output emitted when ucm_debug is true,
  * prefixed as [UCM][2.1][fill_ucm_fields_from_csv].
  *
  * @param[in,out] fields            UCMFields struct to fill
  * @param[in] ucm_grid              UCM grid (needed for domain information)
  * @param[in] building_reader       Building layout reader (broadcast data)
  * @param[in] material_registry     Material library registry (broadcast data)
- * @param[in] grid_ratio            UCM-to-ATM refinement ratio
+ * @param[in] params                UCM parameters (temperature initializers, debug flag)
+ * @param[in] grid_ratio            UCM-to-ATM refinement ratio (deprecated; kept for ABI stability)
  * @param[in] lev                   AMR level (default 0; Phase 1.1 only uses lev=0)
  * @param[in] ucm_debug             Debug flag for output
  *
@@ -76,6 +77,7 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                               const UCMGrid& ucm_grid,
                               const UCMBuildingLayoutReader& building_reader,
                               const UCMMaterialRegistry& material_registry,
+                              const UCMParams& params,
                               int grid_ratio,
                               int lev,
                               bool ucm_debug = false);
@@ -90,8 +92,9 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
  *  - H_bldg, W_road, W_roof ← params.H_bldg_uniform, etc.
  *  - albedo_roof, albedo_wall, albedo_road ← params.albedo_*
  *  - emissivity_roof, emissivity_wall, emissivity_road ← params.emissivity_*
- *  - T_skin_roof, T_skin_wall, T_skin_road ← params.test_surf_temp_K
- *  - T_canyon_air ← params.test_surf_temp_K
+ *  - T_skin_roof, T_skin_wall, T_skin_road ← params.T_skin_init_K
+ *  - T_canyon_air ← params.T_canyon_init_K
+ *  - T_slab_roof, T_slab_wall, T_slab_road ← params.T_skin_init_K (all layers)
  *  - H_sensible, LE_latent ← 0.0
  *  - is_urban ← 1 (everywhere — fully urban patch)
  *
@@ -142,6 +145,7 @@ void fill_ucm_z0_and_disp(UCMFields& fields,
  *    - Profile type 0 (uniform): AH = AH_uniform_Wm2 [constant]
  *    - Profile type 1 (diurnal): AH = AH_daytime_peak * max(0, cos(phase)) [W/m²]
  *      where phase = 2π * time / 86400 - π/2
+ *  - Phase 2.9: per-cell override from AH_Wm2_ucm if > 0 (no diurnal scaling)
  *  - For non-urban cells: AH = 0
  *
  * Called once per timestep in UCMLayer::advance() BEFORE the SEB kernel.
@@ -149,6 +153,7 @@ void fill_ucm_z0_and_disp(UCMFields& fields,
  * @param[out] AH_out           Anthropogenic heat MultiFab to fill [W/m²]
  * @param[in] ah_profile_id     Per-cell profile type (0=uniform, 1=diurnal)
  * @param[in] is_urban          Urban mask (0 or 1)
+ * @param[in] AH_Wm2_ucm        Per-cell AH override [W/m²] (Phase 2.9); 0 → use ParmParse fallback
  * @param[in] params            UCM parameters (AH_uniform_Wm2, AH_daytime_peak, debug flag)
  * @param[in] time              Current simulation time [seconds since start]
  * @param[in] lev               AMR level (default 0; Phase 1.1 only uses lev=0)
@@ -160,9 +165,9 @@ void fill_ucm_z0_and_disp(UCMFields& fields,
 void compute_anthropogenic_heat(amrex::MultiFab&        AH_out,
                                 const amrex::iMultiFab& ah_profile_id,
                                 const amrex::iMultiFab& is_urban,
-                               const amrex::MultiFab&  AH_Wm2_ucm,  // Phase 2.9: per-cell override
-                               const UCMParams&        params,
-                               amrex::Real             time,
-                               int                     lev);
+                                const amrex::MultiFab&  AH_Wm2_ucm,
+                                const UCMParams&        params,
+                                amrex::Real             time,
+                                int                     lev);
 
 #endif // ERF_UCM_ALLOCATE_H

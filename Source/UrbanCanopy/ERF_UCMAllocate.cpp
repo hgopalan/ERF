@@ -26,6 +26,7 @@ void allocate_ucm_fields(UCMFields& fields,
     const DistributionMapping& dm = ucm_grid.dm;
     const IntVect ngrow(1, 1, 0);  // 1 ghost in x,y; 0 in z (2D slab contract)
     const int ncomp = 1;
+    const int ncomp_slab = params.slab_N_layers;  // Phase 3.5A: multi-layer slab
 
     // Allocate each field with debug output
     fields.H_bldg = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
@@ -104,6 +105,25 @@ void allocate_ucm_fields(UCMFields& fields,
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][1.2][allocate_ucm_fields] T_canyon_air: "
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    // Phase 3.5A: Allocate multi-layer slab temperature fields
+    fields.T_slab_roof = std::make_unique<MultiFab>(ba, dm, ncomp_slab, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.5A][allocate_ucm_fields] T_slab_roof: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp_slab << "\n";
+    }
+
+    fields.T_slab_wall = std::make_unique<MultiFab>(ba, dm, ncomp_slab, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.5A][allocate_ucm_fields] T_slab_wall: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp_slab << "\n";
+    }
+
+    fields.T_slab_road = std::make_unique<MultiFab>(ba, dm, ncomp_slab, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.5A][allocate_ucm_fields] T_slab_road: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp_slab << "\n";
     }
 
     fields.H_sensible = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
@@ -274,7 +294,7 @@ void allocate_ucm_fields(UCMFields& fields,
 
     // Summary message
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
-        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 28 MultiFabs on UCM grid "
+        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 31 MultiFabs on UCM grid "
                 << "at lev=" << lev << "\n";
     }
 
@@ -286,6 +306,7 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                               const UCMGrid& ucm_grid,
                               const UCMBuildingLayoutReader& building_reader,
                               const UCMMaterialRegistry& material_registry,
+                              const UCMParams& params,
                               int grid_ratio,
                               int lev,
                               bool ucm_debug)
@@ -313,6 +334,9 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.T_skin_wall->setVal(params.T_skin_init_K);
     fields.T_skin_road->setVal(params.T_skin_init_K);
     fields.T_canyon_air->setVal(params.T_canyon_init_K);
+    fields.T_slab_roof->setVal(params.T_skin_init_K);
+    fields.T_slab_wall->setVal(params.T_skin_init_K);
+    fields.T_slab_road->setVal(params.T_skin_init_K);
     fields.H_sensible->setVal(0.0);
     fields.LE_latent->setVal(0.0);
     fields.is_urban->setVal(0);
@@ -374,6 +398,9 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
         auto T_skin_wall_arr   = fields.T_skin_wall->array(mfi);
         auto T_skin_road_arr   = fields.T_skin_road->array(mfi);
         auto T_canyon_air_arr  = fields.T_canyon_air->array(mfi);
+        auto T_slab_roof_arr   = fields.T_slab_roof->array(mfi);
+        auto T_slab_wall_arr   = fields.T_slab_wall->array(mfi);
+        auto T_slab_road_arr   = fields.T_slab_road->array(mfi);
         auto is_urban_arr      = fields.is_urban->array(mfi);
         auto mat_id_roof_arr   = fields.mat_id_roof->array(mfi);
         auto mat_id_wall_arr   = fields.mat_id_wall->array(mfi);
@@ -470,6 +497,13 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                 T_skin_wall_arr(iv, 0) = 293.15;
                 T_skin_road_arr(iv, 0) = 293.15;
                 T_canyon_air_arr(iv, 0) = 293.15;
+                
+                // Phase 3.5A: Initialize all slab layers to uniform temperature
+                for (int k = 0; k < T_slab_roof_arr.nComp(); ++k) {
+                    T_slab_roof_arr(iv, k) = 293.15;
+                    T_slab_wall_arr(iv, k) = 293.15;
+                    T_slab_road_arr(iv, k) = 293.15;
+                }
             }
         }
     }
@@ -592,6 +626,25 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][1.2][fill_ucm_fields_homogeneous] T_canyon_air = "
                 << params.T_canyon_init_K << " K\n";
+    }
+
+    // Phase 3.5A: Fill multi-layer slab temperatures
+    fields.T_slab_roof->setVal(params.T_skin_init_K);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.5A][fill_ucm_fields_homogeneous] T_slab_roof = "
+                << params.T_skin_init_K << " K (all layers)\n";
+    }
+
+    fields.T_slab_wall->setVal(params.T_skin_init_K);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.5A][fill_ucm_fields_homogeneous] T_slab_wall = "
+                << params.T_skin_init_K << " K (all layers)\n";
+    }
+
+    fields.T_slab_road->setVal(params.T_skin_init_K);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.5A][fill_ucm_fields_homogeneous] T_slab_road = "
+                << params.T_skin_init_K << " K (all layers)\n";
     }
 
     // Fill flux fields (Phase 1.2: zero; Phase 1.3+ computed by SEB)
@@ -797,6 +850,24 @@ bool UCMFields::all_allocated() const
     if (!T_canyon_air) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][1.2][all_allocated] MISSING: T_canyon_air\n";
+        }
+        result = false;
+    }
+    if (!T_slab_roof) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.5A][all_allocated] MISSING: T_slab_roof\n";
+        }
+        result = false;
+    }
+    if (!T_slab_wall) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.5A][all_allocated] MISSING: T_slab_wall\n";
+        }
+        result = false;
+    }
+    if (!T_slab_road) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.5A][all_allocated] MISSING: T_slab_road\n";
         }
         result = false;
     }
@@ -1009,7 +1080,7 @@ void fill_ucm_z0_and_disp(UCMFields& f,
 void compute_anthropogenic_heat(amrex::MultiFab&        AH_out,
                                const amrex::iMultiFab& ah_profile_id,
                                const amrex::iMultiFab& is_urban,
-                               const amrex::MultiFab&  AH_Wm2_ucm,  // Phase 2.9: per-cell override
+                               const amrex::MultiFab&  AH_Wm2_ucm,
                                const UCMParams&        params,
                                amrex::Real             time,
                                int                     lev)
@@ -1030,7 +1101,7 @@ void compute_anthropogenic_heat(amrex::MultiFab&        AH_out,
        auto       ah_a = AH_out.array(mfi);
        auto const id_a = ah_profile_id.const_array(mfi);
        auto const ur_a = is_urban.const_array(mfi);
-       auto const ah_csv_a = AH_Wm2_ucm.const_array(mfi);  // Phase 2.9
+       auto const ah_csv_a = AH_Wm2_ucm.const_array(mfi);
        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
            // Phase 2.9: First-line guard for urban cells
            if (ur_a(i,j,0) == 0) { 
