@@ -790,13 +790,13 @@ void UCMLayer::advance(UCMFields& fields,
 
            const amrex::Real u_star = u_star_a(i,j,0);
            const amrex::Real t_star = t_star_a(i,j,0);
-           // Phase 3.5a-hotfix3: MOST sensible heat flux with consistent sign convention.
-           // H = -ρ*Cp*u_star*t_star [W/m²]
+           // Phase 3.5a-hotfix4b: MOST sensible heat flux sign flip to match Newton convention.
+           // H = ρ*Cp*u_star*t_star [W/m²]  (removed leading minus from hotfix3)
            // Sign convention: Positive H = surface → atmosphere (surface LOSING heat, cooling)
            //                 Negative H = atmosphere → surface (surface GAINING heat, warming)
            // This matches the Newton formula: H = ρ*cp*Ch*|U|*(T_skin - T_air)
-           // Both formulas should produce the same sign for identical inputs.
-           amrex::Real H_base = -rho_ref * Cp * u_star * t_star;
+           // Both formulas now produce the same sign for identical inputs.
+           amrex::Real H_base = rho_ref * Cp * u_star * t_star;
            const amrex::Real AH_val = ah_a(i,j,0);
 
            // Phase 3.4/3.5: Apply stability correction if enabled
@@ -918,6 +918,22 @@ void UCMLayer::advance(UCMFields& fields,
                           << "  T_slab_roof[0] = [" << T_slab_roof_0_min << ", " << T_slab_roof_0_max << "] K\n"
                           << "  T_slab_wall[0] = [" << T_slab_wall_0_min << ", " << T_slab_wall_0_max << "] K\n"
                           << "  T_slab_road[0] = [" << T_slab_road_0_min << ", " << T_slab_road_0_max << "] K\n";
+        }
+
+        // Phase 3.5a-hotfix4b: Extended slab diagnostic — verify all layers initialized
+        if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.5A-hotfix4b][slab-init-check] time=" << time << " s\n";
+            for (int layer = 0; layer < m_params.slab_N_layers; ++layer) {
+                amrex::Real T_rf_min = fields.T_slab_roof->min(layer, 0);
+                amrex::Real T_rf_max = fields.T_slab_roof->max(layer, 0);
+                amrex::Real T_wl_min = fields.T_slab_wall->min(layer, 0);
+                amrex::Real T_wl_max = fields.T_slab_wall->max(layer, 0);
+                amrex::Real T_rd_min = fields.T_slab_road->min(layer, 0);
+                amrex::Real T_rd_max = fields.T_slab_road->max(layer, 0);
+                amrex::Print() << "  T_slab_roof[" << layer << "] = [" << T_rf_min << ", " << T_rf_max << "] K  "
+                              << "T_slab_wall[" << layer << "] = [" << T_wl_min << ", " << T_wl_max << "] K  "
+                              << "T_slab_road[" << layer << "] = [" << T_rd_min << ", " << T_rd_max << "] K\n";
+            }
         }
 
         // Phase 3.2: SEB-inputs diagnostic — verify ATM fields are being consumed

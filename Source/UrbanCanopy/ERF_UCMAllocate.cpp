@@ -349,13 +349,16 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.emissivity_roof->setVal(0.0);
     fields.emissivity_wall->setVal(0.0);
     fields.emissivity_road->setVal(0.0);
-    fields.T_skin_roof->setVal(params.T_skin_init_K);
-    fields.T_skin_wall->setVal(params.T_skin_init_K);
-    fields.T_skin_road->setVal(params.T_skin_init_K);
-    fields.T_canyon_air->setVal(params.T_canyon_init_K);
-    fields.T_slab_roof->setVal(params.T_skin_init_K);
-    fields.T_slab_wall->setVal(params.T_skin_init_K);
-    fields.T_slab_road->setVal(params.T_skin_init_K);
+    // Phase 3.5a-hotfix4b: Use T_init_uniform_K for all temperature fields (previously used T_skin_init_K for T_slab)
+    const amrex::Real T_init = params.T_init_uniform_K;
+     
+    fields.T_skin_roof->setVal(T_init);
+    fields.T_skin_wall->setVal(T_init);
+    fields.T_skin_road->setVal(T_init);
+    fields.T_canyon_air->setVal(T_init);
+    fields.T_slab_roof->setVal(T_init);   // Phase 3.5a-hotfix4b: all layers initialized uniformly
+    fields.T_slab_wall->setVal(T_init);   // Phase 3.5a-hotfix4b: all layers initialized uniformly
+    fields.T_slab_road->setVal(T_init);   // Phase 3.5a-hotfix4b: all layers initialized uniformly
     fields.H_sensible->setVal(0.0);
     fields.LE_latent->setVal(0.0);
     fields.is_urban->setVal(0);
