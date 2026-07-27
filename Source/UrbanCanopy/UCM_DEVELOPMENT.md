@@ -38,8 +38,8 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 3 | 3.3 | MRF re-audit + PBLH consumer guard | Verify u*, θ* under UCM-modified profiles; assert no PBLH consumption | ✅ COMPLETE (PR #236) | — |
 | 3 | 3.4 | Stability-aware canyon-atm exchange | Obukhov-corrected exchange coefficient consuming MRF u*; Businger-Dyer functions | ✅ COMPLETE (PR #238) | — |
 | 3 | 3.5a | Newton SEB solver on T_skin_{roof,wall,road} | Per-facet energy balance via Newton iteration; sensible heat + conduction feedback | ✅ COMPLETE (PR #239) | — |
-| 3 | 3.5b | Prescribed diurnal SW/LW radiation forcing | Analytic solar geometry + clear-sky bulk formulae for SEB closure (bridge to Phase 4.2) | 🔄 IN PROGRESS (this PR) | — |
-| 3 | 3.5 | Two-way MRF+SLUCM full loop regression | End-to-end integration gate with radiation forcing | 🔲 PLANNED | — |
+| 3 | 3.5b | Prescribed diurnal SW/LW radiation forcing | Analytic solar geometry + clear-sky bulk formulae for SEB closure (bridge to Phase 4.2) | ✅ COMPLETE (this PR) | — |
+| 3 | 3.5c | Two-way MRF+SLUCM full loop regression | End-to-end integration gate with radiation forcing enabled | 🔲 PLANNED | — |
 | 3 | 3.6 | UCMBoston multi-level one-way | First anchor_level>0 canonical | 🔲 PLANNED | — |
 | 3 | 3.7 | anchor_level=2 stress test | 3-level nested test on urban core | 🔲 PLANNED | — |
 | 3 | 3.8 | Non-urban partial-domain regression | Mixed urban+rural single ATM level | 🔲 PLANNED | — |

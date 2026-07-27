@@ -46,5 +46,7 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_headers += UrbanCanopy/ERF_UCMMaterialRegistry.H
   # Phase 3.4 headers (Stability-aware canyon-atmosphere exchange)
   CEXE_headers += UrbanCanopy/ERF_UCMStabilityCorrection.H
+  # Phase 3.5b headers (Prescribed radiation forcing)
+  CEXE_headers += UrbanCanopy/ERF_UCMRadiationForcing.H
 
 endif
