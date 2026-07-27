@@ -203,4 +203,64 @@ inline void advance_slab_conduction_column(amrex::Real* T,
     }
 }
 
+/**
+ * @brief Multifab-based wrapper for slab conduction over a box
+ *
+ * For each cell in the box, advances the slab temperature array one timestep.
+ * Thread-safe GPU kernel.
+ *
+ * @param[in,out] T_slab      Temperature MultiFab (N_layers components)
+ * @param[in]     H_flux      Sensible heat flux MultiFab (scalar input BC)
+ * @param[in]     k_therm     Thermal conductivity MultiFab
+ * @param[in]     rho_cp      Volumetric heat capacity MultiFab
+ * @param[in]     is_urban    Urban mask iMultiFab
+ * @param[in]     dt          Timestep [s]
+ * @param[in]     params      UCM parameters (includes slab_L, slab_N_layers, slab_T_deep)
+ * @param[in]     lev         AMR level
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+void advance_slab_conduction_mfi(
+    amrex::Array4<amrex::Real> const& T_slab_arr,
+    amrex::Array4<amrex::Real> const& H_flux_arr,
+    amrex::Array4<amrex::Real> const& k_therm_arr,
+    amrex::Array4<amrex::Real> const& rho_cp_arr,
+    amrex::Array4<int> const& is_urban_arr,
+    amrex::Box const& bx,
+    amrex::Real dt,
+    int N_layers,
+    amrex::Real slab_L,
+    amrex::Real T_deep)
+{
+    amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+        if (is_urban_arr(i,j,0) == 0) return;
+
+        // Stack array for single-column temps (max 50 layers per header)
+        amrex::Real T_col[50];
+        
+        if (N_layers > 50) {
+            return;  // Safety check
+        }
+
+        // Load current temps from MultiFab
+        for (int n = 0; n < N_layers; ++n) {
+            T_col[n] = T_slab_arr(i, j, 0, n);
+        }
+
+        // Compute layer thickness
+        amrex::Real dz = slab_L / static_cast<amrex::Real>(N_layers);
+
+        // Call column solver
+        amrex::Real Q_top = H_flux_arr(i, j, 0);
+        amrex::Real k = k_therm_arr(i, j, 0);
+        amrex::Real rhcp = rho_cp_arr(i, j, 0);
+
+        advance_slab_conduction_column(T_col, Q_top, T_deep, k, rhcp, dz, dt, N_layers);
+
+        // Store updated temps back to MultiFab
+        for (int n = 0; n < N_layers; ++n) {
+            T_slab_arr(i, j, 0, n) = T_col[n];
+        }
+    });
+}
+
 #endif  // ERF_UCM_SLAB_CONDUCTION_H
