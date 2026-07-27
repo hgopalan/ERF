@@ -15,13 +15,10 @@
  *   G  = 2*k_th/dz * (T_skin - T1)
  * Jacobian: F' = -4*eps*sigma*T_skin^3 - rho_cp*Ch*|U| - 2*k_th/dz
  *
- * Safety: T_canyon and T1 are clamped to [200, 400] K before entering the
- * Newton loop. This prevents divergence on the first timestep if the
- * canyon-air budget has not yet been initialised to a physical value.
- *
- * References:
- *  - Kusaka et al. (2001) J. Meteor. Soc. Japan
- *  - Chen et al. (2011)
+ * Safety measures:
+ *   - T_canyon and T1 clamped to [200, 400] K (guards uninitialised values)
+ *   - Newton step limited to ±20 K per iteration (prevents overshoot on first step)
+ *   - Output T_skin clamped to [250, 380] K
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real solve_facet_seb(
@@ -47,10 +44,12 @@ amrex::Real solve_facet_seb(
     constexpr amrex::Real U_min          = 0.01;
     constexpr amrex::Real jacobian_min   = 1.e-10;
     constexpr amrex::Real conduction_min = 1.e-6;
-    // Safety bounds on reference temperatures.
-    // Prevents Newton divergence if canyon-air or slab T1 are uninitialised.
     constexpr amrex::Real T_ref_min      = 200.0;
     constexpr amrex::Real T_ref_max      = 400.0;
+    // Limit Newton step size to prevent overshoot on first iteration.
+    // Without this, a cold initialisation (300 K init, 280 K equilibrium)
+    // can produce a step of -50+ K which overshoots past the 250 K clamp.
+    constexpr amrex::Real max_step_K     = 20.0;
 
     amrex::Real U     = amrex::max(std::abs(U_ref), U_min);
     amrex::Real T_can = amrex::max(amrex::min(T_canyon, T_ref_max), T_ref_min);
@@ -78,8 +77,14 @@ amrex::Real solve_facet_seb(
         amrex::Real F_prime = -4.0 * emiss * sigma_sb * T3 - H_coeff - G_coeff;
         if (std::abs(F_prime) < jacobian_min) break;
 
-        amrex::Real T_new = T_skin - F / F_prime;
-        // Bound iterate to prevent runaway before convergence check
+        // Raw Newton step
+        amrex::Real step = -F / F_prime;
+
+        // Limit step size to prevent large overshoots on first iterations
+        if (step >  max_step_K) step =  max_step_K;
+        if (step < -max_step_K) step = -max_step_K;
+
+        amrex::Real T_new = T_skin + step;
         T_new = amrex::max(amrex::min(T_new, T_max_K), T_min_K);
 
         amrex::Real dT = std::abs(T_new - T_skin);
