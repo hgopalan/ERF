@@ -1307,9 +1307,13 @@ ERF::InitData_post ()
                 lev, m_ucm_params.ucm_debug);
             
             // Fill UCM fields from CSV data
+            /*fill_ucm_fields_from_csv(*m_ucm_fields[lev], *m_ucm_grid[lev],
+                                     *m_ucm_building_reader, *m_ucm_material_registry,
+                                     m_ucm_params.grid_ratio, lev, m_ucm_params.ucm_debug);*/
+            // Fill UCM fields from CSV data
             fill_ucm_fields_from_csv(*m_ucm_fields[lev], *m_ucm_grid[lev],
                                      *m_ucm_building_reader, *m_ucm_material_registry,
-                                     m_ucm_params.grid_ratio, lev, m_ucm_params.ucm_debug);
+                                     m_ucm_params, lev, m_ucm_params.ucm_debug);
         } else {
             // Phase 1.4 fallback: fill with homogeneous parameters
             if (m_ucm_params.ucm_debug) {
