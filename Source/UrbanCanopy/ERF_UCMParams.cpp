@@ -133,31 +133,6 @@ void UCMParams::read_from_parmparse()
     pp.query("T_skin_init_K", T_skin_init_K);
     pp.query("T_canyon_init_K", T_canyon_init_K);
 
-    // Section 11b: Phase 3.5a-hotfix4 — Unified initial temperature
-    pp.query("T_init_uniform_K", T_init_uniform_K);
-
-    // Phase 3.5a-hotfix4: sentinel handling — auto-fill from erf.theta_ref
-    if (T_init_uniform_K < 0.0) {
-        amrex::ParmParse pp_erf("erf");
-        amrex::Real theta_ref_val = 293.15;   // absolute fallback if theta_ref also unset
-        pp_erf.query("theta_ref", theta_ref_val);
-        T_init_uniform_K = theta_ref_val;
-
-        if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][3.5A-hotfix4][init] "
-                           << "T_init_uniform_K not set explicitly; "
-                           << "auto-filled from erf.theta_ref = "
-                           << T_init_uniform_K << " K.\n";
-        }
-    } else {
-        if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][3.5A-hotfix4][init] "
-                           << "T_init_uniform_K explicitly set to "
-                           << T_init_uniform_K << " K "
-                           << "(may differ from erf.theta_ref).\n";
-        }
-    }
-
     // Section 12: Phase 3.5B — Prescribed diurnal SW/LW radiation forcing
     pp.query("use_prescribed_radiation", use_prescribed_radiation);
     pp.query("lat_deg", lat_deg);

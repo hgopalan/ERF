@@ -144,11 +144,7 @@ struct UCMParams
     amrex::Real Cd_roof          = 0.15;       ///< Phase 2.8: BEP roof drag coefficient [-]
 
     int     slab_N_layers      = 4;         ///< Number of soil/material layers in slab [-]
-    /// DEPRECATED (Phase 3.5a-hotfix4): slab now initializes uniformly to
-    /// T_init_uniform_K. This parameter no longer used at init. Retained as
-    /// a physical constant (deep-ground reservoir T for bottom BC of slab
-    /// conduction if a bottom BC is ever added).
-    amrex::Real slab_T_deep    = 293.15;     ///< Deep (bottom BC) temperature [K]
+    amrex::Real slab_T_deep    = 287.0;     ///< Deep (bottom BC) temperature [K]
     amrex::Real slab_L         = 0.3;       ///< Total slab thickness [m]
     amrex::Real k_therm_uniform = 1.5;      ///< Uniform thermal conductivity [W/m/K]
     amrex::Real rho_cp_uniform = 2.0e6;     ///< Uniform volumetric heat capacity [J/m^3/K]
@@ -209,9 +205,6 @@ struct UCMParams
     // =========================================================================
 
     amrex::Real test_ustar     = 0.0;       ///< Placeholder u* before Phase 1.3 [m/s]
-    /// DEPRECATED (Phase 3.5a-hotfix4): use T_init_uniform_K instead.
-    /// Retained for backward compatibility. If T_init_uniform_K is set
-    /// (not equal to sentinel -1.0), it overrides test_surf_temp_K.
     amrex::Real test_surf_temp_K = 293.15;  ///< Placeholder T_sfc before Phase 1.3 [K]
 
     // =========================================================================
@@ -232,26 +225,6 @@ struct UCMParams
     amrex::Real slab_dz  = 0.05;     ///< Top slab layer half-thickness [m]
     amrex::Real T_skin_init_K = 300.0;    ///< Initial facet skin temperature [K]
     amrex::Real T_canyon_init_K = 295.0;  ///< Initial canyon air temperature [K]
-
-    // =========================================================================
-    // Section 11b: Phase 3.5a-hotfix4 — Unified initial temperature
-    // =========================================================================
-
-    /// Phase 3.5a-hotfix4: Single initial temperature for ALL SLUCM fields.
-    /// At t=0, T_skin_{roof,wall,road}, T_slab_*[all layers], T_canyon_air
-    /// all initialize to this value. Physics (radiation, sensible heat, slab
-    /// conduction) create gradients organically over the run.
-    ///
-    /// SENTINEL VALUE -1.0 (default) → auto-fill from erf.theta_ref at ParmParse read.
-    /// This ensures SLUCM is in exact thermal equilibrium with the ATM state at t=0,
-    /// eliminating spurious initial transients from T_skin/T_atm mismatch.
-    ///
-    /// Explicit override (any positive value) forces T_skin = that value, useful for
-    /// diagnostic runs (e.g. "what happens if UCM starts 5 K warmer than ATM?").
-    ///
-    /// This replaces the artificial multi-parameter init scheme that created
-    /// huge gradients at t=0. Matches WRF SLUCM initialization practice.
-    amrex::Real T_init_uniform_K = -1.0;  // sentinel: auto-fill from theta_ref
 
     // =========================================================================
     // Section 12: Phase 3.5B — Prescribed diurnal SW/LW radiation forcing

@@ -905,21 +905,6 @@ void UCMLayer::advance(UCMFields& fields,
                           << "  MOST    H_wall min=" << H_wall_atm_min << " max=" << H_wall_atm_max << " W/m2\n";
         }
 
-        // Phase 3.5a-hotfix4: Slab-top diagnostic — track T_slab[0] evolution
-        amrex::Real T_slab_roof_0_min = fields.T_slab_roof->min(0, 0);
-        amrex::Real T_slab_roof_0_max = fields.T_slab_roof->max(0, 0);
-        amrex::Real T_slab_wall_0_min = fields.T_slab_wall->min(0, 0);
-        amrex::Real T_slab_wall_0_max = fields.T_slab_wall->max(0, 0);
-        amrex::Real T_slab_road_0_min = fields.T_slab_road->min(0, 0);
-        amrex::Real T_slab_road_0_max = fields.T_slab_road->max(0, 0);
-        
-        if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][3.5A-hotfix4][slab-top] time=" << time << " s\n"
-                          << "  T_slab_roof[0] = [" << T_slab_roof_0_min << ", " << T_slab_roof_0_max << "] K\n"
-                          << "  T_slab_wall[0] = [" << T_slab_wall_0_min << ", " << T_slab_wall_0_max << "] K\n"
-                          << "  T_slab_road[0] = [" << T_slab_road_0_min << ", " << T_slab_road_0_max << "] K\n";
-        }
-
         // Phase 3.2: SEB-inputs diagnostic — verify ATM fields are being consumed
         amrex::Real tat_min = T_atm_lowest.min(0, 0), tat_max = T_atm_lowest.max(0, 0);
         amrex::Real uat_min = xvel.min(0, 0), uat_max = xvel.max(0, 0);
