@@ -175,9 +175,40 @@ def main():
     fail_count += not theta_bounded
 
     # ------------------------------------------------------------------
-    # [5] Stability correction log check (informational)
+    # [5] Phase 3.5B: Skin temperature floor check (Newton solver clamping)
     # ------------------------------------------------------------------
-    print(f"\n[5] Stability correction log check (informational)")
+    # Phase 3.5B raises T_skin floor to 260 K to reduce clamping.
+    # With prescribed radiation, floor hits should be rare or absent.
+    print(f"\n[5] Phase 3.5B: Skin temperature floor check (informational)")
+    print(f"    (Clamping to T_skin_min=260 K should be rare with radiation forcing)")
+    log_files = glob.glob("*.log") + glob.glob("run*.log")
+    found_clamp_warn = False
+    clamp_count = 0
+    for lf in log_files:
+        try:
+            with open(lf) as f:
+                for line in f:
+                    if "[UCM][3.5a][WARN]" in line and "clamped" in line:
+                        found_clamp_warn = True
+                        # Try to extract clamp count
+                        import re
+                        match = re.search(r"clamped (\d+) cells", line)
+                        if match:
+                            clamp_count += int(match.group(1))
+        except Exception:
+            pass
+    
+    if found_clamp_warn:
+        print(f"    INFO: Newton solver clamped {clamp_count} cells to T_skin_min=260 K")
+        if clamp_count > 100:
+            print(f"          (WARNING: high clamp count suggests unphysical setup)")
+    else:
+        print(f"    INFO: no clamp warnings found (all T_skin converged normally)")
+
+    # ------------------------------------------------------------------
+    # [6] Stability correction log check (informational)
+    # ------------------------------------------------------------------
+    print(f"\n[6] Stability correction log check (informational)")
     log_files = glob.glob("*.log") + glob.glob("run*.log")
     found_corr = False
     for lf in log_files:
