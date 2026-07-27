@@ -123,4 +123,12 @@ void UCMParams::read_from_parmparse()
     pp.query("use_stability_correction", use_stability_correction);
     pp.query("zeta_max_stable", zeta_max_stable);
     pp.query("zeta_min_unstable", zeta_min_unstable);
+
+    // Section 11: Phase 3.5A — SEB Newton solver exchange coefficients
+    pp.query("Ch_roof", Ch_roof);
+    pp.query("Ch_wall", Ch_wall);
+    pp.query("Ch_road", Ch_road);
+    pp.query("slab_dz", slab_dz);
+    pp.query("T_skin_init_K", T_skin_init_K);
+    pp.query("T_canyon_init_K", T_canyon_init_K);
 }
