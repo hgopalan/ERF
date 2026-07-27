@@ -855,7 +855,7 @@ void UCMLayer::advance(UCMFields& fields,
            //                 Negative H = atmosphere → surface (surface GAINING heat, warming)
            // This matches the Newton formula: H = ρ*cp*Ch*|U|*(T_skin - T_air)
            // Both formulas should produce the same sign for identical inputs.
-           amrex::Real H_base = -rho_ref * Cp * u_star * t_star;
+           amrex::Real H_base = rho_ref * Cp * u_star * t_star;
            const amrex::Real AH_val = ah_a(i,j,0);
 
            // Phase 3.4/3.5: Apply stability correction if enabled
