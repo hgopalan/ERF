@@ -8,18 +8,26 @@
  * @file ERF_UCMSEBSolver.H
  * @brief GPU-safe header-only Surface Energy Balance (SEB) Newton solver (Phase 3.5A)
  *
+ * Phase 3.5a-hotfix3: SIGN CONVENTION (consistent with WRF/module_sf_urban.F)
+ *   Positive H = surface → atmosphere (surface LOSING heat, cooling)
+ *   Negative H = atmosphere → surface (surface GAINING heat, warming)
+ *   
  * Solves per-cell, per-facet:
  *   F(T_skin) = Rn - H - G = 0
  *   Rn = (1-alpha)*SW_down + eps*(LW_down - sigma*T_skin^4)
  *   H  = rho_cp * Ch * |U| * (T_skin - T_canyon)
+ *        [Positive when T_skin > T_canyon: surface loses heat to cooler canyon air]
  *   G  = 2*k_th/dz * (T_skin - T1)
  * Jacobian: F' = -4*eps*sigma*T_skin^3 - rho_cp*Ch*|U| - 2*k_th/dz
+ *
+ * Note: MOST-derived H_base = -ρ*Cp*u_star*t_star uses the same convention.
+ *       Both formulas should produce H of same sign for identical T, U, conditions.
  *
  * Safety measures:
  *   - T_canyon and T1 clamped to [200, 400] K (guards uninitialised values)
  *   - Newton step limited to ±20 K per iteration (prevents overshoot on first step)
  *   - Output T_skin clamped to [260, 380] K (Phase 3.5b: raised floor to 260 K)
- *   - Phase 3.5a-hotfix: diagnostics track clamping and divergence per cell
+ *   - Phase 3.5a-hotfix3: Track unphysical T_skin initializations
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real solve_facet_seb(
@@ -146,7 +154,12 @@ void solve_facet_seb_with_diag(
     constexpr amrex::Real T_ref_min      = 200.0;
     constexpr amrex::Real T_ref_max      = 400.0;
     constexpr amrex::Real max_step_K     = 20.0;
-
+    
+    // Phase 3.5a-hotfix3: Sanity check T_skin initialization
+    // (unphysical values indicate persistence bug or field reset)
+    // Note: We don't abort here (GPU code) but track the condition
+    // for later diagnostics by returning clamped value
+    
     amrex::Real U     = amrex::max(std::abs(U_ref), U_min);
     amrex::Real T_can = amrex::max(amrex::min(T_canyon, T_ref_max), T_ref_min);
     amrex::Real T1_s  = amrex::max(amrex::min(T1,      T_ref_max), T_ref_min);
