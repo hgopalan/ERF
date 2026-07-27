@@ -71,7 +71,11 @@ amrex::Real solar_zenith_angle(amrex::Real time_s, amrex::Real lat_rad,
     // For now, assume solar_time_start_s is passed externally; here we just track elapsed time
     // In actual usage, solar_time_s = solar_time_start_s + time_s (modulo 86400)
     // This function assumes the caller passes the correct local solar time via time_s
-    Real hour_angle = (time_s / 3600.0) * 15.0 * degrad;  // 15°/hour in radians
+    //Real hour_angle = (time_s / 3600.0) * 15.0 * degrad;  // 15°/hour in radians
+    // Hour angle: measured relative to solar noon
+    // (0 at noon, negative in morning, positive in afternoon)
+    Real hours_since_noon = (time_s / 3600.0) - 12.0;
+    Real hour_angle = hours_since_noon * 15.0 * degrad;  // 15°/hour in radians
     // Also add longitude offset: solar_time = local_time + 4*lon_deg minutes
     // This is simplified; exact version in the calling code
     // For now: hour_angle ≈ 15° × (hours since sunrise)

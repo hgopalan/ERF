@@ -384,6 +384,14 @@ void UCMLayer::advance(UCMFields& fields,
             amrex::Real SW_wall = SW_down * svf_wall(i,j,0);    // wall SVF-weighted
             amrex::Real SW_road = SW_down * svf_road(i,j,0);    // road SVF-weighted
 
+    /*if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "[UCM][3.5B-diag] time=" << time
+                       << "s  time_s_local=" << (m_params.solar_time_start_s + time)
+                       << "s  SW_down=" << SW_down
+                       << " W/m2  LW_down=" << LW_down << " W/m2\n";
+    }*/
+
+
             amrex::Real H_rf, H_wl, H_rd;
 
             // ROOF
