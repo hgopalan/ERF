@@ -487,9 +487,12 @@ void UCMLayer::advance(UCMFields& fields,
 
     fields.LE_latent->setVal(0.0);    // LE = 0 in Phase 2.3
 
-    // Phase 3.5A: Update canyon-air temperature from Kusaka (2001) Eq. 21 weighted average
-    // T_canyon = (H_road/(rho*Cp*Ch_road) + 2*(H/W)*(H_wall/(rho*Cp*Ch_wall)) + T_atm)
-    //          / (1 + 1/Ch_road + 2*(H/W)/Ch_wall)
+    // Phase 3.5A: Update canyon-air temperature
+    // Uses a flux-weighted perturbation above T_atm:
+    //   dT = H_facet / (rho_cp * Ch * U_canyon)
+    //   T_canyon = weighted_mean(T_atm + dT_road, T_atm + dT_wall, T_atm)
+    // This replaces the original Kusaka Eq. 21 implementation which had a
+    // dimensional error: H * rho_cp_inv * (1/Ch) has units [K*m/s], not [K].
     for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU());
          mfi.isValid(); ++mfi)
     {
@@ -502,29 +505,42 @@ void UCMLayer::advance(UCMFields& fields,
         auto const T_atm    = forcing.T_atm_ref->const_array(mfi);
         auto T_canyon_a     = fields.T_canyon_air->array(mfi);
 
-        amrex::Real rho_cp_inv = 1.0 / (1.2 * Cp_d);  // [m^3*K/J]
-
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
             if (is_urb(i,j,0) == 0) return;
 
-            amrex::Real H_road = H_rd(i,j,0);
-            amrex::Real H_wall = H_wl(i,j,0);
-            amrex::Real Hb = H_bldg(i,j,0);
-            amrex::Real W = W_road(i,j,0) + 1.0e-6;  // Avoid division by zero
-
-            // Aspect ratio factor
+            amrex::Real Hb  = H_bldg(i,j,0);
+            amrex::Real W   = amrex::max(W_road(i,j,0), amrex::Real(1.0e-6));
             amrex::Real HoW = Hb / W;
-            amrex::Real wall_factor = 2.0 * HoW;
 
-            // Kusaka Eq. 21 numerator and denominator
-            amrex::Real numer = H_road * rho_cp_inv * (1.0 / Ch_road) +
-                               wall_factor * H_wall * rho_cp_inv * (1.0 / Ch_wall) +
-                               T_atm(i,j,0);
-            amrex::Real denom = 1.0 + (1.0 / Ch_road) +
-                               wall_factor * (1.0 / Ch_wall);
+            // Bulk conductance for canyon-air temperature calculation [W/m^2/K]
+            // Using representative in-canyon wind speed 2 m/s and Ch=0.01
+            constexpr amrex::Real rho_cp_c   = 1.2 * 1005.0;  // [J/m^3/K]
+            constexpr amrex::Real U_canyon    = 2.0;           // [m/s]
+            constexpr amrex::Real Ch_c        = 0.01;          // [-]
+            amrex::Real conductance = amrex::max(rho_cp_c * Ch_c * U_canyon,
+                                                  amrex::Real(1.0e-6));
 
-            denom = amrex::max(denom, 1.0e-10);  // Avoid division by zero
-            T_canyon_a(i,j,0) = numer / denom;
+            // H_road and H_wall are pre-weighted [W/m^2 of ATM plan area].
+            // Convert to temperature perturbation above T_atm.
+            amrex::Real dT_rd = H_rd(i,j,0) / conductance;
+            amrex::Real dT_wl = H_wl(i,j,0) / conductance;
+
+            // Weighted canyon-air temperature:
+            // road and wall heat the canyon; ATM inflow dilutes it.
+            amrex::Real T_ref = T_atm(i,j,0);
+            amrex::Real w_rd  = 1.0;
+            amrex::Real w_wl  = 2.0 * HoW;
+            amrex::Real w_atm = 1.0;
+            amrex::Real w_tot = amrex::max(w_rd + w_wl + w_atm, amrex::Real(1.0e-6));
+
+            amrex::Real T_canyon_new = (w_rd  * (T_ref + dT_rd) +
+                                        w_wl  * (T_ref + dT_wl) +
+                                        w_atm *  T_ref) / w_tot;
+
+            // Clamp to physical range
+            T_canyon_new = amrex::max(amrex::min(T_canyon_new, amrex::Real(380.0)),
+                                       amrex::Real(200.0));
+            T_canyon_a(i,j,0) = T_canyon_new;
         });
     }
 
