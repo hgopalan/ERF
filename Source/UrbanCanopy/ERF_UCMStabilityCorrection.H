@@ -44,11 +44,7 @@
 #define ERF_UCM_STABILITY_CORRECTION_H
 
 #include <AMReX_REAL.H>
-<<<<<<< HEAD
 #include <AMReX_GpuQualifiers.H>
-=======
-#include <AMReX_GpuQualifiers.H> 
->>>>>>> ce9809f8 (Fix)
 #include <cmath>
 
 /**
