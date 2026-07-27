@@ -156,6 +156,7 @@ public:
                  const amrex::MultiFab& z_phys_cc,
                  const amrex::MultiFab& T_atm_lowest,
                  const amrex::MultiFab& q_atm_lowest,
+                 const amrex::MultiFab& atm_olen,
                  const amrex::Geometry& geom_atm,
                  amrex::Real time,
                  amrex::Real dt,
