@@ -31,6 +31,34 @@ Override `max_step` for quick iteration during development:
 
     MAX_STEPS=10 ./run_all_regressions.sh
 
+## CI Mode (Phase 3.9)
+
+Run in GitHub Actions–friendly mode with JSON output and annotations:
+
+    ./run_all_regressions.sh --ci-mode
+
+**CI Mode features:**
+- Emits GitHub Actions workflow commands (`::error::`, `::notice::`, etc.)
+- Writes `regression_summary.json` with machine-readable results
+- Exit code: 0 (all pass), 1 (any fail), 2 (setup error)
+- Suitable for automated dashboards and CI/CD pipelines
+
+**Example JSON output:**
+```json
+{
+  "timestamp": "2026-07-27T23:31:56Z",
+  "harness_dir": "/path/to/SLUCM",
+  "results_dir": "/path/to/_regression_results_20260727_233156",
+  "ci_mode": 1,
+  "passed_count": 3,
+  "failed_count": 0,
+  "skipped_count": 1,
+  "passed": ["UCMBoston", "UCMSalamanca", "UCMKanda"],
+  "failed": [],
+  "skipped": ["UCMOsaka (no dir)"]
+}
+```
+
 ## Executable location
 
 The script auto-discovers executables in each canonical directory. If you
@@ -73,8 +101,16 @@ Before opening a PR from `ERF-SLUCM` to `development`:
 
 All canonicals must PASS. Attach `/tmp/slucm_regression.log` to the merge PR body.
 
-## Future CI integration
+## GitHub Actions Integration (Phase 3.9)
 
-A future `.github/workflows/slucm_regression.yml` can invoke this harness
-after building. The harness exit code (0=pass, 1=fail, 2=setup-error) is
-CI-friendly. Do not add the workflow in Phase 3.1c — that is Phase 3.9.
+The `.github/workflows/slucm_regression.yml` workflow automatically:
+1. Builds unit tests with `-DERF_ENABLE_UCM=ON -DERF_ENABLE_UNIT_TESTS=ON`
+2. Runs the unit test binary and gates the PR on failure
+3. Builds the full `erf_exec` with MPI support
+4. Runs canonical regressions with `--ci-mode`
+5. Uploads `regression_summary.json` as a workflow artifact
+6. Reports results to PR via annotations and step summary
+
+The canonical regression job is informational only (`continue-on-error: true`),
+while the unit test job gates the PR (must pass to merge).
+

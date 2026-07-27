@@ -7,6 +7,7 @@
 #
 # Usage:
 #   ./run_all_regressions.sh                    # run all canonicals
+#   ./run_all_regressions.sh --ci-mode          # run with CI annotations & JSON output
 #   ./run_all_regressions.sh UCMBoston          # run one canonical
 #   ./run_all_regressions.sh UCMBoston UCMSalamancaMadrid  # run subset
 #
@@ -29,6 +30,18 @@ HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON="${PYTHON:-python3}"
 RESULTS_DIR="${HARNESS_DIR}/_regression_results_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$RESULTS_DIR"
+
+# Parse command-line flags
+CI_MODE=0
+CANONICALS_ARGS=()
+
+for arg in "$@"; do
+    if [ "$arg" = "--ci-mode" ]; then
+        CI_MODE=1
+    else
+        CANONICALS_ARGS+=("$arg")
+    fi
+done
 
 # -----------------------------------------------------------------------
 # Resolve the single shared executable.
@@ -61,8 +74,8 @@ for d in "$HARNESS_DIR"/*/; do
 done
 
 # If arguments provided, run only those canonicals
-if [ $# -gt 0 ]; then
-    CANONICALS=("$@")
+if [ ${#CANONICALS_ARGS[@]} -gt 0 ]; then
+    CANONICALS=("${CANONICALS_ARGS[@]}")
 else
     CANONICALS=("${ALL_CANONICALS[@]}")
 fi
@@ -73,9 +86,13 @@ echo "  Harness dir:  $HARNESS_DIR"
 echo "  Results dir:  $RESULTS_DIR"
 echo "  Executable:   $GLOBAL_EXEC"
 echo "  Canonicals:   ${CANONICALS[*]}"
+if [ "$CI_MODE" = "1" ]; then
+    echo "  CI Mode:      ON (JSON + GitHub annotations)"
+fi
 echo "======================================================================"
 
 declare -a PASSED FAILED SKIPPED
+
 
 for canon in "${CANONICALS[@]}"; do
     CANON_DIR="$HARNESS_DIR/$canon"
@@ -168,6 +185,57 @@ echo "Skipped (${#SKIPPED[@]}): ${SKIPPED[*]:-<none>}"
 echo ""
 echo "Full logs: $RESULTS_DIR"
 echo "======================================================================"
+
+# Generate JSON summary
+SUMMARY_JSON="$HARNESS_DIR/regression_summary.json"
+{
+    echo "{"
+    echo "  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
+    echo "  \"harness_dir\": \"$HARNESS_DIR\","
+    echo "  \"results_dir\": \"$RESULTS_DIR\","
+    echo "  \"ci_mode\": $CI_MODE,"
+    echo "  \"passed_count\": ${#PASSED[@]},"
+    echo "  \"failed_count\": ${#FAILED[@]},"
+    echo "  \"skipped_count\": ${#SKIPPED[@]},"
+    echo "  \"passed\": ["
+    for i in "${!PASSED[@]}"; do
+        echo -n "    \"${PASSED[$i]}\""
+        if [ $i -lt $((${#PASSED[@]} - 1)) ]; then echo ","; else echo ""; fi
+    done
+    echo "  ],"
+    echo "  \"failed\": ["
+    for i in "${!FAILED[@]}"; do
+        echo -n "    \"${FAILED[$i]}\""
+        if [ $i -lt $((${#FAILED[@]} - 1)) ]; then echo ","; else echo ""; fi
+    done
+    echo "  ],"
+    echo "  \"skipped\": ["
+    for i in "${!SKIPPED[@]}"; do
+        echo -n "    \"${SKIPPED[$i]}\""
+        if [ $i -lt $((${#SKIPPED[@]} - 1)) ]; then echo ","; else echo ""; fi
+    done
+    echo "  ]"
+    echo "}"
+} > "$SUMMARY_JSON"
+
+echo ""
+echo "Summary written to: $SUMMARY_JSON"
+
+# GitHub Actions annotations (CI mode)
+if [ "$CI_MODE" = "1" ]; then
+    if [ ${#FAILED[@]} -gt 0 ]; then
+        echo "::error::SLUCM Regression: ${#FAILED[@]} test(s) failed"
+        for test in "${FAILED[@]}"; do
+            echo "::error::  - $test"
+        done
+    fi
+    if [ ${#SKIPPED[@]} -gt 0 ]; then
+        echo "::notice::SLUCM Regression: ${#SKIPPED[@]} test(s) skipped"
+    fi
+    if [ ${#PASSED[@]} -gt 0 ]; then
+        echo "::notice::SLUCM Regression: ${#PASSED[@]} test(s) passed"
+    fi
+fi
 
 if [ ${#FAILED[@]} -gt 0 ]; then
     exit 1

@@ -1,0 +1,143 @@
+name: SLUCM Regression Suite
+
+on:
+  pull_request:
+    branches: [ERF-SLUCM]
+  push:
+    branches: [ERF-SLUCM]
+
+concurrency:
+  group: ${{ github.ref }}-slucm-regression
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: UCM Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Install Dependencies
+      run: Submodules/AMReX/.github/workflows/dependencies/dependencies.sh
+
+    - name: Install CCache
+      run: Submodules/AMReX/.github/workflows/dependencies/dependencies_ccache.sh
+
+    - name: Set Up Cache (Build)
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-${{ github.workflow }}-slucm-unit-git-${{ github.sha }}
+        restore-keys: |
+          ccache-${{ github.workflow }}-slucm-unit-git-
+
+    - name: Configure Project
+      run: |
+        cmake \
+          -B${{runner.workspace}}/ERF/build \
+          -DCMAKE_INSTALL_PREFIX:PATH=${{runner.workspace}}/ERF/install \
+          -DCMAKE_BUILD_TYPE:STRING=Release \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DERF_DIM:STRING=3 \
+          -DERF_ENABLE_MPI:BOOL=OFF \
+          -DERF_ENABLE_TESTS:BOOL=ON \
+          -DERF_ENABLE_UCM:BOOL=ON \
+          ${{github.workspace}};
+
+    - name: Build Unit Tests
+      run: |
+        export CCACHE_COMPRESS=1
+        export CCACHE_COMPRESSLEVEL=10
+        export CCACHE_MAXSIZE=300M
+        ccache -z
+        cmake --build ${{runner.workspace}}/ERF/build --parallel 2 --target erf_ucm_unit_tests
+        ccache -s
+
+    - name: Run Unit Tests
+      run: |
+        ${{runner.workspace}}/ERF/build/Tests/Unit/UrbanCanopy/erf_ucm_unit_tests
+      timeout-minutes: 5
+
+  canonical-regression:
+    name: Canonical Regression
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Install Dependencies
+      run: Submodules/AMReX/.github/workflows/dependencies/dependencies.sh
+
+    - name: Install CCache
+      run: Submodules/AMReX/.github/workflows/dependencies/dependencies_ccache.sh
+
+    - name: Set Up Cache (Build)
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-${{ github.workflow }}-slucm-canonical-git-${{ github.sha }}
+        restore-keys: |
+          ccache-${{ github.workflow }}-slucm-canonical-git-
+
+    - name: Configure Project
+      run: |
+        cmake \
+          -B${{runner.workspace}}/ERF/build \
+          -DCMAKE_INSTALL_PREFIX:PATH=${{runner.workspace}}/ERF/install \
+          -DCMAKE_BUILD_TYPE:STRING=Release \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DERF_DIM:STRING=3 \
+          -DERF_ENABLE_MPI:BOOL=ON \
+          -DERF_ENABLE_TESTS:BOOL=OFF \
+          -DERF_ENABLE_UCM:BOOL=ON \
+          ${{github.workspace}};
+
+    - name: Build erf_exec
+      run: |
+        export CCACHE_COMPRESS=1
+        export CCACHE_COMPRESSLEVEL=10
+        export CCACHE_MAXSIZE=300M
+        ccache -z
+        cmake --build ${{runner.workspace}}/ERF/build --parallel 2 --target erf_exec
+        ccache -s
+      timeout-minutes: 30
+
+    - name: Run Canonical Regressions
+      run: |
+        set +e
+        cd ${{github.workspace}}/Exec/CanonicalTests/SLUCM
+        export ERF_EXEC=${{runner.workspace}}/ERF/build/Exec/erf_exec
+        ./run_all_regressions.sh --ci-mode 2>&1 | tee regression.log
+        EXIT_CODE=$?
+        set -e
+        cat regression.log
+        exit $EXIT_CODE
+      timeout-minutes: 30
+      continue-on-error: true
+
+    - name: Upload Regression Summary
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: slucm-regression-summary
+        path: |
+          Exec/CanonicalTests/SLUCM/regression_summary.json
+          Exec/CanonicalTests/SLUCM/_regression_results_*/
+        if-no-files-found: ignore
+
+    - name: Report Canonical Results
+      if: always()
+      run: |
+        cd ${{github.workspace}}/Exec/CanonicalTests/SLUCM
+        if [ -f regression_summary.json ]; then
+          echo "## SLUCM Canonical Regression Summary" >> $GITHUB_STEP_SUMMARY
+          cat regression_summary.json >> $GITHUB_STEP_SUMMARY
+        fi
