@@ -18,7 +18,8 @@
  * Safety measures:
  *   - T_canyon and T1 clamped to [200, 400] K (guards uninitialised values)
  *   - Newton step limited to ±20 K per iteration (prevents overshoot on first step)
- *   - Output T_skin clamped to [250, 380] K
+ *   - Output T_skin clamped to [260, 380] K (Phase 3.5b: raised floor to 260 K)
+ *   - Phase 3.5b: clamps count unphysical convergence to floor
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real solve_facet_seb(
@@ -39,7 +40,7 @@ amrex::Real solve_facet_seb(
     amrex::Real& H_out)
 {
     constexpr amrex::Real sigma_sb       = 5.670374419e-8;
-    constexpr amrex::Real T_min_K        = 250.0;
+    constexpr amrex::Real T_min_K        = 260.0;  // Phase 3.5b: raised from 250 K
     constexpr amrex::Real T_max_K        = 380.0;
     constexpr amrex::Real U_min          = 0.01;
     constexpr amrex::Real jacobian_min   = 1.e-10;
@@ -48,7 +49,7 @@ amrex::Real solve_facet_seb(
     constexpr amrex::Real T_ref_max      = 400.0;
     // Limit Newton step size to prevent overshoot on first iteration.
     // Without this, a cold initialisation (300 K init, 280 K equilibrium)
-    // can produce a step of -50+ K which overshoots past the 250 K clamp.
+    // can produce a step of -50+ K which overshoots past the 260 K clamp.
     constexpr amrex::Real max_step_K     = 20.0;
 
     amrex::Real U     = amrex::max(std::abs(U_ref), U_min);

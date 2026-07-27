@@ -231,6 +231,20 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << ")\n";
     amrex::Print() << "[UCM]   Cd_wall             = " << params.Cd_wall << "\n";
     amrex::Print() << "[UCM]   Cd_roof             = " << params.Cd_roof << "\n";
+    amrex::Print() << "[UCM]   --- Phase 3.5A SEB Newton Solver ---\n";
+    amrex::Print() << "[UCM]   Ch_roof             = " << params.Ch_roof << "\n";
+    amrex::Print() << "[UCM]   Ch_wall             = " << params.Ch_wall << "\n";
+    amrex::Print() << "[UCM]   Ch_road             = " << params.Ch_road << "\n";
+    amrex::Print() << "[UCM]   slab_dz [m]         = " << params.slab_dz << "\n";
+    amrex::Print() << "[UCM]   --- Phase 3.5B Prescribed Radiation Forcing ---\n";
+    amrex::Print() << "[UCM]   use_prescribed_radiation = " << (params.use_prescribed_radiation ? "true" : "false") << "\n";
+    amrex::Print() << "[UCM]   lat_deg [°N]        = " << params.lat_deg << "\n";
+    amrex::Print() << "[UCM]   lon_deg [°E]        = " << params.lon_deg << "\n";
+    amrex::Print() << "[UCM]   julian_day [1-365]  = " << params.julian_day << "\n";
+    amrex::Print() << "[UCM]   solar_time_start_s [s] = " << params.solar_time_start_s << "\n";
+    amrex::Print() << "[UCM]   solar_constant [W/m^2] = " << params.solar_constant << "\n";
+    amrex::Print() << "[UCM]   sw_transmission [-] = " << params.sw_transmission << "\n";
+    amrex::Print() << "[UCM]   sky_emissivity [-]  = " << params.sky_emissivity << "\n";
     amrex::Print() << "[UCM] =========================================================\n";
     amrex::Print() << "\n";
 

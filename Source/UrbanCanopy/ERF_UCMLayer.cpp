@@ -20,6 +20,7 @@
 #include <UrbanCanopy/ERF_UCMAllocate.H>
 #include <UrbanCanopy/ERF_UCMShadowing.H>
 #include <UrbanCanopy/ERF_UCMStabilityCorrection.H>
+#include <UrbanCanopy/ERF_UCMRadiationForcing.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <ERF_Constants.H>
 #include <cmath>
@@ -222,8 +223,31 @@ void UCMLayer::advance(UCMFields& fields,
     const amrex::Real dz_slab  = m_params.slab_dz;
     const int         max_iter = m_params.newton_max_iter;
     const amrex::Real tol_K    = m_params.newton_tol_K;
-    const amrex::Real SW_val   = sw_val;   // from Step 2 (analytical)
-    const amrex::Real LW_val   = 350.0;
+    
+    // Phase 3.5B: Compute prescribed SW/LW radiation forcing (if enabled)
+    amrex::Real SW_down = 0.0;
+    amrex::Real LW_down = 350.0;  // Default fallback if radiation disabled
+    
+    if (m_params.use_prescribed_radiation) {
+        // Compute solar zenith angle for domain center
+        amrex::Real time_s_local = m_params.solar_time_start_s + time;  // Local solar time
+        amrex::Real lat_rad = m_params.lat_deg * (3.14159265358979323846 / 180.0);
+        amrex::Real lon_rad = m_params.lon_deg * (3.14159265358979323846 / 180.0);
+        
+        // Solar zenith from astronomical formula
+        amrex::Real cos_zenith = solar_zenith_angle(time_s_local, lat_rad, lon_rad, m_params.julian_day);
+        
+        // Clear-sky SW downwelling
+        SW_down = clear_sky_SW_down(cos_zenith, m_params.solar_constant, m_params.sw_transmission);
+        
+        // Get atmospheric temperature (approximate with lowest level, avoid access issues)
+        amrex::Real T_atm_min = T_atm_lowest.min(0, 0);
+        amrex::Real T_atm_max = T_atm_lowest.max(0, 0);
+        amrex::Real T_atm_approx = 0.5 * (T_atm_min + T_atm_max);  // Spatial average
+        
+        // Gray-sky LW downwelling
+        LW_down = gray_sky_LW_down(T_atm_approx, m_params.sky_emissivity);
+    }
 
     // Slab conduction parameters (declared here, used in both SEB and slab loops)
     const int         N_layers = m_params.slab_N_layers;
@@ -268,30 +292,30 @@ void UCMLayer::advance(UCMFields& fields,
             amrex::Real U = amrex::max(std::sqrt(U_a(i,j,0)*U_a(i,j,0)), 0.01);
             amrex::Real T_can = T_can_a(i,j,0);
 
-            // Effective SW per facet (SVF-scaled)
-            amrex::Real SW_roof = SW_val;                    // roof unshaded
-            amrex::Real SW_wall = SW_val * svf_wall(i,j,0);
-            amrex::Real SW_road = SW_val * svf_road(i,j,0);
+            // Phase 3.5B: Effective SW per facet (SVF-scaled for walls/roads, full for roof)
+            amrex::Real SW_roof = SW_down;                      // roof unshaded
+            amrex::Real SW_wall = SW_down * svf_wall(i,j,0);    // wall SVF-weighted
+            amrex::Real SW_road = SW_down * svf_road(i,j,0);    // road SVF-weighted
 
             amrex::Real H_rf, H_wl, H_rd;
 
             Tskin_rf(i,j,0) = solve_facet_seb(
                 Tskin_rf(i,j,0), T1_rf(i,j,0), T_can,
-                SW_roof, LW_val,
+                SW_roof, LW_down,
                 alb_rf(i,j,0), eps_rf(i,j,0),
                 k_rf(i,j,0), dz_slab,
                 Ch_roof, U, rho_cp, max_iter, tol_K, H_rf);
 
             Tskin_wl(i,j,0) = solve_facet_seb(
                 Tskin_wl(i,j,0), T1_wl(i,j,0), T_can,
-                SW_wall, LW_val,
+                SW_wall, LW_down,
                 alb_wl(i,j,0), eps_wl(i,j,0),
                 k_wl(i,j,0), dz_slab,
                 Ch_wall, U, rho_cp, max_iter, tol_K, H_wl);
 
             Tskin_rd(i,j,0) = solve_facet_seb(
                 Tskin_rd(i,j,0), T1_rd(i,j,0), T_can,
-                SW_road, LW_val,
+                SW_road, LW_down,
                 alb_rd(i,j,0), eps_rd(i,j,0),
                 k_rd(i,j,0), dz_slab,
                 Ch_road, U, rho_cp, max_iter, tol_K, H_rd);

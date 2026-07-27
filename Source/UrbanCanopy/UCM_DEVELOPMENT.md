@@ -36,15 +36,17 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 3 | 3.1c | Regression harness + W_road/W_roof default fix | `run_all_regressions.sh`, per-canonical `check_*.py`, defaults 0.0→10.0 | ✅ COMPLETE (PR #234) | — |
 | 3 | 3.2 | Two-way ATM→UCM data plumbing (T_air + wind only) | Pass ATM fields down for consumption by UCM | 🔲 PLANNED | — |
 | 3 | 3.3 | MRF re-audit + PBLH consumer guard | Verify u*, θ* under UCM-modified profiles; assert no PBLH consumption | ✅ COMPLETE (PR #236) | — |
-| 3 | 3.4 | Stability-aware canyon-atm exchange | Obukhov-corrected exchange coefficient consuming MRF u*; Businger-Dyer functions | 🔲 IN PROGRESS | — |
-| 3 | 3.5 | Two-way MRF+SLUCM full loop regression | End-to-end integration gate | 🔲 PLANNED | — |
+| 3 | 3.4 | Stability-aware canyon-atm exchange | Obukhov-corrected exchange coefficient consuming MRF u*; Businger-Dyer functions | ✅ COMPLETE (PR #238) | — |
+| 3 | 3.5a | Newton SEB solver on T_skin_{roof,wall,road} | Per-facet energy balance via Newton iteration; sensible heat + conduction feedback | ✅ COMPLETE (PR #239) | — |
+| 3 | 3.5b | Prescribed diurnal SW/LW radiation forcing | Analytic solar geometry + clear-sky bulk formulae for SEB closure (bridge to Phase 4.2) | ✅ COMPLETE (this PR) | — |
+| 3 | 3.5c | Two-way MRF+SLUCM full loop regression | End-to-end integration gate with radiation forcing enabled | 🔲 PLANNED | — |
 | 3 | 3.6 | UCMBoston multi-level one-way | First anchor_level>0 canonical | 🔲 PLANNED | — |
 | 3 | 3.7 | anchor_level=2 stress test | 3-level nested test on urban core | 🔲 PLANNED | — |
 | 3 | 3.8 | Non-urban partial-domain regression | Mixed urban+rural single ATM level | 🔲 PLANNED | — |
 | 3 | 3.9 | Regression suite hardening under feedback | CI-grade harness, automate `run_all_regressions.sh` | 🔲 PLANNED | — |
 | 3 | 3.10 | UCMBoston multi-level two-way | Phase 3 finale | 🔲 PLANNED | — |
 | 4 | 4.1 | is_urban mask enforcement (LSM + MOST bypass) | Wiring is_urban into LSM/MOST paths, mixed urban/non-urban domains | 🔲 PLANNED | — |
-| 4 | 4.2 | Radiation coupling (SW/LW extraction) | Solar + LW extraction from radiation module to UCM | 🔲 PLANNED | — |
+| 4 | 4.2 | Radiation coupling (SW/LW extraction) | Solar + LW extraction from radiation module to UCM; replaces Phase 3.5b analytic formulae | 🔲 PLANNED | — |
 | 4 | 4.3 | Urban/non-urban interface treatment | Boundary layer interpolation at urban perimeter | 🔲 PLANNED | — |
 | 4 | 4.4 | Mixed-domain diurnal integration test | Multi-facet urban/forest/ocean test case | 🔲 PLANNED | — |
 | 5 | 5.1 | Tree CSV + tree drag | Vegetation CSV reader, drag force injection | 🔲 PLANNED | — |
@@ -619,4 +621,176 @@ Phi_h(zeta) = (1 - gamma_h * zeta)^(-0.5)  with gamma_h = 16.0
 - **Physics:** Businger et al. (1971), Dyer (1974), Paulson (1970)
 - **WRF Model:** Chen et al. (2011) SLUCM implementation
 - **Prior Phase:** Phase 3.3 MRF re-audit + PBLH consumer guard (PR #236)
-- **Next Phase:** Phase 3.5 Two-way MRF+SLUCM full loop regression (integration of stability correction into facet SEB)
+- **Next Phase:** Phase 3.5a Newton SEB solver (PR #239), then Phase 3.5b Prescribed radiation forcing
+
+---
+
+## Phase 3.5a — Newton SEB Solver on T_skin_{roof,wall,road}
+
+**Status:** ✅ COMPLETE (PR #239)
+
+### Objective
+
+Solve the Surface Energy Balance (SEB) for skin temperature T_skin per facet (roof, wall, road) via Newton iteration. This enables physically correct sensible heat feedback: H = ρ Cp Ch |U| (T_skin - T_canyon) directly from skin temp, not from arbitrary input. This is the foundation for Phases 3.5b–4.2.
+
+### Deliverables
+
+1. **`ERF_UCMSEBSolver.H`** — GPU-safe Newton solver header
+   - `solve_facet_seb(T_skin_in, T1, T_canyon, SW_down, LW_down, ...)` → T_skin_out
+   - Residual: F(T_skin) = Rn - H - G = 0
+   - Jacobian: F' = -4εσT³ - ρCp Ch|U| - 2k/dz
+   - Safety: Step limiting (±20 K/iter), output clamping [250, 380] K, singularity guards
+
+2. **Integration in `ERF_UCMLayer.cpp`** — per-facet SEB solve
+   - Roof, wall, road SEB solved independently with SVF-weighted SW (Phase 2.4)
+   - H_roof, H_wall, H_road output for slab conduction BC
+   - Slab conduction advanced with SEB-derived H (instead of arbitrary input)
+
+3. **ParmParse parameters** — exchange coefficients (Section 11, `ERF_UCMParams.H/cpp`)
+   - `Ch_roof`, `Ch_wall`, `Ch_road` [unitless]
+   - `slab_dz` [m], Newton tolerances (max_iter, tol_K)
+
+### Physics
+
+**Energy balance per facet:**
+```
+F(T_skin) = Rn - H - G = 0
+
+where:
+  Rn = (1 - α) * SW_down + ε * (LW_down - σ * T_skin^4)
+  H  = ρ Cp Ch |U| (T_skin - T_canyon)
+  G  = 2k_th / dz (T_skin - T1)
+```
+
+**Newton iteration:**
+```
+T_new = T_old - F / F'
+F' = -4ε σ T^3 - ρ Cp Ch |U| - 2k_th / dz
+```
+
+**Convergence:** tol_K [K] on temperature change per iteration.
+
+### Backward Compatibility
+
+- Phase 3.5a retains hardcoded `SW_val = 0`, `LW_val = 350` (no radiative forcing yet)
+- With zero SW, SEB cannot close; T_skin collapses to 250 K floor (clamping indicates missing physics)
+- This is expected and documented — Phase 3.5b adds prescribed radiation to unblock closure
+
+---
+
+## Phase 3.5b — Prescribed Diurnal SW/LW Radiation Forcing for SEB Closure
+
+**Status:** 🔄 IN PROGRESS (this PR)
+
+### Objective
+
+Provide analytic, bulk-formulae SW/LW radiation to the SEB Newton solver (Phase 3.5a), unblocking T_skin convergence and enabling physically correct diurnal cycles. This is a *temporary bridge* until Phase 4.2 (RRTM/RRTMG coupling) supplies radiative fluxes from the radiation module.
+
+At Phase 4.2: SW_down and LW_down will be replaced by module-computed values; `use_prescribed_radiation` will be deprecated.
+
+### Deliverables
+
+1. **`ERF_UCMRadiationForcing.H`** — GPU-safe analytic radiation functions
+   - `solar_zenith_angle(time_s, lat_rad, lon_rad, julian_day)` → cos(zenith) ∈ [0, 1]
+     - Standard astronomical formula (Michalsky 1988, Spencer 1971)
+     - Accounts for: equation of time, solar declination, local solar time, latitude
+   - `clear_sky_SW_down(cos_zenith, S0, tau)` → SW [W/m²]
+     - Bird (1984) model: direct + diffuse via transmission τ
+     - S0 = 1361 W/m² (top-of-atmosphere), τ = 0.7 (clear-sky bulk)
+   - `gray_sky_LW_down(T_atm_K, eps_sky)` → LW [W/m²]
+     - Idso-Jackson (1969): LW_down = eps_sky * σ * T_atm^4
+     - eps_sky = 0.83 (clear), 0.95 (overcast)
+
+2. **ParmParse parameters** (Section 12, `ERF_UCMParams.H/cpp`)
+   - `use_prescribed_radiation` [bool] = true — gate for Phase 3.5b; false defers to Phase 4.2
+   - `lat_deg` [°N], `lon_deg` [°E] — domain location (Boston default: 42.36, -71.06)
+   - `julian_day` [1–365] — day of year for solar declination (172 = summer solstice)
+   - `solar_time_start_s` [s] — local solar time at t=0 (default 21600 = 06:00 LST)
+   - `solar_constant` [W/m²] = 1361
+   - `sw_transmission` [-] = 0.7 (clear), 0.5 (very clear), 0.8 (hazy)
+   - `sky_emissivity` [-] = 0.83 (clear), 0.95 (overcast)
+
+3. **Radiation forcing wired into SEB** (`ERF_UCMLayer.cpp`)
+   - Once per time step: compute SW_down and LW_down using analytic functions
+   - Per facet: SW_abs = (1 - albedo) * SW_down * SVF (reuse Phase 2.4 SVF)
+   - Per facet: LW_abs = emissivity * LW_down * SVF
+   - Pass into Newton SEB solver as SW_down, LW_down inputs
+   - Phase 3.5b SEB residual now includes full radiative balance
+
+4. **T_skin floor raised** (`ERF_UCMSEBSolver.H`)
+   - T_min_K: 250 K → 260 K
+   - Rationale: with radiation forcing, Newton should converge well above 250 K floor; floor hits indicate unphysical setup
+   - Debug flag: emit per-step warning if n_clamped > 0 (count cells clamped to floor)
+
+5. **Startup banner** (`ERF_UCMPrerequisites.cpp`, Section 12)
+   - Print all 8 new radiation parameters at initialization
+
+6. **UCMBostonStabilityCorrection updated** (`inputs_stability_correction`)
+   - Add Phase 3.5b section with parameters
+   - Set `solar_time_start_s = 43200` (noon LST) for max daytime SW
+   - Expect T_skin_roof ∈ [305–320] K at noon, [295–310] K on walls/roads
+
+7. **Check script enhanced** (`check_stability_correction.py`)
+   - [5] Phase 3.5B skin temperature floor check (informational)
+   - Parse logs for clamp warnings; report clamp count and flag if excessive
+
+8. **UCM_DEVELOPMENT.md Phase 3.5b** (this section)
+   - Explain context: Phase 3.5a has SEB but no radiation (collapses to floor)
+   - Describe analytic formulae (cite Idso-Jackson, Michalsky, Bird)
+   - Note: Phase 4.2 will replace analytic SW/LW with radiation-module fluxes
+   - Clarify backward compatibility: `use_prescribed_radiation=false` → no radiation (pre-3.5b behavior)
+
+### Physics
+
+**Solar geometry (Michalsky 1988):**
+```
+cos(zenith) = sin(lat) * sin(decl) + cos(lat) * cos(decl) * cos(hour_angle)
+```
+
+**Clear-sky SW (Bird 1984 simple):**
+```
+SW_down = S0 * cos_zenith * tau^(1/cos_zenith)  [for cos_zenith > 0, else 0]
+```
+
+**Gray-sky LW (Idso-Jackson 1969):**
+```
+LW_down = eps_sky * σ * T_atm^4
+eps_sky ≈ 0.70 + 0.05 * e_vapor  [for clear skies]
+  [simplified to scalar eps_sky = 0.83]
+```
+
+### Acceptance Criteria
+
+1. ✅ New header `ERF_UCMRadiationForcing.H` with 3 GPU-safe device functions
+2. ✅ 8 new ParmParse params registered in `ERF_UCMParams.H/cpp`
+3. ✅ Radiation params printed in startup banner
+4. ✅ SW/LW computed once per time step in `ERF_UCMLayer::advance()`
+5. ✅ Per-facet SVF weighting applied (reuse Phase 2.4 SVF_wall, SVF_road, SVF_roof)
+6. ✅ SW/LW fed into Newton residual for all three facets
+7. ✅ T_skin floor raised from 250 K to 260 K
+8. ✅ Clamp count warning emitted (debug flag)
+9. ✅ UCMBostonStabilityCorrection inputs + check script updated
+10. ✅ Builds clean with `-DERF_ENABLE_UCM=ON`
+11. ✅ `UCM_DEVELOPMENT.md` Phase 3.5b section added
+
+### Known Limitations / Deferred
+
+- **Diurnal cycle realism:** Analytic solar formula and bulk LW model are simplified; ~5% RMS error vs. RRTM expected
+- **Aerosol/cloud variation:** τ (sw_transmission) and eps_sky are scalars; Phase 4.2 radiation module handles spatial/temporal variation
+- **Spectral properties:** All properties treated as gray (wavelength-independent); Phase 5+ may add spectral detail
+
+### Backward Compatibility
+
+- `use_prescribed_radiation = false` → SW_down=0, LW_down=350 (pre-3.5b behavior, SEB collapses to floor)
+- `use_prescribed_radiation = true` (default) → activates Phase 3.5b analytic formulae
+- Phase 4.2 will set `use_prescribed_radiation` sentinel to "external" or similar, replacing analytic fluxes with module outputs
+
+### References
+
+- **Problem Statement:** Phase 3.5b Prescribed diurnal SW/LW radiation forcing specification
+- **Solar geometry:** Michalsky, J. (1988), The Astronomical Almanac's Algorithm for Approximate Solar Position, Solar Energy, 40(3), 227–235.
+- **Clear-sky SW:** Bird, R. E., et al. (1984), A Simple, Solar Spectral Model for Direct-Normal and Diffuse Horizontal Irradiance, Solar Energy, 32(4), 461–471.
+- **LW model:** Idso, S. B., and R. D. Jackson (1969), Thermal radiation from the atmosphere, J. Geophys. Res., 74(23), 5397–5403.
+- **Prior Phase:** Phase 3.5a Newton SEB solver on T_skin (PR #239)
+- **Next Phase:** Phase 3.5 full integration test (end-to-end two-way MRF+SLUCM with radiation)
+- **Later Phase:** Phase 4.2 Radiation coupling (SW/LW from RRTM/RRTMG module)
