@@ -239,9 +239,83 @@ def main():
         fail_count += not clamp_check_pass
 
     # ------------------------------------------------------------------
-    # [6] Stability correction log check (informational)
+    # [6] Phase 3.5a-hotfix3: T_canyon collapse detection
     # ------------------------------------------------------------------
-    print(f"\n[6] Stability correction log check (informational)")
+    print(f"\n[6] Phase 3.5a-hotfix3: T_canyon collapse check")
+    log_files = glob.glob("*.log") + glob.glob("run*.log")
+    found_canyon_collapse = False
+    max_canyon_dT = 0.0
+    
+    for lf in log_files:
+        try:
+            with open(lf) as f:
+                content = f.read()
+                # Search for T_canyon values in debug output
+                # Pattern: T_canyon_air=[min, max] K
+                import re
+                canyon_matches = re.findall(r'T_canyon_air=\[([\d.]+),([\d.]+)\]', content)
+                if len(canyon_matches) >= 2:
+                    # Compare consecutive steps
+                    for i in range(len(canyon_matches) - 1):
+                        prev_min, prev_max = float(canyon_matches[i][0]), float(canyon_matches[i][1])
+                        curr_min, curr_max = float(canyon_matches[i+1][0]), float(canyon_matches[i+1][1])
+                        dT_min = abs(curr_min - prev_min)
+                        dT_max = abs(curr_max - prev_max)
+                        max_canyon_dT = max(max_canyon_dT, dT_min, dT_max)
+                        if dT_min > 5.0 or dT_max > 5.0:
+                            found_canyon_collapse = True
+        except Exception:
+            pass
+    
+    CANYON_DT_THRESHOLD = 5.0  # K/step
+    canyon_collapse_pass = not found_canyon_collapse and (max_canyon_dT <= CANYON_DT_THRESHOLD)
+    print(f"    Max T_canyon change per step: {max_canyon_dT:.2f} K")
+    print(f"    {'PASS' if canyon_collapse_pass else 'INFO'}: T_canyon stable "
+          f"(threshold: <{CANYON_DT_THRESHOLD} K/step)")
+    if found_canyon_collapse:
+        print(f"    WARN: T_canyon collapse detected (dT > {CANYON_DT_THRESHOLD} K between steps)")
+    pass_count += canyon_collapse_pass
+    fail_count += (not canyon_collapse_pass and found_canyon_collapse)
+
+    # ------------------------------------------------------------------
+    # [7] Phase 3.5a-hotfix3: Newton/MOST H sign consistency
+    # ------------------------------------------------------------------
+    print(f"\n[7] Phase 3.5a-hotfix3: Newton/MOST H sign consistency check")
+    log_files = glob.glob("*.log") + glob.glob("run*.log")
+    found_sign_mismatch = False
+    
+    for lf in log_files:
+        try:
+            with open(lf) as f:
+                content = f.read()
+                # Search for H_roof debug output from both Newton and MOST
+                # Pattern: H_roof min=X max=Y
+                import re
+                newton_h_matches = re.findall(r'\[UCM\].*Newton.*H_roof min=([\d.-]+) max=([\d.-]+)', content)
+                most_h_matches = re.findall(r'\[UCM\].*MOST.*H.*min=([\d.-]+) max=([\d.-]+)', content)
+                
+                if newton_h_matches and most_h_matches:
+                    # Check if any Newton and MOST H have different signs
+                    for n_match in newton_h_matches:
+                        n_min, n_max = float(n_match[0]), float(n_match[1])
+                        for m_match in most_h_matches:
+                            m_min, m_max = float(m_match[0]), float(m_match[1])
+                            # If one is entirely negative and the other entirely positive
+                            if (n_max < 0 and m_min > 0) or (n_min > 0 and m_max < 0):
+                                found_sign_mismatch = True
+        except Exception:
+            pass
+    
+    sign_consistency_pass = not found_sign_mismatch
+    print(f"    {'PASS' if sign_consistency_pass else 'WARN'}: Newton and MOST H have consistent signs")
+    if found_sign_mismatch:
+        print(f"    WARN: Potential sign mismatch detected between Newton and MOST H")
+    # Note: we don't fail on this; it's informational
+
+    # ------------------------------------------------------------------
+    # [8] Stability correction log check (informational)
+    # ------------------------------------------------------------------
+    print(f"\n[8] Stability correction log check (informational)")
     log_files = glob.glob("*.log") + glob.glob("run*.log")
     found_corr = False
     for lf in log_files:
@@ -265,7 +339,7 @@ def main():
     # Summary
     # ------------------------------------------------------------------
     print("\n" + "=" * 70)
-    print("[UCM][3.4][check_stability_correction]")
+    print("[UCM][3.5a-hotfix3][check_stability_correction]")
     print("=" * 70)
     print(f"  UHI aloft k={k_uhi} (delta-T center-edge): {dT_aloft:+.3f} K"
           f"   {'PASS' if uhi_pass else 'FAIL'} (threshold: >{UHI_THRESHOLD:.3f} K)")
@@ -275,6 +349,12 @@ def main():
     print(f"  Theta bounded [{THETA_MIN},{THETA_MAX}] K at k={k_uhi}:"
           f"  {theta_min:.3f}-{theta_max:.3f} K"
           f"   {'PASS' if theta_bounded else 'FAIL'}")
+    print(f"  Newton clamp/divergence:                 "
+          f"  {'PASS' if clamp_check_pass else 'FAIL' if clamp_check_pass is False else 'N/A'}")
+    print(f"  T_canyon stability (max dT={max_canyon_dT:.2f}K): "
+          f"{'PASS' if canyon_collapse_pass else 'WARN'}")
+    print(f"  Newton/MOST H sign consistency:          "
+          f"{'PASS' if sign_consistency_pass else 'WARN'}")
     print(f"  Stability correction active:             {'YES' if found_corr else 'not confirmed (no log)'}")
     print("=" * 70)
     print(f"Results: {pass_count} PASS, {fail_count} FAIL")

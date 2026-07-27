@@ -80,6 +80,23 @@ void UCMLayer::advance(UCMFields& fields,
     fields.H_wall_atm->setVal(0.0);
     fields.H_roof_atm->setVal(0.0);
 
+    // Phase 3.5a-hotfix3: T_skin persistence diagnostic (tracks slab conduction leak)
+    if (m_params.ucm_debug) {
+        // Collectives on ALL ranks (valid cells only, nghost=0)
+        amrex::Real T_roof_min  = fields.T_skin_roof->min(0, 0);
+        amrex::Real T_roof_max  = fields.T_skin_roof->max(0, 0);
+        amrex::Real T_wall_min  = fields.T_skin_wall->min(0, 0);
+        amrex::Real T_wall_max  = fields.T_skin_wall->max(0, 0);
+        amrex::Real T_road_min  = fields.T_skin_road->min(0, 0);
+        amrex::Real T_road_max  = fields.T_skin_road->max(0, 0);
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][3.5A-hotfix3][entry] T_skin_roof=[" << T_roof_min
+                           << "," << T_roof_max << "] K; T_skin_wall=[" << T_wall_min
+                           << "," << T_wall_max << "] K; T_skin_road=[" << T_road_min
+                           << "," << T_road_max << "] K\n";
+        }
+    }
+
     // Debug: per-step ATM forcing summary on UCM grid (gated; prints every step)
     if (m_params.ucm_debug) {
         // Collectives on ALL ranks (must be outside IOProcessor guard)
@@ -643,31 +660,38 @@ void UCMLayer::advance(UCMFields& fields,
             amrex::Real W   = amrex::max(W_road(i,j,0), amrex::Real(1.0e-6));
             amrex::Real HoW = Hb / W;
 
-            // Bulk conductance for canyon-air temperature calculation [W/m^2/K]
-            // Using representative in-canyon wind speed 2 m/s and Ch=0.01
+            // Phase 3.5a-hotfix3: Canyon-air thermal inertia via first-order relaxation
+            // dT_canyon/dt = (H_road + H_wall - conductance*(T_canyon - T_atm)) / thermal_mass
+            // where thermal_mass = rho_cp * H_canyon_eff (H_canyon_eff = effective canyon depth for thermal mass)
+            // Discretize: T_canyon^{n+1} = T_canyon^n + dt * dT_canyon/dt
+            // with |dT| limiter to prevent runaway if H_facet is nonsensical
+            
             constexpr amrex::Real rho_cp_c   = 1.2 * 1005.0;  // [J/m^3/K]
             constexpr amrex::Real U_canyon    = 2.0;           // [m/s]
             constexpr amrex::Real Ch_c        = 0.01;          // [-]
+            constexpr amrex::Real max_dT_per_step = 2.0;       // [K] Phase 3.5a-hotfix3: limiter
+            
             amrex::Real conductance = amrex::max(rho_cp_c * Ch_c * U_canyon,
                                                   amrex::Real(1.0e-6));
-
-            // H_road and H_wall are pre-weighted [W/m^2 of ATM plan area].
-            // Convert to temperature perturbation above T_atm.
-            amrex::Real dT_rd = H_rd(i,j,0) / conductance;
-            amrex::Real dT_wl = H_wl(i,j,0) / conductance;
-
-            // Weighted canyon-air temperature:
-            // road and wall heat the canyon; ATM inflow dilutes it.
-            amrex::Real T_ref = T_atm(i,j,0);
-            amrex::Real w_rd  = 1.0;
-            amrex::Real w_wl  = 2.0 * HoW;
-            amrex::Real w_atm = 1.0;
-            amrex::Real w_tot = amrex::max(w_rd + w_wl + w_atm, amrex::Real(1.0e-6));
-
-            amrex::Real T_canyon_new = (w_rd  * (T_ref + dT_rd) +
-                                        w_wl  * (T_ref + dT_wl) +
-                                        w_atm *  T_ref) / w_tot;
-
+            
+            // Effective canyon depth for thermal mass (half of building height)
+            amrex::Real H_canyon_depth = 0.5 * Hb;
+            amrex::Real thermal_mass = rho_cp_c * amrex::max(H_canyon_depth, amrex::Real(1.0));
+            
+            // Weighted heat input to canyon from road and wall [W/m^2 of ATM area]
+            amrex::Real H_net = H_rd(i,j,0) + H_wl(i,j,0)
+                              - conductance * (T_canyon_a(i,j,0) - T_atm(i,j,0));
+            
+            // Temperature change over this timestep [K]
+            amrex::Real dT = H_net * dt / thermal_mass;
+            
+            // Limit step to prevent runaway
+            if (dT >  max_dT_per_step) dT =  max_dT_per_step;
+            if (dT < -max_dT_per_step) dT = -max_dT_per_step;
+            
+            // Update canyon air temperature
+            amrex::Real T_canyon_new = T_canyon_a(i,j,0) + dT;
+            
             // Clamp to physical range
             T_canyon_new = amrex::max(amrex::min(T_canyon_new, amrex::Real(380.0)),
                                        amrex::Real(200.0));
@@ -766,7 +790,12 @@ void UCMLayer::advance(UCMFields& fields,
 
            const amrex::Real u_star = u_star_a(i,j,0);
            const amrex::Real t_star = t_star_a(i,j,0);
-           // MOST bulk sensible flux -- already per unit plan area [W/m^2].
+           // Phase 3.5a-hotfix3: MOST sensible heat flux with consistent sign convention.
+           // H = -ρ*Cp*u_star*t_star [W/m²]
+           // Sign convention: Positive H = surface → atmosphere (surface LOSING heat, cooling)
+           //                 Negative H = atmosphere → surface (surface GAINING heat, warming)
+           // This matches the Newton formula: H = ρ*cp*Ch*|U|*(T_skin - T_air)
+           // Both formulas should produce the same sign for identical inputs.
            amrex::Real H_base = -rho_ref * Cp * u_star * t_star;
            const amrex::Real AH_val = ah_a(i,j,0);
 
