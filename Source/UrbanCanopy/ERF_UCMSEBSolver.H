@@ -163,6 +163,8 @@ void solve_facet_seb_with_diag(
     amrex::Real T_skin = amrex::max(amrex::min(T_skin_in, T_max_K), T_min_K);
 
     n_iter = 0;
+    T_skin_unclamped = T_skin;  // Initialize with initial clamped value
+    
     for (int iter = 0; iter < max_iter; ++iter) {
         n_iter = iter + 1;  // track iterations
 
@@ -178,23 +180,37 @@ void solve_facet_seb_with_diag(
         amrex::Real F_prime = -4.0 * emiss * sigma_sb * T3 - H_coeff - G_coeff;
         if (std::abs(F_prime) < jacobian_min) break;
 
-        // Raw Newton step
+        // Raw Newton step (unclamped)
         amrex::Real step = -F / F_prime;
 
         // Limit step size
         if (step >  max_step_K) step =  max_step_K;
         if (step < -max_step_K) step = -max_step_K;
 
-        amrex::Real T_new = T_skin + step;
-        T_new = amrex::max(amrex::min(T_new, T_max_K), T_min_K);
+        // Compute raw Newton value (before clamp)
+        amrex::Real T_new_raw = T_skin + step;
+        // Clamp for next iteration
+        amrex::Real T_new = amrex::max(amrex::min(T_new_raw, T_max_K), T_min_K);
 
         amrex::Real dT = std::abs(T_new - T_skin);
         T_skin = T_new;
-        if (dT < tol_K) break;
+        if (dT < tol_K) {
+            // On convergence, store the raw unclamped value
+            T_skin_unclamped = T_new_raw;
+            break;
+        }
     }
 
-    // Capture T before final clamp (for diagnostics)
-    T_skin_unclamped = T_skin;
+    // If Newton didn't converge (hit max_iter), keep T_skin_unclamped as initialized
+    // (it will be the last clamped value from the loop, which is acceptable)
+    
+    // If Newton converged but we're here, we already set T_skin_unclamped inside the loop
+    // Only override if we hit max_iter without convergence
+    if (n_iter >= max_iter && residual_final > tol_K) {
+        // Newton did not converge; T_skin_unclamped is already set to the clamped loop value
+        // (initialized at loop start and updated each iteration)
+        T_skin_unclamped = T_skin;
+    }
 
     // Final clamp and H
     T_skin_out = amrex::max(amrex::min(T_skin, T_max_K), T_min_K);

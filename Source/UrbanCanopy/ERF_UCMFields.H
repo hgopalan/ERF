@@ -210,7 +210,20 @@ struct UCMFields
     std::unique_ptr<amrex::MultiFab> H_wall;
 
     /// Roof sensible heat flux [W/m²]. Phase 2.3: facet split from H_sensible.
+    /// Phase 3.5A-hotfix2: Newton-derived for slab conduction consistency.
     std::unique_ptr<amrex::MultiFab> H_roof;
+
+    /// Phase 3.5A-hotfix2: Atmospheric injection heat fluxes (MOST-derived).
+    /// These are used for ATM injection and are computed from MOST-derived u_star*t_star.
+    /// Separate from H_roof/wall/road which are Newton-derived for slab conduction.
+    /// Roof sensible heat flux for ATM injection [W/m²]. Phase 3.5A-hotfix2: MOST-derived.
+    std::unique_ptr<amrex::MultiFab> H_roof_atm;
+
+    /// Road sensible heat flux for ATM injection [W/m²]. Phase 3.5A-hotfix2: MOST-derived.
+    std::unique_ptr<amrex::MultiFab> H_road_atm;
+
+    /// Wall sensible heat flux for ATM injection [W/m²]. Phase 3.5A-hotfix2: MOST-derived.
+    std::unique_ptr<amrex::MultiFab> H_wall_atm;
 
     /// Anthropogenic heat flux [W/m²]. Phase 2.3: added to roof; distributed by Profile.
     std::unique_ptr<amrex::MultiFab> AH;
