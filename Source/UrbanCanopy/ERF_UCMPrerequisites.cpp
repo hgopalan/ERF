@@ -290,4 +290,21 @@ void check_ucm_grid_and_fields(const UCMParams& params,
         amrex::Print() << "[UCM][3.3][prerequisites] PBLH guard: CLEAN — no PBLH dependency detected in UCM inputs.\n"
                        << "  SurfaceLayer inputs consumed: u_star, t_star, q_star (all OK per design contract #4).\n";
     }
+
+    // Phase 3.5a-hotfix4: Cross-validation of T_init_uniform_K vs erf.theta_ref
+    // Warn if explicitly set T_init differs from theta_ref by > 1 K (detect fat-finger errors)
+    if (params.T_init_uniform_K > 0.0) {  // User explicitly set (not sentinel)
+        amrex::Real theta_ref_val = 293.15;
+        amrex::ParmParse pp_erf("erf");
+        pp_erf.query("theta_ref", theta_ref_val);
+        
+        if (std::abs(params.T_init_uniform_K - theta_ref_val) > 1.0) {
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "[UCM][WARN] T_init_uniform_K (" << params.T_init_uniform_K
+                               << " K) differs from erf.theta_ref (" << theta_ref_val
+                               << " K) by > 1 K. Initial thermal disequilibrium will produce "
+                               << "transient sensible-heat fluxes for the first ~100 steps.\n";
+            }
+        }
+    }
 }
