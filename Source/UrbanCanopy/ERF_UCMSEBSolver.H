@@ -106,7 +106,8 @@ amrex::Real solve_facet_seb(
     constexpr amrex::Real conduction_min = 1.e-6;     // Minimum dz_slab guard [m]
 
     // Guard: prevent degenerate heat exchange due to zero wind
-    amrex::Real U = amrex::max(amrex::abs(U_ref), U_min);
+    // Use std::abs for HOST+DEVICE compatibility (amrex::abs is device-only)
+    amrex::Real U = amrex::max(std::abs(U_ref), U_min);
 
     // Guard: if dz_slab too small, effectively no conduction term
     amrex::Real G_coeff = 0.0;
@@ -136,7 +137,7 @@ amrex::Real solve_facet_seb(
         amrex::Real F_prime = dRn_dT - dH_dT - dG_dT;
 
         // Guard against singular Jacobian
-        if (amrex::abs(F_prime) < jacobian_min) {
+        if (std::abs(F_prime) < jacobian_min) {
             break;  // Cannot continue iteration
         }
 
@@ -144,7 +145,7 @@ amrex::Real solve_facet_seb(
         amrex::Real T_skin_new = T_skin - F / F_prime;
 
         // Check convergence: |ΔT| < tol_K
-        amrex::Real dT = amrex::abs(T_skin_new - T_skin);
+        amrex::Real dT = std::abs(T_skin_new - T_skin);
         T_skin = T_skin_new;
 
         if (dT < tol_K) {
