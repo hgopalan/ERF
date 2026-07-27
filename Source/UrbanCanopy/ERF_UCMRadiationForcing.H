@@ -54,7 +54,8 @@ amrex::Real solar_zenith_angle(amrex::Real time_s, amrex::Real lat_rad,
     constexpr Real degrad = pi / 180.0;
 
     // Solar constant parameters
-    constexpr Real b = (julian_day - 1.0) * 2.0 * pi / 365.0;
+    // Note: b depends on the runtime parameter julian_day, so it cannot be constexpr
+    const Real b = (julian_day - 1.0) * 2.0 * pi / 365.0;
 
     // Equation of time (Spencer 1971, in minutes)
     Real et_min = 229.18 * (0.000075 + 0.001868*std::cos(b) - 0.032077*std::sin(b)
