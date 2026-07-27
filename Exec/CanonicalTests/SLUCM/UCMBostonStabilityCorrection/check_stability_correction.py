@@ -1,95 +1,223 @@
 #!/usr/bin/env python3
+"""Verification for UCMBostonStabilityCorrection (Phase 3.4/3.5).
+
+Validates that the Businger-Dyer stability-corrected canyon-atmosphere
+heat exchange produces physically correct results. Checks:
+1. UHI aloft at k=10 (~210 m AGL): delta-T (center - edge) > 0.02 K
+2. Wind reduction at k=1 (~30 m AGL): > 10%
+3. All fields finite (no NaN/Inf)
+4. Theta bounded [294, 310] K at k=10 (no blow-up)
+
+Plotfile discovery: main ERF plotfiles are named 'plt_NNNNN' (digits only).
+UCM companion plotfiles (plt_ucm_*, plt_ucm_atm_*) are excluded — they lack
+velocity and theta fields.
 """
-Validation script for UCMBostonStabilityCorrection test (Phase 3.5).
 
-This script validates that the stability-corrected canyon-atmosphere heat
-exchange (Businger-Dyer formulation, Phase 3.4/3.5) produces physically
-plausible results and doesn't cause numerical instabilities.
-
-Key validation metrics:
-1. **Field finiteness:** All fields (theta, u, v) are finite (no NaN/Inf)
-2. **Theta bounds:** Temperature remains within physically reasonable range [285, 320] K
-3. **UHI signal:** Urban heat island signal preserved (ΔT > 0.01 K between center and edge)
-4. **Wind reduction:** Drag effect still present (>5% wind reduction at low level)
-5. **Flux range:** Heat fluxes remain within [-500, 500] W/m² (physical range)
-"""
-
-import sys
 import os
+import re
+import sys
 import glob
+import numpy as np
 
-def check_stability_correction_test():
-    """
-    Main validation function for the stability correction test.
-    
-    Returns:
-        0 on PASS (all metrics OK)
-        1 on FAIL (any metric fails)
-    """
-    
-    # Find the latest plotfile
-    plotfiles = sorted(glob.glob('plt_*'))
-    if not plotfiles:
-        print("[FAIL] No plotfiles found (plt_*)")
-        return 1
-    
-    final_plt = plotfiles[-1]
-    print(f"[CHECK] Using plotfile: {final_plt}")
-    
-    # Try to import AMReX tools if available
+try:
+    import yt
     try:
-        import yt
-        yt.funcs.mylog.setLevel(50)  # Suppress verbose output
-    except ImportError:
-        print("[WARN] yt not available; skipping detailed plotfile checks")
-        print("[PASS] (partial) Plotfile exists; detailed validation skipped")
-        return 0
-    
+        yt.set_log_level("error")
+    except Exception:
+        pass
+except ImportError:
+    print("ERROR: yt not found. Install with: pip install yt")
+    sys.exit(1)
+
+
+def find_final_plotfile():
+    """Return the highest-numbered main ATM plotfile (plt_NNNNN)."""
+    all_entries = sorted(glob.glob("plt_*"))
+    pattern = re.compile(r"^plt_\d+$")
+    main_files = [
+        f for f in all_entries
+        if pattern.match(os.path.basename(f))
+        and not os.path.basename(f).startswith("plt_ucm")
+    ]
+    if not main_files:
+        print("ERROR: No main ATM plotfiles found matching 'plt_NNNNN'")
+        if all_entries:
+            print(f"       Found only: {all_entries}")
+        return None
+    return main_files[-1]
+
+
+def load_field_3d(ds, field_name):
+    """Load a full-domain 3D field via covering_grid; return (z, data) or (None, None)."""
     try:
-        ds = yt.load(final_plt)
-        
-        # Extract fields at the lowest level
-        theta = ds.all_data()["theta"]
-        u = ds.all_data()["x_velocity"]
-        v = ds.all_data()["y_velocity"]
-        
-        # Check 1: Finiteness
-        if not (theta.d.all() == theta.d) or not (u.d.all() == u.d):
-            print("[FAIL] Non-finite values (NaN/Inf) detected in theta or velocity")
-            return 1
-        print("[PASS] All fields are finite")
-        
-        # Check 2: Theta bounds
-        theta_min = theta.d.min()
-        theta_max = theta.d.max()
-        if theta_min < 285.0 or theta_max > 320.0:
-            print(f"[FAIL] Theta out of bounds: [{theta_min:.1f}, {theta_max:.1f}] K")
-            return 1
-        print(f"[PASS] Theta in bounds: [{theta_min:.1f}, {theta_max:.1f}] K")
-        
-        # Check 3: UHI signal (simplified: max - min > 0.01 K)
-        uhi_signal = theta_max - theta_min
-        if uhi_signal < 0.01:
-            print(f"[WARN] UHI signal weak: ΔT={uhi_signal:.4f} K (threshold: 0.01 K)")
-        else:
-            print(f"[PASS] UHI signal strong: ΔT={uhi_signal:.4f} K")
-        
-        # Check 4: Wind reduction (simplified: RMS(u,v) should be > 1 m/s)
-        wind_speed = (u.d**2 + v.d**2)**0.5
-        wind_min = wind_speed.min()
-        wind_max = wind_speed.max()
-        if wind_min < 0.1:
-            print(f"[WARN] Wind speed very low: min={wind_min:.2f} m/s")
-        else:
-            print(f"[PASS] Wind speed reasonable: [{wind_min:.2f}, {wind_max:.2f}] m/s")
-        
-        return 0
-        
+        cg = ds.covering_grid(level=0, left_edge=ds.domain_left_edge,
+                              dims=ds.domain_dimensions, fields=[field_name])
+        data = np.array(cg[field_name])
+        if data.ndim != 3:
+            print(f"WARNING: Field {field_name} has unexpected shape {data.shape}")
+            return None, None
+        z = ds.domain_left_edge[2] + (np.arange(data.shape[2]) + 0.5) \
+            * (ds.domain_right_edge[2] - ds.domain_left_edge[2]) / data.shape[2]
+        return z, data
     except Exception as e:
-        print(f"[WARN] Could not load plotfile: {e}")
-        print("[PASS] (partial) Plotfile exists; detailed validation skipped")
-        return 0
+        print(f"ERROR loading field {field_name}: {e}")
+        return None, None
+
+
+def main():
+    print("=" * 70)
+    print("UCMBoston Stability Correction Validation (Phase 3.4/3.5)")
+    print("=" * 70)
+
+    main_plt = find_final_plotfile()
+    if main_plt is None:
+        print("FAIL: No plotfile found")
+        sys.exit(1)
+
+    print(f"\nLoading main ATM plotfile: {main_plt}")
+    try:
+        ds = yt.load(main_plt)
+    except Exception as e:
+        print(f"ERROR: Failed to load plotfile {main_plt}: {e}")
+        sys.exit(1)
+
+    z, theta = load_field_3d(ds, ("boxlib", "theta"))
+    _, u     = load_field_3d(ds, ("boxlib", "x_velocity"))
+    _, v     = load_field_3d(ds, ("boxlib", "y_velocity"))
+
+    if theta is None or u is None or v is None:
+        print("FAIL: Could not load required fields (theta, x_velocity, y_velocity)")
+        sys.exit(1)
+
+    nx, ny, nz = theta.shape
+    print(f"Domain shape: {theta.shape} (nx, ny, nz)")
+    print(f"Z range: {float(z[0]):.1f} m to {float(z[-1]):.1f} m")
+
+    i_center  = nx // 2
+    i_edge    = 0
+    j_mid     = ny // 2
+    k_surface = 1   # ~30 m AGL
+    k_uhi     = 10  # ~210 m AGL, above canopy top
+
+    pass_count = 0
+    fail_count = 0
+
+    # ------------------------------------------------------------------
+    # [1] UHI aloft check
+    # ------------------------------------------------------------------
+    T_edge_uhi   = theta[i_edge,   j_mid, k_uhi]
+    T_center_uhi = theta[i_center, j_mid, k_uhi]
+    dT_aloft     = T_center_uhi - T_edge_uhi
+
+    print(f"\n[1] UHI check aloft at k={k_uhi} (~{float(z[k_uhi]):.0f} m AGL)")
+    print(f"    T at edge   (i={i_edge},    k={k_uhi}): {T_edge_uhi:.4f} K")
+    print(f"    T at center (i={i_center}, k={k_uhi}): {T_center_uhi:.4f} K")
+    print(f"    UHI delta-T (center - edge) = {dT_aloft:+.4f} K")
+
+    UHI_THRESHOLD = 0.02
+    uhi_pass = dT_aloft > UHI_THRESHOLD
+    print(f"    {'PASS' if uhi_pass else 'FAIL'}: delta-T = {dT_aloft:+.3f} K  "
+          f"(threshold: >{UHI_THRESHOLD:.3f} K)")
+    pass_count += uhi_pass
+    fail_count += not uhi_pass
+
+    # ------------------------------------------------------------------
+    # [2] Wind reduction check
+    # ------------------------------------------------------------------
+    U_center = float(np.sqrt(u[i_center, j_mid, k_surface]**2
+                             + v[i_center, j_mid, k_surface]**2))
+    U_edge   = float(np.sqrt(u[i_edge,   j_mid, k_surface]**2
+                             + v[i_edge,   j_mid, k_surface]**2))
+
+    print(f"\n[2] Wind reduction at k={k_surface} (~{float(z[k_surface]):.0f} m AGL)")
+    print(f"    U at edge   (i={i_edge}):   {U_edge:.2f} m/s")
+    print(f"    U at center (i={i_center}): {U_center:.2f} m/s")
+
+    wind_pass = False
+    reduction_pct = 0.0
+    if U_edge > 0.1:
+        reduction_pct = 100.0 * (1.0 - U_center / U_edge)
+        wind_pass = reduction_pct > 10.0
+        print(f"    Wind reduction: {reduction_pct:.1f}%")
+        print(f"    {'PASS' if wind_pass else 'FAIL'}: {reduction_pct:.1f}% reduction  "
+              f"(threshold: >10%)")
+    else:
+        print(f"    FAIL: edge wind too weak ({U_edge:.3f} m/s)")
+    pass_count += wind_pass
+    fail_count += not wind_pass
+
+    # ------------------------------------------------------------------
+    # [3] Finite-value check
+    # ------------------------------------------------------------------
+    print(f"\n[3] Finite-value check")
+    fields_finite = (np.isfinite(theta).all() and
+                     np.isfinite(u).all() and
+                     np.isfinite(v).all())
+    print(f"    {'PASS' if fields_finite else 'FAIL'}: all fields finite")
+    pass_count += fields_finite
+    fail_count += not fields_finite
+
+    # ------------------------------------------------------------------
+    # [4] Theta bounded check at k=10
+    # ------------------------------------------------------------------
+    theta_at_k = theta[:, :, k_uhi]
+    theta_min  = float(np.min(theta_at_k))
+    theta_max  = float(np.max(theta_at_k))
+
+    THETA_MIN = 294.0
+    THETA_MAX = 310.0
+    theta_bounded = (theta_min >= THETA_MIN) and (theta_max <= THETA_MAX)
+
+    print(f"\n[4] Theta bounded check at k={k_uhi} (~{float(z[k_uhi]):.0f} m AGL)")
+    print(f"    Theta range: [{theta_min:.4f}, {theta_max:.4f}] K")
+    print(f"    {'PASS' if theta_bounded else 'FAIL'}: theta in [{THETA_MIN}, {THETA_MAX}] K")
+    pass_count += theta_bounded
+    fail_count += not theta_bounded
+
+    # ------------------------------------------------------------------
+    # [5] Stability correction log check (informational)
+    # ------------------------------------------------------------------
+    print(f"\n[5] Stability correction log check (informational)")
+    log_files = glob.glob("*.log") + glob.glob("run*.log")
+    found_corr = False
+    for lf in log_files:
+        try:
+            with open(lf) as f:
+                for line in f:
+                    if "[UCM][3.4][stability-correction]" in line:
+                        found_corr = True
+                        break
+        except Exception:
+            pass
+        if found_corr:
+            break
+    if found_corr:
+        print("    INFO: stability correction active (found in log)")
+    else:
+        print("    INFO: no log found or correction trace not present "
+              "(run with ucm_debug=1 to enable)")
+
+    # ------------------------------------------------------------------
+    # Summary
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 70)
+    print("[UCM][3.4][check_stability_correction]")
+    print("=" * 70)
+    print(f"  UHI aloft k={k_uhi} (delta-T center-edge): {dT_aloft:+.3f} K"
+          f"   {'PASS' if uhi_pass else 'FAIL'} (threshold: >{UHI_THRESHOLD:.3f} K)")
+    print(f"  Wind reduction k={k_surface}:               {reduction_pct:.1f}%"
+          f"   {'PASS' if wind_pass else 'FAIL'} (threshold: >10%)")
+    print(f"  All fields finite:                       {'PASS' if fields_finite else 'FAIL'}")
+    print(f"  Theta bounded [{THETA_MIN},{THETA_MAX}] K at k={k_uhi}:"
+          f"  {theta_min:.3f}-{theta_max:.3f} K"
+          f"   {'PASS' if theta_bounded else 'FAIL'}")
+    print(f"  Stability correction active:             {'YES' if found_corr else 'not confirmed (no log)'}")
+    print("=" * 70)
+    print(f"Results: {pass_count} PASS, {fail_count} FAIL")
+    print("=" * 70)
+
+    sys.exit(0 if fail_count == 0 else 1)
+
 
 if __name__ == "__main__":
-    exit_code = check_stability_correction_test()
-    sys.exit(exit_code)
+    main()
