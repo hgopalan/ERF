@@ -790,7 +790,12 @@ void UCMLayer::advance(UCMFields& fields,
 
            const amrex::Real u_star = u_star_a(i,j,0);
            const amrex::Real t_star = t_star_a(i,j,0);
-           // MOST bulk sensible flux -- already per unit plan area [W/m^2].
+           // Phase 3.5a-hotfix3: MOST sensible heat flux with consistent sign convention.
+           // H = -ρ*Cp*u_star*t_star [W/m²]
+           // Sign convention: Positive H = surface → atmosphere (surface LOSING heat, cooling)
+           //                 Negative H = atmosphere → surface (surface GAINING heat, warming)
+           // This matches the Newton formula: H = ρ*cp*Ch*|U|*(T_skin - T_air)
+           // Both formulas should produce the same sign for identical inputs.
            amrex::Real H_base = -rho_ref * Cp * u_star * t_star;
            const amrex::Real AH_val = ah_a(i,j,0);
 
