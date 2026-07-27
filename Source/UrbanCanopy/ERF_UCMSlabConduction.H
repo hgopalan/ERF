@@ -152,9 +152,15 @@ inline void advance_slab_conduction_column(amrex::Real* T,
     // c_0 = 1  (after dividing out Fo)
     // d_0 = T_0^old + Q_top*dz/k = T_0^old + Q_top/(rho_cp*Fo/dt)
 
-    amrex::Real b_top = 1.0/Fo + 1.0;  // Modified diagonal for flux BC
+    /*amrex::Real b_top = 1.0/Fo + 1.0;  // Modified diagonal for flux BC
     amrex::Real c_top = 1.0;
-    amrex::Real d_top = T_old[0] + Q_top*dz/k_therm;
+    amrex::Real d_top = T_old[0] + Q_top*dz/k_therm;*/
+
+    // Correct discretization of Neumann flux BC at top (see docstring above).
+    // Row 0: (1 + Fo) * T_0^{n+1} - Fo * T_1^{n+1} = T_0^n + Q_top * dt / (rho_cp * dz)
+    amrex::Real b_top = 1.0 + Fo;                              // Was 1.0/Fo + 1.0 (WRONG)
+    amrex::Real c_top = Fo;                                    // Was 1.0 (WRONG)
+    amrex::Real d_top = T_old[0] + Q_top * dt / (rho_cp * dz); // Was T_old[0] + Q_top*dz/k_therm (WRONG)
 
     // Forward elimination, row 0
     alpha[0] = c_top / b_top;
