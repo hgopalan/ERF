@@ -1,9 +1,10 @@
 # Phase 3.5c: 24-hour diurnal full-loop regression test
-# Based on UCMBostonStabilityCorrection/inputs_stability_correction with 3 changes:
+# Based on UCMBostonStabilityCorrection/inputs_stability_correction with these changes:
 #   1. max_step: 3600 -> 60000 (~24 hours simulated)
 #   2. plot_int: 300 -> 2500
 #   3. plot_file prefix: plt_ -> plt_diurnal_
 #   4. solar_time_start_s: 43200 -> 0 (start at midnight LST)
+#   5. slab_L / slab_N_layers overridden below (deeper slab, better deep BC)
 # All other physics settings identical to Phase 3.5b stability-correction test.
 max_step         = 60000
 erf.cfl          = 0.5

@@ -12,6 +12,7 @@ Verify that the Phase 3.5a Newton SEB solver + Phase 3.5b prescribed radiation +
 - Summer solstice (`julian_day = 172`)
 - Two-way feedback: heat + momentum enabled
 - Radiation: Phase 3.5b analytic (SW zenith + LW gray-sky)
+- **Slab: 50 cm total depth, 6 layers** (Phase 3.5c-tuned; see Known Limitations)
 
 ## Data Files (must be copied/symlinked from UCMBostonStabilityCorrection)
 
