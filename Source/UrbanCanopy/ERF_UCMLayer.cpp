@@ -75,6 +75,10 @@ void UCMLayer::advance(UCMFields& fields,
     fields.H_road->setVal(0.0);
     fields.H_wall->setVal(0.0);
     fields.H_roof->setVal(0.0);
+    // Phase 3.5A-hotfix2: zero-init ATM injection fluxes
+    fields.H_road_atm->setVal(0.0);
+    fields.H_wall_atm->setVal(0.0);
+    fields.H_roof_atm->setVal(0.0);
 
     // Debug: per-step ATM forcing summary on UCM grid (gated; prints every step)
     if (m_params.ucm_debug) {
@@ -728,9 +732,6 @@ void UCMLayer::advance(UCMFields& fields,
        auto const olen_a   = atm_olen.const_array(mfi);
 
        // Output arrays
-       auto       h_road_a = fields.H_road->array(mfi);
-       auto       h_wall_a = fields.H_wall->array(mfi);
-       auto       h_roof_a = fields.H_roof->array(mfi);
        // Phase 3.5A-hotfix2: MOST-derived fluxes for ATM injection (separate from Newton)
        auto       h_road_atm_a = fields.H_road_atm->array(mfi);
        auto       h_wall_atm_a = fields.H_wall_atm->array(mfi);
