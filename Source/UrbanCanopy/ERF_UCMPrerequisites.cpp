@@ -278,7 +278,12 @@ void check_ucm_grid_and_fields(const UCMParams& params,
         amrex::Print() << "[UCM]   Refinement ratio   = " << ucm_grid.grid_ratio << "\n";
         amrex::Print() << "[UCM]   Ghost cells        = IntVect(1, 1, 0)\n";
         amrex::Print() << "[UCM]   All fields allocated: true\n";
-        amrex::Print() << "[UCM]   is_urban set to 1 everywhere (homogeneous patch)\n";
+        //amrex::Print() << "[UCM]   is_urban set to 1 everywhere (homogeneous patch)\n";
+        if (params.building_layout_csv_path.empty()) {
+            amrex::Print() << "[UCM]   is_urban set to 1 everywhere (homogeneous patch)\n";
+        } else {
+            amrex::Print() << "[UCM]   is_urban populated from CSV (mixed urban/non-urban)\n";
+        }
         amrex::Print() << "[UCM] =========================================================\n";
         amrex::Print() << "\n";
     }
