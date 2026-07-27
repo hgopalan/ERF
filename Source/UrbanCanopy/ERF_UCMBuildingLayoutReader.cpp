@@ -1,9 +1,14 @@
 /**
  * @file ERF_UCMBuildingLayoutReader.cpp
- * @brief Building-layout CSV reader implementation for the ERF-SLUCM module (Phase 2.1)
+ * @brief Building-layout CSV reader implementation for the ERF-SLUCM module (Phase 2.1 → 3.7)
  *
  * Implements rank-0-read + MPI_Bcast of building-layout data following patterns from
  * `Source/LNG/ERF_LNGSpillSchedule.cpp`.
+ *
+ * ### Phase 3.7 extension: Physical-coordinate CSV support
+ * - Detects CSV mode from header: "x_m,y_m,..." (physical) vs "i,j,..." (legacy)
+ * - Physical mode: loads sparse rows, performs nearest-neighbor lookup per UCM cell
+ * - Legacy mode: preserves existing exact-match (i,j) behavior with row-count validation
  */
 
 #include <UrbanCanopy/ERF_UCMBuildingLayoutReader.H>
@@ -15,10 +20,47 @@
 #include <limits>
 #include <set>
 #include <iomanip>
+#include <cmath>
 
 // Verify POD struct is MPI_Bcast safe
 static_assert(std::is_trivially_copyable_v<UCMBuildingRow>,
               "UCMBuildingRow must be trivially copyable for MPI_Bcast");
+
+namespace {
+    // Enum to distinguish CSV mode
+    enum class CSVMode { LEGACY_INDEX, PHYSICAL_COORDS };
+
+    // Helper to detect CSV mode from header
+    CSVMode detect_csv_mode(const std::string& header_line) {
+        auto remove_spaces = [](std::string s) {
+            s.erase(std::remove(s.begin(), s.end(), ' '), s.end());
+            return s;
+        };
+
+        std::string header_clean = remove_spaces(header_line);
+
+        // Check if it starts with x_m,y_m (physical mode)
+        if (header_clean.find("x_m,y_m,") == 0) {
+            return CSVMode::PHYSICAL_COORDS;
+        }
+
+        // Check if it starts with i,j (legacy mode)
+        if (header_clean.find("i,j,") == 0) {
+            return CSVMode::LEGACY_INDEX;
+        }
+
+        // If we get here, it's an unknown format
+        return CSVMode::LEGACY_INDEX;  // Default to legacy
+    }
+
+    // Helper to compute Euclidean distance
+    amrex::Real euclidean_distance(amrex::Real x1, amrex::Real y1,
+                                    amrex::Real x2, amrex::Real y2) {
+        amrex::Real dx = x1 - x2;
+        amrex::Real dy = y1 - y2;
+        return std::sqrt(dx * dx + dy * dy);
+    }
+}  // namespace
 
 void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path, 
                                                   int nx_ucm, int ny_ucm,
@@ -28,6 +70,8 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
     m_rows.clear();
 
     int n_rows = 0;
+    CSVMode csv_mode = CSVMode::LEGACY_INDEX;
+    bool is_physical_mode = false;
     UCMBuildingRow min_vals{}, max_vals{};
     int count_is_urban_zero = 0;
     int count_AH_Wm2_populated = 0;  // Phase 2.9: track non-zero AH_Wm2
@@ -37,6 +81,12 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
     bool has_duplicate = false;
     std::string duplicate_msg;
 
+    // Phase 3.7: Physical-mode bounding box
+    amrex::Real x_min = std::numeric_limits<amrex::Real>::infinity();
+    amrex::Real x_max = -std::numeric_limits<amrex::Real>::infinity();
+    amrex::Real y_min = std::numeric_limits<amrex::Real>::infinity();
+    amrex::Real y_max = -std::numeric_limits<amrex::Real>::infinity();
+
     // =========================================================================
     // Rank 0: Read and parse CSV
     // =========================================================================
@@ -44,14 +94,14 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
     {
         std::ifstream csv_file(path);
         if (!csv_file.is_open()) {
-            amrex::Abort("[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast] "
+            amrex::Abort("[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast] "
                         "Cannot open file: " + path);
         }
 
         // Read and validate header
         std::string header_line;
         if (!std::getline(csv_file, header_line)) {
-            amrex::Abort("[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast] "
+            amrex::Abort("[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast] "
                         "CSV file is empty: " + path);
         }
 
@@ -69,43 +119,71 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
         const auto last = header_line.find_last_not_of(" \t\r\n");
         if (last != std::string::npos) header_line.erase(last + 1);
 
-        // Expected header (allow whitespace around delimiters)
-        // Phase 2.9: Accept both old header (without AH_Wm2) and new header (with AH_Wm2)
-        const std::string expected_header_new = "i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
-                                               "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,AH_Wm2,is_urban";
-        const std::string expected_header_old = "i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
-                                               "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,is_urban";
+        // Phase 3.7: Detect CSV mode from header
+        csv_mode = detect_csv_mode(header_line);
+        is_physical_mode = (csv_mode == CSVMode::PHYSICAL_COORDS);
 
-        // Simple header validation: remove spaces and compare
+        // Validate header format based on detected mode
         auto remove_spaces = [](std::string s) {
             s.erase(std::remove(s.begin(), s.end(), ' '), s.end());
             return s;
         };
-        
+
         std::string header_no_spaces = remove_spaces(header_line);
         bool has_AH_Wm2 = false;
-        
-        if (header_no_spaces == remove_spaces(expected_header_new)) {
-            has_AH_Wm2 = true;  // New header with AH_Wm2
-        } else if (header_no_spaces == remove_spaces(expected_header_old)) {
-            has_AH_Wm2 = false; // Old header without AH_Wm2 (Phase 2.9 backward compat)
-        } else {
-            std::ostringstream oss;
-            oss << "[UCM][2.9][UCMBuildingLayoutReader::read_and_broadcast] "
-                << "CSV header mismatch.\n"
-                << "  Expected (new): " << expected_header_new << "\n"
-                << "  Or (old):       " << expected_header_old << "\n"
-                << "  Got:            " << header_line << "\n"
-                << "  Got bytes (hex): ";
-            for (unsigned char c : header_line) {
-                oss << std::hex << std::setw(2) << std::setfill('0') << int(c) << " ";
+
+        // Define expected headers
+        const std::string expected_header_legacy_new = "i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
+                                                      "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,AH_Wm2,is_urban";
+        const std::string expected_header_legacy_old = "i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
+                                                      "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,is_urban";
+        const std::string expected_header_physical_new = "x_m,y_m,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
+                                                        "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,AH_Wm2,is_urban";
+        const std::string expected_header_physical_old = "x_m,y_m,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
+                                                        "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,is_urban";
+
+        if (is_physical_mode) {
+            if (header_no_spaces == remove_spaces(expected_header_physical_new)) {
+                has_AH_Wm2 = true;
+            } else if (header_no_spaces == remove_spaces(expected_header_physical_old)) {
+                has_AH_Wm2 = false;
+            } else {
+                std::ostringstream oss;
+                oss << "[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast] "
+                    << "CSV header mismatch (physical mode).\n"
+                    << "  Expected (new): " << expected_header_physical_new << "\n"
+                    << "  Or (old):       " << expected_header_physical_old << "\n"
+                    << "  Got:            " << header_line << "\n"
+                    << "  Got bytes (hex): ";
+                for (unsigned char c : header_line) {
+                    oss << std::hex << std::setw(2) << std::setfill('0') << int(c) << " ";
+                }
+                amrex::Abort(oss.str());
             }
-            amrex::Abort(oss.str());
+        } else {
+            // Legacy mode
+            if (header_no_spaces == remove_spaces(expected_header_legacy_new)) {
+                has_AH_Wm2 = true;
+            } else if (header_no_spaces == remove_spaces(expected_header_legacy_old)) {
+                has_AH_Wm2 = false;
+            } else {
+                std::ostringstream oss;
+                oss << "[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast] "
+                    << "CSV header mismatch (legacy mode).\n"
+                    << "  Expected (new): " << expected_header_legacy_new << "\n"
+                    << "  Or (old):       " << expected_header_legacy_old << "\n"
+                    << "  Got:            " << header_line << "\n"
+                    << "  Got bytes (hex): ";
+                for (unsigned char c : header_line) {
+                    oss << std::hex << std::setw(2) << std::setfill('0') << int(c) << " ";
+                }
+                amrex::Abort(oss.str());
+            }
         }
 
         // Read data rows
         std::string line;
-        std::set<std::pair<int, int>> seen_indices;
+        std::set<std::pair<int, int>> seen_indices;  // For legacy mode duplicate checking
 
         while (std::getline(csv_file, line))
         {
@@ -133,9 +211,18 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
             std::string field;
 
             try {
-                // Parse all fields (13 for old format, 14 for new format with AH_Wm2)
-                std::getline(ss, field, ','); row.i               = std::stoi(field);
-                std::getline(ss, field, ','); row.j               = std::stoi(field);
+                // Parse fields based on mode
+                if (is_physical_mode) {
+                    // Physical mode: x_m, y_m (amrex::Real)
+                    std::getline(ss, field, ','); row.x              = std::stod(field);  // x_m
+                    std::getline(ss, field, ','); row.y              = std::stod(field);  // y_m
+                } else {
+                    // Legacy mode: i, j (int, stored as Real for compatibility)
+                    std::getline(ss, field, ','); row.x              = static_cast<amrex::Real>(std::stoi(field));  // i
+                    std::getline(ss, field, ','); row.y              = static_cast<amrex::Real>(std::stoi(field));  // j
+                }
+
+                // Parse remaining fields (same for both modes)
                 std::getline(ss, field, ','); row.bldg_id         = std::stoi(field);
                 std::getline(ss, field, ','); row.height_m        = std::stod(field);
                 std::getline(ss, field, ','); row.plan_area_frac  = std::stod(field);
@@ -146,7 +233,7 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
                 std::getline(ss, field, ','); row.road_mat_id     = std::stoi(field);
                 std::getline(ss, field, ','); row.orientation_deg = std::stod(field);
                 std::getline(ss, field, ','); row.ah_profile_id   = std::stoi(field);
-                
+
                 // Phase 2.9: Handle AH_Wm2 column (new format only)
                 if (has_AH_Wm2) {
                     std::getline(ss, field, ','); row.AH_Wm2     = std::stod(field);
@@ -159,49 +246,54 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
 
                 // Validate is_urban
                 if (row.is_urban != 0 && row.is_urban != 1) {
-                    amrex::Abort("[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast] "
+                    amrex::Abort("[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast] "
                                 "is_urban must be 0 or 1; got " + std::to_string(row.is_urban) +
-                                " at (i,j) = (" + std::to_string(row.i) + "," + std::to_string(row.j) + ")");
+                                " at index=(" + std::to_string(static_cast<int>(row.x)) + "," +
+                                std::to_string(static_cast<int>(row.y)) + ")");
                 }
 
                 // Phase 2.9: Validate AH_Wm2 >= 0
                 if (row.AH_Wm2 < 0.0) {
                     amrex::Abort("[UCM][2.9][UCMBuildingLayoutReader::read_and_broadcast] "
                                 "AH_Wm2 must be >= 0; got " + std::to_string(row.AH_Wm2) +
-                                " at (i,j) = (" + std::to_string(row.i) + "," + std::to_string(row.j) + ")");
+                                " at index=(" + std::to_string(static_cast<int>(row.x)) + "," +
+                                std::to_string(static_cast<int>(row.y)) + ")");
                 }
 
                 // Validate mat_ids based on is_urban
                 if (row.is_urban == 1) {
                     // Urban cells require all mat_ids >= 1
                     if (row.roof_mat_id < 1 || row.wall_mat_id < 1 || row.road_mat_id < 1) {
-                        amrex::Abort("[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast] "
-                                    "Urban cell at (i,j) = (" + std::to_string(row.i) + "," +
-                                    std::to_string(row.j) + ") must have all mat_ids >= 1; "
+                        amrex::Abort("[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast] "
+                                    "Urban cell at index=(" + std::to_string(static_cast<int>(row.x)) + "," +
+                                    std::to_string(static_cast<int>(row.y)) + ") must have all mat_ids >= 1; "
                                     "got roof=" + std::to_string(row.roof_mat_id) +
                                     ", wall=" + std::to_string(row.wall_mat_id) +
                                     ", road=" + std::to_string(row.road_mat_id));
                     }
                 } else {
-                    // Non-urban cells: mat_ids may be 0 (sentinel) or any nonnegative value;
-                    // they will not be dereferenced by fill_ucm_fields_from_csv.
+                    // Non-urban cells: mat_ids may be 0 (sentinel) or any nonnegative value
                     if (row.roof_mat_id < 0 || row.wall_mat_id < 0 || row.road_mat_id < 0) {
-                        amrex::Abort("[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast] "
-                                    "Non-urban cell at (i,j) = (" + std::to_string(row.i) + "," +
-                                    std::to_string(row.j) + ") has negative mat_id");
+                        amrex::Abort("[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast] "
+                                    "Non-urban cell at index=(" + std::to_string(static_cast<int>(row.x)) + "," +
+                                    std::to_string(static_cast<int>(row.y)) + ") has negative mat_id");
                     }
                 }
 
-                // Check for duplicate (i,j)
-                std::pair<int, int> idx_pair{row.i, row.j};
-                if (seen_indices.find(idx_pair) != seen_indices.end()) {
-                    has_duplicate = true;
-                    duplicate_msg = "[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast] "
-                                   "Duplicate (i,j) pair (" + std::to_string(row.i) + "," +
-                                   std::to_string(row.j) + ") in CSV";
-                    break;  // Stop processing and abort below
+                // Legacy mode: Check for duplicate (i,j)
+                if (!is_physical_mode) {
+                    int i = static_cast<int>(row.x);
+                    int j = static_cast<int>(row.y);
+                    std::pair<int, int> idx_pair{i, j};
+                    if (seen_indices.find(idx_pair) != seen_indices.end()) {
+                        has_duplicate = true;
+                        duplicate_msg = "[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast] "
+                                       "Duplicate (i,j) pair (" + std::to_string(i) + "," +
+                                       std::to_string(j) + ") in CSV";
+                        break;
+                    }
+                    seen_indices.insert(idx_pair);
                 }
-                seen_indices.insert(idx_pair);
 
                 // Track statistics
                 if (n_rows == 0) {
@@ -214,6 +306,14 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
                     max_vals.bldg_id        = std::max(max_vals.bldg_id, row.bldg_id);
                     max_vals.height_m       = std::max(max_vals.height_m, row.height_m);
                     max_vals.plan_area_frac = std::max(max_vals.plan_area_frac, row.plan_area_frac);
+                }
+
+                // Phase 3.7: Update bounding box for physical mode
+                if (is_physical_mode) {
+                    x_min = std::min(x_min, row.x);
+                    x_max = std::max(x_max, row.x);
+                    y_min = std::min(y_min, row.y);
+                    y_max = std::max(y_max, row.y);
                 }
 
                 if (row.is_urban == 0) {
@@ -232,43 +332,60 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
                 ++n_rows;
 
             } catch (const std::exception& e) {
-                amrex::Abort("[UCM][2.1][UCMBuildingLayoutReader::read_and_broadcast] "
+                amrex::Abort("[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast] "
                             "Parsing error on line:\n" + line + "\nException: " + std::string(e.what()));
             }
         }
 
         csv_file.close();
 
-        // Abort if duplicate found
+        // Abort if duplicate found (legacy mode only)
         if (has_duplicate) {
             amrex::Abort(duplicate_msg);
         }
 
-        // Phase 2.3: Validate row count == nx_ucm * ny_ucm
-        const int expected_rows = nx_ucm * ny_ucm;
-        if (n_rows != expected_rows) {
-            amrex::Abort("[UCM][2.3][UCMBuildingLayoutReader] CSV row count mismatch. "
-                         "Got " + std::to_string(n_rows) + " rows, expected " +
-                         std::to_string(expected_rows) + " (= nx_ucm * ny_ucm = " +
-                         std::to_string(nx_ucm) + " * " + std::to_string(ny_ucm) + "). "
-                         "CSV i,j MUST be UCM indices, not ATM indices.");
-        }
+        // Phase 3.7: For legacy mode, validate row count == nx_ucm * ny_ucm
+        if (!is_physical_mode) {
+            const int expected_rows = nx_ucm * ny_ucm;
+            if (n_rows != expected_rows) {
+                amrex::Abort("[UCM][3.7][UCMBuildingLayoutReader] CSV row count mismatch. "
+                             "Got " + std::to_string(n_rows) + " rows, expected " +
+                             std::to_string(expected_rows) + " (= nx_ucm * ny_ucm = " +
+                             std::to_string(nx_ucm) + " * " + std::to_string(ny_ucm) + "). "
+                             "CSV i,j MUST be UCM indices, not ATM indices.");
+            }
 
-        // Phase 2.3: Validate (i,j) ranges for all rows
-        for (const auto& r : m_rows) {
-            if (r.i < 0 || r.i >= nx_ucm || r.j < 0 || r.j >= ny_ucm) {
-                amrex::Abort("[UCM][2.3][UCMBuildingLayoutReader] Row (i=" + std::to_string(r.i) +
-                             ",j=" + std::to_string(r.j) + ") out of UCM range [0," +
-                             std::to_string(nx_ucm) + ")x[0," + std::to_string(ny_ucm) + ").");
+            // Phase 3.7: Validate (i,j) ranges for all rows (legacy mode only)
+            for (const auto& r : m_rows) {
+                int i = static_cast<int>(r.x);
+                int j = static_cast<int>(r.y);
+                if (i < 0 || i >= nx_ucm || j < 0 || j >= ny_ucm) {
+                    amrex::Abort("[UCM][3.7][UCMBuildingLayoutReader] Row (i=" + std::to_string(i) +
+                                 ",j=" + std::to_string(j) + ") out of UCM range [0," +
+                                 std::to_string(nx_ucm) + ")x[0," + std::to_string(ny_ucm) + ").");
+                }
             }
         }
 
         // Debug trace
         if (ucm_debug) {
             amrex::Print()
-                << "\n[UCM][2.9][UCMBuildingLayoutReader::read_and_broadcast]\n"
+                << "\n[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast]\n"
                 << "  path = " << path << "\n"
-                << "  rows_parsed = " << n_rows << " (expected " << expected_rows << ")\n";
+                << "  mode = " << (is_physical_mode ? "physical (x_m, y_m)" : "legacy (i, j)") << "\n"
+                << "  rows_parsed = " << n_rows;
+            if (!is_physical_mode) {
+                const int expected_rows = nx_ucm * ny_ucm;
+                amrex::Print() << " (expected " << expected_rows << ")";
+            }
+            amrex::Print() << "\n";
+
+            if (is_physical_mode && n_rows > 0) {
+                amrex::Print()
+                    << "  physical bbox: x=[" << x_min << ", " << x_max << "], "
+                    << "y=[" << y_min << ", " << y_max << "]\n";
+            }
+
             if (n_rows > 0) {
                 amrex::Print()
                     << "  bldg_id: min=" << min_vals.bldg_id << ", max=" << max_vals.bldg_id << "\n"
@@ -277,30 +394,40 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
                     << "  is_urban=0 count: " << count_is_urban_zero << "\n";
                 // Phase 2.9: Log AH_Wm2 stats if populated
                 if (count_AH_Wm2_populated > 0) {
-                    amrex::Real median_AH_Wm2 = sum_AH_Wm2 / count_AH_Wm2_populated;
+                    amrex::Real mean_AH_Wm2 = sum_AH_Wm2 / count_AH_Wm2_populated;
                     amrex::Print()
                         << "  AH_Wm2: populated_count=" << count_AH_Wm2_populated 
                         << ", min=" << min_AH_Wm2 << ", max=" << max_AH_Wm2
-                        << ", mean=" << median_AH_Wm2 << " W/m^2\n";
+                        << ", mean=" << mean_AH_Wm2 << " W/m^2\n";
                 }
             }
         }
     }
 
     // =========================================================================
-    // All ranks: MPI_Bcast row data (as raw bytes to avoid needing
-    // amrex::ParallelDescriptor::Mpi_typemap<UCMBuildingRow> specialization).
+    // All ranks: MPI_Bcast row data + metadata
     // =========================================================================
 
-    // Broadcast row count
+    // Broadcast row count and mode flag
     amrex::ParallelDescriptor::Bcast(&n_rows, 1, amrex::ParallelDescriptor::IOProcessorNumber());
+    int mode_int = static_cast<int>(is_physical_mode ? 1 : 0);
+    amrex::ParallelDescriptor::Bcast(&mode_int, 1, amrex::ParallelDescriptor::IOProcessorNumber());
+    is_physical_mode = (mode_int != 0);
+
+    // Broadcast physical mode bounding box
+    if (is_physical_mode) {
+        amrex::ParallelDescriptor::Bcast(&x_min, 1, amrex::ParallelDescriptor::IOProcessorNumber());
+        amrex::ParallelDescriptor::Bcast(&x_max, 1, amrex::ParallelDescriptor::IOProcessorNumber());
+        amrex::ParallelDescriptor::Bcast(&y_min, 1, amrex::ParallelDescriptor::IOProcessorNumber());
+        amrex::ParallelDescriptor::Bcast(&y_max, 1, amrex::ParallelDescriptor::IOProcessorNumber());
+    }
 
     // Resize on all ranks
     if (!amrex::ParallelDescriptor::IOProcessor()) {
         m_rows.resize(n_rows);
     }
 
-    // Broadcast row data as bytes (selects the char*/byte-count overload)
+    // Broadcast row data as bytes
     if (n_rows > 0) {
         amrex::ParallelDescriptor::Bcast(
             reinterpret_cast<char*>(m_rows.dataPtr()),
@@ -314,15 +441,10 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
         }
     }
 
-    // Phase 2.5-fix2: Task 1 — Debug instrumentation for CSV is_urban propagation
-    if (amrex::ParallelDescriptor::IOProcessor()) {
-        int n_urban = 0, n_nonurban = 0;
-        for (const auto& row : m_rows) {
-            if (row.is_urban == 1) ++n_urban;
-            else ++n_nonurban;
-        }
-        amrex::Print() << "[UCM][2.1][DEBUG][UCMBuildingLayoutReader] parsed "
-                       << m_rows.size() << " rows: urban=" << n_urban
-                       << " non-urban=" << n_nonurban << "\n";
+    // Phase 3.7: Debug output for mode and bounding box
+    if (amrex::ParallelDescriptor::IOProcessor() && ucm_debug) {
+        amrex::Print() << "[UCM][3.7][DEBUG][UCMBuildingLayoutReader] parsed "
+                       << m_rows.size() << " rows in "
+                       << (is_physical_mode ? "physical" : "legacy") << " mode\n";
     }
 }

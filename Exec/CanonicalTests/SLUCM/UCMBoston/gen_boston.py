@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate UCMBoston canonical layout with 5 concentric rings and urban-rural contrast.
+"""Generate UCMBoston canonical layout (Phase 3.7: physical-coordinate format).
 
 Boston-stylized concentric layout (Chebyshev/L-infinity distance from center):
   d = max(|i - 39.5|, |j - 39.5|)
@@ -16,85 +16,27 @@ Y-direction uniform (periodic BC).
 Rationale: Boston UHI validation requires concentric rings mirroring the
 actual urban morphology: high-rise downtown core, mid-rise mid-zone, dense
 and sparse residential rings, and outer suburban transition. This is a
-synthetic layout suitable for Phase 2.11 baseline validation; Phase 2.9's
-gen_real_boston_full.py can regenerate with real WUDAPT/OSM data for
-manual QA in Phase 4+.
+synthetic layout suitable for Phase 2.11 baseline validation.
+
+Phase 3.7: Wrapper around gen_building_layout.py with boston_5zone preset.
 """
 
 import os
 import sys
+import subprocess
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tools")))
-from ucm_csv import write_layout, write_materials
+# Domain: 20 km × 20 km, 80×80 UCM cells
+PROB_LO = [0.0, 0.0]
+PROB_HI = [20000.0, 20000.0]
+N_UCM = [80, 80]
+LAYOUT = "boston_5zone"
+OUTPUT = "building_layout.csv"
 
-NX_ATM, NY_ATM, GRID_RATIO = 20, 20, 4
-NX_UCM, NY_UCM = NX_ATM * GRID_RATIO, NY_ATM * GRID_RATIO
-
-
-def chebyshev_distance(i, j, center_i=39.5, center_j=39.5):
-    """Compute L-infinity (Chebyshev) distance from center."""
-    return max(abs(i - center_i), abs(j - center_j))
-
-
-def morphology_for_ring(d):
-    """Return (is_urban, plan_area_frac, height_m, wall_mat_id, AH_Wm2) for ring d."""
-    if d <= 7:
-        # Downtown core (Financial District style)
-        return dict(is_urban=1, plan_area_frac=0.55, height_m=100.0,
-                    wall_mat_id=1, AH_Wm2=60.0)
-    if d <= 15:
-        # Dense mid-rise (Back Bay / Beacon Hill style)
-        return dict(is_urban=1, plan_area_frac=0.50, height_m=40.0,
-                    wall_mat_id=2, AH_Wm2=45.0)
-    if d <= 24:
-        # Residential dense (South End / Cambridge style)
-        return dict(is_urban=1, plan_area_frac=0.35, height_m=15.0,
-                    wall_mat_id=2, AH_Wm2=30.0)
-    if d <= 32:
-        # Residential sparse (Somerville / Brookline style)
-        return dict(is_urban=1, plan_area_frac=0.20, height_m=8.0,
-                    wall_mat_id=3, AH_Wm2=15.0)
-    # Suburban / rural (Newton / outer metro style, d = 33..39)
-    return dict(is_urban=1, plan_area_frac=0.05, height_m=5.0,
-                wall_mat_id=3, AH_Wm2=5.0)
-
-
-def cell_fn(i, j):
-    d = chebyshev_distance(i, j)
-    m = morphology_for_ring(d)
-
-    # Road/roof widths scale with height
-    W_road = m["height_m"] if m["is_urban"] else 0.0
-    W_roof = 0.6 * m["height_m"] if m["is_urban"] else 0.0
-
-    # Material assignments: downtown uses glass/steel (mat_id=1),
-    # dense and residential dense use brick/concrete (mat_id=2),
-    # suburban uses wood/vinyl (mat_id=3).
-    # Road material: brick/concrete (mat_id=2) for all except suburban (mat_id=3).
-    road_mat_id = 3 if d >= 33 else 2
-
-    return dict(
-        i=i,
-        j=j,
-        bldg_id=1 if m["is_urban"] else 0,
-        height_m=m["height_m"],
-        plan_area_frac=m["plan_area_frac"],
-        W_road_m=W_road,
-        W_roof_m=W_roof,
-        roof_mat_id=m["wall_mat_id"],
-        wall_mat_id=m["wall_mat_id"],
-        road_mat_id=road_mat_id,
-        orientation_deg=0.0,
-        ah_profile_id=0,
-        AH_Wm2=m["AH_Wm2"],
-        is_urban=m["is_urban"],
-    )
-
-
-write_layout("building_layout.csv", NX_UCM, NY_UCM, cell_fn)
-write_materials(
-    "materials.csv",
-    [
+# Materials CSV (unchanged, still generated separately)
+def write_materials():
+    """Write materials.csv (unchanged from Phase 2.x)."""
+    import csv
+    materials = [
         dict(
             mat_id=1,
             name="glass_steel_downtown",
@@ -135,5 +77,51 @@ write_materials(
             thickness_m=0.10,
             description="Rural surrogate (reserved for future is_urban=0 use)",
         ),
-    ],
-)
+    ]
+    
+    header = ['mat_id', 'name', 'albedo', 'emissivity',
+              'k_therm_W_per_mK', 'rho_cp_J_per_m3K', 'thickness_m', 'description']
+    
+    with open("materials.csv", 'w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=header)
+        w.writeheader()
+        for m in materials:
+            w.writerow(m)
+    
+    print(f"[gen_boston] wrote {len(materials)} materials to materials.csv")
+
+
+def main():
+    """Generate building_layout.csv using the new gen_building_layout.py tool."""
+    # Find gen_building_layout.py
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    gen_tool = os.path.join(os.path.dirname(script_dir), "scripts", "gen_building_layout.py")
+    
+    if not os.path.exists(gen_tool):
+        print(f"[ERROR] gen_building_layout.py not found at {gen_tool}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Call gen_building_layout.py with boston_5zone preset
+    cmd = [
+        sys.executable, gen_tool,
+        "--prob-lo", str(PROB_LO[0]), str(PROB_LO[1]),
+        "--prob-hi", str(PROB_HI[0]), str(PROB_HI[1]),
+        "--n-ucm", str(N_UCM[0]), str(N_UCM[1]),
+        "--output", OUTPUT,
+        "--layout", LAYOUT,
+    ]
+    
+    print(f"[gen_boston] Calling: {' '.join(cmd)}")
+    result = subprocess.run(cmd, cwd=os.getcwd())
+    if result.returncode != 0:
+        print(f"[ERROR] gen_building_layout.py failed with return code {result.returncode}",
+              file=sys.stderr)
+        sys.exit(1)
+    
+    # Generate materials.csv
+    write_materials()
+
+
+if __name__ == "__main__":
+    main()
+
