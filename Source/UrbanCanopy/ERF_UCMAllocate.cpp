@@ -14,6 +14,9 @@
 #include <AMReX_Print.H>
 #include <unordered_map>
 #include <cstdint>
+#include <cmath>
+#include <limits>
+
 
 using namespace amrex;
 
@@ -392,17 +395,51 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     // Get const references to the broadcast data
     const auto& rows = building_reader.rows();
 
-    // Phase 2.5-fix3: CSV rows are UCM-indexed (one row per UCM cell).
-    // Build a (i_ucm, j_ucm) -> row_index lookup so each UCM cell can be filled directly.
+    // Phase 3.7: Detect CSV mode. In physical mode, x_m and y_m are
+    // physical coordinates in meters (typically hundreds to thousands).
+    // In legacy mode, x and y are grid indices (small integers < nx_ucm).
+    // Heuristic: if any x or y is non-integer OR >= nx_ucm*10, treat as physical.
+    bool is_physical_mode = false;
+    const int nx_ucm = ucm_grid.ba.minimalBox().length(0);
+    const int ny_ucm = ucm_grid.ba.minimalBox().length(1);
+    for (const auto& row : rows) {
+        if (row.x != std::floor(row.x) || row.y != std::floor(row.y) ||
+            row.x >= 10.0 * nx_ucm || row.y >= 10.0 * ny_ucm) {
+            is_physical_mode = true;
+            break;
+        }
+    }
+
+    // Get UCM physical geometry (needed for physical mode nearest-neighbor)
+    const amrex::Geometry& geom_ucm = ucm_grid.geom;
+    const amrex::Real dx_ucm   = geom_ucm.CellSize(0);
+    const amrex::Real dy_ucm   = geom_ucm.CellSize(1);
+    const amrex::Real prob_lo_x = geom_ucm.ProbLo(0);
+    const amrex::Real prob_lo_y = geom_ucm.ProbLo(1);
+
+    if (ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][3.7][fill_ucm_fields_from_csv] mode="
+                << (is_physical_mode ? "physical (nearest-neighbor)" : "legacy (index)")
+                << " nx_ucm=" << nx_ucm << " ny_ucm=" << ny_ucm
+                << " dx_ucm=" << dx_ucm << " prob_lo=(" << prob_lo_x
+                << "," << prob_lo_y << ")\n";
+    }
+
+    // Legacy mode: build (i,j) -> row lookup table.
+    // Physical mode: skip lookup table; will do nearest-neighbor per cell.
     std::unordered_map<std::int64_t, int> row_by_ucm_ij;
-    row_by_ucm_ij.reserve(rows.size());
     int n_urban = 0, n_non_urban = 0;
-    for (int r = 0; r < static_cast<int>(rows.size()); ++r) {
-        const auto& row = rows[r];
-        const std::int64_t key = (static_cast<std::int64_t>(row.i) << 32) |
-                                 static_cast<std::uint32_t>(row.j);
-        row_by_ucm_ij[key] = r;
-        if (row.is_urban == 1) ++n_urban; else ++n_non_urban;
+    if (!is_physical_mode) {
+        row_by_ucm_ij.reserve(rows.size());
+        for (int r = 0; r < static_cast<int>(rows.size()); ++r) {
+            const auto& row = rows[r];
+            const int i = static_cast<int>(row.x);
+            const int j = static_cast<int>(row.y);
+            const std::int64_t key = (static_cast<std::int64_t>(i) << 32) |
+                                     static_cast<std::uint32_t>(j);
+            row_by_ucm_ij[key] = r;
+            if (row.is_urban == 1) ++n_urban; else ++n_non_urban;
+        }
     }
 
     // Iterate the UCM grid and populate each cell from its matching CSV row.
@@ -443,14 +480,35 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
 
         for (int j_ucm = bx.smallEnd(1); j_ucm <= bx.bigEnd(1); ++j_ucm) {
             for (int i_ucm = bx.smallEnd(0); i_ucm <= bx.bigEnd(0); ++i_ucm) {
-                const std::int64_t key = (static_cast<std::int64_t>(i_ucm) << 32) |
-                                         static_cast<std::uint32_t>(j_ucm);
-                auto it = row_by_ucm_ij.find(key);
-                if (it == row_by_ucm_ij.end()) {
-                    // No CSV row for this UCM cell — leave zero-initialized.
-                    continue;
+
+                int row_idx = -1;
+
+                if (!is_physical_mode) {
+                    // Legacy mode: exact (i,j) lookup
+                    const std::int64_t key = (static_cast<std::int64_t>(i_ucm) << 32) |
+                                             static_cast<std::uint32_t>(j_ucm);
+                    auto it = row_by_ucm_ij.find(key);
+                    if (it == row_by_ucm_ij.end()) continue;  // no match, leave zero
+                    row_idx = it->second;
+                } else {
+                    // Phase 3.7 physical mode: nearest-neighbor lookup
+                    const amrex::Real x_c = prob_lo_x + (i_ucm + 0.5) * dx_ucm;
+                    const amrex::Real y_c = prob_lo_y + (j_ucm + 0.5) * dy_ucm;
+                    amrex::Real min_dist_sq = std::numeric_limits<amrex::Real>::infinity();
+                    for (int r = 0; r < static_cast<int>(rows.size()); ++r) {
+                        const amrex::Real ddx = rows[r].x - x_c;
+                        const amrex::Real ddy = rows[r].y - y_c;
+                        const amrex::Real d2 = ddx*ddx + ddy*ddy;
+                        if (d2 < min_dist_sq) {
+                            min_dist_sq = d2;
+                            row_idx = r;
+                        }
+                    }
+                    if (row_idx < 0) continue;
+                    if (rows[row_idx].is_urban == 1) ++n_urban; else ++n_non_urban;
                 }
-                const auto& row = rows[it->second];
+
+                const auto& row = rows[row_idx];
 
                 IntVect iv(i_ucm, j_ucm, 0);
 
@@ -490,7 +548,7 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                     // Phase 2.3: morphology-derived + AH profile id
                     plan_area_frac_arr(iv, 0) = static_cast<amrex::Real>(row.plan_area_frac);
                     ah_profile_id_arr(iv, 0)  = row.ah_profile_id;
-                    
+
                     // Phase 2.9: per-cell AH override from CSV
                     AH_Wm2_ucm_arr(iv, 0) = row.AH_Wm2;
                 } else {
@@ -520,7 +578,7 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                 T_skin_wall_arr(iv, 0) = 293.15;
                 T_skin_road_arr(iv, 0) = 293.15;
                 T_canyon_air_arr(iv, 0) = 293.15;
-                
+
                 // Phase 3.5A: Initialize all slab layers to uniform temperature
                 for (int k = 0; k < T_slab_roof_arr.nComp(); ++k) {
                     T_slab_roof_arr(iv, k) = 293.15;
@@ -1161,11 +1219,11 @@ void compute_anthropogenic_heat(amrex::MultiFab&        AH_out,
        auto const ah_csv_a = AH_Wm2_ucm.const_array(mfi);
        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
            // Phase 2.9: First-line guard for urban cells
-           if (ur_a(i,j,0) == 0) { 
-               ah_a(i,j,0) = 0.0; 
-               return; 
+           if (ur_a(i,j,0) == 0) {
+               ah_a(i,j,0) = 0.0;
+               return;
            }
-           
+
            // Phase 2.9: Use per-cell AH override if > 0, else use ParmParse fallback
            const amrex::Real AH_csv = ah_csv_a(i,j,0);
            if (AH_csv > 0.0) {
