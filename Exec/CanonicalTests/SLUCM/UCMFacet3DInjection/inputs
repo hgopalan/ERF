@@ -116,7 +116,10 @@ erf.ucm.ucm_atm_plot_int    = 1
 erf.ucm.ucm_diag_file       = "ucm_diag.dat"
 
 erf.ucm.test_ustar          = 0.0
-erf.ucm.T_init_uniform_K      = 293.15
+# Phase 3.5a-hotfix4: Uniform SLUCM init.
+# Default (unset or -1.0) auto-syncs to erf.theta_ref for exact thermal equilibrium.
+# Uncomment to override:
+# erf.ucm.T_init_uniform_K    = 295.0
 
 # Phase 2.6 anthropogenic heat (for testing injection)
 erf.ucm.AH_uniform_Wm2          = 50.0      # constant [W/m^2]

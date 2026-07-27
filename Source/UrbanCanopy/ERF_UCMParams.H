@@ -241,10 +241,17 @@ struct UCMParams
     /// At t=0, T_skin_{roof,wall,road}, T_slab_*[all layers], T_canyon_air
     /// all initialize to this value. Physics (radiation, sensible heat, slab
     /// conduction) create gradients organically over the run.
-    /// Default 293.15 K = standard reference temperature.
+    ///
+    /// SENTINEL VALUE -1.0 (default) → auto-fill from erf.theta_ref at ParmParse read.
+    /// This ensures SLUCM is in exact thermal equilibrium with the ATM state at t=0,
+    /// eliminating spurious initial transients from T_skin/T_atm mismatch.
+    ///
+    /// Explicit override (any positive value) forces T_skin = that value, useful for
+    /// diagnostic runs (e.g. "what happens if UCM starts 5 K warmer than ATM?").
+    ///
     /// This replaces the artificial multi-parameter init scheme that created
     /// huge gradients at t=0. Matches WRF SLUCM initialization practice.
-    amrex::Real T_init_uniform_K = 293.15;
+    amrex::Real T_init_uniform_K = -1.0;  // sentinel: auto-fill from theta_ref
 
     // =========================================================================
     // Section 12: Phase 3.5B — Prescribed diurnal SW/LW radiation forcing

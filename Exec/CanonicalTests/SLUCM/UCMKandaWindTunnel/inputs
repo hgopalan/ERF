@@ -92,7 +92,10 @@ erf.ucm.emissivity_road       = 0.94
 erf.ucm.ucm_plot_int          = 300
 erf.ucm.ucm_atm_plot_int      = 300
 erf.ucm.ucm_diag_file         = "ucm_diag.dat"
-erf.ucm.T_init_uniform_K      = 293.15
+# Phase 3.5a-hotfix4: Uniform SLUCM init.
+# Default (unset or -1.0) auto-syncs to erf.theta_ref for exact thermal equilibrium.
+# Uncomment to override:
+# erf.ucm.T_init_uniform_K    = 295.0
 erf.ucm.AH_uniform_Wm2        = 0.0
 erf.ucm.AH_profile_type_default = 1
 erf.ucm.use_facet3d_injection = 0

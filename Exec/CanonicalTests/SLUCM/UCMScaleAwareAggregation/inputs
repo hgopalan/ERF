@@ -112,7 +112,10 @@ erf.ucm.ucm_atm_plot_int    = 100
 erf.ucm.ucm_diag_file       = "ucm_diag.dat"
 
 erf.ucm.test_ustar          = 0.0
-erf.ucm.T_init_uniform_K      = 293.15
+# Phase 3.5a-hotfix4: Uniform SLUCM init.
+# Default (unset or -1.0) auto-syncs to erf.theta_ref for exact thermal equilibrium.
+# Uncomment to override:
+# erf.ucm.T_init_uniform_K    = 295.0
 
 # Phase 2.5-fix2: force non-zero fluxes for conservation testing.
 erf.most.surf_temp_flux         = 0.02      # small unstable T flux [K m/s], ~25 W/m^2
