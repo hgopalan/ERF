@@ -30,7 +30,7 @@
 // ============================================================================
 
 UCMLayer::UCMLayer(const UCMParams& params, int lev)
-    : m_params(params), m_lev(lev), m_warn_radiation_placeholder_printed(false)
+    : m_params(params), m_warn_radiation_placeholder_printed(false)
 {
     // Phase 1.1: enforce anchor_level == 0
     if (lev != params.anchor_level) {
@@ -51,7 +51,7 @@ void UCMLayer::advance(UCMFields& fields,
                        const UCMGrid& ucm_grid,
                        const amrex::MultiFab& atm_u_star,
                        const amrex::MultiFab& atm_t_star,
-                       const amrex::MultiFab& atm_q_star,
+                       const amrex::MultiFab& /*atm_q_star*/,
                        const amrex::MultiFab& xvel,
                        const amrex::MultiFab& yvel,
                        const amrex::MultiFab& z_phys_cc,
@@ -216,6 +216,7 @@ void UCMLayer::advance(UCMFields& fields,
     // Slab T1 comes from fields.T_slab_* (top interior layer, comp=0).
 
     const amrex::Real sigma_sb = 5.670374419e-8;
+    amrex::ignore_unused(sigma_sb);
     const amrex::Real rho_cp   = 1.2 * Cp_d;   // [J/m^3/K]
     const amrex::Real Ch_roof  = m_params.Ch_roof;
     const amrex::Real Ch_wall  = m_params.Ch_wall;
@@ -223,28 +224,29 @@ void UCMLayer::advance(UCMFields& fields,
     const amrex::Real dz_slab  = m_params.slab_dz;
     const int         max_iter = m_params.newton_max_iter;
     const amrex::Real tol_K    = m_params.newton_tol_K;
-    
+
     // Phase 3.5B: Compute prescribed SW/LW radiation forcing (if enabled)
     amrex::Real SW_down = 0.0;
     amrex::Real LW_down = 350.0;  // Default fallback if radiation disabled
-    
+
     if (m_params.use_prescribed_radiation) {
         // Compute solar zenith angle for domain center
         amrex::Real time_s_local = m_params.solar_time_start_s + time;  // Local solar time
         amrex::Real lat_rad = m_params.lat_deg * (3.14159265358979323846 / 180.0);
         amrex::Real lon_rad = m_params.lon_deg * (3.14159265358979323846 / 180.0);
-        
+        amrex::ignore_unused(lon_rad);
+
         // Solar zenith from astronomical formula
         amrex::Real cos_zenith = solar_zenith_angle(time_s_local, lat_rad, lon_rad, m_params.julian_day);
-        
+
         // Clear-sky SW downwelling
         SW_down = clear_sky_SW_down(cos_zenith, m_params.solar_constant, m_params.sw_transmission);
-        
+
         // Get atmospheric temperature (approximate with lowest level, avoid access issues)
         amrex::Real T_atm_min = T_atm_lowest.min(0, 0);
         amrex::Real T_atm_max = T_atm_lowest.max(0, 0);
         amrex::Real T_atm_approx = 0.5 * (T_atm_min + T_atm_max);  // Spatial average
-        
+
         // Gray-sky LW downwelling
         LW_down = gray_sky_LW_down(T_atm_approx, m_params.sky_emissivity);
     }
@@ -255,9 +257,9 @@ void UCMLayer::advance(UCMFields& fields,
     const amrex::Real T_deep   = m_params.slab_T_deep;
 
     // Phase 3.5a-hotfix: Per-cell clamp counters
-    amrex::Long n_clamped_roof = 0;
-    amrex::Long n_clamped_wall = 0;
-    amrex::Long n_clamped_road = 0;
+    amrex::Long n_clamped_roof  = 0;
+    amrex::Long n_clamped_wall  = 0;
+    amrex::Long n_clamped_road  = 0;
     amrex::Long n_diverged_roof = 0;
     amrex::Long n_diverged_wall = 0;
     amrex::Long n_diverged_road = 0;
@@ -353,10 +355,10 @@ void UCMLayer::advance(UCMFields& fields,
                 constexpr amrex::Real T_min_K = 260.0;
                 constexpr amrex::Real T_clamp_tol = 0.01;
                 if (std::abs(Tskin_rf(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
-                    amrex::Gpu::Atomic::AddNoRet(&n_clamped_roof, 1L);
+                    amrex::Gpu::Atomic::AddNoRet(&n_clamped_roof, amrex::Long(1));
                 }
                 if (n_iter >= max_iter && residual > tol_K) {
-                    amrex::Gpu::Atomic::AddNoRet(&n_diverged_roof, 1L);
+                    amrex::Gpu::Atomic::AddNoRet(&n_diverged_roof, amrex::Long(1));
                 }
             }
 
@@ -388,10 +390,10 @@ void UCMLayer::advance(UCMFields& fields,
                 constexpr amrex::Real T_min_K = 260.0;
                 constexpr amrex::Real T_clamp_tol = 0.01;
                 if (std::abs(Tskin_wl(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
-                    amrex::Gpu::Atomic::AddNoRet(&n_clamped_wall, 1L);
+                    amrex::Gpu::Atomic::AddNoRet(&n_clamped_wall, amrex::Long(1));
                 }
                 if (n_iter >= max_iter && residual > tol_K) {
-                    amrex::Gpu::Atomic::AddNoRet(&n_diverged_wall, 1L);
+                    amrex::Gpu::Atomic::AddNoRet(&n_diverged_wall, amrex::Long(1));
                 }
             }
 
@@ -423,10 +425,10 @@ void UCMLayer::advance(UCMFields& fields,
                 constexpr amrex::Real T_min_K = 260.0;
                 constexpr amrex::Real T_clamp_tol = 0.01;
                 if (std::abs(Tskin_rd(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
-                    amrex::Gpu::Atomic::AddNoRet(&n_clamped_road, 1L);
+                    amrex::Gpu::Atomic::AddNoRet(&n_clamped_road, amrex::Long(1));
                 }
                 if (n_iter >= max_iter && residual > tol_K) {
-                    amrex::Gpu::Atomic::AddNoRet(&n_diverged_road, 1L);
+                    amrex::Gpu::Atomic::AddNoRet(&n_diverged_road, amrex::Long(1));
                 }
             }
 
@@ -692,7 +694,7 @@ void UCMLayer::advance(UCMFields& fields,
            // Wall frontal-area INDEX (per unit ground area). NOT a plan-area
            // fraction; may exceed 1 for tall/narrow canyons. Used only for the
            // per-wall-area diagnostic flux below.
-           const amrex::Real lam_f  = 2.0 * pf * Hb / Wsum;
+           // (lam_f computed inline where needed: 2.0 * pf * Hb / Wsum)
 
            const amrex::Real u_star = u_star_a(i,j,0);
            const amrex::Real t_star = t_star_a(i,j,0);
