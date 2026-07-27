@@ -1,0 +1,116 @@
+# Phase 3.5c: 24-hour diurnal full-loop regression test
+# Based on UCMBostonStabilityCorrection/inputs_stability_correction with 3 changes:
+#   1. max_step: 3600 -> 60000 (~24 hours simulated)
+#   2. plot_int: 300 -> 2500
+#   3. plot_file prefix: plt_ -> plt_diurnal_
+#   4. solar_time_start_s: 43200 -> 0 (start at midnight LST)
+# All other physics settings identical to Phase 3.5b stability-correction test.
+max_step         = 60000
+erf.cfl          = 0.5
+amrex.fpe_trap_invalid = 0
+
+fabarray.mfiter_tile_size = 1024 1024 1024
+
+# Domain: 20 km x 20 km x 1280 m; ATM 20x20x64 -> UCM 80x80 (grid_ratio=4)
+geometry.prob_extent  = 20000.0 20000.0 1280.0
+amr.n_cell            = 20      20      64
+geometry.is_periodic  = 0        1      0
+
+# Boundary conditions (inflow/outflow in x, periodic in y, flat terrain)
+xlo.type = "Inflow"
+xlo.dirichlet_file = "inflow_boston.txt"
+xhi.type = "Outflow"
+
+# MOST reference height must be above tallest building (H=100 m downtown).
+zlo.type              = "surface_layer"
+erf.most.z0           = 1.5
+erf.most.zref         = 200.0
+erf.most.surf_temp_flux = 0.02
+zhi.type              = "SlipWall"
+zhi.theta_grad        = 0.001
+
+# Rayleigh damping at top
+erf.rayleigh_damp_W = true
+erf.rayleigh_dampcoef = 0.2
+erf.rayleigh_zdamp = 250.0
+
+# Initialization
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "sounding_boston"
+
+# PBL: MRF
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = false
+
+# Solver / physics
+erf.terrain_type     = None
+erf.use_moisture     = false
+erf.use_gravity      = true
+erf.molec_diff_type  = "None"
+erf.les_type         = "None"
+erf.theta_ref        = 295.0
+erf.transport_scalar = false
+
+# Diagnostics
+erf.sum_interval     = 100
+erf.v                = 1
+amr.v                = 1
+amr.max_level        = 0
+
+# Plotfiles (larger interval for 24-hour run)
+erf.plot_file_1      = "plt_diurnal_"
+erf.plot_int_1       = 2500
+erf.plot_vars_1      = x_velocity y_velocity z_velocity theta
+amr.plot_int         = 2500
+amr.plot_file        = plt_diurnal_
+amr.check_int        = -1
+erf.check_int        = -1
+
+# SLUCM two-way heat + momentum + stability correction
+erf.ucm.enable                = true
+erf.ucm.ucm_debug             = 1
+erf.ucm.anchor_level          = 0
+erf.ucm.grid_ratio            = 4
+erf.ucm.atm_feedback_momentum = 1.0
+erf.ucm.atm_feedback_heat     = 1.0
+erf.ucm.atm_feedback_moisture = 0.0
+erf.ucm.zref                  = 2.0
+erf.ucm.use_stability_correction = true
+erf.ucm.zeta_max_stable       = 2.0
+erf.ucm.zeta_min_unstable     = -5.0
+erf.ucm.H_bldg_uniform        = 15.0
+erf.ucm.W_road_uniform        = 10.0
+erf.ucm.W_roof_uniform        = 10.0
+erf.ucm.albedo_roof           = 0.20
+erf.ucm.albedo_wall           = 0.20
+erf.ucm.albedo_road           = 0.15
+erf.ucm.emissivity_roof       = 0.90
+erf.ucm.emissivity_wall       = 0.90
+erf.ucm.emissivity_road       = 0.94
+erf.ucm.ucm_plot_int          = 2500
+erf.ucm.ucm_atm_plot_int      = 2500
+erf.ucm.ucm_diag_file         = "ucm_diag.dat"
+erf.ucm.test_surf_temp_K      = 300.0
+erf.ucm.AH_uniform_Wm2        = 30.0
+erf.ucm.AH_profile_type_default = 1
+erf.ucm.use_facet3d_injection = 1
+erf.ucm.use_gaussian_height_distribution = 0
+erf.ucm.wall_drag_mode        = "explicit"
+erf.ucm.Cd_wall               = 0.4
+erf.ucm.Cd_roof               = 0.15
+erf.ucm.building_layout_csv_path = "building_layout.csv"
+erf.ucm.material_library_csv_path = "materials.csv"
+
+# Phase 3.5B: Prescribed radiation forcing (bridge until Phase 4.2)
+erf.ucm.use_prescribed_radiation = true
+erf.ucm.lat_deg            = 42.36    # Boston, MA
+erf.ucm.lon_deg            = -71.06
+erf.ucm.julian_day         = 172.0    # Summer solstice (June 21)
+erf.ucm.solar_time_start_s = 0.0      # Phase 3.5c: start at midnight LST (full diurnal)
+erf.ucm.solar_constant     = 1361.0
+erf.ucm.sw_transmission    = 0.7
+erf.ucm.sky_emissivity     = 0.83
