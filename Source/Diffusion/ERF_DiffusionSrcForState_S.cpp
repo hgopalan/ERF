@@ -68,11 +68,13 @@ DiffusionSrcForState_S (const Box& bx, const Box& domain,
                         const GpuArray<Real,AMREX_SPACEDIM> grav_gpu,
                         const BCRec* bc_ptr,
                         const bool use_SurfLayer,
-                        const Real implicit_fac)
+                        const Real implicit_fac,
+                        const Array4<const int>& is_urban)
 {
     BL_PROFILE_VAR("DiffusionSrcForState_S()",DiffusionSrcForState_S);
 
     const Real explicit_fac = one - implicit_fac;
+    const bool has_is_urban = is_urban.contains(0,0,0);
 
 #include "ERF_SetupDiff.H"
     Real l_abs_g      = std::abs(grav_gpu[2]);
