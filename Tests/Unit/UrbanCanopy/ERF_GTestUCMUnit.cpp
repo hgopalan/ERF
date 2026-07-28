@@ -26,6 +26,8 @@
 #include <AMReX_Print.H>
 #include <AMReX_REAL.H>
 #include <cmath>
+#include <cstdlib>   // std::system
+#include <unistd.h>  // getpid
 #include <string>
 #include <sstream>
 #include <fstream>
@@ -56,24 +58,24 @@ TEST(TDMA_ZeroForcingIdentity, PreservesUniformState)
     // Initial state: uniform 293.15 K (20°C)
     constexpr int N_layers = 4;
     Real T[N_layers] = {293.15, 293.15, 293.15, 293.15};
-    
+
     // Zero forcing, zero ATM difference
     Real Q_top = 0.0;        // No surface flux [W/m²]
     Real T_atm = 293.15;     // Atmospheric temperature (would be used as T_deep) [K]
     Real T_deep = 293.15;    // Deep soil temperature boundary [K]
-    
+
     // Material properties (concrete / asphalt, typical)
     Real k_therm = 1.0;      // Thermal conductivity [W/m/K]
     Real rho_cp = 2.0e6;     // Volumetric heat capacity [J/m³/K]
     Real dz = 0.075;         // Layer thickness (300mm total / 4 layers) [m]
     Real dt = 1.0;           // Timestep [s]
-    
+
     // Advance one step
     advance_slab_conduction_column(T, Q_top, T_deep, k_therm, rho_cp, dz, dt, N_layers);
-    
+
     // Check: all layers should still be 293.15 K to machine precision
     for (int i = 0; i < N_layers; ++i) {
-        EXPECT_NEAR(T[i], 293.15, 1e-10) 
+        EXPECT_NEAR(T[i], 293.15, 1e-10)
             << "Layer " << i << " drifted to " << T[i] << " K (expected 293.15 K)";
     }
 }
@@ -100,37 +102,37 @@ TEST(SEBNewton_ConvergesUnderDaytimeForcing, DayHeating)
     Real T_skin_init = 293.15;  // Initial skin temperature [K]
     Real T1_slab = 293.15;      // Slab 1st-layer temperature [K]
     Real T_canyon = 293.15;     // Canyon air temperature [K]
-    
+
     // Daytime radiation forcing (noon-peak scenario)
     Real SW_down = 800.0;       // Downward SW [W/m²]
     Real LW_down = 350.0;       // Downward LW [W/m²]
-    
+
     // Material properties
     Real alpha = 0.20;          // Shortwave albedo (urban)
     Real emiss = 0.90;          // Longwave emissivity (brick/concrete)
     Real k_th = 1.0;            // Slab thermal conductivity [W/m/K]
     Real dz_slab = 0.075;       // Slab discretization [m]
-    
+
     // Atmospheric exchange
     Real Ch = 0.02;             // Heat transfer coefficient [-]
     Real U_ref = 5.0;           // Wind speed at reference height [m/s]
     Real rho_cp = 1.2 * 1005.0; // Air density × cp [J/m³/K]
-    
+
     // Newton solver parameters
     int max_iter = 20;
     Real tol_K = 0.01;          // Convergence tolerance [K]
-    
+
     // Solve
     Real T_skin_out = T_skin_init;
     Real H_out = 0.0;
-    
+
     // Use the basic solve_facet_seb function
     T_skin_out = solve_facet_seb(
         T_skin_init, T1_slab, T_canyon, SW_down, LW_down,
         alpha, emiss, k_th, dz_slab, Ch, U_ref, rho_cp,
         max_iter, tol_K, H_out
     );
-    
+
     // Assertions
     EXPECT_GT(T_skin_out, 295.0)
         << "Surface should heat above 295 K under 800 W/m² SW forcing";
@@ -162,36 +164,36 @@ TEST(SEBNewton_NoClampAtNightWithLW, NightStability)
     Real T_skin_init = 285.0;   // Initial skin temp (cool but plausible) [K]
     Real T1_slab = 290.0;       // Slab 1st-layer (warmer at depth) [K]
     Real T_canyon = 283.0;      // Canyon air (cooler at night) [K]
-    
+
     // Night-time forcing (SW = 0, typical clear-sky LW)
     Real SW_down = 0.0;         // No shortwave [W/m²]
     Real LW_down = 350.0;       // Clear-sky LW down [W/m²]
-    
+
     // Material properties
     Real alpha = 0.20;
     Real emiss = 0.90;
     Real k_th = 1.0;
     Real dz_slab = 0.075;
-    
+
     // Atmospheric exchange
     Real Ch = 0.02;
     Real U_ref = 5.0;
     Real rho_cp = 1.2 * 1005.0;
-    
+
     // Newton solver
     int max_iter = 20;
     Real tol_K = 0.01;
-    
+
     // Solve
     Real T_skin_out = T_skin_init;
     Real H_out = 0.0;
-    
+
     T_skin_out = solve_facet_seb(
         T_skin_init, T1_slab, T_canyon, SW_down, LW_down,
         alpha, emiss, k_th, dz_slab, Ch, U_ref, rho_cp,
         max_iter, tol_K, H_out
     );
-    
+
     // Assertions
     EXPECT_GT(T_skin_out, 261.0)
         << "Night-time surface should NOT clamp at 260 K floor with LW counter-radiation";
@@ -224,26 +226,29 @@ TEST(BusingerDyer_KnownValues, PhiH)
     Real phi = StabilityFunctions::phi_h(zeta);
     EXPECT_NEAR(phi, 1.0, 1e-6)
         << "phi_h(0.0) should equal 1.0 (neutral)";
-    
+
     // Stable: phi_h(1.0) = 1 + 5*1 = 6.0
     zeta = 1.0;
     phi = StabilityFunctions::phi_h(zeta);
     EXPECT_NEAR(phi, 6.0, 1e-6)
         << "phi_h(1.0) should equal 6.0 for stable case";
-    
-    // Unstable: phi_h(-1.0) = sqrt(1 - 16*(-1)) = sqrt(17)
+
+// Unstable: phi_h(-1.0) = (1 - 16*(-1))^(-0.5) = 1/sqrt(17)
     zeta = -1.0;
     phi = StabilityFunctions::phi_h(zeta);
-    Real expected = std::sqrt(17.0);
+    Real expected = 1.0 / std::sqrt(17.0);
     EXPECT_NEAR(phi, expected, 1e-6)
-        << "phi_h(-1.0) should equal sqrt(17) for unstable case";
-    
-    // Unstable: phi_h(-0.1) = sqrt(1 - 16*(-0.1)) = sqrt(2.6)
+        << "phi_h(-1.0) should equal 1/sqrt(17) for unstable case";
+
+
+    // Unstable: phi_h(-0.1) = (1 - 16*(-0.1))^(-0.5) = 1/sqrt(2.6)
     zeta = -0.1;
     phi = StabilityFunctions::phi_h(zeta);
-    expected = std::sqrt(2.6);
+    expected = 1.0 / std::sqrt(2.6);
     EXPECT_NEAR(phi, expected, 1e-6)
-        << "phi_h(-0.1) should equal sqrt(2.6) for weakly unstable case";
+        << "phi_h(-0.1) should equal 1/sqrt(2.6) for weakly unstable case";
+
+
 }
 
 // ============================================================================
@@ -269,8 +274,8 @@ TEST(CSVReader_PhysicalMode_HeaderDetect, PhysicalVsLegacy)
 {
     // Create temporary directory for test CSV files
     std::string tmpdir = "/tmp/erf_gtest_ucm_csv_" + std::to_string(getpid());
-    system(("mkdir -p " + tmpdir).c_str());
-    
+    std::system(("mkdir -p " + tmpdir).c_str());
+
     // Physical mode CSV (x_m, y_m header)
     std::string phys_csv = tmpdir + "/phys.csv";
     std::ofstream phys_file(phys_csv);
@@ -282,7 +287,7 @@ TEST(CSVReader_PhysicalMode_HeaderDetect, PhysicalVsLegacy)
     phys_file << "125.0,250.0,3,12.0,0.4,8.0,5.0,2,2,2,90.0,0,35.0,1\n";
     phys_file << "250.0,250.0,4,20.0,0.7,14.0,8.0,2,2,2,135.0,0,40.0,1\n";
     phys_file.close();
-    
+
     // Legacy mode CSV (i, j header)
     std::string legacy_csv = tmpdir + "/legacy.csv";
     std::ofstream legacy_file(legacy_csv);
@@ -294,11 +299,11 @@ TEST(CSVReader_PhysicalMode_HeaderDetect, PhysicalVsLegacy)
     legacy_file << "0,1,3,12.0,0.4,8.0,5.0,2,2,2,90.0,0,35.0,1\n";
     legacy_file << "1,1,4,20.0,0.7,14.0,8.0,2,2,2,135.0,0,40.0,1\n";
     legacy_file.close();
-    
+
     // Note: Full CSV reader test would require instantiating UCMBuildingLayoutReader
     // and reading both files. Since the reader API may not expose a public mode query,
     // we perform a text-level validation: count rows with physical vs legacy patterns.
-    
+
     // Physical mode: rows should have large float x values (e.g., 125.0, 250.0)
     std::ifstream phys_read(phys_csv);
     std::string line;
@@ -311,7 +316,7 @@ TEST(CSVReader_PhysicalMode_HeaderDetect, PhysicalVsLegacy)
     }
     phys_read.close();
     EXPECT_GE(phys_row_count, 4) << "Physical CSV should parse at least 4 data rows";
-    
+
     // Legacy mode: rows should have index values (0, 1)
     std::ifstream legacy_read(legacy_csv);
     int legacy_row_count = 0;
@@ -323,9 +328,9 @@ TEST(CSVReader_PhysicalMode_HeaderDetect, PhysicalVsLegacy)
     }
     legacy_read.close();
     EXPECT_GE(legacy_row_count, 4) << "Legacy CSV should parse at least 4 data rows";
-    
+
     // Cleanup
-    system(("rm -rf " + tmpdir).c_str());
+    std::system(("rm -rf " + tmpdir).c_str());
 }
 
 // ============================================================================
@@ -350,35 +355,35 @@ TEST(CSVConsumer_NonUrbanRowsPreserved, IsUrbanFlag)
 {
     // Create a mixed urban/non-urban CSV
     std::string tmpdir = "/tmp/erf_gtest_ucm_csv_" + std::to_string(getpid());
-    system(("mkdir -p " + tmpdir).c_str());
-    
+    std::system(("mkdir -p " + tmpdir).c_str());
+
     std::string mixed_csv = tmpdir + "/mixed.csv";
     std::ofstream csv_file(mixed_csv);
     ASSERT_TRUE(csv_file.is_open()) << "Failed to create mixed urban/non-urban CSV";
-    
+
     // Header
     csv_file << "x_m,y_m,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
              << "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,AH_Wm2,is_urban\n";
-    
+
     // Half rows urban (is_urban=1), half non-urban (is_urban=0)
     csv_file << "100.0,100.0,1,15.0,0.5,10.0,6.0,2,2,2,0.0,0,30.0,1\n";       // urban
     csv_file << "200.0,100.0,0,0.0,0.0,0.0,0.0,0,0,0,0.0,0,0.0,0\n";         // non-urban
     csv_file << "100.0,200.0,2,18.0,0.6,12.0,7.0,2,2,2,45.0,0,25.0,1\n";      // urban
     csv_file << "200.0,200.0,0,0.0,0.0,0.0,0.0,0,0,0,0.0,0,0.0,0\n";         // non-urban
     csv_file.close();
-    
+
     // Read and count rows by is_urban value
     std::ifstream csv_read(mixed_csv);
     std::string line;
     int urban_count = 0, non_urban_count = 0;
     bool header_seen = false;
-    
+
     while (std::getline(csv_read, line)) {
         if (!header_seen) {
             header_seen = true;
             continue;  // Skip header
         }
-        
+
         // Parse is_urban (last column)
         // Count from end: last comma-delimited value
         size_t last_comma = line.rfind(',');
@@ -393,14 +398,14 @@ TEST(CSVConsumer_NonUrbanRowsPreserved, IsUrbanFlag)
         }
     }
     csv_read.close();
-    
+
     // Assertions: both categories should be present
     EXPECT_EQ(urban_count, 2) << "Should have 2 urban rows (is_urban=1)";
     EXPECT_EQ(non_urban_count, 2) << "Should have 2 non-urban rows (is_urban=0)";
     EXPECT_GT(non_urban_count, 0) << "Non-urban rows should be preserved (not dropped)";
-    
+
     // Cleanup
-    system(("rm -rf " + tmpdir).c_str());
+    std::system(("rm -rf " + tmpdir).c_str());
 }
 
 // ============================================================================

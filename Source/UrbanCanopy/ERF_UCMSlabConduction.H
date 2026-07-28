@@ -57,6 +57,10 @@
 
 #include <AMReX_REAL.H>
 #include <AMReX_Print.H>
+#include <AMReX_Box.H>
+#include <AMReX_Array4.H>
+#include <AMReX_BaseFab.H>
+#include <AMReX_GpuLaunch.H>
 #include <cmath>
 
 /**
