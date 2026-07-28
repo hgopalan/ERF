@@ -49,11 +49,10 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 4 | 4.1 | is_urban mask enforcement (LSM + MOST bypass) | Wiring is_urban into LSM/MOST paths, mixed urban/non-urban domains | ✅ COMPLETE | #254 (primary), #255 (hotfix: mask counter iterates full ATM grid), Phase 4.1-hotfix2 (is_urban_atm coarsening — this branch), Phase 4.1-hotfix3 (drag MFIter mismatch — this branch) |
 | 4 | 4.2 | **Cloud-aware analytical radiation (SW attenuation + LW cloud contribution)** | Kasten & Czeplak SW attenuation + Crawford & Duchon LW cloud enhancement layered on Phase 3.5b clear-sky; ParmParse `ucm.cloud_source ∈ {none, constant, csv}`; Boston-diurnal CSV; canonicals `UCMBostonDiurnal24hCloudy/`, `UCMBostonDiurnal24hOvercast/`; regression `ucm.cloud_source=none` bit-identical to 3.5b | 🟡 IN PROGRESS | — (coding agent running) |
 | 4 | 4.3 | **Real radiation extraction (RRTMG / ERF radiation solver)** | Extract SW-down and LW-down from ERF radiation module to the UCM 2D slab; removes `[UCM][1.3][WARNING] Radiation (SW/LW) filled analytically` on the `erf` path; keeps analytic + cloud paths as fallback | 🔲 PLANNED | — |
-| 4 | 4.4 | Urban/non-urban interface treatment | Boundary layer interpolation at urban perimeter | 🔲 PLANNED | — |
-| 4 | 4.5 | Mixed-domain diurnal integration test | Multi-facet urban/forest/ocean test case | 🔲 PLANNED | — |
 | 5 | 5.1 | Multi-bounce wall radiation | Ray tracing within urban canyon, multiple reflections; **may resolve Newton/MOST divergence design gap** | 🔲 PLANNED | — |
 | 5 | 5.2 | AC waste heat + building-energy sub-module | HVAC rejection rate from occupancy schedules, waste injection | 🔲 PLANNED | — |
 | 5 | 5.3 | Green roofs, cool roofs, permeable pavements | Heterogeneous roof/pavement albedos + soil moisture | 🔲 PLANNED | — |
+| 5 | 5.4 | **Coastal sea-breeze canonical (system integration gate)** | Two-tile 24-h canonical (`UCMBostonCoastal24h/`); prescribed-SST water tile type; assertions: UHI ≥ 1 K on land tiles, water tile within 0.5 K of prescribed SST, sea-breeze reversal 12:00–16:00 local time. Gate before Phase 6. | 🔲 PLANNED | — |
 | 6 | 6.1 | Tree CSV + tree drag | Vegetation CSV reader, drag force injection | 🔲 PLANNED | — |
 | 6 | 6.2 | Tree radiation (Beer-Lambert + LW crown-facet) | Canopy shortwave attenuation, crown energy balance | 🔲 PLANNED | — |
 | 6 | 6.3 | Tree leaf EB + local soil bucket + transpiration | Leaf temperature, soil moisture tracking, latent flux | 🔲 PLANNED | — |
