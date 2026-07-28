@@ -21,6 +21,8 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_sources += UrbanCanopy/ERF_UCMMaterialRegistry.cpp
   # Phase 3.4 additions (Stability-aware canyon-atmosphere exchange)
   CEXE_sources += UrbanCanopy/ERF_UCMStabilityCorrection.cpp
+  # Phase 4.2 additions (Cloud-aware radiation)
+  CEXE_sources += UrbanCanopy/ERF_UCMCloudCSVReader.cpp
 
   # Headers (complete list)
   CEXE_headers += UrbanCanopy/ERF_UCM.H
@@ -48,5 +50,7 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_headers += UrbanCanopy/ERF_UCMStabilityCorrection.H
   # Phase 3.5b headers (Prescribed radiation forcing)
   CEXE_headers += UrbanCanopy/ERF_UCMRadiationForcing.H
+  # Phase 4.2 headers (Cloud-aware radiation)
+  CEXE_headers += UrbanCanopy/ERF_UCMCloudCSVReader.H
 
 endif
