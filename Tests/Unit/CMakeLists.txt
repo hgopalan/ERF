@@ -169,6 +169,10 @@ set_tests_properties(erf_unit_tests_shuffle_repeat
 
 add_subdirectory(Shoc)
 
+if(ERF_ENABLE_UCM)
+  add_subdirectory(UrbanCanopy)
+endif()
+
 if(ERF_ENABLE_MPI)
   if(NOT TARGET MPI::MPI_CXX)
     find_package(MPI REQUIRED COMPONENTS CXX)
