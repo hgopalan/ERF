@@ -272,6 +272,10 @@ void check_ucm_prerequisites(const UCMParams& params,
     // Phase 5.1b — SW multi-bounce radiosity solver
     amrex::Print() << "[UCM]   --- Phase 5.1b SW Multi-Bounce Radiosity ---\n";
     amrex::Print() << "[UCM]   radiosity_mode = " << params.radiosity_mode_str << "\n";
+
+    // Phase 5.1c — LW multi-bounce radiosity solver
+    amrex::Print() << "[UCM]   --- Phase 5.1c LW Multi-Bounce Radiosity ---\n";
+    amrex::Print() << "[UCM]   lw_radiosity_mode = " << params.lw_radiosity_mode_str << "\n";
     
     amrex::Print() << "[UCM] =========================================================\n";
     amrex::Print() << "\n";
