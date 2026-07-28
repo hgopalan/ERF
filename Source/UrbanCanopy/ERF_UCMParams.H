@@ -92,6 +92,20 @@ enum class RadiationSource
 };
 
 /**
+ * @enum RadiosityMode
+ * @brief SW multi-bounce radiosity solver mode (Phase 5.1b)
+ *
+ * Selects whether SW reflection between wall_A, wall_B, and road is computed
+ * via infinite-bounce 2×2 Cramer solver (multi) or single-bounce SVF weighting (single).
+ * Roof unshaded; LW multi-bounce deferred to Phase 5.1c.
+ */
+enum class RadiosityMode
+{
+    Single = 0,  ///< Phase 2.4 single-bounce SVF weighting (backward compatible)
+    Multi = 1    ///< Phase 5.1b 2×2 Cramer multi-bounce solver (default)
+};
+
+/**
  * @struct UCMParams
  * @brief Container for all SLUCM configuration parameters read from ParmParse
  *
@@ -295,6 +309,17 @@ struct UCMParams
 
     std::string radiation_source_str = "analytic";       ///< Phase 4.3: "analytic" | "erf"
     RadiationSource radiation_source = RadiationSource::Analytic;  ///< Phase 4.3: resolved enum
+
+    // =========================================================================
+    // Section 15: Phase 5.1b — SW multi-bounce radiosity solver
+    // =========================================================================
+    // Selects whether SW reflection between walls and road is computed via
+    // infinite-bounce 2×2 Cramer solver (multi, default) or single-bounce
+    // SVF weighting (single, backward compatible). Roof unshaded (F_roof_sky=1).
+    // LW multi-bounce deferred to Phase 5.1c.
+
+    std::string radiosity_mode_str = "multi";     ///< Phase 5.1b: "single" | "multi" [string]
+    RadiosityMode radiosity_mode = RadiosityMode::Multi;  ///< Phase 5.1b: resolved enum
 
     // =========================================================================
     // Public methods

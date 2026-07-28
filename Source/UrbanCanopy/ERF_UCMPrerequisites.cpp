@@ -269,6 +269,10 @@ void check_ucm_prerequisites(const UCMParams& params,
     // Phase 4.3 — Real radiation extraction (placeholder)
     amrex::Print() << "[UCM]   radiation_source = " << params.radiation_source_str << "\n";
     
+    // Phase 5.1b — SW multi-bounce radiosity solver
+    amrex::Print() << "[UCM]   --- Phase 5.1b SW Multi-Bounce Radiosity ---\n";
+    amrex::Print() << "[UCM]   radiosity_mode = " << params.radiosity_mode_str << "\n";
+    
     amrex::Print() << "[UCM] =========================================================\n";
     amrex::Print() << "\n";
 

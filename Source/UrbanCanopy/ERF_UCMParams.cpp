@@ -183,5 +183,15 @@ void UCMParams::read_from_parmparse()
                     radiation_source_str +
                     "'; expected 'analytic' or 'erf'.");
     }
+
+    // Section 15: Phase 5.1b — SW multi-bounce radiosity solver
+    pp.query("radiosity_mode", radiosity_mode_str);
+    if (radiosity_mode_str == "single") {
+        radiosity_mode = RadiosityMode::Single;
+    } else if (radiosity_mode_str == "multi") {
+        radiosity_mode = RadiosityMode::Multi;
+    } else {
+        amrex::Abort("[UCM][5.1b] Invalid erf.ucm.radiosity_mode; expected 'single' or 'multi'.");
+    }
 }
 
