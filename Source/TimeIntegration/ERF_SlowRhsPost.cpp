@@ -90,7 +90,8 @@ void erf_slow_rhs_post (int level, int finest_level,
                         ShocDriver* native_shoc_lev,
                         YAFluxRegister* fr_as_crse,
                         YAFluxRegister* fr_as_fine,
-                        std::unique_ptr<ReadBndryPlanes>& m_r2d)
+                        std::unique_ptr<ReadBndryPlanes>& m_r2d,
+                        iMultiFab* is_urban)
 {
     BL_PROFILE_REGION("erf_slow_rhs_post()");
 
@@ -350,6 +351,7 @@ void erf_slow_rhs_post (int level, int finest_level,
         Array4<Real> diffflux_x, diffflux_y, diffflux_z;
         Array4<Real> hfx_x, hfx_y, hfx_z, diss;
         Array4<Real> q1fx_x, q1fx_y, q1fx_z, q2fx_z;
+        Array4<const int> is_urban_arr;  // Phase 4.1: is_urban mask for MOST flux gating
 
         if (l_use_diff) {
             diffflux_x = dflux_x->array(mfi);
@@ -360,6 +362,11 @@ void erf_slow_rhs_post (int level, int finest_level,
             hfx_y = Hfx2->array(mfi);
             hfx_z = Hfx3->array(mfi);
             diss  = Diss->array(mfi);
+            
+            // Phase 4.1: Get is_urban mask if UCM is active
+            if (is_urban) {
+                is_urban_arr = is_urban->const_array(mfi);
+            }
 
             if (Q1fx1) q1fx_x = Q1fx1->array(mfi);
             if (Q1fx2) q1fx_y = Q1fx2->array(mfi);
@@ -459,7 +466,8 @@ void erf_slow_rhs_post (int level, int finest_level,
                                                mf_my, mf_uy, mf_vy,
                                                hfx_z, q1fx_z, q2fx_z, diss,
                                                mu_turb, solverChoice, level,
-                                               tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac);
+                                               tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac,
+                                               is_urban_arr);
                     } else if (l_use_terrain) {
                         DiffusionSrcForState_T(tbx, domain, start_comp, num_comp, l_rotate, u, v,
                                                new_cons, cur_prim, cell_rhs,
@@ -470,7 +478,8 @@ void erf_slow_rhs_post (int level, int finest_level,
                                                mf_my, mf_uy, mf_vy,
                                                hfx_x, hfx_y, hfx_z, q1fx_x, q1fx_y, q1fx_z,q2fx_z, diss,
                                                mu_turb, solverChoice, level,
-                                               tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac);
+                                               tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac,
+                                               is_urban_arr);
                     } else {
                         DiffusionSrcForState_N(tbx, domain, start_comp, num_comp, u, v,
                                                new_cons, cur_prim, cell_rhs,
@@ -479,7 +488,8 @@ void erf_slow_rhs_post (int level, int finest_level,
                                                mf_my, mf_uy, mf_vy,
                                                hfx_z, q1fx_z, q2fx_z, diss,
                                                mu_turb, solverChoice, level,
-                                               tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac);
+                                               tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac,
+                                               is_urban_arr);
                     }
                 } // use_diff
             } // valid slow var
@@ -653,4 +663,37 @@ void erf_slow_rhs_post (int level, int finest_level,
         } // end profile
       } // mfi
     } // OMP
+
+    // Phase 4.1: Debug trace for is_urban mask enforcement at MOST flux sites
+    if (is_urban && solverChoice.ucm_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+        Long n_cells_most_skipped = 0;  // Urban cells where MOST flux skipped
+        Long n_cells_most_applied = 0;  // Non-urban cells where MOST flux applied
+        
+        // Count cells at k=0 by urban mask for current level
+        const auto& domain = geom.Domain();
+        const int k_surface = domain.smallEnd(2);
+        
+        for (MFIter mfi((*is_urban)[level], true); mfi.isValid(); ++mfi) {
+            const Array4<const int> is_urban_arr = (*is_urban)[level].const_array(mfi);
+            const Box& bx = mfi.tilebox();
+            
+            // Count only cells at k=0
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+                    if (is_urban_arr.contains(i, j, k_surface)) {
+                        if (is_urban_arr(i, j, k_surface) == 1) {
+                            ++n_cells_most_skipped;
+                        } else {
+                            ++n_cells_most_applied;
+                        }
+                    }
+                }
+            }
+        }
+        
+        amrex::Print() << "[UCM][4.1][mask-enforcement] lev=" << level << " nrk=" << nrk << "\n"
+                       << "  N_cells_MOST_skipped (is_urban=1): " << n_cells_most_skipped << "\n"
+                       << "  N_cells_MOST_applied (is_urban=0): " << n_cells_most_applied << "\n"
+                       << "  Sanity: Sum = " << (n_cells_most_skipped + n_cells_most_applied) << "\n";
+    }
 }

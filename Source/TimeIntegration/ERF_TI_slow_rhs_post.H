@@ -55,7 +55,8 @@
 #endif
                           native_shoc_driver[level].get(),
                           fr_as_crse, fr_as_fine,
-                          m_r2d);
+                          m_r2d,
+                          m_ucm_is_urban_atm[level].get());  // Phase 4.1: is_urban mask for MOST flux gating
 
         // Implicit diffusion of moisture
         #include "ERF_ImplicitPost.H"
