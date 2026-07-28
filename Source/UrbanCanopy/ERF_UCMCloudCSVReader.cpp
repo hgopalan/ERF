@@ -28,6 +28,12 @@ UCMCloudCSVReader::UCMCloudCSVReader(const std::string& csv_path)
             continue;
         }
 
+        // Skip header row (any line whose first character isn't a digit, '-', or '+')
+        char c0 = line[0];
+        if (!(std::isdigit(static_cast<unsigned char>(c0)) || c0 == '-' || c0 == '+')) {
+            continue;
+        }
+
         // Parse comma-separated values
         std::stringstream ss(line);
         std::string time_str, cf_str;

@@ -239,11 +239,15 @@ void UCMLayer::advance(UCMFields& fields,
     amrex::Real sw_val = 800.0 * std::max(0.0, std::cos(phase));
     forcing.SW_down->setVal(sw_val);
 
-    // One-time warning about radiation placeholder
-    if (!m_warn_radiation_placeholder_printed) {
+    // One-time warning about radiation placeholder — retained only when clouds are OFF,
+    // since cloud attenuation now sits on top of the analytic Phase 3.5b path.
+    // The full removal of this warning is scoped to Phase 4.3 (real radiation extraction).
+    if (!m_warn_radiation_placeholder_printed &&
+        m_params.cloud_source == CloudSource::None)
+    {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][1.3][WARNING] Radiation (SW/LW) filled analytically. "
-                          << "Phase 4.2 will replace with radiation solver extraction.\n";
+                          << "Phase 4.3 will replace with radiation solver extraction.\n";
         }
         m_warn_radiation_placeholder_printed = true;
     }
@@ -277,6 +281,7 @@ void UCMLayer::advance(UCMFields& fields,
     const amrex::Real tol_K    = m_params.newton_tol_K;
 
     // Phase 3.5B: Compute prescribed SW/LW radiation forcing (if enabled)
+    // Phase 4.2: extended with cloud attenuation
     amrex::Real SW_down = 0.0;
     amrex::Real LW_down = 350.0;  // Default fallback if radiation disabled
 
@@ -288,18 +293,62 @@ void UCMLayer::advance(UCMFields& fields,
         amrex::ignore_unused(lon_rad);
 
         // Solar zenith from astronomical formula
-        amrex::Real cos_zenith = solar_zenith_angle(time_s_local, lat_rad, lon_rad, m_params.julian_day);
+        amrex::Real cos_zenith = solar_zenith_angle(time_s_local, lat_rad, lon_rad,
+                                                    m_params.julian_day);
 
-        // Clear-sky SW downwelling
-        SW_down = clear_sky_SW_down(cos_zenith, m_params.solar_constant, m_params.sw_transmission);
+        // Phase 3.5b: clear-sky SW and LW
+        amrex::Real SW_clear = clear_sky_SW_down(cos_zenith,
+                                                  m_params.solar_constant,
+                                                  m_params.sw_transmission);
 
         // Get atmospheric temperature (approximate with lowest level, avoid access issues)
-        amrex::Real T_atm_min = T_atm_lowest.min(0, 0);
-        amrex::Real T_atm_max = T_atm_lowest.max(0, 0);
+        amrex::Real T_atm_min    = T_atm_lowest.min(0, 0);
+        amrex::Real T_atm_max    = T_atm_lowest.max(0, 0);
         amrex::Real T_atm_approx = 0.5 * (T_atm_min + T_atm_max);  // Spatial average
 
-        // Gray-sky LW downwelling
-        LW_down = gray_sky_LW_down(T_atm_approx, m_params.sky_emissivity);
+        amrex::Real LW_clear = gray_sky_LW_down(T_atm_approx, m_params.sky_emissivity);
+
+        // Phase 4.2: cloud attenuation layer on top of Phase 3.5b clear-sky
+        amrex::Real cf = 0.0;
+        if (m_params.cloud_source == CloudSource::Constant) {
+            cf = m_params.cloud_constant_fraction;
+        } else if (m_params.cloud_source == CloudSource::Csv) {
+            // Lazy-load CSV on first call
+            if (!m_cloud_csv_load_attempted) {
+                m_cloud_csv_load_attempted = true;
+                try {
+                    m_cloud_csv_reader = std::make_unique<UCMCloudCSVReader>(
+                        m_params.cloud_csv_path);
+                } catch (...) {
+                    if (amrex::ParallelDescriptor::IOProcessor()) {
+                        amrex::Print() << "[UCM][4.2][ERROR] Failed to load cloud CSV '"
+                                       << m_params.cloud_csv_path
+                                       << "'; falling back to cf=0.\n";
+                    }
+                    m_cloud_csv_reader.reset();
+                }
+            }
+            if (m_cloud_csv_reader) {
+                cf = m_cloud_csv_reader->get_cloud_fraction_at(
+                    time_s_local, m_params.ucm_debug);
+            }
+        }
+
+        SW_down = cloud_attenuated_SW_down(SW_clear, cf,
+                                            m_params.cloud_sw_a,
+                                            m_params.cloud_sw_b);
+        LW_down = cloud_enhanced_LW_down(LW_clear, cf, T_atm_approx);
+
+        // Phase 4.2: per-step diagnostic banner (IO rank only, gated on ucm_debug)
+        if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][4.2][radiation-cloud]"
+                           << " sim_time_s=" << time_s_local
+                           << " SW_down_clear=" << SW_clear
+                           << " SW_down_cloudy=" << SW_down
+                           << " LW_down_clear=" << LW_clear
+                           << " LW_down_cloudy=" << LW_down
+                           << " cloud_fraction=" << cf << "\n";
+        }
     }
 
     // Slab conduction parameters (declared here, used in both SEB and slab loops)

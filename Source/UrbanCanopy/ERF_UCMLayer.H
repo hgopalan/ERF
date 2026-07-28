@@ -48,6 +48,9 @@
 #include <UrbanCanopy/ERF_UCMGrid.H>
 #include <UrbanCanopy/ERF_UCMWindExtract.H>
 #include <AMReX_Geometry.H>
+#include <UrbanCanopy/ERF_UCMCloudCSVReader.H>
+#include <memory>
+
 
 /**
  * @class UCMLayer
@@ -167,6 +170,9 @@ private:
     UCMParams m_params;  ///< Copy of SLUCM parameters (immutable during run)
     int m_lev;           ///< AMR level this layer operates on (Phase 1.1: always 0)
     bool m_warn_radiation_placeholder_printed = false;  ///< One-time warning flag
+    // Phase 4.2: cloud CSV reader (lazy-initialized on first advance())
+    std::unique_ptr<UCMCloudCSVReader> m_cloud_csv_reader;
+    bool m_cloud_csv_load_attempted = false;
 };
 
 #endif  // ERF_UCM_LAYER_H
