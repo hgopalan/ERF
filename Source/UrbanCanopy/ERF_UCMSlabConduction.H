@@ -239,6 +239,7 @@ void advance_slab_conduction_mfi(
     amrex::Real T_deep)
 {
     amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+        (void) k;  // Mark as intentionally unused
         if (is_urban_arr(i,j,0) == 0) return;
 
         // Stack array for single-column temps (max 50 layers per header)
