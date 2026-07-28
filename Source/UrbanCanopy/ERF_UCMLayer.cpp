@@ -883,6 +883,11 @@ void UCMLayer::advance(UCMFields& fields,
         });
     }
 
+    // Phase 2.3: Compute anthropogenic heat
+    compute_anthropogenic_heat(*fields.AH, *fields.ah_profile_id, *fields.is_urban,
+                              *fields.AH_Wm2_ucm,
+                              m_params, time, lev);
+
     // ========================================================================
     // Phase 5.2: HVAC waste heat (Contract #21 / #22)
     //
@@ -983,10 +988,6 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
 
-    // Phase 2.3: Compute anthropogenic heat
-    compute_anthropogenic_heat(*fields.AH, *fields.ah_profile_id, *fields.is_urban,
-                              *fields.AH_Wm2_ucm,
-                              m_params, time, lev);
 
     // ------------------------------------------------------------------------
     // Phase 2.3 facet-split sensible heat flux (Phase 2.3.1 physics fix)
