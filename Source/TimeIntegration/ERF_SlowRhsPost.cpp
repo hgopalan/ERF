@@ -665,35 +665,68 @@ void erf_slow_rhs_post (int level, int finest_level,
     } // OMP
 
     // Phase 4.1: Debug trace for is_urban mask enforcement at MOST flux sites
-    if (is_urban && solverChoice.ucm_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+    if (is_urban && solverChoice.ucm_params.ucm_debug) {
         Long n_cells_most_skipped = 0;  // Urban cells where MOST flux skipped
         Long n_cells_most_applied = 0;  // Non-urban cells where MOST flux applied
+        Long n_cells_uncovered = 0;    // Cells not covered by is_urban mask
         
         // Count cells at k=0 by urban mask for current level
+        // Iterate over the full ATM grid (S_prim) not just urban cells
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+            is_urban != nullptr,
+            "[UCM][4.1] mask-enforcement: is_urban MultiFab is null");
+        
         const auto& domain = geom.Domain();
         const int k_surface = domain.smallEnd(2);
         
-        for (MFIter mfi((*is_urban)[level], true); mfi.isValid(); ++mfi) {
+        // Iterate over full ATM grid
+        for (MFIter mfi(S_prim, true); mfi.isValid(); ++mfi) {
             const Array4<const int> is_urban_arr = (*is_urban)[level].const_array(mfi);
-            const Box& bx = mfi.tilebox();
+            const Box& atm_box = mfi.tilebox();
             
             // Count only cells at k=0
-            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
-                for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+            for (int i = atm_box.smallEnd(0); i <= atm_box.bigEnd(0); ++i) {
+                for (int j = atm_box.smallEnd(1); j <= atm_box.bigEnd(1); ++j) {
+                    // Check if this cell is covered by is_urban mask
                     if (is_urban_arr.contains(i, j, k_surface)) {
                         if (is_urban_arr(i, j, k_surface) == 1) {
-                            ++n_cells_most_skipped;
+                            ++n_cells_most_skipped;  // UCM owns this cell (is_urban=1)
                         } else {
-                            ++n_cells_most_applied;
+                            ++n_cells_most_applied;  // MOST owns this cell (is_urban=0)
                         }
+                    } else {
+                        // Cell not covered by is_urban mask - count as MOST-applied (no UCM)
+                        ++n_cells_most_applied;
+                        ++n_cells_uncovered;
                     }
                 }
             }
         }
         
-        amrex::Print() << "[UCM][4.1][mask-enforcement] lev=" << level << " nrk=" << nrk << "\n"
-                       << "  N_cells_MOST_skipped (is_urban=1): " << n_cells_most_skipped << "\n"
-                       << "  N_cells_MOST_applied (is_urban=0): " << n_cells_most_applied << "\n"
-                       << "  Sanity: Sum = " << (n_cells_most_skipped + n_cells_most_applied) << "\n";
+        // MPI-safe reduction to get global counts
+        amrex::ParallelDescriptor::ReduceIntSum(n_cells_most_skipped);
+        amrex::ParallelDescriptor::ReduceIntSum(n_cells_most_applied);
+        amrex::ParallelDescriptor::ReduceIntSum(n_cells_uncovered);
+        
+        // Compute expected total ATM cells at k=0
+        const Long nx_atm = domain.length(0);
+        const Long ny_atm = domain.length(1);
+        const Long n_expected = nx_atm * ny_atm;
+        const Long n_total = n_cells_most_skipped + n_cells_most_applied;
+        
+        // Sanity check: total should equal expected domain size
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+            n_total == n_expected,
+            "[UCM][4.1] mask-enforcement counter miscounted: "
+            "skipped+applied != total ATM cells at k=0");
+        
+        // Only IOProcessor prints
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][4.1][mask-enforcement] lev=" << level << " nrk=" << nrk << "\n"
+                           << "  N_cells_MOST_skipped (is_urban=1): " << n_cells_most_skipped << "\n"
+                           << "  N_cells_MOST_applied (is_urban=0): " << n_cells_most_applied << "\n"
+                           << "  N_cells_uncovered (no is_urban): " << n_cells_uncovered << "\n"
+                           << "  N_total: " << n_total << " (expected: " << n_expected << ")\n";
+        }
     }
 }
