@@ -122,6 +122,20 @@ enum class LWRadiosityMode
 };
 
 /**
+ * @enum HVACMode
+ * @brief HVAC waste heat computation mode (Phase 5.2)
+ *
+ * Selects whether HVAC waste heat is added to the anthropogenic heat
+ * injection. Simple mode uses COP-based rejection of the residual
+ * slab-conduction cooling load.
+ */
+enum class HVACMode
+{
+    Off = 0,      ///< No HVAC waste heat (backward-compat default)
+    Simple = 1    ///< COP-based rejection with setpoint gate
+};
+
+/**
  * @struct UCMParams
  * @brief Container for all SLUCM configuration parameters read from ParmParse
  *
@@ -347,6 +361,21 @@ struct UCMParams
 
     std::string lw_radiosity_mode_str = "single";           ///< "single" | "multi-lagged"
     LWRadiosityMode lw_radiosity_mode = LWRadiosityMode::Single;
+
+    // =========================================================================
+    // Section 17: Phase 5.2 — AC waste heat & building energy (Contract #21)
+    // =========================================================================
+    // HVAC waste heat coupled to SEB via cooling-load proportionality.
+    // Reuses Phase 2.3 AH injection path. New CSV: hvac.csv (per-profile
+    // COP, setpoint, occupancy). Default 'off' for backward-compat.
+
+    std::string hvac_mode_str = "off";               ///< "off" | "simple"
+    HVACMode hvac_mode = HVACMode::Off;
+    std::string hvac_csv_path = "";                  ///< path to hvac.csv
+    std::string occupancy_csv_path = "";             ///< path to occupancy.csv
+    amrex::Real hvac_hysteresis_K = 2.0;             ///< setpoint hysteresis
+    amrex::Real hvac_cop_default = 3.0;              ///< fallback COP if CSV missing
+    amrex::Real hvac_setpoint_default_K = 297.15;    ///< 24 °C default
 
     // =========================================================================
     // Public methods

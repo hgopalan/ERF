@@ -277,6 +277,17 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   --- Phase 5.1c LW Multi-Bounce Radiosity ---\n";
     amrex::Print() << "[UCM]   lw_radiosity_mode = " << params.lw_radiosity_mode_str << "\n";
     
+    // Phase 5.2 — HVAC waste heat
+    amrex::Print() << "[UCM]   --- Phase 5.2 HVAC Waste Heat ---\n";
+    amrex::Print() << "[UCM]   hvac_mode = " << params.hvac_mode_str << "\n";
+    if (params.hvac_mode == HVACMode::Simple) {
+        amrex::Print() << "[UCM]   hvac_csv_path = " << params.hvac_csv_path << "\n";
+        amrex::Print() << "[UCM]   occupancy_csv_path = " << params.occupancy_csv_path << "\n";
+        amrex::Print() << "[UCM]   hvac_hysteresis_K = " << params.hvac_hysteresis_K << "\n";
+        amrex::Print() << "[UCM]   hvac_cop_default = " << params.hvac_cop_default << "\n";
+        amrex::Print() << "[UCM]   hvac_setpoint_default_K = " << params.hvac_setpoint_default_K << " K\n";
+    }
+    
     amrex::Print() << "[UCM] =========================================================\n";
     amrex::Print() << "\n";
 

@@ -205,5 +205,33 @@ void UCMParams::read_from_parmparse()
                      lw_radiosity_mode_str +
                      "'; expected 'single' or 'multi-lagged'.");
     }
+
+    // Phase 5.2: HVAC waste heat mode
+    pp.query("hvac_mode", hvac_mode_str);
+    if (hvac_mode_str == "off") {
+        hvac_mode = HVACMode::Off;
+    } else if (hvac_mode_str == "simple") {
+        hvac_mode = HVACMode::Simple;
+    } else {
+        amrex::Abort("[UCM][5.2] Invalid erf.ucm.hvac_mode '" + hvac_mode_str +
+                     "'; expected 'off' or 'simple'.");
+    }
+    pp.query("hvac_csv_path", hvac_csv_path);
+    pp.query("occupancy_csv_path", occupancy_csv_path);
+    pp.query("hvac_hysteresis_K", hvac_hysteresis_K);
+    pp.query("hvac_cop_default", hvac_cop_default);
+    pp.query("hvac_setpoint_default_K", hvac_setpoint_default_K);
+
+    // Validation: if hvac_mode == Simple, both CSV paths must be non-empty
+    if (hvac_mode == HVACMode::Simple) {
+        if (hvac_csv_path.empty()) {
+            amrex::Abort("[UCM][5.2] hvac_mode='simple' requires erf.ucm.hvac_csv_path to be specified. "
+                        "See UCM_DEVELOPMENT.md for CSV format (D3).");
+        }
+        if (occupancy_csv_path.empty()) {
+            amrex::Abort("[UCM][5.2] hvac_mode='simple' requires erf.ucm.occupancy_csv_path to be specified. "
+                        "See UCM_DEVELOPMENT.md for CSV format (D4).");
+        }
+    }
 }
 
