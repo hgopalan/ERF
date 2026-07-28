@@ -89,7 +89,6 @@ void UCMLayer::advance(UCMFields& fields,
 
     // Phase 3.5a-hotfix3: T_skin persistence diagnostic (tracks slab conduction leak)
     if (m_params.ucm_debug) {
-        // Collectives on ALL ranks (valid cells only, nghost=0)
         amrex::Real T_roof_min  = fields.T_skin_roof->min(0, 0);
         amrex::Real T_roof_max  = fields.T_skin_roof->max(0, 0);
         amrex::Real T_wall_min  = fields.T_skin_wall->min(0, 0);
@@ -105,10 +104,7 @@ void UCMLayer::advance(UCMFields& fields,
     }
 
     // Phase 3.5A-diag: T_slab state at UCMLayer::advance() entry.
-    // Compares slab-top (comp 0) to slab-deep (last comp) to detect
-    // initialization bugs or slab-conduction corruption between steps.
     if (m_params.ucm_debug) {
-        // Collectives on ALL ranks
         amrex::Real T1_roof_min = fields.T_slab_roof->min(0, 0);
         amrex::Real T1_roof_max = fields.T_slab_roof->max(0, 0);
         amrex::Real T1_wall_min = fields.T_slab_wall->min(0, 0);
@@ -134,9 +130,8 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
 
-    // Debug: per-step ATM forcing summary on UCM grid (gated; prints every step)
+    // Debug: per-step ATM forcing summary on UCM grid
     if (m_params.ucm_debug) {
-        // Collectives on ALL ranks (must be outside IOProcessor guard)
         amrex::Real ust_min = atm_u_star.min(0, 0), ust_max = atm_u_star.max(0, 0);
         amrex::Real tst_min = atm_t_star.min(0, 0), tst_max = atm_t_star.max(0, 0);
         amrex::Real Tat_min = T_atm_lowest.min(0, 0), Tat_max = T_atm_lowest.max(0, 0);
@@ -150,11 +145,10 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
 
-    // Phase 2.2: One-time banner to verify per-cell wiring
+    // Phase 2.2: One-time banner
     static bool banner_printed = false;
     if (!banner_printed && m_params.ucm_debug) {
         banner_printed = true;
-        // Collectives on ALL ranks (must be outside IOProcessor guard)
         amrex::Real H_min = fields.H_bldg->min(0, 0);
         amrex::Real H_max = fields.H_bldg->max(0, 0);
         amrex::Real alb_min = fields.albedo_roof->min(0, 0);
@@ -185,7 +179,6 @@ void UCMLayer::advance(UCMFields& fields,
     // Step 1: Allocate and extract forcing (u*, wind, T, q, SW/LW)
     // ========================================================================
 
-    // Allocate forcing container if not already done
     if (!forcing.all_allocated()) {
         forcing.u_star = std::make_unique<amrex::MultiFab>(
             ucm_grid.ba, ucm_grid.dm, 1, amrex::IntVect(1, 1, 0));
@@ -201,23 +194,18 @@ void UCMLayer::advance(UCMFields& fields,
             ucm_grid.ba, ucm_grid.dm, 1, amrex::IntVect(1, 1, 0));
     }
 
-    // Extract u* from SurfaceLayer
     fill_ucm_ustar_from_surface_layer(*forcing.u_star, atm_u_star, ucm_grid, lev);
 
-    // Extract wind via log-law interpolation to z_target
     fill_ucm_wind_from_interpolation(*forcing.wind_ref, xvel, yvel, z_phys_cc,
                                      *fields.H_bldg, *fields.z0_ucm, *fields.d_disp_ucm,
                                      m_params.zref, ucm_grid, nz_atm, lev);
 
-    // Extract temperature from ATM lowest level
     fill_ucm_scalar_from_atm(*forcing.T_atm_ref, T_atm_lowest, ucm_grid, geom_atm, lev, 0);
 
-    // Extract water vapor (if available; null-safe)
     if (q_atm_lowest.boxArray().size() > 0) {
         fill_ucm_scalar_from_atm(*forcing.q_atm_ref, q_atm_lowest, ucm_grid, geom_atm, lev, 0);
     }
 
-    // Debug: verify extraction results (gated; collectives only when needed)
     if (m_params.ucm_debug) {
         amrex::Real ustar_min = forcing.u_star->min(0), ustar_max = forcing.u_star->max(0);
         amrex::Real T_min     = forcing.T_atm_ref->min(0), T_max = forcing.T_atm_ref->max(0);
@@ -235,20 +223,13 @@ void UCMLayer::advance(UCMFields& fields,
     // ========================================================================
     // Step 2: Fill radiation (analytical placeholder, Phase 1.3)
     // ========================================================================
-    // TODO(UCM Phase 4.2): replace with radiation scheme extraction
 
     forcing.LW_down->setVal(350.0);
 
-    // Analytical diurnal cycle for SW
-    // phase = 2π * elapsed_time / 86400 - π/2
-    // SW = 800 * max(0, cos(phase)) [W/m²]
     amrex::Real phase = 2.0*M_PI*time/86400.0 - 0.5*M_PI;
     amrex::Real sw_val = 800.0 * std::max(0.0, std::cos(phase));
     forcing.SW_down->setVal(sw_val);
 
-    // One-time warning about radiation placeholder — retained only when clouds are OFF,
-    // since cloud attenuation now sits on top of the analytic Phase 3.5b path.
-    // The full removal of this warning is scoped to Phase 4.3 (real radiation extraction).
     if (!m_warn_radiation_placeholder_printed &&
        m_params.radiation_source == RadiationSource::Analytic &&
        m_params.cloud_source == CloudSource::None)
@@ -262,25 +243,12 @@ void UCMLayer::advance(UCMFields& fields,
     }
 
     // ========================================================================
-    // Step 2.4: Compute sky view factors (Kusaka 2001 canyon shadowing model)
+    // Step 2.4: Sky view factors + multi-facet view factors
     // ========================================================================
-    // Phase 2.4: Compute per-cell SVF from canyon aspect ratio.
-    // SVF_road and SVF_wall reduce SW absorption on shaded facets.
-    // SVF_roof = 1.0 always (unshaded from above).
     compute_sky_view_factors(*fields.SVF_wall, *fields.SVF_road, *fields.SVF_roof,
                              *fields.H_bldg, *fields.W_road, *fields.is_urban,
                              lev, m_params.ucm_debug);
 
-    // ========================================================================
-    // Step 2.4a: Compute multi-facet view factors (Phase 5.1a: pure geometry)
-    // ========================================================================
-    // Phase 5.1a: Compute multi-facet view factors (pure geometry).
-    // These fields are NOT consumed by any SEB or radiation path in Phase 5.1a.
-    // Phase 5.1b will introduce a radiosity solver that consumes them.
-    // Computed once per run (H_bldg and W_road are static after CSV load).
-    // TODO(UCM 6.0): view-factor cache is static-bool guarded, assuming Contract #2
-    // (no regrid on anchor level). If Phase 3.1+ ever allows regrid, replace with
-    // an invalidation flag driven by CSV reload or grid change.
     static bool view_factors_computed = false;
     if (!view_factors_computed) {
         view_factors_computed = true;
@@ -301,13 +269,9 @@ void UCMLayer::advance(UCMFields& fields,
     // Step 3: Solve facet SEB and advance slab conduction
     // ========================================================================
 
-    // Phase 3.5A: per-facet Newton-iteration SEB solve
-    // T_skin_* are persistent (not reset); solver updates them in-place.
-    // Slab T1 comes from fields.T_slab_* (top interior layer, comp=0).
-
     const amrex::Real sigma_sb = 5.670374419e-8;
     amrex::ignore_unused(sigma_sb);
-    const amrex::Real rho_cp   = 1.2 * Cp_d;   // [J/m^3/K]
+    const amrex::Real rho_cp   = 1.2 * Cp_d;
     const amrex::Real Ch_roof  = m_params.Ch_roof;
     const amrex::Real Ch_wall  = m_params.Ch_wall;
     const amrex::Real Ch_road  = m_params.Ch_road;
@@ -315,18 +279,13 @@ void UCMLayer::advance(UCMFields& fields,
     const int         max_iter = m_params.newton_max_iter;
     const amrex::Real tol_K    = m_params.newton_tol_K;
 
-    // Phase 3.5B: Compute prescribed SW/LW radiation forcing (if enabled)
-    // Phase 4.2: extended with cloud attenuation
-    // Phase 4.3: new selector between analytic and ERF radiation sources
     amrex::Real SW_down = 0.0;
-    amrex::Real LW_down = 350.0;  // Default fallback if radiation disabled
+    amrex::Real LW_down = 350.0;
 
     if (m_params.radiation_source == RadiationSource::Erf) {
-        // Phase 4.3 placeholder — real extraction deferred
         amrex::Real time_s_local = m_params.solar_time_start_s + time;
         extract_radiation_from_erf(SW_down, LW_down, time_s_local);
 
-        // Layer 2 (runtime sentinel guard): refuse to feed sentinel values to SEB
         if (SW_down < 0.0 || LW_down < 0.0) {
             amrex::Abort(
                 "[UCM][4.3] extract_radiation_from_erf returned sentinel "
@@ -336,7 +295,6 @@ void UCMLayer::advance(UCMFields& fields,
                 "Set erf.ucm.radiation_source=analytic.");
         }
 
-        // Layer 3 (optional physical range sanity check)
         if (SW_down < 0.0 || SW_down > 1500.0 || LW_down < 100.0 || LW_down > 600.0) {
             if (amrex::ParallelDescriptor::IOProcessor()) {
                 amrex::Print()
@@ -349,34 +307,28 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
     else if (m_params.use_prescribed_radiation) {
-        // Compute solar zenith angle for domain center
-        amrex::Real time_s_local = m_params.solar_time_start_s + time;  // Local solar time
+        amrex::Real time_s_local = m_params.solar_time_start_s + time;
         amrex::Real lat_rad = m_params.lat_deg * (3.14159265358979323846 / 180.0);
         amrex::Real lon_rad = m_params.lon_deg * (3.14159265358979323846 / 180.0);
         amrex::ignore_unused(lon_rad);
 
-        // Solar zenith from astronomical formula
         amrex::Real cos_zenith = solar_zenith_angle(time_s_local, lat_rad, lon_rad,
                                                     m_params.julian_day);
 
-        // Phase 3.5b: clear-sky SW and LW
         amrex::Real SW_clear = clear_sky_SW_down(cos_zenith,
                                                   m_params.solar_constant,
                                                   m_params.sw_transmission);
 
-        // Get atmospheric temperature (approximate with lowest level, avoid access issues)
         amrex::Real T_atm_min    = T_atm_lowest.min(0, 0);
         amrex::Real T_atm_max    = T_atm_lowest.max(0, 0);
-        amrex::Real T_atm_approx = 0.5 * (T_atm_min + T_atm_max);  // Spatial average
+        amrex::Real T_atm_approx = 0.5 * (T_atm_min + T_atm_max);
 
         amrex::Real LW_clear = gray_sky_LW_down(T_atm_approx, m_params.sky_emissivity);
 
-        // Phase 4.2: cloud attenuation layer on top of Phase 3.5b clear-sky
         amrex::Real cf = 0.0;
         if (m_params.cloud_source == CloudSource::Constant) {
             cf = m_params.cloud_constant_fraction;
         } else if (m_params.cloud_source == CloudSource::Csv) {
-            // Lazy-load CSV on first call
             if (!m_cloud_csv_load_attempted) {
                 m_cloud_csv_load_attempted = true;
                 try {
@@ -402,7 +354,6 @@ void UCMLayer::advance(UCMFields& fields,
                                             m_params.cloud_sw_b);
         LW_down = cloud_enhanced_LW_down(LW_clear, cf, T_atm_approx);
 
-        // Phase 4.2: per-step diagnostic banner (IO rank only, gated on ucm_debug)
         if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][4.2][radiation-cloud]"
                            << " sim_time_s=" << time_s_local
@@ -414,12 +365,10 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
 
-    // Slab conduction parameters (declared here, used in both SEB and slab loops)
     const int         N_layers = m_params.slab_N_layers;
     const amrex::Real slab_L   = m_params.slab_L;
     const amrex::Real T_deep   = m_params.slab_T_deep;
 
-    // Phase 3.5a-hotfix: Per-cell clamp counters
     amrex::Long n_clamped_roof  = 0;
     amrex::Long n_clamped_wall  = 0;
     amrex::Long n_clamped_road  = 0;
@@ -427,7 +376,6 @@ void UCMLayer::advance(UCMFields& fields,
     amrex::Long n_diverged_wall = 0;
     amrex::Long n_diverged_road = 0;
 
-        // ← ADD THESE 6 LINES HERE (after line 265):
     amrex::Long* p_clamped_roof  = &n_clamped_roof;
     amrex::Long* p_diverged_roof = &n_diverged_roof;
     amrex::Long* p_clamped_wall  = &n_clamped_wall;
@@ -435,9 +383,6 @@ void UCMLayer::advance(UCMFields& fields,
     amrex::Long* p_clamped_road  = &n_clamped_road;
     amrex::Long* p_diverged_road = &n_diverged_road;
 
-    // Scratch MultiFab for per-cell diagnostics
-    // Components: 0=T_final, 1=T_unclamped, 2=residual, 3=n_iter,
-    //             4=SW_abs, 5=LW_abs, 6=H_sens, 7=G_cond
     amrex::MultiFab newton_diag_roof(fields.T_skin_roof->boxArray(),
                                      fields.T_skin_roof->DistributionMap(), 8, 0);
     amrex::MultiFab newton_diag_wall(fields.T_skin_wall->boxArray(),
@@ -465,11 +410,10 @@ void UCMLayer::advance(UCMFields& fields,
         auto const k_rf     = fields.k_therm_roof->const_array(mfi);
         auto const k_wl     = fields.k_therm_wall->const_array(mfi);
         auto const k_rd     = fields.k_therm_road->const_array(mfi);
-        auto const U_a      = forcing.wind_ref->const_array(mfi);  // comp 0 = U
+        auto const U_a      = forcing.wind_ref->const_array(mfi);
         auto const T_can_a  = fields.T_canyon_air->const_array(mfi);
 
-        // Slab top-layer T (comp=0 of T_slab_* is the uppermost interior node)
-        auto const T1_rf    = fields.T_slab_roof->const_array(mfi);   // comp 0
+        auto const T1_rf    = fields.T_slab_roof->const_array(mfi);
         auto const T1_wl    = fields.T_slab_wall->const_array(mfi);
         auto const T1_rd    = fields.T_slab_road->const_array(mfi);
 
@@ -480,30 +424,23 @@ void UCMLayer::advance(UCMFields& fields,
         auto h_wall_a = fields.H_wall->array(mfi);
         auto h_road_a = fields.H_road->array(mfi);
 
-        // Phase 3.5a-hotfix: diagnostics
         auto diag_rf = newton_diag_roof.array(mfi);
         auto diag_wl = newton_diag_wall.array(mfi);
         auto diag_rd = newton_diag_road.array(mfi);
 
-        // Phase 5.1b: View-factor const_arrays for multi-bounce radiosity
         auto const Fww_a = fields.F_wall_wall->const_array(mfi);
         auto const Fwr_a = fields.F_wall_road->const_array(mfi);
         auto const Frw_a = fields.F_road_wall->const_array(mfi);
 
-        // Phase 5.1c: Additional view-factor const_arrays for LW radiosity
         auto const Fws_a = fields.F_wall_sky->const_array(mfi);
         auto const Frs_a = fields.F_road_sky->const_array(mfi);
 
-        // Phase 5.1c: Previous-timestep T_skin and emissivity const_arrays for lagged LW radiosity
         auto const T_wall_prev_a = fields.T_skin_wall->const_array(mfi);
         auto const T_road_prev_a = fields.T_skin_road->const_array(mfi);
         auto const eps_wl_a = fields.emissivity_wall->const_array(mfi);
         auto const eps_rd_a = fields.emissivity_road->const_array(mfi);
 
-        // Phase 5.1b: Capture radiosity mode flag outside lambda
         const bool radiosity_mode_is_multi = (m_params.radiosity_mode == RadiosityMode::Multi);
-
-        // Phase 5.1c: Capture LW radiosity mode flag outside lambda
         const bool lw_radiosity_mode_is_multi = (m_params.lw_radiosity_mode == LWRadiosityMode::MultiLagged);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
@@ -512,8 +449,7 @@ void UCMLayer::advance(UCMFields& fields,
             amrex::Real U = amrex::max(std::sqrt(U_a(i,j,0)*U_a(i,j,0)), 0.01);
             amrex::Real T_can = T_can_a(i,j,0);
 
-            // Phase 5.1b: Effective SW per facet (multi-bounce radiosity or single-bounce SVF)
-            amrex::Real SW_roof = SW_down;                      // roof unshaded
+            amrex::Real SW_roof = SW_down;
             amrex::Real SW_wall, SW_road;
             const amrex::Real SW0_wall = SW_down * svf_wall(i,j,0);
             const amrex::Real SW0_road = SW_down * svf_road(i,j,0);
@@ -523,17 +459,14 @@ void UCMLayer::advance(UCMFields& fields,
                                           Fww_a(i,j,0), Fwr_a(i,j,0), Frw_a(i,j,0),
                                           SW_wall, SW_road);
             } else {
-                // Phase 2.4: single-bounce SVF weighting (backward compatible)
                 SW_wall = SW0_wall;
                 SW_road = SW0_road;
             }
 
-            // Phase 5.1c: LW incident — multi-bounce (lagged) or Phase 3.5b single-bounce
             amrex::Real LW_wall_in, LW_road_in;
-            const amrex::Real LW_roof_in = LW_down;   // Roof unshaded, no bouncing
+            const amrex::Real LW_roof_in = LW_down;
 
             if (lw_radiosity_mode_is_multi) {
-                // Back out effective sky temperature from LW_down
                 const amrex::Real T_sky = std::pow(LW_down / UCM_SIGMA_SB, amrex::Real(0.25));
 
                 lw_radiosity_multi_bounce(
@@ -547,40 +480,28 @@ void UCMLayer::advance(UCMFields& fields,
                 LW_road_in += (1.0 - Frs_a(i,j,0)) * UCM_SIGMA_SB * std::pow(T_road_prev_a(i,j,0), 4);
 
             } else {
-                // Phase 3.5b single-bounce SVF fallback (Contract #20: default backward-compat)
-                // IMPORTANT: preserve the exact existing 3.5b formula for bit-identity.
                 constexpr amrex::Real sigma_sb_local = 5.670374419e-8;
                 const amrex::Real T_can_val = T_can_a(i,j,0);
                 const amrex::Real T_can4 = T_can_val*T_can_val*T_can_val*T_can_val;
-                // Use previous T_skin for the "trapped emission" term (lag by one step; small err)
                 const amrex::Real T_skin_prev_wl = Tskin_wl(i,j,0);
                 const amrex::Real T_skin_prev_rd = Tskin_rd(i,j,0);
                 const amrex::Real T_skin4_wl = T_skin_prev_wl*T_skin_prev_wl*T_skin_prev_wl*T_skin_prev_wl;
                 const amrex::Real T_skin4_rd = T_skin_prev_rd*T_skin_prev_rd*T_skin_prev_rd*T_skin_prev_rd;
-                
+
                 const amrex::Real svf_w = svf_wall(i,j,0);
                 const amrex::Real svf_r = svf_road(i,j,0);
-                
-                LW_wall_in = svf_w * LW_down 
+
+                LW_wall_in = svf_w * LW_down
                            + (1.0 - svf_w) * sigma_sb_local * T_can4
                            + (1.0 - svf_w) * sigma_sb_local * T_skin4_wl;
-                LW_road_in = svf_r * LW_down 
+                LW_road_in = svf_r * LW_down
                            + (1.0 - svf_r) * sigma_sb_local * T_can4
                            + (1.0 - svf_r) * sigma_sb_local * T_skin4_rd;
             }
 
-            // Note: LW_roof_eff is already set; use LW_roof_in = LW_down for consistency
-            const amrex::Real LW_roof_eff = LW_roof_in;   // SVF_roof = 1
+            const amrex::Real LW_roof_eff = LW_roof_in;
             const amrex::Real LW_wall_eff = LW_wall_in;
             const amrex::Real LW_road_eff = LW_road_in;
-
-    /*if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "[UCM][3.5B-diag] time=" << time
-                       << "s  time_s_local=" << (m_params.solar_time_start_s + time)
-                       << "s  SW_down=" << SW_down
-                       << " W/m2  LW_down=" << LW_down << " W/m2\n";
-    }*/
-
 
             amrex::Real H_rf, H_wl, H_rd;
 
@@ -598,17 +519,15 @@ void UCMLayer::advance(UCMFields& fields,
                     T_unclamped, n_iter, residual,
                     SW_abs, LW_abs, H_sens, G_cond);
 
-                // Store diagnostics
-                diag_rf(i,j,0,0) = Tskin_rf(i,j,0);  // T_final
-                diag_rf(i,j,0,1) = T_unclamped;      // T_unclamped
-                diag_rf(i,j,0,2) = residual;         // residual
+                diag_rf(i,j,0,0) = Tskin_rf(i,j,0);
+                diag_rf(i,j,0,1) = T_unclamped;
+                diag_rf(i,j,0,2) = residual;
                 diag_rf(i,j,0,3) = static_cast<amrex::Real>(n_iter);
                 diag_rf(i,j,0,4) = SW_abs;
                 diag_rf(i,j,0,5) = LW_abs;
                 diag_rf(i,j,0,6) = H_sens;
                 diag_rf(i,j,0,7) = G_cond;
 
-                // Track clamping/divergence
                 constexpr amrex::Real T_min_K = 260.0;
                 constexpr amrex::Real T_clamp_tol = 0.01;
                 if (std::abs(Tskin_rf(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
@@ -633,7 +552,6 @@ void UCMLayer::advance(UCMFields& fields,
                     T_unclamped, n_iter, residual,
                     SW_abs, LW_abs, H_sens, G_cond);
 
-                // Store diagnostics
                 diag_wl(i,j,0,0) = Tskin_wl(i,j,0);
                 diag_wl(i,j,0,1) = T_unclamped;
                 diag_wl(i,j,0,2) = residual;
@@ -643,7 +561,6 @@ void UCMLayer::advance(UCMFields& fields,
                 diag_wl(i,j,0,6) = H_sens;
                 diag_wl(i,j,0,7) = G_cond;
 
-                // Track clamping/divergence
                 constexpr amrex::Real T_min_K = 260.0;
                 constexpr amrex::Real T_clamp_tol = 0.01;
                 if (std::abs(Tskin_wl(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
@@ -668,7 +585,6 @@ void UCMLayer::advance(UCMFields& fields,
                     T_unclamped, n_iter, residual,
                     SW_abs, LW_abs, H_sens, G_cond);
 
-                // Store diagnostics
                 diag_rd(i,j,0,0) = Tskin_rd(i,j,0);
                 diag_rd(i,j,0,1) = T_unclamped;
                 diag_rd(i,j,0,2) = residual;
@@ -678,7 +594,6 @@ void UCMLayer::advance(UCMFields& fields,
                 diag_rd(i,j,0,6) = H_sens;
                 diag_rd(i,j,0,7) = G_cond;
 
-                // Track clamping/divergence
                 constexpr amrex::Real T_min_K = 260.0;
                 constexpr amrex::Real T_clamp_tol = 0.01;
                 if (std::abs(Tskin_rd(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
@@ -715,7 +630,6 @@ void UCMLayer::advance(UCMFields& fields,
                            << "\n";
         }
 
-        // Per-cell trace for first N clamped cells
         if (m_params.ucm_debug && m_params.newton_trace_ncells > 0 &&
             (n_clamped_roof > 0 || n_clamped_wall > 0 || n_clamped_road > 0)) {
             int n_traced = 0;
@@ -723,7 +637,6 @@ void UCMLayer::advance(UCMFields& fields,
             constexpr amrex::Real T_min_K = 260.0;
             constexpr amrex::Real T_clamp_tol = 0.01;
 
-            // Trace roof clamped cells
             for (amrex::MFIter mfi(newton_diag_roof); mfi.isValid() && n_traced < n_trace_max; ++mfi) {
                 auto const diag = newton_diag_roof.const_array(mfi);
                 auto const is_urb = fields.is_urban->const_array(mfi);
@@ -755,7 +668,6 @@ void UCMLayer::advance(UCMFields& fields,
                 }
             }
 
-            // Trace wall clamped cells
             for (amrex::MFIter mfi(newton_diag_wall); mfi.isValid() && n_traced < n_trace_max; ++mfi) {
                 auto const diag = newton_diag_wall.const_array(mfi);
                 auto const is_urb = fields.is_urban->const_array(mfi);
@@ -787,7 +699,6 @@ void UCMLayer::advance(UCMFields& fields,
                 }
             }
 
-            // Trace road clamped cells
             for (amrex::MFIter mfi(newton_diag_road); mfi.isValid() && n_traced < n_trace_max; ++mfi) {
                 auto const diag = newton_diag_road.const_array(mfi);
                 auto const is_urb = fields.is_urban->const_array(mfi);
@@ -841,7 +752,6 @@ void UCMLayer::advance(UCMFields& fields,
     // Phase 5.1c: Per-step debug banner for LW radiosity
     amrex::Real Tsky_min = 0.0, Tsky_max = 0.0;
     if (m_params.ucm_debug && m_params.lw_radiosity_mode == LWRadiosityMode::MultiLagged) {
-        // Sample from LW_down min/max — extract using MultiFab->min/max methods
         const amrex::Real LW_min = forcing.LW_down->min(0, 0);
         const amrex::Real LW_max = forcing.LW_down->max(0, 0);
         Tsky_min = std::pow(LW_min / UCM_SIGMA_SB, amrex::Real(0.25));
@@ -861,7 +771,6 @@ void UCMLayer::advance(UCMFields& fields,
 
     // Phase 3.5A: Advance slab conduction using SEB-derived H as surface BC
 
-    // Advance roof slab conduction
     for (amrex::MFIter mfi(*fields.T_slab_roof, amrex::TilingIfNotGPU());
          mfi.isValid(); ++mfi)
     {
@@ -875,7 +784,6 @@ void UCMLayer::advance(UCMFields& fields,
             bx, dt, N_layers, slab_L, T_deep);
     }
 
-    // Advance wall slab conduction
     for (amrex::MFIter mfi(*fields.T_slab_wall, amrex::TilingIfNotGPU());
          mfi.isValid(); ++mfi)
     {
@@ -889,7 +797,6 @@ void UCMLayer::advance(UCMFields& fields,
             bx, dt, N_layers, slab_L, T_deep);
     }
 
-    // Advance road slab conduction
     for (amrex::MFIter mfi(*fields.T_slab_road, amrex::TilingIfNotGPU());
          mfi.isValid(); ++mfi)
     {
@@ -903,9 +810,6 @@ void UCMLayer::advance(UCMFields& fields,
             bx, dt, N_layers, slab_L, T_deep);
     }
 
-    // Phase 3.5A-diag: T_slab state after slab conduction advance.
-    // Compare to slab-top-ENTRY: dT1/dt should be small over one timestep.
-    // Large delta = slab conduction is receiving bad H or has a numerics bug.
     if (m_params.ucm_debug) {
         amrex::Real T1_roof_min = fields.T_slab_roof->min(0, 0);
         amrex::Real T1_roof_max = fields.T_slab_roof->max(0, 0);
@@ -913,7 +817,6 @@ void UCMLayer::advance(UCMFields& fields,
         amrex::Real T1_wall_max = fields.T_slab_wall->max(0, 0);
         amrex::Real T1_road_min = fields.T_slab_road->min(0, 0);
         amrex::Real T1_road_max = fields.T_slab_road->max(0, 0);
-        // Also grab H_roof/wall/road that DROVE the conduction (Newton values)
         amrex::Real Hr_min = fields.H_roof->min(0, 0);
         amrex::Real Hr_max = fields.H_roof->max(0, 0);
         amrex::Real Hw_min = fields.H_wall->min(0, 0);
@@ -932,10 +835,7 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
 
-    // Phase 3.5A: Update canyon-air temperature using Newton-computed H (for consistency)
-    // This runs AFTER slab conduction (which uses Newton H) but BEFORE MOST loop,
-    // ensuring self-consistency: Newton produces T_skin → slab advances T1 →
-    // canyon air T is computed from Newton H → next step's Newton uses this T_canyon
+    // Phase 3.5A: Update canyon-air temperature using Newton-computed H
     for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU());
          mfi.isValid(); ++mfi)
     {
@@ -955,47 +855,37 @@ void UCMLayer::advance(UCMFields& fields,
             amrex::Real W   = amrex::max(W_road(i,j,0), amrex::Real(1.0e-6));
             amrex::Real HoW = Hb / W;
 
-            // Phase 3.5a-hotfix3: Canyon-air thermal inertia via first-order relaxation
-            // dT_canyon/dt = (H_road + H_wall - conductance*(T_canyon - T_atm)) / thermal_mass
-            // where thermal_mass = rho_cp * H_canyon_eff (H_canyon_eff = effective canyon depth for thermal mass)
-            // Discretize: T_canyon^{n+1} = T_canyon^n + dt * dT_canyon/dt
-            // with |dT| limiter to prevent runaway if H_facet is nonsensical
-            
-            constexpr amrex::Real rho_cp_c   = 1.2 * 1005.0;  // [J/m^3/K]
-            constexpr amrex::Real U_canyon    = 2.0;           // [m/s]
-            constexpr amrex::Real Ch_c        = 0.01;          // [-]
-            constexpr amrex::Real max_dT_per_step = 2.0;       // [K] Phase 3.5a-hotfix3: limiter
-            
+            constexpr amrex::Real rho_cp_c   = 1.2 * 1005.0;
+            constexpr amrex::Real U_canyon    = 2.0;
+            constexpr amrex::Real Ch_c        = 0.01;
+            constexpr amrex::Real max_dT_per_step = 2.0;
+
             amrex::Real conductance = amrex::max(rho_cp_c * Ch_c * U_canyon,
                                                   amrex::Real(1.0e-6));
-            
-            // Effective canyon depth for thermal mass (half of building height)
+
             amrex::Real H_canyon_depth = 0.5 * Hb;
             amrex::Real thermal_mass = rho_cp_c * amrex::max(H_canyon_depth, amrex::Real(1.0));
-            
-            // Weighted heat input to canyon from road and wall [W/m^2 of ATM area]
+
             amrex::Real H_net = H_rd(i,j,0) + H_wl(i,j,0)
                               - conductance * (T_canyon_a(i,j,0) - T_atm(i,j,0));
-            
-            // Temperature change over this timestep [K]
+
             amrex::Real dT = H_net * dt / thermal_mass;
-            
-            // Limit step to prevent runaway
+
             if (dT >  max_dT_per_step) dT =  max_dT_per_step;
             if (dT < -max_dT_per_step) dT = -max_dT_per_step;
-            
-            // Update canyon air temperature
+
             amrex::Real T_canyon_new = T_canyon_a(i,j,0) + dT;
-            
-            // Clamp to physical range
+
             T_canyon_new = amrex::max(amrex::min(T_canyon_new, amrex::Real(380.0)),
                                        amrex::Real(200.0));
             T_canyon_a(i,j,0) = T_canyon_new;
         });
     }
 
-    // Phase 5.2: HVAC waste heat (Contract #21)
-    // Coupled to SEB via cooling-load proportionality from slab conduction
+    // ========================================================================
+    // Phase 5.2: HVAC waste heat (Contract #21 / #22)
+    // Scalar-hoisted single-profile lookup — no std::vector in ParallelFor lambda
+    // ========================================================================
     const bool hvac_on = (m_params.hvac_mode == HVACMode::Simple);
 
     if (hvac_on) {
@@ -1003,19 +893,46 @@ void UCMLayer::advance(UCMFields& fields,
         const amrex::Real cop_default = m_params.hvac_cop_default;
         const amrex::Real setpt_default = m_params.hvac_setpoint_default_K;
 
-        // Compute solar time (local time of day for occupancy lookup)
         const amrex::Real solar_time_local = m_params.solar_time_start_s + time;
         const int hour_of_day = static_cast<int>(std::fmod(solar_time_local / 3600.0, 24.0));
 
-        // Phase 5.2: Load HVAC and occupancy profiles from CSV files
-        // (NOTE: In production, these should be loaded once at init and cached.
-        //  For inspection purposes, this shows the functional pattern correctly.)
+        // Load CSVs (once per call; production should cache at init)
         UCMHVACReader hvac_reader(m_params.hvac_csv_path);
         UCMOccupancyReader occ_reader(m_params.occupancy_csv_path);
-
-        // Retrieve profile data for device-side lookup (simplified linear search)
         const auto& hvac_profiles = hvac_reader.get_all_profiles();
         const auto& occ_profiles = occ_reader.get_all_profiles();
+
+        // Contract #22: NO std::vector, std::string, or heap-allocated STL 
+        // containers may be captured by value into an amrex::ParallelFor lambda.
+        // Pre-resolve profile 0's values on HOST as scalars.
+        // Multi-profile per-cell dispatch is deferred to Phase 6.2b (BEM-lite)
+        // via amrex::Gpu::DeviceVector.
+        amrex::Real T_setpt_resolved = setpt_default;
+        amrex::Real cop_resolved = cop_default;
+        int occ_id_resolved = 0;
+        if (hvac_profiles.size() > 0) {
+            T_setpt_resolved = hvac_profiles[0].t_setpoint_K;
+            cop_resolved = hvac_profiles[0].cop;
+            occ_id_resolved = hvac_profiles[0].occupancy_profile_id;
+        }
+
+        amrex::Real f_occ_resolved = 1.0;
+        for (const auto& p : occ_profiles) {
+            if (p.id == occ_id_resolved) {
+                if (hour_of_day >= 0 && hour_of_day < 24) {
+                    f_occ_resolved = p.hourly_frac[hour_of_day];
+                }
+                break;
+            }
+        }
+
+        if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.2-diag-resolved] T_setpt=" << T_setpt_resolved
+                           << " cop=" << cop_resolved
+                           << " occ_id=" << occ_id_resolved
+                           << " f_occ=" << f_occ_resolved
+                           << " hour=" << hour_of_day << "\n";
+        }
 
         for (amrex::MFIter mfi(*fields.AH, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
             const amrex::Box& bx = mfi.tilebox();
@@ -1023,60 +940,23 @@ void UCMLayer::advance(UCMFields& fields,
             auto const H_rf_a = fields.H_roof->const_array(mfi);
             auto const T_can_a = fields.T_canyon_air->const_array(mfi);
             auto const is_urb_a = fields.is_urban->const_array(mfi);
-            auto const hvac_id_a = fields.hvac_profile_id_map->const_array(mfi);
             auto AH_a = fields.AH->array(mfi);
             auto Q_diag_a = fields.Q_HVAC_diag->array(mfi);
-
-            // Create temporary device-accessible copies of profiles
-            // (NOTE: For GPU, these should be pre-allocated device arrays.
-            //  For inspection, this shows the data flow correctly.)
-            auto hvac_profiles_copy = hvac_profiles;  // Copy for device capture
-            auto occ_profiles_copy = occ_profiles;
 
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
                 Q_diag_a(i,j,0) = 0.0;
                 if (is_urb_a(i,j,0) == 0) return;
 
-                const int hvac_id = hvac_id_a(i,j,0);
-
-                // Device-side lookup: find HVAC profile by ID
-                amrex::Real cop = cop_default;
-                amrex::Real T_setpt = setpt_default;
-                int occ_id = 0;
-
-                for (const auto& p : hvac_profiles_copy) {
-                    if (p.id == hvac_id) {
-                        cop = p.cop;
-                        T_setpt = p.t_setpoint_K;
-                        occ_id = p.occupancy_profile_id;
-                        break;
-                    }
-                }
-
-                // Device-side lookup: get occupancy fraction for this hour
-                amrex::Real f_occ = 1.0;  // Default: fully occupied
-                for (const auto& p : occ_profiles_copy) {
-                    if (p.id == occ_id) {
-                        if (hour_of_day >= 0 && hour_of_day < 24) {
-                            f_occ = p.hourly_frac[hour_of_day];
-                        }
-                        break;
-                    }
-                }
-
-                // Compute HVAC waste heat using compute_hvac_waste_heat kernel
                 const amrex::Real Q_HVAC = compute_hvac_waste_heat(
                     H_wl_a(i,j,0), H_rf_a(i,j,0),
-                    T_can_a(i,j,0), T_setpt,
-                    hyst_K, cop, f_occ);
+                    T_can_a(i,j,0), T_setpt_resolved,
+                    hyst_K, cop_resolved, f_occ_resolved);
 
-                // Add HVAC waste heat to existing AH (Phase 2.3 path)
                 AH_a(i,j,0) += Q_HVAC;
                 Q_diag_a(i,j,0) = Q_HVAC;
             });
         }
 
-        // Phase 5.2: Per-step debug output
         if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Real Q_HVAC_min = fields.Q_HVAC_diag->min(0, 0);
             amrex::Real Q_HVAC_max = fields.Q_HVAC_diag->max(0, 0);
@@ -1087,49 +967,22 @@ void UCMLayer::advance(UCMFields& fields,
 
     // Phase 2.3: Compute anthropogenic heat
     compute_anthropogenic_heat(*fields.AH, *fields.ah_profile_id, *fields.is_urban,
-                              *fields.AH_Wm2_ucm,  // Phase 2.9: per-cell override
+                              *fields.AH_Wm2_ucm,
                               m_params, time, lev);
 
     // ------------------------------------------------------------------------
     // Phase 2.3 facet-split sensible heat flux (Phase 2.3.1 physics fix)
-    //
-    // BUG HISTORY: Original Phase 2.3 code multiplied the plan-area MOST flux
-    //   H_base = -rho * Cp * u_star * t_star  [W/m^2 of plan area]
-    // by all three of (f_road, f_wall, f_roof) and summed them into
-    // H_sensible. Because f_road + f_roof = 1 (plan-area partition of unity)
-    // but f_wall = 2*lam_p*H/W is a FRONTAL-area index (may exceed 1), the
-    // "sum" over-injected heat into the atmosphere by a factor of
-    // ~ (1 + f_wall) = ~2 for typical lam_p=0.5, H/W=1. See
-    // Exec/CanonicalTests/SLUCM/UCMFacetSplit  logs showing
-    // H_sensible = 283 W/m^2 vs. H_base ~ 141 W/m^2 for identical inputs.
-    //
-    // FIX: Treat H_base as the plan-area lumped flux already. Facet arrays
-    // H_road/H_wall/H_roof are reported as per-facet-area diagnostics (road
-    // and roof see H_base directly; wall is scaled by the frontal-area index
-    // for its own diagnostic only). The lumped flux written to H_sensible and
-    // fed to the ATM injection is the plan-area partition:
-    //     H_sensible = f_road*H_road + f_roof*(H_roof - AH) + AH
-    // which reduces to (H_base + AH) in the simplified Phase 2.3 split where
-    // road/roof share a single MOST-driven t_star. AH is treated as already
-    // area-integrated (W/m^2 of plan area, per compute_anthropogenic_heat).
-    //
-    // TODO(UCM Phase 2.4): drive road/wall/roof with per-facet resistances
-    // and per-facet ΔT (T_skin_facet - T_canyon or T_atm) so the three facets
-    // can diverge. In the current simplified split they share a single
-    // driving t_star, so H_road == H_roof by construction.
     // ------------------------------------------------------------------------
 
     const amrex::Real Cp = Cp_d;
-    const amrex::Real rho_ref = 1.2;  // Reference density [kg/m^3]
-    const amrex::Real zref = 2.0;     // Reference height above roof [m]
+    const amrex::Real rho_ref = 1.2;
+    const amrex::Real zref = 2.0;
 
-    // Iterate over forcing.u_star (on UCM grid) to compute facet fluxes
     for (amrex::MFIter mfi(*forcing.u_star, amrex::TilingIfNotGPU());
         mfi.isValid(); ++mfi)
     {
        const amrex::Box& bx = mfi.tilebox();
 
-       // Input arrays
        auto const plan_a   = fields.plan_area_frac->const_array(mfi);
        auto const Hbldg_a  = fields.H_bldg->const_array(mfi);
        auto const Wrd_a    = fields.W_road->const_array(mfi);
@@ -1138,17 +991,13 @@ void UCMLayer::advance(UCMFields& fields,
        auto const is_urb_a = fields.is_urban->const_array(mfi);
        auto const u_star_a = forcing.u_star->const_array(mfi);
        auto const t_star_a = atm_t_star.const_array(mfi);
-       // Phase 3.4/3.5: Obukhov length for stability correction
        auto const olen_a   = atm_olen.const_array(mfi);
 
-       // Output arrays
-       // Phase 3.5A-hotfix2: MOST-derived fluxes for ATM injection (separate from Newton)
        auto       h_road_atm_a = fields.H_road_atm->array(mfi);
        auto       h_wall_atm_a = fields.H_wall_atm->array(mfi);
        auto       h_roof_atm_a = fields.H_roof_atm->array(mfi);
        auto       h_sens_a = fields.H_sensible->array(mfi);
 
-       // Phase 3.4/3.5: Stability correction parameters
        const bool use_stab_corr = m_params.use_stability_correction;
        const amrex::Real zeta_max_stable = m_params.zeta_max_stable;
        const amrex::Real zeta_min_unstable = m_params.zeta_min_unstable;
@@ -1166,42 +1015,22 @@ void UCMLayer::advance(UCMFields& fields,
            const amrex::Real Hb   = Hbldg_a(i,j,0);
            const amrex::Real Wsum = amrex::max(Wrd_a(i,j,0) + Wrf_a(i,j,0), 1.0e-6);
 
-           // Plan-area partition of unity (road + roof cover the ground plane).
            const amrex::Real f_road = 1.0 - pf;
            const amrex::Real f_roof = pf;
-           // Wall frontal-area INDEX (per unit ground area). NOT a plan-area
-           // fraction; may exceed 1 for tall/narrow canyons. Used only for the
-           // per-wall-area diagnostic flux below.
-           // (lam_f computed inline where needed: 2.0 * pf * Hb / Wsum)
 
            const amrex::Real u_star = u_star_a(i,j,0);
            const amrex::Real t_star = t_star_a(i,j,0);
-           // Phase 3.5a-hotfix3: MOST sensible heat flux with consistent sign convention.
-           // H = -ρ*Cp*u_star*t_star [W/m²]
-           // Sign convention: Positive H = surface → atmosphere (surface LOSING heat, cooling)
-           //                 Negative H = atmosphere → surface (surface GAINING heat, warming)
-           // This matches the Newton formula: H = ρ*cp*Ch*|U|*(T_skin - T_air)
-           // Both formulas should produce the same sign for identical inputs.
            amrex::Real H_base = rho_ref * Cp * u_star * t_star;
            const amrex::Real AH_val = ah_a(i,j,0);
 
-           // Phase 3.4/3.5: Apply stability correction if enabled
            if (use_stab_corr) {
                const amrex::Real olen = olen_a(i,j,0);
-               // compute_ch_stability_correction expects Ch_base and returns Ch_corrected
-               // For the sensible heat flux: H_corrected = H_base * correction_factor
                H_base = compute_ch_stability_correction(H_base, olen, zref,
                                                         zeta_max_stable, zeta_min_unstable);
            }
 
-           // Phase 2.5-fix2: enforce pre-weighted facet-split convention (Phase 2.3 spec).
-           // H_road_atm, H_wall_atm, H_roof_atm are MOST-derived and each already scaled 
-           // by their area fraction so they sum to the ATM-cell sensible flux for injection.
-           // Phase 2.7 Facet3D injection assumes this convention.
-           //
-           // Per-facet pre-weighted contributions [W/m^2 of ATM cell area].
            amrex::Real Hr = f_road * H_base;
-           amrex::Real Hw = 2.0 * pf * Hb / Wsum * H_base;  // f_wall = 2.0*pf*Hb/Wsum
+           amrex::Real Hw = 2.0 * pf * Hb / Wsum * H_base;
            amrex::Real Hf = f_roof * H_base;
 
            if (!amrex::Math::isfinite(Hr)) Hr = 0.0;
@@ -1212,33 +1041,25 @@ void UCMLayer::advance(UCMFields& fields,
            Hw = amrex::max(-1500.0, amrex::min(1500.0, Hw));
            Hf = amrex::max(-1500.0, amrex::min(1500.0, Hf));
 
-           // Anthropogenic heat added to roof (rooftop HVAC convention).
-           // TODO(UCM Phase 6.2): Move AH to building-energy model.
            Hf += AH_val;
 
-           // Phase 3.5A-hotfix2: Write MOST-derived H to ATM fields (not Newton fields)
            h_road_atm_a(i,j,0) = Hr;
            h_wall_atm_a(i,j,0) = Hw;
            h_roof_atm_a(i,j,0) = Hf;
 
-           // Lumped plan-area sensible flux to ATM.
-           // Since Hr, Hw, Hf are now pre-weighted by their area fractions,
-           // they sum directly to give the ATM-cell sensible heat flux.
-           // Wall does NOT enter this sum -- wall fluxes belong to canyon-air budget (Phase 2.4+).
            const amrex::Real H_lumped = Hr + Hw + Hf;
 
            h_sens_a(i,j,0) = H_lumped;
        });
     }
 
-    fields.LE_latent->setVal(0.0);    // LE = 0 in Phase 2.3
+    fields.LE_latent->setVal(0.0);
 
     // ========================================================================
-    // Step 4: Debug trace (Phase 1.3 mandatory; Phase 2.3 extended)
+    // Step 4: Debug trace
     // ========================================================================
 
     if (m_params.ucm_debug) {
-        // Collectives on ALL ranks (valid cells only, nghost=0)
         amrex::Real T_roof_min  = fields.T_skin_roof->min(0, 0);
         amrex::Real T_roof_max  = fields.T_skin_roof->max(0, 0);
         amrex::Real T_wall_min  = fields.T_skin_wall->min(0, 0);
@@ -1258,7 +1079,6 @@ void UCMLayer::advance(UCMFields& fields,
         amrex::Real AH_min      = fields.AH->min(0, 0);
         amrex::Real AH_max      = fields.AH->max(0, 0);
 
-        // Phase 3.5A-hotfix2: Compare Newton vs MOST H for self-consistency diagnostics
         amrex::Real H_roof_atm_min = fields.H_roof_atm->min(0, 0);
         amrex::Real H_roof_atm_max = fields.H_roof_atm->max(0, 0);
         amrex::Real H_road_atm_min = fields.H_road_atm->min(0, 0);
@@ -1280,7 +1100,6 @@ void UCMLayer::advance(UCMFields& fields,
                           << " (= H_road+H_wall+H_roof; AH already in H_roof)\n";
         }
 
-        // Phase 3.5A-hotfix2: SEB solver self-consistency check — Newton vs MOST H
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][3.5A-hotfix2][consistency] time=" << time << " s\n"
                           << "  Newton  H_roof min=" << H_roof_min << " max=" << H_roof_max << " W/m2  (drives slab conduction)\n"
@@ -1291,7 +1110,6 @@ void UCMLayer::advance(UCMFields& fields,
                           << "  MOST    H_wall min=" << H_wall_atm_min << " max=" << H_wall_atm_max << " W/m2\n";
         }
 
-        // Phase 3.2: SEB-inputs diagnostic — verify ATM fields are being consumed
         amrex::Real tat_min = T_atm_lowest.min(0, 0), tat_max = T_atm_lowest.max(0, 0);
         amrex::Real uat_min = xvel.min(0, 0), uat_max = xvel.max(0, 0);
         amrex::Real vat_min = yvel.min(0, 0), vat_max = yvel.max(0, 0);
@@ -1308,9 +1126,6 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
 
-    // Phase 3.3: PBLH read-back guard — one-time print
-    // Design contract #4: verify no PBLH consumed in this call.
-    // All forcing comes from u_star, t_star, q_star (extracted above).
     static bool pblh_guard_printed = false;
     if (!pblh_guard_printed && m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
         pblh_guard_printed = true;
