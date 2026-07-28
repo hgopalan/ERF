@@ -159,4 +159,90 @@ amrex::Real gray_sky_LW_down(amrex::Real T_atm_K, amrex::Real eps_sky = 0.83)
     return amrex::max(Real(0.0), LW);
 }
 
+/**
+ * @brief Apply cloud attenuation to shortwave radiation (Phase 4.2)
+ *
+ * Kasten & Czeplak (1980) formula for cloud-attenuated SW:
+ *
+ *   SW_cloudy = SW_clear * (1 - a * cf^b)
+ *
+ * where cf is cloud fraction [0–1], and a, b are empirical coefficients.
+ * Defaults: a = 0.75, b = 3.4 (standard for cumulus/stratus cloud types).
+ *
+ * At cf = 0 (clear sky), returns SW_clear unchanged (backward compatible).
+ *
+ * @param SW_clear     Clear-sky downwelling SW [W/m²]
+ * @param cloud_frac   Cloud fraction [0–1]
+ * @param a            Kasten & Czeplak coefficient a (default 0.75) [-]
+ * @param b            Kasten & Czeplak exponent b (default 3.4) [-]
+ *
+ * @return Cloud-attenuated SW radiation [W/m²], clamped ≥ 0
+ *
+ * Reference: Kasten, F., and C. Z. Czeplak (1980), Solar and terrestrial radiation dependent
+ *            on the amount and type of cloud, Sol. Energy, 24(2), 177–189.
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real cloud_attenuated_SW_down(amrex::Real SW_clear, amrex::Real cloud_frac,
+                                  amrex::Real a = 0.75, amrex::Real b = 3.4)
+{
+   using namespace amrex;
+
+   // Clamp cloud fraction to [0, 1]
+   cloud_frac = amrex::max(Real(0.0), amrex::min(Real(1.0), cloud_frac));
+
+   // Kasten & Czeplak attenuation
+   amrex::Real attenuation = std::pow(cloud_frac, b);
+   amrex::Real factor = 1.0 - a * attenuation;
+    
+   // Ensure factor is in [0, 1]
+   factor = amrex::max(Real(0.0), amrex::min(Real(1.0), factor));
+
+   amrex::Real SW_cloudy = SW_clear * factor;
+   return amrex::max(Real(0.0), SW_cloudy);
+}
+
+/**
+ * @brief Apply cloud enhancement to longwave radiation (Phase 4.2)
+ *
+ * Crawford & Duchon (1999) formula for cloud-enhanced LW:
+ *
+ *   LW_cloudy = LW_clear * (1 - cf) + sigma * T_air^4 * cf
+ *
+ * where cf is cloud fraction [0–1], T_air is near-surface air temperature [K],
+ * and sigma is Stefan-Boltzmann constant. The second term models cloud-base
+ * radiation as a blackbody at near-surface temperature.
+ *
+ * At cf = 0 (clear sky), returns LW_clear unchanged (backward compatible).
+ * At cf = 1 (overcast), returns sigma * T_air^4 (cloud-base blackbody).
+ *
+ * @param LW_clear     Clear-sky downwelling LW [W/m²]
+ * @param cloud_frac   Cloud fraction [0–1]
+ * @param T_air_K      Near-surface (k=klo) air temperature [K]
+ *
+ * @return Cloud-enhanced LW radiation [W/m²], clamped ≥ 0
+ *
+ * Reference: Crawford, T. M., and C. E. Duchon (1999), An improved parametrization
+ *            for estimating effective atmospheric emissivity for use in calculating
+ *            net longwave radiation, J. Appl. Meteorol., 38(4), 474–480.
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real cloud_enhanced_LW_down(amrex::Real LW_clear, amrex::Real cloud_frac,
+                                amrex::Real T_air_K)
+{
+   using namespace amrex;
+
+   constexpr amrex::Real sigma_sb = 5.670374419e-8;  // Stefan-Boltzmann [W/m²/K⁴]
+
+   // Clamp cloud fraction and temperature
+   cloud_frac = amrex::max(Real(0.0), amrex::min(Real(1.0), cloud_frac));
+   T_air_K = amrex::max(Real(200.0), amrex::min(Real(350.0), T_air_K));
+
+   // Crawford & Duchon: LW_cloudy = LW_clear * (1 - cf) + sigma * T_air^4 * cf
+   amrex::Real T4 = T_air_K * T_air_K * T_air_K * T_air_K;
+   amrex::Real cloud_base_rad = sigma_sb * T4;
+
+   amrex::Real LW_cloudy = LW_clear * (1.0 - cloud_frac) + cloud_base_rad * cloud_frac;
+   return amrex::max(Real(0.0), LW_cloudy);
+}
+
 #endif  // ERF_UCM_RADIATION_FORCING_H

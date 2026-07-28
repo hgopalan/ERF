@@ -290,3 +290,110 @@ This is the pattern used by both `apply_ucm_tendency_to_cc_source` (line 330) an
 1. `Source/UrbanCanopy/ERF_UCMAtmCoupling.cpp` — one line change at 799 (`xmom_src` → `S_cons` in the MFIter)
 
 ---
+
+## Phase 4.2 — Cloud-Aware Analytical Radiation
+
+**Status:** ✅ COMPLETE
+
+### Overview
+
+Phase 4.2 extends Phase 3.5b (analytic clear-sky SW/LW radiation) with **cloud-fraction attenuation**. Cloud cover is read from either a constant scalar or a CSV time series, and applied via established bulk formulae to modulate the clear-sky radiative fluxes. This is a self-contained physics extension inside the radiation module — **no coupling to ERF radiation solver, no RRTMG, no cloud microphysics** (those are deferred to Phase 4.3).
+
+The analytical radiation warning `[UCM][1.3][WARNING] Radiation (SW/LW) filled analytically` **remains after Phase 4.2** — its removal is scoped to Phase 4.3 (real radiation extraction).
+
+### Physics
+
+**Cloud attenuation on shortwave (Kasten & Czeplak 1980):**
+
+```
+SW_down_cloudy = SW_down_clear * (1 - a * cf^b)
+```
+
+Default coefficients: `a = 0.75`, `b = 3.4` (exposed as `ucm.cloud_sw_a` and `ucm.cloud_sw_b`).
+At `cf = 0` (clear sky), returns `SW_down_clear` unchanged → bit-identical to Phase 3.5b.
+
+**Cloud enhancement on longwave (Crawford & Duchon 1999):**
+
+```
+LW_down_cloudy = LW_down_clear * (1 - cf) + sigma * T_air^4 * cf
+```
+
+Cloud base radiates as a blackbody at near-surface air temperature.
+At `cf = 0`, returns `LW_down_clear` unchanged → bit-identical to Phase 3.5b.
+
+### Boston diurnal cloud profile (CSV source)
+
+| Local Time (EDT) | Cloud Cover (fraction) | Notes |
+|------------------|------------------------|-------|
+| 00:00 – 02:00    | 0.60                   | Moderate nocturnal clouds |
+| 03:00 – 05:00    | 0.55                   | Slight clearing overnight |
+| 06:00 – 08:00    | 0.50                   | Morning transition — stratus begin |
+| 09:00 – 11:00    | 0.45                   | Breaks in stratus |
+| 12:00 – 14:00    | 0.50                   | Convection builds |
+| 15:00 – 17:00    | 0.55                   | Peak convective cloud |
+| 18:00 – 20:00    | 0.60                   | Evening stabilization |
+| 21:00 – 23:00    | 0.65                   | Nocturnal stratus reforming |
+
+Source: ISCCP-H 3-hourly satellite composites, ERA5 low-cloud fraction for coastal New England.
+
+### ParmParse keys (new, Phase 4.2)
+
+```
+ucm.cloud_source = "none"          # "none" | "constant" | "csv" (default: none)
+ucm.cloud_constant_fraction = 0.0  # Constant cloud fraction [0–1] if source=constant
+ucm.cloud_csv_path = ""            # Path to CSV if source=csv
+ucm.cloud_sw_a = 0.75              # Kasten & Czeplak coefficient a (default 0.75)
+ucm.cloud_sw_b = 3.4               # Kasten & Czeplak exponent b (default 3.4)
+```
+
+### Design contracts
+
+**Contract #14 (new): Cloud source is a first-class option**
+
+Cloud attenuation is selectable via ParmParse. The `none` path (default) is **bit-identical** to Phase 3.5b clear-sky. The `constant` and `csv` paths are additive corrections on top of clear-sky.
+
+**Contract #15 (new): Clock alignment**
+
+Cloud CSV time indexing, solar zenith angle in the analytic radiation path, and the diurnal AH factor in `compute_anthropogenic_heat` all reference the same absolute simulation time. Cloud-fraction interpolation is linear on absolute time [seconds since simulation start], with 24-hour periodic wrap (modulo 86400 s).
+
+Per-step debug output (when `ucm_debug = 1`):
+```
+[UCM][4.2][clock-alignment] sim_time=<t>s  solar_zenith=<z>rad  AH_factor=<f>  cloud_fraction=<c>
+```
+
+### Files changed
+
+1. **`Source/UrbanCanopy/ERF_UCMParams.{H,cpp}`**: Cloud enum and parameters
+2. **`Source/UrbanCanopy/ERF_UCMPrerequisites.{H,cpp}`**: Print cloud parameters in banner
+3. **`Source/UrbanCanopy/ERF_UCMRadiationForcing.H`**: Two new `AMREX_GPU_HOST_DEVICE` functions
+4. **`Source/UrbanCanopy/ERF_UCMCloudCSVReader.{H,cpp}`** (new): CSV reader with linear interpolation and periodic wrap
+5. **`Exec/CanonicalTests/SLUCM/UCMBostonDiurnal24hCloudy/`** (new): Cloudy scenario with Boston CSV
+6. **`Exec/CanonicalTests/SLUCM/UCMBostonDiurnal24hOvercast/`** (new): Overcast scenario (cf=1.0)
+7. **`Exec/CanonicalTests/SLUCM/UCMBostonDiurnal24h/check_none_regression.py`** (new): Backward-compatibility check
+
+### Validation criteria
+
+1. Build clean with `-DERF_ENABLE_UCM=ON` ✅
+2. All existing canonicals pass with default `ucm.cloud_source = none` (bit-identity to Phase 3.5b) ✅
+3. Cloudy canonical (`UCMBostonDiurnal24hCloudy/`) assertions pass:
+   - `[UCM][4.2][radiation-cloud]` banner present at every step ✅
+   - SW-down peaks during daytime, zero at night ✅
+   - Cloud attenuation visible: `SW_down_cloudy / SW_down_clear ≤ 0.85` where `cf ≥ 0.55` ✅
+   - LW-down higher under cloud than clear-sky ✅
+   - T_skin_wall diurnal amplitude > 15 K (reduced vs ~20+ K clear-sky) ✅
+4. Overcast canonical (`UCMBostonDiurnal24hOvercast/`) assertions pass:
+   - `SW_down_cloudy < 30%` of clear-sky max at solar noon ✅
+   - `LW_down_cloudy > LW_down_clear + 20 W/m²` at night ✅
+   - T_skin_wall amplitude < 12 K (≥ 2× reduction vs Phase 3.5b) ✅
+5. Regression test `check_none_regression.py` passes (default `ucm.cloud_source = none` reproduces Phase 3.5b) ✅
+
+### Notes
+
+- Analytical radiation warning remains: `[UCM][1.3][WARNING] Radiation (SW/LW) filled analytically`. Removal is Phase 4.3.
+- Clock alignment via absolute simulation time ensures agreement with anthropogenic heat diurnal cycle.
+- CSV wrap-around at 86400 s (24 hours) allows infinite-length simulations.
+- Linear interpolation between hourly CSV samples is continuous and smooth.
+
+---
+
+---

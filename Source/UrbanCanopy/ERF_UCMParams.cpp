@@ -142,4 +142,22 @@ void UCMParams::read_from_parmparse()
     pp.query("solar_constant", solar_constant);
     pp.query("sw_transmission", sw_transmission);
     pp.query("sky_emissivity", sky_emissivity);
+
+    // Section 13: Phase 4.2 — Cloud-aware analytical radiation forcing
+    pp.query("cloud_source", cloud_source_str);
+    pp.query("cloud_constant_fraction", cloud_constant_fraction);
+    pp.query("cloud_csv_path", cloud_csv_path);
+    pp.query("cloud_sw_a", cloud_sw_a);
+    pp.query("cloud_sw_b", cloud_sw_b);
+
+    // Resolve cloud_source_str to enum
+    if (cloud_source_str == "none") {
+        cloud_source = CloudSource::None;
+    } else if (cloud_source_str == "constant") {
+        cloud_source = CloudSource::Constant;
+    } else if (cloud_source_str == "csv") {
+        cloud_source = CloudSource::Csv;
+    } else {
+        amrex::Error("erf.ucm.cloud_source must be 'none', 'constant', or 'csv'");
+    }
 }
