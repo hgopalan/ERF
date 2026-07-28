@@ -22,6 +22,7 @@
 #include <UrbanCanopy/ERF_UCMStabilityCorrection.H>
 #include <UrbanCanopy/ERF_UCMRadiationForcing.H>
 #include <UrbanCanopy/ERF_UCMViewFactors.H>
+#include <UrbanCanopy/ERF_UCMRadiationExtraction.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <ERF_Constants.H>
 #include <cmath>
@@ -244,13 +245,15 @@ void UCMLayer::advance(UCMFields& fields,
     // since cloud attenuation now sits on top of the analytic Phase 3.5b path.
     // The full removal of this warning is scoped to Phase 4.3 (real radiation extraction).
     if (!m_warn_radiation_placeholder_printed &&
-        m_params.cloud_source == CloudSource::None)
+       m_params.radiation_source == RadiationSource::Analytic &&
+       m_params.cloud_source == CloudSource::None)
     {
-        if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][1.3][WARNING] Radiation (SW/LW) filled analytically. "
-                          << "Phase 4.3 will replace with radiation solver extraction.\n";
-        }
-        m_warn_radiation_placeholder_printed = true;
+       if (amrex::ParallelDescriptor::IOProcessor()) {
+           amrex::Print() << "[UCM][1.3][WARNING] Radiation (SW/LW) filled analytically. "
+                         << "Phase 4.3 placeholder allows switching to erf radiation source, "
+                         << "but real extraction is deferred until RRTMG interface stabilizes.\n";
+       }
+       m_warn_radiation_placeholder_printed = true;
     }
 
     // ========================================================================
@@ -306,10 +309,38 @@ void UCMLayer::advance(UCMFields& fields,
 
     // Phase 3.5B: Compute prescribed SW/LW radiation forcing (if enabled)
     // Phase 4.2: extended with cloud attenuation
+    // Phase 4.3: new selector between analytic and ERF radiation sources
     amrex::Real SW_down = 0.0;
     amrex::Real LW_down = 350.0;  // Default fallback if radiation disabled
 
-    if (m_params.use_prescribed_radiation) {
+    if (m_params.radiation_source == RadiationSource::Erf) {
+        // Phase 4.3 placeholder — real extraction deferred
+        amrex::Real time_s_local = m_params.solar_time_start_s + time;
+        extract_radiation_from_erf(SW_down, LW_down, time_s_local);
+
+        // Layer 2 (runtime sentinel guard): refuse to feed sentinel values to SEB
+        if (SW_down < 0.0 || LW_down < 0.0) {
+            amrex::Abort(
+                "[UCM][4.3] extract_radiation_from_erf returned sentinel "
+                "(SW=" + std::to_string(SW_down) +
+                ", LW=" + std::to_string(LW_down) +
+                "). Phase 4.3 real extraction is not yet implemented. "
+                "Set erf.ucm.radiation_source=analytic.");
+        }
+
+        // Layer 3 (optional physical range sanity check)
+        if (SW_down < 0.0 || SW_down > 1500.0 || LW_down < 100.0 || LW_down > 600.0) {
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print()
+                    << "[UCM][4.3][WARNING] extract_radiation_from_erf returned "
+                    << "out-of-range values: SW=" << SW_down
+                    << " W/m² (expected [0, 1500]), LW=" << LW_down
+                    << " W/m² (expected [100, 600]). Check unit conversion and "
+                    << "MultiFab access in the extraction path.\n";
+            }
+        }
+    }
+    else if (m_params.use_prescribed_radiation) {
         // Compute solar zenith angle for domain center
         amrex::Real time_s_local = m_params.solar_time_start_s + time;  // Local solar time
         amrex::Real lat_rad = m_params.lat_deg * (3.14159265358979323846 / 180.0);
