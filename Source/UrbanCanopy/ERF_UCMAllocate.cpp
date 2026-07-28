@@ -314,9 +314,46 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
     }
 
+    // Phase 5.1a: Multi-facet view factors (geometry only)
+    fields.F_wall_sky = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.1a][allocate_ucm_fields] F_wall_sky: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.F_wall_wall = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.1a][allocate_ucm_fields] F_wall_wall: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.F_wall_road = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.1a][allocate_ucm_fields] F_wall_road: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.F_road_sky = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.1a][allocate_ucm_fields] F_road_sky: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.F_road_wall = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.1a][allocate_ucm_fields] F_road_wall: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    fields.F_roof_sky = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.1a][allocate_ucm_fields] F_roof_sky: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
     // Summary message
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
-        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 31 MultiFabs on UCM grid "
+        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 37 MultiFabs on UCM grid "
                 << "at lev=" << lev << "\n";
     }
 
@@ -1143,6 +1180,49 @@ bool UCMFields::all_allocated() const
     if (!SVF_roof) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][2.4][all_allocated] MISSING: SVF_roof\n";
+        }
+        result = false;
+    }
+
+    // Phase 5.1a: Multi-facet view factors (geometry only)
+    if (!F_wall_sky) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.1a][all_allocated] MISSING: F_wall_sky\n";
+        }
+        result = false;
+    }
+
+    if (!F_wall_wall) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.1a][all_allocated] MISSING: F_wall_wall\n";
+        }
+        result = false;
+    }
+
+    if (!F_wall_road) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.1a][all_allocated] MISSING: F_wall_road\n";
+        }
+        result = false;
+    }
+
+    if (!F_road_sky) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.1a][all_allocated] MISSING: F_road_sky\n";
+        }
+        result = false;
+    }
+
+    if (!F_road_wall) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.1a][all_allocated] MISSING: F_road_wall\n";
+        }
+        result = false;
+    }
+
+    if (!F_roof_sky) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.1a][all_allocated] MISSING: F_roof_sky\n";
         }
         result = false;
     }

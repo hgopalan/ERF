@@ -21,6 +21,7 @@
 #include <UrbanCanopy/ERF_UCMShadowing.H>
 #include <UrbanCanopy/ERF_UCMStabilityCorrection.H>
 #include <UrbanCanopy/ERF_UCMRadiationForcing.H>
+#include <UrbanCanopy/ERF_UCMViewFactors.H>
 #include <UrbanCanopy/ERF_UCMRadiationExtraction.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <ERF_Constants.H>
@@ -264,6 +265,29 @@ void UCMLayer::advance(UCMFields& fields,
     compute_sky_view_factors(*fields.SVF_wall, *fields.SVF_road, *fields.SVF_roof,
                              *fields.H_bldg, *fields.W_road, *fields.is_urban,
                              lev, m_params.ucm_debug);
+
+    // ========================================================================
+    // Step 2.4a: Compute multi-facet view factors (Phase 5.1a: pure geometry)
+    // ========================================================================
+    // Phase 5.1a: Compute multi-facet view factors (pure geometry).
+    // These fields are NOT consumed by any SEB or radiation path in Phase 5.1a.
+    // Phase 5.1b will introduce a radiosity solver that consumes them.
+    // Computed once per run (H_bldg and W_road are static after CSV load).
+    static bool view_factors_computed = false;
+    if (!view_factors_computed) {
+        view_factors_computed = true;
+        compute_view_factors(*fields.F_wall_sky,
+                             *fields.F_wall_wall,
+                             *fields.F_wall_road,
+                             *fields.F_road_sky,
+                             *fields.F_road_wall,
+                             *fields.F_roof_sky,
+                             *fields.H_bldg,
+                             *fields.W_road,
+                             *fields.is_urban,
+                             lev,
+                             m_params.ucm_debug);
+    }
 
     // ========================================================================
     // Step 3: Solve facet SEB and advance slab conduction

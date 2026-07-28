@@ -23,6 +23,8 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_sources += UrbanCanopy/ERF_UCMStabilityCorrection.cpp
   # Phase 4.2 additions (Cloud-aware radiation)
   CEXE_sources += UrbanCanopy/ERF_UCMCloudCSVReader.cpp
+  # Phase 5.1a additions (View-factor precomputation)
+  CEXE_sources += UrbanCanopy/ERF_UCMViewFactors.cpp
 
   # Headers (complete list)
   CEXE_headers += UrbanCanopy/ERF_UCM.H
@@ -52,6 +54,8 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_headers += UrbanCanopy/ERF_UCMRadiationForcing.H
   # Phase 4.2 headers (Cloud-aware radiation)
   CEXE_headers += UrbanCanopy/ERF_UCMCloudCSVReader.H
+  # Phase 5.1a headers (View-factor precomputation)
+  CEXE_headers += UrbanCanopy/ERF_UCMViewFactors.H
   # Phase 4.3 headers (Real radiation extraction — placeholder)
   CEXE_headers += UrbanCanopy/ERF_UCMRadiationExtraction.H
 
