@@ -295,6 +295,13 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
     }
 
+    // Phase 5.2: HVAC profile selector
+    fields.hvac_profile_id_map = std::make_unique<iMultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.2][allocate_ucm_fields] hvac_profile_id_map (iMultiFab): "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
     // Phase 2.4: Sky view factors (shadowing model)
     fields.SVF_wall = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
@@ -351,9 +358,16 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
     }
 
+    // Phase 5.2: HVAC diagnostic field
+    fields.Q_HVAC_diag = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.2][allocate_ucm_fields] Q_HVAC_diag: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
     // Summary message
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
-        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 37 MultiFabs on UCM grid "
+        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 39 MultiFabs on UCM grid "
                 << "at lev=" << lev << "\n";
     }
 
@@ -428,6 +442,8 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.AH_Wm2_ucm->setVal(0.0);  // Phase 2.9: zero out per-cell AH override
     fields.plan_area_frac->setVal(0.0);
     fields.ah_profile_id->setVal(0);
+    fields.hvac_profile_id_map->setVal(0);  // Phase 5.2: zero out HVAC profile ID
+    fields.Q_HVAC_diag->setVal(0.0);         // Phase 5.2: zero out HVAC diagnostic
 
     // Get const references to the broadcast data
     const auto& rows = building_reader.rows();
@@ -513,6 +529,7 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
         auto slab_L_road_arr   = fields.slab_L_road->array(mfi);
         auto plan_area_frac_arr = fields.plan_area_frac->array(mfi);
         auto ah_profile_id_arr  = fields.ah_profile_id->array(mfi);
+        auto hvac_profile_id_arr = fields.hvac_profile_id_map->array(mfi);  // Phase 5.2
         auto AH_Wm2_ucm_arr     = fields.AH_Wm2_ucm->array(mfi);  // Phase 2.9
 
         for (int j_ucm = bx.smallEnd(1); j_ucm <= bx.bigEnd(1); ++j_ucm) {
@@ -585,6 +602,7 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                     // Phase 2.3: morphology-derived + AH profile id
                     plan_area_frac_arr(iv, 0) = static_cast<amrex::Real>(row.plan_area_frac);
                     ah_profile_id_arr(iv, 0)  = row.ah_profile_id;
+                    hvac_profile_id_arr(iv, 0) = row.hvac_profile_id;  // Phase 5.2
 
                     // Phase 2.9: per-cell AH override from CSV
                     AH_Wm2_ucm_arr(iv, 0) = row.AH_Wm2;
@@ -608,6 +626,7 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                     slab_L_road_arr(iv, 0) = 0.3;
                     plan_area_frac_arr(iv, 0) = 0.0;
                     ah_profile_id_arr(iv, 0)  = 0;
+                    hvac_profile_id_arr(iv, 0) = 0;  // Phase 5.2
                 }
 
                 // Initial temperatures (same for urban and non-urban).
@@ -902,6 +921,18 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
         Print() << "[UCM][2.3][fill_ucm_fields_homogeneous] ah_profile_id = 0\n";
     }
 
+    // Phase 5.2: HVAC profile ID
+    fields.hvac_profile_id_map->setVal(0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.2][fill_ucm_fields_homogeneous] hvac_profile_id_map = 0\n";
+    }
+
+    // Phase 5.2: HVAC diagnostic field
+    fields.Q_HVAC_diag->setVal(0.0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.2][fill_ucm_fields_homogeneous] Q_HVAC_diag = 0.0 W/m^2\n";
+    }
+
     // Note: z0 and d_disp are filled by fill_ucm_z0_and_disp, not here
 }
 
@@ -1158,6 +1189,21 @@ bool UCMFields::all_allocated() const
     if (!ah_profile_id) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][2.3][all_allocated] MISSING: ah_profile_id\n";
+        }
+        result = false;
+    }
+
+    // Phase 5.2: HVAC profile and diagnostic fields
+    if (!hvac_profile_id_map) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.2][all_allocated] MISSING: hvac_profile_id_map\n";
+        }
+        result = false;
+    }
+
+    if (!Q_HVAC_diag) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.2][all_allocated] MISSING: Q_HVAC_diag\n";
         }
         result = false;
     }

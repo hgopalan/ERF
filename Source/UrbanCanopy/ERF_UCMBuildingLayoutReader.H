@@ -91,6 +91,7 @@ struct UCMBuildingRow
     int    ah_profile_id;      ///< Anthropogenic heat profile ID, Phase 2.3+
     amrex::Real AH_Wm2;        ///< Per-cell AH override [W/m^2], Phase 2.9+; 0 → use ParmParse fallback
     int    is_urban;           ///< Urban mask [0 or 1]; 0 = LSM/MOST, 1 = UCM
+    int    hvac_profile_id;    ///< HVAC profile ID (Phase 5.2+), defaults to 0 if column missing
 };
 
 /**

@@ -25,6 +25,9 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_sources += UrbanCanopy/ERF_UCMCloudCSVReader.cpp
   # Phase 5.1a additions (View-factor precomputation)
   CEXE_sources += UrbanCanopy/ERF_UCMViewFactors.cpp
+  # Phase 5.2 additions (HVAC waste heat)
+  CEXE_sources += UrbanCanopy/ERF_UCMHVACReader.cpp
+  CEXE_sources += UrbanCanopy/ERF_UCMOccupancyReader.cpp
 
   # Headers (complete list)
   CEXE_headers += UrbanCanopy/ERF_UCM.H
@@ -62,5 +65,9 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_headers += UrbanCanopy/ERF_UCMRadiosity.H
   # Phase 5.1c headers (LW multi-bounce radiosity solver)
   CEXE_headers += UrbanCanopy/ERF_UCMRadiosityLW.H
+  # Phase 5.2 headers (HVAC waste heat)
+  CEXE_headers += UrbanCanopy/ERF_UCMHVAC.H
+  CEXE_headers += UrbanCanopy/ERF_UCMHVACReader.H
+  CEXE_headers += UrbanCanopy/ERF_UCMOccupancyReader.H
 
 endif
