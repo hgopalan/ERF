@@ -246,6 +246,26 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   solar_constant [W/m^2] = " << params.solar_constant << "\n";
     amrex::Print() << "[UCM]   sw_transmission [-] = " << params.sw_transmission << "\n";
     amrex::Print() << "[UCM]   sky_emissivity [-]  = " << params.sky_emissivity << "\n";
+    
+    // Phase 4.2 — Cloud-aware radiation
+    std::string cloud_source_name;
+    if (params.cloud_source == CloudSource::None) {
+       cloud_source_name = "none";
+    } else if (params.cloud_source == CloudSource::Constant) {
+       cloud_source_name = "constant";
+    } else if (params.cloud_source == CloudSource::Csv) {
+       cloud_source_name = "csv";
+    }
+    amrex::Print() << "[UCM]   cloud_source = " << cloud_source_name << "\n";
+    if (params.cloud_source == CloudSource::Constant) {
+       amrex::Print() << "[UCM]   cloud_constant_fraction [-] = " << params.cloud_constant_fraction << "\n";
+    }
+    if (params.cloud_source == CloudSource::Csv) {
+       amrex::Print() << "[UCM]   cloud_csv_path = " << params.cloud_csv_path << "\n";
+    }
+    amrex::Print() << "[UCM]   cloud_sw_a [-] = " << params.cloud_sw_a << "\n";
+    amrex::Print() << "[UCM]   cloud_sw_b [-] = " << params.cloud_sw_b << "\n";
+    
     amrex::Print() << "[UCM] =========================================================\n";
     amrex::Print() << "\n";
 

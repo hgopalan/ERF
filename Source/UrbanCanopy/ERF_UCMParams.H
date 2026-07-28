@@ -64,6 +64,20 @@ enum class WallDragMode
 };
 
 /**
+ * @enum CloudSource
+ * @brief Cloud attenuation source for analytical radiation (Phase 4.2)
+ *
+ * Determines how cloud cover is supplied to the SW/LW attenuation formulae.
+ * Phase 3.5b clear-sky (zero cloud) is the backward-compatible default.
+ */
+enum class CloudSource
+{
+    None = 0,      ///< Phase 3.5b clear-sky (zero cloud, default)
+    Constant = 1,  ///< Single scalar cloud fraction held for the whole run
+    Csv = 2        ///< Hourly cloud fraction read from CSV time series
+};
+
+/**
  * @struct UCMParams
  * @brief Container for all SLUCM configuration parameters read from ParmParse
  *
@@ -240,6 +254,21 @@ struct UCMParams
     amrex::Real solar_constant    = 1361.0;        ///< Top-of-atmosphere solar constant [W/m²]
     amrex::Real sw_transmission   = 0.7;           ///< Clear-sky bulk optical depth [-] (0.5–0.8)
     amrex::Real sky_emissivity    = 0.83;          ///< Clear-sky LW emissivity [-] (0.70–0.95)
+
+    // =========================================================================
+    // Section 13: Phase 4.2 — Cloud-aware analytical radiation forcing
+    // =========================================================================
+    // Extends Phase 3.5b with cloud fraction attenuation applied to SW/LW.
+    // Cloud fraction source is selectable: none (clear-sky, default), constant scalar,
+    // or CSV time series. Backward compatible: ucm.cloud_source=none reproduces Phase 3.5b
+    // bit-identically.
+
+    std::string cloud_source_str = "none";     ///< Phase 4.2: "none" | "constant" | "csv" [string]
+    CloudSource cloud_source = CloudSource::None;  ///< Phase 4.2: cloud attenuation source (auto-determined at init)
+    amrex::Real cloud_constant_fraction = 0.0;    ///< Phase 4.2: constant cloud fraction [0–1] if source=constant
+    std::string cloud_csv_path = "";              ///< Phase 4.2: path to cloud CSV if source=csv
+    amrex::Real cloud_sw_a = 0.75;                ///< Phase 4.2: Kasten & Czeplak SW attenuation coeff a [-]
+    amrex::Real cloud_sw_b = 3.4;                 ///< Phase 4.2: Kasten & Czeplak SW attenuation exponent b [-]
 
     // =========================================================================
     // Public methods
