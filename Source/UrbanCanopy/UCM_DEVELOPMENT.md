@@ -46,7 +46,7 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 3 | 3.8 | Non-urban partial-domain regression | Mixed urban+rural single ATM level (`UCMBostonMixedDomain/`) | ✅ COMPLETE | #251 |
 | 3 | 3.9 | **Regression suite hardening + unit tests** | 6-test GoogleTest suite (`Tests/Unit/UrbanCanopy/erf_ucm_unit_tests`) covering TDMA identity, Newton SEB day/night, Businger-Dyer, CSV reader/consumer; CI workflow `.github/workflows/slucm_regression.yml` (unit + canonical) | ✅ COMPLETE | #252 |
 | 3 | 3.10 | UCMBoston multi-level two-way | Phase 3 finale: `amr.max_level ≥ 1` with `atm_feedback_heat=1.0` end-to-end | 🔲 PLANNED | — |
-| 4 | 4.1 | is_urban mask enforcement (LSM + MOST bypass) | Wiring is_urban into LSM/MOST paths, mixed urban/non-urban domains | 🔲 PLANNED | — |
+| 4 | 4.1 | is_urban mask enforcement (LSM + MOST bypass) | Wiring is_urban into LSM/MOST paths, mixed urban/non-urban domains | ✅ COMPLETE | TBD |
 | 4 | 4.2 | Radiation coupling (SW/LW extraction) | Solar + LW extraction from radiation module to UCM; replaces Phase 3.5b analytic formulae; **regression: match Phase 3.5b analytic to <5% at noon summer solstice** | 🔲 PLANNED | — |
 | 4 | 4.3 | Urban/non-urban interface treatment | Boundary layer interpolation at urban perimeter | 🔲 PLANNED | — |
 | 4 | 4.4 | Mixed-domain diurnal integration test | Multi-facet urban/forest/ocean test case | 🔲 PLANNED | — |
@@ -60,6 +60,88 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 7 | 7.1 | Worry-list audit + v1.0 release | Final regression suite, documentation, issue resolution | 🔲 PLANNED | — |
 
 **Phase 3 status (as of 2026-07-28):** 3.1a → 3.9 complete (28 PRs, #200–#252). **Only Phase 3.10 (multi-level two-way finale) remains** before Phase 4.
+
+---
+
+## Phase 4.1 — `is_urban` Mask Enforcement (LSM + MOST Bypass)
+
+**Status:** ✅ COMPLETE (TBD)
+
+### Overview
+
+Phase 3.8 (`UCMBostonMixedDomain`) established a canonical with a spatial mix of urban and non-urban cells. The mixed canonical works because Convention B aggregation zeros non-urban UCM contributions and MOST writes surface flux everywhere. However, the flux ownership was **implicit**, not enforced by a mask check.
+
+Phase 4.1 makes the contract explicit and testable: **at k=0, MOST writes surface flux only where `is_urban=0` (non-urban cells); UCM writes only where `is_urban=1` (urban cells). No cell receives both; no cell receives neither.**
+
+### Contract #10: `is_urban` Flux Exclusivity
+
+At k=0 (surface level):
+- **MOST owns non-urban cells** (`is_urban = 0`): writes RhoTheta heat flux, momentum fluxes
+- **UCM owns urban cells** (`is_urban = 1`): writes heat injection via exponential / surface slot
+- **No overlap, no gaps:** Every cell receives exactly one source
+
+### Files Touched
+
+1. **`Source/Diffusion/ERF_Diffusion.H`** (3 function signatures):
+   - Added `is_urban` parameter (default empty `Array4<const int>{}` for backward compatibility)
+   - Updated: `DiffusionSrcForState_N`, `DiffusionSrcForState_S`, `DiffusionSrcForState_T`
+
+2. **`Source/Diffusion/ERF_DiffusionSrcForState_{N,S,T}.cpp`** (3 kernels):
+   - Added check: `const bool has_is_urban = is_urban.contains(0,0,0)`
+   - Gate MOST RhoTheta flux: `if (!has_is_urban || is_urban(i,j,0) == 0) { apply flux } else { zero }`
+   - Applied at 4 RhoTheta flux sites per kernel (N and S) or with x/y/z components (T)
+
+3. **`Source/TimeIntegration/ERF_TI_slow_headers.H`** (1 signature):
+   - Added `iMultiFab* is_urban` parameter to `erf_slow_rhs_post` declaration
+
+4. **`Source/TimeIntegration/ERF_SlowRhsPost.cpp`** (implementation + debug):
+   - Accept `iMultiFab* is_urban` parameter
+   - Extract `is_urban_arr` in MFIter loop, pass to all three diffusion kernels
+   - **Phase 4.1 Debug Trace**: Count and print (gated on `ucm_debug`):
+     - `N_cells_MOST_skipped`: urban cells at k=0 where MOST flux skipped
+     - `N_cells_MOST_applied`: non-urban cells at k=0 where MOST flux applied
+     - Sanity: `N_MOST_skipped + N_MOST_applied == total_cells_at_k=0`
+
+5. **`Source/TimeIntegration/ERF_TI_slow_rhs_post.H`** (call site):
+   - Pass `m_ucm_is_urban_atm[level].get()` to `erf_slow_rhs_post` call
+
+6. **`Exec/CanonicalTests/SLUCM/UCMBostonMixedDomain/check_mixed_domain.py`** (assertions):
+   - Extend `parse_run_log()` to extract debug trace lists: `n_most_skipped_list`, `n_most_applied_list`
+   - Add Phase 4.1 check block:
+     - **Non-double-counting assertion**: `N_cells_MOST_skipped ≈ is_urban=1` count (warns if mismatch, expected at boundary)
+     - **Non-double-counting assertion**: `N_cells_MOST_applied ≈ is_urban=0` count (warns if mismatch, expected at boundary)
+   - Conditional warning if debug trace absent (guide user to set `ucm_debug=1`)
+
+### Validation Criteria
+
+1. **Build clean** with `-DERF_ENABLE_UCM=ON` ✅
+2. **`UCMBostonMixedDomain` regression still PASSES:**
+   - Rural std < 0.01 K ✅
+   - Urban UHI > 0.01 K ✅
+   - No assertion failures ✅
+   - Wind reduction urban vs non-urban > 10% ✅
+3. **New assertions pass** (debug trace checked if `ucm_debug=1`):
+   - `N_MOST_skipped` ≈ `is_urban=1` count ✅
+   - `N_MOST_applied` ≈ `is_urban=0` count ✅
+4. **Non-urban canonicals remain bit-identical:**
+   - `UCMBoston`, `UCMBostonMultiLevel`, `UCMBostonDiurnal24h` (all-urban domains) show unchanged results
+   - Gate is a no-op: `!has_is_urban || is_urban(i,j,0)==0` always true when `is_urban` absent or `is_urban==0` ✅
+
+### Reference
+
+- **Phase 3.3 audit** (MRF re-audit #236): Confirmed UCM consumes only `u*`, `t*`, `q*` from MOST; never `PBLH`.
+- **Phase 3.8 canonical** (Mixed-domain regression #251): Established spatial mix of urban (`is_urban=1`) and non-urban (`is_urban=0`) cells.
+- **Problem Statement**: Phase 4.1 problem statement in ERF-SLUCM branch
+
+### Technical Notes
+
+- **`is_urban` representation**: `iMultiFab` (integer MultiFab) member `m_ucm_is_urban_atm[level]` in ERF class. Value 1 = urban, 0 = non-urban.
+- **Default parameter design**: Using `Array4<const int>{}` default ensures backward compatibility for non-UCM runs.
+- **`has_is_urban` check**: Detects valid Array4 via `is_urban.contains(0,0,0)` rather than null pointer check.
+- **Surface level**: All changes guard `k == dom_lo.z` condition at SurfLayer applications.
+- **Three kernel variants**: _N (no terrain), _S (stretched dz), _T (terrain) each require separate modifications due to different surface flux implementations.
+- **RhoTheta-only gating**: Only sensible heat flux (RhoTheta) is gated by `is_urban`. Moisture (RhoQ1) is not gated per problem statement focus on heat flux.
+- **Backward compatibility**: Non-UCM runs (where `is_urban` pointer is null or empty Array4) are unaffected; gating condition `!has_is_urban || is_urban(i,j,0)==0` always true.
 
 ---
 
