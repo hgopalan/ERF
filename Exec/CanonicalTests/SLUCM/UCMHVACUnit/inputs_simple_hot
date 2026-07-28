@@ -1,0 +1,20 @@
+# Phase 5.2 HVAC Unit Test - Simple Mode, Hot Canyon (should produce nonzero Q_HVAC)
+# Single urban cell, max_step = 2, T_canyon_air = 305 K (warm, above setpoint)
+max_step = 2
+n_cell = 4
+
+# Grid
+prob_lo = 0.0 0.0 0.0
+prob_hi = 100.0 100.0 100.0
+
+# UCM
+erf.ucm.enable = 1
+erf.ucm.anchor_level = 0
+erf.ucm.hvac_mode = "simple"
+erf.ucm.hvac_csv_path = "hvac_test.csv"
+erf.ucm.occupancy_csv_path = "occupancy_test.csv"
+erf.ucm.hvac_hysteresis_K = 2.0
+erf.ucm.hvac_cop_default = 3.0
+erf.ucm.hvac_setpoint_default_K = 297.15
+
+erf.ucm.atm_feedback_heat = 0.0

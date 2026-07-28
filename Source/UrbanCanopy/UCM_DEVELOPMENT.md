@@ -49,10 +49,10 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 4 | 4.1 | is_urban mask enforcement (LSM + MOST bypass) | Wiring is_urban into LSM/MOST paths, mixed urban/non-urban domains | ✅ COMPLETE | #254 (primary), #255 (hotfix: mask counter iterates full ATM grid), Phase 4.1-hotfix2 (is_urban_atm coarsening — this branch), Phase 4.1-hotfix3 (drag MFIter mismatch — this branch) |
 | 4 | 4.2 | **Cloud-aware analytical radiation (SW attenuation + LW cloud contribution)** | Kasten & Czeplak SW attenuation + Crawford & Duchon LW cloud enhancement layered on Phase 3.5b clear-sky; ParmParse `ucm.cloud_source ∈ {none, constant, csv}`; Boston-diurnal CSV; canonicals `UCMBostonDiurnal24hCloudy/`, `UCMBostonDiurnal24hOvercast/`; regression `ucm.cloud_source=none` bit-identical to 3.5b | ✅ COMPLETE | #256 (primary), Phase 4.2-hotfix (SEB wiring + CSV header + check scripts — this branch) |
 | 4 | 4.3 | **Real radiation extraction (RRTMG / ERF radiation solver)** | Extract SW-down and LW-down from ERF radiation module to the UCM 2D slab; removes `[UCM][1.3][WARNING] Radiation (SW/LW) filled analytically` on the `erf` path; keeps analytic + cloud paths as fallback | ✅ COMPLETE | — |
-| 5 | 5.1a | **View-factor precomputation (Hottel crossed-string, pure geometry)** | 6 per-cell view factors (F_wall_sky, F_wall_wall, F_wall_road, F_road_sky, F_road_wall, F_roof_sky); computed once per run via static-bool guard; unit test `UCMViewFactorsUnit` (uniform, scalar assertions to 4 decimals); heterogeneous regression on `UCMHeterogeneousMorphology` (range, symmetry, aspect-ratio consistency). NO SEB integration. | ✅ COMPLETE | #<PR> + hetero regression |
-| 5 | 5.1b | **Radiosity solver + shortwave multi-bounce** | Iterative radiosity for SW only. Wire into SEB SW input path. Keep LW single-bounce. Regression gate: all Phase 3.5b canonicals stable to `|ΔT_skin| ≤ 0.5 K`. | 🔲 PLANNED | — |
-| 5 | 5.1c | **Longwave multi-bounce + Newton stability re-verification** | Extend radiosity to LW. Rerun full 3.5a-hotfix regression battery (7-bug cascade). **Physics goal**: resolve the Newton/MOST divergence design gap flagged in the original 5.1 roadmap. **High risk of SEB regression — treat like 3.5a-hotfix.** | 🔲 PLANNED | — |
-| 5 | 5.2 | AC waste heat + building-energy sub-module (**COP-based simplified rejection**) | Occupancy schedule CSV (24-h × N-day-types), HVAC rejection = SEB load × (1 + 1/COP), injection via existing AH slot. **Scope-locked**: 1-zone envelope model deferred; add Phase 5.2b only if 6.4 instrumented-site validation shows COP-only is insufficient. | 🔲 PLANNED | — |
+| 5 | 5.1a | **View-factor precomputation (Hottel crossed-string, pure geometry)** | 6 per-cell view factors (F_wall_sky, F_wall_wall, F_wall_road, F_road_sky, F_road_wall, F_roof_sky); computed once per run via static-bool guard; unit test `UCMViewFactorsUnit` (uniform, scalar assertions to 4 decimals); heterogeneous regression on `UCMHeterogeneousMorphology` (range, symmetry, aspect-ratio consistency). NO SEB integration. | ✅ COMPLETE | #258 + hetero regression |
+| 5 | 5.1b | **Radiosity solver + shortwave multi-bounce** | Iterative radiosity for SW only. Wire into SEB SW input path. Keep LW single-bounce. Regression gate: all Phase 3.5b canonicals stable to `|ΔT_skin| ≤ 0.5 K`. | ✅ COMPLETE | #259 |
+| 5 | 5.1c | **Longwave multi-bounce + Newton stability re-verification** | Extend radiosity to LW. Rerun full 3.5a-hotfix regression battery (7-bug cascade). **Physics goal**: resolve the Newton/MOST divergence design gap flagged in the original 5.1 roadmap. **High risk of SEB regression — treat like 3.5a-hotfix.** | ✅ COMPLETE | #260 |
+| 5 | 5.2 | AC waste heat + building-energy sub-module (**COP-based simplified rejection**) | Occupancy schedule CSV (24-h × N-day-types), HVAC rejection = SEB load × (1 + 1/COP), injection via existing AH slot. **Scope-locked**: 1-zone envelope model deferred; add Phase 5.2b only if 6.4 instrumented-site validation shows COP-only is insufficient. | ✅ COMPLETE | #261 |
 | 5 | 5.3 | Green roofs, cool roofs, permeable pavements | Cool roof: CSV knob only (already representable via `albedo_roof`). Green roof: soil layer on roof (reuse slab conduction TDMA + `LE_atm` latent path). Permeable pavement: soil-moisture bucket on road facet (shared with green roof infrastructure). Canonical `UCMBostonGreenRoofs/`. | 🔲 PLANNED | — |
 | 5 | 5.4 | **Coastal sea-breeze canonical (system integration gate before Phase 6)** | Two-tile 24-h canonical (`UCMBostonCoastal24h/`); prescribed-SST water tile type via `tile_type ∈ {urban, rural, water}` column in `building_layout.csv`; SST override bypasses Newton for water tiles. Assertions: (1) land tiles UHI ≥ 1 K, (2) water tile within 0.5 K of prescribed SST, (3) **sea-breeze reversal** 12:00–16:00 local time (near-surface wind at coast flips from offshore to onshore). | 🔲 PLANNED | — |
 | 6 | 6.1 | Tree CSV + tree drag | `tree_layout.csv` reader (per-cell LAD, tree height, crown base height). Tree drag added as new branch in `apply_ucm_momentum_drag_to_source` with Cd_leaf × LAD × ⃒U⃒² formulation, LAD-profile-weighted vertical distribution. Canonical `UCMBostonTrees/` with tree-lined boulevard. | 🔲 PLANNED | — |
@@ -562,3 +562,140 @@ All three are deferred as low-priority hardening; they are not blockers for Phas
 - Bird, R. E. (1984), A simple, solar spectral model for direct-normal and diffuse horizontal irradiance, *Sol. Energy*, 32(4), 461–471.
 
 ---
+
+## Phase 5.2 — HVAC Waste Heat with COP-Based Rejection (SEB-Closed, Occupancy-Aware)
+
+**Status:** ✅ COMPLETE — PR #261 (primary)
+
+### Overview
+
+Phase 5.2 extends Phase 2.3 (anthropogenic heat injection) by adding **HVAC waste-heat feedback closed to the SEB via cooling-load proportionality**. The building's cooling load is driven by the residual downward heat flux through wall+roof slab (from Phase 3.5A slab conduction). The HVAC system rejects heat at rate `Q_HVAC = Q_load × (1 + 1/COP)`, which is injected back into the existing Phase 2.3 AH pathway. This creates a physical feedback loop: *cooler outdoor air → lower cooling load → less HVAC waste heat → cooler urban canyon* — the inverse of traditional UHI amplification.
+
+Phase 5.2 is **diagnostic post-processing, not a Newton branch**. HVAC waste heat is computed after slab conduction completes and added to AH before injection. This keeps complexity and risk minimal.
+
+### Physics
+
+Per urban cell, per timestep:
+
+1. **Compute cooling load** from residual slab-conduction heat flux:
+   ```
+   Q_load(i,j) = f_occ(t) · max(0, H_wall_slab(i,j) + H_roof_slab(i,j))
+   ```
+   where `H_wall_slab`, `H_roof_slab` are per-facet downward conduction fluxes, and `f_occ(t)` is occupancy fraction at hour-of-day (from CSV profile).
+
+2. **Apply setpoint gate** — HVAC only runs when outdoor conditions exceed setpoint:
+   ```
+   if T_canyon_air(i,j) < T_setpoint(i,j) - hysteresis_K:
+       Q_load = 0                    // no cooling needed
+   ```
+   Hysteresis (default 2 K) prevents chattering at marginal conditions.
+
+3. **HVAC waste heat via COP**:
+   ```
+   Q_HVAC(i,j) = Q_load(i,j) · (1 + 1/COP(i,j))
+   ```
+   This is the thermodynamic model: cooling capacity `Q_load` is extracted from the building interior; rejection ratio `(1 + 1/COP)` is sent outdoors. COP = 3 typical gives rejection = 4/3 × cooling load.
+
+4. **Inject as AH** via Phase 2.3 existing pathway:
+   ```
+   AH_total(i,j) = AH_from_profile(i,j,t) + Q_HVAC(i,j)     // additive
+   ```
+
+**Sanity limits (gating logic):**
+- `hvac_mode = off` → `Q_HVAC = 0` identically (bit-identity, backward-compatible default per Contract #21).
+- `f_occ = 0` (unoccupied hour) → `Q_HVAC = 0`.
+- `T_canyon_air ≤ T_setpoint - hysteresis` (cold weather) → `Q_HVAC = 0`.
+- `COP → ∞` → `Q_HVAC → Q_load` (theoretical Carnot lower bound).
+- `Q_HVAC ≥ 0` always (HVAC is heat source in cooling mode, never sink).
+
+### ParmParse keys (new, Phase 5.2)
+
+```
+erf.ucm.hvac_mode = "off"                  # "off" | "simple" (default: off per Contract #21)
+erf.ucm.hvac_csv_path = ""                 # Path to hvac.csv (per-profile COP, setpoint, occupancy_profile_id)
+erf.ucm.occupancy_csv_path = ""            # Path to occupancy.csv (24-h × N-profiles, fractions [0,1])
+erf.ucm.hvac_hysteresis_K = 2.0            # Setpoint hysteresis (typ. 2 K)
+erf.ucm.hvac_cop_default = 3.0             # Fallback COP if CSV missing [dimensionless]
+erf.ucm.hvac_setpoint_default_K = 297.15   # Fallback setpoint (24 °C) [K]
+```
+
+If `hvac_mode = simple` and either CSV path is empty, abort with error message pointing to the CSV format documentation.
+
+### Design Contracts
+
+**Contract #21 (new): HVAC waste heat is SEB-coupled but mode-gated.**
+
+When `erf.ucm.hvac_mode = simple`, HVAC waste heat is computed as a diagnostic post-processing step on the slab-conduction residual and injected into the AH stream. The default `hvac_mode = off` is **bit-identical** to all pre-5.2 simulations — no pre-existing behavior changes. HVAC is never a sink (always rejects heat), and is gated off when unoccupied (`f_occ = 0`), when cold (`T_can ≤ T_setpoint - hysteresis`), or when mode is off.
+
+### CSV formats
+
+**hvac.csv** (per-HVAC-profile properties):
+```
+hvac_profile_id,cop,t_setpoint_K,occupancy_profile_id,description
+0,3.0,297.15,0,office_baseline
+1,4.0,297.15,1,office_efficient
+2,2.5,299.15,2,residential_older_stock
+```
+
+Reader: `ERF_UCMHVACReader`. Loads into `std::vector<HVACProfile>` struct with fields: `id`, `cop`, `t_setpoint_K`, `occupancy_profile_id`, `description`. Aborts on malformed CSV or duplicate profile IDs.
+
+**occupancy.csv** (per-occupancy-profile, 24-h hourly fractions):
+```
+occupancy_profile_id,hour_of_day,occupancy_fraction
+0,0,0.05
+0,1,0.05
+...
+0,23,0.10
+1,0,0.02
+...
+```
+
+Reader: `ERF_UCMOccupancyReader`. Each profile requires exactly 24 rows (0–23 h). Fractions must be in [0, 1]; aborts if bounds violated.
+
+**building_layout.csv extension** (Phase 5.2):
+
+New optional trailing column `hvac_profile_id` (integer, per cell). Placement at end so pre-5.2 CSVs remain readable. Reader detects column presence via header row and defaults to 0 if absent. Log to banner: `[UCM][5.2] building_layout: hvac_profile_id column present=yes|no, defaulting missing cells to 0`.
+
+### Files touched
+
+1. **`Source/UrbanCanopy/ERF_UCMParams.{H,cpp}`** — HVACMode enum (Off, Simple); Section 17 parameters; ParmParse parsing with abort on invalid mode.
+2. **`Source/UrbanCanopy/ERF_UCMHVACReader.{H,cpp}`** (new) — CSV loader for hvac.csv, echoes count to banner.
+3. **`Source/UrbanCanopy/ERF_UCMOccupancyReader.{H,cpp}`** (new) — CSV loader for occupancy.csv with 24-h validation.
+4. **`Source/UrbanCanopy/ERF_UCMBuildingLayoutReader.cpp`** — detect optional hvac_profile_id column, default to 0 if missing.
+5. **`Source/UrbanCanopy/ERF_UCMHVAC.H`** (new, header-only) — `compute_hvac_waste_heat()` kernel with all sanity gates.
+6. **`Source/UrbanCanopy/ERF_UCMLayer.cpp`** — HVAC block wired after slab conduction, before AH injection; device-side CSV lookups; per-step debug output gated on `ucm_debug`.
+7. **`Source/UrbanCanopy/ERF_UCMFields.H`** — `hvac_profile_id_map` iMultiFab, `Q_HVAC_diag` MultiFab for diagnostics.
+8. **`Source/UrbanCanopy/ERF_UCMAllocate.cpp`** — allocate new MFs.
+9. **`Source/UrbanCanopy/ERF_UCMPlotfileCatalog.H`** — add `Q_HVAC_diag` component to plotfile.
+10. **`Source/UrbanCanopy/Make.package`** — register new headers and readers.
+
+### Validation
+
+**UCMHVACUnit** canonical (D9):
+- 4 input variants: `inputs_off`, `inputs_simple_hot` (T_can=305K → Q_HVAC>0), `inputs_simple_cold` (T_can=285K → Q_HVAC=0, setpoint gate), `inputs_simple_unoccupied` (f_occ=0 → Q_HVAC=0, occupancy gate).
+- `check_hvac.py`: asserts 4 gates (mode, setpoint, occupancy) isolate correctly.
+
+**UCMBostonDiurnalHVAC24h** canonical (D10):
+- Both `inputs_hvac_off` (baseline) and `inputs_hvac_simple` (with CSVs).
+- Boston 3-profile HVAC + occupancy CSVs (residential/office/retail).
+- Extended `building_layout.csv` with `hvac_profile_id` column (cycles 0→1→2).
+- `check_hvac_diurnal.py`: asserts (1) both 24-h runs complete, (2) afternoon AH(simple) > AH(off), (3) early-morning AH(simple) ≈ AH(off), (4) Q_HVAC diurnal peak at 14–16 local time.
+
+### Diagnostics
+
+Per-step banner (gated on `ucm_debug = 1`, IO rank only):
+```
+[UCM][5.2][hvac] mode=off|simple hour=<h> Q_HVAC=[<Q_min>, <Q_max>] W/m²
+```
+
+### Known follow-ups & deferred scope
+
+1. **Multi-zone building energy model** (Phase 7.19 BEM-lite): current model is single-zone envelope. Future phases may add interior zones with separate setpoints/occupancy.
+2. **Heating mode**: Phase 5.2 is cooling-only, appropriate for tropical/summer studies. Winter heating via HVAC is deferred.
+3. **Advanced HVAC** (VRF, cool storage, radiant): COP-only model is the target simplification.
+4. **Feedback on setpoint**: setpoint is static per profile; adaptive comfort model is out of scope.
+
+### Phase 5 Status
+
+**Phase 5 status (as of 2026-07-28):** 5.1a (PR #258), 5.1b (PR #259), 5.1c (PR #260), 5.2 (PR #261) complete. 5.3, 5.4 planned.
+
