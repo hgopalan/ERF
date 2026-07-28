@@ -72,3 +72,4 @@ build_*.log
 .#*
 *.bak
 Backtrace.*
+build/
