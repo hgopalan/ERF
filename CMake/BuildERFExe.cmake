@@ -332,6 +332,8 @@ function(build_erf_lib erf_lib_name)
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMStabilityCorrection.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMRadiationForcing.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMCloudCSVReader.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMHVACReader.cpp        
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMOccupancyReader.cpp   
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMViewFactors.H)
 
     target_include_directories(${erf_lib_name} PUBLIC

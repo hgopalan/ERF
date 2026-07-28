@@ -1017,14 +1017,14 @@ void UCMLayer::advance(UCMFields& fields,
         const auto& hvac_profiles = hvac_reader.get_all_profiles();
         const auto& occ_profiles = occ_reader.get_all_profiles();
 
-        for (amrex::MFIter mfi(*fields.AH_field, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        for (amrex::MFIter mfi(*fields.AH, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
             const amrex::Box& bx = mfi.tilebox();
             auto const H_wl_a = fields.H_wall->const_array(mfi);
             auto const H_rf_a = fields.H_roof->const_array(mfi);
             auto const T_can_a = fields.T_canyon_air->const_array(mfi);
             auto const is_urb_a = fields.is_urban->const_array(mfi);
             auto const hvac_id_a = fields.hvac_profile_id_map->const_array(mfi);
-            auto AH_a = fields.AH_field->array(mfi);
+            auto AH_a = fields.AH->array(mfi);
             auto Q_diag_a = fields.Q_HVAC_diag->array(mfi);
 
             // Create temporary device-accessible copies of profiles
