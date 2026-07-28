@@ -186,7 +186,12 @@ DiffusionSrcForState_S (const Box& bx, const Box& domain,
 
             if (SurfLayer_on_zlo) {
                 if (qty_index == RhoTheta_comp) {
-                    zflux(i,j,k) = hfx_z(i,j,0);
+                    // Phase 4.1: is_urban mask enforcement - MOST flux only where is_urban=0
+                    if (!has_is_urban || is_urban(i,j,0) == 0) {
+                        zflux(i,j,k) = hfx_z(i,j,0);
+                    } else {
+                        zflux(i,j,k) = zero;
+                    }
                 } else if (qty_index == RhoQ1_comp) {
                     zflux(i,j,k) = qfx1_z(i,j,0);
                 } else {
@@ -303,7 +308,12 @@ DiffusionSrcForState_S (const Box& bx, const Box& domain,
 
             if (SurfLayer_on_zlo) {
                 if (qty_index == RhoTheta_comp) {
-                    zflux(i,j,k) = hfx_z(i,j,0);
+                    // Phase 4.1: is_urban mask enforcement - MOST flux only where is_urban=0
+                    if (!has_is_urban || is_urban(i,j,0) == 0) {
+                        zflux(i,j,k) = hfx_z(i,j,0);
+                    } else {
+                        zflux(i,j,k) = zero;
+                    }
                 } else if (qty_index == RhoQ1_comp) {
                     zflux(i,j,k) = qfx1_z(i,j,0);
                 } else {
@@ -417,7 +427,12 @@ DiffusionSrcForState_S (const Box& bx, const Box& domain,
 
             if (SurfLayer_on_zlo) {
                 if (qty_index == RhoTheta_comp) {
-                    zflux(i,j,k) = hfx_z(i,j,0);
+                    // Phase 4.1: is_urban mask enforcement - MOST flux only where is_urban=0
+                    if (!has_is_urban || is_urban(i,j,0) == 0) {
+                        zflux(i,j,k) = hfx_z(i,j,0);
+                    } else {
+                        zflux(i,j,k) = zero;
+                    }
                 } else if (qty_index == RhoQ1_comp) {
                     zflux(i,j,k) = qfx1_z(i,j,0);
                 } else {
@@ -528,7 +543,12 @@ DiffusionSrcForState_S (const Box& bx, const Box& domain,
 
             if (SurfLayer_on_zlo) {
                 if (qty_index == RhoTheta_comp) {
-                    zflux(i,j,k) = hfx_z(i,j,0);
+                    // Phase 4.1: is_urban mask enforcement - MOST flux only where is_urban=0
+                    if (!has_is_urban || is_urban(i,j,0) == 0) {
+                        zflux(i,j,k) = hfx_z(i,j,0);
+                    } else {
+                        zflux(i,j,k) = zero;
+                    }
                 } else if (qty_index == RhoQ1_comp) {
                     zflux(i,j,k) = qfx1_z(i,j,0);
                 } else {
