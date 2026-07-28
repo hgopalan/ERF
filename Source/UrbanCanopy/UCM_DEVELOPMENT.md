@@ -64,6 +64,10 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 
 ---
 
+**Phase 4.4 removed (2026-07-28):** the "urban/non-urban interface treatment" placeholder was dropped. The current sharp-mask contract (Contract #10: `is_urban ∈ {0,1}` at k=0, exclusivity of MOST vs UCM writes) plus horizontal advection + diffusion is sufficient at ≥ 1 km ATM grids. Sub-grid tile blending (f_urb-weighted flux mixing) will only be reconsidered if Phase 6.4 instrumented-site validation reveals systematic bias at urban/rural interfaces.
+
+**Old Phase 4.4 (mixed-domain diurnal) → new Phase 5.4:** the mixed-domain diurnal integration test moved to end of Part 5 and was redefined as a coastal sea-breeze canonical. This provides a sharp, physics-meaningful system integration gate (sea-breeze reversal is either present or not) before Part 6 (trees), and re-uses infrastructure that Parts 5.1–5.3 will have already built.
+
 ## Phase 4.1 — `is_urban` Mask Enforcement (LSM + MOST Bypass)
 
 **Status:** ✅ COMPLETE — PRs #254, #255
