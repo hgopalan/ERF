@@ -362,7 +362,7 @@ void erf_slow_rhs_post (int level, int finest_level,
             hfx_y = Hfx2->array(mfi);
             hfx_z = Hfx3->array(mfi);
             diss  = Diss->array(mfi);
-            
+
             // Phase 4.1: Get is_urban mask if UCM is active
             if (is_urban) {
                 is_urban_arr = is_urban->const_array(mfi);
@@ -665,29 +665,22 @@ void erf_slow_rhs_post (int level, int finest_level,
     } // OMP
 
     // Phase 4.1: Debug trace for is_urban mask enforcement at MOST flux sites
-    if (is_urban && solverChoice.ucm_params.ucm_debug) {
+    if (is_urban) {
         Long n_cells_most_skipped = 0;  // Urban cells where MOST flux skipped
         Long n_cells_most_applied = 0;  // Non-urban cells where MOST flux applied
-        Long n_cells_uncovered = 0;    // Cells not covered by is_urban mask
-        
-        // Count cells at k=0 by urban mask for current level
-        // Iterate over the full ATM grid (S_prim) not just urban cells
-        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
-            is_urban != nullptr,
-            "[UCM][4.1] mask-enforcement: is_urban MultiFab is null");
-        
-        const auto& domain = geom.Domain();
-        const int k_surface = domain.smallEnd(2);
-        
+        Long n_cells_uncovered    = 0;  // Cells not covered by is_urban mask
+
+        const Box& debug_domain = geom.Domain();
+        const int k_surface = debug_domain.smallEnd(2);
+
         // Iterate over full ATM grid
         for (MFIter mfi(S_prim, true); mfi.isValid(); ++mfi) {
-            const Array4<const int> is_urban_arr = (*is_urban)[level].const_array(mfi);
+            const Array4<const int> is_urban_arr = is_urban->const_array(mfi);
             const Box& atm_box = mfi.tilebox();
-            
+
             // Count only cells at k=0
             for (int i = atm_box.smallEnd(0); i <= atm_box.bigEnd(0); ++i) {
                 for (int j = atm_box.smallEnd(1); j <= atm_box.bigEnd(1); ++j) {
-                    // Check if this cell is covered by is_urban mask
                     if (is_urban_arr.contains(i, j, k_surface)) {
                         if (is_urban_arr(i, j, k_surface) == 1) {
                             ++n_cells_most_skipped;  // UCM owns this cell (is_urban=1)
@@ -702,24 +695,24 @@ void erf_slow_rhs_post (int level, int finest_level,
                 }
             }
         }
-        
+
         // MPI-safe reduction to get global counts
-        amrex::ParallelDescriptor::ReduceIntSum(n_cells_most_skipped);
-        amrex::ParallelDescriptor::ReduceIntSum(n_cells_most_applied);
-        amrex::ParallelDescriptor::ReduceIntSum(n_cells_uncovered);
-        
+        amrex::ParallelDescriptor::ReduceLongSum(n_cells_most_skipped);
+        amrex::ParallelDescriptor::ReduceLongSum(n_cells_most_applied);
+        amrex::ParallelDescriptor::ReduceLongSum(n_cells_uncovered);
+
         // Compute expected total ATM cells at k=0
-        const Long nx_atm = domain.length(0);
-        const Long ny_atm = domain.length(1);
+        const Long nx_atm    = debug_domain.length(0);
+        const Long ny_atm    = debug_domain.length(1);
         const Long n_expected = nx_atm * ny_atm;
-        const Long n_total = n_cells_most_skipped + n_cells_most_applied;
-        
+        const Long n_total    = n_cells_most_skipped + n_cells_most_applied;
+
         // Sanity check: total should equal expected domain size
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
             n_total == n_expected,
             "[UCM][4.1] mask-enforcement counter miscounted: "
             "skipped+applied != total ATM cells at k=0");
-        
+
         // Only IOProcessor prints
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][4.1][mask-enforcement] lev=" << level << " nrk=" << nrk << "\n"

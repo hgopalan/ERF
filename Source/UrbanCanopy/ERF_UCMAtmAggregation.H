@@ -37,6 +37,10 @@
  * - Aggregates written with `=` (not `+=`) inside kernel to avoid RK-stage drift.
  * - Early is_urban guard prevents OOB access on non-urban cells.
  *
+ * **Phase 4.1-hotfix2:**
+ * - Also emits `is_urban_atm` (majority-vote coarsening from UCM `is_urban`).
+ * - Fixes the mask-enforcement counter reading an unpopulated ATM-grid mask.
+ *
  * **References:**
  * - Source/Dust/ coarsening pattern (averaging with masks)
  * - Source/Fire/ERF_FireAtmCoupling.H (exponential injection layout)
@@ -58,6 +62,7 @@
  *
  * For each ATM cell (covering grid_ratio² UCM cells), aggregates:
  * - Urban fraction (count of urban cells / total)
+ * - Urban mask (majority vote from UCM is_urban)  [Phase 4.1-hotfix2]
  * - Mean building height (area-weighted average over urban cells)
  * - Std dev of building height (variance over urban cells)
  * - Mean plan-area density (building footprint ratio)
@@ -77,6 +82,7 @@
  * ```
  *
  * @param[out] f_urb_atm             Urban fraction per ATM cell [0,1]
+ * @param[out] is_urban_atm          Urban mask on ATM grid (1=urban, 0=rural) [Phase 4.1-hotfix2]
  * @param[out] H_bldg_mean_atm       Mean building height per ATM cell [m]
  * @param[out] H_bldg_std_atm        Std dev of building height per ATM cell [m]
  * @param[out] lambda_p_atm          Mean plan-area density per ATM cell [-]
@@ -93,11 +99,13 @@
  *
  * @note All outputs are on ATM 3D grid, one value per ATM cell across all z.
  * @note Urban fraction can be < 1 when mixed urban/non-urban exists in ATM cell.
+ * @note is_urban_atm uses majority-vote coarsening (2*n_urban > n_cells).
  * @note When f_urb = 0 (no urban cells), mean/std are set to 0.0 (safe division).
  * @note GPU-safe and respects is_urban mask (no access to non-urban cells).
  */
 void aggregate_ucm_morphology_to_atm(
     amrex::MultiFab&           f_urb_atm,
+    amrex::iMultiFab&          is_urban_atm,
     amrex::MultiFab&           H_bldg_mean_atm,
     amrex::MultiFab&           H_bldg_std_atm,
     amrex::MultiFab&           lambda_p_atm,
@@ -116,6 +124,7 @@ void aggregate_ucm_morphology_to_atm(
 
     // Zero all outputs with ghost cells (persistent source pattern)
     f_urb_atm.setVal(0.0, 0, 1, f_urb_atm.nGrow());
+    is_urban_atm.setVal(0, 0, 1, is_urban_atm.nGrow());
     H_bldg_mean_atm.setVal(0.0, 0, 1, H_bldg_mean_atm.nGrow());
     H_bldg_std_atm.setVal(0.0, 0, 1, H_bldg_std_atm.nGrow());
     lambda_p_atm.setVal(0.0, 0, 1, lambda_p_atm.nGrow());
@@ -130,6 +139,7 @@ void aggregate_ucm_morphology_to_atm(
         const Box& atm_box = mfi.tilebox();
 
         auto f_urb_a         = f_urb_atm.array(mfi);
+        auto is_urban_atm_a  = is_urban_atm.array(mfi);
         auto H_mean_a        = H_bldg_mean_atm.array(mfi);
         auto H_std_a         = H_bldg_std_atm.array(mfi);
         auto lambda_p_a      = lambda_p_atm.array(mfi);
@@ -171,6 +181,11 @@ void aggregate_ucm_morphology_to_atm(
 
             // Urban fraction: n_urban / n_cells
             f_urb_a(i, j, k) = static_cast<Real>(n_urban) / static_cast<Real>(n_cells);
+
+            // Phase 4.1-hotfix2: majority-vote urban mask on ATM grid.
+            // Equivalent to (f_urb > 0.5); expressed as integer comparison to
+            // avoid rounding ambiguity at exactly f_urb=0.5 for even n_cells.
+            is_urban_atm_a(i, j, k) = (2 * n_urban > n_cells) ? 1 : 0;
 
             // If no urban cells, set aggregates to 0.0 and return
             if (n_urban == 0) {
@@ -223,6 +238,9 @@ void aggregate_ucm_morphology_to_atm(
     // Compute global min/max for diagnostics (collectives, not inside IOProcessor)
     Real f_urb_min = f_urb_atm.min(0, 0);
     Real f_urb_max = f_urb_atm.max(0, 0);
+    int  is_urb_atm_min = is_urban_atm.min(0, 0);
+    int  is_urb_atm_max = is_urban_atm.max(0, 0);
+    Long is_urb_atm_sum = is_urban_atm.sum(0);
     Real H_mean_min = H_bldg_mean_atm.min(0, 0);
     Real H_mean_max = H_bldg_mean_atm.max(0, 0);
     Real H_std_min = H_bldg_std_atm.min(0, 0);
@@ -236,6 +254,9 @@ void aggregate_ucm_morphology_to_atm(
         Print() << "[UCM][2.5][aggregate_ucm_morphology_to_atm]\n"
                 << "  grid_ratio=" << grid_ratio << "\n"
                 << "  f_urb: min=" << f_urb_min << " max=" << f_urb_max << "\n"
+                << "  is_urban_atm: min=" << is_urb_atm_min
+                << " max=" << is_urb_atm_max
+                << " N_urban=" << is_urb_atm_sum << "\n"
                 << "  H_bldg_mean: min=" << H_mean_min << " max=" << H_mean_max << " [m]\n"
                 << "  H_bldg_std: min=" << H_std_min << " max=" << H_std_max << " [m]\n"
                 << "  lambda_p: min=" << lambda_p_min << " max=" << lambda_p_max << "\n"

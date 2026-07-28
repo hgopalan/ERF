@@ -795,7 +795,7 @@ void apply_ucm_momentum_drag_to_source(
     using ReduceTuple = typename decltype(reduce_data)::Type;
 
     // Iteration over boxes with tiling
-    for (amrex::MFIter mfi(xmom_src, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+    for (amrex::MFIter mfi(S_cons, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
 
         auto xmom_a      = xmom_src.array(mfi);

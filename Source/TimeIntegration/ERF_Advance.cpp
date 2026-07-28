@@ -355,9 +355,18 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             m_ucm_olen_atm[lev]->setVal(0.0);
         }
 
+        // Phase 4.1-hotfix2: Allocate is_urban mask on ATM grid BEFORE aggregation.
+        // Default value 0 (rural) — aggregation will overwrite with majority vote.
+        if (!m_ucm_is_urban_atm[lev]) {
+            m_ucm_is_urban_atm[lev] = std::make_unique<amrex::iMultiFab>(ba, dm, 1, 0);
+            m_ucm_is_urban_atm[lev]->setVal(0);
+        }
+
         // Phase 2.5: Compute morphology aggregates from UCM grid to ATM grid
+        // Phase 4.1-hotfix2: is_urban_atm is now derived from majority vote of UCM mask.
         aggregate_ucm_morphology_to_atm(
             *m_ucm_f_urb_atm[lev],
+            *m_ucm_is_urban_atm[lev],        // Phase 4.1-hotfix2: coarsen mask to ATM grid
             *m_ucm_H_bldg_mean_atm[lev],
             *m_ucm_H_bldg_std_atm[lev],
             *m_ucm_lambda_p_atm[lev],
@@ -474,12 +483,6 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                               << "  H_wall_atm integral = " << h_wall_int << " W\n"
                               << "  H_roof_atm integral = " << h_roof_int << " W\n";
            }
-        }
-
-        // Build is_urban mask on ATM grid if not already allocated
-        if (!m_ucm_is_urban_atm[lev]) {
-            m_ucm_is_urban_atm[lev] = std::make_unique<amrex::iMultiFab>(ba, dm, 1, 0);
-            m_ucm_is_urban_atm[lev]->setVal(1);
         }
 
         // Diagnostics output (once per coarse step)

@@ -83,6 +83,7 @@ void refine_atm_to_ucm(amrex::MultiFab&       Q_ucm_out,
  */
 void aggregate_ucm_morphology_to_atm(
     amrex::MultiFab&           f_urb_atm,
+    amrex::iMultiFab&          is_urban_atm,
     amrex::MultiFab&           H_bldg_mean_atm,
     amrex::MultiFab&           H_bldg_std_atm,
     amrex::MultiFab&           lambda_p_atm,
