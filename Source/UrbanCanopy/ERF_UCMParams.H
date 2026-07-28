@@ -78,6 +78,20 @@ enum class CloudSource
 };
 
 /**
+ * @enum RadiationSource
+ * @brief Radiation source for UCM SEB closure (Phase 4.3)
+ *
+ * Selects whether SW_down and LW_down are computed via analytic formulae
+ * (Phase 3.5b + Phase 4.2 cloud attenuation) or extracted from ERF's radiation
+ * solver (Phase 4.3, currently a placeholder returning sentinel values).
+ */
+enum class RadiationSource
+{
+    Analytic = 0,  ///< Phase 3.5b analytic clear-sky + Phase 4.2 cloud (default)
+    Erf = 1        ///< Extract from ERF radiation module (Phase 4.3 — placeholder)
+};
+
+/**
  * @struct UCMParams
  * @brief Container for all SLUCM configuration parameters read from ParmParse
  *
@@ -271,17 +285,29 @@ struct UCMParams
     amrex::Real cloud_sw_b = 3.4;                 ///< Phase 4.2: Kasten & Czeplak SW attenuation exponent b [-]
 
     // =========================================================================
+    // Section 14: Phase 4.3 — Real radiation extraction (placeholder)
+    // =========================================================================
+    // Selects SW/LW source for SEB. Default 'analytic' preserves Phase 3.5b +
+    // Phase 4.2 behavior. 'erf' path is a placeholder: it wires the interface
+    // through UCMLayer but the extraction stub returns sentinel values with a
+    // one-time warning. Full RRTMG plumbing is deferred until the ERF core
+    // radiation interface stabilizes.
+
+    std::string radiation_source_str = "analytic";       ///< Phase 4.3: "analytic" | "erf"
+    RadiationSource radiation_source = RadiationSource::Analytic;  ///< Phase 4.3: resolved enum
+
+    // =========================================================================
     // Public methods
     // =========================================================================
 
     /**
-     * @brief Read all parameters from ParmParse namespace "erf.ucm"
-     *
-     * Called during ERF initialization to populate this struct from input file.
-     * All parameter names follow pattern "erf.ucm.name". ParmParse::query() is
-     * used to preserve defaults if a parameter is not specified.
-     *
-     */
+    * @brief Read all parameters from ParmParse namespace "erf.ucm"
+    *
+    * Called during ERF initialization to populate this struct from input file.
+    * All parameter names follow pattern "erf.ucm.name". ParmParse::query() is
+    * used to preserve defaults if a parameter is not specified.
+    *
+    */
     void read_from_parmparse();
 };
 
