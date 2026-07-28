@@ -23,6 +23,7 @@
 #include <UrbanCanopy/ERF_UCMRadiationForcing.H>
 #include <UrbanCanopy/ERF_UCMViewFactors.H>
 #include <UrbanCanopy/ERF_UCMRadiationExtraction.H>
+#include <UrbanCanopy/ERF_UCMRadiosity.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <ERF_Constants.H>
 #include <cmath>
@@ -480,16 +481,35 @@ void UCMLayer::advance(UCMFields& fields,
         auto diag_wl = newton_diag_wall.array(mfi);
         auto diag_rd = newton_diag_road.array(mfi);
 
+        // Phase 5.1b: View-factor const_arrays for multi-bounce radiosity
+        auto const Fww_a = fields.F_wall_wall->const_array(mfi);
+        auto const Fwr_a = fields.F_wall_road->const_array(mfi);
+        auto const Frw_a = fields.F_road_wall->const_array(mfi);
+
+        // Phase 5.1b: Capture radiosity mode flag outside lambda
+        const bool radiosity_mode_is_multi = (m_params.radiosity_mode == RadiosityMode::Multi);
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
             if (is_urb(i,j,0) == 0) return;
 
             amrex::Real U = amrex::max(std::sqrt(U_a(i,j,0)*U_a(i,j,0)), 0.01);
             amrex::Real T_can = T_can_a(i,j,0);
 
-            // Phase 3.5B: Effective SW per facet (SVF-scaled for walls/roads, full for roof)
+            // Phase 5.1b: Effective SW per facet (multi-bounce radiosity or single-bounce SVF)
             amrex::Real SW_roof = SW_down;                      // roof unshaded
-            amrex::Real SW_wall = SW_down * svf_wall(i,j,0);    // wall SVF-weighted
-            amrex::Real SW_road = SW_down * svf_road(i,j,0);    // road SVF-weighted
+            amrex::Real SW_wall, SW_road;
+            const amrex::Real SW0_wall = SW_down * svf_wall(i,j,0);
+            const amrex::Real SW0_road = SW_down * svf_road(i,j,0);
+            if (radiosity_mode_is_multi) {
+                sw_radiosity_multi_bounce(SW0_wall, SW0_road,
+                                          alb_wl(i,j,0), alb_rd(i,j,0),
+                                          Fww_a(i,j,0), Fwr_a(i,j,0), Frw_a(i,j,0),
+                                          SW_wall, SW_road);
+            } else {
+                // Phase 2.4: single-bounce SVF weighting (backward compatible)
+                SW_wall = SW0_wall;
+                SW_road = SW0_road;
+            }
 
             // Phase 3.5c-hotfix2: Full canyon LW balance for shaded facets.
             // Real wall/road LW balance (Kusaka 2001, Chen 2011):
@@ -767,6 +787,23 @@ void UCMLayer::advance(UCMFields& fields,
                 }
             }
         }
+    }
+
+    // Phase 5.1b: Per-step debug banner for radiosity
+    amrex::Real Fwr_min = 0.0, Fwr_max = 0.0;
+    if (m_params.ucm_debug && m_params.radiosity_mode == RadiosityMode::Multi) {
+        Fwr_min = fields.F_wall_road->min(0, 0);
+        Fwr_max = fields.F_wall_road->max(0, 0);
+    }
+    if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+        const char* mode_str = (m_params.radiosity_mode == RadiosityMode::Multi) ? "multi" : "single";
+        amrex::Print() << "[UCM][5.1b][radiosity] mode=" << mode_str
+                       << " alpha_wall=" << m_params.albedo_wall
+                       << " alpha_road=" << m_params.albedo_road;
+        if (m_params.radiosity_mode == RadiosityMode::Multi) {
+            amrex::Print() << " F_wall_road=[" << Fwr_min << ", " << Fwr_max << "]";
+        }
+        amrex::Print() << "\n";
     }
 
     // Phase 3.5A: Advance slab conduction using SEB-derived H as surface BC
