@@ -540,6 +540,9 @@ void UCMLayer::advance(UCMFields& fields,
                     Fws_a(i,j,0), Frs_a(i,j,0),
                     LW_wall_in, LW_road_in
                 );
+                LW_wall_in += (1.0 - Fws_a(i,j,0)) * UCM_SIGMA_SB * std::pow(T_wall_prev_a(i,j,0), 4);
+                LW_road_in += (1.0 - Frs_a(i,j,0)) * UCM_SIGMA_SB * std::pow(T_road_prev_a(i,j,0), 4);
+
             } else {
                 // Phase 3.5b single-bounce SVF fallback (Contract #20: default backward-compat)
                 // IMPORTANT: preserve the exact existing 3.5b formula for bit-identity.
@@ -836,8 +839,8 @@ void UCMLayer::advance(UCMFields& fields,
     amrex::Real Tsky_min = 0.0, Tsky_max = 0.0;
     if (m_params.ucm_debug && m_params.lw_radiosity_mode == LWRadiosityMode::MultiLagged) {
         // Sample from LW_down min/max — extract using MultiFab->min/max methods
-        const amrex::Real LW_min = fields.LW_down->min(0, 0);
-        const amrex::Real LW_max = fields.LW_down->max(0, 0);
+        const amrex::Real LW_min = forcing.LW_down->min(0, 0);
+        const amrex::Real LW_max = forcing.LW_down->max(0, 0);
         Tsky_min = std::pow(LW_min / UCM_SIGMA_SB, amrex::Real(0.25));
         Tsky_max = std::pow(LW_max / UCM_SIGMA_SB, amrex::Real(0.25));
     }
