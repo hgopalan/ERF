@@ -2,7 +2,7 @@
 
 ## Overview
 
-The ERF-SLUCM module simulates the thermal and momentum exchange between urban surfaces (buildings, roads, vegetation) and the atmosphere. It is implemented as a 2D refined slab tightly coupled to the ERF mesoscale atmospheric model. Phase 1 focuses on one-way coupling with homogeneous canopy; Phase 2 extends to heterogeneous morphology via CSV; Phase 3 adds two-way feedback; Phases 4–6 add advanced processes (urban/non-urban treatment, tree physics, radiation).
+The ERF-SLUCM module simulates the thermal and momentum exchange between urban surfaces (buildings, roads, vegetation) and the atmosphere. It is implemented as a 2D refined slab tightly coupled to the ERF mesoscale atmospheric model. Phase 1 focuses on one-way coupling with homogeneous canopy; Phase 2 extends to heterogeneous morphology via CSV; Phase 3 adds two-way feedback; Phases 4–7 add advanced processes (urban/non-urban treatment, advanced UCM physics, tree physics, v1.0 release).
 
 **Reference scenarios:**
 - WRF Single-Layer Urban Canopy Model (Chen et al., 2011): Baseline homogeneous urban physics
@@ -12,7 +12,7 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 
 ---
 
-## Six-Part, 25-Phase Implementation Roadmap
+## Seven-Part, 25-Phase Implementation Roadmap
 
 | Part | Phase | Title | Key Deliverables | Status | PRs (primary + post-merge) |
 |------|-------|-------|------------------|--------|-----------------------------|
@@ -50,14 +50,14 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 4 | 4.2 | Radiation coupling (SW/LW extraction) | Solar + LW extraction from radiation module to UCM; replaces Phase 3.5b analytic formulae; **regression: match Phase 3.5b analytic to <5% at noon summer solstice** | 🔲 PLANNED | — |
 | 4 | 4.3 | Urban/non-urban interface treatment | Boundary layer interpolation at urban perimeter | 🔲 PLANNED | — |
 | 4 | 4.4 | Mixed-domain diurnal integration test | Multi-facet urban/forest/ocean test case | 🔲 PLANNED | — |
-| 5 | 5.1 | Tree CSV + tree drag | Vegetation CSV reader, drag force injection | 🔲 PLANNED | — |
-| 5 | 5.2 | Tree radiation (Beer-Lambert + LW crown-facet) | Canopy shortwave attenuation, crown energy balance | 🔲 PLANNED | — |
-| 5 | 5.3 | Tree leaf EB + local soil bucket + transpiration | Leaf temperature, soil moisture tracking, latent flux | 🔲 PLANNED | — |
-| 5 | 5.4 | Tile-averaged fluxes + instrumented-site validation | Horizontal aggregation to native ATM grid, field obs comparison | 🔲 PLANNED | — |
-| 6 | 6.1 | Multi-bounce wall radiation | Ray tracing within urban canyon, multiple reflections; **may resolve Newton/MOST divergence design gap** | 🔲 PLANNED | — |
-| 6 | 6.2 | AC waste heat + building-energy sub-module | HVAC rejection rate from occupancy schedules, waste injection | 🔲 PLANNED | — |
-| 6 | 6.3 | Green roofs, cool roofs, permeable pavements | Heterogeneous roof/pavement albedos + soil moisture | 🔲 PLANNED | — |
-| 6 | 6.4 | Worry-list audit + v1.0 release | Final regression suite, documentation, issue resolution | 🔲 PLANNED | — |
+| 5 | 5.1 | Multi-bounce wall radiation | Ray tracing within urban canyon, multiple reflections; **may resolve Newton/MOST divergence design gap** | 🔲 PLANNED | — |
+| 5 | 5.2 | AC waste heat + building-energy sub-module | HVAC rejection rate from occupancy schedules, waste injection | 🔲 PLANNED | — |
+| 5 | 5.3 | Green roofs, cool roofs, permeable pavements | Heterogeneous roof/pavement albedos + soil moisture | 🔲 PLANNED | — |
+| 6 | 6.1 | Tree CSV + tree drag | Vegetation CSV reader, drag force injection | 🔲 PLANNED | — |
+| 6 | 6.2 | Tree radiation (Beer-Lambert + LW crown-facet) | Canopy shortwave attenuation, crown energy balance | 🔲 PLANNED | — |
+| 6 | 6.3 | Tree leaf EB + local soil bucket + transpiration | Leaf temperature, soil moisture tracking, latent flux | 🔲 PLANNED | — |
+| 6 | 6.4 | Tile-averaged fluxes + instrumented-site validation | Horizontal aggregation to native ATM grid, field obs comparison | 🔲 PLANNED | — |
+| 7 | 7.1 | Worry-list audit + v1.0 release | Final regression suite, documentation, issue resolution | 🔲 PLANNED | — |
 
 **Phase 3 status (as of 2026-07-28):** 3.1a → 3.9 complete (28 PRs, #200–#252). **Only Phase 3.10 (multi-level two-way finale) remains** before Phase 4.
 
