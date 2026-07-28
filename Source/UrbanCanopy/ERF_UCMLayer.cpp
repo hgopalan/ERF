@@ -881,6 +881,22 @@ void UCMLayer::advance(UCMFields& fields,
             T_canyon_a(i,j,0) = T_canyon_new;
         });
     }
+if (m_params.ucm_debug) {
+    for (amrex::MFIter mfi(*fields.T_canyon_air); mfi.isValid(); ++mfi) {
+        auto const Tc = fields.T_canyon_air->const_array(mfi);
+        auto const AH = fields.AH->const_array(mfi);
+        auto const QH = fields.Q_HVAC_diag->const_array(mfi);
+        const amrex::Box& bx = mfi.validbox();
+        int i = bx.smallEnd(0);
+        int j = bx.smallEnd(1);
+        amrex::AllPrint() << "[UCM][DIAG-X] rank=" << amrex::ParallelDescriptor::MyProc()
+                          << " cell(" << i << "," << j << ") "
+                          << "T_can=" << Tc(i,j,0) 
+                          << " AH=" << AH(i,j,0) 
+                          << " Q_HVAC=" << QH(i,j,0) << "\n";
+        break;  // just first tile
+    }
+}
 
     // ========================================================================
     // Phase 5.2: HVAC waste heat (Contract #21 / #22)
@@ -899,32 +915,40 @@ void UCMLayer::advance(UCMFields& fields,
         // Load CSVs (once per call; production should cache at init)
         UCMHVACReader hvac_reader(m_params.hvac_csv_path);
         UCMOccupancyReader occ_reader(m_params.occupancy_csv_path);
-        const auto& hvac_profiles = hvac_reader.get_all_profiles();
-        const auto& occ_profiles = occ_reader.get_all_profiles();
+        //const auto& hvac_profiles = hvac_reader.get_all_profiles();
+        //const auto& occ_profiles = occ_reader.get_all_profiles();
+        // Phase 5.2-hotfix: sync ranks after file I/O to prevent
+        // step-2 collective deadlock when ranks drift out of sync.
+        // TODO: cache CSVs at UCMLayer construction (Phase 5.2 followup).
+    // Use defaults directly (skip CSV)
+        amrex::Real T_setpt_resolved = setpt_default;
+        amrex::Real cop_resolved = cop_default;
+        amrex::Real f_occ_resolved = 1.0;
+        amrex::ParallelDescriptor::Barrier();
 
         // Contract #22: NO std::vector, std::string, or heap-allocated STL 
         // containers may be captured by value into an amrex::ParallelFor lambda.
         // Pre-resolve profile 0's values on HOST as scalars.
         // Multi-profile per-cell dispatch is deferred to Phase 6.2b (BEM-lite)
         // via amrex::Gpu::DeviceVector.
-        amrex::Real T_setpt_resolved = setpt_default;
-        amrex::Real cop_resolved = cop_default;
+        //amrex::Real T_setpt_resolved = setpt_default;
+        //amrex::Real cop_resolved = cop_default;
         int occ_id_resolved = 0;
-        if (hvac_profiles.size() > 0) {
-            T_setpt_resolved = hvac_profiles[0].t_setpoint_K;
-            cop_resolved = hvac_profiles[0].cop;
-            occ_id_resolved = hvac_profiles[0].occupancy_profile_id;
-        }
+        // if (hvac_profiles.size() > 0) {
+        //     T_setpt_resolved = hvac_profiles[0].t_setpoint_K;
+        //     cop_resolved = hvac_profiles[0].cop;
+        //     occ_id_resolved = hvac_profiles[0].occupancy_profile_id;
+        // }
 
-        amrex::Real f_occ_resolved = 1.0;
-        for (const auto& p : occ_profiles) {
-            if (p.id == occ_id_resolved) {
-                if (hour_of_day >= 0 && hour_of_day < 24) {
-                    f_occ_resolved = p.hourly_frac[hour_of_day];
-                }
-                break;
-            }
-        }
+        // amrex::Real f_occ_resolved = 1.0;
+        // for (const auto& p : occ_profiles) {
+        //     if (p.id == occ_id_resolved) {
+        //         if (hour_of_day >= 0 && hour_of_day < 24) {
+        //             f_occ_resolved = p.hourly_frac[hour_of_day];
+        //         }
+        //         break;
+        //     }
+        // }
 
         if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][5.2-diag-resolved] T_setpt=" << T_setpt_resolved
@@ -934,7 +958,7 @@ void UCMLayer::advance(UCMFields& fields,
                            << " hour=" << hour_of_day << "\n";
         }
 
-        for (amrex::MFIter mfi(*fields.AH, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
             const amrex::Box& bx = mfi.tilebox();
             auto const H_wl_a = fields.H_wall->const_array(mfi);
             auto const H_rf_a = fields.H_roof->const_array(mfi);
@@ -964,6 +988,24 @@ void UCMLayer::advance(UCMFields& fields,
                            << " Q_HVAC=[" << Q_HVAC_min << ", " << Q_HVAC_max << "] W/m²\n";
         }
     }
+
+if (m_params.ucm_debug) {
+    for (amrex::MFIter mfi(*fields.T_canyon_air); mfi.isValid(); ++mfi) {
+        auto const Tc = fields.T_canyon_air->const_array(mfi);
+        auto const AH = fields.AH->const_array(mfi);
+        auto const QH = fields.Q_HVAC_diag->const_array(mfi);
+        const amrex::Box& bx = mfi.validbox();
+        int i = bx.smallEnd(0);
+        int j = bx.smallEnd(1);
+        amrex::AllPrint() << "[UCM][DIAG-X] rank=" << amrex::ParallelDescriptor::MyProc()
+                          << " cell(" << i << "," << j << ") "
+                          << "T_can=" << Tc(i,j,0) 
+                          << " AH=" << AH(i,j,0) 
+                          << " Q_HVAC=" << QH(i,j,0) << "\n";
+        break;  // just first tile
+    }
+}
+
 
     // Phase 2.3: Compute anthropogenic heat
     compute_anthropogenic_heat(*fields.AH, *fields.ah_profile_id, *fields.is_urban,
@@ -1052,6 +1094,23 @@ void UCMLayer::advance(UCMFields& fields,
            h_sens_a(i,j,0) = H_lumped;
        });
     }
+if (m_params.ucm_debug) {
+    for (amrex::MFIter mfi(*fields.T_canyon_air); mfi.isValid(); ++mfi) {
+        auto const Tc = fields.T_canyon_air->const_array(mfi);
+        auto const AH = fields.AH->const_array(mfi);
+        auto const QH = fields.Q_HVAC_diag->const_array(mfi);
+        const amrex::Box& bx = mfi.validbox();
+        int i = bx.smallEnd(0);
+        int j = bx.smallEnd(1);
+        amrex::AllPrint() << "[UCM][DIAG-X] rank=" << amrex::ParallelDescriptor::MyProc()
+                          << " cell(" << i << "," << j << ") "
+                          << "T_can=" << Tc(i,j,0) 
+                          << " AH=" << AH(i,j,0) 
+                          << " Q_HVAC=" << QH(i,j,0) << "\n";
+        break;  // just first tile
+    }
+}
+
 
     fields.LE_latent->setVal(0.0);
 
