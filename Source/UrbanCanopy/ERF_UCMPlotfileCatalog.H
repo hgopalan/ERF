@@ -17,10 +17,10 @@
  * @brief Component indices for UCM plotfile output
  *
  * All fields are on the native UCM 2D slab grid.
- * Total ncomp = 19 in Phase 2.4.
+ * Total ncomp = 25 in Phase 5.1a.
  */
 enum UCMPlotfileComponents {
-    // Morphology (1–3)
+    // Morphology (0–2)
     UCMPlot_H_bldg           = 0,   ///< Building height [m]
     UCMPlot_W_road           = 1,   ///< Road width (canyon street) [m]
     UCMPlot_W_roof           = 2,   ///< Roof width (building footprint) [m]
@@ -50,13 +50,23 @@ enum UCMPlotfileComponents {
     // Mask (15)
     UCMPlot_is_urban         = 15,  ///< Urban mask (0/1) [-]
 
-    // Phase 2.4: Sky view factors (shadowing) (16–18)
+    // Phase 2.4: Sky view factors (single-bounce shadowing) (16–18)
     UCMPlot_SVF_wall         = 16,  ///< Wall sky view factor [-]
     UCMPlot_SVF_road         = 17,  ///< Road sky view factor [-]
     UCMPlot_SVF_roof         = 18,  ///< Roof sky view factor [-] (always 1.0)
 
-    // Total (Phase 2.4)
-    UCMPlot_ncomp            = 19   ///< Total number of components (Phase 2.4)
+    // Phase 5.1a: Multi-facet view factors (Hottel crossed-string geometry) (19–24)
+    // Consumed by Phase 5.1b radiosity solver; unused at Phase 5.1a but plotted
+    // for validation and debugging (per Contract #16).
+    UCMPlot_F_wall_sky       = 19,  ///< Wall→sky view factor [-]
+    UCMPlot_F_wall_wall      = 20,  ///< Wall→opposite-wall view factor [-]
+    UCMPlot_F_wall_road      = 21,  ///< Wall→road view factor [-]
+    UCMPlot_F_road_sky       = 22,  ///< Road→sky view factor [-]
+    UCMPlot_F_road_wall      = 23,  ///< Road→one-wall view factor [-]
+    UCMPlot_F_roof_sky       = 24,  ///< Roof→sky view factor [-] (always 1.0)
+
+    // Total (Phase 5.1a)
+    UCMPlot_ncomp            = 25   ///< Total number of components (Phase 5.1a)
 };
 
 /**
@@ -108,6 +118,12 @@ inline const char* UCMPlotfileComponentName(int comp)
         case UCMPlot_SVF_wall:         return "SVF_wall";
         case UCMPlot_SVF_road:         return "SVF_road";
         case UCMPlot_SVF_roof:         return "SVF_roof";
+        case UCMPlot_F_wall_sky:       return "F_wall_sky";
+        case UCMPlot_F_wall_wall:      return "F_wall_wall";
+        case UCMPlot_F_wall_road:      return "F_wall_road";
+        case UCMPlot_F_road_sky:       return "F_road_sky";
+        case UCMPlot_F_road_wall:      return "F_road_wall";
+        case UCMPlot_F_roof_sky:       return "F_roof_sky";
         default:                       return "unknown";
     }
 }

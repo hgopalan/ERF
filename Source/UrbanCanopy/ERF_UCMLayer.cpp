@@ -273,6 +273,9 @@ void UCMLayer::advance(UCMFields& fields,
     // These fields are NOT consumed by any SEB or radiation path in Phase 5.1a.
     // Phase 5.1b will introduce a radiosity solver that consumes them.
     // Computed once per run (H_bldg and W_road are static after CSV load).
+    // TODO(UCM 6.0): view-factor cache is static-bool guarded, assuming Contract #2
+    // (no regrid on anchor level). If Phase 3.1+ ever allows regrid, replace with
+    // an invalidation flag driven by CSV reload or grid change.
     static bool view_factors_computed = false;
     if (!view_factors_computed) {
         view_factors_computed = true;
