@@ -52,5 +52,7 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_headers += UrbanCanopy/ERF_UCMRadiationForcing.H
   # Phase 4.2 headers (Cloud-aware radiation)
   CEXE_headers += UrbanCanopy/ERF_UCMCloudCSVReader.H
+  # Phase 4.3 headers (Real radiation extraction — placeholder)
+  CEXE_headers += UrbanCanopy/ERF_UCMRadiationExtraction.H
 
 endif

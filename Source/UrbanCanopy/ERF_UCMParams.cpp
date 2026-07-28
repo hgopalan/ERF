@@ -160,4 +160,28 @@ void UCMParams::read_from_parmparse()
     } else {
         amrex::Error("erf.ucm.cloud_source must be 'none', 'constant', or 'csv'");
     }
+
+    // Section 14: Phase 4.3 — Real radiation extraction (placeholder)
+    pp.query("radiation_source", radiation_source_str);
+    if (radiation_source_str == "analytic") {
+       radiation_source = RadiationSource::Analytic;
+    } else if (radiation_source_str == "erf") {
+       radiation_source = RadiationSource::Erf;
+       // Layer 1 (startup validation): Verify ERF has an active radiation solver
+       amrex::ParmParse pp_erf("erf");
+       std::string rad_model = "None";
+       pp_erf.query("radiation_model", rad_model);
+       if (rad_model == "None" || rad_model == "none" || rad_model.empty()) {
+           amrex::Abort(
+               "[UCM][4.3] erf.ucm.radiation_source=erf requires an active ERF "
+               "radiation solver, but erf.radiation_model is '" + rad_model + "'. "
+               "Either enable ERF radiation (e.g., erf.radiation_model=RRTMGP) or "
+               "set erf.ucm.radiation_source=analytic.");
+       }
+    } else {
+       amrex::Abort("[UCM][4.3] Invalid erf.ucm.radiation_source '" +
+                    radiation_source_str +
+                    "'; expected 'analytic' or 'erf'.");
+    }
 }
+

@@ -266,6 +266,9 @@ void check_ucm_prerequisites(const UCMParams& params,
     amrex::Print() << "[UCM]   cloud_sw_a [-] = " << params.cloud_sw_a << "\n";
     amrex::Print() << "[UCM]   cloud_sw_b [-] = " << params.cloud_sw_b << "\n";
     
+    // Phase 4.3 — Real radiation extraction (placeholder)
+    amrex::Print() << "[UCM]   radiation_source = " << params.radiation_source_str << "\n";
+    
     amrex::Print() << "[UCM] =========================================================\n";
     amrex::Print() << "\n";
 
