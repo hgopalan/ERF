@@ -1,0 +1,3 @@
+hvac_profile_id,cop,t_setpoint_K,occupancy_profile_id,description
+0,3.0,290.0,0,office_unoccupied_gate
+1,4.0,290.0,0,office_efficient_unocc
