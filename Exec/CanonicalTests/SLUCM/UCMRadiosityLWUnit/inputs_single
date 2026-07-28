@@ -1,0 +1,124 @@
+name=Exec/CanonicalTests/SLUCM/UCMRadiosityLWUnit/inputs_single
+# ============================================================================
+# Phase 5.1c — LW Single-Bounce Radiosity Unit Test (single mode, midnight)
+# ============================================================================
+# Purpose: exercise single-bounce SVF LW fallback with
+# uniform H_bldg = W_road = 20 m, midnight solar time (0 s = 00:00 LST, no SW).
+# LW radiosity mode = "single" (backward-compatible Phase 3.5b path).
+# SW radiosity = "single". Verify:
+#   1. Mode string in banner = "single"
+#   2. Emissivities match input (eps_wall=0.90, eps_road=0.94)
+#   3. No T_sky range reported in banner (single mode doesn't compute it)
+# ============================================================================
+
+max_step         = 2
+erf.cfl          = 0.5
+amrex.fpe_trap_invalid = 0
+
+fabarray.mfiter_tile_size = 1024 1024 1024
+
+# Small domain: 320 m × 320 m × 200 m; ATM 4×4×8 → UCM 16×16 (grid_ratio=4)
+geometry.prob_extent  = 320.0  320.0  200.0
+amr.n_cell            = 4      4      8
+geometry.is_periodic  = 1      1      0
+
+# MOST surface layer — required to activate UCM step hook
+zlo.type              = "surface_layer"
+erf.most.z0           = 1.5
+erf.most.zref         = 100.0
+erf.most.surf_temp_flux = 0.0
+zhi.type              = "SlipWall"
+zhi.theta_grad        = 0.001
+
+# Rayleigh damping at top
+erf.rayleigh_damp_W = true
+erf.rayleigh_dampcoef = 0.2
+erf.rayleigh_zdamp = 50.0
+
+# Initialization from sounding — required for MOST
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "sounding_boston"
+
+# PBL: MRF — required to fully populate SurfaceLayer stability fields
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = false
+
+# Solver / physics
+erf.terrain_type     = None
+erf.use_moisture     = false
+erf.use_gravity      = true
+erf.molec_diff_type  = "None"
+erf.les_type         = "None"
+erf.theta_ref        = 295.0
+erf.transport_scalar = false
+
+# Diagnostics
+erf.sum_interval     = -1
+erf.v                = 1
+amr.v                = 1
+amr.max_level        = 0
+erf.plot_int_1       = -1
+amr.plot_int         = -1
+amr.check_int        = -1
+erf.check_int        = -1
+
+# ============================================================================
+# SLUCM — uniform 20 m buildings, 20 m road, 20 m roof
+# ============================================================================
+
+erf.ucm.enable                = true
+erf.ucm.ucm_debug             = 1
+erf.ucm.anchor_level          = 0
+erf.ucm.grid_ratio            = 4
+
+erf.ucm.H_bldg_uniform        = 20.0
+erf.ucm.W_road_uniform        = 20.0
+erf.ucm.W_roof_uniform        = 20.0
+
+erf.ucm.albedo_roof           = 0.20
+erf.ucm.albedo_wall           = 0.20
+erf.ucm.albedo_road           = 0.15
+erf.ucm.emissivity_roof       = 0.90
+erf.ucm.emissivity_wall       = 0.90
+erf.ucm.emissivity_road       = 0.94
+
+# Feedback: minimal (unit test doesn't care about coupling)
+erf.ucm.atm_feedback_momentum = 0.0
+erf.ucm.atm_feedback_heat     = 0.0
+erf.ucm.atm_feedback_moisture = 0.0
+
+# Wall drag: off
+erf.ucm.wall_drag_mode        = "off"
+
+# Prescribed radiation: on (midnight solar time for LW-only isolation)
+erf.ucm.use_prescribed_radiation = true
+erf.ucm.lat_deg               = 42.36
+erf.ucm.lon_deg               = -71.06
+erf.ucm.julian_day            = 172.0
+erf.ucm.solar_time_start_s    = 0.0
+erf.ucm.solar_constant        = 1361.0
+erf.ucm.sw_transmission       = 0.7
+erf.ucm.sky_emissivity        = 0.83
+
+# Cloud source: none
+erf.ucm.cloud_source          = "none"
+
+# Anthropogenic heat: off
+erf.ucm.AH_uniform_Wm2        = 0.0
+erf.ucm.AH_profile_type_default = 0
+
+# Phase 5.1b: radiosity_mode = single (SW single-bounce)
+erf.ucm.radiosity_mode        = "single"
+
+# Phase 5.1c: lw_radiosity_mode = single (LW single-bounce, backward-compat default)
+erf.ucm.lw_radiosity_mode     = "single"
+
+# UCM plotting/diagnostics: off (parse log only)
+erf.ucm.ucm_plot_int          = -1
+erf.ucm.ucm_atm_plot_int      = -1
+
+erf.ucm.zref                  = 2.0

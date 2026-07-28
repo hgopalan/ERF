@@ -193,5 +193,17 @@ void UCMParams::read_from_parmparse()
     } else {
         amrex::Abort("[UCM][5.1b] Invalid erf.ucm.radiosity_mode; expected 'single' or 'multi'.");
     }
+
+    // Section 16: Phase 5.1c — LW multi-bounce radiosity (Contracts #19, #20)
+    pp.query("lw_radiosity_mode", lw_radiosity_mode_str);
+    if (lw_radiosity_mode_str == "single") {
+        lw_radiosity_mode = LWRadiosityMode::Single;
+    } else if (lw_radiosity_mode_str == "multi-lagged") {
+        lw_radiosity_mode = LWRadiosityMode::MultiLagged;
+    } else {
+        amrex::Abort("[UCM][5.1c] Invalid erf.ucm.lw_radiosity_mode '" +
+                     lw_radiosity_mode_str +
+                     "'; expected 'single' or 'multi-lagged'.");
+    }
 }
 

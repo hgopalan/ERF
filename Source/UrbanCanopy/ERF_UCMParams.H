@@ -106,6 +106,22 @@ enum class RadiosityMode
 };
 
 /**
+ * @enum LWRadiosityMode
+ * @brief LW radiation distribution mode (Phase 5.1c)
+ *
+ * Selects whether LW absorbed on wall and road facets uses single-bounce SVF
+ * weighting (legacy Phase 3.5b path) or 2×2 lagged-T_skin radiosity
+ * (Phase 5.1c). Multi-lagged uses previous-timestep T_skin in the RHS,
+ * decoupling from the Newton iteration entirely. Fully coupled
+ * radiosity-inside-Newton is out of scope (see Contract #19).
+ */
+enum class LWRadiosityMode
+{
+    Single = 0,       ///< Phase 3.5b single-bounce SVF (backward-compat default)
+    MultiLagged = 1   ///< Phase 5.1c 2×2 lagged-T_skin radiosity multi-bounce
+};
+
+/**
  * @struct UCMParams
  * @brief Container for all SLUCM configuration parameters read from ParmParse
  *
@@ -320,6 +336,17 @@ struct UCMParams
 
     std::string radiosity_mode_str = "multi";     ///< Phase 5.1b: "single" | "multi" [string]
     RadiosityMode radiosity_mode = RadiosityMode::Multi;  ///< Phase 5.1b: resolved enum
+
+    // =========================================================================
+    // Section 16: Phase 5.1c — LW multi-bounce radiosity (Contracts #19, #20)
+    // =========================================================================
+    // Multi-bounce LW reflection between wall_A, wall_B, and road via 2×2
+    // radiosity solve using previous-timestep T_skin (lagged approach).
+    // Roof LW unchanged (single-bounce). Defaults to 'single' for backward
+    // compatibility — user opts into 'multi-lagged' explicitly.
+
+    std::string lw_radiosity_mode_str = "single";           ///< "single" | "multi-lagged"
+    LWRadiosityMode lw_radiosity_mode = LWRadiosityMode::Single;
 
     // =========================================================================
     // Public methods

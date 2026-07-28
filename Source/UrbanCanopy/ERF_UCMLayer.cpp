@@ -24,6 +24,7 @@
 #include <UrbanCanopy/ERF_UCMViewFactors.H>
 #include <UrbanCanopy/ERF_UCMRadiationExtraction.H>
 #include <UrbanCanopy/ERF_UCMRadiosity.H>
+#include <UrbanCanopy/ERF_UCMRadiosityLW.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <ERF_Constants.H>
 #include <cmath>
@@ -486,8 +487,21 @@ void UCMLayer::advance(UCMFields& fields,
         auto const Fwr_a = fields.F_wall_road->const_array(mfi);
         auto const Frw_a = fields.F_road_wall->const_array(mfi);
 
+        // Phase 5.1c: Additional view-factor const_arrays for LW radiosity
+        auto const Fws_a = fields.F_wall_sky->const_array(mfi);
+        auto const Frs_a = fields.F_road_sky->const_array(mfi);
+
+        // Phase 5.1c: Previous-timestep T_skin and emissivity const_arrays for lagged LW radiosity
+        auto const T_wall_prev_a = fields.T_skin_wall->const_array(mfi);
+        auto const T_road_prev_a = fields.T_skin_road->const_array(mfi);
+        auto const eps_wl_a = fields.emissivity_wall->const_array(mfi);
+        auto const eps_rd_a = fields.emissivity_road->const_array(mfi);
+
         // Phase 5.1b: Capture radiosity mode flag outside lambda
         const bool radiosity_mode_is_multi = (m_params.radiosity_mode == RadiosityMode::Multi);
+
+        // Phase 5.1c: Capture LW radiosity mode flag outside lambda
+        const bool lw_radiosity_mode_is_multi = (m_params.lw_radiosity_mode == LWRadiosityMode::MultiLagged);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
             if (is_urb(i,j,0) == 0) return;
@@ -511,36 +525,48 @@ void UCMLayer::advance(UCMFields& fields,
                 SW_road = SW0_road;
             }
 
-            // Phase 3.5c-hotfix2: Full canyon LW balance for shaded facets.
-            // Real wall/road LW balance (Kusaka 2001, Chen 2011):
-            //   Absorbed = ε*[SVF*LW_sky + (1-SVF)*σ*T_canyon⁴]
-            //   Emitted  = ε * SVF * σ * T_skin⁴  (only SVF fraction escapes)
-            // The solver internally uses:  LW_abs = ε*(LW_down_input - σ*T_skin⁴)
-            // Setting these equal and solving for effective LW_down_input:
-            //   LW_down_input = SVF*LW_sky + (1-SVF)*σ*T_can⁴ + (1-SVF)*σ*T_skin⁴
-            // The last term "adds back" the emission that doesn't actually escape
-            // (it's absorbed by opposite walls and re-emitted; net effect is trapped).
-            constexpr amrex::Real sigma_sb_local = 5.670374419e-8;
-            const amrex::Real T_can_val = T_can_a(i,j,0);
-            const amrex::Real T_can4 = T_can_val*T_can_val*T_can_val*T_can_val;
-            // Use previous T_skin for the "trapped emission" term (lag by one step; small err)
-            const amrex::Real T_skin_prev_rf = Tskin_rf(i,j,0);
-            const amrex::Real T_skin_prev_wl = Tskin_wl(i,j,0);
-            const amrex::Real T_skin_prev_rd = Tskin_rd(i,j,0);
-            const amrex::Real T_skin4_rf = T_skin_prev_rf*T_skin_prev_rf*T_skin_prev_rf*T_skin_prev_rf;
-            const amrex::Real T_skin4_wl = T_skin_prev_wl*T_skin_prev_wl*T_skin_prev_wl*T_skin_prev_wl;
-            const amrex::Real T_skin4_rd = T_skin_prev_rd*T_skin_prev_rd*T_skin_prev_rd*T_skin_prev_rd;
-            
-            const amrex::Real svf_w = svf_wall(i,j,0);
-            const amrex::Real svf_r = svf_road(i,j,0);
-            
-            const amrex::Real LW_roof_eff = LW_down;   // SVF_roof = 1
-            const amrex::Real LW_wall_eff = svf_w * LW_down 
-                                          + (1.0 - svf_w) * sigma_sb_local * T_can4
-                                          + (1.0 - svf_w) * sigma_sb_local * T_skin4_wl;
-            const amrex::Real LW_road_eff = svf_r * LW_down 
-                                          + (1.0 - svf_r) * sigma_sb_local * T_can4
-                                          + (1.0 - svf_r) * sigma_sb_local * T_skin4_rd;
+            // Phase 5.1c: LW incident — multi-bounce (lagged) or Phase 3.5b single-bounce
+            amrex::Real LW_wall_in, LW_road_in;
+            const amrex::Real LW_roof_in = LW_down;   // Roof unshaded, no bouncing
+
+            if (lw_radiosity_mode_is_multi) {
+                // Back out effective sky temperature from LW_down
+                const amrex::Real T_sky = std::pow(LW_down / UCM_SIGMA_SB, amrex::Real(0.25));
+
+                lw_radiosity_multi_bounce(
+                    T_wall_prev_a(i,j,0), T_road_prev_a(i,j,0), T_sky,
+                    eps_wl_a(i,j,0), eps_rd_a(i,j,0),
+                    Fww_a(i,j,0), Fwr_a(i,j,0), Frw_a(i,j,0),
+                    Fws_a(i,j,0), Frs_a(i,j,0),
+                    LW_wall_in, LW_road_in
+                );
+            } else {
+                // Phase 3.5b single-bounce SVF fallback (Contract #20: default backward-compat)
+                // IMPORTANT: preserve the exact existing 3.5b formula for bit-identity.
+                constexpr amrex::Real sigma_sb_local = 5.670374419e-8;
+                const amrex::Real T_can_val = T_can_a(i,j,0);
+                const amrex::Real T_can4 = T_can_val*T_can_val*T_can_val*T_can_val;
+                // Use previous T_skin for the "trapped emission" term (lag by one step; small err)
+                const amrex::Real T_skin_prev_wl = Tskin_wl(i,j,0);
+                const amrex::Real T_skin_prev_rd = Tskin_rd(i,j,0);
+                const amrex::Real T_skin4_wl = T_skin_prev_wl*T_skin_prev_wl*T_skin_prev_wl*T_skin_prev_wl;
+                const amrex::Real T_skin4_rd = T_skin_prev_rd*T_skin_prev_rd*T_skin_prev_rd*T_skin_prev_rd;
+                
+                const amrex::Real svf_w = svf_wall(i,j,0);
+                const amrex::Real svf_r = svf_road(i,j,0);
+                
+                LW_wall_in = svf_w * LW_down 
+                           + (1.0 - svf_w) * sigma_sb_local * T_can4
+                           + (1.0 - svf_w) * sigma_sb_local * T_skin4_wl;
+                LW_road_in = svf_r * LW_down 
+                           + (1.0 - svf_r) * sigma_sb_local * T_can4
+                           + (1.0 - svf_r) * sigma_sb_local * T_skin4_rd;
+            }
+
+            // Note: LW_roof_eff is already set; use LW_roof_in = LW_down for consistency
+            const amrex::Real LW_roof_eff = LW_roof_in;   // SVF_roof = 1
+            const amrex::Real LW_wall_eff = LW_wall_in;
+            const amrex::Real LW_road_eff = LW_road_in;
 
     /*if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "[UCM][3.5B-diag] time=" << time
@@ -802,6 +828,27 @@ void UCMLayer::advance(UCMFields& fields,
                        << " alpha_road=" << m_params.albedo_road;
         if (m_params.radiosity_mode == RadiosityMode::Multi) {
             amrex::Print() << " F_wall_road=[" << Fwr_min << ", " << Fwr_max << "]";
+        }
+        amrex::Print() << "\n";
+    }
+
+    // Phase 5.1c: Per-step debug banner for LW radiosity
+    amrex::Real Tsky_min = 0.0, Tsky_max = 0.0;
+    if (m_params.ucm_debug && m_params.lw_radiosity_mode == LWRadiosityMode::MultiLagged) {
+        // Sample from LW_down min/max — extract using MultiFab->min/max methods
+        const amrex::Real LW_min = fields.LW_down->min(0, 0);
+        const amrex::Real LW_max = fields.LW_down->max(0, 0);
+        Tsky_min = std::pow(LW_min / UCM_SIGMA_SB, amrex::Real(0.25));
+        Tsky_max = std::pow(LW_max / UCM_SIGMA_SB, amrex::Real(0.25));
+    }
+    if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+        const char* mode_str = (m_params.lw_radiosity_mode == LWRadiosityMode::MultiLagged)
+                               ? "multi-lagged" : "single";
+        amrex::Print() << "[UCM][5.1c][lw-radiosity] mode=" << mode_str
+                       << " eps_wall=" << m_params.emissivity_wall
+                       << " eps_road=" << m_params.emissivity_road;
+        if (m_params.lw_radiosity_mode == LWRadiosityMode::MultiLagged) {
+            amrex::Print() << " T_sky=[" << Tsky_min << ", " << Tsky_max << "]";
         }
         amrex::Print() << "\n";
     }

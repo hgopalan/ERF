@@ -60,5 +60,7 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_headers += UrbanCanopy/ERF_UCMRadiationExtraction.H
   # Phase 5.1b headers (SW multi-bounce radiosity solver)
   CEXE_headers += UrbanCanopy/ERF_UCMRadiosity.H
+  # Phase 5.1c headers (LW multi-bounce radiosity solver)
+  CEXE_headers += UrbanCanopy/ERF_UCMRadiosityLW.H
 
 endif
