@@ -1,0 +1,33 @@
+# Boston cloud diurnal cycle — coastal New England climatology.
+# Daytime convective peaks: local heating around midday fosters cumulus
+# and stratocumulus, raising cloud cover.
+# Nighttime increase: surface cooling reforms boundary-layer stratus
+# (typical in coastal New England).
+# Sources: ISCCP-H 3-hourly satellite composites, ERA5 low-cloud fraction
+# for the Boston region.
+# Format: time_s (0 = 00:00 EDT), cloud_fraction (0..1)
+time_s,cloud_fraction
+0,0.60
+3600,0.60
+7200,0.55
+10800,0.55
+14400,0.50
+18000,0.50
+21600,0.45
+25200,0.45
+28800,0.45
+32400,0.50
+36000,0.50
+39600,0.55
+43200,0.55
+46800,0.50
+50400,0.50
+54000,0.55
+57600,0.55
+61200,0.60
+64800,0.60
+68400,0.60
+72000,0.65
+75600,0.65
+79200,0.60
+82800,0.60
