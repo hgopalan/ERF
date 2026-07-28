@@ -237,6 +237,9 @@ struct UCMFields
     /// Anthropogenic heat profile selector [0=uniform, 1=diurnal]. Phase 2.3: per-cell from CSV.
     std::unique_ptr<amrex::iMultiFab> ah_profile_id;
 
+    /// HVAC profile selector [-]. Phase 5.2: per-cell from CSV hvac_profile_id column; defaults to 0.
+    std::unique_ptr<amrex::iMultiFab> hvac_profile_id_map;
+
     // =========================================================================
     // Phase 2.4: Sky view factors (shadowing model)
     // =========================================================================
@@ -282,6 +285,14 @@ struct UCMFields
     /// Roof-to-sky view factor [-]. Phase 5.1a: uniformly 1.0 (roof unshaded from above).
     /// Included for completeness and future LW radiosity (Phase 5.1c).
     std::unique_ptr<amrex::MultiFab> F_roof_sky;
+
+    // =========================================================================
+    // Phase 5.2: HVAC diagnostics
+    // =========================================================================
+
+    /// HVAC waste heat diagnostic [W/m²]. Phase 5.2: per-cell waste heat rate for plotting.
+    /// Filled during HVAC computation; copied to plotfile if requested.
+    std::unique_ptr<amrex::MultiFab> Q_HVAC_diag;
 
     // =========================================================================
     // Public methods

@@ -1,0 +1,5 @@
+mat_id,name,albedo,emissivity,k_therm_W_per_mK,rho_cp_J_per_m3K,thickness_m,description
+1,glass_steel_downtown,0.3,0.85,50.0,3500000.0,0.1,Curtain-wall high-rise (downtown core)
+2,brick_concrete,0.2,0.9,1.1,1800000.0,0.3,Standard mid-rise and dense residential
+3,wood_vinyl_residential,0.25,0.92,0.15,1200000.0,0.15,Suburban residential wood/vinyl siding
+4,grassland_rural,0.2,0.95,0.3,1400000.0,0.1,Rural surrogate (reserved for future is_urban=0 use)

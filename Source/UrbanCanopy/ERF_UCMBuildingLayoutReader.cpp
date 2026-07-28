@@ -131,8 +131,9 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
 
         std::string header_no_spaces = remove_spaces(header_line);
         bool has_AH_Wm2 = false;
+        bool has_hvac_profile_id = false;  // Phase 5.2: detect optional hvac_profile_id
 
-        // Define expected headers
+        // Define expected headers (with and without AH_Wm2, and optional hvac_profile_id)
         const std::string expected_header_legacy_new = "i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
                                                       "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,AH_Wm2,is_urban";
         const std::string expected_header_legacy_old = "i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
@@ -141,19 +142,39 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
                                                         "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,AH_Wm2,is_urban";
         const std::string expected_header_physical_old = "x_m,y_m,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
                                                         "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,is_urban";
+        
+        // Phase 5.2: New headers with hvac_profile_id
+        const std::string expected_header_legacy_new_hvac = "i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
+                                                           "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,AH_Wm2,is_urban,hvac_profile_id";
+        const std::string expected_header_legacy_old_hvac = "i,j,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
+                                                           "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,is_urban,hvac_profile_id";
+        const std::string expected_header_physical_new_hvac = "x_m,y_m,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
+                                                             "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,AH_Wm2,is_urban,hvac_profile_id";
+        const std::string expected_header_physical_old_hvac = "x_m,y_m,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
+                                                             "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,is_urban,hvac_profile_id";
 
         if (is_physical_mode) {
-            if (header_no_spaces == remove_spaces(expected_header_physical_new)) {
+            if (header_no_spaces == remove_spaces(expected_header_physical_new_hvac)) {
                 has_AH_Wm2 = true;
+                has_hvac_profile_id = true;
+            } else if (header_no_spaces == remove_spaces(expected_header_physical_old_hvac)) {
+                has_AH_Wm2 = false;
+                has_hvac_profile_id = true;
+            } else if (header_no_spaces == remove_spaces(expected_header_physical_new)) {
+                has_AH_Wm2 = true;
+                has_hvac_profile_id = false;
             } else if (header_no_spaces == remove_spaces(expected_header_physical_old)) {
                 has_AH_Wm2 = false;
+                has_hvac_profile_id = false;
             } else {
                 std::ostringstream oss;
-                oss << "[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast] "
+                oss << "[UCM][5.2][UCMBuildingLayoutReader::read_and_broadcast] "
                     << "CSV header mismatch (physical mode).\n"
-                    << "  Expected (new): " << expected_header_physical_new << "\n"
-                    << "  Or (old):       " << expected_header_physical_old << "\n"
-                    << "  Got:            " << header_line << "\n"
+                    << "  Expected (new with hvac): " << expected_header_physical_new_hvac << "\n"
+                    << "  Or (old with hvac):       " << expected_header_physical_old_hvac << "\n"
+                    << "  Or (new):                 " << expected_header_physical_new << "\n"
+                    << "  Or (old):                 " << expected_header_physical_old << "\n"
+                    << "  Got:                      " << header_line << "\n"
                     << "  Got bytes (hex): ";
                 for (unsigned char c : header_line) {
                     oss << std::hex << std::setw(2) << std::setfill('0') << int(c) << " ";
@@ -162,17 +183,27 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
             }
         } else {
             // Legacy mode
-            if (header_no_spaces == remove_spaces(expected_header_legacy_new)) {
+            if (header_no_spaces == remove_spaces(expected_header_legacy_new_hvac)) {
                 has_AH_Wm2 = true;
+                has_hvac_profile_id = true;
+            } else if (header_no_spaces == remove_spaces(expected_header_legacy_old_hvac)) {
+                has_AH_Wm2 = false;
+                has_hvac_profile_id = true;
+            } else if (header_no_spaces == remove_spaces(expected_header_legacy_new)) {
+                has_AH_Wm2 = true;
+                has_hvac_profile_id = false;
             } else if (header_no_spaces == remove_spaces(expected_header_legacy_old)) {
                 has_AH_Wm2 = false;
+                has_hvac_profile_id = false;
             } else {
                 std::ostringstream oss;
-                oss << "[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast] "
+                oss << "[UCM][5.2][UCMBuildingLayoutReader::read_and_broadcast] "
                     << "CSV header mismatch (legacy mode).\n"
-                    << "  Expected (new): " << expected_header_legacy_new << "\n"
-                    << "  Or (old):       " << expected_header_legacy_old << "\n"
-                    << "  Got:            " << header_line << "\n"
+                    << "  Expected (new with hvac): " << expected_header_legacy_new_hvac << "\n"
+                    << "  Or (old with hvac):       " << expected_header_legacy_old_hvac << "\n"
+                    << "  Or (new):                 " << expected_header_legacy_new << "\n"
+                    << "  Or (old):                 " << expected_header_legacy_old << "\n"
+                    << "  Got:                      " << header_line << "\n"
                     << "  Got bytes (hex): ";
                 for (unsigned char c : header_line) {
                     oss << std::hex << std::setw(2) << std::setfill('0') << int(c) << " ";
@@ -242,6 +273,19 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
                     // Old format: no AH_Wm2, default to 0.0
                     row.AH_Wm2 = 0.0;
                     std::getline(ss, field, ','); row.is_urban    = std::stoi(field);
+                }
+
+                // Phase 5.2: Handle hvac_profile_id column (optional trailing column, defaults to 0)
+                row.hvac_profile_id = 0;  // Default
+                if (has_hvac_profile_id) {
+                    std::getline(ss, field, ',');
+                    if (!field.empty()) {
+                        try {
+                            row.hvac_profile_id = std::stoi(field);
+                        } catch (...) {
+                            row.hvac_profile_id = 0;
+                        }
+                    }
                 }
 
                 // Validate is_urban

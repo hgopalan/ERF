@@ -1,0 +1,16 @@
+# Phase 5.2 HVAC Unit Test - Mode OFF (backward compat)
+# Single urban cell, max_step = 2
+max_step = 2
+n_cell = 4
+
+# Grid
+prob_lo = 0.0 0.0 0.0
+prob_hi = 100.0 100.0 100.0
+
+# UCM
+erf.ucm.enable = 1
+erf.ucm.anchor_level = 0
+erf.ucm.hvac_mode = "off"
+
+# No CSV required for off mode
+erf.ucm.atm_feedback_heat = 0.0
