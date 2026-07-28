@@ -256,6 +256,34 @@ struct UCMFields
     std::unique_ptr<amrex::MultiFab> SVF_roof;
 
     // =========================================================================
+    // Phase 5.1a: Multi-facet view factors (geometry only; consumed by Phase 5.1b radiosity)
+    // =========================================================================
+
+    /// Wall-to-sky view factor [-]. Phase 5.1a: from Hottel crossed-string 2D canyon geometry.
+    /// Pure geometry calculation; not consumed by any physics path in Phase 5.1a.
+    std::unique_ptr<amrex::MultiFab> F_wall_sky;
+
+    /// Wall-to-opposite-wall view factor [-]. Phase 5.1a: from Hottel crossed-string method.
+    /// Represents inter-wall radiation coupling in urban canyons.
+    std::unique_ptr<amrex::MultiFab> F_wall_wall;
+
+    /// Wall-to-road view factor [-]. Phase 5.1a: from Hottel crossed-string method.
+    /// Represents wall-to-floor radiation coupling.
+    std::unique_ptr<amrex::MultiFab> F_wall_road;
+
+    /// Road-to-sky view factor [-]. Phase 5.1a: from Hottel crossed-string method.
+    /// Fraction of sky hemisphere visible from canyon floor.
+    std::unique_ptr<amrex::MultiFab> F_road_sky;
+
+    /// Road-to-one-wall view factor [-]. Phase 5.1a: from Hottel crossed-string method.
+    /// This is the view factor to ONE wall; multiply by 2 for total road-to-walls exposure.
+    std::unique_ptr<amrex::MultiFab> F_road_wall;
+
+    /// Roof-to-sky view factor [-]. Phase 5.1a: uniformly 1.0 (roof unshaded from above).
+    /// Included for completeness and future LW radiosity (Phase 5.1c).
+    std::unique_ptr<amrex::MultiFab> F_roof_sky;
+
+    // =========================================================================
     // Public methods
     // =========================================================================
 
