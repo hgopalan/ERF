@@ -348,6 +348,7 @@ void apply_ucm_tendency_to_cc_source(
             ? z_phys_nd->const_array(mfi)
             : amrex::Array4<const amrex::Real>{};
 
+
         const int klo_c = klo;
         const int khi_c = khi;
         const amrex::Real dz_c = dz;
