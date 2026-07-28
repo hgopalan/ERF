@@ -663,4 +663,37 @@ void erf_slow_rhs_post (int level, int finest_level,
         } // end profile
       } // mfi
     } // OMP
+
+    // Phase 4.1: Debug trace for is_urban mask enforcement at MOST flux sites
+    if (is_urban && solverChoice.ucm_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+        Long n_cells_most_skipped = 0;  // Urban cells where MOST flux skipped
+        Long n_cells_most_applied = 0;  // Non-urban cells where MOST flux applied
+        
+        // Count cells at k=0 by urban mask for current level
+        const auto& domain = geom.Domain();
+        const int k_surface = domain.smallEnd(2);
+        
+        for (MFIter mfi((*is_urban)[level], true); mfi.isValid(); ++mfi) {
+            const Array4<const int> is_urban_arr = (*is_urban)[level].const_array(mfi);
+            const Box& bx = mfi.tilebox();
+            
+            // Count only cells at k=0
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+                    if (is_urban_arr.contains(i, j, k_surface)) {
+                        if (is_urban_arr(i, j, k_surface) == 1) {
+                            ++n_cells_most_skipped;
+                        } else {
+                            ++n_cells_most_applied;
+                        }
+                    }
+                }
+            }
+        }
+        
+        amrex::Print() << "[UCM][4.1][mask-enforcement] lev=" << level << " nrk=" << nrk << "\n"
+                       << "  N_cells_MOST_skipped (is_urban=1): " << n_cells_most_skipped << "\n"
+                       << "  N_cells_MOST_applied (is_urban=0): " << n_cells_most_applied << "\n"
+                       << "  Sanity: Sum = " << (n_cells_most_skipped + n_cells_most_applied) << "\n";
+    }
 }
