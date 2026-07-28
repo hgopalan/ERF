@@ -854,6 +854,7 @@ void UCMLayer::advance(UCMFields& fields,
             amrex::Real Hb  = H_bldg(i,j,0);
             amrex::Real W   = amrex::max(W_road(i,j,0), amrex::Real(1.0e-6));
             amrex::Real HoW = Hb / W;
+            amrex::ignore_unused(HoW);
 
             constexpr amrex::Real rho_cp_c   = 1.2 * 1005.0;
             constexpr amrex::Real U_canyon    = 2.0;
@@ -881,26 +882,20 @@ void UCMLayer::advance(UCMFields& fields,
             T_canyon_a(i,j,0) = T_canyon_new;
         });
     }
-if (m_params.ucm_debug) {
-    for (amrex::MFIter mfi(*fields.T_canyon_air); mfi.isValid(); ++mfi) {
-        auto const Tc = fields.T_canyon_air->const_array(mfi);
-        auto const AH = fields.AH->const_array(mfi);
-        auto const QH = fields.Q_HVAC_diag->const_array(mfi);
-        const amrex::Box& bx = mfi.validbox();
-        int i = bx.smallEnd(0);
-        int j = bx.smallEnd(1);
-        amrex::AllPrint() << "[UCM][DIAG-X] rank=" << amrex::ParallelDescriptor::MyProc()
-                          << " cell(" << i << "," << j << ") "
-                          << "T_can=" << Tc(i,j,0) 
-                          << " AH=" << AH(i,j,0) 
-                          << " Q_HVAC=" << QH(i,j,0) << "\n";
-        break;  // just first tile
-    }
-}
 
     // ========================================================================
     // Phase 5.2: HVAC waste heat (Contract #21 / #22)
-    // Scalar-hoisted single-profile lookup — no std::vector in ParallelFor lambda
+    //
+    // Scalar-hoisted single-profile lookup — no std::vector or std::string
+    // captured into the ParallelFor lambda (Contract #22, GPU safety).
+    //
+    // Phase 5.2-hotfix: All AMReX collective reductions (min/max) called
+    // OUTSIDE the IOProcessor() guard per PR #201 Bug #9 rule. Guarding a
+    // collective behind IOProcessor causes deadlock (rank 0 executes the
+    // collective; rank 1 skips it; subsequent collectives desynchronize).
+    //
+    // TODO (Phase 5.2 followup): cache HVAC/occupancy CSVs at UCMLayer
+    // construction time rather than re-reading every timestep.
     // ========================================================================
     const bool hvac_on = (m_params.hvac_mode == HVACMode::Simple);
 
@@ -912,43 +907,39 @@ if (m_params.ucm_debug) {
         const amrex::Real solar_time_local = m_params.solar_time_start_s + time;
         const int hour_of_day = static_cast<int>(std::fmod(solar_time_local / 3600.0, 24.0));
 
-        // Load CSVs (once per call; production should cache at init)
+        // Load CSVs (once per call; TODO: cache at UCMLayer construction)
         UCMHVACReader hvac_reader(m_params.hvac_csv_path);
         UCMOccupancyReader occ_reader(m_params.occupancy_csv_path);
-        //const auto& hvac_profiles = hvac_reader.get_all_profiles();
-        //const auto& occ_profiles = occ_reader.get_all_profiles();
-        // Phase 5.2-hotfix: sync ranks after file I/O to prevent
-        // step-2 collective deadlock when ranks drift out of sync.
-        // TODO: cache CSVs at UCMLayer construction (Phase 5.2 followup).
-    // Use defaults directly (skip CSV)
-        amrex::Real T_setpt_resolved = setpt_default;
-        amrex::Real cop_resolved = cop_default;
-        amrex::Real f_occ_resolved = 1.0;
-        amrex::ParallelDescriptor::Barrier();
+        const auto& hvac_profiles = hvac_reader.get_all_profiles();
+        const auto& occ_profiles = occ_reader.get_all_profiles();
 
-        // Contract #22: NO std::vector, std::string, or heap-allocated STL 
+        // Contract #22: NO std::vector, std::string, or heap-allocated STL
         // containers may be captured by value into an amrex::ParallelFor lambda.
         // Pre-resolve profile 0's values on HOST as scalars.
         // Multi-profile per-cell dispatch is deferred to Phase 6.2b (BEM-lite)
         // via amrex::Gpu::DeviceVector.
-        //amrex::Real T_setpt_resolved = setpt_default;
-        //amrex::Real cop_resolved = cop_default;
+        amrex::Real T_setpt_resolved = setpt_default;
+        amrex::Real cop_resolved = cop_default;
         int occ_id_resolved = 0;
-        // if (hvac_profiles.size() > 0) {
-        //     T_setpt_resolved = hvac_profiles[0].t_setpoint_K;
-        //     cop_resolved = hvac_profiles[0].cop;
-        //     occ_id_resolved = hvac_profiles[0].occupancy_profile_id;
-        // }
+        if (hvac_profiles.size() > 0) {
+            T_setpt_resolved = hvac_profiles[0].t_setpoint_K;
+            cop_resolved = hvac_profiles[0].cop;
+            occ_id_resolved = hvac_profiles[0].occupancy_profile_id;
+        }
 
-        // amrex::Real f_occ_resolved = 1.0;
-        // for (const auto& p : occ_profiles) {
-        //     if (p.id == occ_id_resolved) {
-        //         if (hour_of_day >= 0 && hour_of_day < 24) {
-        //             f_occ_resolved = p.hourly_frac[hour_of_day];
-        //         }
-        //         break;
-        //     }
-        // }
+        amrex::Real f_occ_resolved = 1.0;
+        for (const auto& p : occ_profiles) {
+            if (p.id == occ_id_resolved) {
+                if (hour_of_day >= 0 && hour_of_day < 24) {
+                    f_occ_resolved = p.hourly_frac[hour_of_day];
+                }
+                break;
+            }
+        }
+
+        // Phase 5.2-hotfix: sync ranks after file I/O to prevent step-2
+        // collective deadlock from rank drift.
+        amrex::ParallelDescriptor::Barrier();
 
         if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][5.2-diag-resolved] T_setpt=" << T_setpt_resolved
@@ -981,31 +972,16 @@ if (m_params.ucm_debug) {
             });
         }
 
-        if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
+        // Phase 5.2-hotfix: collectives OUTSIDE IOProcessor guard (PR #201 Bug #9)
+        if (m_params.ucm_debug) {
             amrex::Real Q_HVAC_min = fields.Q_HVAC_diag->min(0, 0);
             amrex::Real Q_HVAC_max = fields.Q_HVAC_diag->max(0, 0);
-            amrex::Print() << "[UCM][5.2][hvac] mode=simple hour=" << hour_of_day
-                           << " Q_HVAC=[" << Q_HVAC_min << ", " << Q_HVAC_max << "] W/m²\n";
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "[UCM][5.2][hvac] mode=simple hour=" << hour_of_day
+                               << " Q_HVAC=[" << Q_HVAC_min << ", " << Q_HVAC_max << "] W/m²\n";
+            }
         }
     }
-
-if (m_params.ucm_debug) {
-    for (amrex::MFIter mfi(*fields.T_canyon_air); mfi.isValid(); ++mfi) {
-        auto const Tc = fields.T_canyon_air->const_array(mfi);
-        auto const AH = fields.AH->const_array(mfi);
-        auto const QH = fields.Q_HVAC_diag->const_array(mfi);
-        const amrex::Box& bx = mfi.validbox();
-        int i = bx.smallEnd(0);
-        int j = bx.smallEnd(1);
-        amrex::AllPrint() << "[UCM][DIAG-X] rank=" << amrex::ParallelDescriptor::MyProc()
-                          << " cell(" << i << "," << j << ") "
-                          << "T_can=" << Tc(i,j,0) 
-                          << " AH=" << AH(i,j,0) 
-                          << " Q_HVAC=" << QH(i,j,0) << "\n";
-        break;  // just first tile
-    }
-}
-
 
     // Phase 2.3: Compute anthropogenic heat
     compute_anthropogenic_heat(*fields.AH, *fields.ah_profile_id, *fields.is_urban,
@@ -1094,23 +1070,6 @@ if (m_params.ucm_debug) {
            h_sens_a(i,j,0) = H_lumped;
        });
     }
-if (m_params.ucm_debug) {
-    for (amrex::MFIter mfi(*fields.T_canyon_air); mfi.isValid(); ++mfi) {
-        auto const Tc = fields.T_canyon_air->const_array(mfi);
-        auto const AH = fields.AH->const_array(mfi);
-        auto const QH = fields.Q_HVAC_diag->const_array(mfi);
-        const amrex::Box& bx = mfi.validbox();
-        int i = bx.smallEnd(0);
-        int j = bx.smallEnd(1);
-        amrex::AllPrint() << "[UCM][DIAG-X] rank=" << amrex::ParallelDescriptor::MyProc()
-                          << " cell(" << i << "," << j << ") "
-                          << "T_can=" << Tc(i,j,0) 
-                          << " AH=" << AH(i,j,0) 
-                          << " Q_HVAC=" << QH(i,j,0) << "\n";
-        break;  // just first tile
-    }
-}
-
 
     fields.LE_latent->setVal(0.0);
 
