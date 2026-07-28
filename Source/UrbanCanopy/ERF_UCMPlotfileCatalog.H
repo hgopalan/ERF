@@ -65,8 +65,11 @@ enum UCMPlotfileComponents {
     UCMPlot_F_road_wall      = 23,  ///< Road→one-wall view factor [-]
     UCMPlot_F_roof_sky       = 24,  ///< Roof→sky view factor [-] (always 1.0)
 
-    // Total (Phase 5.1a)
-    UCMPlot_ncomp            = 25   ///< Total number of components (Phase 5.1a)
+    // Phase 5.2: HVAC diagnostics (25)
+    UCMPlot_Q_HVAC_diag      = 25,  ///< HVAC waste heat diagnostic [W/m²]
+
+    // Total (Phase 5.2)
+    UCMPlot_ncomp            = 26   ///< Total number of components (Phase 5.2)
 };
 
 /**
@@ -124,6 +127,7 @@ inline const char* UCMPlotfileComponentName(int comp)
         case UCMPlot_F_road_sky:       return "F_road_sky";
         case UCMPlot_F_road_wall:      return "F_road_wall";
         case UCMPlot_F_roof_sky:       return "F_roof_sky";
+        case UCMPlot_Q_HVAC_diag:      return "Q_HVAC_diag";
         default:                       return "unknown";
     }
 }
