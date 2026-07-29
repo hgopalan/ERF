@@ -95,7 +95,9 @@ void DiffusionSrcForState_N (const amrex::Box& bx, const amrex::Box& domain,
                              const amrex::BCRec* bc_ptr,
                              const bool use_SurfLayer,
                              const amrex::Real implicit_fac,
-                             const amrex::Array4<const int>& is_urban = amrex::Array4<const int>{});
+                             const amrex::Array4<const int>& is_urban = amrex::Array4<const int>{},
+                             const amrex::Array4<const amrex::Real>& f_urb = amrex::Array4<const amrex::Real>{},
+                             const int interface_mode = 0);
 
 void DiffusionSrcForState_S (const amrex::Box& bx, const amrex::Box& domain,
                              int start_comp, int num_comp,
@@ -128,7 +130,9 @@ void DiffusionSrcForState_S (const amrex::Box& bx, const amrex::Box& domain,
                              const amrex::BCRec* bc_ptr,
                              const bool use_SurfLayer,
                              const amrex::Real implicit_fac,
-                             const amrex::Array4<const int>& is_urban = amrex::Array4<const int>{});
+                             const amrex::Array4<const int>& is_urban = amrex::Array4<const int>{},
+                             const amrex::Array4<const amrex::Real>& f_urb = amrex::Array4<const amrex::Real>{},
+                             const int interface_mode = 0);
 
 void DiffusionSrcForState_T (const amrex::Box& bx, const amrex::Box& domain,
                              int start_comp, int num_comp,
@@ -171,7 +175,9 @@ void DiffusionSrcForState_T (const amrex::Box& bx, const amrex::Box& domain,
                              const amrex::BCRec* bc_ptr,
                              const bool use_SurfLayer,
                              const amrex::Real implicit_fac,
-                             const amrex::Array4<const int>& is_urban = amrex::Array4<const int>{});
+                             const amrex::Array4<const int>& is_urban = amrex::Array4<const int>{},
+                             const amrex::Array4<const amrex::Real>& f_urb = amrex::Array4<const amrex::Real>{},
+                             const int interface_mode = 0);
 
 void DiffusionSrcForState_EB (const amrex::Box& bx, const amrex::Box& domain,
                              int start_comp, int num_comp,

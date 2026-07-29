@@ -56,7 +56,9 @@
                           native_shoc_driver[level].get(),
                           fr_as_crse, fr_as_fine,
                           m_r2d,
-                          m_ucm_is_urban_atm[level].get());  // Phase 4.1: is_urban mask for MOST flux gating
+                          m_ucm_is_urban_atm[level].get(),  // Phase 4.1: is_urban mask for MOST flux gating
+                          m_ucm_f_urb_atm[level].get(),     // Phase 5.6: f_urb for blended flux interface
+                          static_cast<int>(m_ucm_params.interface_mode));  // Phase 5.6: interface mode
 
         // Implicit diffusion of moisture
         #include "ERF_ImplicitPost.H"

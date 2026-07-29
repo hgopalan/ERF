@@ -82,12 +82,15 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
                         const BCRec* bc_ptr,
                         const bool use_SurfLayer,
                         const Real implicit_fac,
-                        const Array4<const int>& is_urban)
+                        const Array4<const int>& is_urban,
+                        const Array4<const Real>& f_urb,
+                        const int interface_mode)
 {
     BL_PROFILE_VAR("DiffusionSrcForState_T()",DiffusionSrcForState_T);
 
     const Real explicit_fac = one - implicit_fac;
     const bool has_is_urban = is_urban.contains(0,0,0);
+    const bool has_f_urb = f_urb.contains(0,0,0);
 
 #include "ERF_SetupDiff.H"
     Real l_abs_g      = std::abs(grav_gpu[2]);
@@ -132,11 +135,17 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
             Real GradCx = dx_inv * ( cell_prim(i, j, k  , prim_index)        - cell_prim(i-1, j, k  , prim_index) );
 
             if (SurfLayer_on_zlo && (qty_index == RhoTheta_comp)) {
-                // Phase 4.1: is_urban mask enforcement
-                if (!has_is_urban || is_urban(i,j,0) == 0) {
-                                    xflux(i,j,k) = hfx_x(i,j,0);
+                // Phase 4.1/5.6: is_urban mask enforcement / f_urb blending
+                if (interface_mode == 1 && has_f_urb) {
+                    // Phase 5.6 blended: scale MOST by rural fraction
+                    const Real f_rural = one - f_urb(i,j,0);
+                    xflux(i,j,k) = f_rural * hfx_x(i,j,0);
+                } else if (!has_is_urban || is_urban(i,j,0) == 0) {
+                    // Phase 4.1 binary: MOST flux only where is_urban=0
+                    xflux(i,j,k) = hfx_x(i,j,0);
                 } else {
-                    xflux(i,j,k) = zero;  // Urban cell: MOST flux skipped, UCM owns the surface
+                    // Binary mode + is_urban=1 → skip (unchanged from Phase 4.1)
+                    xflux(i,j,k) = zero;
                 }
             } else if (SurfLayer_on_zlo && (qty_index == RhoQ1_comp)) {
                 xflux(i,j,k) = qfx1_x(i,j,0);
@@ -168,11 +177,17 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
             Real GradCy = dy_inv * ( cell_prim(i, j, k  , prim_index)        - cell_prim(i, j-1, k  , prim_index) );
 
             if (SurfLayer_on_zlo && (qty_index == RhoTheta_comp)) {
-                // Phase 4.1: is_urban mask enforcement
-                if (!has_is_urban || is_urban(i,j,0) == 0) {
-                                    yflux(i,j,k) = hfx_y(i,j,0);
+                // Phase 4.1/5.6: is_urban mask enforcement / f_urb blending
+                if (interface_mode == 1 && has_f_urb) {
+                    // Phase 5.6 blended: scale MOST by rural fraction
+                    const Real f_rural = one - f_urb(i,j,0);
+                    yflux(i,j,k) = f_rural * hfx_y(i,j,0);
+                } else if (!has_is_urban || is_urban(i,j,0) == 0) {
+                    // Phase 4.1 binary: MOST flux only where is_urban=0
+                    yflux(i,j,k) = hfx_y(i,j,0);
                 } else {
-                    yflux(i,j,k) = zero;  // Urban cell: MOST flux skipped, UCM owns the surface
+                    // Binary mode + is_urban=1 → skip (unchanged from Phase 4.1)
+                    yflux(i,j,k) = zero;
                 }
             } else if (SurfLayer_on_zlo && (qty_index == RhoQ1_comp)) {
                 yflux(i,j,k) = qfx1_y(i,j,0);
@@ -283,11 +298,17 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
             Real GradCx = dx_inv * ( cell_prim(i, j, k  , prim_index)        - cell_prim(i-1, j, k  , prim_index) );
 
             if (SurfLayer_on_zlo && (qty_index == RhoTheta_comp)) {
-                // Phase 4.1: is_urban mask enforcement
-                if (!has_is_urban || is_urban(i,j,0) == 0) {
-                                    xflux(i,j,k) = hfx_x(i,j,0);
+                // Phase 4.1/5.6: is_urban mask enforcement / f_urb blending
+                if (interface_mode == 1 && has_f_urb) {
+                    // Phase 5.6 blended: scale MOST by rural fraction
+                    const Real f_rural = one - f_urb(i,j,0);
+                    xflux(i,j,k) = f_rural * hfx_x(i,j,0);
+                } else if (!has_is_urban || is_urban(i,j,0) == 0) {
+                    // Phase 4.1 binary: MOST flux only where is_urban=0
+                    xflux(i,j,k) = hfx_x(i,j,0);
                 } else {
-                    xflux(i,j,k) = zero;  // Urban cell: MOST flux skipped, UCM owns the surface
+                    // Binary mode + is_urban=1 → skip (unchanged from Phase 4.1)
+                    xflux(i,j,k) = zero;
                 }
             } else if (SurfLayer_on_zlo && (qty_index == RhoQ1_comp)) {
                 xflux(i,j,k) = qfx1_x(i,j,0);
@@ -317,11 +338,17 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
             Real GradCy = dy_inv * ( cell_prim(i, j, k  , prim_index)        - cell_prim(i, j-1, k  , prim_index) );
 
             if (SurfLayer_on_zlo && (qty_index == RhoTheta_comp)) {
-                // Phase 4.1: is_urban mask enforcement
-                if (!has_is_urban || is_urban(i,j,0) == 0) {
-                                    yflux(i,j,k) = hfx_y(i,j,0);
+                // Phase 4.1/5.6: is_urban mask enforcement / f_urb blending
+                if (interface_mode == 1 && has_f_urb) {
+                    // Phase 5.6 blended: scale MOST by rural fraction
+                    const Real f_rural = one - f_urb(i,j,0);
+                    yflux(i,j,k) = f_rural * hfx_y(i,j,0);
+                } else if (!has_is_urban || is_urban(i,j,0) == 0) {
+                    // Phase 4.1 binary: MOST flux only where is_urban=0
+                    yflux(i,j,k) = hfx_y(i,j,0);
                 } else {
-                    yflux(i,j,k) = zero;  // Urban cell: MOST flux skipped, UCM owns the surface
+                    // Binary mode + is_urban=1 → skip (unchanged from Phase 4.1)
+                    yflux(i,j,k) = zero;
                 }
             } else if (SurfLayer_on_zlo && (qty_index == RhoQ1_comp)) {
                 yflux(i,j,k) = qfx1_y(i,j,0);
@@ -430,11 +457,17 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
             Real GradCx = dx_inv * ( cell_prim(i, j, k  , prim_index)        - cell_prim(i-1, j, k  , prim_index) );
 
             if (SurfLayer_on_zlo && (qty_index == RhoTheta_comp)) {
-                // Phase 4.1: is_urban mask enforcement
-                if (!has_is_urban || is_urban(i,j,0) == 0) {
-                                    xflux(i,j,k) = hfx_x(i,j,0);
+                // Phase 4.1/5.6: is_urban mask enforcement / f_urb blending
+                if (interface_mode == 1 && has_f_urb) {
+                    // Phase 5.6 blended: scale MOST by rural fraction
+                    const Real f_rural = one - f_urb(i,j,0);
+                    xflux(i,j,k) = f_rural * hfx_x(i,j,0);
+                } else if (!has_is_urban || is_urban(i,j,0) == 0) {
+                    // Phase 4.1 binary: MOST flux only where is_urban=0
+                    xflux(i,j,k) = hfx_x(i,j,0);
                 } else {
-                    xflux(i,j,k) = zero;  // Urban cell: MOST flux skipped, UCM owns the surface
+                    // Binary mode + is_urban=1 → skip (unchanged from Phase 4.1)
+                    xflux(i,j,k) = zero;
                 }
             } else if (SurfLayer_on_zlo && (qty_index == RhoQ1_comp)) {
                 xflux(i,j,k) = qfx1_x(i,j,0);
@@ -463,11 +496,17 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
             Real GradCy = dy_inv * ( cell_prim(i, j, k  , prim_index)        - cell_prim(i, j-1, k  , prim_index) );
 
             if (SurfLayer_on_zlo && (qty_index == RhoTheta_comp)) {
-                // Phase 4.1: is_urban mask enforcement
-                if (!has_is_urban || is_urban(i,j,0) == 0) {
-                                    yflux(i,j,k) = hfx_y(i,j,0);
+                // Phase 4.1/5.6: is_urban mask enforcement / f_urb blending
+                if (interface_mode == 1 && has_f_urb) {
+                    // Phase 5.6 blended: scale MOST by rural fraction
+                    const Real f_rural = one - f_urb(i,j,0);
+                    yflux(i,j,k) = f_rural * hfx_y(i,j,0);
+                } else if (!has_is_urban || is_urban(i,j,0) == 0) {
+                    // Phase 4.1 binary: MOST flux only where is_urban=0
+                    yflux(i,j,k) = hfx_y(i,j,0);
                 } else {
-                    yflux(i,j,k) = zero;  // Urban cell: MOST flux skipped, UCM owns the surface
+                    // Binary mode + is_urban=1 → skip (unchanged from Phase 4.1)
+                    yflux(i,j,k) = zero;
                 }
             } else if (SurfLayer_on_zlo && (qty_index == RhoQ1_comp)) {
                 yflux(i,j,k) = qfx1_y(i,j,0);
@@ -573,11 +612,17 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
             Real GradCx = dx_inv * ( cell_prim(i, j, k  , prim_index)        - cell_prim(i-1, j, k  , prim_index) );
 
             if (SurfLayer_on_zlo && (qty_index == RhoTheta_comp)) {
-                // Phase 4.1: is_urban mask enforcement
-                if (!has_is_urban || is_urban(i,j,0) == 0) {
-                                    xflux(i,j,k) = hfx_x(i,j,0);
+                // Phase 4.1/5.6: is_urban mask enforcement / f_urb blending
+                if (interface_mode == 1 && has_f_urb) {
+                    // Phase 5.6 blended: scale MOST by rural fraction
+                    const Real f_rural = one - f_urb(i,j,0);
+                    xflux(i,j,k) = f_rural * hfx_x(i,j,0);
+                } else if (!has_is_urban || is_urban(i,j,0) == 0) {
+                    // Phase 4.1 binary: MOST flux only where is_urban=0
+                    xflux(i,j,k) = hfx_x(i,j,0);
                 } else {
-                    xflux(i,j,k) = zero;  // Urban cell: MOST flux skipped, UCM owns the surface
+                    // Binary mode + is_urban=1 → skip (unchanged from Phase 4.1)
+                    xflux(i,j,k) = zero;
                 }
             } else if (SurfLayer_on_zlo && (qty_index == RhoQ1_comp)) {
                 xflux(i,j,k) = qfx1_x(i,j,0);
@@ -605,11 +650,17 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
             Real GradCy = dy_inv * ( cell_prim(i, j, k  , prim_index)        - cell_prim(i, j-1, k  , prim_index) );
 
             if (SurfLayer_on_zlo && (qty_index == RhoTheta_comp)) {
-                // Phase 4.1: is_urban mask enforcement
-                if (!has_is_urban || is_urban(i,j,0) == 0) {
-                                    yflux(i,j,k) = hfx_y(i,j,0);
+                // Phase 4.1/5.6: is_urban mask enforcement / f_urb blending
+                if (interface_mode == 1 && has_f_urb) {
+                    // Phase 5.6 blended: scale MOST by rural fraction
+                    const Real f_rural = one - f_urb(i,j,0);
+                    yflux(i,j,k) = f_rural * hfx_y(i,j,0);
+                } else if (!has_is_urban || is_urban(i,j,0) == 0) {
+                    // Phase 4.1 binary: MOST flux only where is_urban=0
+                    yflux(i,j,k) = hfx_y(i,j,0);
                 } else {
-                    yflux(i,j,k) = zero;  // Urban cell: MOST flux skipped, UCM owns the surface
+                    // Binary mode + is_urban=1 → skip (unchanged from Phase 4.1)
+                    yflux(i,j,k) = zero;
                 }
             } else if (SurfLayer_on_zlo && (qty_index == RhoQ1_comp)) {
                 yflux(i,j,k) = qfx1_y(i,j,0);
