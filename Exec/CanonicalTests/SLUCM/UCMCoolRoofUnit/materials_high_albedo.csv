@@ -1,0 +1,2 @@
+mat_id,name,albedo,emissivity,k_therm_W_per_mK,rho_cp_J_per_m3K,thickness_m,description
+1,cool_roof,0.65,0.90,1.5,1800000.0,0.25,High-albedo cool roof

@@ -5,52 +5,185 @@ Phase 5.3: Green Roof Unit Test Verification Script
 Compares green_roof_mode=off vs green_roof_mode=simple to verify
 that green roofs produce latent heat flux (LE_green_roof_diag > 0).
 
+Parse logs for [UCM][5.3][green-roof] LE_green=[min, max] and assert:
+  - off case: LE_green not found or all zeros
+  - simple case: LE_green_max > 1.0 W/m^2
+
 Exit codes:
-  0: Test passed (LE_green_roof_diag > 0 in simple case, = 0 in off case)
+  0: Test passed (LE_green > 0 in simple case, 0 in off case)
   1: Test failed (assertion error or physical inconsistency)
   2: Missing log file
 """
 
+import argparse
 import re
 import sys
+from pathlib import Path
 
-def parse_ucm_debug_log(log_content, pattern_name):
-    """
-    Parse UCM debug output to extract diagnostic values.
-    
-    Looks for patterns like:
-      [UCM][5.3][green-roof] mode=simple LE_green=[min_val, max_val] W/m²
-    
-    Returns tuple (min_val, max_val) or (None, None) if not found.
-    """
-    # Pattern for green roof diagnostic
-    pattern = r'\[UCM\]\[5\.3\]\[green-roof\].*LE_green=\[([\d.e-]+),\s*([\d.e-]+)\]'
-    matches = re.findall(pattern, log_content)
-    
-    if matches:
-        min_val, max_val = matches[-1]
-        return (float(min_val), float(max_val))
-    
-    return (None, None)
+
+def parse_log(path):
+    """Return a dict of per-step time series parsed from an ERF run log."""
+    steps = []
+    times = []
+    le_green_min = []
+    le_green_max = []
+
+    # per-step scratch (reset when a STEP_START is seen)
+    scratch = {}
+
+    # Regex patterns matching the debug output produced by ERF_UCMLayer.cpp
+    RE_STEP_START = re.compile(
+        r"\[Level 0 step (\d+)\] ADVANCE from elapsed time = ([\d.eE+-]+)"
+    )
+    RE_LE_GREEN = re.compile(
+        r"\[UCM\]\[5\.3\]\[green-roof\].*LE_green=\[([\d.eE+-]+),\s*([\d.eE+-]+)\]"
+    )
+
+    def flush():
+        if not scratch:
+            return
+        steps.append(scratch.get("step"))
+        times.append(scratch.get("time"))
+        le_green_min.append(scratch.get("le_green_min"))
+        le_green_max.append(scratch.get("le_green_max"))
+
+    with open(path) as f:
+        for line in f:
+            m = RE_STEP_START.search(line)
+            if m:
+                flush()
+                scratch = {"step": int(m.group(1)), "time": float(m.group(2))}
+                continue
+
+            m = RE_LE_GREEN.search(line)
+            if m:
+                scratch["le_green_min"] = float(m.group(1))
+                scratch["le_green_max"] = float(m.group(2))
+                continue
+
+        flush()
+
+    return {
+        "path": str(path),
+        "step": steps,
+        "time_s": times,
+        "le_green_min": le_green_min,
+        "le_green_max": le_green_max,
+    }
+
+
+def safe_last(seq):
+    for v in reversed(seq):
+        if v is not None:
+            return v
+    return None
+
+
+def check_run(data, label, expect_le_green, target_step):
+    """Return (passed, messages) for a parsed run."""
+    msgs = []
+    ok = True
+
+    n = len(data["step"])
+    msgs.append(f"[{label}] parsed {n} timesteps from {data['path']}")
+
+    if n == 0:
+        msgs.append(f"[{label}] FAIL: no timesteps parsed - check log path/format")
+        return False, msgs
+
+    last_step = safe_last(data["step"])
+    if last_step is None:
+        msgs.append(f"[{label}] FAIL: no step number found")
+        ok = False
+    elif target_step is not None and last_step < target_step:
+        msgs.append(
+            f"[{label}] FAIL: reached step {last_step} but expected {target_step} "
+            f"(likely hung or crashed)"
+        )
+        ok = False
+    else:
+        msgs.append(f"[{label}] OK: reached step {last_step}")
+
+    # LE_green checks
+    le_present = [le for le in data["le_green_max"] if le is not None]
+    if expect_le_green:
+        if len(le_present) == 0:
+            msgs.append(f"[{label}] FAIL: green_roof_mode=simple but no LE_green lines found")
+            ok = False
+        else:
+            le_max_ever = max(le_present)
+            le_min_ever = min(le_present)
+            msgs.append(
+                f"[{label}] LE_green: min={le_min_ever:.2f} max={le_max_ever:.2f} W/m^2"
+            )
+            if le_max_ever < 1.0:
+                msgs.append(
+                    f"[{label}] FAIL: green roof never activated "
+                    f"(max LE_green={le_max_ever:.4f} < 1.0 W/m^2)"
+                )
+                ok = False
+            else:
+                msgs.append(f"[{label}] OK: green roof produced latent heat (max={le_max_ever:.2f} W/m^2)")
+    else:
+        if len(le_present) > 0:
+            msgs.append(
+                f"[{label}] FAIL: green_roof_mode=off but {len(le_present)} LE_green lines found "
+                f"(should be zero)"
+            )
+            ok = False
+        else:
+            msgs.append(f"[{label}] OK: no LE_green lines (green_roof_mode=off)")
+
+    return ok, msgs
+
 
 def main():
-    """
-    Main verification logic: check green roof produces positive LE
-    """
-    
-    try:
-        print("Phase 5.3 Green Roof Unit Test")
-        print("Expected: simple case LE_green_roof_diag > 0")
-        print("Placeholder: verification would compare two run logs")
-        
-        # Exit 0 for now (placeholder logic)
-        return 0
-    except FileNotFoundError:
-        print("ERROR: Log file not found")
-        return 2
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return 1
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--off", required=True, help="Path to green_roof_mode=off run log"
+    )
+    ap.add_argument(
+        "--simple", required=True, help="Path to green_roof_mode=simple run log"
+    )
+    ap.add_argument(
+        "--max-step", type=int, default=2,
+        help="Expected final step (fail if not reached). Default: 2"
+    )
+    args = ap.parse_args()
+
+    off_path = Path(args.off)
+    simple_path = Path(args.simple)
+    for p in (off_path, simple_path):
+        if not p.exists():
+            print(f"ERROR: log file not found: {p}", file=sys.stderr)
+            sys.exit(2)
+
+    off = parse_log(off_path)
+    simple = parse_log(simple_path)
+
+    all_ok = True
+    all_msgs = []
+
+    ok, msgs = check_run(off, "green_roof_off", expect_le_green=False, target_step=args.max_step)
+    all_ok = all_ok and ok
+    all_msgs += msgs
+    all_msgs.append("")
+
+    ok, msgs = check_run(simple, "green_roof_simple", expect_le_green=True, target_step=args.max_step)
+    all_ok = all_ok and ok
+    all_msgs += msgs
+    all_msgs.append("")
+
+    for m in all_msgs:
+        print(m)
+
+    if all_ok:
+        print("PASS: Phase 5.3 Green Roof unit test.")
+        sys.exit(0)
+    else:
+        print("FAIL: one or more checks did not pass. See messages above.")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
