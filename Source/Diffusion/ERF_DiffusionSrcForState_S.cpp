@@ -69,12 +69,15 @@ DiffusionSrcForState_S (const Box& bx, const Box& domain,
                         const BCRec* bc_ptr,
                         const bool use_SurfLayer,
                         const Real implicit_fac,
-                        const Array4<const int>& is_urban)
+                        const Array4<const int>& is_urban,
+                        const Array4<const Real>& f_urb,
+                        const int interface_mode)
 {
     BL_PROFILE_VAR("DiffusionSrcForState_S()",DiffusionSrcForState_S);
 
     const Real explicit_fac = one - implicit_fac;
     const bool has_is_urban = is_urban.contains(0,0,0);
+    const bool has_f_urb = f_urb.contains(0,0,0);
 
 #include "ERF_SetupDiff.H"
     Real l_abs_g      = std::abs(grav_gpu[2]);
@@ -186,10 +189,16 @@ DiffusionSrcForState_S (const Box& bx, const Box& domain,
 
             if (SurfLayer_on_zlo) {
                 if (qty_index == RhoTheta_comp) {
-                    // Phase 4.1: is_urban mask enforcement - MOST flux only where is_urban=0
-                    if (!has_is_urban || is_urban(i,j,0) == 0) {
+                    // Phase 4.1/5.6: is_urban mask enforcement / f_urb blending
+                    if (interface_mode == 1 && has_f_urb) {
+                        // Phase 5.6 blended: scale MOST by rural fraction
+                        const Real f_rural = one - f_urb(i,j,0);
+                        zflux(i,j,k) = f_rural * hfx_z(i,j,0);
+                    } else if (!has_is_urban || is_urban(i,j,0) == 0) {
+                        // Phase 4.1 binary: MOST flux only where is_urban=0
                         zflux(i,j,k) = hfx_z(i,j,0);
                     } else {
+                        // Binary mode + is_urban=1 → skip (unchanged from Phase 4.1)
                         zflux(i,j,k) = zero;
                     }
                 } else if (qty_index == RhoQ1_comp) {
@@ -308,10 +317,16 @@ DiffusionSrcForState_S (const Box& bx, const Box& domain,
 
             if (SurfLayer_on_zlo) {
                 if (qty_index == RhoTheta_comp) {
-                    // Phase 4.1: is_urban mask enforcement - MOST flux only where is_urban=0
-                    if (!has_is_urban || is_urban(i,j,0) == 0) {
+                    // Phase 4.1/5.6: is_urban mask enforcement / f_urb blending
+                    if (interface_mode == 1 && has_f_urb) {
+                        // Phase 5.6 blended: scale MOST by rural fraction
+                        const Real f_rural = one - f_urb(i,j,0);
+                        zflux(i,j,k) = f_rural * hfx_z(i,j,0);
+                    } else if (!has_is_urban || is_urban(i,j,0) == 0) {
+                        // Phase 4.1 binary: MOST flux only where is_urban=0
                         zflux(i,j,k) = hfx_z(i,j,0);
                     } else {
+                        // Binary mode + is_urban=1 → skip (unchanged from Phase 4.1)
                         zflux(i,j,k) = zero;
                     }
                 } else if (qty_index == RhoQ1_comp) {
@@ -427,10 +442,16 @@ DiffusionSrcForState_S (const Box& bx, const Box& domain,
 
             if (SurfLayer_on_zlo) {
                 if (qty_index == RhoTheta_comp) {
-                    // Phase 4.1: is_urban mask enforcement - MOST flux only where is_urban=0
-                    if (!has_is_urban || is_urban(i,j,0) == 0) {
+                    // Phase 4.1/5.6: is_urban mask enforcement / f_urb blending
+                    if (interface_mode == 1 && has_f_urb) {
+                        // Phase 5.6 blended: scale MOST by rural fraction
+                        const Real f_rural = one - f_urb(i,j,0);
+                        zflux(i,j,k) = f_rural * hfx_z(i,j,0);
+                    } else if (!has_is_urban || is_urban(i,j,0) == 0) {
+                        // Phase 4.1 binary: MOST flux only where is_urban=0
                         zflux(i,j,k) = hfx_z(i,j,0);
                     } else {
+                        // Binary mode + is_urban=1 → skip (unchanged from Phase 4.1)
                         zflux(i,j,k) = zero;
                     }
                 } else if (qty_index == RhoQ1_comp) {
@@ -543,10 +564,16 @@ DiffusionSrcForState_S (const Box& bx, const Box& domain,
 
             if (SurfLayer_on_zlo) {
                 if (qty_index == RhoTheta_comp) {
-                    // Phase 4.1: is_urban mask enforcement - MOST flux only where is_urban=0
-                    if (!has_is_urban || is_urban(i,j,0) == 0) {
+                    // Phase 4.1/5.6: is_urban mask enforcement / f_urb blending
+                    if (interface_mode == 1 && has_f_urb) {
+                        // Phase 5.6 blended: scale MOST by rural fraction
+                        const Real f_rural = one - f_urb(i,j,0);
+                        zflux(i,j,k) = f_rural * hfx_z(i,j,0);
+                    } else if (!has_is_urban || is_urban(i,j,0) == 0) {
+                        // Phase 4.1 binary: MOST flux only where is_urban=0
                         zflux(i,j,k) = hfx_z(i,j,0);
                     } else {
+                        // Binary mode + is_urban=1 → skip (unchanged from Phase 4.1)
                         zflux(i,j,k) = zero;
                     }
                 } else if (qty_index == RhoQ1_comp) {

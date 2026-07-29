@@ -91,7 +91,9 @@ void erf_slow_rhs_post (int level, int finest_level,
                         YAFluxRegister* fr_as_crse,
                         YAFluxRegister* fr_as_fine,
                         std::unique_ptr<ReadBndryPlanes>& m_r2d,
-                        iMultiFab* is_urban)
+                        iMultiFab* is_urban,
+                        MultiFab* f_urb_atm,
+                        int interface_mode)
 {
     BL_PROFILE_REGION("erf_slow_rhs_post()");
 
@@ -351,7 +353,8 @@ void erf_slow_rhs_post (int level, int finest_level,
         Array4<Real> diffflux_x, diffflux_y, diffflux_z;
         Array4<Real> hfx_x, hfx_y, hfx_z, diss;
         Array4<Real> q1fx_x, q1fx_y, q1fx_z, q2fx_z;
-        Array4<const int> is_urban_arr;  // Phase 4.1: is_urban mask for MOST flux gating
+        Array4<const int> is_urban_arr;   // Phase 4.1: is_urban mask for MOST flux gating
+        Array4<const Real> f_urb_arr;     // Phase 5.6: f_urb for blended flux interface
 
         if (l_use_diff) {
             diffflux_x = dflux_x->array(mfi);
@@ -366,6 +369,11 @@ void erf_slow_rhs_post (int level, int finest_level,
             // Phase 4.1: Get is_urban mask if UCM is active
             if (is_urban) {
                 is_urban_arr = is_urban->const_array(mfi);
+            }
+            
+            // Phase 5.6: Get f_urb for blended interface if UCM is active
+            if (f_urb_atm) {
+                f_urb_arr = f_urb_atm->const_array(mfi);
             }
 
             if (Q1fx1) q1fx_x = Q1fx1->array(mfi);
@@ -467,7 +475,7 @@ void erf_slow_rhs_post (int level, int finest_level,
                                                hfx_z, q1fx_z, q2fx_z, diss,
                                                mu_turb, solverChoice, level,
                                                tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac,
-                                               is_urban_arr);
+                                               is_urban_arr, f_urb_arr, interface_mode);
                     } else if (l_use_terrain) {
                         DiffusionSrcForState_T(tbx, domain, start_comp, num_comp, l_rotate, u, v,
                                                new_cons, cur_prim, cell_rhs,
@@ -479,7 +487,7 @@ void erf_slow_rhs_post (int level, int finest_level,
                                                hfx_x, hfx_y, hfx_z, q1fx_x, q1fx_y, q1fx_z,q2fx_z, diss,
                                                mu_turb, solverChoice, level,
                                                tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac,
-                                               is_urban_arr);
+                                               is_urban_arr, f_urb_arr, interface_mode);
                     } else {
                         DiffusionSrcForState_N(tbx, domain, start_comp, num_comp, u, v,
                                                new_cons, cur_prim, cell_rhs,
@@ -489,7 +497,7 @@ void erf_slow_rhs_post (int level, int finest_level,
                                                hfx_z, q1fx_z, q2fx_z, diss,
                                                mu_turb, solverChoice, level,
                                                tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac,
-                                               is_urban_arr);
+                                               is_urban_arr, f_urb_arr, interface_mode);
                     }
                 } // use_diff
             } // valid slow var
