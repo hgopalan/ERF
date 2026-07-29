@@ -56,7 +56,7 @@
 
 /**
  * @struct HVACProfileDevice
- * @brief POD struct for HVAC profile on device (Phase 5.4)
+ * @brief POD struct for HVAC profile on device (Phase 5.4, extended Phase 5.5)
  *
  * Device-safe variant of HVACProfile from ERF_UCMHVACReader.H.
  * No std::string (Contract #22 compliance for GPU capture).
@@ -67,6 +67,8 @@ struct HVACProfileDevice
     amrex::Real t_setpoint_K;          ///< Setpoint temperature [K]
     amrex::Real cop;                   ///< Coefficient of performance [-]
     int         occupancy_profile_id;  ///< Link to occupancy profile
+    amrex::Real sensible_fraction;     ///< Phase 5.5: fraction of Q_HVAC that is sensible (0-1)
+    int         rejection_facet;       ///< Phase 5.5: 0=roof, 1=road, 2=distributed
 };
 
 /**

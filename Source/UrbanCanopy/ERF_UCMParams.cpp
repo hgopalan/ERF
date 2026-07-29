@@ -221,6 +221,7 @@ void UCMParams::read_from_parmparse()
     pp.query("hvac_hysteresis_K", hvac_hysteresis_K);
     pp.query("hvac_cop_default", hvac_cop_default);
     pp.query("hvac_setpoint_default_K", hvac_setpoint_default_K);
+    pp.query("hvac_cop_degradation_per_K", hvac_cop_degradation_per_K);  // Phase 5.5
 
     // Validation: if hvac_mode == Simple, both CSV paths must be non-empty
     if (hvac_mode == HVACMode::Simple) {

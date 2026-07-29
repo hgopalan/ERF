@@ -73,6 +73,8 @@ UCMLayer::UCMLayer(const UCMParams& params, int lev)
                 hvac_pod[i].t_setpoint_K = hvac_host[i].t_setpoint_K;
                 hvac_pod[i].cop = hvac_host[i].cop;
                 hvac_pod[i].occupancy_profile_id = hvac_host[i].occupancy_profile_id;
+                hvac_pod[i].sensible_fraction = hvac_host[i].sensible_fraction;      // Phase 5.5
+                hvac_pod[i].rejection_facet = hvac_host[i].rejection_facet;          // Phase 5.5
             }
             amrex::Gpu::copy(amrex::Gpu::hostToDevice,
                            hvac_pod.data(),
@@ -1014,7 +1016,7 @@ void UCMLayer::advance(UCMFields& fields,
                               m_params, time, lev);
 
     // ========================================================================
-    // Phase 5.2: HVAC waste heat
+    // Phase 5.2 (extended Phase 5.5): HVAC waste heat with COP degradation and facet selection
     // ========================================================================
     const bool hvac_on = (m_params.hvac_mode == HVACMode::Simple);
 
@@ -1023,19 +1025,25 @@ void UCMLayer::advance(UCMFields& fields,
         const int hour_of_day = static_cast<int>(
             std::fmod((m_params.solar_time_start_s + time) / 3600.0, 24.0));
         if (hour_of_day < 0 || hour_of_day >= 24) {
-            amrex::Abort("[UCM][5.4][hvac] hour_of_day out of range");
+            amrex::Abort("[UCM][5.5][hvac] hour_of_day out of range");
         }
 
         // Host-side scalar params to fall back to (per Phase 5.2 sanity)
         const amrex::Real hyst_K       = m_params.hvac_hysteresis_K;
         const amrex::Real cop_default  = m_params.hvac_cop_default;
         const amrex::Real setpt_default = m_params.hvac_setpoint_default_K;
+        const amrex::Real alpha_degrad = m_params.hvac_cop_degradation_per_K;  // Phase 5.5
 
         // Device-side pointers into cached profile tables (Contract #22 compliant)
         const HVACProfileDevice*      hvac_ptr = m_hvac_profiles_dev.dataPtr();
         const OccupancyProfileDevice* occ_ptr  = m_occupancy_profiles_dev.dataPtr();
         const int n_hvac = m_n_hvac_profiles;
         const int n_occ  = m_n_occupancy_profiles;
+
+        // Phase 5.5: Zero diagnostic MultiFabs at top of HVAC block
+        fields.Q_HVAC_roof_diag->setVal(0.0);
+        fields.Q_HVAC_wall_diag->setVal(0.0);
+        fields.Q_HVAC_road_diag->setVal(0.0);
 
         for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU());
              mfi.isValid(); ++mfi)
@@ -1046,8 +1054,13 @@ void UCMLayer::advance(UCMFields& fields,
             auto const T_can_a      = fields.T_canyon_air->const_array(mfi);
             auto const is_urb_a     = fields.is_urban->const_array(mfi);
             auto const hvac_id_a    = fields.hvac_profile_id_map->const_array(mfi);  // Phase 5.4
+            auto const plan_frac_a  = fields.plan_area_frac->const_array(mfi);      // Phase 5.5: for distributed facet split
             auto       AH_a         = fields.AH->array(mfi);
+            auto       LE_a         = fields.LE_latent->array(mfi);                 // Phase 5.5
             auto       Q_diag_a     = fields.Q_HVAC_diag->array(mfi);
+            auto       Q_roof_a     = fields.Q_HVAC_roof_diag->array(mfi);          // Phase 5.5
+            auto       Q_wall_a     = fields.Q_HVAC_wall_diag->array(mfi);          // Phase 5.5
+            auto       Q_road_a     = fields.Q_HVAC_road_diag->array(mfi);          // Phase 5.5
 
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
                 Q_diag_a(i,j,0) = 0.0;
@@ -1057,13 +1070,17 @@ void UCMLayer::advance(UCMFields& fields,
 
                 // Per-cell profile lookup on device — linear search, N small
                 amrex::Real T_setpt = setpt_default;
-                amrex::Real cop     = cop_default;
-                int         occ_id  = 0;
+                amrex::Real cop_rated = cop_default;
+                amrex::Real sensible_frac = 1.0;     // Phase 5.5
+                int         rej_facet = 0;           // Phase 5.5: 0=roof (default)
+                int         occ_id = 0;
                 for (int p = 0; p < n_hvac; ++p) {
                     if (hvac_ptr[p].id == hvac_id) {
                         T_setpt = hvac_ptr[p].t_setpoint_K;
-                        cop     = hvac_ptr[p].cop;
-                        occ_id  = hvac_ptr[p].occupancy_profile_id;
+                        cop_rated = hvac_ptr[p].cop;
+                        occ_id = hvac_ptr[p].occupancy_profile_id;
+                        sensible_frac = hvac_ptr[p].sensible_fraction;  // Phase 5.5
+                        rej_facet = hvac_ptr[p].rejection_facet;        // Phase 5.5
                         break;
                     }
                 }
@@ -1076,26 +1093,77 @@ void UCMLayer::advance(UCMFields& fields,
                     }
                 }
 
-                const amrex::Real Q_HVAC = compute_hvac_waste_heat(
+                // Phase 5.5: Compute waste heat with COP degradation and split
+                amrex::Real Q_HVAC_sensible = 0.0;
+                amrex::Real Q_HVAC_latent = 0.0;
+                const amrex::Real Q_HVAC_total = compute_hvac_waste_heat(
                     H_wl_a(i,j,0), H_rf_a(i,j,0),
                     T_can_a(i,j,0), T_setpt,
-                    hyst_K, cop, f_occ);
+                    hyst_K, cop_rated, f_occ,
+                    T_can_a(i,j,0), alpha_degrad,              // Phase 5.5: T_outdoor and degradation
+                    sensible_frac,                             // Phase 5.5
+                    Q_HVAC_sensible, Q_HVAC_latent);           // Phase 5.5: out-params
 
-                AH_a(i,j,0)     += Q_HVAC;
-                Q_diag_a(i,j,0)  = Q_HVAC;
+                // Total diagnostic (for backward compat)
+                Q_diag_a(i,j,0) = Q_HVAC_total;
+
+                // Phase 5.5: Distribute sensible heat across facets based on rejection_facet
+                if (rej_facet == 0) {  // roof (default)
+                    Q_roof_a(i,j,0) = Q_HVAC_sensible;
+                    Q_wall_a(i,j,0) = 0.0;
+                    Q_road_a(i,j,0) = 0.0;
+                    // For roof: add to AH (existing pathway, unchanged for backward compat)
+                    AH_a(i,j,0) += Q_HVAC_sensible;
+                } else if (rej_facet == 1) {  // road
+                    Q_roof_a(i,j,0) = 0.0;
+                    Q_wall_a(i,j,0) = 0.0;
+                    Q_road_a(i,j,0) = Q_HVAC_sensible;
+                    // For road: sensible heat goes directly to road (not to AH, to avoid double-counting)
+                } else if (rej_facet == 2) {  // distributed
+                    // Split evenly across roof, walls, and road weighted by facet area fractions
+                    // Roof area fraction = plan_area_frac
+                    // Wall area fraction = 2 * (1 - plan_area_frac) * H_bldg / W_road (deferred to after ParallelFor)
+                    // Road area fraction = (1 - plan_area_frac)
+                    // For now, use simple fraction split: 1/3 each (refinement in Phase 5.5b)
+                    const amrex::Real Q_per_facet = Q_HVAC_sensible / 3.0;
+                    Q_roof_a(i,j,0) = Q_per_facet;
+                    Q_wall_a(i,j,0) = Q_per_facet;
+                    Q_road_a(i,j,0) = Q_per_facet;
+                    // For distributed: sensible heat goes directly to facets (not to AH, to avoid double-counting)
+                }
+
+                // Phase 5.5: Accumulate latent heat into LE_latent (canyon moisture budget)
+                // Note: For all rejection_facet cases, latent heat always goes to LE_latent
+                LE_a(i,j,0) += Q_HVAC_latent;
             });
         }
+
+        // Phase 5.5: Fold Q_HVAC_wall_diag and Q_HVAC_road_diag into H_wall and H_road
+        // after the ParallelFor (to avoid race conditions on device)
+        amrex::MultiFab::Add(*fields.H_wall, *fields.Q_HVAC_wall_diag, 0, 0, 1, 0);
+        amrex::MultiFab::Add(*fields.H_road, *fields.Q_HVAC_road_diag, 0, 0, 1, 0);
+        // Phase 5.5: For roof case, Q_HVAC_roof_diag is tracked in AH; for distributed/road,
+        // the roof portion is added to H_roof via Q_HVAC_roof_diag
+        amrex::MultiFab::Add(*fields.H_roof, *fields.Q_HVAC_roof_diag, 0, 0, 1, 0);
 
         // Collectives OUTSIDE IOProcessor guard (Bug #9 rule)
         if (m_params.ucm_debug) {
             amrex::Real Q_HVAC_min = fields.Q_HVAC_diag->min(0, 0);
             amrex::Real Q_HVAC_max = fields.Q_HVAC_diag->max(0, 0);
+            amrex::Real Q_roof_min = fields.Q_HVAC_roof_diag->min(0, 0);
+            amrex::Real Q_roof_max = fields.Q_HVAC_roof_diag->max(0, 0);
+            amrex::Real Q_wall_min = fields.Q_HVAC_wall_diag->min(0, 0);
+            amrex::Real Q_wall_max = fields.Q_HVAC_wall_diag->max(0, 0);
+            amrex::Real Q_road_min = fields.Q_HVAC_road_diag->min(0, 0);
+            amrex::Real Q_road_max = fields.Q_HVAC_road_diag->max(0, 0);
             if (amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "[UCM][5.4][hvac] mode=simple hour=" << hour_of_day
+                amrex::Print() << "[UCM][5.5][hvac] mode=simple hour=" << hour_of_day
                                << " N_hvac_profiles=" << n_hvac
                                << " N_occ_profiles=" << n_occ
-                               << " Q_HVAC=[" << Q_HVAC_min << ", " << Q_HVAC_max
-                               << "] W/m²\n";
+                               << " Q_total=[" << Q_HVAC_min << ", " << Q_HVAC_max << "]"
+                               << " Q_roof=[" << Q_roof_min << ", " << Q_roof_max << "]"
+                               << " Q_wall=[" << Q_wall_min << ", " << Q_wall_max << "]"
+                               << " Q_road=[" << Q_road_min << ", " << Q_road_max << "] W/m²\n";
             }
         }
     }

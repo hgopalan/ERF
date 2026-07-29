@@ -136,6 +136,21 @@ enum class HVACMode
 };
 
 /**
+ * @enum HVACRejectionFacet
+ * @brief HVAC waste heat rejection destination (Phase 5.5)
+ *
+ * Selects where HVAC waste heat is injected into the urban environment.
+ * Sensible heat is distributed to the selected facet(s); latent heat
+ * always goes to LE_latent (canyon moisture budget).
+ */
+enum class HVACRejectionFacet
+{
+    Roof = 0,         ///< Waste heat at roof only (Phase 5.4 default behavior)
+    Road = 1,         ///< Waste heat at street-level (ground-source or packaged units)
+    Distributed = 2   ///< Waste heat split across roof, walls, and road (weighted by area)
+};
+
+/**
  * @enum CoolRoofMode
  * @brief Cool roof high-albedo/high-emissivity surface mode (Phase 5.3)
  *
@@ -421,6 +436,7 @@ struct UCMParams
     amrex::Real hvac_hysteresis_K = 2.0;             ///< setpoint hysteresis
     amrex::Real hvac_cop_default = 3.0;              ///< fallback COP if CSV missing
     amrex::Real hvac_setpoint_default_K = 297.15;    ///< 24 °C default
+    amrex::Real hvac_cop_degradation_per_K = 0.03;   ///< Phase 5.5: COP reduction per K above T_rated [-/K]
 
     // =========================================================================
     // Section 18: Phase 5.3 — Green roofs, cool roofs, permeable pavements (Contract #21 extended)

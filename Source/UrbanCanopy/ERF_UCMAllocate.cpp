@@ -365,6 +365,15 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
     }
 
+    // Phase 5.5: HVAC facet-split diagnostic fields
+    fields.Q_HVAC_roof_diag = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.Q_HVAC_wall_diag = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.Q_HVAC_road_diag = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.5][allocate_ucm_fields] Q_HVAC_roof_diag, Q_HVAC_wall_diag, Q_HVAC_road_diag: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
     // Phase 5.3: Green roof and permeable pavement state fields
     fields.soil_moisture_roof = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
     fields.soil_moisture_road = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
@@ -464,6 +473,10 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.ah_profile_id->setVal(0);
     fields.hvac_profile_id_map->setVal(0);  // Phase 5.2: zero out HVAC profile ID
     fields.Q_HVAC_diag->setVal(0.0);         // Phase 5.2: zero out HVAC diagnostic
+    // Phase 5.5: zero out HVAC facet-split diagnostics
+    fields.Q_HVAC_roof_diag->setVal(0.0);
+    fields.Q_HVAC_wall_diag->setVal(0.0);
+    fields.Q_HVAC_road_diag->setVal(0.0);
 
     // Phase 5.3: Initialize green roof and permeable pavement state
     fields.soil_moisture_roof->setVal(params.green_roof_soil_capacity_m);  // Initialize to full capacity
@@ -990,6 +1003,14 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
         Print() << "[UCM][5.2][fill_ucm_fields_homogeneous] Q_HVAC_diag = 0.0 W/m^2\n";
     }
 
+    // Phase 5.5: HVAC facet-split diagnostic fields
+    fields.Q_HVAC_roof_diag->setVal(0.0);
+    fields.Q_HVAC_wall_diag->setVal(0.0);
+    fields.Q_HVAC_road_diag->setVal(0.0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.5][fill_ucm_fields_homogeneous] Q_HVAC_roof_diag, Q_HVAC_wall_diag, Q_HVAC_road_diag = 0.0 W/m^2\n";
+    }
+
     // Phase 5.3: Green roof and permeable pavement state
     fields.soil_moisture_roof->setVal(params.green_roof_soil_capacity_m);
     fields.soil_moisture_road->setVal(params.permeable_road_soil_capacity_m);
@@ -1275,6 +1296,26 @@ bool UCMFields::all_allocated() const
     if (!Q_HVAC_diag) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][5.2][all_allocated] MISSING: Q_HVAC_diag\n";
+        }
+        result = false;
+    }
+
+    // Phase 5.5: HVAC facet-split diagnostic fields
+    if (!Q_HVAC_roof_diag) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.5][all_allocated] MISSING: Q_HVAC_roof_diag\n";
+        }
+        result = false;
+    }
+    if (!Q_HVAC_wall_diag) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.5][all_allocated] MISSING: Q_HVAC_wall_diag\n";
+        }
+        result = false;
+    }
+    if (!Q_HVAC_road_diag) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.5][all_allocated] MISSING: Q_HVAC_road_diag\n";
         }
         result = false;
     }
