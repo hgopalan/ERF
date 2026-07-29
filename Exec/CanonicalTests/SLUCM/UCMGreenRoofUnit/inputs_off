@@ -1,0 +1,88 @@
+# Phase 5.3 Green Roof Unit Test - Mode OFF (baseline)
+# Expected: run completes 2 timesteps, LE_green_roof_diag = 0, no green roof physics
+
+max_step         = 2
+erf.cfl          = 0.5
+amrex.fpe_trap_invalid = 0
+
+fabarray.mfiter_tile_size = 1024 1024 1024
+
+geometry.prob_extent  = 400.0  400.0  640.0
+amr.n_cell            = 4      4      32
+geometry.is_periodic  = 1      1      0
+
+zlo.type              = "surface_layer"
+erf.most.z0           = 1.0
+erf.most.zref         = 100.0
+erf.most.surf_temp_flux = 0.02
+zhi.type              = "SlipWall"
+zhi.theta_grad        = 0.001
+
+erf.rayleigh_damp_W    = true
+erf.rayleigh_dampcoef  = 0.2
+erf.rayleigh_zdamp     = 100.0
+
+erf.init_type              = "input_sounding"
+erf.input_sounding_file    = "sounding_boston"
+
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr    = 0.5
+erf.pbl_mrf_const_b  = 7.8
+erf.pbl_mrf_sf       = 0.1
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = false
+
+erf.terrain_type       = None
+erf.use_moisture       = false
+erf.use_gravity        = true
+erf.molec_diff_type    = "None"
+erf.les_type           = "None"
+erf.theta_ref          = 295.0
+erf.transport_scalar   = false
+
+erf.sum_interval = 1
+erf.v            = 1
+amr.v            = 1
+amr.max_level    = 0
+amr.check_int    = -1
+erf.check_int    = -1
+amr.plot_int     = -1
+
+erf.ucm.enable                = true
+erf.ucm.ucm_debug             = 1
+erf.ucm.anchor_level          = 0
+erf.ucm.grid_ratio            = 1
+erf.ucm.atm_feedback_momentum = 0.0
+erf.ucm.atm_feedback_heat     = 0.0
+erf.ucm.atm_feedback_moisture = 0.0
+erf.ucm.zref                  = 2.0
+erf.ucm.H_bldg_uniform        = 15.0
+erf.ucm.W_road_uniform        = 10.0
+erf.ucm.W_roof_uniform        = 10.0
+erf.ucm.albedo_roof           = 0.20
+erf.ucm.albedo_wall           = 0.20
+erf.ucm.albedo_road           = 0.15
+erf.ucm.emissivity_roof       = 0.90
+erf.ucm.emissivity_wall       = 0.90
+erf.ucm.emissivity_road       = 0.94
+erf.ucm.AH_uniform_Wm2        = 0.0
+erf.ucm.building_layout_csv_path  = "building_layout.csv"
+erf.ucm.material_library_csv_path = "materials.csv"
+
+erf.ucm.use_prescribed_radiation = true
+erf.ucm.lat_deg            = 42.36
+erf.ucm.lon_deg            = -71.06
+erf.ucm.julian_day         = 172.0
+erf.ucm.solar_time_start_s = 43200.0
+erf.ucm.solar_constant     = 1361.0
+erf.ucm.sw_transmission    = 0.7
+erf.ucm.sky_emissivity     = 0.83
+
+# ================================================================
+# Phase 5.3: Green roof mode = off (baseline, no green roof physics)
+# ================================================================
+erf.ucm.cool_roof_mode              = "off"
+erf.ucm.green_roof_mode             = "off"
+erf.ucm.permeable_road_mode         = "off"
+erf.ucm.green_roof_r_stomatal_s_per_m = 100.0
+erf.ucm.green_roof_soil_capacity_m = 0.10
