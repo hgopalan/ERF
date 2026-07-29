@@ -2,16 +2,13 @@
  * @file ERF_UCMLayer.cpp
  * @brief Implementation of UCMLayer physics driver for facet SEB and conduction
  *
- * Phase 1.3 simplified implementation of SLUCM integration:
- * 1. Extract forcing (u*, wind, T, q, SW/LW)
- * 2. Solve facet SEB via Newton iteration
- * 3. Advance slab conduction
- * 4. Compute and store fluxes
- *
- * References:
- *  - Kusaka et al. (2001)
- *  - Chen et al. (2011)
- *  - WRF phys/module_sf_urban.F
+ * Phase 5.3-hotfix2: green-roof and permeable-road LE are computed BEFORE the
+ * Newton SEB, stored in per-cell diagnostic MultiFabs, and passed into
+ * solve_facet_seb_with_diag as an additional negative energy term. This makes
+ * the SEB residual F = Rn - H - G - LE = 0, so T_skin responds to
+ * evapotranspiration cooling. LE uses T_skin from the previous timestep
+ * (semi-implicit lag) — standard for coupled surface schemes and stable at
+ * dt ~ 1.4 s.
  */
 
 #include <UrbanCanopy/ERF_UCMLayer.H>
@@ -31,6 +28,7 @@
 #include <UrbanCanopy/ERF_UCMGreenRoof.H>
 #include <UrbanCanopy/ERF_UCMPermeableRoad.H>
 #include <AMReX_ParallelDescriptor.H>
+#include <AMReX_MultiFab.H>
 #include <ERF_Constants.H>
 #include <cmath>
 
@@ -41,7 +39,6 @@
 UCMLayer::UCMLayer(const UCMParams& params, int lev)
     : m_params(params), m_warn_radiation_placeholder_printed(false)
 {
-    // Phase 1.1: enforce anchor_level == 0
     if (lev != params.anchor_level) {
         std::string msg = std::string("[UCM] UCMLayer constructed at level ")
                         + std::to_string(lev) + " but params.anchor_level = "
@@ -74,11 +71,16 @@ void UCMLayer::advance(UCMFields& fields,
                        int lev)
 {
     // ========================================================================
-    // Initialize output flux fields and debug print refined ATM inputs
+    // Initialize output flux fields
     // ========================================================================
 
     fields.H_sensible->setVal(0.0);
     fields.LE_latent->setVal(0.0);
+
+    // Phase 5.3-hotfix2: zero LE diagnostics each step (they'll be repopulated
+    // by the green-roof / permeable-road blocks BEFORE the Newton SEB reads them).
+    fields.LE_green_roof_diag->setVal(0.0);
+    fields.LE_permeable_road_diag->setVal(0.0);
 
     // Phase 2.3: zero-init facet-split fluxes
     fields.H_road->setVal(0.0);
@@ -89,7 +91,7 @@ void UCMLayer::advance(UCMFields& fields,
     fields.H_wall_atm->setVal(0.0);
     fields.H_roof_atm->setVal(0.0);
 
-    // Phase 3.5a-hotfix3: T_skin persistence diagnostic (tracks slab conduction leak)
+    // Phase 3.5a-hotfix3: T_skin persistence diagnostic
     if (m_params.ucm_debug) {
         amrex::Real T_roof_min  = fields.T_skin_roof->min(0, 0);
         amrex::Real T_roof_max  = fields.T_skin_roof->max(0, 0);
@@ -105,7 +107,6 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
 
-    // Phase 3.5A-diag: T_slab state at UCMLayer::advance() entry.
     if (m_params.ucm_debug) {
         amrex::Real T1_roof_min = fields.T_slab_roof->min(0, 0);
         amrex::Real T1_roof_max = fields.T_slab_roof->max(0, 0);
@@ -132,7 +133,6 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
 
-    // Debug: per-step ATM forcing summary on UCM grid
     if (m_params.ucm_debug) {
         amrex::Real ust_min = atm_u_star.min(0, 0), ust_max = atm_u_star.max(0, 0);
         amrex::Real tst_min = atm_t_star.min(0, 0), tst_max = atm_t_star.max(0, 0);
@@ -147,7 +147,6 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
 
-    // Phase 2.2: One-time banner
     static bool banner_printed = false;
     if (!banner_printed && m_params.ucm_debug) {
         banner_printed = true;
@@ -164,21 +163,16 @@ void UCMLayer::advance(UCMFields& fields,
 
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "\n[UCM][2.2][BANNER] Phase 2.2 per-cell wiring active:\n"
-                           << "  H_bldg      min=" << H_min
-                           << " max=" << H_max << " m\n"
-                           << "  albedo_roof min=" << alb_min
-                           << " max=" << alb_max << "\n"
-                           << "  k_therm_roof min=" << k_min
-                           << " max=" << k_max << " W/m/K\n"
-                           << "  z0          min=" << z0_min
-                           << " max=" << z0_max << " m\n"
-                           << "  d_disp      min=" << d_min
-                           << " max=" << d_max << " m\n\n";
+                           << "  H_bldg      min=" << H_min << " max=" << H_max << " m\n"
+                           << "  albedo_roof min=" << alb_min << " max=" << alb_max << "\n"
+                           << "  k_therm_roof min=" << k_min << " max=" << k_max << " W/m/K\n"
+                           << "  z0          min=" << z0_min << " max=" << z0_max << " m\n"
+                           << "  d_disp      min=" << d_min << " max=" << d_max << " m\n\n";
         }
     }
 
     // ========================================================================
-    // Step 1: Allocate and extract forcing (u*, wind, T, q, SW/LW)
+    // Step 1: Allocate and extract forcing
     // ========================================================================
 
     if (!forcing.all_allocated()) {
@@ -223,7 +217,7 @@ void UCMLayer::advance(UCMFields& fields,
     }
 
     // ========================================================================
-    // Step 2: Fill radiation (analytical placeholder, Phase 1.3)
+    // Step 2: Fill radiation
     // ========================================================================
 
     forcing.LW_down->setVal(350.0);
@@ -245,7 +239,7 @@ void UCMLayer::advance(UCMFields& fields,
     }
 
     // ========================================================================
-    // Step 2.4: Sky view factors + multi-facet view factors
+    // Step 2.4: View factors
     // ========================================================================
     compute_sky_view_factors(*fields.SVF_wall, *fields.SVF_road, *fields.SVF_roof,
                              *fields.H_bldg, *fields.W_road, *fields.is_urban,
@@ -265,6 +259,157 @@ void UCMLayer::advance(UCMFields& fields,
                              *fields.is_urban,
                              lev,
                              m_params.ucm_debug);
+    }
+
+    // ========================================================================
+    // Phase 5.3-hotfix2: Green roof evapotranspiration (BEFORE Newton SEB)
+    //
+    // LE is computed using T_skin from the previous timestep (semi-implicit),
+    // written to fields.LE_green_roof_diag, and read by the SEB Newton solver
+    // below as an additional cooling term in the surface energy balance.
+    //
+    // The moved block does NOT add to fields.LE_latent here — that
+    // accumulation happens after the Newton loop via MultiFab::Add so the
+    // canyon latent-heat budget is still correct.
+    // ========================================================================
+    const bool green_roof_on = (m_params.green_roof_mode == GreenRoofMode::Simple);
+
+    if (green_roof_on) {
+        const amrex::Real r_stomatal = m_params.green_roof_r_stomatal_s_per_m;
+        const amrex::Real W_max_roof = m_params.green_roof_soil_capacity_m;
+
+        const bool q_ref_valid = (q_atm_lowest.boxArray().size() > 0);
+        const amrex::Real q_canyon_fallback = 0.005;
+
+        for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU());
+             mfi.isValid(); ++mfi)
+        {
+            const amrex::Box& bx = mfi.tilebox();
+            auto const T_skin_rf = fields.T_skin_roof->const_array(mfi);
+            auto const T_can_a = fields.T_canyon_air->const_array(mfi);
+            auto const q_atm_a = forcing.q_atm_ref->const_array(mfi);
+            auto const U_a = forcing.wind_ref->const_array(mfi);
+            auto const is_urb_a = fields.is_urban->const_array(mfi);
+            auto const is_green_a = fields.is_green_roof->const_array(mfi);
+            auto W_roof_a = fields.soil_moisture_roof->array(mfi);
+            auto LE_diag_a = fields.LE_green_roof_diag->array(mfi);
+
+            const amrex::Real Ch_default = 0.004;
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
+                if (is_urb_a(i,j,0) == 0) return;
+                if (is_green_a(i,j,0) == 0) return;
+
+                amrex::Real q_canyon = q_ref_valid ? q_atm_a(i,j,0) : q_canyon_fallback;
+                q_canyon = amrex::max(amrex::min(q_canyon, 0.02), 0.0);
+
+                const amrex::Real LE_green = compute_green_roof_LE(
+                    W_roof_a(i,j,0),
+                    T_skin_rf(i,j,0),
+                    T_can_a(i,j,0),
+                    q_canyon,
+                    U_a(i,j,0),
+                    Ch_default,
+                    r_stomatal);
+
+                LE_diag_a(i,j,0) = LE_green;
+                // Phase 5.3-hotfix2: do NOT add to LE_latent here — Newton SEB
+                // consumes LE_green_roof_diag; LE_latent is updated after Newton.
+
+                update_green_roof_moisture(W_roof_a(i,j,0), LE_green, dt, W_max_roof);
+            });
+        }
+
+        static bool printed_q_ref_banner = false;
+        if (m_params.ucm_debug && !printed_q_ref_banner) {
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "[UCM][5.3][green-roof] q_atm_ref "
+                               << (q_ref_valid ? "valid (from moisture solver)"
+                                               : "invalid; using fallback q=0.005 kg/kg")
+                               << "\n";
+                printed_q_ref_banner = true;
+            }
+        }
+
+        if (m_params.ucm_debug) {
+            amrex::Real LE_green_min = fields.LE_green_roof_diag->min(0, 0);
+            amrex::Real LE_green_max = fields.LE_green_roof_diag->max(0, 0);
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "[UCM][5.3][green-roof] mode=simple"
+                               << " LE_green=[" << LE_green_min << ", " << LE_green_max << "] W/m²\n";
+            }
+        }
+    }
+
+    // ========================================================================
+    // Phase 5.3-hotfix2: Permeable road evaporation (BEFORE Newton SEB)
+    // ========================================================================
+    const bool permeable_road_on = (m_params.permeable_road_mode == PermeableRoadMode::Simple);
+
+    if (permeable_road_on) {
+        const amrex::Real r_soil = 200.0;
+        const amrex::Real W_max_road = m_params.permeable_road_soil_capacity_m;
+
+        const bool q_ref_valid = (q_atm_lowest.boxArray().size() > 0);
+        const amrex::Real q_canyon_fallback = 0.005;
+
+        for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU());
+             mfi.isValid(); ++mfi)
+        {
+            const amrex::Box& bx = mfi.tilebox();
+            auto const T_skin_rd = fields.T_skin_road->const_array(mfi);
+            auto const T_can_a = fields.T_canyon_air->const_array(mfi);
+            auto const q_atm_a = forcing.q_atm_ref->const_array(mfi);
+            auto const U_a = forcing.wind_ref->const_array(mfi);
+            auto const is_urb_a = fields.is_urban->const_array(mfi);
+            auto const is_perm_a = fields.is_permeable_road->const_array(mfi);
+            auto W_road_a = fields.soil_moisture_road->array(mfi);
+            auto LE_diag_a = fields.LE_permeable_road_diag->array(mfi);
+
+            const amrex::Real Ch_default = 0.004;
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
+                if (is_urb_a(i,j,0) == 0) return;
+                if (is_perm_a(i,j,0) == 0) return;
+
+                amrex::Real q_canyon = q_ref_valid ? q_atm_a(i,j,0) : q_canyon_fallback;
+                q_canyon = amrex::max(amrex::min(q_canyon, 0.02), 0.0);
+
+                const amrex::Real LE_perm = compute_permeable_road_LE(
+                    W_road_a(i,j,0),
+                    T_skin_rd(i,j,0),
+                    T_can_a(i,j,0),
+                    q_canyon,
+                    U_a(i,j,0),
+                    Ch_default,
+                    r_soil);
+
+                LE_diag_a(i,j,0) = LE_perm;
+                // Phase 5.3-hotfix2: do NOT add to LE_latent here.
+
+                update_permeable_road_moisture(W_road_a(i,j,0), LE_perm, dt, W_max_road);
+            });
+        }
+
+        static bool printed_q_ref_banner_perm = false;
+        if (m_params.ucm_debug && !printed_q_ref_banner_perm) {
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "[UCM][5.3][permeable-road] q_atm_ref "
+                               << (q_ref_valid ? "valid (from moisture solver)"
+                                               : "invalid; using fallback q=0.005 kg/kg")
+                               << "\n";
+                printed_q_ref_banner_perm = true;
+            }
+        }
+
+        if (m_params.ucm_debug) {
+            amrex::Real LE_perm_min = fields.LE_permeable_road_diag->min(0, 0);
+            amrex::Real LE_perm_max = fields.LE_permeable_road_diag->max(0, 0);
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "[UCM][5.3][permeable-road] mode=simple"
+                               << " LE_perm=[" << LE_perm_min << ", " << LE_perm_max << "] W/m²\n";
+            }
+        }
     }
 
     // ========================================================================
@@ -419,6 +564,12 @@ void UCMLayer::advance(UCMFields& fields,
         auto const T1_wl    = fields.T_slab_wall->const_array(mfi);
         auto const T1_rd    = fields.T_slab_road->const_array(mfi);
 
+        // Phase 5.3-hotfix2: LE from green roof / permeable road (from lagged T_skin)
+        auto const LE_green_a = fields.LE_green_roof_diag->const_array(mfi);
+        auto const LE_perm_a  = fields.LE_permeable_road_diag->const_array(mfi);
+        auto const is_green_a = fields.is_green_roof->const_array(mfi);
+        auto const is_perm_a  = fields.is_permeable_road->const_array(mfi);
+
         auto Tskin_rf = fields.T_skin_roof->array(mfi);
         auto Tskin_wl = fields.T_skin_wall->array(mfi);
         auto Tskin_rd = fields.T_skin_road->array(mfi);
@@ -507,6 +658,11 @@ void UCMLayer::advance(UCMFields& fields,
 
             amrex::Real H_rf, H_wl, H_rd;
 
+            // Phase 5.3-hotfix2: per-cell LE terms (0 for non-green / non-permeable)
+            const amrex::Real LE_roof_cell = (is_green_a(i,j,0) == 1) ? LE_green_a(i,j,0) : amrex::Real(0.0);
+            const amrex::Real LE_road_cell = (is_perm_a(i,j,0)  == 1) ? LE_perm_a(i,j,0)  : amrex::Real(0.0);
+            const amrex::Real LE_wall_cell = amrex::Real(0.0);  // no LE on walls in Phase 5.3
+
             // ROOF
             {
                 amrex::Real T_unclamped, residual, SW_abs, LW_abs, H_sens, G_cond;
@@ -517,6 +673,7 @@ void UCMLayer::advance(UCMFields& fields,
                     alb_rf(i,j,0), eps_rf(i,j,0),
                     k_rf(i,j,0), dz_slab,
                     Ch_roof, U, rho_cp, max_iter, tol_K,
+                    LE_roof_cell,
                     Tskin_rf(i,j,0), H_rf,
                     T_unclamped, n_iter, residual,
                     SW_abs, LW_abs, H_sens, G_cond);
@@ -550,6 +707,7 @@ void UCMLayer::advance(UCMFields& fields,
                     alb_wl(i,j,0), eps_wl(i,j,0),
                     k_wl(i,j,0), dz_slab,
                     Ch_wall, U, rho_cp, max_iter, tol_K,
+                    LE_wall_cell,
                     Tskin_wl(i,j,0), H_wl,
                     T_unclamped, n_iter, residual,
                     SW_abs, LW_abs, H_sens, G_cond);
@@ -583,6 +741,7 @@ void UCMLayer::advance(UCMFields& fields,
                     alb_rd(i,j,0), eps_rd(i,j,0),
                     k_rd(i,j,0), dz_slab,
                     Ch_road, U, rho_cp, max_iter, tol_K,
+                    LE_road_cell,
                     Tskin_rd(i,j,0), H_rd,
                     T_unclamped, n_iter, residual,
                     SW_abs, LW_abs, H_sens, G_cond);
@@ -612,7 +771,7 @@ void UCMLayer::advance(UCMFields& fields,
         });
     }
 
-    // Phase 3.5a-hotfix: MPI reduction and diagnostic output
+    // Phase 3.5a-hotfix: clamp/diverged reductions
     {
         amrex::ParallelDescriptor::ReduceLongSum(&n_clamped_roof, 1);
         amrex::ParallelDescriptor::ReduceLongSum(&n_clamped_wall, 1);
@@ -631,110 +790,20 @@ void UCMLayer::advance(UCMFields& fields,
                            << "  road=" << n_diverged_road
                            << "\n";
         }
-
-        if (m_params.ucm_debug && m_params.newton_trace_ncells > 0 &&
-            (n_clamped_roof > 0 || n_clamped_wall > 0 || n_clamped_road > 0)) {
-            int n_traced = 0;
-            const int n_trace_max = m_params.newton_trace_ncells;
-            constexpr amrex::Real T_min_K = 260.0;
-            constexpr amrex::Real T_clamp_tol = 0.01;
-
-            for (amrex::MFIter mfi(newton_diag_roof); mfi.isValid() && n_traced < n_trace_max; ++mfi) {
-                auto const diag = newton_diag_roof.const_array(mfi);
-                auto const is_urb = fields.is_urban->const_array(mfi);
-                const amrex::Box& bx = mfi.validbox();
-                for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
-                    for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
-                        if (is_urb(i,j,0) > 0 && std::abs(diag(i,j,0,0) - T_min_K) < T_clamp_tol &&
-                            diag(i,j,0,1) < T_min_K) {
-                            if (amrex::ParallelDescriptor::IOProcessor()) {
-                                amrex::Print() << "[UCM][3.5A-hotfix][clamp-trace] ROOF cell (i=" << i << ", j=" << j << ")"
-                                               << "\n  T_initial=" << diag(i,j,0,1)
-                                               << "  T_final=" << diag(i,j,0,0)
-                                               << "  residual=" << diag(i,j,0,2)
-                                               << "  n_iter=" << static_cast<int>(diag(i,j,0,3))
-                                               << "\n  SW_abs=" << diag(i,j,0,4) << " W/m2"
-                                               << "  LW_abs=" << diag(i,j,0,5) << " W/m2"
-                                               << "  H_sens=" << diag(i,j,0,6) << " W/m2"
-                                               << "  G_cond=" << diag(i,j,0,7) << " W/m2"
-                                               << "\n  Balance: SW+LW-H-G = "
-                                               << (diag(i,j,0,4) + diag(i,j,0,5) - diag(i,j,0,6) - diag(i,j,0,7))
-                                               << " W/m2 (should be ~0 for converged, negative = losing heat)"
-                                               << "\n";
-                            }
-                            n_traced++;
-                            if (n_traced >= n_trace_max) break;
-                        }
-                    }
-                    if (n_traced >= n_trace_max) break;
-                }
-            }
-
-            for (amrex::MFIter mfi(newton_diag_wall); mfi.isValid() && n_traced < n_trace_max; ++mfi) {
-                auto const diag = newton_diag_wall.const_array(mfi);
-                auto const is_urb = fields.is_urban->const_array(mfi);
-                const amrex::Box& bx = mfi.validbox();
-                for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
-                    for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
-                        if (is_urb(i,j,0) > 0 && std::abs(diag(i,j,0,0) - T_min_K) < T_clamp_tol &&
-                            diag(i,j,0,1) < T_min_K) {
-                            if (amrex::ParallelDescriptor::IOProcessor()) {
-                                amrex::Print() << "[UCM][3.5A-hotfix][clamp-trace] WALL cell (i=" << i << ", j=" << j << ")"
-                                               << "\n  T_initial=" << diag(i,j,0,1)
-                                               << "  T_final=" << diag(i,j,0,0)
-                                               << "  residual=" << diag(i,j,0,2)
-                                               << "  n_iter=" << static_cast<int>(diag(i,j,0,3))
-                                               << "\n  SW_abs=" << diag(i,j,0,4) << " W/m2"
-                                               << "  LW_abs=" << diag(i,j,0,5) << " W/m2"
-                                               << "  H_sens=" << diag(i,j,0,6) << " W/m2"
-                                               << "  G_cond=" << diag(i,j,0,7) << " W/m2"
-                                               << "\n  Balance: SW+LW-H-G = "
-                                               << (diag(i,j,0,4) + diag(i,j,0,5) - diag(i,j,0,6) - diag(i,j,0,7))
-                                               << " W/m2 (should be ~0 for converged, negative = losing heat)"
-                                               << "\n";
-                            }
-                            n_traced++;
-                            if (n_traced >= n_trace_max) break;
-                        }
-                    }
-                    if (n_traced >= n_trace_max) break;
-                }
-            }
-
-            for (amrex::MFIter mfi(newton_diag_road); mfi.isValid() && n_traced < n_trace_max; ++mfi) {
-                auto const diag = newton_diag_road.const_array(mfi);
-                auto const is_urb = fields.is_urban->const_array(mfi);
-                const amrex::Box& bx = mfi.validbox();
-                for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
-                    for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
-                        if (is_urb(i,j,0) > 0 && std::abs(diag(i,j,0,0) - T_min_K) < T_clamp_tol &&
-                            diag(i,j,0,1) < T_min_K) {
-                            if (amrex::ParallelDescriptor::IOProcessor()) {
-                                amrex::Print() << "[UCM][3.5A-hotfix][clamp-trace] ROAD cell (i=" << i << ", j=" << j << ")"
-                                               << "\n  T_initial=" << diag(i,j,0,1)
-                                               << "  T_final=" << diag(i,j,0,0)
-                                               << "  residual=" << diag(i,j,0,2)
-                                               << "  n_iter=" << static_cast<int>(diag(i,j,0,3))
-                                               << "\n  SW_abs=" << diag(i,j,0,4) << " W/m2"
-                                               << "  LW_abs=" << diag(i,j,0,5) << " W/m2"
-                                               << "  H_sens=" << diag(i,j,0,6) << " W/m2"
-                                               << "  G_cond=" << diag(i,j,0,7) << " W/m2"
-                                               << "\n  Balance: SW+LW-H-G = "
-                                               << (diag(i,j,0,4) + diag(i,j,0,5) - diag(i,j,0,6) - diag(i,j,0,7))
-                                               << " W/m2 (should be ~0 for converged, negative = losing heat)"
-                                               << "\n";
-                            }
-                            n_traced++;
-                            if (n_traced >= n_trace_max) break;
-                        }
-                    }
-                    if (n_traced >= n_trace_max) break;
-                }
-            }
-        }
     }
 
-    // Phase 5.1b: Per-step debug banner for radiosity
+    // Phase 5.3-hotfix2: fold LE diagnostics into canyon LE_latent budget.
+    // The Newton SEB has already accounted for LE cooling in the surface energy
+    // balance (via T_skin drop). Now update the canyon latent-heat field so the
+    // moisture budget stays consistent.
+    if (green_roof_on) {
+        amrex::MultiFab::Add(*fields.LE_latent, *fields.LE_green_roof_diag, 0, 0, 1, 0);
+    }
+    if (permeable_road_on) {
+        amrex::MultiFab::Add(*fields.LE_latent, *fields.LE_permeable_road_diag, 0, 0, 1, 0);
+    }
+
+    // Phase 5.1b banner
     amrex::Real Fwr_min = 0.0, Fwr_max = 0.0;
     if (m_params.ucm_debug && m_params.radiosity_mode == RadiosityMode::Multi) {
         Fwr_min = fields.F_wall_road->min(0, 0);
@@ -751,7 +820,6 @@ void UCMLayer::advance(UCMFields& fields,
         amrex::Print() << "\n";
     }
 
-    // Phase 5.1c: Per-step debug banner for LW radiosity
     amrex::Real Tsky_min = 0.0, Tsky_max = 0.0;
     if (m_params.ucm_debug && m_params.lw_radiosity_mode == LWRadiosityMode::MultiLagged) {
         const amrex::Real LW_min = forcing.LW_down->min(0, 0);
@@ -771,8 +839,7 @@ void UCMLayer::advance(UCMFields& fields,
         amrex::Print() << "\n";
     }
 
-    // Phase 3.5A: Advance slab conduction using SEB-derived H as surface BC
-
+    // Phase 3.5A: slab conduction
     for (amrex::MFIter mfi(*fields.T_slab_roof, amrex::TilingIfNotGPU());
          mfi.isValid(); ++mfi)
     {
@@ -837,7 +904,7 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
 
-    // Phase 3.5A: Update canyon-air temperature using Newton-computed H
+    // Canyon-air temperature update
     for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU());
          mfi.isValid(); ++mfi)
     {
@@ -885,24 +952,13 @@ void UCMLayer::advance(UCMFields& fields,
         });
     }
 
-    // Phase 2.3: Compute anthropogenic heat
+    // Anthropogenic heat
     compute_anthropogenic_heat(*fields.AH, *fields.ah_profile_id, *fields.is_urban,
                               *fields.AH_Wm2_ucm,
                               m_params, time, lev);
 
     // ========================================================================
-    // Phase 5.2: HVAC waste heat (Contract #21 / #22)
-    //
-    // Scalar-hoisted single-profile lookup — no std::vector or std::string
-    // captured into the ParallelFor lambda (Contract #22, GPU safety).
-    //
-    // Phase 5.2-hotfix: All AMReX collective reductions (min/max) called
-    // OUTSIDE the IOProcessor() guard per PR #201 Bug #9 rule. Guarding a
-    // collective behind IOProcessor causes deadlock (rank 0 executes the
-    // collective; rank 1 skips it; subsequent collectives desynchronize).
-    //
-    // TODO (Phase 5.2 followup): cache HVAC/occupancy CSVs at UCMLayer
-    // construction time rather than re-reading every timestep.
+    // Phase 5.2: HVAC waste heat
     // ========================================================================
     const bool hvac_on = (m_params.hvac_mode == HVACMode::Simple);
 
@@ -914,17 +970,11 @@ void UCMLayer::advance(UCMFields& fields,
         const amrex::Real solar_time_local = m_params.solar_time_start_s + time;
         const int hour_of_day = static_cast<int>(std::fmod(solar_time_local / 3600.0, 24.0));
 
-        // Load CSVs (once per call; TODO: cache at UCMLayer construction)
         UCMHVACReader hvac_reader(m_params.hvac_csv_path);
         UCMOccupancyReader occ_reader(m_params.occupancy_csv_path);
         const auto& hvac_profiles = hvac_reader.get_all_profiles();
         const auto& occ_profiles = occ_reader.get_all_profiles();
 
-        // Contract #22: NO std::vector, std::string, or heap-allocated STL
-        // containers may be captured by value into an amrex::ParallelFor lambda.
-        // Pre-resolve profile 0's values on HOST as scalars.
-        // Multi-profile per-cell dispatch is deferred to Phase 6.2b (BEM-lite)
-        // via amrex::Gpu::DeviceVector.
         amrex::Real T_setpt_resolved = setpt_default;
         amrex::Real cop_resolved = cop_default;
         int occ_id_resolved = 0;
@@ -944,8 +994,6 @@ void UCMLayer::advance(UCMFields& fields,
             }
         }
 
-        // Phase 5.2-hotfix: sync ranks after file I/O to prevent step-2
-        // collective deadlock from rank drift.
         amrex::ParallelDescriptor::Barrier();
 
         if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
@@ -979,7 +1027,6 @@ void UCMLayer::advance(UCMFields& fields,
             });
         }
 
-        // Phase 5.2-hotfix: collectives OUTSIDE IOProcessor guard (PR #201 Bug #9)
         if (m_params.ucm_debug) {
             amrex::Real Q_HVAC_min = fields.Q_HVAC_diag->min(0, 0);
             amrex::Real Q_HVAC_max = fields.Q_HVAC_diag->max(0, 0);
@@ -990,178 +1037,9 @@ void UCMLayer::advance(UCMFields& fields,
         }
     }
 
-
     // ========================================================================
-    // Phase 5.3: Green roof evapotranspiration (Contract #21 / #22)
-    //
-    // Scalar-hoisted profile lookup — no std::vector or std::string
-    // captured into the ParallelFor lambda (Contract #22, GPU safety).
-    //
-    // Phase 5.2-hotfix: All AMReX collective reductions (min/max) called
-    // OUTSIDE the IOProcessor() guard per PR #201 Bug #9 rule.
+    // Facet-split H to ATM (MOST-based) — unchanged from Phase 5.2
     // ========================================================================
-    const bool green_roof_on = (m_params.green_roof_mode == GreenRoofMode::Simple);
-
-    if (green_roof_on) {
-        // Pre-resolve parameters on host (scalar capture only)
-        const amrex::Real r_stomatal = m_params.green_roof_r_stomatal_s_per_m;
-        const amrex::Real W_max_roof = m_params.green_roof_soil_capacity_m;
-
-        // Phase 5.3-hotfix1: if q_atm_ref was never written (use_moisture=false),
-        // fall back to a canonical dry-air value so LE_green is deterministic.
-        const bool q_ref_valid = (q_atm_lowest.boxArray().size() > 0);
-        const amrex::Real q_canyon_fallback = 0.005;  // 5 g/kg, typical summer LST
-
-        for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU()); 
-             mfi.isValid(); ++mfi) 
-        {
-            const amrex::Box& bx = mfi.tilebox();
-            auto const T_skin_rf = fields.T_skin_roof->const_array(mfi);
-            auto const T_can_a = fields.T_canyon_air->const_array(mfi);
-            auto const q_atm_a = forcing.q_atm_ref->const_array(mfi);
-            auto const U_a = forcing.wind_ref->const_array(mfi);
-            auto const is_urb_a = fields.is_urban->const_array(mfi);
-            auto const is_green_a = fields.is_green_roof->const_array(mfi);
-            auto W_roof_a = fields.soil_moisture_roof->array(mfi);
-            auto LE_diag_a = fields.LE_green_roof_diag->array(mfi);
-            auto LE_a = fields.LE_latent->array(mfi);
-
-            // Phase 1.3 heat transfer coefficient (from SEB driver)
-            // TODO(Phase 5.3-followup): use per-cell Ch from forcing or SEB
-            const amrex::Real Ch_default = 0.004;
-
-            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
-                if (is_urb_a(i,j,0) == 0) return;
-                if (is_green_a(i,j,0) == 0) return;
-
-                // Use atmospheric humidity as proxy for canyon air humidity
-                // Phase 5.3-hotfix1: use fallback if q_atm_ref was never initialized
-                amrex::Real q_canyon = q_ref_valid ? q_atm_a(i,j,0) : q_canyon_fallback;
-                q_canyon = amrex::max(amrex::min(q_canyon, 0.02), 0.0);  // Physical bounds
-
-                const amrex::Real LE_green = compute_green_roof_LE(
-                    W_roof_a(i,j,0),
-                    T_skin_rf(i,j,0),
-                    T_can_a(i,j,0),
-                    q_canyon,
-                    U_a(i,j,0),
-                    Ch_default,
-                    r_stomatal);
-
-                LE_diag_a(i,j,0) = LE_green;
-                LE_a(i,j,0) += LE_green;  // Additive to canyon latent heat
-
-                // Update soil moisture bucket
-                update_green_roof_moisture(W_roof_a(i,j,0), LE_green, dt, W_max_roof);
-            });
-        }
-
-        // Phase 5.3-hotfix1: print banner once per run (gated on static bool)
-        static bool printed_q_ref_banner = false;
-        if (m_params.ucm_debug && !printed_q_ref_banner) {
-            if (amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "[UCM][5.3][green-roof] q_atm_ref "
-                               << (q_ref_valid ? "valid (from moisture solver)"
-                                               : "invalid; using fallback q=0.005 kg/kg")
-                               << "\n";
-                printed_q_ref_banner = true;
-            }
-        }
-
-        // Phase 5.2-hotfix: collectives OUTSIDE IOProcessor guard
-        if (m_params.ucm_debug) {
-            amrex::Real LE_green_min = fields.LE_green_roof_diag->min(0, 0);
-            amrex::Real LE_green_max = fields.LE_green_roof_diag->max(0, 0);
-            if (amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "[UCM][5.3][green-roof] mode=simple"
-                               << " LE_green=[" << LE_green_min << ", " << LE_green_max << "] W/m²\n";
-            }
-        }
-    }
-
-
-    // ========================================================================
-    // Phase 5.3: Permeable road evaporation (Contract #21 / #22)
-    // ========================================================================
-    const bool permeable_road_on = (m_params.permeable_road_mode == PermeableRoadMode::Simple);
-
-    if (permeable_road_on) {
-        // Pre-resolve parameters on host (scalar capture only)
-        const amrex::Real r_soil = 200.0;  // Bare soil surface resistance [s/m]
-        const amrex::Real W_max_road = m_params.permeable_road_soil_capacity_m;
-
-        // Phase 5.3-hotfix1: if q_atm_ref was never written (use_moisture=false),
-        // fall back to a canonical dry-air value so LE_perm is deterministic.
-        const bool q_ref_valid = (q_atm_lowest.boxArray().size() > 0);
-        const amrex::Real q_canyon_fallback = 0.005;  // 5 g/kg, typical summer LST
-
-        for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU()); 
-             mfi.isValid(); ++mfi) 
-        {
-            const amrex::Box& bx = mfi.tilebox();
-            auto const T_skin_rd = fields.T_skin_road->const_array(mfi);
-            auto const T_can_a = fields.T_canyon_air->const_array(mfi);
-            auto const q_atm_a = forcing.q_atm_ref->const_array(mfi);
-            auto const U_a = forcing.wind_ref->const_array(mfi);
-            auto const is_urb_a = fields.is_urban->const_array(mfi);
-            auto const is_perm_a = fields.is_permeable_road->const_array(mfi);
-            auto W_road_a = fields.soil_moisture_road->array(mfi);
-            auto LE_diag_a = fields.LE_permeable_road_diag->array(mfi);
-            auto LE_a = fields.LE_latent->array(mfi);
-
-            const amrex::Real Ch_default = 0.004;
-
-            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
-                if (is_urb_a(i,j,0) == 0) return;
-                if (is_perm_a(i,j,0) == 0) return;
-
-                // Use atmospheric humidity as proxy for canyon air humidity
-                // Phase 5.3-hotfix1: use fallback if q_atm_ref was never initialized
-                amrex::Real q_canyon = q_ref_valid ? q_atm_a(i,j,0) : q_canyon_fallback;
-                q_canyon = amrex::max(amrex::min(q_canyon, 0.02), 0.0);  // Physical bounds
-
-                const amrex::Real LE_perm = compute_permeable_road_LE(
-                    W_road_a(i,j,0),
-                    T_skin_rd(i,j,0),
-                    T_can_a(i,j,0),
-                    q_canyon,
-                    U_a(i,j,0),
-                    Ch_default,
-                    r_soil);
-
-                LE_diag_a(i,j,0) = LE_perm;
-                LE_a(i,j,0) += LE_perm;  // Additive to canyon latent heat
-
-                // Update soil moisture bucket
-                update_permeable_road_moisture(W_road_a(i,j,0), LE_perm, dt, W_max_road);
-            });
-        }
-
-        // Phase 5.3-hotfix1: print banner once per run (gated on static bool)
-        static bool printed_q_ref_banner_perm = false;
-        if (m_params.ucm_debug && !printed_q_ref_banner_perm) {
-            if (amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "[UCM][5.3][permeable-road] q_atm_ref "
-                               << (q_ref_valid ? "valid (from moisture solver)"
-                                               : "invalid; using fallback q=0.005 kg/kg")
-                               << "\n";
-                printed_q_ref_banner_perm = true;
-            }
-        }
-
-        // Phase 5.2-hotfix: collectives OUTSIDE IOProcessor guard
-        if (m_params.ucm_debug) {
-            amrex::Real LE_perm_min = fields.LE_permeable_road_diag->min(0, 0);
-            amrex::Real LE_perm_max = fields.LE_permeable_road_diag->max(0, 0);
-            if (amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "[UCM][5.3][permeable-road] mode=simple"
-                               << " LE_perm=[" << LE_perm_min << ", " << LE_perm_max << "] W/m²\n";
-            }
-        }
-    }
-
-
-
 
     const amrex::Real Cp = Cp_d;
     const amrex::Real rho_ref = 1.2;
