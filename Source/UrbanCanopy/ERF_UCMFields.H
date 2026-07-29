@@ -295,6 +295,34 @@ struct UCMFields
     std::unique_ptr<amrex::MultiFab> Q_HVAC_diag;
 
     // =========================================================================
+    // Phase 5.3: Green roof and permeable pavement state
+    // =========================================================================
+
+    /// Soil moisture in green roof layer [m³/m³]. Phase 5.3: per-cell water content.
+    /// Depleted by evapotranspiration; initially filled from building_layout.csv or defaults.
+    std::unique_ptr<amrex::MultiFab> soil_moisture_roof;
+
+    /// Soil moisture in permeable pavement layer [m³/m³]. Phase 5.3: per-cell water content.
+    /// Depleted by evaporation; initially filled from building_layout.csv or defaults.
+    std::unique_ptr<amrex::MultiFab> soil_moisture_road;
+
+    /// Green roof latent heat flux diagnostic [W/m²]. Phase 5.3: for plotfile output.
+    /// Evapotranspiration from green roof (LE_green); additive to canyon LE_latent.
+    std::unique_ptr<amrex::MultiFab> LE_green_roof_diag;
+
+    /// Permeable pavement latent heat flux diagnostic [W/m²]. Phase 5.3: for plotfile output.
+    /// Evaporation from permeable road surface; additive to canyon LE_latent.
+    std::unique_ptr<amrex::MultiFab> LE_permeable_road_diag;
+
+    /// Per-cell green roof mask [0 or 1]. Phase 5.3: 1 = green roof present, 0 = standard roof.
+    /// Filled from building_layout.csv is_green_roof column; defaults to 0 if column absent.
+    std::unique_ptr<amrex::iMultiFab> is_green_roof;
+
+    /// Per-cell permeable pavement mask [0 or 1]. Phase 5.3: 1 = permeable road, 0 = standard road.
+    /// Filled from building_layout.csv is_permeable_road column; defaults to 0 if column absent.
+    std::unique_ptr<amrex::iMultiFab> is_permeable_road;
+
+    // =========================================================================
     // Public methods
     // =========================================================================
 

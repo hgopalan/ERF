@@ -288,6 +288,45 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
                     }
                 }
 
+                // Phase 5.3: Handle optional green roof, permeable road, and soil moisture columns
+                // These appear as trailing columns after hvac_profile_id (if present) or after is_urban
+                row.is_green_roof = 0;  // Default: no green roof
+                row.is_permeable_road = 0;  // Default: no permeable pavement
+                row.soil_moisture_init_m3_per_m3 = 0.1;  // Default: reasonable soil moisture
+
+                // Try to parse is_green_roof (optional column)
+                if (std::getline(ss, field, ',')) {
+                    if (!field.empty()) {
+                        try {
+                            row.is_green_roof = std::stoi(field);
+                        } catch (...) {
+                            row.is_green_roof = 0;
+                        }
+                    }
+                }
+
+                // Try to parse is_permeable_road (optional column)
+                if (std::getline(ss, field, ',')) {
+                    if (!field.empty()) {
+                        try {
+                            row.is_permeable_road = std::stoi(field);
+                        } catch (...) {
+                            row.is_permeable_road = 0;
+                        }
+                    }
+                }
+
+                // Try to parse soil_moisture_init_m3_per_m3 (optional column)
+                if (std::getline(ss, field, ',')) {
+                    if (!field.empty()) {
+                        try {
+                            row.soil_moisture_init_m3_per_m3 = std::stod(field);
+                        } catch (...) {
+                            row.soil_moisture_init_m3_per_m3 = 0.1;
+                        }
+                    }
+                }
+
                 // Validate is_urban
                 if (row.is_urban != 0 && row.is_urban != 1) {
                     amrex::Abort("[UCM][3.7][UCMBuildingLayoutReader::read_and_broadcast] "
