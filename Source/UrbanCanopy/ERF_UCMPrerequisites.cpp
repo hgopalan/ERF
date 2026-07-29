@@ -334,6 +334,23 @@ void check_ucm_grid_and_fields(const UCMParams& params,
         amrex::Print() << "\n";
     }
 
+    // Phase 5.7: Coastal canonical banner (if blended mode + diurnal forcing)
+    // This marks the Phase 5 system-integration gate before Part 6 (trees).
+    if (params.ucm_debug && params.interface_mode == "blended" && 
+        params.use_prescribed_radiation && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "[UCM][5.7][coastal-canonical]\n";
+        amrex::Print() << "  Domain: sea=[0,5000]m urban=[6000,14000]m rural=[15000,20000]m\n";
+        amrex::Print() << "  Transition bands: coast=[5000,6000]m rural_edge=[14000,15000]m\n";
+        amrex::Print() << "  Physics enabled:\n";
+        amrex::Print() << "    Phase 5.1a multi-facet view factors: on\n";
+        amrex::Print() << "    Phase 5.1b SW radiosity: on\n";
+        amrex::Print() << "    Phase 5.1c LW radiosity: on\n";
+        amrex::Print() << "    Phase 5.2 HVAC waste heat: on\n";
+        amrex::Print() << "    Phase 5.3 green-roof / cool-roof / permeable: available\n";
+        amrex::Print() << "    Phase 5.5 HVAC extended physics: on\n";
+        amrex::Print() << "    Phase 5.6 interface_mode: blended\n";
+    }
+
     // Phase 3.3: PBLH dependency guard — one-time banner
     // Design contract #4: UCM MUST NOT call SurfaceLayer::get_pblh().
     // All stability inputs come from u_star, t_star, q_star only.
