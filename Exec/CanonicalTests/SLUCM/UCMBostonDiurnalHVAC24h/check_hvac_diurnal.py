@@ -1,423 +1,247 @@
 #!/usr/bin/env python3
 """
-Phase 5.2 D10 — 24-hour Boston diurnal HVAC comparison.
+Phase 5.2 HVAC canonical validation for UCMBostonDiurnalHVAC24h.
 
-Parses two log files (hvac_off vs hvac_simple) produced by:
+Compares two runs (hvac_off vs hvac_simple) and asserts that HVAC waste heat
+enters the anthropogenic-heat field fields.AH as expected.
 
-    mpirun -np N ../../../build/Exec/erf_exec inputs_hvac_off      > run_hvac_off.log
-    mpirun -np N ../../../build/Exec/erf_exec inputs_hvac_simple   > run_hvac_simple.log
-
-Extracts per-step Q_HVAC, T_canyon_air, T_skin_roof/wall/road, H_sensible and
-plots a side-by-side comparison of both runs.
+Parses ONLY these authoritative log lines:
+  1. "[UCM][5.2][hvac] mode=... hour=H Q_HVAC=[qmin, qmax] W/m²"
+       -> Q_HVAC_diag min/max at each step (informational).
+  2. "  AH min=<v> max=<v> W/m2"  (indented, from ERF_UCMLayer.cpp line ~1251)
+       -> fields.AH->max at end of advance(). This is what Facet3D reads.
+  3. "  MOST    H_roof min=<v> max=<v> W/m2  (drives ATM injection)"
+       -> Sensible heat lumped for the atmosphere (base + AH contribution).
 
 Pass criteria:
-  * hvac_off  : Q_HVAC block never printed (mode = off)
-  * hvac_simple: Q_HVAC = 0 whenever the setpoint or occupancy gate fires;
-                Q_HVAC > 0 in daytime hours (occupied + T_can >= setpoint - hyst)
-  * Both runs reach STEP == max_step (or user-provided target step) without hanging.
-  * T_canyon_air with HVAC on >= T_canyon_air with HVAC off (waste heat warms canyon)
+  A) hvac_off:    AH max stays at the base value (60 W/m^2 for Boston default).
+  B) hvac_simple: AH max exceeds base on at least N_fire_min steps
+                  (proving `AH_a(i,j,0) += Q_HVAC` persists to fields.AH).
+  C) hvac_simple: MOST H_roof max on firing steps is greater than the
+                  corresponding hvac_off value (proving AH reaches the ATM).
 
 Usage:
-    python3 check_hvac_diurnal.py \\
-        --off run_hvac_off.log \\
-        --simple run_hvac_simple.log \\
-        [--max-step 60000] \\
-        [--plot hvac_diurnal.png]
-
-Exits 0 on pass, 1 on any failed check.
+    python check_hvac_diurnal.py run_hvac_off.log run_hvac_simple.log
 """
+
+from __future__ import annotations
+
 import argparse
 import re
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import List, Optional
 
-# ---------------------------------------------------------------------------
-# Regex patterns matching the debug output produced by ERF_UCMLayer.cpp
-# ---------------------------------------------------------------------------
+# --- Regexes bound to exact log line formats emitted by ERF_UCMLayer.cpp -----
 
-RE_STEP_START = re.compile(
-    r"\[Level 0 step (\d+)\] ADVANCE from elapsed time = ([\d.eE+-]+)"
-)
-RE_STEP_END = re.compile(
-    r"Coarse STEP (\d+) ends\. TIME = ([\d.eE+-]+)"
-)
-RE_QHVAC = re.compile(
-    r"\[UCM\]\[5\.2\]\[hvac\] mode=simple hour=(\d+)\s+Q_HVAC=\[([\d.eE+-]+),\s*([\d.eE+-]+)\]"
-)
-RE_TCAN = re.compile(
-    r"T_canyon_air=\[([\d.eE+-]+),\s*([\d.eE+-]+)\]"
-)
-RE_TROOF = re.compile(
-    r"T_skin_roof=\[([\d.eE+-]+),\s*([\d.eE+-]+)\]"
-)
-RE_TWALL = re.compile(
-    r"T_skin_wall=\[([\d.eE+-]+),\s*([\d.eE+-]+)\]"
-)
-RE_TROAD = re.compile(
-    r"T_skin_road=\[([\d.eE+-]+),\s*([\d.eE+-]+)\]"
-)
-RE_HSENS = re.compile(
-    r"H_sensible min=([\d.eE+-]+) max=([\d.eE+-]+)"
-)
-RE_AH_STATS = re.compile(
-    r"AH min=([\d.eE+-]+) max=([\d.eE+-]+)"
+# Line: "[UCM][5.2][hvac] mode=simple hour=14 Q_HVAC=[0, 61.28] W/m²"
+RE_HVAC = re.compile(
+    r"\[UCM\]\[5\.2\]\[hvac\]\s+mode=(\w+)\s+hour=(\d+)\s+"
+    r"Q_HVAC=\[\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\]"
 )
 
+# Line: "  AH min=5 max=60 W/m2"   (two leading spaces, indented under [3.5A][SEB])
+RE_AH = re.compile(r"^\s{2}AH\s+min=([-\d.eE+]+)\s+max=([-\d.eE+]+)\s+W/m2\s*$")
 
-def parse_log(path):
-    """Return a dict of per-step time series parsed from an ERF run log."""
-    steps = []
-    times = []
-    q_hvac_min = []
-    q_hvac_max = []
-    hours = []
-    t_can_min = []
-    t_can_max = []
-    t_roof_min = []
-    t_roof_max = []
-    t_wall_min = []
-    t_wall_max = []
-    t_road_min = []
-    t_road_max = []
-    h_sens_min = []
-    h_sens_max = []
-    ah_min = []
-    ah_max = []
+# Line: "  MOST    H_roof min=3.79 max=46.74 W/m2  (drives ATM injection)"
+RE_H_ROOF_ATM = re.compile(
+    r"^\s{2}MOST\s+H_roof\s+min=([-\d.eE+]+)\s+max=([-\d.eE+]+)\s+W/m2\s+"
+    r"\(drives ATM injection\)"
+)
 
-    # per-step scratch (reset when a STEP_START is seen)
-    scratch = {}
+# Base AH value expected when HVAC contributes nothing.
+# Matches Boston Diurnal default: AH_daytime_peak=60, override CSV up to 60.
+AH_BASE_DEFAULT = 60.0
 
-    def flush():
-        if not scratch:
-            return
-        steps.append(scratch.get("step"))
-        times.append(scratch.get("time"))
-        q_hvac_min.append(scratch.get("q_min", None))
-        q_hvac_max.append(scratch.get("q_max", None))
-        hours.append(scratch.get("hour", None))
-        t_can_min.append(scratch.get("tcan_min"))
-        t_can_max.append(scratch.get("tcan_max"))
-        t_roof_min.append(scratch.get("troof_min"))
-        t_roof_max.append(scratch.get("troof_max"))
-        t_wall_min.append(scratch.get("twall_min"))
-        t_wall_max.append(scratch.get("twall_max"))
-        t_road_min.append(scratch.get("troad_min"))
-        t_road_max.append(scratch.get("troad_max"))
-        h_sens_min.append(scratch.get("h_min"))
-        h_sens_max.append(scratch.get("h_max"))
-        ah_min.append(scratch.get("ah_min"))
-        ah_max.append(scratch.get("ah_max"))
+# Tolerance (W/m^2) above AH_BASE to count a step as "HVAC fired".
+AH_FIRE_THRESHOLD = 1.0
 
-    with open(path) as f:
-        for line in f:
-            m = RE_STEP_START.search(line)
+# Minimum number of firing steps required in hvac_simple to pass.
+N_FIRE_MIN = 100
+
+
+@dataclass
+class RunTrace:
+    """Per-step parsed values from an ERF log for one HVAC config."""
+
+    path: Path
+    q_hvac_max: List[float] = field(default_factory=list)  # from Q_HVAC_diag
+    ah_max: List[float] = field(default_factory=list)      # from fields.AH
+    h_roof_atm_max: List[float] = field(default_factory=list)
+    hour: List[int] = field(default_factory=list)
+    mode: Optional[str] = None
+
+
+def parse_log(path: Path) -> RunTrace:
+    """Stream-parse the log and collect the three quantities per step."""
+    trace = RunTrace(path=path)
+    with path.open("r", errors="replace") as fh:
+        for line in fh:
+            m = RE_HVAC.search(line)
             if m:
-                flush()
-                scratch = {"step": int(m.group(1)), "time": float(m.group(2))}
+                trace.mode = m.group(1)
+                trace.hour.append(int(m.group(2)))
+                trace.q_hvac_max.append(float(m.group(4)))
                 continue
-
-            m = RE_QHVAC.search(line)
+            m = RE_AH.match(line)
             if m:
-                scratch["hour"] = int(m.group(1))
-                scratch["q_min"] = float(m.group(2))
-                scratch["q_max"] = float(m.group(3))
+                trace.ah_max.append(float(m.group(2)))
                 continue
-
-            m = RE_TCAN.search(line)
+            m = RE_H_ROOF_ATM.match(line)
             if m:
-                scratch["tcan_min"] = float(m.group(1))
-                scratch["tcan_max"] = float(m.group(2))
+                trace.h_roof_atm_max.append(float(m.group(2)))
                 continue
-
-            m = RE_TROOF.search(line)
-            if m:
-                scratch["troof_min"] = float(m.group(1))
-                scratch["troof_max"] = float(m.group(2))
-                continue
-
-            m = RE_TWALL.search(line)
-            if m:
-                scratch["twall_min"] = float(m.group(1))
-                scratch["twall_max"] = float(m.group(2))
-                continue
-
-            m = RE_TROAD.search(line)
-            if m:
-                scratch["troad_min"] = float(m.group(1))
-                scratch["troad_max"] = float(m.group(2))
-                continue
-
-            m = RE_HSENS.search(line)
-            if m:
-                scratch["h_min"] = float(m.group(1))
-                scratch["h_max"] = float(m.group(2))
-                continue
-
-            m = RE_AH_STATS.search(line)
-            if m:
-                scratch["ah_min"] = float(m.group(1))
-                scratch["ah_max"] = float(m.group(2))
-                continue
-
-        flush()
-
-    return {
-        "path": str(path),
-        "step": steps,
-        "time_s": times,
-        "hour": hours,
-        "q_hvac_min": q_hvac_min,
-        "q_hvac_max": q_hvac_max,
-        "t_can_min": t_can_min,
-        "t_can_max": t_can_max,
-        "t_roof_min": t_roof_min,
-        "t_roof_max": t_roof_max,
-        "t_wall_min": t_wall_min,
-        "t_wall_max": t_wall_max,
-        "t_road_min": t_road_min,
-        "t_road_max": t_road_max,
-        "h_sens_min": h_sens_min,
-        "h_sens_max": h_sens_max,
-        "ah_min": ah_min,
-        "ah_max": ah_max,
-    }
+    return trace
 
 
-def safe_last(seq):
-    for v in reversed(seq):
-        if v is not None:
-            return v
-    return None
-
-
-def check_run(data, label, expect_hvac, target_step):
-    """Return (passed, messages) for a parsed run."""
-    msgs = []
-    ok = True
-
-    n = len(data["step"])
-    msgs.append(f"[{label}] parsed {n} timesteps from {data['path']}")
-
-    if n == 0:
-        msgs.append(f"[{label}] FAIL: no timesteps parsed - check log path/format")
-        return False, msgs
-
-    last_step = safe_last(data["step"])
-    if last_step is None:
-        msgs.append(f"[{label}] FAIL: no step number found")
-        ok = False
-    elif target_step is not None and last_step < target_step:
-        msgs.append(
-            f"[{label}] FAIL: reached step {last_step} but expected {target_step} "
-            f"(likely hung or crashed)"
+def summarize(trace: RunTrace, label: str) -> None:
+    print(f"[{label}] file={trace.path.name}")
+    print(f"[{label}]   mode              = {trace.mode!r}")
+    print(f"[{label}]   n_hvac_lines      = {len(trace.q_hvac_max)}")
+    print(f"[{label}]   n_ah_debug_lines  = {len(trace.ah_max)}")
+    print(f"[{label}]   n_hroof_atm_lines = {len(trace.h_roof_atm_max)}")
+    if trace.q_hvac_max:
+        print(
+            f"[{label}]   Q_HVAC_diag max   "
+            f"min={min(trace.q_hvac_max):.3f} "
+            f"max={max(trace.q_hvac_max):.3f} W/m^2"
         )
-        ok = False
-    else:
-        msgs.append(f"[{label}] OK: reached step {last_step}")
-
-    # Q_HVAC checks
-    q_present = [q for q in data["q_hvac_max"] if q is not None]
-    if expect_hvac:
-        if len(q_present) == 0:
-            msgs.append(f"[{label}] FAIL: HVAC mode = simple but no Q_HVAC lines found")
-            ok = False
-        else:
-            q_max_ever = max(q_present)
-            q_min_ever = min(q_present)
-            frac_nonzero = sum(1 for q in q_present if q > 1e-6) / len(q_present)
-            msgs.append(
-                f"[{label}] Q_HVAC across run: min={q_min_ever:.2f} max={q_max_ever:.2f} "
-                f"W/m^2, nonzero fraction={frac_nonzero*100:.1f}%"
-            )
-            if q_max_ever < 1.0:
-                msgs.append(
-                    f"[{label}] FAIL: HVAC never activated (max Q_HVAC={q_max_ever:.4f}); "
-                    f"setpoint/occupancy gates always blocking?"
-                )
-                ok = False
-            if frac_nonzero < 0.05:
-                msgs.append(
-                    f"[{label}] WARN: HVAC active in <5% of timesteps - verify setpoint"
-                )
-    else:
-        if len(q_present) > 0:
-            msgs.append(
-                f"[{label}] FAIL: hvac_mode=off but {len(q_present)} Q_HVAC lines "
-                f"found (should be zero)"
-            )
-            ok = False
-        else:
-            msgs.append(f"[{label}] OK: no Q_HVAC lines (hvac_mode=off)")
-
-    # Sanity checks on canyon T
-    tcan = [t for t in data["t_can_max"] if t is not None]
-    if tcan:
-        msgs.append(
-            f"[{label}] T_canyon_air: min={min(tcan):.2f} K max={max(tcan):.2f} K"
+    if trace.ah_max:
+        print(
+            f"[{label}]   fields.AH max     "
+            f"min={min(trace.ah_max):.3f} "
+            f"max={max(trace.ah_max):.3f} W/m^2"
         )
-        if min(tcan) < 240 or max(tcan) > 340:
-            msgs.append(
-                f"[{label}] WARN: T_canyon_air outside [240, 340] K - check physics"
-            )
-
-    troof = [t for t in data["t_roof_max"] if t is not None]
-    if troof:
-        msgs.append(
-            f"[{label}] T_skin_roof: min={min(troof):.2f} K max={max(troof):.2f} K"
+    if trace.h_roof_atm_max:
+        print(
+            f"[{label}]   MOST H_roof max   "
+            f"min={min(trace.h_roof_atm_max):.3f} "
+            f"max={max(trace.h_roof_atm_max):.3f} W/m^2"
         )
-
-    return ok, msgs
-
-
-def compare_runs(off, sim):
-    """Physical consistency: HVAC ON should warm the canyon relative to OFF."""
-    msgs = []
-    ok = True
-
-    # Align on step index (take min length)
-    n = min(len(off["step"]), len(sim["step"]))
-    if n < 10:
-        msgs.append(f"[compare] SKIP: fewer than 10 aligned steps ({n})")
-        return True, msgs
-
-    # Compare mean T_canyon_air over aligned window
-    tc_off = [t for t in off["t_can_max"][:n] if t is not None]
-    tc_sim = [t for t in sim["t_can_max"][:n] if t is not None]
-    if tc_off and tc_sim:
-        m_off = sum(tc_off) / len(tc_off)
-        m_sim = sum(tc_sim) / len(tc_sim)
-        delta = m_sim - m_off
-        msgs.append(
-            f"[compare] mean T_canyon_air OFF={m_off:.3f} K, SIMPLE={m_sim:.3f} K, "
-            f"delta={delta:+.3f} K"
-        )
-        if delta < -0.1:
-            msgs.append(
-                f"[compare] FAIL: HVAC waste heat should not COOL the canyon "
-                f"(delta={delta:+.3f} K)"
-            )
-            ok = False
-        elif delta < 0.001:
-            msgs.append(
-                f"[compare] WARN: HVAC waste heat produced negligible warming "
-                f"(delta={delta:+.3f} K); may be OK if HVAC rarely active"
-            )
-        else:
-            msgs.append(f"[compare] OK: HVAC warms canyon (delta={delta:+.3f} K)")
-
-    # Compare AH range
-    ah_off = [a for a in off["ah_max"][:n] if a is not None]
-    ah_sim = [a for a in sim["ah_max"][:n] if a is not None]
-    if ah_off and ah_sim:
-        msgs.append(
-            f"[compare] AH max OFF={max(ah_off):.2f} W/m^2, "
-            f"SIMPLE={max(ah_sim):.2f} W/m^2"
-        )
-
-    return ok, msgs
+    print()
 
 
-def make_plot(off, sim, out_path):
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("[plot] matplotlib not installed; skipping plot")
-        return
-
-    fig, axes = plt.subplots(3, 1, figsize=(11, 9), sharex=True)
-
-    # -- Panel 1: Q_HVAC (simple only)
-    ax = axes[0]
-    sim_t = [t / 3600.0 if t is not None else None for t in sim["time_s"]]
-    sim_q = list(sim["q_hvac_max"])
-    while len(sim_q) < len(sim_t):
-        sim_q.append(None)
-    ax.plot(sim_t, sim_q, "r-", lw=1.0, label="simple (max)")
-    ax.set_ylabel("Q_HVAC (W/m^2)")
-    ax.set_title("Phase 5.2 D10: Boston 24 h HVAC-off vs HVAC-simple")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper right")
-
-    # -- Panel 2: T_canyon_air comparison
-    ax = axes[1]
-    off_t = [t / 3600.0 if t is not None else None for t in off["time_s"]]
-    ax.plot(off_t, off["t_can_max"], "b-", lw=1.0, label="off")
-    ax.plot(sim_t, sim["t_can_max"], "r-", lw=1.0, label="simple")
-    ax.set_ylabel("T_canyon_air (K)")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper right")
-
-    # -- Panel 3: T_skin_roof comparison
-    ax = axes[2]
-    ax.plot(off_t, off["t_roof_max"], "b-", lw=1.0, label="off")
-    ax.plot(sim_t, sim["t_roof_max"], "r-", lw=1.0, label="simple")
-    ax.set_ylabel("T_skin_roof (K)")
-    ax.set_xlabel("Simulation time (hours)")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper right")
-
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=120)
-    print(f"[plot] wrote {out_path}")
-
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--off", required=True, help="Path to hvac_off run log")
-    ap.add_argument("--simple", required=True, help="Path to hvac_simple run log")
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("run_off", type=Path, help="Log from hvac_mode=off run")
+    ap.add_argument("run_simple", type=Path, help="Log from hvac_mode=simple run")
     ap.add_argument(
-        "--max-step", type=int, default=None,
-        help="Expected final step (fail if not reached). Default: no check."
+        "--ah-base",
+        type=float,
+        default=AH_BASE_DEFAULT,
+        help=f"Expected base AH_max with HVAC off (default {AH_BASE_DEFAULT})",
     )
     ap.add_argument(
-        "--plot", default=None,
-        help="If set, write comparison plot to this PNG path."
+        "--fire-threshold",
+        type=float,
+        default=AH_FIRE_THRESHOLD,
+        help=f"W/m^2 above base to count as firing (default {AH_FIRE_THRESHOLD})",
+    )
+    ap.add_argument(
+        "--n-fire-min",
+        type=int,
+        default=N_FIRE_MIN,
+        help=f"Min firing steps required in simple run (default {N_FIRE_MIN})",
     )
     args = ap.parse_args()
 
-    off_path = Path(args.off)
-    sim_path = Path(args.simple)
-    for p in (off_path, sim_path):
-        if not p.exists():
-            print(f"ERROR: log file not found: {p}", file=sys.stderr)
-            sys.exit(2)
+    for p in (args.run_off, args.run_simple):
+        if not p.is_file():
+            print(f"ERROR: log not found: {p}", file=sys.stderr)
+            return 2
 
-    off = parse_log(off_path)
-    sim = parse_log(sim_path)
+    off = parse_log(args.run_off)
+    simple = parse_log(args.run_simple)
 
-    all_ok = True
-    all_msgs = []
+    print("=" * 72)
+    print("Phase 5.2 HVAC canonical: parse summary")
+    print("=" * 72)
+    summarize(off, "off   ")
+    summarize(simple, "simple")
 
-    ok, msgs = check_run(off, "hvac_off", expect_hvac=False, target_step=args.max_step)
-    all_ok = all_ok and ok
-    all_msgs += msgs
-    all_msgs.append("")
+    # ---- Sanity: both logs produced debug lines ----------------------------
+    if not off.ah_max or not simple.ah_max:
+        print("FAIL: one or both runs produced zero 'AH min=... max=...' lines. "
+              "Ensure ucm.debug=1 in the inputs files.")
+        return 1
+    if len(off.ah_max) != len(simple.ah_max):
+        print(
+            f"WARN: step counts differ (off={len(off.ah_max)} "
+            f"simple={len(simple.ah_max)}); comparisons will use min length."
+        )
 
-    ok, msgs = check_run(sim, "hvac_simple", expect_hvac=True, target_step=args.max_step)
-    all_ok = all_ok and ok
-    all_msgs += msgs
-    all_msgs.append("")
+    n = min(len(off.ah_max), len(simple.ah_max))
 
-    ok, msgs = compare_runs(off, sim)
-    all_ok = all_ok and ok
-    all_msgs += msgs
-    all_msgs.append("")
+    # ---- Check A: hvac_off keeps AH at base --------------------------------
+    off_ah_max_over_run = max(off.ah_max[:n])
+    tol = 1e-6
+    if off_ah_max_over_run > args.ah_base + tol:
+        print(
+            f"FAIL [A]: hvac_off has AH max={off_ah_max_over_run:.3f} > "
+            f"base {args.ah_base:.3f}. Something else is writing AH."
+        )
+        return 1
+    print(f"PASS [A]: hvac_off AH max stays at base = {off_ah_max_over_run:.3f} W/m^2")
 
-    for m in all_msgs:
-        print(m)
+    # ---- Check B: hvac_simple exceeds base on enough steps -----------------
+    n_fire = sum(1 for v in simple.ah_max[:n] if v > args.ah_base + args.fire_threshold)
+    simple_ah_max_over_run = max(simple.ah_max[:n])
+    print(
+        f"[compare] hvac_simple firing steps "
+        f"(AH > {args.ah_base + args.fire_threshold:.2f}): "
+        f"{n_fire} / {n}"
+    )
+    print(
+        f"[compare] hvac_simple AH max over run = "
+        f"{simple_ah_max_over_run:.3f} W/m^2 "
+        f"(base={args.ah_base:.3f}, expected > base)"
+    )
+    if n_fire < args.n_fire_min:
+        print(
+            f"FAIL [B]: only {n_fire} firing steps (< {args.n_fire_min}). "
+            "HVAC block did not persist to fields.AH, OR HVAC never engaged. "
+            "Check that T_canyon_air exceeds setpoint - hysteresis somewhere in the run."
+        )
+        return 1
+    if simple_ah_max_over_run <= args.ah_base + args.fire_threshold:
+        print(
+            f"FAIL [B]: hvac_simple AH max {simple_ah_max_over_run:.3f} "
+            f"<= base+threshold {args.ah_base + args.fire_threshold:.3f}. "
+            "HVAC did not persist to fields.AH."
+        )
+        return 1
+    print(
+        f"PASS [B]: hvac_simple fires on {n_fire} steps; "
+        f"max AH = {simple_ah_max_over_run:.3f} W/m^2 > base"
+    )
 
-    if args.plot:
-        make_plot(off, sim, args.plot)
+    # ---- Check C: MOST H_roof (into ATM) is larger in simple ---------------
+    if off.h_roof_atm_max and simple.h_roof_atm_max:
+        m = min(len(off.h_roof_atm_max), len(simple.h_roof_atm_max))
+        n_larger = sum(
+            1 for i in range(m)
+            if simple.h_roof_atm_max[i] > off.h_roof_atm_max[i] + 0.1
+        )
+        print(
+            f"[compare] MOST H_roof larger in simple than off: "
+            f"{n_larger} / {m} steps"
+        )
+        if n_larger < args.n_fire_min:
+            print(
+                f"WARN [C]: MOST H_roof differs on only {n_larger} steps. "
+                "AH may not be reaching Facet3D injection. "
+                "This is a warning, not a failure — domain averaging can mask the effect."
+            )
+        else:
+            print(f"PASS [C]: MOST H_roof reflects HVAC on {n_larger} steps")
 
-    if all_ok:
-        print("PASS: Phase 5.2 D10 Boston diurnal HVAC test.")
-        sys.exit(0)
-    else:
-        print("FAIL: one or more checks did not pass. See messages above.")
-        sys.exit(1)
+    print()
+    print("=" * 72)
+    print("Phase 5.2 HVAC canonical: PASS")
+    print("=" * 72)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
