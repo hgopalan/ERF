@@ -28,6 +28,8 @@
 #include <UrbanCanopy/ERF_UCMHVAC.H>
 #include <UrbanCanopy/ERF_UCMHVACReader.H>
 #include <UrbanCanopy/ERF_UCMOccupancyReader.H>
+#include <UrbanCanopy/ERF_UCMGreenRoof.H>
+#include <UrbanCanopy/ERF_UCMPermeableRoad.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <ERF_Constants.H>
 #include <cmath>
@@ -989,9 +991,141 @@ void UCMLayer::advance(UCMFields& fields,
     }
 
 
-    // ------------------------------------------------------------------------
-    // Phase 2.3 facet-split sensible heat flux (Phase 2.3.1 physics fix)
-    // ------------------------------------------------------------------------
+    // ========================================================================
+    // Phase 5.3: Green roof evapotranspiration (Contract #21 / #22)
+    //
+    // Scalar-hoisted profile lookup — no std::vector or std::string
+    // captured into the ParallelFor lambda (Contract #22, GPU safety).
+    //
+    // Phase 5.2-hotfix: All AMReX collective reductions (min/max) called
+    // OUTSIDE the IOProcessor() guard per PR #201 Bug #9 rule.
+    // ========================================================================
+    const bool green_roof_on = (m_params.green_roof_mode == GreenRoofMode::Simple);
+
+    if (green_roof_on) {
+        // Pre-resolve parameters on host (scalar capture only)
+        const amrex::Real r_stomatal = m_params.green_roof_r_stomatal_s_per_m;
+        const amrex::Real W_max_roof = m_params.green_roof_soil_capacity_m;
+
+        for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU()); 
+             mfi.isValid(); ++mfi) 
+        {
+            const amrex::Box& bx = mfi.tilebox();
+            auto const T_skin_rf = fields.T_skin_roof->const_array(mfi);
+            auto const T_can_a = fields.T_canyon_air->const_array(mfi);
+            auto const q_atm_a = forcing.q_atm_ref->const_array(mfi);
+            auto const U_a = forcing.wind_ref->const_array(mfi);
+            auto const is_urb_a = fields.is_urban->const_array(mfi);
+            auto const is_green_a = fields.is_green_roof->const_array(mfi);
+            auto W_roof_a = fields.soil_moisture_roof->array(mfi);
+            auto LE_diag_a = fields.LE_green_roof_diag->array(mfi);
+            auto LE_a = fields.LE_latent->array(mfi);
+
+            // Phase 1.3 heat transfer coefficient (from SEB driver)
+            // TODO(Phase 5.3-followup): use per-cell Ch from forcing or SEB
+            const amrex::Real Ch_default = 0.004;
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
+                if (is_urb_a(i,j,0) == 0) return;
+                if (is_green_a(i,j,0) == 0) return;
+
+                // Use atmospheric humidity as proxy for canyon air humidity
+                amrex::Real q_canyon = q_atm_a(i,j,0);
+                q_canyon = amrex::max(amrex::min(q_canyon, 0.02), 0.0);  // Physical bounds
+
+                const amrex::Real LE_green = compute_green_roof_LE(
+                    W_roof_a(i,j,0),
+                    T_skin_rf(i,j,0),
+                    T_can_a(i,j,0),
+                    q_canyon,
+                    U_a(i,j,0),
+                    Ch_default,
+                    r_stomatal);
+
+                LE_diag_a(i,j,0) = LE_green;
+                LE_a(i,j,0) += LE_green;  // Additive to canyon latent heat
+
+                // Update soil moisture bucket
+                update_green_roof_moisture(W_roof_a(i,j,0), LE_green, dt, W_max_roof);
+            });
+        }
+
+        // Phase 5.2-hotfix: collectives OUTSIDE IOProcessor guard
+        if (m_params.ucm_debug) {
+            amrex::Real LE_green_min = fields.LE_green_roof_diag->min(0, 0);
+            amrex::Real LE_green_max = fields.LE_green_roof_diag->max(0, 0);
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "[UCM][5.3][green-roof] mode=simple"
+                               << " LE_green=[" << LE_green_min << ", " << LE_green_max << "] W/m²\n";
+            }
+        }
+    }
+
+
+    // ========================================================================
+    // Phase 5.3: Permeable road evaporation (Contract #21 / #22)
+    // ========================================================================
+    const bool permeable_road_on = (m_params.permeable_road_mode == PermeableRoadMode::Simple);
+
+    if (permeable_road_on) {
+        // Pre-resolve parameters on host (scalar capture only)
+        const amrex::Real r_soil = 200.0;  // Bare soil surface resistance [s/m]
+        const amrex::Real W_max_road = m_params.permeable_road_soil_capacity_m;
+
+        for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU()); 
+             mfi.isValid(); ++mfi) 
+        {
+            const amrex::Box& bx = mfi.tilebox();
+            auto const T_skin_rd = fields.T_skin_road->const_array(mfi);
+            auto const T_can_a = fields.T_canyon_air->const_array(mfi);
+            auto const q_atm_a = forcing.q_atm_ref->const_array(mfi);
+            auto const U_a = forcing.wind_ref->const_array(mfi);
+            auto const is_urb_a = fields.is_urban->const_array(mfi);
+            auto const is_perm_a = fields.is_permeable_road->const_array(mfi);
+            auto W_road_a = fields.soil_moisture_road->array(mfi);
+            auto LE_diag_a = fields.LE_permeable_road_diag->array(mfi);
+            auto LE_a = fields.LE_latent->array(mfi);
+
+            const amrex::Real Ch_default = 0.004;
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
+                if (is_urb_a(i,j,0) == 0) return;
+                if (is_perm_a(i,j,0) == 0) return;
+
+                // Use atmospheric humidity as proxy for canyon air humidity
+                amrex::Real q_canyon = q_atm_a(i,j,0);
+                q_canyon = amrex::max(amrex::min(q_canyon, 0.02), 0.0);  // Physical bounds
+
+                const amrex::Real LE_perm = compute_permeable_road_LE(
+                    W_road_a(i,j,0),
+                    T_skin_rd(i,j,0),
+                    T_can_a(i,j,0),
+                    q_canyon,
+                    U_a(i,j,0),
+                    Ch_default,
+                    r_soil);
+
+                LE_diag_a(i,j,0) = LE_perm;
+                LE_a(i,j,0) += LE_perm;  // Additive to canyon latent heat
+
+                // Update soil moisture bucket
+                update_permeable_road_moisture(W_road_a(i,j,0), LE_perm, dt, W_max_road);
+            });
+        }
+
+        // Phase 5.2-hotfix: collectives OUTSIDE IOProcessor guard
+        if (m_params.ucm_debug) {
+            amrex::Real LE_perm_min = fields.LE_permeable_road_diag->min(0, 0);
+            amrex::Real LE_perm_max = fields.LE_permeable_road_diag->max(0, 0);
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "[UCM][5.3][permeable-road] mode=simple"
+                               << " LE_perm=[" << LE_perm_min << ", " << LE_perm_max << "] W/m²\n";
+            }
+        }
+    }
+
+
+
 
     const amrex::Real Cp = Cp_d;
     const amrex::Real rho_ref = 1.2;
