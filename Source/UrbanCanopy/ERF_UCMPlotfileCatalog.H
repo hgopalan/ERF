@@ -68,8 +68,13 @@ enum UCMPlotfileComponents {
     // Phase 5.2: HVAC diagnostics (25)
     UCMPlot_Q_HVAC_diag      = 25,  ///< HVAC waste heat diagnostic [W/m²]
 
-    // Total (Phase 5.2)
-    UCMPlot_ncomp            = 26   ///< Total number of components (Phase 5.2)
+    // Phase 5.5: HVAC facet-split diagnostics (26–28)
+    UCMPlot_Q_HVAC_roof_diag = 26,  ///< HVAC waste heat on roof [W/m²]
+    UCMPlot_Q_HVAC_wall_diag = 27,  ///< HVAC waste heat on walls [W/m²]
+    UCMPlot_Q_HVAC_road_diag = 28,  ///< HVAC waste heat on road [W/m²]
+
+    // Total (Phase 5.5)
+    UCMPlot_ncomp            = 29   ///< Total number of components (Phase 5.5)
 };
 
 /**
@@ -128,6 +133,9 @@ inline const char* UCMPlotfileComponentName(int comp)
         case UCMPlot_F_road_wall:      return "F_road_wall";
         case UCMPlot_F_roof_sky:       return "F_roof_sky";
         case UCMPlot_Q_HVAC_diag:      return "Q_HVAC_diag";
+        case UCMPlot_Q_HVAC_roof_diag: return "Q_HVAC_roof_diag";
+        case UCMPlot_Q_HVAC_wall_diag: return "Q_HVAC_wall_diag";
+        case UCMPlot_Q_HVAC_road_diag: return "Q_HVAC_road_diag";
         default:                       return "unknown";
     }
 }

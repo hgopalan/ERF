@@ -294,6 +294,18 @@ struct UCMFields
     /// Filled during HVAC computation; copied to plotfile if requested.
     std::unique_ptr<amrex::MultiFab> Q_HVAC_diag;
 
+    /// HVAC waste heat on roof [W/m²]. Phase 5.5: per-cell sensible waste heat injected at roof.
+    /// Used for facet-level tracking and plotfile output.
+    std::unique_ptr<amrex::MultiFab> Q_HVAC_roof_diag;
+
+    /// HVAC waste heat on walls [W/m²]. Phase 5.5: per-cell sensible waste heat injected at walls.
+    /// Used for facet-level tracking and plotfile output; zero if rejection_facet != distributed.
+    std::unique_ptr<amrex::MultiFab> Q_HVAC_wall_diag;
+
+    /// HVAC waste heat on road [W/m²]. Phase 5.5: per-cell sensible waste heat injected at road.
+    /// Used for facet-level tracking and plotfile output.
+    std::unique_ptr<amrex::MultiFab> Q_HVAC_road_diag;
+
     // =========================================================================
     // Phase 5.3: Green roof and permeable pavement state
     // =========================================================================
