@@ -53,8 +53,10 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 5 | 5.1b | **Radiosity solver + shortwave multi-bounce** | Iterative radiosity for SW only. Wire into SEB SW input path. Keep LW single-bounce. Regression gate: all Phase 3.5b canonicals stable to `|ΔT_skin| ≤ 0.5 K`. | ✅ COMPLETE | #259 |
 | 5 | 5.1c | **Longwave multi-bounce + Newton stability re-verification** | Extend radiosity to LW. Rerun full 3.5a-hotfix regression battery (7-bug cascade). **Physics goal**: resolve the Newton/MOST divergence design gap flagged in the original 5.1 roadmap. **High risk of SEB regression — treat like 3.5a-hotfix.** | ✅ COMPLETE | #260 |
 | 5 | 5.2 | AC waste heat + building-energy sub-module (**COP-based simplified rejection**) | Occupancy schedule CSV (24-h × N-day-types), HVAC rejection = SEB load × (1 + 1/COP), injection via existing AH slot. **Scope-locked**: 1-zone envelope model deferred; add Phase 5.2b only if 6.4 instrumented-site validation shows COP-only is insufficient. | ✅ COMPLETE | #261 |
-| 5 | 5.3 | Green roofs, cool roofs, permeable pavements | Cool roof: CSV knob only (already representable via `albedo_roof`). Green roof: soil layer on roof (reuse slab conduction TDMA + `LE_atm` latent path). Permeable pavement: soil-moisture bucket on road facet (shared with green roof infrastructure). Canonical `UCMBostonGreenRoofs/`. | 🔲 PLANNED | — |
-| 5 | 5.4 | **Coastal sea-breeze canonical (system integration gate before Phase 6)** | Two-tile 24-h canonical (`UCMBostonCoastal24h/`); prescribed-SST water tile type via `tile_type ∈ {urban, rural, water}` column in `building_layout.csv`; SST override bypasses Newton for water tiles. Assertions: (1) land tiles UHI ≥ 1 K, (2) water tile within 0.5 K of prescribed SST, (3) **sea-breeze reversal** 12:00–16:00 local time (near-surface wind at coast flips from offshore to onshore). | 🔲 PLANNED | — |
+| 5 | 5.3 | Green roofs, cool roofs, permeable pavements | Cool roof: CSV knob only (already representable via `albedo_roof`). Green roof: soil layer on roof (reuse slab conduction TDMA + `LE_atm` latent path). Permeable pavement: soil-moisture bucket on road facet (shared with green roof infrastructure). Canonical `UCMBostonDiurnalGreen24h/`. | 🚧 IN PROGRESS | — |
+| 5 | 5.4 | HVAC production hardening + per-cell profile dispatch | Hoist CSV readers into UCMLayer construction (once-per-run parse). Dispatch per-cell hvac_profile_id via DeviceVector capture. Unblocks Phase 6.2b (per-building energy models). | 📋 PLANNED | — |
+| 5 | 5.5 | HVAC extended physics (sensible/latent split, facet selection, COP degradation) | Split HVAC rejection into H_sensible and LE_latent. Selectable rejection facet (roof / ground / distributed). Optional COP degradation with outdoor T. Scheduled after 5.3 to reuse exercised LE_latent plumbing. | 📋 PLANNED | — |
+| 5 | 5.6 | **Coastal sea-breeze canonical (system integration gate before Phase 6)** | Two-tile 24-h canonical (`UCMBostonCoastal24h/`); prescribed-SST water tile type via `tile_type ∈ {urban, rural, water}` column in `building_layout.csv`; SST override bypasses Newton for water tiles. Assertions: (1) land tiles UHI ≥ 1 K, (2) water tile within 0.5 K of prescribed SST, (3) **sea-breeze reversal** 12:00–16:00 local time (near-surface wind at coast flips from offshore to onshore). Covers all of 5.3–5.5 physics. | 📋 PLANNED | — |
 | 6 | 6.1 | Tree CSV + tree drag | `tree_layout.csv` reader (per-cell LAD, tree height, crown base height). Tree drag added as new branch in `apply_ucm_momentum_drag_to_source` with Cd_leaf × LAD × ⃒U⃒² formulation, LAD-profile-weighted vertical distribution. Canonical `UCMBostonTrees/` with tree-lined boulevard. | 🔲 PLANNED | — |
 | 6 | 6.2a | **Tree radiation — Beer-Lambert SW attenuation only** | `SW_below = SW_above × exp(-k · LAD · dz)` propagated through canopy layers onto wall/roof/road facets. **Keep 3-var Newton — no crown facet in SEB yet.** Diurnal shading canonical demonstrates tree-shaded T_skin_road reduction. | 🔲 PLANNED | — |
 | 6 | 6.2b | **Tree radiation — Crown facet in SEB (4-var Newton)** | Add T_crown state MF. Extend Newton residual + Jacobian to 4×4. Full LW crown radiation via radiosity (reuses 5.1c infrastructure). Rerun full 3.5a-hotfix regression battery. **High risk: SEB dimensionality change.** | 🔲 PLANNED | — |
@@ -695,7 +697,21 @@ Per-step banner (gated on `ucm_debug = 1`, IO rank only):
 3. **Advanced HVAC** (VRF, cool storage, radiant): COP-only model is the target simplification.
 4. **Feedback on setpoint**: setpoint is static per profile; adaptive comfort model is out of scope.
 
+### Phase 5.3–5.6 Rescoping (2026-07-29)
+
+Phases 5.4–5.6 were rescoped during Phase 5.2 D10 diurnal debugging to address two production issues identified in the HVAC/occupancy CSV infrastructure:
+
+(a) **CSV re-parsing overhead and MPI safety:** The HVAC and occupancy CSVs are currently re-parsed every timestep via `UCMOccupancyReader::get_fraction()`, requiring a workaround `ParallelDescriptor::Barrier()` to prevent MPI rank drift from asynchronous `std::ifstream`. This is a correctness liability for large MPI runs.
+
+(b) **Per-cell hvac_profile_id dispatch gap:** The `hvac_profile_id` column in `building_layout.csv` is parsed into `hvac_profile_id_map` iMultiFab, but the HVAC kernel does not index it — every cell uses `hvac_profiles[0]`, losing the per-cell profile selectivity.
+
+**Phase 5.4 (HVAC hardening):** Hoist the CSV readers into `UCMLayer` construction so CSVs load once per run. Dispatch per-cell via `amrex::Gpu::DeviceVector` capture on the device side, eliminating both the re-parsing overhead and the dispatch gap. This unblocks Phase 6.2b (per-building energy models with isolated thermal zones).
+
+**Phase 5.5 (HVAC extended physics):** After Phase 5.3 (green roofs) land, extend HVAC physics: split rejection into `H_sensible` and `LE_latent` streams (separate face destinations), add selectable rejection facet (roof / ground-level diffuse / distributed), and optional COP degradation with outdoor air temperature. This physics extension is scheduled after 5.3 so its latent-heat contributions can reuse the `LE_latent` plumbing already exercised by green-roof evapotranspiration.
+
+**Phase 5.6 (Coastal sea-breeze canonical):** The original Phase 5.4 coastal canonical moves to Phase 5.6, becoming the pre-Phase-6 system-integration gate covering all of 5.3–5.5 physics together.
+
 ### Phase 5 Status
 
-**Phase 5 status (as of 2026-07-28):** 5.1a (PR #258), 5.1b (PR #259), 5.1c (PR #260), 5.2 (PR #261) complete. 5.3, 5.4 planned.
+**Phase 5 status (as of 2026-07-29):** 5.1a (PR #258), 5.1b (PR #259), 5.1c (PR #260), 5.2 (PR #261) complete. 5.3 in progress. 5.4–5.6 planned.
 
