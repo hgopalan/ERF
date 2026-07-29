@@ -365,9 +365,29 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
     }
 
+    // Phase 5.3: Green roof and permeable pavement state fields
+    fields.soil_moisture_roof = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.soil_moisture_road = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.LE_green_roof_diag = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.LE_permeable_road_diag = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.3][allocate_ucm_fields] soil_moisture_roof, soil_moisture_road, "
+                << "LE_green_roof_diag, LE_permeable_road_diag: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
+    // Phase 5.3: Green roof and permeable pavement masks (iMultiFab for integer flags)
+    int ncomp_i = 1;  // integer components
+    fields.is_green_roof = std::make_unique<iMultiFab>(ba, dm, ncomp_i, ngrow);
+    fields.is_permeable_road = std::make_unique<iMultiFab>(ba, dm, ncomp_i, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.3][allocate_ucm_fields] is_green_roof (iMultiFab), is_permeable_road (iMultiFab): "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp_i << "\n";
+    }
+
     // Summary message
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
-        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 39 MultiFabs on UCM grid "
+        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 45 MultiFabs on UCM grid "
                 << "at lev=" << lev << "\n";
     }
 
@@ -444,6 +464,14 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.ah_profile_id->setVal(0);
     fields.hvac_profile_id_map->setVal(0);  // Phase 5.2: zero out HVAC profile ID
     fields.Q_HVAC_diag->setVal(0.0);         // Phase 5.2: zero out HVAC diagnostic
+
+    // Phase 5.3: Initialize green roof and permeable pavement state
+    fields.soil_moisture_roof->setVal(params.green_roof_soil_capacity_m);  // Initialize to full capacity
+    fields.soil_moisture_road->setVal(params.permeable_road_soil_capacity_m);
+    fields.LE_green_roof_diag->setVal(0.0);
+    fields.LE_permeable_road_diag->setVal(0.0);
+    fields.is_green_roof->setVal(0);  // Default: no green roofs
+    fields.is_permeable_road->setVal(0);  // Default: no permeable roads
 
     // Get const references to the broadcast data
     const auto& rows = building_reader.rows();
@@ -933,6 +961,20 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
         Print() << "[UCM][5.2][fill_ucm_fields_homogeneous] Q_HVAC_diag = 0.0 W/m^2\n";
     }
 
+    // Phase 5.3: Green roof and permeable pavement state
+    fields.soil_moisture_roof->setVal(params.green_roof_soil_capacity_m);
+    fields.soil_moisture_road->setVal(params.permeable_road_soil_capacity_m);
+    fields.LE_green_roof_diag->setVal(0.0);
+    fields.LE_permeable_road_diag->setVal(0.0);
+    fields.is_green_roof->setVal(0);
+    fields.is_permeable_road->setVal(0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][5.3][fill_ucm_fields_homogeneous] soil_moisture_roof = " 
+                << params.green_roof_soil_capacity_m << " m³/m³, soil_moisture_road = "
+                << params.permeable_road_soil_capacity_m << " m³/m³\n";
+        Print() << "[UCM][5.3][fill_ucm_fields_homogeneous] is_green_roof = 0, is_permeable_road = 0\n";
+    }
+
     // Note: z0 and d_disp are filled by fill_ucm_z0_and_disp, not here
 }
 
@@ -1204,6 +1246,44 @@ bool UCMFields::all_allocated() const
     if (!Q_HVAC_diag) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][5.2][all_allocated] MISSING: Q_HVAC_diag\n";
+        }
+        result = false;
+    }
+
+    // Phase 5.3: Green roof and permeable pavement state
+    if (!soil_moisture_roof) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.3][all_allocated] MISSING: soil_moisture_roof\n";
+        }
+        result = false;
+    }
+    if (!soil_moisture_road) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.3][all_allocated] MISSING: soil_moisture_road\n";
+        }
+        result = false;
+    }
+    if (!LE_green_roof_diag) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.3][all_allocated] MISSING: LE_green_roof_diag\n";
+        }
+        result = false;
+    }
+    if (!LE_permeable_road_diag) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.3][all_allocated] MISSING: LE_permeable_road_diag\n";
+        }
+        result = false;
+    }
+    if (!is_green_roof) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.3][all_allocated] MISSING: is_green_roof\n";
+        }
+        result = false;
+    }
+    if (!is_permeable_road) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.3][all_allocated] MISSING: is_permeable_road\n";
         }
         result = false;
     }

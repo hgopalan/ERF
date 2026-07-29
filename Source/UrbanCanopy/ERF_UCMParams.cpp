@@ -233,5 +233,47 @@ void UCMParams::read_from_parmparse()
                         "See UCM_DEVELOPMENT.md for CSV format (D4).");
         }
     }
+
+    // Phase 5.3: Cool roof mode (CSV knob documentation)
+    pp.query("cool_roof_mode", cool_roof_mode_str);
+    if (cool_roof_mode_str == "off") {
+        cool_roof_mode = CoolRoofMode::Off;
+    } else if (cool_roof_mode_str == "recipe-only") {
+        cool_roof_mode = CoolRoofMode::RecipeOnly;
+    } else {
+        amrex::Abort("[UCM][5.3] Invalid erf.ucm.cool_roof_mode '" + cool_roof_mode_str +
+                     "'; expected 'off' or 'recipe-only'.");
+    }
+
+    // Phase 5.3: Green roof mode (soil conduction + latent heat)
+    pp.query("green_roof_mode", green_roof_mode_str);
+    if (green_roof_mode_str == "off") {
+        green_roof_mode = GreenRoofMode::Off;
+    } else if (green_roof_mode_str == "simple") {
+        green_roof_mode = GreenRoofMode::Simple;
+    } else {
+        amrex::Abort("[UCM][5.3] Invalid erf.ucm.green_roof_mode '" + green_roof_mode_str +
+                     "'; expected 'off' or 'simple'.");
+    }
+    pp.query("green_roof_r_stomatal_s_per_m", green_roof_r_stomatal_s_per_m);
+    pp.query("green_roof_thickness_m", green_roof_thickness_m);
+    pp.query("green_roof_k_therm", green_roof_k_therm);
+    pp.query("green_roof_rho_cp", green_roof_rho_cp);
+    pp.query("green_roof_soil_capacity_m", green_roof_soil_capacity_m);
+
+    // Phase 5.3: Permeable road mode (soil layer + moisture bucket)
+    pp.query("permeable_road_mode", permeable_road_mode_str);
+    if (permeable_road_mode_str == "off") {
+        permeable_road_mode = PermeableRoadMode::Off;
+    } else if (permeable_road_mode_str == "simple") {
+        permeable_road_mode = PermeableRoadMode::Simple;
+    } else {
+        amrex::Abort("[UCM][5.3] Invalid erf.ucm.permeable_road_mode '" + permeable_road_mode_str +
+                     "'; expected 'off' or 'simple'.");
+    }
+    pp.query("permeable_road_thickness_m", permeable_road_thickness_m);
+    pp.query("permeable_road_k_therm", permeable_road_k_therm);
+    pp.query("permeable_road_rho_cp", permeable_road_rho_cp);
+    pp.query("permeable_road_soil_capacity_m", permeable_road_soil_capacity_m);
 }
 

@@ -136,6 +136,51 @@ enum class HVACMode
 };
 
 /**
+ * @enum CoolRoofMode
+ * @brief Cool roof high-albedo/high-emissivity surface mode (Phase 5.3)
+ *
+ * Cool roofs are fully representable via existing per-cell `albedo_roof` and
+ * `emissivity_roof` fields. This enum is a documentation placeholder for the
+ * CSV knob recipe. No new physics code is required; users set albedo_roof ~0.85
+ * and emissivity_roof ~0.9 per cell via building_layout.csv.
+ */
+enum class CoolRoofMode
+{
+    Off = 0,      ///< No cool roof recipe (backward-compat default)
+    RecipeOnly = 1 ///< Documentation mode; no physics change (values via CSV knob)
+};
+
+/**
+ * @enum GreenRoofMode
+ * @brief Green roof soil + vegetation layer mode (Phase 5.3)
+ *
+ * Green roofs add a vegetated soil layer on top of existing roof slab.
+ * Reuses slab conduction TDMA (with green-roof-specific k_therm, rho_cp, thickness)
+ * and latent heat pathway (LE_green → LE_latent). Bulk stomatal resistance model
+ * for evapotranspiration (Ball-Berry / Jarvis deferred to Phase 6.3).
+ */
+enum class GreenRoofMode
+{
+    Off = 0,      ///< No green roof (backward-compat default)
+    Simple = 1    ///< Soil conduction + bulk stomatal resistance
+};
+
+/**
+ * @enum PermeableRoadMode
+ * @brief Permeable pavement soil + moisture bucket mode (Phase 5.3)
+ *
+ * Permeable pavements replace conventional road surface with soil layer.
+ * Reuses slab conduction TDMA (permeable-pavement-specific k_therm, rho_cp)
+ * and latent heat pathway (LE_perm → LE_latent). Soil moisture bucket
+ * depleted by evaporation; initially filled from per-cell CSV.
+ */
+enum class PermeableRoadMode
+{
+    Off = 0,      ///< No permeable pavement (backward-compat default)
+    Simple = 1    ///< Soil conduction + moisture bucket + evaporation
+};
+
+/**
  * @struct UCMParams
  * @brief Container for all SLUCM configuration parameters read from ParmParse
  *
@@ -376,6 +421,32 @@ struct UCMParams
     amrex::Real hvac_hysteresis_K = 2.0;             ///< setpoint hysteresis
     amrex::Real hvac_cop_default = 3.0;              ///< fallback COP if CSV missing
     amrex::Real hvac_setpoint_default_K = 297.15;    ///< 24 °C default
+
+    // =========================================================================
+    // Section 18: Phase 5.3 — Green roofs, cool roofs, permeable pavements (Contract #21 extended)
+    // =========================================================================
+    // Green roof: soil layer on roof, reuses slab conduction + LE_latent path.
+    // Permeable pavement: soil-water bucket on road, modified conduction.
+    // Cool roof: CSV knob only via albedo/emissivity (no new code).
+    // All default OFF for backward-compat bit-identity.
+
+    std::string cool_roof_mode_str = "off";          ///< "off" | "recipe-only" (documentation mode)
+    CoolRoofMode cool_roof_mode = CoolRoofMode::Off;
+
+    std::string green_roof_mode_str = "off";         ///< "off" | "simple"
+    GreenRoofMode green_roof_mode = GreenRoofMode::Off;
+    amrex::Real green_roof_r_stomatal_s_per_m = 100.0;  ///< bulk stomatal resistance [s/m]
+    amrex::Real green_roof_thickness_m = 0.1;        ///< soil layer depth [m]
+    amrex::Real green_roof_k_therm = 0.5;            ///< thermal conductivity [W/m/K]
+    amrex::Real green_roof_rho_cp = 1.8e6;           ///< volumetric heat capacity [J/m³/K]
+    amrex::Real green_roof_soil_capacity_m = 0.10;   ///< water bucket capacity [m H2O]
+
+    std::string permeable_road_mode_str = "off";     ///< "off" | "simple"
+    PermeableRoadMode permeable_road_mode = PermeableRoadMode::Off;
+    amrex::Real permeable_road_thickness_m = 0.2;    ///< soil layer depth [m]
+    amrex::Real permeable_road_k_therm = 0.8;        ///< thermal conductivity [W/m/K]
+    amrex::Real permeable_road_rho_cp = 1.6e6;       ///< volumetric heat capacity [J/m³/K]
+    amrex::Real permeable_road_soil_capacity_m = 0.20; ///< water bucket capacity [m H2O]
 
     // =========================================================================
     // Public methods
