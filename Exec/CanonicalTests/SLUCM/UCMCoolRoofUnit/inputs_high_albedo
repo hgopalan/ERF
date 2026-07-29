@@ -68,7 +68,7 @@ erf.ucm.emissivity_wall       = 0.90
 erf.ucm.emissivity_road       = 0.94
 erf.ucm.AH_uniform_Wm2        = 0.0
 erf.ucm.building_layout_csv_path  = "building_layout.csv"
-erf.ucm.material_library_csv_path = "materials.csv"
+erf.ucm.material_library_csv_path = "materials_high_albedo.csv"
 
 erf.ucm.use_prescribed_radiation = true
 erf.ucm.lat_deg            = 42.36

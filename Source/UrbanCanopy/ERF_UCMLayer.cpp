@@ -1007,6 +1007,11 @@ void UCMLayer::advance(UCMFields& fields,
         const amrex::Real r_stomatal = m_params.green_roof_r_stomatal_s_per_m;
         const amrex::Real W_max_roof = m_params.green_roof_soil_capacity_m;
 
+        // Phase 5.3-hotfix1: if q_atm_ref was never written (use_moisture=false),
+        // fall back to a canonical dry-air value so LE_green is deterministic.
+        const bool q_ref_valid = (q_atm_lowest.boxArray().size() > 0);
+        const amrex::Real q_canyon_fallback = 0.005;  // 5 g/kg, typical summer LST
+
         for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU()); 
              mfi.isValid(); ++mfi) 
         {
@@ -1030,7 +1035,8 @@ void UCMLayer::advance(UCMFields& fields,
                 if (is_green_a(i,j,0) == 0) return;
 
                 // Use atmospheric humidity as proxy for canyon air humidity
-                amrex::Real q_canyon = q_atm_a(i,j,0);
+                // Phase 5.3-hotfix1: use fallback if q_atm_ref was never initialized
+                amrex::Real q_canyon = q_ref_valid ? q_atm_a(i,j,0) : q_canyon_fallback;
                 q_canyon = amrex::max(amrex::min(q_canyon, 0.02), 0.0);  // Physical bounds
 
                 const amrex::Real LE_green = compute_green_roof_LE(
@@ -1048,6 +1054,18 @@ void UCMLayer::advance(UCMFields& fields,
                 // Update soil moisture bucket
                 update_green_roof_moisture(W_roof_a(i,j,0), LE_green, dt, W_max_roof);
             });
+        }
+
+        // Phase 5.3-hotfix1: print banner once per run (gated on static bool)
+        static bool printed_q_ref_banner = false;
+        if (m_params.ucm_debug && !printed_q_ref_banner) {
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "[UCM][5.3][green-roof] q_atm_ref "
+                               << (q_ref_valid ? "valid (from moisture solver)"
+                                               : "invalid; using fallback q=0.005 kg/kg")
+                               << "\n";
+                printed_q_ref_banner = true;
+            }
         }
 
         // Phase 5.2-hotfix: collectives OUTSIDE IOProcessor guard
@@ -1072,6 +1090,11 @@ void UCMLayer::advance(UCMFields& fields,
         const amrex::Real r_soil = 200.0;  // Bare soil surface resistance [s/m]
         const amrex::Real W_max_road = m_params.permeable_road_soil_capacity_m;
 
+        // Phase 5.3-hotfix1: if q_atm_ref was never written (use_moisture=false),
+        // fall back to a canonical dry-air value so LE_perm is deterministic.
+        const bool q_ref_valid = (q_atm_lowest.boxArray().size() > 0);
+        const amrex::Real q_canyon_fallback = 0.005;  // 5 g/kg, typical summer LST
+
         for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU()); 
              mfi.isValid(); ++mfi) 
         {
@@ -1093,7 +1116,8 @@ void UCMLayer::advance(UCMFields& fields,
                 if (is_perm_a(i,j,0) == 0) return;
 
                 // Use atmospheric humidity as proxy for canyon air humidity
-                amrex::Real q_canyon = q_atm_a(i,j,0);
+                // Phase 5.3-hotfix1: use fallback if q_atm_ref was never initialized
+                amrex::Real q_canyon = q_ref_valid ? q_atm_a(i,j,0) : q_canyon_fallback;
                 q_canyon = amrex::max(amrex::min(q_canyon, 0.02), 0.0);  // Physical bounds
 
                 const amrex::Real LE_perm = compute_permeable_road_LE(
@@ -1111,6 +1135,18 @@ void UCMLayer::advance(UCMFields& fields,
                 // Update soil moisture bucket
                 update_permeable_road_moisture(W_road_a(i,j,0), LE_perm, dt, W_max_road);
             });
+        }
+
+        // Phase 5.3-hotfix1: print banner once per run (gated on static bool)
+        static bool printed_q_ref_banner_perm = false;
+        if (m_params.ucm_debug && !printed_q_ref_banner_perm) {
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "[UCM][5.3][permeable-road] q_atm_ref "
+                               << (q_ref_valid ? "valid (from moisture solver)"
+                                               : "invalid; using fallback q=0.005 kg/kg")
+                               << "\n";
+                printed_q_ref_banner_perm = true;
+            }
         }
 
         // Phase 5.2-hotfix: collectives OUTSIDE IOProcessor guard
@@ -1202,11 +1238,9 @@ void UCMLayer::advance(UCMFields& fields,
 
            const amrex::Real H_lumped = Hr + Hw + Hf;
 
-           h_sens_a(i,j,0) = H_lumped;
+          h_sens_a(i,j,0) = H_lumped;
        });
     }
-
-    fields.LE_latent->setVal(0.0);
 
     // ========================================================================
     // Step 4: Debug trace
