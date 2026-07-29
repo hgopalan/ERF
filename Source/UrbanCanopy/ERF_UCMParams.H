@@ -196,6 +196,19 @@ enum class PermeableRoadMode
 };
 
 /**
+ * @enum InterfaceMode
+ * @brief Flux interface mode for urban/non-urban blending (Phase 5.6)
+ *
+ * Determines whether MOST and UCM fluxes are gated by a binary is_urban mask
+ * (Phase 4.1 sharp interface) or blended using fractional urban coverage f_urb.
+ */
+enum class InterfaceMode
+{
+    Binary = 0,   ///< Phase 4.1 sharp mask (default): MOST where is_urban=0, UCM where is_urban=1
+    Blended = 1   ///< Phase 5.6 f_urb blending: MOST scaled by (1-f_urb), UCM scaled by f_urb
+};
+
+/**
  * @struct UCMParams
  * @brief Container for all SLUCM configuration parameters read from ParmParse
  *
@@ -463,6 +476,17 @@ struct UCMParams
     amrex::Real permeable_road_k_therm = 0.8;        ///< thermal conductivity [W/m/K]
     amrex::Real permeable_road_rho_cp = 1.6e6;       ///< volumetric heat capacity [J/m³/K]
     amrex::Real permeable_road_soil_capacity_m = 0.20; ///< water bucket capacity [m H2O]
+
+    // =========================================================================
+    // Section 19: Phase 5.6 — Fractional urban coverage (f_urb) blending (Contract #10 revised)
+    // =========================================================================
+    // Controls how MOST and UCM fluxes are combined at the ATM/UCM interface.
+    // 'binary' (default, Phase 4.1): Sharp mask—MOST at is_urban=0, UCM at is_urban=1.
+    // 'blended' (Phase 5.6): Fractional blending—MOST scaled by (1-f_urb), UCM by f_urb.
+    // Both f_urb_atm and is_urban_atm are pre-computed; mode selects which is used.
+
+    std::string interface_mode_str = "binary";       ///< "binary" | "blended"
+    InterfaceMode interface_mode = InterfaceMode::Binary;
 
     // =========================================================================
     // Public methods

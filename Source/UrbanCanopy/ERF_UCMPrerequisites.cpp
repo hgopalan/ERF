@@ -287,6 +287,10 @@ void check_ucm_prerequisites(const UCMParams& params,
         amrex::Print() << "[UCM]   hvac_cop_default = " << params.hvac_cop_default << "\n";
         amrex::Print() << "[UCM]   hvac_setpoint_default_K = " << params.hvac_setpoint_default_K << " K\n";
     }
+
+    // Phase 5.6 — Fractional urban coverage (f_urb) blending
+    amrex::Print() << "[UCM]   --- Phase 5.6 Flux Interface Blending ---\n";
+    amrex::Print() << "[UCM]   interface_mode = " << params.interface_mode_str << "\n";
     
     amrex::Print() << "[UCM] =========================================================\n";
     amrex::Print() << "\n";

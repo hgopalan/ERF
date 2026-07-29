@@ -276,5 +276,15 @@ void UCMParams::read_from_parmparse()
     pp.query("permeable_road_k_therm", permeable_road_k_therm);
     pp.query("permeable_road_rho_cp", permeable_road_rho_cp);
     pp.query("permeable_road_soil_capacity_m", permeable_road_soil_capacity_m);
-}
 
+    // Phase 5.6: Interface mode (f_urb blending)
+    pp.query("interface_mode", interface_mode_str);
+    if (interface_mode_str == "binary") {
+       interface_mode = InterfaceMode::Binary;
+    } else if (interface_mode_str == "blended") {
+       interface_mode = InterfaceMode::Blended;
+    } else {
+       amrex::Abort("[UCM][5.6] Invalid erf.ucm.interface_mode '" + interface_mode_str +
+                    "'; expected 'binary' or 'blended'.");
+    }
+}
