@@ -1112,10 +1112,13 @@ void UCMLayer::advance(UCMFields& fields,
                     Q_roof_a(i,j,0) = Q_HVAC_sensible;
                     Q_wall_a(i,j,0) = 0.0;
                     Q_road_a(i,j,0) = 0.0;
+                    // For roof: add to AH (existing pathway, unchanged for backward compat)
+                    AH_a(i,j,0) += Q_HVAC_sensible;
                 } else if (rej_facet == 1) {  // road
                     Q_roof_a(i,j,0) = 0.0;
                     Q_wall_a(i,j,0) = 0.0;
                     Q_road_a(i,j,0) = Q_HVAC_sensible;
+                    // For road: sensible heat goes directly to road (not to AH, to avoid double-counting)
                 } else if (rej_facet == 2) {  // distributed
                     // Split evenly across roof, walls, and road weighted by facet area fractions
                     // Roof area fraction = plan_area_frac
@@ -1126,12 +1129,11 @@ void UCMLayer::advance(UCMFields& fields,
                     Q_roof_a(i,j,0) = Q_per_facet;
                     Q_wall_a(i,j,0) = Q_per_facet;
                     Q_road_a(i,j,0) = Q_per_facet;
+                    // For distributed: sensible heat goes directly to facets (not to AH, to avoid double-counting)
                 }
 
-                // Phase 5.5: Accumulate total sensible heat into AH (for atmospheric injection)
-                AH_a(i,j,0) += Q_HVAC_sensible;
-
                 // Phase 5.5: Accumulate latent heat into LE_latent (canyon moisture budget)
+                // Note: For all rejection_facet cases, latent heat always goes to LE_latent
                 LE_a(i,j,0) += Q_HVAC_latent;
             });
         }
@@ -1140,7 +1142,9 @@ void UCMLayer::advance(UCMFields& fields,
         // after the ParallelFor (to avoid race conditions on device)
         amrex::MultiFab::Add(*fields.H_wall, *fields.Q_HVAC_wall_diag, 0, 0, 1, 0);
         amrex::MultiFab::Add(*fields.H_road, *fields.Q_HVAC_road_diag, 0, 0, 1, 0);
-        // Note: Q_HVAC_roof_diag is already in AH via the ParallelFor accumulation
+        // Phase 5.5: For roof case, Q_HVAC_roof_diag is tracked in AH; for distributed/road,
+        // the roof portion is added to H_roof via Q_HVAC_roof_diag
+        amrex::MultiFab::Add(*fields.H_roof, *fields.Q_HVAC_roof_diag, 0, 0, 1, 0);
 
         // Collectives OUTSIDE IOProcessor guard (Bug #9 rule)
         if (m_params.ucm_debug) {
