@@ -153,20 +153,56 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
         const std::string expected_header_physical_old_hvac = "x_m,y_m,bldg_id,height_m,plan_area_frac,W_road_m,W_roof_m,"
                                                              "roof_mat_id,wall_mat_id,road_mat_id,orientation_deg,ah_profile_id,is_urban,hvac_profile_id";
 
+        // Phase 5.3: accept headers that are a known base prefix followed by
+        // optional whitelisted trailing columns (is_green_roof, is_permeable_road,
+        // soil_moisture_init_m3_per_m3).  Order in the trailing tokens is not
+        // enforced here, but the row parser reads them positionally so CSVs should
+        // list them in that order.
+        const std::set<std::string> phase53_trailing_whitelist = {
+            "is_green_roof", "is_permeable_road", "soil_moisture_init_m3_per_m3"
+        };
+
+        // Returns true if header_no_spaces equals 'base_prefix' exactly, or starts
+        // with 'base_prefix,' and every trailing token is in the whitelist.
+        // Aborts with a specific message if an unknown trailing token is found.
+        // Sets has_AH_Wm2 and has_hvac_profile_id on a successful match.
+        auto try_prefix = [&](const std::string& base_header, bool ah, bool hvac) -> bool {
+            std::string prefix = remove_spaces(base_header);
+            if (header_no_spaces == prefix) {
+                has_AH_Wm2 = ah;
+                has_hvac_profile_id = hvac;
+                return true;
+            }
+            if (header_no_spaces.size() > prefix.size() &&
+                header_no_spaces.compare(0, prefix.size(), prefix) == 0 &&
+                header_no_spaces[prefix.size()] == ',') {
+                std::string trailing = header_no_spaces.substr(prefix.size() + 1);
+                std::istringstream ts(trailing);
+                std::string tok;
+                while (std::getline(ts, tok, ',')) {
+                    if (!tok.empty() &&
+                        phase53_trailing_whitelist.find(tok) == phase53_trailing_whitelist.end()) {
+                        std::ostringstream oss;
+                        oss << "[UCM][5.3][UCMBuildingLayoutReader::read_and_broadcast] "
+                            << "CSV header has unknown trailing column: \"" << tok << "\"\n"
+                            << "  Allowed trailing columns: is_green_roof, is_permeable_road,"
+                            << " soil_moisture_init_m3_per_m3\n"
+                            << "  Got: " << header_line;
+                        amrex::Abort(oss.str());
+                    }
+                }
+                has_AH_Wm2 = ah;
+                has_hvac_profile_id = hvac;
+                return true;
+            }
+            return false;
+        };
+
         if (is_physical_mode) {
-            if (header_no_spaces == remove_spaces(expected_header_physical_new_hvac)) {
-                has_AH_Wm2 = true;
-                has_hvac_profile_id = true;
-            } else if (header_no_spaces == remove_spaces(expected_header_physical_old_hvac)) {
-                has_AH_Wm2 = false;
-                has_hvac_profile_id = true;
-            } else if (header_no_spaces == remove_spaces(expected_header_physical_new)) {
-                has_AH_Wm2 = true;
-                has_hvac_profile_id = false;
-            } else if (header_no_spaces == remove_spaces(expected_header_physical_old)) {
-                has_AH_Wm2 = false;
-                has_hvac_profile_id = false;
-            } else {
+            if (!try_prefix(expected_header_physical_new_hvac, true,  true)  &&
+                !try_prefix(expected_header_physical_old_hvac, false, true)  &&
+                !try_prefix(expected_header_physical_new,      true,  false) &&
+                !try_prefix(expected_header_physical_old,      false, false)) {
                 std::ostringstream oss;
                 oss << "[UCM][5.2][UCMBuildingLayoutReader::read_and_broadcast] "
                     << "CSV header mismatch (physical mode).\n"
@@ -183,19 +219,10 @@ void UCMBuildingLayoutReader::read_and_broadcast(const std::string& path,
             }
         } else {
             // Legacy mode
-            if (header_no_spaces == remove_spaces(expected_header_legacy_new_hvac)) {
-                has_AH_Wm2 = true;
-                has_hvac_profile_id = true;
-            } else if (header_no_spaces == remove_spaces(expected_header_legacy_old_hvac)) {
-                has_AH_Wm2 = false;
-                has_hvac_profile_id = true;
-            } else if (header_no_spaces == remove_spaces(expected_header_legacy_new)) {
-                has_AH_Wm2 = true;
-                has_hvac_profile_id = false;
-            } else if (header_no_spaces == remove_spaces(expected_header_legacy_old)) {
-                has_AH_Wm2 = false;
-                has_hvac_profile_id = false;
-            } else {
+            if (!try_prefix(expected_header_legacy_new_hvac, true,  true)  &&
+                !try_prefix(expected_header_legacy_old_hvac, false, true)  &&
+                !try_prefix(expected_header_legacy_new,      true,  false) &&
+                !try_prefix(expected_header_legacy_old,      false, false)) {
                 std::ostringstream oss;
                 oss << "[UCM][5.2][UCMBuildingLayoutReader::read_and_broadcast] "
                     << "CSV header mismatch (legacy mode).\n"
