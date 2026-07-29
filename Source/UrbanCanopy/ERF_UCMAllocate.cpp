@@ -560,6 +560,14 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
         auto hvac_profile_id_arr = fields.hvac_profile_id_map->array(mfi);  // Phase 5.2
         auto AH_Wm2_ucm_arr     = fields.AH_Wm2_ucm->array(mfi);  // Phase 2.9
 
+        // Phase 5.3: Green roof and permeable pavement fields
+        auto is_green_roof_arr = fields.is_green_roof->array(mfi);
+        auto is_permeable_road_arr = fields.is_permeable_road->array(mfi);
+        auto soil_moisture_roof_arr = fields.soil_moisture_roof->array(mfi);
+        auto soil_moisture_road_arr = fields.soil_moisture_road->array(mfi);
+        auto LE_green_roof_diag_arr = fields.LE_green_roof_diag->array(mfi);
+        auto LE_permeable_road_diag_arr = fields.LE_permeable_road_diag->array(mfi);
+
         for (int j_ucm = bx.smallEnd(1); j_ucm <= bx.bigEnd(1); ++j_ucm) {
             for (int i_ucm = bx.smallEnd(0); i_ucm <= bx.bigEnd(0); ++i_ucm) {
 
@@ -632,6 +640,19 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                     ah_profile_id_arr(iv, 0)  = row.ah_profile_id;
                     hvac_profile_id_arr(iv, 0) = row.hvac_profile_id;  // Phase 5.2
 
+                    // Phase 5.3: Green roof and permeable pavement masks + initial soil moisture
+                    is_green_roof_arr(iv, 0) = row.is_green_roof;
+                    is_permeable_road_arr(iv, 0) = row.is_permeable_road;
+                    // Initialize soil moisture: use CSV value if provided, else use params defaults
+                    soil_moisture_roof_arr(iv, 0) = (row.soil_moisture_init_m3_per_m3 > 0.0) 
+                        ? row.soil_moisture_init_m3_per_m3 
+                        : params.green_roof_soil_capacity_m;
+                    soil_moisture_road_arr(iv, 0) = (row.soil_moisture_init_m3_per_m3 > 0.0) 
+                        ? row.soil_moisture_init_m3_per_m3 
+                        : params.permeable_road_soil_capacity_m;
+                    LE_green_roof_diag_arr(iv, 0) = 0.0;
+                    LE_permeable_road_diag_arr(iv, 0) = 0.0;
+
                     // Phase 2.9: per-cell AH override from CSV
                     AH_Wm2_ucm_arr(iv, 0) = row.AH_Wm2;
                 } else {
@@ -655,6 +676,14 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
                     plan_area_frac_arr(iv, 0) = 0.0;
                     ah_profile_id_arr(iv, 0)  = 0;
                     hvac_profile_id_arr(iv, 0) = 0;  // Phase 5.2
+                    
+                    // Phase 5.3: Non-urban cells get no green roofs or permeable roads
+                    is_green_roof_arr(iv, 0) = 0;
+                    is_permeable_road_arr(iv, 0) = 0;
+                    soil_moisture_roof_arr(iv, 0) = 0.0;
+                    soil_moisture_road_arr(iv, 0) = 0.0;
+                    LE_green_roof_diag_arr(iv, 0) = 0.0;
+                    LE_permeable_road_diag_arr(iv, 0) = 0.0;
                 }
 
                 // Initial temperatures (same for urban and non-urban).
