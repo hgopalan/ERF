@@ -49,8 +49,38 @@
 #include <UrbanCanopy/ERF_UCMWindExtract.H>
 #include <AMReX_Geometry.H>
 #include <UrbanCanopy/ERF_UCMCloudCSVReader.H>
+#include <UrbanCanopy/ERF_UCMHVACReader.H>
+#include <UrbanCanopy/ERF_UCMOccupancyReader.H>
+#include <AMReX_Gpu.H>
 #include <memory>
 
+/**
+ * @struct HVACProfileDevice
+ * @brief POD struct for HVAC profile on device (Phase 5.4)
+ *
+ * Device-safe variant of HVACProfile from ERF_UCMHVACReader.H.
+ * No std::string (Contract #22 compliance for GPU capture).
+ */
+struct HVACProfileDevice
+{
+    int         id;                    ///< hvac_profile_id
+    amrex::Real t_setpoint_K;          ///< Setpoint temperature [K]
+    amrex::Real cop;                   ///< Coefficient of performance [-]
+    int         occupancy_profile_id;  ///< Link to occupancy profile
+};
+
+/**
+ * @struct OccupancyProfileDevice
+ * @brief POD struct for occupancy profile on device (Phase 5.4)
+ *
+ * Device-safe variant of OccupancyProfile from ERF_UCMOccupancyReader.H.
+ * Fixed-size array (no std::array indirection).
+ */
+struct OccupancyProfileDevice
+{
+    int         id;                      ///< occupancy_profile_id
+    amrex::Real hourly_frac[24];         ///< Occupancy fraction per hour [0–1]
+};
 
 /**
  * @class UCMLayer
@@ -173,6 +203,18 @@ private:
     // Phase 4.2: cloud CSV reader (lazy-initialized on first advance())
     std::unique_ptr<UCMCloudCSVReader> m_cloud_csv_reader;
     bool m_cloud_csv_load_attempted = false;
+
+    // Phase 5.4: cached HVAC and occupancy readers (one-time I/O at construction)
+    std::unique_ptr<UCMHVACReader>      m_hvac_reader;
+    std::unique_ptr<UCMOccupancyReader> m_occupancy_reader;
+
+    // Phase 5.4: device-side profile tables for per-cell dispatch (Contract #22)
+    amrex::Gpu::DeviceVector<HVACProfileDevice>      m_hvac_profiles_dev;
+    amrex::Gpu::DeviceVector<OccupancyProfileDevice> m_occupancy_profiles_dev;
+
+    // Profile counts for device-side lookup
+    int m_n_hvac_profiles     = 0;
+    int m_n_occupancy_profiles = 0;
 };
 
 #endif  // ERF_UCM_LAYER_H
