@@ -37,7 +37,11 @@
 // ============================================================================
 
 UCMLayer::UCMLayer(const UCMParams& params, int lev)
-    : m_params(params), m_warn_radiation_placeholder_printed(false)
+    : m_params(params),
+      m_lev(lev),
+      m_warn_radiation_placeholder_printed(false),
+      m_n_hvac_profiles(0),
+      m_n_occupancy_profiles(0)
 {
     if (lev != params.anchor_level) {
         std::string msg = std::string("[UCM] UCMLayer constructed at level ")
@@ -45,6 +49,58 @@ UCMLayer::UCMLayer(const UCMParams& params, int lev)
                         + std::to_string(params.anchor_level)
                         + ". Phase 1.3 supports only anchor_level=0.";
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(false, msg.c_str());
+    }
+
+    // Phase 5.4: Load HVAC and occupancy readers once at construction time
+    // (only when hvac_mode == Simple; Contract #21 compliance)
+    if (m_params.hvac_mode == HVACMode::Simple) {
+        m_hvac_reader = std::make_unique<UCMHVACReader>(m_params.hvac_csv_path);
+        m_occupancy_reader = std::make_unique<UCMOccupancyReader>(m_params.occupancy_csv_path);
+
+        // Convert host-side profiles to POD device structs
+        const auto& hvac_host = m_hvac_reader->get_all_profiles();
+        const auto& occ_host = m_occupancy_reader->get_all_profiles();
+
+        m_n_hvac_profiles = static_cast<int>(hvac_host.size());
+        m_n_occupancy_profiles = static_cast<int>(occ_host.size());
+
+        // Allocate device vectors
+        if (m_n_hvac_profiles > 0) {
+            m_hvac_profiles_dev.resize(m_n_hvac_profiles);
+            std::vector<HVACProfileDevice> hvac_pod(m_n_hvac_profiles);
+            for (int i = 0; i < m_n_hvac_profiles; ++i) {
+                hvac_pod[i].id = hvac_host[i].id;
+                hvac_pod[i].t_setpoint_K = hvac_host[i].t_setpoint_K;
+                hvac_pod[i].cop = hvac_host[i].cop;
+                hvac_pod[i].occupancy_profile_id = hvac_host[i].occupancy_profile_id;
+            }
+            amrex::Gpu::copy(amrex::Gpu::hostToDevice,
+                           hvac_pod.data(),
+                           hvac_pod.data() + m_n_hvac_profiles,
+                           m_hvac_profiles_dev.data());
+        }
+
+        if (m_n_occupancy_profiles > 0) {
+            m_occupancy_profiles_dev.resize(m_n_occupancy_profiles);
+            std::vector<OccupancyProfileDevice> occ_pod(m_n_occupancy_profiles);
+            for (int i = 0; i < m_n_occupancy_profiles; ++i) {
+                occ_pod[i].id = occ_host[i].id;
+                std::copy(occ_host[i].hourly_frac.begin(),
+                         occ_host[i].hourly_frac.end(),
+                         occ_pod[i].hourly_frac);
+            }
+            amrex::Gpu::copy(amrex::Gpu::hostToDevice,
+                           occ_pod.data(),
+                           occ_pod.data() + m_n_occupancy_profiles,
+                           m_occupancy_profiles_dev.data());
+        }
+
+        // Print one-time initialization banner
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][5.4][hvac-init] loaded N_hvac=" << m_n_hvac_profiles
+                          << " N_occ=" << m_n_occupancy_profiles
+                          << " profiles at construction\n";
+        }
     }
 }
 
@@ -963,76 +1019,83 @@ void UCMLayer::advance(UCMFields& fields,
     const bool hvac_on = (m_params.hvac_mode == HVACMode::Simple);
 
     if (hvac_on) {
-        const amrex::Real hyst_K = m_params.hvac_hysteresis_K;
-        const amrex::Real cop_default = m_params.hvac_cop_default;
+        // Phase 5.4: readers are cached at construction; no per-step I/O.
+        const int hour_of_day = static_cast<int>(
+            std::fmod((m_params.solar_time_start_s + time) / 3600.0, 24.0));
+        if (hour_of_day < 0 || hour_of_day >= 24) {
+            amrex::Abort("[UCM][5.4][hvac] hour_of_day out of range");
+        }
+
+        // Host-side scalar params to fall back to (per Phase 5.2 sanity)
+        const amrex::Real hyst_K       = m_params.hvac_hysteresis_K;
+        const amrex::Real cop_default  = m_params.hvac_cop_default;
         const amrex::Real setpt_default = m_params.hvac_setpoint_default_K;
 
-        const amrex::Real solar_time_local = m_params.solar_time_start_s + time;
-        const int hour_of_day = static_cast<int>(std::fmod(solar_time_local / 3600.0, 24.0));
+        // Device-side pointers into cached profile tables (Contract #22 compliant)
+        const HVACProfileDevice*      hvac_ptr = m_hvac_profiles_dev.dataPtr();
+        const OccupancyProfileDevice* occ_ptr  = m_occupancy_profiles_dev.dataPtr();
+        const int n_hvac = m_n_hvac_profiles;
+        const int n_occ  = m_n_occupancy_profiles;
 
-        UCMHVACReader hvac_reader(m_params.hvac_csv_path);
-        UCMOccupancyReader occ_reader(m_params.occupancy_csv_path);
-        const auto& hvac_profiles = hvac_reader.get_all_profiles();
-        const auto& occ_profiles = occ_reader.get_all_profiles();
-
-        amrex::Real T_setpt_resolved = setpt_default;
-        amrex::Real cop_resolved = cop_default;
-        int occ_id_resolved = 0;
-        if (hvac_profiles.size() > 0) {
-            T_setpt_resolved = hvac_profiles[0].t_setpoint_K;
-            cop_resolved = hvac_profiles[0].cop;
-            occ_id_resolved = hvac_profiles[0].occupancy_profile_id;
-        }
-
-        amrex::Real f_occ_resolved = 1.0;
-        for (const auto& p : occ_profiles) {
-            if (p.id == occ_id_resolved) {
-                if (hour_of_day >= 0 && hour_of_day < 24) {
-                    f_occ_resolved = p.hourly_frac[hour_of_day];
-                }
-                break;
-            }
-        }
-
-        amrex::ParallelDescriptor::Barrier();
-
-        if (m_params.ucm_debug && amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][5.2-diag-resolved] T_setpt=" << T_setpt_resolved
-                           << " cop=" << cop_resolved
-                           << " occ_id=" << occ_id_resolved
-                           << " f_occ=" << f_occ_resolved
-                           << " hour=" << hour_of_day << "\n";
-        }
-
-        for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU());
+             mfi.isValid(); ++mfi)
+        {
             const amrex::Box& bx = mfi.tilebox();
-            auto const H_wl_a = fields.H_wall->const_array(mfi);
-            auto const H_rf_a = fields.H_roof->const_array(mfi);
-            auto const T_can_a = fields.T_canyon_air->const_array(mfi);
-            auto const is_urb_a = fields.is_urban->const_array(mfi);
-            auto AH_a = fields.AH->array(mfi);
-            auto Q_diag_a = fields.Q_HVAC_diag->array(mfi);
+            auto const H_wl_a       = fields.H_wall->const_array(mfi);
+            auto const H_rf_a       = fields.H_roof->const_array(mfi);
+            auto const T_can_a      = fields.T_canyon_air->const_array(mfi);
+            auto const is_urb_a     = fields.is_urban->const_array(mfi);
+            auto const hvac_id_a    = fields.hvac_profile_id_map->const_array(mfi);  // Phase 5.4
+            auto       AH_a         = fields.AH->array(mfi);
+            auto       Q_diag_a     = fields.Q_HVAC_diag->array(mfi);
 
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
                 Q_diag_a(i,j,0) = 0.0;
                 if (is_urb_a(i,j,0) == 0) return;
 
+                const int hvac_id = hvac_id_a(i,j,0);
+
+                // Per-cell profile lookup on device — linear search, N small
+                amrex::Real T_setpt = setpt_default;
+                amrex::Real cop     = cop_default;
+                int         occ_id  = 0;
+                for (int p = 0; p < n_hvac; ++p) {
+                    if (hvac_ptr[p].id == hvac_id) {
+                        T_setpt = hvac_ptr[p].t_setpoint_K;
+                        cop     = hvac_ptr[p].cop;
+                        occ_id  = hvac_ptr[p].occupancy_profile_id;
+                        break;
+                    }
+                }
+
+                amrex::Real f_occ = 1.0;
+                for (int p = 0; p < n_occ; ++p) {
+                    if (occ_ptr[p].id == occ_id) {
+                        f_occ = occ_ptr[p].hourly_frac[hour_of_day];
+                        break;
+                    }
+                }
+
                 const amrex::Real Q_HVAC = compute_hvac_waste_heat(
                     H_wl_a(i,j,0), H_rf_a(i,j,0),
-                    T_can_a(i,j,0), T_setpt_resolved,
-                    hyst_K, cop_resolved, f_occ_resolved);
+                    T_can_a(i,j,0), T_setpt,
+                    hyst_K, cop, f_occ);
 
-                AH_a(i,j,0) += Q_HVAC;
-                Q_diag_a(i,j,0) = Q_HVAC;
+                AH_a(i,j,0)     += Q_HVAC;
+                Q_diag_a(i,j,0)  = Q_HVAC;
             });
         }
 
+        // Collectives OUTSIDE IOProcessor guard (Bug #9 rule)
         if (m_params.ucm_debug) {
             amrex::Real Q_HVAC_min = fields.Q_HVAC_diag->min(0, 0);
             amrex::Real Q_HVAC_max = fields.Q_HVAC_diag->max(0, 0);
             if (amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "[UCM][5.2][hvac] mode=simple hour=" << hour_of_day
-                               << " Q_HVAC=[" << Q_HVAC_min << ", " << Q_HVAC_max << "] W/m²\n";
+                amrex::Print() << "[UCM][5.4][hvac] mode=simple hour=" << hour_of_day
+                               << " N_hvac_profiles=" << n_hvac
+                               << " N_occ_profiles=" << n_occ
+                               << " Q_HVAC=[" << Q_HVAC_min << ", " << Q_HVAC_max
+                               << "] W/m²\n";
             }
         }
     }
