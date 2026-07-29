@@ -230,6 +230,8 @@ void apply_ucm_tendency_to_cc_source(
     const amrex::MultiFab&  S_old,
     const amrex::Geometry&  geom_atm,
     const amrex::iMultiFab& is_urban_atm,
+    const amrex::MultiFab*  f_urb_atm,
+    int                     interface_mode,
     bool                    use_facet3d_injection,
     bool                    use_gaussian_height_distribution,
     amrex::Real             height_std_threshold_m,
@@ -242,6 +244,8 @@ void apply_ucm_tendency_to_cc_source(
     // Phase 2.11-fix: feedback now split into per-process knobs.
     // Gate on heat feedback for warning; if both are zero, we return early.
     amrex::Real feedback = amrex::max(feedback_heat, feedback_moisture);
+    const bool have_f_urb = (f_urb_atm != nullptr);
+    const int interface_mode_c = interface_mode;
 
     // One-time warning if feedback is zero
     static bool warned_feedback_zero = false;
@@ -340,6 +344,9 @@ void apply_ucm_tendency_to_cc_source(
         auto const lam_f_a   = lambda_f_atm.const_array(mfi);
         auto const s_a       = S_old.const_array(mfi);
         auto const urban_a   = is_urban_atm.const_array(mfi);
+        amrex::Array4<const amrex::Real> f_urb_a = have_f_urb
+            ? f_urb_atm->const_array(mfi)
+            : amrex::Array4<const amrex::Real>{};
 
         amrex::Array4<const amrex::Real> le_a = have_le
             ? LE_atm->const_array(mfi)
@@ -420,12 +427,15 @@ void apply_ucm_tendency_to_cc_source(
                     const amrex::Real dtheta_road = feedback_heat_c * rho_safe * theta_tend_road;
                     const amrex::Real dtheta_wall = feedback_heat_c * rho_safe * theta_tend_wall;
                     const amrex::Real dtheta_roof = feedback_heat_c * rho_safe * theta_tend_roof;
-                    cc_src_a(i, j, k, RhoTheta_comp) += dtheta_road + dtheta_wall + dtheta_roof;
+                    const amrex::Real scale = (interface_mode_c == 1 && have_f_urb)
+                                              ? f_urb_a(i,j,klo_c)
+                                              : ((urban_a(i, j, klo_c) >= 0.01) ? 1.0 : 0.0);
+                    cc_src_a(i, j, k, RhoTheta_comp) += scale * dtheta_road + scale * dtheta_wall + scale * dtheta_roof;
 
                     if (have_le_c && k == klo_c) {
                         const amrex::Real LE_sfc = le_a(i, j, klo_c);
                         if (LE_sfc != 0.0) {
-                            cc_src_a(i, j, k, RhoQ1_comp) += feedback_moisture_c * rho_safe * (LE_sfc / L_v / dz_local);
+                            cc_src_a(i, j, k, RhoQ1_comp) += scale * feedback_moisture_c * rho_safe * (LE_sfc / L_v / dz_local);
                         }
                     }
 
@@ -487,12 +497,15 @@ void apply_ucm_tendency_to_cc_source(
                     const amrex::Real dtheta_road = feedback_heat_c * rho_safe * theta_tend_road;
                     const amrex::Real dtheta_wall = feedback_heat_c * rho_safe * theta_tend_wall;
                     const amrex::Real dtheta_roof = feedback_heat_c * rho_safe * theta_tend_roof;
-                    cc_src_a(i, j, k, RhoTheta_comp) += dtheta_road + dtheta_wall + dtheta_roof;
+                    const amrex::Real scale = (interface_mode_c == 1 && have_f_urb)
+                                              ? f_urb_a(i,j,klo_c)
+                                              : ((urban_a(i, j, klo_c) >= 0.01) ? 1.0 : 0.0);
+                    cc_src_a(i, j, k, RhoTheta_comp) += scale * dtheta_road + scale * dtheta_wall + scale * dtheta_roof;
 
                     if (have_le_c && k == klo_c) {
                         const amrex::Real LE_sfc = le_a(i, j, klo_c);
                         if (LE_sfc != 0.0) {
-                            cc_src_a(i, j, k, RhoQ1_comp) += feedback_moisture_c * rho_safe * (LE_sfc / L_v / dz_local);
+                            cc_src_a(i, j, k, RhoQ1_comp) += scale * feedback_moisture_c * rho_safe * (LE_sfc / L_v / dz_local);
                         }
                     }
 
@@ -544,12 +557,15 @@ void apply_ucm_tendency_to_cc_source(
                 const amrex::Real dtheta_road = feedback_heat_c * rho_safe * theta_tend_road;
                 const amrex::Real dtheta_wall = feedback_heat_c * rho_safe * theta_tend_wall;
                 const amrex::Real dtheta_roof = feedback_heat_c * rho_safe * theta_tend_roof;
-                cc_src_a(i, j, k, RhoTheta_comp) += dtheta_road + dtheta_wall + dtheta_roof;
+                const amrex::Real scale = (interface_mode_c == 1 && have_f_urb)
+                                          ? f_urb_a(i,j,klo_c)
+                                          : ((urban_a(i, j, klo_c) >= 0.01) ? 1.0 : 0.0);
+                cc_src_a(i, j, k, RhoTheta_comp) += scale * dtheta_road + scale * dtheta_wall + scale * dtheta_roof;
 
                 if (have_le_c && k == klo_c) {
                     const amrex::Real LE_sfc = le_a(i, j, klo_c);
                     if (LE_sfc != 0.0) {
-                        cc_src_a(i, j, k, RhoQ1_comp) += feedback_moisture_c * rho_safe * (LE_sfc / L_v / dz_local);
+                        cc_src_a(i, j, k, RhoQ1_comp) += scale * feedback_moisture_c * rho_safe * (LE_sfc / L_v / dz_local);
                     }
                 }
 
@@ -594,12 +610,15 @@ void apply_ucm_tendency_to_cc_source(
                 const amrex::Real dtheta_road = feedback_heat_c * rho_safe * theta_tend_road;
                 const amrex::Real dtheta_wall = feedback_heat_c * rho_safe * theta_tend_wall;
                 const amrex::Real dtheta_roof = feedback_heat_c * rho_safe * theta_tend_roof;
-                cc_src_a(i, j, k, RhoTheta_comp) += dtheta_road + dtheta_wall + dtheta_roof;
+                const amrex::Real scale = (interface_mode_c == 1 && have_f_urb)
+                                          ? f_urb_a(i,j,klo_c)
+                                          : ((urban_a(i, j, klo_c) >= 0.01) ? 1.0 : 0.0);
+                cc_src_a(i, j, k, RhoTheta_comp) += scale * dtheta_road + scale * dtheta_wall + scale * dtheta_roof;
 
                 if (have_le_c && k == klo_c) {
                     const amrex::Real LE_sfc = le_a(i, j, klo_c);
                     if (LE_sfc != 0.0) {
-                        cc_src_a(i, j, k, RhoQ1_comp) += feedback_moisture_c * rho_safe * (LE_sfc / L_v / dz_local);
+                        cc_src_a(i, j, k, RhoQ1_comp) += scale * feedback_moisture_c * rho_safe * (LE_sfc / L_v / dz_local);
                     }
                 }
 
@@ -750,6 +769,8 @@ void apply_ucm_momentum_drag_to_source(
     const amrex::MultiFab& lambda_f_atm,
     const amrex::MultiFab* z_phys_nd,
     const amrex::iMultiFab& is_urban_atm,
+    const amrex::MultiFab* f_urb_atm,
+    int                    interface_mode,
     const amrex::Geometry& geom_atm,
     WallDragMode           drag_mode,
     amrex::Real            Cd_wall,
@@ -787,6 +808,7 @@ void apply_ucm_momentum_drag_to_source(
 
     // Hoist terrain support to avoid device pointer branching
     const bool use_terrain = (z_phys_nd != nullptr);
+    const bool has_f_urb = (f_urb_atm != nullptr);
 
     // Local reduction for debug accounting
     amrex::ReduceOps<
@@ -809,6 +831,9 @@ void apply_ucm_momentum_drag_to_source(
         auto const lam_p_a   = lambda_p_atm.const_array(mfi);
         auto const lam_f_a   = lambda_f_atm.const_array(mfi);
         auto const urban_a   = is_urban_atm.const_array(mfi);
+        amrex::Array4<const amrex::Real> f_urb_a = has_f_urb
+            ? f_urb_atm->const_array(mfi)
+            : amrex::Array4<const amrex::Real>{};
 
         amrex::Array4<const amrex::Real> z_nd_a = use_terrain
             ? z_phys_nd->const_array(mfi)
@@ -890,8 +915,11 @@ void apply_ucm_momentum_drag_to_source(
                 }
 
                 // Accumulate with rho multiplier (momentum RHS)
-                xmom_a(i, j, k) += rho_safe * (Fx_wall + Fx_roof);
-                ymom_a(i, j, k) += rho_safe * (Fy_wall + Fy_roof);
+                const amrex::Real scale = (interface_mode == 1 && has_f_urb)
+                                          ? f_urb_a(i,j,0)
+                                          : ((urban_a(i, j, 0) == 1) ? 1.0 : 0.0);
+                xmom_a(i, j, k) += scale * rho_safe * (Fx_wall + Fx_roof);
+                ymom_a(i, j, k) += scale * rho_safe * (Fy_wall + Fy_roof);
 
                 const amrex::Real n_wall = (wall_fraction > 0.0 && lam_f > 0.0) ? 1.0 : 0.0;
                 return {n_wall, Fx_wall};
@@ -955,8 +983,11 @@ void apply_ucm_momentum_drag_to_source(
                 }
 
                 // Accumulate with rho multiplier (momentum RHS)
-                xmom_a(i, j, k) += rho_safe * (Fx_wall + Fx_roof);
-                ymom_a(i, j, k) += rho_safe * (Fy_wall + Fy_roof);
+                const amrex::Real scale = (interface_mode == 1 && has_f_urb)
+                                          ? f_urb_a(i,j,0)
+                                          : ((urban_a(i, j, 0) == 1) ? 1.0 : 0.0);
+                xmom_a(i, j, k) += scale * rho_safe * (Fx_wall + Fx_roof);
+                ymom_a(i, j, k) += scale * rho_safe * (Fy_wall + Fy_roof);
 
                 const amrex::Real n_wall = (wall_fraction > 0.0 && lam_f > 0.0) ? 1.0 : 0.0;
                 return {n_wall, Fx_wall};

@@ -72,7 +72,9 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 
 **Phase 4 status (as of 2026-07-28):** 4.1 complete (#254, #255, + two branch-local hotfixes). 4.2 complete (#256 + branch-local hotfix). 4.3 next up (placeholder — assume cell-centered SW/LW from radiation module; full RRTMG plumbing deferred). Old 4.4 dropped, old 4.5 renumbered to Phase 5.4 (coastal sea-breeze canonical).
 
-**Phase 4.4 removed (2026-07-28):** the "urban/non-urban interface treatment" placeholder was dropped. The current sharp-mask contract (Contract #10: `is_urban ∈ {0,1}` at k=0, exclusivity of MOST vs UCM writes) plus horizontal advection + diffusion is sufficient at ≥ 1 km ATM grids. Sub-grid tile blending (f_urb-weighted flux mixing) will only be reconsidered if Phase 6.4 instrumented-site validation reveals systematic bias at urban/rural interfaces.
+**Phase 4.4 removed (2026-07-28):** the "urban/non-urban interface treatment" placeholder was dropped. The current sharp-mask contract (Contract #10: `is_urban ∈ {0,1}` at k=0, exclusivity of MOST vs UCM writes) plus horizontal advection + diffusion is sufficient at ≥ 1 km ATM grids. 
+
+**NOTE (Phase 5.6):** Sub-grid tile blending (f_urb-weighted flux mixing) has now been implemented in Phase 5.6, resolving the deferred Phase 6.4 item. Users can now opt into blended mode via `erf.ucm.interface_mode = blended`; binary mode remains the default for backward compatibility.
 
 **Old Phase 4.4 (mixed-domain diurnal) → new Phase 5.4:** the mixed-domain diurnal integration test moved to end of Part 5 and was redefined as a coastal sea-breeze canonical. This provides a sharp, physics-meaningful system integration gate (sea-breeze reversal is either present or not) before Part 6 (trees), and re-uses infrastructure that Parts 5.1–5.3 will have already built.
 
@@ -709,9 +711,9 @@ Phases 5.4–5.6 were rescoped during Phase 5.2 D10 diurnal debugging to address
 
 **Phase 5.5 (HVAC extended physics):** After Phase 5.3 (green roofs) land, extend HVAC physics: split rejection into `H_sensible` and `LE_latent` streams (separate face destinations), add selectable rejection facet (roof / ground-level diffuse / distributed), and optional COP degradation with outdoor air temperature. This physics extension is scheduled after 5.3 so its latent-heat contributions can reuse the `LE_latent` plumbing already exercised by green-roof evapotranspiration.
 
-**Phase 5.6 (Coastal sea-breeze canonical):** The original Phase 5.4 coastal canonical moves to Phase 5.6, becoming the pre-Phase-6 system-integration gate covering all of 5.3–5.5 physics together.
+**Phase 5.6 (Fractional urban coverage f_urb blending):** ✅ COMPLETE. Adds user-selectable interface mode (`binary` default, `blended` new). In blended mode, MOST and UCM fluxes scale by `(1-f_urb)` and `f_urb` respectively at the ATM/UCM interface, replacing Phase 4.1's sharp binary mask. Resolves the "known limitation" of Phase 4.1's discretized coverage. Implements f_urb blending at diffusion kernel (MOST flux scaling), UCM injection (heat/moisture), and momentum drag paths. Fully backward compatible: binary mode is default and bit-identical to Phase 5.5 for uniform domains.
 
 ### Phase 5 Status
 
-**Phase 5 status (as of 2026-07-29):** 5.1a (PR #258), 5.1b (PR #259), 5.1c (PR #260), 5.2 (PR #261) complete. 5.3 in progress. 5.4–5.6 planned.
+**Phase 5 status (as of 2026-07-29):** 5.1a (PR #258), 5.1b (PR #259), 5.1c (PR #260), 5.2 (PR #261), 5.6 complete. 5.3 in progress. 5.4 planned.
 
