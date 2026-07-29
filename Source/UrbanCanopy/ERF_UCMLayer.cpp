@@ -906,14 +906,6 @@ void UCMLayer::advance(UCMFields& fields,
     // ========================================================================
     const bool hvac_on = (m_params.hvac_mode == HVACMode::Simple);
 
-    // Phase 5.2-hotfix3: Instrumentation to diagnose AH write persistence
-    if (m_params.ucm_debug && hvac_on) {
-        amrex::Real ah_before = fields.AH->max(0, 0);
-        if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "[UCM][5.2-hotfix3][pre-HVAC]  fields.AH->max = " << ah_before << "\n";
-        }
-    }
-
     if (hvac_on) {
         const amrex::Real hyst_K = m_params.hvac_hysteresis_K;
         const amrex::Real cop_default = m_params.hvac_cop_default;
@@ -994,14 +986,6 @@ void UCMLayer::advance(UCMFields& fields,
             if (amrex::ParallelDescriptor::IOProcessor()) {
                 amrex::Print() << "[UCM][5.2][hvac] mode=simple hour=" << hour_of_day
                                << " Q_HVAC=[" << Q_HVAC_min << ", " << Q_HVAC_max << "] W/m²\n";
-            }
-        }
-
-        // Phase 5.2-hotfix3: Post-HVAC instrumentation to diagnose AH write persistence
-        if (m_params.ucm_debug) {
-            amrex::Real ah_after = fields.AH->max(0, 0);
-            if (amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "[UCM][5.2-hotfix3][post-HVAC] fields.AH->max = " << ah_after << "\n";
             }
         }
     }
