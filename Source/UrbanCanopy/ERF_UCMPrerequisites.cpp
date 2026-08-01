@@ -336,7 +336,7 @@ void check_ucm_grid_and_fields(const UCMParams& params,
 
     // Phase 5.7: Coastal canonical banner (if blended mode + diurnal forcing)
     // This marks the Phase 5 system-integration gate before Part 6 (trees).
-    if (params.ucm_debug && params.interface_mode == "blended" && 
+    if (params.ucm_debug && params.interface_mode_str == "blended" && 
         params.use_prescribed_radiation && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "[UCM][5.7][coastal-canonical]\n";
         amrex::Print() << "  Domain: sea=[0,5000]m urban=[6000,14000]m rural=[15000,20000]m\n";

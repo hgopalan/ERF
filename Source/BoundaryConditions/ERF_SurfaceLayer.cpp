@@ -1374,35 +1374,63 @@ SurfaceLayer::read_custom_roughness (const int& lev,
             int jhi = m_geom[lev].Domain().bigEnd(1);
 
             Array4<Real> const& z0_arr = z_0[lev].array(mfi);
+            //Array4<Real> const& z0_arr = z_0[lev].array(mfi);
             ParallelFor(gtbx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/)
             {
                 // Clip indices for ghost-cells
                 int ii = amrex::min(amrex::max(i,ilo),ihi);
                 int jj = amrex::min(amrex::max(j,jlo),jhi);
 
-                // Location of nodes
-                Real x = ProbLoArr[0]  + ii  * dx[0];
-                Real y = ProbLoArr[1]  + jj  * dx[1];
-                int inode = ii + jj * (ihi-ilo+2); // stride is Nx+1
-                if (std::sqrt(amrex::Math::powi<2>(x-xp[inode])+amrex::Math::powi<2>(y-yp[inode])) < tol) {
-                    z0_arr(i,j,klo) = z0p[inode];
-                } else {
-                    // Unexpected list order, do brute force search
-                    Real z0loc = zero;
-                    bool found = false;
-                    for (int n=0; n<nnode; ++n) {
-                        Real delta=std::sqrt(amrex::Math::powi<2>(x-xp[n])+amrex::Math::powi<2>(y-yp[n]));
-                        if (delta < tol) {
-                            found = true;
-                            z0loc = z0p[n];
-                            break;
-                        }
+                // Cell-center coordinates (file uses cell centers)
+                Real x = ProbLoArr[0] + (ii + Real(0.5)) * dx[0];
+                Real y = ProbLoArr[1] + (jj + Real(0.5)) * dx[1];
+
+                // Nearest-neighbor: find file entry with minimum distance
+                Real best_dist = amrex::Math::powi<2>(x - xp[0])
+                               + amrex::Math::powi<2>(y - yp[0]);
+                int  best_n    = 0;
+                for (int n = 1; n < nnode; ++n) {
+                    Real d = amrex::Math::powi<2>(x - xp[n])
+                           + amrex::Math::powi<2>(y - yp[n]);
+                    if (d < best_dist) {
+                        best_dist = d;
+                        best_n    = n;
                     }
-                    AMREX_ASSERT_WITH_MESSAGE(found, "Location read from terrain file does not match the grid!");
-                    amrex::ignore_unused(found);
-                    z0_arr(i,j,klo) = z0loc;
                 }
+                z0_arr(i,j,klo) = z0p[best_n];
             });
+        //     ParallelFor(gtbx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/)
+        //     {
+        //         // Clip indices for ghost-cells
+        //         int ii = amrex::min(amrex::max(i,ilo),ihi);
+        //         int jj = amrex::min(amrex::max(j,jlo),jhi);
+
+        //         // Location of nodes
+        //         Real x = ProbLoArr[0]  + ii  * dx[0];
+        //         Real y = ProbLoArr[1]  + jj  * dx[1];
+        //         int inode = ii + jj * (ihi-ilo+2); // stride is Nx+1
+        //         if (std::sqrt(amrex::Math::powi<2>(x-xp[inode])+amrex::Math::powi<2>(y-yp[inode])) < tol) {
+        //             z0_arr(i,j,klo) = z0p[inode];
+        //         } else {
+        //             // Unexpected list order, do brute force search
+        //             Real z0loc = zero;
+        //             bool found = false;
+        //             for (int n=0; n<nnode; ++n) {
+        //                 Real delta=std::sqrt(amrex::Math::powi<2>(x-xp[n])+amrex::Math::powi<2>(y-yp[n]));
+        //                 if (delta < tol) {
+        //                     found = true;
+        //                     z0loc = z0p[n];
+        //                     break;
+        //                 }
+        //             }
+        //             AMREX_ASSERT_WITH_MESSAGE(found, "Location read from terrain file does not match the grid!");
+        //             amrex::ignore_unused(found);
+        //             z0_arr(i,j,klo) = z0loc;
+        //         }
+		// amrex::Print()<<"$$:"<<x<<"  "<<y<<" "<<z0_arr(i,j,klo)<<std::endl;
+        //     }); 
+
+    
         } // mfi
     } else {
         AMREX_ALWAYS_ASSERT(lev > 0);
