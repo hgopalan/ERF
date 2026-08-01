@@ -111,6 +111,7 @@ void erf_slow_rhs_post (int level, int finest_level,
 
     const bool l_use_terrain      = (solverChoice.mesh_type != MeshType::ConstantDz);
     const bool l_moving_terrain   = (solverChoice.terrain_type == TerrainType::MovingFittedMesh);
+    const bool l_use_eb           = (solverChoice.terrain_type == TerrainType::EB);
     const bool l_reflux = ( (solverChoice.coupling_type == CouplingType::TwoWay) && (nrk == 2) && (finest_level > 0) );
     if (l_moving_terrain) AMREX_ALWAYS_ASSERT(l_use_terrain);
 
@@ -324,20 +325,24 @@ void erf_slow_rhs_post (int level, int finest_level,
         Array4<const Real> fcy_arr{};
         Array4<const Real> fcz_arr{};
         Array4<const Real> detJ_arr{};
+        Array4<const Real> barea_arr{};
+        Array4<const Real> bcent_arr{};
         if (solverChoice.terrain_type == TerrainType::EB) {
             EBCellFlagFab const& cfg = ebfact.getMultiEBCellFlagFab()[mfi];
             cfg_arr  = cfg.const_array();
             if (cfg.getType(tbx) == FabType::singlevalued) {
                 l_eb_terrain_cc = true;
-                ax_arr   = ebfact.getAreaFrac()[0]->const_array(mfi);
-                ay_arr   = ebfact.getAreaFrac()[1]->const_array(mfi);
-                az_arr   = ebfact.getAreaFrac()[2]->const_array(mfi);
-                fcx_arr  = ebfact.getFaceCent()[0]->const_array(mfi);
-                fcy_arr  = ebfact.getFaceCent()[1]->const_array(mfi);
-                fcz_arr  = ebfact.getFaceCent()[2]->const_array(mfi);
-                detJ_arr = ebfact.getVolFrac().const_array(mfi);
+                ax_arr    = ebfact.getAreaFrac()[0]->const_array(mfi);
+                ay_arr    = ebfact.getAreaFrac()[1]->const_array(mfi);
+                az_arr    = ebfact.getAreaFrac()[2]->const_array(mfi);
+                fcx_arr   = ebfact.getFaceCent()[0]->const_array(mfi);
+                fcy_arr   = ebfact.getFaceCent()[1]->const_array(mfi);
+                fcz_arr   = ebfact.getFaceCent()[2]->const_array(mfi);
+                detJ_arr  = ebfact.getVolFrac().const_array(mfi);
                 // if (!already_on_centroids) {mask_arr = physbnd_mask.const_array(mfi);}
-                mask_arr = physbnd_mask.const_array(mfi);
+                mask_arr  = physbnd_mask.const_array(mfi);
+                barea_arr = ebfact.getBndryArea().const_array(mfi);
+                bcent_arr = ebfact.getBndryCent().const_array(mfi);
             }
         }
         if (!l_eb_terrain_cc) {
@@ -353,6 +358,7 @@ void erf_slow_rhs_post (int level, int finest_level,
         Array4<Real> diffflux_x, diffflux_y, diffflux_z;
         Array4<Real> hfx_x, hfx_y, hfx_z, diss;
         Array4<Real> q1fx_x, q1fx_y, q1fx_z, q2fx_z;
+        Array4<Real> hfx_EB{};
         Array4<const int> is_urban_arr;   // Phase 4.1: is_urban mask for MOST flux gating
         Array4<const Real> f_urb_arr;     // Phase 5.6: f_urb for blended flux interface
 
@@ -488,6 +494,16 @@ void erf_slow_rhs_post (int level, int finest_level,
                                                mu_turb, solverChoice, level,
                                                tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac,
                                                is_urban_arr, f_urb_arr, interface_mode);
+                    } else if (l_use_eb) {
+                        DiffusionSrcForState_EB(tbx, domain, start_comp, num_comp, u, v,
+                                                new_cons, cur_prim, cell_rhs,
+                                                diffflux_x, diffflux_y, diffflux_z,
+                                                cfg_arr, ax_arr, ay_arr, az_arr, detJ_arr,
+                                                barea_arr, bcent_arr,
+                                                dx, dxInv,
+                                                hfx_z, q1fx_z, q2fx_z, hfx_EB,
+                                                mu_turb, solverChoice, level,
+                                                bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion);
                     } else {
                         DiffusionSrcForState_N(tbx, domain, start_comp, num_comp, u, v,
                                                new_cons, cur_prim, cell_rhs,
