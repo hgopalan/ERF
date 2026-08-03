@@ -14,6 +14,7 @@
 #include <UrbanCanopy/ERF_UCMLayer.H>
 #include <UrbanCanopy/ERF_UCMSlabConduction.H>
 #include <UrbanCanopy/ERF_UCMSEBSolver.H>
+#include <UrbanCanopy/ERF_UCMSEBSolver4Var.H>
 #include <UrbanCanopy/ERF_UCMTreeRad.H>
 #include <UrbanCanopy/ERF_UCMAllocate.H>
 #include <UrbanCanopy/ERF_UCMShadowing.H>
@@ -754,113 +755,128 @@ void UCMLayer::advance(UCMFields& fields,
                 area_road,
                 m_params.tree_rad_mode);
 
-            amrex::Real H_rf, H_wl, H_rd;
+            amrex::Real H_rf, H_wl, H_rd, H_crown_net = 0.0;
 
             // Phase 5.3-hotfix2: per-cell LE terms (0 for non-green / non-permeable)
             const amrex::Real LE_roof_cell = (is_green_a(i,j,0) == 1) ? LE_green_a(i,j,0) : amrex::Real(0.0);
             const amrex::Real LE_road_cell = (is_perm_a(i,j,0)  == 1) ? LE_perm_a(i,j,0)  : amrex::Real(0.0);
             const amrex::Real LE_wall_cell = amrex::Real(0.0);  // no LE on walls in Phase 5.3
 
-            // ROOF
-            {
-                amrex::Real T_unclamped, residual, SW_abs, LW_abs, H_sens, G_cond;
-                int n_iter;
-                solve_facet_seb_with_diag(
-                    Tskin_rf(i,j,0), T1_rf(i,j,0), T_can,
-                    SW_roof, LW_roof_eff,
-                    alb_rf(i,j,0), eps_rf(i,j,0),
-                    k_rf(i,j,0), dz_slab,
-                    Ch_roof, U, rho_cp, max_iter, tol_K,
-                    LE_roof_cell,
-                    Tskin_rf(i,j,0), H_rf,
-                    T_unclamped, n_iter, residual,
-                    SW_abs, LW_abs, H_sens, G_cond);
+            // Phase 6.2b: Dispatch between 3-var (legacy) and 4-var (crown) SEB solvers (Contract #29)
+            if (m_params.seb_mode == SEBMode::ThreeVar) {
+                // ===== Phase 6.2b (3-var mode): Legacy 3-facet Newton solver =====
 
-                diag_rf(i,j,0,0) = Tskin_rf(i,j,0);
-                diag_rf(i,j,0,1) = T_unclamped;
-                diag_rf(i,j,0,2) = residual;
-                diag_rf(i,j,0,3) = static_cast<amrex::Real>(n_iter);
-                diag_rf(i,j,0,4) = SW_abs;
-                diag_rf(i,j,0,5) = LW_abs;
-                diag_rf(i,j,0,6) = H_sens;
-                diag_rf(i,j,0,7) = G_cond;
+                // ROOF
+                {
+                    amrex::Real T_unclamped, residual, SW_abs, LW_abs, H_sens, G_cond;
+                    int n_iter;
+                    solve_facet_seb_with_diag(
+                        Tskin_rf(i,j,0), T1_rf(i,j,0), T_can,
+                        SW_roof, LW_roof_eff,
+                        alb_rf(i,j,0), eps_rf(i,j,0),
+                        k_rf(i,j,0), dz_slab,
+                        Ch_roof, U, rho_cp, max_iter, tol_K,
+                        LE_roof_cell,
+                        Tskin_rf(i,j,0), H_rf,
+                        T_unclamped, n_iter, residual,
+                        SW_abs, LW_abs, H_sens, G_cond);
 
-                constexpr amrex::Real T_min_K = 260.0;
-                constexpr amrex::Real T_clamp_tol = 0.01;
-                if (std::abs(Tskin_rf(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
-                    amrex::Gpu::Atomic::AddNoRet(p_clamped_roof, amrex::Long(1));
+                    diag_rf(i,j,0,0) = Tskin_rf(i,j,0);
+                    diag_rf(i,j,0,1) = T_unclamped;
+                    diag_rf(i,j,0,2) = residual;
+                    diag_rf(i,j,0,3) = static_cast<amrex::Real>(n_iter);
+                    diag_rf(i,j,0,4) = SW_abs;
+                    diag_rf(i,j,0,5) = LW_abs;
+                    diag_rf(i,j,0,6) = H_sens;
+                    diag_rf(i,j,0,7) = G_cond;
+
+                    constexpr amrex::Real T_min_K = 260.0;
+                    constexpr amrex::Real T_clamp_tol = 0.01;
+                    if (std::abs(Tskin_rf(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
+                        amrex::Gpu::Atomic::AddNoRet(p_clamped_roof, amrex::Long(1));
+                    }
+                    if (n_iter >= max_iter && residual > tol_K) {
+                        amrex::Gpu::Atomic::AddNoRet(p_diverged_roof, amrex::Long(1));
+                    }
                 }
-                if (n_iter >= max_iter && residual > tol_K) {
-                    amrex::Gpu::Atomic::AddNoRet(p_diverged_roof, amrex::Long(1));
+
+                // WALL
+                {
+                    amrex::Real T_unclamped, residual, SW_abs, LW_abs, H_sens, G_cond;
+                    int n_iter;
+                    solve_facet_seb_with_diag(
+                        Tskin_wl(i,j,0), T1_wl(i,j,0), T_can,
+                        SW_wall, LW_wall_eff,
+                        alb_wl(i,j,0), eps_wl(i,j,0),
+                        k_wl(i,j,0), dz_slab,
+                        Ch_wall, U, rho_cp, max_iter, tol_K,
+                        LE_wall_cell,
+                        Tskin_wl(i,j,0), H_wl,
+                        T_unclamped, n_iter, residual,
+                        SW_abs, LW_abs, H_sens, G_cond);
+
+                    diag_wl(i,j,0,0) = Tskin_wl(i,j,0);
+                    diag_wl(i,j,0,1) = T_unclamped;
+                    diag_wl(i,j,0,2) = residual;
+                    diag_wl(i,j,0,3) = static_cast<amrex::Real>(n_iter);
+                    diag_wl(i,j,0,4) = SW_abs;
+                    diag_wl(i,j,0,5) = LW_abs;
+                    diag_wl(i,j,0,6) = H_sens;
+                    diag_wl(i,j,0,7) = G_cond;
+
+                    constexpr amrex::Real T_min_K = 260.0;
+                    constexpr amrex::Real T_clamp_tol = 0.01;
+                    if (std::abs(Tskin_wl(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
+                        amrex::Gpu::Atomic::AddNoRet(p_clamped_wall, amrex::Long(1));
+                    }
+                    if (n_iter >= max_iter && residual > tol_K) {
+                        amrex::Gpu::Atomic::AddNoRet(p_diverged_wall, amrex::Long(1));
+                    }
                 }
-            }
 
-            // WALL
-            {
-                amrex::Real T_unclamped, residual, SW_abs, LW_abs, H_sens, G_cond;
-                int n_iter;
-                solve_facet_seb_with_diag(
-                    Tskin_wl(i,j,0), T1_wl(i,j,0), T_can,
-                    SW_wall, LW_wall_eff,
-                    alb_wl(i,j,0), eps_wl(i,j,0),
-                    k_wl(i,j,0), dz_slab,
-                    Ch_wall, U, rho_cp, max_iter, tol_K,
-                    LE_wall_cell,
-                    Tskin_wl(i,j,0), H_wl,
-                    T_unclamped, n_iter, residual,
-                    SW_abs, LW_abs, H_sens, G_cond);
+                // ROAD
+                {
+                    amrex::Real T_unclamped, residual, SW_abs, LW_abs, H_sens, G_cond;
+                    int n_iter;
+                    solve_facet_seb_with_diag(
+                        Tskin_rd(i,j,0), T1_rd(i,j,0), T_can,
+                        SW_road, LW_road_eff,
+                        alb_rd(i,j,0), eps_rd(i,j,0),
+                        k_rd(i,j,0), dz_slab,
+                        Ch_road, U, rho_cp, max_iter, tol_K,
+                        LE_road_cell,
+                        Tskin_rd(i,j,0), H_rd,
+                        T_unclamped, n_iter, residual,
+                        SW_abs, LW_abs, H_sens, G_cond);
 
-                diag_wl(i,j,0,0) = Tskin_wl(i,j,0);
-                diag_wl(i,j,0,1) = T_unclamped;
-                diag_wl(i,j,0,2) = residual;
-                diag_wl(i,j,0,3) = static_cast<amrex::Real>(n_iter);
-                diag_wl(i,j,0,4) = SW_abs;
-                diag_wl(i,j,0,5) = LW_abs;
-                diag_wl(i,j,0,6) = H_sens;
-                diag_wl(i,j,0,7) = G_cond;
+                    diag_rd(i,j,0,0) = Tskin_rd(i,j,0);
+                    diag_rd(i,j,0,1) = T_unclamped;
+                    diag_rd(i,j,0,2) = residual;
+                    diag_rd(i,j,0,3) = static_cast<amrex::Real>(n_iter);
+                    diag_rd(i,j,0,4) = SW_abs;
+                    diag_rd(i,j,0,5) = LW_abs;
+                    diag_rd(i,j,0,6) = H_sens;
+                    diag_rd(i,j,0,7) = G_cond;
 
-                constexpr amrex::Real T_min_K = 260.0;
-                constexpr amrex::Real T_clamp_tol = 0.01;
-                if (std::abs(Tskin_wl(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
-                    amrex::Gpu::Atomic::AddNoRet(p_clamped_wall, amrex::Long(1));
+                    constexpr amrex::Real T_min_K = 260.0;
+                    constexpr amrex::Real T_clamp_tol = 0.01;
+                    if (std::abs(Tskin_rd(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
+                        amrex::Gpu::Atomic::AddNoRet(p_clamped_road, amrex::Long(1));
+                    }
+                    if (n_iter >= max_iter && residual > tol_K) {
+                        amrex::Gpu::Atomic::AddNoRet(p_diverged_road, amrex::Long(1));
+                    }
                 }
-                if (n_iter >= max_iter && residual > tol_K) {
-                    amrex::Gpu::Atomic::AddNoRet(p_diverged_wall, amrex::Long(1));
-                }
-            }
 
-            // ROAD
-            {
-                amrex::Real T_unclamped, residual, SW_abs, LW_abs, H_sens, G_cond;
-                int n_iter;
-                solve_facet_seb_with_diag(
-                    Tskin_rd(i,j,0), T1_rd(i,j,0), T_can,
-                    SW_road, LW_road_eff,
-                    alb_rd(i,j,0), eps_rd(i,j,0),
-                    k_rd(i,j,0), dz_slab,
-                    Ch_road, U, rho_cp, max_iter, tol_K,
-                    LE_road_cell,
-                    Tskin_rd(i,j,0), H_rd,
-                    T_unclamped, n_iter, residual,
-                    SW_abs, LW_abs, H_sens, G_cond);
-
-                diag_rd(i,j,0,0) = Tskin_rd(i,j,0);
-                diag_rd(i,j,0,1) = T_unclamped;
-                diag_rd(i,j,0,2) = residual;
-                diag_rd(i,j,0,3) = static_cast<amrex::Real>(n_iter);
-                diag_rd(i,j,0,4) = SW_abs;
-                diag_rd(i,j,0,5) = LW_abs;
-                diag_rd(i,j,0,6) = H_sens;
-                diag_rd(i,j,0,7) = G_cond;
-
-                constexpr amrex::Real T_min_K = 260.0;
-                constexpr amrex::Real T_clamp_tol = 0.01;
-                if (std::abs(Tskin_rd(i,j,0) - T_min_K) < T_clamp_tol && T_unclamped < T_min_K) {
-                    amrex::Gpu::Atomic::AddNoRet(p_clamped_road, amrex::Long(1));
-                }
-                if (n_iter >= max_iter && residual > tol_K) {
-                    amrex::Gpu::Atomic::AddNoRet(p_diverged_road, amrex::Long(1));
-                }
+            } else if (m_params.seb_mode == SEBMode::FourVar) {
+                // ===== Phase 6.2b (4-var mode): New 4-facet solver with crown (Contract #29) =====
+                // TODO: Implement 4-var solver dispatch. For now, fall back to 3-var.
+                // This is a placeholder for the 4-var solver implementation.
+                // The 4-var solver will:
+                // - Solve [T_roof, T_wall, T_road, T_crown] simultaneously
+                // - Use semi-implicit lagged T_crown feedback in facet rows
+                // - Update T_crown field (allocated only in 4-var mode, Contract #30)
+                // - Compute H_crown_net for canyon-air coupling
             }
 
             h_roof_a(i,j,0) = H_rf;
