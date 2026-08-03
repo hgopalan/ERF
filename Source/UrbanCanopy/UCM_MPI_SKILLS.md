@@ -583,6 +583,30 @@ Bug 2 (`k_therm = 50 W/m/K` for a wall assembly) illustrates that CSV inputs are
 - Error messages on mismatch must hex-dump actual bytes read
 - **Do NOT use marker characters like `!!!`** that can visually corrupt display
 
+## Lesson 28 (Phase 6.2a-hotfix0): Header-only inline functions must be defined in the header, not the .cpp
+
+If a function is marked `AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE`, 
+clang inlines it at every call site and emits no external symbol. 
+Placing that definition in a `.cpp` while its declaration lives in a 
+`.H` (with no inline hint) causes:
+- `ERF_UCMLayer.cpp` sees only the declaration → emits a call to an 
+  external symbol.
+- `ERF_UCMTreeRad.cpp` sees the definition marked FORCE_INLINE → 
+  emits no external symbol.
+- Linker: undefined symbol.
+
+**Rule:** either keep the body in the `.cpp` and remove all inline 
+hints (external linkage), or move the body to the `.H` and delete the 
+`.cpp` (header-only). Never mix.
+
+Grep merge-blocker for future UCM files:
+```bash
+for cpp in Source/UrbanCanopy/*.cpp; do
+    if grep -q 'AMREX_FORCE_INLINE' "$cpp"; then
+        echo "FAIL: FORCE_INLINE in .cpp file: $cpp — move to header"
+    fi
+done
+
 ---
 
 ## Consolidated Grep Checklist for Phase 3.5a-hotfix

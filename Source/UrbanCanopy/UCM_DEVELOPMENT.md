@@ -800,3 +800,28 @@ erf.ucm.k_ext_tree         = 0.5        // Beer-Lambert extinction coefficient [
 
 **Phase 6 status (as of 2026-08-03):** 6.1 complete. 6.2a in progress (this commit). 6.2b (4-var Newton + prognostic crown state) planned. 6.2c (LW attenuation) deferred.
 
+### Phase 6.2a-hotfix1
+
+**Status:** ✅ COMPLETE.
+
+Corrected the Beer-Lambert per-facet path-length formulas:
+- **Roof**: `L_path = H_tree - max(H_roof, H_crown_base)`. Original 
+  formula clamped to zero for tall buildings; hotfix1 handles roofs 
+  below, inside, and above the crown envelope correctly.
+- **Wall**: linear blend of sunlit and shaded segments, per 
+  `f_wall_in_crown = max(0, min(H_wall, H_tree) - H_crown_base) / H_wall`.
+  Original formula gated on `H_wall >= H_crown_base` which under-fired 
+  in shallow canyons.
+- **Road**: unconditional `L_path = crown_depth`. Original formula 
+  gated on `H_road >= H_crown_base`, which is always false because 
+  road is at z=0. Road never received attenuation.
+
+Also converted `ERF_UCMTreeRad` from `.cpp` + `.H` to header-only 
+inline (avoids external-linkage vs `AMREX_FORCE_INLINE` mismatch — 
+see UCM_MPI_SKILLS.md Lesson 28).
+
+**Canonical geometry (Exec/CanonicalTests/SLUCM/UCMTreeRadUnit):**
+Set `is_urban=1` for all cells (tree-cells must overlap urban-cells 
+for the SEB path to fire) and set `H_tree=40, H_crown_base=20` so 
+trees rise above the 30 m buildings. See Lesson 29.
+
