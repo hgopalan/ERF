@@ -29,6 +29,7 @@
 #include <UrbanCanopy/ERF_UCMOccupancyReader.H>
 #include <UrbanCanopy/ERF_UCMGreenRoof.H>
 #include <UrbanCanopy/ERF_UCMPermeableRoad.H>
+#include <UrbanCanopy/ERF_UCMCrownTranspiration.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_MultiFab.H>
 #include <ERF_Constants.H>
@@ -473,6 +474,69 @@ void UCMLayer::advance(UCMFields& fields,
     }
 
     // ========================================================================
+
+    // ========================================================================
+    // Phase 6.3: Crown transpiration (LE cooling via bulk stomatal resistance)
+    //
+    // LE is computed using T_crown from the previous timestep (semi-implicit),
+    // written to fields.LE_crown_diag, and read by the 4-var SEB solver below
+    // as an additional cooling term in the crown row.
+    //
+    // Only active when seb_mode=FourVar AND crown_transp_mode=Simple.
+    // The computed LE_crown_diag is accumulated to fields.LE_latent after the
+    // Newton loop, consistent with green-roof and permeable-road patterns.
+    // ========================================================================
+    const bool crown_transp_on = (m_params.seb_mode == SEBMode::FourVar) &&
+                                 (m_params.crown_transp_mode == CrownTranspMode::Simple);
+
+    if (crown_transp_on) {
+        const amrex::Real r_stomatal = m_params.r_stomatal_leaf_s_per_m;
+        const amrex::Real LAI_val = m_params.LAI_default;
+        const amrex::Real Ch_leaf = m_params.Ch_leaf;
+
+        const bool q_ref_valid = (q_atm_lowest.boxArray().size() > 0);
+        const amrex::Real q_canyon_fallback = 0.005;
+
+        for (amrex::MFIter mfi(*fields.T_canyon_air, amrex::TilingIfNotGPU());
+             mfi.isValid(); ++mfi)
+        {
+            const amrex::Box& bx = mfi.tilebox();
+            auto const T_crown_a = fields.T_crown->const_array(mfi);  // Lagged from previous timestep
+            auto const q_atm_a = forcing.q_atm_ref->const_array(mfi);
+            auto const U_a = forcing.wind_ref->const_array(mfi);
+            auto const is_urb_a = fields.is_urban->const_array(mfi);
+            auto LE_diag_a = fields.LE_crown_diag->array(mfi);
+
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
+                if (is_urb_a(i,j,0) == 0) return;
+
+                amrex::Real q_canyon = q_ref_valid ? q_atm_a(i,j,0) : q_canyon_fallback;
+                q_canyon = amrex::max(amrex::min(q_canyon, 0.02), 0.0);
+
+                const amrex::Real LE_crown = compute_crown_transpiration_LE(
+                    LAI_val,
+                    T_crown_a(i,j,0),
+                    q_canyon,
+                    U_a(i,j,0),
+                    Ch_leaf,
+                    r_stomatal);
+
+                LE_diag_a(i,j,0) = LE_crown;
+                // Phase 6.3: do NOT add to LE_latent here — 4-var SEB solver reads LE_crown_diag;
+                // LE_latent is updated after Newton loop via MultiFab::Add (consistent with green-roof).
+            });
+        }
+
+        if (m_params.ucm_debug) {
+            amrex::Real LE_crown_min = fields.LE_crown_diag->min(0, 0);
+            amrex::Real LE_crown_max = fields.LE_crown_diag->max(0, 0);
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "[UCM][6.3][crown-transp] mode=simple LAI=" << LAI_val
+                               << " LE_crown=[" << LE_crown_min << ", " << LE_crown_max << "] W/m²\n";
+            }
+        }
+    }
+
     // Step 3: Solve facet SEB and advance slab conduction
     // ========================================================================
 
@@ -627,6 +691,7 @@ void UCMLayer::advance(UCMFields& fields,
         // Phase 5.3-hotfix2: LE from green roof / permeable road (from lagged T_skin)
         auto const LE_green_a = fields.LE_green_roof_diag->const_array(mfi);
         auto const LE_perm_a  = fields.LE_permeable_road_diag->const_array(mfi);
+        auto const LE_crown_a = fields.LE_crown_diag->const_array(mfi);  // Phase 6.3: crown transpiration
         auto const is_green_a = fields.is_green_roof->const_array(mfi);
         auto const is_perm_a  = fields.is_permeable_road->const_array(mfi);
 
@@ -910,6 +975,7 @@ void UCMLayer::advance(UCMFields& fields,
                     SW_roof, SW_wall, SW_road,
                     LW_roof_in, LW_wall_eff, LW_road_eff,
                     Q_tree_SW_abs_a(i,j,0),
+                    LE_crown_a(i,j,0),  // Phase 6.3: crown transpiration (pre-Newton LE_crown_diag)
                     // Albedos
                     alb_rf(i,j,0), alb_wl(i,j,0), alb_rd(i,j,0),
                     // Emissivities
@@ -975,6 +1041,11 @@ void UCMLayer::advance(UCMFields& fields,
     }
     if (permeable_road_on) {
         amrex::MultiFab::Add(*fields.LE_latent, *fields.LE_permeable_road_diag, 0, 0, 1, 0);
+    }
+    // Phase 6.3: Accumulate crown transpiration LE into canyon LE_latent budget (consistent with green-roof pattern)
+    if (crown_transp_on) {
+        amrex::MultiFab::Add(*fields.LE_latent, *fields.LE_crown_diag, 0, 0, 1, 0);
+    }
     }
 
     // Phase 5.1b banner

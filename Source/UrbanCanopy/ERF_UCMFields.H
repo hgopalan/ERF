@@ -335,6 +335,9 @@ struct UCMFields
     /// Evaporation from permeable road surface; additive to canyon LE_latent.
     std::unique_ptr<amrex::MultiFab> LE_permeable_road_diag;
 
+    /// Crown latent heat flux diagnostic [W/m²]. Phase 6.3: transpiration via bulk stomatal resistance.
+    std::unique_ptr<amrex::MultiFab> LE_crown_diag;
+
     /// Per-cell green roof mask [0 or 1]. Phase 5.3: 1 = green roof present, 0 = standard roof.
     /// Filled from building_layout.csv is_green_roof column; defaults to 0 if column absent.
     std::unique_ptr<amrex::iMultiFab> is_green_roof;

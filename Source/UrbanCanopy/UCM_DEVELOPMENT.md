@@ -884,3 +884,82 @@ erf.ucm.crown_view_factor     = 0.3              [default: 0.3]
 - No per-leaf temperature tracking (Phase 6.3).
 - No Jarvis/Ball-Berry stomatal resistance (Phase 6.3).
 
+
+### Phase 6.3 — Crown transpiration (latent heat via bulk stomatal resistance)
+
+**Status:** ✅ COMPLETE (Phase 6.3 main implementation).
+
+Adds latent-heat (transpiration) cooling to the crown facet in the 4-var SEB solver,
+using a bulk stomatal resistance model (semi-implicit, pre-Newton computation).
+Reuses the semi-implicit pre-Newton LE-computation pattern from Phase 5.3 (green-roof)
+and permeable-road blocks. **Only active when `seb_mode=FourVar` AND `crown_transp_mode=Simple`.**
+
+**Contract (mandatory safeguard):**
+- **Contract #36:** Crown transpiration LE is pre-computed via `compute_crown_transpiration_LE()` 
+  using **lagged T_crown** (from previous timestep), written to `LE_crown_diag`, and wired 
+  into the 4-var SEB solver's crown row as an extra cooling term. The computed value is read-only 
+  in the solver and accumulated to `fields.LE_latent` after the Newton loop (consistent with 
+  green-roof pattern in Phase 5.3-hotfix2).
+
+**Physics (bulk resistance model):**
+```
+LE_crown = LAI * ρ * L_v * (q_sat(T_crown) - q_canyon) / (r_boundary + r_stomatal)
+```
+where:
+- `LAI` = m_params.LAI_default initially (Phase 6.4 will make per-cell)
+- `ρ = 1.2 kg/m³` (air density, constant, matches Phase 5.3)
+- `L_v = 2.5e6 J/kg` (latent heat of vaporization)
+- `q_sat(T)` = saturation specific humidity via Magnus formula (T_C ∈ [-40, 50]°C)
+- `q_canyon` = canyon specific humidity from forcing.q_atm_ref (fallback 0.005 if not available)
+- `r_boundary = 1 / max(Ch_leaf * U, 1.e-6)` (aerodynamic leaf boundary layer resistance [s/m], guards div-by-zero)
+- `r_stomatal` = m_params.r_stomatal_leaf_s_per_m ParmParse scalar [s/m]
+
+**Sign convention (Contract #17):**
+- **LE_crown > 0** = crown losing heat via transpiration (cooling)
+- In crown SEB row: `F_crown = SW_abs + LW_in - LW_out - H_up - H_down - LE_crown_cell`
+- Subtract because positive LE = energy leaving crown
+
+**Clamps (bug-shield, per problem statement):**
+- Clamp `q_canyon` to `[0.0, 0.02]` kg/kg (matches green-roof line 364)
+- Clamp `LE_crown` result to `[0.0, 500.0]` W/m² (prevents unphysical dew and edge-case blowup)
+- Return 0.0 if `q_sat - q_canyon <= 0` (no transpiration when saturated; dew formation deferred)
+
+**Implementation:**
+- NEW `Source/UrbanCanopy/ERF_UCMCrownTranspiration.H`: GPU-safe header-only functions
+  - `qsat_magnus_crown(T_K)`: saturation specific humidity via Magnus formula
+  - `compute_crown_transpiration_LE(...)`: main transpiration LE solver
+- Section 21 added to `ERF_UCMParams.H` with `CrownTranspMode` enum + scalars
+  - `crown_transp_mode`: "off" (default, bit-identical) | "simple" (active)
+  - `r_stomatal_leaf_s_per_m`: bulk stomatal resistance [s/m], default 200.0
+  - `LAI_default`: leaf area index [-], default 3.0
+- Section 21 added to `ERF_UCMParams.cpp` with ParmParse reading + validation
+- NEW `LE_crown_diag` 2D MultiFab in `ERF_UCMFields.H` (allocated in `ERF_UCMAllocate.cpp`)
+- Pre-Newton computation in `ERF_UCMLayer.cpp` (between permeable-road and SEB solver)
+  - Reads lagged T_crown and computes LE_crown_diag per-cell
+  - Writes to `fields.LE_crown_diag` (not added to LE_latent yet — pattern from Phase 5.3)
+- Modified 4-var solver signature in `ERF_UCMSEBSolver4Var.H`
+  - Added `LE_crown_cell` parameter (Phase 6.3 latent heat cooling)
+  - Crown residual updated: `F_crown = ... - LE_crown_cell`
+  - Lagged coupling: LE_crown is read-only (semi-implicit, does not feed back to itself)
+- Post-Newton accumulation in `ERF_UCMLayer.cpp`
+  - MultiFab::Add(*fields.LE_latent, *fields.LE_crown_diag) after 3-var/4-var dispatch
+
+**ParmParse knobs (Phase 6.3):**
+```
+erf.ucm.crown_transp_mode           = "off" | "simple"  [default: "off"]
+erf.ucm.r_stomatal_leaf_s_per_m     = 200.0            [default: 200.0 s/m]
+erf.ucm.LAI_default                 = 3.0              [default: 3.0 -]
+```
+
+**Canonical test update (Exec/CanonicalTests/SLUCM/UCMTreeSEB4VarUnit):**
+- `check_tree_seb_4var.py` updated (S7 assertion):
+  - Parses `[UCM][6.3][crown-transp]` log output
+  - Checks `LE_crown=[min, max]` W/m² if active (disabled == OK)
+
+**Known limitations & deferred scope:**
+1. **Bulk resistance model only** (Ball-Berry / Jarvis stomatal conductance deferred to Phase 6.4).
+2. **Constant LAI_default** (per-cell LAI from tree_layout.csv deferred to Phase 6.4).
+3. **No soil-water coupling** (precipitation, infiltration, transpiration reduction on drought deferred to Phase 6.4).
+4. **No crown moisture bucket** (per-cell bucket model deferred to Phase 6.4).
+5. **No leaf-level energy balance** (leaf area density vertical profile deferred to Phase 6.4).
+

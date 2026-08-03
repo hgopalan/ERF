@@ -347,4 +347,17 @@ void UCMParams::read_from_parmparse()
     pp.query("crown_area_frac_default", crown_area_frac_default);
     if (crown_area_frac_default < 0.0 || crown_area_frac_default > 1.0)
        amrex::Abort("[UCM][6.2b] crown_area_frac_default out of [0,1] range.");
+
+    // Phase 6.3: Crown transpiration (LE cooling via bulk stomatal resistance)
+    pp.query("crown_transp_mode", crown_transp_mode_str);
+    pp.query("r_stomatal_leaf_s_per_m", r_stomatal_leaf_s_per_m);
+    pp.query("LAI_default", LAI_default);
+    if      (crown_transp_mode_str == "off")    crown_transp_mode = CrownTranspMode::Off;
+    else if (crown_transp_mode_str == "simple") crown_transp_mode = CrownTranspMode::Simple;
+    else amrex::Abort("[UCM][6.3] Invalid erf.ucm.crown_transp_mode '"
+                     + crown_transp_mode_str + "'; expected 'off' or 'simple'.");
+    if (r_stomatal_leaf_s_per_m <= 0.0)
+       amrex::Abort("[UCM][6.3] r_stomatal_leaf_s_per_m must be > 0.");
+    if (LAI_default < 0.0 || LAI_default > 10.0)
+       amrex::Abort("[UCM][6.3] LAI_default out of [0,10] range.");
 }

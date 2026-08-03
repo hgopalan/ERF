@@ -386,9 +386,14 @@ void allocate_ucm_fields(UCMFields& fields,
     fields.soil_moisture_road = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
     fields.LE_green_roof_diag = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
     fields.LE_permeable_road_diag = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.LE_crown_diag = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][5.3][allocate_ucm_fields] soil_moisture_roof, soil_moisture_road, "
                 << "LE_green_roof_diag, LE_permeable_road_diag: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][6.3][allocate_ucm_fields] LE_crown_diag: "
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
     }
 
@@ -537,6 +542,9 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.LE_permeable_road_diag->setVal(0.0);
     fields.is_green_roof->setVal(0);  // Default: no green roofs
     fields.is_permeable_road->setVal(0);  // Default: no permeable roads
+
+    // Phase 6.3: Initialize crown transpiration diagnostic
+    fields.LE_crown_diag->setVal(0.0);
 
     // Get const references to the broadcast data
     const auto& rows = building_reader.rows();

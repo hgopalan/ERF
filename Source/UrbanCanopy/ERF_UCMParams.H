@@ -252,6 +252,20 @@ enum class SEBMode
 };
 
 /**
+ * @enum CrownTranspMode
+ * @brief Crown transpiration (LE) solver mode (Phase 6.3)
+ *
+ * Determines whether latent heat loss from crown (via bulk stomatal resistance)
+ * is computed and coupled into the 4-var SEB solver. Default 'off' ensures
+ * bit-identity when Phase 6.3 is disabled.
+ */
+enum class CrownTranspMode
+{
+    Off = 0,    ///< Phase 6.3 default: no crown transpiration (bit-identical to pre-Phase-6.3)
+    Simple = 1  ///< Phase 6.3: bulk stomatal resistance model (uses LAI, r_s, q_sat)
+};
+
+/**
  * @struct UCMParams
  * @brief Container for all SLUCM configuration parameters read from ParmParse
  *
@@ -577,6 +591,19 @@ struct UCMParams
     amrex::Real  crown_view_factor_wall = 0.3;       ///< Crown→wall geometric view factor [-]
     amrex::Real  crown_view_factor_road = 0.5;       ///< Crown→road geometric view factor [-] (larger — road directly below crown)
     amrex::Real  crown_area_frac_default = 0.7;      ///< Fallback if fields.crown_area_frac not populated [-]
+
+    // =========================================================================
+    // Section 21: Phase 6.3 — Crown transpiration (LE cooling via bulk stomatal resistance)
+    // =========================================================================
+    // Crown latent heat loss (evapotranspiration) via bulk stomatal resistance model.
+    // Pre-computed via compute_crown_transpiration_LE() and wired into 4-var SEB solver.
+    // Only active when seb_mode=FourVar AND crown_transp_mode=Simple.
+    // Contract #36: semi-implicit pre-Newton computation; LE_crown_diag is read-only in solver row.
+
+    CrownTranspMode crown_transp_mode = CrownTranspMode::Off;
+    std::string     crown_transp_mode_str = "off";
+    amrex::Real     r_stomatal_leaf_s_per_m = 200.0;  ///< Phase 6.3: Bulk stomatal resistance [s/m]
+    amrex::Real     LAI_default = 3.0;                ///< Phase 6.3: Default leaf area index [-]
 
     // =========================================================================
     // Public methods
