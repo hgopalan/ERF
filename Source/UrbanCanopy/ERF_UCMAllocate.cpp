@@ -416,15 +416,17 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << " or " << ncomp_i << "\n";
     }
 
-    // Phase 6.2b: Crown SEB facet (4-var Newton solver)
-    // T_crown allocated ONLY in 4-var mode; left as nullptr in 3-var mode (Contract #30)
-    if (params.seb_mode == SEBMode::FourVar) {
-       fields.T_crown = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
-       if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
-           Print() << "[UCM][6.2b][allocate_ucm_fields] T_crown (4-var mode): "
-                   << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
-       }
-    }
+ // Phase 6.2b: Crown SEB facet (4-var Newton solver)
+// T_crown allocated ONLY in 4-var mode; left as nullptr in 3-var mode (Contract #30)
+if (params.seb_mode == SEBMode::FourVar) {
+   fields.T_crown = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+   fields.H_crown_up = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+   fields.H_crown_down = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+   if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+       Print() << "[UCM][6.2b][allocate_ucm_fields] T_crown + H_crown_up/down (4-var mode): "
+               << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+   }
+}
     // In 3-var mode, T_crown remains nullptr (Contract #30)
 
     // Summary message

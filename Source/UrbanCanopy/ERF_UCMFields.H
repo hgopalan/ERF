@@ -390,6 +390,11 @@ struct UCMFields
     /// Boundary condition for crown energy balance (leaf surface temperature).
     std::unique_ptr<amrex::MultiFab>  T_crown;
 
+    // Phase 6.2b hotfix2: Crown sensible heat components (allocated only in 4-var mode)
+    std::unique_ptr<amrex::MultiFab> H_crown_up;    ///< Crown → atmosphere [W/m²]
+    std::unique_ptr<amrex::MultiFab> H_crown_down;  ///< Crown → canyon air [W/m²]
+
+
     // =========================================================================
     // Public methods
     // =========================================================================
