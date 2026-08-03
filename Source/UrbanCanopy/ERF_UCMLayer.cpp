@@ -166,6 +166,16 @@ void UCMLayer::advance(UCMFields& fields,
                            << "," << T_wall_max << "] K; T_skin_road=[" << T_road_min
                            << "," << T_road_max << "] K\n";
         }
+    
+   // Phase 6.3 diag: T_crown min/max (4-var mode only)
+    if (m_params.ucm_debug && fields.T_crown) {
+        amrex::Real Tc_min = fields.T_crown->min(0, 0);
+        amrex::Real Tc_max = fields.T_crown->max(0, 0);
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.3][entry] T_crown=[" << Tc_min
+                           << "," << Tc_max << "] K\n";
+        }
+    }
     }
 
     if (m_params.ucm_debug) {
