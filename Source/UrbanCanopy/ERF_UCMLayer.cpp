@@ -142,7 +142,15 @@ void UCMLayer::advance(UCMFields& fields,
     // by the green-roof / permeable-road blocks BEFORE the Newton SEB reads them).
     fields.LE_green_roof_diag->setVal(0.0);
     fields.LE_permeable_road_diag->setVal(0.0);
-
+  // Phase 6.2b hotfix4: Q_tree_SW_abs uses += in Beer-Lambert kernel;
+    // must be reset each step or it accumulates unbounded.
+    if (fields.Q_tree_SW_abs) {
+        fields.Q_tree_SW_abs->setVal(0.0);
+    }
+    // Phase 6.3 hotfix1: also zero LE_crown_diag each step
+    if (fields.LE_crown_diag) {
+        fields.LE_crown_diag->setVal(0.0);
+    }
     // Phase 2.3: zero-init facet-split fluxes
     fields.H_road->setVal(0.0);
     fields.H_wall->setVal(0.0);

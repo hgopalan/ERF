@@ -326,6 +326,14 @@ void solve_facet_seb_4var_with_diag(
                 if (step >  max_step_K) step =  max_step_K;
                 if (step < -max_step_K) step = -max_step_K;
                 amrex::Real T_new = T_crown + step;
+   // DEBUG
+                #ifndef AMREX_USE_GPU
+                 if (T_crown > 375.0) {
+                    printf("Row3 dbg: T=%.1f SW=%.1f LW_in=%.1f LW_out=%.1f H_up=%.1f H_dn=%.1f LE=%.1f F=%.3f Fp=%.2f T_wl=%.1f T_rd=%.1f U=%.2f\n",
+                           T_crown, SW_abs, LW_in, LW_out, H_up, H_down, LE_crown_cell, F, Fp,
+                           T_wall_lag, T_road_lag, H_coeff_crown / (rho_cp * Ch_leaf));
+                }
+                #endif
                 T_crown = amrex::max(amrex::min(T_new, T_max_K), T_min_K);
                 dT_max = amrex::max(dT_max, std::abs(step));
             }
