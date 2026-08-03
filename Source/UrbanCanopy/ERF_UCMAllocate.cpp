@@ -374,6 +374,13 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
     }
 
+    // Phase 6.2a: Tree radiation diagnostic field
+    fields.Q_tree_SW_abs = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][6.2a][allocate_ucm_fields] Q_tree_SW_abs: "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+    }
+
     // Phase 5.3: Green roof and permeable pavement state fields
     fields.soil_moisture_roof = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
     fields.soil_moisture_road = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
@@ -498,6 +505,9 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.Q_HVAC_roof_diag->setVal(0.0);
     fields.Q_HVAC_wall_diag->setVal(0.0);
     fields.Q_HVAC_road_diag->setVal(0.0);
+
+    // Phase 6.2a: Zero out tree radiation diagnostic
+    fields.Q_tree_SW_abs->setVal(0.0);
 
     // Phase 5.3: Initialize green roof and permeable pavement state
     fields.soil_moisture_roof->setVal(params.green_roof_soil_capacity_m);  // Initialize to full capacity
@@ -1136,6 +1146,12 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
         Print() << "[UCM][5.5][fill_ucm_fields_homogeneous] Q_HVAC_roof_diag, Q_HVAC_wall_diag, Q_HVAC_road_diag = 0.0 W/m^2\n";
     }
 
+    // Phase 6.2a: Tree radiation diagnostic field
+    fields.Q_tree_SW_abs->setVal(0.0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][6.2a][fill_ucm_fields_homogeneous] Q_tree_SW_abs = 0.0 W/m^2\n";
+    }
+
     // Phase 5.3: Green roof and permeable pavement state
     fields.soil_moisture_roof->setVal(params.green_roof_soil_capacity_m);
     fields.soil_moisture_road->setVal(params.permeable_road_soil_capacity_m);
@@ -1454,6 +1470,14 @@ bool UCMFields::all_allocated() const
     if (!Q_HVAC_road_diag) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][5.5][all_allocated] MISSING: Q_HVAC_road_diag\n";
+        }
+        result = false;
+    }
+
+    // Phase 6.2a: Tree radiation diagnostic
+    if (!Q_tree_SW_abs) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.2a][all_allocated] MISSING: Q_tree_SW_abs\n";
         }
         result = false;
     }
