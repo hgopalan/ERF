@@ -416,10 +416,21 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << " or " << ncomp_i << "\n";
     }
 
+    // Phase 6.2b: Crown SEB facet (4-var Newton solver)
+    // T_crown allocated ONLY in 4-var mode; left as nullptr in 3-var mode (Contract #30)
+    if (params.seb_mode == SEBMode::FourVar) {
+       fields.T_crown = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+       if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+           Print() << "[UCM][6.2b][allocate_ucm_fields] T_crown (4-var mode): "
+                   << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << "\n";
+       }
+    }
+    // In 3-var mode, T_crown remains nullptr (Contract #30)
+
     // Summary message
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
-        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 51 MultiFabs on UCM grid "
-                << "at lev=" << lev << "\n";
+       Print() << "[UCM][1.2][allocate_ucm_fields] allocated 51 MultiFabs on UCM grid "
+               << "at lev=" << lev << "\n";
     }
 
     // Verify all are allocated
@@ -427,13 +438,13 @@ void allocate_ucm_fields(UCMFields& fields,
 }
 
 void fill_ucm_fields_from_csv(UCMFields& fields,
-                              const UCMGrid& ucm_grid,
-                              const UCMBuildingLayoutReader& building_reader,
-                              const UCMMaterialRegistry& material_registry,
-                              const UCMParams& params,
-                              int grid_ratio,
-                              int lev,
-                              bool ucm_debug)
+                             const UCMGrid& ucm_grid,
+                             const UCMBuildingLayoutReader& building_reader,
+                             const UCMMaterialRegistry& material_registry,
+                             const UCMParams& params,
+                             int grid_ratio,
+                             int lev,
+                             bool ucm_debug)
 {
     // Precondition checks
     AMREX_ALWAYS_ASSERT(fields.all_allocated());
@@ -470,6 +481,12 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.crown_area_frac->setVal(0.0);
     fields.Cd_leaf->setVal(0.0);
     fields.is_tree->setVal(0);
+
+    // Phase 6.2b: Crown SEB facet (4-var mode only)
+    if (params.seb_mode == SEBMode::FourVar) {
+       fields.T_crown->setVal(params.T_canyon_init_K);
+    }
+
     fields.mat_id_roof->setVal(0);
     fields.mat_id_wall->setVal(0);
     fields.mat_id_road->setVal(0);
@@ -968,6 +985,15 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][1.2][fill_ucm_fields_homogeneous] T_canyon_air = "
                 << params.T_canyon_init_K << " K\n";
+    }
+
+    // Phase 6.2b: Crown SEB facet (4-var mode only)
+    if (params.seb_mode == SEBMode::FourVar) {
+       fields.T_crown->setVal(params.T_canyon_init_K);
+       if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+           Print() << "[UCM][6.2b][fill_ucm_fields_homogeneous] T_crown = "
+                   << params.T_canyon_init_K << " K\n";
+       }
     }
 
     // Phase 3.5A: Fill multi-layer slab temperatures

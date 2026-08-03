@@ -376,6 +376,21 @@ struct UCMFields
     std::unique_ptr<amrex::iMultiFab> is_tree;
 
     // =========================================================================
+    // Phase 6.2b: Crown SEB facet (4-var Newton solver)
+    // =========================================================================
+    // Crown as separate 4th SEB facet (roof, wall, road, crown).
+    // T_crown allocated ONLY in 4-var mode; nullptr in 3-var mode (Contract #30).
+    // Crown physics: SW absorption (Q_tree_SW_abs), 2-sided LW emission, canyon-LW
+    // absorption, 2-sided sensible flux to canyon air. Semi-implicit coupling via
+    // lagged T_crown in existing 3 facet rows; crown row uses current iterates for
+    // T_roof and lagged for T_wall_prev, T_road_prev (Contract #31).
+
+    /// Crown skin temperature [K]. Phase 6.2b: allocated ONLY in 4-var mode.
+    /// Prognostic variable for tree canopy; nullptr in 3-var mode (Contract #30).
+    /// Boundary condition for crown energy balance (leaf surface temperature).
+    std::unique_ptr<amrex::MultiFab>  T_crown;
+
+    // =========================================================================
     // Public methods
     // =========================================================================
 
