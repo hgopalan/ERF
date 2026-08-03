@@ -665,6 +665,14 @@ void UCMLayer::advance(UCMFields& fields,
         const bool lw_radiosity_mode_is_multi = (m_params.lw_radiosity_mode == LWRadiosityMode::MultiLagged);
         auto const H_bldg_a = fields.H_bldg->const_array(mfi);
 
+        // Phase 6.2b hotfix1: Bind T_crown and H_crown arrays (allocated only in 4-var mode)
+        auto Tcrown_a = (fields.T_crown ? fields.T_crown->array(mfi)
+                                         : amrex::Array4<amrex::Real>());
+        auto H_crown_up_a = (fields.H_crown_up ? fields.H_crown_up->array(mfi)
+                                                 : amrex::Array4<amrex::Real>());
+        auto H_crown_down_a = (fields.H_crown_down ? fields.H_crown_down->array(mfi)
+                                                    : amrex::Array4<amrex::Real>());
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
             if (is_urb(i,j,0) == 0) return;
 
@@ -869,14 +877,59 @@ void UCMLayer::advance(UCMFields& fields,
                 }
 
             } else if (m_params.seb_mode == SEBMode::FourVar) {
-                // ===== Phase 6.2b (4-var mode): New 4-facet solver with crown (Contract #29) =====
-                // TODO: Implement 4-var solver dispatch. For now, fall back to 3-var.
-                // This is a placeholder for the 4-var solver implementation.
-                // The 4-var solver will:
-                // - Solve [T_roof, T_wall, T_road, T_crown] simultaneously
-                // - Use semi-implicit lagged T_crown feedback in facet rows
-                // - Update T_crown field (allocated only in 4-var mode, Contract #30)
-                // - Compute H_crown_net for canyon-air coupling
+                // ===== Phase 6.2b hotfix1 (4-var mode): New 4-facet solver with crown (Contract #29) =====
+
+                // Bind lagged wall/road temperatures for use in crown row
+                amrex::Real T_wl_prev = Tskin_wl(i,j,0);
+                amrex::Real T_rd_prev = Tskin_rd(i,j,0);
+
+                // Diagnostics accumulators (same pattern as 3-var)
+                amrex::Real T_roof_unclamped, T_wall_unclamped, T_road_unclamped, T_crown_unclamped;
+                amrex::Real residual, n_iter_real;
+                int n_iter_int;
+
+                // Call the 4-var solver with crown as prognostic
+                amrex::Real H_crown_up, H_crown_down;
+                solve_facet_seb_4var_with_diag(
+                    // Current iterates
+                    Tskin_rf(i,j,0), Tskin_wl(i,j,0), Tskin_rd(i,j,0),
+                    (fields.T_crown ? Tcrown_a(i,j,0) : T_can),  // Use T_canyon as fallback for 3-var
+                    // Lagged for semi-implicit coupling
+                    T_wl_prev, T_rd_prev,
+                    // Subsurface boundaries
+                    T1_rf(i,j,0), T1_wl(i,j,0), T1_rd(i,j,0),
+                    // Canyon and atmosphere
+                    T_can, T_atm,
+                    // Radiation (already computed above)
+                    SW_roof, SW_wall, SW_road,
+                    LW_roof_eff, LW_wall_eff, LW_road_eff,
+                    Q_tree_SW_abs_a(i,j,0),
+                    // Albedos
+                    alb_rf(i,j,0), alb_wl(i,j,0), alb_rd(i,j,0),
+                    // Emissivities
+                    eps_rf(i,j,0), eps_wl(i,j,0), eps_rd(i,j,0), m_params.eps_leaf,
+                    // Thermal properties
+                    k_rf(i,j,0), k_wl(i,j,0), k_rd(i,j,0),
+                    dz_slab, dz_slab, dz_slab,
+                    // Aerodynamic
+                    Ch_roof, Ch_wall, Ch_road, m_params.Ch_leaf,
+                    U, rho_cp,
+                    // Crown geometry
+                    m_params.crown_view_factor,
+                    m_params.crown_area_frac,
+                    // Solver control
+                    max_iter, tol_K,
+                    // Outputs: temperatures
+                    Tskin_rf(i,j,0), Tskin_wl(i,j,0), Tskin_rd(i,j,0),
+                    (fields.T_crown ? Tcrown_a(i,j,0) : T_can),
+                    // Outputs: fluxes
+                    H_rf, H_wl, H_rd, H_crown_up, H_crown_down,
+                    // Diagnostics
+                    n_iter_int, residual);
+
+                // Write back H_crown components
+                if (fields.H_crown_up) H_crown_up_a(i,j,0) = H_crown_up;
+                if (fields.H_crown_down) H_crown_down_a(i,j,0) = H_crown_down;
             }
 
             h_roof_a(i,j,0) = H_rf;
@@ -1031,6 +1084,10 @@ void UCMLayer::advance(UCMFields& fields,
         auto const T_atm    = forcing.T_atm_ref->const_array(mfi);
         auto T_canyon_a     = fields.T_canyon_air->array(mfi);
 
+        // Phase 6.2b hotfix1: Bind H_crown_down for canyon-air coupling
+        auto const H_crown_down_a = (fields.H_crown_down ? fields.H_crown_down->const_array(mfi)
+                                                         : amrex::Array4<const amrex::Real>());
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
             if (is_urb(i,j,0) == 0) return;
 
@@ -1052,6 +1109,12 @@ void UCMLayer::advance(UCMFields& fields,
 
             amrex::Real H_net = H_rd(i,j,0) + H_wl(i,j,0)
                               - conductance * (T_canyon_a(i,j,0) - T_atm(i,j,0));
+
+            // Phase 6.2b hotfix1 (Bug G fix): Add H_crown_down from crown to canyon
+            // This is only non-zero in 4-var mode; in 3-var mode H_crown_down is nullptr
+            if (fields.H_crown_down) {
+                H_net += H_crown_down_a(i,j,0);
+            }
 
             amrex::Real dT = H_net * dt / thermal_mass;
 
