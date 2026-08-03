@@ -899,13 +899,13 @@ void UCMLayer::advance(UCMFields& fields,
                 solve_facet_seb_4var_with_diag(
                     // Current iterates
                     Tskin_rf(i,j,0), Tskin_wl(i,j,0), Tskin_rd(i,j,0),
-                    (fields.T_crown ? Tcrown_a(i,j,0) : T_can),  // Use T_canyon as fallback for 3-var
+                    (has_T_crown ? Tcrown_a(i,j,0) : T_can),  // Use T_canyon as fallback for 3-var
                     // Lagged for semi-implicit coupling
                     T_wl_prev, T_rd_prev,
                     // Subsurface boundaries
                     T1_rf(i,j,0), T1_wl(i,j,0), T1_rd(i,j,0),
                     // Canyon and atmosphere
-                    T_can, T_atm,
+                   T_can, T_atm_a(i,j,0),
                     // Radiation (already computed above)
                     SW_roof, SW_wall, SW_road,
                     LW_roof_eff, LW_wall_eff, LW_road_eff,
@@ -927,15 +927,15 @@ void UCMLayer::advance(UCMFields& fields,
                     max_iter, tol_K,
                     // Outputs: temperatures
                     Tskin_rf(i,j,0), Tskin_wl(i,j,0), Tskin_rd(i,j,0),
-                    (fields.T_crown ? Tcrown_a(i,j,0) : T_can),
+                    (has_T_crown ? Tcrown_a(i,j,0) : T_can),
                     // Outputs: fluxes
                     H_rf, H_wl, H_rd, H_crown_up, H_crown_down,
                     // Diagnostics
                     n_iter_int, residual);
 
                 // Write back H_crown components
-                if (fields.H_crown_up) H_crown_up_a(i,j,0) = H_crown_up;
-                if (fields.H_crown_down) H_crown_down_a(i,j,0) = H_crown_down;
+                if (has_H_crown_up) H_crown_up_a(i,j,0) = H_crown_up;
+                if (has_H_crown_dn) H_crown_down_a(i,j,0) = H_crown_down;
             }
 
             h_roof_a(i,j,0) = H_rf;
