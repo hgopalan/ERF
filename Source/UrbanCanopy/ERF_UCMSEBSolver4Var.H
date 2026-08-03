@@ -27,54 +27,43 @@
  *   - NO conduction (no slab). NO LE (transpiration deferred to Phase 6.3).
  *
  * Semi-implicit coupling (Contract #31):
- *   Roof/wall/road LW_in gains: +eps_facet * σ * T_crown_prev^4 * crown_view_factor
+ *   Wall LW_in gain: +eps_wall * σ * T_crown_prev^4 * crown_view_factor_wall
+ *   Road LW_in gain: +eps_road * σ * T_crown_prev^4 * crown_view_factor_road
+ *   Roof receives NO crown-LW (crown is geometrically below roof — Contract #34).
  *   T_crown_prev is from previous Newton iteration (or T_canyon_init at n=0).
- *   This keeps the system weakly coupled, solvable with Gauss-Seidel.
  *
  * System architecture:
- *   Row 0 (Roof):   F_roof  = Rn_roof  - H_roof  - G_roof  = 0
- *   Row 1 (Wall):   F_wall  = Rn_wall  - H_wall  = 0  (no G; semi-implicit LW from crown)
- *   Row 2 (Road):   F_road  = Rn_road  - H_road  - G_road  = 0  (semi-implicit LW from crown)
- *   Row 3 (Crown):  F_crown = Q_SW_crown - 2*H_crown - sigma*eps*T_crown^4 + sigma*eps*LW_down = 0
+ *   Row 0 (Roof):   F_roof  = Rn_roof  - H_roof  - G_roof  = 0   (no crown-LW feedback)
+ *   Row 1 (Wall):   F_wall  = Rn_wall  - H_wall  - G_wall  = 0   (crown-LW via VF_wall)
+ *   Row 2 (Road):   F_road  = Rn_road  - H_road  - G_road  = 0   (crown-LW via VF_road)
+ *   Row 3 (Crown):  F_crown = SW_abs + LW_in - LW_out - H_up - H_down = 0
+ *                   (LW_in uses only wall+road upward LW, NOT roof)
  *
  * Gauss-Seidel iteration:
  *   1. Compute roof residual and Jacobian; Newton step for T_roof
- *   2. Compute wall residual using updated T_roof; Newton step for T_wall
- *   3. Compute road residual using updated T_roof; Newton step for T_road
- *   4. Compute crown residual using updated T_roof, T_wall, T_road; Newton step for T_crown
+ *   2. Compute wall residual (with crown-LW); Newton step for T_wall
+ *   3. Compute road residual (with crown-LW); Newton step for T_road
+ *   4. Compute crown residual using lagged wall/road; Newton step for T_crown
  *   5. Repeat until convergence
+ *
+ * Contract #34 (Phase 6.2b hotfix3): facet-specific crown view factors.
+ *   Roof: 0 (crown below roof plane)
+ *   Wall, road: independent scalars from ParmParse (see ERF_UCMParams.H).
  */
 
 /**
  * @brief Phase 6.2b: 4-facet SEB solver with crown as separate prognostic variable
  *
  * Phase 6.2b hotfix1: Fixed bugs B, C, D, E, F
- *   - Bug B: Convergence now tracks dT_max from all 4 rows (not frozen at 0.0)
- *   - Bug C: Wall row now includes conduction term
- *   - Bug D: Crown sensible split into upward (to atmosphere) and downward (to canyon)
- *   - Bug E: Crown row now absorbs canyon LW upward from roof, wall, road
- *   - Bug F: Proper Gauss-Seidel — LW feedback recomputed at start of each outer iter
+ * Phase 6.2b hotfix3: Facet-specific crown view factors (Contract #34); per-cell
+ *                     crown_area_frac; roof no longer receives crown-LW.
  *
- * Inputs:
- *   T_roof_in, T_wall_in, T_road_in, T_crown_in : current temperature estimates [K]
- *   T_wall_prev, T_road_prev : lagged wall and road for canyon LW (frozen per outer iter)
- *   T1_roof, T1_wall, T1_road : subsurface boundary temps [K]
- *   T_canyon : canyon air temperature [K]
- *   T_atm_ref : reference atmosphere temperature [K] (for crown upward sensible)
- *   SW_down : incident shortwave [W/m²]
- *   LW_down : incident longwave from atmosphere [W/m²]
- *   Q_tree_SW_abs : absorbed shortwave by crown [W/m²] (from Phase 6.2a)
- *   alpha_roof, alpha_wall, alpha_road : shortwave albedo [-]
- *   eps_roof, eps_wall, eps_road, eps_leaf : longwave emissivity [-]
- *   k_th_roof, k_th_wall, k_th_road : thermal conductivity [W/m/K]
- *   dz_roof, dz_wall, dz_road : slab thickness [m]
- *   Ch_roof, Ch_wall, Ch_road, Ch_leaf : drag coefficient [-]
- *   U_ref : reference wind speed [m/s]
- *   rho_cp : air density * specific heat [J/m³/K]
- *   crown_view_factor : crown→canyon geometric view factor [-]
- *   crown_area_frac : crown area fraction [-] for effective area weighting
- *   max_iter : max Newton iterations
- *   tol_K : convergence tolerance [K]
+ * Inputs (highlights of hotfix3 changes):
+ *   crown_view_factor_wall : crown→wall view factor [-]
+ *   crown_view_factor_road : crown→road view factor [-]
+ *   crown_area_frac        : per-cell crown area fraction [-] (from fields.crown_area_frac)
+ *
+ * Other inputs unchanged from hotfix1.
  *
  * Outputs (via references):
  *   T_roof, T_wall, T_road, T_crown : final temperatures [K] (clamped)
@@ -126,9 +115,10 @@ void solve_facet_seb_4var_with_diag(
     amrex::Real Ch_leaf,      // Phase 6.2b: crown drag coefficient
     amrex::Real U_ref,
     amrex::Real rho_cp,
-    // Input: crown coupling
-    amrex::Real crown_view_factor,  // Phase 6.2b: crown→canyon VF
-    amrex::Real crown_area_frac,    // Phase 6.2b hotfix1: crown area fraction
+    // Input: crown coupling (Phase 6.2b hotfix3: facet-specific VFs)
+    amrex::Real crown_view_factor_wall,  // crown→wall VF (Contract #34)
+    amrex::Real crown_view_factor_road,  // crown→road VF (Contract #34)
+    amrex::Real crown_area_frac,          // per-cell crown area fraction (Issue #3)
     // Input: solver control
     int         max_iter,
     amrex::Real tol_K,
@@ -170,7 +160,7 @@ void solve_facet_seb_4var_with_diag(
     if (dz_roof >= conduction_min) {
         G_coeff_roof = 2.0 * k_th_roof / dz_roof;
     }
-    // Bug C fix: Wall NOW has conduction
+    // Bug C fix (hotfix1): Wall NOW has conduction
     amrex::Real G_coeff_wall = 0.0;
     if (dz_wall >= conduction_min) {
         G_coeff_wall = 2.0 * k_th_wall / dz_wall;
@@ -186,7 +176,7 @@ void solve_facet_seb_4var_with_diag(
     amrex::Real H_coeff_road = rho_cp * Ch_road * U;
     amrex::Real H_coeff_crown = rho_cp * Ch_leaf * U;
 
-    // Shortwave absorption
+    // Shortwave absorption (Phase 6.2c will replace SW_down with per-facet radiosity SW)
     amrex::Real SW_abs_roof  = (1.0 - alpha_roof) * amrex::max(SW_down, amrex::Real(0.0));
     amrex::Real SW_abs_wall  = (1.0 - alpha_wall) * amrex::max(SW_down, amrex::Real(0.0));
     amrex::Real SW_abs_road  = (1.0 - alpha_road) * amrex::max(SW_down, amrex::Real(0.0));
@@ -197,30 +187,31 @@ void solve_facet_seb_4var_with_diag(
     amrex::Real T_road  = amrex::max(amrex::min(T_road_in, T_max_K), T_min_K);
     amrex::Real T_crown = amrex::max(amrex::min(T_crown_in, T_max_K), T_min_K);
 
-    // Clamp lagged values for use in crown row (Bug E)
+    // Clamp lagged values for use in crown row
     amrex::Real T_wall_lag = amrex::max(amrex::min(T_wall_prev, T_max_K), T_min_K);
     amrex::Real T_road_lag = amrex::max(amrex::min(T_road_prev, T_max_K), T_min_K);
 
-    // Gauss-Seidel Newton iteration (Bug F: LW feedback recomputed each outer iter)
+    // Gauss-Seidel Newton iteration
     int n_iter = 0;
     amrex::Real residual_max = 1.0e10;
     for (; n_iter < max_iter; ++n_iter) {
 
-        // Bug F fix: Recompute lagged crown-LW-feedback at START of each outer iteration
-        // using LATEST T_crown from previous outer iteration (proper Gauss-Seidel)
+        // Recompute lagged crown-LW-feedback at START of each outer iteration
+        // using LATEST T_crown from previous outer iteration (proper Gauss-Seidel).
+        // Phase 6.2b hotfix3: Roof receives ZERO crown-LW (Contract #34: crown below roof plane).
+        // Wall and road each use their own view factor.
         amrex::Real T4_crown  = T_crown * T_crown * T_crown * T_crown;
         amrex::Real LW_crown_rad = sigma_sb * T4_crown;
-        amrex::Real LW_fb_roof = eps_roof * LW_crown_rad * crown_view_factor;
-        amrex::Real LW_fb_wall = eps_wall * LW_crown_rad * crown_view_factor;
-        amrex::Real LW_fb_road = eps_road * LW_crown_rad * crown_view_factor;
+        amrex::Real LW_fb_wall = eps_wall * LW_crown_rad * crown_view_factor_wall;
+        amrex::Real LW_fb_road = eps_road * LW_crown_rad * crown_view_factor_road;
 
         amrex::Real dT_max = 0.0;
 
-        // ========== Row 0: Roof ==========
+        // ========== Row 0: Roof (Phase 6.2b hotfix3: NO crown-LW feedback) ==========
         {
             amrex::Real T3 = T_roof * T_roof * T_roof;
             amrex::Real T4 = T3 * T_roof;
-            amrex::Real LW_abs = eps_roof * (LW_down + LW_fb_roof - sigma_sb * T4);
+            amrex::Real LW_abs = eps_roof * (LW_down - sigma_sb * T4);  // No crown-LW: Contract #34
             amrex::Real Rn     = SW_abs_roof + LW_abs;
             amrex::Real H      = H_coeff_roof * (T_roof - T_can);
             amrex::Real G      = G_coeff_roof * (T_roof - T1r);
@@ -237,14 +228,14 @@ void solve_facet_seb_4var_with_diag(
             }
         }
 
-        // ========== Row 1: Wall (Bug C: NOW includes conduction) ==========
+        // ========== Row 1: Wall (crown-LW via crown_view_factor_wall) ==========
         {
             amrex::Real T3 = T_wall * T_wall * T_wall;
             amrex::Real T4 = T3 * T_wall;
             amrex::Real LW_abs = eps_wall * (LW_down + LW_fb_wall - sigma_sb * T4);
             amrex::Real Rn     = SW_abs_wall + LW_abs;
             amrex::Real H      = H_coeff_wall * (T_wall - T_can);
-            amrex::Real G      = G_coeff_wall * (T_wall - T1w);  // NEW: wall conduction
+            amrex::Real G      = G_coeff_wall * (T_wall - T1w);  // Wall conduction (hotfix1)
             amrex::Real F      = Rn - H - G;
 
             amrex::Real Fp     = -4.0 * eps_wall * sigma_sb * T3 - H_coeff_wall - G_coeff_wall;
@@ -258,7 +249,7 @@ void solve_facet_seb_4var_with_diag(
             }
         }
 
-        // ========== Row 2: Road ==========
+        // ========== Row 2: Road (crown-LW via crown_view_factor_road) ==========
         {
             amrex::Real T3 = T_road * T_road * T_road;
             amrex::Real T4 = T3 * T_road;
@@ -279,33 +270,36 @@ void solve_facet_seb_4var_with_diag(
             }
         }
 
-        // ========== Row 3: Crown (Bug D+E fixes) ==========
+        // ========== Row 3: Crown (Phase 6.2b hotfix3: LW_up uses wall+road only) ==========
         {
             amrex::Real T3 = T_crown * T_crown * T_crown;
             amrex::Real T4 = T3 * T_crown;
 
-            // Bug E fix: canyon LW upward using CURRENT T_roof and LAGGED wall/road
-            // Crown receives upward LW from roof (already updated in Gauss-Seidel order),
-            // and lagged wall/road from previous outer iteration (semi-implicit)
-            amrex::Real T4_roof_cur  = T_roof * T_roof * T_roof * T_roof;
+            // Phase 6.2b hotfix3: canyon LW upward uses only WALL and ROAD (NOT roof).
+            // Contract #34: crown is below roof plane, so crown does not see the roof.
+            // Wall/road are lagged (semi-implicit); roof was included in hotfix1 but
+            // was geometrically incorrect.
             amrex::Real T4_wall_lag  = T_wall_lag * T_wall_lag * T_wall_lag * T_wall_lag;
             amrex::Real T4_road_lag  = T_road_lag * T_road_lag * T_road_lag * T_road_lag;
             amrex::Real LW_up_canyon = sigma_sb * (
-                  eps_roof * T4_roof_cur
-                + eps_wall * T4_wall_lag
-                + eps_road * T4_road_lag) / 3.0;
+                  eps_wall * T4_wall_lag
+                + eps_road * T4_road_lag) / 2.0;
 
+            // Average crown-facing view factor for the "sky share" of crown's LW input.
+            // (1 - avg_VF) is the fraction of crown's downward-hemisphere view NOT filled
+            // by wall+road, so that fraction absorbs LW_up_canyon.
+            amrex::Real avg_VF   = 0.5 * (crown_view_factor_wall + crown_view_factor_road);
             amrex::Real SW_abs   = Q_tree_SW_abs;
             amrex::Real LW_in    = eps_leaf * crown_area_frac *
-                                  (LW_down + (1.0 - crown_view_factor) * LW_up_canyon);
+                                   (LW_down + (1.0 - avg_VF) * LW_up_canyon);
             amrex::Real LW_out   = 2.0 * eps_leaf * crown_area_frac * sigma_sb * T4;
 
-            // Bug D fix: split H_crown into upward (to atmosphere) and downward (to canyon)
+            // Split H_crown into upward (to atmosphere) and downward (to canyon)
             amrex::Real H_up     = H_coeff_crown * crown_area_frac * (T_crown - T_atm);
             amrex::Real H_down   = H_coeff_crown * crown_area_frac * (T_crown - T_can);
 
             amrex::Real F  = SW_abs + LW_in - LW_out - H_up - H_down;
-            // Jacobian: diagonal only; off-diagonal coupling is 1-outer-iter lagged per Contract #31
+            // Jacobian: diagonal only; off-diagonal coupling is 1-outer-iter lagged (Contract #31)
             amrex::Real Fp = -8.0 * eps_leaf * crown_area_frac * sigma_sb * T3
                            - 2.0 * H_coeff_crown * crown_area_frac;
 
@@ -319,7 +313,7 @@ void solve_facet_seb_4var_with_diag(
             }
         }
 
-        // Bug B fix: track dT_max from all rows and break on convergence
+        // Track dT_max from all rows and break on convergence
         residual_max = dT_max;
         if (dT_max < tol_K) {
             ++n_iter;
@@ -337,7 +331,7 @@ void solve_facet_seb_4var_with_diag(
     H_roof_out = H_coeff_roof * (T_roof_out - T_can);
     H_wall_out = H_coeff_wall * (T_wall_out - T_can);
     H_road_out = H_coeff_road * (T_road_out - T_can);
-    // Bug D fix: split crown sensible into upward and downward
+    // Split crown sensible into upward and downward (hotfix1 Bug D)
     H_crown_up_out   = H_coeff_crown * crown_area_frac * (T_crown_out - T_atm);
     H_crown_down_out = H_coeff_crown * crown_area_frac * (T_crown_out - T_can);
 
