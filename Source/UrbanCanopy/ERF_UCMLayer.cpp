@@ -678,7 +678,7 @@ void UCMLayer::advance(UCMFields& fields,
             const bool has_T_crown     = (fields.T_crown != nullptr);
             const bool has_H_crown_up  = (fields.H_crown_up != nullptr);
             const bool has_H_crown_dn  = (fields.H_crown_down != nullptr);
-
+            auto const crown_af_a      = fields.crown_area_frac->const_array(mfi);
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
             if (is_urb(i,j,0) == 0) return;
 
@@ -907,8 +907,8 @@ void UCMLayer::advance(UCMFields& fields,
                     // Canyon and atmosphere
                    T_can, T_atm_a(i,j,0),
                     // Radiation (already computed above)
-                    SW_roof, 
-                    LW_roof_eff, 
+                    SW_roof, SW_wall, SW_road,
+                    LW_roof_in, LW_wall_eff, LW_road_eff,
                     Q_tree_SW_abs_a(i,j,0),
                     // Albedos
                     alb_rf(i,j,0), alb_wl(i,j,0), alb_rd(i,j,0),
@@ -920,9 +920,10 @@ void UCMLayer::advance(UCMFields& fields,
                     // Aerodynamic
                     Ch_roof, Ch_wall, Ch_road, m_params.Ch_leaf,
                     U, rho_cp,
-                    // Crown geometry
-                    m_params.crown_view_factor,
-                    m_params.crown_area_frac,
+                    // Crown geometry (Phase 6.2b hotfix3: facet-specific VFs + per-cell area)
+                    m_params.crown_view_factor_wall,
+                    m_params.crown_view_factor_road,
+                    crown_af_a(i,j,0),
                     // Solver control
                     max_iter, tol_K,
                     // Outputs: temperatures

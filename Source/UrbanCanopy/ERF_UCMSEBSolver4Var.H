@@ -22,7 +22,7 @@
  * Crown physics (Contract #32):
  *   - SW absorption via Q_tree_SW_abs (reused from Phase 6.2a)
  *   - 2-sided LW emission: upward σ*T_crown^4, downward to canyon
- *   - Canyon-LW absorption: receives LW_down from atmosphere
+ *   - Canyon-LW absorption: receives LW_down_sky from atmosphere
  *   - 2-sided sensible flux: H_crown_up (to atmosphere), H_crown_down (to canyon)
  *   - NO conduction (no slab). NO LE (transpiration deferred to Phase 6.3).
  *
@@ -49,6 +49,15 @@
  * Contract #34 (Phase 6.2b hotfix3): facet-specific crown view factors.
  *   Roof: 0 (crown below roof plane)
  *   Wall, road: independent scalars from ParmParse (see ERF_UCMParams.H).
+ *
+ * Contract #35 (Phase 6.2c): per-facet SW and LW radiosity inputs.
+ *   Roof gets SW_roof + LW_down_sky (unshaded, unbounced).
+ *   Wall gets SW_wall + LW_wall_eff (SVF-attenuated + multi-bounce SW; radiosity-lagged LW).
+ *   Road gets SW_road + LW_road_eff (SVF-attenuated + multi-bounce SW; radiosity-lagged LW).
+ *   Crown gets Q_tree_SW_abs + LW_down_sky (only sees sky and canyon LW).
+ *   Previously (hotfix3) all facets received SW_down + LW_down; this over-illuminated
+ *   walls and roads in shadowed canyons (H/W > 1) and skipped the multi-bounce
+ *   radiosity that hotfix3 called from ERF_UCMLayer.cpp but discarded.
  */
 
 /**
@@ -57,13 +66,15 @@
  * Phase 6.2b hotfix1: Fixed bugs B, C, D, E, F
  * Phase 6.2b hotfix3: Facet-specific crown view factors (Contract #34); per-cell
  *                     crown_area_frac; roof no longer receives crown-LW.
+ * Phase 6.2c: Per-facet SW and LW radiosity inputs (Contract #35).
  *
- * Inputs (highlights of hotfix3 changes):
- *   crown_view_factor_wall : crown→wall view factor [-]
- *   crown_view_factor_road : crown→road view factor [-]
- *   crown_area_frac        : per-cell crown area fraction [-] (from fields.crown_area_frac)
+ * Inputs (highlights of 6.2c changes):
+ *   SW_roof, SW_wall, SW_road : per-facet downward SW after SVF + multi-bounce [W/m²]
+ *   LW_down_sky               : sky downward LW (for roof + crown) [W/m²]
+ *   LW_wall_eff, LW_road_eff  : per-facet LW after multi-bounce radiosity [W/m²]
+ *   Q_tree_SW_abs             : absorbed SW by crown (Phase 6.2a Beer-Lambert) [W/m²]
  *
- * Other inputs unchanged from hotfix1.
+ * All other inputs unchanged from hotfix3.
  *
  * Outputs (via references):
  *   T_roof, T_wall, T_road, T_crown : final temperatures [K] (clamped)
@@ -89,10 +100,14 @@ void solve_facet_seb_4var_with_diag(
     amrex::Real T1_road,
     amrex::Real T_canyon,
     amrex::Real T_atm_ref,      // Phase 6.2b hotfix1: for crown upward H
-    // Input: radiation
-    amrex::Real SW_down,
-    amrex::Real LW_down,
-    amrex::Real Q_tree_SW_abs,
+    // Input: radiation (Phase 6.2c: per-facet SW + LW radiosity — Contract #35)
+    amrex::Real SW_roof,        // Per-facet downward SW [W/m²] (SVF + radiosity applied)
+    amrex::Real SW_wall,        // Per-facet downward SW [W/m²]
+    amrex::Real SW_road,        // Per-facet downward SW [W/m²]
+    amrex::Real LW_down_sky,    // Sky downward LW [W/m²] (for roof + crown)
+    amrex::Real LW_wall_eff,    // Per-facet LW after multi-bounce radiosity [W/m²]
+    amrex::Real LW_road_eff,    // Per-facet LW after multi-bounce radiosity [W/m²]
+    amrex::Real Q_tree_SW_abs,  // Crown SW absorption (Phase 6.2a Beer-Lambert) [W/m²]
     // Input: albedo and emissivity
     amrex::Real alpha_roof,
     amrex::Real alpha_wall,
@@ -176,10 +191,11 @@ void solve_facet_seb_4var_with_diag(
     amrex::Real H_coeff_road = rho_cp * Ch_road * U;
     amrex::Real H_coeff_crown = rho_cp * Ch_leaf * U;
 
-    // Shortwave absorption (Phase 6.2c will replace SW_down with per-facet radiosity SW)
-    amrex::Real SW_abs_roof  = (1.0 - alpha_roof) * amrex::max(SW_down, amrex::Real(0.0));
-    amrex::Real SW_abs_wall  = (1.0 - alpha_wall) * amrex::max(SW_down, amrex::Real(0.0));
-    amrex::Real SW_abs_road  = (1.0 - alpha_road) * amrex::max(SW_down, amrex::Real(0.0));
+    // Phase 6.2c: Shortwave absorption uses PER-FACET SW (Contract #35).
+    // SW_roof/wall/road already contain SVF weighting + multi-bounce radiosity from caller.
+    amrex::Real SW_abs_roof  = (1.0 - alpha_roof) * amrex::max(SW_roof, amrex::Real(0.0));
+    amrex::Real SW_abs_wall  = (1.0 - alpha_wall) * amrex::max(SW_wall, amrex::Real(0.0));
+    amrex::Real SW_abs_road  = (1.0 - alpha_road) * amrex::max(SW_road, amrex::Real(0.0));
 
     // Initialize working temperatures with clamping
     amrex::Real T_roof  = amrex::max(amrex::min(T_roof_in, T_max_K), T_min_K);
@@ -207,11 +223,12 @@ void solve_facet_seb_4var_with_diag(
 
         amrex::Real dT_max = 0.0;
 
-        // ========== Row 0: Roof (Phase 6.2b hotfix3: NO crown-LW feedback) ==========
+        // ========== Row 0: Roof (hotfix3: NO crown-LW; 6.2c: uses LW_down_sky) ==========
         {
             amrex::Real T3 = T_roof * T_roof * T_roof;
             amrex::Real T4 = T3 * T_roof;
-            amrex::Real LW_abs = eps_roof * (LW_down - sigma_sb * T4);  // No crown-LW: Contract #34
+            // Roof is unshaded — receives raw sky LW; no crown-LW (Contract #34).
+            amrex::Real LW_abs = eps_roof * (LW_down_sky - sigma_sb * T4);
             amrex::Real Rn     = SW_abs_roof + LW_abs;
             amrex::Real H      = H_coeff_roof * (T_roof - T_can);
             amrex::Real G      = G_coeff_roof * (T_roof - T1r);
@@ -228,11 +245,12 @@ void solve_facet_seb_4var_with_diag(
             }
         }
 
-        // ========== Row 1: Wall (crown-LW via crown_view_factor_wall) ==========
+        // ========== Row 1: Wall (6.2c: LW_wall_eff from radiosity, plus crown-LW) ==========
         {
             amrex::Real T3 = T_wall * T_wall * T_wall;
             amrex::Real T4 = T3 * T_wall;
-            amrex::Real LW_abs = eps_wall * (LW_down + LW_fb_wall - sigma_sb * T4);
+            // Wall receives radiosity-bounced LW from sky+other-facets, plus crown-LW feedback.
+            amrex::Real LW_abs = eps_wall * (LW_wall_eff + LW_fb_wall - sigma_sb * T4);
             amrex::Real Rn     = SW_abs_wall + LW_abs;
             amrex::Real H      = H_coeff_wall * (T_wall - T_can);
             amrex::Real G      = G_coeff_wall * (T_wall - T1w);  // Wall conduction (hotfix1)
@@ -249,11 +267,12 @@ void solve_facet_seb_4var_with_diag(
             }
         }
 
-        // ========== Row 2: Road (crown-LW via crown_view_factor_road) ==========
+        // ========== Row 2: Road (6.2c: LW_road_eff from radiosity, plus crown-LW) ==========
         {
             amrex::Real T3 = T_road * T_road * T_road;
             amrex::Real T4 = T3 * T_road;
-            amrex::Real LW_abs = eps_road * (LW_down + LW_fb_road - sigma_sb * T4);
+            // Road receives radiosity-bounced LW from sky+walls, plus crown-LW feedback.
+            amrex::Real LW_abs = eps_road * (LW_road_eff + LW_fb_road - sigma_sb * T4);
             amrex::Real Rn     = SW_abs_road + LW_abs;
             amrex::Real H      = H_coeff_road * (T_road - T_can);
             amrex::Real G      = G_coeff_road * (T_road - T1d);
@@ -270,15 +289,13 @@ void solve_facet_seb_4var_with_diag(
             }
         }
 
-        // ========== Row 3: Crown (Phase 6.2b hotfix3: LW_up uses wall+road only) ==========
+        // ========== Row 3: Crown (hotfix3: LW_up uses wall+road only; 6.2c: LW_down_sky) ==========
         {
             amrex::Real T3 = T_crown * T_crown * T_crown;
             amrex::Real T4 = T3 * T_crown;
 
             // Phase 6.2b hotfix3: canyon LW upward uses only WALL and ROAD (NOT roof).
             // Contract #34: crown is below roof plane, so crown does not see the roof.
-            // Wall/road are lagged (semi-implicit); roof was included in hotfix1 but
-            // was geometrically incorrect.
             amrex::Real T4_wall_lag  = T_wall_lag * T_wall_lag * T_wall_lag * T_wall_lag;
             amrex::Real T4_road_lag  = T_road_lag * T_road_lag * T_road_lag * T_road_lag;
             amrex::Real LW_up_canyon = sigma_sb * (
@@ -286,12 +303,11 @@ void solve_facet_seb_4var_with_diag(
                 + eps_road * T4_road_lag) / 2.0;
 
             // Average crown-facing view factor for the "sky share" of crown's LW input.
-            // (1 - avg_VF) is the fraction of crown's downward-hemisphere view NOT filled
-            // by wall+road, so that fraction absorbs LW_up_canyon.
             amrex::Real avg_VF   = 0.5 * (crown_view_factor_wall + crown_view_factor_road);
             amrex::Real SW_abs   = Q_tree_SW_abs;
+            // Crown sees sky LW directly (above canopy) and canyon-LW-up from below.
             amrex::Real LW_in    = eps_leaf * crown_area_frac *
-                                   (LW_down + (1.0 - avg_VF) * LW_up_canyon);
+                                   (LW_down_sky + (1.0 - avg_VF) * LW_up_canyon);
             amrex::Real LW_out   = 2.0 * eps_leaf * crown_area_frac * sigma_sb * T4;
 
             // Split H_crown into upward (to atmosphere) and downward (to canyon)
