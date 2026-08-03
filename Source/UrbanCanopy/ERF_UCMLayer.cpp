@@ -662,6 +662,7 @@ void UCMLayer::advance(UCMFields& fields,
 
         const bool radiosity_mode_is_multi = (m_params.radiosity_mode == RadiosityMode::Multi);
         const bool lw_radiosity_mode_is_multi = (m_params.lw_radiosity_mode == LWRadiosityMode::MultiLagged);
+        auto const H_bldg_a = fields.H_bldg->const_array(mfi);
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
             if (is_urb(i,j,0) == 0) return;
@@ -727,7 +728,7 @@ void UCMLayer::advance(UCMFields& fields,
             // Compute per-facet heights based on building geometry
             // Assuming roof at building top, wall at mid-height, road at ground
             const amrex::Real paf = plan_area_frac_a(i,j,0);  // Plan area fraction
-            const amrex::Real H_bldg_cell = m_params.H_bldg_default;
+            const amrex::Real H_bldg_cell = H_bldg_a(i,j,0);
             const amrex::Real H_roof_facet = H_bldg_cell;          // Roof at building top
             const amrex::Real H_wall_facet = 0.5 * H_bldg_cell;    // Wall mid-height
             const amrex::Real H_road_facet = 0.0;                  // Road at ground

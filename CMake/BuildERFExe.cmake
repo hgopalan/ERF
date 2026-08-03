@@ -314,7 +314,6 @@ function(build_erf_lib erf_lib_name)
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMCloudCSVReader.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMTreeLayoutReader.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMTreeDrag.cpp
-                   ${SRC_DIR}/UrbanCanopy/ERF_UCMTreeRad.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMViewFactors.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMParams.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMGrid.H
