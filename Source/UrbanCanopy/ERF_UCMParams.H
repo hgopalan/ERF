@@ -574,6 +574,7 @@ struct UCMParams
     amrex::Real  Ch_leaf = 0.02;                     ///< Phase 6.2b: leaf drag coefficient [-], typical 0.01–0.03
     amrex::Real  eps_leaf = 0.96;                    ///< Phase 6.2b: leaf longwave emissivity [-]
     amrex::Real  crown_view_factor = 0.3;            ///< Phase 6.2b: crown→canyon geometric view factor [-]
+    amrex::Real  crown_area_frac   = 0.7;            ///< Phase 6.2b: global crown area fraction [-]
 
     // =========================================================================
     // Public methods

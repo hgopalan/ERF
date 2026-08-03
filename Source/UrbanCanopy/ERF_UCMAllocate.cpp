@@ -487,6 +487,8 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     // Phase 6.2b: Crown SEB facet (4-var mode only)
     if (params.seb_mode == SEBMode::FourVar) {
        fields.T_crown->setVal(params.T_canyon_init_K);
+      if (fields.H_crown_up)   fields.H_crown_up->setVal(0.0);
+       if (fields.H_crown_down) fields.H_crown_down->setVal(0.0);
     }
 
     fields.mat_id_roof->setVal(0);
@@ -992,6 +994,8 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
     // Phase 6.2b: Crown SEB facet (4-var mode only)
     if (params.seb_mode == SEBMode::FourVar) {
        fields.T_crown->setVal(params.T_canyon_init_K);
+      if (fields.H_crown_up)   fields.H_crown_up->setVal(0.0);
+       if (fields.H_crown_down) fields.H_crown_down->setVal(0.0);
        if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
            Print() << "[UCM][6.2b][fill_ucm_fields_homogeneous] T_crown = "
                    << params.T_canyon_init_K << " K\n";
