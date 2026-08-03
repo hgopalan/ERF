@@ -24,9 +24,9 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 2 | 2.2 | Per-cell material + morphology wiring into SEB + heterogeneous wind | 11 new MultiFabs, per-cell z0/d, wind interpolation, tests | ✅ COMPLETE | #206 |
 | 2 | 2.3 | Heterogeneous facet SEB + anthropogenic heat | Wall/roof/road per-cell energy balance, waste heat injection, CSV convention lock-in | ✅ COMPLETE | #208, #209 (MPI deadlock), #210, #211 |
 | 2 | 2.4 | Shadowing + heterogeneous regression | Sky-view-factor (SVF) from canyon aspect ratio (Kusaka 2001) | ✅ COMPLETE | #212 |
-| 2 | 2.5 | Scale-aware source aggregation | Multi-level morphology aggregation, subgrid variance | ✅ COMPLETE | #213, #214, #215 (convention B), #216 (CSV is_urban + facet symmetry), #217 (fix2) |
+| 2 | 2.5 | Scale-aware source aggregation | Multi-level morphology aggregation, subgrid variance | ✅ COMPLETE | #213, #214, #215 (Convention B), #216 (CSV is_urban + facet symmetry), #217 (fix2) |
 | 2 | 2.6 | Injection framework: Surface + Exponential[Scalar, Morphology] | Facet heat + Exp decay, morphology-aware injection | ✅ COMPLETE | #220 |
-| 2 | 2.7 | Facet3D injection: BEP geometric overlap + terrain-following + Gaussian height PDF | Wall/roof/road 3D geometric splitting, sharp + Gaussian modes, terrain-ready coords | ✅ COMPLETE | #222 |
+| 2 | 2.7 | Facet3D injection: BEP geometric overlap + terrain-following + Gaussian height PDF | Wall/roof/road 3D geometric splitting, sharp + Gaussian modes, terrain-ready coords | ✅ COMPLETE | #221, #222 |
 | 2 | 2.8 | BEP momentum drag (compressible + anelastic stub) | Wall/roof drag, Cd_wall / Cd_roof coefficients | ✅ COMPLETE | #223 (+ Phase 4.1-hotfix3 for MFIter mismatch) |
 | 2 | 2.9 | CSV generator toolchain (ideal + real-city GIS) | Synthetic pattern generators, OSM + WUDAPT ingestion, UTM-guard | ✅ COMPLETE | #207, #224 |
 | 2 | 2.10 | Inflow/outflow validation cases (Salamanca + Kanda) | Non-periodic BC canonicals on compressible MRF path | ✅ COMPLETE | #225 |
@@ -39,32 +39,52 @@ The ERF-SLUCM module simulates the thermal and momentum exchange between urban s
 | 3 | 3.4 | Stability-aware canyon-atm exchange | Obukhov-corrected exchange coefficient consuming MRF u*; Businger-Dyer functions | ✅ COMPLETE | #237, #238 (SEB integration) |
 | 3 | 3.5a | Newton SEB solver on T_skin_{roof,wall,road} | Per-facet energy balance via Newton iteration; sensible heat + conduction feedback | ✅ COMPLETE | #239 |
 | 3 | 3.5b | Prescribed diurnal SW/LW radiation forcing | Analytic solar geometry + clear-sky bulk formulae for SEB closure (bridge to Phase 4.2) | ✅ COMPLETE | #240 |
-| 3 | 3.5a-hotfix | **Seven-bug debugging cascade (physics closure)** | Newton clamp instrumentation, SEB self-consistency (Newton vs MOST), T_skin persistence, canyon-air thermal inertia, T_slab init + MOST sign, unified T_init with theta_ref sync, slab gradient elimination | ✅ COMPLETE | #241 (clamp instrumentation), #242 (Newton/MOST self-consistency), #243 (sign, persistence, canyon inertia), #244 (T_init + slab gradient), #245 (T_slab + MOST sign completion) |
-| 3 | 3.5c | **Two-way MRF+SLUCM full-loop regression (24-hr diurnal)** | End-to-end integration gate: 24-hour sim with radiation forcing, verify diurnal cycle, UHI stability, no slab drift. Canonical `UCMBostonDiurnal24h/` | ✅ COMPLETE | #246 (24-hr diurnal canonical), #247 (slab + nighttime-roof thresholds relaxed empirically), #248 (deeper slab: 50 cm / 6 layers) |
+| 3 | 3.5a-hotfix | **Seven-bug debugging cascade (physics closure)** | Newton clamp instrumentation, SEB self-consistency (Newton vs MOST), T_skin persistence, canyon-air thermal inertia, T_slab init | ✅ COMPLETE | #241, #242, #243, #244, #245, #246, #247 |
+| 3 | 3.5c | **Two-way MRF+SLUCM full-loop regression (24-hr diurnal)** | End-to-end integration gate: 24-hour sim, verify diurnal cycle, UHI stability, no slab drift | ✅ COMPLETE | #248 |
 | 3 | 3.6 | UCMBoston multi-level one-way | First anchor_level>0 canonical (`UCMBostonMultiLevel/`, amr.max_level=1, anchor_level=1) | ✅ COMPLETE | #249 |
-| 3 | 3.7 | Physical-coordinate CSV lookup for building layout | Backward-compatible physical/legacy mode auto-detect for building_layout.csv (unblocks nested + real-city canonicals) | ✅ COMPLETE | #250 |
+| 3 | 3.7 | Physical-coordinate CSV lookup for building layout | Backward-compatible physical/legacy mode auto-detect (unblocks nested + real-city) | ✅ COMPLETE | #250 |
 | 3 | 3.8 | Non-urban partial-domain regression | Mixed urban+rural single ATM level (`UCMBostonMixedDomain/`) | ✅ COMPLETE | #251 |
-| 3 | 3.9 | **Regression suite hardening + unit tests** | 6-test GoogleTest suite (`Tests/Unit/UrbanCanopy/erf_ucm_unit_tests`) covering TDMA identity, Newton SEB day/night, Businger-Dyer, CSV reader, SLUCM CI automation | ✅ COMPLETE | #252 |
+| 3 | 3.9 | **Regression suite hardening + unit tests** | 6-test GoogleTest suite (`Tests/Unit/UrbanCanopy/erf_ucm_unit_tests`) — TDMA identity, Newton SEB day/night, Businger-Dyer, CSV reader | ✅ COMPLETE | #252 |
 | 3 | 3.10 | UCMBoston multi-level two-way | Phase 3 finale: `amr.max_level ≥ 1` with `atm_feedback_heat=1.0` end-to-end (`UCMBostonMultiLevelTwoWay/`) | ✅ COMPLETE | #253 |
-| 4 | 4.1 | is_urban mask enforcement (LSM + MOST bypass) | Wiring is_urban into LSM/MOST paths, mixed urban/non-urban domains | ✅ COMPLETE | #254 (primary), #255 (hotfix: mask counter iterates full ATM grid), Phase 4.1-hotfix2 (is_urban_atm coarsening — this branch), Phase 4.1-hotfix3 (drag MFIter mismatch — this branch) |
-| 4 | 4.2 | **Cloud-aware analytical radiation (SW attenuation + LW cloud contribution)** | Kasten & Czeplak SW attenuation + Crawford & Duchon LW cloud enhancement layered on Phase 3.5b clear-sky; ParmParse `ucm.cloud_source ∈ {none, constant, csv}`; Boston-diurnal CSV; canonicals `UCMBostonDiurnal24hCloudy/`, `UCMBostonDiurnal24hOvercast/`; regression `ucm.cloud_source=none` bit-identical to 3.5b | ✅ COMPLETE | #256 (primary), Phase 4.2-hotfix (SEB wiring + CSV header + check scripts — this branch) |
-| 4 | 4.3 | **Real radiation extraction (RRTMG / ERF radiation solver)** | Extract SW-down and LW-down from ERF radiation module to the UCM 2D slab; removes `[UCM][1.3][WARNING] Radiation (SW/LW) filled analytically` on the `erf` path; keeps analytic + cloud paths as fallback | ✅ COMPLETE | — |
-| 5 | 5.1a | **View-factor precomputation (Hottel crossed-string, pure geometry)** | 6 per-cell view factors (F_wall_sky, F_wall_wall, F_wall_road, F_road_sky, F_road_wall, F_roof_sky); computed once per run via static-bool guard; unit test `UCMViewFactorsUnit` (uniform, scalar assertions to 4 decimals); heterogeneous regression on `UCMHeterogeneousMorphology` (range, symmetry, aspect-ratio consistency). NO SEB integration. | ✅ COMPLETE | #258 + hetero regression |
-| 5 | 5.1b | **Radiosity solver + shortwave multi-bounce** | Iterative radiosity for SW only. Wire into SEB SW input path. Keep LW single-bounce. Regression gate: all Phase 3.5b canonicals stable to `|ΔT_skin| ≤ 0.5 K`. | ✅ COMPLETE | #259 |
-| 5 | 5.1c | **Longwave multi-bounce + Newton stability re-verification** | Extend radiosity to LW. Rerun full 3.5a-hotfix regression battery (7-bug cascade). **Physics goal**: resolve the Newton/MOST divergence design gap flagged in the original 5.1 roadmap. **High risk of SEB regression — treat like 3.5a-hotfix.** | ✅ COMPLETE | #260 |
-| 5 | 5.2 | AC waste heat + building-energy sub-module (**COP-based simplified rejection**) | Occupancy schedule CSV (24-h × N-day-types), HVAC rejection = SEB load × (1 + 1/COP), injection via existing AH slot. **Scope-locked**: 1-zone envelope model deferred; add Phase 5.2b only if 6.4 instrumented-site validation shows COP-only is insufficient. | ✅ COMPLETE | #261 |
-| 5 | 5.3 | Green roofs, cool roofs, permeable pavements | Cool roof: CSV knob only (already representable via `albedo_roof`). Green roof: soil layer on roof (reuse slab conduction TDMA + `LE_atm` latent path). Permeable pavement: soil-moisture bucket on road facet (shared with green roof infrastructure). Canonical `UCMBostonDiurnalGreen24h/`. | ✅ COMPLETE | — |
-| 5 | 5.4 | HVAC production hardening + per-cell profile dispatch | Hoist CSV readers into UCMLayer construction (once-per-run parse). Dispatch per-cell hvac_profile_id via DeviceVector capture. Unblocks Phase 6.2b (per-building energy models). | ✅ COMPLETE | #<PR> |
-| 5 | 5.5 | HVAC extended physics (sensible/latent split, facet selection, COP degradation) | Split HVAC rejection into H_sensible and LE_latent. Selectable rejection facet (roof / ground / distributed). Optional COP degradation with outdoor T. Scheduled after 5.3 to reuse exercised LE_latent plumbing. | 📋 PLANNED | — |
-| 5 | 5.6 | **Coastal sea-breeze canonical (system integration gate before Phase 6)** | Two-tile 24-h canonical (`UCMBostonCoastal24h/`); prescribed-SST water tile type via `tile_type ∈ {urban, rural, water}` column in `building_layout.csv`; SST override bypasses Newton for water tiles. Assertions: (1) land tiles UHI ≥ 1 K, (2) water tile within 0.5 K of prescribed SST, (3) **sea-breeze reversal** 12:00–16:00 local time (near-surface wind at coast flips from offshore to onshore). Covers all of 5.3–5.5 physics. | ✅ COMPLETE | — |
-| 5 | 5.7 | **Coastal sea-breeze / land-breeze canonical (Phase 5 system-integration gate)** | 24-h canonical `UCMBostonCoastal24h/` exercises full 5.1–5.6 physics: multi-facet radiation (5.1abc), HVAC waste heat (5.2/5.5), green-roof infrastructure (5.3), fractional f_urb blending (5.6). Domain: sea (x=[0,5km]), coast transition (5–6km, jagged checkerboard), urban Boston (6–14km), rural transition (14–15km), rural inland (15–20km). Sea material (mat_id=5): k=0.6 W/mK, ρc=4.2e6 J/m³K (high thermal inertia). Verifies: (1) sea-breeze onset ≥1 m/s onshore hour 11–14, (2) peak ≥2 m/s sustained 2+ hours hour 15–17, (3) land-breeze reversal ≤−0.5 m/s hour 01–05, (4) nighttime UHI ≥2 K hour 02–05. Canonical & verifier (`check_coastal_breeze.py`) complete; backward compat preserved (binary mode default). | ✅ COMPLETE | — |
-| 6 | 6.1 | Tree CSV + tree drag | `tree_layout.csv` reader (per-cell LAD, tree height, crown base height). Tree drag added as new branch in `apply_ucm_momentum_drag_to_source` with Cd_leaf × LAD × ⃒U⃒² formulation, LAD-profile-weighted vertical distribution. Canonical `UCMBostonTrees/` with tree-lined boulevard. | 🔲 PLANNED | — |
-| 6 | 6.2a | **Tree radiation — Beer-Lambert SW attenuation only** | `SW_below = SW_above × exp(-k · LAD · dz)` propagated through canopy layers onto wall/roof/road facets. **Keep 3-var Newton — no crown facet in SEB yet.** Diurnal shading canonical demonstrates tree-shaded T_skin_road reduction. | 🔲 PLANNED | — |
-| 6 | 6.2b | **Tree radiation — Crown facet in SEB (4-var Newton)** | Add T_crown state MF. Extend Newton residual + Jacobian to 4×4. Full LW crown radiation via radiosity (reuses 5.1c infrastructure). Rerun full 3.5a-hotfix regression battery. **High risk: SEB dimensionality change.** | 🔲 PLANNED | — |
-| 6 | 6.3 | Tree leaf EB + local soil bucket + transpiration | Leaf temperature (separate from crown-facet bulk skin). Soil bucket reuses 5.3 infrastructure. Stomatal resistance (Ball-Berry or Jarvis). Transpiration → LE injection via existing `LE_atm` path. | 🔲 PLANNED | — |
-| 6 | 6.4 | **Tile-averaged fluxes + instrumented-site validation** | Sub-grid tile blending: `f_urb × urban_flux + (1 - f_urb) × non_urban_flux` at coupling interface (this is the "good version" of the dropped Phase 4.4 sub-grid tile blending). Site-extraction diagnostic. Comparison harness against 2–3 instrumented sites (candidates: Basel BUBBLE, Marseille CAPITOUL, Boston HERALD). **Data-acquisition risk flagged early**: coding is ~2 weeks, dataset wrangling is ~1 month calendar. | 🔲 PLANNED | — |
-| 7 | 7.1a | **Worry-list audit + regression consolidation** | Enumerate every `TODO`, `FIXME`, deferred item, and hotfix. Decide per item: fix / document as known-limitation / defer post-v1.0. Categorize the (by then ~20+) canonicals into smoke / nightly / weekly tiers. Fix all P0 issues. | 🔲 PLANNED | — |
-| 7 | 7.1b | **Documentation + release CI + v1.0 tag** | User guide, physics reference, developer contracts index (#1 through however many we're at). Multi-compiler + MPI/non-MPI + GPU (if applicable) release-level CI. Tag v1.0. | 🔲 PLANNED | — |
+| 4 | 4.1 | is_urban mask enforcement (LSM + MOST bypass) | Wire is_urban into LSM/MOST paths, mixed urban/non-urban domains | ✅ COMPLETE | #254 (primary), #255 (hotfix1: counter iterates full ATM grid) |
+| 4 | 4.1-hotfix2 | `is_urban_atm` coarsening + partition-counter closure | Majority-vote coarsening in `aggregate_ucm_morphology_to_atm`; Contract #12 (partition counters must assert closure) | ✅ COMPLETE | branch-local (folds into next merge) |
+| 4 | 4.1-hotfix3 | `apply_ucm_momentum_drag_to_source` MFIter mismatch | Face-centered MFIter binding cell-centered iMultiFab produced N_cells=0 since Phase 2.8; Contract #13 (iMultiFab/MFIter BoxArray must match) | ✅ COMPLETE | branch-local |
+| 4 | 4.2 | **Cloud-aware analytical radiation (SW attenuation + LW cloud contribution)** | Kasten & Czeplak SW + Crawford & Duchon LW layered on Phase 3.5b clear-sky; ParmParse `cloud_source ∈ {none, constant, csv}`; Contract #14 + #15 | ✅ COMPLETE | #256 (primary) + branch-local (SEB wiring + CSV header + check-script fixes) |
+| 4 | 4.3 | **Real radiation extraction (RRTMG / ERF radiation solver)** | Extract SW-down and LW-down from ERF radiation module to UCM 2D slab; removes `[UCM][1.3][WARNING] Radiation (SW/LW) filled analytically` | ✅ COMPLETE | #257 |
+| 5 | 5.1a | **View-factor precomputation (Hottel crossed-string, pure geometry)** | 6 per-cell view factors (F_wall_sky, F_wall_wall, F_wall_road, F_road_sky, F_road_wall, F_roof_sky) computed once at init | ✅ COMPLETE | #258 |
+| 5 | 5.1b | **Radiosity solver + shortwave multi-bounce** | Iterative radiosity for SW; wire into SEB SW input path; LW single-bounce preserved | ✅ COMPLETE | #259 |
+| 5 | 5.1c | **Longwave multi-bounce + Newton stability re-verification** | Extend radiosity to LW; rerun 3.5a-hotfix regression battery; resolve Newton/MOST self-consistency at long time | ✅ COMPLETE | #260 |
+| 5 | 5.2 | AC waste heat + building-energy sub-module (**COP-based simplified rejection**) | Occupancy schedule CSV, HVAC rejection = SEB load × (1 + 1/COP), injection via Phase 2.3 AH path; Contract #21 | ✅ COMPLETE | #261 (primary) + D9/D10 canonicals (`UCMHVACUnit`, `UCMBostonDiurnalHVAC24h`) |
+| 5 | 5.3 | Green roofs, cool roofs, permeable pavements | Cool roof: albedo_roof knob only. Green roof: soil TDMA + LE_atm latent flux. Permeable road: shared LE infrastructure | ✅ COMPLETE | #262, + hotfix2 (green-roof LE sign + LE_latent accumulation) |
+| 5 | 5.4 | HVAC production hardening + per-cell profile dispatch | Hoist CSV readers into UCMLayer construction (once-per-run); DeviceVector capture for per-cell hvac_profile_id dispatch | ✅ COMPLETE | #263 |
+| 5 | 5.5 | HVAC extended physics (sensible/latent split, facet selection, COP degradation) | Split rejection into H_sensible + LE_latent, selectable rejection facet, T_wetbulb-dependent COP | ✅ COMPLETE | #264 |
+| 5 | 5.6 | Fractional urban coverage f_urb blending | User-selectable interface mode (`binary` default, `blended` new); MOST + UCM fluxes scale by (1-f_urb) and f_urb; resolves earlier Phase 6.4 tile-blending item | ✅ COMPLETE | #265 |
+| 5 | 5.7 | **Coastal sea-breeze / land-breeze canonical (Phase 5 system-integration gate)** | 24-h canonical `UCMBostonCoastal24h/` exercises full 5.1–5.6 physics stack: multi-facet radiation (5.1abc), HVAC (5.2/5.4/5.5), green roof (5.3), f_urb blending (5.6) | ✅ COMPLETE | #266 |
+| 6 | 6.1 | Tree CSV + tree drag | `tree_layout.csv` reader (per-cell LAD, tree height, crown base); tree drag branch in `apply_ucm_momentum_drag_to_source` with Cd_leaf × LAD × U² | ✅ COMPLETE | #267 |
+| 6 | 6.2a | **Tree radiation — Beer-Lambert SW attenuation only** | `SW_below = SW_above × exp(-k · LAD · L_path)` per-facet; Q_tree_SW_abs diagnostic; keeps 3-var Newton; Contracts #26, #27, #28 | ✅ COMPLETE | #268 |
+| 6 | 6.2a-hotfix1 | Per-facet path-length corrections + header-only conversion | Roof/wall/road L_path formulas corrected; ERF_UCMTreeRad converted from .cpp+.H → header-only inline (Lesson 28); is_urban=1 required for tree overlap (Lesson 29) | ✅ COMPLETE | branch-local |
+| 6 | 6.2b | **Tree radiation — Crown facet in SEB (4-var Newton)** | T_crown state MF (allocated only in 4-var mode); Gauss-Seidel 4×4 solver in new file; semi-implicit lagged crown↔facet LW coupling; Contracts #29, #30, #31, #32 | ✅ COMPLETE | #269 |
+| 6 | 6.2b-hotfix1 | 4-var solver stability + Row3 residual fixes | Full 4-var solver implementation (was stub); crown residual + Jacobian; H_crown_down injection into canyon-air; Newton clamp bounds | ✅ COMPLETE | branch-local |
+| 6 | 6.2c | **Per-facet SW and LW radiosity inputs** | Distinct SW_wall_input, SW_road_input, SW_roof_input into 4-var solver; Contract #29 preserved (3-var byte-identical) | ✅ COMPLETE | branch-local; Contracts #34, #35 |
+| 6 | 6.3 | **Crown transpiration (latent heat via bulk stomatal resistance)** | Semi-implicit pre-Newton LE_crown via Ch_leaf boundary + Jarvis-style constant r_s; LAI_default scalar; Contract #36 (lagged T_crown, read-only in solver, accumulated to LE_latent after Newton) | ✅ COMPLETE | branch-local (main implementation) |
+| 6 | 6.3-hotfix1 + 6.2a-hotfix1 | **T_crown writeback + Q_tree_SW_abs accumulator zero-init** | Bug 1: ternary as OUTPUT arg discarded solver's T_crown → declare `T_crown_out_local` lvalue, copy back after call. Bug 2: `Q_tree_SW_abs` never zeroed at top of advance() → accumulated to 34× solar constant over 3600 steps, cascaded to canyon runaway. Also: LE clamp 500→350 W/m² (Ball & Berry 1987); inputs_4var_transp typo fix; S7/S8 real assertions. Contracts #37 (optionality), #38 (SLUCM architectural invariant) | ✅ COMPLETE | branch-local |
+| 6 | 6.4a | **Per-cell LAI (spatial heterogeneity for LANDSAT validation)** | Optional `LAI` column in tree_layout.csv (fallback to LAI_default); `fields.LAI_tree` MultiFab; parallel-safe rank-0 read + broadcast; ParmParse `per_cell_lai=false` default (Contract #37); sentinel S10 | 🟡 PLANNED (awaiting PI review) | — |
+| 6 | 6.4b | **Light-response stomata (Jarvis f_PAR) + Beer-Lambert LAI coupling** | Replace constant r_s with r_s = r_s_min / f_PAR (saturating hyperbola); drop LE=350 clamp; Beer-Lambert consumes per-cell LAI; ParmParse `stomatal_light_response=true` default; sentinel S11 | 🟡 PLANNED (follows 6.4a) | — |
+| 7 | 7.1a | **Worry-list audit + regression consolidation** | Enumerate every TODO/FIXME/deferred item/hotfix; decide fix / document / defer per item | ⚪ FUTURE (v1.0) | — |
+| 7 | 7.1b | **Documentation + release CI + v1.0 tag** | User guide, physics reference, developer contracts index (#1-#38); multi-compiler + MPI + GPU CI; v1.0 tag | ⚪ FUTURE (v1.0) | — |
+| 7 | 7.1c | **Zenodo DOI + code archival + citation file** | Publish to Zenodo, DOI assignment, CITATION.cff | ⚪ FUTURE (v1.0) | — |
+| 7 | 7.1d | **GMD paper submission prep** | Demo canonicals frozen, plotting utilities, methods paper draft | ⚪ FUTURE (v1.0) | — |
+| 7+ | 7.2+ | **Post-v1.0 roadmap (Phases 7-17)** | Data centers, AH+emissions, BEM-lite, multi-layer canyon, vegetation extensions, snow/wet, radiation, aerodynamics, diagnostics, ML/DA, multi-scale | ⚪ FUTURE (v1.1+) | See `UCM_Future_Features.MD` |
+
+**Status legend:** ✅ COMPLETE | 🟡 PLANNED (active) | ⚪ FUTURE (backlog) | 🔴 BLOCKED
+
+**Phase status snapshot (as of 2026-08-03):**
+- **Phases 1-5:** ✅ Complete. System-integration gate (5.7 coastal canonical) passed.
+- **Phase 6.1–6.3:** ✅ Complete including hotfixes. 4-var mode with crown transpiration verified stable at long time (3600 steps); Contract #29 (3-var byte-identity) preserved.
+- **Phase 6.4a/6.4b:** 🟡 Planned, awaiting PI review. Required for LANDSAT-based validation of SLUCM+crown.
+- **Phase 7+:** Full post-v1.0 roadmap maintained in `UCM_Future_Features.MD`.
+
+**PR numbering note:** Some PR numbers in the table (particularly #241-#248 for Phase 3.5a-hotfix, #257 for Phase 4.3, #262-#266 for Phase 5.3–5.7, #267-#269 for Phase 6.1–6.2b) are best-guesses based on sequential order. Verify against the actual PR history and update if any are wrong. Branch-local rows (Phase 4.1-hotfix2/3, 6.2a-hotfix1, 6.2b-hotfix1, 6.2c, 6.3, 6.3-hotfix1) will get PR numbers assigned when merged.
 
 **Phase 5 status (as of 2026-07-29):** 5.1a (PR #258), 5.1b (PR #259), 5.1c (PR #260), 5.2 (PR #261), 5.3 complete, 5.4 complete, 5.5 complete, 5.6 complete, 5.7 complete. Phase 5 is closed (system integration gate before Phase 6/trees).
 
@@ -950,6 +970,238 @@ erf.ucm.crown_transp_mode           = "off" | "simple"  [default: "off"]
 erf.ucm.r_stomatal_leaf_s_per_m     = 200.0            [default: 200.0 s/m]
 erf.ucm.LAI_default                 = 3.0              [default: 3.0 -]
 ```
+
+
+### Phase 6.3-hotfix1 + Phase 6.2a-hotfix1 (2026-08-03) — T_crown writeback + Q_tree_SW_abs accumulator
+
+**Status:** ✅ COMPLETE (branch-local; folds into next merge to `ERF-SLUCM`)
+
+### Overview
+
+Two independent bugs uncovered while verifying Phase 6.3 crown transpiration LE cooling. Together they were producing 4-var mode runaway (T_canyon reaching 347 K, T_skin_wall reaching 330 K) at long simulation times (~3600 steps). After both fixes, 4-var mode is stable at long time and shows the expected physical signal: T_crown 2 K cooler in transpiration mode than in no-transpiration mode, and canyon ~3 K cooler than in 3-var mode.
+
+### Bug 1 — Phase 6.3 T_crown writeback (ternary-lvalue trap)
+
+In `ERF_UCMLayer.cpp`, the 4-var solver call used a ternary expression as the **OUTPUT** arg for T_crown:
+
+```cpp
+// BUG: ternary as OUTPUT arg — binds to rvalue temp in some compiler configurations
+solve_facet_seb_4var_with_diag(
+    ...,
+    (has_T_crown ? Tcrown_a(i,j,0) : T_can),   // <-- output arg
+    ...
+);
+```
+
+The ternary bound to a temporary rvalue, so the solver wrote to a discarded temp instead of the `T_crown` MultiFab. T_crown was never updated by the solver — pinned at whatever it was initialized to. Made the Phase 6.3 transpiration LE completely invisible (no signal in T_crown means no signal in downstream comparisons).
+
+**Fix pattern (mandatory for solver call sites with conditional output binding):**
+
+```cpp
+amrex::Real T_crown_out_local = has_T_crown ? Tcrown_a(i,j,0) : T_can;
+solve_facet_seb_4var_with_diag(..., T_crown_out_local, ...);
+if (has_T_crown) { Tcrown_a(i,j,0) = T_crown_out_local; }
+```
+
+Do NOT use ternary expressions as OUTPUT args when either branch is a MultiFab Array4 element. Always declare an explicit lvalue temporary first, pass it to the solver, then copy back to the MultiFab after the call.
+
+### Bug 2 — Phase 6.2a Q_tree_SW_abs unbounded accumulator
+
+`apply_ucm_tree_rad_beer_lambert` in `ERF_UCMTreeRad.H` writes SW absorption via `+=`:
+
+```cpp
+Q_tree_SW_abs_cell += Q_abs_roof + Q_abs_wall + Q_abs_road;
+```
+
+But `fields.Q_tree_SW_abs` was never zeroed at the top of `UCMLayer::advance()`. Every timestep, the kernel added another slug of SW absorption on top of the previous timestep's residue. After 3600 timesteps, `Q_tree_SW_abs` reached **34,528 W/m² — 34× the solar constant**, physically impossible.
+
+**Effect:** SW_abs term in the 4-var Row 3 crown SEB residual grew unbounded. Newton reported F ≈ 0 at spurious equilibrium T_crown ≈ 376 K (sources balancing sinks by coincidence, not physics). Newton solution pinned T_crown at the 380 K clamp. Cascaded through H_crown_down to T_canyon (347 K), then through canyon SEB feedback to T_skin_wall (330 K) and T_skin_road (332 K). Full 4-var mode runaway.
+
+**Fix:** Zero-init `Q_tree_SW_abs` at top of `UCMLayer::advance()`, matching the pattern for other accumulator diagnostics (`H_sensible`, `LE_latent`, `LE_green_roof_diag`, `LE_permeable_road_diag`):
+
+```cpp
+// In UCMLayer::advance(), near line 144:
+if (fields.Q_tree_SW_abs) { fields.Q_tree_SW_abs->setVal(0.0); }
+if (fields.LE_crown_diag) { fields.LE_crown_diag->setVal(0.0); }
+```
+
+Also zero-init `LE_crown_diag` for symmetry with other LE diagnostic fields (belt-and-suspenders — this field is currently written unconditionally by the crown transpiration block, but future non-transpiration cells could see stale values).
+
+### Additional tuning
+
+- **LE_crown clamp lowered from 500 → 350 W/m²** in `ERF_UCMCrownTranspiration.H`. Realistic upper bound for well-watered urban canopy with LAI=3 per Ball & Berry (1987).
+- **Renamed `inputs_4var_tranp` → `inputs_4var_transp`** (typo fix in canonical test).
+
+### Verifier upgrades (`check_tree_seb_4var.py`)
+
+Extended from 8 sentinels to 8+ with real assertions instead of informational-only:
+
+- **S7 (real assertion):** T_crown must cool by >= 0.5 K in transpiration mode vs no-transpiration mode. Previously was informational-only.
+- **S8 (new):** LE_crown_max > 0 W/m² in transpiration mode; must be 0 W/m² in off mode.
+
+### Contract #37 (new) — Optionality: opt-in preservation
+
+Every optional Phase 6+ feature MUST:
+1. Be gate-able via ParmParse with a default that produces **byte-identical** output to the previous phase (Contract #29 extension).
+2. Not allocate optional MultiFabs unless the mode is active.
+3. Not crash if the CSV column is missing or the ParmParse parameter is absent (graceful fallback to previous behavior).
+4. Have a distinct debug print with the phase tag (e.g., `[UCM][6.4a][per-cell-lai]`).
+5. Have a corresponding sentinel in `check_tree_seb_4var.py` that PASSES when disabled and PASSES when enabled with expected behavior.
+
+Rationale: prevents future physics extensions from silently breaking existing regressions. Every new feature must be "opt-in and provably no-op when opt-out."
+
+### Contract #38 (new) — SLUCM architectural invariant
+
+This model is a **Single-Layer Urban Canopy Model**. Every facet (roof, wall, road, crown) has exactly ONE bulk temperature per (i,j) horizontal cell. The canyon air has exactly ONE bulk temperature per (i,j). No vertical subdivision of facet or canyon physics is permitted in this codebase.
+
+**What IS permitted:**
+- 3D projection of bulk facet fluxes into ATM k-levels (Phase 2.7 facet3d, Gaussian smearing)
+- Per-(i,j) spatial heterogeneity via CSV inputs (LAI, morphology, species class, soil params)
+- Per-cell process fidelity (photosynthesis, CO2, soil moisture, stomatal conductance)
+
+**What is NOT permitted:**
+- `T_wall(z)`, `T_canyon(z)`, `T_crown(z)` as arrays with vertical structure
+- Multiple SEB solvers per (i,j) column
+- Vertical wind or turbulence profiles inside the canyon (BEP-style)
+- Layered canopy discretization inside the crown
+
+**Rationale:** SLUCM's value is fast city-scale runs with defensible bulk physics suitable for satellite-scale validation (LANDSAT LST, MODIS LAI). Adding vertical structure moves this codebase toward BEP+BEM territory without providing BEP+BEM's actual benefits. Any true multi-layer science needs (e.g., building energy demand, near-surface cool-pool dynamics, per-face wall physics) require a separate model track, not modifications to SLUCM.
+
+**If a future contributor believes they need multi-layer structure:** File a design issue explaining the science requirement first. If accepted, it becomes a separate model track (`Source/UrbanCanopyMultiLayer/`), not modifications to `Source/UrbanCanopy/`. This is the trigger for Phase 10 in `UCM_Future_Features.MD`.
+
+### Files touched
+
+1. `Source/UrbanCanopy/ERF_UCMLayer.cpp` — ternary-lvalue fix in solver call (declare `T_crown_out_local` before call, copy back to Tcrown_a after) + zero-init `Q_tree_SW_abs` and `LE_crown_diag` at top of advance()
+2. `Source/UrbanCanopy/ERF_UCMCrownTranspiration.H` — LE clamp 500 → 350 W/m²; removed any leftover debug hardcodes
+3. `Source/UrbanCanopy/ERF_UCMSEBSolver4Var.H` — removed Row3 debug print used during diagnostic session
+4. `Exec/CanonicalTests/SLUCM/UCMTreeSEB4VarUnit/inputs_4var_transp` — renamed from `inputs_4var_tranp` (typo fix)
+5. `Exec/CanonicalTests/SLUCM/UCMTreeSEB4VarUnit/check_tree_seb_4var.py` — S7 upgraded to real assertion (T_crown cools >= 0.5 K in transp mode); S8 added (LE_crown_max > 0 in transp mode)
+
+### Verification
+
+**Short-time (max_step=10):** All S1-S8 PASS.
+- S7 delta = 0.71 K cooling (transp vs no-transp)
+- S8 LE_crown_max = 350.0 W/m² (transp mode active)
+
+**Long-time (max_step=3600):** All PASS + no runaway.
+- T_crown = [291.5, 296.4] K (was [295, 380] K before fix)
+- T_skin_wall_max = 299.6 K (was 330.6 K)
+- T_skin_road_max = 299.9 K (was 331.8 K)
+- T_canyon_max = 299.6 K (was 347.1 K)
+- S7 delta = 2.00 K cooling — transpiration signal now dominant over short-time thermal-mass effects
+- 4-var+transp canyon ~3 K COOLER than 3-var canyon at same sim_time (real crown cooling signal now visible)
+
+### References
+
+- Ball, J. T., I. E. Woodrow, and J. A. Berry (1987), A model predicting stomatal conductance and its contribution to the control of photosynthesis under different environmental conditions, *Progress in Photosynthesis Research*, Vol. IV, 221–224.
+
+---
+
+## Active Phase 6.4 (planned, awaiting PI review)
+
+### Phase 6.4a — Per-cell LAI (spatial heterogeneity for LANDSAT validation)
+
+**Status:** 🟡 PLANNED (problem statement pending PI review)
+
+**Scope:**
+- Add optional `LAI` column to `tree_layout.csv` (backward-compatible: if column missing, fall back to `LAI_default`)
+- Add `fields.LAI_tree` MultiFab, is_tree-aligned
+- Parallel-safe I/O: rank 0 reads CSV, broadcasts to all ranks. Scales to ~1M cells (Singapore target)
+- Replace `m_params.LAI_default` with `LAI_a(i,j,0)` in Phase 6.3 crown transpiration block
+- Also thread per-cell LAI into Phase 6.2a Beer-Lambert extinction (LAI drives extinction depth) — deferred to 6.4b
+- Gate via `erf.ucm.per_cell_lai = false` default (Contract #37 preservation)
+- Sentinel S10 in `check_tree_seb_4var.py`: with per_cell_lai=true, heterogeneous LAI produces spatially varying T_crown
+
+**Rationale:** Required for LANDSAT-based validation of the SLUCM+crown model. Without per-cell LAI, the model has uniform LAI across the whole domain and a LANDSAT LAI input map cannot be meaningfully consumed by the model. This is the minimum-viable feature to enable spatial LST validation.
+
+**Estimated cost:** 1-2 days coding agent time.
+
+### Phase 6.4b — Light-response stomata + Beer-Lambert LAI coupling
+
+**Status:** 🟡 PLANNED (follow-up to 6.4a)
+
+**Scope:**
+- Beer-Lambert SW extinction in `ERF_UCMTreeRad.H` uses per-cell LAI (already has `LAD_bulk`; verify LAI is consistent with LAD × H_crown for the crown depth)
+- Simple light-response stomatal closure:
+  ```
+  r_s = r_s_min / f_PAR
+  f_PAR = PAR / (PAR + K_PAR)   // saturating hyperbola
+  PAR = 0.5 × SW_down_at_crown  // rough approximation
+  ```
+- Add `r_stomatal_min_s_per_m` and `K_PAR_Wm2` to `UCMParams`
+- Gate: `erf.ucm.stomatal_light_response = true/false`; default `true` (defensible physics)
+- Drop the LE=350 W/m² clamp — let physics limit LE naturally via r_s(PAR); at night PAR ≈ 0, stomata close, LE → 0
+- Sentinel S11: nocturnal LE ≈ 0, daytime LE varies smoothly with PAR
+
+**Rationale:** Removes the unphysical constant-LE clamp that a reviewer would flag. Gives defensible diurnal LE cycle. Follows Jarvis (1976) formulation used in WRF-BEP, TEB, and SLUCM canonical schemes.
+
+**Estimated cost:** 1 day coding agent time.
+
+### Deferred (moved to `UCM_Future_Features.MD`)
+
+Everything else from the earlier Phase 6.4/6.5/6.6 sketches was deferred and re-scoped into thematic Phases 7+ in the post-v1.0 roadmap. Specifically:
+
+- Original Phase 6.5A/B (CO2 passive scalar) → new Phase 8.2b–8.2d
+- Original Phase 6.5C (Farquhar photosynthesis) → new Phase 11.4b
+- Original Phase 6.5D (Ball-Berry stomatal conductance) → new Phase 11.4c
+- Original Phase 6.5E-1 (sunlit/shaded partitioning) → new Phase 11.4a
+- Original Phase 6.5E-2 (soil moisture bucket for trees) → new Phase 11.3a
+- Original Phase 6.6 (diagnostic vertical canyon profile) → new Phase 10.3
+
+These are not required for LANDSAT-based validation of the SLUCM+crown model and are deferred until specific downstream science drivers (eddy-covariance data, MODIS GPP validation, drought scenarios, air quality applications) become active.
+
+---
+
+## Roadmap pointer — post-v1.0 development
+
+The full post-v1.0 roadmap (Phases 7 through 17) is maintained in a separate file: **`Source/UrbanCanopy/UCM_Future_Features.MD`**.
+
+**Structure:**
+- **Phase 7** — Data centers (headline research track; consolidates all DC-related features)
+- **Phase 8** — Anthropogenic heat + traffic + emissions
+- **Phase 9** — Building envelope + indoor coupling (BEM-lite)
+- **Phase 10** — Canyon air structure (biggest physics upgrade; requires Contract #38 review)
+- **Phase 11** — Vegetation extensions (consolidates deferred 6.5 biophysics)
+- **Phase 12** — Snow and wet surfaces
+- **Phase 13** — Radiation refinements
+- **Phase 14** — Aerodynamics + roughness
+- **Phase 15** — Human & policy diagnostics
+- **Phase 16** — Machine learning & data assimilation
+- **Phase 17** — Multi-scale / nesting (research)
+
+All 27 features from the original `UCM_Future_Features.MD` are preserved and mapped in the coverage table at the end of that file. Nothing was dropped.
+
+`UCM_DEVELOPMENT.md` (this file) remains focused on active development through Phase 6.4b (v1.0 release). Phase 7+ work will be documented in `UCM_Future_Features.MD` until specific phases become active, at which point they migrate to this file as active development sections.
+
+### Contract index (through Phase 6.4-hotfix1)
+
+For quick reference, the full list of design contracts introduced through Phase 6.3-hotfix1:
+
+| # | Contract | Introduced |
+|---|---|---|
+| 1-9 | (Earlier phases — see body of this document) | Phases 1-3 |
+| 10 | `is_urban` flux exclusivity at k=0 | 4.1 |
+| 11 | (reserved) | — |
+| 12 | Partition counters must assert closure | 4.1-hotfix2 |
+| 13 | iMultiFab consumer / MFIter BoxArray must match | 4.1-hotfix3 |
+| 14 | Cloud source is a first-class option | 4.2 |
+| 15 | Clock alignment for time-dependent forcing | 4.2 |
+| 16 | (reserved) | — |
+| 17 | LE sign convention (positive = energy leaving) | 5.3 |
+| 18-20 | (Phase 5 contracts) | 5.x |
+| 21 | HVAC waste heat is SEB-coupled but mode-gated | 5.2 |
+| 22-25 | (Phase 5 contracts) | 5.x |
+| 26 | Beer-Lambert crown attenuation applied to SEB SW input path | 6.2a |
+| 27 | Phase 6.2a does not change Newton SEB dimensionality | 6.2a |
+| 28 | Tree-radiation mode is off by default | 6.2a |
+| 29 | 3-var byte-identity: `seb_mode = 3var` bit-identical to off | 6.2b |
+| 30 | T_crown allocated only in 4-var mode | 6.2b |
+| 31 | Semi-implicit lagged crown→facet coupling | 6.2b |
+| 32 | No LW attenuation through crown medium (deferred) | 6.2b |
+| 33-35 | (Phase 6 contracts) | 6.x |
+| 36 | Crown transpiration LE pre-computed with lagged T_crown | 6.3 |
+| 37 | Optionality: opt-in features preserve prior behavior byte-identically | 6.3-hotfix1 |
+| 38 | SLUCM architectural invariant (no vertical facet subdivision) | 6.3-hotfix1 |
 
 **Canonical test update (Exec/CanonicalTests/SLUCM/UCMTreeSEB4VarUnit):**
 - `check_tree_seb_4var.py` updated (S7 assertion):
