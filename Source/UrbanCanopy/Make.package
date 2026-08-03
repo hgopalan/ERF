@@ -45,6 +45,7 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_headers += UrbanCanopy/ERF_UCMWindExtract.H
   CEXE_headers += UrbanCanopy/ERF_UCMSlabConduction.H
   CEXE_headers += UrbanCanopy/ERF_UCMSEBSolver.H
+  CEXE_headers += UrbanCanopy/ERF_UCMSEBSolver4Var.H
   CEXE_headers += UrbanCanopy/ERF_UCMLayer.H
   # Phase 1.4 headers
   CEXE_headers += UrbanCanopy/ERF_UCMAtmCoupling.H

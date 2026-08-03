@@ -319,5 +319,21 @@ void UCMParams::read_from_parmparse()
     if (k_ext_tree < 0.0 || k_ext_tree > 5.0) {
         amrex::Abort("[UCM][6.2a] erf.ucm.k_ext_tree out of [0, 5] range.");
     }
+
+    // Phase 6.2b: Crown SEB facet (4-var Newton solver)
+    pp.query("seb_mode", seb_mode_str);
+    pp.query("Ch_leaf", Ch_leaf);
+    pp.query("eps_leaf", eps_leaf);
+    pp.query("crown_view_factor", crown_view_factor);
+    if      (seb_mode_str == "3var") seb_mode = SEBMode::ThreeVar;
+    else if (seb_mode_str == "4var") seb_mode = SEBMode::FourVar;
+    else amrex::Abort("[UCM][6.2b] Invalid erf.ucm.seb_mode '" + seb_mode_str
+                     + "'; expected '3var' or '4var'.");
+    if (Ch_leaf <= 0.0 || Ch_leaf > 1.0)
+       amrex::Abort("[UCM][6.2b] Ch_leaf out of (0,1] range.");
+    if (eps_leaf <= 0.0 || eps_leaf > 1.0)
+       amrex::Abort("[UCM][6.2b] eps_leaf out of (0,1] range.");
+    if (crown_view_factor < 0.0 || crown_view_factor > 1.0)
+       amrex::Abort("[UCM][6.2b] crown_view_factor out of [0,1] range.");
 }
 

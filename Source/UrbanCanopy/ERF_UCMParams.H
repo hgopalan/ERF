@@ -237,6 +237,21 @@ enum class TreeRadMode
 };
 
 /**
+ * @enum SEBMode
+ * @brief Surface Energy Balance solver mode for urban facets (Phase 6.2b)
+ *
+ * Determines whether to use the legacy 3-facet Newton solver (roof/wall/road) or
+ * the new 4-facet solver that adds crown as a separate prognostic temperature.
+ * Phase 6.2b supports: ThreeVar (default, bit-identical to pre-Phase-6.2b),
+ * and FourVar (new crown facet with 4×4 Jacobian solver).
+ */
+enum class SEBMode
+{
+    ThreeVar = 0,      ///< Phase 6.2b default: 3-facet legacy solver (bit-identical to pre-Phase-6.2b output)
+    FourVar = 1        ///< Phase 6.2b: 4-facet solver with prognostic T_crown
+};
+
+/**
  * @struct UCMParams
  * @brief Container for all SLUCM configuration parameters read from ParmParse
  *
@@ -542,6 +557,23 @@ struct UCMParams
     std::string tree_rad_mode_str = "off";           ///< Phase 6.2a: "off" | "beer_lambert"
     TreeRadMode tree_rad_mode = TreeRadMode::Off;
     amrex::Real k_ext_tree = 0.5;                    ///< Phase 6.2a: Beer-Lambert extinction coefficient (Campbell & Norman 1998) [-]
+
+    // =========================================================================
+    // Section 20: Phase 6.2b — Crown SEB facet (4-var Newton)
+    // =========================================================================
+    // Crown as a separate 4th facet in surface energy balance. Semi-implicit coupling
+    // to existing roof/wall/road facets. Default 3-var mode (backward-compat, bit-identical).
+    // T_crown MF allocated ONLY in 4-var mode. Crown physics: SW absorption + 2-sided LW.
+    // Contract #29: 3-var solver unchanged; 4-var is separate standalone solver.
+    // Contract #30: T_crown MF allocated ONLY in 4-var mode; nullptr in 3-var.
+    // Contract #31: Semi-implicit lagged T_crown coupling to existing facets.
+    // Contract #32: No LW attenuation through crown medium in 6.2b (deferred to 6.2c).
+
+    SEBMode      seb_mode = SEBMode::ThreeVar;
+    std::string  seb_mode_str = "3var";
+    amrex::Real  Ch_leaf = 0.02;                     ///< Phase 6.2b: leaf drag coefficient [-], typical 0.01–0.03
+    amrex::Real  eps_leaf = 0.96;                    ///< Phase 6.2b: leaf longwave emissivity [-]
+    amrex::Real  crown_view_factor = 0.3;            ///< Phase 6.2b: crown→canyon geometric view factor [-]
 
     // =========================================================================
     // Public methods

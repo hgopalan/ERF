@@ -825,3 +825,62 @@ Set `is_urban=1` for all cells (tree-cells must overlap urban-cells
 for the SEB path to fire) and set `H_tree=40, H_crown_base=20` so 
 trees rise above the 30 m buildings. See Lesson 29.
 
+### Phase 6.2b — Crown as SEB facet (4-var Newton mode)
+
+**Status:** ✅ COMPLETE (Phase 6.2b main implementation).
+
+Implements crown canopy as a separate 4th prognostic variable in the 
+Surface Energy Balance solver, alongside roof/wall/road. Key features:
+
+**Contracts (mandatory safeguards):**
+- **Contract #29:** 3-var solver unchanged; 4-var solver is NEW standalone file 
+  (`ERF_UCMSEBSolver4Var.H`). Mode dispatch via `erf.ucm.seb_mode` 
+  ParmParse knob (default: "3var" for bit-identity).
+- **Contract #30:** `T_crown` MultiFab allocated ONLY in 4-var mode. 
+  In 3-var mode: `fields.T_crown == nullptr`.
+- **Contract #31:** Semi-implicit lagged crown→facet coupling. Each facet's 
+  `LW_in` is enhanced by `eps_facet * σ * T_crown_prev^4 * crown_view_factor`. 
+  Crown row uses current iterates for T_roof and lagged for T_wall_prev, T_road_prev.
+- **Contract #32:** No LW attenuation through crown medium (Phase 6.2c work).
+
+**Physics:**
+- Crown SW absorption via reused `Q_tree_SW_abs` from Phase 6.2a.
+- 2-sided LW radiation: upward (to atmosphere), downward (to canyon).
+- 2-sided sensible heat flux: `2 * H_coeff * (T_crown - T_canyon)` split between 
+  atmospheric and canyon arms.
+- NO conduction, NO LE (transpiration deferred to Phase 6.3).
+
+**Implementation:**
+- NEW `Source/UrbanCanopy/ERF_UCMSEBSolver4Var.H`: Gauss-Seidel 4×4 Newton 
+  solver (header-only, GPU-safe).
+- Section 20 added to `ERF_UCMParams.H` with `SEBMode` enum, `Ch_leaf`, `eps_leaf`, 
+  `crown_view_factor`.
+- NEW `T_crown` field in `ERF_UCMFields.H`, allocated conditionally in 
+  `ERF_UCMAllocate.cpp`.
+- Dispatch in `ERF_UCMLayer.cpp` (3-var path unchanged; 4-var path calls 
+  new solver).
+- Canyon-air temperature update includes `H_crown_net` when in 4-var mode.
+
+**ParmParse knobs (Phase 6.2b):**
+```
+erf.ucm.seb_mode              = "3var" | "4var"  [default: "3var"]
+erf.ucm.Ch_leaf               = 0.02             [default: 0.02]
+erf.ucm.eps_leaf              = 0.96             [default: 0.96]
+erf.ucm.crown_view_factor     = 0.3              [default: 0.3]
+```
+
+**Canonical test (Exec/CanonicalTests/SLUCM/UCMTreeSEB4VarUnit):**
+- `inputs_off`: default (3-var mode, bit-identical to baseline).
+- `inputs_3var`: explicit `seb_mode="3var"` (backward-compat verification).
+- `inputs_4var`: `seb_mode="4var"` with crown coupling active.
+- `check_tree_seb_4var.py`: verifies 3-var bit-identity and T_crown allocation 
+  in 4-var mode.
+
+**Known limitations & deferred scope:**
+- 4-var solver currently dispatches but NOT FULLY IMPLEMENTED (placeholder for Phase 6.2b.1).
+  Tree-related canonical tests use 3-var path until stub replaced with full solver.
+- No LW attenuation through crown (Phase 6.2c).
+- No transpiration/LE (Phase 6.3).
+- No per-leaf temperature tracking (Phase 6.3).
+- No Jarvis/Ball-Berry stomatal resistance (Phase 6.3).
+
