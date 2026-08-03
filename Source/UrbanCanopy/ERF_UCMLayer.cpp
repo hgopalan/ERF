@@ -973,10 +973,11 @@ void UCMLayer::advance(UCMFields& fields,
 
                 // Call the 4-var solver with crown as prognostic
                 amrex::Real H_crown_up, H_crown_down;
+                amrex::Real T_crown_out_local = has_T_crown ? Tcrown_a(i,j,0) : T_can;
                 solve_facet_seb_4var_with_diag(
                     // Current iterates
                     Tskin_rf(i,j,0), Tskin_wl(i,j,0), Tskin_rd(i,j,0),
-                    (has_T_crown ? Tcrown_a(i,j,0) : T_can),  // Use T_canyon as fallback for 3-var
+                    T_crown_out_local,
                     // Lagged for semi-implicit coupling
                     T_wl_prev, T_rd_prev,
                     // Subsurface boundaries
@@ -1011,7 +1012,9 @@ void UCMLayer::advance(UCMFields& fields,
                     H_rf, H_wl, H_rd, H_crown_up, H_crown_down,
                     // Diagnostics
                     n_iter_int, residual);
-
+                if (has_T_crown) {
+                        Tcrown_a(i,j,0) = T_crown_out_local;
+                    }
                 // Write back H_crown components
                 if (has_H_crown_up) H_crown_up_a(i,j,0) = H_crown_up;
                 if (has_H_crown_dn) H_crown_down_a(i,j,0) = H_crown_down;
