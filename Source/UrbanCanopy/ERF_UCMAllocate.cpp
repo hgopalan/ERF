@@ -394,9 +394,24 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp_i << "\n";
     }
 
+    // Phase 6.1: Tree canopy 2D UCM fields
+    // Note: Tree drag ATM aggregates (m_ucm_is_tree_atm, etc.) are ERF class members,
+    // NOT allocated here. See ERF_Advance.cpp for ATM aggregate allocation pattern.
+    fields.H_tree = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.H_crown_base = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.LAD_bulk = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.crown_area_frac = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.Cd_leaf = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.is_tree = std::make_unique<iMultiFab>(ba, dm, ncomp_i, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][6.1][allocate_ucm_fields] H_tree, H_crown_base, LAD_bulk, crown_area_frac, Cd_leaf (MultiFab), "
+                << "is_tree (iMultiFab): "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << " or " << ncomp_i << "\n";
+    }
+
     // Summary message
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
-        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 45 MultiFabs on UCM grid "
+        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 51 MultiFabs on UCM grid "
                 << "at lev=" << lev << "\n";
     }
 
@@ -1025,6 +1040,19 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
         Print() << "[UCM][5.3][fill_ucm_fields_homogeneous] is_green_roof = 0, is_permeable_road = 0\n";
     }
 
+    // Phase 6.1: Tree canopy fields (homogeneous initialization to zero)
+    // Tree layout is populated from CSV if tree_drag_mode != off.
+    fields.H_tree->setVal(0.0);
+    fields.H_crown_base->setVal(0.0);
+    fields.LAD_bulk->setVal(0.0);
+    fields.crown_area_frac->setVal(0.0);
+    fields.Cd_leaf->setVal(0.0);  // 0 → use Cd_leaf_default
+    fields.is_tree->setVal(0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][6.1][fill_ucm_fields_homogeneous] H_tree, H_crown_base, LAD_bulk, crown_area_frac, Cd_leaf = 0.0, is_tree = 0 "
+                << "(homogeneous; CSV fill follows if tree_drag_mode != off)\n";
+    }
+
     // Note: z0 and d_disp are filled by fill_ucm_z0_and_disp, not here
 }
 
@@ -1419,6 +1447,44 @@ bool UCMFields::all_allocated() const
     if (!F_roof_sky) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][5.1a][all_allocated] MISSING: F_roof_sky\n";
+        }
+        result = false;
+    }
+
+    // Phase 6.1: Tree canopy fields
+    if (!H_tree) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.1][all_allocated] MISSING: H_tree\n";
+        }
+        result = false;
+    }
+    if (!H_crown_base) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.1][all_allocated] MISSING: H_crown_base\n";
+        }
+        result = false;
+    }
+    if (!LAD_bulk) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.1][all_allocated] MISSING: LAD_bulk\n";
+        }
+        result = false;
+    }
+    if (!crown_area_frac) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.1][all_allocated] MISSING: crown_area_frac\n";
+        }
+        result = false;
+    }
+    if (!Cd_leaf) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.1][all_allocated] MISSING: Cd_leaf\n";
+        }
+        result = false;
+    }
+    if (!is_tree) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.1][all_allocated] MISSING: is_tree\n";
         }
         result = false;
     }
