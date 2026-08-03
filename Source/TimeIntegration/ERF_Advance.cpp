@@ -1,6 +1,7 @@
 #include <ERF.H>
 #include <ERF_Utils.H>
 #include <ERF_UCMAtmPlotfile.H>
+#include <UrbanCanopy/ERF_UCMAtmAggregation.H>
 
 #ifdef ERF_USE_WINDFARM
 #include <ERF_WindFarm.H>
@@ -361,6 +362,30 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             m_ucm_is_urban_atm[lev] = std::make_unique<amrex::iMultiFab>(ba, dm, 1, 0);
             m_ucm_is_urban_atm[lev]->setVal(0);
         }
+        if (!m_ucm_is_tree_atm[lev]) {
+            m_ucm_is_tree_atm[lev] = std::make_unique<amrex::iMultiFab>(ba, dm, 1, 0);
+            m_ucm_is_tree_atm[lev]->setVal(0);
+        }
+        if (!m_ucm_H_tree_atm[lev]) {
+            m_ucm_H_tree_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_H_tree_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_H_crown_base_atm[lev]) {
+            m_ucm_H_crown_base_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_H_crown_base_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_LAD_atm[lev]) {
+            m_ucm_LAD_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_LAD_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_crown_area_frac_atm[lev]) {
+            m_ucm_crown_area_frac_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_crown_area_frac_atm[lev]->setVal(0.0);
+        }
+        if (!m_ucm_Cd_leaf_atm[lev]) {
+            m_ucm_Cd_leaf_atm[lev] = std::make_unique<amrex::MultiFab>(ba, dm, 1, 0);
+            m_ucm_Cd_leaf_atm[lev]->setVal(0.0);
+        }
 
         // Phase 2.5: Compute morphology aggregates from UCM grid to ATM grid
         // Phase 4.1-hotfix2: is_urban_atm is now derived from majority vote of UCM mask.
@@ -371,10 +396,22 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
             *m_ucm_H_bldg_std_atm[lev],
             *m_ucm_lambda_p_atm[lev],
             *m_ucm_lambda_f_atm[lev],
+            *m_ucm_is_tree_atm[lev],
+            *m_ucm_H_tree_atm[lev],
+            *m_ucm_H_crown_base_atm[lev],
+            *m_ucm_LAD_atm[lev],
+            *m_ucm_crown_area_frac_atm[lev],
+            *m_ucm_Cd_leaf_atm[lev],
             *m_ucm_fields[lev]->H_bldg,
             *m_ucm_fields[lev]->W_road,
             *m_ucm_fields[lev]->plan_area_frac,
             *m_ucm_fields[lev]->is_urban,
+            *m_ucm_fields[lev]->H_tree,
+            *m_ucm_fields[lev]->H_crown_base,
+            *m_ucm_fields[lev]->LAD_bulk,
+            *m_ucm_fields[lev]->crown_area_frac,
+            *m_ucm_fields[lev]->Cd_leaf,
+            *m_ucm_fields[lev]->is_tree,
             m_ucm_grid[lev]->geom, Geom(lev),
             m_ucm_params.grid_ratio,
             lev,

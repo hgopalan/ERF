@@ -110,10 +110,22 @@ void aggregate_ucm_morphology_to_atm(
     amrex::MultiFab&           H_bldg_std_atm,
     amrex::MultiFab&           lambda_p_atm,
     amrex::MultiFab&           lambda_f_atm,
+    amrex::iMultiFab&          is_tree_atm,
+    amrex::MultiFab&           H_tree_atm,
+    amrex::MultiFab&           H_crown_base_atm,
+    amrex::MultiFab&           LAD_atm,
+    amrex::MultiFab&           crown_area_frac_atm,
+    amrex::MultiFab&           Cd_leaf_atm,
     const amrex::MultiFab&     H_bldg_ucm,
     const amrex::MultiFab&     W_road_ucm,
     const amrex::MultiFab&     plan_area_frac_ucm,
     const amrex::iMultiFab&    is_urban_ucm,
+    const amrex::MultiFab&     H_tree_ucm,
+    const amrex::MultiFab&     H_crown_base_ucm,
+    const amrex::MultiFab&     LAD_ucm,
+    const amrex::MultiFab&     crown_area_frac_ucm,
+    const amrex::MultiFab&     Cd_leaf_ucm,
+    const amrex::iMultiFab&    is_tree_ucm,
     const amrex::Geometry&     geom_ucm,
     const amrex::Geometry&     geom_atm,
     int                        grid_ratio,
@@ -129,6 +141,12 @@ void aggregate_ucm_morphology_to_atm(
     H_bldg_std_atm.setVal(0.0, 0, 1, H_bldg_std_atm.nGrow());
     lambda_p_atm.setVal(0.0, 0, 1, lambda_p_atm.nGrow());
     lambda_f_atm.setVal(0.0, 0, 1, lambda_f_atm.nGrow());
+    is_tree_atm.setVal(0, 0, 1, is_tree_atm.nGrow());
+    H_tree_atm.setVal(0.0, 0, 1, H_tree_atm.nGrow());
+    H_crown_base_atm.setVal(0.0, 0, 1, H_crown_base_atm.nGrow());
+    LAD_atm.setVal(0.0, 0, 1, LAD_atm.nGrow());
+    crown_area_frac_atm.setVal(0.0, 0, 1, crown_area_frac_atm.nGrow());
+    Cd_leaf_atm.setVal(0.0, 0, 1, Cd_leaf_atm.nGrow());
 
     // Get ATM domain to know the k level range
     const int klo_atm = geom_atm.Domain().smallEnd(2);
@@ -144,11 +162,23 @@ void aggregate_ucm_morphology_to_atm(
         auto H_std_a         = H_bldg_std_atm.array(mfi);
         auto lambda_p_a      = lambda_p_atm.array(mfi);
         auto lambda_f_a      = lambda_f_atm.array(mfi);
+        auto is_tree_atm_a   = is_tree_atm.array(mfi);
+        auto H_tree_atm_a    = H_tree_atm.array(mfi);
+        auto H_crown_base_a  = H_crown_base_atm.array(mfi);
+        auto LAD_atm_a       = LAD_atm.array(mfi);
+        auto crown_frac_atm_a = crown_area_frac_atm.array(mfi);
+        auto Cd_leaf_atm_a   = Cd_leaf_atm.array(mfi);
 
         auto const H_bldg_a       = H_bldg_ucm.const_array(mfi);
         auto const W_road_a       = W_road_ucm.const_array(mfi);
         auto const plan_area_a    = plan_area_frac_ucm.const_array(mfi);
         auto const is_urban_a     = is_urban_ucm.const_array(mfi);
+        auto const H_tree_a       = H_tree_ucm.const_array(mfi);
+        auto const H_crown_base_a = H_crown_base_ucm.const_array(mfi);
+        auto const LAD_a          = LAD_ucm.const_array(mfi);
+        auto const crown_frac_a   = crown_area_frac_ucm.const_array(mfi);
+        auto const Cd_leaf_a      = Cd_leaf_ucm.const_array(mfi);
+        auto const is_tree_a      = is_tree_ucm.const_array(mfi);
 
         // Loop over ATM cells (i, j) at k=klo_atm
         ParallelFor(atm_box, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
@@ -160,6 +190,12 @@ void aggregate_ucm_morphology_to_atm(
             Real sum_lambda_p = 0.0;
             Real sum_lambda_f = 0.0;
             Real mean_W_road = 0.0;
+            int n_tree = 0;
+            Real sum_H_tree = 0.0;
+            Real sum_H_crown_base = 0.0;
+            Real sum_LAD = 0.0;
+            Real sum_crown_frac = 0.0;
+            Real sum_Cd_leaf = 0.0;
 
             // First pass: count urban cells and compute sums
             for (int jj = 0; jj < grid_ratio; ++jj) {
@@ -177,6 +213,15 @@ void aggregate_ucm_morphology_to_atm(
                     sum_H += H;
                     sum_lambda_p += plan_area;
                     mean_W_road += W_road;  // for frontal area computation
+
+                    if (is_tree_a(i_ucm, j_ucm, 0) == 1) {
+                        ++n_tree;
+                        sum_H_tree += H_tree_a(i_ucm, j_ucm, 0);
+                        sum_H_crown_base += H_crown_base_a(i_ucm, j_ucm, 0);
+                        sum_LAD += LAD_a(i_ucm, j_ucm, 0);
+                        sum_crown_frac += crown_frac_a(i_ucm, j_ucm, 0);
+                        sum_Cd_leaf += Cd_leaf_a(i_ucm, j_ucm, 0);
+                    }
                 }}
 
             // Urban fraction: n_urban / n_cells
@@ -186,6 +231,15 @@ void aggregate_ucm_morphology_to_atm(
             // Equivalent to (f_urb > 0.5); expressed as integer comparison to
             // avoid rounding ambiguity at exactly f_urb=0.5 for even n_cells.
             is_urban_atm_a(i, j, k) = (2 * n_urban > n_cells) ? 1 : 0;
+            is_tree_atm_a(i, j, k) = (2 * n_tree > n_cells) ? 1 : 0;
+
+            if (n_tree > 0) {
+                H_tree_atm_a(i, j, k) = sum_H_tree / static_cast<Real>(n_tree);
+                H_crown_base_a(i, j, k) = sum_H_crown_base / static_cast<Real>(n_tree);
+                LAD_atm_a(i, j, k) = sum_LAD / static_cast<Real>(n_tree);
+                crown_frac_atm_a(i, j, k) = sum_crown_frac / static_cast<Real>(n_tree);
+                Cd_leaf_atm_a(i, j, k) = sum_Cd_leaf / static_cast<Real>(n_tree);
+            }
 
             // If no urban cells, set aggregates to 0.0 and return
             if (n_urban == 0) {
@@ -249,6 +303,19 @@ void aggregate_ucm_morphology_to_atm(
     Real lambda_p_max = lambda_p_atm.max(0, 0);
     Real lambda_f_min = lambda_f_atm.min(0, 0);
     Real lambda_f_max = lambda_f_atm.max(0, 0);
+    int  is_tree_atm_min = is_tree_atm.min(0, 0);
+    int  is_tree_atm_max = is_tree_atm.max(0, 0);
+    Long is_tree_atm_sum = is_tree_atm.sum(0);
+    Real H_tree_min = H_tree_atm.min(0, 0);
+    Real H_tree_max = H_tree_atm.max(0, 0);
+    Real H_crown_base_min = H_crown_base_atm.min(0, 0);
+    Real H_crown_base_max = H_crown_base_atm.max(0, 0);
+    Real LAD_min = LAD_atm.min(0, 0);
+    Real LAD_max = LAD_atm.max(0, 0);
+    Real crown_frac_min = crown_area_frac_atm.min(0, 0);
+    Real crown_frac_max = crown_area_frac_atm.max(0, 0);
+    Real Cd_leaf_min = Cd_leaf_atm.min(0, 0);
+    Real Cd_leaf_max = Cd_leaf_atm.max(0, 0);
 
     if (ucm_debug && ParallelDescriptor::IOProcessor()) {
         Print() << "[UCM][2.5][aggregate_ucm_morphology_to_atm]\n"
@@ -261,6 +328,15 @@ void aggregate_ucm_morphology_to_atm(
                 << "  H_bldg_std: min=" << H_std_min << " max=" << H_std_max << " [m]\n"
                 << "  lambda_p: min=" << lambda_p_min << " max=" << lambda_p_max << "\n"
                 << "  lambda_f: min=" << lambda_f_min << " max=" << lambda_f_max << "\n";
+        Print() << "[UCM][6.1][aggregate_ucm_morphology_to_atm]\n"
+                << "  is_tree_atm: min=" << is_tree_atm_min
+                << " max=" << is_tree_atm_max
+                << " N_tree=" << is_tree_atm_sum << "\n"
+                << "  H_tree: min=" << H_tree_min << " max=" << H_tree_max << " [m]\n"
+                << "  H_crown_base: min=" << H_crown_base_min << " max=" << H_crown_base_max << " [m]\n"
+                << "  LAD: min=" << LAD_min << " max=" << LAD_max << " [m^2/m^3]\n"
+                << "  crown_area_frac: min=" << crown_frac_min << " max=" << crown_frac_max << "\n"
+                << "  Cd_leaf: min=" << Cd_leaf_min << " max=" << Cd_leaf_max << "\n";
     }
 }
 

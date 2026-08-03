@@ -104,11 +104,14 @@
 #include <UrbanCanopy/ERF_UCMLayer.H>
 // Phase 1.4: atmospheric coupling, plotfile, diagnostics
 #include <UrbanCanopy/ERF_UCMAtmCoupling.H>
+#include <UrbanCanopy/ERF_UCMAtmAggregation.H>
+#include <UrbanCanopy/ERF_UCMTreeDrag.H>
 #include <UrbanCanopy/ERF_UCMPlotfile.H>
 #include <UrbanCanopy/ERF_UCMDiagnostics.H>
 
-// Phase 2.1: CSV readers for heterogeneous inputs
+// Phase 2.1 / 6.1: CSV readers for heterogeneous inputs
 #include <UrbanCanopy/ERF_UCMBuildingLayoutReader.H>
+#include <UrbanCanopy/ERF_UCMTreeLayoutReader.H>
 #include <UrbanCanopy/ERF_UCMMaterialRegistry.H>
 
 // Forward declarations for future phases

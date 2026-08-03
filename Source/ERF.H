@@ -1018,6 +1018,13 @@ private:
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_atm;         // Coarsened sensible flux on ATM grid
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_LE_atm;        // Coarsened latent flux on ATM grid
     amrex::Vector<std::unique_ptr<amrex::iMultiFab>> m_ucm_is_urban_atm; // Coarsened is_urban mask on ATM grid
+    // Phase 6.1: tree canopy aggregates on ATM grid (allocated in Advance per Phase 4.1-hotfix2 pattern)
+    amrex::Vector<std::unique_ptr<amrex::iMultiFab>> m_ucm_is_tree_atm;        // Majority-vote tree mask on ATM grid
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>>  m_ucm_H_tree_atm;         // Mean tree height per ATM cell [m]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>>  m_ucm_H_crown_base_atm;   // Mean crown-base height per ATM cell [m]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>>  m_ucm_LAD_atm;            // Mean bulk LAD per ATM cell [m^2/m^3]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>>  m_ucm_crown_area_frac_atm;// Mean crown-area fraction per ATM cell [-]
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>>  m_ucm_Cd_leaf_atm;        // Mean leaf drag coefficient per ATM cell [-]
     // Phase 2.6: facet-split fluxes on ATM grid for morphology-aware injection
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_ucm_H_road_atm;      // Road flux on ATM grid [W/m^2]
     // Phase 2.7: facet-split wall and roof fluxes (replace Phase 2.6 wall+roof combined)

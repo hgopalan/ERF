@@ -107,6 +107,12 @@ ERF::ERF_shared ()
     m_ucm_H_atm.resize(nlevs_max);
     m_ucm_LE_atm.resize(nlevs_max);
     m_ucm_is_urban_atm.resize(nlevs_max);
+    m_ucm_is_tree_atm.resize(nlevs_max);
+    m_ucm_H_tree_atm.resize(nlevs_max);
+    m_ucm_H_crown_base_atm.resize(nlevs_max);
+    m_ucm_LAD_atm.resize(nlevs_max);
+    m_ucm_crown_area_frac_atm.resize(nlevs_max);
+    m_ucm_Cd_leaf_atm.resize(nlevs_max);
     // Phase 2.6: Facet-split fluxes on ATM grid (lazy construction like m_ucm_H_atm)
     m_ucm_H_road_atm.resize(nlevs_max);
     // Phase 2.7: Facet-split wall and roof fluxes (replace Phase 2.6 combined)

@@ -1313,13 +1313,31 @@ ERF::InitData_post ()
             // Fill UCM fields from CSV data
             fill_ucm_fields_from_csv(*m_ucm_fields[lev], *m_ucm_grid[lev],
                                      *m_ucm_building_reader, *m_ucm_material_registry,
-                                     m_ucm_params, lev, m_ucm_params.ucm_debug);
+                                     m_ucm_params, m_ucm_params.grid_ratio, lev, m_ucm_params.ucm_debug);
         } else {
             // Phase 1.4 fallback: fill with homogeneous parameters
             if (m_ucm_params.ucm_debug) {
                 amrex::Print() << "[UCM][1.2][ERF] calling fill_ucm_fields_homogeneous for lev=" << lev << "\n";
             }
             fill_ucm_fields_homogeneous(*m_ucm_fields[lev], m_ucm_params, lev);
+        }
+
+        if (m_ucm_params.tree_drag_mode == TreeDragMode::Explicit) {
+            UCMTreeLayoutReader tree_reader;
+            const amrex::Box domain_box = m_ucm_grid[lev]->geom.Domain();
+            const int nx_ucm = domain_box.length(0);
+            const int ny_ucm = domain_box.length(1);
+            tree_reader.read_and_broadcast(
+                m_ucm_params.tree_layout_csv_path,
+                nx_ucm,
+                ny_ucm,
+                m_ucm_params.H_tree_max_bound,
+                m_ucm_params.LAD_max_bound,
+                lev,
+                m_ucm_params.ucm_debug);
+            fill_ucm_tree_fields_from_csv(*m_ucm_fields[lev], *m_ucm_grid[lev],
+                                          tree_reader, m_ucm_params,
+                                          lev, m_ucm_params.ucm_debug);
         }
 
         // Phase 2.2: Fill z0 and displacement height (after homogeneous or CSV fill)

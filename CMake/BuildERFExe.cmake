@@ -312,6 +312,8 @@ function(build_erf_lib erf_lib_name)
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMMaterialRegistry.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMStabilityCorrection.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMCloudCSVReader.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMTreeLayoutReader.cpp
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMTreeDrag.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMViewFactors.cpp
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMParams.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMGrid.H
@@ -332,6 +334,8 @@ function(build_erf_lib erf_lib_name)
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMStabilityCorrection.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMRadiationForcing.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMCloudCSVReader.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMTreeLayoutReader.H
+                   ${SRC_DIR}/UrbanCanopy/ERF_UCMTreeDrag.H
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMHVACReader.cpp        
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMOccupancyReader.cpp   
                    ${SRC_DIR}/UrbanCanopy/ERF_UCMViewFactors.H)

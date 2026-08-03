@@ -282,15 +282,15 @@
         // Phase 2.8: Add BEP-style momentum drag (UCM compressible explicit mode)
         // *****************************************************************************
 #ifdef ERF_USE_UCM
+        const amrex::MultiFab* z_nd_ucm_ptr = (z_phys_nd[level] != nullptr)
+            ? z_phys_nd[level].get()
+            : nullptr;
+
         if (m_ucm_params.enable &&
             m_ucm_H_bldg_mean_atm[level] && m_ucm_is_urban_atm[level] &&
             m_ucm_params.wall_drag_mode != WallDragMode::Off &&
             m_ucm_params.atm_feedback_momentum > 0.0)
         {
-            const amrex::MultiFab* z_nd_ucm_ptr = (z_phys_nd[level] != nullptr)
-                ? z_phys_nd[level].get()
-                : nullptr;
-            
             apply_ucm_momentum_drag_to_source(
                 xmom_src, ymom_src,
                 S_data[IntVars::cons],
@@ -311,6 +311,30 @@
                 m_ucm_params.atm_feedback_momentum,
                 m_ucm_params.use_gaussian_height_distribution,
                 m_ucm_params.height_std_threshold_m,
+                level,
+                m_ucm_params.ucm_debug);
+        }
+
+        if (m_ucm_params.enable &&
+            m_ucm_params.tree_drag_mode == TreeDragMode::Explicit &&
+            m_ucm_is_tree_atm[level] && m_ucm_H_tree_atm[level] &&
+            m_ucm_H_crown_base_atm[level] && m_ucm_LAD_atm[level] &&
+            m_ucm_crown_area_frac_atm[level] && m_ucm_Cd_leaf_atm[level])
+        {
+            apply_ucm_tree_drag_to_source(
+                xmom_src, ymom_src,
+                S_data[IntVars::cons],
+                S_data[IntVars::xmom],
+                S_data[IntVars::ymom],
+                *m_ucm_is_tree_atm[level],
+                *m_ucm_H_tree_atm[level],
+                *m_ucm_H_crown_base_atm[level],
+                *m_ucm_LAD_atm[level],
+                *m_ucm_crown_area_frac_atm[level],
+                *m_ucm_Cd_leaf_atm[level],
+                z_nd_ucm_ptr,
+                fine_geom,
+                m_ucm_params.tree_drag_mode,
                 level,
                 m_ucm_params.ucm_debug);
         }
