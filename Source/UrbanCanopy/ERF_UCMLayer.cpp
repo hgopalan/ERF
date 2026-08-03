@@ -673,6 +673,12 @@ void UCMLayer::advance(UCMFields& fields,
         auto H_crown_down_a = (fields.H_crown_down ? fields.H_crown_down->array(mfi)
                                                     : amrex::Array4<amrex::Real>());
 
+        // Phase 6.2b hotfix2: pre-lambda bindings (avoid capturing non-copyable UCMFields)
+            auto const T_atm_a         = forcing.T_atm_ref->const_array(mfi);
+            const bool has_T_crown     = (fields.T_crown != nullptr);
+            const bool has_H_crown_up  = (fields.H_crown_up != nullptr);
+            const bool has_H_crown_dn  = (fields.H_crown_down != nullptr);
+
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
             if (is_urb(i,j,0) == 0) return;
 
