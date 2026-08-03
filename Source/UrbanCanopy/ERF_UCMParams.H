@@ -573,8 +573,10 @@ struct UCMParams
     std::string  seb_mode_str = "3var";
     amrex::Real  Ch_leaf = 0.02;                     ///< Phase 6.2b: leaf drag coefficient [-], typical 0.01–0.03
     amrex::Real  eps_leaf = 0.96;                    ///< Phase 6.2b: leaf longwave emissivity [-]
-    amrex::Real  crown_view_factor = 0.3;            ///< Phase 6.2b: crown→canyon geometric view factor [-]
-    amrex::Real  crown_area_frac   = 0.7;            ///< Phase 6.2b: global crown area fraction [-]
+ // Phase 6.2b hotfix3: facet-specific crown view factors (roof gets 0 — crown is below roof)
+    amrex::Real  crown_view_factor_wall = 0.3;       ///< Crown→wall geometric view factor [-]
+    amrex::Real  crown_view_factor_road = 0.5;       ///< Crown→road geometric view factor [-] (larger — road directly below crown)
+    amrex::Real  crown_area_frac_default = 0.7;      ///< Fallback if fields.crown_area_frac not populated [-]
 
     // =========================================================================
     // Public methods

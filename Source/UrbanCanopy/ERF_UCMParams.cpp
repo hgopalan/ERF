@@ -324,7 +324,6 @@ void UCMParams::read_from_parmparse()
     pp.query("seb_mode", seb_mode_str);
     pp.query("Ch_leaf", Ch_leaf);
     pp.query("eps_leaf", eps_leaf);
-    pp.query("crown_view_factor", crown_view_factor);
     if      (seb_mode_str == "3var") seb_mode = SEBMode::ThreeVar;
     else if (seb_mode_str == "4var") seb_mode = SEBMode::FourVar;
     else amrex::Abort("[UCM][6.2b] Invalid erf.ucm.seb_mode '" + seb_mode_str
@@ -333,7 +332,19 @@ void UCMParams::read_from_parmparse()
        amrex::Abort("[UCM][6.2b] Ch_leaf out of (0,1] range.");
     if (eps_leaf <= 0.0 || eps_leaf > 1.0)
        amrex::Abort("[UCM][6.2b] eps_leaf out of (0,1] range.");
-    if (crown_view_factor < 0.0 || crown_view_factor > 1.0)
-       amrex::Abort("[UCM][6.2b] crown_view_factor out of [0,1] range.");
-}
 
+    // Phase 6.2b hotfix3: facet-specific crown view factors
+    // Roof gets ZERO (crown is geometrically below roof plane — no LW hits roof).
+    // Wall and road each have their own view factor (road sees more of crown than wall).
+    pp.query("crown_view_factor_wall", crown_view_factor_wall);
+    pp.query("crown_view_factor_road", crown_view_factor_road);
+    if (crown_view_factor_wall < 0.0 || crown_view_factor_wall > 1.0)
+       amrex::Abort("[UCM][6.2b] crown_view_factor_wall out of [0,1] range.");
+    if (crown_view_factor_road < 0.0 || crown_view_factor_road > 1.0)
+       amrex::Abort("[UCM][6.2b] crown_view_factor_road out of [0,1] range.");
+
+    // Phase 6.2b hotfix3: fallback crown area fraction (used only if fields.crown_area_frac not populated)
+    pp.query("crown_area_frac_default", crown_area_frac_default);
+    if (crown_area_frac_default < 0.0 || crown_area_frac_default > 1.0)
+       amrex::Abort("[UCM][6.2b] crown_area_frac_default out of [0,1] range.");
+}

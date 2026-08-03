@@ -907,8 +907,8 @@ void UCMLayer::advance(UCMFields& fields,
                     // Canyon and atmosphere
                    T_can, T_atm_a(i,j,0),
                     // Radiation (already computed above)
-                    SW_roof, SW_wall, SW_road,
-                    LW_roof_eff, LW_wall_eff, LW_road_eff,
+                    SW_roof, 
+                    LW_roof_eff, 
                     Q_tree_SW_abs_a(i,j,0),
                     // Albedos
                     alb_rf(i,j,0), alb_wl(i,j,0), alb_rd(i,j,0),
