@@ -126,7 +126,7 @@ amrex::Real compute_crown_transpiration_LE(
 
     // Clamp to [0, 500] W/m² to prevent unphysical dew and edge-case blowup
     LE_crown = amrex::min(amrex::max(LE_crown, 0.0), LE_max);
-    LE_crown = 500.0;  // DEBUG: force max cooling
+    //LE_crown = 500.0;  // DEBUG: force max cooling
 
     return LE_crown;
 }

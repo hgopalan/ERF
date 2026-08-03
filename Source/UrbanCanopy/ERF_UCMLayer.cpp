@@ -1007,7 +1007,7 @@ void UCMLayer::advance(UCMFields& fields,
                     max_iter, tol_K,
                     // Outputs: temperatures
                     Tskin_rf(i,j,0), Tskin_wl(i,j,0), Tskin_rd(i,j,0),
-                    (has_T_crown ? Tcrown_a(i,j,0) : T_can),
+                    T_crown_out_local,
                     // Outputs: fluxes
                     H_rf, H_wl, H_rd, H_crown_up, H_crown_down,
                     // Diagnostics
