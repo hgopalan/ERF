@@ -108,6 +108,7 @@ void solve_facet_seb_4var_with_diag(
     amrex::Real LW_wall_eff,    // Per-facet LW after multi-bounce radiosity [W/m²]
     amrex::Real LW_road_eff,    // Per-facet LW after multi-bounce radiosity [W/m²]
     amrex::Real Q_tree_SW_abs,  // Crown SW absorption (Phase 6.2a Beer-Lambert) [W/m²]
+    amrex::Real LE_crown_cell,  // Crown latent heat flux (Phase 6.3 transpiration) [W/m²]
     // Input: albedo and emissivity
     amrex::Real alpha_roof,
     amrex::Real alpha_wall,
@@ -314,7 +315,8 @@ void solve_facet_seb_4var_with_diag(
             amrex::Real H_up     = H_coeff_crown * crown_area_frac * (T_crown - T_atm);
             amrex::Real H_down   = H_coeff_crown * crown_area_frac * (T_crown - T_can);
 
-            amrex::Real F  = SW_abs + LW_in - LW_out - H_up - H_down;
+            // Phase 6.3: Crown transpiration (LE cooling); positive LE = energy leaving crown
+            amrex::Real F  = SW_abs + LW_in - LW_out - H_up - H_down - LE_crown_cell;
             // Jacobian: diagonal only; off-diagonal coupling is 1-outer-iter lagged (Contract #31)
             amrex::Real Fp = -8.0 * eps_leaf * crown_area_frac * sigma_sb * T3
                            - 2.0 * H_coeff_crown * crown_area_frac;

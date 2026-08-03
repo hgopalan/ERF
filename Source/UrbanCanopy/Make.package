@@ -78,5 +78,10 @@ ifeq ($(USE_UCM), TRUE)
   CEXE_headers += UrbanCanopy/ERF_UCMHVAC.H
   CEXE_headers += UrbanCanopy/ERF_UCMHVACReader.H
   CEXE_headers += UrbanCanopy/ERF_UCMOccupancyReader.H
+  # Phase 5.3 headers (Green roofs and permeable pavement)
+  CEXE_headers += UrbanCanopy/ERF_UCMGreenRoof.H
+  CEXE_headers += UrbanCanopy/ERF_UCMPermeableRoad.H
+  # Phase 6.3 headers (Crown transpiration)
+  CEXE_headers += UrbanCanopy/ERF_UCMCrownTranspiration.H
 
 endif
