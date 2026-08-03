@@ -505,10 +505,12 @@ void UCMLayer::advance(UCMFields& fields,
             auto const q_atm_a = forcing.q_atm_ref->const_array(mfi);
             auto const U_a = forcing.wind_ref->const_array(mfi);
             auto const is_urb_a = fields.is_urban->const_array(mfi);
+            auto const is_tree_a = fields.is_tree->const_array(mfi);
             auto LE_diag_a = fields.LE_crown_diag->array(mfi);
 
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
                 if (is_urb_a(i,j,0) == 0) return;
+                if (is_tree_a(i,j,0) == 0) return;
 
                 amrex::Real q_canyon = q_ref_valid ? q_atm_a(i,j,0) : q_canyon_fallback;
                 q_canyon = amrex::max(amrex::min(q_canyon, 0.02), 0.0);
@@ -1046,7 +1048,7 @@ void UCMLayer::advance(UCMFields& fields,
     if (crown_transp_on) {
         amrex::MultiFab::Add(*fields.LE_latent, *fields.LE_crown_diag, 0, 0, 1, 0);
     }
-    }
+
 
     // Phase 5.1b banner
     amrex::Real Fwr_min = 0.0, Fwr_max = 0.0;
