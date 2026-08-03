@@ -715,3 +715,88 @@ Phases 5.4–5.6 were rescoped during Phase 5.2 D10 diurnal debugging to address
 
 **Phase 5 status (as of 2026-07-29):** 5.1a (PR #258), 5.1b (PR #259), 5.1c (PR #260), 5.2 (PR #261), 5.6 complete. 5.3 in progress. 5.4 planned.
 
+---
+
+## Phase 6.2a — Tree Radiation: Beer-Lambert SW Attenuation
+
+### Overview
+
+Phase 6.2a implements Beer-Lambert SW attenuation of direct normal irradiance through the tree crown. The attenuation is applied to the SEB facet input path (roof, wall, road), not to the upstream atmospheric radiation forcing. The Newton SEB **stays 3-variable** (roof/wall/road skin temperatures); crown state is not prognostic in Phase 6.2a.
+
+### Design Contracts
+
+**Contract #26 (new): Beer-Lambert crown attenuation is applied to the SEB SW input path, not to the SW forcing MF.** 
+The tree helper reads UCM-side `is_tree`, `H_tree`, `H_crown_base`, `LAD_bulk`, the current SW-down at each facet (roof, wall, road) as computed by Phase 3.5b / 4.2 (analytic + cloud) or Phase 4.3 (RRTMG), and returns per-cell attenuated values that replace the raw SW at the SEB input step. The upstream radiation MF is NOT modified in place.
+
+**Contract #27 (new): Phase 6.2a does not change the Newton SEB dimensionality.** 
+The Newton SEB stays 3-variable. Crown state is not prognostic in Phase 6.2a. Any change that adds a fourth Newton variable, changes the Jacobian dimensionality, or introduces a crown temperature MultiFab MUST wait for Phase 6.2b.
+
+**Contract #28 (new): Tree-radiation mode is off by default.** 
+`erf.ucm.tree_rad_mode = off` is the default. In off mode the helper is not called and no code touches `SW_wall_input`, `SW_road_input`, `SW_roof_input`, or `Q_tree_SW_abs`. All existing SLUCM canonicals produce bit-identical plotfiles to pre-Phase-6.2a output. Also: if `erf.ucm.tree_drag_mode = off`, tree state MFs are all zero, so even if `tree_rad_mode = beer_lambert` accidentally is set, `is_tree` is zero everywhere and attenuation is a no-op. This is the "double gate" safety property.
+
+### Physics
+
+**Attenuation formula (Beer-Lambert law):**
+```
+tau_tree = exp(-k_ext · LAD_bulk · L_path)
+```
+where:
+- `k_ext` = extinction coefficient (default 0.5, from Campbell & Norman 1998, random-leaf angle distributions)
+- `LAD_bulk` = leaf area density in crown [m²/m³]
+- `L_path` = path length through crown for each facet [m]
+
+**Path length (per facet z_face):**
+```
+L_path(z_face) = max(0, min(H_tree, z_face) - max(H_crown_base, 0))
+```
+
+**Absorbed SW diagnostic (cumulative per cell):**
+```
+Q_tree_SW_abs = Σ_facet (1 - tau_facet) · SW_facet_incident · area_frac_facet
+```
+
+### Parameters
+
+New ParmParse section (Phase 6.2a):
+```cpp
+erf.ucm.tree_rad_mode      = "off"      // "off" | "beer_lambert" (default: off per Contract #28)
+erf.ucm.k_ext_tree         = 0.5        // Beer-Lambert extinction coefficient [-]
+```
+
+### Files touched
+
+1. **`Source/UrbanCanopy/ERF_UCMParams.{H,cpp}`** — TreeRadMode enum (Off, BeerLambert); Section 19 parameters; ParmParse parsing with abort on invalid mode or k_ext out of [0, 5] bounds.
+2. **`Source/UrbanCanopy/ERF_UCMTreeRad.{H,cpp}`** (new) — Beer-Lambert kernel `apply_ucm_tree_rad_beer_lambert()`, device-side GPU-safe inline function with per-facet attenuation logic.
+3. **`Source/UrbanCanopy/ERF_UCMFields.H`** — `Q_tree_SW_abs` MultiFab pointer (per-cell diagnostic).
+4. **`Source/UrbanCanopy/ERF_UCMAllocate.cpp`** — allocate `Q_tree_SW_abs` on UCM grid; init to 0.0 in both fill_ucm_fields_from_csv and fill_ucm_fields_homogeneous.
+5. **`Source/UrbanCanopy/ERF_UCMLayer.cpp`** — call Beer-Lambert helper immediately BEFORE `solve_facet_seb_with_diag()`. Modify local `SW_wall_input`, `SW_road_input`, `SW_roof_input` variables in-place. Include `ERF_UCMTreeRad.H`.
+6. **`Source/UrbanCanopy/Make.package`** — register `ERF_UCMTreeRad.cpp` under `USE_UCM` block.
+7. **`CMake/BuildERFExe.cmake`** — register `ERF_UCMTreeRad.cpp` under `ERF_ENABLE_UCM` block.
+8. **`Exec/CanonicalTests/SLUCM/UCMTreeRadUnit/`** (new) — three inputs variants (inputs_off, inputs_on, inputs_on_dense), CSV data copied from Phase 6.1 drag unit, `check_tree_rad.py` verifier.
+
+### Validation
+
+**UCMTreeRadUnit** canonical:
+- **inputs_off:** `tree_rad_mode = "off"` with explicit tree drag enabled. Q_tree_SW_abs must be zero everywhere (diagnostic zeroed each step, not touched by kernel).
+- **inputs_on:** `tree_rad_mode = "beer_lambert"`, standard tree layout. Q_tree_SW_abs nonzero during daytime (SW > 0), zero at night.
+- **inputs_on_dense:** same as inputs_on but with denser tree layout; expect larger per-cell Q_tree_SW_abs and more visible attenuation in SEB outputs.
+
+**check_tree_rad.py** assertions:
+1. Q_tree_SW_abs field exists in plotfile.
+2. In off mode: Q_tree_SW_abs ≡ 0 everywhere (bit-identity requirement per Contract #28).
+3. In beer_lambert mode: Q_tree_SW_abs > 0 in tree cells with nonzero LAD and nonzero SW (daytime).
+4. Baseline bit-identity: off-mode run is bit-identical to pre-Phase-6.2a baseline (if provided).
+
+### Known limitations & deferred scope
+
+1. **No LW attenuation** (Phase 6.2c or later; separate work item).
+2. **No LAD vertical shape function** (Phase 6.1 contract: uniform LAD in [H_crown_base, H_tree] per Contract #23).
+3. **No multi-bounce radiosity with crown** (Phase 5.1c-successor).
+4. **No feedback of Q_tree_SW_abs to T_air** (diagnostic only).
+5. **No touching of Phase 6.1 drag path** (drag is momentum coupling; rad is energy coupling).
+6. **Crown not a SEB facet** (Phase 6.2b upgrade to 4-var Newton with crown state).
+
+### Phase 6 Status
+
+**Phase 6 status (as of 2026-08-03):** 6.1 complete. 6.2a in progress (this commit). 6.2b (4-var Newton + prognostic crown state) planned. 6.2c (LW attenuation) deferred.
+

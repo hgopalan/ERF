@@ -114,3 +114,18 @@ The `.github/workflows/slucm_regression.yml` workflow automatically:
 The canonical regression job is informational only (`continue-on-error: true`),
 while the unit test job gates the PR (must pass to merge).
 
+## Phase 6.2a: Tree Radiation (Beer-Lambert)
+
+New canonical: **UCMTreeRadUnit** (under development)
+
+Tests Beer-Lambert SW attenuation through tree crown. Includes three variants:
+- `inputs_off`: tree_rad_mode="off" (bit-identity test; output must match pre-Phase-6.2a)
+- `inputs_on`: tree_rad_mode="beer_lambert" with standard tree layout
+- `inputs_on_dense`: tree_rad_mode="beer_lambert" with dense tree layout
+
+Verification:
+- Q_tree_SW_abs field must be zero when tree_rad_mode="off"
+- Q_tree_SW_abs must be nonzero when tree_rad_mode="beer_lambert" during daytime
+- No Newton SEB dimensionality change; stays 3-variable (roof/wall/road)
+- Attenuation formula: tau_tree = exp(-k_ext * LAD_bulk * L_path)
+- Diagnostic only in Phase 6.2a (not prognostic)
