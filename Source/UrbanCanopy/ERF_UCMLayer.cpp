@@ -1093,7 +1093,7 @@ void UCMLayer::advance(UCMFields& fields,
         // Phase 6.2b hotfix1: Bind H_crown_down for canyon-air coupling
         auto const H_crown_down_a = (fields.H_crown_down ? fields.H_crown_down->const_array(mfi)
                                                          : amrex::Array4<const amrex::Real>());
-
+        const bool has_H_crown_dn_canyon = (fields.H_crown_down != nullptr);
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
             if (is_urb(i,j,0) == 0) return;
 
@@ -1118,9 +1118,10 @@ void UCMLayer::advance(UCMFields& fields,
 
             // Phase 6.2b hotfix1 (Bug G fix): Add H_crown_down from crown to canyon
             // This is only non-zero in 4-var mode; in 3-var mode H_crown_down is nullptr
-            if (fields.H_crown_down) {
+             if (has_H_crown_dn_canyon) {
                 H_net += H_crown_down_a(i,j,0);
             }
+
 
             amrex::Real dT = H_net * dt / thermal_mass;
 
