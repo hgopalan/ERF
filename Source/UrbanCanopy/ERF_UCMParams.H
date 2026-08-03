@@ -223,6 +223,20 @@ enum class TreeDragMode
 };
 
 /**
+ * @enum TreeRadMode
+ * @brief Tree canopy radiation attenuation mode for SW coupling (Phase 6.2a)
+ *
+ * Determines whether Beer-Lambert SW attenuation through tree crown is applied.
+ * Phase 6.2a supports: Off (default, bit-identical to pre-Phase-6.2a),
+ * and BeerLambert (apply SW attenuation to facet SEB inputs).
+ */
+enum class TreeRadMode
+{
+    Off = 0,           ///< Phase 6.2a default: no tree radiation (bit-identical to pre-Phase-6.2a output)
+    BeerLambert = 1    ///< Phase 6.2a: apply Beer-Lambert SW attenuation to roof/wall/road SEB inputs
+};
+
+/**
  * @struct UCMParams
  * @brief Container for all SLUCM configuration parameters read from ParmParse
  *
@@ -516,6 +530,18 @@ struct UCMParams
     amrex::Real Cd_leaf_default   = 0.2;             ///< Phase 6.1: default leaf drag coefficient [0.1–0.3]; Katul et al. 2004 [-]
     amrex::Real LAD_max_bound     = 5.0;             ///< Phase 6.1: sanity bound for LAD [m^2/m^3]
     amrex::Real H_tree_max_bound  = 40.0;            ///< Phase 6.1: sanity bound for tree height [m]
+
+    // =========================================================================
+    // Section 19: Phase 6.2a — Tree radiation (Beer-Lambert SW attenuation)
+    // =========================================================================
+    // Beer-Lambert attenuation of SW through tree crown; applied to SEB facet inputs.
+    // Tree radiation is gated by tree_rad_mode; default 'off' ensures bit-identity
+    // when disabled. Contract #28: double-gate: if tree_drag_mode=off, is_tree is
+    // zero everywhere, so attenuation is no-op even if tree_rad_mode=beer_lambert.
+
+    std::string tree_rad_mode_str = "off";           ///< Phase 6.2a: "off" | "beer_lambert"
+    TreeRadMode tree_rad_mode = TreeRadMode::Off;
+    amrex::Real k_ext_tree = 0.5;                    ///< Phase 6.2a: Beer-Lambert extinction coefficient (Campbell & Norman 1998) [-]
 
     // =========================================================================
     // Public methods

@@ -307,6 +307,15 @@ struct UCMFields
     std::unique_ptr<amrex::MultiFab> Q_HVAC_road_diag;
 
     // =========================================================================
+    // Phase 6.2a: Tree radiation diagnostics
+    // =========================================================================
+
+    /// SW energy absorbed by tree crown [W/m²]. Phase 6.2a: per-cell diagnostic.
+    /// Computed as sum over facets of (1 - tau_tree_facet) * SW_facet_incident * facet_area_fraction.
+    /// Initialized to 0.0; diagnostic only (not used by Newton in Phase 6.2a).
+    std::unique_ptr<amrex::MultiFab> Q_tree_SW_abs;
+
+    // =========================================================================
     // Phase 5.3: Green roof and permeable pavement state
     // =========================================================================
 

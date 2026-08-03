@@ -304,4 +304,20 @@ void UCMParams::read_from_parmparse()
         amrex::Abort("[UCM][6.1] tree_drag_mode=explicit requires "
                      "erf.ucm.tree_layout_csv_path (Contract #25).");
     }
+
+    // Phase 6.2a: Tree Beer-Lambert SW attenuation
+    pp.query("tree_rad_mode", tree_rad_mode_str);
+    pp.query("k_ext_tree",    k_ext_tree);
+    if (tree_rad_mode_str == "off") {
+        tree_rad_mode = TreeRadMode::Off;
+    } else if (tree_rad_mode_str == "beer_lambert") {
+        tree_rad_mode = TreeRadMode::BeerLambert;
+    } else {
+        amrex::Abort("[UCM][6.2a] Invalid erf.ucm.tree_rad_mode '"
+                     + tree_rad_mode_str + "'; expected 'off' or 'beer_lambert'.");
+    }
+    if (k_ext_tree < 0.0 || k_ext_tree > 5.0) {
+        amrex::Abort("[UCM][6.2a] erf.ucm.k_ext_tree out of [0, 5] range.");
+    }
 }
+

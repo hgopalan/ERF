@@ -26,6 +26,8 @@ ifeq ($(USE_UCM), TRUE)
   # Phase 6.1 additions (tree layout + drag)
   CEXE_sources += UrbanCanopy/ERF_UCMTreeLayoutReader.cpp
   CEXE_sources += UrbanCanopy/ERF_UCMTreeDrag.cpp
+  # Phase 6.2a additions (tree radiation)
+  CEXE_sources += UrbanCanopy/ERF_UCMTreeRad.cpp
   # Phase 5.1a additions (View-factor precomputation)
   CEXE_sources += UrbanCanopy/ERF_UCMViewFactors.cpp
   # Phase 5.2 additions (HVAC waste heat)
