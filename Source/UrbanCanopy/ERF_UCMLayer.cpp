@@ -14,6 +14,7 @@
 #include <UrbanCanopy/ERF_UCMLayer.H>
 #include <UrbanCanopy/ERF_UCMSlabConduction.H>
 #include <UrbanCanopy/ERF_UCMSEBSolver.H>
+#include <UrbanCanopy/ERF_UCMTreeRad.H>
 #include <UrbanCanopy/ERF_UCMAllocate.H>
 #include <UrbanCanopy/ERF_UCMShadowing.H>
 #include <UrbanCanopy/ERF_UCMStabilityCorrection.H>
@@ -651,6 +652,14 @@ void UCMLayer::advance(UCMFields& fields,
         auto const eps_wl_a = fields.emissivity_wall->const_array(mfi);
         auto const eps_rd_a = fields.emissivity_road->const_array(mfi);
 
+        // Phase 6.2a: Tree radiation arrays
+        auto const is_tree_a      = fields.is_tree->const_array(mfi);
+        auto const H_tree_a       = fields.H_tree->const_array(mfi);
+        auto const H_crown_base_a = fields.H_crown_base->const_array(mfi);
+        auto const LAD_bulk_a     = fields.LAD_bulk->const_array(mfi);
+        auto const plan_area_frac_a = fields.plan_area_frac->const_array(mfi);
+        auto       Q_tree_SW_abs_a = fields.Q_tree_SW_abs->array(mfi);
+
         const bool radiosity_mode_is_multi = (m_params.radiosity_mode == RadiosityMode::Multi);
         const bool lw_radiosity_mode_is_multi = (m_params.lw_radiosity_mode == LWRadiosityMode::MultiLagged);
 
@@ -713,6 +722,36 @@ void UCMLayer::advance(UCMFields& fields,
             const amrex::Real LW_roof_eff = LW_roof_in;
             const amrex::Real LW_wall_eff = LW_wall_in;
             const amrex::Real LW_road_eff = LW_road_in;
+
+            // Phase 6.2a: Beer-Lambert SW attenuation through tree crown
+            // Compute per-facet heights based on building geometry
+            // Assuming roof at building top, wall at mid-height, road at ground
+            const amrex::Real paf = plan_area_frac_a(i,j,0);  // Plan area fraction
+            const amrex::Real H_bldg_cell = m_params.H_bldg_default;
+            const amrex::Real H_roof_facet = H_bldg_cell;          // Roof at building top
+            const amrex::Real H_wall_facet = 0.5 * H_bldg_cell;    // Wall mid-height
+            const amrex::Real H_road_facet = 0.0;                  // Road at ground
+
+            // Estimate per-facet area fractions from plan area
+            const amrex::Real area_roof = amrex::max(paf, 1.e-6);
+            const amrex::Real area_wall = (1.0 - paf) * 0.01;  // Approximation: ~1% of domain area
+            const amrex::Real area_road = 1.0 - paf;
+
+            apply_ucm_tree_rad_beer_lambert(
+                SW_roof, SW_wall, SW_road,
+                Q_tree_SW_abs_a(i,j,0),
+                is_tree_a(i,j,0),
+                H_tree_a(i,j,0),
+                H_crown_base_a(i,j,0),
+                LAD_bulk_a(i,j,0),
+                m_params.k_ext_tree,
+                H_roof_facet,
+                H_wall_facet,
+                H_road_facet,
+                area_roof,
+                area_wall,
+                area_road,
+                m_params.tree_rad_mode);
 
             amrex::Real H_rf, H_wl, H_rd;
 
