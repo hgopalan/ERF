@@ -103,7 +103,7 @@
  * @note When f_urb = 0 (no urban cells), mean/std are set to 0.0 (safe division).
  * @note GPU-safe and respects is_urban mask (no access to non-urban cells).
  */
-void aggregate_ucm_morphology_to_atm(
+inline void aggregate_ucm_morphology_to_atm(
     amrex::MultiFab&           f_urb_atm,
     amrex::iMultiFab&          is_urban_atm,
     amrex::MultiFab&           H_bldg_mean_atm,
@@ -174,7 +174,7 @@ void aggregate_ucm_morphology_to_atm(
         auto const plan_area_a    = plan_area_frac_ucm.const_array(mfi);
         auto const is_urban_a     = is_urban_ucm.const_array(mfi);
         auto const H_tree_a       = H_tree_ucm.const_array(mfi);
-        auto const H_crown_base_a = H_crown_base_ucm.const_array(mfi);
+        auto const H_crown_base_ucm_a = H_crown_base_ucm.const_array(mfi);
         auto const LAD_a          = LAD_ucm.const_array(mfi);
         auto const crown_frac_a   = crown_area_frac_ucm.const_array(mfi);
         auto const Cd_leaf_a      = Cd_leaf_ucm.const_array(mfi);
@@ -217,7 +217,7 @@ void aggregate_ucm_morphology_to_atm(
                     if (is_tree_a(i_ucm, j_ucm, 0) == 1) {
                         ++n_tree;
                         sum_H_tree += H_tree_a(i_ucm, j_ucm, 0);
-                        sum_H_crown_base += H_crown_base_a(i_ucm, j_ucm, 0);
+                        sum_H_crown_base += H_crown_base_ucm_a(i_ucm, j_ucm, 0);
                         sum_LAD += LAD_a(i_ucm, j_ucm, 0);
                         sum_crown_frac += crown_frac_a(i_ucm, j_ucm, 0);
                         sum_Cd_leaf += Cd_leaf_a(i_ucm, j_ucm, 0);

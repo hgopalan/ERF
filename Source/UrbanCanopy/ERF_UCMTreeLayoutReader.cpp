@@ -18,9 +18,17 @@
 #include <iomanip>
 #include <cmath>
 
+
 // Verify POD struct is MPI_Bcast safe
 static_assert(std::is_trivially_copyable_v<UCMTreeRow>,
               "UCMTreeRow must be trivially copyable for MPI_Bcast");
+
+namespace amrex {
+    template <>
+    struct ParallelDescriptor::Mpi_typemap<UCMTreeRow> {
+        static MPI_Datatype type() { return MPI_BYTE; }
+    };
+}
 
 void UCMTreeLayoutReader::read_and_broadcast(const std::string& path,
                                               int nx_ucm, int ny_ucm,

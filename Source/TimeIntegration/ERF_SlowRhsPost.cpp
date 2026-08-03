@@ -128,7 +128,7 @@ void erf_slow_rhs_post (int level, int finest_level,
     const bool l_use_turb       = tc.use_kturb;
     const bool l_rotate         = (solverChoice.use_rotate_surface_flux);
     const bool l_do_scalar      = (solverChoice.transport_scalar);
-    const bool l_use_eb         = (solverChoice.terrain_type == TerrainType::EB);
+    //const bool l_use_eb         = (solverChoice.terrain_type == TerrainType::EB);
 
     amrex::ignore_unused(m_r2d);
 
@@ -369,6 +369,7 @@ void erf_slow_rhs_post (int level, int finest_level,
             az_arr   = az->const_array(mfi);
             detJ_arr = detJ->const_array(mfi);
         }
+    }
 
         AdvType horiz_adv_type, vert_adv_type;
         Real    horiz_upw_frac, vert_upw_frac;
@@ -511,9 +512,8 @@ void erf_slow_rhs_post (int level, int finest_level,
                                                mf_my, mf_uy, mf_vy,
                                                hfx_x, hfx_y, hfx_z, q1fx_x, q1fx_y, q1fx_z,q2fx_z, diss,
                                                mu_turb, solverChoice, level,
-                                               tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac,
-                                               is_urban_arr, f_urb_arr, interface_mode);
-                                               tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac);
+                                                tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, l_vert_implicit_fac,
+                                                is_urban_arr, f_urb_arr, interface_mode);
                     } else if (l_use_eb) {
                         DiffusionSrcForState_EB(tbx, domain, start_comp, num_comp, u, v,
                                                 new_cons, cur_prim, cell_rhs,
