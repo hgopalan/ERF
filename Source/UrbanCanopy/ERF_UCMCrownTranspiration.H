@@ -94,7 +94,7 @@ amrex::Real compute_crown_transpiration_LE(
     constexpr amrex::Real rho_air    = 1.2;           // Air density [kg/m³]
     constexpr amrex::Real Lv         = 2.5e6;         // Latent heat of vaporization [J/kg]
     constexpr amrex::Real U_min      = 1.e-6;         // Minimum wind speed guard [m/s]
-    constexpr amrex::Real LE_max     = 500.0;         // Maximum LE to prevent blowup [W/m²]
+    constexpr amrex::Real LE_max     = 350.0;         // Maximum LE to prevent blowup [W/m²]
 
     // Guard against unphysical LAI
     amrex::Real LAI_clamped = amrex::max(LAI, 0.0);
