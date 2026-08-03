@@ -394,9 +394,24 @@ void allocate_ucm_fields(UCMFields& fields,
                 << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp_i << "\n";
     }
 
+    // Phase 6.1: Tree canopy 2D UCM fields
+    // Note: Tree drag ATM aggregates (m_ucm_is_tree_atm, etc.) are ERF class members,
+    // NOT allocated here. See ERF_Advance.cpp for ATM aggregate allocation pattern.
+    fields.H_tree = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.H_crown_base = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.LAD_bulk = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.crown_area_frac = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.Cd_leaf = std::make_unique<MultiFab>(ba, dm, ncomp, ngrow);
+    fields.is_tree = std::make_unique<iMultiFab>(ba, dm, ncomp_i, ngrow);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][6.1][allocate_ucm_fields] H_tree, H_crown_base, LAD_bulk, crown_area_frac, Cd_leaf (MultiFab), "
+                << "is_tree (iMultiFab): "
+                << ba.size() << " boxes, ngrow=" << ngrow << ", ncomp=" << ncomp << " or " << ncomp_i << "\n";
+    }
+
     // Summary message
     if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
-        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 45 MultiFabs on UCM grid "
+        Print() << "[UCM][1.2][allocate_ucm_fields] allocated 51 MultiFabs on UCM grid "
                 << "at lev=" << lev << "\n";
     }
 
@@ -442,6 +457,12 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     fields.H_sensible->setVal(0.0);
     fields.LE_latent->setVal(0.0);
     fields.is_urban->setVal(0);
+    fields.H_tree->setVal(0.0);
+    fields.H_crown_base->setVal(0.0);
+    fields.LAD_bulk->setVal(0.0);
+    fields.crown_area_frac->setVal(0.0);
+    fields.Cd_leaf->setVal(0.0);
+    fields.is_tree->setVal(0);
     fields.mat_id_roof->setVal(0);
     fields.mat_id_wall->setVal(0);
     fields.mat_id_road->setVal(0);
@@ -746,6 +767,110 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
     }
 }
 
+void fill_ucm_tree_fields_from_csv(UCMFields& fields,
+                                    const UCMGrid& ucm_grid,
+                                    const UCMTreeLayoutReader& tree_reader,
+                                    const UCMParams& params,
+                                    int lev,
+                                    bool ucm_debug)
+{
+    AMREX_ALWAYS_ASSERT(fields.all_allocated());
+
+    fields.H_tree->setVal(0.0);
+    fields.H_crown_base->setVal(0.0);
+    fields.LAD_bulk->setVal(0.0);
+    fields.crown_area_frac->setVal(0.0);
+    fields.Cd_leaf->setVal(0.0);
+    fields.is_tree->setVal(0);
+
+    const auto& rows = tree_reader.rows();
+    if (rows.empty()) {
+        if (ucm_debug && ParallelDescriptor::IOProcessor()) {
+            Print() << "[UCM][6.1][fill_ucm_tree_fields_from_csv] lev=" << lev
+                    << " rows=0 (tree fields remain zero)\n";
+        }
+        return;
+    }
+
+    const amrex::Geometry& geom_ucm = ucm_grid.geom;
+    const amrex::Real dx_ucm = geom_ucm.CellSize(0);
+    const amrex::Real dy_ucm = geom_ucm.CellSize(1);
+    const amrex::Real prob_lo_x = geom_ucm.ProbLo(0);
+    const amrex::Real prob_lo_y = geom_ucm.ProbLo(1);
+    const amrex::Box domain = geom_ucm.Domain();
+
+    for (const auto& row : rows) {
+        if (row.is_tree == 0) continue;
+
+        const int i_ucm = static_cast<int>(std::floor((row.x_m - prob_lo_x) / dx_ucm));
+        const int j_ucm = static_cast<int>(std::floor((row.y_m - prob_lo_y) / dy_ucm));
+        if (!domain.contains(amrex::IntVect(i_ucm, j_ucm, 0))) {
+            amrex::Abort(std::string("[UCM][6.1][fill_ucm_tree_fields_from_csv] Tree row maps outside UCM domain: x_m=") +
+                         std::to_string(row.x_m) + ", y_m=" + std::to_string(row.y_m) +
+                         ", lev=" + std::to_string(lev));
+        }
+
+        const amrex::IntVect iv(i_ucm, j_ucm, 0);
+        for (MFIter mfi(*fields.H_tree); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            if (!bx.contains(iv)) continue;
+
+            auto H_tree_arr = fields.H_tree->array(mfi);
+            auto H_crown_base_arr = fields.H_crown_base->array(mfi);
+            auto LAD_bulk_arr = fields.LAD_bulk->array(mfi);
+            auto crown_area_frac_arr = fields.crown_area_frac->array(mfi);
+            auto Cd_leaf_arr = fields.Cd_leaf->array(mfi);
+            auto is_tree_arr = fields.is_tree->array(mfi);
+
+            const amrex::Real old_area = crown_area_frac_arr(iv, 0);
+            const amrex::Real add_area = row.crown_area_frac;
+            const amrex::Real new_area = old_area + add_area;
+            const amrex::Real row_cd = (row.Cd_leaf > 0.0) ? row.Cd_leaf : params.Cd_leaf_default;
+
+            if (is_tree_arr(iv, 0) == 0) {
+                H_tree_arr(iv, 0) = row.H_tree_m;
+                H_crown_base_arr(iv, 0) = row.H_crown_base_m;
+                LAD_bulk_arr(iv, 0) = row.LAD_bulk;
+                crown_area_frac_arr(iv, 0) = add_area;
+                Cd_leaf_arr(iv, 0) = row_cd;
+                is_tree_arr(iv, 0) = 1;
+            } else {
+                H_tree_arr(iv, 0) = std::max(H_tree_arr(iv, 0), row.H_tree_m);
+                H_crown_base_arr(iv, 0) = std::min(H_crown_base_arr(iv, 0), row.H_crown_base_m);
+                if (new_area > 0.0) {
+                    LAD_bulk_arr(iv, 0) = (LAD_bulk_arr(iv, 0) * old_area + row.LAD_bulk * add_area) / new_area;
+                    Cd_leaf_arr(iv, 0) = (Cd_leaf_arr(iv, 0) * old_area + row_cd * add_area) / new_area;
+                }
+                crown_area_frac_arr(iv, 0) = new_area;
+            }
+            break;
+        }
+    }
+
+    if (ucm_debug) {
+        const amrex::Real H_tree_min = fields.H_tree->min(0, 0);
+        const amrex::Real H_tree_max = fields.H_tree->max(0, 0);
+        const amrex::Real H_crown_base_min = fields.H_crown_base->min(0, 0);
+        const amrex::Real H_crown_base_max = fields.H_crown_base->max(0, 0);
+        const amrex::Real LAD_min = fields.LAD_bulk->min(0, 0);
+        const amrex::Real LAD_max = fields.LAD_bulk->max(0, 0);
+        const amrex::Real crown_min = fields.crown_area_frac->min(0, 0);
+        const amrex::Real crown_max = fields.crown_area_frac->max(0, 0);
+        const amrex::Real Cd_min = fields.Cd_leaf->min(0, 0);
+        const amrex::Real Cd_max = fields.Cd_leaf->max(0, 0);
+        const long n_tree_cells = fields.is_tree->sum(0);
+        if (ParallelDescriptor::IOProcessor()) {
+            Print() << "[UCM][6.1][fill_ucm_tree_fields_from_csv]\n"
+                    << "  lev=" << lev << " tree_cells=" << n_tree_cells << "\n"
+                    << "  H_tree: min=" << H_tree_min << " max=" << H_tree_max << " [m]\n"
+                    << "  H_crown_base: min=" << H_crown_base_min << " max=" << H_crown_base_max << " [m]\n"
+                    << "  LAD_bulk: min=" << LAD_min << " max=" << LAD_max << " [m^2/m^3]\n"
+                    << "  crown_area_frac: min=" << crown_min << " max=" << crown_max << "\n"
+                    << "  Cd_leaf: min=" << Cd_min << " max=" << Cd_max << "\n";
+        }
+    }
+}
+
 void fill_ucm_fields_homogeneous(UCMFields& fields,
                                   const UCMParams& params,
                                   int lev)
@@ -1023,6 +1148,19 @@ void fill_ucm_fields_homogeneous(UCMFields& fields,
                 << params.green_roof_soil_capacity_m << " m³/m³, soil_moisture_road = "
                 << params.permeable_road_soil_capacity_m << " m³/m³\n";
         Print() << "[UCM][5.3][fill_ucm_fields_homogeneous] is_green_roof = 0, is_permeable_road = 0\n";
+    }
+
+    // Phase 6.1: Tree canopy fields (homogeneous initialization to zero)
+    // Tree layout is populated from CSV if tree_drag_mode != off.
+    fields.H_tree->setVal(0.0);
+    fields.H_crown_base->setVal(0.0);
+    fields.LAD_bulk->setVal(0.0);
+    fields.crown_area_frac->setVal(0.0);
+    fields.Cd_leaf->setVal(0.0);  // 0 → use Cd_leaf_default
+    fields.is_tree->setVal(0);
+    if (params.ucm_debug && ParallelDescriptor::IOProcessor()) {
+        Print() << "[UCM][6.1][fill_ucm_fields_homogeneous] H_tree, H_crown_base, LAD_bulk, crown_area_frac, Cd_leaf = 0.0, is_tree = 0 "
+                << "(homogeneous; CSV fill follows if tree_drag_mode != off)\n";
     }
 
     // Note: z0 and d_disp are filled by fill_ucm_z0_and_disp, not here
@@ -1419,6 +1557,44 @@ bool UCMFields::all_allocated() const
     if (!F_roof_sky) {
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[UCM][5.1a][all_allocated] MISSING: F_roof_sky\n";
+        }
+        result = false;
+    }
+
+    // Phase 6.1: Tree canopy fields
+    if (!H_tree) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.1][all_allocated] MISSING: H_tree\n";
+        }
+        result = false;
+    }
+    if (!H_crown_base) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.1][all_allocated] MISSING: H_crown_base\n";
+        }
+        result = false;
+    }
+    if (!LAD_bulk) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.1][all_allocated] MISSING: LAD_bulk\n";
+        }
+        result = false;
+    }
+    if (!crown_area_frac) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.1][all_allocated] MISSING: crown_area_frac\n";
+        }
+        result = false;
+    }
+    if (!Cd_leaf) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.1][all_allocated] MISSING: Cd_leaf\n";
+        }
+        result = false;
+    }
+    if (!is_tree) {
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[UCM][6.1][all_allocated] MISSING: is_tree\n";
         }
         result = false;
     }

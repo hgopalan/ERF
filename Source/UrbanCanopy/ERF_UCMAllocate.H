@@ -15,6 +15,8 @@
 #define ERF_UCM_ALLOCATE_H
 
 #include <ERF_UCMFields.H>
+#include <UrbanCanopy/ERF_UCMTreeLayoutReader.H>
+#include <UrbanCanopy/ERF_UCMTreeLayoutReader.H>
 #include <ERF_UCMGrid.H>
 #include <ERF_UCMParams.H>
 #include <UrbanCanopy/ERF_UCMBuildingLayoutReader.H>
@@ -114,6 +116,16 @@ void fill_ucm_fields_from_csv(UCMFields& fields,
 void fill_ucm_fields_homogeneous(UCMFields& fields,
                                   const UCMParams& params,
                                   int lev);
+
+/**
+ * @brief Fill Phase 6.1 tree-canopy UCM fields from tree_layout.csv rows.
+ */
+void fill_ucm_tree_fields_from_csv(UCMFields& fields,
+                                  const UCMGrid& ucm_grid,
+                                  const UCMTreeLayoutReader& tree_reader,
+                                  const UCMParams& params,
+                                  int lev,
+                                  bool ucm_debug = false);
 
 /**
  * @brief Fill z0_ucm and d_disp_ucm from building height and morphology ratios

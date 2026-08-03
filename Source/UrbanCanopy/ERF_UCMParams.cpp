@@ -287,4 +287,21 @@ void UCMParams::read_from_parmparse()
        amrex::Abort("[UCM][5.6] Invalid erf.ucm.interface_mode '" + interface_mode_str +
                     "'; expected 'binary' or 'blended'.");
     }
+
+    // Phase 6.1: Tree canopy drag
+    pp.query("tree_drag_mode", tree_drag_mode_str);
+    pp.query("tree_layout_csv_path", tree_layout_csv_path);
+    pp.query("Cd_leaf_default", Cd_leaf_default);
+    if (tree_drag_mode_str == "off") {
+        tree_drag_mode = TreeDragMode::Off;
+    } else if (tree_drag_mode_str == "explicit") {
+        tree_drag_mode = TreeDragMode::Explicit;
+    } else {
+        amrex::Abort("[UCM][6.1] Invalid erf.ucm.tree_drag_mode '" + tree_drag_mode_str +
+                     "'; expected 'off' or 'explicit'.");
+    }
+    if (tree_drag_mode == TreeDragMode::Explicit && tree_layout_csv_path.empty()) {
+        amrex::Abort("[UCM][6.1] tree_drag_mode=explicit requires "
+                     "erf.ucm.tree_layout_csv_path (Contract #25).");
+    }
 }

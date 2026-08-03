@@ -335,6 +335,38 @@ struct UCMFields
     std::unique_ptr<amrex::iMultiFab> is_permeable_road;
 
     // =========================================================================
+    // Phase 6.1: Tree canopy 2D UCM fields (ATM aggregates live in ERF class)
+    // =========================================================================
+    // Tree morphology stored as per-cell 2D MultiFabs on the UCM grid.
+    // ATM-grid aggregates (m_ucm_is_tree_atm, m_ucm_H_tree_atm, etc.) are
+    // ERF class members allocated in ERF::Advance per Phase 4.1-hotfix2 pattern.
+    // Tree drag is optionally applied to ATM momentum via 3D kernel.
+
+    /// Crown top height above ground [m]. Phase 6.1: from tree_layout.csv or zero if disabled.
+    /// Defines upper bound of tree drag envelope: z_center ∈ [0, H_tree].
+    std::unique_ptr<amrex::MultiFab>  H_tree;
+
+    /// Crown base height above ground [m]. Phase 6.1: from tree_layout.csv or zero if disabled.
+    /// Defines lower bound of tree drag envelope: z_center ∈ [H_crown_base, H_tree].
+    std::unique_ptr<amrex::MultiFab>  H_crown_base;
+
+    /// Leaf area density [m^2/m^3]. Phase 6.1: uniform profile inside crown envelope.
+    /// LAD(z) = LAD_bulk for z ∈ [H_crown_base, H_tree]; drag parameterization.
+    std::unique_ptr<amrex::MultiFab>  LAD_bulk;
+
+    /// Crown footprint / cell area [-]. Phase 6.1: >1 allowed for multiple trees per cell.
+    /// Modulates canopy element concentration and drag magnitude per cell.
+    std::unique_ptr<amrex::MultiFab>  crown_area_frac;
+
+    /// Leaf drag coefficient [-]. Phase 6.1: ∈ [0.1, 0.3] typical; from CSV or defaults.
+    /// Cd_leaf = 0 → use Cd_leaf_default; Cd_leaf > 0 → use per-cell override.
+    std::unique_ptr<amrex::MultiFab>  Cd_leaf;
+
+    /// Tree presence mask [0 or 1]. Phase 6.1: 1 = tree present, 0 = no tree.
+    /// UCM cell classification: urban (is_urban=1) may also have trees (is_tree=1).
+    std::unique_ptr<amrex::iMultiFab> is_tree;
+
+    // =========================================================================
     // Public methods
     // =========================================================================
 

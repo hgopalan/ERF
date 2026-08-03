@@ -209,6 +209,20 @@ enum class InterfaceMode
 };
 
 /**
+ * @enum TreeDragMode
+ * @brief Tree canopy drag application mode for momentum coupling (Phase 6.1)
+ *
+ * Determines whether tree canopy drag is applied to atmospheric momentum.
+ * Phase 6.1 supports: Off (default, bit-identical to pre-Phase-6.1),
+ * and Explicit (apply drag directly to ATM momentum RHS).
+ */
+enum class TreeDragMode
+{
+    Off = 0,       ///< Phase 6.1 default: no tree drag (bit-identical to pre-Phase-6.1 output)
+    Explicit = 1   ///< Phase 6.1: apply tree drag directly to xmom_src and ymom_src
+};
+
+/**
  * @struct UCMParams
  * @brief Container for all SLUCM configuration parameters read from ParmParse
  *
@@ -487,6 +501,21 @@ struct UCMParams
 
     std::string interface_mode_str = "binary";       ///< "binary" | "blended"
     InterfaceMode interface_mode = InterfaceMode::Binary;
+
+    // =========================================================================
+    // Section 20: Phase 6.1 — Tree canopy layout + drag
+    // =========================================================================
+    // Tree morphology is stored as 2D UCM MultiFabs (H_tree, H_crown_base, LAD_bulk,
+    // crown_area_frac, Cd_leaf, is_tree). ATM-grid aggregates (m_ucm_is_tree_atm, etc.)
+    // are ERF class members allocated in the same site as m_ucm_is_urban_atm.
+    // Tree drag is gated by tree_drag_mode; default 'off' ensures bit-identity when disabled.
+
+    std::string tree_drag_mode_str = "off";          ///< Phase 6.1: "off" | "explicit"
+    TreeDragMode tree_drag_mode = TreeDragMode::Off;
+    std::string tree_layout_csv_path = "";           ///< Phase 6.1: path to tree_layout.csv (required if tree_drag_mode=explicit)
+    amrex::Real Cd_leaf_default   = 0.2;             ///< Phase 6.1: default leaf drag coefficient [0.1–0.3]; Katul et al. 2004 [-]
+    amrex::Real LAD_max_bound     = 5.0;             ///< Phase 6.1: sanity bound for LAD [m^2/m^3]
+    amrex::Real H_tree_max_bound  = 40.0;            ///< Phase 6.1: sanity bound for tree height [m]
 
     // =========================================================================
     // Public methods
