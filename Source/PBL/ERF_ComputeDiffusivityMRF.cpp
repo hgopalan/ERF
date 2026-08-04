@@ -506,9 +506,9 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
             const Real HOL_bounded = amrex::max(amrex::min(HOL, Real(100.0)), Real(-100.0));
             const Real one_quarter = Real(0.25);
             // Enable QNSE stable functions if requested, otherwise use default linear form
-            const Real enable_qnse_d = (enable_qnse_stable_functions) ? Real(1.0) : Real(0.0);
-            const Real qnse_am_d = qnse_am;
-            const Real qnse_bm_d = qnse_bm;
+            const Real enable_qnse_d = (turbChoice.enable_qnse_stable_functions) ? Real(1.0) : Real(0.0);
+            const Real qnse_am_d = turbChoice.qnse_am;
+            const Real qnse_bm_d = turbChoice.qnse_bm;
             const Real phiM = (obuk_val > 0)
                             ? (enable_qnse_d > Real(0.5)
                                ? (1 + qnse_am_d * HOL_bounded) / (1 + qnse_bm_d * HOL_bounded)
@@ -700,11 +700,11 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
 
                 const Real one_quarter = Real(0.25);
                 // Enable QNSE stable functions if requested, otherwise use default linear form
-                const Real enable_qnse_d = (enable_qnse_stable_functions) ? Real(1.0) : Real(0.0);
-                const Real qnse_am_d = qnse_am;
-                const Real qnse_bm_d = qnse_bm;
-                const Real qnse_ah_d = qnse_ah;
-                const Real qnse_bh_d = qnse_bh;
+                const Real enable_qnse_d = (turbChoice.enable_qnse_stable_functions) ? Real(1.0) : Real(0.0);
+                const Real qnse_am_d = turbChoice.qnse_am;
+                const Real qnse_bm_d = turbChoice.qnse_bm;
+                const Real qnse_ah_d = turbChoice.qnse_ah;
+                const Real qnse_bh_d = turbChoice.qnse_bh;
                 const Real phiM = (obuk_val > 0)
                                 ? (enable_qnse_d > Real(0.5)
                                    ? (1 + qnse_am_d * HOL_bounded) / (1 + qnse_bm_d * HOL_bounded)
