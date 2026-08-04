@@ -830,7 +830,7 @@ void erf_slow_rhs_post (int level, int finest_level,
                            << "  N_total: " << n_total << " (expected: " << n_expected << ")\n";
         }
     }
-}
+
     if (cloud_budget && l_use_diff && n_qstate > 0) {
         for (int qstate = 0; qstate < n_qstate; ++qstate) {
             MultiFab qflux_x(*dflux_x, make_alias, qstate, 1);

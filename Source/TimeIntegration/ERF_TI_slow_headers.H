@@ -163,12 +163,13 @@ void erf_slow_rhs_post (int level, int finest_level, int nrk,
                        amrex::YAFluxRegister* fr_as_crse,
                        amrex::YAFluxRegister* fr_as_fine,
                        std::unique_ptr<ReadBndryPlanes>& m_r2d,
-                       amrex::iMultiFab* is_urban = nullptr,
-                       amrex::MultiFab* f_urb_atm = nullptr,
                        const amrex::MultiFab* cloud_chamber_base_state,
                        const erf_cloud_chamber::Config* cloud_chamber_config,
-                       CloudChamberBudget* cloud_budget
-                       int interface_mode = 0);
+                       CloudChamberBudget* cloud_budget,
+                       amrex::iMultiFab* is_urban = nullptr,
+                       amrex::MultiFab* f_urb_atm = nullptr,
+                       int interface_mode = 0
+                  );
 
 
 #endif
