@@ -1,0 +1,150 @@
+# Canonical test for ERF-SLUCM Phase 6.3: Crown transpiration (LE cooling)
+# Identical to inputs_4var except crown_transp_mode = "simple".
+# Expected: T_skin_crown ~0.5-3 K cooler than inputs_4var due to transpiration cooling.
+#           LE_crown_diag > 0 during daylight (verified in check_tree_seb_4var.py S7/S8).
+
+erf.prob_name = "ABL"
+
+# Time stepping
+max_step         = 3600
+erf.cfl                = 0.5
+amrex.fpe_trap_invalid = 0
+
+fabarray.mfiter_tile_size = 1024 1024 1024
+
+# AMR / geometry: tall domain for better vertical resolution
+geometry.prob_extent = 400.0 400.0 1024.0
+amr.n_cell           = 4 4 256
+amrex.max_grid_size_z = 128
+geometry.is_periodic = 1 1 0
+
+# Domain boundaries
+zlo.type = "surface_layer"
+erf.most.z0   = 0.1
+erf.most.zref = 24.0
+erf.most.surf_temp_flux = 0.02
+zhi.type = "SlipWall"
+zhi.theta_grad = 0.003
+
+# DIAGNOSTICS & VERBOSITY
+erf.sum_interval   = 1
+erf.v              = 1
+amr.v              = 1
+
+# REFINEMENT / REGRIDDING
+amr.max_level       = 0
+
+# CHECKPOINT / PLOTFILES
+amr.check_int        = -1
+erf.check_int        = -1
+erf.plot_file_1     = plt_
+erf.plot_int_1      = 10
+erf.plot_vars_1     = x_velocity y_velocity z_velocity theta density
+
+# SOLVER CHOICE
+erf.use_gravity = true
+erf.molec_diff_type = "None"
+erf.les_type        = "None"
+erf.Cs = 0.11
+erf.theta_ref = 300.0
+
+# Terrain
+erf.terrain_type     = None
+erf.use_moisture     = false
+erf.transport_scalar = false
+
+# INITIALIZATION
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+erf.input_sounding_file = "sounding_neutral_abl"
+
+# PBL CONFIGURATION
+erf.pbl_type = "MRF"
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_sf = 0.1
+
+erf.enable_mrf_countergradient = true
+erf.mrf_moistvars = false
+
+# CORIOLIS / GEOSTROPHIC FORCING
+erf.latitude = 45.0
+erf.use_coriolis = true
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 8.0 0.0 0.0
+
+# ========================================================================
+# SLUCM Configuration
+# ========================================================================
+erf.ucm.enable              = true
+erf.ucm.ucm_debug           = 1
+erf.ucm.anchor_level        = 0
+erf.ucm.static_refinement   = true
+erf.ucm.grid_ratio          = 4
+erf.ucm.allow_steep_terrain = false
+
+erf.ucm.atm_feedback_momentum = 1.0
+erf.ucm.atm_feedback_heat     = 1.0
+erf.ucm.atm_feedback_moisture = 0.0
+erf.ucm.zref                = 2.0
+
+erf.ucm.alpha_ucm           = 10.0
+erf.ucm.H_bldg_uniform      = 30.0
+erf.ucm.W_road_uniform      = 10.0
+erf.ucm.W_roof_uniform      = 10.0
+
+erf.ucm.albedo_roof         = 0.20
+erf.ucm.albedo_wall         = 0.20
+erf.ucm.albedo_road         = 0.15
+
+erf.ucm.emissivity_roof     = 0.90
+erf.ucm.emissivity_wall     = 0.90
+erf.ucm.emissivity_road     = 0.94
+
+erf.ucm.ucm_plot_int        = 10
+erf.ucm.ucm_atm_plot_int    = 1
+erf.ucm.ucm_diag_file       = "ucm_diag.dat"
+
+erf.ucm.test_ustar          = 0.0
+erf.ucm.test_surf_temp_K    = 293.15
+
+erf.ucm.AH_uniform_Wm2          = 50.0
+erf.ucm.AH_profile_type_default = 1
+
+erf.ucm.alpha_scale              = 1.5
+erf.ucm.alpha_min                = 1.0
+erf.ucm.alpha_max                = 50.0
+erf.ucm.use_morphology_injection = 0
+
+erf.ucm.use_facet3d_injection              = 1
+erf.ucm.use_gaussian_height_distribution   = 0
+erf.ucm.height_std_threshold_m             = 0.1
+
+# ========================================================================
+# Phase 6.1 Tree drag + Phase 6.2a Tree radiation
+# ========================================================================
+erf.ucm.tree_drag_mode                     = "explicit"
+erf.ucm.tree_layout_csv_path               = "tree_layout.csv"
+erf.ucm.tree_rad_mode                      = "beer_lambert"
+erf.ucm.k_ext_tree                         = 0.5
+
+# ========================================================================
+# Phase 6.2b: 4-var SEB with crown as prognostic facet
+# ========================================================================
+erf.ucm.seb_mode               = "4var"
+erf.ucm.Ch_leaf                = 0.02
+erf.ucm.eps_leaf               = 0.96
+erf.ucm.crown_view_factor_wall = 0.3
+erf.ucm.crown_view_factor_road = 0.5
+erf.ucm.crown_area_frac_default = 0.7
+
+# ========================================================================
+# Phase 6.3: Crown transpiration (LE) — THE KEY CHANGE
+# ========================================================================
+erf.ucm.crown_transp_mode       = "simple"
+erf.ucm.r_stomatal_leaf_s_per_m = 200.0
+erf.ucm.LAI_default             = 3.0
+
+# CSV-based heterogeneous setup
+erf.ucm.building_layout_csv_path = "building_layout.csv"
+erf.ucm.material_library_csv_path = "materials.csv"
