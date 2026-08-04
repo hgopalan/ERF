@@ -1,3 +1,5 @@
+/** \file ERF_Diffusion.H */
+
 #ifndef ERF_DIFFUSION_H_
 #define ERF_DIFFUSION_H_
 
@@ -11,6 +13,7 @@
 #include "ERF_SurfaceLayer.H"
 #include "ERF_EB.H"
 
+/** \brief Add stress-divergence diffusion source terms to the momentum RHS. */
 void DiffusionSrcForMom (const amrex::Box& bxx, const amrex::Box& bxy, const amrex::Box& bxz,
                          const amrex::Array4<      amrex::Real>& rho_u_rhs,
                          const amrex::Array4<      amrex::Real>& rho_v_rhs,
@@ -32,6 +35,7 @@ void DiffusionSrcForMom (const amrex::Box& bxx, const amrex::Box& bxy, const amr
                          const amrex::Array4<const amrex::Real>& mf_vy     ,
                          const bool use_stretched_dz, const bool use_variable_dz);
 
+/** \brief Add embedded-boundary stress-divergence diffusion source terms to the momentum RHS. */
 void DiffusionSrcForMom_EB (const amrex::MFIter& mfi,
                             [[maybe_unused]] const amrex::Box& domain,
                             const amrex::Box& bxx, const amrex::Box& bxy, const amrex::Box& bxz,
@@ -65,6 +69,7 @@ void DiffusionSrcForMom_EB (const amrex::MFIter& mfi,
                             const eb_& ebfact,
                             [[maybe_unused]] const amrex::BCRec* bc_ptr);
 
+/** \brief Add state diffusion source terms on a uniform grid without terrain. */
 void DiffusionSrcForState_N (const amrex::Box& bx, const amrex::Box& domain,
                              int start_comp, int num_comp,
                              const amrex::Array4<const amrex::Real>& u,
@@ -99,6 +104,7 @@ void DiffusionSrcForState_N (const amrex::Box& bx, const amrex::Box& domain,
                              const amrex::Array4<const amrex::Real>& f_urb = amrex::Array4<const amrex::Real>{},
                              const int interface_mode = 0);
 
+/** \brief Add state diffusion source terms on a vertically stretched grid. */
 void DiffusionSrcForState_S (const amrex::Box& bx, const amrex::Box& domain,
                              int start_comp, int num_comp,
                              const amrex::Array4<const amrex::Real>& u,
@@ -134,6 +140,7 @@ void DiffusionSrcForState_S (const amrex::Box& bx, const amrex::Box& domain,
                              const amrex::Array4<const amrex::Real>& f_urb = amrex::Array4<const amrex::Real>{},
                              const int interface_mode = 0);
 
+/** \brief Add state diffusion source terms on terrain-following coordinates. */
 void DiffusionSrcForState_T (const amrex::Box& bx, const amrex::Box& domain,
                              int start_comp, int num_comp,
                              const bool& rotate,
@@ -179,6 +186,7 @@ void DiffusionSrcForState_T (const amrex::Box& bx, const amrex::Box& domain,
                              const amrex::Array4<const amrex::Real>& f_urb = amrex::Array4<const amrex::Real>{},
                              const int interface_mode = 0);
 
+/** \brief Add state diffusion source terms for embedded-boundary cells. */
 void DiffusionSrcForState_EB (const amrex::Box& bx, const amrex::Box& domain,
                              int start_comp, int num_comp,
                              const amrex::Array4<const amrex::Real>& u,
@@ -208,6 +216,7 @@ void DiffusionSrcForState_EB (const amrex::Box& bx, const amrex::Box& domain,
                              const amrex::BCRec* bc_ptr,
                              const bool use_SurfLayer);
 
+/** \brief Compute embedded-boundary stress components for constant viscosity. */
 void ComputeStressConsVisc_EB (amrex::Box bxcc,
                               amrex::Box tbxxy,
                               amrex::Box tbxxz,
@@ -226,6 +235,7 @@ void ComputeStressConsVisc_EB (amrex::Box bxcc,
                               amrex::Array4<amrex::Real>& tau23i,
                               amrex::Array4<amrex::Real>& tau33i);
 
+/** \brief Compute stress components for constant viscosity on a uniform grid without terrain. */
 void ComputeStressConsVisc_N (amrex::Box bxcc,
                               amrex::Box tbxxy,
                               amrex::Box tbxxz,
@@ -243,6 +253,7 @@ void ComputeStressConsVisc_N (amrex::Box bxcc,
                               amrex::Array4<amrex::Real>& tau23i,
                               amrex::Array4<amrex::Real>& tau33i);
 
+/** \brief Compute stress components for constant viscosity on a vertically stretched grid. */
 void ComputeStressConsVisc_S (amrex::Box bxcc,
                               amrex::Box tbxxy,
                               amrex::Box tbxxz,
@@ -266,6 +277,7 @@ void ComputeStressConsVisc_S (amrex::Box bxcc,
                               amrex::Array4<amrex::Real>& tau23i,
                               amrex::Array4<amrex::Real>& tau33i);
 
+/** \brief Compute stress components for constant viscosity on terrain-following coordinates. */
 void ComputeStressConsVisc_T (amrex::Box bxcc,
                               amrex::Box tbxxy,
                               amrex::Box tbxxz,
@@ -292,6 +304,7 @@ void ComputeStressConsVisc_T (amrex::Box bxcc,
                               amrex::Array4<amrex::Real>& tau23i,
                               amrex::Array4<amrex::Real>& tau33i);
 
+/** \brief Compute embedded-boundary stress components for variable viscosity. */
 void ComputeStressVarVisc_EB (amrex::Box bxcc,
                               amrex::Box tbxxy,
                               amrex::Box tbxxz,
@@ -311,6 +324,7 @@ void ComputeStressVarVisc_EB (amrex::Box bxcc,
                               amrex::Array4<amrex::Real>& tau23i,
                               amrex::Array4<amrex::Real>& tau33i);
 
+/** \brief Compute stress components for variable viscosity on a uniform grid without terrain. */
 void ComputeStressVarVisc_N (amrex::Box bxcc,
                              amrex::Box tbxxy,
                              amrex::Box tbxxz,
@@ -329,6 +343,7 @@ void ComputeStressVarVisc_N (amrex::Box bxcc,
                              amrex::Array4<amrex::Real>& tau23i,
                              amrex::Array4<amrex::Real>& tau33i);
 
+/** \brief Compute stress components for variable viscosity on a vertically stretched grid. */
 void ComputeStressVarVisc_S (amrex::Box bxcc,
                              amrex::Box tbxxy,
                              amrex::Box tbxxz,
@@ -353,6 +368,7 @@ void ComputeStressVarVisc_S (amrex::Box bxcc,
                              amrex::Array4<amrex::Real>& tau23i,
                              amrex::Array4<amrex::Real>& tau33i);
 
+/** \brief Compute stress components for variable viscosity on terrain-following coordinates. */
 void ComputeStressVarVisc_T (amrex::Box bxcc,
                              amrex::Box tbxxy,
                              amrex::Box tbxxz,
@@ -380,6 +396,7 @@ void ComputeStressVarVisc_T (amrex::Box bxcc,
                              amrex::Array4<amrex::Real>& tau23i,
                              amrex::Array4<amrex::Real>& tau33i);
 
+/** \brief Compute embedded-boundary strain-rate components. */
 void ComputeStrain_EB (const amrex::MFIter& mfi,
                       amrex::Box bxcc, amrex::Box tbxxy,
                       amrex::Box tbxxz, amrex::Box tbxyz, amrex::Box domain,
@@ -398,6 +415,7 @@ void ComputeStrain_EB (const amrex::MFIter& mfi,
                       amrex::Array4<amrex::Real>& tau13i,
                       amrex::Array4<amrex::Real>& tau23i);
 
+/** \brief Compute strain-rate components on a uniform grid without terrain. */
 void ComputeStrain_N (amrex::Box bxcc, amrex::Box tbxxy,
                       amrex::Box tbxxz, amrex::Box tbxyz, amrex::Box domain,
                       const amrex::Array4<const amrex::Real>& u,
@@ -420,6 +438,7 @@ void ComputeStrain_N (amrex::Box bxcc, amrex::Box tbxxy,
                       amrex::Array4<amrex::Real>& tau13i,
                       amrex::Array4<amrex::Real>& tau23i);
 
+/** \brief Compute strain-rate components on a vertically stretched grid. */
 void ComputeStrain_S (amrex::Box bxcc, amrex::Box tbxxy,
                       amrex::Box tbxxz, amrex::Box tbxyz, amrex::Box domain,
                       const amrex::Array4<const amrex::Real>& u,
@@ -443,6 +462,7 @@ void ComputeStrain_S (amrex::Box bxcc, amrex::Box tbxxy,
                       amrex::Array4<amrex::Real>& tau13i,
                       amrex::Array4<amrex::Real>& tau23i);
 
+/** \brief Compute strain-rate components on terrain-following coordinates. */
 void ComputeStrain_T (amrex::Box bxcc, amrex::Box tbxxy,
                       amrex::Box tbxxz, amrex::Box tbxyz, amrex::Box domain,
                       const amrex::Array4<const amrex::Real>& u,
@@ -467,6 +487,7 @@ void ComputeStrain_T (amrex::Box bxcc, amrex::Box tbxxy,
                       amrex::Array4<amrex::Real>& tau13i,
                       amrex::Array4<amrex::Real>& tau23i);
 
+/** \brief Apply implicit vertical state diffusion on a uniform grid without terrain. */
 void ImplicitDiffForStateLU_N (const amrex::Box& bx,
                                const amrex::Box& domain,
                                const int level,
@@ -483,6 +504,7 @@ void ImplicitDiffForStateLU_N (const amrex::Box& bx,
                                const amrex::Real implicit_fac,
                                const bool use_mrf_countergradient = false);
 
+/** \brief Apply implicit vertical state diffusion on a vertically stretched grid. */
 void ImplicitDiffForStateLU_S (const amrex::Box& bx,
                                const amrex::Box& domain,
                                const int level,
@@ -499,6 +521,7 @@ void ImplicitDiffForStateLU_S (const amrex::Box& bx,
                                const amrex::Real implicit_fac,
                                const bool use_mrf_countergradient = false);
 
+/** \brief Apply implicit vertical state diffusion on terrain-following coordinates. */
 void ImplicitDiffForStateLU_T (const amrex::Box& bx,
                                const amrex::Box& domain,
                                const int level,
@@ -517,6 +540,7 @@ void ImplicitDiffForStateLU_T (const amrex::Box& bx,
                                const amrex::Real implicit_fac,
                                const bool use_mrf_countergradient = false);
 
+/** \brief Apply implicit vertical momentum diffusion on a uniform grid without terrain. */
 template <int stagdir>
 void ImplicitDiffForMomLU_N (const amrex::Box& bx,
                              const amrex::Box& domain,
@@ -534,6 +558,7 @@ void ImplicitDiffForMomLU_N (const amrex::Box& bx,
                              const amrex::Real implicit_fac,
                              const bool use_ysu_mom_countergradient);
 
+/** \brief Apply implicit vertical momentum diffusion on a vertically stretched grid. */
 template <int stagdir>
 void ImplicitDiffForMomLU_S (const amrex::Box& bx,
                              const amrex::Box& domain,
@@ -551,6 +576,7 @@ void ImplicitDiffForMomLU_S (const amrex::Box& bx,
                              const amrex::Real implicit_fac,
                              const bool use_ysu_mom_countergradient);
 
+/** \brief Apply implicit vertical momentum diffusion on terrain-following coordinates. */
 template <int stagdir>
 void ImplicitDiffForMomLU_T (const amrex::Box& bx,
                              const amrex::Box& domain,
