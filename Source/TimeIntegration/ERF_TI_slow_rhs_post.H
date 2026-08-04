@@ -55,10 +55,13 @@
 #endif
                           native_shoc_driver[level].get(),
                           fr_as_crse, fr_as_fine,
-                          m_r2d,
+                          m_r2d, &base_state[level],
+                          cloud_chamber_config.active ? &cloud_chamber_config : nullptr,
+                          cloud_chamber_budget.get(),
                           m_ucm_is_urban_atm[level].get(),  // Phase 4.1: is_urban mask for MOST flux gating
                           m_ucm_f_urb_atm[level].get(),     // Phase 5.6: f_urb for blended flux interface
                           static_cast<int>(m_ucm_params.interface_mode));  // Phase 5.6: interface mode
+  );
 
         // Implicit diffusion of moisture
         #include "ERF_ImplicitPost.H"

@@ -17,6 +17,9 @@
 #include "ERF_TileNoZ.H"
 #include "ERF_EB.H"
 #include "ERF_ReadBndryPlanes.H"
+#include "Prob/ERF_CloudChamber.H"
+
+class CloudChamberBudget;
 
 class ShocDriver;
 
@@ -103,7 +106,10 @@ void erf_slow_rhs_pre (int level, int finest_level, int nrk,
 #endif
                       ShocDriver* native_shoc_lev,
                       amrex::YAFluxRegister* fr_as_crse,
-                      amrex::YAFluxRegister* fr_as_fine);
+                      amrex::YAFluxRegister* fr_as_fine,
+                      const amrex::MultiFab* cloud_chamber_base_state,
+                      const erf_cloud_chamber::Config* cloud_chamber_config,
+                      CloudChamberBudget* cloud_budget);
 
 /**
  * Function for computing the slow RHS for the evolution equations for the scalars other than density or potential temperature
@@ -159,6 +165,10 @@ void erf_slow_rhs_post (int level, int finest_level, int nrk,
                        std::unique_ptr<ReadBndryPlanes>& m_r2d,
                        amrex::iMultiFab* is_urban = nullptr,
                        amrex::MultiFab* f_urb_atm = nullptr,
+                       const amrex::MultiFab* cloud_chamber_base_state,
+                       const erf_cloud_chamber::Config* cloud_chamber_config,
+                       CloudChamberBudget* cloud_budget
                        int interface_mode = 0);
+
 
 #endif
