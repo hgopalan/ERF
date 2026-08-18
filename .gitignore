@@ -70,6 +70,12 @@ build_*.log
 *~
 \#*\#
 .#*
+<<<<<<< HEAD
 *.bak
 Backtrace.*
 build/
+=======
+
+# Python cache
+__pycache__
+>>>>>>> origin/development
