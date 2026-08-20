@@ -120,7 +120,7 @@ void erf_slow_rhs_post (int level, int finest_level,
     const bool l_use_terrain      = (solverChoice.mesh_type != MeshType::ConstantDz);
     const bool l_moving_terrain   = (solverChoice.terrain_type == TerrainType::MovingFittedMesh);
     const bool l_use_eb           = (solverChoice.terrain_type == TerrainType::EB);
-    const bool l_reflux = ( (solverChoice.coupling_type == CouplingType::TwoWay) && (nrk == 2) && (finest_level > 0) );
+    //const bool l_reflux = ( (solverChoice.coupling_type == CouplingType::TwoWay) && (nrk == 2) && (finest_level > 0) );
     if (l_moving_terrain) AMREX_ALWAYS_ASSERT(l_use_terrain);
 
     const bool l_anelastic   = solverChoice.anelastic[level];
