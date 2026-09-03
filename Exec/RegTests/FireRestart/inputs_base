@@ -26,11 +26,8 @@ erf.most.z0 = 0.1
 erf.most.surf_temp = 300.0
 erf.most.surf_heating_rate = 0.0
 
-# Constant molecular diffusion and no LES. With Smagorinsky on, the
-# surface-layer drag does not resume identically after an ERF restart and the
-# wind, hence a wind-following rate of spread, drifts from the straight run;
-# that is an atmosphere-side restart property, not a fire one, and is kept out
-# of this suite so that any difference is in the fire state alone.
+# Constant molecular diffusion and no LES, so the atmosphere is cheap and
+# deterministic; the surface layer is on, as in every fire run.
 erf.molec_diff_type = "ConstantAlpha"
 erf.les_type = "None"
 erf.use_gravity = true
@@ -52,7 +49,6 @@ erf.fire_plot_int = -1
 erf.fire.enable = true
 erf.fire.fire_debug = true
 erf.fire.grid_ratio = 4              # 25 m fire cells
-erf.fire.coupling_type = "passive"
 erf.fire.propagation_method = "levelset"
 
 erf.fire.fuel_model_id = 1           # short grass

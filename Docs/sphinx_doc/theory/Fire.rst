@@ -215,7 +215,8 @@ explains what each row should show:
 - ``FireHybridObstacles``: the hybrid structure selector, arrival-time probes
   and the interaction with immersed-forcing buildings.
 - ``FireRestart``: a checkpoint written mid-run and a restart from it, on both
-  propagation paths, which must reproduce the uninterrupted run.
+  propagation paths and with lagged heat coupling, which must reproduce the
+  uninterrupted run exactly.
 
 Where each feature is exercised:
 
@@ -261,10 +262,7 @@ Where each feature is exercised:
 Not yet covered by any test: fire heat injection together with
 immersed-forcing buildings (known to discard the immersed-forcing scalar
 source, see :ref:`sec:FireCoupling`), restart of the spotting and crown-fire
-state, and the fire-dust coupling. ``FireRestart`` uses the wind-capped
-Rothermel rate on purpose: with a surface layer the atmosphere itself does
-not resume identically after an ERF restart, so a wind-following model would
-show that atmospheric drift rather than the fire state.
+state, and the fire-dust coupling.
 
 References
 ----------

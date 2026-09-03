@@ -1,12 +1,13 @@
 FILE = inputs_base
 
-# Rothermel on the direction-dependent level-set path, uninterrupted to 200 s.
-# Rothermel is used because its wind cap makes the rate independent of the
-# small post-restart wind differences of the atmosphere (see inputs_base).
-
-erf.fire.ros_model = "rothermel"
+# Balbi 2020 on the direction-dependent level-set path, uninterrupted to 200 s.
+# Balbi follows the wind, so this row also checks that the atmosphere itself
+# resumes exactly.
+erf.fire.ros_model = "balbi"
+erf.fire.balbi.formulation = "2020"
 erf.fire.directional_ros = true
 erf.fire.propagation_method = "levelset"
+erf.fire.coupling_type = "passive"
 stop_time = 200.0
 max_step = 400
 erf.check_int = -1

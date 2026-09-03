@@ -164,8 +164,9 @@ Restart
 -------
 
 The checkpoint stores ``fire_phi``, ``fire_arrival_time``, ``fire_ros``,
-``fire_fuel_load``, ``fire_fuel_mc``, the FARSITE displacement accumulator
-and, when crown fire is on, the crown state and load. On restart the fire
+``fire_fuel_load``, ``fire_fuel_mc``, the FARSITE displacement accumulator,
+the lagged fluxes waiting to be injected and, when crown fire is on, the
+crown state and load. On restart the fire
 layer is initialised from the inputs as on a clean start (fuel map,
 firebreaks, hybrid weights, structure mask) and these fields are then read
 back, so the front, burned area and consumed fuel continue exactly.

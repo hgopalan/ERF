@@ -150,8 +150,9 @@ Checkpoint and restart
 
 The atmospheric checkpoint carries the fire state as ``FirePhi``,
 ``FireArrivalTime``, ``FireROS``, ``FireFuelLoad``, ``FireFuelMC``,
-``FireDispAccum`` and, with crown fire, ``FireCrownActive`` and
-``FireCrownLoad``. On restart the fire layer is initialised from the inputs
+``FireDispAccum``, the lagged flux buffers ``FireQAtmPrev`` and
+``FireQLatAtmPrev`` that the next step injects, and, with crown fire,
+``FireCrownActive`` and ``FireCrownLoad``. On restart the fire layer is initialised from the inputs
 first, so a spatial fuel map, firebreaks, a hybrid weight or a structure
 mask must still be available, and the checkpointed fields are then read
 over the initial ones. Diagnostics are recomputed on the first step.
