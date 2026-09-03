@@ -2,6 +2,7 @@
 #define ERF_FIRE_LAYER_H
 
 #include <AMReX_MultiFab.H>
+#include <string>
 #include <AMReX_Geometry.H>
 #include <memory>
 #include <ERF_FireParams.H>
@@ -188,6 +189,15 @@ public:
     const amrex::MultiFab* get_ros() const
     {
         return fire_ros.get();
+    }
+
+    /**
+     * @brief Get the hybrid ROS per-cell weight of the secondary model.
+     * @return Pointer to fire_ros_weight [0,1], or nullptr unless ros_model = "hybrid".
+     */
+    const amrex::MultiFab* get_ros_weight() const
+    {
+        return fire_ros_weight.get();
     }
 
     /**
@@ -629,6 +639,26 @@ private:
     BalbiComputed                            m_bc_default;      // Balbi global default (uniform fuel)
     CheneyGouldComputed                      m_cgc;             // Cheney-Gould computed params
     amrex::Gpu::DeviceVector<BalbiComputed>  m_d_balbi_table;   // per-fuel Balbi table (spatial fuel)
+
+    // Per-fuel Rothermel table; empty unless rothermel_per_fuel is set on a
+    // spatial fuel map, in which case the Rothermel kernel looks it up per cell.
+    amrex::Gpu::DeviceVector<RothermelComputed> m_d_rc_table;
+
+    // Hybrid ROS (ros_model = "hybrid"): per-cell weight of the secondary
+    // model in [0,1] and the scratch field the secondary model writes into.
+    std::unique_ptr<amrex::MultiFab>         fire_ros_weight;
+    std::unique_ptr<amrex::MultiFab>         fire_ros_scratch;
+
+    /// Evaluate one named ROS model into `out` (uniform-fuel Balbi inputs in balbi_in).
+    void fill_ros_for_model(const std::string& model,
+                            amrex::MultiFab& out,
+                            const BalbiFieldInputs& balbi_in);
+
+    /// Fill fire_ros_weight from the hybrid selector (region or fuel).
+    void init_ros_weight();
+
+    /// Rebuild m_d_rc_table at the given dead fuel moistures.
+    void rebuild_rothermel_table(amrex::Real m1, amrex::Real m10, amrex::Real m100);
 
     // Phase 15: BEHAVE pre-computed state (set in initialize from domain-avg moisture,
     // updated in advance when moisture_dynamic = false)

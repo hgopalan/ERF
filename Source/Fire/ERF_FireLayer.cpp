@@ -373,7 +373,7 @@ void FireLayer::initialize(const ERF& erf,
     // Phase 13B: Pre-compute alternative ROS model coefficients.
     {
         FuelModelParams fp_ros = get_anderson_fuel_params(m_params.fuel_model_id);
-        if (m_params.ros_model == "balbi") {
+        if (m_params.uses_model("balbi")) {
             m_bc_default = compute_balbi_params(fp_ros, m_params.balbi,
                                                 m_params.moisture_1hr);
             // Build per-fuel Balbi table when spatial fuel map is active
@@ -422,14 +422,16 @@ void FireLayer::initialize(const ERF& erf,
                                    << ", H_ref=" << m_params.balbi.hf_ref_height << " m\n";
                 }
             }
-        } else if (m_params.ros_model == "cheney_gould") {
+        }
+        if (m_params.uses_model("cheney_gould")) {
             m_cgc = compute_cheney_gould_params(m_params.cheney_gould);
             if (m_params.fire_debug) {
                 amrex::Print() << "[FIRE DEBUG] ROS model: Cheney-Gould (1998), "
                                << "moisture=" << m_params.cheney_gould.moisture
                                << "%, curing=" << m_params.cheney_gould.curing << "\n";
             }
-        } else if (m_params.ros_model == "behave") {
+        }
+        if (m_params.uses_model("behave")) {
             // Phase 15: Pre-compute BEHAVE multi-class coefficients.
             FuelModelParams fp_bh = get_anderson_fuel_params(m_params.fuel_model_id);
             m_bs_default = compute_behave_state(fp_bh,
@@ -442,15 +444,58 @@ void FireLayer::initialize(const ERF& erf,
                 amrex::Print() << "[FIRE DEBUG] ROS model: BEHAVE multi-class Rothermel, "
                                << "R0=" << m_bs_default.r_0 * 0.00508_rt << " m/s\n";
             }
-        } else if (m_params.ros_model == "macarthur") {
+        }
+        if (m_params.uses_model("macarthur")) {
             if (m_params.fire_debug) {
                 amrex::Print() << "[FIRE DEBUG] ROS model: MacArthur (1966) Australian formula\n";
             }
-        } else {
-            // Default: Rothermel — already initialised above via m_rc
+        }
+        if (m_params.uses_model("rothermel")) {
+            // Rothermel coefficients were initialised above via m_rc.
             if (m_params.fire_debug) {
                 amrex::Print() << "[FIRE DEBUG] ROS model: Rothermel (1972)\n";
             }
+        }
+    }
+
+    // Per-cell Rothermel coefficients on a spatial fuel map (opt-in). Without
+    // this the Rothermel kernel spreads with the domain fuel_model_id everywhere.
+    if (m_params.rothermel_per_fuel && m_has_spatial_fuel && m_params.uses_model("rothermel")) {
+        rebuild_rothermel_table(m_params.moisture_1hr,
+                                m_params.moisture_10hr,
+                                m_params.moisture_100hr);
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Rothermel: per-cell coefficients from the "
+                           << "spatial fuel map (" << m_d_rc_table.size() << " codes)\n";
+        }
+    }
+
+    // Hybrid ROS: allocate the per-cell weight and the secondary scratch field,
+    // then fill the weight from the selector. The weight is static in step 1
+    // (region and fuel selectors), so it is built once here.
+    if (m_params.is_hybrid()) {
+        fire_ros_weight  = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        fire_ros_scratch = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        fire_ros_scratch->setVal(0.0_rt);
+        init_ros_weight();
+        if (m_params.fire_debug) {
+            const amrex::Real w_sum = fire_ros_weight->sum(0);
+            // Count cells that take mostly the secondary model (weight > 0.5).
+            amrex::MultiFab flag(m_fg.ba, m_fg.dm, 1, 0);
+            for (amrex::MFIter mfi(flag); mfi.isValid(); ++mfi) {
+                const amrex::Box& bx = mfi.validbox();
+                auto const& f = flag.array(mfi);
+                auto const& w = fire_ros_weight->const_array(mfi);
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                    f(i, j, k) = (w(i, j, k) > 0.5_rt) ? 1.0_rt : 0.0_rt;
+                });
+            }
+            const long n_half = std::lround(flag.sum(0));
+            amrex::Print() << "[FIRE DEBUG] Hybrid ROS: primary=" << m_params.hybrid.primary
+                           << " secondary=" << m_params.hybrid.secondary
+                           << " selector=" << m_params.hybrid.selector
+                           << " weight_sum=" << w_sum
+                           << " secondary_cells=" << n_half << "\n";
         }
     }
 
@@ -556,13 +601,16 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         avg100 = amrex::max(0.01_rt, amrex::min(avg100, 0.40_rt));
         FuelModelParams fp_cur = get_anderson_fuel_params(m_params.fuel_model_id);
         m_rc = compute_rothermel_params(fp_cur, avg1, avg10, avg100);
+        if (!m_d_rc_table.empty()) {
+            rebuild_rothermel_table(avg1, avg10, avg100);
+        }
         if (m_params.fire_debug)
             amrex::Print() << "[FIRE DEBUG] Updated Rothermel coefficients with avg moisture: "
                            << "M_1hr=" << avg1 << " M_10hr=" << avg10
                            << " M_100hr=" << avg100 << " R0=" << m_rc.R0 << " m/s" << std::endl;
         
         // Phase 13B: Moisture coupling for Balbi and Cheney-Gould models
-        if (m_params.moisture_dynamic && m_params.ros_model == "balbi") {
+        if (m_params.moisture_dynamic && m_params.uses_model("balbi")) {
             // Recompute Balbi coefficients with updated moisture
             // A_coeff carries the moisture dependence through B*, so both the
             // default coefficients and the per-fuel table have to be rebuilt.
@@ -575,14 +623,14 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                  h_balbi.end(), m_d_balbi_table.begin());
             }
         }
-        if (m_params.moisture_dynamic && m_params.ros_model == "cheney_gould") {
+        if (m_params.moisture_dynamic && m_params.uses_model("cheney_gould")) {
             // Update Cheney-Gould with current 1-hr moisture converted to percent
             FireParams::CheneyGouldParams cgp_cur = m_params.cheney_gould;
             cgp_cur.moisture = avg1 * 100.0_rt;  // fraction → percent
             m_cgc = compute_cheney_gould_params(cgp_cur);
         }
         // Phase 15: Update BEHAVE state when dynamic moisture is enabled.
-        if (m_params.moisture_dynamic && m_params.ros_model == "behave") {
+        if (m_params.moisture_dynamic && m_params.uses_model("behave")) {
             FuelModelParams fp_bh = get_anderson_fuel_params(m_params.fuel_model_id);
             // Domain-average live moisture from components 3 and 4
             long nc_live = fire_fuel_mc->boxArray().numPts();
@@ -609,10 +657,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     // Phase 13B: ROS model dispatch.
     // All models write into fire_ros [m/s].
     // Rothermel is the default (ros_model = "rothermel" or unrecognised string).
+    // With ros_model = "hybrid" the primary model writes fire_ros, the
+    // secondary writes fire_ros_scratch, and the two are blended per cell with
+    // fire_ros_weight (0 = primary, 1 = secondary).
     // Optional per-cell fields for the Balbi kernels. Declared here because the
     // level-set path below reuses them when balbi.directional is set.
     BalbiFieldInputs balbi_in;
-    if (m_params.ros_model == "balbi") {
+    if (m_params.uses_model("balbi")) {
         balbi_in.fuel_model   = m_has_spatial_fuel ? fire_fuel_model.get() : nullptr;
         balbi_in.table        = m_d_balbi_table.empty() ? nullptr : m_d_balbi_table.data();
         balbi_in.table_size   = static_cast<int>(m_d_balbi_table.size());
@@ -635,28 +686,25 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             }
         }
 
-        // Balbi normalises the wind by its own vertical velocity scale rather
-        // than by a midflame reduction, so balbi.wind_source can bypass the
-        // Wind Adjustment Factor and hand it the reference-height wind.
-        const MultiFab& balbi_wind = (m_params.balbi.wind_source == 1)
-                                   ? *fire_wind_ref : *fire_wind_eff;
-        fill_balbi_ros(*fire_ros, balbi_wind, *fire_slopes,
-                       m_bc_default, m_params.balbi, balbi_in);
-    } else if (m_params.ros_model == "cheney_gould") {
-        fill_cheney_gould_ros(*fire_ros, *fire_wind_eff, m_cgc);
-    } else if (m_params.ros_model == "behave") {
-        // Phase 15: BEHAVE multi-class Rothermel model
-        FuelModelParams fp_behave = get_anderson_fuel_params(m_params.fuel_model_id);
-        fill_behave_ros(*fire_ros, *fire_wind_eff, *fire_slopes,
-                        fp_behave,
-                        m_bs_default,
-                        m_params.moisture_dynamic ? fire_fuel_mc.get() : nullptr,
-                        m_params.moisture_dynamic);
-    } else if (m_params.ros_model == "macarthur") {
-        fill_macarthur_ros(*fire_ros, *fire_wind_eff);
+    }
+
+    if (m_params.is_hybrid()) {
+        fill_ros_for_model(m_params.hybrid.primary,   *fire_ros,         balbi_in);
+        fill_ros_for_model(m_params.hybrid.secondary, *fire_ros_scratch, balbi_in);
+        // Blend: R = (1 - w) R_primary + w R_secondary. With w = 0 or 1
+        // everywhere this reproduces the single-model result exactly.
+        for (amrex::MFIter mfi(*fire_ros, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.tilebox();
+            auto const& ros = fire_ros->array(mfi);
+            auto const& sec = fire_ros_scratch->const_array(mfi);
+            auto const& w   = fire_ros_weight->const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                const amrex::Real wt = w(i, j, k);
+                ros(i, j, k) = (1.0_rt - wt) * ros(i, j, k) + wt * sec(i, j, k);
+            });
+        }
     } else {
-        // Default: Rothermel (1972) — existing code path, unchanged
-        compute_ros_field(*fire_ros, *fire_wind_eff, *fire_slopes, m_rc);
+        fill_ros_for_model(m_params.ros_model, *fire_ros, balbi_in);
     }
     if (m_params.fire_debug) {
         // Masked ROS diagnostics (only for burning cells where phi < 0)
@@ -1220,4 +1268,115 @@ void FireLayer::apply_fire_coupling_to_cc_source(
         m_params.fire_atm_feedback,
         has_moisture,
         m_params.fire_debug);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Rate-of-spread model helpers
+// ───────────────────────────────────────────────────────────────────────────
+
+void FireLayer::fill_ros_for_model(const std::string& model,
+                                   amrex::MultiFab& out,
+                                   const BalbiFieldInputs& balbi_in)
+{
+    if (model == "balbi") {
+        // Balbi normalises the wind by its own vertical velocity scale rather
+        // than by a midflame reduction, so balbi.wind_source can bypass the
+        // Wind Adjustment Factor and hand it the reference-height wind.
+        const amrex::MultiFab& balbi_wind = (m_params.balbi.wind_source == 1)
+                                          ? *fire_wind_ref : *fire_wind_eff;
+        fill_balbi_ros(out, balbi_wind, *fire_slopes,
+                       m_bc_default, m_params.balbi, balbi_in);
+    } else if (model == "cheney_gould") {
+        fill_cheney_gould_ros(out, *fire_wind_eff, m_cgc);
+    } else if (model == "behave") {
+        // Phase 15: BEHAVE multi-class Rothermel model
+        FuelModelParams fp_behave = get_anderson_fuel_params(m_params.fuel_model_id);
+        fill_behave_ros(out, *fire_wind_eff, *fire_slopes,
+                        fp_behave,
+                        m_bs_default,
+                        m_params.moisture_dynamic ? fire_fuel_mc.get() : nullptr,
+                        m_params.moisture_dynamic);
+    } else if (model == "macarthur") {
+        fill_macarthur_ros(out, *fire_wind_eff);
+    } else {
+        // Default: Rothermel (1972). The per-fuel table is empty unless
+        // rothermel_per_fuel is set on a spatial fuel map, in which case the
+        // overload falls through to the uniform kernel.
+        const bool per_fuel = !m_d_rc_table.empty() && fire_fuel_model;
+        compute_ros_field(out, *fire_wind_eff, *fire_slopes, m_rc,
+                          per_fuel ? fire_fuel_model.get() : nullptr,
+                          per_fuel ? m_d_rc_table.data() : nullptr,
+                          per_fuel ? static_cast<int>(m_d_rc_table.size()) : 0);
+    }
+}
+
+void FireLayer::rebuild_rothermel_table(amrex::Real m1, amrex::Real m10, amrex::Real m100)
+{
+    auto h_table = build_fuel_rothermel_table(m1, m10, m100);
+    m_d_rc_table.resize(h_table.size());
+    amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_table.begin(), h_table.end(),
+                     m_d_rc_table.begin());
+}
+
+void FireLayer::init_ros_weight()
+{
+    const auto& hy = m_params.hybrid;
+    const auto prob_lo = m_fg.geom.ProbLoArray();
+    const auto dx      = m_fg.geom.CellSizeArray();
+
+    fire_ros_weight->setVal(0.0_rt);
+
+    if (hy.selector == "region") {
+        const amrex::Real x_lo = hy.region_x_lo;
+        const amrex::Real y_lo = hy.region_y_lo;
+        const amrex::Real x_hi = hy.region_x_hi;
+        const amrex::Real y_hi = hy.region_y_hi;
+        const amrex::Real bw   = hy.blend_width;
+        for (amrex::MFIter mfi(*fire_ros_weight); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.validbox();
+            auto const& w = fire_ros_weight->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                const amrex::Real x = prob_lo[0] + (i + 0.5_rt) * dx[0];
+                const amrex::Real y = prob_lo[1] + (j + 0.5_rt) * dx[1];
+                if (bw > 0.0_rt) {
+                    // Signed distance into the rectangle (positive inside),
+                    // ramped linearly over blend_width centred on the edge.
+                    const amrex::Real d = amrex::min(amrex::min(x - x_lo, x_hi - x),
+                                                     amrex::min(y - y_lo, y_hi - y));
+                    w(i, j, k) = amrex::max(0.0_rt, amrex::min(1.0_rt, 0.5_rt + d / bw));
+                } else {
+                    w(i, j, k) = (x >= x_lo && x < x_hi && y >= y_lo && y < y_hi) ? 1.0_rt : 0.0_rt;
+                }
+            });
+        }
+    } else if (hy.selector == "fuel") {
+        if (!fire_fuel_model) {
+            amrex::Abort("erf.fire.hybrid.selector = fuel needs a spatial fuel map "
+                         "(erf.fire.fuel_map.file)");
+        }
+        const int n_codes = static_cast<int>(hy.secondary_fuel_codes.size());
+        amrex::Gpu::DeviceVector<int> d_codes(n_codes);
+        amrex::Gpu::copy(amrex::Gpu::hostToDevice,
+                         hy.secondary_fuel_codes.begin(), hy.secondary_fuel_codes.end(),
+                         d_codes.begin());
+        const int* codes = d_codes.data();
+        for (amrex::MFIter mfi(*fire_ros_weight); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.validbox();
+            auto const& w    = fire_ros_weight->array(mfi);
+            auto const& fuel = fire_fuel_model->const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                const int code = static_cast<int>(fuel(i, j, k));
+                amrex::Real wt = 0.0_rt;
+                for (int n = 0; n < n_codes; ++n) {
+                    if (codes[n] == code) { wt = 1.0_rt; break; }
+                }
+                w(i, j, k) = wt;
+            });
+        }
+        // The kernels above read d_codes asynchronously; let them finish
+        // before the device vector is freed at scope exit.
+        amrex::Gpu::streamSynchronize();
+    } else {
+        amrex::Abort("FireLayer::init_ros_weight: unsupported hybrid selector " + hy.selector);
+    }
 }

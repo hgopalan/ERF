@@ -195,7 +195,35 @@ erf.fire.directional_ros = false
 # "macarthur"    MacArthur (1966) Australian formula
 # "cheney_gould" Cheney & Gould (1998) grassland model
 # "balbi"        Balbi physical model (see the Balbi section below)
+# "hybrid"       two of the above blended per cell (see the HYBRID section)
 erf.fire.ros_model = "rothermel"
+
+# Evaluate Rothermel coefficients per cell from the spatial fuel map instead
+# of the domain fuel_model_id. No effect without erf.fire.fuel_map.file.
+erf.fire.rothermel_per_fuel = false
+
+# ============================================================================
+# HYBRID ROS (used only when ros_model = "hybrid")
+# R = (1 - w) R_primary + w R_secondary with a per-cell weight w in [0,1].
+# Isotropic path only: directional_ros and balbi.directional abort with it.
+# ============================================================================
+
+erf.fire.hybrid.primary   = "rothermel"   # model where w = 0
+erf.fire.hybrid.secondary = "balbi"       # model where w = 1 (uses erf.fire.balbi.*)
+
+# How w is set
+# "region"    w = 1 inside hybrid.region, 0 outside
+# "fuel"      w = 1 on cells whose fuel code is in hybrid.secondary_fuel_codes
+# "structure" reserved (aborts): w from distance to a structure cell
+# "wind"      reserved (aborts): w from a wind-speed band
+erf.fire.hybrid.selector = "region"
+
+erf.fire.hybrid.region = 0.0 0.0 0.0 0.0       # x_lo y_lo x_hi y_hi [m]; required for "region"
+erf.fire.hybrid.blend_width = 0.0             # linear ramp width across the region edge [m]; 0 = step
+# erf.fire.hybrid.secondary_fuel_codes = 3    # required for "fuel"
+erf.fire.hybrid.structure_distance = 10.0     # reserved for "structure" [m]
+erf.fire.hybrid.wind_lo = 8.0                 # reserved for "wind" [m/s]
+erf.fire.hybrid.wind_hi = 12.0
 
 # ============================================================================
 # BALBI PHYSICAL MODEL (used only when ros_model = "balbi")

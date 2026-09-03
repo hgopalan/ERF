@@ -311,6 +311,33 @@ struct FireParams
         amrex::Real dynamic_transfer_hi  = 1.20;  ///< Live herba moisture [fraction] above which no transfer occurs
     } behave;
 
+    // Hybrid rate of spread: two of the models above evaluated on every cell
+    // and blended with a per-cell weight in [0,1], where 0 takes the primary
+    // model and 1 the secondary. Only used when ros_model = "hybrid".
+    // Step 1 supports the "region" and "fuel" selectors on the isotropic
+    // path. The "structure" and "wind" selectors and direction-dependent
+    // spread are reserved for step 2 and abort with a message.
+    struct HybridParams {
+        std::string      primary   = "rothermel";  ///< Model where the weight is 0
+        std::string      secondary = "balbi";      ///< Model where the weight is 1
+        std::string      selector  = "region";     ///< "region" | "fuel" | "structure" | "wind"
+        amrex::Real      region_x_lo = 0.0;        ///< selector = region: rectangle [m]
+        amrex::Real      region_y_lo = 0.0;
+        amrex::Real      region_x_hi = 0.0;
+        amrex::Real      region_y_hi = 0.0;
+        std::vector<int> secondary_fuel_codes;     ///< selector = fuel: codes that take the secondary
+        amrex::Real      structure_distance = 10.0; ///< selector = structure (step 2) [m]
+        amrex::Real      wind_lo = 8.0;            ///< selector = wind (step 2): blend band [m/s]
+        amrex::Real      wind_hi = 12.0;
+        amrex::Real      blend_width = 0.0;        ///< selector = region: linear ramp across the edge [m]
+    } hybrid;
+
+    // Evaluate the Rothermel coefficients per cell from the spatial fuel map
+    // instead of the domain fuel_model_id. Off by default: the Rothermel
+    // kernel then spreads with the domain fuel everywhere, as it always has,
+    // and only the heat flux and the Balbi kernels see the map.
+    bool rothermel_per_fuel = false;
+
     // Phase 10: Firebreak barriers (up to 10, indexed by N=0..9)
     int n_firebreaks = 0;
     std::vector<FireBreak> firebreaks;
@@ -477,6 +504,68 @@ struct FireParams
 
        // Phase 13B: ROS model selection
        pp.query("ros_model", ros_model);
+       pp.query("rothermel_per_fuel", rothermel_per_fuel);
+
+       // Hybrid ROS
+       {
+           auto& hy = hybrid;
+           pp.query("hybrid.primary",   hy.primary);
+           pp.query("hybrid.secondary", hy.secondary);
+           pp.query("hybrid.selector",  hy.selector);
+           std::vector<amrex::Real> region;
+           if (pp.queryarr("hybrid.region", region)) {
+               if (region.size() != 4) {
+                   amrex::Abort("erf.fire.hybrid.region needs four values: x_lo y_lo x_hi y_hi");
+               }
+               hy.region_x_lo = region[0];
+               hy.region_y_lo = region[1];
+               hy.region_x_hi = region[2];
+               hy.region_y_hi = region[3];
+           }
+           pp.queryarr("hybrid.secondary_fuel_codes", hy.secondary_fuel_codes);
+           pp.query("hybrid.structure_distance", hy.structure_distance);
+           pp.query("hybrid.wind_lo",            hy.wind_lo);
+           pp.query("hybrid.wind_hi",            hy.wind_hi);
+           pp.query("hybrid.blend_width",        hy.blend_width);
+
+           if (ros_model == "hybrid") {
+               auto known = [](const std::string& m) {
+                   return m == "rothermel" || m == "balbi" || m == "behave" ||
+                          m == "macarthur" || m == "cheney_gould";
+               };
+               if (!known(hy.primary) || !known(hy.secondary)) {
+                   amrex::Abort("erf.fire.hybrid.primary/secondary must each be one of "
+                                "rothermel, balbi, behave, macarthur, cheney_gould");
+               }
+               if (hy.primary == hy.secondary) {
+                   amrex::Abort("erf.fire.hybrid.primary and secondary must differ");
+               }
+               if (hy.selector == "region") {
+                   if (!pp.contains("hybrid.region")) {
+                       amrex::Abort("erf.fire.hybrid.selector = region needs erf.fire.hybrid.region");
+                   }
+                   if (hy.region_x_hi < hy.region_x_lo || hy.region_y_hi < hy.region_y_lo) {
+                       amrex::Abort("erf.fire.hybrid.region must satisfy x_lo <= x_hi and y_lo <= y_hi");
+                   }
+               } else if (hy.selector == "fuel") {
+                   if (hy.secondary_fuel_codes.empty()) {
+                       amrex::Abort("erf.fire.hybrid.selector = fuel needs erf.fire.hybrid.secondary_fuel_codes");
+                   }
+               } else if (hy.selector == "structure" || hy.selector == "wind") {
+                   amrex::Abort("erf.fire.hybrid.selector = " + hy.selector +
+                                " is not available yet (hybrid step 2); use region or fuel");
+               } else {
+                   amrex::Abort("erf.fire.hybrid.selector must be region, fuel, structure or wind");
+               }
+               if (hy.blend_width < 0.0) {
+                   amrex::Abort("erf.fire.hybrid.blend_width must be >= 0");
+               }
+               if (directional_ros) {
+                   amrex::Abort("erf.fire.ros_model = hybrid does not support "
+                                "erf.fire.directional_ros yet (hybrid step 2)");
+               }
+           }
+       }
 
        // Balbi parameters
        auto& bl = balbi;
@@ -572,6 +661,31 @@ struct FireParams
            firebreaks.push_back(fb);
        }
        n_firebreaks = static_cast<int>(firebreaks.size());
+
+       if (ros_model == "hybrid" && balbi.directional) {
+           amrex::Abort("erf.fire.ros_model = hybrid does not support "
+                        "erf.fire.balbi.directional yet (hybrid step 2)");
+       }
+    }
+
+    /// True when ros_model = "hybrid".
+    bool is_hybrid() const { return ros_model == "hybrid"; }
+
+    /**
+     * @brief Whether a rate-of-spread model is evaluated in this run.
+     *
+     * Covers the single-model case and both members of a hybrid pair.
+     * "rothermel" is the fallback for any unrecognised ros_model string,
+     * matching the dispatch in FireLayer.
+     */
+    bool uses_model(const std::string& m) const
+    {
+        if (is_hybrid()) { return hybrid.primary == m || hybrid.secondary == m; }
+        if (m == "rothermel") {
+            return ros_model != "balbi" && ros_model != "behave" &&
+                   ros_model != "macarthur" && ros_model != "cheney_gould";
+        }
+        return ros_model == m;
     }
 
     // Convenience accessors for coupling mode

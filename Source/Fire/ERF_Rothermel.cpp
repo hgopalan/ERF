@@ -156,3 +156,60 @@ void compute_ros_field(
         });
     }
 }
+
+std::vector<RothermelComputed> build_fuel_rothermel_table(
+    Real moisture_1hr,
+    Real moisture_10hr,
+    Real moisture_100hr)
+{
+    std::vector<RothermelComputed> table(ROTHERMEL_TABLE_SIZE);
+
+    // Code 0 is non-burnable: every coefficient zero, so R0 = 0 and the
+    // kernel returns zero spread whatever the wind and slope.
+    table[0] = RothermelComputed{};
+
+    for (int code = 1; code < ROTHERMEL_TABLE_SIZE; ++code) {
+        table[code] = compute_rothermel_params(get_anderson_fuel_params(code),
+                                              moisture_1hr, moisture_10hr, moisture_100hr);
+    }
+    return table;
+}
+
+void compute_ros_field(
+    MultiFab& fire_ros,
+    const MultiFab& fire_wind,
+    const MultiFab& fire_slopes,
+    const RothermelComputed& rc_default,
+    const MultiFab* fuel_model,
+    const RothermelComputed* table,
+    int table_size)
+{
+    if (fuel_model == nullptr || table == nullptr || table_size <= 0) {
+        compute_ros_field(fire_ros, fire_wind, fire_slopes, rc_default);
+        return;
+    }
+
+    for (MFIter mfi(fire_ros, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.tilebox();
+        Array4<Real> ros = fire_ros.array(mfi);
+        Array4<const Real> wind = fire_wind.array(mfi);
+        Array4<const Real> slopes = fire_slopes.array(mfi);
+        Array4<const Real> fuel = fuel_model->const_array(mfi);
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) {
+            int i = iv[0];
+            int j = iv[1];
+            int k = 0;
+
+            Real ux = wind(i, j, k, 0);
+            Real uy = wind(i, j, k, 1);
+            Real sx = slopes(i, j, k, 0);
+            Real sy = slopes(i, j, k, 1);
+
+            const int code = static_cast<int>(fuel(i, j, k));
+            const RothermelComputed& rc = (code >= 0 && code < table_size)
+                                        ? table[code] : rc_default;
+            ros(i, j, k) = rothermel_ros_cell(ux, uy, sx, sy, rc);
+        });
+    }
+}

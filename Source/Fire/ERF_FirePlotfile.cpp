@@ -51,9 +51,11 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
                          fire_layer.get_fuel_model() != nullptr);
     bool has_live_moisture = (fire_layer.get_fuel_mc() != nullptr &&
                               fire_layer.get_fuel_mc()->nComp() >= 5);
+    bool has_ros_weight = (fire_layer.get_params().is_hybrid() &&
+                           fire_layer.get_ros_weight() != nullptr);
 
-    Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture);
-    int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture);
+    Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight);
+    int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight);
     // Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
     // int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
 
@@ -115,6 +117,12 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
     // Phase 10: Spatial fuel map
     if (has_fuel_map) {
         MultiFab::Copy(mf, *fire_layer.get_fuel_model(), 0, comp, 1, 0);
+        ++comp;
+    }
+
+    // Hybrid ROS: per-cell weight of the secondary model
+    if (has_ros_weight) {
+        MultiFab::Copy(mf, *fire_layer.get_ros_weight(), 0, comp, 1, 0);
         ++comp;
     }
 
