@@ -6,6 +6,7 @@
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
 #include <AMReX_Gpu.H>
+#include <algorithm>
 #include <cmath>
 #include <vector>
 #include <random>
@@ -72,6 +73,47 @@ albini_lofting_height(amrex::Real I_B_kW, amrex::Real I_B_min_kW = 100.0)
 }
 
 // ─── Byram fireline intensity ───────────────────────────────────────────────
+
+/**
+ * @brief Bilinear interpolation of a scalar field at continuous coordinates.
+ *
+ * Used for the terrain elevation under a firebrand in flight. Positions outside
+ * the domain are clamped to the edge, since a brand leaving the domain is
+ * discarded by the wind interpolation on the same step.
+ *
+ * @param[in] f          Flat host array, indexed j * nx + i
+ * @param[in] nx, ny     Grid dimensions
+ * @param[in] dx, dy     Cell sizes [m]
+ * @param[in] prob_lo_x  Domain lower x [m]
+ * @param[in] prob_lo_y  Domain lower y [m]
+ * @param[in] x, y       Query position [m]
+ * @return interpolated value
+ */
+inline amrex::Real
+albini_interp_scalar(const std::vector<amrex::Real>& f,
+                     int nx, int ny,
+                     amrex::Real dx, amrex::Real dy,
+                     amrex::Real prob_lo_x, amrex::Real prob_lo_y,
+                     amrex::Real x, amrex::Real y)
+{
+    amrex::Real gx = (x - prob_lo_x) / dx - amrex::Real(0.5);
+    amrex::Real gy = (y - prob_lo_y) / dy - amrex::Real(0.5);
+    int i0 = static_cast<int>(std::floor(gx));
+    int j0 = static_cast<int>(std::floor(gy));
+    amrex::Real wx = gx - static_cast<amrex::Real>(i0);
+    amrex::Real wy = gy - static_cast<amrex::Real>(j0);
+
+    auto at = [&](int i, int j) -> amrex::Real {
+        i = std::max(0, std::min(nx - 1, i));
+        j = std::max(0, std::min(ny - 1, j));
+        return f[static_cast<std::size_t>(j) * nx + i];
+    };
+
+    return (1.0 - wx) * (1.0 - wy) * at(i0,     j0)
+         +        wx  * (1.0 - wy) * at(i0 + 1, j0)
+         + (1.0 - wx) *        wy  * at(i0,     j0 + 1)
+         +        wx  *        wy  * at(i0 + 1, j0 + 1);
+}
 
 /**
  * @brief Compute Byram fireline intensity [kW/m] from Rothermel quantities.
@@ -225,7 +267,8 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
                         int                               fuel_model_id = 1,
                         bool                              fire_debug = false,
                         amrex::MultiFab*                  fire_fuel_load_ptr = nullptr,
-                        amrex::Real                       fuel_load_initial_kg_m2 = 0.0)
+                        amrex::Real                       fuel_load_initial_kg_m2 = 0.0,
+                        const amrex::MultiFab*            terrain_z = nullptr)
 {
     using namespace amrex;
 
@@ -249,6 +292,9 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
     std::vector<Real> h_v(ncells, 0.0);
     std::vector<Real> h_ros(ncells, 0.0);
     std::vector<Real> h_fuel(ncells, 1.0);
+    // Ground elevation under each fire cell. Left at zero when no terrain is
+    // supplied, which reproduces the flat-earth trajectory exactly.
+    std::vector<Real> h_terrain(ncells, 0.0);
 
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         const Box& bx    = mfi.validbox();
@@ -299,6 +345,19 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
         ParallelDescriptor::ReduceRealSum(h_fuel.data(), ncells);
     }
 
+    if (terrain_z) {
+        for (MFIter mfi(*terrain_z); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            const ERFHostFabView terr_v((*terrain_z)[mfi]);
+            auto terr_arr = terr_v.array();
+            LoopOnCpu(bx, [&](int i, int j, int /*k*/) {
+                h_terrain[j * nx + i] = terr_arr(i, j, 0, 0);
+            });
+        }
+        ParallelDescriptor::ReduceRealSum(h_terrain.data(), ncells);
+    }
+    const Real z_ground_min = *std::min_element(h_terrain.begin(), h_terrain.end());
+
     RothermelComputed rc = make_rothermel_params_for_albini(fp);
 
     // Identify fire-front cells using the global (reduced) fields.
@@ -308,6 +367,7 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
         Real I_B;
         Real H_z;
         Real src_x, src_y;
+        Real src_z;   // ground elevation at the source cell [m]
     };
 
     std::vector<FrontCell> front_cells;
@@ -322,7 +382,7 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
                 if (H_z > 0.0) {
                     Real cx = prob_lo[0] + (i + 0.5) * dx[0];
                     Real cy = prob_lo[1] + (j + 0.5) * dx[1];
-                    front_cells.push_back({i, j, I_B, H_z, cx, cy});
+                    front_cells.push_back({i, j, I_B, H_z, cx, cy, h_terrain[idx]});
                 }
             }
         }
@@ -361,14 +421,27 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
         Real H_z = front_cells[fc].H_z;
         Real cx  = front_cells[fc].src_x;
         Real cy  = front_cells[fc].src_y;
+        Real cz  = front_cells[fc].src_z;
 
         // Stochastic launch: P_launch = P_base × min(1, I_B / I_B_min)
         Real P_launch = sp.P_base * std::min(Real(1.0), I_B / sp.I_B_min);
         if (uniform(rng) >= P_launch) { continue; }
 
-        // Forward-Euler trajectory
-        Real t_flight = (sp.terminal_velocity > 0.0) ? H_z / sp.terminal_velocity : 0.0;
-        Real dt_traj  = (sp.n_traj_steps > 0) ? t_flight / sp.n_traj_steps : 0.0;
+        // Forward-Euler trajectory. The brand is lofted H_z above the ground at
+        // the source and descends at its terminal velocity until it meets the
+        // ground beneath it, which is not the same height it started from: a
+        // brand drifting downslope falls further and lands further away, and one
+        // drifting upslope meets the rising ground sooner.
+        //
+        // The step size is set from the longest fall the brand could make, down
+        // to the lowest ground in the domain, so the fixed step count always
+        // covers the descent. With no terrain every elevation is zero and this
+        // reduces to the flat-earth flight time H_z / w_terminal.
+        Real z_brand  = cz + H_z;
+        Real t_max    = (sp.terminal_velocity > 0.0)
+                      ? (z_brand - z_ground_min) / sp.terminal_velocity : 0.0;
+        Real dt_traj  = (sp.n_traj_steps > 0) ? t_max / sp.n_traj_steps : 0.0;
+        Real dz_step  = sp.terminal_velocity * dt_traj;
 
         Real px = cx;
         Real py = cy;
@@ -382,6 +455,11 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
             if (!in_domain) { break; }
             px += u_w * dt_traj;
             py += v_w * dt_traj;
+            z_brand -= dz_step;
+
+            const Real z_ground = albini_interp_scalar(h_terrain, nx, ny, dx[0], dx[1],
+                                                       prob_lo[0], prob_lo[1], px, py);
+            if (z_brand <= z_ground) { break; }
         }
 
         if (!in_domain) { continue; }
