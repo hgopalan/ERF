@@ -24,6 +24,7 @@ A neutral log-law profile enters at `xlo` as mass inflow and leaves at `xhi` as 
 - The reference wind reaches about 22 m/s, since the highest columns sample the capped part of the profile, and the effective midflame wind is about 8 m/s after the Wind Adjustment Factor.
 - The fire spreads from a 100 m ignition disk on a slope, at 0.4 to 0.7 m/s, reaching 284 fire cells at 300 s, and crosses terrain without instability.
 - Spotting launches occasionally and brands land at terrain elevation. Landing distances saturate at the 200 m Scott cap for FM1.
+- The fire cells at 300 s figure above is for the level-set path; see the note on anisotropy below before comparing it with the FARSITE path.
 
 ## Key Parameters
 | Parameter | Value | Description |
@@ -43,16 +44,16 @@ A neutral log-law profile enters at `xlo` as mass inflow and leaves at `xhi` as 
 
 ## Notes
 
-**Propagation method.** The case runs the level-set path, which advances the front continuously. The FARSITE path accumulates displacement per front cell and converts a whole cell only once that displacement reaches a full cell width, one cell per stamp, so it advances in quanta of `dx_fire / ROS` — about 60 s of simulated time here. Over the same 300 s the two paths differ by more than granularity:
+**Propagation method.** The case runs the level-set path. Over the same 300 s the two paths burn very different areas:
 
 | Path | first advance | cells at 300 s |
 |---|---|---|
 | level set | continuous | 284 |
-| FARSITE | step 396 (99 s) | 52 |
+| FARSITE | step 396 (99 s) | 53 |
 
-Both were run at `dt = 0.25 s`; running FARSITE at `dt = 1 s` reaches the same 52 cells in 250 s, so the timestep changes how many steps a quantum takes but not the physical outcome. The gap is the quantization itself: each stamp ignites exactly one cell (the default `farsite.gaussian_sigma = -1` writes `phi = min(phi, -1)` at the single nearest cell rather than over a disk), and stamps that land on already-burned cells are lost, so the front advances well below its nominal rate of spread on a fire grid this fine. Set `propagation_method = "farsite"` to exercise that path.
+That gap is **anisotropy, not a defect in either path**. FARSITE applies the Anderson length-to-width ellipse: at this wind the ratio saturates at its cap of 8, so the head advances at the full rate of spread while the flanks run at 7.5% of it and the backing fire at 20%. The burned area therefore grows as a downwind lobe rather than a disc. The level-set path has no ellipse — every ROS model except Balbi with `balbi.directional` hands it a single scalar rate, which it applies in all directions — so it grows a disc at the head-fire rate and covers about five times the area.
 
-**Spotting re-entry filter.** `spotting.reentry_fuel_thresh` is set to zero. Any positive value silences spotting here: the residual-fuel field reads exactly zero at the landing cells, so even 0.01 kg/m² rejects every brand while 0.0 accepts all of them. That behaviour is independent of terrain and of the fuel model and wants its own investigation.
+FARSITE also advances in whole-cell quanta: a front cell converts one cell only once it has accumulated a full cell width of displacement, about 60 s of simulated time here, and the default `farsite.gaussian_sigma = -1` converts exactly one cell per stamp. Over the full run 27 stamps produced 21 new cells, so the quantization is granular but not lossy. Set `propagation_method = "farsite"` to exercise that path.
 
 ## References
 - Balbi et al. 2020, A convective-radiative propagation model for wildland fires.

@@ -111,6 +111,32 @@ heat flux, etc.). You can switch between methods by changing the
 ``erf.fire.propagation_method`` parameter without modifying the rest of the setup.
 
 
+Anisotropy of the two paths
+---------------------------
+
+The two propagation methods do not spread the same way, and the difference is
+larger than the numerics.
+
+The FARSITE path applies the Anderson length-to-width ellipse, so the head
+advances at the full rate of spread while the flanks and the backing fire run at
+fractions of it. With the Richards coefficients used here the head factor is 1,
+the backing factor is 0.2, and the flank factor is :math:`(a + c)/(2\,L/W)`. The
+length-to-width ratio saturates at its cap of 8 above roughly 5 m/s of midflame
+wind, so the flanks then run at 7.5% of the head rate and the burned area grows
+as a downwind lobe.
+
+The level-set path has no ellipse. Every rate-of-spread model except Balbi with
+:cpp:`erf.fire.balbi.directional` hands it a single scalar rate, which it applies
+in all directions, so the front grows at the head-fire rate everywhere. On an
+otherwise identical case that covers roughly five times the area of the FARSITE
+path over the same interval.
+
+Neither is wrong on its own terms — one imposes an empirical shape, the other
+resolves the front but is fed a direction-independent rate — but they are not
+interchangeable, and a case that switches between them will not conserve burned
+area. Directional spread on the level-set path currently exists only for Balbi.
+
+
 Terrain projection
 ------------------
 
