@@ -5,6 +5,8 @@
 #include <ERF_FireGrid.H>
 #include <ERF_FireWindExtract.H>
 #include <ERF_TerrainSlope.H>
+#include <ERF_HybridRos.H>
+#include <ERF_FireTerrainReader.H>
 
 #include <AMReX_Reduce.H>
 
@@ -477,27 +479,24 @@ void FireLayer::initialize(const ERF& erf,
         fire_ros_weight  = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
         fire_ros_scratch = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
         fire_ros_scratch->setVal(0.0_rt);
-        init_ros_weight();
-        if (m_params.fire_debug) {
-            const amrex::Real w_sum = fire_ros_weight->sum(0);
-            // Count cells that take mostly the secondary model (weight > 0.5).
-            amrex::MultiFab flag(m_fg.ba, m_fg.dm, 1, 0);
-            for (amrex::MFIter mfi(flag); mfi.isValid(); ++mfi) {
-                const amrex::Box& bx = mfi.validbox();
-                auto const& f = flag.array(mfi);
-                auto const& w = fire_ros_weight->const_array(mfi);
-                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                    f(i, j, k) = (w(i, j, k) > 0.5_rt) ? 1.0_rt : 0.0_rt;
-                });
+        if (m_params.hybrid.selector == "structure") {
+            fire_structure_height = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+            if (!read_heightmap_nearest_onto_fire_cells(*fire_structure_height, m_fg,
+                                                        m_params.hybrid.structure_file)) {
+                amrex::Abort("[FIRE] hybrid.selector = structure: cannot read structure file '"
+                             + m_params.hybrid.structure_file + "'");
             }
-            const long n_half = std::lround(flag.sum(0));
-            amrex::Print() << "[FIRE DEBUG] Hybrid ROS: primary=" << m_params.hybrid.primary
-                           << " secondary=" << m_params.hybrid.secondary
-                           << " selector=" << m_params.hybrid.selector
-                           << " weight_sum=" << w_sum
-                           << " secondary_cells=" << n_half << "\n";
+            if (m_params.fire_debug) {
+                amrex::Print() << "[FIRE DEBUG] Hybrid ROS: structure heightmap '"
+                               << m_params.hybrid.structure_file << "' max height "
+                               << fire_structure_height->max(0) << " m\n";
+            }
         }
+        init_ros_weight();
+        if (m_params.fire_debug) { print_hybrid_weight_summary(); }
     }
+
+    m_probe_reported.assign(m_params.probes.size() / 2, false);
 
     amrex::Print() << "[FIRE] FireLayer initialized: C=" << m_fg.C
                    << ", fuel_model=" << fire_params.fuel_model_id
@@ -654,6 +653,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         fire_phi->FillBoundary(m_fg.geom.periodicity());        
     }
 
+    // Hybrid wind selector: the weight follows the effective wind, so it is
+    // rebuilt every fire step; the other selectors are static.
+    if (m_params.is_hybrid() && m_params.hybrid.selector == "wind") {
+        update_wind_weight();
+        if (m_params.fire_debug) { print_hybrid_weight_summary(); }
+    }
+
     // Phase 13B: ROS model dispatch.
     // All models write into fire_ros [m/s].
     // Rothermel is the default (ros_model = "rothermel" or unrecognised string).
@@ -693,16 +699,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         fill_ros_for_model(m_params.hybrid.secondary, *fire_ros_scratch, balbi_in);
         // Blend: R = (1 - w) R_primary + w R_secondary. With w = 0 or 1
         // everywhere this reproduces the single-model result exactly.
-        for (amrex::MFIter mfi(*fire_ros, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-            const amrex::Box& bx = mfi.tilebox();
-            auto const& ros = fire_ros->array(mfi);
-            auto const& sec = fire_ros_scratch->const_array(mfi);
-            auto const& w   = fire_ros_weight->const_array(mfi);
-            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                const amrex::Real wt = w(i, j, k);
-                ros(i, j, k) = (1.0_rt - wt) * ros(i, j, k) + wt * sec(i, j, k);
-            });
-        }
+        blend_ros_fields(*fire_ros, *fire_ros_scratch, *fire_ros_weight);
     } else {
         fill_ros_for_model(m_params.ros_model, *fire_ros, balbi_in);
     }
@@ -761,13 +758,42 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             // magnitude. fire_ros still holds the isotropic head ROS and sets
             // the CFL, which stays conservative since the directional rate never
             // exceeds it.
+            const bool hybrid_directional =
+                m_params.is_hybrid() &&
+                (m_params.directional_ros ||
+                 (m_params.balbi.directional && m_params.uses_model("balbi")));
             const bool balbi_directional =
                 (m_params.ros_model == "balbi") &&
                 (m_params.balbi.directional || m_params.directional_ros);
             const bool generic_directional =
-                m_params.directional_ros && (m_params.ros_model != "balbi");
+                m_params.directional_ros && !m_params.is_hybrid() &&
+                (m_params.ros_model != "balbi");
 
-            if (balbi_directional) {
+            if (hybrid_directional) {
+                // Both members are rebuilt along the front normal at every RK
+                // stage and blended with the same weight the isotropic path uses.
+                HybridDirectionalSpec spec;
+                auto set_member = [&](const std::string& name, int& model,
+                                      DirectionalRosState& state) {
+                    if (name == "balbi") {
+                        model = HYBRID_MODEL_BALBI;
+                    } else {
+                        state = make_directional_state(name);
+                        model = state.model;
+                    }
+                };
+                set_member(m_params.hybrid.primary,   spec.primary_model,   spec.primary_state);
+                set_member(m_params.hybrid.secondary, spec.secondary_model, spec.secondary_state);
+                spec.wind_eff   = fire_wind_eff.get();
+                spec.balbi_wind = (m_params.balbi.wind_source == 1)
+                                ? fire_wind_ref.get() : fire_wind_eff.get();
+                spec.bc         = &m_bc_default;
+                spec.bp         = &m_params.balbi;
+                spec.balbi_in   = &balbi_in;
+                spec.weight     = fire_ros_weight.get();
+                advect_levelset_hybrid_rk3(*fire_phi, *fire_slopes, m_fg.geom, dt_ls,
+                                           m_params.levelset_eps_visc, spec);
+            } else if (balbi_directional) {
                 advect_levelset_balbi_rk3(*fire_phi,
                                           (m_params.balbi.wind_source == 1)
                                               ? *fire_wind_ref : *fire_wind_eff,
@@ -776,21 +802,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                           m_params.levelset_eps_visc,
                                           m_bc_default, m_params.balbi, balbi_in);
             } else if (generic_directional) {
-                DirectionalRosState dir_state;
-                if (m_params.ros_model == "behave") {
-                    dir_state.model = DIRECTIONAL_ROS_BEHAVE;
-                    dir_state.bs    = m_bs_default;
-                } else if (m_params.ros_model == "macarthur") {
-                    dir_state.model = DIRECTIONAL_ROS_MACARTHUR;
-                } else if (m_params.ros_model == "cheney_gould") {
-                    dir_state.model       = DIRECTIONAL_ROS_CHENEY_GOULD;
-                    dir_state.cgc         = m_cgc;
-                    dir_state.cg_moisture = m_params.cheney_gould.moisture;
-                    dir_state.cg_curing   = m_params.cheney_gould.curing;
-                } else {
-                    dir_state.model = DIRECTIONAL_ROS_ROTHERMEL;
-                    dir_state.rc    = m_rc;
-                }
+                const DirectionalRosState dir_state = make_directional_state(m_params.ros_model);
                 advect_levelset_directional_rk3(*fire_phi, *fire_wind_eff,
                                                 *fire_slopes, m_fg.geom, dt_ls,
                                                 m_params.levelset_eps_visc,
@@ -918,6 +930,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                        << "  I_B_max=" << I_B_max << " kW/m"
                        << "  L_max=" << L_max << " m\n";
     }
+
+    report_probes();
 
     if (m_params.write_fire_stats_csv) {
         static bool csv_header_written = false;
@@ -1376,7 +1390,165 @@ void FireLayer::init_ros_weight()
         // The kernels above read d_codes asynchronously; let them finish
         // before the device vector is freed at scope exit.
         amrex::Gpu::streamSynchronize();
+    } else if (hy.selector == "structure") {
+        // Cells within structure_distance of a structure cell (height above
+        // structure_min_height) take the secondary model; blend_width ramps
+        // the weight linearly across that distance instead of stepping.
+        const amrex::Real D    = hy.structure_distance;
+        const amrex::Real bw   = hy.blend_width;
+        const amrex::Real hmin = hy.structure_min_height;
+        const amrex::Real search = D + 0.5_rt * bw;
+        const int ri = static_cast<int>(std::ceil(search / dx[0]));
+        const int rj = static_cast<int>(std::ceil(search / dx[1]));
+        const int ng = amrex::max(ri, rj) + 1;
+
+        amrex::MultiFab mask(m_fg.ba, m_fg.dm, 1, ng);
+        mask.setVal(0.0_rt);
+        for (amrex::MFIter mfi(mask); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.validbox();
+            auto const& m = mask.array(mfi);
+            auto const& h = fire_structure_height->const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                m(i, j, k) = (h(i, j, k) > hmin) ? 1.0_rt : 0.0_rt;
+            });
+        }
+        mask.FillBoundary(m_fg.geom.periodicity());
+
+        const amrex::Real dxf = dx[0];
+        const amrex::Real dyf = dx[1];
+        for (amrex::MFIter mfi(*fire_ros_weight); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.validbox();
+            auto const& w = fire_ros_weight->array(mfi);
+            auto const& m = mask.const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                amrex::Real dmin = 1.0e30_rt;
+                for (int dj = -rj; dj <= rj; ++dj) {
+                    for (int di = -ri; di <= ri; ++di) {
+                        if (m(i + di, j + dj, k) > 0.5_rt) {
+                            const amrex::Real d = std::sqrt(di * dxf * di * dxf + dj * dyf * dj * dyf);
+                            dmin = amrex::min(dmin, d);
+                        }
+                    }
+                }
+                if (bw > 0.0_rt) {
+                    w(i, j, k) = amrex::max(0.0_rt, amrex::min(1.0_rt, 0.5_rt + (D - dmin) / bw));
+                } else {
+                    w(i, j, k) = (dmin <= D) ? 1.0_rt : 0.0_rt;
+                }
+            });
+        }
+    } else if (hy.selector == "wind") {
+        // Rebuilt from the effective wind at every fire step; the wind is not
+        // known yet here, so the weight starts at zero.
     } else {
         amrex::Abort("FireLayer::init_ros_weight: unsupported hybrid selector " + hy.selector);
+    }
+}
+
+void FireLayer::update_wind_weight()
+{
+    const amrex::Real lo = m_params.hybrid.wind_lo;
+    const amrex::Real hi = m_params.hybrid.wind_hi;
+    for (amrex::MFIter mfi(*fire_ros_weight); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.validbox();
+        auto const& w    = fire_ros_weight->array(mfi);
+        auto const& wind = fire_wind_eff->const_array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const amrex::Real u = wind(i, j, k, 0);
+            const amrex::Real v = wind(i, j, k, 1);
+            const amrex::Real U = std::sqrt(u * u + v * v);
+            w(i, j, k) = amrex::max(0.0_rt, amrex::min(1.0_rt, (U - lo) / (hi - lo)));
+        });
+    }
+}
+
+void FireLayer::print_hybrid_weight_summary() const
+{
+    const amrex::Real w_sum = fire_ros_weight->sum(0);
+    // Count cells that take mostly the secondary model (weight > 0.5).
+    amrex::MultiFab flag(m_fg.ba, m_fg.dm, 1, 0);
+    for (amrex::MFIter mfi(flag); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.validbox();
+        auto const& f = flag.array(mfi);
+        auto const& w = fire_ros_weight->const_array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            f(i, j, k) = (w(i, j, k) > 0.5_rt) ? 1.0_rt : 0.0_rt;
+        });
+    }
+    const long n_half = std::lround(flag.sum(0));
+    amrex::Print() << "[FIRE DEBUG] Hybrid ROS: primary=" << m_params.hybrid.primary
+                   << " secondary=" << m_params.hybrid.secondary
+                   << " selector=" << m_params.hybrid.selector
+                   << " weight_sum=" << w_sum
+                   << " secondary_cells=" << n_half << "\n";
+}
+
+DirectionalRosState FireLayer::make_directional_state(const std::string& model) const
+{
+    DirectionalRosState st;
+    if (model == "behave") {
+        st.model = DIRECTIONAL_ROS_BEHAVE;
+        st.bs    = m_bs_default;
+    } else if (model == "macarthur") {
+        st.model = DIRECTIONAL_ROS_MACARTHUR;
+    } else if (model == "cheney_gould") {
+        st.model       = DIRECTIONAL_ROS_CHENEY_GOULD;
+        st.cgc         = m_cgc;
+        st.cg_moisture = m_params.cheney_gould.moisture;
+        st.cg_curing   = m_params.cheney_gould.curing;
+    } else {
+        st.model = DIRECTIONAL_ROS_ROTHERMEL;
+        st.rc    = m_rc;
+    }
+    return st;
+}
+
+void FireLayer::report_probes()
+{
+    const int np = static_cast<int>(m_params.probes.size() / 2);
+    if (np == 0 || !fire_arrival_time) { return; }
+
+    const auto prob_lo = m_fg.geom.ProbLoArray();
+    const auto dx      = m_fg.geom.CellSizeArray();
+    const amrex::Box& domain = m_fg.geom.Domain();
+
+    for (int n = 0; n < np; ++n) {
+        if (m_probe_reported[n]) { continue; }
+        const amrex::Real x = m_params.probes[2 * n];
+        const amrex::Real y = m_params.probes[2 * n + 1];
+        const int ip = static_cast<int>(std::floor((x - prob_lo[0]) / dx[0]));
+        const int jp = static_cast<int>(std::floor((y - prob_lo[1]) / dx[1]));
+        const amrex::IntVect cell(ip, jp, 0);
+        if (!domain.contains(cell)) {
+            amrex::Print() << "[FIRE PROBE] " << n << " x=" << x << " y=" << y
+                           << " is outside the fire domain; ignored\n";
+            m_probe_reported[n] = true;
+            continue;
+        }
+
+        // Arrival time at the probe cell from whichever rank owns it; the
+        // field is -1 until the cell burns, and the min over other ranks'
+        // sentinel keeps that value.
+        amrex::ReduceOps<amrex::ReduceOpMin> reduce_op;
+        amrex::ReduceData<amrex::Real> reduce_data(reduce_op);
+        using ReduceTuple = typename decltype(reduce_data)::Type;
+        for (amrex::MFIter mfi(*fire_arrival_time); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.validbox();
+            if (!bx.contains(cell)) { continue; }
+            auto const& at = fire_arrival_time->const_array(mfi);
+            reduce_op.eval(bx, reduce_data,
+                [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple {
+                    return { (i == ip && j == jp) ? at(i, j, k) : amrex::Real(1.0e30) };
+                });
+        }
+        amrex::Real val = amrex::get<0>(reduce_data.value(reduce_op));
+        amrex::ParallelDescriptor::ReduceRealMin(val);
+
+        if (val >= 0.0_rt && val < 1.0e29_rt) {
+            amrex::Print() << "[FIRE PROBE] " << n << " x=" << x << " y=" << y
+                           << " cell=(" << ip << "," << jp << ")"
+                           << " arrival_time_s=" << val << "\n";
+            m_probe_reported[n] = true;
+        }
     }
 }

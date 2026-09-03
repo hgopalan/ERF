@@ -50,4 +50,23 @@ bool read_terrain_onto_fire_grid(
     const FireGrid&    fg,
     const std::string& fname);
 
+/**
+ * @brief Sample a heightmap onto fire-grid cell centres by nearest point
+ *
+ * Same file format and MPI handling as read_terrain_onto_fire_grid(), but the
+ * value at each fire cell centre is the nearest heightmap point rather than a
+ * bilinear blend. Bilinear interpolation turns a sharp wall into a ramp one
+ * source cell wide, so building footprints are sampled this way to keep their
+ * edges where the file puts them.
+ *
+ * @param[out] h_fire_cc   Height at fire-grid cell centres (1 component)
+ * @param[in]  fg          Fire grid structure
+ * @param[in]  fname       File path (empty string means no file, returns false)
+ * @return true on success, false if fname is empty or cannot be opened
+ */
+bool read_heightmap_nearest_onto_fire_cells(
+    amrex::MultiFab&   h_fire_cc,
+    const FireGrid&    fg,
+    const std::string& fname);
+
 #endif

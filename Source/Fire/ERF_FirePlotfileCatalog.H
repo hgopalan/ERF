@@ -49,6 +49,7 @@
  * @param[in] include_flame_tilt Append fire_flame_tilt within the crown block when true.
  * @param[in] include_live_moisture Append fire_fuel_mc_lh and fire_fuel_mc_lw when true (Phase 15).
  * @param[in] include_ros_weight Append fire_ros_model_weight when true (hybrid ROS).
+ * @param[in] include_structure_height Append fire_structure_height when true (hybrid structure selector).
  * @return Vector of variable name strings in canonical write order.
  */
 inline amrex::Vector<std::string> fire_plotfile_var_names(
@@ -57,7 +58,8 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
     bool include_fuel_map,
     bool include_flame_tilt,
     bool include_live_moisture,
-    bool include_ros_weight = false)
+    bool include_ros_weight = false,
+    bool include_structure_height = false)
 {
     amrex::Vector<std::string> names{
         "fire_phi",
@@ -106,6 +108,9 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
     if (include_ros_weight) {
         names.push_back("fire_ros_model_weight");
     }
+    if (include_structure_height) {
+        names.push_back("fire_structure_height");
+    }
     return names;
 }
 
@@ -128,6 +133,7 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
  * @param[in] include_flame_tilt Count fire_flame_tilt within the crown block when true.
  * @param[in] include_live_moisture Count fire_fuel_mc_lh and fire_fuel_mc_lw when true (Phase 15).
  * @param[in] include_ros_weight Count fire_ros_model_weight when true (hybrid ROS).
+ * @param[in] include_structure_height Count fire_structure_height when true (hybrid structure selector).
  * @return Number of scalar fire output variables.
  */
 inline int fire_plotfile_ncomp(
@@ -136,14 +142,16 @@ inline int fire_plotfile_ncomp(
     bool include_fuel_map,
     bool include_flame_tilt,
     bool include_live_moisture,
-    bool include_ros_weight = false)
+    bool include_ros_weight = false,
+    bool include_structure_height = false)
 {
     return 19
         + (include_live_moisture ? 2 : 0)
         + (include_spotting ? 4 : 0)
         + (include_crown ? (include_flame_tilt ? 5 : 4) : 0)
         + (include_fuel_map ? 1 : 0)
-        + (include_ros_weight ? 1 : 0);
+        + (include_ros_weight ? 1 : 0)
+        + (include_structure_height ? 1 : 0);
 }
 
 

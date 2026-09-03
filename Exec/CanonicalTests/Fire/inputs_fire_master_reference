@@ -205,25 +205,32 @@ erf.fire.rothermel_per_fuel = false
 # ============================================================================
 # HYBRID ROS (used only when ros_model = "hybrid")
 # R = (1 - w) R_primary + w R_secondary with a per-cell weight w in [0,1].
-# Isotropic path only: directional_ros and balbi.directional abort with it.
+# Works on the isotropic path and, with directional_ros, on the
+# direction-dependent level-set path.
 # ============================================================================
 
 erf.fire.hybrid.primary   = "rothermel"   # model where w = 0
 erf.fire.hybrid.secondary = "balbi"       # model where w = 1 (uses erf.fire.balbi.*)
 
 # How w is set
-# "region"    w = 1 inside hybrid.region, 0 outside
-# "fuel"      w = 1 on cells whose fuel code is in hybrid.secondary_fuel_codes
-# "structure" reserved (aborts): w from distance to a structure cell
-# "wind"      reserved (aborts): w from a wind-speed band
+# "region"    w = 1 inside hybrid.region, 0 outside (static)
+# "fuel"      w = 1 on cells whose fuel code is in hybrid.secondary_fuel_codes (static)
+# "structure" w = 1 within hybrid.structure_distance of a structure cell (static)
+# "wind"      w ramps 0 -> 1 between hybrid.wind_lo and wind_hi (rebuilt every step)
 erf.fire.hybrid.selector = "region"
 
 erf.fire.hybrid.region = 0.0 0.0 0.0 0.0       # x_lo y_lo x_hi y_hi [m]; required for "region"
-erf.fire.hybrid.blend_width = 0.0             # linear ramp width across the region edge [m]; 0 = step
+erf.fire.hybrid.blend_width = 0.0             # linear ramp width across the region or structure edge [m]; 0 = step
 # erf.fire.hybrid.secondary_fuel_codes = 3    # required for "fuel"
-erf.fire.hybrid.structure_distance = 10.0     # reserved for "structure" [m]
-erf.fire.hybrid.wind_lo = 8.0                 # reserved for "wind" [m/s]
-erf.fire.hybrid.wind_hi = 12.0
+# erf.fire.hybrid.structure_file = ""         # ERF terrain-format building heightmap; default erf.buildings_file_name
+erf.fire.hybrid.structure_min_height = 0.5    # sampled height [m] above which a cell is a structure
+erf.fire.hybrid.structure_distance = 10.0     # cells within this distance of a structure take the secondary [m]
+erf.fire.hybrid.wind_lo = 8.0                 # effective wind speed [m/s] where w reaches 0
+erf.fire.hybrid.wind_hi = 12.0                # effective wind speed [m/s] where w reaches 1
+
+# Arrival-time probes: flat list of x y pairs [m]. Each prints one
+# "[FIRE PROBE]" line on the step its fire cell first burns. Any ROS model.
+# erf.fire.probes = 100.0 50.0 200.0 50.0
 
 # ============================================================================
 # BALBI PHYSICAL MODEL (used only when ros_model = "balbi")

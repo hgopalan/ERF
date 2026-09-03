@@ -6,6 +6,116 @@
 
 using namespace amrex;
 
+namespace {
+
+/**
+ * Read an ERF terrain text file on the IO rank and broadcast it.
+ * Returns false when the file cannot be opened; every rank agrees on the
+ * result since the open status is broadcast with the sizes.
+ */
+bool read_erf_terrain_file(const std::string& fname,
+                           int& nx_terrain, int& ny_terrain,
+                           std::vector<Real>& x_coords,
+                           std::vector<Real>& y_coords,
+                           std::vector<Real>& z_values)
+{
+    nx_terrain = 0;
+    ny_terrain = 0;
+    int ok = 1;
+
+    if (ParallelDescriptor::IOProcessor()) {
+        std::ifstream file(fname);
+        if (!file.is_open()) {
+            amrex::Warning("Could not open terrain file: " + fname);
+            ok = 0;
+        } else {
+            file >> nx_terrain >> ny_terrain;
+            x_coords.resize(nx_terrain);
+            y_coords.resize(ny_terrain);
+            z_values.resize(static_cast<size_t>(nx_terrain) * ny_terrain);
+            for (int i = 0; i < nx_terrain; ++i) { file >> x_coords[i]; }
+            for (int j = 0; j < ny_terrain; ++j) { file >> y_coords[j]; }
+            for (size_t n = 0; n < z_values.size(); ++n) { file >> z_values[n]; }
+        }
+    }
+
+    ParallelDescriptor::Bcast(&ok, 1, ParallelDescriptor::IOProcessorNumber());
+    if (!ok) { return false; }
+
+    ParallelDescriptor::Bcast(&nx_terrain, 1, ParallelDescriptor::IOProcessorNumber());
+    ParallelDescriptor::Bcast(&ny_terrain, 1, ParallelDescriptor::IOProcessorNumber());
+    if (!ParallelDescriptor::IOProcessor()) {
+        x_coords.resize(nx_terrain);
+        y_coords.resize(ny_terrain);
+        z_values.resize(static_cast<size_t>(nx_terrain) * ny_terrain);
+    }
+    ParallelDescriptor::Bcast(x_coords.data(), nx_terrain, ParallelDescriptor::IOProcessorNumber());
+    ParallelDescriptor::Bcast(y_coords.data(), ny_terrain, ParallelDescriptor::IOProcessorNumber());
+    ParallelDescriptor::Bcast(z_values.data(), nx_terrain * ny_terrain, ParallelDescriptor::IOProcessorNumber());
+    return true;
+}
+
+} // namespace
+
+bool read_heightmap_nearest_onto_fire_cells(
+    MultiFab&          h_fire_cc,
+    const FireGrid&    fg,
+    const std::string& fname)
+{
+    if (fname.empty()) { return false; }
+
+    int nx_t = 0, ny_t = 0;
+    std::vector<Real> x_coords, y_coords, z_values;
+    if (!read_erf_terrain_file(fname, nx_t, ny_t, x_coords, y_coords, z_values)) {
+        return false;
+    }
+
+    Gpu::DeviceVector<Real> x_device(nx_t);
+    Gpu::DeviceVector<Real> y_device(ny_t);
+    Gpu::DeviceVector<Real> z_device(static_cast<size_t>(nx_t) * ny_t);
+    Gpu::copy(Gpu::hostToDevice, x_coords.begin(), x_coords.end(), x_device.begin());
+    Gpu::copy(Gpu::hostToDevice, y_coords.begin(), y_coords.end(), y_device.begin());
+    Gpu::copy(Gpu::hostToDevice, z_values.begin(), z_values.end(), z_device.begin());
+    const Real* x_ptr = x_device.data();
+    const Real* y_ptr = y_device.data();
+    const Real* z_ptr = z_device.data();
+
+    const auto prob_lo = fg.geom.ProbLoArray();
+    const auto dx      = fg.geom.CellSizeArray();
+
+    for (MFIter mfi(h_fire_cc, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.tilebox();
+        Array4<Real> h = h_fire_cc.array(mfi);
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const Real x = prob_lo[0] + (i + 0.5_rt) * dx[0];
+            const Real y = prob_lo[1] + (j + 0.5_rt) * dx[1];
+
+            // Nearest source point along each axis. The coordinates are
+            // sorted, so the first point at or beyond x and its predecessor
+            // bracket it; pick the closer of the two.
+            int ix = nx_t - 1;
+            for (int n = 0; n < nx_t; ++n) {
+                if (x_ptr[n] >= x) { ix = n; break; }
+            }
+            if (ix > 0 && (x - x_ptr[ix - 1]) < (x_ptr[ix] - x)) { ix -= 1; }
+
+            int iy = ny_t - 1;
+            for (int n = 0; n < ny_t; ++n) {
+                if (y_ptr[n] >= y) { iy = n; break; }
+            }
+            if (iy > 0 && (y - y_ptr[iy - 1]) < (y_ptr[iy] - y)) { iy -= 1; }
+
+            h(i, j, k) = z_ptr[ix * ny_t + iy];
+        });
+    }
+
+    // The kernels read the device vectors asynchronously; let them finish
+    // before the vectors are freed at scope exit.
+    Gpu::streamSynchronize();
+    return true;
+}
+
 bool read_terrain_onto_fire_grid(
     MultiFab&   z_fire_nd,
     const FireGrid&    fg,
@@ -21,58 +131,9 @@ bool read_terrain_onto_fire_grid(
     std::vector<Real> x_coords;
     std::vector<Real> y_coords;
     std::vector<Real> z_values;
-
-    // IO rank reads the file
-    if (ParallelDescriptor::IOProcessor()) {
-        std::ifstream file(fname);
-        if (!file.is_open()) {
-            amrex::Warning("Could not open terrain file: " + fname);
-            return false;
-        }
-
-        // Read nx and ny
-        file >> nx_terrain >> ny_terrain;
-
-        x_coords.resize(nx_terrain);
-        y_coords.resize(ny_terrain);
-        z_values.resize(nx_terrain * ny_terrain);
-
-        // Read x-coordinates
-        for (int i = 0; i < nx_terrain; ++i) {
-            file >> x_coords[i];
-        }
-
-        // Read y-coordinates
-        for (int j = 0; j < ny_terrain; ++j) {
-            file >> y_coords[j];
-        }
-
-        // Read z-values (stored contiguous in y: z[ix*ny + iy])
-        for (int i = 0; i < nx_terrain * ny_terrain; ++i) {
-            file >> z_values[i];
-        }
-
-        file.close();
+    if (!read_erf_terrain_file(fname, nx_terrain, ny_terrain, x_coords, y_coords, z_values)) {
+        return false;
     }
-
-    // Broadcast nx, ny to all ranks
-    ParallelDescriptor::Bcast(&nx_terrain, 1, ParallelDescriptor::IOProcessorNumber());
-    ParallelDescriptor::Bcast(&ny_terrain, 1, ParallelDescriptor::IOProcessorNumber());
-
-    // Resize on non-IO ranks
-    if (!ParallelDescriptor::IOProcessor()) {
-        x_coords.resize(nx_terrain);
-        y_coords.resize(ny_terrain);
-        z_values.resize(nx_terrain * ny_terrain);
-    }
-
-    // Broadcast the arrays
-    ParallelDescriptor::Bcast(x_coords.data(), nx_terrain, 
-                              ParallelDescriptor::IOProcessorNumber());
-    ParallelDescriptor::Bcast(y_coords.data(), ny_terrain, 
-                              ParallelDescriptor::IOProcessorNumber());
-    ParallelDescriptor::Bcast(z_values.data(), nx_terrain * ny_terrain, 
-                              ParallelDescriptor::IOProcessorNumber());
 
     // Copy to GPU
     //Gpu::DeviceVector<Real> x_device(x_coords.begin(), x_coords.end());
