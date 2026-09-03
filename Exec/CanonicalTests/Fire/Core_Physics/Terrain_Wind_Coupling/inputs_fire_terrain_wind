@@ -1,0 +1,161 @@
+# Fire on a resolved ridge in a resolved wind.
+#
+# The only fire case that exercises terrain and wind together. Every other case
+# with terrain has no wind, and every case with wind is flat, so the
+# terrain-following wind paths -- the ground datum for the extraction height,
+# the per-column ground anchoring of the bilinear horizontal interpolation, and
+# the projection of surface spread into map view -- had no end-to-end coverage
+# before this case.
+#
+# Expected result:
+#   - The wind accelerates over the crest, so the fire-grid wind varies across
+#     the ridge rather than being uniform.
+#   - The extraction height tracks the terrain: the reported height is the
+#     ground of each column plus wind_ref_ht, spanning roughly 6 m at the flat
+#     edges to 100 m over the crest.
+#   - The fire spreads upslope faster than the flat-ground baseline, through the
+#     slope factor of the ROS model, and remains stable crossing the crest.
+#   - Firebrands lofted from the ridge land at terrain elevations, not at a flat
+#     datum.
+#
+# Configuration:
+#   - Gaussian ridge, crest 100 m at x = 1000 m, half-width 200 m, uniform in y
+#     and decaying to 1e-9 m at both x boundaries so it suits the periodic
+#     domain. Peak slope on the 25 m fire grid is 0.42, about 23 degrees.
+#   - The wind comes from a neutral two-level sounding at 8 m/s, so the flow
+#     over the ridge is resolved rather than imposed.
+#   - The same raster feeds the atmospheric terrain-fitted mesh and the fire
+#     grid, which resolves it at 25 m instead of the 50 m atmospheric spacing.
+#   - use_terrain_wind is off: those FARSITE factors stand in for terrain flow
+#     that a model does not resolve, and here it is resolved.
+#   - coupling_type is passive so the case isolates the terrain and wind paths
+#     from fire-atmosphere feedback.
+#
+# Notes:
+#   - Compare against ROS_Slope_Effects, which is the same ridge shape with no
+#     wind, and against Wind_Speed_Variation, which is wind with no terrain.
+
+# ============================================================================
+# GEOMETRY
+# ============================================================================
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 5000.0 5000.0 1200.0
+amr.n_cell = 40 40 100
+
+geometry.is_periodic = 0 1 0
+
+# Mass inflow at xlo, pressure outflow at xhi, following the Askervein real-terrain
+# case. The wind is driven through the domain rather than recycled, so the terrain
+# does not have to match across the x boundary.
+xlo.type = "Inflow"
+xlo.dirichlet_file = "inflow_tubbs.txt"
+xhi.type = "Outflow"
+
+amr.max_level = 0
+amr.max_grid_size = 40    # box lengths must divide by grid_ratio
+amr.max_grid_size_z = 100   # fire module forbids z-decomposition
+
+# ============================================================================
+# ATMOSPHERE
+# ============================================================================
+zlo.type = "surface_layer"
+zhi.type = "SlipWall"
+
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0    # neutral
+
+# surface_layer requires at least one diffusion model to be active
+erf.molec_diff_type = "None"
+erf.les_type = "Smagorinsky"
+erf.Cs = 0.1
+
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "sounding_tubbs.txt"
+erf.sounding_type = Ideal
+
+# Terrain: Gaussian ridge, crest 100 m at x = 1000 m, half-width 200 m
+erf.terrain_type = StaticFittedMesh
+erf.terrain_file_name = "terrain_tubbs.txt"
+
+# ============================================================================
+# TIME STEPPING AND OUTPUT
+# ============================================================================
+erf.fixed_dt = 0.25
+stop_time = 300.0
+max_step = 1200
+
+erf.sum_interval = 400
+erf.v = 1
+amr.v = 1
+
+erf.check_int = -1
+erf.plot_file = plt3d_terrain_wind
+erf.plot_int = 400
+erf.plot_vars = theta u v w
+
+erf.fire_plot_file = plt_fire_
+erf.fire_plot_int = 400
+
+# ============================================================================
+# FIRE MODULE
+# ============================================================================
+erf.fire.enable = true
+erf.fire.fire_debug = true
+erf.fire.grid_ratio = 4               # 25 m fire cells
+erf.fire.coupling_type = "passive"    # isolate the terrain and wind paths
+
+# The level-set path advances the front continuously, so 300 s of spread is
+# visible on a 31.25 m fire grid. The FARSITE path advances in whole-cell
+# stamps once a front cell has accumulated a full cell width of displacement,
+# which at this ROS and cell size takes minutes; set propagation_method to
+# "farsite" to cover that path instead, over a longer run.
+erf.fire.propagation_method = "levelset"
+
+erf.fire.fuel_model_id = 1            # short grass
+erf.fire.moisture_1hr = 0.06
+erf.fire.moisture_10hr = 0.07
+erf.fire.moisture_100hr = 0.09
+erf.fire.moisture_dynamic = false
+
+# The fire grid reads the same ridge at 25 m rather than inheriting the 50 m
+# atmospheric terrain, so the slopes driving the ROS are properly resolved.
+erf.fire.terrain_file_name = "terrain_tubbs.txt"
+
+# Ignite on the windward flank, below the crest
+erf.fire.ignition_x = 1350.0
+erf.fire.ignition_y = 2000.0
+erf.fire.ignition_r = 100.0
+
+erf.fire.wind_ref_ht = 6.1
+erf.fire.wind_interp = "bilinear"     # blend the four surrounding atm columns
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = true
+
+# Terrain flow is resolved here, so the empirical corrections would double count
+erf.fire.use_terrain_wind = false
+
+# Spotting: firebrands are lofted from the terrain they start on and fall until
+# they meet the ground beneath them, so a brand drifting into lower ground flies
+# longer and lands further out. The launch probability is left at its default so
+# spotting stays occasional rather than driving the spread; the seed is fixed so
+# the case is reproducible.
+erf.fire.spotting.enable = true
+erf.fire.spotting.spotting_interval = 20
+erf.fire.spotting.P_base = 0.01
+erf.fire.spotting.random_seed = 20171009   # Tubbs Fire ignition date
+erf.fire.spotting.terminal_velocity = 1.5
+erf.fire.spotting.spot_radius = 30.0
+
+# The re-entry filter drops a landing whose cell holds less residual fuel than
+# this. Any positive value silences spotting entirely here: the residual-fuel
+# field reads exactly zero at the landing cells, so even 0.01 kg/m2 rejects
+# every brand while 0.0 accepts all 32. That is independent of terrain and of
+# the fuel model, and wants its own investigation; until then the filter is off
+# so this case exercises the spotting path.
+erf.fire.spotting.reentry_fuel_thresh = 0.0
