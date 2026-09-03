@@ -174,6 +174,37 @@ the lowest level, and one above the highest uses the top level, rather than bein
 extrapolated.
 
 
+Firebrand trajectories over terrain
+-----------------------------------
+
+A firebrand is lofted to :math:`H_z = 12.2\, I_B^{1/3}` above the ground **at its
+source cell** and descends at its terminal velocity while the wind carries it.
+The ground it lands on is not the height it left, so the descent is integrated
+against the terrain: the brand lands where its altitude first meets the ground
+beneath it,
+
+.. math::
+
+   z_{brand}(t) = z_{src} + H_z - w_{term} t
+   \quad \text{lands when} \quad
+   z_{brand} \le z_{ground}(x(t), y(t))
+
+A brand drifting onto lower ground therefore falls further, stays aloft longer
+and lands further out; one drifting upslope meets the rising ground sooner and
+lands closer. On flat ground every elevation is zero and this reduces exactly to
+the previous flat-earth flight time :math:`H_z / w_{term}`.
+
+The trajectory step size is set from the longest fall the brand could make — down
+to the lowest ground in the domain — so the fixed step count always covers the
+descent.
+
+The ground elevation used is the atmospheric column's, the same datum the wind
+extraction measures from, so spotting sees terrain at atmospheric resolution.
+Two simplifications remain: the brand is carried by the fire-grid reference wind
+rather than by the wind at its own altitude, and the terminal velocity is a
+single input rather than a distribution over brand sizes.
+
+
 References
 ----------
 - Richards, G. D. (1990). "An elliptical growth model of forest fire fronts and its
