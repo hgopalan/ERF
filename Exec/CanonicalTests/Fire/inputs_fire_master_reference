@@ -580,5 +580,5 @@ erf.fire.flame_tilt_rho_air = 1.2
 #   - ERF_FireParams.H: parameter definitions and defaults
 #   - Source/Fire/ERF_CrownFire.H: crown fire model equations
 #   - Source/Fire/ERF_FireDiagnostics.H: diagnostic computations
-#   - Documentation: Docs/sphinx/fire/
+#   - Documentation: Docs/sphinx_doc/theory/Fire.rst and the pages it links
 # ============================================================================

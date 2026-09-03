@@ -10,7 +10,7 @@ Rate-of-Spread Models
 Overview
 --------
 
-ERF-Fire provides four selectable rate-of-spread models via the :cpp:`erf.fire.ros_model` parameter. The default is Rothermel (1972), and all other models are backward-compatible drop-in replacements that consume the same effective midflame wind and write to the same ``fire_ros`` MultiFab.
+ERF-Fire provides five rate-of-spread models and a per-cell hybrid of any two, selected with the :cpp:`erf.fire.ros_model` parameter: Rothermel (1972, the default), the BEHAVE multi-class Rothermel, MacArthur (1966), Cheney-Gould (1998) and Balbi (2009 or 2020). All consume the same effective midflame wind and write to the same ``fire_ros`` MultiFab, so the propagation methods in :ref:`sec:FirePropagation` are independent of the choice.
 
 Sub-phase A adds per-fuel wind extraction height following WRF-SFIRE :cpp:`fcwh` convention. This is controlled by the :cpp:`erf.fire.use_per_fuel_wind_ht` parameter and is backward-compatible with the global wind reference height approach.
 

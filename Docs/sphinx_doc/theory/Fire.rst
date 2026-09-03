@@ -1,6 +1,5 @@
-
- .. role:: cpp(code)
-    :language: c++
+.. role:: cpp(code)
+   :language: c++
 
 .. _sec:Fire:
 
@@ -10,364 +9,266 @@ Fire Model
 Overview
 --------
 
-The fire model in ERF simulates wildfire propagation using a coupled approach combining the Rothermel fire spread model with the FARSITE elliptical fire expansion algorithm. The implementation uses Lagrangian perimeter tracking with an arrival-time field to represent the fire front and cumulative burned area in complex terrain.
+ERF-Fire simulates a surface wildfire on a two-dimensional fire grid that sits
+on the atmosphere's level-0 mesh and is refined by an integer factor in each
+horizontal direction. The atmosphere supplies wind, near-surface temperature
+and humidity; the fire model returns a surface heat flux, an optional latent
+flux and an optional smoke tracer. Terrain enters through slopes on the fire
+grid and through the height above ground at which the wind is sampled.
 
-The fire model operates on a refined grid with adaptive mesh refinement to capture fire spread dynamics at appropriate spatial scales. Fire state is advanced each atmospheric timestep, with communications between atmospheric and fire solvers handled through interpolation and mapping functions.
+The model is built from independently selectable pieces:
 
-Physical Models
----------------
+- a **rate-of-spread model** that fills the field ``fire_ros`` from the local
+  wind, slope, fuel and moisture (Rothermel, BEHAVE, MacArthur, Cheney-Gould,
+  Balbi, or a per-cell hybrid of two of them), see :ref:`sec:ROS_Models`;
+- a **front propagation method** that advances the burned region at that
+  rate, either the FARSITE Lagrangian marker scheme or a level-set solver, see
+  :ref:`sec:FirePropagation`;
+- **fuel**, either one Anderson model everywhere or a spatial fuel map with
+  firebreaks, and a dead-fuel moisture model driven by the atmosphere, see
+  :ref:`sec:SpatialFuel` and :ref:`sec:FireFuelMoisture`;
+- **ignition**, a disc, a polygon or polyline perimeter, or a timed schedule
+  of events, see :ref:`sec:MultiIgnition`;
+- **coupling** to the atmosphere through wind extraction and heat injection,
+  see :ref:`sec:FireCoupling`;
+- optional **behaviour extensions**: startup acceleration, ember spotting and
+  crown fire, see :ref:`fire_acceleration` and :ref:`sec:FireSpottingCrown`;
+- **diagnostics and output**: fireline intensity, flame length, flame
+  temperature and tilt, fire plotfiles, a statistics CSV, arrival-time probes
+  and checkpoint state, see :ref:`sec:FireOutput`.
 
-Rothermel Fire Spread Model
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Every option is off, or set to its historical behaviour, by default. A deck
+that sets only ``erf.fire.enable``, a fuel model and an ignition runs
+Rothermel on the FARSITE path with static moisture and lagged heat coupling.
+The complete list of inputs with defaults is in :ref:`sec:FireInputs`, and
+``Exec/CanonicalTests/Fire/inputs_fire_master_reference`` carries every input
+with a comment as a reference deck.
 
-The Rothermel model computes the rate of fire spread based on fuel characteristics and environmental conditions. The fire spread rate is determined by:
+.. toctree::
+   :maxdepth: 1
 
-- **Fuel properties**: Fuel moisture content, bed depth, particle density, energy content, and fuel load
-- **Environmental factors**: Wind speed and slope angle
-- **Rate calculations**: Separate computation of head fire (downwind), flank fire (cross-wind), and backing fire (upwind) spread rates
+   fire_propagation
+   ros_models
+   Fire_FuelMoisture
+   spatial_fuel
+   multi_ignition
+   fire_coupling
+   fire_acceleration
+   fire_spotting_crown
+   fire_output
 
-The Rothermel model is based on:
+Fire grid
+---------
 
-Rothermel, R. C. (1972). A mathematical model for predicting fire spread in wildland fuels. Res. Paper INT-115, USDA Forest Service, Intermountain Forest and Range Experiment Station.
+The fire grid is created from the atmosphere's level-0 box array and
+distribution map by refining both by ``erf.fire.grid_ratio`` in x and y and
+collapsing z to one cell. Every fire box therefore lives on the rank that
+owns its parent atmosphere box, and the map from a fire cell to its column is
+integer division by the ratio. Two constraints follow:
 
-FARSITE Elliptical Fire Expansion
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- the x and y lengths of every atmosphere box must be divisible by the ratio
+  (set ``amr.max_grid_size`` accordingly);
+- the atmosphere must not be decomposed in z (``amr.max_grid_size_z`` at
+  least the number of vertical cells), since the fire model interpolates
+  through whole columns.
 
-The FARSITE algorithm models fire expansion as an elliptical shape with characteristics derived from wind and topography:
+The fire model runs on level 0 only. Coordinates on the fire grid are the
+physical x and y of the atmosphere domain, so ignition points, probes,
+firebreaks and structure files are all given in metres.
 
-- **Ellipticity**: The length-to-width ratio of the fire ellipse is derived from wind speed using the Anderson (1983) formulas
-- **Directional spread rates**: The ellipse is oriented according to wind direction and expanding at rates corresponding to head, flank, and backing spread rates computed by Rothermel
-- **Coefficients**: The Richards (1990) coefficients relate head fire rate of spread to flank and backing rates through the ellipse geometry
-- **Level-set representation**: The fire front is represented as a signed-distance function where negative values indicate burned area, positive values indicate unburned fuel, and values near zero indicate the active fire front
+One fire step
+-------------
 
-References:
+``FireLayer::advance`` is called once per atmospheric time step, after the
+dynamical core. In order it:
 
-- Finney, M. A. (2004). FARSITE: Fire Area Simulator model development and evaluation. Res. Paper RMRS-RP-4 Revised, USDA Forest Service, Rocky Mountain Research Station.
-- Richards, G.D. (1990). An elliptical growth model of forest fire fronts and its numerical solution. Int. J. Numer. Meth. Eng. 30(6):1163-1179.
+1. samples the near-surface temperature and relative humidity and, when
+   ``erf.fire.moisture_dynamic`` is on, advances the dead-fuel moisture
+   classes (:ref:`sec:FireFuelMoisture`);
+2. extracts the wind at the reference height above ground on the fire grid,
+   applies the wind adjustment factor and any terrain correction
+   (:ref:`sec:FireCoupling`);
+3. applies any scheduled ignitions due in this step;
+4. evaluates the selected rate-of-spread model into ``fire_ros``, blends at
+   fuel boundaries, and applies the acceleration and crown-fire adjustments
+   when enabled;
+5. propagates the front with CFL-limited subcycles of the FARSITE or
+   level-set scheme, reinitialising the level set periodically, and applies
+   ember spotting when enabled;
+6. updates the arrival-time field, consumes fuel and computes the surface
+   heat flux and the flame diagnostics;
+7. reports probes, appends the statistics CSV, and stores the coarsened heat
+   flux for injection into the atmosphere at the next step.
 
-Level-Set and Arrival-Time Representation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The level set ``fire_phi`` is normalised: it is :math:`-1` well inside the
+burned region, :math:`+1` well outside, zero on the front, and varies
+linearly between them over a band a few fire cells wide. Cells with
+:math:`\phi < 0` are burning or burned; ``fire_arrival_time`` records when
+each cell first crossed zero and is :math:`-1` where it has not.
 
-The fire front is tracked using a combination of a phi field and an arrival-time field:
+Fields on the fire grid
+-----------------------
 
-- **phi field**: Stores the current fire front position after each timestep. After propagation:
-  - phi < 0: Recent fire front ring (current timestep)
-  - phi ≈ 0: Unburned fuel (reset each timestep)
-  
-- **arrival_time field**: Accumulates the cumulative burned region across all timesteps:
-  - arrival_time >= 0: Cells that have been ignited (burned area)
-  - arrival_time < 0: Cells not yet burned
-  - arrival_time value: Time at which the cell was burned
+The principal state and diagnostic fields, all cell-centred on the fire grid:
 
-The fire front propagation works through displacement accumulation: at each grid point near the active fire front, displacement vectors are computed based on the local rate of spread and wind-derived elliptical fire shape. When accumulated displacement reaches a cell threshold, the burned cell position is stamped into a global perimeter list. These positions are then gathered across MPI ranks and used to update phi and arrival_time fields, with arrival_time marking the cumulative burned region.
-
-Wind and Terrain Effects
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The model includes adjustments for wind speed variation with height and terrain effects:
-
-- **Wind Adjustment Factor (WAF)**: Adjusts wind speed from reference height to the flame zone where fire spread occurs, based on fuel moisture and other properties
-- **Terrain corrections**: FARSITE terrain wind corrections account for ridge speed-up, sheltered wind reduction, valley channeling, and wind deflection effects
-
-Model State Variables
----------------------
-
-The fire model maintains several grid-based state variables on the fire-refined mesh:
-
-.. list-table:: Fire Grid MultiFabs (dimensions: Cf × nx × Cf × ny × 1)
-   :widths: 20 15 20 45
+.. list-table::
+   :widths: 26 10 64
    :header-rows: 1
 
    * - Field
-     - Components
-     - Ghost Cells
-     - Description
-   * - fire_phi
+     - Comp.
+     - Meaning
+   * - ``fire_phi``
      - 1
+     - Normalised level set, negative where burned
+   * - ``fire_arrival_time``
      - 1
-     - Level-set field: <0 burned, >0 unburned, ≈0 front
-   * - fire_wind_ref
-     - 2
-     - 0
-     - Reference wind components (u, v) at specified height
-   * - fire_wind_eff
-     - 2
-     - 0
-     - Effective wind after WAF and terrain corrections
-   * - fire_slopes
-     - 2
-     - 0
-     - Terrain slopes (dz/dx, dz/dy)
-   * - fire_curvature
+     - Time a cell first burned [s], :math:`-1` if unburned
+   * - ``fire_ros``
      - 1
-     - 0
-     - Terrain curvature
-   * - fire_ros
+     - Isotropic (head-fire) rate of spread [m/s]
+   * - ``fire_wind_ref``, ``fire_wind_eff``
+     - 2 each
+     - Wind at the reference height, and after WAF and terrain corrections [m/s]
+   * - ``fire_wind_extract_z``
      - 1
-     - 0
-     - Rate of spread [m/s]
-   * - fire_fuel_load
+     - Height at which the wind was sampled [m]
+   * - ``fire_slopes``, ``fire_curvature``
+     - 2, 1
+     - Terrain slope components and curvature on the fire grid
+   * - ``fire_fuel_load``
      - 1
-     - 0
-     - Fuel load [kg/m²]
-   * - fire_fuel_mc
-     - 3
-     - 0
-     - Fuel moisture content (1-hr, 10-hr, 100-hr) [fraction]
-   * - fire_heat_flux
+     - Remaining fuel load [kg/m²]
+   * - ``fire_fuel_mc``
+     - 5
+     - Dead 1-, 10-, 100-hour and live herbaceous and woody moisture [fraction]
+   * - ``fire_fuel_model``
      - 1
-     - 0
-     - Heat flux [W/m²]
-   * - fire_spread_vec
-     - 2
-     - 0
-     - Spread vectors for FARSITE expansion
+     - Fuel code per cell, present only with a spatial fuel map
+   * - ``fire_surface_temp``, ``fire_surface_rh``
+     - 1 each
+     - Near-surface temperature [K] and relative humidity [0-1] from the atmosphere
+   * - ``fire_heat_flux``, ``fire_latent_flux``
+     - 1 each
+     - Sensible and latent surface flux [W/m²]
+   * - ``fire_fireline_intensity``, ``fire_flame_length``, ``fire_flame_temp``, ``fire_flame_tilt``
+     - 1 each
+     - Byram intensity [kW/m], Thomas flame length [m], flame temperature [K], tilt [deg]
+   * - ``fire_ros_weight``, ``fire_structure_height``
+     - 1 each
+     - Hybrid model weight and sampled building height, present only with the hybrid model
+   * - ``fire_crown_active``, ``fire_crown_load``, ``fire_crown_fraction_burned``
+     - 1 each
+     - Crown-fire state, present only with crown fire enabled
+   * - ``fire_albini_data``
+     - 4
+     - Spotting diagnostics, present only with spotting enabled
 
-Implementation Components
---------------------------
+Which of these reach the fire plotfile, and under what names, is listed in
+:ref:`sec:FireOutput`.
 
-Core Classes
-~~~~~~~~~~~~
+Source layout
+-------------
 
-**Fire Layer Class** (ERF_FireLayer.H, ERF_FireLayer.cpp)
-   - Main fire simulation container
-   - Manages fire state on refined grid
-   - Implements fire computation pipeline
-   - Handles communication between atmospheric and fire solvers
+All fire sources are in ``Source/Fire``. The entry points are
+``ERF_FireLayer.H`` and ``ERF_FireLayer.cpp`` (the ``FireLayer`` class that
+owns the fields and runs a step) and ``ERF_FireParams.H`` (every
+``erf.fire.*`` input, read once from ParmParse). The remaining headers each
+hold one model or one stage of the step and are named for it:
+``ERF_Rothermel``, ``ERF_BalbiModel``, ``ERF_BehaveModel``,
+``ERF_MacArthurModel``, ``ERF_CheneyGouldModel``, ``ERF_DirectionalRos`` and
+``ERF_HybridRos`` for the rate of spread; ``ERF_FarsiteEllipse``,
+``ERF_LevelSetAdvection``, ``ERF_NumericalSchemes`` and ``ERF_Reinitialize``
+for propagation; ``ERF_FireWindExtract``, ``ERF_FuelWindHeight`` and
+``ERF_TerrainSlope`` for the wind and terrain; ``ERF_FuelMoisture``,
+``ERF_MoistureExtinction``, ``ERF_FuelMap``, ``ERF_LcpReader``,
+``ERF_FuelBlending`` and ``ERF_FireBreak`` for fuel; ``ERF_FireIgnition``,
+``ERF_IgnitionSchedule`` and ``ERF_PolygonIgnition`` for ignition;
+``ERF_FireHeatFlux``, ``ERF_FireAtmCoupling`` and ``ERF_FireSmokeEmission``
+for coupling; ``ERF_AlbiniSpotting``, ``ERF_ScottSpottingTable``,
+``ERF_CrownFire`` and ``ERF_FireAcceleration`` for the behaviour extensions;
+and ``ERF_FireDiagnostics``, ``ERF_FireStatsOutput``, ``ERF_FirePlotfile``
+and ``ERF_FirePlotfileCatalog`` for output. The fire module is compiled when
+``ERF_ENABLE_FIRE`` is on, which is the CMake default.
 
-**Fire Parameters** (ERF_FireParams.H)
-   - Stores fire model configuration and parameters
-   - Reads user settings from input file
-   - Manages fuel model specifications
+Tests
+-----
 
-**Wind Extraction** (ERF_FireWindExtract.H, ERF_FireWindExtract.cpp)
-   - Extracts wind field from atmospheric MOST layer
-   - Interpolates wind to fire grid
-   - Applies Wind Adjustment Factor
+``Exec/CanonicalTests/Fire`` holds the canonical fire cases, grouped by theme
+(core physics, FARSITE and level-set propagation, fire-atmosphere coupling,
+fire behaviour options, heat-flux diagnostics, mesh refinement) with a README
+in every directory, plus Python unit tests under ``Unit_Tests`` for the
+Rothermel kernel, the FARSITE ellipse, the ROS models, the fuel map reader,
+the ignition schedule, spotting, crown fire, acceleration, wind interpolation
+and terrain projection. The canonical cases have no recorded reference values, so they are smoke
+tests: they show a feature runs and behaves qualitatively as documented.
 
-**Terrain Handling** (ERF_FireTerrainReader.H, ERF_FireTerrainReader.cpp)
-   - Reads terrain elevation data
-   - Computes slopes and curvature on fire grid
-   - Applies FARSITE terrain corrections
+The regression suites under ``Exec/RegTests`` are the quantitative checks.
+Each is a directory of input decks sharing one base, a script that runs every
+deck and prints a table, and a README that records the reference values and
+explains what each row should show:
 
-**Ignition** (ERF_FireIgnition.H)
-   - Initializes fire front at specified location and time
-   - Sets up initial fire phi field
+- ``FireRosComparison``: every rate-of-spread model on the isotropic and
+  direction-dependent level-set paths, the hybrid selectors with their
+  identity checks, per-fuel Rothermel coefficients, the wind mapping, and the
+  Balbi wind-source and extinction options, all on one flat grass fire.
+- ``FireHybridObstacles``: the hybrid structure selector, arrival-time probes
+  and the interaction with immersed-forcing buildings.
+- ``FireRestart``: a checkpoint written mid-run and a restart from it, on both
+  propagation paths, which must reproduce the uninterrupted run.
 
-**Plotfile Output** (ERF_FirePlotfile.H, ERF_FirePlotfile.cpp)
-   - Writes fire state variables to plotfiles
-   - Enables visualization and analysis of results
+Where each feature is exercised:
 
-Integration with ERF
-~~~~~~~~~~~~~~~~~~~~
+.. list-table::
+   :widths: 40 60
+   :header-rows: 1
 
-The fire layer is instantiated and managed by the main ERF class:
+   * - Feature
+     - Test
+   * - Rothermel, BEHAVE, MacArthur, Cheney-Gould, Balbi 2009 and 2020
+     - ``FireRosComparison``; canonical ``Fire_Behavior/ROS_Models``, ``Core_Physics``
+   * - Direction-dependent level set, every model
+     - ``FireRosComparison`` (``*_directional`` rows)
+   * - Hybrid: region, fuel, wind selectors, blend width, directional, non-Balbi members
+     - ``FireRosComparison`` (``hybrid_*`` rows)
+   * - Hybrid: structure selector, probes, immersed-forcing buildings
+     - ``FireHybridObstacles``
+   * - Per-fuel Rothermel coefficients, spatial fuel map, blending, firebreaks
+     - ``FireRosComparison`` (``rothermel_fuelmap``, ``hybrid_fuel``); canonical ``Fire_Behavior/Spatial_Fuel``
+   * - Wind mapping (bilinear, nearest), per-fuel wind height, WAF formulas
+     - ``FireRosComparison`` (``rothermel_nearest``); canonical ``ROS_Models``, ``Core_Physics/Wind_Adjustment_Factor``; ``Unit_Tests/test_wind_interpolation.py``
+   * - Balbi couplings: reference wind, moisture extinction
+     - ``FireRosComparison`` (``balbi2020_reference_wind``, ``balbi2020_extinction_wet``)
+   * - FARSITE ellipse, level-set advection and reinitialisation
+     - ``FireRestart``; canonical ``FARSITE_Propagation``, ``Level_Set_Propagation``; ``Unit_Tests/test_farsite_ellipse.py``
+   * - Checkpoint and restart of the fire state
+     - ``FireRestart``
+   * - Dynamic fuel moisture
+     - canonical ``Core_Physics/Fuel_Moisture_Sensitivity``, ``ROS_Models/behave_dynamic``
+   * - Ignition schedule, polygon and polyline ignition
+     - canonical ``Fire_Behavior/Ignition_Patterns``; ``Unit_Tests/test_ignition_schedule.py``
+   * - Startup acceleration
+     - canonical ``Fire_Behavior/Acceleration``; ``Unit_Tests/test_fire_acceleration.py``
+   * - Ember spotting, crown fire
+     - canonical ``Fire_Behavior/Spotting``, ``Fire_Behavior/Crown_Fire``; ``Unit_Tests/test_albini_spotting.py``, ``test_crown_fire.py``
+   * - Coupling modes, heat injection, smoke tracer
+     - canonical ``Fire_Atmosphere_Coupling``
+   * - Flame temperature, tilt, intensity
+     - canonical ``Heat_Flux_Diagnostics``
+   * - Terrain slopes and terrain wind corrections
+     - canonical ``Core_Physics/ROS_Slope_Effects``, ``Terrain_Wind_Coupling``; ``Unit_Tests/test_terrain_projection.py``
 
-- **Initialization**: Fire layer is created in ``ERF::InitData_post()`` after atmospheric grid setup
-- **Advance**: Fire state is advanced each atmospheric timestep via ``FireLayer::advance()``
-- **Wind coupling**: Wind field is extracted from the MOST boundary layer model at
-  ``erf.fire.wind_ref_ht`` above the **ground**. The datum is the mean of the four
-  surface nodes of an atmospheric column, taken from the atmospheric terrain even
-  when ``erf.fire.terrain_file_name`` supplies a finer terrain for the slopes,
-  since the wind profile being interpolated belongs to that column
-
-- **Horizontal mapping**: ``erf.fire.wind_interp`` selects how the atmospheric
-  wind reaches the finer fire grid. ``"bilinear"`` (default) blends the four
-  atmospheric columns surrounding each fire cell, every one sampled at the
-  reference height above *its own* ground, so a fire cell midway between columns
-  gets the wind of that position. ``"nearest"`` takes only the column containing
-  the cell, which makes the fire-grid wind piecewise constant on atmospheric
-  cells: with ``grid_ratio`` of 5 to 20, that is a block of 25 to 400 fire cells
-  sharing one wind vector, with a discontinuity of a full atmospheric cell of
-  shear at every block edge
-- **Output**: Fire variables are included in plotfile output for visualization
-
-Configuration and Input Parameters
------------------------------------
-
-Fire model behavior is controlled through input file parameters using the ``erf.fire.*`` prefix.
-
-Basic Configuration
-~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: text
-
-   erf.fire.enable = true                # Enable/disable fire model
-   erf.fire.grid_ratio = 5               # Fire grid refinement factor relative to atmospheric grid
-   erf.fire.fuel_model_id = 1            # Anderson FBFM13 fuel model (1-13)
-   erf.fire.ignition_x = 1000.0          # Ignition center x-coordinate [m]
-   erf.fire.ignition_y = 1000.0          # Ignition center y-coordinate [m]
-   erf.fire.ignition_r = 20.0            # Initial fire radius [m]
-   erf.fire.ignition_time = 0.0          # Ignition time [s]
-
-Fuel and Moisture
-~~~~~~~~~~~~~~~~~
-
-.. code-block:: text
-
-   erf.fire.fuel_model_id = 1            # Anderson fuel model (1-13)
-   erf.fire.moisture_1hr = 0.08          # 1-hour fuel moisture [fraction]
-   erf.fire.moisture_10hr = 0.08         # 10-hour fuel moisture [fraction]
-   erf.fire.moisture_100hr = 0.10        # 100-hour fuel moisture [fraction]
-
-Wind Parameters
-~~~~~~~~~~~~~~~
-
-.. code-block:: text
-
-   erf.fire.wind_ref_ht = 6.1            # Reference height for wind input [m]
-   erf.fire.use_waf = true               # Apply Wind Adjustment Factor
-   erf.fire.waf_formula = "andrews"      # WAF formula: "andrews" or "behaviorplus"
-
-Terrain Corrections
-~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: text
-
-   erf.fire.use_terrain_wind = true      # Apply FARSITE terrain corrections
-   erf.fire.k_ridge = 1.5                # Ridge speed-up factor
-   erf.fire.k_shelter = 0.6              # Sheltered wind reduction factor
-   erf.fire.k_valley = 0.8               # Valley channeling factor
-   erf.fire.k_deflect = 0.3              # Wind deflection factor
-
-FARSITE Algorithm Parameters
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: text
-
-   erf.fire.farsite.phi_threshold = 0.0     # Level-set detection threshold
-   erf.fire.farsite.use_anderson_lw = 1     # Use Anderson L/W ratio (1) or fixed coefficients (0)
-   erf.fire.farsite.coeff_a = 0.5           # Richards head fire coefficient
-   erf.fire.farsite.coeff_b = 0.25          # Richards flank fire coefficient
-   erf.fire.farsite.coeff_c = 0.1           # Richards backing fire coefficient
-   erf.fire.farsite.gaussian_sigma = -1.0   # Phi stamping radius [m]
-                                            # <0: single-cell mode
-                                            # =0: auto mode
-                                            # >0: fixed Gaussian radius
-   erf.fire.farsite.cfl_fire = 0.5          # Fire CFL number for subcycle timestep
-
-Debugging
-~~~~~~~~~
-
-.. code-block:: text
-
-   erf.fire.fire_debug = false           # Enable debug output for fire calculations
-
-When enabled, debug messages provide information about wind extraction, wind adjustment factor application, terrain corrections, rate-of-spread calculations, and fire front propagation.
-
-Implementation Components
--------------------------
-
-**Framework Foundation**
-   - Fire layer class structure
-   - Rothermel and FARSITE computational kernels
-   - Integration with main ERF class
-   - Input file support
-   - Regression test infrastructure
-
-**Rothermel Model**
-   - Rothermel fire spread equations
-   - Wind and slope factor calculations
-   - Anderson FBFM13 fuel model database
-   - Wind Adjustment Factor application
-   - Terrain slope computation
-
-**Lagrangian Perimeter Propagation**
-   - Fire front displacement accumulation
-   - Perimeter point stamping and MPI gather
-   - Arrival-time field management for cumulative burned region
-   - Two-pass propagation: GPU spread vectors, host MPI gather
-   - Single-cell and Gaussian stamping modes
-   - CFL-limited fire subcycling
-
-Testing
--------
-
-Regression tests verify fire model functionality:
-
-**Rothermel Validation Test** (inputs_fire_phase2)
-   - Flat domain with GR1 fuel model
-   - 5 m/s wind, 8% fuel moisture
-   - Verifies Rothermel rate-of-spread computation
-   - Output: max_ROS and mean_ROS values
-
-**Fire Front Propagation Test** (inputs_fire_phase3)
-   - Flat domain with GR1 fuel model
-   - 5 m/s wind, 8% fuel moisture
-   - Verifies fire front propagation and FARSITE elliptical expansion
-   - Test checks:
-      - Fire front propagation (phi_min < 0 at t > 0)
-      - Subcycle count verification
-      - Burned area geometry at specified time
-      - No NaN values in computed fields
-
-Expected Results
-~~~~~~~~~~~~~~~~
-
-At t = 1800 seconds with GR1 fuel, 5 m/s wind, and flat terrain:
-
-   - Head fire rate of spread: 0.06-0.10 m/s (WAF-dependent)
-   - Adjusted wind speed: 5-6 m/s
-   - Anderson L/W ratio: 1.5-2.0
-   - Burned ellipse major axis: 200-350 m
-   - Burned ellipse minor axis: 100-200 m
-
-Output and Visualization
-------------------------
-
-Fire simulation results are written to plotfiles for visualization and analysis:
-
-- **Level-set/phi field**: Shows the current fire front position (phi < 0 indicates recent burn)
-- **Rate of spread** (fire_ros): Spatial distribution of fire spread rates
-- **Wind fields** (fire_wind_ref, fire_wind_eff): Reference and effective wind components
-- **Fuel properties** (fire_fuel_load, fire_fuel_mc): Fuel load and moisture content
-- **Terrain data** (fire_slopes, fire_curvature): Elevation derivatives
-- **Arrival time** (fire_arrival_time): Cumulative burned region tracker (arrival_time >= 0 indicates burned area)
-
-Fire Statistics CSV Output
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-When enabled (default), the fire model writes burned area and fire perimeter statistics to a CSV file each timestep. This file contains:
-
-- **Time series data**: step, time [s], burned area [ha], perimeter [km]
-- **Active front metrics**: active cells, head rate of spread [m/s]
-- **Fire geometry**: major and minor axes of fire ellipse [m]
-
-Configure with:
-
-.. code-block:: text
-
-   erf.fire.write_fire_stats_csv = true          # Enable CSV output (default: true)
-   erf.fire.fire_stats_csv_file = "fire_stats.csv"  # Output filename
-
-Animation Visualization
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-A Python script is provided to generate animated GIF visualizations of fire spread evolution:
-
-.. code-block:: bash
-
-   python3 plot_fire_animation.py [--csv-file FILE] [--output FILE] [--fps FPS]
-
-This creates a multi-panel animation showing:
-   - Fire ellipse extent evolution
-   - Cumulative burned area time series
-   - Fire perimeter growth
-   - Head rate of spread temporal evolution
-
-See ``Exec/CanonicalTests/Fire/ANIMATION_GUIDE.md`` for detailed usage instructions.
-
-These variables enable quantitative analysis of fire behavior and validation against observational data.
+Not yet covered by any test: fire heat injection together with
+immersed-forcing buildings (known to discard the immersed-forcing scalar
+source, see :ref:`sec:FireCoupling`), restart of the spotting and crown-fire
+state, and the fire-dust coupling. ``FireRestart`` uses the wind-capped
+Rothermel rate on purpose: with a surface layer the atmosphere itself does
+not resume identically after an ERF restart, so a wind-following model would
+show that atmospheric drift rather than the fire state.
 
 References
 ----------
 
-- Rothermel, R. C. (1972). A mathematical model for predicting fire spread in wildland fuels. Res. Paper INT-115, USDA Forest Service, Intermountain Forest and Range Experiment Station.
-
-- Finney, M. A. (2004). FARSITE: Fire Area Simulator model development and evaluation. Res. Paper RMRS-RP-4 Revised, USDA Forest Service, Rocky Mountain Research Station.
-
-- Richards, G.D. (1990). An elliptical growth model of forest fire fronts and its numerical solution. Int. J. Numer. Meth. Eng. 30(6):1163-1179.
-
-- Andrews, P. L. (2018). Current status and future needs of the BehavePlus Fire Modeling System. International Journal of Wildland Fire, 27(9), 558-566.
-
-- Anderson, H.E. (1983). Predicting wind-driven wild fire size and shape. USDA Forest Service Research Paper INT-305.
+- Rothermel, R. C. (1972). A mathematical model for predicting fire spread in wildland fuels. USDA Forest Service Research Paper INT-115.
+- Finney, M. A. (2004). FARSITE: Fire Area Simulator model development and evaluation. USDA Forest Service Research Paper RMRS-RP-4 Revised.
+- Mandel, J., Beezley, J. D. and Kochanski, A. K. (2011). Coupled atmosphere-wildland fire modeling with WRF 3.3 and SFIRE 2011. Geoscientific Model Development, 4, 591-610.
