@@ -711,8 +711,8 @@ amrex::Real diagnose_layer_tau(
  *    and the direct + diffuse downwelling flux; the per-level SW heating rate
  *    is written to qheating_arr(i,j,k,0).
  * 2. LW: sweep downward from the TOA (F_down = 0) to the surface, then upward
- *    from the surface (F_up = eps * sigma * T_s^4) to the TOA, storing both
- *    interface profiles. The per-level LW heating rate from the net-flux
+ *    from the surface (F_up = eps * sigma * T_s^4 + (1 - eps) * F_down) to
+ *    the TOA, storing both interface profiles. The per-level LW heating rate from the net-flux
  *    divergence is written to qheating_arr(i,j,k,1).
  * 3. Scalar diagnostics (max heating rate, surface fluxes) are returned for
  *    the reduction in the caller.
@@ -926,11 +926,14 @@ void vertical_two_stream_sweep(
             F_lw_down_iface[m] = compute_lw_flux_down(F_lw_down_iface[m + 1], T_layer, sigma, tau_lw_level[m]);
         }
 
-        // Upward sweep: surface -> TOA.
+        // Upward sweep: surface -> TOA. The surface emits eps * sigma * T_s^4
+        // and reflects the fraction (1 - eps) of the downwelling flux that
+        // reaches it (gray surface, Kirchhoff's law).
         {
             amrex::Real t_surface = resolve_surface_temp_k(i, j, t_sfc, rad_choice, has_t_sfc);
             amrex::Real emiss_lw  = resolve_surface_emissivity_lw(i, j, hetero_emiss_lw, rad_choice, has_hetero_emiss_lw);
-            F_lw_up_iface[0] = emiss_lw * compute_thermal_intensity(t_surface, sigma);
+            F_lw_up_iface[0] = emiss_lw * compute_thermal_intensity(t_surface, sigma)
+                             + (1.0 - emiss_lw) * F_lw_down_iface[0];
         }
         for (int k = kmin; k <= kmax; ++k) {
             const int m = k - kmin;
