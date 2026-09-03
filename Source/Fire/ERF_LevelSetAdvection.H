@@ -121,6 +121,89 @@ inline void compute_levelset_rhs(amrex::MultiFab& rhs,
 }
 
 /**
+ * @brief SSP-RK3 level-set step with a rate of spread rebuilt every stage
+ *
+ * Shared driver for every direction-dependent path: the caller supplies
+ * fill_ros(R, phi_stage), which writes the ROS field to use for that stage
+ * from the stage's level set (typically from its front normal). Same WENO5-Z
+ * spatial scheme and stage arithmetic as advect_levelset_weno5z_rk3().
+ *
+ * @param[in,out] phi       Level-set field
+ * @param[in]     slopes    Terrain slopes [dz/dx, dz/dy]; |∇φ| is projected
+ *                          onto the terrain surface
+ * @param[in]     geom      Fire-grid geometry
+ * @param[in]     dt        Timestep [s]
+ * @param[in]     eps_visc  Artificial viscosity coefficient
+ * @param[in]     fill_ros  Callable (MultiFab& R, const MultiFab& phi_stage)
+ */
+template <class FillRos>
+inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
+                                          const amrex::MultiFab& slopes,
+                                          const amrex::Geometry& geom,
+                                          amrex::Real dt,
+                                          amrex::Real eps_visc,
+                                          FillRos&& fill_ros)
+{
+    using namespace amrex;
+
+    const auto* dx = geom.CellSize();
+
+    const int nghost = 3;
+    MultiFab phi_n(phi.boxArray(), phi.DistributionMap(), 1, nghost);
+    MultiFab phi_star(phi.boxArray(), phi.DistributionMap(), 1, nghost);
+    MultiFab phi_hat(phi.boxArray(), phi.DistributionMap(), 1, nghost);
+    MultiFab rhs(phi.boxArray(), phi.DistributionMap(), 1, 0);
+    MultiFab R_dir(phi.boxArray(), phi.DistributionMap(), 1, 0);
+
+    phi_n.ParallelCopy(phi);
+    phi_n.FillBoundary(geom.periodicity());
+
+    // Stage 1: phi* = phi^n + dt L(phi^n)
+    phi_star.ParallelCopy(phi_n);
+    phi_star.FillBoundary(geom.periodicity());
+    fill_ros(R_dir, phi_star);
+    compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes);
+    for (MFIter mfi(phi_star); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto ps = phi_star.array(mfi);
+        auto r  = rhs.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
+            ps(iv) = ps(iv) + dt * r(iv);
+        });
+    }
+    phi_star.FillBoundary(geom.periodicity());
+
+    // Stage 2: phi** = (3/4)phi^n + (1/4)(phi* + dt L(phi*))
+    fill_ros(R_dir, phi_star);
+    compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes);
+    phi_hat.ParallelCopy(phi_n);
+    for (MFIter mfi(phi_hat); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto ph = phi_hat.array(mfi);
+        auto ps = phi_star.const_array(mfi);
+        auto r  = rhs.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
+            ph(iv) = 0.75_rt * ph(iv) + 0.25_rt * (ps(iv) + dt * r(iv));
+        });
+    }
+    phi_hat.FillBoundary(geom.periodicity());
+
+    // Stage 3: phi^{n+1} = (1/3)phi^n + (2/3)(phi** + dt L(phi**))
+    fill_ros(R_dir, phi_hat);
+    compute_levelset_rhs(rhs, phi_hat, R_dir, dx[0], dx[1], eps_visc, &slopes);
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto pnew = phi.array(mfi);
+        auto ph   = phi_hat.const_array(mfi);
+        auto r    = rhs.const_array(mfi);
+        auto pn   = phi_n.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
+            pnew(iv) = (1.0_rt/3.0_rt) * pn(iv) + (2.0_rt/3.0_rt) * (ph(iv) + dt * r(iv));
+        });
+    }
+}
+
+/**
  * @brief Advect level-set using WENO5-Z spatial + SSP-RK3 temporal integration
  *
  * Solves ∂φ/∂t = −R(x,y) * (|∇φ| − ε Δφ) with a single RK3 step.

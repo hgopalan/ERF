@@ -1,0 +1,14 @@
+FILE = inputs_base
+
+# Wind selector: the weight ramps from 0 at 1 m/s to 1 at 3 m/s of effective
+# (midflame) wind, rebuilt every fire step. The neutral 8 m/s sounding gives a
+# midflame wind of about 2 m/s after the WAF, so every cell carries a weight
+# near one half and the result sits midway between the two models.
+erf.fire.ros_model = "hybrid"
+erf.fire.directional_ros = false
+erf.fire.hybrid.primary   = "rothermel"
+erf.fire.hybrid.secondary = "balbi"
+erf.fire.hybrid.selector  = "wind"
+erf.fire.hybrid.wind_lo   = 1.0
+erf.fire.hybrid.wind_hi   = 3.0
+erf.fire.balbi.formulation = "2020"

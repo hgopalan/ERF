@@ -48,8 +48,22 @@ per-cell weight, and the per-fuel Rothermel table
   the Rothermel rate, so the burned area falls between the two identities.
 
 The `sec_cells` column is the number of fire cells whose weight exceeds one
-half, read from the `[FIRE DEBUG] Hybrid ROS` line; 48 of the 80 columns lie
-east of the split, hence 3840.
+half, read from the last `[FIRE DEBUG] Hybrid ROS` line; 48 of the 80 columns
+lie east of the split, hence 3840.
+
+Two further groups cover the direction-dependent path and the wind selector:
+
+- **Directional identities and split.** `hybrid_none_directional` and
+  `hybrid_all_directional` repeat the identities with
+  `erf.fire.directional_ros = true`, where both members are rebuilt along the
+  front normal at every Runge-Kutta stage, and must match
+  `rothermel_directional` and `balbi2020_directional`.
+  `hybrid_region_directional` is the split on that path.
+- **Wind selector.** `hybrid_wind` ramps the weight from 0 at 1 m/s to 1 at
+  3 m/s of midflame wind, rebuilt every fire step; the 8 m/s sounding gives
+  about 2 m/s after the WAF, so every cell carries a weight near one half.
+  `hybrid_wind_off` puts the band far above the midflame wind and is another
+  Rothermel identity.
 
 ## Reference results
 
@@ -69,6 +83,11 @@ spread:
 | `hybrid_all` | 232 | 0.514 | 6400 |
 | `hybrid_region` | 162 | 0.514 | 3840 |
 | `hybrid_fuel` | 140 | 0.329 | 3840 |
+| `hybrid_none_directional` | 78 | 0.250 | 0 |
+| `hybrid_all_directional` | 138 | 0.514 | 6400 |
+| `hybrid_region_directional` | 98 | 0.514 | 3840 |
+| `hybrid_wind_off` | 132 | 0.250 | 0 |
+| `hybrid_wind` | 216 | 0.389 | 6400 |
 
 Three things to read out of it.
 
@@ -91,6 +110,15 @@ its radiative base rate on the flanks and keeps spreading sideways, slowly.
 `rothermel_isotropic`, and `hybrid_all` matches `balbi2020_isotropic`, in both
 columns. The blend is `(1 - w) R_p + w R_s`, so a weight of exactly 0 or 1
 returns one model's value untouched.
+
+**The directional identities hold exactly too**, at 78 and 138, which also
+checks that moving the three direction-dependent drivers onto one shared
+Runge-Kutta routine changed nothing. `hybrid_region_directional` burns 98
+cells, between them, for the same reason as its isotropic counterpart.
+
+**The wind selector blends rather than switches.** With every cell at a
+weight near one half, `hybrid_wind` reports a head rate of 0.389 m/s, close to
+the mean of 0.250 and 0.514, and a burned area between the two identities.
 
 **The splits sit between the identities.** `hybrid_region` burns 162 cells:
 more than Rothermel because the head runs at the Balbi rate from the first

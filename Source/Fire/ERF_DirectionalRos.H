@@ -204,63 +204,10 @@ inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,
                                             amrex::Real eps_visc,
                                             const DirectionalRosState& st)
 {
-    using namespace amrex;
-
-    const auto* dx = geom.CellSize();
-
-    const int nghost = 3;
-    MultiFab phi_n(phi.boxArray(), phi.DistributionMap(), 1, nghost);
-    MultiFab phi_star(phi.boxArray(), phi.DistributionMap(), 1, nghost);
-    MultiFab phi_hat(phi.boxArray(), phi.DistributionMap(), 1, nghost);
-    MultiFab rhs(phi.boxArray(), phi.DistributionMap(), 1, 0);
-    MultiFab R_dir(phi.boxArray(), phi.DistributionMap(), 1, 0);
-
-    phi_n.ParallelCopy(phi);
-    phi_n.FillBoundary(geom.periodicity());
-
-    // Stage 1: phi* = phi^n + dt L(phi^n)
-    phi_star.ParallelCopy(phi_n);
-    phi_star.FillBoundary(geom.periodicity());
-    fill_directional_ros(R_dir, phi_star, wind, slopes, geom, st);
-    fire_levelset::compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes);
-    for (MFIter mfi(phi_star); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.validbox();
-        auto ps = phi_star.array(mfi);
-        auto r  = rhs.const_array(mfi);
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
-            ps(iv) = ps(iv) + dt * r(iv);
+    fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
+        [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
+            fill_directional_ros(R, phi_stage, wind, slopes, geom, st);
         });
-    }
-    phi_star.FillBoundary(geom.periodicity());
-
-    // Stage 2: phi** = (3/4)phi^n + (1/4)(phi* + dt L(phi*))
-    fill_directional_ros(R_dir, phi_star, wind, slopes, geom, st);
-    fire_levelset::compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes);
-    phi_hat.ParallelCopy(phi_n);
-    for (MFIter mfi(phi_hat); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.validbox();
-        auto ph = phi_hat.array(mfi);
-        auto ps = phi_star.const_array(mfi);
-        auto r  = rhs.const_array(mfi);
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
-            ph(iv) = 0.75_rt * ph(iv) + 0.25_rt * (ps(iv) + dt * r(iv));
-        });
-    }
-    phi_hat.FillBoundary(geom.periodicity());
-
-    // Stage 3: phi^{n+1} = (1/3)phi^n + (2/3)(phi** + dt L(phi**))
-    fill_directional_ros(R_dir, phi_hat, wind, slopes, geom, st);
-    fire_levelset::compute_levelset_rhs(rhs, phi_hat, R_dir, dx[0], dx[1], eps_visc, &slopes);
-    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.validbox();
-        auto pnew = phi.array(mfi);
-        auto ph   = phi_hat.const_array(mfi);
-        auto r    = rhs.const_array(mfi);
-        auto pn   = phi_n.const_array(mfi);
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
-            pnew(iv) = (1.0_rt/3.0_rt) * pn(iv) + (2.0_rt/3.0_rt) * (ph(iv) + dt * r(iv));
-        });
-    }
 }
 
 #endif

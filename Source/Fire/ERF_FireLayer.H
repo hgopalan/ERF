@@ -201,6 +201,16 @@ public:
     }
 
     /**
+     * @brief Get the structure height sampled onto the fire grid.
+     * @return Pointer to fire_structure_height [m], or nullptr unless the
+     *         hybrid structure selector is active.
+     */
+    const amrex::MultiFab* get_structure_height() const
+    {
+        return fire_structure_height.get();
+    }
+
+    /**
      * @brief Get effective wind field for diagnostics.
      * @return Pointer to fire_wind_eff MultiFab [m/s].
      */
@@ -654,8 +664,26 @@ private:
                             amrex::MultiFab& out,
                             const BalbiFieldInputs& balbi_in);
 
-    /// Fill fire_ros_weight from the hybrid selector (region or fuel).
+    /// Fill fire_ros_weight from a static hybrid selector (region, fuel, structure).
     void init_ros_weight();
+
+    /// Rebuild fire_ros_weight from the effective wind speed (selector = wind).
+    void update_wind_weight();
+
+    /// Debug line with the weight sum and the count of cells above one half.
+    void print_hybrid_weight_summary() const;
+
+    /// Precomputed coefficients of a named non-Balbi model for the directional path.
+    DirectionalRosState make_directional_state(const std::string& model) const;
+
+    /// Print the arrival time at each erf.fire.probes point the first time it burns.
+    void report_probes();
+
+    // Structure height [m] on the fire grid (hybrid selector = structure only).
+    std::unique_ptr<amrex::MultiFab>         fire_structure_height;
+
+    // Arrival-time probes already reported.
+    std::vector<bool>                        m_probe_reported;
 
     /// Rebuild m_d_rc_table at the given dead fuel moistures.
     void rebuild_rothermel_table(amrex::Real m1, amrex::Real m10, amrex::Real m100);

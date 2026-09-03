@@ -408,9 +408,15 @@ The weight comes from :cpp:`erf.fire.hybrid.selector`:
 
 * ``region``: :math:`w = 1` inside the rectangle :cpp:`erf.fire.hybrid.region = x_lo y_lo x_hi y_hi` and 0 outside. A positive :cpp:`erf.fire.hybrid.blend_width` [m] replaces the step with a linear ramp centred on the rectangle edge.
 * ``fuel``: :math:`w = 1` on cells whose fuel code is listed in :cpp:`erf.fire.hybrid.secondary_fuel_codes`, 0 elsewhere. Requires a spatial fuel map.
-* ``structure`` and ``wind`` are reserved for a later step and currently abort.
+* ``structure``: :math:`w = 1` on cells within :cpp:`erf.fire.hybrid.structure_distance` [m] of a structure cell, 0 elsewhere, with the same optional :cpp:`blend_width` ramp centred on that distance. Structure cells are those whose height in the building heightmap :cpp:`erf.fire.hybrid.structure_file` (default: :cpp:`erf.buildings_file_name`, the same file the immersed-forcing buildings use) exceeds :cpp:`erf.fire.hybrid.structure_min_height`. The file is in the ERF terrain text format and is sampled onto fire cell centres by nearest point, so footprints keep their edges; the sampled height is written to the fire plotfile as ``fire_structure_height``.
+* ``wind``: :math:`w` rises linearly from 0 at :cpp:`erf.fire.hybrid.wind_lo` to 1 at :cpp:`erf.fire.hybrid.wind_hi` [m/s] of effective wind speed, rebuilt every fire step. This hands the high-wind regime to a model without a wind-speed cap.
 
-The weight is written to the fire plotfile as ``fire_ros_model_weight``. The hybrid is only available on the isotropic path: :cpp:`erf.fire.directional_ros` and :cpp:`erf.fire.balbi.directional` abort with it.
+The weight is written to the fire plotfile as ``fire_ros_model_weight``. With :cpp:`erf.fire.directional_ros` the hybrid runs on the direction-dependent level-set path: both members are rebuilt along the front normal at every Runge-Kutta stage and blended there, so each keeps its own head, flank and backing behaviour.
+
+Arrival-time probes
+```````````````````
+
+:cpp:`erf.fire.probes = x1 y1 x2 y2 ...` [m] lists points at which the fire arrival time is reported. Each probe prints one ``[FIRE PROBE]`` line on the fire step its cell first burns, which is what the obstacle regtest in ``Exec/RegTests/FireHybridObstacles`` tabulates. Probes work with every ROS model, not only the hybrid.
 
 Per-fuel Rothermel coefficients
 ```````````````````````````````
@@ -470,7 +476,7 @@ Input Parameters
    * - :cpp:`erf.fire.hybrid.selector`
      - String
      - "region"
-     - Hybrid: how the weight is set ("region", "fuel"; "structure" and "wind" reserved)
+     - Hybrid: how the weight is set ("region", "fuel", "structure", "wind")
    * - :cpp:`erf.fire.hybrid.region`
      - 4 Reals
      - none
@@ -483,6 +489,30 @@ Input Parameters
      - Integers
      - none
      - Hybrid: fuel codes that take the secondary model (selector = fuel)
+   * - :cpp:`erf.fire.hybrid.structure_file`
+     - String
+     - erf.buildings_file_name
+     - Hybrid: building heightmap in ERF terrain text format (selector = structure)
+   * - :cpp:`erf.fire.hybrid.structure_min_height`
+     - Real
+     - 0.5
+     - Hybrid: height [m] above which a sampled cell counts as a structure
+   * - :cpp:`erf.fire.hybrid.structure_distance`
+     - Real
+     - 10.0
+     - Hybrid: distance [m] from a structure cell within which the secondary model applies
+   * - :cpp:`erf.fire.hybrid.wind_lo`
+     - Real
+     - 8.0
+     - Hybrid: effective wind speed [m/s] at and below which the weight is 0 (selector = wind)
+   * - :cpp:`erf.fire.hybrid.wind_hi`
+     - Real
+     - 12.0
+     - Hybrid: effective wind speed [m/s] at and above which the weight is 1 (selector = wind)
+   * - :cpp:`erf.fire.probes`
+     - Reals
+     - none
+     - Flat list of x y points [m] whose fire arrival time is printed once
    * - :cpp:`erf.fire.use_per_fuel_wind_ht`
      - Boolean
      - false
@@ -551,7 +581,7 @@ Limitations
 
 - Unless :cpp:`erf.fire.rothermel_per_fuel = true`, the Rothermel kernel spreads with the domain :cpp:`fuel_model_id` on every cell of a spatial fuel map; a hybrid with the ``fuel`` selector and a Rothermel primary should set that flag so the primary honours the map.
 
-- The hybrid model is isotropic only. Direction-dependent spread, the ``structure`` and ``wind`` selectors, and a time-varying weight are not yet available.
+- The hybrid ``structure`` selector only chooses which model spreads near a building. It does not stop the fire at the footprint; treating structures as non-burnable and placing their heat correctly is separate work.
 
 References
 ----------

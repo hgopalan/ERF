@@ -314,9 +314,11 @@ struct FireParams
     // Hybrid rate of spread: two of the models above evaluated on every cell
     // and blended with a per-cell weight in [0,1], where 0 takes the primary
     // model and 1 the secondary. Only used when ros_model = "hybrid".
-    // Step 1 supports the "region" and "fuel" selectors on the isotropic
-    // path. The "structure" and "wind" selectors and direction-dependent
-    // spread are reserved for step 2 and abort with a message.
+    // Selectors: "region" and "fuel" set a static weight at initialisation,
+    // "structure" a static weight from distance to a building footprint, and
+    // "wind" a weight rebuilt every fire step from the effective wind speed.
+    // Works on the isotropic path and, with directional_ros, on the
+    // direction-dependent level-set path.
     struct HybridParams {
         std::string      primary   = "rothermel";  ///< Model where the weight is 0
         std::string      secondary = "balbi";      ///< Model where the weight is 1
@@ -326,11 +328,17 @@ struct FireParams
         amrex::Real      region_x_hi = 0.0;
         amrex::Real      region_y_hi = 0.0;
         std::vector<int> secondary_fuel_codes;     ///< selector = fuel: codes that take the secondary
-        amrex::Real      structure_distance = 10.0; ///< selector = structure (step 2) [m]
-        amrex::Real      wind_lo = 8.0;            ///< selector = wind (step 2): blend band [m/s]
-        amrex::Real      wind_hi = 12.0;
-        amrex::Real      blend_width = 0.0;        ///< selector = region: linear ramp across the edge [m]
+        std::string      structure_file;           ///< selector = structure: building heightmap; empty = erf.buildings_file_name
+        amrex::Real      structure_min_height = 0.5; ///< selector = structure: height above which a cell is a structure [m]
+        amrex::Real      structure_distance = 10.0; ///< selector = structure: cells within this distance take the secondary [m]
+        amrex::Real      wind_lo = 8.0;            ///< selector = wind: weight 0 at and below this speed [m/s]
+        amrex::Real      wind_hi = 12.0;           ///< selector = wind: weight 1 at and above this speed [m/s]
+        amrex::Real      blend_width = 0.0;        ///< selector = region or structure: linear ramp across the edge [m]
     } hybrid;
+
+    // Arrival-time probes: flat list of x y pairs [m]. Each probe reports the
+    // fire arrival time at its fire cell once, on the step it first burns.
+    std::vector<amrex::Real> probes;
 
     // Evaluate the Rothermel coefficients per cell from the spatial fuel map
     // instead of the domain fuel_model_id. Off by default: the Rothermel
@@ -523,7 +531,9 @@ struct FireParams
                hy.region_y_hi = region[3];
            }
            pp.queryarr("hybrid.secondary_fuel_codes", hy.secondary_fuel_codes);
-           pp.query("hybrid.structure_distance", hy.structure_distance);
+           pp.query("hybrid.structure_file",       hy.structure_file);
+           pp.query("hybrid.structure_min_height", hy.structure_min_height);
+           pp.query("hybrid.structure_distance",   hy.structure_distance);
            pp.query("hybrid.wind_lo",            hy.wind_lo);
            pp.query("hybrid.wind_hi",            hy.wind_hi);
            pp.query("hybrid.blend_width",        hy.blend_width);
@@ -551,20 +561,34 @@ struct FireParams
                    if (hy.secondary_fuel_codes.empty()) {
                        amrex::Abort("erf.fire.hybrid.selector = fuel needs erf.fire.hybrid.secondary_fuel_codes");
                    }
-               } else if (hy.selector == "structure" || hy.selector == "wind") {
-                   amrex::Abort("erf.fire.hybrid.selector = " + hy.selector +
-                                " is not available yet (hybrid step 2); use region or fuel");
+               } else if (hy.selector == "structure") {
+                   if (hy.structure_file.empty()) {
+                       amrex::ParmParse pp_erf("erf");
+                       pp_erf.query("buildings_file_name", hy.structure_file);
+                   }
+                   if (hy.structure_file.empty()) {
+                       amrex::Abort("erf.fire.hybrid.selector = structure needs "
+                                    "erf.fire.hybrid.structure_file or erf.buildings_file_name");
+                   }
+                   if (hy.structure_distance < 0.0) {
+                       amrex::Abort("erf.fire.hybrid.structure_distance must be >= 0");
+                   }
+               } else if (hy.selector == "wind") {
+                   if (!(hy.wind_hi > hy.wind_lo)) {
+                       amrex::Abort("erf.fire.hybrid.wind_hi must exceed erf.fire.hybrid.wind_lo");
+                   }
                } else {
                    amrex::Abort("erf.fire.hybrid.selector must be region, fuel, structure or wind");
                }
                if (hy.blend_width < 0.0) {
                    amrex::Abort("erf.fire.hybrid.blend_width must be >= 0");
                }
-               if (directional_ros) {
-                   amrex::Abort("erf.fire.ros_model = hybrid does not support "
-                                "erf.fire.directional_ros yet (hybrid step 2)");
-               }
            }
+       }
+
+       pp.queryarr("probes", probes);
+       if (probes.size() % 2 != 0) {
+           amrex::Abort("erf.fire.probes must be a flat list of x y pairs");
        }
 
        // Balbi parameters
@@ -661,11 +685,6 @@ struct FireParams
            firebreaks.push_back(fb);
        }
        n_firebreaks = static_cast<int>(firebreaks.size());
-
-       if (ros_model == "hybrid" && balbi.directional) {
-           amrex::Abort("erf.fire.ros_model = hybrid does not support "
-                        "erf.fire.balbi.directional yet (hybrid step 2)");
-       }
     }
 
     /// True when ros_model = "hybrid".
