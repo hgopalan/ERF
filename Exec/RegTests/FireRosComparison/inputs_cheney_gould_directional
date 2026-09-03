@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# Cheney-Gould on the generic direction-dependent path.
+erf.fire.ros_model = "cheney_gould"
+erf.fire.directional_ros = true

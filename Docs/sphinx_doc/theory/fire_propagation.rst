@@ -1,0 +1,182 @@
+.. role:: cpp(code)
+   :language: c++
+
+.. _sec:FirePropagation:
+
+Front Propagation
+=================
+
+The rate-of-spread models (:ref:`sec:ROS_Models`) give a speed at every fire
+cell. This page describes how the burned region is advanced at that speed.
+Two methods are available through :cpp:`erf.fire.propagation_method`:
+``"farsite"`` (default), a Lagrangian marker scheme in the spirit of FARSITE,
+and ``"levelset"``, a Hamilton-Jacobi solver. Both act on the same normalised
+level set ``fire_phi`` and both record ``fire_arrival_time``, so everything
+downstream (fuel consumption, heat flux, diagnostics, output) is independent
+of the choice.
+
+Level set and ignition
+----------------------
+
+``fire_phi`` is a normalised signed distance: zero on the front, negative
+inside the burned region, positive outside, clamped to :math:`[-1, 1]`. The
+disc ignition sets
+
+.. math::
+
+   \phi = -\frac{r - d}{r} \quad (d \le r), \qquad \phi = +1 \quad (d > r),
+
+where :math:`d` is the distance from the ignition centre
+:cpp:`erf.fire.ignition_x`, :cpp:`erf.fire.ignition_y` and :math:`r` is
+:cpp:`erf.fire.ignition_r`. Polygon, polyline and scheduled ignitions
+(:ref:`sec:MultiIgnition`) and ember landings (:ref:`sec:FireSpottingCrown`)
+stamp negative values with the same convention. Firebreaks
+(:ref:`sec:SpatialFuel`) stamp a large positive sentinel.
+
+``fire_arrival_time`` starts at :math:`-1` everywhere and is set to the
+current time on the step a cell's :math:`\phi` first becomes negative. It is
+never reset, so it is the cumulative burned region and the field to use for
+burned area, perimeter and arrival statistics.
+
+FARSITE path
+------------
+
+The default path advances the front with markers, in the manner of Finney's
+FARSITE, but on the fire grid rather than on a free polygon. Each fire
+subcycle of length :math:`\Delta t_f`:
+
+1. **Front cells** are those with :math:`\phi \le` :cpp:`erf.fire.farsite.phi_threshold`
+   (default 0.1) and a positive rate of spread.
+2. **Ellipse shape.** The length-to-width ratio of the local spread ellipse
+   follows Anderson (1983) from the midflame wind :math:`U` in mph,
+
+   .. math::
+
+      L/W = 0.936\, e^{0.2566 U} - 0.397 \sqrt{U}, \qquad 1 \le L/W \le 8,
+
+   and is converted to the Richards (1990) coefficients :math:`a = 1`,
+   :math:`c = 0.2a`, :math:`b = (a + c) / (2\, L/W)` when
+   :cpp:`erf.fire.farsite.use_anderson_lw` is 1. Setting it to 0 uses
+   :cpp:`erf.fire.farsite.coeff_a`, ``coeff_b`` and ``coeff_c`` directly.
+   Head, flank and backing rates are the head rate scaled by these
+   coefficients, oriented along the wind, with an upslope correction from the
+   terrain slope.
+3. **Displacement accumulation.** Every front cell accumulates the displacement
+   :math:`R\,\Delta t_f` along its spread direction in ``fire_disp_accum``.
+   When the accumulated length reaches one fire cell, the target position is
+   recorded and the accumulator is reset. Positions are gathered across MPI
+   ranks so every rank stamps the same set.
+4. **Stamping.** Each recorded position is stamped into :math:`\phi` as a
+   burned cell. :cpp:`erf.fire.farsite.gaussian_sigma` selects a single-cell
+   stamp (negative), an automatic radius from the grid spacing (zero) or a fixed
+   Gaussian radius in metres (positive).
+
+The subcycle length is :cpp:`erf.fire.farsite.cfl_fire` times the cell size
+over the maximum rate of spread, so the front never crosses more than a
+fraction of a cell per subcycle. Because the directionality comes from the
+Anderson ellipse, the rate-of-spread models need only supply the head-fire
+rate on this path; :cpp:`erf.fire.directional_ros` has no effect here.
+
+Level-set path
+--------------
+
+Setting :cpp:`erf.fire.propagation_method = "levelset"` solves
+
+.. math::
+
+   \frac{\partial \phi}{\partial t} = -R(x, y)\,\bigl(|\nabla \phi| - \varepsilon\, \Delta \phi\bigr)
+
+with a fifth-order WENO-Z reconstruction of the one-sided derivatives, a
+Godunov Hamiltonian for :math:`|\nabla\phi|`, and a three-stage strong
+stability preserving Runge-Kutta step. The Laplacian term is an artificial
+viscosity with coefficient :cpp:`erf.fire.levelset.eps_visc` (default 0.4)
+that keeps the front smooth at the grid scale. When terrain slopes are
+available, :math:`|\nabla \phi|` is projected onto the terrain surface so that
+:math:`R` is a rate along the ground rather than in map view.
+
+The subcycle length is :cpp:`erf.fire.levelset.cfl` (default 0.4) times the
+cell size over the maximum rate of spread. The field is periodically
+reinitialised, see below, and the scheme needs three ghost cells for the WENO
+stencil, which the fire grid provides.
+
+Direction-dependent spread
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Handed one scalar :math:`R` per cell, the level set grows a disc at the
+head-fire rate: flanks and backing fire advance as fast as the head. With
+:cpp:`erf.fire.directional_ros = true` the wind and slope are projected onto
+the front normal :math:`\hat n = \nabla\phi / |\nabla\phi|` and the selected
+model is evaluated with the projected scalars,
+
+.. math::
+
+   R(\hat n) = \text{model}\bigl(\max(\mathbf U \cdot \hat n, 0),\ \max(\nabla z \cdot \hat n, 0)\bigr),
+
+inside every Runge-Kutta stage, so the head, flanks and backing fire each get
+the rate the model gives for their own orientation. Backing and downslope
+components are clamped at zero rather than reversed, since the empirical
+models take magnitudes. The FARSITE ellipse is deliberately not imposed on top
+of a resolved wind field: its length-to-width fit stands in for a flow field
+that ERF resolves, and imposing both would double count the wind. The
+projection is also what the hybrid model uses on this path, and Balbi has an
+equivalent switch :cpp:`erf.fire.balbi.directional` that additionally carries
+its per-cell couplings. ``Exec/RegTests/FireRosComparison`` tabulates the
+effect: the head rate is unchanged and the burned area falls, since the flanks
+no longer run at the head rate.
+
+Reinitialisation
+~~~~~~~~~~~~~~~~
+
+Advection steepens and flattens :math:`\phi`, so every
+:cpp:`erf.fire.levelset.reinit_every` subcycles (default 5) it is restored to
+a signed distance by :cpp:`erf.fire.levelset.reinit_iters` (default 10)
+pseudo-time iterations of a band-normalised Sussman update,
+
+.. math::
+
+   \frac{\partial \phi}{\partial \tau} = \operatorname{sgn}(\phi_0)\,\frac{1 - L\,|\nabla\phi|}{L},
+
+whose fixed point is :math:`|\nabla \phi| = 1/L`: :math:`\phi` varies linearly
+from 0 at the front to :math:`\pm 1` at the band half-width :math:`L`, which is
+:cpp:`erf.fire.levelset.reinit_band_m` or three cells when that is not
+positive. Cells whose neighbourhood straddles the interface use the Russo and
+Smereka (2000) subcell correction, which fixes the front from :math:`\phi_0`
+instead of letting the iteration move it; without it every pass would erode
+the burned area, and the level-set path never rebuilds :math:`\phi` from the
+arrival time. The pseudo-timestep :cpp:`erf.fire.levelset.reinit_dtau`
+defaults to a quarter of the cell size, half the Sussman stability limit.
+:math:`\phi` is clamped to :math:`[-1, 1]` after every iteration.
+
+Choosing a path
+---------------
+
+The FARSITE path is the reference behaviour, carries the Anderson ellipse as
+calibration, and is the path the canonical FARSITE tests and the acceleration,
+spotting and crown-fire options were developed on. The level-set path is the
+one to use when the wind is resolved and direction-dependent spread from the
+model itself is wanted, when the Balbi couplings are in use, or when the
+hybrid model is run on the directional path. The two are not comparable cell
+for cell: the ellipse reproduces neither a backing rate below the no-wind rate
+nor the saturation of the length-to-width ratio, and the projection reproduces
+neither of the empirical calibrations the ellipse carries.
+
+Restart
+-------
+
+The checkpoint stores ``fire_phi``, ``fire_arrival_time``, ``fire_ros``,
+``fire_fuel_load``, ``fire_fuel_mc``, the FARSITE displacement accumulator
+and, when crown fire is on, the crown state and load. On restart the fire
+layer is initialised from the inputs as on a clean start (fuel map,
+firebreaks, hybrid weights, structure mask) and these fields are then read
+back, so the front, burned area and consumed fuel continue exactly.
+
+References
+----------
+
+- Finney, M. A. (2004). FARSITE: Fire Area Simulator model development and evaluation. USDA Forest Service RMRS-RP-4 Revised.
+- Anderson, H. E. (1983). Predicting wind-driven wild land fire size and shape. USDA Forest Service Research Paper INT-305.
+- Richards, G. D. (1990). An elliptical growth model of forest fire fronts and its numerical solution. International Journal for Numerical Methods in Engineering, 30(6), 1163-1179.
+- Osher, S. and Fedkiw, R. (2003). Level Set Methods and Dynamic Implicit Surfaces. Springer.
+- Borges, R., Carmona, M., Costa, B. and Don, W. S. (2008). An improved weighted essentially non-oscillatory scheme for hyperbolic conservation laws. Journal of Computational Physics, 227(6), 3191-3211.
+- Sussman, M., Smereka, P. and Osher, S. (1994). A level set approach for computing solutions to incompressible two-phase flow. Journal of Computational Physics, 114(1), 146-159.
+- Russo, G. and Smereka, P. (2000). A remark on computing distance functions. Journal of Computational Physics, 163(1), 51-67.

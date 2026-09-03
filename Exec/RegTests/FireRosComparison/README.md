@@ -51,7 +51,9 @@ The `sec_cells` column is the number of fire cells whose weight exceeds one
 half, read from the last `[FIRE DEBUG] Hybrid ROS` line; 48 of the 80 columns
 lie east of the split, hence 3840.
 
-Two further groups cover the direction-dependent path and the wind selector:
+Further groups cover the direction-dependent path, the wind selector, the
+other rate-of-spread models, the nearest-column wind mapping, two Balbi
+options and hybrids built from two non-Balbi members:
 
 - **Directional identities and split.** `hybrid_none_directional` and
   `hybrid_all_directional` repeat the identities with
@@ -88,6 +90,18 @@ spread:
 | `hybrid_region_directional` | 98 | 0.514 | 3840 |
 | `hybrid_wind_off` | 132 | 0.250 | 0 |
 | `hybrid_wind` | 216 | 0.389 | 6400 |
+| `macarthur_isotropic` | 740 | 1.015 | - |
+| `macarthur_directional` | 184 | 1.015 | - |
+| `cheney_gould_isotropic` | 104 | 0.180 | - |
+| `cheney_gould_directional` | 96 | 0.180 | - |
+| `behave_isotropic` | 132 | 0.250 | - |
+| `behave_directional` | 78 | 0.250 | - |
+| `rothermel_nearest` | 132 | 0.250 | - |
+| `balbi2020_reference_wind` | 516 | 0.930 | - |
+| `balbi2020_extinction_wet` | 52 | 0.000 | - |
+| `hybrid_behave_cheney` | 128 | 0.250 | 3840 |
+| `hybrid_behave_cheney_directional` | 74 | 0.250 | 3840 |
+| `hybrid_blend_width` | 158 | 0.497 | 3840 |
 
 Three things to read out of it.
 
@@ -128,6 +142,30 @@ burning cells and the head is in the Balbi region. `hybrid_fuel` reports
 0.329 m/s because Balbi 2020 evaluated on FM3 tall grass is slower than on FM1
 at this wind, which is the per-fuel Balbi table doing its job.
 
+**The remaining models behave as their formulas say.** MacArthur has no
+slope term and an exponential wind response, so it is by far the fastest here
+and loses the most area to the directional switch (740 to 184). Cheney-Gould
+is nearly isotropic by construction, its rate depending weakly on direction,
+so the switch changes it least (104 to 96). BEHAVE on FM1, a single dead
+class with no live fuel, reduces exactly to Rothermel: 132 and 78, the same
+digits. `rothermel_nearest` matches `rothermel_isotropic` because the wind is
+uniform, so the two horizontal mappings must agree; a difference here would
+mean they disagree on a uniform field.
+
+**Balbi options.** Consuming the reference-height wind instead of the
+WAF-reduced midflame wind raises the head rate from 0.514 to 0.930 m/s and
+the area to 516 cells. With the moisture-of-extinction cutoff on and the
+1-hour moisture at 0.20, above the FM1 extinction value of 0.12, the rate is
+exactly zero and the burned area stays at the ignition disc (52 cells against
+the 50 stamped, the difference being the reinitialisation band).
+
+**Hybrids of two generic members.** BEHAVE upwind of x = 800 m and
+Cheney-Gould downwind gives 128 cells isotropic and 74 directional, below
+both single-model directional results (78 and 96) because the head runs at
+the slower Cheney-Gould rate while the flanks run at BEHAVE's smaller no-wind
+rate. `hybrid_blend_width` ramps the weight over 200 m instead of stepping
+it and lands just below `hybrid_region` (158 against 162).
+
 ## Backward compatibility
 
 `erf.fire.directional_ros` defaults to false. Omitting it entirely and setting it
@@ -145,7 +183,7 @@ give 138 cells on `balbi2020_directional`.
 The FARSITE path is not in the table. It carries its own directionality through
 the Anderson length-to-width ellipse and is not comparable cell-for-cell with
 the level-set path; see the note on anisotropy in
-`Docs/sphinx/fire/propagation_methods.rst`.
+the front propagation page of the Sphinx documentation (`Docs/sphinx_doc/theory/fire_propagation.rst`).
 
 The projection reproduces neither the observed saturation of the length-to-width
 ratio nor a backing rate below the no-wind rate, both of which the empirical

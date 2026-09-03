@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# MacArthur (1966) Australian formula, isotropic level set.
+erf.fire.ros_model = "macarthur"
+erf.fire.directional_ros = false

@@ -1,0 +1,12 @@
+FILE = inputs_base
+
+# Rothermel on the direction-dependent level-set path, uninterrupted to 200 s.
+# Rothermel is used because its wind cap makes the rate independent of the
+# small post-restart wind differences of the atmosphere (see inputs_base).
+
+erf.fire.ros_model = "rothermel"
+erf.fire.directional_ros = true
+erf.fire.propagation_method = "levelset"
+stop_time = 200.0
+max_step = 400
+erf.check_int = -1

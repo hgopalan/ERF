@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# Rothermel with nearest-column wind mapping instead of bilinear. The wind
+# is uniform here, so this must match rothermel_isotropic; a difference means
+# the two mappings disagree on a uniform field.
+erf.fire.ros_model = "rothermel"
+erf.fire.directional_ros = false
+erf.fire.wind_interp = "nearest"

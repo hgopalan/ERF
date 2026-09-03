@@ -1591,29 +1591,10 @@ ERF::ReadCheckpointFile ()
     }
 #endif
 
-#ifdef ERF_ENABLE_FIRE
-    if (m_fire_layer) {
-        std::string FirePhiFile(restart_chkfile + "/Level_0/FirePhi_H");
-        if (amrex::FileExists(FirePhiFile)) {
-            amrex::Print() << "Reading fire level-set from checkpoint" << std::endl;
-            amrex::MultiFab tmp_phi;
-            VisMF::Read(tmp_phi, MultiFabFileFullPrefix(0, restart_chkfile, "Level_", "FirePhi"));
-            m_fire_layer->get_levelset_mut()->ParallelCopy(tmp_phi, 0, 0, 1,
-                                                           tmp_phi.nGrowVect(),
-                                                           m_fire_layer->get_levelset_mut()->nGrowVect());
-        }
-        // Restore fire arrival time (needed to restore burned interior on restart)
-        std::string ArrivalTimeFile(restart_chkfile + "/Level_0/FireArrivalTime_H");
-        if (amrex::FileExists(ArrivalTimeFile)) {
-            amrex::Print() << "Reading fire arrival time from checkpoint" << std::endl;
-            amrex::MultiFab tmp_at;
-            VisMF::Read(tmp_at, MultiFabFileFullPrefix(0, restart_chkfile, "Level_", "FireArrivalTime"));
-            m_fire_layer->get_arrival_time_mut()->ParallelCopy(tmp_at, 0, 0, 1,
-                                                               tmp_at.nGrowVect(),
-                                                               m_fire_layer->get_arrival_time_mut()->nGrowVect());
-        }
-    }
-#endif
+    // The fire state is restored by ReadCheckpointFileFire(), which runs after
+    // FireLayer::initialize() has allocated the fire fields. At this point the
+    // FireLayer object exists (it is created in the constructor) but its
+    // MultiFabs do not, so nothing fire-related can be read here.
 }
 
 /**

@@ -1,0 +1,10 @@
+FILE = inputs_base
+
+# Restarts from chk00200 (written by inputs_farsite_chk) and runs to 200 s.
+# Must reproduce inputs_farsite_straight.
+erf.fire.ros_model = "rothermel"
+erf.fire.propagation_method = "farsite"
+erf.restart = chk00200
+stop_time = 200.0
+max_step = 400
+erf.check_int = -1

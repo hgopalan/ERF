@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# MacArthur on the generic direction-dependent path.
+erf.fire.ros_model = "macarthur"
+erf.fire.directional_ros = true
