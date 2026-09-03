@@ -101,7 +101,8 @@ struct FireParams
         int               n_traj_steps        = 20;      ///< Trajectory integration sub-steps
         amrex::Real       spot_radius         = 10.0;    ///< Ignition disk radius at landing [m]
         amrex::Real       P_catch             = 1.0;     ///< Catching probability at landing [0–1]
-        amrex::Real       reentry_fuel_thresh = 0.05;    ///< Minimum residual fuel fraction for re-entry
+        amrex::Real       reentry_fuel_thresh = 0.05;    ///< Minimum residual fuel fraction for re-entry,
+                                                       ///< as a fraction of the cell's initial load
         int               random_seed         = 0;       ///< 0 = time-based seed, >0 = fixed seed
         int               spotting_interval   = 1;       ///< Apply spotting every N fire subcycles
         std::string       fuel_system         = "13";    ///< "13" (FBFM13) or "40" (Scott-Burgan 40)

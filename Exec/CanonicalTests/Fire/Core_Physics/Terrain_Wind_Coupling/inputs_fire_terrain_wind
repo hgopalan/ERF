@@ -152,10 +152,3 @@ erf.fire.spotting.random_seed = 20171009   # Tubbs Fire ignition date
 erf.fire.spotting.terminal_velocity = 1.5
 erf.fire.spotting.spot_radius = 30.0
 
-# The re-entry filter drops a landing whose cell holds less residual fuel than
-# this. Any positive value silences spotting entirely here: the residual-fuel
-# field reads exactly zero at the landing cells, so even 0.01 kg/m2 rejects
-# every brand while 0.0 accepts all 32. That is independent of terrain and of
-# the fuel model, and wants its own investigation; until then the filter is off
-# so this case exercises the spotting path.
-erf.fire.spotting.reentry_fuel_thresh = 0.0

@@ -236,7 +236,7 @@ make_rothermel_params_for_albini(const FuelModelParams& /*fp*/)
  *  6. Forward-Euler trajectory over n_traj_steps sub-steps.
  *  7. Apply Scott/Albini per-fuel-model maximum distance cap.
  *  8. Apply P_catch catching probability filter.
- *  9. Skip if landing cell residual fuel < reentry_fuel_thresh.
+ *  9. Skip if the landing cell's remaining fuel fraction < reentry_fuel_thresh.
  * 10. Stamp phi negative within spot_radius of landing location.
  * 11. Record diagnostics in albini_data.
  * 12. MPI: Allgatherv front cells so all ranks apply identical spots.
@@ -484,8 +484,18 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
         li = std::max(0, std::min(nx - 1, li));
         lj = std::max(0, std::min(ny - 1, lj));
         if (fuel_load) {
-            Real rf = h_fuel[lj * nx + li];
-            if (rf < sp.reentry_fuel_thresh) { continue; }
+            // reentry_fuel_thresh is documented as a residual fuel *fraction*,
+            // but the load it is compared against is an absolute kg/m2. That
+            // made the filter fuel-model dependent: FM1 carries 0.166 kg/m2 in
+            // total, so any threshold above that rejected every brand however
+            // much fuel was left, while for a heavy fuel the same threshold was
+            // met by a cell that had already burned almost everything. Compare
+            // the fraction of the load the cell started with, as the name says.
+            const Real rf = h_fuel[lj * nx + li];
+            const Real frac = (fuel_load_initial_kg_m2 > 0.0)
+                            ? rf / fuel_load_initial_kg_m2
+                            : Real(1.0);
+            if (frac < sp.reentry_fuel_thresh) { continue; }
         }
 
         landings.push_back({px, py, si, sj, dist});
