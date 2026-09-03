@@ -10,13 +10,13 @@
 
 set -u
 
-EXE=${1:?usage: run_restart.sh /path/to/erf_exec [extra args]}
+EXE=${1:?usage: [MPIRUN="mpirun -np 8"] run_restart.sh /path/to/erf_exec [extra args]}
 shift || true
 
 run() {
     local name=$1
     shift
-    "$EXE" "inputs_${name}" "$@" > "run_${name}.log" 2>&1
+    ${MPIRUN:-} "$EXE" "inputs_${name}" "$@" > "run_${name}.log" 2>&1
     echo $?
 }
 stats() {

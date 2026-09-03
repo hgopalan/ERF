@@ -53,7 +53,8 @@ lie east of the split, hence 3840.
 
 Further groups cover the direction-dependent path, the wind selector, the
 other rate-of-spread models, the nearest-column wind mapping, two Balbi
-options and hybrids built from two non-Balbi members:
+options, hybrids built from two non-Balbi members, and a non-burnable
+fuel-code strip:
 
 - **Directional identities and split.** `hybrid_none_directional` and
   `hybrid_all_directional` repeat the identities with
@@ -102,6 +103,8 @@ spread:
 | `hybrid_behave_cheney` | 128 | 0.250 | 3840 |
 | `hybrid_behave_cheney_directional` | 74 | 0.250 | 3840 |
 | `hybrid_blend_width` | 158 | 0.497 | 3840 |
+| `rothermel_code0_legacy` | 132 | 0.250 | - |
+| `rothermel_code0_masked` | 124 | 0.250 | - |
 
 Three things to read out of it.
 
@@ -165,6 +168,17 @@ both single-model directional results (78 and 96) because the head runs at
 the slower Cheney-Gould rate while the flanks run at BEHAVE's smaller no-wind
 rate. `hybrid_blend_width` ramps the weight over 200 m instead of stepping
 it and lands just below `hybrid_region` (158 against 162).
+
+**Non-burnable fuel codes.** `rothermel_code0_legacy` puts a 100 m strip of
+fuel code 0 (the nodata value) one cell downwind of the ignition disc and
+runs Rothermel without the per-fuel table, which is the historical setup: the
+kernel spreads with the domain fuel model everywhere, the strip burns as
+short grass, and the result is `rothermel_isotropic` to the cell (132).
+`rothermel_code0_masked` lists code 0 in `erf.fire.fuel_map.nonburnable_codes`
+and the head fire stops at the strip's upwind edge (124 cells, none of them
+inside the strip). With `rothermel_per_fuel = true` code 0 has zero spread in
+the per-fuel table and the strip stops the fire without the mask, but only
+the mask also rejects ember landings and keeps the level set out of it.
 
 ## Backward compatibility
 

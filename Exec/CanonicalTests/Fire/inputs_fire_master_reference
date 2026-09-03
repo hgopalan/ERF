@@ -233,6 +233,31 @@ erf.fire.hybrid.wind_hi = 12.0                # effective wind speed [m/s] where
 # erf.fire.probes = 100.0 50.0 200.0 50.0
 
 # ============================================================================
+# NON-BURNABLE MASK: STRUCTURES, FUEL CODES, FIREBREAKS
+# Cells in the mask get zero rate of spread, the level set is held outside
+# the burned region, FARSITE and spotting landings are rejected, and fuel
+# and heat are zero. Every source is off by default.
+# ============================================================================
+
+# Structures from a building heightmap in the ERF terrain text format,
+# sampled onto fire cell centres by nearest point (the same file and sampling
+# the hybrid "structure" selector uses; that selector alone does not stop the
+# fire). The file defaults to erf.fire.hybrid.structure_file, then
+# erf.buildings_file_name.
+erf.fire.structures.enable = false
+# erf.fire.structures.file = ""
+erf.fire.structures.min_height = 0.5      # sampled height [m] above which a cell is a structure
+
+# Fuel codes that are non-burnable. Empty by default, in which case an
+# unknown code (including 0, the nodata value) still falls through to fuel
+# model 1 in the Rothermel table. Recommended with a fuel map:
+# erf.fire.fuel_map.nonburnable_codes = 0 91 92 93 98 99
+
+# Hold the firebreak cells in the mask as well (they are otherwise only
+# stamped into phi once, which the level-set reinitialisation can erode)
+erf.fire.firebreak.use_mask = false
+
+# ============================================================================
 # BALBI PHYSICAL MODEL (used only when ros_model = "balbi")
 # ============================================================================
 

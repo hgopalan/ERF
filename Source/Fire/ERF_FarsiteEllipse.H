@@ -52,12 +52,14 @@ void advance_farsite_one_step(
     amrex::Real dt_fire,
     amrex::Real current_time,
     const FarsiteParams& fp,
-    const amrex::MultiFab* slopes = nullptr)
+    const amrex::MultiFab* slopes = nullptr,
+    const amrex::MultiFab* nonburnable = nullptr)
 {
     using namespace amrex;
 
     const auto prob_lo = geom_fire.ProbLoArray();
     const auto dx      = geom_fire.CellSizeArray();
+    const bool use_mask = (nonburnable != nullptr);
     const Real dxi = 1.0 / dx[0];
     const Real dyi = 1.0 / dx[1];
     const Real stamp_threshold = amrex::min(dx[0], dx[1]);
@@ -252,12 +254,17 @@ void advance_farsite_one_step(
             for (MFIter mfi(phi, false); mfi.isValid(); ++mfi) {
                 const Box& bx = mfi.validbox();
                 auto p = phi.array(mfi);
+                Array4<const Real> m;
+                if (use_mask) { m = nonburnable->const_array(mfi); }
                 amrex::ParallelFor(npts, [=] AMREX_GPU_DEVICE (int n) noexcept {
                     int ii = static_cast<int>(
                         std::round((xp[n] - prob_lo[0]) / dx[0] - 0.5_rt));
                     int jj = static_cast<int>(
                         std::round((yp[n] - prob_lo[1]) / dx[1] - 0.5_rt));
                     if (bx.contains(amrex::IntVect(ii, jj, 0))) {
+                        // A target inside a non-burnable cell is dropped: the
+                        // front stops at the footprint instead of crossing it.
+                        if (use_mask && m(ii, jj, 0) > 0.5_rt) { return; }
                         p(ii, jj, 0) = amrex::min(p(ii, jj, 0), -1.0_rt);
                     }
                 });
@@ -281,7 +288,10 @@ void advance_farsite_one_step(
             for (MFIter mfi(phi, false); mfi.isValid(); ++mfi) {
                 auto p = phi.array(mfi);
                 const Box& bx = mfi.validbox();
+                Array4<const Real> m;
+                if (use_mask) { m = nonburnable->const_array(mfi); }
                 ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
+                    if (use_mask && m(iv) > 0.5_rt) { return; }
                     Real xc = prob_lo[0] + (iv[0]+0.5)*dx[0];
                     Real yc = prob_lo[1] + (iv[1]+0.5)*dx[1];
                     for (int n = 0; n < npts; ++n) {
@@ -338,7 +348,8 @@ int advance_fire_subcycle(
     amrex::Real dt_atm,
     amrex::Real current_time,
     const FarsiteParams& fp,
-    const amrex::MultiFab* slopes = nullptr)
+    const amrex::MultiFab* slopes = nullptr,
+    const amrex::MultiFab* nonburnable = nullptr)
 {
     using namespace amrex;
 
@@ -355,7 +366,7 @@ int advance_fire_subcycle(
                                  vel_eff, R_mf,
                                  geom_fire, dt_fire,
                                  current_time + (dt_atm - time_remaining),
-                                 fp, slopes);
+                                 fp, slopes, nonburnable);
 
         time_remaining -= dt_fire;
         ++n_substeps;

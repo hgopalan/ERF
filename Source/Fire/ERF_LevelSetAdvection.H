@@ -121,6 +121,45 @@ inline void compute_levelset_rhs(amrex::MultiFab& rhs,
 }
 
 /**
+ * @brief Zero a rate-of-spread field where a non-burnable mask is set
+ *
+ * @param[in,out] R     Rate of spread [m/s]
+ * @param[in]     mask  Non-burnable mask (>0.5 = non-burnable), or nullptr for no-op
+ */
+inline void zero_ros_in_mask(amrex::MultiFab& R, const amrex::MultiFab* mask)
+{
+    if (mask == nullptr) { return; }
+    for (amrex::MFIter mfi(R, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.tilebox();
+        auto const& r = R.array(mfi);
+        auto const& m = mask->const_array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            if (m(i, j, k) > amrex::Real(0.5)) { r(i, j, k) = amrex::Real(0.0); }
+        });
+    }
+}
+
+/**
+ * @brief Hold the level set at or above `value` where a non-burnable mask is set
+ *
+ * @param[in,out] phi    Level-set field
+ * @param[in]     mask   Non-burnable mask (>0.5 = non-burnable), or nullptr for no-op
+ * @param[in]     value  Level-set value kept in mask cells (positive = unburned)
+ */
+inline void hold_phi_in_mask(amrex::MultiFab& phi, const amrex::MultiFab* mask, amrex::Real value)
+{
+    if (mask == nullptr) { return; }
+    for (amrex::MFIter mfi(phi, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.growntilebox(amrex::min(phi.nGrowVect(), mask->nGrowVect()));
+        auto const& p = phi.array(mfi);
+        auto const& m = mask->const_array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            if (m(i, j, k) > amrex::Real(0.5)) { p(i, j, k) = amrex::max(p(i, j, k), value); }
+        });
+    }
+}
+
+/**
  * @brief SSP-RK3 level-set step with a rate of spread rebuilt every stage
  *
  * Shared driver for every direction-dependent path: the caller supplies
@@ -135,6 +174,8 @@ inline void compute_levelset_rhs(amrex::MultiFab& rhs,
  * @param[in]     dt        Timestep [s]
  * @param[in]     eps_visc  Artificial viscosity coefficient
  * @param[in]     fill_ros  Callable (MultiFab& R, const MultiFab& phi_stage)
+ * @param[in]     mask      Optional non-burnable mask; the ROS is zeroed there
+ *                          after every fill
  */
 template <class FillRos>
 inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
@@ -142,7 +183,8 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
                                           const amrex::Geometry& geom,
                                           amrex::Real dt,
                                           amrex::Real eps_visc,
-                                          FillRos&& fill_ros)
+                                          FillRos&& fill_ros,
+                                          const amrex::MultiFab* mask = nullptr)
 {
     using namespace amrex;
 
@@ -162,6 +204,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     phi_star.ParallelCopy(phi_n);
     phi_star.FillBoundary(geom.periodicity());
     fill_ros(R_dir, phi_star);
+    zero_ros_in_mask(R_dir, mask);
     compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes);
     for (MFIter mfi(phi_star); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -175,6 +218,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
 
     // Stage 2: phi** = (3/4)phi^n + (1/4)(phi* + dt L(phi*))
     fill_ros(R_dir, phi_star);
+    zero_ros_in_mask(R_dir, mask);
     compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes);
     phi_hat.ParallelCopy(phi_n);
     for (MFIter mfi(phi_hat); mfi.isValid(); ++mfi) {
@@ -190,6 +234,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
 
     // Stage 3: phi^{n+1} = (1/3)phi^n + (2/3)(phi** + dt L(phi**))
     fill_ros(R_dir, phi_hat);
+    zero_ros_in_mask(R_dir, mask);
     compute_levelset_rhs(rhs, phi_hat, R_dir, dx[0], dx[1], eps_visc, &slopes);
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();

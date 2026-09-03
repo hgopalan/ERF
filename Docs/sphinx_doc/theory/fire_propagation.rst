@@ -147,6 +147,53 @@ arrival time. The pseudo-timestep :cpp:`erf.fire.levelset.reinit_dtau`
 defaults to a quarter of the cell size, half the Sussman stability limit.
 :math:`\phi` is clamped to :math:`[-1, 1]` after every iteration.
 
+Non-burnable cells
+------------------
+
+A non-burnable mask on the fire grid marks cells the fire may never enter.
+It is built once at initialisation from up to three sources, each off by
+default:
+
+- **structures**, with :cpp:`erf.fire.structures.enable`: every cell whose
+  height in the building heightmap :cpp:`erf.fire.structures.file` exceeds
+  :cpp:`erf.fire.structures.min_height`. The file is in the ERF terrain text
+  format, sampled onto fire cell centres by nearest point so footprints keep
+  their edges, and defaults to the hybrid selector's file and then to
+  :cpp:`erf.buildings_file_name`, so one heightmap can drive the
+  immersed-forcing buildings, the hybrid ``structure`` selector and the mask;
+- **fuel codes** listed in :cpp:`erf.fire.fuel_map.nonburnable_codes`, for
+  example ``0`` (nodata) and the Scott and Burgan non-burnable classes
+  ``91``-``99``. Without the list an unknown code still falls through to fuel
+  model 1 in the Rothermel table and burns as short grass;
+- **firebreaks**, with :cpp:`erf.fire.firebreak.use_mask`. Firebreaks are
+  otherwise stamped into :math:`\phi` once as a large positive sentinel,
+  which the FARSITE path rebuilds away every subcycle and the level-set
+  reinitialisation clamps; the mask makes them permanent on both paths.
+
+The mask acts in five places, so that no path around it is left open:
+
+1. the rate of spread is zero in mask cells, on the isotropic field and inside
+   every Runge-Kutta stage of the direction-dependent drivers;
+2. the level set is clamped at zero there, after every advection subcycle,
+   after reinitialisation and after any scheduled ignition. The clamp is only
+   a guard: with a zero rate of spread a masked cell's value does not evolve
+   during advection, and reinitialisation keeps its sign, so masked cells
+   keep a consistent signed distance to the real front. They are not lifted
+   to a fixed positive level, which would let the footprint edge act like a
+   front of its own;
+3. FARSITE marker targets that land in a mask cell are dropped, so the front
+   stops at the footprint instead of crossing it;
+4. ember landings on a mask cell are discarded and the spot disc never stamps
+   into one;
+5. the fuel load is zero in mask cells from the start, so they produce no
+   heat flux, intensity or flame diagnostics, and the arrival time is never
+   set.
+
+The mask is written to the fire plotfile as ``fire_nonburnable``. A fire
+approaching a masked footprint goes around it through whatever burnable
+cells remain; ``Exec/RegTests/FireHybridObstacles`` compares the same
+obstacle deck with the mask off and on.
+
 Choosing a path
 ---------------
 

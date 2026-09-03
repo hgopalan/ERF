@@ -479,21 +479,41 @@ void FireLayer::initialize(const ERF& erf,
         fire_ros_weight  = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
         fire_ros_scratch = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
         fire_ros_scratch->setVal(0.0_rt);
-        if (m_params.hybrid.selector == "structure") {
-            fire_structure_height = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
-            if (!read_heightmap_nearest_onto_fire_cells(*fire_structure_height, m_fg,
-                                                        m_params.hybrid.structure_file)) {
-                amrex::Abort("[FIRE] hybrid.selector = structure: cannot read structure file '"
-                             + m_params.hybrid.structure_file + "'");
-            }
-            if (m_params.fire_debug) {
-                amrex::Print() << "[FIRE DEBUG] Hybrid ROS: structure heightmap '"
-                               << m_params.hybrid.structure_file << "' max height "
-                               << fire_structure_height->max(0) << " m\n";
-            }
+        if (m_params.hybrid.selector == "structure" && !fire_structure_height) {
+            load_structure_height(m_params.hybrid.structure_file);
         }
         init_ros_weight();
         if (m_params.fire_debug) { print_hybrid_weight_summary(); }
+    }
+
+    // Non-burnable mask: structures, listed fuel codes, masked firebreaks.
+    // Built after every ignition source has been stamped so that an ignition
+    // overlapping a structure is pushed back out of it, and fuel in mask cells
+    // is removed so no heat or intensity can ever come from them.
+    if (m_params.structures.enable && !fire_structure_height) {
+        load_structure_height(m_params.structures.file);
+    }
+    build_nonburnable_mask();
+    if (fire_nonburnable) {
+        enforce_nonburnable_phi();
+        for (MFIter mfi(*fire_fuel_load); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            auto const& fuel = fire_fuel_load->array(mfi);
+            auto const& at   = fire_arrival_time->array(mfi);
+            auto const& m    = fire_nonburnable->const_array(mfi);
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                if (m(i, j, k) > 0.5_rt) {
+                    fuel(i, j, k) = 0.0_rt;
+                    // An ignition stamped over a footprint is pushed back out:
+                    // the FARSITE path rebuilds phi from the arrival time.
+                    at(i, j, k) = -1.0_rt;
+                }
+            });
+        }
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Non-burnable mask: "
+                           << std::lround(fire_nonburnable->sum(0)) << " cells\n";
+        }
     }
 
     m_probe_reported.assign(m_params.probes.size() / 2, false);
@@ -650,6 +670,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                   m_current_time - dt);
         // fill_boundary after any phi modification to propagate ghost cells
         //amrex::FillBoundary(*fire_phi, m_fg.geom);
+        enforce_nonburnable_phi();
         fire_phi->FillBoundary(m_fg.geom.periodicity());        
     }
 
@@ -703,6 +724,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     } else {
         fill_ros_for_model(m_params.ros_model, *fire_ros, balbi_in);
     }
+    zero_ros_in_mask(*fire_ros);
     if (m_params.fire_debug) {
         // Masked ROS diagnostics (only for burning cells where phi < 0)
         const auto ros_stats = erf_fire_diag::burning_ros_stats(*fire_ros, *fire_phi);
@@ -792,7 +814,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 spec.balbi_in   = &balbi_in;
                 spec.weight     = fire_ros_weight.get();
                 advect_levelset_hybrid_rk3(*fire_phi, *fire_slopes, m_fg.geom, dt_ls,
-                                           m_params.levelset_eps_visc, spec);
+                                           m_params.levelset_eps_visc, spec,
+                                           fire_nonburnable.get());
             } else if (balbi_directional) {
                 advect_levelset_balbi_rk3(*fire_phi,
                                           (m_params.balbi.wind_source == 1)
@@ -800,19 +823,21 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                           *fire_slopes,
                                           m_fg.geom, dt_ls,
                                           m_params.levelset_eps_visc,
-                                          m_bc_default, m_params.balbi, balbi_in);
+                                          m_bc_default, m_params.balbi, balbi_in,
+                                          fire_nonburnable.get());
             } else if (generic_directional) {
                 const DirectionalRosState dir_state = make_directional_state(m_params.ros_model);
                 advect_levelset_directional_rk3(*fire_phi, *fire_wind_eff,
                                                 *fire_slopes, m_fg.geom, dt_ls,
                                                 m_params.levelset_eps_visc,
-                                                dir_state);
+                                                dir_state, fire_nonburnable.get());
             } else {
                 fire_levelset::advect_levelset_weno5z_rk3(*fire_phi, *fire_wind_eff,
                                                 *fire_ros, m_fg.geom, dt_ls,
                                                 m_params.levelset_eps_visc,
                                                 fire_slopes.get());
             }
+            enforce_nonburnable_phi();
             fire_phi->FillBoundary(m_fg.geom.periodicity());
 
             ++m_levelset_subcycle_count;
@@ -827,6 +852,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                       m_params.levelset_reinit_iters, dtau,
                                       m_params.levelset_reinit_band_m,
                                       /*normalized=*/false);
+                enforce_nonburnable_phi();
                 fire_phi->FillBoundary(m_fg.geom.periodicity());
             }
 
@@ -865,7 +891,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                           m_fg.geom, dt,
                                           m_current_time,
                                           m_fp,
-                                          fire_slopes.get());
+                                          fire_slopes.get(), fire_nonburnable.get());
     }
 
     if (m_params.fire_debug) {
@@ -903,8 +929,27 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 m_params.fire_debug,
                 fire_fuel_load.get(),
                 m_fuel_load_initial_kg_m2,
-                fire_surface_z.get());
+                fire_surface_z.get(),
+                fire_nonburnable.get());
         }
+    }
+
+    if (m_params.fire_debug && fire_nonburnable) {
+        // Burned cells inside the mask must stay at zero; the regression
+        // scripts read this line.
+        amrex::MultiFab flag(m_fg.ba, m_fg.dm, 1, 0);
+        for (amrex::MFIter mfi(flag); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.validbox();
+            auto const& f  = flag.array(mfi);
+            auto const& m  = fire_nonburnable->const_array(mfi);
+            auto const& at = fire_arrival_time->const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                f(i, j, k) = (m(i, j, k) > 0.5_rt && at(i, j, k) >= 0.0_rt) ? 1.0_rt : 0.0_rt;
+            });
+        }
+        amrex::Print() << "[FIRE DEBUG] Non-burnable: mask_cells="
+                       << std::lround(fire_nonburnable->sum(0))
+                       << " burned_inside=" << std::lround(flag.sum(0)) << "\n";
     }
 
     if (m_params.fire_debug) {
@@ -1551,4 +1596,97 @@ void FireLayer::report_probes()
             m_probe_reported[n] = true;
         }
     }
+}
+
+
+// ───────────────────────────────────────────────────────────────────────────
+// Structures and the non-burnable mask
+// ───────────────────────────────────────────────────────────────────────────
+
+void FireLayer::load_structure_height(const std::string& file)
+{
+    fire_structure_height = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+    if (!read_heightmap_nearest_onto_fire_cells(*fire_structure_height, m_fg, file)) {
+        amrex::Abort("[FIRE] cannot read structure heightmap '" + file + "'");
+    }
+    if (m_params.fire_debug) {
+        amrex::Print() << "[FIRE DEBUG] Structure heightmap '" << file
+                       << "' max height " << fire_structure_height->max(0) << " m\n";
+    }
+}
+
+void FireLayer::build_nonburnable_mask()
+{
+    const bool from_structures = m_params.structures.enable && fire_structure_height;
+    const bool from_codes      = !m_params.fuel_map.nonburnable_codes.empty() && fire_fuel_model;
+    const bool from_breaks     = m_params.firebreak_use_mask && !m_params.firebreaks.empty();
+    if (!from_structures && !from_codes && !from_breaks) { return; }
+
+    fire_nonburnable = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 1);
+    fire_nonburnable->setVal(0.0_rt);
+
+    if (from_structures) {
+        const amrex::Real hmin = m_params.structures.min_height;
+        for (amrex::MFIter mfi(*fire_nonburnable); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.validbox();
+            auto const& m = fire_nonburnable->array(mfi);
+            auto const& h = fire_structure_height->const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                if (h(i, j, k) > hmin) { m(i, j, k) = 1.0_rt; }
+            });
+        }
+    }
+    if (from_codes) {
+        const int n_codes = static_cast<int>(m_params.fuel_map.nonburnable_codes.size());
+        amrex::Gpu::DeviceVector<int> d_codes(n_codes);
+        amrex::Gpu::copy(amrex::Gpu::hostToDevice,
+                         m_params.fuel_map.nonburnable_codes.begin(),
+                         m_params.fuel_map.nonburnable_codes.end(), d_codes.begin());
+        const int* codes = d_codes.data();
+        for (amrex::MFIter mfi(*fire_nonburnable); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.validbox();
+            auto const& m    = fire_nonburnable->array(mfi);
+            auto const& fuel = fire_fuel_model->const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                const int code = static_cast<int>(fuel(i, j, k));
+                for (int n = 0; n < n_codes; ++n) {
+                    if (codes[n] == code) { m(i, j, k) = 1.0_rt; break; }
+                }
+            });
+        }
+        amrex::Gpu::streamSynchronize();
+    }
+    if (from_breaks) {
+        // Firebreak cells carry the phi sentinel from apply_firebreaks(); anything
+        // at or above it is a firebreak.
+        const amrex::Real sentinel = 0.5_rt * FIREBREAK_PHI_SENTINEL;
+        for (amrex::MFIter mfi(*fire_nonburnable); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.validbox();
+            auto const& m = fire_nonburnable->array(mfi);
+            auto const& p = fire_phi->const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                if (p(i, j, k) >= sentinel) { m(i, j, k) = 1.0_rt; }
+            });
+        }
+    }
+    fire_nonburnable->FillBoundary(m_fg.geom.periodicity());
+}
+
+void FireLayer::enforce_nonburnable_phi()
+{
+    if (!fire_nonburnable || !fire_phi) { return; }
+    // Mask cells are only ever clamped at zero, never lifted to a fixed
+    // positive level. With a zero rate of spread their level-set value does
+    // not evolve during advection, and reinitialisation keeps its sign, so
+    // the clamp is a guard against round-off. Holding them at a positive
+    // distance instead would break the signed-distance property around the
+    // footprint and let its edge act like a front: the masked runs burned
+    // more than the unmasked ones when that was tried. On the FARSITE path
+    // zero is simply the unburned indicator.
+    fire_levelset::hold_phi_in_mask(*fire_phi, fire_nonburnable.get(), 0.0_rt);
+}
+
+void FireLayer::zero_ros_in_mask(amrex::MultiFab& ros) const
+{
+    fire_levelset::zero_ros_in_mask(ros, fire_nonburnable.get());
 }

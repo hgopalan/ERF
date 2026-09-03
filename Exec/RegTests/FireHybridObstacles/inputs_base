@@ -69,7 +69,10 @@ erf.fire.balbi.formulation = "2020"
 erf.fire.balbi.wind_source = "reference"
 erf.fire.write_fire_stats_csv = false
 
-# Arrival-time probes: upwind faces, gap midpoints, downwind faces of the boxes
-erf.fire.probes = 179.5 30.0  179.5 80.0  179.5 115.0 \
+# Arrival-time probes: upwind faces, gap midpoints, downwind faces of the boxes.
+# The heightmap is on 5 m nodes and is sampled onto fire cells by nearest node,
+# so a footprint spans 2.5 m beyond its nominal edge; the face probes sit just
+# outside that sampled footprint (box at x = 180-200 m, sampled 177.5-202.5 m).
+erf.fire.probes = 176.0 30.0  176.0 80.0  176.0 115.0 \
                   190.0 55.0  190.0 97.5  190.0 10.0 \
-                  200.5 30.0  200.5 80.0  200.5 115.0
+                  204.0 30.0  204.0 80.0  204.0 115.0

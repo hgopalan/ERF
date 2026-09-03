@@ -1,0 +1,12 @@
+FILE = inputs_base
+
+# The same strip declared non-burnable: the head fire stops at its upwind
+# edge and only the flanks and backing fire keep growing. (Setting
+# erf.fire.rothermel_per_fuel = true would also stop it, since code 0 has
+# zero spread in the per-fuel table; the mask additionally rejects landings
+# and keeps the level set out.)
+erf.fire.ros_model = "rothermel"
+erf.fire.directional_ros = false
+erf.fire.fuel_map.file = "fuel_map_code0_strip.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.fuel_map.nonburnable_codes = 0

@@ -268,7 +268,8 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
                         bool                              fire_debug = false,
                         amrex::MultiFab*                  fire_fuel_load_ptr = nullptr,
                         amrex::Real                       fuel_load_initial_kg_m2 = 0.0,
-                        const amrex::MultiFab*            terrain_z = nullptr)
+                        const amrex::MultiFab*            terrain_z = nullptr,
+                        const amrex::MultiFab*            nonburnable = nullptr)
 {
     using namespace amrex;
 
@@ -329,6 +330,20 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
     ParallelDescriptor::ReduceRealSum(h_u.data(),    ncells);
     ParallelDescriptor::ReduceRealSum(h_v.data(),    ncells);
     ParallelDescriptor::ReduceRealSum(h_ros.data(),  ncells);
+    // Host copy of the non-burnable mask, gathered the same way as the fuel.
+    const bool has_mask = (nonburnable != nullptr);
+    std::vector<Real> h_mask(has_mask ? ncells : 0, 0.0);
+    if (has_mask) {
+        for (MFIter mfi(*nonburnable); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            const ERFHostFabView m_v((*nonburnable)[mfi]);
+            auto m_arr = m_v.array();
+            LoopOnCpu(bx, [&](int i, int j, int /*k*/) {
+                h_mask[j * nx + i] = m_arr(i, j, 0, 0);
+            });
+        }
+        ParallelDescriptor::ReduceRealSum(h_mask.data(), ncells);
+    }
     if (fuel_load) {
         // h_fuel is initialised to 1.0; ReduceRealSum of disjoint patches would double-count
         // the default 1.0 values.  Initialise to 0.0, then reduce, then set unowned cells to 1.0.
@@ -483,6 +498,10 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
         int lj = static_cast<int>((py - prob_lo[1]) / dx[1]);
         li = std::max(0, std::min(nx - 1, li));
         lj = std::max(0, std::min(ny - 1, lj));
+        // A brand landing on a non-burnable cell (structure, non-burnable fuel
+        // code, masked firebreak) does not ignite. Structures will later feed
+        // an ember accumulator instead; for now the brand is simply dropped.
+        if (has_mask && h_mask[lj * nx + li] > 0.5) { continue; }
         if (fuel_load) {
             // reentry_fuel_thresh is documented as a residual fuel *fraction*,
             // but the load it is compared against is an absolute kg/m2. That
@@ -561,9 +580,14 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
             auto alb_arr  = albini_data.array(mfi);
             // Aliased to phi when there is no fuel field; never written in that case.
             auto fuel_arr = fire_fuel_load_ptr ? fire_fuel_load_ptr->array(mfi) : phi.array(mfi);
+            Array4<const Real> mask_arr;
+            if (has_mask) { mask_arr = nonburnable->const_array(mfi); }
 
             ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept
             {
+                // Non-burnable cells never receive a spot stamp, even inside the
+                // disc of a landing that fell on a burnable neighbour.
+                if (has_mask && mask_arr(i, j, 0) > 0.5) { return; }
                 const Real ccx = prob_lo[0] + (i + 0.5) * dx[0];
                 const Real ccy = prob_lo[1] + (j + 0.5) * dx[1];
 

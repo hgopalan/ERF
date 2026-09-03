@@ -54,9 +54,10 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
     bool has_ros_weight = (fire_layer.get_params().is_hybrid() &&
                            fire_layer.get_ros_weight() != nullptr);
     bool has_structure_height = (fire_layer.get_structure_height() != nullptr);
+    bool has_nonburnable = (fire_layer.get_nonburnable() != nullptr);
 
-    Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height);
-    int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height);
+    Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable);
+    int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable);
     // Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
     // int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
 
@@ -127,9 +128,15 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
         ++comp;
     }
 
-    // Hybrid structure selector: sampled structure height
+    // Structures: sampled structure height
     if (has_structure_height) {
         MultiFab::Copy(mf, *fire_layer.get_structure_height(), 0, comp, 1, 0);
+        ++comp;
+    }
+
+    // Non-burnable mask
+    if (has_nonburnable) {
+        MultiFab::Copy(mf, *fire_layer.get_nonburnable(), 0, comp, 1, 0);
         ++comp;
     }
 

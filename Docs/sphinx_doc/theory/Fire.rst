@@ -27,6 +27,8 @@ The model is built from independently selectable pieces:
 - **fuel**, either one Anderson model everywhere or a spatial fuel map with
   firebreaks, and a dead-fuel moisture model driven by the atmosphere, see
   :ref:`sec:SpatialFuel` and :ref:`sec:FireFuelMoisture`;
+- a **non-burnable mask** from building footprints, listed fuel codes and
+  firebreaks, which the fire goes around, see :ref:`sec:FirePropagation`;
 - **ignition**, a disc, a polygon or polyline perimeter, or a timed schedule
   of events, see :ref:`sec:MultiIgnition`;
 - **coupling** to the atmosphere through wind extraction and heat injection,
@@ -156,7 +158,10 @@ The principal state and diagnostic fields, all cell-centred on the fire grid:
      - Byram intensity [kW/m], Thomas flame length [m], flame temperature [K], tilt [deg]
    * - ``fire_ros_weight``, ``fire_structure_height``
      - 1 each
-     - Hybrid model weight and sampled building height, present only with the hybrid model
+     - Hybrid model weight and sampled building height, present with the hybrid model or structures
+   * - ``fire_nonburnable``
+     - 1
+     - Non-burnable mask, present when structures, non-burnable fuel codes or masked firebreaks are configured
    * - ``fire_crown_active``, ``fire_crown_load``, ``fire_crown_fraction_burned``
      - 1 each
      - Crown-fire state, present only with crown fire enabled
@@ -234,6 +239,8 @@ Where each feature is exercised:
      - ``FireRosComparison`` (``hybrid_*`` rows)
    * - Hybrid: structure selector, probes, immersed-forcing buildings
      - ``FireHybridObstacles``
+   * - Non-burnable mask: structures and fuel codes
+     - ``FireHybridObstacles`` (``*_mask`` rows), ``FireRosComparison`` (``rothermel_code0_*``)
    * - Per-fuel Rothermel coefficients, spatial fuel map, blending, firebreaks
      - ``FireRosComparison`` (``rothermel_fuelmap``, ``hybrid_fuel``); canonical ``Fire_Behavior/Spatial_Fuel``
    * - Wind mapping (bilinear, nearest), per-fuel wind height, WAF formulas

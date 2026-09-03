@@ -110,12 +110,13 @@ inline void advect_levelset_hybrid_rk3(amrex::MultiFab& phi,
                                        const amrex::Geometry& geom,
                                        amrex::Real dt,
                                        amrex::Real eps_visc,
-                                       const HybridDirectionalSpec& spec)
+                                       const HybridDirectionalSpec& spec,
+                                       const amrex::MultiFab* nonburnable = nullptr)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
             fill_hybrid_directional_ros(R, phi_stage, slopes, geom, spec);
-        });
+        }, nonburnable);
 }
 
 #endif  // ERF_HYBRID_ROS_H
