@@ -1,6 +1,7 @@
 #ifndef ERF_ROTHERMEL_H
 #define ERF_ROTHERMEL_H
 
+#include <vector>
 #include <AMReX_MultiFab.H>
 #include <cmath>
 
@@ -319,5 +320,49 @@ void compute_ros_field(
     const amrex::MultiFab& fire_wind,
     const amrex::MultiFab& fire_slopes,
     const RothermelComputed& rc);
+
+/// Entries in the per-fuel Rothermel table: code 0 (non-burnable) plus FBFM 1-13.
+inline constexpr int ROTHERMEL_TABLE_SIZE = 14;
+
+/**
+ * @brief Build a per-fuel-code lookup table of Rothermel coefficients
+ *
+ * Mirrors build_fuel_balbi_table(): indexed by integer fuel code, with index 0
+ * holding a zeroed entry (R0 = 0, no spread) and 1-13 the Anderson models at
+ * the given dead fuel moistures.
+ *
+ * @param[in] moisture_1hr   1-hour dead fuel moisture [fraction]
+ * @param[in] moisture_10hr  10-hour dead fuel moisture [fraction]
+ * @param[in] moisture_100hr 100-hour dead fuel moisture [fraction]
+ * @return host-side vector of size ROTHERMEL_TABLE_SIZE
+ */
+std::vector<RothermelComputed> build_fuel_rothermel_table(
+    amrex::Real moisture_1hr,
+    amrex::Real moisture_10hr,
+    amrex::Real moisture_100hr);
+
+/**
+ * @brief Compute the rate-of-spread field with per-cell Rothermel coefficients
+ *
+ * Cells whose fuel code lies inside the table use that code's coefficients;
+ * any other cell, and every cell when no table is given, uses rc_default.
+ * With fuel_model or table null this is identical to the uniform overload.
+ *
+ * @param[out] fire_ros     Output ROS [m/s]
+ * @param[in]  fire_wind    Effective midflame wind after WAF + terrain [m/s]
+ * @param[in]  fire_slopes  Terrain slopes [dz/dx, dz/dy]
+ * @param[in]  rc_default   Coefficients for cells outside the table
+ * @param[in]  fuel_model   Per-cell fuel code MultiFab, or nullptr
+ * @param[in]  table        Device pointer to the per-fuel table, or nullptr
+ * @param[in]  table_size   Entries in table
+ */
+void compute_ros_field(
+    amrex::MultiFab& fire_ros,
+    const amrex::MultiFab& fire_wind,
+    const amrex::MultiFab& fire_slopes,
+    const RothermelComputed& rc_default,
+    const amrex::MultiFab* fuel_model,
+    const RothermelComputed* table,
+    int table_size);
 
 #endif

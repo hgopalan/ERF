@@ -1,0 +1,9 @@
+FILE = inputs_base
+
+# Identity: a uniform FM1 fuel map with per-fuel Rothermel coefficients
+# must reproduce rothermel_isotropic exactly.
+erf.fire.ros_model = "rothermel"
+erf.fire.directional_ros = false
+erf.fire.fuel_map.file = "fuel_map_uniform_fm1.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.rothermel_per_fuel = true

@@ -393,6 +393,30 @@ The parameter :cpp:`erf.fire.waf_fcz0_scale` (default 1.0) scales all :cpp:`fcz0
 - WRF-SFIRE :cpp:`module_fr_sfire_phys.F`
 - Andrews, P.L. (1986). BEHAVE: Fire Behavior Prediction and Fuel Modeling System. USDA Forest Service General Technical Report INT-194.
 
+Hybrid Model
+------------
+
+Setting :cpp:`erf.fire.ros_model = "hybrid"` evaluates two of the models above on every fire cell and blends them with a per-cell weight :math:`w \in [0, 1]`:
+
+.. math::
+
+   R = (1 - w)\, R_{\text{primary}} + w\, R_{\text{secondary}}
+
+The primary and secondary models are named with :cpp:`erf.fire.hybrid.primary` and :cpp:`erf.fire.hybrid.secondary` and may be any two distinct values of :cpp:`ros_model`; each keeps its own parameter block (for example :cpp:`erf.fire.balbi.*`). Where :math:`w` is exactly 0 or 1 the blend reproduces the single-model result bit for bit, which is what the identity decks in ``Exec/RegTests/FireRosComparison`` check.
+
+The weight comes from :cpp:`erf.fire.hybrid.selector`:
+
+* ``region``: :math:`w = 1` inside the rectangle :cpp:`erf.fire.hybrid.region = x_lo y_lo x_hi y_hi` and 0 outside. A positive :cpp:`erf.fire.hybrid.blend_width` [m] replaces the step with a linear ramp centred on the rectangle edge.
+* ``fuel``: :math:`w = 1` on cells whose fuel code is listed in :cpp:`erf.fire.hybrid.secondary_fuel_codes`, 0 elsewhere. Requires a spatial fuel map.
+* ``structure`` and ``wind`` are reserved for a later step and currently abort.
+
+The weight is written to the fire plotfile as ``fire_ros_model_weight``. The hybrid is only available on the isotropic path: :cpp:`erf.fire.directional_ros` and :cpp:`erf.fire.balbi.directional` abort with it.
+
+Per-fuel Rothermel coefficients
+```````````````````````````````
+
+By default the Rothermel kernel uses the coefficients of the domain :cpp:`erf.fire.fuel_model_id` on every cell, even when a spatial fuel map is loaded; only the heat flux and the Balbi kernels look the map up per cell. Setting :cpp:`erf.fire.rothermel_per_fuel = true` builds a per-code coefficient table (code 0 gives zero spread, codes 1-13 the Anderson models at the current dead fuel moistures, rebuilt each step when :cpp:`moisture_dynamic` is on) and evaluates the Rothermel rate of spread with the coefficients of each cell's own fuel code. Without a fuel map the flag has no effect.
+
 Model Selection Guide
 ---------------------
 
@@ -430,7 +454,35 @@ Input Parameters
    * - :cpp:`erf.fire.ros_model`
      - String
      - "rothermel"
-     - ROS model selection ("rothermel", "macarthur", "balbi", "cheney_gould")
+     - ROS model selection ("rothermel", "macarthur", "balbi", "cheney_gould", "behave", "hybrid")
+   * - :cpp:`erf.fire.rothermel_per_fuel`
+     - Boolean
+     - false
+     - Rothermel: evaluate per-cell coefficients from the spatial fuel map
+   * - :cpp:`erf.fire.hybrid.primary`
+     - String
+     - "rothermel"
+     - Hybrid: model used where the weight is 0
+   * - :cpp:`erf.fire.hybrid.secondary`
+     - String
+     - "balbi"
+     - Hybrid: model used where the weight is 1
+   * - :cpp:`erf.fire.hybrid.selector`
+     - String
+     - "region"
+     - Hybrid: how the weight is set ("region", "fuel"; "structure" and "wind" reserved)
+   * - :cpp:`erf.fire.hybrid.region`
+     - 4 Reals
+     - none
+     - Hybrid: rectangle x_lo y_lo x_hi y_hi [m] that takes the secondary model (selector = region)
+   * - :cpp:`erf.fire.hybrid.blend_width`
+     - Real
+     - 0.0
+     - Hybrid: linear ramp width [m] across the region edge; 0 = step
+   * - :cpp:`erf.fire.hybrid.secondary_fuel_codes`
+     - Integers
+     - none
+     - Hybrid: fuel codes that take the secondary model (selector = fuel)
    * - :cpp:`erf.fire.use_per_fuel_wind_ht`
      - Boolean
      - false
@@ -496,6 +548,10 @@ Limitations
 - Per-fuel wind height (:cpp:`use_per_fuel_wind_ht = true`) uses WRF-SFIRE default :math:`\text{fcwh} = 6.096` m for all 13 Anderson fuel models, which produces the same result as :cpp:`wind_ref_ht = 6.096` m unless the table is customised. Custom :cpp:`fcwh` values are not yet exposed through ParmParse.
 
 - All four ROS models use the same effective midflame wind (:cpp:`fire_wind_eff`) after global WAF and terrain corrections. The WAF is derived from the global :cpp:`fuel_model_id` fuel bed depth, not from per-cell fuel bed depth when a spatial fuel map is loaded.
+
+- Unless :cpp:`erf.fire.rothermel_per_fuel = true`, the Rothermel kernel spreads with the domain :cpp:`fuel_model_id` on every cell of a spatial fuel map; a hybrid with the ``fuel`` selector and a Rothermel primary should set that flag so the primary honours the map.
+
+- The hybrid model is isotropic only. Direction-dependent spread, the ``structure`` and ``wind`` selectors, and a time-varying weight are not yet available.
 
 References
 ----------

@@ -31,19 +31,44 @@ Two axes, crossed:
   the model is evaluated with the projected scalars, so the flanks and backing
   fire slow down.
 
+A third group exercises the hybrid model (`erf.fire.ros_model = "hybrid"`), which
+evaluates a primary and a secondary model on every cell and blends them with a
+per-cell weight, and the per-fuel Rothermel table
+(`erf.fire.rothermel_per_fuel`):
+
+- **Identities.** `hybrid_none` gives the secondary model an empty region, so it
+  must reproduce `rothermel_isotropic` exactly; `hybrid_all` gives it the whole
+  domain and must reproduce `balbi2020_isotropic`; `rothermel_fuelmap` runs
+  Rothermel on a uniform FM1 fuel map with per-fuel coefficients and must again
+  match `rothermel_isotropic`. These are bit-for-bit checks, not tolerances.
+- **Splits.** `hybrid_region` hands cells east of x = 800 m, the downwind edge
+  of the ignition disc, to Balbi 2020; `hybrid_fuel` does the same by fuel
+  code on a map that is FM1 west of that line and FM3 east of it. In both the
+  head fire runs at the secondary rate while the flanks and backing fire keep
+  the Rothermel rate, so the burned area falls between the two identities.
+
+The `sec_cells` column is the number of fire cells whose weight exceeds one
+half, read from the `[FIRE DEBUG] Hybrid ROS` line; 48 of the 80 columns lie
+east of the split, hence 3840.
+
 ## Reference results
 
 Burned cells after 200 s from a 50-cell ignition disk, and the head-fire rate of
 spread:
 
-| variant | burned cells | max ROS (m/s) |
-|---|---|---|
-| `rothermel_isotropic` | 132 | 0.250 |
-| `rothermel_directional` | 78 | 0.250 |
-| `balbi2009_isotropic` | 200 | 0.390 |
-| `balbi2009_directional` | 84 | 0.390 |
-| `balbi2020_isotropic` | 232 | 0.514 |
-| `balbi2020_directional` | 138 | 0.514 |
+| variant | burned cells | max ROS (m/s) | sec_cells |
+|---|---|---|---|
+| `rothermel_isotropic` | 132 | 0.250 | - |
+| `rothermel_directional` | 78 | 0.250 | - |
+| `balbi2009_isotropic` | 200 | 0.390 | - |
+| `balbi2009_directional` | 84 | 0.390 | - |
+| `balbi2020_isotropic` | 232 | 0.514 | - |
+| `balbi2020_directional` | 138 | 0.514 | - |
+| `rothermel_fuelmap` | 132 | 0.250 | - |
+| `hybrid_none` | 132 | 0.250 | 0 |
+| `hybrid_all` | 232 | 0.514 | 6400 |
+| `hybrid_region` | 162 | 0.514 | 3840 |
+| `hybrid_fuel` | 140 | 0.329 | 3840 |
 
 Three things to read out of it.
 
@@ -62,11 +87,28 @@ no-wind spread at all, so once the wind is projected out on the flanks its
 flanking rate is zero and the fire can only run downwind. The 2020 form retains
 its radiative base rate on the flanks and keeps spreading sideways, slowly.
 
+**The identities hold exactly.** `hybrid_none` and `rothermel_fuelmap` match
+`rothermel_isotropic`, and `hybrid_all` matches `balbi2020_isotropic`, in both
+columns. The blend is `(1 - w) R_p + w R_s`, so a weight of exactly 0 or 1
+returns one model's value untouched.
+
+**The splits sit between the identities.** `hybrid_region` burns 162 cells:
+more than Rothermel because the head runs at the Balbi rate from the first
+step, fewer than Balbi because the flanks and the backing fire still spread at
+0.25 m/s. Its max ROS is the Balbi value since the diagnostic is taken over
+burning cells and the head is in the Balbi region. `hybrid_fuel` reports
+0.329 m/s because Balbi 2020 evaluated on FM3 tall grass is slower than on FM1
+at this wind, which is the per-fuel Balbi table doing its job.
+
 ## Backward compatibility
 
 `erf.fire.directional_ros` defaults to false. Omitting it entirely and setting it
 to false give the same answer, 132 cells for Rothermel, which is also what the
-code produced before the switch existed. The older Balbi-only flag
+code produced before the switch existed. `erf.fire.ros_model` still defaults to
+`rothermel` and `erf.fire.rothermel_per_fuel` to false, so runs that do not
+name the hybrid or the per-fuel table are unchanged; without the flag the
+Rothermel kernel keeps spreading with the domain `fuel_model_id` on every cell
+of a fuel map, as before. The older Balbi-only flag
 `erf.fire.balbi.directional` still works and is equivalent for that model: both
 give 138 cells on `balbi2020_directional`.
 

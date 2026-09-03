@@ -1,0 +1,15 @@
+FILE = inputs_base
+
+# FM1 short grass west of x = 800 m, FM3 tall grass east of it, the split at
+# the downwind edge of the ignition disc. Rothermel (per-fuel coefficients)
+# spreads the FM1 side, Balbi 2020 the FM3 side.
+erf.fire.ros_model = "hybrid"
+erf.fire.directional_ros = false
+erf.fire.fuel_map.file = "fuel_map_split_fm1_fm3.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.rothermel_per_fuel = true
+erf.fire.hybrid.primary   = "rothermel"
+erf.fire.hybrid.secondary = "balbi"
+erf.fire.hybrid.selector  = "fuel"
+erf.fire.hybrid.secondary_fuel_codes = 3
+erf.fire.balbi.formulation = "2020"
