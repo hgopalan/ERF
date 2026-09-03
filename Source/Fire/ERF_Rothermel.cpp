@@ -129,40 +129,6 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     return rc;
 }
 
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
-Real rothermel_ros_cell(
-    Real ux_eff, Real uy_eff,
-    Real sx, Real sy,
-    const RothermelComputed& rc) noexcept
-{
-    // Effective wind speed [m/s]
-    Real U_eff = std::sqrt(ux_eff*ux_eff + uy_eff*uy_eff);
-
-    // Wind factor: φ_w = C * U_eff^B * (β/β_opt)^E
-    // Convert to ft/min for Rothermel calculation
-    Real U_eff_ftmin = U_eff * rc.wind_conv;
-
-    // Apply MEWS cap
-    U_eff_ftmin = amrex::min(U_eff_ftmin, rc.U_max_ftmin);
-
-    // Slope magnitude and squared tangent (for Rothermel Eq. 51)
-    Real tan_slope_sq = sx*sx + sy*sy;
-
-    // Cap at tan²(80°) ≈ 32.16; steeper than any realistic or surveyed terrain.
-    // Prevents corrupted boundary slopes from producing unphysical ROS.
-    tan_slope_sq = amrex::min(tan_slope_sq, 32.0_rt);
-
-    // Slope factor (Rothermel Eq. 51): φ_s = 5.275 * β^(-0.3) * tan²(φ)
-    Real phi_s = rc.phi_s_const * tan_slope_sq;
-
-    // Wind factor
-    Real phi_w = rc.C * std::pow(U_eff_ftmin, rc.B) * rc.beta_ratio_E;
-
-    // Rate of spread: R = R0 * (1 + φ_w + φ_s)
-    Real ROS = rc.R0 * (1.0 + phi_w + phi_s);
-    
-    return amrex::max(ROS, 0.0);
-}
 
 void compute_ros_field(
     MultiFab& fire_ros,

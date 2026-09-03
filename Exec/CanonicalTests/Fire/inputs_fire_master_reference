@@ -177,6 +177,14 @@ erf.fire.k_deflect = 0.3    # Wind deflection factor (affects wind direction cha
 #            column shares one wind vector
 erf.fire.wind_interp = "bilinear"
 
+# Evaluate the rate of spread along the local front normal on the level-set
+# path, instead of applying one scalar rate in every direction. The wind and
+# slope are projected onto the normal and the selected model is evaluated with
+# the projected scalars, so head, flank and backing spread come from the model.
+# false (default) keeps the isotropic behaviour. No effect on the FARSITE path,
+# which gets its directionality from the Anderson ellipse.
+erf.fire.directional_ros = false
+
 # ============================================================================
 # RATE-OF-SPREAD MODEL SELECTION
 # ============================================================================

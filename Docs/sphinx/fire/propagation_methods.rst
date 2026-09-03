@@ -125,16 +125,55 @@ length-to-width ratio saturates at its cap of 8 above roughly 5 m/s of midflame
 wind, so the flanks then run at 7.5% of the head rate and the burned area grows
 as a downwind lobe.
 
-The level-set path has no ellipse. Every rate-of-spread model except Balbi with
-:cpp:`erf.fire.balbi.directional` hands it a single scalar rate, which it applies
-in all directions, so the front grows at the head-fire rate everywhere. On an
-otherwise identical case that covers roughly five times the area of the FARSITE
-path over the same interval.
+The level-set path has no ellipse, and does not need one: it propagates a front
+at whatever normal speed it is given, so the shape follows from the rate of
+spread rather than from an imposed template. What it needs is a rate that depends
+on direction. By default it is handed a single scalar, which it applies in all
+directions, so the front grows at the head-fire rate everywhere; on an otherwise
+identical case that covers roughly five times the area of the FARSITE path.
 
-Neither is wrong on its own terms — one imposes an empirical shape, the other
-resolves the front but is fed a direction-independent rate — but they are not
-interchangeable, and a case that switches between them will not conserve burned
-area. Directional spread on the level-set path currently exists only for Balbi.
+:cpp:`erf.fire.directional_ros = true` supplies the missing direction-dependence
+by projecting the driving vectors onto the front normal
+:math:`\hat{n} = \nabla\phi/|\nabla\phi|` and evaluating the selected model with
+the projected scalars:
+
+.. math::
+
+   R(\hat{n}) = \text{model}\left(\max(\mathbf{U}\cdot\hat{n},\,0),\;
+                                   \max(\nabla z\cdot\hat{n},\,0)\right)
+
+At the head the normal is aligned with the wind, the model sees the full wind and
+upslope, and :math:`R` is the head rate. On the flanks the projections vanish and
+:math:`R` falls back to the model's no-wind, no-slope rate. Backing is the same:
+a wind blowing out of the unburned fuel does not drive the front into it, and
+Rothermel's slope factor is quadratic and so cannot represent downslope
+retardation, so both are clamped at zero rather than reversed. Because
+:math:`R(\hat{n})` never exceeds the head rate, the isotropic field that sets the
+level-set CFL stays a conservative bound.
+
+This is preferred over borrowing the ellipse, for a specific reason: the Anderson
+length-to-width ratio is an empirical function of midflame wind speed, a stand-in
+for a flow field that ERF resolves. Imposing it on top of a resolved wind is the
+same double counting as applying the FARSITE terrain wind factors over resolved
+terrain flow.
+
+Two limits are worth knowing. The projection reproduces neither the saturation of
+the observed length-to-width ratio, which the Anderson fit caps at 8, nor a
+backing rate below the no-wind rate; both are calibration the empirical ellipse
+carries and the projection does not. And making :math:`R` depend on the normal
+turns the level-set equation into a general Hamilton-Jacobi problem, while the
+Godunov upwinding used for :math:`|\nabla\phi|` is derived for a
+direction-independent speed. Freezing :math:`R(\hat{n})` from central differences
+at each Runge-Kutta stage, as done here, is the usual practical approximation
+rather than the correct anisotropic flux.
+
+Balbi keeps its own switch, :cpp:`erf.fire.balbi.directional`, which additionally
+carries that model's per-cell moisture, surface temperature and heat-flux
+couplings; either flag enables direction-dependent spread when
+:cpp:`ros_model = "balbi"`.
+
+``Exec/RegTests/FireRosComparison`` runs both settings against both Balbi
+formulations and Rothermel on one fixed scenario and tabulates the burned area.
 
 
 Terrain projection
