@@ -107,7 +107,10 @@ order; the optional blocks are present only when their feature is on:
      - ``erf.fire.ros_model = hybrid``
    * - ``fire_structure_height``
      - m
-     - hybrid ``structure`` selector
+     - ``erf.fire.structures.enable`` or the hybrid ``structure`` selector
+   * - ``fire_nonburnable``
+     - 0/1
+     - structures, ``fuel_map.nonburnable_codes`` or ``firebreak.use_mask`` configured
 
 Fire statistics CSV
 -------------------

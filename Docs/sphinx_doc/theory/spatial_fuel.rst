@@ -56,6 +56,17 @@ where :math:`f` is the blending fraction (default 0.0, range [0, 1]), :math:`n_{
 
 When a cell has no neighbors with different fuel codes, it is not modified. Blending is applied after all ROS calculations but before fire propagation, allowing smooth transitions in fire front shape and intensity across zone boundaries.
 
+Non-burnable fuel codes
+-----------------------
+
+Cells whose code is listed in :cpp:`erf.fire.fuel_map.nonburnable_codes` are
+placed in the non-burnable mask described in :ref:`sec:FirePropagation`: zero
+rate of spread, no fuel, no ember landings, and the front stops at their
+edge. The list is empty by default, and an unlisted code that is not one of
+the Anderson models falls through to fuel model 1 in the Rothermel table,
+which means the nodata value 0 burns as short grass unless it is listed.
+With the Scott and Burgan fuel system the non-burnable classes are 91 to 99.
+
 Firebreak Barriers
 ------------------
 
@@ -82,6 +93,13 @@ A circular barrier is defined by centre :math:`(c_x, c_y)` and radius :math:`r`.
 All cells within any barrier have their level-set field ``fire_phi`` stamped to the constant value ``FIREBREAK_PHI_SENTINEL = 1.0e6`` at initialization, after ignition. This sentinel is strictly greater than ``farsite_phi_threshold`` (default 0.1) and any unburned cell phi value. Once set, firebreak cells remain at the sentinel value throughout the simulation, permanently preventing fire arrival and propagation. Firebreak barriers cannot be burned through or overcome during the fire simulation.
 
 Reference: Finney, M.A. (1998). FARSITE: Fire Area Simulator. RMRS-RP-4.
+
+Firebreak cells are stamped into the level set once at initialisation. On
+the FARSITE path the level set is rebuilt from the arrival time every
+subcycle and on the level-set path reinitialisation clamps the sentinel, so
+a firebreak can be burned over later in a run. Setting
+:cpp:`erf.fire.firebreak.use_mask = true` keeps the firebreak cells in the
+non-burnable mask instead, which holds on both paths.
 
 Input Parameters
 ----------------

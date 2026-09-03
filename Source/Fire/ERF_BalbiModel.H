@@ -846,12 +846,13 @@ inline void advect_levelset_balbi_rk3(amrex::MultiFab& phi,
                                       amrex::Real eps_visc,
                                       const BalbiComputed& bc_default,
                                       const FireParams::BalbiParams& bp,
-                                      const BalbiFieldInputs& in = BalbiFieldInputs{})
+                                      const BalbiFieldInputs& in = BalbiFieldInputs{},
+                                      const amrex::MultiFab* nonburnable = nullptr)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
             fill_balbi_ros_directional(R, phi_stage, wind, slopes, geom, bc_default, bp, in);
-        });
+        }, nonburnable);
 }
 
 #endif

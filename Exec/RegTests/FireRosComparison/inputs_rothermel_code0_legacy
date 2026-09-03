@@ -1,0 +1,10 @@
+FILE = inputs_base
+
+# A code-0 (nodata) strip 100 m wide at x = 825-925 m, one cell downwind of
+# the ignition disc edge, with the legacy behaviour: Rothermel without the
+# per-fuel table spreads with the domain fuel model everywhere, so the strip
+# burns as short grass and the result equals rothermel_isotropic.
+erf.fire.ros_model = "rothermel"
+erf.fire.directional_ros = false
+erf.fire.fuel_map.file = "fuel_map_code0_strip.asc"
+erf.fire.fuel_map.format = "ascii"

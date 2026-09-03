@@ -211,6 +211,16 @@ public:
     }
 
     /**
+     * @brief Get the non-burnable mask (1 in structure, listed fuel-code and
+     *        masked firebreak cells, 0 elsewhere).
+     * @return Pointer to fire_nonburnable, or nullptr when no mask source is on.
+     */
+    const amrex::MultiFab* get_nonburnable() const
+    {
+        return fire_nonburnable.get();
+    }
+
+    /**
      * @brief Get effective wind field for diagnostics.
      * @return Pointer to fire_wind_eff MultiFab [m/s].
      */
@@ -685,8 +695,26 @@ private:
     /// Print the arrival time at each erf.fire.probes point the first time it burns.
     void report_probes();
 
-    // Structure height [m] on the fire grid (hybrid selector = structure only).
+    // Structure height [m] on the fire grid (structures.enable or the hybrid
+    // structure selector).
     std::unique_ptr<amrex::MultiFab>         fire_structure_height;
+
+    // Non-burnable mask on the fire grid, one ghost cell so the level-set
+    // stencils and the FARSITE stamp can test neighbours. Null when no source
+    // (structures, fuel codes, masked firebreaks) is configured.
+    std::unique_ptr<amrex::MultiFab>         fire_nonburnable;
+
+    /// Read the structure heightmap onto the fire grid (nearest-cell sampling).
+    void load_structure_height(const std::string& file);
+
+    /// Build fire_nonburnable from structures, fuel codes and firebreaks.
+    void build_nonburnable_mask();
+
+    /// Hold phi outside the burned region in mask cells (level-set path).
+    void enforce_nonburnable_phi();
+
+    /// Zero the rate of spread in mask cells.
+    void zero_ros_in_mask(amrex::MultiFab& ros) const;
 
     // Arrival-time probes already reported.
     std::vector<bool>                        m_probe_reported;

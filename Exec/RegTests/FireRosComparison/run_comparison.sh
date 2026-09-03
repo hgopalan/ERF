@@ -13,7 +13,7 @@
 
 set -u
 
-EXE=${1:?usage: run_comparison.sh /path/to/erf_exec [extra args]}
+EXE=${1:?usage: [MPIRUN="mpirun -np 8"] run_comparison.sh /path/to/erf_exec [extra args]}
 shift || true
 
 VARIANTS="rothermel_isotropic rothermel_directional
@@ -27,14 +27,15 @@ VARIANTS="rothermel_isotropic rothermel_directional
           cheney_gould_isotropic cheney_gould_directional
           behave_isotropic behave_directional
           rothermel_nearest balbi2020_reference_wind balbi2020_extinction_wet
-          hybrid_behave_cheney hybrid_behave_cheney_directional hybrid_blend_width"
+          hybrid_behave_cheney hybrid_behave_cheney_directional hybrid_blend_width
+          rothermel_code0_legacy rothermel_code0_masked"
 
 printf "%-24s %8s %10s %14s %10s\n" variant exit cells max_ROS sec_cells
 printf "%-24s %8s %10s %14s %10s\n" ------------------------ -------- ---------- -------------- ----------
 
 for v in $VARIANTS; do
     log="run_${v}.log"
-    "$EXE" "inputs_${v}" "$@" > "$log" 2>&1
+    ${MPIRUN:-} "$EXE" "inputs_${v}" "$@" > "$log" 2>&1
     rc=$?
     cells=$(grep 'active fire cells' "$log" | tail -1 | awk '{print $NF}')
     ros=$(grep 'Rate-of-spread computed' "$log" | tail -1 | sed 's/.*Max: //; s/,.*//')

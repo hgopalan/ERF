@@ -202,12 +202,13 @@ inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,
                                             const amrex::Geometry& geom,
                                             amrex::Real dt,
                                             amrex::Real eps_visc,
-                                            const DirectionalRosState& st)
+                                            const DirectionalRosState& st,
+                                            const amrex::MultiFab* nonburnable = nullptr)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
             fill_directional_ros(R, phi_stage, wind, slopes, geom, st);
-        });
+        }, nonburnable);
 }
 
 #endif

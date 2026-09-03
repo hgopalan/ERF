@@ -138,6 +138,10 @@ struct FireParams
         std::string   fuel_map_file       = "";        ///< Path to fuel map file; empty = uniform
         std::string   fuel_map_format     = "ascii";   ///< "ascii" or "lcp"
         amrex::Real   blending_fraction   = 0.0;       ///< ROS blending at fuel boundaries [0-1]
+        /// Fuel codes that are non-burnable (e.g. 0 for nodata, 91-99 in the
+        /// Scott-Burgan set). Empty by default, in which case an unknown code
+        /// falls through to fuel model 1 in the Rothermel table as before.
+        std::vector<int> nonburnable_codes;
     } fuel_map;
 
     // Phase 11: Multi-ignition schedule parameters.
@@ -339,6 +343,24 @@ struct FireParams
     // Arrival-time probes: flat list of x y pairs [m]. Each probe reports the
     // fire arrival time at its fire cell once, on the step it first burns.
     std::vector<amrex::Real> probes;
+
+    // Structures on the fire grid: a building heightmap in the ERF terrain
+    // text format sampled onto fire cell centres by nearest point. With
+    // enable = true every cell whose sampled height exceeds min_height is
+    // non-burnable: zero rate of spread, the level set held outside the
+    // burned region, FARSITE and spotting landings rejected, no fuel and no
+    // heat. Off by default; the hybrid "structure" selector reads the same
+    // file but by itself does not stop the fire.
+    struct StructureParams {
+        bool        enable     = false;   ///< Treat structure cells as non-burnable
+        std::string file;                 ///< Heightmap; empty = hybrid.structure_file, then erf.buildings_file_name
+        amrex::Real min_height = 0.5;     ///< Sampled height above which a cell is a structure [m]
+    } structures;
+
+    // Firebreak cells stamped at initialization are also held in the
+    // non-burnable mask when true, so the level-set path cannot burn back
+    // into them after reinitialisation. Off by default (legacy behaviour).
+    bool firebreak_use_mask = false;
 
     // Evaluate the Rothermel coefficients per cell from the spatial fuel map
     // instead of the domain fuel_model_id. Off by default: the Rothermel
@@ -589,6 +611,27 @@ struct FireParams
        pp.queryarr("probes", probes);
        if (probes.size() % 2 != 0) {
            amrex::Abort("erf.fire.probes must be a flat list of x y pairs");
+       }
+
+       // Non-burnable mask: structures, fuel codes, firebreaks
+       pp.query("structures.enable",     structures.enable);
+       pp.query("structures.file",       structures.file);
+       pp.query("structures.min_height", structures.min_height);
+       pp.queryarr("fuel_map.nonburnable_codes", fuel_map.nonburnable_codes);
+       pp.query("firebreak.use_mask", firebreak_use_mask);
+       if (structures.enable) {
+           if (structures.file.empty()) { structures.file = hybrid.structure_file; }
+           if (structures.file.empty()) {
+               amrex::ParmParse pp_erf("erf");
+               pp_erf.query("buildings_file_name", structures.file);
+           }
+           if (structures.file.empty()) {
+               amrex::Abort("erf.fire.structures.enable needs erf.fire.structures.file "
+                            "or erf.buildings_file_name");
+           }
+           if (structures.min_height < 0.0) {
+               amrex::Abort("erf.fire.structures.min_height must be >= 0");
+           }
        }
 
        // Balbi parameters
