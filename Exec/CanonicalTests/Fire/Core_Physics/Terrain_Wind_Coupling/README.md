@@ -22,7 +22,7 @@ A neutral log-law profile enters at `xlo` as mass inflow and leaves at `xhi` as 
 ## Expected Results
 - The extraction height tracks the terrain: the reported range spans roughly 12 m over the lowest ground to 284 m over the highest, each being that column's ground plus `wind_ref_ht`.
 - The reference wind reaches about 22 m/s, since the highest columns sample the capped part of the profile, and the effective midflame wind is about 8 m/s after the Wind Adjustment Factor.
-- The fire spreads from a 100 m ignition disk on a slope, at 0.4 to 0.7 m/s, and crosses terrain without instability.
+- The fire spreads from a 100 m ignition disk on a slope, at 0.4 to 0.7 m/s, reaching 284 fire cells at 300 s, and crosses terrain without instability.
 - Spotting launches occasionally and brands land at terrain elevation. Landing distances saturate at the 200 m Scott cap for FM1.
 
 ## Key Parameters
@@ -43,7 +43,14 @@ A neutral log-law profile enters at `xlo` as mass inflow and leaves at `xhi` as 
 
 ## Notes
 
-**Propagation method.** The case runs the level-set path, which advances the front continuously and shows 300 s of spread on a 31.25 m fire grid. The FARSITE path accumulates displacement per front cell and stamps a whole cell only once that displacement reaches a full cell width, so at this rate of spread and cell size it advances in jumps of `dx_fire / ROS`, about 45 s of fire time, and needs a much longer run to show anything. Set `propagation_method = "farsite"` to cover that path.
+**Propagation method.** The case runs the level-set path, which advances the front continuously. The FARSITE path accumulates displacement per front cell and converts a whole cell only once that displacement reaches a full cell width, one cell per stamp, so it advances in quanta of `dx_fire / ROS` — about 60 s of simulated time here. Over the same 300 s the two paths differ by more than granularity:
+
+| Path | first advance | cells at 300 s |
+|---|---|---|
+| level set | continuous | 284 |
+| FARSITE | step 396 (99 s) | 52 |
+
+Both were run at `dt = 0.25 s`; running FARSITE at `dt = 1 s` reaches the same 52 cells in 250 s, so the timestep changes how many steps a quantum takes but not the physical outcome. The gap is the quantization itself: each stamp ignites exactly one cell (the default `farsite.gaussian_sigma = -1` writes `phi = min(phi, -1)` at the single nearest cell rather than over a disk), and stamps that land on already-burned cells are lost, so the front advances well below its nominal rate of spread on a fire grid this fine. Set `propagation_method = "farsite"` to exercise that path.
 
 **Spotting re-entry filter.** `spotting.reentry_fuel_thresh` is set to zero. Any positive value silences spotting here: the residual-fuel field reads exactly zero at the landing cells, so even 0.01 kg/m² rejects every brand while 0.0 accepts all of them. That behaviour is independent of terrain and of the fuel model and wants its own investigation.
 
