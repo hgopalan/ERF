@@ -1,0 +1,12 @@
+FILE = inputs_base
+
+# Rothermel with lagged heat coupling, uninterrupted to 200 s. Exercises the
+# checkpointed flux buffer: the first restarted step must inject the flux the
+# straight run injects, not zero.
+erf.fire.ros_model = "rothermel"
+erf.fire.coupling_type = "lagged"
+erf.fire.directional_ros = true
+erf.fire.propagation_method = "levelset"
+stop_time = 200.0
+max_step = 400
+erf.check_int = -1

@@ -492,6 +492,12 @@ public:
         return m_Q_lat_atm_prev.get();
     }
 
+    /// Mutable access to the lagged sensible flux buffer, for checkpoint restart.
+    amrex::MultiFab* get_Q_atm_prev_mut() { return m_Q_atm_prev.get(); }
+
+    /// Mutable access to the lagged latent flux buffer, for checkpoint restart.
+    amrex::MultiFab* get_Q_lat_atm_prev_mut() { return m_Q_lat_atm_prev.get(); }
+
     /**
      * @brief Get fire latent heat flux on fire grid.
      * @return Pointer to fire_latent_flux MultiFab [W/m²].

@@ -460,6 +460,7 @@ ERF::WriteCheckpointFile () const
             write_sl_var(m_SurfaceLayer->get_q_surf(lev), "Qsurf");
             write_sl_var(m_SurfaceLayer->get_pblh(lev)  , "PBLH");
             write_sl_var(m_SurfaceLayer->get_z0(lev)    , "Z0");
+            write_sl_var(m_SurfaceLayer->get_t_surf(lev), "Tsurf");
 
             // The exponentially filtered averages behind erf.most.time_average.  The
             // region policy carries the filter state in these MultiFabs (the plane and
@@ -611,6 +612,15 @@ ERF::WriteCheckpointFile () const
         if (const amrex::MultiFab* cl = m_fire_layer->get_crown_load()) {
             amrex::Print() << "Writing fire crown load to checkpoint" << std::endl;
             VisMF::Write(*cl, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireCrownLoad"));
+        }
+        // The lagged fluxes injected into the atmosphere on the next step. Without
+        // them the first step after a restart injects no fire heat at all.
+        if (const amrex::MultiFab* q = m_fire_layer->get_Q_atm_prev()) {
+            amrex::Print() << "Writing fire atmosphere flux buffer to checkpoint" << std::endl;
+            VisMF::Write(*q, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireQAtmPrev"));
+        }
+        if (const amrex::MultiFab* ql = m_fire_layer->get_Q_lat_atm_prev()) {
+            VisMF::Write(*ql, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireQLatAtmPrev"));
         }
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[FIRE] Fire state written to checkpoint " << checkpointname << "\n";
@@ -1732,6 +1742,10 @@ ERF::ReadCheckpointFileSurfaceLayer ()
 
         // Z0
         read_most_var("Z0", m_SurfaceLayer->get_z0(lev));
+        // Surface temperature. Not every path rewrites it each step (a fixed
+        // surface temperature with no heating rate keeps whatever was set at
+        // initialization), so it has to come back from the checkpoint too.
+        read_most_var("Tsurf", m_SurfaceLayer->get_t_surf(lev));
 
         // The exponentially filtered averages.  We only mark the filter as initialized
         // if every piece of its state came back, so that a partial restore degrades to
@@ -1802,4 +1816,6 @@ ERF::ReadCheckpointFileFire ()
     restore_optional(m_fire_layer->get_disp_accum_mut(),   "FireDispAccum");
     restore_optional(m_fire_layer->get_crown_active_mut(), "FireCrownActive");
     restore_optional(m_fire_layer->get_crown_load_mut(),   "FireCrownLoad");
+    restore_optional(m_fire_layer->get_Q_atm_prev_mut(),     "FireQAtmPrev");
+    restore_optional(m_fire_layer->get_Q_lat_atm_prev_mut(), "FireQLatAtmPrev");
 }
