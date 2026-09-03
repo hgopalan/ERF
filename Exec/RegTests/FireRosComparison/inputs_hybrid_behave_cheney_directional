@@ -1,0 +1,10 @@
+FILE = inputs_base
+
+# The same BEHAVE / Cheney-Gould hybrid on the direction-dependent path, which
+# exercises the generic member evaluation along the front normal.
+erf.fire.ros_model = "hybrid"
+erf.fire.directional_ros = true
+erf.fire.hybrid.primary   = "behave"
+erf.fire.hybrid.secondary = "cheney_gould"
+erf.fire.hybrid.selector  = "region"
+erf.fire.hybrid.region    = 800.0 0.0 2000.0 2000.0

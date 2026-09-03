@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# Balbi 2020 consuming the reference-height wind instead of the WAF-reduced
+# midflame wind. Faster than balbi2020_isotropic by construction.
+erf.fire.ros_model = "balbi"
+erf.fire.directional_ros = false
+erf.fire.balbi.formulation = "2020"
+erf.fire.balbi.wind_source = "reference"

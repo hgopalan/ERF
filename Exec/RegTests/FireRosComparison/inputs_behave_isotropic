@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# BEHAVE multi-class Rothermel, isotropic level set.
+erf.fire.ros_model = "behave"
+erf.fire.directional_ros = false

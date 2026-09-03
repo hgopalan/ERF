@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# BEHAVE on the generic direction-dependent path.
+erf.fire.ros_model = "behave"
+erf.fire.directional_ros = true

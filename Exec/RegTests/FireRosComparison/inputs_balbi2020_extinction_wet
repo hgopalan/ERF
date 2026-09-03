@@ -1,0 +1,10 @@
+FILE = inputs_base
+
+# Balbi 2020 with the moisture-of-extinction cutoff on and the 1-hour moisture
+# above the FM1 extinction value, so the rate of spread must be zero and the
+# burned area stays at the ignition disc (50 cells).
+erf.fire.ros_model = "balbi"
+erf.fire.directional_ros = false
+erf.fire.balbi.formulation = "2020"
+erf.fire.balbi.use_moisture_extinction = true
+erf.fire.moisture_1hr = 0.20

@@ -1517,28 +1517,6 @@ ERF::InitData_post ()
                                               z_phys_nd[lev],
                                               walldist[lev]);
 
-                // Initialize fire layer after surface layer is fully initialized (lev=0)
-#ifdef ERF_ENABLE_FIRE
-                // z_phys_nd[0] is null on flat terrain (TerrainType::None); the fire
-                // layer handles that case itself, so it must not gate initialization.
-                if (lev == 0 && m_fire_layer) {
-                    m_fire_layer->initialize(*this, m_SurfaceLayer.get(), z_phys_nd[0].get(), m_fire_params);
-                    
-                    // Verify that at least one cell was marked during fire initialization
-                    if (const amrex::MultiFab* phi = m_fire_layer->get_levelset()) {
-                        Real phi_min = phi->min(0);
-                        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(phi_min < 0.0_rt,
-                            "[FIRE] Fire initialization failed: no cells were marked as burned. "
-                            "Check ignition parameters (ignition_x, ignition_y, ignition_r).");
-                    }
-                    
-                    // Restore fire state from checkpoint if restarting
-                    if (restart_chkfile != "") {
-                        ReadCheckpointFileFire();
-                    }
-                }
-#endif
-
                 // Initialize tke(x,y,z) as a function of u*(x,y)
                 if (solverChoice.turbChoice[lev].init_tke_from_ustar) {
                     Real qkefac = one;
@@ -1552,6 +1530,30 @@ ERF::InitData_post ()
                     m_SurfaceLayer->init_tke_from_ustar(lev, vars_new[lev][Vars::cons], z_phys_nd[lev], qkefac);
                 }
             }
+
+            // Initialize the fire layer once the surface layer exists (lev = 0).
+            // This runs on a clean start and on a restart alike: on a restart the
+            // fields are allocated and set up from the inputs here, then overwritten
+            // from the checkpoint by ReadCheckpointFileFire().
+#ifdef ERF_ENABLE_FIRE
+            // z_phys_nd[0] is null on flat terrain (TerrainType::None); the fire
+            // layer handles that case itself, so it must not gate initialization.
+            if (lev == 0 && m_fire_layer) {
+                m_fire_layer->initialize(*this, m_SurfaceLayer.get(), z_phys_nd[0].get(), m_fire_params);
+
+                // Verify that at least one cell was marked during fire initialization
+                if (const amrex::MultiFab* phi = m_fire_layer->get_levelset()) {
+                    Real phi_min = phi->min(0);
+                    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(phi_min < 0.0_rt,
+                        "[FIRE] Fire initialization failed: no cells were marked as burned. "
+                        "Check ignition parameters (ignition_x, ignition_y, ignition_r).");
+                }
+
+                if (restart_chkfile != "") {
+                    ReadCheckpointFileFire();
+                }
+            }
+#endif
         }
     } // end if (phys_bc_type[Orientation(Direction::z,Orientation::low)] == ERF_BC::surface_layer)
 

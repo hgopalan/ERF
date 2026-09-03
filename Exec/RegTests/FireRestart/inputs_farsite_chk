@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# Same as inputs_farsite_straight but stops at 100 s and writes chk00200.
+erf.fire.ros_model = "rothermel"
+erf.fire.propagation_method = "farsite"
+stop_time = 100.0
+max_step = 200
+erf.check_int = 200

@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# Cheney-Gould (1998) grassland model, isotropic level set.
+erf.fire.ros_model = "cheney_gould"
+erf.fire.directional_ros = false

@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# Rothermel on the FARSITE path, uninterrupted to 200 s.
+erf.fire.ros_model = "rothermel"
+erf.fire.propagation_method = "farsite"
+stop_time = 200.0
+max_step = 400
+erf.check_int = -1

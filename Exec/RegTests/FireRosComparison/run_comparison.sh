@@ -22,7 +22,12 @@ VARIANTS="rothermel_isotropic rothermel_directional
           rothermel_fuelmap
           hybrid_none hybrid_all hybrid_region hybrid_fuel
           hybrid_none_directional hybrid_all_directional hybrid_region_directional
-          hybrid_wind_off hybrid_wind"
+          hybrid_wind_off hybrid_wind
+          macarthur_isotropic macarthur_directional
+          cheney_gould_isotropic cheney_gould_directional
+          behave_isotropic behave_directional
+          rothermel_nearest balbi2020_reference_wind balbi2020_extinction_wet
+          hybrid_behave_cheney hybrid_behave_cheney_directional hybrid_blend_width"
 
 printf "%-24s %8s %10s %14s %10s\n" variant exit cells max_ROS sec_cells
 printf "%-24s %8s %10s %14s %10s\n" ------------------------ -------- ---------- -------------- ----------
