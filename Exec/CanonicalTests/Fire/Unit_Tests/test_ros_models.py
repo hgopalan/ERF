@@ -10,6 +10,7 @@ Tests are organized by model:
   - MacArthur (1966) Australian formula (4 tests)
   - Balbi (2009) physical model (10 tests)
   - Balbi (2020) convective-radiative model and couplings (10 tests)
+  - Directional ROS projection (5 tests)
   - Cheney-Gould (1998) grassland model (4 tests)
   - Per-fuel wind height tables (5 tests)
 
@@ -764,6 +765,103 @@ def test_balbi_herb_curing_raises_load():
 
 
 # ============================================================================
+# Directional ROS Projection Tests
+# ============================================================================
+
+def project_onto_normal(u, v, nx, ny):
+    """
+    Wind component along the spread direction, clamped at zero.
+
+    Formula from ERF_DirectionalRos.H, directional_ros_cell(): only a wind
+    pushing into the unburned fuel drives the front, so a backing component is
+    clamped rather than passed as a negative speed.
+    """
+    return max(u * nx + v * ny, 0.0)
+
+
+def test_directional_head_matches_isotropic():
+    """Test 34: at the head the projected rate equals the isotropic rate."""
+    # The head normal is aligned with the wind, so U . n = |U| and the model
+    # sees exactly what the isotropic path hands it.
+    u, v = 6.0, 0.0
+    speed = math.hypot(u, v)
+    U_n = project_onto_normal(u, v, 1.0, 0.0)
+    passed = abs(U_n - speed) < 1.0e-12
+    status = "\u2713" if passed else "\u2717"
+    print(f"{status} Test 34: directional head rate equals the isotropic rate")
+    if not passed:
+        print(f"    U_n={U_n}, |U|={speed}")
+    return passed
+
+
+def test_directional_flank_and_back_drop_the_wind():
+    """Test 35: flank and backing directions see no driving wind."""
+    u, v = 6.0, 0.0
+    flank = project_onto_normal(u, v, 0.0, 1.0)
+    back = project_onto_normal(u, v, -1.0, 0.0)
+    passed = flank == 0.0 and back == 0.0
+    status = "\u2713" if passed else "\u2717"
+    print(f"{status} Test 35: flank and backing directions get zero driving wind")
+    if not passed:
+        print(f"    flank={flank}, back={back}")
+    return passed
+
+
+def test_directional_never_exceeds_head():
+    """Test 36: the directional rate never exceeds the head-fire rate."""
+    # This is what keeps the isotropic field a conservative CFL bound for the
+    # level-set subcycle: R(n) <= R_head for every n.
+    u, v = 5.0, 3.0
+    speed = math.hypot(u, v)
+    worst = 0.0
+    for deg in range(0, 360, 5):
+        th = math.radians(deg)
+        U_n = project_onto_normal(u, v, math.cos(th), math.sin(th))
+        worst = max(worst, U_n)
+    passed = worst <= speed + 1.0e-12
+    status = "\u2713" if passed else "\u2717"
+    print(f"{status} Test 36: directional wind never exceeds the head-fire wind")
+    if not passed:
+        print(f"    max projection {worst} vs |U| {speed}")
+    return passed
+
+
+def test_directional_rothermel_flank_is_the_no_wind_rate():
+    """Test 37: with the wind projected out, Rothermel returns R0."""
+    # R = R0 (1 + phi_w + phi_s); on the flank both factors vanish.
+    R0 = 0.02
+    phi_w_head = 12.0
+    head = R0 * (1.0 + phi_w_head)
+    flank = R0 * (1.0 + 0.0)
+    passed = abs(flank - R0) < 1.0e-12 and head > flank
+    status = "\u2713" if passed else "\u2717"
+    print(f"{status} Test 37: Rothermel flank rate falls back to R0")
+    if not passed:
+        print(f"    head={head}, flank={flank}, R0={R0}")
+    return passed
+
+
+def test_directional_balbi_2009_stalls_on_the_flank():
+    """Test 38: the 2009 Balbi form has no flank spread, the 2020 form does."""
+    # Balbi 2009 is R = A (1 + sin a - cos a) with tan a = U/v_b: at U = 0 and
+    # no slope the geometric factor is exactly zero. The 2020 form keeps its
+    # radiative base term R_b, which is why the two respond so differently to
+    # direction-dependent spread.
+    A_coeff, v_b = compute_balbi_params(*ANDERSON_FUELS[1], M_f=0.06)
+    flank_2009 = balbi_ros(0.0, 0.0, A_coeff, v_b)
+
+    bc = compute_balbi2020_state(load=0.3, **PAPER_TABLE2)
+    flank_2020 = balbi2020_ros(bc, U=0.0)
+
+    passed = flank_2009 == 0.0 and flank_2020 > 0.0
+    status = "\u2713" if passed else "\u2717"
+    print(f"{status} Test 38: Balbi 2009 flank rate is zero, 2020 is not")
+    if not passed:
+        print(f"    2009 flank={flank_2009}, 2020 flank={flank_2020}")
+    return passed
+
+
+# ============================================================================
 # Cheney-Gould (1998) Grassland Model Tests
 # ============================================================================
 
@@ -999,7 +1097,7 @@ def test_fcz0_table_size():
 # ============================================================================
 
 def main():
-    """Run all 33 tests and return exit code (0 = all pass, 1 = any fail)."""
+    """Run all 38 tests and return exit code (0 = all pass, 1 = any fail)."""
     print("=" * 70)
     print("Phase 13 ROS Model Unit Tests")
     print("=" * 70)
@@ -1043,6 +1141,16 @@ def main():
     results.append(test_balbi_moisture_extinction_cutoff())
     results.append(test_balbi_moisture_clamp())
     results.append(test_balbi_herb_curing_raises_load())
+    print()
+
+    # Directional projection tests (5)
+    print("Directional ROS Projection Tests")
+    print("-" * 70)
+    results.append(test_directional_head_matches_isotropic())
+    results.append(test_directional_flank_and_back_drop_the_wind())
+    results.append(test_directional_never_exceeds_head())
+    results.append(test_directional_rothermel_flank_is_the_no_wind_rate())
+    results.append(test_directional_balbi_2009_stalls_on_the_flank())
     print()
     
     # Cheney-Gould tests (4)

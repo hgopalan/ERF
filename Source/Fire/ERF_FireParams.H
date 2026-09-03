@@ -183,6 +183,20 @@ struct FireParams
     // allocated and the call in advance() returns immediately.
     AccelerationParams accel;
 
+    // Evaluate the rate of spread along the local front normal on the level-set
+    // path, instead of handing it a single scalar rate that it then applies in
+    // every direction. The wind and slope are projected onto the normal and the
+    // selected ROS model is evaluated with the projected scalars, so head, flank
+    // and backing spread come from the model itself.
+    //
+    // Off by default: with it off every model keeps the isotropic behaviour it
+    // has always had on that path. No effect on the FARSITE path, which gets its
+    // directionality from the Anderson ellipse. Balbi has its own switch,
+    // erf.fire.balbi.directional, which additionally carries that model's
+    // per-cell moisture, surface temperature and heat-flux couplings; either
+    // flag enables direction-dependent spread when ros_model = "balbi".
+    bool              directional_ros     = false;
+
     // Horizontal interpolation of the atmospheric wind onto the fire grid:
     // 0 = nearest atmospheric column (every fire cell in a column shares one
     // wind vector), 1 = bilinear between the four surrounding columns.
@@ -446,6 +460,8 @@ struct FireParams
        pp.query("accel.perim_limit",     ac.perim_limit);
        pp.query("accel.enable_wind_lag", ac.enable_wind_lag);
        pp.query("accel.tau_wind",        ac.tau_wind);
+
+       pp.query("directional_ros", directional_ros);
 
        {
            std::string wind_interp_str = (wind_interp == 0) ? "nearest" : "bilinear";

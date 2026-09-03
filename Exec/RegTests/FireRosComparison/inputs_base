@@ -1,0 +1,71 @@
+# Shared configuration for the FireRosComparison regression tests.
+#
+# A single wind-driven grass fire on flat ground, small and short enough to run
+# in seconds, used to compare rate-of-spread formulations against each other.
+# Every variant in this directory includes this file and overrides only the
+# lines that distinguish it, so any difference in the result is the formulation.
+#
+# Run one variant with, e.g.:
+#   erf_exec inputs_rothermel_directional
+#
+# or all of them with:
+#   ./run_comparison.sh <path to erf_exec>
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 2000.0 2000.0 600.0
+amr.n_cell = 20 20 30
+
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.max_grid_size = 20      # box lengths must divide by grid_ratio
+amr.max_grid_size_z = 30    # fire module forbids z-decomposition
+
+zlo.type = "surface_layer"
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+erf.molec_diff_type = "None"
+erf.les_type = "Smagorinsky"
+erf.Cs = 0.1
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type = Ideal
+
+erf.fixed_dt = 0.5
+max_step = 400
+stop_time = 200.0
+
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_int = -1
+erf.fire_plot_int = -1
+
+erf.fire.enable = true
+erf.fire.fire_debug = true
+erf.fire.grid_ratio = 4              # 25 m fire cells
+erf.fire.coupling_type = "passive"
+erf.fire.propagation_method = "levelset"
+
+erf.fire.fuel_model_id = 1           # short grass
+erf.fire.moisture_1hr = 0.06
+erf.fire.moisture_10hr = 0.07
+erf.fire.moisture_100hr = 0.09
+erf.fire.moisture_dynamic = false
+
+erf.fire.ignition_x = 700.0
+erf.fire.ignition_y = 1000.0
+erf.fire.ignition_r = 100.0
+
+erf.fire.wind_ref_ht = 6.1
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = true
+erf.fire.use_terrain_wind = false

@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+erf.fire.ros_model = "rothermel"
+erf.fire.directional_ros = true

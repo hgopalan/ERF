@@ -28,6 +28,7 @@
 #include <ERF_FuelWindHeight.H>
 // Phase 13B: ROS models
 #include <ERF_BalbiModel.H>
+#include <ERF_DirectionalRos.H>
 #include <ERF_CheneyGouldModel.H>
 #include <ERF_MacArthurModel.H>
 // Phase 15: BEHAVE multi-class Rothermel

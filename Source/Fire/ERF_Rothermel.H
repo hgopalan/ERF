@@ -273,7 +273,36 @@ AMREX_GPU_DEVICE AMREX_FORCE_INLINE
 amrex::Real rothermel_ros_cell(
     amrex::Real ux_eff, amrex::Real uy_eff,
     amrex::Real sx, amrex::Real sy,
-    const RothermelComputed& rc) noexcept;
+    const RothermelComputed& rc) noexcept
+{
+    // Effective wind speed [m/s]
+    amrex::Real U_eff = std::sqrt(ux_eff*ux_eff + uy_eff*uy_eff);
+
+    // Wind factor: φ_w = C * U_eff^B * (β/β_opt)^E
+    // Convert to ft/min for Rothermel calculation
+    amrex::Real U_eff_ftmin = U_eff * rc.wind_conv;
+
+    // Apply MEWS cap
+    U_eff_ftmin = amrex::min(U_eff_ftmin, rc.U_max_ftmin);
+
+    // Slope magnitude and squared tangent (for Rothermel Eq. 51)
+    amrex::Real tan_slope_sq = sx*sx + sy*sy;
+
+    // Cap at tan²(80°) ≈ 32.16; steeper than any realistic or surveyed terrain.
+    // Prevents corrupted boundary slopes from producing unphysical ROS.
+    tan_slope_sq = amrex::min(tan_slope_sq, amrex::Real(32.0));
+
+    // Slope factor (Rothermel Eq. 51): φ_s = 5.275 * β^(-0.3) * tan²(φ)
+    amrex::Real phi_s = rc.phi_s_const * tan_slope_sq;
+
+    // Wind factor
+    amrex::Real phi_w = rc.C * std::pow(U_eff_ftmin, rc.B) * rc.beta_ratio_E;
+
+    // Rate of spread: R = R0 * (1 + φ_w + φ_s)
+    amrex::Real ROS = rc.R0 * (1.0 + phi_w + phi_s);
+    
+    return amrex::max(ROS, 0.0);
+}
 
 /**
  * @brief Compute rate-of-spread field on fire grid

@@ -707,11 +707,19 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 : time_remaining;
             dt_ls = std::min(dt_ls, time_remaining);
 
-            // With balbi.directional the ROS is rebuilt from the front normal
-            // inside every RK stage, so the front gets head, flank and backing
-            // spread from the model rather than a single head-fire magnitude.
-            // fire_ros still holds the isotropic head ROS and sets the CFL.
-            if (m_params.ros_model == "balbi" && m_params.balbi.directional) {
+            // With directional spread enabled the ROS is rebuilt from the front
+            // normal inside every RK stage, so the front gets head, flank and
+            // backing spread from the model rather than a single head-fire
+            // magnitude. fire_ros still holds the isotropic head ROS and sets
+            // the CFL, which stays conservative since the directional rate never
+            // exceeds it.
+            const bool balbi_directional =
+                (m_params.ros_model == "balbi") &&
+                (m_params.balbi.directional || m_params.directional_ros);
+            const bool generic_directional =
+                m_params.directional_ros && (m_params.ros_model != "balbi");
+
+            if (balbi_directional) {
                 advect_levelset_balbi_rk3(*fire_phi,
                                           (m_params.balbi.wind_source == 1)
                                               ? *fire_wind_ref : *fire_wind_eff,
@@ -719,6 +727,26 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                           m_fg.geom, dt_ls,
                                           m_params.levelset_eps_visc,
                                           m_bc_default, m_params.balbi, balbi_in);
+            } else if (generic_directional) {
+                DirectionalRosState dir_state;
+                if (m_params.ros_model == "behave") {
+                    dir_state.model = DIRECTIONAL_ROS_BEHAVE;
+                    dir_state.bs    = m_bs_default;
+                } else if (m_params.ros_model == "macarthur") {
+                    dir_state.model = DIRECTIONAL_ROS_MACARTHUR;
+                } else if (m_params.ros_model == "cheney_gould") {
+                    dir_state.model       = DIRECTIONAL_ROS_CHENEY_GOULD;
+                    dir_state.cgc         = m_cgc;
+                    dir_state.cg_moisture = m_params.cheney_gould.moisture;
+                    dir_state.cg_curing   = m_params.cheney_gould.curing;
+                } else {
+                    dir_state.model = DIRECTIONAL_ROS_ROTHERMEL;
+                    dir_state.rc    = m_rc;
+                }
+                advect_levelset_directional_rk3(*fire_phi, *fire_wind_eff,
+                                                *fire_slopes, m_fg.geom, dt_ls,
+                                                m_params.levelset_eps_visc,
+                                                dir_state);
             } else {
                 fire_levelset::advect_levelset_weno5z_rk3(*fire_phi, *fire_wind_eff,
                                                 *fire_ros, m_fg.geom, dt_ls,

@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+erf.fire.ros_model = "balbi"
+erf.fire.directional_ros = false
+erf.fire.balbi.formulation = "2020"
