@@ -431,6 +431,28 @@ erf.fire.fire_atm_feedback = 1.0
 # false: sensible heat only
 erf.fire.inject_latent = true
 
+# How the fire tendency enters the cell source once make_sources has rebuilt
+# it for the Runge-Kutta stage
+# "overwrite" (default, legacy) replaces the theta and vapour slots, which
+#             discards any other source in them (immersed-forcing scalar
+#             relaxation, radiation heating, Rayleigh damping)
+# "add"       accumulates into the freshly rebuilt source, once per stage;
+#             required to run fire heat together with immersed-forcing buildings
+erf.fire.source_mode = "overwrite"
+
+# Place the injected heat only in the open part of each atmospheric column:
+# below the sampled roof height a cell's share is scaled by the column's open
+# fraction (one minus the area covered by structure cells) and the column is
+# renormalised, so no fire heat lands inside a building and the energy per
+# column is unchanged. Needs erf.fire.structures.enable.
+erf.fire.heat_open_fraction = false
+
+# Tendency form. true (default, legacy): d(rho theta)/dt = -rho (1/Cp) dQ/dz,
+# which injects rho times the fire flux as heat, about 10-15% too much at sea
+# level. false: the energy-consistent -(1/Cp) dQ/dz; the coupling's energy
+# diagnostic then reads exactly one.
+erf.fire.heat_tendency_density = true
+
 # ============================================================================
 # TERRAIN FILE (Optional)
 # ============================================================================

@@ -222,6 +222,9 @@ explains what each row should show:
 - ``FireRestart``: a checkpoint written mid-run and a restart from it, on both
   propagation paths and with lagged heat coupling, which must reproduce the
   uninterrupted run exactly.
+- ``FireHeatPlacement``: the fire tendency's source mode and the open-fraction
+  placement around buildings, with and without immersed-forcing buildings,
+  checked through the coupling's energy diagnostic.
 
 Where each feature is exercised:
 
@@ -261,15 +264,15 @@ Where each feature is exercised:
      - canonical ``Fire_Behavior/Spotting``, ``Fire_Behavior/Crown_Fire``; ``Unit_Tests/test_albini_spotting.py``, ``test_crown_fire.py``
    * - Coupling modes, heat injection, smoke tracer
      - canonical ``Fire_Atmosphere_Coupling``
+   * - Additive source mode, open-fraction heat placement, fire heat with immersed-forcing buildings
+     - ``FireHeatPlacement``
    * - Flame temperature, tilt, intensity
      - canonical ``Heat_Flux_Diagnostics``
    * - Terrain slopes and terrain wind corrections
      - canonical ``Core_Physics/ROS_Slope_Effects``, ``Terrain_Wind_Coupling``; ``Unit_Tests/test_terrain_projection.py``
 
-Not yet covered by any test: fire heat injection together with
-immersed-forcing buildings (known to discard the immersed-forcing scalar
-source, see :ref:`sec:FireCoupling`), restart of the spotting and crown-fire
-state, and the fire-dust coupling.
+Not yet covered by any test: restart of the spotting and crown-fire state,
+and the fire-dust coupling.
 
 References
 ----------

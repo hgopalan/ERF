@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# Additive with open-fraction placement, flat ground: the same energy per column, none of it inside the boxes.
+erf.fire.source_mode = "add"
+erf.fire.heat_open_fraction = true

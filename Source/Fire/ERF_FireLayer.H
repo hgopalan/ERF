@@ -631,6 +631,16 @@ private:
     // cc_source at the start of the next timestep (one-step explicit lag).
     std::unique_ptr<amrex::MultiFab>         m_Q_atm_prev;            // sensible [W/m²]
     std::unique_ptr<amrex::MultiFab>         m_Q_lat_atm_prev;        // latent   [W/m²]
+
+    // Open-fraction heat placement (erf.fire.heat_open_fraction): per
+    // atmospheric column, the fraction of the footprint not covered by
+    // non-burnable structure cells and the mean roof height of those cells,
+    // both area-averaged from the fire grid at initialisation.
+    std::unique_ptr<amrex::MultiFab>         m_open_frac_atm;         // [0-1]
+    std::unique_ptr<amrex::MultiFab>         m_roof_h_atm;            // [m]
+
+    /// Fill m_open_frac_atm and m_roof_h_atm from the mask and structure height.
+    void build_open_fraction(const amrex::Geometry& geom_atm);
     std::unique_ptr<amrex::MultiFab>         fire_latent_flux;        // latent heat flux on fire grid [W/m²]
 
     // Precomputed Rothermel coefficients

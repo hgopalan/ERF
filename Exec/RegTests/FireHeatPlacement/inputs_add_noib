@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Additive source, flat ground. No other source is active, so this must equal overwrite_noib exactly.
+erf.fire.source_mode = "add"

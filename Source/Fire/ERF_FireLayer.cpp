@@ -514,6 +514,11 @@ void FireLayer::initialize(const ERF& erf,
             amrex::Print() << "[FIRE DEBUG] Non-burnable mask: "
                            << std::lround(fire_nonburnable->sum(0)) << " cells\n";
         }
+        // Per-column open fraction and roof height for the coupling: used as
+        // weights with heat_open_fraction, and for the diagnostics regardless.
+        if (m_params.structures.enable && m_params.injects_flux()) {
+            build_open_fraction(erf.Geom(0));
+        }
     }
 
     m_probe_reported.assign(m_params.probes.size() / 2, false);
@@ -1326,7 +1331,60 @@ void FireLayer::apply_fire_coupling_to_cc_source(
         m_params.heat_flux_alfg,
         m_params.fire_atm_feedback,
         has_moisture,
-        m_params.fire_debug);
+        m_params.fire_debug,
+        m_params.source_mode == "add",
+        m_open_frac_atm.get(),
+        m_roof_h_atm.get(),
+        m_params.heat_open_fraction,
+        m_params.heat_tendency_density);
+}
+
+void FireLayer::build_open_fraction(const amrex::Geometry& geom_atm)
+{
+    if (!fire_nonburnable || !fire_structure_height || !m_Q_atm_prev) { return; }
+    const amrex::BoxArray& ba2d = m_Q_atm_prev->boxArray();
+    const amrex::DistributionMapping& dm = m_Q_atm_prev->DistributionMap();
+    m_open_frac_atm = std::make_unique<amrex::MultiFab>(ba2d, dm, 1, 0);
+    m_roof_h_atm    = std::make_unique<amrex::MultiFab>(ba2d, dm, 1, 0);
+
+    // Only structure cells count toward the roof height, not fuel-code or
+    // firebreak cells of the mask, which have no height.
+    amrex::MultiFab smask(m_fg.ba, m_fg.dm, 1, 0);
+    amrex::MultiFab sh(m_fg.ba, m_fg.dm, 1, 0);
+    const amrex::Real hmin = m_params.structures.min_height;
+    for (amrex::MFIter mfi(smask); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.validbox();
+        auto const& m = smask.array(mfi);
+        auto const& w = sh.array(mfi);
+        auto const& h = fire_structure_height->const_array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const bool s = h(i, j, k) > hmin;
+            m(i, j, k) = s ? 1.0_rt : 0.0_rt;
+            w(i, j, k) = s ? h(i, j, k) : 0.0_rt;
+        });
+    }
+    // Area averages onto the atmospheric columns: blocked fraction and
+    // (height x indicator), whose ratio is the mean roof height.
+    amrex::MultiFab blocked(ba2d, dm, 1, 0), hsum(ba2d, dm, 1, 0);
+    coarsen_fire_flux_to_atm(blocked, smask, geom_atm, m_fg.geom, m_fg.C);
+    coarsen_fire_flux_to_atm(hsum,    sh,    geom_atm, m_fg.geom, m_fg.C);
+    for (amrex::MFIter mfi(*m_open_frac_atm); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.validbox();
+        auto const& fo = m_open_frac_atm->array(mfi);
+        auto const& hr = m_roof_h_atm->array(mfi);
+        auto const& b  = blocked.const_array(mfi);
+        auto const& hs = hsum.const_array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const amrex::Real f = amrex::max(0.0_rt, amrex::min(1.0_rt, b(i, j, k)));
+            fo(i, j, k) = 1.0_rt - f;
+            hr(i, j, k) = (f > 1.0e-6_rt) ? hs(i, j, k) / f : 0.0_rt;
+        });
+    }
+    if (m_params.fire_debug) {
+        amrex::Print() << "[FIRE DEBUG] Open-fraction heat placement: min open fraction "
+                       << m_open_frac_atm->min(0) << ", max roof height "
+                       << m_roof_h_atm->max(0) << " m\n";
+    }
 }
 
 // ───────────────────────────────────────────────────────────────────────────

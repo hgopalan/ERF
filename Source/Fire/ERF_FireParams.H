@@ -91,6 +91,25 @@ struct FireParams
     //                    (vars_new), fire heat still enters atmosphere at step n+1
     std::string       coupling_type           = "lagged";
     bool              inject_latent           = true;  ///< inject latent heat alongside sensible (WRF-Fire parity)
+    // How the fire tendency enters the cell source after make_sources has
+    // rebuilt it for the Runge-Kutta stage. "overwrite" (default, legacy)
+    // replaces the potential-temperature and vapour slots, which discards any
+    // other source in them (immersed-forcing scalar relaxation, radiation,
+    // Rayleigh damping). "add" accumulates into the freshly rebuilt source,
+    // once per stage, so nothing is lost and nothing is double counted.
+    std::string       source_mode             = "overwrite";
+    // Place the injected heat only in the open part of each atmospheric column:
+    // below the sampled roof height a cell's weight is scaled by its open
+    // fraction (one minus the area covered by non-burnable structure cells),
+    // and the column's total is renormalised so the injected energy is
+    // unchanged. Needs erf.fire.structures.enable. Off by default.
+    bool              heat_open_fraction      = false;
+    // Legacy tendency form: d(rho theta)/dt = -rho (1/Cp) dQ/dz, which injects
+    // rho times the fire flux as heat (about 10-15% too much at sea level).
+    // false uses the energy-consistent -(1/Cp) dQ/dz. Default true keeps
+    // existing coupled results unchanged; the coupling's energy diagnostic
+    // reads exactly one with false.
+    bool              heat_tendency_density   = true;
 
     // Phase 8: Albini (1983) ember spotting parameters
     struct SpottingParams {
@@ -452,6 +471,12 @@ struct FireParams
        pp.query("fire_atm_feedback", fire_atm_feedback);
        pp.query("coupling_type", coupling_type);
        pp.query("inject_latent", inject_latent);
+       pp.query("source_mode", source_mode);
+       if (source_mode != "overwrite" && source_mode != "add") {
+           amrex::Abort("erf.fire.source_mode must be \"overwrite\" or \"add\"");
+       }
+       pp.query("heat_open_fraction", heat_open_fraction);
+       pp.query("heat_tendency_density", heat_tendency_density);
 
        // Phase 4: smoke tracer parameters
        pp.query("smoke_enable", smoke_enable);
@@ -632,6 +657,9 @@ struct FireParams
            if (structures.min_height < 0.0) {
                amrex::Abort("erf.fire.structures.min_height must be >= 0");
            }
+       }
+       if (heat_open_fraction && !structures.enable) {
+           amrex::Abort("erf.fire.heat_open_fraction needs erf.fire.structures.enable");
        }
 
        // Balbi parameters
