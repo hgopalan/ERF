@@ -225,6 +225,9 @@ explains what each row should show:
 - ``FireHeatPlacement``: the fire tendency's source mode and the open-fraction
   placement around buildings, with and without immersed-forcing buildings,
   checked through the coupling's energy diagnostic.
+- ``FireNearWall``: the level-set wall extrapolation and the open-column wind
+  weights next to masked buildings, measured by the flank's arrival along a
+  wall against the unmasked reference.
 
 Where each feature is exercised:
 
@@ -266,6 +269,8 @@ Where each feature is exercised:
      - canonical ``Fire_Atmosphere_Coupling``
    * - Additive source mode, open-fraction heat placement, fire heat with immersed-forcing buildings
      - ``FireHeatPlacement``
+   * - Level-set wall extrapolation, open-column wind weights
+     - ``FireNearWall``
    * - Flame temperature, tilt, intensity
      - canonical ``Heat_Flux_Diagnostics``
    * - Terrain slopes and terrain wind corrections

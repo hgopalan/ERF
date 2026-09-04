@@ -80,6 +80,14 @@
  * reference height above *its own* ground, and the results are blended with
  * bilinear weights. With wind_interp = 0 only the column containing the cell is
  * used, which makes the fire-grid wind piecewise constant on atmospheric cells.
+ *
+ * With col_open and col_roof given (2D atmospheric-column fields, one ghost
+ * cell) each bilinear weight is multiplied by the column's open fraction when
+ * its roof is above the cell's wind height, and the four weights are
+ * renormalised, so a column inside a building does not contribute its
+ * relaxed in-building velocity to the fire cells around it. A cell whose four
+ * columns are all closed keeps the plain weights; it is inside a footprint
+ * and masked anyway.
  */
 void fill_fire_wind_from_interpolation(
     amrex::MultiFab&       fire_wind_ref,
@@ -95,7 +103,9 @@ void fill_fire_wind_from_interpolation(
     const amrex::MultiFab* fuel_model_mf = nullptr,
     const amrex::Real*     d_fcwh         = nullptr,
     int                    nfuelcats      = 0,
-    int                    wind_interp    = 1);
+    int                    wind_interp    = 1,
+    const amrex::MultiFab* col_open       = nullptr,
+    const amrex::MultiFab* col_roof       = nullptr);
 
 /**
  * @brief Compute unsheltered Wind Adjustment Factor (Andrews/Albini & Baughman 1979)

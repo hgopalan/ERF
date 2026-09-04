@@ -37,6 +37,18 @@ the fire-grid wind piecewise constant on atmospheric cells with a full cell of
 shear at every block edge. The result is ``fire_wind_ref`` and the sampling
 height is ``fire_wind_extract_z``.
 
+Next to immersed-forcing buildings the columns inside a footprint carry the
+relaxed in-building velocity, and the bilinear blend hands a share of it to
+every fire cell within one atmospheric cell of the wall. With
+:cpp:`erf.fire.structures.wind_open_columns` each column's weight is
+multiplied by its open fraction (the part of the column not covered by
+non-burnable structure cells, from the structure heightmap) whenever its
+sampled roof is above the cell's wind height, and the four weights are
+renormalised, so the fire reads the wind of the open columns only. A cell
+whose four columns are all closed keeps the plain weights; it is inside a
+footprint and masked anyway. Off by default; needs
+:cpp:`erf.fire.structures.enable` and has no effect with ``"nearest"``.
+
 **Adjustment to the flame zone.** ``fire_wind_eff`` is the reference wind
 multiplied by the wind adjustment factor and modified by the terrain
 corrections:

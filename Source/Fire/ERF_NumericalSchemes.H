@@ -57,6 +57,46 @@ amrex::Real weno3_reconstruct(amrex::Real /*v0*/, amrex::Real v1,
 }
 
 /**
+ * @brief Level-set stencil that does not cross a non-burnable wall
+ *
+ * With `on` set, a stencil point inside the mask returns the value of the
+ * centre cell instead of its own: the level set is extrapolated into the
+ * wall with zero normal gradient, so a masked cell's untouched (and, next to
+ * a burned cell, very different) value never enters a derivative. Without it
+ * the one-sided difference toward the wall dominates the Godunov norm, the
+ * wall-adjacent cells burn down far faster than the spread rate, and the
+ * flank along the wall runs about 20% fast. Off (`on = false`) the stencil is
+ * the plain neighbour value, so every existing result is unchanged.
+ */
+struct WallStencil {
+    amrex::Array4<const amrex::Real> mask;
+    bool on = false;
+
+    AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+    bool masked(int i, int j, int k) const noexcept {
+        return on && mask(i, j, k) > amrex::Real(0.5);
+    }
+
+    /// phi at (i+di, j+dj, k) as seen from open cell (i, j, k)
+    AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+    amrex::Real at(const amrex::Array4<const amrex::Real>& phi,
+                   int i, int j, int k, int di, int dj) const noexcept {
+        if (on && mask(i + di, j + dj, k) > amrex::Real(0.5)) { return phi(i, j, k); }
+        return phi(i + di, j + dj, k);
+    }
+};
+
+/// Wall stencil for one fab: active only when a mask is given and the option is on.
+inline WallStencil make_wall_stencil(const amrex::MultiFab* mask, bool on,
+                                     const amrex::MFIter& mfi)
+{
+    WallStencil w;
+    w.on = on && (mask != nullptr);
+    if (w.on) { w.mask = mask->const_array(mfi); }
+    return w;
+}
+
+/**
  * @brief Godunov norm of the gradient, with optional terrain arc-length correction
  *
  * Computes |∇φ| using Godunov's scheme on a staggered grid.
@@ -75,13 +115,15 @@ amrex::Real godunov_norm_grad_phi(const amrex::Array4<const amrex::Real>& phi,
                                    amrex::Real dx, amrex::Real dy,
                                    int i, int j, int k,
                                    amrex::Real slope_x = 0.0,
-                                   amrex::Real slope_y = 0.0) noexcept
+                                   amrex::Real slope_y = 0.0,
+                                   const WallStencil& wall = WallStencil{}) noexcept
 {
-    // One-sided derivatives (Godunov scheme)
-    amrex::Real dxm = (phi(i,   j, k) - phi(i-1, j, k)) / dx;
-    amrex::Real dxp = (phi(i+1, j, k) - phi(i,   j, k)) / dx;
-    amrex::Real dym = (phi(i, j,   k) - phi(i, j-1, k)) / dy;
-    amrex::Real dyp = (phi(i, j+1, k) - phi(i, j,   k)) / dy;
+    // One-sided derivatives (Godunov scheme). Through a wall stencil a masked
+    // neighbour carries the centre value, so no difference crosses a wall.
+    amrex::Real dxm = (phi(i, j, k) - wall.at(phi, i, j, k, -1, 0)) / dx;
+    amrex::Real dxp = (wall.at(phi, i, j, k, 1, 0) - phi(i, j, k)) / dx;
+    amrex::Real dym = (phi(i, j, k) - wall.at(phi, i, j, k, 0, -1)) / dy;
+    amrex::Real dyp = (wall.at(phi, i, j, k, 0, 1) - phi(i, j, k)) / dy;
 
     // Take max of upwind/downwind (Godunov)
     amrex::Real phi_x = (dxm * dxm > dxp * dxp) ? dxm : dxp;

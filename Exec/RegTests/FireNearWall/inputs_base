@@ -1,0 +1,82 @@
+# Near-wall behaviour of the level set and the wind extraction: the
+# FireHybridObstacles grass fire approaching three box obstacles on flat ground.
+# 320 x 160 x 160 m at 5 m, fire grid at 1.25 m, neutral 8 m/s sounding, FM1
+# short grass at 6% moisture with a non-burnable street along the wind.
+# Ignited as a 15 m disc at x = 130 m; the upwind faces of the boxes are 35 m
+# downwind of its edge. Passive coupling, direction-dependent level set.
+# Balbi 2020 on the reference wind. Variants add the non-burnable mask, the
+# level-set wall extrapolation, immersed-forcing buildings from the same
+# heightmap, and the open-column wind weights.
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 320.0 160.0 160.0
+amr.n_cell = 64 32 32
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.max_grid_size = 32      # box lengths must divide by grid_ratio
+amr.max_grid_size_z = 32    # fire module forbids z-decomposition
+
+zlo.type = "surface_layer"
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+erf.molec_diff_type = "None"
+erf.les_type = "Smagorinsky"
+erf.Cs = 0.1
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type = Ideal
+
+erf.fixed_dt = 0.125
+erf.substepping_cfl = 0.5
+max_step = 100000
+stop_time = 240.0
+
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_int = -1
+erf.fire_plot_int = -1
+
+erf.fire.enable = true
+erf.fire.fire_debug = true
+erf.fire.grid_ratio = 4              # 1.25 m fire cells; 32-cell boxes must divide by it
+erf.fire.coupling_type = "passive"
+erf.fire.propagation_method = "levelset"
+erf.fire.directional_ros = true
+erf.fire.fuel_model_id = 1           # short grass
+erf.fire.fuel_map.file = "fuel_map_street.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.rothermel_per_fuel = true   # honour the street (code 0) with Rothermel
+erf.fire.moisture_1hr = 0.06
+erf.fire.moisture_10hr = 0.07
+erf.fire.moisture_100hr = 0.09
+erf.fire.moisture_dynamic = false
+erf.fire.ignition_x = 130.0
+erf.fire.ignition_y = 80.0
+erf.fire.ignition_r = 15.0
+erf.fire.wind_ref_ht = 6.1
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = true
+erf.fire.use_terrain_wind = false
+erf.fire.balbi.formulation = "2020"
+erf.fire.balbi.wind_source = "reference"
+erf.fire.write_fire_stats_csv = false
+
+# Arrival-time probes: upwind faces, gap midpoints, downwind faces of the boxes.
+# The heightmap is on 5 m nodes and is sampled onto fire cells by nearest node,
+# so a footprint spans 2.5 m beyond its nominal edge; the face probes sit just
+# outside that sampled footprint (box at x = 180-200 m, sampled 177.5-202.5 m).
+erf.fire.probes = 176.0 30.0  176.0 80.0  176.0 115.0 \
+                  190.0 55.0  190.0 97.5  190.0 10.0 \
+                  204.0 30.0  204.0 80.0  204.0 115.0
+
+erf.fire.ros_model = "balbi"

@@ -1,0 +1,11 @@
+FILE = inputs_base
+
+# Flat ground, mask and wall extrapolation: the flank should arrive at the
+# rate of the unmasked reference.
+# Structures and the street as non-burnable cells
+erf.fire.structures.enable = true
+erf.fire.structures.file = "buildings_5m_64x32.txt"
+erf.fire.fuel_map.nonburnable_codes = 0
+
+# Level set extrapolated into the mask inside every stencil
+erf.fire.levelset.wall_extrapolate = true

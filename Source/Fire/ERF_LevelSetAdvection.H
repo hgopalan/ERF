@@ -80,7 +80,9 @@ inline void compute_levelset_rhs(amrex::MultiFab& rhs,
                                   const amrex::MultiFab& R_mf,
                                   amrex::Real dx, amrex::Real dy,
                                   amrex::Real eps_visc,
-                                  const amrex::MultiFab* slopes = nullptr)
+                                  const amrex::MultiFab* slopes = nullptr,
+                                  const amrex::MultiFab* mask = nullptr,
+                                  bool wall_extrap = false)
 {
     using namespace amrex;
 
@@ -94,6 +96,7 @@ inline void compute_levelset_rhs(amrex::MultiFab& rhs,
         auto rhs_arr = rhs.array(mfi);
         auto phi_arr = phi.const_array(mfi);
         auto R_arr = R_mf.const_array(mfi);
+        const WallStencil wall = make_wall_stencil(mask, wall_extrap, mfi);
 
         Array4<const Real> slope_arr;
         if (use_terrain) slope_arr = slopes->const_array(mfi);
@@ -107,11 +110,13 @@ inline void compute_levelset_rhs(amrex::MultiFab& rhs,
             const Real sx = use_terrain ? slope_arr(i, j, k, 0) : Real(0.0);
             const Real sy = use_terrain ? slope_arr(i, j, k, 1) : Real(0.0);
             Real norm_grad = fire_levelset::godunov_norm_grad_phi(phi_arr, dx, dy,
-                                                                  i, j, k, sx, sy);
+                                                                  i, j, k, sx, sy, wall);
 
-            // Compute Δφ = ∂²φ/∂x² + ∂²φ/∂y²
-            Real laplacian = (phi_arr(i+1, j, k) - 2.0*phi_arr(i, j, k) + phi_arr(i-1, j, k)) * dx2i
-                           + (phi_arr(i, j+1, k) - 2.0*phi_arr(i, j, k) + phi_arr(i, j-1, k)) * dy2i;
+            // Compute Δφ = ∂²φ/∂x² + ∂²φ/∂y², through the same wall stencil
+            Real laplacian = (wall.at(phi_arr, i, j, k, 1, 0) - 2.0*phi_arr(i, j, k)
+                              + wall.at(phi_arr, i, j, k, -1, 0)) * dx2i
+                           + (wall.at(phi_arr, i, j, k, 0, 1) - 2.0*phi_arr(i, j, k)
+                              + wall.at(phi_arr, i, j, k, 0, -1)) * dy2i;
 
             // RHS: -R * (|∇φ| - ε Δφ)
             Real R_val = R_arr(i, j, k);
@@ -176,6 +181,8 @@ inline void hold_phi_in_mask(amrex::MultiFab& phi, const amrex::MultiFab* mask, 
  * @param[in]     fill_ros  Callable (MultiFab& R, const MultiFab& phi_stage)
  * @param[in]     mask      Optional non-burnable mask; the ROS is zeroed there
  *                          after every fill
+ * @param[in]     wall_extrap  Extrapolate phi into mask cells inside every
+ *                          stencil (see WallStencil); needs a mask
  */
 template <class FillRos>
 inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
@@ -184,7 +191,8 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
                                           amrex::Real dt,
                                           amrex::Real eps_visc,
                                           FillRos&& fill_ros,
-                                          const amrex::MultiFab* mask = nullptr)
+                                          const amrex::MultiFab* mask = nullptr,
+                                          bool wall_extrap = false)
 {
     using namespace amrex;
 
@@ -205,7 +213,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     phi_star.FillBoundary(geom.periodicity());
     fill_ros(R_dir, phi_star);
     zero_ros_in_mask(R_dir, mask);
-    compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes);
+    compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap);
     for (MFIter mfi(phi_star); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto ps = phi_star.array(mfi);
@@ -219,7 +227,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     // Stage 2: phi** = (3/4)phi^n + (1/4)(phi* + dt L(phi*))
     fill_ros(R_dir, phi_star);
     zero_ros_in_mask(R_dir, mask);
-    compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes);
+    compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap);
     phi_hat.ParallelCopy(phi_n);
     for (MFIter mfi(phi_hat); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -235,7 +243,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     // Stage 3: phi^{n+1} = (1/3)phi^n + (2/3)(phi** + dt L(phi**))
     fill_ros(R_dir, phi_hat);
     zero_ros_in_mask(R_dir, mask);
-    compute_levelset_rhs(rhs, phi_hat, R_dir, dx[0], dx[1], eps_visc, &slopes);
+    compute_levelset_rhs(rhs, phi_hat, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap);
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto pnew = phi.array(mfi);
@@ -267,6 +275,8 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
  *                          projected onto the terrain surface so that R is a
  *                          spread rate along the ground. nullptr keeps the
  *                          map-view interpretation.
+ * @param[in]     mask      Optional non-burnable mask, only read with wall_extrap
+ * @param[in]     wall_extrap  Extrapolate phi into mask cells inside every stencil
  */
 inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
                                         const amrex::MultiFab& /*vel_eff*/,
@@ -274,7 +284,9 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
                                         const amrex::Geometry& geom,
                                         amrex::Real dt,
                                         amrex::Real eps_visc,
-                                        const amrex::MultiFab* slopes = nullptr)
+                                        const amrex::MultiFab* slopes = nullptr,
+                                        const amrex::MultiFab* mask = nullptr,
+                                        bool wall_extrap = false)
 {
     using namespace amrex;
 
@@ -298,7 +310,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
     // stencil in compute_levelset_rhs reads all three. Stages 2 and 3 already
     // fill before their RHS; stage 1 was the one that did not.
     phi_star.FillBoundary(geom.periodicity());
-    compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes);
+    compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap);
     for (MFIter mfi(phi_star); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto ps = phi_star.array(mfi);
@@ -310,7 +322,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
     phi_star.FillBoundary(geom.periodicity());
 
     // Stage 2: φ** = (3/4)φ^n + (1/4)(φ* + Δt L(φ*))
-    compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes);
+    compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap);
     phi_hat.ParallelCopy(phi_n);
     for (MFIter mfi(phi_hat); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -324,7 +336,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
     phi_hat.FillBoundary(geom.periodicity());
 
     // Stage 3: φ^{n+1} = (1/3)φ^n + (2/3)(φ** + Δt L(φ**))
-    compute_levelset_rhs(rhs, phi_hat, R_mf, dx[0], dx[1], eps_visc, slopes);
+    compute_levelset_rhs(rhs, phi_hat, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap);
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto pnew = phi.array(mfi);

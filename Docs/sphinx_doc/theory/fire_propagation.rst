@@ -189,6 +189,23 @@ The mask acts in five places, so that no path around it is left open:
    heat flux, intensity or flame diagnostics, and the arrival time is never
    set.
 
+**Walls in the level-set stencils.** A masked cell keeps the level-set value
+it had before the front arrived, so once its open neighbour burns the two
+differ by many metres across one cell. The Godunov norm takes the larger
+one-sided difference, which is then the one into the wall, and the cells
+along a wall burn down far faster than the spread rate; the front normal
+from the central difference points into the wall as well, so the directional
+models evaluate a head-fire rate there. On flat ground this drives the flank
+along a wall about 20% fast (``FireHybridObstacles``, probe ``u3``).
+:cpp:`erf.fire.levelset.wall_extrapolate` extrapolates the level set into
+the mask inside every stencil: a masked stencil point takes the centre
+cell's value in the gradient, the Laplacian, the front normal and the
+reinitialisation, which itself leaves masked cells untouched. The wall is
+then a zero-gradient boundary of the distance function, the normal next to
+it runs along it, and the flank arrives at the unmasked rate.
+``Exec/RegTests/FireNearWall`` measures this. Off by default, so existing
+masked results are unchanged; it has no effect without a mask.
+
 The mask is written to the fire plotfile as ``fire_nonburnable``. A fire
 approaching a masked footprint goes around it through whatever burnable
 cells remain; ``Exec/RegTests/FireHybridObstacles`` compares the same

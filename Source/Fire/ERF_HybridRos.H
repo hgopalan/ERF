@@ -75,13 +75,15 @@ inline void fill_hybrid_member_directional(amrex::MultiFab& R,
                                            const amrex::Geometry& geom,
                                            int model,
                                            const DirectionalRosState& state,
-                                           const HybridDirectionalSpec& spec)
+                                           const HybridDirectionalSpec& spec,
+                                           const amrex::MultiFab* mask = nullptr,
+                                           bool wall_extrap = false)
 {
     if (model == HYBRID_MODEL_BALBI) {
         fill_balbi_ros_directional(R, phi, *spec.balbi_wind, slopes, geom,
-                                   *spec.bc, *spec.bp, *spec.balbi_in);
+                                   *spec.bc, *spec.bp, *spec.balbi_in, mask, wall_extrap);
     } else {
-        fill_directional_ros(R, phi, *spec.wind_eff, slopes, geom, state);
+        fill_directional_ros(R, phi, *spec.wind_eff, slopes, geom, state, mask, wall_extrap);
     }
 }
 
@@ -92,13 +94,17 @@ inline void fill_hybrid_directional_ros(amrex::MultiFab& R,
                                         const amrex::MultiFab& phi,
                                         const amrex::MultiFab& slopes,
                                         const amrex::Geometry& geom,
-                                        const HybridDirectionalSpec& spec)
+                                        const HybridDirectionalSpec& spec,
+                                        const amrex::MultiFab* mask = nullptr,
+                                        bool wall_extrap = false)
 {
     fill_hybrid_member_directional(R, phi, slopes, geom,
-                                   spec.primary_model, spec.primary_state, spec);
+                                   spec.primary_model, spec.primary_state, spec,
+                                   mask, wall_extrap);
     amrex::MultiFab R_sec(R.boxArray(), R.DistributionMap(), 1, 0);
     fill_hybrid_member_directional(R_sec, phi, slopes, geom,
-                                   spec.secondary_model, spec.secondary_state, spec);
+                                   spec.secondary_model, spec.secondary_state, spec,
+                                   mask, wall_extrap);
     blend_ros_fields(R, R_sec, *spec.weight);
 }
 
@@ -111,12 +117,13 @@ inline void advect_levelset_hybrid_rk3(amrex::MultiFab& phi,
                                        amrex::Real dt,
                                        amrex::Real eps_visc,
                                        const HybridDirectionalSpec& spec,
-                                       const amrex::MultiFab* nonburnable = nullptr)
+                                       const amrex::MultiFab* nonburnable = nullptr,
+                                       bool wall_extrap = false)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
-            fill_hybrid_directional_ros(R, phi_stage, slopes, geom, spec);
-        }, nonburnable);
+            fill_hybrid_directional_ros(R, phi_stage, slopes, geom, spec, nonburnable, wall_extrap);
+        }, nonburnable, wall_extrap);
 }
 
 #endif  // ERF_HYBRID_ROS_H
