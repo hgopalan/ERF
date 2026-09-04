@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# Flat ground with the mask: the flank along the masked wall of the middle
+# box reaches the third box early (the level-set wall effect).
+# Structures and the street as non-burnable cells
+erf.fire.structures.enable = true
+erf.fire.structures.file = "buildings_5m_64x32.txt"
+erf.fire.fuel_map.nonburnable_codes = 0

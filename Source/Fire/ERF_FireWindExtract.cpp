@@ -209,10 +209,13 @@ void fill_fire_wind_from_interpolation(
     const MultiFab* fuel_model_mf,
     const Real*     d_fcwh,
     int             nfuelcats,
-    int             wind_interp)
+    int             wind_interp,
+    const MultiFab* col_open,
+    const MultiFab* col_roof)
 {
     const int C = fg.C;
     const bool bilinear = (wind_interp == 1);
+    const bool open_weights = bilinear && (col_open != nullptr) && (col_roof != nullptr);
 
     for (MFIter mfi(fire_wind_ref, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
@@ -228,6 +231,18 @@ void fill_fire_wind_from_interpolation(
         Array4<const Real> fuel_model;
         if (fuel_model_mf != nullptr) {
             fuel_model = fuel_model_mf->array(mfi);
+        }
+
+        // Open-column weights: the 2D fields carry one ghost cell, which is
+        // all the bilinear stencil reaches; clamp to their box regardless.
+        Array4<const Real> open_arr, roof_arr;
+        int io_min = 0, io_max = 0, jo_min = 0, jo_max = 0;
+        if (open_weights) {
+            open_arr = col_open->const_array(mfi);
+            roof_arr = col_roof->const_array(mfi);
+            const Box& obox = Box(open_arr);
+            io_min = obox.smallEnd(0); io_max = obox.bigEnd(0);
+            jo_min = obox.smallEnd(1); jo_max = obox.bigEnd(1);
         }
 
         // Bilinear reaches one atmospheric cell beyond the column holding the
@@ -291,13 +306,36 @@ void fill_fire_wind_from_interpolation(
             Real v_sum = 0.0;
             Real z_sum = 0.0;
 
+            // Open-column factors and their bilinear sum; fall back to the
+            // plain weights when every column is closed.
+            Real f_open[4] = {1.0, 1.0, 1.0, 1.0};
+            Real w_norm = 1.0;
+            if (open_weights) {
+                Real wsum = 0.0;
+                for (int c = 0; c < 4; ++c) {
+                    const int di = (c & 1);
+                    const int dj = ((c >> 1) & 1);
+                    const int io = amrex::max(io_min, amrex::min(i0 + di, io_max));
+                    const int jo = amrex::max(jo_min, amrex::min(j0 + dj, jo_max));
+                    const Real w = (di ? wx : (1.0 - wx)) * (dj ? wy : (1.0 - wy));
+                    f_open[c] = (roof_arr(io, jo, 0) > z_ref_cell) ? open_arr(io, jo, 0) : Real(1.0);
+                    wsum += w * f_open[c];
+                }
+                if (wsum > 1.0e-6) {
+                    w_norm = 1.0 / wsum;
+                } else {
+                    for (int c = 0; c < 4; ++c) { f_open[c] = 1.0; }
+                }
+            }
+
             for (int c = 0; c < 4; ++c) {
                 const int di = (c & 1);
                 const int dj = ((c >> 1) & 1);
                 const int ia = amrex::max(ia_min, amrex::min(i0 + di, ia_max));
                 const int ja = amrex::max(ja_min, amrex::min(j0 + dj, ja_max));
 
-                const Real w = (di ? wx : (1.0 - wx)) * (dj ? wy : (1.0 - wy));
+                const Real w = (di ? wx : (1.0 - wx)) * (dj ? wy : (1.0 - wy))
+                             * f_open[c] * w_norm;
 
                 // Each column is sampled at the same height above *its own*
                 // ground: near the surface the profile is anchored to the local

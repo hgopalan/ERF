@@ -111,8 +111,11 @@ evaluating a head-fire rate along their front normal, which points into the
 wall, so their level-set value keeps falling although the front cannot move;
 between reinitialisations that steepens the gradient along the wall and
 pushes the flank faster than the flank rate. It is a level-set wall effect of
-about 20% on the lateral spread, does not occur in the immersed-forcing rows
-(`u3` 101 s in both), and belongs with the near-wall work that follows.
+about 20% on the lateral spread and does not occur in the immersed-forcing rows
+(`u3` 101 s in both). `erf.fire.levelset.wall_extrapolate` removes it by
+extrapolating the level set into the mask inside every stencil;
+`Exec/RegTests/FireNearWall` measures that on this scenario. It is off here
+so these rows stay as they were.
 
 ## What this is not
 

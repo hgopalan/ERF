@@ -72,6 +72,13 @@ struct FireParams
     int               levelset_reinit_iters   = 10;    ///< Sussman reinitialization iterations
     amrex::Real       levelset_reinit_band_m  = -1.0;  ///< Band half-width L [m] where |phi| reaches 1; <=0 selects 3*min(dx,dy)
     amrex::Real       levelset_reinit_dtau    = -1.0;  ///< Reinitialization pseudo-dt (<0 = auto = 0.5*min(dx,dy))
+    // Extrapolate the level set into non-burnable cells inside every stencil
+    // (gradient, Laplacian, front normal, reinitialisation), so a masked wall
+    // is a zero-gradient boundary of the distance function rather than a
+    // front. Without it the cells along a wall burn down at the rate the
+    // one-sided difference into the wall dictates and the flank along it runs
+    // about 20% fast. Off by default; needs a mask source to do anything.
+    bool              levelset_wall_extrapolate = false;
 
     // Terrain file for fine-grid terrain data
     std::string       terrain_file_name       = "";   ///< Path to terrain file for fine-grid interpolation
@@ -374,6 +381,14 @@ struct FireParams
         bool        enable     = false;   ///< Treat structure cells as non-burnable
         std::string file;                 ///< Heightmap; empty = hybrid.structure_file, then erf.buildings_file_name
         amrex::Real min_height = 0.5;     ///< Sampled height above which a cell is a structure [m]
+        // Bilinear wind weights renormalised over the atmospheric columns
+        // that are open at the fire cell's wind height: a column whose
+        // sampled roof is above that height contributes with its open
+        // fraction. With immersed-forcing buildings the columns inside a
+        // footprint carry the relaxed in-building velocity, which otherwise
+        // leaks into the wind of the fire cells around it. Off by default;
+        // no effect with wind_interp = "nearest".
+        bool        wind_open_columns = false;
     } structures;
 
     // Firebreak cells stamped at initialization are also held in the
@@ -457,6 +472,7 @@ struct FireParams
        pp.query("levelset.reinit_iters", levelset_reinit_iters);
        pp.query("levelset.reinit_band_m", levelset_reinit_band_m);
        pp.query("levelset.reinit_dtau", levelset_reinit_dtau);
+       pp.query("levelset.wall_extrapolate", levelset_wall_extrapolate);
 
        // Terrain file
        amrex::ParmParse pp_erf("erf");
@@ -642,6 +658,7 @@ struct FireParams
        pp.query("structures.enable",     structures.enable);
        pp.query("structures.file",       structures.file);
        pp.query("structures.min_height", structures.min_height);
+       pp.query("structures.wind_open_columns", structures.wind_open_columns);
        pp.queryarr("fuel_map.nonburnable_codes", fuel_map.nonburnable_codes);
        pp.query("firebreak.use_mask", firebreak_use_mask);
        if (structures.enable) {
@@ -657,6 +674,9 @@ struct FireParams
            if (structures.min_height < 0.0) {
                amrex::Abort("erf.fire.structures.min_height must be >= 0");
            }
+       }
+       if (structures.wind_open_columns && !structures.enable) {
+           amrex::Abort("erf.fire.structures.wind_open_columns needs erf.fire.structures.enable");
        }
        if (heat_open_fraction && !structures.enable) {
            amrex::Abort("erf.fire.heat_open_fraction needs erf.fire.structures.enable");

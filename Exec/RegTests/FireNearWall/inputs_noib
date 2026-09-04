@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Flat ground, no mask: the fire burns through the boxes. Reference for the
+# flank arrival at the third box (u3) with nothing in the way.

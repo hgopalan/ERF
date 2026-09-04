@@ -514,9 +514,10 @@ void FireLayer::initialize(const ERF& erf,
             amrex::Print() << "[FIRE DEBUG] Non-burnable mask: "
                            << std::lround(fire_nonburnable->sum(0)) << " cells\n";
         }
-        // Per-column open fraction and roof height for the coupling: used as
-        // weights with heat_open_fraction, and for the diagnostics regardless.
-        if (m_params.structures.enable && m_params.injects_flux()) {
+        // Per-column open fraction and roof height: weights for the coupling
+        // with heat_open_fraction and its diagnostics, and for the wind
+        // extraction with structures.wind_open_columns.
+        if (m_params.structures.enable) {
             build_open_fraction(erf.Geom(0));
         }
     }
@@ -564,13 +565,16 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     if (m_params.fire_debug)
         amrex::Print() << "[FIRE DEBUG] Starting fire advance step with dt=" << dt << std::endl;
 
+    const bool wind_open = m_params.structures.wind_open_columns && m_open_frac_atm && m_roof_h_atm;
     fill_fire_wind_from_interpolation(*fire_wind_ref, *fire_wind_extract_z, xvel, yvel, z_phys_cc,
                                       *fire_surface_z, *fire_col_ground,
                                       m_fg, m_params.wind_ref_ht, m_nz,
                                       m_use_per_fuel_wind_ht ? fire_fuel_model.get() : nullptr,
                                       m_use_per_fuel_wind_ht ? m_d_fcwh.data() : nullptr,
                                       m_use_per_fuel_wind_ht ? 13 : 0,
-                                      m_params.wind_interp);
+                                      m_params.wind_interp,
+                                      wind_open ? m_open_frac_atm.get() : nullptr,
+                                      wind_open ? m_roof_h_atm.get() : nullptr);
     if (m_params.fire_debug) {
         amrex::Print() << "[FIRE DEBUG] Wind extraction completed. Max reference wind: "
                        << fire_wind_ref->max(0) << " m/s" << std::endl;
@@ -795,6 +799,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             const bool generic_directional =
                 m_params.directional_ros && !m_params.is_hybrid() &&
                 (m_params.ros_model != "balbi");
+            // Wall extrapolation only means something with a mask.
+            const bool wall_extrap = m_params.levelset_wall_extrapolate && (fire_nonburnable != nullptr);
 
             if (hybrid_directional) {
                 // Both members are rebuilt along the front normal at every RK
@@ -820,7 +826,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 spec.weight     = fire_ros_weight.get();
                 advect_levelset_hybrid_rk3(*fire_phi, *fire_slopes, m_fg.geom, dt_ls,
                                            m_params.levelset_eps_visc, spec,
-                                           fire_nonburnable.get());
+                                           fire_nonburnable.get(), wall_extrap);
             } else if (balbi_directional) {
                 advect_levelset_balbi_rk3(*fire_phi,
                                           (m_params.balbi.wind_source == 1)
@@ -829,18 +835,19 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                           m_fg.geom, dt_ls,
                                           m_params.levelset_eps_visc,
                                           m_bc_default, m_params.balbi, balbi_in,
-                                          fire_nonburnable.get());
+                                          fire_nonburnable.get(), wall_extrap);
             } else if (generic_directional) {
                 const DirectionalRosState dir_state = make_directional_state(m_params.ros_model);
                 advect_levelset_directional_rk3(*fire_phi, *fire_wind_eff,
                                                 *fire_slopes, m_fg.geom, dt_ls,
                                                 m_params.levelset_eps_visc,
-                                                dir_state, fire_nonburnable.get());
+                                                dir_state, fire_nonburnable.get(), wall_extrap);
             } else {
                 fire_levelset::advect_levelset_weno5z_rk3(*fire_phi, *fire_wind_eff,
                                                 *fire_ros, m_fg.geom, dt_ls,
                                                 m_params.levelset_eps_visc,
-                                                fire_slopes.get());
+                                                fire_slopes.get(),
+                                                fire_nonburnable.get(), wall_extrap);
             }
             enforce_nonburnable_phi();
             fire_phi->FillBoundary(m_fg.geom.periodicity());
@@ -856,7 +863,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 fire_levelset::reinitialize_phi(*fire_phi, m_fg.geom,
                                       m_params.levelset_reinit_iters, dtau,
                                       m_params.levelset_reinit_band_m,
-                                      /*normalized=*/false);
+                                      /*normalized=*/false,
+                                      fire_nonburnable.get(), wall_extrap);
                 enforce_nonburnable_phi();
                 fire_phi->FillBoundary(m_fg.geom.periodicity());
             }
@@ -1344,8 +1352,11 @@ void FireLayer::build_open_fraction(const amrex::Geometry& geom_atm)
     if (!fire_nonburnable || !fire_structure_height || !m_Q_atm_prev) { return; }
     const amrex::BoxArray& ba2d = m_Q_atm_prev->boxArray();
     const amrex::DistributionMapping& dm = m_Q_atm_prev->DistributionMap();
-    m_open_frac_atm = std::make_unique<amrex::MultiFab>(ba2d, dm, 1, 0);
-    m_roof_h_atm    = std::make_unique<amrex::MultiFab>(ba2d, dm, 1, 0);
+    // One ghost cell: the bilinear wind stencil reaches the neighbouring column.
+    m_open_frac_atm = std::make_unique<amrex::MultiFab>(ba2d, dm, 1, 1);
+    m_roof_h_atm    = std::make_unique<amrex::MultiFab>(ba2d, dm, 1, 1);
+    m_open_frac_atm->setVal(1.0_rt);
+    m_roof_h_atm->setVal(0.0_rt);
 
     // Only structure cells count toward the roof height, not fuel-code or
     // firebreak cells of the mask, which have no height.
@@ -1380,6 +1391,8 @@ void FireLayer::build_open_fraction(const amrex::Geometry& geom_atm)
             hr(i, j, k) = (f > 1.0e-6_rt) ? hs(i, j, k) / f : 0.0_rt;
         });
     }
+    m_open_frac_atm->FillBoundary(geom_atm.periodicity());
+    m_roof_h_atm->FillBoundary(geom_atm.periodicity());
     if (m_params.fire_debug) {
         amrex::Print() << "[FIRE DEBUG] Open-fraction heat placement: min open fraction "
                        << m_open_frac_atm->min(0) << ", max roof height "

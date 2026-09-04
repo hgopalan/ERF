@@ -4,6 +4,7 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_Gpu.H>
+#include <ERF_NumericalSchemes.H>
 
 /**
  * @file ERF_Reinitialize.H
@@ -54,13 +55,19 @@ namespace fire_levelset {
  * @param[in]     dtau     Pseudo-timestep [m] for reinitialization
  * @param[in]     band_m   Band half-width L [m]: the distance from the front at
  *                         which φ reaches ±1. Values <= 0 select 3*min(dx,dy).
+ * @param[in]     mask     Optional non-burnable mask, read only with wall_extrap
+ * @param[in]     wall_extrap  Leave mask cells untouched and read neighbours
+ *                         through a wall stencil, so the wall is a zero-gradient
+ *                         boundary of the distance function rather than a front
  */
 inline void reinitialize_phi(amrex::MultiFab& phi,
                               const amrex::Geometry& geom,
                               int n_iters,
                               amrex::Real dtau,
                               amrex::Real band_m = -1.0,
-                              bool normalized = true)
+                              bool normalized = true,
+                              const amrex::MultiFab* mask = nullptr,
+                              bool wall_extrap = false)
 {
     using namespace amrex;
     
@@ -109,15 +116,20 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
             auto phi_arr = phi_work.const_array(mfi);
             auto phi_out = phi_next.array(mfi);
             auto phi_in  = phi.const_array(mfi);
-            
+            const WallStencil wall = make_wall_stencil(mask, wall_extrap, mfi);
+
             ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
                 int i = iv[0], j = iv[1], k = iv[2];
-                
-                // Central differences for gradient
-                Real dxm = (phi_arr(i, j, k) - phi_arr(i-1, j, k)) * dxi;
-                Real dxp = (phi_arr(i+1, j, k) - phi_arr(i, j, k)) * dxi;
-                Real dym = (phi_arr(i, j, k) - phi_arr(i, j-1, k)) * dyi;
-                Real dyp = (phi_arr(i, j+1, k) - phi_arr(i, j, k)) * dyi;
+
+                // Mask cells are not part of the distance function: they keep
+                // their value and their neighbours read through the wall.
+                if (wall.masked(i, j, k)) { phi_out(i, j, k) = phi_arr(i, j, k); return; }
+
+                // One-sided differences for the gradient
+                Real dxm = (phi_arr(i, j, k) - wall.at(phi_arr, i, j, k, -1, 0)) * dxi;
+                Real dxp = (wall.at(phi_arr, i, j, k, 1, 0) - phi_arr(i, j, k)) * dxi;
+                Real dym = (phi_arr(i, j, k) - wall.at(phi_arr, i, j, k, 0, -1)) * dyi;
+                Real dyp = (wall.at(phi_arr, i, j, k, 0, 1) - phi_arr(i, j, k)) * dyi;
                 
                 // Sign of original level-set
                 Real sgn_phi0 = (phi_in(i, j, k) > 0.0) ? 1.0 :
@@ -161,23 +173,25 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
                 // the distance to the interface implied by phi_0 itself, so the
                 // interface location is set by phi_0 and not by the iteration.
                 const Real p0c = phi_in(i, j, k);
+                const Real p0xp = wall.at(phi_in, i, j, k, 1, 0);
+                const Real p0xm = wall.at(phi_in, i, j, k, -1, 0);
+                const Real p0yp = wall.at(phi_in, i, j, k, 0, 1);
+                const Real p0ym = wall.at(phi_in, i, j, k, 0, -1);
                 const bool near_front =
-                    (p0c * phi_in(i+1, j, k) < 0.0_rt) ||
-                    (p0c * phi_in(i-1, j, k) < 0.0_rt) ||
-                    (p0c * phi_in(i, j+1, k) < 0.0_rt) ||
-                    (p0c * phi_in(i, j-1, k) < 0.0_rt);
+                    (p0c * p0xp < 0.0_rt) || (p0c * p0xm < 0.0_rt) ||
+                    (p0c * p0yp < 0.0_rt) || (p0c * p0ym < 0.0_rt);
 
                 if (near_front) {
                     // Robust local |grad phi_0|*h estimate: the central
                     // difference, floored by every one-sided difference so a
                     // kink at the interface cannot make it vanish.
-                    const Real dcx = 0.5_rt * (phi_in(i+1, j, k) - phi_in(i-1, j, k));
-                    const Real dcy = 0.5_rt * (phi_in(i, j+1, k) - phi_in(i, j-1, k));
+                    const Real dcx = 0.5_rt * (p0xp - p0xm);
+                    const Real dcy = 0.5_rt * (p0yp - p0ym);
                     Real dphi0 = std::sqrt(dcx * dcx + dcy * dcy);
-                    dphi0 = amrex::max(dphi0, std::abs(phi_in(i+1, j, k) - p0c));
-                    dphi0 = amrex::max(dphi0, std::abs(p0c - phi_in(i-1, j, k)));
-                    dphi0 = amrex::max(dphi0, std::abs(phi_in(i, j+1, k) - p0c));
-                    dphi0 = amrex::max(dphi0, std::abs(p0c - phi_in(i, j-1, k)));
+                    dphi0 = amrex::max(dphi0, std::abs(p0xp - p0c));
+                    dphi0 = amrex::max(dphi0, std::abs(p0c - p0xm));
+                    dphi0 = amrex::max(dphi0, std::abs(p0yp - p0c));
+                    dphi0 = amrex::max(dphi0, std::abs(p0c - p0ym));
                     dphi0 = amrex::max(dphi0, 1.0e-12_rt);
 
                     // Signed distance to the interface [m], then expressed in the

@@ -129,13 +129,19 @@ amrex::Real directional_ros_cell(const DirectionalRosState& st,
  * @param[in]  slopes  Terrain slopes [dz/dx, dz/dy]
  * @param[in]  geom    Fire-grid geometry
  * @param[in]  st      Precomputed coefficients for the selected model
+ * @param[in]  mask    Optional non-burnable mask, read only with wall_extrap
+ * @param[in]  wall_extrap  Take the front normal through a wall stencil, so a
+ *                     cell next to a masked wall sees a normal along the wall
+ *                     rather than into it
  */
 inline void fill_directional_ros(amrex::MultiFab& R_mf,
                                  const amrex::MultiFab& phi,
                                  const amrex::MultiFab& wind,
                                  const amrex::MultiFab& slopes,
                                  const amrex::Geometry& geom,
-                                 const DirectionalRosState& st)
+                                 const DirectionalRosState& st,
+                                 const amrex::MultiFab* mask = nullptr,
+                                 bool wall_extrap = false)
 {
     const amrex::Real dx = geom.CellSize(0);
     const amrex::Real dy = geom.CellSize(1);
@@ -146,6 +152,8 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
         auto phi_arr    = phi.const_array(mfi);
         auto wind_arr   = wind.const_array(mfi);
         auto slopes_arr = slopes.const_array(mfi);
+        const fire_levelset::WallStencil wall =
+            fire_levelset::make_wall_stencil(mask, wall_extrap, mfi);
 
         constexpr amrex::Real grad_min = DIRECTIONAL_ROS_GRAD_MIN;
 
@@ -161,8 +169,10 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
 
             // Front normal from central differences; it points toward increasing
             // phi, that is into the unburned fuel.
-            const amrex::Real dpdx = (phi_arr(i+1, j, k) - phi_arr(i-1, j, k)) / (2.0 * dx);
-            const amrex::Real dpdy = (phi_arr(i, j+1, k) - phi_arr(i, j-1, k)) / (2.0 * dy);
+            const amrex::Real dpdx = (wall.at(phi_arr, i, j, k, 1, 0)
+                                      - wall.at(phi_arr, i, j, k, -1, 0)) / (2.0 * dx);
+            const amrex::Real dpdy = (wall.at(phi_arr, i, j, k, 0, 1)
+                                      - wall.at(phi_arr, i, j, k, 0, -1)) / (2.0 * dy);
             const amrex::Real grad = std::sqrt(dpdx*dpdx + dpdy*dpdy);
 
             amrex::Real U_n, s_n;
@@ -203,12 +213,13 @@ inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,
                                             amrex::Real dt,
                                             amrex::Real eps_visc,
                                             const DirectionalRosState& st,
-                                            const amrex::MultiFab* nonburnable = nullptr)
+                                            const amrex::MultiFab* nonburnable = nullptr,
+                                            bool wall_extrap = false)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
-            fill_directional_ros(R, phi_stage, wind, slopes, geom, st);
-        }, nonburnable);
+            fill_directional_ros(R, phi_stage, wind, slopes, geom, st, nonburnable, wall_extrap);
+        }, nonburnable, wall_extrap);
 }
 
 #endif

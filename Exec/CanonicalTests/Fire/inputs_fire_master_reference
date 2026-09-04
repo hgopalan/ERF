@@ -185,6 +185,14 @@ erf.fire.wind_interp = "bilinear"
 # which gets its directionality from the Anderson ellipse.
 erf.fire.directional_ros = false
 
+# Level-set path only: extrapolate the level set into non-burnable cells
+# inside every stencil (gradient, Laplacian, front normal, reinitialisation),
+# so a masked wall is a zero-gradient boundary of the distance function.
+# Without it the cells along a wall burn down at the rate the one-sided
+# difference into the wall dictates and the flank along the wall runs about
+# 20% fast. No effect without a mask source (see NON-BURNABLE MASK).
+erf.fire.levelset.wall_extrapolate = false
+
 # ============================================================================
 # RATE-OF-SPREAD MODEL SELECTION
 # ============================================================================
@@ -247,6 +255,12 @@ erf.fire.hybrid.wind_hi = 12.0                # effective wind speed [m/s] where
 erf.fire.structures.enable = false
 # erf.fire.structures.file = ""
 erf.fire.structures.min_height = 0.5      # sampled height [m] above which a cell is a structure
+# Renormalise the bilinear wind weights over the atmospheric columns that are
+# open at the fire cell's wind height (a column whose sampled roof is above
+# that height counts with its open fraction), so the relaxed velocity inside
+# an immersed-forcing building does not leak into the wind of the fire cells
+# around it. Needs structures.enable; no effect with wind_interp = "nearest".
+erf.fire.structures.wind_open_columns = false
 
 # Fuel codes that are non-burnable. Empty by default, in which case an
 # unknown code (including 0, the nodata value) still falls through to fuel
