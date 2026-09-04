@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Legacy overwrite of the source slots, flat ground.
+erf.fire.source_mode = "overwrite"

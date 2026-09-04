@@ -136,21 +136,76 @@ where :math:`z` is height above the local terrain and
 e-folding depth: 37% of the flux remains at 45 m and 1% at 225 m. The latent
 flux is distributed the same way into the vapour equation when
 :cpp:`erf.fire.inject_latent` is true and moisture is active.
-:cpp:`erf.fire.fire_atm_feedback` multiplies both fluxes before injection;
-zero gives one-way coupling with the fire still responding to the wind, one
-gives the full feedback. The lagged flux is constant across the Runge-Kutta
-stages of a step, so the fire coupling *overwrites* the potential-temperature
-and vapour slots of the cell source rather than accumulating into them, which
-is what keeps the injected energy independent of the number of stages.
 
 .. note::
 
-   That overwrite happens after the other source terms are assembled and
-   therefore also discards any source written into those slots by the
-   immersed-forcing scalar relaxation. Running fire heat injection together
-   with ``erf.terrain_type`` or ``erf.buildings_type = ImmersedForcing``
-   currently loses the immersed-forcing temperature forcing; use
-   ``coupling_type = passive`` until the coupling is made additive.
+   The historical form of the tendency carries an extra density factor,
+   :math:`\partial(\rho\theta)/\partial t = -\rho\, \partial H/\partial z`
+   with :math:`H = Q/c_p`, so the heat it injects is :math:`\rho` times the
+   fire flux, about 10 to 15% too much at sea level. Heating gives
+   :math:`\partial(\rho\theta)/\partial t = -(1/c_p)\, \partial Q/\partial z`
+   with no density factor. :cpp:`erf.fire.heat_tendency_density = false`
+   selects that form; the default keeps the historical one so existing coupled
+   results do not change. The energy diagnostic printed with
+   :cpp:`erf.fire.fire_debug` reads about :math:`\rho` times
+   :math:`1 - e^{-z_{top}/\alpha_g}` with the default and exactly that
+   factor with the corrected form.
+
+:cpp:`erf.fire.fire_atm_feedback` multiplies both fluxes before injection;
+zero gives one-way coupling with the fire still responding to the wind, one
+gives the full feedback.
+
+The cell source is rebuilt by the atmosphere at every Runge-Kutta stage and
+the fire tendency is applied after that rebuild. :cpp:`erf.fire.source_mode`
+selects how: ``"overwrite"`` (default, the historical behaviour) replaces the
+potential-temperature and vapour slots, which keeps the injected energy
+independent of the number of stages but discards any other source already
+in those slots, such as the immersed-forcing scalar relaxation, radiative
+heating or Rayleigh damping; ``"add"`` accumulates the fire tendency into the
+freshly rebuilt source, once per stage, so nothing is lost and nothing is
+double counted. Use ``"add"`` whenever another source writes into those
+slots: immersed forcing applied on the slow step
+(``erf.immersed_forcing_substep = false``, the anelastic default), radiative
+heating, Rayleigh damping. With immersed forcing on the acoustic substeps
+(the compressible default) the scalar relaxation never meets the slow-step
+source and the two modes are identical, as they are with no other source.
+
+Heat placement around buildings
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The fire-grid flux is area-averaged onto each atmospheric column. With the
+structure mask on (:ref:`sec:FirePropagation`) the fire cells under a
+building carry no flux, so a column fully covered by a footprint receives no
+heat at all, and a column that straddles a footprint edge receives a flux
+diluted by its open fraction. What the plain profile gets wrong in those
+partial columns is where the heat goes: it is spread over the cells below
+the roof as if the column were open. With
+:cpp:`erf.fire.heat_open_fraction` (requires
+:cpp:`erf.fire.structures.enable`) every column carries its open fraction
+:math:`f` and the mean roof height :math:`H` of its structure cells, both
+area-averaged from the fire grid at initialisation. A cell's share of the
+exponential profile is scaled by :math:`f` below the roof, by one above it,
+and linearly across the cell that holds the roof, and the column is
+renormalised over the shares that remain,
+
+.. math::
+
+   w_k = \frac{\bigl(e^{-z_k/\alpha_g} - e^{-z_{k+1}/\alpha_g}\bigr)\, s_k}
+              {\sum_j \bigl(e^{-z_j/\alpha_g} - e^{-z_{j+1}/\alpha_g}\bigr)\, s_j}
+         \,\bigl(1 - e^{-z_{top}/\alpha_g}\bigr),
+
+so the energy injected per column is exactly what the plain profile injects
+and the share placed below the roof falls from :math:`1 - e^{-H/\alpha_g}`
+to that times the open fraction, the rest being lifted above the roof. On a
+5 m atmosphere grid with 20 m buildings the partial columns are the ring of
+cells along each footprint edge, so the option is a refinement of the edge
+rather than a large change; it matters more as buildings approach the grid
+spacing. With :cpp:`erf.fire.fire_debug` the coupling prints the
+column-integrated heating against the flux handed in, whose ratio is
+:math:`1 - e^{-z_{top}/\alpha_g}` (one for any realistic domain top, and
+about :math:`\rho` times that with the legacy tendency form), the largest
+below-roof share among partial columns, and the largest potential
+temperature of the state under a roof.
 
 Smoke tracer
 ------------

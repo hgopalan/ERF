@@ -4040,6 +4040,15 @@ Heat flux and coupling
 | **erf.fire.inject_latent**                     | Inject the latent flux into the vapour equation when       | Boolean                        | true                   |
 |                                                | moisture is active                                         |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.source_mode**                       | Replace the theta and vapour source slots (legacy) or add  | "overwrite", "add"             | "overwrite"            |
+|                                                | to the rebuilt stage source                                |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.heat_open_fraction**                | Place injected heat only in the open part of columns with  | Boolean                        | false                  |
+|                                                | structures; needs structures.enable                        |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.heat_tendency_density**             | Keep the legacy density factor in the injected tendency    | Boolean                        | true                   |
+|                                                | (injects rho times the flux); false is energy-consistent   |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.smoke_enable**                      | Add the passive smoke tracer                               | Boolean                        | false                  |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.smoke_emission_factor**             | Smoke mass per unit fuel burned [kg/kg]                    | Real >= 0                      | 0.02                   |
