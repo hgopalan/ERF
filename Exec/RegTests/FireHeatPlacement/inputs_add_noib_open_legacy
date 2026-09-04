@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# Additive with open-fraction placement, flat ground, and the historical
+# tendency form with its density factor: the same placement as add_noib_open
+# with the energy ratio about rho times 1 - exp(-z_top/alfg).
+erf.fire.source_mode = "add"
+erf.fire.heat_open_fraction = true
+erf.fire.heat_tendency_density = true

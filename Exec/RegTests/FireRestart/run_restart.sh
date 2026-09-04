@@ -4,7 +4,7 @@
 #   ./run_restart.sh /path/to/erf_exec [extra erf args...]
 #
 # For each row (FARSITE path, level-set path, lagged coupling, exposure
-# diagnostics) three runs are made: straight to
+# diagnostics, spotting, crown fire) three runs are made: straight to
 # 200 s, to 100 s with a checkpoint at step 200, and a restart from that
 # checkpoint to 200 s. The burned-cell count and head rate of spread at 200 s
 # of the restarted run must equal those of the straight run; the exposure row
@@ -32,7 +32,7 @@ stats() {
 printf "%-10s %8s %10s %14s %10s %14s %8s\n" path straight_rc s_cells s_ROS r_cells r_ROS match
 printf "%-10s %8s %10s %14s %10s %14s %8s\n" ---------- -------- ---------- -------------- ---------- -------------- --------
 
-for p in farsite levelset coupled exposure; do
+for p in farsite levelset coupled exposure spotting crown; do
     rm -rf chk00200
     rc_s=$(run ${p}_straight "$@")
     rc_c=$(run ${p}_chk "$@")

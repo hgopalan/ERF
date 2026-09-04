@@ -387,13 +387,30 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
         Real src_z;   // ground elevation at the source cell [m]
     };
 
+    // Launch set: every burned cell (legacy), or only burned cells with
+    // unburned fuel within front_band cells of them (the fireline).
+    const bool front_only = (sp.launch_from == "front");
+    const int  band       = sp.front_band;
+    auto near_unburned = [&](int i, int j) -> bool {
+        for (int dj = -band; dj <= band; ++dj) {
+            const int jj = j + dj;
+            if (jj < 0 || jj >= ny) { continue; }
+            for (int di = -band; di <= band; ++di) {
+                const int ii = i + di;
+                if (ii < 0 || ii >= nx) { continue; }
+                if (h_phi[jj * nx + ii] >= 0.0) { return true; }
+            }
+        }
+        return false;
+    };
+
     std::vector<FrontCell> front_cells;
     for (int j = 0; j < ny; ++j) {
         for (int i = 0; i < nx; ++i) {
             int idx  = j * nx + i;
             Real pv  = h_phi[idx];
             Real rsp = h_ros[idx];
-            if (pv < 0.0 && rsp > 0.0) {
+            if (pv < 0.0 && rsp > 0.0 && (!front_only || near_unburned(i, j))) {
                 Real I_B = albini_byram_intensity(rsp, fp, rc);
                 Real H_z = albini_lofting_height(I_B, sp.I_B_min);
                 if (H_z > 0.0) {

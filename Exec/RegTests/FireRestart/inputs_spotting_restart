@@ -1,0 +1,23 @@
+FILE = inputs_base
+
+# Restarts from chk00200 (written by inputs_spotting_chk) and runs to 200 s.
+# Must reproduce inputs_spotting_straight.
+erf.fire.ros_model = "balbi"
+erf.fire.balbi.formulation = "2020"
+erf.fire.directional_ros = true
+erf.fire.propagation_method = "levelset"
+erf.fire.coupling_type = "passive"
+# Albini spotting on a fixed seed. Grass lofts brands to about 170 m; the
+# fall speed is raised so they land within the 2 km domain, and the launch
+# set is the front so the count follows the fireline.
+erf.fire.spotting.enable = true
+erf.fire.spotting.random_seed = 11
+erf.fire.spotting.launch_from = "front"
+erf.fire.spotting.P_base = 0.02
+erf.fire.spotting.spotting_interval = 2
+erf.fire.spotting.I_B_min = 100.0
+erf.fire.spotting.terminal_velocity = 4.0
+erf.restart = chk00200
+stop_time = 200.0
+max_step = 400
+erf.check_int = -1

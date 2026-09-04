@@ -111,12 +111,13 @@ struct FireParams
     // and the column's total is renormalised so the injected energy is
     // unchanged. Needs erf.fire.structures.enable. Off by default.
     bool              heat_open_fraction      = false;
-    // Legacy tendency form: d(rho theta)/dt = -rho (1/Cp) dQ/dz, which injects
-    // rho times the fire flux as heat (about 10-15% too much at sea level).
-    // false uses the energy-consistent -(1/Cp) dQ/dz. Default true keeps
-    // existing coupled results unchanged; the coupling's energy diagnostic
-    // reads exactly one with false.
-    bool              heat_tendency_density   = true;
+    // Tendency form. false (default): the energy-consistent
+    // d(rho theta)/dt = -(1/Cp) dQ/dz, with which the coupling's energy
+    // diagnostic reads 1 - exp(-z_top/alfg). true: the historical form with
+    // an extra density factor, -rho (1/Cp) dQ/dz, which injects rho times the
+    // fire flux (about 10-15% too much at sea level); kept to reproduce
+    // coupled results from before 2026-09-03.
+    bool              heat_tendency_density   = false;
 
     // Phase 8: Albini (1983) ember spotting parameters
     struct SpottingParams {
@@ -132,6 +133,14 @@ struct FireParams
         int               random_seed         = 0;       ///< 0 = time-based seed, >0 = fixed seed
         int               spotting_interval   = 1;       ///< Apply spotting every N fire subcycles
         std::string       fuel_system         = "13";    ///< "13" (FBFM13) or "40" (Scott-Burgan 40)
+        // Which burned cells may launch a brand. "burned" (default, legacy):
+        // every cell behind the front, so the brand count scales with the
+        // burned area and P_base has to be retuned per domain. "front": only
+        // burned cells with unburned fuel within front_band cells, the
+        // fireline Albini's model assumes, so the count scales with its
+        // length.
+        std::string       launch_from         = "burned";
+        int               front_band          = 2;       ///< "front": band width [fire cells]
     } spotting;
 
     // Phase 9: Crown fire initiation parameters.
@@ -521,6 +530,12 @@ struct FireParams
        pp.query("spotting.terminal_velocity",   sp.terminal_velocity);
        pp.query("spotting.n_traj_steps",        sp.n_traj_steps);
        pp.query("spotting.spot_radius",         sp.spot_radius);
+       pp.query("spotting.launch_from",         sp.launch_from);
+       pp.query("spotting.front_band",          sp.front_band);
+       if (sp.launch_from != "burned" && sp.launch_from != "front") {
+           amrex::Abort("erf.fire.spotting.launch_from must be \"burned\" or \"front\"");
+       }
+       if (sp.front_band < 1) { amrex::Abort("erf.fire.spotting.front_band must be >= 1"); }
        pp.query("spotting.P_catch",             sp.P_catch);
        pp.query("spotting.reentry_fuel_thresh", sp.reentry_fuel_thresh);
        pp.query("spotting.random_seed",         sp.random_seed);

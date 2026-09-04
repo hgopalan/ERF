@@ -35,16 +35,16 @@ the arrival times at the middle box's upwind face and the two gap probes.
 
 | deck | source_mode | buildings in atmosphere | open fraction | tendency |
 | --- | --- | --- | --- | --- |
-| `overwrite_noib` | overwrite | none | off | legacy |
-| `add_noib` | add | none | off | legacy |
-| `add_noib_open` | add | none | on | legacy |
-| `add_noib_open_energy` | add | none | on | energy-consistent |
-| `overwrite_ib` | overwrite | immersed forcing, substeps | off | legacy |
-| `add_ib` | add | immersed forcing, substeps | off | legacy |
-| `add_ib_open` | add | immersed forcing, substeps | on | legacy |
-| `add_ib_open_energy` | add | immersed forcing, substeps | on | energy-consistent |
-| `overwrite_ib_slow` | overwrite | immersed forcing, slow step | off | legacy |
-| `add_ib_slow` | add | immersed forcing, slow step | off | legacy |
+| `overwrite_noib` | overwrite | none | off | default |
+| `add_noib` | add | none | off | default |
+| `add_noib_open` | add | none | on | default |
+| `add_noib_open_legacy` | add | none | on | historical (density factor) |
+| `overwrite_ib` | overwrite | immersed forcing, substeps | off | default |
+| `add_ib` | add | immersed forcing, substeps | off | default |
+| `add_ib_open` | add | immersed forcing, substeps | on | default |
+| `add_ib_open_legacy` | add | immersed forcing, substeps | on | historical (density factor) |
+| `overwrite_ib_slow` | overwrite | immersed forcing, slow step | off | default |
+| `add_ib_slow` | add | immersed forcing, slow step | off | default |
 
 ## What to expect
 
@@ -53,13 +53,12 @@ the arrival times at the middle box's upwind face and the two gap probes.
   the acoustic substeps (the compressible default), which never meets the
   slow-step fire source. With the forcing on the slow step the overwrite
   discards the building relaxation and the two rows separate.
-- **The energy ratio is `1 - exp(-z_top / alfg)` with the energy-consistent
-  tendency**, 0.9714 for this 160 m domain and 45 m decay height, and one
-  for any realistic domain top. The legacy form multiplies the tendency by
-  the local density, so its ratio is about 1.11 at sea level: the plain
-  profile has always injected about ten percent more energy than the fire
-  supplied. `heat_tendency_density = false` removes the factor; it is off
-  by default to keep every existing case bit-for-bit.
+- **The energy ratio is `1 - exp(-z_top / alfg)`**, 0.9714 for this 160 m
+  domain and 45 m decay height, and one for any realistic domain top. The
+  historical form (`heat_tendency_density = true`, the `_legacy` rows)
+  multiplies the tendency by the local density, so its ratio is about 1.11
+  at sea level: until 2026-09-03 the default injected about ten percent
+  more energy than the fire supplied.
 - **Fully covered columns receive no heat in any variant**, because their
   fire cells are masked and carry no flux. The open-fraction option acts in
   the ring of columns that straddle a footprint edge: the below-roof share
@@ -70,27 +69,30 @@ the arrival times at the middle box's upwind face and the two gap probes.
 - **The fire spreads less with buildings in the atmosphere** (about 5000
   against 6800 cells) because the immersed forcing slows the near-surface
   wind the reference-wind Balbi model reads, and the arrival at the middle
-  box's upwind face moves from 25 s to 37 s. The energy-consistent form
-  burns slightly less again because it injects less heat.
+  box's upwind face moves from 25 s to 37 s. The historical form burns
+  slightly more because it injects more heat.
 
 ## Reference table
 
 ```
 variant                 exit   cells    E_ratio   below_roof  theta_blk  u2 g1 g2
 ---------------------- ----- ------- ---------- ------------ ----------  ----------
-overwrite_noib             0    6794   1.112377   0.20676035   311.4136     25   54   46
-add_noib                   0    6794   1.112377   0.20676035   311.4136     25   54   46
-add_noib_open              0    6806   1.112774   0.16535310   309.0057     25   54   46
-add_noib_open_energy       0    6804   0.971434   0.16403038   308.3025     25   54   46
-overwrite_ib               0    5055   1.113573   0.20505155   329.5685     37   53   59
-add_ib                     0    5055   1.113573   0.20505155   329.5685     37   53   59
-add_ib_open                0    5053   1.114572   0.16413099   324.5222     37   53   59
-add_ib_open_energy         0    4992   0.971434   0.16403038   322.8175     37   53   59
-overwrite_ib_slow          0    5052   1.113290   0.20587627   330.5684     35   53   59
-add_ib_slow                0    5054   1.113260   0.20587066   330.5684     35   53   59
+overwrite_noib             0    6789   0.971434   0.20512201   308.1556     25   54   46
+add_noib                   0    6789   0.971434   0.20512201   308.1556     25   54   46
+add_noib_open              0    6804   0.971434   0.16403038   308.3025     25   54   46
+add_noib_open_legacy       0    6806   1.112774   0.16535310   309.0057     25   54   46
+overwrite_ib               0    4996   0.971434   0.20512201   327.7269     37   53   59
+add_ib                     0    4996   0.971434   0.20512201   327.7269     37   53   59
+add_ib_open                0    4992   0.971434   0.16403038   322.8175     37   53   59
+add_ib_open_legacy         0    5053   1.114572   0.16413099   324.5222     37   53   59
+overwrite_ib_slow          0    5012   0.971434   0.20512201   328.8138     35   54   59
+add_ib_slow                0    5017   0.971434   0.20512201   328.9534     35   54   60
 ```
 
-Four ranks, `heat_tendency_density` at its default except in the `_energy`
-rows. `u2`, `g1`, `g2` are arrival times in seconds at the middle box's upwind
-face and the two gap midpoints; `theta_blk` is the largest potential
-temperature [K] of the state in a cell below a roof on the last stage.
+Four ranks, `heat_tendency_density` at its default (energy-consistent)
+except in the `_legacy` rows. `u2`, `g1`, `g2` are arrival times in seconds
+at the middle box's upwind face and the two gap midpoints; `theta_blk` is
+the largest potential temperature [K] of the state in a cell below a roof
+on the last stage. The `_legacy` rows reproduce, to the cell, the
+`add_*_open` rows of the table generated before the default changed, and
+the default `add_*_open` rows reproduce its `_energy` rows.

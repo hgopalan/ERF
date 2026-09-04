@@ -28,6 +28,12 @@ constant molecular diffusion and no LES, a 100 m ignition disc. Three rows:
   accumulators (`FireHeatLoad`, `FirePeakIntensity`, `FireEmberLandings`)
   are checkpointed, and the last line of the exposure CSV written by the
   restarted run must equal the straight run's.
+- `spotting`: the `levelset` row with Albini spotting on a fixed seed. The
+  seed is the fixed seed plus the fire step, so the row also checks that the
+  fire step counter is restored from the checkpoint; before that the
+  restarted run drew different brands.
+- `crown`: the `farsite` row with crown fire and the canonical canopy;
+  `FireCrownActive` and `FireCrownLoad` carry the crown state.
 - `coupled`: Rothermel on the level-set path with lagged heat coupling, so
   the fire heats the atmosphere and the flux buffer that the first restarted
   step injects has to come back from the checkpoint.

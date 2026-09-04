@@ -4052,8 +4052,9 @@ Heat flux and coupling
 | **erf.fire.heat_open_fraction**                | Place injected heat only in the open part of columns with  | Boolean                        | false                  |
 |                                                | structures; needs structures.enable                        |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.heat_tendency_density**             | Keep the legacy density factor in the injected tendency    | Boolean                        | true                   |
-|                                                | (injects rho times the flux); false is energy-consistent   |                                |                        |
+| **erf.fire.heat_tendency_density**             | Restore the historical density factor in the injected      | Boolean                        | false                  |
+|                                                | tendency (injects rho times the flux); false is energy-    |                                |                        |
+|                                                | consistent                                                 |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.smoke_enable**                      | Add the passive smoke tracer                               | Boolean                        | false                  |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -4079,6 +4080,11 @@ Spotting
 | **erf.fire.spotting.terminal_velocity**        | Brand terminal fall velocity [m/s]                         | Real > 0                       | 0.5                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.spotting.n_traj_steps**             | Forward-Euler sub-steps along the trajectory               | Integer > 0                    | 20                     |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.spotting.launch_from**              | Cells that may launch a brand: every burned cell, or only  | "burned", "front"              | "burned"               |
+|                                                | those with unburned fuel within front_band cells           |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.spotting.front_band**               | Band width for launch_from = front [fire cells]            | Integer >= 1                   | 2                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.spotting.spot_radius**              | Ignition disc radius at the landing point [m]              | Real > 0                       | 10.0                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
