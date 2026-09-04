@@ -508,6 +508,18 @@ public:
     /// Mutable access to the lagged latent flux buffer, for checkpoint restart.
     amrex::MultiFab* get_Q_lat_atm_prev_mut() { return m_Q_lat_atm_prev.get(); }
 
+    /// Structure id on the fire grid (0 = none); null unless exposure.enable.
+    const amrex::MultiFab* get_structure_id() const { return fire_structure_id.get(); }
+    /// Accumulated heat load [J/m2]; null unless exposure.enable.
+    const amrex::MultiFab* get_heat_load() const { return fire_heat_load.get(); }
+    amrex::MultiFab* get_heat_load_mut() { return fire_heat_load.get(); }
+    /// Running maximum of the fireline intensity [kW/m]; null unless exposure.enable.
+    const amrex::MultiFab* get_peak_intensity() const { return fire_peak_intensity.get(); }
+    amrex::MultiFab* get_peak_intensity_mut() { return fire_peak_intensity.get(); }
+    /// Embers that landed on each cell of a footprint; null unless exposure.enable.
+    const amrex::MultiFab* get_ember_landings() const { return fire_ember_landings.get(); }
+    amrex::MultiFab* get_ember_landings_mut() { return fire_ember_landings.get(); }
+
     /**
      * @brief Get fire latent heat flux on fire grid.
      * @return Pointer to fire_latent_flux MultiFab [W/m²].
@@ -713,6 +725,22 @@ private:
     // stencils and the FARSITE stamp can test neighbours. Null when no source
     // (structures, fuel codes, masked firebreaks) is configured.
     std::unique_ptr<amrex::MultiFab>         fire_nonburnable;
+
+    // Exposure diagnostics (erf.fire.exposure.enable). The id carries
+    // exposure.ring ghost cells so the wall band can be found from any cell;
+    // the three accumulators are restart state and are checkpointed.
+    std::unique_ptr<amrex::MultiFab>         fire_structure_id;     // 1..N, 0 outside
+    std::unique_ptr<amrex::MultiFab>         fire_heat_load;        // sum Q dt [J/m2]
+    std::unique_ptr<amrex::MultiFab>         fire_peak_intensity;   // max I_B [kW/m]
+    std::unique_ptr<amrex::MultiFab>         fire_ember_landings;   // brands landed on a footprint
+    int                                      m_n_structures = 0;
+    std::vector<char>                        m_exposure_reported;   // first-arrival line printed
+
+    /// Label the footprints of the structure heightmap and allocate the accumulators.
+    void build_structure_ids();
+
+    /// Append one line per structure to the exposure CSV and print first arrivals.
+    void report_exposure();
 
     /// Read the structure heightmap onto the fire grid (nearest-cell sampling).
     void load_structure_height(const std::string& file);

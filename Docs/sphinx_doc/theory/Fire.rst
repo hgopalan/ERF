@@ -228,6 +228,9 @@ explains what each row should show:
 - ``FireNearWall``: the level-set wall extrapolation and the open-column wind
   weights next to masked buildings, measured by the flank's arrival along a
   wall against the unmasked reference.
+- ``FireExposure``: the per-structure exposure CSV (arrival and residence of
+  the front along each wall, peak intensity, heat load, embers) with and
+  without immersed-forcing buildings and with spotting.
 
 Where each feature is exercised:
 
@@ -271,6 +274,8 @@ Where each feature is exercised:
      - ``FireHeatPlacement``
    * - Level-set wall extrapolation, open-column wind weights
      - ``FireNearWall``
+   * - Structure exposure diagnostics, their checkpoint and restart
+     - ``FireExposure``; ``FireRestart`` (``exposure`` row)
    * - Flame temperature, tilt, intensity
      - canonical ``Heat_Flux_Diagnostics``
    * - Terrain slopes and terrain wind corrections

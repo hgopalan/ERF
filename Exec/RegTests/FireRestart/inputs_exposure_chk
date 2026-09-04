@@ -1,0 +1,17 @@
+FILE = inputs_base
+
+# Same as inputs_exposure_straight but stops at 100 s and writes chk00200.
+erf.fire.ros_model = "balbi"
+erf.fire.balbi.formulation = "2020"
+erf.fire.directional_ros = true
+erf.fire.propagation_method = "levelset"
+erf.fire.coupling_type = "passive"
+erf.fire.structures.enable = true
+erf.fire.structures.file = "buildings_25m_80x80.txt"
+erf.fire.levelset.wall_extrapolate = true
+erf.fire.exposure.enable = true
+erf.fire.exposure.interval = 1
+erf.fire.exposure.file = "exposure_chk.csv"
+stop_time = 100.0
+max_step = 200
+erf.check_int = 200

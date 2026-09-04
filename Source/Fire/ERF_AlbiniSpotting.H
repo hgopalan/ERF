@@ -269,7 +269,9 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
                         amrex::MultiFab*                  fire_fuel_load_ptr = nullptr,
                         amrex::Real                       fuel_load_initial_kg_m2 = 0.0,
                         const amrex::MultiFab*            terrain_z = nullptr,
-                        const amrex::MultiFab*            nonburnable = nullptr)
+                        const amrex::MultiFab*            nonburnable = nullptr,
+                        amrex::MultiFab*                  ember_landings = nullptr,
+                        bool                              phi_normalized = true)
 {
     using namespace amrex;
 
@@ -421,6 +423,9 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
     std::string fuel_sys = fuel_system ? *fuel_system : "13";
     Real max_dist_cap = scott_max_spot_dist(fuel_model_id, fuel_sys);
 
+    // Brands dropped on a non-burnable cell, counted for the exposure diagnostics.
+    std::vector<std::pair<int, int>> mask_landings;
+
     // Collect landing sites to stamp (avoid double-stamping during iteration).
     struct LandingSite {
         Real x, y;
@@ -499,9 +504,12 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
         li = std::max(0, std::min(nx - 1, li));
         lj = std::max(0, std::min(ny - 1, lj));
         // A brand landing on a non-burnable cell (structure, non-burnable fuel
-        // code, masked firebreak) does not ignite. Structures will later feed
-        // an ember accumulator instead; for now the brand is simply dropped.
-        if (has_mask && h_mask[lj * nx + li] > 0.5) { continue; }
+        // code, masked firebreak) does not ignite. With the exposure
+        // diagnostics on it is counted on the cell it fell on instead.
+        if (has_mask && h_mask[lj * nx + li] > 0.5) {
+            if (ember_landings) { mask_landings.push_back({li, lj}); }
+            continue;
+        }
         if (fuel_load) {
             // reentry_fuel_thresh is documented as a residual fuel *fraction*,
             // but the load it is compared against is an absolute kg/m2. That
@@ -521,6 +529,31 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
 
         // Update diagnostics comp 0 (H_z) and comp 1 (brand count) at source cell
         // These are done after the loop to avoid MultiFab conflicts mid-loop.
+    }
+
+    // Count the brands that fell on non-burnable cells, one kernel over the
+    // owned cells against the (short) list, like the stamping below.
+    if (ember_landings && !mask_landings.empty()) {
+        const int nml = static_cast<int>(mask_landings.size());
+        Gpu::DeviceVector<int> d_mi(nml), d_mj(nml);
+        {
+            std::vector<int> h_mi(nml), h_mj(nml);
+            for (int n = 0; n < nml; ++n) { h_mi[n] = mask_landings[n].first; h_mj[n] = mask_landings[n].second; }
+            Gpu::copy(Gpu::hostToDevice, h_mi.begin(), h_mi.end(), d_mi.begin());
+            Gpu::copy(Gpu::hostToDevice, h_mj.begin(), h_mj.end(), d_mj.begin());
+        }
+        const int* p_mi = d_mi.data();
+        const int* p_mj = d_mj.data();
+        for (MFIter mfi(*ember_landings); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            auto e = ember_landings->array(mfi);
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/) noexcept {
+                int c = 0;
+                for (int n = 0; n < nml; ++n) { if (p_mi[n] == i && p_mj[n] == j) { ++c; } }
+                if (c > 0) { e(i, j, 0) += Real(c); }
+            });
+        }
+        Gpu::streamSynchronize();
     }
 
     // Stamp phi at landing sites and update source-cell diagnostics.
@@ -603,9 +636,11 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
                     const Real ddy = ccy - p_ly[n];
                     const Real d   = std::sqrt(ddx*ddx + ddy*ddy);
                     if (d <= spot_radius) {
-                        // Normalize SDF by spot_radius to match the [-1, 1] convention
-                        // used throughout the level-set (as in initialize_ignition).
-                        const Real sdf_val = (d - spot_radius) / spot_radius;  // in [-1, 0]
+                        // Signed distance of the spot disc: normalized by the
+                        // radius in the [-1, 1] convention (as initialize_ignition
+                        // does), in metres on the level-set path.
+                        const Real sdf_val = phi_normalized ? (d - spot_radius) / spot_radius
+                                                            : (d - spot_radius);
                         phi_new = amrex::min(phi_new, sdf_val);
                         spotted = true;
                     }
@@ -637,12 +672,17 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
         Gpu::streamSynchronize();
     }
 
-    // Clamp phi to [-1, 1] after all spotting stamps
-    for (amrex::MFIter mfi(phi); mfi.isValid(); ++mfi) {
-        auto p = phi.array(mfi);
-        amrex::ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) noexcept {
-            p(iv) = amrex::max(-1.0, amrex::min(p(iv), 1.0));
-        });
+    // Clamp phi to [-1, 1] after all spotting stamps. Only in the normalized
+    // convention: on the level-set path phi is a signed distance in metres,
+    // and clamping it here squashed the whole distance function every
+    // spotting step, which changed the spread even when nothing landed.
+    if (phi_normalized) {
+        for (amrex::MFIter mfi(phi); mfi.isValid(); ++mfi) {
+            auto p = phi.array(mfi);
+            amrex::ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) noexcept {
+                p(iv) = amrex::max(-1.0, amrex::min(p(iv), 1.0));
+            });
+        }
     }
 
     phi.FillBoundary(geom.periodicity());

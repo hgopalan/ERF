@@ -370,6 +370,20 @@ struct FireParams
     // fire arrival time at its fire cell once, on the step it first burns.
     std::vector<amrex::Real> probes;
 
+    // Per-structure exposure diagnostics (needs structures.enable). Each
+    // connected footprint of the heightmap gets an id, and every `interval`
+    // fire steps one line per structure is appended to `file`: the first and
+    // last arrival of the front in the ring of burnable cells within `ring`
+    // fire cells of the footprint, the fraction of that ring burned, the peak
+    // fireline intensity and the accumulated heat load there, and the number
+    // of embers that landed on the footprint. Off by default.
+    struct ExposureParams {
+        bool        enable   = false;
+        std::string file     = "fire_exposure.csv";
+        int         interval = 100;   ///< fire steps between rows
+        int         ring     = 1;     ///< wall band width [fire cells]
+    } exposure;
+
     // Structures on the fire grid: a building heightmap in the ERF terrain
     // text format sampled onto fire cell centres by nearest point. With
     // enable = true every cell whose sampled height exceeds min_height is
@@ -653,6 +667,11 @@ struct FireParams
        if (probes.size() % 2 != 0) {
            amrex::Abort("erf.fire.probes must be a flat list of x y pairs");
        }
+       pp.query("exposure.enable",   exposure.enable);
+       pp.query("exposure.file",     exposure.file);
+       pp.query("exposure.interval", exposure.interval);
+       pp.query("exposure.ring",     exposure.ring);
+       // Checked against structures.enable below, once that block is read.
 
        // Non-burnable mask: structures, fuel codes, firebreaks
        pp.query("structures.enable",     structures.enable);
@@ -677,6 +696,13 @@ struct FireParams
        }
        if (structures.wind_open_columns && !structures.enable) {
            amrex::Abort("erf.fire.structures.wind_open_columns needs erf.fire.structures.enable");
+       }
+       if (exposure.enable) {
+           if (!structures.enable) {
+               amrex::Abort("erf.fire.exposure.enable needs erf.fire.structures.enable");
+           }
+           if (exposure.interval < 1) { amrex::Abort("erf.fire.exposure.interval must be >= 1"); }
+           if (exposure.ring < 1)     { amrex::Abort("erf.fire.exposure.ring must be >= 1"); }
        }
        if (heat_open_fraction && !structures.enable) {
            amrex::Abort("erf.fire.heat_open_fraction needs erf.fire.structures.enable");

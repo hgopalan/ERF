@@ -23,6 +23,11 @@ constant molecular diffusion and no LES, a 100 m ignition disc. Three rows:
 - `levelset`: Balbi 2020 on the direction-dependent level-set path, passive
   coupling. Balbi's rate follows the wind, so this row also requires the
   atmosphere itself to resume exactly.
+- `exposure`: the `levelset` row with one masked 75 x 100 m box whose upwind
+  face the front reaches at about 50 s and the exposure diagnostics on. Its
+  accumulators (`FireHeatLoad`, `FirePeakIntensity`, `FireEmberLandings`)
+  are checkpointed, and the last line of the exposure CSV written by the
+  restarted run must equal the straight run's.
 - `coupled`: Rothermel on the level-set path with lagged heat coupling, so
   the fire heats the atmosphere and the flux buffer that the first restarted
   step injects has to come back from the checkpoint.

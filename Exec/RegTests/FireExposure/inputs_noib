@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Flat ground: the front reaches the boxes through the wind alone.
+erf.fire.exposure.file = "exposure_noib.csv"
