@@ -1,0 +1,19 @@
+FILE = inputs_base
+
+# The FARSITE row with crown fire, uninterrupted to 200 s. The crown
+# activation and remaining canopy load are checkpointed.
+erf.fire.coupling_type = "passive"
+# Crown fire on the FARSITE path with the canonical Crown_Fire canopy.
+erf.fire.crown.enable = true
+erf.fire.crown.canopy_base_ht = 5.0
+erf.fire.crown.canopy_bulk_den = 0.20
+erf.fire.crown.canopy_depth = 10.0
+erf.fire.crown.foliar_moisture = 1.00
+erf.fire.crown.M_c = 0.30
+erf.fire.crown.h_crown_BTU_lb = 8000.0
+erf.fire.crown.wind_10m_kmh = 30.0
+erf.fire.crown.ros_model = "cruz"
+erf.fire.crown.use_passive_blend = false
+stop_time = 200.0
+max_step = 400
+erf.check_int = -1

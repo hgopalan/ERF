@@ -1797,6 +1797,11 @@ ERF::ReadCheckpointFileFire ()
 
     amrex::Print() << "[FIRE] Restoring fire state from checkpoint " << restart_chkfile << "\n";
 
+    // The fire step counter continues from the atmospheric step: the spotting
+    // random seed is random_seed + step, so without this a restarted run drew
+    // different brands from the straight run.
+    m_fire_layer->set_step(istep[0]);
+
     VisMF::Read(*m_fire_layer->get_levelset_mut(),
         amrex::MultiFabFileFullPrefix(0, restart_chkfile, "Level_", "FirePhi"));
     m_fire_layer->get_levelset_mut()->FillBoundary(m_fire_layer->get_fire_geom().periodicity());

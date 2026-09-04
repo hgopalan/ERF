@@ -151,17 +151,17 @@ flux is distributed the same way into the vapour equation when
 
 .. note::
 
-   The historical form of the tendency carries an extra density factor,
+   Before 2026-09-03 the default tendency carried an extra density factor,
    :math:`\partial(\rho\theta)/\partial t = -\rho\, \partial H/\partial z`
    with :math:`H = Q/c_p`, so the heat it injects is :math:`\rho` times the
    fire flux, about 10 to 15% too much at sea level. Heating gives
    :math:`\partial(\rho\theta)/\partial t = -(1/c_p)\, \partial Q/\partial z`
-   with no density factor. :cpp:`erf.fire.heat_tendency_density = false`
-   selects that form; the default keeps the historical one so existing coupled
-   results do not change. The energy diagnostic printed with
-   :cpp:`erf.fire.fire_debug` reads about :math:`\rho` times
-   :math:`1 - e^{-z_{top}/\alpha_g}` with the default and exactly that
-   factor with the corrected form.
+   with no density factor, and that is now the default;
+   :cpp:`erf.fire.heat_tendency_density = true` restores the historical form
+   for comparison with older coupled results. The energy diagnostic printed
+   with :cpp:`erf.fire.fire_debug` reads exactly
+   :math:`1 - e^{-z_{top}/\alpha_g}` with the default and about
+   :math:`\rho` times that with the historical form.
 
 :cpp:`erf.fire.fire_atm_feedback` multiplies both fluxes before injection;
 zero gives one-way coupling with the fire still responding to the wind, one

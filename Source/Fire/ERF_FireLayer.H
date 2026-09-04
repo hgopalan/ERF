@@ -508,6 +508,10 @@ public:
     /// Mutable access to the lagged latent flux buffer, for checkpoint restart.
     amrex::MultiFab* get_Q_lat_atm_prev_mut() { return m_Q_lat_atm_prev.get(); }
 
+    /// Set the fire step counter, for a restart: the spotting seed and the
+    /// interval-based outputs derive from it.
+    void set_step(int step) { m_step = step; }
+
     /// Structure id on the fire grid (0 = none); null unless exposure.enable.
     const amrex::MultiFab* get_structure_id() const { return fire_structure_id.get(); }
     /// Accumulated heat load [J/m2]; null unless exposure.enable.

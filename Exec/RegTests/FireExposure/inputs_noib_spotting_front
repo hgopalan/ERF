@@ -1,0 +1,18 @@
+FILE = inputs_base
+
+# As noib_spotting but launching only from the front (launch_from = front):
+# the brand count follows the fireline length, not the burned area.
+# Albini ember spotting with a fixed seed. The grass front lofts brands to
+# about 170 m, which at the default 0.5 m/s fall speed carries them out of
+# this 320 m domain; the fall speed is raised so they land within 50 m. The
+# model launches from every burned cell, so the launch probability is kept
+# small and the step coarse: about two brands per second from the whole
+# burned area, of which a few land on the footprints.
+erf.fire.spotting.enable = true
+erf.fire.spotting.launch_from = "front"
+erf.fire.spotting.random_seed = 7
+erf.fire.spotting.P_base = 1.0e-4
+erf.fire.spotting.spotting_interval = 8      # every 1 s at dt = 0.125 s
+erf.fire.spotting.I_B_min = 100.0
+erf.fire.spotting.terminal_velocity = 8.0
+erf.fire.exposure.file = "exposure_noib_spotting_front.csv"

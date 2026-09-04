@@ -17,8 +17,13 @@ Albini (1983). Every :cpp:`erf.fire.spotting.spotting_interval` fire
 subcycles (default every subcycle), on the host and with the same random
 draws on every rank:
 
-1. Front cells are identified: :math:`\phi` at or below the FARSITE threshold
-   and a positive rate of spread.
+1. The launch set is identified. With :cpp:`erf.fire.spotting.launch_from =
+   "burned"` (default) it is every burned cell (:math:`\phi < 0`) with a
+   positive rate of spread, so the number of brands grows with the burned
+   area and the launch probability has to be retuned for each domain. With
+   ``"front"`` it is only the burned cells that have unburned fuel within
+   :cpp:`erf.fire.spotting.front_band` fire cells (default 2), the fireline
+   Albini's model describes, so the count follows the fireline length.
 2. The Byram fireline intensity :math:`I_B` [kW/m] of each front cell is
    formed from the rate of spread, the fuel load and the heat content.
 3. Cells below :cpp:`erf.fire.spotting.I_B_min` (default 100 kW/m) launch

@@ -5,8 +5,8 @@
 #   SKIP_RUN=1 ./run_heat.sh x     # only rebuild the table from existing logs
 #
 # Columns: burned fire cells at 120 s; the injected-to-supplied energy ratio
-# of the last coupling call (1 - exp(-z_top/alfg) with the energy-consistent
-# tendency, about rho times that with the legacy form); the largest share of a
+# of the last coupling call (1 - exp(-z_top/alfg) with the default tendency,
+# about rho times that with the historical form of the _legacy rows); the largest share of a
 # partial column's heating that lands below the roof (1 - exp(-H/alfg) for the
 # plain profile, reduced by the open fraction with heat_open_fraction); the
 # largest potential temperature of the state in cells below a roof; and the
@@ -17,8 +17,8 @@ set -u
 EXE=${1:?usage: run_heat.sh /path/to/erf_exec [extra args]}
 shift || true
 
-VARIANTS="overwrite_noib add_noib add_noib_open add_noib_open_energy
-          overwrite_ib add_ib add_ib_open add_ib_open_energy
+VARIANTS="overwrite_noib add_noib add_noib_open add_noib_open_legacy
+          overwrite_ib add_ib add_ib_open add_ib_open_legacy
           overwrite_ib_slow add_ib_slow"
 
 printf "%-22s %5s %7s %10s %12s %10s  %s\n" variant exit cells E_ratio below_roof theta_blk "u2 g1 g2"
