@@ -7,6 +7,9 @@
 #include <ERF_TerrainSlope.H>
 #include <ERF_HybridRos.H>
 #include <ERF_FireTerrainReader.H>
+#include <ERF_HostFabView.H>
+#include <fstream>
+#include <iomanip>
 
 #include <AMReX_Reduce.H>
 
@@ -493,6 +496,9 @@ void FireLayer::initialize(const ERF& erf,
     if (m_params.structures.enable && !fire_structure_height) {
         load_structure_height(m_params.structures.file);
     }
+    if (m_params.exposure.enable && m_params.structures.enable) {
+        build_structure_ids();
+    }
     build_nonburnable_mask();
     if (fire_nonburnable) {
         enforce_nonburnable_phi();
@@ -918,6 +924,22 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
 
     compute_heat_flux_and_diagnostics(dt);
 
+    // Exposure accumulators: heat load integrates the flux over the
+    // atmospheric step, the peak keeps the largest intensity seen.
+    if (fire_heat_load && fire_heat_flux && fire_fireline_intensity) {
+        for (MFIter mfi(*fire_heat_load, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.tilebox();
+            auto const& hl = fire_heat_load->array(mfi);
+            auto const& pk = fire_peak_intensity->array(mfi);
+            auto const& q  = fire_heat_flux->const_array(mfi);
+            auto const& ib = fire_fireline_intensity->const_array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                hl(i, j, k) += q(i, j, k) * dt;
+                pk(i, j, k)  = amrex::max(pk(i, j, k), ib(i, j, k));
+            });
+        }
+    }
+
     // Phase 8: Albini ember spotting
     // Apply stochastic spotting at the specified interval.
     // fire_wind_eff provides the 2-D wind field for trajectory integration.
@@ -943,7 +965,9 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 fire_fuel_load.get(),
                 m_fuel_load_initial_kg_m2,
                 fire_surface_z.get(),
-                fire_nonburnable.get());
+                fire_nonburnable.get(),
+                fire_ember_landings.get(),
+                /*phi_normalized=*/ m_params.propagation_method != "levelset");
         }
     }
 
@@ -990,6 +1014,11 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     }
 
     report_probes();
+
+    if (m_params.exposure.enable && fire_structure_id &&
+        (m_step % m_params.exposure.interval == 0)) {
+        report_exposure();
+    }
 
     if (m_params.write_fire_stats_csv) {
         static bool csv_header_written = false;
@@ -1669,6 +1698,165 @@ void FireLayer::report_probes()
     }
 }
 
+
+// ───────────────────────────────────────────────────────────────────────────
+// Structure exposure diagnostics
+// ───────────────────────────────────────────────────────────────────────────
+
+void FireLayer::build_structure_ids()
+{
+    const int ring = m_params.exposure.ring;
+    fire_structure_id = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, ring);
+    fire_structure_id->setVal(0.0_rt);
+    m_n_structures = read_structure_ids_nearest_onto_fire_cells(
+        *fire_structure_id, m_fg, m_params.structures.file, m_params.structures.min_height);
+    if (m_n_structures < 0) {
+        amrex::Abort("[FIRE] cannot read structure heightmap '" + m_params.structures.file
+                     + "' for the exposure diagnostics");
+    }
+    fire_structure_id->FillBoundary(m_fg.geom.periodicity());
+    m_exposure_reported.assign(m_n_structures + 1, 0);
+
+    fire_heat_load      = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+    fire_peak_intensity = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+    fire_ember_landings = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+    fire_heat_load->setVal(0.0_rt);
+    fire_peak_intensity->setVal(0.0_rt);
+    fire_ember_landings->setVal(0.0_rt);
+
+    amrex::Print() << "[FIRE] Exposure diagnostics: " << m_n_structures
+                   << " structures in '" << m_params.structures.file
+                   << "', wall band " << ring << " fire cell(s), rows every "
+                   << m_params.exposure.interval << " steps to "
+                   << m_params.exposure.file << "\n";
+}
+
+void FireLayer::report_exposure()
+{
+    if (!fire_structure_id || m_n_structures <= 0) { return; }
+    const int  N    = m_n_structures;
+    const int  ring = m_params.exposure.ring;
+    const auto prob_lo = m_fg.geom.ProbLoArray();
+    const auto dx      = m_fg.geom.CellSizeArray();
+
+    // Per-structure partial sums on this rank, index 0 unused.
+    std::vector<amrex::Real> foot(N + 1, 0.0), sx(N + 1, 0.0), sy(N + 1, 0.0),
+        hmax(N + 1, 0.0), wall(N + 1, 0.0), wall_burned(N + 1, 0.0),
+        tfirst(N + 1, 1.0e30), tlast(N + 1, -1.0), imax(N + 1, 0.0),
+        hl_sum(N + 1, 0.0), hl_max(N + 1, 0.0), emb(N + 1, 0.0);
+
+    for (amrex::MFIter mfi(*fire_structure_id); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.validbox();
+        const ERFHostFabView id_v((*fire_structure_id)[mfi]);
+        const ERFHostFabView mk_v((*fire_nonburnable)[mfi]);
+        const ERFHostFabView at_v((*fire_arrival_time)[mfi]);
+        const ERFHostFabView hl_v((*fire_heat_load)[mfi]);
+        const ERFHostFabView pk_v((*fire_peak_intensity)[mfi]);
+        const ERFHostFabView em_v((*fire_ember_landings)[mfi]);
+        const ERFHostFabView hh_v((*fire_structure_height)[mfi]);
+        auto id = id_v.array();  auto mk = mk_v.array();  auto at = at_v.array();
+        auto hl = hl_v.array();  auto pk = pk_v.array();  auto em = em_v.array();
+        auto hh = hh_v.array();
+        amrex::LoopOnCpu(bx, [&](int i, int j, int /*k*/) {
+            const int sid = static_cast<int>(id(i, j, 0) + 0.5_rt);
+            if (sid > 0) {
+                foot[sid] += 1.0;
+                sx[sid]   += prob_lo[0] + (i + 0.5_rt) * dx[0];
+                sy[sid]   += prob_lo[1] + (j + 0.5_rt) * dx[1];
+                hmax[sid]  = std::max(hmax[sid], hh(i, j, 0));
+                emb[sid]  += em(i, j, 0);
+                return;
+            }
+            if (mk(i, j, 0) > 0.5_rt) { return; }   // street or firebreak: not a wall cell
+            // Distinct structures within the ring of this burnable cell; a
+            // cell between two footprints counts for both.
+            int seen[8]; int ns = 0;
+            for (int dj = -ring; dj <= ring; ++dj) {
+                for (int di = -ring; di <= ring; ++di) {
+                    const int nid = static_cast<int>(id(i + di, j + dj, 0) + 0.5_rt);
+                    if (nid <= 0) { continue; }
+                    bool dup = false;
+                    for (int n = 0; n < ns; ++n) { if (seen[n] == nid) { dup = true; break; } }
+                    if (!dup && ns < 8) { seen[ns++] = nid; }
+                }
+            }
+            for (int n = 0; n < ns; ++n) {
+                const int s = seen[n];
+                wall[s] += 1.0;
+                const amrex::Real t = at(i, j, 0);
+                if (t >= 0.0_rt) {
+                    wall_burned[s] += 1.0;
+                    tfirst[s] = std::min(tfirst[s], t);
+                    tlast[s]  = std::max(tlast[s], t);
+                }
+                imax[s]    = std::max(imax[s], pk(i, j, 0));
+                hl_sum[s] += hl(i, j, 0);
+                hl_max[s]  = std::max(hl_max[s], hl(i, j, 0));
+            }
+        });
+    }
+    amrex::ParallelDescriptor::ReduceRealSum(foot.data(),        N + 1);
+    amrex::ParallelDescriptor::ReduceRealSum(sx.data(),          N + 1);
+    amrex::ParallelDescriptor::ReduceRealSum(sy.data(),          N + 1);
+    amrex::ParallelDescriptor::ReduceRealMax(hmax.data(),        N + 1);
+    amrex::ParallelDescriptor::ReduceRealSum(wall.data(),        N + 1);
+    amrex::ParallelDescriptor::ReduceRealSum(wall_burned.data(), N + 1);
+    amrex::ParallelDescriptor::ReduceRealMin(tfirst.data(),      N + 1);
+    amrex::ParallelDescriptor::ReduceRealMax(tlast.data(),       N + 1);
+    amrex::ParallelDescriptor::ReduceRealMax(imax.data(),        N + 1);
+    amrex::ParallelDescriptor::ReduceRealSum(hl_sum.data(),      N + 1);
+    amrex::ParallelDescriptor::ReduceRealMax(hl_max.data(),      N + 1);
+    amrex::ParallelDescriptor::ReduceRealSum(emb.data(),         N + 1);
+
+    if (!amrex::ParallelDescriptor::IOProcessor()) { return; }
+
+    // Header only when the file does not exist yet (or is empty), so a
+    // restarted run appends to the file the first leg wrote.
+    bool need_header = true;
+    {
+        std::ifstream probe(m_params.exposure.file, std::ios::ate);
+        if (probe.good() && probe.tellg() > 0) { need_header = false; }
+    }
+    std::ofstream csv(m_params.exposure.file, std::ios::app);
+    if (need_header) {
+        csv << "time_s,structure_id,x_m,y_m,height_m,footprint_cells,wall_cells,"
+               "wall_burned_frac,t_first_s,t_last_s,residence_s,"
+               "peak_intensity_kWm,heat_load_mean_MJm2,heat_load_max_MJm2,embers\n";
+    }
+    int reached = 0;
+    amrex::Real i_top = 0.0, hl_top = 0.0;
+    for (int s = 1; s <= N; ++s) {
+        const bool burned = wall_burned[s] > 0.0;
+        const amrex::Real t0  = burned ? tfirst[s] : -1.0;
+        const amrex::Real t1  = burned ? tlast[s]  : -1.0;
+        const amrex::Real res = burned ? (t1 - t0) : 0.0;
+        const amrex::Real xc  = (foot[s] > 0.0) ? sx[s] / foot[s] : 0.0;
+        const amrex::Real yc  = (foot[s] > 0.0) ? sy[s] / foot[s] : 0.0;
+        const amrex::Real wf  = (wall[s] > 0.0) ? wall_burned[s] / wall[s] : 0.0;
+        const amrex::Real hlm = (wall[s] > 0.0) ? hl_sum[s] / wall[s] * 1.0e-6 : 0.0;
+        csv << std::setprecision(10)
+            << m_current_time << "," << s << "," << xc << "," << yc << "," << hmax[s] << ","
+            << static_cast<long>(foot[s]) << "," << static_cast<long>(wall[s]) << ","
+            << wf << "," << t0 << "," << t1 << "," << res << ","
+            << imax[s] << "," << hlm << "," << hl_max[s] * 1.0e-6 << ","
+            << static_cast<long>(emb[s]) << "\n";
+        if (burned) {
+            ++reached;
+            i_top  = std::max(i_top,  imax[s]);
+            hl_top = std::max(hl_top, hl_max[s] * 1.0e-6);
+            if (!m_exposure_reported[s]) {
+                amrex::Print() << "[FIRE EXPOSURE] structure " << s
+                               << " x=" << xc << " y=" << yc
+                               << " reached_at_s=" << t0 << "\n";
+                m_exposure_reported[s] = 1;
+            }
+        }
+    }
+    amrex::Print() << "[FIRE EXPOSURE] t=" << m_current_time
+                   << " reached=" << reached << "/" << N
+                   << " peak_intensity_kWm=" << i_top
+                   << " heat_load_max_MJm2=" << hl_top << "\n";
+}
 
 // ───────────────────────────────────────────────────────────────────────────
 // Structures and the non-burnable mask

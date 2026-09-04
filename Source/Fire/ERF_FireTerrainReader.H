@@ -69,4 +69,27 @@ bool read_heightmap_nearest_onto_fire_cells(
     const FireGrid&    fg,
     const std::string& fname);
 
+/**
+ * @brief Label the connected structures of a heightmap and sample the labels
+ *        onto fire cells
+ *
+ * Heightmap points above hmin are grouped by 4-connectivity on the file's
+ * own grid and numbered 1..N in scan order; every other point is 0. Each fire
+ * cell takes the label of its nearest point, the same sampling as
+ * read_heightmap_nearest_onto_fire_cells(), so a cell carries a nonzero id
+ * exactly when the structure mask built from the same file and threshold is
+ * set there. Only the valid region is written.
+ *
+ * @param[out] id_fire_cc  Structure id at fire-grid cell centres (1 component)
+ * @param[in]  fg          Fire grid structure
+ * @param[in]  fname       Heightmap file
+ * @param[in]  hmin        Height above which a point belongs to a structure [m]
+ * @return Number of structures N, or -1 if the file cannot be read
+ */
+int read_structure_ids_nearest_onto_fire_cells(
+    amrex::MultiFab&   id_fire_cc,
+    const FireGrid&    fg,
+    const std::string& fname,
+    amrex::Real        hmin);
+
 #endif

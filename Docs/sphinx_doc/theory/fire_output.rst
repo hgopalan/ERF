@@ -138,6 +138,52 @@ cell first burns, and nothing afterwards; a probe outside the domain is
 reported once and ignored. The obstacle regression suite uses these to
 tabulate arrival at building faces.
 
+Structure exposure
+------------------
+
+With :cpp:`erf.fire.exposure.enable` (which needs
+:cpp:`erf.fire.structures.enable`) the fire layer reports what each building
+experienced. At initialisation the points of the structure heightmap above
+:cpp:`erf.fire.structures.min_height` are grouped into connected footprints
+(4-connected on the file's grid, numbered in scan order) and each fire cell
+takes the id of its nearest point, the same sampling as the mask, so
+``fire_structure_id`` is nonzero exactly where the mask holds a structure.
+Three accumulators run on the fire grid: the heat load
+:math:`\int Q\,dt` [J/m²] of every cell, the running maximum of the Byram
+fireline intensity [kW/m], and the number of embers that landed on each
+masked cell (brands the spotting model drops there instead of igniting).
+
+Every :cpp:`erf.fire.exposure.interval` fire steps one line per structure is
+appended to :cpp:`erf.fire.exposure.file` (default ``fire_exposure.csv``),
+evaluated over the *wall band*: the burnable cells within
+:cpp:`erf.fire.exposure.ring` fire cells of the footprint (a cell between
+two footprints counts for both). The columns are
+
+``time_s, structure_id, x_m, y_m, height_m, footprint_cells, wall_cells,
+wall_burned_frac, t_first_s, t_last_s, residence_s, peak_intensity_kWm,
+heat_load_mean_MJm2, heat_load_max_MJm2, embers``:
+
+the footprint centroid and sampled height, the size of the footprint and
+of its band, the fraction of the band burned, the earliest and latest
+arrival of the front in the band and their difference (how long the front
+spent passing the structure; both are -1 until it arrives), the largest
+peak intensity in the band, the mean and largest heat load there in MJ/m²,
+and the embers on the footprint. The first time a structure's band burns a
+line ``[FIRE EXPOSURE] structure n x= y= reached_at_s=`` is printed, and
+every row set ends with a summary of how many structures have been reached
+and the largest peak intensity and heat load among them. A restarted run
+appends to an existing file and writes the header only into a new one.
+
+The four fields are added to the fire plotfile as ``fire_structure_id``,
+``fire_heat_load``, ``fire_peak_intensity`` and ``fire_ember_landings``, and
+the three accumulators are checkpointed as ``FireHeatLoad``,
+``FirePeakIntensity`` and ``FireEmberLandings``. The heat load is the
+fire's own release at the ground next to the wall, not a radiant flux onto
+the wall; a view-factor model of the wall flux from the flame length and
+tilt of the band cells is the natural next step. ``Exec/RegTests/FireExposure``
+runs the obstacle scenario with and without immersed-forcing buildings and
+with spotting, and ``FireRestart`` checks that the CSV resumes exactly.
+
 Debug output
 ------------
 
@@ -154,8 +200,10 @@ Checkpoint and restart
 The atmospheric checkpoint carries the fire state as ``FirePhi``,
 ``FireArrivalTime``, ``FireROS``, ``FireFuelLoad``, ``FireFuelMC``,
 ``FireDispAccum``, the lagged flux buffers ``FireQAtmPrev`` and
-``FireQLatAtmPrev`` that the next step injects, and, with crown fire,
-``FireCrownActive`` and ``FireCrownLoad``. On restart the fire layer is initialised from the inputs
+``FireQLatAtmPrev`` that the next step injects, with crown fire
+``FireCrownActive`` and ``FireCrownLoad``, and with the exposure
+diagnostics ``FireHeatLoad``, ``FirePeakIntensity`` and
+``FireEmberLandings``. On restart the fire layer is initialised from the inputs
 first, so a spatial fuel map, firebreaks, a hybrid weight or a structure
 mask must still be available, and the checkpointed fields are then read
 over the initial ones. Diagnostics are recomputed on the first step.

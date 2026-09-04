@@ -46,7 +46,20 @@ draws on every rank:
    fuel load, so brands landing in the burned area or on consumed fuel are
    discarded.
 8. A disc of radius :cpp:`erf.fire.spotting.spot_radius` (default 10 m) is
-   stamped negative into :math:`\phi` at the landing point.
+   stamped negative into :math:`\phi` at the landing point, in the
+   convention of the propagation path: normalised by the radius on the
+   FARSITE path, as a signed distance in metres on the level-set path. A
+   brand that lands on a non-burnable cell is dropped and, with the
+   exposure diagnostics on, counted on that cell.
+
+.. note::
+
+   Until the exposure work the spotting step clamped :math:`\phi` to
+   :math:`[-1, 1]` on every call regardless of the path. On the level-set
+   path, where :math:`\phi` is a distance in metres, that squashed the
+   distance function every spotting step and changed the spread even when
+   no brand landed. Level-set runs with spotting on therefore differ from
+   earlier builds; FARSITE runs do not.
 
 :cpp:`erf.fire.spotting.random_seed` fixes the draws for reproducibility;
 zero seeds from the clock. The four-component diagnostic field

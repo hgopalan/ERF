@@ -240,6 +240,19 @@ erf.fire.hybrid.wind_hi = 12.0                # effective wind speed [m/s] where
 # "[FIRE PROBE]" line on the step its fire cell first burns. Any ROS model.
 # erf.fire.probes = 100.0 50.0 200.0 50.0
 
+# Per-structure exposure diagnostics (needs erf.fire.structures.enable).
+# Each connected footprint of the heightmap gets an id; every `interval`
+# fire steps one line per structure goes to `file` with the first and last
+# arrival of the front in the band of burnable cells within `ring` fire
+# cells of the footprint, the fraction of that band burned, the peak
+# fireline intensity and the accumulated heat load there, and the embers
+# that landed on the footprint. Adds fire_structure_id, fire_heat_load,
+# fire_peak_intensity and fire_ember_landings to the fire plotfile.
+erf.fire.exposure.enable = false
+erf.fire.exposure.file = "fire_exposure.csv"
+erf.fire.exposure.interval = 100
+erf.fire.exposure.ring = 1
+
 # ============================================================================
 # NON-BURNABLE MASK: STRUCTURES, FUEL CODES, FIREBREAKS
 # Cells in the mask get zero rate of spread, the level set is held outside

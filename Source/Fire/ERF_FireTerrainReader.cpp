@@ -116,6 +116,89 @@ bool read_heightmap_nearest_onto_fire_cells(
     return true;
 }
 
+int read_structure_ids_nearest_onto_fire_cells(
+    MultiFab&          id_fire_cc,
+    const FireGrid&    fg,
+    const std::string& fname,
+    Real               hmin)
+{
+    if (fname.empty()) { return -1; }
+
+    int nx_t = 0, ny_t = 0;
+    std::vector<Real> x_coords, y_coords, z_values;
+    if (!read_erf_terrain_file(fname, nx_t, ny_t, x_coords, y_coords, z_values)) {
+        return -1;
+    }
+
+    // Connected components of the points above hmin, 4-connected on the
+    // file's grid, numbered in scan order. Every rank holds the whole file
+    // after the broadcast, so every rank labels identically.
+    const size_t npts = static_cast<size_t>(nx_t) * ny_t;
+    std::vector<Real> labels(npts, 0.0);
+    std::vector<int>  stack;
+    int n_struct = 0;
+    for (int ix = 0; ix < nx_t; ++ix) {
+        for (int iy = 0; iy < ny_t; ++iy) {
+            const size_t p = static_cast<size_t>(ix) * ny_t + iy;
+            if (z_values[p] <= hmin || labels[p] > 0.0) { continue; }
+            ++n_struct;
+            labels[p] = static_cast<Real>(n_struct);
+            stack.clear();
+            stack.push_back(static_cast<int>(p));
+            while (!stack.empty()) {
+                const int q = stack.back(); stack.pop_back();
+                const int qx = q / ny_t, qy = q % ny_t;
+                const int nbx[4] = {qx - 1, qx + 1, qx, qx};
+                const int nby[4] = {qy, qy, qy - 1, qy + 1};
+                for (int n = 0; n < 4; ++n) {
+                    if (nbx[n] < 0 || nbx[n] >= nx_t || nby[n] < 0 || nby[n] >= ny_t) { continue; }
+                    const size_t r = static_cast<size_t>(nbx[n]) * ny_t + nby[n];
+                    if (z_values[r] > hmin && labels[r] == 0.0) {
+                        labels[r] = static_cast<Real>(n_struct);
+                        stack.push_back(static_cast<int>(r));
+                    }
+                }
+            }
+        }
+    }
+
+    Gpu::DeviceVector<Real> x_device(nx_t);
+    Gpu::DeviceVector<Real> y_device(ny_t);
+    Gpu::DeviceVector<Real> l_device(npts);
+    Gpu::copy(Gpu::hostToDevice, x_coords.begin(), x_coords.end(), x_device.begin());
+    Gpu::copy(Gpu::hostToDevice, y_coords.begin(), y_coords.end(), y_device.begin());
+    Gpu::copy(Gpu::hostToDevice, labels.begin(),   labels.end(),   l_device.begin());
+    const Real* x_ptr = x_device.data();
+    const Real* y_ptr = y_device.data();
+    const Real* l_ptr = l_device.data();
+
+    const auto prob_lo = fg.geom.ProbLoArray();
+    const auto dx      = fg.geom.CellSizeArray();
+
+    for (MFIter mfi(id_fire_cc, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.tilebox();
+        Array4<Real> id = id_fire_cc.array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const Real x = prob_lo[0] + (i + 0.5_rt) * dx[0];
+            const Real y = prob_lo[1] + (j + 0.5_rt) * dx[1];
+            // Same nearest-point rule as the height sampling.
+            int ix = nx_t - 1;
+            for (int n = 0; n < nx_t; ++n) {
+                if (x_ptr[n] >= x) { ix = n; break; }
+            }
+            if (ix > 0 && (x - x_ptr[ix - 1]) < (x_ptr[ix] - x)) { ix -= 1; }
+            int iy = ny_t - 1;
+            for (int n = 0; n < ny_t; ++n) {
+                if (y_ptr[n] >= y) { iy = n; break; }
+            }
+            if (iy > 0 && (y - y_ptr[iy - 1]) < (y_ptr[iy] - y)) { iy -= 1; }
+            id(i, j, k) = l_ptr[ix * ny_t + iy];
+        });
+    }
+    Gpu::streamSynchronize();
+    return n_struct;
+}
+
 bool read_terrain_onto_fire_grid(
     MultiFab&   z_fire_nd,
     const FireGrid&    fg,

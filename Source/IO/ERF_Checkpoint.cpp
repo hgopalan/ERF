@@ -622,6 +622,17 @@ ERF::WriteCheckpointFile () const
         if (const amrex::MultiFab* ql = m_fire_layer->get_Q_lat_atm_prev()) {
             VisMF::Write(*ql, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireQLatAtmPrev"));
         }
+        // Exposure accumulators; all null unless erf.fire.exposure.enable.
+        if (const amrex::MultiFab* hl = m_fire_layer->get_heat_load()) {
+            amrex::Print() << "Writing fire exposure accumulators to checkpoint" << std::endl;
+            VisMF::Write(*hl, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireHeatLoad"));
+        }
+        if (const amrex::MultiFab* pk = m_fire_layer->get_peak_intensity()) {
+            VisMF::Write(*pk, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FirePeakIntensity"));
+        }
+        if (const amrex::MultiFab* em = m_fire_layer->get_ember_landings()) {
+            VisMF::Write(*em, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireEmberLandings"));
+        }
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[FIRE] Fire state written to checkpoint " << checkpointname << "\n";
         }
@@ -1818,4 +1829,7 @@ ERF::ReadCheckpointFileFire ()
     restore_optional(m_fire_layer->get_crown_load_mut(),   "FireCrownLoad");
     restore_optional(m_fire_layer->get_Q_atm_prev_mut(),     "FireQAtmPrev");
     restore_optional(m_fire_layer->get_Q_lat_atm_prev_mut(), "FireQLatAtmPrev");
+    restore_optional(m_fire_layer->get_heat_load_mut(),      "FireHeatLoad");
+    restore_optional(m_fire_layer->get_peak_intensity_mut(), "FirePeakIntensity");
+    restore_optional(m_fire_layer->get_ember_landings_mut(), "FireEmberLandings");
 }

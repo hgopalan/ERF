@@ -1,0 +1,20 @@
+FILE = inputs_base
+
+# The levelset row with one masked box 25 m downwind of the ignition disc and
+# the exposure diagnostics on, uninterrupted to 200 s. The last line of the
+# exposure CSV (heat load, peak intensity, arrival times along the wall) must
+# match the restarted run's.
+erf.fire.ros_model = "balbi"
+erf.fire.balbi.formulation = "2020"
+erf.fire.directional_ros = true
+erf.fire.propagation_method = "levelset"
+erf.fire.coupling_type = "passive"
+erf.fire.structures.enable = true
+erf.fire.structures.file = "buildings_25m_80x80.txt"
+erf.fire.levelset.wall_extrapolate = true
+erf.fire.exposure.enable = true
+erf.fire.exposure.interval = 1
+erf.fire.exposure.file = "exposure_straight.csv"
+stop_time = 200.0
+max_step = 400
+erf.check_int = -1

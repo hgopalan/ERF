@@ -1,0 +1,13 @@
+FILE = inputs_base
+
+# Immersed-forcing buildings and open-column wind: the atmosphere the fire
+# reads is blocked and channelled by the boxes.
+# Immersed-forcing buildings from the same heightmap the mask reads
+erf.buildings_type = ImmersedForcing
+erf.buildings_file_name = buildings_5m_64x32.txt
+erf.immersed_forcing_substep = true
+eb2.small_volfrac = 0.005
+erf.if_Cd_momentum = 500.0
+erf.if_Cd_scalar   = 50.0
+erf.fire.structures.wind_open_columns = true
+erf.fire.exposure.file = "exposure_ib.csv"
