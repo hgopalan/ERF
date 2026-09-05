@@ -4035,6 +4035,15 @@ Propagation
 | **erf.fire.levelset.wall_extrapolate**         | Extrapolate the level set into non-burnable cells inside   | Boolean                        | false                  |
 |                                                | every stencil, so a masked wall is a zero-gradient boundary|                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.levelset.ellipse**                  | Spread as a Huygens ellipse set by the midflame wind       | Boolean                        | false                  |
+|                                                | (FARSITE family) instead of a disc; exclusive with         |                                |                        |
+|                                                | directional_ros                                            |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.levelset.ellipse_lw**               | Fixed length-to-width ratio of that ellipse; 0 = Anderson  | Real >= 0                      | 0.0                    |
+|                                                | (1983) from the wind                                       |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.levelset.ellipse_lw_max**           | Cap on the length-to-width ratio                           | Real >= 1                      | 8.0                    |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.accel.enable**                      | Startup acceleration of the rate of spread                 | Boolean                        | false                  |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.accel.use_temporal**                | Temporal per-cell model instead of the size-based model    | Boolean                        | false                  |

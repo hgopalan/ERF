@@ -156,6 +156,44 @@ its per-cell couplings. ``Exec/RegTests/FireRosComparison`` tabulates the
 effect: the head rate is unchanged and the burned area falls, since the flanks
 no longer run at the head rate.
 
+Spread ellipse
+~~~~~~~~~~~~~~
+
+The alternative the FARSITE family uses (Finney 1998; ELMFIRE, Prometheus,
+Cell2Fire) is available as an option, :cpp:`erf.fire.levelset.ellipse`,
+off by default and exclusive with the projection above. Every point of the
+front spreads as a Huygens ellipse: the length-to-width ratio :math:`L/W`
+follows Anderson (1983) from the midflame wind (capped at
+:cpp:`erf.fire.levelset.ellipse_lw_max`, default 8, or fixed with
+:cpp:`erf.fire.levelset.ellipse_lw`), the head-to-back ratio follows
+Alexander (1985),
+
+.. math::
+
+   H/B = \frac{L/W + \sqrt{(L/W)^2 - 1}}{L/W - \sqrt{(L/W)^2 - 1}},
+
+and with the model's rate :math:`R` as the head rate the ellipse has
+semi-major rate :math:`b = (R + R/(H/B))/2`, semi-minor rate
+:math:`a = b/(L/W)` and centre offset :math:`c = b - R/(H/B)`. The level set
+needs the normal speed of that envelope, the support function of the
+ellipse,
+
+.. math::
+
+   R_n(\theta) = c\cos\theta + \sqrt{b^2\cos^2\theta + a^2\sin^2\theta},
+
+with :math:`\theta` the angle between the front normal and the wind, so the
+head runs at :math:`R`, the flanks at :math:`a` and the back at
+:math:`R/(H/B)`. Unlike the projection this reproduces the saturation of the
+observed length-to-width ratio and a backing rate below the no-wind rate,
+which are calibration the empirical ellipse carries; it also double counts
+a resolved wind for the reason given above, so it is the right choice when
+comparing with those models and the projection is the right choice when the
+flow around the fire is resolved. Slope enters through :math:`R` only; the
+ellipse is oriented by the wind alone. ``Exec/RegTests/FireLevelSetEllipse``
+measures the burned shape against :math:`L/W` and the unit test
+``ERF_GTestLevelSetEllipse`` checks the rates at the head, flanks and back.
+
 Reinitialisation
 ~~~~~~~~~~~~~~~~
 

@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# Huygens ellipse with a fixed length-to-width ratio of 3.
+erf.fire.levelset.ellipse = true
+erf.fire.levelset.ellipse_lw = 3.0

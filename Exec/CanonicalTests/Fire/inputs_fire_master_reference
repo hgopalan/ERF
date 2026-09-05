@@ -211,6 +211,12 @@ erf.fire.directional_ros = false
 # difference into the wall dictates and the flank along the wall runs about
 # 20% fast. No effect without a mask source (see NON-BURNABLE MASK).
 erf.fire.levelset.wall_extrapolate = false
+# Spread as a Huygens ellipse set by the midflame wind (FARSITE family) instead
+# of a disc; exclusive with directional_ros. ellipse_lw fixes the
+# length-to-width ratio (0 = Anderson 1983 from the wind), ellipse_lw_max caps it
+erf.fire.levelset.ellipse = false
+erf.fire.levelset.ellipse_lw = 0.0
+erf.fire.levelset.ellipse_lw_max = 8.0
 erf.fire.levelset.gradient = weno5z_front       # "upwind" (first order everywhere), "weno5z" (HJ-WENO5-Z everywhere), "weno5z_front" (WENO in the front band; WRF-Fire hybrid)
 erf.fire.levelset.weno_band_cells = 4           # half-width of that front band in fire cells
 erf.fire.levelset.eps_visc_front = 0.1          # near-front artificial viscosity (WRF-Fire fire_viscosity_bg, 0.1 as in CFBM); < 0 keeps eps_visc everywhere
