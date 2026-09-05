@@ -1,13 +1,18 @@
 # Level_Set_Advection
 
 ## Purpose
-Exercises the level-set fire-front solver: the Godunov upwind gradient, a
+Exercises the level-set fire-front solver: the Godunov upwind gradient with
+first-order, WENO5-Z or hybrid WENO5-Z/first-order one-sided derivatives, a
 three-stage SSP-RK3 step subcycled on its own CFL condition, and Sussman
 signed-distance reinitialization.
 
 ## Physics / Model Features Exercised
 - Level-set advection of the fire front (`propagation_method = "levelset"`)
 - Godunov upwind gradient with artificial viscosity on the Laplacian
+- `erf.fire.levelset.gradient`: `upwind` (first order everywhere), `weno5z`
+  (HJ-WENO5-Z everywhere) and the default `weno5z_front` (WENO within
+  `weno_band_cells` = 4 cells of the front, first order elsewhere, the
+  WRF-Fire / CFBM hybrid); `run_compare.sh` runs the three decks
 - CFL-based subcycling within one atmospheric step
 - Sussman reinitialization of the signed-distance property
 
@@ -43,6 +48,17 @@ Burned-cell count at t = 150 / 300 / 450 / 600 s, measured on 1 rank:
 | `inputs_fire_levelset_baseline` | 36 | 52 | 60 | 64 |
 | `inputs_fire_levelset_no_reinit` | 32 | 44 | 52 | 52 |
 | FARSITE reference | 32 | 32 | 32 | 68 |
+| `inputs_fire_levelset_weno5z` | 32 | 44 | 52 | 52 |
+| `inputs_fire_levelset_weno5z_front` | 32 | 44 | 52 | 52 |
+
+The first two decks pin `erf.fire.levelset.gradient = upwind`, the scheme
+their numbers were measured with; the last two use WENO5-Z everywhere and
+the default hybrid, which reproduces WENO everywhere to the cell here
+because the whole burn sits inside the band. All three put the front on
+the analytic radius along the axes (within 0.3 m at 600 s, on a 25 m
+grid); the difference is the corners, which the first-order scheme grows
+out square (64 cells against 56) and WENO keeps rounder (52). The rate is
+the same, the shape is better.
 
 Both cases track the analytic front. `phi` behaves as a signed distance:
 `phi_min` about -38 m near the centre of the burn, `phi_max` about the

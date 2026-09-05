@@ -3992,6 +3992,13 @@ Propagation
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.eps_visc**                 | Artificial viscosity coefficient                           | Real >= 0                      | 0.4                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.levelset.gradient**                 | One-sided derivatives of the level set: first-order        | "upwind" / "weno5z" /          | "weno5z_front"         |
+|                                                | everywhere, HJ-WENO5-Z everywhere, or HJ-WENO5-Z within    | "weno5z_front"                 |                        |
+|                                                | the front band and first order elsewhere (WRF-Fire)        |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.levelset.weno_band_cells**          | Half-width of the front band, in fire cells, that uses     | Integer > 0                    | 4                      |
+|                                                | WENO with "weno5z_front"                                   |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.reinit_every**             | Reinitialise every N subcycles                             | Integer > 0                    | 5                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.reinit_iters**             | Sussman iterations per reinitialisation                    | Integer > 0                    | 10                     |

@@ -8,7 +8,7 @@ with `erf.fire.propagation_method = "levelset"`.
 ## Subcases
 | Subdirectory | Description | Character |
 |---|---|---|
-| `Level_Set_Advection` | Godunov upwind advection with SSP-RK3 time stepping and Sussman signed-distance reinitialization. | empirical / regression |
+| `Level_Set_Advection` | Godunov upwind advection with SSP-RK3 time stepping and Sussman signed-distance reinitialization; first-order, WENO5-Z and hybrid WENO5-Z/first-order derivatives compared against the analytic front. | empirical / regression |
 
 ## Notes
 - Level-set propagation is **isotropic**. The front advances at the scalar rate

@@ -84,6 +84,12 @@ and Δφ is the Laplacian.
    * - ``erf.fire.levelset.reinit_dtau``
      - −1 (auto)
      - Pseudo-timestep for reinitialization; negative means auto = 0.5·min(dx, dy)
+   * - ``erf.fire.levelset.gradient``
+     - "weno5z_front"
+     - One-sided derivatives of the level set: "upwind" (first order everywhere), "weno5z" (HJ-WENO5-Z everywhere) or "weno5z_front" (WENO within the front band, first order elsewhere; the WRF-Fire hybrid)
+   * - ``erf.fire.levelset.weno_band_cells``
+     - 4
+     - Half-width of the front band, in fire cells, that uses WENO with "weno5z_front"
 
 
 When to use which method

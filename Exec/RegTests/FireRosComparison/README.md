@@ -71,40 +71,45 @@ fuel-code strip:
 ## Reference results
 
 Burned cells after 200 s from a 50-cell ignition disk, and the head-fire rate of
-spread:
+spread, with the default hybrid WENO5-Z/first-order level set
+(`erf.fire.levelset.gradient = weno5z_front`, 2026-09-05). The first-order
+scheme that preceded it burned more cells in every row (for example
+`rothermel_isotropic` 132 against 112, `balbi2020_isotropic` 232 against
+216) at the same head rate; the identities and the direction-dependence
+ordering below are unchanged.
 
 | variant | burned cells | max ROS (m/s) | sec_cells |
 |---|---|---|---|
-| `rothermel_isotropic` | 132 | 0.250 | - |
-| `rothermel_directional` | 78 | 0.250 | - |
-| `balbi2009_isotropic` | 200 | 0.390 | - |
-| `balbi2009_directional` | 84 | 0.390 | - |
-| `balbi2020_isotropic` | 232 | 0.514 | - |
-| `balbi2020_directional` | 138 | 0.514 | - |
-| `rothermel_fuelmap` | 132 | 0.250 | - |
-| `hybrid_none` | 132 | 0.250 | 0 |
-| `hybrid_all` | 232 | 0.514 | 6400 |
-| `hybrid_region` | 162 | 0.514 | 3840 |
-| `hybrid_fuel` | 140 | 0.329 | 3840 |
-| `hybrid_none_directional` | 78 | 0.250 | 0 |
-| `hybrid_all_directional` | 138 | 0.514 | 6400 |
-| `hybrid_region_directional` | 98 | 0.514 | 3840 |
-| `hybrid_wind_off` | 132 | 0.250 | 0 |
-| `hybrid_wind` | 216 | 0.389 | 6400 |
-| `macarthur_isotropic` | 740 | 1.015 | - |
-| `macarthur_directional` | 184 | 1.015 | - |
-| `cheney_gould_isotropic` | 104 | 0.180 | - |
-| `cheney_gould_directional` | 96 | 0.180 | - |
-| `behave_isotropic` | 132 | 0.250 | - |
-| `behave_directional` | 78 | 0.250 | - |
-| `rothermel_nearest` | 132 | 0.250 | - |
-| `balbi2020_reference_wind` | 516 | 0.930 | - |
+| `rothermel_isotropic` | 112 | 0.250 | - |
+| `rothermel_directional` | 74 | 0.250 | - |
+| `balbi2009_isotropic` | 172 | 0.390 | - |
+| `balbi2009_directional` | 80 | 0.390 | - |
+| `balbi2020_isotropic` | 216 | 0.514 | - |
+| `balbi2020_directional` | 120 | 0.514 | - |
+| `rothermel_fuelmap` | 112 | 0.250 | - |
+| `hybrid_none` | 112 | 0.250 | 0 |
+| `hybrid_all` | 216 | 0.514 | 6400 |
+| `hybrid_region` | 136 | 0.514 | 3840 |
+| `hybrid_fuel` | 120 | 0.329 | 3840 |
+| `hybrid_none_directional` | 74 | 0.250 | 0 |
+| `hybrid_all_directional` | 120 | 0.514 | 6400 |
+| `hybrid_region_directional` | 90 | 0.514 | 3840 |
+| `hybrid_wind_off` | 112 | 0.250 | 0 |
+| `hybrid_wind` | 180 | 0.389 | 6400 |
+| `macarthur_isotropic` | 680 | 1.015 | - |
+| `macarthur_directional` | 154 | 1.015 | - |
+| `cheney_gould_isotropic` | 88 | 0.180 | - |
+| `cheney_gould_directional` | 84 | 0.180 | - |
+| `behave_isotropic` | 112 | 0.250 | - |
+| `behave_directional` | 74 | 0.250 | - |
+| `rothermel_nearest` | 112 | 0.250 | - |
+| `balbi2020_reference_wind` | 468 | 0.930 | - |
 | `balbi2020_extinction_wet` | 52 | 0.000 | - |
-| `hybrid_behave_cheney` | 128 | 0.250 | 3840 |
-| `hybrid_behave_cheney_directional` | 74 | 0.250 | 3840 |
-| `hybrid_blend_width` | 158 | 0.497 | 3840 |
-| `rothermel_code0_legacy` | 132 | 0.250 | - |
-| `rothermel_code0_masked` | 124 | 0.250 | - |
+| `hybrid_behave_cheney` | 108 | 0.250 | 3840 |
+| `hybrid_behave_cheney_directional` | 68 | 0.250 | 3840 |
+| `hybrid_blend_width` | 136 | 0.497 | 3840 |
+| `rothermel_code0_legacy` | 112 | 0.250 | - |
+| `rothermel_code0_masked` | 110 | 0.250 | - |
 
 Three things to read out of it.
 

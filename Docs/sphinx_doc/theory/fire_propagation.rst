@@ -86,11 +86,26 @@ Setting :cpp:`erf.fire.propagation_method = "levelset"` solves
 
    \frac{\partial \phi}{\partial t} = -R(x, y)\,\bigl(|\nabla \phi| - \varepsilon\, \Delta \phi\bigr)
 
-with the first-order Godunov upwind Hamiltonian for :math:`|\nabla\phi|`
-(Osher and Sethian: for an expanding front the backward difference counts
-only where it is positive and the forward difference only where it is
-negative, so the update always reads the burned side) and a three-stage
-strong stability preserving Runge-Kutta step. The Laplacian term is an artificial
+with the Godunov upwind Hamiltonian for :math:`|\nabla\phi|` (Osher and
+Sethian: for an expanding front the backward difference counts only where
+it is positive and the forward difference only where it is negative, so the
+update always reads the burned side) and a three-stage strong stability
+preserving Runge-Kutta step. The one-sided derivatives that feed the
+Hamiltonian follow WRF-Fire and the Community Fire Behavior Model
+(Munoz-Esparza et al. 2018; Jimenez y Munoz et al. 2026): by default,
+:cpp:`erf.fire.levelset.gradient = "weno5z_front"`, they are the
+fifth-order Hamilton-Jacobi WENO of Jiang and Peng (2000) with the Z
+weights of Borges et al. (2008) within :cpp:`erf.fire.levelset.weno_band_cells`
+(default 4) fire cells of the front, where the value of the level set
+matters, and first-order differences elsewhere, where it does not.
+``"weno5z"`` uses WENO everywhere and ``"upwind"`` first order everywhere,
+the scheme before 2026-09-05; the Godunov choice between the two sides is
+the same in all three. The reinitialisation uses the same derivatives.
+First-order differences dissipate the front: in the line-ignition test of
+Jimenez y Munoz et al. (2026) the first-order run lags the theoretical
+front the most and WENO5 removes most of the gap. Next to a masked wall
+the wide stencil falls back to the first-order difference through the
+wall stencil. The ``Level_Set_Advection`` canonical case compares the three. The Laplacian term is an artificial
 viscosity with coefficient :cpp:`erf.fire.levelset.eps_visc` (default 0.4)
 that keeps the front smooth at the grid scale. When terrain slopes are
 available, :math:`|\nabla \phi|` is projected onto the terrain surface so that

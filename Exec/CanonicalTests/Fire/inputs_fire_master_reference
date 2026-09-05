@@ -192,6 +192,8 @@ erf.fire.directional_ros = false
 # difference into the wall dictates and the flank along the wall runs about
 # 20% fast. No effect without a mask source (see NON-BURNABLE MASK).
 erf.fire.levelset.wall_extrapolate = false
+erf.fire.levelset.gradient = weno5z_front       # "upwind" (first order everywhere), "weno5z" (HJ-WENO5-Z everywhere), "weno5z_front" (WENO in the front band; WRF-Fire hybrid)
+erf.fire.levelset.weno_band_cells = 4           # half-width of that front band in fire cells
 
 # ============================================================================
 # RATE-OF-SPREAD MODEL SELECTION
