@@ -633,6 +633,31 @@ ERF::WriteCheckpointFile () const
         if (const amrex::MultiFab* em = m_fire_layer->get_ember_landings()) {
             VisMF::Write(*em, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireEmberLandings"));
         }
+        // State that carries across steps but was not written before: the spotting
+        // diagnostics, which are recomputed only every spotting interval and held
+        // in between; the temporal acceleration state; and the crown ROS carried
+        // between steps with the crown fraction burned.
+        if (const amrex::MultiFab* ad = m_fire_layer->get_albini_data()) {
+            VisMF::Write(*ad, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireAlbiniData"));
+        }
+        if (const amrex::MultiFab* as = m_fire_layer->get_accel_state()) {
+            VisMF::Write(*as, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireAccelState"));
+        }
+        if (const amrex::MultiFab* cr = m_fire_layer->get_crown_ros_active()) {
+            VisMF::Write(*cr, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireCrownRosActive"));
+        }
+        if (const amrex::MultiFab* cf = m_fire_layer->get_crown_fraction_burned()) {
+            VisMF::Write(*cf, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireCrownFractionBurned"));
+        }
+        // The counters: the step (also implied by the atmosphere's) and the level-set
+        // subcycle count that schedules the reinitialisation every N subcycles. Without
+        // it a restart from a step that is not a multiple of N reinitialised on a
+        // different schedule from the uninterrupted run and the fronts diverged.
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            std::ofstream f(checkpointname + "/FireState");
+            f << "step " << m_fire_layer->get_step() << "\n"
+              << "levelset_subcycle_count " << m_fire_layer->get_levelset_subcycle_count() << "\n";
+        }
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[FIRE] Fire state written to checkpoint " << checkpointname << "\n";
         }
@@ -1857,6 +1882,30 @@ ERF::ReadCheckpointFileFire ()
     restore_optional(m_fire_layer->get_heat_load_mut(),      "FireHeatLoad");
     restore_optional(m_fire_layer->get_peak_intensity_mut(), "FirePeakIntensity");
     restore_optional(m_fire_layer->get_ember_landings_mut(), "FireEmberLandings");
+    restore_optional(m_fire_layer->get_albini_data_mut(),           "FireAlbiniData");
+    restore_optional(m_fire_layer->get_accel_state_mut(),           "FireAccelState");
+    restore_optional(m_fire_layer->get_crown_ros_active_mut(),      "FireCrownRosActive");
+    restore_optional(m_fire_layer->get_crown_fraction_burned_mut(), "FireCrownFractionBurned");
+
+    // The level-set subcycle count, so the reinitialisation keeps the schedule of
+    // the uninterrupted run; a checkpoint without FireState leaves it at zero,
+    // which is right only when the checkpoint step is a multiple of the interval.
+    {
+        std::ifstream f(restart_chkfile + "/FireState");
+        if (f) {
+            std::string key;
+            while (f >> key) {
+                if (key == "levelset_subcycle_count") {
+                    int n; f >> n; m_fire_layer->set_levelset_subcycle_count(n);
+                } else {
+                    std::string skip; f >> skip;
+                }
+            }
+        } else {
+            amrex::Print() << "[FIRE] Checkpoint has no FireState; the reinitialisation"
+                           << " schedule restarts from the checkpoint step.\n";
+        }
+    }
 }
 
 #ifdef ERF_USE_DUST

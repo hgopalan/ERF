@@ -5,8 +5,11 @@
 #
 # For each row (FARSITE path, level-set path, lagged coupling, exposure
 # diagnostics, spotting, crown fire, dust) three runs are made: straight to
-# 200 s, to 100 s with a checkpoint at step 200, and a restart from that
-# checkpoint to 200 s. The burned-cell count and head rate of spread at 200 s
+# 200 s, to step 197 (98.5 s) with a checkpoint there, and a restart from that
+# checkpoint to 200 s. Step 197 is not a multiple of the level-set
+# reinitialisation interval (5) or the spotting interval (2), so the restart
+# also checks that the counters behind those schedules come back.
+# The burned-cell count and head rate of spread at 200 s
 # of the restarted run must equal those of the straight run; the exposure row
 # also compares the last line of the two exposure CSVs, and the dust row the
 # last line of every dust CSV.
@@ -34,7 +37,7 @@ printf "%-10s %8s %10s %14s %10s %14s %8s\n" path straight_rc s_cells s_ROS r_ce
 printf "%-10s %8s %10s %14s %10s %14s %8s\n" ---------- -------- ---------- -------------- ---------- -------------- --------
 
 for p in farsite levelset coupled exposure spotting crown dust; do
-    rm -rf chk00200
+    rm -rf chk00197
     rc_s=$(run ${p}_straight "$@")
     rc_c=$(run ${p}_chk "$@")
     rc_r=$(run ${p}_restart "$@")

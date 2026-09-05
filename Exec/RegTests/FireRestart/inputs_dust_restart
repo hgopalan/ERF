@@ -1,12 +1,12 @@
 FILE = inputs_base
 
-# Restarts from chk00200 (written by inputs_dust_chk) and runs to 200 s.
+# Restarts from chk00197 (written by inputs_dust_chk) and runs to 200 s.
 # Must reproduce inputs_dust_straight, dust CSVs included.
 erf.fire.ros_model = "rothermel"
 erf.fire.coupling_type = "lagged"
 erf.fire.directional_ros = true
 erf.fire.propagation_method = "levelset"
-erf.restart = chk00200
+erf.restart = chk00197
 stop_time = 200.0
 max_step = 400
 erf.check_int = -1

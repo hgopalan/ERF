@@ -1,6 +1,6 @@
 FILE = inputs_base
 
-# Restarts from chk00200 (written by inputs_crown_chk) and runs to 200 s.
+# Restarts from chk00197 (written by inputs_crown_chk) and runs to 200 s.
 # Must reproduce inputs_crown_straight.
 erf.fire.coupling_type = "passive"
 # Crown fire on the FARSITE path with the canonical Crown_Fire canopy.
@@ -14,7 +14,7 @@ erf.fire.crown.h_crown_BTU_lb = 8000.0
 erf.fire.crown.wind_10m_kmh = 30.0
 erf.fire.crown.ros_model = "cruz"
 erf.fire.crown.use_passive_blend = false
-erf.restart = chk00200
+erf.restart = chk00197
 stop_time = 200.0
 max_step = 400
 erf.check_int = -1

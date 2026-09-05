@@ -1,6 +1,8 @@
 FILE = inputs_base
 
-# Same as inputs_crown_straight but stops at 100 s and writes chk00200.
+# Same as inputs_crown_straight but stops at step 197 (98.5 s) and writes chk00197; the step is not a
+# multiple of the reinitialisation or spotting intervals, so the restart also
+# checks that the counters behind those schedules come back.
 erf.fire.coupling_type = "passive"
 # Crown fire on the FARSITE path with the canonical Crown_Fire canopy.
 erf.fire.crown.enable = true
@@ -13,6 +15,6 @@ erf.fire.crown.h_crown_BTU_lb = 8000.0
 erf.fire.crown.wind_10m_kmh = 30.0
 erf.fire.crown.ros_model = "cruz"
 erf.fire.crown.use_passive_blend = false
-stop_time = 100.0
-max_step = 200
-erf.check_int = 200
+stop_time = 200.0
+max_step = 197
+erf.check_int = 197
