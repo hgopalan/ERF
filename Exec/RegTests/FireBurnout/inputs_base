@@ -1,0 +1,65 @@
+# FireBurnout: a fire on flat ground with the fuel burnt out on the cell
+# crossing time (historical) or on the fuel model's burn time (WRF-SFIRE,
+# erf.fire.burnout_model = sfire), on grass and on timber litter. One-way
+# coupling, so the atmosphere is the same in every deck.
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 320.0 160.0 160.0
+amr.n_cell = 64 32 32
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.max_grid_size = 32      # box lengths must divide by grid_ratio
+amr.max_grid_size_z = 32    # fire module forbids z-decomposition
+
+zlo.type = "surface_layer"
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+erf.molec_diff_type = "None"
+erf.les_type = "Smagorinsky"
+erf.Cs = 0.1
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type = Ideal
+
+erf.fixed_dt = 0.125
+erf.substepping_cfl = 0.5
+max_step = 100000
+stop_time = 60.0
+
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_int = -1
+erf.fire_plot_int = -1
+
+erf.fire.enable = true
+erf.fire.fire_debug = true            # the [FIRE DEBUG] flux lines are what the script reads
+erf.fire.grid_ratio = 4               # 1.25 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.directional_ros = true
+erf.fire.fuel_model_id = 1            # short grass, uniform
+erf.fire.moisture_1hr = 0.08          # the CFBM default fuel moisture
+erf.fire.moisture_10hr = 0.08
+erf.fire.moisture_100hr = 0.08
+erf.fire.moisture_dynamic = false
+erf.fire.ignition_x = 100.0
+erf.fire.ignition_y = 80.0
+erf.fire.ignition_r = 15.0
+erf.fire.wind_ref_ht = 6.1
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = true
+erf.fire.use_terrain_wind = false
+erf.fire.ros_model = "rothermel"
+erf.fire.write_fire_stats_csv = false
+erf.fire.coupling_type = "lagged"
+erf.fire.inject_latent = true
+erf.fire.fire_atm_feedback = 0.0      # one-way: the atmosphere is identical in every deck

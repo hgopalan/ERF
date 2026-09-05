@@ -61,6 +61,23 @@ struct FireParams
     
     // Heat flux parameters (Phase 5)
     amrex::Real       tau_residence_s     = 0.0;         ///< Residence time [s]; 0 = derive from fuel SAV
+    // Burnout of the fuel behind the front (the e-folding time of the fuel
+    // load, which sets how long a cell keeps releasing heat):
+    //   "residence" (default) — max(dx_fire / R, tau_SAV), or tau_residence_s
+    //                           when positive: the cell crossing time floored
+    //                           by the particle burnout time, as always.
+    //   "sfire"               — a burn time per fuel model, as WRF-SFIRE and
+    //                           the Community Fire Behavior Model do (Mandel
+    //                           et al. 2011; Jimenez y Munoz et al. 2026,
+    //                           Table 1: 7 s grass, 180 s chaparral, 100 s
+    //                           brush, 900 s timber litter and slash), turned
+    //                           into the e-folding time by dividing by 0.8514
+    //                           (a 40 % loss in 10 min for 1000 s). Heavy fuels
+    //                           then keep burning behind the front instead of
+    //                           releasing their heat in the crossing time.
+    std::string       burnout_model       = "residence";
+    std::vector<amrex::Real> burnout_times_s;             ///< 13 burn times [s] for Anderson models 1-13 overriding the table (sfire)
+    amrex::Real       burnout_time_to_efold = 0.8514;     ///< tau = burn time / this (WRF-SFIRE)
     amrex::Real       f_c_min             = 0.2;         ///< Minimum combustion fraction
     amrex::Real       f_c_max             = 0.9;         ///< Maximum combustion fraction
     
@@ -545,6 +562,17 @@ struct FireParams
           
        // Heat flux parameters (Phase 5)
        pp.query("tau_residence_s", tau_residence_s);
+       pp.query("burnout_model", burnout_model);
+       pp.queryarr("burnout_times_s", burnout_times_s);
+       pp.query("burnout_time_to_efold", burnout_time_to_efold);
+       if (burnout_model != "residence" && burnout_model != "sfire") {
+           amrex::Abort("erf.fire.burnout_model must be \"residence\" or \"sfire\"");
+       }
+       if (!burnout_times_s.empty() && burnout_times_s.size() != 13) {
+           amrex::Abort("erf.fire.burnout_times_s needs 13 values, one per Anderson fuel model");
+       }
+       for (auto t : burnout_times_s) { if (t <= 0.0) amrex::Abort("erf.fire.burnout_times_s must be positive"); }
+       if (burnout_time_to_efold <= 0.0) { amrex::Abort("erf.fire.burnout_time_to_efold must be positive"); }
        pp.query("f_c_min", f_c_min);
        pp.query("f_c_max", f_c_max);
 

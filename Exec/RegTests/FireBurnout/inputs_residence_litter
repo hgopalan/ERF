@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Hardwood litter (Anderson 9), burnout on the cell crossing time.
+erf.fire.fuel_model_id = 9

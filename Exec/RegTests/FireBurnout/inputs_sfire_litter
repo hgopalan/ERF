@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# Hardwood litter with WRF-SFIRE's burn time: tau = 900 / 0.8514 = 1057 s, so most of the
+# fuel is still there at 60 s and keeps burning behind the front.
+erf.fire.fuel_model_id = 9
+erf.fire.burnout_model = "sfire"

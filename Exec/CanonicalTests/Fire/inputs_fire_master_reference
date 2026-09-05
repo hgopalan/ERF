@@ -417,6 +417,16 @@ erf.fire.cheney_gould.curing = 1.0     # Degree of curing [0-1], 1 = fully cured
 # >0: use this fixed value
 erf.fire.tau_residence_s = 0.0
 
+# Burnout of the fuel behind the front: "residence" (default) is the cell
+# crossing time floored by the particle burnout time (or tau_residence_s);
+# "sfire" is WRF-SFIRE's burn time per fuel model (7 s grass ... 900 s timber
+# litter and slash, CFBM Table 1) divided by burnout_time_to_efold, so heavy
+# fuels keep burning behind the front. burnout_times_s (13 values) overrides
+# the table.
+erf.fire.burnout_model = "residence"
+erf.fire.burnout_time_to_efold = 0.8514
+#erf.fire.burnout_times_s = 7 7 7 180 100 100 100 900 900 900 900 900 900
+
 # Combustion fraction bounds for heat flux calculation
 # Fraction of fuel consumed: typically 0.2 (minimum) to 0.9 (maximum)
 erf.fire.f_c_min = 0.2

@@ -1165,10 +1165,31 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
                        << " m, max_ROS=" << ros_stats.max_ros << " m/s)" << std::endl;
     }
 
+    // Fuel-model burnout time (erf.fire.burnout_model = sfire): the table by
+    // fuel code is built once, on first use.
+    const bool sfire_burnout = (m_params.burnout_model == "sfire");
+    if (sfire_burnout && m_d_burnout_tau.empty()) {
+        std::vector<Real> h_tau(14, 0.0_rt);
+        for (int c = 1; c <= 13; ++c) { h_tau[c] = burnout_tau_s(c); }
+        m_d_burnout_tau.resize(h_tau.size());
+        amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_tau.begin(), h_tau.end(), m_d_burnout_tau.begin());
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Burnout model sfire: tau by fuel model 1-13 [s]:";
+            for (int c = 1; c <= 13; ++c) { amrex::Print() << " " << h_tau[c]; }
+            amrex::Print() << " (burn time / " << m_params.burnout_time_to_efold << ")\n";
+            amrex::Print() << "[FIRE DEBUG] Burnout model sfire: uniform fuel model " << m_params.fuel_model_id
+                           << " tau=" << burnout_tau_s(m_params.fuel_model_id) << " s, w0="
+                           << m_fuel_load_initial_kg_m2 << " kg/m2, fresh-cell heat flux w0 h / tau="
+                           << m_fuel_load_initial_kg_m2 * fp.heat_content * 2326.0_rt / burnout_tau_s(m_params.fuel_model_id)
+                           << " W/m2\n";
+        }
+    }
     fill_fire_heat_flux(*fire_heat_flux, *fire_fuel_load,
                         *fire_phi, *fire_ros, fp,
                         m_fg.geom.CellSize(0), tau_sav_floor, dt_fire_s,
-                        m_has_spatial_fuel ? fire_fuel_model.get() : nullptr);
+                        m_has_spatial_fuel ? fire_fuel_model.get() : nullptr,
+                        (sfire_burnout && !m_has_spatial_fuel) ? burnout_tau_s(m_params.fuel_model_id) : 0.0_rt,
+                        (sfire_burnout && m_has_spatial_fuel) ? m_d_burnout_tau.data() : nullptr);
 
     const Real h_kJ_per_kg = fp.heat_content * 2.326_rt;
     const Real h_fuel_Jkg = fp.heat_content * 2326.0_rt;
@@ -1341,9 +1362,12 @@ void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
     if (!fire_heat_flux || !m_Q_atm_prev) { return; }
 
     if (m_params.fire_debug) {
+        const amrex::Real dA = m_fg.geom.CellSize(0) * m_fg.geom.CellSize(1);
         amrex::Print() << "[FIRE DEBUG] Updating atmosphere flux buffer for coupling_type="
                        << m_params.coupling_type << ". Current max heat flux: "
-                       << fire_heat_flux->max(0) << " W/m2" << std::endl;
+                       << fire_heat_flux->max(0) << " W/m2"
+                       << " total_power_W=" << fire_heat_flux->sum(0) * dA
+                       << " fuel_kg=" << fire_fuel_load->sum(0) * dA << std::endl;
     }
 
     // Fuel moisture seen by the flux partition and the latent flux: the
@@ -1465,6 +1489,17 @@ void FireLayer::apply_polygon_ignition(amrex::Real t_ign)
                        << m_params.ignition.polygon_file << "' ("
                        << m_params.ignition.polygon_type << ") at t=" << t_ign << " s\n";
     }
+}
+
+amrex::Real FireLayer::burnout_tau_s(int fuel_code) const
+{
+    // WRF-SFIRE / CFBM burn times for the Anderson 13 (Jimenez y Munoz et al. 2026, Table 1)
+    static const amrex::Real sfire_burn_time_s[14] = {0.0, 7.0, 7.0, 7.0, 180.0, 100.0, 100.0, 100.0,
+                                                      900.0, 900.0, 900.0, 900.0, 900.0, 900.0};
+    const int c = (fuel_code >= 1 && fuel_code <= 13) ? fuel_code : 1;
+    const amrex::Real burn_time = m_params.burnout_times_s.empty() ? sfire_burn_time_s[c]
+                                                                   : m_params.burnout_times_s[c - 1];
+    return burn_time / m_params.burnout_time_to_efold;
 }
 
 amrex::Real FireLayer::smoke_heat_per_kg_atm() const
