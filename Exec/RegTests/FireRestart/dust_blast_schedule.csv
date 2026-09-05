@@ -1,0 +1,4 @@
+# time_s  cx  cy  radius  mass_kg_m2  mineral_type  priority
+# One blast before the 100 s checkpoint and one after it.
+60.0   1200.0  1000.0  150.0  0.05  0  5
+140.0  1400.0   900.0  150.0  0.05  0  5

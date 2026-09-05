@@ -1,0 +1,67 @@
+FILE = inputs_base
+
+# The coupled row with the dust model, uninterrupted to 200 s.
+erf.fire.ros_model = "rothermel"
+erf.fire.coupling_type = "lagged"
+erf.fire.directional_ros = true
+erf.fire.propagation_method = "levelset"
+stop_time = 200.0
+max_step = 400
+erf.check_int = -1
+
+# Dust settings of the `dust` row of run_restart.sh (the same in its three decks).
+# The row is the `coupled` row (Rothermel on the level-set path, lagged heat
+# coupling) with the dust model on top, coupled to the fire, and every piece of
+# dust state that lives across steps exercised: the deposition accumulator, the
+# 24-hour PM averages and their flags, the MSHA dose with a 60 s shift so two
+# shift ends fall in the run, the STEL running average, the suppression coverage
+# decaying from a raster, a blast before and a blast after the 100 s checkpoint,
+# a haul road, the critical-material budget and the PHREEQC feedback files. The
+# per-run file names are set in the three decks so the straight and restarted
+# runs can be compared line by line.
+erf.transport_scalar = true
+
+erf.dust.enable = true
+erf.dust.grid_ratio = 4                  # must equal erf.fire.grid_ratio
+erf.dust.zref = 10.0                     # first cell centre of the 20 m cells
+erf.dust.silt_fraction = 0.20
+erf.dust.crust_index = 0.5
+erf.dust.z0_dust = 0.01
+erf.dust.suppression_file = "dust_suppression.asc"
+erf.dust.supp_tau_base_s = 300.0
+erf.dust.blast_schedule_file = "dust_blast_schedule.csv"
+erf.dust.blast_reactivity = 2.0
+erf.dust.road_schedule_file = "dust_road_schedule.csv"
+erf.dust.atm_feedback = 1.0
+erf.dust.bin_diameters = 7.0e-6 2.5e-6 50.0e-6
+erf.dust.deposition_E0 = 3.0e-3
+erf.dust.loading_feedback_coeff = 1.0e5
+erf.dust.msha_shift_duration_s = 60.0
+erf.dust.msha_receptor_x = 1500.0
+erf.dust.msha_receptor_y = 1000.0
+erf.dust.stel_enable = true
+erf.dust.stel_averaging_s = 30.0
+erf.dust.silica_enable = true
+erf.dust.visibility_enable = true
+erf.dust.cm_fractions = 0.002
+erf.dust.phreeqc_feedback_interval_s = 50.0
+erf.dust.dust_plot_int = 0               # final step only
+
+erf.fire_dust_coupling = true
+erf.fire_dust_crust_reduction = 0.9
+erf.fire_dust_wind_to_dust = true
+erf.fire_dust_lofting_enabled = true
+
+erf.dust.dust_plot_prefix = "plt_dust_straight_"
+erf.dust.dust_diag_file = "dust_diag_straight.dat"
+erf.dust.dust_naaqs_file = "dust_naaqs_straight.csv"
+erf.dust.msha_exposure_file = "msha_exposure_straight.csv"
+erf.dust.msha_shift_file = "msha_shift_straight.csv"
+erf.dust.msha_receptor_names = "probe_straight"
+erf.dust.stel_diag_file = "stel_straight.csv"
+erf.dust.silica_diag_file = "silica_straight.csv"
+erf.dust.visibility_diag_file = "visibility_straight.csv"
+erf.dust.cm_budget_file = "dust_cm_straight.csv"
+erf.dust.road_diag_file = "dust_road_straight.csv"
+erf.dust.phreeqc_feedback_file = "dust_dep_feedback_straight.dat"
+erf.dust.phreeqc_site_summary_file = "dust_dep_site_straight.csv"

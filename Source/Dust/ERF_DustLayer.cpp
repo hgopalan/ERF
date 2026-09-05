@@ -4,6 +4,7 @@
  */
 
 #include <ERF_DustLayer.H>
+#include <fstream>
 #include <ERF_DustPrerequisites.H>
 #include <ERF_DustGrid.H>
 #include <ERF_DustSurfaceReader.H>
@@ -1177,3 +1178,120 @@ DustLayer::write_phreeqc_feedback(int nstep, amrex::Real cur_time,
 
 
 #endif // ERF_USE_DUST
+// ---------------------------------------------------------------------------
+// Checkpoint and restart
+// ---------------------------------------------------------------------------
+
+amrex::Vector<std::pair<std::string, amrex::MultiFab*>>
+DustLayer::checkpoint_fields ()
+{
+    amrex::Vector<std::pair<std::string, amrex::MultiFab*>> fields;
+    auto add = [&] (const char* name, amrex::MultiFab* mf) {
+        if (mf) { fields.push_back({std::string(name), mf}); }
+    };
+    // Surface state evolved by PHREEQC, the suppression decay and the fire coupling.
+    add("DustUstarT",         dust_ustar_t.get());
+    add("DustUstarBase",      dust_ustar_base.get());
+    add("DustCrustIndex",     dust_crust_index.get());
+    add("DustSiltFraction",   dust_silt_fraction.get());
+    add("DustEfflor",         dust_efflor.get());
+    add("DustSuppression",    dust_suppression.get());
+    add("DustRetreatFlag",    dust_retreat_flag.get());
+    // Accumulators, running averages and the flags derived from them.
+    add("DustDepositionRate", dust_deposition_rate.get());
+    add("DustPM25",           dust_pm25.get());
+    add("DustPM10",           dust_pm10.get());
+    add("DustPM25_24h",       dust_pm25_24h.get());
+    add("DustPM10_24h",       dust_pm10_24h.get());
+    add("DustPM25Exceed",     dust_pm25_exceed.get());
+    add("DustPM10Exceed",     dust_pm10_exceed.get());
+    add("DustMSHADose",       dust_msha_dose.get());
+    add("DustMSHATWA",        dust_msha_twa.get());
+    add("DustMSHAExceed",     dust_msha_exceed.get());
+    add("DustMSHAShiftTWA",   dust_msha_shift_twa.get());
+    add("DustSTELAvg",        m_stel_avg.get());
+    // The dust step runs after the dycore of the same step, so the first dycore
+    // after a restart injects the emission flux and deposits with the friction
+    // velocity that the last step before the checkpoint computed, and reads the
+    // surface concentration returned after its slow right-hand side. Without
+    // these three the first restarted step injected nothing, deposited nothing
+    // (u* was still zero) and the deposition accumulator carried that offset
+    // for the rest of the run.
+    add("DustEmissionFlux",   dust_emission_flux.get());
+    add("DustUstarIn",        dust_ustar_in.get());
+    add("DustConcSfc",        dust_conc_sfc.get());
+#if defined(ERF_USE_PARTICLES)
+    add("DustSourceMap",      dust_source_map.get());
+#endif
+    return fields;
+}
+
+void
+DustLayer::write_checkpoint_state (const std::string& checkpointname) const
+{
+    if (!amrex::ParallelDescriptor::IOProcessor()) { return; }
+    std::ofstream f(checkpointname + "/DustState");
+    f.precision(17);
+    f << "step " << m_step << "\n"
+      << "time " << m_time << "\n"
+      << "last_phreeqc_update " << m_last_phreeqc_update << "\n"
+      << "msha_shift_count " << m_msha_shift_count << "\n"
+      << "last_phreeqc_write_time " << m_last_phreeqc_write_time << "\n"
+      << "last_phreeqc_write_step " << m_last_phreeqc_write_step << "\n"
+      << "last_dust_plot_step " << m_last_dust_plot_step << "\n";
+}
+
+void
+DustLayer::read_checkpoint_state (const std::string& restart_chkfile,
+                                  int step, amrex::Real time)
+{
+    // The dust layer counts its own steps and accumulates its own time from
+    // zero, so without this a restarted run would see PHREEQC intervals, MSHA
+    // shifts and output intervals measured from the restart instead of from
+    // the start of the run.
+    m_step = step;
+    m_time = time;
+    std::ifstream f(restart_chkfile + "/DustState");
+    if (f) {
+        std::string key;
+        while (f >> key) {
+            if      (key == "step")                    { f >> m_step; }
+            else if (key == "time")                    { f >> m_time; }
+            else if (key == "last_phreeqc_update")     { f >> m_last_phreeqc_update; }
+            else if (key == "msha_shift_count")        { f >> m_msha_shift_count; }
+            else if (key == "last_phreeqc_write_time") { f >> m_last_phreeqc_write_time; }
+            else if (key == "last_phreeqc_write_step") { f >> m_last_phreeqc_write_step; }
+            else if (key == "last_dust_plot_step")     { f >> m_last_dust_plot_step; }
+            else { std::string skip; f >> skip; }
+        }
+    } else {
+        amrex::Print() << "[DUST] Checkpoint has no DustState; taking step and time"
+                       << " from the atmosphere.\n";
+    }
+    // Events dated before the restart were applied by the run that wrote the
+    // checkpoint; the schedule only fires events inside the current step's
+    // interval, so this keeps the debug output and the fired flags consistent.
+    for (auto& ev : m_blast_schedule.events) {
+        ev.fired = (ev.time_s <= m_time);
+    }
+}
+
+#if defined(ERF_USE_PARTICLES)
+void
+DustLayer::checkpoint_particles (const std::string& checkpointname) const
+{
+    if (!m_dust_pc) { return; }
+    m_dust_pc->Checkpoint(checkpointname, "DustParticles", true, m_dust_pc->varNames());
+}
+
+void
+DustLayer::restart_particles (const std::string& restart_chkfile)
+{
+    if (!m_dust_pc) { return; }
+    if (!amrex::FileExists(restart_chkfile + "/DustParticles/Header")) {
+        amrex::Print() << "[DUST] Checkpoint has no DustParticles; starting with none.\n";
+        return;
+    }
+    m_dust_pc->Restart(restart_chkfile, "DustParticles");
+}
+#endif

@@ -1739,6 +1739,9 @@ private:
     int         m_fire_plot_int  = -1;
     amrex::Real m_fire_plot_per  = -1.0;
     void ReadCheckpointFileFire (); 
+#ifdef ERF_USE_DUST
+    void ReadCheckpointFileDust ();
+#endif
 #endif
 
 

@@ -206,6 +206,33 @@ public:
     int get_dust_scalar_comp() const { return m_dust_scalar_comp; }
 
     /**
+     * The fields that carry state from one step to the next, as (name, field)
+     * pairs, for the checkpoint: the surface state that PHREEQC, suppression
+     * and the fire coupling evolve, the accumulators and running averages, and
+     * what the first dycore after a restart uses before the dust step refills
+     * it: the emission flux it injects, the friction velocity its deposition
+     * uses and the surface concentration returned to the dust grid. The wind,
+     * temperature and boundary-layer height are refilled before use and are
+     * not in the list.
+     */
+    amrex::Vector<std::pair<std::string, amrex::MultiFab*>> checkpoint_fields ();
+
+    /// Write the counters behind the fields (step, time, PHREEQC and output
+    /// timing, MSHA shift number) to <checkpointname>/DustState.
+    void write_checkpoint_state (const std::string& checkpointname) const;
+
+    /// Restore those counters; step and time fall back to the atmosphere's when
+    /// the file is absent. Blast events dated before the restart are marked fired.
+    void read_checkpoint_state (const std::string& restart_chkfile,
+                                int step, amrex::Real time);
+
+#if defined(ERF_USE_PARTICLES)
+    /// Write and read the super-particles as <dir>/DustParticles.
+    void checkpoint_particles (const std::string& checkpointname) const;
+    void restart_particles (const std::string& restart_chkfile);
+#endif
+
+    /**
      * @brief Inject dust emission flux into the ERF cc_source MultiFab.
      *
      * Called from ERF_Advance.cpp before advance_dycore(), following the same
