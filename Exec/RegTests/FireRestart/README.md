@@ -134,5 +134,13 @@ the same kind of indexing slip, placing particles with the atmosphere's
 spacing from dust-grid indices, so with a grid ratio above one most were
 released outside the domain; it now uses the dust spacing.
 
+**The fire plotfile mislabelled everything after its base block.** Comparing
+the fire plotfiles across rank counts on the way showed `fire_fuel_mc_lh` and
+`fire_fuel_mc_lw` differing: the catalog names them right after the nineteen
+base fields whenever the moisture MultiFab carries the live classes (it
+always does), but the writer never copied them, so their two slots held
+uninitialized memory and every later field, spotting onwards, sat two slots
+away from its name. The writer now copies them.
+
 Restart of the spotting diagnostics and the crown-fire state is not covered
 here.
