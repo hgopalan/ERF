@@ -505,6 +505,20 @@ public:
     /// Mutable access to the lagged sensible flux buffer, for checkpoint restart.
     amrex::MultiFab* get_Q_atm_prev_mut() { return m_Q_atm_prev.get(); }
 
+    /**
+     * @brief Heat per kilogram of fuel that converts the lagged atmospheric
+     *        sensible flux back into fuel burnt, for the smoke emission.
+     *
+     * The fuel model's heat content when erf.fire.smoke_heat_from_fuel is
+     * true, otherwise erf.fire.smoke_heat_of_comb, multiplied by the
+     * partition factor the buffer was last filled with (1 under the legacy
+     * partition, 1 / (1 + M_f) under the CFBM one), so the fuel burnt is
+     * recovered from the unpartitioned heat release and the smoke does not
+     * change with erf.fire.heat_flux_partition.
+     * @return Heat per kilogram of fuel [J/kg] to divide the lagged flux by.
+     */
+    amrex::Real smoke_heat_per_kg_atm() const;
+
     /// Mutable access to the lagged latent flux buffer, for checkpoint restart.
     amrex::MultiFab* get_Q_lat_atm_prev_mut() { return m_Q_lat_atm_prev.get(); }
 
@@ -662,6 +676,7 @@ private:
     // cc_source at the start of the next timestep (one-step explicit lag).
     std::unique_ptr<amrex::MultiFab>         m_Q_atm_prev;            // sensible [W/m²]
     std::unique_ptr<amrex::MultiFab>         m_Q_lat_atm_prev;        // latent   [W/m²]
+    amrex::Real                              m_f_dry_prev = 1.0;      // partition factor m_Q_atm_prev was filled with
 
     // Open-fraction heat placement (erf.fire.heat_open_fraction): per
     // atmospheric column, the fraction of the footprint not covered by

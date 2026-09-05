@@ -453,6 +453,12 @@ struct FireParams
     bool  smoke_enable           = false;
     amrex::Real  smoke_emission_factor  = 0.02;       // kg smoke / kg fuel [-]
     amrex::Real  smoke_heat_of_comb     = 18700000.0; // J/kg fuel
+    // Take the heat per kilogram that converts the flux back into fuel burnt
+    // from the fuel model's own heat content (erf.fire.fuel_model_id) instead
+    // of smoke_heat_of_comb, as the Community Fire Behavior Model does. With
+    // a spatial fuel map the deck's fuel model is still the one used, since
+    // the lagged flux lives on the atmospheric grid without the fuel codes.
+    bool  smoke_heat_from_fuel   = false;
 
     /**
      * @brief Construct FireParams from ParmParse
@@ -559,6 +565,7 @@ struct FireParams
        pp.query("smoke_enable", smoke_enable);
        pp.query("smoke_emission_factor", smoke_emission_factor);
        pp.query("smoke_heat_of_comb", smoke_heat_of_comb);
+       pp.query("smoke_heat_from_fuel", smoke_heat_from_fuel);
 
        // Phase 8: Albini (1983) ember spotting parameters
        auto& sp = spotting;

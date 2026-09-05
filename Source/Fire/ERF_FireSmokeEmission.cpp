@@ -59,7 +59,8 @@ void inject_smoke_from_fire(
         Real heat_max = fire_heat_atm.max(0);
         Print() << "[FIRE DEBUG] Phase 4 smoke: step=" << step
                 << " fire_heat_atm_max=" << heat_max << " W/m2"
-                << " smoke_src_max=" << src_max << " kg/m3/s\n";
+                << " smoke_src_max=" << src_max << " kg/m3/s"
+                << " heat_per_kg=" << heat_of_combustion << " J/kg\n";
     }
 }
 

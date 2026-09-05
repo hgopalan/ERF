@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# Smoke tracer with the CFBM partition: the emission must equal smoke_legacy, since the
+# partition factor is divided back out of the lagged flux before the fuel burnt is formed.
+erf.fire.heat_flux_partition = "cfbm"
+erf.fire.smoke_enable = true

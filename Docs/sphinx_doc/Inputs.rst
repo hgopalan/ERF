@@ -4083,6 +4083,9 @@ Heat flux and coupling
 | **erf.fire.smoke_heat_of_comb**                | Heat of combustion used to convert flux to fuel burned     | Real > 0                       | 1.87e7                 |
 |                                                | [J/kg]                                                     |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.smoke_heat_from_fuel**              | Convert the flux to fuel burned with the fuel model's own  | Boolean                        | false                  |
+|                                                | heat content instead of smoke_heat_of_comb (CFBM parity)   |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 
 
 Spotting

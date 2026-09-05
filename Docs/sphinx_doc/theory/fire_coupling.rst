@@ -260,6 +260,19 @@ energy injection and is placed in the lowest atmospheric cell. The tracer is
 advected and diffused like any other scalar and is available in the
 atmospheric plotfile.
 
+This is the Community Fire Behavior Model's smoke (Jiménez y Muñoz et al.,
+2026): 2% of the fuel burnt, following Coen (2013), released into the first
+atmospheric layer. Two details keep the parity exact.
+:cpp:`erf.fire.smoke_heat_from_fuel` (default false) takes :math:`H_c` from
+the fuel model's own heat content instead of
+:cpp:`erf.fire.smoke_heat_of_comb`, so the fuel burnt is the one the heat
+release was built from (with a spatial fuel map the deck's fuel model is
+used, since the lagged flux carries no fuel codes). And under the CFBM heat
+flux partition the lagged sensible flux is :math:`f_{dry} Q`; the emission
+divides that factor back out, so the smoke is the same under both
+partitions. The ``smoke_*`` decks of ``Exec/RegTests/FireFluxPartition``
+check both.
+
 References
 ----------
 

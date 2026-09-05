@@ -1340,6 +1340,7 @@ void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
     // Jimenez y Munoz et al. (2026). The fire-grid field itself is left as the
     // unpartitioned release for the diagnostics and the latent flux below.
     const amrex::Real f_dry = m_params.cfbm_partition() ? 1.0_rt / (1.0_rt + M_f) : 1.0_rt;
+    m_f_dry_prev = f_dry;   // the smoke emission divides this back out
     if (m_params.cfbm_partition()) {
         amrex::MultiFab Q_sens(fire_heat_flux->boxArray(), fire_heat_flux->DistributionMap(), 1, 0);
         amrex::MultiFab::Copy(Q_sens, *fire_heat_flux, 0, 0, 1, 0);
@@ -1369,6 +1370,16 @@ void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
         }
         m_Q_lat_atm_prev->setVal(0.0_rt);
     }
+}
+
+amrex::Real FireLayer::smoke_heat_per_kg_atm() const
+{
+    amrex::Real h = m_params.smoke_heat_of_comb;
+    if (m_params.smoke_heat_from_fuel) {
+        const FuelModelParams fp = get_anderson_fuel_params(m_params.fuel_model_id);
+        h = fp.heat_content * 2326.0_rt;    // BTU/lb to J/kg
+    }
+    return h * m_f_dry_prev;
 }
 
 void FireLayer::apply_fire_coupling_to_cc_source(

@@ -21,7 +21,7 @@ MPIRUN="mpirun -np 4" ./run_partition.sh /path/to/erf_exec
 python3 plot_partition.py
 ```
 
-Seven decks, 60 s each. Five run one-way (`erf.fire.fire_atm_feedback =
+Ten decks, 60 s each. Five run one-way (`erf.fire.fire_atm_feedback =
 0`, fluxes computed and printed but not injected) so the fire evolves
 identically and the checks are exact: `default` (no key), `legacy`, `cfbm`,
 `cfbm_wet` (30 % moisture) and `cfbm_nolatent`. The script reads the
@@ -35,6 +35,17 @@ heating changes the wind a little and the fronts ignite cells a step apart,
 so the flux maxima depart from the factor on a few dozen of the 480 steps
 while the burned area stays the same. The plot shows the one-way flux
 maxima against time and the sensible-flux ratio for both pairs.
+
+Three `smoke_*` decks turn the smoke tracer on, one-way. The tracer is the
+CFBM's smoke (2 % of the fuel burnt, Coen 2013, into the first atmospheric
+layer). `smoke_legacy` and `smoke_cfbm` must give an identical smoke source
+at every step: the emission divides the partition factor back out of the
+lagged flux before forming the fuel burnt, so the smoke does not change with
+`erf.fire.heat_flux_partition`. `smoke_cfbm_fuel` sets
+`erf.fire.smoke_heat_from_fuel = true`, which takes the heat per kilogram
+from the fuel model (18.608 MJ/kg for the Anderson models) instead of
+`erf.fire.smoke_heat_of_comb` (18.7 MJ/kg); its source must be the ratio of
+the two, 1.00494, times `smoke_cfbm` at every step.
 
 | M_f | 1/(1+M_f) |
 |-----|-----------|
