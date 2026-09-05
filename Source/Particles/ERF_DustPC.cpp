@@ -51,8 +51,11 @@ void ERFDustPC::ReleaseParticles(const amrex::MultiFab& emission_flux,
         amrex::LoopOnCpu(bx, [&](int i, int j, int k) {
             if (k != 0 || flux_arr(i, j, k) <= 0.0) return;
 
-            const Real x_pos = plo_atm[0] + (i + 0.5) * dx_atm[0];
-            const Real y_pos = plo_atm[1] + (j + 0.5) * dx_atm[1];
+            // (i, j) index the dust grid, so the position uses the dust spacing;
+            // with the atmosphere's spacing and grid_ratio > 1 every particle
+            // beyond the first 1/grid_ratio of the domain was released outside it.
+            const Real x_pos = plo_dust[0] + (i + 0.5) * dx_dust_m;
+            const Real y_pos = plo_dust[1] + (j + 0.5) * dy_dust_m;
             const Real mass  = flux_arr(i, j, k) * dx_dust_m * dy_dust_m * dt;
 
             ParticleType p;
