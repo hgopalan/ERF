@@ -245,7 +245,7 @@ void FireLayer::initialize(const ERF& erf,
     // Grounds of the four columns the bilinear wind stencil blends, so each can
     // be sampled at the same height above its own terrain.
     compute_fire_column_grounds(*fire_col_ground, z_phys_nd_atm, erf.Geom(0), m_fg);
-    fire_slopes->FillBoundary(m_fg.geom.periodicity());
+    fire_fill_boundary(*fire_slopes, m_fg.geom);
     compute_terrain_curvature(*fire_curvature, *fire_slopes, m_fg.geom);
 
     m_ignition_x = fire_params.ignition_x;
@@ -257,7 +257,7 @@ void FireLayer::initialize(const ERF& erf,
     const bool phi_normalized = (m_params.propagation_method != "levelset");
     initialize_ignition(*fire_phi, m_fg.geom, m_ignition_x, m_ignition_y, m_ignition_r,
                         phi_normalized);
-    fire_phi->FillBoundary(m_fg.geom.periodicity());
+    fire_fill_boundary(*fire_phi, m_fg.geom);
 
     for (MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
         auto phi_arr = fire_phi->const_array(mfi);
@@ -326,7 +326,7 @@ void FireLayer::initialize(const ERF& erf,
         } else {
             init_phi_from_polygon(*fire_phi, m_fg.geom, xs, ys);
         }
-        fire_phi->FillBoundary(m_fg.geom.periodicity());
+        fire_fill_boundary(*fire_phi, m_fg.geom);
         if (m_params.fire_debug) {
             amrex::Print() << "[FIRE DEBUG] Polygon ignition applied from '"
                            << m_params.ignition.polygon_file << "' ("
@@ -686,7 +686,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         // fill_boundary after any phi modification to propagate ghost cells
         //amrex::FillBoundary(*fire_phi, m_fg.geom);
         enforce_nonburnable_phi();
-        fire_phi->FillBoundary(m_fg.geom.periodicity());        
+        fire_fill_boundary(*fire_phi, m_fg.geom);        
     }
 
     // Hybrid wind selector: the weight follows the effective wind, so it is
@@ -757,7 +757,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                       m_params.fuel_map.blending_fraction);
     }
 
-    fire_phi->FillBoundary(m_fg.geom.periodicity());
+    fire_fill_boundary(*fire_phi, m_fg.geom);
 
     // Phase 12: Apply fire acceleration scaling to ROS.
     // Reduces ROS for small fires not yet at quasi-steady-state.
@@ -856,7 +856,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                                 fire_nonburnable.get(), wall_extrap);
             }
             enforce_nonburnable_phi();
-            fire_phi->FillBoundary(m_fg.geom.periodicity());
+            fire_fill_boundary(*fire_phi, m_fg.geom);
 
             ++m_levelset_subcycle_count;
             if (m_levelset_subcycle_count % m_params.levelset_reinit_every == 0) {
@@ -872,7 +872,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                       /*normalized=*/false,
                                       fire_nonburnable.get(), wall_extrap);
                 enforce_nonburnable_phi();
-                fire_phi->FillBoundary(m_fg.geom.periodicity());
+                fire_fill_boundary(*fire_phi, m_fg.geom);
             }
 
             // Update arrival time for newly burned cells (phi < 0)
@@ -920,7 +920,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         amrex::Print() << "[FIRE DEBUG] Number of active fire cells: " << num_fire_cells << std::endl;
     }
 
-    fire_phi->FillBoundary(m_fg.geom.periodicity());
+    fire_fill_boundary(*fire_phi, m_fg.geom);
 
     compute_heat_flux_and_diagnostics(dt);
 
@@ -1557,7 +1557,7 @@ void FireLayer::init_ros_weight()
                 m(i, j, k) = (h(i, j, k) > hmin) ? 1.0_rt : 0.0_rt;
             });
         }
-        mask.FillBoundary(m_fg.geom.periodicity());
+        fire_fill_boundary(mask, m_fg.geom);
 
         const amrex::Real dxf = dx[0];
         const amrex::Real dyf = dx[1];
@@ -1714,7 +1714,7 @@ void FireLayer::build_structure_ids()
         amrex::Abort("[FIRE] cannot read structure heightmap '" + m_params.structures.file
                      + "' for the exposure diagnostics");
     }
-    fire_structure_id->FillBoundary(m_fg.geom.periodicity());
+    fire_fill_boundary(*fire_structure_id, m_fg.geom);
     m_exposure_reported.assign(m_n_structures + 1, 0);
 
     fire_heat_load      = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
@@ -1928,7 +1928,7 @@ void FireLayer::build_nonburnable_mask()
             });
         }
     }
-    fire_nonburnable->FillBoundary(m_fg.geom.periodicity());
+    fire_fill_boundary(*fire_nonburnable, m_fg.geom);
 }
 
 void FireLayer::enforce_nonburnable_phi()

@@ -2,6 +2,7 @@
 #define ERF_LEVELSET_ADVECTION_H
 
 #include <AMReX_MultiFab.H>
+#include <ERF_FireGrid.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_Gpu.H>
 #include <cmath>
@@ -206,11 +207,11 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     MultiFab R_dir(phi.boxArray(), phi.DistributionMap(), 1, 0);
 
     phi_n.ParallelCopy(phi);
-    phi_n.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_n, geom);
 
     // Stage 1: phi* = phi^n + dt L(phi^n)
     phi_star.ParallelCopy(phi_n);
-    phi_star.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_star, geom);
     fill_ros(R_dir, phi_star);
     zero_ros_in_mask(R_dir, mask);
     compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap);
@@ -222,7 +223,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
             ps(iv) = ps(iv) + dt * r(iv);
         });
     }
-    phi_star.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_star, geom);
 
     // Stage 2: phi** = (3/4)phi^n + (1/4)(phi* + dt L(phi*))
     fill_ros(R_dir, phi_star);
@@ -238,7 +239,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
             ph(iv) = 0.75_rt * ph(iv) + 0.25_rt * (ps(iv) + dt * r(iv));
         });
     }
-    phi_hat.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_hat, geom);
 
     // Stage 3: phi^{n+1} = (1/3)phi^n + (2/3)(phi** + dt L(phi**))
     fill_ros(R_dir, phi_hat);
@@ -301,7 +302,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
 
     // Save initial phi (input)
     phi_n.ParallelCopy(phi);
-    phi_n.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_n, geom);
 
     // Stage 1: φ* = φ^n + Δt L(φ^n)
     phi_star.ParallelCopy(phi_n);
@@ -309,7 +310,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
     // so without this its three ghost cells are uninitialized -- and the WENO5-Z
     // stencil in compute_levelset_rhs reads all three. Stages 2 and 3 already
     // fill before their RHS; stage 1 was the one that did not.
-    phi_star.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_star, geom);
     compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap);
     for (MFIter mfi(phi_star); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -319,7 +320,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
             ps(iv) = ps(iv) + dt * r(iv);
         });
     }
-    phi_star.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_star, geom);
 
     // Stage 2: φ** = (3/4)φ^n + (1/4)(φ* + Δt L(φ*))
     compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap);
@@ -333,7 +334,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
             ph(iv) = 0.75_rt * ph(iv) + 0.25_rt * (ps(iv) + dt * r(iv));
         });
     }
-    phi_hat.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_hat, geom);
 
     // Stage 3: φ^{n+1} = (1/3)φ^n + (2/3)(φ** + Δt L(φ**))
     compute_levelset_rhs(rhs, phi_hat, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap);
