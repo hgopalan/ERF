@@ -389,8 +389,12 @@ inline void apply_fire_tendency_to_cc_source(
             below_roof_max    = col.max(0);
             theta_blocked_max = thb.max(0);
         }
+        // The ratio divides only when e_in > 0, but the optimiser evaluates the division
+        // speculatively for both arms of the selection, and 0/0 on the first lagged step
+        // raised the invalid flag that aborts the run under amrex.fpe_trap_invalid; the
+        // tiny offset keeps the discarded value finite and the printed one unchanged.
         amrex::Print() << "[FIRE COUPLING] energy_in=" << e_in << " W  energy_out=" << e_out
-                       << " W  ratio=" << ((e_in > 0.0) ? e_out / e_in : 0.0)
+                       << " W  ratio=" << ((e_in > 0.0) ? e_out / (e_in + 1.0e-300) : 0.0)
                        << "  below_roof_share_max=" << below_roof_max
                        << "  theta_blocked_max=" << theta_blocked_max << "\n";
     }
