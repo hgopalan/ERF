@@ -4063,6 +4063,9 @@ Heat flux and coupling
 | **erf.fire.inject_latent**                     | Inject the latent flux into the vapour equation when       | Boolean                        | true                   |
 |                                                | moisture is active                                         |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.heat_flux_partition**               | Sensible flux handed to the atmosphere: the full heat      | "legacy", "cfbm"               | "legacy"               |
+|                                                | release (legacy) or the CFBM dry-fuel share 1/(1+M_f)      |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.source_mode**                       | Replace the theta and vapour source slots (legacy) or add  | "overwrite", "add"             | "overwrite"            |
 |                                                | to the rebuilt stage source                                |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+

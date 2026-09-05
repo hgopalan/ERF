@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# Two-way coupling with the legacy partition, for the comparison table only.
+erf.fire.heat_flux_partition = "legacy"
+erf.fire.fire_atm_feedback = 1.0

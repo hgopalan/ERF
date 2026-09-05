@@ -132,6 +132,29 @@ The latent flux follows WRF-SFIRE,
 where :math:`M_f` is the fuel moisture and :math:`f_w` the water yield of
 combustion per unit dry fuel.
 
+The Community Fire Behavior Model (Jiménez y Muñoz et al., 2026, their
+Eqs. 4 and 5) keeps this latent flux but hands the atmosphere only the
+dry-fuel share of the heat release,
+
+.. math::
+
+   Q_{sens} = f_{dry}\, Q, \qquad f_{dry} = rac{1}{1 + M_f} = 1 - b,
+
+so that the sensible flux is 7% lower than :math:`Q` at the default 8%
+moisture and 23% lower at 30%. :cpp:`erf.fire.heat_flux_partition` selects
+the partition: ``"legacy"`` (default) injects the full :math:`Q`, the form
+ERF-Fire has always used; ``"cfbm"`` applies :math:`f_{dry}`. Only the
+flux handed to the atmosphere changes: the fire-grid heat flux kept for the
+plotfiles, Byram intensity and flame diagnostics stays the unpartitioned
+release, and the latent flux is the same under both settings. The moisture
+in :math:`f_{dry}` is the one the latent flux uses, the deck's 1-h value or
+the load-weighted mean of the dynamic moisture map. Note that
+:math:`f_{dry}` is mass bookkeeping rather than an energy balance: the heat
+spent vaporising the fuel water is about :math:`M_f L_v` per unit dry fuel,
+roughly 1.5% of the heat content at 10% moisture, so the CFBM partition
+removes more heat than evaporation costs. The regression test
+``Exec/RegTests/FireFluxPartition`` runs both partitions side by side.
+
 Injection into the atmosphere
 -----------------------------
 

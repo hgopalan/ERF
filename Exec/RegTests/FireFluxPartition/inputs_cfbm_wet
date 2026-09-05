@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# CFBM partition at 30 % moisture: factor 1/(1+0.30) = 0.7692.
+erf.fire.heat_flux_partition = "cfbm"
+erf.fire.moisture_1hr = 0.30
+erf.fire.moisture_10hr = 0.30
+erf.fire.moisture_100hr = 0.30

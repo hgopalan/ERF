@@ -463,6 +463,13 @@ erf.fire.fire_atm_feedback = 1.0
 # false: sensible heat only
 erf.fire.inject_latent = true
 
+# Split of the heat release between the sensible and latent flux handed to
+# the atmosphere
+# "legacy" (default): sensible flux is the full heat release of the dry fuel
+# "cfbm": sensible flux scaled by the dry-fuel fraction 1/(1+M_f), Eq. 4 of
+#         Jimenez y Munoz et al. (2026); latent flux unchanged
+erf.fire.heat_flux_partition = "legacy"
+
 # How the fire tendency enters the cell source once make_sources has rebuilt
 # it for the Runge-Kutta stage
 # "overwrite" (default, legacy) replaces the theta and vapour slots, which
