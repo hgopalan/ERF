@@ -97,4 +97,5 @@ erf.fire.levelset.eps_visc = 0.4         # artificial viscosity on the Laplacian
 erf.fire.levelset.reinit_every = 5        # reinitialize every N subcycles; must be >= 1
 erf.fire.levelset.reinit_iters = 100      # must converge over the burn; see header
 erf.fire.levelset.gradient = upwind       # first-order derivatives everywhere: the scheme the expected results were measured with
+erf.fire.levelset.eps_visc_front = -1.0    # single viscosity everywhere: the scheme these numbers were measured with
 erf.fire.levelset.reinit_dtau = -1.0     # <= 0 selects 0.5*min(dx,dy)

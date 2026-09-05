@@ -75,18 +75,19 @@ above the cell's wind height, and the four weights are renormalised.
 ```
 variant               exit   cells  max_ROS in_mask max_wind  u1 u2 u3 | g1 g2 g3 | d1 d2 d3
 -------------------- ----- ------- -------- ------- --------  ------------------------------------------
-noib                     0   17899   0.7710       -   4.2877      -    27   113 |    55    48     - |     -    55   105
-noib_mask                0   16121   0.7710       0   4.2877      -    27   113 |    55    49     - |     -   135   144
-noib_mask_wall           0   16277   0.7710       0   4.2877      -    27   113 |    55    49     - |     -   129   139
-ib_mask                  0   12839   1.0155       0   6.3440      -    40   102 |    58    65     - |     -   172   185
-ib_mask_wall             0   12834   1.0155       0   6.3440      -    40   102 |    58    65     - |     -   169   183
-ib_mask_wind             0   12882   1.0155       0   6.3440      -    39   101 |    58    64     - |     -   168   182
-ib_mask_wall_wind        0   12876   1.0155       0   6.3440      -    39   101 |    58    64     - |     -   166   180
+noib                     0   18241   0.7710       -   4.2877      -    27   110 |    54    48     - |     -    54   100
+noib_mask                0   16718   0.7710       0   4.2877      -    27   109 |    54    48     - |     -   130   141
+noib_mask_wall           0   16722   0.7710       0   4.2877      -    27   110 |    54    48     - |     -   126   138
+ib_mask                  0   13304   1.0155       0   6.3440      -    39    99 |    56    61     - |     -   165   177
+ib_mask_wall             0   13300   1.0155       0   6.3440      -    39    99 |    56    61     - |     -   164   177
+ib_mask_wind             0   13331   1.0155       0   6.3440      -    39    98 |    56    60     - |     -   162   174
+ib_mask_wall_wind        0   13328   1.0155       0   6.3440      -    39    98 |    56    60     - |     -   162   174
 ```
 
 Four ranks, 240 s, with the default hybrid WENO5-Z/first-order level set
-(`erf.fire.levelset.gradient = weno5z_front`, 2026-09-05). Things to read
-out of it.
+and the near-front artificial viscosity of 0.1 (`erf.fire.levelset.gradient
+= weno5z_front`, `eps_visc_front = 0.1`, 2026-09-05). Things to read out
+of it.
 
 **The wall effect this suite was built to expose is gone at its root.**
 The suite was written when the flank along a masked wall reached the third
@@ -95,29 +96,30 @@ box at 88 s against 112 s with nothing in the way, and
 taking the larger-magnitude one-sided difference, which at a wall is the
 one into the untouched mask value; that branch was replaced by the
 Osher-Sethian choice in the WUI validation work (#353), and since then
-`noib_mask` reaches `u3` at 113 s with or without the extrapolation, the
-same as `noib`. The option stays: it still keeps a masked cell's value out
+`noib_mask` reaches `u3` at 109 s with or without the extrapolation
+(110 s), the same as `noib`. The option stays: it still keeps a masked cell's value out
 of every stencil, which moves the downwind-face arrivals by a few seconds
-(`d2` 135 against 129 s) and the burned area by 1% (16121 against 16277
-cells), and next to a wall the WENO stencil falls back to the first-order
+(`d2` 130 against 126 s) and the burned area by a few cells (16718
+against 16722), and next to a wall the WENO stencil falls back to the first-order
 difference through it.
 
-**The mask itself costs area, as it should.** `noib` burns 17899 cells and
-`noib_mask` 16121: the three boxes and the streets are out of the fuel, and
-the front has to go round them (`d2`, `d3` later by 80 and 39 s).
+**The mask itself costs area, as it should.** `noib` burns 18241 cells and
+`noib_mask` 16718: the three boxes and the streets are out of the fuel, and
+the front has to go round them (`d2`, `d3` later by 76 and 41 s).
 
 **With buildings in the atmosphere the wind does the rest.** The immersed
 forcing slows the wind along the walls and speeds it in the gaps (largest
 reference wind 6.34 against 4.29 m/s), the fire reaches the head probe
-`u2` later (40 against 27 s) and the downwind faces much later (172
-against 135 s), and burns 12839 cells. The open-column wind option makes
+`u2` later (39 against 27 s) and the downwind faces much later (165
+against 130 s), and burns 13304 cells. The open-column wind option makes
 a small difference the other way: the fire cells beside a wall read the
 open columns only, a slightly stronger wind than the blend with the
 in-building velocity, and the downwind faces are reached a few seconds
-earlier (12882 cells).
+earlier (13331 cells).
 
-Before the hybrid scheme, with first-order derivatives everywhere and the
-Godunov branch already fixed, the rows burned about 8% more cells at the
-same arrival times; the table before #353 (first order, old branch) is in
-the history of this file.
+With a single viscosity of 0.4 the rows burned 2-4% fewer cells (`noib`
+17899, `ib_mask` 12839) with the same arrival times to within a few
+seconds; with first-order derivatives everywhere and the Godunov branch
+already fixed, about 8% more than that. The table before #353 (first
+order, old branch) is in the history of this file.
 
