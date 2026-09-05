@@ -522,6 +522,16 @@ public:
     void apply_polygon_ignition(amrex::Real t_ign);
 
     /**
+     * @brief Burnout e-folding time of a fuel model for erf.fire.burnout_model = sfire.
+     *
+     * WRF-SFIRE's burn time per Anderson model (7, 7, 7, 180, 100, 100, 100,
+     * 900, 900, 900, 900, 900, 900 s; Jimenez y Munoz et al. 2026, Table 1),
+     * or erf.fire.burnout_times_s, divided by erf.fire.burnout_time_to_efold.
+     * @param fuel_code Anderson fuel model 1-13 (others fall back to 1).
+     */
+    amrex::Real burnout_tau_s(int fuel_code) const;
+
+    /**
      * @brief Heat per kilogram of fuel that converts the lagged atmospheric
      *        sensible flux back into fuel burnt, for the smoke emission.
      *
@@ -731,6 +741,7 @@ private:
 
     // Phase 13A: Per-fuel wind height device tables
     amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcwh;          // fcwh[0..13], device copy
+    amrex::Gpu::DeviceVector<amrex::Real> m_d_burnout_tau;   ///< burnout e-folding time by fuel code (index 1-13) [s], erf.fire.burnout_model = sfire
     amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcz0;          // fcz0[0..13], device copy
     bool                                     m_use_per_fuel_wind_ht = false;
 

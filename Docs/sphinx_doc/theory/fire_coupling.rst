@@ -110,8 +110,28 @@ where :math:`\Delta x_f / R` is the time the front takes to cross one fire
 cell and :math:`\tau_{SAV} = 301\,\rho_p/\sigma` (Rothermel 1983, seconds
 with :math:`\rho_p` in lb/ft³ and :math:`\sigma` in ft⁻¹) is the particle
 burnout time used as a floor. :cpp:`erf.fire.tau_residence_s` overrides the
-residence time with a fixed value when positive. The sensible flux is the
-instantaneous power of that decay,
+residence time with a fixed value when positive.
+
+That residence time ties the burnout to the front's speed, so a cell of
+timber litter releases its heat as fast as a cell of grass once the front has
+passed. WRF-SFIRE and the Community Fire Behavior Model instead give each
+fuel model a burn time (Mandel et al. 2011; Jiménez y Muñoz et al. 2026,
+Table 1: 7 s for the grasses, 180 s chaparral, 100 s the brush models,
+900 s timber litter and slash), turned into the e-folding time by dividing
+by 0.8514 so that 1000 s gives a 40% loss in ten minutes.
+:cpp:`erf.fire.burnout_model = "sfire"` uses that time in place of
+:math:`\tau_{res}`, regardless of the rate of spread; the table can be
+overridden with :cpp:`erf.fire.burnout_times_s` (13 values) and the divisor
+with :cpp:`erf.fire.burnout_time_to_efold`. The default, ``"residence"``,
+keeps the crossing time. The two release the same energy per cell, only
+spread differently in time: with the burn time, heavy fuels keep burning
+behind the front, which is what a plume driven by a long-lived fire needs
+and what the residence time cannot give. ``Exec/RegTests/FireBurnout``
+compares both on grass and on timber litter. The size-class post-frontal
+combustion of BURNUP (Albini and Reinhardt 1995), with its own load and
+burnout per particle size, is the fuller model and a later step.
+
+The sensible flux is the instantaneous power of that decay,
 
 .. math::
 

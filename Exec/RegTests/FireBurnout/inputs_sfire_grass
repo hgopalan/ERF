@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Grass with WRF-SFIRE's burn time: tau = 7 / 0.8514 = 8.222 s.
+erf.fire.burnout_model = "sfire"

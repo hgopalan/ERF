@@ -4071,6 +4071,15 @@ Heat flux and coupling
 | **erf.fire.tau_residence_s**                   | Fixed residence time [s]; 0 derives it from the cell       | Real >= 0                      | 0.0                    |
 |                                                | crossing time and fuel SAV                                 |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.burnout_model**                     | Fuel burnout e-folding time: the cell crossing time floored | "residence", "sfire"           | "residence"            |
+|                                                | by the particle time (residence) or WRF-SFIRE's burn time  |                                |                        |
+|                                                | per fuel model / 0.8514 (sfire)                            |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.burnout_times_s**                   | 13 burn times [s] for Anderson models 1-13 overriding the  | 13 Reals > 0                   | SFIRE table            |
+|                                                | table (sfire)                                              |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.burnout_time_to_efold**             | Divisor turning a burn time into the e-folding time        | Real > 0                       | 0.8514                 |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.f_c_min**                           | Read but not consumed by the current heat-flux kernel      | Real                           | 0.2                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.f_c_max**                           | Read but not consumed by the current heat-flux kernel      | Real                           | 0.9                    |

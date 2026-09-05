@@ -165,6 +165,8 @@ amrex::Real deplete_fuel_load(
  *
  * For each burned cell (phi < 0), the per-cell residence time is computed as:
  *   tau_cell = max(dx_fire / ros_cell, tau_sav_floor)
+ * or, with erf.fire.burnout_model = sfire, the fuel model's burnout e-folding
+ * time (WRF-SFIRE burn time / 0.8514) regardless of the rate of spread,
  * where ros_cell is the local ROS from fire_ros (floored at 1e-6 m/s to avoid
  * division by zero). This avoids the global-max-ROS bug where one boundary
  * artifact cell (with spuriously high ROS) would set tau for all burned cells.
@@ -186,6 +188,11 @@ amrex::Real deplete_fuel_load(
  * @param[in] tau_sav_floor       SAV-based residence time floor [s]
  * @param[in] dt_fire_s           Atmospheric timestep [s]
  * @param[in] fuel_model_mf       Optional per-cell fuel model codes (nullptr = uniform)
+ * @param[in] tau_burnout_uniform Fuel-model burnout e-folding time [s] replacing the
+ *                                residence time when > 0 (erf.fire.burnout_model = sfire,
+ *                                uniform fuel)
+ * @param[in] d_tau_burnout       Device table of that time by fuel code (index 1-13) for a
+ *                                spatial fuel map; nullptr keeps the residence time
  */
 inline void fill_fire_heat_flux(
     amrex::MultiFab& fire_heat_flux,
@@ -196,7 +203,9 @@ inline void fill_fire_heat_flux(
     amrex::Real dx_fire,
     amrex::Real tau_sav_floor,
     amrex::Real dt_fire_s,
-    const amrex::MultiFab* fuel_model_mf = nullptr)
+    const amrex::MultiFab* fuel_model_mf = nullptr,
+    amrex::Real tau_burnout_uniform = 0.0,
+    const amrex::Real* d_tau_burnout = nullptr)
 {
     using namespace amrex;
 
@@ -233,9 +242,14 @@ inline void fill_fire_heat_flux(
                 FuelModelParams fp_cell = get_anderson_fuel_params(fuel_code);
                 Real h_fuel_cell = fp_cell.heat_content * 2326.0_rt;
 
-                // Per-cell residence time: floor ROS at 1e-6 m/s to avoid divide-by-zero
+                // Per-cell residence time: floor ROS at 1e-6 m/s to avoid divide-by-zero;
+                // or the fuel model's burnout time when a table is given.
                 Real ros_cell  = amrex::max(ros_arr(i, j, k), 1.0e-6_rt);
                 Real tau_cell  = amrex::max(dx_fire / ros_cell, tau_sav_floor);
+                if (d_tau_burnout != nullptr) {
+                    const int fc = amrex::max(1, amrex::min(fuel_code, 13));
+                    tau_cell = d_tau_burnout[fc];
+                }
 
                 Q_arr(i, j, k)    = compute_heat_flux_cell(phi_val, w_cur, h_fuel_cell, tau_cell);
                 fuel_arr(i, j, k) = deplete_fuel_load(phi_val, w_cur, tau_cell, dt_fire_s);
@@ -247,9 +261,12 @@ inline void fill_fire_heat_flux(
                 Real phi_val = phi_arr(i, j, k);
                 Real w_cur   = fuel_arr(i, j, k);
 
-                // Per-cell residence time: floor ROS at 1e-6 m/s to avoid divide-by-zero
+                // Per-cell residence time: floor ROS at 1e-6 m/s to avoid divide-by-zero;
+                // or the fuel model's burnout time when one is given.
                 Real ros_cell  = amrex::max(ros_arr(i, j, k), 1.0e-6_rt);
-                Real tau_cell  = amrex::max(dx_fire / ros_cell, tau_sav_floor);
+                Real tau_cell  = (tau_burnout_uniform > 0.0_rt)
+                               ? tau_burnout_uniform
+                               : amrex::max(dx_fire / ros_cell, tau_sav_floor);
 
                 Q_arr(i, j, k)    = compute_heat_flux_cell(phi_val, w_cur, h_fuel_J_per_kg, tau_cell);
                 fuel_arr(i, j, k) = deplete_fuel_load(phi_val, w_cur, tau_cell, dt_fire_s);

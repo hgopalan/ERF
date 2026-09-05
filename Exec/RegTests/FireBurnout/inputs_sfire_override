@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# Grass with the table overridden: burn time 14 s for model 1, tau = 16.44 s.
+erf.fire.burnout_model = "sfire"
+erf.fire.burnout_times_s = 14 7 7 180 100 100 100 900 900 900 900 900 900

@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Same with the key written out: must reproduce inputs_residence line for line.
+erf.fire.burnout_model = "residence"
