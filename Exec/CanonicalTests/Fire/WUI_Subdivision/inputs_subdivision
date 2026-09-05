@@ -1,0 +1,24 @@
+FILE = inputs_base
+
+# The subdivision: houses as non-burnable structures with the level set
+# extrapolated into them, streets non-burnable through the fuel map, lawns
+# grass, per-structure exposure and seeded ember spotting. Passive atmosphere.
+erf.fire_plot_file = "plt_fire_subdivision_"
+erf.fire.fire_stats_csv_file = "fire_stats_subdivision.csv"
+erf.fire.fuel_map.file = "fuel_map_subdivision.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.rothermel_per_fuel = true
+erf.fire.fuel_map.nonburnable_codes = 0
+erf.fire.structures.enable = true
+erf.fire.structures.file = "houses_10m_96x48.txt"
+erf.fire.levelset.wall_extrapolate = true
+erf.fire.exposure.enable = true
+erf.fire.exposure.interval = 20         # 10 s
+erf.fire.exposure.ring = 1
+erf.fire.exposure.file = "exposure_subdivision.csv"
+erf.fire.spotting.enable = true
+erf.fire.spotting.random_seed = 7
+erf.fire.spotting.P_base = 1.0e-4
+erf.fire.spotting.spotting_interval = 2  # 1 s
+erf.fire.spotting.I_B_min = 100.0
+erf.fire.spotting.terminal_velocity = 8.0

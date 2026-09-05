@@ -2,6 +2,7 @@
 #define ERF_REINITIALIZE_H
 
 #include <AMReX_MultiFab.H>
+#include <ERF_FireGrid.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_Gpu.H>
 #include <ERF_NumericalSchemes.H>
@@ -108,7 +109,7 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
 
     for (int iter = 0; iter < n_iters; ++iter) {
         // Fill boundary ghosts
-        phi_work.FillBoundary(geom.periodicity());
+        fire_fill_boundary(phi_work, geom);
         
         // Update RHS via Sussman reinitialization
         for (MFIter mfi(phi_work); mfi.isValid(); ++mfi) {

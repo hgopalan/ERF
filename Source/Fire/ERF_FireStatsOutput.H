@@ -5,6 +5,7 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Reduce.H>
+#include <ERF_FireGrid.H>
 #include <fstream>
 #include <string>
 #include <cmath>
@@ -134,21 +135,26 @@ append_fire_stats(const amrex::MultiFab& phi,
 
     // Device reduction: under CUDA these MultiFabs live in device memory
     // (the_arena_is_managed defaults to false) and cannot be read on the host.
-    // Cell semantics below are kept exactly as the previous host loop had them,
-    // including the in-box-only neighbour tests.
+    //
+    // The neighbour tests read a copy of the arrival time with one ghost cell,
+    // exchanged and extrapolated at non-periodic faces, and stop at the domain
+    // rather than at the box: tested in-box only, the edges between two boxes
+    // were never counted and the perimeter (with the ellipse axes and the head
+    // ROS derived from it) depended on the domain decomposition.
+    MultiFab at_g(arrival_time.boxArray(), arrival_time.DistributionMap(), 1, 1);
+    MultiFab::Copy(at_g, arrival_time, 0, 0, 1, 0);
+    fire_fill_boundary(at_g, geom);
     {
         ReduceOps<ReduceOpSum, ReduceOpSum, ReduceOpSum, ReduceOpMax> reduce_op;
         ReduceData<unsigned long long, unsigned long long, Real, Real> reduce_data(reduce_op);
         using ReduceTuple = typename decltype(reduce_data)::Type;
-
         const bool has_R = (R_mf != nullptr);
-
+        const IntVect lo = geom.Domain().smallEnd();
+        const IntVect hi = geom.Domain().bigEnd();
         for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
             const Box& bx = mfi.validbox();
             auto const p  = phi.const_array(mfi);
-            auto const at = arrival_time.const_array(mfi);
-            const IntVect lo = bx.smallEnd();
-            const IntVect hi = bx.bigEnd();
+            auto const at = at_g.const_array(mfi);
 
             Array4<const Real> R_arr;
             if (has_R) R_arr = R_mf->const_array(mfi);

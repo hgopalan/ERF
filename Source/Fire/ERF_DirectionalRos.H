@@ -194,7 +194,7 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
 /**
  * @brief Advect the level set with a direction-dependent ROS
  *
- * Same WENO5-Z / SSP-RK3 scheme as advect_levelset_weno5z_rk3(), except that
+ * Same Godunov / SSP-RK3 scheme as advect_levelset_weno5z_rk3(), except that
  * the ROS field is rebuilt from the front normal at the start of every RK stage
  * so R follows the front as it turns.
  *

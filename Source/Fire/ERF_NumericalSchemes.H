@@ -7,54 +7,13 @@
 
 /**
  * @file ERF_NumericalSchemes.H
- * @brief Numerical schemes for level-set advection: WENO3 and Godunov norm gradient
+ * @brief Numerical schemes for level-set advection: the Godunov norm of the gradient
  *
  * Ported from wildfire_levelset/src/numerical_schemes.H
  */
 
 namespace fire_levelset {
 
-/**
- * @brief WENO-3 reconstruction on grid point (i,j) from left stencil (i-2,i-1,i,i+1)
- *
- * Reconstructs the third-order accurate flux on the right side of cell (i-1),
- * which is the left side of cell i.
- *
- * Note: v0 (value at i-2) is accepted for interface consistency but is not used
- * in the 2-stencil WENO3 formulation.
- *
- * @param v0  Function value at i-2 (unused in current formulation)
- * @param v1  Function value at i-1
- * @param v2  Function value at i
- * @param v3  Function value at i+1
- * @return Reconstructed value on the right of i-1 (left of i)
- */
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real weno3_reconstruct(amrex::Real /*v0*/, amrex::Real v1,
-                               amrex::Real v2, amrex::Real v3) noexcept
-{
-    constexpr amrex::Real eps = 1.0e-6;
-
-    // Smoothness indicators
-    amrex::Real IS0 = (v2 - v1) * (v2 - v1);
-    amrex::Real IS1 = (v3 - v2) * (v3 - v2);
-
-    // Weights
-    amrex::Real w0 = 1.0 / (3.0 * (eps + IS0) * (eps + IS0));
-    amrex::Real w1 = 2.0 / (3.0 * (eps + IS1) * (eps + IS1));
-    amrex::Real w_sum = w0 + w1;
-
-    // Normalize weights
-    w0 /= w_sum;
-    w1 /= w_sum;
-
-    // ENO stencils
-    amrex::Real u0 = (v1 + v2) / 2.0;
-    amrex::Real u1 = (v2 + v3) / 2.0;
-
-    // Weighted combination
-    return w0 * u0 + w1 * u1;
-}
 
 /**
  * @brief Level-set stencil that does not cross a non-burnable wall
@@ -97,9 +56,12 @@ inline WallStencil make_wall_stencil(const amrex::MultiFab* mask, bool on,
 }
 
 /**
+
+/**
  * @brief Godunov norm of the gradient, with optional terrain arc-length correction
  *
- * Computes |∇φ| using Godunov's scheme on a staggered grid.
+ * Computes |∇φ| with the first-order Godunov upwind scheme for an expanding
+ * front (R >= 0).
  * With slope_x and slope_y parameters, applies terrain arc-length correction:
  *   |∇φ|_corrected = sqrt(φ_x^2 + φ_y^2 + (φ_x * slope_x + φ_y * slope_y)^2)
  *
@@ -125,9 +87,21 @@ amrex::Real godunov_norm_grad_phi(const amrex::Array4<const amrex::Real>& phi,
     amrex::Real dym = (phi(i, j, k) - wall.at(phi, i, j, k, 0, -1)) / dy;
     amrex::Real dyp = (wall.at(phi, i, j, k, 0, 1) - phi(i, j, k)) / dy;
 
-    // Take max of upwind/downwind (Godunov)
-    amrex::Real phi_x = (dxm * dxm > dxp * dxp) ? dxm : dxp;
-    amrex::Real phi_y = (dym * dym > dyp * dyp) ? dym : dyp;
+    // Godunov (Osher-Sethian) choice for an expanding front, phi_t + R|grad
+    // phi| = 0 with R >= 0: the backward difference counts only where it is
+    // positive and the forward difference only where it is negative, so the
+    // update always reads the burned side. Taking whichever one-sided
+    // difference is larger in magnitude, regardless of sign, is not the
+    // Godunov scheme: wherever the profile ahead of the front is convex the
+    // downwind slope wins, the scheme becomes anti-dissipative, and the front
+    // runs ahead of R (the same defect the reinitialisation had; see
+    // ERF_Reinitialize.H).
+    const amrex::Real ax = amrex::max(dxm, amrex::Real(0.0));
+    const amrex::Real bx = amrex::min(dxp, amrex::Real(0.0));
+    const amrex::Real ay = amrex::max(dym, amrex::Real(0.0));
+    const amrex::Real by = amrex::min(dyp, amrex::Real(0.0));
+    amrex::Real phi_x = (ax * ax > bx * bx) ? ax : bx;
+    amrex::Real phi_y = (ay * ay > by * by) ? ay : by;
 
     // Godunov norm in map coordinates
     amrex::Real grad_sq = phi_x * phi_x + phi_y * phi_y;

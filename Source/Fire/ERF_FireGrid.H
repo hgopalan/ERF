@@ -50,4 +50,45 @@ FireGrid create_fire_grid(const amrex::BoxArray& ba_atm,
                           const amrex::Geometry& geom_atm,
                           int C);
 
+#include <AMReX_MultiFab.H>
+#include <AMReX_MFIter.H>
+
+/**
+ * Exchange the ghost cells of a fire-grid MultiFab and fill the ones outside a
+ * non-periodic face of the domain by copying the nearest interior value.
+ *
+ * FillBoundary alone leaves those cells untouched, so with an inflow-outflow
+ * atmosphere (the fire grid inherits its periodicity) the gradient stencil of
+ * the level set read whatever the allocator had left there. Whether that was
+ * benign depended on the box layout: one box per rank happened to run, two
+ * boxes on a rank blew the level set up at the inflow face within three steps.
+ * Every fire-grid exchange goes through here.
+ */
+inline void fire_fill_boundary (amrex::MultiFab& mf, const amrex::Geometry& geom)
+{
+    mf.FillBoundary(geom.periodicity());
+    const auto ng = mf.nGrowVect();
+    const bool px = geom.isPeriodic(0) || ng[0] == 0;
+    const bool py = geom.isPeriodic(1) || ng[1] == 0;
+    const bool pz = geom.isPeriodic(2) || ng[2] == 0;
+    if (px && py && pz) { return; }   // nothing outside a non-periodic face to fill
+    const amrex::Box& dom = geom.Domain();
+    const auto dlo = dom.smallEnd();
+    const auto dhi = dom.bigEnd();
+    const int ncomp = mf.nComp();
+    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+        const amrex::Box& gbx = mfi.fabbox();
+        if (dom.contains(gbx)) { continue; }
+        auto a = mf.array(mfi);
+        amrex::ParallelFor(gbx, ncomp, [=] AMREX_GPU_DEVICE (int i, int j, int k, int n) noexcept
+        {
+            int ic = i, jc = j, kc = k;
+            if (!px) { ic = amrex::min(amrex::max(i, dlo[0]), dhi[0]); }
+            if (!py) { jc = amrex::min(amrex::max(j, dlo[1]), dhi[1]); }
+            if (!pz) { kc = amrex::min(amrex::max(k, dlo[2]), dhi[2]); }
+            if (ic != i || jc != j || kc != k) { a(i, j, k, n) = a(ic, jc, kc, n); }
+        });
+    }
+}
+
 #endif

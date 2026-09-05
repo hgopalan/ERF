@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# Uniform grass, no houses: the reference the other variants are read against.
+# The spread rate along the centreline between x = 450 and 550 m is checked
+# against Rothermel's FM1 rate at the WAF-reduced 10 m/s wind.
+erf.fire_plot_file = "plt_fire_wildland_"
+erf.fire.fire_stats_csv_file = "fire_stats_wildland.csv"

@@ -2,6 +2,7 @@
 #define ERF_LEVELSET_ADVECTION_H
 
 #include <AMReX_MultiFab.H>
+#include <ERF_FireGrid.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_Gpu.H>
 #include <cmath>
@@ -9,65 +10,21 @@
 
 /**
  * @file ERF_LevelSetAdvection.H
- * @brief Level-set advection using WENO5-Z and SSP-RK3
+ * @brief Level-set advection using Godunov upwinding and SSP-RK3
  *
  * Ported from wildfire_levelset/src/advection.H
  * Solves ∂φ/∂t = −R(x,y) * (|∇φ| − ε Δφ) via:
- *   - WENO5-Z reconstruction for spatial discretization
+ *   - First-order Godunov upwind |grad phi| for spatial discretization
  *   - 3-stage Strong Stability Preserving RK3 for time integration
  */
 
 namespace fire_levelset {
 
 /**
- * @brief WENO5-Z reconstruction for level-set advection
- *
- * Reconstructs flux at cell face using a high-order WENO scheme
- * with a Z-weighting (Z-type smoothness) for shock capturing.
- * This is a simplified 1D reconstruction for the normal derivative.
- *
- * @param v0, v1, v2, v3, v4  Function values at i-2, i-1, i, i+1, i+2
- * @return Reconstructed flux value
- */
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real weno5z_reconstruct(amrex::Real v0, amrex::Real v1, amrex::Real v2,
-                                amrex::Real v3, amrex::Real v4) noexcept
-{
-    constexpr amrex::Real eps = 1.0e-6;
-
-    // Smoothness indicators
-    amrex::Real IS0 = (13.0/12.0) * (v0 - 2.0*v1 + v2) * (v0 - 2.0*v1 + v2)
-                    + (1.0/4.0) * (v0 - 4.0*v1 + 3.0*v2) * (v0 - 4.0*v1 + 3.0*v2);
-    amrex::Real IS1 = (13.0/12.0) * (v1 - 2.0*v2 + v3) * (v1 - 2.0*v2 + v3)
-                    + (1.0/4.0) * (v1 - v3) * (v1 - v3);
-    amrex::Real IS2 = (13.0/12.0) * (v2 - 2.0*v3 + v4) * (v2 - 2.0*v3 + v4)
-                    + (1.0/4.0) * (3.0*v2 - 4.0*v3 + v4) * (3.0*v2 - 4.0*v3 + v4);
-
-    // Z-type smoothness weights
-    amrex::Real tau = std::abs(IS0 - IS2);
-
-    amrex::Real w0 = (2.0/60.0) * (1.0 + tau / (eps + IS0));
-    amrex::Real w1 = (30.0/60.0) * (1.0 + tau / (eps + IS1));
-    amrex::Real w2 = (28.0/60.0) * (1.0 + tau / (eps + IS2));
-    amrex::Real w_sum = w0 + w1 + w2;
-
-    w0 /= w_sum;
-    w1 /= w_sum;
-    w2 /= w_sum;
-
-    // ENO stencils
-    amrex::Real u0 = v0/60.0 - v1*7.0/60.0 + v2*37.0/60.0;
-    amrex::Real u1 = (-1.0/60.0)*v1 + (37.0/60.0)*v2 + (37.0/60.0)*v3 - (1.0/60.0)*v4;
-    amrex::Real u2 = v2*37.0/60.0 - v3*7.0/60.0 + v4/60.0;
-
-    return w0 * u0 + w1 * u1 + w2 * u2;
-}
-
-/**
  * @brief Compute level-set RHS: ∂φ/∂t = −R * (|∇φ| − ε Δφ)
  *
- * Uses WENO5-Z for gradient reconstruction and central differences for Laplacian.
- * Requires 3 ghost cells for WENO5-Z stencil.
+ * Uses the Godunov upwind norm for |∇φ| and central differences for the
+ * Laplacian. One ghost cell is read; the stage fields carry three.
  *
  * @param[out] rhs         RHS field (modified in-place)
  * @param[in]  phi         Level-set field with ghosts
@@ -169,7 +126,7 @@ inline void hold_phi_in_mask(amrex::MultiFab& phi, const amrex::MultiFab* mask, 
  *
  * Shared driver for every direction-dependent path: the caller supplies
  * fill_ros(R, phi_stage), which writes the ROS field to use for that stage
- * from the stage's level set (typically from its front normal). Same WENO5-Z
+ * from the stage's level set (typically from its front normal). Same Godunov
  * spatial scheme and stage arithmetic as advect_levelset_weno5z_rk3().
  *
  * @param[in,out] phi       Level-set field
@@ -206,11 +163,11 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     MultiFab R_dir(phi.boxArray(), phi.DistributionMap(), 1, 0);
 
     phi_n.ParallelCopy(phi);
-    phi_n.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_n, geom);
 
     // Stage 1: phi* = phi^n + dt L(phi^n)
     phi_star.ParallelCopy(phi_n);
-    phi_star.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_star, geom);
     fill_ros(R_dir, phi_star);
     zero_ros_in_mask(R_dir, mask);
     compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap);
@@ -222,7 +179,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
             ps(iv) = ps(iv) + dt * r(iv);
         });
     }
-    phi_star.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_star, geom);
 
     // Stage 2: phi** = (3/4)phi^n + (1/4)(phi* + dt L(phi*))
     fill_ros(R_dir, phi_star);
@@ -238,7 +195,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
             ph(iv) = 0.75_rt * ph(iv) + 0.25_rt * (ps(iv) + dt * r(iv));
         });
     }
-    phi_hat.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_hat, geom);
 
     // Stage 3: phi^{n+1} = (1/3)phi^n + (2/3)(phi** + dt L(phi**))
     fill_ros(R_dir, phi_hat);
@@ -257,7 +214,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
 }
 
 /**
- * @brief Advect level-set using WENO5-Z spatial + SSP-RK3 temporal integration
+ * @brief Advect level-set using Godunov upwind spatial + SSP-RK3 temporal integration
  *
  * Solves ∂φ/∂t = −R(x,y) * (|∇φ| − ε Δφ) with a single RK3 step.
  * Multi-stage calls advance by dt; CFL-based subcycling is handled by caller.
@@ -292,7 +249,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
 
     const auto* dx = geom.CellSize();
 
-    // Allocate stage MultiFabs with 3 ghost cells for WENO5-Z
+    // Allocate stage MultiFabs with 3 ghost cells (the stencil reads one)
     const int nghost = 3;
     MultiFab phi_n(phi.boxArray(), phi.DistributionMap(), 1, nghost);
     MultiFab phi_star(phi.boxArray(), phi.DistributionMap(), 1, nghost);
@@ -301,15 +258,15 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
 
     // Save initial phi (input)
     phi_n.ParallelCopy(phi);
-    phi_n.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_n, geom);
 
     // Stage 1: φ* = φ^n + Δt L(φ^n)
     phi_star.ParallelCopy(phi_n);
     // ParallelCopy fills the valid region only, and phi_star was just allocated,
-    // so without this its three ghost cells are uninitialized -- and the WENO5-Z
+    // so without this its three ghost cells are uninitialized -- and the gradient-Z
     // stencil in compute_levelset_rhs reads all three. Stages 2 and 3 already
     // fill before their RHS; stage 1 was the one that did not.
-    phi_star.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_star, geom);
     compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap);
     for (MFIter mfi(phi_star); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -319,7 +276,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
             ps(iv) = ps(iv) + dt * r(iv);
         });
     }
-    phi_star.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_star, geom);
 
     // Stage 2: φ** = (3/4)φ^n + (1/4)(φ* + Δt L(φ*))
     compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap);
@@ -333,7 +290,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
             ph(iv) = 0.75_rt * ph(iv) + 0.25_rt * (ps(iv) + dt * r(iv));
         });
     }
-    phi_hat.FillBoundary(geom.periodicity());
+    fire_fill_boundary(phi_hat, geom);
 
     // Stage 3: φ^{n+1} = (1/3)φ^n + (2/3)(φ** + Δt L(φ**))
     compute_levelset_rhs(rhs, phi_hat, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap);

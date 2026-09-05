@@ -1,0 +1,22 @@
+FILE = inputs_subdivision
+
+# The subdivision with the houses standing in the atmosphere as immersed-forcing
+# buildings, the fire's wind read from the open columns beside them, and the
+# fire's heat fed back to the atmosphere with the additive source placed in the
+# open part of each column. The full two-way case.
+erf.fire_plot_file = "plt_fire_coupled_"
+erf.fire.fire_stats_csv_file = "fire_stats_coupled.csv"
+erf.fire.exposure.file = "exposure_coupled.csv"
+erf.buildings_type = ImmersedForcing
+erf.buildings_file_name = houses_10m_96x48.txt
+erf.immersed_forcing_substep = true
+eb2.small_volfrac = 0.005
+erf.if_Cd_momentum = 500.0
+erf.if_Cd_scalar   = 50.0
+erf.fire.structures.wind_open_columns = true
+erf.fire.coupling_type = "lagged"
+erf.fire.source_mode = "add"
+erf.fire.heat_open_fraction = true
+erf.plot_int_1 = 2800
+erf.plot_file_1 = "plt_atm_coupled_"
+erf.plot_vars_1 = x_velocity y_velocity z_velocity theta

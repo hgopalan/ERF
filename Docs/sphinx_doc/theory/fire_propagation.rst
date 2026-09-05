@@ -86,9 +86,11 @@ Setting :cpp:`erf.fire.propagation_method = "levelset"` solves
 
    \frac{\partial \phi}{\partial t} = -R(x, y)\,\bigl(|\nabla \phi| - \varepsilon\, \Delta \phi\bigr)
 
-with a fifth-order WENO-Z reconstruction of the one-sided derivatives, a
-Godunov Hamiltonian for :math:`|\nabla\phi|`, and a three-stage strong
-stability preserving Runge-Kutta step. The Laplacian term is an artificial
+with the first-order Godunov upwind Hamiltonian for :math:`|\nabla\phi|`
+(Osher and Sethian: for an expanding front the backward difference counts
+only where it is positive and the forward difference only where it is
+negative, so the update always reads the burned side) and a three-stage
+strong stability preserving Runge-Kutta step. The Laplacian term is an artificial
 viscosity with coefficient :cpp:`erf.fire.levelset.eps_visc` (default 0.4)
 that keeps the front smooth at the grid scale. When terrain slopes are
 available, :math:`|\nabla \phi|` is projected onto the terrain surface so that
@@ -96,8 +98,7 @@ available, :math:`|\nabla \phi|` is projected onto the terrain surface so that
 
 The subcycle length is :cpp:`erf.fire.levelset.cfl` (default 0.4) times the
 cell size over the maximum rate of spread. The field is periodically
-reinitialised, see below, and the scheme needs three ghost cells for the WENO
-stencil, which the fire grid provides.
+reinitialised, see below.
 
 Direction-dependent spread
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
