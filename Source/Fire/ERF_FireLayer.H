@@ -511,6 +511,21 @@ public:
     /// Set the fire step counter, for a restart: the spotting seed and the
     /// interval-based outputs derive from it.
     void set_step(int step) { m_step = step; }
+    int  get_step() const { return m_step; }
+    /// The level-set subcycle count that schedules the reinitialisation; carried
+    /// by the checkpoint so a restart keeps the schedule of the uninterrupted run.
+    int  get_levelset_subcycle_count() const { return m_levelset_subcycle_count; }
+    void set_levelset_subcycle_count(int n) { m_levelset_subcycle_count = n; }
+    /// Fields that carry across steps and are checkpointed alongside the ones
+    /// above: the spotting diagnostics (recomputed only every spotting interval),
+    /// the temporal acceleration state, the crown ROS carried between steps and
+    /// the crown fraction burned.
+    const amrex::MultiFab* get_accel_state() const      { return fire_accel_state.get(); }
+    const amrex::MultiFab* get_crown_ros_active() const { return fire_crown_ros_active.get(); }
+    amrex::MultiFab* get_albini_data_mut()           { return fire_albini_data.get(); }
+    amrex::MultiFab* get_accel_state_mut()           { return fire_accel_state.get(); }
+    amrex::MultiFab* get_crown_ros_active_mut()      { return fire_crown_ros_active.get(); }
+    amrex::MultiFab* get_crown_fraction_burned_mut() { return fire_crown_fraction_burned.get(); }
 
     /// Structure id on the fire grid (0 = none); null unless exposure.enable.
     const amrex::MultiFab* get_structure_id() const { return fire_structure_id.get(); }

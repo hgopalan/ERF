@@ -2,8 +2,12 @@
 
 Checks that a run restarted from a checkpoint reproduces the uninterrupted
 run exactly. For each row three runs are made from one base deck: straight to
-200 s, to 100 s with a checkpoint written at step 200, and a restart from that
-checkpoint to 200 s. The burned-cell count and the head rate of spread at
+200 s, to step 197 (98.5 s) with a checkpoint written there, and a restart
+from that checkpoint to 200 s. Step 197 is not a multiple of the level-set
+reinitialisation interval (5 subcycles) or the spotting interval (2 steps), so
+the rows also check that the counters behind those schedules come back; the
+suite's original checkpoint at step 200 was a multiple of both and hid that
+they did not. The burned-cell count and the head rate of spread at
 200 s of the restarted run must equal those of the straight run to every
 printed digit.
 
@@ -142,5 +146,18 @@ always does), but the writer never copied them, so their two slots held
 uninitialized memory and every later field, spotting onwards, sat two slots
 away from its name. The writer now copies them.
 
-Restart of the spotting diagnostics and the crown-fire state is not covered
-here.
+**The reinitialisation schedule and four fire fields were not checkpointed.**
+The `spotting`, `crown` and `levelset` rows passed with the checkpoint at
+step 200 and diverged from step 200 onwards when it was moved to step 197:
+the level-set subcycle count that schedules the reinitialisation every five
+subcycles restarted from zero, so the restarted run reinitialised on a
+different schedule from the uninterrupted one. The count is now written to
+`FireState` and restored. Four fields that carry across steps were not
+written either: the spotting diagnostics (`FireAlbiniData`, recomputed only
+every spotting interval and held in between), the temporal acceleration state
+(`FireAccelState`: current ROS, elapsed time and equilibrium ROS per cell), the
+crown ROS carried between steps (`FireCrownRosActive`) and the crown fraction
+burned (`FireCrownFractionBurned`). With them every row restarts from step 197
+bit-for-bit in every fire plotfile field through step 400, and the
+`Fire_Behavior/Acceleration` temporal canonical restarted at step 143 matches
+its straight run at step 300.
