@@ -12,7 +12,9 @@ signed-distance reinitialization.
 - `erf.fire.levelset.gradient`: `upwind` (first order everywhere), `weno5z`
   (HJ-WENO5-Z everywhere) and the default `weno5z_front` (WENO within
   `weno_band_cells` = 4 cells of the front, first order elsewhere, the
-  WRF-Fire / CFBM hybrid); `run_compare.sh` runs the three decks
+  WRF-Fire / CFBM hybrid); `run_compare.sh` runs the three decks and
+  `inputs_fire_levelset_lowvisc`, the hybrid with the two-value artificial
+  viscosity (`eps_visc_front` = 0.1 within two cells of the front)
 - CFL-based subcycling within one atmospheric step
 - Sussman reinitialization of the signed-distance property
 
@@ -50,6 +52,7 @@ Burned-cell count at t = 150 / 300 / 450 / 600 s, measured on 1 rank:
 | FARSITE reference | 32 | 32 | 32 | 68 |
 | `inputs_fire_levelset_weno5z` | 32 | 44 | 52 | 52 |
 | `inputs_fire_levelset_weno5z_front` | 32 | 44 | 52 | 52 |
+| `inputs_fire_levelset_lowvisc` | 32 | 44 | 52 | 52 |
 
 The first two decks pin `erf.fire.levelset.gradient = upwind`, the scheme
 their numbers were measured with; the last two use WENO5-Z everywhere and
@@ -58,7 +61,15 @@ because the whole burn sits inside the band. All three put the front on
 the analytic radius along the axes (within 0.3 m at 600 s, on a 25 m
 grid); the difference is the corners, which the first-order scheme grows
 out square (64 cells against 56) and WENO keeps rounder (52). The rate is
-the same, the shape is better.
+the same, the shape is better. Lowering the near-front viscosity to 0.1
+(`inputs_fire_levelset_lowvisc`) changes nothing that this 25 m grid can
+show: the same cells, the front within 0.1 m of the hybrid run along the
+axis and the diagonal. The burn here is only a few cells across; the
+viscosity option is for fine fire grids. On the 5 m grid of the WUI
+wildland case (`WUI_Subdivision`, 1200 s) the near-front value of 0.1
+leaves the head at 0.250 m/s on every segment and lets the flanks spread a
+little more: 150 m wide at x = 450 m against 140 m, 4.96 ha burned against
+4.83 ha.
 
 Both cases track the analytic front. `phi` behaves as a signed distance:
 `phi_min` about -38 m near the centre of the burn, `phi_max` about the

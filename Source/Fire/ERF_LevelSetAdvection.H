@@ -32,7 +32,8 @@ namespace fire_levelset {
  * @param[in]  phi         Level-set field with ghosts
  * @param[in]  R_mf        Rate-of-spread field
  * @param[in]  dx, dy      Cell sizes
- * @param[in]  eps_visc    Artificial viscosity coefficient
+ * @param[in]  eps_visc    Artificial viscosity coefficient away from the front
+ *                         (grad_scheme carries the near-front value, if any)
  */
 inline void compute_levelset_rhs(amrex::MultiFab& rhs,
                                   const amrex::MultiFab& phi,
@@ -79,9 +80,11 @@ inline void compute_levelset_rhs(amrex::MultiFab& rhs,
                            + (wall.at(phi_arr, i, j, k, 0, 1) - 2.0*phi_arr(i, j, k)
                               + wall.at(phi_arr, i, j, k, 0, -1)) * dy2i;
 
-            // RHS: -R * (|∇φ| - ε Δφ)
+            // RHS: -R * (|∇φ| - ε Δφ), with ε the near-front value inside
+            // the viscosity band when two values are set
             Real R_val = R_arr(i, j, k);
-            rhs_arr(i, j, k) = -R_val * (norm_grad - eps_visc * laplacian);
+            const Real eps = grad_scheme.eps_at(phi_arr(i, j, k), eps_visc);
+            rhs_arr(i, j, k) = -R_val * (norm_grad - eps * laplacian);
         });
     }
 }
