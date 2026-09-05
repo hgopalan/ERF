@@ -68,13 +68,12 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
                               amrex::Real band_m = -1.0,
                               bool normalized = true,
                               const amrex::MultiFab* mask = nullptr,
-                              bool wall_extrap = false)
+                              bool wall_extrap = false,
+                              const LevelSetGradient& grad = LevelSetGradient{})
 {
     using namespace amrex;
     
     const auto* dx = geom.CellSize();
-    const Real dxi = 1.0 / dx[0];
-    const Real dyi = 1.0 / dx[1];
 
     // Band half-width. The default spreads the [-1, 1] range over three cells,
     // the usual interface thickness for a level-set band.
@@ -126,11 +125,12 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
                 // their value and their neighbours read through the wall.
                 if (wall.masked(i, j, k)) { phi_out(i, j, k) = phi_arr(i, j, k); return; }
 
-                // One-sided differences for the gradient
-                Real dxm = (phi_arr(i, j, k) - wall.at(phi_arr, i, j, k, -1, 0)) * dxi;
-                Real dxp = (wall.at(phi_arr, i, j, k, 1, 0) - phi_arr(i, j, k)) * dxi;
-                Real dym = (phi_arr(i, j, k) - wall.at(phi_arr, i, j, k, 0, -1)) * dyi;
-                Real dyp = (wall.at(phi_arr, i, j, k, 0, 1) - phi_arr(i, j, k)) * dyi;
+                // One-sided differences for the gradient, first order or
+                // HJ-WENO5-Z as the advection uses (WRF-Fire solves the
+                // reinitialisation with the same hybrid scheme).
+                Real dxm, dxp, dym, dyp;
+                one_sided_derivatives(phi_arr, dx[0], i, j, k, 1, 0, grad, wall, dxm, dxp);
+                one_sided_derivatives(phi_arr, dx[1], i, j, k, 0, 1, grad, wall, dym, dyp);
                 
                 // Sign of original level-set
                 Real sgn_phi0 = (phi_in(i, j, k) > 0.0) ? 1.0 :

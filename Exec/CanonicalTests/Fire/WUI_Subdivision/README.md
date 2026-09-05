@@ -71,23 +71,30 @@ future work.
 
 ## Reference results
 
-Two ranks, 2100 s, level set with the Godunov upwind branch (2026-09-05):
+Two ranks, 2100 s, level set with the default hybrid WENO5-Z/first-order
+derivatives (`erf.fire.levelset.gradient = weno5z_front`, 2026-09-05):
 
 | variant            | x = 780 m at [s] | burned cells | houses reached | peak intensity [kW/m] | max heat load [MJ/m²] | ember landings |
 |--------------------|-----------------:|-------------:|---------------:|----------------------:|----------------------:|---------------:|
-| wildland           |             1612 |         5242 |              - |                     - |                     - |              - |
-| wildland_spotting  |             1176 |         6676 |              - |                     - |                     - |              - |
-| subdivision        |             1403 |         5470 |          15/24 |                   773 |                  3.11 |             31 |
-| defensible         |            never |         2210 |           0/24 |                     0 |                  0.00 |              0 |
-| coupled            |             1441 |         5981 |          15/24 |                   773 |                  3.11 |             11 |
+| wildland           |             1613 |         4076 |              - |                     - |                     - |              - |
+| wildland_spotting  |             1181 |         5856 |              - |                     - |                     - |              - |
+| subdivision        |             1352 |         4916 |          12/24 |                   773 |                  3.11 |             37 |
+| defensible         |            never |         1660 |           0/24 |                     0 |                  0.00 |              0 |
+| coupled            |             1855 |         5069 |          15/24 |                   773 |                  3.11 |             11 |
 
-The wildland head moves at 0.250 m/s between x = 400 and 470 m against
+The wildland head moves at 0.249 m/s between x = 400 and 470 m against
 Rothermel's 0.2501 m/s for FM1 at 6% moisture and the 300 ft/min wind cap;
 the fuel consumed over its burned area is within 1.5% of the initial load.
 No footprint cell burns or loses fuel in any variant. The subdivision's first
-contacts are at 407, 581 and 816 s for the three rows; the coupled run's at
-427, 567 and 853 s, with a plume of 20 m/s at the end. `wui_spread.png` in
+contacts are at 314, 607 and 846 s for the three rows; the coupled run's at
+392, 695 and 1014 s, with a plume of 20 m/s at the end. `wui_spread.png` in
 the docs figures shows the four arrival-time maps.
+
+With first-order derivatives everywhere (`gradient = upwind`) the same runs
+gave x = 780 m at 1612 / 1176 / 1403 / never / 1441 s and 5242 / 6676 /
+5470 / 2210 / 5981 burned cells: the head rate is the same and the flanks
+are wider, so the first-order fire burns about a fifth more area and, in
+the coupled run, gets through the lanes sooner on that wider front.
 
 ## What this case found
 

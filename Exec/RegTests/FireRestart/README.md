@@ -52,12 +52,20 @@ constant molecular diffusion and no LES, a 100 m ignition disc. Three rows:
 
 ## Reference results
 
+Level set with the default hybrid WENO5-Z/first-order derivatives
+(`erf.fire.levelset.gradient = weno5z_front`, 2026-09-05); the rows that
+use the level set burned 134 / 124 / 237 / 164 / 78 cells with the
+first-order scheme that preceded it.
+
 | row | straight cells | straight ROS (m/s) | restarted cells | restarted ROS (m/s) | match |
 |---|---|---|---|---|---|
 | `farsite` | 70 | 0.250 | 70 | 0.250 | yes |
-| `levelset` | 134 | 0.479 | 134 | 0.479 | yes |
-| `coupled` | 78 | 0.250 | 78 | 0.250 | yes |
-| `dust` | 78 | 0.250 | 78 | 0.250 | yes |
+| `levelset` | 120 | 0.479 | 120 | 0.479 | yes |
+| `coupled` | 74 | 0.250 | 74 | 0.250 | yes |
+| `exposure` | 104 | 0.479 | 104 | 0.479 | yes |
+| `spotting` | 204 | 0.479 | 204 | 0.479 | yes |
+| `crown` | 148 | 0.250 | 148 | 0.250 | yes |
+| `dust` | 74 | 0.250 | 74 | 0.250 | yes |
 
 ## What this suite found
 

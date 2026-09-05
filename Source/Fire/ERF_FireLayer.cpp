@@ -807,6 +807,12 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 (m_params.ros_model != "balbi");
             // Wall extrapolation only means something with a mask.
             const bool wall_extrap = m_params.levelset_wall_extrapolate && (fire_nonburnable != nullptr);
+            // One-sided derivatives of the level set: the front band of the
+            // hybrid scheme is a number of fire cells, phi is in metres here.
+            fire_levelset::LevelSetGradient ls_grad;
+            ls_grad.scheme = m_params.levelset_grad_scheme;
+            ls_grad.band   = m_params.levelset_weno_band_cells
+                           * std::min(m_fg.geom.CellSize()[0], m_fg.geom.CellSize()[1]);
 
             if (hybrid_directional) {
                 // Both members are rebuilt along the front normal at every RK
@@ -832,7 +838,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 spec.weight     = fire_ros_weight.get();
                 advect_levelset_hybrid_rk3(*fire_phi, *fire_slopes, m_fg.geom, dt_ls,
                                            m_params.levelset_eps_visc, spec,
-                                           fire_nonburnable.get(), wall_extrap);
+                                           fire_nonburnable.get(), wall_extrap,
+                                           ls_grad);
             } else if (balbi_directional) {
                 advect_levelset_balbi_rk3(*fire_phi,
                                           (m_params.balbi.wind_source == 1)
@@ -841,19 +848,22 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                           m_fg.geom, dt_ls,
                                           m_params.levelset_eps_visc,
                                           m_bc_default, m_params.balbi, balbi_in,
-                                          fire_nonburnable.get(), wall_extrap);
+                                          fire_nonburnable.get(), wall_extrap,
+                                          ls_grad);
             } else if (generic_directional) {
                 const DirectionalRosState dir_state = make_directional_state(m_params.ros_model);
                 advect_levelset_directional_rk3(*fire_phi, *fire_wind_eff,
                                                 *fire_slopes, m_fg.geom, dt_ls,
                                                 m_params.levelset_eps_visc,
-                                                dir_state, fire_nonburnable.get(), wall_extrap);
+                                                dir_state, fire_nonburnable.get(), wall_extrap,
+                                                ls_grad);
             } else {
                 fire_levelset::advect_levelset_weno5z_rk3(*fire_phi, *fire_wind_eff,
                                                 *fire_ros, m_fg.geom, dt_ls,
                                                 m_params.levelset_eps_visc,
                                                 fire_slopes.get(),
-                                                fire_nonburnable.get(), wall_extrap);
+                                                fire_nonburnable.get(), wall_extrap,
+                                                ls_grad);
             }
             enforce_nonburnable_phi();
             fire_fill_boundary(*fire_phi, m_fg.geom);
@@ -870,7 +880,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                       m_params.levelset_reinit_iters, dtau,
                                       m_params.levelset_reinit_band_m,
                                       /*normalized=*/false,
-                                      fire_nonburnable.get(), wall_extrap);
+                                      fire_nonburnable.get(), wall_extrap, ls_grad);
                 enforce_nonburnable_phi();
                 fire_fill_boundary(*fire_phi, m_fg.geom);
             }

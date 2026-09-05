@@ -72,6 +72,9 @@ struct FireParams
     int               levelset_reinit_iters   = 10;    ///< Sussman reinitialization iterations
     amrex::Real       levelset_reinit_band_m  = -1.0;  ///< Band half-width L [m] where |phi| reaches 1; <=0 selects 3*min(dx,dy)
     amrex::Real       levelset_reinit_dtau    = -1.0;  ///< Reinitialization pseudo-dt (<0 = auto = 0.5*min(dx,dy))
+    std::string       levelset_gradient       = "weno5z_front"; ///< One-sided derivatives: "upwind" (first order), "weno5z" (HJ-WENO5-Z everywhere) or "weno5z_front" (WENO within weno_band_cells of the front, first order elsewhere; the WRF-Fire default)
+    int               levelset_grad_scheme    = 2;     ///< levelset_gradient resolved: 0 upwind, 1 weno5z, 2 weno5z_front
+    int               levelset_weno_band_cells = 4;    ///< Half-width in fire cells of the front band that uses WENO with "weno5z_front" (WRF-Fire fire_lsm_band_ngp)
     // Extrapolate the level set into non-burnable cells inside every stencil
     // (gradient, Laplacian, front normal, reinitialisation), so a masked wall
     // is a zero-gradient boundary of the distance function rather than a
@@ -496,6 +499,17 @@ struct FireParams
        pp.query("levelset.reinit_band_m", levelset_reinit_band_m);
        pp.query("levelset.reinit_dtau", levelset_reinit_dtau);
        pp.query("levelset.wall_extrapolate", levelset_wall_extrapolate);
+       pp.query("levelset.gradient", levelset_gradient);
+       pp.query("levelset.weno_band_cells", levelset_weno_band_cells);
+       if (levelset_gradient == "upwind") {
+           levelset_grad_scheme = 0;
+       } else if (levelset_gradient == "weno5z") {
+           levelset_grad_scheme = 1;
+       } else if (levelset_gradient == "weno5z_front") {
+           levelset_grad_scheme = 2;
+       } else {
+           amrex::Abort("erf.fire.levelset.gradient must be \"upwind\", \"weno5z\" or \"weno5z_front\", got \"" + levelset_gradient + "\"");
+       }
 
        // Terrain file
        amrex::ParmParse pp_erf("erf");

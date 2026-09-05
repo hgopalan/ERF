@@ -24,7 +24,9 @@ namespace fire_levelset {
  * @brief Compute level-set RHS: ∂φ/∂t = −R * (|∇φ| − ε Δφ)
  *
  * Uses the Godunov upwind norm for |∇φ| and central differences for the
- * Laplacian. One ghost cell is read; the stage fields carry three.
+ * Laplacian. The one-sided derivatives are first order, or HJ-WENO5-Z with
+ * a WENO `grad_scheme`, which reads all three ghost cells of
+ * the stage fields.
  *
  * @param[out] rhs         RHS field (modified in-place)
  * @param[in]  phi         Level-set field with ghosts
@@ -39,7 +41,8 @@ inline void compute_levelset_rhs(amrex::MultiFab& rhs,
                                   amrex::Real eps_visc,
                                   const amrex::MultiFab* slopes = nullptr,
                                   const amrex::MultiFab* mask = nullptr,
-                                  bool wall_extrap = false)
+                                  bool wall_extrap = false,
+                                  const LevelSetGradient& grad_scheme = LevelSetGradient{})
 {
     using namespace amrex;
 
@@ -67,7 +70,8 @@ inline void compute_levelset_rhs(amrex::MultiFab& rhs,
             const Real sx = use_terrain ? slope_arr(i, j, k, 0) : Real(0.0);
             const Real sy = use_terrain ? slope_arr(i, j, k, 1) : Real(0.0);
             Real norm_grad = fire_levelset::godunov_norm_grad_phi(phi_arr, dx, dy,
-                                                                  i, j, k, sx, sy, wall);
+                                                                  i, j, k, sx, sy, wall,
+                                                                  grad_scheme);
 
             // Compute Δφ = ∂²φ/∂x² + ∂²φ/∂y², through the same wall stencil
             Real laplacian = (wall.at(phi_arr, i, j, k, 1, 0) - 2.0*phi_arr(i, j, k)
@@ -149,7 +153,8 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
                                           amrex::Real eps_visc,
                                           FillRos&& fill_ros,
                                           const amrex::MultiFab* mask = nullptr,
-                                          bool wall_extrap = false)
+                                          bool wall_extrap = false,
+                                          const LevelSetGradient& grad_scheme = LevelSetGradient{})
 {
     using namespace amrex;
 
@@ -170,7 +175,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     fire_fill_boundary(phi_star, geom);
     fill_ros(R_dir, phi_star);
     zero_ros_in_mask(R_dir, mask);
-    compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap);
+    compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap, grad_scheme);
     for (MFIter mfi(phi_star); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto ps = phi_star.array(mfi);
@@ -184,7 +189,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     // Stage 2: phi** = (3/4)phi^n + (1/4)(phi* + dt L(phi*))
     fill_ros(R_dir, phi_star);
     zero_ros_in_mask(R_dir, mask);
-    compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap);
+    compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap, grad_scheme);
     phi_hat.ParallelCopy(phi_n);
     for (MFIter mfi(phi_hat); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -200,7 +205,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     // Stage 3: phi^{n+1} = (1/3)phi^n + (2/3)(phi** + dt L(phi**))
     fill_ros(R_dir, phi_hat);
     zero_ros_in_mask(R_dir, mask);
-    compute_levelset_rhs(rhs, phi_hat, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap);
+    compute_levelset_rhs(rhs, phi_hat, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap, grad_scheme);
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto pnew = phi.array(mfi);
@@ -243,7 +248,8 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
                                         amrex::Real eps_visc,
                                         const amrex::MultiFab* slopes = nullptr,
                                         const amrex::MultiFab* mask = nullptr,
-                                        bool wall_extrap = false)
+                                        bool wall_extrap = false,
+                                        const LevelSetGradient& grad_scheme = LevelSetGradient{})
 {
     using namespace amrex;
 
@@ -267,7 +273,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
     // stencil in compute_levelset_rhs reads all three. Stages 2 and 3 already
     // fill before their RHS; stage 1 was the one that did not.
     fire_fill_boundary(phi_star, geom);
-    compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap);
+    compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap, grad_scheme);
     for (MFIter mfi(phi_star); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto ps = phi_star.array(mfi);
@@ -279,7 +285,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
     fire_fill_boundary(phi_star, geom);
 
     // Stage 2: φ** = (3/4)φ^n + (1/4)(φ* + Δt L(φ*))
-    compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap);
+    compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap, grad_scheme);
     phi_hat.ParallelCopy(phi_n);
     for (MFIter mfi(phi_hat); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -293,7 +299,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
     fire_fill_boundary(phi_hat, geom);
 
     // Stage 3: φ^{n+1} = (1/3)φ^n + (2/3)(φ** + Δt L(φ**))
-    compute_levelset_rhs(rhs, phi_hat, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap);
+    compute_levelset_rhs(rhs, phi_hat, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap, grad_scheme);
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto pnew = phi.array(mfi);

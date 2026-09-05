@@ -86,6 +86,7 @@ erf.fire.fire_stats_csv_file = "fire_stats_levelset_no_reinit.csv"
 erf.fire.propagation_method = "levelset"
 erf.fire.levelset.cfl = 0.25
 erf.fire.levelset.eps_visc = 0.2
+erf.fire.levelset.gradient = upwind
 erf.fire.levelset.reinit_every = 1000000  # disabled: this case isolates the advection
 erf.fire.levelset.reinit_iters = 100
 erf.fire.levelset.reinit_dtau = 2.0
