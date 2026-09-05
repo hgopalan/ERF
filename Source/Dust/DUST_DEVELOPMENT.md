@@ -583,8 +583,23 @@ step, so the previous step's emission flux and u* are live state and are in
 the list; and the ghost cells are restored without a boundary fill because
 the kernels read stale edge ghosts. Verified bit-for-bit by the `dust` row of
 `Exec/RegTests/FireRestart` on one and four ranks and by the DustParticles
-case (2026-09-04). Found on the way, not fixed: the dust results depend on
-the number of ranks along a box edge of the deposition grid.
+case (2026-09-04).
+
+### Decomposition Dependence (Fixed)
+
+The dust results depended on the number of ranks. Two indexing slips: the
+scratch copies of the fire wind and heat flux onto the dust grid used the
+atmosphere geometry's periodicity (`Geom(0)`) on dust-grid MultiFabs, which
+with `grid_ratio > 1` treats dust cells one atmosphere domain apart as
+periodic images and misplaces the fire's heat on more than one rank; and
+`apply_dust_deposition_bc` read `dust_ustar_in` (dust grid) with atmosphere
+indices, the wrong cell on one box and an out-of-bounds read on any box
+whose dust indices do not start at zero. The copies now use
+`get_dust_geom().periodicity()` and `DustLayer::apply_deposition_bc` averages
+u* onto the atmosphere grid with `average_down` first. One and four ranks are
+now bit-identical (FireRestart `dust` row, 400 steps, periodic and
+inflow-outflow). `ERFDustPC::ReleaseParticles` also placed particles with the
+atmosphere spacing from dust-grid indices; it uses the dust spacing now.
 
 ### Phase 19/20 Plotfile Catalog (Fixed)
 

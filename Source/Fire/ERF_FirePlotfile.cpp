@@ -95,6 +95,16 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
 
     int comp = 19;
 
+    // The catalog names fire_fuel_mc_lh and fire_fuel_mc_lw right after the base
+    // block whenever the moisture MultiFab carries the live classes, but nothing
+    // copied them: their two slots held whatever memory the plotfile buffer had
+    // (different on every rank count) and every field after them, spotting
+    // onwards, sat two slots away from its name.
+    if (has_live_moisture) {
+        MultiFab::Copy(mf, *fire_layer.get_fuel_mc(), 3, comp, 2, 0);
+        comp += 2;
+    }
+
     // Phase 8: Albini spotting diagnostics
     if (has_spotting) {
         MultiFab::Copy(mf, *fire_layer.get_albini_data(), 0, comp, 4, 0);

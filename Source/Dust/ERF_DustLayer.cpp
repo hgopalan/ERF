@@ -919,6 +919,27 @@ DustLayer::apply_deposition_bc(
    if (!dep_flux_atm || !dust_ustar_in) return;
    if (m_params.atm_feedback <= 0.0) return;
 
+   // The deposition kernel walks the atmosphere's cells, so it needs u* on the
+   // atmosphere grid: the mean over the C x C dust cells of each atmosphere
+   // cell, coarsened the way the emission flux is in apply_to_cc_source. It
+   // used to be handed dust_ustar_in itself and read it with atmosphere
+   // indices, which with grid_ratio > 1 is the wrong dust cell on a single
+   // box and, on a box whose dust indices do not start at zero, a read
+   // outside the FAB, so the deposition depended on the domain decomposition.
+   amrex::MultiFab ustar_atm(dep_flux_atm->boxArray(), dep_flux_atm->DistributionMap(),
+                             1, amrex::IntVect(0));
+   {
+     amrex::Box atm_domain_2d = geom_atm.Domain();
+     atm_domain_2d.setSmall(2, 0);
+     atm_domain_2d.setBig(2, 0);
+     amrex::RealBox prob_2d = geom_atm.ProbDomain();
+     prob_2d.setHi(2, prob_2d.lo(2) + 1.0);
+     amrex::Geometry geom_atm_2d(atm_domain_2d, prob_2d, amrex::CoordSys::cartesian,
+                                 {false, false, false});
+     amrex::average_down(*dust_ustar_in, ustar_atm, m_dg.geom, geom_atm_2d, 0, 1,
+                         amrex::IntVect(m_dg.grid_ratio, m_dg.grid_ratio, 1));
+   }
+
    int n_active = m_params.transport_bins_separately ? m_params.n_size_bins : 1;
 
    for (int b = 0; b < n_active; ++b) {
@@ -930,7 +951,7 @@ DustLayer::apply_deposition_bc(
        int comp = m_dust_scalar_comp + b;
 
        apply_dust_deposition_bc(cc_source, *dep_flux_atm,
-                                 S_old, *dust_ustar_in,
+                                 S_old, ustar_atm,
                                  z_phys_cc, geom_atm,
                                  d_m, rhop, E_0, comp,
                                  m_params.dust_debug);

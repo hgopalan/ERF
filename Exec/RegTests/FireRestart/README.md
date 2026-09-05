@@ -114,13 +114,33 @@ boundary fill, because the dust kernels read ghost cells at box edges that
 the run itself does not refill: filling them on restart changed the edge
 values on four ranks.
 
-**The dust layer depends on the domain decomposition.** Found on the way and
-not fixed here: the straight `dust` row on four ranks (boxes of 12 and 8
-cells) differs from the same row on one rank in a strip of cells along a box
-edge in the deposition grid, by about 0.1%. The restart reproduces whichever
-of the two it was started from, so the row passes on either count, but the
-dust emission or deposition kernels read ghost cells across box boundaries
-that are not filled every step.
+**The dust layer depended on the domain decomposition.** The straight `dust`
+row on four ranks (boxes of 12 and 8 cells) differed from the same row on one
+rank, by 30% in parts of the deposition grid, for two reasons, neither of them
+a ghost-cell fill. The scratch copies that carry the fire's wind and heat flux
+onto the dust grid used the atmosphere geometry's periodicity on MultiFabs
+indexed on the dust grid; with a grid ratio of 4 the copy took dust cells
+20 cells apart for periodic images of each other and, on more than one rank,
+put the fire's heat at three false locations and dropped it from the true one,
+so the lofting tripled the emission in the wrong places. And the deposition
+kernel read the dust-grid friction velocity with atmosphere indices: on one
+box that is the wrong dust cell, on a box whose dust indices start at 48 it is
+a read outside the FAB, and one rank's box deposited with garbage. The copies
+now use the dust grid's periodicity and the deposition takes the friction
+velocity averaged onto the atmosphere grid. With both, the row on four ranks
+is bit-for-bit the row on one rank, with periodic and with inflow-outflow
+boundaries, and the restart on four ranks is exact. The particle release had
+the same kind of indexing slip, placing particles with the atmosphere's
+spacing from dust-grid indices, so with a grid ratio above one most were
+released outside the domain; it now uses the dust spacing.
+
+**The fire plotfile mislabelled everything after its base block.** Comparing
+the fire plotfiles across rank counts on the way showed `fire_fuel_mc_lh` and
+`fire_fuel_mc_lw` differing: the catalog names them right after the nineteen
+base fields whenever the moisture MultiFab carries the live classes (it
+always does), but the writer never copied them, so their two slots held
+uninitialized memory and every later field, spotting onwards, sat two slots
+away from its name. The writer now copies them.
 
 Restart of the spotting diagnostics and the crown-fire state is not covered
 here.

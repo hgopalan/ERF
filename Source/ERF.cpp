@@ -236,7 +236,14 @@ ERF::Evolve ()
                     // With grid_ratio > 1 and 2+ MPI ranks a dust tile on rank 0 may
                     // need fire cells owned by rank 1. ParallelCopy into a scratch MultiFab
                     // on the dust BA before the GPU kernel runs.
-                    const amrex::Periodicity& per = Geom(0).periodicity();
+                    //
+                    // The periodicity has to be the dust grid's, whose domain is the
+                    // atmosphere's refined by the grid ratio. With the atmosphere's the
+                    // copy treated dust cells one atmosphere domain apart as periodic
+                    // images of each other and landed the fire wind (and, below, the
+                    // fire heat) in the wrong place on more than one rank, so the
+                    // dust emission depended on the domain decomposition.
+                    const amrex::Periodicity& per = m_DustLayer->get_dust_geom().periodicity();
                     amrex::MultiFab fire_wind_scratch(
                         m_DustLayer->get_dust_ba(),
                         m_DustLayer->get_dust_dm(),
@@ -266,7 +273,8 @@ ERF::Evolve ()
                 m_fire_lofting_ready = false;
                 if (m_fire_dust_coupling.fire_lofting_enabled &&
                     m_fire_layer->get_heat_flux()) {
-                    const amrex::Periodicity& per = Geom(0).periodicity();
+                    // The dust grid's periodicity, as for the wind scratch above.
+                    const amrex::Periodicity& per = m_DustLayer->get_dust_geom().periodicity();
                     m_fire_heat_scratch_for_lofting = amrex::MultiFab(
                         m_DustLayer->get_dust_ba(),
                         m_DustLayer->get_dust_dm(),
