@@ -1,0 +1,3 @@
+FILE = inputs_base
+
+# Polygon stamped at initialisation, interior ignited with its fuel intact: the historical behaviour.

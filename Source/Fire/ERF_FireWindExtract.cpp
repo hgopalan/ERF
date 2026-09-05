@@ -211,11 +211,14 @@ void fill_fire_wind_from_interpolation(
     int             nfuelcats,
     int             wind_interp,
     const MultiFab* col_open,
-    const MultiFab* col_roof)
+    const MultiFab* col_roof,
+    Real            z_sample,
+    Real            z0_log)
 {
     const int C = fg.C;
     const bool bilinear = (wind_interp == 1);
     const bool open_weights = bilinear && (col_open != nullptr) && (col_roof != nullptr);
+    const bool resample = (z_sample > 0.0);
 
     for (MFIter mfi(fire_wind_ref, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
@@ -270,6 +273,11 @@ void fill_fire_wind_from_interpolation(
                 z_ref_cell = d_fcwh[fuel_code];
             }
 
+            // Height actually sampled and the log-law factor that brings the
+            // sampled wind down to the target height (1 without resampling).
+            const Real z_at  = resample ? z_sample : z_ref_cell;
+            const Real scale = resample ? std::log(z_ref_cell / z0_log) / std::log(z_sample / z0_log) : Real(1.0);
+
             if (!bilinear) {
                 // Nearest atmospheric column: every fire cell in a column shares
                 // one wind vector, so the fire-grid wind is piecewise constant
@@ -281,14 +289,14 @@ void fill_fire_wind_from_interpolation(
                 // is the terrain surface, not the first cell centre, which sits
                 // half an atmospheric cell higher and would push the extraction
                 // height up by an amount that varies with vertical resolution.
-                const Real z_target = z_surf_arr(i_f, j_f, 0) + z_ref_cell;
+                const Real z_target = z_surf_arr(i_f, j_f, 0) + z_at;
                 extract_z(i_f, j_f, 0) = z_target;
 
                 Real u_out, v_out;
                 column_wind_at_height(xvel, yvel, z_phys_cc, i_a, j_a, nz,
                                       z_target, u_out, v_out);
-                fire_wind(i_f, j_f, 0, 0) = u_out;
-                fire_wind(i_f, j_f, 0, 1) = v_out;
+                fire_wind(i_f, j_f, 0, 0) = scale * u_out;
+                fire_wind(i_f, j_f, 0, 1) = scale * v_out;
                 return;
             }
 
@@ -318,7 +326,7 @@ void fill_fire_wind_from_interpolation(
                     const int io = amrex::max(io_min, amrex::min(i0 + di, io_max));
                     const int jo = amrex::max(jo_min, amrex::min(j0 + dj, jo_max));
                     const Real w = (di ? wx : (1.0 - wx)) * (dj ? wy : (1.0 - wy));
-                    f_open[c] = (roof_arr(io, jo, 0) > z_ref_cell) ? open_arr(io, jo, 0) : Real(1.0);
+                    f_open[c] = (roof_arr(io, jo, 0) > z_at) ? open_arr(io, jo, 0) : Real(1.0);
                     wsum += w * f_open[c];
                 }
                 if (wsum > 1.0e-6) {
@@ -341,7 +349,7 @@ void fill_fire_wind_from_interpolation(
                 // ground: near the surface the profile is anchored to the local
                 // terrain, so blending at one absolute height would sample an
                 // upslope neighbour far higher above ground than asked for.
-                const Real z_target_c = z_col_arr(i_f, j_f, 0, c) + z_ref_cell;
+                const Real z_target_c = z_col_arr(i_f, j_f, 0, c) + z_at;
 
                 Real u_c, v_c;
                 column_wind_at_height(xvel, yvel, z_phys_cc, ia, ja, nz,
@@ -353,8 +361,8 @@ void fill_fire_wind_from_interpolation(
             }
 
             extract_z(i_f, j_f, 0) = z_sum;
-            fire_wind(i_f, j_f, 0, 0) = u_sum;
-            fire_wind(i_f, j_f, 0, 1) = v_sum;
+            fire_wind(i_f, j_f, 0, 0) = scale * u_sum;
+            fire_wind(i_f, j_f, 0, 1) = scale * v_sum;
         });
     }
 }

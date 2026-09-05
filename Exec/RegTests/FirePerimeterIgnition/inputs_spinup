@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Polygon stamped at 30 s: no fire for the first 30 s while the atmosphere spins up.
+erf.fire.ignition.polygon_time = 30.0

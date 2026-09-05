@@ -277,3 +277,29 @@ References
 - Borges, R., Carmona, M., Costa, B. and Don, W. S. (2008). An improved weighted essentially non-oscillatory scheme for hyperbolic conservation laws. Journal of Computational Physics, 227(6), 3191-3211.
 - Sussman, M., Smereka, P. and Osher, S. (1994). A level set approach for computing solutions to incompressible two-phase flow. Journal of Computational Physics, 114(1), 146-159.
 - Russo, G. and Smereka, P. (2000). A remark on computing distance functions. Journal of Computational Physics, 163(1), 51-67.
+
+
+Perimeter ignition with spin-up
+-------------------------------
+
+A fire can be started from an observed perimeter instead of a point:
+:cpp:`erf.fire.ignition.polygon_file` lists the vertices and the level set
+is set to the signed distance from that polygon. By default the polygon is
+stamped at initialisation. :cpp:`erf.fire.ignition.polygon_time` stamps it
+at that time instead, so the atmosphere spins up before the fire exists;
+this is WRF-SFIRE's perimeter time, the way the Community Fire Behavior
+Model runs start from mapped perimeters (Jiménez y Muñoz et al., 2026, with
+about three hours of spin-up). With
+:cpp:`erf.fire.ignition.polygon_interior_ros` :math:`= R > 0` the interior
+is given the state of a fire that reached the perimeter after spreading
+outward at :math:`R`: a cell at distance :math:`d` inside the perimeter gets
+the arrival time :math:`t_{ign} - d/R`, clamped at the simulation start
+because a negative arrival time reads as unburned, and its fuel load is
+reduced by
+:math:`\exp(-d/(R\tau))`, the exponential burnout the heat-flux step
+applies, with :math:`\tau` = :cpp:`erf.fire.ignition.polygon_interior_tau`
+(the cell crossing time :math:`\Delta x / R` when 0). Without it the whole
+interior ignites at the perimeter time with its fuel intact, which releases
+the heat of the entire burnt area at once. The regression test
+``Exec/RegTests/FirePerimeterIgnition`` checks the interior state cell by
+cell from the fire plotfile.

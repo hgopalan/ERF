@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Wind taken at 20 m directly (no sampling): the reference for the factor check.
+erf.fire.wind_ref_ht = 20.0
