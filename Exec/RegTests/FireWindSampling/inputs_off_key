@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Same with the key written out: must reproduce inputs_off line for line.
+erf.fire.wind_sample_ht = 0.0

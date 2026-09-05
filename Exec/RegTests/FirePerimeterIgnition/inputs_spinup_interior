@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# Both: the perimeter of a fire that has been burning, stamped after a 30 s spin-up.
+erf.fire.ignition.polygon_time = 30.0
+erf.fire.ignition.polygon_interior_ros = 0.5
+erf.fire.ignition.polygon_interior_tau = 60.0

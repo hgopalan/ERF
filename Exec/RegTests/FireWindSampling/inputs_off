@@ -1,0 +1,3 @@
+FILE = inputs_base
+
+# Wind sampled at wind_ref_ht = 6.1 m: the historical behaviour.

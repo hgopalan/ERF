@@ -14,6 +14,14 @@ ERF-Fire provides five rate-of-spread models and a per-cell hybrid of any two, s
 
 Sub-phase A adds per-fuel wind extraction height following WRF-SFIRE :cpp:`fcwh` convention. This is controlled by the :cpp:`erf.fire.use_per_fuel_wind_ht` parameter and is backward-compatible with the global wind reference height approach.
 
+The wind can also be sampled above the flames and brought down to the target height, the second interpolation option of the Community Fire Behavior Model (Jiménez y Muñoz et al., 2026), meant to drive the fire with an ambient wind rather than one already accelerated by its own plume. With :cpp:`erf.fire.wind_sample_ht` :math:`= z_s > 0` every atmospheric column is sampled at :math:`z_s` above its own ground and the result is scaled with a neutral log profile of roughness :cpp:`erf.fire.wind_sample_z0` :math:`= z_0`,
+
+.. math::
+
+   U(z_{ref}) = U(z_s)\, \frac{\ln(z_{ref}/z_0)}{\ln(z_s/z_0)},
+
+where :math:`z_{ref}` is :cpp:`erf.fire.wind_ref_ht` or the per-fuel height. The default, 0, samples at the target height as before. The regression test ``Exec/RegTests/FireWindSampling`` checks the factor against a run that samples at :math:`z_s` directly.
+
 Rothermel (1972) - Default
 ---------------------------
 

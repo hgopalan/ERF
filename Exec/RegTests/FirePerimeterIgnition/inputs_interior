@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# Polygon at initialisation with the interior state of a fire that spread outward at 0.5 m/s:
+# arrival time -d/R and fuel exp(-d/(R tau)) with tau = 60 s, d the distance inside the perimeter.
+erf.fire.ignition.polygon_interior_ros = 0.5
+erf.fire.ignition.polygon_interior_tau = 60.0

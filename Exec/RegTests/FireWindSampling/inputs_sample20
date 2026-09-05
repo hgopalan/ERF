@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# Wind sampled at 20 m above ground and brought down to 6.1 m with a log profile of z0 = 0.1 m:
+# factor ln(6.1/0.1) / ln(20/0.1) = 0.77589.
+erf.fire.wind_sample_ht = 20.0
+erf.fire.wind_sample_z0 = 0.1

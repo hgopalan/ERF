@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# Same with the keys written out: must reproduce inputs_t0 line for line.
+erf.fire.ignition.polygon_time = 0.0
+erf.fire.ignition.polygon_interior_ros = 0.0

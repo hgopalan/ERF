@@ -36,6 +36,15 @@ struct FireParams
     bool              use_waf             = true;        ///< Apply Wind Adjustment Factor
     std::string       waf_formula         = "andrews";   ///< "andrews" or "behaviorplus"
     bool              use_wind_limit      = true;        ///< Apply MEWS cap to wind
+    // Second-height wind sampling (the Community Fire Behavior Model's second
+    // interpolation option): sample the atmospheric wind at wind_sample_ht
+    // above the local ground, above the fire's own plume, and bring it down
+    // to the target height (wind_ref_ht, or the per-fuel height) with a
+    // neutral log profile of roughness wind_sample_z0,
+    //   U(z_ref) = U(z_sample) ln(z_ref / z0) / ln(z_sample / z0).
+    // 0 (default) samples at the target height as before.
+    amrex::Real       wind_sample_ht      = 0.0;         ///< Height [m] above ground to sample the wind; 0 = at the target height
+    amrex::Real       wind_sample_z0      = 0.1;         ///< Roughness length [m] of the log profile between the two heights
     bool              use_terrain_wind    = true;        ///< Apply terrain corrections
     amrex::Real       k_ridge             = 1.5;         ///< Ridge speed-up factor
     amrex::Real       k_shelter           = 0.6;         ///< Sheltered wind factor
@@ -218,6 +227,21 @@ struct FireParams
         std::string   polygon_file            = "";         ///< Path to polygon vertex CSV; empty = disabled
         std::string   polygon_type            = "polygon";  ///< "polygon" or "polyline"
         amrex::Real   polyline_width          = 10.0;       ///< Half-width of polyline ignition zone [m]
+        // Observed-perimeter ignition with spin-up (WRF-SFIRE's perimeter
+        // time, as used by the Community Fire Behavior Model): the polygon is
+        // applied at polygon_time instead of at initialisation, so the
+        // atmosphere spins up first. With polygon_interior_ros > 0 the
+        // interior is given the state of a fire that spread outward at that
+        // rate: a cell at distance d inside the perimeter gets arrival time
+        // polygon_time - d / R (clamped at the simulation start, since a
+        // negative arrival time reads as unburned) and its fuel reduced by
+        // exp(-d / (R tau)),
+        // tau = polygon_interior_tau (dx_fire / R when 0), the exponential
+        // burnout the heat-flux step applies. 0 keeps the whole interior
+        // igniting at polygon_time with the fuel intact, as before.
+        amrex::Real   polygon_time            = 0.0;        ///< Time [s] the polygon is applied; 0 = at initialisation
+        amrex::Real   polygon_interior_ros    = 0.0;        ///< Spread rate [m/s] behind the interior arrival times; 0 = off
+        amrex::Real   polygon_interior_tau    = 0.0;        ///< Burnout e-folding time [s] of the interior; 0 = dx_fire / polygon_interior_ros
     } ignition;
 
     // Phase 12: Fire acceleration at startup.
@@ -479,6 +503,16 @@ struct FireParams
        pp.query("ignition_y", ignition_y);
        pp.query("ignition_r", ignition_r);
        pp.query("wind_ref_ht", wind_ref_ht);
+       pp.query("wind_sample_ht", wind_sample_ht);
+       pp.query("wind_sample_z0", wind_sample_z0);
+       if (wind_sample_ht > 0.0) {
+           if (wind_sample_ht <= wind_ref_ht) {
+               amrex::Abort("erf.fire.wind_sample_ht must exceed erf.fire.wind_ref_ht (sample above the target height)");
+           }
+           if (wind_sample_z0 <= 0.0 || wind_sample_z0 >= wind_ref_ht) {
+               amrex::Abort("erf.fire.wind_sample_z0 must be positive and below erf.fire.wind_ref_ht");
+           }
+       }
        // Phase 13A: Per-fuel wind height
        pp.query("use_per_fuel_wind_ht", use_per_fuel_wind_ht);
        pp.query("waf_fcz0_scale", waf_fcz0_scale);
@@ -621,6 +655,12 @@ struct FireParams
        pp.query("ignition.polygon_file",  ig.polygon_file);
        pp.query("ignition.polygon_type",  ig.polygon_type);
        pp.query("ignition.polyline_width", ig.polyline_width);
+       pp.query("ignition.polygon_time",         ig.polygon_time);
+       pp.query("ignition.polygon_interior_ros", ig.polygon_interior_ros);
+       pp.query("ignition.polygon_interior_tau", ig.polygon_interior_tau);
+       if (ig.polygon_time < 0.0 || ig.polygon_interior_ros < 0.0 || ig.polygon_interior_tau < 0.0) {
+           amrex::Abort("erf.fire.ignition.polygon_time, polygon_interior_ros and polygon_interior_tau must be >= 0");
+       }
 
        // Phase 12: fire acceleration
        auto& ac = accel;

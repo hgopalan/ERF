@@ -506,6 +506,21 @@ public:
     amrex::MultiFab* get_Q_atm_prev_mut() { return m_Q_atm_prev.get(); }
 
     /**
+     * @brief Stamp the perimeter polygon (or polyline) of
+     *        erf.fire.ignition.polygon_file into the level set.
+     *
+     * Called at initialisation when erf.fire.ignition.polygon_time is 0, or
+     * from advance() on the step whose window contains that time. With
+     * erf.fire.ignition.polygon_interior_ros > 0 the cells the polygon
+     * newly ignites get the interior state of a fire that spread outward at
+     * that rate: arrival time t_ign - d / R and fuel reduced by
+     * exp(-d / (R tau)) with d the distance inside the perimeter and tau
+     * erf.fire.ignition.polygon_interior_tau (dx_fire / R when 0).
+     * @param t_ign Time [s] the perimeter is valid at.
+     */
+    void apply_polygon_ignition(amrex::Real t_ign);
+
+    /**
      * @brief Heat per kilogram of fuel that converts the lagged atmospheric
      *        sensible flux back into fuel burnt, for the smoke emission.
      *
@@ -677,6 +692,7 @@ private:
     std::unique_ptr<amrex::MultiFab>         m_Q_atm_prev;            // sensible [W/m²]
     std::unique_ptr<amrex::MultiFab>         m_Q_lat_atm_prev;        // latent   [W/m²]
     amrex::Real                              m_f_dry_prev = 1.0;      // partition factor m_Q_atm_prev was filled with
+    bool                                     m_polygon_applied = false; // the timed perimeter polygon has been stamped
 
     // Open-fraction heat placement (erf.fire.heat_open_fraction): per
     // atmospheric column, the fraction of the footprint not covered by

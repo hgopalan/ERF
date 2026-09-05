@@ -88,6 +88,15 @@
  * relaxed in-building velocity to the fire cells around it. A cell whose four
  * columns are all closed keeps the plain weights; it is inside a footprint
  * and masked anyway.
+ *
+ * With z_sample > 0 (erf.fire.wind_sample_ht) every column is sampled at
+ * z_sample above its ground instead of at the target height, and the result
+ * is brought down to the target height with a neutral log profile of
+ * roughness z0_log: U(z_ref) = U(z_sample) ln(z_ref / z0) / ln(z_sample / z0).
+ * This is the second interpolation option of the Community Fire Behavior
+ * Model (Jimenez y Munoz et al. 2026), meant to drive the fire with a wind
+ * taken above its own plume. fire_wind_extract_z then records the sampled
+ * height; the open-column test uses that height as well.
  */
 void fill_fire_wind_from_interpolation(
     amrex::MultiFab&       fire_wind_ref,
@@ -105,7 +114,9 @@ void fill_fire_wind_from_interpolation(
     int                    nfuelcats      = 0,
     int                    wind_interp    = 1,
     const amrex::MultiFab* col_open       = nullptr,
-    const amrex::MultiFab* col_roof       = nullptr);
+    const amrex::MultiFab* col_roof       = nullptr,
+    amrex::Real            z_sample       = 0.0,
+    amrex::Real            z0_log         = 0.1);
 
 /**
  * @brief Compute unsheltered Wind Adjustment Factor (Andrews/Albini & Baughman 1979)

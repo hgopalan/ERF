@@ -314,24 +314,10 @@ void FireLayer::initialize(const ERF& erf,
     }
 
     // Phase 11: Polygon ignition (initial fire perimeter from vertex file).
-    // Applied at t=0 as part of initialization, before the schedule.
-    if (!m_params.ignition.polygon_file.empty()) {
-        std::vector<amrex::Real> xs, ys;
-        // Vertex file is read on rank 0 only; broadcast to all ranks inside
-        // read_polygon_vertices() before returning.
-        read_polygon_vertices(m_params.ignition.polygon_file, xs, ys);
-        if (m_params.ignition.polygon_type == "polyline") {
-            init_phi_from_polyline(*fire_phi, m_fg.geom, xs, ys,
-                                   m_params.ignition.polyline_width);
-        } else {
-            init_phi_from_polygon(*fire_phi, m_fg.geom, xs, ys);
-        }
-        fire_fill_boundary(*fire_phi, m_fg.geom);
-        if (m_params.fire_debug) {
-            amrex::Print() << "[FIRE DEBUG] Polygon ignition applied from '"
-                           << m_params.ignition.polygon_file << "' ("
-                           << m_params.ignition.polygon_type << ")\n";
-        }
+    // Applied at t=0 as part of initialization, before the schedule, unless
+    // erf.fire.ignition.polygon_time defers it to advance().
+    if (!m_params.ignition.polygon_file.empty() && m_params.ignition.polygon_time <= 0.0) {
+        apply_polygon_ignition(0.0);
     }
 
     // Phase 11: Load ignition schedule if specified.
@@ -580,8 +566,15 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                       m_use_per_fuel_wind_ht ? 13 : 0,
                                       m_params.wind_interp,
                                       wind_open ? m_open_frac_atm.get() : nullptr,
-                                      wind_open ? m_roof_h_atm.get() : nullptr);
+                                      wind_open ? m_roof_h_atm.get() : nullptr,
+                                      m_params.wind_sample_ht, m_params.wind_sample_z0);
     if (m_params.fire_debug) {
+        if (m_params.wind_sample_ht > 0.0) {
+            amrex::Print() << "[FIRE DEBUG] Wind sampled at " << m_params.wind_sample_ht
+                           << " m above ground, log-law factor to " << m_params.wind_ref_ht << " m: "
+                           << std::log(m_params.wind_ref_ht / m_params.wind_sample_z0)
+                              / std::log(m_params.wind_sample_ht / m_params.wind_sample_z0) << std::endl;
+        }
         amrex::Print() << "[FIRE DEBUG] Wind extraction completed. Max reference wind: "
                        << fire_wind_ref->max(0) << " m/s" << std::endl;
         if (m_step > 0)
@@ -674,6 +667,20 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             avg_lw = amrex::max(0.30_rt, amrex::min(avg_lw, 2.50_rt));
             m_bs_default = compute_behave_state(fp_bh, avg1, avg10, avg100, avg_lh, avg_lw);
         }
+    }
+
+    // Observed-perimeter ignition with spin-up: the polygon of
+    // erf.fire.ignition.polygon_file is stamped on the step whose window
+    // (m_current_time - dt, m_current_time] contains polygon_time. After a
+    // restart past that time the window never contains it, so the perimeter
+    // restored from the checkpoint is not stamped again.
+    if (!m_params.ignition.polygon_file.empty() && !m_polygon_applied && fire_phi
+        && m_params.ignition.polygon_time > 0.0
+        && m_params.ignition.polygon_time > m_current_time - dt
+        && m_params.ignition.polygon_time <= m_current_time) {
+        apply_polygon_ignition(m_params.ignition.polygon_time);
+        enforce_nonburnable_phi();
+        fire_fill_boundary(*fire_phi, m_fg.geom);
     }
 
     // Phase 11: Apply any scheduled ignition events due this timestep.
@@ -1369,6 +1376,70 @@ void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
             amrex::Print() << "[FIRE DEBUG] Skipping latent heat injection (inject_latent=false or no moisture)" << std::endl;
         }
         m_Q_lat_atm_prev->setVal(0.0_rt);
+    }
+}
+
+void FireLayer::apply_polygon_ignition(amrex::Real t_ign)
+{
+    std::vector<amrex::Real> xs, ys;
+    // Vertex file is read on rank 0 only; broadcast to all ranks inside
+    // read_polygon_vertices() before returning.
+    read_polygon_vertices(m_params.ignition.polygon_file, xs, ys);
+
+    const amrex::Real R   = m_params.ignition.polygon_interior_ros;
+    const bool interior   = (R > 0.0);
+    // Cells the polygon newly ignites are those that were unburned before it.
+    std::unique_ptr<amrex::MultiFab> phi_before;
+    if (interior) {
+        phi_before = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        amrex::MultiFab::Copy(*phi_before, *fire_phi, 0, 0, 1, 0);
+    }
+
+    if (m_params.ignition.polygon_type == "polyline") {
+        init_phi_from_polyline(*fire_phi, m_fg.geom, xs, ys,
+                               m_params.ignition.polyline_width);
+    } else {
+        init_phi_from_polygon(*fire_phi, m_fg.geom, xs, ys);
+    }
+    fire_fill_boundary(*fire_phi, m_fg.geom);
+    m_polygon_applied = true;
+
+    if (interior) {
+        // Interior state of a fire that reached the perimeter at t_ign after
+        // spreading outward at R: |phi| is the distance inside the perimeter.
+        const amrex::Real tau = (m_params.ignition.polygon_interior_tau > 0.0)
+                              ? m_params.ignition.polygon_interior_tau
+                              : m_fg.geom.CellSize(0) / R;
+        amrex::Real fuel_before = fire_fuel_load->sum(0);
+        for (amrex::MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.validbox();
+            auto const& p0   = phi_before->const_array(mfi);
+            auto const& p    = fire_phi->const_array(mfi);
+            auto const& at   = fire_arrival_time->array(mfi);
+            auto const& fuel = fire_fuel_load->array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                if (p0(i, j, k) >= 0.0_rt && p(i, j, k) < 0.0_rt) {
+                    const amrex::Real d = -p(i, j, k);
+                    // Arrival times before the simulation start are clamped to
+                    // 0: the field's negative values mean "unburned" everywhere
+                    // in the fire layer (the -1 sentinel), so a negative arrival
+                    // would be overwritten at the first substep. The fuel keeps
+                    // the full burnout, which is what the heat release needs.
+                    at(i, j, k)   = amrex::max(t_ign - d / R, 0.0_rt);
+                    fuel(i, j, k) = fuel(i, j, k) * std::exp(-d / (R * tau));
+                }
+            });
+        }
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Polygon interior state: ros=" << R << " m/s tau=" << tau
+                           << " s, fuel load sum " << fuel_before << " -> " << fire_fuel_load->sum(0)
+                           << " kg/m2 (cell sum)\n";
+        }
+    }
+    if (m_params.fire_debug) {
+        amrex::Print() << "[FIRE DEBUG] Polygon ignition applied from '"
+                       << m_params.ignition.polygon_file << "' ("
+                       << m_params.ignition.polygon_type << ") at t=" << t_ign << " s\n";
     }
 }
 

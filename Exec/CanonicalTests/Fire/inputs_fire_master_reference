@@ -137,6 +137,20 @@ erf.fire.ignition_y = 1000.0
 # Ignition source: circular patch radius [m]
 erf.fire.ignition_r = 30.0
 
+# Ignition from a perimeter polygon (CSV of x y vertices; "polygon" closed or
+# "polyline" open with half-width polyline_width); empty = disabled
+erf.fire.ignition.polygon_file = ""
+erf.fire.ignition.polygon_type = "polygon"
+erf.fire.ignition.polyline_width = 10.0
+# Stamp the polygon at this time [s] so the atmosphere spins up first; 0 = at
+# initialisation (WRF-SFIRE perimeter time)
+erf.fire.ignition.polygon_time = 0.0
+# Interior state behind the perimeter: arrival time polygon_time - d/R and
+# fuel exp(-d/(R tau)) at distance d inside; 0 = whole interior ignites at
+# polygon_time with the fuel intact
+erf.fire.ignition.polygon_interior_ros = 0.0
+erf.fire.ignition.polygon_interior_tau = 0.0
+
 # ============================================================================
 # WIND AND TERRAIN ADJUSTMENT FACTORS
 # ============================================================================
@@ -144,6 +158,11 @@ erf.fire.ignition_r = 30.0
 # Wind measurement reference height [m] (typical MOST: 6.1 m)
 # Fire model extracts wind at this height and adjusts to 10 m canopy height
 erf.fire.wind_ref_ht = 6.1
+# Sample the wind at this height above ground (above the plume) and bring it
+# down to wind_ref_ht with a log profile of roughness wind_sample_z0 (CFBM
+# second interpolation option); 0 samples at wind_ref_ht directly
+erf.fire.wind_sample_ht = 0.0
+erf.fire.wind_sample_z0 = 0.1
 
 # Apply Wind Adjustment Factor (WAF) for canopy screening
 # true: reduce wind for forest canopy using Andrews formula
