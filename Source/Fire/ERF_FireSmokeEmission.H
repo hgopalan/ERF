@@ -21,7 +21,9 @@
  * @param[in]     z_phys_cc           Cell-centre terrain height [m]
  * @param[in]     geom_atm            ATM geometry
  * @param[in]     emission_factor     kg smoke per kg fuel burned [-]
- * @param[in]     heat_of_combustion  J per kg fuel burned [J/kg]
+ * @param[in]     heat_of_combustion  J per kg fuel burned [J/kg]; the caller passes
+ *                                    FireLayer::smoke_heat_per_kg_atm(), which
+ *                                    folds in the heat-flux partition factor
  * @param[in]     smoke_comp          Component index in cc_source for smoke
  * @param[in]     fire_debug          Print debug output if true
  * @param[in]     step                Current step for debug output

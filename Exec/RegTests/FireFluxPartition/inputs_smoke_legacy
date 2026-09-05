@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# Smoke tracer with the legacy partition, one-way: the reference for the smoke checks.
+erf.fire.heat_flux_partition = "legacy"
+erf.fire.smoke_enable = true

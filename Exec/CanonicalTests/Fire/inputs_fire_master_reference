@@ -470,6 +470,16 @@ erf.fire.inject_latent = true
 #         Jimenez y Munoz et al. (2026); latent flux unchanged
 erf.fire.heat_flux_partition = "legacy"
 
+# Passive smoke tracer: a fraction of the fuel burnt released into the first
+# atmospheric layer (Coen 2013, the Community Fire Behavior Model default)
+erf.fire.smoke_enable = false
+# kg of smoke per kg of fuel burnt
+erf.fire.smoke_emission_factor = 0.02
+# Heat per kg of fuel that converts the lagged flux back into fuel burnt [J/kg]
+erf.fire.smoke_heat_of_comb = 1.87e7
+# true: use the fuel model's own heat content instead of smoke_heat_of_comb
+erf.fire.smoke_heat_from_fuel = false
+
 # How the fire tendency enters the cell source once make_sources has rebuilt
 # it for the Runge-Kutta stage
 # "overwrite" (default, legacy) replaces the theta and vapour slots, which

@@ -181,7 +181,7 @@
                 *zpc_to_use,
                 fine_geom,
                 m_fire_layer->get_params().smoke_emission_factor,
-                m_fire_layer->get_params().smoke_heat_of_comb,
+                m_fire_layer->smoke_heat_per_kg_atm(),
                 RhoSmoke_comp,
                 m_fire_layer->get_params().fire_debug,
                 istep[level]);

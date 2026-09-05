@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# Smoke tracer with the fuel model's own heat content (18.608 MJ/kg for the Anderson
+# models) instead of smoke_heat_of_comb (18.7 MJ/kg): emission 1.00494 times smoke_cfbm.
+erf.fire.heat_flux_partition = "cfbm"
+erf.fire.smoke_enable = true
+erf.fire.smoke_heat_from_fuel = true
