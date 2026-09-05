@@ -1,0 +1,3 @@
+FILE = inputs_base
+
+# No partition key: must reproduce inputs_legacy exactly.

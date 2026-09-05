@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# CFBM partition: sensible flux scaled by 1/(1+M_f) = 0.9259 at M_f = 0.08; latent flux unchanged.
+erf.fire.heat_flux_partition = "cfbm"

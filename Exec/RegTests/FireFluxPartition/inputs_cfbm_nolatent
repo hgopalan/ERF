@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# The factor applies to the sensible flux even when no latent flux is injected.
+erf.fire.heat_flux_partition = "cfbm"
+erf.fire.inject_latent = false

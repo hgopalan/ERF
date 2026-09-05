@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# The sensible flux is the full heat release of the dry fuel (the form ERF-Fire has always used).
+erf.fire.heat_flux_partition = "legacy"

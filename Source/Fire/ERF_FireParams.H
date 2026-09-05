@@ -104,6 +104,20 @@ struct FireParams
     //                    (vars_new), fire heat still enters atmosphere at step n+1
     std::string       coupling_type           = "lagged";
     bool              inject_latent           = true;  ///< inject latent heat alongside sensible (WRF-Fire parity)
+    // How the combustion heat release is split between the sensible and the
+    // latent flux handed to the atmosphere.
+    //   "legacy" (default) — the sensible flux is the full heat release of the
+    //                        dry fuel, Q = w h / tau, and the latent flux is
+    //                        derived from it as in WRF-SFIRE (the form in
+    //                        ERF-Fire since the coupling was written).
+    //   "cfbm"             — the sensible flux is scaled by the dry-fuel
+    //                        fraction of the wet fuel mass, 1 / (1 + M_f),
+    //                        Eq. 4 of Jimenez y Munoz et al. (2026, GMD 19,
+    //                        3035), the Community Fire Behavior Model; the
+    //                        latent flux is unchanged (their Eq. 5 is the
+    //                        legacy form). The fire-grid heat flux kept for
+    //                        diagnostics stays the unpartitioned release.
+    std::string       heat_flux_partition     = "legacy";
     // How the fire tendency enters the cell source after make_sources has
     // rebuilt it for the Runge-Kutta stage. "overwrite" (default, legacy)
     // replaces the potential-temperature and vapour slots, which discards any
@@ -530,6 +544,10 @@ struct FireParams
        pp.query("fire_atm_feedback", fire_atm_feedback);
        pp.query("coupling_type", coupling_type);
        pp.query("inject_latent", inject_latent);
+       pp.query("heat_flux_partition", heat_flux_partition);
+       if (heat_flux_partition != "legacy" && heat_flux_partition != "cfbm") {
+           amrex::Abort("erf.fire.heat_flux_partition must be \"legacy\" or \"cfbm\"");
+       }
        pp.query("source_mode", source_mode);
        if (source_mode != "overwrite" && source_mode != "add") {
            amrex::Abort("erf.fire.source_mode must be \"overwrite\" or \"add\"");
@@ -864,6 +882,8 @@ struct FireParams
     bool is_lagged()      const { return coupling_type == "lagged"; }
     bool is_synchronous() const { return coupling_type == "synchronous"; }
     bool injects_flux()   const { return is_lagged() || is_synchronous(); }
+    /// The CFBM partition: sensible flux scaled by the dry-fuel fraction 1 / (1 + M_f).
+    bool cfbm_partition() const { return heat_flux_partition == "cfbm"; }
 };
 
 #endif

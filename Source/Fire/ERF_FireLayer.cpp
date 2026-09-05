@@ -1315,25 +1315,47 @@ void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
                        << fire_heat_flux->max(0) << " W/m2" << std::endl;
     }
 
-    coarsen_fire_flux_to_atm(*m_Q_atm_prev, *fire_heat_flux,
-                             geom_atm, m_fg.geom, m_fg.C);
+    // Fuel moisture seen by the flux partition and the latent flux: the
+    // deck's 1-h value, or the load-weighted mean of the dynamic moisture
+    // map. One value for the whole fire grid, as the latent flux has always
+    // used, so the two fluxes see the same moisture.
+    FuelModelParams fp = get_anderson_fuel_params(m_params.fuel_model_id);
+    const amrex::Real h_fuel_Jkg = fp.heat_content * 2326.0_rt;
+    amrex::Real M_f = m_params.moisture_1hr;
+    if (m_params.moisture_dynamic && fire_fuel_mc) {
+        long nc = fire_fuel_mc->boxArray().numPts();
+        amrex::Real avg1   = (nc > 0) ? fire_fuel_mc->sum(0) / amrex::Real(nc) : m_params.moisture_1hr;
+        amrex::Real avg10  = (nc > 0) ? fire_fuel_mc->sum(1) / amrex::Real(nc) : m_params.moisture_10hr;
+        amrex::Real avg100 = (nc > 0) ? fire_fuel_mc->sum(2) / amrex::Real(nc) : m_params.moisture_100hr;
+        amrex::Real dead_load = fp.w_d1 + fp.w_d10 + fp.w_d100;
+        M_f = (dead_load > 1e-10_rt)
+            ? (fp.w_d1*avg1 + fp.w_d10*avg10 + fp.w_d100*avg100) / dead_load
+            : avg1;
+    }
+
+    // Sensible flux handed to the atmosphere. With the legacy partition it is
+    // the full heat release of the dry fuel on the fire grid; with the CFBM
+    // partition (erf.fire.heat_flux_partition = cfbm) it is scaled by the
+    // dry-fuel fraction of the wet fuel mass, f_dry = 1 / (1 + M_f), Eq. 4 of
+    // Jimenez y Munoz et al. (2026). The fire-grid field itself is left as the
+    // unpartitioned release for the diagnostics and the latent flux below.
+    const amrex::Real f_dry = m_params.cfbm_partition() ? 1.0_rt / (1.0_rt + M_f) : 1.0_rt;
+    if (m_params.cfbm_partition()) {
+        amrex::MultiFab Q_sens(fire_heat_flux->boxArray(), fire_heat_flux->DistributionMap(), 1, 0);
+        amrex::MultiFab::Copy(Q_sens, *fire_heat_flux, 0, 0, 1, 0);
+        Q_sens.mult(f_dry, 0, 1, 0);
+        coarsen_fire_flux_to_atm(*m_Q_atm_prev, Q_sens, geom_atm, m_fg.geom, m_fg.C);
+    } else {
+        coarsen_fire_flux_to_atm(*m_Q_atm_prev, *fire_heat_flux,
+                                 geom_atm, m_fg.geom, m_fg.C);
+    }
+    if (m_params.fire_debug) {
+        amrex::Print() << "[FIRE DEBUG] Sensible flux to the atmosphere: max " << m_Q_atm_prev->max(0)
+                       << " W/m2 (partition=" << m_params.heat_flux_partition
+                       << ", f_dry_fuel=" << f_dry << ", fuel moisture=" << M_f << ")" << std::endl;
+    }
 
     if (m_params.inject_latent && m_Q_lat_atm_prev) {
-        FuelModelParams fp = get_anderson_fuel_params(m_params.fuel_model_id);
-        amrex::Real h_fuel_Jkg = fp.heat_content * 2326.0_rt;
-
-        amrex::Real M_f = m_params.moisture_1hr;
-        if (m_params.moisture_dynamic && fire_fuel_mc) {
-            long nc = fire_fuel_mc->boxArray().numPts();
-            amrex::Real avg1   = (nc > 0) ? fire_fuel_mc->sum(0) / amrex::Real(nc) : m_params.moisture_1hr;
-            amrex::Real avg10  = (nc > 0) ? fire_fuel_mc->sum(1) / amrex::Real(nc) : m_params.moisture_10hr;
-            amrex::Real avg100 = (nc > 0) ? fire_fuel_mc->sum(2) / amrex::Real(nc) : m_params.moisture_100hr;
-            amrex::Real dead_load = fp.w_d1 + fp.w_d10 + fp.w_d100;
-            M_f = (dead_load > 1e-10_rt)
-                ? (fp.w_d1*avg1 + fp.w_d10*avg10 + fp.w_d100*avg100) / dead_load
-                : avg1;
-        }
-
         compute_fire_latent_flux(*fire_latent_flux, *fire_heat_flux, M_f, h_fuel_Jkg);
         coarsen_fire_flux_to_atm(*m_Q_lat_atm_prev, *fire_latent_flux,
                                  geom_atm, m_fg.geom, m_fg.C);
