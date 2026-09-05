@@ -12,7 +12,9 @@ signed-distance reinitialization.
 - `erf.fire.levelset.gradient`: `upwind` (first order everywhere), `weno5z`
   (HJ-WENO5-Z everywhere) and the default `weno5z_front` (WENO within
   `weno_band_cells` = 4 cells of the front, first order elsewhere, the
-  WRF-Fire / CFBM hybrid); `run_compare.sh` runs the three decks
+  WRF-Fire / CFBM hybrid); `run_compare.sh` runs the three decks and
+  `inputs_fire_levelset_lowvisc`, the hybrid with the two-value artificial
+  viscosity (`eps_visc_front` = 0.1 within two cells of the front)
 - CFL-based subcycling within one atmospheric step
 - Sussman reinitialization of the signed-distance property
 

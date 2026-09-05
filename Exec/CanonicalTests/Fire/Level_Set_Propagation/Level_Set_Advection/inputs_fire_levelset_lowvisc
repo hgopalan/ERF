@@ -1,0 +1,77 @@
+# The default hybrid derivatives with the two-value artificial viscosity
+# of WRF-Fire / CFBM: 0.1 within two cells of the front, blending to the
+# background 0.4 over the next two (Jimenez y Munoz et al. 2026 lower the
+# near-front value to 0.1 to bring the WENO5 front onto the theoretical
+# one). run_compare.sh runs this deck with the other three.
+#
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 2000.0 2000.0 500.0
+amr.n_cell = 40 40 50
+
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.max_grid_size = 100
+amr.max_grid_size_z = 50
+
+zlo.type = "surface_layer"
+zhi.type = "SlipWall"
+
+erf.most.z0 = 0.1
+erf.molec_diff_type = "ConstantAlpha"
+erf.les_type = "None"
+erf.rans_type = "None"
+erf.init_type = "uniform"
+erf.theta_ref = 300.0
+erf.geostrophic_wind_x = 5.0
+erf.geostrophic_wind_y = 0.0
+
+erf.fixed_dt = 1.0
+stop_time = 600.0
+max_step = 1000
+
+erf.sum_interval = 50
+erf.v = 1
+amr.v = 1
+erf.check_int = -1
+erf.plot_int = 100
+erf.plot_vars = theta qv u v w
+erf.fire_plot_file = plt_fire_levelset_lowvisc_
+erf.fire_plot_int = 100
+
+erf.fire.enable = true
+erf.fire.fire_debug = true
+erf.fire.grid_ratio = 5
+erf.fire.fuel_model_id = 1
+erf.fire.moisture_1hr = 0.08
+erf.fire.moisture_10hr = 0.10
+erf.fire.moisture_100hr = 0.12
+erf.fire.moisture_dynamic = false
+erf.fire.ignition_x = 1000.0
+erf.fire.ignition_y = 1000.0
+erf.fire.ignition_r = 30.0
+erf.fire.wind_ref_ht = 6.1
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = true
+erf.fire.use_terrain_wind = false
+erf.fire.ros_model = "rothermel"
+erf.fire.farsite.cfl_fire = 0.5
+erf.fire.coupling_type = "passive"
+erf.fire.write_fire_stats_csv = true
+erf.fire.flame_temp_method = "byram_radiant"
+erf.fire.compute_flame_tilt = false
+erf.fire.fire_stats_csv_file = "fire_stats_levelset_baseline.csv"
+
+# ---------------------------------------------------------------------------
+# Level-set propagation
+# ---------------------------------------------------------------------------
+erf.fire.propagation_method = "levelset"
+erf.fire.levelset.cfl = 0.4              # subcycle CFL; must be > 0
+erf.fire.levelset.eps_visc = 0.4         # artificial viscosity on the Laplacian
+erf.fire.levelset.reinit_every = 5        # reinitialize every N subcycles; must be >= 1
+erf.fire.levelset.reinit_iters = 100      # must converge over the burn; see header
+erf.fire.levelset.gradient = weno5z_front
+erf.fire.levelset.eps_visc_front = 0.1
+erf.fire.levelset.visc_front_cells = 2
+erf.fire.levelset.visc_transition_cells = 2.0
+erf.fire.levelset.reinit_dtau = -1.0     # <= 0 selects 0.5*min(dx,dy)

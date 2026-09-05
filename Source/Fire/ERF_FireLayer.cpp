@@ -811,8 +811,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             // hybrid scheme is a number of fire cells, phi is in metres here.
             fire_levelset::LevelSetGradient ls_grad;
             ls_grad.scheme = m_params.levelset_grad_scheme;
-            ls_grad.band   = m_params.levelset_weno_band_cells
-                           * std::min(m_fg.geom.CellSize()[0], m_fg.geom.CellSize()[1]);
+            const amrex::Real h_fire = std::min(m_fg.geom.CellSize()[0], m_fg.geom.CellSize()[1]);
+            ls_grad.band   = m_params.levelset_weno_band_cells * h_fire;
+            // Two-value artificial viscosity: the near-front value inside
+            // visc_front_cells, blended to eps_visc over visc_transition_cells.
+            ls_grad.eps_visc_front = m_params.levelset_eps_visc_front;
+            ls_grad.visc_d0 = m_params.levelset_visc_front_cells * h_fire;
+            ls_grad.visc_d1 = ls_grad.visc_d0 + m_params.levelset_visc_transition_cells * h_fire;
 
             if (hybrid_directional) {
                 // Both members are rebuilt along the front normal at every RK

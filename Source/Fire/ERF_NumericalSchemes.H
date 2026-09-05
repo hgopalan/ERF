@@ -63,7 +63,8 @@ inline constexpr int LEVELSET_GRAD_WENO5Z       = 1;   ///< HJ-WENO5-Z everywher
 inline constexpr int LEVELSET_GRAD_WENO5Z_FRONT = 2;   ///< HJ-WENO5-Z within `band` of the front, first order elsewhere
 
 /**
- * @brief Which one-sided derivatives feed the Godunov Hamiltonian
+ * @brief Which one-sided derivatives feed the Godunov Hamiltonian, and the
+ *        artificial viscosity near the front
  *
  * The WRF-Fire / CFBM default (Munoz-Esparza et al. 2018; Jimenez y Munoz
  * et al. 2026) is the hybrid: fifth-order WENO where the level set is
@@ -71,10 +72,33 @@ inline constexpr int LEVELSET_GRAD_WENO5Z_FRONT = 2;   ///< HJ-WENO5-Z within `b
  * first-order difference elsewhere. `band` is the half-width of that
  * region in the units of phi (metres on the signed-distance path); a
  * non-positive band with the hybrid scheme means WENO everywhere.
+ *
+ * WRF-Fire also carries two artificial viscosities, one within a few cells
+ * of the front (fire_viscosity_bg, fire_viscosity_ngp) and one elsewhere
+ * (fire_viscosity), blended over a fraction of the advection band
+ * (fire_viscosity_band). `eps_visc_front` is the near-front value; the
+ * coefficient is eps_visc_front for |phi| <= visc_d0, the background value
+ * for |phi| >= visc_d1, and linear in between. A negative eps_visc_front
+ * keeps the single background value everywhere.
  */
 struct LevelSetGradient {
-    int         scheme = LEVELSET_GRAD_UPWIND1;
-    amrex::Real band   = -1.0;
+    int         scheme         = LEVELSET_GRAD_UPWIND1;
+    amrex::Real band           = -1.0;
+    amrex::Real eps_visc_front = -1.0;
+    amrex::Real visc_d0        = 0.0;
+    amrex::Real visc_d1        = 0.0;
+
+    /// Artificial viscosity at a cell with level-set value phi, given the
+    /// background coefficient eps_bg
+    AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+    amrex::Real eps_at(amrex::Real phi, amrex::Real eps_bg) const noexcept {
+        if (eps_visc_front < amrex::Real(0.0)) { return eps_bg; }
+        const amrex::Real a = std::abs(phi);
+        if (a <= visc_d0) { return eps_visc_front; }
+        if (a >= visc_d1 || visc_d1 <= visc_d0) { return eps_bg; }
+        const amrex::Real w = (a - visc_d0) / (visc_d1 - visc_d0);
+        return eps_visc_front + w * (eps_bg - eps_visc_front);
+    }
 };
 
 /**

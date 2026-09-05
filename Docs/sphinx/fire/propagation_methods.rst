@@ -90,6 +90,15 @@ and Δφ is the Laplacian.
    * - ``erf.fire.levelset.weno_band_cells``
      - 4
      - Half-width of the front band, in fire cells, that uses WENO with "weno5z_front"
+   * - ``erf.fire.levelset.eps_visc_front``
+     - −1 (off)
+     - Artificial viscosity within ``visc_front_cells`` of the front (WRF-Fire ``fire_viscosity_bg``); negative keeps ``eps_visc`` everywhere
+   * - ``erf.fire.levelset.visc_front_cells``
+     - 2
+     - Half-width, in fire cells, of the near-front viscosity band (WRF-Fire ``fire_viscosity_ngp``)
+   * - ``erf.fire.levelset.visc_transition_cells``
+     - 2
+     - Width, in fire cells, of the linear blend from ``eps_visc_front`` to ``eps_visc``
 
 
 When to use which method

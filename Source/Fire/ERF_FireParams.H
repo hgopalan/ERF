@@ -75,6 +75,9 @@ struct FireParams
     std::string       levelset_gradient       = "weno5z_front"; ///< One-sided derivatives: "upwind" (first order), "weno5z" (HJ-WENO5-Z everywhere) or "weno5z_front" (WENO within weno_band_cells of the front, first order elsewhere; the WRF-Fire default)
     int               levelset_grad_scheme    = 2;     ///< levelset_gradient resolved: 0 upwind, 1 weno5z, 2 weno5z_front
     int               levelset_weno_band_cells = 4;    ///< Half-width in fire cells of the front band that uses WENO with "weno5z_front" (WRF-Fire fire_lsm_band_ngp)
+    amrex::Real       levelset_eps_visc_front  = -1.0; ///< Artificial viscosity within visc_front_cells of the front (WRF-Fire fire_viscosity_bg); < 0 uses eps_visc everywhere
+    int               levelset_visc_front_cells = 2;   ///< Half-width in fire cells of the near-front viscosity band (WRF-Fire fire_viscosity_ngp)
+    amrex::Real       levelset_visc_transition_cells = 2.0; ///< Width in fire cells of the linear blend from eps_visc_front to eps_visc beyond that band (WRF-Fire: fire_viscosity_band x fire_lsm_band_ngp = 0.5 x 4)
     // Extrapolate the level set into non-burnable cells inside every stencil
     // (gradient, Laplacian, front normal, reinitialisation), so a masked wall
     // is a zero-gradient boundary of the distance function rather than a
@@ -501,6 +504,9 @@ struct FireParams
        pp.query("levelset.wall_extrapolate", levelset_wall_extrapolate);
        pp.query("levelset.gradient", levelset_gradient);
        pp.query("levelset.weno_band_cells", levelset_weno_band_cells);
+       pp.query("levelset.eps_visc_front", levelset_eps_visc_front);
+       pp.query("levelset.visc_front_cells", levelset_visc_front_cells);
+       pp.query("levelset.visc_transition_cells", levelset_visc_transition_cells);
        if (levelset_gradient == "upwind") {
            levelset_grad_scheme = 0;
        } else if (levelset_gradient == "weno5z") {

@@ -3999,6 +3999,16 @@ Propagation
 | **erf.fire.levelset.weno_band_cells**          | Half-width of the front band, in fire cells, that uses     | Integer > 0                    | 4                      |
 |                                                | WENO with "weno5z_front"                                   |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.levelset.eps_visc_front**           | Artificial viscosity within visc_front_cells of the front  | Real                           | -1.0 (single value)    |
+|                                                | (WRF-Fire fire_viscosity_bg); negative keeps eps_visc      |                                |                        |
+|                                                | everywhere                                                 |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.levelset.visc_front_cells**         | Half-width, in fire cells, of the near-front viscosity     | Integer >= 0                   | 2                      |
+|                                                | band (WRF-Fire fire_viscosity_ngp)                         |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.levelset.visc_transition_cells**    | Width, in fire cells, of the linear blend from             | Real >= 0                      | 2.0                    |
+|                                                | eps_visc_front to eps_visc beyond that band                |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.reinit_every**             | Reinitialise every N subcycles                             | Integer > 0                    | 5                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.reinit_iters**             | Sussman iterations per reinitialisation                    | Integer > 0                    | 10                     |

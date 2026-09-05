@@ -194,6 +194,9 @@ erf.fire.directional_ros = false
 erf.fire.levelset.wall_extrapolate = false
 erf.fire.levelset.gradient = weno5z_front       # "upwind" (first order everywhere), "weno5z" (HJ-WENO5-Z everywhere), "weno5z_front" (WENO in the front band; WRF-Fire hybrid)
 erf.fire.levelset.weno_band_cells = 4           # half-width of that front band in fire cells
+erf.fire.levelset.eps_visc_front = -1.0         # near-front artificial viscosity (WRF-Fire fire_viscosity_bg); < 0 keeps eps_visc everywhere
+erf.fire.levelset.visc_front_cells = 2          # half-width of the near-front viscosity band in fire cells (fire_viscosity_ngp)
+erf.fire.levelset.visc_transition_cells = 2.0   # width of the linear blend from eps_visc_front to eps_visc, in fire cells
 
 # ============================================================================
 # RATE-OF-SPREAD MODEL SELECTION
