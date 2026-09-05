@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Projection-based directional rate, for comparison of the shapes.
+erf.fire.directional_ros = true

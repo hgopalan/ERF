@@ -782,7 +782,23 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     apply_crown_fire_ros();
 
     int n_substeps = 0;
-    
+
+    if (m_params.fire_debug && m_params.levelset_ellipse && m_params.propagation_method == "levelset") {
+        // Shape of the spread ellipse at the strongest midflame wind on the grid.
+        amrex::MultiFab umag(m_fg.ba, m_fg.dm, 1, 0);
+        for (amrex::MFIter mfi(umag); mfi.isValid(); ++mfi) {
+            auto const& w = fire_wind_eff->const_array(mfi);
+            auto const& m = umag.array(mfi);
+            amrex::ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                m(i, j, k) = std::sqrt(w(i, j, k, 0) * w(i, j, k, 0) + w(i, j, k, 1) * w(i, j, k, 1));
+            });
+        }
+        const amrex::Real U = umag.max(0);
+        const SpreadEllipse e = spread_ellipse(1.0, U, m_params.levelset_ellipse_lw, m_params.levelset_ellipse_lw_max);
+        amrex::Print() << "[FIRE DEBUG] Spread ellipse at max midflame wind " << U << " m/s: LB=" << e.LB
+                       << " HB=" << e.HB << " flank/head=" << e.a << " back/head=" << (e.b - e.c) << std::endl;
+    }
+
     if (m_params.propagation_method == "levelset") {
         // --- Level-set path ---
         // CFL-based subcycling (same structure as FARSITE)
@@ -869,6 +885,14 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                                 m_params.levelset_eps_visc,
                                                 dir_state, fire_nonburnable.get(), wall_extrap,
                                                 ls_grad);
+            } else if (m_params.levelset_ellipse) {
+                // Huygens ellipse: the model's rate is the head rate and the
+                // normal speed follows the ellipse set by the midflame wind.
+                advect_levelset_ellipse_rk3(*fire_phi, *fire_wind_eff, *fire_ros,
+                                            *fire_slopes, m_fg.geom, dt_ls,
+                                            m_params.levelset_eps_visc,
+                                            m_params.levelset_ellipse_lw, m_params.levelset_ellipse_lw_max,
+                                            fire_nonburnable.get(), wall_extrap, ls_grad);
             } else {
                 fire_levelset::advect_levelset_weno5z_rk3(*fire_phi, *fire_wind_eff,
                                                 *fire_ros, m_fg.geom, dt_ls,

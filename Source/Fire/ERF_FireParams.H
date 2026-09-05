@@ -94,6 +94,16 @@ struct FireParams
     // one-sided difference into the wall dictates and the flank along it runs
     // about 20% fast. Off by default; needs a mask source to do anything.
     bool              levelset_wall_extrapolate = false;
+    // Wind-driven spread ellipse on the level-set path (Huygens principle as
+    // in FARSITE, ELMFIRE, Prometheus, Cell2Fire): the normal speed is the
+    // support function of an ellipse with Anderson's length-to-width ratio
+    // from the midflame wind and Alexander's head-to-back ratio, head at the
+    // model's rate. Off by default; incompatible with directional_ros, the
+    // hybrid directional path and balbi.directional, which shape the front
+    // from the model instead. See ERF_LevelSetEllipse.H.
+    bool              levelset_ellipse         = false;  ///< erf.fire.levelset.ellipse
+    amrex::Real       levelset_ellipse_lw      = 0.0;    ///< Fixed length-to-width ratio; 0 = Anderson (1983) from the wind
+    amrex::Real       levelset_ellipse_lw_max  = 8.0;    ///< Cap on the length-to-width ratio (Anderson's fit saturates at 8)
 
     // Terrain file for fine-grid terrain data
     std::string       terrain_file_name       = "";   ///< Path to terrain file for fine-grid interpolation
@@ -556,6 +566,17 @@ struct FireParams
        pp.query("levelset.reinit_band_m", levelset_reinit_band_m);
        pp.query("levelset.reinit_dtau", levelset_reinit_dtau);
        pp.query("levelset.wall_extrapolate", levelset_wall_extrapolate);
+       pp.query("levelset.ellipse",        levelset_ellipse);
+       pp.query("levelset.ellipse_lw",     levelset_ellipse_lw);
+       pp.query("levelset.ellipse_lw_max", levelset_ellipse_lw_max);
+       if (levelset_ellipse) {
+           if (levelset_ellipse_lw < 0.0 || levelset_ellipse_lw_max < 1.0) {
+               amrex::Abort("erf.fire.levelset.ellipse_lw must be >= 0 and ellipse_lw_max >= 1");
+           }
+           if (directional_ros || balbi.directional) {
+               amrex::Abort("erf.fire.levelset.ellipse cannot be combined with directional_ros or balbi.directional");
+           }
+       }
        pp.query("levelset.gradient", levelset_gradient);
        pp.query("levelset.weno_band_cells", levelset_weno_band_cells);
        pp.query("levelset.eps_visc_front", levelset_eps_visc_front);

@@ -1,0 +1,3 @@
+FILE = inputs_base
+
+# Isotropic rate: the front grows as a disc at the head rate (historical).

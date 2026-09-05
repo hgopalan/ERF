@@ -157,6 +157,7 @@ target_sources(${erf_exe_name}
     ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/Kessler/ERF_GTestKesslerPhysicalProperties.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/Morrison/ERF_GTestMorrisonPhysicalProperties.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFarsiteSpreadAccumulation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestLevelSetEllipse.cpp
 )
 if(ERF_ENABLE_NETCDF)
   target_sources(${erf_exe_name} PRIVATE

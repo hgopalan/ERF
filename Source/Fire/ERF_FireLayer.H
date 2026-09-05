@@ -24,6 +24,7 @@
 #include <ERF_FuelBlending.H>
 #include <ERF_IgnitionSchedule.H>
 #include <ERF_PolygonIgnition.H>
+#include <ERF_LevelSetEllipse.H>
 #include <ERF_FireAcceleration.H>
 // Phase 13A: Per-fuel wind height
 #include <ERF_FuelWindHeight.H>

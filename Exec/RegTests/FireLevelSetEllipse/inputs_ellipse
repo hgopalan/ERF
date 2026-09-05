@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Huygens ellipse with Anderson's length-to-width ratio from the midflame wind.
+erf.fire.levelset.ellipse = true
