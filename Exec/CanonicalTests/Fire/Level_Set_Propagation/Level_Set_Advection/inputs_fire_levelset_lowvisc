@@ -1,8 +1,9 @@
-# The default hybrid derivatives with the two-value artificial viscosity
-# of WRF-Fire / CFBM: 0.1 within two cells of the front, blending to the
-# background 0.4 over the next two (Jimenez y Munoz et al. 2026 lower the
-# near-front value to 0.1 to bring the WENO5 front onto the theoretical
-# one). run_compare.sh runs this deck with the other three.
+# The defaults: the hybrid derivatives with the two-value artificial
+# viscosity of WRF-Fire / CFBM, 0.1 within two cells of the front blending
+# to the background 0.4 over the next two (Jimenez y Munoz et al. 2026
+# lower the near-front value to 0.1 to bring the WENO5 front onto the
+# theoretical one). The other three decks pin a single viscosity.
+# run_compare.sh runs this deck with them.
 #
 geometry.prob_lo = 0.0 0.0 0.0
 geometry.prob_hi = 2000.0 2000.0 500.0

@@ -111,16 +111,17 @@ WRF-Fire and CFBM also carry two artificial viscosities, one near the front
 and one elsewhere, both 0.4 by default; in the line-ignition test of
 Jimenez y Munoz et al. (2026) lowering the near-front value to 0.1 brings
 the WENO5 front onto the theoretical one. The same option is
-:cpp:`erf.fire.levelset.eps_visc_front` (WRF-Fire ``fire_viscosity_bg``):
-when set, it is the coefficient within
+:cpp:`erf.fire.levelset.eps_visc_front` (WRF-Fire ``fire_viscosity_bg``),
+0.1 by default as in the paper: it is the coefficient within
 :cpp:`erf.fire.levelset.visc_front_cells` (default 2, ``fire_viscosity_ngp``)
-fire cells of the front, blending linearly to :cpp:`eps_visc` over the next
-:cpp:`erf.fire.levelset.visc_transition_cells` (default 2, WRF-Fire's
-``fire_viscosity_band`` times the advection band). Left negative, the
-default, a single :cpp:`eps_visc` applies everywhere and nothing changes.
-On the 5 m grid of the WUI wildland case a near-front value of 0.1 leaves
-the head rate unchanged and widens the flanks by about 7% (4.96 ha burned
-at 1200 s against 4.83 ha): the viscosity acts where the front is curved. The Laplacian term is an artificial
+fire cells of the front, blending linearly to :cpp:`eps_visc` (0.4) over
+the next :cpp:`erf.fire.levelset.visc_transition_cells` (default 2,
+WRF-Fire's ``fire_viscosity_band`` times the advection band). A negative
+value keeps the single :cpp:`eps_visc` everywhere. On the 5 m grid of the
+WUI wildland case the near-front value of 0.1 leaves the head rate
+unchanged and widens the flanks by about 7% against the single value
+(4.96 ha burned at 1200 s against 4.83 ha): the viscosity acts where the
+front is curved. The Laplacian term is an artificial
 viscosity with coefficient :cpp:`erf.fire.levelset.eps_visc` (default 0.4)
 that keeps the front smooth at the grid scale. When terrain slopes are
 available, :math:`|\nabla \phi|` is projected onto the terrain surface so that

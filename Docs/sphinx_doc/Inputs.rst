@@ -3999,7 +3999,7 @@ Propagation
 | **erf.fire.levelset.weno_band_cells**          | Half-width of the front band, in fire cells, that uses     | Integer > 0                    | 4                      |
 |                                                | WENO with "weno5z_front"                                   |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.levelset.eps_visc_front**           | Artificial viscosity within visc_front_cells of the front  | Real                           | -1.0 (single value)    |
+| **erf.fire.levelset.eps_visc_front**           | Artificial viscosity within visc_front_cells of the front  | Real                           | 0.1                    |
 |                                                | (WRF-Fire fire_viscosity_bg); negative keeps eps_visc      |                                |                        |
 |                                                | everywhere                                                 |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
