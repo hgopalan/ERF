@@ -568,6 +568,18 @@ Reference: US DOE (2023) Critical Materials Assessment. REE mass fractions in mi
 
 ---
 
+### Phase 19/20 Plotfile Catalog (Fixed)
+
+`dust_plotfile_var_names()` listed 20 names while `dust_plotfile_ncomp()` and
+`WriteDustPlotfile` filled 21 components: the Phase 19 `dust_source_map` slot
+(component 18) had no name, so the header labelled it `dust_site_id`, labelled
+the site index as the CM flux and left the CM flux unnamed. Fixed by adding
+`dust_source_map` to the catalog between the MSHA fields and `dust_site_id`.
+Found while rewriting `Docs/sphinx_doc/theory/DustModule.rst` (2026-09-04),
+which now lists the 21 fields in order.
+
+---
+
 ## Build Rules (apply to every phase)
 
 1. New `.cpp` file: add to **both** `CMake/BuildERFExe.cmake` dust block **AND** `Source/Dust/Make.package`.
