@@ -281,8 +281,9 @@ Where each feature is exercised:
    * - Terrain slopes and terrain wind corrections
      - canonical ``Core_Physics/ROS_Slope_Effects``, ``Terrain_Wind_Coupling``; ``Unit_Tests/test_terrain_projection.py``
 
-Not yet covered by any test: restart of the spotting and crown-fire state,
-and the fire-dust coupling.
+Not yet covered by any test: restart of the spotting and crown-fire state.
+The fire-dust coupling has its own cases under ``Exec/CanonicalTests/Hazard``
+(:ref:`sec:DustFire`).
 
 References
 ----------
