@@ -1,0 +1,13 @@
+FILE = inputs_base
+
+# Uniform grass with the same seeded spotting as the subdivision variants and
+# no houses: the reference the delay through the subdivision is read against,
+# so that the only difference between the two runs is the houses.
+erf.fire_plot_file = "plt_fire_wildland_spotting_"
+erf.fire.fire_stats_csv_file = "fire_stats_wildland_spotting.csv"
+erf.fire.spotting.enable = true
+erf.fire.spotting.random_seed = 7
+erf.fire.spotting.P_base = 1.0e-4
+erf.fire.spotting.spotting_interval = 2  # 1 s
+erf.fire.spotting.I_B_min = 100.0
+erf.fire.spotting.terminal_velocity = 8.0

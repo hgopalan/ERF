@@ -55,6 +55,7 @@ with a comment as a reference deck.
    spatial_fuel
    multi_ignition
    fire_coupling
+   wui_validation
    fire_acceleration
    fire_spotting_crown
    fire_output
@@ -280,6 +281,8 @@ Where each feature is exercised:
      - canonical ``Heat_Flux_Diagnostics``
    * - Terrain slopes and terrain wind corrections
      - canonical ``Core_Physics/ROS_Slope_Effects``, ``Terrain_Wind_Coupling``; ``Unit_Tests/test_terrain_projection.py``
+   * - The WUI features together: structure mask, wall extrapolation, open-column wind, exposure, spotting, immersed buildings with heat coupling
+     - canonical ``WUI_Subdivision`` (:ref:`sec:WUIValidation`)
 
 Not yet covered by any test: restart of the spotting and crown-fire state.
 The fire-dust coupling has its own cases under ``Exec/CanonicalTests/Hazard``

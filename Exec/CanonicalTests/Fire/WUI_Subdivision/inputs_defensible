@@ -1,0 +1,25 @@
+FILE = inputs_base
+
+# The subdivision with defensible space: a 30 m fuel break along the wildland
+# edge (x = 480-510 m) and 10 m cleared around every house (which removes the
+# lanes), otherwise the
+# subdivision variant: the fire can only reach the houses by spotting.
+erf.fire_plot_file = "plt_fire_defensible_"
+erf.fire.fire_stats_csv_file = "fire_stats_defensible.csv"
+erf.fire.fuel_map.file = "fuel_map_defensible.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.rothermel_per_fuel = true
+erf.fire.fuel_map.nonburnable_codes = 0
+erf.fire.structures.enable = true
+erf.fire.structures.file = "houses_10m_96x48.txt"
+erf.fire.levelset.wall_extrapolate = true
+erf.fire.exposure.enable = true
+erf.fire.exposure.interval = 20         # 10 s
+erf.fire.exposure.ring = 1
+erf.fire.exposure.file = "exposure_defensible.csv"
+erf.fire.spotting.enable = true
+erf.fire.spotting.random_seed = 7
+erf.fire.spotting.P_base = 1.0e-4
+erf.fire.spotting.spotting_interval = 2  # 1 s
+erf.fire.spotting.I_B_min = 100.0
+erf.fire.spotting.terminal_velocity = 8.0
