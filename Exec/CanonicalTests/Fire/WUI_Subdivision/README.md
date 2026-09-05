@@ -72,29 +72,37 @@ future work.
 ## Reference results
 
 Two ranks, 2100 s, level set with the default hybrid WENO5-Z/first-order
-derivatives (`erf.fire.levelset.gradient = weno5z_front`, 2026-09-05):
+derivatives and the near-front artificial viscosity of 0.1
+(`erf.fire.levelset.gradient = weno5z_front`, `eps_visc_front = 0.1`,
+2026-09-05):
 
 | variant            | x = 780 m at [s] | burned cells | houses reached | peak intensity [kW/m] | max heat load [MJ/m²] | ember landings |
 |--------------------|-----------------:|-------------:|---------------:|----------------------:|----------------------:|---------------:|
-| wildland           |             1613 |         4076 |              - |                     - |                     - |              - |
-| wildland_spotting  |             1181 |         5856 |              - |                     - |                     - |              - |
-| subdivision        |             1352 |         4916 |          12/24 |                   773 |                  3.11 |             37 |
-| defensible         |            never |         1660 |           0/24 |                     0 |                  0.00 |              0 |
-| coupled            |             1855 |         5069 |          15/24 |                   773 |                  3.11 |             11 |
+| wildland           |             1610 |         4352 |              - |                     - |                     - |              - |
+| wildland_spotting  |             1255 |         5986 |              - |                     - |                     - |              - |
+| subdivision        |             1575 |         4837 |          12/24 |                   773 |                  3.11 |             30 |
+| defensible         |            never |         1752 |           0/24 |                     0 |                  0.00 |              0 |
+| coupled            |             1618 |         5464 |          15/24 |                   773 |                  3.11 |             10 |
 
-The wildland head moves at 0.249 m/s between x = 400 and 470 m against
+The wildland head moves at 0.250 m/s between x = 400 and 470 m against
 Rothermel's 0.2501 m/s for FM1 at 6% moisture and the 300 ft/min wind cap;
 the fuel consumed over its burned area is within 1.5% of the initial load.
 No footprint cell burns or loses fuel in any variant. The subdivision's first
-contacts are at 314, 607 and 846 s for the three rows; the coupled run's at
-392, 695 and 1014 s, with a plume of 20 m/s at the end. `wui_spread.png` in
+contacts are at 383, 669 and 953 s for the three rows; the coupled run's at
+371, 659 and 832 s, with a plume of 20 m/s at the end. `wui_spread.png` in
 the docs figures shows the four arrival-time maps.
 
-With first-order derivatives everywhere (`gradient = upwind`) the same runs
-gave x = 780 m at 1612 / 1176 / 1403 / never / 1441 s and 5242 / 6676 /
-5470 / 2210 / 5981 burned cells: the head rate is the same and the flanks
-are wider, so the first-order fire burns about a fifth more area and, in
-the coupled run, gets through the lanes sooner on that wider front.
+With a single viscosity of 0.4 everywhere (`eps_visc_front = -1`) the same
+runs gave x = 780 m at 1613 / 1181 / 1352 / never / 1855 s and 4352 / 5856
+/ 4916 / 1660 / 5069 burned cells: the head rate is the same and the lower
+near-front viscosity lets the flanks spread a little more (about 7% more
+area in the wildland run). With first-order derivatives everywhere
+(`gradient = upwind`) they gave 1612 / 1176 / 1403 / never / 1441 s and
+5242 / 6676 / 5470 / 2210 / 5981 cells: the flanks are wider still, so the
+first-order fire burns about a fifth more area and, in the coupled run,
+gets through the lanes sooner on that wider front. The spotting runs
+differ between the three by more than the flanks alone because the ember
+launches are sampled from the burned cells.
 
 ## What this case found
 

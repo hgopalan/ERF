@@ -71,8 +71,11 @@ fuel-code strip:
 ## Reference results
 
 Burned cells after 200 s from a 50-cell ignition disk, and the head-fire rate of
-spread, with the default hybrid WENO5-Z/first-order level set
-(`erf.fire.levelset.gradient = weno5z_front`, 2026-09-05). The first-order
+spread, with the default hybrid WENO5-Z/first-order level set and the
+near-front artificial viscosity of 0.1 (`erf.fire.levelset.gradient =
+weno5z_front`, `eps_visc_front = 0.1`, 2026-09-05; the single viscosity
+differs only in `balbi2020_directional` 120, `hybrid_all_directional` 120
+and `hybrid_wind` 180). The first-order
 scheme that preceded it burned more cells in every row (for example
 `rothermel_isotropic` 132 against 112, `balbi2020_isotropic` 232 against
 216) at the same head rate; the identities and the direction-dependence
@@ -85,17 +88,17 @@ ordering below are unchanged.
 | `balbi2009_isotropic` | 172 | 0.390 | - |
 | `balbi2009_directional` | 80 | 0.390 | - |
 | `balbi2020_isotropic` | 216 | 0.514 | - |
-| `balbi2020_directional` | 120 | 0.514 | - |
+| `balbi2020_directional` | 122 | 0.514 | - |
 | `rothermel_fuelmap` | 112 | 0.250 | - |
 | `hybrid_none` | 112 | 0.250 | 0 |
 | `hybrid_all` | 216 | 0.514 | 6400 |
 | `hybrid_region` | 136 | 0.514 | 3840 |
 | `hybrid_fuel` | 120 | 0.329 | 3840 |
 | `hybrid_none_directional` | 74 | 0.250 | 0 |
-| `hybrid_all_directional` | 120 | 0.514 | 6400 |
+| `hybrid_all_directional` | 122 | 0.514 | 6400 |
 | `hybrid_region_directional` | 90 | 0.514 | 3840 |
 | `hybrid_wind_off` | 112 | 0.250 | 0 |
-| `hybrid_wind` | 180 | 0.389 | 6400 |
+| `hybrid_wind` | 188 | 0.389 | 6400 |
 | `macarthur_isotropic` | 680 | 1.015 | - |
 | `macarthur_directional` | 154 | 1.015 | - |
 | `cheney_gould_isotropic` | 88 | 0.180 | - |

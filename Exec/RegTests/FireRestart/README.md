@@ -52,18 +52,20 @@ constant molecular diffusion and no LES, a 100 m ignition disc. Three rows:
 
 ## Reference results
 
-Level set with the default hybrid WENO5-Z/first-order derivatives
-(`erf.fire.levelset.gradient = weno5z_front`, 2026-09-05); the rows that
-use the level set burned 134 / 124 / 237 / 164 / 78 cells with the
-first-order scheme that preceded it.
+Level set with the default hybrid WENO5-Z/first-order derivatives and the
+near-front artificial viscosity of 0.1 (`erf.fire.levelset.gradient =
+weno5z_front`, `eps_visc_front = 0.1`, 2026-09-05); with a single
+viscosity of 0.4 the exposure and spotting rows burned 104 and 204 cells,
+and with the first-order scheme that preceded both the level-set rows
+burned 134 / 124 / 237 / 164 / 78.
 
 | row | straight cells | straight ROS (m/s) | restarted cells | restarted ROS (m/s) | match |
 |---|---|---|---|---|---|
 | `farsite` | 70 | 0.250 | 70 | 0.250 | yes |
 | `levelset` | 120 | 0.479 | 120 | 0.479 | yes |
 | `coupled` | 74 | 0.250 | 74 | 0.250 | yes |
-| `exposure` | 104 | 0.479 | 104 | 0.479 | yes |
-| `spotting` | 204 | 0.479 | 204 | 0.479 | yes |
+| `exposure` | 106 | 0.479 | 106 | 0.479 | yes |
+| `spotting` | 194 | 0.479 | 194 | 0.479 | yes |
 | `crown` | 148 | 0.250 | 148 | 0.250 | yes |
 | `dust` | 74 | 0.250 | 74 | 0.250 | yes |
 

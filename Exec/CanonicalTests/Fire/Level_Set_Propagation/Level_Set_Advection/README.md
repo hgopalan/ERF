@@ -14,7 +14,8 @@ signed-distance reinitialization.
   `weno_band_cells` = 4 cells of the front, first order elsewhere, the
   WRF-Fire / CFBM hybrid); `run_compare.sh` runs the three decks and
   `inputs_fire_levelset_lowvisc`, the hybrid with the two-value artificial
-  viscosity (`eps_visc_front` = 0.1 within two cells of the front)
+  viscosity (`eps_visc_front` = 0.1 within two cells of the front, the
+  default since 2026-09-05; the other decks pin a single viscosity)
 - CFL-based subcycling within one atmospheric step
 - Sussman reinitialization of the signed-distance property
 
