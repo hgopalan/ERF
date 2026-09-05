@@ -568,6 +568,24 @@ Reference: US DOE (2023) Critical Materials Assessment. REE mass fractions in mi
 
 ---
 
+### Checkpoint and Restart (Added)
+
+Nothing on the dust grid was checkpointed: a restarted run started the
+deposition accumulator, PM averages, MSHA dose and shift count, suppression
+coverage, PHREEQC timing and super-particles from zero, and the layer's own
+step and time from zero. `DustLayer::checkpoint_fields()` now lists every
+field that carries across steps (written as `Dust*` MultiFabs under
+`Level_0`), `write/read_checkpoint_state()` carry the counters in
+`DustState`, and `checkpoint/restart_particles()` the particle container in
+`DustParticles`; `ERF::ReadCheckpointFileDust()` restores them after
+`initialize()`. Two details: the dust step runs after the dycore of the same
+step, so the previous step's emission flux and u* are live state and are in
+the list; and the ghost cells are restored without a boundary fill because
+the kernels read stale edge ghosts. Verified bit-for-bit by the `dust` row of
+`Exec/RegTests/FireRestart` on one and four ranks and by the DustParticles
+case (2026-09-04). Found on the way, not fixed: the dust results depend on
+the number of ranks along a box edge of the deposition grid.
+
 ### Phase 19/20 Plotfile Catalog (Fixed)
 
 `dust_plotfile_var_names()` listed 20 names while `dust_plotfile_ncomp()` and

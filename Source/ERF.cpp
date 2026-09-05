@@ -1607,6 +1607,12 @@ ERF::InitData_post ()
                     ba2d, DistributionMap(0), 1, amrex::IntVect(1, 1, 0));
                 m_dust_flux_atm[0]->setVal(0.0);
             }
+
+            // On a restart the fields initialize() just built from the inputs are
+            // replaced by the checkpointed ones, and the layer's counters resume.
+            if (!restart_chkfile.empty()) {
+                ReadCheckpointFileDust();
+            }
         }
     }
 #endif

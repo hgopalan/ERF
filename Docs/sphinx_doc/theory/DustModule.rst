@@ -292,15 +292,32 @@ pieces.
        ``FireSmokeDustCoupled``
    * - Everything together
      - ``Dust/DustIntegration``
+   * - Checkpoint and restart, with the fire coupling
+     - ``RegTests/FireRestart`` (the ``dust`` row)
+
+Checkpoint and restart
+----------------------
+
+Every field of the dust grid that carries from one step to the next is
+written to the checkpoint as a ``Dust*`` MultiFab under ``Level_0``: the
+surface state that PHREEQC, the suppression decay and the fire coupling
+evolve, the deposition accumulator, the PM averages and flags, the MSHA
+dose, TWA and shift state, the STEL average, the surface concentration the
+next step reads, and the super-particle source map. The layer's counters
+(its step and time, the PHREEQC read and write times, the MSHA shift
+number, the last plotfile step) go to ``DustState`` and the super-particles
+to ``DustParticles``. On restart the layer is initialised from the inputs
+and rasters as usual and the checkpointed values are read over it, so a
+checkpoint without dust fields, or one from an older build, still restarts.
+The emission flux and friction velocity of the last step are among the
+fields, because the dust step runs after the dycore of the same step and the
+first dycore after a restart still uses them. A restarted run reproduces the
+uninterrupted one bit for bit on one rank and on four; the ``dust`` row of
+``Exec/RegTests/FireRestart`` checks this with the fire coupling on.
 
 Limitations
 -----------
 
-- **No checkpoint of the dust state.** Nothing on the dust grid is written to
-  or read from a checkpoint, so a restarted run starts the deposition
-  accumulator, the 24-hour PM averages, the MSHA dose, the suppression
-  coverage and the fired blast events from scratch, while the dust already in
-  the atmosphere is restored with the conserved state.
 - The NetCDF branches of the raster and PHREEQC readers abort; use ESRI ASCII
   and CSV. :cpp:`erf.dust.surface_map_file` is read but not consumed.
 - With :cpp:`erf.dust.transport_bins_separately` only bin 0 is returned to the

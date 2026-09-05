@@ -638,6 +638,26 @@ ERF::WriteCheckpointFile () const
         }
     }
 #endif
+
+#ifdef ERF_USE_DUST
+    // Everything on the dust grid that carries from one step to the next (see
+    // DustLayer::checkpoint_fields), the counters behind it, and the
+    // super-particles. Before this nothing of the dust layer was written, so a
+    // restarted run started its deposition, PM averages, MSHA dose, suppression
+    // coverage and shift count from zero.
+    if (m_DustLayer) {
+        for (auto& nf : m_DustLayer->checkpoint_fields()) {
+            VisMF::Write(*nf.second, MultiFabFileFullPrefix(0, checkpointname, "Level_", nf.first));
+        }
+        m_DustLayer->write_checkpoint_state(checkpointname);
+#ifdef ERF_USE_PARTICLES
+        m_DustLayer->checkpoint_particles(checkpointname);
+#endif
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "[DUST] Dust state written to checkpoint " << checkpointname << "\n";
+        }
+    }
+#endif
     // Write zlevels to its own directory and read it as well, similar to bdy data
     if (ParallelDescriptor::IOProcessor()) {
         std::string ZLevelsFileName(checkpointname + "/zlevels");
@@ -1838,3 +1858,44 @@ ERF::ReadCheckpointFileFire ()
     restore_optional(m_fire_layer->get_peak_intensity_mut(), "FirePeakIntensity");
     restore_optional(m_fire_layer->get_ember_landings_mut(), "FireEmberLandings");
 }
+
+#ifdef ERF_USE_DUST
+/**
+ * Restore the dust layer from the checkpoint. Called after DustLayer::initialize()
+ * has allocated the fields from the inputs and rasters, so anything the
+ * checkpoint lacks (an older checkpoint, or a field this build does not have)
+ * keeps its initialized value.
+ */
+void
+ERF::ReadCheckpointFileDust ()
+{
+    if (!m_DustLayer) { return; }
+
+    const std::string probe = restart_chkfile + "/Level_0/DustDepositionRate_H";
+    if (!amrex::FileExists(probe)) {
+        amrex::Print() << "[DUST] No dust state found in checkpoint; starting the dust"
+                       << " layer from its initial values.\n";
+        return;
+    }
+    amrex::Print() << "[DUST] Restoring dust state from checkpoint " << restart_chkfile << "\n";
+
+    // The ghost cells come back from the file as they were, with no boundary
+    // fill afterwards: the dust kernels read ghost cells at box edges that the
+    // run does not refill every step, so a fill here would hand the restarted
+    // run different edge values from the uninterrupted one on more than one
+    // rank.
+    for (auto& nf : m_DustLayer->checkpoint_fields()) {
+        const std::string header = restart_chkfile + "/Level_0/" + nf.first + "_H";
+        if (!amrex::FileExists(header)) {
+            amrex::Print() << "[DUST] Checkpoint has no " << nf.first
+                           << "; keeping the initialized values.\n";
+            continue;
+        }
+        VisMF::Read(*nf.second, amrex::MultiFabFileFullPrefix(0, restart_chkfile, "Level_", nf.first));
+    }
+    m_DustLayer->read_checkpoint_state(restart_chkfile, istep[0], t_new[0]);
+#ifdef ERF_USE_PARTICLES
+    m_DustLayer->restart_particles(restart_chkfile);
+#endif
+}
+#endif

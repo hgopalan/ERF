@@ -37,6 +37,14 @@ constant molecular diffusion and no LES, a 100 m ignition disc. Three rows:
 - `coupled`: Rothermel on the level-set path with lagged heat coupling, so
   the fire heats the atmosphere and the flux buffer that the first restarted
   step injects has to come back from the checkpoint.
+- `dust`: the `coupled` row with the dust model on top and coupled to the
+  fire (crust removal, outflow wind, lofting), with every piece of dust state
+  that lives across steps exercised: the deposition accumulator, the 24-hour
+  PM averages, the MSHA dose with 60 s shifts, the STEL running average,
+  suppression coverage decaying from a raster, a blast before and one after
+  the checkpoint, a haul road, the critical-material budget and the PHREEQC
+  feedback files. Besides the fire numbers, the last line of every dust CSV
+  written by the restarted run must equal the straight run's.
 
 ## Reference results
 
@@ -45,6 +53,7 @@ constant molecular diffusion and no LES, a 100 m ignition disc. Three rows:
 | `farsite` | 70 | 0.250 | 70 | 0.250 | yes |
 | `levelset` | 134 | 0.479 | 134 | 0.479 | yes |
 | `coupled` | 78 | 0.250 | 78 | 0.250 | yes |
+| `dust` | 78 | 0.250 | 78 | 0.250 | yes |
 
 ## What this suite found
 
@@ -86,6 +95,32 @@ buffer was not written, so the first restarted step injected no heat at all.
 That gave a small persistent offset in the `coupled` row (0.01 K in theta,
 0.001 m/s in wind at the surface after 200 steps on the ABL case). The
 buffers are now written as `FireQAtmPrev` and `FireQLatAtmPrev` and restored.
+
+**Nothing on the dust grid was checkpointed.** The dust layer's deposition
+accumulator, 24-hour PM averages, MSHA dose and shift count, suppression
+coverage, PHREEQC timing and super-particles all restarted from zero, and its
+own step and time counters restarted from zero as well, so shifts and PHREEQC
+intervals were measured from the restart. The `dust` row added them: the
+persisting fields are written as `Dust*` MultiFabs, the counters as
+`DustState`, and the particles as `DustParticles`; with them the row restarts
+to the last printed digit of every CSV and bit-for-bit in the dust plotfile,
+on one rank and on four. Two details mattered. The dust step runs after the
+dycore of the same step, so the first dycore after a restart injects the
+emission flux and deposits with the friction velocity of the last step before
+the checkpoint; both are checkpointed, and without the friction velocity the
+restarted run deposited nothing on its first step and carried a 5% offset in
+the accumulator. And the ghost cells come back from the file without a
+boundary fill, because the dust kernels read ghost cells at box edges that
+the run itself does not refill: filling them on restart changed the edge
+values on four ranks.
+
+**The dust layer depends on the domain decomposition.** Found on the way and
+not fixed here: the straight `dust` row on four ranks (boxes of 12 and 8
+cells) differs from the same row on one rank in a strip of cells along a box
+edge in the deposition grid, by about 0.1%. The restart reproduces whichever
+of the two it was started from, so the row passes on either count, but the
+dust emission or deposition kernels read ghost cells across box boundaries
+that are not filled every step.
 
 Restart of the spotting diagnostics and the crown-fire state is not covered
 here.

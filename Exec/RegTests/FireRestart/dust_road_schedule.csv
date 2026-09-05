@@ -1,0 +1,2 @@
+# road_name  x_lo_m  y_lo_m  x_hi_m  y_hi_m  road_width_m  vehicle_weight_t  silt_pct  vmt_per_h  start_s  end_s
+haul_1  300.0  400.0  1700.0  460.0  20.0  40.0  8.0  10.0  0.0  -1
