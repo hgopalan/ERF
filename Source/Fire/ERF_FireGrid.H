@@ -58,8 +58,8 @@ FireGrid create_fire_grid(const amrex::BoxArray& ba_atm,
  * non-periodic face of the domain by copying the nearest interior value.
  *
  * FillBoundary alone leaves those cells untouched, so with an inflow-outflow
- * atmosphere (the fire grid inherits its periodicity) the WENO stencil of the
- * level set read whatever the allocator had left there. Whether that was
+ * atmosphere (the fire grid inherits its periodicity) the gradient stencil of
+ * the level set read whatever the allocator had left there. Whether that was
  * benign depended on the box layout: one box per rank happened to run, two
  * boxes on a rank blew the level set up at the inflow face within three steps.
  * Every fire-grid exchange goes through here.

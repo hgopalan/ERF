@@ -1,6 +1,6 @@
 # Level-set advection with reinitialization disabled.
 #
-# Isolates the WENO5-Z + SSP-RK3 advection from the signed-distance
+# Isolates the Godunov upwind + SSP-RK3 advection from the signed-distance
 # reinitialization, so a regression can be attributed to one or the other.
 #
 # Expected result (measured, 1 rank, 600 s):

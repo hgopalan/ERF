@@ -1,4 +1,4 @@
-# Level-set fire-front propagation (WENO5-Z + SSP-RK3, signed distance).
+# Level-set fire-front propagation (Godunov upwind + SSP-RK3, signed distance).
 #
 # Exercises the PDE-based alternative to the default FARSITE Lagrangian path.
 # phi is a true signed distance in metres for this path: negative inside the
@@ -14,7 +14,7 @@
 # Deterministic: repeat runs agree exactly, and the case is clean under
 # amrex.init_snan=1 amrex.fpe_trap_invalid=1. It was neither until the fire
 # Geometry was given the atmospheric periodicity; before that every
-# FillBoundary on the fire grid was a no-op and the WENO5-Z stencil read
+# FillBoundary on the fire grid was a no-op and the gradient stencil read
 # uninitialized memory three cells past the box edge.
 #
 # Configuration:

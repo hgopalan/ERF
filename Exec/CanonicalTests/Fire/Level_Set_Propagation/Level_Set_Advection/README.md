@@ -1,13 +1,13 @@
 # Level_Set_Advection
 
 ## Purpose
-Exercises the level-set fire-front solver: WENO5-Z gradient reconstruction, a
+Exercises the level-set fire-front solver: the Godunov upwind gradient, a
 three-stage SSP-RK3 step subcycled on its own CFL condition, and Sussman
 signed-distance reinitialization.
 
 ## Physics / Model Features Exercised
 - Level-set advection of the fire front (`propagation_method = "levelset"`)
-- WENO5-Z reconstruction with artificial viscosity on the Laplacian
+- Godunov upwind gradient with artificial viscosity on the Laplacian
 - CFL-based subcycling within one atmospheric step
 - Sussman reinitialization of the signed-distance property
 
@@ -59,7 +59,7 @@ Neither was true before the fire `Geometry` was given the atmospheric
 periodicity. `create_fire_grid()` hard-coded `{false, false, false}`, so every
 `FillBoundary` on the fire grid was a no-op: the fire grid is a single box
 spanning the domain, which makes all of its ghost cells domain-boundary ghosts.
-The WENO5-Z stencil reaches three cells past the box edge and was reading
+The stage fields carry three ghost cells past the box edge and were reading
 whatever the allocator supplied, so the burned area varied run to run — 64, 82,
 106, 118 and 126 cells at 600 s across five identical runs.
 
@@ -96,4 +96,3 @@ front: 32 cells before and after, at every iteration count tested from 5 to 80.
 ## References
 - Osher & Sethian 1988, Fronts propagating with curvature-dependent speed.
 - Sussman, Smereka & Osher 1994, A level set approach for computing solutions to incompressible two-phase flow.
-- Borges et al. 2008, An improved weighted essentially non-oscillatory scheme for hyperbolic conservation laws (WENO-Z).

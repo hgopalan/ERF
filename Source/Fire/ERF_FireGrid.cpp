@@ -58,8 +58,8 @@ create_fire_grid(const BoxArray& ba_atm,
     // non-periodic silently disabled every FillBoundary on the fire grid: the
     // fire grid is one box spanning the domain, so all of its ghost cells are
     // domain-boundary ghosts, and a non-periodic Periodicity() leaves them
-    // untouched. The WENO5-Z level-set stencil reaches three cells past the box
-    // edge and was reading whatever the allocator happened to supply, which is
+    // untouched. The level-set stage fields carry three ghost cells past the box
+    // edge and were reading whatever the allocator happened to supply, which is
     // what made the level-set path differ from run to run. z is a dummy 1 m slab
     // and stays non-periodic.
     Geometry geom_fire_2d(fire_domain, prob_domain_2d,
