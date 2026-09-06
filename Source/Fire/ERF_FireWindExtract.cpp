@@ -1,4 +1,5 @@
 #include <ERF_FireWindExtract.H>
+#include <ERF_FuelModels.H>
 
 
 using namespace amrex;
@@ -267,10 +268,13 @@ void fill_fire_wind_from_interpolation(
             Real z_ref_cell = z_ref;  // default: global fallback
             if (fuel_model_mf != nullptr && d_fcwh != nullptr) {
                 // Per-fuel height lookup
-                int fuel_code = static_cast<int>(fuel_model(i_f, j_f, 0));
-                // Clamp to valid range [1, nfuelcats]
-                fuel_code = amrex::max(1, amrex::min(fuel_code, nfuelcats));
-                z_ref_cell = d_fcwh[fuel_code];
+                const int fuel_code = static_cast<int>(fuel_model(i_f, j_f, 0));
+                // Table slot of the code (Anderson at its own code, Scott-Burgan
+                // above 13), unknown codes taking slot 1, clamped to the table.
+                int slot = fuel_slot(fuel_code);
+                if (slot < 1) slot = 1;
+                slot = amrex::min(slot, nfuelcats);
+                z_ref_cell = d_fcwh[slot];
             }
 
             // Height actually sampled and the log-law factor that brings the

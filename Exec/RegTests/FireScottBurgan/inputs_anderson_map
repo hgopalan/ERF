@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# The crosswalked map written out by hand in Anderson codes, the reference for the crosswalk deck.
+erf.fire.fuel_map.file = "fuel_map_anderson.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.fuel_map.nonburnable_codes = 0
+erf.fire.rothermel_per_fuel = true
+erf.fire.fuel_model_id = 1

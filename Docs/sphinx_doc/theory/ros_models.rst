@@ -607,3 +607,42 @@ References
 - Andrews, P.L. (1986). BEHAVE: Fire Behavior Prediction and Fuel Modeling System. USDA Forest Service General Technical Report INT-194.
 
 - Mandel, J. et al. (2011). A wildland fire model with data assimilation. *Mathematics and Computers in Simulation*, 79(3), 584-606.
+
+Fuel model sets
+---------------
+
+The rate-of-spread models take their fuel parameters from one of two sets,
+selected with :cpp:`erf.fire.fuel_map.fuel_set`. The default,
+``"anderson13"``, is the historical Anderson (1982) 13, addressed by codes
+1 to 13 with anything else falling to model 1. ``"scott_burgan40"`` adds
+the Scott and Burgan (2005) 40, the set LANDFIRE's FBFM40 rasters use:
+codes 101 to 109 (GR grass), 121 to 124 (GS grass-shrub), 141 to 149 (SH
+shrub), 161 to 165 (TU timber-understory), 181 to 189 (TL timber litter)
+and 201 to 204 (SB slash-blowdown), with 91 to 99 non-burnable (urban,
+snow, agriculture, water, barren). A fuel map or :cpp:`erf.fire.fuel_model_id`
+may then carry either set's codes; 0 and 91 to 99 are non-burnable
+without listing them in :cpp:`erf.fire.fuel_map.nonburnable_codes`. The
+loads, surface-area-to-volume ratios, depths, moistures of extinction and
+heat contents are the published table (``ERF_FuelModels.H``), and the
+dynamic models (those with a live herbaceous load) move their cured
+herbaceous load to the 1-h dead class at :cpp:`erf.fire.moisture_live`,
+fully cured at 30% and not at all at 120%, the BEHAVE and FARSITE
+transfer; the 1-h surface-area-to-volume ratio is kept for the transferred
+load, since the single-class Rothermel path carries one dead ratio. Every
+per-fuel table (Rothermel, Balbi, wind height, burnout time) is indexed by
+a slot with the Anderson models at their own codes, so the historical
+lookups are unchanged; the Scott-Burgan models take the wind heights and
+the burnout times of their crosswalked Anderson model.
+
+:cpp:`erf.fire.fuel_map.sb40_crosswalk = true` instead translates the 40
+to the 13 when the map is read, with the commonly used crosswalk (GR1 and
+GR2 to 1; GR3 to GR9 to 3; GS1 to GS3 to 2, GS4 to 4; SH1 and SH6 to 5,
+SH2 to SH4 and SH8 to 6, SH5, SH7 and SH9 to 4; TU1 to 8, TU2 to TU5 to
+10; TL1 to TL4 and TL7 to 8, TL5, TL6, TL8 and TL9 to 9; SB1 and SB2 to
+11, SB3 to 12, SB4 to 13), which is how the Community Fire Behavior Model
+runs LANDFIRE data (Jiménez y Muñoz et al., 2026).
+:cpp:`erf.fire.fuel_map.load_from_map = true` starts each cell with its own
+model's fuel load instead of the uniform model's, which matters as soon as
+the map mixes light and heavy fuels. ``Exec/RegTests/FireScottBurgan``
+checks the table, the per-cell loads, the non-burnable codes and the
+crosswalk.

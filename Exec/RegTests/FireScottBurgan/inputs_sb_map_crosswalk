@@ -1,0 +1,10 @@
+FILE = inputs_base
+
+# The same map through the crosswalk to the Anderson 13 (GR2 -> 1, SH2 -> 6, TL3 -> 8, NB -> 0),
+# as the Community Fire Behavior Model does: must reproduce inputs_anderson_map line for line.
+erf.fire.fuel_map.fuel_set = "scott_burgan40"
+erf.fire.fuel_map.sb40_crosswalk = true
+erf.fire.fuel_map.file = "fuel_map_sb40.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.rothermel_per_fuel = true
+erf.fire.fuel_model_id = 102

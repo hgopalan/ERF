@@ -6,6 +6,7 @@
 #include <cmath>
 #include <vector>
 #include <ERF_Rothermel.H>
+#include <ERF_FuelModels.H>
 #include <ERF_FireParams.H>
 #include <ERF_MoistureExtinction.H>
 #include <ERF_LevelSetAdvection.H>
@@ -160,7 +161,7 @@ inline constexpr amrex::Real BALBI_MAX_WIND_SPEED_SQ =
     BALBI_MAX_WIND_SPEED_MS * BALBI_MAX_WIND_SPEED_MS;
 
 /// Balbi table size: Anderson FBFM13 codes 1–13 plus index 0 (non-burnable).
-inline constexpr int BALBI_TABLE_SIZE = 14;
+inline constexpr int BALBI_TABLE_SIZE = FUEL_SLOT_COUNT;   ///< 0 non-burnable, 1-13 Anderson, 14-53 Scott-Burgan
 
 /// |∇φ| below which the front normal is taken as undefined and the isotropic
 /// wind and slope magnitudes are used instead.
@@ -315,7 +316,9 @@ BalbiComputed compute_balbi_params(
 inline std::vector<BalbiComputed> build_fuel_balbi_table(
     const FireParams::BalbiParams& bp,
     amrex::Real M_f,
-    amrex::Real T_amb = -1.0)
+    amrex::Real T_amb = -1.0,
+    int fuel_set = 0,
+    amrex::Real M_live = -1.0)
 {
     std::vector<BalbiComputed> table(BALBI_TABLE_SIZE);
 
@@ -323,8 +326,10 @@ inline std::vector<BalbiComputed> build_fuel_balbi_table(
     table[0] = BalbiComputed{};
     table[0].v_b = 1.0;
 
-    for (int code = 1; code < BALBI_TABLE_SIZE; ++code) {
-        table[code] = compute_balbi_params(get_anderson_fuel_params(code), bp, M_f, T_amb);
+    // Slots 1-13 hold the Anderson models at their own codes; 14-53 the Scott-Burgan models.
+    for (int slot = 1; slot < BALBI_TABLE_SIZE; ++slot) {
+        table[slot] = compute_balbi_params(get_fuel_params(fuel_code_from_slot(slot), (slot >= 14) ? 1 : fuel_set, M_live),
+                                           bp, M_f, T_amb);
     }
 
     return table;
@@ -544,6 +549,8 @@ struct BalbiFieldInputs
     const amrex::MultiFab* fuel_mc      = nullptr;  ///< Fuel moisture state [fraction]
     FuelModelParams        fp{};                    ///< Uniform fuel, for per-cell rebuilds
     amrex::Real            M_f          = 0.0;      ///< Fuel moisture [fraction]
+    int                    fuel_set     = 0;        ///< Fuel model set of the codes (ERF_FuelModels.H)
+    amrex::Real            M_live       = -1.0;     ///< Live herbaceous moisture for the Scott-Burgan curing
 };
 
 /**
@@ -567,16 +574,20 @@ BalbiComputed balbi_state_at_cell(int i, int j, int k,
                                   const amrex::Array4<const amrex::Real>& surf_temp,
                                   bool use_surf_temp,
                                   const amrex::Array4<const amrex::Real>& fuel_mc,
-                                  bool use_cell_moisture) noexcept
+                                  bool use_cell_moisture,
+                                  int fuel_set = 0,
+                                  amrex::Real M_live = -1.0) noexcept
 {
-    int fuel_code = -1;
+    // fuel_code is the raw code of the cell, idx its slot in the table (-1 outside).
+    int fuel_code = -1, idx = -1;
     if (use_table) {
         const int code = static_cast<int>(fuel_model(i, j, k));
-        if (code >= 0 && code < tbl_sz) fuel_code = code;
+        const int t = fuel_table_index(code, fuel_set);
+        if (t >= 0 && t < tbl_sz) { idx = t; fuel_code = (t == 0) ? 0 : code; }
     }
 
     if (use_surf_temp || use_cell_moisture) {
-        if (fuel_code == 0) {
+        if (idx == 0) {
             BalbiComputed bc{};
             bc.v_b = 1.0;
             return bc;  // non-burnable
@@ -590,12 +601,12 @@ BalbiComputed balbi_state_at_cell(int i, int j, int k,
                                 amrex::min(fuel_mc(i, j, k, 0), amrex::Real(0.40)));
         }
         const FuelModelParams fp = (fuel_code > 0)
-                                 ? get_anderson_fuel_params(fuel_code)
+                                 ? get_fuel_params(fuel_code, fuel_set, M_live)
                                  : fp_uniform;
         return compute_balbi_params(fp, bp, M_cell, T_amb);
     }
 
-    return (fuel_code >= 0) ? tbl[fuel_code] : bc_default;
+    return (idx >= 0) ? tbl[idx] : bc_default;
 }
 
 /**
@@ -639,6 +650,8 @@ inline void fill_balbi_ros(
 
     const BalbiComputed*  tbl        = in.table;
     const int             tbl_sz     = in.table_size;
+    const int             fuel_set   = in.fuel_set;
+    const amrex::Real     M_live     = in.M_live;
     const FuelModelParams fp_uniform = in.fp;
     const amrex::Real     M_f        = in.M_f;
 
@@ -683,7 +696,8 @@ inline void fill_balbi_ros(
                                                          fuel_model, use_table,
                                                          tbl, tbl_sz,
                                                          surf_temp, use_surf_temp,
-                                                         fuel_mc, use_cell_mc);
+                                                         fuel_mc, use_cell_mc,
+                                                         fuel_set, M_live);
 
             const amrex::Real vz_extra = use_heat_flux
                                        ? balbi_induced_velocity(heat_flux(i, j, k), bp)
@@ -750,6 +764,8 @@ inline void fill_balbi_ros_directional(
 
     const BalbiComputed*  tbl        = in.table;
     const int             tbl_sz     = in.table_size;
+    const int             fuel_set   = in.fuel_set;
+    const amrex::Real     M_live     = in.M_live;
     const FuelModelParams fp_uniform = in.fp;
     const amrex::Real     M_f        = in.M_f;
 
@@ -816,7 +832,8 @@ inline void fill_balbi_ros_directional(
                                                          fuel_model, use_table,
                                                          tbl, tbl_sz,
                                                          surf_temp, use_surf_temp,
-                                                         fuel_mc, use_cell_mc);
+                                                         fuel_mc, use_cell_mc,
+                                                         fuel_set, M_live);
 
             const amrex::Real vz_extra = use_heat_flux
                                        ? balbi_induced_velocity(heat_flux(i, j, k), bp)

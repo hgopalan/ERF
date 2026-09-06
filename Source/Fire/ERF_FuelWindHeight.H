@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <AMReX_REAL.H>
+#include <ERF_FuelModels.H>
 
 /**
  * @file ERF_FuelWindHeight.H
@@ -45,16 +46,18 @@ inline std::vector<amrex::Real> build_fcwh_table(
     amrex::Real global_z_ref,
     bool use_per_fuel = false)
 {
-    std::vector<amrex::Real> fcwh(14, 0.0);
-    
+    // Sized for every fuel slot (1-13 Anderson, 14-53 Scott-Burgan); the
+    // Scott-Burgan models take the same heights as the Anderson ones.
+    std::vector<amrex::Real> fcwh(FUEL_SLOT_COUNT, 0.0);
+
     if (use_per_fuel) {
         // WRF-SFIRE defaults: all fuel models use 6.096 m (20 ft)
-        for (int i = 1; i <= 13; ++i) {
+        for (int i = 1; i < FUEL_SLOT_COUNT; ++i) {
             fcwh[i] = 6.096;
         }
     } else {
         // Uniform: all entries use global_z_ref
-        for (int i = 1; i <= 13; ++i) {
+        for (int i = 1; i < FUEL_SLOT_COUNT; ++i) {
             fcwh[i] = global_z_ref;
         }
     }

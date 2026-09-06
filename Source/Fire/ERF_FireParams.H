@@ -6,6 +6,7 @@
 #include <ERF_FireAcceleration.H>
 #include <string>
 #include <vector>
+#include <ERF_FuelModels.H>
 
 /**
  * @file ERF_FireParams.H
@@ -233,6 +234,19 @@ struct FireParams
         /// Scott-Burgan set). Empty by default, in which case an unknown code
         /// falls through to fuel model 1 in the Rothermel table as before.
         std::vector<int> nonburnable_codes;
+        // Fuel model set (see ERF_FuelModels.H):
+        //   "anderson13"     (default) the Anderson 13 only; codes outside 1-13 fall to model 1
+        //   "scott_burgan40" the Scott and Burgan 40 (LANDFIRE FBFM40 codes 101-204) alongside
+        //                    the 13, natively; 0 and 91-99 are non-burnable without listing them
+        std::string fuel_set = "anderson13";
+        /// With scott_burgan40: translate the 40 to the Anderson 13 at load (the CFBM way)
+        bool sb40_crosswalk = false;
+        /// Take each cell's initial fuel load from its own model instead of the uniform one
+        bool load_from_map = false;
+        /// Set id for the kernels: Scott-Burgan semantics only when native (no crosswalk)
+        int  fuel_set_id() const { return (fuel_set == "scott_burgan40" && !sb40_crosswalk) ? 1 : 0; }
+        /// The Scott-Burgan set is in use in either mode (non-burnable 0 and 91-99)
+        bool sb40_active() const { return fuel_set == "scott_burgan40"; }
     } fuel_map;
 
     // Phase 11: Multi-ignition schedule parameters.
@@ -828,6 +842,23 @@ struct FireParams
        pp.query("structures.min_height", structures.min_height);
        pp.query("structures.wind_open_columns", structures.wind_open_columns);
        pp.queryarr("fuel_map.nonburnable_codes", fuel_map.nonburnable_codes);
+       pp.query("fuel_map.fuel_set",       fuel_map.fuel_set);
+       pp.query("fuel_map.sb40_crosswalk", fuel_map.sb40_crosswalk);
+       pp.query("fuel_map.load_from_map",  fuel_map.load_from_map);
+       if (fuel_map.fuel_set != "anderson13" && fuel_map.fuel_set != "scott_burgan40") {
+           amrex::Abort("erf.fire.fuel_map.fuel_set must be \"anderson13\" or \"scott_burgan40\"");
+       }
+       if (fuel_map.sb40_crosswalk && fuel_map.fuel_set != "scott_burgan40") {
+           amrex::Abort("erf.fire.fuel_map.sb40_crosswalk needs fuel_map.fuel_set = scott_burgan40");
+       }
+       if (fuel_map.fuel_set == "scott_burgan40") {
+           const bool ok13 = (fuel_model_id >= 1 && fuel_model_id <= 13);
+           const bool ok40 = (fuel_slot(fuel_model_id) >= 14);
+           if (!ok13 && !ok40) {
+               amrex::Abort("erf.fire.fuel_model_id must be an Anderson (1-13) or Scott-Burgan (101-204) code with fuel_set = scott_burgan40");
+           }
+           if (fuel_map.sb40_crosswalk) { fuel_model_id = sb40_to_anderson(fuel_model_id); }
+       }
        pp.query("firebreak.use_mask", firebreak_use_mask);
        if (structures.enable) {
            if (structures.file.empty()) { structures.file = hybrid.structure_file; }
