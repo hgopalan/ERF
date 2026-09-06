@@ -36,7 +36,7 @@ TEST(FuelMoistureStick, RelaxesToSurfaceWithTheClassLag)
     // approach from below, surface ahead of the core while the profile is still developing
     EXPECT_GT(avg[10], 0.05); EXPECT_LT(avg[10], 0.20);
     EXPECT_GT(surf_1h, core_1h);
-    EXPECT_NEAR(avg.back(), 0.20, 1e-6);
+    EXPECT_NEAR(avg.back(), 0.20, 1e-4);            // 0.15 exp(-100/10) = 7e-6 is still left
     // e-folding of the remaining deficit between 20 h and 40 h (first mode only left)
     const amrex::Real d1 = 0.20 - avg[400 - 1], d2 = 0.20 - avg[800 - 1];
     const amrex::Real tau_fit = 20.0 / std::log(d1 / d2);
