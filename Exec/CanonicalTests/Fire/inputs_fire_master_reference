@@ -112,6 +112,15 @@ erf.fire.moisture_live = 0.60
 # 0.0 = no precipitation
 erf.fire.precip_rate_mm_hr = 0.0
 
+# Dead-class update with moisture_dynamic: "timelag" (default, one time constant
+# per class) or "stick" (radial diffusion in a cylindrical stick per class, the
+# Nelson 2000 framework, lag-calibrated diffusivity; shells checkpointed)
+erf.fire.moisture_model = "timelag"
+erf.fire.stick.n_shells = 6
+erf.fire.stick.radius_cm = 0.15 0.635 2.5    # 1-h, 10-h, 100-h [cm]
+erf.fire.stick.rain_surface_moisture = 0.35
+erf.fire.stick.diffusivity_scale = 1.0
+
 # ============================================================================
 # FUEL MOISTURE: DYNAMIC MOISTURE (Phase 4)
 # ============================================================================

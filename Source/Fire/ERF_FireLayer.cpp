@@ -1173,19 +1173,54 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
     FuelModelParams fp = uniform_fuel_params();
     Real precip_mm_hr = m_params.precip_rate_mm_hr;
 
+    // Stick model: allocate the shells on first use, every shell at the
+    // class's current moisture (a restart restores them afterwards, before
+    // the first advance, through get_stick_mc_mut()).
+    const bool use_stick = (m_params.moisture_model == "stick");
+    const int  n_sh      = m_params.stick.n_shells;
+    if (use_stick && !fire_stick_mc) {
+        allocate_stick_mc();
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Fuel moisture stick model: " << n_sh << " shells, radii "
+                           << m_params.stick.radius_cm[0] << " " << m_params.stick.radius_cm[1] << " "
+                           << m_params.stick.radius_cm[2] << " cm, diffusivities "
+                           << stick_diffusivity(m_params.stick.radius_cm[0], FuelMoistureConst::TAU_1HR) << " "
+                           << stick_diffusivity(m_params.stick.radius_cm[1], FuelMoistureConst::TAU_10HR) << " "
+                           << stick_diffusivity(m_params.stick.radius_cm[2], FuelMoistureConst::TAU_100HR)
+                           << " cm2/h (x " << m_params.stick.diffusivity_scale << ")\n";
+        }
+    }
+    const Real r1 = m_params.stick.radius_cm[0], r10 = m_params.stick.radius_cm[1], r100 = m_params.stick.radius_cm[2];
+    const Real rain_ms = m_params.stick.rain_surface_moisture, dscale = m_params.stick.diffusivity_scale;
+
     for (MFIter mfi(*fire_fuel_mc); mfi.isValid(); ++mfi) {
         Array4<Real> mc   = fire_fuel_mc->array(mfi);
         Array4<Real> mext = fire_mext->array(mfi);
         Array4<const Real> T_f  = fire_surface_temp->const_array(mfi);
         Array4<const Real> RH_f = fire_surface_rh->const_array(mfi);
+        Array4<Real> st;
+        if (use_stick) { st = fire_stick_mc->array(mfi); }
         amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv_f) {
             int i = iv_f[0], j = iv_f[1];
             Real T_C = T_f(i,j,0) - 273.15_rt;
             Real RH  = RH_f(i,j,0) * 100.0_rt;
+            if (use_stick) {
+                // Radial diffusion per class; the class value is the volume average.
+                Real M[FuelStickConst::MAX_SHELLS];
+                const Real radii[3] = {r1, r10, r100};
+                const Real taus[3]  = {FuelMoistureConst::TAU_1HR, FuelMoistureConst::TAU_10HR, FuelMoistureConst::TAU_100HR};
+                for (int c = 0; c < 3; ++c) {
+                    for (int n = 0; n < n_sh; ++n) { M[n] = st(i, j, 0, c * n_sh + n); }
+                    mc(i, j, 0, c) = stick_advance_class(M, n_sh, radii[c], taus[c], RH, T_C, precip_mm_hr,
+                                                         rain_ms, dscale, dt_hours);
+                    for (int n = 0; n < n_sh; ++n) { st(i, j, 0, c * n_sh + n) = M[n]; }
+                }
+            } else {
             // Existing 3 dead fuel classes (unchanged)
             mc(i,j,0,0) = advance_fuel_moisture_one_class(mc(i,j,0,0),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_1HR);
             mc(i,j,0,1) = advance_fuel_moisture_one_class(mc(i,j,0,1),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_10HR);
             mc(i,j,0,2) = advance_fuel_moisture_one_class(mc(i,j,0,2),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_100HR);
+            }
             // Phase 15: live fuel moisture (components 3 and 4)
             // Live fuels respond slowly to atmospheric conditions.
             // Use TAU_100HR as a lower bound; live moisture is bounded [0.30, 2.50].
@@ -1547,6 +1582,22 @@ void FireLayer::apply_polygon_ignition(amrex::Real t_ign)
         amrex::Print() << "[FIRE DEBUG] Polygon ignition applied from '"
                        << m_params.ignition.polygon_file << "' ("
                        << m_params.ignition.polygon_type << ") at t=" << t_ign << " s\n";
+    }
+}
+
+void FireLayer::allocate_stick_mc()
+{
+    if (fire_stick_mc || !fire_fuel_mc) { return; }
+    const int n_sh = m_params.stick.n_shells;
+    fire_stick_mc = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 3 * n_sh, 0);
+    for (MFIter mfi(*fire_stick_mc); mfi.isValid(); ++mfi) {
+        Array4<Real> st = fire_stick_mc->array(mfi);
+        Array4<const Real> mc0 = fire_fuel_mc->const_array(mfi);
+        amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv_f) {
+            for (int c = 0; c < 3; ++c) {
+                for (int n = 0; n < n_sh; ++n) { st(iv_f[0], iv_f[1], 0, c * n_sh + n) = mc0(iv_f[0], iv_f[1], 0, c); }
+            }
+        });
     }
 }
 

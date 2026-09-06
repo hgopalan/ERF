@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# Restart from chk00240 to 60 s: the stick shells come back from the checkpoint, so the
+# moisture classes at 60 s must equal the straight run's.
+erf.fire.moisture_model = "stick"
+erf.restart = chk00240

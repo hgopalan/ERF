@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# Stick model to step 240 (30 s) with a checkpoint there.
+erf.fire.moisture_model = "stick"
+max_step = 240
+erf.check_int = 240

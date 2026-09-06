@@ -27,6 +27,7 @@
 #include <ERF_LevelSetEllipse.H>
 #include <ERF_FuelModels.H>
 #include <ERF_FbpModel.H>
+#include <ERF_FuelMoistureStick.H>
 #include <ERF_FireAcceleration.H>
 // Phase 13A: Per-fuel wind height
 #include <ERF_FuelWindHeight.H>
@@ -508,6 +509,13 @@ public:
     /// Mutable access to the lagged sensible flux buffer, for checkpoint restart.
     amrex::MultiFab* get_Q_atm_prev_mut() { return m_Q_atm_prev.get(); }
 
+    /// Shell moistures of the stick model (3 classes x n_shells), null unless erf.fire.moisture_model = stick.
+    const amrex::MultiFab* get_stick_mc() const { return fire_stick_mc.get(); }
+    /// Mutable access to the stick state, for checkpoint restart.
+    amrex::MultiFab* get_stick_mc_mut() { return fire_stick_mc.get(); }
+    /// Allocate the stick shells, every shell at its class's current moisture (no-op if allocated).
+    void allocate_stick_mc();
+
     /**
      * @brief Stamp the perimeter polygon (or polyline) of
      *        erf.fire.ignition.polygon_file into the level set.
@@ -663,6 +671,7 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_ros;          // Rate of spread
     std::unique_ptr<amrex::MultiFab>         fire_fuel_load;    // Fuel load
     std::unique_ptr<amrex::MultiFab>         fire_fuel_mc;      // Fuel moisture (3 comp)
+    std::unique_ptr<amrex::MultiFab>         fire_stick_mc;     // stick model shells: 3 classes x n_shells [fraction]
     std::unique_ptr<amrex::MultiFab>         fire_mext;         // Moisture of extinction (Phase 4)
     std::unique_ptr<amrex::MultiFab>         fire_heat_flux;    // Heat flux (stub)
     std::unique_ptr<amrex::MultiFab>         fire_spread_vec;   // FARSITE scratch

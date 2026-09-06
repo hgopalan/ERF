@@ -599,6 +599,11 @@ ERF::WriteCheckpointFile () const
             amrex::Print() << "Writing fire fuel moisture to checkpoint" << std::endl;
             VisMF::Write(*mc, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireFuelMC"));
         }
+        // Shell moistures of the stick model (erf.fire.moisture_model = stick).
+        if (const amrex::MultiFab* st = m_fire_layer->get_stick_mc()) {
+            amrex::Print() << "Writing fire moisture stick shells to checkpoint" << std::endl;
+            VisMF::Write(*st, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireStickMC"));
+        }
         // Sub-cell displacement carried between FARSITE substeps.
         if (const amrex::MultiFab* disp = m_fire_layer->get_disp_accum()) {
             amrex::Print() << "Writing fire displacement accumulator to checkpoint" << std::endl;
@@ -1874,6 +1879,12 @@ ERF::ReadCheckpointFileFire ()
     };
 
     restore_optional(m_fire_layer->get_fuel_mc_mut(),      "FireFuelMC");
+    // The stick shells are allocated on the first advance; allocate them now
+    // so the checkpoint's shells replace the fresh initialisation.
+    if (m_fire_params.moisture_model == "stick" && m_fire_layer->get_stick_mc() == nullptr) {
+        m_fire_layer->allocate_stick_mc();
+    }
+    restore_optional(m_fire_layer->get_stick_mc_mut(),     "FireStickMC");
     restore_optional(m_fire_layer->get_disp_accum_mut(),   "FireDispAccum");
     restore_optional(m_fire_layer->get_crown_active_mut(), "FireCrownActive");
     restore_optional(m_fire_layer->get_crown_load_mut(),   "FireCrownLoad");

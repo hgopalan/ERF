@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Cylindrical stick model, straight run to 60 s.
+erf.fire.moisture_model = "stick"
