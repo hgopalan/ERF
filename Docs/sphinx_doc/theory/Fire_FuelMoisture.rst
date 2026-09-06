@@ -66,6 +66,40 @@ BEHAVE path uses the per-cell dead classes and the live classes through its
 dynamic live-to-dead transfer, controlled by
 :cpp:`erf.fire.behave.dynamic_transfer_lo` and ``_hi``.
 
+Stick model
+-----------
+
+:cpp:`erf.fire.moisture_model = "stick"` (default ``"timelag"``) replaces
+the single time constant with the diffusion of moisture through a
+cylindrical fuel particle, the framework of Nelson (2000): for each dead
+class in every fire cell,
+
+.. math::
+
+   \frac{\partial M}{\partial t} = \frac{1}{r}\frac{\partial}{\partial r}
+   \Bigl(r D \frac{\partial M}{\partial r}\Bigr), \qquad 0 < r < R_c,
+
+on :cpp:`erf.fire.stick.n_shells` shells (default 6), advanced implicitly,
+with the surface held at the air's equilibrium moisture (the same
+adsorption/desorption hysteresis, applied to the surface shell) or at
+:cpp:`erf.fire.stick.rain_surface_moisture` (0.35) while it rains. The
+diffusivity is set so that the slowest radial mode has the class's time lag,
+:math:`D_c = R_c^2 / (\lambda_1^2 \tau_c)` with :math:`\lambda_1 = 2.405`
+the first zero of :math:`J_0`, scaled by the temperature factor above and by
+:cpp:`erf.fire.stick.diffusivity_scale`; the radii
+:cpp:`erf.fire.stick.radius_cm` default to 0.15, 0.635 and 2.5 cm (the
+10-h value is the standard stick). The class moisture the rate-of-spread
+models see is the volume average of the shells, so the long-time response
+equals the time-lag model's while the short-time response is diffusive: the
+surface follows the air within minutes and the core lags by hours, which
+is the diurnal shape Nelson measured. The shells are carried in
+``fire_stick_mc`` and checkpointed. Not reproduced from Nelson: his species
+constants for the diffusivity, bound-water isotherm and surface exchange,
+and the solar heating of the stick. ``Exec/RegTests/FireStickMoisture``
+checks the plumbing and the restart, and the unit test
+``ERF_GTestFuelMoistureStick`` the relaxation, the calibrated lag, the
+surface-before-core ordering and the rain condition.
+
 Moisture of extinction
 ----------------------
 

@@ -55,6 +55,17 @@ struct FireParams
     
     // Fuel moisture control (Phase 4)
     bool              moisture_dynamic    = true;        ///< Advance moisture each step via ODEs
+    // How the dead classes are advanced when moisture_dynamic is on:
+    //   "timelag" (default) — one time constant per class (ERF_FuelMoisture.H)
+    //   "stick"             — radial diffusion in a cylindrical stick per class
+    //                         (ERF_FuelMoistureStick.H, Nelson 2000 framework)
+    std::string       moisture_model      = "timelag";
+    struct StickParams {
+        int                      n_shells = 6;                       ///< radial shells per stick (<= 16)
+        std::vector<amrex::Real> radius_cm = {0.15, 0.635, 2.5};     ///< 1-h, 10-h, 100-h stick radii [cm]
+        amrex::Real              rain_surface_moisture = 0.35;       ///< surface moisture while it rains
+        amrex::Real              diffusivity_scale = 1.0;            ///< multiplier on the lag-calibrated diffusivity
+    } stick;
     amrex::Real       precip_rate_mm_hr   = 0.0;         ///< Uniform precipitation rate [mm/hr]
     amrex::Real       moisture_live       = 0.60;        ///< Live fuel moisture [fraction]
     
@@ -588,6 +599,20 @@ struct FireParams
        pp.query("moisture_dynamic", moisture_dynamic);
        pp.query("precip_rate_mm_hr", precip_rate_mm_hr);
        pp.query("moisture_live", moisture_live);
+       pp.query("moisture_model", moisture_model);
+       pp.query("stick.n_shells", stick.n_shells);
+       pp.queryarr("stick.radius_cm", stick.radius_cm);
+       pp.query("stick.rain_surface_moisture", stick.rain_surface_moisture);
+       pp.query("stick.diffusivity_scale", stick.diffusivity_scale);
+       if (moisture_model != "timelag" && moisture_model != "stick") {
+           amrex::Abort("erf.fire.moisture_model must be \"timelag\" or \"stick\"");
+       }
+       if (moisture_model == "stick") {
+           if (stick.n_shells < 1 || stick.n_shells > 16) { amrex::Abort("erf.fire.stick.n_shells must be 1-16"); }
+           if (stick.radius_cm.size() != 3) { amrex::Abort("erf.fire.stick.radius_cm needs 3 values (1-h, 10-h, 100-h)"); }
+           for (auto r : stick.radius_cm) { if (r <= 0.0) amrex::Abort("erf.fire.stick.radius_cm must be positive"); }
+           if (stick.diffusivity_scale <= 0.0) { amrex::Abort("erf.fire.stick.diffusivity_scale must be positive"); }
+       }
         
        // Moisture of extinction (Phase 4)
        pp.query("use_dynamic_mext", use_dynamic_mext);

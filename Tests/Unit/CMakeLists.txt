@@ -159,6 +159,7 @@ target_sources(${erf_exe_name}
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFarsiteSpreadAccumulation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestLevelSetEllipse.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFbp.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFuelMoistureStick.cpp
 )
 if(ERF_ENABLE_NETCDF)
   target_sources(${erf_exe_name} PRIVATE
