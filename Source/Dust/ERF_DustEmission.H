@@ -95,7 +95,7 @@ amrex::Real compute_saltation_flux(amrex::Real ustar,
     amrex::Real Qs = DustEmissionConst::C_S * rho / DustEmissionConst::G_ACCEL
                    * ustar * ustar * ustar
                    * (1.0 - ratio) * (1.0 + ratio) * (1.0 + ratio);
-    return amrex::max(0.0, Qs);
+    return amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(Qs));
 }
 
 /**
@@ -112,7 +112,7 @@ amrex::Real compute_saltation_flux(amrex::Real ustar,
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_sandblasting_efficiency(amrex::Real silt_frac) noexcept
 {
-    amrex::Real sf = amrex::min(amrex::max(silt_frac, 0.0), 1.0);
+    amrex::Real sf = amrex::min(static_cast<amrex::Real>(amrex::max(static_cast<amrex::Real>(silt_frac), static_cast<amrex::Real>(0.0))), static_cast<amrex::Real>(1.0));
     amrex::Real clay = DustEmissionConst::CLAY_FROM_SILT * sf;
     amrex::Real log_alpha = DustEmissionConst::ALPHA_SLOPE * clay
                            + DustEmissionConst::ALPHA_INTERCEPT;
@@ -135,7 +135,7 @@ amrex::Real compute_vertical_emission_flux(amrex::Real alpha,
                                             amrex::Real Qs) noexcept
 {
     amrex::Real F = alpha * silt * Qs;
-    return amrex::min(amrex::max(F, 0.0), DustEmissionConst::FLUX_MAX);
+    return amrex::min(amrex::max(static_cast<amrex::Real>(F), static_cast<amrex::Real>(0.0)), DustEmissionConst::FLUX_MAX);
 }
 
 /**

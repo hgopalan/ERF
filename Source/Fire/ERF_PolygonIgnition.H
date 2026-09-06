@@ -191,7 +191,7 @@ amrex::Real segment_dist_sq(amrex::Real px, amrex::Real py,
 
     // Parameter t of closest point on segment
     amrex::Real t = ((px - ax) * dx + (py - ay) * dy) / len_sq;
-    t = amrex::max(0.0, amrex::min(1.0, t));
+    t = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(t))));
 
     amrex::Real cx = ax + t * dx;
     amrex::Real cy = ay + t * dy;

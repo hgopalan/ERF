@@ -120,7 +120,7 @@ void apply_farsite_terrain_wind(
                 Real sin_cross = sx * uy - sy * ux;
                 
                 // Compute deflection angle
-                Real denom = amrex::max(slope_mag * wind_mag_new * factor, 1.0e-10);
+                Real denom = amrex::max(static_cast<amrex::Real>(slope_mag * wind_mag_new * factor), static_cast<amrex::Real>(1.0e-10));
                 Real sin_cross_norm = amrex::max(-1.0_rt, amrex::min(1.0_rt, sin_cross / denom));
                 Real deflect_angle = k_deflect * std::asin(sin_cross_norm);
 

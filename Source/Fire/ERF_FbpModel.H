@@ -135,7 +135,7 @@ amrex::Real fbp_buildup_effect(int type, amrex::Real bui) noexcept
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real fbp_rsi_basic(const FbpCoeffs& k, amrex::Real isi) noexcept
 {
-    return k.a * std::pow(amrex::max(amrex::Real(0.0), 1.0 - std::exp(-k.b * isi)), k.c);
+    return k.a * std::pow(amrex::max(amrex::Real(0.0), static_cast<amrex::Real>(1.0 - std::exp(-k.b * isi))), k.c);
 }
 
 /// Surface rate of spread [m/min] of a type at an ISI, before the buildup effect
@@ -162,7 +162,7 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real fbp_isf_basic(const FbpCoeffs& k, amrex::Real rsf) noexcept
 {
     if (k.a <= 0.0 || rsf <= 0.0) return 0.0;
-    const amrex::Real r = amrex::min(std::pow(rsf / k.a, 1.0 / k.c), amrex::Real(0.999));
+    const amrex::Real r = amrex::min(static_cast<amrex::Real>(std::pow(rsf / k.a, 1.0 / k.c)),  amrex::Real(0.999));
     return std::log(1.0 - r) / (-k.b);
 }
 
@@ -176,7 +176,7 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real fbp_slope_equivalent_wind(const FbpComputed& s, amrex::Real slope) noexcept
 {
     if (!s.use_slope || slope <= 0.0) return 0.0;
-    const amrex::Real gs = amrex::min(100.0 * slope, amrex::Real(70.0));     // percent, capped as the system does
+    const amrex::Real gs = amrex::min(static_cast<amrex::Real>(100.0 * slope),  amrex::Real(70.0));     // percent, capped as the system does
     const amrex::Real sf = std::exp(3.533 * std::pow(gs / 100.0, 1.2));
     const amrex::Real isz = fbp_isi(s.fF, 0.0);                              // zero-wind ISI
     amrex::Real isf;

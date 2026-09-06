@@ -697,7 +697,7 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
         for (amrex::MFIter mfi(phi); mfi.isValid(); ++mfi) {
             auto p = phi.array(mfi);
             amrex::ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) noexcept {
-                p(iv) = amrex::max(-1.0, amrex::min(p(iv), 1.0));
+                p(iv) = amrex::max(static_cast<amrex::Real>(-1.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(p(iv)), static_cast<amrex::Real>(1.0))));
             });
         }
     }

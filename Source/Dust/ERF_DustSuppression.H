@@ -86,7 +86,7 @@ amrex::Real compute_temp_factor_supp(amrex::Real T_surf_K) noexcept
 {
     amrex::Real dT = T_surf_K - DustSuppressionConst::T_REF_K;
     amrex::Real fT = std::exp(DustSuppressionConst::K_TEMP * dT);
-    return amrex::min(amrex::max(fT, 0.1), 10.0);
+    return amrex::min(static_cast<amrex::Real>(amrex::max(static_cast<amrex::Real>(fT), static_cast<amrex::Real>(0.1))), static_cast<amrex::Real>(10.0));
 }
 
 /**
@@ -98,7 +98,7 @@ amrex::Real compute_temp_factor_supp(amrex::Real T_surf_K) noexcept
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_wind_factor_supp(amrex::Real u_10m) noexcept
 {
-    amrex::Real u = amrex::max(u_10m, 0.0);
+    amrex::Real u = amrex::max(static_cast<amrex::Real>(u_10m), static_cast<amrex::Real>(0.0));
     return 1.0 + DustSuppressionConst::K_WIND * u;
 }
 
@@ -127,7 +127,7 @@ amrex::Real advance_suppression_coverage(amrex::Real coverage_old,
     amrex::Real fT    = compute_temp_factor_supp(T_surf_K);
     amrex::Real fwind = compute_wind_factor_supp(u_10m);
     amrex::Real tau_eff = tau_base_s / (fT * fwind);
-    tau_eff = amrex::max(tau_eff, 1.0);  // floor at 1 s to prevent divide-by-zero
+    tau_eff = amrex::max(static_cast<amrex::Real>(tau_eff), static_cast<amrex::Real>(1.0));  // floor at 1 s to prevent divide-by-zero
     amrex::Real c_new = coverage_old * std::exp(-dt_s / tau_eff);
     if (c_new < DustSuppressionConst::COVERAGE_FLOOR) c_new = 0.0;
     return c_new;

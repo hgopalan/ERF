@@ -50,7 +50,7 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     // ===================================================================
     // Use sigma_d1 as characteristic SAV
     Real sigma = fp.sigma_d1;
-    sigma = amrex::max(sigma, 100.0);  // Minimum SAV guard
+    sigma = amrex::max(static_cast<amrex::Real>(sigma), static_cast<amrex::Real>(100.0));  // Minimum SAV guard
 
     Real beta_op = 3.348 * std::pow(sigma, -0.8189);           // Eq. 37: optimum packing ratio
     Real sigma_1p5 = std::pow(sigma, 1.5);
@@ -62,7 +62,7 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     // ===================================================================
     // 8-10. Moisture damping (Eq. 29) and mineral damping (Eq. 30)
     // ===================================================================
-    Real rm = amrex::min(M_f / fp.Mx, 1.0);
+    Real rm = amrex::min(static_cast<amrex::Real>(M_f / fp.Mx), static_cast<amrex::Real>(1.0));
     Real eta_M = amrex::max(0.0, 1.0 - 2.59*rm + 5.11*rm*rm - 3.52*rm*rm*rm);  // Eq. 29
     Real eta_s = 0.174 * std::pow(S_e, -0.19);                                  // Eq. 30
 
@@ -70,7 +70,7 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     // 11. Reaction intensity (Eq. 27)
     // ===================================================================
     Real I_R = Gamma_prime * w_n * fp.heat_content * eta_M * eta_s;
-    I_R = amrex::max(I_R, 0.01);
+    I_R = amrex::max(static_cast<amrex::Real>(I_R), static_cast<amrex::Real>(0.01));
 
     // ===================================================================
     // 12-15. Propagating flux ratio, heating number, heat of preignition, and R0 (Eqs. 1, 12, 14, 42)

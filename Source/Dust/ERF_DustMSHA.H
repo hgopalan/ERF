@@ -58,7 +58,7 @@ void update_msha_dose(amrex::MultiFab& dose, amrex::MultiFab& twa,
         auto tw = twa.array(mfi);
         auto pm = pm10.const_array(mfi);
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-            d(i,j,k)  += amrex::max(pm(i,j,k), 0.0) * DustMSHAConst::UG_TO_MG * dth;
+            d(i,j,k)  += amrex::max(static_cast<amrex::Real>(pm(i,j,k)), static_cast<amrex::Real>(0.0)) * DustMSHAConst::UG_TO_MG * dth;
             tw(i,j,k)  = d(i,j,k) / DustMSHAConst::TWA_HOURS;
         });
     }

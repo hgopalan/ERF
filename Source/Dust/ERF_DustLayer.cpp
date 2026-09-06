@@ -683,7 +683,7 @@ DustLayer::advance(
       auto conc = dust_conc_sfc->const_array(mfi);
       const amrex::Real alpha = m_params.loading_feedback_coeff;
       amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-        ust(i,j,k) *= (1.0 + alpha * amrex::max(conc(i,j,k), 0.0));
+        ust(i,j,k) *= (1.0 + alpha * amrex::max(static_cast<amrex::Real>(conc(i,j,k)), static_cast<amrex::Real>(0.0)));
       });
     }
     if (m_params.dust_debug) {
@@ -703,8 +703,8 @@ DustLayer::advance(
       auto ust   = dust_ustar_t->array(mfi);
       auto qflux = dust_surf_moist->const_array(mfi);
       amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-        amrex::Real w       = amrex::max(qflux(i,j,k), 0.0) / (Lv * rho_a);
-        amrex::Real excess  = amrex::max(w - w_prime, 0.0);
+        amrex::Real w       = amrex::max(static_cast<amrex::Real>(qflux(i,j,k)), static_cast<amrex::Real>(0.0)) / (Lv * rho_a);
+        amrex::Real excess  = amrex::max(static_cast<amrex::Real>(w - w_prime), static_cast<amrex::Real>(0.0));
         amrex::Real f_moist = std::sqrt(1.0 + a_f * excess);
         ust(i,j,k) *= f_moist;
       });

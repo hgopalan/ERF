@@ -277,8 +277,8 @@ void update_ustar_t_from_chemistry(MultiFab& ustar_t, const MultiFab& ustar_base
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
             // Higher crust and efflorescence both INCREASE u*_t (harder to emit).
             // This matches the threshold computation: f_chem = (1 + alpha_c * crust) * (1 + alpha_e * efflor)
-            Real f_chem = (Real(1.0) + alpha_c * amrex::min(amrex::max(crust_arr(i,j,k), 0.0), 1.0))
-                        * (Real(1.0) + alpha_e * amrex::min(amrex::max(efflor_arr(i,j,k), 0.0), 1.0));
+            Real f_chem = (Real(1.0) + alpha_c * amrex::min(static_cast<amrex::Real>(amrex::max(static_cast<amrex::Real>(crust_arr(i,j,k)), static_cast<amrex::Real>(0.0))), static_cast<amrex::Real>(1.0)))
+                        * (Real(1.0) + alpha_e * amrex::min(static_cast<amrex::Real>(amrex::max(static_cast<amrex::Real>(efflor_arr(i,j,k)), static_cast<amrex::Real>(0.0))), static_cast<amrex::Real>(1.0)));
             Real ut = ut_base_arr(i,j,k) * f_chem;
             ut_arr(i,j,k) = amrex::max(ut, ustar_tmin);
         });

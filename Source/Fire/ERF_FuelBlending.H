@@ -47,7 +47,7 @@ inline void apply_fuel_boundary_blending(amrex::MultiFab& fire_ros,
     if (blending_fraction <= 0.0) { return; }
 
     // Clamp blending fraction to [0, 1]
-    blending_fraction = amrex::min(blending_fraction, 1.0);
+    blending_fraction = amrex::min(static_cast<amrex::Real>(blending_fraction), static_cast<amrex::Real>(1.0));
 
     // ParallelFor over ROS field
     for (amrex::MFIter mfi(fire_ros); mfi.isValid(); ++mfi) {

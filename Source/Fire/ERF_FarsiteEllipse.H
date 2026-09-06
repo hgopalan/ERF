@@ -28,7 +28,7 @@ amrex::Real anderson_LW_ratio(amrex::Real wind_speed_mph) noexcept
     if (wind_speed_mph < 1.0) { return 1.0; }
     amrex::Real lw = 0.936 * std::exp(0.2566 * wind_speed_mph)
                    - 0.397 * std::sqrt(wind_speed_mph);
-    return amrex::max(1.0, amrex::min(lw, 8.0));
+    return amrex::max(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(lw), static_cast<amrex::Real>(8.0))));
 }
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -104,7 +104,7 @@ void advance_farsite_one_step(
             if (wind_mag > 1.0e-10) {
                 Real wx = ux / wind_mag;
                 Real wy = uy / wind_mag;
-                Real cos_t = amrex::max(-1.0, amrex::min(nx*wx + ny*wy, 1.0));
+                Real cos_t = amrex::max(static_cast<amrex::Real>(-1.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(nx*wx + ny*wy), static_cast<amrex::Real>(1.0))));
                 Real sin_t = std::sqrt(1.0 - cos_t*cos_t);
                 Real a = fp.coeff_a, b = fp.coeff_b, c = fp.coeff_c;
                 if (fp.use_anderson_lw != 0) {
@@ -117,7 +117,7 @@ void advance_farsite_one_step(
             }
 
             // Distance travelled along the terrain surface
-            Real ds = amrex::max(scale, 0.0) * ros_arr(iv) * dt_fire;
+            Real ds = amrex::max(static_cast<amrex::Real>(scale), static_cast<amrex::Real>(0.0)) * ros_arr(iv) * dt_fire;
 
             // Project onto the map. A surface step ds up a slope of angle theta
             // in the spread direction covers ds cos(theta) horizontally, with

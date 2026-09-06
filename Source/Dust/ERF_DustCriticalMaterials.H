@@ -73,7 +73,7 @@ inline void compute_cm_flux(
             const int src_comp = b;
             amrex::ParallelFor(bx,
                 [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-                    cm(i,j,k) += amrex::max(fl(i,j,k,src_comp), 0.0) * frac;
+                    cm(i,j,k) += amrex::max(static_cast<amrex::Real>(fl(i,j,k,src_comp)), static_cast<amrex::Real>(0.0)) * frac;
             });
         }
     }

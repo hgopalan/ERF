@@ -129,7 +129,7 @@ void fill_fire_wind_from_interpolation(
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_waf_unsheltered(amrex::Real delta_ft) noexcept
 {
-    delta_ft = amrex::max(delta_ft, 0.1);
+    delta_ft = amrex::max(static_cast<amrex::Real>(delta_ft), static_cast<amrex::Real>(0.1));
     amrex::Real numerator = 20.0 + 0.36 * delta_ft;
     amrex::Real denominator = 0.13 * delta_ft;
     return 1.83 / std::log(numerator / denominator);
@@ -149,13 +149,13 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_waf_sheltered(amrex::Real f_c, amrex::Real h_c_ft,
                                    amrex::Real delta_ft) noexcept
 {
-    f_c = amrex::max(f_c, 0.01);
-    h_c_ft = amrex::max(h_c_ft, 0.1);
-    delta_ft = amrex::max(delta_ft, 0.1);
+    f_c = amrex::max(static_cast<amrex::Real>(f_c), static_cast<amrex::Real>(0.01));
+    h_c_ft = amrex::max(static_cast<amrex::Real>(h_c_ft), static_cast<amrex::Real>(0.1));
+    delta_ft = amrex::max(static_cast<amrex::Real>(delta_ft), static_cast<amrex::Real>(0.1));
 
     amrex::Real ln_term = std::log((20.0 + 0.36 * h_c_ft) / (0.13 * h_c_ft));
     amrex::Real denom = std::sqrt(f_c * h_c_ft) * ln_term;
-    denom = amrex::max(denom, 1.0e-6);
+    denom = amrex::max(static_cast<amrex::Real>(denom), static_cast<amrex::Real>(1.0e-6));
 
     return 0.555 / denom;
 }

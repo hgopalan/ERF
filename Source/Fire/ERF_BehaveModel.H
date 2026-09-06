@@ -196,8 +196,8 @@ BehaveState compute_behave_state(
     Real fuelmce = fp.Mx;  // Dead fuel moisture of extinction (from FuelModelParams)
 
     // Effective heating number weighting: exp(-138/sigma)
-    Real exp_dead = w_dead * std::exp(-138.0 / amrex::max(sigma_dead, 1.0));
-    Real exp_live = w_live * std::exp(-138.0 / amrex::max(sigma_live, 1.0));
+    Real exp_dead = w_dead * std::exp(-138.0 / amrex::max(static_cast<amrex::Real>(sigma_dead), static_cast<amrex::Real>(1.0)));
+    Real exp_live = w_live * std::exp(-138.0 / amrex::max(static_cast<amrex::Real>(sigma_live), static_cast<amrex::Real>(1.0)));
 
     Real W_prima = (exp_live > 1.0e-12) ? (exp_dead / exp_live) : 0.0;
 
@@ -219,8 +219,8 @@ BehaveState compute_behave_state(
     fmc_dead = f_d1 * mc_1hr + f_d10 * mc_10hr + f_d100 * mc_100hr + f_dh * 0.15;
     Real fmc_live = f_lh * mc_herba + f_lw * mc_woody;
 
-    Real r_dead = amrex::min(1.0, fmc_dead / fuelmce);
-    Real r_live = amrex::min(1.0, fmc_live / fuelmce_live);
+    Real r_dead = amrex::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(fmc_dead / fuelmce));
+    Real r_live = amrex::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(fmc_live / fuelmce_live));
 
     // Moisture damping coefficients
     auto etam_poly = [](Real r) -> Real {
@@ -255,7 +255,7 @@ BehaveState compute_behave_state(
     // =====================================================================
     // Use dead fuel SAV as characteristic value (weighted across dead classes)
     Real sigma = sigma_dead;
-    sigma = amrex::max(sigma, 100.0);  // Minimum SAV guard
+    sigma = amrex::max(static_cast<amrex::Real>(sigma), static_cast<amrex::Real>(100.0));  // Minimum SAV guard
 
     Real beta_op = 3.348 * std::pow(sigma, -0.8189);
     Real sigma_1p5 = std::pow(sigma, 1.5);
@@ -297,9 +297,9 @@ BehaveState compute_behave_state(
 
     Real I_R = bs.gamma * (bs.wn_dead * bs.fuelheat_dead * bs.etam_dead * bs.etas_dead
                           + bs.wn_live * bs.fuelheat_live * bs.etam_live * bs.etas_live);
-    I_R = amrex::max(I_R, 0.01);
+    I_R = amrex::max(static_cast<amrex::Real>(I_R), static_cast<amrex::Real>(0.01));
 
-    Real R0_ft_min = (I_R * bs.xifr) / amrex::max(bs.heat_sink, 1.0);
+    Real R0_ft_min = (I_R * bs.xifr) / amrex::max(static_cast<amrex::Real>(bs.heat_sink), static_cast<amrex::Real>(1.0));
 
     // =====================================================================
     // Step 11: Wind and slope factor coefficients
@@ -359,7 +359,7 @@ amrex::Real behave_ros_cell(
     Real tan_slope_sq = sx*sx + sy*sy;
 
     // Cap at tan²(80°) ≈ 32.16
-    tan_slope_sq = amrex::min(tan_slope_sq, 32.0);
+    tan_slope_sq = amrex::min(static_cast<amrex::Real>(tan_slope_sq), static_cast<amrex::Real>(32.0));
 
     // Slope factor (Rothermel Eq. 51)
     Real phi_s = bs.phi_s_const * tan_slope_sq;
@@ -370,7 +370,7 @@ amrex::Real behave_ros_cell(
     // Rate of spread: R = R0 * (1 + φ_w + φ_s)
     Real ROS = bs.r_0 * (1.0 + phi_w + phi_s);
 
-    return amrex::max(ROS, 0.0);
+    return amrex::max(static_cast<amrex::Real>(ROS), static_cast<amrex::Real>(0.0));
 }
 
 /**

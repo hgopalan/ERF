@@ -56,7 +56,7 @@ amrex::Real compute_fireline_intensity_kW_per_m(
 
     // I_B = h * w_consumed * ros
     amrex::Real I_B = h_fuel_kJ_per_kg * w_consumed * ros;
-    return amrex::max(0.0, I_B);
+    return amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(I_B));
 }
 
 /**
@@ -76,7 +76,7 @@ amrex::Real compute_flame_length_m(amrex::Real I_B_kW_per_m) noexcept
 
     // Thomas (1963): L = 0.0775 * I_B^0.46
     amrex::Real L = 0.0775 * std::pow(I_B_kW_per_m, 0.46);
-    return amrex::max(0.0, L);
+    return amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(L));
 }
 
 /**
@@ -187,7 +187,7 @@ amrex::Real compute_flame_temp_byram(amrex::Real I_B_kWm, amrex::Real T_amb) noe
 {
     if (I_B_kWm <= 0.0) return 0.0;
     amrex::Real T_flame = T_amb + 800.0 * std::pow(I_B_kWm / 1000.0, 0.25);
-    return amrex::max(0.0, T_flame);
+    return amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(T_flame));
 }
 
 /**
@@ -236,7 +236,7 @@ amrex::Real compute_flame_temp_nelson(amrex::Real I_B_kWm) noexcept
     amrex::Real Q_rad_Wm = I_B_kWm * 1000.0;  // convert kW/m to W/m
     amrex::Real T_flame = std::pow(Q_rad_Wm / (sigma * epsilon), 0.25);
     // Clip to reasonable range
-    T_flame = amrex::max(300.0, amrex::min(T_flame, 1800.0));
+    T_flame = amrex::max(static_cast<amrex::Real>(300.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(T_flame), static_cast<amrex::Real>(1800.0))));
     return T_flame;
 }
 

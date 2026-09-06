@@ -106,7 +106,7 @@ inline void apply_fire_acceleration_size_based(amrex::MultiFab&       R_mf,
     // Burned area and effective fire radius
     const amrex::Real A_fire     = static_cast<amrex::Real>(n_burned) * dx[0] * dx[1];
     const amrex::Real r_fire     = std::sqrt(A_fire / amrex::Math::pi<amrex::Real>());
-    const amrex::Real L_acc_safe = amrex::max(L_acc, 1.0);  // floor prevents divide-by-zero
+    const amrex::Real L_acc_safe = amrex::max(static_cast<amrex::Real>(L_acc), static_cast<amrex::Real>(1.0));  // floor prevents divide-by-zero
     const amrex::Real alpha      = 1.0 - std::exp(-r_fire / L_acc_safe);
 
     // Nothing to do when essentially at full speed (saves a kernel launch)
@@ -248,7 +248,7 @@ inline void apply_fire_acceleration_temporal(amrex::MultiFab&       R_mf,
             const amrex::Real EQUILIBRIUM_CHANGE_THRESHOLD = 1.0e-6;
             const amrex::Real dR_eq = amrex::Math::abs(R_E - R_prev_eq);
             const bool eq_changed = (dR_eq > EQUILIBRIUM_CHANGE_THRESHOLD * 
-                                     amrex::max(R_E, R_prev_eq, 1.0));
+                                     amrex::max(static_cast<amrex::Real>(R_E), static_cast<amrex::Real>(R_prev_eq), static_cast<amrex::Real>(1.0)));
 
             if (eq_changed) {
                 // Equilibrium changed — apply wind-lag or reset

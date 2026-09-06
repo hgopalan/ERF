@@ -58,8 +58,8 @@ namespace DustDepositionConst {
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_r_a(amrex::Real u_star) noexcept {
-    return amrex::min(1.0 / (amrex::max(u_star, 1.0e-4) * DustDepositionConst::KAPPA),
-                      DustDepositionConst::R_MAX);
+    return amrex::min(static_cast<amrex::Real>(1.0 / (amrex::max(static_cast<amrex::Real>(u_star), static_cast<amrex::Real>(1.0e-4)) * DustDepositionConst::KAPPA)),
+                      static_cast<amrex::Real>(DustDepositionConst::R_MAX));
 }
 
 /**
@@ -72,8 +72,8 @@ amrex::Real compute_r_a(amrex::Real u_star) noexcept {
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_r_s(amrex::Real u_star, amrex::Real E_0) noexcept {
-    return amrex::min(1.0 / (amrex::max(u_star, 1.0e-4) * amrex::max(E_0, 1.0e-6)),
-                      DustDepositionConst::R_MAX);
+    return amrex::min(static_cast<amrex::Real>(1.0 / (amrex::max(static_cast<amrex::Real>(u_star), static_cast<amrex::Real>(1.0e-4)) * amrex::max(static_cast<amrex::Real>(E_0), static_cast<amrex::Real>(1.0e-6)))),
+                      static_cast<amrex::Real>(DustDepositionConst::R_MAX));
 }
 
 /**
@@ -153,12 +153,12 @@ inline void apply_dust_deposition_bc(
             Real dz = (k < khi) ? (z(i,j,k+1)-z(i,j,k)) : dz_avg;
             if (dz <= 1.0e-10) dz = dz_avg;
 
-            Real u_star = amrex::max(us(i,j,0), 1.0e-4);
+            Real u_star = amrex::max(static_cast<amrex::Real>(us(i,j,0)), static_cast<amrex::Real>(1.0e-4));
             Real vs = compute_stokes_settling(dp, rhop, rho_a,
                                               DustSettlingConst::MU_AIR_STD);
             Real vd = compute_deposition_velocity(vs, u_star, e0);
 
-            Real rho_dust = amrex::max(src(i,j,k,comp), 0.0);
+            Real rho_dust = amrex::max(static_cast<amrex::Real>(src(i,j,k,comp)), static_cast<amrex::Real>(0.0));
             dep(i,j,0)    = vd * rho_dust;
             src(i,j,k,comp) -= vd * rho_dust / dz;
         });

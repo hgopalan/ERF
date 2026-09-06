@@ -99,7 +99,7 @@ inline void compute_pm_concentrations(
             auto p10  = pm10.array(mfi);
             const int src_comp = b;
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-                amrex::Real c = amrex::max(conc(i,j,k,src_comp), 0.0) * scale;
+                amrex::Real c = amrex::max(static_cast<amrex::Real>(conc(i,j,k,src_comp)), static_cast<amrex::Real>(0.0)) * scale;
                 if (contrib_pm25) p25(i,j,k) += c;
                 if (contrib_pm10) p10(i,j,k) += c;
             });

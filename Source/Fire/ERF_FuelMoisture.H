@@ -77,7 +77,7 @@ amrex::Real compute_emc_adsorption(amrex::Real RH) noexcept
     amrex::Real M_e = a0 + a1*H + a2*H2 + a3*H3 + a4*H4;
 
     // Clamp to physical range
-    M_e = amrex::max(0.0, amrex::min(M_e, 0.35));
+    M_e = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(M_e), static_cast<amrex::Real>(0.35))));
 
     return M_e;
 }
@@ -107,7 +107,7 @@ amrex::Real compute_emc_desorption(amrex::Real RH) noexcept
     amrex::Real M_e = d0 + d1*H + d2*H2 + d3*H3 + d4*H4;
 
     // Clamp to physical range
-    M_e = amrex::max(0.0, amrex::min(M_e, 0.35));
+    M_e = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(M_e), static_cast<amrex::Real>(0.35))));
 
     return M_e;
 }
@@ -147,7 +147,7 @@ amrex::Real compute_temp_correction(amrex::Real T_C) noexcept
     amrex::Real f_T = std::exp(-k * (T_C - T_ref));
 
     // Clamp to reasonable range (0.5× to 2× nominal time lag)
-    f_T = amrex::min(amrex::max(f_T, 0.5), 2.0);
+    f_T = amrex::min(static_cast<amrex::Real>(amrex::max(static_cast<amrex::Real>(f_T), static_cast<amrex::Real>(0.5))), static_cast<amrex::Real>(2.0));
 
     return f_T;
 }
@@ -209,7 +209,7 @@ amrex::Real advance_fuel_moisture_one_class(
     const amrex::Real P = compute_precip_wetting_rate(rain_mm_hr);
 
     // Time-lag moisture change term
-    const amrex::Real dM_dt_timelag = (M_e - M_current) / amrex::max(tau_eff, 0.1);
+    const amrex::Real dM_dt_timelag = (M_e - M_current) / amrex::max(static_cast<amrex::Real>(tau_eff), static_cast<amrex::Real>(0.1));
 
     // Total moisture change rate
     const amrex::Real dM_dt = dM_dt_timelag + P;

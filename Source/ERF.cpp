@@ -103,7 +103,7 @@ double ERF::last_plot2d_file_time_2 = 0.0;
 double ERF::last_check_file_time    = 0.0;
 
 #ifdef ERF_ENABLE_FIRE
-Real ERF::last_fire_plot_time = -one;
+double ERF::last_fire_plot_time = -1.0;   // double: writeNow() takes double&, as for the other plot times
 #endif
 
 bool ERF::plot_file_on_restart = true;

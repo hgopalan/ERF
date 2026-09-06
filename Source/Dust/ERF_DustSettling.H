@@ -93,7 +93,7 @@ amrex::Real compute_stokes_settling(amrex::Real d_m, amrex::Real rho_p,
 {
     if (d_m <= 0.0 || rho_p <= 0.0) return 0.0;
     amrex::Real mu = (mu_a > 0.0) ? mu_a : DustSettlingConst::MU_AIR_STD;
-    amrex::Real rho_diff = rho_p - amrex::max(rho_a, 0.0);
+    amrex::Real rho_diff = rho_p - amrex::max(static_cast<amrex::Real>(rho_a), static_cast<amrex::Real>(0.0));
     if (rho_diff <= 0.0) return 0.0;
     amrex::Real Cc  = compute_cunningham_cc(d_m);
     amrex::Real vs  = rho_diff * DustSettlingConst::G_ACCEL * d_m * d_m * Cc / (18.0 * mu);
