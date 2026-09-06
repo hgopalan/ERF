@@ -1,0 +1,10 @@
+FILE = inputs_base
+
+# Scott-Burgan map (GR2 / SH2 / TL3 / urban / water) with native parameters and the
+# initial fuel load taken from each cell's model.
+erf.fire.fuel_map.fuel_set = "scott_burgan40"
+erf.fire.fuel_map.file = "fuel_map_sb40.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.fuel_map.load_from_map = true
+erf.fire.rothermel_per_fuel = true
+erf.fire.fuel_model_id = 102

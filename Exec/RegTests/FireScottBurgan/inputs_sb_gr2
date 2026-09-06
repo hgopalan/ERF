@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# Uniform Scott-Burgan GR2 (102), low-load dry-climate grass, native parameters.
+erf.fire.fuel_map.fuel_set = "scott_burgan40"
+erf.fire.fuel_model_id = 102

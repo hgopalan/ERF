@@ -322,7 +322,7 @@ void compute_ros_field(
     const RothermelComputed& rc);
 
 /// Entries in the per-fuel Rothermel table: code 0 (non-burnable) plus FBFM 1-13.
-inline constexpr int ROTHERMEL_TABLE_SIZE = 14;
+inline constexpr int ROTHERMEL_TABLE_SIZE = 54;   ///< FUEL_SLOT_COUNT: 0 non-burnable, 1-13 Anderson, 14-53 Scott-Burgan
 
 /**
  * @brief Build a per-fuel-code lookup table of Rothermel coefficients
@@ -339,7 +339,9 @@ inline constexpr int ROTHERMEL_TABLE_SIZE = 14;
 std::vector<RothermelComputed> build_fuel_rothermel_table(
     amrex::Real moisture_1hr,
     amrex::Real moisture_10hr,
-    amrex::Real moisture_100hr);
+    amrex::Real moisture_100hr,
+    int fuel_set = 0,
+    amrex::Real moisture_live = -1.0);
 
 /**
  * @brief Compute the rate-of-spread field with per-cell Rothermel coefficients
@@ -355,6 +357,8 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
  * @param[in]  fuel_model   Per-cell fuel code MultiFab, or nullptr
  * @param[in]  table        Device pointer to the per-fuel table, or nullptr
  * @param[in]  table_size   Entries in table
+ * @param[in]  fuel_set     Fuel model set the codes belong to (ERF_FuelModels.H); with
+ *                          the Anderson set a code outside 0-13 falls to rc_default as before
  */
 void compute_ros_field(
     amrex::MultiFab& fire_ros,
@@ -363,6 +367,7 @@ void compute_ros_field(
     const RothermelComputed& rc_default,
     const amrex::MultiFab* fuel_model,
     const RothermelComputed* table,
-    int table_size);
+    int table_size,
+    int fuel_set = 0);
 
 #endif

@@ -310,6 +310,15 @@ erf.fire.structures.wind_open_columns = false
 # model 1 in the Rothermel table. Recommended with a fuel map:
 # erf.fire.fuel_map.nonburnable_codes = 0 91 92 93 98 99
 
+# Fuel model set: "anderson13" (default, codes 1-13) or "scott_burgan40" (the
+# Scott and Burgan 40 alongside them, LANDFIRE FBFM40 codes 101-204; 0 and
+# 91-99 non-burnable without listing them). sb40_crosswalk translates the 40 to
+# the 13 at load (the CFBM route). load_from_map starts each cell with its own
+# model's fuel load instead of the uniform one.
+erf.fire.fuel_map.fuel_set = "anderson13"
+erf.fire.fuel_map.sb40_crosswalk = false
+erf.fire.fuel_map.load_from_map = false
+
 # Hold the firebreak cells in the mask as well (they are otherwise only
 # stamped into phi once, which the level-set reinitialisation can erode)
 erf.fire.firebreak.use_mask = false

@@ -25,6 +25,7 @@
 #include <ERF_IgnitionSchedule.H>
 #include <ERF_PolygonIgnition.H>
 #include <ERF_LevelSetEllipse.H>
+#include <ERF_FuelModels.H>
 #include <ERF_FireAcceleration.H>
 // Phase 13A: Per-fuel wind height
 #include <ERF_FuelWindHeight.H>
@@ -530,6 +531,12 @@ public:
      * @param fuel_code Anderson fuel model 1-13 (others fall back to 1).
      */
     amrex::Real burnout_tau_s(int fuel_code) const;
+
+    /// Parameters of the uniform fuel model, erf.fire.fuel_model_id, under the deck's fuel set.
+    FuelModelParams uniform_fuel_params() const
+    {
+        return get_fuel_params(m_params.fuel_model_id, m_params.fuel_map.fuel_set_id(), m_params.moisture_live);
+    }
 
     /**
      * @brief Heat per kilogram of fuel that converts the lagged atmospheric

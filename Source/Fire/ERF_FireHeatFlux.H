@@ -37,6 +37,7 @@
 
 #include <AMReX_MultiFab.H>
 #include <ERF_Rothermel.H>
+#include <ERF_FuelModels.H>
 #include <cmath>
 
 // BURNOUT_ALPHA [s·ft/lb from Rothermel (1983) GTR INT-143].
@@ -191,8 +192,10 @@ amrex::Real deplete_fuel_load(
  * @param[in] tau_burnout_uniform Fuel-model burnout e-folding time [s] replacing the
  *                                residence time when > 0 (erf.fire.burnout_model = sfire,
  *                                uniform fuel)
- * @param[in] d_tau_burnout       Device table of that time by fuel code (index 1-13) for a
- *                                spatial fuel map; nullptr keeps the residence time
+ * @param[in] d_tau_burnout       Device table of that time by fuel slot (ERF_FuelModels.H) for
+ *                                a spatial fuel map; nullptr keeps the residence time
+ * @param[in] fuel_set            Fuel model set of the map's codes (ERF_FuelModels.H)
+ * @param[in] M_live              Live herbaceous moisture for the Scott-Burgan curing transfer
  */
 inline void fill_fire_heat_flux(
     amrex::MultiFab& fire_heat_flux,
@@ -205,7 +208,9 @@ inline void fill_fire_heat_flux(
     amrex::Real dt_fire_s,
     const amrex::MultiFab* fuel_model_mf = nullptr,
     amrex::Real tau_burnout_uniform = 0.0,
-    const amrex::Real* d_tau_burnout = nullptr)
+    const amrex::Real* d_tau_burnout = nullptr,
+    int fuel_set = 0,
+    amrex::Real M_live = -1.0)
 {
     using namespace amrex;
 
@@ -239,7 +244,7 @@ inline void fill_fire_heat_flux(
 
                 // Get per-cell fuel code and look up heat content
                 int fuel_code = static_cast<int>(fuel_code_arr(i, j, k) + 0.5_rt);
-                FuelModelParams fp_cell = get_anderson_fuel_params(fuel_code);
+                FuelModelParams fp_cell = get_fuel_params(fuel_code, fuel_set, M_live);
                 Real h_fuel_cell = fp_cell.heat_content * 2326.0_rt;
 
                 // Per-cell residence time: floor ROS at 1e-6 m/s to avoid divide-by-zero;
@@ -247,8 +252,9 @@ inline void fill_fire_heat_flux(
                 Real ros_cell  = amrex::max(ros_arr(i, j, k), 1.0e-6_rt);
                 Real tau_cell  = amrex::max(dx_fire / ros_cell, tau_sav_floor);
                 if (d_tau_burnout != nullptr) {
-                    const int fc = amrex::max(1, amrex::min(fuel_code, 13));
-                    tau_cell = d_tau_burnout[fc];
+                    int slot = fuel_slot(fuel_code);
+                    if (slot < 1) slot = 1;   // unknown codes: model 1, as the heat content does
+                    tau_cell = d_tau_burnout[slot];
                 }
 
                 Q_arr(i, j, k)    = compute_heat_flux_cell(phi_val, w_cur, h_fuel_cell, tau_cell);

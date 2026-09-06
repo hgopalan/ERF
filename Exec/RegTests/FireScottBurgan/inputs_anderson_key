@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Same with the fuel set written out: must reproduce inputs_anderson line for line.
+erf.fire.fuel_map.fuel_set = "anderson13"

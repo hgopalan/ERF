@@ -3748,6 +3748,16 @@ Fuel and moisture
 | **erf.fire.fuel_map.nonburnable_codes**        | Fuel codes that are non-burnable; empty keeps the fall-    | Integers                       | none                   |
 |                                                | through to fuel model 1                                    |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.fuel_map.fuel_set**                 | Fuel model set: the Anderson 13, or the Scott and Burgan   | "anderson13",                  | "anderson13"           |
+|                                                | 40 (LANDFIRE FBFM40 codes 101-204, 91-99 non-burnable)     | "scott_burgan40"               |                        |
+|                                                | alongside them                                             |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.fuel_map.sb40_crosswalk**           | Translate the Scott-Burgan codes to the Anderson 13 at     | Boolean                        | false                  |
+|                                                | load (the CFBM route) instead of using them natively       |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.fuel_map.load_from_map**            | Start each cell with its own model's fuel load instead of  | Boolean                        | false                  |
+|                                                | the uniform model's                                        |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.rothermel_per_fuel**                | Evaluate Rothermel coefficients per cell from the fuel map | Boolean                        | false                  |
 |                                                | instead of fuel_model_id                                   |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
