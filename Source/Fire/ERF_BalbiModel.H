@@ -277,7 +277,7 @@ BalbiComputed compute_balbi_params(
             const amrex::Real a_r = amrex::min(S / two_pi, amrex::Real(1.0));   // eq. 17
 
             bc.A_rad   = a_r * bp.chi_0 * h_si / (4.0 * q);                     // eq. 16
-            bc.Rb_coef = amrex::min(S / (0.5 * two_pi), amrex::Real(1.0))
+            bc.Rb_coef = amrex::min(static_cast<amrex::Real>(S / (0.5 * two_pi)),  amrex::Real(1.0))
                        * bp.sigma_B / (beta * rho_v * q);                       // eq. 13
             bc.Rc_coef = sigma_m * h_si / (q * bp.tau_0)
                        * amrex::min(delta_m, two_pi / (sigma_m * beta));        // eq. 27
@@ -500,7 +500,7 @@ amrex::Real balbi_ros_cell(const BalbiComputed& bc,
     const amrex::Real sin_alpha = tan_alpha * inv_sec;
     const amrex::Real cos_alpha = inv_sec;
 
-    return amrex::max(bc.A_coeff * (1.0 + sin_alpha - cos_alpha), amrex::Real(0.0));
+    return amrex::max(static_cast<amrex::Real>(bc.A_coeff * (1.0 + sin_alpha - cos_alpha)),  amrex::Real(0.0));
 }
 
 /**

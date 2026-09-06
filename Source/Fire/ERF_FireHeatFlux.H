@@ -61,7 +61,7 @@ amrex::Real compute_residence_time_s(amrex::Real sigma_ft, amrex::Real rho_p_lbf
 {
     if (sigma_ft <= 0.0 || rho_p_lbft3 <= 0.0) { return 1.0; }
     amrex::Real tau = FIRE_BURNOUT_ALPHA * rho_p_lbft3 / sigma_ft;
-    return amrex::max(tau, 1.0);
+    return amrex::max(static_cast<amrex::Real>(tau), static_cast<amrex::Real>(1.0));
 }
 
 /**
@@ -105,7 +105,7 @@ amrex::Real compute_per_class_consumption_frac(
     }
 
     amrex::Real f_c = (w_d1*f_d1 + w_d10*f_d10 + w_d100*f_d100 + w_lh*f_lh + w_lw*f_lw) / total_w;
-    return amrex::max(0.0, amrex::min(f_c, 1.0));
+    return amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(f_c), static_cast<amrex::Real>(1.0))));
 }
 
 /**
@@ -132,7 +132,7 @@ amrex::Real compute_heat_flux_cell(
     if (phi >= 0.0)              return 0.0;
     if (fuel_load_remain <= 0.0) return 0.0;
     if (tau_res_s <= 0.0)        return 0.0;
-    return amrex::max(0.0, fuel_load_remain * h_fuel_J_per_kg / tau_res_s);
+    return amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(fuel_load_remain * h_fuel_J_per_kg / tau_res_s));
 }
 
 /**
@@ -158,7 +158,7 @@ amrex::Real deplete_fuel_load(
 {
     if (phi >= 0.0)                            return fuel_load_remain;
     if (tau_res_s <= 0.0 || dt_fire_s <= 0.0) return fuel_load_remain;
-    return amrex::max(0.0, fuel_load_remain * std::exp(-dt_fire_s / tau_res_s));
+    return amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(fuel_load_remain * std::exp(-dt_fire_s / tau_res_s)));
 }
 
 /**

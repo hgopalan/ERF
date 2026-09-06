@@ -302,7 +302,7 @@ amrex::Real rothermel_ros_cell(
     // Rate of spread: R = R0 * (1 + φ_w + φ_s)
     amrex::Real ROS = rc.R0 * (1.0 + phi_w + phi_s);
     
-    return amrex::max(ROS, 0.0);
+    return amrex::max(static_cast<amrex::Real>(ROS), static_cast<amrex::Real>(0.0));
 }
 
 /**

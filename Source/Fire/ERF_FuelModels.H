@@ -473,7 +473,7 @@ FuelModelParams get_scott_burgan_fuel_params(int code, amrex::Real M_live = -1.0
     }
     if (fp.w_lh > 0.0 && M_live >= 0.0) {
         // Dynamic model: the cured fraction of the herbaceous load joins the 1-h dead class.
-        const amrex::Real T = amrex::max(amrex::Real(0.0), amrex::min(amrex::Real(1.0), (1.2 - M_live) / 0.9));
+        const amrex::Real T = amrex::max(amrex::Real(0.0), amrex::min(amrex::Real(1.0), static_cast<amrex::Real>((1.2 - M_live) / 0.9)));
         fp.w_d1 += T * fp.w_lh;
         fp.w_lh *= (1.0 - T);
     }

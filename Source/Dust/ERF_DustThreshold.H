@@ -82,7 +82,7 @@ amrex::Real compute_ustar_t_bagnold(amrex::Real A, amrex::Real rho_p,
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_moisture_inhibition(amrex::Real w) noexcept
 {
-    w = amrex::min(amrex::max(w, 0.0), 1.0);
+    w = amrex::min(static_cast<amrex::Real>(amrex::max(static_cast<amrex::Real>(w), static_cast<amrex::Real>(0.0))), static_cast<amrex::Real>(1.0));
     return 1.0 + DustThresholdConst::BETA_MOIST * w;
 }
 
@@ -98,7 +98,7 @@ amrex::Real compute_moisture_inhibition(amrex::Real w) noexcept
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_suppression_factor(amrex::Real s) noexcept
 {
-    s = amrex::min(amrex::max(s, 0.0), 1.0);
+    s = amrex::min(static_cast<amrex::Real>(amrex::max(static_cast<amrex::Real>(s), static_cast<amrex::Real>(0.0))), static_cast<amrex::Real>(1.0));
     return 1.0 + DustThresholdConst::GAMMA_SUPP * s;
 }
 
@@ -144,9 +144,9 @@ amrex::Real compute_ustar_t_full(amrex::Real ustar_t_base,
     // Chemistry enhancement from crust and efflorescence (Phase 4).
     // Higher crust_index and efflorescence both increase the threshold (harder to emit).
     // Reference: Marticorena & Bergametti (1995), https://doi.org/10.1029/95JD00690
-    amrex::Real f_chem = (1.0 + alpha_crust * amrex::min(amrex::max(crust_index,  0.0), 1.0))
-                       * (1.0 + alpha_efflor * amrex::min(amrex::max(efflorescence,0.0), 1.0));
-    f_chem = amrex::max(f_chem, 0.01);
+    amrex::Real f_chem = (1.0 + alpha_crust * amrex::min(static_cast<amrex::Real>(amrex::max(static_cast<amrex::Real>(crust_index), static_cast<amrex::Real>(0.0))), static_cast<amrex::Real>(1.0)))
+                       * (1.0 + alpha_efflor * amrex::min(static_cast<amrex::Real>(amrex::max(static_cast<amrex::Real>(efflorescence), static_cast<amrex::Real>(0.0))), static_cast<amrex::Real>(1.0)));
+    f_chem = amrex::max(static_cast<amrex::Real>(f_chem), static_cast<amrex::Real>(0.01));
 
     amrex::Real f_moist = compute_moisture_inhibition(surface_moisture);
     amrex::Real f_supp  = compute_suppression_factor(suppression);
@@ -158,7 +158,7 @@ amrex::Real compute_ustar_t_full(amrex::Real ustar_t_base,
     if (slope_mag > 0.0) {
         amrex::Real cos_beta = 1.0 / std::sqrt(1.0 + slope_mag * slope_mag);
         amrex::Real slope_factor =
-            std::sqrt(amrex::max(0.1, cos_beta + slope_mag / DustThresholdConst::TAN_REPOSE));
+            std::sqrt(amrex::max(static_cast<amrex::Real>(0.1), static_cast<amrex::Real>(cos_beta + slope_mag / DustThresholdConst::TAN_REPOSE)));
         ut *= slope_factor;
     }
 

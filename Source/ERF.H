@@ -1358,7 +1358,7 @@ private:
     static double last_check_file_time;
 
 #ifdef ERF_ENABLE_FIRE
-    static amrex::Real last_fire_plot_time;
+    static double last_fire_plot_time;   // double: writeNow() takes double&, as for the other plot times
 #endif
 
     amrex::Vector<int> last_subvol_step;

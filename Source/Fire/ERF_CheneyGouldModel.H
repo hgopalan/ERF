@@ -59,15 +59,15 @@ inline CheneyGouldComputed compute_cheney_gould_params(
     CheneyGouldComputed cgc;
     
     // Clamp inputs to valid ranges
-    amrex::Real moisture = amrex::max(1.0, amrex::min(cgp.moisture, 40.0));  // [%]
-    amrex::Real curing   = amrex::max(0.0, amrex::min(cgp.curing, 1.0));      // [0-1]
+    amrex::Real moisture = amrex::max(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(cgp.moisture), static_cast<amrex::Real>(40.0))));  // [%]
+    amrex::Real curing   = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(cgp.curing), static_cast<amrex::Real>(1.0))));      // [0-1]
 
     // CSIRO grassfire relations for backing ROS
     // Simplified empirical fit: ros_backing increases with curing, decreases with moisture
     // Base backing rate at full curing: ~0.08 m/s
     amrex::Real base_backing = 0.08 * curing;
     cgc.ros_backing = base_backing * std::exp(-0.01 * moisture);  // Exponential moisture decay
-    cgc.ros_backing = amrex::max(cgc.ros_backing, 0.001);  // Minimum backing
+    cgc.ros_backing = amrex::max(static_cast<amrex::Real>(cgc.ros_backing), static_cast<amrex::Real>(0.001));  // Minimum backing
 
     // Flank ROS (perpendicular to fire spread)
     // Typically 0.3 of forward ROS; CSIRO gives empirical relations
@@ -111,7 +111,7 @@ amrex::Real cheney_gould_ros(
     amrex::Real moisture_factor = moisture_scale / (moisture + 1.0);
     
     amrex::Real ros_forward = ros_backing * (1.0 + wind_factor) * moisture_factor;
-    return amrex::max(ros_forward, 0.0);
+    return amrex::max(static_cast<amrex::Real>(ros_forward), static_cast<amrex::Real>(0.0));
 }
 
 /**
@@ -219,7 +219,7 @@ inline void fill_cheney_gould_ros(
                 10.0,   // placeholder: default moisture [%]
                 1.0);   // placeholder: default curing [0-1]
             
-            ros = amrex::max(ros, 0.0);
+            ros = amrex::max(static_cast<amrex::Real>(ros), static_cast<amrex::Real>(0.0));
             ros_arr(i, j, k, 0) = ros;
         });
     }
@@ -277,7 +277,7 @@ inline void fill_cheney_gould_ros_with_slope(
                 10.0,   // placeholder: default moisture [%]
                 1.0);   // placeholder: default curing [0-1]
             
-            ros = amrex::max(ros, 0.0);
+            ros = amrex::max(static_cast<amrex::Real>(ros), static_cast<amrex::Real>(0.0));
             ros_arr(i, j, k, 0) = ros;
         });
     }

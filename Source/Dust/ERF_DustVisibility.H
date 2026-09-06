@@ -64,7 +64,7 @@ inline void compute_visibility(
                 Real b_ext = k_ext * pm10_kg_m3;
                 visibility = DustVisibilityConst::KOSCHMIEDER_COEFF / b_ext;
                 // Floor at 10 m
-                visibility = amrex::max(visibility, 10.0);
+                visibility = amrex::max(static_cast<amrex::Real>(visibility), static_cast<amrex::Real>(10.0));
                 // Cap at maximum
                 visibility = amrex::min(visibility, vis_max_m);
             }

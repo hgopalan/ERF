@@ -67,7 +67,7 @@ void fill_dust_wind_from_interpolation(
             Real alpha = 0.0;
             if (z_hi > z_lo) {
                 alpha = (z_target - z_lo) / (z_hi - z_lo);
-                alpha = amrex::max(0.0, amrex::min(1.0, alpha));
+                alpha = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(alpha))));
             }
 
             int k_hi = k_lo + 1;

@@ -65,7 +65,7 @@ inline void fill_dust_conc_from_atm(
         const int comp = dust_comp;
         const int kl   = klo;
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-            conc(i,j,k) = amrex::max(cons(i/C, j/C, kl, comp), 0.0);
+            conc(i,j,k) = amrex::max(static_cast<amrex::Real>(cons(i/C, j/C, kl, comp)), static_cast<amrex::Real>(0.0));
         });
     }
 }

@@ -313,8 +313,8 @@ bool read_terrain_onto_fire_grid(
             Real dx_x = (x_ptr[ix_hi] > x_ptr[ix_lo]) ? (x - x_ptr[ix_lo]) / (x_ptr[ix_hi] - x_ptr[ix_lo]) : 0.0;
             Real dy_y = (y_ptr[iy_hi] > y_ptr[iy_lo]) ? (y - y_ptr[iy_lo]) / (y_ptr[iy_hi] - y_ptr[iy_lo]) : 0.0;
 
-            dx_x = std::max(0.0, std::min(1.0, dx_x));
-            dy_y = std::max(0.0, std::min(1.0, dy_y));
+            dx_x = std::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(std::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(dx_x))));
+            dy_y = std::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(std::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(dy_y))));
 
             // Bilinear interpolation
             Real z_lo = z_ll * (1.0 - dx_x) + z_lr * dx_x;

@@ -63,7 +63,7 @@ amrex::Real van_wagner_critical_intensity(amrex::Real C_BH, amrex::Real foliar_m
         return LARGE_INTENSITY;
     }
 
-    C_BH = amrex::max(C_BH, 0.1);
+    C_BH = amrex::max(static_cast<amrex::Real>(C_BH), static_cast<amrex::Real>(0.1));
     amrex::Real FMC_excess_pct = amrex::max((foliar_moisture - M_c) * 100.0, 0.0);
     return 0.010 * C_BH * (460.0 + 25.9 * FMC_excess_pct);
 }
@@ -95,14 +95,14 @@ amrex::Real cruz_crown_ros(amrex::Real U_10_ms, amrex::Real C_BD, amrex::Real mo
 
     // Convert wind from m/s to km/h
     amrex::Real U_kmh = U_10_ms * 3.6;
-    U_kmh = amrex::max(U_kmh, 1.0);  // Minimum 1 km/h (model not calibrated at calm)
+    U_kmh = amrex::max(static_cast<amrex::Real>(U_kmh), static_cast<amrex::Real>(1.0));  // Minimum 1 km/h (model not calibrated at calm)
 
     // Convert moisture from fraction to percent
     amrex::Real MC10_pct = moisture_10hr * 100.0;
 
     // Clamp inputs to valid ranges
-    C_BD = amrex::max(C_BD, 0.01);
-    MC10_pct = amrex::max(MC10_pct, 0.0);
+    C_BD = amrex::max(static_cast<amrex::Real>(C_BD), static_cast<amrex::Real>(0.01));
+    MC10_pct = amrex::max(static_cast<amrex::Real>(MC10_pct), static_cast<amrex::Real>(0.0));
 
     // Cruz formula: R [m/min] = 11.02 * U^0.90 * CBD^0.19 * exp(-0.17 * MC10)
     constexpr amrex::Real A_COEFF  = 11.02;   // leading coefficient
@@ -117,7 +117,7 @@ amrex::Real cruz_crown_ros(amrex::Real U_10_ms, amrex::Real C_BD, amrex::Real mo
 
     // Convert m/min to m/s
     amrex::Real R_m_s = R_m_min / 60.0;
-    return amrex::max(0.0, R_m_s);
+    return amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(R_m_s));
 }
 
 /**
@@ -135,7 +135,7 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_rothermel_1991_crown_ros(amrex::Real R_surface_ms) noexcept
 {
     constexpr amrex::Real ROTHERMEL_MULT = 3.34;
-    return amrex::max(ROTHERMEL_MULT * R_surface_ms, 0.0);
+    return amrex::max(static_cast<amrex::Real>(ROTHERMEL_MULT * R_surface_ms), static_cast<amrex::Real>(0.0));
 }
 
 /**
@@ -155,14 +155,14 @@ amrex::Real compute_van_wagner_proxy_ros(amrex::Real C_BD, amrex::Real foliar_mo
     amrex::Real FMC_pct = foliar_moisture * 100.0;
 
     // Clamp CBD
-    C_BD = amrex::max(C_BD, 0.01);
+    C_BD = amrex::max(static_cast<amrex::Real>(C_BD), static_cast<amrex::Real>(0.01));
 
     // Base crown ROS [m/min] = 3.0 / CBD
     amrex::Real R_m_min = 3.0 / C_BD;
 
     // Moisture factor (reduction for higher moisture)
     amrex::Real mf = 1.0 - (FMC_pct - 100.0) / 200.0;
-    mf = amrex::max(0.3, amrex::min(1.0, mf));
+    mf = amrex::max(static_cast<amrex::Real>(0.3), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(mf))));
 
     R_m_min *= mf;
 
@@ -195,7 +195,7 @@ amrex::Real compute_van_wagner_passive_blend(
 {
     if (I_o_kwm < 1.0e-6 || I_B_kwm <= 0.0) return R_surface_ms;
 
-    amrex::Real ratio = amrex::max(I_B_kwm / I_o_kwm, 0.0);
+    amrex::Real ratio = amrex::max(static_cast<amrex::Real>(I_B_kwm / I_o_kwm), static_cast<amrex::Real>(0.0));
     amrex::Real CF = amrex::min(std::pow(ratio, 2.0 / 3.0), 1.0);
     return R_surface_ms * (1.0 - CF) + amrex::max(R_crown_active_ms, R_surface_ms) * CF;
 }
@@ -225,9 +225,9 @@ amrex::Real compute_crown_fraction_burned(
     amrex::Real R_active_crown) noexcept
 {
     // Ensure positive rates
-    R_total       = amrex::max(R_total,       0.0);
-    R_surface     = amrex::max(R_surface,     0.0);
-    R_active_crown = amrex::max(R_active_crown, 0.0);
+    R_total       = amrex::max(static_cast<amrex::Real>(R_total), static_cast<amrex::Real>(0.0));
+    R_surface     = amrex::max(static_cast<amrex::Real>(R_surface), static_cast<amrex::Real>(0.0));
+    R_active_crown = amrex::max(static_cast<amrex::Real>(R_active_crown), static_cast<amrex::Real>(0.0));
 
     // If active crown ROS not greater than surface, no crown fire
     if (R_active_crown <= R_surface + 1.0e-8) {
@@ -238,7 +238,7 @@ amrex::Real compute_crown_fraction_burned(
     amrex::Real CFB = (R_total - R_surface) / (R_active_crown - R_surface);
 
     // Clamp to valid range [0, 1]
-    CFB = amrex::max(0.0, amrex::min(1.0, CFB));
+    CFB = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(CFB))));
 
     return CFB;
 }
@@ -358,8 +358,8 @@ inline void fill_crown_heat_flux(amrex::MultiFab& fire_heat_flux,
                 }
 
                 // Crown burnout residence time [s]
-                amrex::Real R_safe    = amrex::max(R_crown_ms, 1.0e-10);
-                amrex::Real tau_crown = amrex::max(canopy_depth / R_safe, 1.0);
+                amrex::Real R_safe    = amrex::max(static_cast<amrex::Real>(R_crown_ms), static_cast<amrex::Real>(1.0e-10));
+                amrex::Real tau_crown = amrex::max(static_cast<amrex::Real>(canopy_depth / R_safe), static_cast<amrex::Real>(1.0));
 
                 // Heat flux from crown fuel [W/m²]
                 amrex::Real Q_crown = w_crown(i, j, k) * h_crown_J_per_kg / tau_crown;
@@ -370,7 +370,7 @@ inline void fill_crown_heat_flux(amrex::MultiFab& fire_heat_flux,
                 w_crown(i, j, k) *= decay_factor;
 
                 // Floor at zero
-                w_crown(i, j, k) = amrex::max(0.0, w_crown(i, j, k));
+                w_crown(i, j, k) = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(w_crown(i, j, k)));
             }
         });
     }

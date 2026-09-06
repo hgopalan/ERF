@@ -45,7 +45,7 @@ inline void compute_silica_concentration(
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
             // PM10 is in µg/m³, convert to mg/m³: multiply by 1e-3
             // RCS = PM10 [µg/m³] * 1e-3 [mg/µg] * silica_fraction [-]
-            rcs(i,j,k) = amrex::max(pm10(i,j,k), 0.0) * 1.0e-3 * silica_fraction;
+            rcs(i,j,k) = amrex::max(static_cast<amrex::Real>(pm10(i,j,k)), static_cast<amrex::Real>(0.0)) * 1.0e-3 * silica_fraction;
         });
     }
 }

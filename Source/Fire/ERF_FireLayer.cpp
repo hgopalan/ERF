@@ -2088,7 +2088,7 @@ void FireLayer::report_exposure()
         if (burned) {
             ++reached;
             i_top  = std::max(i_top,  imax[s]);
-            hl_top = std::max(hl_top, hl_max[s] * 1.0e-6);
+            hl_top = std::max(static_cast<amrex::Real>(hl_top), static_cast<amrex::Real>(hl_max[s] * 1.0e-6));
             if (!m_exposure_reported[s]) {
                 amrex::Print() << "[FIRE EXPOSURE] structure " << s
                                << " x=" << xc << " y=" << yc

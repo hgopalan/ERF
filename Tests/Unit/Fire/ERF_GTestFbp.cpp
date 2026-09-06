@@ -1,5 +1,9 @@
 #include <gtest/gtest.h>
 #include <cmath>
+#include <AMReX_REAL.H>
+
+/// Round-off tolerance of the build precision: 1e-12 in double, 1e-5 in single.
+static constexpr double TOL = (sizeof(amrex::Real) == 8) ? 1e-12 : 1e-5;
 
 #include "ERF_FbpModel.H"
 
@@ -21,14 +25,16 @@ static FbpComputed make(int type, double ffmc, double bui, double curing = 60.0,
 
 TEST(Fbp, BuildupEffectAndCuring)
 {
-    EXPECT_NEAR(fbp_buildup_effect(FBP_C2, 64.0), 1.0, 1e-12);      // BUI = BUI0
+    EXPECT_NEAR(fbp_buildup_effect(FBP_C2, 64.0), 1.0, TOL);      // BUI = BUI0
     EXPECT_LT(fbp_buildup_effect(FBP_C2, 30.0), 1.0);                // drier than BUI0: less
     EXPECT_GT(fbp_buildup_effect(FBP_C2, 120.0), 1.0);
-    EXPECT_NEAR(fbp_buildup_effect(FBP_O1B, 10.0), 1.0, 1e-12);     // grass: none
-    EXPECT_NEAR(fbp_curing_factor(100.0), 1.0, 1e-12);               // fully cured
-    EXPECT_NEAR(fbp_curing_factor(58.8), 0.176, 1e-12);              // the two branches meet
-    EXPECT_NEAR(fbp_curing_factor(58.8 - 1e-9), 0.005 * (std::exp(0.061 * 58.8) - 1.0), 1e-6);
-    EXPECT_NEAR(fbp_curing_factor(0.0), 0.0, 1e-12);
+    EXPECT_NEAR(fbp_buildup_effect(FBP_O1B, 10.0), 1.0, TOL);     // grass: none
+    EXPECT_NEAR(fbp_curing_factor(100.0), 1.0, TOL);               // fully cured
+    // The two published branches, each side of the 58.8 % join (they differ by
+    // 4e-4 there, and in single precision 58.8 itself lands on the exponential side)
+    EXPECT_NEAR(fbp_curing_factor(58.81), 0.176 + 0.02 * 0.01, TOL);
+    EXPECT_NEAR(fbp_curing_factor(58.7), 0.005 * (std::exp(0.061 * 58.7) - 1.0), TOL);
+    EXPECT_NEAR(fbp_curing_factor(0.0), 0.0, TOL);
 }
 
 TEST(Fbp, MixedwoodLimitsAndWind)
@@ -37,8 +43,8 @@ TEST(Fbp, MixedwoodLimitsAndWind)
     const FbpComputed m1_100 = make(FBP_M1, 90, 60, 60, 100.0), m1_0 = make(FBP_M1, 90, 60, 60, 0.0);
     // the buildup effects differ (q, BUI0), so compare the surface rates before BE
     const double isi = fbp_isi(c2.fF, 20.0);
-    EXPECT_NEAR(fbp_rsi(m1_100, isi), fbp_rsi(c2, isi), 1e-12);
-    EXPECT_NEAR(fbp_rsi(m1_0, isi), fbp_rsi(d1, isi), 1e-12);
+    EXPECT_NEAR(fbp_rsi(m1_100, isi), fbp_rsi(c2, isi), TOL);
+    EXPECT_NEAR(fbp_rsi(m1_0, isi), fbp_rsi(d1, isi), TOL);
     // wind speeds the fire; the FFMC function is the published value at FFMC 90 (about 20.6)
     EXPECT_LT(fbp_ros(c2, 0.0, 0.0), fbp_ros(c2, 20.0 / 3.6, 0.0));
     EXPECT_NEAR(c2.fF, 20.6, 0.2);
@@ -56,13 +62,13 @@ TEST(Fbp, SlopeEquivalentWind)
         // Exact for the basic types and grass; the mixedwood types weight the
         // C-2 and D-1 inverse curves (the system's own prescription), which
         // does not invert the weighted rate exactly.
-        const double tol = (type == FBP_M1) ? 0.15 * sf : 1e-6;
+        const double tol = (type == FBP_M1) ? 0.15 * sf : (TOL * 1e6);
         EXPECT_NEAR(sloped / flat, sf, tol) << "type " << type;
-        EXPECT_NEAR(fbp_ros(s, 0.0, -0.3), flat, 1e-12);            // downslope: no effect
+        EXPECT_NEAR(fbp_ros(s, 0.0, -0.3), flat, TOL);            // downslope: no effect
         EXPECT_GE(fbp_slope_equivalent_wind(s, 0.3), 0.0);
     }
     FbpComputed off = make(FBP_C2, 90, 60); off.use_slope = false;
-    EXPECT_NEAR(fbp_ros(off, 0.0, 0.5), fbp_ros(off, 0.0, 0.0), 1e-12);
+    EXPECT_NEAR(fbp_ros(off, 0.0, 0.5), fbp_ros(off, 0.0, 0.0), TOL);
 }
 
 TEST(Fbp, Names)

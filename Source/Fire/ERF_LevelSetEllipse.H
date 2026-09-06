@@ -71,7 +71,7 @@ SpreadEllipse spread_ellipse(amrex::Real R, amrex::Real U_mps,
     amrex::Real LB = (lw_fixed > 0.0) ? lw_fixed : anderson_LW_ratio(U_mps * 2.23694);
     LB = amrex::max(amrex::Real(1.0), amrex::min(LB, lw_max));
     e.LB = LB;
-    const amrex::Real s = std::sqrt(amrex::max(LB * LB - 1.0, amrex::Real(0.0)));
+    const amrex::Real s = std::sqrt(amrex::max(static_cast<amrex::Real>(LB * LB - 1.0),  amrex::Real(0.0)));
     e.HB = (LB - s > 1.0e-12) ? (LB + s) / (LB - s) : 1.0e12;
     const amrex::Real Rb = R / e.HB;
     e.b = 0.5 * (R + Rb);

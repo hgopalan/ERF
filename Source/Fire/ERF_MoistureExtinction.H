@@ -51,7 +51,7 @@ amrex::Real compute_moisture_of_extinction(
 
     // Apply reasonable bounds
     M_x = amrex::max(M_x, M_x_min);
-    M_x = amrex::min(M_x, 0.45);  // M_X_MAX
+    M_x = amrex::min(static_cast<amrex::Real>(M_x), static_cast<amrex::Real>(0.45));  // M_X_MAX
 
     return M_x;
 }
@@ -106,7 +106,7 @@ amrex::Real compute_moisture_damping(amrex::Real M_f, amrex::Real M_x) noexcept
     amrex::Real eta_M = 1.0 - 2.59 * ratio + 5.11 * ratio2 - 3.52 * ratio3;
 
     // Clamp to [0, 1]
-    eta_M = amrex::max(0.0, amrex::min(eta_M, 1.0));
+    eta_M = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(eta_M), static_cast<amrex::Real>(1.0))));
 
     return eta_M;
 }

@@ -47,6 +47,7 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
                        const MultiFab* qheating_rates,
                        const MultiFab* Q_fire_atm)
 {
+    amrex::ignore_unused(qheating_rates);
     // Shadow the namespace-scope constants from ERF_Constants.H with local copies.
     // Passing those constants straight to amrex::min/max binds a const reference,
     // which odr-uses them; under CUDA relocatable device code nvcc then wants a
