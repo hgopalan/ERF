@@ -30,8 +30,10 @@ TEST(Fbp, BuildupEffectAndCuring)
     EXPECT_GT(fbp_buildup_effect(FBP_C2, 120.0), 1.0);
     EXPECT_NEAR(fbp_buildup_effect(FBP_O1B, 10.0), 1.0, TOL);     // grass: none
     EXPECT_NEAR(fbp_curing_factor(100.0), 1.0, TOL);               // fully cured
-    EXPECT_NEAR(fbp_curing_factor(58.8), 0.176, TOL);              // the two branches meet
-    EXPECT_NEAR(fbp_curing_factor(58.8 - (TOL * 1e3)), 0.005 * (std::exp(0.061 * 58.8) - 1.0), (TOL * 1e6));
+    // The two published branches, each side of the 58.8 % join (they differ by
+    // 4e-4 there, and in single precision 58.8 itself lands on the exponential side)
+    EXPECT_NEAR(fbp_curing_factor(58.81), 0.176 + 0.02 * 0.01, TOL);
+    EXPECT_NEAR(fbp_curing_factor(58.7), 0.005 * (std::exp(0.061 * 58.7) - 1.0), TOL);
     EXPECT_NEAR(fbp_curing_factor(0.0), 0.0, TOL);
 }
 
