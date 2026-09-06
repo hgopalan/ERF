@@ -472,6 +472,23 @@ void FireLayer::initialize(const ERF& erf,
                                << "R0=" << m_bs_default.r_0 * 0.00508_rt << " m/s\n";
             }
         }
+        if (m_params.uses_model("fbp")) {
+            const auto& fb = m_params.fbp;
+            m_fbp.type      = fbp_type_from_name(fb.fuel_type);
+            m_fbp.fF        = fbp_ffmc_function(fb.ffmc);
+            m_fbp.be        = fbp_buildup_effect(m_fbp.type, fb.bui);
+            m_fbp.cf        = (m_fbp.type == FBP_O1A || m_fbp.type == FBP_O1B) ? fbp_curing_factor(fb.curing) : 1.0;
+            m_fbp.pc        = fb.pc;
+            m_fbp.pdf       = fb.pdf;
+            m_fbp.use_slope = fb.use_slope;
+            if (m_params.fire_debug) {
+                amrex::Print() << "[FIRE DEBUG] FBP: fuel type " << fb.fuel_type << " FFMC=" << fb.ffmc
+                               << " f(F)=" << m_fbp.fF << " BUI=" << fb.bui << " BE=" << m_fbp.be
+                               << " CF=" << m_fbp.cf << " wind_source=" << (fb.wind_source == 1 ? "midflame" : "reference")
+                               << " (wind_ref_ht=" << m_params.wind_ref_ht << " m; the system wants the 10 m wind)"
+                               << " ROS at 0 and 20 km/h, flat: " << fbp_ros(m_fbp, 0.0, 0.0) << " " << fbp_ros(m_fbp, 20.0 / 3.6, 0.0) << " m/s\n";
+            }
+        }
         if (m_params.uses_model("macarthur")) {
             if (m_params.fire_debug) {
                 amrex::Print() << "[FIRE DEBUG] ROS model: MacArthur (1966) Australian formula\n";
@@ -918,7 +935,10 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                           ls_grad);
             } else if (generic_directional) {
                 const DirectionalRosState dir_state = make_directional_state(m_params.ros_model);
-                advect_levelset_directional_rk3(*fire_phi, *fire_wind_eff,
+                // FBP reads the reference-height wind unless told otherwise;
+                // every other model takes the midflame wind.
+                const bool fbp_ref = (m_params.ros_model == "fbp") && (m_params.fbp.wind_source == 0);
+                advect_levelset_directional_rk3(*fire_phi, fbp_ref ? *fire_wind_ref : *fire_wind_eff,
                                                 *fire_slopes, m_fg.geom, dt_ls,
                                                 m_params.levelset_eps_visc,
                                                 dir_state, fire_nonburnable.get(), wall_extrap,
@@ -1676,6 +1696,8 @@ void FireLayer::fill_ros_for_model(const std::string& model,
                         m_params.moisture_dynamic);
     } else if (model == "macarthur") {
         fill_macarthur_ros(out, *fire_wind_eff);
+    } else if (model == "fbp") {
+        fill_fbp_ros(out, (m_params.fbp.wind_source == 1) ? *fire_wind_eff : *fire_wind_ref, *fire_slopes, m_fbp);
     } else {
         // Default: Rothermel (1972). The per-fuel table is empty unless
         // rothermel_per_fuel is set on a spatial fuel map, in which case the
@@ -1856,6 +1878,9 @@ DirectionalRosState FireLayer::make_directional_state(const std::string& model) 
         st.bs    = m_bs_default;
     } else if (model == "macarthur") {
         st.model = DIRECTIONAL_ROS_MACARTHUR;
+    } else if (model == "fbp") {
+        st.model = DIRECTIONAL_ROS_FBP;
+        st.fbp   = m_fbp;
     } else if (model == "cheney_gould") {
         st.model       = DIRECTIONAL_ROS_CHENEY_GOULD;
         st.cgc         = m_cgc;

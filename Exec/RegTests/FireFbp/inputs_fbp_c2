@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# FBP C-2 boreal spruce, FFMC 90, BUI 60, wind from the 10 m reference height.
+erf.fire.ros_model = "fbp"
+erf.fire.fbp.fuel_type = "C2"
+erf.fire.fbp.ffmc = 90.0
+erf.fire.fbp.bui = 60.0

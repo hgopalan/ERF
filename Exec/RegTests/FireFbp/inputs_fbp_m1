@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# FBP M-1 mixedwood at 60 % conifer: weighted between C-2 and D-1.
+erf.fire.ros_model = "fbp"
+erf.fire.fbp.fuel_type = "M1"
+erf.fire.fbp.ffmc = 90.0
+erf.fire.fbp.bui = 60.0
+erf.fire.fbp.pc = 60.0
