@@ -26,6 +26,7 @@
 #include <ERF_PolygonIgnition.H>
 #include <ERF_LevelSetEllipse.H>
 #include <ERF_FuelModels.H>
+#include <ERF_FbpModel.H>
 #include <ERF_FireAcceleration.H>
 // Phase 13A: Per-fuel wind height
 #include <ERF_FuelWindHeight.H>
@@ -755,6 +756,7 @@ private:
     // Phase 13B: Pre-computed ROS model coefficients (set in initialize, used in advance)
     BalbiComputed                            m_bc_default;      // Balbi global default (uniform fuel)
     CheneyGouldComputed                      m_cgc;             // Cheney-Gould computed params
+    FbpComputed         m_fbp;     ///< Canadian FBP state (ros_model = fbp)
     amrex::Gpu::DeviceVector<BalbiComputed>  m_d_balbi_table;   // per-fuel Balbi table (spatial fuel)
 
     // Per-fuel Rothermel table; empty unless rothermel_per_fuel is set on a

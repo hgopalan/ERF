@@ -8,6 +8,7 @@
 #include <ERF_BehaveModel.H>
 #include <ERF_MacArthurModel.H>
 #include <ERF_CheneyGouldModel.H>
+#include <ERF_FbpModel.H>
 #include <ERF_LevelSetAdvection.H>
 
 /**
@@ -64,12 +65,13 @@
  */
 struct DirectionalRosState
 {
-    /// 0 = Rothermel, 1 = BEHAVE, 2 = MacArthur, 3 = Cheney-Gould
+    /// 0 = Rothermel, 1 = BEHAVE, 2 = MacArthur, 3 = Cheney-Gould, 4 = FBP
     int model = 0;
 
     RothermelComputed   rc{};
     BehaveState         bs{};
     CheneyGouldComputed cgc{};
+    FbpComputed         fbp{};
 
     /// Cheney-Gould inputs, which its per-cell function takes directly
     amrex::Real cg_moisture = 10.0;   ///< Dead fine fuel moisture [%]
@@ -81,6 +83,7 @@ inline constexpr int DIRECTIONAL_ROS_ROTHERMEL    = 0;
 inline constexpr int DIRECTIONAL_ROS_BEHAVE       = 1;
 inline constexpr int DIRECTIONAL_ROS_MACARTHUR    = 2;
 inline constexpr int DIRECTIONAL_ROS_CHENEY_GOULD = 3;
+inline constexpr int DIRECTIONAL_ROS_FBP          = 4;
 
 /// |grad(phi)| below which the front normal is taken as undefined and the
 /// isotropic wind and slope magnitudes are used instead.
@@ -112,6 +115,8 @@ amrex::Real directional_ros_cell(const DirectionalRosState& st,
             return macarthur_ros(U);
         case DIRECTIONAL_ROS_CHENEY_GOULD:
             return cheney_gould_ros(U, st.cgc.ros_backing, st.cg_moisture, st.cg_curing);
+        case DIRECTIONAL_ROS_FBP:
+            return fbp_ros(st.fbp, U, s);
         default:
             return rothermel_ros_cell(U, amrex::Real(0.0), s, amrex::Real(0.0), st.rc);
     }

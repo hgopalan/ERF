@@ -608,6 +608,41 @@ References
 
 - Mandel, J. et al. (2011). A wildland fire model with data assimilation. *Mathematics and Computers in Simulation*, 79(3), 584-606.
 
+Canadian Forest Fire Behavior Prediction System
+-----------------------------------------------
+
+:cpp:`erf.fire.ros_model = "fbp"` selects the rate of spread of the Canadian
+FBP System (Forestry Canada Fire Danger Group, 1992; Wotton, Alexander and
+Taylor, 2009) for one of its sixteen fuel types, :cpp:`erf.fire.fbp.fuel_type`
+(C1 to C7 conifer, D1 deciduous, M1 to M4 mixedwood, S1 to S3 slash, O1a and
+O1b grass). The surface rate is
+
+.. math::
+
+   R = a\bigl(1 - e^{-b\,\mathrm{ISI}}\bigr)^c \, \mathrm{BE}, \qquad
+   \mathrm{ISI} = 0.208\, f(F)\, e^{0.05039\, W},
+
+with :math:`W` the 10 m open wind in km/h, :math:`f(F)` the function of the
+Fine Fuel Moisture Code :cpp:`erf.fire.fbp.ffmc`, and the buildup effect
+:math:`\mathrm{BE} = \exp[50 \ln q\,(1/\mathrm{BUI} - 1/\mathrm{BUI}_0)]`
+from :cpp:`erf.fire.fbp.bui` (none for grass). The mixedwood types are
+weighted between C2 and D1 by the percent conifer :cpp:`erf.fire.fbp.pc`
+(the D1 share at 0.2 for M2) and between the dead-fir coefficients and D1 by
+the percent dead fir :cpp:`erf.fire.fbp.pdf`; the grass types are scaled by
+the curing factor of :cpp:`erf.fire.fbp.curing`. Slope enters as the system
+prescribes: the zero-wind rate on the slope, :math:`\mathrm{SF} =
+\exp[3.533\,(\mathrm{GS}/100)^{1.2}]` times the flat one, is inverted to
+the ISI it implies and that to an equivalent wind, added to the wind before
+the ISI is formed. On the level-set path with :cpp:`erf.fire.directional_ros`
+the wind and slope along the front normal are used, so head, flank and
+backing rates follow from the system. The indices are daily inputs, uniform
+over the domain; the wind is the reference-height wind
+(:cpp:`erf.fire.fbp.wind_source = "reference"`, so set
+:cpp:`erf.fire.wind_ref_ht` to 10 m) or the midflame wind. C6 is given its
+surface rate only. ``Exec/RegTests/FireFbp`` checks the head rate against an
+independent implementation of the equations and the unit test
+``ERF_GTestFbp`` their invariants.
+
 Fuel model sets
 ---------------
 

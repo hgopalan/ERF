@@ -232,6 +232,7 @@ erf.fire.levelset.visc_transition_cells = 2.0   # width of the linear blend from
 # "behave"       BEHAVE multi-class Rothermel
 # "macarthur"    MacArthur (1966) Australian formula
 # "cheney_gould" Cheney & Gould (1998) grassland model
+# "fbp"          Canadian Forest Fire Behavior Prediction System (erf.fire.fbp.*)
 # "balbi"        Balbi physical model (see the Balbi section below)
 # "hybrid"       two of the above blended per cell (see the HYBRID section)
 erf.fire.ros_model = "rothermel"
@@ -416,6 +417,21 @@ erf.fire.balbi.hf_ref_height = 10.0  # Reference height for the induced velocity
 
 erf.fire.cheney_gould.moisture = 10.0  # Dead fine fuel moisture [%]
 erf.fire.cheney_gould.curing = 1.0     # Degree of curing [0-1], 1 = fully cured
+
+# ============================================================================
+# CANADIAN FBP SYSTEM (used only when ros_model = "fbp")
+# ============================================================================
+# Fuel type C1-C7, D1, M1-M4, S1-S3, O1A, O1B; daily indices uniform over the
+# domain; the wind is the reference-height wind (set wind_ref_ht = 10) or the
+# midflame wind; slope through the system's equivalent wind
+erf.fire.fbp.fuel_type = "C2"
+erf.fire.fbp.ffmc = 90.0
+erf.fire.fbp.bui = 60.0
+erf.fire.fbp.curing = 60.0       # grass types [%]
+erf.fire.fbp.pc = 50.0           # percent conifer (M1, M2)
+erf.fire.fbp.pdf = 50.0          # percent dead fir (M3, M4)
+erf.fire.fbp.use_slope = true
+erf.fire.fbp.wind_source = "reference"
 
 # ============================================================================
 # FIRE PROPAGATION: ROTHERMEL MODEL (Phases 1-3)

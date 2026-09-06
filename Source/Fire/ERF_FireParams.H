@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <ERF_FuelModels.H>
+#include <ERF_FbpModel.H>
 
 /**
  * @file ERF_FireParams.H
@@ -334,6 +335,7 @@ struct FireParams
     // "macarthur"    — MacArthur (1966) Australian formula R = 0.18*exp(0.8424*U)
     // "balbi"        — Balbi (2009) physical model R = A*(1+sin α − cos α)
     // "cheney_gould" — Cheney & Gould (1998) empirical grassland model
+    // "fbp"          — Canadian Forest Fire Behavior Prediction System (ERF_FbpModel.H)
     std::string       ros_model = "rothermel";  ///< ROS model selector
 
     // Phase 13B: Balbi (2009) physical fire spread model parameters.
@@ -425,6 +427,22 @@ struct FireParams
         amrex::Real moisture = 10.0;  ///< Dead fine fuel moisture [%]
         amrex::Real curing   = 1.0;   ///< Degree of curing [0-1]; 1 = fully cured
     } cheney_gould;
+
+    // Canadian Forest Fire Behavior Prediction System (ros_model = "fbp";
+    // see ERF_FbpModel.H). The system's inputs are daily indices, uniform
+    // over the domain, and its wind is the 10 m open wind.
+    struct FbpParams {
+        std::string fuel_type = "C2";   ///< C1-C7, D1, M1-M4, S1-S3, O1A, O1B
+        amrex::Real ffmc      = 90.0;   ///< Fine Fuel Moisture Code
+        amrex::Real bui       = 60.0;   ///< Buildup Index
+        amrex::Real curing    = 60.0;   ///< Degree of curing of the grass types [%]
+        amrex::Real pc        = 50.0;   ///< Percent conifer (M1, M2)
+        amrex::Real pdf       = 50.0;   ///< Percent dead fir (M3, M4)
+        bool        use_slope = true;   ///< Slope through the equivalent wind
+        /// 0 = the reference-height wind (fire_wind_ref; set wind_ref_ht = 10),
+        /// 1 = the midflame wind after the Wind Adjustment Factor (fire_wind_eff)
+        int         wind_source = 0;
+    } fbp;
 
     // Phase 15: BEHAVE multi-class Rothermel parameters.
     // Only used when ros_model = "behave".
@@ -781,11 +799,11 @@ struct FireParams
            if (ros_model == "hybrid") {
                auto known = [](const std::string& m) {
                    return m == "rothermel" || m == "balbi" || m == "behave" ||
-                          m == "macarthur" || m == "cheney_gould";
+                          m == "macarthur" || m == "cheney_gould" || m == "fbp";
                };
                if (!known(hy.primary) || !known(hy.secondary)) {
                    amrex::Abort("erf.fire.hybrid.primary/secondary must each be one of "
-                                "rothermel, balbi, behave, macarthur, cheney_gould");
+                                "rothermel, balbi, behave, macarthur, cheney_gould, fbp");
                }
                if (hy.primary == hy.secondary) {
                    amrex::Abort("erf.fire.hybrid.primary and secondary must differ");
@@ -959,6 +977,31 @@ struct FireParams
        pp.query("cheney_gould.moisture", cg.moisture);
        pp.query("cheney_gould.curing",   cg.curing);
 
+       auto& fb = fbp;
+       pp.query("fbp.fuel_type", fb.fuel_type);
+       pp.query("fbp.ffmc",      fb.ffmc);
+       pp.query("fbp.bui",       fb.bui);
+       pp.query("fbp.curing",    fb.curing);
+       pp.query("fbp.pc",        fb.pc);
+       pp.query("fbp.pdf",       fb.pdf);
+       pp.query("fbp.use_slope", fb.use_slope);
+       {
+           std::string ws = (fb.wind_source == 1) ? "midflame" : "reference";
+           pp.query("fbp.wind_source", ws);
+           if (ws == "reference")     { fb.wind_source = 0; }
+           else if (ws == "midflame") { fb.wind_source = 1; }
+           else { amrex::Abort("erf.fire.fbp.wind_source must be \"reference\" or \"midflame\""); }
+       }
+       if (uses_model("fbp")) {
+           if (fbp_type_from_name(fb.fuel_type) < 0) {
+               amrex::Abort("erf.fire.fbp.fuel_type must be one of C1-C7, D1, M1-M4, S1-S3, O1A, O1B");
+           }
+           if (fb.ffmc < 0.0 || fb.ffmc > 101.0 || fb.bui < 0.0 || fb.curing < 0.0 || fb.curing > 100.0
+               || fb.pc < 0.0 || fb.pc > 100.0 || fb.pdf < 0.0 || fb.pdf > 100.0) {
+               amrex::Abort("erf.fire.fbp: ffmc in [0,101], bui >= 0, curing/pc/pdf in [0,100]");
+           }
+       }
+
        // Phase 15: BEHAVE parameters
        auto& bh = behave;
        pp.query("behave.dynamic_transfer_lo", bh.dynamic_transfer_lo);
@@ -999,7 +1042,7 @@ struct FireParams
         if (is_hybrid()) { return hybrid.primary == m || hybrid.secondary == m; }
         if (m == "rothermel") {
             return ros_model != "balbi" && ros_model != "behave" &&
-                   ros_model != "macarthur" && ros_model != "cheney_gould";
+                   ros_model != "macarthur" && ros_model != "cheney_gould" && ros_model != "fbp";
         }
         return ros_model == m;
     }
