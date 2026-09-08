@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <vector>
+#include <AMReX_REAL.H>
+
+/// Round-off tolerance of the build precision: 1e-12 in double, 1e-5 in single.
+static constexpr double TOL = (sizeof(amrex::Real) == 8) ? 1e-12 : 1e-5;
 
 #include "ERF_FuelMoistureStick.H"
 
@@ -14,9 +18,9 @@
 TEST(FuelMoistureStick, VolumeAverage)
 {
     amrex::Real M[4] = {0.1, 0.1, 0.1, 0.1};
-    EXPECT_NEAR(stick_volume_average(M, 4), 0.1, 1e-14);
+    EXPECT_NEAR(stick_volume_average(M, 4), 0.1, TOL);
     amrex::Real N[2] = {0.0, 1.0};                  // outer shell 3/4 of the area
-    EXPECT_NEAR(stick_volume_average(N, 2), 0.75, 1e-14);
+    EXPECT_NEAR(stick_volume_average(N, 2), 0.75, TOL);
 }
 
 TEST(FuelMoistureStick, RelaxesToSurfaceWithTheClassLag)

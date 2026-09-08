@@ -467,6 +467,64 @@ function(add_test_d TEST_NAME TEST_DIR TEST_EXE PLTFILE)
     )
 endfunction(add_test_d)
 
+# Fire smoke test: one deck of a fire suite under Exec/RegTests, run for NSTEPS
+# steps on the regression rank count, passing when the run exits cleanly and
+# the fire plotfile of the last step is written. The suites carry no gold
+# files: their physics checks live in the run_*.sh scripts beside the decks,
+# which run every variant to its stop time and are too long for CI. The whole
+# suite directory is copied so a deck finds its inputs_base, sounding, fuel
+# map, building list and schedules.
+function(add_test_fire TEST_NAME SUITE_DIR INPUT_FILE NSTEPS)
+    set(options )
+    set(oneValueArgs "RUNTIME_OPTIONS" "NRANKS")
+    set(multiValueArgs )
+    cmake_parse_arguments(ADD_TEST_FIRE "${options}" "${oneValueArgs}"
+        "${multiValueArgs}" ${ARGN})
+
+    set(CURRENT_TEST_SOURCE_DIR ${PROJECT_SOURCE_DIR}/Exec/RegTests/${SUITE_DIR})
+    set(CURRENT_TEST_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
+    file(MAKE_DIRECTORY ${CURRENT_TEST_BINARY_DIR})
+    file(GLOB TEST_FILES "${CURRENT_TEST_SOURCE_DIR}/*")
+    file(COPY ${TEST_FILES} DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+
+    # NRANKS overrides the regression rank count: a 20-cell coarse deck has no
+    # two-rank decomposition whose box edges divide by the fire grid ratio
+    if(ERF_ENABLE_MPI)
+        if("${ADD_TEST_FIRE_NRANKS}" STREQUAL "")
+            set(NP ${ERF_TEST_NRANKS})
+        else()
+            set(NP ${ADD_TEST_FIRE_NRANKS})
+        endif()
+        set(MPI_COMMANDS "${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${NP} ${MPIEXEC_PREFLAGS}")
+    else()
+        set(NP 1)
+        unset(MPI_COMMANDS)
+    endif()
+
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+
+    # fire plotfile names carry the step number padded to five digits
+    set(_step "0000${NSTEPS}")
+    string(LENGTH "${_step}" _len)
+    math(EXPR _start "${_len} - 5")
+    string(SUBSTRING "${_step}" ${_start} 5 _step)
+    set(PLTFILE "plt_fire_${_step}")
+
+    set(RUNTIME_OPTIONS "max_step=${NSTEPS} erf.fire_plot_int=${NSTEPS} erf.fire_plot_file=plt_fire_ erf.plot_int=-1 erf.check_int=-1 ${ADD_TEST_FIRE_RUNTIME_OPTIONS}")
+    set(test_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
+    set(test_command sh -c "${MPI_COMMANDS} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE} ${RUNTIME_OPTIONS} > ${test_log} 2>&1 && test -f ${CURRENT_TEST_BINARY_DIR}/${PLTFILE}/Header")
+
+    add_test(${TEST_NAME} ${test_command})
+    set_tests_properties(${TEST_NAME}
+        PROPERTIES
+        TIMEOUT 1800
+        PROCESSORS ${NP}
+        WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+        LABELS "regression;fire"
+        ATTACHED_FILES_ON_FAIL "${test_log}"
+    )
+endfunction(add_test_fire)
+
 # Stationary test -- compare with time 0
 function(add_test_0 TEST_NAME TEST_DIR TEST_EXE PLTFILE)
     set(options )
@@ -790,6 +848,32 @@ if(ERF_ENABLE_PARTICLES)
     add_test_sdm(SDM_RICO3D                      "" "erf_exec"  "plt00010" 5e-13 5e-13 INPUT_SOUNDING "input_sounding" RUNTIME_OPTIONS "erf.vert_implicit=false ")
     # multispecies setup with dummy water species
     add_test_sdm(SDM_MultiSpecies_Bubble2D       "" "erf_exec"  "plt00001" 5e-12 1e-12 RUNTIME_OPTIONS "erf.vert_implicit=false ")
+endif()
+
+#=============================================================================
+# Fire and dust smoke tests: one deck per suite under Exec/RegTests, a few
+# steps each (ctest -L fire, or -R Fire)
+#=============================================================================
+if(ERF_ENABLE_FIRE)
+add_test_fire(FireBurnout_base              FireBurnout           inputs_base                40)
+add_test_fire(FireExposure_noib             FireExposure          inputs_noib                40)
+add_test_fire(FireFbp_c2                    FireFbp               inputs_fbp_c2              40)
+add_test_fire(FireFluxPartition_cfbm        FireFluxPartition     inputs_cfbm                40)
+add_test_fire(FireHeatPlacement_add_noib    FireHeatPlacement     inputs_add_noib            40)
+add_test_fire(FireHybridObstacles_noib      FireHybridObstacles   inputs_hybrid_noib         40)
+add_test_fire(FireLevelSetEllipse_ellipse   FireLevelSetEllipse   inputs_ellipse             40)
+add_test_fire(FireNearWall_noib_mask_wall   FireNearWall          inputs_noib_mask_wall      40)
+add_test_fire(FirePerimeterIgnition_t0      FirePerimeterIgnition inputs_t0                  40)
+add_test_fire(FireRestart_levelset_straight FireRestart           inputs_levelset_straight   40 NRANKS 1)
+add_test_fire(FireRosComparison_rothermel   FireRosComparison     inputs_rothermel_isotropic 40 NRANKS 1)
+add_test_fire(FireScottBurgan_gr2           FireScottBurgan       inputs_sb_gr2              40)
+add_test_fire(FireStickMoisture_stick       FireStickMoisture     inputs_stick               40)
+add_test_fire(FireWindSampling_sample20     FireWindSampling      inputs_sample20            40)
+add_test_fire(FireFarsiteDefault            FarsiteDefault        inputs                     40)
+add_test_fire(FireLevelSetPropagation       LevelSetPropagation   inputs                     40)
+if(ERF_ENABLE_DUST)
+add_test_fire(FireRestart_dust_straight     FireRestart           inputs_dust_straight       40 NRANKS 1)
+endif()
 endif()
 
 #=============================================================================

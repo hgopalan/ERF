@@ -126,7 +126,12 @@ amrex::Real hj_weno5z(amrex::Real v1, amrex::Real v2, amrex::Real v3,
     amrex::Real vmax2 = v1*v1;
     vmax2 = amrex::max(vmax2, v2*v2); vmax2 = amrex::max(vmax2, v3*v3);
     vmax2 = amrex::max(vmax2, v4*v4); vmax2 = amrex::max(vmax2, v5*v5);
-    const amrex::Real eps = 1.0e-6 * vmax2 + 1.0e-99;
+    // The additive floor keeps a constant stencil (every v zero, so every
+    // smoothness indicator zero) from dividing 0 by 0; it must be a normal
+    // number of the build precision, and 1e-99 underflows to zero in single.
+    constexpr amrex::Real tiny = (sizeof(amrex::Real) == 8) ? amrex::Real(1.0e-99)
+                                                            : amrex::Real(1.0e-30);
+    const amrex::Real eps = 1.0e-6 * vmax2 + tiny;
     const amrex::Real tau = std::abs(is0 - is2);
     amrex::Real a0 = 0.1 * (1.0 + tau / (is0 + eps));
     amrex::Real a1 = 0.6 * (1.0 + tau / (is1 + eps));
