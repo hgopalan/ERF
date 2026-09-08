@@ -27,9 +27,9 @@ The WRF-Fire choices are mirrored: the wind is interpolated to 6.1 m and
 reduced by the fuel model's wind reduction factor (WRF-Fire's ``windrf(1) =
 0.36`` for fuel model 1; here Andrews' unsheltered factor, 0.362 for the 1 ft
 grass bed), and there is no midflame wind cap (``erf.fire.use_wind_limit =
-false``; WRF-Fire caps R at 6 m/s only). Four decks share one base: no wind,
+false``; WRF-Fire caps R at 6 m/s only). Five decks share one base: no wind,
 a 2.5 m/s sounding (the paper's Control), a 5 m/s sounding (WSHi), and the
-Control wind with the heat coupled back.
+two winds with the heat coupled back.
 
 Probe cells sit on the line y = 40 m at 1.25 and 3.75 m behind the west edge
 of the line and at 1.25, 3.75, 8.75, 18.75, 38.75 and 58.75 m ahead of its
@@ -66,7 +66,7 @@ Results
      - Backing
      - Head expected
      - Head measured
-     - Coen et al. (2013)
+     - Coen et al. (2013), coupled LES
    * - nowind
      - 0.00
      - 0.00
@@ -74,7 +74,7 @@ Results
      - 0.0240
      - 0.0240
      - 0.0240
-     - NoWind: 0.02 outward
+     - NoWind: 0.02 outward, both fronts
    * - wind2p5
      - 2.30
      - 0.83
@@ -82,7 +82,7 @@ Results
      - 0.0240
      - 0.0908
      - 0.0957
-     - Control: 0.22 head
+     - Control: 0.22 head (backing not quoted; WRF-Fire sets it to R0)
    * - wind5
      - 4.31
      - 1.56
@@ -99,6 +99,21 @@ Results
      - (coupled)
      - 0.2427
      - Control: 0.22 head
+   * - wind5_2way
+     - 5.55 (max)
+     - 2.01
+     - 0.0240
+     - 0.0240
+     - (coupled)
+     - 0.2383
+     - WSHi: about 0.40 head
+
+Reading the table: the paper's column is its head fire in a coupled LES,
+except the no-wind row, where the fire crept outward at the same rate on
+every side. The backing fire is never quoted in the paper, and WRF-Fire sets
+it to :math:`R_0` as ERF does, so the like-for-like pairs are backing against
+NoWind, the one-way heads against Rothermel at the sampled wind, and the
+two-way heads against Control and WSHi.
 
 The backing fire moves at :math:`R_0` to the last digit in every deck, the
 no-wind fire at :math:`R_0` in both directions, and the head fire within
@@ -107,13 +122,31 @@ wind's drift over the run. The no-wind rate itself, 0.024 m/s, is the
 paper's 0.02 m/s.
 
 The heads of the one-way decks are well below the paper's 0.22 and about
-0.40 m/s: those are coupled results in a turbulent convective boundary layer,
-where the fire's plume draws the near-surface wind into the head ("near-fire
-horizontal winds varied from 2 to 4 m/s" for the 2.5 m/s Control). The
-two-way deck shows the same mechanism: with the heat coupled back the
-sampled wind rises from 2.3 to 4.8 m/s at the head and the head fire runs at
-0.24 m/s, the paper's 0.22, in a box far smaller than the paper's 5 km LES
-and without its resolved turbulence. That deck is reported, not checked.
+0.40 m/s, and are meant to be: those are coupled results in a turbulent
+convective boundary layer, where the fire's plume draws the near-surface
+wind into the head ("near-fire horizontal winds varied from 2 to 4 m/s" for
+the 2.5 m/s Control). At 2.5 m/s the one-way chain is 2.5 m/s in the
+sounding, 2.3 m/s at 6.1 m once the surface layer has acted, 0.83 m/s after
+the 0.36 reduction factor, a wind factor of 2.8 and a head of 0.09 m/s;
+doubling the midflame wind raises the wind factor by about four and the head
+to the paper's value.
+
+The two-way decks are reported, not checked, and the two winds show why.
+At 2.5 m/s the coupled head runs at 0.24 m/s, the paper's 0.22. At 5 m/s it
+runs at 0.24 m/s as well, below the one-way 0.25 and far below the paper's
+0.40. The fire plotfiles show the reason: with the heat on, the 6.1 m wind at
+the head is 5.0 m/s at 50 s (4.6 one-way), 3.7 m/s at 100 s (4.2 one-way)
+and reversed, -1.8 m/s at the head and -2.2 m/s 10 m ahead of it, at 150 s.
+The line here spans the whole periodic y extent, so its plume is
+two-dimensional and the inflow it draws from the downwind side has nowhere to
+come from but against the ambient wind, which it overpowers; the directional
+model then clips the wind component into the fire at zero and the head drops
+to the no-wind rate. The paper's 1 km line in a 5 km box lets the flow go
+around the flanks and feed the head instead. Reproducing the coupled rates
+needs a finite line and a domain the plume can turn over in, which is the
+paper's LES and not this regression case; the 2.5 m/s agreement is the
+transient enhancement before the reversal sets in, not the paper's
+mechanism.
 
 References
 ----------

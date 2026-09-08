@@ -18,9 +18,11 @@ TOL = 0.10
 M_F = 0.055                       # the decks' fuel moisture (all dead classes)
 FT_MIN_TO_M_S = 0.00508
 FM1 = dict(w0=0.034, sigma=3500.0, delta=1.0, Mx=0.12, h=8000.0, S_T=0.0555, S_e=0.010, rho_p=32.0)
-COEN = {"nowind": ("NoWind", 0.02), "wind2p5": ("Control", 0.22), "wind5": ("WSHi", 0.40),
-        "wind2p5_2way": ("Control (coupled)", 0.22)}   # Coen et al. 2013: 0.02 m/s outward; 0.22 m/s head;
-                                                       # WSHi "four-fifths" faster than Control
+# Coen et al. 2013, coupled LES: NoWind crept outward at 0.02 m/s on every side (= R0); Control
+# ran a 0.22 m/s HEAD (backing not quoted; WRF-Fire sets it to R0); WSHi "four-fifths" faster.
+# The one-way heads here are meant to sit below these: the paper's plume doubles the head wind.
+COEN = {"nowind": ("NoWind", 0.02), "wind2p5": ("Control head", 0.22), "wind5": ("WSHi head", 0.40),
+        "wind2p5_2way": ("Control head", 0.22), "wind5_2way": ("WSHi head", 0.40)}
 
 def rothermel_fm1(M_f, U_eff_ms):
     """Rothermel (1972) as Source/Fire/ERF_Rothermel.cpp computes it: (R0, R, phi_w) in m/s."""
@@ -58,7 +60,7 @@ def rate(pts):
 def main():
     variants = sys.argv[1:]
     status = 0
-    hdr = f"{'variant':14s} {'U6.1':>6s} {'U_eff':>6s} {'R0':>7s} {'R_head':>7s} | {'back':>7s} {'head':>7s} {'n':>3s} | {'Coen':>18s}"
+    hdr = f"{'variant':14s} {'U6.1':>6s} {'U_eff':>6s} {'R0':>7s} {'R_head':>7s} | {'back':>7s} {'head':>7s} {'n':>3s} | {'Coen (coupled)':>18s}"
     print(hdr); print("-" * len(hdr))
     for v in variants:
         probes, ueff, uref = parse(f"run_{v}.log")

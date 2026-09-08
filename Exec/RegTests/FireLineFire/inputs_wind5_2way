@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# 5 m/s with the heat coupled back, for the comparison with Coen's WSHi head;
+# reported, not checked: the domain is far smaller than the paper's 5 km LES.
+erf.input_sounding_file = "input_sounding_u5"
+erf.fire.fire_atm_feedback = 1.0
