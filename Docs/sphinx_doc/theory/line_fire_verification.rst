@@ -66,7 +66,7 @@ Results
      - Backing
      - Head expected
      - Head measured
-     - Coen et al. (2013)
+     - Coen et al. (2013), coupled LES
    * - nowind
      - 0.00
      - 0.00
@@ -74,7 +74,7 @@ Results
      - 0.0240
      - 0.0240
      - 0.0240
-     - NoWind: 0.02 outward
+     - NoWind: 0.02 outward, both fronts
    * - wind2p5
      - 2.30
      - 0.83
@@ -82,7 +82,7 @@ Results
      - 0.0240
      - 0.0908
      - 0.0957
-     - Control: 0.22 head
+     - Control: 0.22 head (backing not quoted; WRF-Fire sets it to R0)
    * - wind5
      - 4.31
      - 1.56
@@ -100,6 +100,13 @@ Results
      - 0.2427
      - Control: 0.22 head
 
+Reading the table: the paper's column is its head fire in a coupled LES,
+except the no-wind row, where the fire crept outward at the same rate on
+every side. The backing fire is never quoted in the paper, and WRF-Fire sets
+it to :math:`R_0` as ERF does, so the like-for-like pairs are backing against
+NoWind, the one-way heads against Rothermel at the sampled wind, and the
+two-way head against Control.
+
 The backing fire moves at :math:`R_0` to the last digit in every deck, the
 no-wind fire at :math:`R_0` in both directions, and the head fire within
 5.5 % of Rothermel at the sampled wind in both winds, the residual being the
@@ -107,9 +114,14 @@ wind's drift over the run. The no-wind rate itself, 0.024 m/s, is the
 paper's 0.02 m/s.
 
 The heads of the one-way decks are well below the paper's 0.22 and about
-0.40 m/s: those are coupled results in a turbulent convective boundary layer,
-where the fire's plume draws the near-surface wind into the head ("near-fire
-horizontal winds varied from 2 to 4 m/s" for the 2.5 m/s Control). The
+0.40 m/s, and are meant to be: those are coupled results in a turbulent
+convective boundary layer, where the fire's plume draws the near-surface
+wind into the head ("near-fire horizontal winds varied from 2 to 4 m/s" for
+the 2.5 m/s Control). At 2.5 m/s the one-way chain is 2.5 m/s in the
+sounding, 2.3 m/s at 6.1 m once the surface layer has acted, 0.83 m/s after
+the 0.36 reduction factor, a wind factor of 2.8 and a head of 0.09 m/s;
+doubling the midflame wind, as the coupled plume does, raises the wind
+factor by about four and the head to the paper's value. The
 two-way deck shows the same mechanism: with the heat coupled back the
 sampled wind rises from 2.3 to 4.8 m/s at the head and the head fire runs at
 0.24 m/s, the paper's 0.22, in a box far smaller than the paper's 5 km LES
