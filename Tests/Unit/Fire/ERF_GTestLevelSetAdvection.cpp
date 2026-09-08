@@ -1,303 +1,370 @@
 #include <gtest/gtest.h>
+#include <AMReX_REAL.H>
+#include <AMReX_Box.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
-#include <AMReX_ParmParse.H>
-#include <AMReX_IntVect.H>
+#include <AMReX_ParallelDescriptor.H>
 #include <cmath>
 
-// Include the level-set headers
+/// Round-off tolerance of the build precision: 1e-12 in double, 1e-5 in single.
+static constexpr double TOL = (sizeof(amrex::Real) == 8) ? 1e-12 : 1e-5;
+
 #include "ERF_NumericalSchemes.H"
 #include "ERF_Reinitialize.H"
 #include "ERF_LevelSetAdvection.H"
 
-using namespace amrex;
-using namespace ERF;
-
 /**
  * @file ERF_GTestLevelSetAdvection.cpp
- * @brief Unit tests for level-set advection and reinitialization
+ * @brief The level-set path of the fire module on a fire grid: the Godunov
+ *        norm of the gradient with the first-order and HJ-WENO5-Z one-sided
+ *        derivatives, the terrain projection and the viscosity term of the
+ *        right-hand side, one SSP-RK3 step, an expanding disc over many steps
+ *        with the production reinitialisation, and the reinitialisation
+ *        itself (unit gradient restored, zero contour kept).
  *
- * Tests the WENO5-Z advection scheme with SSP-RK3 time integration
- * and the Sussman reinitialization method.
+ * Every field lives on a 400 m square fire grid of 80 x 80 cells (dx = 5 m),
+ * non-periodic, split into four boxes so that the ghost exchange and the
+ * copy-out fill of fire_fill_boundary are both exercised. A planar front
+ * phi = x - x0 gives exact expectations (its one-sided differences are all
+ * one), the disc phi = r - R0 gives the geometric ones.
  */
 
-class LevelSetAdvectionTest : public ::testing::Test
+using namespace amrex;
+using namespace fire_levelset;
+
+namespace {
+
+constexpr int  NCELL = 80;
+constexpr Real LDOM  = 400.0;
+constexpr Real DX    = LDOM / NCELL;   // 5 m
+
+struct FireGridFixture
 {
-protected:
-    void SetUp() override
+    BoxArray            ba;
+    DistributionMapping dm;
+    Geometry            geom;
+
+    FireGridFixture ()
     {
-        // Create a simple 2D domain (64x64 cells)
-        Box domain(IntVect(0, 0, 0), IntVect(63, 63, 0));
-        BoxArray ba(domain);
-        DistributionMapping dm(ba);
+        Box domain(IntVect(0, 0, 0), IntVect(NCELL - 1, NCELL - 1, 0));
+        ba = BoxArray(domain);
+        ba.maxSize(IntVect(NCELL / 2, NCELL / 2, 1));
+        dm = DistributionMapping(ba);
+        RealBox rb({0.0, 0.0, 0.0}, {LDOM, LDOM, 1.0});
+        geom = Geometry(domain, rb, CoordSys::cartesian, {0, 0, 0});
+    }
 
-        // Physical domain: 500 m x 500 m
-        RealBox prob_domain(0.0, 0.0, 0.0, 500.0, 500.0, 1.0);
-        Geometry geom(domain, prob_domain, CoordSys::cartesian, {false, false, false});
+    Real xc (int i) const { return (i + Real(0.5)) * DX; }
 
-        // Create MultiFabs with sufficient ghost cells for level-set
-        phi.define(ba, dm, 1, 3);
-        vel_eff.define(ba, dm, 2, 0);
-        R_mf.define(ba, dm, 1, 0);
-
-        this->geom = geom;
-        
-        // Initialize: phi = signed distance to circle at domain center
-        // Circle: center (250, 250), radius 50 m
-        Real cx = 250.0_rt, cy = 250.0_rt, R_circle = 50.0_rt;
-        Real dx = (prob_domain.hi(0) - prob_domain.lo(0)) / domain.length(0);
-        Real dy = (prob_domain.hi(1) - prob_domain.lo(1)) / domain.length(1);
-        
+    /// phi = scale * (x - x0): a straight front normal to x, burned on the left
+    void planar (MultiFab& phi, Real x0, Real scale = 1.0) const
+    {
         for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
             auto p = phi.array(mfi);
-            const Box& bx = mfi.growntilebox();
-            for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k) {
-                for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
-                    for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
-                        Real x = prob_domain.lo(0) + (i + 0.5_rt) * dx;
-                        Real y = prob_domain.lo(1) + (j + 0.5_rt) * dy;
-                        Real r = std::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
-                        p(i, j, k) = r - R_circle;  // Signed distance
-                    }
-                }
-            }
+            const Box& gbx = mfi.growntilebox();
+            ParallelFor(gbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                p(i, j, k) = scale * ((i + Real(0.5)) * DX - x0);
+            });
         }
-        phi.FillBoundary(geom.periodicity());
-        
-        // Wind field: zero (not used in this test)
-        vel_eff.setVal(0.0_rt);
-        
-        // ROS field: constant 0.5 m/s
-        R_mf.setVal(0.5_rt);
     }
 
-    MultiFab phi;
-    MultiFab vel_eff;
-    MultiFab R_mf;
-    Geometry geom;
+    /// phi = scale * (r - R0): a disc of radius R0 about the domain centre
+    void disc (MultiFab& phi, Real R0, Real scale = 1.0) const
+    {
+        const Real c = Real(0.5) * LDOM;
+        for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+            auto p = phi.array(mfi);
+            const Box& gbx = mfi.growntilebox();
+            ParallelFor(gbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                const Real x = (i + Real(0.5)) * DX - c;
+                const Real y = (j + Real(0.5)) * DX - c;
+                p(i, j, k) = scale * (std::sqrt(x * x + y * y) - R0);
+            });
+        }
+    }
+
+    Real radius (int i, int j) const
+    {
+        const Real x = xc(i) - Real(0.5) * LDOM;
+        const Real y = xc(j) - Real(0.5) * LDOM;
+        return std::sqrt(x * x + y * y);
+    }
 };
 
-/**
- * Test 1: Basic advection step
- *
- * Scenario:
- *   - Initialize phi as a signed-distance circle
- *   - Advance one step with constant ROS = 0.5 m/s
- *   - Verify that phi values change and circle expands
- */
-TEST_F(LevelSetAdvectionTest, BasicAdvectionStep)
+/// Number of valid cells with phi < 0, summed over ranks
+long burned_cells (const MultiFab& phi)
 {
-    Real dt = 1.0;  // 1 second timestep
-    
-    // Store initial state
-    MultiFab phi_initial(phi.boxArray(), phi.DistributionMapping(), 1, 0);
-    phi_initial.copy(phi);
-    
-    // Advance one step
-    advect_levelset_weno5z_rk3(phi, vel_eff, R_mf, geom, dt);
-    phi.FillBoundary(geom.periodicity());
-    
-    // Check that phi has changed
-    bool changed = false;
+    long n = 0;
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
-        auto p = phi.array(mfi);
-        auto p0 = phi_initial.const_array(mfi);
-        const Box& bx = mfi.tilebox();
-        for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k) {
-            for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
-                for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
-                    if (std::abs(p(i, j, k) - p0(i, j, k)) > 1.0e-10) {
-                        changed = true;
-                        break;
-                    }
-                }
-                if (changed) break;
+        auto p = phi.const_array(mfi);
+        const Box& bx = mfi.validbox();
+        for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                if (p(i, j, 0) < Real(0.0)) { ++n; }
             }
-            if (changed) break;
         }
-        if (changed) break;
     }
-    EXPECT_TRUE(changed) << "Level-set should have changed after advection";
-    
-    // Check that phi is bounded (finite, reasonable values)
-    Real phi_max = phi.max(0);
-    Real phi_min = phi.min(0);
-    EXPECT_TRUE(std::isfinite(phi_max)) << "phi_max should be finite";
-    EXPECT_TRUE(std::isfinite(phi_min)) << "phi_min should be finite";
-    EXPECT_LT(std::abs(phi_max), 1.0e6) << "phi_max should be reasonable";
-    EXPECT_GT(std::abs(phi_min), -1.0e6) << "phi_min should be reasonable";
+    ParallelDescriptor::ReduceLongSum(n);
+    return n;
 }
 
-/**
- * Test 2: Reinitialization
- *
- * Scenario:
- *   - Initialize phi as a signed-distance circle
- *   - Perturb phi randomly to break the signed-distance property
- *   - Apply Sussman reinitialization
- *   - Verify that the zero-level contour is preserved (within tolerance)
- */
-TEST_F(LevelSetAdvectionTest, Reinitialization)
+/// Largest |a - b| over the valid cells selected by keep(i, j), over ranks
+template <class Keep>
+Real max_abs_diff (const MultiFab& a, const MultiFab& b, Keep&& keep)
 {
-    // Perturb phi to break signed-distance property
-    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
-        auto p = phi.array(mfi);
-        const Box& bx = mfi.tilebox();
-        for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k) {
-            for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
-                for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
-                    p(i, j, k) *= 1.5_rt;  // Scale by 1.5 to perturb distance
-                }
+    Real m = 0.0;
+    for (MFIter mfi(a); mfi.isValid(); ++mfi) {
+        auto pa = a.const_array(mfi);
+        auto pb = b.const_array(mfi);
+        const Box& bx = mfi.validbox();
+        for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                if (keep(i, j)) { m = amrex::max(m, std::abs(pa(i, j, 0) - pb(i, j, 0))); }
             }
         }
     }
-    
-    // Apply reinitialization
-    Real dtau = 0.5 * std::min(geom.CellSize()[0], geom.CellSize()[1]);
-    reinitialize_phi(phi, geom, 10, dtau);
-    phi.FillBoundary(geom.periodicity());
-    
-    // Check that phi is still well-behaved
-    Real phi_max = phi.max(0);
-    Real phi_min = phi.min(0);
-    Real phi_norminf = std::max(std::abs(phi_max), std::abs(phi_min));
-    
-    EXPECT_TRUE(std::isfinite(phi_max)) << "phi_max should be finite after reinit";
-    EXPECT_TRUE(std::isfinite(phi_min)) << "phi_min should be finite after reinit";
-    EXPECT_GT(phi_norminf, 0.0) << "phi norm should be positive";
-    EXPECT_LT(phi_norminf, 1.0e3) << "phi should remain bounded after reinit";
+    ParallelDescriptor::ReduceRealMax(m);
+    return m;
 }
 
-/**
- * Test 3: Multiple advection and reinit cycles
- *
- * Scenario:
- *   - Initialize phi as a signed-distance circle
- *   - Perform 10 advection steps and 1 reinitialization after every 5 steps
- *   - Verify that the burned area (phi < 0) grows monotonically
- *   - Verify that phi remains bounded
- */
-TEST_F(LevelSetAdvectionTest, MultiCycleAdvectionReinit)
+LevelSetGradient scheme (int s, Real band = -1.0)
 {
-    Real dt = 1.0;
-    
-    // Count initial burned cells (phi < 0)
-    long n_burned_initial = 0;
-    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
-        auto p = phi.const_array(mfi);
-        const Box& bx = mfi.tilebox();
-        for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k) {
-            for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
-                for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
-                    if (p(i, j, k) < 0.0_rt) ++n_burned_initial;
-                }
-            }
-        }
-    }
-    amrex::ParallelDescriptor::ReduceLongSum(n_burned_initial);
-    
-    // Run 10 advection steps
-    for (int step = 0; step < 10; ++step) {
-        advect_levelset_weno5z_rk3(phi, vel_eff, R_mf, geom, dt);
-        phi.FillBoundary(geom.periodicity());
-        
-        // Reinitialization every 5 steps
-        if ((step + 1) % 5 == 0) {
-            Real dtau = 0.5 * std::min(geom.CellSize()[0], geom.CellSize()[1]);
-            reinitialize_phi(phi, geom, 10, dtau);
-            phi.FillBoundary(geom.periodicity());
-        }
-    }
-    
-    // Count final burned cells
-    long n_burned_final = 0;
-    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
-        auto p = phi.const_array(mfi);
-        const Box& bx = mfi.tilebox();
-        for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k) {
-            for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
-                for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
-                    if (p(i, j, k) < 0.0_rt) ++n_burned_final;
-                }
-            }
-        }
-    }
-    amrex::ParallelDescriptor::ReduceLongSum(n_burned_final);
-    
-    // Check that phi is bounded
-    Real phi_max = phi.max(0);
-    Real phi_min = phi.min(0);
-    EXPECT_TRUE(std::isfinite(phi_max)) << "phi_max should be finite after cycles";
-    EXPECT_TRUE(std::isfinite(phi_min)) << "phi_min should be finite after cycles";
-    
-    // Burned area should grow (with some tolerance for numerics)
-    EXPECT_GE(n_burned_final, n_burned_initial) 
-        << "Burned area should grow monotonically; initial=" << n_burned_initial 
-        << " final=" << n_burned_final;
+    LevelSetGradient g;
+    g.scheme = s;
+    g.band   = band;
+    return g;
 }
 
-/**
- * Test 4: Zero-level contour preservation
- *
- * Scenario:
- *   - Initialize phi with a circular level-set
- *   - Compute the initial zero-level contour (cells with |phi| < dx)
- *   - Advance several steps with reinitialization
- *   - Verify that the zero-level contour area changes by less than 20%
- */
-TEST_F(LevelSetAdvectionTest, ZeroContourPreservation)
+/// Number of valid cells holding a NaN or an infinity, over ranks. The
+/// max-based checks skip NaN (a comparison with NaN is false), so every field
+/// that a kernel wrote is checked here as well.
+long nonfinite_cells (const MultiFab& a)
 {
-    Real dx = geom.CellSize()[0];
-    Real dt = 1.0;
-    
-    // Count initial contour cells (|phi| < dx)
-    long n_contour_initial = 0;
-    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
-        auto p = phi.const_array(mfi);
-        const Box& bx = mfi.tilebox();
-        for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k) {
-            for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
-                for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
-                    if (std::abs(p(i, j, k)) < dx) ++n_contour_initial;
-                }
+    long n = 0;
+    for (MFIter mfi(a); mfi.isValid(); ++mfi) {
+        auto pa = a.const_array(mfi);
+        const Box& bx = mfi.validbox();
+        for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                if (!std::isfinite(pa(i, j, 0))) { ++n; }
             }
         }
     }
-    amrex::ParallelDescriptor::ReduceLongSum(n_contour_initial);
-    
-    // Run 10 cycles
-    for (int step = 0; step < 10; ++step) {
-        advect_levelset_weno5z_rk3(phi, vel_eff, R_mf, geom, dt);
-        phi.FillBoundary(geom.periodicity());
-        
-        if ((step + 1) % 5 == 0) {
-            Real dtau = 0.5 * std::min(geom.CellSize()[0], geom.CellSize()[1]);
-            reinitialize_phi(phi, geom, 10, dtau);
-            phi.FillBoundary(geom.periodicity());
-        }
-    }
-    
-    // Count final contour cells
-    long n_contour_final = 0;
-    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
-        auto p = phi.const_array(mfi);
-        const Box& bx = mfi.tilebox();
-        for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k) {
-            for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
-                for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
-                    if (std::abs(p(i, j, k)) < dx) ++n_contour_final;
-                }
+    ParallelDescriptor::ReduceLongSum(n);
+    return n;
+}
+
+/// Number of valid cells whose sign differs between a and b, over ranks
+long sign_changes (const MultiFab& a, const MultiFab& b)
+{
+    long n = 0;
+    for (MFIter mfi(a); mfi.isValid(); ++mfi) {
+        auto pa = a.const_array(mfi);
+        auto pb = b.const_array(mfi);
+        const Box& bx = mfi.validbox();
+        for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                if ((pa(i, j, 0) < Real(0.0)) != (pb(i, j, 0) < Real(0.0))) { ++n; }
             }
         }
     }
-    amrex::ParallelDescriptor::ReduceLongSum(n_contour_final);
-    
-    // Contour area should remain within 20% of initial (20% buffer for expanding fire)
-    Real rel_change = std::abs(n_contour_final - n_contour_initial) / (Real)(n_contour_initial + 1);
-    EXPECT_LT(rel_change, 1.0) << "Relative change in contour cells should be reasonable; "
-                                 << "initial=" << n_contour_initial 
-                                 << " final=" << n_contour_final 
-                                 << " rel_change=" << rel_change;
+    ParallelDescriptor::ReduceLongSum(n);
+    return n;
+}
+
+} // namespace
+
+/// On phi = x - x0 every one-sided difference is exactly one, so the RHS with
+/// R = 1 and no viscosity is -1 with either scheme. The three cells next to
+/// each x edge are excluded: the copy-out ghost fill puts a kink there that
+/// the WENO stencil reads. Along y the field is constant, so no edge effect.
+TEST(LevelSetAdvection, PlanarGradientNormIsOne)
+{
+    FireGridFixture f;
+    MultiFab phi(f.ba, f.dm, 1, 3), R(f.ba, f.dm, 1, 0), rhs(f.ba, f.dm, 1, 0), ref(f.ba, f.dm, 1, 0);
+    f.planar(phi, 200.0);
+    R.setVal(1.0);
+    ref.setVal(-1.0);
+    const Real tol = 100.0 * TOL;
+    for (int s : {LEVELSET_GRAD_UPWIND1, LEVELSET_GRAD_WENO5Z, LEVELSET_GRAD_WENO5Z_FRONT}) {
+        compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, nullptr, nullptr, false, scheme(s, 3.0 * DX));
+        // along y the stencil is constant: every difference zero, which the
+        // WENO weights must survive in either precision
+        EXPECT_EQ(nonfinite_cells(rhs), 0) << "scheme " << s;
+        const Real err = max_abs_diff(rhs, ref, [] (int i, int) { return i >= 3 && i < NCELL - 3; });
+        EXPECT_LT(err, tol) << "scheme " << s;
+    }
+    // WENO only within the band about x0, first order elsewhere: away from the
+    // front the hybrid reads one cell each side, so only the low-x edge cell
+    // (whose backward difference is zero through the copied ghost) differs
+    compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, nullptr, nullptr, false, scheme(LEVELSET_GRAD_WENO5Z_FRONT, 3.0 * DX));
+    const Real err = max_abs_diff(rhs, ref, [] (int i, int) { return i >= 1; });
+    EXPECT_LT(err, tol);
+}
+
+/// With terrain slopes the spread rate is along the ground: the map-view
+/// |grad phi| of a planar front normal to x on a slope s_x is 1/sqrt(1+s_x^2),
+/// and a slope across the front (s_y) does not enter.
+TEST(LevelSetAdvection, TerrainProjectionOfPlanarFront)
+{
+    FireGridFixture f;
+    MultiFab phi(f.ba, f.dm, 1, 3), R(f.ba, f.dm, 1, 0), rhs(f.ba, f.dm, 1, 0), ref(f.ba, f.dm, 1, 0);
+    MultiFab slopes(f.ba, f.dm, 2, 0);
+    f.planar(phi, 200.0);
+    R.setVal(1.0);
+    auto keep = [] (int i, int) { return i >= 3 && i < NCELL - 3; };
+
+    slopes.setVal(0.75, 0, 1);   // dz/dx = 0.75: 1 + s^2 = 25/16
+    slopes.setVal(0.0,  1, 1);
+    ref.setVal(-0.8);
+    compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, &slopes, nullptr, false, scheme(LEVELSET_GRAD_UPWIND1));
+    EXPECT_LT(max_abs_diff(rhs, ref, keep), 100.0 * TOL);
+
+    slopes.setVal(0.0, 0, 1);
+    slopes.setVal(2.0, 1, 1);    // a slope along the front leaves |grad phi| alone
+    ref.setVal(-1.0);
+    compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, &slopes, nullptr, false, scheme(LEVELSET_GRAD_WENO5Z));
+    EXPECT_LT(max_abs_diff(rhs, ref, keep), 100.0 * TOL);
+}
+
+/// The viscosity term is -R eps lap(phi): nothing on a planar front, and
+/// R eps / r on the disc (lap r = 1/r in two dimensions), to the accuracy of
+/// the central difference well away from the centre and the edges.
+TEST(LevelSetAdvection, ViscosityTermIsLaplacian)
+{
+    FireGridFixture f;
+    MultiFab phi(f.ba, f.dm, 1, 3), R(f.ba, f.dm, 1, 0), rhs0(f.ba, f.dm, 1, 0), rhs1(f.ba, f.dm, 1, 0);
+    R.setVal(0.5);
+    const Real eps = 0.4;
+
+    f.planar(phi, 200.0);
+    compute_levelset_rhs(rhs0, phi, R, DX, DX, 0.0, nullptr, nullptr, false, scheme(LEVELSET_GRAD_UPWIND1));
+    compute_levelset_rhs(rhs1, phi, R, DX, DX, eps, nullptr, nullptr, false, scheme(LEVELSET_GRAD_UPWIND1));
+    EXPECT_LT(max_abs_diff(rhs0, rhs1, [] (int i, int) { return i >= 1 && i < NCELL - 1; }), 100.0 * TOL);
+
+    f.disc(phi, 50.0);
+    compute_levelset_rhs(rhs0, phi, R, DX, DX, 0.0, nullptr, nullptr, false, scheme(LEVELSET_GRAD_UPWIND1));
+    compute_levelset_rhs(rhs1, phi, R, DX, DX, eps, nullptr, nullptr, false, scheme(LEVELSET_GRAD_UPWIND1));
+    Real worst = 0.0;
+    for (MFIter mfi(rhs0); mfi.isValid(); ++mfi) {
+        auto a = rhs0.const_array(mfi);
+        auto b = rhs1.const_array(mfi);
+        const Box& bx = mfi.validbox();
+        for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                const Real r = f.radius(i, j);
+                if (r < 40.0 || r > 150.0) { continue; }
+                const Real expected = Real(0.5) * eps / r;
+                worst = amrex::max(worst, std::abs((b(i, j, 0) - a(i, j, 0)) / expected - Real(1.0)));
+            }
+        }
+    }
+    ParallelDescriptor::ReduceRealMax(worst);
+    EXPECT_LT(worst, 0.02) << "relative error of the Laplacian of r";
+}
+
+/// One SSP-RK3 step moves a planar front by exactly R dt: every cell of
+/// phi = x - x0 drops by R dt, up to round-off. Cells within a few stencils
+/// of the x edges see the ghost kink propagate one stencil per stage and are
+/// left out. With R = 0 the field is returned untouched.
+TEST(LevelSetAdvection, PlanarFrontAdvancesAtRos)
+{
+    FireGridFixture f;
+    MultiFab phi(f.ba, f.dm, 1, 3), vel(f.ba, f.dm, 2, 0), R(f.ba, f.dm, 1, 0), ref(f.ba, f.dm, 1, 3);
+    vel.setVal(0.0);
+    const Real ros = 0.5, dt = 2.0;
+    auto keep = [] (int i, int) { return i >= 12 && i < NCELL - 12; };
+
+    for (int s : {LEVELSET_GRAD_UPWIND1, LEVELSET_GRAD_WENO5Z, LEVELSET_GRAD_WENO5Z_FRONT}) {
+        f.planar(phi, 200.0);
+        f.planar(ref, 200.0 + ros * dt);
+        R.setVal(ros);
+        advect_levelset_weno5z_rk3(phi, vel, R, f.geom, dt, 0.0, nullptr, nullptr, false, scheme(s, 3.0 * DX));
+        EXPECT_EQ(nonfinite_cells(phi), 0) << "scheme " << s;
+        EXPECT_LT(max_abs_diff(phi, ref, keep), 100.0 * TOL) << "scheme " << s;
+        // the zero contour moved from x0 to x0 + R dt: one more column burned
+        EXPECT_EQ(burned_cells(phi), burned_cells(ref)) << "scheme " << s;
+    }
+
+    f.planar(phi, 200.0);
+    f.planar(ref, 200.0);
+    R.setVal(0.0);
+    advect_levelset_weno5z_rk3(phi, vel, R, f.geom, dt, 0.4, nullptr, nullptr, false, scheme(LEVELSET_GRAD_WENO5Z_FRONT, 3.0 * DX));
+    EXPECT_LT(max_abs_diff(phi, ref, [] (int, int) { return true; }), 100.0 * TOL);
+}
+
+/// A disc of radius 50 m spreading at 0.5 m/s for 40 s, with the production
+/// reinitialisation every fifth step, burns the disc of radius 70 m: the
+/// burned-cell count grows every step and gives that radius to within one
+/// cell. The first-order scheme lags the exact rate by up to dx/(2 sqrt2 r)
+/// off the axes, the hybrid WENO scheme by much less.
+TEST(LevelSetAdvection, DiscExpandsAtRos)
+{
+    FireGridFixture f;
+    MultiFab phi(f.ba, f.dm, 1, 3), vel(f.ba, f.dm, 2, 0), R(f.ba, f.dm, 1, 0);
+    vel.setVal(0.0);
+    const Real ros = 0.5, dt = 1.0, R0 = 50.0;
+    const int  nsteps = 40;
+    const Real r_final = R0 + ros * dt * nsteps;   // 70 m
+
+    for (int s : {LEVELSET_GRAD_UPWIND1, LEVELSET_GRAD_WENO5Z_FRONT}) {
+        f.disc(phi, R0);
+        R.setVal(ros);
+        const LevelSetGradient g = scheme(s, 3.0 * DX);
+        long n_prev = burned_cells(phi);
+        EXPECT_NEAR(std::sqrt(n_prev * DX * DX / M_PI), R0, 0.5 * DX);
+        for (int step = 0; step < nsteps; ++step) {
+            advect_levelset_weno5z_rk3(phi, vel, R, f.geom, dt, 0.4, nullptr, nullptr, false, g);
+            fire_fill_boundary(phi, f.geom);
+            if ((step + 1) % 5 == 0) {
+                reinitialize_phi(phi, f.geom, 10, 0.25 * DX, -1.0, /*normalized=*/false, nullptr, false, g);
+                fire_fill_boundary(phi, f.geom);
+            }
+            const long n = burned_cells(phi);
+            EXPECT_GE(n, n_prev) << "scheme " << s << " step " << step;
+            n_prev = n;
+        }
+        const Real r_est = std::sqrt(n_prev * DX * DX / M_PI);
+        EXPECT_NEAR(r_est, r_final, DX) << "scheme " << s << " burned cells " << n_prev;
+        EXPECT_EQ(nonfinite_cells(phi), 0) << "scheme " << s;
+    }
+}
+
+/// Reinitialisation on the signed-distance path: a disc field stretched to
+/// |grad phi| = 1.5 comes back to a unit gradient within the band the
+/// pseudo-time sweeps reach, the zero contour (burned-cell count) does not
+/// move, and the field stays finite.
+TEST(LevelSetAdvection, ReinitialisationRestoresUnitGradient)
+{
+    FireGridFixture f;
+    MultiFab phi(f.ba, f.dm, 1, 3), phi0(f.ba, f.dm, 1, 3), R(f.ba, f.dm, 1, 0), rhs(f.ba, f.dm, 1, 0), ref(f.ba, f.dm, 1, 0);
+    R.setVal(1.0);
+    ref.setVal(-1.0);
+    const Real R0 = 50.0;
+    const int  iters = 20;
+    const Real dtau  = 0.25 * DX;
+
+    for (int s : {LEVELSET_GRAD_UPWIND1, LEVELSET_GRAD_WENO5Z_FRONT}) {
+        const LevelSetGradient g = scheme(s, 3.0 * DX);
+        f.disc(phi, R0, 1.5);
+        f.disc(phi0, R0, 1.5);
+        const long n0 = burned_cells(phi);
+
+        // |grad phi| = 1.5 before: the RHS with R = 1 is -1.5 off the axes too
+        compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, nullptr, nullptr, false, g);
+        auto band = [&f, R0] (int i, int j) { return std::abs(f.radius(i, j) - R0) < 3.0 * DX; };
+        EXPECT_GT(max_abs_diff(rhs, ref, band), 0.4) << "scheme " << s;
+
+        reinitialize_phi(phi, f.geom, iters, dtau, -1.0, /*normalized=*/false, nullptr, false, g);
+        fire_fill_boundary(phi, f.geom);
+
+        compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, nullptr, nullptr, false, g);
+        EXPECT_LT(max_abs_diff(rhs, ref, band), 0.1) << "scheme " << s;
+        EXPECT_EQ(burned_cells(phi), n0) << "scheme " << s;
+        // the sign is kept everywhere, not only at the front
+        EXPECT_EQ(sign_changes(phi, phi0), 0) << "scheme " << s;
+        EXPECT_EQ(nonfinite_cells(phi), 0) << "scheme " << s;
+    }
 }

@@ -552,3 +552,27 @@ Test Location: `Tests/test_files/EkmanSpiral`_
 Problem Location: `Exec/CanonicalTests/EkmanSpiral`_
 
 .. _`Exec/CanonicalTests/EkmanSpiral`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/EkmanSpiral
+
+Fire and dust smoke tests
+-------------------------
+Every fire suite under ``Exec/RegTests`` (``FireBurnout``, ``FireExposure``,
+``FireFbp``, ``FireFluxPartition``, ``FireHeatPlacement``,
+``FireHybridObstacles``, ``FireLevelSetEllipse``, ``FireNearWall``,
+``FirePerimeterIgnition``, ``FireRestart``, ``FireRosComparison``,
+``FireScottBurgan``, ``FireStickMoisture``, ``FireWindSampling``,
+``FarsiteDefault`` and ``LevelSetPropagation``) registers one of its decks as
+a CTest smoke test carrying the ``fire`` and ``regression`` labels; the dust
+module is covered by the ``FireRestart`` dust deck when ``ERF_ENABLE_DUST`` is
+on. Each test copies the suite directory, runs the deck for 40 steps on the
+regression rank count, and passes when the run exits cleanly and writes the
+fire plotfile of its last step. There are no gold files: the physics checks of
+a suite live in the ``run_*.sh`` script beside its decks, which runs every
+variant to its stop time and tabulates the result, and is too long for CI.
+
+.. code-block:: bash
+
+   ctest --test-dir build -L fire        # or -R Fire
+
+The 20-cell decks of ``FireRestart`` and ``FireRosComparison`` run on one rank:
+the fire module requires every box edge to divide by ``erf.fire.grid_ratio``,
+and a 20-cell domain has no two-rank decomposition that does.
