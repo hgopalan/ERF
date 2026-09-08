@@ -279,8 +279,19 @@ void fill_fire_wind_from_interpolation(
 
             // Height actually sampled and the log-law factor that brings the
             // sampled wind down to the target height (1 without resampling).
+            // The log ratio is written so that every argument is valid whether
+            // or not it is selected: clang evaluates the ternary's arm
+            // speculatively in Release, and with resampling off z_sample is 0,
+            // so log(0) raised the divide-by-zero flag and tripped
+            // amrex.fpe_trap_zero on the first step. abs and the tiny offset
+            // are not selects, so nothing is folded back into the arm; with
+            // resampling on the values are unchanged.
+            constexpr Real z_tiny  = Real(1.0e-30);
+            const Real z0_safe     = std::abs(z0_log) + z_tiny;
+            const Real log_ref     = std::log((std::abs(z_ref_cell) + z_tiny) / z0_safe);
+            const Real log_sample  = std::log((std::abs(z_sample)   + z_tiny) / z0_safe);
             const Real z_at  = resample ? z_sample : z_ref_cell;
-            const Real scale = resample ? std::log(z_ref_cell / z0_log) / std::log(z_sample / z0_log) : Real(1.0);
+            const Real scale = resample ? log_ref / (log_sample + z_tiny) : Real(1.0);
 
             if (!bilinear) {
                 // Nearest atmospheric column: every fire cell in a column shares
