@@ -159,6 +159,14 @@ erf.fire.ignition.polygon_time = 0.0
 # polygon_time with the fuel intact
 erf.fire.ignition.polygon_interior_ros = 0.0
 erf.fire.ignition.polygon_interior_tau = 0.0
+# Temperature-threshold ignition: every burnable, unburned fire cell whose
+# k = 0 potential temperature (the field the fuel-moisture update reads)
+# exceeds threshold_temp [K] ignites as a disc of threshold_radius [m] (0 =
+# one fire cell), from threshold_start_time [s] on; off by default
+erf.fire.ignition.threshold_enable = false
+erf.fire.ignition.threshold_temp = 573.15
+erf.fire.ignition.threshold_radius = 0.0
+erf.fire.ignition.threshold_start_time = 0.0
 
 # ============================================================================
 # WIND AND TERRAIN ADJUSTMENT FACTORS

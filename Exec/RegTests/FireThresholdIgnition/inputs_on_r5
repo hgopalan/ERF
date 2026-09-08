@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# As inputs_on, with a 5 m disc stamped around every hot cell.
+erf.fire.ignition.threshold_enable = true
+erf.fire.ignition.threshold_temp = 315.0
+erf.fire.ignition.threshold_radius = 5.0

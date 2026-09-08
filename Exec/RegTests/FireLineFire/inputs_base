@@ -1,0 +1,81 @@
+# FireLineFire: the idealized surface line fire of Coen et al. (2013), the
+# WRF-Fire paper, without and with an ambient wind. Short grass (Anderson
+# model 1) at 5.5 % moisture on flat ground, a 40 m wide line fire across the
+# whole (periodic) y extent, so the fire is a pair of straight fronts: a head
+# fire spreading with the wind and a backing fire against it. One-way, so the
+# fronts must move at the Rothermel rates for the wind the fire samples; the
+# two-way variant is reported next to Coen's coupled numbers.
+#
+# The WRF-Fire choices mirrored here: the wind interpolated to 6.1 m and
+# reduced by the fuel model's wind reduction factor (windrf = 0.36 for FM1,
+# Andrews' unsheltered factor), no midflame wind cap (WRF-Fire caps R at
+# 6 m/s only), a 0.03 m roughness length. Only the sounding, the feedback and
+# the probes change between the decks.
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 400.0 80.0 160.0
+amr.n_cell = 80 16 32
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.max_grid_size = 20      # box lengths must divide by grid_ratio; four boxes for four ranks
+amr.max_grid_size_z = 32    # fire module forbids z-decomposition
+
+zlo.type = "surface_layer"
+zhi.type = "SlipWall"
+erf.most.z0 = 0.03
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+erf.molec_diff_type = "None"
+erf.les_type = "Smagorinsky"
+erf.Cs = 0.1
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+
+erf.fixed_dt = 0.25
+erf.substepping_cfl = 0.5
+max_step = 100000
+stop_time = 180.0
+
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_int = -1
+erf.fire_plot_int = -1
+
+erf.fire.enable = true
+erf.fire.fire_debug = true            # the [FIRE DEBUG] wind lines and [FIRE PROBE] arrivals are what the script reads
+erf.fire.grid_ratio = 2               # 2.5 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.directional_ros = true       # head and backing rates from the wind component along the front normal
+erf.fire.fuel_model_id = 1            # short grass, uniform
+erf.fire.moisture_1hr = 0.055         # Coen et al. (2013) control moisture
+erf.fire.moisture_10hr = 0.055
+erf.fire.moisture_100hr = 0.055
+erf.fire.moisture_dynamic = false
+erf.fire.ignition_x = 160.0
+erf.fire.ignition_y = 40.0
+erf.fire.ignition_r = 0.0            # no disc: the line is the only ignition
+erf.fire.ignition.polygon_file = "line_x160.csv"
+erf.fire.ignition.polygon_type = "polyline"
+erf.fire.ignition.polyline_width = 20.0   # 40 m wide line, as in the paper
+erf.fire.wind_ref_ht = 6.1
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"      # 0.362 for the 1 ft grass bed, WRF-Fire's windrf(1) = 0.36
+erf.fire.use_wind_limit = false       # WRF-Fire has no midflame cap
+erf.fire.use_terrain_wind = false
+erf.fire.ros_model = "rothermel"
+erf.fire.write_fire_stats_csv = false
+erf.fire.coupling_type = "lagged"
+erf.fire.inject_latent = true
+erf.fire.fire_atm_feedback = 0.0      # one-way: the fronts must move at the Rothermel rates
+# Probe cells along y = 40 m: the backing side at 1.25 and 3.75 m behind the
+# west edge of the line (x = 140), the head side at 1.25, 3.75, 8.75, 18.75,
+# 38.75 and 58.75 m ahead of the east edge (x = 180). The arrival time
+# differences between consecutive probes give the rates.
+erf.fire.probes = 138.75 40.0  136.25 40.0  181.25 40.0  183.75 40.0  188.75 40.0  198.75 40.0  218.75 40.0  238.75 40.0

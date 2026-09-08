@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# No ambient wind: both fronts must move at the no-wind rate R0 (Coen: NoWind, 0.02 m/s).
+erf.input_sounding_file = "input_sounding_u0"

@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# 2.5 m/s ambient wind, Coen's control (head 0.22 m/s in the coupled LES).
+erf.input_sounding_file = "input_sounding_u2p5"

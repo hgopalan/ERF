@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# As inputs_on, but nothing may ignite by threshold before 4 s
+# (the disc fire's plume is hottest in its first seconds, before the fuel burns out).
+erf.fire.ignition.threshold_enable = true
+erf.fire.ignition.threshold_temp = 315.0
+erf.fire.ignition.threshold_start_time = 4.0

@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# Threshold ignition on at 315 K, one fire cell per hot cell.
+erf.fire.ignition.threshold_enable = true
+erf.fire.ignition.threshold_temp = 315.0

@@ -1,0 +1,127 @@
+.. role:: cpp(code)
+   :language: c++
+
+.. _sec:LineFireVerification:
+
+Line Fire Verification
+======================
+
+``Exec/RegTests/FireLineFire`` is the idealized surface line fire of Coen et
+al. (2013), the WRF-Fire paper, run without and with an ambient wind. It is
+the verification the FIRE-SMART proposal named for the fire module, and it
+checks the whole one-way chain, wind extraction, wind reduction, Rothermel and
+the level set, against an answer that is known in closed form.
+
+The case
+--------
+
+Short grass (Anderson fuel model 1) at 5.5 % moisture on flat ground, the
+control moisture of the paper. A 40 m wide line fire is stamped at
+initialisation across the whole y extent of a 400 by 80 by 160 m box that is
+periodic in x and y, so the fire is a pair of straight fronts: a head fire
+spreading with the wind and a backing fire against it. The atmosphere runs at
+5 m with a Smagorinsky closure and a MOST surface layer over a 0.03 m
+roughness length (the paper's drag coefficient of 0.005), the fire grid at
+2.5 m with the level set, the directional Rothermel model and 0.25 s steps.
+The WRF-Fire choices are mirrored: the wind is interpolated to 6.1 m and
+reduced by the fuel model's wind reduction factor (WRF-Fire's ``windrf(1) =
+0.36`` for fuel model 1; here Andrews' unsheltered factor, 0.362 for the 1 ft
+grass bed), and there is no midflame wind cap (``erf.fire.use_wind_limit =
+false``; WRF-Fire caps R at 6 m/s only). Four decks share one base: no wind,
+a 2.5 m/s sounding (the paper's Control), a 5 m/s sounding (WSHi), and the
+Control wind with the heat coupled back.
+
+Probe cells sit on the line y = 40 m at 1.25 and 3.75 m behind the west edge
+of the line and at 1.25, 3.75, 8.75, 18.75, 38.75 and 58.75 m ahead of its
+east edge. The rates of spread are the distances between consecutive probes
+divided by the differences of their arrival times, so the initial transient
+of the stamped line does not enter.
+
+The expected rates
+------------------
+
+For an infinite straight line the directional Rothermel model gives the head
+fire :math:`R = R_0\,(1 + \phi_w(U_{\rm eff}))` with :math:`U_{\rm eff}` the
+wind component along the front normal after the reduction factor, and the
+backing fire :math:`R_0`, since the wind component into the fire is clipped
+at zero (Coen et al. 2013 make the same choice: "the backing rate of spread
+in these experiments is the zero-wind rate of spread"). ``check_linefire.py``
+carries an independent port of the Rothermel equations of
+``Source/Fire/ERF_Rothermel.cpp`` and evaluates them at the effective wind the
+fire reports each step, averaged over the run, since the surface layer slows
+the sounding wind at 6.1 m as the run proceeds (by 15 % over 180 s at 2.5 m/s
+and 28 % at 5 m/s). The one-way decks must match to 10 %.
+
+Results
+-------
+
+.. list-table:: Rates of spread [m/s] at 180 s, four ranks, 0.25 s steps
+   :widths: 16 10 10 12 12 12 12 22
+   :header-rows: 1
+
+   * - Deck
+     - U at 6.1 m
+     - U_eff
+     - R0
+     - Backing
+     - Head expected
+     - Head measured
+     - Coen et al. (2013)
+   * - nowind
+     - 0.00
+     - 0.00
+     - 0.0240
+     - 0.0240
+     - 0.0240
+     - 0.0240
+     - NoWind: 0.02 outward
+   * - wind2p5
+     - 2.30
+     - 0.83
+     - 0.0240
+     - 0.0240
+     - 0.0908
+     - 0.0957
+     - Control: 0.22 head
+   * - wind5
+     - 4.31
+     - 1.56
+     - 0.0240
+     - 0.0240
+     - 0.2689
+     - 0.2541
+     - WSHi: about 0.40 head
+   * - wind2p5_2way
+     - 4.80 (max)
+     - 1.74
+     - 0.0240
+     - 0.0240
+     - (coupled)
+     - 0.2427
+     - Control: 0.22 head
+
+The backing fire moves at :math:`R_0` to the last digit in every deck, the
+no-wind fire at :math:`R_0` in both directions, and the head fire within
+5.5 % of Rothermel at the sampled wind in both winds, the residual being the
+wind's drift over the run. The no-wind rate itself, 0.024 m/s, is the
+paper's 0.02 m/s.
+
+The heads of the one-way decks are well below the paper's 0.22 and about
+0.40 m/s: those are coupled results in a turbulent convective boundary layer,
+where the fire's plume draws the near-surface wind into the head ("near-fire
+horizontal winds varied from 2 to 4 m/s" for the 2.5 m/s Control). The
+two-way deck shows the same mechanism: with the heat coupled back the
+sampled wind rises from 2.3 to 4.8 m/s at the head and the head fire runs at
+0.24 m/s, the paper's 0.22, in a box far smaller than the paper's 5 km LES
+and without its resolved turbulence. That deck is reported, not checked.
+
+References
+----------
+
+Coen, J. L., M. Cameron, J. Michalakes, E. G. Patton, P. J. Riggan and
+K. M. Yedinak (2013). WRF-Fire: Coupled weather-wildland fire modeling with
+the Weather Research and Forecasting model. *J. Appl. Meteor. Climatol.* 52,
+16-38. Table 1 and section 4.
+
+Rothermel, R. C. (1972). A mathematical model for predicting fire spread in
+wildland fuels. USDA Forest Service Research Paper INT-115.
