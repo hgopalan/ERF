@@ -22,7 +22,7 @@ FM1 = dict(w0=0.034, sigma=3500.0, delta=1.0, Mx=0.12, h=8000.0, S_T=0.0555, S_e
 # ran a 0.22 m/s HEAD (backing not quoted; WRF-Fire sets it to R0); WSHi "four-fifths" faster.
 # The one-way heads here are meant to sit below these: the paper's plume doubles the head wind.
 COEN = {"nowind": ("NoWind", 0.02), "wind2p5": ("Control head", 0.22), "wind5": ("WSHi head", 0.40),
-        "wind2p5_2way": ("Control head", 0.22)}
+        "wind2p5_2way": ("Control head", 0.22), "wind5_2way": ("WSHi head", 0.40)}
 
 def rothermel_fm1(M_f, U_eff_ms):
     """Rothermel (1972) as Source/Fire/ERF_Rothermel.cpp computes it: (R0, R, phi_w) in m/s."""

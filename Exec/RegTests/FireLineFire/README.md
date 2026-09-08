@@ -8,14 +8,17 @@ spreading with the wind and a backing fire against it. The WRF-Fire choices
 are mirrored: the wind interpolated to 6.1 m and reduced by the fuel model's
 wind reduction factor (WRF-Fire's `windrf(1) = 0.36`, here Andrews'
 unsheltered factor 0.362 for the 1 ft grass bed), no midflame wind cap
-(WRF-Fire caps R at 6 m/s only), a 0.03 m roughness length. Four decks share
+(WRF-Fire caps R at 6 m/s only), a 0.03 m roughness length. Five decks share
 one base:
 
 - `nowind`: no ambient wind. Both fronts must move at the no-wind rate R0.
 - `wind2p5`: a 2.5 m/s sounding, Coen's Control.
 - `wind5`: a 5 m/s sounding, Coen's WSHi.
-- `wind2p5_2way`: the Control wind with the heat coupled back. Reported,
-  not checked: the 400 by 80 m box is far smaller than the paper's 5 km LES.
+- `wind2p5_2way`, `wind5_2way`: the Control and WSHi winds with the heat
+  coupled back. Reported, not checked: the 400 by 80 m box is far smaller
+  than the paper's 5 km LES, and an infinite line in it makes a two-dimensional
+  plume whose inflow from the downwind side opposes the ambient wind, unlike
+  the paper's 1 km line, which the flow can go around.
 
 ```
 MPIRUN="mpirun -np 4" ./run_linefire.sh /path/to/erf_exec

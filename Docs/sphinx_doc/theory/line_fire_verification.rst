@@ -27,9 +27,9 @@ The WRF-Fire choices are mirrored: the wind is interpolated to 6.1 m and
 reduced by the fuel model's wind reduction factor (WRF-Fire's ``windrf(1) =
 0.36`` for fuel model 1; here Andrews' unsheltered factor, 0.362 for the 1 ft
 grass bed), and there is no midflame wind cap (``erf.fire.use_wind_limit =
-false``; WRF-Fire caps R at 6 m/s only). Four decks share one base: no wind,
+false``; WRF-Fire caps R at 6 m/s only). Five decks share one base: no wind,
 a 2.5 m/s sounding (the paper's Control), a 5 m/s sounding (WSHi), and the
-Control wind with the heat coupled back.
+two winds with the heat coupled back.
 
 Probe cells sit on the line y = 40 m at 1.25 and 3.75 m behind the west edge
 of the line and at 1.25, 3.75, 8.75, 18.75, 38.75 and 58.75 m ahead of its
@@ -99,6 +99,14 @@ Results
      - (coupled)
      - 0.2427
      - Control: 0.22 head
+   * - wind5_2way
+     - 5.55 (max)
+     - 2.01
+     - 0.0240
+     - 0.0240
+     - (coupled)
+     - 0.2383
+     - WSHi: about 0.40 head
 
 Reading the table: the paper's column is its head fire in a coupled LES,
 except the no-wind row, where the fire crept outward at the same rate on
