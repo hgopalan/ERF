@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# The FARSITE path, threshold off.
+erf.fire.propagation_method = "farsite"

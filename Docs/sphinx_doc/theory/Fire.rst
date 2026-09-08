@@ -56,6 +56,7 @@ with a comment as a reference deck.
    multi_ignition
    fire_coupling
    wui_validation
+   line_fire_verification
    fire_acceleration
    fire_spotting_crown
    fire_output

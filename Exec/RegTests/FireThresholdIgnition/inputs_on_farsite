@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# The FARSITE path, threshold on at 315 K.
+erf.fire.propagation_method = "farsite"
+erf.fire.ignition.threshold_enable = true
+erf.fire.ignition.threshold_temp = 315.0

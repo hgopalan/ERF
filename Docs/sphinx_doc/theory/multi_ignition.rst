@@ -165,6 +165,44 @@ Example Polyline File
    1300.0 1000.0
    1600.0 1000.0
 
+Temperature-Threshold Ignition
+------------------------------
+
+The third source is the atmosphere itself. With
+``erf.fire.ignition.threshold_enable = true``, every burnable, unburned fire
+cell whose near-surface air temperature exceeds
+``erf.fire.ignition.threshold_temp`` is ignited on the fire step in which it
+first does so. The temperature is the :math:`k = 0` potential temperature the
+fuel-moisture update already maps onto the fire grid (``fire_surface_temp``
+in the fire plotfiles), so what the threshold sees depends on the coupling:
+in a two-way run the fire's own plume, advected over unburned fuel, can start
+new fire ahead of the front; in a one-way run only the initial atmosphere
+can. The default of 573.15 K (300 C) is the piloted ignition temperature of
+fine dead fuel; the FIRE-SMART proposal that ERF-Hazard grew from asked for
+"a simple temperature-threshold-based ignition model" as the ignition to pair
+with the heat feedback, and this is that model.
+
+Each hot cell is stamped as a disc of radius
+``erf.fire.ignition.threshold_radius`` (one fire cell when 0) with the same
+``min()`` semantics as the scheduled ignitions, so existing fire is never
+overwritten and neighbouring hot cells merge. The stamp is the signed distance
+to the disc, in metres on the level-set path and normalised to :math:`[-1, 1]`
+on the FARSITE path, matching the primary ignition. Cells in the non-burnable
+mask (structures, non-burnable fuel codes, firebreaks) neither ignite nor
+receive a stamp. ``erf.fire.ignition.threshold_start_time`` holds the
+threshold off until that time so the atmosphere can spin up first. The
+ignition is stateless: an ignited cell is an ordinary burning cell from then
+on, its arrival time is set by the propagation step, and nothing is added to
+the checkpoint. With ``erf.fire.fire_debug = true`` every fire step prints
+the number of cells ignited by threshold and the maximum surface temperature.
+
+``Exec/RegTests/FireThresholdIgnition`` runs a two-way grass fire with the
+threshold off and on (at 315 K, so the plume of a small disc fire crosses
+it), on both propagation paths, with a start time and with a 5 m disc, and
+checks that the default changes nothing, that cells ignite by threshold and
+the fire ends larger, that nothing ignites before the start time, and that
+the disc ignites at least as much as the one-cell stamp.
+
 Input Parameters
 ----------------
 
@@ -194,6 +232,22 @@ All multi-ignition parameters use the ``erf.fire.ignition.*`` prefix in the Parm
      - Real
      - Half-width of polyline ignition zone [m]
      - 10.0
+   * - ``ignition.threshold_enable``
+     - bool
+     - Ignite unburned, burnable cells whose k = 0 potential temperature exceeds ``threshold_temp``
+     - false
+   * - ``ignition.threshold_temp``
+     - Real
+     - Ignition temperature [K]
+     - 573.15
+   * - ``ignition.threshold_radius``
+     - Real
+     - Radius [m] of the disc stamped around each hot cell; 0 = one fire cell
+     - 0.0
+   * - ``ignition.threshold_start_time``
+     - Real
+     - No threshold ignition before this time [s]
+     - 0.0
 
 Example Input File Snippet
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

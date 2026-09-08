@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# The default keys written out: must reproduce inputs_off line for line.
+erf.fire.ignition.threshold_enable = false
+erf.fire.ignition.threshold_temp = 573.15
+erf.fire.ignition.threshold_radius = 0.0
+erf.fire.ignition.threshold_start_time = 0.0

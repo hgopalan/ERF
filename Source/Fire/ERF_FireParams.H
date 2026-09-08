@@ -295,6 +295,17 @@ struct FireParams
         amrex::Real   polygon_time            = 0.0;        ///< Time [s] the polygon is applied; 0 = at initialisation
         amrex::Real   polygon_interior_ros    = 0.0;        ///< Spread rate [m/s] behind the interior arrival times; 0 = off
         amrex::Real   polygon_interior_tau    = 0.0;        ///< Burnout e-folding time [s] of the interior; 0 = dx_fire / polygon_interior_ros
+        // Temperature-threshold ignition: every burnable, unburned fire cell
+        // whose near-surface air temperature (the k = 0 potential temperature
+        // the fuel-moisture update reads, mapped onto the fire grid) exceeds
+        // threshold_temp is ignited as a disc of radius threshold_radius (one
+        // fire cell when 0), from threshold_start_time on. In a coupled run
+        // the fire's own heating can therefore start new fire ahead of the
+        // front; in a one-way run only the initial state can. Off by default.
+        bool          threshold_enable        = false;      ///< Ignite cells hotter than threshold_temp
+        amrex::Real   threshold_temp          = 573.15;     ///< Ignition temperature [K] (300 C, piloted ignition of fine dead fuel)
+        amrex::Real   threshold_radius        = 0.0;        ///< Radius [m] of the disc stamped around a hot cell; 0 = one fire cell
+        amrex::Real   threshold_start_time    = 0.0;        ///< No threshold ignition before this time [s]
     } ignition;
 
     // Phase 12: Fire acceleration at startup.
@@ -766,6 +777,13 @@ struct FireParams
        pp.query("ignition.polygon_interior_tau", ig.polygon_interior_tau);
        if (ig.polygon_time < 0.0 || ig.polygon_interior_ros < 0.0 || ig.polygon_interior_tau < 0.0) {
            amrex::Abort("erf.fire.ignition.polygon_time, polygon_interior_ros and polygon_interior_tau must be >= 0");
+       }
+       pp.query("ignition.threshold_enable",     ig.threshold_enable);
+       pp.query("ignition.threshold_temp",       ig.threshold_temp);
+       pp.query("ignition.threshold_radius",     ig.threshold_radius);
+       pp.query("ignition.threshold_start_time", ig.threshold_start_time);
+       if (ig.threshold_temp <= 0.0 || ig.threshold_radius < 0.0 || ig.threshold_start_time < 0.0) {
+           amrex::Abort("erf.fire.ignition.threshold_temp must be > 0 K; threshold_radius and threshold_start_time must be >= 0");
        }
 
        // Phase 12: fire acceleration

@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# 5 m/s ambient wind, Coen's WSHi (head about 0.40 m/s in the coupled LES).
+erf.input_sounding_file = "input_sounding_u5"

@@ -749,6 +749,33 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         fire_fill_boundary(*fire_phi, m_fg.geom);        
     }
 
+    // Temperature-threshold ignition: cells whose near-surface air is hotter
+    // than erf.fire.ignition.threshold_temp ignite. fire_surface_temp is the
+    // k = 0 potential temperature mapped onto the fire grid by
+    // advance_fuel_moisture() above, so a coupled run sees the fire's own
+    // heating and a one-way run only the initial atmosphere. Stateless: the
+    // ignited cells are ordinary burning cells from here on, and the arrival
+    // time is set by the propagation step like any other new fire.
+    if (m_params.ignition.threshold_enable && fire_phi && fire_surface_temp
+        && m_current_time >= m_params.ignition.threshold_start_time) {
+        const Real r_ign = (m_params.ignition.threshold_radius > 0.0)
+                         ? m_params.ignition.threshold_radius
+                         : static_cast<Real>(m_fg.geom.CellSize(0));
+        const long n_ign = apply_threshold_ignition(*fire_phi, *fire_surface_temp,
+                                                    fire_nonburnable.get(), m_fg.geom,
+                                                    m_params.ignition.threshold_temp, r_ign,
+                                                    m_params.propagation_method != "levelset");
+        if (n_ign > 0) {
+            enforce_nonburnable_phi();
+            fire_fill_boundary(*fire_phi, m_fg.geom);
+        }
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] Threshold ignition: " << n_ign
+                           << " cells ignited above " << m_params.ignition.threshold_temp
+                           << " K (max surface temp " << fire_surface_temp->max(0) << " K)\n";
+        }
+    }
+
     // Hybrid wind selector: the weight follows the effective wind, so it is
     // rebuilt every fire step; the other selectors are static.
     if (m_params.is_hybrid() && m_params.hybrid.selector == "wind") {
