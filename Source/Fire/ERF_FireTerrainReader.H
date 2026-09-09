@@ -31,16 +31,19 @@
  * 5. Bilinearly interpolates terrain heights at fire-grid nodes
  * 6. Fills z_fire_nd MultiFab with interpolated values
  *
- * @param[out] z_fire_nd   Terrain height at fire-grid nodes (1 component, 1 ghost cell)
- *                         On fire grid, indexed by fire grid cell indices
+ * @param[out] z_fire_nd   Terrain height at fire-grid nodes (1 component, 1 ghost cell):
+ *                         entry (i, j) holds the height at the lower-left node
+ *                         of cell (i, j), ghost entries included
  * @param[in]  fg          Fire grid structure
  * @param[in]  fname       File path (empty string means no file, returns false)
  *
  * @return true if file was successfully read and interpolation completed,
  *         false if fname is empty or file cannot be opened
  *
- * Ghost cells are handled by clamping indices to valid domain bounds before
- * computing physical positions.
+ * The ghost entries are sampled from the raster at their own node position,
+ * clamped to the raster's extent, so the slope stencil's read of entry
+ * (i + 1, j + 1) on the last column of a box is defined at a non-periodic
+ * face too; the caller's FillBoundary then overwrites the periodic ones.
  *
  * @note This is a host-side I/O operation followed by GPU-side interpolation.
  *       The function broadcasts to all MPI ranks so all can compute in parallel.

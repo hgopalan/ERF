@@ -245,37 +245,41 @@ bool read_terrain_onto_fire_grid(
     Real dx_f = dx_dy[0];
     Real dy_f = dx_dy[1];
 
-    // Get fire domain bounds (for clamping)
-    const Box& domain_fire = fg.geom.Domain();
-    int i_fire_lo = domain_fire.smallEnd(0);
-    int i_fire_hi = domain_fire.bigEnd(0);
-    int j_fire_lo = domain_fire.smallEnd(1);
-    int j_fire_hi = domain_fire.bigEnd(1);
-
     // Get terrain domain bounds
     Real x_min = x_coords[0];
     Real x_max = x_coords[nx_terrain - 1];
     Real y_min = y_coords[0];
     Real y_max = y_coords[ny_terrain - 1];
 
-    // Interpolate onto fire grid
+    // Interpolate onto fire grid, ghost entries included. The MultiFab is
+    // cell-indexed but holds the height at node (i, j), the lower-left corner
+    // of cell (i, j), so the slope stencil reads entry (i + 1, j + 1) of the
+    // last cell of a box: inside the domain that entry belongs to the
+    // neighbouring box, and at the domain's high face it is the ghost entry
+    // whose node is the domain edge itself. Filling only the valid region
+    // left that entry to the allocator (FillBoundary does not touch a ghost
+    // outside a non-periodic face), so the last column upwind of an outflow
+    // face got a slope of (garbage - z) / dx: with a zero there the Tubbs
+    // terrain case read a 163 m cliff and a 26 m/s rate of spread in the
+    // column on the outflow face. Every ghost node is sampled from the file
+    // at its own position, clamped to the raster's extent; the periodic
+    // FillBoundary afterwards overwrites the periodic ones with their images,
+    // so a periodic run is unchanged.
     for (MFIter mfi(z_fire_nd, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.tilebox();
+        const Box& bx = mfi.growntilebox();
         Array4<Real> z_fire = z_fire_nd.array(mfi);
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) {
             int i_f = iv[0];
             int j_f = iv[1];
 
-            // Clamp to domain for ghost cells
-            int i_f_clamped = std::max(i_fire_lo, std::min(i_fire_hi, i_f));
-            int j_f_clamped = std::max(j_fire_lo, std::min(j_fire_hi, j_f));
+            // Physical position of node (i_f, j_f); the node one past the last
+            // cell sits on the domain's high edge, which the raster covers.
+            Real x = ProbLo_x + i_f * dx_f;
+            Real y = ProbLo_y + j_f * dy_f;
 
-            // Compute physical position at fire-grid node
-            Real x = ProbLo_x + i_f_clamped * dx_f;
-            Real y = ProbLo_y + j_f_clamped * dy_f;
-
-            // Clamp to terrain domain
+            // Clamp to the raster's extent: a ghost node past the raster takes
+            // the edge value, a zero-gradient extension.
             x = std::max(x_min, std::min(x_max, x));
             y = std::max(y_min, std::min(y_max, y));
 

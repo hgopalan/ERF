@@ -22,9 +22,12 @@ A neutral log-law profile enters at `xlo` as mass inflow and leaves at `xhi` as 
 ## Expected Results
 - The extraction height tracks the terrain: the reported range spans roughly 12 m over the lowest ground to 284 m over the highest, each being that column's ground plus `wind_ref_ht`.
 - The reference wind reaches about 22 m/s, since the highest columns sample the capped part of the profile, and the effective midflame wind is about 8 m/s after the Wind Adjustment Factor.
-- The fire spreads from a 100 m ignition disk on a slope, at 0.4 to 0.7 m/s, reaching 284 fire cells at 300 s, and crosses terrain without instability.
+- The fire spreads from a 100 m ignition disk on a slope, at 0.4 to 0.7 m/s, reaching 320 fire cells at 300 s, and crosses terrain without instability.
 - Spotting launches occasionally and brands land at terrain elevation. Landing distances saturate at the 200 m Scott cap for FM1.
 - The fire cells at 300 s figure above is for the level-set path; see the note on anisotropy below before comparing it with the FARSITE path.
+- The fire-grid slopes stay within the raster's (0.70 along x, 0.99 along y) in every column, the outflow column included, and the rate of spread stays below 1.2 m/s everywhere.
+- No cell west of the ignition disc burns before the backing fire can reach it: the wind is westerly, so brands land downwind of the cell that launched them, and a burned cell `d` metres upwind of the disc's western edge has an arrival time of at least `(d - 30 m) / ROS_max`. At 300 s the fire has backed 110 m upwind.
+- No cell on the inflow or outflow column burns.
 
 ## Key Parameters
 | Parameter | Value | Description |
@@ -41,6 +44,18 @@ A neutral log-law profile enters at `xlo` as mass inflow and leaves at `xhi` as 
 | `erf.fire.coupling_type` | `"passive"` | Isolates the terrain and wind paths from feedback. |
 | `erf.fire.use_terrain_wind` | `false` | Terrain flow is resolved, so the empirical corrections would double count. |
 | `erf.fire.spotting.enable` | `true` | Exercises the terrain-aware firebrand descent. |
+
+## Checks (`check_terrain_wind.py`)
+
+Run from the case directory after the case itself:
+
+```bash
+python3 check_terrain_wind.py            # reads the last plt_fire_????? plotfile
+```
+
+It needs yt and reads the terrain raster as an independent reference. It fails when a fire-grid slope exceeds the raster's along either axis, when the rate of spread exceeds 5 m/s anywhere, when a cell west of the ignition disc burns before the backing fire (at the largest ROS on the grid, plus one stamp radius of 30 m) can reach it, when a cell on the inflow or outflow column burns, or when the extraction height minus `wind_ref_ht` leaves the raster's elevation range.
+
+The upwind check exists because this case once burned in vertical stripes 500 to 1200 m west of the ignition from the first seconds of the run. Two defects were behind it. The fire grid's terrain reader filled only the valid region of a field that holds the height at each cell's lower-left node, so the slope stencil of the column on the outflow face read an unfilled ghost entry, saw a 163 m cliff and gave that column a rate of spread of 26 m/s; the reader now fills the ghost entries from the raster. And a binary older than the fire-grid ghost fill of 2026-09-04 (`fire_fill_boundary`) left the level-set stencil reading uninitialised memory outside both x faces. Nothing downwind is bounded this way: there the fire advances by chains of spot fires, up to the Scott cap every spotting interval.
 
 ## Notes
 

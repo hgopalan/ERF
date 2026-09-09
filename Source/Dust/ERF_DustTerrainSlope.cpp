@@ -81,30 +81,28 @@ bool read_terrain_onto_dust_grid(
     Real dx_d = dx_dy[0];
     Real dy_d = dx_dy[1];
 
-    const Box& domain_dust = dg.geom.Domain();
-    int i_dust_lo = domain_dust.smallEnd(0);
-    int i_dust_hi = domain_dust.bigEnd(0);
-    int j_dust_lo = domain_dust.smallEnd(1);
-    int j_dust_hi = domain_dust.bigEnd(1);
-
     Real x_min = x_coords.front();
     Real x_max = x_coords.back();
     Real y_min = y_coords.front();
     Real y_max = y_coords.back();
 
+    // Ghost entries included: entry (i, j) holds the height at node (i, j),
+    // and the slope stencil reads entry (i + 1, j + 1) of the last cell of a
+    // box, which at the domain's high face is a ghost entry that FillBoundary
+    // leaves untouched when that face is not periodic. Sampling only the
+    // valid region left it to the allocator (see the fire reader, which had
+    // the same defect). Each node is sampled at its own position, clamped to
+    // the raster's extent.
     for (MFIter mfi(z_dust_nd, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.tilebox();
+        const Box& bx = mfi.growntilebox();
         Array4<Real> z_dust = z_dust_nd.array(mfi);
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) {
             int i_d = iv[0];
             int j_d = iv[1];
 
-            int i_clamped = amrex::max(i_dust_lo, amrex::min(i_dust_hi, i_d));
-            int j_clamped = amrex::max(j_dust_lo, amrex::min(j_dust_hi, j_d));
-
-            Real x = prob_lo_x + i_clamped * dx_d;
-            Real y = prob_lo_y + j_clamped * dy_d;
+            Real x = prob_lo_x + i_d * dx_d;
+            Real y = prob_lo_y + j_d * dy_d;
             x = amrex::max(x_min, amrex::min(x_max, x));
             y = amrex::max(y_min, amrex::min(y_max, y));
 
