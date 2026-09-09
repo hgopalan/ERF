@@ -22,11 +22,11 @@ A neutral log-law profile enters at `xlo` as mass inflow and leaves at `xhi` as 
 ## Expected Results
 - The extraction height tracks the terrain: the reported range spans roughly 12 m over the lowest ground to 284 m over the highest, each being that column's ground plus `wind_ref_ht`.
 - The reference wind reaches about 22 m/s, since the highest columns sample the capped part of the profile, and the effective midflame wind is about 8 m/s after the Wind Adjustment Factor.
-- The fire spreads from a 100 m ignition disk on a slope, at 0.4 to 0.7 m/s, reaching 320 fire cells at 300 s, and crosses terrain without instability.
+- The fire spreads from a 100 m ignition disk on a slope, at 0.4 to 0.7 m/s at the head, reaching 127 fire cells at 300 s, and crosses terrain without instability.
 - Spotting launches occasionally and brands land at terrain elevation. Landing distances saturate at the 200 m Scott cap for FM1.
 - The fire cells at 300 s figure above is for the level-set path; see the note on anisotropy below before comparing it with the FARSITE path.
 - The fire-grid slopes stay within the raster's (0.70 along x, 0.99 along y) in every column, the outflow column included, and the rate of spread stays below 1.2 m/s everywhere.
-- No cell west of the ignition disc burns before the backing fire can reach it: the wind is westerly, so brands land downwind of the cell that launched them, and a burned cell `d` metres upwind of the disc's western edge has an arrival time of at least `(d - 30 m) / ROS_max`. At 300 s the fire has backed 110 m upwind.
+- No cell west of the ignition disc burns before the backing fire can reach it: the wind is westerly, so brands land downwind of the cell that launched them, and a burned cell `d` metres upwind of the disc's western edge has an arrival time of at least `(d - 30 m) / ROS_max`. At 300 s the fire has backed 16 m upwind (two cells) while the head has run 460 m.
 - No cell on the inflow or outflow column burns.
 
 ## Key Parameters
@@ -63,7 +63,7 @@ The upwind check exists because this case once burned in vertical stripes 500 to
 
 | Path | first advance | cells at 300 s |
 |---|---|---|
-| level set | continuous | 284 |
+| level set | continuous | 127 |
 | FARSITE | step 396 (99 s) | 53 |
 
 That gap is **anisotropy, not a defect in either path**. FARSITE applies the Anderson length-to-width ellipse: at this wind the ratio saturates at its cap of 8, so the head advances at the full rate of spread while the flanks run at 7.5% of it and the backing fire at 20%. The burned area therefore grows as a downwind lobe rather than a disc. The level-set path gets its direction-dependence from the model itself: by default (`erf.fire.directional_ros = true`, the WRF-Fire form) Rothermel is evaluated with the wind and slope projected on the front normal, so the head sees the full wind and the backing fire the no-wind rate. With `directional_ros = false` the head rate is applied in every direction and the fire grows a disc that covers several times the area; the figures in this README are for the default.
