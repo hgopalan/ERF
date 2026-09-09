@@ -22,7 +22,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--every", type=int, default=1, help="use every N-th plotfile")
 ap.add_argument("--out", default="marshall_fire.gif")
 ap.add_argument("--fps", type=float, default=2.0)
-ap.add_argument("--crop", default="0,16,5,17", help="x0,x1,y0,y1 window in km; \"\" for the whole domain")
+ap.add_argument("--crop", default="0,10,6,14", help="x0,x1,y0,y1 window in km; \"\" for the whole domain")
 args = ap.parse_args()
 
 files = sorted(glob.glob("plt_fire_?????"))[::args.every]
@@ -51,7 +51,7 @@ for k, pf in enumerate(files):
     t = float(ds.current_time)
     nx = at.shape[0]; dx = L / nx
     xc = (np.arange(nx) + 0.5) * dx / 1000.0
-    fig, ax = plt.subplots(figsize=(7.5, 6.6))
+    fig, ax = plt.subplots(figsize=(7.7, 6.3))   # 1.22 aspect, the review slide's picture box
     ax.imshow(relief, origin="lower", extent=[0, L / 1000, 0, L / 1000])
     ax.contour(xt, xt, tz.T, levels=np.arange(0, tz.max(), 50.0), colors="k", linewidths=0.3, alpha=0.5)
     burned = np.ma.masked_where(at < 0, at / 60.0)
