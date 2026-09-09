@@ -134,9 +134,10 @@ reinitialised, see below.
 Direction-dependent spread
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Handed one scalar :math:`R` per cell, the level set grows a disc at the
-head-fire rate: flanks and backing fire advance as fast as the head. With
-:cpp:`erf.fire.directional_ros = true` the wind and slope are projected onto
+Handed one scalar :math:`R` per cell (:cpp:`erf.fire.directional_ros =
+false`), the level set grows a disc at the head-fire rate: flanks and backing
+fire advance as fast as the head. By default
+(:cpp:`erf.fire.directional_ros = true`, as in WRF-Fire) the wind and slope are projected onto
 the front normal :math:`\hat n = \nabla\phi / |\nabla\phi|` and the selected
 model is evaluated with the projected scalars,
 

@@ -108,11 +108,11 @@ erf.fire.fire_debug = false
 erf.fire.grid_ratio = 4               # 25 m fire cells
 erf.fire.coupling_type = "passive"
 erf.fire.propagation_method = "levelset"
-# Anderson length-to-width ellipse on the level set: the head keeps the model's
-# rate while the flanks and the backing fire drop to a fraction of it, so the
-# fire grows as a downwind lobe. Without it the level set spreads at the local
-# rate in every direction and backed into the 35 m/s wind at 0.18 m/s.
-erf.fire.levelset.ellipse = true
+# The level set evaluates Rothermel along the front normal by default (the
+# WRF-Fire form, erf.fire.directional_ros = true): the head gets the full wind,
+# the backing fire the no-wind rate. With directional_ros = false the head rate
+# is applied in every direction and the fire backed into the 35 m/s wind at
+# 0.18 m/s.
 
 erf.fire.fuel_model_id = 1            # short grass, cured
 erf.fire.moisture_1hr = 0.04

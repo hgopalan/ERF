@@ -128,9 +128,10 @@ struct FireParams
     // in FARSITE, ELMFIRE, Prometheus, Cell2Fire): the normal speed is the
     // support function of an ellipse with Anderson's length-to-width ratio
     // from the midflame wind and Alexander's head-to-back ratio, head at the
-    // model's rate. Off by default; incompatible with directional_ros, the
-    // hybrid directional path and balbi.directional, which shape the front
-    // from the model instead. See ERF_LevelSetEllipse.H.
+    // model's rate. Off by default. It shapes the front itself, so it turns the
+    // directional_ros default off; an explicit directional_ros = true, the
+    // hybrid directional path or balbi.directional cannot be combined with
+    // it. See ERF_LevelSetEllipse.H.
     bool              levelset_ellipse         = false;  ///< erf.fire.levelset.ellipse
     amrex::Real       levelset_ellipse_lw      = 0.0;    ///< Fixed length-to-width ratio; 0 = Anderson (1983) from the wind
     amrex::Real       levelset_ellipse_lw_max  = 8.0;    ///< Cap on the length-to-width ratio (Anderson's fit saturates at 8)
@@ -336,13 +337,16 @@ struct FireParams
     // selected ROS model is evaluated with the projected scalars, so head, flank
     // and backing spread come from the model itself.
     //
-    // Off by default: with it off every model keeps the isotropic behaviour it
-    // has always had on that path. No effect on the FARSITE path, which gets its
-    // directionality from the Anderson ellipse. Balbi has its own switch,
-    // erf.fire.balbi.directional, which additionally carries that model's
-    // per-cell moisture, surface temperature and heat-flux couplings; either
-    // flag enables direction-dependent spread when ros_model = "balbi".
-    bool              directional_ros     = false;
+    // On by default (since 2026-09-08): this is the WRF-Fire form, and without
+    // it the level set applied the head rate in every direction, so a grass
+    // fire backed into a 35 m/s wind at a third of its head rate. Set it false
+    // to recover that isotropic disc. No effect on the FARSITE path, which gets
+    // its directionality from the Anderson ellipse; erf.fire.levelset.ellipse
+    // turns this default off (see the end of the constructor). Balbi has its own
+    // switch, erf.fire.balbi.directional, which additionally carries that
+    // model's per-cell moisture, surface temperature and heat-flux couplings;
+    // either flag enables direction-dependent spread when ros_model = "balbi".
+    bool              directional_ros     = true;
 
     // Horizontal interpolation of the atmospheric wind onto the fire grid:
     // 0 = nearest atmospheric column (every fire cell in a column shares one
@@ -669,9 +673,6 @@ struct FireParams
            if (levelset_ellipse_lw < 0.0 || levelset_ellipse_lw_max < 1.0) {
                amrex::Abort("erf.fire.levelset.ellipse_lw must be >= 0 and ellipse_lw_max >= 1");
            }
-           if (directional_ros || balbi.directional) {
-               amrex::Abort("erf.fire.levelset.ellipse cannot be combined with directional_ros or balbi.directional");
-           }
        }
        pp.query("levelset.gradient", levelset_gradient);
        pp.query("levelset.weno_band_cells", levelset_weno_band_cells);
@@ -797,7 +798,9 @@ struct FireParams
        pp.query("accel.enable_wind_lag", ac.enable_wind_lag);
        pp.query("accel.tau_wind",        ac.tau_wind);
 
-       pp.query("directional_ros", directional_ros);
+       // Remembered for the ellipse check at the end: the ellipse turns the
+       // default off but conflicts with an explicit true.
+       const bool directional_ros_given = pp.query("directional_ros", directional_ros);
 
        {
            std::string wind_interp_str = (wind_interp == 0) ? "nearest" : "bilinear";
@@ -1068,6 +1071,15 @@ struct FireParams
            firebreaks.push_back(fb);
        }
        n_firebreaks = static_cast<int>(firebreaks.size());
+
+       // The Huygens ellipse shapes the front itself, so it supersedes the
+       // directional default; asking for both explicitly is a conflict.
+       if (levelset_ellipse) {
+           if ((directional_ros_given && directional_ros) || balbi.directional) {
+               amrex::Abort("erf.fire.levelset.ellipse cannot be combined with directional_ros = true or balbi.directional");
+           }
+           directional_ros = false;
+       }
     }
 
     /// True when ros_model = "hybrid".
