@@ -150,6 +150,9 @@ void FireLayer::initialize(const ERF& erf,
     fire_slopes->setVal(0.0);
     fire_curvature->setVal(0.0);
     fire_ros->setVal(0.0);
+    // Written by compute_heat_flux_and_diagnostics() from the first step on;
+    // the initial plotfile carried whatever the allocator held before that.
+    fire_heat_flux->setVal(0.0_rt);
     fire_arrival_time->setVal(-1.0_rt);
     fire_disp_accum->setVal(0.0_rt);
     fire_surface_temp->setVal(0.0);
@@ -1737,8 +1740,11 @@ void FireLayer::build_open_fraction(const amrex::Geometry& geom_atm)
             hr(i, j, k) = (f > 1.0e-6_rt) ? hs(i, j, k) / f : 0.0_rt;
         });
     }
-    m_open_frac_atm->FillBoundary(geom_atm.periodicity());
-    m_roof_h_atm->FillBoundary(geom_atm.periodicity());
+    // The bilinear wind stencil reads the column past a non-periodic face for
+    // the outermost fire cells; FillBoundary leaves that ghost at the setVal
+    // defaults (open, no roof), so copy the edge column into it instead.
+    fire_fill_boundary(*m_open_frac_atm, geom_atm);
+    fire_fill_boundary(*m_roof_h_atm, geom_atm);
     if (m_params.fire_debug) {
         amrex::Print() << "[FIRE DEBUG] Open-fraction heat placement: min open fraction "
                        << m_open_frac_atm->min(0) << ", max roof height "
@@ -2209,7 +2215,10 @@ void FireLayer::build_nonburnable_mask()
     const bool from_breaks     = m_params.firebreak_use_mask && !m_params.firebreaks.empty();
     if (!from_structures && !from_codes && !from_breaks) { return; }
 
-    fire_nonburnable = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 1);
+    // Three ghost cells, the reach of the HJ-WENO5-Z stencil: with
+    // levelset.wall_extrapolate the wall stencil tests the mask at every cell
+    // of the stencil, and with one ghost that read ran past the fab.
+    fire_nonburnable = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 3);
     fire_nonburnable->setVal(0.0_rt);
 
     if (from_structures) {

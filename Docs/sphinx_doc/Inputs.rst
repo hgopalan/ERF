@@ -3888,8 +3888,8 @@ Rate of spread
 |                                                |                                                            | "fbp",                         |                        |
 |                                                |                                                            | "balbi", "hybrid"              |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.directional_ros**                   | Evaluate the rate along the front normal on the level-set  | Boolean                        | false                  |
-|                                                | path                                                       |                                |                        |
+| **erf.fire.directional_ros**                   | Evaluate the rate along the front normal on the level-set  | Boolean                        | true                   |
+|                                                | path; false spreads the head rate in every direction       |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.cheney_gould.moisture**             | Cheney-Gould dead fine fuel moisture [%]                   | Real                           | 10.0                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -4086,8 +4086,8 @@ Propagation
 |                                                | every stencil, so a masked wall is a zero-gradient boundary|                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.ellipse**                  | Spread as a Huygens ellipse set by the midflame wind       | Boolean                        | false                  |
-|                                                | (FARSITE family) instead of a disc; exclusive with         |                                |                        |
-|                                                | directional_ros                                            |                                |                        |
+|                                                | (FARSITE family); turns the directional_ros default off,   |                                |                        |
+|                                                | and cannot be combined with an explicit true               |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.ellipse_lw**               | Fixed length-to-width ratio of that ellipse; 0 = Anderson  | Real >= 0                      | 0.0                    |
 |                                                | (1983) from the wind                                       |                                |                        |

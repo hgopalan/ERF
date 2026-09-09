@@ -143,12 +143,14 @@ as a downwind lobe.
 The level-set path has no ellipse, and does not need one: it propagates a front
 at whatever normal speed it is given, so the shape follows from the rate of
 spread rather than from an imposed template. What it needs is a rate that depends
-on direction. By default it is handed a single scalar, which it applies in all
-directions, so the front grows at the head-fire rate everywhere; on an otherwise
-identical case that covers roughly five times the area of the FARSITE path.
+on direction. Handed a single scalar, which :cpp:`erf.fire.directional_ros =
+false` selects, it applies that rate in all directions, so the front grows at
+the head-fire rate everywhere; on an otherwise identical case that covers
+roughly five times the area of the FARSITE path.
 
-:cpp:`erf.fire.directional_ros = true` supplies the missing direction-dependence
-by projecting the driving vectors onto the front normal
+By default (:cpp:`erf.fire.directional_ros = true`) the level set gets the
+direction-dependence the way WRF-Fire does, by projecting the driving vectors
+onto the front normal
 :math:`\hat{n} = \nabla\phi/|\nabla\phi|` and evaluating the selected model with
 the projected scalars:
 

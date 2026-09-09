@@ -8,6 +8,7 @@
 #include <AMReX_ParallelReduce.H>
 #include <AMReX_ccse-mpi.H>
 #include <AMReX_Gpu.H>
+#include <ERF_FireGrid.H>
 #include <cmath>
 #include <vector>
 
@@ -367,6 +368,12 @@ int advance_fire_subcycle(
                                  geom_fire, dt_fire,
                                  current_time + (dt_atm - time_remaining),
                                  fp, slopes, nonburnable);
+
+        // The step rebuilds phi in the valid region only (setVal then the
+        // perimeter stamps), so the front normal of the next substep read
+        // zeros in the ghosts along box and domain edges. The layer refills
+        // after the last substep; the ones in between need it here.
+        fire_fill_boundary(phi, geom_fire);
 
         time_remaining -= dt_fire;
         ++n_substeps;

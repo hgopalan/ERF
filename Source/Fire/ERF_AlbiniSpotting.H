@@ -702,7 +702,10 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
         }
     }
 
-    phi.FillBoundary(geom.periodicity());
+    // Every fire-grid exchange goes through fire_fill_boundary, which also
+    // copies the nearest interior value into the ghosts outside a
+    // non-periodic face; FillBoundary alone leaves those untouched.
+    fire_fill_boundary(phi, geom);
 
     if (fire_debug) {
         int n_launched = static_cast<int>(landings.size());

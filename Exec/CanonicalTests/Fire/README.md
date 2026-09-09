@@ -13,6 +13,7 @@ Canonical fire tests covering analytical ROS checks, atmospheric coupling, ignit
 | `Fire_Behavior` | This directory collects related canonical ERF test cases under the Fire Behavior theme. It provides an organizational overview for the child cases listed below. | empirical / regression |
 | `Heat_Flux_Diagnostics` | This directory collects related canonical ERF test cases under the Heat Flux Diagnostics theme. It provides an organizational overview for the child cases listed below. | empirical / regression |
 | `Level_Set_Propagation` | Level-set (PDE) fire-front propagation, the alternative to the FARSITE Lagrangian path. | empirical / regression |
+| `Real_Terrain` | Fires on real (SRTM) terrain at event scale with inflow/outflow boundaries: the Marshall Fire windstorm case. | demonstration |
 | `Mesh_Refinement` | This directory collects related canonical ERF test cases under the Mesh Refinement theme. It provides an organizational overview for the child cases listed below. | empirical / regression |
 | `Supporting_Files` | Documentation and supporting assets. | empirical / regression |
 | `Unit_Tests` | This directory collects related canonical ERF test cases under the Unit Tests theme. It provides an organizational overview for the child cases listed below. | empirical / regression |
