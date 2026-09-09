@@ -21,7 +21,8 @@ except ImportError as e:
 ap = argparse.ArgumentParser()
 ap.add_argument("--every", type=int, default=1, help="use every N-th plotfile")
 ap.add_argument("--out", default="marshall_fire.gif")
-ap.add_argument("--fps", type=float, default=6.0)
+ap.add_argument("--fps", type=float, default=2.0)
+ap.add_argument("--crop", default="0,12,5,17", help="x0,x1,y0,y1 window in km; \"\" for the whole domain")
 args = ap.parse_args()
 
 files = sorted(glob.glob("plt_fire_?????"))[::args.every]
@@ -53,11 +54,15 @@ for k, pf in enumerate(files):
     im = ax.imshow(burned.T, cmap="inferno", origin="lower", extent=[0, L / 1000, 0, L / 1000],
                    vmin=0, vmax=max(1.0, t / 60.0), alpha=0.9)
     ax.contour(xc, xc, phi.T, levels=[0.0], colors="red", linewidths=1.2)
-    s = max(1, nx // 24)
+    s = max(1, nx // 48)
     ax.quiver(xc[::s], xc[::s], u[::s, ::s].T, w[::s, ::s].T, color="deepskyblue", scale=300, width=0.002)
     for ig in info.get("ignitions", []):
         ax.plot(ig["x"] / 1000, ig["y"] / 1000, "o", mfc="none", mec="white", mew=1.2, ms=8)
-    ax.set_xlim(0, L / 1000); ax.set_ylim(0, L / 1000)
+    if args.crop:
+        cx0, cx1, cy0, cy1 = [float(c) for c in args.crop.split(",")]
+        ax.set_xlim(cx0, cx1); ax.set_ylim(cy0, cy1)
+    else:
+        ax.set_xlim(0, L / 1000); ax.set_ylim(0, L / 1000)
     ax.set_xlabel("x [km]"); ax.set_ylabel("y [km]")
     n_b = int((at >= 0).sum())
     ax.set_title(f"Marshall Fire  t = {t / 60:6.1f} min   burned {n_b * dx * dx / 1e4:7.1f} ha")

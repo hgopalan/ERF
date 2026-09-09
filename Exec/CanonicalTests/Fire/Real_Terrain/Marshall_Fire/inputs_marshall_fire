@@ -83,22 +83,22 @@ erf.terrain_file_name = "terrain_marshall.txt"
 # ============================================================================
 # TIME STEPPING AND OUTPUT
 # ============================================================================
-stop_time = 7200.0
-max_step  = 24000
+stop_time = 1800.0                # 30 min: a short demonstration of the spread
+max_step  = 6000
 
 erf.sum_interval = 2000
 erf.v = 1
 amr.v = 1
 
 erf.check_file = chk_marshall
-erf.check_int  = 12000
+erf.check_int  = -1
 
 erf.plot_file = plt3d_marshall
 erf.plot_int  = 2000              # every 10 min
 erf.plot_vars = theta u v w z_phys
 
 erf.fire_plot_file = plt_fire_
-erf.fire_plot_int  = 400          # one frame every two minutes
+erf.fire_plot_int  = 100          # one animation frame every 30 s
 
 # ============================================================================
 # FIRE MODULE
