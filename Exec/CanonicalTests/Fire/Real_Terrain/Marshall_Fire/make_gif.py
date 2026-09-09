@@ -35,7 +35,10 @@ v = np.loadtxt("terrain_marshall.txt")
 nt = int(v[0]); tz = v[2 + 2 * nt:].reshape(nt, nt)
 L = float(v[2 + nt - 1])
 ls = LightSource(azdeg=315, altdeg=45)
-relief = ls.hillshade(tz.T, vert_exag=2, dx=L / (nt - 1), dy=L / (nt - 1))
+# colour-shaded elevation: hillshade over the terrain colormap, plus 50 m contours
+relief = ls.shade(tz.T, cmap=plt.cm.terrain, blend_mode="soft", vert_exag=2,
+                  dx=L / (nt - 1), dy=L / (nt - 1), vmin=-0.3 * tz.max(), vmax=1.05 * tz.max())
+xt = np.linspace(0, L / 1000, nt)
 
 os.makedirs("frames", exist_ok=True)
 frames = []
@@ -49,13 +52,14 @@ for k, pf in enumerate(files):
     nx = at.shape[0]; dx = L / nx
     xc = (np.arange(nx) + 0.5) * dx / 1000.0
     fig, ax = plt.subplots(figsize=(7.5, 6.6))
-    ax.imshow(relief, cmap="gray", origin="lower", extent=[0, L / 1000, 0, L / 1000], alpha=0.85)
+    ax.imshow(relief, origin="lower", extent=[0, L / 1000, 0, L / 1000])
+    ax.contour(xt, xt, tz.T, levels=np.arange(0, tz.max(), 50.0), colors="k", linewidths=0.3, alpha=0.5)
     burned = np.ma.masked_where(at < 0, at / 60.0)
-    im = ax.imshow(burned.T, cmap="inferno", origin="lower", extent=[0, L / 1000, 0, L / 1000],
-                   vmin=0, vmax=max(1.0, t / 60.0), alpha=0.9)
-    ax.contour(xc, xc, phi.T, levels=[0.0], colors="red", linewidths=1.2)
+    im = ax.imshow(burned.T, cmap="hot", origin="lower", extent=[0, L / 1000, 0, L / 1000],
+                   vmin=0, vmax=max(1.0, t / 60.0), alpha=0.95)
+    ax.contour(xc, xc, phi.T, levels=[0.0], colors="red", linewidths=1.5)
     s = max(1, nx // 48)
-    ax.quiver(xc[::s], xc[::s], u[::s, ::s].T, w[::s, ::s].T, color="deepskyblue", scale=300, width=0.002)
+    ax.quiver(xc[::s], xc[::s], u[::s, ::s].T, w[::s, ::s].T, color="navy", scale=250, width=0.0025)
     for ig in info.get("ignitions", []):
         ax.plot(ig["x"] / 1000, ig["y"] / 1000, "o", mfc="none", mec="white", mew=1.2, ms=8)
     if args.crop:
