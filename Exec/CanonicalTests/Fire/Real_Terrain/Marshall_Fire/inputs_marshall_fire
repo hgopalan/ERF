@@ -132,9 +132,14 @@ erf.fire.waf_formula = "andrews"
 erf.fire.use_wind_limit = true
 erf.fire.use_terrain_wind = false     # the terrain flow is resolved
 
+# Spotting every 60 s (200 steps of 0.3 s) at a low launch probability. The
+# interval is in steps, and with the 20-step, P_base 0.01 setting of the
+# smaller cases a brand landed 200 m downwind every 6 s and became a source at
+# once, so the chain of spot fires ran at 12 m/s; the event itself advanced at
+# about 0.5 m/s on average, with the front here at 0.3 to 0.6 m/s.
 erf.fire.spotting.enable = true
-erf.fire.spotting.spotting_interval = 20
-erf.fire.spotting.P_base = 0.01
+erf.fire.spotting.spotting_interval = 200
+erf.fire.spotting.P_base = 0.002
 erf.fire.spotting.random_seed = 20211230
 erf.fire.spotting.terminal_velocity = 1.5
 erf.fire.spotting.spot_radius = 30.0

@@ -22,7 +22,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--every", type=int, default=1, help="use every N-th plotfile")
 ap.add_argument("--out", default="marshall_fire.gif")
 ap.add_argument("--fps", type=float, default=2.0)
-ap.add_argument("--crop", default="0,12,5,17", help="x0,x1,y0,y1 window in km; \"\" for the whole domain")
+ap.add_argument("--crop", default="0,16,5,17", help="x0,x1,y0,y1 window in km; \"\" for the whole domain")
 args = ap.parse_args()
 
 files = sorted(glob.glob("plt_fire_?????"))[::args.every]
