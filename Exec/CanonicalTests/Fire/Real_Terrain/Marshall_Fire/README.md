@@ -31,3 +31,10 @@ python3 make_gif.py                      # marshall_fire.gif from the fire plotf
 The atmosphere has 256 x 256 x 40 cells (10 m first cell stretched by 1.1 to 4.4 km) and the fire grid 1024 x 1024; the slow step is 0.3 s, the acoustic substepping automatic. The deck stops at 30 minutes, which is enough for a short animation of the first spread and costs about 90 minutes on eight ranks (0.85 s per step); raise `stop_time` for the fire to run across the plains. `make_gif.py` writes one frame per fire plotfile (every 30 s) over an x = 0 to 10 km, y = 6 to 14 km window around the fires; `--crop ""` shows the whole domain. The SRTM tiles come from `elevation.clip(bounds=(-105.33, 39.80, -104.97, 40.10), product="SRTM1")`, which leaves them in `~/Library/Caches/elevation/SRTM1/cache`; the GDAL clip that follows is not needed since the generator reads the tiles itself.
 
 ## Expected Results
+From the 30-minute run on eight ranks (0.85 to 1.0 s per step, 6000 steps):
+
+- The atmosphere runs stable at 0.3 s steps with 8 acoustic substeps; the fire-grid wind reaches 4 to 5 m/s at midflame near the origin and follows the terrain, accelerating over the mesa rims and turning in the drainages.
+- The three fires burn 370 ha at 30 minutes (22 ha at 6 min, 146 ha at 18 min), with a perimeter of 18.7 km and one to three spot fires ahead of the fronts at any time.
+- The origin fire's head advances at 0.44 m/s including its spot fires (0.3 to 0.6 m/s on the ROS field), the order the event averaged over its 10 km run.
+- Those figures are from a run with `erf.fire.directional_ros = false`, the isotropic level set, which also backed the fires into the wind at 0.18 m/s; the committed deck uses the directional default, which keeps the head rate, holds the backing fire at the no-wind rate, and grows each fire as a downwind lobe with a smaller area.
+- `make_gif.py` writes a 61-frame animation (30 s at 2 fps) of the burned area over the shaded elevation; the animation is not committed.
