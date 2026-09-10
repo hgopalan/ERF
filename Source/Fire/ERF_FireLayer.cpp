@@ -463,8 +463,9 @@ void FireLayer::initialize(const ERF& erf,
             }
         }
         if (m_params.uses_model("behave")) {
-            // Phase 15: Pre-compute BEHAVE multi-class coefficients.
-            FuelModelParams fp_bh = uniform_fuel_params();
+            // Phase 15: Pre-compute BEHAVE multi-class coefficients from the
+            // untransferred table; BEHAVE cures the herbaceous load itself.
+            FuelModelParams fp_bh = uniform_behave_fuel_params();
             m_bs_default = compute_behave_state(fp_bh,
                                                 m_params.moisture_1hr,
                                                 m_params.moisture_10hr,
@@ -719,7 +720,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         }
         // Phase 15: Update BEHAVE state when dynamic moisture is enabled.
         if (m_params.moisture_dynamic && m_params.uses_model("behave")) {
-            FuelModelParams fp_bh = uniform_fuel_params();
+            FuelModelParams fp_bh = uniform_behave_fuel_params();
             // Domain-average live moisture from components 3 and 4
             long nc_live = fire_fuel_mc->boxArray().numPts();
             Real avg_lh  = (nc_live > 0) ? fire_fuel_mc->sum(3) / Real(nc_live) : m_params.moisture_live;
@@ -1796,7 +1797,7 @@ void FireLayer::fill_ros_for_model(const std::string& model,
         fill_cheney_gould_ros(out, *fire_wind_eff, m_cgc);
     } else if (model == "behave") {
         // Phase 15: BEHAVE multi-class Rothermel model
-        FuelModelParams fp_behave = uniform_fuel_params();
+        FuelModelParams fp_behave = uniform_behave_fuel_params();
         fill_behave_ros(out, *fire_wind_eff, *fire_slopes,
                         fp_behave,
                         m_bs_default,

@@ -32,6 +32,7 @@
  */
 
 #include <AMReX_MultiFab.H>
+#include <ERF_FuelModels.H>
 #include <ERF_Rothermel.H>
 #include <cmath>
 
@@ -102,6 +103,28 @@ amrex::Real behave_herb_transfer_fraction(amrex::Real mc_herba,
 }
 
 /**
+ * @brief Fuel parameters BEHAVE starts from: the fuel table without its own
+ *        curing transfer.
+ *
+ * get_fuel_params moves a Scott-Burgan dynamic model's cured herbaceous load
+ * to the 1-h class at the live moisture it is given, which the single-class
+ * Rothermel and Balbi paths need. BEHAVE transfers the load itself, into its
+ * dead herbaceous class (compute_behave_state, Step 1), so it takes the
+ * untransferred table. Handing it the cured table transferred the load twice:
+ * 5/9 of GR2's herbaceous load dead at M = 0.90 instead of 1/3. Anderson codes
+ * ignore the live moisture, so they are unaffected.
+ *
+ * @param[in] code     Fuel model code
+ * @param[in] fuel_set FUEL_SET_ANDERSON13 or FUEL_SET_SCOTT_BURGAN40
+ * @return Fuel parameters with the herbaceous load still live
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+FuelModelParams behave_fuel_params(int code, int fuel_set)
+{
+    return get_fuel_params(code, fuel_set, amrex::Real(-1.0));
+}
+
+/**
  * @brief Compute BEHAVE multi-class Rothermel state for a single cell.
  *
  * Ports fire_ros_behave() from WRF-SFIRE module_fr_sfire_phys.F, implementing:
@@ -112,7 +135,8 @@ amrex::Real behave_herb_transfer_fraction(amrex::Real mc_herba,
  *   - Multi-class reaction intensity
  *   - Multi-class heat sink
  *
- * @param[in] fp         FuelModelParams — all fuel properties
+ * @param[in] fp         FuelModelParams — all fuel properties, with the
+ *                       herbaceous load untransferred (behave_fuel_params)
  * @param[in] mc_1hr     1-hour dead fuel moisture [fraction]
  * @param[in] mc_10hr    10-hour dead fuel moisture [fraction]
  * @param[in] mc_100hr   100-hour dead fuel moisture [fraction]
@@ -133,6 +157,11 @@ amrex::Real behave_herb_transfer_fraction(amrex::Real mc_herba,
  *   Live herba:     fp.sigma_lh       [1/ft]  (from FuelModelParams)
  *   Live woody:     fp.sigma_lw       [1/ft]  (from FuelModelParams)
  *   Dead herba (transferred): fp.sigma_lh [1/ft] (same as live herba)
+ *
+ * The dead herbaceous class takes the 1-hour moisture mc_1hr (Scott and
+ * Burgan 2005, p. 10). It carried a fixed 0.15 before, which put fuels with a
+ * dead moisture of extinction of 0.15 near extinction once most of the
+ * herbaceous load had cured.
  *
  * Reference: Andrews (2018) GTR-RMRS-371 pp. 16–38.
  */
@@ -222,8 +251,8 @@ BehaveState compute_behave_state(
 
     Real W_prima = (exp_live > 1.0e-12) ? (exp_dead / exp_live) : 0.0;
 
-    // Weighted dead fuel moisture
-    Real fmc_dead = f_d1 * mc_1hr + f_d10 * mc_10hr + f_d100 * mc_100hr + f_dh * 0.15;
+    // Weighted dead fuel moisture; the dead herbaceous class takes the 1-h moisture
+    Real fmc_dead = f_d1 * mc_1hr + f_d10 * mc_10hr + f_d100 * mc_100hr + f_dh * mc_1hr;
     Real M_prima_f = fmc_dead;
 
     // Live moisture of extinction from Rothermel live fuel path
@@ -237,7 +266,7 @@ BehaveState compute_behave_state(
     //   where r = min(1, M / M_x)
     // Reference: WRF-SFIRE lines ~431–445
 
-    fmc_dead = f_d1 * mc_1hr + f_d10 * mc_10hr + f_d100 * mc_100hr + f_dh * 0.15;
+    fmc_dead = f_d1 * mc_1hr + f_d10 * mc_10hr + f_d100 * mc_100hr + f_dh * mc_1hr;
     Real fmc_live = f_lh * mc_herba + f_lw * mc_woody;
 
     Real r_dead = amrex::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(fmc_dead / fuelmce));
