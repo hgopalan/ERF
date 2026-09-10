@@ -27,7 +27,7 @@ The WRF-Fire choices are mirrored: the wind is interpolated to 6.1 m and
 reduced by the fuel model's wind reduction factor (WRF-Fire's ``windrf(1) =
 0.36`` for fuel model 1; here Andrews' unsheltered factor, 0.362 for the 1 ft
 grass bed), and there is no midflame wind cap (``erf.fire.use_wind_limit =
-false``; WRF-Fire caps R at 6 m/s only). Five decks share one base: no wind,
+false``; WRF-Fire caps R at 6 m/s only). Six decks share one base: no wind,
 a 2.5 m/s sounding (the paper's Control), a 5 m/s sounding (WSHi), and the
 two winds with the heat coupled back.
 
@@ -91,6 +91,14 @@ Results
      - 0.2689
      - 0.2541
      - WSHi: about 0.40 head
+   * - nowind_2way
+     - 1.34 (max)
+     - 0.48
+     - 0.0240
+     - 0.0240
+     - (coupled)
+     - 0.0240
+     - NoWind: 0.02 outward
    * - wind2p5_2way
      - 4.80 (max)
      - 1.74

@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# No ambient wind with the heat coupled back, for the comparison with Coen's NoWind
+# fire, which crept outward at 0.02 m/s; reported, not checked: in the paper the
+# still-air fire sits in a convective boundary layer, here in a neutral box.
+erf.input_sounding_file = "input_sounding_u0"
+erf.fire.fire_atm_feedback = 1.0
