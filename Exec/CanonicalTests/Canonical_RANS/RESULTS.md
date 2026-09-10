@@ -339,3 +339,29 @@ Agreement: Smagorinsky implicit against explicit at dt = 5 s differs by
 2.7e-2 m/s in wind (scale 10) after 1 h of spin-up, and implicit dt = 120 s
 against implicit dt = 5 s by 5.3e-2 m/s. Deardorff implicit dt = 120 s
 against dt = 5 s differs by 1.7e-2 m/s, 3.0e-3 K and 2.1e-3 m2/s2 in k.
+
+### Anelastic against compressible, after the change
+
+Both integrators carry the same slow time step, because the acoustic
+waves in the compressible path are handled by substepping and never
+limited the slow step; what limited the anelastic path was the vertical
+diffusion being forced explicit. Neutral deck, 12 h, 2 ranks, wall time
+for the whole run:
+
+| integrator | dt [s] | acoustic substeps per step | wall time | outcome |
+| --- | --- | --- | --- | --- |
+| anelastic implicit | 5 | none | 25 s | all checks pass |
+| anelastic implicit | 60 | none | 2 s | all checks pass |
+| anelastic implicit | 240 | none | 1 s | all checks pass |
+| anelastic implicit | 480 | none | - | fails at step 53 |
+| compressible implicit | 60 | 2400 | 445 s | all checks pass |
+| compressible implicit | 120 | 4800 | 433 s | all checks pass |
+| compressible implicit | 240 | 9600 | 433 s | runs, 7 checks fail |
+
+So the anelastic path now reaches a larger passing step than the
+compressible one (240 s against 120 s) and costs about two orders of
+magnitude less per unit simulated time, since it pays one FFT solve per
+step instead of thousands of acoustic substeps. Before phases 9 and 10
+the ordering was inverted: the compressible path had had the implicit
+column solve for a long time, while `vert_implicit_fac` was zeroed for
+anelastic, so the cheaper integrator was the one stuck near 10 s.
