@@ -1715,6 +1715,7 @@ private:
     // Coarsened dust emission flux on atmospheric grid for each level
     // Updated after DustLayer::advance, applied in ERF_Advance before dycore
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> m_dust_flux_atm;
+    void ReadCheckpointFileDust ();
 #if defined(ERF_ENABLE_FIRE) && defined(ERF_USE_DUST)
     FireDustCoupling m_fire_dust_coupling;
     amrex::MultiFab m_fire_heat_scratch_for_lofting;
@@ -1730,9 +1731,6 @@ private:
     int         m_fire_plot_int  = -1;
     amrex::Real m_fire_plot_per  = -1.0;
     void ReadCheckpointFileFire ();
-#ifdef ERF_USE_DUST
-    void ReadCheckpointFileDust ();
-#endif
 #endif
 
 

@@ -1828,6 +1828,7 @@ ERF::ReadCheckpointFileSurfaceLayer ()
     }
 }
 
+#ifdef ERF_ENABLE_FIRE
 /**
  * ERF function for reading fire state from a checkpoint file during restart.
  *
@@ -1928,6 +1929,7 @@ ERF::ReadCheckpointFileFire ()
         }
     }
 }
+#endif
 
 #ifdef ERF_USE_DUST
 /**
