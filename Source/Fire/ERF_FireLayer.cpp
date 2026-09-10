@@ -887,6 +887,14 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
 
     int n_substeps = 0;
 
+    // With the front acceleration clock, the level-set paths that rebuild the
+    // rate inside every RK stage apply the factor fire_ros already carries.
+    std::unique_ptr<amrex::MultiFab> accel_factor;
+    if (m_params.accel.enable && m_params.accel.use_temporal
+        && m_params.accel.clock == accel_clock::front && fire_accel_state) {
+        accel_factor = std::make_unique<amrex::MultiFab>(*fire_accel_state, amrex::make_alias, 2, 1);
+    }
+
     if (m_params.fire_debug && m_params.levelset_ellipse && m_params.propagation_method == "levelset") {
         // Shape of the spread ellipse at the strongest midflame wind on the grid.
         amrex::MultiFab umag(m_fg.ba, m_fg.dm, 1, 0);
@@ -971,7 +979,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 advect_levelset_hybrid_rk3(*fire_phi, *fire_slopes, m_fg.geom, dt_ls,
                                            m_params.levelset_eps_visc, spec,
                                            fire_nonburnable.get(), wall_extrap,
-                                           ls_grad);
+                                           ls_grad, accel_factor.get());
             } else if (balbi_directional) {
                 advect_levelset_balbi_rk3(*fire_phi,
                                           (m_params.balbi.wind_source == 1)
@@ -981,7 +989,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                           m_params.levelset_eps_visc,
                                           m_bc_default, m_params.balbi, balbi_in,
                                           fire_nonburnable.get(), wall_extrap,
-                                          ls_grad);
+                                          ls_grad, accel_factor.get());
             } else if (generic_directional) {
                 const DirectionalRosState dir_state = make_directional_state(m_params.ros_model);
                 // FBP reads the reference-height wind unless told otherwise;
@@ -993,7 +1001,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                                 dir_state, fire_nonburnable.get(), wall_extrap,
                                                 ls_grad, m_params.directional_shape,
                                                 m_params.directional_ellipse_lw,
-                                                m_params.directional_ellipse_lw_max);
+                                                m_params.directional_ellipse_lw_max,
+                                                accel_factor.get());
             } else if (m_params.levelset_ellipse) {
                 // Huygens ellipse: the model's rate is the head rate and the
                 // normal speed follows the ellipse set by the midflame wind.
@@ -1453,6 +1462,12 @@ void FireLayer::apply_crown_fire_ros()
         : (crown.ros_model == "van_wagner_proxy") ? 2 : 0;
     const bool use_dynamic_mc = (m_params.moisture_dynamic && fire_fuel_mc != nullptr);
     const bool use_passive_blend = crown.use_passive_blend;
+    // With the front acceleration clock the crown rate accelerates with the
+    // fire, as the surface rate it is compared with does: Cruz and the Van
+    // Wagner proxy take the factor here, Rothermel (1991) scales the surface
+    // rate, which already carries it.
+    const bool accel_front = m_params.accel.enable && m_params.accel.use_temporal
+                          && (m_params.accel.clock == accel_clock::front) && fire_accel_state;
 
     for (MFIter mfi(*fire_ros); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -1463,6 +1478,10 @@ void FireLayer::apply_crown_fire_ros()
         Array4<const Real> mc_arr;
         if (use_dynamic_mc) {
             mc_arr = fire_fuel_mc->const_array(mfi);
+        }
+        Array4<const Real> acc_arr;
+        if (accel_front) {
+            acc_arr = fire_accel_state->const_array(mfi);
         }
         auto ros_arr = fire_ros->array(mfi);
         auto crown_active_arr = fire_crown_active->array(mfi);
@@ -1493,6 +1512,9 @@ void FireLayer::apply_crown_fire_ros()
                 R_active = compute_van_wagner_proxy_ros(canopy_bulk_den, foliar_moisture);
             } else {
                 R_active = cruz_crown_ros(U10_ms, canopy_bulk_den, moisture_10hr);
+            }
+            if (accel_front && crown_model_id != 1) {
+                R_active *= acc_arr(i, j, k, 2);
             }
             R_active = amrex::max(R_active, R_surface);
 

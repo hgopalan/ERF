@@ -1016,6 +1016,7 @@ endif()
 # steps each (ctest -L fire, or -R Fire)
 #=============================================================================
 if(ERF_ENABLE_FIRE)
+add_test_fire(FireAccelerationClock_levelset_front FireAccelerationClock inputs_levelset_front 40)
 add_test_fire(FireBurnout_base              FireBurnout           inputs_base                40)
 add_test_fire(FireDirectionalShape_ellipse  FireDirectionalShape  inputs_ellipse             40)
 add_test_fire(FireEmcModel_van_wagner       FireEmcModel          inputs_van_wagner          40)

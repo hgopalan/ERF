@@ -1,0 +1,77 @@
+# FireAccelerationClock: settings shared by the decks in this folder. A 50 m
+# radius burning disc in a uniform 3 m/s westerly on flat ground, spread for 10
+# minutes with the temporal fire acceleration R = R_E (1 - exp(-A t)) under each
+# erf.fire.accel.clock, and without it, on the FARSITE and level-set paths.
+#
+# From a point ignition at a steady R_E the head rate is its unaccelerated
+# value times 1 - exp(-A t), t the time since ignition, whatever that value is
+# on each path. check_fireaccelerationclock.py measures the head of every deck
+# against its path's unaccelerated deck and that factor. A = 1 /min (60 s time
+# constant) instead of the calibrated 0.115 /min so that the whole ramp fits in
+# the run, and the perimeter limit is out of reach so A never switches to the
+# line constant.
+#
+# The atmosphere is a uniform westerly from input_sounding over a periodic domain
+# with no drag, no diffusion and one-way coupling, so the fire sees the same
+# midflame wind everywhere and at all times, and the 80 m atmosphere cells cost
+# almost nothing. Short grass (Anderson fuel model 1) at 5.5 % moisture, 10 m
+# fire cells.
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 2560.0 1920.0 640.0
+amr.n_cell = 32 24 8
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.max_grid_size = 16      # 16 x 16 and 16 x 8 boxes: both divide by the fire grid ratio
+amr.max_grid_size_z = 8     # the fire module forbids z-decomposition
+zlo.type = "surface_layer"  # the fire module needs the surface layer at the ground
+zhi.type = "SlipWall"
+# Zero bulk transfer coefficients: no surface drag, so the wind does not decay.
+erf.surface_layer.flux_type = "bulk_coeff"
+erf.most.Cd = 0.0
+erf.most.Ch = 0.0
+erf.most.Cq = 0.0
+erf.most.surf_temp = 300.0
+erf.most.surf_moist = 0.0
+# The surface layer needs a diffusion operator; zero coefficients keep it idle.
+erf.molec_diff_type = "ConstantAlpha"
+erf.dynamic_viscosity = 0.0
+erf.alpha_T = 0.0
+erf.alpha_C = 0.0
+erf.les_type = "None"
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type = Ideal
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+erf.fixed_dt = 1.0                    # one-way and uniform, so the atmosphere stays put
+erf.substepping_cfl = 0.5
+max_step = 600
+stop_time = 600.0
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_int_1 = -1
+erf.fire_plot_file = "plt_fire_"
+erf.fire_plot_int = 60                # every minute
+erf.fire.enable = true
+erf.fire.grid_ratio = 8               # 10 m fire cells, 256 x 192 of them
+erf.fire.ros_model = "rothermel"
+erf.fire.coupling_type = "passive"    # one-way: the atmosphere never sees the fire
+erf.fire.fuel_model_id = 1            # short grass
+erf.fire.moisture_1hr = 0.055
+erf.fire.moisture_10hr = 0.055
+erf.fire.moisture_100hr = 0.055
+erf.fire.moisture_dynamic = false
+erf.fire.use_waf = false              # the fire takes the wind at wind_ref_ht as its midflame wind
+erf.fire.use_wind_limit = false
+erf.fire.use_terrain_wind = false
+erf.fire.write_fire_stats_csv = false
+erf.fire.ignition_x = 500.0
+erf.fire.ignition_y = 960.0
+erf.fire.ignition_r = 50.0            # a 50 m radius burning disc
+# Temporal acceleration constants for the decks that switch it on
+erf.fire.accel.A_point = 1.0          # 1/min: a 60 s time constant
+erf.fire.accel.A_line = 1.0
+erf.fire.accel.perim_limit = 1.0e9    # never the line constant

@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# FARSITE path, temporal acceleration with the clock started at ignition and
+# carried with the front.
+erf.fire.propagation_method = "farsite"
+erf.fire.accel.enable = true
+erf.fire.accel.use_temporal = true
+erf.fire.accel.clock = "front"

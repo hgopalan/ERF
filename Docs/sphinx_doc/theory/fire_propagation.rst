@@ -98,9 +98,7 @@ not depend on the box decomposition or the number of ranks. The subcycle
 length is :cpp:`erf.fire.farsite.cfl_fire` times the cell size over the maximum
 rate of spread. Because the directionality comes from the Anderson ellipse, the
 rate-of-spread models need only supply the head-fire rate on this path;
-:cpp:`erf.fire.directional_ros` has no effect here. The temporal fire
-acceleration lowers the rate in burned cells only, so it does not slow this
-update; the size-based acceleration scales every cell and does.
+:cpp:`erf.fire.directional_ros` has no effect here.
 
 :cpp:`erf.fire.farsite.front_update` selects the update. ``"front_cell"`` is
 the default and the one described above. ``"legacy"`` is the update used before
@@ -115,6 +113,17 @@ advanced two rows per cell of travel: about twice the rate of spread at the
 head, flanks and back. ``Exec/RegTests/FarsiteFrontUpdate`` runs both against
 the Richards rates. ``phi_threshold`` and ``gaussian_sigma`` apply to the
 legacy update only.
+
+The startup acceleration of :ref:`fire_acceleration` rescales the rate before
+this step. The size-based model scales every cell. The temporal model with
+:cpp:`erf.fire.accel.clock = "front"` writes its factor to the burned cells and
+to the unburned cells the front moves into, so both updates advance the front
+at the accelerated rate. With the default ``"legacy"`` clock only burned cells
+carry the factor, and a cell starts again from zero rate when it burns. The
+``"front_cell"`` update then takes the front cell's own equilibrium rate as the
+larger one and is not slowed at all, and the ``"legacy"`` update still advances
+the first unburned row at the equilibrium rate
+(``Exec/RegTests/FireAccelerationClock``).
 
 Level-set path
 --------------
@@ -405,6 +414,12 @@ hybrid model is run on the directional path. The two are not comparable cell
 for cell: the ellipse reproduces neither a backing rate below the no-wind rate
 nor the saturation of the length-to-width ratio, and the projection reproduces
 neither of the empirical calibrations the ellipse carries.
+
+The temporal acceleration reaches the level-set speed only with
+:cpp:`erf.fire.accel.clock = "front"`, whose factor also multiplies the rate the
+directional, hybrid and Balbi paths rebuild in every Runge-Kutta stage. Those
+paths never read the accelerated ``fire_ros``, so under the ``"legacy"`` clock
+they spread as if acceleration were off (``Exec/RegTests/FireAccelerationClock``).
 
 Restart
 -------

@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# FARSITE path, temporal acceleration with the clock of each burned cell,
+# restarted when the cell burns and written to burned cells only.
+erf.fire.propagation_method = "farsite"
+erf.fire.accel.enable = true
+erf.fire.accel.use_temporal = true
+erf.fire.accel.clock = "legacy"

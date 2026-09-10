@@ -1,0 +1,9 @@
+FILE = inputs_base
+
+# Level-set path, temporal acceleration with the clock of each burned cell. The
+# directional rate is rebuilt from the model inside every RK stage and never
+# reads the accelerated field, so this runs as if acceleration were off.
+erf.fire.propagation_method = "levelset"
+erf.fire.accel.enable = true
+erf.fire.accel.use_temporal = true
+erf.fire.accel.clock = "legacy"
