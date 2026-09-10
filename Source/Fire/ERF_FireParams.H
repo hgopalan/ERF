@@ -689,9 +689,15 @@ struct FireParams
            amrex::Abort("erf.fire.levelset.gradient must be \"upwind\", \"weno5z\" or \"weno5z_front\", got \"" + levelset_gradient + "\"");
        }
 
-       // Terrain file
+       // Terrain file. The fire grid is grid_ratio times finer than the
+       // atmosphere, so it can carry a finer digital elevation model than the
+       // fitted mesh: erf.fire.terrain_file_name overrides the atmosphere's
+       // file when it is given, and the slope that drives the rate of spread
+       // is then read at the fire's own resolution. Unset, the fire shares
+       // erf.terrain_file_name as before.
        amrex::ParmParse pp_erf("erf");
        pp_erf.query("terrain_file_name", terrain_file_name);
+       pp.query("terrain_file_name", terrain_file_name);
         
        // CSV output parameters
        pp.query("write_fire_stats_csv", write_fire_stats_csv);

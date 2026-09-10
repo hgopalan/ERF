@@ -1,0 +1,10 @@
+frames/
+plt_fire_*
+plt3d_*
+chk_*
+*.gif
+*.mp4
+fire_stats_palisades.csv
+terrain_palisades.txt
+terrain_palisades_fire.txt
+fuel_palisades.asc
