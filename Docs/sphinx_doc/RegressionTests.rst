@@ -582,3 +582,12 @@ and a 20-cell domain has no two-rank decomposition that does.
 ``zlo.type=SlipWall`` for one step and passes when the run stops at start-up
 with the fire module's message that it requires a surface layer at the bottom
 boundary. Without that check the run crashed in the first step.
+
+PBL start-up check
+------------------
+``ABL_MRF_ZSplit_abort`` reruns the ``ABL_MRF_Tiling`` deck on one rank with
+``amr.max_grid_size_z=16``, which splits its 32-cell columns in two, and passes
+when the run stops before the first step with the message that MRF needs every
+box to span the vertical domain. Without that check the run failed a bare
+assert in the MRF kernel in the first step. The column schemes MYJ, MYNN25,
+MYNNEDMF, YSU, YSUNew and MRF share the check.

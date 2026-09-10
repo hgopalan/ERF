@@ -66,8 +66,8 @@ at startup, aborting with a message that names the input to change:
 - a surface layer (:cpp:`zlo.type = "surface_layer"`) with a roughness length
   :cpp:`erf.most.z0`, which supplies :math:`u_*`, the surface temperature and
   the boundary-layer height;
-- no domain decomposition in the vertical (:cpp:`amrex.max_grid_size_z` equal
-  to the number of vertical cells), so every rank owns full columns;
+- no domain decomposition in the vertical (:cpp:`amr.max_grid_size_z` at least
+  the number of vertical cells), so every rank owns full columns;
 - :cpp:`erf.dust.grid_ratio` of at least 1, with every atmosphere box length in
   x and y divisible by it;
 - a distribution mapping the same size as the box array, a domain whose

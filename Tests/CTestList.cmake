@@ -622,15 +622,14 @@ function(add_test_fire TEST_NAME SUITE_DIR INPUT_FILE NSTEPS)
     )
 endfunction(add_test_fire)
 
-# Fire start-up check: run one deck of a fire suite with RUNTIME_OPTIONS that
-# break a fire prerequisite, and pass when the run stops with EXPECTED_MESSAGE
-# in its output. The run is meant to abort, so its exit status is dropped by
-# the pipe into tee (a ';' here would split the CMake command list).
-function(add_test_fire_abort TEST_NAME SUITE_DIR INPUT_FILE EXPECTED_MESSAGE RUNTIME_OPTIONS)
-    set(CURRENT_TEST_SOURCE_DIR ${PROJECT_SOURCE_DIR}/Exec/RegTests/${SUITE_DIR})
+# Start-up check: copy SOURCE_DIR, run INPUT_FILE on one rank with RUNTIME_OPTIONS
+# that break a start-up requirement, and pass when the run stops with
+# EXPECTED_MESSAGE in its output. The run is meant to abort, so its exit status is
+# dropped by the pipe into tee (a ';' here would split the CMake command list).
+function(add_test_abort TEST_NAME SOURCE_DIR INPUT_FILE EXPECTED_MESSAGE RUNTIME_OPTIONS)
     set(CURRENT_TEST_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
     file(MAKE_DIRECTORY ${CURRENT_TEST_BINARY_DIR})
-    file(GLOB TEST_FILES "${CURRENT_TEST_SOURCE_DIR}/*")
+    file(GLOB TEST_FILES "${SOURCE_DIR}/*")
     file(COPY ${TEST_FILES} DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
 
     if(ERF_ENABLE_MPI)
@@ -650,10 +649,17 @@ function(add_test_fire_abort TEST_NAME SUITE_DIR INPUT_FILE EXPECTED_MESSAGE RUN
         TIMEOUT 600
         PROCESSORS 1
         WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
-        LABELS "regression;fire"
+        LABELS "regression"
         PASS_REGULAR_EXPRESSION "${EXPECTED_MESSAGE}"
         ATTACHED_FILES_ON_FAIL "${test_log}"
     )
+endfunction(add_test_abort)
+
+# Fire start-up check: add_test_abort on one deck of a fire suite under Exec/RegTests
+function(add_test_fire_abort TEST_NAME SUITE_DIR INPUT_FILE EXPECTED_MESSAGE RUNTIME_OPTIONS)
+    add_test_abort(${TEST_NAME} ${PROJECT_SOURCE_DIR}/Exec/RegTests/${SUITE_DIR} ${INPUT_FILE}
+                   "${EXPECTED_MESSAGE}" "${RUNTIME_OPTIONS}")
+    set_tests_properties(${TEST_NAME} PROPERTIES LABELS "regression;fire")
 endfunction(add_test_fire_abort)
 
 # Stationary test -- compare with time 0
@@ -872,6 +878,9 @@ add_test_tiling_parity(ABL_MRF_PBLHSmooth_Tiling    ABL_MRF_Tiling "00010" "0001
 add_test_tiling_parity(ABL_MRF_PBLHSmooth_Boxes     ABL_MRF_Tiling "00010" "00010" SPLIT boxes FCOMPARE_RTOL "1.0e-8" RUNTIME_OPTIONS "erf.enable_pblh_smoothing=true erf.pblh_smoothing_passes=3")
 add_test_tiling_parity(ABL_YSUNew_PBLHSmooth_Tiling ABL_MRF_Tiling "00010" "00010" RUNTIME_OPTIONS "erf.pbl_type=YSUNew erf.most.pblh_calc=YSU erf.enable_pblh_smoothing=true erf.pblh_smoothing_passes=3")
 add_test_tiling_parity(ABL_YSUNew_PBLHSmooth_Boxes  ABL_MRF_Tiling "00010" "00010" SPLIT boxes FCOMPARE_RTOL "1.0e-8" RUNTIME_OPTIONS "erf.pbl_type=YSUNew erf.most.pblh_calc=YSU erf.enable_pblh_smoothing=true erf.pblh_smoothing_passes=3")
+# A column PBL scheme on boxes split in z must stop at start-up, not at the kernel assert in step 1
+add_test_abort(ABL_MRF_ZSplit_abort ${PROJECT_SOURCE_DIR}/Tests/test_files/ABL_MRF_Tiling ABL_MRF_Tiling.i
+    "every box on level 0 must span the vertical domain" "amr.max_grid_size_z=16")
 add_test_r(ABL_InflowFile                    ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")
 add_test_r(MoistBubble                       ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")
 add_test_r(SquallLine_2D                     ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")

@@ -35,7 +35,8 @@ void verify_dust_prerequisites(const ERF&          erf,
         amrex::Box box = ba_atm[i];
         int box_nz = box.length(2);
         std::string msg = std::string("[DUST] Cannot decompose in z direction. ")
-                        + "Set: amrex.max_grid_size_z = " + std::to_string(domain_nz);
+                        + "Set: amr.max_grid_size_z = " + std::to_string(domain_nz)
+                        + " (or larger)";
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(box_nz == domain_nz, msg.c_str());
     }
 
@@ -64,7 +65,7 @@ void verify_dust_prerequisites(const ERF&          erf,
             std::string msg5 = std::string("[DUST] Box sizes not divisible by grid_ratio. ")
                              + "All atmospheric box x,y sizes must be divisible by grid_ratio="
                              + std::to_string(dust_params.grid_ratio)
-                             + ". Adjust grid_ratio or amrex.max_grid_size.";
+                             + ". Adjust grid_ratio or amr.max_grid_size_x and amr.max_grid_size_y.";
             AMREX_ALWAYS_ASSERT_WITH_MESSAGE(false, msg5.c_str());
         }
     }
