@@ -1102,6 +1102,20 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 fire_nonburnable.get(),
                 fire_ember_landings.get(),
                 /*phi_normalized=*/ m_params.propagation_method != "levelset");
+
+            // A spot landing lowers phi below zero directly, outside the
+            // substep loop that stamps arrival time, so spot-ignited cells kept
+            // the -1 sentinel while burning: an isolated spot ahead of the front
+            // had no arrival time at all until the main front overran it. Stamp
+            // them here with the end of this step, the same rule the loop uses.
+            const amrex::Real t_spot = m_current_time + dt;
+            for (amrex::MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
+                auto p  = fire_phi->const_array(mfi);
+                auto at = fire_arrival_time->array(mfi);
+                amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) noexcept {
+                    if (p(iv) < 0.0_rt && at(iv) < 0.0_rt) at(iv) = t_spot;
+                });
+            }
         }
     }
 

@@ -17,7 +17,10 @@ geometry.prob_lo = 0.0 0.0 0.0
 geometry.prob_hi = 2000.0 2000.0 1000.0
 amr.n_cell       = 40 40 64
 
-geometry.is_periodic = 0 0 0
+# Periodic in x and y like the other fire canonical decks. This was 0 0 0
+# with no xlo/xhi/ylo/yhi types, which ERF rejects ("This BC type is
+# unknown"), so the deck had never run.
+geometry.is_periodic = 1 1 0
 amr.max_level = 0
 amr.max_grid_size   = 100
 amr.max_grid_size_z = 64
@@ -33,11 +36,15 @@ erf.init_type = "uniform"
 erf.theta_ref = 300.0
 erf.molec_diff_type = "ConstantAlpha"
 erf.les_type = "None"
-erf.use_gravity = true
+# No gravity, like the other uniform-init fire decks: erf.init_type = "uniform"
+# is a constant-density state, which ERF only accepts without gravity or when
+# anelastic, so use_gravity = true aborted at initialisation.
 
-erf.fixed_dt = 1.0
+# CFL-controlled step. A fixed 1.0 s was 2.4 times the compressible limit of
+# about 0.41 s on this grid, and a coupled fire crashes on it.
+erf.cfl = 0.5
 stop_time    = 900.0
-max_step     = 50
+max_step     = 6000
 
 erf.sum_interval = 10
 erf.v   = 1

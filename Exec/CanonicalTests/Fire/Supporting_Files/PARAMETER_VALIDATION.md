@@ -107,8 +107,12 @@ All fire-specific parameters are defined in `Source/Fire/ERF_FireParams.H` and p
 ✓ `erf.pbl_type` - PBL model type
 ✓ `erf.abl_driver_type` - ABL driver type
 ✓ `erf.abl_geo_wind` - Geostrophic wind configuration
-✓ `erf.geostrophic_wind_x` - Geostrophic wind X [m/s]
-✓ `erf.geostrophic_wind_y` - Geostrophic wind Y [m/s]
+✓ `erf.abl_driver_type = "GeostrophicWind"` - drive the flow toward a geostrophic wind
+✓ `erf.abl_geo_wind` - Geostrophic wind u v w [m/s]; the generic problem also starts the flow there
+✓ `erf.use_coriolis` - must be true for the geostrophic driver
+
+Not inputs: `erf.geostrophic_wind_x` / `_y` appeared in these decks until
+2026-09-10 and were read by nothing, so every deck using them ran with no wind.
 ✓ `erf.latitude` - Latitude [degrees]
 ✓ `erf.rotational_time_period` - Coriolis period
 

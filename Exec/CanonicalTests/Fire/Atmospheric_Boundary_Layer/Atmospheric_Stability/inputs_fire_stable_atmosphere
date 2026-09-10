@@ -48,9 +48,11 @@ erf.theta_ref = 300.0
 erf.dtheta_ref = 0.01                # K/m - positive = stable
 
 # Time stepping
-erf.fixed_dt = 1.0
+# CFL-controlled step. A fixed 1.0 s was 2.4 times the compressible limit of
+# about 0.41 s on this grid, and the deck crashed on it once the fire coupled back.
+erf.cfl = 0.5
 stop_time = 1800.0
-max_step = 2000
+max_step = 12000
 
 # Diagnostics
 erf.sum_interval = 100
