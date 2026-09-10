@@ -146,16 +146,20 @@ rebuilt from the moisture every step, holds the ignition still until the 1-hour
 class falls below the 12 % moisture of extinction. Every class matches the
 model's forward-Euler steps to :math:`10^{-16}` and the closed form to
 :math:`5 \times 10^{-5}`; the rate of spread matches Rothermel at the 1-hour
-moisture to six digits once it crosses extinction at 2157 s; the burned radius
-follows the integral of that rate to 0.08 cells.
+moisture to six digits once it crosses extinction at 2754 s; the burned radius
+follows the integral of that rate to 0.09 cells, reaching 76.2 m at two hours.
 
-The closed form it follows is not Nelson's. With the adsorption and desorption
-equilibria :math:`E_w = 0.0351` and :math:`E_d = 0.0600` of this air, the
-hysteresis in ``compute_emc_with_hysteresis`` sends fuel above the adsorption
-curve towards it and fuel below the desorption curve towards that, so drying fuel
-heads for :math:`E_w` and holds at :math:`E_d`:
-:math:`M = \max(E_w + (M_0 - E_w) e^{-t/\tau}, E_d)`, 0.0895 after one hour,
-where Nelson's choice gives :math:`E_d + (M_0 - E_d) e^{-t/\tau}` = 0.106.
+With the adsorption and desorption equilibria :math:`E_w = 0.0351` and
+:math:`E_d = 0.0600` of this air, the hysteresis in
+``compute_emc_with_hysteresis`` sends fuel wetter than :math:`E_d` towards it,
+fuel drier than :math:`E_w` towards that, and leaves fuel between the two alone
+(Nelson 2000; Vejmelka et al. 2016), so drying fuel follows
+:math:`M = E_d + (M_0 - E_d) e^{-t/\tau}`: 0.1062 after one hour and 0.0753
+after two. The check was written against the reversed choice ERF carried until
+September 2026, which sent drying fuel towards :math:`E_w` and held it at
+:math:`E_d`, :math:`\max(E_w + (M_0 - E_w) e^{-t/\tau}, E_d)` = 0.0895 after one
+hour; it still prints that value, and a binary from before the fix fails 44 of
+its 48 checks.
 
 References
 ----------
@@ -165,6 +169,10 @@ content. Canadian Journal of Forest Research, 30, 1071-1087.
 
 Rothermel, R. C. (1972). A mathematical model for predicting fire spread in
 wildland fuels. USDA Forest Service Research Paper INT-115.
+
+Vejmelka, M., A. K. Kochanski and J. Mandel (2016). Data assimilation of dead
+fuel moisture observations from remote automated weather stations.
+International Journal of Wildland Fire, 25, 558-568.
 
 Viegas, D. X., J. R. Raposo, D. A. Davim and C. G. Rossa (2012). Study of the
 jump fire produced by the interaction of two oblique fire fronts. Part 1.

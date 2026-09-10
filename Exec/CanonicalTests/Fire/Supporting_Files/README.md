@@ -251,9 +251,10 @@ Run: `python3 Exec/CanonicalTests/Fire/Unit_Tests/test_albini_spotting.py`
 ERF writes separate plot files for atmospheric and fire variables due to their different grid structures:
 
 **Atmospheric 3D Variables** (atmospheric grid - 50m spacing):
-- Directory: `plt3d_atm*` 
-- Variables: theta, qv, u, v, w
-- Configuration: `erf.plot_file`, `erf.plot_int`, `erf.plot_vars`
+- Directory: the `erf.plot_file_1` prefix (`plt_1_XXXXX` by default)
+- Variables: names from `Docs/sphinx_doc/plotfiles/Plotfile3DReference.rst`, e.g. theta, x_velocity, y_velocity, z_velocity (not u, v, w; qv only with a moisture model)
+- Configuration: `erf.plot_file_1`, `erf.plot_int_1`, `erf.plot_vars_1` (and `_2` for a second set)
+- ERF reads nothing under the bare `erf.plot_file`, `erf.plot_int` and `erf.plot_vars`. The decks set those until 2026-09-10 and wrote no atmosphere plotfile. Most now set `erf.plot_int_1 = -1`, since their check scripts read only the fire plotfiles; the lagged, synchronous, stability, terrain-wind and real-terrain decks write a few.
 
 **Fire 2D Variables** (fire grid - 10m spacing, 5× refined):
 - Directory: `plt_fire_XXXXX` (timestep numbered)

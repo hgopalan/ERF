@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cmath>
 #include <vector>
 #include <AMReX_REAL.H>
@@ -66,4 +67,31 @@ TEST(FuelMoistureStick, RainWetsTheSurface)
     amrex::Real M2[N]; for (auto& m : M2) m = 0.08;
     const amrex::Real avg_dry = stick_advance_class(M2, N, 0.635, 10.0, 30.0, 20.0, 0.0, 0.35, 1.0, 0.5);
     EXPECT_LT(avg_dry, avg_rain);
+}
+
+TEST(FuelMoistureStick, SurfaceFollowsTheHysteresisCurves)
+{
+    // Dry air (RH 1 %: wetting curve E_w = 0.035 below drying curve E_d = 0.060), no rain.
+    // A 1-h stick drying from 0.20 approaches E_d from above, so no shell ever drops
+    // below it; one wetting from 0.02 approaches E_w from below and never passes it;
+    // one between the curves stays where it is.
+    const int N = 6; const amrex::Real R = 0.15, tau = 1.0, RH = 1.0, T = 20.0, dt = 0.01;
+    const amrex::Real E_w = compute_emc_adsorption(RH), E_d = compute_emc_desorption(RH);
+    amrex::Real dry[N], wet[N], mid[N];
+    for (int i = 0; i < N; ++i) { dry[i] = 0.20; wet[i] = 0.02; mid[i] = 0.05; }
+    amrex::Real dry_min = 1.0, wet_max = 0.0, avg_dry = 0.0, avg_wet = 0.0, avg_mid = 0.0;
+    for (int n = 0; n < 2400; ++n) {                 // 24 h
+        avg_dry = stick_advance_class(dry, N, R, tau, RH, T, 0.0, 0.35, 1.0, dt);
+        avg_wet = stick_advance_class(wet, N, R, tau, RH, T, 0.0, 0.35, 1.0, dt);
+        avg_mid = stick_advance_class(mid, N, R, tau, RH, T, 0.0, 0.35, 1.0, dt);
+        for (int i = 0; i < N; ++i) {
+            dry_min = std::min(dry_min, dry[i]);
+            wet_max = std::max(wet_max, wet[i]);
+        }
+    }
+    EXPECT_GE(dry_min, E_d - TOL);
+    EXPECT_LE(wet_max, E_w + TOL);
+    EXPECT_NEAR(avg_dry, E_d, 1e-4);
+    EXPECT_NEAR(avg_wet, E_w, 1e-4);
+    EXPECT_NEAR(avg_mid, 0.05, TOL);
 }

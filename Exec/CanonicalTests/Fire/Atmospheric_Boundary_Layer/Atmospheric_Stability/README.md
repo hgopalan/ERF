@@ -7,6 +7,11 @@ These cases isolate the role of background atmospheric stability in modulating f
 - Fire spread / ignition configuration
 - Atmospheric forcing and boundary-condition setup
 
+## The two decks
+The decks differ only in the potential-temperature profile. In `input_sounding_stable`, theta rises 0.01 K/m from 300 K; in `input_sounding_unstable`, it falls 0.01 K/m. Both start at rest in hydrostatic balance with `erf.use_gravity = true`, and `zhi.theta_grad` holds each lapse rate at the lid. Neither sets `erf.most.surf_temp` or a surface flux, so the surface is adiabatic and the stratification acts through buoyancy on the fire's plume and the indraft it drives. The unstable column overturns wherever it is disturbed; in this still, periodic domain, the plume is the first disturbance.
+
+Until 2026-09-10 no stability was applied. The decks set `erf.dtheta_ref` and `erf.most.use_monin_obukhov`, which no code reads, together with `erf.init_type = "uniform"` and gravity off, so both decks ran the same neutral atmosphere. The unstable deck also set `erf.use_wind_limit` in place of `erf.fire.use_wind_limit`.
+
 ## Expected Results
 See the input-file header comments in this directory for the specific validation target. In general, these cases should reproduce the documented analytical trend, qualitative regime change, or engineering diagnostic associated with the scenario.
 

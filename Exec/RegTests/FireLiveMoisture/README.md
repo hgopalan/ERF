@@ -39,17 +39,18 @@ MPIRUN="mpirun -np 4" ./run_live.sh /path/to/erf_exec
   the checkpointed values, and the dead classes restart the same;
 - the two directional runs hold their live classes and give different fronts.
 
-Measured 2026-09-10 (Release, 2 ranks, macOS):
+Measured 2026-09-10 (Release, 2 ranks, macOS), with the corrected dead-fuel
+hysteresis (the dead classes dry toward the upper equilibrium curve):
 
 | variant          | t [s] | live herb / woody | 1-h mean | burned area [m2] | mean ROS, burning cells [m/s] |
 |------------------|-------|-------------------|----------|------------------|-------------------------------|
-| `legacy`         | 60    | 0.39993           | 0.07918  | 2118.8           | 0.1844                        |
-| `legacy_key`     | 60    | 0.39993           | 0.07918  | 2118.8           | 0.1844                        |
-| `fixed`          | 60    | 0.90000           | 0.07918  | 1812.5           | 0.1510                        |
-| `legacy_restart` | 20    | 0.39998           | 0.07972  | 1106.2           | 0.1839                        |
-| `fixed_restart`  | 20    | 0.90000           | 0.07972  | 1062.5           | 0.1506                        |
-| `fixed_dir020`   | 20    | 0.20000           | 0.07972  | 853.1            | 0.1861                        |
-| `fixed_dir025`   | 20    | 0.25000           | 0.07972  | 853.1            | 0.1865                        |
+| `legacy`         | 60    | 0.39994           | 0.07963  | 2118.8           | 0.1840                        |
+| `legacy_key`     | 60    | 0.39994           | 0.07963  | 2118.8           | 0.1840                        |
+| `fixed`          | 60    | 0.90000           | 0.07963  | 1812.5           | 0.1507                        |
+| `legacy_restart` | 20    | 0.39998           | 0.07988  | 1106.2           | 0.1838                        |
+| `fixed_restart`  | 20    | 0.90000           | 0.07988  | 1062.5           | 0.1506                        |
+| `fixed_dir020`   | 20    | 0.20000           | 0.07988  | 853.1            | 0.1859                        |
+| `fixed_dir025`   | 20    | 0.25000           | 0.07988  | 853.1            | 0.1864                        |
 
 The legacy live classes fall from 0.90 to the 0.40 clamp on the first step.
 BEHAVE then moves 89 % of the live herbaceous load to the dead class instead

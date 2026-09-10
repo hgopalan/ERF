@@ -22,29 +22,29 @@ checks at every plotfile each class against the model's forward-Euler steps and
 against the closed form, the rate of spread against Rothermel at the 1-hour
 moisture, and the burned radius against r_ig plus the integral of that rate.
 
-Nelson's equilibrium moisture has an adsorption (wetting) and a desorption
-(drying) curve, E_w = 0.0351 and E_d = 0.0600 here. As implemented
-(`compute_emc_with_hysteresis` in `Source/Fire/ERF_FuelMoisture.H`) the choice is
-the reverse of Nelson's: fuel above the adsorption curve relaxes towards it and
-fuel below the desorption curve towards that, so a fuel drying from 20 % heads
-for E_w and then holds at E_d,
+The equilibrium moisture has an adsorption (wetting) and a desorption (drying)
+curve, E_w = 0.0351 and E_d = 0.0600 here. The curve follows sorption hysteresis
+(`compute_emc_with_hysteresis` in `Source/Fire/ERF_FuelMoisture.H`): a fuel wetter
+than E_d dries toward E_d, one drier than E_w wets toward E_w, and one between the
+two does not change (Nelson 2000; Vejmelka et al. 2016). A fuel drying from 20 %
+therefore follows
 
-    M(t) = max(E_w + (M0 - E_w) exp(-t / tau_eff), E_d),
+    M(t) = E_d + (M0 - E_d) exp(-t / tau_eff).
 
-where Nelson's hysteresis gives E_d + (M0 - E_d) exp(-t / tau_eff). The check
-follows the code and prints Nelson's value next to it; the branch choice is a
-separate fix.
+The check also prints the value of the reversed choice ERF carried before the
+fix, max(E_w + (M0 - E_w) exp(-t / tau_eff), E_d), which headed for E_w and held
+at E_d from about 6100 s; a binary from before the fix fails 44 of the 48 checks.
 
 ## Expected Results
 
-On four ranks, T = 26.85 C and tau_eff = 0.9024 h:
+On one rank, T = 26.85 C and tau_eff = 0.9024 h:
 
 - every class matches the stepwise solution to 1e-16 and the closed form to
   5e-5 at every plotfile;
-- the 1-hour class reads 0.0895 at one hour (Nelson's curve: 0.106) and holds at
-  0.0600 from about 6000 s;
+- the 1-hour class reads 0.1062 at one hour and 0.0753 at two hours, still
+  drying toward E_d (the reversed choice read 0.0895, then held at 0.0600);
 - the rate of spread is zero (Rothermel's floor) until the 1-hour class crosses
-  12 % at t = 2157 s, and matches Rothermel at the 1-hour moisture to six digits
+  12 % at t = 2754 s, and matches Rothermel at the 1-hour moisture to six digits
   at every plotfile after that;
-- the burned radius follows r_ig plus the integral of the rate to 0.08 cells,
-  reaching 102.7 m at two hours.
+- the burned radius follows r_ig plus the integral of the rate to 0.09 cells,
+  reaching 76.2 m at two hours.
