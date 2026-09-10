@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# The historical deck, stopped at step 80 (10 s) with a checkpoint there
+# (chk_legacy00080) for inputs_legacy_restart and inputs_fixed_restart. Its
+# live classes are already at the 0.40 dead-fuel clamp.
+max_step = 80
+erf.check_file = chk_legacy
+erf.check_int = 80

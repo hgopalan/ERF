@@ -77,7 +77,9 @@ struct FireParams
     //   "legacy" (default) — the dead-fuel time-lag update with the 100-h lag,
     //                        bounded to [0.30, 2.50]; its dead-range clamp
     //                        pulls a value above 0.40 down to 0.40 at once
-    //   "fixed"            — held at moisture_live (or the checkpointed value)
+    //   "fixed"            — held at moisture_live, also after a restart (the
+    //                        checkpointed live classes are replaced), and the
+    //                        domain average BEHAVE uses is not clamped
     std::string       moisture_live_model = "legacy";
 
     // Moisture of extinction (Phase 4)
