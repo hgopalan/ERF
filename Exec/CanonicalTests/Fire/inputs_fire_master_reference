@@ -252,11 +252,27 @@ erf.fire.levelset.visc_transition_cells = 2.0   # width of the linear blend from
 # "fbp"          Canadian Forest Fire Behavior Prediction System (erf.fire.fbp.*)
 # "balbi"        Balbi physical model (see the Balbi section below)
 # "hybrid"       two of the above blended per cell (see the HYBRID section)
+# "prescribed"   a rate set in the deck, for verification (see PRESCRIBED below)
 erf.fire.ros_model = "rothermel"
 
 # Evaluate Rothermel coefficients per cell from the spatial fuel map instead
 # of the domain fuel_model_id. No effect without erf.fire.fuel_map.file.
 erf.fire.rothermel_per_fuel = false
+
+# ============================================================================
+# PRESCRIBED RATE OF SPREAD (used only when ros_model = "prescribed")
+# ============================================================================
+# R(x,y) = max(min_ros, R_base + dR/dx (x - x0) + dR/dy (y - y0)), with R_base
+# the rate listed for the cell's fuel code in by_fuel (pairs of code and rate,
+# needs fuel_map.file), else prescribed.ros. No wind, slope or moisture
+# dependence and no direction: directional_ros is turned off, and the level set
+# solves |grad T| = 1/R as posed. For the closed-form verification cases in
+# Exec/CanonicalTests/Fire/Verification.
+erf.fire.prescribed.ros = 0.0
+erf.fire.prescribed.gradient = 0.0 0.0
+erf.fire.prescribed.origin = 0.0 0.0
+erf.fire.prescribed.min_ros = 0.0
+# erf.fire.prescribed.by_fuel = 1 1.0 2 0.5
 
 # ============================================================================
 # HYBRID ROS (used only when ros_model = "hybrid")
@@ -546,6 +562,16 @@ erf.fire.inject_latent = true
 # "cfbm": sensible flux scaled by the dry-fuel fraction 1/(1+M_f), Eq. 4 of
 #         Jimenez y Munoz et al. (2026); latent flux unchanged
 erf.fire.heat_flux_partition = "legacy"
+
+# Prescribed surface heat flux [W/m2] added to the fire heat flux over a disc,
+# whatever the fuel and the front, and injected like fire heat; 0 = off. For
+# plume verification (Exec/CanonicalTests/Fire/Verification/Calm_Plume).
+# end_time < 0 keeps it on for the whole run.
+erf.fire.prescribed_heat.flux = 0.0
+erf.fire.prescribed_heat.center = 0.0 0.0
+erf.fire.prescribed_heat.radius = 0.0
+erf.fire.prescribed_heat.start_time = 0.0
+erf.fire.prescribed_heat.end_time = -1.0
 
 # Passive smoke tracer: a fraction of the fuel burnt released into the first
 # atmospheric layer (Coen 2013, the Community Fire Behavior Model default)

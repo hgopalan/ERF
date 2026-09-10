@@ -1,4 +1,5 @@
 #include <ERF_FireLayer.H>
+#include <ERF_PrescribedFire.H>
 #include <ERF.H>
 #include <ERF_SurfaceLayer.H>
 #include <ERF_FirePrerequisites.H>
@@ -912,7 +913,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 (m_params.balbi.directional || m_params.directional_ros);
             const bool generic_directional =
                 m_params.directional_ros && !m_params.is_hybrid() &&
-                (m_params.ros_model != "balbi");
+                (m_params.ros_model != "balbi") && (m_params.ros_model != "prescribed");
             // Wall extrapolation only means something with a mask.
             const bool wall_extrap = m_params.levelset_wall_extrapolate && (fire_nonburnable != nullptr);
             // One-sided derivatives of the level set: the front band of the
@@ -1328,6 +1329,7 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
                         (sfire_burnout && !m_has_spatial_fuel) ? burnout_tau_s(m_params.fuel_model_id) : 0.0_rt,
                         (sfire_burnout && m_has_spatial_fuel) ? m_d_burnout_tau.data() : nullptr,
                         m_params.fuel_map.fuel_set_id(), m_params.moisture_live);
+    add_prescribed_heat_flux();
 
     const Real h_kJ_per_kg = fp.heat_content * 2.326_rt;
     const Real h_fuel_Jkg = fp.heat_content * 2326.0_rt;
@@ -1796,6 +1798,8 @@ void FireLayer::fill_ros_for_model(const std::string& model,
         fill_macarthur_ros(out, *fire_wind_eff);
     } else if (model == "fbp") {
         fill_fbp_ros(out, (m_params.fbp.wind_source == 1) ? *fire_wind_eff : *fire_wind_ref, *fire_slopes, m_fbp);
+    } else if (model == "prescribed") {
+        fill_prescribed_ros(out);
     } else {
         // Default: Rothermel (1972). The per-fuel table is empty unless
         // rothermel_per_fuel is set on a spatial fuel map, in which case the
@@ -1806,6 +1810,74 @@ void FireLayer::fill_ros_for_model(const std::string& model,
                           per_fuel ? m_d_rc_table.data() : nullptr,
                           per_fuel ? static_cast<int>(m_d_rc_table.size()) : 0,
                           m_params.fuel_map.fuel_set_id());
+    }
+}
+
+void FireLayer::fill_prescribed_ros(amrex::MultiFab& out) const
+{
+    const auto& pr = m_params.prescribed;
+    const int n_pairs = static_cast<int>(pr.by_fuel.size() / 2);
+    if (n_pairs > 0 && !fire_fuel_model) {
+        amrex::Abort("erf.fire.prescribed.by_fuel needs a spatial fuel map (erf.fire.fuel_map.file)");
+    }
+    const bool by_code = (n_pairs > 0);
+
+    amrex::Gpu::DeviceVector<amrex::Real> d_pairs(pr.by_fuel.size());
+    if (by_code) {
+        amrex::Gpu::copy(amrex::Gpu::hostToDevice, pr.by_fuel.begin(), pr.by_fuel.end(), d_pairs.begin());
+    }
+    const amrex::Real* pairs = d_pairs.data();
+
+    const auto prob_lo = m_fg.geom.ProbLoArray();
+    const auto dx      = m_fg.geom.CellSizeArray();
+    const amrex::Real R_default = pr.ros;
+    const amrex::Real gx = pr.grad_x, gy = pr.grad_y, x0 = pr.x0, y0 = pr.y0, rmin = pr.min_ros;
+
+    for (amrex::MFIter mfi(out); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.validbox();
+        auto const& R = out.array(mfi);
+        amrex::Array4<const amrex::Real> fuel;
+        if (by_code) { fuel = fire_fuel_model->const_array(mfi); }
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const amrex::Real x = prob_lo[0] + (i + 0.5_rt) * dx[0];
+            const amrex::Real y = prob_lo[1] + (j + 0.5_rt) * dx[1];
+            amrex::Real base = R_default;
+            if (by_code) {
+                const int code = static_cast<int>(fuel(i, j, k));
+                for (int n = 0; n < n_pairs; ++n) {
+                    if (static_cast<int>(pairs[2 * n]) == code) { base = pairs[2 * n + 1]; break; }
+                }
+            }
+            R(i, j, k) = prescribed_ros_at(base, gx, gy, x0, y0, rmin, x, y);
+        });
+    }
+    amrex::Gpu::streamSynchronize();
+}
+
+void FireLayer::add_prescribed_heat_flux()
+{
+    const auto& ph = m_params.prescribed_heat;
+    if (ph.flux <= 0.0_rt || !fire_heat_flux) { return; }
+
+    const auto prob_lo = m_fg.geom.ProbLoArray();
+    const auto dx      = m_fg.geom.CellSizeArray();
+    const amrex::Real flux = ph.flux, cx = ph.cx, cy = ph.cy, radius = ph.radius;
+    const amrex::Real t0 = ph.start_time, t1 = ph.end_time, t = m_current_time;
+
+    for (amrex::MFIter mfi(*fire_heat_flux); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.validbox();
+        auto const& q = fire_heat_flux->array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const amrex::Real x = prob_lo[0] + (i + 0.5_rt) * dx[0];
+            const amrex::Real y = prob_lo[1] + (j + 0.5_rt) * dx[1];
+            q(i, j, k) += prescribed_heat_flux_at(flux, cx, cy, radius, t0, t1, x, y, t);
+        });
+    }
+    if (m_params.fire_debug) {
+        const bool on = prescribed_heat_flux_at(flux, cx, cy, radius, t0, t1, cx, cy, t) > 0.0_rt;
+        amrex::Print() << "[FIRE DEBUG] Prescribed heat flux " << (on ? "on" : "off") << " at t=" << t
+                       << " s: " << flux << " W/m2 over radius " << radius << " m at ("
+                       << cx << ", " << cy << ")\n";
     }
 }
 

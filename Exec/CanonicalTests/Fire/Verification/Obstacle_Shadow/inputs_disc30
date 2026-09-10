@@ -1,0 +1,16 @@
+FILE = inputs_base
+
+# Point fire (6 m disc at (60, 100)) at a prescribed 1 m/s passing a 30 m disc of
+# non-burnable fuel centred at (160, 100). Behind the disc the arrival time is the
+# length of the taut string from the ignition around the disc, divided by R.
+max_step = 700
+stop_time = 350.0
+erf.fire_plot_int = 350
+
+erf.fire.prescribed.ros = 1.0
+erf.fire.ignition_x = 60.0
+erf.fire.ignition_y = 100.0
+erf.fire.ignition_r = 6.0
+erf.fire.fuel_map.file = "fuel_obstacle.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.fuel_map.nonburnable_codes = 0

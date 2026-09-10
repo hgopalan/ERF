@@ -1,0 +1,57 @@
+# Speed_Gradient: settings shared by the decks in this folder. A point fire in a linearly varying rate of spread.
+#
+# A still atmosphere (slip walls on the sides and top, no gravity, no diffusion)
+# under a fire grid of 2 m cells, and ros_model = "prescribed", so the rate of
+# spread is set in the deck and the level set solves |grad T| = 1/R as posed.
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 400.0 400.0 100.0
+amr.n_cell = 20 20 5
+geometry.is_periodic = 0 0 0
+amr.max_level = 0
+amr.max_grid_size = 10      # box lengths must divide by the fire grid ratio
+amr.max_grid_size_z = 5     # the fire module forbids z-decomposition
+
+xlo.type = "SlipWall"
+xhi.type = "SlipWall"
+ylo.type = "SlipWall"
+yhi.type = "SlipWall"
+zlo.type = "surface_layer"  # the fire module needs the surface layer at the ground
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+# The surface layer needs a diffusion operator; zero coefficients keep it idle.
+erf.molec_diff_type = "ConstantAlpha"
+erf.dynamic_viscosity = 0.0
+erf.alpha_T = 0.0
+erf.alpha_C = 0.0
+erf.les_type = "None"
+
+erf.init_type = "uniform"
+erf.use_gravity = false
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+erf.fixed_dt = 0.5
+erf.substepping_cfl = 0.5
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_int_1 = -1
+erf.fire_plot_file = "plt_fire_"
+
+erf.fire.enable = true
+erf.fire.grid_ratio = 10              # 2 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.ros_model = "prescribed"
+erf.fire.coupling_type = "passive"    # one-way: the atmosphere never sees the fire
+erf.fire.fuel_model_id = 1
+erf.fire.moisture_1hr = 0.08
+erf.fire.moisture_10hr = 0.08
+erf.fire.moisture_100hr = 0.10
+erf.fire.moisture_dynamic = false
+erf.fire.use_waf = false
+erf.fire.use_terrain_wind = false
+erf.fire.write_fire_stats_csv = false

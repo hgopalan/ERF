@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# The plane z = 0.6 x (31.0 degrees), isotropic level set: the whole front
+# spreads at Rothermel's head rate R0 (1 + phi_s), projected onto the ground.
+erf.fire.terrain_file_name = "plane_s60.txt"
+erf.fire.directional_ros = false

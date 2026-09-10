@@ -1,0 +1,11 @@
+FILE = inputs_base
+
+# A square ignition grown at a prescribed 1 m/s; a convex polygon: its burned area follows Steiner's formula A0 + P0 r + pi r^2.
+max_step = 120
+stop_time = 60.0
+erf.fire_plot_int = 20
+
+erf.fire.prescribed.ros = 1.0
+erf.fire.ignition_r = 0.0             # no disc: the polygon is the only ignition
+erf.fire.ignition.polygon_file = "square.csv"
+erf.fire.ignition.polygon_type = "polygon"

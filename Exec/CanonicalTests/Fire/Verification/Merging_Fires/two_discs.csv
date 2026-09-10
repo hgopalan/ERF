@@ -1,0 +1,4 @@
+# Two 6 m discs 80 m apart, both at t = 0
+# Format: time_s  cx  cy  radius  [source_type]  [priority]
+0  160.0  100.0  6.0  0  10
+0  240.0  100.0  6.0  0  10

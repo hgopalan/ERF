@@ -154,6 +154,7 @@ All 18 input files have been verified:
 ### Files Checked
 ```
 Core_Physics/
+  ├── Vertical_Refinement/inputs_fire_vertical_refinement
   ├── ROS_Basic_Calculation/inputs_fire_phase2
   ├── ROS_Uniform_Grid/inputs_fire_flat_uniform
   ├── ROS_Slope_Effects/inputs_fire_phase2_slope
@@ -162,9 +163,6 @@ Core_Physics/
   ├── Wind_Speed_Variation/inputs_fire_wind_low
   ├── Wind_Speed_Variation/inputs_fire_wind_high
   └── Multiple_Fuel_Models/inputs_fire_fuel_fm4_chaparral
-
-FARSITE_Propagation/
-  └── Elliptical_Propagation/inputs_fire_phase3
 
 Heat_Flux_Diagnostics/
   └── Heat_Flux_and_Intensity/inputs_fire_phase5
@@ -180,10 +178,8 @@ Atmospheric_Boundary_Layer/
       ├── inputs_fire_stable_atmosphere
       └── inputs_fire_unstable_atmosphere
 
-Mesh_Refinement/
-  └── Vertical_Refinement/inputs_fire_vertical_refinement
-
 Fire_Behavior/
+  ├── Elliptical_Propagation/inputs_fire_phase3
   └── Ignition_Patterns/inputs_fire_multiple_ignitions
 ```
 

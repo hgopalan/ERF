@@ -1,0 +1,58 @@
+# FirePrescribed: the two verification options, on a still atmosphere.
+#
+#   erf.fire.ros_model = "prescribed"   a rate set in the deck, no wind, slope or moisture
+#   erf.fire.prescribed_heat.flux       a constant heat flux over a disc, independent of fuel
+#
+# 400 x 400 x 500 m with slip walls on the sides and top, so nothing drives a flow; the
+# fire grid is 2 m (grid ratio 10 on 20 m atmospheric cells). The domain is 500 m
+# deep so the injected heat, spread over height with an e-folding scale of
+# erf.fire.heat_flux_alfg = 45 m, is all inside it: a column of height H carries
+# 1 - exp(-H / 45 m) of the flux, 89 % for 100 m.
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 400.0 400.0 500.0
+amr.n_cell = 20 20 10
+geometry.is_periodic = 0 0 0
+amr.max_level = 0
+amr.max_grid_size = 10      # box lengths must divide by the fire grid ratio
+amr.max_grid_size_z = 10    # the fire module forbids z-decomposition
+
+xlo.type = "SlipWall"
+xhi.type = "SlipWall"
+ylo.type = "SlipWall"
+yhi.type = "SlipWall"
+zlo.type = "surface_layer"            # the fire module needs the surface layer at the ground
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+# The surface layer needs a diffusion operator; zero coefficients keep the air
+# free of it, so nothing but the prescribed source changes the state.
+erf.molec_diff_type = "ConstantAlpha"
+erf.dynamic_viscosity = 0.0
+erf.alpha_T = 0.0
+erf.alpha_C = 0.0
+erf.les_type = "None"
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+erf.fixed_dt = 0.5
+erf.substepping_cfl = 0.5
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_int_1 = -1
+
+erf.fire.enable = true
+erf.fire.grid_ratio = 10              # 2 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.fuel_model_id = 1
+erf.fire.moisture_1hr = 0.08
+erf.fire.moisture_10hr = 0.08
+erf.fire.moisture_100hr = 0.10
+erf.fire.moisture_dynamic = false
+erf.fire.use_waf = false
+erf.fire.use_terrain_wind = false
+erf.fire.write_fire_stats_csv = false
+erf.fire_plot_file = "plt_fire_"

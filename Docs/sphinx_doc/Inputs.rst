@@ -3890,10 +3890,24 @@ Rate of spread
 | **erf.fire.ros_model**                         | Rate-of-spread model                                       | "rothermel", "behave",         | "rothermel"            |
 |                                                |                                                            | "macarthur", "cheney_gould",   |                        |
 |                                                |                                                            | "fbp",                         |                        |
-|                                                |                                                            | "balbi", "hybrid"              |                        |
+|                                                |                                                            | "balbi", "hybrid",             |                        |
+|                                                |                                                            | "prescribed"                   |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.directional_ros**                   | Evaluate the rate along the front normal on the level-set  | Boolean                        | true                   |
 |                                                | path; false spreads the head rate in every direction       |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed.ros**                    | Rate of spread for ros_model = prescribed where by_fuel    | Real >= 0                      | 0.0                    |
+|                                                | has no entry; no wind, slope or moisture dependence, and   |                                |                        |
+|                                                | directional_ros is turned off [m/s]                        |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed.gradient**               | Gradient of the prescribed rate, dR/dx and dR/dy [1/s]     | Two Reals                      | 0.0 0.0                |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed.origin**                 | Point where the prescribed rate equals its base value [m]  | Two Reals                      | 0.0 0.0                |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed.min_ros**                | Floor on the prescribed rate [m/s]                         | Real >= 0                      | 0.0                    |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed.by_fuel**                | Flat list of fuel code and base rate pairs overriding      | Reals                          | none                   |
+|                                                | prescribed.ros per cell; needs fuel_map.file               |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.cheney_gould.moisture**             | Cheney-Gould dead fine fuel moisture [%]                   | Real                           | 10.0                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -3914,7 +3928,7 @@ Rate of spread
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.fbp.use_slope**                     | Slope through the system's equivalent wind                 | Boolean                        | true                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.fbp.wind_source**                   | The reference-height wind (set wind_ref_ht = 10) or the   | "reference", "midflame"        | "reference"            |
+| **erf.fire.fbp.wind_source**                   | The reference-height wind (set wind_ref_ht = 10) or the    | "reference", "midflame"        | "reference"            |
 |                                                | midflame wind after the Wind Adjustment Factor             |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.behave.dynamic_transfer_lo**        | BEHAVE live herbaceous moisture below which all load       | Real                           | 0.30                   |
@@ -4125,9 +4139,9 @@ Heat flux and coupling
 | **erf.fire.tau_residence_s**                   | Fixed residence time [s]; 0 derives it from the cell       | Real >= 0                      | 0.0                    |
 |                                                | crossing time and fuel SAV                                 |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.burnout_model**                     | Fuel burnout e-folding time: the cell crossing time floored | "residence", "sfire"           | "residence"            |
-|                                                | by the particle time (residence) or WRF-SFIRE's burn time  |                                |                        |
-|                                                | per fuel model / 0.8514 (sfire)                            |                                |                        |
+| **erf.fire.burnout_model**                     | Fuel burnout e-folding time: the cell crossing time        | "residence", "sfire"           | "residence"            |
+|                                                | floored by the particle time (residence) or WRF-SFIRE's    |                                |                        |
+|                                                | burn time per fuel model / 0.8514 (sfire)                  |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.burnout_times_s**                   | 13 burn times [s] for Anderson models 1-13 overriding the  | 13 Reals > 0                   | SFIRE table            |
 |                                                | table (sfire)                                              |                                |                        |
@@ -4150,6 +4164,18 @@ Heat flux and coupling
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.heat_flux_partition**               | Sensible flux handed to the atmosphere: the full heat      | "legacy", "cfbm"               | "legacy"               |
 |                                                | release (legacy) or the CFBM dry-fuel share 1/(1+M_f)      |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed_heat.flux**              | Constant sensible heat flux added to the fire heat flux    | Real >= 0                      | 0.0                    |
+|                                                | over a disc, whatever the fuel and front; injected like    |                                |                        |
+|                                                | fire heat; 0 is off [W/m2]                                 |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed_heat.center**            | Centre of the prescribed heat-flux disc [m]                | Two Reals                      | 0.0 0.0                |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed_heat.radius**            | Radius of the prescribed heat-flux disc [m]                | Real > 0 when flux > 0         | 0.0                    |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed_heat.start_time**        | Time the prescribed heat flux switches on [s]              | Real                           | 0.0                    |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed_heat.end_time**          | Time it switches off [s]; negative keeps it on             | Real                           | -1.0                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.source_mode**                       | Replace the theta and vapour source slots (legacy) or add  | "overwrite", "add"             | "overwrite"            |
 |                                                | to the rebuilt stage source                                |                                |                        |

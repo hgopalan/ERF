@@ -1,0 +1,16 @@
+FILE = inputs_base
+
+# A disc of radius 10 m grown at a prescribed 1 m/s: the front must stay a
+# circle of radius 10 + t. One-way, no gravity: the atmosphere stays at rest.
+erf.init_type = "uniform"
+erf.use_gravity = false
+max_step = 200
+stop_time = 100.0
+erf.fire_plot_int = 40
+
+erf.fire.ros_model = "prescribed"
+erf.fire.prescribed.ros = 1.0
+erf.fire.coupling_type = "passive"
+erf.fire.ignition_x = 200.0
+erf.fire.ignition_y = 200.0
+erf.fire.ignition_r = 10.0

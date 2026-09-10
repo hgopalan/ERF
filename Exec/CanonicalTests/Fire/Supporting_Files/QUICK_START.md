@@ -40,7 +40,7 @@ cd Core_Physics/Multiple_Fuel_Models
 
 #### Fire Propagation Tests
 ```bash
-cd FARSITE_Propagation/Elliptical_Propagation
+cd Fire_Behavior/Elliptical_Propagation
 ./erf inputs_fire_phase3                 # FARSITE elliptical expansion
 ```
 
@@ -74,7 +74,7 @@ cd Atmospheric_Boundary_Layer/Atmospheric_Stability
 
 #### Mesh Refinement Tests
 ```bash
-cd Mesh_Refinement/Vertical_Refinement
+cd Core_Physics/Vertical_Refinement
 ./erf inputs_fire_vertical_refinement    # Stretched vertical grid
 ```
 
@@ -92,11 +92,11 @@ cd Fire_Behavior/Ignition_Patterns
 | **Fuel Properties** | Core_Physics | Fuel_Moisture_Sensitivity (dry/wet) |
 | **Wind Effects** | Core_Physics | Wind_Speed_Variation (low/high), ROS_Slope_Effects |
 | **Fuel Models** | Core_Physics | Multiple_Fuel_Models (FM1, FM4) |
-| **Propagation** | FARSITE_Propagation | Elliptical_Propagation |
+| **Propagation** | Fire_Behavior | Elliptical_Propagation |
 | **Heat Output** | Heat_Flux_Diagnostics | Heat_Flux_and_Intensity |
 | **Coupling Modes** | Fire_Atmosphere_Coupling | Lagged_Coupling, Synchronous_Coupling, Passive_Baseline |
 | **ABL Physics** | Atmospheric_Boundary_Layer | ABL_with_MRF, Atmospheric_Stability (stable/unstable) |
-| **Mesh Handling** | Mesh_Refinement | Vertical_Refinement |
+| **Mesh Handling** | Core_Physics | Vertical_Refinement |
 | **Fire Behavior** | Fire_Behavior | Ignition_Patterns |
 
 ## Output Variables by Test Type
@@ -230,14 +230,13 @@ Fire/
 │   ├── test_fire_ros_regression.py
 │   └── test_farsite_ellipse.py
 ├── Core_Physics/
+│   ├── Vertical_Refinement/
 │   ├── ROS_Basic_Calculation/
 │   ├── ROS_Uniform_Grid/
 │   ├── ROS_Slope_Effects/
 │   ├── Fuel_Moisture_Sensitivity/
 │   ├── Wind_Speed_Variation/
 │   └── Multiple_Fuel_Models/
-├── FARSITE_Propagation/
-│   └── Elliptical_Propagation/
 ├── Heat_Flux_Diagnostics/
 │   └── Heat_Flux_and_Intensity/
 ├── Fire_Atmosphere_Coupling/
@@ -247,9 +246,8 @@ Fire/
 ├── Atmospheric_Boundary_Layer/
 │   ├── ABL_with_MRF/
 │   └── Atmospheric_Stability/
-├── Mesh_Refinement/
-│   └── Vertical_Refinement/
 ├── Fire_Behavior/
+│   ├── Elliptical_Propagation/
 │   └── Ignition_Patterns/
 └── Supporting_Files/
     ├── README.md

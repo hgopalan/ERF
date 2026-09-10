@@ -1,0 +1,6 @@
+FILE = inputs_disc30
+
+# The same obstacle with the level-set wall extrapolation, which takes the
+# one-sided derivatives next to a masked cell through a stencil extrapolated
+# into it rather than through the held value.
+erf.fire.levelset.wall_extrapolate = true

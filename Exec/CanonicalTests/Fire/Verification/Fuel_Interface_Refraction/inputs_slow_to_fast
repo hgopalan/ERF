@@ -1,0 +1,16 @@
+FILE = inputs_base
+
+# A straight front at 0.5 m/s (fuel code 1, x < 200 m) meeting fuel code 2, where it
+# spreads at 1 m/s, with its normal at 25 degrees to the boundary normal.
+# Huygens gives Snell's law, sin(theta2) / R2 = sin(theta1) / R1: theta2 = 57.70 degrees.
+max_step = 800
+stop_time = 400.0
+erf.fire_plot_int = 400
+
+erf.fire.prescribed.by_fuel = 1 0.5 2 1
+erf.fire.fuel_map.file = "fuel_halves.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.ignition_r = 0.0             # no disc: the line is the only ignition
+erf.fire.ignition.polygon_file = "line_25.csv"
+erf.fire.ignition.polygon_type = "polyline"
+erf.fire.ignition.polyline_width = 3.0   # half-width: a 6 m wide line

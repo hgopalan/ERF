@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# The plane z = 0.3 x (16.7 degrees), directional level set (the default):
+# the slope is taken along the front normal, so backing and flanks spread at R0.
+erf.fire.terrain_file_name = "plane_s30.txt"

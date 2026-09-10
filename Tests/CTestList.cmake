@@ -913,6 +913,8 @@ add_test_fire(FireRosComparison_rothermel   FireRosComparison     inputs_rotherm
 add_test_fire(FireScottBurgan_gr2           FireScottBurgan       inputs_sb_gr2              40)
 add_test_fire(FireStickMoisture_stick       FireStickMoisture     inputs_stick               40)
 add_test_fire(FireWindSampling_sample20     FireWindSampling      inputs_sample20            40)
+add_test_fire(FirePrescribed_ros_circle     FirePrescribed        inputs_ros_circle          40)
+add_test_fire(FirePrescribed_heat_patch     FirePrescribed        inputs_heat_patch          40)
 add_test_fire(FireFarsiteDefault            FarsiteDefault        inputs                     40)
 add_test_fire(FireLevelSetPropagation       LevelSetPropagation   inputs                     40)
 if(ERF_ENABLE_DUST)

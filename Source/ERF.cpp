@@ -1550,13 +1550,16 @@ ERF::InitData_post ()
                 m_fire_layer->initialize(*this, m_SurfaceLayer.get(), z_phys_nd[0].get(), m_fire_params);
 
                 // Verify that at least one cell was marked during fire initialization,
-                // unless the ignition is deferred: a perimeter polygon stamped at
+                // unless the ignition is deferred or absent on purpose: a perimeter polygon stamped at
                 // erf.fire.ignition.polygon_time > 0 (spin-up first) or a timed
                 // ignition schedule, either of which legitimately leaves the domain
                 // unburned at t = 0.
+                // A run driven only by erf.fire.prescribed_heat.flux has no front at
+                // all, by design.
                 const bool deferred_ignition =
                     (!m_fire_params.ignition.polygon_file.empty() && m_fire_params.ignition.polygon_time > 0.0)
-                    || !m_fire_params.ignition.ignition_schedule_file.empty();
+                    || !m_fire_params.ignition.ignition_schedule_file.empty()
+                    || (m_fire_params.prescribed_heat.flux > 0.0);
                 if (const amrex::MultiFab* phi = m_fire_layer->get_levelset(); phi && !deferred_ignition) {
                     Real phi_min = phi->min(0);
                     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(phi_min < 0.0_rt,
