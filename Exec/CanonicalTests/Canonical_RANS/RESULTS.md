@@ -322,3 +322,20 @@ zero and the printed CFL-1 step of 32 s means nothing for them. The hill
 deck is the honest one: with the solve on, the step is set by the
 advective Courant number that ERF prints each step ("Anelastic dt at
 level 0 would be"), and a working choice is half to nine tenths of it.
+
+### The gain is not specific to the k-eqn closure
+
+The solve lives in the dycore, so every closure that sets a vertical
+eddy diffusivity gets it. On the same neutral geometry, 1 h, anelastic,
+running each closure explicit and implicit over a step sweep:
+
+| closure | explicit | implicit |
+| --- | --- | --- |
+| Smagorinsky (`erf.Cs = 0.16`) | dt 5 s runs, 20 s fails at step 4 | 5, 20, 60 and 120 s all run |
+| Deardorff | dt 5 s fails at step 89 | 5, 20, 60 and 120 s all run |
+| kEqn (Axell & Liungman) | dt 10 s runs, 20 s fails | 5 to 240 s run |
+
+Agreement: Smagorinsky implicit against explicit at dt = 5 s differs by
+2.7e-2 m/s in wind (scale 10) after 1 h of spin-up, and implicit dt = 120 s
+against implicit dt = 5 s by 5.3e-2 m/s. Deardorff implicit dt = 120 s
+against dt = 5 s differs by 1.7e-2 m/s, 3.0e-3 K and 2.1e-3 m2/s2 in k.
