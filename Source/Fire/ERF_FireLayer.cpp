@@ -973,7 +973,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                                 *fire_slopes, m_fg.geom, dt_ls,
                                                 m_params.levelset_eps_visc,
                                                 dir_state, fire_nonburnable.get(), wall_extrap,
-                                                ls_grad);
+                                                ls_grad, m_params.directional_shape);
             } else if (m_params.levelset_ellipse) {
                 // Huygens ellipse: the model's rate is the head rate and the
                 // normal speed follows the ellipse set by the midflame wind.

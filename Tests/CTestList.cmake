@@ -934,6 +934,7 @@ endif()
 #=============================================================================
 if(ERF_ENABLE_FIRE)
 add_test_fire(FireBurnout_base              FireBurnout           inputs_base                40)
+add_test_fire(FireDirectionalShape_ellipse  FireDirectionalShape  inputs_ellipse             40)
 add_test_fire(FireEmcModel_van_wagner       FireEmcModel          inputs_van_wagner          40)
 add_test_fire(FireExposure_noib             FireExposure          inputs_noib                40)
 add_test_fire(FireFbp_c2                    FireFbp               inputs_fbp_c2              40)

@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# The directional level set with the normal speed taken from the spread ellipse
+# whose head, back and flank rates are the model's: head R0 (1 + phi_w) along
+# the wind, back and flanks R0.
+erf.fire.directional_shape = "ellipse"

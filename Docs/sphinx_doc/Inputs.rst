@@ -3900,6 +3900,11 @@ Rate of spread
 | **erf.fire.directional_ros**                   | Evaluate the rate along the front normal on the level-set  | Boolean                        | true                   |
 |                                                | path; false spreads the head rate in every direction       |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.directional_shape**                 | Form of that rate: the model along the front normal, or    | "projection", "ellipse"        | "projection"           |
+|                                                | the support function of the ellipse with the model's head, |                                |                        |
+|                                                | back and flank rates, which keeps a point fire's head at   |                                |                        |
+|                                                | the head rate; not for balbi or hybrid                     |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.prescribed.ros**                    | Rate of spread for ros_model = prescribed where by_fuel    | Real >= 0                      | 0.0                    |
 |                                                | has no entry; no wind, slope or moisture dependence, and   |                                |                        |
 |                                                | directional_ros is turned off [m/s]                        |                                |                        |

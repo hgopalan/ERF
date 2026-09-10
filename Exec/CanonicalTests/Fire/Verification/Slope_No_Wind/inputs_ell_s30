@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# The plane z = 0.3 x (16.7 degrees), directional level set with the ellipse
+# shape: head R0 (1 + phi_s) up the slope, back and flanks R0.
+erf.fire.terrain_file_name = "plane_s30.txt"
+erf.fire.directional_shape = "ellipse"

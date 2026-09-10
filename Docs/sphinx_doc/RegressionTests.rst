@@ -555,8 +555,9 @@ Problem Location: `Exec/CanonicalTests/EkmanSpiral`_
 
 Fire and dust smoke tests
 -------------------------
-Every fire suite under ``Exec/RegTests`` (``FireBurnout``, ``FireEmcModel``,
-``FireExposure``, ``FireFbp``, ``FireFluxPartition``, ``FireHeatPlacement``,
+Every fire suite under ``Exec/RegTests`` (``FireBurnout``,
+``FireDirectionalShape``, ``FireEmcModel``, ``FireExposure``, ``FireFbp``,
+``FireFluxPartition``, ``FireHeatPlacement``,
 ``FireHybridObstacles``, ``FireLevelSetEllipse``, ``FireNearWall``,
 ``FirePerimeterIgnition``, ``FireRestart``, ``FireRosComparison``,
 ``FireScottBurgan``, ``FireStickMoisture``, ``FireWindSampling``,

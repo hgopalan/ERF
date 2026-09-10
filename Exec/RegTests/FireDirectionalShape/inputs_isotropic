@@ -1,0 +1,9 @@
+FILE = inputs_base
+
+# The isotropic level set: the whole front spreads at Rothermel's head rate.
+erf.fire.directional_ros = false
+
+# A disc at the head rate would wrap the periodic domain long before 1500 s.
+max_step = 300
+stop_time = 300.0
+erf.fire_plot_int = 150
