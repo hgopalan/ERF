@@ -36,15 +36,15 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
         }
 
         std::string line;
-        
+
         // Helper lambda to parse header line (case-insensitive key)
         auto parse_header = [](const std::string& line, const std::string& key_lower)
             -> std::pair<bool, Real> {
             std::string line_lower = line;
-            std::transform(line_lower.begin(), line_lower.end(), 
-                         line_lower.begin(), 
+            std::transform(line_lower.begin(), line_lower.end(),
+                         line_lower.begin(),
                          [](unsigned char c) { return std::tolower(c); });
-            
+
             std::istringstream iss(line_lower);
             std::string key;
             Real value;
@@ -101,7 +101,7 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
         }
         file.close();
 
-        // Row reversal: file row 0 is northernmost; domain row 0 is southernmost. 
+        // Row reversal: file row 0 is northernmost; domain row 0 is southernmost.
         // Matches ERF_FuelMap.H convention.
         std::vector<Real> data_reversed(ncols * nrows);
         for (int j = 0; j < nrows; ++j) {
@@ -129,7 +129,7 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
     }
 
     // Broadcast data
-    ParallelDescriptor::Bcast(data.data(), ncols * nrows, 
+    ParallelDescriptor::Bcast(data.data(), ncols * nrows,
                                ParallelDescriptor::IOProcessorNumber());
 
     // Copy data to device
@@ -139,7 +139,7 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
     // Build uniform source-grid coordinate vectors on device
     Gpu::DeviceVector<Real> x_src(ncols);
     Gpu::DeviceVector<Real> y_src(nrows);
-    
+
     // Host vectors to copy from
     std::vector<Real> x_src_host(ncols), y_src_host(nrows);
     for (int i = 0; i < ncols; ++i) {
@@ -184,7 +184,7 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
 
             // Find bounding source cells
             int i_left = 0, j_bottom = 0;
-            
+
             // Linear search for x
             for (int ii = 0; ii < ncols - 1; ++ii) {
                 if (x_dust >= x_src_ptr[ii] && x_dust <= x_src_ptr[ii + 1]) {
@@ -192,7 +192,7 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
                     break;
                 }
             }
-            
+
             // Linear search for y
             for (int jj = 0; jj < nrows - 1; ++jj) {
                 if (y_dust >= y_src_ptr[jj] && y_dust <= y_src_ptr[jj + 1]) {
@@ -210,7 +210,7 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
             // Bilinear interpolation weights
             Real dx_cell = x_src_ptr[i_left + 1] - x_src_ptr[i_left];
             Real dy_cell = y_src_ptr[j_bottom + 1] - y_src_ptr[j_bottom];
-            
+
             Real wx = (x_dust - x_src_ptr[i_left]) / dx_cell;
             Real wy = (y_dust - y_src_ptr[j_bottom]) / dy_cell;
 

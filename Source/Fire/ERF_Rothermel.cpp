@@ -23,7 +23,7 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     // 1. Total fuel load and weighted moisture (single-class path)
     // ===================================================================
     Real w_0 = fp.w_d1 + fp.w_d10 + fp.w_d100 + fp.w_lh + fp.w_lw;  // total oven-dry load [lb/ft²]
-    
+
     // Compute weighted dead fuel moisture
     Real w_d = fp.w_d1 + fp.w_d10 + fp.w_d100;
     Real M_f = 0.0;  // weighted fuel moisture fraction
@@ -75,7 +75,7 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     // ===================================================================
     // 12-15. Propagating flux ratio, heating number, heat of preignition, and R0 (Eqs. 1, 12, 14, 42)
     // ===================================================================
-    Real xi = std::exp((0.792 + 0.681 * std::sqrt(sigma)) * (beta + 0.1)) 
+    Real xi = std::exp((0.792 + 0.681 * std::sqrt(sigma)) * (beta + 0.1))
               / (192.0 + 0.2595 * sigma);                                      // Eq. 42
     Real eps_h = std::exp(-138.0 / sigma);                                     // Eq. 14
     Real Q_ig = 250.0 + 1116.0 * M_f;                                          // Eq. 12: heat of preignition

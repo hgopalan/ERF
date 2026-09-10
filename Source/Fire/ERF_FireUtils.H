@@ -17,8 +17,8 @@
 /**
  * @brief Compute relative humidity from conserved atmospheric variables at k=0.
  *
- * Computes RH from pressure, temperature, and water vapor mixing ratio at 
- * the first atmospheric level (k=0). Uses the ERF microphysics saturation 
+ * Computes RH from pressure, temperature, and water vapor mixing ratio at
+ * the first atmospheric level (k=0). Uses the ERF microphysics saturation
  * vapor pressure functions.
  *
  * @param[out] RH_out        Output relative humidity MultiFab [fraction 0-1]
@@ -72,7 +72,7 @@ void compute_rh_from_conservative(amrex::MultiFab& RH_out,
 
             // Compute pressure from RhoTheta and qv using standard EOS
             Real p = getPgivenRTh(rho_th, qv);  // Pressure [Pa]
-            
+
             // Convert pressure to mbar for saturation vapor pressure functions
             Real p_mbar = p * 0.01_rt;  // Pa to mbar (1 mbar = 100 Pa)
 

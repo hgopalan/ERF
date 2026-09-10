@@ -47,7 +47,7 @@ create_dust_grid(const BoxArray& ba_atm,
     DistributionMapping dm_dust = dm_atm;
 
     // Step 4: Create 2D Geometry with REFINED index-space domain
-    // The index-space domain is scaled by grid_ratio so that cell size = 
+    // The index-space domain is scaled by grid_ratio so that cell size =
     // physical_size / (grid_ratio * n_cells) = (physical_size / n_cells) / grid_ratio
     // Keep x-y physical domain unchanged — same extent as atmospheric grid.
     Box atm_domain   = geom_atm.Domain();

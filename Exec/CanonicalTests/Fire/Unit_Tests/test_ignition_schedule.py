@@ -23,15 +23,15 @@ def parse_ignition_schedule_csv(csv_content):
         # Skip empty lines and comments
         if not line or line[0] in '#!':
             continue
-        
+
         # Convert commas to spaces
         line = line.replace(',', ' ')
-        
+
         # Parse fields
         parts = line.split()
         if len(parts) < 4:
             continue
-        
+
         try:
             time_s = float(parts[0])
             cx = float(parts[1])
@@ -42,7 +42,7 @@ def parse_ignition_schedule_csv(csv_content):
             suppress_if_burning = int(parts[6]) if len(parts) > 6 else 0
         except (ValueError, IndexError):
             continue
-        
+
         events.append({
             'time_s': time_s,
             'cx': cx,
@@ -53,7 +53,7 @@ def parse_ignition_schedule_csv(csv_content):
             'suppress_if_burning': (suppress_if_burning != 0),
             'fired': False
         })
-    
+
     return events
 
 
@@ -87,11 +87,11 @@ def polygon_winding_number(px, py, xs, ys):
     """
     winding = 0
     n = len(xs)
-    
+
     for i in range(n):
         x1, y1 = xs[i], ys[i]
         x2, y2 = xs[(i + 1) % n], ys[(i + 1) % n]
-        
+
         if y1 <= py:
             if y2 > py:
                 # Upward crossing
@@ -104,7 +104,7 @@ def polygon_winding_number(px, py, xs, ys):
                 cross = (x2 - x1) * (py - y1) - (px - x1) * (y2 - y1)
                 if cross < 0.0:
                     winding -= 1
-    
+
     return winding
 
 
@@ -113,17 +113,17 @@ def segment_dist_sq(px, py, ax, ay, bx, by):
     dx = bx - ax
     dy = by - ay
     len_sq = dx * dx + dy * dy
-    
+
     if len_sq < 1.0e-14:
         # Degenerate segment
         dpx = px - ax
         dpy = py - ay
         return dpx * dpx + dpy * dpy
-    
+
     # Parameter t of closest point on segment
     t = ((px - ax) * dx + (py - ay) * dy) / len_sq
     t = max(0.0, min(1.0, t))
-    
+
     cx = ax + t * dx
     cy = ay + t * dy
     dpx = px - cx
@@ -170,36 +170,36 @@ def test_time_window_firing():
         {'time_s': 300.0, 'priority': 5},
         {'time_s': 600.0, 'priority': 5},
     ]
-    
+
     # Window (0, 300]
     fired = get_events_in_window(events, 0.0, 300.0)
     assert len(fired) == 1, f"Window (0, 300] should fire 1 event, got {len(fired)}"
     assert fired[0]['time_s'] == 300.0, f"Should fire t=300 event, got t={fired[0]['time_s']}"
-    
+
     # Window (-1, 0]
     fired = get_events_in_window(events, -1.0, 0.0)
     assert len(fired) == 1, f"Window (-1, 0] should fire 1 event, got {len(fired)}"
     assert fired[0]['time_s'] == 0.0, f"Should fire t=0 event, got t={fired[0]['time_s']}"
-    
+
     # Window (-100, 600]
     fired = get_events_in_window(events, -100.0, 600.0)
     assert len(fired) == 3, f"Window (-100, 600] should fire 3 events, got {len(fired)}"
-    
+
     print("✓ test_time_window_firing PASSED")
 
 
 def test_fired_flag_prevents_reapplication():
     """Test that fired flag prevents re-application."""
     events = [{'time_s': 100.0, 'fired': True}]
-    
+
     # Event with fired=True should not appear in firing list
     fired = [e for e in events if not e['fired'] and e['time_s'] == 100.0]
     assert len(fired) == 0, f"Fired event should not be in firing list, got {len(fired)}"
-    
+
     events[0]['fired'] = False
     fired = [e for e in events if not e['fired'] and e['time_s'] == 100.0]
     assert len(fired) == 1, f"Non-fired event should be in firing list, got {len(fired)}"
-    
+
     print("✓ test_fired_flag_prevents_reapplication PASSED")
 
 
@@ -208,7 +208,7 @@ def test_sphere_sdf_stamp_formula():
     # Cell at distance 15 from ignition center with radius 30
     dist = 15.0
     radius = 30.0
-    
+
     # For phi_old = +1.0
     phi_old = 1.0
     phi_new = sphere_sdf_stamp(phi_old, dist, radius)
@@ -216,7 +216,7 @@ def test_sphere_sdf_stamp_formula():
     expected = max(min(expected, 1.0), -1.0)
     assert abs(phi_new - expected) < 1.0e-10, \
         f"phi_new should be {expected}, got {phi_new}"
-    
+
     # For phi_old = -20.0 (existing fire)
     phi_old = -20.0
     phi_new = sphere_sdf_stamp(phi_old, dist, radius)
@@ -225,7 +225,7 @@ def test_sphere_sdf_stamp_formula():
     expected = min(phi_old, expected_val)
     assert abs(phi_new - expected) < 1.0e-10, \
         f"phi_new should be {expected}, got {phi_new}"
-    
+
     print("✓ test_sphere_sdf_stamp_formula PASSED")
 
 
@@ -236,23 +236,23 @@ def test_suppress_if_burning_logic():
     radius = 30.0
     dist = 15.0
     suppress = True
-    
+
     if suppress and phi < 0.0:
         phi_new = phi  # Not modified
     else:
         phi_new = sphere_sdf_stamp(phi, dist, radius)
-    
+
     assert phi_new == phi, f"Burning cell should not be modified, got {phi_new}"
-    
+
     # Cell with phi = +10.0 (unburned) should be modified with suppress_if_burning=True
     phi = 10.0
     if suppress and phi < 0.0:
         phi_new = phi
     else:
         phi_new = sphere_sdf_stamp(phi, dist, radius)
-    
+
     assert phi_new != phi, f"Unburned cell should be modified, got {phi_new}"
-    
+
     print("✓ test_suppress_if_burning_logic PASSED")
 
 
@@ -261,11 +261,11 @@ def test_polygon_winding_number_inside():
     # Square: (0,0), (2,0), (2,2), (0,2)
     xs = [0.0, 2.0, 2.0, 0.0]
     ys = [0.0, 0.0, 2.0, 2.0]
-    
+
     # Point at center (1, 1) should be inside
     winding = polygon_winding_number(1.0, 1.0, xs, ys)
     assert winding != 0, f"Center point should have non-zero winding, got {winding}"
-    
+
     print("✓ test_polygon_winding_number_inside PASSED")
 
 
@@ -274,11 +274,11 @@ def test_polygon_winding_number_outside():
     # Square: (0,0), (2,0), (2,2), (0,2)
     xs = [0.0, 2.0, 2.0, 0.0]
     ys = [0.0, 0.0, 2.0, 2.0]
-    
+
     # Point at (3, 3) should be outside
     winding = polygon_winding_number(3.0, 3.0, xs, ys)
     assert winding == 0, f"Outside point should have zero winding, got {winding}"
-    
+
     print("✓ test_polygon_winding_number_outside PASSED")
 
 
@@ -288,11 +288,11 @@ def test_polygon_winding_number_vertex_count():
     n_sides = 6
     xs = [math.cos(2 * math.pi * i / n_sides) for i in range(n_sides)]
     ys = [math.sin(2 * math.pi * i / n_sides) for i in range(n_sides)]
-    
+
     # Point at center (0, 0) should be inside
     winding = polygon_winding_number(0.0, 0.0, xs, ys)
     assert winding != 0, f"Center of hexagon should have non-zero winding, got {winding}"
-    
+
     print("✓ test_polygon_winding_number_vertex_count PASSED")
 
 
@@ -301,12 +301,12 @@ def test_segment_distance_squared_formula():
     # Segment from (0,0) to (2,0), point at (1,1)
     dist_sq = segment_dist_sq(1.0, 1.0, 0.0, 0.0, 2.0, 0.0)
     assert abs(dist_sq - 1.0) < 1.0e-10, f"Distance squared should be 1.0, got {dist_sq}"
-    
+
     # Segment from (0,0) to (2,0), point at (3,1)
     dist_sq = segment_dist_sq(3.0, 1.0, 0.0, 0.0, 2.0, 0.0)
     expected = (3.0 - 2.0)**2 + (1.0 - 0.0)**2  # Distance to (2, 0)
     assert abs(dist_sq - expected) < 1.0e-10, f"Distance squared should be {expected}, got {dist_sq}"
-    
+
     print("✓ test_segment_distance_squared_formula PASSED")
 
 
@@ -315,15 +315,15 @@ def test_polyline_half_width_stamp():
     # Cell at distance 8.0 from segment with half_width=10.0
     dist = 8.0
     half_width = 10.0
-    
+
     new_phi = -half_width if dist <= half_width else dist
     assert new_phi == -10.0, f"Should get phi=-10.0, got {new_phi}"
-    
+
     # Cell at distance 12.0 from segment with half_width=10.0
     dist = 12.0
     new_phi = -half_width if dist <= half_width else dist
     assert new_phi == 12.0, f"Should get phi=12.0, got {new_phi}"
-    
+
     print("✓ test_polyline_half_width_stamp PASSED")
 
 
@@ -332,17 +332,17 @@ def test_multi_ignition_phi_merge():
     # Two ignitions produce phi values of -15 and -8 at same cell
     phi1 = -15.0
     phi2 = -8.0
-    
+
     # Merge via min()
     merged = min(phi1, phi2)
     assert merged == -15.0, f"min(-15, -8) should be -15, got {merged}"
-    
+
     # Verify that min() doesn't overwrite existing fire
     phi_old = -20.0
     new_phi = -10.0
     merged = min(phi_old, new_phi)
     assert merged == -20.0, f"Existing fire should not be overwritten, got {merged}"
-    
+
     print("✓ test_multi_ignition_phi_merge PASSED")
 
 
@@ -351,7 +351,7 @@ def main():
     print("=" * 70)
     print("Phase 11: Multi-Ignition Schedule Unit Tests")
     print("=" * 70)
-    
+
     tests = [
         test_schedule_csv_parsing,
         test_priority_sorting_within_timestep,
@@ -366,7 +366,7 @@ def main():
         test_polyline_half_width_stamp,
         test_multi_ignition_phi_merge,
     ]
-    
+
     failed = []
     for test in tests:
         try:
@@ -374,7 +374,7 @@ def main():
         except AssertionError as e:
             print(f"✗ {test.__name__} FAILED: {e}")
             failed.append((test.__name__, str(e)))
-    
+
     print("=" * 70)
     if not failed:
         print(f"All {len(tests)} tests PASSED")

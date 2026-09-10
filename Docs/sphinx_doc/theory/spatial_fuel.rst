@@ -49,7 +49,7 @@ At boundaries between different fuel model zones, ROS discontinuities can produc
 
 .. math::
 
-    \text{ROS}_{\text{blended}}(i,j) = (1-f) \, \text{ROS}_{\text{cell}}(i,j) + 
+    \text{ROS}_{\text{blended}}(i,j) = (1-f) \, \text{ROS}_{\text{cell}}(i,j) +
     f \, \frac{1}{n_{\text{diff}}} \sum_{\text{neighbors with different fuel code}} \text{ROS}_{\text{neighbor}}
 
 where :math:`f` is the blending fraction (default 0.0, range [0, 1]), :math:`n_{\text{diff}}` is the count of neighbors with fuel codes differing from the central cell, and neighbors are the 4-cell von Neumann stencil (±i, ±j directions). A value :math:`f=0` disables blending (sharp boundaries); :math:`f=1` fully replaces the cell ROS with the mean neighbor ROS (maximum smoothing).

@@ -52,7 +52,7 @@ struct FireParams
     amrex::Real       k_shelter           = 0.6;         ///< Sheltered wind factor
     amrex::Real       k_valley            = 0.8;         ///< Valley channeling factor
     amrex::Real       k_deflect           = 0.3;         ///< Wind deflection factor
-    
+
     // Fuel moisture control (Phase 4)
     bool              moisture_dynamic    = true;        ///< Advance moisture each step via ODEs
     // How the dead classes are advanced when moisture_dynamic is on:
@@ -68,10 +68,10 @@ struct FireParams
     } stick;
     amrex::Real       precip_rate_mm_hr   = 0.0;         ///< Uniform precipitation rate [mm/hr]
     amrex::Real       moisture_live       = 0.60;        ///< Live fuel moisture [fraction]
-    
+
     // Moisture of extinction (Phase 4)
     bool              use_dynamic_mext    = true;        ///< Compute M_x from fuel SAV
-    
+
     // Heat flux parameters (Phase 5)
     amrex::Real       tau_residence_s     = 0.0;         ///< Residence time [s]; 0 = derive from fuel SAV
     // Burnout of the fuel behind the front (the e-folding time of the fuel
@@ -93,7 +93,7 @@ struct FireParams
     amrex::Real       burnout_time_to_efold = 0.8514;     ///< tau = burn time / this (WRF-SFIRE)
     amrex::Real       f_c_min             = 0.2;         ///< Minimum combustion fraction
     amrex::Real       f_c_max             = 0.9;         ///< Maximum combustion fraction
-    
+
     // FARSITE parameters
     amrex::Real       farsite_phi_threshold   = 0.1;  ///< front detection level in phi
     int               farsite_use_anderson_lw = 1;       ///< derive coeff_a/b/c from Anderson L/W
@@ -138,11 +138,11 @@ struct FireParams
 
     // Terrain file for fine-grid terrain data
     std::string       terrain_file_name       = "";   ///< Path to terrain file for fine-grid interpolation
-    
+
     // CSV output for fire statistics (burned area, perimeter, etc.)
     bool              write_fire_stats_csv    = true; ///< Write burned area and perimeter CSV
     std::string       fire_stats_csv_file     = "fire_stats.csv"; ///< Fire statistics output filename
-    
+
     // Phase 6: fire-atmosphere coupling parameters
     amrex::Real       heat_flux_alfg          = 45.0;  ///< e-folding height for sensible heat distribution [m]
     amrex::Real       fire_atm_feedback       = 1.0;   ///< multiplier on fire flux (0 = one-way, 1 = full)
@@ -232,7 +232,7 @@ struct FireParams
     // Phase 9: Flame temperature diagnostic
     std::string       flame_temp_method   = "byram_radiant"; ///< "byram_radiant", "mcalpine_heat", "nelson_emissivity"
     amrex::Real       flame_temp_T_amb    = 300.0;           ///< Ambient temperature for flame temp formula [K]
-    
+
     // Phase 9: Flame tilt angle diagnostic
     bool              compute_flame_tilt  = false;           ///< Compute flame tilt angle diagnostic [degrees]
     amrex::Real       flame_tilt_T_amb    = 300.0;           ///< Ambient temperature for flame tilt [K]
@@ -355,7 +355,7 @@ struct FireParams
     int               wind_interp         = 1;
 
     // Phase 13B: Rate-of-spread model selection and parameters
-    
+
     // Phase 13B: Rate-of-spread model selection.
     // "rothermel"    — Rothermel (1972) single-class model (default, Phases 1-12)
     // "macarthur"    — MacArthur (1966) Australian formula R = 0.18*exp(0.8424*U)
@@ -609,7 +609,7 @@ struct FireParams
        pp.query("k_shelter", k_shelter);
        pp.query("k_valley", k_valley);
        pp.query("k_deflect", k_deflect);
-        
+
        // Fuel moisture control (Phase 4)
        pp.query("moisture_dynamic", moisture_dynamic);
        pp.query("precip_rate_mm_hr", precip_rate_mm_hr);
@@ -628,10 +628,10 @@ struct FireParams
            for (auto r : stick.radius_cm) { if (r <= 0.0) amrex::Abort("erf.fire.stick.radius_cm must be positive"); }
            if (stick.diffusivity_scale <= 0.0) { amrex::Abort("erf.fire.stick.diffusivity_scale must be positive"); }
        }
-        
+
        // Moisture of extinction (Phase 4)
        pp.query("use_dynamic_mext", use_dynamic_mext);
-          
+
        // Heat flux parameters (Phase 5)
        pp.query("tau_residence_s", tau_residence_s);
        pp.query("burnout_model", burnout_model);
@@ -698,11 +698,11 @@ struct FireParams
        amrex::ParmParse pp_erf("erf");
        pp_erf.query("terrain_file_name", terrain_file_name);
        pp.query("terrain_file_name", terrain_file_name);
-        
+
        // CSV output parameters
        pp.query("write_fire_stats_csv", write_fire_stats_csv);
        pp.query("fire_stats_csv_file", fire_stats_csv_file);
-        
+
        // Phase 6: fire-atmosphere coupling parameters
        pp.query("heat_flux_alfg", heat_flux_alfg);
        pp.query("fire_atm_feedback", fire_atm_feedback);
@@ -761,7 +761,7 @@ struct FireParams
        // Phase 9: Flame temperature diagnostic
        pp.query("flame_temp_method", flame_temp_method);
        pp.query("flame_temp_T_amb",  flame_temp_T_amb);
-         
+
        // Phase 9: Flame tilt angle diagnostic
        pp.query("compute_flame_tilt", compute_flame_tilt);
        pp.query("flame_tilt_T_amb",   flame_tilt_T_amb);

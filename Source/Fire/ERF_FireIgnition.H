@@ -41,19 +41,19 @@ void initialize_ignition(
     bool normalized = true)
 {
     using namespace amrex;
-    
+
     const auto prob_lo = geom_fire.ProbLoArray();
     const auto dx      = geom_fire.CellSizeArray();
-    
+
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto p = phi.array(mfi);
-        
+
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
             Real x = prob_lo[0] + (i + 0.5_rt) * dx[0];
             Real y = prob_lo[1] + (j + 0.5_rt) * dx[1];
             Real dist = std::sqrt((x-cx)*(x-cx) + (y-cy)*(y-cy));
-            
+
             // Signed distance: negative inside ignition circle, positive outside.
             //
             // normalized = true  : divided by the radius and clamped to [-1, 1].

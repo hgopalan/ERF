@@ -21,7 +21,7 @@ def compute_rothermel_fm1(moisture_1hr=0.08, wind_ftmin=0.0):
     """
     Compute Rothermel ROS for FM1 (Short Grass) using correct equations.
     Returns dict with Rothermel parameters.
-    
+
     FM1 parameters (wildfire_levelset/src/fuel_database.H):
       w0=0.034 lb/ft², sigma=3500 ft⁻¹, delta=1.0 ft, Mx=0.12,
       h=8000 BTU/lb, S_T=0.0555, S_e=0.010, rho_p=32.0 lb/ft³
@@ -32,11 +32,11 @@ def compute_rothermel_fm1(moisture_1hr=0.08, wind_ftmin=0.0):
 
     # Net fuel load
     w_n = w0 * (1 - S_T)
-    
+
     # Bulk density and packing ratio
     rho_b = w0 / delta
     beta = rho_b / rho_p
-    
+
     # Reaction velocity components
     beta_op = 3.348 * sigma**(-0.8189)
     sigma_1p5 = sigma**1.5
@@ -96,7 +96,7 @@ def compute_rothermel_fm1(moisture_1hr=0.08, wind_ftmin=0.0):
 def compute_rothermel_fm4(moisture_1hr=0.08, wind_ftmin=0.0):
     """
     Compute Rothermel ROS for FM4 (Chaparral) using correct equations.
-    
+
     FM4 parameters:
       w0=0.736 lb/ft², sigma=1739 ft⁻¹, delta=6.0 ft, Mx=0.20,
       h=8000 BTU/lb, S_T=0.0555, S_e=0.010, rho_p=32.0 lb/ft³
@@ -107,11 +107,11 @@ def compute_rothermel_fm4(moisture_1hr=0.08, wind_ftmin=0.0):
 
     # Net fuel load
     w_n = w0 * (1 - S_T)
-    
+
     # Bulk density and packing ratio
     rho_b = w0 / delta
     beta = rho_b / rho_p
-    
+
     # Reaction velocity components
     beta_op = 3.348 * sigma**(-0.8189)
     sigma_1p5 = sigma**1.5
@@ -263,7 +263,7 @@ def main():
     print("=" * 70)
     print("Rothermel (1972) Unit Tests")
     print("=" * 70)
-    
+
     tests = [
         test_fm1_no_wind,
         test_fm1_wind_coefficient_C,
@@ -276,7 +276,7 @@ def main():
         test_moisture_effect_on_ros,
         test_wind_effect_on_ros,
     ]
-    
+
     failed = []
     for test in tests:
         try:
@@ -284,7 +284,7 @@ def main():
         except AssertionError as e:
             print(f"✗ {test.__name__} FAILED: {e}")
             failed.append((test.__name__, str(e)))
-    
+
     print("=" * 70)
     if not failed:
         print(f"All {len(tests)} tests PASSED")

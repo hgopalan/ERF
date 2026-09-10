@@ -106,9 +106,9 @@ struct BlastSchedule
  * @brief Load blast schedule from a CSV file.
  *
  * Rank-0 reads CSV file; parses required fields time_s cx cy radius mass_kg_m2
- * and optional mineral_type priority. Comment lines start with # or !; 
+ * and optional mineral_type priority. Comment lines start with # or !;
  * commas converted to spaces before parsing. Sorts by time_s ascending,
- * then priority descending. Broadcasts all fields via MPI_Bcast using the 
+ * then priority descending. Broadcasts all fields via MPI_Bcast using the
  * same flat-array serialization pattern as ERF_IgnitionSchedule.H.
  *
  * @param[in]  filename  Path to CSV file.
@@ -268,7 +268,7 @@ void apply_blast_schedule(
 
     // Apply each event via GPU kernel
     for (auto evt : events_due) {
-        amrex::Real blast_flux_per_bin = evt->mass_kg_m2 * blast_reactivity 
+        amrex::Real blast_flux_per_bin = evt->mass_kg_m2 * blast_reactivity
                                         / (dt_safe * n_size_bins);
         blast_flux_per_bin = std::min(blast_flux_per_bin, DustBlastConst::BLAST_FLUX_MAX);
 

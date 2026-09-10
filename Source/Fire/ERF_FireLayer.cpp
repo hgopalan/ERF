@@ -691,7 +691,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             amrex::Print() << "[FIRE DEBUG] Updated Rothermel coefficients with avg moisture: "
                            << "M_1hr=" << avg1 << " M_10hr=" << avg10
                            << " M_100hr=" << avg100 << " R0=" << m_rc.R0 << " m/s" << std::endl;
-        
+
         // Phase 13B: Moisture coupling for Balbi and Cheney-Gould models
         if (m_params.moisture_dynamic && m_params.uses_model("balbi")) {
             // Recompute Balbi coefficients with updated moisture
@@ -749,7 +749,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         // fill_boundary after any phi modification to propagate ghost cells
         //amrex::FillBoundary(*fire_phi, m_fg.geom);
         enforce_nonburnable_phi();
-        fire_fill_boundary(*fire_phi, m_fg.geom);        
+        fire_fill_boundary(*fire_phi, m_fg.geom);
     }
 
     // Temperature-threshold ignition: cells whose near-surface air is hotter
@@ -1140,13 +1140,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     if (m_params.fire_debug) {
         amrex::Real phi_min  = fire_phi->min(0, 0);   // nghost=0
         amrex::Real phi_max  = fire_phi->max(0, 0);
-        
+
         // Masked ROS diagnostics (only for burning cells where phi < 0)
         const auto ros_stats = erf_fire_diag::burning_ros_stats(*fire_ros, *fire_phi);
 
         amrex::Real ros_max  = ros_stats.max_ros;
         amrex::Real ros_mean = ros_stats.mean_ros;
-        
+
         amrex::Real Q_max    = fire_heat_flux ? fire_heat_flux->max(0) : 0.0;
         amrex::Real I_B_max  = fire_fireline_intensity ? fire_fireline_intensity->max(0) : 0.0;
         amrex::Real L_max    = fire_flame_length ? fire_flame_length->max(0) : 0.0;
