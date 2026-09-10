@@ -91,10 +91,10 @@ erf.fire_plot_file = plt_fire_
 erf.fire_plot_int  = 100
 
 
-# Plot files (3D atmospheric variables)
-erf.plot_file = plt3d_atm_slope
-erf.plot_int = 100
-erf.plot_vars = theta qv u v w
+# No atmosphere plotfiles: nothing reads them, the check script uses the fire
+# plotfiles. (erf.plot_int/erf.plot_vars, set here before 2026-09-10, were read
+# by nothing, so none was written either; ERF reads erf.plot_int_1/plot_vars_1.)
+erf.plot_int_1 = -1
 
 # Fire module parameters (Phase 2 with terrain)
 erf.fire.enable = true

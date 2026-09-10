@@ -63,9 +63,12 @@ erf.fire_plot_file = plt_fire_
 erf.fire_plot_int  = 100
 
 
-# Plot files (3D atmospheric variables)
-erf.plot_int = 100
-erf.plot_vars = theta qv u v w
+# Plot files (3D atmospheric variables): the plume, about every 300 s at the
+# 0.22 s starting step. (erf.plot_int/erf.plot_vars, set here before 2026-09-10,
+# were read by nothing, so no atmosphere plotfile was written; qv, u, v and w
+# are not plot variables of this dry run.)
+erf.plot_int_1 = 1350
+erf.plot_vars_1 = theta x_velocity y_velocity z_velocity
 
 # Fire module parameters
 erf.fire.enable = true

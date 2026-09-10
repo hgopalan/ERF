@@ -94,9 +94,13 @@ erf.v = 1
 amr.v = 1
 
 erf.check_int = -1
-erf.plot_file = plt3d_terrain_wind
-erf.plot_int = 400
-erf.plot_vars = theta u v w
+# Atmosphere plotfiles every 100 s for the wind over the terrain;
+# z_phys is the cell-centre height of the fitted mesh. (erf.plot_file/plot_int/
+# plot_vars, set here before 2026-09-10, were read by nothing, so no atmosphere
+# plotfile was written; u, v and w are not ERF plot variable names.)
+erf.plot_file_1 = plt3d_terrain_wind
+erf.plot_int_1 = 400
+erf.plot_vars_1 = theta x_velocity y_velocity z_velocity z_phys
 
 erf.fire_plot_file = plt_fire_
 erf.fire_plot_int = 400

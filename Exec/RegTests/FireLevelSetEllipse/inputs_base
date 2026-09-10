@@ -37,7 +37,9 @@ erf.v = 0
 amr.v = 0
 erf.sum_interval = -1
 erf.check_int = -1
-erf.plot_int = -1
+# (erf.plot_int, set here before 2026-09-10, was read by nothing; ERF reads
+# erf.plot_int_1, and no atmosphere plotfile is still the intent.)
+erf.plot_int_1 = -1
 erf.fire_plot_int = 480              # fire plotfile at 60 s for the shape measurement
 
 erf.fire.enable = true
