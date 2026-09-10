@@ -9,7 +9,9 @@ consecutive probe cells divided by the difference of their arrival times
 fuel model 1 at the deck's moisture, evaluated at the effective (post wind
 reduction factor) wind the fire reports ([FIRE DEBUG] Max effective wind),
 with no midflame cap since the decks set use_wind_limit = false: the head at
-R0 (1 + phi_w(U_eff)), the backing fire at R0. One-way variants must match to
+R0 (1 + phi_w(U_eff)), the backing fire at R0. A variant whose name ends in
+_cap turns the cap back on, and its head is checked at the capped wind, the
+mean of min(U_eff, 300 ft/min) over the run. One-way variants must match to
 TOL; a variant whose name ends in _2way is reported only.
 """
 import math, re, sys
@@ -17,11 +19,13 @@ import math, re, sys
 TOL = 0.10
 M_F = 0.055                       # the decks' fuel moisture (all dead classes)
 FT_MIN_TO_M_S = 0.00508
-FM1 = dict(w0=0.034, sigma=3500.0, delta=1.0, Mx=0.12, h=8000.0, S_T=0.0555, S_e=0.010, rho_p=32.0)
+U_MEWS = 300.0 / 196.85           # erf.fire.use_wind_limit cap for fine fuels (sigma > 1000 1/ft) [m/s]
+FM1 =dict(w0=0.034, sigma=3500.0, delta=1.0, Mx=0.12, h=8000.0, S_T=0.0555, S_e=0.010, rho_p=32.0)
 # Coen et al. 2013, coupled LES: NoWind crept outward at 0.02 m/s on every side (= R0); Control
 # ran a 0.22 m/s HEAD (backing not quoted; WRF-Fire sets it to R0); WSHi "four-fifths" faster.
 # The one-way heads here are meant to sit below these: the paper's plume doubles the head wind.
 COEN = {"nowind": ("NoWind", 0.02), "wind2p5": ("Control head", 0.22), "wind5": ("WSHi head", 0.40),
+        "wind5_cap": ("WSHi head", 0.40),
         "nowind_2way": ("NoWind", 0.02),
         "wind2p5_2way": ("Control head", 0.22), "wind5_2way": ("WSHi head", 0.40)}
 
@@ -65,7 +69,8 @@ def main():
     print(hdr); print("-" * len(hdr))
     for v in variants:
         probes, ueff, uref = parse(f"run_{v}.log")
-        U = sum(ueff) / len(ueff) if ueff else 0.0
+        capped = [min(u, U_MEWS) for u in ueff] if v.endswith("_cap") else ueff
+        U = sum(capped) / len(capped) if capped else 0.0
         Ur = sum(uref) / len(uref) if uref else 0.0
         R0, Rh, _ = rothermel_fm1(M_F, U)
         back = [(x, t) for x, t in probes.values() if x < 140.0]
