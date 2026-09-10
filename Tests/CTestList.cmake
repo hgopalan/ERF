@@ -919,6 +919,50 @@ add_test_rans(RANS_Flat_Fitted_2D_Poisson Neutral_Hill_2D      inputs_hill      
 add_test_rans(RANS_Neutral_Hill_3D        Neutral_Hill_3D      inputs_hill3d      40  check_hill3d.py)
 add_test_rans(RANS_Neutral_Hill_3D_Poisson Neutral_Hill_3D     inputs_hill3d      40  check_hill3d.py RUNTIME_OPTIONS "erf.wall_dist_type=poisson")
 
+# Largest stable time step of one closure under explicit anelastic, implicit
+# anelastic and implicit compressible integration (Timestep_Limits). The
+# sweep spins the closure up and climbs a ladder of steps, about 30 short ERF
+# runs and 60-90 s on one rank in Release, so it is labelled dt_sweep and kept
+# out of the regression label that the CI runs in Debug.
+function(add_test_rans_dt TEST_NAME CLOSURE)
+    set(_rans_root ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/Canonical_RANS)
+    set(CURRENT_TEST_SOURCE_DIR ${_rans_root}/Timestep_Limits)
+    set(CURRENT_TEST_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
+    file(MAKE_DIRECTORY ${CURRENT_TEST_BINARY_DIR})
+    file(GLOB TEST_FILES "${CURRENT_TEST_SOURCE_DIR}/*")
+    file(COPY ${TEST_FILES} DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+    file(GLOB _rans_py "${_rans_root}/*.py")
+    file(COPY ${_rans_py} DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+
+    # a 4 x 4 x 200 column: one rank
+    if(ERF_ENABLE_MPI)
+        set(MPI_COMMANDS "${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${MPIEXEC_PREFLAGS}")
+    else()
+        unset(MPI_COMMANDS)
+    endif()
+
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+
+    set(test_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
+    # The sweep's exit code is the verdict; its tables are echoed into the
+    # ctest output so a failure shows every rung.
+    set(test_command sh -c "rm -f ${CURRENT_TEST_BINARY_DIR}/SWEEP_FAILED && ( ${ERF_RANS_PYTHON} ${CURRENT_TEST_BINARY_DIR}/sweep_dt.py --exe ${TEST_EXE} --closure ${CLOSURE} --mpi-cmd \"${MPI_COMMANDS}\" --workdir ${CURRENT_TEST_BINARY_DIR}/dt_runs > ${test_log} 2>&1 || touch ${CURRENT_TEST_BINARY_DIR}/SWEEP_FAILED ) && cat ${test_log} && test ! -f ${CURRENT_TEST_BINARY_DIR}/SWEEP_FAILED")
+
+    add_test(${TEST_NAME} ${test_command})
+    set_tests_properties(${TEST_NAME}
+        PROPERTIES
+        TIMEOUT 3600
+        PROCESSORS 1
+        WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+        LABELS "rans;dt_sweep"
+        ATTACHED_FILES_ON_FAIL "${test_log}"
+    )
+endfunction(add_test_rans_dt)
+
+add_test_rans_dt(RANS_Timestep_Limits_kEqn      kEqn)
+add_test_rans_dt(RANS_Timestep_Limits_Deardorff Deardorff)
+add_test_rans_dt(RANS_Timestep_Limits_MRF       MRF)
+
 #=============================================================================
 # Performance tests
 #=============================================================================

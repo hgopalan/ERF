@@ -562,6 +562,18 @@ dt = 10 s with the implicit column solve of momentum, theta and KE),
 ``RANS_Flat_Fitted_2D`` (and ``_Poisson``), ``RANS_Neutral_Hill_3D`` (and
 ``_Poisson``); label ``rans``.
 
+A sixth case, ``Timestep_Limits``, measures the largest stable time step of
+the vertical eddy diffusion on a neutral 4 x 4 x 200 column (dx = 800 m,
+dz = 5 m) for the :math:`k` closure, Deardorff and MRF under explicit
+anelastic, implicit anelastic and implicit compressible integration. Its
+driver spins each closure up for 1 h, restarts from the checkpoint over a
+ladder of time steps from 0.125 s to 1024 s, and checks that the explicit
+step lies within a factor 2 of :math:`\Delta z^2 / (2 K)` and that both
+implicit integrators reach at least eight times that step. Test names:
+``RANS_Timestep_Limits_kEqn``, ``RANS_Timestep_Limits_Deardorff``,
+``RANS_Timestep_Limits_MRF``; labels ``rans`` and ``dt_sweep``, not
+``regression``, since each entry makes about 30 short ERF runs.
+
 Problem Location: `Exec/CanonicalTests/Canonical_RANS`_
 
 .. _`Exec/CanonicalTests/Canonical_RANS`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/Canonical_RANS

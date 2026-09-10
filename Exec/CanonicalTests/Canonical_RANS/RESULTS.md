@@ -374,3 +374,23 @@ step instead of thousands of acoustic substeps. Before phases 9 and 10
 the ordering was inverted: the compressible path had had the implicit
 column solve for a long time, while `vert_implicit_fac` was zeroed for
 anelastic, so the cheaper integrator was the one stuck near 10 s.
+
+### Largest step per closure and integrator (`Timestep_Limits`)
+
+A RANS-like neutral column (4 x 4 x 200, dx = 800 m, dz = 5 m), spun up for
+1 h at dt = 5 s with the implicit solve and restarted over a ladder of steps
+for 200 steps each; the step is the largest rung below the first failure.
+`Timestep_Limits/sweep_dt.py`, 1 rank, first failing rung in brackets:
+
+| closure | explicit anelastic | implicit anelastic | implicit compressible | dz^2 / (2 K/rho) |
+| --- | --- | --- | --- | --- |
+| kEqn | 2 s (4) | 256 s (512) | 64 s (128) | 2.13 s |
+| Deardorff | 0.25 s (0.5) | 512 s (1024) | 64 s (128) | 0.339 s |
+| MRF | 0.5 s (1) | 256 s (512) | 8 s (16) | 0.582 s |
+
+The explicit anelastic step is 0.94, 0.74 and 0.86 of dz^2 / (2 K/rho) in
+the restart state, so for all three closures it is the diffusion limit, and
+the implicit solve raises it by two to three orders of magnitude under
+anelastic. Under compressible, kEqn and Deardorff stop at 64 s and MRF at
+8 s. The MRF run at 16 s keeps going with |u| in the thousands of m/s,
+whether the substeps are ERF's own or pinned. Not investigated.
