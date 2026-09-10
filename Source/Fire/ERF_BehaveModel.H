@@ -147,6 +147,7 @@ FuelModelParams behave_fuel_params(int code, int fuel_set)
  *                        (erf.fire.behave.dynamic_transfer_lo)
  * @param[in] transfer_hi Live herbaceous moisture at and above which none
  *                        transfers [fraction] (erf.fire.behave.dynamic_transfer_hi)
+ * @param[in] use_wind_limit  Apply the MEWS cap (erf.fire.use_wind_limit)
  *
  * @return BehaveState with all precomputed coefficients
  *
@@ -174,7 +175,8 @@ BehaveState compute_behave_state(
     amrex::Real mc_herba,
     amrex::Real mc_woody,
     amrex::Real transfer_lo,
-    amrex::Real transfer_hi)
+    amrex::Real transfer_hi,
+    bool use_wind_limit = true)
 {
     BehaveState bs;
 
@@ -365,8 +367,8 @@ BehaveState compute_behave_state(
     bs.beta_ratio_E = std::pow(beta_ratio, -E);
     bs.phi_s_const = 5.275 * std::pow(beta, -0.3);
 
-    // MEWS wind speed cap (Andrews 2018)
-    bs.U_max_ftmin = (sigma > 1000.0) ? 300.0 : 500.0;
+    // MEWS wind speed cap (Andrews 2018), none when erf.fire.use_wind_limit = false
+    bs.U_max_ftmin = rothermel_wind_cap_ftmin(sigma, use_wind_limit);
     bs.wind_conv = 196.85;  // m/s → ft/min
 
     return bs;
@@ -434,6 +436,7 @@ amrex::Real behave_ros_cell(
  * @param[in]  transfer_hi     Live herbaceous transfer window, upper edge [fraction]
  * @param[in]  fire_fuel_mc    Per-cell fuel moisture (5 components, optional)
  * @param[in]  moisture_dynamic Whether per-cell moisture should be used
+ * @param[in]  use_wind_limit  MEWS cap of the per-cell states (erf.fire.use_wind_limit)
  */
 inline void fill_behave_ros(
     amrex::MultiFab& fire_ros,
@@ -444,7 +447,8 @@ inline void fill_behave_ros(
     amrex::Real transfer_lo,
     amrex::Real transfer_hi,
     const amrex::MultiFab* fire_fuel_mc = nullptr,
-    bool moisture_dynamic = false)
+    bool moisture_dynamic = false,
+    bool use_wind_limit = true)
 {
     // When moisture_dynamic and fire_fuel_mc is provided, compute per-cell
     // BehaveState using per-cell moisture. Otherwise use bs_default for all cells.
@@ -494,7 +498,7 @@ inline void fill_behave_ros(
                 const BehaveState bs = compute_behave_state(fp,
                     mc(i,j,0,0), mc(i,j,0,1), mc(i,j,0,2),
                     mc(i,j,0,3), mc(i,j,0,4),
-                    transfer_lo, transfer_hi);
+                    transfer_lo, transfer_hi, use_wind_limit);
 
                 ros(i, j, 0) = behave_ros_cell(wind(i,j,0,0), wind(i,j,0,1),
                                                slopes(i,j,0,0), slopes(i,j,0,1),

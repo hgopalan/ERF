@@ -384,7 +384,8 @@ void FireLayer::initialize(const ERF& erf,
 
     m_rc = compute_rothermel_params(fp, fire_params.moisture_1hr,
                                     fire_params.moisture_10hr,
-                                    fire_params.moisture_100hr);
+                                    fire_params.moisture_100hr,
+                                    fire_params.use_wind_limit);
 
     // Phase 13A: Build per-fuel wind height tables and copy to device.
     // When use_per_fuel_wind_ht = false, all entries equal wind_ref_ht (no-op).
@@ -473,7 +474,8 @@ void FireLayer::initialize(const ERF& erf,
                                                 m_params.moisture_live,
                                                 m_params.moisture_live,
                                                 m_params.behave.dynamic_transfer_lo,
-                                                m_params.behave.dynamic_transfer_hi);
+                                                m_params.behave.dynamic_transfer_hi,
+                                                m_params.use_wind_limit);
             if (m_params.fire_debug) {
                 amrex::Print() << "[FIRE DEBUG] ROS model: BEHAVE multi-class Rothermel, "
                                << "R0=" << m_bs_default.r_0 << " m/s, live herbaceous transfer window "
@@ -689,7 +691,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         avg10  = amrex::max(0.01_rt, amrex::min(avg10,  0.40_rt));
         avg100 = amrex::max(0.01_rt, amrex::min(avg100, 0.40_rt));
         FuelModelParams fp_cur = uniform_fuel_params();
-        m_rc = compute_rothermel_params(fp_cur, avg1, avg10, avg100);
+        m_rc = compute_rothermel_params(fp_cur, avg1, avg10, avg100, m_params.use_wind_limit);
         if (!m_d_rc_table.empty()) {
             rebuild_rothermel_table(avg1, avg10, avg100);
         }
@@ -736,7 +738,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             }
             m_bs_default = compute_behave_state(fp_bh, avg1, avg10, avg100, avg_lh, avg_lw,
                                                 m_params.behave.dynamic_transfer_lo,
-                                                m_params.behave.dynamic_transfer_hi);
+                                                m_params.behave.dynamic_transfer_hi,
+                                                m_params.use_wind_limit);
         }
     }
 
@@ -1812,7 +1815,8 @@ void FireLayer::fill_ros_for_model(const std::string& model,
                         m_params.behave.dynamic_transfer_lo,
                         m_params.behave.dynamic_transfer_hi,
                         m_params.moisture_dynamic ? fire_fuel_mc.get() : nullptr,
-                        m_params.moisture_dynamic);
+                        m_params.moisture_dynamic,
+                        m_params.use_wind_limit);
     } else if (model == "macarthur") {
         fill_macarthur_ros(out, *fire_wind_eff);
     } else if (model == "fbp") {
@@ -1902,7 +1906,8 @@ void FireLayer::add_prescribed_heat_flux()
 
 void FireLayer::rebuild_rothermel_table(amrex::Real m1, amrex::Real m10, amrex::Real m100)
 {
-    auto h_table = build_fuel_rothermel_table(m1, m10, m100, m_params.fuel_map.fuel_set_id(), m_params.moisture_live);
+    auto h_table = build_fuel_rothermel_table(m1, m10, m100, m_params.fuel_map.fuel_set_id(), m_params.moisture_live,
+                                              m_params.use_wind_limit);
     m_d_rc_table.resize(h_table.size());
     amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_table.begin(), h_table.end(),
                      m_d_rc_table.begin());

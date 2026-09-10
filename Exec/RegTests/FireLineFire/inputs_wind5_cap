@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# wind5 with the midflame wind cap on (erf.fire.use_wind_limit = true, the default):
+# the head can run no faster than Rothermel at the maximum effective wind speed,
+# 300 ft/min (1.52 m/s) for fuel model 1, whatever the wind above it.
+erf.input_sounding_file = "input_sounding_u5"
+erf.fire.use_wind_limit = true

@@ -7,21 +7,29 @@ For each variant the head and backing rates are the distance between
 consecutive probe cells divided by the difference of their arrival times
 ([FIRE PROBE] lines). The expected rates are Rothermel (1972) for Anderson
 fuel model 1 at the deck's moisture, evaluated at the effective (post wind
-reduction factor) wind the fire reports ([FIRE DEBUG] Max effective wind),
-with no midflame cap since the decks set use_wind_limit = false: the head at
-R0 (1 + phi_w(U_eff)), the backing fire at R0. One-way variants must match to
-TOL; a variant whose name ends in _2way is reported only.
+reduction factor) wind the fire reports every step ([FIRE DEBUG] Max
+effective wind), with no midflame cap since the decks set use_wind_limit =
+false: the head at R0 (1 + phi_w(U_eff)), the backing fire at R0. The surface
+layer slows the wind over the run (by 28 % at 5 m/s) and phi_w grows about as
+U_eff^2, so the head rate a probe pair must see is the mean of that rate over
+the pair's own arrival window, not the rate at the run-mean wind. A variant
+whose name ends in _cap turns the cap back on and is checked with the wind
+clipped at 300 ft/min. One-way variants must match to TOL; a variant whose
+name ends in _2way is reported only.
 """
 import math, re, sys
 
 TOL = 0.10
 M_F = 0.055                       # the decks' fuel moisture (all dead classes)
+DT = 0.25                         # erf.fixed_dt of inputs_base: one wind sample per step
 FT_MIN_TO_M_S = 0.00508
+U_MEWS = 300.0 / 196.85           # erf.fire.use_wind_limit cap for fine fuels (sigma > 1000 1/ft) [m/s]
 FM1 = dict(w0=0.034, sigma=3500.0, delta=1.0, Mx=0.12, h=8000.0, S_T=0.0555, S_e=0.010, rho_p=32.0)
 # Coen et al. 2013, coupled LES: NoWind crept outward at 0.02 m/s on every side (= R0); Control
 # ran a 0.22 m/s HEAD (backing not quoted; WRF-Fire sets it to R0); WSHi "four-fifths" faster.
 # The one-way heads here are meant to sit below these: the paper's plume doubles the head wind.
 COEN = {"nowind": ("NoWind", 0.02), "wind2p5": ("Control head", 0.22), "wind5": ("WSHi head", 0.40),
+        "wind5_cap": ("WSHi head", 0.40),
         "nowind_2way": ("NoWind", 0.02),
         "wind2p5_2way": ("Control head", 0.22), "wind5_2way": ("WSHi head", 0.40)}
 
@@ -42,21 +50,34 @@ def rothermel_fm1(M_f, U_eff_ms):
     return R0, R0 * (1 + phi_w), phi_w
 
 def parse(log):
-    probes, ueff, uref = {}, [], []
+    """Probe arrivals, and the effective and reference wind with the time of the step that reported it."""
+    probes, times, ueff, uref, step = {}, [], [], [], 0
     for line in open(log):
+        m = re.search(r"Coarse STEP (\d+) starts", line)
+        if m: step = int(m.group(1))
         m = re.search(r"\[FIRE PROBE\] (\d+) x=([\d.eE+-]+) y=.*arrival_time_s=([\d.eE+-]+)", line)
         if m: probes[int(m.group(1))] = (float(m.group(2)), float(m.group(3)))
         m = re.search(r"Max effective wind: ([\d.eE+-]+) m/s", line)
-        if m: ueff.append(float(m.group(1)))
+        if m: ueff.append(float(m.group(1))); times.append((step - 1) * DT)
         m = re.search(r"Max reference wind: ([\d.eE+-]+) m/s", line)
         if m: uref.append(float(m.group(1)))
-    return probes, ueff, uref
+    return probes, times, ueff, uref
 
-def rate(pts):
-    """Mean rate over consecutive arrived probes, ordered by distance from the line (x = 160 m)."""
+def rate(pts, times, R):
+    """Mean rate over consecutive arrived probes, ordered by distance from the line (x = 160 m), and the
+    mean over the same pairs of the rate history R(times) averaged over each pair's arrival window."""
     pts = sorted(pts, key=lambda p: abs(p[0] - 160.0))
-    rates = [abs(x1 - x0) / (t1 - t0) for (x0, t0), (x1, t1) in zip(pts, pts[1:]) if t1 > t0]
-    return (sum(rates) / len(rates), len(rates)) if rates else (float('nan'), 0)
+    pairs = [(p0, p1) for p0, p1 in zip(pts, pts[1:]) if p1[1] > p0[1]]
+    if not pairs:
+        return float('nan'), float('nan'), 0
+    measured, expected = [], []
+    for (x0, t0), (x1, t1) in pairs:
+        measured.append(abs(x1 - x0) / (t1 - t0))
+        window = [r for t, r in zip(times, R) if t0 <= t <= t1]
+        if not window:  # a window shorter than one step: the sample nearest its middle
+            window = [R[min(range(len(times)), key=lambda i: abs(times[i] - 0.5 * (t0 + t1)))]]
+        expected.append(sum(window) / len(window))
+    return sum(measured) / len(pairs), sum(expected) / len(pairs), len(pairs)
 
 def main():
     variants = sys.argv[1:]
@@ -64,22 +85,28 @@ def main():
     hdr = f"{'variant':14s} {'U6.1':>6s} {'U_eff':>6s} {'R0':>7s} {'R_head':>7s} | {'back':>7s} {'head':>7s} {'n':>3s} | {'Coen (coupled)':>18s}"
     print(hdr); print("-" * len(hdr))
     for v in variants:
-        probes, ueff, uref = parse(f"run_{v}.log")
-        U = sum(ueff) / len(ueff) if ueff else 0.0
+        probes, times, ueff, uref = parse(f"run_{v}.log")
+        if v.endswith("_cap"):
+            ueff = [min(u, U_MEWS) for u in ueff]
+        if not ueff:
+            times, ueff = [0.0], [0.0]
+        U = sum(ueff) / len(ueff)
         Ur = sum(uref) / len(uref) if uref else 0.0
-        R0, Rh, _ = rothermel_fm1(M_F, U)
+        R0 = rothermel_fm1(M_F, 0.0)[0]
+        R_head = [rothermel_fm1(M_F, u)[1] for u in ueff]
         back = [(x, t) for x, t in probes.values() if x < 140.0]
         head = [(x, t) for x, t in probes.values() if x > 180.0]
-        rb, nb = rate(back); rh, nh = rate(head)
+        rb, _, nb = rate(back, times, R_head)
+        rh, Rh, nh = rate(head, times, R_head)
         name, rc = COEN.get(v, ("", float('nan')))
         print(f"{v:14s} {Ur:6.2f} {U:6.2f} {R0:7.4f} {Rh:7.4f} | {rb:7.4f} {rh:7.4f} {nb + nh:3d} | {name:>12s} {rc:5.2f}")
         if v.endswith("_2way"): continue
         eb = abs(rb - R0) / R0 if nb else float('inf'); eh = abs(rh - Rh) / Rh if nh else float('inf')
-        spread = (max(ueff) - min(ueff)) / U if U > 0 and ueff else 0.0
+        spread = (max(ueff) - min(ueff)) / U if U > 0 else 0.0
         ok_b, ok_h = eb < TOL, eh < TOL
         print(f"  backing {rb:.4f} vs R0 {R0:.4f} m/s ({eb * 100:.1f} %, {nb} pairs): {'PASS' if ok_b else 'FAIL'}")
-        print(f"  head    {rh:.4f} vs R0(1+phi_w) {Rh:.4f} m/s at U_eff {U:.3f} m/s (range {spread * 100:.1f} %) "
-              f"({eh * 100:.1f} %, {nh} pairs): {'PASS' if ok_h else 'FAIL'}")
+        print(f"  head    {rh:.4f} vs R0(1+phi_w) {Rh:.4f} m/s over the arrival windows (run-mean U_eff {U:.3f} m/s, "
+              f"range {spread * 100:.1f} %) ({eh * 100:.1f} %, {nh} pairs): {'PASS' if ok_h else 'FAIL'}")
         status |= (not ok_b) | (not ok_h)
     print("Coen et al. (2013), Table 1 and section 4: FM1 at 5.5 %, 40 m wide 1 km line, coupled LES with a "
           "convective boundary layer; NoWind 0.02 m/s outward, Control (2.5 m/s) 0.22 m/s head, WSHi (5 m/s) "
