@@ -104,9 +104,16 @@ erf.fire.moisture_10hr = 0.08
 # Changes most slowly; represents deeper fuel bed
 erf.fire.moisture_100hr = 0.10
 
-# Live herbaceous fuel moisture [fraction] (Phase 4)
-# Only used when moisture_dynamic = true
+# Live herbaceous and live woody fuel moisture [fraction] (Phase 4)
+# The live classes start here
 erf.fire.moisture_live = 0.60
+
+# Live classes with moisture_dynamic = true:
+#   "legacy" (default) - the dead-fuel time-lag update with the 100-h lag,
+#                        bounded to [0.30, 2.50]; its dead-range clamp drops a
+#                        value above 0.40 to 0.40 on the first step
+#   "fixed"            - held at moisture_live (recommended)
+erf.fire.moisture_live_model = "legacy"
 
 # Precipitation rate [mm/hr] (Phase 4, affects moisture dynamics)
 # 0.0 = no precipitation

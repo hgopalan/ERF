@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# The live classes held at erf.fire.moisture_live.
+erf.fire.moisture_live_model = "fixed"

@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# The default written out: must reproduce inputs_legacy exactly.
+erf.fire.moisture_live_model = "legacy"

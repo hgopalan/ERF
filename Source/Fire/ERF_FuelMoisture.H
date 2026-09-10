@@ -63,6 +63,10 @@ namespace FuelMoistureConst {
     constexpr amrex::Real M_MIN = 0.01;
     constexpr amrex::Real M_MAX = 0.40;
 
+    // Live herbaceous and live woody bounds of the legacy live update [fraction]
+    constexpr amrex::Real LIVE_M_MIN = 0.30;
+    constexpr amrex::Real LIVE_M_MAX = 2.50;
+
     // RH clamp bounds [fraction of 100]
     constexpr amrex::Real RH_MIN = 0.01;
     constexpr amrex::Real RH_MAX = 0.99;
@@ -296,6 +300,34 @@ amrex::Real advance_fuel_moisture_one_class(
                        amrex::Real(FuelMoistureConst::M_MAX));
 
     return M_new;
+}
+
+// Advance one live class (herbaceous or woody) over one step.
+//
+// With hold_fixed (erf.fire.moisture_live_model = "fixed") the moisture is
+// returned unchanged: live moisture follows the plant's water status over days
+// to weeks, and does not relax to the equilibrium of the air within a run.
+//
+// Otherwise ("legacy", the default) the class goes through the dead-fuel
+// update above with the 100-hour lag, no rain and the emc_model curves, and the
+// result is bounded to [LIVE_M_MIN, LIVE_M_MAX]. That update clamps its input
+// to the dead range [M_MIN, M_MAX] first and relaxes toward a dead-fuel
+// equilibrium, so a live moisture above 0.40 drops to 0.40 or below on the
+// first step and then decays toward the 0.30 bound.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real advance_live_fuel_moisture(
+    amrex::Real M_live,
+    amrex::Real RH,
+    amrex::Real T_C,
+    amrex::Real dt_hours,
+    bool hold_fixed,
+    int emc_model = FuelMoistureEMC::LEGACY) noexcept
+{
+    if (hold_fixed) { return M_live; }
+    const amrex::Real M_new = advance_fuel_moisture_one_class(M_live, RH, T_C, amrex::Real(0.0), dt_hours,
+                                                              FuelMoistureConst::TAU_100HR, emc_model);
+    return amrex::max(amrex::Real(FuelMoistureConst::LIVE_M_MIN),
+                      amrex::min(M_new, amrex::Real(FuelMoistureConst::LIVE_M_MAX)));
 }
 
 #endif  // ERF_FUEL_MOISTURE_H
