@@ -220,15 +220,39 @@ with the compressible integrator) removes the explicit limit
 :math:`\Delta t < \Delta z^2 / (2K)` for the quantities it covers.
 Under the anelastic integrator it is opt-in: give
 :cpp:`erf.vert_implicit = true` (or an explicit
-:cpp:`erf.vert_implicit_fac`) and :math:`\theta`, :math:`k` and moisture
-are solved implicitly while momentum stays explicit. The anelastic update
-is trapezoidal: the second stage averages the first-stage tendency,
+:cpp:`erf.vert_implicit_fac`) and :math:`u`, :math:`v`, :math:`\theta`,
+:math:`k` and moisture are all solved implicitly. The momentum solve is
+folded into the slow tendency before the stage update, so the momenta are
+diffused and then projected, which is the order the divergence constraint
+needs; :math:`w` stays explicit unless ERF is built with
+``ERF_IMPLICIT_W``, as in the compressible path. The anelastic update is
+trapezoidal: the second stage averages the first-stage tendency,
 recovered from the state difference, with the new one, so the first
 stage's implicit increment is already half-counted and the implicit
 operator on the second stage acts with half the step. The solve takes
 each box's vertical extent as the whole column, so no level-0 box may be
 cut in :math:`z` (the z entry of ``amr.max_grid_size`` must reach
 ``amr.n_cell``); ERF checks this at start-up.
+
+On the neutral flat case the solve carries the time step from 5 s to 60 s
+under the anelastic integrator, 6 times the explicit limit of about 10 s,
+and the 12 h profiles stay within 3e-3 m/s of the explicit run. On a
+terrain case the advective Courant number binds well below the explicit
+diffusion limit, so the solve buys no time step there; it reproduces the
+explicit answer to 1e-5 relative.
+
+One caveat: with the implicit :math:`\theta` solve the answer is no
+longer invariant to the box decomposition at round-off. The column solve
+couples the whole column at once, so a one-unit-in-the-last-place
+difference reaches every cell in one step, and in a near-neutral layer
+:math:`\partial\theta/\partial z` is a difference of nearly equal
+numbers, so the buoyancy term amplifies it. On the neutral case the
+spread between one box and four saturates near 1e-5 m/s in wind, 1e-6 in
+relative terms, against 1e-15 for the explicit run. It is a sensitivity
+of the closure in a neutral layer rather than an inconsistency: with
+Smagorinsky in place of the :math:`k` equation the same solve stays at
+1e-12, and the implicit momentum and :math:`k` solves are decomposition
+invariant to round-off on their own.
 
 The buoyancy term of the :math:`k` equation uses the vertical heat flux
 the closure computes at the start of the step,
@@ -250,11 +274,12 @@ Limitations
 * All levels must use the closure; a hybrid RANS-LES set-up is refused.
 * Embedded and thin-body boundaries are not supported by the Poisson wall
   distance.
-* Under the anelastic integrator the vertical diffusion of momentum is
-  explicit, so the time step is bounded by :math:`\Delta z^2 / (2 K_m)`;
-  the scalars can use the implicit column solve (see below). With the
-  eddy viscosities a convective boundary layer produces (tens of
-  m\ :sup:`2`/s) this is the binding constraint, not the closure.
+* The time step is bounded by :math:`\Delta z^2 / (2 K)` unless the
+  implicit column solve is on (see below); with the eddy viscosities a
+  convective boundary layer produces (tens of m\ :sup:`2`/s) that is the
+  binding constraint, not the closure. With the solve on, the limit is
+  the advective Courant number, and the vertical velocity, which stays
+  explicit, is diffused at :math:`2 K_m`.
 * The closure is local: a convective layer keeps a superadiabatic lapse
   of order :math:`-F/K_h` through its depth where a countergradient
   scheme or LES would mix it out.

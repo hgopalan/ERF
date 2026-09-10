@@ -556,7 +556,7 @@ clean exit alone never passes a test. The ``_Poisson`` variants run the
 terrain cases with the Poisson wall distance instead of the terrain height.
 
 Test names: ``RANS_Neutral_ABL_Flat`` (and ``_Implicit``, the same deck at
-dt = 10 s with the implicit column solve of theta and KE),
+dt = 10 s with the implicit column solve of momentum, theta and KE),
 ``RANS_Stable_ABL_Flat``, ``RANS_Convective_ABL_Flat``,
 ``RANS_Neutral_Hill_2D`` (and ``_Poisson``),
 ``RANS_Flat_Fitted_2D`` (and ``_Poisson``), ``RANS_Neutral_Hill_3D`` (and

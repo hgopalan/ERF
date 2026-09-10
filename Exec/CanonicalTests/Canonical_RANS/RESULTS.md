@@ -243,3 +243,82 @@ Gold tests that run Deardorff (`ABL_MOST`, `Deardorff_stationary`) and
 the implicit-diffusion MYNN tests (`ABL_MOST_IMP_DIFF*`) pass; `ctest -L
 rans` is 10 for 10 (new entry `RANS_Neutral_ABL_Flat_Implicit`, the
 neutral deck at dt = 10 s with the solve on); 7 gtests pass.
+
+## Phase 10: implicit vertical diffusion of momentum under anelastic
+
+`erf.vert_implicit = true` under the anelastic integrator now covers u, v,
+theta, k and moisture; w stays explicit. All runs 2 ranks.
+
+Neutral deck, 12 h, max |difference| of the planar averages from the
+anelastic explicit dt = 5 s run (scales: u 11.8, v 2.93 m/s, theta 309 K,
+k 0.515 m2/s2):
+
+| run | dt [s] | u [m/s] | v [m/s] | theta [K] | k [m2/s2] |
+| --- | --- | --- | --- | --- | --- |
+| anelastic implicit | 5 | 3.1e-4 | 4.8e-4 | 2.7e-4 | 8.9e-6 |
+| anelastic implicit | 10 | 1.3e-3 | 1.2e-3 | 7.9e-4 | 8.4e-6 |
+| anelastic implicit | 20 | 1.7e-3 | 1.8e-3 | 8.8e-4 | 1.2e-5 |
+| anelastic implicit | 30 | 1.7e-3 | 1.8e-3 | 9.8e-4 | 1.4e-5 |
+| anelastic implicit | 60 | 2.9e-3 | 3.0e-3 | 1.7e-3 | 2.6e-5 |
+| compressible implicit | 5 | 1.1e-3 | 1.1e-3 | 6.4e-4 | 7.8e-6 |
+| compressible implicit | 20 | 1.2e-3 | 1.3e-3 | 6.9e-4 | 1.5e-5 |
+| compressible implicit | 60 | 1.8e-3 | 1.8e-3 | 1.0e-3 | 4.3e-5 |
+
+Every one of these passes all 22 physics checks. u* runs 0.39312 at dt = 5 s
+to 0.39322 at dt = 60 s and KE(0)/u*^2 stays 3.2322 to 3.2325. The figure
+`plot_dt_overlay.py` produces from these runs shows the nine profiles on
+top of each other with the differences below.
+
+Other decks:
+
+| deck | step reached | vs explicit reference | note |
+| --- | --- | --- | --- |
+| Convective, 4 h | dt 20 s (explicit was 2 s) | 1.8e-2 m/s, 2.4e-2 K | heat budget 0.998; ships at dt 5 s (3.5e-3 m/s) |
+| Stable, 9 h | dt 8 s | 7.6e-4 m/s | u* 0.24379, jet 1.2286, depth 134 m |
+| Neutral_Hill_2D, 6 h | dt 1.5 s (unchanged) | 1.2e-4 m/s on the 3D field | advection-limited, see below |
+
+The 2D hill deck gains no time step: its CFL-1 step is 3.3 s against the
+shipped 1.5 s, so advection binds long before vertical diffusion, and the
+deck fails at dt = 3 s at the same step 82 with the solve on and off. What
+the deck does show is that the terrain-fitted momentum solve reproduces
+the explicit answer (1.2e-4 m/s in u on a scale of 10.4, 1.5e-5 m/s in w).
+
+Restart at dt = 20 s with the momentum solve on: `fcompare` reports zero
+absolute and relative difference on all fourteen fields.
+
+Sensitivity to the box decomposition (one rank, one box against four x-y
+boxes, 40 steps, dt 5 s, max |difference| of planar averages in u):
+
+| configuration | difference |
+| --- | --- |
+| explicit | 1.8e-15 |
+| implicit, k solve only | 1.8e-15 |
+| implicit, momentum solve only | 5.3e-15 |
+| implicit, theta solve only | 8.0e-7 (theta 1.2e-5) |
+| implicit, theta solve only, Smagorinsky instead of kEqn | 7.8e-12 |
+
+Step 1 is bit-identical in every case, so the seed is one ulp; the column
+tridiagonal spreads it over the whole column in a single step and the
+near-neutral buoyancy term, which differences nearly equal numbers to get
+dtheta/dz, amplifies it until it saturates near 1e-5 m/s (1e-6 relative).
+It moves no physics check, and it is the k equation amplifying rather
+than the solve being inconsistent.
+
+### How large a step the solve allows
+
+The explicit limit dz^2 / (2K) is gone for u, v, theta and k, so what is
+left is the advective Courant number and the vertical diffusion of w,
+which stays explicit. Pushing each deck until it fails:
+
+| deck | shipped | highest passing | first failure | what binds |
+| --- | --- | --- | --- | --- |
+| Neutral_ABL_Flat | 5 s | 240 s (all checks) | 480 s at step 53 | nothing physical: the deck is horizontally uniform, so advection does no work |
+| Convective_ABL_Flat | 5 s | 20 s (all checks) | 80 s still runs, only the dissipation-lag diagnostic fails (0.12 against 0.05) | as above |
+| Neutral_Hill_2D | 1.5 s | 2 s | 3 s at step 82, identically with the solve on and off | advective Courant number (CFL-1 step 3.3 s) |
+
+The flat numbers are not transferable: those decks are 8 x 8 in the
+horizontal with a horizontally uniform state, so `u du/dx` is identically
+zero and the printed CFL-1 step of 32 s means nothing for them. The hill
+deck is the honest one: with the solve on, the step is set by the
+advective Courant number that ERF prints each step ("Anelastic dt at
+level 0 would be"), and a working choice is half to nine tenths of it.

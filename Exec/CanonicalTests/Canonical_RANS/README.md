@@ -25,6 +25,10 @@ record is `PLAN.md` and the numbers per phase are in `RESULTS.md`.
   need the converged run in the table above.
 - Shared checks live in `rans_checks.py`; the terrain scripts use the full
   3D reader because ERF writes no planar averages on a fitted mesh.
+- `plot_dt_overlay.py` is an optional figure tool (the only script here
+  that needs matplotlib): give it `label=plotfile` pairs and it overlays
+  the profiles with the difference from the first run below, which is how
+  the phase 10 time-step comparison in `RESULTS.md` was made.
 - Closure changes are cross-checked against the Kynema `KLAxell` and
   `KransAxell` implementation and the paper; the comparisons are recorded
   in `PLAN.md`.
