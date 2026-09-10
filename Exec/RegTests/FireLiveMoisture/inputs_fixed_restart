@@ -1,0 +1,9 @@
+FILE = inputs_base
+
+# Restarts from the same legacy checkpoint (chk_legacy00080) with "fixed": the
+# live classes come back at erf.fire.moisture_live = 0.90 rather than at the
+# 0.40 the checkpoint holds. Runs to step 160 (20 s).
+erf.fire.moisture_live_model = "fixed"
+erf.restart = chk_legacy00080
+max_step = 160
+erf.fire_plot_int = 160
