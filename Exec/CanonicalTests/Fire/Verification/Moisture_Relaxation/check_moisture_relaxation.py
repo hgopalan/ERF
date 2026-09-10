@@ -8,22 +8,23 @@ Each dead class relaxes towards the equilibrium moisture M_e of the air,
     dM/dt = (M_e - M) / tau_eff,   tau_eff = tau f(T),   f(T) = exp(-0.015 (T - 20 C)),
 
 with tau = 1, 10 and 100 hours (Nelson 2000). In still, dry air M_e and T are
-constant. M_e comes from Nelson's adsorption (wetting) and desorption (drying)
-polynomials in the relative humidity, the curve chosen from the fuel's current
-moisture, and the relative humidity of air without a moisture model is zero,
-clamped to 1 %: E_w = 0.0351 and E_d = 0.0600.
+constant. M_e comes from the adsorption (wetting) and desorption (drying)
+polynomials in the relative humidity, and the relative humidity of air without a
+moisture model is zero, clamped to 1 %: E_w = 0.0351 and E_d = 0.0600.
 
-As implemented (compute_emc_with_hysteresis in ERF_FuelMoisture.H) the choice is
-the reverse of Nelson's: fuel above the adsorption curve relaxes towards it, and
-fuel below the desorption curve towards that, so a fuel drying from 20 % heads for
-E_w and stops when it meets E_d,
+The curve is chosen by sorption hysteresis (compute_emc_with_hysteresis in
+ERF_FuelMoisture.H): the desorption curve lies above the adsorption curve, a fuel
+wetter than E_d dries toward E_d, one drier than E_w wets toward E_w, and one
+between the two does not change (Nelson 2000; Vejmelka et al. 2016). A fuel
+drying from 20 % therefore follows
 
-    M(t) = max(E_w + (M0 - E_w) exp(-t / tau_eff), E_d),
+    M(t) = E_d + (M0 - E_d) exp(-t / tau_eff),
 
-where Nelson's model would give E_d + (M0 - E_d) exp(-t / tau_eff), 0.106 instead
-of 0.090 after an hour. The check follows the code, and prints Nelson's curve
-alongside; the model advances the equation with forward Euler at the atmospheric
-step, which the check also reproduces step for step.
+0.106 after an hour for the 1-hour class. The check also prints the value of the
+reversed choice that ERF carried before the fix (fuel heading for E_w and pinned
+at E_d, max(E_w + (M0 - E_w) exp(-t / tau_eff), E_d), 0.090 after an hour), so a
+stale binary is easy to recognise. The model advances the equation with forward
+Euler at the atmospheric step, which the check also reproduces step for step.
 
 Rothermel is rebuilt from the moisture every step. Fuel model 1 carries only
 1-hour fuel, so its no-wind rate follows M_1h(t) alone: it is zero until M_1h
@@ -66,8 +67,10 @@ def emc_des(RH):
     return max(0.0, min(0.05800 + 0.1985 * H + 0.6250 * H**2 - 1.1830 * H**3 + 1.0570 * H**4, 0.35))
 
 def emc(RH, M):
+    # dry toward the upper (desorption) curve, wet toward the lower, hold in between
     a, d = emc_ads(RH), emc_des(RH)
-    return d if M < d else (a if M > a else 0.5 * (a + d))
+    lo, hi = min(a, d), max(a, d)
+    return hi if M > hi else (lo if M < lo else M)
 
 def temp_factor(T_C):
     return min(max(math.exp(-0.015 * (T_C - 20.0)), 0.5), 2.0)
@@ -102,7 +105,7 @@ def main():
         ds = yt.load(pfs[0]); g = ds.covering_grid(0, ds.domain_left_edge, ds.domain_dimensions)
         RH = 100.0 * float(np.asarray(g[("boxlib", "fire_surface_rh")]).mean())
         Me = [emc(RH, M0)] * 3
-        E_d = emc_des(RH)
+        E_w, E_d = emc_ads(RH), emc_des(RH)
         tau_eff = [t_h * temp_factor(T_C) * 3600.0 for t_h in TAU_H]
         t_x = -tau_eff[0] * math.log((FM1["Mx"] - Me[0]) / (M0 - Me[0]))
         print(f"{v}: RH {RH:.2f} %, T {T_C:.2f} C, M_e {Me[0]:.4f}, tau_eff {tau_eff[0] / 3600:.4f} h, "
@@ -121,14 +124,14 @@ def main():
             worst_step, worst_exp = 0.0, 0.0
             for c, name in enumerate(("fire_fuel_mc_1hr", "fire_fuel_mc_10hr", "fire_fuel_mc_100hr")):
                 f = np.asarray(g[("boxlib", name)])
-                exact = max(Me[c] + (M0 - Me[c]) * math.exp(-t / tau_eff[c]), E_d)
+                exact = Me[c] + (M0 - Me[c]) * math.exp(-t / tau_eff[c])
                 worst_step = max(worst_step, float(np.abs(f - M[n][c]).max()))
                 worst_exp = max(worst_exp, float(np.abs(f - exact).max()))
             check("moisture: stepwise solution", worst_step < 1e-9,
                   f"max |M - Euler| {worst_step:.1e} over the three classes (1-hour {M[n][0]:.5f})")
             check("moisture: closed form", worst_exp < 2e-4,
-                  f"max |M - max(E_w + (M0 - E_w) exp(-t/tau), E_d)| {worst_exp:.1e}; "
-                  f"Nelson's hysteresis would give {E_d + (M0 - E_d) * math.exp(-t / tau_eff[0]):.5f} for the 1-hour class")
+                  f"max |M - (E_d + (M0 - E_d) exp(-t/tau))| {worst_exp:.1e}; "
+                  f"the reversed choice would give {max(E_w + (M0 - E_w) * math.exp(-t / tau_eff[0]), E_d):.5f} for the 1-hour class")
             ros = float(np.asarray(g[("boxlib", "fire_ros")]).max())
             R0 = rothermel_R0(M[n][0])
             check("rate of spread", abs(ros - R0) <= 1e-6 * max(R0, 1e-3),

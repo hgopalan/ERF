@@ -157,5 +157,6 @@ References
 
 - Nelson, R. M. (2000). Prediction of diurnal change in 10-h fuel stick moisture content. Canadian Journal of Forest Research, 30, 1071-1087.
 - Van Wagner, C. E. (1972). Equilibrium moisture contents of some fine forest fuels in eastern Canada. Canadian Forestry Service Information Report PS-X-36.
+- Vejmelka, M., Kochanski, A. K., and Mandel, J. (2016). Data assimilation of dead fuel moisture observations from remote automated weather stations. International Journal of Wildland Fire, 25, 558-568.
 - Rothermel, R. C. (1972). A mathematical model for predicting fire spread in wildland fuels. USDA Forest Service Research Paper INT-115.
 - Anderson, H. E. (1970). Forest fuel ignitability. Fire Technology, 6(4), 312-319.
