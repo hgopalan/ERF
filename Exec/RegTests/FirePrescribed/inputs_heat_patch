@@ -1,0 +1,24 @@
+FILE = inputs_base
+
+# A prescribed 1e4 W/m2 over a 30 m disc and nothing burning: the coupling must
+# hand the atmosphere exactly that power, and the air above the disc must warm.
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type = Ideal
+erf.use_gravity = true
+max_step = 120
+stop_time = 60.0
+erf.fire_plot_int = 40
+erf.plot_int_1 = 40
+erf.plot_file_1 = "plt_atm_"
+erf.plot_vars_1 = density theta
+
+erf.fire.fire_debug = true            # the coupling's energy_in / energy_out lines are what the check reads
+erf.fire.ros_model = "rothermel"
+erf.fire.ignition_r = 0.0             # nothing burns: all the heat is the prescribed disc
+erf.fire.coupling_type = "lagged"
+erf.fire.fire_atm_feedback = 1.0
+erf.fire.inject_latent = false
+erf.fire.prescribed_heat.flux = 1.0e4
+erf.fire.prescribed_heat.center = 200.0 200.0
+erf.fire.prescribed_heat.radius = 30.0
