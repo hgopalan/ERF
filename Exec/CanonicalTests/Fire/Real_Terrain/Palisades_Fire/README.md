@@ -95,7 +95,35 @@ SRTM1 is a 30 m product; the demo used a 10 m DEM, so `--dxr` is there for when 
 finer one is substituted.
 
 ## Expected Results
-RESULTS_PLACEHOLDER
+From a 30-minute run (`stop_time = 1800`, 9000 steps, `erf.fire_plot_int = 200`)
+on ten ranks, and the same deck with grass instead of chaparral:
+
+| fuel | head ROS | burned at 30 min | perimeter |
+|---|---|---|---|
+| Anderson 4, chaparral, 3 % moisture (the deck) | 3.9 m/s | 1310 ha, 3236 acres | 31.4 km |
+| Anderson 1, short grass, 4 % moisture | 1.0 m/s | 69 ha, 170 acres | 7.7 km |
+
+- The atmosphere is stable at 0.2 s steps on the fitted mesh; the fire runs as a
+  single downwind lobe northeast from the origin, and the shoreline holds it on
+  the coastal side, which is the non-burnable fuel code doing its job.
+- `make_movie.py` writes a 46-frame animation over an x = 4 to 18 km,
+  y = 3 to 17 km window, and an H.264 MP4 of the same frames when ffmpeg is on
+  the PATH; neither is committed.
+
+**On the demo's 600 acres.** The demo reported about 600 acres after 3.13 hours.
+This case matches its configuration, the domain, both resolutions, the cell
+counts, the wind, the coupling and the run length, but burns more than that, and
+the reason is the one input the slide does not state: the fuel. Chaparral is the
+real Santa Monica Mountains vegetation and Rothermel spreads it at 3.9 m/s in a
+38 mph wind, which is an order of magnitude more area than the demo. Short grass,
+the fuel `Marshall_Fire` uses, gives 1.0 m/s and 170 acres in the first half
+hour, still ahead of the demo's average rate. Reproducing the 600 acres would
+need the demo's own fuel map, most likely one with the urban and irrigated parts
+of the Palisades marked non-burnable rather than a single model over all the
+vegetated land. Set `erf.fire.fuel_model_id = 1` with
+`erf.fire.rothermel_per_fuel = 0` for the grass row above; a real fuel map drops
+into `erf.fire.fuel_map.file` in the same ESRI ASCII form `gen_palisades.py`
+writes.
 
 ## What building it found
 **The fire never read `erf.fire.terrain_file_name`.** `ERF_FireParams.H` queried
