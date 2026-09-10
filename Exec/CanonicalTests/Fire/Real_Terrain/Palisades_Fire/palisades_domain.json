@@ -1,0 +1,38 @@
+{
+ "domain_m": 24000.0,
+ "raster_dx_m": 30.0,
+ "nodes": 801,
+ "fire_dx_m": 30.0,
+ "fire_cells": 640000,
+ "atm_dx_m": 300.0,
+ "atm_cells_xy": 6400,
+ "utm_zone": "11N",
+ "sw_corner_lonlat": [
+  -118.62263662503702,
+  34.00632788297395
+ ],
+ "ne_corner_lonlat": [
+  -118.36629023496417,
+  34.22586997524688
+ ],
+ "floor_elevation_m_asl": 0.0,
+ "relief_m": 644.0118737671825,
+ "relief_before_blend_m": 724.1118489338568,
+ "max_slope_fire": 1.2675982911881207,
+ "max_slope_atm": 0.7515097475072017,
+ "sea_fraction_of_fire_grid": 0.053940625,
+ "west_face_ground_m": 289.8473547105121,
+ "south_face_ground_m": 15.966797914788454,
+ "u10_ms": 16.98752,
+ "wind_from_deg": 225.0,
+ "ignition": {
+  "x": 9000.0,
+  "y": 8000.0,
+  "lonlat": [
+   -118.5265,
+   34.0797
+  ],
+  "z_m": 387.16459551011366,
+  "slope": 0.7457754449252687
+ }
+}

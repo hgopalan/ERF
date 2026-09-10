@@ -1,0 +1,158 @@
+# Palisades Fire: the NLR stress-test demo.
+#
+# A 24 km square of the Santa Monica Mountains and the Pacific Palisades coast,
+# a 300 m atmosphere over a 30 m fire and terrain grid, a simplified stratified
+# atmosphere with a southwesterly at 38 mph, and a two-way coupled Rothermel
+# fire started at the reported origin above Temescal Canyon. Run
+# gen_palisades.py first to write the terrain, fuel map, inflow and sounding.
+#
+#   python3 gen_palisades.py
+#   mpirun -np 4 /path/to/erf_exec inputs_palisades_fire
+#
+# 80 x 80 x 102 = 652,800 atmospheric cells and 800 x 800 = 640,000 fire cells.
+# max_grid_size 40 gives four boxes, one per rank on a four-GPU node.
+
+# ============================================================ domain
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 24000.0 24000.0 6463.0     # z: 102 levels from 10 m stretched by 1.03
+amr.n_cell       = 80 80 102
+geometry.is_periodic = 0 0 0
+
+# The wind is from the southwest, so the west and south faces take the inflow
+# profile and the east and north faces are outflow.
+xlo.type = "Inflow"
+xlo.dirichlet_file = "inflow_xlo.txt"
+xhi.type = "Outflow"
+ylo.type = "Inflow"
+ylo.dirichlet_file = "inflow_ylo.txt"
+yhi.type = "Outflow"
+
+amr.max_level = 0
+amr.max_grid_size   = 40     # 4 boxes; box lengths divide by grid_ratio
+amr.max_grid_size_z = 102    # fire module forbids z-decomposition
+
+erf.initial_dz            = 10.0
+erf.grid_stretching_ratio = 1.03
+erf.anelastic = 0                 # fully compressible
+
+# The compressible limit on this fitted mesh is about 0.217 s; 0.2 keeps margin
+# as the plume steepens the near-ground cells.
+erf.fixed_dt = 0.2
+
+# ============================================================ boundaries and closure
+zlo.type = "surface_layer"
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+# The canyon walls compress the near-ground cells, so the surface layer is asked
+# for a height it can find on every column.
+erf.most.zref = 20.0
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+erf.molec_diff_type = "None"
+erf.les_type = "Smagorinsky"
+erf.Cs = 0.1
+
+# 300 m horizontal spacing is the turbulence grey zone: the plume is partly
+# resolved and partly not. Smagorinsky alone is the demo's configuration. For a
+# scale-aware alternative, switch to a PBL scheme and let the Boutle blending
+# hand the parameterised part over as the grid coarsens:
+#   erf.les_type = "None"
+#   erf.pbl_type = "MRF"
+#   erf.pbl_blend_length = 750.0
+
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+
+erf.dycore_horiz_adv_type  = "Upwind_5th"
+erf.dycore_vert_adv_type   = "Upwind_3rd"
+erf.dryscal_horiz_adv_type = "Upwind_5th"
+erf.dryscal_vert_adv_type  = "Upwind_3rd"
+
+erf.rayleigh_damp_W   = true
+erf.rayleigh_dampcoef = 0.2
+erf.rayleigh_zdamp    = 1500.0
+
+# ============================================================ initial state and terrain
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "sounding_palisades.txt"
+erf.sounding_type = Ideal
+
+# The atmosphere rides the raster box-averaged to its own 300 m cell; the fire
+# reads the sharp 30 m one below, which is where the slope has to be right.
+erf.terrain_type = StaticFittedMesh
+erf.terrain_file_name = "terrain_palisades.txt"
+
+# ============================================================ time and output
+stop_time = 11268.0               # 3.13 hours, the demo's run length
+max_step  = 60000
+
+erf.sum_interval = 2000
+erf.v = 1
+amr.v = 1
+
+erf.check_file = chk_palisades
+erf.check_int  = -1
+
+erf.plot_file = plt3d_palisades
+erf.plot_int  = 4000              # every 20 min
+erf.plot_vars = theta u v w z_phys
+
+erf.fire_plot_file = plt_fire_
+erf.fire_plot_int  = 400          # one animation frame every 2 min
+
+# ============================================================ fire
+erf.fire.enable = true
+erf.fire.fire_debug = false
+erf.fire.grid_ratio = 10              # 30 m fire cells under the 300 m atmosphere
+
+# Two-way: the fire's sensible heat enters the atmosphere on the next step and
+# the fire reads the wind that results.
+erf.fire.coupling_type = "lagged"
+erf.fire.source_mode = "add"
+
+erf.fire.propagation_method = "levelset"
+erf.fire.ros_model = "rothermel"
+erf.fire.directional_ros = true
+
+# Anderson 4, chaparral, is the Santa Monica Mountains vegetation. The map
+# carries 4 on land and 0 over the Pacific and the beach; 0 is non-burnable, so
+# the front stops at the shoreline. For the grass the Marshall case uses, set
+# fuel_model_id = 1 and rewrite the map's land code.
+erf.fire.fuel_model_id = 4
+erf.fire.fuel_map.file = "fuel_palisades.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.fuel_map.nonburnable_codes = 0
+erf.fire.rothermel_per_fuel = true
+
+# January Santa Ana dead-fuel moisture.
+erf.fire.moisture_1hr = 0.03
+erf.fire.moisture_10hr = 0.04
+erf.fire.moisture_100hr = 0.06
+erf.fire.moisture_dynamic = false
+
+erf.fire.terrain_file_name = "terrain_palisades_fire.txt"
+
+erf.fire.ignition_x = 9000.0
+erf.fire.ignition_y = 8000.0
+erf.fire.ignition_r = 100.0
+
+erf.fire.wind_ref_ht = 6.1
+erf.fire.wind_interp = "bilinear"
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = true
+erf.fire.use_terrain_wind = false     # the terrain flow is resolved
+
+# Ember transport: the demo's wind carries brands well ahead of the front, which
+# is how the real fire crossed the canyons.
+erf.fire.spotting.enable = true
+erf.fire.spotting.spotting_interval = 200
+erf.fire.spotting.P_base = 0.002
+erf.fire.spotting.random_seed = 20250107
+erf.fire.spotting.terminal_velocity = 2.0
+erf.fire.spotting.spot_radius = 30.0
+
+erf.fire.write_fire_stats_csv = true
+erf.fire.fire_stats_csv_file = "fire_stats_palisades.csv"
