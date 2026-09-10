@@ -112,26 +112,28 @@ amrex::Real compute_emc_desorption(amrex::Real RH) noexcept
     return M_e;
 }
 
-// Select adsorption or desorption EMC based on current moisture state
-// (hysteresis). When M_current < M_e_des the fuel is drying; when
-// M_current > M_e_ads it is wetting; when between curves, the average is used.
+// Equilibrium moisture the fuel relaxes toward, with sorption hysteresis.
+// The desorption (drying) curve lies above the adsorption (wetting) curve.
+// A fuel wetter than the drying equilibrium dries toward it, a fuel drier
+// than the wetting equilibrium wets toward it, and a fuel between the two
+// does not change: the current moisture is returned, so the time-lag term
+// vanishes. This is the rule of the WRF-SFIRE dead-fuel model (Vejmelka,
+// Kochanski and Mandel 2016, Int. J. Wildland Fire 25, 558-568); Nelson (2000)
+// likewise calls sorption desorption when the fuel is wetter than its
+// equilibrium and adsorption when it is drier.
+// The two polynomials cross near 66 % RH and meet at the 0.35 cap above
+// about 70 %, so the band is taken between the lower and the upper value.
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_emc_with_hysteresis(amrex::Real RH, amrex::Real M_current) noexcept
 {
     const amrex::Real M_e_ads = compute_emc_adsorption(RH);
     const amrex::Real M_e_des = compute_emc_desorption(RH);
+    const amrex::Real E_d = amrex::max(M_e_ads, M_e_des);   // drying equilibrium (upper)
+    const amrex::Real E_w = amrex::min(M_e_ads, M_e_des);   // wetting equilibrium (lower)
 
-    // Determine wetting or drying based on current moisture
-    if (M_current < M_e_des) {
-        // Fuel is drying
-        return M_e_des;
-    } else if (M_current > M_e_ads) {
-        // Fuel is wetting
-        return M_e_ads;
-    } else {
-        // Between curves: use average
-        return (M_e_ads + M_e_des) * 0.5;
-    }
+    if (M_current > E_d) { return E_d; }   // drying
+    if (M_current < E_w) { return E_w; }   // wetting
+    return M_current;                      // between the curves: no sorption
 }
 
 // Temperature correction factor for the effective time-lag constant.

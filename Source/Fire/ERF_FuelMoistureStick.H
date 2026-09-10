@@ -25,8 +25,9 @@
  *
  * on N shells of equal thickness with an implicit (backward Euler)
  * tridiagonal step, the surface held at the equilibrium moisture of the air
- * with the same adsorption/desorption hysteresis the time-lag model uses,
- * or at the rain-wet value while it rains. The diffusivity is set so that
+ * with the same adsorption/desorption hysteresis the time-lag model uses
+ * (between the drying and wetting curves the surface shell keeps its own
+ * value), or at the rain-wet value while it rains. The diffusivity is set so that
  * the slowest radial mode has the class's nominal time lag,
  *
  *   D_c = R_c^2 / (lambda_1^2 tau_c),  lambda_1 = 2.4048 (first zero of J_0),

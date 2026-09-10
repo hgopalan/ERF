@@ -38,14 +38,34 @@ advanced by forward Euler once per atmospheric step:
 with :math:`\Delta t` in hours, :math:`\tau` the class time lag of 1, 10 or
 100 hours, and the result clamped to :math:`[0.01, 0.40]`.
 
-**Equilibrium moisture** :math:`M_e` is Nelson's fourth-degree polynomial in
-the relative humidity fraction :math:`H`, on the adsorption (wetting) curve
-:math:`0.0323 + 0.281 H + 0.409 H^2 - 1.356 H^3 + 1.660 H^4` or the
+**Equilibrium moisture** :math:`M_e` comes from two fourth-degree polynomials
+in the relative humidity fraction :math:`H`, the adsorption (wetting) curve
+:math:`E_w = 0.0323 + 0.281 H + 0.409 H^2 - 1.356 H^3 + 1.660 H^4` and the
 desorption (drying) curve
-:math:`0.0580 + 0.199 H + 0.625 H^2 - 1.183 H^3 + 1.057 H^4`, each clamped
-to :math:`[0, 0.35]`. The curve is chosen by hysteresis: a fuel wetter than
-the desorption value dries toward it, one drier than the adsorption value
-wets toward it, and one between the two relaxes to their mean.
+:math:`E_d = 0.0580 + 0.199 H + 0.625 H^2 - 1.183 H^3 + 1.057 H^4`, each
+clamped to :math:`[0, 0.35]`. They are carried over from wildfire_levelset,
+which attributes them to Nelson (2000); Nelson's own model uses a single
+isotherm averaged over adsorption and desorption data.
+
+The desorption curve lies above the adsorption curve, and the curve is chosen
+by sorption hysteresis as in the WRF-SFIRE dead-fuel model (Vejmelka et al.
+2016): a fuel wetter than :math:`E_d` dries toward it, a fuel drier than
+:math:`E_w` wets toward it, and a fuel between the two does not change
+(:math:`M_e = M_n`, so only rain moves it). Nelson (2000) draws the same line,
+desorption when the fuel is wetter than its equilibrium and adsorption when it
+is drier. The polynomials cross near 66 % relative humidity and meet at the
+cap above about 70 %, so the band is taken between the lower and the upper
+value. In constant dry air a fuel starting at :math:`M_0 > E_d` therefore
+follows :math:`M(t) = E_d + (M_0 - E_d)\,e^{-t/(\tau f_T)}`, which the unit
+test ``ERF_GTestFuelMoisture`` checks.
+
+.. note::
+
+   Until September 2026 the choice was reversed: a fuel above the adsorption
+   curve relaxed toward it and one below the desorption curve toward that, so
+   a drying fuel headed for the lower curve and was then held at the upper
+   one, and a fuel drier than both wetted toward the upper one. Runs with
+   dynamic moisture made before the fix differ from runs made after it.
 
 **Temperature correction.** The time lag is scaled by
 :math:`f_T = \exp(-0.015\,(T - 20^\circ\mathrm{C}))`, clamped to
