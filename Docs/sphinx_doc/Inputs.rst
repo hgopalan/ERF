@@ -655,7 +655,8 @@ stacked in z and the level uses the implicit acoustic substep of compressible
 runs or the implicit vertical diffusion, which solve each column inside one box,
 or has a surface layer at zlo, whose planar arrays are built per box.  The first
 two can be avoided with **erf.substepping_type** = None and an explicit time
-step, and **erf.vert_implicit_fac** = 0.)  ERF is set up so that this is the default behavior, in both places where
+step, and **erf.vert_implicit_fac** = 0.  On fine levels ERF joins such boxes
+itself, see below.)  ERF is set up so that this is the default behavior, in all three places where
 grids are created:
 
 -  **When the level 0 grids are created**, ERF decomposes the domain across the
@@ -670,6 +671,15 @@ grids are created:
    **amr.refine_grid_layout_x/_y/_z** flag is set.  Because ERF defaults
    **amr.refine_grid_layout_z** to 0, this load-balancing step never splits a
    box in the vertical direction.
+
+-  **When fine grids are made from tagged cells**, clustering stacks boxes in z
+   wherever the refined region is not made of whole columns of one height, and
+   **amr.max_grid_size_z** cannot prevent it.  On a level that uses the implicit
+   acoustic substep, the implicit vertical diffusion or a surface layer, ERF
+   joins boxes stacked in z into whole columns of the refined region
+   (``ERFJoinBoxesStackedInZ``) at start-up and at every regrid, before the level
+   is made.  The refined region does not change, and **amr.max_grid_size_z** is
+   not imposed on that level; **amr.max_grid_size_x/_y** still are.
 
 The usual way to *accidentally* introduce a vertical decomposition is to set
 **amr.max_grid_size** as a single value, since that limits the box size in all

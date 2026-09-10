@@ -82,6 +82,13 @@ void ChopGrids2D (amrex::BoxArray& ba, const amrex::Box& domain, int target_size
 amrex::BoxArray
 ERFPostProcessBaseGrids (const amrex::Box& domain, bool decompose_in_z);
 
+/*
+ * Re-cut the boxes of a level so that no two of them share a face in z, covering the same cells.
+ * Boxes in no stack are kept as they are; max_grid_size is applied in x and y only.
+ */
+amrex::BoxArray
+ERFJoinBoxesStackedInZ (const amrex::BoxArray& ba, const amrex::IntVect& max_grid_size);
+
 /**
  * Convert conservative state to primitive variables.
  * @param[in] cons_state Conservative state MultiFab.

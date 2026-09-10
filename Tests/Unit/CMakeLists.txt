@@ -133,6 +133,7 @@ target_sources(${erf_exe_name}
     ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestProvenance.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestEpochTime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestGridUtils.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestJoinBoxesStackedInZ.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/HashRng/ERF_GTestHashRngScalar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/HashRng/ERF_GTestHashRngKernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/EOS/ERF_GTestEOSScalar.cpp

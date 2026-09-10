@@ -568,6 +568,14 @@ public:
     void MakeNewLevelFromScratch (int lev, amrex::Real time, const amrex::BoxArray& ba,
                                   const amrex::DistributionMapping& dm) override;
 
+    // Make the grids and the levels at initialization: AmrCore::InitFromScratch, with fine
+    // boxes stacked in z joined into whole columns where the level needs them
+    void InitGridsFromScratch (amrex::Real time);
+
+    // AmrCore::regrid, with fine boxes stacked in z joined into whole columns where the level
+    // needs them; overrides the virtual function in AmrCore
+    void regrid (int lbase, amrex::Real time, bool initial = false) override;
+
     // compute dt from CFL considerations
     double estTimeStep (int lev, long& dt_fast_ratio) const;
 
