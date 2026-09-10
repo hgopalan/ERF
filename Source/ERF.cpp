@@ -798,7 +798,7 @@ ERF::InitData_pre ()
 
     if (restart_chkfile.empty()) {
         // Start simulation from the beginning
-        InitFromScratch(zero);
+        InitGridsFromScratch(zero);
     } else {
         // For initialization this is done in init_only; it is done here for restart
         init_bcs();

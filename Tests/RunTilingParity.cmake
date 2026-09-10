@@ -12,6 +12,12 @@ cmake_minimum_required(VERSION 3.24)
 # SPLIT boxes: the deck's own boxes, tiled, against a single box, untiled.  A
 # horizontal stencil that stops at box edges gives a different answer on the
 # single box.
+#
+# SPLIT fine_z: level 1 split in z (amr.max_grid_size_z = unlimited 16) against
+# level 1 left whole, both untiled.  Where a column solve is on, ERF joins fine
+# boxes stacked in z into whole columns, so both runs must give the same answer.
+#
+# PLT2DFILE may be empty for a deck that writes no 2D plotfile.
 
 foreach(_required MPIEXEC MPIEXEC_NUMPROC_FLAG NRANKS TEST_EXE INPUT
                   WORKING_DIRECTORY FCOMPARE RTOL ATOL PLTFILE PLT2DFILE)
@@ -48,8 +54,12 @@ elseif("${SPLIT}" STREQUAL "boxes")
   set(_multibox_options  "${_tiled}")
   set(_singlebox_options "${_untiled}" "amr.max_grid_size_x=1048576" "amr.max_grid_size_y=1048576")
   set(_singlebox_one_rank TRUE)
+elseif("${SPLIT}" STREQUAL "fine_z")
+  set(_runs finesplit finewhole)
+  set(_finesplit_options "${_untiled}" "amr.max_grid_size_z=1048576 16")
+  set(_finewhole_options "${_untiled}" "amr.max_grid_size_z=1048576 1048576")
 else()
-  message(FATAL_ERROR "RunTilingParity.cmake: SPLIT must be tiles or boxes, not ${SPLIT}")
+  message(FATAL_ERROR "RunTilingParity.cmake: SPLIT must be tiles, boxes or fine_z, not ${SPLIT}")
 endif()
 list(GET _runs 0 _candidate)
 list(GET _runs 1 _reference)
@@ -78,7 +88,11 @@ foreach(_run IN LISTS _runs)
   endif()
 endforeach()
 
-foreach(_kind IN ITEMS plt plt2d)
+set(_kinds plt)
+if(NOT "${PLT2DFILE}" STREQUAL "")
+  list(APPEND _kinds plt2d)
+endif()
+foreach(_kind IN LISTS _kinds)
   if(_kind STREQUAL "plt")
     set(_step "${PLTFILE}")
   else()

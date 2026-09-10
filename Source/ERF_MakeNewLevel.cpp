@@ -68,23 +68,70 @@ check_pbl_full_column_boxes (int lev, const BoxArray& ba, const Geometry& geom,
 // whose planar arrays are the z-collapse of the 3D BoxArray (one 2D box per 3D box). Where
 // two boxes of a level are stacked in z, the solves put a boundary at the shared face and the
 // surface layer fills duplicate planar boxes, so the run depends on the decomposition or blows
-// up within a few steps. A box that ends at a coarse-fine boundary is fine; only a face shared
-// by two boxes of the same level is not. Check the grids whenever a level is made or remade.
+// up within a few steps. This holds on fine levels too. A box that ends at a coarse-fine
+// boundary is fine; only a face shared by two boxes of the same level is not.
+//
+struct ColumnSolves
+{
+    bool implicit_substep = false;
+    bool implicit_diff    = false;
+    bool surface_layer    = false;
+    [[nodiscard]] bool any () const { return implicit_substep || implicit_diff || surface_layer; }
+};
+
+ColumnSolves
+column_solves_on_level (int lev, const SolverChoice& sc)
+{
+    ColumnSolves cs;
+    cs.implicit_substep = (sc.anelastic[lev] == 0) &&
+                          (sc.substepping_type[lev] == SubsteppingType::Implicit);
+    cs.implicit_diff    = (sc.vert_implicit_fac[lev][0] > Real(0)) ||
+                          (sc.vert_implicit_fac[lev][1] > Real(0)) ||
+                          (sc.vert_implicit_fac[lev][2] > Real(0));
+    std::string zlo_type;
+    ParmParse pp_zlo("zlo");
+    pp_zlo.query("type", zlo_type);
+    cs.surface_layer = (amrex::toLower(zlo_type) == "surface_layer");
+    return cs;
+}
+
+//
+// Tagging and clustering stack fine boxes in z wherever the refined region is not made of
+// whole columns of one height, and amr.max_grid_size_z cannot prevent that. On a level that
+// uses a column solve or the surface layer, join such boxes into whole columns of the refined
+// region (ERFJoinBoxesStackedInZ) before the level is made or remade from them. The refined
+// region stays the same; amr.max_grid_size_z is not imposed on the joined boxes.
+//
+void
+join_fine_boxes_stacked_in_z (int lev, BoxArray& ba, const IntVect& max_grid_size,
+                              const SolverChoice& sc, int verbose)
+{
+    if (lev == 0 || ba.empty() || !column_solves_on_level(lev, sc).any()) { return; }
+
+    const BoxArray ba_joined = ERFJoinBoxesStackedInZ(ba, max_grid_size);
+    if (ba_joined == ba) { return; }
+
+    if (verbose > 0) {
+        Print() << "Level " << lev << ": joined " << ba.size() << " boxes, some stacked in z,"
+                << " into " << ba_joined.size() << " boxes of whole columns" << std::endl;
+    }
+    ba = ba_joined;
+}
+
+//
+// Check the grids whenever a level is made or remade. Level 0 grids come from the inputs;
+// fine grids made here by regridding are joined into whole columns first, so on a fine level
+// this stops only grids made elsewhere, such as those read from a checkpoint.
 //
 void
 check_stacked_boxes_in_z (int lev, const BoxArray& ba, const Geometry& geom,
                           const SolverChoice& sc)
 {
-    const bool implicit_substep = (sc.anelastic[lev] == 0) &&
-                                  (sc.substepping_type[lev] == SubsteppingType::Implicit);
-    const bool implicit_diff    = (sc.vert_implicit_fac[lev][0] > Real(0)) ||
-                                  (sc.vert_implicit_fac[lev][1] > Real(0)) ||
-                                  (sc.vert_implicit_fac[lev][2] > Real(0));
-    std::string zlo_type;
-    ParmParse pp_zlo("zlo");
-    pp_zlo.query("type", zlo_type);
-    const bool surface_layer = (amrex::toLower(zlo_type) == "surface_layer");
-    if (!implicit_substep && !implicit_diff && !surface_layer) { return; }
+    const ColumnSolves cs = column_solves_on_level(lev, sc);
+    if (!cs.any()) { return; }
+    const bool implicit_substep = cs.implicit_substep;
+    const bool implicit_diff    = cs.implicit_diff;
+    const bool surface_layer    = cs.surface_layer;
 
     Vector<std::string> users;
     if (implicit_substep) { users.push_back("the implicit acoustic substep"); }
@@ -112,8 +159,13 @@ check_stacked_boxes_in_z (int lev, const BoxArray& ba, const Geometry& geom,
             msg << users[n];
         }
         msg << ((users.size() > 1) ? " give" : " gives")
-            << " results that depend on the decomposition or blow up. Set amr.max_grid_size_z = "
-            << nz << " (or larger)" << ((lev > 0) ? " on this level" : "") << ".";
+            << " results that depend on the decomposition or blow up.";
+        if (lev == 0) {
+            msg << " Set amr.max_grid_size_z = " << nz << " (or larger).";
+        } else {
+            msg << " Regridding joins fine boxes stacked in z into whole columns on such a level,"
+                << " so these grids were made elsewhere, for example read from a checkpoint.";
+        }
         if (implicit_substep) {
             msg << " The implicit acoustic substep (erf.substepping_type = Implicit, the default"
                 << " for compressible runs) solves each column inside one box;"
@@ -133,11 +185,168 @@ check_stacked_boxes_in_z (int lev, const BoxArray& ba, const Geometry& geom,
 
 } // namespace
 
+//
+// AmrCore::regrid, with the new fine grids joined into whole columns where the level needs them
+// (join_fine_boxes_stacked_in_z) before any level is made or remade from them.
+// AmrMesh::MakeNewGrids is not virtual, so this is where the grids can be changed between
+// clustering and the level.
+//
+void
+ERF::regrid (int lbase, Real time, bool /*initial*/)
+{
+    if (lbase >= max_level) { return; }
+
+    int new_finest;
+    Vector<BoxArray> new_grids(finest_level+2);
+    MakeNewGrids(lbase, time, new_finest, new_grids);
+
+    AMREX_ASSERT(new_finest <= finest_level+1);
+
+    for (int lev = lbase+1; lev <= new_finest; ++lev) {
+        join_fine_boxes_stacked_in_z(lev, new_grids[lev], max_grid_size[lev], solverChoice, verbose);
+    }
+
+    bool coarse_ba_changed = false;
+    for (int lev = lbase+1; lev <= new_finest; ++lev)
+    {
+        if (lev <= finest_level) // an old level
+        {
+            bool ba_changed = (new_grids[lev] != grids[lev]);
+            if (ba_changed || coarse_ba_changed) {
+                BoxArray level_grids = grids[lev];
+                DistributionMapping level_dmap = dmap[lev];
+                if (ba_changed) {
+                    level_grids = new_grids[lev];
+                    level_dmap = MakeDistributionMap(lev, level_grids);
+                }
+                const auto old_num_setdm = num_setdm;
+                RemakeLevel(lev, time, level_grids, level_dmap);
+                SetBoxArray(lev, level_grids);
+                if (old_num_setdm == num_setdm) {
+                    SetDistributionMap(lev, level_dmap);
+                }
+            }
+            coarse_ba_changed = ba_changed;
+        }
+        else // a new level
+        {
+            DistributionMapping new_dmap = MakeDistributionMap(lev, new_grids[lev]);
+            const auto old_num_setdm = num_setdm;
+            MakeNewLevelFromCoarse(lev, time, new_grids[lev], new_dmap);
+            SetBoxArray(lev, new_grids[lev]);
+            if (old_num_setdm == num_setdm) {
+                SetDistributionMap(lev, new_dmap);
+            }
+        }
+    }
+
+    for (int lev = new_finest+1; lev <= finest_level; ++lev) {
+        ClearLevel(lev);
+        ClearBoxArray(lev);
+        ClearDistributionMap(lev);
+    }
+
+    finest_level = new_finest;
+}
+
+//
+// AmrCore::InitFromScratch (AmrMesh::MakeNewGrids(Real)), with each new fine BoxArray joined
+// into whole columns where the level needs them before the level is made. ERF does not build
+// AMReX with Bittree, so the Bittree branch of the AMReX version is left out.
+//
+void
+ERF::InitGridsFromScratch (Real time)
+{
+    {
+        finest_level = 0;
+
+        const auto old_num_setdm = num_setdm;
+        const auto old_num_setba = num_setba;
+
+        BoxArray ba = MakeBaseGrids();
+        DistributionMapping dm = MakeDistributionMap(0, ba);
+
+        MakeNewLevelFromScratch(0, time, ba, dm);
+
+        if (old_num_setba == num_setba) {
+            SetBoxArray(0, ba);
+        }
+        if (old_num_setdm == num_setdm) {
+            SetDistributionMap(0, dm);
+        }
+    }
+
+    if (max_level == 0) { return; }
+
+    Vector<BoxArray> new_grids(max_level+1);
+    new_grids[0] = grids[0];
+    do
+    {
+        int new_finest;
+
+        // Add (at most) one level at a time
+        MakeNewGrids(finest_level, time, new_finest, new_grids);
+
+        if (new_finest <= finest_level) { break; }
+        finest_level = new_finest;
+
+        join_fine_boxes_stacked_in_z(new_finest, new_grids[new_finest], max_grid_size[new_finest],
+                                     solverChoice, verbose);
+
+        DistributionMapping dm = MakeDistributionMap(new_finest, new_grids[new_finest]);
+        const auto old_num_setdm = num_setdm;
+
+        MakeNewLevelFromScratch(new_finest, time, new_grids[new_finest], dm);
+
+        SetBoxArray(new_finest, new_grids[new_finest]);
+        if (old_num_setdm == num_setdm) {
+            SetDistributionMap(new_finest, dm);
+        }
+    }
+    while (finest_level < max_level);
+
+    // Iterate grids to ensure fine grids encompass all interesting features
+    if (iterate_on_new_grids)
+    {
+        for (int it = 0; it < max_grid_iterations; ++it)
+        {
+            for (int i = 1; i <= finest_level; ++i) {
+                new_grids[i] = grids[i];
+            }
+
+            int new_finest;
+            MakeNewGrids(0, time, new_finest, new_grids);
+
+            if (new_finest < finest_level) { break; }
+            finest_level = new_finest;
+
+            bool grids_the_same = true;
+            for (int lev = 1; lev <= new_finest; ++lev) {
+                join_fine_boxes_stacked_in_z(lev, new_grids[lev], max_grid_size[lev],
+                                             solverChoice, verbose);
+                if (new_grids[lev] != grids[lev]) {
+                    grids_the_same = false;
+                    DistributionMapping dm = MakeDistributionMap(lev, new_grids[lev]);
+                    const auto old_num_setdm = num_setdm;
+
+                    MakeNewLevelFromScratch(lev, time, new_grids[lev], dm);
+
+                    SetBoxArray(lev, new_grids[lev]);
+                    if (old_num_setdm == num_setdm) {
+                        SetDistributionMap(lev, dm);
+                    }
+                }
+            }
+            if (grids_the_same) { break; }
+        }
+    }
+}
+
 // Make a new level from scratch using provided BoxArray and DistributionMapping.
 // This is called both for initialization and for restart
 // (overrides the pure virtual function in AmrCore)
-// main.cpp --> ERF::InitData --> InitFromScratch --> MakeNewGrids --> MakeNewLevelFromScratch
-//                                       restart  --> MakeNewGrids --> MakeNewLevelFromScratch
+// main.cpp --> ERF::InitData --> InitGridsFromScratch --> MakeNewGrids --> MakeNewLevelFromScratch
+//                                       restart  --> ReadCheckpointFile --> MakeNewLevelFromScratch
 void ERF::MakeNewLevelFromScratch (int lev, Real time, const BoxArray& ba_in,
                                    const DistributionMapping& dm_in)
 {

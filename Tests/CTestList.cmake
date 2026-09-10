@@ -229,6 +229,8 @@ function(add_test_tiling_parity TEST_NAME TEST_FILES_DIR PLTFILE PLT2DFILE)
 
     if(ADD_TEST_TP_SPLIT STREQUAL "boxes")
         set(_run_logs "multibox.log;singlebox.log")
+    elseif(ADD_TEST_TP_SPLIT STREQUAL "fine_z")
+        set(_run_logs "finesplit.log;finewhole.log")
     else()
         set(_run_logs "tiled.log;untiled.log")
     endif()
@@ -892,6 +894,13 @@ add_test_abort(ABL_ZSplit_ImplicitDiffusion_abort ${PROJECT_SOURCE_DIR}/Tests/te
 add_test_abort(ABL_ZSplit_SurfaceLayer_abort ${PROJECT_SOURCE_DIR}/Tests/test_files/ABL_MRF_Tiling ABL_MRF_Tiling.i
     "split in z, the surface layer gives"
     "erf.pbl_type=None erf.most.pblh_calc=None erf.les_type=Smagorinsky erf.Cs=0.1 erf.substepping_type=None erf.fixed_dt=0.05 erf.vert_implicit_fac=0 amr.max_grid_size_z=16")
+# On fine levels ERF joins boxes stacked in z into whole columns instead, at regrid and at
+# start-up: level 1 split in z must match level 1 left whole. Without the join these runs
+# stopped at the check above; with the check skipped as well, level 1 split in z was off by
+# 0.022 m/s in w at step 20 (Substep), and the Terrain2Lev split run trapped at start-up.
+add_test_tiling_parity(Bubble2D_FineZSplit_Substep   Bubble2D_FineZSplit "00020" "" SPLIT fine_z)
+add_test_tiling_parity(Bubble2D_FineZSplit_Diffusion Bubble2D_FineZSplit "00020" "" SPLIT fine_z RUNTIME_OPTIONS "erf.substepping_type=None erf.fixed_dt=0.05")
+add_test_tiling_parity(Terrain2Lev_FineZSplit_Init   Terrain2Lev_STF_interp "00010" "" SPLIT fine_z RUNTIME_OPTIONS "erf.vert_implicit=false")
 add_test_r(ABL_InflowFile                    ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")
 add_test_r(MoistBubble                       ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")
 add_test_r(SquallLine_2D                     ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")
