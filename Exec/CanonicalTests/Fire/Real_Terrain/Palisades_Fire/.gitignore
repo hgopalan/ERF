@@ -8,3 +8,6 @@ fire_stats_palisades.csv
 terrain_palisades.txt
 terrain_palisades_fire.txt
 fuel_palisades.asc
+frames_map/
+basemap_*.tif
+basemap_tiles/
