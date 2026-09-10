@@ -76,6 +76,8 @@ seed 20250107, so the run is reproducible.
 ```bash
 python3 gen_palisades.py                 # once; needs rasterio, pyproj, scipy and the SRTM tile cache
 mpirun -np 4 ../../../../../build/Exec/erf_exec inputs_palisades_fire
+python3 make_movie.py                    # palisades_fire.gif and .mp4 over the shaded relief
+python3 ../../../../Tools/make_map_movie.py --fetch usgs   # the same frames over USGS imagery
 ```
 The atmosphere has 80 x 80 x 102 cells (652,800; 10 m first cell stretched by 1.03
 to 6463 m) and the fire grid 800 x 800 (640,000). The demo quoted approximately
@@ -94,6 +96,13 @@ product="SRTM1")`, which leaves it in `~/Library/Caches/elevation/SRTM1/cache`.
 SRTM1 is a 30 m product; the demo used a 10 m DEM, so `--dxr` is there for when a
 finer one is substituted.
 
+`Exec/Tools/make_map_movie.py` draws the fire over map imagery. `--fetch usgs`
+downloads the 169 USGS imagery tiles covering the domain once (zoom 14, about
+8 m per pixel, 5 MB, kept in `basemap_tiles/`), stitches them into
+`basemap_palisades_z14.tif`, warps that onto the domain's UTM 11N square and
+writes `palisades_fire_map.gif` and `.mp4` over the same window as
+`make_movie.py`; `--basemap` takes any RGB GeoTIFF instead.
+
 ## Expected Results
 From a 30-minute run (`stop_time = 1800`, 9000 steps, `erf.fire_plot_int = 200`)
 on ten ranks, and the same deck with grass instead of chaparral:
@@ -109,6 +118,9 @@ on ten ranks, and the same deck with grass instead of chaparral:
 - `make_movie.py` writes a 46-frame animation over an x = 4 to 18 km,
   y = 3 to 17 km window, and an H.264 MP4 of the same frames when ffmpeg is on
   the PATH; neither is committed.
+- `make_map_movie.py` writes the same 46 frames over the USGS imagery. The
+  imagery's coastline and the fuel map's sea cells agree on 98.8 % of the fire
+  grid with no offset, so the overlay is registered to the model grid.
 
 **On the demo's 600 acres.** The demo reported about 600 acres after 3.13 hours.
 This case matches its configuration, the domain, both resolutions, the cell

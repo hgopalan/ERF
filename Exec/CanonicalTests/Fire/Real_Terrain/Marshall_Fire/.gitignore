@@ -1,0 +1,10 @@
+frames/
+frames_map/
+plt_fire_*
+plt3d_*
+chk_*
+*.gif
+*.mp4
+basemap_*.tif
+basemap_tiles/
+fire_stats*.csv
