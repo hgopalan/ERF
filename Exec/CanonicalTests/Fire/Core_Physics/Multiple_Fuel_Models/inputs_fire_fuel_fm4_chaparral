@@ -44,9 +44,12 @@ erf.init_type = "uniform"
 erf.theta_ref = 300.0
 
 # Time stepping
-erf.fixed_dt = 1.0
+# CFL-controlled step. A fixed 1.0 s was 2.4 times the compressible limit of
+# about 0.41 s on this grid; with the fire coupled back the atmosphere went NaN
+# within 20 s and the fire read NaN wind everywhere, without any abort.
+erf.cfl = 0.5
 stop_time = 1800.0
-max_step = 2000
+max_step = 12000
 
 # Diagnostics
 erf.sum_interval = 100

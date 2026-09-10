@@ -31,12 +31,18 @@ erf.les_type = "None"
 erf.rans_type = "None"
 erf.init_type = "uniform"
 erf.theta_ref = 300.0
-erf.geostrophic_wind_x = 5.0
-erf.geostrophic_wind_y = 0.0
+# Wind: geostrophic forcing, and the generic problem starts the flow in
+# geostrophic balance so the driver holds this wind rather than building it.
+# (erf.geostrophic_wind_x/y, used here before 2026-09-10, was read by nothing.)
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 5.0 0.0 0.0
+erf.use_coriolis = true
 
-erf.fixed_dt = 1.0
+# CFL-controlled step. A fixed 1.0 s was 2.4 times the compressible limit of
+# about 0.41 s on this grid, and every deck coupling the fire back crashed on it.
+erf.cfl = 0.5
 stop_time = 900.0
-max_step = 1000
+max_step = 6000
 
 erf.sum_interval = 100
 erf.v = 1
@@ -60,7 +66,7 @@ erf.fire.ignition_x = 1000.0
 erf.fire.ignition_y = 1000.0
 erf.fire.ignition_r = 0.0
 # Polygon ignition from file
-erf.fire.ignition.polygon_file = "Supporting_Files/polygon_phase11.csv"
+erf.fire.ignition.polygon_file = "polygon_phase11.csv"
 erf.fire.ignition.polygon_type = "polygon"
 erf.fire.wind_ref_ht = 6.1
 erf.fire.use_waf = true

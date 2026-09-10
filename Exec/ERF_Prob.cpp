@@ -293,8 +293,32 @@ Problem::init_custom_pert_vels (
 #include "Prob/ERF_InitCustomPertVels_Bomex.H"
     }
     else {
-        Print() << "Problem name" << " \"" <<  my_prob_name_ci << "\" "
-                << "does not add any velocity perturbations. \n";
+        // No problem-specific velocity field. Start in geostrophic balance when
+        // the run is driven that way: erf.abl_geo_wind only supplies the forcing
+        // term, it never sets the initial state, so from rest the flow needs of
+        // order 1/f to reach the wind it names -- hours, where a fire case runs
+        // for minutes. Seeding the initial velocity with it lets the driver hold
+        // that wind against surface drag instead of having to build it. Without
+        // erf.abl_geo_wind this stays a zero perturbation, as before.
+        Vector<Real> abl_geo_wind(AMREX_SPACEDIM, 0.0);
+        {
+            ParmParse pp_geo("erf");
+            pp_geo.queryarr("abl_geo_wind", abl_geo_wind);
+        }
+        const Real u_geo = abl_geo_wind[0];
+        const Real v_geo = abl_geo_wind[1];
+        ParallelFor(xbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+        {
+            x_vel_pert(i, j, k) = u_geo;
+        });
+        ParallelFor(ybx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+        {
+            y_vel_pert(i, j, k) = v_geo;
+        });
+        ParallelFor(zbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+        {
+            z_vel_pert(i, j, k) = 0.0;
+        });
     }
 
     amrex::Gpu::streamSynchronize();

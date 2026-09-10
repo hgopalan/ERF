@@ -211,7 +211,8 @@ To create a new fire test:
 
 1. **Copy template input file** from similar test
 2. **Modify parameters**:
-   - `erf.geostrophic_wind_x/y` - Wind speed/direction
+   - `erf.abl_driver_type = "GeostrophicWind"`, `erf.abl_geo_wind = u v 0`, `erf.use_coriolis = true` - wind speed/direction
+     (not `erf.geostrophic_wind_x/y`, which ERF does not read)
    - `erf.fire.moisture_*hr` - Fuel moisture
    - `erf.fire.fuel_model_id` - Fuel type (1=GR1, 4=FM4, etc.)
    - `erf.dtheta_ref` - Atmospheric stability

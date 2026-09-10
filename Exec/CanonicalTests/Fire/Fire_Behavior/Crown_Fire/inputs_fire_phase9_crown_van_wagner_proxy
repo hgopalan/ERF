@@ -36,12 +36,18 @@ erf.les_type = "None"
 erf.rans_type = "None"
 erf.init_type = "uniform"
 erf.theta_ref = 300.0
-erf.geostrophic_wind_x = 10.0
-erf.geostrophic_wind_y = 0.0
+# Wind: geostrophic forcing, and the generic problem starts the flow in
+# geostrophic balance so the driver holds this wind rather than building it.
+# (erf.geostrophic_wind_x/y, used here before 2026-09-10, was read by nothing.)
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 10.0 0.0 0.0
+erf.use_coriolis = true
 
-erf.fixed_dt = 1.0
+# CFL-controlled step. A fixed 1.0 s was 2.4 times the compressible limit of
+# about 0.41 s on this grid, and every deck coupling the fire back crashed on it.
+erf.cfl = 0.5
 stop_time = 900.0
-max_step = 1000
+max_step = 6000
 
 erf.sum_interval = 50
 erf.v = 1
