@@ -907,6 +907,7 @@ function(add_test_rans TEST_NAME CASE_DIR INPUT_FILE NSTEPS CHECK_SCRIPT)
 endfunction(add_test_rans)
 
 add_test_rans(RANS_Neutral_ABL_Flat     Neutral_ABL_Flat     inputs_neutral     40  check_neutral.py)
+add_test_rans(RANS_Neutral_ABL_Flat_Implicit Neutral_ABL_Flat  inputs_neutral     40  check_neutral.py RUNTIME_OPTIONS "erf.vert_implicit=true erf.fixed_dt=10")
 add_test_rans(RANS_Stable_ABL_Flat      Stable_ABL_Flat      inputs_stable      40  check_stable.py)
 add_test_rans(RANS_Convective_ABL_Flat  Convective_ABL_Flat  inputs_convective  40  check_convective.py)
 # terrain-fitted mesh: Poisson wall distance against the exact ridge distance,

@@ -771,7 +771,14 @@ List of Parameters
 |                                      | where ``anelastic`` = 1                                  |                    |                   |
 +--------------------------------------+----------------------------------------------------------+--------------------+-------------------+
 | **erf.vert_implicit**                | Do vertical implicit solve for diffusion of u, v, theta, | Boolean            | true              |
-|                                      | KE, and qv with default time-centering in each stage     |                    |                   |
+|                                      | KE, and qv with default time-centering in each stage.    |                    |                   |
+|                                      | Under the anelastic integrator the solve is off unless   |                    |                   |
+|                                      | this flag (or ``erf.vert_implicit_fac``) is given in the |                    |                   |
+|                                      | inputs; then theta, KE and qv are solved implicitly and  |                    |                   |
+|                                      | momentum stays explicit. The column solve needs every    |                    |                   |
+|                                      | level-0 box to span the full column: the z entry of      |                    |                   |
+|                                      | ``amr.max_grid_size`` must not be below ``amr.n_cell``   |                    |                   |
+|                                      | in z (the run aborts otherwise)                          |                    |                   |
 +--------------------------------------+----------------------------------------------------------+--------------------+-------------------+
 | **erf.vert_implicit_fac**            | time-centering factor for the vertical diffusive terms,  | 1 or 3 Reals in    | 1.0 1.0 0.0       |
 |                                      | where 0 is fully explicit and 1 is fully implicit.       | [0,1]              |                   |

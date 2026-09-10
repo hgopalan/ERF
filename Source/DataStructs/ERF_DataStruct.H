@@ -1313,6 +1313,8 @@ struct SolverChoice {
         } // uses_shoc_family
 
         // Do not allow implicit vertical diff if user turns it off
+        // (queried before queryAdd, which would enter the default into the table)
+        const bool user_set_vert_implicit = pp.contains("vert_implicit") || pp.contains("vert_implicit_fac");
         bool do_vert_implicit = true;
         pp.queryAdd("vert_implicit", do_vert_implicit);
         if (!do_vert_implicit) {
@@ -1324,13 +1326,32 @@ struct SolverChoice {
             }
         }
 
-        // Do not allow implicit vertical diff with anelastic
+        // Anelastic: the scalar solves work as they do with substepping (the
+        // theta solve is folded into the slow tendency before the stage
+        // update, the KE and moisture solves act on the stage result, both
+        // with half the step on the trapezoidal second stage), but the
+        // momentum solve lives in the substepping path, which the anelastic
+        // integrator replaces with a projection, so momentum stays explicit.
+        // The solve is opt-in under anelastic (erf.vert_implicit = true or an
+        // explicit erf.vert_implicit_fac) so that existing anelastic runs keep
+        // their fully explicit answer.
         for (int lev = 0; lev <= max_level; lev++) {
-            if (anelastic[lev]) {
-                amrex::Print() << "Turning off native vertical implicit solve flag because anelastic at level " << lev << std::endl;
-                vert_implicit_fac[lev][0] = zero;
-                vert_implicit_fac[lev][1] = zero;
-                vert_implicit_fac[lev][2] = zero;
+            if (anelastic[lev] && do_vert_implicit) {
+                if (!user_set_vert_implicit) {
+                    amrex::Print() << "Anelastic at level " << lev
+                                   << ": vertical diffusion stays explicit; set erf.vert_implicit = true "
+                                   << "for the implicit column solve of theta, KE and moisture" << std::endl;
+                    vert_implicit_fac[lev][0] = zero;
+                    vert_implicit_fac[lev][1] = zero;
+                    vert_implicit_fac[lev][2] = zero;
+                } else {
+                    if (implicit_momentum_diffusion) {
+                        amrex::Print() << "Anelastic at level " << lev
+                                       << ": vertical implicit diffusion applies to theta, KE and moisture; momentum stays explicit"
+                                       << std::endl;
+                    }
+                    implicit_momentum_diffusion = false;
+                }
             }
         }
 

@@ -3607,20 +3607,21 @@ ERF::check_for_negative_theta(amrex::MultiFab& S)
             const Real rho      = s_arr(i, j, k, Rho_comp);
             const Real rhotheta = s_arr(i, j, k, RhoTheta_comp);
 
-            if (rho <= zero) {
+            // Written as !(x > 0) so that a NaN, which fails every comparison, is caught too
+            if (!(rho > zero)) {
 #ifdef AMREX_USE_GPU
-                AMREX_DEVICE_PRINTF("Rho is negative at %d %d %d %e \n", i,j,k,rho);
+                AMREX_DEVICE_PRINTF("Rho is negative or NaN at %d %d %d %e \n", i,j,k,rho);
 #else
-                printf("Rho is negative at %d %d %d %e \n", i,j,k,rho);
+                printf("Rho is negative or NaN at %d %d %d %e \n", i,j,k,rho);
                 Abort("Bad rho in check_for_negative_theta");
 #endif
             }
 
-            if (rhotheta <= zero) {
+            if (!(rhotheta > zero)) {
 #ifdef AMREX_USE_GPU
-                AMREX_DEVICE_PRINTF("RhoTheta is negative at %d %d %d %e \n", i,j,k,rhotheta);
+                AMREX_DEVICE_PRINTF("RhoTheta is negative or NaN at %d %d %d %e \n", i,j,k,rhotheta);
 #else
-                printf("RhoTheta is negative at %d %d %d %e \n", i,j,k,rhotheta);
+                printf("RhoTheta is negative or NaN at %d %d %d %e \n", i,j,k,rhotheta);
                 Abort("Bad theta in check_for_negative_theta");
 #endif
             }

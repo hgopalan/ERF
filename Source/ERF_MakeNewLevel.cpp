@@ -36,8 +36,14 @@ void ERF::MakeNewLevelFromScratch (int lev, Real time, const BoxArray& ba_in,
         (max_grid_size[0][1] >= domain.length(1)) &&
         ba_in.size() != ParallelDescriptor::NProcs())
     {
-        // We only decompose in z if max_grid_size_z indicates we should
-        bool decompose_in_z = (max_grid_size[0][2] < domain.length(2));
+        // We only decompose in z if max_grid_size_z indicates we should, and
+        // never when the vertical implicit diffusion solve is on: it solves
+        // one tridiagonal per column and takes each box's z extent as the
+        // column, applying the domain boundary conditions at its ends.
+        const bool implicit_column_solve = (solverChoice.vert_implicit_fac[0][0] > 0 ||
+                                            solverChoice.vert_implicit_fac[0][1] > 0 ||
+                                            solverChoice.vert_implicit_fac[0][2] > 0);
+        bool decompose_in_z = (max_grid_size[0][2] < domain.length(2)) && !implicit_column_solve;
 
         ba = ERFPostProcessBaseGrids(Geom(0).Domain(),decompose_in_z);
         dm = DistributionMapping(ba);
