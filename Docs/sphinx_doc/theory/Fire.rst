@@ -57,6 +57,7 @@ with a comment as a reference deck.
    fire_coupling
    wui_validation
    line_fire_verification
+   fire_verification
    fire_acceleration
    fire_spotting_crown
    fire_output
@@ -202,13 +203,16 @@ Tests
 -----
 
 ``Exec/CanonicalTests/Fire`` holds the canonical fire cases, grouped by theme
-(core physics, FARSITE and level-set propagation, fire-atmosphere coupling,
-fire behaviour options, heat-flux diagnostics, mesh refinement) with a README
-in every directory, plus Python unit tests under ``Unit_Tests`` for the
-Rothermel kernel, the FARSITE ellipse, the ROS models, the fuel map reader,
-the ignition schedule, spotting, crown fire, acceleration, wind interpolation
-and terrain projection. The canonical cases have no recorded reference values, so they are smoke
-tests: they show a feature runs and behaves qualitatively as documented.
+(verification, core physics, fire behaviour options, fire-atmosphere coupling,
+boundary layers, heat-flux diagnostics, the WUI subdivision, real terrain) with
+a README and a check script in every case directory, plus Python unit tests
+under ``Unit_Tests`` for the Rothermel kernel, the FARSITE ellipse, the ROS
+models, the fuel map reader, the ignition schedule, spotting, crown fire,
+acceleration, wind interpolation and terrain projection. The cases under
+``Verification`` compare with an exact or published answer and record the
+measured agreement (:ref:`sec:FireVerification`); the other canonical cases have
+no recorded reference values, so they are smoke tests: they show a feature runs
+and behaves qualitatively as documented.
 
 The regression suites under ``Exec/RegTests`` are the quantitative checks.
 Each is a directory of input decks sharing one base, a script that runs every
@@ -230,6 +234,11 @@ explains what each row should show:
 - ``FireNearWall``: the level-set wall extrapolation and the open-column wind
   weights next to masked buildings, measured by the flank's arrival along a
   wall against the unmasked reference.
+- ``FirePrescribed``: the prescribed rate of spread against a growing circle
+  and the prescribed heat flux against the coupling's energy diagnostic and the
+  atmosphere's heat budget.
+- ``FireLineFire``: the Coen et al. (2013) line fire, one-way against Rothermel
+  and coupled against the paper (:ref:`sec:LineFireVerification`).
 - ``FireExposure``: the per-structure exposure CSV (arrival and residence of
   the front along each wall, peak intensity, heat load, embers) with and
   without immersed-forcing buildings and with spotting.
@@ -259,11 +268,15 @@ Where each feature is exercised:
    * - Balbi couplings: reference wind, moisture extinction
      - ``FireRosComparison`` (``balbi2020_reference_wind``, ``balbi2020_extinction_wet``)
    * - FARSITE ellipse, level-set advection and reinitialisation
-     - ``FireRestart``; canonical ``FARSITE_Propagation``, ``Level_Set_Propagation``; ``Unit_Tests/test_farsite_ellipse.py``
+     - ``FireRestart``; canonical ``Fire_Behavior/Elliptical_Propagation``, ``Verification/Level_Set_Advection``; ``Unit_Tests/test_farsite_ellipse.py``
+   * - Level-set geometry: masked obstacles, junctions, polygon corners, merging fronts, refraction at a fuel boundary, a spatially varying rate
+     - canonical ``Verification`` (``Obstacle_Shadow``, ``Junction_Fire``, ``Polygon_Growth``, ``Merging_Fires``, ``Fuel_Interface_Refraction``, ``Speed_Gradient``)
+   * - Prescribed rate of spread and prescribed heat flux
+     - ``FirePrescribed``; canonical ``Verification``
    * - Checkpoint and restart of the fire state
      - ``FireRestart``
    * - Dynamic fuel moisture
-     - canonical ``Core_Physics/Fuel_Moisture_Sensitivity``, ``ROS_Models/behave_dynamic``
+     - canonical ``Verification/Moisture_Relaxation``, ``Core_Physics/Fuel_Moisture_Sensitivity``, ``ROS_Models/behave_dynamic``
    * - Ignition schedule, polygon and polyline ignition
      - canonical ``Fire_Behavior/Ignition_Patterns``; ``Unit_Tests/test_ignition_schedule.py``
    * - Startup acceleration
@@ -271,7 +284,7 @@ Where each feature is exercised:
    * - Ember spotting, crown fire
      - canonical ``Fire_Behavior/Spotting``, ``Fire_Behavior/Crown_Fire``; ``Unit_Tests/test_albini_spotting.py``, ``test_crown_fire.py``
    * - Coupling modes, heat injection, smoke tracer
-     - canonical ``Fire_Atmosphere_Coupling``
+     - canonical ``Fire_Atmosphere_Coupling``, ``Verification/Calm_Plume``; ``FirePrescribed``
    * - Additive source mode, open-fraction heat placement, fire heat with immersed-forcing buildings
      - ``FireHeatPlacement``
    * - Level-set wall extrapolation, open-column wind weights
@@ -281,7 +294,7 @@ Where each feature is exercised:
    * - Flame temperature, tilt, intensity
      - canonical ``Heat_Flux_Diagnostics``
    * - Terrain slopes and terrain wind corrections
-     - canonical ``Core_Physics/ROS_Slope_Effects``, ``Terrain_Wind_Coupling``; ``Unit_Tests/test_terrain_projection.py``
+     - canonical ``Verification/Slope_No_Wind``, ``Core_Physics/ROS_Slope_Effects``, ``Terrain_Wind_Coupling``; ``Unit_Tests/test_terrain_projection.py``
    * - The WUI features together: structure mask, wall extrapolation, open-column wind, exposure, spotting, immersed buildings with heat coupling
      - canonical ``WUI_Subdivision`` (:ref:`sec:WUIValidation`)
 
