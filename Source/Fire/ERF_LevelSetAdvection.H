@@ -109,6 +109,25 @@ inline void zero_ros_in_mask(amrex::MultiFab& R, const amrex::MultiFab* mask)
 }
 
 /**
+ * @brief Multiply a rate-of-spread field by a per-cell factor
+ *
+ * @param[in,out] R      Rate of spread [m/s]
+ * @param[in]     scale  Factor on the same grid, or nullptr for no-op
+ */
+inline void scale_ros_field(amrex::MultiFab& R, const amrex::MultiFab* scale)
+{
+    if (scale == nullptr) { return; }
+    for (amrex::MFIter mfi(R, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.tilebox();
+        auto const& r = R.array(mfi);
+        auto const& s = scale->const_array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            r(i, j, k) *= s(i, j, k);
+        });
+    }
+}
+
+/**
  * @brief Hold the level set at or above `value` where a non-burnable mask is set
  *
  * @param[in,out] phi    Level-set field
@@ -201,6 +220,8 @@ inline void rk3_stage3_update(amrex::MultiFab& phi, const amrex::MultiFab& phi_h
  *                          after every fill
  * @param[in]     wall_extrap  Extrapolate phi into mask cells inside every
  *                          stencil (see WallStencil); needs a mask
+ * @param[in]     ros_scale Optional per-cell factor applied to the ROS after
+ *                          every fill (the front acceleration clock)
  */
 template <class FillRos>
 inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
@@ -211,7 +232,8 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
                                           FillRos&& fill_ros,
                                           const amrex::MultiFab* mask = nullptr,
                                           bool wall_extrap = false,
-                                          const LevelSetGradient& grad_scheme = LevelSetGradient{})
+                                          const LevelSetGradient& grad_scheme = LevelSetGradient{},
+                                          const amrex::MultiFab* ros_scale = nullptr)
 {
     using namespace amrex;
 
@@ -231,6 +253,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     phi_star.ParallelCopy(phi_n);
     fire_fill_boundary(phi_star, geom);
     fill_ros(R_dir, phi_star);
+    scale_ros_field(R_dir, ros_scale);
     zero_ros_in_mask(R_dir, mask);
     compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap, grad_scheme);
     rk3_stage1_update(phi_star, rhs, dt);
@@ -238,6 +261,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
 
     // Stage 2: phi** = (3/4)phi^n + (1/4)(phi* + dt L(phi*))
     fill_ros(R_dir, phi_star);
+    scale_ros_field(R_dir, ros_scale);
     zero_ros_in_mask(R_dir, mask);
     compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap, grad_scheme);
     phi_hat.ParallelCopy(phi_n);
@@ -246,6 +270,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
 
     // Stage 3: phi^{n+1} = (1/3)phi^n + (2/3)(phi** + dt L(phi**))
     fill_ros(R_dir, phi_hat);
+    scale_ros_field(R_dir, ros_scale);
     zero_ros_in_mask(R_dir, mask);
     compute_levelset_rhs(rhs, phi_hat, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap, grad_scheme);
     rk3_stage3_update(phi, phi_hat, phi_n, rhs, dt);

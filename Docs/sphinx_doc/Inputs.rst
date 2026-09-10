@@ -4160,9 +4160,14 @@ Propagation
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.accel.perim_limit**                 | Perimeter length separating point and line fires [m]       | Real > 0                       | 500.0                  |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.accel.enable_wind_lag**             | Exponential lag on wind increases (temporal model)         | Boolean                        | false                  |
+| **erf.fire.accel.enable_wind_lag**             | Exponential lag on wind increases (legacy clock only)      | Boolean                        | false                  |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.accel.tau_wind**                    | Wind-lag time constant [s]                                 | Real > 0                       | 60.0                   |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.accel.clock**                       | Clock of the temporal model: "legacy" per burned cell,     | String                         | "legacy"               |
+|                                                | restarted when the cell burns and written to burned cells  |                                |                        |
+|                                                | only; "front" from ignition, carried with the front and    |                                |                        |
+|                                                | applied to the rate that moves it                          |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 
 

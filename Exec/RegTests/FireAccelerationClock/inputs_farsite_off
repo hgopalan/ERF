@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# FARSITE path without acceleration: the reference head rate of this path.
+erf.fire.propagation_method = "farsite"
+erf.fire.accel.enable = false

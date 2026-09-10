@@ -397,6 +397,7 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
  * @param[in]     shape     DIRECTIONAL_SHAPE_PROJECTION or DIRECTIONAL_SHAPE_ELLIPSE
  * @param[in]     ellipse_lw      Flank rule of the ellipse, DIRECTIONAL_ELLIPSE_LW_*
  * @param[in]     ellipse_lw_max  Cap on Anderson's length-to-width ratio
+ * @param[in]     ros_scale       Optional per-cell factor on the rebuilt ROS (front acceleration clock)
  */
 inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,
                                             const amrex::MultiFab& wind,
@@ -410,13 +411,14 @@ inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,
                                             const fire_levelset::LevelSetGradient& grad_scheme = fire_levelset::LevelSetGradient{},
                                             int shape = DIRECTIONAL_SHAPE_PROJECTION,
                                             int ellipse_lw = DIRECTIONAL_ELLIPSE_LW_MODEL,
-                                            amrex::Real ellipse_lw_max = amrex::Real(8.0))
+                                            amrex::Real ellipse_lw_max = amrex::Real(8.0),
+                                            const amrex::MultiFab* ros_scale = nullptr)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
             fill_directional_ros(R, phi_stage, wind, slopes, geom, st, nonburnable, wall_extrap, shape,
                                  ellipse_lw, ellipse_lw_max);
-        }, nonburnable, wall_extrap, grad_scheme);
+        }, nonburnable, wall_extrap, grad_scheme, ros_scale);
 }
 
 #endif

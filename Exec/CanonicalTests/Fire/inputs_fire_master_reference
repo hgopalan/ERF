@@ -808,6 +808,41 @@ erf.fire.flame_tilt_T_amb = 300.0
 erf.fire.flame_tilt_rho_air = 1.2
 
 # ============================================================================
+# PHASE 12: STARTUP FIRE ACCELERATION
+# ============================================================================
+# Theory: Docs/sphinx_doc/theory/fire_acceleration.rst
+
+# Scale the rate of spread of a young fire (default false: no acceleration)
+erf.fire.accel.enable = false
+
+# false: size-based model, alpha = 1 - exp(-r_fire / L_acc) on every cell
+# true: temporal model, R = R_E (1 - exp(-A t))
+erf.fire.accel.use_temporal = false
+
+# Size-based acceleration length scale [m]
+erf.fire.accel.L_acc = 50.0
+
+# Temporal acceleration constants [1/min]: point fire while the burned
+# perimeter is at most perim_limit [m], line fire beyond it
+erf.fire.accel.A_point = 0.115
+erf.fire.accel.A_line = 0.886
+erf.fire.accel.perim_limit = 500.0
+
+# Clock of the temporal model
+#   "legacy": a clock per burned cell, started when the cell burns and restarted
+#             on any change of its equilibrium rate, written to burned cells
+#             only, so it barely acts on the front (before 2026-09)
+#   "front":  the time since ignition, carried with the front into the cells it
+#             burns and applied to the rate that moves it on every path; a
+#             separate ignition (spot, schedule, threshold) starts its own clock
+erf.fire.accel.clock = "legacy"
+
+# Exponential lag on increases of the equilibrium rate (legacy clock only;
+# aborts with clock = "front") and its time constant [s]
+erf.fire.accel.enable_wind_lag = false
+erf.fire.accel.tau_wind = 60.0
+
+# ============================================================================
 # FIRE PLOTFILE OUTPUT CONFIGURATION
 # ============================================================================
 # These are auto-included based on feature enablement above.

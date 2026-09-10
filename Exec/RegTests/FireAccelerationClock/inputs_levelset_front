@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# Level-set path, temporal acceleration with the clock carried with the front;
+# its factor multiplies the directional rate in every RK stage.
+erf.fire.propagation_method = "levelset"
+erf.fire.accel.enable = true
+erf.fire.accel.use_temporal = true
+erf.fire.accel.clock = "front"

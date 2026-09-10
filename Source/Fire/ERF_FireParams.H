@@ -343,9 +343,12 @@ struct FireParams
     //
     //   Temporal (use_temporal = true):
     //     R(t) = R_E * (1 - exp(-A * t))
-    //   where t is elapsed time since ignition [s] and A [1/min] is the
-    //   acceleration constant, selected based on perimeter length relative to
-    //   perim_limit (point vs line fire).
+    //   where t is elapsed time [s] and A [1/min] is the acceleration
+    //   constant, selected based on perimeter length relative to
+    //   perim_limit (point vs line fire). accel.clock picks the meaning of t:
+    //   "legacy" (default) a clock per burned cell, started when the cell
+    //   burns, written to burned cells only; "front" the time since ignition,
+    //   carried with the front and applied to the rate that moves it.
     //   Reference: McAlpine & Wakimoto (1991) Forest Science 37(5).
     //
     // Disabled by default (enable = false). When disabled, no MultiFab is
@@ -895,6 +898,22 @@ struct FireParams
        pp.query("accel.perim_limit",     ac.perim_limit);
        pp.query("accel.enable_wind_lag", ac.enable_wind_lag);
        pp.query("accel.tau_wind",        ac.tau_wind);
+       {
+           std::string clock_str = (ac.clock == accel_clock::front) ? "front" : "legacy";
+           pp.query("accel.clock", clock_str);
+           if (clock_str == "legacy") {
+               ac.clock = accel_clock::legacy;
+           } else if (clock_str == "front") {
+               ac.clock = accel_clock::front;
+           } else {
+               amrex::Abort("erf.fire.accel.clock must be \"legacy\" or \"front\"");
+           }
+       }
+       // The wind lag restarts the legacy clock on every rise of the equilibrium
+       // rate; the front clock follows the equilibrium rate at once instead.
+       if (ac.enable && ac.use_temporal && ac.clock == accel_clock::front && ac.enable_wind_lag) {
+           amrex::Abort("erf.fire.accel.enable_wind_lag works with erf.fire.accel.clock = \"legacy\" only");
+       }
 
        // Remembered for the ellipse check at the end: the ellipse turns the
        // default off but conflicts with an explicit true.

@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# Level-set path (directional rate along the front normal, the default there)
+# without acceleration: the reference head rate of this path.
+erf.fire.propagation_method = "levelset"
+erf.fire.accel.enable = false

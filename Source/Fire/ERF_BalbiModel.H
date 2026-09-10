@@ -872,13 +872,14 @@ inline void advect_levelset_balbi_rk3(amrex::MultiFab& phi,
                                       const BalbiFieldInputs& in = BalbiFieldInputs{},
                                       const amrex::MultiFab* nonburnable = nullptr,
                                       bool wall_extrap = false,
-                                      const fire_levelset::LevelSetGradient& grad_scheme = fire_levelset::LevelSetGradient{})
+                                      const fire_levelset::LevelSetGradient& grad_scheme = fire_levelset::LevelSetGradient{},
+                                      const amrex::MultiFab* ros_scale = nullptr)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
             fill_balbi_ros_directional(R, phi_stage, wind, slopes, geom, bc_default, bp, in,
                                        nonburnable, wall_extrap);
-        }, nonburnable, wall_extrap, grad_scheme);
+        }, nonburnable, wall_extrap, grad_scheme, ros_scale);
 }
 
 #endif
