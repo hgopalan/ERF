@@ -8,7 +8,8 @@ using namespace amrex;
 RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
                                            Real moisture_1hr,
                                            Real moisture_10hr,
-                                           Real moisture_100hr)
+                                           Real moisture_100hr,
+                                           bool use_wind_limit)
 {
     RothermelComputed rc;
 
@@ -110,8 +111,8 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     // consistent with published BEHAVE/BehavePlus validation tables:
     //   Fine fuels (sigma > 1000 ft⁻¹): cap at 300 ft/min (~1.5 m/s midflame)
     //   Coarse fuels (sigma <= 1000 ft⁻¹): cap at 500 ft/min (~2.5 m/s midflame)
-    // These caps are bypassed when erf.fire.use_wind_limit = false.
-    Real U_max_ftmin = (sigma > 1000.0) ? 300.0 : 500.0;
+    // erf.fire.use_wind_limit = false removes the cap (rothermel_wind_cap_ftmin).
+    Real U_max_ftmin = rothermel_wind_cap_ftmin(sigma, use_wind_limit);
 
     // ===================================================================
     // Store results in RothermelComputed
@@ -163,7 +164,8 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
     Real moisture_10hr,
     Real moisture_100hr,
     int fuel_set,
-    Real moisture_live)
+    Real moisture_live,
+    bool use_wind_limit)
 {
     std::vector<RothermelComputed> table(ROTHERMEL_TABLE_SIZE);
 
@@ -174,7 +176,7 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
     // Slots 1-13 hold the Anderson models at their own codes; 14-53 the Scott-Burgan models.
     for (int slot = 1; slot < ROTHERMEL_TABLE_SIZE; ++slot) {
         table[slot] = compute_rothermel_params(get_fuel_params(fuel_code_from_slot(slot), (slot >= 14) ? 1 : fuel_set, moisture_live),
-                                              moisture_1hr, moisture_10hr, moisture_100hr);
+                                              moisture_1hr, moisture_10hr, moisture_100hr, use_wind_limit);
     }
     return table;
 }

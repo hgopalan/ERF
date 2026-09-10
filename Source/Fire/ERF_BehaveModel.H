@@ -94,6 +94,7 @@ struct BehaveState
  * @param[in] mc_100hr   100-hour dead fuel moisture [fraction]
  * @param[in] mc_herba   Live herbaceous fuel moisture [fraction]
  * @param[in] mc_woody   Live woody fuel moisture [fraction]
+ * @param[in] use_wind_limit  Apply the MEWS cap (erf.fire.use_wind_limit)
  *
  * @return BehaveState with all precomputed coefficients
  *
@@ -114,7 +115,8 @@ BehaveState compute_behave_state(
     amrex::Real mc_10hr,
     amrex::Real mc_100hr,
     amrex::Real mc_herba,
-    amrex::Real mc_woody)
+    amrex::Real mc_woody,
+    bool use_wind_limit = true)
 {
     BehaveState bs;
 
@@ -315,8 +317,8 @@ BehaveState compute_behave_state(
     bs.beta_ratio_E = std::pow(beta_ratio, -E);
     bs.phi_s_const = 5.275 * std::pow(beta, -0.3);
 
-    // MEWS wind speed cap (Andrews 2018)
-    bs.U_max_ftmin = (sigma > 1000.0) ? 300.0 : 500.0;
+    // MEWS wind speed cap (Andrews 2018), none when erf.fire.use_wind_limit = false
+    bs.U_max_ftmin = rothermel_wind_cap_ftmin(sigma, use_wind_limit);
     bs.wind_conv = 196.85;  // m/s → ft/min
 
     return bs;
@@ -382,6 +384,7 @@ amrex::Real behave_ros_cell(
  * @param[in]  bs_default      Default BehaveState for uniform moisture
  * @param[in]  fire_fuel_mc    Per-cell fuel moisture (5 components, optional)
  * @param[in]  moisture_dynamic Whether per-cell moisture should be used
+ * @param[in]  use_wind_limit  MEWS cap of the per-cell states (erf.fire.use_wind_limit)
  */
 inline void fill_behave_ros(
     amrex::MultiFab& fire_ros,
@@ -390,7 +393,8 @@ inline void fill_behave_ros(
     const FuelModelParams& fp,
     const BehaveState& bs_default,
     const amrex::MultiFab* fire_fuel_mc = nullptr,
-    bool moisture_dynamic = false)
+    bool moisture_dynamic = false,
+    bool use_wind_limit = true)
 {
     // When moisture_dynamic and fire_fuel_mc is provided, compute per-cell
     // BehaveState using per-cell moisture. Otherwise use bs_default for all cells.
@@ -439,7 +443,7 @@ inline void fill_behave_ros(
 
                 const BehaveState bs = compute_behave_state(fp,
                     mc(i,j,0,0), mc(i,j,0,1), mc(i,j,0,2),
-                    mc(i,j,0,3), mc(i,j,0,4));
+                    mc(i,j,0,3), mc(i,j,0,4), use_wind_limit);
 
                 ros(i, j, 0) = behave_ros_cell(wind(i,j,0,0), wind(i,j,0,1),
                                                slopes(i,j,0,0), slopes(i,j,0,1),

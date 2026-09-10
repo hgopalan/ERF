@@ -190,9 +190,11 @@ erf.fire.use_waf = true
 # Options: "andrews" (default), "behaviorplus"
 erf.fire.waf_formula = "andrews"
 
-# Apply MEWS (Maximum Energy Release) wind speed cap
-# true: cap wind to avoid unrealistic ROS
-# false: allow uncapped wind
+# Cap the midflame wind at Rothermel's maximum effective wind speed (MEWS):
+# 300 ft/min (1.52 m/s) for fine fuels (SAV > 1000 1/ft), 500 ft/min otherwise.
+# Rothermel and BEHAVE kernels, including the per-fuel table and the directional path.
+# true: cap the wind factor at the MEWS
+# false: no cap, as in WRF-Fire (Exec/RegTests/FireLineFire)
 erf.fire.use_wind_limit = true
 
 # Apply terrain-based wind corrections (FARSITE model)

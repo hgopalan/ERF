@@ -3863,8 +3863,8 @@ Wind
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.waf_formula**                       | Wind adjustment factor formula                             | "andrews", "behaviorplus"      | "andrews"              |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.use_wind_limit**                    | Cap the effective wind at Rothermel's maximum (Rothermel   | Boolean                        | true                   |
-|                                                | kernel only)                                               |                                |                        |
+| **erf.fire.use_wind_limit**                    | Cap the midflame wind at Rothermel's maximum effective     | Boolean                        | true                   |
+|                                                | wind speed (Rothermel and BEHAVE kernels); false: no cap   |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.use_terrain_wind**                  | Apply the FARSITE terrain wind corrections                 | Boolean                        | true                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+

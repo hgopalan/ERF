@@ -37,7 +37,7 @@ struct FireParams
     amrex::Real       waf_fcz0_scale       = 1.0;   ///< Scale factor on fcz0 roughness for WAF [dimensionless]
     bool              use_waf             = true;        ///< Apply Wind Adjustment Factor
     std::string       waf_formula         = "andrews";   ///< "andrews" or "behaviorplus"
-    bool              use_wind_limit      = true;        ///< Apply MEWS cap to wind
+    bool              use_wind_limit      = true;        ///< Apply the MEWS midflame wind cap (Rothermel, BEHAVE)
     // Second-height wind sampling (the Community Fire Behavior Model's second
     // interpolation option): sample the atmospheric wind at wind_sample_ht
     // above the local ground, above the fire's own plume, and bring it down

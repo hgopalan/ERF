@@ -69,7 +69,7 @@ corrections:
   vector toward the slope. These are empirical stand-ins for flow that a
   resolved LES already contains, so switch them off when the atmosphere
   resolves the terrain.
-- The Rothermel kernel additionally caps the effective wind at the maximum
+- The Rothermel and BEHAVE kernels additionally cap the effective wind at the maximum
   effective wind speed of Rothermel (1972), 300 ft/min for fine fuels
   (surface-area-to-volume ratio above 1000 ft⁻¹) and 500 ft/min otherwise,
   when :cpp:`erf.fire.use_wind_limit` is true (default). Wind-driven
