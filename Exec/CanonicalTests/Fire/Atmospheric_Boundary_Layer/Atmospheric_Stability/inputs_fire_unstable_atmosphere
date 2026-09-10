@@ -30,22 +30,32 @@ amr.max_grid_size_z = 50
 # Surface layer boundary condition (REQUIRED for fire)
 zlo.type = "surface_layer"
 zhi.type = "SlipWall"
+zhi.theta_grad = -0.01               # hold the sounding's lapse rate at the lid
 
 # MOST parameters (REQUIRED for fire wind extraction)
+# Monin-Obukhov similarity is the surface layer's default (flux_type moeng).
+# With no erf.most.surf_temp or surf_temp_flux the surface is adiabatic, so the
+# stratification acts through buoyancy on the plume, not through surface fluxes.
 erf.most.z0 = 0.1
-erf.most.use_monin_obukhov = true
 
 # Physics
 erf.molec_diff_type = "ConstantAlpha"
 erf.les_type = "None"
 erf.rans_type = "None"
 
-# Initial conditions - Unstable atmosphere
-erf.init_type = "uniform"
+# Initial conditions - Unstable atmosphere: theta falls 0.01 K/m from 300 K
+# (input_sounding_unstable), at rest in hydrostatic balance, with gravity on.
+# The column is statically unstable and overturns where it is disturbed; at rest
+# in a periodic domain, the fire's plume is the first disturbance.
+# Until 2026-09-10 this deck set erf.init_type = "uniform" with
+# erf.dtheta_ref = -0.01 and erf.most.use_monin_obukhov = true. Nothing reads
+# those two keys and gravity was off, so the stable and unstable decks ran the
+# same neutral, gravity-free atmosphere.
+erf.use_gravity = true
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding_unstable"
+erf.sounding_type = Ideal
 erf.theta_ref = 300.0
-
-# Potential temperature profile: unstable stratification (dtheta/dz < 0)
-erf.dtheta_ref = -0.01               # K/m - negative = unstable (convective)
 
 # Time stepping
 # CFL-controlled step. A fixed 1.0 s was 2.4 times the compressible limit of
@@ -90,7 +100,7 @@ erf.fire.ignition_r = 20.0
 erf.fire.wind_ref_ht = 6.1
 erf.fire.use_waf = true
 erf.fire.waf_formula = "andrews"
-erf.use_wind_limit = true
+erf.fire.use_wind_limit = true       # erf.use_wind_limit until 2026-09-10, read by nothing
 erf.fire.use_terrain_wind = false
 erf.fire.k_ridge = 1.5
 erf.fire.k_shelter = 0.6
