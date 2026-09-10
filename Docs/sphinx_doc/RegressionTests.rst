@@ -576,3 +576,8 @@ variant to its stop time and tabulates the result, and is too long for CI.
 The 20-cell decks of ``FireRestart`` and ``FireRosComparison`` run on one rank:
 the fire module requires every box edge to divide by ``erf.fire.grid_ratio``,
 and a 20-cell domain has no two-rank decomposition that does.
+
+``FireNoSurfaceLayer_abort`` reruns the ``FireRestart`` level-set deck with
+``zlo.type=SlipWall`` for one step and passes when the run stops at start-up
+with the fire module's message that it requires a surface layer at the bottom
+boundary. Without that check the run crashed in the first step.

@@ -81,6 +81,15 @@ The fire model runs on level 0 only. Coordinates on the fire grid are the
 physical x and y of the atmosphere domain, so ignition points, probes,
 firebreaks and structure files are all given in metres.
 
+The fire model also requires a surface layer at the bottom boundary,
+``zlo.type = "surface_layer"``. The fire layer is set up together with the
+surface layer, and the near-surface potential temperature it samples each step
+is only kept on that path. The surface layer in turn needs a diffusion choice
+other than ``None`` (``erf.molec_diff_type``, ``erf.les_type``, a RANS or a
+PBL model); ``erf.molec_diff_type = "ConstantAlpha"`` with zero coefficients
+is enough when no diffusion is wanted. A deck with any other bottom boundary
+aborts at start-up with a message saying so.
+
 One fire step
 -------------
 

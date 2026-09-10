@@ -1409,6 +1409,19 @@ ERF::InitData_post ()
         }
     }
 
+#ifdef ERF_ENABLE_FIRE
+    // The fire layer is initialised inside the surface-layer block below (so its
+    // own prerequisite checks run there), and ERF::Advance samples Theta_prim,
+    // which is only allocated with a surface layer. Any other bottom boundary
+    // used to skip both and crash on the first step, so stop here instead.
+    if (m_fire_layer &&
+        phys_bc_type[Orientation(Direction::z,Orientation::low)] != ERF_BC::surface_layer) {
+        Abort("[FIRE] The fire module requires a surface layer at the bottom boundary: "
+              "set zlo.type = \"surface_layer\" with erf.most.z0 and a diffusion choice "
+              "other than None (erf.molec_diff_type, erf.les_type, RANS or PBL)");
+    }
+#endif
+
     // Configure SurfaceLayer params if used
     // NOTE: we must set up the MOST routine after calling FillPatch
     //       in order to have lateral ghost cells filled (MOST + terrain interp).
