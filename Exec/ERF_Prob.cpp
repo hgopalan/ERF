@@ -300,8 +300,13 @@ Problem::init_custom_pert_vels (
         // for minutes. Seeding the initial velocity with it lets the driver hold
         // that wind against surface drag instead of having to build it. Without
         // erf.abl_geo_wind this stays a zero perturbation, as before.
+        // Only uniform init starts from rest. An input sounding already sets
+        // the background wind, and this perturbation is added on top of it, so
+        // seeding there doubled the wind of every sounding deck that also names
+        // erf.abl_geo_wind (inputs_fire_abl_mrf_unstable started at 30 m/s
+        // instead of its sounding's 15 m/s).
         Vector<Real> abl_geo_wind(AMREX_SPACEDIM, 0.0);
-        {
+        if (sc.init_type == InitType::Uniform) {
             ParmParse pp_geo("erf");
             pp_geo.queryarr("abl_geo_wind", abl_geo_wind);
         }
