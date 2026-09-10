@@ -11,7 +11,8 @@ of the reaction intensity and, for Balbi, through the energy needed to bring
 the fuel to ignition. ERF-Fire carries five moisture classes per fire cell in
 ``fire_fuel_mc``: dead 1-hour, 10-hour and 100-hour fuels, and live
 herbaceous and live woody fuels. The dead classes can be held fixed or
-advanced with the atmosphere; the live classes are fixed.
+advanced with the atmosphere; how the live classes move with them is set by
+:cpp:`erf.fire.moisture_live_model`.
 
 Static moisture
 ---------------
@@ -150,6 +151,35 @@ dynamic live-to-dead herbaceous transfer, whose moisture window is
 :cpp:`erf.fire.behave.dynamic_transfer_lo` and ``_hi``
 (:ref:`sec:ROS_Behave`).
 
+Live moisture
+-------------
+
+With dynamic moisture the live herbaceous and live woody classes follow
+:cpp:`erf.fire.moisture_live_model`:
+
+- ``"legacy"`` (the default, so existing runs reproduce) passes each live
+  class through the dead-fuel update above with the 100-hour lag and no rain,
+  then bounds it to :math:`[0.30, 2.50]`. The dead-fuel update clamps its input
+  to :math:`[0.01, 0.40]` and relaxes toward the dead-fuel equilibrium of
+  :cpp:`erf.fire.emc_model`, so a live moisture above 0.40 (the default
+  :cpp:`erf.fire.moisture_live` is 0.60) drops to 0.40 or below on the first
+  step, even in saturated air, and then decays toward the 0.30 bound over tens
+  of hours. This is not a live-moisture model; it is kept for backward
+  compatibility.
+- ``"fixed"`` holds the live classes where they start, at
+  :cpp:`erf.fire.moisture_live`, or at the checkpointed value on a restart.
+  Live moisture follows the plant's water status over days to weeks, not the
+  air over the length of a fire run, so this is the recommended setting.
+
+The evolving live classes reach only the BEHAVE model, per cell or as the
+domain average: through the live moisture damping and through the transfer
+of live herbaceous load to the dead class, which grows as the live herbaceous
+moisture falls. A fuel without a live load (Anderson model 1, for example) is
+unaffected. Rothermel, Balbi and the Scott-Burgan curing transfer read
+:cpp:`erf.fire.moisture_live` directly.
+``Exec/RegTests/FireLiveMoisture`` runs the two settings side by side, and
+``ERF_GTestFuelMoistureLive`` checks both updates.
+
 Stick model
 -----------
 
@@ -210,8 +240,10 @@ Limitations
   profile.
 - Rain comes only from the uniform input rate; atmospheric precipitation is
   not yet passed to the fuel.
-- Live moisture is constant. Curing of the live herbaceous load is available
-  to the Balbi 2020 form through :cpp:`erf.fire.balbi.herb_curing`.
+- There is no live-moisture model: the live classes are held
+  (``"fixed"``) or carried through the dead-fuel update (``"legacy"``).
+  Curing of the live herbaceous load is available to the Balbi 2020 form
+  through :cpp:`erf.fire.balbi.herb_curing`.
 - The forward Euler step is accurate while the atmospheric step is much
   shorter than the shortest time lag (one hour), which holds for every
   practical ERF step.

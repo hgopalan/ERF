@@ -162,6 +162,7 @@ target_sources(${erf_exe_name}
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFbp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFuelMoistureStick.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFuelMoistureEMC.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFuelMoistureLive.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestLevelSetAdvection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestPrescribedFire.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestDirectionalShape.cpp

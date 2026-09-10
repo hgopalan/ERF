@@ -1229,6 +1229,7 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
     // the first advance, through get_stick_mc_mut()).
     const bool use_stick = (m_params.moisture_model == "stick");
     const int  n_sh      = m_params.stick.n_shells;
+    const bool live_fixed = (m_params.moisture_live_model == "fixed");
     if (use_stick && !fire_stick_mc) {
         allocate_stick_mc();
         if (m_params.fire_debug) {
@@ -1274,14 +1275,12 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
             mc(i,j,0,1) = advance_fuel_moisture_one_class(mc(i,j,0,1),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_10HR,emc_model);
             mc(i,j,0,2) = advance_fuel_moisture_one_class(mc(i,j,0,2),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_100HR,emc_model);
             }
-            // Phase 15: live fuel moisture (components 3 and 4)
-            // Live fuels respond slowly to atmospheric conditions.
-            // Use TAU_100HR as a lower bound; live moisture is bounded [0.30, 2.50].
+            // Live herbaceous and live woody moisture (components 3 and 4):
+            // held where they are with erf.fire.moisture_live_model = "fixed",
+            // otherwise the legacy dead-fuel update (see advance_live_fuel_moisture).
             if (mc.nComp() >= 5) {
-                Real lh_new = advance_fuel_moisture_one_class(mc(i,j,0,3),RH,T_C,0.0_rt,dt_hours,FuelMoistureConst::TAU_100HR,emc_model);
-                Real lw_new = advance_fuel_moisture_one_class(mc(i,j,0,4),RH,T_C,0.0_rt,dt_hours,FuelMoistureConst::TAU_100HR,emc_model);
-                mc(i,j,0,3) = amrex::max(0.30_rt, amrex::min(lh_new, 2.50_rt));  // live herba: 30%–250%
-                mc(i,j,0,4) = amrex::max(0.30_rt, amrex::min(lw_new, 2.50_rt));  // live woody: 30%–250%
+                mc(i,j,0,3) = advance_live_fuel_moisture(mc(i,j,0,3),RH,T_C,dt_hours,live_fixed,emc_model);
+                mc(i,j,0,4) = advance_live_fuel_moisture(mc(i,j,0,4),RH,T_C,dt_hours,live_fixed,emc_model);
             }
             Real dead_load = fp.w_d1+fp.w_d10+fp.w_d100;
             Real sw = dead_load>0.0_rt ? (fp.w_d1*fp.sigma_d1)/dead_load : fp.sigma_d1;

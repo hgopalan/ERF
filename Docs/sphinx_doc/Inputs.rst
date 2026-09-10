@@ -3732,8 +3732,12 @@ Fuel and moisture
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.moisture_100hr**                    | 100-hour dead fuel moisture [fraction]                     | Real 0-1                       | 0.10                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.moisture_live**                     | Live herbaceous and woody moisture [fraction], held        | Real                           | 0.60                   |
-|                                                | constant                                                   |                                |                        |
+| **erf.fire.moisture_live**                     | Live herbaceous and woody moisture [fraction]; the live    | Real                           | 0.60                   |
+|                                                | classes start here (see moisture_live_model)               |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.moisture_live_model**               | Live classes with moisture_dynamic: the legacy dead-fuel   | "legacy", "fixed"              | "legacy"               |
+|                                                | update (a value above 0.40 drops to 0.40 on the first      |                                |                        |
+|                                                | step) or held at moisture_live                             |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.moisture_dynamic**                  | Advance the dead classes each step with the Nelson time-   | Boolean                        | true                   |
 |                                                | lag model                                                  |                                |                        |

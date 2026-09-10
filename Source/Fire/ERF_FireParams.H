@@ -73,6 +73,12 @@ struct FireParams
     } stick;
     amrex::Real       precip_rate_mm_hr   = 0.0;         ///< Uniform precipitation rate [mm/hr]
     amrex::Real       moisture_live       = 0.60;        ///< Live fuel moisture [fraction]
+    // How the live classes move when moisture_dynamic is on:
+    //   "legacy" (default) — the dead-fuel time-lag update with the 100-h lag,
+    //                        bounded to [0.30, 2.50]; its dead-range clamp
+    //                        pulls a value above 0.40 down to 0.40 at once
+    //   "fixed"            — held at moisture_live (or the checkpointed value)
+    std::string       moisture_live_model = "legacy";
 
     // Moisture of extinction (Phase 4)
     bool              use_dynamic_mext    = true;        ///< Compute M_x from fuel SAV
@@ -666,12 +672,16 @@ struct FireParams
        if (emc_model != "legacy" && emc_model != "van_wagner") {
            amrex::Abort("erf.fire.emc_model must be \"legacy\" or \"van_wagner\"");
        }
+       pp.query("moisture_live_model", moisture_live_model);
        pp.query("stick.n_shells", stick.n_shells);
        pp.queryarr("stick.radius_cm", stick.radius_cm);
        pp.query("stick.rain_surface_moisture", stick.rain_surface_moisture);
        pp.query("stick.diffusivity_scale", stick.diffusivity_scale);
        if (moisture_model != "timelag" && moisture_model != "stick") {
            amrex::Abort("erf.fire.moisture_model must be \"timelag\" or \"stick\"");
+       }
+       if (moisture_live_model != "legacy" && moisture_live_model != "fixed") {
+           amrex::Abort("erf.fire.moisture_live_model must be \"legacy\" or \"fixed\"");
        }
        if (moisture_model == "stick") {
            if (stick.n_shells < 1 || stick.n_shells > 16) { amrex::Abort("erf.fire.stick.n_shells must be 1-16"); }
