@@ -1,0 +1,14 @@
+Auto-merging Docs/sphinx_doc/Inputs.rst
+Auto-merging Source/DataStructs/ERF_TurbStruct.H
+CONFLICT (content): Merge conflict in Source/DataStructs/ERF_TurbStruct.H
+Auto-merging Source/ERF.H
+Auto-merging Source/PBL/ERF_ComputeDiffusivityMRF.cpp
+CONFLICT (content): Merge conflict in Source/PBL/ERF_ComputeDiffusivityMRF.cpp
+Auto-merging Source/PBL/ERF_ComputeDiffusivityYSUNew.cpp
+Auto-merging Source/PBL/ERF_PBLModels.H
+Auto-merging Source/PBL/ERF_PBLScaleAwareBlending.H
+CONFLICT (content): Merge conflict in Source/PBL/ERF_PBLScaleAwareBlending.H
+Auto-merging Source/TimeIntegration/ERF_Advance.cpp
+Auto-merging Source/TimeIntegration/ERF_SlowRhsPost.cpp
+Auto-merging Tests/CTestList.cmake
+Automatic merge failed; fix conflicts and then commit the result.
