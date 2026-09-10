@@ -1,0 +1,66 @@
+# Calm_Plume: settings shared by the decks in this folder. A steady prescribed heat
+# source under still air, and the plume it raises.
+#
+# 1.6 x 1.6 x 1.2 km, 40 m cells, periodic in x and y, a Smagorinsky LES, gravity.
+# The ground has a zero heat flux, so the only heat the air receives is the
+# prescribed 1.1e3 W/m2 over a 120 m disc at the centre (50 MW, carried into the
+# lowest cells by the coupling's exp(-z / 45 m) profile). Nothing burns. The top
+# 200 m damp the vertical velocity only, which leaves the heat content untouched.
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 1600.0 1600.0 1200.0
+amr.n_cell = 40 40 30
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.max_grid_size = 20      # box lengths must divide by the fire grid ratio
+amr.max_grid_size_z = 30    # the fire module forbids z-decomposition
+
+zlo.type = "surface_layer"  # the fire module needs the surface layer at the ground
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+erf.most.surf_temp_flux = 0.0          # adiabatic ground: all heat is the prescribed source
+
+erf.molec_diff_type = "None"
+erf.les_type = "Smagorinsky"
+erf.Cs = 0.1
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+erf.rayleigh_damp_W = true
+erf.rayleigh_damp_U = false
+erf.rayleigh_damp_V = false
+erf.rayleigh_damp_T = false
+erf.rayleigh_zdamp = 200.0
+erf.rayleigh_dampcoef = 0.2
+
+erf.fixed_dt = 1.0                     # acoustic substeps are automatic
+erf.substepping_cfl = 0.5
+max_step = 1000000
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_file_1 = "plt_atm_"
+erf.plot_per_1 = 50.0
+erf.plot_vars_1 = density theta x_velocity y_velocity z_velocity
+erf.fire_plot_int = -1
+
+erf.fire.enable = true
+erf.fire.grid_ratio = 2               # 20 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.ros_model = "rothermel"
+erf.fire.fuel_model_id = 1
+erf.fire.moisture_dynamic = false
+erf.fire.use_waf = false
+erf.fire.use_terrain_wind = false
+erf.fire.write_fire_stats_csv = false
+erf.fire.ignition_r = 0.0             # nothing burns
+erf.fire.coupling_type = "lagged"
+erf.fire.fire_atm_feedback = 1.0
+erf.fire.inject_latent = false
+erf.fire.smoke_enable = false
+erf.fire.prescribed_heat.flux = 1.1e3
+erf.fire.prescribed_heat.center = 800.0 800.0
+erf.fire.prescribed_heat.radius = 120.0

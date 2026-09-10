@@ -29,7 +29,7 @@ Calm_Plume, and the fire grid is 2 m.
 | `Speed_Gradient` | eikonal travel time in a linear speed gradient | a spatially varying rate |
 | `Slope_No_Wind` | Rothermel's slope factor; the Wulff shape | slope along the front normal, the ground projection, the ellipse shape of the directional rate |
 | `Moisture_Relaxation` | time-lag ODE solution; Rothermel at the moisture | dynamic dead-fuel moisture and extinction |
-| `Calm_Plume` | heat budget; Heskestad; Morton-Taylor-Turner and Briggs | the heat the coupling injects and the plume it raises |
+| `Calm_Plume` | heat budget (checked); Heskestad, Morton-Taylor-Turner and Briggs (reported) | the heat the coupling injects; the plume it raises, under-entrained at 40 m |
 
 The coupled no-wind line fire of Coen et al. (2013) is `Exec/RegTests/FireLineFire`
 (`nowind_2way`), next to the wind decks of the same case, and the two options these

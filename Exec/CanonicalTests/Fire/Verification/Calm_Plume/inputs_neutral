@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# Neutral air (theta = 300 K at every height): the far-field plume follows the
+# Heskestad centreline velocity and temperature correlations.
+erf.input_sounding_file = "sounding_neutral"
+stop_time = 1200.0

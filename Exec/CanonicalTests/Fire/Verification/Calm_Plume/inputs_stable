@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# Stable air, N = 0.01 1/s (theta rising 3.0581 K/km): the plume stops rising and
+# spreads, at the height plume theory gives for a buoyancy flux F in stratification N.
+erf.input_sounding_file = "sounding_stable"
+stop_time = 1500.0

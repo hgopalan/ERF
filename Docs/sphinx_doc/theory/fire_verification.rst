@@ -157,8 +157,38 @@ heads for :math:`E_w` and holds at :math:`E_d`:
 :math:`M = \max(E_w + (M_0 - E_w) e^{-t/\tau}, E_d)`, 0.0895 after one hour,
 where Nelson's choice gives :math:`E_d + (M_0 - E_d) e^{-t/\tau}` = 0.106.
 
+The plume over a prescribed heat source
+---------------------------------------
+
+``Calm_Plume`` releases 49.3 MW from a 120 m disc (``erf.fire.prescribed_heat``)
+under still air, neutral and with :math:`N = 0.01` s\ :sup:`-1`, in a 40 m LES
+with an adiabatic ground. The heat budget is checked: the atmosphere's heat
+content grows by the placed power times the heated time to 0.01 % in both decks.
+
+Plume theory is reported, not checked. Against Heskestad's far-field centreline
+correlations the neutral plume's excess temperature runs from 1.14 to 1.76 times
+and its velocity from 0.88 to 1.36 times the correlation between 260 and 540 m,
+and its axis velocity grows with height (4.2 to 6.1 m/s up to 740 m) where the
+far-field law has it fall. The stable plume's radial outflow sits at 383 m against
+the spreading level of 312 m that Morton, Taylor and Turner's maximum height
+:math:`5.0 F^{1/4} N^{-3/4}` implies, but its core passes neutral buoyancy near
+460 m with 4 m/s and overshoots to about 935 m, nearly twice the theoretical top.
+The 240 m source is six cells across and broad against its height, so the plume
+is under-entrained and still in its near field; validating it needs a smaller
+source on 10 to 20 m cells.
+
 References
 ----------
+
+Briggs, G. A. (1975). Plume rise predictions. In Lectures on Air Pollution and
+Environmental Impact Analyses, American Meteorological Society, 59-111.
+
+Heskestad, G. (2016). Fire plumes, flame height, and air entrainment. In SFPE
+Handbook of Fire Protection Engineering, 5th ed., Springer, 396-428.
+
+Morton, B. R., G. I. Taylor and J. S. Turner (1956). Turbulent gravitational
+convection from maintained and instantaneous sources. Proceedings of the Royal
+Society A, 234, 1-23.
 
 Nelson, R. M. (2000). Prediction of diurnal change in 10-h fuel stick moisture
 content. Canadian Journal of Forest Research, 30, 1071-1087.
