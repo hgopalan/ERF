@@ -282,6 +282,16 @@ The default subvolume inventory is documented on :ref:`sec:Plotfiles`.
 |                             | [problem-dep.]   |
 |                             |                  |
 +-----------------------------+------------------+
+| **rhoadv_dust**             | Dust mass        |
+|                             | concentration    |
+|                             | [kg/m^3]; dust   |
+|                             | builds only      |
++-----------------------------+------------------+
+| **smoke**                   | Smoke mass       |
+|                             | concentration    |
+|                             | [kg/m^3]; fire   |
+|                             | builds only      |
++-----------------------------+------------------+
 | **soundspeed**              | Sound speed      |
 |                             | [m/s]            |
 |                             |                  |
@@ -808,8 +818,11 @@ the kinematic momentum diffusivity ``Kmv / density``.
   corresponding velocity or pressure quantity.
 
 The fixed conserved-state inventory is ``density``, ``rhotheta``, ``rhoKE``,
-``rhoadv_0``, and ``rhoQ1`` through ``rhoQ11``. The ``rhoQ`` components are
-active only to the extent that the selected moisture model provides them.
+``rhoadv_0``, ``rhoadv_dust`` (builds with ``ERF_USE_DUST``), ``smoke`` (builds
+with ``ERF_ENABLE_FIRE``), and ``rhoQ1`` through ``rhoQ11``. The ``rhoQ``
+components are active only to the extent that the selected moisture model
+provides them. ``rhoadv_dust`` and ``smoke`` are written as stored, as mass
+concentrations, and only when listed in the plot variables.
 
 Wind-farm-only variables
 ~~~~~~~~~~~~~~~~~~~~~~~~

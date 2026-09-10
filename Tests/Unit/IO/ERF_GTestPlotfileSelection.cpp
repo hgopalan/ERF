@@ -309,6 +309,48 @@ TEST(Plotfile3DSelection, RawStateNamesUseTheMoistureMapAboveRhoQ1)
     EXPECT_FALSE(erf_plotfile::plot3d_fixed_variable_available("rhoQ1", truncated));
 }
 
+// Motivation: Both output paths walk the raw state names and copy the component
+// each name maps to.  Fire and dust builds listed "smoke" and "rhoadv_dust"
+// without a mapping, so requesting them only printed "not available".  Every
+// name must map to its own component, in the layout order of ERF_IndexDefines.H.
+TEST(Plotfile3DSelection, EveryConservedStateNameMapsToItsComponent)
+{
+    const auto names = erf_plotfile::plot3d_conserved_state_names();
+    ASSERT_EQ(static_cast<int>(names.size()), NDRY + NSCALARS + NMOIST_max);
+    for (int i = 0; i < static_cast<int>(names.size()); ++i) {
+        EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index(names[i]), i)
+            << "state name " << names[i] << " does not map to component " << i;
+    }
+
+    const auto dry    = make_capabilities(MoistureType::None);
+    const auto moist  = make_capabilities(MoistureType::Kessler);
+
+#ifdef ERF_USE_DUST
+    EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index("rhoadv_dust"), RhoAdv_comp);
+    EXPECT_TRUE(erf_plotfile::plot3d_fixed_variable_available("rhoadv_dust", dry));
+    EXPECT_TRUE(erf_plotfile::plot3d_fixed_variable_available("rhoadv_dust", moist));
+#else
+    EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index("rhoadv_dust"), -1);
+    EXPECT_FALSE(erf_plotfile::plot3d_fixed_variable_available("rhoadv_dust", dry));
+    EXPECT_FALSE(erf_plotfile::plot3d_fixed_variable_available("rhoadv_dust", moist));
+#endif
+
+#ifdef ERF_ENABLE_FIRE
+    EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index("smoke"), RhoSmoke_comp);
+    EXPECT_TRUE(erf_plotfile::plot3d_fixed_variable_available("smoke", dry));
+    EXPECT_TRUE(erf_plotfile::plot3d_fixed_variable_available("smoke", moist));
+
+    // Like the other scalars below the moist window, smoke is bounded by the
+    // allocated width rather than by the moisture map
+    const auto truncated = make_capabilities(MoistureType::None, RhoSmoke_comp);
+    EXPECT_FALSE(erf_plotfile::plot3d_fixed_variable_available("smoke", truncated));
+#else
+    EXPECT_EQ(erf_plotfile::plot3d_conserved_component_index("smoke"), -1);
+    EXPECT_FALSE(erf_plotfile::plot3d_fixed_variable_available("smoke", dry));
+    EXPECT_FALSE(erf_plotfile::plot3d_fixed_variable_available("smoke", moist));
+#endif
+}
+
 // Motivation: The conserved state does not end at the moist species.
 // SuperDroplets places each non-water species' qt/qv above the moist window, at
 // RhoQ1_comp + qstate_moist_size + 2*k, and those components are allocated,

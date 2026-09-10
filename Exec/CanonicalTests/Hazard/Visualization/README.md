@@ -48,10 +48,11 @@ python plot_hazard_fields.py --plotdir path/to/plt_00020 --case HaboobFirePit
 
 Make sure the ERF `inputs` file includes these in `erf.plot_vars_1`:
 ```
-erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta
+erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta smoke rhoadv_dust
 ```
-Smoke (`smoke`) and dust (`rhoadv_dust`) are written automatically
-when `ERF_ENABLE_FIRE=ON` and `ERF_USE_DUST=ON`.
+Smoke (`smoke`, fire builds) and dust (`rhoadv_dust`, dust builds) are written
+only when listed, as mass concentrations in kg/m³, and `erf.plot_int_1` (or
+`erf.plot_per_1`) must be positive for any plotfile to be written.
 
 ---
 

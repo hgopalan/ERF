@@ -51,8 +51,11 @@ erf.sum_interval = 50
 erf.v = 1
 amr.v = 1
 erf.check_int = -1
-erf.plot_int = 100
-erf.plot_vars = theta qv u v w
+# Atmosphere plotfiles plt_1_NNNNN carry the smoke mass concentration [kg/m^3]
+# that check_smoke_tracer.py reads. (erf.plot_int/erf.plot_vars, used here
+# before 2026-09-10, were read by nothing, so no atmosphere plotfile was written.)
+erf.plot_int_1 = 500
+erf.plot_vars_1 = density theta x_velocity y_velocity z_velocity smoke
 erf.fire_plot_file = plt_fire_smoke_
 erf.fire_plot_int = 100
 
