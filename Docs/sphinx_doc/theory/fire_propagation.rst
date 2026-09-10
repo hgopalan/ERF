@@ -212,6 +212,22 @@ keep the projection, and :cpp:`erf.fire.levelset.ellipse` cannot be combined
 with it. The unit test ``ERF_GTestDirectionalShape`` checks the rates, the
 vector addition and the Wulff extents of both forms.
 
+Flanks at :math:`R_0` are the projection's claim, not an observation, and give
+a length-to-width ratio far above the observed one: 5.7 for short grass in a
+1.5 m/s wind, where Anderson (1983) gives 1.5.
+:cpp:`erf.fire.directional_ellipse_lw = "anderson"` (default ``"model"``)
+keeps the head rate, its direction and the back rate :math:`R_0`, and sets the
+semi-minor rate to :math:`a = b/(L/W)`. Here :math:`L/W` is Anderson's ratio (as
+in the spread ellipse below), capped at
+:cpp:`erf.fire.directional_ellipse_lw_max` (default 8), evaluated at the
+effective wind speed :math:`U_\text{eff}`. That speed is the wind that alone
+would give the head rate, :math:`\text{model}(U_\text{eff}, 0) = R_h`, which is
+BEHAVE's definition, so a slope elongates the fire as the equivalent wind
+would. For Rothermel and BEHAVE it is the inverted wind factor
+:math:`((R_h/R_0 - 1)/(C (\beta/\beta_\text{op})^{-E}))^{1/B}`, capped at the
+model's own wind limit; the other models find it by bisection. The ellipse
+stays convex, so the head still runs at :math:`R_h`.
+
 Spread ellipse
 ~~~~~~~~~~~~~~
 

@@ -3905,6 +3905,13 @@ Rate of spread
 |                                                | back and flank rates, which keeps a point fire's head at   |                                |                        |
 |                                                | the head rate; not for balbi or hybrid                     |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.directional_ellipse_lw**            | Flank rate of that ellipse: the model's no-wind, no-slope  | "model", "anderson"            | "model"                |
+|                                                | rate, or b over Anderson's (1983) length-to-width ratio at |                                |                        |
+|                                                | the effective wind speed; head and back unchanged; needs   |                                |                        |
+|                                                | directional_shape = "ellipse"                              |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.directional_ellipse_lw_max**        | Cap on that Anderson ratio (the fit itself saturates at 8) | Real >= 1                      | 8.0                    |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.prescribed.ros**                    | Rate of spread for ros_model = prescribed where by_fuel    | Real >= 0                      | 0.0                    |
 |                                                | has no entry; no wind, slope or moisture dependence, and   |                                |                        |
 |                                                | directional_ros is turned off [m/s]                        |                                |                        |

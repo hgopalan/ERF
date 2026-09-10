@@ -237,6 +237,16 @@ erf.fire.directional_ros = false
 #              head runs at the head rate
 erf.fire.directional_shape = "projection"
 
+# Flank rate of the "ellipse" shape (needs directional_shape = "ellipse").
+# "model" (default) keeps the model's no-wind, no-slope rate at the flanks, so
+#          the length-to-width ratio (R_h/R0 + 1)/2 is not capped
+# "anderson" sets the flank rate to b / LW with Anderson's (1983) ratio LW at the
+#          effective wind speed (the wind that alone gives the head rate, so a
+#          slope elongates the fire too), capped at directional_ellipse_lw_max;
+#          head and back rates are unchanged
+erf.fire.directional_ellipse_lw = "model"
+erf.fire.directional_ellipse_lw_max = 8.0
+
 # Level-set path only: extrapolate the level set into non-burnable cells
 # inside every stencil (gradient, Laplacian, front normal, reinitialisation),
 # so a masked wall is a zero-gradient boundary of the distance function.

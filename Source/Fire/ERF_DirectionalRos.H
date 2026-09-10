@@ -86,6 +86,17 @@
  * (ERF_LevelSetEllipse.H has the support function), so the length-to-width ratio
  * is (R_h/R0 + 1)/2, uncapped like the projection's.
  *
+ * That ratio is the projection's claim that the flanks spread at the no-wind
+ * rate, and it runs far above the observed one: 5.7 for short grass in a
+ * 1.5 m/s wind, where Anderson (1983) gives 1.5. erf.fire.directional_ellipse_lw
+ * = "anderson" (DIRECTIONAL_ELLIPSE_LW_ANDERSON, opt-in) keeps the head and back
+ * rates and sets the flank rate a = b / LW instead, with LW Anderson's ratio at
+ * the effective wind speed, capped at erf.fire.directional_ellipse_lw_max. The
+ * effective wind speed is the wind that alone would give the head rate R_h, the
+ * BEHAVE definition, so a slope elongates the fire as the equivalent wind would;
+ * for Rothermel and BEHAVE it is capped at the model's own wind limit. The head
+ * still runs at R_h and the back at R0, and the ellipse stays convex.
+ *
  * Balbi has its own directional path in ERF_BalbiModel.H, which carries the
  * per-cell moisture, surface temperature and heat-flux couplings that model
  * supports; this covers the remaining models.
@@ -161,6 +172,46 @@ amrex::Real directional_ros_cell(const DirectionalRosState& st,
 inline constexpr int DIRECTIONAL_SHAPE_PROJECTION = 0;  ///< the model evaluated along the front normal
 inline constexpr int DIRECTIONAL_SHAPE_ELLIPSE    = 1;  ///< support function of the model's spread ellipse
 
+/// Length-to-width ratio of the ellipse shape, erf.fire.directional_ellipse_lw
+inline constexpr int DIRECTIONAL_ELLIPSE_LW_MODEL    = 0;  ///< flanks at the model's no-wind, no-slope rate
+inline constexpr int DIRECTIONAL_ELLIPSE_LW_ANDERSON = 1;  ///< Anderson (1983) at the effective wind speed, capped
+
+/**
+ * @brief Effective wind speed [m/s]: the wind that alone gives the head rate R_h
+ *
+ * The wind factor inverted at the combined head rate. Closed form for the
+ * Rothermel power law (Rothermel and BEHAVE), capped at the model's own wind
+ * limit; bisection on [0, 30] m/s for the others, whose rates increase with the
+ * wind.
+ *
+ * @param[in] st   Precomputed coefficients for the selected model
+ * @param[in] R_h  Head rate of spread [m/s]
+ */
+AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+amrex::Real directional_effective_wind(const DirectionalRosState& st, amrex::Real R_h) noexcept
+{
+    const amrex::Real zero = 0.0;
+    const amrex::Real one  = 1.0;
+    if (st.model == DIRECTIONAL_ROS_ROTHERMEL || st.model == DIRECTIONAL_ROS_BEHAVE) {
+        const bool behave = (st.model == DIRECTIONAL_ROS_BEHAVE);
+        const amrex::Real R0   = behave ? st.bs.r_0          : st.rc.R0;
+        const amrex::Real cE   = behave ? st.bs.C * st.bs.beta_ratio_E : st.rc.C * st.rc.beta_ratio_E;
+        const amrex::Real B    = behave ? st.bs.B            : st.rc.B;
+        const amrex::Real Umax = behave ? st.bs.U_max_ftmin  : st.rc.U_max_ftmin;
+        const amrex::Real conv = behave ? st.bs.wind_conv    : st.rc.wind_conv;
+        if (R0 <= zero || cE <= zero || B <= zero || R_h <= R0) { return zero; }
+        const amrex::Real U_ft = std::pow((R_h / R0 - one) / cE, one / B);
+        return amrex::min(U_ft, Umax) / conv;
+    }
+    amrex::Real lo = zero, hi = amrex::Real(30.0);
+    if (directional_ros_cell(st, hi, zero) <= R_h) { return hi; }
+    for (int it = 0; it < 30; ++it) {
+        const amrex::Real mid = amrex::Real(0.5) * (lo + hi);
+        if (directional_ros_cell(st, mid, zero) < R_h) { lo = mid; } else { hi = mid; }
+    }
+    return amrex::Real(0.5) * (lo + hi);
+}
+
 /**
  * @struct DirectionalEllipse
  * @brief Spread ellipse built from the selected model, and the direction of its head
@@ -175,17 +226,22 @@ struct DirectionalEllipse
 /**
  * @brief Spread ellipse whose head, back and flank rates come from the model
  *
- * Head R0 + g |dR_w w + dR_s s| along that vector, back and flanks R0; see the
- * file comment.
+ * Head R0 + g |dR_w w + dR_s s| along that vector, back R0, flanks R0 or, with
+ * DIRECTIONAL_ELLIPSE_LW_ANDERSON, b over Anderson's length-to-width ratio at
+ * the effective wind speed; see the file comment.
  *
  * @param[in] st          Precomputed coefficients for the selected model
  * @param[in] u, v        Wind [m/s]
  * @param[in] dzdx, dzdy  Terrain slopes [-]
+ * @param[in] lw_mode     DIRECTIONAL_ELLIPSE_LW_MODEL or DIRECTIONAL_ELLIPSE_LW_ANDERSON
+ * @param[in] lw_max      Cap on Anderson's length-to-width ratio
  */
 AMREX_GPU_DEVICE AMREX_FORCE_INLINE
 DirectionalEllipse directional_ellipse_cell(const DirectionalRosState& st,
                                             amrex::Real u, amrex::Real v,
-                                            amrex::Real dzdx, amrex::Real dzdy) noexcept
+                                            amrex::Real dzdx, amrex::Real dzdy,
+                                            int lw_mode = DIRECTIONAL_ELLIPSE_LW_MODEL,
+                                            amrex::Real lw_max = amrex::Real(8.0)) noexcept
 {
     constexpr amrex::Real tiny = 1.0e-12;
     const amrex::Real zero = 0.0;
@@ -209,9 +265,18 @@ DirectionalEllipse directional_ellipse_cell(const DirectionalRosState& st,
     const amrex::Real R_h = R0 + g * P;
     d.e.b  = amrex::Real(0.5) * (R_h + R0);
     d.e.c  = amrex::Real(0.5) * (R_h - R0);
-    d.e.a  = R0;
-    d.e.LB = (R0 > tiny) ? d.e.b / R0 : amrex::Real(1.0e12);
-    d.e.HB = (R0 > tiny) ? R_h / R0   : amrex::Real(1.0e12);
+    if (lw_mode == DIRECTIONAL_ELLIPSE_LW_ANDERSON) {
+        // Flanks from Anderson's ratio at the effective wind speed [mph]
+        const amrex::Real U_eff = directional_effective_wind(st, R_h);
+        const amrex::Real LB = amrex::max(amrex::Real(1.0),
+                                          amrex::min(anderson_LW_ratio(U_eff * amrex::Real(2.23694)), lw_max));
+        d.e.a  = d.e.b / LB;
+        d.e.LB = LB;
+    } else {
+        d.e.a  = R0;
+        d.e.LB = (R0 > tiny) ? d.e.b / R0 : amrex::Real(1.0e12);
+    }
+    d.e.HB = (R0 > tiny) ? R_h / R0 : amrex::Real(1.0e12);
     return d;
 }
 
@@ -241,6 +306,8 @@ amrex::Real directional_ellipse_speed(const DirectionalEllipse& d,
  *                     rather than into it
  * @param[in]  shape   DIRECTIONAL_SHAPE_PROJECTION (the model along the normal)
  *                     or DIRECTIONAL_SHAPE_ELLIPSE (the model's spread ellipse)
+ * @param[in]  ellipse_lw      Flank rule of the ellipse, DIRECTIONAL_ELLIPSE_LW_*
+ * @param[in]  ellipse_lw_max  Cap on Anderson's length-to-width ratio
  */
 inline void fill_directional_ros(amrex::MultiFab& R_mf,
                                  const amrex::MultiFab& phi,
@@ -250,7 +317,9 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
                                  const DirectionalRosState& st,
                                  const amrex::MultiFab* mask = nullptr,
                                  bool wall_extrap = false,
-                                 int shape = DIRECTIONAL_SHAPE_PROJECTION)
+                                 int shape = DIRECTIONAL_SHAPE_PROJECTION,
+                                 int ellipse_lw = DIRECTIONAL_ELLIPSE_LW_MODEL,
+                                 amrex::Real ellipse_lw_max = amrex::Real(8.0))
 {
     const amrex::Real dx = geom.CellSize(0);
     const amrex::Real dy = geom.CellSize(1);
@@ -287,7 +356,8 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
             if (shape == DIRECTIONAL_SHAPE_ELLIPSE) {
                 // Support function of the model's spread ellipse, and its head
                 // rate where the normal is undefined
-                const DirectionalEllipse de = directional_ellipse_cell(st, u, v, dzdx, dzdy);
+                const DirectionalEllipse de = directional_ellipse_cell(st, u, v, dzdx, dzdy,
+                                                                      ellipse_lw, ellipse_lw_max);
                 R_arr(i, j, k) = (grad > grad_min)
                     ? directional_ellipse_speed(de, dpdx / grad, dpdy / grad)
                     : de.e.b + de.e.c;
@@ -325,6 +395,8 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
  * @param[in]     eps_visc  Artificial viscosity coefficient
  * @param[in]     st        Precomputed coefficients for the selected model
  * @param[in]     shape     DIRECTIONAL_SHAPE_PROJECTION or DIRECTIONAL_SHAPE_ELLIPSE
+ * @param[in]     ellipse_lw      Flank rule of the ellipse, DIRECTIONAL_ELLIPSE_LW_*
+ * @param[in]     ellipse_lw_max  Cap on Anderson's length-to-width ratio
  */
 inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,
                                             const amrex::MultiFab& wind,
@@ -336,11 +408,14 @@ inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,
                                             const amrex::MultiFab* nonburnable = nullptr,
                                             bool wall_extrap = false,
                                             const fire_levelset::LevelSetGradient& grad_scheme = fire_levelset::LevelSetGradient{},
-                                            int shape = DIRECTIONAL_SHAPE_PROJECTION)
+                                            int shape = DIRECTIONAL_SHAPE_PROJECTION,
+                                            int ellipse_lw = DIRECTIONAL_ELLIPSE_LW_MODEL,
+                                            amrex::Real ellipse_lw_max = amrex::Real(8.0))
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
-            fill_directional_ros(R, phi_stage, wind, slopes, geom, st, nonburnable, wall_extrap, shape);
+            fill_directional_ros(R, phi_stage, wind, slopes, geom, st, nonburnable, wall_extrap, shape,
+                                 ellipse_lw, ellipse_lw_max);
         }, nonburnable, wall_extrap, grad_scheme);
 }
 

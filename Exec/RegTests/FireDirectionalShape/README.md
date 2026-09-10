@@ -6,7 +6,7 @@ and with the spread ellipse (`"ellipse"`), against Rothermel's head rate and the
 exact solution of each formulation's own equation.
 
 ```
-MPIRUN="mpirun -np 2" ./run_firedirectionalshape.sh /path/to/erf_exec   # four decks, then the checks
+MPIRUN="mpirun -np 2" ./run_firedirectionalshape.sh /path/to/erf_exec   # five decks, then the checks
 SKIP_RUN=1 ./run_firedirectionalshape.sh x                             # checks only
 ```
 
@@ -28,6 +28,7 @@ otherwise wrap the periodic domain). The wind stays below the 300 ft/min
 | `projection` | the default: R(n) = R0 (1 + phi_w(max(U . n, 0))) |
 | `projection_key` | the same with `directional_shape = "projection"` written out |
 | `ellipse` | `directional_shape = "ellipse"`: head R0 (1 + phi_w), back and flanks R0 |
+| `ellipse_anderson` (800 s) | the same with `directional_ellipse_lw = "anderson"`: flank rate b / LW, Anderson's LW at the wind |
 
 ## Why the projection's head falls short
 
@@ -66,9 +67,14 @@ projection's exact solution (the Wulff shape) 0.14155 m/s, 57 % of it. Rates
 | `projection` | 0.18487 (-25.9 %; 40 % of the way from the Wulff tip to Rothermel) | 0.02396 | 0.02400 |
 | `projection_key` | arrival times identical to `projection` bit for bit | | |
 | `ellipse` | 0.24775 (-0.67 %) | 0.02388 | 0.02403 |
+| `ellipse_anderson` (800 s) | 0.24866 (-0.31 %) | 0.02399 | 0.09185 (exact 0.09196; LW 1.487) |
 
-Back and flanks match the exact rates (R0 = 0.02404 m/s) to 0.7 %; 42 of the
-44 checks below pass, all of them for the four decks of the script.
+Back and flanks match the exact rates (R0 = 0.02404 m/s, and b / LW for
+`ellipse_anderson`) to 0.7 %. All 28 checks of the five decks in the script
+pass; of the 44 checks over the eight decks and scheme variants below (before
+`ellipse_anderson` was added), the two on the upwind ellipse's head fail.
+With Anderson's flanks the fire is 3.8 times wider than with the model's,
+while its head and back are unchanged.
 
 The head against the level-set scheme, with extra arguments on the same decks:
 

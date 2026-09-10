@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Slope_No_Wind: a grass fire on an inclined plane in still air, against Rothermel.
 
-    python3 check_slope_no_wind.py iso_s30 iso_s60 dir_s30 dir_s60 ell_s30 ell_s60
+    python3 check_slope_no_wind.py iso_s30 iso_s60 dir_s30 dir_s60 ell_s30 ell_s60 and_s30 and_s60
 
 Rothermel (1972) spreads a fire on a slope of tangent s at R0 (1 + phi_s) with
 the slope factor phi_s = 5.275 beta^-0.3 s^2; R0 is the no-wind rate of Anderson
@@ -57,6 +57,12 @@ ell_*  erf.fire.directional_shape = "ellipse": R(n) is the support function of t
        b = (R_h + R0)/2, c = (R_h - R0)/2, a = R0. An ellipse is its own Wulff
        shape, so the head runs at Rothermel's head rate. All four directions at
        the Hopf solution, and the head within 3 % of R0 (1 + phi_s) / sqrt(1 + s^2).
+
+and_*  the same with erf.fire.directional_ellipse_lw = "anderson": the flank rate
+       is a = b / LW, LW Anderson's (1983) length-to-width ratio at the effective
+       wind speed, the wind whose factor equals phi_s (capped at the 300 ft/min
+       fine-fuel limit). These flanks are wide, so the decks run on a 400 m wide
+       domain ignited at y = 200 m. Same checks as the ell_* decks.
 """
 
 import glob, math, sys
@@ -70,10 +76,14 @@ except ImportError:
 TOL = 0.03
 MIN_RATE_CELLS = 20
 T_MARGIN = 20.0
-SLOPES = {"iso_s30": 0.3, "iso_s60": 0.6, "dir_s30": 0.3, "dir_s60": 0.6, "ell_s30": 0.3, "ell_s60": 0.6}
-XS, YS, R_IG = 80.0, 100.0, 10.0
+SLOPES = {"iso_s30": 0.3, "iso_s60": 0.6, "dir_s30": 0.3, "dir_s60": 0.6, "ell_s30": 0.3, "ell_s60": 0.6,
+          "and_s30": 0.3, "and_s60": 0.6}
+CENTRE = {"and_s30": (80.0, 200.0), "and_s60": (80.0, 200.0)}   # ignition point; (80, 100) otherwise
+R_IG = 10.0
 M_F = 0.055
 FT_MIN_TO_M_S = 0.00508
+M_S_TO_FT_MIN = 196.85
+LW_MAX = 8.0
 FM1 = dict(w0=0.034, sigma=3500.0, delta=1.0, Mx=0.12, h=8000.0, S_T=0.0555, S_e=0.010, rho_p=32.0)
 N_ANGLES = 3600
 results = []
@@ -85,7 +95,8 @@ def check(name, ok, detail):
 
 
 def rothermel_fm1(M_f):
-    """Rothermel (1972) no-wind rate and slope-factor constant for fuel model 1: (R0 [m/s], 5.275 beta^-0.3)."""
+    """Rothermel (1972) for fuel model 1: R0 [m/s], the slope-factor constant 5.275 beta^-0.3, and the
+    effective wind speed [m/s] whose wind factor equals a given factor, under the fine-fuel wind cap."""
     fp = FM1
     w_n = fp['w0'] * (1 - fp['S_T']); rho_b = fp['w0'] / fp['delta']; beta = rho_b / fp['rho_p']; s = fp['sigma']
     beta_op = 3.348 * s ** -0.8189; s15 = s ** 1.5; Gmax = s15 / (495 + 0.0594 * s15); A = 133 * s ** -0.7913
@@ -96,10 +107,23 @@ def rothermel_fm1(M_f):
     xi = math.exp((0.792 + 0.681 * math.sqrt(s)) * (beta + 0.1)) / (192 + 0.2595 * s)
     eps = math.exp(-138 / s); Qig = 250 + 1116 * M_f
     R0 = IR * xi / (rho_b * eps * Qig) * FT_MIN_TO_M_S
-    return R0, 5.275 * beta ** -0.3
+    C = 7.47 * math.exp(-0.133 * s ** 0.55); B = 0.02526 * s ** 0.54; E = 0.715 * math.exp(-3.59e-4 * s)
+    cap = 300.0 if s > 1000.0 else 500.0
+
+    def effective_wind(phi):
+        return min((phi / (C * br ** -E)) ** (1.0 / B), cap) / M_S_TO_FT_MIN if phi > 0 else 0.0
+    return R0, 5.275 * beta ** -0.3, effective_wind
 
 
-def speed(kind, th, R0, phis_c, s):
+def anderson_lw(U_mps):
+    """Anderson (1983) length-to-width ratio, clamped to [1, LW_MAX] as in ERF_FarsiteEllipse.H."""
+    mph = U_mps * 2.23694
+    if mph < 1.0:
+        return 1.0
+    return max(1.0, min(0.936 * math.exp(0.2566 * mph) - 0.397 * math.sqrt(mph), LW_MAX))
+
+
+def speed(kind, th, R0, phis_c, s, effective_wind):
     """Map-view normal speed F(theta) of each deck, theta measured from upslope (+x)."""
     cs = np.cos(th)
     Rh = R0 * (1 + phis_c * s * s)
@@ -108,15 +132,16 @@ def speed(kind, th, R0, phis_c, s):
     elif kind == "dir":
         R = R0 * (1 + phis_c * (s * np.maximum(cs, 0.0)) ** 2)
     else:
-        b, c, a = 0.5 * (Rh + R0), 0.5 * (Rh - R0), R0
+        b, c = 0.5 * (Rh + R0), 0.5 * (Rh - R0)
+        a = b / anderson_lw(effective_wind(phis_c * s * s)) if kind == "and" else R0
         R = c * cs + np.sqrt((b * cs) ** 2 + (a * np.sin(th)) ** 2)
     return R / np.sqrt(1 + (s * cs) ** 2)
 
 
-def hopf_grid(x, y, F, th):
-    """Hopf arrival time at every cell centre from the ignition disc for normal speed F(th)."""
+def hopf_grid(x, y, F, th, xs, ys):
+    """Hopf arrival time at every cell centre from the ignition disc about (xs, ys) for normal speed F(th)."""
     cs, sn = np.cos(th), np.sin(th)
-    X, Y = np.meshgrid(x - XS, y - YS, indexing="ij")
+    X, Y = np.meshgrid(x - xs, y - ys, indexing="ij")
     px, py = X.ravel(), Y.ravel()
     T = np.empty(px.size)
     for k in range(0, px.size, 2000):
@@ -125,14 +150,14 @@ def hopf_grid(x, y, F, th):
     return np.maximum(T, 0.0).reshape(X.shape)
 
 
-def first_arrival(at, x, y):
+def first_arrival(at, x, y, xs, ys):
     """Distance and time at which the front first reaches each column or row, per direction."""
     a = np.where(at >= 0, at, np.inf)
     tx, ty = a.min(axis=1), a.min(axis=0)
-    return {"up the slope (+x)":     (x[x > XS] - XS, tx[x > XS]),
-            "down the slope (-x)":   (XS - x[x < XS], tx[x < XS]),
-            "across the slope (+y)": (y[y > YS] - YS, ty[y > YS]),
-            "across the slope (-y)": (YS - y[y < YS], ty[y < YS])}
+    return {"up the slope (+x)":     (x[x > xs] - xs, tx[x > xs]),
+            "down the slope (-x)":   (xs - x[x < xs], tx[x < xs]),
+            "across the slope (+y)": (y[y > ys] - ys, ty[y > ys]),
+            "across the slope (-y)": (ys - y[y < ys], ty[y < ys])}
 
 
 def fitted(dist, T, h, t):
@@ -168,16 +193,22 @@ def plotfiles(v):
 
 
 def main():
-    R0, phis_c = rothermel_fm1(M_F)
+    R0, phis_c, effective_wind = rothermel_fm1(M_F)
     th = np.linspace(0.0, 2 * np.pi, N_ANGLES, endpoint=False)
     print(f"Rothermel fuel model 1 at {M_F:.3f}: R0 = {R0:.5f} m/s, slope-factor constant 5.275 beta^-0.3 = {phis_c:.3f}")
     for v in (sys.argv[1:] or list(SLOPES)):
         s, kind = SLOPES[v], v[:3]
+        xs, ys = CENTRE.get(v, (80.0, 100.0))
         head = R0 * (1 + phis_c * s * s) / math.sqrt(1 + s * s)
         u = np.linspace(1e-4, 1.0, 200001)
         wulff = float(np.min(R0 * (1 + phis_c * s * s * u * u) / (u * np.sqrt(1 + s * s * u * u))))
         print(f"{v}: tan(slope) = {s}, phi_s = {phis_c * s * s:.3f}; Rothermel head {head:.5f} m/s in map view, "
               f"Wulff tip of the projection {wulff:.5f} m/s")
+        if kind == "and":
+            U_eff = effective_wind(phis_c * s * s)
+            b = 0.5 * R0 * (2 + phis_c * s * s)
+            print(f"  effective wind {U_eff:.3f} m/s, Anderson LW {anderson_lw(U_eff):.3f}: flank rate "
+                  f"{b / anderson_lw(U_eff):.5f} m/s against R0 {R0:.5f} m/s")
         pfs = plotfiles(v)
         if not pfs:
             check("plotfiles", False, "none"); continue
@@ -187,8 +218,8 @@ def main():
         h = float((ds.domain_right_edge.d[0] - ds.domain_left_edge.d[0]) / ds.domain_dimensions[0])
         nx, ny = at.shape
         x = (np.arange(nx) + 0.5) * h; y = (np.arange(ny) + 0.5) * h
-        measured = first_arrival(at, x, y)
-        exact = first_arrival(hopf_grid(x, y, speed(kind, th, R0, phis_c, s), th), x, y)
+        measured = first_arrival(at, x, y, xs, ys)
+        exact = first_arrival(hopf_grid(x, y, speed(kind, th, R0, phis_c, s, effective_wind), th, xs, ys), x, y, xs, ys)
         for name in measured:
             if kind == "dir" and name.startswith("up"):
                 rate, n = fit_rate(*measured[name], h, t)
@@ -198,7 +229,7 @@ def main():
                       f"({(rate - wulff) / (head - wulff) * 100:.0f} % of the way to Rothermel)")
                 continue
             rate = check_direction(name, measured[name], exact[name], h, t)
-            if kind == "ell" and name.startswith("up"):
+            if kind in ("ell", "and") and name.startswith("up"):
                 check("head vs Rothermel", np.isfinite(rate) and abs(rate / head - 1) < TOL,
                       f"{rate:.5f} vs {head:.5f} m/s ({(rate / head - 1) * 100:+.2f} %)")
     n_fail = results.count(False)

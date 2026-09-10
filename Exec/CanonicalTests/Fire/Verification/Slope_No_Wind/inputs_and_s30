@@ -1,0 +1,12 @@
+FILE = inputs_base
+
+# The plane z = 0.3 x (16.7 degrees), the ellipse shape with Anderson's flanks:
+# head R0 (1 + phi_s) up the slope and back R0, flank rate b / LW with Anderson's
+# length-to-width ratio at the effective wind speed. The flanks are wide, so the
+# domain is 400 m across with the ignition in the middle.
+geometry.prob_hi = 400.0 400.0 100.0
+amr.n_cell = 20 20 5
+erf.fire.ignition_y = 200.0
+erf.fire.terrain_file_name = "plane_s30_wide.txt"
+erf.fire.directional_shape = "ellipse"
+erf.fire.directional_ellipse_lw = "anderson"
