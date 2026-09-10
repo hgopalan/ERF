@@ -39,7 +39,7 @@ zhi.theta_grad = 0.003
 
 # Prevent z-decomposition: z-extent must be on a single rank.
 # verify_dust_prerequisites check 3 requires box_nz == domain_nz.
-amrex.max_grid_size_z = 128
+amr.max_grid_size_z   = 128
 
 erf.fixed_dt = 0.5
 

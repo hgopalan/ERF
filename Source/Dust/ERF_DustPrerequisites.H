@@ -32,7 +32,7 @@ class ERF;
  *   1. SurfaceLayer pointer is not null (zlo.type = "surface_layer" required).
  *   2. erf.most.z0 is set (roughness length required for u* computation).
  *   3. No z-direction MPI decomposition: all boxes in ba_atm must span the
- *      full z-extent of the domain (set amrex.max_grid_size_z = domain_nz).
+ *      full z-extent of the domain (set amr.max_grid_size_z >= domain_nz).
  *   4. grid_ratio >= 1.
  *   5. All atmospheric boxes have x,y sizes divisible by grid_ratio.
  *   6. DistributionMapping size matches BoxArray size.
