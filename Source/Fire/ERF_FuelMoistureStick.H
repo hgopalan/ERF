@@ -115,16 +115,17 @@ void stick_advance(amrex::Real* M, int N, amrex::Real R_cm, amrex::Real D,
 
 /**
  * @brief One class of one cell for one step: surface condition, diffusivity, advance.
+ * @param[in] emc_model equilibrium moisture curves of the surface (FuelMoistureEMC), legacy by default
  * @return the volume-average moisture after the step
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real stick_advance_class(amrex::Real* M, int N, amrex::Real R_cm, amrex::Real tau_h,
                                 amrex::Real RH, amrex::Real T_C, amrex::Real rain_mm_hr,
                                 amrex::Real rain_surface_moisture, amrex::Real diffusivity_scale,
-                                amrex::Real dt_h) noexcept
+                                amrex::Real dt_h, int emc_model = FuelMoistureEMC::LEGACY) noexcept
 {
     // Surface: the air's equilibrium with hysteresis on the surface shell, or rain-wet.
-    amrex::Real M_surf = compute_emc_with_hysteresis(RH, M[N - 1]);
+    amrex::Real M_surf = compute_emc_with_hysteresis(RH, M[N - 1], T_C, emc_model);
     if (rain_mm_hr >= FuelMoistureConst::MIN_RAIN_RATE) { M_surf = amrex::max(M_surf, rain_surface_moisture); }
     // Diffusivity: lag-calibrated, faster when warm (same factor as the time lag).
     const amrex::Real D = diffusivity_scale * stick_diffusivity(R_cm, tau_h * compute_temp_correction(T_C));

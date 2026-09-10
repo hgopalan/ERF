@@ -6,6 +6,30 @@
 //   Van Wagner, C.E. (1972). Equilibrium moisture contents of some fine
 //     forest fuels in eastern Canada. Canadian Forestry Service Report 7.
 //
+// Equilibrium moisture content, selected by erf.fire.emc_model:
+//   "legacy" (default) — the adsorption and desorption quartics in H = RH/100
+//     below, ported from hgopalan/wildfire_levelset
+//     src/fuel_moisture_timelag_de.H with an attribution to Nelson (2000).
+//     Nelson (2000) does not contain them: he fits Hart's (1977) isotherm to
+//     Blackmarr's (1971) adsorption and desorption data and averages the two
+//     into one isotherm (his eqs. 18-19). The constant and linear terms are
+//     those of Simard's (1968) RH < 10 % equation, 0.03229 + 0.281073 RH
+//     - 0.000578 RH T (RH and EMC in percent, T in F), applied to fractions;
+//     no source is known for the higher terms. The curves run about twice the
+//     published ones (0.166 and 0.189 at 40 % RH), cross near 66 % RH and both
+//     reach the 0.35 cap above 70 %. Kept as the default so existing results
+//     do not change.
+//   "van_wagner" — the drying and wetting equilibrium moisture of the Canadian
+//     Fine Fuel Moisture Code, the pair WRF-SFIRE uses:
+//       Van Wagner, C.E., Pickett, T.L. (1985). Equations and FORTRAN program
+//         for the Canadian Forest Fire Weather Index System. Canadian Forestry
+//         Service, Forestry Technical Report 33.
+//       Van Wagner, C.E. (1987). Development and structure of the Canadian
+//         Forest Fire Weather Index System. Canadian Forestry Service,
+//         Forestry Technical Report 35 (eqs. 2a, 2b).
+//       Viney, N.R. (1991). A review of fine fuel moisture modelling.
+//         International Journal of Wildland Fire, 1, 215-234 (eqs. 7, 8).
+//
 // Moisture of extinction reference:
 //   Rothermel, R.C. (1972). A mathematical model for predicting fire spread
 //     in wildland fuels. USDA Forest Service Research Paper INT-115.
@@ -39,6 +63,10 @@ namespace FuelMoistureConst {
     constexpr amrex::Real M_MIN = 0.01;
     constexpr amrex::Real M_MAX = 0.40;
 
+    // Live herbaceous and live woody bounds of the legacy live update [fraction]
+    constexpr amrex::Real LIVE_M_MIN = 0.30;
+    constexpr amrex::Real LIVE_M_MAX = 2.50;
+
     // RH clamp bounds [fraction of 100]
     constexpr amrex::Real RH_MIN = 0.01;
     constexpr amrex::Real RH_MAX = 0.99;
@@ -52,8 +80,14 @@ namespace FuelMoistureConst {
     constexpr amrex::Real TEMP_FACTOR_K  = 0.015; // [1/°C]
 }
 
-// Equilibrium moisture content (adsorption / wetting path).
-// Nelson (2000) 4th-degree polynomial in H = RH/100.
+// Equilibrium moisture curves (erf.fire.emc_model)
+namespace FuelMoistureEMC {
+    constexpr int LEGACY     = 0;  ///< "legacy": the quartics below, no temperature dependence
+    constexpr int VAN_WAGNER = 1;  ///< "van_wagner": Van Wagner and Pickett (1985) E_d and E_w
+}
+
+// Equilibrium moisture content (adsorption / wetting path), legacy curve.
+// 4th-degree polynomial in H = RH/100 (provenance in the header comment).
 // Valid for H in [0.01, 0.99]. Returns EMC [fraction].
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_emc_adsorption(amrex::Real RH) noexcept
@@ -63,7 +97,7 @@ amrex::Real compute_emc_adsorption(amrex::Real RH) noexcept
     H = amrex::min(amrex::max(H, amrex::Real(FuelMoistureConst::RH_MIN)),
                    amrex::Real(FuelMoistureConst::RH_MAX));
 
-    // Nelson (2000) adsorption polynomial
+    // Legacy adsorption polynomial
     constexpr amrex::Real a0 = 0.03229;
     constexpr amrex::Real a1 = 0.2810;
     constexpr amrex::Real a2 = 0.4093;
@@ -82,8 +116,8 @@ amrex::Real compute_emc_adsorption(amrex::Real RH) noexcept
     return M_e;
 }
 
-// Equilibrium moisture content (desorption / drying path).
-// Nelson (2000) 4th-degree polynomial in H = RH/100.
+// Equilibrium moisture content (desorption / drying path), legacy curve.
+// 4th-degree polynomial in H = RH/100 (provenance in the header comment).
 // Returns EMC [fraction].
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_emc_desorption(amrex::Real RH) noexcept
@@ -93,7 +127,7 @@ amrex::Real compute_emc_desorption(amrex::Real RH) noexcept
     H = amrex::min(amrex::max(H, amrex::Real(FuelMoistureConst::RH_MIN)),
                    amrex::Real(FuelMoistureConst::RH_MAX));
 
-    // Nelson (2000) desorption polynomial
+    // Legacy desorption polynomial
     constexpr amrex::Real d0 = 0.05800;
     constexpr amrex::Real d1 = 0.1985;
     constexpr amrex::Real d2 = 0.6250;
@@ -112,6 +146,43 @@ amrex::Real compute_emc_desorption(amrex::Real RH) noexcept
     return M_e;
 }
 
+// Temperature term shared by the Van Wagner and Pickett (1985) curves [percent]:
+// 0.18 (21.1 - T) (1 - exp(-0.115 h)), h = RH [%], T [°C].
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real emc_van_wagner_temperature_term(amrex::Real h, amrex::Real T_C) noexcept
+{
+    return static_cast<amrex::Real>(0.18) * (static_cast<amrex::Real>(21.1) - T_C)
+         * (static_cast<amrex::Real>(1.0) - std::exp(static_cast<amrex::Real>(-0.115) * h));
+}
+
+// Drying equilibrium moisture content E_d, Van Wagner and Pickett (1985):
+//   E_d = 0.942 h^0.679 + 11 exp((h - 100)/10) + 0.18 (21.1 - T)(1 - exp(-0.115 h))
+// with h = RH [%] clamped to [0, 100], T [°C], E_d in percent of dry mass.
+// Returns EMC [fraction], floored at zero.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real compute_emc_drying_van_wagner(amrex::Real RH, amrex::Real T_C) noexcept
+{
+    const amrex::Real h = amrex::min(amrex::max(RH, static_cast<amrex::Real>(0.0)), static_cast<amrex::Real>(100.0));
+    const amrex::Real E = static_cast<amrex::Real>(0.942) * std::pow(h, static_cast<amrex::Real>(0.679))
+                        + static_cast<amrex::Real>(11.0) * std::exp((h - static_cast<amrex::Real>(100.0)) / static_cast<amrex::Real>(10.0))
+                        + emc_van_wagner_temperature_term(h, T_C);
+    return amrex::max(E, static_cast<amrex::Real>(0.0)) / static_cast<amrex::Real>(100.0);
+}
+
+// Wetting equilibrium moisture content E_w, Van Wagner and Pickett (1985):
+//   E_w = 0.618 h^0.753 + 10 exp((h - 100)/10) + 0.18 (21.1 - T)(1 - exp(-0.115 h))
+// with h = RH [%] clamped to [0, 100], T [°C], E_w in percent of dry mass.
+// Returns EMC [fraction], floored at zero.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real compute_emc_wetting_van_wagner(amrex::Real RH, amrex::Real T_C) noexcept
+{
+    const amrex::Real h = amrex::min(amrex::max(RH, static_cast<amrex::Real>(0.0)), static_cast<amrex::Real>(100.0));
+    const amrex::Real E = static_cast<amrex::Real>(0.618) * std::pow(h, static_cast<amrex::Real>(0.753))
+                        + static_cast<amrex::Real>(10.0) * std::exp((h - static_cast<amrex::Real>(100.0)) / static_cast<amrex::Real>(10.0))
+                        + emc_van_wagner_temperature_term(h, T_C);
+    return amrex::max(E, static_cast<amrex::Real>(0.0)) / static_cast<amrex::Real>(100.0);
+}
+
 // Equilibrium moisture the fuel relaxes toward, with sorption hysteresis.
 // The desorption (drying) curve lies above the adsorption (wetting) curve.
 // A fuel wetter than the drying equilibrium dries toward it, a fuel drier
@@ -121,13 +192,18 @@ amrex::Real compute_emc_desorption(amrex::Real RH) noexcept
 // Kochanski and Mandel 2016, Int. J. Wildland Fire 25, 558-568); Nelson (2000)
 // likewise calls sorption desorption when the fuel is wetter than its
 // equilibrium and adsorption when it is drier.
-// The two polynomials cross near 66 % RH and meet at the 0.35 cap above
-// about 70 %, so the band is taken between the lower and the upper value.
+// T_C [°C] and emc_model (FuelMoistureEMC) choose the curves; the defaults
+// give the legacy curves, which do not depend on temperature. The legacy
+// polynomials cross near 66 % RH and meet at the 0.35 cap above about 70 %,
+// so the band is taken between the lower and the upper value.
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real compute_emc_with_hysteresis(amrex::Real RH, amrex::Real M_current) noexcept
+amrex::Real compute_emc_with_hysteresis(amrex::Real RH, amrex::Real M_current,
+                                        amrex::Real T_C = FuelMoistureConst::TEMP_REFERENCE,
+                                        int emc_model = FuelMoistureEMC::LEGACY) noexcept
 {
-    const amrex::Real M_e_ads = compute_emc_adsorption(RH);
-    const amrex::Real M_e_des = compute_emc_desorption(RH);
+    const bool van_wagner = (emc_model == FuelMoistureEMC::VAN_WAGNER);
+    const amrex::Real M_e_ads = van_wagner ? compute_emc_wetting_van_wagner(RH, T_C) : compute_emc_adsorption(RH);
+    const amrex::Real M_e_des = van_wagner ? compute_emc_drying_van_wagner(RH, T_C)  : compute_emc_desorption(RH);
     const amrex::Real E_d = amrex::max(M_e_ads, M_e_des);   // drying equilibrium (upper)
     const amrex::Real E_w = amrex::min(M_e_ads, M_e_des);   // wetting equilibrium (lower)
 
@@ -183,6 +259,7 @@ amrex::Real compute_precip_wetting_rate(amrex::Real rain_rate_mm_hr) noexcept
 //   rain_mm_hr   — precipitation rate [mm/hr] (0 if none)
 //   dt_hours     — time step [hours]
 //   tau_hours    — base time-lag constant [hours]
+//   emc_model    — equilibrium moisture curves (FuelMoistureEMC), legacy by default
 //
 // Returns updated moisture [fraction], clamped to [M_MIN, M_MAX].
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -192,14 +269,15 @@ amrex::Real advance_fuel_moisture_one_class(
     amrex::Real T_C,
     amrex::Real rain_mm_hr,
     amrex::Real dt_hours,
-    amrex::Real tau_hours) noexcept
+    amrex::Real tau_hours,
+    int emc_model = FuelMoistureEMC::LEGACY) noexcept
 {
     // Ensure M_current is in valid range
     M_current = amrex::min(amrex::max(M_current, amrex::Real(FuelMoistureConst::M_MIN)),
                            amrex::Real(FuelMoistureConst::M_MAX));
 
     // Compute equilibrium moisture with hysteresis
-    const amrex::Real M_e = compute_emc_with_hysteresis(RH, M_current);
+    const amrex::Real M_e = compute_emc_with_hysteresis(RH, M_current, T_C, emc_model);
 
     // Compute temperature correction factor
     const amrex::Real f_T = compute_temp_correction(T_C);
@@ -224,6 +302,34 @@ amrex::Real advance_fuel_moisture_one_class(
                        amrex::Real(FuelMoistureConst::M_MAX));
 
     return M_new;
+}
+
+// Advance one live class (herbaceous or woody) over one step.
+//
+// With hold_fixed (erf.fire.moisture_live_model = "fixed") the moisture is
+// returned unchanged: live moisture follows the plant's water status over days
+// to weeks, and does not relax to the equilibrium of the air within a run.
+//
+// Otherwise ("legacy", the default) the class goes through the dead-fuel
+// update above with the 100-hour lag, no rain and the emc_model curves, and the
+// result is bounded to [LIVE_M_MIN, LIVE_M_MAX]. That update clamps its input
+// to the dead range [M_MIN, M_MAX] first and relaxes toward a dead-fuel
+// equilibrium, so a live moisture above 0.40 drops to 0.40 or below on the
+// first step and then decays toward the 0.30 bound.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real advance_live_fuel_moisture(
+    amrex::Real M_live,
+    amrex::Real RH,
+    amrex::Real T_C,
+    amrex::Real dt_hours,
+    bool hold_fixed,
+    int emc_model = FuelMoistureEMC::LEGACY) noexcept
+{
+    if (hold_fixed) { return M_live; }
+    const amrex::Real M_new = advance_fuel_moisture_one_class(M_live, RH, T_C, amrex::Real(0.0), dt_hours,
+                                                              FuelMoistureConst::TAU_100HR, emc_model);
+    return amrex::max(amrex::Real(FuelMoistureConst::LIVE_M_MIN),
+                      amrex::min(M_new, amrex::Real(FuelMoistureConst::LIVE_M_MAX)));
 }
 
 #endif  // ERF_FUEL_MOISTURE_H

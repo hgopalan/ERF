@@ -1,0 +1,3 @@
+FILE = inputs_base
+
+# The historical behaviour: no erf.fire.moisture_live_model key.

@@ -95,8 +95,15 @@ Rothermel on a slope
 (``directional_ros = false``) every direction spreads at
 :math:`R_0 (1 + \phi_s)`, reduced by :math:`\sqrt{1 + s_n^2}` for the slope
 :math:`s_n` along it by the ground projection; the four axis rates agree to
-0.22 %. On the default directional path the backing fire and the flanks spread
-at :math:`R_0`, to 0.46 %.
+0.24 %. On the default directional path the backing fire and the flanks spread
+at :math:`R_0`, their fronts within 0.05 cell of the exact ones.
+
+Each deck is compared with the exact (viscosity) solution of its own level-set
+equation, evaluated with the Hopf formula
+:math:`T(\mathbf x) = \max_{\mathbf n} ((\mathbf x - \mathbf c)\cdot\mathbf n - r_0)/F(\mathbf n)`
+for the map-view normal speed :math:`F`. Rates are checked to 3 % where the fit
+spans 20 cells or more, and fronts that travel fewer cells to half a cell on
+average and one at worst.
 
 The directional head does not reach :math:`R_0 (1 + \phi_s)`. The directional
 path evaluates :math:`R(\mathbf n) = R_0 (1 + 5.275\,\beta^{-0.3}
@@ -113,10 +120,21 @@ shape. Its head is a wedge of oblique facets whose tip runs at
 0.183 m/s instead of 0.326 m/s at :math:`s = 0.6`. A straight line fire keeps
 :math:`\mathbf n = \hat{\mathbf x}` and is not affected, which is why the line
 fire of :ref:`sec:LineFireVerification` meets Rothermel's head rate. The scheme
-lands between the two, 0.258 m/s (53 % of the way from the Wulff tip speed to
+lands between the two, 0.257 m/s (52 % of the way from the Wulff tip speed to
 Rothermel's head rate) at :math:`s = 0.6` and 0.102 m/s (61 %) at
 :math:`s = 0.3`, and the check requires only that. The same argument applies to
 the wind factor wherever :math:`\phi_w (B - 1) > 1`.
+
+The opt-in :cpp:`erf.fire.directional_shape = "ellipse"` removes the shortfall. It
+takes the normal speed from the support function of the ellipse with the same
+head, back and flank rates, and an ellipse is its own Wulff shape. Its decks
+``ell_s30`` and ``ell_s60`` spread the head at 0.1077 and 0.3250 m/s, within
+0.6 % of Rothermel's head rate. Their backs and flanks stay within 0.26 cell of
+the exact fronts, although the pointed back reads 4 to 5 % fast as a fitted rate
+over the 7 to 9 cells it travels. ``Exec/RegTests/FireDirectionalShape`` measures
+the same in a uniform 1.5 m/s wind on the same grass (:math:`\phi_w = 9.4`). There
+the default head runs at 0.185 m/s and the ellipse's at 0.248 m/s, against
+Rothermel's 0.249 m/s and a Wulff tip of 0.142 m/s.
 
 Fuel moisture
 -------------

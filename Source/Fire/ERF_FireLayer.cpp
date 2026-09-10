@@ -463,17 +463,22 @@ void FireLayer::initialize(const ERF& erf,
             }
         }
         if (m_params.uses_model("behave")) {
-            // Phase 15: Pre-compute BEHAVE multi-class coefficients.
-            FuelModelParams fp_bh = uniform_fuel_params();
+            // Phase 15: Pre-compute BEHAVE multi-class coefficients from the
+            // untransferred table; BEHAVE cures the herbaceous load itself.
+            FuelModelParams fp_bh = uniform_behave_fuel_params();
             m_bs_default = compute_behave_state(fp_bh,
                                                 m_params.moisture_1hr,
                                                 m_params.moisture_10hr,
                                                 m_params.moisture_100hr,
                                                 m_params.moisture_live,
-                                                m_params.moisture_live);
+                                                m_params.moisture_live,
+                                                m_params.behave.dynamic_transfer_lo,
+                                                m_params.behave.dynamic_transfer_hi);
             if (m_params.fire_debug) {
                 amrex::Print() << "[FIRE DEBUG] ROS model: BEHAVE multi-class Rothermel, "
-                               << "R0=" << m_bs_default.r_0 * 0.00508_rt << " m/s\n";
+                               << "R0=" << m_bs_default.r_0 << " m/s, live herbaceous transfer window "
+                               << m_params.behave.dynamic_transfer_lo << "-"
+                               << m_params.behave.dynamic_transfer_hi << "\n";
             }
         }
         if (m_params.uses_model("fbp")) {
@@ -715,14 +720,16 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         }
         // Phase 15: Update BEHAVE state when dynamic moisture is enabled.
         if (m_params.moisture_dynamic && m_params.uses_model("behave")) {
-            FuelModelParams fp_bh = uniform_fuel_params();
+            FuelModelParams fp_bh = uniform_behave_fuel_params();
             // Domain-average live moisture from components 3 and 4
             long nc_live = fire_fuel_mc->boxArray().numPts();
             Real avg_lh  = (nc_live > 0) ? fire_fuel_mc->sum(3) / Real(nc_live) : m_params.moisture_live;
             Real avg_lw  = (nc_live > 0) ? fire_fuel_mc->sum(4) / Real(nc_live) : m_params.moisture_live;
             avg_lh = amrex::max(0.30_rt, amrex::min(avg_lh, 2.50_rt));
             avg_lw = amrex::max(0.30_rt, amrex::min(avg_lw, 2.50_rt));
-            m_bs_default = compute_behave_state(fp_bh, avg1, avg10, avg100, avg_lh, avg_lw);
+            m_bs_default = compute_behave_state(fp_bh, avg1, avg10, avg100, avg_lh, avg_lw,
+                                                m_params.behave.dynamic_transfer_lo,
+                                                m_params.behave.dynamic_transfer_hi);
         }
     }
 
@@ -973,7 +980,9 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                                 *fire_slopes, m_fg.geom, dt_ls,
                                                 m_params.levelset_eps_visc,
                                                 dir_state, fire_nonburnable.get(), wall_extrap,
-                                                ls_grad);
+                                                ls_grad, m_params.directional_shape,
+                                                m_params.directional_ellipse_lw,
+                                                m_params.directional_ellipse_lw_max);
             } else if (m_params.levelset_ellipse) {
                 // Huygens ellipse: the model's rate is the head rate and the
                 // normal speed follows the ellipse set by the midflame wind.
@@ -1223,6 +1232,7 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
     // the first advance, through get_stick_mc_mut()).
     const bool use_stick = (m_params.moisture_model == "stick");
     const int  n_sh      = m_params.stick.n_shells;
+    const bool live_fixed = (m_params.moisture_live_model == "fixed");
     if (use_stick && !fire_stick_mc) {
         allocate_stick_mc();
         if (m_params.fire_debug) {
@@ -1237,6 +1247,8 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
     }
     const Real r1 = m_params.stick.radius_cm[0], r10 = m_params.stick.radius_cm[1], r100 = m_params.stick.radius_cm[2];
     const Real rain_ms = m_params.stick.rain_surface_moisture, dscale = m_params.stick.diffusivity_scale;
+    // Equilibrium moisture curves (erf.fire.emc_model), for both update models
+    const int emc_model = (m_params.emc_model == "van_wagner") ? FuelMoistureEMC::VAN_WAGNER : FuelMoistureEMC::LEGACY;
 
     for (MFIter mfi(*fire_fuel_mc); mfi.isValid(); ++mfi) {
         Array4<Real> mc   = fire_fuel_mc->array(mfi);
@@ -1257,23 +1269,21 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
                 for (int c = 0; c < 3; ++c) {
                     for (int n = 0; n < n_sh; ++n) { M[n] = st(i, j, 0, c * n_sh + n); }
                     mc(i, j, 0, c) = stick_advance_class(M, n_sh, radii[c], taus[c], RH, T_C, precip_mm_hr,
-                                                         rain_ms, dscale, dt_hours);
+                                                         rain_ms, dscale, dt_hours, emc_model);
                     for (int n = 0; n < n_sh; ++n) { st(i, j, 0, c * n_sh + n) = M[n]; }
                 }
             } else {
             // Existing 3 dead fuel classes (unchanged)
-            mc(i,j,0,0) = advance_fuel_moisture_one_class(mc(i,j,0,0),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_1HR);
-            mc(i,j,0,1) = advance_fuel_moisture_one_class(mc(i,j,0,1),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_10HR);
-            mc(i,j,0,2) = advance_fuel_moisture_one_class(mc(i,j,0,2),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_100HR);
+            mc(i,j,0,0) = advance_fuel_moisture_one_class(mc(i,j,0,0),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_1HR,emc_model);
+            mc(i,j,0,1) = advance_fuel_moisture_one_class(mc(i,j,0,1),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_10HR,emc_model);
+            mc(i,j,0,2) = advance_fuel_moisture_one_class(mc(i,j,0,2),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_100HR,emc_model);
             }
-            // Phase 15: live fuel moisture (components 3 and 4)
-            // Live fuels respond slowly to atmospheric conditions.
-            // Use TAU_100HR as a lower bound; live moisture is bounded [0.30, 2.50].
+            // Live herbaceous and live woody moisture (components 3 and 4):
+            // held where they are with erf.fire.moisture_live_model = "fixed",
+            // otherwise the legacy dead-fuel update (see advance_live_fuel_moisture).
             if (mc.nComp() >= 5) {
-                Real lh_new = advance_fuel_moisture_one_class(mc(i,j,0,3),RH,T_C,0.0_rt,dt_hours,FuelMoistureConst::TAU_100HR);
-                Real lw_new = advance_fuel_moisture_one_class(mc(i,j,0,4),RH,T_C,0.0_rt,dt_hours,FuelMoistureConst::TAU_100HR);
-                mc(i,j,0,3) = amrex::max(0.30_rt, amrex::min(lh_new, 2.50_rt));  // live herba: 30%–250%
-                mc(i,j,0,4) = amrex::max(0.30_rt, amrex::min(lw_new, 2.50_rt));  // live woody: 30%–250%
+                mc(i,j,0,3) = advance_live_fuel_moisture(mc(i,j,0,3),RH,T_C,dt_hours,live_fixed,emc_model);
+                mc(i,j,0,4) = advance_live_fuel_moisture(mc(i,j,0,4),RH,T_C,dt_hours,live_fixed,emc_model);
             }
             Real dead_load = fp.w_d1+fp.w_d10+fp.w_d100;
             Real sw = dead_load>0.0_rt ? (fp.w_d1*fp.sigma_d1)/dead_load : fp.sigma_d1;
@@ -1788,10 +1798,12 @@ void FireLayer::fill_ros_for_model(const std::string& model,
         fill_cheney_gould_ros(out, *fire_wind_eff, m_cgc);
     } else if (model == "behave") {
         // Phase 15: BEHAVE multi-class Rothermel model
-        FuelModelParams fp_behave = uniform_fuel_params();
+        FuelModelParams fp_behave = uniform_behave_fuel_params();
         fill_behave_ros(out, *fire_wind_eff, *fire_slopes,
                         fp_behave,
                         m_bs_default,
+                        m_params.behave.dynamic_transfer_lo,
+                        m_params.behave.dynamic_transfer_hi,
                         m_params.moisture_dynamic ? fire_fuel_mc.get() : nullptr,
                         m_params.moisture_dynamic);
     } else if (model == "macarthur") {

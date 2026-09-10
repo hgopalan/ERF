@@ -338,6 +338,78 @@ The current implementation uses domain-average moisture and curing values inside
 
 - Cheney, N.P., Gould, J.S. &amp; Catchpole, W.R. (1998). Prediction of fire spread in grasslands. *International Journal of Wildland Fire*, 8(1), 1-13.
 
+.. _sec:ROS_Behave:
+
+BEHAVE Multi-Class Rothermel
+----------------------------
+
+**Key parameter:** :cpp:`ros_model = "behave"`
+
+The multi-class form of Rothermel's model (Andrews, 2018) carries the dead
+1-h, 10-h and 100-h classes, the live herbaceous and live woody classes, and a
+dead herbaceous class that receives cured live herbaceous fuel, with separate
+dead and live moisture damping and a live moisture of extinction from the
+ratio of dead to live load (``ERF_BehaveModel.H``). With
+:cpp:`erf.fire.moisture_dynamic = true` the state is rebuilt in every fire
+cell from that cell's moistures; otherwise it is computed once from the deck's.
+
+**Live herbaceous transfer.** A share :math:`T` of the live herbaceous load
+:math:`w_{lh}` moves to the dead herbaceous class, linear in the live
+herbaceous moisture :math:`M_{lh}` across the window from
+:math:`M_{lo}` = :cpp:`erf.fire.behave.dynamic_transfer_lo` to
+:math:`M_{hi}` = :cpp:`erf.fire.behave.dynamic_transfer_hi`:
+
+.. math::
+
+   T = \min\Bigl(1,\ \max\Bigl(0,\ \frac{M_{hi} - M_{lh}}{M_{hi} - M_{lo}}\Bigr)\Bigr),
+
+so the whole load is dead at and below :math:`M_{lo}` and none of it at and
+above :math:`M_{hi}`. The defaults 0.30 and 1.20 are the BEHAVE window, and
+the run aborts unless :math:`M_{hi} > M_{lo}`. Only fuels with a live
+herbaceous load respond: Anderson models 2, 4, 5, 7 and 10, and Scott and
+Burgan GR1 to GR9, GS1 to GS4, SH1, SH9, TU1 and TU3. Anderson model 1
+ignores both inputs. The transferred load keeps the live herbaceous
+surface-area-to-volume ratio and takes the 1-h dead moisture (Scott and
+Burgan, 2005). Under :cpp:`erf.fire.fuel_map.fuel_set = "scott_burgan40"`
+the model starts from the fuel table before the table's own curing transfer
+(:ref:`sec:ROS_FuelSets`), so the herbaceous load is transferred once, in
+this window.
+
+The ramp was hard-coded before September 2026 as :math:`1.333 - 1.11\,M_{lh}`,
+the default window rounded to three digits. That moved up to
+:math:`10^{-3}\,w_{lh}` more load just below :math:`M_{lh} = 1.20`, and
+changed the rate of spread by at most 0.5 % for the Anderson models.
+``ERF_GTestBehaveTransfer`` checks the ramp and that the window reaches the
+model state; ``Exec/CanonicalTests/Fire/Fire_Behavior/ROS_Models/inputs_fire_phase13_behave_dynamic``
+runs it per cell on Anderson model 5.
+
+Two defects in the transfer were corrected in September 2026. For the
+Scott-Burgan dynamic models BEHAVE was handed the table after its curing
+transfer at :cpp:`erf.fire.moisture_live` and transferred the remainder
+again, so at :math:`M_{lh} = 0.90` five ninths of the herbaceous load were
+dead instead of one third. And the dead herbaceous class carried a fixed
+moisture of 0.15 instead of the 1-h moisture, which damped fuels whose dead
+moisture of extinction is near 0.15 almost to extinction once most of the
+load had cured. With 1-h, 10-h and 100-h moistures of 6, 7 and 8 %, live
+moistures from 0.30 to 1.50 and midflame winds of 0 to 5 m/s, the corrected
+rate of spread is higher by up to 9, 24, 33, 15 and 21 % for Anderson
+models 2, 4, 5, 7 and 10 (most at :math:`M_{lh} = 0.30`), and lower by up to
+66 % for the GR and GS models (GR2 at :math:`M_{lh} = 0.90`) and by up to 8 %
+for SH1, TU1 and TU3. SH9's no-wind rate rises by up to 83 % while its rate
+at 5 m/s falls by up to 31 %: moving its cured load from the 1-h class
+(750 1/ft) to the dead herbaceous class (1800 1/ft) raises the dead
+surface-area-to-volume ratio past 1000 1/ft, where the wind cap drops from
+500 to 300 ft/min. Nothing changes at or above
+:math:`M_{lh} = 1.20`, or for fuels without a live herbaceous load.
+``ERF_GTestBehaveScottBurgan`` checks that GR2 at :math:`M_{lh} = 0.90`
+carries :math:`w_{d1} + w_{lh}/3` of the untransferred table as dead load,
+and that a fully cured herbaceous load behaves as 1-h fuel with the
+herbaceous surface-area-to-volume ratio.
+
+**Reference:**
+
+- Andrews, P.L. (2018). The Rothermel surface fire spread model and associated developments: A comprehensive explanation. USDA Forest Service General Technical Report RMRS-GTR-371.
+
 Per-Fuel Wind Height (Sub-phase A)
 ----------------------------------
 
@@ -565,6 +637,14 @@ Input Parameters
      - Real
      - 1.0
      - Cheney-Gould: degree of curing [0-1]
+   * - :cpp:`erf.fire.behave.dynamic_transfer_lo`
+     - Real
+     - 0.30
+     - BEHAVE: live herbaceous moisture at and below which the whole live herbaceous load transfers to dead [fraction]
+   * - :cpp:`erf.fire.behave.dynamic_transfer_hi`
+     - Real
+     - 1.20
+     - BEHAVE: live herbaceous moisture at and above which none transfers [fraction]; must exceed dynamic_transfer_lo
 
 Limitations
 -----------
@@ -643,6 +723,8 @@ surface rate only. ``Exec/RegTests/FireFbp`` checks the head rate against an
 independent implementation of the equations and the unit test
 ``ERF_GTestFbp`` their invariants.
 
+.. _sec:ROS_FuelSets:
+
 Fuel model sets
 ---------------
 
@@ -663,7 +745,10 @@ dynamic models (those with a live herbaceous load) move their cured
 herbaceous load to the 1-h dead class at :cpp:`erf.fire.moisture_live`,
 fully cured at 30% and not at all at 120%, the BEHAVE and FARSITE
 transfer; the 1-h surface-area-to-volume ratio is kept for the transferred
-load, since the single-class Rothermel path carries one dead ratio. Every
+load, since the single-class Rothermel path carries one dead ratio. The
+BEHAVE model reads the table before this transfer and moves the cured load
+into its own dead herbaceous class (:ref:`sec:ROS_Behave`), so the load is
+transferred once. Every
 per-fuel table (Rothermel, Balbi, wind height, burnout time) is indexed by
 a slot with the Anderson models at their own codes, so the historical
 lookups are unchanged; the Scott-Burgan models take the wind heights and
