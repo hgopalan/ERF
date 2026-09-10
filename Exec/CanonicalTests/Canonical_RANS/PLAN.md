@@ -329,6 +329,63 @@ the explicit answer to the tolerances above; compressible results
 unchanged; CTest entry with `erf.vert_implicit_fac = 1 1` on the neutral
 deck.
 
+Status (2026-09-09): done, on branch `claude-RANS-implicit` off
+`claude-RANS`. What was found and changed, in the order it was found:
+
+- The anelastic second stage double-counted the implicit increment. The
+  pre-stage theta solve (`ERF_ImplicitPre.H`, folded into the slow
+  tendency) and the post-stage KE and moisture solves
+  (`ERF_ImplicitPost.H`) both ran with the full step on stage 1, while the
+  trapezoidal update already carries half of the stage-0 implicit
+  increment through the reconstructed first-stage tendency. Symptom: the
+  column heat budget of the convective deck gained 1.45 times the surface
+  flux in one step; decomposing by stage with `erf.vert_implicit_fac`
+  = `1 0 0` (0.975), `0 1 0` (1.449) and `0 0.5 0` (1.212) isolated
+  stage 1. Both solves now use half the step on the anelastic second
+  stage (the same pattern as the implicit dissipation of phase 3); the
+  ratio is 0.975 for every factor combination and 0.983 after ten steps
+  (explicit: 0.994 at dt = 2 s).
+- The TKE buoyancy term was lost under the implicit theta solve, in the
+  compressible path as well (upstream since "Optimize Post", #2310,
+  2025-05). The closures write the cell-centred flux
+  `-K_h dtheta/dz` into `Hfx3` at the start of the step (AL01 Eq. 15,
+  the same form as Kynema's `buoy_prod = -muPrime * stratification`),
+  and `ERF_AddTKESources.H` reads it; the explicit diffusion operator
+  then overwrote it with the face flux times the explicit fraction, so
+  with `vert_implicit_fac = 1` every cell above the first saw zero
+  buoyancy production or destruction. Found from a restart at 6 h of the
+  neutral deck: one step implicit against explicit differed in KE by
+  1.2e-11 with the KE diffusivity switched off, but the same test with
+  the buoyancy term present differed by 1e-6 growing linearly in time
+  and independent of dt, and on the convective deck the implicit run
+  carried a third of the explicit KE (0.35 vs 1.24 m2/s2 at 250 m) with
+  the mean theta 1.3 K off. The overwrite is removed in the three
+  `ERF_DiffusionSrcForState_{N,S,T}.cpp`; the term is the closure's
+  cell value (it was also half a cell low before, being the flux at the
+  lower face). After the fix one step from the restart agrees to 8e-9
+  in KE and 10 s to 5e-7, front cell included. The gold tests that run
+  Deardorff (`ABL_MOST`, `Deardorff_stationary`) and the implicit-diffusion
+  MYNN tests still pass.
+- Under anelastic the solve is opt-in (`erf.vert_implicit = true` or an
+  explicit `erf.vert_implicit_fac` in the inputs; queried with
+  `pp.contains` before `queryAdd` enters the default), so every existing
+  anelastic deck keeps its fully explicit answer; a banner says how to
+  turn it on. Momentum stays explicit (phase 10).
+- No level-0 box may be cut in z when the solve is on: `MakeNewLevel`
+  no longer decomposes in z in that case and `update_diffusive_arrays`
+  aborts with the fix if any box's z extent is short of the domain. This
+  closes the same silent error in the compressible path.
+- `check_for_negative_theta` now trips on NaN as well (`!(x > 0)`); the
+  dt = 20 s neutral run used to finish with NaN fields and exit 0.
+- The neutral deck at dt = 20 s still fails at 10.8 h: the explicit
+  momentum limit dz^2 / (2 K_m) is 10 s on this deck once K_m reaches
+  7.5 m2/s (the 19 s quoted in phase 3 was the early-time value). dt =
+  10 s runs and passes; dt = 20 s is the phase 10 exit.
+- The convective deck now ships at dt = 5 s with `erf.vert_implicit =
+  true` (it aborted at 5 s explicit); CTest `RANS_Neutral_ABL_Flat_Implicit`
+  runs the neutral deck at dt = 10 s with the solve on. Numbers in
+  RESULTS.md.
+
 ## Phase 10: implicit vertical diffusion of momentum under anelastic
 
 - Call the momentum tridiagonal on the explicitly updated momenta in the
@@ -343,4 +400,97 @@ Exit: neutral deck under anelastic at dt = 60 s passes the physics checks
 and matches the compressible implicit run at dt = 60 s (phase 3, RESULTS)
 to the same tolerances; 2D hill deck (phase 5) under anelastic at 4x its
 explicit limit runs and matches its explicit answer; restart bit-exact.
+
+Status (2026-09-09): done, on `claude-RANS-implicit`. The momentum solve
+needed no new code: `ERF_ImplicitPre.H` already folds it into the slow
+tendency before the stage update, which under anelastic means the momenta
+are diffused and then projected, the order the divergence constraint
+needs, and `implicit_before_substep` is forced true without substepping.
+Phase 9's `implicit_momentum_diffusion = false` for anelastic is simply
+removed, so `erf.vert_implicit = true` now covers u, v, theta, k and
+moisture; w stays explicit unless built with `ERF_IMPLICIT_W`, as in the
+compressible path. The half-step on the trapezoidal second stage from
+phase 9 applies to the momentum solve unchanged (the reconstructed
+first-stage tendency carries its implicit increment the same way).
+
+- Neutral deck, 12 h: dt = 5, 10, 20, 30 and 60 s all pass every physics
+  check; at dt = 60 s, 12 times the shipped step and 6 times the explicit
+  limit of about 10 s, the profiles are within 2.9e-3 m/s of the explicit
+  dt = 5 s run (u scale 11.8) and 1.7e-3 K. Compressible at dt = 5, 20
+  and 60 s lands within 1.8e-3 m/s of the same reference, so the two
+  integrators and the whole step range agree to about 2e-4 relative.
+  `plot_dt_overlay.py` (matplotlib, optional) draws the nine profiles.
+- Convective deck: runs at dt = 20 s, ten times its original explicit
+  step, within 1.8e-2 m/s and 2.4e-2 K of the explicit dt = 2 s run with
+  the heat budget at 0.998. It still ships at dt = 5 s, which is within
+  3.5e-3 m/s, to keep the phase 9 reference numbers.
+- Stable deck: dt = 8 s passes, within 7.6e-4 m/s of explicit.
+- 2D hill deck: the exit criterion of 4x is not reachable and not about
+  diffusion. The advective Courant number binds first (the CFL-1 step is
+  3.3 s against a shipped 1.5 s), and the deck fails at dt = 3 s at the
+  same step 82 with the solve on and off, so the implicit solve neither
+  helps nor hurts. At the shipped step the terrain-fitted momentum solve
+  reproduces the explicit answer to 1.2e-4 m/s on the full 3D field.
+- Restart at dt = 20 s with the momentum solve on is bit-exact
+  (`fcompare` reports zero on every field).
+- The `_Implicit` CTest entry stays at dt = 10 s: it exercises the
+  momentum solve, while a 40-step run at dt = 60 s trips the
+  dissipation-lag diagnostic (10.6 % against 5 %) because k moves a lot
+  per step during the start-up transient. The 12 h dt = 60 s run passes
+  that same check.
+
+Found while verifying: with the implicit solve on, the answer is no
+longer invariant to the box decomposition at round-off. Chased at length
+and not fixed; what the evidence says is below, so nobody has to repeat
+the search.
+
+Measurement (one rank, one box against four x-y boxes with whole columns,
+so MPI reductions play no part; 40 steps of the neutral deck):
+
+| configuration | max diff in u | in theta |
+| --- | --- | --- |
+| explicit | 1.8e-15 | 5.7e-14 (one ulp) |
+| implicit, dt 5 s | 9.1e-7 | 1.1e-5 |
+| implicit, dt 20 s | 1.3e-5 | 4.4e-5 |
+| implicit, dt 60 s | 3.6e-4 | 1.8e-4 |
+
+Ruled out, each by direct test: MPI reduction order (it reproduces on one
+rank); the MOST plane average (`erf.most.average_policy = 1`, local, still
+1e-5); run-to-run nondeterminism (two identical runs agree bitwise);
+uninitialised work memory (`fab.init_snan = 1` with the invalid trap armed
+runs clean); the TKE floor; the buoyancy term (`erf.theta_ref = 1e12` to
+null it, still 8.5e-6); the Dirichlet wall value of k; and the closure
+itself, since Deardorff shows it too (1.4e-5). A z-split column is not
+the cause either: the four boxes span the full column and the guard
+aborts otherwise.
+
+What the evidence does say. The deck is horizontally uniform and stays
+exactly so (the horizontal max minus min of theta, u and k is 0 to the
+last bit at every step in both runs), so the whole thing is a 1D problem
+and the two decompositions differ only through the round-off of the FFT
+projection, which shows up as a w of order 1e-19 where w should be zero.
+The state first differs at step 3 by exactly one ulp of rho theta and
+then grows at roughly 1.5 to 5 times per step before saturating. The
+growth needs the implicit solve: the same one-ulp seed sits in the
+explicit run and stays there for 200 steps. It also needs the anelastic
+integrator, since the compressible path with the same solve stays at
+5e-12. It scales with the size of the implicit increment, with dt and
+with how many stages apply the solve: theta alone at
+`vert_implicit_fac = 1 0 0` is clean at 1.8e-15, and so are theta+KE and
+theta+momentum at that factor, while the shipped `1 1 0` is 1e-5 at the
+same dt.
+
+A scalar amplification analysis of the anelastic RK2 with the fold-in
+gives a factor in (0, 1] for every mode at both `1 0 0` and `1 1 0`, so
+the growth is not in the theta update alone; it is in the coupling of the
+implicit solve, the turbulence model and the projection, and that is as
+far as the search got. The difference is broadband in z (31 sign changes
+in 63 cells), not a grid-scale mode.
+
+It moves no physics check and no reported number: at dt 60 s the spread
+is 3e-5 in relative terms, while the implicit and explicit 12 h answers
+differ by 2.5e-4. But `vert_implicit` under anelastic should not be
+expected to give decomposition-invariant answers, and a gold-file test
+of that configuration would have to compare with a tolerance rather than
+with `fcompare` at zero.
 

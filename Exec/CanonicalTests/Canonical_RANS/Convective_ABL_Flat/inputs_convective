@@ -38,10 +38,13 @@ erf.input_sounding_file = "input_sounding"
 erf.sounding_type       = "Ideal"
 
 # TIME STEP CONTROL
-# The anelastic integrator diffuses explicitly in the vertical: K/rho reaches
-# 40 m2/s in the mixed layer, so dt must stay below dz^2/(2K) = 10 s with
-# margin (dt = 5 s aborts after 1.7 h).
-erf.fixed_dt = 2.0
+# K/rho reaches 40 m2/s in the mixed layer, so explicit vertical diffusion
+# needs dt below dz^2/(2K) = 10 s with margin (dt = 5 s aborts after 1.7 h
+# with erf.vert_implicit = false; dt = 2 s runs). The implicit column solve
+# of theta and KE (opt-in under anelastic) removes that limit for the
+# scalars; momentum stays explicit, and its diffusivity here is far smaller.
+erf.fixed_dt      = 5.0
+erf.vert_implicit = true
 
 # DIAGNOSTICS & VERBOSITY
 erf.sum_interval = 10
@@ -49,7 +52,7 @@ erf.v            = 1
 amr.v            = 0
 
 erf.data_log        = surf_hist.dat mean_profiles.dat flux_profiles.dat sfs_profiles.dat
-erf.profile_int     = 100
+erf.profile_int     = 40    # 200 s at dt 5
 erf.destag_profiles = false
 
 # REFINEMENT / REGRIDGING
@@ -57,11 +60,11 @@ amr.max_level = 0
 
 # CHECKPOINT FILES
 erf.check_file = chk
-erf.check_int  = 3600
+erf.check_int  = 1440   # 2 h at dt 5
 
 # PLOTFILES
 erf.plot_file_1 = plt
-erf.plot_int_1  = 3600
+erf.plot_int_1  = 1440   # 2 h at dt 5
 erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta KE Kmv Khv Lturb walldist diss
 
 # SOLVER CHOICE

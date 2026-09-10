@@ -212,6 +212,61 @@ The distance is available as the plot variable ``walldist``. It is
 computed once at initialisation, also on a restart; it is not recomputed
 after a regrid.
 
+Implicit vertical diffusion
+---------------------------
+
+The column tridiagonal solve of ERF (``erf.vert_implicit``, on by default
+with the compressible integrator) removes the explicit limit
+:math:`\Delta t < \Delta z^2 / (2K)` for the quantities it covers.
+Under the anelastic integrator it is opt-in: give
+:cpp:`erf.vert_implicit = true` (or an explicit
+:cpp:`erf.vert_implicit_fac`) and :math:`u`, :math:`v`, :math:`\theta`,
+:math:`k` and moisture are all solved implicitly. The momentum solve is
+folded into the slow tendency before the stage update, so the momenta are
+diffused and then projected, which is the order the divergence constraint
+needs; :math:`w` stays explicit unless ERF is built with
+``ERF_IMPLICIT_W``, as in the compressible path. The anelastic update is
+trapezoidal: the second stage averages the first-stage tendency,
+recovered from the state difference, with the new one, so the first
+stage's implicit increment is already half-counted and the implicit
+operator on the second stage acts with half the step. The solve takes
+each box's vertical extent as the whole column, so no level-0 box may be
+cut in :math:`z` (the z entry of ``amr.max_grid_size`` must reach
+``amr.n_cell``); ERF checks this at start-up.
+
+On the neutral flat case the solve carries the time step from 5 s to 60 s
+under the anelastic integrator, 6 times the explicit limit of about 10 s,
+and the 12 h profiles stay within 3e-3 m/s of the explicit run. On a
+terrain case the advective Courant number binds well below the explicit
+diffusion limit, so the solve buys no time step there; it reproduces the
+explicit answer to 1e-5 relative.
+
+One caveat: with the solve on, the answer is not invariant to the box
+decomposition at round-off. On the neutral case the spread between one
+box and four is 9e-7 m/s in wind at :math:`\Delta t` = 5 s and 3.6e-4 at
+60 s, against 1.8e-15 for the explicit run; the seed is one unit in the
+last place, from the round-off of the projection, and the implicit solve
+grows it until it saturates. It needs the anelastic integrator (the
+compressible path with the same solve stays at 5e-12) and it grows with
+the size of the implicit increment. It is not the closure: Deardorff
+behaves the same way and nulling the buoyancy term does not remove it.
+The magnitude stays far below the difference between the implicit and
+explicit answers, so it moves no physics check, but a bitwise comparison
+across decompositions will not hold in this configuration. The
+development record has the full set of mechanisms ruled out.
+
+The buoyancy term of the :math:`k` equation uses the vertical heat flux
+the closure computes at the start of the step,
+:math:`-K_h \, \partial\theta/\partial z` from the cell-centred gradient
+(AL01 Eq. 15; the Kynema implementation forms it the same way), with the
+surface-layer flux in the first cell. It does not depend on how
+:math:`\theta` is then advanced. Before this the explicit diffusion
+operator overwrote that flux with the face flux scaled by the explicit
+fraction, which put the term half a cell low and, whenever the implicit
+solve was on, silently dropped the buoyancy production and destruction
+of :math:`k` in every cell above the first (the convective case then
+carried a third of its turbulence kinetic energy).
+
 Limitations
 -----------
 
@@ -220,10 +275,12 @@ Limitations
 * All levels must use the closure; a hybrid RANS-LES set-up is refused.
 * Embedded and thin-body boundaries are not supported by the Poisson wall
   distance.
-* Under the anelastic integrator all vertical diffusion is explicit, so
-  the time step is bounded by :math:`\Delta z^2 / (2 K)`; with the eddy
-  viscosities a convective boundary layer produces (tens of m\ :sup:`2`/s)
-  this is the binding constraint, not the closure.
+* The time step is bounded by :math:`\Delta z^2 / (2 K)` unless the
+  implicit column solve is on (see below); with the eddy viscosities a
+  convective boundary layer produces (tens of m\ :sup:`2`/s) that is the
+  binding constraint, not the closure. With the solve on, the limit is
+  the advective Courant number, and the vertical velocity, which stays
+  explicit, is diffused at :math:`2 K_m`.
 * The closure is local: a convective layer keeps a superadiabatic lapse
   of order :math:`-F/K_h` through its depth where a countergradient
   scheme or LES would mix it out.

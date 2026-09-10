@@ -14,16 +14,16 @@ ceiling, since zi is about 1 km).
 | --- | --- |
 | domain | 2560 x 2560 x 2000 m |
 | grid | 8 x 8 x 100, dz = 20 m, first cell centre 10 m |
-| time step | 2 s fixed, anelastic with FFT (K/rho reaches 40 m^2/s, the explicit limit at 5 s) |
+| time step | 5 s fixed, anelastic with FFT, implicit column solve of theta and KE (`erf.vert_implicit = true`; explicit diffusion needs 2 s since K/rho reaches 40 m^2/s) |
 | closure | `erf.rans_type = kEqn`, AL01 defaults, `dirichlet_k = true` |
-| physics run | 4 h (7200 steps), about 2 min on 2 ranks |
+| physics run | 4 h (2880 steps), about 1 min on 2 ranks |
 | smoke run | 40 steps (`ctest -R RANS_Convective_ABL_Flat`) |
 
 ## Running
 
 ```bash
 mpirun -np 2 erf_exec inputs_convective
-python3 check_convective.py --physics plt07200 surf_hist.dat
+python3 check_convective.py --physics plt02880 surf_hist.dat
 ```
 
 ## Checks

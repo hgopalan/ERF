@@ -582,6 +582,22 @@ ERF::update_diffusive_arrays (int lev, const BoxArray& ba, const DistributionMap
                             solverChoice.vert_implicit_fac[lev][1] > 0 ||
                             solverChoice.vert_implicit_fac[lev][2] > 0);
 
+    // The vertical implicit solves are column tridiagonals that take each
+    // box's z extent as the whole column (domain BCs at both ends), so no
+    // box at level 0 may be cut in z. A z entry of amr.max_grid_size below
+    // the number of vertical cells does exactly that.
+    if (l_implicit_diff && lev == 0) {
+        const Box& dom = geom[lev].Domain();
+        for (int ibox = 0; ibox < ba.size(); ++ibox) {
+            const Box& b = ba[ibox];
+            if (b.smallEnd(2) != dom.smallEnd(2) || b.bigEnd(2) != dom.bigEnd(2)) {
+                amrex::Abort("Vertical implicit diffusion needs every level-0 box to span the full column: "
+                             "set the z entry of amr.max_grid_size to at least amr.n_cell in z, "
+                             "or turn the solve off with erf.vert_implicit = false");
+            }
+        }
+    }
+
     bool l_eb_surface_layer = (l_use_eb && solverChoice.ebChoice.eb_boundary_type == EBBoundaryType::SurfaceLayer);
 
     BoxArray ba12 = convert(ba, IntVect(1,1,0));

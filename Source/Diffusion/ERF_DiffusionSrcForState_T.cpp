@@ -246,11 +246,10 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
                 zflux(i,j,k) = -rhoAlpha * GradCz;
             }
 
-            if (qty_index == RhoTheta_comp) {
-                if (!SurfLayer_on_zlo) {
-                    hfx_z(i,j,k) = zflux(i,j,k) * explicit_fac;
-                }
-            } else  if (qty_index == RhoQ1_comp) {
+            // hfx_z above the surface keeps the cell-centred flux the closure wrote
+            // (-K_h dtheta/dz at the cell); the TKE buoyancy source reads it there.
+            // Only the surface layer writes hfx_z(i,j,0).
+            if (qty_index == RhoQ1_comp) {
                 if (!SurfLayer_on_zlo) {
                     qfx1_z(i,j,k) = zflux(i,j,k) * explicit_fac;
                 }
@@ -383,11 +382,10 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
                 zflux(i,j,k) = -rhoAlpha * GradCz;
             }
 
-            if (qty_index == RhoTheta_comp) {
-                if (!SurfLayer_on_zlo) {
-                    hfx_z(i,j,k) = zflux(i,j,k) * explicit_fac;
-                }
-            } else  if (qty_index == RhoQ1_comp) {
+            // hfx_z above the surface keeps the cell-centred flux the closure wrote
+            // (-K_h dtheta/dz at the cell); the TKE buoyancy source reads it there.
+            // Only the surface layer writes hfx_z(i,j,0).
+            if (qty_index == RhoQ1_comp) {
                 if (!SurfLayer_on_zlo) {
                     qfx1_z(i,j,k) = zflux(i,j,k) * explicit_fac;
                 }
@@ -518,11 +516,10 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
                 zflux(i,j,k) = -rhoAlpha * GradCz;
             }
 
-            if (qty_index == RhoTheta_comp) {
-                if (!SurfLayer_on_zlo) {
-                    hfx_z(i,j,k) = zflux(i,j,k) * explicit_fac;
-                }
-            } else if (qty_index == RhoQ1_comp) {
+            // hfx_z above the surface keeps the cell-centred flux the closure wrote
+            // (-K_h dtheta/dz at the cell); the TKE buoyancy source reads it there.
+            // Only the surface layer writes hfx_z(i,j,0).
+            if (qty_index == RhoQ1_comp) {
                 if (!SurfLayer_on_zlo) {
                     qfx1_z(i,j,k) = zflux(i,j,k) * explicit_fac;
                 }
@@ -650,11 +647,10 @@ DiffusionSrcForState_T (const Box& bx, const Box& domain,
                 zflux(i,j,k) = -rhoAlpha * GradCz;
             }
 
-            if (qty_index == RhoTheta_comp) {
-                if (!SurfLayer_on_zlo) {
-                    hfx_z(i,j,k) = zflux(i,j,k) * explicit_fac;
-                }
-            } else  if (qty_index == RhoQ1_comp) {
+            // hfx_z above the surface keeps the cell-centred flux the closure wrote
+            // (-K_h dtheta/dz at the cell); the TKE buoyancy source reads it there.
+            // Only the surface layer writes hfx_z(i,j,0).
+            if (qty_index == RhoQ1_comp) {
                 if (!SurfLayer_on_zlo) {
                     qfx1_z(i,j,k) = zflux(i,j,k) * explicit_fac;
                 }
