@@ -101,7 +101,7 @@ void initialize_ignition(
  * @return Number of cells that went from unburned to burning, summed over ranks
  */
 inline
-long apply_threshold_ignition(
+amrex::Long apply_threshold_ignition(
     amrex::MultiFab& phi,
     const amrex::MultiFab& temp,
     const amrex::MultiFab* nonburnable,
@@ -167,7 +167,7 @@ long apply_threshold_ignition(
                 return {(old >= 0.0_rt && p(i, j, k) < 0.0_rt) ? 1L : 0L};
             });
     }
-    long n_ignited = amrex::get<0>(reduce_data.value(reduce_op));
+    amrex::Long n_ignited = amrex::get<0>(reduce_data.value(reduce_op));
     ParallelDescriptor::ReduceLongSum(n_ignited);
     return n_ignited;
 }

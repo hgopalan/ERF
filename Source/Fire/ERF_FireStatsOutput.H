@@ -3,6 +3,7 @@
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_Geometry.H>
+#include <AMReX_Math.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Reduce.H>
 #include <ERF_FireGrid.H>
@@ -39,7 +40,7 @@ compute_fire_ellipse_axes(amrex::Real area_m2, amrex::Real perimeter_m)
         return {0.0, 0.0};
     }
 
-    constexpr amrex::Real PI = M_PI;
+    constexpr amrex::Real PI = amrex::Math::pi<amrex::Real>();
 
     // From Area = π * a * b and Perimeter ≈ π * (a + b)
     // we get: a + b ≈ Perimeter / π and a * b = Area / π
@@ -220,7 +221,7 @@ append_fire_stats(const amrex::MultiFab& phi,
     // Phase 8: Albini spotting statistics
     // spot_fires: count of cells with active spot flag (comp 3) > 0.5
     // max_spot_dist_m: domain maximum of landing distance field (comp 2)
-    long  n_spot_fires   = 0;
+    amrex::Long n_spot_fires = 0;
     Real  max_spot_dist  = 0.0_rt;
     if (albini_mf) {
         ReduceOps<ReduceOpSum, ReduceOpMax> reduce_op;
@@ -239,7 +240,7 @@ append_fire_stats(const amrex::MultiFab& phi,
         }
 
         ReduceTuple hv  = reduce_data.value(reduce_op);
-        n_spot_fires    = static_cast<long>(amrex::get<0>(hv));
+        n_spot_fires    = static_cast<amrex::Long>(amrex::get<0>(hv));
         max_spot_dist   = amrex::get<1>(hv);
 
         ParallelDescriptor::ReduceLongSum(n_spot_fires);

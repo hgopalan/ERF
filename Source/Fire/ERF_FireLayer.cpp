@@ -28,7 +28,7 @@ namespace erf_fire_diag {
 struct BurningRosStats {
     amrex::Real max_ros  = 0.0;   ///< Max ROS over burning cells [m/s]
     amrex::Real mean_ros = 0.0;   ///< Mean ROS over burning cells [m/s]
-    long        n_cells  = 0;     ///< Number of burning cells
+    amrex::Long n_cells  = 0;     ///< Number of burning cells
 };
 
 // Masked ROS statistics over burning cells (phi < 0), reduced across ranks.
@@ -59,7 +59,7 @@ BurningRosStats burning_ros_stats (const amrex::MultiFab& ros,
     ReduceTuple hv = reduce_data.value(reduce_op);
     Real max_ros = amrex::get<0>(hv);
     Real sum_ros = amrex::get<1>(hv);
-    long n_cells = static_cast<long>(amrex::get<2>(hv));
+    amrex::Long n_cells = static_cast<amrex::Long>(amrex::get<2>(hv));
 
     ParallelDescriptor::ReduceRealMax(max_ros);
     ParallelDescriptor::ReduceRealSum(sum_ros);
@@ -73,7 +73,7 @@ BurningRosStats burning_ros_stats (const amrex::MultiFab& ros,
 }
 
 // Number of cells with phi < 0, reduced across ranks.
-long count_burning_cells (const amrex::MultiFab& phi)
+amrex::Long count_burning_cells (const amrex::MultiFab& phi)
 {
     ReduceOps<ReduceOpSum> reduce_op;
     ReduceData<unsigned long long> reduce_data(reduce_op);
@@ -89,7 +89,7 @@ long count_burning_cells (const amrex::MultiFab& phi)
         });
     }
 
-    long n = static_cast<long>(amrex::get<0>(reduce_data.value(reduce_op)));
+    amrex::Long n = static_cast<amrex::Long>(amrex::get<0>(reduce_data.value(reduce_op)));
     ParallelDescriptor::ReduceLongSum(n);
     return n;
 }
@@ -764,7 +764,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         const Real r_ign = (m_params.ignition.threshold_radius > 0.0)
                          ? m_params.ignition.threshold_radius
                          : static_cast<Real>(m_fg.geom.CellSize(0));
-        const long n_ign = apply_threshold_ignition(*fire_phi, *fire_surface_temp,
+        const amrex::Long n_ign = apply_threshold_ignition(*fire_phi, *fire_surface_temp,
                                                     fire_nonburnable.get(), m_fg.geom,
                                                     m_params.ignition.threshold_temp, r_ign,
                                                     m_params.propagation_method != "levelset");
@@ -1050,7 +1050,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     if (m_params.fire_debug) {
         amrex::Print() << "[FIRE DEBUG] Fire front propagation completed with "
                        << n_substeps << " fire subcycles" << std::endl;
-        const long num_fire_cells = erf_fire_diag::count_burning_cells(*fire_phi);
+        const amrex::Long num_fire_cells = erf_fire_diag::count_burning_cells(*fire_phi);
         amrex::Print() << "[FIRE DEBUG] Number of active fire cells: " << num_fire_cells << std::endl;
     }
 
