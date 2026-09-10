@@ -27,18 +27,19 @@ live classes at 0.90; `fixed` still holds them there at 60 s while `legacy`
 has dropped them to at most 0.40; the dead classes do not depend on the
 setting; and the rate of spread does.
 
-Measured 2026-09-10 (Release, 2 ranks, macOS), at 60 s:
+Measured 2026-09-10 (Release, 2 ranks, macOS), at 60 s, with the corrected
+dead-fuel hysteresis and the single BEHAVE herbaceous transfer of #382:
 
 | variant      | live herb / woody | 1-h mean | burned area [m2] | mean ROS, burning cells [m/s] |
 |--------------|-------------------|----------|------------------|-------------------------------|
-| `legacy`     | 0.39993           | 0.07918  | 2000.0           | 0.1719                        |
-| `legacy_key` | 0.39993           | 0.07918  | 2000.0           | 0.1719                        |
-| `fixed`      | 0.90000           | 0.07918  | 1756.2           | 0.1476                        |
+| `legacy`     | 0.39994           | 0.07963  | 2118.8           | 0.1840                        |
+| `legacy_key` | 0.39994           | 0.07963  | 2118.8           | 0.1840                        |
+| `fixed`      | 0.90000           | 0.07963  | 1812.5           | 0.1507                        |
 
 The legacy live classes fall from 0.90 to the 0.40 clamp on the first step.
 BEHAVE then moves 89 % of the live herbaceous load to the dead class instead
-of 1/3 (default window 0.30-1.20), so the legacy fire spreads 16 % faster
-and burns 14 % more area in 60 s. `legacy_key` matches `legacy` exactly in
+of 1/3 (default window 0.30-1.20), so the legacy fire spreads 22 % faster
+and burns 17 % more area in 60 s. `legacy_key` matches `legacy` exactly in
 the level set, the rate of spread and all five classes; the dead classes are
 identical in all three runs.
 
