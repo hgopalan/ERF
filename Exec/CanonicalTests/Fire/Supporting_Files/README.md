@@ -69,9 +69,8 @@ Basic fire rate-of-spread calculations and fundamental fire physics:
 - **Wind_Speed_Variation/**: Fire spread at low and high wind speeds
 - **Multiple_Fuel_Models/**: Different Anderson FBFM13 fuel types
 
-### FARSITE_Propagation/
-FARSITE elliptical fire expansion method:
-- **Elliptical_Propagation/**: FARSITE elliptical fire front advancement
+### Fire_Behavior/Elliptical_Propagation/
+FARSITE elliptical fire front advancement (formerly under FARSITE_Propagation/).
 
 ### Heat_Flux_Diagnostics/
 Heat output and fuel depletion calculations:
@@ -88,14 +87,16 @@ Atmospheric boundary layer physics with fire:
 - **ABL_with_MRF/**: Atmospheric coupling with MRF turbulence model
 - **Atmospheric_Stability/**: Tests in stable and unstable boundary layers
 
-### Mesh_Refinement/
-Grid refinement and mesh structure tests:
-- **Vertical_Refinement/**: Stretched vertical grid fire spread
+### Core_Physics/Vertical_Refinement/
+Stretched vertical grid fire spread (formerly under Mesh_Refinement/).
 
 ### Fire_Behavior/
 Advanced fire behavior patterns:
 - **Ignition_Patterns/**: Multiple ignition sources and fire interaction
 - **Spotting/**: Albini (1983) stochastic ember spotting (Phase 8)
+
+### Verification/
+Cases with an exact or published answer and a check script each; see Verification/README.md.
 
 ### Supporting_Files/
 Documentation and utility scripts:

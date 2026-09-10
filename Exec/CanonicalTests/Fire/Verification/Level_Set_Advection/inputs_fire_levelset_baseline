@@ -28,7 +28,7 @@
 #   - Level-set propagation is isotropic: it advances the front at the scalar
 #     ROS through a Godunov norm and does not use wind direction, so the
 #     perimeter stays near-circular even under wind. Compare against
-#     FARSITE_Propagation/Elliptical_Propagation for the elliptical treatment.
+#     Fire_Behavior/Elliptical_Propagation for the elliptical treatment.
 
 geometry.prob_lo = 0.0 0.0 0.0
 geometry.prob_hi = 2000.0 2000.0 500.0

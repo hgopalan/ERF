@@ -6,17 +6,19 @@ Canonical fire tests covering analytical ROS checks, atmospheric coupling, ignit
 ## Subcases
 | Subdirectory | Description | Character |
 |---|---|---|
-| `Atmospheric_Boundary_Layer` | This directory collects related canonical ERF test cases under the Atmospheric Boundary Layer theme. It provides an organizational overview for the child cases listed below. | empirical / regression |
-| `Core_Physics` | This directory collects related canonical ERF test cases under the Core Physics theme. It provides an organizational overview for the child cases listed below. | empirical / regression |
-| `FARSITE_Propagation` | This directory collects related canonical ERF test cases under the FARSITE Propagation theme. It provides an organizational overview for the child cases listed below. | empirical / regression |
-| `Fire_Atmosphere_Coupling` | This directory collects related canonical ERF test cases under the Fire Atmosphere Coupling theme. It provides an organizational overview for the child cases listed below. | empirical / regression |
-| `Fire_Behavior` | This directory collects related canonical ERF test cases under the Fire Behavior theme. It provides an organizational overview for the child cases listed below. | empirical / regression |
-| `Heat_Flux_Diagnostics` | This directory collects related canonical ERF test cases under the Heat Flux Diagnostics theme. It provides an organizational overview for the child cases listed below. | empirical / regression |
-| `Level_Set_Propagation` | Level-set (PDE) fire-front propagation, the alternative to the FARSITE Lagrangian path. | empirical / regression |
-| `Real_Terrain` | Fires on real (SRTM) terrain at event scale with inflow/outflow boundaries: the Marshall Fire windstorm case. | demonstration |
-| `Mesh_Refinement` | This directory collects related canonical ERF test cases under the Mesh Refinement theme. It provides an organizational overview for the child cases listed below. | empirical / regression |
-| `Supporting_Files` | Documentation and supporting assets. | empirical / regression |
-| `Unit_Tests` | This directory collects related canonical ERF test cases under the Unit Tests theme. It provides an organizational overview for the child cases listed below. | empirical / regression |
+| `Verification` | Cases with an independent answer: exact solutions of the equations the fire module solves (geometry of the level set with a prescribed rate, Snell refraction, a speed gradient, Rothermel on a slope, the moisture time lag) and plume theory for the injected heat. Each has a check script. | verification |
+| `Core_Physics` | Rothermel spread on flat and sloped ground, fuel models and moisture, the wind adjustment factor and wind speed, terrain-wind coupling, vertical grid refinement. | empirical / regression |
+| `Fire_Behavior` | Behaviour options: rate-of-spread models, the FARSITE elliptical spread, acceleration, crown fire, ignition patterns, spatial fuel, spotting. | empirical / regression |
+| `Fire_Atmosphere_Coupling` | Passive, lagged and synchronous coupling and the smoke tracer. | empirical / regression |
+| `Atmospheric_Boundary_Layer` | Fires under stability and MRF boundary-layer settings. | empirical / regression |
+| `Heat_Flux_Diagnostics` | Flame temperature, heat flux and fireline intensity diagnostics. | empirical / regression |
+| `WUI_Subdivision` | A wind-driven grass fire running into three rows of houses: the wildland-urban interface features together, each checked against an independent expectation. | verification |
+| `Real_Terrain` | Fires on real (SRTM) terrain at event scale with inflow/outflow boundaries: the Marshall and Palisades fires. | demonstration |
+| `Unit_Tests` | Python unit tests for the Rothermel kernel, the FARSITE ellipse, the ROS models, the fuel map, ignition schedules, spotting, crown fire, acceleration, wind interpolation and terrain projection. | unit |
+| `Supporting_Files` | Shared fuel maps, ignition files, guides and the input validator. | assets |
+
+Every case folder has a `check_*.py`; the regression suites that pin quantitative
+results are under `Exec/RegTests/Fire*`.
 
 ## Notes
 - See each subdirectory README for case-specific purpose, expected results, and key parameters.
