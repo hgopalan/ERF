@@ -569,6 +569,40 @@ function(add_test_fire TEST_NAME SUITE_DIR INPUT_FILE NSTEPS)
     )
 endfunction(add_test_fire)
 
+# Fire start-up check: run one deck of a fire suite with RUNTIME_OPTIONS that
+# break a fire prerequisite, and pass when the run stops with EXPECTED_MESSAGE
+# in its output. The run is meant to abort, so its exit status is dropped by
+# the pipe into tee (a ';' here would split the CMake command list).
+function(add_test_fire_abort TEST_NAME SUITE_DIR INPUT_FILE EXPECTED_MESSAGE RUNTIME_OPTIONS)
+    set(CURRENT_TEST_SOURCE_DIR ${PROJECT_SOURCE_DIR}/Exec/RegTests/${SUITE_DIR})
+    set(CURRENT_TEST_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
+    file(MAKE_DIRECTORY ${CURRENT_TEST_BINARY_DIR})
+    file(GLOB TEST_FILES "${CURRENT_TEST_SOURCE_DIR}/*")
+    file(COPY ${TEST_FILES} DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+
+    if(ERF_ENABLE_MPI)
+        set(MPI_COMMANDS "${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${MPIEXEC_PREFLAGS}")
+    else()
+        unset(MPI_COMMANDS)
+    endif()
+
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+
+    set(test_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
+    set(test_command sh -c "${MPI_COMMANDS} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE} max_step=1 erf.plot_int=-1 erf.check_int=-1 ${RUNTIME_OPTIONS} 2>&1 | tee ${test_log}")
+
+    add_test(${TEST_NAME} ${test_command})
+    set_tests_properties(${TEST_NAME}
+        PROPERTIES
+        TIMEOUT 600
+        PROCESSORS 1
+        WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+        LABELS "regression;fire"
+        PASS_REGULAR_EXPRESSION "${EXPECTED_MESSAGE}"
+        ATTACHED_FILES_ON_FAIL "${test_log}"
+    )
+endfunction(add_test_fire_abort)
+
 # Stationary test -- compare with time 0
 function(add_test_0 TEST_NAME TEST_DIR TEST_EXE PLTFILE)
     set(options )
@@ -915,6 +949,9 @@ add_test_fire(FireStickMoisture_stick       FireStickMoisture     inputs_stick  
 add_test_fire(FireWindSampling_sample20     FireWindSampling      inputs_sample20            40)
 add_test_fire(FireFarsiteDefault            FarsiteDefault        inputs                     40)
 add_test_fire(FireLevelSetPropagation       LevelSetPropagation   inputs                     40)
+# fire without a surface layer at zlo must stop at start-up, not crash in the first step
+add_test_fire_abort(FireNoSurfaceLayer_abort  FireRestart           inputs_levelset_straight
+    "The fire module requires a surface layer" "zlo.type=SlipWall")
 if(ERF_ENABLE_DUST)
 add_test_fire(FireRestart_dust_straight     FireRestart           inputs_dust_straight       40 NRANKS 1)
 endif()
