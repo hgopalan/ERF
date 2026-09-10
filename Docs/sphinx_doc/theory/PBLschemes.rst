@@ -23,6 +23,14 @@ which case the vertical component of the LES model is ignored.
 Right now, ERF supports several PBL schemes: MYNN Level 2.5, MYJ, native SHOC,
 optional EAMxx SHOC, MRF, and YSU.
 
+MYJ, MYNN25, MYNNEDMF, MRF, YSU and YSUNew are column schemes: on every level
+where one is active, each box must span that level's full vertical domain.
+ERF checks the grids whenever such a level is made or regridded, and stops with
+a message naming ``amr.max_grid_size_z``, which must be at least the number of
+vertical cells on the level (it takes one value per level; ``amr.max_grid_size``
+with several values also sets one size per level, not per direction). Native
+SHOC has the same requirement and its own check (see its section below).
+
 The MYNN Level 2.5 model is the Mellor-Yamada-Nakanishi-Niino Level 2.5 model, largely matching the original forumulation proposed by Nakanishi and Niino in a series of papers from 2001 to 2009.
 
 .. _MYNN25:

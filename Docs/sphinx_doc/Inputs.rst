@@ -648,8 +648,9 @@ Avoiding Decomposition in the Vertical Direction
 
 Many ERF workflows want each box to span the full vertical extent of the domain
 or of the refined region -- for example because a physics package operates on
-entire columns.  (Native SHOC requires this and will abort if any box is split
-in z.)  ERF is set up so that this is the default behavior, in both places where
+entire columns.  (Native SHOC and the column PBL schemes MYJ, MYNN25, MYNNEDMF,
+YSU, YSUNew and MRF require this, and stop when a level on which they are active
+is made with a box split in z.)  ERF is set up so that this is the default behavior, in both places where
 grids are created:
 
 -  **When the level 0 grids are created**, ERF decomposes the domain across the

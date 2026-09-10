@@ -32,7 +32,7 @@ zhi.type = "SlipWall"
 zhi.theta_grad = 0.003
 
 # Prevent z-decomposition (verify_dust_prerequisites check 3).
-amrex.max_grid_size_z = 128
+amr.max_grid_size_z   = 128
 
 erf.fixed_dt     = 0.5
 erf.sum_interval = 1

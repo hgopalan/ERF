@@ -19,7 +19,7 @@ See the input-file header comments in this directory for the specific validation
 | `fabarray.mfiter_tile_size` | `1024 1024 1024` | Primary configuration value taken from `inputs`. |
 | `geometry.prob_extent` | `3000 3000 1024` | Primary configuration value taken from `inputs`. |
 | `amr.n_cell` | `8   8   64` | Primary configuration value taken from `inputs`. |
-| `amrex.max_grid_size_z` | `128` | Primary configuration value taken from `inputs`. |
+| `amr.max_grid_size_z` | `128` | Primary configuration value taken from `inputs`. |
 | `geometry.is_periodic` | `1 1 0` | Primary configuration value taken from `inputs`. |
 
 ## References

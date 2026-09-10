@@ -62,7 +62,7 @@ rebalance_columns (MultiFab& rho,
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!use_sfc || (klo == k_dom_lo),
                                          "rebalance_columns with use_sfc requires boxes that "
                                          "reach the bottom of the domain: the integration is "
-                                         "seeded from p_0 at the surface. Set erf.max_grid_size_z "
+                                         "seeded from p_0 at the surface. Set amr.max_grid_size_z "
                                          "large enough that the grids are not decomposed in z.");
         bx.makeSlab(2,klo);
 

@@ -32,8 +32,8 @@ void verify_fire_prerequisites(const ERF& erf,
         int box_nz    = b.length(2);
         // Build the message string before passing to the macro
         std::string msg = std::string("[FIRE] Cannot decompose in z direction. ")
-                        + "Set: erf.max_grid_size_z = " + std::to_string(domain_nz)
-                        + " or erf.blocking_factor_z = " + std::to_string(domain_nz);
+                        + "Set: amr.max_grid_size_z = " + std::to_string(domain_nz)
+                        + " (or larger)";
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(box_nz == domain_nz, msg.c_str());
     }
 
@@ -49,7 +49,7 @@ void verify_fire_prerequisites(const ERF& erf,
         int nx = b.length(0);
         int ny = b.length(1);
         std::string msg = std::string("[FIRE] Box sizes not divisible by grid_ratio. ")
-                        + "Adjust erf.max_grid_size so all x,y lengths are divisible by "
+                        + "Adjust amr.max_grid_size_x and amr.max_grid_size_y so all x,y lengths are divisible by "
                         + std::to_string(C);
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE((nx % C == 0 && ny % C == 0), msg.c_str());
     }
