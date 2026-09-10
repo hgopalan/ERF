@@ -39,29 +39,32 @@ the curves for hours.
 
 ## Expected Results
 
-On four ranks (macOS Release, built at 3a7b36680; the dead-class moisture
-path is unchanged through 08678c8e2), surface temperature 300 K:
+On two ranks (macOS Release, built at 30f1f7988, the head of #387; the
+dead-class moisture path is unchanged through 3c716b269), surface temperature
+300 K:
 
 ```
 variant             RH max  T max K     M_1hr    M_10hr   M_100hr     R0 m/s   cells
-legacy               0.000   300.00  0.079179  0.079917  0.079992    0.02038     774
-legacy_key           0.000   300.00  0.079179  0.079917  0.079992    0.02038     774
+legacy               0.000   300.00  0.079635  0.079963  0.079996    0.02028     774
+legacy_key           0.000   300.00  0.079635  0.079963  0.079996    0.02028     774
 van_wagner           0.000   300.00  0.078536  0.079852  0.079985    0.02052     774
-humid_legacy         0.396   300.00  0.081958  0.080197  0.080020    0.01975     774
-humid_van_wagner     0.396   300.00  0.080448  0.080045  0.080005    0.02010     774
+humid_legacy         0.396   300.00  0.081541  0.080155  0.080016    0.01985     774
+humid_van_wagner     0.396   300.00  0.080157  0.080016  0.080002    0.02017     774
 ```
 
 and every check passes. The 1-h changes over 60 s follow forward Euler at
-tau_eff = 0.902 h under the hysteresis rule as coded (a fuel above the
-adsorption curve relaxes toward it, one below the desorption curve toward
-that):
+tau_eff = 0.902 h under the hysteresis rule of #387 (a fuel wetter than the
+drying curve E_d relaxes toward it, one drier than the wetting curve E_w
+toward that, and one between them does not change):
 
-- dry legacy, toward E_w = 0.035: -8.2e-4;
-- dry van_wagner, toward E_w = 0: -1.46e-3;
-- humid legacy, toward E_d = 0.187: +1.96e-3;
-- humid van_wagner, toward E_d = 0.104: +4.5e-4.
+- dry legacy, toward E_d = 0.060: -3.7e-4;
+- dry van_wagner, toward E_w = E_d = 0: -1.46e-3;
+- humid legacy, toward E_w = 0.164: +1.54e-3;
+- humid van_wagner, toward E_w = 0.089: +1.6e-4.
 
 The burning-cell count is the same in all five decks: rate-of-spread
-differences of 0.7-1.8 % over 60 s move the front by less than a fire cell.
-A change to the hysteresis rule changes these numbers (legacy dry air would
-relax toward E_d = 0.060, both humid decks toward E_w) but not the checks.
+differences of 1.2-1.6 % over 60 s move the front by less than a fire cell.
+Builds before #387 used the reversed curve choice and gave 0.079179 (legacy),
+0.081958 (humid legacy) and 0.080448 (humid van_wagner) for the 1-h class on
+four ranks; the dry van_wagner deck is the same under both rules, because both
+of its curves are zero.
