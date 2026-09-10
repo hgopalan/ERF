@@ -36,8 +36,11 @@ rates for the wind the fire samples: `check_linefire.py` takes the head and
 backing rates from the arrival-time differences between consecutive probe
 cells, evaluates Rothermel (1972) for fuel model 1 at 5.5 % (the same
 equations as `Source/Fire/ERF_Rothermel.cpp`, ported independently) at the
-effective wind the fire reports, and requires the backing fire at R0 and the
-head at R0 (1 + phi_w) to 10 %.
+effective wind the fire reports every step, and requires the backing fire at
+R0 and the head at R0 (1 + phi_w) to 10 %. The surface layer slows the wind by
+28 % over the 5 m/s run and phi_w grows about as the wind squared, so each
+probe pair is held to the head rate averaged over its own arrival window, not
+to the rate at the run-mean wind.
 
 The reference numbers from the paper (Table 1 and section 4): a 1 km long,
 40 m wide line in fuel model 1 at 5.5 % moisture in a 5 km periodic LES with

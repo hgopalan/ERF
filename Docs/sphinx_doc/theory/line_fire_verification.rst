@@ -27,9 +27,10 @@ The WRF-Fire choices are mirrored: the wind is interpolated to 6.1 m and
 reduced by the fuel model's wind reduction factor (WRF-Fire's ``windrf(1) =
 0.36`` for fuel model 1; here Andrews' unsheltered factor, 0.362 for the 1 ft
 grass bed), and there is no midflame wind cap (``erf.fire.use_wind_limit =
-false``; WRF-Fire caps R at 6 m/s only). Six decks share one base: no wind,
-a 2.5 m/s sounding (the paper's Control), a 5 m/s sounding (WSHi), and the
-two winds with the heat coupled back.
+false``; WRF-Fire caps R at 6 m/s only). Seven decks share one base: no wind,
+a 2.5 m/s sounding (the paper's Control), a 5 m/s sounding (WSHi), the 5 m/s
+sounding with ERF's default midflame wind cap turned back on (``wind5_cap``),
+and the three winds with the heat coupled back.
 
 Probe cells sit on the line y = 40 m at 1.25 and 3.75 m behind the west edge
 of the line and at 1.25, 3.75, 8.75, 18.75, 38.75 and 58.75 m ahead of its
@@ -48,9 +49,12 @@ at zero (Coen et al. 2013 make the same choice: "the backing rate of spread
 in these experiments is the zero-wind rate of spread"). ``check_linefire.py``
 carries an independent port of the Rothermel equations of
 ``Source/Fire/ERF_Rothermel.cpp`` and evaluates them at the effective wind the
-fire reports each step, averaged over the run, since the surface layer slows
-the sounding wind at 6.1 m as the run proceeds (by 15 % over 180 s at 2.5 m/s
-and 28 % at 5 m/s). The one-way decks must match to 10 %.
+fire reports each step. The surface layer slows the sounding wind at 6.1 m as
+the run proceeds (by 15 % over 180 s at 2.5 m/s and 28 % at 5 m/s), and
+:math:`\phi_w` grows about as the square of the wind, so each pair of probes is
+held to the head rate averaged over its own arrival window rather than to the
+rate at the run-mean wind; at 5 m/s the two differ by 15 %. The one-way decks
+must match to 10 %.
 
 Results
 -------
@@ -80,7 +84,7 @@ Results
      - 0.83
      - 0.0240
      - 0.0240
-     - 0.0908
+     - 0.0960
      - 0.0957
      - Control: 0.22 head (backing not quoted; WRF-Fire sets it to R0)
    * - wind5
@@ -88,7 +92,15 @@ Results
      - 1.56
      - 0.0240
      - 0.0240
-     - 0.2689
+     - 0.3097
+     - 0.3104
+     - WSHi: about 0.40 head
+   * - wind5_cap
+     - 4.31
+     - 1.49 (capped)
+     - 0.0240
+     - 0.0240
+     - 0.2541
      - 0.2541
      - WSHi: about 0.40 head
    * - nowind_2way
@@ -100,20 +112,20 @@ Results
      - 0.0240
      - NoWind: 0.02 outward
    * - wind2p5_2way
-     - 4.80 (max)
-     - 1.74
+     - 5.43 (max)
+     - 1.96
      - 0.0240
      - 0.0240
      - (coupled)
-     - 0.2427
+     - 0.3555
      - Control: 0.22 head
    * - wind5_2way
-     - 5.55 (max)
-     - 2.01
+     - 6.19 (max)
+     - 2.24
      - 0.0240
-     - 0.0240
+     - 0.0299
      - (coupled)
-     - 0.2383
+     - 0.5559
      - WSHi: about 0.40 head
 
 Reading the table: the paper's column is its head fire in a coupled LES,
@@ -123,13 +135,13 @@ it to :math:`R_0` as ERF does, so the like-for-like pairs are backing against
 NoWind, the one-way heads against Rothermel at the sampled wind, and the
 two-way heads against Control and WSHi.
 
-The backing fire moves at :math:`R_0` to the last digit in every deck, the
-no-wind fire at :math:`R_0` in both directions, and the head fire within
-5.5 % of Rothermel at the sampled wind in both winds, the residual being the
-wind's drift over the run. The no-wind rate itself, 0.024 m/s, is the
-paper's 0.02 m/s.
+The backing fire moves at :math:`R_0` to the last digit in every deck but the
+coupled 5 m/s one (0.0299 m/s over its single probe pair), the no-wind fire
+at :math:`R_0` in both directions, and the one-way head fire within 0.3 % of
+Rothermel over its arrival windows in both winds, with the cap or without it.
+The no-wind rate itself, 0.024 m/s, is the paper's 0.02 m/s.
 
-The heads of the one-way decks are well below the paper's 0.22 and about
+The heads of the one-way decks are below the paper's 0.22 and about
 0.40 m/s, and are meant to be: those are coupled results in a turbulent
 convective boundary layer, where the fire's plume draws the near-surface
 wind into the head ("near-fire horizontal winds varied from 2 to 4 m/s" for
@@ -139,22 +151,44 @@ the 0.36 reduction factor, a wind factor of 2.8 and a head of 0.09 m/s;
 doubling the midflame wind raises the wind factor by about four and the head
 to the paper's value.
 
-The two-way decks are reported, not checked, and the two winds show why.
-At 2.5 m/s the coupled head runs at 0.24 m/s, the paper's 0.22. At 5 m/s it
-runs at 0.24 m/s as well, below the one-way 0.25 and far below the paper's
-0.40. The fire plotfiles show the reason: with the heat on, the 6.1 m wind at
-the head is 5.0 m/s at 50 s (4.6 one-way), 3.7 m/s at 100 s (4.2 one-way)
-and reversed, -1.8 m/s at the head and -2.2 m/s 10 m ahead of it, at 150 s.
-The line here spans the whole periodic y extent, so its plume is
-two-dimensional and the inflow it draws from the downwind side has nowhere to
-come from but against the ambient wind, which it overpowers; the directional
-model then clips the wind component into the fire at zero and the head drops
-to the no-wind rate. The paper's 1 km line in a 5 km box lets the flow go
-around the flanks and feed the head instead. Reproducing the coupled rates
-needs a finite line and a domain the plume can turn over in, which is the
-paper's LES and not this regression case; the 2.5 m/s agreement is the
-transient enhancement before the reversal sets in, not the paper's
-mechanism.
+The midflame wind cap
+~~~~~~~~~~~~~~~~~~~~~
+
+Until ``erf.fire.use_wind_limit = false`` was honoured (the flag was parsed
+and ignored), every deck here ran with Rothermel's maximum effective wind
+speed cap, 300 ft/min (1.52 m/s) for fuel model 1, which holds the head at or
+below 0.257 m/s at 5.5 % moisture. ``wind5_cap`` keeps that cap and shows the
+ceiling: its first three probe pairs move at 0.256 to 0.258 m/s while the wind
+is above the cap, and the last at 0.245 m/s once the wind has fallen below it.
+Its head is the 0.2541 m/s that ``wind5`` reported before; uncapped, ``wind5``
+runs at 0.3104 m/s.
+
+The two-way decks
+~~~~~~~~~~~~~~~~~
+
+The two-way decks are reported, not checked. With the cap, both coupled heads
+ran at 0.24 m/s, and that equality was the cap: both runs sample midflame
+winds above 1.52 m/s. Uncapped, the coupled heads run at 0.36 m/s at 2.5 m/s
+and 0.56 m/s at 5 m/s, against the paper's 0.22 and about 0.40 m/s, and the
+two winds evolve differently.
+
+At 5 m/s the head crosses the probes at 0.43 to 0.80 m/s in its first 30 s,
+then at 0.26 m/s between 30 and 107 s, and has not reached the probe 58.75 m
+ahead of the line by 180 s. The line here spans the whole periodic y extent,
+so its plume is two-dimensional and the inflow it draws from the downwind side
+has nowhere to come from but against the ambient wind; the directional model
+clips a wind component into the fire at zero, which drops the head towards the
+no-wind rate. Fire plotfiles of the capped run showed that inflow reversing the
+6.1 m wind at the head by 150 s (-1.8 m/s at the head, -2.2 m/s 10 m ahead of
+it). The slowdown here is consistent with it, but the uncapped fields have not
+been re-examined. At 2.5 m/s the head instead speeds up: 0.25 to 0.34 m/s
+until 79 s, then 0.38 m/s to 131 s and 0.54 m/s to 168 s, as the largest
+effective wind in the domain rises from 1.6 to 3.7 m/s.
+
+The paper's 1 km line in a 5 km box lets the flow go around the flanks and
+feed the head instead. Reproducing the coupled rates needs a finite line and a
+domain the plume can turn over in, which is the paper's LES and not this
+regression case.
 
 References
 ----------
