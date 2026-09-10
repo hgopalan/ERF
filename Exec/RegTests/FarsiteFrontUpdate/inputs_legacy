@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# The update before 2026-09: every cell at or below farsite.phi_threshold stamps
+# a target one cell ahead, and the phi = 0 rebuild puts the first unburned row
+# below that threshold too, so two rows advance per cell of travel.
+erf.fire.farsite.front_update = "legacy"

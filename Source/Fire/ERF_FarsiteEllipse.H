@@ -4,13 +4,21 @@
 #include <AMReX_Config.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_Geometry.H>
+#include <AMReX_Math.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_ParallelReduce.H>
 #include <AMReX_ccse-mpi.H>
 #include <AMReX_Gpu.H>
 #include <ERF_FireGrid.H>
 #include <cmath>
+#include <limits>
 #include <vector>
+
+namespace farsite_front {
+    /// erf.fire.farsite.front_update
+    constexpr int legacy     = 0;
+    constexpr int front_cell = 1;
+}
 
 struct FarsiteParams
 {
@@ -21,6 +29,7 @@ struct FarsiteParams
     int         use_anderson_lw = 1;
     amrex::Real gaussian_sigma  = -1.0;
     amrex::Real cfl_fire        = 0.5;
+    int         front_update    = farsite_front::front_cell;
 };
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -41,8 +50,139 @@ void LW_ratio_to_richards_coefficients(amrex::Real LW_ratio,
     coeff_b = (coeff_a + coeff_c) / (2.0 * LW_ratio);
 }
 
+namespace farsite_front {
+
+/// Larger than any arrival time
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+constexpr amrex::Real never () noexcept { return std::numeric_limits<amrex::Real>::max(); }
+
+/**
+ * Spread shape of one front cell at unit head rate.
+ *
+ * With wind the Richards (1990) normal speed, a cos + b |sin| ahead and
+ * b |sin| - c cos behind the wind direction, is the support function of the
+ * rectangle [-c, a] x [-b, b] in the wind frame. Without wind the normal speed
+ * is the head rate in every direction and the shape is the unit disc.
+ */
+struct Shape
+{
+    amrex::Real wx, wy;   ///< unit wind direction
+    amrex::Real a, b, c;  ///< head, flank and backing coefficients, all > 0
+    amrex::Real sx, sy;   ///< terrain slope dz/dx, dz/dy
+    bool isotropic;       ///< no wind: the unit disc
+};
+
+/**
+ * Time the shape takes to cover the map vector (ddx, ddy) at unit head rate:
+ * its gauge, lengthened by the slope, since a step ds along the ground up a
+ * slope of angle theta in that direction covers ds cos(theta) in map view.
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real gauge (amrex::Real ddx, amrex::Real ddy, const Shape& s) noexcept
+{
+    using namespace amrex::literals;
+    const amrex::Real len = std::sqrt(ddx * ddx + ddy * ddy);
+    if (len <= 0.0_rt) { return 0.0_rt; }
+    amrex::Real g = len;
+    if (!s.isotropic) {
+        const amrex::Real par = ddx * s.wx + ddy * s.wy;
+        const amrex::Real per = std::abs(ddy * s.wx - ddx * s.wy);
+        g = amrex::max(amrex::max(par / s.a, -par / s.c), per / s.b);
+    }
+    const amrex::Real tan_theta = (s.sx * ddx + s.sy * ddy) / len;
+    return g * std::sqrt(1.0_rt + tan_theta * tan_theta);
+}
+
+/// Zero of (1 - l) g0 + l g1 strictly inside (0, 1), or -1 if there is none
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real crossing (amrex::Real g0, amrex::Real g1) noexcept
+{
+    using namespace amrex::literals;
+    if ((g0 < 0.0_rt && g1 > 0.0_rt) || (g0 > 0.0_rt && g1 < 0.0_rt)) { return g0 / (g0 - g1); }
+    return -1.0_rt;
+}
+
+/**
+ * Arrival time at a cell from one quadrant of its neighbours.
+ *
+ * Tx, Ty are the arrival times of the quadrant's x and y neighbours (negative
+ * while unburned), hx, hy the signed offsets from those neighbours to the cell,
+ * and rate the head rate of spread (> 0). Returns never() if neither burned.
+ *
+ * This is the Hopf-Lax (Huygens) update: the front passed each point of the
+ * segment joining the two neighbour centres at the linearly interpolated time,
+ * and the cell burns when the spread shape grown from the first of those points
+ * reaches it. For a planar front this is exact: the time between rows is the
+ * row spacing along the normal over the normal speed, one row at a time. Along
+ * the segment the objective is convex; for the rectangle it is piecewise linear,
+ * so the minimum lies at an end or at a kink, and every kink is tried; for the
+ * disc the stationary point has a closed form. The slope is left out of the
+ * choice of the point and applied to the travel time from it.
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real quadrant_arrival (amrex::Real Tx, amrex::Real Ty,
+                              amrex::Real hx, amrex::Real hy,
+                              const Shape& s, amrex::Real rate) noexcept
+{
+    using namespace amrex::literals;
+    const bool has_x = (Tx >= 0.0_rt);
+    const bool has_y = (Ty >= 0.0_rt);
+    const amrex::Real inv_rate = 1.0_rt / rate;
+    amrex::Real best = never();
+    if (has_x) { best = amrex::min(best, Tx + gauge(hx, 0.0_rt, s) * inv_rate); }
+    if (has_y) { best = amrex::min(best, Ty + gauge(0.0_rt, hy, s) * inv_rate); }
+    if (!(has_x && has_y)) { return best; }
+
+    amrex::Real lam[6];
+    int n = 0;
+    if (s.isotropic) {
+        // Tx + l (Ty - Tx) + |d(l)| / rate with d(l) = ((1 - l)|hx|, l |hy|) is
+        // stationary where |hx| cos(p) - |hy| sin(p) = rate (Ty - Tx), p the angle of d.
+        const amrex::Real ax = std::abs(hx);
+        const amrex::Real ay = std::abs(hy);
+        const amrex::Real q  = amrex::max(-1.0_rt, amrex::min(rate * (Ty - Tx) / std::sqrt(ax * ax + ay * ay), 1.0_rt));
+        const amrex::Real p  = std::acos(q) - std::atan2(ay, ax);
+        if (p > 0.0_rt && p < 0.5_rt * amrex::Math::pi<amrex::Real>()) {
+            lam[n++] = ax * std::sin(p) / (ay * std::cos(p) + ax * std::sin(p));
+        }
+    } else {
+        // Kinks of max(par / a, -par / c, |per| / b) along the segment, where par
+        // and per (along and across the wind) are linear in l.
+        const amrex::Real p0 =  hx * s.wx;
+        const amrex::Real p1 =  hy * s.wy;
+        const amrex::Real q0 = -hx * s.wy;
+        const amrex::Real q1 =  hy * s.wx;
+        lam[n++] = crossing(p0, p1);
+        lam[n++] = crossing(q0, q1);
+        lam[n++] = crossing( p0 / s.a - q0 / s.b,  p1 / s.a - q1 / s.b);
+        lam[n++] = crossing( p0 / s.a + q0 / s.b,  p1 / s.a + q1 / s.b);
+        lam[n++] = crossing(-p0 / s.c - q0 / s.b, -p1 / s.c - q1 / s.b);
+        lam[n++] = crossing(-p0 / s.c + q0 / s.b, -p1 / s.c + q1 / s.b);
+    }
+    for (int m = 0; m < n; ++m) {
+        const amrex::Real l = lam[m];
+        if (l <= 0.0_rt || l >= 1.0_rt) { continue; }
+        best = amrex::min(best, Tx + l * (Ty - Tx) + gauge((1.0_rt - l) * hx, l * hy, s) * inv_rate);
+    }
+    return best;
+}
+
+} // namespace farsite_front
+
+/**
+ * @brief One FARSITE substep, erf.fire.farsite.front_update = "legacy".
+ *
+ * Every cell with phi <= phi_threshold and a nonzero central-difference gradient
+ * accumulates R dt along its normal and, once that reaches one cell, stamps a
+ * burned target one cell ahead. phi is then rebuilt as -1 on burned cells and 0
+ * everywhere else, so from the first substep on every unburned cell sits below
+ * the threshold: the last burned row and the first unburned row both accumulate,
+ * both stamp, and the front advances two rows per cell of travel, about twice
+ * the rate of spread (Exec/RegTests/FarsiteFrontUpdate). Kept to reproduce
+ * results from before 2026-09.
+ */
 inline
-void advance_farsite_one_step(
+void advance_farsite_one_step_legacy(
     amrex::MultiFab& phi,
     amrex::MultiFab& farsite_work,
     amrex::MultiFab& disp_accum,
@@ -320,6 +460,186 @@ void advance_farsite_one_step(
                 }
             });
         }
+    }
+}
+
+/**
+ * @brief One FARSITE substep, erf.fire.farsite.front_update = "front_cell".
+ *
+ * Front cells are the unburned, burnable cells with a burned 4-neighbour. Each
+ * gets an arrival time from the arrival times of those neighbours with the
+ * Hopf-Lax update of farsite_front::quadrant_arrival, using the Richards shape
+ * of its own midflame wind (or the disc without wind) and its slope, and burns
+ * in this substep if that time falls inside it, taking that time, not the
+ * substep's, as its arrival time. A planar front therefore moves one row per
+ * row spacing along the normal over R times the Richards normal speed, and the
+ * burned region of a uniform case grows as the ignition swept by the spread
+ * shape, which keeps a finite line's head flat and a disc convex.
+ *
+ * The head rate R is the larger of the cell's own rate and those of its burned
+ * neighbours: the burned side carries the crown-fire rate, which is only set in
+ * burned cells, and the cell's own rate keeps the front moving where a burned
+ * cell's rate has dropped. Its mean since the first neighbour burned is what
+ * the update uses, accumulated in disp_accum (component 0 the distance R dt
+ * summed, component 1 set to 1 while the cell is a front cell), so a rate that
+ * varies in time is averaged over the crossing of the cell rather than applied
+ * retroactively. Unburned cells get phi = +1, burned cells -1.
+ */
+inline
+void advance_farsite_front_cells(
+    amrex::MultiFab& phi,
+    amrex::MultiFab& disp_accum,
+    amrex::MultiFab& arrival_time,
+    const amrex::MultiFab& vel_eff,
+    const amrex::MultiFab& R_mf,
+    const amrex::Geometry& geom_fire,
+    amrex::Real dt_fire,
+    amrex::Real current_time,
+    const FarsiteParams& fp,
+    const amrex::MultiFab* slopes = nullptr,
+    const amrex::MultiFab* nonburnable = nullptr)
+{
+    using namespace amrex;
+
+    const auto dx = geom_fire.CellSizeArray();
+    const Real t0 = current_time;
+    const Real t1 = current_time + dt_fire;
+    const bool use_terrain = (slopes != nullptr);
+    const bool use_mask    = (nonburnable != nullptr);
+    const int  use_anderson_lw = fp.use_anderson_lw;
+    // Coefficients divide the gauge; a zero one would mean no spread that way.
+    const Real coef_min = 1.0e-6_rt;
+    const Real coef_a = amrex::max(fp.coeff_a, coef_min);
+    const Real coef_b = amrex::max(fp.coeff_b, coef_min);
+    const Real coef_c = amrex::max(fp.coeff_c, coef_min);
+
+    // An ignition, a spot landing or a restart can leave a cell burned (phi < 0)
+    // without an arrival time; it burns from the start of this substep.
+    for (MFIter mfi(arrival_time); mfi.isValid(); ++mfi) {
+        auto p  = phi.const_array(mfi);
+        auto at = arrival_time.array(mfi);
+        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            if (p(i, j, k) < 0.0_rt && at(i, j, k) < 0.0_rt) { at(i, j, k) = t0; }
+        });
+    }
+
+    // Arrival time and rate of spread with a ghost cell: each update reads its
+    // four neighbours, across box and periodic boundaries.
+    MultiFab nbr(arrival_time.boxArray(), arrival_time.DistributionMap(), 2, IntVect(1, 1, 0));
+    MultiFab::Copy(nbr, arrival_time, 0, 0, 1, 0);
+    MultiFab::Copy(nbr, R_mf,         0, 1, 1, 0);
+    fire_fill_boundary(nbr, geom_fire);
+
+    for (MFIter mfi(arrival_time); mfi.isValid(); ++mfi) {
+        auto nb  = nbr.const_array(mfi);
+        auto at  = arrival_time.array(mfi);
+        auto acc = disp_accum.array(mfi);
+        auto vel = vel_eff.const_array(mfi);
+        Array4<const Real> slp;
+        if (use_terrain) { slp = slopes->const_array(mfi); }
+        Array4<const Real> msk;
+        if (use_mask) { msk = nonburnable->const_array(mfi); }
+
+        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+        {
+            const Real Txm = nb(i-1, j, k, 0);
+            const Real Txp = nb(i+1, j, k, 0);
+            const Real Tym = nb(i, j-1, k, 0);
+            const Real Typ = nb(i, j+1, k, 0);
+            const bool front = (nb(i, j, k, 0) < 0.0_rt)
+                            && !(use_mask && msk(i, j, k) > 0.5_rt)
+                            && (Txm >= 0.0_rt || Txp >= 0.0_rt || Tym >= 0.0_rt || Typ >= 0.0_rt);
+            if (!front) {
+                acc(i, j, k, 0) = 0.0_rt;
+                acc(i, j, k, 1) = 0.0_rt;
+                return;
+            }
+
+            Real t_first = farsite_front::never();
+            Real rate_now = nb(i, j, k, 1);
+            if (Txm >= 0.0_rt) { t_first = amrex::min(t_first, Txm); rate_now = amrex::max(rate_now, nb(i-1, j, k, 1)); }
+            if (Txp >= 0.0_rt) { t_first = amrex::min(t_first, Txp); rate_now = amrex::max(rate_now, nb(i+1, j, k, 1)); }
+            if (Tym >= 0.0_rt) { t_first = amrex::min(t_first, Tym); rate_now = amrex::max(rate_now, nb(i, j-1, k, 1)); }
+            if (Typ >= 0.0_rt) { t_first = amrex::min(t_first, Typ); rate_now = amrex::max(rate_now, nb(i, j+1, k, 1)); }
+            rate_now = amrex::max(rate_now, 0.0_rt);
+
+            // Distance covered at the head rate since the first neighbour burned
+            if (acc(i, j, k, 1) != 1.0_rt) {
+                acc(i, j, k, 0) = rate_now * amrex::max(t0 - t_first, 0.0_rt);
+                acc(i, j, k, 1) = 1.0_rt;
+            }
+            acc(i, j, k, 0) += rate_now * dt_fire;
+            const Real rate = acc(i, j, k, 0) / (t1 - t_first);
+            if (!(rate > 0.0_rt)) { return; }
+
+            farsite_front::Shape s;
+            const Real ux = vel(i, j, k, 0);
+            const Real uy = vel(i, j, k, 1);
+            const Real wind_mag = std::sqrt(ux * ux + uy * uy);
+            s.isotropic = !(wind_mag > 1.0e-10_rt);
+            s.wx = 1.0_rt; s.wy = 0.0_rt;
+            s.a = 1.0_rt; s.b = 1.0_rt; s.c = 1.0_rt;
+            if (!s.isotropic) {
+                s.wx = ux / wind_mag;
+                s.wy = uy / wind_mag;
+                Real a = coef_a, b = coef_b, c = coef_c;
+                if (use_anderson_lw != 0) {
+                    LW_ratio_to_richards_coefficients(anderson_LW_ratio(wind_mag * 2.237_rt), a, b, c);
+                }
+                s.a = amrex::max(a, coef_min);
+                s.b = amrex::max(b, coef_min);
+                s.c = amrex::max(c, coef_min);
+            }
+            s.sx = use_terrain ? slp(i, j, k, 0) : 0.0_rt;
+            s.sy = use_terrain ? slp(i, j, k, 1) : 0.0_rt;
+
+            Real T_new = farsite_front::never();
+            T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txm, Tym,  dx[0],  dx[1], s, rate));
+            T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txp, Tym, -dx[0],  dx[1], s, rate));
+            T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txm, Typ,  dx[0], -dx[1], s, rate));
+            T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txp, Typ, -dx[0], -dx[1], s, rate));
+            if (T_new <= t1) {
+                at(i, j, k) = amrex::max(T_new, t0);
+                acc(i, j, k, 0) = 0.0_rt;
+                acc(i, j, k, 1) = 0.0_rt;
+            }
+        });
+    }
+
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        auto p  = phi.array(mfi);
+        auto at = arrival_time.const_array(mfi);
+        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            p(i, j, k) = (at(i, j, k) >= 0.0_rt) ? -1.0_rt : 1.0_rt;
+        });
+    }
+    // The kernels above read nbr, which is freed on return.
+    Gpu::streamSynchronize();
+}
+
+inline
+void advance_farsite_one_step(
+    amrex::MultiFab& phi,
+    amrex::MultiFab& farsite_work,
+    amrex::MultiFab& disp_accum,
+    amrex::MultiFab& arrival_time,
+    const amrex::MultiFab& vel_eff,
+    const amrex::MultiFab& R_mf,
+    const amrex::Geometry& geom_fire,
+    amrex::Real dt_fire,
+    amrex::Real current_time,
+    const FarsiteParams& fp,
+    const amrex::MultiFab* slopes = nullptr,
+    const amrex::MultiFab* nonburnable = nullptr)
+{
+    if (fp.front_update == farsite_front::legacy) {
+        advance_farsite_one_step_legacy(phi, farsite_work, disp_accum, arrival_time,
+                                        vel_eff, R_mf, geom_fire, dt_fire,
+                                        current_time, fp, slopes, nonburnable);
+    } else {
+        advance_farsite_front_cells(phi, disp_accum, arrival_time,
+                                    vel_eff, R_mf, geom_fire, dt_fire,
+                                    current_time, fp, slopes, nonburnable);
     }
 }
 

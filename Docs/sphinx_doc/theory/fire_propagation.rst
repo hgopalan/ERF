@@ -9,7 +9,7 @@ Front Propagation
 The rate-of-spread models (:ref:`sec:ROS_Models`) give a speed at every fire
 cell. This page describes how the burned region is advanced at that speed.
 Two methods are available through :cpp:`erf.fire.propagation_method`:
-``"farsite"`` (default), a Lagrangian marker scheme in the spirit of FARSITE,
+``"farsite"`` (default), a cell-by-cell Huygens scheme in the spirit of FARSITE,
 and ``"levelset"``, a Hamilton-Jacobi solver. Both act on the same normalised
 level set ``fire_phi`` and both record ``fire_arrival_time``, so everything
 downstream (fuel consumption, heat flux, diagnostics, output) is independent
@@ -41,13 +41,12 @@ burned area, perimeter and arrival statistics.
 FARSITE path
 ------------
 
-The default path advances the front with markers, in the manner of Finney's
-FARSITE, but on the fire grid rather than on a free polygon. Each fire
-subcycle of length :math:`\Delta t_f`:
+The default path grows the burned region by Huygens' principle, as Finney's
+FARSITE does, but on the fire grid rather than on a free polygon, and with the
+Richards (1990) spread shape below. Each fire subcycle of length
+:math:`\Delta t_f`:
 
-1. **Front cells** are those with :math:`\phi \le` :cpp:`erf.fire.farsite.phi_threshold`
-   (default 0.1) and a positive rate of spread.
-2. **Ellipse shape.** The length-to-width ratio of the local spread ellipse
+1. **Ellipse shape.** The length-to-width ratio of the local spread ellipse
    follows Anderson (1983) from the midflame wind :math:`U` in mph,
 
    .. math::
@@ -59,23 +58,63 @@ subcycle of length :math:`\Delta t_f`:
    :cpp:`erf.fire.farsite.use_anderson_lw` is 1. Setting it to 0 uses
    :cpp:`erf.fire.farsite.coeff_a`, ``coeff_b`` and ``coeff_c`` directly.
    Head, flank and backing rates are the head rate scaled by these
-   coefficients, oriented along the wind, with an upslope correction from the
-   terrain slope.
-3. **Displacement accumulation.** Every front cell accumulates the displacement
-   :math:`R\,\Delta t_f` along its spread direction in ``fire_disp_accum``.
-   When the accumulated length reaches one fire cell, the target position is
-   recorded and the accumulator is reset. Positions are gathered across MPI
-   ranks so every rank stamps the same set.
-4. **Stamping.** Each recorded position is stamped into :math:`\phi` as a
-   burned cell. :cpp:`erf.fire.farsite.gaussian_sigma` selects a single-cell
-   stamp (negative), an automatic radius from the grid spacing (zero) or a fixed
-   Gaussian radius in metres (positive).
+   coefficients, oriented along the wind: the normal speed of a front whose
+   normal makes the angle :math:`\theta` with the wind is
+   :math:`R\,(a\cos\theta + b\,|\sin\theta|)` ahead and
+   :math:`R\,(b\,|\sin\theta| - c\cos\theta)` behind. That is the support
+   function of the rectangle :math:`[-cR, aR] \times [-bR, bR]` in the wind
+   frame, the shape a point fire grows into. Without wind the shape is the
+   disc of radius :math:`R`.
+2. **Front cells** are the unburned, burnable cells with a burned neighbour
+   across a face.
+3. **Arrival time.** A front cell burns when the shape grown from its burned
+   neighbours reaches its centre. For each quadrant, with :math:`T_x` and
+   :math:`T_y` the arrival times of its neighbours along :math:`x` and
+   :math:`y`,
 
-The subcycle length is :cpp:`erf.fire.farsite.cfl_fire` times the cell size
-over the maximum rate of spread, so the front never crosses more than a
-fraction of a cell per subcycle. Because the directionality comes from the
-Anderson ellipse, the rate-of-spread models need only supply the head-fire
-rate on this path; :cpp:`erf.fire.directional_ros` has no effect here.
+   .. math::
+
+      T = \min_{0 \le \lambda \le 1} \left[ (1-\lambda)\, T_x + \lambda\, T_y
+          + \frac{\gamma\big((1-\lambda)\,\Delta x,\ \lambda\,\Delta y\big)}{\bar R} \right],
+
+   where :math:`\gamma(\mathbf d)` is the time the shape takes to cover the map
+   vector :math:`\mathbf d` at unit head rate, lengthened by
+   :math:`\sqrt{1 + (\nabla z \cdot \hat{\mathbf d})^2}` on a slope. This is
+   the Hopf-Lax update of the arrival time, taken over the four quadrants (one
+   neighbour alone gives the end point). If :math:`T` falls inside the subcycle
+   the cell burns and :math:`T` becomes its ``fire_arrival_time``. For a planar
+   front it is exact: rows burn one at a time, a row spacing along the normal
+   over the normal speed apart.
+4. **Rate.** :math:`\bar R` is the mean, since the first neighbour burned, of
+   the larger of the cell's own rate of spread and those of its burned
+   neighbours, accumulated in ``fire_disp_accum``. The burned side carries the
+   crown-fire rate, which is set only in burned cells; the cell's own rate keeps
+   the front moving where a burned cell's rate has dropped.
+5. **Level set.** :math:`\phi` is rebuilt as :math:`-1` in burned cells and
+   :math:`+1` elsewhere.
+
+The update reads a cell and its four neighbours only, so the arrival times do
+not depend on the box decomposition or the number of ranks. The subcycle
+length is :cpp:`erf.fire.farsite.cfl_fire` times the cell size over the maximum
+rate of spread. Because the directionality comes from the Anderson ellipse, the
+rate-of-spread models need only supply the head-fire rate on this path;
+:cpp:`erf.fire.directional_ros` has no effect here. The temporal fire
+acceleration lowers the rate in burned cells only, so it does not slow this
+update; the size-based acceleration scales every cell and does.
+
+:cpp:`erf.fire.farsite.front_update` selects the update. ``"front_cell"`` is
+the default and the one described above. ``"legacy"`` is the update used before
+September 2026: every cell with :math:`\phi \le`
+:cpp:`erf.fire.farsite.phi_threshold` and a nonzero gradient of :math:`\phi`
+accumulated :math:`R\,\Delta t_f` along its normal and, once that reached one
+cell, stamped a burned target one cell ahead
+(:cpp:`erf.fire.farsite.gaussian_sigma` chooses a single cell, an automatic or a
+fixed stamp radius). Since :math:`\phi` was rebuilt as 0 on every unburned cell,
+the first unburned row stamped along with the last burned row, and the front
+advanced two rows per cell of travel: about twice the rate of spread at the
+head, flanks and back. ``Exec/RegTests/FarsiteFrontUpdate`` runs both against
+the Richards rates. ``phi_threshold`` and ``gaussian_sigma`` apply to the
+legacy update only.
 
 Level-set path
 --------------
@@ -323,8 +362,9 @@ The mask acts in five places, so that no path around it is left open:
    keep a consistent signed distance to the real front. They are not lifted
    to a fixed positive level, which would let the footprint edge act like a
    front of its own;
-3. FARSITE marker targets that land in a mask cell are dropped, so the front
-   stops at the footprint instead of crossing it;
+3. on the FARSITE path a mask cell is never a front cell (and a legacy marker
+   target that lands in one is dropped), so the front stops at the footprint
+   instead of crossing it;
 4. ember landings on a mask cell are discarded and the spot disc never stamps
    into one;
 5. the fuel load is zero in mask cells from the start, so they produce no

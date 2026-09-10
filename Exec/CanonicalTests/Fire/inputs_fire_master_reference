@@ -541,7 +541,15 @@ erf.fire.f_c_max = 0.9
 # LEVEL-SET ADVECTION (FARSITE Model, Phase 3)
 # ============================================================================
 
-# Fire front detection threshold for phi level-set
+# Front update of the FARSITE path
+# "front_cell" (default): unburned cells next to the burned region burn when
+#   the spread shape grown from their burned neighbours' arrival times reaches
+#   them, one row at a time
+# "legacy": the update before 2026-09, marker stamping from every cell at or
+#   below phi_threshold; the front ran about twice the rate of spread
+erf.fire.farsite.front_update = "front_cell"
+
+# Fire front detection threshold for phi level-set (legacy update only)
 # Unburned: phi > farsite_phi_threshold
 # Burned: phi < -threshold
 # Front: near-zero phi
@@ -559,7 +567,7 @@ erf.fire.farsite.coeff_a = 0.5   # Head fire coefficient (0 to 1)
 erf.fire.farsite.coeff_b = 0.25  # Flank fire coefficient
 erf.fire.farsite.coeff_c = 0.1   # Backing fire coefficient
 
-# Gaussian stamping radius for fire front [m]
+# Gaussian stamping radius for fire front [m] (legacy update only)
 # < 0: auto-compute from grid resolution
 # > 0: manual override (use for tuning)
 erf.fire.farsite.gaussian_sigma = -1.0

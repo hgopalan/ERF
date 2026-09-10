@@ -115,6 +115,14 @@ struct FireParams
     amrex::Real       farsite_coeff_c         = 0.1;  ///< Richards backing coefficient
     amrex::Real       farsite_gaussian_sigma  = -1.0; ///< phi stamping radius [m]
     amrex::Real       farsite_cfl_fire        = 0.5;  ///< fire CFL number
+    // Front update of the FARSITE path, erf.fire.farsite.front_update (see
+    // ERF_FarsiteEllipse.H). "front_cell" (1, default): unburned cells with a
+    // burned neighbour burn when the spread shape grown from their neighbours'
+    // arrival times reaches them, one row at a time. "legacy" (0): displacement
+    // stamping from every cell at or below phi_threshold, which after the phi = 0
+    // rebuild includes the first unburned row, so the front ran about twice the
+    // rate of spread; kept to reproduce earlier results.
+    int               farsite_front_update    = 1;
 
     // Level-set propagation parameters
     std::string       propagation_method      = "farsite";   ///< "farsite" (default, Lagrangian) or "levelset" (PDE-based)
@@ -729,6 +737,17 @@ struct FireParams
        pp.query("farsite.coeff_c", farsite_coeff_c);
        pp.query("farsite.gaussian_sigma", farsite_gaussian_sigma);
        pp.query("farsite.cfl_fire", farsite_cfl_fire);
+       {
+           std::string front_update_str = (farsite_front_update == 0) ? "legacy" : "front_cell";
+           pp.query("farsite.front_update", front_update_str);
+           if (front_update_str == "legacy") {
+               farsite_front_update = 0;
+           } else if (front_update_str == "front_cell") {
+               farsite_front_update = 1;
+           } else {
+               amrex::Abort("erf.fire.farsite.front_update must be \"front_cell\" or \"legacy\"");
+           }
+       }
 
        // Level-set propagation parameters
        pp.query("propagation_method", propagation_method);

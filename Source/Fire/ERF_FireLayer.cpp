@@ -381,6 +381,7 @@ void FireLayer::initialize(const ERF& erf,
     m_fp.use_anderson_lw    = fire_params.farsite_use_anderson_lw;
     m_fp.gaussian_sigma     = fire_params.farsite_gaussian_sigma;
     m_fp.cfl_fire           = fire_params.farsite_cfl_fire;
+    m_fp.front_update       = fire_params.farsite_front_update;
 
     m_rc = compute_rothermel_params(fp, fire_params.moisture_1hr,
                                     fire_params.moisture_10hr,
