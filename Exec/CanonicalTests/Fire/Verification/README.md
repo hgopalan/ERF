@@ -27,7 +27,7 @@ Calm_Plume, and the fire grid is 2 m.
 | `Merging_Fires` | union of two discs | two fires joining, the neck filling |
 | `Fuel_Interface_Refraction` | Snell's law, sin theta2 / R2 = sin theta1 / R1 | a front crossing a fuel boundary, per-fuel rates |
 | `Speed_Gradient` | eikonal travel time in a linear speed gradient | a spatially varying rate |
-| `Slope_No_Wind` | Rothermel's slope factor; the Wulff shape | slope along the front normal and the ground projection |
+| `Slope_No_Wind` | Rothermel's slope factor; the Wulff shape | slope along the front normal, the ground projection, the ellipse shape of the directional rate |
 | `Moisture_Relaxation` | time-lag ODE solution; Rothermel at the moisture | dynamic dead-fuel moisture and extinction |
 | `Calm_Plume` | heat budget; Heskestad; Morton-Taylor-Turner and Briggs | the heat the coupling injects and the plume it raises |
 
@@ -39,7 +39,10 @@ What the cases found, recorded in their READMEs:
 
 - `Slope_No_Wind`: the directional level set cannot give a point fire Rothermel's
   head rate once the slope (or wind) factor is large; the exact solution of the
-  equation it solves is the Wulff shape, whose head is slower.
+  equation it solves is the Wulff shape, whose head is slower. The opt-in
+  `erf.fire.directional_shape = "ellipse"` takes the rate from a convex shape with
+  the same head, back and flank rates and restores the head (the `ell_*` decks;
+  `Exec/RegTests/FireDirectionalShape` does the same in wind).
 - `Moisture_Relaxation`: the equilibrium-moisture hysteresis picks the adsorption
   and desorption curves the wrong way round.
 - `Obstacle_Shadow`: the front that wraps a masked obstacle lags half a cell

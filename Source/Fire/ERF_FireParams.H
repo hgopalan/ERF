@@ -353,6 +353,19 @@ struct FireParams
     // either flag enables direction-dependent spread when ros_model = "balbi".
     bool              directional_ros     = true;
 
+    // Shape of that direction-dependent rate, erf.fire.directional_shape.
+    // "projection" (0, default) evaluates the model with the wind and slope
+    // projected onto the front normal. "ellipse" (1) takes the normal speed from
+    // the support function of an ellipse with the model's head rate along the
+    // vector sum of its wind and slope increments, and its no-wind, no-slope
+    // rate at the back and flanks. From a point ignition the projection's head
+    // falls short of the model's head rate once the wind or slope factor is
+    // large, because the exact solution is the Wulff shape of R(n) (see
+    // ERF_DirectionalRos.H); the ellipse is convex and spreads the head at the
+    // model's rate. Needs directional_ros; implemented for rothermel, behave,
+    // macarthur, cheney_gould and fbp.
+    int               directional_shape   = 0;
+
     // Horizontal interpolation of the atmospheric wind onto the fire grid:
     // 0 = nearest atmospheric column (every fire cell in a column shares one
     // wind vector), 1 = bilinear between the four surrounding columns.
@@ -844,6 +857,17 @@ struct FireParams
        // Remembered for the ellipse check at the end: the ellipse turns the
        // default off but conflicts with an explicit true.
        const bool directional_ros_given = pp.query("directional_ros", directional_ros);
+       {
+           std::string shape_str = (directional_shape == 1) ? "ellipse" : "projection";
+           pp.query("directional_shape", shape_str);
+           if (shape_str == "projection") {
+               directional_shape = 0;
+           } else if (shape_str == "ellipse") {
+               directional_shape = 1;
+           } else {
+               amrex::Abort("erf.fire.directional_shape must be \"projection\" or \"ellipse\"");
+           }
+       }
 
        {
            std::string wind_interp_str = (wind_interp == 0) ? "nearest" : "bilinear";
@@ -1183,6 +1207,19 @@ struct FireParams
                amrex::Abort("erf.fire.ros_model = prescribed cannot be combined with erf.fire.levelset.ellipse");
            }
            directional_ros = false;
+       }
+
+       // The ellipse shape is a form of the directional rate of the generic
+       // models; Balbi and the hybrid keep the projection. Checked last, once
+       // the ellipse and prescribed options have had their say on
+       // directional_ros.
+       if (directional_shape == 1) {
+           if (!directional_ros) {
+               amrex::Abort("erf.fire.directional_shape = \"ellipse\" needs directional_ros = true and cannot be combined with erf.fire.levelset.ellipse or ros_model = prescribed");
+           }
+           if (ros_model == "balbi" || is_hybrid()) {
+               amrex::Abort("erf.fire.directional_shape = \"ellipse\" is implemented for rothermel, behave, macarthur, cheney_gould and fbp, not balbi or hybrid");
+           }
        }
     }
 

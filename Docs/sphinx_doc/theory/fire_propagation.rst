@@ -157,6 +157,61 @@ its per-cell couplings. ``Exec/RegTests/FireRosComparison`` tabulates the
 effect: the head rate is unchanged and the burned area falls, since the flanks
 no longer run at the head rate.
 
+A normal speed is not a spread rate in a direction, though, and from a point
+ignition the difference shows. The exact (viscosity) solution of
+:math:`\phi_t + R(\hat n)|\nabla\phi| = 0` from a point is the Wulff shape
+
+.. math::
+
+   W(t) = \{\mathbf x : \mathbf x\cdot\hat n \le t\,R(\hat n)\ \text{for every}\ \hat n\},
+
+whose extent along a direction :math:`\hat d` is
+:math:`\min_{\hat n\cdot\hat d>0} R(\hat n)/(\hat n\cdot\hat d)`. That equals
+:math:`R(\hat d)` only when :math:`R` is the support function of a convex set.
+Rothermel's projected rate :math:`R_0(1 + \phi_w (U n_x)^B)` is not once
+:math:`\phi_w (B-1) > 1`, nor :math:`R_0(1 + \phi_s (s n_x)^2)` once
+:math:`\phi_s > 1`: the head of a point fire becomes a wedge of oblique
+facets whose tip runs at
+:math:`R_0\,\tfrac{B}{B-1}\,(\phi_w(B-1))^{1/B}` in wind and about
+:math:`2\sqrt{\phi_s}\,R_0` on a slope, well below the head rate
+:math:`R_0(1+\phi_w+\phi_s)`. A better scheme would not help, since it is the
+exact solution that falls short; the level set, which freezes
+:math:`R(\hat n)` from central differences, lands between the tip speed and
+the head rate. A straight line fire keeps :math:`\hat n` along the wind and is
+unaffected. ``Exec/RegTests/FireDirectionalShape`` (point ignition in a uniform
+wind) and ``Exec/CanonicalTests/Fire/Verification/Slope_No_Wind`` measure it: in
+a uniform 1.5 m/s wind on short grass (:math:`\phi_w = 9.4`) the head runs at
+0.185 m/s against Rothermel's 0.249 m/s and a Wulff tip of 0.142 m/s, between
+0.153 and 0.198 m/s depending on the gradient scheme and viscosity.
+
+:cpp:`erf.fire.directional_shape = "ellipse"` (default ``"projection"``)
+removes the shortfall by taking the normal speed from the support function of
+an ellipse built from the same model. The ellipse is convex, so it is its own
+Wulff shape and spreads a point fire's head at the head rate. With
+:math:`R_0` the model's no-wind, no-slope rate and
+:math:`\Delta R_w = \text{model}(|\mathbf U|, 0) - R_0`,
+:math:`\Delta R_s = \text{model}(0, |\nabla z|) - R_0` the wind and slope
+increments, the head runs at
+
+.. math::
+
+   R_h = R_0 + g\,\bigl|\Delta R_w\,\hat{\mathbf w} + \Delta R_s\,\hat{\mathbf s}\bigr|,
+   \qquad g = \frac{\text{model}(|\mathbf U|, |\nabla z|) - R_0}{\Delta R_w + \Delta R_s},
+
+along that vector (:math:`\hat{\mathbf w}` and :math:`\hat{\mathbf s}` the
+unit wind and upslope vectors: BEHAVE's vector addition, with :math:`g = 1` for
+the additive Rothermel form), and the back and flanks at :math:`R_0`. The
+semi-axes are :math:`b = (R_h + R_0)/2` along the head and :math:`a = R_0`
+across it, with centre offset :math:`c = (R_h - R_0)/2`, and the normal speed
+is the support function given under Spread ellipse below. With aligned wind
+and slope the head, back and flank rates are the projection's own; only the
+directions between them change. The length-to-width ratio
+:math:`(R_h/R_0 + 1)/2` is not capped, as the projection's is not. The option
+covers Rothermel, BEHAVE, MacArthur, Cheney-Gould and FBP; Balbi and the hybrid
+keep the projection, and :cpp:`erf.fire.levelset.ellipse` cannot be combined
+with it. The unit test ``ERF_GTestDirectionalShape`` checks the rates, the
+vector addition and the Wulff extents of both forms.
+
 Spread ellipse
 ~~~~~~~~~~~~~~
 

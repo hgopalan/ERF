@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# The default directional level set: Rothermel evaluated with the wind projected
+# onto the front normal, R(n) = R0 (1 + phi_w(max(U . n, 0))).

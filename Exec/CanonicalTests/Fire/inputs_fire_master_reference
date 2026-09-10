@@ -227,6 +227,16 @@ erf.fire.wind_interp = "bilinear"
 # which gets its directionality from the Anderson ellipse.
 erf.fire.directional_ros = false
 
+# Form of the directional rate (needs directional_ros; not for balbi or hybrid).
+# "projection" (default) evaluates the model with the wind and slope projected
+#              onto the front normal; from a point ignition its head runs below
+#              the model's head rate once the wind or slope factor is large
+# "ellipse"    uses the support function of the ellipse with the model's head
+#              rate (wind and slope increments added as vectors) and its
+#              no-wind, no-slope rate at the back and flanks, so a point fire's
+#              head runs at the head rate
+erf.fire.directional_shape = "projection"
+
 # Level-set path only: extrapolate the level set into non-burnable cells
 # inside every stencil (gradient, Laplacian, front normal, reinitialisation),
 # so a masked wall is a zero-gradient boundary of the distance function.
