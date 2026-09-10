@@ -591,3 +591,17 @@ when the run stops before the first step with the message that MRF needs every
 box to span the vertical domain. Without that check the run failed a bare
 assert in the MRF kernel in the first step. The column schemes MYJ, MYNN25,
 MYNNEDMF, YSU, YSUNew and MRF share the check.
+
+Stacked-box start-up check
+--------------------------
+Three tests rerun the ``ABL_MRF_Tiling`` deck without a PBL scheme (Smagorinsky)
+and with ``amr.max_grid_size_z=16``, which stacks two boxes in every column, and
+pass when the run stops before the first step with the matching message:
+
+- ``ABL_ZSplit_ImplicitSubstep_abort``: slip-wall bottom and the default implicit
+  substepping. Without the check the run blew up by the third step.
+- ``ABL_ZSplit_ImplicitDiffusion_abort``: slip-wall bottom and
+  ``erf.substepping_type=None``, leaving the implicit vertical diffusion.
+- ``ABL_ZSplit_SurfaceLayer_abort``: the deck's surface layer with
+  ``erf.substepping_type=None`` and ``erf.vert_implicit_fac=0``. Without the check
+  the run stopped on a floating-point trap in the first step.

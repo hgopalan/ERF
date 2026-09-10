@@ -881,6 +881,17 @@ add_test_tiling_parity(ABL_YSUNew_PBLHSmooth_Boxes  ABL_MRF_Tiling "00010" "0001
 # A column PBL scheme on boxes split in z must stop at start-up, not at the kernel assert in step 1
 add_test_abort(ABL_MRF_ZSplit_abort ${PROJECT_SOURCE_DIR}/Tests/test_files/ABL_MRF_Tiling ABL_MRF_Tiling.i
     "every box on level 0 must span the vertical domain" "amr.max_grid_size_z=16")
+# Boxes stacked in z must stop at start-up with the implicit acoustic substep, the implicit
+# vertical diffusion or a surface layer, which all work on whole columns inside one box
+add_test_abort(ABL_ZSplit_ImplicitSubstep_abort ${PROJECT_SOURCE_DIR}/Tests/test_files/ABL_MRF_Tiling ABL_MRF_Tiling.i
+    "split in z, the implicit acoustic substep and the implicit vertical diffusion give"
+    "zlo.type=SlipWall erf.pbl_type=None erf.most.pblh_calc=None erf.les_type=Smagorinsky erf.Cs=0.1 amr.max_grid_size_z=16")
+add_test_abort(ABL_ZSplit_ImplicitDiffusion_abort ${PROJECT_SOURCE_DIR}/Tests/test_files/ABL_MRF_Tiling ABL_MRF_Tiling.i
+    "split in z, the implicit vertical diffusion gives"
+    "zlo.type=SlipWall erf.pbl_type=None erf.most.pblh_calc=None erf.les_type=Smagorinsky erf.Cs=0.1 erf.substepping_type=None erf.fixed_dt=0.05 amr.max_grid_size_z=16")
+add_test_abort(ABL_ZSplit_SurfaceLayer_abort ${PROJECT_SOURCE_DIR}/Tests/test_files/ABL_MRF_Tiling ABL_MRF_Tiling.i
+    "split in z, the surface layer gives"
+    "erf.pbl_type=None erf.most.pblh_calc=None erf.les_type=Smagorinsky erf.Cs=0.1 erf.substepping_type=None erf.fixed_dt=0.05 erf.vert_implicit_fac=0 amr.max_grid_size_z=16")
 add_test_r(ABL_InflowFile                    ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")
 add_test_r(MoistBubble                       ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")
 add_test_r(SquallLine_2D                     ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")

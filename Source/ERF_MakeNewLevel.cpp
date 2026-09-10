@@ -61,6 +61,76 @@ check_pbl_full_column_boxes (int lev, const BoxArray& ba, const Geometry& geom,
     }
 }
 
+//
+// Three parts of ERF work on whole columns inside one box, taking the box's bottom and top
+// faces as the ends of the column: the implicit acoustic substep (MakeFastCoeffs and the w
+// solve in the substep routines), the implicit vertical diffusion, and the surface layer,
+// whose planar arrays are the z-collapse of the 3D BoxArray (one 2D box per 3D box). Where
+// two boxes of a level are stacked in z, the solves put a boundary at the shared face and the
+// surface layer fills duplicate planar boxes, so the run depends on the decomposition or blows
+// up within a few steps. A box that ends at a coarse-fine boundary is fine; only a face shared
+// by two boxes of the same level is not. Check the grids whenever a level is made or remade.
+//
+void
+check_stacked_boxes_in_z (int lev, const BoxArray& ba, const Geometry& geom,
+                          const SolverChoice& sc)
+{
+    const bool implicit_substep = (sc.anelastic[lev] == 0) &&
+                                  (sc.substepping_type[lev] == SubsteppingType::Implicit);
+    const bool implicit_diff    = (sc.vert_implicit_fac[lev][0] > Real(0)) ||
+                                  (sc.vert_implicit_fac[lev][1] > Real(0)) ||
+                                  (sc.vert_implicit_fac[lev][2] > Real(0));
+    std::string zlo_type;
+    ParmParse pp_zlo("zlo");
+    pp_zlo.query("type", zlo_type);
+    const bool surface_layer = (amrex::toLower(zlo_type) == "surface_layer");
+    if (!implicit_substep && !implicit_diff && !surface_layer) { return; }
+
+    Vector<std::string> users;
+    if (implicit_substep) { users.push_back("the implicit acoustic substep"); }
+    if (implicit_diff)    { users.push_back("the implicit vertical diffusion"); }
+    if (surface_layer)    { users.push_back("the surface layer"); }
+
+    const Box& domain = geom.Domain();
+    const int nz = domain.length(2);
+
+    for (int i = 0; i < ba.size(); ++i) {
+        const Box& b = ba[i];
+        if (b.bigEnd(2) >= domain.bigEnd(2)) { continue; }
+
+        Box above(b);
+        above.setRange(2, b.bigEnd(2)+1);
+        const auto isects = ba.intersections(above, true, 0);
+        if (isects.empty()) { continue; }
+
+        std::ostringstream msg;
+        msg << "Boxes " << b << " and " << ba[isects[0].first] << " on level " << lev
+            << " are stacked in z: they share the face at k = " << b.bigEnd(2)+1
+            << ". With boxes split in z, ";
+        for (int n = 0; n < users.size(); ++n) {
+            if (n > 0) { msg << ((n + 1 == users.size()) ? " and " : ", "); }
+            msg << users[n];
+        }
+        msg << ((users.size() > 1) ? " give" : " gives")
+            << " results that depend on the decomposition or blow up. Set amr.max_grid_size_z = "
+            << nz << " (or larger)" << ((lev > 0) ? " on this level" : "") << ".";
+        if (implicit_substep) {
+            msg << " The implicit acoustic substep (erf.substepping_type = Implicit, the default"
+                << " for compressible runs) solves each column inside one box;"
+                << " erf.substepping_type = None with an explicit time step avoids it.";
+        }
+        if (implicit_diff) {
+            msg << " The implicit vertical diffusion (erf.vert_implicit_fac > 0) solves each"
+                << " column inside one box; erf.vert_implicit_fac = 0 avoids it.";
+        }
+        if (surface_layer) {
+            msg << " The surface layer (zlo.type = surface_layer) builds its planar arrays per"
+                << " box and cannot run on boxes split in z (erf-model/ERF#3970 fixes this).";
+        }
+        Abort(msg.str());
+    }
+}
+
 } // namespace
 
 // Make a new level from scratch using provided BoxArray and DistributionMapping.
@@ -108,6 +178,7 @@ void ERF::MakeNewLevelFromScratch (int lev, Real time, const BoxArray& ba_in,
     }
 
     check_pbl_full_column_boxes(lev, ba, Geom(lev), solverChoice.turbChoice[lev]);
+    check_stacked_boxes_in_z(lev, ba, Geom(lev), solverChoice);
 
     subdomains.resize(lev+1);
     //
@@ -348,6 +419,7 @@ ERF::MakeNewLevelFromCoarse (int lev, Real time, const BoxArray& ba,
     }
 
     check_pbl_full_column_boxes(lev, ba, Geom(lev), solverChoice.turbChoice[lev]);
+    check_stacked_boxes_in_z(lev, ba, Geom(lev), solverChoice);
 
     //
     // Grow the subdomains vector and build the subdomains vector at this level
@@ -645,6 +717,7 @@ ERF::RemakeLevel (int lev, Real time, const BoxArray& ba, const DistributionMapp
     }
 
     check_pbl_full_column_boxes(lev, ba, Geom(lev), solverChoice.turbChoice[lev]);
+    check_stacked_boxes_in_z(lev, ba, Geom(lev), solverChoice);
 
     //
     // Re-define subdomain at this level within the domain such that
