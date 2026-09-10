@@ -80,9 +80,9 @@ All fire-specific parameters are defined in `Source/Fire/ERF_FireParams.H` and p
 ### I/O and Checkpoints
 ✓ `erf.check_file` - Checkpoint file prefix
 ✓ `erf.check_int` - Checkpoint interval
-✓ `erf.plot_file` - Atmospheric plot file prefix
-✓ `erf.plot_int` - Atmospheric plot interval
-✓ `erf.plot_vars` - Atmospheric variables to output
+✓ `erf.plot_file_1` - Atmospheric plot file prefix (the bare `erf.plot_file` is read by nothing)
+✓ `erf.plot_int_1` - Atmospheric plot interval (the bare `erf.plot_int` is read by nothing)
+✓ `erf.plot_vars_1` - Atmospheric variables to output (the bare `erf.plot_vars` is read by nothing)
 ✓ `erf.sum_interval` - Statistics summary interval
 
 ### Physics Configuration
