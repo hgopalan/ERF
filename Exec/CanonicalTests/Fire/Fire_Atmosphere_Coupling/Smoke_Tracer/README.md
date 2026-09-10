@@ -60,6 +60,9 @@ fire and slowed to 3.0 m/s under the plume. The head rate of spread in
 from 46 to 53 kW/m2. The burned area (0.42 ha) was unchanged at 60 s. Upwind_3rd
 had kept the negative smoke mass at 2% of the positive mass with gravity off
 (worst cell -3%), so the undershoot only mattered once the plume appeared.
+These numbers predate the FARSITE `front_cell` update (2026-09-10), which
+fixed a front that ran about twice the rate of spread; with it the burned area
+at 60 s is 0.38 ha instead of 0.42 ha.
 
 ## Notes
 - Enabling smoke adds a conserved component, so plotfile component counts differ
