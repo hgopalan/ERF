@@ -467,6 +467,16 @@ erf.fire.fbp.use_slope = true
 erf.fire.fbp.wind_source = "reference"
 
 # ============================================================================
+# BEHAVE MULTI-CLASS ROTHERMEL (used only when ros_model = "behave")
+# ============================================================================
+# Live herbaceous moisture window of the live-to-dead herbaceous transfer: the
+# whole live herbaceous load joins the dead class at and below lo, none at and
+# above hi, the share (hi - M)/(hi - lo) between; hi must exceed lo. Only fuels
+# with a live herbaceous load respond (Anderson model 1 has none).
+erf.fire.behave.dynamic_transfer_lo = 0.30   # [fraction]
+erf.fire.behave.dynamic_transfer_hi = 1.20   # [fraction]
+
+# ============================================================================
 # FIRE PROPAGATION: ROTHERMEL MODEL (Phases 1-3)
 # ============================================================================
 

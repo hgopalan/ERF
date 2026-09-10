@@ -472,11 +472,12 @@ struct FireParams
 
     // Phase 15: BEHAVE multi-class Rothermel parameters.
     // Only used when ros_model = "behave".
-    // Controls the dynamic live-to-dead load transfer threshold.
+    // Controls the moisture window of the live-to-dead herbaceous load transfer,
+    // which acts only on fuels with a live herbaceous load (w_lh > 0).
     // All other fuel properties come from FuelModelParams via get_anderson_fuel_params().
     struct BehaveParams {
-        amrex::Real dynamic_transfer_lo  = 0.30;  ///< Live herba moisture [fraction] below which full transfer occurs
-        amrex::Real dynamic_transfer_hi  = 1.20;  ///< Live herba moisture [fraction] above which no transfer occurs
+        amrex::Real dynamic_transfer_lo  = 0.30;  ///< Live herba moisture [fraction] at and below which the whole load transfers
+        amrex::Real dynamic_transfer_hi  = 1.20;  ///< Live herba moisture [fraction] at and above which none transfers
     } behave;
 
     // Hybrid rate of spread: two of the models above evaluated on every cell
@@ -1135,6 +1136,9 @@ struct FireParams
        auto& bh = behave;
        pp.query("behave.dynamic_transfer_lo", bh.dynamic_transfer_lo);
        pp.query("behave.dynamic_transfer_hi", bh.dynamic_transfer_hi);
+       if (uses_model("behave") && !(bh.dynamic_transfer_hi > bh.dynamic_transfer_lo)) {
+           amrex::Abort("erf.fire.behave.dynamic_transfer_hi must be greater than dynamic_transfer_lo");
+       }
 
        // Phase 10: firebreaks (indexed, stop at first missing)
        for (int nb = 0; nb < 10; ++nb) {
