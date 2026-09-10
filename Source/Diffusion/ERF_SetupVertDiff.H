@@ -77,14 +77,14 @@
        }
     }
 
-    // The number of quantities following Scalar_h must be equal to the number
-    //   of quantities in the conserved state following RhoScalar_comp -- this is
-    //   currently all the moist quantities, which tops out at 11 for the Morrison model
-    Vector<int> eddy_diff_idz{EddyDiff::Theta_v, EddyDiff::KE_v, EddyDiff::Scalar_v,
-                              EddyDiff::Q_v    , EddyDiff::Q_v,  EddyDiff::Q_v,
-                              EddyDiff::Q_v    , EddyDiff::Q_v,  EddyDiff::Q_v,
-                              EddyDiff::Q_v    , EddyDiff::Q_v,  EddyDiff::Q_v,
-                              EddyDiff::Q_v    , EddyDiff::Q_v};
+    // Indexed by primitive component, so the table must cover every scalar slot
+    //   (base, dust and smoke) as well as the moist quantities that follow them
+    Vector<int> eddy_diff_idz(NPRIMVAR_max, EddyDiff::Q_v);
+    eddy_diff_idz[PrimTheta_comp] = EddyDiff::Theta_v;
+    eddy_diff_idz[PrimKE_comp]    = EddyDiff::KE_v;
+    for (int n = 0; n < NSCALARS; ++n) {
+        eddy_diff_idz[PrimScalar_comp + n] = EddyDiff::Scalar_v;
+    }
 
     // Device vectors
     Gpu::AsyncVector<Real> alpha_eff_d;

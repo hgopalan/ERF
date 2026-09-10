@@ -18,19 +18,15 @@
     [[maybe_unused]] const Real l_inv_theta0 = (use_ref_theta) ? one / turbChoice.theta_ref : one;
 
     // vertical diffusivities are defined in ERF_SetupVertDiff.H
-    // The number of quantities following Scalar_h must be equal to the number
-    //   of quantities in the conserved state following RhoScalar_comp -- this is
-    //   currently all the moist quantities, which tops out at 11 for the Morrison model
-    Vector<int> eddy_diff_idx{EddyDiff::Theta_h, EddyDiff::KE_h, EddyDiff::Scalar_h,
-                              EddyDiff::Q_h    , EddyDiff::Q_h,  EddyDiff::Q_h,
-                              EddyDiff::Q_h    , EddyDiff::Q_h,  EddyDiff::Q_h,
-                              EddyDiff::Q_h    , EddyDiff::Q_h,  EddyDiff::Q_h,
-                              EddyDiff::Q_h    , EddyDiff::Q_h};
-    Vector<int> eddy_diff_idy{EddyDiff::Theta_h, EddyDiff::KE_h, EddyDiff::Scalar_h,
-                              EddyDiff::Q_h    , EddyDiff::Q_h,  EddyDiff::Q_h,
-                              EddyDiff::Q_h    , EddyDiff::Q_h,  EddyDiff::Q_h,
-                              EddyDiff::Q_h    , EddyDiff::Q_h,  EddyDiff::Q_h,
-                              EddyDiff::Q_h    , EddyDiff::Q_h};
+    // Indexed by primitive component, so the tables must cover every scalar slot
+    //   (base, dust and smoke) as well as the moist quantities that follow them
+    Vector<int> eddy_diff_idx(NPRIMVAR_max, EddyDiff::Q_h);
+    eddy_diff_idx[PrimTheta_comp] = EddyDiff::Theta_h;
+    eddy_diff_idx[PrimKE_comp]    = EddyDiff::KE_h;
+    for (int n = 0; n < NSCALARS; ++n) {
+        eddy_diff_idx[PrimScalar_comp + n] = EddyDiff::Scalar_h;
+    }
+    Vector<int> eddy_diff_idy(eddy_diff_idx);
 
     // Device vectors
     Gpu::AsyncVector<int>  eddy_diff_idx_d;
