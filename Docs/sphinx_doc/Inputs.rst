@@ -650,7 +650,12 @@ Many ERF workflows want each box to span the full vertical extent of the domain
 or of the refined region -- for example because a physics package operates on
 entire columns.  (Native SHOC and the column PBL schemes MYJ, MYNN25, MYNNEDMF,
 YSU, YSUNew and MRF require this, and stop when a level on which they are active
-is made with a box split in z.)  ERF is set up so that this is the default behavior, in both places where
+is made with a box split in z.  ERF also stops when two boxes of a level are
+stacked in z and the level uses the implicit acoustic substep of compressible
+runs or the implicit vertical diffusion, which solve each column inside one box,
+or has a surface layer at zlo, whose planar arrays are built per box.  The first
+two can be avoided with **erf.substepping_type** = None and an explicit time
+step, and **erf.vert_implicit_fac** = 0.)  ERF is set up so that this is the default behavior, in both places where
 grids are created:
 
 -  **When the level 0 grids are created**, ERF decomposes the domain across the
