@@ -351,7 +351,10 @@ dead herbaceous class that receives cured live herbaceous fuel, with separate
 dead and live moisture damping and a live moisture of extinction from the
 ratio of dead to live load (``ERF_BehaveModel.H``). With
 :cpp:`erf.fire.moisture_dynamic = true` the state is rebuilt in every fire
-cell from that cell's moistures; otherwise it is computed once from the deck's.
+cell from that cell's moistures, and the directional level-set path reads a
+state rebuilt each step from the domain-average moistures. The live
+herbaceous and woody moistures stay at :cpp:`erf.fire.moisture_live` in
+either case; otherwise the state is computed once from the deck's.
 
 **Live herbaceous transfer.** A share :math:`T` of the live herbaceous load
 :math:`w_{lh}` moves to the dead herbaceous class, linear in the live
@@ -378,7 +381,10 @@ this window.
 The ramp was hard-coded before September 2026 as :math:`1.333 - 1.11\,M_{lh}`,
 the default window rounded to three digits. That moved up to
 :math:`10^{-3}\,w_{lh}` more load just below :math:`M_{lh} = 1.20`, and
-changed the rate of spread by at most 0.5 % for the Anderson models.
+changed the rate of spread by at most 0.5 % for the Anderson models. Before
+September 2026 the dynamic moisture update also advanced the live classes as
+dead fuel, which pinned them to [0.30, 0.40] from the first step whatever
+:cpp:`erf.fire.moisture_live` said.
 ``ERF_GTestBehaveTransfer`` checks the ramp and that the window reaches the
 model state; ``Exec/CanonicalTests/Fire/Fire_Behavior/ROS_Models/inputs_fire_phase13_behave_dynamic``
 runs it per cell on Anderson model 5.

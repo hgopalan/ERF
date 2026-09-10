@@ -1879,6 +1879,12 @@ ERF::ReadCheckpointFileFire ()
     };
 
     restore_optional(m_fire_layer->get_fuel_mc_mut(),      "FireFuelMC");
+    // Live moisture (components 3 and 4) is held at erf.fire.moisture_live, so it
+    // comes from the inputs, not the checkpoint: older builds advanced it as dead
+    // fuel and wrote values pinned to [0.30, 0.40].
+    if (amrex::MultiFab* mc = m_fire_layer->get_fuel_mc_mut(); mc != nullptr && mc->nComp() >= 5) {
+        mc->setVal(m_fire_params.moisture_live, 3, 2);
+    }
     // The stick shells are allocated on the first advance; allocate them now
     // so the checkpoint's shells replace the fresh initialisation.
     if (m_fire_params.moisture_model == "stick" && m_fire_layer->get_stick_mc() == nullptr) {

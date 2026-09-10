@@ -721,12 +721,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         // Phase 15: Update BEHAVE state when dynamic moisture is enabled.
         if (m_params.moisture_dynamic && m_params.uses_model("behave")) {
             FuelModelParams fp_bh = uniform_behave_fuel_params();
-            // Domain-average live moisture from components 3 and 4
+            // Domain-average live moisture from components 3 and 4, unclamped
+            // like the start-up state and the per-cell kernel. The directional
+            // level-set path reads this state; a [0.30, 2.50] clamp here kept a
+            // window with dynamic_transfer_lo < 0.30 from reaching full transfer.
             long nc_live = fire_fuel_mc->boxArray().numPts();
             Real avg_lh  = (nc_live > 0) ? fire_fuel_mc->sum(3) / Real(nc_live) : m_params.moisture_live;
             Real avg_lw  = (nc_live > 0) ? fire_fuel_mc->sum(4) / Real(nc_live) : m_params.moisture_live;
-            avg_lh = amrex::max(0.30_rt, amrex::min(avg_lh, 2.50_rt));
-            avg_lw = amrex::max(0.30_rt, amrex::min(avg_lw, 2.50_rt));
             m_bs_default = compute_behave_state(fp_bh, avg1, avg10, avg100, avg_lh, avg_lw,
                                                 m_params.behave.dynamic_transfer_lo,
                                                 m_params.behave.dynamic_transfer_hi);
@@ -1275,15 +1276,11 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
             mc(i,j,0,1) = advance_fuel_moisture_one_class(mc(i,j,0,1),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_10HR,emc_model);
             mc(i,j,0,2) = advance_fuel_moisture_one_class(mc(i,j,0,2),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_100HR,emc_model);
             }
-            // Phase 15: live fuel moisture (components 3 and 4)
-            // Live fuels respond slowly to atmospheric conditions.
-            // Use TAU_100HR as a lower bound; live moisture is bounded [0.30, 2.50].
-            if (mc.nComp() >= 5) {
-                Real lh_new = advance_fuel_moisture_one_class(mc(i,j,0,3),RH,T_C,0.0_rt,dt_hours,FuelMoistureConst::TAU_100HR,emc_model);
-                Real lw_new = advance_fuel_moisture_one_class(mc(i,j,0,4),RH,T_C,0.0_rt,dt_hours,FuelMoistureConst::TAU_100HR,emc_model);
-                mc(i,j,0,3) = amrex::max(0.30_rt, amrex::min(lh_new, 2.50_rt));  // live herba: 30%–250%
-                mc(i,j,0,4) = amrex::max(0.30_rt, amrex::min(lw_new, 2.50_rt));  // live woody: 30%–250%
-            }
+            // Live herbaceous and woody moisture (components 3 and 4) are not
+            // advanced: they stay at erf.fire.moisture_live, the input BEHAVE and
+            // FARSITE take for live fuel. They used to go through the dead
+            // time-lag update, whose [0.01, 0.40] clamp and a [0.30, 2.50] clamp
+            // after it pinned them to [0.30, 0.40] from the first step on.
             Real dead_load = fp.w_d1+fp.w_d10+fp.w_d100;
             Real sw = dead_load>0.0_rt ? (fp.w_d1*fp.sigma_d1)/dead_load : fp.sigma_d1;
             mext(i,j,0) = compute_moisture_of_extinction(sw);
