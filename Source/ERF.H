@@ -41,6 +41,7 @@
 
 #include <ERF_IndexDefines.H>
 #include <ERF_DataStruct.H>
+#include <ERF_PlotfileSelection.H>
 #include <ERF_BaseStateParams.H>
 #include <ERF_TurbPertStruct.H>
 #include <ERF_InputSoundingData.H>
@@ -1455,22 +1456,9 @@ private:
     amrex::Vector<std::string> plot3d_var_names_2;
     amrex::Vector<std::string> plot2d_var_names_1;
     amrex::Vector<std::string> plot2d_var_names_2;
-    const amrex::Vector<std::string> cons_names = []() {
-        amrex::Vector<std::string> names = {"density", "rhotheta", "rhoKE", "rhoadv_0"};
-#ifdef ERF_USE_DUST
-        names.push_back("rhoadv_dust");
-#endif
-#ifdef ERF_ENABLE_FIRE
-        names.push_back("smoke");
-#endif
-        names.insert(names.end(), {
-            "rhoQ1",  "rhoQ2",  "rhoQ3",
-            "rhoQ4",  "rhoQ5",  "rhoQ6",
-            "rhoQ7",  "rhoQ8",  "rhoQ9",
-            "rhoQ10", "rhoQ11"
-        });
-        return names;
-    }();
+    // Raw conserved-state names in component order; the list and its
+    // name-to-component map live together in IO/ERF_PlotfileSelection.H
+    const amrex::Vector<std::string> cons_names = erf_plotfile::plot3d_conserved_state_names();
 
     // **************************************************************************************
     // NOTE: The order of variable names here **MUST MATCH THE ORDER** in IO/ERF_Plotfile.cpp
