@@ -3940,11 +3940,15 @@ Rate of spread
 | **erf.fire.fbp.wind_source**                   | The reference-height wind (set wind_ref_ht = 10) or the    | "reference", "midflame"        | "reference"            |
 |                                                | midflame wind after the Wind Adjustment Factor             |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.behave.dynamic_transfer_lo**        | BEHAVE live herbaceous moisture below which all load       | Real                           | 0.30                   |
-|                                                | transfers to dead [fraction]                               |                                |                        |
+| **erf.fire.behave.dynamic_transfer_lo**        | BEHAVE live herbaceous moisture [fraction] at and below    | Real < dynamic_transfer_hi     | 0.30                   |
+|                                                | which the whole live herbaceous load transfers to dead,    |                                |                        |
+|                                                | with a linear share up to dynamic_transfer_hi. Acts only   |                                |                        |
+|                                                | on fuels with a live herbaceous load                       |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.behave.dynamic_transfer_hi**        | BEHAVE live herbaceous moisture above which no load        | Real                           | 1.20                   |
-|                                                | transfers [fraction]                                       |                                |                        |
+| **erf.fire.behave.dynamic_transfer_hi**        | BEHAVE live herbaceous moisture [fraction] at and above    | Real > dynamic_transfer_lo     | 1.20                   |
+|                                                | which none transfers; the share is (hi - M)/(hi - lo),     |                                |                        |
+|                                                | clamped to [0,1]. Aborts unless greater than               |                                |                        |
+|                                                | dynamic_transfer_lo                                        |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 
 

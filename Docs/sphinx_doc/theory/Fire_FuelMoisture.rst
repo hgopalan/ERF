@@ -146,8 +146,9 @@ within the same step. The Rothermel, Balbi and Cheney-Gould coefficients are
 rebuilt each step from the domain-average moisture; Balbi can instead take
 the per-cell value with :cpp:`erf.fire.balbi.use_cell_moisture`, and the
 BEHAVE path uses the per-cell dead classes and the live classes through its
-dynamic live-to-dead transfer, controlled by
-:cpp:`erf.fire.behave.dynamic_transfer_lo` and ``_hi``.
+dynamic live-to-dead herbaceous transfer, whose moisture window is
+:cpp:`erf.fire.behave.dynamic_transfer_lo` and ``_hi``
+(:ref:`sec:ROS_Behave`).
 
 Stick model
 -----------

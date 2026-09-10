@@ -13,7 +13,8 @@
  *   3. Dead 100-hour
  *   4. Live herbaceous
  *   5. Live woody
- *   6. Dead herbaceous (transferred from live when moisture < 30%)
+ *   6. Dead herbaceous (transferred from live across the moisture window
+ *      erf.fire.behave.dynamic_transfer_lo/hi)
  *
  * Key features:
  * - Dynamic load transfer from live herbaceous to dead category based on moisture
@@ -78,6 +79,29 @@ struct BehaveState
 };
 
 /**
+ * @brief Fraction of the live herbaceous load moved to the dead herbaceous class.
+ *
+ * Linear in the live herbaceous moisture M across the transfer window: 1 at and
+ * below transfer_lo, 0 at and above transfer_hi, (hi - M) / (hi - lo) between.
+ * FireParams aborts unless transfer_hi > transfer_lo. The ramp was hard-coded
+ * before as 1.333 - 1.11 M, the default window rounded to three digits, which
+ * transferred up to 1e-3 more of the load just below M = 1.20.
+ *
+ * @param[in] mc_herba    Live herbaceous fuel moisture [fraction]
+ * @param[in] transfer_lo Moisture at and below which the whole load transfers [fraction]
+ * @param[in] transfer_hi Moisture at and above which none transfers [fraction]
+ * @return Transferred fraction in [0,1]
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real behave_herb_transfer_fraction(amrex::Real mc_herba,
+                                          amrex::Real transfer_lo,
+                                          amrex::Real transfer_hi) noexcept
+{
+    const amrex::Real T = (transfer_hi - mc_herba) / (transfer_hi - transfer_lo);
+    return amrex::max(amrex::Real(0.0), amrex::min(amrex::Real(1.0), T));
+}
+
+/**
  * @brief Compute BEHAVE multi-class Rothermel state for a single cell.
  *
  * Ports fire_ros_behave() from WRF-SFIRE module_fr_sfire_phys.F, implementing:
@@ -94,6 +118,11 @@ struct BehaveState
  * @param[in] mc_100hr   100-hour dead fuel moisture [fraction]
  * @param[in] mc_herba   Live herbaceous fuel moisture [fraction]
  * @param[in] mc_woody   Live woody fuel moisture [fraction]
+ * @param[in] transfer_lo Live herbaceous moisture at and below which the whole
+ *                        herbaceous load transfers to dead [fraction]
+ *                        (erf.fire.behave.dynamic_transfer_lo)
+ * @param[in] transfer_hi Live herbaceous moisture at and above which none
+ *                        transfers [fraction] (erf.fire.behave.dynamic_transfer_hi)
  *
  * @return BehaveState with all precomputed coefficients
  *
@@ -114,7 +143,9 @@ BehaveState compute_behave_state(
     amrex::Real mc_10hr,
     amrex::Real mc_100hr,
     amrex::Real mc_herba,
-    amrex::Real mc_woody)
+    amrex::Real mc_woody,
+    amrex::Real transfer_lo,
+    amrex::Real transfer_hi)
 {
     BehaveState bs;
 
@@ -132,23 +163,13 @@ BehaveState compute_behave_state(
     // =====================================================================
     // Step 1: Dynamic load transfer (live herbaceous to dead)
     // =====================================================================
-    // When fmc_herba < 0.30: entire live herba load transfers to dead
-    // When 0.30 <= fmc_herba < 1.20: partial transfer
+    // The whole live herbaceous load transfers at and below transfer_lo, none
+    // at and above transfer_hi, and a linear share between.
     // Reference: WRF-SFIRE fire_ros_behave, lines ~384–396
 
-    Real fuelload_herba_dead = 0.0;
-    Real fuelload_herba_live = fp.w_lh;  // [lb/ft²]
-
-    if (mc_herba < 0.30) {
-        fuelload_herba_dead = fuelload_herba_live;
-        fuelload_herba_live = 0.0;
-    } else if (mc_herba < 1.20) {
-        // Linear interpolation: transfer decreases from 100% to 0%
-        // as moisture goes from 0.30 to 1.20
-        Real transferred = fuelload_herba_live * (1.333 - 1.11 * mc_herba);
-        fuelload_herba_dead = transferred;
-        fuelload_herba_live -= transferred;
-    }
+    const Real T_herba = behave_herb_transfer_fraction(mc_herba, transfer_lo, transfer_hi);
+    Real fuelload_herba_dead = T_herba * fp.w_lh;                 // [lb/ft²]
+    Real fuelload_herba_live = fp.w_lh - fuelload_herba_dead;
 
     // =====================================================================
     // Step 2: Area-weighted SAV for dead and live
@@ -380,6 +401,8 @@ amrex::Real behave_ros_cell(
  * @param[in]  fire_wind_eff   Effective wind (u,v) [m/s]
  * @param[in]  fire_slopes     Terrain slopes (dz/dx, dz/dy)
  * @param[in]  bs_default      Default BehaveState for uniform moisture
+ * @param[in]  transfer_lo     Live herbaceous transfer window, lower edge [fraction]
+ * @param[in]  transfer_hi     Live herbaceous transfer window, upper edge [fraction]
  * @param[in]  fire_fuel_mc    Per-cell fuel moisture (5 components, optional)
  * @param[in]  moisture_dynamic Whether per-cell moisture should be used
  */
@@ -389,6 +412,8 @@ inline void fill_behave_ros(
     const amrex::MultiFab& fire_slopes,
     const FuelModelParams& fp,
     const BehaveState& bs_default,
+    amrex::Real transfer_lo,
+    amrex::Real transfer_hi,
     const amrex::MultiFab* fire_fuel_mc = nullptr,
     bool moisture_dynamic = false)
 {
@@ -439,7 +464,8 @@ inline void fill_behave_ros(
 
                 const BehaveState bs = compute_behave_state(fp,
                     mc(i,j,0,0), mc(i,j,0,1), mc(i,j,0,2),
-                    mc(i,j,0,3), mc(i,j,0,4));
+                    mc(i,j,0,3), mc(i,j,0,4),
+                    transfer_lo, transfer_hi);
 
                 ros(i, j, 0) = behave_ros_cell(wind(i,j,0,0), wind(i,j,0,1),
                                                slopes(i,j,0,0), slopes(i,j,0,1),

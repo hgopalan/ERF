@@ -470,10 +470,14 @@ void FireLayer::initialize(const ERF& erf,
                                                 m_params.moisture_10hr,
                                                 m_params.moisture_100hr,
                                                 m_params.moisture_live,
-                                                m_params.moisture_live);
+                                                m_params.moisture_live,
+                                                m_params.behave.dynamic_transfer_lo,
+                                                m_params.behave.dynamic_transfer_hi);
             if (m_params.fire_debug) {
                 amrex::Print() << "[FIRE DEBUG] ROS model: BEHAVE multi-class Rothermel, "
-                               << "R0=" << m_bs_default.r_0 * 0.00508_rt << " m/s\n";
+                               << "R0=" << m_bs_default.r_0 << " m/s, live herbaceous transfer window "
+                               << m_params.behave.dynamic_transfer_lo << "-"
+                               << m_params.behave.dynamic_transfer_hi << "\n";
             }
         }
         if (m_params.uses_model("fbp")) {
@@ -722,7 +726,9 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             Real avg_lw  = (nc_live > 0) ? fire_fuel_mc->sum(4) / Real(nc_live) : m_params.moisture_live;
             avg_lh = amrex::max(0.30_rt, amrex::min(avg_lh, 2.50_rt));
             avg_lw = amrex::max(0.30_rt, amrex::min(avg_lw, 2.50_rt));
-            m_bs_default = compute_behave_state(fp_bh, avg1, avg10, avg100, avg_lh, avg_lw);
+            m_bs_default = compute_behave_state(fp_bh, avg1, avg10, avg100, avg_lh, avg_lw,
+                                                m_params.behave.dynamic_transfer_lo,
+                                                m_params.behave.dynamic_transfer_hi);
         }
     }
 
@@ -1794,6 +1800,8 @@ void FireLayer::fill_ros_for_model(const std::string& model,
         fill_behave_ros(out, *fire_wind_eff, *fire_slopes,
                         fp_behave,
                         m_bs_default,
+                        m_params.behave.dynamic_transfer_lo,
+                        m_params.behave.dynamic_transfer_hi,
                         m_params.moisture_dynamic ? fire_fuel_mc.get() : nullptr,
                         m_params.moisture_dynamic);
     } else if (model == "macarthur") {

@@ -14,11 +14,16 @@
 #
 # Configuration:
 #   - ros_model = "behave" with moisture_dynamic = true.
-#   - dynamic_transfer_lo/hi bracket the live herbaceous moisture range over
-#     which live fuel is transferred to the dead herbaceous class.
+#   - Anderson fuel model 5 (brush), which carries a live herbaceous load.
+#     Fuel model 1 has none, and the transfer window then changes nothing.
+#   - dynamic_transfer_lo/hi set the live herbaceous moisture window of the
+#     transfer to the dead herbaceous class: the whole live herbaceous load at
+#     and below lo, none at and above hi, the share (hi - M)/(hi - lo) between.
 #
 # Notes:
-#   - Compare against inputs_fire_phase13_behave to isolate the per-cell path.
+#   - inputs_fire_phase13_behave runs fuel model 1, so a comparison with it
+#     mixes the fuel change into the per-cell path; set fuel_model_id = 1 here
+#     to isolate the path.
 geometry.prob_lo = 0.0 0.0 0.0
 geometry.prob_hi = 2000.0 2000.0 500.0
 amr.n_cell = 40 40 50
@@ -62,7 +67,7 @@ erf.fire_plot_int = 100
 erf.fire.enable = true
 erf.fire.fire_debug = true
 erf.fire.grid_ratio = 5
-erf.fire.fuel_model_id = 1
+erf.fire.fuel_model_id = 5          # brush: live herbaceous load, so the transfer window matters
 erf.fire.moisture_1hr = 0.08
 erf.fire.moisture_10hr = 0.10
 erf.fire.moisture_100hr = 0.12
@@ -86,6 +91,8 @@ erf.fire.fire_stats_csv_file = "fire_stats_phase13_behave_dynamic.csv"
 # ---------------------------------------------------------------------------
 # BEHAVE live herbaceous transfer window
 # ---------------------------------------------------------------------------
+# Transferred share (hi - M)/(hi - lo), clamped to [0,1]; hi must exceed lo.
+# At M = 0.90 the defaults move (1.20 - 0.90)/0.90 = 1/3 of the load.
 erf.fire.moisture_live = 0.90
-erf.fire.behave.dynamic_transfer_lo = 0.30   # full transfer below this live moisture
-erf.fire.behave.dynamic_transfer_hi = 1.20   # no transfer above it
+erf.fire.behave.dynamic_transfer_lo = 0.30   # whole load transfers at and below this live moisture
+erf.fire.behave.dynamic_transfer_hi = 1.20   # none transfers at and above it
