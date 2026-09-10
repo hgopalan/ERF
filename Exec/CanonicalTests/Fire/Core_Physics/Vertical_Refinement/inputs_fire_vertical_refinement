@@ -32,13 +32,19 @@ zlo.type = "surface_layer"
 erf.most.z0 = 0.1
 zhi.type = "SlipWall"
 
-erf.init_type = "uniform"
+# Neutral 300 K at rest (input_sounding), in hydrostatic balance with gravity
+# on, so the fire's heat drives the buoyant plume this deck resolves.
+# Until 2026-09-10 this deck set erf.init_type = "uniform" without gravity:
+# uniform init is a constant-density state, which ERF accepts only without
+# gravity or when anelastic. The heat warmed the air but raised no plume, and
+# with no ambient wind the fire saw no wind at all.
+erf.use_gravity = true
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type = Ideal
 erf.theta_ref = 300.0
 erf.molec_diff_type = "ConstantAlpha"
 erf.les_type = "None"
-# No gravity, like the other uniform-init fire decks: erf.init_type = "uniform"
-# is a constant-density state, which ERF only accepts without gravity or when
-# anelastic, so use_gravity = true aborted at initialisation.
 
 # CFL-controlled step. A fixed 1.0 s was 2.4 times the compressible limit of
 # about 0.41 s on this grid, and a coupled fire crashes on it.

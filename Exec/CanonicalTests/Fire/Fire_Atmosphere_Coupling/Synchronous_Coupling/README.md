@@ -7,6 +7,11 @@ This case exercises the tighter synchronous coupling pathway between fire and at
 - Fire spread / ignition configuration
 - Atmospheric forcing and boundary-condition setup
 
+## Atmosphere
+The atmosphere is neutral (300 K) and at rest. It starts from `input_sounding` in hydrostatic balance with `erf.use_gravity = true`, so the fire's heat drives a buoyant plume, and the plume's indraft feeds back on the wind the fire sees.
+
+Until 2026-09-10 the deck used `erf.init_type = "uniform"`, which runs with gravity off: `erf.use_gravity` defaults to false, and uniform init allows gravity only when anelastic. The heat warmed the air near the ground but raised no plume. In a 120 s run, the largest vertical velocity was 3e-4 m/s with gravity off and 0.67 m/s with it on. With gravity on, the near-surface indraft reached 0.37 m/s and the fire's effective wind 0.12 m/s. The head rate of spread rose by 1.8%, and the burned area (0.12 ha) did not change. Over those 120 s this deck and Lagged_Coupling agree to within 0.3% in every one of these numbers, so the small grass fire does not yet separate the two coupling orders.
+
 ## Expected Results
 See the input-file header comments in this directory for the specific validation target. In general, these cases should reproduce the documented analytical trend, qualitative regime change, or engineering diagnostic associated with the scenario.
 

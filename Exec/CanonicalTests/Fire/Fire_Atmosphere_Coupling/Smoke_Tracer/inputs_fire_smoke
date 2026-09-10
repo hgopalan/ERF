@@ -32,10 +32,26 @@ erf.most.z0 = 0.1
 erf.molec_diff_type = "ConstantAlpha"
 erf.les_type = "None"
 erf.rans_type = "None"
-erf.init_type = "uniform"
+# WENO-Z for the passive scalars, which include smoke; theta and momentum keep
+# the dycore scheme. The default Upwind_3rd rings next to the one-layer surface
+# source. Once the plume lifted that ringing, the negative smoke mass reached
+# 18% of the positive mass in 60 s, against 2% with gravity off. With WENOZ5 it
+# rounds to zero, and the plume, the fire and the smoke total are unchanged.
+erf.dryscal_horiz_adv_type = "WENOZ5"
+erf.dryscal_vert_adv_type  = "WENOZ5"
+# Neutral 300 K with a uniform 5 m/s westerly (input_sounding), in hydrostatic
+# balance with gravity on, so the fire's heat drives a buoyant plume that lofts
+# the smoke.
+# Until 2026-09-10 this deck set erf.init_type = "uniform", which runs with
+# gravity off (erf.use_gravity defaults to false, and uniform init allows
+# gravity only when anelastic), so the heat warmed the air but raised no plume.
+erf.use_gravity = true
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type = Ideal
 erf.theta_ref = 300.0
-# Wind: geostrophic forcing, and the generic problem starts the flow in
-# geostrophic balance so the driver holds this wind rather than building it.
+# Wind: the sounding starts the flow at the geostrophic wind, and the
+# geostrophic forcing holds it against surface drag.
 # (erf.geostrophic_wind_x/y, used here before 2026-09-10, was read by nothing.)
 erf.abl_driver_type = "GeostrophicWind"
 erf.abl_geo_wind = 5.0 0.0 0.0
