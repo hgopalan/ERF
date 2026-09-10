@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Dry air, Van Wagner and Pickett (1985) drying and wetting curves.
+erf.fire.emc_model = "van_wagner"

@@ -60,6 +60,11 @@ struct FireParams
     //   "stick"             — radial diffusion in a cylindrical stick per class
     //                         (ERF_FuelMoistureStick.H, Nelson 2000 framework)
     std::string       moisture_model      = "timelag";
+    // Equilibrium moisture curves the dead classes relax toward (both models):
+    //   "legacy" (default) — the adsorption/desorption quartics ported from
+    //                        wildfire_levelset (provenance in ERF_FuelMoisture.H)
+    //   "van_wagner"       — Van Wagner and Pickett (1985) drying and wetting EMC
+    std::string       emc_model           = "legacy";
     struct StickParams {
         int                      n_shells = 6;                       ///< radial shells per stick (<= 16)
         std::vector<amrex::Real> radius_cm = {0.15, 0.635, 2.5};     ///< 1-h, 10-h, 100-h stick radii [cm]
@@ -68,6 +73,14 @@ struct FireParams
     } stick;
     amrex::Real       precip_rate_mm_hr   = 0.0;         ///< Uniform precipitation rate [mm/hr]
     amrex::Real       moisture_live       = 0.60;        ///< Live fuel moisture [fraction]
+    // How the live classes move when moisture_dynamic is on:
+    //   "legacy" (default) — the dead-fuel time-lag update with the 100-h lag,
+    //                        bounded to [0.30, 2.50]; its dead-range clamp
+    //                        pulls a value above 0.40 down to 0.40 at once
+    //   "fixed"            — held at moisture_live, also after a restart (the
+    //                        checkpointed live classes are replaced), and the
+    //                        domain average BEHAVE uses is not clamped
+    std::string       moisture_live_model = "legacy";
 
     // Moisture of extinction (Phase 4)
     bool              use_dynamic_mext    = true;        ///< Compute M_x from fuel SAV
@@ -348,6 +361,29 @@ struct FireParams
     // either flag enables direction-dependent spread when ros_model = "balbi".
     bool              directional_ros     = true;
 
+    // Shape of that direction-dependent rate, erf.fire.directional_shape.
+    // "projection" (0, default) evaluates the model with the wind and slope
+    // projected onto the front normal. "ellipse" (1) takes the normal speed from
+    // the support function of an ellipse with the model's head rate along the
+    // vector sum of its wind and slope increments, and its no-wind, no-slope
+    // rate at the back and flanks. From a point ignition the projection's head
+    // falls short of the model's head rate once the wind or slope factor is
+    // large, because the exact solution is the Wulff shape of R(n) (see
+    // ERF_DirectionalRos.H); the ellipse is convex and spreads the head at the
+    // model's rate. Needs directional_ros; implemented for rothermel, behave,
+    // macarthur, cheney_gould and fbp.
+    int               directional_shape   = 0;
+
+    // Flank rule of that ellipse, erf.fire.directional_ellipse_lw. "model" (0,
+    // default) keeps the model's no-wind, no-slope rate at the flanks, so the
+    // length-to-width ratio (R_h/R0 + 1)/2 is not capped. "anderson" (1) sets the
+    // flank rate from Anderson's (1983) ratio at the effective wind speed (the
+    // wind that alone would give the combined head rate, so a slope elongates
+    // the fire too), capped at directional_ellipse_lw_max; head and back rates
+    // are unchanged. Needs directional_shape = "ellipse".
+    int               directional_ellipse_lw     = 0;
+    amrex::Real       directional_ellipse_lw_max = 8.0;  ///< Cap on that ratio (Anderson's fit saturates at 8)
+
     // Horizontal interpolation of the atmospheric wind onto the fire grid:
     // 0 = nearest atmospheric column (every fire cell in a column shares one
     // wind vector), 1 = bilinear between the four surrounding columns.
@@ -472,11 +508,12 @@ struct FireParams
 
     // Phase 15: BEHAVE multi-class Rothermel parameters.
     // Only used when ros_model = "behave".
-    // Controls the dynamic live-to-dead load transfer threshold.
+    // Controls the moisture window of the live-to-dead herbaceous load transfer,
+    // which acts only on fuels with a live herbaceous load (w_lh > 0).
     // All other fuel properties come from FuelModelParams via get_anderson_fuel_params().
     struct BehaveParams {
-        amrex::Real dynamic_transfer_lo  = 0.30;  ///< Live herba moisture [fraction] below which full transfer occurs
-        amrex::Real dynamic_transfer_hi  = 1.20;  ///< Live herba moisture [fraction] above which no transfer occurs
+        amrex::Real dynamic_transfer_lo  = 0.30;  ///< Live herba moisture [fraction] at and below which the whole load transfers
+        amrex::Real dynamic_transfer_hi  = 1.20;  ///< Live herba moisture [fraction] at and above which none transfers
     } behave;
 
     // Hybrid rate of spread: two of the models above evaluated on every cell
@@ -643,12 +680,20 @@ struct FireParams
        pp.query("precip_rate_mm_hr", precip_rate_mm_hr);
        pp.query("moisture_live", moisture_live);
        pp.query("moisture_model", moisture_model);
+       pp.query("emc_model", emc_model);
+       if (emc_model != "legacy" && emc_model != "van_wagner") {
+           amrex::Abort("erf.fire.emc_model must be \"legacy\" or \"van_wagner\"");
+       }
+       pp.query("moisture_live_model", moisture_live_model);
        pp.query("stick.n_shells", stick.n_shells);
        pp.queryarr("stick.radius_cm", stick.radius_cm);
        pp.query("stick.rain_surface_moisture", stick.rain_surface_moisture);
        pp.query("stick.diffusivity_scale", stick.diffusivity_scale);
        if (moisture_model != "timelag" && moisture_model != "stick") {
            amrex::Abort("erf.fire.moisture_model must be \"timelag\" or \"stick\"");
+       }
+       if (moisture_live_model != "legacy" && moisture_live_model != "fixed") {
+           amrex::Abort("erf.fire.moisture_live_model must be \"legacy\" or \"fixed\"");
        }
        if (moisture_model == "stick") {
            if (stick.n_shells < 1 || stick.n_shells > 16) { amrex::Abort("erf.fire.stick.n_shells must be 1-16"); }
@@ -835,6 +880,34 @@ struct FireParams
        // Remembered for the ellipse check at the end: the ellipse turns the
        // default off but conflicts with an explicit true.
        const bool directional_ros_given = pp.query("directional_ros", directional_ros);
+       {
+           std::string shape_str = (directional_shape == 1) ? "ellipse" : "projection";
+           pp.query("directional_shape", shape_str);
+           if (shape_str == "projection") {
+               directional_shape = 0;
+           } else if (shape_str == "ellipse") {
+               directional_shape = 1;
+           } else {
+               amrex::Abort("erf.fire.directional_shape must be \"projection\" or \"ellipse\"");
+           }
+
+           std::string lw_str = (directional_ellipse_lw == 1) ? "anderson" : "model";
+           pp.query("directional_ellipse_lw", lw_str);
+           pp.query("directional_ellipse_lw_max", directional_ellipse_lw_max);
+           if (lw_str == "model") {
+               directional_ellipse_lw = 0;
+           } else if (lw_str == "anderson") {
+               directional_ellipse_lw = 1;
+           } else {
+               amrex::Abort("erf.fire.directional_ellipse_lw must be \"model\" or \"anderson\"");
+           }
+           if (directional_ellipse_lw == 1 && directional_shape != 1) {
+               amrex::Abort("erf.fire.directional_ellipse_lw = \"anderson\" needs erf.fire.directional_shape = \"ellipse\"");
+           }
+           if (directional_ellipse_lw_max < 1.0) {
+               amrex::Abort("erf.fire.directional_ellipse_lw_max must be >= 1");
+           }
+       }
 
        {
            std::string wind_interp_str = (wind_interp == 0) ? "nearest" : "bilinear";
@@ -1135,6 +1208,9 @@ struct FireParams
        auto& bh = behave;
        pp.query("behave.dynamic_transfer_lo", bh.dynamic_transfer_lo);
        pp.query("behave.dynamic_transfer_hi", bh.dynamic_transfer_hi);
+       if (uses_model("behave") && !(bh.dynamic_transfer_hi > bh.dynamic_transfer_lo)) {
+           amrex::Abort("erf.fire.behave.dynamic_transfer_hi must be greater than dynamic_transfer_lo");
+       }
 
        // Phase 10: firebreaks (indexed, stop at first missing)
        for (int nb = 0; nb < 10; ++nb) {
@@ -1174,6 +1250,19 @@ struct FireParams
                amrex::Abort("erf.fire.ros_model = prescribed cannot be combined with erf.fire.levelset.ellipse");
            }
            directional_ros = false;
+       }
+
+       // The ellipse shape is a form of the directional rate of the generic
+       // models; Balbi and the hybrid keep the projection. Checked last, once
+       // the ellipse and prescribed options have had their say on
+       // directional_ros.
+       if (directional_shape == 1) {
+           if (!directional_ros) {
+               amrex::Abort("erf.fire.directional_shape = \"ellipse\" needs directional_ros = true and cannot be combined with erf.fire.levelset.ellipse or ros_model = prescribed");
+           }
+           if (ros_model == "balbi" || is_hybrid()) {
+               amrex::Abort("erf.fire.directional_shape = \"ellipse\" is implemented for rothermel, behave, macarthur, cheney_gould and fbp, not balbi or hybrid");
+           }
        }
     }
 

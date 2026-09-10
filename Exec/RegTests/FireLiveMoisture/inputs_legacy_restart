@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# Restarts the historical deck from chk_legacy00080 (inputs_legacy_chk) and runs
+# to step 160 (20 s). "legacy" keeps the checkpointed live classes.
+erf.restart = chk_legacy00080
+max_step = 160
+erf.fire_plot_int = 160

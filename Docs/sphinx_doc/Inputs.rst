@@ -3732,8 +3732,12 @@ Fuel and moisture
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.moisture_100hr**                    | 100-hour dead fuel moisture [fraction]                     | Real 0-1                       | 0.10                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.moisture_live**                     | Live herbaceous and woody moisture [fraction], held        | Real                           | 0.60                   |
-|                                                | constant                                                   |                                |                        |
+| **erf.fire.moisture_live**                     | Live herbaceous and woody moisture [fraction]; the live    | Real                           | 0.60                   |
+|                                                | classes start here (see moisture_live_model)               |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.moisture_live_model**               | Live classes with moisture_dynamic: the legacy dead-fuel   | "legacy", "fixed"              | "legacy"               |
+|                                                | update (a value above 0.40 drops to 0.40 on the first      |                                |                        |
+|                                                | step) or held at moisture_live                             |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.moisture_dynamic**                  | Advance the dead classes each step with the Nelson time-   | Boolean                        | true                   |
 |                                                | lag model                                                  |                                |                        |
@@ -3742,6 +3746,10 @@ Fuel and moisture
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.moisture_model**                    | Dead-class update: one time constant per class, or radial  | "timelag", "stick"             | "timelag"              |
 |                                                | diffusion in a cylindrical stick (Nelson 2000 framework)   |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.emc_model**                         | Equilibrium moisture curves of the dead-class update: the  | "legacy", "van_wagner"         | "legacy"               |
+|                                                | legacy quartics, or Van Wagner and Pickett (1985) drying   |                                |                        |
+|                                                | and wetting EMC (temperature dependent, as in WRF-SFIRE)   |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.stick.n_shells**                    | Radial shells per stick                                    | Integer 1-16                   | 6                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -3896,6 +3904,18 @@ Rate of spread
 | **erf.fire.directional_ros**                   | Evaluate the rate along the front normal on the level-set  | Boolean                        | true                   |
 |                                                | path; false spreads the head rate in every direction       |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.directional_shape**                 | Form of that rate: the model along the front normal, or    | "projection", "ellipse"        | "projection"           |
+|                                                | the support function of the ellipse with the model's head, |                                |                        |
+|                                                | back and flank rates, which keeps a point fire's head at   |                                |                        |
+|                                                | the head rate; not for balbi or hybrid                     |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.directional_ellipse_lw**            | Flank rate of that ellipse: the model's no-wind, no-slope  | "model", "anderson"            | "model"                |
+|                                                | rate, or b over Anderson's (1983) length-to-width ratio at |                                |                        |
+|                                                | the effective wind speed; head and back unchanged; needs   |                                |                        |
+|                                                | directional_shape = "ellipse"                              |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.directional_ellipse_lw_max**        | Cap on that Anderson ratio (the fit itself saturates at 8) | Real >= 1                      | 8.0                    |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.prescribed.ros**                    | Rate of spread for ros_model = prescribed where by_fuel    | Real >= 0                      | 0.0                    |
 |                                                | has no entry; no wind, slope or moisture dependence, and   |                                |                        |
 |                                                | directional_ros is turned off [m/s]                        |                                |                        |
@@ -3931,11 +3951,15 @@ Rate of spread
 | **erf.fire.fbp.wind_source**                   | The reference-height wind (set wind_ref_ht = 10) or the    | "reference", "midflame"        | "reference"            |
 |                                                | midflame wind after the Wind Adjustment Factor             |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.behave.dynamic_transfer_lo**        | BEHAVE live herbaceous moisture below which all load       | Real                           | 0.30                   |
-|                                                | transfers to dead [fraction]                               |                                |                        |
+| **erf.fire.behave.dynamic_transfer_lo**        | BEHAVE live herbaceous moisture [fraction] at and below    | Real < dynamic_transfer_hi     | 0.30                   |
+|                                                | which the whole live herbaceous load transfers to dead,    |                                |                        |
+|                                                | with a linear share up to dynamic_transfer_hi. Acts only   |                                |                        |
+|                                                | on fuels with a live herbaceous load                       |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.behave.dynamic_transfer_hi**        | BEHAVE live herbaceous moisture above which no load        | Real                           | 1.20                   |
-|                                                | transfers [fraction]                                       |                                |                        |
+| **erf.fire.behave.dynamic_transfer_hi**        | BEHAVE live herbaceous moisture [fraction] at and above    | Real > dynamic_transfer_lo     | 1.20                   |
+|                                                | which none transfers; the share is (hi - M)/(hi - lo),     |                                |                        |
+|                                                | clamped to [0,1]. Aborts unless greater than               |                                |                        |
+|                                                | dynamic_transfer_lo                                        |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 
 

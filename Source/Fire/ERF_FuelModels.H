@@ -216,7 +216,8 @@ int sb40_to_anderson(int code) noexcept
  * @brief Scott and Burgan (2005) fuel model parameters.
  * @param code   101-204
  * @param M_live Live herbaceous moisture [fraction] for the curing transfer of the
- *               dynamic models; negative leaves the herbaceous load live
+ *               dynamic models; negative leaves the herbaceous load live, as
+ *               BEHAVE needs (behave_fuel_params), since it transfers in its own window
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 FuelModelParams get_scott_burgan_fuel_params(int code, amrex::Real M_live = -1.0)

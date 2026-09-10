@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Sanity checks on the fire output of the Smoke_Tracer tests.
+"""Sanity checks on the fire and smoke output of the Smoke_Tracer tests.
 
     python3 check_smoke_tracer.py [plt_fire_NNNNN] [--stats fire_stats.csv]
+                                  [--atm-prefix plt_1_]
 
-With no plotfile the last plt_fire_????? in the directory is used; with no
+With no plotfile the last fire plotfile in the directory is used (plt_fire_NNNNN,
+or plt_fire_<name>_NNNNN for a deck that sets erf.fire_plot_file); with no
 --stats every fire_stats*.csv present is checked. Each check prints PASS or FAIL
 and the script exits 1 if any fails, so it can follow the run in CTest:
 
@@ -21,14 +23,31 @@ The checks are the ones every fire case must satisfy whatever its physics:
               in a burned cell (burning only removes fuel)
   area        the burned area in the statistics CSV never decreases
 
+and, from the smoke mass concentration [kg/m^3] in the atmosphere plotfiles
+(erf.plot_vars_1 must list smoke):
+
+  smoke       every atmosphere plotfile has a finite smoke field, and the last
+              one holds smoke
+  positive    the negative smoke mass stays below 10% of the positive mass in
+              every plotfile. The default Upwind_3rd scalar advection is not
+              monotone and rings next to the one-layer surface source, so single
+              cells undershoot zero (by 12% of the maximum early in the 60 s run
+              of this deck); by mass the undershoot was 2-6%
+  mass        the domain-total smoke mass never decreases: the domain is
+              periodic in x and y with walls top and bottom, so smoke only
+              enters, through the fire emission, and never leaves
+
 A deck that deliberately never ignites (a wet or extinction case) can pass
---allow-no-fire, which turns "ignited" into "burned area stays zero".
+--allow-no-fire, which turns "ignited" into "burned area stays zero" and
+"smoke" into "no smoke is emitted".
 """
-import argparse, csv, glob, math, os, sys
+import argparse, csv, glob, math, os, re, sys
 import numpy as np
 
 ROS_CAP = 50.0          # m/s; no surface fire model gets near this
 TOL = 1.0e-9
+NEG_MASS_FRAC = 0.10    # allowed negative smoke mass as a fraction of the positive mass
+MASS_RTOL = 1.0e-9      # allowed relative decrease of the total smoke mass
 
 def fail_if(missing):
     if missing:
@@ -53,23 +72,73 @@ def load(pf):
         return np.asarray(g[("boxlib", cand[0])])[:, :, 0]
     return ds, get
 
+def plotfiles(pattern):
+    """Plotfile directories matching pattern (step number in group 2), by step."""
+    rx = re.compile(pattern)
+    found = [(m, p) for p in os.listdir(".") for m in [rx.match(p)] if m and os.path.isdir(p)]
+    return [p for m, p in sorted(found, key=lambda mp: int(mp[0].group(2)))]
+
 results = []
 def check(name, ok, detail):
     results.append(ok)
     print(f"  {name:8s} {'PASS' if ok else 'FAIL'}  {detail}")
 
+def check_smoke(prefix, allow_no_fire):
+    pfs = plotfiles(r"^(" + re.escape(prefix) + r")(\d{5,})$")
+    if not pfs:
+        check("smoke", False, f"no {prefix}NNNNN atmosphere plotfile (erf.plot_int_1)")
+        return
+    rows = []
+    for p in pfs:
+        ds = yt.load(p)
+        if ("boxlib", "smoke") not in ds.field_list:
+            check("smoke", False, f"{p} has no smoke field (erf.plot_vars_1)")
+            return
+        g = ds.covering_grid(0, ds.domain_left_edge, ds.domain_dimensions)
+        s = np.asarray(g[("boxlib", "smoke")])
+        dv = float(np.prod((ds.domain_right_edge - ds.domain_left_edge).d / ds.domain_dimensions))
+        finite = bool(np.all(np.isfinite(s)))
+        s0 = np.where(np.isfinite(s), s, 0.0)
+        rows.append((p, float(ds.current_time), finite,
+                     float(s0.min()), float(s0.max()), float(s0.sum()) * dv,
+                     float(-s0[s0 < 0.0].sum()) * dv, float(s0[s0 > 0.0].sum()) * dv))
+
+    bad = [p for p, _, finite, *_ in rows if not finite]
+    last = rows[-1]
+    smax = max(r[4] for r in rows)
+    if bad:
+        check("smoke", False, f"non-finite smoke in {bad}")
+    elif allow_no_fire:
+        check("smoke", smax <= TOL, f"{len(rows)} plotfiles, max {smax:.4g} kg/m3 (no-fire case)")
+    else:
+        check("smoke", last[4] > 0.0,
+              f"{len(rows)} plotfiles, {last[0]} at t = {last[1]:.1f} s: max {last[4]:.4g} kg/m3")
+
+    smin = min(r[3] for r in rows)
+    fracs = [(r[6] / r[7], r[0]) for r in rows if r[7] > 0.0]
+    worst, worst_pf = max(fracs) if fracs else (0.0, "no plotfile with smoke")
+    check("positive", worst <= NEG_MASS_FRAC,
+          f"negative/positive mass at most {worst:.3f} ({worst_pf}); "
+          f"cell min {smin:.4g} against max {smax:.4g} kg/m3")
+
+    mass = [r[5] for r in rows]
+    dips = sum(1 for x, y in zip(mass, mass[1:]) if y < x - MASS_RTOL * max(abs(x), abs(y)))
+    check("mass", dips == 0, f"{mass[0]:.4g} -> {mass[-1]:.4g} kg over {len(mass)} plotfiles, {dips} decreases")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("plotfile", nargs="?")
     ap.add_argument("--stats", action="append")
+    ap.add_argument("--atm-prefix", default="plt_1_",
+                    help="atmosphere plotfile prefix (erf.plot_file_1)")
     ap.add_argument("--allow-no-fire", action="store_true")
     args = ap.parse_args()
 
     pf = args.plotfile
     if pf is None:
-        pfs = sorted(p for p in glob.glob("plt_fire_?????") if os.path.isdir(p))
+        pfs = plotfiles(r"^(plt_fire_(?:.+_)?)(\d{5,})$")
         if not pfs:
-            print("  no plt_fire_????? plotfile here: FAIL")
+            print("  no plt_fire_NNNNN plotfile here: FAIL")
             sys.exit(1)
         pf = pfs[-1]
     ds, get = load(pf)
@@ -105,12 +174,12 @@ def main():
         check("arrival", ok_b and ok_u, detail)
 
     if fuel is not None:
-        f0_pfs = sorted(p for p in glob.glob("plt_fire_00000") if os.path.isdir(p))
+        f0 = re.sub(r"\d+$", "00000", pf)
         ok_neg = float(np.nanmin(fuel)) >= -TOL
-        if f0_pfs and f0_pfs[0] != pf:
-            _, get0 = load(f0_pfs[0])
-            f0 = get0("fire_fuel_load", required=False)
-            grew = int((fuel > f0 + 1.0e-9).sum()) if f0 is not None else 0
+        if os.path.isdir(f0) and f0 != pf:
+            _, get0 = load(f0)
+            fuel0 = get0("fire_fuel_load", required=False)
+            grew = int((fuel > fuel0 + 1.0e-9).sum()) if fuel0 is not None else 0
             check("fuel", ok_neg and grew == 0, f"min {np.nanmin(fuel):.4g}, {grew} cells above their start")
         else:
             check("fuel", ok_neg, f"min {np.nanmin(fuel):.4g} kg/m2")
@@ -130,6 +199,8 @@ def main():
             check("area", max(a) <= 1.0e-9 or dips == 0, f"{sf}: {len(a)} rows, max {max(a):.4g} ha")
         else:
             check("area", dips == 0, f"{sf}: {len(a)} rows, {a[0]:.4g} -> {a[-1]:.4g} ha, {dips} decreases")
+
+    check_smoke(args.atm_prefix, args.allow_no_fire)
 
     n_fail = results.count(False)
     print(f"Smoke_Tracer: {len(results) - n_fail}/{len(results)} checks passed")

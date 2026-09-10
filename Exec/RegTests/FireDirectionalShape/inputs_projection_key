@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# The projection written out: must reproduce inputs_projection bit for bit.
+erf.fire.directional_shape = "projection"

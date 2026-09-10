@@ -22,6 +22,8 @@ using amrex::Real;
 
 static constexpr Real M_DEAD = 0.055;                ///< Coen et al. (2013) moisture
 static constexpr Real M_LIVE = 1.0;
+static constexpr Real TRANSFER_LO = 0.30;            ///< erf.fire.behave.dynamic_transfer_lo default
+static constexpr Real TRANSFER_HI = 1.20;            ///< erf.fire.behave.dynamic_transfer_hi default
 static constexpr Real FTMIN_PER_MS = 196.85;
 static constexpr Real UNCAPPED = std::numeric_limits<Real>::max();
 
@@ -104,8 +106,10 @@ TEST(WindLimit, PerFuelTable)
 TEST(WindLimit, Behave)
 {
     const FuelModelParams fp = get_fuel_params(1, 0);
-    const BehaveState bs_default = compute_behave_state(fp, M_DEAD, M_DEAD, M_DEAD, M_LIVE, M_LIVE);
-    const BehaveState bs_off = compute_behave_state(fp, M_DEAD, M_DEAD, M_DEAD, M_LIVE, M_LIVE, false);
+    const BehaveState bs_default = compute_behave_state(fp, M_DEAD, M_DEAD, M_DEAD, M_LIVE, M_LIVE,
+                                                        TRANSFER_LO, TRANSFER_HI);
+    const BehaveState bs_off = compute_behave_state(fp, M_DEAD, M_DEAD, M_DEAD, M_LIVE, M_LIVE,
+                                                    TRANSFER_LO, TRANSFER_HI, false);
 
     EXPECT_EQ(bs_default.U_max_ftmin, Real(300.0));
     EXPECT_EQ(bs_off.U_max_ftmin, UNCAPPED);

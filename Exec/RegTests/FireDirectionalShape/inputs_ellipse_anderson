@@ -1,0 +1,13 @@
+FILE = inputs_base
+
+# The ellipse shape with Anderson's flanks: head R0 (1 + phi_w) along the wind
+# and back R0 as in inputs_ellipse, flank rate b / LW with Anderson's (1983)
+# length-to-width ratio at the 1.5 m/s wind (LW = 1.49).
+erf.fire.directional_shape = "ellipse"
+erf.fire.directional_ellipse_lw = "anderson"
+
+# The flanks spread at about 0.09 m/s and would reach the periodic y boundary
+# well before 1500 s.
+max_step = 800
+stop_time = 800.0
+erf.fire_plot_int = 400

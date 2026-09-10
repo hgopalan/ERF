@@ -104,9 +104,16 @@ erf.fire.moisture_10hr = 0.08
 # Changes most slowly; represents deeper fuel bed
 erf.fire.moisture_100hr = 0.10
 
-# Live herbaceous fuel moisture [fraction] (Phase 4)
-# Only used when moisture_dynamic = true
+# Live herbaceous and live woody fuel moisture [fraction] (Phase 4)
+# The live classes start here
 erf.fire.moisture_live = 0.60
+
+# Live classes with moisture_dynamic = true:
+#   "legacy" (default) - the dead-fuel time-lag update with the 100-h lag,
+#                        bounded to [0.30, 2.50]; its dead-range clamp drops a
+#                        value above 0.40 to 0.40 on the first step
+#   "fixed"            - held at moisture_live (recommended)
+erf.fire.moisture_live_model = "legacy"
 
 # Precipitation rate [mm/hr] (Phase 4, affects moisture dynamics)
 # 0.0 = no precipitation
@@ -120,6 +127,12 @@ erf.fire.stick.n_shells = 6
 erf.fire.stick.radius_cm = 0.15 0.635 2.5    # 1-h, 10-h, 100-h [cm]
 erf.fire.stick.rain_surface_moisture = 0.35
 erf.fire.stick.diffusivity_scale = 1.0
+
+# Equilibrium moisture curves the dead classes relax toward (both update models):
+# "legacy" (default; adsorption/desorption quartics of unknown origin, see
+# Source/Fire/ERF_FuelMoisture.H) or "van_wagner" (Van Wagner and Pickett 1985
+# drying and wetting EMC, temperature dependent, the pair WRF-SFIRE uses)
+erf.fire.emc_model = "legacy"
 
 # ============================================================================
 # FUEL MOISTURE: DYNAMIC MOISTURE (Phase 4)
@@ -222,6 +235,26 @@ erf.fire.wind_interp = "bilinear"
 # false (default) keeps the isotropic behaviour. No effect on the FARSITE path,
 # which gets its directionality from the Anderson ellipse.
 erf.fire.directional_ros = false
+
+# Form of the directional rate (needs directional_ros; not for balbi or hybrid).
+# "projection" (default) evaluates the model with the wind and slope projected
+#              onto the front normal; from a point ignition its head runs below
+#              the model's head rate once the wind or slope factor is large
+# "ellipse"    uses the support function of the ellipse with the model's head
+#              rate (wind and slope increments added as vectors) and its
+#              no-wind, no-slope rate at the back and flanks, so a point fire's
+#              head runs at the head rate
+erf.fire.directional_shape = "projection"
+
+# Flank rate of the "ellipse" shape (needs directional_shape = "ellipse").
+# "model" (default) keeps the model's no-wind, no-slope rate at the flanks, so
+#          the length-to-width ratio (R_h/R0 + 1)/2 is not capped
+# "anderson" sets the flank rate to b / LW with Anderson's (1983) ratio LW at the
+#          effective wind speed (the wind that alone gives the head rate, so a
+#          slope elongates the fire too), capped at directional_ellipse_lw_max;
+#          head and back rates are unchanged
+erf.fire.directional_ellipse_lw = "model"
+erf.fire.directional_ellipse_lw_max = 8.0
 
 # Level-set path only: extrapolate the level set into non-burnable cells
 # inside every stencil (gradient, Laplacian, front normal, reinitialisation),
@@ -467,6 +500,16 @@ erf.fire.fbp.pc = 50.0           # percent conifer (M1, M2)
 erf.fire.fbp.pdf = 50.0          # percent dead fir (M3, M4)
 erf.fire.fbp.use_slope = true
 erf.fire.fbp.wind_source = "reference"
+
+# ============================================================================
+# BEHAVE MULTI-CLASS ROTHERMEL (used only when ros_model = "behave")
+# ============================================================================
+# Live herbaceous moisture window of the live-to-dead herbaceous transfer: the
+# whole live herbaceous load joins the dead class at and below lo, none at and
+# above hi, the share (hi - M)/(hi - lo) between; hi must exceed lo. Only fuels
+# with a live herbaceous load respond (Anderson model 1 has none).
+erf.fire.behave.dynamic_transfer_lo = 0.30   # [fraction]
+erf.fire.behave.dynamic_transfer_hi = 1.20   # [fraction]
 
 # ============================================================================
 # FIRE PROPAGATION: ROTHERMEL MODEL (Phases 1-3)

@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# Air at about 40 % RH (9 g/kg water vapour at 300 K), legacy curves.
+erf.moisture_model = "Kessler_NoRain"
+erf.input_sounding_file = "input_sounding_humid"

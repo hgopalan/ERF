@@ -7,7 +7,7 @@
 set -u
 EXE=${1:?usage: run_slope_no_wind.sh /path/to/erf_exec [extra args]}
 shift || true
-VARIANTS="iso_s30 iso_s60 dir_s30 dir_s60"
+VARIANTS="iso_s30 iso_s60 dir_s30 dir_s60 ell_s30 ell_s60 and_s30 and_s60"
 
 for v in $VARIANTS; do
     if [ "${SKIP_RUN:-0}" = "1" ] && [ -f "run_$v.log" ]; then continue; fi

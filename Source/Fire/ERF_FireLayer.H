@@ -547,6 +547,12 @@ public:
         return get_fuel_params(m_params.fuel_model_id, m_params.fuel_map.fuel_set_id(), m_params.moisture_live);
     }
 
+    /// The uniform fuel model's parameters for BEHAVE: the table without its curing transfer (behave_fuel_params).
+    FuelModelParams uniform_behave_fuel_params() const
+    {
+        return behave_fuel_params(m_params.fuel_model_id, m_params.fuel_map.fuel_set_id());
+    }
+
     /**
      * @brief Heat per kilogram of fuel that converts the lagged atmospheric
      *        sensible flux back into fuel burnt, for the smoke emission.

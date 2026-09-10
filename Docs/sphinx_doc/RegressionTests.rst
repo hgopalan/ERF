@@ -555,9 +555,10 @@ Problem Location: `Exec/CanonicalTests/EkmanSpiral`_
 
 Fire and dust smoke tests
 -------------------------
-Every fire suite under ``Exec/RegTests`` (``FireBurnout``, ``FireExposure``,
-``FireFbp``, ``FireFluxPartition``, ``FireHeatPlacement``,
-``FireHybridObstacles``, ``FireLevelSetEllipse``, ``FireNearWall``,
+Every fire suite under ``Exec/RegTests`` (``FireBurnout``,
+``FireDirectionalShape``, ``FireEmcModel``, ``FireExposure``, ``FireFbp``,
+``FireFluxPartition``, ``FireHeatPlacement``, ``FireHybridObstacles``,
+``FireLevelSetEllipse``, ``FireLiveMoisture``, ``FireNearWall``,
 ``FirePerimeterIgnition``, ``FireRestart``, ``FireRosComparison``,
 ``FireScottBurgan``, ``FireStickMoisture``, ``FireWindSampling``,
 ``FarsiteDefault`` and ``LevelSetPropagation``) registers one of its decks as
