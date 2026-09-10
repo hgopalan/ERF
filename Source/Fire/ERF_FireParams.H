@@ -60,6 +60,11 @@ struct FireParams
     //   "stick"             — radial diffusion in a cylindrical stick per class
     //                         (ERF_FuelMoistureStick.H, Nelson 2000 framework)
     std::string       moisture_model      = "timelag";
+    // Equilibrium moisture curves the dead classes relax toward (both models):
+    //   "legacy" (default) — the adsorption/desorption quartics ported from
+    //                        wildfire_levelset (provenance in ERF_FuelMoisture.H)
+    //   "van_wagner"       — Van Wagner and Pickett (1985) drying and wetting EMC
+    std::string       emc_model           = "legacy";
     struct StickParams {
         int                      n_shells = 6;                       ///< radial shells per stick (<= 16)
         std::vector<amrex::Real> radius_cm = {0.15, 0.635, 2.5};     ///< 1-h, 10-h, 100-h stick radii [cm]
@@ -643,6 +648,10 @@ struct FireParams
        pp.query("precip_rate_mm_hr", precip_rate_mm_hr);
        pp.query("moisture_live", moisture_live);
        pp.query("moisture_model", moisture_model);
+       pp.query("emc_model", emc_model);
+       if (emc_model != "legacy" && emc_model != "van_wagner") {
+           amrex::Abort("erf.fire.emc_model must be \"legacy\" or \"van_wagner\"");
+       }
        pp.query("stick.n_shells", stick.n_shells);
        pp.queryarr("stick.radius_cm", stick.radius_cm);
        pp.query("stick.rain_surface_moisture", stick.rain_surface_moisture);

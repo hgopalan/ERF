@@ -3743,6 +3743,10 @@ Fuel and moisture
 | **erf.fire.moisture_model**                    | Dead-class update: one time constant per class, or radial  | "timelag", "stick"             | "timelag"              |
 |                                                | diffusion in a cylindrical stick (Nelson 2000 framework)   |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.emc_model**                         | Equilibrium moisture curves of the dead-class update: the  | "legacy", "van_wagner"         | "legacy"               |
+|                                                | legacy quartics, or Van Wagner and Pickett (1985) drying   |                                |                        |
+|                                                | and wetting EMC (temperature dependent, as in WRF-SFIRE)   |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.stick.n_shells**                    | Radial shells per stick                                    | Integer 1-16                   | 6                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.stick.radius_cm**                   | Stick radii of the 1-h, 10-h and 100-h classes [cm]        | 3 Reals > 0                    | 0.15 0.635 2.5         |

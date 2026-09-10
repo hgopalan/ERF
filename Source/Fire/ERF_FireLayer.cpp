@@ -1237,6 +1237,8 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
     }
     const Real r1 = m_params.stick.radius_cm[0], r10 = m_params.stick.radius_cm[1], r100 = m_params.stick.radius_cm[2];
     const Real rain_ms = m_params.stick.rain_surface_moisture, dscale = m_params.stick.diffusivity_scale;
+    // Equilibrium moisture curves (erf.fire.emc_model), for both update models
+    const int emc_model = (m_params.emc_model == "van_wagner") ? FuelMoistureEMC::VAN_WAGNER : FuelMoistureEMC::LEGACY;
 
     for (MFIter mfi(*fire_fuel_mc); mfi.isValid(); ++mfi) {
         Array4<Real> mc   = fire_fuel_mc->array(mfi);
@@ -1257,21 +1259,21 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
                 for (int c = 0; c < 3; ++c) {
                     for (int n = 0; n < n_sh; ++n) { M[n] = st(i, j, 0, c * n_sh + n); }
                     mc(i, j, 0, c) = stick_advance_class(M, n_sh, radii[c], taus[c], RH, T_C, precip_mm_hr,
-                                                         rain_ms, dscale, dt_hours);
+                                                         rain_ms, dscale, dt_hours, emc_model);
                     for (int n = 0; n < n_sh; ++n) { st(i, j, 0, c * n_sh + n) = M[n]; }
                 }
             } else {
             // Existing 3 dead fuel classes (unchanged)
-            mc(i,j,0,0) = advance_fuel_moisture_one_class(mc(i,j,0,0),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_1HR);
-            mc(i,j,0,1) = advance_fuel_moisture_one_class(mc(i,j,0,1),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_10HR);
-            mc(i,j,0,2) = advance_fuel_moisture_one_class(mc(i,j,0,2),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_100HR);
+            mc(i,j,0,0) = advance_fuel_moisture_one_class(mc(i,j,0,0),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_1HR,emc_model);
+            mc(i,j,0,1) = advance_fuel_moisture_one_class(mc(i,j,0,1),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_10HR,emc_model);
+            mc(i,j,0,2) = advance_fuel_moisture_one_class(mc(i,j,0,2),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_100HR,emc_model);
             }
             // Phase 15: live fuel moisture (components 3 and 4)
             // Live fuels respond slowly to atmospheric conditions.
             // Use TAU_100HR as a lower bound; live moisture is bounded [0.30, 2.50].
             if (mc.nComp() >= 5) {
-                Real lh_new = advance_fuel_moisture_one_class(mc(i,j,0,3),RH,T_C,0.0_rt,dt_hours,FuelMoistureConst::TAU_100HR);
-                Real lw_new = advance_fuel_moisture_one_class(mc(i,j,0,4),RH,T_C,0.0_rt,dt_hours,FuelMoistureConst::TAU_100HR);
+                Real lh_new = advance_fuel_moisture_one_class(mc(i,j,0,3),RH,T_C,0.0_rt,dt_hours,FuelMoistureConst::TAU_100HR,emc_model);
+                Real lw_new = advance_fuel_moisture_one_class(mc(i,j,0,4),RH,T_C,0.0_rt,dt_hours,FuelMoistureConst::TAU_100HR,emc_model);
                 mc(i,j,0,3) = amrex::max(0.30_rt, amrex::min(lh_new, 2.50_rt));  // live herba: 30%–250%
                 mc(i,j,0,4) = amrex::max(0.30_rt, amrex::min(lw_new, 2.50_rt));  // live woody: 30%–250%
             }
