@@ -127,9 +127,25 @@ humidity: the legacy curves clamp it to 1 % and hold the dead classes near
 RH, and the unit test ``ERF_GTestFuelMoistureEMC`` checks the curves against
 the published equations and the long-time equilibrium of both update models.
 
-The curve is chosen by hysteresis: a fuel wetter than
-the desorption value dries toward it, one drier than the adsorption value
-wets toward it, and one between the two relaxes to their mean.
+The curve is chosen by sorption hysteresis, as in the WRF-SFIRE dead-fuel
+model (Vejmelka et al. 2016): a fuel wetter than :math:`E_d` dries toward it,
+a fuel drier than :math:`E_w` wets toward it, and a fuel between the two does
+not change (:math:`M_e = M_n`, so only rain moves it). Nelson (2000) draws the
+same line, desorption when the fuel is wetter than its equilibrium and
+adsorption when it is drier. Where the legacy polynomials cross (66-70 %
+relative humidity) the band is taken between the lower and the upper value.
+In constant dry air a fuel starting at :math:`M_0 > E_d` therefore follows
+:math:`M(t) = E_d + (M_0 - E_d)\,e^{-t/(\tau f_T)}`, which the unit test
+``ERF_GTestFuelMoisture`` and the verification case
+``Exec/CanonicalTests/Fire/Verification/Moisture_Relaxation`` check.
+
+.. note::
+
+   Until September 2026 the choice was reversed: a fuel above the adsorption
+   curve relaxed toward it and one below the desorption curve toward that, so
+   a drying fuel headed for the lower curve and was then held at the upper
+   one, and a fuel drier than both wetted toward the upper one. Runs with
+   dynamic moisture made before the fix differ from runs made after it.
 
 **Temperature correction.** The time lag is scaled by
 :math:`f_T = \exp(-0.015\,(T - 20^\circ\mathrm{C}))`, clamped to
@@ -259,6 +275,7 @@ References
 - Nelson, R. M. (2000). Prediction of diurnal change in 10-h fuel stick moisture content. Canadian Journal of Forest Research, 30, 1071-1087.
 - Van Wagner, C. E. (1972). Equilibrium moisture contents of some fine forest fuels in eastern Canada. Canadian Forestry Service Information Report PS-X-36.
 - Van Wagner, C. E., and Pickett, T. L. (1985). Equations and FORTRAN program for the Canadian Forest Fire Weather Index System. Canadian Forestry Service, Forestry Technical Report 33.
+- Vejmelka, M., Kochanski, A. K., and Mandel, J. (2016). Data assimilation of dead fuel moisture observations from remote automated weather stations. International Journal of Wildland Fire, 25, 558-568.
 - Van Wagner, C. E. (1987). Development and structure of the Canadian Forest Fire Weather Index System. Canadian Forestry Service, Forestry Technical Report 35.
 - Viney, N. R. (1991). A review of fine fuel moisture modelling. International Journal of Wildland Fire, 1(4), 215-234.
 - Simard, A. J. (1968). The moisture content of forest fuels. Part III: moisture content variations of fast responding fuels below the fibre saturation point. Canadian Forest Service Information Report FF-X-16.
