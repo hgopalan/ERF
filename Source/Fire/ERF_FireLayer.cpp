@@ -721,12 +721,19 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         // Phase 15: Update BEHAVE state when dynamic moisture is enabled.
         if (m_params.moisture_dynamic && m_params.uses_model("behave")) {
             FuelModelParams fp_bh = uniform_behave_fuel_params();
-            // Domain-average live moisture from components 3 and 4
+            // Domain-average live moisture from components 3 and 4; the
+            // directional level-set path reads this state. "fixed" passes the
+            // held value through, as the per-cell kernel does, so a
+            // moisture_live outside [0.30, 2.50] reaches both paths. "legacy"
+            // keeps the clamp; its update holds the classes in [0.30, 0.40], so
+            // the clamp only catches round-off in the average there.
             long nc_live = fire_fuel_mc->boxArray().numPts();
             Real avg_lh  = (nc_live > 0) ? fire_fuel_mc->sum(3) / Real(nc_live) : m_params.moisture_live;
             Real avg_lw  = (nc_live > 0) ? fire_fuel_mc->sum(4) / Real(nc_live) : m_params.moisture_live;
-            avg_lh = amrex::max(0.30_rt, amrex::min(avg_lh, 2.50_rt));
-            avg_lw = amrex::max(0.30_rt, amrex::min(avg_lw, 2.50_rt));
+            if (m_params.moisture_live_model != "fixed") {
+                avg_lh = amrex::max(0.30_rt, amrex::min(avg_lh, 2.50_rt));
+                avg_lw = amrex::max(0.30_rt, amrex::min(avg_lw, 2.50_rt));
+            }
             m_bs_default = compute_behave_state(fp_bh, avg1, avg10, avg100, avg_lh, avg_lw,
                                                 m_params.behave.dynamic_transfer_lo,
                                                 m_params.behave.dynamic_transfer_hi);

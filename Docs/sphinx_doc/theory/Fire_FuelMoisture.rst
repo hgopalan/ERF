@@ -166,15 +166,20 @@ With dynamic moisture the live herbaceous and live woody classes follow
   step, even in saturated air, and then decays toward the 0.30 bound over tens
   of hours. This is not a live-moisture model; it is kept for backward
   compatibility.
-- ``"fixed"`` holds the live classes where they start, at
-  :cpp:`erf.fire.moisture_live`, or at the checkpointed value on a restart.
-  Live moisture follows the plant's water status over days to weeks, not the
-  air over the length of a fire run, so this is the recommended setting.
+- ``"fixed"`` holds the live classes at :cpp:`erf.fire.moisture_live`. A
+  restart takes them from the inputs, not from the checkpoint, so it can change
+  the value, and a checkpoint written by a ``"legacy"`` run or an older build
+  does not bring back its clamped live moisture. Live moisture follows the
+  plant's water status over days to weeks, not the air over the length of a
+  fire run, so this is the recommended setting.
 
-The evolving live classes reach only the BEHAVE model, per cell or as the
-domain average: through the live moisture damping and through the transfer
-of live herbaceous load to the dead class, which grows as the live herbaceous
-moisture falls. A fuel without a live load (Anderson model 1, for example) is
+The live classes reach only the BEHAVE model, per cell or as the domain
+average that the directional level-set path builds its state from: through
+the live moisture damping and through the transfer of live herbaceous load to
+the dead class, which grows as the live herbaceous moisture falls. With
+``"legacy"`` that average is clamped to :math:`[0.30, 2.50]`; with ``"fixed"``
+it is not, so a :cpp:`erf.fire.moisture_live` outside that range reaches both
+paths. A fuel without a live load (Anderson model 1, for example) is
 unaffected. Rothermel, Balbi and the Scott-Burgan curing transfer read
 :cpp:`erf.fire.moisture_live` directly.
 ``Exec/RegTests/FireLiveMoisture`` runs the two settings side by side, and

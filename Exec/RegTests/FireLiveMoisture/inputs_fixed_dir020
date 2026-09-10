@@ -1,0 +1,12 @@
+FILE = inputs_base
+
+# "fixed" with a mostly cured live herbaceous load (0.20) on the directional
+# level-set path, which reads the BEHAVE state rebuilt each step from the
+# domain-average moistures. The transfer window starts at 0.10, so the
+# moisture below 0.30 matters; compare inputs_fixed_dir025. 20 s.
+erf.fire.moisture_live_model = "fixed"
+erf.fire.moisture_live = 0.20
+erf.fire.behave.dynamic_transfer_lo = 0.10
+erf.fire.directional_ros = true
+stop_time = 20.0
+erf.fire_plot_int = 160

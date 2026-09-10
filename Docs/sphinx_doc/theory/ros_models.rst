@@ -351,7 +351,10 @@ dead herbaceous class that receives cured live herbaceous fuel, with separate
 dead and live moisture damping and a live moisture of extinction from the
 ratio of dead to live load (``ERF_BehaveModel.H``). With
 :cpp:`erf.fire.moisture_dynamic = true` the state is rebuilt in every fire
-cell from that cell's moistures; otherwise it is computed once from the deck's.
+cell from that cell's moistures, and the directional level-set path reads a
+state rebuilt each step from the domain-average moistures; otherwise it is
+computed once from the deck's. How the live moistures evolve is set by
+:cpp:`erf.fire.moisture_live_model` (see the fuel moisture section).
 
 **Live herbaceous transfer.** A share :math:`T` of the live herbaceous load
 :math:`w_{lh}` moves to the dead herbaceous class, linear in the live
