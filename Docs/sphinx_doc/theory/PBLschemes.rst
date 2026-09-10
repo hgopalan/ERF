@@ -966,6 +966,44 @@ Two ABL tests in ``Exec/CanonicalTests/ABL/MRF_Enhancements/`` verify the implem
 - Hong, S.-Y., and H.-L. Pan, 1996: Nonlocal boundary layer vertical diffusion in a medium-range forecast model. *Monthly Weather Review*, 124, 2322–2339.
   https://doi.org/10.1175/1520-0493(1996)124<2322:NBLVDI>2.0.CO;2
 
+7. Pass Order and Fire Coupling of the Velocity Scale
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``ComputeDiffusivityMRF`` diagnoses each column in five passes before it builds the K-profile:
+
+1. **Predictor:** PBLH from the bulk Richardson number with the base surface virtual temperature.
+2. **w\* and VPERT** from the predictor PBLH. The pass also stores the fire kinematic buoyancy flux
+   :math:`kbfs_{fire} = Q_{fire} / (\rho_{sfc} c_{p,d})` of every column where the fire heat flux
+   exceeds ``mrf_fire_q_threshold``.
+3. **Corrector:** PBLH with the surface virtual temperature raised by VPERT, using the Vogelezang and
+   Holtslag (1996) shear term when ``enable_vh96_shear_correction`` is set, then the optional
+   ``enable_pblh_smoothing``. This corrected PBLH is the one the K-profile uses, and the one written
+   to SurfaceLayer (the 2D ``pblh`` plotfile field, the Beljaars w\* term and the dust layer).
+4. **w\*, HGAMT and HGAMQ** from the corrected PBLH, followed by the fire boost below.
+5. **Zero-Ri extent** of the nonlocal mixing region (``pbl_mrf_use_zero_ri_extent``).
+
+With ``erf.pbl_mrf_fire_thermal_excess = true`` (default ``false``) the fire raises w\* in the
+K-profile amplitude of burning columns, and leaves the PBLH alone:
+
+.. math::
+
+   w_{*,fire} = \left( \frac{g}{\theta} \, (kbfs_{MOST} + kbfs_{fire}) \, h \right)^{1/3}, \qquad
+   w_{*,eff} = \max(w_{*,fire}, w_*) \quad \text{where } kbfs_{fire} > 0,
+
+with :math:`kbfs_{MOST} = -u_* \theta_*`, :math:`h` the corrected PBLH and :math:`w_*` the Pass 4
+scale. Columns without fire keep :math:`w_*`, and HGAMT/HGAMQ always use the unboosted :math:`w_*`.
+The fire heat flux is kept out of the corrector because a fire thermal excess would make the
+Richardson number negative through a neutral or shear-driven ABL and collapse the PBLH to its floor.
+
+**Change in results (2026-09).** Earlier ERF-Hazard builds ran Passes 2 to 5 a second time after the
+first set. The second corrector had no VH96 term, no smoothing and no guards, and it overwrote the
+first. The K-profile therefore used a PBLH that could differ from the one SurfaceLayer stored. The second
+Pass 4 also replaced w\* with :math:`\max(w_{*,fire}, u_*/\phi_m)` in every column, including runs
+without fire. It dropped the Deardorff convective blend of Pass 4 and ignored the QNSE option. Every
+MRF simulation changes with the single set of passes; without fire the passes are now those of upstream ERF.
+``Exec/RegTests/MRF_Single_Pass_Comparison`` tabulates PBLH, Kmv and theta from both versions for
+``ABL/mrf_unstable`` and the MRF fire deck.
+
 Older MRF Enhancements (Deprecated/Documented for Historical Completeness)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
