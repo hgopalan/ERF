@@ -26,7 +26,7 @@ def compute_rothermel_fm1(moisture_1hr=0.08, wind_ftmin=0.0):
     w_n = w0 * (1 - S_T)
     rho_b = w0 / delta
     beta = rho_b / rho_p
-    
+
     beta_op = 3.348 * sigma**(-0.8189)
     sigma_1p5 = sigma**1.5
     Gamma_max = sigma_1p5 / (495.0 + 0.0594 * sigma_1p5)
@@ -80,7 +80,7 @@ def compute_rothermel_fm4(moisture_1hr=0.08, wind_ftmin=0.0):
     w_n = w0 * (1 - S_T)
     rho_b = w0 / delta
     beta = rho_b / rho_p
-    
+
     beta_op = 3.348 * sigma**(-0.8189)
     sigma_1p5 = sigma**1.5
     Gamma_max = sigma_1p5 / (495.0 + 0.0594 * sigma_1p5)
@@ -152,19 +152,19 @@ REFERENCE_VALUES = {
 
 def test_reference_values():
     """Check that computed values match reference ranges."""
-    
+
     print("=" * 70)
     print("Fire ROS Regression Test (Reference Values)")
     print("=" * 70)
-    
+
     failures = []
     test_count = 0
-    
+
     # Test FM1, no wind
     print("\nTesting FM1 at 8% moisture, no wind...")
     r = compute_rothermel_fm1(moisture_1hr=0.08, wind_ftmin=0.0)
     ref = REFERENCE_VALUES[('FM1', 0.08, 0.0)]
-    
+
     for key, (min_val, max_val) in ref.items():
         test_count += 1
         val = r[key]
@@ -174,12 +174,12 @@ def test_reference_values():
             msg = f"{key}: {val:.4f} (expected {min_val:.4f}-{max_val:.4f})"
             print(f"  ✗ {msg}")
             failures.append(msg)
-    
+
     # Test FM1 with wind
     print("\nTesting FM1 at 8% moisture, 500 ft/min wind...")
     r = compute_rothermel_fm1(moisture_1hr=0.08, wind_ftmin=500.0)
     ref = REFERENCE_VALUES[('FM1', 0.08, 500.0)]
-    
+
     for key, (min_val, max_val) in ref.items():
         test_count += 1
         val = r[key]
@@ -189,12 +189,12 @@ def test_reference_values():
             msg = f"{key}: {val:.4f} (expected {min_val:.4f}-{max_val:.4f})"
             print(f"  ✗ {msg}")
             failures.append(msg)
-    
+
     # Test FM4, no wind
     print("\nTesting FM4 at 8% moisture, no wind...")
     r = compute_rothermel_fm4(moisture_1hr=0.08, wind_ftmin=0.0)
     ref = REFERENCE_VALUES[('FM4', 0.08, 0.0)]
-    
+
     for key, (min_val, max_val) in ref.items():
         test_count += 1
         val = r[key]
@@ -204,7 +204,7 @@ def test_reference_values():
             msg = f"{key}: {val:.4f} (expected {min_val:.4f}-{max_val:.4f})"
             print(f"  ✗ {msg}")
             failures.append(msg)
-    
+
     print("\n" + "=" * 70)
     if not failures:
         print(f"FINAL RESULT: All {test_count} reference value checks PASSED")

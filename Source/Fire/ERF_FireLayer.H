@@ -169,7 +169,7 @@ public:
      *                               On atmospheric grid (coarser than fire grid).
      */
     void advance(amrex::Real time,
-                 amrex::Real dt, 
+                 amrex::Real dt,
                  SurfaceLayer& surface_layer,
                  const amrex::MultiFab& xvel,
                  const amrex::MultiFab& yvel,
@@ -697,22 +697,22 @@ private:
     // comp 0: lofting height H_z [m], comp 1: brand count,
     // comp 2: max landing dist [m], comp 3: active spot flag
     std::unique_ptr<amrex::MultiFab>         fire_albini_data;
-     
+
     // Phase 12: Per-cell acceleration state for temporal model (3 components).
     // comp 0: ROS_current [m/s], comp 1: elapsed_time [s], comp 2: ROS_equilibrium [m/s].
     // Only allocated when accel.enable = true AND accel.use_temporal = true.
     // nullptr when acceleration is disabled or size-based model is used.
     std::unique_ptr<amrex::MultiFab>  fire_accel_state;
-     
+
     // Phase 10: Per-cell fuel model (non-null when fuel_map.file is non-empty)
     std::unique_ptr<amrex::MultiFab>         fire_fuel_model;  // integer code stored as Real
     amrex::Gpu::DeviceVector<int>            m_d_fuel_codes;   // device copy of integer codes
     bool                                     m_has_spatial_fuel = false;
-     
+
     // Phase 11: Multi-ignition schedule runtime state
     IgnitionSchedule  m_ignition_schedule;   // loaded from ignition_schedule_file
     bool              m_has_schedule = false;
-     
+
     // Phase 6: fire-atmosphere coupling MultiFabs
     // Coarsened fire fluxes on the atmospheric level-0 grid (nx × ny × 1).
     // These hold fire fluxes from the previous timestep for injection into

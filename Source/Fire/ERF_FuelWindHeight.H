@@ -61,7 +61,7 @@ inline std::vector<amrex::Real> build_fcwh_table(
             fcwh[i] = global_z_ref;
         }
     }
-    
+
     return fcwh;
 }
 
@@ -76,7 +76,7 @@ inline std::vector<amrex::Real> build_fcwh_table(
 inline std::vector<amrex::Real> build_fcz0_table()
 {
     std::vector<amrex::Real> fcz0(14, 0.0);
-    
+
     // WRF-SFIRE data statement: fcz0(k) for k=1..13
     fcz0[1]  = 0.0396;   // FM1
     fcz0[2]  = 0.0396;   // FM2
@@ -91,7 +91,7 @@ inline std::vector<amrex::Real> build_fcz0_table()
     fcz0[11] = 0.0396;   // FM11
     fcz0[12] = 0.0911;   // FM12
     fcz0[13] = 0.1188;   // FM13
-    
+
     return fcz0;
 }
 

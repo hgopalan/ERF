@@ -63,7 +63,7 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
     // int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
 
     MultiFab mf(fg.ba, fg.dm, ncomp, 0);
-    
+
     // Component 0: fire_phi
     MultiFab::Copy(mf, *fire_layer.get_levelset(), 0, 0, 1, 0);
     // Component 1: fire_ros

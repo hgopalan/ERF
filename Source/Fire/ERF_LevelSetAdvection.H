@@ -129,6 +129,60 @@ inline void hold_phi_in_mask(amrex::MultiFab& phi, const amrex::MultiFab* mask, 
 }
 
 /**
+ * @brief SSP-RK3 stage updates on the valid cells
+ *
+ * Kept out of advect_levelset_rk3_with_fill: CUDA rejects a device lambda
+ * inside a function template whose template argument is a caller's local
+ * lambda type, which is how every ROS model passes its fill_ros.
+ */
+/// Stage 1: phi* = phi* + dt L(phi*)
+inline void rk3_stage1_update(amrex::MultiFab& phi_star, const amrex::MultiFab& rhs, amrex::Real dt)
+{
+    using namespace amrex;
+    for (MFIter mfi(phi_star); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto ps = phi_star.array(mfi);
+        auto r  = rhs.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
+            ps(iv) = ps(iv) + dt * r(iv);
+        });
+    }
+}
+
+/// Stage 2: phi** = (3/4) phi^n + (1/4)(phi* + dt L(phi*)), with phi_hat holding phi^n on entry
+inline void rk3_stage2_update(amrex::MultiFab& phi_hat, const amrex::MultiFab& phi_star,
+                              const amrex::MultiFab& rhs, amrex::Real dt)
+{
+    using namespace amrex;
+    for (MFIter mfi(phi_hat); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto ph = phi_hat.array(mfi);
+        auto ps = phi_star.const_array(mfi);
+        auto r  = rhs.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
+            ph(iv) = 0.75_rt * ph(iv) + 0.25_rt * (ps(iv) + dt * r(iv));
+        });
+    }
+}
+
+/// Stage 3: phi^{n+1} = (1/3) phi^n + (2/3)(phi** + dt L(phi**))
+inline void rk3_stage3_update(amrex::MultiFab& phi, const amrex::MultiFab& phi_hat,
+                              const amrex::MultiFab& phi_n, const amrex::MultiFab& rhs, amrex::Real dt)
+{
+    using namespace amrex;
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto pnew = phi.array(mfi);
+        auto ph   = phi_hat.const_array(mfi);
+        auto r    = rhs.const_array(mfi);
+        auto pn   = phi_n.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
+            pnew(iv) = (1.0_rt/3.0_rt) * pn(iv) + (2.0_rt/3.0_rt) * (ph(iv) + dt * r(iv));
+        });
+    }
+}
+
+/**
  * @brief SSP-RK3 level-set step with a rate of spread rebuilt every stage
  *
  * Shared driver for every direction-dependent path: the caller supplies
@@ -179,14 +233,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     fill_ros(R_dir, phi_star);
     zero_ros_in_mask(R_dir, mask);
     compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap, grad_scheme);
-    for (MFIter mfi(phi_star); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.validbox();
-        auto ps = phi_star.array(mfi);
-        auto r  = rhs.const_array(mfi);
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
-            ps(iv) = ps(iv) + dt * r(iv);
-        });
-    }
+    rk3_stage1_update(phi_star, rhs, dt);
     fire_fill_boundary(phi_star, geom);
 
     // Stage 2: phi** = (3/4)phi^n + (1/4)(phi* + dt L(phi*))
@@ -194,31 +241,14 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     zero_ros_in_mask(R_dir, mask);
     compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap, grad_scheme);
     phi_hat.ParallelCopy(phi_n);
-    for (MFIter mfi(phi_hat); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.validbox();
-        auto ph = phi_hat.array(mfi);
-        auto ps = phi_star.const_array(mfi);
-        auto r  = rhs.const_array(mfi);
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
-            ph(iv) = 0.75_rt * ph(iv) + 0.25_rt * (ps(iv) + dt * r(iv));
-        });
-    }
+    rk3_stage2_update(phi_hat, phi_star, rhs, dt);
     fire_fill_boundary(phi_hat, geom);
 
     // Stage 3: phi^{n+1} = (1/3)phi^n + (2/3)(phi** + dt L(phi**))
     fill_ros(R_dir, phi_hat);
     zero_ros_in_mask(R_dir, mask);
     compute_levelset_rhs(rhs, phi_hat, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap, grad_scheme);
-    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.validbox();
-        auto pnew = phi.array(mfi);
-        auto ph   = phi_hat.const_array(mfi);
-        auto r    = rhs.const_array(mfi);
-        auto pn   = phi_n.const_array(mfi);
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
-            pnew(iv) = (1.0_rt/3.0_rt) * pn(iv) + (2.0_rt/3.0_rt) * (ph(iv) + dt * r(iv));
-        });
-    }
+    rk3_stage3_update(phi, phi_hat, phi_n, rhs, dt);
 }
 
 /**

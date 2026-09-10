@@ -719,7 +719,7 @@ DustLayer::advance(
   if (m_params.dust_debug) {
     amrex::Print() << "[DUST DEBUG] Phase 6: Before emission computation: u*_t_min="
                    << dust_ustar_t->min(0) << " u*_t_max=" << dust_ustar_t->max(0)
-                   << " [m/s], u*_in_min=" << dust_ustar_in->min(0) 
+                   << " [m/s], u*_in_min=" << dust_ustar_in->min(0)
                    << " u*_in_max=" << dust_ustar_in->max(0) << " [m/s]\n";
   }
 

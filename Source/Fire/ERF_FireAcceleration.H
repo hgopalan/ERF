@@ -201,19 +201,19 @@ inline void apply_fire_acceleration_temporal(amrex::MultiFab&       R_mf,
     amrex::ParallelDescriptor::ReduceLongSum(n_perimeter);
 
     // Estimate perimeter length in meters
-    const amrex::Real perim_length = static_cast<amrex::Real>(n_perimeter) * 
+    const amrex::Real perim_length = static_cast<amrex::Real>(n_perimeter) *
                                      std::sqrt(dx[0] * dx[0] + dx[1] * dx[1]);
 
     // Select acceleration constant based on perimeter size
     const amrex::Real A = (perim_length > params.perim_limit) ? params.A_line : params.A_point;
-    
+
     // Convert A from [1/min] to [1/s]
     const amrex::Real A_per_sec = A / 60.0;
 
     if (fire_debug) {
-        amrex::Print() << "[FIRE DEBUG] Fire acceleration (temporal): perim=" << perim_length 
-                       << " m  A=" << A << " 1/min  (using " 
-                       << (perim_length > params.perim_limit ? "line" : "point") 
+        amrex::Print() << "[FIRE DEBUG] Fire acceleration (temporal): perim=" << perim_length
+                       << " m  A=" << A << " 1/min  (using "
+                       << (perim_length > params.perim_limit ? "line" : "point")
                        << " constant)\n";
     }
 
@@ -247,7 +247,7 @@ inline void apply_fire_acceleration_temporal(amrex::MultiFab&       R_mf,
             // Detect equilibrium ROS change (wind change or fuel change)
             const amrex::Real EQUILIBRIUM_CHANGE_THRESHOLD = 1.0e-6;
             const amrex::Real dR_eq = amrex::Math::abs(R_E - R_prev_eq);
-            const bool eq_changed = (dR_eq > EQUILIBRIUM_CHANGE_THRESHOLD * 
+            const bool eq_changed = (dR_eq > EQUILIBRIUM_CHANGE_THRESHOLD *
                                      amrex::max(static_cast<amrex::Real>(R_E), static_cast<amrex::Real>(R_prev_eq), static_cast<amrex::Real>(1.0)));
 
             if (eq_changed) {
@@ -258,7 +258,7 @@ inline void apply_fire_acceleration_temporal(amrex::MultiFab&       R_mf,
                     // R_target(t) = R_prev + (R_E - R_prev) × (1 - exp(-dt/tau_wind))
                     const amrex::Real lag_factor = 1.0 - std::exp(-dt_loc / tau_wind_loc);
                     const amrex::Real R_target = R_prev_eq + (R_E - R_prev_eq) * lag_factor;
-                    
+
                     // Start new acceleration towards lagged target
                     R_prev_eq = R_target;
                     t_elapsed = 0.0;

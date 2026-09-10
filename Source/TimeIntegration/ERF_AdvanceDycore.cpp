@@ -647,7 +647,7 @@ void ERF::advance_dycore (int level,
                                   m_SurfaceLayer, z_0, l_use_terrain_fitted_coords,
                                   l_use_moisture, level,
                                   bc_ptr_h,
-                                  get_eb(level), 
+                                  get_eb(level),
                                   false, // vert_only
                                   qheating_rates[level].get(),
                                 Q_fire_for_pbl);

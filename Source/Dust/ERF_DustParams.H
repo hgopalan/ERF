@@ -318,10 +318,10 @@ struct DustParams {
         pp.queryarr("msha_receptor_names", msha_receptor_names);
         pp.queryarr("msha_receptor_x", msha_receptor_x);
         pp.queryarr("msha_receptor_y", msha_receptor_y);
-        
+
         pp.query("enable_particles", enable_particles);
         pp.query("particle_release_interval", particle_release_interval);
-        
+
         // Allow per-bin diameter override from input file.
         // erf.dust.bin_diameters = d0 d1 d2 ...
         {

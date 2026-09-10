@@ -73,7 +73,7 @@ inline void fill_macarthur_ros(
 
             // Compute MacArthur ROS
             amrex::Real ros = macarthur_ros(wind_mag);
-            
+
             ros_arr(i, j, k, 0) = ros;
         });
     }

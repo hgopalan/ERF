@@ -3,6 +3,7 @@
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_Geometry.H>
+#include <AMReX_Math.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Reduce.H>
 #include <ERF_FireGrid.H>
@@ -39,17 +40,17 @@ compute_fire_ellipse_axes(amrex::Real area_m2, amrex::Real perimeter_m)
         return {0.0, 0.0};
     }
 
-    constexpr amrex::Real PI = M_PI;
-    
+    constexpr amrex::Real PI = amrex::Math::pi<amrex::Real>();
+
     // From Area = π * a * b and Perimeter ≈ π * (a + b)
     // we get: a + b ≈ Perimeter / π and a * b = Area / π
     amrex::Real sum_ab  = perimeter_m / PI;
     amrex::Real prod_ab = area_m2 / PI;
-    
+
     if (sum_ab <= 0.0 || prod_ab <= 0.0) {
         return {0.0, 0.0};
     }
-    
+
     // Solve for semi-major and semi-minor axes using quadratic formula
     amrex::Real discriminant = sum_ab * sum_ab - 4.0 * prod_ab;
     if (discriminant < 0.0) {
@@ -57,11 +58,11 @@ compute_fire_ellipse_axes(amrex::Real area_m2, amrex::Real perimeter_m)
         amrex::Real radius = std::sqrt(area_m2 / PI);
         return {2.0 * radius, 2.0 * radius};
     }
-    
+
     amrex::Real sqrt_disc = std::sqrt(discriminant);
     amrex::Real semi_a = (sum_ab + sqrt_disc) / 2.0;  // semi-major axis
     amrex::Real semi_b = (sum_ab - sqrt_disc) / 2.0;  // semi-minor axis
-    
+
     // Return full axes (2 * semi-axes)
     return {2.0 * semi_a, 2.0 * semi_b};
 }
@@ -78,13 +79,13 @@ inline void
 write_fire_stats_header(const std::string& filename)
 {
     if (!amrex::ParallelDescriptor::IOProcessor()) return;
-    
+
     std::ofstream out(filename, std::ios::out | std::ios::trunc);
     if (!out.is_open()) {
         amrex::Print() << "[FIRE] WARNING: Cannot open fire_stats file: " << filename << "\n";
         return;
     }
-    
+
     out << "step,time_s,burned_area_ha,perimeter_km,"
            "active_front_cells,head_ros_ms,major_axis_m,minor_axis_m,heat_flux_max_Wm2,"
            "spot_fires_this_step,max_spot_dist_m\n";
@@ -123,7 +124,7 @@ append_fire_stats(const amrex::MultiFab& phi,
                   const amrex::MultiFab* albini_mf = nullptr)
 {
     using namespace amrex;
-    
+
     // GpuArray by value: geom.CellSize() hands back a pointer into host Geometry
     // members, which a device lambda cannot dereference.
     const auto dx = geom.CellSizeArray();
@@ -220,7 +221,7 @@ append_fire_stats(const amrex::MultiFab& phi,
     // Phase 8: Albini spotting statistics
     // spot_fires: count of cells with active spot flag (comp 3) > 0.5
     // max_spot_dist_m: domain maximum of landing distance field (comp 2)
-    long  n_spot_fires   = 0;
+    amrex::Long n_spot_fires = 0;
     Real  max_spot_dist  = 0.0_rt;
     if (albini_mf) {
         ReduceOps<ReduceOpSum, ReduceOpMax> reduce_op;
@@ -239,7 +240,7 @@ append_fire_stats(const amrex::MultiFab& phi,
         }
 
         ReduceTuple hv  = reduce_data.value(reduce_op);
-        n_spot_fires    = static_cast<long>(amrex::get<0>(hv));
+        n_spot_fires    = static_cast<amrex::Long>(amrex::get<0>(hv));
         max_spot_dist   = amrex::get<1>(hv);
 
         ParallelDescriptor::ReduceLongSum(n_spot_fires);
@@ -248,7 +249,7 @@ append_fire_stats(const amrex::MultiFab& phi,
 
     Real burned_ha    = static_cast<Real>(n_burned) * cell_area / Real(1.0e4);
     Real perim_km     = perim_m / Real(1000.0);
-     
+
     // Calculate fire ellipse major/minor axes from area and perimeter
     Real area_m2 = burned_ha * Real(1.0e4);  // convert ha to m²
     auto [major_axis_m, minor_axis_m] = compute_fire_ellipse_axes(area_m2, perim_m);
@@ -260,7 +261,7 @@ append_fire_stats(const amrex::MultiFab& phi,
         amrex::Print() << "[FIRE] WARNING: Cannot append to fire_stats file: " << filename << "\n";
         return;
     }
-     
+
     out << step       << ","
         << time_s     << ","
         << burned_ha  << ","

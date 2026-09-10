@@ -72,7 +72,7 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
                               const LevelSetGradient& grad = LevelSetGradient{})
 {
     using namespace amrex;
-    
+
     const auto* dx = geom.CellSize();
 
     // Band half-width. The default spreads the [-1, 1] range over three cells,
@@ -89,7 +89,7 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
     // square in practice; min() is the conservative choice if it ever is not.
     const Real h    = amrex::min(dx[0], dx[1]);
     const Real hinv = 1.0 / h;
-    
+
     // Make a working copy for pseudo-time iteration
     MultiFab phi_work(phi.boxArray(), phi.DistributionMap(), 1, 3);
     phi_work.ParallelCopy(phi);
@@ -109,7 +109,7 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
     for (int iter = 0; iter < n_iters; ++iter) {
         // Fill boundary ghosts
         fire_fill_boundary(phi_work, geom);
-        
+
         // Update RHS via Sussman reinitialization
         for (MFIter mfi(phi_work); mfi.isValid(); ++mfi) {
             const Box& bx = mfi.validbox();
@@ -131,7 +131,7 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
                 Real dxm, dxp, dym, dyp;
                 one_sided_derivatives(phi_arr, dx[0], i, j, k, 1, 0, grad, wall, dxm, dxp);
                 one_sided_derivatives(phi_arr, dx[1], i, j, k, 0, 1, grad, wall, dym, dyp);
-                
+
                 // Sign of original level-set
                 Real sgn_phi0 = (phi_in(i, j, k) > 0.0) ? 1.0 :
                                 (phi_in(i, j, k) < 0.0) ? -1.0 : 0.0;
@@ -155,7 +155,7 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
                     gy2 = amrex::max(c * c, d * d);
                 }
                 Real norm_grad = std::sqrt(gx2 + gy2 + 1.0e-14);
-                
+
                 // Band-normalized Sussman RHS: sgn(φ₀) * (1 - L|∇φ|) / L.
                 // The fixed point is |∇φ| = 1/L rather than 1, because φ here is
                 // normalized to [-1, 1] rather than measured in metres.
@@ -218,7 +218,7 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
         // for the next sweep. Ghost cells are refilled at the top of the loop.
         MultiFab::Copy(phi_work, phi_next, 0, 0, 1, 0);
     }
-    
+
     // Copy result back to phi
     phi.ParallelCopy(phi_work);
 }

@@ -25,7 +25,7 @@ where :math:`z_{ref}` is :cpp:`erf.fire.wind_ref_ht` or the per-fuel height. The
 Rothermel (1972) - Default
 ---------------------------
 
-The default single-class empirical model implemented in Phases 1-12. This model computes the rate of fire spread based on fuel characteristics, moisture content, wind speed, and slope. 
+The default single-class empirical model implemented in Phases 1-12. This model computes the rate of fire spread based on fuel characteristics, moisture content, wind speed, and slope.
 
 **Key parameter:** :cpp:`ros_model = "rothermel"`
 

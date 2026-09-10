@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unit tests for Phase 13 rate-of-spread models: MacArthur, Balbi, Cheney-Gould, 
+Unit tests for Phase 13 rate-of-spread models: MacArthur, Balbi, Cheney-Gould,
 and per-fuel wind height functions.
 
 Verifies pure-Python implementations of ROS model formulae against analytical
@@ -33,14 +33,14 @@ import sys
 def macarthur_ros(wind_speed_ms):
     """
     MacArthur (1966) Mark 5 Forest Fire Danger Meter ROS formula.
-    
+
     Formula from ERF_BalbiModel.H lines 159-165:
       R [m/s] = backing * exp(0.8424 * max(U, 0))
       where backing = 0.18 m/s
-    
+
     Args:
         wind_speed_ms: Wind speed in fire spread direction [m/s]
-    
+
     Returns:
         ROS [m/s]
     """
@@ -144,20 +144,20 @@ def compute_balbi_params(sigma_d1, delta_ft, heat_content, M_f, bp=None,
                          M_x=None, use_moisture_extinction=False):
     """
     Balbi (2009) fuel/thermal coefficients.
-    
+
     Formula from ERF_BalbiModel.H, compute_balbi_params():
       chi    = r_00 * sigma_m / (1 + r_00 * sigma_m)
       B_star = (C_pf * (T_i - T_a) + M_f * delta_H) / h
       v_b    = sqrt(g * delta_m * (T_f - T_a) / T_a)
       A      = chi * sigma_m * delta_m / (2 * tau_0 * B_star)
-    
+
     Args:
         sigma_d1:     1-hr dead fuel surface-area-to-volume ratio [1/ft]
         delta_ft:     Fuel bed depth [ft]
         heat_content: Heat of combustion [BTU/lb]
         M_f:          Fuel moisture content [fraction]
         bp:           Balbi thermal parameters (defaults to BALBI_DEFAULTS)
-    
+
     Returns:
         (A_coeff [m/s], v_b [m/s])
     """
@@ -195,10 +195,10 @@ def compute_balbi_params(sigma_d1, delta_ft, heat_content, M_f, bp=None,
 def build_fuel_balbi_table(M_f, bp=None):
     """
     Per-fuel-code Balbi lookup table.
-    
+
     Mirrors build_fuel_balbi_table() in ERF_BalbiModel.H: index 0 is the
     non-burnable code (zero spread), 1-13 are the Anderson fuel models.
-    
+
     Returns:
         list of (A_coeff, v_b) of length BALBI_TABLE_SIZE
     """
@@ -212,16 +212,16 @@ def build_fuel_balbi_table(M_f, bp=None):
 def compute_balbi_angle(U, theta, v_b):
     """
     Compute wind and slope angle for Balbi model.
-    
+
     Formula from ERF_BalbiModel.H, compute_balbi_angle():
       tan α = U/v_b + tan θ
       where v_b < BALBI_V_B_MIN is clamped to BALBI_V_B_MIN
-    
+
     Args:
         U: Wind speed in spread direction [m/s]
         theta: Terrain slope [radians]
         v_b: Buoyancy velocity [m/s]
-    
+
     Returns:
         Angle α [radians]
     """
@@ -233,17 +233,17 @@ def compute_balbi_angle(U, theta, v_b):
 def balbi_ros(U, theta, A_coeff, v_b):
     """
     Balbi (2009) ROS formula.
-    
+
     Formula from ERF_BalbiModel.H, fill_balbi_ros():
       R = A_coeff × (1 + sin α − cos α)
       where α = compute_balbi_angle(U, theta, v_b)
-    
+
     Args:
         U: Wind speed in spread direction [m/s]
         theta: Terrain slope [radians]
         A_coeff: Balbi coefficient A [m/s]
         v_b: Buoyancy velocity [m/s]
-    
+
     Returns:
         ROS [m/s], clamped to ≥ 0
     """
@@ -295,14 +295,14 @@ def test_balbi_angle_formula():
     theta = 0.0
     alpha = compute_balbi_angle(U, theta, v_b)
     expected_alpha = math.atan(1.5)
-    
+
     # Now compute ROS and verify
     A_coeff = 0.5
     ros = balbi_ros(U, theta, A_coeff, v_b)
     sin_alpha = math.sin(expected_alpha)
     cos_alpha = math.cos(expected_alpha)
     expected_ros = A_coeff * (1.0 + sin_alpha - cos_alpha)
-    
+
     passed = abs(alpha - expected_alpha) < 1e-6 and abs(ros - expected_ros) < 1e-6
     status = "✓" if passed else "✗"
     print(f"{status} Test 7: Balbi angle formula (U=3, v_b=2, θ=0)")
@@ -462,17 +462,17 @@ TWO_PI = 2.0 * math.pi
 def compute_balbi2020_state(sav, depth, load, rho_v, M_f, bp=None):
     """
     Balbi (2020) coefficients that do not depend on the rate of spread.
-    
+
     Mirrors the 2020 branch of compute_balbi_params() in ERF_BalbiModel.H,
     in SI units directly (the C++ side converts from Rothermel units first).
-    
+
     Args:
         sav:   surface-area-to-volume ratio s [1/m]
         depth: fuel bed depth h [m]
         load:  dead fuel load [kg/m2]
         rho_v: fuel particle density [kg/m3]
         M_f:   fuel moisture content [fraction]
-    
+
     Returns:
         dict of precomputed coefficients
     """
@@ -506,7 +506,7 @@ def compute_balbi2020_state(sav, depth, load, rho_v, M_f, bp=None):
 def balbi2020_rhs(bc, R, U, tan_slope):
     """
     Right-hand side of Balbi (2020) eq. 28, R_b + R_c + R_r.
-    
+
     Mirrors balbi2020_rhs() in ERF_BalbiModel.H, including the two-pass
     refinement of the flame tilt that eq. C7 needs.
     """
@@ -868,18 +868,18 @@ def test_directional_balbi_2009_stalls_on_the_flank():
 def cheney_gould_ros(u_wind, ros_backing, moisture, curing):
     """
     Cheney-Gould (1998) ROS formula.
-    
+
     Formula from ERF_CheneyGouldModel.H lines 104-114:
       wind_factor = 0.15 * U * (curing + 0.2)
       moisture_factor = 20 / (moisture + 1)
       ROS_forward = ros_backing * (1 + wind_factor) * moisture_factor
-    
+
     Args:
         u_wind: Wind speed in forward direction [m/s]
         ros_backing: Base (no-wind) ROS [m/s]
         moisture: Dead fine fuel moisture [%]
         curing: Curing degree [0-1]
-    
+
     Returns:
         ROS [m/s], clamped to ≥ 0
     """
@@ -900,7 +900,7 @@ def test_cheney_gould_zero_wind():
     ros_backing = 0.05
     moisture = 10.0
     curing = 1.0
-    ros = cheney_gould_ros(u_wind=0.0, ros_backing=ros_backing, 
+    ros = cheney_gould_ros(u_wind=0.0, ros_backing=ros_backing,
                            moisture=moisture, curing=curing)
     expected = ros_backing * 1.0 * (20.0 / (moisture + 1.0))
     passed = abs(ros - expected) < 1e-6
@@ -975,15 +975,15 @@ def test_cheney_gould_increases_with_curing():
 def build_fcwh_table(global_z_ref, use_per_fuel=False):
     """
     Build per-fuel wind height (fcwh) table indexed 0..13.
-    
+
     Implementation from ERF_FuelWindHeight.H lines 44-63:
     - When use_per_fuel=False: all entries 1-13 equal global_z_ref
     - When use_per_fuel=True: all entries 1-13 equal 6.096 (WRF-SFIRE default)
-    
+
     Args:
         global_z_ref: Global fallback wind reference height [m]
         use_per_fuel: When True, use WRF-SFIRE defaults; when False, use global_z_ref
-    
+
     Returns:
         List of size 14; index 0 unused, 1-13 valid
     """
@@ -1000,10 +1000,10 @@ def build_fcwh_table(global_z_ref, use_per_fuel=False):
 def build_fcz0_table():
     """
     Build per-fuel roughness length (fcz0) table indexed 0..13.
-    
+
     Implementation from ERF_FuelWindHeight.H lines 73-93.
     WRF-SFIRE data statement values [m].
-    
+
     Returns:
         List of size 14; index 0 unused, 1-13 valid
     """
@@ -1028,7 +1028,7 @@ def test_fcwh_uniform_mode():
     """Test 29: fcwh uniform mode returns global_z_ref for all fuels."""
     global_z_ref = 6.1
     fcwh = build_fcwh_table(global_z_ref, use_per_fuel=False)
-    passed = (len(fcwh) == 14 and 
+    passed = (len(fcwh) == 14 and
               all(fcwh[i] == global_z_ref for i in range(1, 14)))
     status = "✓" if passed else "✗"
     print(f"{status} Test 29: fcwh uniform mode (all fuels = {global_z_ref})")
@@ -1043,7 +1043,7 @@ def test_fcwh_per_fuel_mode():
     global_z_ref = 6.1
     fcwh = build_fcwh_table(global_z_ref, use_per_fuel=True)
     expected = 6.096
-    passed = (len(fcwh) == 14 and 
+    passed = (len(fcwh) == 14 and
               all(abs(fcwh[i] - expected) < 1e-6 for i in range(1, 14)))
     status = "✓" if passed else "✗"
     print(f"{status} Test 30: fcwh per-fuel mode (all fuels = 6.096 m)")
@@ -1071,8 +1071,8 @@ def test_fcz0_fm1_fm2_equal():
     """Test 32: fcz0 FM1 and FM2 both equal 0.0396."""
     fcz0 = build_fcz0_table()
     expected = 0.0396
-    passed = (abs(fcz0[1] - expected) < 1e-6 and 
-              abs(fcz0[2] - expected) < 1e-6 and 
+    passed = (abs(fcz0[1] - expected) < 1e-6 and
+              abs(fcz0[2] - expected) < 1e-6 and
               fcz0[1] == fcz0[2])
     status = "✓" if passed else "✗"
     print(f"{status} Test 32: fcz0 FM1 and FM2 both equal 0.0396 m")
@@ -1102,7 +1102,7 @@ def main():
     print("Phase 13 ROS Model Unit Tests")
     print("=" * 70)
     print()
-    
+
     # MacArthur tests (4)
     print("MacArthur (1966) Australian Formula Tests")
     print("-" * 70)
@@ -1112,7 +1112,7 @@ def main():
     results.append(test_macarthur_monotone_with_wind())
     results.append(test_macarthur_negative_wind_clamp())
     print()
-    
+
     # Balbi tests (10)
     print("Balbi (2009) Physical Model Tests")
     print("-" * 70)
@@ -1152,7 +1152,7 @@ def main():
     results.append(test_directional_rothermel_flank_is_the_no_wind_rate())
     results.append(test_directional_balbi_2009_stalls_on_the_flank())
     print()
-    
+
     # Cheney-Gould tests (4)
     print("Cheney-Gould (1998) Grassland Model Tests")
     print("-" * 70)
@@ -1161,7 +1161,7 @@ def main():
     results.append(test_cheney_gould_decreases_with_moisture())
     results.append(test_cheney_gould_increases_with_curing())
     print()
-    
+
     # Per-fuel wind height tests (5)
     print("Per-Fuel Wind Height Tests")
     print("-" * 70)
@@ -1171,7 +1171,7 @@ def main():
     results.append(test_fcz0_fm1_fm2_equal())
     results.append(test_fcz0_table_size())
     print()
-    
+
     # Summary
     total = len(results)
     passed = sum(results)
@@ -1179,7 +1179,7 @@ def main():
     print("=" * 70)
     print(f"Results: {passed}/{total} passed, {failed}/{total} failed")
     print("=" * 70)
-    
+
     return 0 if failed == 0 else 1
 
 

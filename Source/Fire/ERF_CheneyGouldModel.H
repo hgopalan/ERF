@@ -57,7 +57,7 @@ inline CheneyGouldComputed compute_cheney_gould_params(
     const FireParams::CheneyGouldParams& cgp) noexcept
 {
     CheneyGouldComputed cgc;
-    
+
     // Clamp inputs to valid ranges
     amrex::Real moisture = amrex::max(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(cgp.moisture), static_cast<amrex::Real>(40.0))));  // [%]
     amrex::Real curing   = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(cgp.curing), static_cast<amrex::Real>(1.0))));      // [0-1]
@@ -105,11 +105,11 @@ amrex::Real cheney_gould_ros(
     // ROS_forward ≈ ROS_backing × (1 + wind_factor)
     // where wind_factor grows with wind speed and curing
     amrex::Real wind_factor = 0.15 * u_wind * (curing + 0.2);
-    
+
     // Moisture attenuation factor (inverse relationship)
     constexpr amrex::Real moisture_scale = 20.0;  // Reference moisture [%]
     amrex::Real moisture_factor = moisture_scale / (moisture + 1.0);
-    
+
     amrex::Real ros_forward = ros_backing * (1.0 + wind_factor) * moisture_factor;
     return amrex::max(static_cast<amrex::Real>(ros_forward), static_cast<amrex::Real>(0.0));
 }
@@ -133,11 +133,11 @@ amrex::Real csiro_grassfire_acceleration(
 {
     // Wind effect on forward ROS (log scale)
     amrex::Real wind_accel = 1.0 + 0.2 * std::log1p(u_wind);
-    
+
     // Slope effect (upslope enhancement)
     amrex::Real slope_mag = std::abs(slope);
     amrex::Real slope_accel = 1.0 + 5.0 * slope_mag * (curing + 0.1);
-    
+
     // Combined effect
     return wind_accel * slope_accel;
 }
@@ -164,13 +164,13 @@ amrex::Real cheney_gould_ros_with_acceleration(
 {
     // Base wind effect
     amrex::Real ros_wind = cheney_gould_ros(u_wind, ros_backing, moisture, curing);
-    
+
     // Additional slope acceleration (upslope only)
     amrex::Real slope_accel = 1.0;
     if (slope > 0.0) {  // upslope
         slope_accel = csiro_grassfire_acceleration(u_wind, slope, curing);
     }
-    
+
     return ros_wind * slope_accel;
 }
 
@@ -194,7 +194,7 @@ inline void fill_cheney_gould_ros(
     // - Per-cell fuel moisture (currently uses default from cgc)
     // - Per-cell slope (already available)
     // For now, uses domain-averaged moisture from parameters
-    
+
     for (amrex::MFIter mfi(fire_ros, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
         auto ros_arr = fire_ros.array(mfi);
@@ -218,7 +218,7 @@ inline void fill_cheney_gould_ros(
                 cgc.ros_backing,
                 10.0,   // placeholder: default moisture [%]
                 1.0);   // placeholder: default curing [0-1]
-            
+
             ros = amrex::max(static_cast<amrex::Real>(ros), static_cast<amrex::Real>(0.0));
             ros_arr(i, j, k, 0) = ros;
         });
@@ -257,7 +257,7 @@ inline void fill_cheney_gould_ros_with_slope(
             amrex::Real u = wind_arr(i, j, k, 0);
             amrex::Real v = wind_arr(i, j, k, 1);
             amrex::Real wind_mag = std::sqrt(u*u + v*v);
-            
+
             amrex::Real dzdx = slopes_arr(i, j, k, 0);
             amrex::Real dzdy = slopes_arr(i, j, k, 1);
             amrex::Real slope_mag = std::sqrt(dzdx*dzdx + dzdy*dzdy);
@@ -276,7 +276,7 @@ inline void fill_cheney_gould_ros_with_slope(
                 cgc.ros_backing,
                 10.0,   // placeholder: default moisture [%]
                 1.0);   // placeholder: default curing [0-1]
-            
+
             ros = amrex::max(static_cast<amrex::Real>(ros), static_cast<amrex::Real>(0.0));
             ros_arr(i, j, k, 0) = ros;
         });

@@ -54,7 +54,7 @@ void fill_dust_wind_from_interpolation(
             // is above all levels, the topmost wind values are used.
             int k_lo = nz - 2;
             for (int k = 0; k < nz - 1; ++k) {
-                if (z_phys_cc(i_a, j_a, k) <= z_target && 
+                if (z_phys_cc(i_a, j_a, k) <= z_target &&
                     z_target < z_phys_cc(i_a, j_a, k + 1)) {
                     k_lo = k;
                     break;
@@ -128,24 +128,24 @@ void compute_dust_ustar_from_wind(
     // u* = κ * U / ln(z_ref/z0)
     // where κ = 0.4 (von Karman constant)
     // Reference: Businger et al. (1971), and MOST in ERF_MOSTStress.H
-    
+
     constexpr Real kappa = 0.4;  // von Karman constant
     Real ln_ratio = std::log(z_ref / z0);
     if (ln_ratio <= 0.0) ln_ratio = 1.0;  // Safety guard
-    
+
     for (MFIter mfi(dust_ustar_in, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
         auto ust = dust_ustar_in.array(mfi);
         auto wind = dust_wind_ref.const_array(mfi);
-        
+
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
             // Extract (u, v) components
             Real uu = wind(i, j, k, 0);
             Real vv = wind(i, j, k, 1);
-            
+
             // Compute wind speed magnitude
             Real wind_mag = std::sqrt(uu*uu + vv*vv);
-            
+
             // Compute u* = κ * U / ln(z_ref/z0)
             ust(i, j, k) = kappa * wind_mag / ln_ratio;
         });

@@ -82,7 +82,7 @@ void verify_dust_prerequisites(const ERF&          erf,
 
     if (dust_params.dust_debug) {
         amrex::Print() << "[DUST DEBUG] Prerequisite check 6 passed: "
-                       << "DistributionMapping size=" << dm_atm.size() 
+                       << "DistributionMapping size=" << dm_atm.size()
                        << " matches BoxArray size=" << ba_atm.size() << "\n";
     }
 

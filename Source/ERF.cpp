@@ -312,12 +312,12 @@ ERF::Evolve ()
                 m_fire_lofting_ready = false;
             }
 #endif
-            
+
             // Coarsen dust emission flux to atmospheric grid for injection at next step
             // One-step explicit lag: flux from this step will be injected in next step
             if (m_dust_flux_atm[0]) {
                 const DustParams& dust_params = m_DustLayer->get_params();
-                
+
                 // Sum emission flux over all size bins into a temporary 1-component MultiFab
                 // on the dust grid, then coarsen to the atmospheric grid.
                 {
@@ -329,7 +329,7 @@ ERF::Evolve ()
                         amrex::MultiFab::Add(dust_flux_sum, *m_DustLayer->get_emission_flux(),
                                             b, 0, 1, amrex::IntVect(1, 1, 0));
                     }
-                    
+
                     // Coarsen summed flux from dust grid to atmospheric grid
                     coarsen_dust_flux_to_atm(*m_dust_flux_atm[0], dust_flux_sum,
                                              m_DustLayer->get_dust_geom(), geom[0],
@@ -1592,7 +1592,7 @@ ERF::InitData_post ()
                 pp.query("fire_dust_lofting_Q_ref",       m_fire_dust_coupling.lofting_Q_ref);
                 m_fire_dust_coupling.fire_phi_mf = m_fire_layer->get_levelset();
                 m_fire_dust_coupling.geom_fire   = m_fire_layer->get_fire_geom();
-                
+
                 // Validate grid_ratio matching for fire-dust coupling
                 if (m_fire_dust_coupling.enabled) {
                     int fire_gr = m_fire_params.grid_ratio;
@@ -1605,7 +1605,7 @@ ERF::InitData_post ()
                 }
             }
 #endif
-            
+
             // Allocate coarsened dust flux for level 0 (dust coupling only at level 0)
             {
                 amrex::BoxArray ba_atm = boxArray(0);
@@ -2003,7 +2003,7 @@ if (m_DustLayer && restart_chkfile.empty()) {
                          *z_phys_nd[0],
                          m_fire_params);
     }
-#endif*/ 
+#endif*/
 }
 
 //

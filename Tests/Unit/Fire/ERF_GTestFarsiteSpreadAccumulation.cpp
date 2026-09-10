@@ -41,13 +41,13 @@ protected:
         // Create MultiFabs
         // phi: level-set field with 1 ghost cell
         phi.define(ba, dm, 1, 1);
-        
+
         // farsite_work: 2-component spread vector, no ghosts
         farsite_work.define(ba, dm, 2, 0);
-        
+
         // vel_eff: 2-component wind field, no ghosts
         vel_eff.define(ba, dm, 2, 0);
-        
+
         // R_mf: ROS field, no ghosts
         R_mf.define(ba, dm, 1, 0);
 

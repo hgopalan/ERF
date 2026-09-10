@@ -42,9 +42,9 @@
 // We also assume (the final "+1" that the base state components have the same bcs)
 #define NBCVAR_max ((NDRY + 1 + NMOIST_max + 1) + 2*5) // allow up to 5 non-moist species
 
-// This is the number of components if we assume there is only one passive scalar
-// We can use this when we assume all passive scalars have the same diffusion coefficients
-#define NPRIMVAR_max (NDRY + 1 + NMOIST_max)
+// Number of primitive components: one per conserved component after Rho_comp,
+// counting every passive scalar (base, dust and smoke) and the moist quantities
+#define NPRIMVAR_max (NDRY + NSCALARS + NMOIST_max)
 
 // Cell-centered state variables
 #define Rho_comp       0

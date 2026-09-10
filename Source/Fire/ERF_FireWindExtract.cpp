@@ -50,7 +50,7 @@ void apply_farsite_terrain_wind(
 {
     // Apply FARSITE terrain wind corrections per Finney (1998)
     // Ridge speed-up, lee sheltering, valley channeling, directional deflection
-    
+
     for (MFIter mfi(fire_wind_eff, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
         Array4<Real> wind = fire_wind_eff.array(mfi);
@@ -118,7 +118,7 @@ void apply_farsite_terrain_wind(
             if (curv_val < -0.01 && slope_mag > 0.05) {
                 // Compute z-component of slope × wind cross product
                 Real sin_cross = sx * uy - sy * ux;
-                
+
                 // Compute deflection angle
                 Real denom = amrex::max(static_cast<amrex::Real>(slope_mag * wind_mag_new * factor), static_cast<amrex::Real>(1.0e-10));
                 Real sin_cross_norm = amrex::max(-1.0_rt, amrex::min(1.0_rt, sin_cross / denom));
