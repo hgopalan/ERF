@@ -1,0 +1,11 @@
+FILE = inputs_base
+
+# A cross ignition grown at a prescribed 1 m/s; a non-convex polygon: its outer corners round off while the four inner corners stay sharp.
+max_step = 120
+stop_time = 60.0
+erf.fire_plot_int = 20
+
+erf.fire.prescribed.ros = 1.0
+erf.fire.ignition_r = 0.0             # no disc: the polygon is the only ignition
+erf.fire.ignition.polygon_file = "cross.csv"
+erf.fire.ignition.polygon_type = "polygon"

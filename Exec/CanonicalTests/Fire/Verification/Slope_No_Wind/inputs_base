@@ -1,0 +1,66 @@
+# Slope_No_Wind: settings shared by the decks in this folder. A grass fire on an
+# inclined plane in still air.
+#
+# The atmosphere is flat and at rest (slip walls on the sides and top, no gravity,
+# no diffusion); the fire reads its own terrain, a plane rising towards +x, so the
+# only thing shaping the front is Rothermel's slope factor. Short grass (Anderson
+# fuel model 1) at 5.5 % moisture, the directional level set, 2 m fire cells.
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 400.0 200.0 100.0
+amr.n_cell = 20 10 5
+geometry.is_periodic = 0 0 0
+amr.max_level = 0
+amr.max_grid_size = 10      # box lengths must divide by the fire grid ratio
+amr.max_grid_size_z = 5     # the fire module forbids z-decomposition
+
+xlo.type = "SlipWall"
+xhi.type = "SlipWall"
+ylo.type = "SlipWall"
+yhi.type = "SlipWall"
+zlo.type = "surface_layer"  # the fire module needs the surface layer at the ground
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+# The surface layer needs a diffusion operator; zero coefficients keep it idle.
+erf.molec_diff_type = "ConstantAlpha"
+erf.dynamic_viscosity = 0.0
+erf.alpha_T = 0.0
+erf.alpha_C = 0.0
+erf.les_type = "None"
+
+erf.init_type = "uniform"
+erf.use_gravity = false
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+erf.fixed_dt = 0.5
+erf.substepping_cfl = 0.5
+max_step = 2000
+stop_time = 1000.0
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_int_1 = -1
+erf.fire_plot_file = "plt_fire_"
+erf.fire_plot_int = 2000
+
+erf.fire.enable = true
+erf.fire.grid_ratio = 10              # 2 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.ros_model = "rothermel"
+erf.fire.coupling_type = "passive"    # one-way: the atmosphere never sees the fire
+erf.fire.fuel_model_id = 1            # short grass
+erf.fire.moisture_1hr = 0.055
+erf.fire.moisture_10hr = 0.055
+erf.fire.moisture_100hr = 0.055
+erf.fire.moisture_dynamic = false
+erf.fire.use_waf = false
+erf.fire.use_wind_limit = false
+erf.fire.use_terrain_wind = false
+erf.fire.write_fire_stats_csv = false
+erf.fire.ignition_x = 80.0
+erf.fire.ignition_y = 100.0
+erf.fire.ignition_r = 10.0

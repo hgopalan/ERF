@@ -1,0 +1,15 @@
+FILE = inputs_base
+
+# A 4 m disc at (200, 200) with R = 1 + 0.004 (x - 200) m/s: 0.2 m/s at the west
+# edge, 1.8 m/s at the east edge. The fronts are circles whose centres drift up the
+# gradient, and the arrival time has the closed form of a constant velocity gradient.
+max_step = 300
+stop_time = 150.0
+erf.fire_plot_int = 100
+
+erf.fire.prescribed.ros = 1.0
+erf.fire.prescribed.gradient = 0.004 0.0
+erf.fire.prescribed.origin = 200.0 200.0
+erf.fire.ignition_x = 200.0
+erf.fire.ignition_y = 200.0
+erf.fire.ignition_r = 4.0

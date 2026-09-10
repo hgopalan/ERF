@@ -1,0 +1,14 @@
+FILE = inputs_base
+
+# Two 180 m fire lines at a prescribed 1 m/s meeting at 60 degrees (apex at (40, 100)).
+# Every point burns at (distance to the V - 4 m) / R, so the point where the two
+# inner fronts meet runs down the bisector at R / sin(30 deg) = 2.000 m/s.
+max_step = 220
+stop_time = 110.0
+erf.fire_plot_int = 220
+
+erf.fire.prescribed.ros = 1.0
+erf.fire.ignition_r = 0.0             # no disc: the V is the only ignition
+erf.fire.ignition.polygon_file = "v60.csv"
+erf.fire.ignition.polygon_type = "polyline"
+erf.fire.ignition.polyline_width = 4.0   # half-width: an 8 m wide line

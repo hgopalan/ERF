@@ -1,0 +1,11 @@
+FILE = inputs_base
+
+# Two 6 m discs 80 m apart grown at a prescribed 1 m/s: they touch at t = 34 s,
+# after which the burned area is the union of two discs of radius 6 + t.
+max_step = 160
+stop_time = 80.0
+erf.fire_plot_int = 20
+
+erf.fire.prescribed.ros = 1.0
+erf.fire.ignition_r = 0.0             # no disc of its own: the schedule holds both
+erf.fire.ignition.schedule_file = "two_discs.csv"
