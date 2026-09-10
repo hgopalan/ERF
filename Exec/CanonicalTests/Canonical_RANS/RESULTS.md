@@ -126,6 +126,9 @@ superadiabatic lapse of -1 to -3 K/km through the mixed layer (K_h 40 to
 67 kg/m/s, Lturb 24 to 45 m under the PBL-height cap), the expected
 behaviour of a local-K closure without countergradient transport.
 
+The deck now runs at dt = 5 s with `erf.vert_implicit = true` (phase 9);
+the 4 h numbers of that run are in the phase 9 section below.
+
 ## Neutral_Hill_2D (phase 5)
 
 6 h run at dt = 1.5 s, 2 ranks, `check_hill.py --physics plt14400`.
@@ -181,3 +184,62 @@ here with dz != dx yields a deterministic pre-projection divergence of
 uninitialised read in the w boundary fill trips the trap in the first
 advance.
 
+
+## Phase 9: implicit vertical diffusion of scalars under anelastic
+
+All runs on 2 ranks with the final phase 9 code, which also changed the
+explicit answers: the TKE buoyancy term is now the closure's cell-centred
+`-K_h dtheta/dz` instead of the flux at the lower face (the explicit 12 h
+neutral profile moved by up to 0.08 m/s and 0.03 K at the boundary-layer
+top, the stable one by 0.08 m/s and 0.02 K, the convective one by 0.13
+m/s and 0.18 K; every physics check still passes and the hill numbers
+are unchanged in the digits quoted above).
+
+Implicit scalars (`erf.vert_implicit = true`) against the explicit run,
+max |difference| of the planar averages over the column:
+
+| case | step | u [m/s] | theta [K] | KE [m2/s2] | Kmv [kg/m/s] |
+| --- | --- | --- | --- | --- | --- |
+| Neutral 12 h, dt 5 s implicit vs dt 5 s explicit | 5 | 2.9e-4 | 1.4e-4 | 6.3e-6 | 1.4e-3 |
+| Neutral 12 h, dt 10 s implicit vs dt 5 s explicit | 10 | 1.3e-3 | 7.5e-4 | 9.9e-6 | 1.6e-3 |
+| Stable 9 h, dt 2 s implicit vs explicit | 2 | 3.8e-5 | 3.9e-5 | 2.0e-6 | 1.5e-5 |
+| Convective 4 h, dt 5 s implicit vs dt 2 s explicit | 5 / 2 | 3.2e-3 | 5.1e-3 | 2.7e-4 | 7.1e-3 |
+
+Scales: u 12, 10 and 10 m/s; KE 0.5, 0.2 and 1.2 m2/s2; Kmv 7.5, 0.75
+and 42 kg/m/s. Before the two fixes the same comparisons gave 0.34 m/s
+(neutral), 0.47 m/s (stable) and 1.0 m/s with 1.3 K and a factor 3 in
+KE (convective).
+
+Key numbers, explicit / implicit:
+
+| check | neutral dt 5 | neutral dt 10 (implicit) | stable dt 2 | convective |
+| --- | --- | --- | --- | --- |
+| u* [m/s] | 0.39312 / 0.39312 | 0.39313 | 0.24369 / 0.24370 | 0.4849 / 0.4848 |
+| KE(k=0)/u*^2 | 3.2323 / 3.2323 | 3.2322 | | 3.816 / 3.817 |
+| jet max U/Ug | | | 1.2286 / 1.2286 | |
+| BL depth from KE [m] | | | 134 / 134 | |
+| column heat gain over rho_sfc F t | | | | 0.9998 / 0.9995 |
+| inversion height [m] | | | | 1020 / 1020 |
+| theta spread 0.2 to 0.7 zi [K] | | | | 1.117 / 1.117 |
+
+Stage decomposition of the convective one-step heat budget (ratio of the
+column heat gain to rho_sfc F dt, dt = 5 s): before the fix
+`erf.vert_implicit_fac` = `1 0 0` 0.975, `0 1 0` 1.449, `0 0.5 0` 1.212,
+`1 1 0` 1.450; after the fix 0.975 for all four, 0.983 after ten steps
+(explicit at dt = 2 s: 0.994).
+
+Restart consistency test that exposed the buoyancy-term defect (neutral
+deck restarted at 6 h, one step of 0.5 s, implicit minus explicit, max
+over the column): KE 1.2e-11 with `erf.sigma_k = 1e9` (no KE diffusion)
+against 1e-6 with it, growing linearly in time and the same at dt = 0.5,
+1 and 2 s, i.e. an operator difference, not a time-stepping one; after
+the fix 8e-9 in one step and 5e-7 after 10 s at any of the three steps.
+
+Neutral deck at dt = 20 s with implicit scalars: NaN at 10.8 h (now
+caught by `check_for_negative_theta`), from the explicit momentum
+diffusion, whose limit is 10.4 s once K_m reaches 7.5 m2/s. Phase 10.
+
+Gold tests that run Deardorff (`ABL_MOST`, `Deardorff_stationary`) and
+the implicit-diffusion MYNN tests (`ABL_MOST_IMP_DIFF*`) pass; `ctest -L
+rans` is 10 for 10 (new entry `RANS_Neutral_ABL_Flat_Implicit`, the
+neutral deck at dt = 10 s with the solve on); 7 gtests pass.

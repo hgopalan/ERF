@@ -212,6 +212,36 @@ The distance is available as the plot variable ``walldist``. It is
 computed once at initialisation, also on a restart; it is not recomputed
 after a regrid.
 
+Implicit vertical diffusion
+---------------------------
+
+The column tridiagonal solve of ERF (``erf.vert_implicit``, on by default
+with the compressible integrator) removes the explicit limit
+:math:`\Delta t < \Delta z^2 / (2K)` for the quantities it covers.
+Under the anelastic integrator it is opt-in: give
+:cpp:`erf.vert_implicit = true` (or an explicit
+:cpp:`erf.vert_implicit_fac`) and :math:`\theta`, :math:`k` and moisture
+are solved implicitly while momentum stays explicit. The anelastic update
+is trapezoidal: the second stage averages the first-stage tendency,
+recovered from the state difference, with the new one, so the first
+stage's implicit increment is already half-counted and the implicit
+operator on the second stage acts with half the step. The solve takes
+each box's vertical extent as the whole column, so no level-0 box may be
+cut in :math:`z` (the z entry of ``amr.max_grid_size`` must reach
+``amr.n_cell``); ERF checks this at start-up.
+
+The buoyancy term of the :math:`k` equation uses the vertical heat flux
+the closure computes at the start of the step,
+:math:`-K_h \, \partial\theta/\partial z` from the cell-centred gradient
+(AL01 Eq. 15; the Kynema implementation forms it the same way), with the
+surface-layer flux in the first cell. It does not depend on how
+:math:`\theta` is then advanced. Before this the explicit diffusion
+operator overwrote that flux with the face flux scaled by the explicit
+fraction, which put the term half a cell low and, whenever the implicit
+solve was on, silently dropped the buoyancy production and destruction
+of :math:`k` in every cell above the first (the convective case then
+carried a third of its turbulence kinetic energy).
+
 Limitations
 -----------
 
@@ -220,10 +250,11 @@ Limitations
 * All levels must use the closure; a hybrid RANS-LES set-up is refused.
 * Embedded and thin-body boundaries are not supported by the Poisson wall
   distance.
-* Under the anelastic integrator all vertical diffusion is explicit, so
-  the time step is bounded by :math:`\Delta z^2 / (2 K)`; with the eddy
-  viscosities a convective boundary layer produces (tens of m\ :sup:`2`/s)
-  this is the binding constraint, not the closure.
+* Under the anelastic integrator the vertical diffusion of momentum is
+  explicit, so the time step is bounded by :math:`\Delta z^2 / (2 K_m)`;
+  the scalars can use the implicit column solve (see below). With the
+  eddy viscosities a convective boundary layer produces (tens of
+  m\ :sup:`2`/s) this is the binding constraint, not the closure.
 * The closure is local: a convective layer keeps a superadiabatic lapse
   of order :math:`-F/K_h` through its depth where a countergradient
   scheme or LES would mix it out.
