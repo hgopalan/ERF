@@ -588,23 +588,13 @@ pblh_mf.setVal(0.0);
             }
         });
 
-
-        // Apply PBLH spatial smoothing if enabled (Seibert et al. 2000 methodology)
-        // Seibert et al. (2000): Review and intercomparison of operational methods
-        // for the determination of the mixing height. Atmospheric Environment, 34, 1001-1027.
-        // Spatial smoothing removes unphysical grid-to-grid noise from discrete Rib-crossing detection
-        if (turbChoice.enable_pblh_smoothing) {
-            ApplyPBLHSmoothing(pbl_height_corrector, xybx,
-                             turbChoice.pblh_smoothing_weight,
-                             turbChoice.pblh_smoothing_passes,
-                             geom.Domain());
-        }
-
         // Copy corrected PBL height into pblh_mf for SurfaceLayer storage.
         // pbl_height_corrector only covers this tile (grown by one), so loop over
         // the tile, not the valid box: with tiling in x/y the valid box reaches
         // past it. Under TileNoZ the tile spans the full column, and pblh_mf has
-        // no ghost cells, so the tiles together still fill every cell.
+        // no ghost cells, so the tiles together still fill every cell. The
+        // optional smoothing reaches across tiles and boxes, so it is applied to
+        // pblh_mf after the tile loop.
         {
             auto pblh_out = pblh_mf.array(mfi);
             const Box& tbx = mfi.tilebox();
@@ -1491,6 +1481,37 @@ pblh_mf.setVal(0.0);
     // see it; pblh_mf is filled inside the kernel above, so this stays on
     // the device. update_pblh no longer aborts for the MRF type.
     if (SurfLayer->get_pblh(level)) {
+        // Apply PBLH spatial smoothing if enabled (Seibert et al. 2000 methodology)
+        // Seibert et al. (2000): Review and intercomparison of operational methods
+        // for the determination of the mixing height. Atmospheric Environment, 34, 1001-1027.
+        // Spatial smoothing removes unphysical grid-to-grid noise from discrete Rib-crossing detection.
+        // The stencil reaches into neighbouring tiles and boxes, so it runs here, on a
+        // planar copy whose ghost cells are filled before every pass; smoothing each
+        // tile's own work array read outside it and tied the result to the decomposition.
+        // As before, only the height passed to SurfaceLayer is smoothed: the K-profile
+        // above uses the height from the second corrector pass.
+        if (turbChoice.enable_pblh_smoothing) {
+            MultiFab pblh_2d = MakePlanarPBLHMultiFab(pblh_mf.boxArray(), pblh_mf.DistributionMap());
+            for (MFIter mfi(pblh_2d, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+                const Box& bx = mfi.tilebox();
+                const auto pblh_col = pblh_mf.const_array(mfi);
+                const auto pblh_pln = pblh_2d.array(mfi);
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept {
+                    pblh_pln(i, j, 0) = pblh_col(i, j, klo);
+                });
+            }
+            ApplyPBLHSmoothing(pblh_2d, geom,
+                               turbChoice.pblh_smoothing_weight,
+                               turbChoice.pblh_smoothing_passes);
+            for (MFIter mfi(pblh_mf, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+                const Box& bx = mfi.tilebox();
+                const auto pblh_pln = pblh_2d.const_array(mfi);
+                const auto pblh_col = pblh_mf.array(mfi);
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+                    pblh_col(i, j, k) = pblh_pln(i, j, 0);
+                });
+            }
+        }
         SurfLayer->set_pblh(level, pblh_mf);
     }
 }

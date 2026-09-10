@@ -32,25 +32,48 @@ using namespace amrex;
  * @param[in] z_phys_nd Nodal physical height field.
  * @param[in] z_phys_cc Cell-centered physical height field.
  * @param[in] moisture_indices Indices for moisture variables in the state vector.
+ * One sweep over the tiles; ComputeDiffusivityYSUNew below runs one, or two
+ * when the PBL height is smoothed.
+ *
+ * @param[in] xvel X-velocity field.
+ * @param[in] yvel Y-velocity field.
+ * @param[in] cons_in Input conservative variables.
+ * @param[out] eddyViscosity MultiFab to store computed eddy viscosity and countergradient terms.
+ * @param[in] geom Geometry used for grid spacings and domain extent.
+ * @param[in] turbChoice Turbulence model configuration and parameters.
+ * @param[in] SurfLayer Pointer to surface layer data.
+ * @param[in] use_terrain_fitted_coords Use terrain-fitted coordinates if true.
+ * @param[in] use_moisture Include moisture in the diffusivity calculation.
+ * @param[in] level Current AMR level.
+ * @param[in] bc_ptr Boundary condition records.
+ * @param[in] vert_only Reserved flag for vertical-only computation.
+ * @param[in] z_phys_nd Nodal physical height field.
+ * @param[in] z_phys_cc Cell-centered physical height field.
+ * @param[in] moisture_indices Indices for moisture variables in the state vector.
  * @param[in] qheating_rates Optional heating rates for cloud-top mixing.
+ * @param[out] pblh_raw If set, store the unsmoothed corrector PBL height of every
+ *             column here (planar, see MakePlanarPBLHMultiFab) and stop there.
+ * @param[in] pblh_smoothed If set, the smoothed corrector PBL height to use.
  */
-void
-ComputeDiffusivityYSUNew (const MultiFab& xvel,
-                       const MultiFab& yvel,
-                       const MultiFab& cons_in,
-                       MultiFab& eddyViscosity,
-                       const Geometry& geom,
-                       const TurbChoice& turbChoice,
-                       std::unique_ptr<SurfaceLayer>& SurfLayer,
-                       bool use_terrain_fitted_coords,
-                       bool use_moisture,
-                       int level,
-                       const BCRec* bc_ptr,
-                       bool /*vert_only*/,
-                       const std::unique_ptr<MultiFab>& z_phys_nd,
-                       const std::unique_ptr<MultiFab>& z_phys_cc,
-                       const MoistureComponentIndices& moisture_indices,
-                       const MultiFab* qheating_rates)
+static void
+ComputeDiffusivityYSUNewSweep (const MultiFab& xvel,
+                               const MultiFab& yvel,
+                               const MultiFab& cons_in,
+                               MultiFab& eddyViscosity,
+                               const Geometry& geom,
+                               const TurbChoice& turbChoice,
+                               std::unique_ptr<SurfaceLayer>& SurfLayer,
+                               bool use_terrain_fitted_coords,
+                               bool use_moisture,
+                               int level,
+                               const BCRec* bc_ptr,
+                               bool /*vert_only*/,
+                               const std::unique_ptr<MultiFab>& z_phys_nd,
+                               const std::unique_ptr<MultiFab>& z_phys_cc,
+                               const MoistureComponentIndices& moisture_indices,
+                               const MultiFab* qheating_rates,
+                               MultiFab* pblh_raw,
+                               const MultiFab* pblh_smoothed)
 {
     /*
     ============================================================================
@@ -975,15 +998,31 @@ ComputeDiffusivityYSUNew (const MultiFab& xvel,
             pbli_arr(i, j, 0) = kpbl;
         });
 
-        // Apply PBLH spatial smoothing if enabled (Seibert et al. 2000 methodology)
-        // Seibert et al. (2000): Review and intercomparison of operational methods
-        // for the determination of the mixing height. Atmospheric Environment, 34, 1001-1027.
-        // Spatial smoothing removes unphysical grid-to-grid noise from discrete Rib-crossing detection
-        if (turbChoice.enable_pblh_smoothing) {
-        ApplyPBLHSmoothing(pbl_height_corrector, xybx,
-                         turbChoice.pblh_smoothing_weight,
-                         turbChoice.pblh_smoothing_passes,
-                         geom.Domain());
+        // PBLH spatial smoothing (Seibert et al. 2000, opt-in). The stencil reaches
+        // into neighbouring tiles and boxes, which this tile's work arrays do not
+        // cover, so ComputeDiffusivityYSUNew first runs a sweep with pblh_raw set,
+        // which stops here, smooths that field over the whole level, and then runs
+        // the full sweep with pblh_smoothed set. Every pass above is column-local,
+        // so the full sweep recomputes the same unsmoothed heights it replaces.
+        if (pblh_raw) {
+            const auto pblh_raw_arr = pblh_raw->array(mfi);
+            ParallelFor(PerpendicularBox<ZDir>(mfi.tilebox(), IntVect{0, 0, 0}),
+                        [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept
+            {
+                pblh_raw_arr(i, j, 0) = pblh_corr_arr(i, j, 0);
+            });
+            continue;
+        }
+        if (pblh_smoothed) {
+            // Ring columns beyond a non-periodic domain edge have no smoothed height
+            // and keep their own; ComputeTurbulentViscosity refills those ghost cells.
+            const Box smooth_bx = xybx & PerpendicularBox<ZDir>(geom.growPeriodicDomain(1),
+                                                                IntVect{0, 0, 0});
+            const auto pblh_smoothed_arr = pblh_smoothed->const_array(mfi);
+            ParallelFor(smooth_bx, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept
+            {
+                pblh_corr_arr(i, j, 0) = pblh_smoothed_arr(i, j, 0);
+            });
         }
 
         // Copy corrected PBL height into pblh_mf for SurfaceLayer storage.
@@ -1882,10 +1921,84 @@ ComputeDiffusivityYSUNew (const MultiFab& xvel,
             K_turb(i, j, khi+1, EddyDiff::Turb_lengthscale) = K_turb(i, j, khi, EddyDiff::Turb_lengthscale);
         });
     }// mfi
+    // A sweep that only collects the unsmoothed PBL height leaves SurfaceLayer alone
+    if (pblh_raw) {
+        return;
+    }
     // Write YSUNew-computed PBLH back into SurfaceLayer so Beljaars correction
     // and diagnostics can use it, and update_pblh no longer aborts for YSUNew type.
     // REGRID NOTE: On regrid, SurfaceLayer is reallocated and PBLH returns to sentinel.
     // The driver must call ComputeDiffusivityYSUNew (or an equivalent bootstrap pass)
     // before consuming PBLH in update_fluxes() or Beljaars correction after any regrid.
     SurfLayer->set_pblh(level, pblh_mf);
+}
+
+/**
+ * Compute vertical eddy viscosity coefficients using the Yonsei University (YSU) boundary layer scheme.
+ *
+ * With erf.enable_pblh_smoothing the corrector PBL height is smoothed over the
+ * whole level (Seibert et al. 2000) before the diffusivities are computed from
+ * it: a first sweep collects the unsmoothed height of every column, and the full
+ * sweep then uses the smoothed field, so the result does not depend on the box or
+ * tile decomposition. The passes up to the corrector run twice in that case.
+ *
+ * @param[in] xvel X-velocity field.
+ * @param[in] yvel Y-velocity field.
+ * @param[in] cons_in Input conservative variables.
+ * @param[out] eddyViscosity MultiFab to store computed eddy viscosity and countergradient terms.
+ * @param[in] geom Geometry used for grid spacings and domain extent.
+ * @param[in] turbChoice Turbulence model configuration and parameters.
+ * @param[in] SurfLayer Pointer to surface layer data.
+ * @param[in] use_terrain_fitted_coords Use terrain-fitted coordinates if true.
+ * @param[in] use_moisture Include moisture in the diffusivity calculation.
+ * @param[in] level Current AMR level.
+ * @param[in] bc_ptr Boundary condition records.
+ * @param[in] vert_only Reserved flag for vertical-only computation.
+ * @param[in] z_phys_nd Nodal physical height field.
+ * @param[in] z_phys_cc Cell-centered physical height field.
+ * @param[in] moisture_indices Indices for moisture variables in the state vector.
+ * @param[in] qheating_rates Optional heating rates for cloud-top mixing.
+ */
+void
+ComputeDiffusivityYSUNew (const MultiFab& xvel,
+                          const MultiFab& yvel,
+                          const MultiFab& cons_in,
+                          MultiFab& eddyViscosity,
+                          const Geometry& geom,
+                          const TurbChoice& turbChoice,
+                          std::unique_ptr<SurfaceLayer>& SurfLayer,
+                          bool use_terrain_fitted_coords,
+                          bool use_moisture,
+                          int level,
+                          const BCRec* bc_ptr,
+                          bool vert_only,
+                          const std::unique_ptr<MultiFab>& z_phys_nd,
+                          const std::unique_ptr<MultiFab>& z_phys_cc,
+                          const MoistureComponentIndices& moisture_indices,
+                          const MultiFab* qheating_rates)
+{
+    if (!turbChoice.enable_pblh_smoothing) {
+        ComputeDiffusivityYSUNewSweep(xvel, yvel, cons_in, eddyViscosity, geom, turbChoice,
+                                      SurfLayer, use_terrain_fitted_coords, use_moisture,
+                                      level, bc_ptr, vert_only, z_phys_nd, z_phys_cc,
+                                      moisture_indices, qheating_rates,
+                                      nullptr, nullptr);
+        return;
+    }
+
+    MultiFab pblh_2d = MakePlanarPBLHMultiFab(eddyViscosity.boxArray(),
+                                              eddyViscosity.DistributionMap());
+    ComputeDiffusivityYSUNewSweep(xvel, yvel, cons_in, eddyViscosity, geom, turbChoice,
+                                  SurfLayer, use_terrain_fitted_coords, use_moisture,
+                                  level, bc_ptr, vert_only, z_phys_nd, z_phys_cc,
+                                  moisture_indices, qheating_rates,
+                                  &pblh_2d, nullptr);
+    ApplyPBLHSmoothing(pblh_2d, geom,
+                       turbChoice.pblh_smoothing_weight,
+                       turbChoice.pblh_smoothing_passes);
+    ComputeDiffusivityYSUNewSweep(xvel, yvel, cons_in, eddyViscosity, geom, turbChoice,
+                                  SurfLayer, use_terrain_fitted_coords, use_moisture,
+                                  level, bc_ptr, vert_only, z_phys_nd, z_phys_cc,
+                                  moisture_indices, qheating_rates,
+                                  nullptr, &pblh_2d);
 }
