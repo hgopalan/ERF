@@ -508,6 +508,34 @@ struct FireParams
     // fire arrival time at its fire cell once, on the step it first burns.
     std::vector<amrex::Real> probes;
 
+    // Prescribed rate of spread, used only when ros_model = "prescribed":
+    // R = max(min_ros, R_base + grad_x (x - x0) + grad_y (y - y0)) with R_base
+    // the rate listed for the cell's fuel code in by_fuel, else ros. No wind,
+    // slope or moisture dependence and no direction, so directional_ros is
+    // turned off. For verification against closed-form arrival times; see
+    // ERF_PrescribedFire.H.
+    struct PrescribedRosParams {
+        amrex::Real ros     = 0.0;   ///< R_base where by_fuel has no entry [m/s]
+        amrex::Real grad_x  = 0.0;   ///< dR/dx [1/s]
+        amrex::Real grad_y  = 0.0;   ///< dR/dy [1/s]
+        amrex::Real x0      = 0.0;   ///< Point where R = R_base [m]
+        amrex::Real y0      = 0.0;
+        amrex::Real min_ros = 0.0;   ///< Floor on R [m/s]
+        std::vector<amrex::Real> by_fuel; ///< Flat list of fuel code, R_base pairs; needs fuel_map.file
+    } prescribed;
+
+    // Prescribed surface heat flux over a disc, added to fire_heat_flux whatever
+    // the fuel and the front, and injected by the coupling like fire heat. Off
+    // unless flux > 0. For plume verification; see ERF_PrescribedFire.H.
+    struct PrescribedHeatParams {
+        amrex::Real flux       = 0.0;   ///< Flux inside the disc [W/m2]; 0 = off
+        amrex::Real cx         = 0.0;   ///< Disc centre [m]
+        amrex::Real cy         = 0.0;
+        amrex::Real radius     = 0.0;   ///< Disc radius [m]
+        amrex::Real start_time = 0.0;   ///< Switch-on time [s]
+        amrex::Real end_time   = -1.0;  ///< Switch-off time [s]; negative = never
+    } prescribed_heat;
+
     // Per-structure exposure diagnostics (needs structures.enable). Each
     // connected footprint of the heightmap gets an id, and every `interval`
     // fire steps one line per structure is appended to `file`: the first and
@@ -900,6 +928,55 @@ struct FireParams
        if (probes.size() % 2 != 0) {
            amrex::Abort("erf.fire.probes must be a flat list of x y pairs");
        }
+
+       // Prescribed rate of spread and heat flux (verification cases)
+       {
+           auto& pr = prescribed;
+           pp.query("prescribed.ros",     pr.ros);
+           pp.query("prescribed.min_ros", pr.min_ros);
+           std::vector<amrex::Real> pair;
+           if (pp.queryarr("prescribed.gradient", pair)) {
+               if (pair.size() != 2) { amrex::Abort("erf.fire.prescribed.gradient needs two values: dR/dx dR/dy [1/s]"); }
+               pr.grad_x = pair[0]; pr.grad_y = pair[1];
+           }
+           pair.clear();
+           if (pp.queryarr("prescribed.origin", pair)) {
+               if (pair.size() != 2) { amrex::Abort("erf.fire.prescribed.origin needs two values: x0 y0 [m]"); }
+               pr.x0 = pair[0]; pr.y0 = pair[1];
+           }
+           pp.queryarr("prescribed.by_fuel", pr.by_fuel);
+           if (pr.by_fuel.size() % 2 != 0) {
+               amrex::Abort("erf.fire.prescribed.by_fuel must be a flat list of fuel code, rate pairs");
+           }
+           if (ros_model == "prescribed") {
+               bool any_positive = pr.ros > 0.0;
+               for (std::size_t n = 1; n < pr.by_fuel.size(); n += 2) {
+                   if (pr.by_fuel[n] < 0.0) { amrex::Abort("erf.fire.prescribed.by_fuel rates must be >= 0"); }
+                   any_positive = any_positive || pr.by_fuel[n] > 0.0;
+               }
+               if (pr.ros < 0.0 || pr.min_ros < 0.0) {
+                   amrex::Abort("erf.fire.prescribed.ros and prescribed.min_ros must be >= 0");
+               }
+               if (!any_positive && pr.min_ros <= 0.0) {
+                   amrex::Abort("erf.fire.ros_model = prescribed needs prescribed.ros > 0, a positive prescribed.by_fuel rate or prescribed.min_ros > 0");
+               }
+           }
+
+           auto& ph = prescribed_heat;
+           pp.query("prescribed_heat.flux", ph.flux);
+           pair.clear();
+           if (pp.queryarr("prescribed_heat.center", pair)) {
+               if (pair.size() != 2) { amrex::Abort("erf.fire.prescribed_heat.center needs two values: x y [m]"); }
+               ph.cx = pair[0]; ph.cy = pair[1];
+           }
+           pp.query("prescribed_heat.radius",     ph.radius);
+           pp.query("prescribed_heat.start_time", ph.start_time);
+           pp.query("prescribed_heat.end_time",   ph.end_time);
+           if (ph.flux < 0.0) { amrex::Abort("erf.fire.prescribed_heat.flux must be >= 0"); }
+           if (ph.flux > 0.0 && ph.radius <= 0.0) {
+               amrex::Abort("erf.fire.prescribed_heat.flux > 0 needs prescribed_heat.radius > 0");
+           }
+       }
        pp.query("exposure.enable",   exposure.enable);
        pp.query("exposure.file",     exposure.file);
        pp.query("exposure.interval", exposure.interval);
@@ -1086,6 +1163,18 @@ struct FireParams
            }
            directional_ros = false;
        }
+
+       // A prescribed rate has no direction, so it supersedes the directional
+       // default in the same way; asking for both explicitly is a conflict.
+       if (ros_model == "prescribed") {
+           if (directional_ros_given && directional_ros) {
+               amrex::Abort("erf.fire.ros_model = prescribed is isotropic and cannot be combined with directional_ros = true");
+           }
+           if (levelset_ellipse) {
+               amrex::Abort("erf.fire.ros_model = prescribed cannot be combined with erf.fire.levelset.ellipse");
+           }
+           directional_ros = false;
+       }
     }
 
     /// True when ros_model = "hybrid".
@@ -1103,7 +1192,8 @@ struct FireParams
         if (is_hybrid()) { return hybrid.primary == m || hybrid.secondary == m; }
         if (m == "rothermel") {
             return ros_model != "balbi" && ros_model != "behave" &&
-                   ros_model != "macarthur" && ros_model != "cheney_gould" && ros_model != "fbp";
+                   ros_model != "macarthur" && ros_model != "cheney_gould" && ros_model != "fbp" &&
+                   ros_model != "prescribed";
         }
         return ros_model == m;
     }

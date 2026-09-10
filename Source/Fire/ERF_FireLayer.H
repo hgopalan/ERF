@@ -778,6 +778,12 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_ros_scratch;
 
     /// Evaluate one named ROS model into `out` (uniform-fuel Balbi inputs in balbi_in).
+    /// Rate of spread for ros_model = "prescribed" (ERF_PrescribedFire.H).
+    void fill_prescribed_ros(amrex::MultiFab& out) const;
+
+    /// Add erf.fire.prescribed_heat.flux to fire_heat_flux over its disc and time window.
+    void add_prescribed_heat_flux();
+
     void fill_ros_for_model(const std::string& model,
                             amrex::MultiFab& out,
                             const BalbiFieldInputs& balbi_in);
