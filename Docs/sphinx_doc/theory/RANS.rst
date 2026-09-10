@@ -241,18 +241,19 @@ terrain case the advective Courant number binds well below the explicit
 diffusion limit, so the solve buys no time step there; it reproduces the
 explicit answer to 1e-5 relative.
 
-One caveat: with the implicit :math:`\theta` solve the answer is no
-longer invariant to the box decomposition at round-off. The column solve
-couples the whole column at once, so a one-unit-in-the-last-place
-difference reaches every cell in one step, and in a near-neutral layer
-:math:`\partial\theta/\partial z` is a difference of nearly equal
-numbers, so the buoyancy term amplifies it. On the neutral case the
-spread between one box and four saturates near 1e-5 m/s in wind, 1e-6 in
-relative terms, against 1e-15 for the explicit run. It is a sensitivity
-of the closure in a neutral layer rather than an inconsistency: with
-Smagorinsky in place of the :math:`k` equation the same solve stays at
-1e-12, and the implicit momentum and :math:`k` solves are decomposition
-invariant to round-off on their own.
+One caveat: with the solve on, the answer is not invariant to the box
+decomposition at round-off. On the neutral case the spread between one
+box and four is 9e-7 m/s in wind at :math:`\Delta t` = 5 s and 3.6e-4 at
+60 s, against 1.8e-15 for the explicit run; the seed is one unit in the
+last place, from the round-off of the projection, and the implicit solve
+grows it until it saturates. It needs the anelastic integrator (the
+compressible path with the same solve stays at 5e-12) and it grows with
+the size of the implicit increment. It is not the closure: Deardorff
+behaves the same way and nulling the buoyancy term does not remove it.
+The magnitude stays far below the difference between the implicit and
+explicit answers, so it moves no physics check, but a bitwise comparison
+across decompositions will not hold in this configuration. The
+development record has the full set of mechanisms ruled out.
 
 The buoyancy term of the :math:`k` equation uses the vertical heat flux
 the closure computes at the start of the step,

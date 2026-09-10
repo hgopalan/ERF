@@ -439,20 +439,58 @@ first-stage tendency carries its implicit increment the same way).
   per step during the start-up transient. The 12 h dt = 60 s run passes
   that same check.
 
-Found while verifying, and worth recording: with the implicit theta solve
-the answer is no longer invariant to the box decomposition at round-off.
-One rank with four x-y boxes differs from one rank with one box by 1.2e-5
-in wind after 40 steps, against 1.8e-15 for the explicit run; the seed is
-a one-ulp difference (step 1 is bit-identical) and it saturates near
-1e-5, 1e-6 in relative terms. Isolating the three solves on one rank:
-the KE solve gives 2e-16, the momentum solve 5e-15, the theta solve
-1.2e-5, and with Smagorinsky in place of the k equation the theta solve
-gives 6e-12. So it is the k equation that amplifies, not the solve that
-is inconsistent: the column tridiagonal spreads a one-ulp difference over
-the whole column in one step, and in a near-neutral layer
-dtheta/dz is a difference of nearly equal numbers, so the buoyancy term
-turns that into a large relative change. Explicit diffusion spreads it
-one cell per step and stays at round-off. Worth knowing before anyone
-expects decomposition-invariant answers from kEqn plus `vert_implicit`;
-it does not move any physics check.
+Found while verifying: with the implicit solve on, the answer is no
+longer invariant to the box decomposition at round-off. Chased at length
+and not fixed; what the evidence says is below, so nobody has to repeat
+the search.
+
+Measurement (one rank, one box against four x-y boxes with whole columns,
+so MPI reductions play no part; 40 steps of the neutral deck):
+
+| configuration | max diff in u | in theta |
+| --- | --- | --- |
+| explicit | 1.8e-15 | 5.7e-14 (one ulp) |
+| implicit, dt 5 s | 9.1e-7 | 1.1e-5 |
+| implicit, dt 20 s | 1.3e-5 | 4.4e-5 |
+| implicit, dt 60 s | 3.6e-4 | 1.8e-4 |
+
+Ruled out, each by direct test: MPI reduction order (it reproduces on one
+rank); the MOST plane average (`erf.most.average_policy = 1`, local, still
+1e-5); run-to-run nondeterminism (two identical runs agree bitwise);
+uninitialised work memory (`fab.init_snan = 1` with the invalid trap armed
+runs clean); the TKE floor; the buoyancy term (`erf.theta_ref = 1e12` to
+null it, still 8.5e-6); the Dirichlet wall value of k; and the closure
+itself, since Deardorff shows it too (1.4e-5). A z-split column is not
+the cause either: the four boxes span the full column and the guard
+aborts otherwise.
+
+What the evidence does say. The deck is horizontally uniform and stays
+exactly so (the horizontal max minus min of theta, u and k is 0 to the
+last bit at every step in both runs), so the whole thing is a 1D problem
+and the two decompositions differ only through the round-off of the FFT
+projection, which shows up as a w of order 1e-19 where w should be zero.
+The state first differs at step 3 by exactly one ulp of rho theta and
+then grows at roughly 1.5 to 5 times per step before saturating. The
+growth needs the implicit solve: the same one-ulp seed sits in the
+explicit run and stays there for 200 steps. It also needs the anelastic
+integrator, since the compressible path with the same solve stays at
+5e-12. It scales with the size of the implicit increment, with dt and
+with how many stages apply the solve: theta alone at
+`vert_implicit_fac = 1 0 0` is clean at 1.8e-15, and so are theta+KE and
+theta+momentum at that factor, while the shipped `1 1 0` is 1e-5 at the
+same dt.
+
+A scalar amplification analysis of the anelastic RK2 with the fold-in
+gives a factor in (0, 1] for every mode at both `1 0 0` and `1 1 0`, so
+the growth is not in the theta update alone; it is in the coupling of the
+implicit solve, the turbulence model and the projection, and that is as
+far as the search got. The difference is broadband in z (31 sign changes
+in 63 cells), not a grid-scale mode.
+
+It moves no physics check and no reported number: at dt 60 s the spread
+is 3e-5 in relative terms, while the implicit and explicit 12 h answers
+differ by 2.5e-4. But `vert_implicit` under anelastic should not be
+expected to give decomposition-invariant answers, and a gold-file test
+of that configuration would have to compare with a tolerance rather than
+with `fcompare` at zero.
 

@@ -289,20 +289,29 @@ absolute and relative difference on all fourteen fields.
 Sensitivity to the box decomposition (one rank, one box against four x-y
 boxes, 40 steps, dt 5 s, max |difference| of planar averages in u):
 
-| configuration | difference |
-| --- | --- |
-| explicit | 1.8e-15 |
-| implicit, k solve only | 1.8e-15 |
-| implicit, momentum solve only | 5.3e-15 |
-| implicit, theta solve only | 8.0e-7 (theta 1.2e-5) |
-| implicit, theta solve only, Smagorinsky instead of kEqn | 7.8e-12 |
+| configuration | difference in u | in theta |
+| --- | --- | --- |
+| explicit | 1.8e-15 | 5.7e-14 |
+| implicit, k solve only | 1.8e-15 | 5.7e-14 |
+| implicit, momentum solve only | 5.3e-15 | 5.7e-14 |
+| implicit, theta solve only, `vert_implicit_fac = 1 0 0` | 1.8e-15 | 5.7e-14 |
+| implicit, theta solve only, `1 1 0` | 8.0e-7 | 1.2e-5 |
+| implicit as shipped, dt 5 s | 9.1e-7 | 1.1e-5 |
+| implicit as shipped, dt 20 s | 1.3e-5 | 4.4e-5 |
+| implicit as shipped, dt 60 s | 3.6e-4 | 1.8e-4 |
 
-Step 1 is bit-identical in every case, so the seed is one ulp; the column
-tridiagonal spreads it over the whole column in a single step and the
-near-neutral buoyancy term, which differences nearly equal numbers to get
-dtheta/dz, amplifies it until it saturates near 1e-5 m/s (1e-6 relative).
-It moves no physics check, and it is the k equation amplifying rather
-than the solve being inconsistent.
+5.7e-14 is one ulp of rho theta, so the first four rows are as clean as
+floating point allows. The cause was chased at length and not found; the
+list of mechanisms ruled out by direct test, and what the evidence does
+support, is in PLAN.md phase 10. In short: it reproduces on a single rank
+so it is not MPI reduction order, it is not the MOST plane average, not
+uninitialised memory, not the buoyancy term, not the Dirichlet wall value
+of k, and not the k equation, since Deardorff behaves the same. It needs
+both the implicit solve and the anelastic projection, and it scales with
+the size of the implicit increment. At dt 60 s the spread is 3e-5 in
+relative terms against an implicit-explicit difference of 2.5e-4, so it
+moves no physics check, but this configuration will not reproduce bitwise
+across decompositions.
 
 ### How large a step the solve allows
 
