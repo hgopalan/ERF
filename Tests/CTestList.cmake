@@ -213,15 +213,30 @@ function(add_test_cloud_chamber_parity TEST_NAME)
         ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/budget_off/simulation.log;${CURRENT_TEST_BINARY_DIR}/budget_on/simulation.log;${CURRENT_TEST_BINARY_DIR}/parity.log")
 endfunction(add_test_cloud_chamber_parity)
 
-# Tiling parity: run one deck with MFIter tiling on and off and require identical
-# 3D and 2D plotfiles (no gold file). Catches kernels that loop over the valid box
-# while indexing per-tile work arrays.
+# Tiling parity: run one deck over two decompositions of the same grid and require
+# identical 3D and 2D plotfiles (no gold file). SPLIT tiles (the default) runs with
+# MFIter tiling on and off, which catches kernels that loop over the valid box while
+# indexing per-tile work arrays. SPLIT boxes runs the deck's boxes, tiled, against a
+# single box on one rank, untiled, which catches stencils that stop at box edges.
+# Different boxes and rank counts change the round-off, so those tests can pass a
+# looser FCOMPARE_RTOL; fcompare accepts a variable within either tolerance.
 function(add_test_tiling_parity TEST_NAME TEST_FILES_DIR PLTFILE PLT2DFILE)
     set(options )
-    set(oneValueArgs "RUNTIME_OPTIONS")
+    set(oneValueArgs "RUNTIME_OPTIONS" "SPLIT" "FCOMPARE_RTOL")
     set(multiValueArgs )
     cmake_parse_arguments(ADD_TEST_TP "${options}" "${oneValueArgs}"
         "${multiValueArgs}" ${ARGN})
+
+    if(ADD_TEST_TP_SPLIT STREQUAL "boxes")
+        set(_run_logs "multibox.log;singlebox.log")
+    else()
+        set(_run_logs "tiled.log;untiled.log")
+    endif()
+    if(DEFINED ADD_TEST_TP_FCOMPARE_RTOL)
+        set(_fcompare_rtol "${ADD_TEST_TP_FCOMPARE_RTOL}")
+    else()
+        set(_fcompare_rtol "${ERF_TEST_FCOMPARE_RTOL}")
+    endif()
 
     setup_test()
     resolve_test_exe("" "erf_exec" TEST_EXE)
@@ -235,18 +250,20 @@ function(add_test_tiling_parity TEST_NAME TEST_FILES_DIR PLTFILE PLT2DFILE)
         -DRUNTIME_OPTIONS=${ADD_TEST_TP_RUNTIME_OPTIONS}
         -DWORKING_DIRECTORY=${CURRENT_TEST_BINARY_DIR}
         -DFCOMPARE=${FCOMPARE_EXE}
-        -DRTOL=${ERF_TEST_FCOMPARE_RTOL}
+        -DRTOL=${_fcompare_rtol}
         -DATOL=${ERF_TEST_FCOMPARE_ATOL}
         -DPLTFILE=${PLTFILE}
         -DPLT2DFILE=${PLT2DFILE}
+        -DSPLIT=${ADD_TEST_TP_SPLIT}
         -P ${PROJECT_SOURCE_DIR}/Tests/RunTilingParity.cmake)
+    list(TRANSFORM _run_logs PREPEND "${CURRENT_TEST_BINARY_DIR}/")
     set_tests_properties(${TEST_NAME}
         PROPERTIES
         TIMEOUT 1200
         PROCESSORS ${NP}
         WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
         LABELS "regression"
-        ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/tiled.log;${CURRENT_TEST_BINARY_DIR}/untiled.log;${CURRENT_TEST_BINARY_DIR}/fcompare_plt.log;${CURRENT_TEST_BINARY_DIR}/fcompare_plt2d.log")
+        ATTACHED_FILES_ON_FAIL "${_run_logs};${CURRENT_TEST_BINARY_DIR}/fcompare_plt.log;${CURRENT_TEST_BINARY_DIR}/fcompare_plt2d.log")
 endfunction(add_test_tiling_parity)
 
 function(add_test_cloud_chamber_budget TEST_NAME MODE SOURCE_NAME)
@@ -849,6 +866,12 @@ add_test_tiling_parity(ABL_MRF_Tiling        ABL_MRF_Tiling "00010" "00010")
 add_test_tiling_parity(ABL_YSUNew_Tiling     ABL_MRF_Tiling "00010" "00010" RUNTIME_OPTIONS "erf.pbl_type=YSUNew erf.most.pblh_calc=YSU")
 # Legacy YSU aborts in unstable conditions, so cool the surface
 add_test_tiling_parity(ABL_YSU_Tiling        ABL_MRF_Tiling "00010" "00010" RUNTIME_OPTIONS "erf.pbl_type=YSU erf.most.pblh_calc=YSU erf.most.surf_temp_flux=-0.05")
+# PBLH smoothing reaches across tiles and boxes; three passes carry a tile or box edge into
+# valid cells. Box and rank round-off in K is about 1e-10 relative; the defect was 0.3.
+add_test_tiling_parity(ABL_MRF_PBLHSmooth_Tiling    ABL_MRF_Tiling "00010" "00010" RUNTIME_OPTIONS "erf.enable_pblh_smoothing=true erf.pblh_smoothing_passes=3")
+add_test_tiling_parity(ABL_MRF_PBLHSmooth_Boxes     ABL_MRF_Tiling "00010" "00010" SPLIT boxes FCOMPARE_RTOL "1.0e-8" RUNTIME_OPTIONS "erf.enable_pblh_smoothing=true erf.pblh_smoothing_passes=3")
+add_test_tiling_parity(ABL_YSUNew_PBLHSmooth_Tiling ABL_MRF_Tiling "00010" "00010" RUNTIME_OPTIONS "erf.pbl_type=YSUNew erf.most.pblh_calc=YSU erf.enable_pblh_smoothing=true erf.pblh_smoothing_passes=3")
+add_test_tiling_parity(ABL_YSUNew_PBLHSmooth_Boxes  ABL_MRF_Tiling "00010" "00010" SPLIT boxes FCOMPARE_RTOL "1.0e-8" RUNTIME_OPTIONS "erf.pbl_type=YSUNew erf.most.pblh_calc=YSU erf.enable_pblh_smoothing=true erf.pblh_smoothing_passes=3")
 add_test_r(ABL_InflowFile                    ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")
 add_test_r(MoistBubble                       ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")
 add_test_r(SquallLine_2D                     ""  "erf_exec" "plt00010" RUNTIME_OPTIONS "erf.vert_implicit=false ")

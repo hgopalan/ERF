@@ -5,6 +5,8 @@
 # tiling off, and requires identical plotfiles.  Do not set mfiter_tile_size
 # here: the script supplies it.  The same deck runs YSUNew, and legacy YSU with
 # a cooled surface (it aborts in unstable conditions), through RUNTIME_OPTIONS.
+# With SPLIT boxes the script compares these four boxes against a single box
+# (max_grid_size_x/y on the command line); the PBLH smoothing tests use both.
 erf.prob_name = "ABL"
 
 max_step = 10

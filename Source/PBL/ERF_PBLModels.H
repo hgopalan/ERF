@@ -477,6 +477,29 @@ struct PBLDerivativeDzInv_T
 #endif
 
 /**
+ * @brief Planar (k = 0) MultiFab over the columns of a full-column BoxArray.
+ *
+ * One component, one ghost cell in x and y, zero-initialised: the layout
+ * ApplyPBLHSmoothing works on. It shares the DistributionMapping, so it can
+ * be indexed with an MFIter over the full-column MultiFab.
+ *
+ * @param[in] ba Full-column BoxArray (each box spans the domain in z)
+ * @param[in] dm DistributionMapping of ba
+ */
+inline amrex::MultiFab
+MakePlanarPBLHMultiFab (const amrex::BoxArray& ba,
+                        const amrex::DistributionMapping& dm)
+{
+    amrex::BoxList bl = ba.boxList();
+    for (auto& bx : bl) {
+        bx.setRange(2, 0);
+    }
+    amrex::MultiFab pblh(amrex::BoxArray(std::move(bl)), dm, 1, amrex::IntVect(1, 1, 0));
+    pblh.setVal(amrex::Real(0.0));
+    return pblh;
+}
+
+/**
  * @brief Apply spatial smoothing to PBLH field using 5-point stencil.
  *
  * Applies a simple 5-point spatial averaging to reduce grid-to-grid noise in
@@ -487,52 +510,63 @@ struct PBLDerivativeDzInv_T
  *
  * Stencil: PBLH_smooth(i,j) = w * PBLH(i,j) + (1-w)/4 * [PBLH(i±1,j) + PBLH(i,j±1)]
  *
- * @param[in,out] pblh_fab FArrayBox containing 2D PBLH field (component 0)
- * @param[in] xybx Valid box for smoothing (x,y indices only)
+ * The stencil reaches into neighbouring tiles and boxes, so the field is a
+ * level-wide planar MultiFab (see MakePlanarPBLHMultiFab) whose ghost cells
+ * are filled before every pass, and the result does not depend on the box or
+ * tile decomposition. Neighbours are clamped at the domain edges, in periodic
+ * directions too, as a single box always did.
+ *
+ * @param[in,out] pblh Planar PBLH field (component 0), at least one ghost cell in x and y
+ * @param[in] geom Level geometry (domain edges and periodicity)
  * @param[in] weight Center cell weight in stencil (must be in [0,1])
  * @param[in] passes Number of smoothing iterations
- * @param[in] domain Domain box for reflective boundary conditions
  */
 inline void
-ApplyPBLHSmoothing (amrex::FArrayBox& pblh_fab,
-                    const amrex::Box& xybx,
+ApplyPBLHSmoothing (amrex::MultiFab& pblh,
+                    const amrex::Geometry& geom,
                     const amrex::Real weight,
-                    const int passes,
-                    const amrex::Box& domain)
+                    const int passes)
 {
-    // Use a temporary to hold intermediate results
-    amrex::FArrayBox pblh_temp(xybx, 1, amrex::The_Async_Arena());
-    auto pblh = pblh_fab.array();
-    auto pblh_tmp = pblh_temp.array();
+    AMREX_ALWAYS_ASSERT(pblh.nGrowVect()[0] >= 1 && pblh.nGrowVect()[1] >= 1);
 
-    const auto& dom_lo = amrex::lbound(domain);
-    const auto& dom_hi = amrex::ubound(domain);
+    // Use a temporary to hold intermediate results
+    amrex::MultiFab pblh_tmp(pblh.boxArray(), pblh.DistributionMap(), 1, 0);
+
+    const auto& dom_lo = amrex::lbound(geom.Domain());
+    const auto& dom_hi = amrex::ubound(geom.Domain());
 
     const amrex::Real wt_side = (one - weight) / four; // Weight for each of 4 neighbors
 
-    // Apply smoothing passes
+    // Apply smoothing passes; each pass reads only the previous one
     for (int pass = 0; pass < passes; ++pass) {
-        amrex::ParallelFor(xybx, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept
-        {
-            // Use reflective (Neumann) boundary conditions:
-            // At domain boundaries, reuse the current cell's own value
-            const int i_xlo = (i > dom_lo.x) ? (i - 1) : i;
-            const int i_xhi = (i < dom_hi.x) ? (i + 1) : i;
-            const int j_ylo = (j > dom_lo.y) ? (j - 1) : j;
-            const int j_yhi = (j < dom_hi.y) ? (j + 1) : j;
+        pblh.FillBoundary(geom.periodicity());
 
-            // 5-point stencil
-            pblh_tmp(i, j, 0) = weight * pblh(i, j, 0)
-                              + wt_side * (pblh(i_xlo, j, 0) + pblh(i_xhi, j, 0) +
-                                          pblh(i, j_ylo, 0) + pblh(i, j_yhi, 0));
-        });
+#ifdef _OPENMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+        for (amrex::MFIter mfi(pblh_tmp, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.tilebox();
+            const auto src = pblh.const_array(mfi);
+            const auto dst = pblh_tmp.array(mfi);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+            {
+                // Use reflective (Neumann) boundary conditions:
+                // At domain boundaries, reuse the current cell's own value
+                const int i_xlo = (i > dom_lo.x) ? (i - 1) : i;
+                const int i_xhi = (i < dom_hi.x) ? (i + 1) : i;
+                const int j_ylo = (j > dom_lo.y) ? (j - 1) : j;
+                const int j_yhi = (j < dom_hi.y) ? (j + 1) : j;
 
-        // Swap arrays for next iteration (or final result)
-        if (pass < passes - 1) {
-            pblh_fab.copy<amrex::RunOn::Device>(pblh_temp, 0, 0, 1);
-        } else {
-            // Copy final result back
-            pblh_fab.copy<amrex::RunOn::Device>(pblh_temp, 0, 0, 1);
+                // 5-point stencil
+                dst(i, j, k) = weight * src(i, j, k)
+                             + wt_side * (src(i_xlo, j, k) + src(i_xhi, j, k) +
+                                          src(i, j_ylo, k) + src(i, j_yhi, k));
+            });
         }
+
+        amrex::MultiFab::Copy(pblh, pblh_tmp, 0, 0, 1, 0);
     }
+
+    // Leave the ghost cells holding the smoothed field for callers that read them
+    pblh.FillBoundary(geom.periodicity());
 }
