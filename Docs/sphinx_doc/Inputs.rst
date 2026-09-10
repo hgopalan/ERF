@@ -4078,7 +4078,8 @@ Propagation
 +================================================+============================================================+================================+========================+
 | **erf.fire.propagation_method**                | Front propagation scheme                                   | "farsite", "levelset"          | "farsite"              |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.farsite.phi_threshold**             | Level-set value at or below which a cell is a front cell   | Real                           | 0.1                    |
+| **erf.fire.farsite.phi_threshold**             | Legacy update: level-set value at or below which a cell    | Real                           | 0.1                    |
+|                                                | is a front cell                                            |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.farsite.use_anderson_lw**           | Derive the ellipse coefficients from the Anderson length-  | 0, 1                           | 1                      |
 |                                                | to-width ratio                                             |                                |                        |
@@ -4089,10 +4090,15 @@ Propagation
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.farsite.coeff_c**                   | Richards backing coefficient when use_anderson_lw = 0      | Real > 0                       | 0.1                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.farsite.gaussian_sigma**            | Stamp radius [m]: < 0 single cell, 0 automatic, > 0 fixed  | Real                           | -1.0                   |
-|                                                | Gaussian                                                   |                                |                        |
+| **erf.fire.farsite.gaussian_sigma**            | Legacy update: stamp radius [m], < 0 single cell,          | Real                           | -1.0                   |
+|                                                | 0 automatic, > 0 fixed Gaussian                            |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.farsite.cfl_fire**                  | CFL number of the FARSITE subcycle                         | Real > 0                       | 0.5                    |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.farsite.front_update**              | Front update: "front_cell" burns the unburned cells next   | "front_cell", "legacy"         | "front_cell"           |
+|                                                | to the burned region at their Hopf-Lax arrival times;      |                                |                        |
+|                                                | "legacy" is the stamping used before 2026-09, which        |                                |                        |
+|                                                | ran about twice the rate of spread                         |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.cfl**                      | CFL number of the level-set subcycle                       | Real > 0                       | 0.4                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+

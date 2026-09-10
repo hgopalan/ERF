@@ -682,7 +682,7 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_heat_flux;    // Heat flux (stub)
     std::unique_ptr<amrex::MultiFab>         fire_spread_vec;   // FARSITE scratch
     std::unique_ptr<amrex::MultiFab>         fire_arrival_time; // Fire arrival time [s]
-    std::unique_ptr<amrex::MultiFab>         fire_disp_accum;   // Persistent displacement accumulator (2 comp)
+    std::unique_ptr<amrex::MultiFab>         fire_disp_accum;   // Persistent FARSITE accumulator (2 comp): displacement (legacy), or head-rate distance and front flag (front_cell)
     std::unique_ptr<amrex::MultiFab>         fire_surface_temp; // Surface temperature [K] (Phase 2)
     std::unique_ptr<amrex::MultiFab>         fire_surface_rh;   // Surface relative humidity [0-1] (Phase 2)
     std::unique_ptr<amrex::MultiFab>         fire_fireline_intensity; // Byram fireline intensity [kW/m]

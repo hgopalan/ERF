@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# Front cells are the unburned cells next to the burned region; each burns when
+# the spread shape grown from its burned neighbours' arrival times reaches it.
+erf.fire.farsite.front_update = "front_cell"

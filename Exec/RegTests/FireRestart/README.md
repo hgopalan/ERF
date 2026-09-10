@@ -57,11 +57,13 @@ near-front artificial viscosity of 0.1 (`erf.fire.levelset.gradient =
 weno5z_front`, `eps_visc_front = 0.1`, 2026-09-05); with a single
 viscosity of 0.4 the exposure and spotting rows burned 104 and 204 cells,
 and with the first-order scheme that preceded both the level-set rows
-burned 134 / 124 / 237 / 164 / 78.
+burned 134 / 124 / 237 / 164 / 78. The `farsite` row is the FARSITE
+`front_cell` update (2026-09-10); the legacy update burned 70 cells, and the
+restart matched with both.
 
 | row | straight cells | straight ROS (m/s) | restarted cells | restarted ROS (m/s) | match |
 |---|---|---|---|---|---|
-| `farsite` | 70 | 0.250 | 70 | 0.250 | yes |
+| `farsite` | 72 | 0.250 | 72 | 0.250 | yes |
 | `levelset` | 120 | 0.479 | 120 | 0.479 | yes |
 | `coupled` | 74 | 0.250 | 74 | 0.250 | yes |
 | `exposure` | 106 | 0.479 | 106 | 0.479 | yes |

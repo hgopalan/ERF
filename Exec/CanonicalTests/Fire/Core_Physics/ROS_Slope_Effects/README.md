@@ -23,7 +23,7 @@ With no wind, the flat-ground rate of spread is the no-wind, no-slope value `R0`
 | Half-amplitude ridge (h = 50 m) | 0.285 | 0.0888 m/s | 41.9 |
 | This case (h = 100 m) | 0.569 | 0.2942 m/s | 41.8 |
 
-The slope factor tracks `tan^2(theta)` to within 0.2% across the two amplitudes, which is Eq. 51 with the FM1 packing ratio. The full 900 s run burns 1204 fire cells and crosses the crest without instability.
+The slope factor tracks `tan^2(theta)` to within 0.2% across the two amplitudes, which is Eq. 51 with the FM1 packing ratio. The full 900 s run burns 968 fire cells and brings the head to the crest (x = 500 m) without instability. Before the FARSITE `front_cell` update (2026-09-10), whose predecessor ran about twice the rate of spread, the same run burned 1196 cells (1204 when this README was first written) and crossed the crest by one cell.
 
 Compare directly against `ROS_Basic_Calculation` for the flat baseline.
 
