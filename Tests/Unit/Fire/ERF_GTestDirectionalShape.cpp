@@ -155,3 +155,61 @@ TEST(DirectionalShape, EllipseMacArthurHeadAndBacking)
     EXPECT_NEAR(directional_ellipse_speed(de, 0.0, -1.0), back, REL * head);
     EXPECT_NEAR(directional_ellipse_speed(de, 1.0, 0.0), back, REL * head);
 }
+
+/// Relative tolerance of an inverted wind factor (a power law or a bisection).
+static constexpr double REL_INV = (sizeof(amrex::Real) == 8) ? 1e-7 : 1e-3;
+
+TEST(DirectionalShape, AndersonFlankKeepsHeadAndBack)
+{
+    const DirectionalRosState st = rothermel_state();
+    const amrex::Real U = 1.5;
+    const DirectionalEllipse dm = directional_ellipse_cell(st, U, 0.0, 0.0, 0.0);
+    const DirectionalEllipse da = directional_ellipse_cell(st, U, 0.0, 0.0, 0.0,
+                                                           DIRECTIONAL_ELLIPSE_LW_ANDERSON, 8.0);
+    const double head = directional_ros_cell(st, U, 0.0);
+    const double R0 = directional_ros_cell(st, 0.0, 0.0);
+    const double LB = anderson_LW_ratio(static_cast<amrex::Real>(U * 2.23694));
+    EXPECT_NEAR(da.e.LB, LB, REL_INV * LB);
+    // head and back as with the model's flanks; only the flank rate changes
+    EXPECT_NEAR(directional_ellipse_speed(da, 1.0, 0.0), head, REL * head);
+    EXPECT_NEAR(directional_ellipse_speed(da, -1.0, 0.0), R0, REL * head);
+    EXPECT_NEAR(directional_ellipse_speed(da, 0.0, 1.0), dm.e.b / LB, REL_INV * head);
+    EXPECT_GT(directional_ellipse_speed(da, 0.0, 1.0), directional_ellipse_speed(dm, 0.0, 1.0));
+}
+
+TEST(DirectionalShape, EffectiveWindInvertsTheWindFactor)
+{
+    const DirectionalRosState st = rothermel_state();
+    // wind alone: the effective wind is the wind
+    const amrex::Real U = 1.5;
+    const double R_w = directional_ros_cell(st, U, 0.0);
+    EXPECT_NEAR(directional_effective_wind(st, static_cast<amrex::Real>(R_w)), U, REL_INV * U);
+    // slope alone: the wind that gives the same head rate
+    const double R_s = directional_ros_cell(st, 0.0, 0.4);
+    const double U_eff = directional_effective_wind(st, static_cast<amrex::Real>(R_s));
+    EXPECT_NEAR(directional_ros_cell(st, static_cast<amrex::Real>(U_eff), 0.0), R_s, REL_INV * R_s);
+    // no wind or slope: none
+    EXPECT_NEAR(directional_effective_wind(st, st.rc.R0), 0.0, 1e-12);
+    // the model's wind limit caps it: the slope's effective wind is about
+    // 250 ft/min, so a 200 ft/min limit binds
+    DirectionalRosState capped = st;
+    capped.rc.U_max_ftmin = 200.0;
+    EXPECT_NEAR(directional_effective_wind(capped, static_cast<amrex::Real>(R_s)), 200.0 / 196.85, REL_INV);
+}
+
+TEST(DirectionalShape, EffectiveWindBisectionAndCap)
+{
+    DirectionalRosState st;
+    st.model = DIRECTIONAL_ROS_MACARTHUR;
+    const amrex::Real U = 2.0;
+    EXPECT_NEAR(directional_effective_wind(st, macarthur_ros(U)), U, 1e-4);
+    // a strong wind saturates Anderson's fit at 8; lw_max caps it lower
+    const DirectionalRosState ro = rothermel_state();
+    const DirectionalEllipse d8 = directional_ellipse_cell(ro, 20.0, 0.0, 0.0, 0.0,
+                                                           DIRECTIONAL_ELLIPSE_LW_ANDERSON, 8.0);
+    const DirectionalEllipse d3 = directional_ellipse_cell(ro, 20.0, 0.0, 0.0, 0.0,
+                                                           DIRECTIONAL_ELLIPSE_LW_ANDERSON, 3.0);
+    EXPECT_NEAR(d8.e.LB, 8.0, REL);
+    EXPECT_NEAR(d3.e.LB, 3.0, REL);
+    EXPECT_NEAR(directional_ellipse_speed(d3, 0.0, 1.0), d3.e.b / 3.0, REL * d3.e.b);
+}

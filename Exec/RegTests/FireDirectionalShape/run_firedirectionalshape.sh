@@ -7,7 +7,7 @@
 set -u
 EXE=${1:?usage: run_firedirectionalshape.sh /path/to/erf_exec [extra args]}
 shift || true
-VARIANTS="isotropic projection projection_key ellipse"
+VARIANTS="isotropic projection projection_key ellipse ellipse_anderson"
 
 for v in $VARIANTS; do
     if [ "${SKIP_RUN:-0}" = "1" ] && [ -f "run_$v.log" ]; then continue; fi

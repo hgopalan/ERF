@@ -366,6 +366,16 @@ struct FireParams
     // macarthur, cheney_gould and fbp.
     int               directional_shape   = 0;
 
+    // Flank rule of that ellipse, erf.fire.directional_ellipse_lw. "model" (0,
+    // default) keeps the model's no-wind, no-slope rate at the flanks, so the
+    // length-to-width ratio (R_h/R0 + 1)/2 is not capped. "anderson" (1) sets the
+    // flank rate from Anderson's (1983) ratio at the effective wind speed (the
+    // wind that alone would give the combined head rate, so a slope elongates
+    // the fire too), capped at directional_ellipse_lw_max; head and back rates
+    // are unchanged. Needs directional_shape = "ellipse".
+    int               directional_ellipse_lw     = 0;
+    amrex::Real       directional_ellipse_lw_max = 8.0;  ///< Cap on that ratio (Anderson's fit saturates at 8)
+
     // Horizontal interpolation of the atmospheric wind onto the fire grid:
     // 0 = nearest atmospheric column (every fire cell in a column shares one
     // wind vector), 1 = bilinear between the four surrounding columns.
@@ -867,6 +877,23 @@ struct FireParams
                directional_shape = 1;
            } else {
                amrex::Abort("erf.fire.directional_shape must be \"projection\" or \"ellipse\"");
+           }
+
+           std::string lw_str = (directional_ellipse_lw == 1) ? "anderson" : "model";
+           pp.query("directional_ellipse_lw", lw_str);
+           pp.query("directional_ellipse_lw_max", directional_ellipse_lw_max);
+           if (lw_str == "model") {
+               directional_ellipse_lw = 0;
+           } else if (lw_str == "anderson") {
+               directional_ellipse_lw = 1;
+           } else {
+               amrex::Abort("erf.fire.directional_ellipse_lw must be \"model\" or \"anderson\"");
+           }
+           if (directional_ellipse_lw == 1 && directional_shape != 1) {
+               amrex::Abort("erf.fire.directional_ellipse_lw = \"anderson\" needs erf.fire.directional_shape = \"ellipse\"");
+           }
+           if (directional_ellipse_lw_max < 1.0) {
+               amrex::Abort("erf.fire.directional_ellipse_lw_max must be >= 1");
            }
        }
 
