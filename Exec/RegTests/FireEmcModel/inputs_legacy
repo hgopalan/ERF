@@ -1,0 +1,3 @@
+FILE = inputs_base
+
+# Dry air, legacy curves by default: the historical behaviour.

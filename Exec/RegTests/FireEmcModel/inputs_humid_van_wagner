@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# Air at about 40 % RH (9 g/kg water vapour at 300 K), Van Wagner and Pickett curves.
+erf.moisture_model = "Kessler_NoRain"
+erf.input_sounding_file = "input_sounding_humid"
+erf.fire.emc_model = "van_wagner"

@@ -121,6 +121,12 @@ erf.fire.stick.radius_cm = 0.15 0.635 2.5    # 1-h, 10-h, 100-h [cm]
 erf.fire.stick.rain_surface_moisture = 0.35
 erf.fire.stick.diffusivity_scale = 1.0
 
+# Equilibrium moisture curves the dead classes relax toward (both update models):
+# "legacy" (default; adsorption/desorption quartics of unknown origin, see
+# Source/Fire/ERF_FuelMoisture.H) or "van_wagner" (Van Wagner and Pickett 1985
+# drying and wetting EMC, temperature dependent, the pair WRF-SFIRE uses)
+erf.fire.emc_model = "legacy"
+
 # ============================================================================
 # FUEL MOISTURE: DYNAMIC MOISTURE (Phase 4)
 # ============================================================================

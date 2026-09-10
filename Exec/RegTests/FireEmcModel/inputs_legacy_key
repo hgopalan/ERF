@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# Same with the key written out: must reproduce inputs_legacy exactly.
+erf.fire.emc_model = "legacy"
