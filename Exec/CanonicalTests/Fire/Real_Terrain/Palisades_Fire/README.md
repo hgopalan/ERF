@@ -138,6 +138,15 @@ into `erf.fire.fuel_map.file` in the same ESRI ASCII form `gen_palisades.py`
 writes.
 
 ## What building it found
+**The sounding's surface pressure was written in Pa.** ERF's `input_sounding`
+reads the first value of the first line in hPa, as WRF does, and multiplies it by
+100. `gen_palisades.py` wrote `101325.0`, so until 2026-09-11 the atmosphere
+started at about 100 atmospheres: the start-up log reported a surface dry air
+density of 31.45 kg/m^3, and theta = 300 K meant a temperature of about 1120 K.
+The sound speed that follows set the terrain-aware compressible estimate at
+0.217 s. The file now starts `1013.25`, the density is 1.17 kg/m^3 and the same
+estimate is 0.414 s.
+
 **The fire never read `erf.fire.terrain_file_name`.** `ERF_FireParams.H` queried
 `terrain_file_name` under the `erf` prefix only, so the fire silently used the
 atmosphere's raster and the deck parameter did nothing. It went unnoticed because

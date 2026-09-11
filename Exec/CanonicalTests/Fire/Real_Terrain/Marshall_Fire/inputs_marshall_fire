@@ -44,9 +44,12 @@ erf.grid_stretching_ratio = 1.1
 # ATMOSPHERE
 # ============================================================================
 erf.anelastic = 0                 # fully compressible
-# The terrain-aware limits ERF reports at start-up are 0.46 s advective and
-# 0.11 s acoustic (35 m/s over 10 m cells on 0.48 slopes); 0.3 s keeps the
-# slow step at CFL 0.65 and the acoustic substepping is chosen automatically.
+# The terrain-aware limits ERF reports at start-up are 0.47 s advective and
+# 0.20 s acoustic (35 m/s over 10 m cells on 0.48 slopes); 0.3 s keeps the
+# slow step at CFL 0.63 and the acoustic substepping is chosen automatically
+# (4 substeps). Before the sounding's surface pressure was corrected to hPa
+# (2026-09-11) the atmosphere started at 1064 K, the acoustic limit read 0.11 s
+# and the automatic choice was 8 substeps.
 erf.fixed_dt = 0.3
 
 zlo.type = "surface_layer"
