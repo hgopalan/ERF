@@ -296,7 +296,9 @@ AMREX_GPU_DEVICE AMREX_FORCE_INLINE
 amrex::Real rothermel_ros_cell(
     amrex::Real ux_eff, amrex::Real uy_eff,
     amrex::Real sx, amrex::Real sy,
-    const RothermelComputed& rc) noexcept
+    const RothermelComputed& rc,
+    amrex::Real cos_theta_wind = amrex::Real(1.0),
+    amrex::Real cos_theta_slope = amrex::Real(1.0)) noexcept
 {
     // Effective wind speed [m/s]
     amrex::Real U_eff = std::sqrt(ux_eff*ux_eff + uy_eff*uy_eff);
@@ -320,6 +322,18 @@ amrex::Real rothermel_ros_cell(
 
     // Wind factor
     amrex::Real phi_w = rc.C * std::pow(U_eff_ftmin, rc.B) * rc.beta_ratio_E;
+
+    // WRF-Fire (fire_ros, module_fr_fire_phys.F) couples direction in by
+    // scaling the already-exponentiated wind/slope excess by the cosine to
+    // the spread direction, rather than projecting (ux_eff,uy_eff) before
+    // raising it to the B power. cos_theta_* = 1 (the default) reproduces the
+    // omnidirectional rate exactly, unchanged from before this parameter
+    // existed; a caller doing directional spread may pass the raw wind speed
+    // as (ux_eff,uy_eff) and the true cosine here instead, which keeps R
+    // linear in cos(theta) and so a convex (circle) support function instead
+    // of cos^B(theta) -- see ERF_DirectionalRos.H's file comment.
+    phi_w *= amrex::max(cos_theta_wind, amrex::Real(0.0));
+    phi_s *= amrex::max(cos_theta_slope, amrex::Real(0.0));
 
     // Rate of spread: R = R0 * (1 + φ_w + φ_s)
     amrex::Real ROS = rc.R0 * (1.0 + phi_w + phi_s);

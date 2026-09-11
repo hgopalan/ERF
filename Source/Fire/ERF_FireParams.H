@@ -32,6 +32,9 @@ struct FireParams
     amrex::Real       ignition_y          = 0.0;         ///< Ignition center y [m]
     amrex::Real       ignition_r          = 20.0;        ///< Ignition radius [m]
     amrex::Real       wind_ref_ht         = 6.1;         ///< MOST wind reference height [m]
+    bool              prescribed_wind     = false;       ///< Bypass atmospheric wind interpolation
+    amrex::Real       prescribed_wind_x   = 0.0;         ///< Constant reference wind, x [m/s]
+    amrex::Real       prescribed_wind_y   = 0.0;         ///< Constant reference wind, y [m/s]
     // Phase 13A: Per-fuel wind height
     bool              use_per_fuel_wind_ht = false; ///< Use per-fuel fcwh table for wind height
     amrex::Real       waf_fcz0_scale       = 1.0;   ///< Scale factor on fcz0 roughness for WAF [dimensionless]
@@ -385,6 +388,21 @@ struct FireParams
     // macarthur, cheney_gould and fbp.
     int               directional_shape   = 0;
 
+    // Angular coupling of the wind/slope factor into that projection,
+    // erf.fire.directional_wind_coupling. "projection" (0, default, backward
+    // compatible) projects the wind onto the spread direction before
+    // Rothermel's power-law wind factor, R(theta) ~ (U cos theta)^B -- this is
+    // the original behaviour, unchanged. "wrf" (1, opt-in) instead computes
+    // the wind/slope factor from the raw, unprojected speed and scales the
+    // result by the cosine afterward, matching WRF-Fire's fire_ros
+    // (module_fr_fire_phys.F): R(theta) is then linear in cos(theta), the
+    // convex support function of a circle, rather than cos^B(theta), which
+    // stops being convex once phi_w(B-1) > 1 and lets a finite line's ends
+    // grow a Wulff wedge that falls behind the head rate over time (see
+    // ERF_DirectionalRos.H). Rothermel with directional_shape = "projection"
+    // only; ignored otherwise (the ellipse path is already convex).
+    int               directional_wind_coupling = 0;
+
     // Flank rule of that ellipse, erf.fire.directional_ellipse_lw. "model" (0,
     // default) keeps the model's no-wind, no-slope rate at the flanks, so the
     // length-to-width ratio (R_h/R0 + 1)/2 is not capped. "anderson" (1) sets the
@@ -664,6 +682,9 @@ struct FireParams
        pp.query("ignition_y", ignition_y);
        pp.query("ignition_r", ignition_r);
        pp.query("wind_ref_ht", wind_ref_ht);
+       pp.query("prescribed_wind", prescribed_wind);
+       pp.query("prescribed_wind_x", prescribed_wind_x);
+       pp.query("prescribed_wind_y", prescribed_wind_y);
        pp.query("wind_sample_ht", wind_sample_ht);
        pp.query("wind_sample_z0", wind_sample_z0);
        if (wind_sample_ht > 0.0) {
@@ -927,6 +948,16 @@ struct FireParams
                directional_shape = 1;
            } else {
                amrex::Abort("erf.fire.directional_shape must be \"projection\" or \"ellipse\"");
+           }
+
+           std::string coupling_str = (directional_wind_coupling == 1) ? "wrf" : "projection";
+           pp.query("directional_wind_coupling", coupling_str);
+           if (coupling_str == "projection") {
+               directional_wind_coupling = 0;
+           } else if (coupling_str == "wrf") {
+               directional_wind_coupling = 1;
+           } else {
+               amrex::Abort("erf.fire.directional_wind_coupling must be \"projection\" or \"wrf\"");
            }
 
            std::string lw_str = (directional_ellipse_lw == 1) ? "anderson" : "model";

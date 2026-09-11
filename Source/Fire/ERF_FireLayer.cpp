@@ -622,17 +622,22 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     if (m_params.fire_debug)
         amrex::Print() << "[FIRE DEBUG] Starting fire advance step with dt=" << dt << std::endl;
 
-    const bool wind_open = m_params.structures.wind_open_columns && m_open_frac_atm && m_roof_h_atm;
-    fill_fire_wind_from_interpolation(*fire_wind_ref, *fire_wind_extract_z, xvel, yvel, z_phys_cc,
-                                      *fire_surface_z, *fire_col_ground,
-                                      m_fg, m_params.wind_ref_ht, m_nz,
-                                      m_use_per_fuel_wind_ht ? fire_fuel_model.get() : nullptr,
-                                      m_use_per_fuel_wind_ht ? m_d_fcwh.data() : nullptr,
-                                      m_use_per_fuel_wind_ht ? FUEL_SLOT_COUNT - 1 : 0,
-                                      m_params.wind_interp,
-                                      wind_open ? m_open_frac_atm.get() : nullptr,
-                                      wind_open ? m_roof_h_atm.get() : nullptr,
-                                      m_params.wind_sample_ht, m_params.wind_sample_z0);
+    if (m_params.prescribed_wind) {
+        fire_wind_ref->setVal(m_params.prescribed_wind_x, 0, 1, 0);
+        fire_wind_ref->setVal(m_params.prescribed_wind_y, 1, 1, 0);
+    } else {
+        const bool wind_open = m_params.structures.wind_open_columns && m_open_frac_atm && m_roof_h_atm;
+        fill_fire_wind_from_interpolation(*fire_wind_ref, *fire_wind_extract_z, xvel, yvel, z_phys_cc,
+                                          *fire_surface_z, *fire_col_ground,
+                                          m_fg, m_params.wind_ref_ht, m_nz,
+                                          m_use_per_fuel_wind_ht ? fire_fuel_model.get() : nullptr,
+                                          m_use_per_fuel_wind_ht ? m_d_fcwh.data() : nullptr,
+                                          m_use_per_fuel_wind_ht ? FUEL_SLOT_COUNT - 1 : 0,
+                                          m_params.wind_interp,
+                                          wind_open ? m_open_frac_atm.get() : nullptr,
+                                          wind_open ? m_roof_h_atm.get() : nullptr,
+                                          m_params.wind_sample_ht, m_params.wind_sample_z0);
+    }
     if (m_params.fire_debug) {
         if (m_params.wind_sample_ht > 0.0) {
             amrex::Print() << "[FIRE DEBUG] Wind sampled at " << m_params.wind_sample_ht
@@ -1002,7 +1007,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                                 ls_grad, m_params.directional_shape,
                                                 m_params.directional_ellipse_lw,
                                                 m_params.directional_ellipse_lw_max,
-                                                accel_factor.get());
+                                                accel_factor.get(),
+                                                m_params.directional_wind_coupling);
             } else if (m_params.levelset_ellipse) {
                 // Huygens ellipse: the model's rate is the head rate and the
                 // normal speed follows the ellipse set by the midflame wind.
