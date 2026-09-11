@@ -38,7 +38,7 @@ Header lines specify grid dimensions, geospatial coordinates, cell size, and the
 
 **FARSITE LCP Binary Format**
 
-FARSITE landscape files (.lcp) are binary rasters used in operational fire simulation. The reader extracts the fuel model layer (layer 2 in the LCP specification) and maps it to the fire grid. Cell dimensions must match the fire grid exactly.
+FARSITE landscape files (.lcp) are binary rasters used in operational fire simulation; LANDFIRE provides them and GDAL writes them (``gdal_translate -of LCP``). A file is a 7316-byte header (FARSITE's ``headdata``: the crown and ground fuel flags, the extent and per-theme summaries, then the column and row counts at bytes 4164 and 4168 and the cell size at byte 4208) followed by the cells, row by row from the north edge and west to east within a row. Each cell holds its 16-bit bands in turn: elevation, slope, aspect, fuel model and canopy cover; then stand height, crown base height and crown bulk density when the crown fuel flag is 21; then duff and coarse woody fuel when the ground fuel flag is 21. The reader takes the fuel model band of every cell, turns negative (no-data) codes into 0, and places the first row on the north edge of the fire grid. The landscape must have exactly as many columns and rows as the fire grid has cells, and the run stops with a message otherwise or when the header does not describe a complete landscape. Until 2026-09-11 the reader assumed a 256-byte header and layers stored one after another, so it rejected or misread real landscape files.
 
 Reference: Finney, M.A. (1998/2004). FARSITE: Fire Area Simulator. RMRS-RP-4.
 
@@ -184,7 +184,7 @@ Limitations
 
 - **Exact dimension match**: Fuel map grid dimensions must equal the fire grid dimensions exactly. No interpolation or regridding is performed.
 - **Permanent barriers**: Firebreak cells are stamped at initialization and remain non-burnable for the duration of the simulation. Barriers cannot evolve or be modified during the run.
-- **LCP layer extraction**: The FARSITE LCP reader extracts only the fuel model layer (layer 2). Elevation, aspect, slope, fuel moisture, and other LCP layers are not currently loaded.
+- **LCP layer extraction**: The FARSITE LCP reader extracts only the fuel model band of each cell. Elevation, aspect, slope, fuel moisture, and other LCP layers are not currently loaded.
 - **Valid fuel codes**: FBFM13 recognizes burnable fuel codes 1–13. Code 0 (nodata), code 14 and higher (out-of-range), and code -9999 (sentinel) are treated as non-burnable or invalid and default to the fallback ``fuel_model_id``.
 
 References

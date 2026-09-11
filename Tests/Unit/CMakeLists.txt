@@ -173,6 +173,7 @@ target_sources(${erf_exe_name}
 # the library, when the fire module is built.
 if(ERF_ENABLE_FIRE)
   target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestLcpReader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFarsiteSpreadAccumulation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireAcceleration.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestLevelSetEllipse.cpp
