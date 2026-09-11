@@ -693,6 +693,44 @@ function(add_test_fire_abort TEST_NAME SUITE_DIR INPUT_FILE EXPECTED_MESSAGE RUN
     set_tests_properties(${TEST_NAME} PROPERTIES LABELS "regression;fire")
 endfunction(add_test_fire_abort)
 
+# Fire fuel map row order: run INPUT_FILE of a fire suite under Exec/RegTests to
+# its step-0 fire plotfile and check fire_fuel_load at the south and north edges
+# along x = X with amrex_fextract (Tests/RunFireFuelMapRows.cmake). The deck must
+# load its ESRI ASCII map with erf.fire.fuel_map.load_from_map.
+function(add_test_fire_fuel_map_rows TEST_NAME SUITE_DIR INPUT_FILE X SOUTH_MIN SOUTH_MAX NORTH_MIN NORTH_MAX)
+    set(CURRENT_TEST_SOURCE_DIR ${PROJECT_SOURCE_DIR}/Exec/RegTests/${SUITE_DIR})
+    set(CURRENT_TEST_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
+    file(MAKE_DIRECTORY ${CURRENT_TEST_BINARY_DIR})
+    file(GLOB TEST_FILES "${CURRENT_TEST_SOURCE_DIR}/*")
+    file(COPY ${TEST_FILES} DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+    string(REPLACE "amrex_fcompare" "amrex_fextract" FEXTRACT_EXE "${FCOMPARE_EXE}")
+
+    add_test(${TEST_NAME} ${CMAKE_COMMAND}
+        -DMPIEXEC=${MPIEXEC_EXECUTABLE}
+        -DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}
+        -DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}
+        -DNRANKS=${ERF_TEST_NRANKS}
+        -DTEST_EXE=${TEST_EXE}
+        -DFEXTRACT=${FEXTRACT_EXE}
+        -DINPUT=${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE}
+        -DWORKING_DIRECTORY=${CURRENT_TEST_BINARY_DIR}
+        -DX=${X}
+        -DSOUTH_MIN=${SOUTH_MIN}
+        -DSOUTH_MAX=${SOUTH_MAX}
+        -DNORTH_MIN=${NORTH_MIN}
+        -DNORTH_MAX=${NORTH_MAX}
+        -P ${PROJECT_SOURCE_DIR}/Tests/RunFireFuelMapRows.cmake)
+    set_tests_properties(${TEST_NAME}
+        PROPERTIES
+        TIMEOUT 600
+        PROCESSORS ${ERF_TEST_NRANKS}
+        WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+        LABELS "regression;fire"
+        ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/run.log")
+endfunction(add_test_fire_fuel_map_rows)
+
 # Stationary test -- compare with time 0
 function(add_test_0 TEST_NAME TEST_DIR TEST_EXE PLTFILE)
     set(options )
@@ -1079,6 +1117,16 @@ add_test_fire(FireLevelSetPropagation       LevelSetPropagation   inputs        
 # fire without a surface layer at zlo must stop at start-up, not crash in the first step
 add_test_fire_abort(FireNoSurfaceLayer_abort  FireRestart           inputs_levelset_straight
     "The fire module requires a surface layer" "zlo.type=SlipWall")
+# a fuel map is placed by cell index, so it must have the fire grid's size
+add_test_fire_abort(FireFuelMapSize_abort     FireScottBurgan       inputs_sb_map
+    "has 256 x 128 cells but the fire grid has 128 x 64" "erf.fire.grid_ratio=2")
+# the first data row of an ESRI ASCII fuel map is the north edge: the sb_map deck's
+# map puts TL3 (1.2329 kg/m2) along the north and NB8 water (no fuel) along the south
+# execute_process needs mpiexec, and does not expand the executable globs used on Windows
+if(ERF_ENABLE_MPI AND NOT WIN32)
+add_test_fire_fuel_map_rows(FireScottBurgan_map_rows FireScottBurgan inputs_sb_map 100
+    -0.000001 0.000001 1.2329 1.2330)
+endif()
 if(ERF_ENABLE_DUST)
 add_test_fire(FireRestart_dust_straight     FireRestart           inputs_dust_straight       40 NRANKS 1)
 endif()

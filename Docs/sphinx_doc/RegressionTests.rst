@@ -625,6 +625,17 @@ and a 20-cell domain has no two-rank decomposition that does.
 with the fire module's message that it requires a surface layer at the bottom
 boundary. Without that check the run crashed in the first step.
 
+``FireFuelMapSize_abort`` reruns the ``FireScottBurgan`` map deck with
+``erf.fire.grid_ratio=2``, which halves the fire grid under its 256 x 128 fuel
+map, and passes when the run stops at start-up with the message that the map
+must have the fire grid's size. ``FireScottBurgan_map_rows`` (MPI builds, not
+Windows) runs the same deck to its step-0 fire plotfile, extracts the
+``fire_fuel_load`` profile along x = 100 m with ``amrex_fextract``, and requires
+the TL3 load (1.2329 kg/m²) on the northernmost fire cell and none on the
+southernmost: the map's first data row lies in its TL3 band and its last in the
+NB8 water. Until 2026-09-11 the reader put the first data row on the south edge,
+which fails both checks.
+
 PBL start-up check
 ------------------
 ``ABL_MRF_ZSplit_abort`` reruns the ``ABL_MRF_Tiling`` deck on one rank with

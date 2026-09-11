@@ -34,7 +34,9 @@ This is a simple, human-readable raster format. File structure:
     ...
     <row N of integer codes>
 
-Header lines specify grid dimensions, geospatial coordinates, cell size, and the sentinel value for missing/invalid cells. Data rows are ordered from north (highest y-coordinate) to south (lowest y-coordinate), following the ESRI standard convention. The ERF fire reader reverses this row order internally to match fire domain coordinates (south to north), ensuring that cell (i, j) in the fire grid is correctly mapped to its corresponding fuel model code.
+Header lines specify grid dimensions, geospatial coordinates, cell size, and the sentinel value for missing/invalid cells. Data rows are ordered from north (highest y-coordinate) to south (lowest y-coordinate), following the ESRI standard convention. The ERF fire reader reverses this row order internally to match fire domain coordinates (south to north), ensuring that cell (i, j) in the fire grid is correctly mapped to its corresponding fuel model code: the first data row lands on the north edge of the fire grid. Until 2026-09-11 the reader put the first data row on the south edge instead, so a map written in this convention was mirrored north to south.
+
+The map is placed by cell index, not by coordinates. It must have exactly as many columns and rows as the fire grid has cells in x and y, and the run stops with a message otherwise. The corner in the header is not used, and a ``cellsize`` different from the fire cell size is reported as a warning. For a real-terrain case, ``Exec/Tools/make_landfire_fuel_map.py`` puts a LANDFIRE fuel raster on the fire grid in this form.
 
 **FARSITE LCP Binary Format**
 
