@@ -91,7 +91,7 @@ of four acoustic substeps. A 30-minute run at 0.3 s is stable as well (all six
 checks pass and the advective estimate never drops below 0.79 s), but the spotting
 interval and the level-set reinitialisation are counted in steps, so at 0.3 s
 embers launch every 60 s instead of every 40 s and the fire burns less: 816 ha at
-30 minutes. The deck was first built on a sounding whose surface pressure was in
+30 minutes instead of 1235 ha. The deck was first built on a sounding whose surface pressure was in
 Pa (see below), which put the acoustic estimate at 0.217 s; four substeps of
 0.075 s then exceeded the 0.072 s each may take, which is most likely why 0.3 s
 failed at the time. `stop_time = 11268` is the demo's 3.13 hours, which is 56,340
@@ -116,7 +116,7 @@ on ten ranks, and the same deck with grass instead of chaparral:
 
 | fuel | head ROS | burned at 30 min | perimeter |
 |---|---|---|---|
-| Anderson 4, chaparral, 3 % moisture (the deck) | 3.9 m/s | 1310 ha, 3236 acres | 31.4 km |
+| Anderson 4, chaparral, 3 % moisture (the deck) | 3.1 m/s | 1235 ha, 3051 acres | 27.2 km |
 | Anderson 1, short grass, 4 % moisture | 1.0 m/s | 69 ha, 170 acres | 7.7 km |
 
 - The atmosphere is stable at 0.2 s steps on the fitted mesh; the fire runs as a
