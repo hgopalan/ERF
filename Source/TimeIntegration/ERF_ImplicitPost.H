@@ -4,6 +4,12 @@
         const bool l_do_implicit_ke    = solverChoice.implicit_ke_diffusion;
         const bool l_do_implicit_moist = solverChoice.implicit_moisture_diffusion;
         const Real l_vert_implicit_fac = solverChoice.vert_implicit_fac[level][nrk];
+        // The anelastic second stage is trapezoidal: the explicit update
+        // averages the first-stage tendency (recovered from the state
+        // difference, so it already carries the first stage's implicit
+        // increment) with the new one, and the implicit operator on this
+        // stage therefore acts with half the step.
+        const double l_post_dt = (solverChoice.anelastic[level] && nrk == 1) ? 0.5 * slow_dt : slow_dt;
         if ( l_vert_implicit_fac > zero ) {
 
             const bool l_use_turb         = solverChoice.turbChoice[level].use_kturb;
@@ -35,19 +41,19 @@
 
                     if (l_use_stretched_dz) {
                         ImplicitDiffForStateLU_S(bx, fine_geom.Domain(), level, RhoKE_comp,
-                                                 slow_dt, l_bc_neumann_vals_d, cell_data,
+                                                 l_post_dt, l_bc_neumann_vals_d, cell_data,
                                                  stretched_dz_d[level], Array4<const Real>{},
                                                  mu_turb, solverChoice,
                                                  bc_ptr_h, l_use_SurfLayer, l_vert_implicit_fac);
                     } else if (l_use_terrain_fitted_coords) {
                         ImplicitDiffForStateLU_T(bx, fine_geom.Domain(), level, RhoKE_comp,
-                                                 slow_dt, l_bc_neumann_vals_d, cell_data,
+                                                 l_post_dt, l_bc_neumann_vals_d, cell_data,
                                                  z_nd_arr, detJ_arr, dxInv, Array4<const Real>{},
                                                  mu_turb, solverChoice,
                                                  bc_ptr_h, l_use_SurfLayer, l_vert_implicit_fac);
                     } else { // no terrain
                         ImplicitDiffForStateLU_N(bx, fine_geom.Domain(), level, RhoKE_comp,
-                                                 slow_dt, l_bc_neumann_vals_d, cell_data,
+                                                 l_post_dt, l_bc_neumann_vals_d, cell_data,
                                                  dxInv, Array4<const Real>{}, mu_turb, solverChoice,
                                                  bc_ptr_h, l_use_SurfLayer, l_vert_implicit_fac);
                     }
@@ -82,21 +88,21 @@
                                                 && (solverChoice.turbChoice[level].pbl_type == PBLType::MRF);
                      if (l_use_stretched_dz) {
                          ImplicitDiffForStateLU_S(bx, fine_geom.Domain(), level, RhoQ1_comp,
-                                                  slow_dt, l_bc_neumann_vals_d, cell_data,
+                                                  l_post_dt, l_bc_neumann_vals_d, cell_data,
                                                   stretched_dz_d[level], q1fx_z,
                                                   mu_turb, solverChoice,
                                                   bc_ptr_h, l_use_SurfLayer, l_vert_implicit_fac,
                                                   l_use_mrf_cg);
                      } else if (l_use_terrain_fitted_coords) {
                          ImplicitDiffForStateLU_T(bx, fine_geom.Domain(), level, RhoQ1_comp,
-                                                  slow_dt, l_bc_neumann_vals_d, cell_data,
+                                                  l_post_dt, l_bc_neumann_vals_d, cell_data,
                                                   z_nd_arr, detJ_arr, dxInv, q1fx_z,
                                                   mu_turb, solverChoice,
                                                   bc_ptr_h, l_use_SurfLayer, l_vert_implicit_fac,
                                                   l_use_mrf_cg);
                      } else { // no terrain
                          ImplicitDiffForStateLU_N(bx, fine_geom.Domain(), level, RhoQ1_comp,
-                                                  slow_dt, l_bc_neumann_vals_d, cell_data,
+                                                  l_post_dt, l_bc_neumann_vals_d, cell_data,
                                                   dxInv, q1fx_z, mu_turb, solverChoice,
                                                   bc_ptr_h, l_use_SurfLayer, l_vert_implicit_fac,
                                                   l_use_mrf_cg);

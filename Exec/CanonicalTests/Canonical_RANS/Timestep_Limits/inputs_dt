@@ -1,0 +1,87 @@
+# ------------------  INPUTS TO MAIN PROGRAM  -------------------
+# Largest stable time step of the vertical eddy diffusion: a neutral ABL
+# column on a coarse horizontal grid with a fine vertical grid, as in a
+# RANS setup. The closure (kEqn, Deardorff, MRF), the integrator (explicit
+# anelastic, implicit anelastic, implicit compressible), the time step and
+# the restart are all set on the command line by sweep_dt.py; this deck
+# alone runs 40 steps with no closure.
+erf.prob_name = "ABL"
+
+erf.anelastic     = 1
+erf.use_fft       = true
+erf.vert_implicit = false
+
+max_step  = 40
+stop_time = 1.0e9
+
+amrex.fpe_trap_invalid = 0
+
+fabarray.mfiter_tile_size = 1024 1024 1024
+
+# PROBLEM SIZE & GEOMETRY
+geometry.prob_extent = 3200   3200   1000
+amr.n_cell           =    4      4    200     # dx = 800 m, dz = 5 m, first cell centre 2.5 m
+amr.max_grid_size    = 256
+amr.blocking_factor  = 4
+
+geometry.is_periodic = 1 1 0
+
+# MOST BOUNDARY (adiabatic: neutral surface)
+zlo.type      = "surface_layer"
+erf.most.z0   = 0.1
+
+zhi.type       = "SlipWall"
+zhi.theta_grad = 0.03   # [K/m], matches the sounding above the inversion
+
+# INITIALIZATION
+erf.init_type           = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type       = "Ideal"
+
+# TIME STEP CONTROL
+erf.fixed_dt = 1.0
+
+# DIAGNOSTICS & VERBOSITY
+erf.v = 1
+amr.v = 0
+
+# REFINEMENT / REGRIDDING
+amr.max_level = 0
+
+# CHECKPOINT AND PLOT FILES
+erf.check_file  = chk
+erf.check_int   = -1
+erf.plot_file_1 = plt
+erf.plot_int_1  = -1
+erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta Kmv Khv
+
+# SOLVER CHOICE
+erf.dycore_horiz_adv_type  = "Upwind_5th"
+erf.dycore_vert_adv_type   = "Upwind_3rd"
+erf.dryscal_horiz_adv_type = "Upwind_5th"
+erf.dryscal_vert_adv_type  = "Upwind_3rd"
+
+erf.use_gravity  = true
+erf.use_coriolis = true
+erf.coriolis_3d  = false
+erf.latitude     = 90.0
+erf.rotational_time_period = 125663.7061435917   # f = 1e-4 1/s
+
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind    = 10.0 0.0 0.0
+
+erf.molec_diff_type = "None"
+
+# TURBULENCE MODELING: chosen on the command line by sweep_dt.py
+erf.les_type  = "None"
+erf.rans_type = "None"
+erf.pbl_type  = "None"
+erf.theta_ref = 300.0
+
+# PROBLEM PARAMETERS: no perturbations
+prob.pert_deltaU   = 0.0
+prob.pert_deltaV   = 0.0
+prob.T_0_Pert_Mag  = 0.0
+prob.U_0_Pert_Mag  = 0.0
+prob.V_0_Pert_Mag  = 0.0
+prob.W_0_Pert_Mag  = 0.0

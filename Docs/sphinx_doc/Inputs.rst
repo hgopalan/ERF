@@ -787,7 +787,14 @@ List of Parameters
 |                                      | where ``anelastic`` = 1                                  |                    |                   |
 +--------------------------------------+----------------------------------------------------------+--------------------+-------------------+
 | **erf.vert_implicit**                | Do vertical implicit solve for diffusion of u, v, theta, | Boolean            | true              |
-|                                      | KE, and qv with default time-centering in each stage     |                    |                   |
+|                                      | KE, and qv with default time-centering in each stage.    |                    |                   |
+|                                      | Under the anelastic integrator the solve is off unless   |                    |                   |
+|                                      | this flag (or ``erf.vert_implicit_fac``) is given in the |                    |                   |
+|                                      | inputs; u, v, theta, KE and qv are then all solved       |                    |                   |
+|                                      | implicitly, the momenta before the projection. The       |                    |                   |
+|                                      | column solve needs every level-0 box to span the full    |                    |                   |
+|                                      | column: the z entry of ``amr.max_grid_size`` must not be |                    |                   |
+|                                      | below ``amr.n_cell`` in z (the run aborts otherwise)     |                    |                   |
 +--------------------------------------+----------------------------------------------------------+--------------------+-------------------+
 | **erf.vert_implicit_fac**            | time-centering factor for the vertical diffusive terms,  | 1 or 3 Reals in    | 1.0 1.0 0.0       |
 |                                      | where 0 is fully explicit and 1 is fully implicit.       | [0,1]              |                   |
@@ -1633,8 +1640,37 @@ List of Parameters
 | **erf.max_geom_lscale**          | upper bound [m] on the geometric mixing length           | Real > 0           | 30.0             |
 |                                  | (per-level)                                              |                    |                  |
 +----------------------------------+----------------------------------------------------------+--------------------+------------------+
-| **erf.dirichlet_k**              | impose a Dirichlet condition on the turbulent kinetic    | Boolean            | false            |
-|                                  | energy at the wall (per-level)                           |                    |                  |
+| **erf.dirichlet_k**              | k-equation RANS under a surface layer: set the turbulent | Boolean            | false            |
+|                                  | kinetic energy of the first cell above the wall from u*  |                    |                  |
+|                                  | and t* (Axell & Liungman 2001, Eq. 16) and hold it       |                    |                  |
+|                                  | through the step (per-level)                             |                    |                  |
++----------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.tke_floor**                | runtime floor on the turbulent kinetic energy [m^2/s^2]  | Real >= 0          | 0 (machine       |
+|                                  | in the k-equation update and the RANS closure; distinct  |                    | epsilon on rho k)|
+|                                  | from ``erf.tke_min``, the initial value (per-level)      |                    |                  |
++----------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.implicit_tke_dissipation** | Deardorff or k-equation RANS: treat the TKE dissipation  | Boolean            | false            |
+|                                  | implicitly, eps = (C k_old^1/2 / L) k_new folded into    |                    |                  |
+|                                  | the update, which removes the dissipation time-step      |                    |                  |
+|                                  | limit near the wall (per-level)                          |                    |                  |
++----------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.rans_consistent_diffusivit-| k-equation RANS: horizontal heat, scalar and moisture    | Boolean            | false            |
+| ies**                            | diffusivities follow the scalar stability function       |                    |                  |
+|                                  | (Axell & Liungman Eq. 32) like the vertical heat         |                    |                  |
+|                                  | diffusivity, instead of Pr_t and Sc_t times the eddy     |                    |                  |
+|                                  | viscosity (per-level)                                    |                    |                  |
++----------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.rans_lscale_from_pblh**    | k-equation RANS: cap the geometric length at kappa times | Boolean            | false            |
+|                                  | 0.1 times the diagnosed PBL height (needs                |                    |                  |
+|                                  | ``erf.most.pblh_calc = MYNN25``), clamped to             |                    |                  |
+|                                  | [``erf.rans_lscale_min``, ``erf.max_geom_lscale``]       |                    |                  |
+|                                  | (per-level)                                              |                    |                  |
++----------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.rans_lscale_min**          | lower bound [m] of the PBL-height cap above (per-level)  | Real > 0           | 1.0              |
++----------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.wall_dist_type**           | wall distance for RANS on a terrain-fitted mesh:         | "poisson",         | "poisson"        |
+|                                  | Tucker (2003) Poisson distance, or the height above the  | "terrain_height"   |                  |
+|                                  | local surface projected on its normal (no linear solve)  |                    |                  |
 +----------------------------------+----------------------------------------------------------+--------------------+------------------+
 
 Note: in the equations for the evolution of momentum, potential temperature and advected scalars, the

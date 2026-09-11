@@ -950,6 +950,13 @@ struct SolverChoice {
         // *******************************************************************************
 
         pp.queryAdd("ncorr", ncorr);
+        // Wall distance on a terrain-fitted mesh (RANS): "poisson" (Tucker 2003
+        // differential-equation distance) or "terrain_height" (height above the
+        // local surface projected on its normal, no linear solve)
+        pp.queryAdd("wall_dist_type", wall_dist_type);
+        if (wall_dist_type != "poisson" && wall_dist_type != "terrain_height") {
+            amrex::Error("erf.wall_dist_type must be poisson or terrain_height");
+        }
         pp.queryAdd("poisson_abstol", poisson_abstol);
         pp.queryAdd("poisson_reltol", poisson_reltol);
 #ifdef AMREX_USE_FLOAT
@@ -1306,6 +1313,8 @@ struct SolverChoice {
         } // uses_shoc_family
 
         // Do not allow implicit vertical diff if user turns it off
+        // (queried before queryAdd, which would enter the default into the table)
+        const bool user_set_vert_implicit = pp.contains("vert_implicit") || pp.contains("vert_implicit_fac");
         bool do_vert_implicit = true;
         pp.queryAdd("vert_implicit", do_vert_implicit);
         if (!do_vert_implicit) {
@@ -1317,10 +1326,21 @@ struct SolverChoice {
             }
         }
 
-        // Do not allow implicit vertical diff with anelastic
+        // Anelastic: every solve works as it does with substepping. The theta
+        // and momentum solves are folded into the slow tendency before the
+        // stage update (so under anelastic the momenta are diffused and then
+        // projected, which is the order the divergence constraint needs), the
+        // KE and moisture solves act on the stage result, and all of them take
+        // half the step on the trapezoidal second stage. Only w stays explicit
+        // unless ERF_IMPLICIT_W is built in, as in the compressible path.
+        // The solve is opt-in under anelastic (erf.vert_implicit = true or an
+        // explicit erf.vert_implicit_fac) so that existing anelastic runs keep
+        // their fully explicit answer.
         for (int lev = 0; lev <= max_level; lev++) {
-            if (anelastic[lev]) {
-                amrex::Print() << "Turning off native vertical implicit solve flag because anelastic at level " << lev << std::endl;
+            if (anelastic[lev] && do_vert_implicit && !user_set_vert_implicit) {
+                amrex::Print() << "Anelastic at level " << lev
+                               << ": vertical diffusion stays explicit; set erf.vert_implicit = true "
+                               << "for the implicit column solve" << std::endl;
                 vert_implicit_fac[lev][0] = zero;
                 vert_implicit_fac[lev][1] = zero;
                 vert_implicit_fac[lev][2] = zero;
@@ -1894,6 +1914,7 @@ struct SolverChoice {
     bool implicit_before_substep     = true;
 
     int         ncorr               = 1;
+    std::string wall_dist_type      = "poisson";
 #ifdef AMREX_USE_FLOAT
     amrex::Real poisson_abstol      = amrex::Real(1e-6);
     amrex::Real poisson_reltol      = amrex::Real(1e-6);

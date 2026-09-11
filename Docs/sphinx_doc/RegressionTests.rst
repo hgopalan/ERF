@@ -539,6 +539,45 @@ Problem Location: ``Exec/CanonicalTests/DensityCurrent``
 
 .. _`Exec/CanonicalTests/DensityCurrent`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/DensityCurrent
 
+Canonical RANS
+---------------------------
+Five cases exercise the one-equation :math:`k` RANS closure (see :ref:`RANS`)
+on flat ground (neutral, stable and convective boundary layers) and on
+terrain-fitted meshes (a 2D ridge and a 3D hill), each for 40 steps. Every
+entry then runs the case's Python check script, which reads the plotfile
+with a standard-library AMReX reader, averages or samples the fields, and
+compares numbers against stated targets with tolerances: wall distance
+against the exact distance to the terrain, length scale against its bounds,
+the wall value of :math:`k` against :math:`u_*^2 / (c_\mu^0)^2`, dissipation
+against AL01 Eq. 19, and, in the longer physics runs documented in each
+case's README, the log law, GABLS1 depths and jets, the convective heat
+budget and the hill-top speed-up. The script's exit code is the verdict; a
+clean exit alone never passes a test. The ``_Poisson`` variants run the
+terrain cases with the Poisson wall distance instead of the terrain height.
+
+Test names: ``RANS_Neutral_ABL_Flat`` (and ``_Implicit``, the same deck at
+dt = 10 s with the implicit column solve of momentum, theta and KE),
+``RANS_Stable_ABL_Flat``, ``RANS_Convective_ABL_Flat``,
+``RANS_Neutral_Hill_2D`` (and ``_Poisson``),
+``RANS_Flat_Fitted_2D`` (and ``_Poisson``), ``RANS_Neutral_Hill_3D`` (and
+``_Poisson``); label ``rans``.
+
+A sixth case, ``Timestep_Limits``, measures the largest stable time step of
+the vertical eddy diffusion on a neutral 4 x 4 x 200 column (dx = 800 m,
+dz = 5 m) for the :math:`k` closure, Deardorff and MRF under explicit
+anelastic, implicit anelastic and implicit compressible integration. Its
+driver spins each closure up for 1 h, restarts from the checkpoint over a
+ladder of time steps from 0.125 s to 1024 s, and checks that the explicit
+step lies within a factor 2 of :math:`\Delta z^2 / (2 K)` and that both
+implicit integrators reach at least eight times that step. Test names:
+``RANS_Timestep_Limits_kEqn``, ``RANS_Timestep_Limits_Deardorff``,
+``RANS_Timestep_Limits_MRF``; labels ``rans`` and ``dt_sweep``, not
+``regression``, since each entry makes about 30 short ERF runs.
+
+Problem Location: `Exec/CanonicalTests/Canonical_RANS`_
+
+.. _`Exec/CanonicalTests/Canonical_RANS`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/Canonical_RANS
+
 Ekman Spiral
 ---------------------------
 The Ekman spiral problem tests the computation of the stress term internally and at no-slip walls, as well as Coriolis and geostrophic forcing.
