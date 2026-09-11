@@ -47,6 +47,14 @@ erf.plot_int_1  = 1
 erf.plot_vars_1 = z_phys detJ
 
 # SOLVER CHOICE
+# No column solve, so ERF-Hazard keeps the fine grids split in z: a level with the
+# implicit acoustic substep (the compressible default), implicit vertical diffusion or a
+# surface layer has its stacked fine boxes joined into whole columns (hgopalan/ERF#404),
+# which would leave nothing to compare. The grids are made before the implicit vertical
+# diffusion is switched off for want of any diffusion, so it is turned off here as well.
+# Only step 0 is run, so neither solve is ever used.
+erf.substepping_type = None
+erf.vert_implicit    = false
 erf.use_gravity     = true
 erf.molec_diff_type = "None"
 erf.les_type        = "None"
