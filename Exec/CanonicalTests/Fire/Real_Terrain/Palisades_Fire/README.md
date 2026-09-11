@@ -140,7 +140,8 @@ hour, still ahead of the demo's average rate. Reproducing the 600 acres would
 need the demo's own fuel map, most likely one with the urban and irrigated parts
 of the Palisades marked non-burnable rather than a single model over all the
 vegetated land. Set `erf.fire.fuel_model_id = 1` with
-`erf.fire.rothermel_per_fuel = 0` for the grass row above; a real fuel map drops
+`erf.fire.rothermel_per_fuel = 0` and `erf.fire.moisture_1hr = 0.04` for the
+grass row above; a real fuel map drops
 into `erf.fire.fuel_map.file` in the same ESRI ASCII form `gen_palisades.py`
 writes.
 
