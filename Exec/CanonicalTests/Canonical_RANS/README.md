@@ -22,8 +22,10 @@ record is `PLAN.md` and the numbers per phase are in `RESULTS.md`.
   (`erf_plotfile.py`, standard library only) and prints one row per check:
   measured value, target, tolerance, pass. Its exit code is the verdict.
   `--smoke` runs the structural checks that must hold after a few steps
-  (the CTest entries, `ctest -L rans`); `--physics` adds the checks that
-  need the converged run in the table above.
+  (the CTest entries, `ctest -L rans`; the flat entries pass
+  `erf.use_fft=false` and the terrain entries exist only in FFT builds);
+  `--physics` adds the checks that need the converged run in the table
+  above.
 - `Timestep_Limits` has no `check_<case>.py`: its `sweep_dt.py` runs ERF
   itself (spin-up, then a restart per time step) and applies the checks
   listed in its README (`ctest -L dt_sweep`, not part of `regression`).
