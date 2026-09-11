@@ -35,8 +35,12 @@ erf.initial_dz            = 10.0
 erf.grid_stretching_ratio = 1.03
 erf.anelastic = 0                 # fully compressible
 
-# The compressible limit on this fitted mesh is about 0.217 s; 0.2 keeps margin
-# as the plume steepens the near-ground cells.
+# ERF reports terrain-aware estimates of 0.81 s advective and 0.41 s acoustic at
+# start-up; the acoustic substepping takes the minimum 4 substeps. A 30-minute
+# run at 0.3 s is stable too, but the spotting interval and the level-set
+# reinitialisation are counted in steps, so 0.3 s launches embers every 60 s
+# instead of 40 s and burns less. (The 0.217 s acoustic estimate quoted here
+# before 2026-09-11 came from a sounding whose surface pressure was in Pa.)
 erf.fixed_dt = 0.2
 
 # ============================================================ boundaries and closure

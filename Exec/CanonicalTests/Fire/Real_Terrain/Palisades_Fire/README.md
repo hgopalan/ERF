@@ -85,9 +85,16 @@ to 6463 m) and the fire grid 800 x 800 (640,000). The demo quoted approximately
 four-GPU node, and box lengths that divide by the grid ratio of 10 as the fire
 module requires.
 
-The slow step is 0.2 s. The compressible limit on this fitted mesh is about
-0.217 s, so 0.3 s, which `Marshall_Fire` uses on its gentler 100 m mesh, is
-unstable here. `stop_time = 11268` is the demo's 3.13 hours, which is 56,340
+The slow step is 0.2 s. ERF reports terrain-aware estimates of 0.81 s advective
+and 0.41 s acoustic at start-up, and the automatic substepping takes the minimum
+of four acoustic substeps. A 30-minute run at 0.3 s is stable as well (all six
+checks pass and the advective estimate never drops below 0.79 s), but the spotting
+interval and the level-set reinitialisation are counted in steps, so at 0.3 s
+embers launch every 60 s instead of every 40 s and the fire burns less: 816 ha at
+30 minutes. The deck was first built on a sounding whose surface pressure was in
+Pa (see below), which put the acoustic estimate at 0.217 s; four substeps of
+0.075 s then exceeded the 0.072 s each may take, which is most likely why 0.3 s
+failed at the time. `stop_time = 11268` is the demo's 3.13 hours, which is 56,340
 steps: this is an overnight run on CPUs and the reason the demo used GPUs. For a
 first look set `stop_time = 1800`.
 
