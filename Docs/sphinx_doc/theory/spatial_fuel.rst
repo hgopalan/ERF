@@ -34,11 +34,13 @@ This is a simple, human-readable raster format. File structure:
     ...
     <row N of integer codes>
 
-Header lines specify grid dimensions, geospatial coordinates, cell size, and the sentinel value for missing/invalid cells. Data rows are ordered from north (highest y-coordinate) to south (lowest y-coordinate), following the ESRI standard convention. The ERF fire reader reverses this row order internally to match fire domain coordinates (south to north), ensuring that cell (i, j) in the fire grid is correctly mapped to its corresponding fuel model code.
+Header lines specify grid dimensions, geospatial coordinates, cell size, and the sentinel value for missing/invalid cells. Data rows are ordered from north (highest y-coordinate) to south (lowest y-coordinate), following the ESRI standard convention. The ERF fire reader reverses this row order internally to match fire domain coordinates (south to north), ensuring that cell (i, j) in the fire grid is correctly mapped to its corresponding fuel model code: the first data row lands on the north edge of the fire grid. Until 2026-09-11 the reader put the first data row on the south edge instead, so a map written in this convention was mirrored north to south.
+
+The map is placed by cell index, not by coordinates. It must have exactly as many columns and rows as the fire grid has cells in x and y, and the run stops with a message otherwise. The corner in the header is not used, and a ``cellsize`` different from the fire cell size is reported as a warning. For a real-terrain case, ``Exec/Tools/make_landfire_fuel_map.py`` puts a LANDFIRE fuel raster on the fire grid in this form.
 
 **FARSITE LCP Binary Format**
 
-FARSITE landscape files (.lcp) are binary rasters used in operational fire simulation. The reader extracts the fuel model layer (layer 2 in the LCP specification) and maps it to the fire grid. Cell dimensions must match the fire grid exactly.
+FARSITE landscape files (.lcp) are binary rasters used in operational fire simulation; LANDFIRE provides them and GDAL writes them (``gdal_translate -of LCP``). A file is a 7316-byte header (FARSITE's ``headdata``: the crown and ground fuel flags, the extent and per-theme summaries, then the column and row counts at bytes 4164 and 4168 and the cell size at byte 4208) followed by the cells, row by row from the north edge and west to east within a row. Each cell holds its 16-bit bands in turn: elevation, slope, aspect, fuel model and canopy cover; then stand height, crown base height and crown bulk density when the crown fuel flag is 21; then duff and coarse woody fuel when the ground fuel flag is 21. The reader takes the fuel model band of every cell, turns negative (no-data) codes into 0, and places the first row on the north edge of the fire grid. The landscape must have exactly as many columns and rows as the fire grid has cells, and the run stops with a message otherwise or when the header does not describe a complete landscape. Until 2026-09-11 the reader assumed a 256-byte header and layers stored one after another, so it rejected or misread real landscape files.
 
 Reference: Finney, M.A. (1998/2004). FARSITE: Fire Area Simulator. RMRS-RP-4.
 
@@ -184,7 +186,7 @@ Limitations
 
 - **Exact dimension match**: Fuel map grid dimensions must equal the fire grid dimensions exactly. No interpolation or regridding is performed.
 - **Permanent barriers**: Firebreak cells are stamped at initialization and remain non-burnable for the duration of the simulation. Barriers cannot evolve or be modified during the run.
-- **LCP layer extraction**: The FARSITE LCP reader extracts only the fuel model layer (layer 2). Elevation, aspect, slope, fuel moisture, and other LCP layers are not currently loaded.
+- **LCP layer extraction**: The FARSITE LCP reader extracts only the fuel model band of each cell. Elevation, aspect, slope, fuel moisture, and other LCP layers are not currently loaded.
 - **Valid fuel codes**: FBFM13 recognizes burnable fuel codes 1–13. Code 0 (nodata), code 14 and higher (out-of-range), and code -9999 (sentinel) are treated as non-burnable or invalid and default to the fallback ``fuel_model_id``.
 
 References

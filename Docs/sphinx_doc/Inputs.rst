@@ -3818,7 +3818,9 @@ Fuel and moisture
 | **erf.fire.use_dynamic_mext**                  | Read but not consumed; the SAV-based moisture of           | Boolean                        | true                   |
 |                                                | extinction is diagnostic only                              |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.fuel_map.file**                     | Spatial fuel map file; empty means uniform fuel            | String                         | ""                     |
+| **erf.fire.fuel_map.file**                     | Spatial fuel map file; empty means uniform fuel. Rows of   | String                         | ""                     |
+|                                                | an ESRI ASCII map run north first; one code per fire       |                                |                        |
+|                                                | cell, so the map must have the fire grid's size            |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.fuel_map.format**                   | Fuel map format                                            | "ascii", "lcp"                 | "ascii"                |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+

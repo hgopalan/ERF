@@ -294,7 +294,8 @@ void FireLayer::initialize(const ERF& erf,
                                    fire_nx, fire_ny, h_fuel_codes);
         } else {
             ok = read_ascii_fuel_map(m_params.fuel_map.fuel_map_file,
-                                     fire_nx, fire_ny, h_fuel_codes, nodata_val);
+                                     fire_nx, fire_ny, h_fuel_codes, nodata_val,
+                                     m_fg.geom.CellSize(0));
         }
         if (ok && m_params.fuel_map.sb40_crosswalk) {
             // The Community Fire Behavior Model's route for LANDFIRE data: the
@@ -314,18 +315,10 @@ void FireLayer::initialize(const ERF& erf,
                 // Each cell starts with its own model's load rather than the
                 // uniform one; non-burnable codes of the Scott-Burgan set carry
                 // none, and unknown codes follow the set's fall-through.
-                const int  fset   = m_params.fuel_map.fuel_set_id();
-                const bool sb40   = m_params.fuel_map.sb40_active();
-                const Real M_live = m_params.moisture_live;
-                for (MFIter mfi(*fire_fuel_load); mfi.isValid(); ++mfi) {
-                    auto const& fuel = fire_fuel_load->array(mfi);
-                    auto const& code = fire_fuel_model->const_array(mfi);
-                    ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                        const int c = static_cast<int>(code(i, j, k));
-                        fuel(i, j, k) = (sb40 && sb40_nonburnable(c)) ? 0.0_rt
-                                      : fuel_total_load_kg_m2(get_fuel_params(c, fset, M_live));
-                    });
-                }
+                fill_fuel_load_from_map(*fire_fuel_load, *fire_fuel_model,
+                                        m_params.fuel_map.fuel_set_id(),
+                                        m_params.fuel_map.sb40_active(),
+                                        m_params.moisture_live);
                 if (m_params.fire_debug) {
                     const Real dA = m_fg.geom.CellSize(0) * m_fg.geom.CellSize(1);
                     amrex::Print() << "[FIRE DEBUG] Fuel load from the map: " << fire_fuel_load->sum(0) * dA
