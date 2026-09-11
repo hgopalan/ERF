@@ -1,0 +1,11 @@
+FILE = inputs_base
+
+# WRF-Fire's fire_ros (module_fr_fire_phys.F): exponentiate phi_w from the raw,
+# unprojected wind speed, then scale the result by cos(theta) to the front
+# normal afterward, R(n) = R0(1 + phi_w(U) * max(cos theta, 0)). Linear in
+# cos(theta) -- the convex support function of a circle -- so the Wulff shape
+# does not develop a wedge and the head tracks Rothermel's head rate. See
+# README.md.
+erf.fire.directional_wind_coupling = "wrf"
+erf.fire_plot_file           = "plt_fire_wrf_"
+erf.fire.fire_stats_csv_file = "fire_stats_wrf.csv"
