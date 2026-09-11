@@ -1189,9 +1189,13 @@ function(add_test_rans_dt TEST_NAME CLOSURE)
     )
 endfunction(add_test_rans_dt)
 
-add_test_rans_dt(RANS_Timestep_Limits_kEqn      kEqn)
-add_test_rans_dt(RANS_Timestep_Limits_Deardorff Deardorff)
-add_test_rans_dt(RANS_Timestep_Limits_MRF       MRF)
+# The sweep's spin-up deck uses the FFT projection (the limits in its README
+# were measured with it), so the entries exist only in FFT builds.
+if(ERF_ENABLE_FFT)
+    add_test_rans_dt(RANS_Timestep_Limits_kEqn      kEqn)
+    add_test_rans_dt(RANS_Timestep_Limits_Deardorff Deardorff)
+    add_test_rans_dt(RANS_Timestep_Limits_MRF       MRF)
+endif()
 
 #=============================================================================
 # MOST reference height on flat stretched meshes
