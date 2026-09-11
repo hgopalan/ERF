@@ -8,3 +8,7 @@ chk_*
 basemap_*.tif
 basemap_tiles/
 fire_stats*.csv
+LF20*_*.tif
+*.tif.part
+fuel_marshall_*.asc
+fuel_marshall_*.png
