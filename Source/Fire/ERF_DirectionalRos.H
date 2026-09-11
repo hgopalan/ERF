@@ -135,18 +135,46 @@ inline constexpr int DIRECTIONAL_ROS_FBP          = 4;
 /// isotropic wind and slope magnitudes are used instead.
 inline constexpr amrex::Real DIRECTIONAL_ROS_GRAD_MIN = 1.0e-12;
 
+/// Angular coupling of the wind/slope factor into the projected rate,
+/// erf.fire.directional_wind_coupling. Rothermel only; every other model
+/// ignores this and directional_ros_cell's U_mag/s_mag arguments.
+inline constexpr int DIRECTIONAL_WIND_COUPLING_PROJECTION = 0;  ///< default: project wind, then exponentiate (Rothermel's U^B)
+inline constexpr int DIRECTIONAL_WIND_COUPLING_WRF        = 1;  ///< opt-in: exponentiate on the raw wind, then scale by cos(theta) (WRF-Fire's fire_ros)
+
 /**
  * @brief Rate of spread along one direction
  *
- * @param[in] st   Precomputed coefficients for the selected model
- * @param[in] U_n  Wind component along the spread direction [m/s]
- * @param[in] s_n  Terrain slope along the spread direction [-]
+ * @param[in] st             Precomputed coefficients for the selected model
+ * @param[in] U_n            Wind component along the spread direction [m/s]
+ * @param[in] s_n            Terrain slope along the spread direction [-]
+ * @param[in] wind_coupling  DIRECTIONAL_WIND_COUPLING_PROJECTION (default) or
+ *                           _WRF; Rothermel only, see below.
+ * @param[in] U_mag          Raw (unprojected) wind speed [m/s]; read only
+ *                           when wind_coupling == _WRF.
+ * @param[in] s_mag          Raw (unprojected) slope magnitude [-]; read only
+ *                           when wind_coupling == _WRF.
  * @return ROS [m/s]
+ *
+ * DIRECTIONAL_WIND_COUPLING_PROJECTION (default, backward compatible): the
+ * Rothermel branch projects the wind onto the spread direction and then
+ * raises it to Rothermel's B power, R(theta) ~ (U cos theta)^B -- the
+ * original behaviour, byte-for-byte, since U_mag/s_mag are not read on this
+ * path. This is non-convex once phi_w(B-1) > 1, which is what lets a finite
+ * line's ends grow a Wulff wedge that falls behind the head rate over time
+ * (see the file comment). DIRECTIONAL_WIND_COUPLING_WRF (opt-in) instead
+ * exponentiates the wind/slope factor from the raw magnitude U_mag/s_mag and
+ * only afterward scales by the cosine to the spread direction (U_n/U_mag),
+ * matching WRF-Fire's fire_ros (module_fr_fire_phys.F). That keeps R(theta)
+ * linear in cos(theta) -- the convex support function of a circle -- so the
+ * wedge does not form. Selected via erf.fire.directional_wind_coupling.
  */
 AMREX_GPU_DEVICE AMREX_FORCE_INLINE
 amrex::Real directional_ros_cell(const DirectionalRosState& st,
                                  amrex::Real U_n,
-                                 amrex::Real s_n) noexcept
+                                 amrex::Real s_n,
+                                 int wind_coupling = DIRECTIONAL_WIND_COUPLING_PROJECTION,
+                                 amrex::Real U_mag = amrex::Real(0.0),
+                                 amrex::Real s_mag = amrex::Real(0.0)) noexcept
 {
     // Only a wind pushing into the unburned fuel drives the front, and only an
     // upslope component enhances it; the models take magnitudes, so the
@@ -164,6 +192,17 @@ amrex::Real directional_ros_cell(const DirectionalRosState& st,
         case DIRECTIONAL_ROS_FBP:
             return fbp_ros(st.fbp, U, s);
         default:
+            if (wind_coupling == DIRECTIONAL_WIND_COUPLING_WRF) {
+                // The raw magnitude is at least the projected component (it is
+                // the same vector, just not dotted with the normal); guard
+                // against a caller passing 0 by mistake so cos_w falls back
+                // to 1 rather than dividing by (near) zero.
+                const amrex::Real Um = amrex::max(U_mag, U);
+                const amrex::Real sm = amrex::max(s_mag, s);
+                const amrex::Real cos_w = (Um > amrex::Real(1.0e-12)) ? U / Um : amrex::Real(1.0);
+                const amrex::Real cos_s = (sm > amrex::Real(1.0e-12)) ? s / sm : amrex::Real(1.0);
+                return rothermel_ros_cell(Um, amrex::Real(0.0), sm, amrex::Real(0.0), st.rc, cos_w, cos_s);
+            }
             return rothermel_ros_cell(U, amrex::Real(0.0), s, amrex::Real(0.0), st.rc);
     }
 }
@@ -308,6 +347,9 @@ amrex::Real directional_ellipse_speed(const DirectionalEllipse& d,
  *                     or DIRECTIONAL_SHAPE_ELLIPSE (the model's spread ellipse)
  * @param[in]  ellipse_lw      Flank rule of the ellipse, DIRECTIONAL_ELLIPSE_LW_*
  * @param[in]  ellipse_lw_max  Cap on Anderson's length-to-width ratio
+ * @param[in]  wind_coupling   DIRECTIONAL_WIND_COUPLING_PROJECTION (default) or
+ *                     _WRF; Rothermel-with-DIRECTIONAL_SHAPE_PROJECTION only,
+ *                     see directional_ros_cell()
  */
 inline void fill_directional_ros(amrex::MultiFab& R_mf,
                                  const amrex::MultiFab& phi,
@@ -319,7 +361,9 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
                                  bool wall_extrap = false,
                                  int shape = DIRECTIONAL_SHAPE_PROJECTION,
                                  int ellipse_lw = DIRECTIONAL_ELLIPSE_LW_MODEL,
-                                 amrex::Real ellipse_lw_max = amrex::Real(8.0))
+                                 amrex::Real ellipse_lw_max = amrex::Real(8.0),
+                                 const fire_levelset::LevelSetGradient& grad_scheme = fire_levelset::LevelSetGradient{},
+                                 int wind_coupling = DIRECTIONAL_WIND_COUPLING_PROJECTION)
 {
     const amrex::Real dx = geom.CellSize(0);
     const amrex::Real dy = geom.CellSize(1);
@@ -345,12 +389,17 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
             const amrex::Real dzdx = slopes_arr(i, j, k, 0);
             const amrex::Real dzdy = slopes_arr(i, j, k, 1);
 
-            // Front normal from central differences; it points toward increasing
-            // phi, that is into the unburned fuel.
-            const amrex::Real dpdx = (wall.at(phi_arr, i, j, k, 1, 0)
-                                      - wall.at(phi_arr, i, j, k, -1, 0)) / (2.0 * dx);
-            const amrex::Real dpdy = (wall.at(phi_arr, i, j, k, 0, 1)
-                                      - wall.at(phi_arr, i, j, k, 0, -1)) / (2.0 * dy);
+            // Front normal from the same one-sided derivatives (first order or
+            // HJ-WENO5-Z, per grad_scheme) as the magnitude in
+            // compute_levelset_rhs, averaged into a centred estimate; this
+            // reduces exactly to the prior central difference when
+            // grad_scheme.scheme == LEVELSET_GRAD_UPWIND1, and points toward
+            // increasing phi, that is into the unburned fuel.
+            amrex::Real dxm, dxp, dym, dyp;
+            fire_levelset::one_sided_derivatives(phi_arr, dx, i, j, k, 1, 0, grad_scheme, wall, dxm, dxp);
+            fire_levelset::one_sided_derivatives(phi_arr, dy, i, j, k, 0, 1, grad_scheme, wall, dym, dyp);
+            const amrex::Real dpdx = amrex::Real(0.5) * (dxm + dxp);
+            const amrex::Real dpdy = amrex::Real(0.5) * (dym + dyp);
             const amrex::Real grad = std::sqrt(dpdx*dpdx + dpdy*dpdy);
 
             if (shape == DIRECTIONAL_SHAPE_ELLIPSE) {
@@ -364,6 +413,13 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
                 return;
             }
 
+            // Raw (unprojected) magnitudes: passed through so the Rothermel
+            // branch of directional_ros_cell can exponentiate from these,
+            // WRF-style, then scale by the cosine to the front normal below,
+            // rather than projecting first. Ignored by every other model.
+            const amrex::Real U_mag = std::sqrt(u*u + v*v);
+            const amrex::Real s_mag = std::sqrt(dzdx*dzdx + dzdy*dzdy);
+
             amrex::Real U_n, s_n;
             if (grad > grad_min) {
                 const amrex::Real nx = dpdx / grad;
@@ -371,11 +427,11 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
                 U_n = u*nx + v*ny;
                 s_n = dzdx*nx + dzdy*ny;
             } else {
-                U_n = std::sqrt(u*u + v*v);
-                s_n = std::sqrt(dzdx*dzdx + dzdy*dzdy);
+                U_n = U_mag;
+                s_n = s_mag;
             }
 
-            R_arr(i, j, k) = directional_ros_cell(st, U_n, s_n);
+            R_arr(i, j, k) = directional_ros_cell(st, U_n, s_n, wind_coupling, U_mag, s_mag);
         });
     }
 }
@@ -398,6 +454,8 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
  * @param[in]     ellipse_lw      Flank rule of the ellipse, DIRECTIONAL_ELLIPSE_LW_*
  * @param[in]     ellipse_lw_max  Cap on Anderson's length-to-width ratio
  * @param[in]     ros_scale       Optional per-cell factor on the rebuilt ROS (front acceleration clock)
+ * @param[in]     wind_coupling   DIRECTIONAL_WIND_COUPLING_PROJECTION (default) or _WRF;
+ *                     Rothermel-with-DIRECTIONAL_SHAPE_PROJECTION only, see directional_ros_cell()
  */
 inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,
                                             const amrex::MultiFab& wind,
@@ -412,12 +470,13 @@ inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,
                                             int shape = DIRECTIONAL_SHAPE_PROJECTION,
                                             int ellipse_lw = DIRECTIONAL_ELLIPSE_LW_MODEL,
                                             amrex::Real ellipse_lw_max = amrex::Real(8.0),
-                                            const amrex::MultiFab* ros_scale = nullptr)
+                                            const amrex::MultiFab* ros_scale = nullptr,
+                                            int wind_coupling = DIRECTIONAL_WIND_COUPLING_PROJECTION)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
             fill_directional_ros(R, phi_stage, wind, slopes, geom, st, nonburnable, wall_extrap, shape,
-                                 ellipse_lw, ellipse_lw_max);
+                                 ellipse_lw, ellipse_lw_max, grad_scheme, wind_coupling);
         }, nonburnable, wall_extrap, grad_scheme, ros_scale);
 }
 
