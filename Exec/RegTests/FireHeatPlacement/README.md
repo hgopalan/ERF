@@ -67,7 +67,7 @@ the arrival times at the middle box's upwind face and the two gap probes.
   that is a small change in the burned-cell count; it grows as the building
   size approaches the atmosphere spacing.
 - **The fire spreads less with buildings in the atmosphere** (about 5000
-  against 6800 cells) because the immersed forcing slows the near-surface
+  against 6600 cells) because the immersed forcing slows the near-surface
   wind the reference-wind Balbi model reads, and the arrival at the middle
   box's upwind face moves from 25 s to 37 s. The historical form burns
   slightly more because it injects more heat.
@@ -77,16 +77,16 @@ the arrival times at the middle box's upwind face and the two gap probes.
 ```
 variant                 exit   cells    E_ratio   below_roof  theta_blk  u2 g1 g2
 ---------------------- ----- ------- ---------- ------------ ----------  ----------
-overwrite_noib             0    6789   0.971434   0.20512201   308.1556     25   54   46
-add_noib                   0    6789   0.971434   0.20512201   308.1556     25   54   46
-add_noib_open              0    6804   0.971434   0.16403038   308.3025     25   54   46
-add_noib_open_legacy       0    6806   1.112774   0.16535310   309.0057     25   54   46
-overwrite_ib               0    4996   0.971434   0.20512201   327.7269     37   53   59
-add_ib                     0    4996   0.971434   0.20512201   327.7269     37   53   59
-add_ib_open                0    4992   0.971434   0.16403038   322.8175     37   53   59
-add_ib_open_legacy         0    5053   1.114572   0.16413099   324.5222     37   53   59
-overwrite_ib_slow          0    5012   0.971434   0.20512201   328.8138     35   54   59
-add_ib_slow                0    5017   0.971434   0.20512201   328.9534     35   54   60
+overwrite_noib             0    6611   0.971434   0.20512201   307.8475     25   54   47
+add_noib                   0    6611   0.971434   0.20512201   307.8475     25   54   47
+add_noib_open              0    6625   0.971434   0.16403038   307.9225     25   54   47
+add_noib_open_legacy       0    6635   1.112157   0.16550991   308.8266     25   54   47
+overwrite_ib               0    4971   0.971434   0.20512201   327.8431     37   54   59
+add_ib                     0    4971   0.971434   0.20512201   327.8431     37   54   59
+add_ib_open                0    4969   0.971434   0.16403038   322.9018     37   54   59
+add_ib_open_legacy         0    5019   1.114533   0.16409439   324.5610     37   54   59
+overwrite_ib_slow          0    4980   0.971434   0.20512201   328.7950     35   55   60
+add_ib_slow                0    4991   0.971434   0.20512201   328.9740     35   55   60
 ```
 
 Four ranks, `heat_tendency_density` at its default (energy-consistent)
@@ -96,3 +96,11 @@ the largest potential temperature [K] of the state in a cell below a roof
 on the last stage. The `_legacy` rows reproduce, to the cell, the
 `add_*_open` rows of the table generated before the default changed, and
 the default `add_*_open` rows reproduce its `_energy` rows.
+
+The table was regenerated on 2026-09-11 after the fuel map fix
+(hgopalan/ERF#411): the reader had put the first row of
+`fuel_map_street.asc` on the south edge, so the 5 m street ran at
+y = 30-35 m instead of 125-130 m. With the street in its place the
+flat-ground rows burn about 180 fewer cells (6611 against 6789), the
+immersed-forcing rows under 1 % fewer, the gap probes move by a second, and
+the energy ratio of the default rows is unchanged.

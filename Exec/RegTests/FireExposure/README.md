@@ -53,7 +53,7 @@ Arrival times are -1 for a box the front never reached.
   fire reads is slowed) and the intensities are lower.
 - Embers appear only in the spotting rows; the counts depend on the seed.
   Launching from the front gives far fewer brands at the same probability,
-  because the fireline is a few hundred cells against tens of thousands
+  because the fireline is about a thousand cells against tens of thousands
   behind it.
 
 ## Reference table
@@ -61,30 +61,36 @@ Arrival times are -1 for a box the front never reached.
 ```
 variant              id      x      y  burned t_first  t_last  resid  peak_kWm   HL_mean    HL_max  embers  landed
 ------------------- --- ------ ------ ------- ------- ------- ------ --------- --------- --------- ------- -------
-noib                  1    190     30    0.45     111     164     54    2698.8     1.414     3.160       0       0
-noib                  2    190     80    1.00      28     125     96    3205.8     3.160     3.160       0       0
-noib                  3    190    115    1.00      39     216    177    3115.2     3.156     3.160       0       0
-ib                    1    190     30    0.45     107     156     49    1591.2     1.404     3.158       0       0
-ib                    2    190     80    1.00      40     160    120    1532.2     3.138     3.160       0       0
-ib                    3    190    115    1.00      49     222    173    1557.5     3.080     3.160       0       0
-noib_spotting         1    190     30    0.45      76     129     54    2871.8     1.414     3.160       1      23
-noib_spotting         2    190     80    1.00       2      95     93    3600.8     2.409     3.160       8      23
-noib_spotting         3    190    115    1.00      24     210    185    3240.2     3.159     3.160       4      23
-noib_spotting_front   1    190     30    0.45      74     131     56    2878.3     1.414     3.160       0      11
-noib_spotting_front   2    190     80    1.00       2      49     47    3600.8     1.623     3.160       0      11
-noib_spotting_front   3    190    115    1.00      20     178    158    3362.3     2.659     3.160       2      11
+noib                  1    190     30    0.62     108     224    116    2711.6     1.904     3.160       0       0
+noib                  2    190     80    1.00      28     128    100    3208.0     3.160     3.160       0       0
+noib                  3    190    115    1.00      40     191    151    3111.3     3.160     3.160       0       0
+ib                    1    190     30    0.73     106     224    118    1591.4     2.202     3.158       0       0
+ib                    2    190     80    1.00      40     162    122    1532.1     3.137     3.160       0       0
+ib                    3    190    115    0.98      50     218    168    1557.5     3.048     3.160       0       0
+noib_spotting         1    190     30    0.76      78     224    146    2859.8     2.314     3.160       0      24
+noib_spotting         2    190     80    1.00       2      99     97    3600.8     2.516     3.160       5      24
+noib_spotting         3    190    115    1.00      21     169    148    3266.6     3.160     3.160       5      24
+noib_spotting_front   1    190     30    0.70      78     224    146    2859.8     2.189     3.160       1      11
+noib_spotting_front   2    190     80    1.00       2     113    111    3600.8     2.802     3.160       0      11
+noib_spotting_front   3    190    115    1.00      40     191    151    3111.3     3.160     3.160       0      11
 ```
 
-Four ranks, 240 s, last row per box (written at 224.9 s). Things to read
-out of it.
+Four ranks, 240 s, last row per box (written at 224.9 s), regenerated on
+2026-09-11 after the fuel map fix. Things to read out of it.
+
+**The street moved on 2026-09-11.** Until hgopalan/ERF#411 the fuel map
+reader put the first row of `fuel_map_street.asc` on the south edge, so the
+non-burnable street ran at y = 30-35 m, across the first box, instead of at
+125-130 m. That street cut the first box's band: 45 % of it burned, and the
+front had passed it by 164 s. With the street in its place 62 % has burned
+when the run ends and the front is still passing.
 
 **The middle box is the one the head fire hits.** It is reached at 28 s, a
 second after the arrival-time probe on its upwind face, its whole wall band
 burns as the front wraps around it, and the front leaves its downwind side
-at 125 s, the same time the downwind probe reports. The outer boxes are
+at 128 s, two seconds after the downwind probe reports. The outer boxes are
 reached by the flanks, later and obliquely, so their residence times are
-longer; the first box, on the far side of the street, only ever has 45% of
-its band burned.
+longer; the flank is still passing the first box when the run ends.
 
 **The heat load saturates at the fuel's energy.** The largest heat load on
 every box is 3.16 MJ/m², which is the FM1 fuel load (0.166 kg/m²) times its
@@ -97,16 +103,15 @@ the walls, and every arrival is 10 s or so later.
 
 **Spotting reaches the walls first.** With brands in the air the middle box
 is reached at 2 s by a brand from the ignition disc that landed at its
-wall, 13 embers land on the three footprints in 240 s, and the spot fires
-ahead of the front burn a quarter more of the domain. The mean heat load on
+wall, 10 embers land on the three footprints in 240 s, and the spot fires
+ahead of the front burn half as much again (25349 cells against 16980). The mean heat load on
 the middle box drops because cells ignited by a spot have their fuel capped
 at 5% of the initial load.
 
 **Launching from the front changes what the brand count measures.** At the
-same launch probability the front set is 2082 cells against 21390 burned
-cells on the last step, yet 11 brands land against 23: brands from deep in
+same launch probability the front set is 1537 cells against 25349 burned
+cells on the last step, yet 11 brands land against 24: brands from deep in
 the burned area mostly fall on consumed fuel and are discarded, brands from
-the front land in fuel. The spots therefore ignite more new area (24472
-cells burned against 21390), fewer embers reach the footprints (2 against
-13), and the middle box's band is passed sooner because spot fires ahead of
-it burn the fuel around it first.
+the front land in fuel. Fewer landings still mean fewer spot fires: 23157
+cells burn against 25349, one ember reaches a footprint against 10, and the
+middle box's band is passed later (113 against 99 s).
