@@ -33,8 +33,8 @@ struct FireParams
     amrex::Real       ignition_r          = 20.0;        ///< Ignition radius [m]
     amrex::Real       wind_ref_ht         = 6.1;         ///< MOST wind reference height [m]
     bool              prescribed_wind     = false;       ///< Bypass atmospheric wind interpolation
-    amrex::Real       prescribed_wind_x   = 0.0;         ///< Constant reference wind, x [m/s]
-    amrex::Real       prescribed_wind_y   = 0.0;         ///< Constant reference wind, y [m/s]
+    amrex::Real       prescribed_wind_x   = 0.0;         ///< Constant reference wind, x [m/s]; exact everywhere only with use_waf=false and use_terrain_wind=false (WAF and the FARSITE terrain corrections still apply downstream otherwise)
+    amrex::Real       prescribed_wind_y   = 0.0;         ///< Constant reference wind, y [m/s]; see prescribed_wind_x
     // Phase 13A: Per-fuel wind height
     bool              use_per_fuel_wind_ht = false; ///< Use per-fuel fcwh table for wind height
     amrex::Real       waf_fcz0_scale       = 1.0;   ///< Scale factor on fcz0 roughness for WAF [dimensionless]
@@ -396,11 +396,14 @@ struct FireParams
     // the wind/slope factor from the raw, unprojected speed and scales the
     // result by the cosine afterward, matching WRF-Fire's fire_ros
     // (module_fr_fire_phys.F): R(theta) is then linear in cos(theta), the
-    // convex support function of a circle, rather than cos^B(theta), which
-    // stops being convex once phi_w(B-1) > 1 and lets a finite line's ends
-    // grow a Wulff wedge that falls behind the head rate over time (see
-    // ERF_DirectionalRos.H). Rothermel with directional_shape = "projection"
-    // only; ignored otherwise (the ellipse path is already convex).
+    // convex support function of a stadium (a disc of radius R0 swept along
+    // the wind vector), rather than cos^B(theta), which stops being convex
+    // once phi_w(B-1) > 1 and lets a finite line's ends grow a Wulff wedge
+    // that falls behind the head rate over time (see ERF_DirectionalRos.H).
+    // Rothermel with directional_shape = "projection" only; rejected in every
+    // other combination (see the abort below), since the ellipse path is
+    // already convex and every other model or the hybrid path would silently
+    // ignore this flag.
     int               directional_wind_coupling = 0;
 
     // Flank rule of that ellipse, erf.fire.directional_ellipse_lw. "model" (0,
@@ -1331,6 +1334,20 @@ struct FireParams
            }
            if (ros_model == "balbi" || is_hybrid()) {
                amrex::Abort("erf.fire.directional_shape = \"ellipse\" is implemented for rothermel, behave, macarthur, cheney_gould and fbp, not balbi or hybrid");
+           }
+       }
+
+       // directional_wind_coupling = "wrf" is read only by directional_ros_cell's
+       // Rothermel branch (and only reached with directional_shape = "projection");
+       // every other shape, model or the hybrid path (whose fill_directional_ros
+       // call in ERF_HybridRos.H does not thread this flag through) would silently
+       // ignore it, so reject those combinations instead.
+       if (directional_wind_coupling == 1) {
+           if (directional_shape == 1) {
+               amrex::Abort("erf.fire.directional_wind_coupling = \"wrf\" needs erf.fire.directional_shape = \"projection\" (it has no effect with \"ellipse\")");
+           }
+           if (is_hybrid() || !uses_model("rothermel")) {
+               amrex::Abort("erf.fire.directional_wind_coupling = \"wrf\" is implemented for erf.fire.ros_model = \"rothermel\" only, not hybrid or another model");
            }
        }
     }

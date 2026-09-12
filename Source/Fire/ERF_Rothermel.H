@@ -275,6 +275,17 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
  * @param[in] ux_eff, uy_eff   Effective midflame wind [m/s] after WAF and terrain
  * @param[in] sx, sy           Terrain slopes [dz/dx, dz/dy]
  * @param[in] rc               RothermelComputed coefficients
+ * @param[in] cos_theta_wind   Cosine between the wind and the spread direction,
+ *                             applied to phi_w after it is computed from
+ *                             |(ux_eff, uy_eff)|; 1 (no-op) for the isotropic
+ *                             call sites. Lets a caller (see
+ *                             ERF_DirectionalRos.H's DIRECTIONAL_WIND_COUPLING_WRF)
+ *                             exponentiate phi_w from the raw wind speed and
+ *                             scale by this cosine afterward, rather than
+ *                             passing an already-projected wind in ux_eff/uy_eff.
+ * @param[in] cos_theta_slope  Cosine between the slope gradient and the spread
+ *                             direction, applied to phi_s the same way; 1
+ *                             (no-op) for the isotropic call sites.
  * @return ROS [m/s]
  *
  * Wind factor:
@@ -330,7 +341,7 @@ amrex::Real rothermel_ros_cell(
     // omnidirectional rate exactly, unchanged from before this parameter
     // existed; a caller doing directional spread may pass the raw wind speed
     // as (ux_eff,uy_eff) and the true cosine here instead, which keeps R
-    // linear in cos(theta) and so a convex (circle) support function instead
+    // linear in cos(theta) and so a convex (stadium) support function instead
     // of cos^B(theta) -- see ERF_DirectionalRos.H's file comment.
     phi_w *= amrex::max(cos_theta_wind, amrex::Real(0.0));
     phi_s *= amrex::max(cos_theta_slope, amrex::Real(0.0));

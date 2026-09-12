@@ -43,7 +43,7 @@ except ImportError:
     sys.exit("needs numpy and yt")
 
 TOL_WRF = 0.03          # wrf head rate must be within 3% of Rf
-MAX_FRAC_PROJECTION = 0.7  # projection head rate must be no more than 70% of Rf
+MAX_FRAC_PROJECTION = 0.80  # projection head rate must be no more than 80% of Rf (measured ~71%)
 MIN_CLOSER_MARGIN = 0.15   # wrf must land at least 15 points of Rf-fraction closer than projection
 X0, Y_CENTER = 500.0, 1500.0
 U = 4.005

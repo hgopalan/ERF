@@ -3912,6 +3912,15 @@ Wind
 | **erf.fire.wind_ref_ht**                       | Height above local ground at which the atmospheric wind is | Real > 0                       | 6.1                    |
 |                                                | sampled [m]                                                |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed_wind**                   | Bypass atmospheric wind interpolation with a constant      | Boolean                        | false                  |
+|                                                | reference wind, for controlled idealized-wind test cases;  |                                |                        |
+|                                                | exact everywhere only with use_waf = false and             |                                |                        |
+|                                                | use_terrain_wind = false                                   |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed_wind_x**                 | Constant reference wind, x, when prescribed_wind [m/s]     | Real                           | 0.0                    |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.prescribed_wind_y**                 | Constant reference wind, y, when prescribed_wind [m/s]     | Real                           | 0.0                    |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.use_per_fuel_wind_ht**              | Sample at the per-fuel fcwh height instead of wind_ref_ht  | Boolean                        | false                  |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.wind_sample_ht**                    | Sample the wind at this height above ground and bring it   | Real > wind_ref_ht, or 0       | 0.0                    |
@@ -3964,6 +3973,13 @@ Rate of spread
 |                                                | the support function of the ellipse with the model's head, |                                |                        |
 |                                                | back and flank rates, which keeps a point fire's head at   |                                |                        |
 |                                                | the head rate; not for balbi or hybrid                     |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.directional_wind_coupling**         | With directional_shape = "projection": exponentiate the    | "projection", "wrf"            | "projection"           |
+|                                                | wind/slope factor from the projected wind (Rothermel's own |                                |                        |
+|                                                | form), or from the raw wind and scale by the cosine to the |                                |                        |
+|                                                | front normal afterward (WRF-Fire's fire_ros), which keeps  |                                |                        |
+|                                                | a point or finite-line fire's head at the head rate; needs |                                |                        |
+|                                                | ros_model = rothermel                                     |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.directional_ellipse_lw**            | Flank rate of that ellipse: the model's no-wind, no-slope  | "model", "anderson"            | "model"                |
 |                                                | rate, or b over Anderson's (1983) length-to-width ratio at |                                |                        |

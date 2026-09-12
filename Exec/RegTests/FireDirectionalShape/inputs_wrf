@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# erf.fire.directional_wind_coupling = "wrf": Rothermel evaluated from the raw
+# wind speed, then the wind/slope factor scaled by cos(theta) to the front
+# normal afterward, R(n) = R0 (1 + phi_w(U) max(cos theta, 0)) -- linear in
+# cos(theta), so (unlike the projection deck) the point fire's head runs at
+# Rothermel's head rate rather than the Wulff-shape tip. See README.md.
+erf.fire.directional_wind_coupling = "wrf"

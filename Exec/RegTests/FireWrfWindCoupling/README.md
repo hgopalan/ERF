@@ -44,8 +44,8 @@ point ignition, here for a finite line.
 exponentiate phi_w from the raw, unprojected wind speed, then scale the
 whole wind/slope factor by cos(theta) to the front normal afterward,
 R(n) = R0(1 + phi_w(U) max(cos theta, 0)). Linear in cos(theta) -- the
-convex support function of a circle -- so no wedge forms and the head
-tracks Rf.
+convex support function of a stadium (a disc of radius R0 swept along the
+wind vector) -- so no wedge forms and the head tracks Rf.
 
 `check_firewrfwindcoupling.py` reads the centerline row (nearest y=1500, the
 ignition line's midpoint, farthest from the flank curvature at its ends)
@@ -56,14 +56,21 @@ its asymptotic behaviour.
 
 ## Expected Results
 
-| deck | head rate (t >= 1050 s) | vs Rf = 1.701 m/s |
-|---|---|---|
-| `default` | well below Rf | <= 70 % of Rf, >= Wulff tip (22 %) less 5 points |
-| `projection` | same as `default`, bit for bit | |
-| `wrf` | close to Rf | within 3 % |
+One rank per deck. Rf = 1.70098 m/s; the Wulff-shape tip of the projection
+formula is 0.36793 m/s (22 % of Rf). Rates fitted over t >= 1050 s:
 
-Back rate is reported for reference (R0 = 0.0234 m/s either way, barely one
-fire cell over the run -- not checked quantitatively) and is expected to be
-essentially identical between decks: the fix only changes how the wind/slope
-factor couples to the front-normal direction, not the backing rate, where
-the projected component is clipped to zero under either formulation.
+| deck | x_head(2100 s) | head rate | vs Rf |
+|---|---|---|---|
+| `default` | 3616.09 m | 1.20891 m/s | 71.1 % (well below Rf, well above the Wulff tip) |
+| `projection` | 3616.09 m | 1.20891 m/s | same as `default`, bit for bit (`max\|phi_default - phi_projection\| = 0`) |
+| `wrf` | 4091.58 m | 1.70098 m/s | 100.0 % |
+
+`wrf` lands 28.9 points of Rf-fraction closer to Rf than `projection`. All 8
+checks pass.
+
+Back rate is reported for reference (0.02342 m/s vs R0 = 0.02339 m/s,
+essentially identical across all three decks, barely one fire cell over the
+run -- not checked quantitatively) and confirms the fix only changes how the
+wind/slope factor couples to the front-normal direction on the advancing
+side, not the backing rate, where the projected component is clipped to
+zero under either formulation.

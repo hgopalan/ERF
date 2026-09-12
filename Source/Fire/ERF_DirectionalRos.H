@@ -97,6 +97,27 @@
  * for Rothermel and BEHAVE it is capped at the model's own wind limit. The head
  * still runs at R_h and the back at R0, and the ellipse stays convex.
  *
+ * erf.fire.directional_wind_coupling = "wrf" (DIRECTIONAL_WIND_COUPLING_WRF,
+ * opt-in, Rothermel with directional_shape = "projection" only) removes the
+ * same non-convexity a different way: not by imposing a shape on top of the
+ * projection's rates, as the ellipse does, but by changing how the model's
+ * wind/slope factor couples to the front-normal direction in the first place.
+ * Rothermel's phi_w is exponentiated from the raw, unprojected wind speed and
+ * only the result is scaled by cos(theta) to the front normal afterward,
+ * R(n) = R0 (1 + phi_w(|U|) max(U . n / |U|, 0)), matching WRF-Fire's fire_ros
+ * (module_fr_fire_phys.F) rather than R0 (1 + phi_w(max(U . n, 0))). This is
+ * linear in cos(theta) and so the support function of a stadium (a disc of
+ * radius R0 swept along the wind vector, since the clamp at zero flattens the
+ * back rather than reversing it) -- convex, and so its own Wulff shape, giving
+ * the same head rate as the ellipse. Unlike the ellipse it is the model's own
+ * oblique rate rather than an imposed shape: back and flank both come out at
+ * R0 here because that happens to be Rothermel's own zero-wind rate, not
+ * because they were set that way, so for Rothermel the two options happen to
+ * agree; they would not necessarily agree for a model whose off-axis rate is
+ * not the no-wind rate (BEHAVE has the same power-law wind term and would be
+ * a cheap extension, but is not wired to this flag yet). It is also the form
+ * a user comparing against WRF-Fire runs would expect.
+ *
  * Balbi has its own directional path in ERF_BalbiModel.H, which carries the
  * per-cell moisture, surface temperature and heat-flux couplings that model
  * supports; this covers the remaining models.
@@ -165,7 +186,9 @@ inline constexpr int DIRECTIONAL_WIND_COUPLING_WRF        = 1;  ///< opt-in: exp
  * exponentiates the wind/slope factor from the raw magnitude U_mag/s_mag and
  * only afterward scales by the cosine to the spread direction (U_n/U_mag),
  * matching WRF-Fire's fire_ros (module_fr_fire_phys.F). That keeps R(theta)
- * linear in cos(theta) -- the convex support function of a circle -- so the
+ * linear in cos(theta) -- the convex support function of a stadium (a disc of
+ * radius R0 swept along the wind vector, since the clamp at zero for backing
+ * flattens rather than reverses it) -- so the
  * wedge does not form. Selected via erf.fire.directional_wind_coupling.
  */
 AMREX_GPU_DEVICE AMREX_FORCE_INLINE
@@ -362,7 +385,6 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
                                  int shape = DIRECTIONAL_SHAPE_PROJECTION,
                                  int ellipse_lw = DIRECTIONAL_ELLIPSE_LW_MODEL,
                                  amrex::Real ellipse_lw_max = amrex::Real(8.0),
-                                 const fire_levelset::LevelSetGradient& grad_scheme = fire_levelset::LevelSetGradient{},
                                  int wind_coupling = DIRECTIONAL_WIND_COUPLING_PROJECTION)
 {
     const amrex::Real dx = geom.CellSize(0);
@@ -389,17 +411,12 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
             const amrex::Real dzdx = slopes_arr(i, j, k, 0);
             const amrex::Real dzdy = slopes_arr(i, j, k, 1);
 
-            // Front normal from the same one-sided derivatives (first order or
-            // HJ-WENO5-Z, per grad_scheme) as the magnitude in
-            // compute_levelset_rhs, averaged into a centred estimate; this
-            // reduces exactly to the prior central difference when
-            // grad_scheme.scheme == LEVELSET_GRAD_UPWIND1, and points toward
-            // increasing phi, that is into the unburned fuel.
-            amrex::Real dxm, dxp, dym, dyp;
-            fire_levelset::one_sided_derivatives(phi_arr, dx, i, j, k, 1, 0, grad_scheme, wall, dxm, dxp);
-            fire_levelset::one_sided_derivatives(phi_arr, dy, i, j, k, 0, 1, grad_scheme, wall, dym, dyp);
-            const amrex::Real dpdx = amrex::Real(0.5) * (dxm + dxp);
-            const amrex::Real dpdy = amrex::Real(0.5) * (dym + dyp);
+            // Front normal from central differences; it points toward increasing
+            // phi, that is into the unburned fuel.
+            const amrex::Real dpdx = (wall.at(phi_arr, i, j, k, 1, 0)
+                                      - wall.at(phi_arr, i, j, k, -1, 0)) / (2.0 * dx);
+            const amrex::Real dpdy = (wall.at(phi_arr, i, j, k, 0, 1)
+                                      - wall.at(phi_arr, i, j, k, 0, -1)) / (2.0 * dy);
             const amrex::Real grad = std::sqrt(dpdx*dpdx + dpdy*dpdy);
 
             if (shape == DIRECTIONAL_SHAPE_ELLIPSE) {
@@ -476,7 +493,7 @@ inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
             fill_directional_ros(R, phi_stage, wind, slopes, geom, st, nonburnable, wall_extrap, shape,
-                                 ellipse_lw, ellipse_lw_max, grad_scheme, wind_coupling);
+                                 ellipse_lw, ellipse_lw_max, wind_coupling);
         }, nonburnable, wall_extrap, grad_scheme, ros_scale);
 }
 

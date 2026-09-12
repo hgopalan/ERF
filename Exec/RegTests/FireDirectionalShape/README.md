@@ -1,12 +1,13 @@
 # FireDirectionalShape
 
 A point ignition in a uniform wind, spread by the directional level set with
-the projected rate (the default, `erf.fire.directional_shape = "projection"`)
-and with the spread ellipse (`"ellipse"`), against Rothermel's head rate and the
-exact solution of each formulation's own equation.
+the projected rate (the default, `erf.fire.directional_shape = "projection"`),
+with the spread ellipse (`"ellipse"`), and with `erf.fire.directional_wind_coupling
+= "wrf"` (still `directional_shape = "projection"`), against Rothermel's head
+rate and the exact solution of each formulation's own equation.
 
 ```
-MPIRUN="mpirun -np 2" ./run_firedirectionalshape.sh /path/to/erf_exec   # five decks, then the checks
+MPIRUN="mpirun -np 2" ./run_firedirectionalshape.sh /path/to/erf_exec   # six decks, then the checks
 SKIP_RUN=1 ./run_firedirectionalshape.sh x                             # checks only
 ```
 
@@ -29,6 +30,7 @@ otherwise wrap the periodic domain). The wind stays below the 300 ft/min
 | `projection_key` | the same with `directional_shape = "projection"` written out |
 | `ellipse` | `directional_shape = "ellipse"`: head R0 (1 + phi_w), back and flanks R0 |
 | `ellipse_anderson` (800 s) | the same with `directional_ellipse_lw = "anderson"`: flank rate b / LW, Anderson's LW at the wind |
+| `wrf` | `directional_wind_coupling = "wrf"`: R(n) = R0 (1 + phi_w(U) max(cos theta, 0)) |
 
 ## Why the projection's head falls short
 
@@ -47,6 +49,23 @@ The ellipse option takes R(n) from the support function of an ellipse with the
 model's head, back and flank rates. An ellipse is convex, so it is its own
 Wulff shape and a point fire's head runs at the head rate, while the back and
 flanks keep the projection's rates.
+
+`directional_wind_coupling = "wrf"` fixes the same non-convexity a different
+way, at the level of the rate-of-spread model rather than by imposing a shape:
+instead of projecting the wind onto the front normal and then exponentiating
+(R0 (1 + phi_w((U n_x)))), it exponentiates phi_w from the raw wind speed once
+and only afterward scales the whole wind/slope factor by cos(theta),
+R(n) = R0 (1 + phi_w(U) max(cos theta, 0)) -- matching WRF-Fire's fire_ros
+(module_fr_fire_phys.F). This is linear in cos(theta), the support function of
+a stadium (a disc of radius R0 swept along the wind vector, since the clamp at
+zero flattens the back), so it is convex and is its own Wulff shape: the head
+again runs at Rothermel's head rate, but back and flanks fall out of the same
+formula (R0, since cos theta <= 0 there) rather than being set to the model's
+rates separately as the ellipse does. Where the ellipse asks "what shape has
+this head/back/flank rate," `"wrf"` asks "what is the model's own oblique
+rate" -- the two happen to agree here because Rothermel's back and flank rates
+are both R0, but they would differ for a model whose off-axis rate is not
+simply the no-wind rate.
 
 `check_firedirectionalshape.py` evaluates the exact solution of each deck's
 equation with the Hopf formula T(x) = max over n of ((x - c) . n - r0) / R(n)
@@ -68,10 +87,15 @@ projection's exact solution (the Wulff shape) 0.14155 m/s, 57 % of it. Rates
 | `projection_key` | arrival times identical to `projection` bit for bit | | |
 | `ellipse` | 0.24775 (-0.67 %) | 0.02388 | 0.02403 |
 | `ellipse_anderson` (800 s) | 0.24866 (-0.31 %) | 0.02399 | 0.09185 (exact 0.09196; LW 1.487) |
+| `wrf` | 0.24849 (-0.38 %) | 0.02396 | 0.02446 (+1.77 %) |
 
 Back and flanks match the exact rates (R0 = 0.02404 m/s, and b / LW for
-`ellipse_anderson`) to 0.7 %. All 28 checks of the five decks in the script
-pass; of the 44 checks over the eight decks and scheme variants below (before
+`ellipse_anderson`) to 0.7 %, except `wrf`'s flanks at 1.77 % (front 0.44
+cells from the exact one on average, 0.53 at worst -- still inside the 0.5 /
+1.0 cell tolerance but closer to the edge than the other decks, plausibly the
+cos(theta) clamp's kink at theta = 90 deg, which the ellipse's smooth support
+function does not have). All 34 checks of the six decks in the script pass;
+of the 44 checks over the eight decks and scheme variants below (before
 `ellipse_anderson` was added), the two on the upwind ellipse's head fail.
 With Anderson's flanks the fire is 3.8 times wider than with the model's,
 while its head and back are unchanged.
