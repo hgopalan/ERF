@@ -80,17 +80,28 @@ derivatives and the near-front artificial viscosity of 0.1
 |--------------------|-----------------:|-------------:|---------------:|----------------------:|----------------------:|---------------:|
 | wildland           |             1610 |         4352 |              - |                     - |                     - |              - |
 | wildland_spotting  |             1255 |         5986 |              - |                     - |                     - |              - |
-| subdivision        |             1575 |         4837 |          12/24 |                   773 |                  3.11 |             30 |
+| subdivision        |             1705 |         4398 |          13/24 |                   773 |                  3.11 |             47 |
 | defensible         |            never |         1752 |           0/24 |                     0 |                  0.00 |              0 |
-| coupled            |             1618 |         5464 |          15/24 |                   773 |                  3.11 |             10 |
+| coupled            |             1921 |         5339 |          14/24 |                   773 |                  3.11 |              7 |
 
 The wildland head moves at 0.250 m/s between x = 400 and 470 m against
 Rothermel's 0.2501 m/s for FM1 at 6% moisture and the 300 ft/min wind cap;
 the fuel consumed over its burned area is within 1.5% of the initial load.
 No footprint cell burns or loses fuel in any variant. The subdivision's first
-contacts are at 383, 669 and 953 s for the three rows; the coupled run's at
-371, 659 and 832 s, with a plume of 20 m/s at the end. `wui_spread.png` in
-the docs figures shows the four arrival-time maps.
+contacts are at 383, 723 and 963 s for the three rows; the coupled run's at
+371, 645 and 966 s, with a plume of 20 m/s at the end. `wui_spread.png` in
+the docs figures shows the four arrival-time maps; it predates the fuel map
+fix below.
+
+These numbers were regenerated on 2026-09-11 after the fuel map fix
+(hgopalan/ERF#411). The reader had put the first row of each fuel map on the
+south edge, which moved the 20 m streets of `fuel_map_subdivision.asc` under
+the house rows and left grass where the streets belong. With the streets in
+place the subdivision reaches x = 780 m 130 s later (1705 against 1575 s) and
+the coupled run 303 s later, they burn 9 % and 2 % fewer cells, and the ember
+counts follow the burned cells the launches are sampled from. `wildland`,
+`wildland_spotting` and `defensible` are unchanged. The single-viscosity and
+first-order numbers below were measured before the fix.
 
 With a single viscosity of 0.4 everywhere (`eps_visc_front = -1`) the same
 runs gave x = 780 m at 1613 / 1181 / 1352 / never / 1855 s and 4352 / 5856
