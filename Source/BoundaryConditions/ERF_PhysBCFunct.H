@@ -19,6 +19,7 @@
 #include <ERF_DataStruct.H>
 #include <ERF_EddyViscosity.H>
 #include <ERF_TerrainMetrics.H>
+#include <ERF_InflowProfile.H>
 
 class ERFPhysBCFunct_cons
 {
@@ -58,6 +59,17 @@ public:
      * Destroy the conserved-variable physical boundary-condition functor.
      */
     ~ERFPhysBCFunct_cons () {}
+
+    /** Terrain-following inflow profiles per face (xlo.inflow_profile), owned by ERF */
+    void set_inflow_profiles (const amrex::Array<InflowProfile,2*AMREX_SPACEDIM>* profiles) { m_inflow_profiles = profiles; }
+
+    /** Overwrite the lateral ghost cells of profiled inflow faces (theta, tke) */
+    void impose_inflow_profile_cons (const amrex::Array4<amrex::Real>& dest_arr,
+                                     const amrex::Array4<amrex::Real const>& xvel_arr,
+                                     const amrex::Array4<amrex::Real const>& yvel_arr,
+                                     const amrex::Array4<amrex::Real const>& z_nd,
+                                     const amrex::Box& bx, const amrex::Box& domain,
+                                     int icomp, int ncomp);
 
    /**
     * Impose physical boundary conditions at domain boundaries
@@ -127,6 +139,7 @@ private:
     amrex::MultiFab* m_z_phys_nd;
     bool             m_use_real_bcs;
     amrex::Real*     m_th_bc_data;
+    const amrex::Array<InflowProfile,2*AMREX_SPACEDIM>* m_inflow_profiles = nullptr;
 };
 
 class ERFPhysBCFunct_u
@@ -167,6 +180,17 @@ public:
      * Destroy the x-velocity physical boundary-condition functor.
      */
     ~ERFPhysBCFunct_u () {}
+
+    /** Terrain-following inflow profiles per face (xlo.inflow_profile), owned by ERF */
+    void set_inflow_profiles (const amrex::Array<InflowProfile,2*AMREX_SPACEDIM>* profiles) { m_inflow_profiles = profiles; }
+
+    /** Overwrite the boundary and ghost faces of profiled inflow faces */
+    void impose_inflow_profile_xvel (const amrex::Array4<amrex::Real>& dest_arr,
+                                     const amrex::Array4<amrex::Real const>& xvel_arr,
+                                     const amrex::Array4<amrex::Real const>& yvel_arr,
+                                     const amrex::Array4<amrex::Real const>& z_nd,
+                                     const amrex::Box& bx, const amrex::Box& domain,
+                                     int bccomp);
 
    /**
     * Impose physical boundary conditions at domain boundaries
@@ -228,6 +252,7 @@ private:
     amrex::MultiFab* m_z_phys_nd;
     bool             m_use_real_bcs;
     amrex::Real*     m_u_bc_data;
+    const amrex::Array<InflowProfile,2*AMREX_SPACEDIM>* m_inflow_profiles = nullptr;
 };
 
 class ERFPhysBCFunct_v
@@ -268,6 +293,17 @@ public:
      * Destroy the y-velocity physical boundary-condition functor.
      */
     ~ERFPhysBCFunct_v () {}
+
+    /** Terrain-following inflow profiles per face (xlo.inflow_profile), owned by ERF */
+    void set_inflow_profiles (const amrex::Array<InflowProfile,2*AMREX_SPACEDIM>* profiles) { m_inflow_profiles = profiles; }
+
+    /** Overwrite the boundary and ghost faces of profiled inflow faces */
+    void impose_inflow_profile_yvel (const amrex::Array4<amrex::Real>& dest_arr,
+                                     const amrex::Array4<amrex::Real const>& xvel_arr,
+                                     const amrex::Array4<amrex::Real const>& yvel_arr,
+                                     const amrex::Array4<amrex::Real const>& z_nd,
+                                     const amrex::Box& bx, const amrex::Box& domain,
+                                     int bccomp);
 
    /**
     * Impose physical boundary conditions at domain boundaries
@@ -329,6 +365,7 @@ private:
     amrex::MultiFab* m_z_phys_nd;
     bool             m_use_real_bcs;
     amrex::Real*     m_v_bc_data;
+    const amrex::Array<InflowProfile,2*AMREX_SPACEDIM>* m_inflow_profiles = nullptr;
 };
 
 class ERFPhysBCFunct_w
