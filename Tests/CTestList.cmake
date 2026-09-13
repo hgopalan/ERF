@@ -1152,6 +1152,80 @@ else()
     set(ERF_RANS_PYTHON "python3")
 endif()
 
+#=============================================================================
+# Anelastic slow-scalar advection (Exec/RegTests/AnelasticScalarAdvection)
+#
+# A deck in Exec/RegTests/<CASE_DIR> runs and its Python check script, whose
+# exit code is the verdict, reads the plotfile. With REFERENCE_INPUT a second
+# deck runs first (plotfile prefix ref_plt) and the check script gets both
+# plotfiles, the tested one first. The check table is echoed into the ctest
+# output, and the tail of the run log when a run itself fails.
+#=============================================================================
+function(add_test_checked TEST_NAME CASE_DIR INPUT_FILE NSTEPS CHECK_SCRIPT)
+    set(options )
+    set(oneValueArgs "REFERENCE_INPUT")
+    set(multiValueArgs )
+    cmake_parse_arguments(ADD_TEST_CHECKED "${options}" "${oneValueArgs}"
+        "${multiValueArgs}" ${ARGN})
+
+    set(CURRENT_TEST_SOURCE_DIR ${PROJECT_SOURCE_DIR}/Exec/RegTests/${CASE_DIR})
+    set(CURRENT_TEST_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
+    file(MAKE_DIRECTORY ${CURRENT_TEST_BINARY_DIR})
+    file(GLOB TEST_FILES "${CURRENT_TEST_SOURCE_DIR}/*")
+    file(COPY ${TEST_FILES} DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+    file(COPY ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/Canonical_RANS/erf_plotfile.py DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+
+    if(ERF_ENABLE_MPI)
+        set(NP ${ERF_TEST_NRANKS})
+        set(MPI_COMMANDS "${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${NP} ${MPIEXEC_PREFLAGS}")
+    else()
+        set(NP 1)
+        unset(MPI_COMMANDS)
+    endif()
+
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+
+    # plotfile names carry the step number padded to five digits
+    set(_step "0000${NSTEPS}")
+    string(LENGTH "${_step}" _len)
+    math(EXPR _start "${_len} - 5")
+    string(SUBSTRING "${_step}" ${_start} 5 _step)
+
+    set(RUNTIME_OPTIONS "max_step=${NSTEPS} erf.plot_int_1=${NSTEPS} erf.check_int=-1")
+    set(test_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
+    set(check_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.check.log")
+    set(run_test "( ${MPI_COMMANDS} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE} ${RUNTIME_OPTIONS} erf.plot_file_1=plt > ${test_log} 2>&1 || ( tail -n 60 ${test_log} && false ) )")
+    set(check_args "${CURRENT_TEST_BINARY_DIR}/plt${_step}")
+    if(NOT "${ADD_TEST_CHECKED_REFERENCE_INPUT}" STREQUAL "")
+        set(ref_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.reference.log")
+        set(run_ref "( ${MPI_COMMANDS} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${ADD_TEST_CHECKED_REFERENCE_INPUT} ${RUNTIME_OPTIONS} erf.plot_file_1=ref_plt > ${ref_log} 2>&1 || ( tail -n 60 ${ref_log} && false ) )")
+        set(run_test "${run_ref} && ${run_test}")
+        set(check_args "${check_args} ${CURRENT_TEST_BINARY_DIR}/ref_plt${_step}")
+    endif()
+    # remove the plotfiles of an earlier pass first, so a run that ends before
+    # NSTEPS cannot be checked against them
+    set(test_command sh -c "rm -rf ${check_args} && ${run_test} && rm -f ${CURRENT_TEST_BINARY_DIR}/CHECK_FAILED && ( ${ERF_RANS_PYTHON} ${CURRENT_TEST_BINARY_DIR}/${CHECK_SCRIPT} ${check_args} > ${check_log} 2>&1 || touch ${CURRENT_TEST_BINARY_DIR}/CHECK_FAILED ) && cat ${check_log} && test ! -f ${CURRENT_TEST_BINARY_DIR}/CHECK_FAILED")
+
+    add_test(${TEST_NAME} ${test_command})
+    set_tests_properties(${TEST_NAME}
+        PROPERTIES
+        TIMEOUT 900
+        PROCESSORS ${NP}
+        WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+        LABELS "regression;anelastic"
+        ATTACHED_FILES_ON_FAIL "${test_log};${check_log}"
+    )
+endfunction(add_test_checked)
+
+# Map factors on a uniform mesh (MLMG projection): runs in every build
+add_test_checked(AnelasticScalarAdvection_MapFactor AnelasticScalarAdvection inputs_mapfac_anelastic 60 check_mapfac_parity.py
+                 REFERENCE_INPUT inputs_mapfac_compressible)
+# Stretched and terrain-fitted meshes: their anelastic projection needs FFT
+if(ERF_ENABLE_FFT)
+    add_test_checked(AnelasticScalarAdvection_Fitted    AnelasticScalarAdvection inputs_fitted    50 check_scalar_centroid.py)
+    add_test_checked(AnelasticScalarAdvection_Stretched AnelasticScalarAdvection inputs_stretched 50 check_scalar_centroid.py)
+endif()
+
 function(add_test_rans TEST_NAME CASE_DIR INPUT_FILE NSTEPS CHECK_SCRIPT)
     set(options )
     set(oneValueArgs "RUNTIME_OPTIONS" "NRANKS")
