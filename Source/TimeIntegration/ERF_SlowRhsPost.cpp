@@ -355,21 +355,44 @@ void erf_slow_rhs_post (int level, int finest_level,
             cur_cons(i,j,k,n) = new_cons(i,j,k,n);
         });
 
-        // Non-EB Anelastic: Per-tile copy of projected momentum (EB done above)
+        // Non-EB Anelastic: the scalar-advection momenta from the projected momenta, in the
+        // form AdvectionSrcForRho defines them (ax rho_u / mf_uy, ay rho_v / mf_vx,
+        // az Omega / (mf_mx mf_my)), since AdvectionSrcForScalars divides the flux
+        // differences by detJ. Copying the raw momenta scaled horizontal scalar advection
+        // by 1/h_zeta on stretched and terrain-fitted meshes. The projection hands back
+        // rho w, so Omega is rebuilt as in erf_slow_rhs_pre. (EB done above)
         if (l_anelastic && !l_use_eb) {
             Box tbx_inc = mfi.nodaltilebox(0);
             Box tby_inc = mfi.nodaltilebox(1);
             Box tbz_inc = mfi.nodaltilebox(2);
 
+            const Array4<const Real>& ax_mom  = ax->const_array(mfi);
+            const Array4<const Real>& ay_mom  = ay->const_array(mfi);
+            const Array4<const Real>& az_mom  = az->const_array(mfi);
+            const Array4<const Real>  xmom_c  = cur_xmom;
+            const Array4<const Real>  ymom_c  = cur_ymom;
+            const bool l_fitted_mom = (solverChoice.mesh_type == MeshType::VariableDz);
+            const auto dxInv_mom    = geom.InvCellSizeArray();
+            const int  klo_face     = domain.smallEnd(2);
+            const int  khi_face     = domain.bigEnd(2) + 1;
+
             ParallelFor(tbx_inc, tby_inc, tbz_inc,
             [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                avg_xmom_arr(i,j,k) = cur_xmom(i,j,k);
+                avg_xmom_arr(i,j,k) = ax_mom(i,j,k) * cur_xmom(i,j,k) / mf_uy(i,j,0);
             },
             [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                avg_ymom_arr(i,j,k) = cur_ymom(i,j,k);
+                avg_ymom_arr(i,j,k) = ay_mom(i,j,k) * cur_ymom(i,j,k) / mf_vx(i,j,0);
             },
             [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                avg_zmom_arr(i,j,k) = cur_zmom(i,j,k);
+                Real omega_face;
+                if (!l_fitted_mom || k == khi_face) {
+                    omega_face = cur_zmom(i,j,k);
+                } else if (k == klo_face) {
+                    omega_face = zero;
+                } else {
+                    omega_face = OmegaFromW(i,j,k,cur_zmom(i,j,k),xmom_c,ymom_c,mf_ux,mf_vy,z_nd,dxInv_mom);
+                }
+                avg_zmom_arr(i,j,k) = az_mom(i,j,k) * omega_face / (mf_mx(i,j,0) * mf_my(i,j,0));
             });
         }
 
