@@ -479,6 +479,8 @@ function(build_erf_lib erf_lib_name)
        ${SRC_DIR}/BoundaryConditions/ERF_MOSTAverage.cpp
        ${SRC_DIR}/BoundaryConditions/ERF_BoundaryConditionsCons.cpp
        ${SRC_DIR}/BoundaryConditions/ERF_BoundaryConditionsXvel.cpp
+       ${SRC_DIR}/BoundaryConditions/ERF_BoundaryConditionsInflowProfile.cpp
+       ${SRC_DIR}/BoundaryConditions/ERF_InflowProfile.cpp
        ${SRC_DIR}/BoundaryConditions/ERF_BoundaryConditionsYvel.cpp
        ${SRC_DIR}/BoundaryConditions/ERF_BoundaryConditionsZvel.cpp
        ${SRC_DIR}/BoundaryConditions/ERF_BoundaryConditionsBaseState.cpp
