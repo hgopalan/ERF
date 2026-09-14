@@ -191,6 +191,15 @@ erf.fire.ignition.threshold_start_time = 0.0
 # Wind measurement reference height [m] (typical MOST: 6.1 m)
 # Fire model extracts wind at this height and adjusts to 10 m canopy height
 erf.fire.wind_ref_ht = 6.1
+
+# Bypass atmospheric wind interpolation with a constant reference wind, for
+# controlled idealized-wind test cases (Exec/RegTests/FireLineIgnition,
+# FireAdvectiveWindCoupling). Exact everywhere only with use_waf = false and
+# use_terrain_wind = false, since both still apply downstream otherwise.
+erf.fire.prescribed_wind   = false
+erf.fire.prescribed_wind_x = 0.0
+erf.fire.prescribed_wind_y = 0.0
+
 # Sample the wind at this height above ground (above the plume) and bring it
 # down to wind_ref_ht with a log profile of roughness wind_sample_z0 (CFBM
 # second interpolation option); 0 samples at wind_ref_ht directly
@@ -256,6 +265,18 @@ erf.fire.directional_ros = false
 #              no-wind, no-slope rate at the back and flanks, so a point fire's
 #              head runs at the head rate
 erf.fire.directional_shape = "projection"
+
+# With directional_shape = "projection" and ros_model = "rothermel": couple
+# the wind/slope factor to the front-normal direction either the way
+# Rothermel's own formula does (projecting the wind first, then
+# exponentiating -- non-convex once phi_w(B-1) > 1, so a point or finite-line
+# fire's head falls toward the Wulff-shape tip rate) or by exponentiating the
+# raw wind, then scaling by the cosine to the front normal (matching
+# WRF-Fire's fire_ros) -- convex, so the head runs at the head rate, like the
+# "ellipse" shape but without imposing an ellipse.
+# "projection" (default)
+# "advective"
+erf.fire.directional_wind_coupling = "projection"
 
 # Flank rate of the "ellipse" shape (needs directional_shape = "ellipse").
 # "model" (default) keeps the model's no-wind, no-slope rate at the flanks, so
