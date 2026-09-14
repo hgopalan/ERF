@@ -4,7 +4,7 @@
 #include <ERF_ShocDriver.H>
 #include <ERF_EBAdvection.H>
 #include <ERF_EBRedistribute.H>
-#include "ERF_ResolvedWallFlux.H"
+#include "Diffusion/ERF_CloudChamberWallFlux.H"
 #include "Prob/ERF_CloudChamberBudget.H"
 
 using namespace amrex;
@@ -62,7 +62,7 @@ void erf_slow_rhs_post (int level, int finest_level,
                               MultiFab& avg_zmom,
                         const MultiFab& xvel,
                         const MultiFab& yvel,
-                        const MultiFab& /*zvel*/,
+                        const MultiFab& zvel,
                         const MultiFab& source,
                               MultiFab* terrain_blank,
                               MultiFab* terrain_blank_xface,
@@ -314,6 +314,7 @@ void erf_slow_rhs_post (int level, int finest_level,
 
         const Array4<const Real> & u = xvel.array(mfi);
         const Array4<const Real> & v = yvel.array(mfi);
+        const Array4<const Real> & w = zvel.array(mfi);
 
         const Array4<const Real>& z_nd         = z_phys_nd->const_array(mfi);
         const Array4<const Real>& z_cc         = z_phys_cc->const_array(mfi);
@@ -630,12 +631,12 @@ void erf_slow_rhs_post (int level, int finest_level,
                         // The diffusion views are component-shifted; the
                         // wall helper receives the unshifted views and the
                         // explicit flux component index.
-                        erf_resolved_wall_flux::apply(
+                        erf_cloud_chamber_wall_flux::apply(
                             tbx, domain, state_comp, flux_comp, new_cons, cur_prim,
-                            cloud_chamber_base_state->const_array(mfi), cell_rhs,
+                            cloud_chamber_base_state->const_array(mfi), u, v, w, cell_rhs,
                             diffflux_x, diffflux_y, diffflux_z, dxInv,
                             chamber_walls, dc.alpha_T, dc.alpha_C,
-                            solverChoice.rdOcp);
+                            solverChoice.rdOcp, cloud_chamber_config->cloudy);
                     }
                     }
                 } // use_diff
@@ -743,7 +744,14 @@ void erf_slow_rhs_post (int level, int finest_level,
             const int klo = domain.smallEnd(2);
             if (tbx.smallEnd(2) <= klo && tbx.bigEnd(2) >= klo) {
                 ParallelFor(makeSlab(tbx,2,klo), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                    cur_cons(i,j,k,RhoKE_comp) = old_cons(i,j,k,RhoKE_comp);
+                    // Hold k, not rho*k.  Eq. 16 defines the primitive wall value, and
+                    // cur_cons(Rho_comp) has already been updated for this stage (and,
+                    // with moving terrain, rescaled by detJ/detJ_new along with RhoKE),
+                    // so copying the conserved variable straight across would let the
+                    // wall value drift by the first-cell density change every step.
+                    // Both states carry the same detJ convention, so the ratio is exact.
+                    cur_cons(i,j,k,RhoKE_comp) = cur_cons(i,j,k,Rho_comp) *
+                        ( old_cons(i,j,k,RhoKE_comp) / old_cons(i,j,k,Rho_comp) );
                 });
             }
         }

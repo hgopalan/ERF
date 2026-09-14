@@ -655,21 +655,12 @@ pass when the run stops before the first step with the matching message:
   substepping. Without the check the run blew up by the third step.
 - ``ABL_ZSplit_ImplicitDiffusion_abort``: slip-wall bottom and
   ``erf.substepping_type=None``, leaving the implicit vertical diffusion.
-- ``ABL_ZSplit_SurfaceLayer_abort``: the deck's surface layer with
-  ``erf.substepping_type=None`` and ``erf.vert_implicit_fac=0``. Without the check
-  the run stopped on a floating-point trap in the first step.
+
 
 On fine levels, whose boxes come from clustering, ERF joins boxes stacked in z
-into whole columns instead of stopping. Three ``SPLIT fine_z`` parity tests run a
-deck twice, with level 1 split in z (``amr.max_grid_size_z=1048576 16``) and with
-level 1 left whole, and pass when the two plotfiles agree:
-
-- ``Bubble2D_FineZSplit_Substep``: a dry 2D bubble whose level-1 box is made at the
-  regrid of step 4, with the implicit substep and the implicit vertical diffusion.
-  With the check skipped and no join, level 1 split in z was off by 0.18 m/s in w
-  and 0.019 K in theta after 100 steps; split in x it was bit-identical.
-- ``Bubble2D_FineZSplit_Diffusion``: the same deck with
-  ``erf.substepping_type=None``, leaving the implicit vertical diffusion (0.048 m/s
-  in w after 400 steps without the join).
-- ``Terrain2Lev_FineZSplit_Init``: the ``Terrain2Lev_STF_interp`` deck, whose level 1
-  is made at start-up, so the join also runs outside regridding.
+into whole columns instead of stopping (at the regrid and at start-up). The
+parity runs that covered the join (a dry 2D bubble with level 1 split in z
+against level 1 left whole, with and without the implicit substep, and the
+``Terrain2Lev_STF_interp`` deck) used a ``SPLIT fine_z`` mode of the fork's
+tiling-parity script, which the September 2026 development merge replaced with
+upstream's script; they are to be re-registered on upstream's box-parity harness.

@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <sstream>
+#include "ERF_Constants.H"
 
 #include "AMReX_buildInfo.H"
 
@@ -127,16 +128,16 @@ void
 check_stacked_boxes_in_z (int lev, const BoxArray& ba, const Geometry& geom,
                           const SolverChoice& sc)
 {
+    // The surface layer no longer counts: its planar arrays follow the box split
+    // since erf-model/ERF#3970 (ABL_MOST_WOA_ZSplit runs it on boxes split in z).
     const ColumnSolves cs = column_solves_on_level(lev, sc);
-    if (!cs.any()) { return; }
     const bool implicit_substep = cs.implicit_substep;
     const bool implicit_diff    = cs.implicit_diff;
-    const bool surface_layer    = cs.surface_layer;
+    if (!(implicit_substep || implicit_diff)) { return; }
 
     Vector<std::string> users;
     if (implicit_substep) { users.push_back("the implicit acoustic substep"); }
     if (implicit_diff)    { users.push_back("the implicit vertical diffusion"); }
-    if (surface_layer)    { users.push_back("the surface layer"); }
 
     const Box& domain = geom.Domain();
     const int nz = domain.length(2);
@@ -174,10 +175,6 @@ check_stacked_boxes_in_z (int lev, const BoxArray& ba, const Geometry& geom,
         if (implicit_diff) {
             msg << " The implicit vertical diffusion (erf.vert_implicit_fac > 0) solves each"
                 << " column inside one box; erf.vert_implicit_fac = 0 avoids it.";
-        }
-        if (surface_layer) {
-            msg << " The surface layer (zlo.type = surface_layer) builds its planar arrays per"
-                << " box and cannot run on boxes split in z (erf-model/ERF#3970 fixes this).";
         }
         Abort(msg.str());
     }
@@ -592,7 +589,7 @@ void ERF::MakeNewLevelFromScratch (int lev, Real time, const BoxArray& ba_in,
     //********************************************************************************************
     // Radiation
     // *******************************************************************************************
-    if (solverChoice.rad_type != RadiationType::None)
+    if (solverChoice.rad_uses_interface())
     {
         rad[lev]->Init(geom[lev], ba, &vars_new[lev][Vars::cons]);
     }
@@ -730,7 +727,7 @@ ERF::MakeNewLevelFromCoarse (int lev, Real time, const BoxArray& ba,
     //********************************************************************************************
     // Radiation
     // *******************************************************************************************
-    if (solverChoice.rad_type != RadiationType::None)
+    if (solverChoice.rad_uses_interface())
     {
         rad[lev]->Init(geom[lev], ba, &vars_new[lev][Vars::cons]);
     }
@@ -1245,7 +1242,7 @@ ERF::RemakeLevel (int lev, Real time, const BoxArray& ba, const DistributionMapp
     //********************************************************************************************
     // Radiation
     // *******************************************************************************************
-    if (solverChoice.rad_type != RadiationType::None)
+    if (solverChoice.rad_uses_interface())
     {
         rad[lev]->Init(geom[lev], ba, &vars_new[lev][Vars::cons]);
     }
@@ -1424,6 +1421,9 @@ ERF::ClearLevel (int lev)
 
     // Clears the integrator memory
     mri_integrator_mem[lev].reset();
+
+    // Clears the map of the vertical extent of the grid column over each (i,j)
+    column_kextent[lev].reset();
 
     // Clears the physical boundary condition routines
     physbcs_cons[lev].reset();

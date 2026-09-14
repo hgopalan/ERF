@@ -59,6 +59,7 @@ erf.use_gravity     = true
 erf.molec_diff_type = "None"
 erf.les_type        = "None"
 
+
 # TERRAIN GRID TYPE
 erf.terrain_type      = StaticFittedMesh
 erf.terrain_smoothing = 0                       # BTF
