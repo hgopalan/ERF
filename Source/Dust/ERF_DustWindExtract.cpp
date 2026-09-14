@@ -43,8 +43,10 @@ void fill_dust_wind_from_interpolation(
             int i_a = i_d / C;
             int j_a = j_d / C;
 
-            // Get surface height
-            Real z_surf = z_phys_cc(i_a, j_a, 0);
+            // Surface height: half a cell below the first cell centre (the fire grid
+            // uses the terrain surface; using the first centre put the sample half
+            // a cell too high and made the wind depend on the vertical resolution).
+            Real z_surf = z_phys_cc(i_a, j_a, 0) - 0.5 * (z_phys_cc(i_a, j_a, 1) - z_phys_cc(i_a, j_a, 0));
 
             // Compute target height
             Real z_target = z_surf + zref;

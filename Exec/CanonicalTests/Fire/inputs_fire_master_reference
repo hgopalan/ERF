@@ -147,8 +147,6 @@ erf.fire.moisture_dynamic = false
 
 # Compute moisture of extinction dynamically from fuel SAV (Phase 4)
 # false: use default extinction moisture for fuel model
-# true: calculate from surface-area-to-volume ratio
-erf.fire.use_dynamic_mext = true
 
 # ============================================================================
 # IGNITION PARAMETERS
@@ -164,6 +162,9 @@ erf.fire.ignition_r = 30.0
 # Ignition from a perimeter polygon (CSV of x y vertices; "polygon" closed or
 # "polyline" open with half-width polyline_width); empty = disabled
 erf.fire.ignition.polygon_file = ""
+
+# Timed point ignitions from a CSV (time x y radius per line); empty = disabled
+erf.fire.ignition.schedule_file = ""
 erf.fire.ignition.polygon_type = "polygon"
 erf.fire.ignition.polyline_width = 10.0
 # Stamp the polygon at this time [s] so the atmosphere spins up first; 0 = at
@@ -196,6 +197,9 @@ erf.fire.wind_ref_ht = 6.1
 erf.fire.wind_sample_ht = 0.0
 erf.fire.wind_sample_z0 = 0.1
 
+# Take the midflame wind height from the per-fuel fcwh table instead of wind_ref_ht
+erf.fire.use_per_fuel_wind_ht = false
+
 # Apply Wind Adjustment Factor (WAF) for canopy screening
 # true: reduce wind for forest canopy using Andrews formula
 # false: use wind as-is
@@ -204,6 +208,7 @@ erf.fire.use_waf = true
 # WAF formula selection
 # Options: "andrews" (default), "behaviorplus"
 erf.fire.waf_formula = "andrews"
+
 
 # Cap the midflame wind at Rothermel's maximum effective wind speed (MEWS):
 # 300 ft/min (1.52 m/s) for fine fuels (SAV > 1000 1/ft), 500 ft/min otherwise.
@@ -216,6 +221,10 @@ erf.fire.use_wind_limit = true
 # true: modify wind based on slope aspect/elevation
 # false: use extracted wind as-is
 erf.fire.use_terrain_wind = false
+
+# Terrain file for the fire grid (ERF terrain text format); empty = erf.terrain_file_name
+# interpolated to the fire grid. A finer raster here gives the fire the sharp slope.
+erf.fire.terrain_file_name = ""
 
 # Terrain wind adjustment factors (used when use_terrain_wind = true)
 erf.fire.k_ridge = 1.5      # Ridge speed-up factor (wind accelerates over ridges)
@@ -257,6 +266,19 @@ erf.fire.directional_shape = "projection"
 #          head and back rates are unchanged
 erf.fire.directional_ellipse_lw = "model"
 erf.fire.directional_ellipse_lw_max = 8.0
+
+# Front propagation path: "farsite" (Huygens ellipse, default) or "levelset"
+erf.fire.propagation_method = "farsite"
+
+# Level-set numerics: subcycle CFL, artificial viscosity away from the front
+# (eps_visc_front below applies near it), and the Sussman reinitialisation
+# (every N subcycles, iterations, band half-width in m and pseudo-dt; <0 = auto)
+erf.fire.levelset.cfl = 0.4
+erf.fire.levelset.eps_visc = 0.4
+erf.fire.levelset.reinit_every = 5
+erf.fire.levelset.reinit_iters = 10
+erf.fire.levelset.reinit_band_m = -1.0
+erf.fire.levelset.reinit_dtau = -1.0
 
 # Level-set path only: extrapolate the level set into non-burnable cells
 # inside every stencil (gradient, Laplacian, front normal, reinitialisation),
@@ -375,6 +397,13 @@ erf.fire.structures.min_height = 0.5      # sampled height [m] above which a cel
 # an immersed-forcing building does not leak into the wind of the fire cells
 # around it. Needs structures.enable; no effect with wind_interp = "nearest".
 erf.fire.structures.wind_open_columns = false
+
+# Spatial fuel map on the fire grid: ESRI ASCII ("ascii") or FARSITE landscape
+# ("lcp") file; empty = the uniform fuel_model_id. blending_fraction blends the
+# ROS across fuel boundaries (0 = none, 1 = full neighbour average).
+erf.fire.fuel_map.file = ""
+erf.fire.fuel_map.format = "ascii"
+erf.fire.fuel_map.blending_fraction = 0.0
 
 # Fuel codes that are non-burnable. Empty by default, in which case an
 # unknown code (including 0, the nodata value) still falls through to fuel
@@ -534,8 +563,6 @@ erf.fire.burnout_time_to_efold = 0.8514
 
 # Combustion fraction bounds for heat flux calculation
 # Fraction of fuel consumed: typically 0.2 (minimum) to 0.9 (maximum)
-erf.fire.f_c_min = 0.2
-erf.fire.f_c_max = 0.9
 
 # ============================================================================
 # LEVEL-SET ADVECTION (FARSITE Model, Phase 3)
@@ -750,8 +777,6 @@ erf.fire.crown.foliar_moisture = 1.0
 
 # Critical foliar moisture (Van Wagner 1977 threshold) [fraction]
 # Below this, crown fire impossible due to moisture
-# Typical: 0.30 (30%)
-erf.fire.crown.M_c = 0.30
 
 # Canopy heat content (energy released when canopy burns) [BTU/lb]
 # Typical: 8000 BTU/lb (slightly lower than surface fuels due to moisture)
@@ -867,6 +892,39 @@ erf.fire.accel.tau_wind = 60.0
 #
 # Phase 9 flame temp (always written):
 #   fire_flame_temp (1 additional component)
+
+# ============================================================================
+# FIREBREAKS (up to 10, numbered 0-9; reading stops at the first missing .type)
+# ============================================================================
+# erf.fire.firebreak.0.type = "rect"       # "rect" (x_lo y_lo x_hi y_hi) or "circle" (cx cy radius), metres
+# erf.fire.firebreak.0.x_lo = 0.0
+# erf.fire.firebreak.0.y_lo = 0.0
+# erf.fire.firebreak.0.x_hi = 0.0
+# erf.fire.firebreak.0.y_hi = 0.0
+# erf.fire.firebreak.1.type = "circle"
+# erf.fire.firebreak.1.cx = 0.0
+# erf.fire.firebreak.1.cy = 0.0
+# erf.fire.firebreak.1.radius = 0.0
+
+# ============================================================================
+# FIRE PLOTFILES (read under erf., not erf.fire.)
+# ============================================================================
+erf.fire_plot_file = "plt_fire_"   # prefix of the fire-grid plotfiles
+erf.fire_plot_int = -1              # steps between fire plotfiles (-1 = off)
+erf.fire_plot_per = -1.0            # seconds between fire plotfiles (-1 = off)
+
+# ============================================================================
+# FIRE-DUST COUPLING (read under erf.; needs ERF_ENABLE_DUST and erf.dust.enable)
+# ============================================================================
+erf.fire_dust_coupling = false           # master switch
+erf.fire_dust_crust_reduction = 0.8      # fraction of the soil crust removed in burned cells
+erf.fire_dust_wind_to_dust = true        # hand the fire-grid wind to the dust threshold
+erf.fire_dust_wind_z0 = 0.1              # roughness of the log law used for that wind [m]
+erf.fire_dust_wind_zref = 6.1            # its reference height; match erf.fire.wind_ref_ht [m]
+erf.fire_dust_lofting_enabled = false    # loft dust in the fire plume
+erf.fire_dust_lofting_k_loft = 2.0       # lofting strength
+erf.fire_dust_lofting_Q_threshold = 50.0 # fire heat flux that starts lofting [W/m2]
+erf.fire_dust_lofting_Q_ref = 500.0      # heat flux of unit lofting [W/m2]
 
 # ============================================================================
 # END OF MASTER FIRE CONFIGURATION FILE

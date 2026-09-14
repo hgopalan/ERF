@@ -285,7 +285,7 @@ Where each feature is exercised:
    * - Checkpoint and restart of the fire state
      - ``FireRestart``
    * - Dynamic fuel moisture
-     - canonical ``Verification/Moisture_Relaxation``, ``Core_Physics/Fuel_Moisture_Sensitivity``, ``ROS_Models/behave_dynamic``
+     - canonical ``Verification/Moisture_Relaxation``, ``Core_Physics/Fuel_Moisture_Sensitivity``, ``Fire_Behavior/ROS_Models/behave_dynamic``
    * - Ignition schedule, polygon and polyline ignition
      - canonical ``Fire_Behavior/Ignition_Patterns``; ``Unit_Tests/test_ignition_schedule.py``
    * - Startup acceleration
@@ -293,7 +293,7 @@ Where each feature is exercised:
    * - Ember spotting, crown fire
      - canonical ``Fire_Behavior/Spotting``, ``Fire_Behavior/Crown_Fire``; ``Unit_Tests/test_albini_spotting.py``, ``test_crown_fire.py``
    * - Coupling modes, heat injection, smoke tracer
-     - canonical ``Fire_Atmosphere_Coupling``, ``Verification/Calm_Plume``; ``FirePrescribed``
+     - canonical ``Fire_Atmosphere_Coupling``; ``FirePrescribed``
    * - Additive source mode, open-fraction heat placement, fire heat with immersed-forcing buildings
      - ``FireHeatPlacement``
    * - Level-set wall extrapolation, open-column wind weights

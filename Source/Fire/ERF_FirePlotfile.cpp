@@ -72,7 +72,7 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
     MultiFab::Copy(mf, *fire_layer.get_wind_eff(), 0, 2, 2, 0);
     // Components 4-5: fire_wind_ref (u, v)
     MultiFab::Copy(mf, *fire_layer.get_wind_ref(), 0, 4, 2, 0);
-    // Component 6: fire_wind_extract_z
+    // Component 6: fire_extract_z
     MultiFab::Copy(mf, *fire_layer.get_wind_extract_z(), 0, 6, 1, 0);
     // Components 7-8: fire_slopes (dz/dx, dz/dy)
     MultiFab::Copy(mf, *fire_layer.get_slopes(),   0, 7, 2, 0);

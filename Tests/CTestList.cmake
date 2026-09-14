@@ -640,7 +640,9 @@ function(add_test_fire TEST_NAME SUITE_DIR INPUT_FILE NSTEPS)
 
     set(RUNTIME_OPTIONS "max_step=${NSTEPS} erf.fire_plot_int=${NSTEPS} erf.fire_plot_file=plt_fire_ erf.plot_int_1=-1 erf.plot_int_2=-1 erf.check_int=-1 ${ADD_TEST_FIRE_RUNTIME_OPTIONS}")
     set(test_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
-    set(test_command sh -c "${MPI_COMMANDS} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE} ${RUNTIME_OPTIONS} > ${test_log} 2>&1 && test -f ${CURRENT_TEST_BINARY_DIR}/${PLTFILE}/Header")
+    # the fire and dust CSVs are appended to (a restart keeps its earlier leg), so a
+    # rerun in the same directory starts from a clean slate
+    set(test_command sh -c "cd ${CURRENT_TEST_BINARY_DIR} && rm -rf plt_fire_* plt_dust_* fire_stats* dust_diag* && ${MPI_COMMANDS} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE} ${RUNTIME_OPTIONS} > ${test_log} 2>&1 && test -f ${CURRENT_TEST_BINARY_DIR}/${PLTFILE}/Header")
 
     add_test(${TEST_NAME} ${test_command})
     set_tests_properties(${TEST_NAME}
@@ -685,6 +687,55 @@ function(add_test_abort TEST_NAME SOURCE_DIR INPUT_FILE EXPECTED_MESSAGE RUNTIME
         ATTACHED_FILES_ON_FAIL "${test_log}"
     )
 endfunction(add_test_abort)
+
+# Fire suite deck followed by its check script (pure Python; the plotfile reader
+# erf_plotfile.py from Canonical_RANS is copied next to it). The script's exit
+# code is the verdict and its table is echoed into the ctest output.
+function(add_test_fire_check TEST_NAME SUITE_DIR INPUT_FILE NSTEPS CHECK_SCRIPT)
+    set(options )
+    set(oneValueArgs "RUNTIME_OPTIONS" "NRANKS")
+    set(multiValueArgs )
+    cmake_parse_arguments(ADD_TEST_FIRE_CHECK "${options}" "${oneValueArgs}"
+        "${multiValueArgs}" ${ARGN})
+
+    set(CURRENT_TEST_SOURCE_DIR ${PROJECT_SOURCE_DIR}/Exec/RegTests/${SUITE_DIR})
+    set(CURRENT_TEST_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
+    file(MAKE_DIRECTORY ${CURRENT_TEST_BINARY_DIR})
+    file(GLOB TEST_FILES "${CURRENT_TEST_SOURCE_DIR}/*")
+    file(COPY ${TEST_FILES} DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+    file(COPY ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/Canonical_RANS/erf_plotfile.py
+         DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+
+    if(ERF_ENABLE_MPI)
+        if("${ADD_TEST_FIRE_CHECK_NRANKS}" STREQUAL "")
+            set(NP ${ERF_TEST_NRANKS})
+        else()
+            set(NP ${ADD_TEST_FIRE_CHECK_NRANKS})
+        endif()
+        set(MPI_COMMANDS "${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${NP} ${MPIEXEC_PREFLAGS}")
+    else()
+        set(NP 1)
+        unset(MPI_COMMANDS)
+    endif()
+
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+    set(RUNTIME_OPTIONS "max_step=${NSTEPS} erf.plot_int_1=-1 erf.plot_int_2=-1 erf.check_int=-1 ${ADD_TEST_FIRE_CHECK_RUNTIME_OPTIONS}")
+    set(test_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
+    set(check_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.check.log")
+    # stale plotfiles and diagnostics of an earlier run are removed first: the
+    # dust and fire CSVs are appended to (a restart keeps its earlier leg)
+    set(test_command sh -c "cd ${CURRENT_TEST_BINARY_DIR} && rm -rf plt_fire_* plt_dust_* dust_diag* fire_stats* CHECK_FAILED && ${MPI_COMMANDS} ${TEST_EXE} ${CURRENT_TEST_BINARY_DIR}/${INPUT_FILE} ${RUNTIME_OPTIONS} > ${test_log} 2>&1 || ( tail -n 60 ${test_log} && false ) && ( ${ERF_RANS_PYTHON} ${CURRENT_TEST_BINARY_DIR}/${CHECK_SCRIPT} > ${check_log} 2>&1 || touch ${CURRENT_TEST_BINARY_DIR}/CHECK_FAILED ) && cat ${check_log} && test ! -f ${CURRENT_TEST_BINARY_DIR}/CHECK_FAILED")
+
+    add_test(${TEST_NAME} ${test_command})
+    set_tests_properties(${TEST_NAME}
+        PROPERTIES
+        TIMEOUT 1800
+        PROCESSORS ${NP}
+        WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+        LABELS "regression;fire"
+        ATTACHED_FILES_ON_FAIL "${test_log};${check_log}"
+    )
+endfunction(add_test_fire_check)
 
 # Fire start-up check: add_test_abort on one deck of a fire suite under Exec/RegTests
 function(add_test_fire_abort TEST_NAME SUITE_DIR INPUT_FILE EXPECTED_MESSAGE RUNTIME_OPTIONS)
@@ -1087,6 +1138,14 @@ if(ERF_ENABLE_PARTICLES)
     add_test_sdm(SDM_MultiSpecies_Bubble2D       "" "erf_exec"  "plt00001" 5e-12 1e-12 RUNTIME_OPTIONS "erf.vert_implicit=false ")
 endif()
 
+# Python for the fire, dust and RANS check scripts
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    set(ERF_RANS_PYTHON "${Python3_EXECUTABLE}")
+else()
+    set(ERF_RANS_PYTHON "python3")
+endif()
+
 #=============================================================================
 # Fire and dust smoke tests: one deck per suite under Exec/RegTests, a few
 # steps each (ctest -L fire, or -R Fire)
@@ -1127,8 +1186,26 @@ if(ERF_ENABLE_MPI AND NOT WIN32)
 add_test_fire_fuel_map_rows(FireScottBurgan_map_rows FireScottBurgan inputs_sb_map 100
     -0.000001 0.000001 1.2329 1.2330)
 endif()
+# a misspelt selector or a value the kernels cannot use stops at start-up
+add_test_fire_abort(FireBadRosModel_abort     FireRestart           inputs_levelset_straight
+    "erf.fire.ros_model = \"rothermal\" is not one of" "erf.fire.ros_model=rothermal")
+add_test_fire_abort(FireBadCoupling_abort     FireRestart           inputs_levelset_straight
+    "erf.fire.coupling_type = \"laged\" is not one of" "erf.fire.coupling_type=laged")
+# the fire and dust layers live on level 0 only
+add_test_fire_abort(FireAmrLevel_abort        FireRestart           inputs_levelset_straight
+    "The fire module runs on a single level" "amr.max_level=1 amr.ref_ratio=2 erf.regrid_int=1000")
+# every documented fire/dust key is read, every read key is documented, no deck sets an unread key
+add_test(FireDustInputsDocs ${ERF_RANS_PYTHON} ${PROJECT_SOURCE_DIR}/Tests/check_fire_dust_inputs.py ${PROJECT_SOURCE_DIR})
+set_tests_properties(FireDustInputsDocs PROPERTIES LABELS "docs;fire" TIMEOUT 120)
 if(ERF_ENABLE_DUST)
 add_test_fire(FireRestart_dust_straight     FireRestart           inputs_dust_straight       40 NRANKS 1)
+# the three fire-dust couplings applied once per step, in the right order
+add_test_fire_check(FireDustCoupling_check  FireDustCoupling      inputs                     40 check_firedust.py NRANKS 1)
+# dust inputs the kernels cannot use stop at start-up
+add_test_fire_abort(DustBadBins_abort         FireRestart           inputs_dust_straight
+    "erf.dust.n_size_bins must be >= 1" "erf.dust.n_size_bins=0")
+add_test_fire_abort(DustZrefMismatch_abort    FireRestart           inputs_dust_straight
+    "must equal erf.most.zref" "erf.most.zref=12.0")
 endif()
 endif()
 
@@ -1145,12 +1222,7 @@ endif()
 # whose general-terrain projection has no non-FFT path, are registered only
 # when the build enables FFT (ERF_ENABLE_FFT).
 #=============================================================================
-find_package(Python3 COMPONENTS Interpreter QUIET)
-if(Python3_Interpreter_FOUND)
-    set(ERF_RANS_PYTHON "${Python3_EXECUTABLE}")
-else()
-    set(ERF_RANS_PYTHON "python3")
-endif()
+# (Python3 for the check scripts is found above the fire tests)
 
 #=============================================================================
 # Anelastic slow-scalar advection (Exec/RegTests/AnelasticScalarAdvection)

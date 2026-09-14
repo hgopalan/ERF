@@ -992,6 +992,9 @@ K-profile amplitude of burning columns, and leaves the PBLH alone:
 
 with :math:`kbfs_{MOST} = -u_* \theta_*`, :math:`h` the corrected PBLH and :math:`w_*` the Pass 4
 scale. Columns without fire keep :math:`w_*`, and HGAMT/HGAMQ always use the unboosted :math:`w_*`.
+A column counts as burning when its fire heat flux exceeds ``erf.mrf_fire_q_threshold``
+(default 50 W/m\ :sup:`2`), and the thermal excess the fire adds is capped at
+``erf.mrf_fire_t_excess_cap`` (default 50 K). Both keys accept the ``_lev<N>`` per-level form.
 The fire heat flux is kept out of the corrector because a fire thermal excess would make the
 Richardson number negative through a neutral or shear-driven ABL and collapse the PBLH to its floor.
 

@@ -43,9 +43,7 @@
 #include <cmath>
 
 // Density component index (needed for S_old array access)
-#ifndef Rho_comp
 #include <ERF_IndexDefines.H>
-#endif
 
 namespace DustSettlingConst {
     constexpr amrex::Real G_ACCEL    = 9.81;     ///< Gravitational acceleration [m/s^2]

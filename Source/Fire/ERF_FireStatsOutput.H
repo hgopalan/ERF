@@ -79,6 +79,10 @@ inline void
 write_fire_stats_header(const std::string& filename)
 {
     if (!amrex::ParallelDescriptor::IOProcessor()) return;
+    {   // a restart keeps the earlier leg; the header is written once per file
+        std::ifstream probe(filename);
+        if (probe.good() && probe.peek() != std::ifstream::traits_type::eof()) return;
+    }
 
     std::ofstream out(filename, std::ios::out | std::ios::trunc);
     if (!out.is_open()) {

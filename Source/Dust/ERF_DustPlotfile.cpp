@@ -72,7 +72,7 @@ void WriteDustPlotfile(const std::string& plotfile_prefix,
     copy_if(dust_layer.get_ustar_t(),          2);
     copy_if(dust_layer.get_deposition_rate(),  3);
     copy_if(dust_layer.get_conc_sfc(),         4);
-    copy_if(dust_layer.get_surf_moist(),       5);
+    copy_if(dust_layer.get_surf_qflux(),       5);
     copy_if(dust_layer.get_suppression(),      6);
     copy_if(dust_layer.get_retreat_flag(),     7);
     // Phase 17: EPA NAAQS fields

@@ -101,8 +101,6 @@ erf.fire.k_deflect = 0.3
 
 # Heat flux parameters (Phase 5)
 erf.fire.tau_residence_s = 0.0        # 0 = derive from fuel SAV and rho_p
-erf.fire.f_c_min = 0.2
-erf.fire.f_c_max = 0.9
 
 # FARSITE parameters (Phase 3)
 erf.fire.farsite.phi_threshold = 0.1

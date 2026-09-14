@@ -21,6 +21,7 @@
 struct FireDustCoupling {
     bool        enabled                   = false;
     amrex::Real post_fire_crust_reduction = 0.8;  // fraction of crust removed in burned cells
+    bool        debug                     = false; // erf.dust.dust_debug: per-step coupling prints
 
     // Fire level-set phi on the fire sub-grid (phi < 0 => burned).
     const amrex::MultiFab* fire_phi_mf  = nullptr;

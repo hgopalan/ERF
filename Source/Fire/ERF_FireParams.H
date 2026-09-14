@@ -34,7 +34,6 @@ struct FireParams
     amrex::Real       wind_ref_ht         = 6.1;         ///< MOST wind reference height [m]
     // Phase 13A: Per-fuel wind height
     bool              use_per_fuel_wind_ht = false; ///< Use per-fuel fcwh table for wind height
-    amrex::Real       waf_fcz0_scale       = 1.0;   ///< Scale factor on fcz0 roughness for WAF [dimensionless]
     bool              use_waf             = true;        ///< Apply Wind Adjustment Factor
     std::string       waf_formula         = "andrews";   ///< "andrews" or "behaviorplus"
     bool              use_wind_limit      = true;        ///< Apply the MEWS midflame wind cap (Rothermel, BEHAVE)
@@ -83,7 +82,6 @@ struct FireParams
     std::string       moisture_live_model = "legacy";
 
     // Moisture of extinction (Phase 4)
-    bool              use_dynamic_mext    = true;        ///< Compute M_x from fuel SAV
 
     // Heat flux parameters (Phase 5)
     amrex::Real       tau_residence_s     = 0.0;         ///< Residence time [s]; 0 = derive from fuel SAV
@@ -104,8 +102,6 @@ struct FireParams
     std::string       burnout_model       = "residence";
     std::vector<amrex::Real> burnout_times_s;             ///< 13 burn times [s] for Anderson models 1-13 overriding the table (sfire)
     amrex::Real       burnout_time_to_efold = 0.8514;     ///< tau = burn time / this (WRF-SFIRE)
-    amrex::Real       f_c_min             = 0.2;         ///< Minimum combustion fraction
-    amrex::Real       f_c_max             = 0.9;         ///< Maximum combustion fraction
 
     // FARSITE parameters
     amrex::Real       farsite_phi_threshold   = 0.1;  ///< front detection level in phi
@@ -243,7 +239,6 @@ struct FireParams
         amrex::Real   canopy_bulk_den = 0.2;    ///< Canopy bulk density C_BD [kg/m³]
         amrex::Real   canopy_depth    = 10.0;   ///< Canopy depth [m]
         amrex::Real   foliar_moisture = 1.0;    ///< Foliar moisture M_fold [fraction]
-        amrex::Real   M_c             = 0.30;   ///< Critical foliar moisture [fraction] (Van Wagner 1977)
         amrex::Real   h_crown_BTU_lb  = 8000.0; ///< Canopy heat content [BTU/lb]
         amrex::Real   wind_10m_kmh    = 0.0;    ///< 10-m wind speed [km/h]; 0 = derive from fire_wind_eff
         std::string   ros_model       = "cruz"; ///< Crown ROS model: "cruz", "rothermel1991", "van_wagner_proxy"
@@ -440,7 +435,7 @@ struct FireParams
         amrex::Real K1       = 130.0;    ///< Convective decay coefficient [-]
         amrex::Real st       = 17.0;     ///< Stoichiometric coefficient [-]
         amrex::Real rho_a    = 1.2;      ///< Air density [kg/m³]
-        amrex::Real sigma_B  = 5.6e-8;   ///< Stefan-Boltzmann constant [W/(m²·K⁴)]
+        amrex::Real sigma_B  = 5.670374e-8; ///< Stefan-Boltzmann constant [W/(m²·K⁴)]
         int         max_iter = 40;       ///< Max root-solve iterations (2020 only)
         amrex::Real tol      = 1.0e-4;   ///< Root-solve bracket width [m/s] (2020 only)
 
@@ -653,6 +648,24 @@ struct FireParams
     FireParams()
     {
        amrex::ParmParse pp("erf.fire");
+       // Reject values the kernels cannot use instead of running on with a
+       // silent fallback or a NaN. Every message names the key and the value.
+       auto fail = [](const std::string& msg) { amrex::Abort("[FIRE] " + msg); };
+       auto one_of = [&](const char* key, const std::string& v, std::initializer_list<const char*> allowed) {
+           for (auto a : allowed) { if (v == a) return; }
+           std::string list;
+           for (auto a : allowed) { list += (list.empty() ? "" : ", ") + std::string("\"") + a + "\""; }
+           fail(std::string("erf.fire.") + key + " = \"" + v + "\" is not one of " + list);
+       };
+       auto positive = [&](const char* key, amrex::Real v) {
+           if (!(v > 0.0)) fail(std::string("erf.fire.") + key + " must be > 0, got " + std::to_string(v));
+       };
+       auto nonneg = [&](const char* key, amrex::Real v) {
+           if (!(v >= 0.0)) fail(std::string("erf.fire.") + key + " must be >= 0, got " + std::to_string(v));
+       };
+       auto fraction = [&](const char* key, amrex::Real v) {
+           if (!(v >= 0.0 && v <= 1.0)) fail(std::string("erf.fire.") + key + " must be in [0,1], got " + std::to_string(v));
+       };
        pp.query("enable", enable);
        pp.query("fire_debug", fire_debug);
        pp.query("grid_ratio", grid_ratio);
@@ -664,6 +677,11 @@ struct FireParams
        pp.query("ignition_y", ignition_y);
        pp.query("ignition_r", ignition_r);
        pp.query("wind_ref_ht", wind_ref_ht);
+       fraction("moisture_1hr", moisture_1hr);
+       fraction("moisture_10hr", moisture_10hr);
+       fraction("moisture_100hr", moisture_100hr);
+       nonneg("ignition_r", ignition_r);   // 0 = no ignition disc (schedule, polygon or line instead)
+       positive("wind_ref_ht", wind_ref_ht);
        pp.query("wind_sample_ht", wind_sample_ht);
        pp.query("wind_sample_z0", wind_sample_z0);
        if (wind_sample_ht > 0.0) {
@@ -676,9 +694,9 @@ struct FireParams
        }
        // Phase 13A: Per-fuel wind height
        pp.query("use_per_fuel_wind_ht", use_per_fuel_wind_ht);
-       pp.query("waf_fcz0_scale", waf_fcz0_scale);
        pp.query("use_waf", use_waf);
        pp.query("waf_formula", waf_formula);
+       one_of("waf_formula", waf_formula, {"andrews", "behaviorplus"});
        pp.query("use_wind_limit", use_wind_limit);
        pp.query("use_terrain_wind", use_terrain_wind);
        pp.query("k_ridge", k_ridge);
@@ -714,7 +732,6 @@ struct FireParams
        }
 
        // Moisture of extinction (Phase 4)
-       pp.query("use_dynamic_mext", use_dynamic_mext);
 
        // Heat flux parameters (Phase 5)
        pp.query("tau_residence_s", tau_residence_s);
@@ -729,8 +746,6 @@ struct FireParams
        }
        for (auto t : burnout_times_s) { if (t <= 0.0) amrex::Abort("erf.fire.burnout_times_s must be positive"); }
        if (burnout_time_to_efold <= 0.0) { amrex::Abort("erf.fire.burnout_time_to_efold must be positive"); }
-       pp.query("f_c_min", f_c_min);
-       pp.query("f_c_max", f_c_max);
 
        // FARSITE parameters
        pp.query("farsite.phi_threshold", farsite_phi_threshold);
@@ -754,6 +769,7 @@ struct FireParams
 
        // Level-set propagation parameters
        pp.query("propagation_method", propagation_method);
+       one_of("propagation_method", propagation_method, {"farsite", "levelset"});
        pp.query("levelset.cfl", levelset_cfl);
        pp.query("levelset.eps_visc", levelset_eps_visc);
        pp.query("levelset.reinit_every", levelset_reinit_every);
@@ -802,6 +818,9 @@ struct FireParams
        pp.query("heat_flux_alfg", heat_flux_alfg);
        pp.query("fire_atm_feedback", fire_atm_feedback);
        pp.query("coupling_type", coupling_type);
+       one_of("coupling_type", coupling_type, {"passive", "lagged", "synchronous"});
+       positive("heat_flux_alfg", heat_flux_alfg);
+       nonneg("fire_atm_feedback", fire_atm_feedback);   // 0 = one-way, the documented switch
        pp.query("inject_latent", inject_latent);
        pp.query("heat_flux_partition", heat_flux_partition);
        if (heat_flux_partition != "legacy" && heat_flux_partition != "cfbm") {
@@ -819,6 +838,10 @@ struct FireParams
        pp.query("smoke_emission_factor", smoke_emission_factor);
        pp.query("smoke_heat_of_comb", smoke_heat_of_comb);
        pp.query("smoke_heat_from_fuel", smoke_heat_from_fuel);
+       if (smoke_enable) {
+           positive("smoke_heat_of_comb", smoke_heat_of_comb);
+           nonneg("smoke_emission_factor", smoke_emission_factor);
+       }
 
        // Phase 8: Albini (1983) ember spotting parameters
        auto& sp = spotting;
@@ -839,6 +862,14 @@ struct FireParams
        pp.query("spotting.random_seed",         sp.random_seed);
        pp.query("spotting.spotting_interval",   sp.spotting_interval);
        pp.query("spotting.fuel_system",         sp.fuel_system);
+       if (sp.enable) {
+           positive("spotting.I_B_min", sp.I_B_min);
+           positive("spotting.terminal_velocity", sp.terminal_velocity);
+           if (sp.n_traj_steps < 1) fail("erf.fire.spotting.n_traj_steps must be >= 1, got " + std::to_string(sp.n_traj_steps));
+           fraction("spotting.P_base", sp.P_base);
+           fraction("spotting.P_catch", sp.P_catch);
+           one_of("spotting.fuel_system", sp.fuel_system, {"13", "40"});
+       }
 
        // Phase 9: Crown fire initiation parameters
        auto& cr = crown;
@@ -847,14 +878,15 @@ struct FireParams
        pp.query("crown.canopy_bulk_den", cr.canopy_bulk_den);
        pp.query("crown.canopy_depth",    cr.canopy_depth);
        pp.query("crown.foliar_moisture", cr.foliar_moisture);
-       pp.query("crown.M_c",             cr.M_c);
        pp.query("crown.h_crown_BTU_lb",  cr.h_crown_BTU_lb);
        pp.query("crown.wind_10m_kmh",    cr.wind_10m_kmh);
        pp.query("crown.ros_model",       cr.ros_model);
+       one_of("crown.ros_model", cr.ros_model, {"cruz", "rothermel1991", "van_wagner_proxy"});
        pp.query("crown.use_passive_blend", cr.use_passive_blend);
 
        // Phase 9: Flame temperature diagnostic
        pp.query("flame_temp_method", flame_temp_method);
+       one_of("flame_temp_method", flame_temp_method, {"byram_radiant", "mcalpine_heat", "nelson_emissivity"});
        pp.query("flame_temp_T_amb",  flame_temp_T_amb);
 
        // Phase 9: Flame tilt angle diagnostic
@@ -867,6 +899,8 @@ struct FireParams
        pp.query("fuel_map.file",               fm.fuel_map_file);
        pp.query("fuel_map.format",             fm.fuel_map_format);
        pp.query("fuel_map.blending_fraction",  fm.blending_fraction);
+       one_of("fuel_map.format", fm.fuel_map_format, {"ascii", "lcp"});
+       fraction("fuel_map.blending_fraction", fm.blending_fraction);
 
        // Phase 11: multi-ignition schedule and polygon ignition
        auto& ig = ignition;
@@ -874,6 +908,8 @@ struct FireParams
        pp.query("ignition.polygon_file",  ig.polygon_file);
        pp.query("ignition.polygon_type",  ig.polygon_type);
        pp.query("ignition.polyline_width", ig.polyline_width);
+       one_of("ignition.polygon_type", ig.polygon_type, {"polygon", "polyline"});
+       if (!ig.polygon_file.empty() && ig.polygon_type == "polyline") positive("ignition.polyline_width", ig.polyline_width);
        pp.query("ignition.polygon_time",         ig.polygon_time);
        pp.query("ignition.polygon_interior_ros", ig.polygon_interior_ros);
        pp.query("ignition.polygon_interior_tau", ig.polygon_interior_tau);
@@ -961,6 +997,7 @@ struct FireParams
 
        // Phase 13B: ROS model selection
        pp.query("ros_model", ros_model);
+       one_of("ros_model", ros_model, {"rothermel", "behave", "balbi", "fbp", "hybrid", "prescribed", "cheney_gould", "macarthur"});
        pp.query("rothermel_per_fuel", rothermel_per_fuel);
 
        // Hybrid ROS
@@ -1108,6 +1145,17 @@ struct FireParams
        }
        if (fuel_map.sb40_crosswalk && fuel_map.fuel_set != "scott_burgan40") {
            amrex::Abort("erf.fire.fuel_map.sb40_crosswalk needs fuel_map.fuel_set = scott_burgan40");
+       }
+       // The spotting distance table has to match the fuel codes the map carries:
+       // Scott-Burgan codes (101-204) without the crosswalk need the "40" table.
+       {
+           const std::string want = (fuel_map.fuel_set == "scott_burgan40" && !fuel_map.sb40_crosswalk) ? "40" : "13";
+           if (!pp.contains("spotting.fuel_system")) {
+               spotting.fuel_system = want;
+           } else if (spotting.enable && spotting.fuel_system != want) {
+               fail("erf.fire.spotting.fuel_system = \"" + spotting.fuel_system + "\" does not match fuel_map.fuel_set = \""
+                    + fuel_map.fuel_set + "\"" + (fuel_map.sb40_crosswalk ? " with sb40_crosswalk" : "") + " (needs \"" + want + "\")");
+           }
        }
        if (fuel_map.fuel_set == "scott_burgan40") {
            const bool ok13 = (fuel_model_id >= 1 && fuel_model_id <= 13);
@@ -1257,6 +1305,7 @@ struct FireParams
            if (!pp.query(type_key.c_str(), type_val)) break;
            FireBreak fb;
            fb.type = type_val;
+           one_of(type_key.c_str(), type_val, {"rect", "rectangle", "circle"});   // the kernel branches on the first letter
            std::string pfx = "firebreak." + std::to_string(nb) + ".";
            pp.query((pfx + "x_lo").c_str(),   fb.x_lo);
            pp.query((pfx + "y_lo").c_str(),   fb.y_lo);

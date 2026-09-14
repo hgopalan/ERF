@@ -244,9 +244,8 @@ void FireLayer::initialize(const ERF& erf,
         });
     }
 
-    Real dead_load = fp.w_d1+fp.w_d10+fp.w_d100;
-    Real sigma_weighted = dead_load > 0.0_rt ? (fp.w_d1*fp.sigma_d1)/dead_load : fp.sigma_d1;
-    fire_mext->setVal(compute_moisture_of_extinction(sigma_weighted));
+    fire_mext->setVal(compute_moisture_of_extinction(
+        dead_fuel_weighted_sav(fp.w_d1, fp.w_d10, fp.w_d100, fp.sigma_d1)));
 
     compute_terrain_slopes(*fire_slopes, z_phys_nd_atm, erf.Geom(0), m_fg, m_params.terrain_file_name);
 
@@ -677,7 +676,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     }
 
     if (m_params.moisture_dynamic) {
-        long nc = fire_fuel_mc->boxArray().numPts();
+        amrex::Long nc = fire_fuel_mc->boxArray().numPts();
         Real avg1   = (nc>0) ? fire_fuel_mc->sum(0)/Real(nc) : m_params.moisture_1hr;
         Real avg10  = (nc>0) ? fire_fuel_mc->sum(1)/Real(nc) : m_params.moisture_10hr;
         Real avg100 = (nc>0) ? fire_fuel_mc->sum(2)/Real(nc) : m_params.moisture_100hr;
@@ -723,7 +722,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             // moisture_live outside [0.30, 2.50] reaches both paths. "legacy"
             // keeps the clamp; its update holds the classes in [0.30, 0.40], so
             // the clamp only catches round-off in the average there.
-            long nc_live = fire_fuel_mc->boxArray().numPts();
+            amrex::Long nc_live = fire_fuel_mc->boxArray().numPts();
             Real avg_lh  = (nc_live > 0) ? fire_fuel_mc->sum(3) / Real(nc_live) : m_params.moisture_live;
             Real avg_lw  = (nc_live > 0) ? fire_fuel_mc->sum(4) / Real(nc_live) : m_params.moisture_live;
             if (m_params.moisture_live_model != "fixed") {
@@ -825,7 +824,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         balbi_in.heat_flux    = fire_heat_flux.get();
 
         if (m_params.moisture_dynamic && fire_fuel_mc) {
-            long nc_mc = fire_fuel_mc->boxArray().numPts();
+            amrex::Long nc_mc = fire_fuel_mc->boxArray().numPts();
             if (nc_mc > 0) {
                 Real avg_mc = fire_fuel_mc->sum(0) / Real(nc_mc);
                 balbi_in.M_f = amrex::max(0.01_rt, amrex::min(avg_mc, 0.40_rt));
@@ -916,6 +915,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                                    m_fg.geom.CellSize()[1]) / max_ros
                 : time_remaining;
             dt_ls = std::min(dt_ls, time_remaining);
+            AMREX_ASSERT(dt_ls > 0.0 && std::isfinite(dt_ls));
 
             // With directional spread enabled the ROS is rebuilt from the front
             // normal inside every RK stage, so the front gets head, flank and
@@ -1209,8 +1209,7 @@ void FireLayer::apply_waf_to_wind()
     Real waf = 0.4_rt;
     if      (m_params.waf_formula == "andrews")      waf = compute_waf_unsheltered(m_fuel_bed_depth_ft);
     else if (m_params.waf_formula == "behaviorplus")  waf = compute_waf_behaviorplus(m_fuel_bed_depth_ft);
-    else amrex::Print() << "[FIRE WARNING] Unknown waf_formula='" << m_params.waf_formula
-                        << "'. Using default WAF=" << waf << std::endl;
+    else amrex::Abort("[FIRE] Unknown waf_formula '" + m_params.waf_formula + "'");
     fire_wind_eff->mult(waf, 0, 2, 0);
 }
 
@@ -1270,6 +1269,7 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
         Array4<const Real> RH_f = fire_surface_rh->const_array(mfi);
         Array4<Real> st;
         if (use_stick) { st = fire_stick_mc->array(mfi); }
+        const Real sw_dead = dead_fuel_weighted_sav(fp.w_d1, fp.w_d10, fp.w_d100, fp.sigma_d1);
         amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv_f) {
             int i = iv_f[0], j = iv_f[1];
             Real T_C = T_f(i,j,0) - 273.15_rt;
@@ -1298,9 +1298,7 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
                 mc(i,j,0,3) = advance_live_fuel_moisture(mc(i,j,0,3),RH,T_C,dt_hours,live_fixed,emc_model);
                 mc(i,j,0,4) = advance_live_fuel_moisture(mc(i,j,0,4),RH,T_C,dt_hours,live_fixed,emc_model);
             }
-            Real dead_load = fp.w_d1+fp.w_d10+fp.w_d100;
-            Real sw = dead_load>0.0_rt ? (fp.w_d1*fp.sigma_d1)/dead_load : fp.sigma_d1;
-            mext(i,j,0) = compute_moisture_of_extinction(sw);
+            mext(i,j,0) = compute_moisture_of_extinction(sw_dead);
         });
     }
 }
@@ -1309,10 +1307,7 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
 {
     FuelModelParams fp = uniform_fuel_params();
 
-    Real dead_load = fp.w_d1 + fp.w_d10 + fp.w_d100;
-    Real sigma_agg = (dead_load > 1.0e-10_rt)
-        ? (fp.w_d1*fp.sigma_d1 + fp.w_d10*FIRE_SIGMA_D10 + fp.w_d100*FIRE_SIGMA_D100) / dead_load
-        : fp.sigma_d1;
+    Real sigma_agg = dead_fuel_weighted_sav(fp.w_d1, fp.w_d10, fp.w_d100, fp.sigma_d1);
 
     Real tau_sav = compute_residence_time_s(sigma_agg, fp.rho_p);
     Real tau_sav_floor = (m_params.tau_residence_s > 0.0_rt) ? m_params.tau_residence_s : tau_sav;
@@ -1390,9 +1385,10 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
                           *fire_phi, *fire_ros, *fire_fuel_load,
                           m_fuel_load_initial_kg_m2, h_kJ_per_kg);
 
+    const Real dead_load = fp.w_d1 + fp.w_d10 + fp.w_d100;
     Real M_f = m_params.moisture_1hr;
     if (m_params.moisture_dynamic && fire_fuel_mc) {
-        const long nc = fire_fuel_mc->boxArray().numPts();
+        const amrex::Long nc = fire_fuel_mc->boxArray().numPts();
         const Real avg1 = (nc > 0) ? fire_fuel_mc->sum(0) / Real(nc) : m_params.moisture_1hr;
         const Real avg10 = (nc > 0) ? fire_fuel_mc->sum(1) / Real(nc) : m_params.moisture_10hr;
         const Real avg100 = (nc > 0) ? fire_fuel_mc->sum(2) / Real(nc) : m_params.moisture_100hr;
@@ -1444,10 +1440,8 @@ void FireLayer::apply_crown_fire_ros()
     const Real canopy_base_ht = crown.canopy_base_ht;
     const Real canopy_bulk_den = crown.canopy_bulk_den;
     const Real foliar_moisture = crown.foliar_moisture;
-    const Real M_c = crown.M_c;
     const Real default_moisture_10hr = m_params.moisture_10hr;
-    const Real I_B_crit = van_wagner_critical_intensity(
-        canopy_base_ht, foliar_moisture, M_c);
+    const Real I_B_crit = van_wagner_critical_intensity(canopy_base_ht, foliar_moisture);
     const Real fixed_u10_ms = (crown.wind_10m_kmh > 0.0_rt)
         ? crown.wind_10m_kmh / 3.6_rt
         : -1.0_rt;
@@ -1465,7 +1459,9 @@ void FireLayer::apply_crown_fire_ros()
     for (MFIter mfi(*fire_ros); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto const phi_arr = fire_phi->const_array(mfi);
-        auto const wind_arr = fire_wind_eff->const_array(mfi);
+        // Cruz's U_10 is an open wind: the reference wind at wind_ref_ht, not the
+        // WAF-reduced midflame wind (about 0.4x, which made R_crown 2.3x low).
+        auto const wind_arr = fire_wind_ref->const_array(mfi);
         auto const surface_ros_arr = surface_ros.const_array(mfi);
         auto const surface_I_B_arr = surface_intensity.const_array(mfi);
         Array4<const Real> mc_arr;
@@ -1554,7 +1550,7 @@ void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
     const amrex::Real h_fuel_Jkg = fp.heat_content * 2326.0_rt;
     amrex::Real M_f = m_params.moisture_1hr;
     if (m_params.moisture_dynamic && fire_fuel_mc) {
-        long nc = fire_fuel_mc->boxArray().numPts();
+        amrex::Long nc = fire_fuel_mc->boxArray().numPts();
         amrex::Real avg1   = (nc > 0) ? fire_fuel_mc->sum(0) / amrex::Real(nc) : m_params.moisture_1hr;
         amrex::Real avg10  = (nc > 0) ? fire_fuel_mc->sum(1) / amrex::Real(nc) : m_params.moisture_10hr;
         amrex::Real avg100 = (nc > 0) ? fire_fuel_mc->sum(2) / amrex::Real(nc) : m_params.moisture_100hr;

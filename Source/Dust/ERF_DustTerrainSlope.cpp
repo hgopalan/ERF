@@ -9,7 +9,7 @@ using namespace amrex;
 
 namespace {
 
-bool read_terrain_onto_dust_grid(
+static bool read_terrain_onto_dust_grid(
     MultiFab& z_dust_nd,
     const DustGrid& dg,
     const std::string& fname)
@@ -24,28 +24,33 @@ bool read_terrain_onto_dust_grid(
     std::vector<Real> y_coords;
     std::vector<Real> z_values;
 
+    // The I/O rank must not return before the broadcasts below: the other ranks
+    // are waiting in them, and a missing file hung every run on more than one rank.
+    int ok = 1;
     if (ParallelDescriptor::IOProcessor()) {
         std::ifstream file(fname);
         if (!file.is_open()) {
             amrex::Warning("Could not open dust terrain file: " + fname);
-            return false;
-        }
+            ok = 0;
+        } else {
+            file >> nx_terrain >> ny_terrain;
+            x_coords.resize(nx_terrain);
+            y_coords.resize(ny_terrain);
+            z_values.resize(nx_terrain * ny_terrain);
 
-        file >> nx_terrain >> ny_terrain;
-        x_coords.resize(nx_terrain);
-        y_coords.resize(ny_terrain);
-        z_values.resize(nx_terrain * ny_terrain);
-
-        for (int i = 0; i < nx_terrain; ++i) {
-            file >> x_coords[i];
-        }
-        for (int j = 0; j < ny_terrain; ++j) {
-            file >> y_coords[j];
-        }
-        for (int n = 0; n < nx_terrain * ny_terrain; ++n) {
-            file >> z_values[n];
+            for (int i = 0; i < nx_terrain; ++i) {
+                file >> x_coords[i];
+            }
+            for (int j = 0; j < ny_terrain; ++j) {
+                file >> y_coords[j];
+            }
+            for (int n = 0; n < nx_terrain * ny_terrain; ++n) {
+                file >> z_values[n];
+            }
         }
     }
+    ParallelDescriptor::Bcast(&ok, 1, ParallelDescriptor::IOProcessorNumber());
+    if (!ok) { return false; }
 
     ParallelDescriptor::Bcast(&nx_terrain, 1, ParallelDescriptor::IOProcessorNumber());
     ParallelDescriptor::Bcast(&ny_terrain, 1, ParallelDescriptor::IOProcessorNumber());

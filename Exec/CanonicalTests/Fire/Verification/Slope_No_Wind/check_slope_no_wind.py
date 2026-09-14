@@ -120,7 +120,7 @@ def anderson_lw(U_mps):
     mph = U_mps * 2.23694
     if mph < 1.0:
         return 1.0
-    return max(1.0, min(0.936 * math.exp(0.2566 * mph) - 0.397 * math.sqrt(mph), LW_MAX))
+    return max(1.0, min(0.936 * math.exp(0.2566 * mph) + 0.461 * math.exp(-0.1548 * mph) - 0.397, LW_MAX))
 
 
 def speed(kind, th, R0, phis_c, s, effective_wind):

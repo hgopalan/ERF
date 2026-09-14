@@ -158,7 +158,7 @@ dry-fuel share of the heat release,
 
 .. math::
 
-   Q_{sens} = f_{dry}\, Q, \qquad f_{dry} = rac{1}{1 + M_f} = 1 - b,
+   Q_{sens} = f_{dry}\, Q, \qquad f_{dry} = \frac{1}{1 + M_f} = 1 - b,
 
 so that the sensible flux is 7% lower than :math:`Q` at the default 8%
 moisture and 23% lower at 30%. :cpp:`erf.fire.heat_flux_partition` selects

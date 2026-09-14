@@ -47,8 +47,10 @@
  */
 
 // ─── unit conversion constants ─────────────────────────────────────────────
-// 1 BTU/ft·s = 1.055 kW/m  (Byram fireline intensity conversion)
-static constexpr amrex::Real ALBINI_BTU_FTS_TO_KW_M = 1.055;
+// 1 BTU/(ft s) = 1.05506 kJ / 0.3048 m = 3.4613 kW/m (Byram fireline intensity).
+// This was 1.055 (BTU to kJ only), so the intensity fed to the launch
+// probability and the lofting height was 3.28x low.
+static constexpr amrex::Real ALBINI_BTU_FTS_TO_KW_M = 3.4613;
 // 1 ft/min = 0.00508 m/s
 static constexpr amrex::Real ALBINI_FT_PER_MIN_TO_M_PER_S = 0.00508;
 

@@ -172,3 +172,15 @@ and a particle that falls below half the lowest cell height is removed and
 its mass added to ``dust_source_map`` at its source cell. The map is never
 reset, so it accumulates the deposition attributable to each source over the
 run.
+
+Debug output
+------------
+
+:cpp:`erf.dust.dust_debug` prints, on the I/O rank and every step, the emission
+flux maximum, the active road sources, the surface concentration and PM10
+maxima, the MSHA time-weighted average, the u* and 10 m wind maxima, the
+threshold u* range, the deposition total and, with the fire-dust coupling on,
+the crust range after the burned-area reduction and the fire-wind u* maximum.
+Every number is a global reduction. The start-up summary (grid, bins, files,
+sites, schedules) is printed under the same flag. Without the flag the dust
+module prints only its initialisation line, schedule events and warnings.

@@ -1,197 +1,122 @@
 # ============================================================================
 # ERF Hazard Module: Master Inputs Configuration Reference
 # ============================================================================
-# This file documents fire + dust coupling and combined hazard scenario parameters.
-# Refer to Fire/inputs_fire_master_reference and Dust/inputs_dust_master_reference
-# for complete parameter lists within each sub-module.
+# Documentation only: the keys that make a coupled fire + dust (hazard) run,
+# with their defaults. Every key listed here is read by the code; the full
+# per-module lists are Fire/inputs_fire_master_reference (erf.fire.*) and
+# Dust/inputs_dust_master_reference (erf.dust.*, generated from
+# Docs/sphinx_doc/tools/gen_dust_inputs.py). ParmParse never warns about a
+# key nothing reads, so check the unused-keys table AMReX prints at exit.
 # ============================================================================
 
 # ============================================================================
 # CORE GEOMETRY AND ATMOSPHERIC SETUP
 # ============================================================================
-# (standard domain, mesh, time stepping — see fire master reference)
+# Standard domain, mesh, time stepping and surface layer: see the fire master
+# reference. Both modules need zlo.type = "surface_layer" and whole columns
+# in z (amr.max_grid_size_z = the domain's number of cells in z).
 
 # ============================================================================
-# HAZARD MODULE: MASTER CONTROL FLAGS
+# MODULE SWITCHES
 # ============================================================================
-
-# Enable fire simulation
 erf.fire.enable = true
+erf.dust.enable = false          # needs a build with ERF_ENABLE_DUST=ON
 
-# Enable dust simulation
-erf.dust.enable = false
-
-# Hazard coupling mode: how fire and dust interact
-# Options: "none" (independent), "thermal_lofting" (fire heat plume lifts dust),
-#          "full_coupling" (two-way momentum + thermal + chemistry)
-erf.hazard.coupling_mode = "none"
+# Both layers live on their own finer 2D grid; the coupling requires the two
+# ratios to be equal (checked at start-up).
+erf.fire.grid_ratio = 1
+erf.dust.grid_ratio = 1
 
 # ============================================================================
-# FIRE SUB-MODULE (ABBREVIATED REFERENCE)
+# FIRE SUB-MODULE (ABBREVIATED)
 # ============================================================================
-# For full fire parameters, see: Exec/CanonicalTests/Fire/inputs_fire_master_reference
-# Key parameters for hazard scenarios:
-
-# Fire enable flag
-erf.fire.enable = true
-
-# Fuel model (Anderson FBFM13 ID 1-13)
-erf.fire.fuel_model_id = 8
-
-# Fuel moisture
-erf.fire.moisture_1hr = 0.08
+erf.fire.fuel_model_id = 8       # Anderson FBFM13 model (1-13)
+erf.fire.moisture_1hr = 0.08     # dead fuel moisture fractions
 erf.fire.moisture_10hr = 0.08
 erf.fire.moisture_100hr = 0.08
+erf.fire.use_terrain_wind = true # FARSITE terrain wind corrections on the fire grid
 
-# Wind speed / atmospheric coupling
-erf.fire.wind_speed = 5.0  # [m/s] for constant wind baseline
-erf.fire.wind_from = 270.0 # [degrees, 0=N, 90=E, 180=S, 270=W]
+# Wind: the fire reads the atmosphere's wind at erf.fire.wind_ref_ht; there is
+# no fire-side constant wind. Set it through the atmosphere (sounding, inflow
+# profile or uniform init).
 
-# ============================================================================
-# DUST SUB-MODULE (ABBREVIATED REFERENCE)
-# ============================================================================
-# For full dust parameters, see: Exec/CanonicalTests/Dust/inputs_dust_master_reference
-# Key parameters for hazard scenarios:
-
-# Dust enable flag
-erf.dust.enable = false
-
-# Dust emission scheme
-erf.dust.emission_scheme = "Shao"
-
-# Particle size distribution
-erf.dust.n_dust_bins = 3
-
-# Dust coupling
-erf.dust.coupling = "passive"
+# Smoke tracer emitted by the fire (advected as a scalar in the atmosphere)
+erf.fire.smoke_enable = false
+erf.fire.smoke_emission_factor = 0.02      # kg smoke per kg fuel burned
+erf.fire.smoke_heat_of_comb = 18700000.0   # J/kg, converts heat flux to fuel burned
+erf.fire.smoke_heat_from_fuel = false      # emit from the fuel consumed instead of the heat flux
 
 # ============================================================================
-# FIRE-DUST INTERACTION PARAMETERS
+# DUST SUB-MODULE (ABBREVIATED)
 # ============================================================================
+erf.dust.n_size_bins = 3
+erf.dust.bin_diameters = 7.0e-6 2.5e-6 50.0e-6   # [m]; bin 0 sets the threshold u*
+erf.dust.z0_dust = 0.01          # roughness of the emitting surface [m]
+erf.dust.zref = 10.0             # wind extraction height [m]; must equal erf.most.zref
+erf.dust.atm_feedback = 1.0      # 1 = dust returns to the atmosphere as a scalar, 0 = passive
+erf.dust.transport_bins_separately = false
+erf.dust.deposition_E0 = 3.0e-3  # dry-deposition efficiency; 0 turns deposition off (mass-conservation case)
 
-# Enable fire-induced lofting of dust
-erf.hazard.fire_lofting_enable = false
-
-# Heat plume buoyancy threshold for lofting activation [K/m]
-erf.hazard.lofting_buoyancy_threshold = 0.001
-
-# Lofting velocity scale [m/s]
-erf.hazard.lofting_velocity_scale = 1.5
-
-# Lofting height cap [m] — maximum altitude dust can be lifted
-erf.hazard.lofting_height_cap = 1000.0
-
-# Interaction mode for coupled scenarios
-# Options: "none", "thermal_lofting", "full_coupling"
-erf.hazard.fire_dust_interaction = "none"
-
-# ============================================================================
-# TERRAIN CONFIGURATION
-# ============================================================================
-
-# Terrain type
-# Options: "flat", "gaussian_hill", "gaussian_pit", "real_terrain"
-erf.terrain.type = "flat"
-
-# Real terrain file (HDF5 or ASCII format if terrain_type = "real_terrain")
-erf.terrain.file = ""
-
-# Gaussian hill parameters (for terrain_type = "gaussian_hill")
-erf.terrain.gaussian_amplitude = 100.0  # [m]
-erf.terrain.gaussian_sigma_x = 500.0    # [m]
-erf.terrain.gaussian_sigma_y = 500.0    # [m]
-erf.terrain.gaussian_center_x = 1000.0  # [m]
-erf.terrain.gaussian_center_y = 1000.0  # [m]
-
-# Gaussian pit parameters (for terrain_type = "gaussian_pit")
-erf.terrain.gaussian_pit_depth = 50.0   # [m]
-erf.terrain.gaussian_pit_sigma_x = 500.0
-erf.terrain.gaussian_pit_sigma_y = 500.0
-erf.terrain.gaussian_pit_center_x = 1000.0
-erf.terrain.gaussian_pit_center_y = 1000.0
+# Terrain wind corrections on the dust grid (same factors as the fire ones)
+erf.dust.use_terrain_wind = false
+erf.dust.terrain_file = ""       # ESRI ASCII raster on the dust grid; empty = the atmosphere terrain
+erf.dust.k_ridge = 1.5
+erf.dust.k_shelter = 0.6
+erf.dust.k_valley = 0.8
+erf.dust.k_deflect = 0.3
 
 # ============================================================================
-# SMOKE / TRACER TRANSPORT
+# FIRE-DUST COUPLING (erf.* keys, read only when both layers exist)
 # ============================================================================
-
-# Enable smoke tracer (passive scalar from fire)
-erf.smoke.enable = false
-
-# Smoke emission rate from fire [kg/m²/s]
-erf.smoke.emission_rate = 0.01
-
-# Smoke deposition scheme
-# Options: "none", "gravitational", "surface_layer"
-erf.smoke.deposition = "none"
-
-# ============================================================================
-# HEALTH AND REGULATORY DIAGNOSTICS
-# ============================================================================
-
-# NAAQS PM2.5 thresholds
-erf.naaqs.pm25_24hr_limit = 35.0   # [µg/m³]
-erf.naaqs.pm25_annual_limit = 12.0 # [µg/m³]
-erf.naaqs.enable = false
-
-# MSHA occupational dust exposure
-erf.msha.dust_limit = 5.0  # [mg/m³]
-erf.msha.enable = false
-
-# OSHA Short-Term Exposure Limit (STEL)
-erf.osha.stel_threshold = 10.0  # [mg/m³]
-erf.osha.stel_window = 15       # [minutes]
-erf.osha.enable = false
-
-# Silica fraction for silicosis risk assessment [0.0-1.0]
-erf.hazard.silica_fraction = 0.2
-
-# Visibility diagnostic
-erf.hazard.visibility_enable = false
-
-# Health integration output (combined fire + dust exposure)
-erf.hazard.health_integration_output = false
+erf.fire_dust_coupling = false           # master switch
+erf.fire_dust_crust_reduction = 0.8      # fraction of the soil crust removed in burned cells
+erf.fire_dust_wind_to_dust = true        # hand the fire-grid wind to the dust threshold
+erf.fire_dust_wind_z0 = 0.1              # roughness of the log law used for that wind [m]
+erf.fire_dust_wind_zref = 6.1            # its reference height; match erf.fire.wind_ref_ht [m]
+erf.fire_dust_lofting_enabled = false    # loft dust in the fire plume
+erf.fire_dust_lofting_k_loft = 2.0       # lofting strength
+erf.fire_dust_lofting_Q_threshold = 50.0 # fire heat flux that starts lofting [W/m2]
+erf.fire_dust_lofting_Q_ref = 500.0      # heat flux of unit lofting [W/m2]
 
 # ============================================================================
-# HABOOB / DUST STORM INITIALIZATION
+# TERRAIN
 # ============================================================================
-
-# Enable haboob (cold pool dust storm) initialization
-erf.haboob.enable = false
-
-# Haboob cold pool depth [m]
-erf.haboob.cold_pool_depth = 500.0
-
-# Haboob density anomaly [kg/m³]
-erf.haboob.density_anomaly = 0.5
-
-# Haboob initial position
-erf.haboob.center_x = 500.0  # [m]
-erf.haboob.center_y = 500.0  # [m]
+# The Hazard cases use ERF's terrain-fitted mesh with a raster file; the
+# Gaussian hill and pit rasters are in Hazard/GaussianTerrain.
+# erf.terrain_type = StaticFittedMesh
+# erf.terrain_file_name = "../GaussianTerrain/gaussian_hill_32x32.txt"
+# erf.terrain_smoothing = 1
 
 # ============================================================================
-# MASS CONSERVATION DIAGNOSTICS
+# HEALTH AND REGULATORY DIAGNOSTICS (dust module; see the dust master reference
+# for the NAAQS / PM output keys)
 # ============================================================================
-
-# Enable mass conservation check (for coupled fire+dust)
-erf.hazard.mass_conservation_check = false
-
-# Mass conservation reporting interval [steps]
-erf.hazard.mass_conservation_interval = 10
-
-# Mass conservation tolerance [fraction]
-erf.hazard.mass_conservation_tolerance = 0.01
-
-# ============================================================================
-# OUTPUT AND VISUALIZATION
-# ============================================================================
-
-# Enable visualization output (fire + dust combined)
-erf.hazard.visualization_enable = true
-
-# Plot variables (comma-separated list combining fire and dust fields)
-erf.hazard.plot_vars = "theta u v dust_concentration fire_intensity"
-
-# Statistics CSV file for hazard diagnostics
-erf.hazard.stats_file = ""
+erf.dust.msha_pel_mg_m3 = 5.0
+erf.dust.msha_shift_duration_s = 28800.0
+erf.dust.msha_exposure_file = "msha_exposure.csv"
+erf.dust.msha_shift_file = "msha_shift_summary.csv"
+erf.dust.stel_enable = false
+erf.dust.stel_threshold_mg_m3 = 10.0
+erf.dust.stel_averaging_s = 900.0
+erf.dust.stel_diag_file = "stel_diag.csv"
+erf.dust.silica_enable = false
+erf.dust.silica_fraction_rcs = 0.04
+erf.dust.silica_osha_pel_mg_m3 = 0.05
+erf.dust.silica_diag_file = "silica_diag.csv"
+erf.dust.visibility_enable = false
+erf.dust.visibility_k_ext = 4.0e3
+erf.dust.visibility_road_closure_m = 300.0
+erf.dust.visibility_warning_m = 1000.0
+erf.dust.visibility_diag_file = "visibility_diag.csv"
 
 # ============================================================================
+# OUTPUT
+# ============================================================================
+erf.fire_plot_int = -1           # fire-grid plotfiles (plt_fire_*), -1 = off
+erf.dust.dust_plot_int = -1      # dust-grid plotfiles, -1 = off
+erf.dust.dust_debug = false      # per-step dust diagnostics
+erf.fire.fire_debug = false      # per-step fire diagnostics
+
+# The haboob cases (Hazard/HaboobFire*) are ordinary sounding-initialised
+# runs; there are no haboob-specific keys. Mass conservation is checked by
+# the FireDustMassConservation case's script, not by an input.

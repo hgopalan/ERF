@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <AMReX_REAL.H>
+#include <ERF_Constants.H>
 #include <AMReX_Box.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
@@ -94,9 +95,9 @@ struct FireGridFixture
 };
 
 /// Number of valid cells with phi < 0, summed over ranks
-long burned_cells (const MultiFab& phi)
+amrex::Long burned_cells (const MultiFab& phi)
 {
-    long n = 0;
+    amrex::Long n = 0;
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         auto p = phi.const_array(mfi);
         const Box& bx = mfi.validbox();
@@ -140,9 +141,9 @@ LevelSetGradient scheme (int s, Real band = -1.0)
 /// Number of valid cells holding a NaN or an infinity, over ranks. The
 /// max-based checks skip NaN (a comparison with NaN is false), so every field
 /// that a kernel wrote is checked here as well.
-long nonfinite_cells (const MultiFab& a)
+amrex::Long nonfinite_cells (const MultiFab& a)
 {
-    long n = 0;
+    amrex::Long n = 0;
     for (MFIter mfi(a); mfi.isValid(); ++mfi) {
         auto pa = a.const_array(mfi);
         const Box& bx = mfi.validbox();
@@ -157,9 +158,9 @@ long nonfinite_cells (const MultiFab& a)
 }
 
 /// Number of valid cells whose sign differs between a and b, over ranks
-long sign_changes (const MultiFab& a, const MultiFab& b)
+amrex::Long sign_changes (const MultiFab& a, const MultiFab& b)
 {
-    long n = 0;
+    amrex::Long n = 0;
     for (MFIter mfi(a); mfi.isValid(); ++mfi) {
         auto pa = a.const_array(mfi);
         auto pb = b.const_array(mfi);
@@ -313,8 +314,8 @@ TEST(LevelSetAdvection, DiscExpandsAtRos)
         f.disc(phi, R0);
         R.setVal(ros);
         const LevelSetGradient g = scheme(s, 3.0 * DX);
-        long n_prev = burned_cells(phi);
-        EXPECT_NEAR(std::sqrt(n_prev * DX * DX / M_PI), R0, 0.5 * DX);
+        amrex::Long n_prev = burned_cells(phi);
+        EXPECT_NEAR(std::sqrt(n_prev * DX * DX / PI), R0, 0.5 * DX);
         for (int step = 0; step < nsteps; ++step) {
             advect_levelset_weno5z_rk3(phi, vel, R, f.geom, dt, 0.4, nullptr, nullptr, false, g);
             fire_fill_boundary(phi, f.geom);
@@ -322,11 +323,11 @@ TEST(LevelSetAdvection, DiscExpandsAtRos)
                 reinitialize_phi(phi, f.geom, 10, 0.25 * DX, -1.0, /*normalized=*/false, nullptr, false, g);
                 fire_fill_boundary(phi, f.geom);
             }
-            const long n = burned_cells(phi);
+            const amrex::Long n = burned_cells(phi);
             EXPECT_GE(n, n_prev) << "scheme " << s << " step " << step;
             n_prev = n;
         }
-        const Real r_est = std::sqrt(n_prev * DX * DX / M_PI);
+        const Real r_est = std::sqrt(n_prev * DX * DX / PI);
         EXPECT_NEAR(r_est, r_final, DX) << "scheme " << s << " burned cells " << n_prev;
         EXPECT_EQ(nonfinite_cells(phi), 0) << "scheme " << s;
     }
@@ -350,7 +351,7 @@ TEST(LevelSetAdvection, ReinitialisationRestoresUnitGradient)
         const LevelSetGradient g = scheme(s, 3.0 * DX);
         f.disc(phi, R0, 1.5);
         f.disc(phi0, R0, 1.5);
-        const long n0 = burned_cells(phi);
+        const amrex::Long n0 = burned_cells(phi);
 
         // |grad phi| = 1.5 before: the RHS with R = 1 is -1.5 off the axes too
         compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, nullptr, nullptr, false, g);

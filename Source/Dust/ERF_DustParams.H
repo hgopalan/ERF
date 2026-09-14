@@ -37,7 +37,7 @@
 struct DustParams {
 
     bool        enable              = false;    ///< Enable dust module
-    bool        dust_debug          = false;    ///< Write per-timestep debug fields to plotfile
+    bool        dust_debug          = false;    ///< Print per-step dust diagnostics (stdout, IO rank)
     int         n_size_bins         = 3;        ///< Number of particle size bins; each bin maps to
                                                  ///<   one RhoQ*_comp scalar component in ERF.
                                                  ///<   Bin 0: coarse  (2.5 um < d <= 10 um)
@@ -51,7 +51,6 @@ struct DustParams {
                                                  ///<   All atmospheric box x,y sizes must be divisible
                                                  ///<   by grid_ratio. Set erf.dust.grid_ratio to match
                                                  ///<   the desired surface resolution.
-    amrex::Vector<amrex::Real> bin_diameter_um  = {7.0, 3.5, 0.7}; ///< Representative aerodynamic diameter per bin [um]
     amrex::Real particle_density    = 2650.0;  ///< Bulk particle density [kg/m^3]; quartz default
     amrex::Real z0_dust             = 0.01;    ///< Aerodynamic roughness length over bare tailings [m]
     amrex::Real silt_fraction       = 0.10;    ///< Default surface silt mass fraction [dimensionless]
@@ -60,7 +59,10 @@ struct DustParams {
                                                  ///<   Reference: Marticorena & Bergametti (1995),
                                                  ///<   J. Geophys. Res., 100, 16415-16430.
                                                  ///<   https://doi.org/10.1029/95JD00690
-    amrex::Real threshold_A_coeff  = 0.0123;  ///< Bagnold threshold coefficient A [dimensionless]
+    amrex::Real threshold_A_coeff  = 0.1;     ///< Bagnold fluid-threshold constant A [-]. Until 2026-09 the
+                                                 ///<   default was 0.0123, Shao & Lu's A_N, which belongs inside
+                                                 ///<   sqrt(A_N (rho_p g d / rho_a + gamma / (rho_a d))), so u*_t
+                                                 ///<   was 8x below Bagnold's value.
                                                  ///<   u*_t = A * sqrt(rho_p * g * d / rho_a)
                                                  ///<   Reference: Bagnold (1941), The Physics of Blown
                                                  ///<   Sand and Desert Dunes, Methuen, London.
@@ -117,7 +119,6 @@ struct DustParams {
     std::string phreeqc_efflor_var   = "efflorescence";  ///< Variable/column name for efflorescence.
     std::string phreeqc_supp_var     = "suppression_mod";///< Variable/column name for suppression modifier.
     std::string phreeqc_metal_var    = "metal_as_bin0";  ///< Variable/column name for As mass fraction bin 0.
-    std::string surface_map_file    = "";      ///< Path to NetCDF surface property map; empty = uniform
     std::string phreeqc_output_file = "";      ///< Path to PHREEQC output NetCDF; empty = disabled
     std::string soil_type_file      = "";      ///< Path to soil type raster (.asc or .nc).
                                                  ///<   Code 0 = undefined; 1-16 = STATSGO natural soils;
@@ -165,21 +166,15 @@ struct DustParams {
                                                ///<   Effective threshold: u*_t *= (1 + coeff * C_sfc).
                                                ///<   0 = disabled (default).
                                                ///<   Shao (2001): https://doi.org/10.1029/2001JD900171
-    bool use_dynamic_moisture = false;         ///< Pass Q1fx3 to fill_dust_moist_from_atm.
-                                               ///<   Requires moisture_type != None in ERF.
-                                               ///<   Safe to set true with no moisture: Q1fx3 will
-                                               ///<   be null and function returns immediately.
-                                               ///<   Fecan et al. (1999):
-                                               ///<   https://doi.org/10.1007/s00585-999-0149-7
 
     // Phase 14: MRF nonlocal countergradient PBL diffusion
     // MRF turbulent Schmidt number for the dust scalar is controlled via
-    // erf.dust.mrf_Sc_t in the PBL turbulence parameters (ERF_TurbStruct.H).
+    // erf.dust_mrf_Sc_t (an erf.* key) in the PBL turbulence parameters (ERF_TurbStruct.H).
     // Default: same diffusivity as heat (Sc_t = Pr_t).
     // Seinfeld & Pandis (2006), Ch. 16: https://doi.org/10.1002/9781118227572
 
     // Phase 16: Dust diagnostics and plotfile output
-    int         dust_plot_int      = -1;           ///< Steps between dust plotfiles. -1 = disabled.
+    int         dust_plot_int      = -1;           ///< Steps between dust plotfiles; <= 0 writes only the final step.
     std::string dust_plot_prefix   = "plt_dust_";  ///< Plotfile name prefix.
     std::string dust_diag_file     = "dust_diag.dat"; ///< CSV diagnostics file path.
 
@@ -240,8 +235,9 @@ struct DustParams {
 
     // Phase 7: Visibility and health exposure diagnostics
     bool        visibility_enable        = false;   ///< Enable Koschmieder visibility output
-    amrex::Real visibility_k_ext        = 4.0e3;   ///< Mass extinction coefficient [m²/kg]
-                                                 ///< k_ext = 3/(2*rho_p*r_eff) with rho_p=2650, r_eff=5um
+    amrex::Real visibility_k_ext        = 4.0e3;   ///< Mass extinction coefficient [m²/kg]; an assumed value for
+                                                 ///< fine dust (3/(2 rho_p r_eff) gives 113 m²/kg at r_eff = 5 um,
+                                                 ///< 2650 kg/m³; literature 300-1000 m²/kg). Set it per case.
     amrex::Real visibility_road_closure_m = 300.0; ///< Haul road closure threshold [m]
     amrex::Real visibility_warning_m    = 1000.0;  ///< Reduced visibility warning threshold [m]
     std::string visibility_diag_file    = "visibility_diag.csv"; ///< Output CSV
@@ -265,7 +261,6 @@ struct DustParams {
         pp.query("enable", enable);
         pp.query("dust_debug", dust_debug);
         pp.query("n_size_bins", n_size_bins);
-        pp.queryarr("bin_diameter_um", bin_diameter_um);
         pp.query("particle_density", particle_density);
         pp.query("z0_dust", z0_dust);
         pp.query("silt_fraction", silt_fraction);
@@ -295,7 +290,6 @@ struct DustParams {
         pp.query("phreeqc_efflor_var", phreeqc_efflor_var);
         pp.query("phreeqc_supp_var", phreeqc_supp_var);
         pp.query("phreeqc_metal_var", phreeqc_metal_var);
-        pp.query("surface_map_file", surface_map_file);
         pp.query("phreeqc_output_file", phreeqc_output_file);
         pp.query("soil_type_file",     soil_type_file);
         pp.query("silt_fraction_file", silt_fraction_file);
@@ -306,7 +300,6 @@ struct DustParams {
         pp.query("atm_feedback", atm_feedback);
         pp.query("deposition_E0", deposition_E0);
         pp.query("loading_feedback_coeff", loading_feedback_coeff);
-        pp.query("use_dynamic_moisture",   use_dynamic_moisture);
         pp.query("dust_plot_int",    dust_plot_int);
         pp.query("dust_plot_prefix", dust_plot_prefix);
         pp.query("dust_diag_file",   dust_diag_file);
@@ -369,6 +362,52 @@ struct DustParams {
         pp.query("stel_threshold_mg_m3", stel_threshold_mg_m3);
         pp.query("stel_averaging_s", stel_averaging_s);
         pp.query("stel_diag_file", stel_diag_file);
+
+        // Reject inputs that would divide by zero, take a log or sqrt of a
+        // non-positive number, or index arrays out of bounds. Nothing here
+        // was checked before; a bad value produced NaN or read past an array.
+        if (!enable) return;
+        auto fail = [](const std::string& msg) { amrex::Abort("[DUST] " + msg); };
+        auto positive = [&](const char* key, amrex::Real v) {
+            if (!(v > 0.0)) fail(std::string("erf.dust.") + key + " must be > 0, got " + std::to_string(v));
+        };
+        auto fraction = [&](const char* key, amrex::Real v) {
+            if (!(v >= 0.0 && v <= 1.0)) fail(std::string("erf.dust.") + key + " must be in [0,1], got " + std::to_string(v));
+        };
+        if (n_size_bins < 1) fail("erf.dust.n_size_bins must be >= 1, got " + std::to_string(n_size_bins));
+        if (grid_ratio < 1)  fail("erf.dust.grid_ratio must be >= 1, got " + std::to_string(grid_ratio));
+        if (bin_diameters.empty()) fail("erf.dust.bin_diameters must list at least one diameter [m]");
+        for (auto d : bin_diameters) positive("bin_diameters", d);
+        positive("particle_density",  particle_density);
+        positive("z0_dust",           z0_dust);
+        positive("threshold_A_coeff", threshold_A_coeff);
+        positive("rho_air",           rho_air);
+        positive("supp_tau_base_s",   supp_tau_base_s);
+        if (!(zref > z0_dust)) fail("erf.dust.zref (" + std::to_string(zref) + ") must be above z0_dust (" + std::to_string(z0_dust) + ")");
+        fraction("silt_fraction", silt_fraction);
+        fraction("crust_index",   crust_index);
+        if (atm_feedback < 0.0)  fail("erf.dust.atm_feedback must be >= 0, got " + std::to_string(atm_feedback));
+        if (deposition_E0 < 0.0) fail("erf.dust.deposition_E0 must be >= 0, got " + std::to_string(deposition_E0));
+        if (blast_reactivity < 0.0) fail("erf.dust.blast_reactivity must be >= 0, got " + std::to_string(blast_reactivity));
+        if (!phreeqc_output_file.empty()) positive("phreeqc_update_interval_s", phreeqc_update_interval_s);
+        if (enable_particles && particle_release_interval < 1)
+            fail("erf.dust.particle_release_interval must be >= 1, got " + std::to_string(particle_release_interval));
+        if (stel_enable) positive("stel_averaging_s", stel_averaging_s);
+        if (visibility_enable) positive("visibility_k_ext", visibility_k_ext);
+        if (silica_enable) fraction("silica_fraction_rcs", silica_fraction_rcs);
+        if (msha_receptor_x.size() != msha_receptor_names.size() ||
+            msha_receptor_y.size() != msha_receptor_names.size())
+            fail("erf.dust.msha_receptor_names, msha_receptor_x and msha_receptor_y must have the same length (got "
+                 + std::to_string(msha_receptor_names.size()) + ", " + std::to_string(msha_receptor_x.size())
+                 + ", " + std::to_string(msha_receptor_y.size()) + ")");
+        const auto ns = site_names.size();
+        if (site_x_lo.size() != ns || site_y_lo.size() != ns || site_x_hi.size() != ns || site_y_hi.size() != ns ||
+            (!site_phreeqc_files.empty() && site_phreeqc_files.size() != ns))
+            fail("erf.dust.site_names (" + std::to_string(ns) + ") and site_x_lo/site_y_lo/site_x_hi/site_y_hi"
+                 " (and site_phreeqc_files when given) must have the same length");
+        for (std::size_t s = 0; s < ns; ++s)
+            if (!(site_x_hi[s] > site_x_lo[s] && site_y_hi[s] > site_y_lo[s]))
+                fail("erf.dust site " + site_names[s] + ": x_hi/y_hi must exceed x_lo/y_lo");
    }  // end DustParams constructor
  };     // end struct DustParams
 #endif // ERF_DUST_PARAMS_H

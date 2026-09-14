@@ -5,7 +5,7 @@
  * Three output files:
  *   msha_exposure.csv     - per-step: step,time_s,TWA_max,n_exceed,dose_max
  *   msha_shift_summary.csv- per-shift-end: shift,time_s,TWA_peak,n_exceed
- *   msha_receptor_<N>.csv - per-step: step,time_s,PM10_ug_m3 at receptor N
+ *   msha_receptor_<name>.csv - per-step: step,time_s,PM10_ug_m3 at that receptor
  *
  * Pattern: ERF_FireStatsOutput.H in Source/Fire/:
  *   https://github.com/hgopalan/ERF/blob/ERF-Fire/Source/Fire/ERF_FireStatsOutput.H

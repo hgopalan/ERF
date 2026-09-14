@@ -120,12 +120,13 @@ void FireDustCoupling::apply_burned_area_to_crust(
     // end of this function. Let the kernels finish reading it.
     amrex::Gpu::streamSynchronize();
 
-    // Report debug info
-    amrex::Real crust_min = dust_crust_index.min(0);
-    amrex::Real crust_max = dust_crust_index.max(0);
-    amrex::Print() << "[DUST DEBUG] Fire-dust coupling: modified crust values "
-                   << "crust_min=" << crust_min << ", crust_max=" << crust_max
-                   << ", reduction=" << reduction << "\n";
+    if (debug) {
+        amrex::Real crust_min = dust_crust_index.min(0);
+        amrex::Real crust_max = dust_crust_index.max(0);
+        amrex::Print() << "[DUST DEBUG] Fire-dust coupling: modified crust values "
+                       << "crust_min=" << crust_min << ", crust_max=" << crust_max
+                       << ", reduction=" << reduction << "\n";
+    }
 }
 
 void FireDustCoupling::apply_fire_wind_to_dust_ustar(
@@ -176,13 +177,14 @@ void FireDustCoupling::apply_fire_wind_to_dust_ustar(
             });
     }
 
-    // Debug output — after all MPI collectives (LNG_MPI_SKILLS Rule B1)
-    amrex::Real ustar_max = dust_ustar_in.max(0);
-    amrex::Real wind_max  = fire_wind_scratch.max(0);
-    amrex::Print() << "[DUST DEBUG] Phase 2 fire-wind coupling:"
-                   << " fire_wind_max=" << wind_max << " m/s"
-                   << " ustar_max_after=" << ustar_max << " m/s"
-                   << " C=" << C_ratio << "\n";
+    if (debug) {
+        amrex::Real ustar_max = dust_ustar_in.max(0);
+        amrex::Real wind_max  = fire_wind_scratch.max(0);
+        amrex::Print() << "[DUST DEBUG] Phase 2 fire-wind coupling:"
+                       << " fire_wind_max=" << wind_max << " m/s"
+                       << " ustar_fire_max=" << ustar_max << " m/s"
+                       << " C=" << C_ratio << "\n";
+    }
 }
 
 #endif

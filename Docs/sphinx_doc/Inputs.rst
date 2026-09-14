@@ -3836,8 +3836,6 @@ Fuel and moisture
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.stick.diffusivity_scale**           | Multiplier on the lag-calibrated diffusivity               | Real > 0                       | 1.0                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.use_dynamic_mext**                  | Read but not consumed; the SAV-based moisture of           | Boolean                        | true                   |
-|                                                | extinction is diagnostic only                              |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.fuel_map.file**                     | Spatial fuel map file; empty means uniform fuel. Rows of   | String                         | ""                     |
 |                                                | an ESRI ASCII map run north first; one code per fire       |                                |                        |
@@ -3942,7 +3940,6 @@ Wind
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.wind_sample_z0**                    | Roughness length [m] of that log profile                   | 0 < Real < wind_ref_ht         | 0.1                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.waf_fcz0_scale**                    | Read but not consumed                                      | Real                           | 1.0                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.wind_interp**                       | Horizontal mapping of atmospheric columns onto fire cells  | "bilinear", "nearest"          | "bilinear"             |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -4262,9 +4259,7 @@ Heat flux and coupling
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.burnout_time_to_efold**             | Divisor turning a burn time into the e-folding time        | Real > 0                       | 0.8514                 |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.f_c_min**                           | Read but not consumed by the current heat-flux kernel      | Real                           | 0.2                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.f_c_max**                           | Read but not consumed by the current heat-flux kernel      | Real                           | 0.9                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.coupling_type**                     | Wind used by the fire and whether its heat is injected     | "passive", "lagged",           | "lagged"               |
 |                                                |                                                            | "synchronous"                  |                        |
@@ -4364,8 +4359,6 @@ Crown fire
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.crown.foliar_moisture**             | Foliar moisture [fraction]                                 | Real                           | 1.0                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.crown.M_c**                         | Critical foliar moisture below which crowning is           | Real                           | 0.30                   |
-|                                                | impossible [fraction]                                      |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.crown.h_crown_BTU_lb**              | Canopy heat content [BTU/lb]                               | Real > 0                       | 8000.0                 |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -4462,10 +4455,8 @@ checked once at startup and abort with a message naming the input to fix.
 | **erf.dust.n_size_bins**                     | Number of particle size bins; each bin is one component of | Integer > 0              | 3                                  |
 |                                              | the emission flux                                          |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.bin_diameter_um**                 | Representative aerodynamic diameter per bin [µm]; bin 0    | Reals                    | 7.0 3.5 0.7                        |
-|                                              | sets the Bagnold base threshold                            |                          |                                    |
-+----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.bin_diameters**                   | Per-bin diameter [m] for settling, deposition and PM       | Reals                    | 7.0e-6 2.5e-6 50.0e-6              |
+| **erf.dust.bin_diameters**                   | Per-bin diameter [m]; bin 0 sets the Bagnold base          | Reals                    | 7.0e-6 2.5e-6 50.0e-6              |
+|                                              | threshold, and all bins drive settling, deposition and PM  |                          |                                    |
 |                                              | classification; the last value repeats when shorter than   |                          |                                    |
 |                                              | n_size_bins                                                |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
@@ -4496,7 +4487,9 @@ implemented.
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.crust_index**                     | Surface crust strength index; 0 loose, 1 fully crusted     | Real 0-1                 | 0.0                                |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.threshold_A_coeff**               | Bagnold threshold coefficient A [-]                        | Real > 0                 | 0.0123                             |
+| **erf.dust.threshold_A_coeff**               | Bagnold fluid-threshold constant A [-] (0.1; 0.0123 is     | Real > 0                 | 0.1                                |
+|                                              | Shao and Lu's coefficient of a different formula and gave  |                          |                                    |
+|                                              | 8x too low a threshold)                                    |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.ustar_t_base**                    | Base threshold friction velocity before the modifiers      | Real                     | -1.0                               |
 |                                              | [m/s]; negative computes the Bagnold value from bin 0 at   |                          |                                    |
@@ -4520,9 +4513,6 @@ implemented.
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.suppression_file**                | Suppression agent coverage raster in [0,1]; empty means    | String                   | ``""``                             |
 |                                              | none                                                       |                          |                                    |
-+----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.surface_map_file**                | Read but not consumed; the five rasters above carry the    | String                   | ``""``                             |
-|                                              | surface state                                              |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.terrain_file**                    | Fine-grid terrain raster for the dust slopes; empty        | String                   | ``""``                             |
 |                                              | differences the atmosphere's nodal terrain                 |                          |                                    |
@@ -4652,9 +4642,6 @@ on the same scalar.
 | **erf.dust.loading_feedback_coeff**          | Shao (2001) loading feedback on the threshold [m³/kg]; 0   | Real >= 0                | 0.0                                |
 |                                              | disables                                                   |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.use_dynamic_moisture**            | Derive the moisture inhibition from the surface moisture   | Boolean                  | false                              |
-|                                              | flux (needs a moisture scheme; harmless without one)       |                          |                                    |
-+----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust_mrf_Sc_t**                        | Turbulent Schmidt number of the dust scalar in the MRF     | Real                     | 0 (Pr_t)                           |
 |                                              | scheme, read from the erf prefix; 0 or negative uses the   |                          |                                    |
 |                                              | Prandtl number so dust diffuses like heat                  |                          |                                    |
@@ -4673,8 +4660,8 @@ models are enabled; see :ref:`sec:DustFire`.
 | **erf.fire_dust_coupling**                   | Enable the fire-dust coupling; requires                    | Boolean                  | false                              |
 |                                              | erf.dust.grid_ratio = erf.fire.grid_ratio                  |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.fire_dust_crust_reduction**            | Fraction of the crust index removed in burned cells each   | Real 0-1                 | 0.8                                |
-|                                              | step                                                       |                          |                                    |
+| **erf.fire_dust_crust_reduction**            | Fraction of the baseline crust index removed in burned     | Real 0-1                 | 0.8                                |
+|                                              | cells each step                                            |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.fire_dust_wind_to_dust**               | Raise the dust u* to the log-law value of the fire's       | Boolean                  | true                               |
 |                                              | effective wind where that is larger                        |                          |                                    |
@@ -4693,6 +4680,26 @@ models are enabled; see :ref:`sec:DustFire`.
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.fire_dust_lofting_Q_ref**              | Heat flux scale of the lofting factor [W/m²]; 0 or         | Real                     | 500.0                              |
 |                                              | negative disables it                                       |                          |                                    |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+
+
+MRF boundary layer with fire (ERF-Hazard)
+-----------------------------------------
+
+Read from the ``erf`` prefix in ``Source/DataStructs/ERF_TurbStruct.H`` for
+the MRF scheme; every key also accepts a per-level ``_lev<N>`` form. See the
+MRF section of :ref:`PBLschemes`.
+
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| Parameter                                    | Definition                                                 | Acceptable Values        | Default                            |
++==============================================+============================================================+==========================+====================================+
+| **erf.pbl_mrf_fire_thermal_excess**          | Add the fire surface heat flux to the MRF convective       | Boolean                  | false                              |
+|                                              | velocity scale w* of burning columns                       |                          |                                    |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| **erf.mrf_fire_q_threshold**                 | Fire heat flux above which a column counts as burning for  | Real >= 0                | 50.0                               |
+|                                              | that boost [W/m²]                                          |                          |                                    |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| **erf.mrf_fire_t_excess_cap**                | Cap on the thermal excess the fire adds [K]                | Real > 0                 | 50.0                               |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 
 

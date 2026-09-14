@@ -15,6 +15,11 @@ void verify_fire_prerequisites(const ERF& erf,
         "fire module requires SurfaceLayer. "
         "Check: phys_bc_type[zlo] == surface_layer AND erf.most.z0 is set");
 
+    // The fire layer lives on level 0 only: its heat, moisture and smoke go into
+    // the level-0 RHS and a finer level's average-down would overwrite them.
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(erf.maxLevel() == 0,
+        "[FIRE] The fire module runs on a single level. Set: amr.max_level = 0");
+
     // Check 2: SurfaceLayer pointer not null
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
         surface_layer != nullptr,
