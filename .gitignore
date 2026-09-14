@@ -79,3 +79,6 @@ Exec/.DevTests/
 *.log
 diffs_*/
 Backtrace.*
+
+# LLM/session working notes (merge status, plans, checklists); kept locally only
+Notes/

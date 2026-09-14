@@ -249,8 +249,6 @@ Source layout
 - ``Source/FireDust/ERF_FireDustCoupling`` and
   ``Source/Dust/ERF_DustFireLofting`` are the fire coupling, and
   ``Source/Particles/ERF_DustPC`` the super-particles.
-- ``Source/Dust/DUST_DEVELOPMENT.md`` is the development log with the phase
-  history behind the file names.
 
 Tests
 -----
