@@ -279,7 +279,7 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
  *                             applied to phi_w after it is computed from
  *                             |(ux_eff, uy_eff)|; 1 (no-op) for the isotropic
  *                             call sites. Lets a caller (see
- *                             ERF_DirectionalRos.H's DIRECTIONAL_WIND_COUPLING_WRF)
+ *                             ERF_DirectionalRos.H's DIRECTIONAL_WIND_COUPLING_ADVECTIVE)
  *                             exponentiate phi_w from the raw wind speed and
  *                             scale by this cosine afterward, rather than
  *                             passing an already-projected wind in ux_eff/uy_eff.
@@ -334,15 +334,17 @@ amrex::Real rothermel_ros_cell(
     // Wind factor
     amrex::Real phi_w = rc.C * std::pow(U_eff_ftmin, rc.B) * rc.beta_ratio_E;
 
-    // WRF-Fire (fire_ros, module_fr_fire_phys.F) couples direction in by
-    // scaling the already-exponentiated wind/slope excess by the cosine to
-    // the spread direction, rather than projecting (ux_eff,uy_eff) before
-    // raising it to the B power. cos_theta_* = 1 (the default) reproduces the
-    // omnidirectional rate exactly, unchanged from before this parameter
-    // existed; a caller doing directional spread may pass the raw wind speed
-    // as (ux_eff,uy_eff) and the true cosine here instead, which keeps R
-    // linear in cos(theta) and so a convex (stadium) support function instead
-    // of cos^B(theta) -- see ERF_DirectionalRos.H's file comment.
+    // The advective wind coupling (erf.fire.directional_wind_coupling =
+    // "advective") couples direction in by scaling the already-exponentiated
+    // wind/slope excess by the cosine to the spread direction, rather than
+    // projecting (ux_eff,uy_eff) before raising it to the B power -- matching
+    // WRF-Fire's fire_ros (module_fr_fire_phys.F). cos_theta_* = 1 (the
+    // default) reproduces the omnidirectional rate exactly, unchanged from
+    // before this parameter existed; a caller doing directional spread may
+    // pass the raw wind speed as (ux_eff,uy_eff) and the true cosine here
+    // instead, which keeps R linear in cos(theta) and so a convex (stadium)
+    // support function instead of cos^B(theta) -- see ERF_DirectionalRos.H's
+    // file comment.
     phi_w *= amrex::max(cos_theta_wind, amrex::Real(0.0));
     phi_s *= amrex::max(cos_theta_slope, amrex::Real(0.0));
 

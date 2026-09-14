@@ -193,7 +193,7 @@ erf.fire.wind_ref_ht = 6.1
 
 # Bypass atmospheric wind interpolation with a constant reference wind, for
 # controlled idealized-wind test cases (Exec/RegTests/FireLineIgnition,
-# FireWrfWindCoupling). Exact everywhere only with use_waf = false and
+# FireAdvectiveWindCoupling). Exact everywhere only with use_waf = false and
 # use_terrain_wind = false, since both still apply downstream otherwise.
 erf.fire.prescribed_wind   = false
 erf.fire.prescribed_wind_x = 0.0
@@ -261,12 +261,12 @@ erf.fire.directional_shape = "projection"
 # the wind/slope factor to the front-normal direction either the way
 # Rothermel's own formula does (projecting the wind first, then
 # exponentiating -- non-convex once phi_w(B-1) > 1, so a point or finite-line
-# fire's head falls toward the Wulff-shape tip rate) or the way WRF-Fire's
-# fire_ros does (exponentiating the raw wind, then scaling by the cosine to
-# the front normal -- convex, so the head runs at the head rate, like the
-# "ellipse" shape but without imposing an ellipse).
+# fire's head falls toward the Wulff-shape tip rate) or by exponentiating the
+# raw wind, then scaling by the cosine to the front normal (matching
+# WRF-Fire's fire_ros) -- convex, so the head runs at the head rate, like the
+# "ellipse" shape but without imposing an ellipse.
 # "projection" (default)
-# "wrf"
+# "advective"
 erf.fire.directional_wind_coupling = "projection"
 
 # Flank rate of the "ellipse" shape (needs directional_shape = "ellipse").

@@ -1,7 +1,8 @@
-# FireWrfWindCoupling: a finite ignition line under a strong, spatially-uniform
-# wind, testing erf.fire.directional_wind_coupling ("projection", the default,
-# vs "wrf"). See README.md for the physics; this deck holds everything the
-# three variants (inputs_default, inputs_projection, inputs_wrf) share.
+# FireAdvectiveWindCoupling: a finite ignition line under a strong,
+# spatially-uniform wind, testing erf.fire.directional_wind_coupling
+# ("projection", the default, vs "advective"). See README.md for the physics;
+# this deck holds everything the three variants (inputs_default,
+# inputs_projection, inputs_advective) share.
 #
 # The scenario is FireLineIgnition's Munoz-Esparza-et-al.-style finite line
 # (a 1 km line, well short of the periodic extent, so the fire develops real

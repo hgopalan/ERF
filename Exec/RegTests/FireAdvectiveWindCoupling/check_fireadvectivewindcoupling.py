@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""FireWrfWindCoupling: a finite ignition line in a strong uniform wind, testing
-erf.fire.directional_wind_coupling ("projection", the default, vs "wrf").
+"""FireAdvectiveWindCoupling: a finite ignition line in a strong uniform wind,
+testing erf.fire.directional_wind_coupling ("projection", the default, vs
+"advective").
 
-    python3 check_firewrfwindcoupling.py [default projection wrf]
+    python3 check_fireadvectivewindcoupling.py [default projection advective]
 
 A 1 km ignition line (short of the 3 km periodic y-extent, so the fire
 develops real lateral flanks) burns FM1 (short grass) at 6 % moisture in a
@@ -21,9 +22,9 @@ default / projection    phi_w evaluated from the wind already projected onto
                          facets. `default` (the flag left unset) must
                          reproduce `projection` (the flag written out) bit
                          for bit.
-wrf                      WRF-Fire's fire_ros: phi_w evaluated from the raw
-                         wind, then the whole wind/slope factor scaled by
-                         cos(theta) to the front normal, linear in
+advective                phi_w evaluated from the raw wind, then the whole
+                         wind/slope factor scaled by cos(theta) to the front
+                         normal (matching WRF-Fire's fire_ros), linear in
                          cos(theta) and so convex -- the head tracks Rf.
 
 The checker reads the centerline row (nearest y=1500, the ignition line's
@@ -42,9 +43,9 @@ try:
 except ImportError:
     sys.exit("needs numpy and yt")
 
-TOL_WRF = 0.03          # wrf head rate must be within 3% of Rf
+TOL_ADVECTIVE = 0.03    # advective head rate must be within 3% of Rf
 MAX_FRAC_PROJECTION = 0.80  # projection head rate must be no more than 80% of Rf (measured ~71%)
-MIN_CLOSER_MARGIN = 0.15   # wrf must land at least 15 points of Rf-fraction closer than projection
+MIN_CLOSER_MARGIN = 0.15   # advective must land at least 15 points of Rf-fraction closer than projection
 X0, Y_CENTER = 500.0, 1500.0
 U = 4.005
 M_F = 0.06
@@ -52,7 +53,7 @@ FT_MIN_TO_M_S = 0.00508
 M_S_TO_FT_MIN = 196.85
 FM1 = dict(w0=0.034, sigma=3500.0, delta=1.0, Mx=0.12, h=8000.0, S_T=0.0555, S_e=0.010, rho_p=32.0)
 STOP_TIME = 2100.0
-PREFIX = {"default": "plt_fire_default_", "projection": "plt_fire_projection_", "wrf": "plt_fire_wrf_"}
+PREFIX = {"default": "plt_fire_default_", "projection": "plt_fire_projection_", "advective": "plt_fire_advective_"}
 results = []
 
 
@@ -167,8 +168,8 @@ def main():
         frac = rate / Rf
         detail = (f"x_head({t[-1]:.0f}s) = {xh[-1]:.2f} m; late-time rate = {rate:.5f} m/s "
                   f"from {n} snapshots (t >= {0.5 * STOP_TIME:.0f}s), {frac * 100:.1f} % of Rf")
-        if v == "wrf":
-            check("head rate vs Rf", abs(frac - 1.0) < TOL_WRF, detail)
+        if v == "advective":
+            check("head rate vs Rf", abs(frac - 1.0) < TOL_ADVECTIVE, detail)
         elif v in ("default", "projection"):
             check("head rate degraded", tip / Rf - 0.05 < frac < MAX_FRAC_PROJECTION, detail)
         back_rate, nb = fit_rate(t, xb, 0.0)
@@ -187,16 +188,16 @@ def main():
         check("default == projection bit for bit", max_diff == 0.0,
               f"max|phi_default - phi_projection| = {max_diff:.3e} over {len(shared)} shared plotfiles")
 
-    if "wrf" in tracks and "projection" in tracks:
-        rw, _ = fit_rate(tracks["wrf"]["t"], tracks["wrf"]["xh"], 0.5 * STOP_TIME)
+    if "advective" in tracks and "projection" in tracks:
+        rw, _ = fit_rate(tracks["advective"]["t"], tracks["advective"]["xh"], 0.5 * STOP_TIME)
         rp, _ = fit_rate(tracks["projection"]["t"], tracks["projection"]["xh"], 0.5 * STOP_TIME)
         margin = rw / Rf - rp / Rf
-        check("wrf closer to Rf than projection", margin > MIN_CLOSER_MARGIN,
-              f"wrf {rw / Rf * 100:.1f} % of Rf vs projection {rp / Rf * 100:.1f} % of Rf "
+        check("advective closer to Rf than projection", margin > MIN_CLOSER_MARGIN,
+              f"advective {rw / Rf * 100:.1f} % of Rf vs projection {rp / Rf * 100:.1f} % of Rf "
               f"({margin * 100:+.1f} points)")
 
     n_fail = results.count(False)
-    print(f"FireWrfWindCoupling: {len(results) - n_fail}/{len(results)} checks passed")
+    print(f"FireAdvectiveWindCoupling: {len(results) - n_fail}/{len(results)} checks passed")
     sys.exit(1 if n_fail else 0)
 
 

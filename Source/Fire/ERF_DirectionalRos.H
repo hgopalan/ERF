@@ -97,26 +97,32 @@
  * for Rothermel and BEHAVE it is capped at the model's own wind limit. The head
  * still runs at R_h and the back at R0, and the ellipse stays convex.
  *
- * erf.fire.directional_wind_coupling = "wrf" (DIRECTIONAL_WIND_COUPLING_WRF,
+ * erf.fire.directional_wind_coupling = "advective" (DIRECTIONAL_WIND_COUPLING_ADVECTIVE,
  * opt-in, Rothermel with directional_shape = "projection" only) removes the
  * same non-convexity a different way: not by imposing a shape on top of the
  * projection's rates, as the ellipse does, but by changing how the model's
  * wind/slope factor couples to the front-normal direction in the first place.
  * Rothermel's phi_w is exponentiated from the raw, unprojected wind speed and
  * only the result is scaled by cos(theta) to the front normal afterward,
- * R(n) = R0 (1 + phi_w(|U|) max(U . n / |U|, 0)), matching WRF-Fire's fire_ros
- * (module_fr_fire_phys.F) rather than R0 (1 + phi_w(max(U . n, 0))). This is
- * linear in cos(theta) and so the support function of a stadium (a disc of
- * radius R0 swept along the wind vector, since the clamp at zero flattens the
- * back rather than reversing it) -- convex, and so its own Wulff shape, giving
- * the same head rate as the ellipse. Unlike the ellipse it is the model's own
- * oblique rate rather than an imposed shape: back and flank both come out at
- * R0 here because that happens to be Rothermel's own zero-wind rate, not
- * because they were set that way, so for Rothermel the two options happen to
- * agree; they would not necessarily agree for a model whose off-axis rate is
- * not the no-wind rate (BEHAVE has the same power-law wind term and would be
- * a cheap extension, but is not wired to this flag yet). It is also the form
- * a user comparing against WRF-Fire runs would expect.
+ * R(n) = R0 (1 + phi_w(|U|) max(U . n / |U|, 0)), rather than
+ * R0 (1 + phi_w(max(U . n, 0))). Since n |grad(phi)| = grad(phi), this
+ * particular R(n) turns the level-set equation into pure advection by a
+ * wind-aligned velocity V = (phi_w(|U|) R0 / |U|) U plus isotropic growth at
+ * R0, phi_t + V . grad(phi) + R0 |grad(phi)| = 0 -- the same reduction used in
+ * the original level-set fire-spread formulation (Mandel, Beezley & Kochanski
+ * 2011) and, not coincidentally, matching WRF-Fire's fire_ros
+ * (module_fr_fire_phys.F). Being linear in cos(theta), it is also the support
+ * function of a stadium (a disc of radius R0 swept along the wind vector,
+ * since the clamp at zero flattens the back rather than reversing it) --
+ * convex, and so its own Wulff shape, giving the same head rate as the
+ * ellipse. Unlike the ellipse it is the model's own oblique rate rather than
+ * an imposed shape: back and flank both come out at R0 here because that
+ * happens to be Rothermel's own zero-wind rate, not because they were set
+ * that way, so for Rothermel the two options happen to agree; they would not
+ * necessarily agree for a model whose off-axis rate is not the no-wind rate
+ * (BEHAVE has the same power-law wind term and would be a cheap extension,
+ * but is not wired to this flag yet). It is also the form a user comparing
+ * against WRF-Fire runs would expect.
  *
  * Balbi has its own directional path in ERF_BalbiModel.H, which carries the
  * per-cell moisture, surface temperature and heat-flux couplings that model
@@ -160,7 +166,7 @@ inline constexpr amrex::Real DIRECTIONAL_ROS_GRAD_MIN = 1.0e-12;
 /// erf.fire.directional_wind_coupling. Rothermel only; every other model
 /// ignores this and directional_ros_cell's U_mag/s_mag arguments.
 inline constexpr int DIRECTIONAL_WIND_COUPLING_PROJECTION = 0;  ///< default: project wind, then exponentiate (Rothermel's U^B)
-inline constexpr int DIRECTIONAL_WIND_COUPLING_WRF        = 1;  ///< opt-in: exponentiate on the raw wind, then scale by cos(theta) (WRF-Fire's fire_ros)
+inline constexpr int DIRECTIONAL_WIND_COUPLING_ADVECTIVE  = 1;  ///< opt-in: exponentiate on the raw wind, then scale by cos(theta) -- turns the level set into pure advection plus isotropic growth
 
 /**
  * @brief Rate of spread along one direction
@@ -169,11 +175,11 @@ inline constexpr int DIRECTIONAL_WIND_COUPLING_WRF        = 1;  ///< opt-in: exp
  * @param[in] U_n            Wind component along the spread direction [m/s]
  * @param[in] s_n            Terrain slope along the spread direction [-]
  * @param[in] wind_coupling  DIRECTIONAL_WIND_COUPLING_PROJECTION (default) or
- *                           _WRF; Rothermel only, see below.
+ *                           _ADVECTIVE; Rothermel only, see below.
  * @param[in] U_mag          Raw (unprojected) wind speed [m/s]; read only
- *                           when wind_coupling == _WRF.
+ *                           when wind_coupling == _ADVECTIVE.
  * @param[in] s_mag          Raw (unprojected) slope magnitude [-]; read only
- *                           when wind_coupling == _WRF.
+ *                           when wind_coupling == _ADVECTIVE.
  * @return ROS [m/s]
  *
  * DIRECTIONAL_WIND_COUPLING_PROJECTION (default, backward compatible): the
@@ -182,14 +188,15 @@ inline constexpr int DIRECTIONAL_WIND_COUPLING_WRF        = 1;  ///< opt-in: exp
  * original behaviour, byte-for-byte, since U_mag/s_mag are not read on this
  * path. This is non-convex once phi_w(B-1) > 1, which is what lets a finite
  * line's ends grow a Wulff wedge that falls behind the head rate over time
- * (see the file comment). DIRECTIONAL_WIND_COUPLING_WRF (opt-in) instead
+ * (see the file comment). DIRECTIONAL_WIND_COUPLING_ADVECTIVE (opt-in) instead
  * exponentiates the wind/slope factor from the raw magnitude U_mag/s_mag and
- * only afterward scales by the cosine to the spread direction (U_n/U_mag),
- * matching WRF-Fire's fire_ros (module_fr_fire_phys.F). That keeps R(theta)
- * linear in cos(theta) -- the convex support function of a stadium (a disc of
- * radius R0 swept along the wind vector, since the clamp at zero for backing
- * flattens rather than reverses it) -- so the
- * wedge does not form. Selected via erf.fire.directional_wind_coupling.
+ * only afterward scales by the cosine to the spread direction (U_n/U_mag).
+ * That keeps R(theta) linear in cos(theta) -- the convex support function of
+ * a stadium (a disc of radius R0 swept along the wind vector, since the
+ * clamp at zero for backing flattens rather than reverses it) -- so the
+ * wedge does not form; equivalently, it turns the level-set equation into
+ * pure advection by a wind-aligned velocity plus isotropic growth (see the
+ * file comment). Selected via erf.fire.directional_wind_coupling.
  */
 AMREX_GPU_DEVICE AMREX_FORCE_INLINE
 amrex::Real directional_ros_cell(const DirectionalRosState& st,
@@ -215,7 +222,7 @@ amrex::Real directional_ros_cell(const DirectionalRosState& st,
         case DIRECTIONAL_ROS_FBP:
             return fbp_ros(st.fbp, U, s);
         default:
-            if (wind_coupling == DIRECTIONAL_WIND_COUPLING_WRF) {
+            if (wind_coupling == DIRECTIONAL_WIND_COUPLING_ADVECTIVE) {
                 // The raw magnitude is at least the projected component (it is
                 // the same vector, just not dotted with the normal); guard
                 // against a caller passing 0 by mistake so cos_w falls back
@@ -371,7 +378,7 @@ amrex::Real directional_ellipse_speed(const DirectionalEllipse& d,
  * @param[in]  ellipse_lw      Flank rule of the ellipse, DIRECTIONAL_ELLIPSE_LW_*
  * @param[in]  ellipse_lw_max  Cap on Anderson's length-to-width ratio
  * @param[in]  wind_coupling   DIRECTIONAL_WIND_COUPLING_PROJECTION (default) or
- *                     _WRF; Rothermel-with-DIRECTIONAL_SHAPE_PROJECTION only,
+ *                     _ADVECTIVE; Rothermel-with-DIRECTIONAL_SHAPE_PROJECTION only,
  *                     see directional_ros_cell()
  */
 inline void fill_directional_ros(amrex::MultiFab& R_mf,
@@ -431,9 +438,10 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
             }
 
             // Raw (unprojected) magnitudes: passed through so the Rothermel
-            // branch of directional_ros_cell can exponentiate from these,
-            // WRF-style, then scale by the cosine to the front normal below,
-            // rather than projecting first. Ignored by every other model.
+            // branch of directional_ros_cell can exponentiate from these
+            // (the advective coupling), then scale by the cosine to the
+            // front normal below, rather than projecting first. Ignored by
+            // every other model.
             const amrex::Real U_mag = std::sqrt(u*u + v*v);
             const amrex::Real s_mag = std::sqrt(dzdx*dzdx + dzdy*dzdy);
 
@@ -471,7 +479,7 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
  * @param[in]     ellipse_lw      Flank rule of the ellipse, DIRECTIONAL_ELLIPSE_LW_*
  * @param[in]     ellipse_lw_max  Cap on Anderson's length-to-width ratio
  * @param[in]     ros_scale       Optional per-cell factor on the rebuilt ROS (front acceleration clock)
- * @param[in]     wind_coupling   DIRECTIONAL_WIND_COUPLING_PROJECTION (default) or _WRF;
+ * @param[in]     wind_coupling   DIRECTIONAL_WIND_COUPLING_PROJECTION (default) or _ADVECTIVE;
  *                     Rothermel-with-DIRECTIONAL_SHAPE_PROJECTION only, see directional_ros_cell()
  */
 inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,

@@ -392,10 +392,10 @@ struct FireParams
     // erf.fire.directional_wind_coupling. "projection" (0, default, backward
     // compatible) projects the wind onto the spread direction before
     // Rothermel's power-law wind factor, R(theta) ~ (U cos theta)^B -- this is
-    // the original behaviour, unchanged. "wrf" (1, opt-in) instead computes
-    // the wind/slope factor from the raw, unprojected speed and scales the
-    // result by the cosine afterward, matching WRF-Fire's fire_ros
-    // (module_fr_fire_phys.F): R(theta) is then linear in cos(theta), the
+    // the original behaviour, unchanged. "advective" (1, opt-in) instead
+    // computes the wind/slope factor from the raw, unprojected speed and
+    // scales the result by the cosine afterward (matching WRF-Fire's
+    // fire_ros, module_fr_fire_phys.F): R(theta) is then linear in cos(theta), the
     // convex support function of a stadium (a disc of radius R0 swept along
     // the wind vector), rather than cos^B(theta), which stops being convex
     // once phi_w(B-1) > 1 and lets a finite line's ends grow a Wulff wedge
@@ -953,14 +953,14 @@ struct FireParams
                amrex::Abort("erf.fire.directional_shape must be \"projection\" or \"ellipse\"");
            }
 
-           std::string coupling_str = (directional_wind_coupling == 1) ? "wrf" : "projection";
+           std::string coupling_str = (directional_wind_coupling == 1) ? "advective" : "projection";
            pp.query("directional_wind_coupling", coupling_str);
            if (coupling_str == "projection") {
                directional_wind_coupling = 0;
-           } else if (coupling_str == "wrf") {
+           } else if (coupling_str == "advective") {
                directional_wind_coupling = 1;
            } else {
-               amrex::Abort("erf.fire.directional_wind_coupling must be \"projection\" or \"wrf\"");
+               amrex::Abort("erf.fire.directional_wind_coupling must be \"projection\" or \"advective\"");
            }
 
            std::string lw_str = (directional_ellipse_lw == 1) ? "anderson" : "model";
@@ -1337,17 +1337,17 @@ struct FireParams
            }
        }
 
-       // directional_wind_coupling = "wrf" is read only by directional_ros_cell's
+       // directional_wind_coupling = "advective" is read only by directional_ros_cell's
        // Rothermel branch (and only reached with directional_shape = "projection");
        // every other shape, model or the hybrid path (whose fill_directional_ros
        // call in ERF_HybridRos.H does not thread this flag through) would silently
        // ignore it, so reject those combinations instead.
        if (directional_wind_coupling == 1) {
            if (directional_shape == 1) {
-               amrex::Abort("erf.fire.directional_wind_coupling = \"wrf\" needs erf.fire.directional_shape = \"projection\" (it has no effect with \"ellipse\")");
+               amrex::Abort("erf.fire.directional_wind_coupling = \"advective\" needs erf.fire.directional_shape = \"projection\" (it has no effect with \"ellipse\")");
            }
            if (is_hybrid() || !uses_model("rothermel")) {
-               amrex::Abort("erf.fire.directional_wind_coupling = \"wrf\" is implemented for erf.fire.ros_model = \"rothermel\" only, not hybrid or another model");
+               amrex::Abort("erf.fire.directional_wind_coupling = \"advective\" is implemented for erf.fire.ros_model = \"rothermel\" only, not hybrid or another model");
            }
        }
     }

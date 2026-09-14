@@ -260,7 +260,7 @@ keep the projection, and :cpp:`erf.fire.levelset.ellipse` cannot be combined
 with it. The unit test ``ERF_GTestDirectionalShape`` checks the rates, the
 vector addition and the Wulff extents of both forms.
 
-:cpp:`erf.fire.directional_wind_coupling = "wrf"` (default ``"projection"``,
+:cpp:`erf.fire.directional_wind_coupling = "advective"` (default ``"projection"``,
 Rothermel with :cpp:`directional_shape = "projection"` only) removes the same
 shortfall a different way: rather than imposing a shape on top of the
 projection's rates, it changes how Rothermel's wind factor couples to the
@@ -272,18 +272,24 @@ the front normal afterward,
 
    R(\hat n) = R_0\bigl(1 + \phi_w(|\mathbf U|)\,\max(\hat{\mathbf U}\cdot\hat n, 0)\bigr),
 
-matching WRF-Fire's ``fire_ros`` (``module_fr_fire_phys.F``), rather than
-:math:`R_0(1 + \phi_w(|\mathbf U|\max(\hat{\mathbf U}\cdot\hat n, 0)))`. This is
-linear in the cosine and so the support function of a stadium (a disc of
-radius :math:`R_0` swept along the wind vector, since the clamp at zero
-flattens the back rather than reversing it) -- convex, and so its own Wulff
-shape, giving the same head rate as the ellipse. Unlike the ellipse this is
-the model's own oblique rate rather than an imposed shape: the back and
-flanks come out at :math:`R_0` here because that is Rothermel's own zero-wind
-rate, not because they were set that way, so for Rothermel the two options
-happen to agree. ``Exec/RegTests/FireDirectionalShape`` includes a ``wrf``
-deck alongside ``ellipse``; ``Exec/RegTests/FireWrfWindCoupling`` repeats the
-comparison on a finite ignition line, where the projection's wedge shows at
+rather than :math:`R_0(1 + \phi_w(|\mathbf U|\max(\hat{\mathbf U}\cdot\hat n, 0)))`.
+Since :math:`\hat n|\nabla\phi| = \nabla\phi`, this :math:`R(\hat n)` turns the
+level-set equation into pure advection by a wind-aligned velocity plus
+isotropic growth, :math:`\phi_t + \mathbf V\cdot\nabla\phi + R_0|\nabla\phi| = 0`
+with :math:`\mathbf V = (\phi_w(|\mathbf U|) R_0/|\mathbf U|)\,\mathbf U` -- the
+same reduction used in the original level-set fire-spread formulation (Mandel,
+Beezley and Kochanski 2011) and, not coincidentally, matching WRF-Fire's
+``fire_ros`` (``module_fr_fire_phys.F``). Being linear in the cosine, it is
+also the support function of a stadium (a disc of radius :math:`R_0` swept
+along the wind vector, since the clamp at zero flattens the back rather than
+reversing it) -- convex, and so its own Wulff shape, giving the same head rate
+as the ellipse. Unlike the ellipse this is the model's own oblique rate rather
+than an imposed shape: the back and flanks come out at :math:`R_0` here
+because that is Rothermel's own zero-wind rate, not because they were set that
+way, so for Rothermel the two options happen to agree.
+``Exec/RegTests/FireDirectionalShape`` includes an ``advective`` deck alongside
+``ellipse``; ``Exec/RegTests/FireAdvectiveWindCoupling`` repeats the comparison
+on a finite ignition line, where the projection's wedge shows at
 the line's ends rather than a point.
 
 Flanks at :math:`R_0` are the projection's claim, not an observation, and give

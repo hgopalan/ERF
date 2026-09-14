@@ -3974,12 +3974,12 @@ Rate of spread
 |                                                | back and flank rates, which keeps a point fire's head at   |                                |                        |
 |                                                | the head rate; not for balbi or hybrid                     |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.directional_wind_coupling**         | With directional_shape = "projection": exponentiate the    | "projection", "wrf"            | "projection"           |
+| **erf.fire.directional_wind_coupling**         | With directional_shape = "projection": exponentiate the    | "projection", "advective"      | "projection"           |
 |                                                | wind/slope factor from the projected wind (Rothermel's own |                                |                        |
 |                                                | form), or from the raw wind and scale by the cosine to the |                                |                        |
-|                                                | front normal afterward (WRF-Fire's fire_ros), which keeps  |                                |                        |
-|                                                | a point or finite-line fire's head at the head rate; needs |                                |                        |
-|                                                | ros_model = rothermel                                     |                                |                        |
+|                                                | front normal afterward (matching WRF-Fire's fire_ros),     |                                |                        |
+|                                                | which keeps a point or finite-line fire's head at the head |                                |                        |
+|                                                | rate; needs ros_model = rothermel                          |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.directional_ellipse_lw**            | Flank rate of that ellipse: the model's no-wind, no-slope  | "model", "anderson"            | "model"                |
 |                                                | rate, or b over Anderson's (1983) length-to-width ratio at |                                |                        |

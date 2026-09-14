@@ -1,12 +1,12 @@
-# FireWrfWindCoupling
+# FireAdvectiveWindCoupling
 
 A finite ignition line in a strong uniform wind, spread by the directional
 level set with `erf.fire.directional_wind_coupling = "projection"` (the
-default) and `"wrf"`, against Rothermel's head rate.
+default) and `"advective"`, against Rothermel's head rate.
 
 ```
-MPIRUN="mpirun -np 2" ./run_firewrfwindcoupling.sh /path/to/erf_exec   # three decks, then the checks
-SKIP_RUN=1 ./run_firewrfwindcoupling.sh x                              # checks only
+MPIRUN="mpirun -np 2" ./run_fireadvectivewindcoupling.sh /path/to/erf_exec   # three decks, then the checks
+SKIP_RUN=1 ./run_fireadvectivewindcoupling.sh x                              # checks only
 ```
 
 ## The case
@@ -25,7 +25,7 @@ Munoz-Esparza-et-al.-style case), 2100 s.
 |---|---|
 | `default` | unset (must reproduce `projection` bit for bit) |
 | `projection` | `"projection"`, written out |
-| `wrf` | `"wrf"` |
+| `advective` | `"advective"` |
 
 ## Why the projection's head falls short
 
@@ -40,17 +40,22 @@ R0 B/(B-1) (phi_w(B-1))^(1/B) = 0.368 m/s (22 % of Rf) as the front
 develops facets -- the same degradation FireDirectionalShape documents for a
 point ignition, here for a finite line.
 
-`"wrf"` instead matches WRF-Fire's `fire_ros` (module_fr_fire_phys.F):
-exponentiate phi_w from the raw, unprojected wind speed, then scale the
-whole wind/slope factor by cos(theta) to the front normal afterward,
-R(n) = R0(1 + phi_w(U) max(cos theta, 0)). Linear in cos(theta) -- the
-convex support function of a stadium (a disc of radius R0 swept along the
-wind vector) -- so no wedge forms and the head tracks Rf.
+`"advective"` instead exponentiates phi_w from the raw, unprojected wind
+speed, then scales the whole wind/slope factor by cos(theta) to the front
+normal afterward, R(n) = R0(1 + phi_w(U) max(cos theta, 0)) -- matching
+WRF-Fire's `fire_ros` (module_fr_fire_phys.F). Since n |grad(phi)| =
+grad(phi), this R(n) turns the level-set equation into pure advection by a
+wind-aligned velocity plus isotropic growth at R0 -- the same reduction used
+in the original level-set fire-spread formulation (Mandel, Beezley and
+Kochanski 2011), which is where the name comes from. Being linear in
+cos(theta), it is also the convex support function of a stadium (a disc of
+radius R0 swept along the wind vector) -- so no wedge forms and the head
+tracks Rf.
 
-`check_firewrfwindcoupling.py` reads the centerline row (nearest y=1500, the
-ignition line's midpoint, farthest from the flank curvature at its ends)
-from every `fire_phi` plotfile, tracks the head (+x) and back (-x) front
-position over time, and fits a rate over the second half of the run
+`check_fireadvectivewindcoupling.py` reads the centerline row (nearest
+y=1500, the ignition line's midpoint, farthest from the flank curvature at
+its ends) from every `fire_phi` plotfile, tracks the head (+x) and back (-x)
+front position over time, and fits a rate over the second half of the run
 (t >= 1050 s), by which point the projection deck's head has settled onto
 its asymptotic behaviour.
 
@@ -63,10 +68,10 @@ formula is 0.36793 m/s (22 % of Rf). Rates fitted over t >= 1050 s:
 |---|---|---|---|
 | `default` | 3616.09 m | 1.20891 m/s | 71.1 % (well below Rf, well above the Wulff tip) |
 | `projection` | 3616.09 m | 1.20891 m/s | same as `default`, bit for bit (`max\|phi_default - phi_projection\| = 0`) |
-| `wrf` | 4091.58 m | 1.70098 m/s | 100.0 % |
+| `advective` | 4091.58 m | 1.70098 m/s | 100.0 % |
 
-`wrf` lands 28.9 points of Rf-fraction closer to Rf than `projection`. All 8
-checks pass.
+`advective` lands 28.9 points of Rf-fraction closer to Rf than `projection`.
+All 8 checks pass.
 
 Back rate is reported for reference (0.02342 m/s vs R0 = 0.02339 m/s,
 essentially identical across all three decks, barely one fire cell over the
