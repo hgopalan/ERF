@@ -46,15 +46,14 @@ def compute_rothermel_fm1(moisture_1hr=0.08, wind_ftmin=0.0):
     Q_ig = 250.0 + 1116.0 * M_f
     R0_ft_min = (I_R * xi) / (rho_b * eps_h * Q_ig)
 
-    C = 7.47 * math.exp(-0.8711 * sigma**(-0.55))
+    C = 7.47 * math.exp(-0.133 * sigma**0.55)   # Rothermel (1972) eq. 48
     B = 0.02526 * sigma**0.54
     E = 0.715 * math.exp(-3.59e-4 * sigma)
     beta_ratio_E = beta_ratio**(-E)
 
-    phi_w_max = 0.9 * I_R
-    U_max_ft_min = 0.0
-    if C > 0 and B > 0 and beta_ratio_E > 0:
-        U_max_ft_min = (phi_w_max / (C * beta_ratio_E))**(1.0/B)
+    # Maximum effective wind speed, as the code caps it (erf.fire.use_wind_limit):
+    # 300 ft/min for fine fuels (sigma > 1000 1/ft), 500 ft/min otherwise
+    U_max_ft_min = 300.0 if sigma > 1000.0 else 500.0
 
     U_capped = min(wind_ftmin, U_max_ft_min)
     phi_w = C * (U_capped**B) * beta_ratio_E if U_capped > 0 else 0.0
@@ -100,15 +99,14 @@ def compute_rothermel_fm4(moisture_1hr=0.08, wind_ftmin=0.0):
     Q_ig = 250.0 + 1116.0 * M_f
     R0_ft_min = (I_R * xi) / (rho_b * eps_h * Q_ig)
 
-    C = 7.47 * math.exp(-0.8711 * sigma**(-0.55))
+    C = 7.47 * math.exp(-0.133 * sigma**0.55)   # Rothermel (1972) eq. 48
     B = 0.02526 * sigma**0.54
     E = 0.715 * math.exp(-3.59e-4 * sigma)
     beta_ratio_E = beta_ratio**(-E)
 
-    phi_w_max = 0.9 * I_R
-    U_max_ft_min = 0.0
-    if C > 0 and B > 0 and beta_ratio_E > 0:
-        U_max_ft_min = (phi_w_max / (C * beta_ratio_E))**(1.0/B)
+    # Maximum effective wind speed, as the code caps it (erf.fire.use_wind_limit):
+    # 300 ft/min for fine fuels (sigma > 1000 1/ft), 500 ft/min otherwise
+    U_max_ft_min = 300.0 if sigma > 1000.0 else 500.0
 
     U_capped = min(wind_ftmin, U_max_ft_min)
     phi_w = C * (U_capped**B) * beta_ratio_E if U_capped > 0 else 0.0
@@ -125,7 +123,8 @@ def compute_rothermel_fm4(moisture_1hr=0.08, wind_ftmin=0.0):
     }
 
 
-# Reference values (computed with correct Rothermel Eq. 47: C = 7.47*exp(-0.8711*sigma^(-0.55)))
+# Reference ranges for Rothermel (1972) with eq. 48 C = 7.47 exp(-0.133 sigma^0.55)
+# and the 300/500 ft/min wind cap of the code
 # Units: ROS in m/s, I_R in BTU/ft²/min
 # These are expected ranges; actual values should fall within these bounds
 REFERENCE_VALUES = {
@@ -133,19 +132,19 @@ REFERENCE_VALUES = {
     ('FM1', 0.08, 0.0): {
         'R0_ftmin': (1.5, 5.0),
         'I_R': (100, 1000),
-        'C': (7.0, 7.5),
-        'U_max_ftmin': (1.0, 100),
+        'C': (5.0e-5, 6.0e-5),
+        'U_max_ftmin': (300, 300),
     },
     # FM1, 8% moisture, 500 ft/min midflame wind
     ('FM1', 0.08, 500.0): {
-        'ROS_ms': (1.0, 50.0),  # Wind significantly increases ROS
-        'phi_w': (100, 10000),
+        'ROS_ms': (0.05, 1.0),  # the 300 ft/min cap binds; phi_w of order 10
+        'phi_w': (2.0, 30.0),
     },
     # FM4, 8% moisture, no wind
     ('FM4', 0.08, 0.0): {
         'R0_ftmin': (1.0, 50.0),
         'I_R': (500, 50000),
-        'C': (7.0, 7.5),
+        'C': (1.0e-4, 1.0e-2),
     },
 }
 

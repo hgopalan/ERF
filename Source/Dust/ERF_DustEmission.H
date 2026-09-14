@@ -53,11 +53,13 @@ namespace DustEmissionConst {
     // Gravitational acceleration [m/s^2].
     constexpr amrex::Real G_ACCEL         = 9.81;
 
-    // Sandblasting efficiency intercept (log10 scale).
-    // log10(alpha) = ALPHA_SLOPE * clay_frac + ALPHA_INTERCEPT
-    // Reference: Marticorena & Bergametti (1995), Eq. 9.
+    // Sandblasting efficiency, Marticorena & Bergametti (1995) eq. 9:
+    //   log10( alpha [1/cm] ) = ALPHA_SLOPE * (clay in percent) + ALPHA_INTERCEPT
+    // for clay < 20 %. It used to be evaluated with the clay fraction and read
+    // as 1/m, 184x low at 2 % clay.
     constexpr amrex::Real ALPHA_SLOPE     = 0.134;
     constexpr amrex::Real ALPHA_INTERCEPT = -6.0;
+    constexpr amrex::Real PER_CM_TO_PER_M = 100.0;
 
     // Proxy for clay fraction from silt fraction at mine tailings.
     // clay_frac = CLAY_FROM_SILT * silt_frac
@@ -113,10 +115,11 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_sandblasting_efficiency(amrex::Real silt_frac) noexcept
 {
     amrex::Real sf = amrex::min(static_cast<amrex::Real>(amrex::max(static_cast<amrex::Real>(silt_frac), static_cast<amrex::Real>(0.0))), static_cast<amrex::Real>(1.0));
-    amrex::Real clay = DustEmissionConst::CLAY_FROM_SILT * sf;
-    amrex::Real log_alpha = DustEmissionConst::ALPHA_SLOPE * clay
-                           + DustEmissionConst::ALPHA_INTERCEPT;
-    return std::pow(10.0, log_alpha);
+    amrex::Real clay_pct = 100.0 * DustEmissionConst::CLAY_FROM_SILT * sf;
+    clay_pct = amrex::min(clay_pct, static_cast<amrex::Real>(20.0));   // the fit's range
+    amrex::Real log_alpha_cm = DustEmissionConst::ALPHA_SLOPE * clay_pct
+                             + DustEmissionConst::ALPHA_INTERCEPT;
+    return DustEmissionConst::PER_CM_TO_PER_M * std::pow(10.0, log_alpha_cm);
 }
 
 /**

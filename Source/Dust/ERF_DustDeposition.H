@@ -37,9 +37,7 @@
 #include <ERF_DustSettling.H>
 
 // Density component index (needed for S_old array access)
-#ifndef Rho_comp
 #include <ERF_IndexDefines.H>
-#endif
 
 namespace DustDepositionConst {
     constexpr amrex::Real KAPPA   = 0.4;      ///< von Karman constant [-]

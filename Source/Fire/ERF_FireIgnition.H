@@ -68,8 +68,10 @@ void initialize_ignition(
             //   field outside the band so the front eventually advances into
             //   ground carrying no gradient information.
             const Real sdf = dist - radius;
+            // radius <= 0 is "no disc" (the schedule, polygon or line ignites
+            // instead): unburned everywhere, and no division by the radius.
             p(i,j,k) = normalized
-                     ? amrex::max(amrex::min(sdf / radius, 1.0_rt), -1.0_rt)
+                     ? ((radius > 0.0_rt) ? amrex::max(amrex::min(sdf / radius, 1.0_rt), -1.0_rt) : 1.0_rt)
                      : sdf;
         });
     }

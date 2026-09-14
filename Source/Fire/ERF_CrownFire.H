@@ -38,34 +38,29 @@
 /**
  * @brief Van Wagner (1977) critical fireline intensity for crown fire initiation
  *
- * Formula used here:
- *   I_B_crit = 0.010 * C_BH * (460 + 25.9 * FMC_excess_pct)
- * where FMC_excess_pct = 100 * (foliar_moisture - M_c).
+ *   I_0 = ( 0.010 C_BH (460 + 25.9 m) )^(3/2)   [kW/m]
  *
- * If foliar_moisture <= M_c the transition is treated as unattainable and a
- * large sentinel value is returned.
+ * with C_BH the canopy base height [m] and m the foliar moisture content in
+ * percent of dry mass. This is Van Wagner's eq. 4 with his h = 460 + 25.9 m
+ * (kJ/kg) and C = 0.010. Until 2026-09 the 3/2 power was missing and the
+ * moisture entered as the excess over a "critical" value, which made I_0 16x
+ * too low at the defaults (114 instead of 1883 kW/m for C_BH = 5 m, m = 100 %)
+ * and treated dry foliage as unable to crown.
  *
- * @param[in] C_BH              Canopy base height [m]
- * @param[in] foliar_moisture   Foliar moisture [fraction, 0-1]
- * @param[in] M_c               Critical foliar moisture [fraction]
- * @return Critical intensity [kW/m], or 1.0e12 kW/m when foliar_moisture <= M_c
+ * @param[in] C_BH              Canopy base height [m], floored at 0.1 m
+ * @param[in] foliar_moisture   Foliar moisture [fraction of dry mass]
+ * @return Critical surface fireline intensity [kW/m]
  *
  * Reference: Van Wagner, C.E. (1977). Conditions for the start and spread of
  *   crown fire. Canadian Journal of Forest Research, 7(1), 23–34.
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real van_wagner_critical_intensity(amrex::Real C_BH, amrex::Real foliar_moisture,
-                                           amrex::Real M_c) noexcept
+amrex::Real van_wagner_critical_intensity(amrex::Real C_BH, amrex::Real foliar_moisture) noexcept
 {
-    constexpr amrex::Real LARGE_INTENSITY = 1.0e12;
-
-    if (foliar_moisture <= M_c) {
-        return LARGE_INTENSITY;
-    }
-
     C_BH = amrex::max(static_cast<amrex::Real>(C_BH), static_cast<amrex::Real>(0.1));
-    amrex::Real FMC_excess_pct = amrex::max((foliar_moisture - M_c) * 100.0, 0.0);
-    return 0.010 * C_BH * (460.0 + 25.9 * FMC_excess_pct);
+    const amrex::Real m_pct = amrex::max(static_cast<amrex::Real>(foliar_moisture), static_cast<amrex::Real>(0.0)) * 100.0;
+    const amrex::Real base  = 0.010 * C_BH * (460.0 + 25.9 * m_pct);
+    return base * std::sqrt(base);
 }
 
 /**

@@ -198,7 +198,7 @@ Checkpoint and restart
 ----------------------
 
 The atmospheric checkpoint carries the fire state as ``FirePhi``,
-``FireArrivalTime``, ``FireROS``, ``FireFuelLoad``, ``FireFuelMC``,
+``FireArrivalTime``, ``FireHeatFlux``, ``FireFuelLoad``, ``FireFuelMC``,
 ``FireDispAccum``, the lagged flux buffers ``FireQAtmPrev`` and
 ``FireQLatAtmPrev`` that the next step injects, with crown fire
 ``FireCrownActive`` and ``FireCrownLoad``, and with the exposure

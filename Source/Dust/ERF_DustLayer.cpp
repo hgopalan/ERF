@@ -64,7 +64,7 @@ DustLayer::initialize(
   dust_curvature->setVal(0.0);
   compute_dust_terrain_slopes(
     *dust_slopes, z_phys_nd_atm, erf.Geom(0), m_dg, dust_params.terrain_file);
-  dust_slopes->FillBoundary(m_dg.geom.periodicity());
+  dust_fill_boundary(*dust_slopes, m_dg.geom);
   compute_terrain_curvature(*dust_curvature, *dust_slopes, m_dg.geom);
 
   dust_ustar_t       = std::make_unique<amrex::MultiFab>(m_dg.ba, m_dg.dm, 1, ng);
@@ -86,18 +86,23 @@ DustLayer::initialize(
                    << dust_params.n_size_bins << " comp)\n";
   }
 
-  amrex::Real g    = 9.81;
-  amrex::Real rho_a = 1.225;
-  amrex::Real d_bin0 = dust_params.bin_diameter_um[0] * 1.0e-6;
-  amrex::Real ustar_t =
-    dust_params.threshold_A_coeff *
-    std::sqrt(dust_params.particle_density * g * d_bin0 / rho_a);
+  // Bin 0 diameter [m] from erf.dust.bin_diameters, the array settling, deposition
+  // and the PM classes use, so the threshold sees the same particle as the rest.
+  AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!dust_params.bin_diameters.empty(),
+      "[DUST] erf.dust.bin_diameters must list at least one bin diameter [m]");
+  amrex::Real d_bin0 = dust_params.bin_diameters[0];
+  // Bagnold threshold for bin 0 with the deck's air density (the emission flux
+  // uses the same rho_air); erf.dust.ustar_t_base >= 0 replaces it.
+  amrex::Real ustar_t = compute_ustar_t_bagnold(dust_params.threshold_A_coeff,
+                                                dust_params.particle_density,
+                                                d_bin0, dust_params.rho_air);
+  if (dust_params.ustar_t_base >= 0.0) ustar_t = dust_params.ustar_t_base;
   dust_ustar_t->setVal(ustar_t);
 
   if (dust_params.dust_debug) {
     amrex::Print()
       << "[DUST DEBUG] Set dust_ustar_t (Bagnold threshold bin 0): " << "u*_t="
-      << ustar_t << " m/s, " << "d=" << dust_params.bin_diameter_um[0]
+      << ustar_t << " m/s, " << "d=" << d_bin0 * 1.0e6
       << " um, " << "rho_p=" << dust_params.particle_density << " kg/m^3, "
       << "A=" << dust_params.threshold_A_coeff << "\n";
   }
@@ -134,6 +139,10 @@ DustLayer::initialize(
   dust_surf_moist = std::make_unique<amrex::MultiFab>(
     m_dg.ba, m_dg.dm, 1, amrex::IntVect(1, 1, 0));
   dust_surf_moist->setVal(0.0);
+  dust_surf_qflux = std::make_unique<amrex::MultiFab>(m_dg.ba, m_dg.dm, 1, ng);
+  dust_surf_qflux->setVal(0.0);
+  dust_ustar_fire = std::make_unique<amrex::MultiFab>(m_dg.ba, m_dg.dm, 1, ng);
+  dust_ustar_fire->setVal(0.0);
 
   dust_ustar_in = std::make_unique<amrex::MultiFab>(
     m_dg.ba, m_dg.dm, 1, amrex::IntVect(1, 1, 0));
@@ -205,6 +214,11 @@ DustLayer::initialize(
     dust_flux_atm->DistributionMap(),
     1, amrex::IntVect(1,1,0));
   dep_flux_atm->setVal(0.0);
+  dep_flux_step = std::make_unique<amrex::MultiFab>(
+    dust_flux_atm->boxArray(),
+    dust_flux_atm->DistributionMap(),
+    1, amrex::IntVect(0));
+  dep_flux_step->setVal(0.0);
 
   if (dust_params.dust_debug) {
     amrex::Print() << "[DUST DEBUG] Phase 12: dust_deposition_rate"
@@ -221,7 +235,6 @@ DustLayer::initialize(
                    << " dust_surf_moist allocated on dust grid\n"
                    << "[DUST DEBUG] Phase 13: loading_feedback_coeff="
                    << dust_params.loading_feedback_coeff
-                   << " use_dynamic_moisture=" << dust_params.use_dynamic_moisture
                    << "\n";
   }
 
@@ -398,10 +411,14 @@ DustLayer::initialize(
                    << " grid_ratio=" << m_dg.grid_ratio
                    << " dust_scalar_comp=" << m_dust_scalar_comp
                    << " loading_feedback_coeff="
-                   << dust_params.loading_feedback_coeff
-                   << " use_dynamic_moisture="
-                   << dust_params.use_dynamic_moisture << "\n";
+                   << dust_params.loading_feedback_coeff << "\n";
   }
+
+  // The crust the burned-area reduction starts from each step. Refreshed after
+  // a PHREEQC update; not checkpointed, so a restart rebuilds it from the inputs
+  // and rasters and the reduction is re-applied from the checkpointed level set.
+  dust_crust_baseline = std::make_unique<amrex::MultiFab>(m_dg.ba, m_dg.dm, 1, dust_crust_index->nGrowVect());
+  amrex::MultiFab::Copy(*dust_crust_baseline, *dust_crust_index, 0, 0, 1, dust_crust_index->nGrowVect());
 
   write_dust_stats_header(m_params.dust_diag_file);
 
@@ -520,6 +537,15 @@ DustLayer::advance(
   ++m_step;
   m_time += dt;
 
+  // Deposited mass for the step just completed: the last RK stage's flux (summed
+  // over bins in apply_deposition_bc) times the step. It used to be added inside
+  // apply_deposition_bc at every stage with that stage's dt, 1.83 dt per step.
+  if (dep_flux_step && dust_deposition_rate && dt > 0.0) {
+    apply_deposition_to_dust_grid(*dust_deposition_rate, *dep_flux_step,
+                                  m_dg.grid_ratio, dt);
+    dep_flux_step->setVal(0.0);
+  }
+
   if (m_params.dust_debug) {
     amrex::Real cs  = dust_conc_sfc  ? dust_conc_sfc->max(0) * 1e9 : 0.0;
     amrex::Real p10 = dust_pm10      ? dust_pm10->max(0) : 0.0;
@@ -563,6 +589,20 @@ DustLayer::advance(
       // dust emission calculations.
       compute_dust_ustar_from_wind(
         *dust_ustar_in, *dust_wind_ref, m_params.zref, m_params.z0_dust);
+    }
+    // Fire-dust coupling: the fire-grid wind raises u* where it is stronger. This
+    // has to come after the fills above, which overwrite dust_ustar_in.
+    if (dust_ustar_fire) {
+      for (amrex::MFIter mfi(*dust_ustar_in, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.tilebox();
+        auto ust = dust_ustar_in->array(mfi);
+        auto usf = dust_ustar_fire->const_array(mfi);
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+          ust(i,j,k) = amrex::max(ust(i,j,k), usf(i,j,k));
+        });
+      }
+      dust_ustar_in->FillBoundary(m_dg.geom.periodicity());
+      dust_ustar_fire->setVal(0.0);   // never reuse a stale fire wind
     }
     if (surface_layer->get_t_surf(0))
       fill_dust_scalar_from_atm(*dust_tsfc, *surface_layer->get_t_surf(0), m_dg);
@@ -609,6 +649,8 @@ DustLayer::advance(
       *dust_ustar_t, *dust_ustar_base, *dust_crust_index, *dust_silt_fraction,
       *dust_efflor, *dust_suppression, *dust_emission_flux, m_dg, dust_params);
     m_last_phreeqc_update = m_time;
+    if (dust_crust_baseline)
+      amrex::MultiFab::Copy(*dust_crust_baseline, *dust_crust_index, 0, 0, 1, dust_crust_index->nGrowVect());
     if (dust_params.dust_debug)
       amrex::Print() << "[DUST DEBUG] PHREEQC update completed\n";
   }
@@ -645,9 +687,10 @@ DustLayer::advance(
   if (m_fire_dust_coupling && m_fire_dust_coupling->enabled
       && dust_crust_index)
   {
-      // Reset crust to the initial uniform value each step so that
-      // crust is not permanently driven to zero over multiple steps.
-      dust_crust_index->setVal(m_params.crust_index);
+      // Reset the crust to its baseline (inputs, rasters, last PHREEQC update)
+      // each step so the reduction is applied once, not compounded. The reset
+      // used to be setVal(crust_index), which wiped a crust raster.
+      amrex::MultiFab::Copy(*dust_crust_index, *dust_crust_baseline, 0, 0, 1, dust_crust_index->nGrowVect());
       // Re-apply burned-area reduction using current fire phi field.
       m_fire_dust_coupling->apply_burned_area_to_crust(
           *dust_crust_index, m_dg.geom);
@@ -693,28 +736,6 @@ DustLayer::advance(
     }
   }
 
-  if (m_params.use_dynamic_moisture && dust_surf_moist) {
-    constexpr amrex::Real Lv      = 2.501e6;
-    constexpr amrex::Real rho_a   = 1.225;
-    constexpr amrex::Real a_f     = 1.21;
-    constexpr amrex::Real w_prime = 0.003;
-    for (amrex::MFIter mfi(*dust_ustar_t, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-      const amrex::Box& bx = mfi.tilebox();
-      auto ust   = dust_ustar_t->array(mfi);
-      auto qflux = dust_surf_moist->const_array(mfi);
-      amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-        amrex::Real w       = amrex::max(static_cast<amrex::Real>(qflux(i,j,k)), static_cast<amrex::Real>(0.0)) / (Lv * rho_a);
-        amrex::Real excess  = amrex::max(static_cast<amrex::Real>(w - w_prime), static_cast<amrex::Real>(0.0));
-        amrex::Real f_moist = std::sqrt(1.0 + a_f * excess);
-        ust(i,j,k) *= f_moist;
-      });
-    }
-    if (m_params.dust_debug) {
-      amrex::Real ust_max = dust_ustar_t->max(0);
-      amrex::Print() << "[DUST DEBUG] Phase 13: dynamic moisture inhibition applied"
-                     << " ustar_t_max=" << ust_max << " m/s\n";
-    }
-  }
 
   if (m_params.dust_debug) {
     amrex::Print() << "[DUST DEBUG] Phase 6: Before emission computation: u*_t_min="
@@ -897,6 +918,8 @@ DustLayer::apply_settling_to_cc_source(
         amrex::Real d_m  = m_params.bin_diameters[d_idx];
         amrex::Real rhop = m_params.particle_density;
         int comp = m_dust_scalar_comp + b;
+       AMREX_ASSERT(comp < cc_source.nComp());
+        AMREX_ASSERT(comp < cc_source.nComp());
 
         apply_dust_settling_to_cc_source(cc_source, S_old, z_phys_cc,
                                          geom_atm, d_m, rhop, comp,
@@ -942,6 +965,7 @@ DustLayer::apply_deposition_bc(
 
    int n_active = m_params.transport_bins_separately ? m_params.n_size_bins : 1;
 
+   if (dep_flux_step) dep_flux_step->setVal(0.0);
    for (int b = 0; b < n_active; ++b) {
        int d_idx = (b < (int)m_params.bin_diameters.size())
                  ? b : (int)m_params.bin_diameters.size()-1;
@@ -956,9 +980,8 @@ DustLayer::apply_deposition_bc(
                                  d_m, rhop, E_0, comp,
                                  m_params.dust_debug);
 
-       apply_deposition_to_dust_grid(*dust_deposition_rate,
-                                      *dep_flux_atm,
-                                      m_dg.grid_ratio, dt);
+       if (dep_flux_step)
+         amrex::MultiFab::Add(*dep_flux_step, *dep_flux_atm, 0, 0, 1, 0);
    }
 
    if (m_params.dust_debug) {
@@ -978,16 +1001,16 @@ DustLayer::extract_atm_return_fields(
     fill_dust_conc_from_atm(*dust_conc_sfc, S_new_cons,
                              m_dust_scalar_comp, geom_atm, m_dg.grid_ratio);
 
-    const amrex::MultiFab* q1fx3_ptr = m_params.use_dynamic_moisture ? Q1fx3 : nullptr;
-    fill_dust_moist_from_atm(*dust_surf_moist, q1fx3_ptr,
+    const amrex::MultiFab* q1fx3_ptr = Q1fx3;   // null without a moisture scheme; the flux is output only
+    fill_dust_moist_from_atm(*dust_surf_qflux, q1fx3_ptr,
                               geom_atm, m_dg.grid_ratio);
 
     if (m_params.dust_debug) {
         amrex::Real conc_max  = dust_conc_sfc->max(0);
         amrex::Real conc_sum  = dust_conc_sfc->sum(0);
-        amrex::Real moist_max = dust_surf_moist->max(0);
+        amrex::Real moist_max = dust_surf_qflux->max(0);
         amrex::Real dep_total = dust_deposition_rate ? dust_deposition_rate->sum(0) : 0.0;
-        bool q1fx3_active = (Q1fx3 != nullptr) && m_params.use_dynamic_moisture;
+        bool q1fx3_active = (Q1fx3 != nullptr);
         amrex::Print() << "[DUST DEBUG] Phase 13: step=" << m_step
                        << " conc_sfc_max=" << conc_max
                        << " kg/m^3  conc_sfc_sum=" << conc_sum
@@ -1113,7 +1136,7 @@ DustLayer::compute_msha_exposure(amrex::Real dt, amrex::Real cur_time, int nstep
 }
 
 void
-DustLayer::write_output(int nstep, double cur_time, bool is_final)
+DustLayer::write_output(int nstep, amrex::Real cur_time, bool is_final)
 {
     append_dust_stats(nstep, cur_time,
                       m_params.dust_diag_file,

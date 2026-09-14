@@ -26,7 +26,7 @@ class ERF;
 /**
  * @brief Verify fire module prerequisites in ERF configuration
  *
- * Called once at startup from ERF::init_fire_module() after SurfaceLayer is ready.
+ * Called once at startup from ERF::initializeFire() after SurfaceLayer is ready.
  * Aborts with clear diagnostic messages if any requirement is not met.
  *
  * @param[in] erf              ERF instance (for grids, dmap, Geom access)

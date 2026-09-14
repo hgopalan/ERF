@@ -50,6 +50,22 @@ constexpr amrex::Real FIRE_SIGMA_D10  = 109.0;
 constexpr amrex::Real FIRE_SIGMA_D100 =  30.0;
 
 /**
+ * @brief Load-weighted surface-area-to-volume ratio of the dead fuel [1/ft].
+ *
+ * (w_d1 sigma_d1 + w_d10 sigma_d10 + w_d100 sigma_d100) / (w_d1 + w_d10 + w_d100),
+ * sigma_d1 when there is no dead load. The moisture of extinction and the
+ * residence time both use it; two of the four call sites used to drop the
+ * 10-h and 100-h terms (FM10: 600 instead of 636.8 1/ft).
+ */
+inline amrex::Real dead_fuel_weighted_sav (amrex::Real w_d1, amrex::Real w_d10, amrex::Real w_d100,
+                                           amrex::Real sigma_d1)
+{
+    const amrex::Real dead_w = w_d1 + w_d10 + w_d100;
+    return (dead_w > 1.0e-10) ? (w_d1*sigma_d1 + w_d10*FIRE_SIGMA_D10 + w_d100*FIRE_SIGMA_D100) / dead_w
+                              : sigma_d1;
+}
+
+/**
  * @brief Compute SAV-based flame residence time [s].
  *
  * tau [s] = FIRE_BURNOUT_ALPHA * rho_p [lb/ft³] / sigma [ft⁻¹]
@@ -62,50 +78,6 @@ amrex::Real compute_residence_time_s(amrex::Real sigma_ft, amrex::Real rho_p_lbf
     if (sigma_ft <= 0.0 || rho_p_lbft3 <= 0.0) { return 1.0; }
     amrex::Real tau = FIRE_BURNOUT_ALPHA * rho_p_lbft3 / sigma_ft;
     return amrex::max(static_cast<amrex::Real>(tau), static_cast<amrex::Real>(1.0));
-}
-
-/**
- * @brief Per-class exponential burnout model (Albini 1976 GTR INT-30).
- *
- * Computes the load-weighted mean total combustion fraction:
- *   f_c_i = 1 - exp(-tau_res / tau_i)
- *
- * Used ONLY by the fire diagnostics path (fireline intensity, flame length).
- * NOT used in the heat-flux or fuel-depletion kernels.
- */
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real compute_per_class_consumption_frac(
-    amrex::Real tau_res,
-    amrex::Real w_d1,   amrex::Real sigma_d1,
-    amrex::Real w_d10,
-    amrex::Real w_d100,
-    amrex::Real w_lh,   amrex::Real sigma_lh,
-    amrex::Real w_lw,   amrex::Real sigma_lw,
-    amrex::Real rho_p) noexcept
-{
-    amrex::Real tau_d1   = compute_residence_time_s(sigma_d1, rho_p);
-    amrex::Real tau_d10  = compute_residence_time_s(FIRE_SIGMA_D10, rho_p);
-    amrex::Real tau_d100 = compute_residence_time_s(FIRE_SIGMA_D100, rho_p);
-    amrex::Real tau_lh_adj = compute_residence_time_s(sigma_lh, rho_p) * 1.0;
-    amrex::Real tau_lw_adj = compute_residence_time_s(sigma_lw, rho_p) * 2.0;
-
-    amrex::Real f_d1   = 1.0 - std::exp(-tau_res / tau_d1);
-    amrex::Real f_d10  = 1.0 - std::exp(-tau_res / tau_d10);
-    amrex::Real f_d100 = 1.0 - std::exp(-tau_res / tau_d100);
-    amrex::Real f_lh   = 1.0 - std::exp(-tau_res / tau_lh_adj);
-    amrex::Real f_lw   = 1.0 - std::exp(-tau_res / tau_lw_adj);
-
-    amrex::Real total_w = w_d1 + w_d10 + w_d100 + w_lh + w_lw;
-    if (total_w <= 0.0) {
-        amrex::Real dead_w = w_d1 + w_d10 + w_d100;
-        if (dead_w <= 1.0e-10) { return 0.5; }
-        amrex::Real sigma_agg = (w_d1*sigma_d1 + w_d10*FIRE_SIGMA_D10 + w_d100*FIRE_SIGMA_D100) / dead_w;
-        amrex::Real tau_agg = compute_residence_time_s(sigma_agg, rho_p);
-        return 1.0 - std::exp(-tau_res / tau_agg);
-    }
-
-    amrex::Real f_c = (w_d1*f_d1 + w_d10*f_d10 + w_d100*f_d100 + w_lh*f_lh + w_lw*f_lw) / total_w;
-    return amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(f_c), static_cast<amrex::Real>(1.0))));
 }
 
 /**

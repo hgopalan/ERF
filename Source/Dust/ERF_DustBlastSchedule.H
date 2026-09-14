@@ -178,7 +178,7 @@ void load_blast_schedule(const std::string& filename,
     }
 
     // Broadcast event count
-    int n_events = schedule.events.size();
+    int n_events = static_cast<int>(schedule.events.size());
     amrex::ParallelDescriptor::Bcast(&n_events, 1, amrex::ParallelDescriptor::IOProcessorNumber());
 
     // Resize on non-IO ranks
@@ -271,6 +271,8 @@ void apply_blast_schedule(
         amrex::Real blast_flux_per_bin = evt->mass_kg_m2 * blast_reactivity
                                         / (dt_safe * n_size_bins);
         blast_flux_per_bin = std::min(blast_flux_per_bin, DustBlastConst::BLAST_FLUX_MAX);
+        // Copy the event's numbers out: evt is a host pointer, not valid on the device.
+        const amrex::Real evt_cx = evt->cx, evt_cy = evt->cy, evt_radius = evt->radius;
 
         // GPU ParallelFor over dust grid valid region
 #ifdef AMREX_USE_OMP
@@ -288,12 +290,12 @@ void apply_blast_schedule(
                     amrex::Real y_cell = plo[1] + (j + 0.5) * dx[1];
 
                     // Compute distance from blast center
-                    amrex::Real dist_x = x_cell - evt->cx;
-                    amrex::Real dist_y = y_cell - evt->cy;
+                    amrex::Real dist_x = x_cell - evt_cx;
+                    amrex::Real dist_y = y_cell - evt_cy;
                     amrex::Real dist = std::sqrt(dist_x * dist_x + dist_y * dist_y);
 
                     // If within radius, add blast flux
-                    if (dist <= evt->radius) {
+                    if (dist <= evt_radius) {
                         dest(i, j, k, n) += blast_flux_per_bin;
                     }
                 });

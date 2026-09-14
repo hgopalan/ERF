@@ -221,11 +221,8 @@ ERF::Evolve ()
             if (m_fire_dust_coupling.enabled && m_fire_layer) {
                 m_fire_dust_coupling.fire_phi_mf = m_fire_layer->get_levelset();
                 m_fire_dust_coupling.geom_fire   = m_fire_layer->get_fire_geom();
-                m_fire_dust_coupling.apply_burned_area_to_crust(
-                    *m_DustLayer->get_crust_index_mut(),
-                    m_DustLayer->get_dust_geom());
-                // Ensure ghost cells are properly synchronized after crust reduction
-                m_DustLayer->get_crust_index_mut()->FillBoundary(m_DustLayer->get_dust_geom().periodicity());
+                // The crust reduction is applied inside DustLayer::advance from the
+                // crust baseline (see set_fire_dust_coupling).
 
                 // Phase 2: fire outflow wind raises dust u*
                 if (m_fire_dust_coupling.fire_wind_to_dust &&
@@ -256,8 +253,12 @@ ERF::Evolve ()
                     const int C = amrex::max(
                         m_fire_layer->get_grid_ratio() / m_DustLayer->get_grid_ratio(), 1);
 
-                    amrex::MultiFab* ustar_in = m_DustLayer->get_ustar_in_mut();
+                    // Into the fire-u* field, which advance() maxes into u* after it
+                    // has filled u* from the surface layer. Applied to dust_ustar_in
+                    // here it was overwritten before it was used.
+                    amrex::MultiFab* ustar_in = m_DustLayer->get_ustar_fire_mut();
                     if (ustar_in) {
+                        ustar_in->setVal(0.0_rt);
                         m_fire_dust_coupling.apply_fire_wind_to_dust_ustar(
                             *ustar_in,
                             fire_wind_scratch,
@@ -1560,7 +1561,7 @@ ERF::InitData_post ()
             // fields are allocated and set up from the inputs here, then overwritten
             // from the checkpoint by ReadCheckpointFileFire().
 #ifdef ERF_ENABLE_FIRE
-            // z_phys_nd[0] is null on flat terrain (TerrainType::None); the fire
+            // z_phys_nd[0] is allocated on every terrain type; the fire
             // layer handles that case itself, so it must not gate initialization.
             if (lev == 0 && m_fire_layer) {
                 m_fire_layer->initialize(*this, m_SurfaceLayer.get(), z_phys_nd[0].get(), m_fire_params);
@@ -1611,6 +1612,11 @@ ERF::InitData_post ()
                 pp.query("fire_dust_lofting_Q_ref",       m_fire_dust_coupling.lofting_Q_ref);
                 m_fire_dust_coupling.fire_phi_mf = m_fire_layer->get_levelset();
                 m_fire_dust_coupling.geom_fire   = m_fire_layer->get_fire_geom();
+                m_fire_dust_coupling.debug       = dust_params.dust_debug;
+                // DustLayer::advance applies the burned-area crust reduction from its
+                // baseline each step; without this registration the reduction was
+                // applied here every step on top of the previous one.
+                m_DustLayer->set_fire_dust_coupling(&m_fire_dust_coupling);
 
                 // Validate grid_ratio matching for fire-dust coupling
                 if (m_fire_dust_coupling.enabled) {
@@ -2537,6 +2543,18 @@ ERF::initializeMicrophysics (const int& a_nlevsmax /*!< number of AMR levels */)
 void
 ERF::initializeFire (const int& /*a_nlevsmax*/ /*!< number of AMR levels */)
 {
+#ifndef ERF_ENABLE_FIRE
+    {   // a fire deck on a build without the module ran as plain ERF, silently
+        amrex::ParmParse pp("erf.fire"); bool want = false; pp.query("enable", want);
+        if (want) { amrex::Abort("erf.fire.enable = true but this executable was built with ERF_ENABLE_FIRE=OFF"); }
+    }
+#endif
+#ifndef ERF_USE_DUST
+    {
+        amrex::ParmParse pp("erf.dust"); bool want = false; pp.query("enable", want);
+        if (want) { amrex::Abort("erf.dust.enable = true but this executable was built with ERF_ENABLE_DUST=OFF"); }
+    }
+#endif
 #ifdef ERF_ENABLE_FIRE
     if (m_fire_params.enable) {
         m_fire_layer = std::make_unique<FireLayer>();

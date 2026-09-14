@@ -19,6 +19,9 @@ void compute_dust_emission_flux(MultiFab& dust_emission_flux,
 {
     // n_size_bins must match nComp of dust_emission_flux.
     AMREX_ALWAYS_ASSERT(dust_emission_flux.nComp() == n_size_bins);
+    AMREX_ASSERT(dust_ustar_t.boxArray() == dust_emission_flux.boxArray() &&
+                 dust_ustar_in.boxArray() == dust_emission_flux.boxArray() &&
+                 dust_silt_fraction.boxArray() == dust_emission_flux.boxArray());
 
     for (MFIter mfi(dust_emission_flux, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();

@@ -3,6 +3,7 @@
  */
 
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <cmath>
 #include <vector>
@@ -585,9 +586,10 @@ ERF::WriteCheckpointFile () const
             amrex::Print() << "Writing fire arrival time to checkpoint" << std::endl;
             VisMF::Write(*at, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireArrivalTime"));
         }
-        if (const amrex::MultiFab* ros = m_fire_layer->get_ros()) {
-            amrex::Print() << "Writing fire ROS to checkpoint" << std::endl;
-            VisMF::Write(*ros, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireROS"));
+        // Balbi with heat_flux_coupling reads the previous step's flux before it is
+        // recomputed; without it the first restarted step used a zero flux.
+        if (const amrex::MultiFab* hf = m_fire_layer->get_heat_flux()) {
+            VisMF::Write(*hf, MultiFabFileFullPrefix(0, checkpointname, "Level_", "FireHeatFlux"));
         }
         if (const amrex::MultiFab* fuel = m_fire_layer->get_fuel_load()) {
             amrex::Print() << "Writing fire fuel load to checkpoint" << std::endl;
@@ -661,7 +663,8 @@ ERF::WriteCheckpointFile () const
         if (amrex::ParallelDescriptor::IOProcessor()) {
             std::ofstream f(checkpointname + "/FireState");
             f << "step " << m_fire_layer->get_step() << "\n"
-              << "levelset_subcycle_count " << m_fire_layer->get_levelset_subcycle_count() << "\n";
+              << "levelset_subcycle_count " << m_fire_layer->get_levelset_subcycle_count() << "\n"
+              << std::setprecision(17) << "f_dry_prev " << m_fire_layer->get_f_dry_prev() << "\n";
         }
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[FIRE] Fire state written to checkpoint " << checkpointname << "\n";
@@ -1855,7 +1858,7 @@ ERF::ReadCheckpointFileFire ()
 
     VisMF::Read(*m_fire_layer->get_levelset_mut(),
         amrex::MultiFabFileFullPrefix(0, restart_chkfile, "Level_", "FirePhi"));
-    m_fire_layer->get_levelset_mut()->FillBoundary(m_fire_layer->get_fire_geom().periodicity());
+    fire_fill_boundary(*m_fire_layer->get_levelset_mut(), m_fire_layer->get_fire_geom());
 
     VisMF::Read(*m_fire_layer->get_arrival_time_mut(),
         amrex::MultiFabFileFullPrefix(0, restart_chkfile, "Level_", "FireArrivalTime"));
@@ -1899,6 +1902,7 @@ ERF::ReadCheckpointFileFire ()
     restore_optional(m_fire_layer->get_disp_accum_mut(),   "FireDispAccum");
     restore_optional(m_fire_layer->get_crown_active_mut(), "FireCrownActive");
     restore_optional(m_fire_layer->get_crown_load_mut(),   "FireCrownLoad");
+    restore_optional(m_fire_layer->get_heat_flux_mut(),      "FireHeatFlux");
     restore_optional(m_fire_layer->get_Q_atm_prev_mut(),     "FireQAtmPrev");
     restore_optional(m_fire_layer->get_Q_lat_atm_prev_mut(), "FireQLatAtmPrev");
     restore_optional(m_fire_layer->get_heat_load_mut(),      "FireHeatLoad");
@@ -1919,6 +1923,8 @@ ERF::ReadCheckpointFileFire ()
             while (f >> key) {
                 if (key == "levelset_subcycle_count") {
                     int n; f >> n; m_fire_layer->set_levelset_subcycle_count(n);
+                } else if (key == "f_dry_prev") {   // the smoke emission divides the lagged flux by it
+                    amrex::Real v; f >> v; m_fire_layer->set_f_dry_prev(v);
                 } else {
                     std::string skip; f >> skip;
                 }

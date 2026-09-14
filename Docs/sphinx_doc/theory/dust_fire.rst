@@ -20,7 +20,8 @@ with the coupling off as the control.
 Burned area removes the crust
 -----------------------------
 
-Every dust step the crust index is reset to :cpp:`erf.dust.crust_index` and
+Every dust step the crust index is reset to its baseline (the input value,
+the crust raster, or the last PHREEQC update) and
 then, in every dust cell whose fire cell has a negative level set (burned),
 reduced to
 

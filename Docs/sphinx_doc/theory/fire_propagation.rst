@@ -51,7 +51,7 @@ Richards (1990) spread shape below. Each fire subcycle of length
 
    .. math::
 
-      L/W = 0.936\, e^{0.2566 U} - 0.397 \sqrt{U}, \qquad 1 \le L/W \le 8,
+      L/W = 0.936\, e^{0.2566 U} + 0.461\, e^{-0.1548 U} - 0.397, \qquad 1 \le L/W \le 8,
 
    and is converted to the Richards (1990) coefficients :math:`a = 1`,
    :math:`c = 0.2a`, :math:`b = (a + c) / (2\, L/W)` when

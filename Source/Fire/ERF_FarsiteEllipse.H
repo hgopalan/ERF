@@ -35,9 +35,13 @@ struct FarsiteParams
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real anderson_LW_ratio(amrex::Real wind_speed_mph) noexcept
 {
-    if (wind_speed_mph < 1.0) { return 1.0; }
+    // Anderson (1983) as fitted in FARSITE (Finney 1998, eq. 8), U in mi/h:
+    // L/W = 0.936 e^{0.2566 U} + 0.461 e^{-0.1548 U} - 0.397, which is 1 at U = 0.
+    // The second term used to be -0.397 sqrt(U), 22 % narrower at 5 mi/h.
+    if (wind_speed_mph <= 0.0) { return 1.0; }
     amrex::Real lw = 0.936 * std::exp(0.2566 * wind_speed_mph)
-                   - 0.397 * std::sqrt(wind_speed_mph);
+                   + 0.461 * std::exp(-0.1548 * wind_speed_mph)
+                   - 0.397;
     return amrex::max(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(lw), static_cast<amrex::Real>(8.0))));
 }
 
@@ -194,7 +198,8 @@ void advance_farsite_one_step_legacy(
     amrex::Real current_time,
     const FarsiteParams& fp,
     const amrex::MultiFab* slopes = nullptr,
-    const amrex::MultiFab* nonburnable = nullptr)
+    const amrex::MultiFab* nonburnable = nullptr,
+    bool debug = false)
 {
     using namespace amrex;
 
@@ -362,7 +367,9 @@ void advance_farsite_one_step_legacy(
     yarray_all = yarray;
 #endif
 
-    amrex::Print() << "[FIRE] Stamping " << npts_global << " new perimeter points\n";
+    if (debug) {
+        amrex::Print() << "[FIRE DEBUG] FARSITE legacy: stamping " << npts_global << " new perimeter points\n";
+    }
 
     // -------------------------------------------------------------------------
     // Step A: reset phi to 0
@@ -630,12 +637,13 @@ void advance_farsite_one_step(
     amrex::Real current_time,
     const FarsiteParams& fp,
     const amrex::MultiFab* slopes = nullptr,
-    const amrex::MultiFab* nonburnable = nullptr)
+    const amrex::MultiFab* nonburnable = nullptr,
+    bool debug = false)
 {
     if (fp.front_update == farsite_front::legacy) {
         advance_farsite_one_step_legacy(phi, farsite_work, disp_accum, arrival_time,
                                         vel_eff, R_mf, geom_fire, dt_fire,
-                                        current_time, fp, slopes, nonburnable);
+                                        current_time, fp, slopes, nonburnable, debug);
     } else {
         advance_farsite_front_cells(phi, disp_accum, arrival_time,
                                     vel_eff, R_mf, geom_fire, dt_fire,

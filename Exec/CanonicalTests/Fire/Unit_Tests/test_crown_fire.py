@@ -11,11 +11,10 @@ G = 9.81
 PI = math.pi
 
 
-def van_wagner_critical_intensity(cbh, foliar_moisture, m_c):
-    if foliar_moisture <= m_c:
-        return LARGE_INTENSITY
-    fmc_excess_pct = max((foliar_moisture - m_c) * 100.0, 0.0)
-    return 0.010 * max(cbh, 0.1) * (460.0 + 25.9 * fmc_excess_pct)
+def van_wagner_critical_intensity(cbh, foliar_moisture):
+    # Van Wagner (1977) eq. 4: I_0 = (0.010 CBH (460 + 25.9 m))^(3/2), m in percent
+    base = 0.010 * max(cbh, 0.1) * (460.0 + 25.9 * max(foliar_moisture, 0.0) * 100.0)
+    return base ** 1.5
 
 
 def cruz_crown_ros(u10_ms, cbd, moisture_10hr):
@@ -76,34 +75,37 @@ def compute_flame_tilt_angle_deg(i_b, wind_speed, rho_air, t_amb):
     return min(math.atan(wind_speed / buoyancy) * 180.0 / PI, 90.0)
 
 
-def crown_initiates(i_b, cbh=2.0, foliar_moisture=0.50, m_c=0.30):
-    return i_b >= van_wagner_critical_intensity(cbh, foliar_moisture, m_c)
+def crown_initiates(i_b, cbh=2.0, foliar_moisture=0.50):
+    return i_b >= van_wagner_critical_intensity(cbh, foliar_moisture)
 
 
 def test_van_wagner_formula():
-    expected = 0.010 * 5.0 * (460.0 + 25.9 * 70.0)
-    actual = van_wagner_critical_intensity(5.0, 1.0, 0.30)
+    expected = (0.010 * 5.0 * (460.0 + 25.9 * 100.0)) ** 1.5   # 1883 kW/m
+    actual = van_wagner_critical_intensity(5.0, 1.0)
     assert abs(actual - expected) < 1.0e-10, f"expected {expected}, got {actual}"
     print("✓ test_van_wagner_formula PASSED")
 
 
 def test_van_wagner_increases_with_height():
-    low = van_wagner_critical_intensity(2.0, 1.0, 0.30)
-    high = van_wagner_critical_intensity(8.0, 1.0, 0.30)
+    low = van_wagner_critical_intensity(2.0, 1.0)
+    high = van_wagner_critical_intensity(8.0, 1.0)
     assert high > low, f"higher CBH should increase I_B_crit: {high} <= {low}"
     print("✓ test_van_wagner_increases_with_height PASSED")
 
 
-def test_van_wagner_impossible_below_Mc():
-    actual = van_wagner_critical_intensity(5.0, 0.25, 0.30)
-    assert actual >= LARGE_INTENSITY, f"expected impossible threshold, got {actual}"
-    print("✓ test_van_wagner_impossible_below_Mc PASSED")
+def test_van_wagner_increases_with_moisture():
+    # drier foliage crowns at a lower surface intensity (no "critical moisture" gate)
+    dry = van_wagner_critical_intensity(5.0, 0.80)
+    wet = van_wagner_critical_intensity(5.0, 1.20)
+    assert dry < wet, f"expected I_0 to rise with foliar moisture, got {dry} >= {wet}"
+    print("✓ test_van_wagner_increases_with_moisture PASSED")
 
 
-def test_van_wagner_at_Mc_boundary():
-    actual = van_wagner_critical_intensity(5.0, 0.30, 0.30)
-    assert actual >= LARGE_INTENSITY, f"expected boundary to remain impossible, got {actual}"
-    print("✓ test_van_wagner_at_Mc_boundary PASSED")
+def test_van_wagner_reference_value():
+    # Van Wagner (1977): CBH 6 m, m 100 % gives (0.010*6*3050)^1.5 = 2476 kW/m
+    actual = van_wagner_critical_intensity(6.0, 1.0)
+    assert abs(actual - 2476.0) < 2.0, f"expected 2476 kW/m, got {actual:.1f}"
+    print("✓ test_van_wagner_reference_value PASSED")
 
 
 def test_cruz_formula():
@@ -134,8 +136,9 @@ def test_cruz_increases_with_CBD():
 
 
 def test_crown_initiation_logic():
-    assert crown_initiates(50.0), "I_B=50 should trigger crown initiation"
-    assert not crown_initiates(5.0), "I_B=5 should remain surface fire"
+    # CBH 2 m, foliar moisture 50 %: I_0 = (0.010*2*(460+1295))^1.5 = 208 kW/m
+    assert crown_initiates(300.0), "I_B=300 kW/m should trigger crown initiation"
+    assert not crown_initiates(150.0), "I_B=150 kW/m should remain a surface fire"
     print("✓ test_crown_initiation_logic PASSED")
 
 
@@ -207,8 +210,8 @@ def main():
     tests = [
         test_van_wagner_formula,
         test_van_wagner_increases_with_height,
-        test_van_wagner_impossible_below_Mc,
-        test_van_wagner_at_Mc_boundary,
+        test_van_wagner_increases_with_moisture,
+        test_van_wagner_reference_value,
         test_cruz_formula,
         test_cruz_increases_with_wind,
         test_cruz_decreases_with_moisture,

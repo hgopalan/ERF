@@ -60,18 +60,15 @@ def compute_rothermel_fm1(moisture_1hr=0.08, wind_ftmin=0.0):
     Q_ig = 250.0 + 1116.0 * M_f
     R0_ft_min = (I_R * xi) / (rho_b * eps_h * Q_ig)
 
-    # Wind factor coefficients (CORRECT: negative exponent on sigma)
-    C = 7.47 * math.exp(-0.8711 * sigma**(-0.55))
+    # Wind factor coefficients, Rothermel (1972) eqs. 48-50 (sigma in 1/ft)
+    C = 7.47 * math.exp(-0.133 * sigma**0.55)   # Rothermel (1972) eq. 48
     B = 0.02526 * sigma**0.54
     E = 0.715 * math.exp(-3.59e-4 * sigma)
     beta_ratio_E = beta_ratio**(-E)
 
-    # MEWS wind speed cap
-    phi_w_max = 0.9 * I_R
-    U_max_ft_min = 0.0
-    if C > 0 and B > 0 and beta_ratio_E > 0:
-        U_max_ft_min = (phi_w_max / (C * beta_ratio_E))**(1.0/B)
-        U_max_ft_min = max(U_max_ft_min, 0.0)
+    # Maximum effective wind speed, as the code caps it (erf.fire.use_wind_limit):
+    # 300 ft/min for fine fuels (sigma > 1000 1/ft), 500 ft/min otherwise
+    U_max_ft_min = 300.0 if sigma > 1000.0 else 500.0
 
     # Wind factor at capped wind speed
     U_capped = min(wind_ftmin, U_max_ft_min)
@@ -135,18 +132,15 @@ def compute_rothermel_fm4(moisture_1hr=0.08, wind_ftmin=0.0):
     Q_ig = 250.0 + 1116.0 * M_f
     R0_ft_min = (I_R * xi) / (rho_b * eps_h * Q_ig)
 
-    # Wind factor coefficients (CORRECT: negative exponent on sigma)
-    C = 7.47 * math.exp(-0.8711 * sigma**(-0.55))
+    # Wind factor coefficients, Rothermel (1972) eqs. 48-50 (sigma in 1/ft)
+    C = 7.47 * math.exp(-0.133 * sigma**0.55)   # Rothermel (1972) eq. 48
     B = 0.02526 * sigma**0.54
     E = 0.715 * math.exp(-3.59e-4 * sigma)
     beta_ratio_E = beta_ratio**(-E)
 
-    # MEWS wind speed cap
-    phi_w_max = 0.9 * I_R
-    U_max_ft_min = 0.0
-    if C > 0 and B > 0 and beta_ratio_E > 0:
-        U_max_ft_min = (phi_w_max / (C * beta_ratio_E))**(1.0/B)
-        U_max_ft_min = max(U_max_ft_min, 0.0)
+    # Maximum effective wind speed, as the code caps it (erf.fire.use_wind_limit):
+    # 300 ft/min for fine fuels (sigma > 1000 1/ft), 500 ft/min otherwise
+    U_max_ft_min = 300.0 if sigma > 1000.0 else 500.0
 
     # Wind factor at capped wind speed
     U_capped = min(wind_ftmin, U_max_ft_min)
@@ -177,9 +171,9 @@ def test_fm1_no_wind():
 
 
 def test_fm1_wind_coefficient_C():
-    """C coefficient must be near 7.4 for FM1 (negative exponent)."""
+    """C = 7.47 exp(-0.133 sigma^0.55) is 5.4e-5 for FM1 (sigma 3500 1/ft)."""
     r = compute_rothermel_fm1()
-    assert 7.0 < r['C'] < 7.5, f"FM1 C={r['C']:.4f}, expected ~7.4 (not near zero)"
+    assert 5.0e-5 < r['C'] < 6.0e-5, f"FM1 C={r['C']:.3e}, expected 5.4e-5"
     print("✓ test_fm1_wind_coefficient_C PASSED")
 
 
@@ -196,10 +190,9 @@ def test_fm1_ros_with_wind():
 
 
 def test_mews_cap_physically_reasonable():
-    """MEWS cap should exist and be positive (not unrealistically low from buggy formula)."""
+    """The wind cap is 300 ft/min for fine fuels, 500 ft/min otherwise."""
     r = compute_rothermel_fm1()
-    # U_max should be positive and not near-zero (the bug produced ~4 ft/min, correct formula should give ~8-200 ft/min)
-    assert r['U_max_ftmin'] > 1.0, f"U_max={r['U_max_ftmin']:.1f} ft/min, too low (≤ 1.0)"
+    assert r['U_max_ftmin'] == 300.0, f"U_max={r['U_max_ftmin']:.1f} ft/min, expected 300 for sigma > 1000"
     print("✓ test_mews_cap_physically_reasonable PASSED")
 
 
@@ -214,7 +207,7 @@ def test_fm4_no_wind():
 def test_fm4_wind_coefficient_C():
     """C coefficient must be near 7.4 for FM4 (negative exponent)."""
     r = compute_rothermel_fm4()
-    assert 7.0 < r['C'] < 7.5, f"FM4 C={r['C']:.4f}, expected ~7.4"
+    assert 1.0e-4 < r['C'] < 1.0e-2, f"FM4 C={r['C']:.3e}, expected about 2e-3"
     print("✓ test_fm4_wind_coefficient_C PASSED")
 
 
@@ -231,13 +224,16 @@ def test_fm4_ros_with_wind():
 
 
 def test_wrong_c_formula_detection():
-    """Demonstrate that old wrong C formula (positive exponent) gives near-zero C for FM1."""
+    """Rothermel eq. 48 has sigma^0.55 in the exponent: C is small (5.4e-5 for
+    FM1) and the wind factor phi_w = C U^B (beta/beta_op)^-E is O(1-10) at the
+    300 ft/min cap. The inverted form 7.47 exp(-0.8711 sigma^-0.55), which
+    these references used until 2026-09, gives C = 7.4 and phi_w of order 1e5."""
     sigma = 3500.0
-    C_wrong = 7.47 * math.exp(-0.133 * sigma**0.55)   # old wrong formula
-    C_right = 7.47 * math.exp(-0.8711 * sigma**(-0.55))  # correct formula
-    assert C_wrong < 0.001, f"Wrong formula should give near-zero C, got {C_wrong}"
-    assert C_right > 7.0, f"Correct formula should give C≈7.4, got {C_right}"
-    print(f"✓ test_wrong_c_formula_detection PASSED (C_wrong={C_wrong:.2e}, C_right={C_right:.4f})")
+    C_right = 7.47 * math.exp(-0.133 * sigma**0.55)
+    C_wrong = 7.47 * math.exp(-0.8711 * sigma**(-0.55))
+    assert 5.0e-5 < C_right < 6.0e-5, f"eq. 48 should give 5.4e-5, got {C_right:.3e}"
+    assert C_wrong > 7.0, f"the inverted form gives 7.4, got {C_wrong}"
+    print(f"✓ test_wrong_c_formula_detection PASSED (C_right={C_right:.2e}, C_wrong={C_wrong:.4f})")
 
 
 def test_moisture_effect_on_ros():

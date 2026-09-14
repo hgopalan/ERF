@@ -17,10 +17,12 @@ The base value is Bagnold's
 
    u_{*t,\mathrm{base}} = A \sqrt{\frac{\rho_p\, g\, d}{\rho_a}}
 
-with :math:`A` = :cpp:`erf.dust.threshold_A_coeff` (0.0123), :math:`\rho_p`
+with :math:`A` = :cpp:`erf.dust.threshold_A_coeff` (0.1, Bagnold's fluid-threshold
+constant; the earlier default 0.0123 was Shao and Lu's coefficient of a different
+formula and gave a threshold 8x too low), :math:`\rho_p`
 = :cpp:`erf.dust.particle_density`, :math:`\rho_a` =
 :cpp:`erf.dust.rho_air` and :math:`d` the diameter of bin 0 in
-:cpp:`erf.dust.bin_diameter_um`; :cpp:`erf.dust.ustar_t_base` overrides it
+:cpp:`erf.dust.bin_diameters` (the same array settling and deposition use); :cpp:`erf.dust.ustar_t_base` overrides it
 when non-negative. The per-cell threshold (``compute_ustar_t_full`` in
 ``ERF_DustThreshold.H``) is then
 
@@ -72,7 +74,8 @@ and the vertical flux of every bin is the same sandblasting fraction of it,
 .. math::
 
    F_i = \alpha\, f_\mathrm{silt}\, Q_s, \qquad
-   \log_{10}\alpha = 0.134\, f_\mathrm{clay} - 6, \qquad
+   \log_{10}\alpha_\mathrm{[cm^{-1}]} = 0.134\, (100 f_\mathrm{clay}) - 6, \qquad
+   \alpha = 100\, \alpha_\mathrm{[cm^{-1}]}, \qquad
    f_\mathrm{clay} = 0.2\, f_\mathrm{silt}
 
 with :math:`f_\mathrm{silt}` the silt fraction of the cell. Each bin's flux
@@ -115,11 +118,13 @@ Haul roads
 
 A road is active from ``start_s`` to ``end_s`` (``-1`` means for the whole
 run); overlapping entries for one road give shift patterns. The emission
-factor is the unpaved-road relation of EPA AP-42 13.2.2,
+factor is the unpaved-road relation of EPA AP-42 13.2.2 (industrial sites,
+PM-10 constants k = 1.5 lb/VMT, a = 0.9, b = 0.45; the earlier 2.6, 0.8 and 0.4
+were 163x low),
 
 .. math::
 
-   E = 2.6 \left(\frac{s}{12}\right)^{0.8} \left(\frac{W}{3}\right)^{0.4}
+   E = 423 \left(\frac{s}{12}\right)^{0.9} \left(\frac{W}{3}\right)^{0.45}
    \quad [\mathrm{g/VKT}]
 
 with :math:`s` the silt content in percent and :math:`W` the vehicle mass in

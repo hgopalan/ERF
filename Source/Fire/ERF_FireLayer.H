@@ -82,7 +82,7 @@ class ERF;
  * | fire_fuel_load | 1     | Fuel load [kg/m²]                            |
  * | fire_fuel_mc   | 5     | M_1hr, M_10hr, M_100hr, M_lh, M_lw [fraction] |
  * | fire_mext      | 1     | Moisture of extinction [fraction] (Phase 4)  |
- * | fire_heat_flux | 1     | Heat flux [W/m²] (Phase 6, stub)             |
+ * | fire_heat_flux | 1     | Heat flux [W/m²]                             |
  * | fire_spread_vec| 2     | Scratch for FARSITE spread direction (Phase 3)|
  * | fire_crown_active  | 1 | Crown fire status: 1=active crown, 0=surface fire (Phase 9) |
  * | fire_crown_load    | 1 | Remaining crown fuel load [kg/m²] (Phase 9)                 |
@@ -179,7 +179,7 @@ public:
 
     /**
      * @brief Get heat flux for atmospheric coupling.
-     * @return Pointer to fire_heat_flux MultiFab (nullptr until Phase 6).
+     * @return Pointer to fire_heat_flux MultiFab (always allocated).
      */
     const amrex::MultiFab* get_heat_flux() const
     {
@@ -508,6 +508,9 @@ public:
 
     /// Mutable access to the lagged sensible flux buffer, for checkpoint restart.
     amrex::MultiFab* get_Q_atm_prev_mut() { return m_Q_atm_prev.get(); }
+    amrex::MultiFab* get_heat_flux_mut()  { return fire_heat_flux.get(); }
+    amrex::Real get_f_dry_prev() const { return m_f_dry_prev; }
+    void set_f_dry_prev(amrex::Real f) { m_f_dry_prev = f; }
 
     /// Shell moistures of the stick model (3 classes x n_shells), null unless erf.fire.moisture_model = stick.
     const amrex::MultiFab* get_stick_mc() const { return fire_stick_mc.get(); }
@@ -676,10 +679,10 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_curvature;    // Terrain curvature
     std::unique_ptr<amrex::MultiFab>         fire_ros;          // Rate of spread
     std::unique_ptr<amrex::MultiFab>         fire_fuel_load;    // Fuel load
-    std::unique_ptr<amrex::MultiFab>         fire_fuel_mc;      // Fuel moisture (3 comp)
+    std::unique_ptr<amrex::MultiFab>         fire_fuel_mc;      // Fuel moisture (5 comp: 1-h, 10-h, 100-h, live herb, live woody)
     std::unique_ptr<amrex::MultiFab>         fire_stick_mc;     // stick model shells: 3 classes x n_shells [fraction]
     std::unique_ptr<amrex::MultiFab>         fire_mext;         // Moisture of extinction (Phase 4)
-    std::unique_ptr<amrex::MultiFab>         fire_heat_flux;    // Heat flux (stub)
+    std::unique_ptr<amrex::MultiFab>         fire_heat_flux;    // Heat flux [W/m2] on the fire grid
     std::unique_ptr<amrex::MultiFab>         fire_spread_vec;   // FARSITE scratch
     std::unique_ptr<amrex::MultiFab>         fire_arrival_time; // Fire arrival time [s]
     std::unique_ptr<amrex::MultiFab>         fire_disp_accum;   // Persistent FARSITE accumulator (2 comp): displacement (legacy), or head-rate distance and front flag (front_cell)

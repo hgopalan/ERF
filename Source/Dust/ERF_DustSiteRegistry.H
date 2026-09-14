@@ -60,6 +60,7 @@ inline void populate_dust_site_id(
 {
     site_id.setVal(0.0);
     const int n_sites = (int)x_lo.size();
+    AMREX_ASSERT(y_lo.size() == x_lo.size() && x_hi.size() == x_lo.size() && y_hi.size() == x_lo.size());
     if (n_sites == 0) return;
 
     // GpuArray by value; the raw pointers CellSize()/ProbLo() return cannot be
@@ -111,10 +112,10 @@ inline void populate_dust_site_id(
  * @param site_id  2D MultiFab with site indices.
  * @param n_sites  Number of registered sites.
  */
-inline amrex::Vector<long> count_site_cells(
+inline amrex::Vector<amrex::Long> count_site_cells(
     const amrex::MultiFab& site_id, int n_sites)
 {
-    amrex::Vector<long> counts(n_sites + 1, 0L);
+    amrex::Vector<amrex::Long> counts(n_sites + 1, amrex::Long(0));
     // Counting into named bins, so a host loop -- over a staged view, because
     // site_id is device-only under CUDA.
     for (amrex::MFIter mfi(site_id); mfi.isValid(); ++mfi) {

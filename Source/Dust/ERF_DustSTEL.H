@@ -57,6 +57,7 @@ inline void update_stel_average(
     }
 
     // Update STEL running average using exponential moving average
+    AMREX_ASSERT(T_avg > 0.0 && dt <= T_avg);
     for (MFIter mfi(stel_avg_mf, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
         auto stel = stel_avg_mf.array(mfi);

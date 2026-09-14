@@ -101,15 +101,13 @@ the column: the dust density of the lowest atmosphere cell,
 ``dust_conc_sfc``, which drives the loading feedback of
 :ref:`sec:DustSources`, and the surface moisture flux from the microphysics
 (``Q1fx3`` at the bottom face), which is zero without a moisture scheme.
-When :cpp:`erf.dust.use_dynamic_moisture` is set and a moisture scheme is
-active, the flux gives a gravimetric water content
-:math:`w = q_\mathrm{flux} / (L_v \rho_a)` and the Fecan (1999) factor
-
-.. math::
-
-   f_\mathrm{moist} = \sqrt{1 + 1.21 \max(w - 0.003, 0)}
-
-multiplies the threshold; otherwise the static moisture raster is all that
+The flux is carried to the dust plotfile as ``dust_surf_moist`` and is not
+used by the threshold: the Fecan (1999) factor needs the gravimetric soil
+moisture, which a surface flux cannot give (the former dynamic-moisture
+option divided the flux by :math:`L_v \rho_a` and
+compared the result, of order :math:`10^{-11}`, with a 0.3 % moisture, so it
+never did anything and was removed in September 2026). The static moisture
+raster is all that
 acts.
 
 Turbulent diffusion in the MRF scheme
