@@ -30,13 +30,13 @@ plotfiles and requires, for `front_cell`, the head within 3 % of `a R`, the
 back and flanks within 10 % of `c R` and `b R`, and the burned area at least
 0.95 of its convex hull; `legacy` is reported.
 
-Measured on 2026-09-10 (R = 0.971 m/s, L/W = 4.21; 46 s for both runs on 2 ranks):
+Measured on 2026-09-14 with Anderson's ratio carrying its second term (R = 0.971 m/s, L/W = 5.00; 46 s for both runs on 2 ranks):
 
 | update | head [m/s] | back [m/s] | flanks [m/s] | area at 600 s [ha] | area / hull |
 |---|---|---|---|---|---|
-| Richards | 0.971 | 0.194 | 0.138 | | 1 |
-| `front_cell` | 0.975 (+0.4 %) | 0.191 (-1.7 %) | 0.141 (+2.1 %) | 19.2 | 0.964 or more |
-| `legacy` | 1.828 (1.88 a R) | 0.382 (1.97 c R) | 0.379 (2.74 b R) | 50.1 | 0.662 at 60 s |
+| Richards | 0.971 | 0.194 | 0.116 | | 1 |
+| `front_cell` | 0.975 (+0.4 %) | 0.191 (-1.7 %) | 0.112 (-3.7 %) | 19.2 | 0.954 or more |
+| `legacy` | 1.828 (1.88 a R) | 0.382 (1.97 c R) | 0.354 (3.04 b R) | 50.1 | 0.655 at 60 s |
 
 `Tests/Unit/Fire/ERF_GTestFarsiteSpreadAccumulation.cpp` checks the same
 rates cell by cell, and that the arrival times do not depend on the box

@@ -94,6 +94,18 @@ def check(name, ok, detail):
     print(f"  {name:24s} {'PASS' if ok else 'FAIL'}  {detail}")
 
 
+def use_wind_limit():
+    """erf.fire.use_wind_limit of the decks (inputs_base); the code's default is true."""
+    try:
+        for line in open("inputs_base"):
+            t = line.split("#")[0].strip()
+            if t.startswith("erf.fire.use_wind_limit"):
+                return t.split("=")[1].strip().lower() in ("true", "1")
+    except OSError:
+        pass
+    return True
+
+
 def rothermel_fm1(M_f):
     """Rothermel (1972) for fuel model 1: R0 [m/s], the slope-factor constant 5.275 beta^-0.3, and the
     effective wind speed [m/s] whose wind factor equals a given factor, under the fine-fuel wind cap."""
@@ -108,7 +120,10 @@ def rothermel_fm1(M_f):
     eps = math.exp(-138 / s); Qig = 250 + 1116 * M_f
     R0 = IR * xi / (rho_b * eps * Qig) * FT_MIN_TO_M_S
     C = 7.47 * math.exp(-0.133 * s ** 0.55); B = 0.02526 * s ** 0.54; E = 0.715 * math.exp(-3.59e-4 * s)
-    cap = 300.0 if s > 1000.0 else 500.0
+    # The maximum effective wind speed applies only with erf.fire.use_wind_limit
+    # (inputs_base sets it false, so the equivalent wind of a steep slope is not
+    # capped; the flag was inert until 2026-09-10 and the cap always applied).
+    cap = (300.0 if s > 1000.0 else 500.0) if use_wind_limit() else float("inf")
 
     def effective_wind(phi):
         return min((phi / (C * br ** -E)) ** (1.0 / B), cap) / M_S_TO_FT_MIN if phi > 0 else 0.0

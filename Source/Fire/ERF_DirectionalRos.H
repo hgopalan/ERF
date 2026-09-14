@@ -249,9 +249,9 @@ DirectionalEllipse directional_ellipse_cell(const DirectionalRosState& st,
     const amrex::Real S = std::sqrt(dzdx*dzdx + dzdy*dzdy);
 
     const amrex::Real R0   = directional_ros_cell(st, zero, zero);
-    const amrex::Real dR_w = amrex::max(directional_ros_cell(st, U, zero) - R0, zero);
-    const amrex::Real dR_s = amrex::max(directional_ros_cell(st, zero, S) - R0, zero);
-    const amrex::Real dR   = amrex::max(directional_ros_cell(st, U, S) - R0, zero);
+    const amrex::Real dR_w = amrex::max(directional_ros_cell(st, U, amrex::Real(0.0)) - R0, amrex::Real(0.0));
+    const amrex::Real dR_s = amrex::max(directional_ros_cell(st, amrex::Real(0.0), S) - R0, amrex::Real(0.0));
+    const amrex::Real dR   = amrex::max(directional_ros_cell(st, U, S) - R0, amrex::Real(0.0));
 
     // The wind and slope increments as vectors along the wind and upslope
     amrex::Real px = 0.0, py = 0.0;
