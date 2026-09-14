@@ -54,7 +54,7 @@ def check(name, ok, detail):
 def richards(u_mid):
     """Head, flank and back coefficients of the FARSITE path (ERF_FarsiteEllipse.H)."""
     mph = u_mid * 2.237
-    lw = 1.0 if mph < 1.0 else min(max(0.936 * math.exp(0.2566 * mph) - 0.397 * math.sqrt(mph), 1.0), 8.0)
+    lw = 1.0 if mph < 1.0 else min(max(0.936 * math.exp(0.2566 * mph) + 0.461 * math.exp(-0.1548 * mph) - 0.397, 1.0), 8.0)
     return 1.0, 1.2 / (2.0 * lw), 0.2, lw
 
 

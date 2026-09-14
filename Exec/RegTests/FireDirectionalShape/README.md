@@ -67,13 +67,13 @@ projection's exact solution (the Wulff shape) 0.14155 m/s, 57 % of it. Rates
 | `projection` | 0.18487 (-25.9 %; 40 % of the way from the Wulff tip to Rothermel) | 0.02396 | 0.02400 |
 | `projection_key` | arrival times identical to `projection` bit for bit | | |
 | `ellipse` | 0.24775 (-0.67 %) | 0.02388 | 0.02403 |
-| `ellipse_anderson` (800 s) | 0.24866 (-0.31 %) | 0.02399 | 0.09185 (exact 0.09196; LW 1.487) |
+| `ellipse_anderson` (800 s) | 0.24832 (-0.44 %) | 0.02396 | 0.06534 (exact 0.06538; LW 2.091) |
 
 Back and flanks match the exact rates (R0 = 0.02404 m/s, and b / LW for
 `ellipse_anderson`) to 0.7 %. All 28 checks of the five decks in the script
 pass; of the 44 checks over the eight decks and scheme variants below (before
 `ellipse_anderson` was added), the two on the upwind ellipse's head fail.
-With Anderson's flanks the fire is 3.8 times wider than with the model's,
+With Anderson's flanks the fire is 2.7 times wider than with the model's,
 while its head and back are unchanged.
 
 The head against the level-set scheme, with extra arguments on the same decks:
