@@ -1,14 +1,67 @@
+warning: unable to rmdir 'Submodules/Noah-MP': Directory not empty
+warning: unable to rmdir 'Submodules/RRTMGP': Directory not empty
+warning: unable to rmdir 'Submodules/WW3': Directory not empty
+warning: unable to rmdir 'Submodules/ekat': Directory not empty
+Auto-merging .gitignore
+Auto-merging CMake/BuildERFExe.cmake
+Auto-merging CMakeLists.txt
 Auto-merging Docs/sphinx_doc/Inputs.rst
+Auto-merging Docs/sphinx_doc/RegressionTests.rst
+CONFLICT (content): Merge conflict in Docs/sphinx_doc/RegressionTests.rst
+Auto-merging Docs/sphinx_doc/index.rst
+Auto-merging Docs/sphinx_doc/plotfiles/Plotfile3DReference.rst
+Auto-merging Exec/CanonicalTests/Canonical_RANS/Neutral_ABL_Flat/README.md
+CONFLICT (content): Merge conflict in Exec/CanonicalTests/Canonical_RANS/Neutral_ABL_Flat/README.md
+Auto-merging Exec/CanonicalTests/Canonical_RANS/README.md
+CONFLICT (content): Merge conflict in Exec/CanonicalTests/Canonical_RANS/README.md
+Auto-merging Exec/ERF_Prob.cpp
+Auto-merging Source/BoundaryConditions/ERF_PhysBCFunct.H
+Auto-merging Source/BoundaryConditions/ERF_PhysBCFunct.cpp
+Auto-merging Source/DataStructs/ERF_DataStruct.H
 Auto-merging Source/DataStructs/ERF_TurbStruct.H
 CONFLICT (content): Merge conflict in Source/DataStructs/ERF_TurbStruct.H
+Auto-merging Source/Diffusion/ERF_ComputeTurbulentViscosity.cpp
+Auto-merging Source/Diffusion/ERF_EddyViscosity.H
 Auto-merging Source/ERF.H
+CONFLICT (content): Merge conflict in Source/ERF.H
+Auto-merging Source/ERF.cpp
+Auto-merging Source/ERF_Constructors.cpp
+Auto-merging Source/ERF_MakeNewArrays.cpp
+Auto-merging Source/ERF_MakeNewLevel.cpp
+CONFLICT (content): Merge conflict in Source/ERF_MakeNewLevel.cpp
+Auto-merging Source/IO/ERF_Checkpoint.cpp
+CONFLICT (content): Merge conflict in Source/IO/ERF_Checkpoint.cpp
+Auto-merging Source/IO/ERF_PlotfileSelection.H
+Auto-merging Source/IO/ERF_WriteScalarProfiles.cpp
+Auto-merging Source/Initialization/ERF_InitBCs.cpp
+Auto-merging Source/LinearSolvers/ERF_PoissonWallDist.cpp
 Auto-merging Source/PBL/ERF_ComputeDiffusivityMRF.cpp
 CONFLICT (content): Merge conflict in Source/PBL/ERF_ComputeDiffusivityMRF.cpp
+Auto-merging Source/PBL/ERF_ComputeDiffusivityYSU.cpp
 Auto-merging Source/PBL/ERF_ComputeDiffusivityYSUNew.cpp
+CONFLICT (content): Merge conflict in Source/PBL/ERF_ComputeDiffusivityYSUNew.cpp
 Auto-merging Source/PBL/ERF_PBLModels.H
-Auto-merging Source/PBL/ERF_PBLScaleAwareBlending.H
-CONFLICT (content): Merge conflict in Source/PBL/ERF_PBLScaleAwareBlending.H
+CONFLICT (content): Merge conflict in Source/PBL/ERF_PBLModels.H
+Auto-merging Source/Particles/ERF_SuperDropletPCDefinitions.H
+Auto-merging Source/Particles/ERF_SuperDropletPCMassChange.H
 Auto-merging Source/TimeIntegration/ERF_Advance.cpp
+CONFLICT (content): Merge conflict in Source/TimeIntegration/ERF_Advance.cpp
+Auto-merging Source/TimeIntegration/ERF_ImplicitPre.H
+CONFLICT (content): Merge conflict in Source/TimeIntegration/ERF_ImplicitPre.H
 Auto-merging Source/TimeIntegration/ERF_SlowRhsPost.cpp
+Auto-merging Source/Utils/ERF_Rebalance.cpp
+CONFLICT (content): Merge conflict in Source/Utils/ERF_Rebalance.cpp
+Auto-merging Source/Utils/ERF_Utils.H
+Auto-merging Source/Utils/Make.package
 Auto-merging Tests/CTestList.cmake
+CONFLICT (content): Merge conflict in Tests/CTestList.cmake
+Auto-merging Tests/RunTilingParity.cmake
+CONFLICT (add/add): Merge conflict in Tests/RunTilingParity.cmake
+Auto-merging Tests/Unit/CMakeLists.txt
+Auto-merging Tests/Unit/IO/ERF_GTestPlotfileSelection.cpp
+Auto-merging Tests/test_files/ABL_MRF_Tiling/ABL_MRF_Tiling.i
+CONFLICT (add/add): Merge conflict in Tests/test_files/ABL_MRF_Tiling/ABL_MRF_Tiling.i
+Auto-merging Tests/test_files/ABL_MRF_Tiling/mrf_sounding_unstable
+CONFLICT (add/add): Merge conflict in Tests/test_files/ABL_MRF_Tiling/mrf_sounding_unstable
+Auto-merging Tests/test_files/Terrain2Lev_BTF_ZSplit/Terrain2Lev_BTF_ZSplit.i
 Automatic merge failed; fix conflicts and then commit the result.

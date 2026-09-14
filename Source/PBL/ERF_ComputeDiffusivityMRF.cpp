@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "ERF_SurfaceLayer.H"
 #include "ERF_DirectionSelector.H"
 #include "ERF_Diffusion.H"
@@ -50,15 +52,6 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
                        const MultiFab* Q_fire_atm)
 {
     amrex::ignore_unused(qheating_rates);
-    // Shadow the namespace-scope constants from ERF_Constants.H with local copies.
-    // Passing those constants straight to amrex::min/max binds a const reference,
-    // which odr-uses them; under CUDA relocatable device code nvcc then wants a
-    // device-side symbol that is never emitted, and the extended __device__ lambdas
-    // below fail with 'identifier "zero" is undefined in device code'. Function-local
-    // constants are captured by value into the closure instead.
-    constexpr amrex::Real zero = amrex::Real(0.0);
-    constexpr amrex::Real one  = amrex::Real(1.0);
-
     /*
     ============================================================================
     Medium-Range Forecast (MRF) Boundary Layer Parameterization Scheme
@@ -101,22 +94,18 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
        - Uses YSU stability functions (Hong et al. 2006)
        - Ri-dependent diffusivity above PBL
 
-    FIRE COUPLING (ERF extension):
+    FIRE COUPLING (ERF-Fire extension):
     --------------------------------
     Fire heat flux augments the convective velocity scale w* used in the
     K-profile amplitude: K = rho * w*_eff * kappa * z * (1 - z/h)^2.
-    The PBLH itself (corrector) is NOT modified by fire — only w* is boosted.
-    This correctly represents fire as increasing turbulent mixing intensity
-    within the existing PBL depth, consistent with Deardorff (1970).
+    The PBLH itself (corrector) is NOT modified by fire, only w* is boosted.
 
-    w*_fire = (g/theta * kbfs_total * h_corr)^(1/3)
-    w*_eff  = max(w*_fire, w*)
+    w*_fire = (g/theta * kbfs_total * h_corr)^(1/3),  w*_eff = max(w*_fire, w*)
 
     where kbfs_total = kbfs_MOST + Q_fire/(rho*Cp), w* is the Pass 4 velocity
-    scale (u_star/phi_m blended with the Deardorff convective scale) and h_corr the
-    final corrected PBLH. The boost is applied only in columns where Q_fire
-    exceeds mrf_fire_q_threshold (erf.pbl_mrf_fire_thermal_excess = true);
-    elsewhere w*_eff = w*. HGAMT/HGAMQ keep the unboosted w*.
+    scale and h_corr the final corrected PBLH. The boost is applied only in
+    columns where Q_fire exceeds mrf_fire_q_threshold
+    (erf.pbl_mrf_fire_thermal_excess = true); HGAMT/HGAMQ keep the unboosted w*.
 
     ENHANCEMENTS IN ERF IMPLEMENTATION:
     -----------------------------------
@@ -228,6 +217,29 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
 MultiFab pblh_mf(eddyViscosity.boxArray(), eddyViscosity.DistributionMap(), 1, 0);
 pblh_mf.setVal(0.0);
 
+// PBLH smoothing reads one column per pass outside the cells it writes, so the
+// planar work arrays have to carry that many columns of halo and the PBLH passes
+// have to fill them: otherwise the stencil reads off the end of the tile and the
+// answer depends on the decomposition. With smoothing off this is the single
+// column of halo the diffusivity kernels already use, so nothing changes.
+const int ng_pblh = (turbChoice.enable_pblh_smoothing)
+                  ? std::max(1, turbChoice.pblh_smoothing_passes) : 1;
+if (ng_pblh > 1) {
+    const int ng_avail = std::min({cons_in.nGrowVect()[0], cons_in.nGrowVect()[1],
+                                   xvel.nGrowVect()[0],    xvel.nGrowVect()[1],
+                                   yvel.nGrowVect()[0],    yvel.nGrowVect()[1],
+                                   SurfLayer->get_u_star(level)->nGrowVect()[0],
+                                   SurfLayer->get_u_star(level)->nGrowVect()[1],
+                                   SurfLayer->get_olen(level)->nGrowVect()[0],
+                                   SurfLayer->get_olen(level)->nGrowVect()[1]});
+    if (ng_pblh > ng_avail) {
+        amrex::Abort("erf.pblh_smoothing_passes = " + std::to_string(turbChoice.pblh_smoothing_passes)
+                   + " needs " + std::to_string(ng_pblh) + " halo columns, but the state and "
+                     "surface-layer arrays carry only " + std::to_string(ng_avail)
+                   + "; reduce erf.pblh_smoothing_passes to at most " + std::to_string(ng_avail));
+    }
+}
+
 #ifdef _OPENMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
 #endif
@@ -243,21 +255,32 @@ pblh_mf.setVal(0.0);
         const GeometryData gdata = geom.data();
         const Box xybx = PerpendicularBox<ZDir>(gbx, IntVect{0, 0, 0});
 
+        // The PBLH passes run on the region the smoothing stencil will consume
+        // (see ng_pblh above). growntilebox() is no use here: it does not grow at
+        // an interior tile edge, so a tile in the middle of a box gets no halo at
+        // all -- which is exactly how the stencil came to read off the end of the
+        // array. Grow the tile box explicitly instead, which costs a little
+        // duplicated work in the overlaps. With smoothing off this is xybx and
+        // nothing is duplicated.
+        const Box gbx_work  = (turbChoice.enable_pblh_smoothing)
+                            ? amrex::grow(mfi.tilebox(), IntVect(ng_pblh,ng_pblh,0)) : gbx;
+        const Box xybx_work = PerpendicularBox<ZDir>(gbx_work, IntVect{0, 0, 0});
+        const Box xybx_tile = PerpendicularBox<ZDir>(mfi.tilebox(), IntVect{0, 0, 0});
+
         // Pass 1 (predictor): PBLH with base surface temperature, no VPERT
         // Pass 2 (wstar/VPERT): compute wstar, HGAMT, HGAMQ, VPERT from predictor height
         // Pass 3 (corrector): PBLH with VPERT-enhanced surface temperature (WRF-consistent)
-        // Pass 4 (wstar recompute): recompute wstar using corrected PBLH; augment with fire
         //   WRF reference (module_bl_mrf.F lines 813-964):
         //   https://github.com/wrf-model/WRF/blob/master/phys/module_bl_mrf.F#L813-L964
-        FArrayBox pbl_height_predictor(xybx, 1, The_Async_Arena());  // Pass 1: base t_layer_v
-        FArrayBox pbl_height_corrector(xybx, 1, The_Async_Arena());  // Pass 3: VPERT-enhanced
-        IArrayBox pbl_index(xybx, 1, The_Async_Arena());
-        IArrayBox pbl_index_zero_ri(xybx, 1, The_Async_Arena());  // Index for zero-Ri diagnostic pass
-        FArrayBox hgamt_fab(xybx, 1, The_Async_Arena());  // Store HGAMT/h (normalized countergradient)
-        FArrayBox hgamq_fab(xybx, 1, The_Async_Arena());  // Store HGAMQ/h (normalized countergradient)
-        FArrayBox wstar_fab(xybx, 1, The_Async_Arena());  // Convective velocity scale (fire-augmented in Pass 4)
-        FArrayBox vpert_fab(xybx, 1, The_Async_Arena());  // Virtual temperature perturbation VPERT
-        FArrayBox kbfs_fire_fab(xybx, 1, The_Async_Arena());  // Fire kinematic buoyancy flux [K m/s] per column
+        FArrayBox pbl_height_predictor(xybx_work, 1, The_Async_Arena());  // Pass 1: base t_layer_v
+        FArrayBox pbl_height_corrector(xybx_work, 1, The_Async_Arena());  // Pass 3: VPERT-enhanced
+        IArrayBox pbl_index(xybx_work, 1, The_Async_Arena());
+        IArrayBox pbl_index_zero_ri(xybx_work, 1, The_Async_Arena());  // Index for zero-Ri diagnostic pass
+        FArrayBox hgamt_fab(xybx_work, 1, The_Async_Arena());  // Store HGAMT/h (normalized countergradient)
+        FArrayBox hgamq_fab(xybx_work, 1, The_Async_Arena());  // Store HGAMQ/h (normalized countergradient)
+        FArrayBox wstar_fab(xybx_work, 1, The_Async_Arena());  // Convective velocity scale
+        FArrayBox vpert_fab(xybx_work, 1, The_Async_Arena());  // Virtual temperature perturbation VPERT
+        FArrayBox kbfs_fire_fab(xybx_work, 1, The_Async_Arena());  // Fire kinematic buoyancy flux [K m/s] per column
         const auto& pblh_pred_arr   = pbl_height_predictor.array();  // predictor (base t_layer_v)
         const auto& pblh_corr_arr   = pbl_height_corrector.array();  // corrector (VPERT-enhanced)
         const auto& pbli_arr        = pbl_index.array();
@@ -287,7 +310,7 @@ pblh_mf.setVal(0.0);
                                                                       : Array4<Real const>{};
         const PBLDerivativeDzInv_T pbl_derivative_dz_inv{z_phys_cc->const_array(mfi)};
 
-        // Fire heat flux array and flags
+        // Fire heat flux array and flags (ERF-Fire)
         const Array4<Real const> Q_fire_arr =
            (Q_fire_atm && turbChoice.mrf_fire_thermal_excess)
            ? Q_fire_atm->const_array(mfi)
@@ -302,7 +325,7 @@ pblh_mf.setVal(0.0);
         // WRF reference (module_bl_mrf.F lines 813-842):
         // https://github.com/wrf-model/WRF/blob/master/phys/module_bl_mrf.F#L813-L842
         //
-        ParallelFor(xybx, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept
+        ParallelFor(xybx_work, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept
         {
             const Real t_layer = t10av_arr(i, j, 0);
             const Real moisture_fraction = use_moisture ? q10av_arr(i, j, 0) : Real(0);
@@ -404,11 +427,10 @@ pblh_mf.setVal(0.0);
         // PASS 2 (WSTAR / VPERT): Compute wstar, HGAMT, HGAMQ, VPERT using the
         // predictor PBL height (pblh_pred_arr). VPERT will be fed into the corrector
         // Rib search in Pass 3 to raise the effective surface temperature.
-        // Also compute and store kbfs_fire per column for use in Pass 4.
         // WRF reference (module_bl_mrf.F lines 857-880):
         // https://github.com/wrf-model/WRF/blob/master/phys/module_bl_mrf.F#L857-L880
         //
-        ParallelFor(xybx, [=,zero_d=zero] AMREX_GPU_DEVICE(int i, int j, int) noexcept
+        ParallelFor(xybx_work, [=,zero_d=zero] AMREX_GPU_DEVICE(int i, int j, int) noexcept
         {
             const Real t_layer  = t10av_arr(i, j, 0);
             Real obuk_val = l_obuk_arr(i, j, 0);
@@ -515,15 +537,12 @@ pblh_mf.setVal(0.0);
         //
         // PASS 3 (CORRECTOR): Recompute PBL height with VPERT-enhanced surface temperature.
         // theta_s = theta_va + VPERT  (Hong & Pan 1996, Eq. 4)
-        // Fire flux does not enter here; it only boosts w* in Pass 4. A fire thermal
-        // excess in t_layer_v would make Rib < 0 through a neutral or shear-driven
-        // ABL, and the corrector would return pblh_min instead of a deeper PBL.
         // This is the WRF-consistent corrector pass. pblh_corr_arr is used for the
         // K-profile shape function K = rho*wstar*kappa*z*(1-z/h)^2.
         // WRF reference (module_bl_mrf.F lines 932-964):
         // https://github.com/wrf-model/WRF/blob/master/phys/module_bl_mrf.F#L932-L964
         //
-        ParallelFor(xybx, [=,one_d=one]
+        ParallelFor(xybx_work, [=,one_d=one]
                     AMREX_GPU_DEVICE(int i, int j, int) noexcept
         {
             const Real t_layer  = t10av_arr(i, j, 0);
@@ -609,13 +628,25 @@ pblh_mf.setVal(0.0);
             }
         });
 
+
+        // Apply PBLH spatial smoothing if enabled (Seibert et al. 2000 methodology)
+        // Seibert et al. (2000): Review and intercomparison of operational methods
+        // for the determination of the mixing height. Atmospheric Environment, 34, 1001-1027.
+        // Spatial smoothing removes unphysical grid-to-grid noise from discrete Rib-crossing detection
+        if (turbChoice.enable_pblh_smoothing) {
+            // Smooth the tile's own columns, reading the halo the passes above
+            // filled. The result is the same however the domain is split.
+            ApplyPBLHSmoothing(pbl_height_corrector, xybx_tile,
+                             turbChoice.pblh_smoothing_weight,
+                             turbChoice.pblh_smoothing_passes,
+                             geom.Domain(), geom.periodicity());
+        }
+
         // Copy corrected PBL height into pblh_mf for SurfaceLayer storage.
         // pbl_height_corrector only covers this tile (grown by one), so loop over
         // the tile, not the valid box: with tiling in x/y the valid box reaches
         // past it. Under TileNoZ the tile spans the full column, and pblh_mf has
-        // no ghost cells, so the tiles together still fill every cell. The
-        // optional smoothing reaches across tiles and boxes, so it is applied to
-        // pblh_mf after the tile loop.
+        // no ghost cells, so the tiles together still fill every cell.
         {
             auto pblh_out = pblh_mf.array(mfi);
             const Box& tbx = mfi.tilebox();
@@ -627,7 +658,6 @@ pblh_mf.setVal(0.0);
         // PASS 4 (WSTAR RECOMPUTE): Recompute wstar, HGAMT, HGAMQ using the corrected
         // PBL height (pblh_corr_arr) to ensure internal consistency between the K-profile
         // amplitude and the countergradient fluxes. HOL = sf*h/L uses pblh_corr_arr.
-        // Over fire columns w* is then boosted (see FIRE COUPLING above).
         // WRF reference (module_bl_mrf.F lines 857-880):
         // https://github.com/wrf-model/WRF/blob/master/phys/module_bl_mrf.F#L857-L880
         //
@@ -796,7 +826,7 @@ pblh_mf.setVal(0.0);
             }
         });
 
-        // Fire diagnostics, after the final corrector (and its smoothing) and the w* boost.
+        // Fire diagnostics, after the final corrector and the w* boost.
         if (use_fire_correction) {
             Real pblh_max_corr = pbl_height_corrector.max<RunOn::Device>(0);
             Real pblh_max_pred = pbl_height_predictor.max<RunOn::Device>(0);
@@ -805,9 +835,7 @@ pblh_mf.setVal(0.0);
             amrex::Print() << "[MRF FIRE] fire wstar-boost active"
                            << "  pblh_predictor_max=" << pblh_max_pred << " m"
                            << "  pblh_corrector_max=" << pblh_max_corr << " m"
-                           << "  kbfs_fire_max=" << kbfs_fire_max << " K m/s"
-                           << "  (fire boosts wstar/K within PBL, not PBLH)\n";
-            amrex::Print() << "[MRF FIRE] wstar_max=" << wstar_max << " m/s"
+                           << "  wstar_max=" << wstar_max << " m/s"
                            << "  kbfs_fire_max=" << kbfs_fire_max << " K m/s\n";
         }
 
@@ -933,13 +961,10 @@ pblh_mf.setVal(0.0);
                 Real Prt_base = phit_eff / phiM_eff;
                 const Real Prt = amrex::min(amrex::max(Prt_base + const_b * KAPPA * sf, prmin), prmax);
 
-                // wstar_arr now holds fire-augmented wstar_eff (set in Pass 4)
                 const Real wstar = wstar_arr(i, j, 0);
-
                 const bool use_qnse_stable_profile = (obuk_val > Real(0)) && (enable_qnse_d > Real(0.5));
                 if (SFCFLG || use_qnse_stable_profile) {
-                    // K-profile: K = rho * wstar_eff * kappa * zrel * (1 - zrel/pblh_rel)^2
-                    // Fire enters here via the boosted wstar_eff — larger K over fire columns.
+                    // K-profile: K = rho * wstar * kappa * zrel * (1 - zrel/pblh_rel)^2
                     // WRF Reference: module_bl_mrf.F L976-978
                     const Real z_sfc = (use_terrain_fitted_coords)
                                      ? Compute_Zrel_AtCellCenter(i, j, klo, z_nd_arr)
@@ -951,7 +976,7 @@ pblh_mf.setVal(0.0);
 
                     K_turb(i, j, k, EddyDiff::Mom_v)   = rho * wstar * KAPPA * zrel * zfac * zfac;
                     K_turb(i, j, k, EddyDiff::Theta_v) = K_turb(i, j, k, EddyDiff::Mom_v) / Prt;
-                    // Phase 14: Set scalar diffusivity (used for dust when transport_scalar=true)
+                    // Scalar diffusivity (dust when transport_scalar=true)
                     K_turb(i, j, k, EddyDiff::Scalar_v) = K_turb(i, j, k, EddyDiff::Theta_v);
 
                     if (turbChoice.mrf_moistvars) {
@@ -1013,9 +1038,8 @@ pblh_mf.setVal(0.0);
 
                     K_turb(i, j, k, EddyDiff::Mom_v)   = rl2wsp * fm * Pr_mom;
                     K_turb(i, j, k, EddyDiff::Theta_v) = rl2wsp * ft;
-                    // Phase 14: Set scalar diffusivity (used for dust when transport_scalar=true)
+                K_turb(i, j, k, EddyDiff::Scalar_v) = K_turb(i, j, k, EddyDiff::Theta_v);
                     K_turb(i, j, k, EddyDiff::Scalar_v) = K_turb(i, j, k, EddyDiff::Theta_v);
-
                     if (use_moisture && turbChoice.mrf_moistvars) {
                         K_turb(i, j, k, EddyDiff::Q_v) = rl2wsp * ft;
                     } else {
@@ -1074,9 +1098,7 @@ pblh_mf.setVal(0.0);
 
                 K_turb(i, j, k, EddyDiff::Mom_v)   = rl2wsp * fm * Pr_mom;
                 K_turb(i, j, k, EddyDiff::Theta_v) = rl2wsp * ft;
-                // Phase 14: Set scalar diffusivity (used for dust when transport_scalar=true)
                 K_turb(i, j, k, EddyDiff::Scalar_v) = K_turb(i, j, k, EddyDiff::Theta_v);
-
                 if (use_moisture && turbChoice.mrf_moistvars) {
                     K_turb(i, j, k, EddyDiff::Q_v) = rl2wsp * ft;
                 } else {
@@ -1130,16 +1152,9 @@ pblh_mf.setVal(0.0);
                 std::min(K_turb(i, j, k, EddyDiff::Theta_v), rhoKmax), rhoKmin);
             K_turb(i, j, k, EddyDiff::Q_v) = std::max(
                 std::min(K_turb(i, j, k, EddyDiff::Q_v), rhoKmax), rhoKmin);
-            // Phase 14: Bound scalar diffusivity (used for dust when transport_scalar=true)
             K_turb(i, j, k, EddyDiff::Scalar_v) = std::max(
                 std::min(K_turb(i, j, k, EddyDiff::Scalar_v), rhoKmax), rhoKmin);
-
-            K_turb(i, j, k, EddyDiff::Turb_lengthscale) = pblh_corr_arr(i, j, 0);
-
-            // Phase 14: Dust turbulent Schmidt number scaling.
-            // Sc_t controls scalar vertical diffusivity relative to heat.
-            // Default Sc_t = Pr_t (no scaling). Seinfeld & Pandis (2006), Ch. 16.
-            // Hong & Pan (1996): https://doi.org/10.1175/1520-0493(1996)124<2322:NBLVDI>2.0.CO;2
+            // Dust turbulent Schmidt number scaling (erf.dust_mrf_Sc_t); default Sc_t = Pr_t.
 #ifdef ERF_USE_DUST
             if (turbChoice.dust_mrf_Sc_t > 0.0 &&
                 std::abs(turbChoice.dust_mrf_Sc_t - turbChoice.Pr_t) > 1.0e-6) {
@@ -1147,6 +1162,7 @@ pblh_mf.setVal(0.0);
                 K_turb(i, j, k, EddyDiff::Scalar_v) *= scale;
             }
 #endif
+            K_turb(i, j, k, EddyDiff::Turb_lengthscale) = pblh_corr_arr(i, j, 0);
 
             // IMPORTANT — units convention for HGAMT_v / HGAMQ_v:
             // These are stored as (countergradient term / pblh), i.e. already
@@ -1191,42 +1207,7 @@ pblh_mf.setVal(0.0);
             K_turb(i, j, khi+1, EddyDiff::Turb_lengthscale) = K_turb(i, j, khi, EddyDiff::Turb_lengthscale);
         });
     }// mfi
-    // Write the MRF-computed PBLH back into SurfaceLayer so the Beljaars
-    // correction, the diagnostics and the dust layer (which reads get_pblh)
-    // see it; pblh_mf is filled inside the kernel above, so this stays on
-    // the device. update_pblh no longer aborts for the MRF type.
-    if (SurfLayer->get_pblh(level)) {
-        // Apply PBLH spatial smoothing if enabled (Seibert et al. 2000 methodology)
-        // Seibert et al. (2000): Review and intercomparison of operational methods
-        // for the determination of the mixing height. Atmospheric Environment, 34, 1001-1027.
-        // Spatial smoothing removes unphysical grid-to-grid noise from discrete Rib-crossing detection.
-        // The stencil reaches into neighbouring tiles and boxes, so it runs here, on a
-        // planar copy whose ghost cells are filled before every pass; smoothing each
-        // tile's own work array read outside it and tied the result to the decomposition.
-        // As before, only the height passed to SurfaceLayer is smoothed: the K-profile
-        // above uses the height from the second corrector pass.
-        if (turbChoice.enable_pblh_smoothing) {
-            MultiFab pblh_2d = MakePlanarPBLHMultiFab(pblh_mf.boxArray(), pblh_mf.DistributionMap());
-            for (MFIter mfi(pblh_2d, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                const Box& bx = mfi.tilebox();
-                const auto pblh_col = pblh_mf.const_array(mfi);
-                const auto pblh_pln = pblh_2d.array(mfi);
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept {
-                    pblh_pln(i, j, 0) = pblh_col(i, j, klo);
-                });
-            }
-            ApplyPBLHSmoothing(pblh_2d, geom,
-                               turbChoice.pblh_smoothing_weight,
-                               turbChoice.pblh_smoothing_passes);
-            for (MFIter mfi(pblh_mf, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                const Box& bx = mfi.tilebox();
-                const auto pblh_pln = pblh_2d.const_array(mfi);
-                const auto pblh_col = pblh_mf.array(mfi);
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-                    pblh_col(i, j, k) = pblh_pln(i, j, 0);
-                });
-            }
-        }
-        SurfLayer->set_pblh(level, pblh_mf);
-    }
+    // Write MRF-computed PBLH back into SurfaceLayer so Beljaars correction
+    // and diagnostics can use it, and update_pblh no longer aborts for MRF type.
+    SurfLayer->set_pblh(level, pblh_mf);
 }

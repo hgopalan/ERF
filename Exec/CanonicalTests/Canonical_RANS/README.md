@@ -4,7 +4,8 @@ Regression cases for the one-equation k RANS closure of Axell & Liungman
 (2001), `erf.rans_type = kEqn`, laid out like `../Canonical_LES`: one
 directory per case with the input deck, the sounding, a README stating the
 targets and tolerances, and a Python check script. The theory and the
-inputs are described in `Docs/sphinx_doc/theory/RANS.rst`.
+inputs are described in `Docs/sphinx_doc/theory/RANS.rst`; the measured
+numbers and tolerances for each case are in that case's README.
 
 | case | mesh | physics run | what it checks |
 | --- | --- | --- | --- |
