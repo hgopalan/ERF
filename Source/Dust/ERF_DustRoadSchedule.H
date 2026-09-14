@@ -198,7 +198,7 @@ inline void apply_road_schedule(
         amrex::Real F_v = E_road * DustRoadConst::G_PER_KG
                         * ev.vmt_per_h
                         / (ev.road_width_m * road_len * DustRoadConst::S_PER_H);
-        F_v = amrex::min(F_v, DustRoadConst::FLUX_MAX);
+        F_v = amrex::min(F_v, amrex::Real(DustRoadConst::FLUX_MAX));
 
         const amrex::Real x_lo = ev.x_lo, y_lo = ev.y_lo;
         const amrex::Real x_hi = ev.x_hi, y_hi = ev.y_hi;

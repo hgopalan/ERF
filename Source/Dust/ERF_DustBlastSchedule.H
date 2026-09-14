@@ -270,7 +270,7 @@ void apply_blast_schedule(
     for (auto evt : events_due) {
         amrex::Real blast_flux_per_bin = evt->mass_kg_m2 * blast_reactivity
                                         / (dt_safe * n_size_bins);
-        blast_flux_per_bin = std::min(blast_flux_per_bin, DustBlastConst::BLAST_FLUX_MAX);
+        blast_flux_per_bin = std::min(blast_flux_per_bin, amrex::Real(DustBlastConst::BLAST_FLUX_MAX));
         // Copy the event's numbers out: evt is a host pointer, not valid on the device.
         const amrex::Real evt_cx = evt->cx, evt_cy = evt->cy, evt_radius = evt->radius;
 

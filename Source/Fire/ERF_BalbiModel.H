@@ -257,7 +257,7 @@ BalbiComputed compute_balbi_params(
                               : 0.0;
 
     bc.A_coeff = amrex::max(A_coeff, amrex::Real(0.0));
-    bc.v_b     = amrex::max(v_b, BALBI_V_B_MIN);
+    bc.v_b     = amrex::max(v_b, amrex::Real(BALBI_V_B_MIN));
 
     // ------------------------------------------------------------------
     // Balbi (2020)
@@ -282,7 +282,7 @@ BalbiComputed compute_balbi_params(
             bc.Rc_coef = sigma_m * h_si / (q * bp.tau_0)
                        * amrex::min(delta_m, two_pi / (sigma_m * beta));        // eq. 27
             bc.u0_coef = 2.0 * (bp.st + 1.0) / bp.tau_0 * (rho_v / bp.rho_a)
-                       * amrex::min(S, two_pi);                                 // eq. B9
+                       * amrex::min(S, amrex::Real(two_pi));                                 // eq. B9
             bc.s_r00   = sigma_m * bp.r_00;
 
             // eq. C7: χ = χ₀/(1 + p R τ₀ cos γ/(2 s)), and with the paper's
@@ -389,7 +389,7 @@ amrex::Real balbi2020_rhs(const BalbiComputed& bc,
 
         u0 = bc.u0_coef * (T / bc.T_a);                                          // eq. B9
         u0 = std::sqrt(u0 * u0 + vz_extra * vz_extra);
-        u0 = amrex::max(u0, BALBI_V_B_MIN);
+        u0 = amrex::max(u0, amrex::Real(BALBI_V_B_MIN));
 
         const amrex::Real tan_gamma = tan_slope + U / u0;                        // eq. 2
         const amrex::Real inv_sec   = 1.0 / std::sqrt(1.0 + tan_gamma * tan_gamma);
@@ -491,7 +491,7 @@ amrex::Real balbi_ros_cell(const BalbiComputed& bc,
 
     // Balbi (2009): R = A (1 + sin α − cos α), tan α = U/v_b + tan θ
     amrex::Real v_b = std::sqrt(bc.v_b * bc.v_b + vz_extra * vz_extra);
-    v_b = amrex::max(v_b, BALBI_V_B_MIN);
+    v_b = amrex::max(v_b, amrex::Real(BALBI_V_B_MIN));
 
     const amrex::Real tan_alpha = U_n / v_b + tan_slope;
 

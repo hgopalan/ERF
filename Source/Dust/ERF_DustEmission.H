@@ -138,7 +138,7 @@ amrex::Real compute_vertical_emission_flux(amrex::Real alpha,
                                             amrex::Real Qs) noexcept
 {
     amrex::Real F = alpha * silt * Qs;
-    return amrex::min(amrex::max(static_cast<amrex::Real>(F), static_cast<amrex::Real>(0.0)), DustEmissionConst::FLUX_MAX);
+    return amrex::min(amrex::max(static_cast<amrex::Real>(F), static_cast<amrex::Real>(0.0)), amrex::Real(DustEmissionConst::FLUX_MAX));
 }
 
 /**

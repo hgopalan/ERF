@@ -90,8 +90,8 @@ amrex::Real compute_deposition_velocity(amrex::Real v_s, amrex::Real u_star,
     amrex::Real rs    = compute_r_s(u_star, E_0);
     amrex::Real denom = ra + rs + ra * rs * v_s;
     amrex::Real vd    = (denom > 1.0e-10) ? v_s + 1.0/denom : v_s;
-    return amrex::min(amrex::max(vd, DustDepositionConst::VD_MIN),
-                      DustDepositionConst::VD_MAX);
+    return amrex::min(amrex::max(vd, amrex::Real(DustDepositionConst::VD_MIN)),
+                      amrex::Real(DustDepositionConst::VD_MAX));
 }
 
 /**
