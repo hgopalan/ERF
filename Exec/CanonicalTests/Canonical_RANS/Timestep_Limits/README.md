@@ -83,7 +83,7 @@ rung in brackets (1 rank, Release, 2026-09-10):
   compressible.
 - The column is horizontally uniform, so advection does no work and the
   implicit steps do not carry over to a real case, where the advective
-  Courant number binds first (see `Neutral_Hill_2D` in `../RESULTS.md`).
+  Courant number binds first (see the `Neutral_Hill_2D` case).
   What stops the implicit runs here was not identified.
 - MRF under implicit compressible stops at 8 s: a factor 8 below kEqn and
   Deardorff, and 32 below its own anelastic step. The 16 s rung does not

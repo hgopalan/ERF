@@ -101,7 +101,6 @@ Cases with an exact or published answer and a check script each; see Verificatio
 ### Supporting_Files/
 Documentation and utility scripts:
 - `README.md`: This documentation
-- `ANIMATION_GUIDE.md`: Guide for creating fire animations
 - `plot_fire_animation.py`: Plotting utility
 
 ## Test Cases by Feature

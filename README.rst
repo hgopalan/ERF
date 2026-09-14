@@ -1,3 +1,92 @@
+ERF-Fire: wildfire, smoke and dust hazard modeling built on ERF
+----
+
+`ERF-Fire` is a stand-alone atmospheric hazard code built on the
+`Energy Research and Forecasting (ERF) <https://github.com/erf-model/ERF>`__ model,
+which in turn is built upon the `AMReX <https://amrex-codes.github.io/amrex/>`__ software framework
+for massively parallel block-structured applications.
+
+ERF-Fire lives on the ``ERF-Fire`` branch of this repository. It is not merged back
+into upstream ERF; instead, upstream ``development`` is merged into ``ERF-Fire``
+regularly so that the atmospheric core, build system and inputs stay compatible
+with ERF. The original ERF README follows below the ERF-Fire sections.
+
+What ERF-Fire adds
+~~~~~~~~~~~~~~~~~~
+
+On top of the ERF atmosphere (compressible and anelastic dynamics, terrain-fitted
+meshes, LES and PBL closures, MOST surface layer, radiation, microphysics and
+land-surface models), ERF-Fire adds:
+
+* a two-dimensional surface fire spread model (``Source/Fire``): level-set
+  front propagation, Rothermel and BEHAVE-style rate of spread with the
+  standard fuel models, dead and live fuel moisture, fuel maps from
+  ESRI ASCII and FARSITE ``.lcp`` files, spotting and crown fire, fire
+  acceleration, and two-way coupling of heat, moisture and smoke to the atmosphere;
+* wildland-urban interface (WUI) capabilities: building obstacles, structure
+  exposure and heat-flux diagnostics;
+* a dust emission, transport and deposition module (``Source/Dust``) with
+  road, blast and wind-erosion sources, health and visibility diagnostics, and
+  coupling to fire lofting (``Source/FireDust``);
+* a one-equation (k) RANS closure and terrain-following inflow profiles for
+  fire-weather simulations over real terrain;
+* canonical, verification and regression cases for all of the above under
+  ``Exec/CanonicalTests/Fire``, ``Exec/CanonicalTests/Dust``,
+  ``Exec/CanonicalTests/Hazard``, ``Exec/CanonicalTests/Canonical_RANS`` and
+  ``Exec/RegTests``.
+
+ERF-Fire Test Status
+~~~~~~~~~~~~~~~~~~~~
+
+=================  ================
+Regression Tests    |firetests|
+=================  ================
+
+.. |firetests| image:: https://github.com/hgopalan/ERF/actions/workflows/ci.yml/badge.svg?branch=ERF-Fire
+
+Building and running ERF-Fire
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+ERF-Fire is built with CMake exactly like ERF; see the ERF Getting Started page
+linked below for system requirements and the basic build and run instructions.
+Clone this repository with its submodules and check out the ``ERF-Fire`` branch::
+
+   git clone --recursive --branch ERF-Fire https://github.com/hgopalan/ERF.git ERF-Fire
+   cd ERF-Fire
+   cmake -S . -B build -DERF_ENABLE_MPI=ON
+   cmake --build build -j
+
+The fire module is enabled by default (``ERF_ENABLE_FIRE=ON``); the dust module is
+opt-in (``ERF_ENABLE_DUST=ON``). Each case directory under ``Exec/CanonicalTests``
+contains a README with the inputs, expected behaviour and a check script.
+ERF-Fire specific tools (terrain and fuel-map preparation, fire maps and
+animations) are in ``Exec/Tools`` and next to the cases that use them.
+
+ERF-Fire documentation
+~~~~~~~~~~~~~~~~~~~~~~
+
+The theory and inputs of the fire, dust, WUI and RANS capabilities are documented
+in the Sphinx sources under ``Docs/sphinx_doc`` (``theory/Fire.rst``,
+``theory/DustModule.rst``, ``theory/RANS.rst`` and the pages they link to),
+alongside the ERF documentation. Build them locally with::
+
+   pip install -r Docs/sphinx_doc/requirements.txt
+   sphinx-build -b html Docs/sphinx_doc build/docs
+
+ERF-Fire development model
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Development happens on topic branches off ``ERF-Fire`` with pull requests back
+into ``ERF-Fire`` in this repository. New physics is added as opt-in options
+with the existing behaviour left as the default, and every change to the fire
+model comes with a regression or canonical case. Fixes to the shared
+atmospheric core are contributed to upstream ERF and reach ``ERF-Fire`` through
+the periodic upstream merges. The ERF coding conventions in CONTRIBUTING.md
+apply here as well.
+
+ERF-Fire is distributed under the ERF license below; when using ERF-Fire, please
+cite the ERF publications listed at the end of this page.
+
 Energy Research and Forecasting (ERF): An atmospheric modeling code
 ----
 
