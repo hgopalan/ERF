@@ -54,7 +54,7 @@ ellipse           erf.fire.directional_shape = "ellipse": F is the support
                   solution, and the head within 3 % of Rothermel's head rate.
 ellipse_anderson  the same with erf.fire.directional_ellipse_lw = "anderson": the
                   flank rate a = b / LW with Anderson's (1983) length-to-width
-                  ratio LW = 0.936 exp(0.2566 U) - 0.397 sqrt(U) (U in mph, at
+                  ratio LW = 0.936 exp(0.2566 U) + 0.461 exp(-0.1548 U) - 0.397 (U in mph, at
                   least 1, at most 8) at the effective wind speed, here the wind
                   itself under the fine-fuel cap. Same checks as the ellipse deck.
 """
@@ -113,7 +113,8 @@ def anderson_lw(U_mps):
     mph = U_mps * 2.23694
     if mph < 1.0:
         return 1.0
-    return max(1.0, min(0.936 * math.exp(0.2566 * mph) - 0.397 * math.sqrt(mph), LW_MAX))
+    # FARSITE's fit (Finney 1998, eq. 8); the second term was -0.397 sqrt(U) until 2026-09
+    return max(1.0, min(0.936 * math.exp(0.2566 * mph) + 0.461 * math.exp(-0.1548 * mph) - 0.397, LW_MAX))
 
 
 def speed(kind, th, R0, phi_w, U, U_cap):
