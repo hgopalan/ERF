@@ -1,7 +1,8 @@
 # Canonical case: a small building set through a morning. Four buildings
 # from a nodal height map (a 60 m concrete slab, a 40 m brick cube in its
-# morning shadow, two 20 m timber blocks) on a 480 m periodic domain at 10 m, three materials by
-# building, a 3 m/s westerly, Boulder on the June solstice from 05:00 solar
+# morning shadow, two 20 m timber blocks) on a 480 m periodic domain, 320 m
+# deep, at 10 m, three materials by building, a 3 m/s westerly held by
+# nudging above the roofs, Boulder on the June solstice from 05:00 solar
 # time for six hours, the prescribed clear-sky provider, a gray sky, the
 # convective velocity scale and the stability functions on. The immersed
 # forcing runs with the wall law snapped to half cells, which a height-map
@@ -15,9 +16,11 @@ stop_time = 21600.0
 amrex.fpe_trap_invalid = 1
 fabarray.mfiter_tile_size = 1024 1024 1024
 
-geometry.prob_extent =  480     480    160
-amr.n_cell           =  48      48     16
-amr.max_grid_size    =  24
+geometry.prob_extent =  480     480    320
+amr.n_cell           =  48      48     32
+amr.max_grid_size_x  =  24
+amr.max_grid_size_y  =  24
+amr.max_grid_size_z  =  32
 geometry.is_periodic = 1 1 0
 zlo.type = "surface_layer"
 erf.most.z0 = 0.1
@@ -48,6 +51,20 @@ erf.if_use_most = true
 erf.if_z0 = 0.01
 erf.if_snap_partial_cells = true
 erf.use_coriolis = false
+# The plane-mean wind above the roofs is nudged toward the 3 m/s sounding
+# (u and v only, above 100 m, 10 minute time scale); the flow among the
+# buildings is left to the drag. Without a driver the wind decays to
+# 0.2 m/s by 08:00 and the morning turns into free convection; a constant
+# pressure gradient instead keeps accelerating the flow aloft under the
+# slip top (4.5 m/s at 300 m after an hour at -7e-4 Pa/m).
+erf.nudging_from_input_sounding = true
+erf.nudging_u = true
+erf.nudging_t = false
+erf.nudging_q = false
+erf.nudging_u_z1 = 100.0
+erf.tau_nudging = 600.0
+erf.data_log = "surf_hist" "mean_profiles"
+erf.profile_int = 1200
 
 erf.ibseb.enable = true
 erf.ibseb.prognostic = true
