@@ -63,33 +63,33 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
         // Read 6 header lines
         // Line 1: ncols
         if (std::getline(file, line)) {
-            auto [ok, val] = parse_header(line, "ncols");
-            if (ok) ncols = static_cast<int>(val);
+            auto [found, val] = parse_header(line, "ncols");
+            if (found) ncols = static_cast<int>(val);
         }
         // Line 2: nrows
         if (std::getline(file, line)) {
-            auto [ok, val] = parse_header(line, "nrows");
-            if (ok) nrows = static_cast<int>(val);
+            auto [found, val] = parse_header(line, "nrows");
+            if (found) nrows = static_cast<int>(val);
         }
         // Line 3: xllcorner
         if (std::getline(file, line)) {
-            auto [ok, val] = parse_header(line, "xllcorner");
-            if (ok) xllcorner = val;
+            auto [found, val] = parse_header(line, "xllcorner");
+            if (found) xllcorner = val;
         }
         // Line 4: yllcorner
         if (std::getline(file, line)) {
-            auto [ok, val] = parse_header(line, "yllcorner");
-            if (ok) yllcorner = val;
+            auto [found, val] = parse_header(line, "yllcorner");
+            if (found) yllcorner = val;
         }
         // Line 5: cellsize
         if (std::getline(file, line)) {
-            auto [ok, val] = parse_header(line, "cellsize");
-            if (ok) cellsize = val;
+            auto [found, val] = parse_header(line, "cellsize");
+            if (found) cellsize = val;
         }
         // Line 6: nodata_value
         if (std::getline(file, line)) {
-            auto [ok, val] = parse_header(line, "nodata_value");
-            if (ok) nodata_value = val;
+            auto [found, val] = parse_header(line, "nodata_value");
+            if (found) nodata_value = val;
         }
 
         // Read data rows

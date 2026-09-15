@@ -303,7 +303,7 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
  *   - Preserves steady-state behavior: E ≤ 0.9 * I_R always
  *   - With erf.fire.use_wind_limit = false U_max_ftmin is the largest Real
  */
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real rothermel_ros_cell(
     amrex::Real ux_eff, amrex::Real uy_eff,
     amrex::Real sx, amrex::Real sy,

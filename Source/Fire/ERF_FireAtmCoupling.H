@@ -197,7 +197,7 @@ inline void apply_fire_tendency_to_cc_source(
     if (alfg <= 0.0) { return; }
     if (feedback <= 0.0) { return; }
 
-    constexpr Real Cp_d = 1004.64;
+    constexpr Real Cp_fire = 1004.64;
     constexpr Real L_V  = 2.501e6;
 
     const Box& domain = geom_atm.Domain();
@@ -328,11 +328,11 @@ inline void apply_fire_tendency_to_cc_source(
             // move by round-off.
             Real theta_tend, q_tend = 0.0;
             if (use_open) {
-                theta_tend = rho_fac * (q_sfc_sensible / Cp_d) * w_k / dz;
+                theta_tend = rho_fac * (q_sfc_sensible / Cp_fire) * w_k / dz;
                 if (has_latent) { q_tend = rho_fac * (q_sfc_latent / L_V) * w_k / dz; }
             } else {
-                Real hfx_k    = (q_sfc_sensible / Cp_d) * exp_k;
-                Real hfx_kp1  = (q_sfc_sensible / Cp_d) * exp_kp1;
+                Real hfx_k    = (q_sfc_sensible / Cp_fire) * exp_k;
+                Real hfx_kp1  = (q_sfc_sensible / Cp_fire) * exp_kp1;
                 theta_tend = -rho_fac * (hfx_kp1 - hfx_k) / dz;
                 if (has_latent) {
                     Real qfx_k   = (q_sfc_latent / L_V) * exp_k;
@@ -364,7 +364,7 @@ inline void apply_fire_tendency_to_cc_source(
         Real Q_max        = Q_atm.max(0);
         Real rt_tend_sum  = cc_source.sum(RhoTheta_comp);
         Real rt_tend_max  = cc_source.max(RhoTheta_comp);
-        Real expected_max = Q_max / (Cp_d * 1.2)
+        Real expected_max = Q_max / (Cp_fire * 1.2)
                             * (1.0 - std::exp(-dz_avg / alfg)) / dz_avg;
         amrex::Print() << "[FIRE COUPLING] Q_atm_max=" << Q_max
                        << " W/m2  alfg=" << alfg << " m\n"
@@ -381,7 +381,7 @@ inline void apply_fire_tendency_to_cc_source(
         // fire tendency inside a fully blocked cell below the roof must be
         // zero with the open-fraction option.
         const Real area = dx[0] * dx[1];
-        const Real e_out = Cp_d * tend_dbg.sum(0) * area;
+        const Real e_out = Cp_fire * tend_dbg.sum(0) * area;
         const Real e_in  = feedback * Q_atm.sum(0) * area;
         // Columns that straddle a footprint (0 < open fraction < 1) are where
         // the placement matters: fully covered columns carry no flux once their

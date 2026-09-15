@@ -102,4 +102,21 @@ void compute_rh_from_conservative(amrex::MultiFab& RH_out,
     }
 }
 
+/**
+ * Copy the k = 0 plane of a cell-centred atmospheric field into a MultiFab on the
+ * same boxes coarsened to one cell in z. A namespace-scope function because nvcc
+ * rejects a device kernel inside a private member such as ERF::Advance.
+ */
+inline
+void fire_copy_k0_plane(amrex::MultiFab& dst_2d, const amrex::MultiFab& src_3d)
+{
+    for (amrex::MFIter mfi(dst_2d); mfi.isValid(); ++mfi) {
+        amrex::Array4<amrex::Real> d = dst_2d.array(mfi);
+        amrex::Array4<const amrex::Real> s = src_3d.const_array(mfi);
+        amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) {
+            d(iv[0], iv[1], 0) = s(iv[0], iv[1], 0);
+        });
+    }
+}
+
 #endif  // ERF_FIRE_UTILS_H

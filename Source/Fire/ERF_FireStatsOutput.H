@@ -40,12 +40,12 @@ compute_fire_ellipse_axes(amrex::Real area_m2, amrex::Real perimeter_m)
         return {0.0, 0.0};
     }
 
-    constexpr amrex::Real PI = amrex::Math::pi<amrex::Real>();
+    constexpr amrex::Real pi = amrex::Math::pi<amrex::Real>();
 
     // From Area = π * a * b and Perimeter ≈ π * (a + b)
     // we get: a + b ≈ Perimeter / π and a * b = Area / π
-    amrex::Real sum_ab  = perimeter_m / PI;
-    amrex::Real prod_ab = area_m2 / PI;
+    amrex::Real sum_ab  = perimeter_m / pi;
+    amrex::Real prod_ab = area_m2 / pi;
 
     if (sum_ab <= 0.0 || prod_ab <= 0.0) {
         return {0.0, 0.0};
@@ -55,7 +55,7 @@ compute_fire_ellipse_axes(amrex::Real area_m2, amrex::Real perimeter_m)
     amrex::Real discriminant = sum_ab * sum_ab - 4.0 * prod_ab;
     if (discriminant < 0.0) {
         // No real solution; return a circle approximation
-        amrex::Real radius = std::sqrt(area_m2 / PI);
+        amrex::Real radius = std::sqrt(area_m2 / pi);
         return {2.0 * radius, 2.0 * radius};
     }
 

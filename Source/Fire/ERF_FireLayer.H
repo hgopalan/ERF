@@ -770,8 +770,6 @@ private:
     std::unique_ptr<amrex::MultiFab>         m_open_frac_atm;         // [0-1]
     std::unique_ptr<amrex::MultiFab>         m_roof_h_atm;            // [m]
 
-    /// Fill m_open_frac_atm and m_roof_h_atm from the mask and structure height.
-    void build_open_fraction(const amrex::Geometry& geom_atm);
     std::unique_ptr<amrex::MultiFab>         fire_latent_flux;        // latent heat flux on fire grid [W/m²]
 
     // Precomputed Rothermel coefficients
@@ -826,30 +824,12 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_ros_scratch;
 
     /// Evaluate one named ROS model into `out` (uniform-fuel Balbi inputs in balbi_in).
-    /// Rate of spread for ros_model = "prescribed" (ERF_PrescribedFire.H).
-    void fill_prescribed_ros(amrex::MultiFab& out) const;
-
-    /// Add erf.fire.prescribed_heat.flux to fire_heat_flux over its disc and time window.
-    void add_prescribed_heat_flux();
-
     void fill_ros_for_model(const std::string& model,
                             amrex::MultiFab& out,
                             const BalbiFieldInputs& balbi_in);
 
-    /// Fill fire_ros_weight from a static hybrid selector (region, fuel, structure).
-    void init_ros_weight();
-
-    /// Rebuild fire_ros_weight from the effective wind speed (selector = wind).
-    void update_wind_weight();
-
-    /// Debug line with the weight sum and the count of cells above one half.
-    void print_hybrid_weight_summary() const;
-
     /// Precomputed coefficients of a named non-Balbi model for the directional path.
     DirectionalRosState make_directional_state(const std::string& model) const;
-
-    /// Print the arrival time at each erf.fire.probes point the first time it burns.
-    void report_probes();
 
     // Structure height [m] on the fire grid (structures.enable or the hybrid
     // structure selector).
@@ -878,9 +858,6 @@ private:
 
     /// Read the structure heightmap onto the fire grid (nearest-cell sampling).
     void load_structure_height(const std::string& file);
-
-    /// Build fire_nonburnable from structures, fuel codes and firebreaks.
-    void build_nonburnable_mask();
 
     /// Hold phi outside the burned region in mask cells (level-set path).
     void enforce_nonburnable_phi();
@@ -921,9 +898,33 @@ private:
     void check_edge_guard();
 
     // nvcc forbids an extended __device__ lambda inside a function with private or
-    // protected class access, and both methods below launch ParallelFor kernels, so
-    // they are public even though they are only called from advance().
+    // protected class access, and every method below launches ParallelFor kernels, so
+    // they are public even though only the fire layer calls them.
 public:
+
+    /// Fill m_open_frac_atm and m_roof_h_atm from the mask and structure height.
+    void build_open_fraction(const amrex::Geometry& geom_atm);
+
+    /// Rate of spread for ros_model = "prescribed" (ERF_PrescribedFire.H).
+    void fill_prescribed_ros(amrex::MultiFab& out) const;
+
+    /// Add erf.fire.prescribed_heat.flux to fire_heat_flux over its disc and time window.
+    void add_prescribed_heat_flux();
+
+    /// Fill fire_ros_weight from a static hybrid selector (region, fuel, structure).
+    void init_ros_weight();
+
+    /// Rebuild fire_ros_weight from the effective wind speed (selector = wind).
+    void update_wind_weight();
+
+    /// Debug line with the weight sum and the count of cells above one half.
+    void print_hybrid_weight_summary() const;
+
+    /// Print the arrival time at each erf.fire.probes point the first time it burns.
+    void report_probes();
+
+    /// Build fire_nonburnable from structures, fuel codes and firebreaks.
+    void build_nonburnable_mask();
 
     /**
      * @brief Apply the crown-fire rate-of-spread enhancement to fire_ros.
