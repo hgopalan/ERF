@@ -239,6 +239,17 @@ if (ng_pblh > 1) {
                    + "; reduce erf.pblh_smoothing_passes to at most " + std::to_string(ng_avail));
     }
 }
+// The fire heat flux (erf.pbl_mrf_fire_thermal_excess) is read in every column the
+// passes cover, the halo included, so it has to carry that many ghost columns.
+if (Q_fire_atm != nullptr && turbChoice.mrf_fire_thermal_excess) {
+    const int ng_fire = std::min(Q_fire_atm->nGrowVect()[0], Q_fire_atm->nGrowVect()[1]);
+    if (ng_fire < ng_pblh) {
+        amrex::Abort("erf.pbl_mrf_fire_thermal_excess reads the fire heat flux in "
+                   + std::to_string(ng_pblh) + " halo columns, but the flux carries only "
+                   + std::to_string(ng_fire) + "; reduce erf.pblh_smoothing_passes to at most "
+                   + std::to_string(ng_fire));
+    }
+}
 
 #ifdef _OPENMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())

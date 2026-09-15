@@ -737,6 +737,8 @@ private:
     // Coarsened fire fluxes on the atmospheric level-0 grid (nx × ny × 1).
     // These hold fire fluxes from the previous timestep for injection into
     // cc_source at the start of the next timestep (one-step explicit lag).
+    // Lagged fluxes on the atmospheric columns, with ghost columns filled from the
+    // neighbouring boxes for the MRF fire thermal excess, which reads the halo
     std::unique_ptr<amrex::MultiFab>         m_Q_atm_prev;            // sensible [W/m²]
     std::unique_ptr<amrex::MultiFab>         m_Q_lat_atm_prev;        // latent   [W/m²]
     amrex::Real                              m_f_dry_prev = 1.0;      // partition factor m_Q_atm_prev was filled with

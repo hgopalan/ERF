@@ -210,6 +210,17 @@ flux is distributed the same way into the vapour equation when
 zero gives one-way coupling with the fire still responding to the wind, one
 gives the full feedback.
 
+The same area-averaged sensible flux feeds the MRF boundary layer scheme when
+:cpp:`erf.pbl_mrf_fire_thermal_excess` is true, where it raises the convective
+velocity scale of burning columns (:ref:`PBLschemes`). MRF evaluates its
+passes on a halo of columns around every tile, so the flux carries ghost
+columns holding the neighbouring box's value, or the edge column's outside a
+non-periodic face, refilled whenever the flux is written or restored from a
+checkpoint. Before 2026-09-15 it carried none and the option read outside the
+array: builds with assertions stopped in the first step, other builds read
+whatever lay there. ``FireMrfThermalExcess`` runs the coupled
+``FireRestart`` deck with MRF and the option on.
+
 The cell source is rebuilt by the atmosphere at every Runge-Kutta stage and
 the fire tendency is applied after that rebuild. :cpp:`erf.fire.source_mode`
 selects how: ``"overwrite"`` (default, the historical behaviour) replaces the

@@ -1003,6 +1003,9 @@ scale. Columns without fire keep :math:`w_*`, and HGAMT/HGAMQ always use the unb
 A column counts as burning when its fire heat flux exceeds ``erf.mrf_fire_q_threshold``
 (default 50 W/m\ :sup:`2`), and the thermal excess the fire adds is capped at
 ``erf.mrf_fire_t_excess_cap`` (default 50 K). Both keys accept the ``_lev<N>`` per-level form.
+The passes cover a halo of columns around every tile, so the fire flux carries ghost columns holding
+the neighbouring box's value (the edge column's outside a non-periodic face); until 2026-09-15 it had
+none and the option read outside the array, which builds with assertions stopped in the first step.
 The fire heat flux is kept out of the corrector because a fire thermal excess would make the
 Richardson number negative through a neutral or shear-driven ABL and collapse the PBLH to its floor.
 
