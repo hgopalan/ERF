@@ -40,7 +40,7 @@ protected:
 
         // Physical domain: 100 m x 100 m
         RealBox prob_domain(0.0, 0.0, 0.0, 100.0, 100.0, 1.0);
-        Geometry geom(domain, prob_domain, CoordSys::cartesian, {false, false, false});
+        geom = Geometry(domain, prob_domain, CoordSys::cartesian, {false, false, false});
 
         // Create MultiFabs
         // phi: level-set field with 1 ghost cell
@@ -68,7 +68,6 @@ protected:
         disp_accum.setVal(0.0_rt);
         arrival_time.setVal(-1.0_rt);
 
-        this->geom = geom;
     }
 
     /// Burn the cells for which burned(i, j) holds, at time 0

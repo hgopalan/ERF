@@ -453,13 +453,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         // uses time-averaged T, and the change in T from fire heating within
         // one atmospheric step is small relative to the moisture time lag.
         MultiFab T_atm_k0(ba2d[lev], S_old.DistributionMap(), 1, 0);
-        for (MFIter mfi(T_atm_k0); mfi.isValid(); ++mfi) {
-            Array4<Real> t2d = T_atm_k0.array(mfi);
-            Array4<const Real> t3d = Theta_prim[lev]->const_array(mfi);
-            amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv) {
-                t2d(iv[0], iv[1], 0) = t3d(iv[0], iv[1], 0);
-            });
-        }
+        fire_copy_k0_plane(T_atm_k0, *Theta_prim[lev]);
         MultiFab RH_atm_k0(ba2d[lev], S_old.DistributionMap(), 1, 0);
         compute_rh_from_conservative(RH_atm_k0, S_old, Geom(lev));
 

@@ -329,7 +329,7 @@ amrex::Real compute_flame_tilt_angle_deg(
     }
 
     constexpr amrex::Real g       = 9.81;
-    constexpr amrex::Real PI      = 3.14159265358979323846;
+    constexpr amrex::Real pi      = 3.14159265358979323846;
     constexpr amrex::Real Cp_air  = 1005.0;
 
     amrex::Real wind_speed = std::sqrt(wind_u * wind_u + wind_v * wind_v);
@@ -345,7 +345,7 @@ amrex::Real compute_flame_tilt_angle_deg(
     }
 
     amrex::Real tilt_rad = std::atan(wind_speed / buoyancy);
-    return amrex::min(tilt_rad * 180.0 / PI, 90.0);
+    return amrex::min(tilt_rad * 180.0 / pi, 90.0);
 }
 
 /**

@@ -1111,7 +1111,6 @@ struct FireParams
                    }
                } else if (hy.selector == "structure") {
                    if (hy.structure_file.empty()) {
-                       amrex::ParmParse pp_erf("erf");
                        pp_erf.query("buildings_file_name", hy.structure_file);
                    }
                    if (hy.structure_file.empty()) {
@@ -1231,7 +1230,6 @@ struct FireParams
        if (structures.enable) {
            if (structures.file.empty()) { structures.file = hybrid.structure_file; }
            if (structures.file.empty()) {
-               amrex::ParmParse pp_erf("erf");
                pp_erf.query("buildings_file_name", structures.file);
            }
            if (structures.file.empty()) {
@@ -1365,18 +1363,18 @@ struct FireParams
            std::string type_key = "firebreak." + std::to_string(nb) + ".type";
            std::string type_val;
            if (!pp.query(type_key.c_str(), type_val)) break;
-           FireBreak fb;
-           fb.type = type_val;
+           FireBreak brk;
+           brk.type = type_val;
            one_of(type_key.c_str(), type_val, {"rect", "rectangle", "circle"});   // the kernel branches on the first letter
            std::string pfx = "firebreak." + std::to_string(nb) + ".";
-           pp.query((pfx + "x_lo").c_str(),   fb.x_lo);
-           pp.query((pfx + "y_lo").c_str(),   fb.y_lo);
-           pp.query((pfx + "x_hi").c_str(),   fb.x_hi);
-           pp.query((pfx + "y_hi").c_str(),   fb.y_hi);
-           pp.query((pfx + "cx").c_str(),     fb.cx);
-           pp.query((pfx + "cy").c_str(),     fb.cy);
-           pp.query((pfx + "radius").c_str(), fb.radius);
-           firebreaks.push_back(fb);
+           pp.query((pfx + "x_lo").c_str(),   brk.x_lo);
+           pp.query((pfx + "y_lo").c_str(),   brk.y_lo);
+           pp.query((pfx + "x_hi").c_str(),   brk.x_hi);
+           pp.query((pfx + "y_hi").c_str(),   brk.y_hi);
+           pp.query((pfx + "cx").c_str(),     brk.cx);
+           pp.query((pfx + "cy").c_str(),     brk.cy);
+           pp.query((pfx + "radius").c_str(), brk.radius);
+           firebreaks.push_back(brk);
        }
        n_firebreaks = static_cast<int>(firebreaks.size());
 

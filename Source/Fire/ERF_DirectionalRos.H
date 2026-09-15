@@ -198,7 +198,7 @@ inline constexpr int DIRECTIONAL_WIND_COUPLING_ADVECTIVE  = 1;  ///< opt-in: exp
  * pure advection by a wind-aligned velocity plus isotropic growth (see the
  * file comment). Selected via erf.fire.directional_wind_coupling.
  */
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real directional_ros_cell(const DirectionalRosState& st,
                                  amrex::Real U_n,
                                  amrex::Real s_n,
@@ -256,11 +256,11 @@ inline constexpr int DIRECTIONAL_ELLIPSE_LW_ANDERSON = 1;  ///< Anderson (1983) 
  * @param[in] st   Precomputed coefficients for the selected model
  * @param[in] R_h  Head rate of spread [m/s]
  */
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real directional_effective_wind(const DirectionalRosState& st, amrex::Real R_h) noexcept
 {
-    const amrex::Real zero = 0.0;
-    const amrex::Real one  = 1.0;
+    const amrex::Real zero_r = 0.0;
+    const amrex::Real one_r  = 1.0;
     if (st.model == DIRECTIONAL_ROS_ROTHERMEL || st.model == DIRECTIONAL_ROS_BEHAVE) {
         const bool behave = (st.model == DIRECTIONAL_ROS_BEHAVE);
         const amrex::Real R0   = behave ? st.bs.r_0          : st.rc.R0;
@@ -268,15 +268,15 @@ amrex::Real directional_effective_wind(const DirectionalRosState& st, amrex::Rea
         const amrex::Real B    = behave ? st.bs.B            : st.rc.B;
         const amrex::Real Umax = behave ? st.bs.U_max_ftmin  : st.rc.U_max_ftmin;
         const amrex::Real conv = behave ? st.bs.wind_conv    : st.rc.wind_conv;
-        if (R0 <= zero || cE <= zero || B <= zero || R_h <= R0) { return zero; }
-        const amrex::Real U_ft = std::pow((R_h / R0 - one) / cE, one / B);
+        if (R0 <= zero_r || cE <= zero_r || B <= zero_r || R_h <= R0) { return zero_r; }
+        const amrex::Real U_ft = std::pow((R_h / R0 - one_r) / cE, one_r / B);
         return amrex::min(U_ft, Umax) / conv;
     }
-    amrex::Real lo = zero, hi = amrex::Real(30.0);
-    if (directional_ros_cell(st, hi, zero) <= R_h) { return hi; }
+    amrex::Real lo = zero_r, hi = amrex::Real(30.0);
+    if (directional_ros_cell(st, hi, zero_r) <= R_h) { return hi; }
     for (int it = 0; it < 30; ++it) {
         const amrex::Real mid = amrex::Real(0.5) * (lo + hi);
-        if (directional_ros_cell(st, mid, zero) < R_h) { lo = mid; } else { hi = mid; }
+        if (directional_ros_cell(st, mid, zero_r) < R_h) { lo = mid; } else { hi = mid; }
     }
     return amrex::Real(0.5) * (lo + hi);
 }
@@ -305,7 +305,7 @@ struct DirectionalEllipse
  * @param[in] lw_mode     DIRECTIONAL_ELLIPSE_LW_MODEL or DIRECTIONAL_ELLIPSE_LW_ANDERSON
  * @param[in] lw_max      Cap on Anderson's length-to-width ratio
  */
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 DirectionalEllipse directional_ellipse_cell(const DirectionalRosState& st,
                                             amrex::Real u, amrex::Real v,
                                             amrex::Real dzdx, amrex::Real dzdy,
@@ -313,11 +313,11 @@ DirectionalEllipse directional_ellipse_cell(const DirectionalRosState& st,
                                             amrex::Real lw_max = amrex::Real(8.0)) noexcept
 {
     constexpr amrex::Real tiny = 1.0e-12;
-    const amrex::Real zero = 0.0;
+    const amrex::Real zero_r = 0.0;
     const amrex::Real U = std::sqrt(u*u + v*v);
     const amrex::Real S = std::sqrt(dzdx*dzdx + dzdy*dzdy);
 
-    const amrex::Real R0   = directional_ros_cell(st, zero, zero);
+    const amrex::Real R0   = directional_ros_cell(st, zero_r, zero_r);
     const amrex::Real dR_w = amrex::max(directional_ros_cell(st, U, amrex::Real(0.0)) - R0, amrex::Real(0.0));
     const amrex::Real dR_s = amrex::max(directional_ros_cell(st, amrex::Real(0.0), S) - R0, amrex::Real(0.0));
     const amrex::Real dR   = amrex::max(directional_ros_cell(st, U, S) - R0, amrex::Real(0.0));
@@ -350,7 +350,7 @@ DirectionalEllipse directional_ellipse_cell(const DirectionalRosState& st,
 }
 
 /// Normal speed of a DirectionalEllipse for the unit front normal (nx, ny).
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real directional_ellipse_speed(const DirectionalEllipse& d,
                                       amrex::Real nx, amrex::Real ny) noexcept
 {
