@@ -64,6 +64,7 @@ In addition to this documentation, there is API documentation for ERF generated 
    theory/PBLschemes.rst
    theory/DustModule.rst
    theory/Forcings.rst
+   theory/WindFarmModels.rst
    theory/Radiation.rst
    Particles.rst
    SuperDroplets.rst
