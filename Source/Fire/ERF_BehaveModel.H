@@ -389,7 +389,7 @@ BehaveState compute_behave_state(
  *
  * @return Rate of spread [m/s]
  */
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real behave_ros_cell(
     amrex::Real ux_eff, amrex::Real uy_eff,
     amrex::Real sx, amrex::Real sy,

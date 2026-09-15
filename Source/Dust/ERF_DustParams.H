@@ -405,7 +405,7 @@ struct DustParams {
             (!site_phreeqc_files.empty() && site_phreeqc_files.size() != ns))
             fail("erf.dust.site_names (" + std::to_string(ns) + ") and site_x_lo/site_y_lo/site_x_hi/site_y_hi"
                  " (and site_phreeqc_files when given) must have the same length");
-        for (std::size_t s = 0; s < ns; ++s)
+        for (amrex::Long s = 0; s < ns; ++s)
             if (!(site_x_hi[s] > site_x_lo[s] && site_y_hi[s] > site_y_lo[s]))
                 fail("erf.dust site " + site_names[s] + ": x_hi/y_hi must exceed x_lo/y_lo");
    }  // end DustParams constructor

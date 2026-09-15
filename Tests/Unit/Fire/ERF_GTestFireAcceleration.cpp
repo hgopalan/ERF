@@ -85,6 +85,18 @@ void burn_column (MultiFab& phi, int ic)
     }
 }
 
+/// phi = (i + 1/2) h - x0 on every cell of phi, ghosts included; a launch outside
+/// a TEST body, which nvcc refuses as the parent of an extended device lambda
+void fill_phi_ramp (MultiFab& phi, Real h, Real x0)
+{
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        auto p = phi.array(mfi);
+        ParallelFor(mfi.fabbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            p(i, j, k) = (i + 0.5_rt) * h - x0;
+        });
+    }
+}
+
 /// Value of component comp at valid cell (i, j), from whichever rank owns it
 Real value_at (const MultiFab& mf, int i, int j, int comp = 0)
 {
@@ -431,12 +443,7 @@ TEST(FireAcceleration, LevelSetRosScaleMultipliesTheRebuiltRate)
 
     auto advance = [&](const MultiFab* ros_scale) {
         MultiFab phi(s.ba, s.dm, 1, 3);
-        for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
-            auto p = phi.array(mfi);
-            ParallelFor(mfi.fabbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                p(i, j, k) = (i + 0.5_rt) * H - 100.0_rt;
-            });
-        }
+        fill_phi_ramp(phi, H, 100.0_rt);
         for (int n = 0; n < 40; ++n) {
             fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, s.geom, 1.0_rt, 0.0_rt,
                 [](MultiFab& Rf, const MultiFab&) { Rf.setVal(0.8); },

@@ -1643,10 +1643,10 @@ ERF::InitData_post ()
                     bx.setBig(2, 0);
                     bl.push_back(bx);
                 }
-                amrex::BoxArray ba2d(amrex::BoxList(std::move(bl)));
+                amrex::BoxArray ba_dust2d(amrex::BoxList(std::move(bl)));
                 m_dust_flux_atm.resize(1);
                 m_dust_flux_atm[0] = std::make_unique<amrex::MultiFab>(
-                    ba2d, DistributionMap(0), 1, amrex::IntVect(1, 1, 0));
+                    ba_dust2d, DistributionMap(0), 1, amrex::IntVect(1, 1, 0));
                 m_dust_flux_atm[0]->setVal(0.0);
             }
 
@@ -1666,14 +1666,14 @@ ERF::InitData_post ()
 // ************************************************************************************
 #ifdef ERF_USE_DUST
 if (m_DustLayer && restart_chkfile.empty()) {
-    int dc = m_DustLayer->get_dust_scalar_comp();
+    int dust_comp = m_DustLayer->get_dust_scalar_comp();
     for (int lev = 0; lev <= finest_level; ++lev) {
-        vars_new[lev][Vars::cons].setVal(0.0, dc, 1,
+        vars_new[lev][Vars::cons].setVal(0.0, dust_comp, 1,
             vars_new[lev][Vars::cons].nGrowVect());
-        vars_old[lev][Vars::cons].setVal(0.0, dc, 1,
+        vars_old[lev][Vars::cons].setVal(0.0, dust_comp, 1,
             vars_old[lev][Vars::cons].nGrowVect());
     }
-    amrex::Print() << "[DUST] Zeroed dust_scalar_comp=" << dc
+    amrex::Print() << "[DUST] Zeroed dust_scalar_comp=" << dust_comp
                    << " in vars_new/old after all initialization.\n";
 }
 #endif

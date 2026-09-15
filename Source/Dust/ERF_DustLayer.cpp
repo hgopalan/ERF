@@ -937,7 +937,7 @@ void
 DustLayer::apply_deposition_bc(
    amrex::MultiFab& cc_source, const amrex::MultiFab& S_old,
    const amrex::MultiFab& z_phys_cc, const amrex::Geometry& geom_atm,
-   amrex::Real dt)
+   amrex::Real /*dt*/)
 {
    if (!dep_flux_atm || !dust_ustar_in) return;
    if (m_params.atm_feedback <= 0.0) return;

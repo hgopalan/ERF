@@ -82,8 +82,8 @@
     Vector<int> eddy_diff_idz(NPRIMVAR_max, EddyDiff::Q_v);
     eddy_diff_idz[PrimTheta_comp] = EddyDiff::Theta_v;
     eddy_diff_idz[PrimKE_comp]    = EddyDiff::KE_v;
-    for (int n = 0; n < NSCALARS; ++n) {
-        eddy_diff_idz[PrimScalar_comp + n] = EddyDiff::Scalar_v;
+    for (int ns = 0; ns < NSCALARS; ++ns) {
+        eddy_diff_idz[PrimScalar_comp + ns] = EddyDiff::Scalar_v;
     }
 
     // Device vectors
