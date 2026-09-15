@@ -565,7 +565,7 @@ if (Q_fire_atm != nullptr && turbChoice.mrf_fire_thermal_excess) {
             constexpr Real Cp_d = Real(1004.64);
             Real kbfs_fire = zero_d;
             if (use_fire_correction && Q_fire_arr) {
-                const Real rho_sfc = cell_data(i, j, klo, Rho_comp);
+                const Real rho_sfc = cell_data(i, j, ksrf, Rho_comp);
                 const Real q_fire  = Q_fire_arr(i, j, 0);
                 if (q_fire > mrf_fire_q_thresh && rho_sfc > zero_d) {
                     // max() keeps the division valid if it is evaluated speculatively
@@ -816,12 +816,13 @@ if (Q_fire_atm != nullptr && turbChoice.mrf_fire_thermal_excess) {
             // Fire boost (Deardorff 1970): where Pass 2 found a fire flux, use the
             // convective scale of the surface plus fire buoyancy flux over the
             // corrected PBLH if it is larger. Fire only increases w*; HGAMT/HGAMQ
-            // below keep the unboosted w*. Every input is valid for every column,
+            // below keep the unboosted w*. An immersed column (erf.pbl_ib_aware) takes
+            // its own surface scales, as the rest of the pass. Every input is valid for every column,
             // so nothing traps if the arm is evaluated speculatively.
             const Real kbfs_fire  = kbfs_fire_arr(i, j, 0);
-            const Real kbfs_total = amrex::max(-u_star_arr(i, j, 0) * t_star_arr(i, j, 0) + kbfs_fire,
+            const Real kbfs_total = amrex::max(-us_eff_arr(i, j, 0) * ts_eff_arr(i, j, 0) + kbfs_fire,
                                                Real(0));
-            const Real wstar_fire = std::cbrt(CONST_GRAV / amrex::max(t10av_arr(i, j, 0), Real(1.0))
+            const Real wstar_fire = std::cbrt(CONST_GRAV / amrex::max(t10_eff_arr(i, j, 0), Real(1.0))
                                               * kbfs_total * pblh_corr_arr(i, j, 0));
             wstar_arr(i, j, 0) = (kbfs_fire > Real(0)) ? amrex::max(wstar_fire, wstar) : wstar;
             bool SFCFLG = (obuk_val <= Real(0));
