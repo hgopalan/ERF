@@ -10,7 +10,7 @@
 # building's means go to ibseb_set.csv every minute, every face to
 # faces/set every five minutes.
 #
-#   mpirun -np 4 erf_exec inputs        # about an hour on a laptop
+#   mpirun -np 4 erf_exec inputs        # about two hours on a laptop
 #
 stop_time = 21600.0
 amrex.fpe_trap_invalid = 1
