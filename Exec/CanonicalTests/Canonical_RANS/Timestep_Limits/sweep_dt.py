@@ -9,13 +9,15 @@ Usage:
 
 For each closure the deck (inputs_dt: 4 x 4 x 200 cells, dx = 800 m,
 dz = 5 m) is spun up for 1 h at dt = 5 s with the implicit column solve,
-once under the anelastic integrator and once compressible, and
+once under the anelastic integrator (midpoint stages, the only anelastic
+scheme that takes the solve) and once compressible, and
 checkpointed. Every rung of the step ladder restarts from that checkpoint
 and takes --steps steps at the rung's dt (erf.change_max is lifted so the
 new step applies at once instead of growing 10 % per step from 5 s):
 
   explicit anelastic     anelastic checkpoint,    erf.vert_implicit = false
-  implicit anelastic     anelastic checkpoint,    erf.vert_implicit = true
+  implicit anelastic     anelastic checkpoint,    erf.vert_implicit = true,
+                         erf.anelastic_type = MidPoint
   implicit compressible  compressible checkpoint, erf.vert_implicit = true,
                          acoustic substeps pinned at a fast step of 2 s
 
@@ -81,13 +83,13 @@ ANELASTIC = ["erf.anelastic=1", "erf.use_fft=true"]
 COMPRESSIBLE = ["erf.anelastic=0", "erf.use_fft=false"]
 # spin-up integrator per checkpoint family; both use the implicit column solve
 FAMILIES = {
-    "anelastic": ANELASTIC + ["erf.vert_implicit=true"],
+    "anelastic": ANELASTIC + ["erf.vert_implicit=true", "erf.anelastic_type=MidPoint"],
     "compressible": COMPRESSIBLE + ["erf.vert_implicit=true"],
 }
 # (integrator, checkpoint family, overrides)
 MODES = [
     ("explicit anelastic", "anelastic", ANELASTIC + ["erf.vert_implicit=false"]),
-    ("implicit anelastic", "anelastic", ANELASTIC + ["erf.vert_implicit=true"]),
+    ("implicit anelastic", "anelastic", ANELASTIC + ["erf.vert_implicit=true", "erf.anelastic_type=MidPoint"]),
     ("implicit compressible", "compressible", COMPRESSIBLE + ["erf.vert_implicit=true"]),
 ]
 

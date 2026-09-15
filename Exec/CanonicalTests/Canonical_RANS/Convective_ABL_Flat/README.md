@@ -14,7 +14,7 @@ ceiling, since zi is about 1 km).
 | --- | --- |
 | domain | 2560 x 2560 x 2000 m |
 | grid | 8 x 8 x 100, dz = 20 m, first cell centre 10 m |
-| time step | 5 s fixed, anelastic with FFT, implicit column solve of theta and KE (`erf.vert_implicit = true`; explicit diffusion needs 2 s since K/rho reaches 40 m^2/s) |
+| time step | 5 s fixed, anelastic with FFT, implicit column solve of theta and KE (`erf.vert_implicit = true` with `erf.anelastic_type = MidPoint`; explicit diffusion needs 2 s since K/rho reaches 40 m^2/s) |
 | closure | `erf.rans_type = kEqn`, AL01 defaults, `dirichlet_k = true` |
 | physics run | 4 h (2880 steps), about 1 min on 2 ranks |
 | smoke run | 40 steps (`ctest -R RANS_Convective_ABL_Flat`) |

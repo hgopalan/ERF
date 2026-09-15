@@ -77,6 +77,18 @@ AMREX_ENUM(SubsteppingType,
 );
 
 /**
+ * @brief Two-stage scheme used by the anelastic time integrator.
+ *
+ * RK2 is the SSP (Heun) scheme: both stages advance a full timestep from the old
+ * state and the second averages the two slow sources.  MidPoint advances only a
+ * half timestep in the first stage, which makes the vertical diffusion second
+ * order in time with an implicit solve in the first stage alone.
+ */
+AMREX_ENUM(AnelasticType,
+    RK2, MidPoint
+);
+
+/**
  * @brief Vertical mesh representation.
  */
 AMREX_ENUM(MeshType,
@@ -174,6 +186,8 @@ enum Rayleigh {
 enum Sponge {
     ubar_sponge, vbar_sponge, nvars_sponge
 };
+
+static const std::string BoundaryFaceName[] = {"xlo", "ylo", "zlo", "xhi", "yhi", "zhi"};
 
 /**
  * @brief The moisture data carried by the active microphysics scheme.
@@ -941,6 +955,25 @@ struct SolverChoice {
         }
 
         // *******************************************************************************
+        // Read anelastic_type and allow for different values at each level
+        // *******************************************************************************
+        anelastic_type.resize(max_level+1);
+
+        for (int i = 0; i <= max_level; i++) {
+            anelastic_type[i] = AnelasticType::RK2;
+        }
+
+        for (int i = 0; i <= max_level; i++) {
+            query_one_or_per_level_enum_case_insensitive(
+                pp, "anelastic_type", anelastic_type[i], i, max_level);
+        }
+
+        if (pp.contains("anelastic_type") && !any_anelastic) {
+            amrex::Print() << "Ignoring erf.anelastic_type because no level is anelastic" << std::endl;
+            for (int i = 0; i <= max_level; i++) { anelastic_type[i] = AnelasticType::RK2; }
+        }
+
+        // *******************************************************************************
         // Read substepping_type and allow for different values at each level
         // *******************************************************************************
         substepping_type.resize(max_level+1);
@@ -958,8 +991,6 @@ struct SolverChoice {
 
         pp.queryAdd("beta_s", beta_s);
 
-
-
         // *******************************************************************************
         // Error check on deprecated input
         // *******************************************************************************
@@ -967,8 +998,6 @@ struct SolverChoice {
         if (nvals_old > 0) {
             amrex::Error("The no_substepping flag is deprecated -- set substepping_type instead");
         }
-
-        // *******************************************************************************
 
         pp.queryAdd("ncorr", ncorr);
         // Wall distance on a terrain-fitted mesh (RANS): "poisson" (Tucker 2003
@@ -1347,8 +1376,6 @@ struct SolverChoice {
         } // uses_shoc_family
 
         // Do not allow implicit vertical diff if user turns it off
-        // (queried before queryAdd, which would enter the default into the table)
-        const bool user_set_vert_implicit = pp.contains("vert_implicit") || pp.contains("vert_implicit_fac");
         bool do_vert_implicit = true;
         pp.queryAdd("vert_implicit", do_vert_implicit);
         if (!do_vert_implicit) {
@@ -1360,24 +1387,34 @@ struct SolverChoice {
             }
         }
 
-        // Anelastic: every solve works as it does with substepping. The theta
-        // and momentum solves are folded into the slow tendency before the
-        // stage update (so under anelastic the momenta are diffused and then
-        // projected, which is the order the divergence constraint needs), the
-        // KE and moisture solves act on the stage result, and all of them take
-        // half the step on the trapezoidal second stage. Only w stays explicit
-        // unless ERF_IMPLICIT_W is built in, as in the compressible path.
-        // The solve is opt-in under anelastic (erf.vert_implicit = true or an
-        // explicit erf.vert_implicit_fac) so that existing anelastic runs keep
-        // their fully explicit answer.
+        // The implicit vertical diffusion is only second order in an anelastic run when
+        // the two stages are the midpoint method and the solve is done in the first stage
+        // alone: S^* = S^n + (dt/2) F(S^*) and S^{n+1} = S^n + dt F(S^*) give
+        // S^* = (S^n + S^{n+1})/2, i.e. the implicit midpoint rule.  Solving again in the
+        // second stage would reduce the pair to backward Euler, and with the RK2 (Heun)
+        // stages there is no stage that plays the role of the midpoint at all.
         for (int lev = 0; lev <= max_level; lev++) {
-            if (anelastic[lev] && do_vert_implicit && !user_set_vert_implicit) {
-                amrex::Print() << "Anelastic at level " << lev
-                               << ": vertical diffusion stays explicit; set erf.vert_implicit = true "
-                               << "for the implicit column solve" << std::endl;
-                vert_implicit_fac[lev][0] = zero;
-                vert_implicit_fac[lev][1] = zero;
-                vert_implicit_fac[lev][2] = zero;
+            if (anelastic[lev]) {
+                if (anelastic_type[lev] == AnelasticType::RK2) {
+                    amrex::Print() << "Turning off native vertical implicit solve flag because anelastic at level " << lev
+                                   << " with RK2 scheme." << std::endl;
+                    vert_implicit_fac[lev][0] = zero;
+                    vert_implicit_fac[lev][1] = zero;
+                    vert_implicit_fac[lev][2] = zero;
+                } else if (anelastic_type[lev] == AnelasticType::MidPoint) {
+                    if (do_vert_implicit && vert_implicit_fac[lev][0] != one) {
+                        amrex::Print() << "Forcing implicit factor 1 in first stage of MidPoint to ensure second-order accuracy." << std::endl;
+                        vert_implicit_fac[lev][0] = one;
+                    }
+                    if (vert_implicit_fac[lev][1] > zero) {
+                        amrex::Print() << "Turning off the second-stage vertical implicit solve at level " << lev
+                                       << " because anelastic with MidPoint solves in the first stage only."
+                                       << std::endl;
+                    }
+                    // The anelastic integrator only takes two stages, so [2] is never used
+                    vert_implicit_fac[lev][1] = zero;
+                    vert_implicit_fac[lev][2] = zero;
+                }
             }
         }
 
@@ -1668,7 +1705,9 @@ struct SolverChoice {
         for (int lev = 0; lev <= max_level; lev++) {
             amrex::Print() << "At level " << lev << " : " << std::endl;
             if (anelastic[lev]) {
-                amrex::Print() << "   anelastic with no substepping" << std::endl;
+                amrex::Print() << "   anelastic with no substepping, using the "
+                               << ((anelastic_type[lev] == AnelasticType::MidPoint) ? "MidPoint" : "RK2")
+                               << " integrator" << std::endl;
             } else {
                if (substepping_type[lev] == SubsteppingType::None) {
                    amrex::Print() << "   compressible with no substepping" << std::endl;
@@ -1925,6 +1964,7 @@ struct SolverChoice {
 
     amrex::Vector<SubsteppingType> substepping_type;
     amrex::Vector<int> anelastic;
+    amrex::Vector<AnelasticType> anelastic_type;
     amrex::Vector<int> fixed_density;
     amrex::Vector<int> project_initial_velocity;
     amrex::Vector<int> buoyancy_type;
@@ -2300,6 +2340,8 @@ struct SolverChoice {
  * @brief Acoustic substepping type for each AMR level.
  * @var SolverChoice::anelastic
  * @brief Per-level flag selecting anelastic dynamics.
+ * @var SolverChoice::anelastic_type
+ * @brief Per-level two-stage scheme used by the anelastic integrator.
  * @var SolverChoice::fixed_density
  * @brief Per-level flag selecting fixed-density treatment.
  * @var SolverChoice::project_initial_velocity

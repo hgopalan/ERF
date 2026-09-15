@@ -568,7 +568,8 @@ projection and are registered only when the build enables FFT
 A sixth case, ``Timestep_Limits``, measures the largest stable time step of
 the vertical eddy diffusion on a neutral 4 x 4 x 200 column (dx = 800 m,
 dz = 5 m) for the :math:`k` closure, Deardorff and MRF under explicit
-anelastic, implicit anelastic and implicit compressible integration. Its
+anelastic, implicit anelastic (``erf.anelastic_type = MidPoint``) and implicit
+compressible integration. Its
 driver spins each closure up for 1 h, restarts from the checkpoint over a
 ladder of time steps from 0.125 s to 1024 s, and checks that the explicit
 step lies within a factor 2 of :math:`\Delta z^2 / (2 K)` and that both
