@@ -476,7 +476,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                 amrex::Print() << "[FIRE DEBUG] Fire advance using SYNCHRONOUS coupling with POST-dycore wind at t="
                                << time << ", dt=" << dt_lev << std::endl;
             }
-            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer,
+            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer[Orientation::zlo()],
                                   vars_new[lev][Vars::xvel],
                                   vars_new[lev][Vars::yvel],
                                   *z_phys_cc[lev],
@@ -486,7 +486,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                 amrex::Print() << "[FIRE DEBUG] Fire advance using LAGGED coupling with PRE-dycore wind at t="
                                << time << ", dt=" << dt_lev << std::endl;
             }
-            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer,
+            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer[Orientation::zlo()],
                                   vars_old[lev][Vars::xvel],
                                   vars_old[lev][Vars::yvel],
                                   *z_phys_cc[lev],
@@ -497,7 +497,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                 amrex::Print() << "[FIRE DEBUG] Fire advance using PASSIVE coupling with PRE-dycore wind at t="
                                << time << ", dt=" << dt_lev << std::endl;
             }
-            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer,
+            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer[Orientation::zlo()],
                                   vars_old[lev][Vars::xvel],
                                   vars_old[lev][Vars::yvel],
                                   *z_phys_cc[lev],
