@@ -218,18 +218,14 @@ Implicit vertical diffusion
 The column tridiagonal solve of ERF (``erf.vert_implicit``, on by default
 with the compressible integrator) removes the explicit limit
 :math:`\Delta t < \Delta z^2 / (2K)` for the quantities it covers.
-Under the anelastic integrator it is opt-in: give
-:cpp:`erf.vert_implicit = true` (or an explicit
-:cpp:`erf.vert_implicit_fac`) and :math:`u`, :math:`v`, :math:`\theta`,
-:math:`k` and moisture are all solved implicitly. The momentum solve is
-folded into the slow tendency before the stage update, so the momenta are
-diffused and then projected, which is the order the divergence constraint
-needs; :math:`w` stays explicit unless ERF is built with
-``ERF_IMPLICIT_W``, as in the compressible path. The anelastic update is
-trapezoidal: the second stage averages the first-stage tendency,
-recovered from the state difference, with the new one, so the first
-stage's implicit increment is already half-counted and the implicit
-operator on the second stage acts with half the step. The solve takes
+Under the anelastic integrator it needs the midpoint stages,
+:cpp:`erf.anelastic_type = MidPoint`: the first stage advances half the
+step with the implicit solve and the second takes no solve, which is the
+implicit midpoint rule and second order in time. With the default RK2
+stages there is no midpoint stage, so ERF turns the solve off (see
+:ref:`the inputs <sec:Inputs>` for :cpp:`erf.anelastic_type`). :math:`w` stays
+explicit unless ERF is built with ``ERF_IMPLICIT_W``, as in the
+compressible path. The solve takes
 each box's vertical extent as the whole column, so no level-0 box may be
 cut in :math:`z` (the z entry of ``amr.max_grid_size`` must reach
 ``amr.n_cell``); ERF checks this at start-up.
