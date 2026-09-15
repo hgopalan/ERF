@@ -184,8 +184,13 @@ void FireLayer::initialize(const ERF& erf,
     const DistributionMapping& dm_atm = erf.DistributionMap(0);
     BoxArray ba_atm_2d = ba_atm;
     ba_atm_2d.coarsen(IntVect(1, 1, erf.Geom(0).Domain().length(2)));
-    m_Q_atm_prev = std::make_unique<MultiFab>(ba_atm_2d, dm_atm, 1, 0);
-    m_Q_lat_atm_prev = std::make_unique<MultiFab>(ba_atm_2d, dm_atm, 1, 0);
+    // Ghost columns for the MRF fire thermal excess, which reads the fluxes in the
+    // halo around every tile. ERF's state carries ComputeGhostCells() + 1 columns,
+    // at most 5, and ComputeDiffusivityMRF keeps its halo within the state's and
+    // checks these fluxes against it; update_atm_flux_buffer() fills them.
+    const IntVect ng_flux(5, 5, 0);
+    m_Q_atm_prev = std::make_unique<MultiFab>(ba_atm_2d, dm_atm, 1, ng_flux);
+    m_Q_lat_atm_prev = std::make_unique<MultiFab>(ba_atm_2d, dm_atm, 1, ng_flux);
     m_Q_atm_prev->setVal(0.0_rt);
     m_Q_lat_atm_prev->setVal(0.0_rt);
 
@@ -1700,6 +1705,13 @@ void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
         }
         m_Q_lat_atm_prev->setVal(0.0_rt);
     }
+
+    // The MRF fire thermal excess reads these fluxes in the halo columns around
+    // every tile; give them the neighbouring box's value (and the edge column's
+    // outside a non-periodic face), so a column sees the same flux whichever box
+    // holds it.
+    fire_fill_boundary(*m_Q_atm_prev, geom_atm);
+    if (m_Q_lat_atm_prev) { fire_fill_boundary(*m_Q_lat_atm_prev, geom_atm); }
 }
 
 void FireLayer::apply_polygon_ignition(amrex::Real t_ign)

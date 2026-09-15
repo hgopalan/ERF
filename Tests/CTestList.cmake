@@ -1438,6 +1438,11 @@ add_test_fire(FireLevelSetEllipse_ellipse   FireLevelSetEllipse   inputs_ellipse
 add_test_fire(FireNearWall_noib_mask_wall   FireNearWall          inputs_noib_mask_wall      40)
 add_test_fire(FirePerimeterIgnition_t0      FirePerimeterIgnition inputs_t0                  40)
 add_test_fire(FireRestart_levelset_straight FireRestart           inputs_levelset_straight   40 NRANKS 1)
+# the MRF fire thermal excess reads the lagged fire flux in the halo columns of every
+# tile; the coupled restart deck with MRF and the option on stopped on an out-of-bound
+# read in the first step before the flux carried ghost columns
+add_test_fire(FireMrfThermalExcess          FireRestart           inputs_coupled_straight    40 NRANKS 1
+    RUNTIME_OPTIONS "erf.pbl_type=MRF erf.pbl_mrf_fire_thermal_excess=true")
 add_test_fire(FireRosComparison_rothermel   FireRosComparison     inputs_rothermel_isotropic 40 NRANKS 1)
 add_test_fire(FireScottBurgan_gr2           FireScottBurgan       inputs_sb_gr2              40)
 add_test_fire(FireStickMoisture_stick       FireStickMoisture     inputs_stick               40)

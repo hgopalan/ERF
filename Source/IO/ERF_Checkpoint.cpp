@@ -1925,6 +1925,11 @@ ERF::ReadCheckpointFileFire ()
     restore_optional(m_fire_layer->get_heat_flux_mut(),      "FireHeatFlux");
     restore_optional(m_fire_layer->get_Q_atm_prev_mut(),     "FireQAtmPrev");
     restore_optional(m_fire_layer->get_Q_lat_atm_prev_mut(), "FireQLatAtmPrev");
+    // Their ghost columns feed the MRF fire thermal excess. VisMF restores the
+    // valid cells (a checkpoint written before the fluxes had ghosts holds none),
+    // so refill the ghosts the way update_atm_flux_buffer() does.
+    if (amrex::MultiFab* q = m_fire_layer->get_Q_atm_prev_mut()) { fire_fill_boundary(*q, geom[0]); }
+    if (amrex::MultiFab* q = m_fire_layer->get_Q_lat_atm_prev_mut()) { fire_fill_boundary(*q, geom[0]); }
     restore_optional(m_fire_layer->get_heat_load_mut(),      "FireHeatLoad");
     restore_optional(m_fire_layer->get_peak_intensity_mut(), "FirePeakIntensity");
     restore_optional(m_fire_layer->get_ember_landings_mut(), "FireEmberLandings");
