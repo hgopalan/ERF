@@ -1289,6 +1289,14 @@ if(ERF_ENABLE_MPI AND NOT WIN32)
   add_test_tiling_parity(ABL_YSUNew_Tiling_Smooth ABL_MRF_Tiling "00010" "00010"
       RUNTIME_OPTIONS "erf.pbl_type=YSUNew erf.most.pblh_calc=YSU erf.enable_pblh_smoothing=true"
       VARYING_3D "Lturb Kmv" VARYING_2D "pblh u_star")
+  # The immersed-boundary-aware MRF and YSUNew (erf.pbl_ib_aware) build their
+  # per-column surface and work arrays on the tile work box; a cube by
+  # immersed forcing makes them differ from column to column.
+  add_test_tiling_parity(PBL_IBAware_MRF_Tiling    PBL_IBAware_Tiling "00010" "00010"
+      VARYING_3D "Kmv" VARYING_2D "pblh u_star")
+  add_test_tiling_parity(PBL_IBAware_YSUNew_Tiling PBL_IBAware_Tiling "00010" "00010"
+      RUNTIME_OPTIONS "erf.pbl_type=YSUNew erf.most.pblh_calc=YSU"
+      VARYING_3D "Kmv" VARYING_2D "pblh u_star")
 endif()
 # A column PBL scheme on boxes split in z must stop at start-up, not at the kernel assert in step 1
 add_test_abort(ABL_MRF_ZSplit_abort ${PROJECT_SOURCE_DIR}/Tests/test_files/ABL_MRF_Tiling ABL_MRF_Tiling.i
@@ -1864,6 +1872,11 @@ function(add_test_most_zref TEST_NAME)
 endfunction(add_test_most_zref)
 
 add_test_most_zref(MOST_Zref_Stretched)
+
+# Immersed-boundary surface energy balance on the faces of a height-map cube
+# (prognostic skin, slab conduction, heat flux into the air), 40 steps.
+add_test_r(IBSEB_Cube                        ""  "erf_exec" "plt00040")
+add_test_r(PBL_IBAware_MRF_Smoothing         ""  "erf_exec" "plt00010")
 
 #=============================================================================
 # Performance tests
