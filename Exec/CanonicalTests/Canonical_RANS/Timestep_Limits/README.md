@@ -8,7 +8,7 @@ MRF PBL scheme (`erf.pbl_type = MRF`), each under three integrators:
 | integrator | inputs |
 | --- | --- |
 | explicit anelastic | `erf.anelastic = 1`, `erf.vert_implicit = false` |
-| implicit anelastic | `erf.anelastic = 1`, `erf.vert_implicit = true` |
+| implicit anelastic | `erf.anelastic = 1`, `erf.vert_implicit = true`, `erf.anelastic_type = MidPoint` (RK2 anelastic turns the solve off) |
 | implicit compressible | `erf.anelastic = 0`, `erf.vert_implicit = true`, acoustic substeps |
 
 The grid is coarse in the horizontal and fine in the vertical, as in a RANS
