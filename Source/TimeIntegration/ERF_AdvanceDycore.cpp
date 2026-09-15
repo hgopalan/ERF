@@ -651,7 +651,10 @@ void ERF::advance_dycore (int level,
                                   get_eb(level),
                                   false, // vert_only
                                   qheating_rates[level].get(),
-                                Q_fire_for_pbl);
+                                  (solverChoice.terrain_type == TerrainType::ImmersedForcing ||
+                                   solverChoice.buildings_type == BuildingsType::ImmersedForcing) ?
+                                      terrain_blanking[level].get() : nullptr,
+                                  Q_fire_for_pbl);
         // Phase 14: Print debug info about dust scalar diffusivity
 #ifdef ERF_USE_DUST
         // Check if dust layer is active and debug is enabled

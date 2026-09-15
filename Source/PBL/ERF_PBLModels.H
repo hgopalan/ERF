@@ -186,6 +186,7 @@ ComputeDiffusivityMRF (const amrex::MultiFab& xvel,
                        const std::unique_ptr<amrex::MultiFab>& z_phys_nd,
                        const std::unique_ptr<amrex::MultiFab>& z_phys_cc,
                        const MoistureComponentIndices& moisture_indices,
+                       const amrex::MultiFab* terrain_blank = nullptr,
                        const amrex::MultiFab* qheating_rates = nullptr,
                        const amrex::MultiFab* Q_fire_atm = nullptr);
 
@@ -234,7 +235,8 @@ ComputeDiffusivityYSUNew (const amrex::MultiFab& xvel,
                           const std::unique_ptr<amrex::MultiFab>& z_phys_nd,
                           const std::unique_ptr<amrex::MultiFab>& z_phys_cc,
                           const MoistureComponentIndices& moisture_indices,
-                          const amrex::MultiFab* qheating_rates = nullptr);
+                          const amrex::MultiFab* qheating_rates = nullptr,
+                          const amrex::MultiFab* terrain_blank = nullptr);
 
 /**
  * Function for computing vertical derivatives for use in PBL model

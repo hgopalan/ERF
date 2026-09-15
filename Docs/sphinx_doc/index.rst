@@ -71,6 +71,7 @@ In addition to this documentation, there is API documentation for ERF generated 
    ProblemInputs.rst
    theory/Forest.rst
    theory/Fire.rst
+   theory/ImmersedBoundarySEB.rst
    theory/HindCast.rst
    theory/UnitsAndConstants.rst
 
