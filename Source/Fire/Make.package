@@ -42,6 +42,7 @@ ifeq ($(USE_FIRE), TRUE)
   CEXE_headers += Fire/ERF_FuelMap.H
   CEXE_headers += Fire/ERF_LcpReader.H
   CEXE_headers += Fire/ERF_FireBreak.H
+  CEXE_headers += Fire/ERF_FireBoundaryGuard.H
   CEXE_headers += Fire/ERF_FuelBlending.H
   CEXE_headers += Fire/ERF_FireAcceleration.H
   CEXE_headers += Fire/ERF_BalbiModel.H

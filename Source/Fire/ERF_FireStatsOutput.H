@@ -92,7 +92,7 @@ write_fire_stats_header(const std::string& filename)
 
     out << "step,time_s,burned_area_ha,perimeter_km,"
            "active_front_cells,head_ros_ms,major_axis_m,minor_axis_m,heat_flux_max_Wm2,"
-           "spot_fires_this_step,max_spot_dist_m\n";
+           "spot_fires_this_step,max_spot_dist_m,edge_band_cells,edge_contact_time_s\n";
     out.close();
 }
 
@@ -115,6 +115,9 @@ write_fire_stats_header(const std::string& filename)
  * @param[in] Q_mf              Optional heat flux field for max heat flux tracking
  * @param[in] albini_mf         Optional Albini spotting diagnostic MultiFab (4 comp).
  *                              comp 3 = active spot flag, comp 2 = max landing dist [m].
+ * @param[in] n_edge_cells      Burning cells within the boundary guard band this step
+ *                              (erf.fire.boundary_guard_cells); 0 when the band is off.
+ * @param[in] edge_contact_time Time [s] the fire first entered the band, -1 until then.
  */
 inline void
 append_fire_stats(const amrex::MultiFab& phi,
@@ -125,7 +128,9 @@ append_fire_stats(const amrex::MultiFab& phi,
                   const std::string& filename,
                   const amrex::MultiFab* R_mf = nullptr,
                   const amrex::MultiFab* Q_mf = nullptr,
-                  const amrex::MultiFab* albini_mf = nullptr)
+                  const amrex::MultiFab* albini_mf = nullptr,
+                  amrex::Long n_edge_cells = 0,
+                  amrex::Real edge_contact_time = amrex::Real(-1.0))
 {
     using namespace amrex;
 
@@ -276,7 +281,9 @@ append_fire_stats(const amrex::MultiFab& phi,
         << minor_axis_m << ","
         << Q_max << ","
         << n_spot_fires << ","
-        << max_spot_dist << "\n";
+        << max_spot_dist << ","
+        << n_edge_cells << ","
+        << edge_contact_time << "\n";
     out.close();
 }
 

@@ -4789,6 +4789,16 @@ Diagnostics and output
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.fire_stats_csv_file**               | Statistics CSV filename                                    | String                         | "fire_stats.csv"       |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.boundary_guard_cells**              | Width, in fire cells, of the band along every non-periodic | Integer >= 0                   | 2                      |
+|                                                | edge of the fire grid that the boundary guard watches      |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.boundary_guard_action**             | When a burning cell enters the band: "warn" prints once    | "none", "warn", "abort"        | "warn"                 |
+|                                                | and records the contact time, "abort" stops the run,       |                                |                        |
+|                                                | "none" checks nothing                                      |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.edge_reach_check**                  | Print once at ignition the distance to each edge against   | Boolean                        | true                   |
+|                                                | the largest rate of spread times the time left in the run  |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.probes**                            | Flat list of x y points [m] whose arrival time is printed  | Reals                          | none                   |
 |                                                | once                                                       |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+

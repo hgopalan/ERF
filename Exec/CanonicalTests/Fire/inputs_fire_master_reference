@@ -634,6 +634,21 @@ erf.fire.write_fire_stats_csv = true
 # CSV output filename for fire statistics
 erf.fire.fire_stats_csv_file = "fire_stats.csv"
 
+# The fire at the edge of the fire grid: nothing outside it burns and a front
+# that reaches a non-periodic edge is clipped there. The guard band of
+# WRF-SFIRE (fire_boundary_guard): the width in fire cells along every
+# non-periodic edge, and what the first burning cell inside it does:
+#   "warn"  (default) print once, record edge_contact_time_s in the CSV, continue
+#   "abort" stop the run, as WRF-SFIRE does by default
+#   "none"  check nothing
+erf.fire.boundary_guard_cells = 2
+erf.fire.boundary_guard_action = "warn"
+
+# Once, on the first step with a burning cell: the distance from the burning
+# region to each edge against the largest rate of spread times the time left
+# in the run, with a warning for every edge the fire can reach
+erf.fire.edge_reach_check = true
+
 # ============================================================================
 # FIRE-ATMOSPHERE COUPLING (Phase 6)
 # ============================================================================

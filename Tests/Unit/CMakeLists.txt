@@ -183,6 +183,7 @@ if(ERF_ENABLE_FIRE)
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestLcpReader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFarsiteSpreadAccumulation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireAcceleration.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireBoundaryGuard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestLevelSetEllipse.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestBehaveTransfer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestBehaveScottBurgan.cpp

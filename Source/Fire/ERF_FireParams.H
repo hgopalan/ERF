@@ -159,6 +159,19 @@ struct FireParams
     // Terrain file for fine-grid terrain data
     std::string       terrain_file_name       = "";   ///< Path to terrain file for fine-grid interpolation
 
+    // The fire at the edge of the fire grid. Nothing outside the grid burns, so
+    // a front that reaches a non-periodic edge is clipped there. The guard band
+    // of WRF-SFIRE (fire_boundary_guard): once a burning cell lies within
+    // boundary_guard_cells of a non-periodic edge, "warn" prints a message once
+    // and records the contact time (in the statistics CSV and the checkpoint),
+    // "abort" stops the run as SFIRE does by default, "none" checks nothing.
+    int               boundary_guard_cells    = 2;      ///< Band width in fire cells from each non-periodic edge
+    std::string       boundary_guard_action   = "warn"; ///< "none", "warn" or "abort" when the fire enters the band
+    // On the first step with a burning cell, print the distance from the burning
+    // region to each non-periodic edge against the largest rate of spread times
+    // the time left in the run, and warn for every edge the fire can reach.
+    bool              edge_reach_check        = true;   ///< Reach estimate printed once at ignition
+
     // CSV output for fire statistics (burned area, perimeter, etc.)
     bool              write_fire_stats_csv    = true; ///< Write burned area and perimeter CSV
     std::string       fire_stats_csv_file     = "fire_stats.csv"; ///< Fire statistics output filename
@@ -843,6 +856,11 @@ struct FireParams
        pp.query("fire_atm_feedback", fire_atm_feedback);
        pp.query("coupling_type", coupling_type);
        one_of("coupling_type", coupling_type, {"passive", "lagged", "synchronous"});
+       pp.query("boundary_guard_cells", boundary_guard_cells);
+       if (boundary_guard_cells < 0) fail("erf.fire.boundary_guard_cells must be >= 0, got " + std::to_string(boundary_guard_cells));
+       pp.query("boundary_guard_action", boundary_guard_action);
+       one_of("boundary_guard_action", boundary_guard_action, {"none", "warn", "abort"});
+       pp.query("edge_reach_check", edge_reach_check);
        positive("heat_flux_alfg", heat_flux_alfg);
        nonneg("fire_atm_feedback", fire_atm_feedback);   // 0 = one-way, the documented switch
        pp.query("inject_latent", inject_latent);
@@ -1426,6 +1444,9 @@ struct FireParams
     bool is_passive()     const { return coupling_type == "passive"; }
     bool is_lagged()      const { return coupling_type == "lagged"; }
     bool is_synchronous() const { return coupling_type == "synchronous"; }
+    /// The guard band is checked at all when it has a width and an action.
+    bool guards_edge()  const { return boundary_guard_cells > 0 && boundary_guard_action != "none"; }
+    bool guard_aborts() const { return boundary_guard_action == "abort"; }
     bool injects_flux()   const { return is_lagged() || is_synchronous(); }
     /// The CFBM partition: sensible flux scaled by the dry-fuel fraction 1 / (1 + M_f).
     bool cfbm_partition() const { return heat_flux_partition == "cfbm"; }
