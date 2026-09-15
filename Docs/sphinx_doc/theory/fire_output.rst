@@ -121,12 +121,17 @@ fire step is appended to :cpp:`erf.fire.fire_stats_csv_file` (default
 
 ``step, time_s, burned_area_ha, perimeter_km, active_front_cells, head_ros_ms,
 major_axis_m, minor_axis_m, heat_flux_max_Wm2, spot_fires_this_step,
-max_spot_dist_m``.
+max_spot_dist_m, edge_band_cells, edge_contact_time_s``.
 
 Burned area and perimeter come from the arrival-time field, the head rate is
 the maximum rate of spread over burning cells, and the axes are those of the
-burned region's bounding ellipse. The last two columns are zero unless
-spotting is on.
+burned region's bounding ellipse. The spotting columns are zero unless
+spotting is on. The last two are the boundary guard of
+:ref:`sec:FireGridEdge`: the number of burning cells within
+:cpp:`erf.fire.boundary_guard_cells` of a non-periodic edge of the fire grid
+on this step, and the time the fire first entered that band, :math:`-1`
+until it does. Both are zero and :math:`-1` with
+:cpp:`erf.fire.boundary_guard_action = "none"`.
 
 Arrival-time probes
 -------------------

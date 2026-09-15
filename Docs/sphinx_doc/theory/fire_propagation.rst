@@ -500,3 +500,62 @@ interior ignites at the perimeter time with its fuel intact, which releases
 the heat of the entire burnt area at once. The regression test
 ``Exec/RegTests/FirePerimeterIgnition`` checks the interior state cell by
 cell from the fire plotfile.
+
+.. _sec:FireGridEdge:
+
+The edge of the fire grid
+-------------------------
+
+Nothing outside the fire grid burns. At a periodic edge the fire wraps around,
+as the atmosphere does. At a non-periodic edge the ghost cells take the nearest
+interior value on every exchange, so a front that reaches the edge stops there:
+the cells along the wall burn, their heat is released, and the part of the fire
+that would have continued outside the domain is clipped. Nothing is exported
+to a larger domain. This is the guard-off behaviour of WRF-SFIRE, whose fire
+mesh is likewise the whole innermost domain and whose front is likewise
+clipped at its edge.
+
+Three reports tell a deck's author about it.
+
+**The reach estimate at ignition.** On the first fire step with a burning cell,
+:cpp:`erf.fire.edge_reach_check` (default true) prints the distance from the
+nearest burning cell to each non-periodic edge, the largest rate of spread on
+the grid (before the startup acceleration scales it), and the time left in the
+run from ``stop_time`` or ``max_step``, whichever ends it first. For every
+edge closer than that rate times that time it prints a warning naming the
+edge. The rate is the one under the wind at ignition and the estimate is a
+straight line at the head rate, so it errs on the side of warning: a fire the
+wind later turns away from the edge is not warned about again, and a fire that
+accelerates later is not caught. A run without ``stop_time`` and ``max_step``
+prints the distances and the time to each edge at that rate, and no warning.
+
+**The guard band.** :cpp:`erf.fire.boundary_guard_cells` (default 2) is the
+width, in fire cells, of a band along every non-periodic edge, the
+``fire_boundary_guard`` of WRF-SFIRE with its default. Every fire step counts
+the burning cells within it. :cpp:`erf.fire.boundary_guard_action` decides
+what the first contact does:
+
+- ``"warn"`` (default) prints a warning once, naming the edges touched and the
+  time, and records that time as ``edge_contact_time_s`` in the statistics
+  CSV, whose ``edge_band_cells`` column carries the count on every step
+  (:ref:`sec:FireOutput`). The contact time is in the checkpoint, so a restart
+  neither repeats the warning nor forgets that it fired. The run continues
+  with the front clipped at the edge.
+- ``"abort"`` stops the run with a message naming the edge and the time, as
+  WRF-SFIRE does by default: a fire at the edge means the domain was too
+  small, and a stop is cheaper than a forecast of a clipped fire.
+- ``"none"`` checks nothing; the CSV columns stay 0 and :math:`-1`.
+
+A width of zero also turns the band off. A grid periodic in both directions
+has no edge to guard and the check returns at once.
+
+The regression test ``Exec/RegTests/FireBoundaryGuard`` runs a prescribed
+rate of 1 m/s on 2 m fire cells: a disc whose east edge is 10 m from the wall
+enters the 4 m band at 7 s, a disc 190 m from every wall never does, and a
+disc overlapping the wall stops an ``"abort"`` run on its first step. The unit
+test ``ERF_GTestFireBoundaryGuard`` checks the band count per edge, the
+corner counted once, periodic edges skipped, and the distances.
+
+The band and the estimate are what a fire confined to a refinement box will
+need once the fire grid can sit on a finer atmospheric level: the contact is
+then the signal that the box should grow, not a reason to stop.

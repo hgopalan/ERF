@@ -251,6 +251,9 @@ explains what each row should show:
 - ``FireExposure``: the per-structure exposure CSV (arrival and residence of
   the front along each wall, peak intensity, heat load, embers) with and
   without immersed-forcing buildings and with spotting.
+- ``FireBoundaryGuard``: the fire at the edge of the fire grid, the reach
+  estimate at ignition and the guard band's contact time in the statistics
+  CSV, with the abort action stopping a run on its first step.
 
 Where each feature is exercised:
 
@@ -306,6 +309,8 @@ Where each feature is exercised:
      - canonical ``Verification/Slope_No_Wind``, ``Core_Physics/ROS_Slope_Effects``, ``Terrain_Wind_Coupling``; ``Unit_Tests/test_terrain_projection.py``
    * - The WUI features together: structure mask, wall extrapolation, open-column wind, exposure, spotting, immersed buildings with heat coupling
      - canonical ``WUI_Subdivision`` (:ref:`sec:WUIValidation`)
+   * - The edge of the fire grid: reach estimate at ignition, boundary guard band (warn, abort)
+     - ``FireBoundaryGuard``; gtest ``ERF_GTestFireBoundaryGuard``
 
 Not yet covered by any test: restart of the spotting and crown-fire state.
 The fire-dust coupling has its own cases under ``Exec/CanonicalTests/Hazard``

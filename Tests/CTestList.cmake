@@ -1468,6 +1468,13 @@ add_test_fire_abort(FireBadCoupling_abort     FireRestart           inputs_level
 # the fire and dust layers live on level 0 only
 add_test_fire_abort(FireAmrLevel_abort        FireRestart           inputs_levelset_straight
     "The fire module runs on a single level" "amr.max_level=1 amr.ref_ratio=2 erf.regrid_int=1000")
+# the fire at the edge of the fire grid: the guard band records the first contact in the
+# statistics CSV and warns (warn), never fires on a fire far from every wall (far), or
+# stops the run on a disc that starts inside the band (abort)
+add_test_fire_check(FireBoundaryGuard_warn    FireBoundaryGuard     inputs_warn  40 check_guard.py NRANKS 1)
+add_test_fire_check(FireBoundaryGuard_far     FireBoundaryGuard     inputs_far   40 check_guard.py NRANKS 1)
+add_test_fire_abort(FireBoundaryGuard_abort   FireBoundaryGuard     inputs_abort
+    "reached the boundary guard band" "")
 # every documented fire/dust key is read, every read key is documented, no deck sets an unread key
 add_test(FireDustInputsDocs ${ERF_RANS_PYTHON} ${PROJECT_SOURCE_DIR}/Tests/check_fire_dust_inputs.py ${PROJECT_SOURCE_DIR})
 set_tests_properties(FireDustInputsDocs PROPERTIES LABELS "docs;fire" TIMEOUT 120)

@@ -1,0 +1,6 @@
+# Ignition in the centre, 190 m from every wall: no edge is within reach in
+# 20 s, the band is never entered and the contact time stays -1.
+FILE = inputs_base
+erf.fire.ignition_x = 200.0
+erf.fire.boundary_guard_action = "warn"
+erf.fire.fire_stats_csv_file = "fire_stats_far.csv"

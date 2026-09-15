@@ -670,7 +670,11 @@ ERF::WriteCheckpointFile () const
             std::ofstream f(checkpointname + "/FireState");
             f << "step " << m_fire_layer->get_step() << "\n"
               << "levelset_subcycle_count " << m_fire_layer->get_levelset_subcycle_count() << "\n"
-              << std::setprecision(17) << "f_dry_prev " << m_fire_layer->get_f_dry_prev() << "\n";
+              << std::setprecision(17) << "f_dry_prev " << m_fire_layer->get_f_dry_prev() << "\n"
+              // the boundary guard: when the fire first entered the band (-1 if never), so a
+              // restart neither repeats the warning nor forgets that it fired
+              << "edge_contact_time " << m_fire_layer->get_edge_contact_time() << "\n"
+              << "edge_reach_checked " << (m_fire_layer->get_edge_reach_checked() ? 1 : 0) << "\n";
         }
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[FIRE] Fire state written to checkpoint " << checkpointname << "\n";
@@ -1936,6 +1940,10 @@ ERF::ReadCheckpointFileFire ()
                     int n; f >> n; m_fire_layer->set_levelset_subcycle_count(n);
                 } else if (key == "f_dry_prev") {   // the smoke emission divides the lagged flux by it
                     amrex::Real v; f >> v; m_fire_layer->set_f_dry_prev(v);
+                } else if (key == "edge_contact_time") {
+                    amrex::Real v; f >> v; m_fire_layer->set_edge_contact_time(v);
+                } else if (key == "edge_reach_checked") {
+                    int v; f >> v; m_fire_layer->set_edge_reach_checked(v != 0);
                 } else {
                     std::string skip; f >> skip;
                 }

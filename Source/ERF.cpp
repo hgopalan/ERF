@@ -1566,6 +1566,7 @@ ERF::InitData_post ()
             // layer handles that case itself, so it must not gate initialization.
             if (lev == 0 && m_fire_layer) {
                 m_fire_layer->initialize(*this, m_SurfaceLayer.get(), z_phys_nd[0].get(), m_fire_params);
+                m_fire_layer->set_run_end(stop_time, max_step);   // for the reach estimate at ignition
 
                 // Verify that at least one cell was marked during fire initialization,
                 // unless the ignition is deferred or absent on purpose: a perimeter polygon stamped at

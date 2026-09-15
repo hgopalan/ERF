@@ -511,6 +511,17 @@ public:
     amrex::MultiFab* get_heat_flux_mut()  { return fire_heat_flux.get(); }
     amrex::Real get_f_dry_prev() const { return m_f_dry_prev; }
     void set_f_dry_prev(amrex::Real f) { m_f_dry_prev = f; }
+    /// The boundary guard (erf.fire.boundary_guard_*): when the fire first
+    /// entered the band along a non-periodic edge, -1 until then; checkpointed
+    /// so a restart neither repeats the warning nor forgets it fired.
+    amrex::Real get_edge_contact_time() const { return m_edge_contact_time; }
+    void set_edge_contact_time(amrex::Real t) { m_edge_contact_time = t; }
+    /// Whether the reach estimate (erf.fire.edge_reach_check) was printed.
+    bool get_edge_reach_checked() const { return m_edge_reach_checked; }
+    void set_edge_reach_checked(bool b) { m_edge_reach_checked = b; }
+    /// The end of the run as the reach estimate needs it: ERF's stop_time
+    /// (numeric_limits max when unset) and max_step (negative when unset).
+    void set_run_end(amrex::Real stop_time, int max_step) { m_run_stop_time = stop_time; m_run_max_step = max_step; }
 
     /// Shell moistures of the stick model (3 classes x n_shells), null unless erf.fire.moisture_model = stick.
     const amrex::MultiFab* get_stick_mc() const { return fire_stick_mc.get(); }
@@ -752,6 +763,12 @@ private:
     amrex::Real                              m_current_time = 0.0;
     amrex::Real                              m_dt_atm       = 0.0;
     int                                      m_step         = 0;  ///< Simulation step counter
+    // The boundary guard and the reach estimate (ERF_FireBoundaryGuard.H).
+    amrex::Real                              m_edge_contact_time  = -1.0;  ///< First entry into the guard band [s], -1 if never
+    amrex::Long                              m_n_edge_cells       = 0;     ///< Burning cells in the band this step (statistics CSV)
+    bool                                     m_edge_reach_checked = false; ///< Reach estimate printed
+    amrex::Real                              m_run_stop_time      = -1.0;  ///< From set_run_end
+    int                                      m_run_max_step       = -1;
 
     // Level-set propagation tracking
     int                                      m_levelset_subcycle_count = 0;  ///< Counts fire subcycles for reinit scheduling
@@ -874,6 +891,12 @@ private:
      * Multiplies fire_wind_eff by a scalar WAF. Used inside advance().
      */
     void apply_waf_to_wind();
+    /// Reach estimate on the first step with a burning cell: distance to each
+    /// non-periodic edge against ros_max times the time left in the run.
+    void report_edge_reach(amrex::Real ros_max, amrex::Real dt);
+    /// The guard band: count the burning cells within it, warn or abort on the
+    /// first contact, keep the count for the statistics CSV.
+    void check_edge_guard();
 
     // nvcc forbids an extended __device__ lambda inside a function with private or
     // protected class access, and both methods below launch ParallelFor kernels, so

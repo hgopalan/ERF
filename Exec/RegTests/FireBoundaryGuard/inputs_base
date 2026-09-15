@@ -1,0 +1,77 @@
+# FireBoundaryGuard: the fire at the edge of the fire grid.
+#
+# Nothing outside the fire grid burns, so a front that reaches a non-periodic
+# edge is clipped there. Three things report that situation:
+#
+#   erf.fire.edge_reach_check        once, at ignition: the distance from the burning
+#                                    region to each edge against the largest rate of
+#                                    spread times the time left in the run
+#   erf.fire.boundary_guard_cells    the guard band of WRF-SFIRE (fire_boundary_guard)
+#   erf.fire.boundary_guard_action   "warn" (default) records the first contact with the
+#                                    band in the statistics CSV, "abort" stops the run
+#                                    as SFIRE does, "none" checks nothing
+#
+# A still atmosphere on a 400 x 400 m domain with slip walls, 2 m fire cells
+# (grid ratio 10 on 20 m atmospheric cells) and a prescribed rate of spread of
+# 1 m/s, so the front moves exactly one cell every second and the contact time
+# follows from the ignition position: every variant differs only in where the
+# disc is put and in the guard action.
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 400.0 400.0 500.0
+amr.n_cell = 20 20 10
+geometry.is_periodic = 0 0 0
+amr.max_level = 0
+amr.max_grid_size = 10      # box lengths must divide by the fire grid ratio
+amr.max_grid_size_z = 10    # the fire module forbids z-decomposition
+
+xlo.type = "SlipWall"
+xhi.type = "SlipWall"
+ylo.type = "SlipWall"
+yhi.type = "SlipWall"
+zlo.type = "surface_layer"            # the fire module needs the surface layer at the ground
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+# The surface layer needs a diffusion operator; zero coefficients keep the air
+# free of it, so nothing but the fire changes the state.
+erf.molec_diff_type = "ConstantAlpha"
+erf.dynamic_viscosity = 0.0
+erf.alpha_T = 0.0
+erf.alpha_C = 0.0
+erf.les_type = "None"
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+erf.init_type = "uniform"
+erf.use_gravity = false
+erf.fixed_dt = 0.5
+erf.substepping_cfl = 0.5
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_int_1 = -1
+erf.fire_plot_int = -1
+max_step = 40
+stop_time = 20.0
+
+erf.fire.enable = true
+erf.fire.grid_ratio = 10              # 2 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.ros_model = "prescribed"
+erf.fire.prescribed.ros = 1.0
+erf.fire.coupling_type = "passive"
+erf.fire.fuel_model_id = 1
+erf.fire.moisture_1hr = 0.08
+erf.fire.moisture_10hr = 0.08
+erf.fire.moisture_100hr = 0.10
+erf.fire.moisture_dynamic = false
+erf.fire.use_waf = false
+erf.fire.use_terrain_wind = false
+erf.fire.ignition_r = 10.0
+erf.fire.ignition_y = 200.0
+erf.fire.write_fire_stats_csv = true
+erf.fire.boundary_guard_cells = 2     # 4 m band along every wall
+erf.fire.edge_reach_check = true

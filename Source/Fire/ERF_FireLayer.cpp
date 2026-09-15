@@ -8,8 +8,12 @@
 #include <ERF_TerrainSlope.H>
 #include <ERF_HybridRos.H>
 #include <ERF_FireTerrainReader.H>
+#include <ERF_FireBoundaryGuard.H>
 #include <ERF_HostFabView.H>
 #include <fstream>
+#include <sstream>
+#include <limits>
+#include <array>
 #include <iomanip>
 
 #include <AMReX_Reduce.H>
@@ -867,6 +871,11 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
 
     fire_fill_boundary(*fire_phi, m_fg.geom);
 
+    // The reach estimate wants the equilibrium rate, before the acceleration
+    // ramp scales it down; taken only on the step that prints it.
+    const Real ros_max_equilibrium =
+        (m_params.edge_reach_check && !m_edge_reach_checked && fire_ros) ? fire_ros->max(0) : Real(0.0);
+
     // Phase 12: Apply fire acceleration scaling to ROS.
     // Reduces ROS for small fires not yet at quasi-steady-state.
     // Returns immediately when accel.enable = false (zero cost when disabled).
@@ -1085,6 +1094,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
 
     fire_fill_boundary(*fire_phi, m_fg.geom);
 
+    // The fire at the edge of the fire grid: the reach estimate once, the guard
+    // band every step (both read the propagated front).
+    if (m_params.edge_reach_check && !m_edge_reach_checked) {
+        report_edge_reach(ros_max_equilibrium, dt);
+    }
+    check_edge_guard();
+
     compute_heat_flux_and_diagnostics(dt);
 
     // Exposure accumulators: heat load integrates the flux over the
@@ -1205,10 +1221,91 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         }
         append_fire_stats(*fire_phi, *fire_arrival_time, m_fg.geom,
                          m_step, m_current_time, m_params.fire_stats_csv_file,
-                         fire_ros.get(), fire_heat_flux.get(), fire_albini_data.get());
+                         fire_ros.get(), fire_heat_flux.get(), fire_albini_data.get(),
+                         m_n_edge_cells, m_edge_contact_time);
     }
 }
 
+
+void FireLayer::report_edge_reach(Real ros_max, Real dt)
+{
+    // Wait for a burning cell: a scheduled or threshold ignition may come later.
+    std::array<Real, 4> dist;
+    const amrex::Long n_burning = erf_fire_edge::burning_distance_to_edges(*fire_phi, m_fg.geom, dist);
+    if (n_burning == 0) return;
+    m_edge_reach_checked = true;
+
+    // Time left in the run: the earlier of stop_time and max_step at this step's dt.
+    Real t_left = Real(-1.0);
+    if (m_run_stop_time < std::numeric_limits<Real>::max() && m_run_stop_time > m_current_time) {
+        t_left = m_run_stop_time - m_current_time;
+    }
+    if (m_run_max_step > m_step && dt > Real(0.0)) {
+        const Real t_steps = Real(m_run_max_step - m_step) * dt;
+        t_left = (t_left < Real(0.0)) ? t_steps : std::min(t_left, t_steps);
+    }
+    const Real reach = (t_left > Real(0.0)) ? ros_max * t_left : Real(-1.0);
+
+    amrex::Print() << "[FIRE] Reach at ignition (t=" << m_current_time << " s): largest rate of spread "
+                   << ros_max << " m/s";
+    if (reach >= Real(0.0)) {
+        amrex::Print() << ", " << t_left << " s left in the run, reach " << reach << " m";
+    } else {
+        amrex::Print() << ", run length unknown (no stop_time or max_step)";
+    }
+    amrex::Print() << "\n";
+
+    bool any_periodic_only = true;
+    for (int f = 0; f < 4; ++f) {
+        if (dist[f] < Real(0.0)) continue;   // periodic edge
+        any_periodic_only = false;
+        const Real t_edge = (ros_max > Real(0.0)) ? dist[f] / ros_max : Real(-1.0);
+        amrex::Print() << "[FIRE]   " << erf_fire_edge::face_name(f) << " edge: " << dist[f] << " m from the burning region";
+        if (t_edge >= Real(0.0)) amrex::Print() << ", reached in about " << t_edge << " s at that rate";
+        amrex::Print() << "\n";
+        if (reach >= Real(0.0) && reach > dist[f]) {
+            amrex::Print() << "[FIRE] WARNING: the fire can reach the " << erf_fire_edge::face_name(f)
+                           << " edge of the fire grid before the run ends (" << dist[f] << " m at "
+                           << ros_max << " m/s, about " << t_edge << " s). Nothing outside the grid burns:"
+                           << " enlarge the domain or move the ignition; erf.fire.boundary_guard_action"
+                           << " decides what happens when the fire gets there.\n";
+        }
+    }
+    if (any_periodic_only) {
+        amrex::Print() << "[FIRE]   every edge of the fire grid is periodic; the fire wraps around\n";
+    }
+}
+
+void FireLayer::check_edge_guard()
+{
+    m_n_edge_cells = 0;
+    if (!m_params.guards_edge()) return;
+    if (m_fg.geom.isPeriodic(0) && m_fg.geom.isPeriodic(1)) return;   // nothing to guard
+
+    std::array<amrex::Long, 4> touched;
+    m_n_edge_cells = erf_fire_edge::count_burning_in_edge_band(*fire_phi, m_fg.geom,
+                                                               m_params.boundary_guard_cells, touched);
+    if (m_n_edge_cells == 0 || m_edge_contact_time >= Real(0.0)) return;
+
+    m_edge_contact_time = m_current_time;
+    std::string faces;
+    for (int f = 0; f < 4; ++f) {
+        if (touched[f] > 0) { faces += (faces.empty() ? "" : ", ") + std::string(erf_fire_edge::face_name(f)); }
+    }
+    if (m_params.guard_aborts()) {
+        std::ostringstream msg;
+        msg << "[FIRE] The fire reached the boundary guard band (" << m_params.boundary_guard_cells
+            << " fire cells) at the " << faces << " edge of the fire grid at t = " << m_current_time
+            << " s. Nothing outside the grid burns. Enlarge the domain, move the ignition, or set"
+               " erf.fire.boundary_guard_action = warn to continue with the front clipped at the edge.";
+        amrex::Abort(msg.str());
+    }
+    amrex::Print() << "[FIRE] WARNING: the fire entered the boundary guard band (" << m_params.boundary_guard_cells
+                   << " fire cells) at the " << faces << " edge of the fire grid at t = " << m_current_time
+                   << " s with " << m_n_edge_cells << " burning cells in it. The front stops at the edge and"
+                   << " nothing outside the grid burns; the contact time is in the statistics CSV"
+                   << " (erf.fire.boundary_guard_action = warn).\n";
+}
 
 void FireLayer::apply_waf_to_wind()
 {
