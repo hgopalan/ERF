@@ -3098,9 +3098,15 @@ column would be taken for a building), a uniform vertical grid (no
 +-----------------------------------+----------------------------------------------------------+--------------------+------------------------+
 | **erf.ibseb.z0h_wall**            | heat roughness length of the faces [m]                   | Real > 0           | 0.001                  |
 +-----------------------------------+----------------------------------------------------------+--------------------+------------------------+
-| **erf.ibseb.stability_correction**| apply the surface layer's similarity functions to the    | Boolean            | false                  |
-|                                   | wall function on roofs, iterated on the face's own       |                    |                        |
-|                                   | Obukhov length; walls stay on the log law                |                    |                        |
+| **erf.ibseb.stability_correction**| correct the wall function on roofs for stability with    | Boolean            | false                  |
+|                                   | erf.ibseb.stability_scheme; walls stay on the log law    |                    |                        |
++-----------------------------------+----------------------------------------------------------+--------------------+------------------------+
+| **erf.ibseb.stability_scheme**    | with the stability correction: ``iterative`` applies the | ``iterative``,     | ``iterative``          |
+|                                   | surface layer's similarity functions iterated on the     | ``louis``          |                        |
+|                                   | face's own Obukhov length; ``louis`` the Louis (1979)    |                    |                        |
+|                                   | factors on the bulk Richardson number, no iteration.     |                    |                        |
+|                                   | Setting it without the correction aborts, and so do      |                    |                        |
+|                                   | obukhov_seed or obukhov_relax with ``louis``             |                    |                        |
 +-----------------------------------+----------------------------------------------------------+--------------------+------------------------+
 | **erf.ibseb.couple_heat**         | add the face sensible flux to the temperature equation;  | Boolean            | true                   |
 |                                   | false diagnoses it only                                  |                    |                        |

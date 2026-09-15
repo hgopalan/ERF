@@ -1,7 +1,7 @@
 # SEB/WallFunction
 
 The wall function beyond neutral. Two switches, both
-off by default, so every earlier result is unchanged unless a deck asks
+off by default, and a choice of stability scheme, so every earlier result is unchanged unless a deck asks
 for them.
 
 ```
@@ -35,7 +35,15 @@ reason.
   layer's iteration is in erf-model #3486, and seeded from the ground
   surface layer's 2D field at the face's column. Walls stay on the log
   law: the functions assume a horizontal surface, and on a wall the
-  convective scale carries free convection.
+  convective scale carries free convection. This is
+  `erf.ibseb.stability_scheme = iterative`, the default.
+- `erf.ibseb.stability_scheme = louis` (with the correction on): the
+  Louis (1979) factors on the bulk Richardson number between the skin and
+  the cell centre, `Ri_b = g/theta delta (theta_air - theta_skin) / U_eff^2`,
+  multiply the neutral coefficients, `u* = kappa U_eff sqrt(F_m) / ln(delta/z0)`
+  and `ln_h,eff = ln(delta/z0h) sqrt(F_m) / F_h`; no iteration and no seed.
+  The scheme without the correction, an unknown scheme, and `obukhov_seed`
+  or `obukhov_relax` with `louis` abort at start-up.
 
 ## The scenario
 
@@ -60,7 +68,16 @@ roofs' L is entirely their own.
    stored H is the balance's flux at the new skin), u* and H follow the
    corrected log law with Dyer's psi_m and psi_h at delta/L to 1e-7, and
    the roof flux exceeds the run without the functions.
-4. `inputs_bulkri` (capped sounding, inversion at 100 m): the diagnosed
+4. `inputs_louis` (Louis factors and the scale): the roofs' bulk
+   Richardson number is negative, u* and the Obukhov length follow the
+   factors with the previous step's skin, H follows the coefficient at the
+   new skin, all to 1e-6; the walls stay on the log law, and the roof flux
+   lies within a factor of two of the iterated functions' run. The same
+   check on the iterated run's dumps fails (u* 3 %, H 14 % off), so it
+   tells the two schemes apart. `inputs_louis_bad_scheme`,
+   `inputs_louis_no_correction` and `inputs_louis_relax` must abort with
+   the message naming the input.
+5. `inputs_bulkri` (capped sounding, inversion at 100 m): the diagnosed
    depth is the first cell centre above the inversion, 95 m, and the
    roofs' depth in w* is that minus the 40 m roof.
 

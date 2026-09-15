@@ -140,7 +140,9 @@ ERF::ibseb_advance (int lev, Real time, Real dt, const MultiFab& cons,
     const MultiFab* olen2d = nullptr;
     const MultiFab* pblh2d = nullptr;
     Real z_i_bulk = 0.0;
-    if (m_SurfaceLayer && ibseb_params.stability_correction) { olen2d = m_SurfaceLayer->get_olen(lev); }
+    if (m_SurfaceLayer && ibseb_params.stability_correction && ibseb_params.stability_scheme == "iterative") {
+        olen2d = m_SurfaceLayer->get_olen(lev);   // seed of the iteration; the Louis factors need none
+    }
     if (ibseb_params.convective_velocity == "deardorff") {
         if (m_SurfaceLayer && m_SurfaceLayer->computes_pblh() && ibseb_params.z_i_mode == "pblh") {
             pblh2d = m_SurfaceLayer->get_pblh(lev);
