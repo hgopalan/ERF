@@ -1,0 +1,5 @@
+# Start-up check: a level-1 box that stops at 200 m. The fire model interpolates
+# through whole columns, so every box on its level must span the full height.
+FILE = inputs_base
+erf.box1.in_box_lo = 200.0 200.0 0.0
+erf.box1.in_box_hi = 600.0 500.0 200.0

@@ -936,6 +936,47 @@ function(add_test_fire_check TEST_NAME SUITE_DIR INPUT_FILE NSTEPS CHECK_SCRIPT)
     )
 endfunction(add_test_fire_check)
 
+# Fire suite driven by its own run script: copy SUITE_DIR (and erf_plotfile.py from
+# Canonical_RANS) and run SCRIPT with the executable, MPIRUN set for NRANKS ranks. The
+# script's exit status is the verdict; it runs the variants and their checks itself.
+function(add_test_fire_script TEST_NAME SUITE_DIR SCRIPT)
+    set(options )
+    set(oneValueArgs "NRANKS")
+    set(multiValueArgs )
+    cmake_parse_arguments(ADD_TEST_FIRE_SCRIPT "${options}" "${oneValueArgs}"
+        "${multiValueArgs}" ${ARGN})
+
+    set(CURRENT_TEST_SOURCE_DIR ${PROJECT_SOURCE_DIR}/Exec/RegTests/${SUITE_DIR})
+    set(CURRENT_TEST_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
+    file(MAKE_DIRECTORY ${CURRENT_TEST_BINARY_DIR})
+    file(GLOB TEST_FILES "${CURRENT_TEST_SOURCE_DIR}/*")
+    file(COPY ${TEST_FILES} DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+    file(COPY ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/Canonical_RANS/erf_plotfile.py
+         DESTINATION "${CURRENT_TEST_BINARY_DIR}/")
+
+    if("${ADD_TEST_FIRE_SCRIPT_NRANKS}" STREQUAL "")
+        set(NP ${ERF_TEST_NRANKS})
+    else()
+        set(NP ${ADD_TEST_FIRE_SCRIPT_NRANKS})
+    endif()
+    set(MPI_COMMANDS "${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${NP} ${MPIEXEC_PREFLAGS}")
+
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+    set(test_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
+    # the script removes its own earlier output before running
+    set(test_command sh -c "cd ${CURRENT_TEST_BINARY_DIR} && MPIRUN='${MPI_COMMANDS}' PYTHON=${ERF_RANS_PYTHON} sh ${CURRENT_TEST_BINARY_DIR}/${SCRIPT} ${TEST_EXE} > ${test_log} 2>&1 || ( cat ${test_log} && false ) && cat ${test_log}")
+
+    add_test(${TEST_NAME} ${test_command})
+    set_tests_properties(${TEST_NAME}
+        PROPERTIES
+        TIMEOUT 1800
+        PROCESSORS ${NP}
+        WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+        LABELS "regression;fire"
+        ATTACHED_FILES_ON_FAIL "${test_log}"
+    )
+endfunction(add_test_fire_script)
+
 # Fire start-up check: add_test_abort on one deck of a fire suite under Exec/RegTests
 function(add_test_fire_abort TEST_NAME SUITE_DIR INPUT_FILE EXPECTED_MESSAGE RUNTIME_OPTIONS)
     add_test_abort(${TEST_NAME} ${PROJECT_SOURCE_DIR}/Exec/RegTests/${SUITE_DIR} ${INPUT_FILE}
@@ -1470,9 +1511,27 @@ add_test_fire_abort(FireBadRosModel_abort     FireRestart           inputs_level
     "erf.fire.ros_model = \"rothermal\" is not one of" "erf.fire.ros_model=rothermal")
 add_test_fire_abort(FireBadCoupling_abort     FireRestart           inputs_levelset_straight
     "erf.fire.coupling_type = \"laged\" is not one of" "erf.fire.coupling_type=laged")
-# the fire and dust layers live on level 0 only
-add_test_fire_abort(FireAmrLevel_abort        FireRestart           inputs_levelset_straight
-    "The fire module runs on a single level" "amr.max_level=1 amr.ref_ratio=2 erf.regrid_int=1000")
+# the fire grid on a refined level (erf.fire.anchor_level, the finest level by default):
+# the same front as a single-level run at that resolution, the level-0 heat budget after
+# average-down (and its loss with the fire on the coarser level), restart, and a restart
+# that would move the fire grid stopping at start-up
+if(ERF_ENABLE_MPI AND NOT WIN32)
+add_test_fire_script(FireAnchorLevel          FireAnchorLevel       run_anchor_level.sh NRANKS 2)
+endif()
+# its start-up checks: a level above the finest, a regridding level, a refinement box
+# short of the domain top, two separate patches, and the dust layer (level 0 only)
+add_test_fire_abort(FireAnchorLevel_above_finest_abort FireAnchorLevel inputs_base
+    "is above the finest level of this run" "erf.fire.anchor_level=2")
+add_test_fire_abort(FireAnchorLevel_regrid_abort       FireAnchorLevel inputs_base
+    "regrids it" "erf.regrid_int=10")
+add_test_fire_abort(FireAnchorLevel_partial_height_abort FireAnchorLevel inputs_partial_height
+    "Cannot decompose in z direction" "")
+add_test_fire_abort(FireAnchorLevel_two_patches_abort  FireAnchorLevel inputs_two_patches
+    "but the fire grid needs one rectangle" "")
+if(ERF_ENABLE_DUST)
+add_test_fire_abort(FireAnchorLevel_dust_abort         FireAnchorLevel inputs_base
+    "The dust layer and the fire-dust coupling run on level 0" "erf.dust.enable=true")
+endif()
 # the fire at the edge of the fire grid: the guard band records the first contact in the
 # statistics CSV and warns (warn), never fires on a fire far from every wall (far), or
 # stops the run on a disc that starts inside the band (abort)

@@ -445,8 +445,8 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     }
 
 #ifdef ERF_ENABLE_FIRE
-    // Advance fire simulation at level 0
-    if (lev == 0 && m_fire_layer) {
+    // Advance the fire on the level its grid refines (erf.fire.anchor_level)
+    if (m_fire_layer && lev == m_fire_layer->level()) {
 
         // T and RH at k=0 for fuel moisture update, derived from pre-dycore state.
         // This is used in both lagged and synchronous modes: the moisture ODE

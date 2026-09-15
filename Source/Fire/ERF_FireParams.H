@@ -24,6 +24,11 @@ struct FireParams
     bool              enable              = false;       ///< Enable fire module
     bool              fire_debug          = false;       ///< Enable debug output for fire calculations
     int               grid_ratio          = 5;           ///< Fire grid refinement factor (C)
+    // The AMR level whose grid the fire grid refines. -1 (default) is the finest
+    // level at start-up, so a single-level deck runs on level 0 as always. On a
+    // finer level the fire grid covers that level's refined region, which must be
+    // one rectangle of full-height columns that never regrids.
+    int               anchor_level        = -1;          ///< AMR level of the fire grid, -1 = the finest level
     int               fuel_model_id       = 1;           ///< Anderson FBFM13 model (1-13)
     amrex::Real       moisture_1hr        = 0.08;        ///< 1-hour fuel moisture [fraction]
     amrex::Real       moisture_10hr       = 0.08;        ///< 10-hour fuel moisture [fraction]
@@ -703,6 +708,11 @@ struct FireParams
        pp.query("enable", enable);
        pp.query("fire_debug", fire_debug);
        pp.query("grid_ratio", grid_ratio);
+       pp.query("anchor_level", anchor_level);
+       if (anchor_level < -1) {
+           fail("erf.fire.anchor_level must be -1 (the finest level) or a level >= 0, got "
+                + std::to_string(anchor_level));
+       }
        pp.query("fuel_model_id", fuel_model_id);
        pp.query("moisture_1hr", moisture_1hr);
        pp.query("moisture_10hr", moisture_10hr);

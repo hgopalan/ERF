@@ -17,7 +17,7 @@ Wind extraction
 
 The rate-of-spread models take a midflame wind. It is built in three stages.
 
-**Sampling.** For each fire cell the atmospheric column is sampled at the
+**Sampling.** For each fire cell the atmospheric column of the fire grid's level is sampled at the
 reference height :cpp:`erf.fire.wind_ref_ht` (default 6.1 m) above the local
 ground. The ground is the mean of the four surface nodes of the atmospheric
 cell, taken from the atmospheric terrain even when
@@ -178,7 +178,7 @@ removes more heat than evaporation costs. The regression test
 Injection into the atmosphere
 -----------------------------
 
-The fire-grid fluxes are area-averaged onto the atmospheric columns and
+The fire-grid fluxes are area-averaged onto the atmospheric columns of the fire grid's level and
 distributed vertically with an exponential profile,
 
 .. math::
@@ -235,6 +235,31 @@ slots: immersed forcing applied on the slow step
 heating, Rayleigh damping. With immersed forcing on the acoustic substeps
 (the compressible default) the scalar relaxation never meets the slow-step
 source and the two modes are identical, as they are with no other source.
+
+Levels
+~~~~~~
+
+The sensible and latent tendencies and the smoke source go into the source of
+the level the fire grid refines (:cpp:`erf.fire.anchor_level`, the finest
+level by default) at every Runge-Kutta stage of that level's steps, and the
+flux handed to the MRF boundary layer scheme with
+:cpp:`erf.pbl_mrf_fire_thermal_excess` is used on that level only, where its
+ghost columns outside the refined region, which has no fire grid, hold zero. Coarser
+levels receive the heat through average-down (``erf.coupling_type =
+"TwoWay"``), which keeps the volume integral, so the heat on level 0 is the
+heat injected on the fire's level: ``Exec/RegTests/FireAnchorLevel`` checks
+the level-0 budget of a prescribed heat disc on level 1 in an anelastic run to
+0.1 %. The anelastic form is what closes that budget: in the compressible form
+of the same deck the level-0 integral held 43 % of the injected heat after
+20 s, against 99.99 % on one level, since rho theta moves with the pressure
+waves the heating raises and is not conserved where they cross the
+coarse-fine interface of the compressible solver. With the fire
+grid on a coarser level than the finest, the same average-down replaces the
+heated cells under the finer level with unheated ones and that heat is lost,
+and with ``"OneWay"`` the finer level never sees it; the fire layer warns at
+start-up whenever the level is not the finest. The same test runs the heat disc
+with MRF and the thermal excess on level 1 and restarts it, which must reproduce
+both levels byte for byte.
 
 Heat placement around buildings
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

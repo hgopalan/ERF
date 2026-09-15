@@ -628,10 +628,11 @@ void ERF::advance_dycore (int level,
         bool l_use_moisture = ( solverChoice.moisture_type != MoistureType::None );
         const BCRec* bc_ptr_h = domain_bcs_type.data();
 
-        // Prepare fire heat flux for PBL if needed
+        // Prepare fire heat flux for PBL if needed; the flux lives on the atmospheric
+        // columns of the fire grid's level only
         const MultiFab* Q_fire_for_pbl = nullptr;
 #ifdef ERF_ENABLE_FIRE
-        if (m_fire_layer && m_fire_params.enable &&
+        if (m_fire_layer && level == m_fire_layer->level() && m_fire_params.enable &&
             m_fire_params.injects_flux() &&
             tc.mrf_fire_thermal_excess) {
             Q_fire_for_pbl = m_fire_layer->get_Q_atm_prev();

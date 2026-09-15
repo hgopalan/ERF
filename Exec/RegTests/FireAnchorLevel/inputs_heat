@@ -1,0 +1,32 @@
+# The heat of a fire on level 1 reaches level 0. A prescribed 1e4 W/m2 over a
+# 30 m disc at (350, 350) m, inside the level-1 box, nothing burning, lagged
+# two-way coupling. The fire and its heat are on level 1; level 0 sees the heat
+# only through average-down, so Cp times the change of the integral of rho theta
+# on level 0 must be the placed power, 1 - exp(-400 / 45) of the disc's power,
+# over the heated time (every fire step but the first, which injects the zero
+# initial flux), and must equal the level-1 integral over the refined region.
+#
+# Anelastic: the compressible form of this deck moves rho theta with the pressure
+# waves the heating raises, and its two-level run keeps only part of the heat on
+# level 0 (0.43 after 20 s, against 0.99986 on one level), which is the
+# compressible solver's coarse-fine interface, not the fire. Without acoustic
+# waves and without gravity the heat stays where it is placed.
+#
+# With erf.fire.anchor_level = 0 on the command line the same deck puts the heat
+# into level 0 under level 1, where average-down replaces it, and the level-0
+# budget must lose it.
+FILE = inputs_base
+erf.anelastic = 1
+erf.plot_int_1 = 20
+erf.plot_file_1 = "plt_atm_"
+erf.plot_vars_1 = density theta
+erf.fire.fire_debug = true            # the coupling's energy_in / energy_out lines are what the check reads
+erf.fire.ros_model = "rothermel"
+erf.fire.fuel_map.file = ""           # no map: its size would tie the deck to one fire level
+erf.fire.ignition_r = 0.0             # nothing burns: all the heat is the prescribed disc
+erf.fire.coupling_type = "lagged"
+erf.fire.fire_atm_feedback = 1.0
+erf.fire.inject_latent = false
+erf.fire.prescribed_heat.flux = 1.0e4
+erf.fire.prescribed_heat.center = 350.0 350.0
+erf.fire.prescribed_heat.radius = 30.0

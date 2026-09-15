@@ -30,6 +30,8 @@
 
 #ifdef ERF_ENABLE_FIRE
 #include "ERF_FirePlotfile.H"
+#include "ERF_FirePrerequisites.H"
+#include <sstream>
 #endif
 #ifdef ERF_USE_DUST
 #include "ERF_DustAtmCoupling.H"
@@ -1557,16 +1559,23 @@ ERF::InitData_post ()
                 }
             }
 
-            // Initialize the fire layer once the surface layer exists (lev = 0).
+            // Initialize the fire layer once the surface layer exists on every level,
+            // on the level its grid refines: erf.fire.anchor_level, the finest level
+            // when unset (level 0 on a single-level run).
             // This runs on a clean start and on a restart alike: on a restart the
             // fields are allocated and set up from the inputs here, then overwritten
             // from the checkpoint by ReadCheckpointFileFire().
 #ifdef ERF_ENABLE_FIRE
-            // z_phys_nd[0] is allocated on every terrain type; the fire
+            // z_phys_nd[fire_lev] is null on flat terrain; the fire
             // layer handles that case itself, so it must not gate initialization.
-            if (lev == 0 && m_fire_layer) {
-                m_fire_layer->initialize(*this, m_SurfaceLayer.get(), z_phys_nd[0].get(), m_fire_params);
-                m_fire_layer->set_run_end(stop_time, max_step);   // for the reach estimate at ignition
+            if (lev == finest_level && m_fire_layer) {
+                const int fire_lev = fire_anchor_level(m_fire_params, finest_level);
+                m_fire_layer->initialize(*this, fire_lev, m_SurfaceLayer.get(), z_phys_nd[fire_lev].get(), m_fire_params);
+                // For the reach estimate at ignition: max_step counts level-0 steps, and the
+                // fire takes one step per step of its own level.
+                int fire_steps_per_coarse_step = 1;
+                for (int l = 1; l <= fire_lev; ++l) { fire_steps_per_coarse_step *= nsubsteps[l]; }
+                m_fire_layer->set_run_end(stop_time, max_step, fire_steps_per_coarse_step);
 
                 // Verify that at least one cell was marked during fire initialization,
                 // unless the ignition is deferred or absent on purpose: a perimeter polygon stamped at
@@ -1581,9 +1590,15 @@ ERF::InitData_post ()
                     || (m_fire_params.prescribed_heat.flux > 0.0);
                 if (const amrex::MultiFab* phi = m_fire_layer->get_levelset(); phi && !deferred_ignition) {
                     Real phi_min = phi->min(0);
-                    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(phi_min < 0.0_rt,
-                        "[FIRE] Fire initialization failed: no cells were marked as burned. "
-                        "Check ignition parameters (ignition_x, ignition_y, ignition_r).");
+                    if (!(phi_min < 0.0_rt)) {
+                        const amrex::Geometry& gf = m_fire_layer->get_fire_geom();
+                        std::ostringstream msg;
+                        msg << "[FIRE] Fire initialization failed: no cells were marked as burned. "
+                            << "Check ignition parameters (ignition_x, ignition_y, ignition_r): the fire grid "
+                            << "on level " << fire_lev << " covers x " << gf.ProbLo(0) << " to " << gf.ProbHi(0)
+                            << " m, y " << gf.ProbLo(1) << " to " << gf.ProbHi(1) << " m.";
+                        amrex::Abort(msg.str());
+                    }
                 }
 
                 if (restart_chkfile != "") {

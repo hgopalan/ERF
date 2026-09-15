@@ -21,10 +21,10 @@ void compute_terrain_slopes(
     Real dx_fire = fg.geom.CellSize(0);
     Real dy_fire = fg.geom.CellSize(1);
 
-    // Atmospheric domain
-    const Box& domain_atm = geom_atm.Domain();
-    int atm_nlo_x = domain_atm.smallEnd(0);
-    int atm_nlo_y = domain_atm.smallEnd(1);
+    // Atmospheric index of the fire region's lower corner: fire cell (i_f, j_f)
+    // lies in atmospheric cell (i_f / C + atm_nlo_x, j_f / C + atm_nlo_y)
+    const int atm_nlo_x = fg.atm_lo[0];
+    const int atm_nlo_y = fg.atm_lo[1];
 
     // Try to use fine-grid terrain if file is available
     bool use_fine_terrain = false;
@@ -125,9 +125,9 @@ void compute_fire_surface_height(
     }
 
     const int C = fg.C;
-    const Box& domain_atm = geom_atm.Domain();
-    const int atm_nlo_x = domain_atm.smallEnd(0);
-    const int atm_nlo_y = domain_atm.smallEnd(1);
+    // Atmospheric index of the fire region's lower corner (FireGrid::atm_lo)
+    const int atm_nlo_x = fg.atm_lo[0];
+    const int atm_nlo_y = fg.atm_lo[1];
 
     for (MFIter mfi(fire_surface_z, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
@@ -162,9 +162,9 @@ void compute_fire_column_grounds(
     }
 
     const int C = fg.C;
-    const Box& domain_atm = geom_atm.Domain();
-    const int atm_nlo_x = domain_atm.smallEnd(0);
-    const int atm_nlo_y = domain_atm.smallEnd(1);
+    // Atmospheric index of the fire region's lower corner (FireGrid::atm_lo)
+    const int atm_nlo_x = fg.atm_lo[0];
+    const int atm_nlo_y = fg.atm_lo[1];
 
     for (MFIter mfi(fire_col_ground, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();

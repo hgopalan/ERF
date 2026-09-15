@@ -217,6 +217,9 @@ void fill_fire_wind_from_interpolation(
     Real            z0_log)
 {
     const int C = fg.C;
+    // Fire cell (i_f, j_f) lies in atmospheric cell (i_f / C + lo_x, j_f / C + lo_y)
+    const int lo_x = fg.atm_lo[0];
+    const int lo_y = fg.atm_lo[1];
     const bool bilinear = (wind_interp == 1);
     const bool open_weights = bilinear && (col_open != nullptr) && (col_roof != nullptr);
     const bool resample = (z_sample > 0.0);
@@ -297,8 +300,8 @@ void fill_fire_wind_from_interpolation(
                 // Nearest atmospheric column: every fire cell in a column shares
                 // one wind vector, so the fire-grid wind is piecewise constant
                 // on atmospheric cells.
-                const int i_a = amrex::max(ia_min, amrex::min(i_f / C, ia_max));
-                const int j_a = amrex::max(ja_min, amrex::min(j_f / C, ja_max));
+                const int i_a = amrex::max(ia_min, amrex::min(i_f / C + lo_x, ia_max));
+                const int j_a = amrex::max(ja_min, amrex::min(j_f / C + lo_y, ja_max));
 
                 // Ground elevation of this fire cell's atmospheric column. This
                 // is the terrain surface, not the first cell centre, which sits
@@ -317,13 +320,16 @@ void fill_fire_wind_from_interpolation(
 
             // Bilinear between the four surrounding atmospheric columns. The
             // fire cell centre sits at continuous atmospheric cell-centre
-            // coordinate (i_f + 0.5)/C - 0.5.
+            // coordinate (i_f + 0.5)/C - 0.5 relative to the region's corner; the
+            // weights come from that, the column indices add the corner.
             const Real gx = (Real(i_f) + 0.5) / Real(C) - 0.5;
             const Real gy = (Real(j_f) + 0.5) / Real(C) - 0.5;
-            const int i0 = static_cast<int>(std::floor(gx));
-            const int j0 = static_cast<int>(std::floor(gy));
-            const Real wx = gx - Real(i0);
-            const Real wy = gy - Real(j0);
+            const int i0_local = static_cast<int>(std::floor(gx));
+            const int j0_local = static_cast<int>(std::floor(gy));
+            const Real wx = gx - Real(i0_local);
+            const Real wy = gy - Real(j0_local);
+            const int i0 = i0_local + lo_x;
+            const int j0 = j0_local + lo_y;
 
             Real u_sum = 0.0;
             Real v_sum = 0.0;

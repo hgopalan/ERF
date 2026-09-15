@@ -636,6 +636,31 @@ southernmost: the map's first data row lies in its TL3 band and its last in the
 NB8 water. Until 2026-09-11 the reader put the first data row on the south edge,
 which fails both checks.
 
+``FireBoundaryGuard_warn`` and ``FireBoundaryGuard_far`` run the two
+``FireBoundaryGuard`` decks for 40 steps and check the statistics CSV and the
+log with ``check_guard.py``; ``FireBoundaryGuard_abort`` passes when the deck
+whose ignition overlaps a wall stops on its first step.
+
+``FireAnchorLevel`` (MPI builds, not Windows) runs ``run_anchor_level.sh`` on
+two ranks. It puts the fire on level 1 of a two-level deck and compares it with
+the same fire on one level at level 1's resolution, which must give the same
+arrival time in every fire cell and the same statistics CSV. It checks the
+level-0 heat budget of an anelastic prescribed heat disc on level 1 to 0.1 %,
+that level 1 averages down onto level 0 exactly, and that the
+same deck with ``erf.fire.anchor_level=0`` warns and loses the heat to
+average-down. It restarts the level-1 fire from its own checkpoint, which must
+reproduce the fire plotfile byte for byte, and restarts it with the fire grid
+moved to level 0, which must stop at start-up. It runs the heat disc again with
+``erf.pbl_type=MRF`` and ``erf.pbl_mrf_fire_thermal_excess=true``, which read the
+lagged fire flux on level 1 and in its ghost columns, and restarts that run at
+step 10, which must reproduce the atmosphere and fire plotfiles byte for byte.
+``FireAnchorLevel_above_finest_abort``, ``FireAnchorLevel_regrid_abort``,
+``FireAnchorLevel_partial_height_abort``, ``FireAnchorLevel_two_patches_abort``
+and, with ``ERF_ENABLE_DUST``, ``FireAnchorLevel_dust_abort`` pass when the
+matching start-up check of the fire grid's level stops the run: a level above
+the finest, a level that regrids, a refinement box short of the domain top, two
+separate patches, and the dust layer, which runs on level 0 only.
+
 PBL start-up check
 ------------------
 ``ABL_MRF_ZSplit_abort`` reruns the ``ABL_MRF_Tiling`` deck on one rank with

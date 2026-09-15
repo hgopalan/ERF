@@ -157,7 +157,8 @@
         // across all RK stages and must be added here to survive the integrator.
         // *****************************************************************************
 #ifdef ERF_ENABLE_FIRE
-        if (level == 0 && m_fire_layer
+        // on the level the fire grid refines; coarser levels get it by average-down
+        if (m_fire_layer && level == m_fire_layer->level()
             && m_fire_layer->get_params().injects_flux()
             && m_fire_layer->get_Q_atm_prev()) {
             bool has_moisture = (solverChoice.moisture_type != MoistureType::None);
@@ -173,7 +174,7 @@
         // Phase 4: Inject smoke tracer from fire heat flux AFTER make_sources
         // and AFTER fire coupling. Smoke is proportional to fire heat flux.
         // *****************************************************************************
-        if (level == 0 && m_fire_layer && m_fire_layer->get_params().smoke_enable &&
+        if (m_fire_layer && level == m_fire_layer->level() && m_fire_layer->get_params().smoke_enable &&
             m_fire_layer->get_Q_atm_prev()) {
             inject_smoke_from_fire(
                 cc_src,
