@@ -124,19 +124,23 @@ public:
      *
      * @param[in] erf                ERF instance — used only for public
      *                               AmrCore accessors (boxArray, DistributionMap,
-     *                               Geom).
+     *                               Geom, finestLevel, refRatio).
+     * @param[in] lev                AMR level the fire grid refines
+     *                               (fire_anchor_level(): erf.fire.anchor_level,
+     *                               the finest level by default).
      * @param[in] surface_layer_ptr  Pointer to the SurfaceLayer owned by ERF
      *                               (pass m_SurfaceLayer.get() at the call site).
      *                               May be nullptr when called before the surface
      *                               layer is constructed (prereq check only).
-     * @param[in] z_phys_nd_atm      Atmospheric nodal terrain-height MultiFab
-     *                               (pass z_phys_nd[0].get() at the call site);
+     * @param[in] z_phys_nd_atm      Atmospheric nodal terrain-height MultiFab of
+     *                               level lev (pass z_phys_nd[lev].get());
      *                               nullptr on flat terrain (TerrainType::None).
      * @param[in] fire_params        Fire configuration struct.
      *
      * @throw amrex::Error if prerequisites not met.
      */
     void initialize(const ERF&            erf,
+                    int                   lev,
                     const SurfaceLayer*   surface_layer_ptr,
                     const amrex::MultiFab* z_phys_nd_atm,
                     const FireParams&     fire_params);
@@ -344,6 +348,13 @@ public:
     }
 
     /**
+     * @brief AMR level the fire grid refines (erf.fire.anchor_level, resolved at
+     *        initialize). ERF advances the fire, injects its heat and smoke and
+     *        checkpoints its state on this level only.
+     */
+    int level() const { return m_lev; }
+
+    /**
      * @brief Get reference wind field for plotfile output.
      * @return Pointer to fire_wind_ref MultiFab [m/s].
      */
@@ -520,8 +531,15 @@ public:
     bool get_edge_reach_checked() const { return m_edge_reach_checked; }
     void set_edge_reach_checked(bool b) { m_edge_reach_checked = b; }
     /// The end of the run as the reach estimate needs it: ERF's stop_time
-    /// (numeric_limits max when unset) and max_step (negative when unset).
-    void set_run_end(amrex::Real stop_time, int max_step) { m_run_stop_time = stop_time; m_run_max_step = max_step; }
+    /// (numeric_limits max when unset) and max_step (negative when unset), which
+    /// counts level-0 steps; the fire takes steps_per_coarse_step steps on its own
+    /// level for each of them.
+    void set_run_end(amrex::Real stop_time, int max_step, int steps_per_coarse_step)
+    {
+        m_run_stop_time = stop_time;
+        m_run_max_step  = (max_step < 0) ? amrex::Long(-1)
+                                         : amrex::Long(max_step) * amrex::Long(steps_per_coarse_step);
+    }
 
     /// Shell moistures of the stick model (3 classes x n_shells), null unless erf.fire.moisture_model = stick.
     const amrex::MultiFab* get_stick_mc() const { return fire_stick_mc.get(); }
@@ -734,11 +752,12 @@ private:
     bool              m_has_schedule = false;
 
     // Phase 6: fire-atmosphere coupling MultiFabs
-    // Coarsened fire fluxes on the atmospheric level-0 grid (nx × ny × 1).
-    // These hold fire fluxes from the previous timestep for injection into
-    // cc_source at the start of the next timestep (one-step explicit lag).
-    // Lagged fluxes on the atmospheric columns, with ghost columns filled from the
-    // neighbouring boxes for the MRF fire thermal excess, which reads the halo
+    // Fire fluxes coarsened onto the atmospheric columns of the fire grid's level
+    // (one slab per box of that level), held from the previous timestep for
+    // injection into cc_source at the start of the next (one-step explicit lag).
+    // Their ghost columns hold the neighbouring box's value for the MRF fire
+    // thermal excess, which reads a halo around every tile; outside the refined
+    // region of a finer level they hold zero.
     std::unique_ptr<amrex::MultiFab>         m_Q_atm_prev;            // sensible [W/m²]
     std::unique_ptr<amrex::MultiFab>         m_Q_lat_atm_prev;        // latent   [W/m²]
     amrex::Real                              m_f_dry_prev = 1.0;      // partition factor m_Q_atm_prev was filled with
@@ -770,13 +789,14 @@ private:
     amrex::Long                              m_n_edge_cells       = 0;     ///< Burning cells in the band this step (statistics CSV)
     bool                                     m_edge_reach_checked = false; ///< Reach estimate printed
     amrex::Real                              m_run_stop_time      = -1.0;  ///< From set_run_end
-    int                                      m_run_max_step       = -1;
+    amrex::Long                              m_run_max_step       = -1;    ///< In steps of the fire's level
 
     // Level-set propagation tracking
     int                                      m_levelset_subcycle_count = 0;  ///< Counts fire subcycles for reinit scheduling
 
     // Vertical levels
     int                                      m_nz = 0;
+    int                                      m_lev = 0;  ///< AMR level the fire grid refines
 
     // Fuel bed depth [ft] (fuel-model dependent)
     amrex::Real                              m_fuel_bed_depth_ft = 6.5;

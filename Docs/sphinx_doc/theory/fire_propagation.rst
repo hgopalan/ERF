@@ -556,6 +556,10 @@ disc overlapping the wall stops an ``"abort"`` run on its first step. The unit
 test ``ERF_GTestFireBoundaryGuard`` checks the band count per edge, the
 corner counted once, periodic edges skipped, and the distances.
 
-The band and the estimate are what a fire confined to a refinement box will
-need once the fire grid can sit on a finer atmospheric level: the contact is
-then the signal that the box should grow, not a reason to stop.
+On a refined level (:cpp:`erf.fire.anchor_level`) the fire grid covers the
+refined region only, so its edges are the edges of the refinement: the
+estimate and the band then report a fire about to leave the refined region,
+and their messages ask for a larger refinement box rather than a larger
+domain. The refinement cannot follow the fire during a run yet, since the fire
+grid's level must not regrid; a guard contact is the signal a moving fine
+level will act on.

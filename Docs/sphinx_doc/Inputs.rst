@@ -4184,8 +4184,14 @@ Master control
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.fire_debug**                        | Print per-step fire diagnostics to stdout                  | Boolean                        | false                  |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.grid_ratio**                        | Fire grid refinement factor in x and y; every atmosphere   | Integer > 0                    | 5                      |
-|                                                | box length must divide by it                               |                                |                        |
+| **erf.fire.grid_ratio**                        | Fire grid refinement factor in x and y; every box length   | Integer > 0                    | 5                      |
+|                                                | on the fire grid's level must divide by it                 |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.anchor_level**                      | AMR level whose grid the fire grid refines; -1 is the      | -1, or 0 to the finest level   | -1                     |
+|                                                | finest level at start-up. Above level 0 the level must     |                                |                        |
+|                                                | keep its boxes (erf.regrid_int = -1), cover one rectangle  |                                |                        |
+|                                                | of full-height columns and run without the dust layer; a   |                                |                        |
+|                                                | level below the finest prints a warning                    |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 
 

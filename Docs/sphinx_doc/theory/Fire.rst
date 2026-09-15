@@ -10,8 +10,8 @@ Overview
 --------
 
 ERF-Fire simulates a surface wildfire on a two-dimensional fire grid that sits
-on the atmosphere's level-0 mesh and is refined by an integer factor in each
-horizontal direction. The atmosphere supplies wind, near-surface temperature
+on one level of the atmosphere's mesh, the finest by default, and is refined by
+an integer factor in each horizontal direction. The atmosphere supplies wind, near-surface temperature
 and humidity; the fire model returns a surface heat flux, an optional latent
 flux and an optional smoke tracer. Terrain enters through slopes on the fire
 grid and through the height above ground at which the wind is sampled.
@@ -65,21 +65,56 @@ with a comment as a reference deck.
 Fire grid
 ---------
 
-The fire grid is created from the atmosphere's level-0 box array and
-distribution map by refining both by ``erf.fire.grid_ratio`` in x and y and
-collapsing z to one cell. Every fire box therefore lives on the rank that
-owns its parent atmosphere box, and the map from a fire cell to its column is
-integer division by the ratio. Two constraints follow:
+The fire grid refines one level of the atmospheric mesh, chosen by
+:cpp:`erf.fire.anchor_level`: the finest level at start-up when the input is
+unset, so a single-level run puts it on level 0. It is built from that level's
+box array and distribution map by refining both by ``erf.fire.grid_ratio`` in
+x and y and collapsing z to one cell, so every fire box lives on the rank that
+owns its parent atmosphere box. The fire grid covers the region the level's
+boxes cover: the whole domain on level 0, the refined region on a finer level.
+Its index space starts at zero at the lower corner of that region, so with a
+grid ratio :math:`C` and the region's lower corner at column
+:math:`(i_0, j_0)` of its level, fire cell :math:`(i, j)` lies in the
+atmospheric column :math:`(\lfloor i/C \rfloor + i_0, \lfloor j/C \rfloor + j_0)`.
 
-- the x and y lengths of every atmosphere box must be divisible by the ratio
-  (set ``amr.max_grid_size`` accordingly);
-- the atmosphere must not be decomposed in z (``amr.max_grid_size_z`` at
-  least the number of vertical cells), since the fire model interpolates
-  through whole columns.
+The constraints on the fire grid's level:
 
-The fire model runs on level 0 only. Coordinates on the fire grid are the
-physical x and y of the atmosphere domain, so ignition points, probes,
-firebreaks and structure files are all given in metres.
+- the x and y lengths of every box on that level must be divisible by the
+  ratio (set ``amr.max_grid_size`` and ``amr.blocking_factor`` accordingly);
+- no box on that level may be split in z (``amr.max_grid_size_z`` at least
+  the number of vertical cells), and a refinement box must reach the domain
+  top, since the fire model interpolates through whole columns;
+- above level 0, the level's boxes must cover one rectangle (one refinement
+  box), the refinement must not change during the run (``erf.regrid_int =
+  -1``), and the dust layer must be off, since it and the fire-dust coupling
+  run on level 0.
+
+A deck that breaks one of these stops at start-up with a message naming the
+input to change.
+
+The fire takes one step per time step of its level. On level 1 of a run with
+``amr.ref_ratio_vect = 2 2 1`` it steps twice per level-0 step, reads that
+level's wind, temperature and humidity, and puts its heat, moisture and smoke
+into that level's source; coarser levels receive them through average-down
+(:ref:`sec:FireCoupling`). A level finer than the fire's never sees the fire,
+and with two-way coupling its average-down replaces the heated cells under it,
+so the fire layer prints a warning, with the share of the fire grid a finer
+level covers, whenever :cpp:`erf.fire.anchor_level` is not the finest level.
+The fire state is checkpointed under that level's directory together with the
+level and the region's corner, and a restart that would put the fire grid on
+another level or region stops with a message.
+
+Nothing outside the fire grid burns. On a refined level the edges of the
+refined region are the fire grid's edges, where the front stops; the reach
+estimate and the guard band of :ref:`sec:FireGridEdge` report a fire that gets
+there.
+
+Coordinates on the fire grid are the physical x and y of the atmosphere
+domain, so ignition points, probes, firebreaks and structure files are all
+given in metres. A raster placed by cell index, the fuel map
+(``erf.fire.fuel_map.file``), must have one entry per cell of the fire grid,
+starting at the region's lower corner; the terrain and structure files are
+sampled by position and may extend beyond the region.
 
 The fire model also requires a surface layer at the bottom boundary,
 ``zlo.type = "surface_layer"``. The fire layer is set up together with the
@@ -93,8 +128,8 @@ aborts at start-up with a message saying so.
 One fire step
 -------------
 
-``FireLayer::advance`` is called once per atmospheric time step, after the
-dynamical core. In order it:
+``FireLayer::advance`` is called once per time step of the fire grid's level,
+after that level's dynamical core. In order it:
 
 1. samples the near-surface temperature and relative humidity and, when
    ``erf.fire.moisture_dynamic`` is on, advances the dead-fuel moisture
@@ -254,6 +289,11 @@ explains what each row should show:
 - ``FireBoundaryGuard``: the fire at the edge of the fire grid, the reach
   estimate at ignition and the guard band's contact time in the statistics
   CSV, with the abort action stopping a run on its first step.
+- ``FireAnchorLevel``: the fire grid on a refined level against a
+  single-level run at that level's resolution, the level-0 heat budget after
+  average-down (and the heat lost with the fire on the coarser level), a
+  restart, a restart with the MRF fire thermal excess on level 1, and the
+  start-up checks of :cpp:`erf.fire.anchor_level`.
 
 Where each feature is exercised:
 
@@ -311,6 +351,8 @@ Where each feature is exercised:
      - canonical ``WUI_Subdivision`` (:ref:`sec:WUIValidation`)
    * - The edge of the fire grid: reach estimate at ignition, boundary guard band (warn, abort)
      - ``FireBoundaryGuard``; gtest ``ERF_GTestFireBoundaryGuard``
+   * - The fire grid on a refined level: region, maps to the atmosphere, front, heat budget, restart, start-up checks
+     - ``FireAnchorLevel``; gtest ``ERF_GTestFireAnchorLevel``
 
 Not yet covered by any test: restart of the spotting and crown-fire state.
 The fire-dust coupling has its own cases under ``Exec/CanonicalTests/Hazard``

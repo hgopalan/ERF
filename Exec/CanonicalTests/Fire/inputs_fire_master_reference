@@ -67,6 +67,14 @@ erf.fire.fire_debug = false
 # Typical: 5 (fire grid is 5x finer in x,y)
 erf.fire.grid_ratio = 5
 
+# AMR level whose grid the fire grid refines. -1 (default) is the finest level
+# at start-up, level 0 on a single-level run. Above level 0 that level must keep
+# its boxes (erf.regrid_int = -1), cover one rectangle of full-height columns and
+# run without the dust layer; the fire's heat reaches coarser levels by
+# average-down. A level below the finest prints a warning, since a finer level's
+# average-down replaces the heated cells under it.
+erf.fire.anchor_level = -1
+
 # ============================================================================
 # FUEL MODEL SELECTION
 # ============================================================================

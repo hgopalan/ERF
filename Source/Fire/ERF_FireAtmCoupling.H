@@ -44,9 +44,13 @@
 //   exponential profile.
 //
 // Assumptions:
-//   - Single AMR level (no refinement in z between fire and atmospheric grids).
-//   - fire_heat_flux and fire_latent_flux are on the fire grid (C*nx x C*ny x 1).
-//   - The coarsening from fire grid to atmospheric grid uses average_down().
+//   - The tendency goes into the source of the level the fire grid refines
+//     (erf.fire.anchor_level, the finest level by default); coarser levels see it
+//     through average-down, finer levels not at all.
+//   - fire_heat_flux and fire_latent_flux are on the fire grid (C*nx x C*ny x 1
+//     over the fire region).
+//   - The coarsening from fire grid to atmospheric grid is the area average of
+//     average_down(), with the region's lower corner added (FireGrid::atm_lo).
 //   - z_phys_cc is the cell-centre terrain-following height MultiFab [m].
 //   - The atmospheric BoxArray is not split in z (max_grid_size_z = nz enforced).
 //   - Latent heat injection into RhoQ1_comp is skipped when moisture is inactive.
@@ -69,6 +73,7 @@
 #include <cmath>
 #include <ERF_Constants.H>
 #include <ERF_IndexDefines.H>
+#include <ERF_FireGrid.H>
 
 // Default e-folding height for ground fire heat distribution [m].
 // WRF-Fire default: alfg ~ 45-75 m. At z = alfg: flux decays to 1/e ~ 37%.
@@ -78,18 +83,56 @@ constexpr amrex::Real FIRE_ATM_ALFG_DEFAULT = 45.0;
 // Only used when canopy fire heat is non-zero.
 constexpr amrex::Real FIRE_ATM_ALFC_DEFAULT = 60.0;
 
-// Coarsen fire_heat_flux from the fire grid (C*nx x C*ny x 1) to the
-// atmospheric level-0 grid (nx x ny x 1) using area-weighted averaging.
-// Uses amrex::average_down() with refinement ratio (C, C, 1).
+// Coarsen a fire-grid field (C*nx x C*ny x 1) onto the atmospheric columns of
+// the level the fire grid refines (nx x ny x 1) by area averaging.
+//
+// Q_atm_out lives on the k = 0 slabs of that level's boxes, in their order and
+// with their owners; Q_fire on the fire grid, whose index space starts at the
+// region's corner. On level 0 the corner is the origin and this is
+// amrex::average_down() with ratio (C, C, 1), as it always was. Elsewhere the
+// same average is taken with the corner added: fire cells (i - lo_x) C + r,
+// (j - lo_y) C + q for r, q in [0, C) average into atmospheric cell (i, j).
+// average_down() itself would place the result at the fire grid's own indices.
 inline void coarsen_fire_flux_to_atm(
     amrex::MultiFab& Q_atm_out,
     const amrex::MultiFab& Q_fire,
     const amrex::Geometry& geom_atm,
-    const amrex::Geometry& geom_fire,
-    int C)
+    const FireGrid& fg)
 {
-    amrex::average_down(Q_fire, Q_atm_out, geom_fire, geom_atm, 0, Q_fire.nComp(),
-                        amrex::IntVect(C, C, 1));
+    const int C = fg.C;
+    if (fg.atm_lo == amrex::IntVect::TheZeroVector()) {
+        amrex::average_down(Q_fire, Q_atm_out, fg.geom, geom_atm, 0, Q_fire.nComp(),
+                            amrex::IntVect(C, C, 1));
+        return;
+    }
+
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+        Q_fire.boxArray().size() == Q_atm_out.boxArray().size() &&
+        Q_fire.DistributionMap() == Q_atm_out.DistributionMap(),
+        "[FIRE] coarsen_fire_flux_to_atm: the fire grid and the atmospheric slabs must pair box for box");
+    AMREX_ALWAYS_ASSERT(Q_atm_out.nComp() >= Q_fire.nComp());
+
+    const int lo_x  = fg.atm_lo[0];
+    const int lo_y  = fg.atm_lo[1];
+    const int ncomp = Q_fire.nComp();
+    const amrex::Real volfrac = amrex::Real(1.0) / amrex::Real(C * C);
+    for (amrex::MFIter mfi(Q_atm_out); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.validbox();
+        auto crse = Q_atm_out.array(mfi);
+        auto fine = Q_fire.const_array(mfi);
+        amrex::ParallelFor(bx, ncomp, [=] AMREX_GPU_DEVICE (int i, int j, int k, int n) noexcept
+        {
+            const int ii = (i - lo_x) * C;
+            const int jj = (j - lo_y) * C;
+            amrex::Real c = 0.0;
+            for (int q = 0; q < C; ++q) {
+                for (int r = 0; r < C; ++r) {
+                    c += fine(ii + r, jj + q, 0, n);
+                }
+            }
+            crse(i, j, k, n) = volfrac * c;
+        });
+    }
 }
 
 // Compute fire latent heat flux [W/m2] from sensible heat flux and fuel moisture.

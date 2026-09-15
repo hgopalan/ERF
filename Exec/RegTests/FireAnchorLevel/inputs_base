@@ -1,0 +1,84 @@
+# FireAnchorLevel: the fire grid on a refined level (erf.fire.anchor_level).
+#
+# Two levels: 16 x 16 x 8 cells of 50 m over 800 x 800 x 400 m, and a static
+# level-1 box refined 2 x 2 x 1 over x 200-600 m, y 200-500 m, the full height.
+# Level 1 is 16 x 12 cells of 25 m in two boxes of 8 and 4 cells along y
+# (amr.max_grid_size = 8), so the fire grid refines columns 8-23 by 8-19 of
+# level 1 into 64 x 48 fire cells of 6.25 m (grid_ratio 4). erf.fire.anchor_level
+# is unset: the fire runs on the finest level.
+#
+# Still air, no gravity, no diffusion: a prescribed rate of spread set per fuel
+# code from a checkerboard fuel map (1 m/s on code 1, 0.4 m/s on code 4, squares
+# of 25 x 50 m) grows a disc ignited at (330, 360) m. The map has one code per
+# fire cell of the refined region. inputs_single runs the same fire on one
+# level of 25 m cells, where the fire grid covers the whole domain with the same
+# 6.25 m cells and a map of the whole domain; the two must give the same front.
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 800.0 800.0 400.0
+amr.n_cell = 16 16 8
+geometry.is_periodic = 0 0 0
+amr.max_level = 1
+amr.ref_ratio_vect = 2 2 1
+amr.max_grid_size = 8           # box lengths must divide by the fire grid ratio
+amr.max_grid_size_z = 8         # the fire module forbids z-decomposition
+amr.blocking_factor = 4
+erf.refinement_indicators = box1
+erf.box1.max_level = 1
+erf.box1.in_box_lo = 200.0 200.0
+erf.box1.in_box_hi = 600.0 500.0
+erf.regrid_int = -1             # the fire grid needs static refinement
+erf.coupling_type = "TwoWay"
+
+xlo.type = "SlipWall"
+xhi.type = "SlipWall"
+ylo.type = "SlipWall"
+yhi.type = "SlipWall"
+zlo.type = "surface_layer"      # the fire module needs the surface layer at the ground
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+# The surface layer needs a diffusion operator; zero coefficients keep the air
+# free of it, so nothing but the fire changes the state.
+erf.molec_diff_type = "ConstantAlpha"
+erf.dynamic_viscosity = 0.0
+erf.alpha_T = 0.0
+erf.alpha_C = 0.0
+erf.les_type = "None"
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+erf.init_type = "uniform"
+erf.use_gravity = false
+erf.fixed_dt = 1.0              # level 0; level 1 steps at 0.5 s
+erf.substepping_cfl = 0.5
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_int_1 = -1
+max_step = 40
+stop_time = 40.0
+
+erf.fire.enable = true
+erf.fire_plot_file = "plt_fire_"
+erf.fire_plot_int = 20
+erf.fire.grid_ratio = 4
+erf.fire.propagation_method = "levelset"
+erf.fire.ros_model = "prescribed"
+erf.fire.prescribed.ros = 0.2
+erf.fire.prescribed.by_fuel = 1 1.0 4 0.4
+erf.fire.fuel_map.file = "fuel_region.asc"
+erf.fire.coupling_type = "passive"
+erf.fire.fuel_model_id = 1
+erf.fire.moisture_1hr = 0.08
+erf.fire.moisture_10hr = 0.08
+erf.fire.moisture_100hr = 0.10
+erf.fire.moisture_dynamic = false
+erf.fire.use_waf = false
+erf.fire.use_terrain_wind = false
+erf.fire.ignition_x = 330.0
+erf.fire.ignition_y = 360.0
+erf.fire.ignition_r = 15.0
+erf.fire.write_fire_stats_csv = true
