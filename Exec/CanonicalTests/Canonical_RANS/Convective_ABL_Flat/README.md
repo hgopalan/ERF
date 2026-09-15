@@ -28,10 +28,14 @@ python3 check_convective.py --physics plt02880 surf_hist.dat
 
 ## Checks
 
-Smoke (`--smoke`, the CTest entry): the structural checks of
+Smoke (`--smoke`, the CTest entry, 40 steps): the structural checks of
 `../rans_checks.py`, with the length-scale bound taken as the unstable
 bound (about 1.31 times the neutral geometric length under the cap), which
-is where the phase 3 limiter on the unstable length is exercised.
+is where the limiter on the unstable length is exercised, and the column
+heat gain over rho_sfc F t (1, 10 %) from the physics table below. The deck
+runs the implicit column solve, so the heat gain after 40 steps tests that
+the solve adds the surface heat flux once per step on both anelastic
+stages.
 
 Physics (`--physics`, 4 h):
 
