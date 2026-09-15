@@ -8,7 +8,7 @@ MRF PBL scheme (`erf.pbl_type = MRF`), each under three integrators:
 | integrator | inputs |
 | --- | --- |
 | explicit anelastic | `erf.anelastic = 1`, `erf.vert_implicit = false` |
-| implicit anelastic | `erf.anelastic = 1`, `erf.vert_implicit = true` |
+| implicit anelastic | `erf.anelastic = 1`, `erf.vert_implicit = true`, `erf.anelastic_type = MidPoint` (RK2 anelastic turns the solve off) |
 | implicit compressible | `erf.anelastic = 0`, `erf.vert_implicit = true`, acoustic substeps |
 
 The grid is coarse in the horizontal and fine in the vertical, as in a RANS
@@ -67,32 +67,39 @@ which is a lower bound.
 ## Results
 
 Largest step that runs 200 steps from the 1 h state, with the first failing
-rung in brackets (1 rank, Release, 2026-09-10):
+rung in brackets (1 rank, Release, 2026-09-15; implicit anelastic with
+`erf.anelastic_type = MidPoint`):
 
 | closure | explicit anelastic | implicit anelastic | implicit compressible | dz^2 / (2 K/rho) |
 | --- | --- | --- | --- | --- |
-| kEqn | 2 s (4) | 256 s (512) | 64 s (128) | 2.13 s |
-| Deardorff | 0.25 s (0.5) | 512 s (1024) | 64 s (128) | 0.339 s |
-| MRF | 0.5 s (1) | 256 s (512) | 8 s (16) | 0.582 s |
+| kEqn | 2 s (4) | 64 s (128) | 64 s (128) | 2.13 s |
+| Deardorff | 0.25 s (0.5) | 64 s (128) | 64 s (128) | 0.339 s |
+| MRF | 0.5 s (1) | 64 s (128) | 8 s (16) | 0.246 s |
 
 - Explicit anelastic stops at the diffusion limit for all three closures.
-  The passing step is 0.94, 0.74 and 0.86 of dz^2 / (2 K/rho), and the next
-  rung aborts on a negative theta after 15, 75 and 11 steps.
-- The implicit solve raises the step by a factor of 128 (kEqn), 2048
-  (Deardorff) and 512 (MRF) under anelastic, and 32, 256 and 16 under
-  compressible.
+  The passing step is 0.94, 0.74 and 2.03 of dz^2 / (2 K/rho), and the next
+  rung aborts on a negative theta after 21, 80, 3 steps. The MRF ratio lies
+  above the stated band of 0.5 to 2; the check reports a pass because its
+  range comparison is half a band width too loose (erf-model/ERF#4027).
+- The implicit solve raises the step by a factor of 32 (kEqn), 256
+  (Deardorff) and 128 (MRF) under anelastic, and 32, 256 and 16 under
+  compressible. Implicit anelastic stops at 64 s for every closure: the
+  128 s rung makes rho theta negative after 10 to 13 steps.
+- Before the midpoint stages (RK2 with a second-stage half step, removed
+  when ERF-Fire took development's rule for anelastic implicit diffusion)
+  implicit anelastic reached 256 s (kEqn, MRF) and 512 s (Deardorff). The
+  anelastic spin-up now runs the midpoint stages too, which leaves MRF with a
+  larger diffusivity at 1 h (K/rho 50.8 m2/s against 21.5 m2/s), hence its
+  shorter diffusion limit.
 - The column is horizontally uniform, so advection does no work and the
   implicit steps do not carry over to a real case, where the advective
   Courant number binds first (see the `Neutral_Hill_2D` case).
-  What stops the implicit runs here was not identified.
 - MRF under implicit compressible stops at 8 s: a factor 8 below kEqn and
-  Deardorff, and 32 below its own anelastic step. The 16 s rung does not
-  abort; after 200 steps |u| reaches 4.6e3 m/s. The pinned substeps are not
-  the cause: with ERF's own substep count the same rung reaches 1.7e3 m/s,
-  and with a 1 s fast step 6.3e3 m/s. Not investigated further.
+  Deardorff. The 16 s rung does not abort; after 200 steps |u| reaches
+  4.6e3 m/s. The pinned substeps are not the cause (measured 2026-09-10).
+  Not investigated further.
 
-Wall time: 57 to 87 s per closure on one rank in Release, 26 to 32 ERF runs
-each.
+Wall time: 192 s for the three closures on one rank in Release.
 
 ## Running
 

@@ -129,7 +129,7 @@ public:
      *                               (fire_anchor_level(): erf.fire.anchor_level,
      *                               the finest level by default).
      * @param[in] surface_layer_ptr  Pointer to the SurfaceLayer owned by ERF
-     *                               (pass m_SurfaceLayer.get() at the call site).
+     *                               (pass m_SurfaceLayer[Orientation::zlo()].get() at the call site).
      *                               May be nullptr when called before the surface
      *                               layer is constructed (prereq check only).
      * @param[in] z_phys_nd_atm      Atmospheric nodal terrain-height MultiFab of
