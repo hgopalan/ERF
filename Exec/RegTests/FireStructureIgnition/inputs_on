@@ -1,0 +1,20 @@
+FILE = inputs_base
+
+# The new path: house A ignites from the heat load of the grass burning at its
+# wall, burns with a fast curve, and its radiation and brands ignite B 20 m
+# away; C, 90 m further, stays unignited. The thresholds and the curve are set for a 20 s
+# run, not the documented defaults: the heat-load threshold is one fiftieth of
+# the default and the growth time one three-hundredth, and the fuel load is
+# small enough that A burns out before the end (see the README).
+erf.fire_plot_file = "plt_fire_on_"
+erf.fire.fire_stats_csv_file = "fire_stats_on.csv"
+erf.fire.exposure.file = "exposure_on.csv"
+erf.fire.structures.ignition.enable = true
+erf.fire.structures.ignition.heat_load_J_m2 = 1.2e5     # 0.12 MJ/m2 (default 6 MJ/m2)
+erf.fire.structures.ignition.ember_count = 5             # (default 50)
+erf.fire.structures.ignition.intensity_kW_m = 0.0        # criterion off here
+erf.fire.structures.ignition.peak_flux_W_m2 = 2.5e5      # the default
+erf.fire.structures.ignition.fuel_load_J_m2 = 2.0e6      # 2 MJ/m2: burns out in about 12 s (default 780 MJ/m2)
+erf.fire.structures.ignition.growth_time_s = 2.0         # (default 600 s)
+erf.fire.structures.ignition.rad_fraction = 0.3    # the default
+erf.fire.structures.ignition.rad_radius_m = 60.0   # (default 100 m)

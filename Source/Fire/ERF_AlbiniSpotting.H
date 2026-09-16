@@ -254,6 +254,10 @@ make_rothermel_params_for_albini(const FuelModelParams& /*fp*/)
  * @param[in]     fuel_load        Optional residual fuel MultiFab (for re-entry filter)
  * @param[in]     fuel_system      Fuel system string ("13" or "40") for distance table
  * @param[in]     fuel_model_id    Anderson/Scott-Burgan model ID for distance table lookup
+ * @param[in]     extra_launch_intensity  Optional equivalent fireline intensity [kW/m] of
+ *                                 cells that launch brands although they are not burning fuel
+ *                                 (the footprint cells of a burning structure); a cell with a
+ *                                 positive value is a launch site with that intensity
  */
 inline void
 compute_albini_spotting(amrex::MultiFab&                  phi,
@@ -273,7 +277,8 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
                         const amrex::MultiFab*            terrain_z = nullptr,
                         const amrex::MultiFab*            nonburnable = nullptr,
                         amrex::MultiFab*                  ember_landings = nullptr,
-                        bool                              phi_normalized = true)
+                        bool                              phi_normalized = true,
+                        const amrex::MultiFab*            extra_launch_intensity = nullptr)
 {
     using namespace amrex;
 
@@ -335,6 +340,21 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
     ParallelDescriptor::ReduceRealSum(h_v.data(),    ncells);
     ParallelDescriptor::ReduceRealSum(h_ros.data(),  ncells);
     // Host copy of the non-burnable mask, gathered the same way as the fuel.
+    // Extra launch sites (burning structures): reduced like the other fields.
+    const bool has_extra = (extra_launch_intensity != nullptr);
+    std::vector<Real> h_extra(has_extra ? ncells : 0, 0.0);
+    if (has_extra) {
+        for (MFIter mfi(*extra_launch_intensity); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            const ERFHostFabView e_v((*extra_launch_intensity)[mfi]);
+            auto e_arr = e_v.array();
+            LoopOnCpu(bx, [&](int i, int j, int /*k*/) {
+                h_extra[j * nx + i] = e_arr(i, j, 0, 0);
+            });
+        }
+        ParallelDescriptor::ReduceRealSum(h_extra.data(), ncells);
+    }
+
     const bool has_mask = (nonburnable != nullptr);
     std::vector<Real> h_mask(has_mask ? ncells : 0, 0.0);
     if (has_mask) {
@@ -420,6 +440,16 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
                     Real cy = prob_lo[1] + (j + 0.5) * dx[1];
                     front_cells.push_back({i, j, I_B, H_z, cx, cy, h_terrain[idx]});
                 }
+            } else if (has_extra && h_extra[idx] > 0.0) {
+                // A burning structure: not fuel, not behind the front, but a
+                // launch site with the equivalent intensity it was given.
+                Real I_B = h_extra[idx];
+                Real H_z = albini_lofting_height(I_B, sp.I_B_min);
+                if (H_z > 0.0) {
+                    Real cx = prob_lo[0] + (i + 0.5) * dx[0];
+                    Real cy = prob_lo[1] + (j + 0.5) * dx[1];
+                    front_cells.push_back({i, j, I_B, H_z, cx, cy, h_terrain[idx]});
+                }
             }
         }
     }
@@ -450,6 +480,7 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
         Real x, y;
         int  src_i, src_j;
         Real dist;
+        Real H_z;     // lofting height at the source (a structure's is not derivable from h_ros)
     };
     std::vector<LandingSite> landings;
 
@@ -544,7 +575,7 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
             if (frac < sp.reentry_fuel_thresh) { continue; }
         }
 
-        landings.push_back({px, py, si, sj, dist});
+        landings.push_back({px, py, si, sj, dist, H_z});
 
         // Update diagnostics comp 0 (H_z) and comp 1 (brand count) at source cell
         // These are done after the loop to avoid MultiFab conflicts mid-loop.
@@ -602,10 +633,9 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
                 h_ldist[n] = ls.dist;
                 h_lsi[n]   = ls.src_i;
                 h_lsj[n]   = ls.src_j;
-                // Same H_z the previous host loop recomputed per landing.
-                const Real rsp = h_ros[ls.src_j * nx + ls.src_i];
-                h_lhz[n] = albini_lofting_height(albini_byram_intensity(rsp, fp, rc),
-                                                 sp.I_B_min);
+                // The source cell's lofting height, as the launch loop computed it
+                // (from h_ros for a fuel cell, from the extra intensity for a structure).
+                h_lhz[n] = ls.H_z;
             }
             Gpu::copy(Gpu::hostToDevice, h_lx.begin(),    h_lx.end(),    d_lx.begin());
             Gpu::copy(Gpu::hostToDevice, h_ly.begin(),    h_ly.end(),    d_ly.begin());
