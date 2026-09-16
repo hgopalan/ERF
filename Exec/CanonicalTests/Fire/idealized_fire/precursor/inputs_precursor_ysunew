@@ -1,0 +1,21 @@
+FILE = inputs_precursor_common
+
+# PBL: YSUNew, parameters as Exec/CanonicalTests/ABL/MRF_YSUNew_Enhancements/canonical/neutral_abl
+# (Coriolis frequency at 39.95 N)
+erf.pbl_type = "YSUNew"
+erf.most.pblh_calc = "YSUNew"
+erf.enable_ysu_cloud_pblh = true
+erf.enable_ysu_countergradient = true
+erf.enable_ysu_entrainment = true
+erf.enable_ysu_liquid_theta = true
+erf.enable_ysu_sat_limiter = false
+erf.enable_ysu_terrain_pblh_floor = true
+erf.enable_ysu_topdown = true
+erf.pbl_ysu_coriolis_freq = 9.34e-5
+erf.pbl_ysu_force_over_water = false
+erf.pbl_ysu_land_Ribcr = 0.25
+erf.pbl_ysu_unst_Ribcr = 0.0
+erf.pbl_ysu_use_consistent_coriolis = false
+erf.pbl_ysunew_highres_bounds = false
+erf.ysu_moistvars = false
+erf.ysu_qcloud_threshold = 1.0e-4

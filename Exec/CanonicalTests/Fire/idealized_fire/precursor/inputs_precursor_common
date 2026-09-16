@@ -1,0 +1,69 @@
+# Inflow precursor for the idealized Marshall Fire decks: a flat, periodic, geostrophically
+# forced column on the vertical grid, surface and solver of the fire decks. The horizontal
+# mean of the column after 24 h becomes the inflow profile (z above ground, u, v, T) and the
+# starting sounding of the fire deck with the same PBL scheme (make_inflow.py).
+# Included by inputs_precursor_mrf and inputs_precursor_ysunew.
+
+# GEOMETRY: 8 x 8 columns at the fire decks' 320 m spacing; their 50 levels, 10 m stretched by 1.1 to 11.6 km
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 2560.0 2560.0 11639.1
+amr.n_cell = 8 8 50
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.max_grid_size = 8
+amr.max_grid_size_z = 50
+erf.initial_dz            = 10.0
+erf.grid_stretching_ratio = 1.1
+# flat ground on the fitted mesh, so the surface layer takes the same path as in the fire decks
+erf.terrain_type = StaticFittedMesh
+
+# SURFACE AND TOP, as the fire decks
+zlo.type = "surface_layer"
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+zhi.type = "SlipWall"
+zhi.theta_grad = 0.003
+erf.rayleigh_damp_W   = true
+erf.rayleigh_dampcoef = 0.2
+erf.rayleigh_zdamp    = 3000.0
+
+# ATMOSPHERE
+erf.molec_diff_type = "None"
+erf.les_type = "None"          # horizontally uniform column: the PBL scheme does all the mixing
+erf.use_gravity = true
+erf.theta_ref = 300.0
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+erf.input_sounding_file = "sounding_precursor.txt"   # neutral to 1500 m, +15 K capping inversion over 100 m, 3 K/km above
+
+# FORCING: 67 m/s geostrophic wind from 285 degrees at 39.95 N. make_inflow.py rotates the
+# settled column to the fire decks' wind direction; on an f-plane that equals rotating this wind.
+erf.use_coriolis = true
+erf.latitude = 39.95
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind = 64.71703 -17.34088 0.0
+
+# SOLVER, as the fire decks
+erf.anelastic = 1
+erf.vert_implicit = true
+erf.cfl = 0.5
+erf.use_fft = 1
+erf.dycore_horiz_adv_type  = "Upwind_3rd"
+erf.dycore_vert_adv_type   = "Upwind_3rd"
+erf.dryscal_horiz_adv_type = "Upwind_3rd"
+erf.dryscal_vert_adv_type  = "Upwind_3rd"
+
+# RUN AND OUTPUT: 24 h (the inertial period at 39.95 N is 18.7 h), a plotfile every hour
+stop_time = 86400.0
+max_step  = 200000
+erf.sum_interval = 100000
+erf.v = 1
+amr.v = 1
+erf.check_int = -1
+erf.plot_file_1 = plt_pre
+erf.plot_per_1  = 3600.0
+erf.plot_vars_1 = theta x_velocity y_velocity z_velocity z_phys Kmv Khv
+erf.plot2d_file_1 = plt2d_pre
+erf.plot2d_per_1  = 600.0
+erf.plot2d_vars_1 = pblh u_star t_star
