@@ -426,6 +426,31 @@ erf.fire.structures.min_height = 0.5      # sampled height [m] above which a cel
 # an immersed-forcing building does not leak into the wind of the fire cells
 # around it. Needs structures.enable; no effect with wind_interp = "nearest".
 erf.fire.structures.wind_open_columns = false
+# Structure ignition and house-to-house spread on the exposure accumulators
+# (needs exposure.enable). A structure ignites when the largest accumulated
+# heat load in its wall band reaches heat_load_J_m2, or ember_count brands
+# have landed on its footprint, or the largest fireline intensity in its band
+# has spent residence_s above intensity_kW_m; a threshold <= 0 turns that
+# criterion off. A burning structure releases heat on its footprint along the
+# EN 1991-1-2 Annex E.4 dwelling curve (t-squared growth to peak_flux_W_m2
+# over growth_time_s, a plateau until 70 % of fuel_load_J_m2 is out, a linear
+# decay), launches brands through the spotting model when it is on, and
+# spreads rad_fraction of its release as ground point sources onto the
+# cells within rad_radius_m, where it adds to the heat load; that is
+# how it ignites its neighbours. Adds fire_structure_state,
+# fire_structure_ignition_time and fire_structure_rad_flux to the fire
+# plotfile and five columns to the exposure CSV. The thresholds are
+# placeholders to calibrate; the curve is the Eurocode dwelling.
+erf.fire.structures.ignition.enable = false
+erf.fire.structures.ignition.heat_load_J_m2 = 6.0e6       # band heat load at ignition [J/m2]
+erf.fire.structures.ignition.ember_count = 50             # brands on the footprint at ignition
+erf.fire.structures.ignition.intensity_kW_m = 1000.0      # band intensity threshold [kW/m]
+erf.fire.structures.ignition.residence_s = 60.0           # time above it at ignition [s]
+erf.fire.structures.ignition.peak_flux_W_m2 = 2.5e5       # EN 1991-1-2 dwelling RHRf
+erf.fire.structures.ignition.fuel_load_J_m2 = 7.8e8       # EN 1991-1-2 dwelling fire load density
+erf.fire.structures.ignition.growth_time_s = 600.0        # time from ignition to the peak [s]
+erf.fire.structures.ignition.rad_fraction = 0.3     # share radiated onto the surroundings
+erf.fire.structures.ignition.rad_radius_m = 100.0   # reach of the incident flux [m]
 
 # Spatial fuel map on the fire grid: ESRI ASCII ("ascii") or FARSITE landscape
 # ("lcp") file; empty = the uniform fuel_model_id. blending_fraction blends the

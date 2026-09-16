@@ -1,0 +1,97 @@
+# FireStructureIgnition: a grass fire lit against the wall of a house, and
+# what the house does next.
+#
+# 320 x 160 x 120 m, 10 m atmosphere cells, 5 m fire cells; a neutral 10 m/s
+# sounding entering at the west face and leaving at the east face, periodic in
+# y; FM1 short grass at 6% moisture; passive atmosphere. Three 20 m houses on
+# the centreline (gen_structure_ignition.py): A at x = 100-120 m, B 20 m east
+# of it at 140-160 m, C at 250-270 m as the control. The ignition disc ends at
+# A's sampled west wall (x = 97.5 m), so A's wall band burns from the first
+# step. The variants set erf.fire.structures.ignition.enable off and on.
+#
+#   ./run_structure_ignition.sh /path/to/erf_exec     runs both, restarts, checks
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 320.0 160.0 120.0
+amr.n_cell = 32 16 12
+
+geometry.is_periodic = 0 1 0
+xlo.type = "Inflow"
+xlo.velocity = 10.0 0.0 0.0
+xlo.theta = 300.0
+xlo.density = 1.16144
+xhi.type = "Outflow"
+zlo.type = "surface_layer"
+zhi.type = "SlipWall"
+
+amr.max_level = 0
+amr.max_grid_size = 32      # one box; box lengths must divide by the fire grid ratio
+amr.max_grid_size_z = 12    # the fire module forbids z decomposition
+
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+erf.molec_diff_type = "None"
+erf.les_type = "Smagorinsky"
+erf.Cs = 0.1
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type = Ideal
+
+erf.fixed_dt = 0.5
+erf.substepping_cfl = 0.5
+stop_time = 20.0
+max_step = 40
+
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_int_1 = -1
+erf.fire_plot_int = 10           # every 5 s: step 10 catches A at its peak
+
+erf.fire.enable = true
+erf.fire.fire_debug = false
+erf.fire.grid_ratio = 2            # 5 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.directional_ros = true
+erf.fire.ros_model = "rothermel"
+erf.fire.fuel_model_id = 1         # short grass
+erf.fire.moisture_1hr = 0.06
+erf.fire.moisture_10hr = 0.07
+erf.fire.moisture_100hr = 0.09
+erf.fire.moisture_dynamic = false
+erf.fire.ignition_x = 78.0
+erf.fire.ignition_y = 80.0
+erf.fire.ignition_r = 20.0         # edge at x = 98 m, on A's wall band
+erf.fire.wind_ref_ht = 6.1
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = true
+erf.fire.use_terrain_wind = false
+erf.fire.coupling_type = "passive"
+erf.fire.write_fire_stats_csv = true
+
+# Houses as non-burnable structures with the exposure diagnostics: one row
+# per house every second, a one-cell wall band.
+erf.fire.structures.enable = true
+erf.fire.structures.file = "houses_10m_32x16.txt"
+erf.fire.levelset.wall_extrapolate = true
+erf.fire.exposure.enable = true
+erf.fire.exposure.interval = 2
+erf.fire.exposure.ring = 1
+
+# Seeded spotting so a burning house launches brands (front-only launch from
+# the grass); the fall speed keeps the brands within the domain.
+erf.fire.spotting.enable = true
+erf.fire.spotting.random_seed = 11
+erf.fire.spotting.P_base = 0.02
+erf.fire.spotting.spotting_interval = 1
+erf.fire.spotting.I_B_min = 100.0
+erf.fire.spotting.terminal_velocity = 8.0
+erf.fire.spotting.launch_from = "front"

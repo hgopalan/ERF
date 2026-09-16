@@ -11,7 +11,7 @@ fuel against conservation.
 
 ```
 python3 gen_wui.py                                   # rasters (already committed)
-MPIRUN="mpirun -np 2" ./run_wui.sh /path/to/erf_exec  # five variants, then the checks
+MPIRUN="mpirun -np 2" ./run_wui.sh /path/to/erf_exec  # six variants, then the checks
 SKIP_RUN=1 ./run_wui.sh /path/to/erf_exec             # checks only
 ```
 
@@ -36,6 +36,7 @@ read the same file), the two fuel maps and the sounding.
 | `subdivision` | houses as non-burnable structures, level set extrapolated into them, streets non-burnable, exposure diagnostics every 10 s, seeded Albini spotting; passive atmosphere |
 | `defensible` | the subdivision with a 30 m fuel break at x = 480-510 m and 10 m cleared around every house, which removes the lanes: only embers can reach a house |
 | `coupled` | the subdivision with immersed-forcing houses in the atmosphere, the fire's wind from the open columns beside them, lagged heat coupling with the additive source in the open part of the columns; an atmosphere plotfile at 700 s intervals |
+| `ignition` | the subdivision with structure ignition on (`erf.fire.structures.ignition.*`, 2026-09-16) with the thresholds at a third of the documented defaults: houses ignite from a 2 MJ/m² heat load in their wall band, 15 landed brands, or a minute above 300 kW/m; burn along the EN 1991-1-2 dwelling curve (250 kW/m², 780 MJ/m², 600 s to the peak, the defaults); radiate 30% of it within 100 m and launch brands; passive atmosphere. At the documented thresholds no house ignites here (see the results) |
 
 The runs are two boxes, so at most two ranks; each variant runs 2100 s.
 
@@ -62,6 +63,12 @@ The runs are two boxes, so at most two ranks; each variant runs 2100 s.
    maximum heat load at a house in `defensible` than in `subdivision`.
 7. **The coupled run stands up.** No NaN, a plume (maximum w above 0.5 m/s in
    the last atmosphere plotfile), and the fire reaches x = 780 m.
+8. **Houses ignite and spread.** In `ignition` at least one house ignites,
+   a later one ignites after the first, and at least one ignited house had
+   not been reached by the front when it ignited (house-to-house spread by
+   radiation or brands); the plotfile state of every ignited house agrees
+   with the CSV; no footprint cell burns or loses fuel (a burning house is a
+   heat source, not a burning fuel cell).
 
 The exposure columns are also printed against the threshold usually quoted
 for the ignition of wood by radiation, about 20 kW/m² (Cohen 2004), as a
@@ -83,6 +90,23 @@ derivatives and the near-front artificial viscosity of 0.1
 | subdivision        |             1705 |         4398 |          13/24 |                   773 |                  3.11 |             47 |
 | defensible         |            never |         1752 |           0/24 |                     0 |                  0.00 |              0 |
 | coupled            |             1921 |         5339 |          14/24 |                   773 |                  3.11 |              7 |
+| ignition           |         1460 |   5583 | 17/24 |              773 |                99.0 |     104 |
+
+The `ignition` variant was run on 2026-09-16 with the same binary as a fresh
+`subdivision` run (which reached x = 780 m at 1277 s with 4864
+burned cells, 13/24 houses reached and 3.11 MJ/m² maximum heat
+load; the arrival and the burned area differ from the 2026-09-11 row above,
+which was measured before the fire-grid and coupling changes merged into
+ERF-Fire since then, while the house exposure numbers are unchanged; the
+ignition-off path of the 2026-09-16 binary is byte-identical to the previous
+head on the FireStructureIgnition deck). **At the documented default thresholds (6 MJ/m², 50 brands, 1000 kW/m
+for 60 s) no house ignited in 2100 s**: 13 of 24 houses reached by the front, largest wall heat load 3.11 MJ/m², peak intensity 773 kW/m, 86 brands landed with at most 15 on one footprint, the same numbers as `subdivision`, since a house that never ignites changes nothing. A short-grass fire at
+10 m/s does not reach those placeholders by radiation at the ground next to a
+wall, and the seeded spotting drops too few brands on any one footprint; that
+is in line with the field finding that homes in grass fires ignite from
+embers and adjacent fuels rather than from the flame front (Cohen 2004), and
+it says nothing about the thresholds' calibration. With the thresholds at a
+third of the defaults (the committed `inputs_ignition`): 19 of 24 houses ignited, all by the heat-load criterion, the first (first row, house 4) at 250 s from a spot fire burning at its wall ahead of the front and the last at 1880 s; 7, 6 and 6 houses in the three rows. Nine of the nineteen ignited before the front had reached their wall band, and two (houses 8 and 18) have a wall band the front never reached, so they ignited from their neighbours' radiation alone: house-to-house spread at the scale of the subdivision. Every ignited house was still burning at 2100 s (the Eurocode curve lasts 74 minutes), each releasing its 250 kW/m² peak; the largest wall heat load rose to 99 MJ/m² under the radiation of neighbours. The brands launched from the burning houses raise the landings to 104 and the burned area by 15%, and change the seeded brand sequence, so the front reaches x = 780 m at 1460 s instead of 1277 s. The fire itself is unchanged by an ignition: no footprint cell burns or loses fuel, and the exposure numbers of the houses the front reaches are those of `subdivision`
 
 The wildland head moves at 0.250 m/s between x = 400 and 470 m against
 Rothermel's 0.2501 m/s for FM1 at 6% moisture and the 300 ft/min wind cap;

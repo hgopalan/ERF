@@ -52,6 +52,8 @@
  * @param[in] include_structure_height Append fire_structure_height when true (structures or hybrid structure selector).
  * @param[in] include_nonburnable Append fire_nonburnable when true (non-burnable mask active).
  * @param[in] include_exposure Append the four exposure fields when true (erf.fire.exposure.enable).
+ * @param[in] include_structure_ignition Append the three structure ignition fields when true
+ *            (erf.fire.structures.ignition.enable).
  * @return Vector of variable name strings in canonical write order.
  */
 inline amrex::Vector<std::string> fire_plotfile_var_names(
@@ -63,7 +65,8 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
     bool include_ros_weight = false,
     bool include_structure_height = false,
     bool include_nonburnable = false,
-    bool include_exposure = false)
+    bool include_exposure = false,
+    bool include_structure_ignition = false)
 {
     amrex::Vector<std::string> names{
         "fire_phi",
@@ -124,6 +127,11 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
         names.push_back("fire_peak_intensity");
         names.push_back("fire_ember_landings");
     }
+    if (include_structure_ignition) {
+        names.push_back("fire_structure_state");
+        names.push_back("fire_structure_ignition_time");
+        names.push_back("fire_structure_rad_flux");
+    }
     return names;
 }
 
@@ -149,6 +157,7 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
  * @param[in] include_structure_height Count fire_structure_height when true (structures or hybrid structure selector).
  * @param[in] include_nonburnable Count fire_nonburnable when true (non-burnable mask active).
  * @param[in] include_exposure Count the four exposure fields when true.
+ * @param[in] include_structure_ignition Count the three structure ignition fields when true.
  * @return Number of scalar fire output variables.
  */
 inline int fire_plotfile_ncomp(
@@ -160,7 +169,8 @@ inline int fire_plotfile_ncomp(
     bool include_ros_weight = false,
     bool include_structure_height = false,
     bool include_nonburnable = false,
-    bool include_exposure = false)
+    bool include_exposure = false,
+    bool include_structure_ignition = false)
 {
     return 19
         + (include_live_moisture ? 2 : 0)
@@ -170,7 +180,8 @@ inline int fire_plotfile_ncomp(
         + (include_ros_weight ? 1 : 0)
         + (include_structure_height ? 1 : 0)
         + (include_nonburnable ? 1 : 0)
-        + (include_exposure ? 4 : 0);
+        + (include_exposure ? 4 : 0)
+        + (include_structure_ignition ? 3 : 0);
 }
 
 
