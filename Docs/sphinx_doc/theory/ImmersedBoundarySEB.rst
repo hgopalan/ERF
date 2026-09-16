@@ -307,6 +307,28 @@ convection. The face's :math:`L` stays its own because a roof in a
 separation zone or a sunlit wall can be in the opposite regime from the
 ground under it.
 
+That is :cpp:`erf.ibseb.stability_scheme = iterative`. With ``louis`` the
+roofs take the explicit factors of Louis (1979) on the bulk Richardson
+number between the skin and the cell centre,
+
+.. math::
+
+   Ri_b = \frac{g}{\theta} \frac{\delta (\theta_{air} - \theta_s)}{U_{eff}^2}, \qquad
+   F = 1 - \frac{b\, Ri_b}{1 + C^* a^2 b \sqrt{|Ri_b| \delta / z_0}} \quad (Ri_b < 0), \qquad
+   F_m = F_h = \frac{1}{(1 + \tfrac{b}{2} Ri_b)^2} \quad (Ri_b \ge 0),
+
+with :math:`b = 9.4`, :math:`C^* = 7.4` for momentum and 5.3 for heat and
+:math:`a^2 = (\kappa / \ln(\delta/z_0))^2`. They multiply the neutral
+coefficients, :math:`u_*^2 = a^2 U_{eff}^2 F_m` and
+:math:`u_* \theta_* = \kappa^2 U_{eff} (\theta_{air} - \theta_s) F_h /
+(\ln(\delta/z_0) \ln(\delta/z_{0h}))`, so the neutral limit is the two log
+laws of the wall function. Louis' ratio of the heat to the momentum
+coefficient, :math:`1/R = 1/0.74`, is not applied: it stands in for a heat
+roughness below the momentum one, which :cpp:`erf.ibseb.z0h_wall` already
+sets. There is no iteration and no seed, which makes it cheaper and
+free of convergence questions at very low wind; the Obukhov length it
+stores is diagnosed from the resulting :math:`u_*` and :math:`\theta_*`.
+
 ``Exec/CanonicalTests/SEB/WallFunction`` puts the cube in calm air
 under a strong sun and checks that the neutral law sheds under 1 W/m2
 from a 340 K roof while the convective scale sheds hundreds; that
