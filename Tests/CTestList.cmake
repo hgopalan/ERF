@@ -1505,6 +1505,7 @@ add_test_fire(FireRosComparison_rothermel   FireRosComparison     inputs_rotherm
 add_test_fire(FireScottBurgan_gr2           FireScottBurgan       inputs_sb_gr2              40)
 add_test_fire(FireStickMoisture_stick       FireStickMoisture     inputs_stick               40)
 add_test_fire(FireStructureIgnition_on      FireStructureIgnition inputs_on                  40 NRANKS 1)
+add_test_fire(FirePrecipSource_atmosphere   FirePrecipSource      inputs_atmosphere          40 NRANKS 1)
 add_test_fire(FireLiveMoisture_fixed        FireLiveMoisture      inputs_fixed               40)
 add_test_fire(FireWindSampling_sample20     FireWindSampling      inputs_sample20            40)
 add_test_fire(FirePrescribed_ros_circle     FirePrescribed        inputs_ros_circle          40)
@@ -1536,6 +1537,21 @@ add_test_fire_abort(FireBadCoupling_abort     FireRestart           inputs_level
 if(ERF_ENABLE_MPI AND NOT WIN32)
 add_test_fire_script(FireAnchorLevel          FireAnchorLevel       run_anchor_level.sh NRANKS 2)
 endif()
+# where the rain that wets the dead fuel comes from (erf.fire.precip_source): the
+# atmosphere's rain per column wets the fuel under the raining columns only and the
+# fire-grid rate equals the change of the Kessler surface accumulation over the step,
+# the uniform rate wets every cell, and the restart carries the accumulation snapshot
+if(ERF_ENABLE_MPI AND NOT WIN32)
+add_test_fire_script(FirePrecipSource         FirePrecipSource      run_precip.sh NRANKS 1)
+endif()
+# its start-up checks: a scheme without precipitation accumulators, static moisture,
+# and both rain sources named at once
+add_test_fire_abort(FirePrecipSource_norain_abort  FirePrecipSource inputs_atmosphere
+    "provides none" "erf.moisture_model=Kessler_NoRain")
+add_test_fire_abort(FirePrecipSource_static_abort  FirePrecipSource inputs_atmosphere
+    "holds them fixed" "erf.fire.moisture_dynamic=false")
+add_test_fire_abort(FirePrecipSource_two_sources_abort FirePrecipSource inputs_atmosphere
+    "the rain has one source" "erf.fire.precip_rate_mm_hr=1.0")
 # its start-up checks: a level above the finest, a regridding level, a refinement box
 # short of the domain top, two separate patches, and the dust layer (level 0 only)
 add_test_fire_abort(FireAnchorLevel_above_finest_abort FireAnchorLevel inputs_base

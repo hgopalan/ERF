@@ -608,9 +608,9 @@ Every fire suite under ``Exec/RegTests`` (``FireAccelerationClock``, ``FireBurno
 ``FireDirectionalShape``, ``FireEmcModel``, ``FireExposure``, ``FireFbp``,
 ``FireFluxPartition``, ``FireHeatPlacement``, ``FireHybridObstacles``,
 ``FireLevelSetEllipse``, ``FireLiveMoisture``, ``FireNearWall``,
-``FirePerimeterIgnition``, ``FireRestart``, ``FireRosComparison``,
-``FireScottBurgan``, ``FireStickMoisture``, ``FireStructureIgnition``,
-``FireWindSampling``,
+``FirePerimeterIgnition``, ``FirePrecipSource``, ``FireRestart``,
+``FireRosComparison``, ``FireScottBurgan``, ``FireStickMoisture``,
+``FireStructureIgnition``, ``FireWindSampling``,
 ``FarsiteDefault`` and ``LevelSetPropagation``) registers one of its decks as
 a CTest smoke test carrying the ``fire`` and ``regression`` labels; the dust
 module is covered by the ``FireRestart`` dust deck when ``ERF_ENABLE_DUST`` is
@@ -643,6 +643,22 @@ the TL3 load (1.2329 kg/m²) on the northernmost fire cell and none on the
 southernmost: the map's first data row lies in its TL3 band and its last in the
 NB8 water. Until 2026-09-11 the reader put the first data row on the south edge,
 which fails both checks.
+
+``FirePrecipSource`` (MPI builds, not Windows) runs ``run_precip.sh`` on one
+rank: five 40-step runs of a passive grass fire under Kessler rain from a cold
+column of air, with the rain that wets the dead fuel taken from nowhere (the
+historical deck), from the uniform ``erf.fire.precip_rate_mm_hr``, and from
+the atmosphere's rain per column (``erf.fire.precip_source = atmosphere``),
+the last also to a checkpoint and restarted from it. ``check_precip.py``
+requires the atmosphere's rain to raise the 1-hour moisture under the raining
+columns only and the uniform rate everywhere, the fire-grid rate
+``fire_precip_mm_hr`` to equal the change of ``rain_accum`` over the last step
+times 3600 / dt on every fire cell, the checkpoint to carry the accumulation
+snapshot, and the restart to reproduce the straight run exactly.
+``FirePrecipSource_norain_abort``, ``FirePrecipSource_static_abort`` and
+``FirePrecipSource_two_sources_abort`` pass when the atmosphere source stops
+at start-up under ``Kessler_NoRain``, with static moisture, and with a uniform
+rate set as well.
 
 ``FireBoundaryGuard_warn`` and ``FireBoundaryGuard_far`` run the two
 ``FireBoundaryGuard`` decks for 40 steps and check the statistics CSV and the

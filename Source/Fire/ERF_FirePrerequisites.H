@@ -4,6 +4,7 @@
 #include <ERF_FireParams.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_Geometry.H>
+#include <ERF_SurfacePrecipitation.H>
 
 // Forward declaration
 class SurfaceLayer;
@@ -35,6 +36,21 @@ class ERF;
  * @param[in] finest_level  Finest level of the run at start-up
  */
 int fire_anchor_level(const FireParams& fire_params, int finest_level);
+
+/**
+ * @brief Start-up check of erf.fire.precip_source = atmosphere: the microphysics
+ *        scheme must provide surface precipitation accumulators.
+ *
+ * Aborts, naming erf.fire.precip_source and erf.moisture_model, when the
+ * sources are empty (no moisture model, Kessler_NoRain, saturation adjustment
+ * only, ...). A no-op for the uniform source. Called after the microphysics of
+ * the fire grid's level is initialised.
+ *
+ * @param[in] fire_params  Fire configuration parameters
+ * @param[in] sources      Microphysics::Get_Surface_Precip_Accumulation_Ptrs(lev)
+ */
+void verify_fire_precip_source(const FireParams& fire_params,
+                               const SurfacePrecipAccumulationSources& sources);
 
 /**
  * @brief Verify fire module prerequisites in ERF configuration

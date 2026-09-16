@@ -151,9 +151,11 @@ In constant dry air a fuel starting at :math:`M_0 > E_d` therefore follows
 :math:`f_T = \exp(-0.015\,(T - 20^\circ\mathrm{C}))`, clamped to
 :math:`[0.5, 2]`, so warm fuel responds faster.
 
-**Precipitation.** A uniform rate :cpp:`erf.fire.precip_rate_mm_hr` adds a
-wetting term :math:`P = 0.01 \times` rate per hour once the rate exceeds
-0.1 mm/h; there is no rain from the atmosphere yet.
+**Precipitation.** A rain rate :math:`r` [mm/h] adds a wetting term
+:math:`P = 0.01\, r` per hour once the rate reaches 0.1 mm/h (the stick model
+holds its surface shell at :cpp:`erf.fire.stick.rain_surface_moisture`
+instead); where the rate comes from is set by :cpp:`erf.fire.precip_source`
+(:ref:`sec:FirePrecipSource`).
 
 The drivers are the potential temperature and relative humidity of the
 lowest atmospheric cell, sampled onto the fire grid each step and also
@@ -166,6 +168,63 @@ BEHAVE path uses the per-cell dead classes and the live classes through its
 dynamic live-to-dead herbaceous transfer, whose moisture window is
 :cpp:`erf.fire.behave.dynamic_transfer_lo` and ``_hi``
 (:ref:`sec:ROS_Behave`).
+
+.. _sec:FirePrecipSource:
+
+Rain source
+-----------
+
+:cpp:`erf.fire.precip_source` chooses where the rain that wets the dead
+classes comes from:
+
+- ``"uniform"`` (the default): :cpp:`erf.fire.precip_rate_mm_hr` on every
+  fire cell for the whole run, as before this option existed (0 by default,
+  so no rain).
+- ``"atmosphere"``: the rain of each atmospheric column. Every Eulerian
+  microphysics scheme with precipitation keeps a cumulative surface
+  accumulator per column (Kessler's ``rain_accum``, the rain, snow and
+  graupel accumulations of SAM, Morrison, WSM6 and WDM6), exposed in kg/m² of
+  liquid water. One kg/m² is one millimetre of depth, so after the
+  microphysics of each step the fire layer takes the accumulation of every
+  column of its level, subtracts the accumulation it saw at the end of its
+  previous step and divides by the step to get the rate,
+
+  .. math::
+
+     r = \frac{A(t + \Delta t) - A(t)}{\Delta t}\, 3600 \quad [\mathrm{mm/h}],
+
+  clamped at zero if the accumulator was reset. Every fire cell of a column
+  takes its column's rate, the same map that hands the fuel its temperature
+  and humidity, so the rain is piecewise constant on atmospheric columns. A
+  fresh start measures from zero, where every scheme starts its accumulators;
+  a restart brings the previous accumulation back from the checkpoint
+  (``FirePrecipAccumPrev``), and a checkpoint written without it gives the
+  first restarted step no rain and starts the reference from that step. The
+  rate is a step average over the step just taken, while the temperature and
+  humidity are the pre-step values.
+
+  The source is checked at start-up: the run stops, naming
+  :cpp:`erf.moisture_model`, if the scheme provides no accumulators
+  (``None``, ``Kessler_NoRain``, ``SatAdj``, ``MoistNoCondensation``); if
+  :cpp:`erf.fire.moisture_dynamic` is false; or if a positive
+  :cpp:`erf.fire.precip_rate_mm_hr` is set as well, since the rain has one
+  source and the two are not added.
+
+With dynamic moisture and either source the rate of every fire cell is written
+as ``fire_precip_mm_hr`` in the fire plotfile, and its maximum over the fire
+grid as the last column, ``precip_max_mm_hr``, of the statistics CSV
+(:ref:`sec:FireOutput`); a uniform rate of zero writes neither.
+
+``Exec/RegTests/FirePrecipSource`` runs a passive grass fire under Kessler
+rain from a cold column of air with the three settings side by side: the
+atmosphere's rain wets the 1-hour class under the raining columns only, the
+uniform rate wets it everywhere, the fire-grid rate equals the change of
+``rain_accum`` over the last step to round-off, and a restart reproduces the
+straight run exactly. The unit test ``ERF_GTestFirePrecip`` checks the rate
+conversion, the species sum without double counting, the rolling snapshot
+and the map onto the fire grid. Not modelled: canopy interception, the
+storage and evaporation of water on the fuel surface, and any distinction
+between rain and the liquid-water equivalent of snow, graupel and hail.
 
 Live moisture
 -------------
@@ -258,8 +317,9 @@ Limitations
 
 - Moisture is uniform within a fire cell and there is no fuel-bed depth
   profile.
-- Rain comes only from the uniform input rate; atmospheric precipitation is
-  not yet passed to the fuel.
+- Rain wets the fuel through the wetting term only: no canopy interception,
+  no surface water storage or evaporation, and frozen precipitation counts
+  as its liquid-water equivalent.
 - There is no live-moisture model: the live classes are held
   (``"fixed"``) or carried through the dead-fuel update (``"legacy"``).
   Curing of the live herbaceous load is available to the Balbi 2020 form

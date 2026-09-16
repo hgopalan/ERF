@@ -4,6 +4,7 @@
 
 #ifdef ERF_ENABLE_FIRE
 #include <ERF_FireUtils.H>
+#include <ERF_FirePrecip.H>
 #endif
 
 #ifdef ERF_USE_WINDFARM
@@ -467,6 +468,19 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         MultiFab RH_atm_k0(ba2d[lev], S_old.DistributionMap(), 1, 0);
         compute_rh_from_conservative(RH_atm_k0, S_old, Geom(lev));
 
+        // Surface precipitation accumulation of every column after this step's
+        // microphysics, for the rain per column of the fuel moisture model
+        // (erf.fire.precip_source = atmosphere); the fire layer differences it
+        // against the accumulation it saw at its previous step.
+        std::unique_ptr<MultiFab> precip_accum_k0;
+        if (m_fire_layer->get_precip_accum_prev() != nullptr) {
+            const SurfacePrecipAccumulationSources precip_sources =
+                micro ? micro->Get_Surface_Precip_Accumulation_Ptrs(lev)
+                      : SurfacePrecipAccumulationSources{};
+            precip_accum_k0 = std::make_unique<MultiFab>(ba2d[lev], S_old.DistributionMap(), 1, 0);
+            fire_surface_precip_accum_k0(*precip_accum_k0, precip_sources, Geom(lev).Domain().smallEnd(2));
+        }
+
         // In passive and lagged modes, fire uses pre-dycore wind (vars_old).
         // In synchronous mode, fire uses post-dycore wind (vars_new) so that
         // the fire spread rate at step n+1 reflects the atmospheric momentum
@@ -480,7 +494,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                                   vars_new[lev][Vars::xvel],
                                   vars_new[lev][Vars::yvel],
                                   *z_phys_cc[lev],
-                                  T_atm_k0, RH_atm_k0);
+                                  T_atm_k0, RH_atm_k0, precip_accum_k0.get());
         } else if (m_fire_layer->get_params().is_lagged()) {
             if (m_fire_layer->get_params().fire_debug) {
                 amrex::Print() << "[FIRE DEBUG] Fire advance using LAGGED coupling with PRE-dycore wind at t="
@@ -490,7 +504,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                                   vars_old[lev][Vars::xvel],
                                   vars_old[lev][Vars::yvel],
                                   *z_phys_cc[lev],
-                                  T_atm_k0, RH_atm_k0);
+                                  T_atm_k0, RH_atm_k0, precip_accum_k0.get());
         } else {
             // Passive mode
             if (m_fire_layer->get_params().fire_debug) {
@@ -501,7 +515,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                                   vars_old[lev][Vars::xvel],
                                   vars_old[lev][Vars::yvel],
                                   *z_phys_cc[lev],
-                                  T_atm_k0, RH_atm_k0);
+                                  T_atm_k0, RH_atm_k0, precip_accum_k0.get());
         }
 
         // Store current fire flux for injection at the next timestep via

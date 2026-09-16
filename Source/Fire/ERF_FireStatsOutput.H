@@ -92,7 +92,7 @@ write_fire_stats_header(const std::string& filename)
 
     out << "step,time_s,burned_area_ha,perimeter_km,"
            "active_front_cells,head_ros_ms,major_axis_m,minor_axis_m,heat_flux_max_Wm2,"
-           "spot_fires_this_step,max_spot_dist_m,edge_band_cells,edge_contact_time_s\n";
+           "spot_fires_this_step,max_spot_dist_m,edge_band_cells,edge_contact_time_s,precip_max_mm_hr\n";
     out.close();
 }
 
@@ -118,6 +118,8 @@ write_fire_stats_header(const std::string& filename)
  * @param[in] n_edge_cells      Burning cells within the boundary guard band this step
  *                              (erf.fire.boundary_guard_cells); 0 when the band is off.
  * @param[in] edge_contact_time Time [s] the fire first entered the band, -1 until then.
+ * @param[in] precip_mf         Optional rain rate per fire cell [mm/hr] (erf.fire.precip_source);
+ *                              its maximum is the last column, 0 without a rain source.
  */
 inline void
 append_fire_stats(const amrex::MultiFab& phi,
@@ -130,7 +132,8 @@ append_fire_stats(const amrex::MultiFab& phi,
                   const amrex::MultiFab* Q_mf = nullptr,
                   const amrex::MultiFab* albini_mf = nullptr,
                   amrex::Long n_edge_cells = 0,
-                  amrex::Real edge_contact_time = amrex::Real(-1.0))
+                  amrex::Real edge_contact_time = amrex::Real(-1.0),
+                  const amrex::MultiFab* precip_mf = nullptr)
 {
     using namespace amrex;
 
@@ -226,6 +229,8 @@ append_fire_stats(const amrex::MultiFab& phi,
     if (Q_mf) {
         ParallelDescriptor::ReduceRealMax(Q_max);
     }
+    // MultiFab::max() already reduces over ranks
+    const Real precip_max = precip_mf ? precip_mf->max(0) : 0.0_rt;
 
     // Phase 8: Albini spotting statistics
     // spot_fires: count of cells with active spot flag (comp 3) > 0.5
@@ -283,7 +288,8 @@ append_fire_stats(const amrex::MultiFab& phi,
         << n_spot_fires << ","
         << max_spot_dist << ","
         << n_edge_cells << ","
-        << edge_contact_time << "\n";
+        << edge_contact_time << ","
+        << precip_max << "\n";
     out.close();
 }
 

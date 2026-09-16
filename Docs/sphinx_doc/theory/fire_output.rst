@@ -113,6 +113,9 @@ order; the optional blocks are present only when their feature is on:
    * - ``fire_nonburnable``
      - 0/1
      - structures, ``fuel_map.nonburnable_codes`` or ``firebreak.use_mask`` configured
+   * - ``fire_precip_mm_hr``
+     - mm/hr
+     - dynamic dead-fuel moisture with ``erf.fire.precip_source = atmosphere`` or a positive ``erf.fire.precip_rate_mm_hr``
 
 Fire statistics CSV
 -------------------
@@ -123,7 +126,7 @@ fire step is appended to :cpp:`erf.fire.fire_stats_csv_file` (default
 
 ``step, time_s, burned_area_ha, perimeter_km, active_front_cells, head_ros_ms,
 major_axis_m, minor_axis_m, heat_flux_max_Wm2, spot_fires_this_step,
-max_spot_dist_m, edge_band_cells, edge_contact_time_s``.
+max_spot_dist_m, edge_band_cells, edge_contact_time_s, precip_max_mm_hr``.
 
 Burned area and perimeter come from the arrival-time field, the head rate is
 the maximum rate of spread over burning cells, and the axes are those of the

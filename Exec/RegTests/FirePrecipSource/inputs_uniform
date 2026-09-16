@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# The uniform rate, as before this option: 2 mm/hr on every fire cell.
+erf.fire.precip_source = "uniform"
+erf.fire.precip_rate_mm_hr = 2.0
+erf.fire.fire_stats_csv_file = "fire_stats_uniform.csv"
