@@ -1504,6 +1504,7 @@ add_test_fire(FireMrfThermalExcess          FireRestart           inputs_coupled
 add_test_fire(FireRosComparison_rothermel   FireRosComparison     inputs_rothermel_isotropic 40 NRANKS 1)
 add_test_fire(FireScottBurgan_gr2           FireScottBurgan       inputs_sb_gr2              40)
 add_test_fire(FireStickMoisture_stick       FireStickMoisture     inputs_stick               40)
+add_test_fire(FireStructureIgnition_on      FireStructureIgnition inputs_on                  40 NRANKS 1)
 add_test_fire(FireLiveMoisture_fixed        FireLiveMoisture      inputs_fixed               40)
 add_test_fire(FireWindSampling_sample20     FireWindSampling      inputs_sample20            40)
 add_test_fire(FirePrescribed_ros_circle     FirePrescribed        inputs_ros_circle          40)
@@ -1596,6 +1597,19 @@ add_test_fire_check(FireBoundaryGuard_warn    FireBoundaryGuard     inputs_warn 
 add_test_fire_check(FireBoundaryGuard_far     FireBoundaryGuard     inputs_far   40 check_guard.py NRANKS 1)
 add_test_fire_abort(FireBoundaryGuard_abort   FireBoundaryGuard     inputs_abort
     "reached the boundary guard band" "")
+# structure ignition and house-to-house spread (erf.fire.structures.ignition.*): the
+# old and the new path on the same three houses, a radiation-only variant in which
+# the second house can only ignite from the first, a restart, and the checker on the
+# old path, where it must fail
+if(ERF_ENABLE_MPI AND NOT WIN32)
+add_test_fire_script(FireStructureIgnition   FireStructureIgnition run_structure_ignition.sh NRANKS 1)
+endif()
+# its start-up checks: ignition without the exposure accumulators it reads, and a
+# burn curve whose growth phase alone would release more than the EN 1991-1-2 curve allows
+add_test_fire_abort(FireStructureIgnition_no_exposure_abort FireStructureIgnition inputs_on
+    "needs erf.fire.exposure.enable" "erf.fire.exposure.enable=false")
+add_test_fire_abort(FireStructureIgnition_curve_abort FireStructureIgnition inputs_on
+    "exceeds 70 % of fuel_load_J_m2" "erf.fire.structures.ignition.growth_time_s=100.0")
 # every documented fire/dust key is read, every read key is documented, no deck sets an unread key
 add_test(FireDustInputsDocs ${ERF_RANS_PYTHON} ${PROJECT_SOURCE_DIR}/Tests/check_fire_dust_inputs.py ${PROJECT_SOURCE_DIR})
 set_tests_properties(FireDustInputsDocs PROPERTIES LABELS "docs;fire" TIMEOUT 120)

@@ -1,0 +1,9 @@
+FILE = inputs_on
+
+# The heat path alone: no spotting, the ember criterion off, so B can only
+# ignite from the incident radiant flux of A.
+erf.fire_plot_file = "plt_fire_radiation_"
+erf.fire.fire_stats_csv_file = "fire_stats_radiation.csv"
+erf.fire.exposure.file = "exposure_radiation.csv"
+erf.fire.spotting.enable = false
+erf.fire.structures.ignition.ember_count = 0

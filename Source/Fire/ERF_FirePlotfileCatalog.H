@@ -52,6 +52,8 @@
  * @param[in] include_structure_height Append fire_structure_height when true (structures or hybrid structure selector).
  * @param[in] include_nonburnable Append fire_nonburnable when true (non-burnable mask active).
  * @param[in] include_exposure Append the four exposure fields when true (erf.fire.exposure.enable).
+ * @param[in] include_structure_ignition Append the three structure ignition fields when true
+ *            (erf.fire.structures.ignition.enable).
  * @param[in] include_suppression Append fire_suppression_mask, fire_ros_factor and fire_line_progress when true (erf.fire.suppression.enable).
  * @return Vector of variable name strings in canonical write order.
  */
@@ -65,6 +67,7 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
     bool include_structure_height = false,
     bool include_nonburnable = false,
     bool include_exposure = false,
+    bool include_structure_ignition = false,
     bool include_suppression = false)
 {
     amrex::Vector<std::string> names{
@@ -126,6 +129,11 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
         names.push_back("fire_peak_intensity");
         names.push_back("fire_ember_landings");
     }
+    if (include_structure_ignition) {
+        names.push_back("fire_structure_state");
+        names.push_back("fire_structure_ignition_time");
+        names.push_back("fire_structure_rad_flux");
+    }
     if (include_suppression) {
         names.push_back("fire_suppression_mask");
         names.push_back("fire_ros_factor");
@@ -156,6 +164,7 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
  * @param[in] include_structure_height Count fire_structure_height when true (structures or hybrid structure selector).
  * @param[in] include_nonburnable Count fire_nonburnable when true (non-burnable mask active).
  * @param[in] include_exposure Count the four exposure fields when true.
+ * @param[in] include_structure_ignition Count the three structure ignition fields when true.
  * @param[in] include_suppression Count the three suppression fields when true.
  * @return Number of scalar fire output variables.
  */
@@ -169,6 +178,7 @@ inline int fire_plotfile_ncomp(
     bool include_structure_height = false,
     bool include_nonburnable = false,
     bool include_exposure = false,
+    bool include_structure_ignition = false,
     bool include_suppression = false)
 {
     return 19
@@ -180,6 +190,7 @@ inline int fire_plotfile_ncomp(
         + (include_structure_height ? 1 : 0)
         + (include_nonburnable ? 1 : 0)
         + (include_exposure ? 4 : 0)
+        + (include_structure_ignition ? 3 : 0)
         + (include_suppression ? 3 : 0);
 }
 

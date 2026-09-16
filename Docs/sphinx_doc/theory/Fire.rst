@@ -57,6 +57,7 @@ with a comment as a reference deck.
    fire_suppression
    fire_coupling
    wui_validation
+   wui_structure_ignition
    line_fire_verification
    fire_verification
    fire_acceleration

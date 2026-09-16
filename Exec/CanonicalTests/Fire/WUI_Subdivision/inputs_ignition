@@ -1,0 +1,27 @@
+FILE = inputs_subdivision
+
+# The subdivision with structure ignition: the houses ignite from the heat
+# load of the grass burning at their walls, from landed brands or from a
+# sustained fireline intensity in their wall band, burn following the
+# EN 1991-1-2 dwelling curve (the documented defaults), launch brands and
+# radiate onto their neighbours. Passive atmosphere, so the houses' heat is
+# reported but not fed back; the coupled variant takes the heat into the
+# atmosphere.
+#
+# The thresholds are a third of the documented defaults. At the defaults
+# (6 MJ/m2, 50 brands, 1000 kW/m for 60 s) no house ignites in this case:
+# the short-grass fire leaves at most 3.1 MJ/m2 at a wall, peaks at 773 kW/m
+# and drops fewer than 50 brands on any footprint (README, 2026-09-16).
+erf.fire_plot_file = "plt_fire_ignition_"
+erf.fire.fire_stats_csv_file = "fire_stats_ignition.csv"
+erf.fire.exposure.file = "exposure_ignition.csv"
+erf.fire.structures.ignition.enable = true
+erf.fire.structures.ignition.heat_load_J_m2 = 2.0e6
+erf.fire.structures.ignition.ember_count = 15
+erf.fire.structures.ignition.intensity_kW_m = 300.0
+erf.fire.structures.ignition.residence_s = 60.0
+erf.fire.structures.ignition.peak_flux_W_m2 = 2.5e5
+erf.fire.structures.ignition.fuel_load_J_m2 = 7.8e8
+erf.fire.structures.ignition.growth_time_s = 600.0
+erf.fire.structures.ignition.rad_fraction = 0.3
+erf.fire.structures.ignition.rad_radius_m = 100.0

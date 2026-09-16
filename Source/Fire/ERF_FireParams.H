@@ -651,6 +651,33 @@ struct FireParams
         // leaks into the wind of the fire cells around it. Off by default;
         // no effect with wind_interp = "nearest".
         bool        wind_open_columns = false;
+        // Structure ignition and burning on the exposure accumulators
+        // (erf.fire.structures.ignition.*; needs exposure.enable). A
+        // structure ignites when the largest accumulated heat load in its
+        // wall band reaches heat_load_J_m2, or ember_count brands have landed
+        // on its footprint, or the largest fireline intensity in its band has
+        // spent residence_s above intensity_kW_m (a threshold <= 0 turns that
+        // criterion off). A burning structure releases heat on its footprint
+        // following the EN 1991-1-2 Annex E.4 curve (t-squared growth to
+        // peak_flux_W_m2 over growth_time_s, a plateau until 70 % of
+        // fuel_load_J_m2 is released, a linear decay), launches brands
+        // through the spotting model when that is on, and spreads
+        // rad_fraction of its release as ground point sources onto the
+        // cells within rad_radius_m, where it adds to the heat-load
+        // accumulator; that is how it loads its neighbours. Off by default;
+        // see ERF_StructureIgnition.H for the sources of the defaults.
+        struct IgnitionParams {
+            bool        enable             = false;
+            amrex::Real heat_load_J_m2     = 6.0e6;   ///< Band heat load at ignition [J/m2]; <= 0 off
+            int         ember_count        = 50;      ///< Brands on the footprint at ignition; <= 0 off
+            amrex::Real intensity_kW_m     = 1000.0;  ///< Band intensity threshold [kW/m]; <= 0 off
+            amrex::Real residence_s        = 60.0;    ///< Time above intensity_kW_m at ignition [s]
+            amrex::Real peak_flux_W_m2     = 2.5e5;   ///< Peak heat release per unit footprint area [W/m2]
+            amrex::Real fuel_load_J_m2     = 7.8e8;   ///< Heat released over the whole burn [J/m2]
+            amrex::Real growth_time_s      = 600.0;   ///< Time from ignition to the peak flux [s]
+            amrex::Real rad_fraction = 0.3;     ///< Share of the release radiated onto the surroundings
+            amrex::Real rad_radius_m = 100.0;   ///< Reach of the incident radiant flux [m]; <= 0 off
+        } ignition;
     } structures;
 
     // Firebreak cells stamped at initialization are also held in the
@@ -1206,6 +1233,19 @@ struct FireParams
        pp.query("structures.file",       structures.file);
        pp.query("structures.min_height", structures.min_height);
        pp.query("structures.wind_open_columns", structures.wind_open_columns);
+       {
+           auto& ig = structures.ignition;
+           pp.query("structures.ignition.enable",             ig.enable);
+           pp.query("structures.ignition.heat_load_J_m2",     ig.heat_load_J_m2);
+           pp.query("structures.ignition.ember_count",        ig.ember_count);
+           pp.query("structures.ignition.intensity_kW_m",     ig.intensity_kW_m);
+           pp.query("structures.ignition.residence_s",        ig.residence_s);
+           pp.query("structures.ignition.peak_flux_W_m2",     ig.peak_flux_W_m2);
+           pp.query("structures.ignition.fuel_load_J_m2",     ig.fuel_load_J_m2);
+           pp.query("structures.ignition.growth_time_s",      ig.growth_time_s);
+           pp.query("structures.ignition.rad_fraction", ig.rad_fraction);
+           pp.query("structures.ignition.rad_radius_m", ig.rad_radius_m);
+       }
        pp.queryarr("fuel_map.nonburnable_codes", fuel_map.nonburnable_codes);
        pp.query("fuel_map.fuel_set",       fuel_map.fuel_set);
        pp.query("fuel_map.sb40_crosswalk", fuel_map.sb40_crosswalk);
@@ -1261,6 +1301,42 @@ struct FireParams
        }
        if (heat_open_fraction && !structures.enable) {
            amrex::Abort("erf.fire.heat_open_fraction needs erf.fire.structures.enable");
+       }
+       if (structures.ignition.enable) {
+           const auto& ig = structures.ignition;
+           if (!exposure.enable) {
+               amrex::Abort("erf.fire.structures.ignition.enable needs erf.fire.exposure.enable "
+                            "(the ignition rule reads the exposure accumulators)");
+           }
+           if (ig.heat_load_J_m2 <= 0.0 && ig.ember_count <= 0 && ig.intensity_kW_m <= 0.0) {
+               amrex::Abort("erf.fire.structures.ignition: at least one of heat_load_J_m2, ember_count "
+                            "and intensity_kW_m must be positive, or no structure can ignite");
+           }
+           if (ig.residence_s < 0.0) {
+               amrex::Abort("erf.fire.structures.ignition.residence_s must be >= 0");
+           }
+           if (ig.peak_flux_W_m2 <= 0.0) {
+               amrex::Abort("erf.fire.structures.ignition.peak_flux_W_m2 must be > 0");
+           }
+           if (ig.fuel_load_J_m2 <= 0.0) {
+               amrex::Abort("erf.fire.structures.ignition.fuel_load_J_m2 must be > 0");
+           }
+           if (ig.growth_time_s < 0.0) {
+               amrex::Abort("erf.fire.structures.ignition.growth_time_s must be >= 0");
+           }
+           // EN 1991-1-2 Annex E.4: the decay releases 30 % of the load, so the
+           // t-squared growth (which releases peak * growth / 3) must leave room
+           if (ig.peak_flux_W_m2 * ig.growth_time_s / 3.0 > 0.7 * ig.fuel_load_J_m2) {
+               amrex::Abort("erf.fire.structures.ignition: peak_flux_W_m2 * growth_time_s / 3 exceeds "
+                            "70 % of fuel_load_J_m2, so the growth phase alone would release more "
+                            "than the EN 1991-1-2 curve allows; shorten growth_time_s or raise fuel_load_J_m2");
+           }
+           if (ig.rad_fraction < 0.0 || ig.rad_fraction > 1.0) {
+               amrex::Abort("erf.fire.structures.ignition.rad_fraction must be in [0, 1]");
+           }
+           if (ig.rad_radius_m < 0.0) {
+               amrex::Abort("erf.fire.structures.ignition.rad_radius_m must be >= 0");
+           }
        }
 
        // Suppression (ERF_FireSuppression.H): every key is checked here, the
