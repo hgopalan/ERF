@@ -572,11 +572,17 @@ anelastic, implicit anelastic (``erf.anelastic_type = MidPoint``) and implicit
 compressible integration. Its
 driver spins each closure up for 1 h, restarts from the checkpoint over a
 ladder of time steps from 0.125 s to 1024 s, and checks that the explicit
-step lies within a factor 2 of :math:`\Delta z^2 / (2 K)` and that both
+step lies between 0.5 and 2.5 times :math:`\Delta z^2 / (2 K)` and that both
 implicit integrators reach at least eight times that step. Test names:
 ``RANS_Timestep_Limits_kEqn``, ``RANS_Timestep_Limits_Deardorff``,
 ``RANS_Timestep_Limits_MRF``; labels ``rans`` and ``dt_sweep``, not
 ``regression``, since each entry makes about 30 short ERF runs.
+
+``RANS_Checks_SelfTest`` tests the check scripts' own verdict logic rather
+than any physics: it states, for each kind of comparison the shared
+``rans_checks.py`` offers, what the check must decide for values inside and
+just outside the stated tolerance or band, and fails when a check disagrees.
+It runs no ERF executable; labels ``rans`` and ``unit``.
 
 Problem Location: `Exec/CanonicalTests/Canonical_RANS`_
 
