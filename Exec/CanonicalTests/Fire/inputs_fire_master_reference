@@ -487,6 +487,24 @@ erf.fire.fuel_map.load_from_map = false
 erf.fire.firebreak.use_mask = false
 
 # ============================================================================
+# SUPPRESSION: FIRE LINES, RETARDANT DROPS, HOLD TEST, BURNOUT
+# Actions read from a watched file (one per line, whitespace separated,
+# geometry in fire-grid metres):
+#   L1  line     3600  500 200 900 600   rate=0.5        -1    2.4   # polyline built at rate [m/s]; expiry_s (-1 = permanent); flame_limit_m (- = holds)
+#   D1  drop     5400  poly:x1,y1;x2,y2;x3,y3  ros_factor=0.0  1800  -   # polygon; factor 0 = barrier, 0 < f < 1 slows
+#   B1  burnout  4000  ref=L1            offset=20       -     -     # ignitions along the built part of L1, offset on the fire side
+# Built line cells and factor-0 drops join the non-burnable mask both
+# propagation paths read; a factor between 0 and 1 multiplies the rate of
+# spread. The file is re-read every poll_interval fire steps when its
+# modification time changed (0 = once at start); ids already read are
+# skipped. Events go to the log CSV. Adds fire_suppression_mask,
+# fire_ros_factor and fire_line_progress to the fire plotfile.
+erf.fire.suppression.enable = false
+# erf.fire.suppression.file = "suppression.txt"
+erf.fire.suppression.poll_interval = 10
+erf.fire.suppression.log = "suppression_log.csv"
+
+# ============================================================================
 # BALBI PHYSICAL MODEL (used only when ros_model = "balbi")
 # ============================================================================
 

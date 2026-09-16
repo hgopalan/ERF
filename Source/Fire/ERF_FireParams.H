@@ -702,6 +702,15 @@ struct FireParams
     int n_firebreaks = 0;
     std::vector<FireBreak> firebreaks;
 
+    // Suppression actions (fire lines, retardant drops, burnout) read from a
+    // watched action file; see ERF_FireSuppression.H. Off by default.
+    struct SuppressionParams {
+        bool        enable        = false;
+        std::string file;                          ///< Action file (whitespace separated, # comments)
+        int         poll_interval = 10;            ///< Fire steps between mtime checks; 0 = read once
+        std::string log           = "suppression_log.csv"; ///< Event log (applied, expired, hold_failed, ...)
+    } suppression;
+
     // Phase 4: smoke tracer
     bool  smoke_enable           = false;
     amrex::Real  smoke_emission_factor  = 0.02;       // kg smoke / kg fuel [-]
@@ -1349,6 +1358,24 @@ struct FireParams
            }
            if (ig.rad_radius_m < 0.0) {
                amrex::Abort("erf.fire.structures.ignition.rad_radius_m must be >= 0");
+           }
+       }
+
+       // Suppression (ERF_FireSuppression.H): every key is checked here, the
+       // action file itself at the first read.
+       pp.query("suppression.enable",        suppression.enable);
+       pp.query("suppression.file",          suppression.file);
+       pp.query("suppression.poll_interval", suppression.poll_interval);
+       pp.query("suppression.log",           suppression.log);
+       if (suppression.enable) {
+           if (suppression.file.empty()) {
+               amrex::Abort("erf.fire.suppression.enable needs erf.fire.suppression.file");
+           }
+           if (suppression.poll_interval < 0) {
+               amrex::Abort("erf.fire.suppression.poll_interval must be >= 0 (0 = read once at start)");
+           }
+           if (suppression.log.empty()) {
+               amrex::Abort("erf.fire.suppression.log must name a file");
            }
        }
 

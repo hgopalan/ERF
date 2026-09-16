@@ -1,0 +1,2 @@
+# id  type  start_s  x0 y0 x1 y1        param    expiry_s  flame_limit_m
+L1    line  0        221 100 221 300    rate=50  -1        -

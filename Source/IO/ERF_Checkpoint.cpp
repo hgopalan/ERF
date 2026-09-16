@@ -732,6 +732,11 @@ ERF::WriteCheckpointFile () const
               << "fire_region_lo_x " << m_fire_layer->get_fire_grid().atm_lo[0] << "\n"
               << "fire_region_lo_y " << m_fire_layer->get_fire_grid().atm_lo[1] << "\n";
         }
+        // Suppression fields, per-line built length, applied-id set and the
+        // active actions (erf.fire.suppression.enable).
+        if (const FireSuppression* sp = m_fire_layer->get_suppression()) {
+            sp->write_checkpoint(checkpointname, fire_lev);
+        }
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[FIRE] Fire state written to checkpoint " << checkpointname << "\n";
         }
@@ -2107,6 +2112,11 @@ ERF::ReadCheckpointFileFire ()
             amrex::Print() << "[FIRE] Checkpoint has no FireState; the reinitialisation"
                            << " schedule restarts from the checkpoint step.\n";
         }
+    }
+    // Suppression: the checkpoint's actions (with geometry and state) replace the
+    // file's copies of the same ids; the file only adds new ids, as at start-up.
+    if (FireSuppression* sp = m_fire_layer->get_suppression_mut()) {
+        sp->read_checkpoint(restart_chkfile, fire_lev);
     }
 }
 #endif

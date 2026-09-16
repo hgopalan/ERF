@@ -1,0 +1,7 @@
+# A fire line at x = 221 m from y = 100 to 300 m, started at t = 0 and built
+# at 50 m/s, so it is complete at 4 s, seven seconds before the front reaches
+# it. The head stops at the line: no cell at or beyond x = 221 m burns in the
+# rows the line spans.
+FILE = inputs_base
+erf.fire.suppression.file = actions_line_early.txt
+erf.fire.suppression.log = suppression_line_early.csv

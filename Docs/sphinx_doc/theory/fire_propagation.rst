@@ -432,7 +432,10 @@ masked results are unchanged; it has no effect without a mask.
 The mask is written to the fire plotfile as ``fire_nonburnable``. A fire
 approaching a masked footprint goes around it through whatever burnable
 cells remain; ``Exec/RegTests/FireHybridObstacles`` compares the same
-obstacle deck with the mask off and on.
+obstacle deck with the mask off and on. Suppression actions
+(:ref:`sec:FireSuppression`) add a time-dependent source to the same mask:
+fire lines built at a rate and retardant drops, rebuilt every step and
+combined with the static sources by OR before either path reads it.
 
 Choosing a path
 ---------------

@@ -1,0 +1,12 @@
+# The watched file. The run starts with an empty action file and polls it
+# every 5 fire steps; run_poll.sh appends the full-height line at x = 241 m once the log
+# shows the empty file was read. The front would reach x = 241 m at 31 s, so
+# the 80-step (40 s) run ends with the head stopped at the line only if the
+# re-read and the broadcast to every rank happened in time.
+FILE = inputs_base
+erf.fire.suppression.file = actions_poll.txt
+erf.fire.suppression.log = suppression_poll.csv
+erf.fire.suppression.poll_interval = 5
+max_step = 80
+stop_time = 40.0
+erf.fire_plot_int = 80

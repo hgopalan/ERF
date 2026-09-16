@@ -1,0 +1,6 @@
+# The same drop with ros_factor = 0.3 and no expiry: inside it the head moves
+# at 0.3 m/s, so after reaching x = 216 m at 6 s it covers about 4 m in the
+# remaining 14 s instead of 14 m.
+FILE = inputs_base
+erf.fire.suppression.file = actions_drop_slow.txt
+erf.fire.suppression.log = suppression_drop_slow.csv

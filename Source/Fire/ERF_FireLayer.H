@@ -44,6 +44,8 @@
 #include <ERF_NumericalSchemes.H>
 #include <ERF_Reinitialize.H>
 #include <ERF_LevelSetAdvection.H>
+// Suppression actions (fire lines, drops, burnout) from a watched file
+#include <ERF_FireSuppression.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -691,6 +693,10 @@ public:
     {
         if (m_struct_ign && fire_structure_id) { m_struct_ign->restore_from_field(*fire_structure_id); }
     }
+    /// The suppression actions (erf.fire.suppression.enable); null when off.
+    /// The checkpoint delegates to it and the plotfile reads its fields.
+    const FireSuppression* get_suppression() const { return m_suppression.get(); }
+    FireSuppression*       get_suppression_mut()   { return m_suppression.get(); }
 
     /**
      * @brief Get fire latent heat flux on fire grid.
@@ -906,6 +912,12 @@ private:
     // (structures, fuel codes, masked firebreaks) is configured.
     std::unique_ptr<amrex::MultiFab>         fire_nonburnable;
 
+    // Suppression (erf.fire.suppression.enable): the action list and its
+    // per-cell fields live in the class; fire_nonburnable becomes the OR of
+    // the static mask kept here and the suppression mask, rebuilt every step.
+    std::unique_ptr<FireSuppression>         m_suppression;
+    std::unique_ptr<amrex::MultiFab>         fire_nonburnable_static;
+
     // Exposure diagnostics (erf.fire.exposure.enable). The id carries
     // exposure.ring ghost cells so the wall band can be found from any cell;
     // the three accumulators are restart state and are checkpointed.
@@ -996,6 +1008,10 @@ public:
 
     /// Build fire_nonburnable from structures, fuel codes and firebreaks.
     void build_nonburnable_mask();
+
+    /// Suppression, once per fire step before the front update: apply the
+    /// actions, then rebuild fire_nonburnable as static mask OR suppression mask.
+    void apply_suppression();
 
     /**
      * @brief Apply the crown-fire rate-of-spread enhancement to fire_ros.

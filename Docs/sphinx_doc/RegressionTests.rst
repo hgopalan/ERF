@@ -644,6 +644,25 @@ southernmost: the map's first data row lies in its TL3 band and its last in the
 NB8 water. Until 2026-09-11 the reader put the first data row on the south edge,
 which fails both checks.
 
+``FireSuppression_<scenario>_levelset`` and ``FireSuppression_<scenario>_farsite``
+run the ``FireSuppression`` decks (``line_early``, ``line_late``,
+``drop_hold``, ``drop_slow``, ``hold``, ``burnout``) for 40 steps on each
+propagation path and check the last fire plotfile and the suppression log
+with ``check_suppression.py``: the line built in time stops the head, the
+late line is overrun, the ``ros_factor = 0`` drop holds until its expiry
+and the head crosses afterwards, the ``0.3`` drop slows the head to the
+expected distance, the low flame limit fails on the hot side of a rate
+gradient and holds on the other, and the burnout fires the strip along the
+line. ``FireSuppression_bad_line_abort``, ``FireSuppression_duplicate_id_abort``
+and ``FireSuppression_no_file_abort`` pass when the start-up read stops on a
+malformed line, a duplicate id and a missing file name. On MPI builds (not
+Windows) ``FireSuppression_poll_levelset``, ``FireSuppression_poll_farsite``
+and ``FireSuppression_poll_2ranks`` run ``run_poll.sh``, which starts the
+run on an empty action file and appends the line while the run polls, and
+``FireSuppression_restart_levelset`` and ``FireSuppression_restart_farsite``
+run ``run_restart.sh``, which restarts with a line under construction and
+requires the straight run's fire plotfile in every field.
+
 ``FirePrecipSource`` (MPI builds, not Windows) runs ``run_precip.sh`` on one
 rank: five 40-step runs of a passive grass fire under Kessler rain from a cold
 column of air, with the rain that wets the dead fuel taken from nowhere (the

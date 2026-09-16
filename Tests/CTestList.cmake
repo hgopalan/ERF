@@ -1569,6 +1569,46 @@ endif()
 # the fire at the edge of the fire grid: the guard band records the first contact in the
 # statistics CSV and warns (warn), never fires on a fire far from every wall (far), or
 # stops the run on a disc that starts inside the band (abort)
+# Suppression (erf.fire.suppression.*): each scenario on the level-set and the
+# FARSITE path, checked from the last fire plotfile and the suppression log
+add_test_fire_check(FireSuppression_line_early_levelset FireSuppression inputs_line_early 40 check_suppression.py NRANKS 1)
+add_test_fire_check(FireSuppression_line_early_farsite  FireSuppression inputs_line_early 40 check_suppression.py NRANKS 1
+                    RUNTIME_OPTIONS "erf.fire.propagation_method=farsite")
+add_test_fire_check(FireSuppression_line_late_levelset  FireSuppression inputs_line_late  40 check_suppression.py NRANKS 1)
+add_test_fire_check(FireSuppression_line_late_farsite   FireSuppression inputs_line_late  40 check_suppression.py NRANKS 1
+                    RUNTIME_OPTIONS "erf.fire.propagation_method=farsite")
+add_test_fire_check(FireSuppression_drop_hold_levelset  FireSuppression inputs_drop_hold  40 check_suppression.py NRANKS 1)
+add_test_fire_check(FireSuppression_drop_hold_farsite   FireSuppression inputs_drop_hold  40 check_suppression.py NRANKS 1
+                    RUNTIME_OPTIONS "erf.fire.propagation_method=farsite")
+add_test_fire_check(FireSuppression_drop_slow_levelset  FireSuppression inputs_drop_slow  40 check_suppression.py NRANKS 1)
+add_test_fire_check(FireSuppression_drop_slow_farsite   FireSuppression inputs_drop_slow  40 check_suppression.py NRANKS 1
+                    RUNTIME_OPTIONS "erf.fire.propagation_method=farsite")
+add_test_fire_check(FireSuppression_hold_levelset       FireSuppression inputs_hold       40 check_suppression.py NRANKS 1)
+add_test_fire_check(FireSuppression_hold_farsite        FireSuppression inputs_hold       40 check_suppression.py NRANKS 1
+                    RUNTIME_OPTIONS "erf.fire.propagation_method=farsite")
+add_test_fire_check(FireSuppression_burnout_levelset    FireSuppression inputs_burnout    40 check_suppression.py NRANKS 1)
+add_test_fire_check(FireSuppression_burnout_farsite     FireSuppression inputs_burnout    40 check_suppression.py NRANKS 1
+                    RUNTIME_OPTIONS "erf.fire.propagation_method=farsite")
+add_test_fire_abort(FireSuppression_bad_line_abort      FireSuppression inputs_line_early
+                    "suppression file 'actions_bad.txt' line 2: rate must be a number > 0"
+                    "erf.fire.suppression.file=actions_bad.txt")
+add_test_fire_abort(FireSuppression_duplicate_id_abort  FireSuppression inputs_line_early
+                    "suppression file 'actions_duplicate.txt' line 3: duplicate id"
+                    "erf.fire.suppression.file=actions_duplicate.txt")
+add_test_fire_abort(FireSuppression_no_file_abort       FireSuppression inputs_base
+                    "erf.fire.suppression.enable needs erf.fire.suppression.file"
+                    "erf.v=0")
+# The watched file (a writer process appends the line while the run polls, on
+# one rank and on two, where the re-read is broadcast) and the restart with a
+# line under construction, both on both propagation paths
+if(ERF_ENABLE_MPI AND NOT WIN32)
+add_test_fire_script(FireSuppression_poll_levelset    FireSuppression run_poll.sh NRANKS 1)
+add_test_fire_script(FireSuppression_poll_farsite     FireSuppression run_poll_farsite.sh NRANKS 1)
+add_test_fire_script(FireSuppression_poll_2ranks      FireSuppression run_poll.sh NRANKS 2)
+add_test_fire_script(FireSuppression_restart_levelset FireSuppression run_restart.sh NRANKS 1)
+add_test_fire_script(FireSuppression_restart_farsite  FireSuppression run_restart_farsite.sh NRANKS 1)
+endif()
+
 add_test_fire_check(FireBoundaryGuard_warn    FireBoundaryGuard     inputs_warn  40 check_guard.py NRANKS 1)
 add_test_fire_check(FireBoundaryGuard_far     FireBoundaryGuard     inputs_far   40 check_guard.py NRANKS 1)
 add_test_fire_abort(FireBoundaryGuard_abort   FireBoundaryGuard     inputs_abort
