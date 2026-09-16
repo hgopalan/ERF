@@ -13,7 +13,7 @@ on:
     types: [opened, synchronize, reopened, closed]
 
 concurrency:
-  group: ${{ github.ref }}-${{ github.head_ref }}-ci
+  group: ${{ github.event.pull_request.number || github.ref }}-${{ github.head_ref }}-ci
   cancel-in-progress: true
 
 jobs:
@@ -79,6 +79,7 @@ jobs:
           '-DERF_PARALLEL_TEST_NRANKS:STRING=${{env.ERF_PARALLEL_TEST_NRANKS}}' \
           -DERF_ENABLE_PARTICLES:BOOL=${{matrix.particles}} \
           -DERF_ENABLE_TESTS:BOOL=ON \
+          -DERF_ENABLE_DUST:BOOL=ON \
           -DERF_ENABLE_ALL_WARNINGS:BOOL=ON \
           -DERF_ENABLE_FCOMPARE:BOOL=ON \
           ${{github.workspace}};

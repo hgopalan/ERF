@@ -93,12 +93,14 @@ Van Wagner (1977) critical intensity,
 
 .. math::
 
-   I_{crit} = 0.010\, C_{BH}\, \bigl(460 + 25.9\, (M_{fol} - M_c) \times 100\bigr) \quad [\mathrm{kW/m}],
+   I_{0} = \bigl(0.010\, C_{BH}\, (460 + 25.9\, m)\bigr)^{3/2} \quad [\mathrm{kW/m}],
 
-with :math:`C_{BH}` the canopy base height and :math:`M_c` =
-:cpp:`erf.fire.crown.M_c` (default 0.30) the critical foliar moisture; a
-foliar moisture at or below :math:`M_c` makes crowning unattainable. Once a
-cell has crowned it stays crowned.
+with :math:`C_{BH}` the canopy base height [m] and :math:`m` the foliar
+moisture content in percent of dry mass (:cpp:`erf.fire.crown.foliar_moisture`
+times 100). At the defaults (5 m, 100 %) :math:`I_0` = 1883 kW/m. Until
+September 2026 the 3/2 power was missing and the moisture entered as the excess
+over a "critical" value, so the threshold was 16x lower and dry foliage could
+not crown. Once a cell has crowned it stays crowned.
 
 **Active crown rate of spread.** :cpp:`erf.fire.crown.ros_model` selects
 

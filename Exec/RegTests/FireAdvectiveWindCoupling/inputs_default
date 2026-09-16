@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# erf.fire.directional_wind_coupling left unset: this is the true default
+# ("projection"). Must reproduce inputs_projection's fire_phi bit for bit.
+erf.fire_plot_file           = "plt_fire_default_"
+erf.fire.fire_stats_csv_file = "fire_stats_default.csv"

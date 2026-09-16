@@ -1,0 +1,100 @@
+# Fire-dust coupling regression: the three couplings applied once per step.
+#
+# A grass fire on the level-set path with lagged heat coupling, and the dust
+# model on the same 25 m grid, coupled to the fire: burned cells lose 80 % of
+# their crust, the fire-grid wind raises the dust u* where it is stronger, and
+# the fire heat lofts the emission. check_firedust.py verifies from the fire and
+# dust plotfiles at steps 20 and 40 that
+#   * the threshold u* in burned cells is (1 + 0.5 * 0.2) / (1 + 0.5 * 1.0) of the
+#     unburned value at both steps: the crust reduction is applied to the
+#     baseline crust once, not compounded every step (0.2^n before the fix);
+#   * the dust u* is at least the log-law u* of the fire wind in every cell:
+#     the fire wind is applied inside the dust step, after the surface-layer
+#     fill that used to overwrite it;
+#   * the deposition accumulator grows once per step (it used to add every RK
+#     stage, 1.83 dt per step); the reference value is in the check script.
+# fire_dust_wind_z0 = 3 m (a test value, not a roughness) makes the fire log-law
+# u* exceed the surface-layer u* so the second check has a signal.
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 2000.0 2000.0 600.0
+amr.n_cell = 20 20 30
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.max_grid_size = 20      # box lengths must divide by grid_ratio
+amr.max_grid_size_z = 30    # fire and dust forbid z-decomposition
+
+zlo.type = "surface_layer"
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+erf.most.zref = 10.0        # the dust module requires erf.dust.zref to match
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+erf.molec_diff_type = "ConstantAlpha"
+erf.les_type = "None"
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type = Ideal
+erf.transport_scalar = true
+
+erf.fixed_dt = 0.5
+stop_time = 200.0
+max_step = 40
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.plot_int_1 = -1
+erf.check_int = -1
+erf.fire_plot_int = 20
+
+# ---- fire: short grass, level set, lagged heat coupling
+erf.fire.enable = true
+erf.fire.fire_debug = false
+erf.fire.grid_ratio = 4              # 25 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.ros_model = "rothermel"
+erf.fire.coupling_type = "lagged"
+erf.fire.directional_ros = true
+erf.fire.fuel_model_id = 1
+erf.fire.moisture_1hr = 0.06
+erf.fire.moisture_10hr = 0.07
+erf.fire.moisture_100hr = 0.09
+erf.fire.moisture_dynamic = false
+erf.fire.ignition_x = 700.0
+erf.fire.ignition_y = 1000.0
+erf.fire.ignition_r = 150.0
+erf.fire.wind_ref_ht = 6.1
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = true
+erf.fire.use_terrain_wind = false
+
+# ---- dust on the fire grid, threshold from a uniform crust
+erf.dust.enable = true
+erf.dust.dust_debug = false
+erf.dust.grid_ratio = 4
+erf.dust.zref = 10.0
+erf.dust.z0_dust = 0.01
+erf.dust.silt_fraction = 0.20
+erf.dust.crust_index = 1.0
+erf.dust.alpha_crust = 0.5
+erf.dust.alpha_efflor = 0.3
+erf.dust.atm_feedback = 1.0
+erf.dust.bin_diameters = 7.0e-6 2.5e-6 50.0e-6
+erf.dust.deposition_E0 = 3.0e-3
+erf.dust.loading_feedback_coeff = 0.0
+erf.dust.dust_plot_int = 20
+erf.dust.dust_plot_prefix = "plt_dust_"
+erf.dust.dust_diag_file = "dust_diag.dat"
+
+# ---- the couplings
+erf.fire_dust_coupling = true
+erf.fire_dust_crust_reduction = 0.8
+erf.fire_dust_wind_to_dust = true
+erf.fire_dust_wind_z0 = 3.0    # test value: puts the fire log-law u* above the surface-layer u*
+erf.fire_dust_wind_zref = 6.1
+erf.fire_dust_lofting_enabled = true

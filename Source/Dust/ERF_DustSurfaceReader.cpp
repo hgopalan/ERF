@@ -27,13 +27,17 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
     Real xllcorner = 0.0, yllcorner = 0.0, cellsize = 0.0, nodata_value = -9999.0;
     std::vector<Real> data;
 
-    // Rank 0 reads the file
+    // Rank 0 reads the file. It must not return before the broadcasts below:
+    // the other ranks are waiting in them, so a missing or truncated file hung
+    // every run on more than one rank.
+    int ok = 1;
     if (ParallelDescriptor::IOProcessor()) {
         std::ifstream file(filename);
         if (!file.is_open()) {
             amrex::Print() << "[DUST] WARNING: Could not open file: " << filename << "\n";
-            return false;
+            ok = 0;
         }
+        if (ok) {
 
         std::string line;
 
@@ -59,43 +63,43 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
         // Read 6 header lines
         // Line 1: ncols
         if (std::getline(file, line)) {
-            auto [ok, val] = parse_header(line, "ncols");
-            if (ok) ncols = static_cast<int>(val);
+            auto [found, val] = parse_header(line, "ncols");
+            if (found) ncols = static_cast<int>(val);
         }
         // Line 2: nrows
         if (std::getline(file, line)) {
-            auto [ok, val] = parse_header(line, "nrows");
-            if (ok) nrows = static_cast<int>(val);
+            auto [found, val] = parse_header(line, "nrows");
+            if (found) nrows = static_cast<int>(val);
         }
         // Line 3: xllcorner
         if (std::getline(file, line)) {
-            auto [ok, val] = parse_header(line, "xllcorner");
-            if (ok) xllcorner = val;
+            auto [found, val] = parse_header(line, "xllcorner");
+            if (found) xllcorner = val;
         }
         // Line 4: yllcorner
         if (std::getline(file, line)) {
-            auto [ok, val] = parse_header(line, "yllcorner");
-            if (ok) yllcorner = val;
+            auto [found, val] = parse_header(line, "yllcorner");
+            if (found) yllcorner = val;
         }
         // Line 5: cellsize
         if (std::getline(file, line)) {
-            auto [ok, val] = parse_header(line, "cellsize");
-            if (ok) cellsize = val;
+            auto [found, val] = parse_header(line, "cellsize");
+            if (found) cellsize = val;
         }
         // Line 6: nodata_value
         if (std::getline(file, line)) {
-            auto [ok, val] = parse_header(line, "nodata_value");
-            if (ok) nodata_value = val;
+            auto [found, val] = parse_header(line, "nodata_value");
+            if (found) nodata_value = val;
         }
 
         // Read data rows
         data.resize(ncols * nrows);
-        for (int j = 0; j < nrows; ++j) {
-            for (int i = 0; i < ncols; ++i) {
+        for (int j = 0; j < nrows && ok; ++j) {
+            for (int i = 0; i < ncols && ok; ++i) {
                 if (!(file >> data[j * ncols + i])) {
                     amrex::Print() << "[DUST] ERROR: Could not read data at row " << j << ", col " << i << "\n";
                     file.close();
-                    return false;
+                    ok = 0;
                 }
             }
         }
@@ -114,7 +118,10 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
             }
         }
         data = data_reversed;
+        }   // if (ok)
     }
+    ParallelDescriptor::Bcast(&ok, 1, ParallelDescriptor::IOProcessorNumber());
+    if (!ok) { return false; }
 
     // Broadcast dimensions from rank 0
     ParallelDescriptor::Bcast(&ncols, 1, ParallelDescriptor::IOProcessorNumber());

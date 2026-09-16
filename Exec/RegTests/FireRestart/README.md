@@ -61,14 +61,22 @@ burned 134 / 124 / 237 / 164 / 78. The `farsite` row is the FARSITE
 `front_cell` update (2026-09-10); the legacy update burned 70 cells, and the
 restart matched with both.
 
+Measured on 2026-09-14 after the September audit: the `farsite` row has Anderson's
+length-to-width ratio with its second term (72 cells before), the level-set rows
+have the corrected dead-fuel SAV weighting in the moisture of extinction (120 / 106 /
+194 cells and 0.479 m/s before), the `spotting` row has the Albini intensity in kW/m
+(3.28x higher, so more brands: 194 cells before), and the `crown` row no longer
+crowns in 200 s because Van Wagner's critical intensity carries its 3/2 power
+(1883 kW/m at the deck's canopy, against 114 before; 148 cells before).
+
 | row | straight cells | straight ROS (m/s) | restarted cells | restarted ROS (m/s) | match |
 |---|---|---|---|---|---|
-| `farsite` | 72 | 0.250 | 72 | 0.250 | yes |
-| `levelset` | 120 | 0.479 | 120 | 0.479 | yes |
+| `farsite` | 68 | 0.250 | 68 | 0.250 | yes |
+| `levelset` | 122 | 0.482 | 122 | 0.482 | yes |
 | `coupled` | 74 | 0.250 | 74 | 0.250 | yes |
-| `exposure` | 106 | 0.479 | 106 | 0.479 | yes |
-| `spotting` | 194 | 0.479 | 194 | 0.479 | yes |
-| `crown` | 148 | 0.250 | 148 | 0.250 | yes |
+| `exposure` | 112 | 0.482 | 112 | 0.482 | yes |
+| `spotting` | 246 | 0.482 | 246 | 0.482 | yes |
+| `crown` | 74 | 0.250 | 74 | 0.250 | yes |
 | `dust` | 74 | 0.250 | 74 | 0.250 | yes |
 
 ## What this suite found

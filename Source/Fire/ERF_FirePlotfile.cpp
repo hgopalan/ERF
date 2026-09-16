@@ -17,7 +17,7 @@ using namespace amrex;
 
 static void
 write_fire_metadata_json(const std::string& plotfilename,
-                         Real time, int step, int grid_ratio, int n_vars)
+                         Real time, int step, int grid_ratio, int level, int n_vars)
 {
     if (!ParallelDescriptor::IOProcessor()) { return; }
     const std::string filename = plotfilename + "/FireMetadata.json";
@@ -28,6 +28,7 @@ write_fire_metadata_json(const std::string& plotfilename,
     outfile << "  \"time\": " << std::fixed << std::setprecision(15) << time << ",\n";
     outfile << "  \"step\": " << step << ",\n";
     outfile << "  \"grid_ratio\": " << grid_ratio << ",\n";
+    outfile << "  \"level\": " << level << ",\n";
     outfile << "  \"n_variables\": " << n_vars << "\n";
     outfile << "}\n";
     if (!outfile.good()) { FileOpenFailed(filename); }
@@ -72,7 +73,7 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
     MultiFab::Copy(mf, *fire_layer.get_wind_eff(), 0, 2, 2, 0);
     // Components 4-5: fire_wind_ref (u, v)
     MultiFab::Copy(mf, *fire_layer.get_wind_ref(), 0, 4, 2, 0);
-    // Component 6: fire_wind_extract_z
+    // Component 6: fire_extract_z
     MultiFab::Copy(mf, *fire_layer.get_wind_extract_z(), 0, 6, 1, 0);
     // Components 7-8: fire_slopes (dz/dx, dz/dy)
     MultiFab::Copy(mf, *fire_layer.get_slopes(),   0, 7, 2, 0);
@@ -204,5 +205,5 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
     }
 
     ParallelDescriptor::Barrier();
-    write_fire_metadata_json(plotfilename, time, step, fg.C, ncomp);
+    write_fire_metadata_json(plotfilename, time, step, fg.C, fg.lev, ncomp);
 }

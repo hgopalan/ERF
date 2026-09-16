@@ -1,0 +1,8 @@
+# Start-up check: two separate level-1 patches. The fire grid covers one
+# rectangle and treats its edges as domain edges, so the boxes of its level must
+# form one.
+FILE = inputs_base
+erf.refinement_indicators = box1 box2
+erf.box2.max_level = 1
+erf.box2.in_box_lo = 650.0 650.0
+erf.box2.in_box_hi = 750.0 750.0

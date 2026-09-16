@@ -68,7 +68,6 @@ erf.fire.ignition_y = 1000.0
 erf.fire.ignition_r = 30.0
 erf.fire.wind_ref_ht = 6.1
 erf.fire.use_per_fuel_wind_ht = true
-erf.fire.waf_fcz0_scale = 1.0
 erf.fire.use_waf = true
 erf.fire.waf_formula = "andrews"
 erf.fire.use_wind_limit = true

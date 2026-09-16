@@ -568,14 +568,21 @@ projection and are registered only when the build enables FFT
 A sixth case, ``Timestep_Limits``, measures the largest stable time step of
 the vertical eddy diffusion on a neutral 4 x 4 x 200 column (dx = 800 m,
 dz = 5 m) for the :math:`k` closure, Deardorff and MRF under explicit
-anelastic, implicit anelastic and implicit compressible integration. Its
+anelastic, implicit anelastic (``erf.anelastic_type = MidPoint``) and implicit
+compressible integration. Its
 driver spins each closure up for 1 h, restarts from the checkpoint over a
 ladder of time steps from 0.125 s to 1024 s, and checks that the explicit
-step lies within a factor 2 of :math:`\Delta z^2 / (2 K)` and that both
+step lies between 0.5 and 2.5 times :math:`\Delta z^2 / (2 K)` and that both
 implicit integrators reach at least eight times that step. Test names:
 ``RANS_Timestep_Limits_kEqn``, ``RANS_Timestep_Limits_Deardorff``,
 ``RANS_Timestep_Limits_MRF``; labels ``rans`` and ``dt_sweep``, not
 ``regression``, since each entry makes about 30 short ERF runs.
+
+``RANS_Checks_SelfTest`` tests the check scripts' own verdict logic rather
+than any physics: it states, for each kind of comparison the shared
+``rans_checks.py`` offers, what the check must decide for values inside and
+just outside the stated tolerance or band, and fails when a check disagrees.
+It runs no ERF executable; labels ``rans`` and ``unit``.
 
 Problem Location: `Exec/CanonicalTests/Canonical_RANS`_
 
@@ -636,6 +643,31 @@ southernmost: the map's first data row lies in its TL3 band and its last in the
 NB8 water. Until 2026-09-11 the reader put the first data row on the south edge,
 which fails both checks.
 
+``FireBoundaryGuard_warn`` and ``FireBoundaryGuard_far`` run the two
+``FireBoundaryGuard`` decks for 40 steps and check the statistics CSV and the
+log with ``check_guard.py``; ``FireBoundaryGuard_abort`` passes when the deck
+whose ignition overlaps a wall stops on its first step.
+
+``FireAnchorLevel`` (MPI builds, not Windows) runs ``run_anchor_level.sh`` on
+two ranks. It puts the fire on level 1 of a two-level deck and compares it with
+the same fire on one level at level 1's resolution, which must give the same
+arrival time in every fire cell and the same statistics CSV. It checks the
+level-0 heat budget of an anelastic prescribed heat disc on level 1 to 0.1 %,
+that level 1 averages down onto level 0 exactly, and that the
+same deck with ``erf.fire.anchor_level=0`` warns and loses the heat to
+average-down. It restarts the level-1 fire from its own checkpoint, which must
+reproduce the fire plotfile byte for byte, and restarts it with the fire grid
+moved to level 0, which must stop at start-up. It runs the heat disc again with
+``erf.pbl_type=MRF`` and ``erf.pbl_mrf_fire_thermal_excess=true``, which read the
+lagged fire flux on level 1 and in its ghost columns, and restarts that run at
+step 10, which must reproduce the atmosphere and fire plotfiles byte for byte.
+``FireAnchorLevel_above_finest_abort``, ``FireAnchorLevel_regrid_abort``,
+``FireAnchorLevel_partial_height_abort``, ``FireAnchorLevel_two_patches_abort``
+and, with ``ERF_ENABLE_DUST``, ``FireAnchorLevel_dust_abort`` pass when the
+matching start-up check of the fire grid's level stops the run: a level above
+the finest, a level that regrids, a refinement box short of the domain top, two
+separate patches, and the dust layer, which runs on level 0 only.
+
 PBL start-up check
 ------------------
 ``ABL_MRF_ZSplit_abort`` reruns the ``ABL_MRF_Tiling`` deck on one rank with
@@ -655,21 +687,12 @@ pass when the run stops before the first step with the matching message:
   substepping. Without the check the run blew up by the third step.
 - ``ABL_ZSplit_ImplicitDiffusion_abort``: slip-wall bottom and
   ``erf.substepping_type=None``, leaving the implicit vertical diffusion.
-- ``ABL_ZSplit_SurfaceLayer_abort``: the deck's surface layer with
-  ``erf.substepping_type=None`` and ``erf.vert_implicit_fac=0``. Without the check
-  the run stopped on a floating-point trap in the first step.
+
 
 On fine levels, whose boxes come from clustering, ERF joins boxes stacked in z
-into whole columns instead of stopping. Three ``SPLIT fine_z`` parity tests run a
-deck twice, with level 1 split in z (``amr.max_grid_size_z=1048576 16``) and with
-level 1 left whole, and pass when the two plotfiles agree:
-
-- ``Bubble2D_FineZSplit_Substep``: a dry 2D bubble whose level-1 box is made at the
-  regrid of step 4, with the implicit substep and the implicit vertical diffusion.
-  With the check skipped and no join, level 1 split in z was off by 0.18 m/s in w
-  and 0.019 K in theta after 100 steps; split in x it was bit-identical.
-- ``Bubble2D_FineZSplit_Diffusion``: the same deck with
-  ``erf.substepping_type=None``, leaving the implicit vertical diffusion (0.048 m/s
-  in w after 400 steps without the join).
-- ``Terrain2Lev_FineZSplit_Init``: the ``Terrain2Lev_STF_interp`` deck, whose level 1
-  is made at start-up, so the join also runs outside regridding.
+into whole columns instead of stopping (at the regrid and at start-up). The
+parity runs that covered the join (a dry 2D bubble with level 1 split in z
+against level 1 left whole, with and without the implicit substep, and the
+``Terrain2Lev_STF_interp`` deck) used a ``SPLIT fine_z`` mode of the fork's
+tiling-parity script, which the September 2026 development merge replaced with
+upstream's script; they are to be re-registered on upstream's box-parity harness.

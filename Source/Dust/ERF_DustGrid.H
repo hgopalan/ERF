@@ -18,6 +18,7 @@
 #define ERF_DUST_GRID_H
 
 #include <AMReX_BoxArray.H>
+#include <AMReX_MultiFab.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_Geometry.H>
 
@@ -84,5 +85,42 @@ DustGrid create_dust_grid(const amrex::BoxArray&          ba_atm,
                           const amrex::DistributionMapping& dm_atm,
                           const amrex::Geometry&          geom_atm,
                           int                             grid_ratio);
+
+/**
+ * @brief FillBoundary plus a nearest-interior fill of the ghost cells outside a
+ *        non-periodic face, the dust-grid twin of the fire grid's helper.
+ *
+ * FillBoundary leaves the cells outside a non-periodic domain face untouched, so
+ * a stencil read there sees whatever the field was allocated or last set with
+ * (the slopes were setVal(0), which made the curvature of the outermost row and
+ * column at an outflow face -s/(2 dx) instead of 0). Every dust-grid exchange of
+ * a field read with a stencil goes through here.
+ */
+inline void dust_fill_boundary (amrex::MultiFab& mf, const amrex::Geometry& geom)
+{
+    mf.FillBoundary(geom.periodicity());
+    const auto ng = mf.nGrowVect();
+    const bool px = geom.isPeriodic(0) || ng[0] == 0;
+    const bool py = geom.isPeriodic(1) || ng[1] == 0;
+    const bool pz = geom.isPeriodic(2) || ng[2] == 0;
+    if (px && py && pz) { return; }
+    const amrex::Box& dom = geom.Domain();
+    const auto dlo = dom.smallEnd();
+    const auto dhi = dom.bigEnd();
+    const int ncomp = mf.nComp();
+    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+        const amrex::Box& gbx = mfi.fabbox();
+        if (dom.contains(gbx)) { continue; }
+        auto a = mf.array(mfi);
+        amrex::ParallelFor(gbx, ncomp, [=] AMREX_GPU_DEVICE (int i, int j, int k, int n) noexcept
+        {
+            int ic = i, jc = j, kc = k;
+            if (!px) { ic = amrex::min(amrex::max(i, dlo[0]), dhi[0]); }
+            if (!py) { jc = amrex::min(amrex::max(j, dlo[1]), dhi[1]); }
+            if (!pz) { kc = amrex::min(amrex::max(k, dlo[2]), dhi[2]); }
+            if (ic != i || jc != j || kc != k) { a(i, j, k, n) = a(ic, jc, kc, n); }
+        });
+    }
+}
 
 #endif // ERF_DUST_GRID_H

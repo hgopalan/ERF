@@ -251,8 +251,7 @@ dependent estimate,
 
 clamped to :math:`[0.12, 0.45]`, is evaluated per cell from the load-weighted
 :math:`\sigma` of the local fuel and held in the field ``fire_mext``. It is
-presently diagnostic: the kernels still read the tabulated value, and
-:cpp:`erf.fire.use_dynamic_mext` is accepted but not yet consumed.
+presently diagnostic: the kernels still read the tabulated value.
 
 Limitations
 -----------

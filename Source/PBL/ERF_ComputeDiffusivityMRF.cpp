@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "ERF_SurfaceLayer.H"
 #include "ERF_DirectionSelector.H"
 #include "ERF_Diffusion.H"
@@ -46,19 +48,11 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
                        const std::unique_ptr<MultiFab>& z_phys_nd,
                        const std::unique_ptr<MultiFab>& z_phys_cc,
                        const MoistureComponentIndices& moisture_indices,
+                       const MultiFab* terrain_blank,
                        const MultiFab* qheating_rates,
                        const MultiFab* Q_fire_atm)
 {
     amrex::ignore_unused(qheating_rates);
-    // Shadow the namespace-scope constants from ERF_Constants.H with local copies.
-    // Passing those constants straight to amrex::min/max binds a const reference,
-    // which odr-uses them; under CUDA relocatable device code nvcc then wants a
-    // device-side symbol that is never emitted, and the extended __device__ lambdas
-    // below fail with 'identifier "zero" is undefined in device code'. Function-local
-    // constants are captured by value into the closure instead.
-    constexpr amrex::Real zero = amrex::Real(0.0);
-    constexpr amrex::Real one  = amrex::Real(1.0);
-
     /*
     ============================================================================
     Medium-Range Forecast (MRF) Boundary Layer Parameterization Scheme
@@ -101,22 +95,18 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
        - Uses YSU stability functions (Hong et al. 2006)
        - Ri-dependent diffusivity above PBL
 
-    FIRE COUPLING (ERF extension):
+    FIRE COUPLING (ERF-Fire extension):
     --------------------------------
     Fire heat flux augments the convective velocity scale w* used in the
     K-profile amplitude: K = rho * w*_eff * kappa * z * (1 - z/h)^2.
-    The PBLH itself (corrector) is NOT modified by fire — only w* is boosted.
-    This correctly represents fire as increasing turbulent mixing intensity
-    within the existing PBL depth, consistent with Deardorff (1970).
+    The PBLH itself (corrector) is NOT modified by fire, only w* is boosted.
 
-    w*_fire = (g/theta * kbfs_total * h_corr)^(1/3)
-    w*_eff  = max(w*_fire, w*)
+    w*_fire = (g/theta * kbfs_total * h_corr)^(1/3),  w*_eff = max(w*_fire, w*)
 
     where kbfs_total = kbfs_MOST + Q_fire/(rho*Cp), w* is the Pass 4 velocity
-    scale (u_star/phi_m blended with the Deardorff convective scale) and h_corr the
-    final corrected PBLH. The boost is applied only in columns where Q_fire
-    exceeds mrf_fire_q_threshold (erf.pbl_mrf_fire_thermal_excess = true);
-    elsewhere w*_eff = w*. HGAMT/HGAMQ keep the unboosted w*.
+    scale and h_corr the final corrected PBLH. The boost is applied only in
+    columns where Q_fire exceeds mrf_fire_q_threshold
+    (erf.pbl_mrf_fire_thermal_excess = true); HGAMT/HGAMQ keep the unboosted w*.
 
     ENHANCEMENTS IN ERF IMPLEMENTATION:
     -----------------------------------
@@ -228,6 +218,42 @@ ComputeDiffusivityMRF (const MultiFab& xvel,
 MultiFab pblh_mf(eddyViscosity.boxArray(), eddyViscosity.DistributionMap(), 1, 0);
 pblh_mf.setVal(0.0);
 
+// PBLH smoothing reads one column per pass outside the cells it writes, so the
+// planar work arrays have to carry that many columns of halo and the PBLH passes
+// have to fill them: otherwise the stencil reads off the end of the tile and the
+// answer depends on the decomposition. With smoothing off this is the single
+// column of halo the diffusivity kernels already use, so nothing changes.
+const int ng_pblh = (turbChoice.enable_pblh_smoothing)
+                  ? std::max(1, turbChoice.pblh_smoothing_passes) : 1;
+if (ng_pblh > 1) {
+    const int ng_avail = std::min({cons_in.nGrowVect()[0], cons_in.nGrowVect()[1],
+                                   xvel.nGrowVect()[0],    xvel.nGrowVect()[1],
+                                   yvel.nGrowVect()[0],    yvel.nGrowVect()[1],
+                                   SurfLayer->get_u_star(level)->nGrowVect()[0],
+                                   SurfLayer->get_u_star(level)->nGrowVect()[1],
+                                   SurfLayer->get_olen(level)->nGrowVect()[0],
+                                   SurfLayer->get_olen(level)->nGrowVect()[1],
+                                   (terrain_blank) ? terrain_blank->nGrowVect()[0] : 1000,
+                                   (terrain_blank) ? terrain_blank->nGrowVect()[1] : 1000});
+    if (ng_pblh > ng_avail) {
+        amrex::Abort("erf.pblh_smoothing_passes = " + std::to_string(turbChoice.pblh_smoothing_passes)
+                   + " needs " + std::to_string(ng_pblh) + " halo columns, but the state and "
+                     "surface-layer arrays carry only " + std::to_string(ng_avail)
+                   + "; reduce erf.pblh_smoothing_passes to at most " + std::to_string(ng_avail));
+    }
+}
+// The fire heat flux (erf.pbl_mrf_fire_thermal_excess) is read in every column the
+// passes cover, the halo included, so it has to carry that many ghost columns.
+if (Q_fire_atm != nullptr && turbChoice.mrf_fire_thermal_excess) {
+    const int ng_fire = std::min(Q_fire_atm->nGrowVect()[0], Q_fire_atm->nGrowVect()[1]);
+    if (ng_fire < ng_pblh) {
+        amrex::Abort("erf.pbl_mrf_fire_thermal_excess reads the fire heat flux in "
+                   + std::to_string(ng_pblh) + " halo columns, but the flux carries only "
+                   + std::to_string(ng_fire) + "; reduce erf.pblh_smoothing_passes to at most "
+                   + std::to_string(ng_fire));
+    }
+}
+
 #ifdef _OPENMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
 #endif
@@ -243,23 +269,36 @@ pblh_mf.setVal(0.0);
         const GeometryData gdata = geom.data();
         const Box xybx = PerpendicularBox<ZDir>(gbx, IntVect{0, 0, 0});
 
+        // The PBLH passes run on the region the smoothing stencil will consume
+        // (see ng_pblh above). growntilebox() is no use here: it does not grow at
+        // an interior tile edge, so a tile in the middle of a box gets no halo at
+        // all -- which is exactly how the stencil came to read off the end of the
+        // array. Grow the tile box explicitly instead, which costs a little
+        // duplicated work in the overlaps. With smoothing off this is xybx and
+        // nothing is duplicated.
+        const Box gbx_work  = (turbChoice.enable_pblh_smoothing)
+                            ? amrex::grow(mfi.tilebox(), IntVect(ng_pblh,ng_pblh,0)) : gbx;
+        const Box xybx_work = PerpendicularBox<ZDir>(gbx_work, IntVect{0, 0, 0});
+        const Box xybx_tile = PerpendicularBox<ZDir>(mfi.tilebox(), IntVect{0, 0, 0});
+
         // Pass 1 (predictor): PBLH with base surface temperature, no VPERT
         // Pass 2 (wstar/VPERT): compute wstar, HGAMT, HGAMQ, VPERT from predictor height
         // Pass 3 (corrector): PBLH with VPERT-enhanced surface temperature (WRF-consistent)
-        // Pass 4 (wstar recompute): recompute wstar using corrected PBLH; augment with fire
         //   WRF reference (module_bl_mrf.F lines 813-964):
         //   https://github.com/wrf-model/WRF/blob/master/phys/module_bl_mrf.F#L813-L964
-        FArrayBox pbl_height_predictor(xybx, 1, The_Async_Arena());  // Pass 1: base t_layer_v
-        FArrayBox pbl_height_corrector(xybx, 1, The_Async_Arena());  // Pass 3: VPERT-enhanced
-        IArrayBox pbl_index(xybx, 1, The_Async_Arena());
-        IArrayBox pbl_index_zero_ri(xybx, 1, The_Async_Arena());  // Index for zero-Ri diagnostic pass
-        FArrayBox hgamt_fab(xybx, 1, The_Async_Arena());  // Store HGAMT/h (normalized countergradient)
-        FArrayBox hgamq_fab(xybx, 1, The_Async_Arena());  // Store HGAMQ/h (normalized countergradient)
-        FArrayBox wstar_fab(xybx, 1, The_Async_Arena());  // Convective velocity scale (fire-augmented in Pass 4)
-        FArrayBox vpert_fab(xybx, 1, The_Async_Arena());  // Virtual temperature perturbation VPERT
-        FArrayBox kbfs_fire_fab(xybx, 1, The_Async_Arena());  // Fire kinematic buoyancy flux [K m/s] per column
+        FArrayBox pbl_height_predictor(xybx_work, 1, The_Async_Arena());  // Pass 1: base t_layer_v
+        FArrayBox pbl_height_corrector(xybx_work, 1, The_Async_Arena());  // Pass 3: VPERT-enhanced
+        IArrayBox pbl_index(xybx_work, 1, The_Async_Arena());
+        IArrayBox pbl_index_zero_ri(xybx_work, 1, The_Async_Arena());  // Index for zero-Ri diagnostic pass
+        FArrayBox hgamt_fab(xybx_work, 1, The_Async_Arena());  // Store HGAMT/h (normalized countergradient)
+        FArrayBox hgamq_fab(xybx_work, 1, The_Async_Arena());  // Store HGAMQ/h (normalized countergradient)
+        FArrayBox wstar_fab(xybx_work, 1, The_Async_Arena());  // Convective velocity scale
+        FArrayBox vpert_fab(xybx_work, 1, The_Async_Arena());  // Virtual temperature perturbation VPERT
+        FArrayBox kbfs_fire_fab(xybx_work, 1, The_Async_Arena());  // Fire kinematic buoyancy flux [K m/s] per column
+        FArrayBox pblh_floor_fab(xybx_work, 1, The_Async_Arena());  // Floor of the corrected height per column, reapplied after the smoothing
         const auto& pblh_pred_arr   = pbl_height_predictor.array();  // predictor (base t_layer_v)
         const auto& pblh_corr_arr   = pbl_height_corrector.array();  // corrector (VPERT-enhanced)
+        const auto& pblh_floor_arr  = pblh_floor_fab.array();
         const auto& pbli_arr        = pbl_index.array();
         const auto& pbli_zero_arr   = pbl_index_zero_ri.array();  // Zero-Ri diagnostic PBL index
         const auto& hgamt_arr       = hgamt_fab.array();
@@ -277,8 +316,8 @@ pblh_mf.setVal(0.0);
         const auto& u_star_arr = SurfLayer->get_u_star(level)->const_array(mfi);
         const auto& t_star_arr = SurfLayer->get_t_star(level)->const_array(mfi);
         const auto& l_obuk_arr = SurfLayer->get_olen(level)->const_array(mfi);
-        const auto& t10av_arr  = SurfLayer->get_mac_avg(level, 2)->const_array(mfi);
-        const auto& q10av_arr  = SurfLayer->get_mac_avg(level, 3)->const_array(mfi);
+        const auto& t10av_arr  = SurfLayer->get_mac_avg(level, 3)->const_array(mfi);
+        const auto& q10av_arr  = SurfLayer->get_mac_avg(level, 4)->const_array(mfi);
         const auto& lmask_arr = (SurfLayer->get_lmask(level)) ?
                                 SurfLayer->get_lmask(level)->const_array(mfi) :
                                 Array4<int>{};
@@ -287,7 +326,7 @@ pblh_mf.setVal(0.0);
                                                                       : Array4<Real const>{};
         const PBLDerivativeDzInv_T pbl_derivative_dz_inv{z_phys_cc->const_array(mfi)};
 
-        // Fire heat flux array and flags
+        // Fire heat flux array and flags (ERF-Fire)
         const Array4<Real const> Q_fire_arr =
            (Q_fire_atm && turbChoice.mrf_fire_thermal_excess)
            ? Q_fire_atm->const_array(mfi)
@@ -302,22 +341,94 @@ pblh_mf.setVal(0.0);
         // WRF reference (module_bl_mrf.F lines 813-842):
         // https://github.com/wrf-model/WRF/blob/master/phys/module_bl_mrf.F#L813-L842
         //
-        ParallelFor(xybx, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept
+        // FIX: guard against null dereference of q_star when use_moisture is false (dry case)
+        // get_q_star can return null pointer when the field is not allocated
+        amrex::MultiFab* q_star_mf = SurfLayer->get_q_star(level);
+        Array4<Real const> q_star_arr = (q_star_mf != nullptr) ? q_star_mf->const_array(mfi)
+                                                               : Array4<Real const>{};
+
+        // --------------------------------------------------------------------
+        // Immersed-boundary awareness (turbChoice.pbl_ib_aware): per column,
+        // the first fluid cell above the immersed solid (ksurf) and its height
+        // above the domain bottom (zib). Every height below is measured from
+        // it, the diffusivities vanish inside the solid, and the surface
+        // scales of a column with solid cells are a neutral log law at its
+        // top instead of the ground surface layer's values (which come from
+        // cells inside the solid there). With the option off, or without
+        // immersed cells, ksurf = klo, zib = 0 and the scales are copies, so
+        // the arithmetic below is unchanged.
+        // --------------------------------------------------------------------
+        const bool l_ib = turbChoice.pbl_ib_aware && (terrain_blank != nullptr);
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!(l_ib && use_terrain_fitted_coords),
+            "erf.pbl_ib_aware is not supported with terrain-fitted coordinates");
+        const Array4<Real const> blank_arr = l_ib ? terrain_blank->const_array(mfi) : Array4<Real const>{};
+        IArrayBox ksurf_fab(xybx_work, 1, The_Async_Arena());
+        FArrayBox zib_fab(xybx_work, 1, The_Async_Arena());
+        FArrayBox us_eff_fab(xybx_work, 1, The_Async_Arena()), ts_eff_fab(xybx_work, 1, The_Async_Arena());
+        FArrayBox qs_eff_fab(xybx_work, 1, The_Async_Arena()), ol_eff_fab(xybx_work, 1, The_Async_Arena());
+        FArrayBox t10_eff_fab(xybx_work, 1, The_Async_Arena()), q10_eff_fab(xybx_work, 1, The_Async_Arena());
+        const auto& ksurf_arr = ksurf_fab.array();
+        const auto& zib_arr   = zib_fab.array();
+        const auto& us_eff_arr = us_eff_fab.array();  const auto& ts_eff_arr = ts_eff_fab.array();
+        const auto& qs_eff_arr = qs_eff_fab.array();  const auto& ol_eff_arr = ol_eff_fab.array();
+        const auto& t10_eff_arr = t10_eff_fab.array(); const auto& q10_eff_arr = q10_eff_fab.array();
         {
-            const Real t_layer = t10av_arr(i, j, 0);
-            const Real moisture_fraction = use_moisture ? q10av_arr(i, j, 0) : Real(0);
+            const Real dz_ib = geom.CellSize(2);
+            const Real z0_ib = turbChoice.pbl_ib_z0;
+            const Array4<Real const>& uv_ib = xvel.const_array(mfi);
+            const Array4<Real const>& vv_ib = yvel.const_array(mfi);
+            const bool have_qstar = (q_star_mf != nullptr);
+            ParallelFor(xybx_work, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept
+            {
+                int ks = klo;
+                if (l_ib) {
+                    for (int kk = klo; kk <= khi; ++kk) { if (blank_arr(i, j, kk) >= Real(0.5)) { ks = kk + 1; } }
+                    if (ks > khi) { ks = khi; }
+                }
+                ksurf_arr(i, j, 0) = ks;
+                zib_arr(i, j, 0)   = (ks - klo) * dz_ib;
+                if (ks > klo) {
+                    // Column with immersed solid: neutral log law at its top.
+                    const Real u_top = myhalf * (uv_ib(i, j, ks) + uv_ib(i + 1, j, ks));
+                    const Real v_top = myhalf * (vv_ib(i, j, ks) + vv_ib(i, j + 1, ks));
+                    const Real ws_top = std::sqrt(u_top * u_top + v_top * v_top);
+                    us_eff_arr(i, j, 0)  = amrex::max(KAPPA * ws_top / std::log(myhalf * dz_ib / z0_ib), Real(1.0e-3));
+                    ts_eff_arr(i, j, 0)  = Real(0);
+                    qs_eff_arr(i, j, 0)  = Real(0);
+                    ol_eff_arr(i, j, 0)  = Real(1.0e10);
+                    t10_eff_arr(i, j, 0) = cell_data(i, j, ks, RhoTheta_comp) / cell_data(i, j, ks, Rho_comp);
+                    q10_eff_arr(i, j, 0) = (use_moisture && moisture_indices.qv >= 0)
+                                         ? cell_data(i, j, ks, moisture_indices.qv) / cell_data(i, j, ks, Rho_comp) : Real(0);
+                } else {
+                    us_eff_arr(i, j, 0)  = u_star_arr(i, j, 0);
+                    ts_eff_arr(i, j, 0)  = t_star_arr(i, j, 0);
+                    qs_eff_arr(i, j, 0)  = have_qstar ? q_star_arr(i, j, 0) : Real(0);
+                    ol_eff_arr(i, j, 0)  = l_obuk_arr(i, j, 0);
+                    t10_eff_arr(i, j, 0) = t10av_arr(i, j, 0);
+                    q10_eff_arr(i, j, 0) = use_moisture ? q10av_arr(i, j, 0) : Real(0);
+                }
+            });
+        }
+
+        ParallelFor(xybx_work, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept
+        {
+            const int  ksrf = ksurf_arr(i, j, 0);   // local surface: first fluid cell of the column
+            const Real zib  = zib_arr(i, j, 0);     // its height, subtracted from every height below
+            amrex::ignore_unused(zib);
+            const Real t_layer = t10_eff_arr(i, j, 0);
+            const Real moisture_fraction = use_moisture ? q10_eff_arr(i, j, 0) : Real(0);
             const Real t_layer_v = t_layer * (one + epsv * moisture_fraction);
 
             Real zval, Rib;
-            int kpbl = klo;
+            int kpbl = ksrf;
 
             {
                 zval = (use_terrain_fitted_coords)
                      ? Compute_Zrel_AtCellCenter(i, j, kpbl, z_nd_arr)
-                     : (kpbl + myhalf) * gdata.CellSize(2);
+                     : ((kpbl + myhalf) * gdata.CellSize(2) - zib);
                 const Real theta_v     = GetThetav(i, j, kpbl, cell_data, moisture_indices);
                 // FIX: guard theta_v_klo against zero to prevent NaN in Rib
-                const Real theta_v_klo = amrex::max(GetThetav(i, j, klo, cell_data, moisture_indices), Real(1.0));
+                const Real theta_v_klo = amrex::max(GetThetav(i, j, ksrf, cell_data, moisture_indices), Real(1.0));
                 const Real ws2_raw = fourth * ( (uvel(i, j, kpbl) + uvel(i + 1, j, kpbl)) *
                                                 (uvel(i, j, kpbl) + uvel(i + 1, j, kpbl)) +
                                                 (vvel(i, j, kpbl) + vvel(i, j + 1, kpbl)) *
@@ -327,7 +438,7 @@ pblh_mf.setVal(0.0);
                 // Reference: Vogelezang, D.H.P., and A.A.M. Holtslag, 1996: Evaluation and model impacts of
                 // alternative boundary-layer height formulations. Boundary-Layer Meteorology, 81, 245–269.
                 const Real ws2 = (turbChoice.enable_vh96_shear_correction)
-                                ? (ws2_raw + turbChoice.vh96_shear_const_b * u_star_arr(i,j,0) * u_star_arr(i,j,0))
+                                ? (ws2_raw + turbChoice.vh96_shear_const_b * us_eff_arr(i,j,0) * us_eff_arr(i,j,0))
                                 : amrex::max(ws2_raw, Real(1.0));
                 Rib = CONST_GRAV * zval * (theta_v - t_layer_v) / (ws2 * theta_v_klo);
             }
@@ -341,10 +452,10 @@ pblh_mf.setVal(0.0);
 
                 zval = (use_terrain_fitted_coords)
                      ? Compute_Zrel_AtCellCenter(i, j, kpbl, z_nd_arr)
-                     : (kpbl + myhalf) * gdata.CellSize(2);
+                     : ((kpbl + myhalf) * gdata.CellSize(2) - zib);
                 const Real theta_v     = GetThetav(i, j, kpbl, cell_data, moisture_indices);
                 // FIX: guard theta_v_klo against zero to prevent NaN in Rib
-                const Real theta_v_klo = amrex::max(GetThetav(i, j, klo, cell_data, moisture_indices), Real(1.0));
+                const Real theta_v_klo = amrex::max(GetThetav(i, j, ksrf, cell_data, moisture_indices), Real(1.0));
                 const Real ws2_raw = fourth * ( (uvel(i, j, kpbl) + uvel(i + 1, j, kpbl)) *
                                                 (uvel(i, j, kpbl) + uvel(i + 1, j, kpbl)) +
                                                 (vvel(i, j, kpbl) + vvel(i, j + 1, kpbl)) *
@@ -352,18 +463,18 @@ pblh_mf.setVal(0.0);
                 // Vogelezang & Holtslag (1996): Add shear correction term to denominator instead of ad-hoc floor
                 // to better represent shear associated with surface-layer turbulence at low wind speeds.
                 const Real ws2 = (turbChoice.enable_vh96_shear_correction)
-                                ? (ws2_raw + turbChoice.vh96_shear_const_b * u_star_arr(i,j,0) * u_star_arr(i,j,0))
+                                ? (ws2_raw + turbChoice.vh96_shear_const_b * us_eff_arr(i,j,0) * us_eff_arr(i,j,0))
                                 : amrex::max(ws2_raw, Real(1.0));
                 Rib = CONST_GRAV * zval * (theta_v - t_layer_v) / (ws2 * theta_v_klo);
                 above_critical = (Rib >= Ribcr);
             }
 
             const Real pblh_emp = (use_terrain_fitted_coords)
-                                ? Compute_Zrel_AtCellCenter(i, j, klo, z_nd_arr)
+                                ? Compute_Zrel_AtCellCenter(i, j, ksrf, z_nd_arr)
                                 : myhalf * gdata.CellSize(2);
             const Real z_max = (use_terrain_fitted_coords)
                              ? Compute_Zrel_AtCellCenter(i, j, khi, z_nd_arr)
-                             : (khi + myhalf) * gdata.CellSize(2);
+                             : ((khi + myhalf) * gdata.CellSize(2) - zib);
             const Real pblh_max = Real(0.9) * z_max;
             const Real pblh_min = amrex::max(pblh_emp, Real(10.0));
 
@@ -381,15 +492,9 @@ pblh_mf.setVal(0.0);
                 pbli_arr(i, j, 0) = kpbl;
             } else {
                 pblh_pred_arr(i, j, 0) = pblh_min;
-                pbli_arr(i, j, 0) = klo + 1;
+                pbli_arr(i, j, 0) = ksrf + 1;
             }
         });
-
-        // FIX: guard against null dereference of q_star when use_moisture is false (dry case)
-        // get_q_star can return null pointer when the field is not allocated
-        amrex::MultiFab* q_star_mf = SurfLayer->get_q_star(level);
-        Array4<Real const> q_star_arr = (q_star_mf != nullptr) ? q_star_mf->const_array(mfi)
-                                                               : Array4<Real const>{};
 
         const Real const_b = turbChoice.pbl_mrf_const_b;
         const Real sf = turbChoice.pbl_mrf_sf;
@@ -404,14 +509,16 @@ pblh_mf.setVal(0.0);
         // PASS 2 (WSTAR / VPERT): Compute wstar, HGAMT, HGAMQ, VPERT using the
         // predictor PBL height (pblh_pred_arr). VPERT will be fed into the corrector
         // Rib search in Pass 3 to raise the effective surface temperature.
-        // Also compute and store kbfs_fire per column for use in Pass 4.
         // WRF reference (module_bl_mrf.F lines 857-880):
         // https://github.com/wrf-model/WRF/blob/master/phys/module_bl_mrf.F#L857-L880
         //
-        ParallelFor(xybx, [=,zero_d=zero] AMREX_GPU_DEVICE(int i, int j, int) noexcept
+        ParallelFor(xybx_work, [=,zero_d=zero] AMREX_GPU_DEVICE(int i, int j, int) noexcept
         {
-            const Real t_layer  = t10av_arr(i, j, 0);
-            Real obuk_val = l_obuk_arr(i, j, 0);
+            const int  ksrf = ksurf_arr(i, j, 0);   // local surface: first fluid cell of the column
+            const Real zib  = zib_arr(i, j, 0);     // its height, subtracted from every height below
+            amrex::ignore_unused(zib);
+            const Real t_layer  = t10_eff_arr(i, j, 0);
+            Real obuk_val = ol_eff_arr(i, j, 0);
             if (std::abs(obuk_val) < amrex::Real(1.0e-10)) {
                 obuk_val = (obuk_val >= zero_d) ? amrex::Real(1.0e-10) : amrex::Real(-1.0e-10);
             }
@@ -438,12 +545,12 @@ pblh_mf.setVal(0.0);
             // ComputeDiffusivityMRF before consuming wstar or Beljaars correction after regrid.
             // Deardorff (1972) convective velocity scale — well-behaved as u_star -> 0.
             // wstar_conv = (g/theta_v0 * zi * wthv0)^(1/3)
-            const Real theta_v0 = amrex::max(GetThetav(i, j, klo, cell_data, moisture_indices), Real(1.0));
-            const Real wthv0 = amrex::max(-u_star_arr(i,j,0) * t_star_arr(i,j,0), Real(0.0)); // surface buoyancy flux, unstable only
+            const Real theta_v0 = amrex::max(GetThetav(i, j, ksrf, cell_data, moisture_indices), Real(1.0));
+            const Real wthv0 = amrex::max(-us_eff_arr(i,j,0) * ts_eff_arr(i,j,0), Real(0.0)); // surface buoyancy flux, unstable only
             const Real zi = amrex::max(pblh_pred_arr(i, j, 0), Real(10.0));  // or pblh_corr_arr in Pass 4
             const Real wstar_conv = std::cbrt(CONST_GRAV / theta_v0 * zi * wthv0);
 
-            Real wstar_shear = u_star_arr(i, j, 0) / phiM_safe;
+            Real wstar_shear = us_eff_arr(i, j, 0) / phiM_safe;
 
             // Blend: standard convective/shear combination (WRF YSU-style),
             // weighted by cube sum so either term can dominate smoothly
@@ -458,7 +565,7 @@ pblh_mf.setVal(0.0);
             constexpr Real Cp_d = Real(1004.64);
             Real kbfs_fire = zero_d;
             if (use_fire_correction && Q_fire_arr) {
-                const Real rho_sfc = cell_data(i, j, klo, Rho_comp);
+                const Real rho_sfc = cell_data(i, j, ksrf, Rho_comp);
                 const Real q_fire  = Q_fire_arr(i, j, 0);
                 if (q_fire > mrf_fire_q_thresh && rho_sfc > zero_d) {
                     // max() keeps the division valid if it is evaluated speculatively
@@ -469,13 +576,13 @@ pblh_mf.setVal(0.0);
 
             bool SFCFLG = (obuk_val <= zero_d);
             const Real HGAMT = (SFCFLG && enable_mrf_countergradient)
-                             ? amrex::min(-const_b * u_star_arr(i, j, 0) * t_star_arr(i, j, 0) / wstar, GAMCRT)
+                             ? amrex::min(-const_b * us_eff_arr(i, j, 0) * ts_eff_arr(i, j, 0) / wstar, GAMCRT)
                              : zero_d;
 
             Real HGAMQ = Real(0);
             if (SFCFLG && use_moisture && enable_mrf_countergradient) {
-                const Real q_star = q_star_arr(i, j, 0);
-                const Real HGAMQ_calc = -const_b * u_star_arr(i, j, 0) * q_star / wstar;
+                const Real q_star = qs_eff_arr(i, j, 0);
+                const Real HGAMQ_calc = -const_b * us_eff_arr(i, j, 0) * q_star / wstar;
                 HGAMQ = amrex::max(amrex::min(HGAMQ_calc, GAMCRQ), Real(0));
 
                 if (lmask_arr) {
@@ -484,10 +591,10 @@ pblh_mf.setVal(0.0);
                 }
 
                 if (moisture_indices.qv >= 0) {
-                    Real qv_klo = cell_data(i, j, klo, moisture_indices.qv) / cell_data(i, j, klo, Rho_comp);
-                    Real T_klo = getTgivenRandRTh(cell_data(i, j, klo, Rho_comp),
-                                                  cell_data(i, j, klo, RhoTheta_comp), qv_klo);
-                    Real p_klo = getPgivenRTh(cell_data(i, j, klo, RhoTheta_comp), qv_klo) * Real(0.01);
+                    Real qv_klo = cell_data(i, j, ksrf, moisture_indices.qv) / cell_data(i, j, ksrf, Rho_comp);
+                    Real T_klo = getTgivenRandRTh(cell_data(i, j, ksrf, Rho_comp),
+                                                  cell_data(i, j, ksrf, RhoTheta_comp), qv_klo);
+                    Real p_klo = getPgivenRTh(cell_data(i, j, ksrf, RhoTheta_comp), qv_klo) * Real(0.01);
                     Real qsat_klo = zero_d;
                     erf_qsatw(T_klo, p_klo, qsat_klo);
                     Real rh_klo = (qsat_klo > Real(1.0e-10)) ? (qv_klo / qsat_klo) : Real(0);
@@ -501,7 +608,7 @@ pblh_mf.setVal(0.0);
             // Compute VPERT = HGAMT + 0.61*theta*HGAMQ (virtual temperature perturbation)
             // This will be added to the surface temperature in the corrector Rib search.
             // WRF Reference: module_bl_mrf.F lines 879-880
-            if (pbli_arr(i, j, 0) <= klo + 1 || !enable_mrf_countergradient) {
+            if (pbli_arr(i, j, 0) <= ksrf + 1 || !enable_mrf_countergradient) {
                 vpert_arr(i, j, 0) = zero_d;
             } else {
                 const Real VPERT_raw = HGAMT + epsv * t_layer * HGAMQ;
@@ -515,44 +622,44 @@ pblh_mf.setVal(0.0);
         //
         // PASS 3 (CORRECTOR): Recompute PBL height with VPERT-enhanced surface temperature.
         // theta_s = theta_va + VPERT  (Hong & Pan 1996, Eq. 4)
-        // Fire flux does not enter here; it only boosts w* in Pass 4. A fire thermal
-        // excess in t_layer_v would make Rib < 0 through a neutral or shear-driven
-        // ABL, and the corrector would return pblh_min instead of a deeper PBL.
         // This is the WRF-consistent corrector pass. pblh_corr_arr is used for the
         // K-profile shape function K = rho*wstar*kappa*z*(1-z/h)^2.
         // WRF reference (module_bl_mrf.F lines 932-964):
         // https://github.com/wrf-model/WRF/blob/master/phys/module_bl_mrf.F#L932-L964
         //
-        ParallelFor(xybx, [=,one_d=one]
+        ParallelFor(xybx_work, [=,one_d=one]
                     AMREX_GPU_DEVICE(int i, int j, int) noexcept
         {
-            const Real t_layer  = t10av_arr(i, j, 0);
-            const Real moisture_fraction = use_moisture ? q10av_arr(i, j, 0) : Real(0);
+            const int  ksrf = ksurf_arr(i, j, 0);   // local surface: first fluid cell of the column
+            const Real zib  = zib_arr(i, j, 0);     // its height, subtracted from every height below
+            amrex::ignore_unused(zib);
+            const Real t_layer  = t10_eff_arr(i, j, 0);
+            const Real moisture_fraction = use_moisture ? q10_eff_arr(i, j, 0) : Real(0);
             // VPERT-enhanced surface virtual temperature (WRF THERMAL variable)
             const Real t_layer_v = t_layer * (one + epsv * moisture_fraction)
                                  + vpert_arr(i, j, 0);
 
-            Real obuk_val = l_obuk_arr(i, j, 0);
+            Real obuk_val = ol_eff_arr(i, j, 0);
             if (std::abs(obuk_val) < amrex::Real(1.0e-10)) {
                 obuk_val = (obuk_val >= zero) ? amrex::Real(1.0e-10) : amrex::Real(-1.0e-10);
             }
 
-            int kpbl = klo;
+            int kpbl = ksrf;
             Real zval, Rib;                        // FIX: removed uninitialized zval0, Rib0
             {
                 zval = (use_terrain_fitted_coords)
                      ? Compute_Zrel_AtCellCenter(i, j, kpbl, z_nd_arr)
-                     : (kpbl + myhalf) * gdata.CellSize(2);
+                     : ((kpbl + myhalf) * gdata.CellSize(2) - zib);
                 const Real theta_v     = GetThetav(i, j, kpbl, cell_data, moisture_indices);
                 // FIX: guard theta_v_klo against zero to prevent NaN in Rib
-                const Real theta_v_klo = amrex::max(GetThetav(i, j, klo, cell_data, moisture_indices), one_d);
+                const Real theta_v_klo = amrex::max(GetThetav(i, j, ksrf, cell_data, moisture_indices), one_d);
                 const Real ws2_raw = fourth * ( (uvel(i, j, kpbl) + uvel(i + 1, j, kpbl)) *
                                                 (uvel(i, j, kpbl) + uvel(i + 1, j, kpbl)) +
                                                 (vvel(i, j, kpbl) + vvel(i, j + 1, kpbl)) *
                                                 (vvel(i, j, kpbl) + vvel(i, j + 1, kpbl)) );
                 // Vogelezang & Holtslag (1996): Add shear correction term to denominator instead of ad-hoc floor
                 const Real ws2 = (turbChoice.enable_vh96_shear_correction)
-                                ? (ws2_raw + turbChoice.vh96_shear_const_b * u_star_arr(i,j,0) * u_star_arr(i,j,0))
+                                ? (ws2_raw + turbChoice.vh96_shear_const_b * us_eff_arr(i,j,0) * us_eff_arr(i,j,0))
                                 : amrex::max(ws2_raw, one_d);
                 Rib = CONST_GRAV * zval * (theta_v - t_layer_v) / (ws2 * theta_v_klo);
             }
@@ -566,28 +673,28 @@ pblh_mf.setVal(0.0);
 
                 zval = (use_terrain_fitted_coords)
                      ? Compute_Zrel_AtCellCenter(i, j, kpbl, z_nd_arr)
-                     : (kpbl + myhalf) * gdata.CellSize(2);
+                     : ((kpbl + myhalf) * gdata.CellSize(2) - zib);
                 const Real theta_v     = GetThetav(i, j, kpbl, cell_data, moisture_indices);
                 // FIX: guard theta_v_klo against zero to prevent NaN in Rib
-                const Real theta_v_klo = amrex::max(GetThetav(i, j, klo, cell_data, moisture_indices), one_d);
+                const Real theta_v_klo = amrex::max(GetThetav(i, j, ksrf, cell_data, moisture_indices), one_d);
                 const Real ws2_raw = fourth * ( (uvel(i, j, kpbl) + uvel(i + 1, j, kpbl)) *
                                                 (uvel(i, j, kpbl) + uvel(i + 1, j, kpbl)) +
                                                 (vvel(i, j, kpbl) + vvel(i, j + 1, kpbl)) *
                                                 (vvel(i, j, kpbl) + vvel(i, j + 1, kpbl)) );
                 // Vogelezang & Holtslag (1996): Add shear correction term to denominator instead of ad-hoc floor
                 const Real ws2 = (turbChoice.enable_vh96_shear_correction)
-                                ? (ws2_raw + turbChoice.vh96_shear_const_b * u_star_arr(i,j,0) * u_star_arr(i,j,0))
+                                ? (ws2_raw + turbChoice.vh96_shear_const_b * us_eff_arr(i,j,0) * us_eff_arr(i,j,0))
                                 : amrex::max(ws2_raw, one_d);
                 Rib = CONST_GRAV * zval * (theta_v - t_layer_v) / (ws2 * theta_v_klo);
                 above_critical = (Rib >= Ribcr);
             }
 
             const Real pblh_emp = (use_terrain_fitted_coords)
-                                ? Compute_Zrel_AtCellCenter(i, j, klo, z_nd_arr)
+                                ? Compute_Zrel_AtCellCenter(i, j, ksrf, z_nd_arr)
                                 : myhalf * gdata.CellSize(2);
             const Real z_max = (use_terrain_fitted_coords)
                              ? Compute_Zrel_AtCellCenter(i, j, khi, z_nd_arr)
-                             : (khi + myhalf) * gdata.CellSize(2);
+                             : ((khi + myhalf) * gdata.CellSize(2) - zib);
             const Real pblh_max = Real(0.9) * z_max;
             const Real pblh_min = amrex::max(pblh_emp, Real(10.0));
 
@@ -605,36 +712,66 @@ pblh_mf.setVal(0.0);
                 pbli_arr(i, j, 0) = kpbl;
             } else {
                 pblh_corr_arr(i, j, 0) = pblh_min;
-                pbli_arr(i, j, 0) = klo + 1;
+                pbli_arr(i, j, 0) = ksrf + 1;
             }
+            pblh_floor_arr(i, j, 0) = pblh_min;
         });
+
+
+        // Apply PBLH spatial smoothing if enabled (Seibert et al. 2000 methodology)
+        // Seibert et al. (2000): Review and intercomparison of operational methods
+        // for the determination of the mixing height. Atmospheric Environment, 34, 1001-1027.
+        // Spatial smoothing removes unphysical grid-to-grid noise from discrete Rib-crossing detection
+        if (turbChoice.enable_pblh_smoothing) {
+            // Smooth the tile's own columns, reading the halo the passes above
+            // filled. The result is the same however the domain is split.
+            // The stencil mixes neighbouring columns, so it runs on the
+            // absolute height (the stored convention): the column's surface
+            // height zib goes on over the work box first and comes off
+            // after, and the result is kept at or above the column's floor.
+            // zib is zero without erf.pbl_ib_aware.
+            ParallelFor(xybx_work, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept {
+                pblh_corr_arr(i, j, 0) += zib_arr(i, j, 0);
+            });
+            ApplyPBLHSmoothing(pbl_height_corrector, xybx_tile,
+                             turbChoice.pblh_smoothing_weight,
+                             turbChoice.pblh_smoothing_passes,
+                             geom.Domain(), geom.periodicity());
+            ParallelFor(xybx_work, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept {
+                pblh_corr_arr(i, j, 0) = amrex::max(pblh_corr_arr(i, j, 0) - zib_arr(i, j, 0), pblh_floor_arr(i, j, 0));
+            });
+        }
 
         // Copy corrected PBL height into pblh_mf for SurfaceLayer storage.
         // pbl_height_corrector only covers this tile (grown by one), so loop over
         // the tile, not the valid box: with tiling in x/y the valid box reaches
         // past it. Under TileNoZ the tile spans the full column, and pblh_mf has
-        // no ghost cells, so the tiles together still fill every cell. The
-        // optional smoothing reaches across tiles and boxes, so it is applied to
-        // pblh_mf after the tile loop.
+        // no ghost cells, so the tiles together still fill every cell.
         {
             auto pblh_out = pblh_mf.array(mfi);
             const Box& tbx = mfi.tilebox();
+            // The scheme measures its height from the top of an immersed column
+            // (zib); the stored field is the absolute height above the domain
+            // bottom, the convention of YSUNew and of every consumer of
+            // SurfaceLayer::get_pblh(). zib is zero without erf.pbl_ib_aware.
             ParallelFor(tbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-                pblh_out(i, j, k) = pblh_corr_arr(i, j, 0);
+                pblh_out(i, j, k) = pblh_corr_arr(i, j, 0) + zib_arr(i, j, 0);
             });
         }
         //
         // PASS 4 (WSTAR RECOMPUTE): Recompute wstar, HGAMT, HGAMQ using the corrected
         // PBL height (pblh_corr_arr) to ensure internal consistency between the K-profile
         // amplitude and the countergradient fluxes. HOL = sf*h/L uses pblh_corr_arr.
-        // Over fire columns w* is then boosted (see FIRE COUPLING above).
         // WRF reference (module_bl_mrf.F lines 857-880):
         // https://github.com/wrf-model/WRF/blob/master/phys/module_bl_mrf.F#L857-L880
         //
         ParallelFor(xybx, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept
         {
-            //const Real t_layer  = t10av_arr(i, j, 0);
-            Real obuk_val = l_obuk_arr(i, j, 0);
+            const int  ksrf = ksurf_arr(i, j, 0);   // local surface: first fluid cell of the column
+            const Real zib  = zib_arr(i, j, 0);     // its height, subtracted from every height below
+            amrex::ignore_unused(zib);
+            //const Real t_layer  = t10_eff_arr(i, j, 0);
+            Real obuk_val = ol_eff_arr(i, j, 0);
             if (std::abs(obuk_val) < amrex::Real(1.0e-10)) {
                 obuk_val = (obuk_val >= Real(0)) ? amrex::Real(1.0e-10) : amrex::Real(-1.0e-10);
             }
@@ -661,41 +798,42 @@ pblh_mf.setVal(0.0);
             // Absolute bounds [0.01, 5.0] m/s
             // Deardorff (1972) convective velocity scale — well-behaved as u_star -> 0.
             // wstar_conv = (g/theta_v0 * zi * wthv0)^(1/3)
-            const Real theta_v0 = amrex::max(GetThetav(i, j, klo, cell_data, moisture_indices), Real(1.0));
-            const Real wthv0 = amrex::max(-u_star_arr(i,j,0) * t_star_arr(i,j,0), Real(0.0)); // surface buoyancy flux, unstable only
+            const Real theta_v0 = amrex::max(GetThetav(i, j, ksrf, cell_data, moisture_indices), Real(1.0));
+            const Real wthv0 = amrex::max(-us_eff_arr(i,j,0) * ts_eff_arr(i,j,0), Real(0.0)); // surface buoyancy flux, unstable only
             const Real zi = amrex::max(pblh_pred_arr(i, j, 0), Real(10.0));  // or pblh_corr_arr in Pass 4
             const Real wstar_conv = std::cbrt(CONST_GRAV / theta_v0 * zi * wthv0);
 
-            Real wstar_shear = u_star_arr(i, j, 0) / phiM_safe;
+            Real wstar_shear = us_eff_arr(i, j, 0) / phiM_safe;
 
             // Blend: standard convective/shear combination (WRF YSU-style),
             // weighted by cube sum so either term can dominate smoothly
             Real wstar = std::cbrt(wstar_shear*wstar_shear*wstar_shear +
                                 wstar_conv*wstar_conv*wstar_conv);
-            //Real wstar = u_star_arr(i, j, 0) / phiM_safe;
+            //Real wstar = us_eff_arr(i, j, 0) / phiM_safe;
             wstar = amrex::max(wstar, Real(0.01));
             wstar = amrex::min(wstar, Real(5.0));
 
             // Fire boost (Deardorff 1970): where Pass 2 found a fire flux, use the
             // convective scale of the surface plus fire buoyancy flux over the
             // corrected PBLH if it is larger. Fire only increases w*; HGAMT/HGAMQ
-            // below keep the unboosted w*. Every input is valid for every column,
+            // below keep the unboosted w*. An immersed column (erf.pbl_ib_aware) takes
+            // its own surface scales, as the rest of the pass. Every input is valid for every column,
             // so nothing traps if the arm is evaluated speculatively.
             const Real kbfs_fire  = kbfs_fire_arr(i, j, 0);
-            const Real kbfs_total = amrex::max(-u_star_arr(i, j, 0) * t_star_arr(i, j, 0) + kbfs_fire,
+            const Real kbfs_total = amrex::max(-us_eff_arr(i, j, 0) * ts_eff_arr(i, j, 0) + kbfs_fire,
                                                Real(0));
-            const Real wstar_fire = std::cbrt(CONST_GRAV / amrex::max(t10av_arr(i, j, 0), Real(1.0))
+            const Real wstar_fire = std::cbrt(CONST_GRAV / amrex::max(t10_eff_arr(i, j, 0), Real(1.0))
                                               * kbfs_total * pblh_corr_arr(i, j, 0));
             wstar_arr(i, j, 0) = (kbfs_fire > Real(0)) ? amrex::max(wstar_fire, wstar) : wstar;
             bool SFCFLG = (obuk_val <= Real(0));
             const Real HGAMT = (SFCFLG && enable_mrf_countergradient)
-                             ? amrex::min(-const_b * u_star_arr(i, j, 0) * t_star_arr(i, j, 0) / wstar, GAMCRT)
+                             ? amrex::min(-const_b * us_eff_arr(i, j, 0) * ts_eff_arr(i, j, 0) / wstar, GAMCRT)
                              : Real(0);
 
             Real HGAMQ = Real(0);
             if (SFCFLG && use_moisture && enable_mrf_countergradient) {
-                const Real q_star = q_star_arr(i, j, 0);
-                const Real HGAMQ_calc = -const_b * u_star_arr(i, j, 0) * q_star / wstar;
+                const Real q_star = qs_eff_arr(i, j, 0);
+                const Real HGAMQ_calc = -const_b * us_eff_arr(i, j, 0) * q_star / wstar;
                 HGAMQ = amrex::max(amrex::min(HGAMQ_calc, GAMCRQ), Real(0));
 
                 if (lmask_arr) {
@@ -704,10 +842,10 @@ pblh_mf.setVal(0.0);
                 }
 
                 if (moisture_indices.qv >= 0) {
-                    Real qv_klo = cell_data(i, j, klo, moisture_indices.qv) / cell_data(i, j, klo, Rho_comp);
-                    Real T_klo = getTgivenRandRTh(cell_data(i, j, klo, Rho_comp),
-                                                  cell_data(i, j, klo, RhoTheta_comp), qv_klo);
-                    Real p_klo = getPgivenRTh(cell_data(i, j, klo, RhoTheta_comp), qv_klo) * Real(0.01);
+                    Real qv_klo = cell_data(i, j, ksrf, moisture_indices.qv) / cell_data(i, j, ksrf, Rho_comp);
+                    Real T_klo = getTgivenRandRTh(cell_data(i, j, ksrf, Rho_comp),
+                                                  cell_data(i, j, ksrf, RhoTheta_comp), qv_klo);
+                    Real p_klo = getPgivenRTh(cell_data(i, j, ksrf, RhoTheta_comp), qv_klo) * Real(0.01);
                     Real qsat_klo = Real(0);
                     erf_qsatw(T_klo, p_klo, qsat_klo);
                     Real rh_klo = (qsat_klo > Real(1.0e-10)) ? (qv_klo / qsat_klo) : Real(0);
@@ -718,7 +856,7 @@ pblh_mf.setVal(0.0);
                 }
             }
 
-            if (pbli_arr(i, j, 0) <= klo + 1) {
+            if (pbli_arr(i, j, 0) <= ksrf + 1) {
                 hgamt_arr(i, j, 0) = Real(0);
                 hgamq_arr(i, j, 0) = Real(0);
             } else {
@@ -743,27 +881,30 @@ pblh_mf.setVal(0.0);
         ParallelFor(xybx, [=,one_d=one]
                     AMREX_GPU_DEVICE(int i, int j, int) noexcept
         {
-            const Real t_layer  = t10av_arr(i, j, 0);
-            const Real moisture_fraction = use_moisture ? q10av_arr(i, j, 0) : zero;
+            const int  ksrf = ksurf_arr(i, j, 0);   // local surface: first fluid cell of the column
+            const Real zib  = zib_arr(i, j, 0);     // its height, subtracted from every height below
+            amrex::ignore_unused(zib);
+            const Real t_layer  = t10_eff_arr(i, j, 0);
+            const Real moisture_fraction = use_moisture ? q10_eff_arr(i, j, 0) : zero;
             const Real t_layer_v = t_layer * (one + epsv * moisture_fraction);
             const Real t_layer_v_enhanced = t_layer_v + vpert_arr(i, j, 0);
 
-            int kpbl_zero = klo;
+            int kpbl_zero = ksrf;
             Real zval_zero, Rib_zero;
             {
                 zval_zero = (use_terrain_fitted_coords)
                           ? Compute_Zrel_AtCellCenter(i, j, kpbl_zero, z_nd_arr)
-                          : (kpbl_zero + myhalf) * gdata.CellSize(2);
+                          : ((kpbl_zero + myhalf) * gdata.CellSize(2) - zib);
                 const Real theta_v     = GetThetav(i, j, kpbl_zero, cell_data, moisture_indices);
                 // FIX: guard theta_v_klo against zero to prevent NaN in Rib
-                const Real theta_v_klo = amrex::max(GetThetav(i, j, klo, cell_data, moisture_indices), one_d);
+                const Real theta_v_klo = amrex::max(GetThetav(i, j, ksrf, cell_data, moisture_indices), one_d);
                 const Real ws2_raw = fourth * ( (uvel(i, j, kpbl_zero) + uvel(i + 1, j, kpbl_zero)) *
                                                 (uvel(i, j, kpbl_zero) + uvel(i + 1, j, kpbl_zero)) +
                                                 (vvel(i, j, kpbl_zero) + vvel(i, j + 1, kpbl_zero)) *
                                                 (vvel(i, j, kpbl_zero) + vvel(i, j + 1, kpbl_zero)) );
                 // Vogelezang & Holtslag (1996): Add shear correction term to denominator instead of ad-hoc floor
                 const Real ws2 = (turbChoice.enable_vh96_shear_correction)
-                                ? (ws2_raw + turbChoice.vh96_shear_const_b * u_star_arr(i,j,0) * u_star_arr(i,j,0))
+                                ? (ws2_raw + turbChoice.vh96_shear_const_b * us_eff_arr(i,j,0) * us_eff_arr(i,j,0))
                                 : amrex::max(ws2_raw, one_d);
                 Rib_zero = CONST_GRAV * zval_zero * (theta_v - t_layer_v_enhanced) / (ws2 * theta_v_klo);
             }
@@ -773,17 +914,17 @@ pblh_mf.setVal(0.0);
                 kpbl_zero += 1;
                 zval_zero = (use_terrain_fitted_coords)
                           ? Compute_Zrel_AtCellCenter(i, j, kpbl_zero, z_nd_arr)
-                          : (kpbl_zero + myhalf) * gdata.CellSize(2);
+                          : ((kpbl_zero + myhalf) * gdata.CellSize(2) - zib);
                 const Real theta_v     = GetThetav(i, j, kpbl_zero, cell_data, moisture_indices);
                 // FIX: guard theta_v_klo against zero to prevent NaN in Rib
-                const Real theta_v_klo = amrex::max(GetThetav(i, j, klo, cell_data, moisture_indices), one_d);
+                const Real theta_v_klo = amrex::max(GetThetav(i, j, ksrf, cell_data, moisture_indices), one_d);
                 const Real ws2_raw = fourth * ( (uvel(i, j, kpbl_zero) + uvel(i + 1, j, kpbl_zero)) *
                                                 (uvel(i, j, kpbl_zero) + uvel(i + 1, j, kpbl_zero)) +
                                                 (vvel(i, j, kpbl_zero) + vvel(i, j + 1, kpbl_zero)) *
                                                 (vvel(i, j, kpbl_zero) + vvel(i, j + 1, kpbl_zero)) );
                 // Vogelezang & Holtslag (1996): Add shear correction term to denominator instead of ad-hoc floor
                 const Real ws2 = (turbChoice.enable_vh96_shear_correction)
-                                ? (ws2_raw + turbChoice.vh96_shear_const_b * u_star_arr(i,j,0) * u_star_arr(i,j,0))
+                                ? (ws2_raw + turbChoice.vh96_shear_const_b * us_eff_arr(i,j,0) * us_eff_arr(i,j,0))
                                 : amrex::max(ws2_raw, one_d);
                 Rib_zero = CONST_GRAV * zval_zero * (theta_v - t_layer_v_enhanced) / (ws2 * theta_v_klo);
                 above_critical_zero = (Rib_zero >= Ribcr_zero);
@@ -792,11 +933,11 @@ pblh_mf.setVal(0.0);
             if (above_critical_zero) {
                 pbli_zero_arr(i, j, 0) = kpbl_zero;
             } else {
-                pbli_zero_arr(i, j, 0) = klo + 1;
+                pbli_zero_arr(i, j, 0) = ksrf + 1;
             }
         });
 
-        // Fire diagnostics, after the final corrector (and its smoothing) and the w* boost.
+        // Fire diagnostics, after the final corrector and the w* boost.
         if (use_fire_correction) {
             Real pblh_max_corr = pbl_height_corrector.max<RunOn::Device>(0);
             Real pblh_max_pred = pbl_height_predictor.max<RunOn::Device>(0);
@@ -805,9 +946,7 @@ pblh_mf.setVal(0.0);
             amrex::Print() << "[MRF FIRE] fire wstar-boost active"
                            << "  pblh_predictor_max=" << pblh_max_pred << " m"
                            << "  pblh_corrector_max=" << pblh_max_corr << " m"
-                           << "  kbfs_fire_max=" << kbfs_fire_max << " K m/s"
-                           << "  (fire boosts wstar/K within PBL, not PBLH)\n";
-            amrex::Print() << "[MRF FIRE] wstar_max=" << wstar_max << " m/s"
+                           << "  wstar_max=" << wstar_max << " m/s"
                            << "  kbfs_fire_max=" << kbfs_fire_max << " K m/s\n";
         }
 
@@ -837,21 +976,24 @@ pblh_mf.setVal(0.0);
 
         ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
         {
-            Real obuk_val = l_obuk_arr(i, j, 0);
+            const int  ksrf = ksurf_arr(i, j, 0);   // local surface: first fluid cell of the column
+            const Real zib  = zib_arr(i, j, 0);     // its height, subtracted from every height below
+            amrex::ignore_unused(zib);
+            Real obuk_val = ol_eff_arr(i, j, 0);
             if (std::abs(obuk_val) < amrex::Real(1.0e-10)) {
                 obuk_val = (obuk_val >= Real(0)) ? amrex::Real(1.0e-10) : amrex::Real(-1.0e-10);
             }
 
             const Real zval = (use_terrain_fitted_coords)
                             ? Compute_Zrel_AtCellCenter(i, j, k, z_nd_arr)
-                            : (k + myhalf) * gdata.CellSize(2);
+                            : ((k + myhalf) * gdata.CellSize(2) - zib);
             const Real rho = cell_data(i, j, k, Rho_comp);
             // Guard: skip lateral ghost cells that may have uninitialized density.
             // Prevents division-by-zero inside GetThetav at lateral ghost cells of gbx.
             // REGRID NOTE: On regrid, SurfaceLayer is reallocated and PBLH returns to sentinel.
             // The driver must call ComputeDiffusivityMRF (or an equivalent bootstrap pass)
             // before consuming PBLH in update_fluxes() or Beljaars correction after any regrid.
-            if (rho <= Real(0)) {
+            if (rho <= Real(0) || k < ksrf) {   // no diffusivity inside an immersed solid
                 K_turb(i, j, k, EddyDiff::Mom_v)   = Real(0);
                 K_turb(i, j, k, EddyDiff::Theta_v) = Real(0);
                 K_turb(i, j, k, EddyDiff::Q_v)     = Real(0);
@@ -933,16 +1075,13 @@ pblh_mf.setVal(0.0);
                 Real Prt_base = phit_eff / phiM_eff;
                 const Real Prt = amrex::min(amrex::max(Prt_base + const_b * KAPPA * sf, prmin), prmax);
 
-                // wstar_arr now holds fire-augmented wstar_eff (set in Pass 4)
                 const Real wstar = wstar_arr(i, j, 0);
-
                 const bool use_qnse_stable_profile = (obuk_val > Real(0)) && (enable_qnse_d > Real(0.5));
                 if (SFCFLG || use_qnse_stable_profile) {
-                    // K-profile: K = rho * wstar_eff * kappa * zrel * (1 - zrel/pblh_rel)^2
-                    // Fire enters here via the boosted wstar_eff — larger K over fire columns.
+                    // K-profile: K = rho * wstar * kappa * zrel * (1 - zrel/pblh_rel)^2
                     // WRF Reference: module_bl_mrf.F L976-978
                     const Real z_sfc = (use_terrain_fitted_coords)
-                                     ? Compute_Zrel_AtCellCenter(i, j, klo, z_nd_arr)
+                                     ? Compute_Zrel_AtCellCenter(i, j, ksrf, z_nd_arr)
                                      : Real(0);
                     const Real zrel = zval - z_sfc;
                     const Real pblh = pblh_corr_arr(i, j, 0);
@@ -951,7 +1090,7 @@ pblh_mf.setVal(0.0);
 
                     K_turb(i, j, k, EddyDiff::Mom_v)   = rho * wstar * KAPPA * zrel * zfac * zfac;
                     K_turb(i, j, k, EddyDiff::Theta_v) = K_turb(i, j, k, EddyDiff::Mom_v) / Prt;
-                    // Phase 14: Set scalar diffusivity (used for dust when transport_scalar=true)
+                    // Scalar diffusivity (dust when transport_scalar=true)
                     K_turb(i, j, k, EddyDiff::Scalar_v) = K_turb(i, j, k, EddyDiff::Theta_v);
 
                     if (turbChoice.mrf_moistvars) {
@@ -1013,9 +1152,8 @@ pblh_mf.setVal(0.0);
 
                     K_turb(i, j, k, EddyDiff::Mom_v)   = rl2wsp * fm * Pr_mom;
                     K_turb(i, j, k, EddyDiff::Theta_v) = rl2wsp * ft;
-                    // Phase 14: Set scalar diffusivity (used for dust when transport_scalar=true)
+                K_turb(i, j, k, EddyDiff::Scalar_v) = K_turb(i, j, k, EddyDiff::Theta_v);
                     K_turb(i, j, k, EddyDiff::Scalar_v) = K_turb(i, j, k, EddyDiff::Theta_v);
-
                     if (use_moisture && turbChoice.mrf_moistvars) {
                         K_turb(i, j, k, EddyDiff::Q_v) = rl2wsp * ft;
                     } else {
@@ -1074,9 +1212,7 @@ pblh_mf.setVal(0.0);
 
                 K_turb(i, j, k, EddyDiff::Mom_v)   = rl2wsp * fm * Pr_mom;
                 K_turb(i, j, k, EddyDiff::Theta_v) = rl2wsp * ft;
-                // Phase 14: Set scalar diffusivity (used for dust when transport_scalar=true)
                 K_turb(i, j, k, EddyDiff::Scalar_v) = K_turb(i, j, k, EddyDiff::Theta_v);
-
                 if (use_moisture && turbChoice.mrf_moistvars) {
                     K_turb(i, j, k, EddyDiff::Q_v) = rl2wsp * ft;
                 } else {
@@ -1130,16 +1266,9 @@ pblh_mf.setVal(0.0);
                 std::min(K_turb(i, j, k, EddyDiff::Theta_v), rhoKmax), rhoKmin);
             K_turb(i, j, k, EddyDiff::Q_v) = std::max(
                 std::min(K_turb(i, j, k, EddyDiff::Q_v), rhoKmax), rhoKmin);
-            // Phase 14: Bound scalar diffusivity (used for dust when transport_scalar=true)
             K_turb(i, j, k, EddyDiff::Scalar_v) = std::max(
                 std::min(K_turb(i, j, k, EddyDiff::Scalar_v), rhoKmax), rhoKmin);
-
-            K_turb(i, j, k, EddyDiff::Turb_lengthscale) = pblh_corr_arr(i, j, 0);
-
-            // Phase 14: Dust turbulent Schmidt number scaling.
-            // Sc_t controls scalar vertical diffusivity relative to heat.
-            // Default Sc_t = Pr_t (no scaling). Seinfeld & Pandis (2006), Ch. 16.
-            // Hong & Pan (1996): https://doi.org/10.1175/1520-0493(1996)124<2322:NBLVDI>2.0.CO;2
+            // Dust turbulent Schmidt number scaling (erf.dust_mrf_Sc_t); default Sc_t = Pr_t.
 #ifdef ERF_USE_DUST
             if (turbChoice.dust_mrf_Sc_t > 0.0 &&
                 std::abs(turbChoice.dust_mrf_Sc_t - turbChoice.Pr_t) > 1.0e-6) {
@@ -1147,6 +1276,7 @@ pblh_mf.setVal(0.0);
                 K_turb(i, j, k, EddyDiff::Scalar_v) *= scale;
             }
 #endif
+            K_turb(i, j, k, EddyDiff::Turb_lengthscale) = pblh_corr_arr(i, j, 0) + zib;   // absolute height, as stored
 
             // IMPORTANT — units convention for HGAMT_v / HGAMQ_v:
             // These are stored as (countergradient term / pblh), i.e. already
@@ -1191,42 +1321,7 @@ pblh_mf.setVal(0.0);
             K_turb(i, j, khi+1, EddyDiff::Turb_lengthscale) = K_turb(i, j, khi, EddyDiff::Turb_lengthscale);
         });
     }// mfi
-    // Write the MRF-computed PBLH back into SurfaceLayer so the Beljaars
-    // correction, the diagnostics and the dust layer (which reads get_pblh)
-    // see it; pblh_mf is filled inside the kernel above, so this stays on
-    // the device. update_pblh no longer aborts for the MRF type.
-    if (SurfLayer->get_pblh(level)) {
-        // Apply PBLH spatial smoothing if enabled (Seibert et al. 2000 methodology)
-        // Seibert et al. (2000): Review and intercomparison of operational methods
-        // for the determination of the mixing height. Atmospheric Environment, 34, 1001-1027.
-        // Spatial smoothing removes unphysical grid-to-grid noise from discrete Rib-crossing detection.
-        // The stencil reaches into neighbouring tiles and boxes, so it runs here, on a
-        // planar copy whose ghost cells are filled before every pass; smoothing each
-        // tile's own work array read outside it and tied the result to the decomposition.
-        // As before, only the height passed to SurfaceLayer is smoothed: the K-profile
-        // above uses the height from the second corrector pass.
-        if (turbChoice.enable_pblh_smoothing) {
-            MultiFab pblh_2d = MakePlanarPBLHMultiFab(pblh_mf.boxArray(), pblh_mf.DistributionMap());
-            for (MFIter mfi(pblh_2d, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                const Box& bx = mfi.tilebox();
-                const auto pblh_col = pblh_mf.const_array(mfi);
-                const auto pblh_pln = pblh_2d.array(mfi);
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int) noexcept {
-                    pblh_pln(i, j, 0) = pblh_col(i, j, klo);
-                });
-            }
-            ApplyPBLHSmoothing(pblh_2d, geom,
-                               turbChoice.pblh_smoothing_weight,
-                               turbChoice.pblh_smoothing_passes);
-            for (MFIter mfi(pblh_mf, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                const Box& bx = mfi.tilebox();
-                const auto pblh_pln = pblh_2d.const_array(mfi);
-                const auto pblh_col = pblh_mf.array(mfi);
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-                    pblh_col(i, j, k) = pblh_pln(i, j, 0);
-                });
-            }
-        }
-        SurfLayer->set_pblh(level, pblh_mf);
-    }
+    // Write MRF-computed PBLH back into SurfaceLayer so Beljaars correction
+    // and diagnostics can use it, and update_pblh no longer aborts for MRF type.
+    SurfLayer->set_pblh(level, pblh_mf);
 }

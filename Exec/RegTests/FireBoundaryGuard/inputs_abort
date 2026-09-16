@@ -1,0 +1,7 @@
+# Ignition disc overlapping the east wall: burning cells are inside the guard
+# band on the first step and the abort action stops the run there, with the
+# message the CTest FireBoundaryGuard_abort looks for.
+FILE = inputs_base
+erf.fire.ignition_x = 395.0
+erf.fire.boundary_guard_action = "abort"
+erf.fire.fire_stats_csv_file = "fire_stats_abort.csv"

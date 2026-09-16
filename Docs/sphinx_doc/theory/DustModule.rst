@@ -249,8 +249,6 @@ Source layout
 - ``Source/FireDust/ERF_FireDustCoupling`` and
   ``Source/Dust/ERF_DustFireLofting`` are the fire coupling, and
   ``Source/Particles/ERF_DustPC`` the super-particles.
-- ``Source/Dust/DUST_DEVELOPMENT.md`` is the development log with the phase
-  history behind the file names.
 
 Tests
 -----
@@ -319,7 +317,7 @@ Limitations
 -----------
 
 - The NetCDF branches of the raster and PHREEQC readers abort; use ESRI ASCII
-  and CSV. :cpp:`erf.dust.surface_map_file` is read but not consumed.
+  and CSV.
 - With :cpp:`erf.dust.transport_bins_separately` only bin 0 is returned to the
   surface as the concentration; the other bins are injected and transported
   but do not feed the loading feedback.

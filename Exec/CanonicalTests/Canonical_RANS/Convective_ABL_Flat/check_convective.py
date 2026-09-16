@@ -3,9 +3,9 @@
 
 Usage: check_convective.py [--smoke | --physics] <plotfile> [surf_hist.dat]
 
---smoke (default, the CTest entry) runs the structural checks; --physics
-adds the checks on the 4 h state: the column heat budget against the
-imposed surface flux, a well-mixed layer, the inversion height, the
+--smoke (default, the CTest entry) runs the structural checks and the
+column heat budget against the imposed surface flux; --physics adds the
+checks on the 4 h state: a well-mixed layer, the inversion height, the
 mixed-layer warming and the AL01 wall value of k with its buoyancy term.
 """
 
@@ -40,15 +40,17 @@ def main(argv):
 
     rc.structural_checks(rep, z, p, Z0, L_G_MAX, allow_unstable=True, mode=mode)
 
+    # column heat budget: sum rho (theta - theta_init) dz = rho_sfc F t. The deck
+    # runs the implicit column solve with the midpoint stages, so the smoke run
+    # tests that the solve adds the surface heat flux exactly once per step.
+    t = hdr["time"]
+    gained = sum(p["density"][k] * (p["theta"][k] - theta_init(z[k])) * dz for k in range(nz))
+    rep.check("column heat gain / (rho_sfc F t)", gained / (p["density"][0] * SURF_FLUX * t), 1.0, 0.10)
+
     if mode == "physics":
-        t = hdr["time"]
         sh = erf_plotfile.read_surf_hist(surf)
         ustar = sh["u_star"]
         rep.check("u_star [m/s]", ustar, (0.30, 0.80), 0.0, "range")
-
-        # column heat budget: sum rho (theta - theta_init) dz = rho_sfc F t
-        gained = sum(p["density"][k] * (p["theta"][k] - theta_init(z[k])) * dz for k in range(nz))
-        rep.check("column heat gain / (rho_sfc F t)", gained / (p["density"][0] * SURF_FLUX * t), 1.0, 0.10)
 
         # inversion height: strongest dtheta/dz
         grad = [(p["theta"][k + 1] - p["theta"][k]) / dz for k in range(nz - 1)]

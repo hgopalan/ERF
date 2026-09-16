@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <AMReX_REAL.H>
+#include <ERF_Constants.H>
 
 /// Round-off tolerance of the build precision: 1e-12 in double, 1e-5 in single.
 static constexpr double TOL = (sizeof(amrex::Real) == 8) ? 1e-12 : 1e-5;
@@ -34,7 +35,7 @@ TEST(LevelSetEllipse, HeadFlankBackRates)
     EXPECT_NEAR(length / width, LB, (TOL * 1e3));
     // the normal speed never goes negative around the ellipse
     for (int n = 0; n <= 360; n += 5) {
-        const amrex::Real th = n * M_PI / 180.0;
+        const amrex::Real th = n * PI / 180.0;
         EXPECT_GE(ellipse_normal_speed(e, std::cos(th), std::sin(th)), 0.0);
     }
 }
@@ -46,7 +47,7 @@ TEST(LevelSetEllipse, CalmWindIsCircle)
     EXPECT_NEAR(e.a, 0.5, TOL);
     EXPECT_NEAR(e.c, 0.0, TOL);
     for (int n = 0; n < 360; n += 30) {
-        const amrex::Real th = n * M_PI / 180.0;
+        const amrex::Real th = n * PI / 180.0;
         EXPECT_NEAR(ellipse_normal_speed(e, std::cos(th), std::sin(th)), 0.5, TOL);
     }
 }

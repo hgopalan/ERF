@@ -14,7 +14,7 @@ ceiling, since zi is about 1 km).
 | --- | --- |
 | domain | 2560 x 2560 x 2000 m |
 | grid | 8 x 8 x 100, dz = 20 m, first cell centre 10 m |
-| time step | 5 s fixed, anelastic with FFT, implicit column solve of theta and KE (`erf.vert_implicit = true`; explicit diffusion needs 2 s since K/rho reaches 40 m^2/s) |
+| time step | 5 s fixed, anelastic with FFT, implicit column solve of theta and KE (`erf.vert_implicit = true` with `erf.anelastic_type = MidPoint`; explicit diffusion needs 2 s since K/rho reaches 40 m^2/s) |
 | closure | `erf.rans_type = kEqn`, AL01 defaults, `dirichlet_k = true` |
 | physics run | 4 h (2880 steps), about 1 min on 2 ranks |
 | smoke run | 40 steps (`ctest -R RANS_Convective_ABL_Flat`) |
@@ -28,10 +28,14 @@ python3 check_convective.py --physics plt02880 surf_hist.dat
 
 ## Checks
 
-Smoke (`--smoke`, the CTest entry): the structural checks of
+Smoke (`--smoke`, the CTest entry, 40 steps): the structural checks of
 `../rans_checks.py`, with the length-scale bound taken as the unstable
 bound (about 1.31 times the neutral geometric length under the cap), which
-is where the phase 3 limiter on the unstable length is exercised.
+is where the limiter on the unstable length is exercised, and the column
+heat gain over rho_sfc F t (1, 10 %) from the physics table below. The deck
+runs the implicit column solve, so the heat gain after 40 steps tests that
+the solve adds the surface heat flux once per step on both anelastic
+stages.
 
 Physics (`--physics`, 4 h):
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FireDirectionalShape: a point ignition in a uniform wind, against Rothermel.
 
-    python3 check_firedirectionalshape.py [isotropic projection projection_key ellipse ellipse_anderson]
+    python3 check_firedirectionalshape.py [isotropic projection projection_key ellipse ellipse_anderson advective]
 
 A grass fire (Anderson fuel model 1 at 5.5 % moisture) spreads from a 10 m disc
 on flat ground in a uniform westerly. Rothermel (1972) spreads its head at
@@ -54,9 +54,21 @@ ellipse           erf.fire.directional_shape = "ellipse": F is the support
                   solution, and the head within 3 % of Rothermel's head rate.
 ellipse_anderson  the same with erf.fire.directional_ellipse_lw = "anderson": the
                   flank rate a = b / LW with Anderson's (1983) length-to-width
-                  ratio LW = 0.936 exp(0.2566 U) - 0.397 sqrt(U) (U in mph, at
+                  ratio LW = 0.936 exp(0.2566 U) + 0.461 exp(-0.1548 U) - 0.397 (U in mph, at
                   least 1, at most 8) at the effective wind speed, here the wind
                   itself under the fine-fuel cap. Same checks as the ellipse deck.
+advective         erf.fire.directional_wind_coupling = "advective": phi_w
+                  evaluated from the raw wind speed U (not projected), then
+                  the whole wind/slope factor scaled by cos(theta) to the
+                  front normal, F(theta) = R0 (1 + phi_w(U) max(cos theta, 0))
+                  -- matching WRF-Fire's fire_ros (module_fr_fire_phys.F).
+                  Linear in cos(theta), so (like the ellipse) it is its own
+                  Wulff shape and the head runs at Rothermel's head rate,
+                  without imposing an ellipse: back and flanks fall out of
+                  the same formula (R0, since cos(theta) <= 0 there), rather
+                  than being set separately as in the ellipse deck. Head,
+                  back and flanks at the Hopf solution, and the head within
+                  3 % of Rothermel's head rate.
 """
 
 import glob, math, sys
@@ -77,7 +89,7 @@ M_S_TO_FT_MIN = 196.85
 LW_MAX = 8.0
 FM1 = dict(w0=0.034, sigma=3500.0, delta=1.0, Mx=0.12, h=8000.0, S_T=0.0555, S_e=0.010, rho_p=32.0)
 KIND = {"isotropic": "iso", "projection": "proj", "projection_key": "proj", "ellipse": "ell",
-        "ellipse_anderson": "ella"}
+        "ellipse_anderson": "ella", "advective": "adv"}
 N_ANGLES = 3600
 results = []
 
@@ -113,7 +125,8 @@ def anderson_lw(U_mps):
     mph = U_mps * 2.23694
     if mph < 1.0:
         return 1.0
-    return max(1.0, min(0.936 * math.exp(0.2566 * mph) - 0.397 * math.sqrt(mph), LW_MAX))
+    # FARSITE's fit (Finney 1998, eq. 8); the second term was -0.397 sqrt(U) until 2026-09
+    return max(1.0, min(0.936 * math.exp(0.2566 * mph) + 0.461 * math.exp(-0.1548 * mph) - 0.397, LW_MAX))
 
 
 def speed(kind, th, R0, phi_w, U, U_cap):
@@ -123,6 +136,8 @@ def speed(kind, th, R0, phi_w, U, U_cap):
         return np.full_like(th, Rh)
     if kind == "proj":
         return R0 * (1 + phi_w(U * np.maximum(np.cos(th), 0.0)))
+    if kind == "adv":
+        return R0 * (1 + float(phi_w(U)) * np.maximum(np.cos(th), 0.0))
     b, c = 0.5 * (Rh + R0), 0.5 * (Rh - R0)
     a = b / anderson_lw(min(U, U_cap)) if kind == "ella" else R0
     return c * np.cos(th) + np.sqrt((b * np.cos(th)) ** 2 + (a * np.sin(th)) ** 2)
@@ -237,7 +252,7 @@ def main():
                       f"({(rate - wulff) / (head - wulff) * 100:.0f} % of the way to Rothermel)")
                 continue
             rate = check_direction(name, measured[name], exact[name], h, t)
-            if kind in ("ell", "ella") and name.startswith("head"):
+            if kind in ("ell", "ella", "adv") and name.startswith("head"):
                 check("head vs Rothermel", np.isfinite(rate) and abs(rate / head - 1) < TOL,
                       f"{rate:.5f} vs {head:.5f} m/s ({(rate / head - 1) * 100:+.2f} %)")
     if "projection" in arrival and "projection_key" in arrival:

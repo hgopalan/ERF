@@ -10,7 +10,6 @@ erf.fire.crown.canopy_base_ht = 5.0
 erf.fire.crown.canopy_bulk_den = 0.20
 erf.fire.crown.canopy_depth = 10.0
 erf.fire.crown.foliar_moisture = 1.00
-erf.fire.crown.M_c = 0.30
 erf.fire.crown.h_crown_BTU_lb = 8000.0
 erf.fire.crown.wind_10m_kmh = 30.0
 erf.fire.crown.ros_model = "cruz"

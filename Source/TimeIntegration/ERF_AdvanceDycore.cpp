@@ -99,8 +99,8 @@ void ERF::advance_dycore (int level,
     bool l_use_diff    = ( (dc.molec_diff_type != MolecDiffType::None) ||
                            l_use_kturb );
 
-    const bool use_SurfLayer = (m_SurfaceLayer != nullptr);
-    const MultiFab* z_0     = (use_SurfLayer) ? m_SurfaceLayer->get_z0(level) : nullptr;
+    const bool use_SurfLayer = (m_SurfaceLayer[Orientation(Direction::z, Orientation::low)] != nullptr);
+    const MultiFab* z_0      = (use_SurfLayer) ? m_SurfaceLayer[Orientation(Direction::z, Orientation::low)]->get_z0(level) : nullptr;
 
     const bool use_nudging = solverChoice.nudging_from_input_sounding;
     const bool has_moisture = (solverChoice.moisture_type != MoistureType::None);
@@ -535,9 +535,10 @@ void ERF::advance_dycore (int level,
             Array4<Real> tau13 = Tau[level][TauType::tau13].get()->array(mfi);
             Array4<Real> tau23 = Tau[level][TauType::tau23].get()->array(mfi);
 
-            Array4<Real> tau21 = l_use_terrain_fitted_coords ? Tau[level][TauType::tau21].get()->array(mfi) : Array4<Real>{};
-            Array4<Real> tau31 = l_use_terrain_fitted_coords ? Tau[level][TauType::tau31].get()->array(mfi) : Array4<Real>{};
-            Array4<Real> tau32 = l_use_terrain_fitted_coords ? Tau[level][TauType::tau32].get()->array(mfi) : Array4<Real>{};
+            Array4<Real> tau21  = (Tau[level][TauType::tau21]) ? Tau[level][TauType::tau21].get()->array(mfi) : Array4<Real>{};
+            Array4<Real> tau31  = (Tau[level][TauType::tau31]) ? Tau[level][TauType::tau31].get()->array(mfi) : Array4<Real>{};
+            Array4<Real> tau32  = (Tau[level][TauType::tau32]) ? Tau[level][TauType::tau32].get()->array(mfi) : Array4<Real>{};
+
             const Array4<const Real>& z_nd = z_phys_nd[level]->const_array(mfi);
 
             const Array4<const Real> mf_mx = mapfac[level][MapFacType::m_x]->const_array(mfi);
@@ -628,10 +629,11 @@ void ERF::advance_dycore (int level,
         bool l_use_moisture = ( solverChoice.moisture_type != MoistureType::None );
         const BCRec* bc_ptr_h = domain_bcs_type.data();
 
-        // Prepare fire heat flux for PBL if needed
+        // Prepare fire heat flux for PBL if needed; the flux lives on the atmospheric
+        // columns of the fire grid's level only
         const MultiFab* Q_fire_for_pbl = nullptr;
 #ifdef ERF_ENABLE_FIRE
-        if (m_fire_layer && m_fire_params.enable &&
+        if (m_fire_layer && level == m_fire_layer->level() && m_fire_params.enable &&
             m_fire_params.injects_flux() &&
             tc.mrf_fire_thermal_excess) {
             Q_fire_for_pbl = m_fire_layer->get_Q_atm_prev();
@@ -644,13 +646,16 @@ void ERF::advance_dycore (int level,
                                   *eddyDiffs, *Hfx1, *Hfx2, *Hfx3, *Diss, // to be updated
                                   fine_geom, mapfac[level],
                                   z_phys_nd[level], z_phys_cc[level], solverChoice,
-                                  m_SurfaceLayer, z_0, l_use_terrain_fitted_coords,
+                                  m_SurfaceLayer[Orientation(Direction::z, Orientation::low)], z_0, l_use_terrain_fitted_coords,
                                   l_use_moisture, level,
                                   bc_ptr_h,
                                   get_eb(level),
                                   false, // vert_only
                                   qheating_rates[level].get(),
-                                Q_fire_for_pbl);
+                                  (solverChoice.terrain_type == TerrainType::ImmersedForcing ||
+                                   solverChoice.buildings_type == BuildingsType::ImmersedForcing) ?
+                                      terrain_blanking[level].get() : nullptr,
+                                  Q_fire_for_pbl);
         // Phase 14: Print debug info about dust scalar diffusivity
 #ifdef ERF_USE_DUST
         // Check if dust layer is active and debug is enabled

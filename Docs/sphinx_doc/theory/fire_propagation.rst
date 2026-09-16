@@ -51,7 +51,7 @@ Richards (1990) spread shape below. Each fire subcycle of length
 
    .. math::
 
-      L/W = 0.936\, e^{0.2566 U} - 0.397 \sqrt{U}, \qquad 1 \le L/W \le 8,
+      L/W = 0.936\, e^{0.2566 U} + 0.461\, e^{-0.1548 U} - 0.397, \qquad 1 \le L/W \le 8,
 
    and is converted to the Richards (1990) coefficients :math:`a = 1`,
    :math:`c = 0.2a`, :math:`b = (a + c) / (2\, L/W)` when
@@ -259,6 +259,38 @@ covers Rothermel, BEHAVE, MacArthur, Cheney-Gould and FBP; Balbi and the hybrid
 keep the projection, and :cpp:`erf.fire.levelset.ellipse` cannot be combined
 with it. The unit test ``ERF_GTestDirectionalShape`` checks the rates, the
 vector addition and the Wulff extents of both forms.
+
+:cpp:`erf.fire.directional_wind_coupling = "advective"` (default ``"projection"``,
+Rothermel with :cpp:`directional_shape = "projection"` only) removes the same
+shortfall a different way: rather than imposing a shape on top of the
+projection's rates, it changes how Rothermel's wind factor couples to the
+front-normal direction. :math:`\phi_w` is exponentiated from the raw wind
+speed :math:`|\mathbf U|` once, and only the result is scaled by the cosine to
+the front normal afterward,
+
+.. math::
+
+   R(\hat n) = R_0\bigl(1 + \phi_w(|\mathbf U|)\,\max(\hat{\mathbf U}\cdot\hat n, 0)\bigr),
+
+rather than :math:`R_0(1 + \phi_w(|\mathbf U|\max(\hat{\mathbf U}\cdot\hat n, 0)))`.
+Since :math:`\hat n|\nabla\phi| = \nabla\phi`, this :math:`R(\hat n)` turns the
+level-set equation into pure advection by a wind-aligned velocity plus
+isotropic growth, :math:`\phi_t + \mathbf V\cdot\nabla\phi + R_0|\nabla\phi| = 0`
+with :math:`\mathbf V = (\phi_w(|\mathbf U|) R_0/|\mathbf U|)\,\mathbf U` -- the
+same reduction used in the original level-set fire-spread formulation (Mandel,
+Beezley and Kochanski 2011) and, not coincidentally, matching WRF-Fire's
+``fire_ros`` (``module_fr_fire_phys.F``). Being linear in the cosine, it is
+also the support function of a stadium (a disc of radius :math:`R_0` swept
+along the wind vector, since the clamp at zero flattens the back rather than
+reversing it) -- convex, and so its own Wulff shape, giving the same head rate
+as the ellipse. Unlike the ellipse this is the model's own oblique rate rather
+than an imposed shape: the back and flanks come out at :math:`R_0` here
+because that is Rothermel's own zero-wind rate, not because they were set that
+way, so for Rothermel the two options happen to agree.
+``Exec/RegTests/FireDirectionalShape`` includes an ``advective`` deck alongside
+``ellipse``; ``Exec/RegTests/FireAdvectiveWindCoupling`` repeats the comparison
+on a finite ignition line, where the projection's wedge shows at the line's
+ends rather than a point.
 
 Flanks at :math:`R_0` are the projection's claim, not an observation, and give
 a length-to-width ratio far above the observed one: 5.7 for short grass in a
@@ -468,3 +500,66 @@ interior ignites at the perimeter time with its fuel intact, which releases
 the heat of the entire burnt area at once. The regression test
 ``Exec/RegTests/FirePerimeterIgnition`` checks the interior state cell by
 cell from the fire plotfile.
+
+.. _sec:FireGridEdge:
+
+The edge of the fire grid
+-------------------------
+
+Nothing outside the fire grid burns. At a periodic edge the fire wraps around,
+as the atmosphere does. At a non-periodic edge the ghost cells take the nearest
+interior value on every exchange, so a front that reaches the edge stops there:
+the cells along the wall burn, their heat is released, and the part of the fire
+that would have continued outside the domain is clipped. Nothing is exported
+to a larger domain. This is the guard-off behaviour of WRF-SFIRE, whose fire
+mesh is likewise the whole innermost domain and whose front is likewise
+clipped at its edge.
+
+Three reports tell a deck's author about it.
+
+**The reach estimate at ignition.** On the first fire step with a burning cell,
+:cpp:`erf.fire.edge_reach_check` (default true) prints the distance from the
+nearest burning cell to each non-periodic edge, the largest rate of spread on
+the grid (before the startup acceleration scales it), and the time left in the
+run from ``stop_time`` or ``max_step``, whichever ends it first. For every
+edge closer than that rate times that time it prints a warning naming the
+edge. The rate is the one under the wind at ignition and the estimate is a
+straight line at the head rate, so it errs on the side of warning: a fire the
+wind later turns away from the edge is not warned about again, and a fire that
+accelerates later is not caught. A run without ``stop_time`` and ``max_step``
+prints the distances and the time to each edge at that rate, and no warning.
+
+**The guard band.** :cpp:`erf.fire.boundary_guard_cells` (default 2) is the
+width, in fire cells, of a band along every non-periodic edge, the
+``fire_boundary_guard`` of WRF-SFIRE with its default. Every fire step counts
+the burning cells within it. :cpp:`erf.fire.boundary_guard_action` decides
+what the first contact does:
+
+- ``"warn"`` (default) prints a warning once, naming the edges touched and the
+  time, and records that time as ``edge_contact_time_s`` in the statistics
+  CSV, whose ``edge_band_cells`` column carries the count on every step
+  (:ref:`sec:FireOutput`). The contact time is in the checkpoint, so a restart
+  neither repeats the warning nor forgets that it fired. The run continues
+  with the front clipped at the edge.
+- ``"abort"`` stops the run with a message naming the edge and the time, as
+  WRF-SFIRE does by default: a fire at the edge means the domain was too
+  small, and a stop is cheaper than a forecast of a clipped fire.
+- ``"none"`` checks nothing; the CSV columns stay 0 and :math:`-1`.
+
+A width of zero also turns the band off. A grid periodic in both directions
+has no edge to guard and the check returns at once.
+
+The regression test ``Exec/RegTests/FireBoundaryGuard`` runs a prescribed
+rate of 1 m/s on 2 m fire cells: a disc whose east edge is 10 m from the wall
+enters the 4 m band at 7 s, a disc 190 m from every wall never does, and a
+disc overlapping the wall stops an ``"abort"`` run on its first step. The unit
+test ``ERF_GTestFireBoundaryGuard`` checks the band count per edge, the
+corner counted once, periodic edges skipped, and the distances.
+
+On a refined level (:cpp:`erf.fire.anchor_level`) the fire grid covers the
+refined region only, so its edges are the edges of the refinement: the
+estimate and the band then report a fire about to leave the refined region,
+and their messages ask for a larger refinement box rather than a larger
+domain. The refinement cannot follow the fire during a run yet, since the fire
+grid's level must not regrid; a guard contact is the signal a moving fine
+level will act on.

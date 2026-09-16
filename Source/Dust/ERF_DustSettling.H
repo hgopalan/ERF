@@ -43,9 +43,7 @@
 #include <cmath>
 
 // Density component index (needed for S_old array access)
-#ifndef Rho_comp
 #include <ERF_IndexDefines.H>
-#endif
 
 namespace DustSettlingConst {
     constexpr amrex::Real G_ACCEL    = 9.81;     ///< Gravitational acceleration [m/s^2]
@@ -97,8 +95,8 @@ amrex::Real compute_stokes_settling(amrex::Real d_m, amrex::Real rho_p,
     if (rho_diff <= 0.0) return 0.0;
     amrex::Real Cc  = compute_cunningham_cc(d_m);
     amrex::Real vs  = rho_diff * DustSettlingConst::G_ACCEL * d_m * d_m * Cc / (18.0 * mu);
-    return amrex::min(amrex::max(vs, DustSettlingConst::V_S_MIN),
-                      DustSettlingConst::V_S_MAX);
+    return amrex::min(amrex::max(vs, amrex::Real(DustSettlingConst::V_S_MIN)),
+                      amrex::Real(DustSettlingConst::V_S_MAX));
 }
 
 /**

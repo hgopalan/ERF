@@ -38,10 +38,9 @@ p("grid_ratio", "Dust grid refinement factor in x and y; every atmosphere box "
   "fire coupling is on", "Integer > 0", "1")
 p("n_size_bins", "Number of particle size bins; each bin is one component of "
   "the emission flux", "Integer > 0", "3")
-p("bin_diameter_um", "Representative aerodynamic diameter per bin [µm]; bin 0 "
-  "sets the Bagnold base threshold", "Reals", "7.0 3.5 0.7")
-p("bin_diameters", "Per-bin diameter [m] for settling, deposition and PM "
-  "classification; the last value repeats when shorter than n_size_bins",
+p("bin_diameters", "Per-bin diameter [m]; bin 0 sets the Bagnold base threshold, "
+  "and all bins drive settling, deposition and PM classification; the last "
+  "value repeats when shorter than n_size_bins",
   "Reals", "7.0e-6 2.5e-6 50.0e-6")
 p("particle_density", "Bulk particle density [kg/m³]", "Real > 0", "2650.0")
 p("rho_air", "Air density used in the threshold and saltation flux [kg/m³]",
@@ -58,7 +57,8 @@ grp("Surface state",
 p("silt_fraction", "Surface silt mass fraction [-]", "Real 0-1", "0.10")
 p("crust_index", "Surface crust strength index; 0 loose, 1 fully crusted",
   "Real 0-1", "0.0")
-p("threshold_A_coeff", "Bagnold threshold coefficient A [-]", "Real > 0", "0.0123")
+p("threshold_A_coeff", "Bagnold fluid-threshold constant A [-] (0.1; 0.0123 is Shao and "
+  "Lu's coefficient of a different formula and gave 8x too low a threshold)", "Real > 0", "0.1")
 p("ustar_t_base", "Base threshold friction velocity before the modifiers "
   "[m/s]; negative computes the Bagnold value from bin 0 at startup",
   "Real", "-1.0")
@@ -75,8 +75,6 @@ p("moisture_flag_file", "Surface moisture inhibition raster in [0,1]; empty "
   "means dry", "String", '""')
 p("suppression_file", "Suppression agent coverage raster in [0,1]; empty "
   "means none", "String", '""')
-p("surface_map_file", "Read but not consumed; the five rasters above carry "
-  "the surface state", "String", '""')
 p("terrain_file", "Fine-grid terrain raster for the dust slopes; empty "
   "differences the atmosphere's nodal terrain", "String", '""')
 
@@ -151,9 +149,6 @@ p("deposition_E0", "Surface collection efficiency of the dry-deposition "
   "Real > 0", "3.0e-3")
 p("loading_feedback_coeff", "Shao (2001) loading feedback on the threshold "
   "[m³/kg]; 0 disables", "Real >= 0", "0.0")
-p("use_dynamic_moisture", "Derive the moisture inhibition from the surface "
-  "moisture flux (needs a moisture scheme; harmless without one)", "Boolean",
-  "false")
 p("erf.dust_mrf_Sc_t", "Turbulent Schmidt number of the dust scalar in the "
   "MRF scheme, read from the erf prefix; 0 or negative uses the Prandtl "
   "number so dust diffuses like heat", "Real", "0 (Pr_t)")
@@ -163,7 +158,7 @@ grp("Fire coupling (ERF-Hazard)",
     "and dust models are enabled; see :ref:`sec:DustFire`.")
 p("erf.fire_dust_coupling", "Enable the fire-dust coupling; requires "
   "erf.dust.grid_ratio = erf.fire.grid_ratio", "Boolean", "false")
-p("erf.fire_dust_crust_reduction", "Fraction of the crust index removed in "
+p("erf.fire_dust_crust_reduction", "Fraction of the baseline crust index removed in "
   "burned cells each step", "Real 0-1", "0.8")
 p("erf.fire_dust_wind_to_dust", "Raise the dust u* to the log-law value of "
   "the fire's effective wind where that is larger", "Boolean", "true")
@@ -177,6 +172,16 @@ p("erf.fire_dust_lofting_Q_threshold", "Fire heat flux below which there is "
   "no lofting [W/m²]", "Real >= 0", "50.0")
 p("erf.fire_dust_lofting_Q_ref", "Heat flux scale of the lofting factor "
   "[W/m²]; 0 or negative disables it", "Real", "500.0")
+grp("MRF boundary layer with fire (ERF-Hazard)",
+    "Read from the ``erf`` prefix in ``Source/DataStructs/ERF_TurbStruct.H`` "
+    "for the MRF scheme; every key also accepts a per-level ``_lev<N>`` form. "
+    "See the MRF section of :ref:`PBLschemes`.")
+p("erf.pbl_mrf_fire_thermal_excess", "Add the fire surface heat flux to the "
+  "MRF convective velocity scale w* of burning columns", "Boolean", "false")
+p("erf.mrf_fire_q_threshold", "Fire heat flux above which a column counts as "
+  "burning for that boost [W/m²]", "Real >= 0", "50.0")
+p("erf.mrf_fire_t_excess_cap", "Cap on the thermal excess the fire adds [K]",
+  "Real > 0", "50.0")
 
 grp("Output and diagnostics",
     "Every CSV is written by rank 0 and appended each step; paths are "

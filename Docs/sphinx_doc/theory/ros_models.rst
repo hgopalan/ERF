@@ -469,8 +469,6 @@ WRF-SFIRE defaults are 6.096 m for all 13 Anderson fuel models, which is identic
      - Heavy Logging Slash
      - 0.1188
 
-The parameter :cpp:`erf.fire.waf_fcz0_scale` (default 1.0) scales all :cpp:`fcz0` values uniformly.
-
 **References:**
 
 - WRF-SFIRE :cpp:`module_fr_sfire_phys.F`
@@ -600,10 +598,6 @@ Input Parameters
      - Boolean
      - false
      - Enable per-fuel wind extraction height (WRF-SFIRE :cpp:`fcwh`)
-   * - :cpp:`erf.fire.waf_fcz0_scale`
-     - Real
-     - 1.0
-     - Uniform scaling factor for all fcz0 roughness lengths
    * - :cpp:`erf.fire.balbi.T_a`
      - Real
      - 300.0

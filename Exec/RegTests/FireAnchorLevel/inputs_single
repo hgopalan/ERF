@@ -1,0 +1,11 @@
+# The reference for inputs_base: one level of 25 m cells, the resolution of
+# inputs_base's level 1, stepping at level 1's 0.5 s. The fire grid covers the
+# whole domain with the same 6.25 m cells, and the fuel map covers the whole
+# domain with the same checkerboard.
+FILE = inputs_base
+amr.max_level = 0
+amr.n_cell = 32 32 8
+erf.fixed_dt = 0.5
+max_step = 80
+erf.fire_plot_int = 40
+erf.fire.fuel_map.file = "fuel_full.asc"

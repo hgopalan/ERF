@@ -45,9 +45,12 @@
 #include <cmath>
 
 namespace DustRoadConst {
-    constexpr amrex::Real K_AP42   = 2.6;   ///< AP-42 emission factor k [g/VKT]
-    constexpr amrex::Real A_AP42   = 0.8;   ///< AP-42 silt exponent a
-    constexpr amrex::Real B_AP42   = 0.4;   ///< AP-42 weight exponent b
+    // EPA AP-42 13.2.2 (unpaved roads at industrial sites), eq. 1a, PM-10 size
+    // fraction: k = 1.5 lb/VMT = 423 g/VKT, a = 0.9, b = 0.45. The constants were
+    // 2.6 g/VKT, 0.8 and 0.4 until 2026-09, 163x below the PM-10 factor.
+    constexpr amrex::Real K_AP42   = 423.0; ///< AP-42 PM-10 emission factor k [g/VKT]
+    constexpr amrex::Real A_AP42   = 0.9;   ///< AP-42 PM-10 silt exponent a
+    constexpr amrex::Real B_AP42   = 0.45;  ///< AP-42 weight exponent b
     constexpr amrex::Real FLUX_MAX = 1.0e-3;///< Maximum road flux [kg/m^2/s]
     constexpr amrex::Real G_PER_KG = 1.0e-3;///< g -> kg
     constexpr amrex::Real S_PER_H  = 3600.0;///< s/h
@@ -59,7 +62,7 @@ struct RoadEvent {
     amrex::Real road_width_m;            ///< Road width [m]
     amrex::Real vehicle_weight_t;        ///< Mean vehicle weight [tons]
     amrex::Real silt_pct;                ///< Silt content [%]
-    amrex::Real vmt_per_h;              ///< Vehicle miles/km travelled per hour
+    amrex::Real vmt_per_h;              ///< Vehicle kilometres travelled per hour [VKT/h] (E is per VKT)
     amrex::Real start_time_s;           ///< Activation start time [s]
     amrex::Real end_time_s;             ///< Activation end time [s]. -1 = whole sim.
 };
@@ -195,7 +198,7 @@ inline void apply_road_schedule(
         amrex::Real F_v = E_road * DustRoadConst::G_PER_KG
                         * ev.vmt_per_h
                         / (ev.road_width_m * road_len * DustRoadConst::S_PER_H);
-        F_v = amrex::min(F_v, DustRoadConst::FLUX_MAX);
+        F_v = amrex::min(F_v, amrex::Real(DustRoadConst::FLUX_MAX));
 
         const amrex::Real x_lo = ev.x_lo, y_lo = ev.y_lo;
         const amrex::Real x_hi = ev.x_hi, y_hi = ev.y_hi;

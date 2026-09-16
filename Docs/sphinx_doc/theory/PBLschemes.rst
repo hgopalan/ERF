@@ -280,8 +280,11 @@ in the vertical direction is rejected at runtime.
 
 When setting vector-valued AMR grid-size controls, choose a vertical grid size
 large enough to keep each SHOC box full height. With mesh refinement,
-SHOC-active refined grids must also consist of full vertical columns. See
-:ref:`MeshRefinement` for the general ERF refinement rules.
+SHOC-active refined grids must also consist of full vertical columns; setting
+``amr.refine_whole_domain_dir = 2`` makes every refined level cover the full
+depth of the domain regardless of where cells are tagged. See
+:ref:`MeshRefinement` for the general ERF refinement rules and
+:ref:`subsec:refine-whole-domain-dir` for that parameter.
 
 Surface fluxes and moisture coupling
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -782,6 +785,7 @@ Enabling unbounded VPERT preserves the combined heating effect while preventing 
 The correction produces physically more accurate PBL heights in moist environments.
 
 **References:**
+
 - Original error identified during ERF development
 - See ERF_ComputeDiffusivityMRF.cpp source comments for detailed physics explanation
 
@@ -830,22 +834,25 @@ based on cloud water/ice content.
   * Better captures cumulus-capped boundary layers
 
 **Parameters:**
+
 - Enabled via: ``enable_mrf_countergradient`` flag (default: false)
 - Adjustment strength: 15-20% reduction in stable, 5% boost in unstable
 - Can be customized via ``pbl_mrf_cloud_adjustment_factor`` parameter
 
 **Physical Justification:**
+
 - Clouds modify vertical buoyancy structure through radiative cooling/warming
 - Latent heat release enhances convective mixing
 - Cloud-top entrainment zones are qualitatively different from clear-air turbulence
 - Conceptually similar to WRF's IMVDIF cloud-aware parameterization (Bretherton & Park 2009)
 
 **References:**
+
 - Bretherton, C. S., and S. Park, 2009: A new moist turbulence parameterization in the WRF
   Advanced Research WRF (ARW) model. In *Proceedings of the 9th Annual WRF Users' Workshop*.
 
 4. Virtual Potential Temperature Treatment
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 **Enhancement:** Proper handling of moisture effects on buoyancy throughout the scheme.
 
@@ -869,6 +876,7 @@ stable boundary layer tests (GABLS cases).
 - Detailed equations and references provided in source code comments
 
 **References:**
+
 - Hong, S. Y., Y. Noh, and J. Dudhia, 2006: A new vertical diffusion package with an explicit
   treatment of entrainment processes. *Monthly Weather Review*, 134, 2318-2341.
   https://doi.org/10.1175/MWR3250.1
@@ -992,6 +1000,12 @@ K-profile amplitude of burning columns, and leaves the PBLH alone:
 
 with :math:`kbfs_{MOST} = -u_* \theta_*`, :math:`h` the corrected PBLH and :math:`w_*` the Pass 4
 scale. Columns without fire keep :math:`w_*`, and HGAMT/HGAMQ always use the unboosted :math:`w_*`.
+A column counts as burning when its fire heat flux exceeds ``erf.mrf_fire_q_threshold``
+(default 50 W/m\ :sup:`2`), and the thermal excess the fire adds is capped at
+``erf.mrf_fire_t_excess_cap`` (default 50 K). Both keys accept the ``_lev<N>`` per-level form.
+The passes cover a halo of columns around every tile, so the fire flux carries ghost columns holding
+the neighbouring box's value (the edge column's outside a non-periodic face); until 2026-09-15 it had
+none and the option read outside the array, which builds with assertions stopped in the first step.
 The fire heat flux is kept out of the corrector because a fire thermal excess would make the
 Richardson number negative through a neutral or shear-driven ABL and collapse the PBLH to its floor.
 

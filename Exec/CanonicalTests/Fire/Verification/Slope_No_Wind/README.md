@@ -71,18 +71,21 @@ and flanks at R0 travel 7 to 9 cells, where the check is on position):
 | `dir_s60` | 0.25676: Wulff 0.18272, Rothermel 0.32585 (52 % of the way) | 0.02052 (0.04 cell) | 0.02401 (0.02 cell) |
 | `ell_s30` | 0.10768 (-0.54 % of Rothermel) | 0.02414 (0.13 cell) | 0.02401 (0.01 cell) |
 | `ell_s60` | 0.32498 (-0.27 % of Rothermel) | 0.02147 (0.13 cell) | 0.02402 (0.01 cell) |
-| `and_s30` | 0.10798 (-0.26 % of Rothermel) | 0.02296 (0.03 cell) | 0.06569 (-0.24 %) |
-| `and_s60` | 0.32534 (-0.16 % of Rothermel) | 0.02057 (0.03 cell) | 0.13352 (-0.08 %) |
+| `and_s30` | 0.10786 (-0.37 % of Rothermel) | 0.02295 (0.04 cell) | 0.04396 (-0.21 %) |
+| `and_s60` | 0.32515 (-0.21 % of Rothermel) | 0.02054 (0.04 cell) | 0.07818 (-0.05 %) |
 
 The slope factor and the ground projection are exact to a quarter of a percent.
 The default directional head of a point fire falls 6 % and 21 % short of
 Rothermel's; the ellipse shape brings it within 0.6 %.
 
 The `and_*` decks keep those heads and backs and widen the flanks to Anderson's
-length-to-width ratio at the effective wind speed. At tan 0.3 that speed is
-0.958 m/s and the ratio 1.04, so the fire is nearly round. At tan 0.6 the speed
-reaches the 1.524 m/s fine-fuel wind limit and the ratio is 1.51. The flank rates
-match the exact ones to a quarter of a percent.
+length-to-width ratio at the effective wind speed (Anderson's fit with its
+second term, 0.936 e^{0.2566 U} + 0.461 e^{-0.1548 U} - 0.397, since 2026-09-14).
+At tan 0.3 that speed is 0.958 m/s and the ratio 1.56; at tan 0.6 it is
+1.870 m/s and the ratio 2.58. The decks turn the fine-fuel wind limit off
+(`erf.fire.use_wind_limit = false`), so the equivalent wind of the steep slope is
+not capped at 1.524 m/s; the check script follows the flag. The flank rates match
+the exact ones to a quarter of a percent.
 
 The ellipse's back is pointed (a radius of curvature a^2/b, one to two cells
 here), and for a few hundred seconds the rows either side of the centre line

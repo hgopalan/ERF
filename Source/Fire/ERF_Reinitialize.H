@@ -89,6 +89,7 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
     // square in practice; min() is the conservative choice if it ever is not.
     const Real h    = amrex::min(dx[0], dx[1]);
     const Real hinv = 1.0 / h;
+    AMREX_ASSERT(L > 0.0 && h > 0.0);
 
     // Make a working copy for pseudo-time iteration
     MultiFab phi_work(phi.boxArray(), phi.DistributionMap(), 1, 3);

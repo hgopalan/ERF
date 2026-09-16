@@ -162,8 +162,8 @@ amrex::Real compute_ustar_t_full(amrex::Real ustar_t_base,
         ut *= slope_factor;
     }
 
-    return amrex::min(amrex::max(ut, DustThresholdConst::USTAR_T_MIN),
-                      DustThresholdConst::USTAR_T_MAX);
+    return amrex::min(amrex::max(ut, amrex::Real(DustThresholdConst::USTAR_T_MIN)),
+                      amrex::Real(DustThresholdConst::USTAR_T_MAX));
 }
 
 /**

@@ -1,0 +1,8 @@
+# Ignition 20 m from the east wall: the disc's east edge is 10 m from the wall
+# and the centre of the first cell of the 4 m guard band 7 m ahead of it, so at
+# 1 m/s the fire enters the band at 7 s. The reach estimate at ignition sees 19.5 s left and warns for the
+# east edge only.
+FILE = inputs_base
+erf.fire.ignition_x = 380.0
+erf.fire.boundary_guard_action = "warn"
+erf.fire.fire_stats_csv_file = "fire_stats_warn.csv"

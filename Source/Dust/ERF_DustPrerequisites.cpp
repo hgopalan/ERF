@@ -7,6 +7,7 @@
 #include <ERF.H>
 #include <ERF_SurfaceLayer.H>
 #include <AMReX_Print.H>
+#include <AMReX_ParmParse.H>
 
 void verify_dust_prerequisites(const ERF&          erf,
                                const SurfaceLayer* surface_layer,
@@ -16,6 +17,11 @@ void verify_dust_prerequisites(const ERF&          erf,
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
         surface_layer != nullptr,
         "[DUST] SurfaceLayer is required. Set: zlo.type = \"surface_layer\"");
+
+    // The dust layer lives on level 0 only: its sources go into the level-0 RHS and
+    // a finer level's average-down would overwrite them.
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(erf.maxLevel() == 0,
+        "[DUST] The dust module runs on a single level. Set: amr.max_level = 0");
 
     // Get atmospheric grid information
     const amrex::BoxArray& ba_atm = erf.boxArray(0);
@@ -104,10 +110,44 @@ void verify_dust_prerequisites(const ERF&          erf,
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
         dz > 0.0,
         "[DUST] Domain physical height must be positive. Check Geometry configuration.");
+    {
+        std::string msg = std::string("[DUST] erf.dust.zref (") + std::to_string(dust_params.zref)
+                        + " m) must lie below the domain top (" + std::to_string(dz) + " m)";
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dust_params.zref < dz, msg.c_str());
+    }
 
     if (dust_params.dust_debug) {
         amrex::Print() << "[DUST DEBUG] Prerequisite check 8 passed: "
                        << "Domain physical height=" << dz << " m > 0\n";
+    }
+
+    // Check 9: the dust wind-extraction height is the surface layer's reference
+    // height. The dust u* comes from a log law between z0_dust and erf.dust.zref
+    // using the wind the surface layer sampled at erf.most.zref, so the two must
+    // agree; with erf.most.zref unset the surface layer picks its own height
+    // and the deck has to set erf.dust.zref to the same value.
+    {
+        amrex::ParmParse pp_most("erf.most");
+        amrex::Real most_zref = -1.0;
+        // MOSTAverage queryAdds its sentinel (-1) when the deck sets nothing, so a
+        // non-positive value means "not specified", not a height.
+        if (pp_most.query("zref", most_zref) && most_zref > 0.0) {
+            std::string msg = std::string("[DUST] erf.dust.zref (")
+                            + std::to_string(dust_params.zref)
+                            + ") must equal erf.most.zref ("
+                            + std::to_string(most_zref) + ")";
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+                std::abs(dust_params.zref - most_zref) <= 1.0e-6 * std::max(most_zref, amrex::Real(1.0)),
+                msg.c_str());
+        } else {
+            amrex::Print() << "[DUST] WARNING: erf.most.zref is not set; erf.dust.zref = "
+                           << dust_params.zref << " m must match the surface layer's "
+                           << "reference height\n";
+        }
+        if (dust_params.dust_debug) {
+            amrex::Print() << "[DUST DEBUG] Prerequisite check 9 passed: "
+                           << "erf.dust.zref=" << dust_params.zref << " m\n";
+        }
     }
 
     amrex::Print() << "[DUST] All prerequisites verified\n";

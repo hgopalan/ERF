@@ -182,6 +182,10 @@ public:
     // Non-const accessors for internal coupling (e.g., fire-dust coupling)
     amrex::MultiFab* get_crust_index_mut() { return dust_crust_index.get(); }
     amrex::MultiFab* get_ustar_in_mut() { return dust_ustar_in.get(); }
+    /// Friction velocity from the fire-grid wind, filled by ERF before advance();
+    /// advance() takes max(u*, u*_fire) after it has filled u* from the surface layer.
+    amrex::MultiFab* get_ustar_fire_mut() { return dust_ustar_fire.get(); }
+    const amrex::MultiFab* get_surf_qflux() const { return dust_surf_qflux.get(); }
     amrex::MultiFab* get_emission_flux_mut() { return dust_emission_flux.get(); }
     const amrex::BoxArray&            get_dust_ba() const { return m_dg.ba; }
     const amrex::DistributionMapping& get_dust_dm() const { return m_dg.dm; }
@@ -365,7 +369,7 @@ public:
      * @param[in] cur_time  Current simulation time [s].
      * @param[in] is_final  True when called from WriteAtFinalTime.
      */
-    void write_output(int nstep, double cur_time, bool is_final = false);
+    void write_output(int nstep, amrex::Real cur_time, bool is_final = false);
 
     /**
      * @brief Write PHREEQC deposition feedback files if interval has elapsed.
@@ -405,6 +409,10 @@ private:
     std::unique_ptr<amrex::MultiFab>      dust_efflor;
     std::unique_ptr<amrex::MultiFab>      dust_ustar_base;
     std::unique_ptr<amrex::MultiFab>      dust_surf_moist;
+    std::unique_ptr<amrex::MultiFab>      dust_surf_qflux;    ///< Surface latent flux Q1fx3 [kg/m^2/s] for the dynamic moisture factor.
+    std::unique_ptr<amrex::MultiFab>      dust_ustar_fire;    ///< u* from the fire-grid wind (fire-dust coupling), 0 where no fire wind.
+    std::unique_ptr<amrex::MultiFab>      dust_crust_baseline; ///< Crust index before the burned-area reduction (inputs, rasters, PHREEQC).
+    std::unique_ptr<amrex::MultiFab>      dep_flux_step;      ///< Sum over bins of the last stage's deposition flux on the atm slab.
     std::unique_ptr<amrex::MultiFab>      dust_ustar_in;
     std::unique_ptr<amrex::MultiFab>      dust_retreat_flag;
     std::unique_ptr<amrex::MultiFab>      dust_slopes;     ///< Static terrain slopes on dust grid.

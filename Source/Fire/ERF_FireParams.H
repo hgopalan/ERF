@@ -24,6 +24,11 @@ struct FireParams
     bool              enable              = false;       ///< Enable fire module
     bool              fire_debug          = false;       ///< Enable debug output for fire calculations
     int               grid_ratio          = 5;           ///< Fire grid refinement factor (C)
+    // The AMR level whose grid the fire grid refines. -1 (default) is the finest
+    // level at start-up, so a single-level deck runs on level 0 as always. On a
+    // finer level the fire grid covers that level's refined region, which must be
+    // one rectangle of full-height columns that never regrids.
+    int               anchor_level        = -1;          ///< AMR level of the fire grid, -1 = the finest level
     int               fuel_model_id       = 1;           ///< Anderson FBFM13 model (1-13)
     amrex::Real       moisture_1hr        = 0.08;        ///< 1-hour fuel moisture [fraction]
     amrex::Real       moisture_10hr       = 0.08;        ///< 10-hour fuel moisture [fraction]
@@ -32,9 +37,11 @@ struct FireParams
     amrex::Real       ignition_y          = 0.0;         ///< Ignition center y [m]
     amrex::Real       ignition_r          = 20.0;        ///< Ignition radius [m]
     amrex::Real       wind_ref_ht         = 6.1;         ///< MOST wind reference height [m]
+    bool              prescribed_wind     = false;       ///< Bypass atmospheric wind interpolation
+    amrex::Real       prescribed_wind_x   = 0.0;         ///< Constant reference wind, x [m/s]; exact everywhere only with use_waf=false and use_terrain_wind=false (WAF and the FARSITE terrain corrections still apply downstream otherwise)
+    amrex::Real       prescribed_wind_y   = 0.0;         ///< Constant reference wind, y [m/s]; see prescribed_wind_x
     // Phase 13A: Per-fuel wind height
     bool              use_per_fuel_wind_ht = false; ///< Use per-fuel fcwh table for wind height
-    amrex::Real       waf_fcz0_scale       = 1.0;   ///< Scale factor on fcz0 roughness for WAF [dimensionless]
     bool              use_waf             = true;        ///< Apply Wind Adjustment Factor
     std::string       waf_formula         = "andrews";   ///< "andrews" or "behaviorplus"
     bool              use_wind_limit      = true;        ///< Apply the MEWS midflame wind cap (Rothermel, BEHAVE)
@@ -83,7 +90,6 @@ struct FireParams
     std::string       moisture_live_model = "legacy";
 
     // Moisture of extinction (Phase 4)
-    bool              use_dynamic_mext    = true;        ///< Compute M_x from fuel SAV
 
     // Heat flux parameters (Phase 5)
     amrex::Real       tau_residence_s     = 0.0;         ///< Residence time [s]; 0 = derive from fuel SAV
@@ -104,8 +110,6 @@ struct FireParams
     std::string       burnout_model       = "residence";
     std::vector<amrex::Real> burnout_times_s;             ///< 13 burn times [s] for Anderson models 1-13 overriding the table (sfire)
     amrex::Real       burnout_time_to_efold = 0.8514;     ///< tau = burn time / this (WRF-SFIRE)
-    amrex::Real       f_c_min             = 0.2;         ///< Minimum combustion fraction
-    amrex::Real       f_c_max             = 0.9;         ///< Maximum combustion fraction
 
     // FARSITE parameters
     amrex::Real       farsite_phi_threshold   = 0.1;  ///< front detection level in phi
@@ -159,6 +163,19 @@ struct FireParams
 
     // Terrain file for fine-grid terrain data
     std::string       terrain_file_name       = "";   ///< Path to terrain file for fine-grid interpolation
+
+    // The fire at the edge of the fire grid. Nothing outside the grid burns, so
+    // a front that reaches a non-periodic edge is clipped there. The guard band
+    // of WRF-SFIRE (fire_boundary_guard): once a burning cell lies within
+    // boundary_guard_cells of a non-periodic edge, "warn" prints a message once
+    // and records the contact time (in the statistics CSV and the checkpoint),
+    // "abort" stops the run as SFIRE does by default, "none" checks nothing.
+    int               boundary_guard_cells    = 2;      ///< Band width in fire cells from each non-periodic edge
+    std::string       boundary_guard_action   = "warn"; ///< "none", "warn" or "abort" when the fire enters the band
+    // On the first step with a burning cell, print the distance from the burning
+    // region to each non-periodic edge against the largest rate of spread times
+    // the time left in the run, and warn for every edge the fire can reach.
+    bool              edge_reach_check        = true;   ///< Reach estimate printed once at ignition
 
     // CSV output for fire statistics (burned area, perimeter, etc.)
     bool              write_fire_stats_csv    = true; ///< Write burned area and perimeter CSV
@@ -243,7 +260,6 @@ struct FireParams
         amrex::Real   canopy_bulk_den = 0.2;    ///< Canopy bulk density C_BD [kg/m³]
         amrex::Real   canopy_depth    = 10.0;   ///< Canopy depth [m]
         amrex::Real   foliar_moisture = 1.0;    ///< Foliar moisture M_fold [fraction]
-        amrex::Real   M_c             = 0.30;   ///< Critical foliar moisture [fraction] (Van Wagner 1977)
         amrex::Real   h_crown_BTU_lb  = 8000.0; ///< Canopy heat content [BTU/lb]
         amrex::Real   wind_10m_kmh    = 0.0;    ///< 10-m wind speed [km/h]; 0 = derive from fire_wind_eff
         std::string   ros_model       = "cruz"; ///< Crown ROS model: "cruz", "rothermel1991", "van_wagner_proxy"
@@ -385,6 +401,24 @@ struct FireParams
     // macarthur, cheney_gould and fbp.
     int               directional_shape   = 0;
 
+    // Angular coupling of the wind/slope factor into that projection,
+    // erf.fire.directional_wind_coupling. "projection" (0, default, backward
+    // compatible) projects the wind onto the spread direction before
+    // Rothermel's power-law wind factor, R(theta) ~ (U cos theta)^B -- this is
+    // the original behaviour, unchanged. "advective" (1, opt-in) instead
+    // computes the wind/slope factor from the raw, unprojected speed and
+    // scales the result by the cosine afterward (matching WRF-Fire's
+    // fire_ros, module_fr_fire_phys.F): R(theta) is then linear in cos(theta), the
+    // convex support function of a stadium (a disc of radius R0 swept along
+    // the wind vector), rather than cos^B(theta), which stops being convex
+    // once phi_w(B-1) > 1 and lets a finite line's ends grow a Wulff wedge
+    // that falls behind the head rate over time (see ERF_DirectionalRos.H).
+    // Rothermel with directional_shape = "projection" only; rejected in every
+    // other combination (see the abort below), since the ellipse path is
+    // already convex and every other model or the hybrid path would silently
+    // ignore this flag.
+    int               directional_wind_coupling = 0;
+
     // Flank rule of that ellipse, erf.fire.directional_ellipse_lw. "model" (0,
     // default) keeps the model's no-wind, no-slope rate at the flanks, so the
     // length-to-width ratio (R_h/R0 + 1)/2 is not capped. "anderson" (1) sets the
@@ -440,7 +474,7 @@ struct FireParams
         amrex::Real K1       = 130.0;    ///< Convective decay coefficient [-]
         amrex::Real st       = 17.0;     ///< Stoichiometric coefficient [-]
         amrex::Real rho_a    = 1.2;      ///< Air density [kg/m³]
-        amrex::Real sigma_B  = 5.6e-8;   ///< Stefan-Boltzmann constant [W/(m²·K⁴)]
+        amrex::Real sigma_B  = 5.670374e-8; ///< Stefan-Boltzmann constant [W/(m²·K⁴)]
         int         max_iter = 40;       ///< Max root-solve iterations (2020 only)
         amrex::Real tol      = 1.0e-4;   ///< Root-solve bracket width [m/s] (2020 only)
 
@@ -653,9 +687,32 @@ struct FireParams
     FireParams()
     {
        amrex::ParmParse pp("erf.fire");
+       // Reject values the kernels cannot use instead of running on with a
+       // silent fallback or a NaN. Every message names the key and the value.
+       auto fail = [](const std::string& msg) { amrex::Abort("[FIRE] " + msg); };
+       auto one_of = [&](const char* key, const std::string& v, std::initializer_list<const char*> allowed) {
+           for (auto a : allowed) { if (v == a) return; }
+           std::string list;
+           for (auto a : allowed) { list += (list.empty() ? "" : ", ") + std::string("\"") + a + "\""; }
+           fail(std::string("erf.fire.") + key + " = \"" + v + "\" is not one of " + list);
+       };
+       auto positive = [&](const char* key, amrex::Real v) {
+           if (!(v > 0.0)) fail(std::string("erf.fire.") + key + " must be > 0, got " + std::to_string(v));
+       };
+       auto nonneg = [&](const char* key, amrex::Real v) {
+           if (!(v >= 0.0)) fail(std::string("erf.fire.") + key + " must be >= 0, got " + std::to_string(v));
+       };
+       auto fraction = [&](const char* key, amrex::Real v) {
+           if (!(v >= 0.0 && v <= 1.0)) fail(std::string("erf.fire.") + key + " must be in [0,1], got " + std::to_string(v));
+       };
        pp.query("enable", enable);
        pp.query("fire_debug", fire_debug);
        pp.query("grid_ratio", grid_ratio);
+       pp.query("anchor_level", anchor_level);
+       if (anchor_level < -1) {
+           fail("erf.fire.anchor_level must be -1 (the finest level) or a level >= 0, got "
+                + std::to_string(anchor_level));
+       }
        pp.query("fuel_model_id", fuel_model_id);
        pp.query("moisture_1hr", moisture_1hr);
        pp.query("moisture_10hr", moisture_10hr);
@@ -664,6 +721,14 @@ struct FireParams
        pp.query("ignition_y", ignition_y);
        pp.query("ignition_r", ignition_r);
        pp.query("wind_ref_ht", wind_ref_ht);
+       pp.query("prescribed_wind", prescribed_wind);
+       pp.query("prescribed_wind_x", prescribed_wind_x);
+       pp.query("prescribed_wind_y", prescribed_wind_y);
+       fraction("moisture_1hr", moisture_1hr);
+       fraction("moisture_10hr", moisture_10hr);
+       fraction("moisture_100hr", moisture_100hr);
+       nonneg("ignition_r", ignition_r);   // 0 = no ignition disc (schedule, polygon or line instead)
+       positive("wind_ref_ht", wind_ref_ht);
        pp.query("wind_sample_ht", wind_sample_ht);
        pp.query("wind_sample_z0", wind_sample_z0);
        if (wind_sample_ht > 0.0) {
@@ -676,9 +741,9 @@ struct FireParams
        }
        // Phase 13A: Per-fuel wind height
        pp.query("use_per_fuel_wind_ht", use_per_fuel_wind_ht);
-       pp.query("waf_fcz0_scale", waf_fcz0_scale);
        pp.query("use_waf", use_waf);
        pp.query("waf_formula", waf_formula);
+       one_of("waf_formula", waf_formula, {"andrews", "behaviorplus"});
        pp.query("use_wind_limit", use_wind_limit);
        pp.query("use_terrain_wind", use_terrain_wind);
        pp.query("k_ridge", k_ridge);
@@ -714,7 +779,6 @@ struct FireParams
        }
 
        // Moisture of extinction (Phase 4)
-       pp.query("use_dynamic_mext", use_dynamic_mext);
 
        // Heat flux parameters (Phase 5)
        pp.query("tau_residence_s", tau_residence_s);
@@ -729,8 +793,6 @@ struct FireParams
        }
        for (auto t : burnout_times_s) { if (t <= 0.0) amrex::Abort("erf.fire.burnout_times_s must be positive"); }
        if (burnout_time_to_efold <= 0.0) { amrex::Abort("erf.fire.burnout_time_to_efold must be positive"); }
-       pp.query("f_c_min", f_c_min);
-       pp.query("f_c_max", f_c_max);
 
        // FARSITE parameters
        pp.query("farsite.phi_threshold", farsite_phi_threshold);
@@ -754,6 +816,7 @@ struct FireParams
 
        // Level-set propagation parameters
        pp.query("propagation_method", propagation_method);
+       one_of("propagation_method", propagation_method, {"farsite", "levelset"});
        pp.query("levelset.cfl", levelset_cfl);
        pp.query("levelset.eps_visc", levelset_eps_visc);
        pp.query("levelset.reinit_every", levelset_reinit_every);
@@ -802,6 +865,14 @@ struct FireParams
        pp.query("heat_flux_alfg", heat_flux_alfg);
        pp.query("fire_atm_feedback", fire_atm_feedback);
        pp.query("coupling_type", coupling_type);
+       one_of("coupling_type", coupling_type, {"passive", "lagged", "synchronous"});
+       pp.query("boundary_guard_cells", boundary_guard_cells);
+       if (boundary_guard_cells < 0) fail("erf.fire.boundary_guard_cells must be >= 0, got " + std::to_string(boundary_guard_cells));
+       pp.query("boundary_guard_action", boundary_guard_action);
+       one_of("boundary_guard_action", boundary_guard_action, {"none", "warn", "abort"});
+       pp.query("edge_reach_check", edge_reach_check);
+       positive("heat_flux_alfg", heat_flux_alfg);
+       nonneg("fire_atm_feedback", fire_atm_feedback);   // 0 = one-way, the documented switch
        pp.query("inject_latent", inject_latent);
        pp.query("heat_flux_partition", heat_flux_partition);
        if (heat_flux_partition != "legacy" && heat_flux_partition != "cfbm") {
@@ -819,6 +890,10 @@ struct FireParams
        pp.query("smoke_emission_factor", smoke_emission_factor);
        pp.query("smoke_heat_of_comb", smoke_heat_of_comb);
        pp.query("smoke_heat_from_fuel", smoke_heat_from_fuel);
+       if (smoke_enable) {
+           positive("smoke_heat_of_comb", smoke_heat_of_comb);
+           nonneg("smoke_emission_factor", smoke_emission_factor);
+       }
 
        // Phase 8: Albini (1983) ember spotting parameters
        auto& sp = spotting;
@@ -839,6 +914,14 @@ struct FireParams
        pp.query("spotting.random_seed",         sp.random_seed);
        pp.query("spotting.spotting_interval",   sp.spotting_interval);
        pp.query("spotting.fuel_system",         sp.fuel_system);
+       if (sp.enable) {
+           positive("spotting.I_B_min", sp.I_B_min);
+           positive("spotting.terminal_velocity", sp.terminal_velocity);
+           if (sp.n_traj_steps < 1) fail("erf.fire.spotting.n_traj_steps must be >= 1, got " + std::to_string(sp.n_traj_steps));
+           fraction("spotting.P_base", sp.P_base);
+           fraction("spotting.P_catch", sp.P_catch);
+           one_of("spotting.fuel_system", sp.fuel_system, {"13", "40"});
+       }
 
        // Phase 9: Crown fire initiation parameters
        auto& cr = crown;
@@ -847,14 +930,15 @@ struct FireParams
        pp.query("crown.canopy_bulk_den", cr.canopy_bulk_den);
        pp.query("crown.canopy_depth",    cr.canopy_depth);
        pp.query("crown.foliar_moisture", cr.foliar_moisture);
-       pp.query("crown.M_c",             cr.M_c);
        pp.query("crown.h_crown_BTU_lb",  cr.h_crown_BTU_lb);
        pp.query("crown.wind_10m_kmh",    cr.wind_10m_kmh);
        pp.query("crown.ros_model",       cr.ros_model);
+       one_of("crown.ros_model", cr.ros_model, {"cruz", "rothermel1991", "van_wagner_proxy"});
        pp.query("crown.use_passive_blend", cr.use_passive_blend);
 
        // Phase 9: Flame temperature diagnostic
        pp.query("flame_temp_method", flame_temp_method);
+       one_of("flame_temp_method", flame_temp_method, {"byram_radiant", "mcalpine_heat", "nelson_emissivity"});
        pp.query("flame_temp_T_amb",  flame_temp_T_amb);
 
        // Phase 9: Flame tilt angle diagnostic
@@ -867,6 +951,8 @@ struct FireParams
        pp.query("fuel_map.file",               fm.fuel_map_file);
        pp.query("fuel_map.format",             fm.fuel_map_format);
        pp.query("fuel_map.blending_fraction",  fm.blending_fraction);
+       one_of("fuel_map.format", fm.fuel_map_format, {"ascii", "lcp"});
+       fraction("fuel_map.blending_fraction", fm.blending_fraction);
 
        // Phase 11: multi-ignition schedule and polygon ignition
        auto& ig = ignition;
@@ -874,6 +960,8 @@ struct FireParams
        pp.query("ignition.polygon_file",  ig.polygon_file);
        pp.query("ignition.polygon_type",  ig.polygon_type);
        pp.query("ignition.polyline_width", ig.polyline_width);
+       one_of("ignition.polygon_type", ig.polygon_type, {"polygon", "polyline"});
+       if (!ig.polygon_file.empty() && ig.polygon_type == "polyline") positive("ignition.polyline_width", ig.polyline_width);
        pp.query("ignition.polygon_time",         ig.polygon_time);
        pp.query("ignition.polygon_interior_ros", ig.polygon_interior_ros);
        pp.query("ignition.polygon_interior_tau", ig.polygon_interior_tau);
@@ -929,6 +1017,16 @@ struct FireParams
                amrex::Abort("erf.fire.directional_shape must be \"projection\" or \"ellipse\"");
            }
 
+           std::string coupling_str = (directional_wind_coupling == 1) ? "advective" : "projection";
+           pp.query("directional_wind_coupling", coupling_str);
+           if (coupling_str == "projection") {
+               directional_wind_coupling = 0;
+           } else if (coupling_str == "advective") {
+               directional_wind_coupling = 1;
+           } else {
+               amrex::Abort("erf.fire.directional_wind_coupling must be \"projection\" or \"advective\"");
+           }
+
            std::string lw_str = (directional_ellipse_lw == 1) ? "anderson" : "model";
            pp.query("directional_ellipse_lw", lw_str);
            pp.query("directional_ellipse_lw_max", directional_ellipse_lw_max);
@@ -961,6 +1059,7 @@ struct FireParams
 
        // Phase 13B: ROS model selection
        pp.query("ros_model", ros_model);
+       one_of("ros_model", ros_model, {"rothermel", "behave", "balbi", "fbp", "hybrid", "prescribed", "cheney_gould", "macarthur"});
        pp.query("rothermel_per_fuel", rothermel_per_fuel);
 
        // Hybrid ROS
@@ -1012,7 +1111,6 @@ struct FireParams
                    }
                } else if (hy.selector == "structure") {
                    if (hy.structure_file.empty()) {
-                       amrex::ParmParse pp_erf("erf");
                        pp_erf.query("buildings_file_name", hy.structure_file);
                    }
                    if (hy.structure_file.empty()) {
@@ -1109,6 +1207,17 @@ struct FireParams
        if (fuel_map.sb40_crosswalk && fuel_map.fuel_set != "scott_burgan40") {
            amrex::Abort("erf.fire.fuel_map.sb40_crosswalk needs fuel_map.fuel_set = scott_burgan40");
        }
+       // The spotting distance table has to match the fuel codes the map carries:
+       // Scott-Burgan codes (101-204) without the crosswalk need the "40" table.
+       {
+           const std::string want = (fuel_map.fuel_set == "scott_burgan40" && !fuel_map.sb40_crosswalk) ? "40" : "13";
+           if (!pp.contains("spotting.fuel_system")) {
+               spotting.fuel_system = want;
+           } else if (spotting.enable && spotting.fuel_system != want) {
+               fail("erf.fire.spotting.fuel_system = \"" + spotting.fuel_system + "\" does not match fuel_map.fuel_set = \""
+                    + fuel_map.fuel_set + "\"" + (fuel_map.sb40_crosswalk ? " with sb40_crosswalk" : "") + " (needs \"" + want + "\")");
+           }
+       }
        if (fuel_map.fuel_set == "scott_burgan40") {
            const bool ok13 = (fuel_model_id >= 1 && fuel_model_id <= 13);
            const bool ok40 = (fuel_slot(fuel_model_id) >= 14);
@@ -1121,7 +1230,6 @@ struct FireParams
        if (structures.enable) {
            if (structures.file.empty()) { structures.file = hybrid.structure_file; }
            if (structures.file.empty()) {
-               amrex::ParmParse pp_erf("erf");
                pp_erf.query("buildings_file_name", structures.file);
            }
            if (structures.file.empty()) {
@@ -1255,17 +1363,18 @@ struct FireParams
            std::string type_key = "firebreak." + std::to_string(nb) + ".type";
            std::string type_val;
            if (!pp.query(type_key.c_str(), type_val)) break;
-           FireBreak fb;
-           fb.type = type_val;
+           FireBreak brk;
+           brk.type = type_val;
+           one_of(type_key.c_str(), type_val, {"rect", "rectangle", "circle"});   // the kernel branches on the first letter
            std::string pfx = "firebreak." + std::to_string(nb) + ".";
-           pp.query((pfx + "x_lo").c_str(),   fb.x_lo);
-           pp.query((pfx + "y_lo").c_str(),   fb.y_lo);
-           pp.query((pfx + "x_hi").c_str(),   fb.x_hi);
-           pp.query((pfx + "y_hi").c_str(),   fb.y_hi);
-           pp.query((pfx + "cx").c_str(),     fb.cx);
-           pp.query((pfx + "cy").c_str(),     fb.cy);
-           pp.query((pfx + "radius").c_str(), fb.radius);
-           firebreaks.push_back(fb);
+           pp.query((pfx + "x_lo").c_str(),   brk.x_lo);
+           pp.query((pfx + "y_lo").c_str(),   brk.y_lo);
+           pp.query((pfx + "x_hi").c_str(),   brk.x_hi);
+           pp.query((pfx + "y_hi").c_str(),   brk.y_hi);
+           pp.query((pfx + "cx").c_str(),     brk.cx);
+           pp.query((pfx + "cy").c_str(),     brk.cy);
+           pp.query((pfx + "radius").c_str(), brk.radius);
+           firebreaks.push_back(brk);
        }
        n_firebreaks = static_cast<int>(firebreaks.size());
 
@@ -1302,6 +1411,20 @@ struct FireParams
                amrex::Abort("erf.fire.directional_shape = \"ellipse\" is implemented for rothermel, behave, macarthur, cheney_gould and fbp, not balbi or hybrid");
            }
        }
+
+       // directional_wind_coupling = "advective" is read only by directional_ros_cell's
+       // Rothermel branch (and only reached with directional_shape = "projection");
+       // every other shape, model or the hybrid path (whose fill_directional_ros
+       // call in ERF_HybridRos.H does not thread this flag through) would silently
+       // ignore it, so reject those combinations instead.
+       if (directional_wind_coupling == 1) {
+           if (directional_shape == 1) {
+               amrex::Abort("erf.fire.directional_wind_coupling = \"advective\" needs erf.fire.directional_shape = \"projection\" (it has no effect with \"ellipse\")");
+           }
+           if (is_hybrid() || !uses_model("rothermel")) {
+               amrex::Abort("erf.fire.directional_wind_coupling = \"advective\" is implemented for erf.fire.ros_model = \"rothermel\" only, not hybrid or another model");
+           }
+       }
     }
 
     /// True when ros_model = "hybrid".
@@ -1329,6 +1452,9 @@ struct FireParams
     bool is_passive()     const { return coupling_type == "passive"; }
     bool is_lagged()      const { return coupling_type == "lagged"; }
     bool is_synchronous() const { return coupling_type == "synchronous"; }
+    /// The guard band is checked at all when it has a width and an action.
+    bool guards_edge()  const { return boundary_guard_cells > 0 && boundary_guard_action != "none"; }
+    bool guard_aborts() const { return boundary_guard_action == "abort"; }
     bool injects_flux()   const { return is_lagged() || is_synchronous(); }
     /// The CFBM partition: sensible flux scaled by the dry-fuel fraction 1 / (1 + M_f).
     bool cfbm_partition() const { return heat_flux_partition == "cfbm"; }

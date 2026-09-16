@@ -326,7 +326,7 @@ void update_dust_from_phreeqc(MultiFab&       dust_ustar_t,
     if (!params.phreeqc_metal_var.empty()) {
         MultiFab temp_mf(dg.ba, dg.dm, 1, IntVect(1,1,0));
         if (read_field(temp_mf, params.phreeqc_metal_var))
-            MultiFab::Copy(dust_emission, temp_mf, 0, 0, 1, IntVect(1,1,0));
+            MultiFab::Copy(dust_emission, temp_mf, 0, 0, 1, IntVect(0));
     }
 
     amrex::Print() << "[DUST] PHREEQC update from file: "

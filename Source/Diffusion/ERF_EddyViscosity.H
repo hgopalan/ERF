@@ -7,7 +7,7 @@
 #include "ERF_SurfaceLayer.H"
 #include "ERF_DataStruct.H"
 #include "ERF_IndexDefines.H"
-#include "ERF_Constants.H"
+#include "ERF_NumericalConstants.H"
 #include "ERF_EOS.H"
 #include "ERF_EB.H"
 
@@ -42,6 +42,7 @@ ComputeTurbulentViscosity (double dt,
                            const eb_& ebfact,
                            bool vert_only = false,
                            const amrex::MultiFab* qheating_rates = nullptr,
+                           const amrex::MultiFab* terrain_blank = nullptr,
                            const amrex::MultiFab* Q_fire_atm = nullptr);
 
 /** Compute LES turbulent viscosity, heat fluxes, and dissipation. */
