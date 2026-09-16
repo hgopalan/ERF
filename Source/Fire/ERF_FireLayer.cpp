@@ -626,6 +626,26 @@ void FireLayer::initialize(const ERF& erf,
         }
     }
 
+    // Suppression: its own fields, and a mask for both propagation paths to
+    // read even when no static source exists (an all-zero mask changes nothing).
+    if (m_params.suppression.enable) {
+        m_suppression = std::make_unique<FireSuppression>();
+        m_suppression->initialize(m_params.suppression.file, m_params.suppression.poll_interval,
+                                  m_params.suppression.log, m_fg.ba, m_fg.dm, m_fg.geom,
+                                  m_params.fire_debug);
+        if (fire_nonburnable) {
+            fire_nonburnable_static = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 3);
+            amrex::MultiFab::Copy(*fire_nonburnable_static, *fire_nonburnable, 0, 0, 1, 3);
+        } else {
+            fire_nonburnable = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 3);
+            fire_nonburnable->setVal(0.0_rt);
+        }
+        if (m_params.propagation_method != "levelset" && m_fp.front_update == farsite_front::legacy) {
+            amrex::Print() << "[FIRE] WARNING: suppression with erf.fire.farsite.front_update = legacy "
+                           << "is untested; the ros_factor of a drop is applied to fire_ros only\n";
+        }
+    }
+
     m_probe_reported.assign(m_params.probes.size() / 2, false);
 
     amrex::Print() << "[FIRE] FireLayer initialized: C=" << m_fg.C
@@ -810,6 +830,12 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         fire_fill_boundary(*fire_phi, m_fg.geom);
     }
 
+    // Suppression actions for this step: lines, drops, hold test and the
+    // burnout ignitions, which enter the schedule applied just below.
+    if (m_suppression) {
+        apply_suppression();
+    }
+
     // Phase 11: Apply any scheduled ignition events due this timestep.
     // Time window: (m_current_time - dt, m_current_time].
     if (m_has_schedule && fire_phi) {
@@ -950,6 +976,22 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     if (m_params.accel.enable && m_params.accel.use_temporal
         && m_params.accel.clock == accel_clock::front && fire_accel_state) {
         accel_factor = std::make_unique<amrex::MultiFab>(*fire_accel_state, amrex::make_alias, 2, 1);
+    }
+
+    // A retardant drop with 0 < ros_factor < 1 multiplies the rate the front
+    // update receives, after the acceleration ramp and the crown enhancement.
+    // The directional level-set paths rebuild the rate inside every RK stage,
+    // so the factor is folded into the per-stage scale they take.
+    if (m_suppression && m_suppression->factor_active()) {
+        amrex::MultiFab::Multiply(*fire_ros, *m_suppression->ros_factor(), 0, 0, 1, 0);
+        auto combined = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        if (accel_factor) {
+            amrex::MultiFab::Copy(*combined, *accel_factor, 0, 0, 1, 0);
+        } else {
+            combined->setVal(1.0_rt);
+        }
+        amrex::MultiFab::Multiply(*combined, *m_suppression->ros_factor(), 0, 0, 1, 0);
+        accel_factor = std::move(combined);
     }
 
     if (m_params.fire_debug && m_params.levelset_ellipse && m_params.propagation_method == "levelset") {
@@ -2543,6 +2585,34 @@ void FireLayer::build_nonburnable_mask()
         }
     }
     fire_fill_boundary(*fire_nonburnable, m_fg.geom);
+}
+
+void FireLayer::apply_suppression()
+{
+    if (!m_suppression || !fire_phi || !fire_arrival_time || !fire_nonburnable) { return; }
+    m_suppression->update(m_current_time, m_dt_atm, m_step, *fire_phi, *fire_arrival_time,
+                          fire_flame_length.get(), m_ignition_schedule, m_has_schedule);
+    // The mask both propagation paths read: the static sources OR the suppression cells.
+    const bool has_static = (fire_nonburnable_static != nullptr);
+    for (amrex::MFIter mfi(*fire_nonburnable, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.tilebox();
+        auto const& m  = fire_nonburnable->array(mfi);
+        auto const& sm = m_suppression->mask()->const_array(mfi);
+        amrex::Array4<const amrex::Real> st;
+        if (has_static) { st = fire_nonburnable_static->const_array(mfi); }
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+        {
+            const bool on = (sm(i, j, k) > 0.5_rt) || (has_static && st(i, j, k) > 0.5_rt);
+            m(i, j, k) = on ? 1.0_rt : 0.0_rt;
+        });
+    }
+    fire_fill_boundary(*fire_nonburnable, m_fg.geom);
+    enforce_nonburnable_phi();
+    fire_fill_boundary(*fire_phi, m_fg.geom);
+    if (m_params.fire_debug) {
+        amrex::Print() << "[FIRE DEBUG] Suppression: mask_cells=" << std::lround(m_suppression->mask()->sum(0))
+                       << " factor_active=" << (m_suppression->factor_active() ? 1 : 0) << "\n";
+    }
 }
 
 void FireLayer::enforce_nonburnable_phi()

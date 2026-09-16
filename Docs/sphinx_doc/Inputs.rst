@@ -5060,6 +5060,17 @@ Diagnostics and output
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.exposure.ring**                     | Width of the wall band around a footprint [fire cells]     | Integer >= 1                   | 1                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.suppression.enable**                | Read and apply the suppression action file (fire lines,    | Boolean                        | false                  |
+|                                                | drops, hold test, burnout); see :ref:`sec:FireSuppression` |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.suppression.file**                  | The action file; required with suppression.enable          | String                         | none                   |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.suppression.poll_interval**         | Fire steps between modification-time checks of the file;   | Integer >= 0                   | 10                     |
+|                                                | 0 reads it once at start-up                                |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.suppression.log**                   | Event log (applied, completed, expired, hold_failed,       | String                         | "suppression_log.csv"  |
+|                                                | burnout, reread)                                           |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire_plot_file**                         | Fire plotfile prefix                                       | String                         | ``plt_fire_``          |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire_plot_int**                          | Steps between fire plotfiles; < 0 disables                 | Integer                        | -1                     |

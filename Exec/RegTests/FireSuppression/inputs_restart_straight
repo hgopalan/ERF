@@ -1,0 +1,6 @@
+# Restart equality with a line under construction. L1 at x = 221 m is built
+# from y = 100 m at 5 m/s, so it is half built at the end of the 20 s run;
+# the straight run to step 40 is the reference.
+FILE = inputs_base
+erf.fire.suppression.file = actions_restart.txt
+erf.fire.suppression.log = suppression_restart_straight.csv

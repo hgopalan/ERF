@@ -1,0 +1,7 @@
+# A retardant drop with ros_factor = 0 over x = 216..300 m, y = 100..300 m,
+# from t = 0 for 12 s. The front reaches the drop at 6 s and waits; at 12 s
+# the cells revert and the head moves on for the remaining 8 s, so at 20 s it
+# stands about 6 m short of the unsuppressed 230 m.
+FILE = inputs_base
+erf.fire.suppression.file = actions_drop_hold.txt
+erf.fire.suppression.log = suppression_drop_hold.csv

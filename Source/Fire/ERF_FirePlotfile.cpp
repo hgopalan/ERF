@@ -57,9 +57,10 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
     bool has_structure_height = (fire_layer.get_structure_height() != nullptr);
     bool has_nonburnable = (fire_layer.get_nonburnable() != nullptr);
     bool has_exposure = (fire_layer.get_structure_id() != nullptr);
+    bool has_suppression = (fire_layer.get_suppression() != nullptr);
 
-    Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure);
-    int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure);
+    Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure, has_suppression);
+    int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure, has_suppression);
     // Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
     // int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
 
@@ -158,6 +159,15 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
         MultiFab::Copy(mf, *fire_layer.get_heat_load(),      0, comp++, 1, 0);
         MultiFab::Copy(mf, *fire_layer.get_peak_intensity(), 0, comp++, 1, 0);
         MultiFab::Copy(mf, *fire_layer.get_ember_landings(), 0, comp++, 1, 0);
+    }
+
+    // Suppression: the plotted mask (1 suppressed, -1 hold failed), the ROS
+    // factor and the line ordinal of every built cell
+    if (has_suppression) {
+        const FireSuppression* sp = fire_layer.get_suppression();
+        sp->fill_plot_mask(mf, comp++);
+        MultiFab::Copy(mf, *sp->ros_factor(), 0, comp++, 1, 0);
+        MultiFab::Copy(mf, *sp->progress(),   0, comp++, 1, 0);
     }
 
     std::string plotfilename = Concatenate(plotfile_prefix, step, 5);

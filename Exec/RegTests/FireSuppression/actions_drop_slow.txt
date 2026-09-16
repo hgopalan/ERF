@@ -1,0 +1,2 @@
+# id  type  start_s  geometry                                     param           expiry_s  flame_limit_m
+D1    drop  0        poly:216,100;300,100;300,300;216,300         ros_factor=0.3  -1        -

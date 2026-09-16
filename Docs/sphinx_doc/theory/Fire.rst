@@ -54,6 +54,7 @@ with a comment as a reference deck.
    Fire_FuelMoisture
    spatial_fuel
    multi_ignition
+   fire_suppression
    fire_coupling
    wui_validation
    line_fire_verification
@@ -208,7 +209,10 @@ The principal state and diagnostic fields, all cell-centred on the fire grid:
      - Hybrid model weight and sampled building height, present with the hybrid model or structures
    * - ``fire_nonburnable``
      - 1
-     - Non-burnable mask, present when structures, non-burnable fuel codes or masked firebreaks are configured
+     - Non-burnable mask, present when structures, non-burnable fuel codes, masked firebreaks or suppression are configured
+   * - ``fire_suppression_mask``, ``fire_ros_factor``, ``fire_line_progress``
+     - 1 each
+     - Suppression cells, rate factor and line ordinal, present only with ``erf.fire.suppression.enable`` (:ref:`sec:FireSuppression`)
    * - ``fire_crown_active``, ``fire_crown_load``, ``fire_crown_fraction_burned``
      - 1 each
      - Crown-fire state, present only with crown fire enabled
