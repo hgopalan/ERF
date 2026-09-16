@@ -79,6 +79,13 @@ struct FireParams
         amrex::Real              diffusivity_scale = 1.0;            ///< multiplier on the lag-calibrated diffusivity
     } stick;
     amrex::Real       precip_rate_mm_hr   = 0.0;         ///< Uniform precipitation rate [mm/hr]
+    // Where the rain that wets the dead classes comes from:
+    //   "uniform"    (default) - precip_rate_mm_hr everywhere, as always
+    //   "atmosphere"           - the change per step of the microphysics surface
+    //                            precipitation accumulation of each column, in
+    //                            mm/hr (ERF_FirePrecip.H); needs a scheme with
+    //                            precipitation and moisture_dynamic
+    std::string       precip_source       = "uniform";
     amrex::Real       moisture_live       = 0.60;        ///< Live fuel moisture [fraction]
     // How the live classes move when moisture_dynamic is on:
     //   "legacy" (default) — the dead-fuel time-lag update with the 100-h lag,
@@ -790,6 +797,21 @@ struct FireParams
        // Fuel moisture control (Phase 4)
        pp.query("moisture_dynamic", moisture_dynamic);
        pp.query("precip_rate_mm_hr", precip_rate_mm_hr);
+       nonneg("precip_rate_mm_hr", precip_rate_mm_hr);
+       pp.query("precip_source", precip_source);
+       one_of("precip_source", precip_source, {"uniform", "atmosphere"});
+       if (precip_source == "atmosphere") {
+           if (!moisture_dynamic) {
+               fail("erf.fire.precip_source = atmosphere wets the dead fuel classes with the atmosphere's rain,"
+                    " but erf.fire.moisture_dynamic = false holds them fixed. Set erf.fire.moisture_dynamic = true"
+                    " or erf.fire.precip_source = uniform.");
+           }
+           if (precip_rate_mm_hr > 0.0) {
+               fail("erf.fire.precip_rate_mm_hr = " + std::to_string(precip_rate_mm_hr)
+                    + " is set with erf.fire.precip_source = atmosphere; the rain has one source, the uniform"
+                    " rate is not added to the atmosphere's. Remove one of the two.");
+           }
+       }
        pp.query("moisture_live", moisture_live);
        pp.query("moisture_model", moisture_model);
        pp.query("emc_model", emc_model);

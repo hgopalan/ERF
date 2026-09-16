@@ -673,6 +673,13 @@ ERF::WriteCheckpointFile () const
         if (const amrex::MultiFab* ql = m_fire_layer->get_Q_lat_atm_prev()) {
             VisMF::Write(*ql, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireQLatAtmPrev"));
         }
+        // The surface precipitation accumulation the rain per column is measured from
+        // (erf.fire.precip_source = atmosphere); without it the first restarted step
+        // would read the whole accumulation since t = 0 as one step's rain.
+        if (const amrex::MultiFab* pa = m_fire_layer->get_precip_accum_prev()) {
+            amrex::Print() << "Writing fire precipitation snapshot to checkpoint" << std::endl;
+            VisMF::Write(*pa, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FirePrecipAccumPrev"));
+        }
         // Exposure accumulators; all null unless erf.fire.exposure.enable.
         if (const amrex::MultiFab* hl = m_fire_layer->get_heat_load()) {
             amrex::Print() << "Writing fire exposure accumulators to checkpoint" << std::endl;
@@ -1280,15 +1287,21 @@ ERF::ReadCheckpointFile ()
             MultiFab::Copy(*z_phys_nd[lev],z_height,0,0,1,ng);
             update_terrain_arrays(lev);
 
-            // Compute the min dz and pass to the micro model
-            Real dzmin = get_dzmin_terrain(*z_phys_nd[lev]);
-            micro->Set_dzmin(lev, dzmin);
-
 #if 0
             if ( (solverChoice.init_type != InitType::WRFInput) && (solverChoice.init_type != InitType::Metgrid) ) {
                 check_mesh_type(lev);
             }
 #endif
+        }
+
+        // The min dz the microphysics sizes its sedimentation substeps with, for
+        // every mesh type as init_zphys does on a fresh start. Set only on fitted
+        // meshes before, so a restart on a constant-dz mesh left Kessler's (and
+        // SAM's, Morrison's) dzmin uninitialised and the substep count unbounded:
+        // the first restarted step of a raining run never finished.
+        {
+            Real dzmin = get_dzmin_terrain(*z_phys_nd[lev]);
+            micro->Set_dzmin(lev, dzmin);
         }
 
         // Read in the moisture model restart variables
@@ -2046,6 +2059,21 @@ ERF::ReadCheckpointFileFire ()
     // so refill the ghosts the way update_atm_flux_buffer() does.
     if (amrex::MultiFab* q = m_fire_layer->get_Q_atm_prev_mut()) { fire_fill_boundary(*q, geom[fire_lev]); }
     if (amrex::MultiFab* q = m_fire_layer->get_Q_lat_atm_prev_mut()) { fire_fill_boundary(*q, geom[fire_lev]); }
+    // The precipitation snapshot (erf.fire.precip_source = atmosphere). A checkpoint
+    // without it (an older build, or a run that used the uniform rate) cannot give
+    // the first restarted step a rain rate: that step reports none and starts the
+    // snapshot from its own accumulation, instead of reading the accumulation since
+    // t = 0 as one step's rain.
+    if (amrex::MultiFab* pa = m_fire_layer->get_precip_accum_prev_mut()) {
+        const std::string header = restart_chkfile + "/Level_" + std::to_string(fire_lev) + "/FirePrecipAccumPrev_H";
+        if (amrex::FileExists(header)) {
+            VisMF::Read(*pa, amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", "FirePrecipAccumPrev"));
+        } else {
+            amrex::Print() << "[FIRE] Checkpoint has no FirePrecipAccumPrev; the first restarted step"
+                           << " reports no rain and starts the precipitation snapshot from its own accumulation.\n";
+            m_fire_layer->invalidate_precip_accum_prev();
+        }
+    }
     restore_optional(m_fire_layer->get_heat_load_mut(),      "FireHeatLoad");
     restore_optional(m_fire_layer->get_peak_intensity_mut(), "FirePeakIntensity");
     restore_optional(m_fire_layer->get_ember_landings_mut(), "FireEmberLandings");

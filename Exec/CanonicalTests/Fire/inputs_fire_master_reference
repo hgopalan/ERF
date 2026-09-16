@@ -129,6 +129,15 @@ erf.fire.moisture_live_model = "legacy"
 # 0.0 = no precipitation
 erf.fire.precip_rate_mm_hr = 0.0
 
+# Where the rain that wets the dead classes comes from (moisture_dynamic = true):
+#   "uniform"    (default) - precip_rate_mm_hr everywhere
+#   "atmosphere"           - the change per step of the microphysics surface
+#                            precipitation accumulation of each column [mm/hr];
+#                            needs a scheme with precipitation (Kessler, SAM,
+#                            Morrison, WSM6, WDM6) and precip_rate_mm_hr = 0.
+#                            Plotfile field fire_precip_mm_hr, CSV column precip_max_mm_hr.
+erf.fire.precip_source = "uniform"
+
 # Dead-class update with moisture_dynamic: "timelag" (default, one time constant
 # per class) or "stick" (radial diffusion in a cylindrical stick per class, the
 # Nelson 2000 framework, lag-calibrated diffusivity; shells checkpointed)

@@ -20,6 +20,20 @@ int fire_anchor_level(const FireParams& fire_params, int finest_level)
     return lev;
 }
 
+void verify_fire_precip_source(const FireParams& fire_params,
+                               const SurfacePrecipAccumulationSources& sources)
+{
+    if (fire_params.precip_source != "atmosphere") { return; }
+    if (surface_precip_has_any_source(sources)) { return; }
+    std::string moisture_model = "None";
+    ParmParse pp_erf("erf");
+    pp_erf.query("moisture_model", moisture_model);
+    Abort("[FIRE] erf.fire.precip_source = atmosphere takes the rain of every column from the microphysics "
+          "surface precipitation accumulators, but erf.moisture_model = \"" + moisture_model + "\" provides "
+          "none (Kessler, SAM, Morrison, WSM6 and WDM6 with precipitation do; Kessler_NoRain, SatAdj, "
+          "MoistNoCondensation and None do not). Choose one of those, or set erf.fire.precip_source = uniform.");
+}
+
 void verify_fire_prerequisites(const ERF& erf,
                                int lev,
                                const SurfaceLayer* surface_layer,

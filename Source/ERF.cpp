@@ -1644,6 +1644,11 @@ ERF::InitData_post ()
     if (m_fire_layer) {
         const int fire_lev = fire_anchor_level(m_fire_params, finest_level);
         m_fire_layer->initialize(*this, fire_lev, m_SurfaceLayer[Orientation::zlo()].get(), z_phys_nd[fire_lev].get(), m_fire_params);
+        // erf.fire.precip_source = atmosphere needs the microphysics accumulators of the
+        // fire grid's level, which exist now that every level is built.
+        verify_fire_precip_source(m_fire_params,
+                                  micro ? micro->Get_Surface_Precip_Accumulation_Ptrs(fire_lev)
+                                        : SurfacePrecipAccumulationSources{});
         // For the reach estimate at ignition: max_step counts level-0 steps, and the
         // fire takes one step per step of its own level.
         int fire_steps_per_coarse_step = 1;

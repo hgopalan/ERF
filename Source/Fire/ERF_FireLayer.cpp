@@ -208,6 +208,13 @@ void FireLayer::initialize(const ERF& erf,
     fire_disp_accum->setVal(0.0_rt);
     fire_surface_temp->setVal(0.0);
     fire_surface_rh->setVal(0.0);
+    // Rain per fire cell: the atmosphere's rain per column (erf.fire.precip_source =
+    // atmosphere) or the uniform rate, kept only when it can wet the dead classes.
+    if (m_params.moisture_dynamic &&
+        (m_params.precip_source == "atmosphere" || m_params.precip_rate_mm_hr > 0.0_rt)) {
+        fire_precip_rate = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        fire_precip_rate->setVal(m_params.precip_source == "atmosphere" ? 0.0_rt : m_params.precip_rate_mm_hr);
+    }
     fire_fireline_intensity->setVal(0.0_rt);
     fire_flame_length->setVal(0.0_rt);
     fire_flame_temp->setVal(0.0_rt);
@@ -239,6 +246,14 @@ void FireLayer::initialize(const ERF& erf,
     m_Q_lat_atm_prev = std::make_unique<MultiFab>(ba_atm_2d, dm_atm, 1, ng_flux);
     m_Q_atm_prev->setVal(0.0_rt);
     m_Q_lat_atm_prev->setVal(0.0_rt);
+    // The surface precipitation accumulation the rain per column is measured from
+    // (erf.fire.precip_source = atmosphere): zero at a fresh start, as the scheme's
+    // accumulators are; a restart restores it from the checkpoint.
+    if (m_params.precip_source == "atmosphere") {
+        m_precip_accum_prev = std::make_unique<MultiFab>(ba_atm_2d, dm_atm, 1, 0);
+        m_precip_accum_prev->setVal(0.0_rt);
+        m_precip_prev_valid = true;
+    }
 
     fire_latent_flux = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_latent_flux->setVal(0.0_rt);
@@ -691,7 +706,8 @@ void FireLayer::initialize(const ERF& erf,
 void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                         const MultiFab& xvel, const MultiFab& yvel,
                         const MultiFab& z_phys_cc,
-                        const MultiFab& T_atm_k0, const MultiFab& RH_atm_k0)
+                        const MultiFab& T_atm_k0, const MultiFab& RH_atm_k0,
+                        const MultiFab* precip_accum_k0)
 {
     amrex::ignore_unused(surface_layer);
 
@@ -756,7 +772,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
 
     if (m_params.fire_debug)
         amrex::Print() << "[FIRE DEBUG] Updating fuel moisture from atmospheric state" << std::endl;
-    advance_fuel_moisture(dt, T_atm_k0, RH_atm_k0);
+    advance_fuel_moisture(dt, T_atm_k0, RH_atm_k0, precip_accum_k0);
     if (m_params.fire_debug) {
         amrex::Print() << "[FIRE DEBUG] Fuel moisture update completed. Max 1-hour moisture: "
                        << fire_fuel_mc->max(0) << std::endl;
@@ -766,6 +782,11 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         amrex::Print() << "[FIRE DEBUG] Surface RH range:   min="
                        << fire_surface_rh->min(0) << "    max="
                        << fire_surface_rh->max(0) << std::endl;
+        if (fire_precip_rate) {
+            amrex::Print() << "[FIRE DEBUG] Rain rate (" << m_params.precip_source << "): min="
+                           << fire_precip_rate->min(0) << " mm/hr  max="
+                           << fire_precip_rate->max(0) << " mm/hr" << std::endl;
+        }
     }
 
     if (m_params.moisture_dynamic) {
@@ -1355,7 +1376,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         append_fire_stats(*fire_phi, *fire_arrival_time, m_fg.geom,
                          m_step, m_current_time, m_params.fire_stats_csv_file,
                          fire_ros.get(), fire_heat_flux.get(), fire_albini_data.get(),
-                         m_n_edge_cells, m_edge_contact_time);
+                         m_n_edge_cells, m_edge_contact_time, fire_precip_rate.get());
     }
 }
 
@@ -1455,7 +1476,8 @@ void FireLayer::apply_waf_to_wind()
 
 void FireLayer::advance_fuel_moisture(Real dt_s,
                                       const MultiFab& T_atm_k0,
-                                      const MultiFab& RH_atm_k0)
+                                      const MultiFab& RH_atm_k0,
+                                      const MultiFab* precip_accum_k0)
 {
     // Map atmospheric T and RH to fire grid and store persistently.
     // This operation runs every timestep to ensure
@@ -1467,6 +1489,24 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
     Real dt_hours = dt_s / 3600.0_rt;
     FuelModelParams fp = uniform_fuel_params();
     Real precip_mm_hr = m_params.precip_rate_mm_hr;
+
+    // Rain per fire cell for this step (erf.fire.precip_source). With
+    // "atmosphere" the rate of every atmospheric column is the change of its
+    // surface precipitation accumulation over the step, mapped onto the fire
+    // grid like T and RH: every fire cell takes the value of its column.
+    if (fire_precip_rate) {
+        if (m_params.precip_source == "atmosphere") {
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(precip_accum_k0 != nullptr && m_precip_accum_prev != nullptr,
+                "[FIRE] Internal error: erf.fire.precip_source = atmosphere but no surface precipitation "
+                "accumulation reached the fire layer");
+            MultiFab rate_2d(m_precip_accum_prev->boxArray(), m_precip_accum_prev->DistributionMap(), 1, 0);
+            fire_precip_rate_from_accum(rate_2d, *m_precip_accum_prev, *precip_accum_k0, dt_s, m_precip_prev_valid);
+            m_precip_prev_valid = true;
+            fill_fire_from_atm_k0(*fire_precip_rate, rate_2d, m_fg);
+        } else {
+            fire_precip_rate->setVal(precip_mm_hr);
+        }
+    }
 
     // Stick model: allocate the shells on first use, every shell at the
     // class's current moisture (a restart restores them afterwards, before
@@ -1498,11 +1538,17 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
         Array4<const Real> RH_f = fire_surface_rh->const_array(mfi);
         Array4<Real> st;
         if (use_stick) { st = fire_stick_mc->array(mfi); }
+        // The rain of this cell: the per-cell field when there is one, else the
+        // uniform rate (zero without a rain source).
+        const bool has_pr = (fire_precip_rate != nullptr);
+        Array4<const Real> pr;
+        if (has_pr) { pr = fire_precip_rate->const_array(mfi); }
         const Real sw_dead = dead_fuel_weighted_sav(fp.w_d1, fp.w_d10, fp.w_d100, fp.sigma_d1);
         amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv_f) {
             int i = iv_f[0], j = iv_f[1];
             Real T_C = T_f(i,j,0) - 273.15_rt;
             Real RH  = RH_f(i,j,0) * 100.0_rt;
+            const Real precip_cell = has_pr ? pr(i,j,0) : precip_mm_hr;
             if (use_stick) {
                 // Radial diffusion per class; the class value is the volume average.
                 Real M[FuelStickConst::MAX_SHELLS];
@@ -1510,15 +1556,15 @@ void FireLayer::advance_fuel_moisture(Real dt_s,
                 const Real taus[3]  = {FuelMoistureConst::TAU_1HR, FuelMoistureConst::TAU_10HR, FuelMoistureConst::TAU_100HR};
                 for (int c = 0; c < 3; ++c) {
                     for (int n = 0; n < n_sh; ++n) { M[n] = st(i, j, 0, c * n_sh + n); }
-                    mc(i, j, 0, c) = stick_advance_class(M, n_sh, radii[c], taus[c], RH, T_C, precip_mm_hr,
+                    mc(i, j, 0, c) = stick_advance_class(M, n_sh, radii[c], taus[c], RH, T_C, precip_cell,
                                                          rain_ms, dscale, dt_hours, emc_model);
                     for (int n = 0; n < n_sh; ++n) { st(i, j, 0, c * n_sh + n) = M[n]; }
                 }
             } else {
             // Existing 3 dead fuel classes (unchanged)
-            mc(i,j,0,0) = advance_fuel_moisture_one_class(mc(i,j,0,0),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_1HR,emc_model);
-            mc(i,j,0,1) = advance_fuel_moisture_one_class(mc(i,j,0,1),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_10HR,emc_model);
-            mc(i,j,0,2) = advance_fuel_moisture_one_class(mc(i,j,0,2),RH,T_C,precip_mm_hr,dt_hours,FuelMoistureConst::TAU_100HR,emc_model);
+            mc(i,j,0,0) = advance_fuel_moisture_one_class(mc(i,j,0,0),RH,T_C,precip_cell,dt_hours,FuelMoistureConst::TAU_1HR,emc_model);
+            mc(i,j,0,1) = advance_fuel_moisture_one_class(mc(i,j,0,1),RH,T_C,precip_cell,dt_hours,FuelMoistureConst::TAU_10HR,emc_model);
+            mc(i,j,0,2) = advance_fuel_moisture_one_class(mc(i,j,0,2),RH,T_C,precip_cell,dt_hours,FuelMoistureConst::TAU_100HR,emc_model);
             }
             // Live herbaceous and live woody moisture (components 3 and 4):
             // held where they are with erf.fire.moisture_live_model = "fixed",

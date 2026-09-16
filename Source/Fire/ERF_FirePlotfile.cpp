@@ -58,10 +58,11 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
     bool has_nonburnable = (fire_layer.get_nonburnable() != nullptr);
     bool has_exposure = (fire_layer.get_structure_id() != nullptr);
     bool has_structure_ignition = (fire_layer.get_structure_state() != nullptr);
+    bool has_precip = (fire_layer.get_precip_rate() != nullptr);
     bool has_suppression = (fire_layer.get_suppression() != nullptr);
 
-    Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure, has_structure_ignition, has_suppression);
-    int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure, has_structure_ignition, has_suppression);
+    Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure, has_structure_ignition, has_precip, has_suppression);
+    int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure, has_structure_ignition, has_precip, has_suppression);
     // Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
     // int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
 
@@ -167,6 +168,11 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
         MultiFab::Copy(mf, *fire_layer.get_structure_state(),    erf_structure_ignition::StateComp,        comp++, 1, 0);
         MultiFab::Copy(mf, *fire_layer.get_structure_state(),    erf_structure_ignition::IgnitionTimeComp, comp++, 1, 0);
         MultiFab::Copy(mf, *fire_layer.get_structure_rad_flux(), 0, comp++, 1, 0);
+    }
+
+    // Rain rate per fire cell [mm/hr] (erf.fire.precip_source, or the uniform rate)
+    if (has_precip) {
+        MultiFab::Copy(mf, *fire_layer.get_precip_rate(), 0, comp++, 1, 0);
     }
 
     // Suppression: the plotted mask (1 suppressed, -1 hold failed), the ROS
