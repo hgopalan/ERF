@@ -14,6 +14,7 @@ Canonical fire tests covering analytical ROS checks, atmospheric coupling, ignit
 | `Heat_Flux_Diagnostics` | Flame temperature, heat flux and fireline intensity diagnostics. | empirical / regression |
 | `WUI_Subdivision` | A wind-driven grass fire running into three rows of houses: the wildland-urban interface features together, each checked against an independent expectation. | verification |
 | `Real_Terrain` | Fires on real (SRTM) terrain at event scale with inflow/outflow boundaries: the Marshall and Palisades fires. | demonstration |
+| `idealized_fire` | The Marshall Fire atmosphere in idealized form: the Real_Terrain SRTM terrain, mass inflow from a flat precursor column rotated to the HRRR wind direction, MRF and YSUNew boundary layers, LANDFIRE fuel, one-way coupling. | demonstration |
 | `Unit_Tests` | Python unit tests for the Rothermel kernel, the FARSITE ellipse, the ROS models, the fuel map, ignition schedules, spotting, crown fire, acceleration, wind interpolation and terrain projection. | unit |
 | `Supporting_Files` | Shared fuel maps, ignition files, guides and the input validator. | assets |
 

@@ -1,0 +1,179 @@
+# Idealized Marshall Fire: MRF boundary layer
+#
+# The 30 December 2021 Marshall Fire (Boulder County, Colorado) in an idealized atmosphere
+# over the real terrain of ../Real_Terrain/Marshall_Fire. Mass inflow on the west and north
+# faces carries a flat precursor column (precursor/, 67 m/s geostrophic wind, +15 K capping
+# inversion at 1.5 km) rotated so the 10 m wind blows from 267 degrees, the HRRR analysis at
+# the west face at 18 UTC (Exec/Tools/hrrr_point_winds.py); pressure outflow on the east and
+# south faces. MRF in the vertical, 2D Smagorinsky in the horizontal, anelastic. The fire
+# spreads over the LANDFIRE 2.0.0 fuel map with one-way coupling: 20 min of wind spin-up,
+# then 45 min of fire from the first ignition. inputs_marshall_ideal_ysunew differs only in
+# the PBL block, the inflow and sounding files and the geostrophic wind. See README.md.
+
+# ============================================================================
+# GEOMETRY
+# ============================================================================
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 25600.0 25600.0 11639.1     # z: 50 levels from 10 m stretched by 1.1
+amr.n_cell = 80 80 50                          # 320 m horizontally
+geometry.is_periodic = 0 0 0
+amr.max_level = 0
+amr.max_grid_size   = 40     # 4 boxes; box lengths divide by the fire grid ratio
+amr.max_grid_size_z = 50     # whole columns: the fire module forbids a z decomposition
+erf.initial_dz            = 10.0
+erf.grid_stretching_ratio = 1.1
+
+erf.terrain_type      = StaticFittedMesh
+erf.terrain_file_name = "../Real_Terrain/Marshall_Fire/terrain_marshall.txt"
+erf.terrain_smoothing = 1        # STF: smoothed metrics
+erf.terrain_gamma_m   = 0.3
+
+# ============================================================================
+# BOUNDARIES
+# ============================================================================
+# Every boundary cell of an inflow face takes the precursor column at its own height
+# above the local ground (u, v and T)
+xlo.type = "Inflow"
+xlo.inflow_profile      = "file"
+xlo.inflow_profile_file = "inflow_mrf.txt"
+yhi.type = "Inflow"
+yhi.inflow_profile      = "file"
+yhi.inflow_profile_file = "inflow_mrf.txt"
+xhi.type = "Outflow"
+ylo.type = "Outflow"
+
+zlo.type = "surface_layer"
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+zhi.type = "SlipWall"
+zhi.theta_grad = 0.003
+
+# Rayleigh damping of w in the top 3 km against mountain-wave reflection
+erf.rayleigh_damp_W   = true
+erf.rayleigh_dampcoef = 0.2
+erf.rayleigh_zdamp    = 3000.0
+
+# ============================================================================
+# ATMOSPHERE
+# ============================================================================
+erf.molec_diff_type = "None"
+erf.les_type = "Smagorinsky2D"   # horizontal mixing; MRF does the vertical
+erf.Cs = 0.1
+
+# PBL: MRF, parameters as Exec/CanonicalTests/ABL/MRF_YSUNew_Enhancements/canonical/neutral_abl
+erf.pbl_type = "MRF"
+erf.most.pblh_calc = "MRF"       # plt2d writes the PBL height MRF diagnoses
+erf.enable_mrf_cloud_adjustment = false
+erf.enable_mrf_countergradient = true
+erf.enable_mrf_unbounded_vpert = false
+erf.mrf_moistvars = false
+erf.pbl_mrf_Ribcr = 0.5
+erf.pbl_mrf_const_b = 7.8
+erf.pbl_mrf_coriolis_freq = 9.34e-5
+erf.pbl_mrf_highres_bounds = false
+erf.pbl_mrf_sf = 0.1
+erf.pbl_mrf_use_zero_ri_extent = false
+
+erf.use_gravity = true
+erf.theta_ref   = 300.0
+
+# The precursor's geostrophic wind, rotated with its column (printed by precursor/make_inflow.py),
+# keeps the inflow column in the balance it was made in
+erf.use_coriolis    = true
+erf.latitude        = 39.95
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind    = 61.23815 -27.18252 0.0
+
+# The interior starts from the same column, read above the local ground like the inflow faces
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+erf.input_sounding_file = "sounding_mrf.txt"          # 840 hPa surface pressure
+erf.input_sounding_wind_above_ground  = true
+erf.input_sounding_theta_above_ground = true           # the capping inversion follows the terrain
+
+# ============================================================================
+# SOLVER
+# ============================================================================
+erf.anelastic = 1          # inflow faces prescribe the velocity, outflow faces hold the pressure
+erf.use_fft   = 1          # the terrain-fitted projection needs a build with FFT
+erf.vert_implicit = true
+erf.cfl = 0.5
+erf.dycore_horiz_adv_type  = "Upwind_3rd"
+erf.dycore_vert_adv_type   = "Upwind_3rd"
+erf.dryscal_horiz_adv_type = "Upwind_3rd"
+erf.dryscal_vert_adv_type  = "Upwind_3rd"
+
+# ============================================================================
+# TIME STEPPING AND OUTPUT
+# ============================================================================
+stop_time = 3900.0      # 20 min wind spin-up, then 45 min of fire
+max_step  = 20000
+
+erf.sum_interval = 2000
+erf.v = 1
+amr.v = 1
+
+erf.check_file = chk_marshall
+erf.check_int  = -1
+
+erf.plot_file_1 = plt3d_marshall
+erf.plot_per_1  = 300.0            # every 5 min
+erf.plot_vars_1 = theta x_velocity y_velocity z_velocity z_phys Kmv Khv Kmh
+erf.plot2d_file_1 = plt2d_marshall
+erf.plot2d_per_1  = 60.0
+erf.plot2d_vars_1 = pblh u_star t_star
+
+erf.fire_plot_file = plt_fire_
+erf.fire_plot_per  = 30.0
+
+# ============================================================================
+# FIRE MODULE
+# ============================================================================
+erf.fire.enable = true
+erf.fire.fire_debug = false
+erf.fire.grid_ratio = 8                     # 40 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.coupling_type = "passive"          # one way: the fire does not heat the atmosphere
+erf.fire.terrain_file_name = "../Real_Terrain/Marshall_Fire/terrain_marshall.txt"
+
+# LANDFIRE LF 2.0.0 FBFM40 (about 2016, before the fire) on the 640 x 640 fire grid:
+#   python3 ../../../Tools/make_landfire_fuel_map.py --fetch LF2016 --dx 40 \
+#       --domain ../Real_Terrain/Marshall_Fire/marshall_domain.json
+erf.fire.fuel_map.file = "fuel_marshall_fbfm40.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.fuel_map.fuel_set = "scott_burgan40"
+erf.fire.fuel_map.load_from_map = true      # each cell starts with its own model's load; non-burnable codes carry none
+erf.fire.rothermel_per_fuel = true          # Rothermel coefficients per cell
+erf.fire.fuel_model_id = 102                # GR2, where the map gives no model
+erf.fire.moisture_dynamic = false
+erf.fire.moisture_1hr   = 0.06
+erf.fire.moisture_10hr  = 0.07
+erf.fire.moisture_100hr = 0.08
+erf.fire.moisture_live  = 0.30
+
+# First ignition, Eldorado Springs Drive at CO-93 (39.953 N, 105.232 W), from the schedule
+# after the spin-up; no disc at t = 0
+erf.fire.ignition_x = 5000.0
+erf.fire.ignition_y = 11000.0
+erf.fire.ignition_r = 0.0
+erf.fire.ignition.schedule_file = "ignitions_spinup.csv"
+
+erf.fire.wind_ref_ht = 6.1
+erf.fire.wind_interp = "bilinear"
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = false             # Andrews, Cruz & Rothermel (2013): the limit is too restrictive
+erf.fire.use_terrain_wind = false           # the terrain flow is resolved
+# The ellipse form of the directional rate carries the head, back and flank rates, with the
+# Anderson length-to-breadth ratio for the flank width in a strong wind
+erf.fire.directional_shape = "ellipse"
+erf.fire.directional_ellipse_lw = "anderson"
+
+# Spotting: a launch attempt every 200 steps (a few minutes) at a low probability, fixed seed
+erf.fire.spotting.enable = true
+erf.fire.spotting.spotting_interval = 200
+erf.fire.spotting.P_base = 0.002
+erf.fire.spotting.random_seed = 20211230
+erf.fire.spotting.terminal_velocity = 1.5
+erf.fire.spotting.spot_radius = 30.0

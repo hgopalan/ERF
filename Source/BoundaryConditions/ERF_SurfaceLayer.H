@@ -129,6 +129,8 @@ public:
           pblh_type = PBLHeightCalcType::YSU;
       } else if (pblh_string == "mrf") {
           pblh_type = PBLHeightCalcType::MRF;
+      } else if (pblh_string == "ysunew") {
+          pblh_type = PBLHeightCalcType::YSUNew;
       } else {
           amrex::Abort("Undefined PBLH calc type!");
       }
