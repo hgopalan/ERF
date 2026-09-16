@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# The historical deck: no rain key at all, so the dead classes see no rain
+# (erf.fire.precip_source defaults to uniform and erf.fire.precip_rate_mm_hr to 0).
+erf.fire.fire_stats_csv_file = "fire_stats_legacy.csv"

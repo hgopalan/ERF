@@ -28,6 +28,7 @@
 #include <ERF_FuelModels.H>
 #include <ERF_FbpModel.H>
 #include <ERF_FuelMoistureStick.H>
+#include <ERF_FirePrecip.H>
 #include <ERF_FireAcceleration.H>
 // Phase 13A: Per-fuel wind height
 #include <ERF_FuelWindHeight.H>
@@ -171,6 +172,11 @@ public:
      *                               On atmospheric grid (coarser than fire grid).
      * @param[in]     RH_atm_k0      Atmospheric relative humidity at k=0 [fraction 0-1]
      *                               On atmospheric grid (coarser than fire grid).
+     * @param[in]     precip_accum_k0 Surface precipitation accumulation of every
+     *                               column [kg/m2], on the atmospheric grid
+     *                               coarsened to one cell in z (ERF_FirePrecip.H);
+     *                               required with erf.fire.precip_source =
+     *                               atmosphere, ignored (may be null) otherwise.
      */
     void advance(amrex::Real time,
                  amrex::Real dt,
@@ -179,7 +185,8 @@ public:
                  const amrex::MultiFab& yvel,
                  const amrex::MultiFab& z_phys_cc,
                  const amrex::MultiFab& T_atm_k0,
-                 const amrex::MultiFab& RH_atm_k0);
+                 const amrex::MultiFab& RH_atm_k0,
+                 const amrex::MultiFab* precip_accum_k0 = nullptr);
 
     /**
      * @brief Get heat flux for atmospheric coupling.
@@ -416,6 +423,33 @@ public:
     {
         return fire_surface_rh.get();
     }
+
+    /**
+     * @brief Rain rate per fire cell [mm/hr] that wets the dead classes this step
+     *        (erf.fire.precip_source: the atmosphere's rain per column, or the
+     *        uniform erf.fire.precip_rate_mm_hr), for the plotfile field
+     *        fire_precip_mm_hr and the statistics CSV.
+     * @return Pointer, or nullptr when the dead-fuel moisture is static or no rain
+     *         source is configured.
+     */
+    const amrex::MultiFab* get_precip_rate() const
+    {
+        return fire_precip_rate.get();
+    }
+
+    /// Surface precipitation accumulation [kg/m2] of every column of the fire
+    /// grid's level at the end of the previous fire step, the reference the
+    /// next step's rate is measured from; null unless erf.fire.precip_source =
+    /// atmosphere. Checkpointed as FirePrecipAccumPrev.
+    const amrex::MultiFab* get_precip_accum_prev() const
+    {
+        return m_precip_accum_prev.get();
+    }
+    /// Mutable access to the snapshot, for checkpoint restart.
+    amrex::MultiFab* get_precip_accum_prev_mut() { return m_precip_accum_prev.get(); }
+    /// A restart from a checkpoint without the snapshot: the first restarted
+    /// step reports no rain and takes the snapshot from its own accumulation.
+    void invalidate_precip_accum_prev() { m_precip_prev_valid = false; }
 
     /**
      * @brief Get fireline intensity for diagnostics and plotfile output.
@@ -717,6 +751,13 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_disp_accum;   // Persistent FARSITE accumulator (2 comp): displacement (legacy), or head-rate distance and front flag (front_cell)
     std::unique_ptr<amrex::MultiFab>         fire_surface_temp; // Surface temperature [K] (Phase 2)
     std::unique_ptr<amrex::MultiFab>         fire_surface_rh;   // Surface relative humidity [0-1] (Phase 2)
+    std::unique_ptr<amrex::MultiFab>         fire_precip_rate;  // Rain rate wetting the dead classes [mm/hr]; null without a rain source
+    // erf.fire.precip_source = atmosphere: the surface precipitation accumulation
+    // [kg/m2] of every column of the fire grid's level (one slab per box of that
+    // level) at the end of the previous fire step; the step's rain is the change
+    // from it. Fresh start: zero, where every scheme starts its accumulators.
+    std::unique_ptr<amrex::MultiFab>         m_precip_accum_prev;
+    bool                                     m_precip_prev_valid = true;
     std::unique_ptr<amrex::MultiFab>         fire_fireline_intensity; // Byram fireline intensity [kW/m]
     std::unique_ptr<amrex::MultiFab>         fire_flame_length;       // Thomas flame length [m]
     std::unique_ptr<amrex::MultiFab>         fire_flame_tilt;         // Flame tilt angle [deg from vertical] (Phase 9)
@@ -946,10 +987,14 @@ public:
      * @param[in] dt_s       Atmospheric timestep [seconds]
      * @param[in] T_atm_k0   Atmospheric potential temperature at k=0 [K]
      * @param[in] RH_atm_k0  Atmospheric relative humidity at k=0 [fraction 0-1]
+     * @param[in] precip_accum_k0  Surface precipitation accumulation per column
+     *                       [kg/m2]; required with erf.fire.precip_source =
+     *                       atmosphere, ignored otherwise
      */
     void advance_fuel_moisture(amrex::Real dt_s,
                                const amrex::MultiFab& T_atm_k0,
-                               const amrex::MultiFab& RH_atm_k0);
+                               const amrex::MultiFab& RH_atm_k0,
+                               const amrex::MultiFab* precip_accum_k0);
 
     /**
      * @brief Compute heat flux and deplete fuel load for one atmospheric timestep (Phase 5).

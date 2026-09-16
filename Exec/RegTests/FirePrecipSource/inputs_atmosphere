@@ -1,0 +1,5 @@
+FILE = inputs_base
+
+# The rain of each atmospheric column from Kessler's surface accumulation.
+erf.fire.precip_source = "atmosphere"
+erf.fire.fire_stats_csv_file = "fire_stats_atmosphere.csv"

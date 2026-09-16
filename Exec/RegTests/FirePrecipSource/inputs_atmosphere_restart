@@ -1,0 +1,9 @@
+FILE = inputs_base
+
+# Restarts from chk00027 (written by inputs_atmosphere_chk) and runs to step 40.
+# Must reproduce inputs_atmosphere exactly, which needs the precipitation
+# snapshot back from the checkpoint.
+erf.fire.precip_source = "atmosphere"
+erf.fire.fire_stats_csv_file = "fire_stats_atmosphere_restart.csv"
+erf.restart = chk00027
+erf.check_int = -1

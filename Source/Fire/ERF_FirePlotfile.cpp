@@ -57,9 +57,10 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
     bool has_structure_height = (fire_layer.get_structure_height() != nullptr);
     bool has_nonburnable = (fire_layer.get_nonburnable() != nullptr);
     bool has_exposure = (fire_layer.get_structure_id() != nullptr);
+    bool has_precip = (fire_layer.get_precip_rate() != nullptr);
 
-    Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure);
-    int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure);
+    Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure, has_precip);
+    int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt, has_live_moisture, has_ros_weight, has_structure_height, has_nonburnable, has_exposure, has_precip);
     // Vector<std::string> varnames = fire_plotfile_var_names(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
     // int ncomp = fire_plotfile_ncomp(has_spotting, has_crown, has_fuel_map, has_flame_tilt);
 
@@ -158,6 +159,11 @@ WriteFirePlotfile(const std::string& plotfile_prefix,
         MultiFab::Copy(mf, *fire_layer.get_heat_load(),      0, comp++, 1, 0);
         MultiFab::Copy(mf, *fire_layer.get_peak_intensity(), 0, comp++, 1, 0);
         MultiFab::Copy(mf, *fire_layer.get_ember_landings(), 0, comp++, 1, 0);
+    }
+
+    // Rain rate per fire cell [mm/hr] (erf.fire.precip_source, or the uniform rate)
+    if (has_precip) {
+        MultiFab::Copy(mf, *fire_layer.get_precip_rate(), 0, comp++, 1, 0);
     }
 
     std::string plotfilename = Concatenate(plotfile_prefix, step, 5);

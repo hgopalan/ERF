@@ -4447,6 +4447,12 @@ Fuel and moisture
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.precip_rate_mm_hr**                 | Uniform precipitation rate wetting the dead fuel [mm/hr]   | Real >= 0                      | 0.0                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.precip_source**                     | Rain wetting the dead classes: precip_rate_mm_hr           | "uniform", "atmosphere"        | "uniform"              |
+|                                                | everywhere, or each column's change per step of the        |                                |                        |
+|                                                | microphysics surface precipitation accumulation (needs a   |                                |                        |
+|                                                | scheme with precipitation, moisture_dynamic, and           |                                |                        |
+|                                                | precip_rate_mm_hr = 0)                                     |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.moisture_model**                    | Dead-class update: one time constant per class, or radial  | "timelag", "stick"             | "timelag"              |
 |                                                | diffusion in a cylindrical stick (Nelson 2000 framework)   |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
