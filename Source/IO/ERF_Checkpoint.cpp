@@ -691,6 +691,12 @@ ERF::WriteCheckpointFile () const
         if (const amrex::MultiFab* em = m_fire_layer->get_ember_landings()) {
             VisMF::Write(*em, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireEmberLandings"));
         }
+        // Structure ignition state (state, ignition time, time above the
+        // intensity threshold, cause); null unless erf.fire.structures.ignition.enable.
+        if (const amrex::MultiFab* ss = m_fire_layer->get_structure_state()) {
+            amrex::Print() << "Writing fire structure ignition state to checkpoint" << std::endl;
+            VisMF::Write(*ss, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireStructureState"));
+        }
         // State that carries across steps but was not written before: the spotting
         // diagnostics, which are recomputed only every spotting interval and held
         // in between; the temporal acceleration state; and the crown ROS carried
@@ -2066,6 +2072,12 @@ ERF::ReadCheckpointFileFire ()
     restore_optional(m_fire_layer->get_heat_load_mut(),      "FireHeatLoad");
     restore_optional(m_fire_layer->get_peak_intensity_mut(), "FirePeakIntensity");
     restore_optional(m_fire_layer->get_ember_landings_mut(), "FireEmberLandings");
+    // The per-structure state that drives the ignition rule is rebuilt from
+    // the field on every rank once it is read.
+    if (m_fire_layer->get_structure_state_mut() != nullptr) {
+        restore_optional(m_fire_layer->get_structure_state_mut(), "FireStructureState");
+        m_fire_layer->restore_structure_ignition_state();
+    }
     restore_optional(m_fire_layer->get_albini_data_mut(),           "FireAlbiniData");
     restore_optional(m_fire_layer->get_accel_state_mut(),           "FireAccelState");
     restore_optional(m_fire_layer->get_crown_ros_active_mut(),      "FireCrownRosActive");

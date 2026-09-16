@@ -85,6 +85,20 @@ CSVs and the logs, prints a table and fails on any of these:
 7. **The coupled run stands up.** No NaN in the log, a plume (maximum
    vertical velocity above 0.5 m/s in the last atmosphere plotfile), and the
    fire reaches x = 780 m.
+8. **Houses ignite and spread.** The ``ignition`` variant runs the
+   subdivision with :ref:`sec:WUIStructureIgnition` on, with the ignition
+   thresholds at a third of the documented defaults (at the defaults no house
+   ignites in this case; the README has both runs). At least one house ignites, a later one after the first, and at
+   least one ignited house had not been reached by the front when it ignited,
+   which is house-to-house spread by radiation or brands; the plotfile state
+   of every ignited house agrees with the CSV; no footprint cell burns or
+   loses fuel. On 2026-09-16, with the thresholds at a third of the defaults, 19 of the
+   24 houses ignited between 250 and 1880 s, all by heat load; nine before
+   the front reached their wall band and two whose band the front never
+   reached, from their neighbours' radiation alone. At the documented
+   defaults no house ignites in 2100 s: the grass fire leaves at most
+   3.1 MJ/m² at a wall, peaks at 773 kW/m and drops at most 15 brands on a
+   footprint.
 
 The exposure numbers are also reported against the threshold usually quoted
 for the ignition of wood by radiation, about 20 kW/m² (Cohen 2004), as a

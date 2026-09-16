@@ -194,6 +194,13 @@ tilt of the band cells is the natural next step. ``Exec/RegTests/FireExposure``
 runs the obstacle scenario with and without immersed-forcing buildings and
 with spotting, and ``FireRestart`` checks that the CSV resumes exactly.
 
+With :cpp:`erf.fire.structures.ignition.enable` the structures ignite from
+these accumulators, burn and load their neighbours (:ref:`sec:WUIStructureIgnition`).
+The CSV then gains ``state, t_ignition_s, cause, structure_flux_Wm2,
+incident_flux_max_Wm2`` (the columns are absent when the option is off), the
+plotfile ``fire_structure_state``, ``fire_structure_ignition_time`` and
+``fire_structure_rad_flux``, and the checkpoint ``FireStructureState``.
+
 Debug output
 ------------
 

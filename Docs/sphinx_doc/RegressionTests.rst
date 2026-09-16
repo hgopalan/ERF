@@ -610,7 +610,7 @@ Every fire suite under ``Exec/RegTests`` (``FireAccelerationClock``, ``FireBurno
 ``FireLevelSetEllipse``, ``FireLiveMoisture``, ``FireNearWall``,
 ``FirePerimeterIgnition``, ``FirePrecipSource``, ``FireRestart``,
 ``FireRosComparison``, ``FireScottBurgan``, ``FireStickMoisture``,
-``FireWindSampling``,
+``FireStructureIgnition``, ``FireWindSampling``,
 ``FarsiteDefault`` and ``LevelSetPropagation``) registers one of its decks as
 a CTest smoke test carrying the ``fire`` and ``regression`` labels; the dust
 module is covered by the ``FireRestart`` dust deck when ``ERF_ENABLE_DUST`` is
@@ -684,6 +684,24 @@ and, with ``ERF_ENABLE_DUST``, ``FireAnchorLevel_dust_abort`` pass when the
 matching start-up check of the fire grid's level stops the run: a level above
 the finest, a level that regrids, a refinement box short of the domain top, two
 separate patches, and the dust layer, which runs on level 0 only.
+
+``FireStructureIgnition`` (MPI builds, not Windows) runs
+``run_structure_ignition.sh`` on one rank: a grass fire lit against the wall
+of a house, with a second house 20 m downwind and a third 90 m further, for
+40 steps with structure ignition off and on, in a radiation-only variant and
+restarted from step 20 (:ref:`sec:WUIStructureIgnition`). It requires the
+first house to ignite from the heat load at its wall, a second house to
+ignite later (from the first's radiation alone in the radiation-only variant,
+where the front never reaches its wall band and the third house stays
+unignited), the first house to release its peak flux and burn out with zero
+release after, the plotfile state to agree with the CSV, the incident flux of
+the step-10 plotfile to equal the point-source sum recomputed in the checker,
+the restart to reproduce the last CSV rows, and the same checker to fail on
+the ignition-off run, whose CSV has no state column.
+``FireStructureIgnition_no_exposure_abort`` and
+``FireStructureIgnition_curve_abort`` pass when the run stops at start-up
+without the exposure accumulators the rule reads, and with a burn curve whose
+growth phase alone would release more than 70 % of the fuel load.
 
 PBL start-up check
 ------------------

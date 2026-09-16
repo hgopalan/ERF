@@ -4513,6 +4513,37 @@ Fuel and moisture
 | **erf.fire.structures.wind_open_columns**      | Renormalise the bilinear wind weights over the columns open| Boolean                        | false                  |
 |                                                | at the wind height; needs structures.enable                |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.structures.ignition.enable**        | Structures ignite from the exposure accumulators, burn,    | Boolean                        | false                  |
+|                                                | radiate and launch brands (:ref:`sec:WUIStructureIgnition`)|                                |                        |
+|                                                | ; needs exposure.enable                                    |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.structures.ignition.heat_load_J_m2**| Largest accumulated heat load in the wall band at which a  | Real; <= 0 turns the criterion | 6.0e6                  |
+|                                                | structure ignites [J/m2]                                   | off                            |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.structures.ignition.ember_count**   | Brands landed on the footprint at which a structure        | Integer; <= 0 turns the        | 50                     |
+|                                                | ignites                                                    | criterion off                  |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.structures.ignition.intensity_kW_m**| Fireline intensity in the wall band above which time       | Real; <= 0 turns the criterion | 1000.0                 |
+|                                                | counts toward residence_s [kW/m]                           | off                            |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.structures.ignition.residence_s**   | Time above intensity_kW_m at which a structure ignites [s] | Real >= 0                      | 60.0                   |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.structures.ignition.peak_flux_W_m2**| Peak heat release of a burning structure per unit          | Real > 0                       | 2.5e5                  |
+|                                                | footprint area [W/m2]                                      |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.structures.ignition.fuel_load_J_m2**| Heat a structure releases over its whole burn per unit     | Real > 0                       | 7.8e8                  |
+|                                                | footprint area [J/m2]                                      |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.structures.ignition.growth_time_s** | Time from ignition to the peak flux (t-squared growth) [s];| Real >= 0; peak_flux_W_m2 *    | 600.0                  |
+|                                                | 0 starts at the peak                                       | growth_time_s / 3 <= 0.7 *     |                        |
+|                                                |                                                            | fuel_load_J_m2                 |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.structures.ignition.rad_fraction**  | Share of the release radiated onto the cells around the    | Real in [0, 1]                 | 0.3                    |
+|                                                | structure                                                  |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.structures.ignition.rad_radius_m**  | Distance within which a burning footprint cell's radiation | Real >= 0; 0 turns the         | 100.0                  |
+|                                                | is added to the heat load [m]                              | radiation off                  |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 
 
 Ignition

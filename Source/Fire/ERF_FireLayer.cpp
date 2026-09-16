@@ -641,6 +641,19 @@ void FireLayer::initialize(const ERF& erf,
         }
     }
 
+    // Structure ignition: needs the ids (exposure) and the mask (the wall
+    // band), both built above.
+    if (m_params.structures.ignition.enable) {
+        if (!fire_structure_id || !fire_nonburnable) {
+            amrex::Abort("[FIRE] erf.fire.structures.ignition.enable needs the structure ids and the "
+                         "non-burnable mask (erf.fire.exposure.enable with erf.fire.structures.enable)");
+        }
+        m_struct_ign = std::make_unique<StructureIgnition>(m_fg, m_params.structures.ignition,
+                                                           m_n_structures, m_params.exposure.ring,
+                                                           m_params.fire_debug);
+        m_struct_ign->build_footprints(*fire_structure_id);
+    }
+
     m_probe_reported.assign(m_params.probes.size() / 2, false);
 
     amrex::Print() << "[FIRE] FireLayer initialized: C=" << m_fg.C
@@ -1175,19 +1188,38 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
 
     compute_heat_flux_and_diagnostics(dt);
 
+    // Burning structures: their release joins fire_heat_flux on their
+    // footprint cells (and so the atmosphere, through update_atm_flux_buffer),
+    // their equivalent intensity is handed to the spotting launch below, and
+    // their radiant fraction becomes the incident flux on the cells around them.
+    if (m_struct_ign) {
+        m_struct_ign->apply_heat_sources(m_current_time, *fire_heat_flux, *fire_structure_id);
+    }
+
     // Exposure accumulators: heat load integrates the flux over the
-    // atmospheric step, the peak keeps the largest intensity seen.
+    // atmospheric step (plus the incident radiant flux of burning structures,
+    // which is how a burning house loads its neighbours), the peak keeps the
+    // largest intensity seen.
     if (fire_heat_load && fire_heat_flux && fire_fireline_intensity) {
+        const amrex::MultiFab* rad = m_struct_ign ? m_struct_ign->rad_flux() : nullptr;
         for (MFIter mfi(*fire_heat_load, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
             const Box& bx = mfi.tilebox();
             auto const& hl = fire_heat_load->array(mfi);
             auto const& pk = fire_peak_intensity->array(mfi);
             auto const& q  = fire_heat_flux->const_array(mfi);
             auto const& ib = fire_fireline_intensity->const_array(mfi);
-            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                hl(i, j, k) += q(i, j, k) * dt;
-                pk(i, j, k)  = amrex::max(pk(i, j, k), ib(i, j, k));
-            });
+            if (rad) {
+                auto const& qr = rad->const_array(mfi);
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                    hl(i, j, k) += (q(i, j, k) + qr(i, j, k)) * dt;
+                    pk(i, j, k)  = amrex::max(pk(i, j, k), ib(i, j, k));
+                });
+            } else {
+                amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                    hl(i, j, k) += q(i, j, k) * dt;
+                    pk(i, j, k)  = amrex::max(pk(i, j, k), ib(i, j, k));
+                });
+            }
         }
     }
 
@@ -1218,7 +1250,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 fire_surface_z.get(),
                 fire_nonburnable.get(),
                 fire_ember_landings.get(),
-                /*phi_normalized=*/ m_params.propagation_method != "levelset");
+                /*phi_normalized=*/ m_params.propagation_method != "levelset",
+                m_struct_ign ? m_struct_ign->launch_intensity() : nullptr);
 
             // A spot landing lowers phi below zero directly, outside the
             // substep loop that stamps arrival time, so spot-ignited cells kept
@@ -1279,6 +1312,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     }
 
     report_probes();
+
+    // The ignition rule reads the accumulators after this step's update and
+    // stamps new ignitions with the end of the step, as the arrival time is.
+    if (m_struct_ign) {
+        m_struct_ign->update_state(m_current_time + dt, dt, *fire_structure_id, *fire_nonburnable,
+                                   *fire_heat_load, *fire_fireline_intensity, *fire_ember_landings);
+    }
 
     if (m_params.exposure.enable && fire_structure_id &&
         (m_step % m_params.exposure.interval == 0)) {
@@ -2395,7 +2435,8 @@ void FireLayer::report_exposure()
     std::vector<amrex::Real> foot(N + 1, 0.0), sx(N + 1, 0.0), sy(N + 1, 0.0),
         hmax(N + 1, 0.0), wall(N + 1, 0.0), wall_burned(N + 1, 0.0),
         tfirst(N + 1, 1.0e30), tlast(N + 1, -1.0), imax(N + 1, 0.0),
-        hl_sum(N + 1, 0.0), hl_max(N + 1, 0.0), emb(N + 1, 0.0);
+        hl_sum(N + 1, 0.0), hl_max(N + 1, 0.0), emb(N + 1, 0.0), rad_max(N + 1, 0.0);
+    const amrex::MultiFab* rad = m_struct_ign ? m_struct_ign->rad_flux() : nullptr;
 
     for (amrex::MFIter mfi(*fire_structure_id); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.validbox();
@@ -2409,6 +2450,9 @@ void FireLayer::report_exposure()
         auto id = id_v.array();  auto mk = mk_v.array();  auto at = at_v.array();
         auto hl = hl_v.array();  auto pk = pk_v.array();  auto em = em_v.array();
         auto hh = hh_v.array();
+        std::unique_ptr<ERFHostFabView> rad_v;
+        amrex::Array4<const amrex::Real> rf;
+        if (rad) { rad_v = std::make_unique<ERFHostFabView>((*rad)[mfi]); rf = rad_v->array(); }
         amrex::LoopOnCpu(bx, [&](int i, int j, int /*k*/) {
             const int sid = static_cast<int>(id(i, j, 0) + 0.5_rt);
             if (sid > 0) {
@@ -2444,6 +2488,7 @@ void FireLayer::report_exposure()
                 imax[s]    = std::max(imax[s], pk(i, j, 0));
                 hl_sum[s] += hl(i, j, 0);
                 hl_max[s]  = std::max(hl_max[s], hl(i, j, 0));
+                if (rad) { rad_max[s] = std::max(rad_max[s], rf(i, j, 0)); }
             }
         });
     }
@@ -2459,6 +2504,7 @@ void FireLayer::report_exposure()
     amrex::ParallelDescriptor::ReduceRealSum(hl_sum.data(),      N + 1);
     amrex::ParallelDescriptor::ReduceRealMax(hl_max.data(),      N + 1);
     amrex::ParallelDescriptor::ReduceRealSum(emb.data(),         N + 1);
+    amrex::ParallelDescriptor::ReduceRealMax(rad_max.data(),     N + 1);
 
     if (!amrex::ParallelDescriptor::IOProcessor()) { return; }
 
@@ -2473,7 +2519,13 @@ void FireLayer::report_exposure()
     if (need_header) {
         csv << "time_s,structure_id,x_m,y_m,height_m,footprint_cells,wall_cells,"
                "wall_burned_frac,t_first_s,t_last_s,residence_s,"
-               "peak_intensity_kWm,heat_load_mean_MJm2,heat_load_max_MJm2,embers\n";
+               "peak_intensity_kWm,heat_load_mean_MJm2,heat_load_max_MJm2,embers";
+        // The structure ignition columns only when it is on, so the positional
+        // readers of the plain exposure CSV keep working.
+        if (m_struct_ign) {
+            csv << ",state,t_ignition_s,cause,structure_flux_Wm2,incident_flux_max_Wm2";
+        }
+        csv << "\n";
     }
     int reached = 0;
     amrex::Real i_top = 0.0, hl_top = 0.0;
@@ -2491,7 +2543,15 @@ void FireLayer::report_exposure()
             << static_cast<long>(foot[s]) << "," << static_cast<long>(wall[s]) << ","
             << wf << "," << t0 << "," << t1 << "," << res << ","
             << imax[s] << "," << hlm << "," << hl_max[s] * 1.0e-6 << ","
-            << static_cast<long>(emb[s]) << "\n";
+            << static_cast<long>(emb[s]);
+        if (m_struct_ign) {
+            csv << "," << erf_structure_ignition::state_name(m_struct_ign->state_of(s))
+                << "," << m_struct_ign->ignition_time(s)
+                << "," << erf_structure_ignition::cause_name(m_struct_ign->cause_of(s))
+                << "," << m_struct_ign->flux_of(s, m_current_time)
+                << "," << rad_max[s];
+        }
+        csv << "\n";
         if (burned) {
             ++reached;
             i_top  = std::max(i_top,  imax[s]);
@@ -2507,7 +2567,12 @@ void FireLayer::report_exposure()
     amrex::Print() << "[FIRE EXPOSURE] t=" << m_current_time
                    << " reached=" << reached << "/" << N
                    << " peak_intensity_kWm=" << i_top
-                   << " heat_load_max_MJm2=" << hl_top << "\n";
+                   << " heat_load_max_MJm2=" << hl_top;
+    if (m_struct_ign) {
+        amrex::Print() << " burning=" << m_struct_ign->n_burning()
+                       << " burned_out=" << m_struct_ign->n_burned_out();
+    }
+    amrex::Print() << "\n";
 }
 
 // ───────────────────────────────────────────────────────────────────────────

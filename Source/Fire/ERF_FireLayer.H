@@ -32,6 +32,7 @@
 #include <ERF_FireAcceleration.H>
 // Phase 13A: Per-fuel wind height
 #include <ERF_FuelWindHeight.H>
+#include <ERF_StructureIgnition.H>
 // Phase 13B: ROS models
 #include <ERF_BalbiModel.H>
 #include <ERF_DirectionalRos.H>
@@ -667,6 +668,30 @@ public:
     const amrex::MultiFab* get_ember_landings() const { return fire_ember_landings.get(); }
     amrex::MultiFab* get_ember_landings_mut() { return fire_ember_landings.get(); }
 
+    /// Structure ignition state field (state, ignition time, time above the
+    /// intensity threshold, cause; see erf_structure_ignition::Comp); null
+    /// unless erf.fire.structures.ignition.enable.
+    const amrex::MultiFab* get_structure_state() const
+    {
+        return m_struct_ign ? m_struct_ign->state_field() : nullptr;
+    }
+    amrex::MultiFab* get_structure_state_mut()
+    {
+        return m_struct_ign ? m_struct_ign->state_field_mut() : nullptr;
+    }
+    /// Incident radiant flux from burning structures [W/m2]; null unless ignition is on.
+    const amrex::MultiFab* get_structure_rad_flux() const
+    {
+        return m_struct_ign ? m_struct_ign->rad_flux() : nullptr;
+    }
+    /// The structure ignition module itself, for the diagnostics; null unless on.
+    const StructureIgnition* get_structure_ignition() const { return m_struct_ign.get(); }
+    /// Rebuild the per-structure ignition state from the restored field (checkpoint restart).
+    void restore_structure_ignition_state()
+    {
+        if (m_struct_ign && fire_structure_id) { m_struct_ign->restore_from_field(*fire_structure_id); }
+    }
+
     /**
      * @brief Get fire latent heat flux on fire grid.
      * @return Pointer to fire_latent_flux MultiFab [W/m²].
@@ -890,6 +915,11 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_ember_landings;   // brands landed on a footprint
     int                                      m_n_structures = 0;
     std::vector<char>                        m_exposure_reported;   // first-arrival line printed
+
+    // Structure ignition and burning (erf.fire.structures.ignition.enable):
+    // per-structure state, the burning structures' heat and ember sources and
+    // the incident radiant flux on the fire grid (ERF_StructureIgnition.H).
+    std::unique_ptr<StructureIgnition>       m_struct_ign;
 
     /// Label the footprints of the structure heightmap and allocate the accumulators.
     void build_structure_ids();
