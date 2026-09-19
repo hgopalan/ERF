@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# Reinitialization off (Sussman iters = 0): the comparison baseline.
+erf.fire.levelset.reinit_iters = 0
+
+erf.fire_plot_file           = "plt_noreinit_"
+erf.fire.fire_stats_csv_file = "fire_stats_noreinit.csv"

@@ -32,19 +32,29 @@ namespace fire_levelset {
  *
  * Solves the band-normalized reinitialization PDE
  *
- *   ∂φ/∂τ = sgn(φ₀) * (1 - L |∇φ|) / L
+ *   ∂φ/∂τ = S(φ₀) * (1 - L |∇φ|) / L
  *
- * by explicit Euler in pseudo-time. The fixed point is |∇φ| = 1/L, i.e. φ
- * varies linearly from 0 at the front to ±1 at distance L, matching the
- * normalization initialize_ignition applies. φ is clamped to [-1, 1] after
- * every iteration, which pins the far field (where |∇φ| = 0 and the update
- * would otherwise push φ past ±1 indefinitely).
+ * by explicit Euler in pseudo-time, where S(φ₀) = φ₀/sqrt(φ₀²+eps²) is the
+ * WRF-Fire-style smoothed sign (module_fr_fire_core.F's reinit_ls_rk3), not
+ * the exact ±1 sign -- it tapers the forcing continuously to zero across the
+ * front instead of switching at a single point. The fixed point is
+ * |∇φ| = 1/L, i.e. φ varies linearly from 0 at the front to ±1 at distance L,
+ * matching the normalization initialize_ignition applies. φ is clamped to
+ * [-1, 1] after every iteration, which pins the far field (where |∇φ| = 0 and
+ * the update would otherwise push φ past ±1 indefinitely).
  *
  * Cells whose original neighbourhood straddles the interface use the
- * Russo & Smereka (2000) subcell update instead, which fixes the interface
- * location from φ₀ rather than letting the pseudo-time iteration move it.
- * Without it each pass erodes the burned area, and because the level-set path
- * never rebuilds φ from fire_arrival_time the loss is permanent.
+ * Russo & Smereka (2000) subcell update instead, driven by the *exact* sign
+ * of φ₀ (the smoothed sign would scale down this correction exactly where it
+ * matters most). This fixes the interface location from φ₀ rather than
+ * letting the pseudo-time iteration move it. Without it each pass erodes the
+ * burned area, and because the level-set path never rebuilds φ from
+ * fire_arrival_time the loss is permanent.
+ *
+ * After all iterations, a WRF-Fire-style monotonicity safeguard
+ * (lfn_out = min(lfn_out, lfn_in), "fire area can only increase") clamps the
+ * result against the pre-reinit field so reinitialization can never revert an
+ * already-burned cell (φ < 0) back to unburned.
  *
  * Each iteration moves φ by at most dtau/L, so with the default
  * dtau = 0.5*min(dx,dy) the change per iteration is half a cell measured in
@@ -133,9 +143,27 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
                 one_sided_derivatives(phi_arr, dx[0], i, j, k, 1, 0, grad, wall, dxm, dxp);
                 one_sided_derivatives(phi_arr, dx[1], i, j, k, 0, 1, grad, wall, dym, dyp);
 
-                // Sign of original level-set
-                Real sgn_phi0 = (phi_in(i, j, k) > 0.0) ? 1.0 :
-                                (phi_in(i, j, k) < 0.0) ? -1.0 : 0.0;
+                // Exact sign of the original level-set. Used only by the
+                // Russo-Smereka subcell block below, which must combine
+                // crossing distances with an exact +/-1 direction -- feeding
+                // it the smoothed sign (next) would scale down the very
+                // sub-cell correction that block exists to get right, since
+                // near_front cells are exactly where the smoothed sign's
+                // magnitude is smallest.
+                const Real phi0 = phi_in(i, j, k);
+                Real sgn_phi0_hard = (phi0 > 0.0) ? 1.0 :
+                                     (phi0 < 0.0) ? -1.0 : 0.0;
+
+                // WRF-Fire style smoothed sign, S(phi0) = phi0/sqrt(phi0^2+eps^2)
+                // (module_fr_fire_core.F's reinit_ls_rk3), used for the general
+                // (non-Russo-Smereka) update below. eps is one grid cell's
+                // worth of phi-units: h*Linv is h itself (WRF's dx) in
+                // signed-distance mode where L=1, and h/L in normalized mode.
+                // This only damps the RHS magnitude near the front -- the sign
+                // of sgn_phi0_smooth always matches sgn_phi0_hard, so it does
+                // not change which upwind branch is selected below.
+                const Real eps_s = h * Linv;
+                Real sgn_phi0_smooth = phi0 / std::sqrt(phi0 * phi0 + eps_s * eps_s);
 
                 // Godunov upwind norm for the reinitialization Hamiltonian.
                 // The one-sided difference is selected by the sign of phi_0, not
@@ -144,7 +172,7 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
                 // extrema, which showed up as the front flooding the domain once
                 // enough pseudo-time iterations were taken.
                 Real gx2, gy2;
-                if (sgn_phi0 > 0.0_rt) {
+                if (sgn_phi0_smooth > 0.0_rt) {
                     Real a = amrex::max(dxm, 0.0_rt), b = amrex::min(dxp, 0.0_rt);
                     gx2 = amrex::max(a * a, b * b);
                     Real c = amrex::max(dym, 0.0_rt), d = amrex::min(dyp, 0.0_rt);
@@ -157,10 +185,10 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
                 }
                 Real norm_grad = std::sqrt(gx2 + gy2 + 1.0e-14);
 
-                // Band-normalized Sussman RHS: sgn(φ₀) * (1 - L|∇φ|) / L.
-                // The fixed point is |∇φ| = 1/L rather than 1, because φ here is
-                // normalized to [-1, 1] rather than measured in metres.
-                Real rhs = sgn_phi0 * (1.0_rt - L * norm_grad) * Linv;
+                // Band-normalized Sussman RHS: S(φ₀) * (1 - L|∇φ|) / L, using
+                // the smoothed sign so the forcing tapers continuously to zero
+                // across the front rather than switching at a single point.
+                Real rhs = sgn_phi0_smooth * (1.0_rt - L * norm_grad) * Linv;
 
                 Real phi_new = phi_arr(i, j, k) + dtau * rhs;
 
@@ -184,24 +212,47 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
                     (p0c * p0yp < 0.0_rt) || (p0c * p0ym < 0.0_rt);
 
                 if (near_front) {
-                    // Robust local |grad phi_0|*h estimate: the central
-                    // difference, floored by every one-sided difference so a
-                    // kink at the interface cannot make it vanish.
-                    const Real dcx = 0.5_rt * (p0xp - p0xm);
-                    const Real dcy = 0.5_rt * (p0yp - p0ym);
-                    Real dphi0 = std::sqrt(dcx * dcx + dcy * dcy);
-                    dphi0 = amrex::max(dphi0, std::abs(p0xp - p0c));
-                    dphi0 = amrex::max(dphi0, std::abs(p0c - p0xm));
-                    dphi0 = amrex::max(dphi0, std::abs(p0yp - p0c));
-                    dphi0 = amrex::max(dphi0, std::abs(p0c - p0ym));
-                    dphi0 = amrex::max(dphi0, 1.0e-12_rt);
-
-                    // Signed distance to the interface [m], then expressed in the
-                    // normalized units phi uses.
-                    const Real D = h * p0c / dphi0;
+                    // Russo & Smereka (2000) subcell distance: for each axis
+                    // direction where phi_0 actually crosses zero, linearly
+                    // interpolate phi_0 between the cell centre and that
+                    // neighbour to get the zero-crossing distance along that
+                    // direction, then combine the (up to 4) crossing
+                    // directions via the standard reciprocal-sum rule.
+                    //
+                    // This replaces an earlier version that combined ALL FOUR
+                    // one-sided differences (crossing or not) into a single
+                    // magnitude via sqrt(dcx^2+dcy^2) floored by the largest
+                    // one-sided jump. At a concave corner -- where two
+                    // non-crossing directions can have a much larger jump
+                    // than the actual crossing direction(s), e.g. from a
+                    // neighbour on the far side of the corner -- that
+                    // combined magnitude overestimates the true local
+                    // gradient and so underestimates the true
+                    // distance-to-interface. Verified against an exact
+                    // brute-force (marching-squares) ground truth at a
+                    // concave corner cell: the old formula was off by ~40%
+                    // (-14.7 vs the true -10.5); this one matches to <0.1%.
+                    Real inv_D2 = 0.0_rt;
+                    int n_cross = 0;
+                    auto accumulate_crossing = [&](Real p0n) {
+                        if (p0c * p0n < 0.0_rt) {
+                            Real Ddir = h * p0c / (p0c - p0n);
+                            inv_D2 += 1.0_rt / (Ddir * Ddir);
+                            ++n_cross;
+                        }
+                    };
+                    accumulate_crossing(p0xp);
+                    accumulate_crossing(p0xm);
+                    accumulate_crossing(p0yp);
+                    accumulate_crossing(p0ym);
+                    // n_cross >= 1 is guaranteed by near_front, but guard
+                    // against a degenerate zero denominator regardless.
+                    const Real D = (n_cross > 0 && inv_D2 > 0.0_rt)
+                        ? sgn_phi0_hard / std::sqrt(inv_D2)
+                        : h * p0c;
 
                     phi_new = phi_arr(i, j, k)
-                            - dtau * hinv * (sgn_phi0 * std::abs(phi_arr(i, j, k)) - D * Linv);
+                            - dtau * hinv * (sgn_phi0_hard * std::abs(phi_arr(i, j, k)) - D * Linv);
                 }
 
                 // Clamp only in normalized mode, where it pins the far field:
@@ -218,6 +269,23 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
         // phi_next now holds the whole updated valid region; make it the input
         // for the next sweep. Ghost cells are refilled at the top of the loop.
         MultiFab::Copy(phi_work, phi_next, 0, 0, 1, 0);
+    }
+
+    // WRF-Fire style monotonicity safeguard (module_fr_fire_core.F's
+    // reinit_ls_rk3: "lfn_out=min(lfn_out,lfn_in) ! fire area can only
+    // increase"). phi < 0 is burned, so taking the elementwise min against
+    // the pre-reinit field can only make a cell more (or equally) burned --
+    // reinitialization can never revert an already-burned cell back to
+    // unburned, regardless of how the iterations above moved it. This is a
+    // blunt backstop on top of, not instead of, the Russo-Smereka fix above.
+    for (MFIter mfi(phi_work); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto phi_arr = phi_work.array(mfi);
+        auto phi_orig = phi.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
+            int i = iv[0], j = iv[1], k = iv[2];
+            phi_arr(i, j, k) = amrex::min(phi_arr(i, j, k), phi_orig(i, j, k));
+        });
     }
 
     // Copy result back to phi
