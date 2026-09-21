@@ -349,9 +349,9 @@ void init_phi_from_polyline(
             // True signed distance function shifted inward by half_width, so
             // phi ramps continuously through zero at min_dist == half_width
             // rather than jumping from a flat -half_width interior straight
-            // to +half_width outside (the old clamped version made |grad phi|
-            // blow up to ~1.5-1.8 right at that edge; see ERF_fire_lsreinit's
-            // CLAUDE.md for the empirical measurement that caught this).
+            // to +half_width outside. Empirically, the old clamped version
+            // made |grad phi| spike to about 1.5-1.8 at that transition,
+            // so this continuous ramp preserves the expected |grad phi| = 1.
             Real new_phi = min_dist - half_width;
 
             // Apply min() semantics to merge with existing fire
