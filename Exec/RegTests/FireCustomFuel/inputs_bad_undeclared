@@ -1,0 +1,6 @@
+FILE = inputs_custom_map
+
+# The same run with a raster whose block is 1007, a custom code no
+# erf.fire.custom_fuel.1007.* block defines. Start-up has to abort naming the
+# code; without the check those cells would burn as GR1.
+erf.fire.fuel_map.file = "fuel_map_undeclared.asc"

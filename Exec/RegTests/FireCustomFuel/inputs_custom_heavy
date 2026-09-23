@@ -1,0 +1,18 @@
+FILE = inputs_base
+
+# A fuel complex neither published set can express: a heavy bed of coarse
+# woody material, the direction a structural fuel would be described in.
+# Rothermel's reaction term punishes the low surface-area-to-volume ratio, so
+# this must spread slower than the grass baseline.
+erf.fire.custom_fuel.codes = 1000
+erf.fire.custom_fuel.1000.name                   = coarse_woody_bed
+erf.fire.custom_fuel.1000.w_1h_kg_m2             = 2.0
+erf.fire.custom_fuel.1000.w_10h_kg_m2            = 20.0
+erf.fire.custom_fuel.1000.sav_1h_1_m             = 200.0
+erf.fire.custom_fuel.1000.depth_m                = 2.0
+erf.fire.custom_fuel.1000.moisture_ext           = 0.35
+erf.fire.custom_fuel.1000.heat_content_J_kg      = 1.86e7
+erf.fire.custom_fuel.1000.density_kg_m3 = 512.0
+erf.fire.custom_fuel.1000.burnout_time_s         = 600.0
+
+erf.fire.fuel_model_id = 1000

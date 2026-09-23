@@ -1503,6 +1503,8 @@ add_test_fire(FireMrfThermalExcess          FireRestart           inputs_coupled
     RUNTIME_OPTIONS "erf.pbl_type=MRF erf.pbl_mrf_fire_thermal_excess=true")
 add_test_fire(FireRosComparison_rothermel   FireRosComparison     inputs_rothermel_isotropic 40 NRANKS 1)
 add_test_fire(FireScottBurgan_gr2           FireScottBurgan       inputs_sb_gr2              40)
+add_test_fire(FireCustomFuel_uniform        FireCustomFuel        inputs_custom_grass        40)
+add_test_fire(FireCustomFuel_map            FireCustomFuel        inputs_custom_map          40)
 add_test_fire(FireStickMoisture_stick       FireStickMoisture     inputs_stick               40)
 add_test_fire(FireStructureIgnition_on      FireStructureIgnition inputs_on                  40 NRANKS 1)
 add_test_fire(FirePrecipSource_atmosphere   FirePrecipSource      inputs_atmosphere          40 NRANKS 1)
@@ -1515,6 +1517,22 @@ add_test_fire(FireLevelSetPropagation       LevelSetPropagation   inputs        
 # fire without a surface layer at zlo must stop at start-up, not crash in the first step
 add_test_fire_abort(FireNoSurfaceLayer_abort  FireRestart           inputs_levelset_straight
     "The fire module requires a surface layer" "zlo.type=SlipWall")
+# a deck-defined fuel model has to be described completely and in range: a code
+# outside 1000-1015, a missing property, a bed depth under the floor where the
+# Balbi models silently return zero spread, a heat content left in BTU/lb, and a
+# raster code no block defines all have to stop the run at start-up
+add_test_fire_abort(FireCustomFuelBadCode_abort     FireCustomFuel inputs_bad_code
+    "outside the custom range 1000-1015" "max_step=1")
+add_test_fire_abort(FireCustomFuelMissing_abort     FireCustomFuel inputs_bad_missing
+    "erf.fire.custom_fuel.1000.sav_1h_1_m is required" "max_step=1")
+add_test_fire_abort(FireCustomFuelBadDepth_abort    FireCustomFuel inputs_bad_depth
+    "erf.fire.custom_fuel.1000.depth_m must be in" "max_step=1")
+add_test_fire_abort(FireCustomFuelBadHeat_abort     FireCustomFuel inputs_bad_heat
+    "erf.fire.custom_fuel.1000.heat_content_J_kg must be in" "max_step=1")
+add_test_fire_abort(FireCustomFuelBurnout_abort     FireCustomFuel inputs_bad_burnout
+    "needs erf.fire.custom_fuel.1000.burnout_time_s" "max_step=1")
+add_test_fire_abort(FireCustomFuelUndeclared_abort  FireCustomFuel inputs_bad_undeclared
+    "the fuel map holds code 1007" "max_step=1")
 # a fuel map is placed by cell index, so it must have the fire grid's size
 add_test_fire_abort(FireFuelMapSize_abort     FireScottBurgan       inputs_sb_map
     "has 256 x 128 cells but the fire grid has 128 x 64" "erf.fire.grid_ratio=2")

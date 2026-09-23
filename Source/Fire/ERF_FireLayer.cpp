@@ -287,8 +287,18 @@ void FireLayer::initialize(const ERF& erf,
         }
     }
 
-    FuelModelParams fp = get_fuel_params(fire_params.fuel_model_id, fire_params.fuel_map.fuel_set_id(),
-                                         fire_params.moisture_live);
+    // Deck-defined fuel models first: every fuel property read below, the fuel
+    // map's own load and the coefficient tables all go through the slot table
+    // this builds, so it has to exist before any of them.
+    m_custom_fuel.init_from_inputs();
+    m_h_fuel_params = build_fuel_params_slot_table(fire_params.fuel_map.fuel_set_id(),
+                                                   fire_params.moisture_live, m_custom_fuel);
+    m_d_fuel_params.resize(m_h_fuel_params.size());
+    amrex::Gpu::copy(amrex::Gpu::hostToDevice, m_h_fuel_params.begin(), m_h_fuel_params.end(),
+                     m_d_fuel_params.begin());
+    if (fire_params.fire_debug) { m_custom_fuel.print_summary(); }
+
+    FuelModelParams fp = uniform_fuel_params();
     if (fire_params.fire_debug) {
         amrex::Print() << "[FIRE DEBUG] Uniform fuel model code=" << fire_params.fuel_model_id
                        << " set=" << fire_params.fuel_map.fuel_set << (fire_params.fuel_map.sb40_crosswalk ? " (crosswalk)" : "")
@@ -380,6 +390,9 @@ void FireLayer::initialize(const ERF& erf,
             fill_fuel_model_mf(*fire_fuel_model, m_d_fuel_codes.data(),
                                m_fg.geom, fire_nx);
             m_has_spatial_fuel = true;
+            // A custom code in the raster with no block in the deck would
+            // otherwise fall through to the set's unknown-code default.
+            m_custom_fuel.validate_map_codes(*fire_fuel_model);
             if (m_params.fuel_map.load_from_map) {
                 // Each cell starts with its own model's load rather than the
                 // uniform one; non-burnable codes of the Scott-Burgan set carry
@@ -387,7 +400,8 @@ void FireLayer::initialize(const ERF& erf,
                 fill_fuel_load_from_map(*fire_fuel_load, *fire_fuel_model,
                                         m_params.fuel_map.fuel_set_id(),
                                         m_params.fuel_map.sb40_active(),
-                                        m_params.moisture_live);
+                                        m_params.moisture_live,
+                                        fuel_params_table(), fuel_params_table_size());
                 if (m_params.fire_debug) {
                     const Real dA = m_fg.geom.CellSize(0) * m_fg.geom.CellSize(1);
                     amrex::Print() << "[FIRE DEBUG] Fuel load from the map: " << fire_fuel_load->sum(0) * dA
@@ -474,7 +488,8 @@ void FireLayer::initialize(const ERF& erf,
                                                 m_params.moisture_1hr);
             // Build per-fuel Balbi table when spatial fuel map is active
             if (m_has_spatial_fuel) {
-                auto h_balbi = build_fuel_balbi_table(m_params.balbi, m_params.moisture_1hr, -1.0, m_params.fuel_map.fuel_set_id(), m_params.moisture_live);
+                auto h_balbi = build_fuel_balbi_table(m_params.balbi, m_params.moisture_1hr, -1.0, m_params.fuel_map.fuel_set_id(), m_params.moisture_live,
+                                                      fuel_params_table_host().data());
                 m_d_balbi_table.resize(h_balbi.size());
                 amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_balbi.begin(),
                                  h_balbi.end(), m_d_balbi_table.begin());
@@ -815,7 +830,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             FuelModelParams fp_balbi = uniform_fuel_params();
             m_bc_default = compute_balbi_params(fp_balbi, m_params.balbi, avg1);
             if (m_has_spatial_fuel) {
-                auto h_balbi = build_fuel_balbi_table(m_params.balbi, avg1, -1.0, m_params.fuel_map.fuel_set_id(), m_params.moisture_live);
+                auto h_balbi = build_fuel_balbi_table(m_params.balbi, avg1, -1.0, m_params.fuel_map.fuel_set_id(), m_params.moisture_live,
+                                                      fuel_params_table_host().data());
                 m_d_balbi_table.resize(h_balbi.size());
                 amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_balbi.begin(),
                                  h_balbi.end(), m_d_balbi_table.begin());
@@ -930,6 +946,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         balbi_in.fuel_model   = m_has_spatial_fuel ? fire_fuel_model.get() : nullptr;
         balbi_in.table        = m_d_balbi_table.empty() ? nullptr : m_d_balbi_table.data();
         balbi_in.table_size   = static_cast<int>(m_d_balbi_table.size());
+        balbi_in.fp_table     = fuel_params_table();
+        balbi_in.fp_table_size = fuel_params_table_size();
         balbi_in.fp           = uniform_fuel_params();
         balbi_in.fuel_set     = m_params.fuel_map.fuel_set_id();
         balbi_in.M_live       = m_params.moisture_live;
@@ -1621,7 +1639,8 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
                         m_has_spatial_fuel ? fire_fuel_model.get() : nullptr,
                         (sfire_burnout && !m_has_spatial_fuel) ? burnout_tau_s(m_params.fuel_model_id) : 0.0_rt,
                         (sfire_burnout && m_has_spatial_fuel) ? m_d_burnout_tau.data() : nullptr,
-                        m_params.fuel_map.fuel_set_id(), m_params.moisture_live);
+                        m_params.fuel_map.fuel_set_id(), m_params.moisture_live,
+                        fuel_params_table(), fuel_params_table_size());
     add_prescribed_heat_flux();
 
     const Real h_kJ_per_kg = fp.heat_content * 2.326_rt;
@@ -1967,6 +1986,17 @@ amrex::Real FireLayer::burnout_tau_s(int fuel_code) const
     // WRF-SFIRE / CFBM burn times for the Anderson 13 (Jimenez y Munoz et al. 2026, Table 1)
     static const amrex::Real sfire_burn_time_s[14] = {0.0, 7.0, 7.0, 7.0, 180.0, 100.0, 100.0, 100.0,
                                                       900.0, 900.0, 900.0, 900.0, 900.0, 900.0};
+    // A deck-defined model carries its own burn time: sb40_to_anderson() would
+    // return the custom code unchanged and it would fall to model 1's 7 s.
+    if (m_custom_fuel.has_code(fuel_code)) {
+        const amrex::Real t_custom = m_custom_fuel.burnout_time_s(fuel_code);
+        if (!(t_custom > 0.0)) {
+            amrex::Abort("ERF-Fire custom fuel: erf.fire.burnout_model = sfire needs "
+                         "erf.fire.custom_fuel." + std::to_string(fuel_code)
+                         + ".burnout_time_s > 0 for the fuel codes the map uses");
+        }
+        return t_custom / m_params.burnout_time_to_efold;
+    }
     // Scott-Burgan codes take the burn time of their crosswalked Anderson model.
     const int a = sb40_to_anderson(fuel_code);
     const int c = (a >= 1 && a <= 13) ? a : 1;
@@ -2202,7 +2232,7 @@ void FireLayer::add_prescribed_heat_flux()
 void FireLayer::rebuild_rothermel_table(amrex::Real m1, amrex::Real m10, amrex::Real m100)
 {
     auto h_table = build_fuel_rothermel_table(m1, m10, m100, m_params.fuel_map.fuel_set_id(), m_params.moisture_live,
-                                              m_params.use_wind_limit);
+                                              m_params.use_wind_limit, fuel_params_table_host().data());
     m_d_rc_table.resize(h_table.size());
     amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_table.begin(), h_table.end(),
                      m_d_rc_table.begin());

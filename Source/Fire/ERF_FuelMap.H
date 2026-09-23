@@ -213,10 +213,16 @@ inline void fill_fuel_model_mf(amrex::MultiFab& fire_fuel_model,
  * @param[in]  fuel_set        Fuel model set id
  * @param[in]  sb40            Whether the Scott-Burgan codes are active
  * @param[in]  M_live          Live fuel moisture for the dynamic models
+ * @param[in]  fp_tbl          Device fuel properties by slot, so the deck-defined
+ *                             models of ERF_CustomFuel.H carry their own load;
+ *                             nullptr reads the published sets only
+ * @param[in]  fp_tbl_size     Entries in fp_tbl
  */
 inline void fill_fuel_load_from_map(amrex::MultiFab& fire_fuel_load,
                                     const amrex::MultiFab& fire_fuel_model,
-                                    int fuel_set, bool sb40, amrex::Real M_live)
+                                    int fuel_set, bool sb40, amrex::Real M_live,
+                                    const FuelModelParams* fp_tbl = nullptr,
+                                    int fp_tbl_size = 0)
 {
     for (amrex::MFIter mfi(fire_fuel_load); mfi.isValid(); ++mfi) {
         auto const& fuel = fire_fuel_load.array(mfi);
@@ -224,7 +230,8 @@ inline void fill_fuel_load_from_map(amrex::MultiFab& fire_fuel_load,
         amrex::ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
             const int c = static_cast<int>(code(i, j, k));
             fuel(i, j, k) = (sb40 && sb40_nonburnable(c)) ? amrex::Real(0.0)
-                          : fuel_total_load_kg_m2(get_fuel_params(c, fuel_set, M_live));
+                          : fuel_total_load_kg_m2(fuel_params_at_code(c, fuel_set, M_live,
+                                                                      fp_tbl, fp_tbl_size));
         });
     }
 }

@@ -1,0 +1,20 @@
+FILE = inputs_base
+
+# Anderson short grass written out in SI as a deck-defined model. Every number
+# is the table's value converted once:
+#   w_d1   0.034 lb/ft2 * 4.88243   = 0.16600262 kg/m2
+#   sigma  3500 1/ft    * 3.28084   = 11482.94   1/m
+#   delta  1.0 ft       * 0.3048    = 0.3048     m
+#   heat   8000 BTU/lb  * 2326      = 1.8608e7   J/kg
+#   rho_p  32 lb/ft3    * 16.0185   = 512.592    kg/m3
+# so the run has to reproduce inputs_anderson1 exactly.
+erf.fire.custom_fuel.codes = 1000
+erf.fire.custom_fuel.1000.name                   = anderson1_as_deck_fuel
+erf.fire.custom_fuel.1000.w_1h_kg_m2             = 0.16600262
+erf.fire.custom_fuel.1000.sav_1h_1_m             = 11482.94
+erf.fire.custom_fuel.1000.depth_m                = 0.3048
+erf.fire.custom_fuel.1000.moisture_ext           = 0.12
+erf.fire.custom_fuel.1000.heat_content_J_kg      = 1.8608e7
+erf.fire.custom_fuel.1000.density_kg_m3 = 512.592
+
+erf.fire.fuel_model_id = 1000

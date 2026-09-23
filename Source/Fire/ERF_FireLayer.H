@@ -5,6 +5,7 @@
 #include <string>
 #include <AMReX_Geometry.H>
 #include <memory>
+#include <vector>
 #include <ERF_FireParams.H>
 #include <ERF_FireGrid.H>
 #include <ERF_Rothermel.H>
@@ -20,6 +21,7 @@
 #include <ERF_ScottSpottingTable.H>
 #include <ERF_CrownFire.H>
 #include <ERF_FuelMap.H>
+#include <ERF_CustomFuel.H>
 #include <ERF_FireBreak.H>
 #include <ERF_FuelBlending.H>
 #include <ERF_IgnitionSchedule.H>
@@ -610,15 +612,33 @@ public:
      */
     amrex::Real burnout_tau_s(int fuel_code) const;
 
+    /// Device fuel properties by slot, or nullptr before initialize() builds them.
+    const FuelModelParams* fuel_params_table () const
+    {
+        return m_d_fuel_params.empty() ? nullptr : m_d_fuel_params.data();
+    }
+
+    /// Entries in fuel_params_table().
+    int fuel_params_table_size () const { return static_cast<int>(m_d_fuel_params.size()); }
+
+    /// The same fuel properties on the host, for the coefficient table builders.
+    const std::vector<FuelModelParams>& fuel_params_table_host () const { return m_h_fuel_params; }
+
     /// Parameters of the uniform fuel model, erf.fire.fuel_model_id, under the deck's fuel set.
     FuelModelParams uniform_fuel_params() const
     {
-        return get_fuel_params(m_params.fuel_model_id, m_params.fuel_map.fuel_set_id(), m_params.moisture_live);
+        return fuel_params_with_custom(m_params.fuel_model_id, m_params.fuel_map.fuel_set_id(),
+                                       m_params.moisture_live, m_custom_fuel);
     }
 
     /// The uniform fuel model's parameters for BEHAVE: the table without its curing transfer (behave_fuel_params).
     FuelModelParams uniform_behave_fuel_params() const
     {
+        // A deck-defined model has no live herbaceous class to transfer, so the
+        // BEHAVE parameters are the entry itself.
+        if (m_custom_fuel.has_code(m_params.fuel_model_id)) {
+            return m_custom_fuel.params(m_params.fuel_model_id);
+        }
         return behave_fuel_params(m_params.fuel_model_id, m_params.fuel_map.fuel_set_id());
     }
 
@@ -879,6 +899,13 @@ private:
     amrex::Gpu::DeviceVector<amrex::Real> m_d_burnout_tau;   ///< burnout e-folding time by fuel code (index 1-13) [s], erf.fire.burnout_model = sfire
     amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcz0;          // fcz0[0..13], device copy
     bool                                     m_use_per_fuel_wind_ht = false;
+
+    // Deck-defined fuel models (erf.fire.custom_fuel.*) and the slot table of
+    // fuel properties every ROS model, the heat flux and the fuel load read.
+    // Both are built from the inputs, so neither is checkpointed.
+    CustomFuelTable                              m_custom_fuel;
+    std::vector<FuelModelParams>                 m_h_fuel_params;
+    amrex::Gpu::DeviceVector<FuelModelParams>    m_d_fuel_params;
 
     // Phase 13B: Pre-computed ROS model coefficients (set in initialize, used in advance)
     BalbiComputed                            m_bc_default;      // Balbi global default (uniform fuel)

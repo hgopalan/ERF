@@ -11,6 +11,7 @@ ifeq ($(USE_FIRE), TRUE)
   CEXE_sources += Fire/ERF_FirePlotfile.cpp
   CEXE_sources += Fire/ERF_FireSmokeEmission.cpp
   CEXE_sources += Fire/ERF_StructureIgnition.cpp
+  CEXE_sources += Fire/ERF_CustomFuel.cpp
 
   CEXE_headers += Fire/ERF_Fire.H
   CEXE_headers += Fire/ERF_FireParams.H
@@ -55,5 +56,7 @@ ifeq ($(USE_FIRE), TRUE)
   CEXE_headers += Fire/ERF_BehaveModel.H
   CEXE_headers += Fire/ERF_FuelWindHeight.H
   CEXE_headers += Fire/ERF_StructureIgnition.H
+  CEXE_headers += Fire/ERF_CustomFuel.H
+  CEXE_headers += Fire/ERF_FuelModels.H
 endif
 
