@@ -3653,7 +3653,8 @@ ends of a box. Set ``amr.refine_whole_domain_dir = 2`` so AMReX emits refinement
 a run that violates either is refused at start-up with a message naming the input. The surface
 energy balance remains a level-0 feature, so ``erf.radiation.seb_prognostic_enable`` -- which
 evolves the surface temperature that the longwave boundary condition reads -- cannot be combined
-with ``amr.max_level > 0``.
+with ``amr.max_level > 0``; that combination is refused when the inputs are read, whether or not
+a fine level is ever built.
 
 
 

@@ -198,13 +198,20 @@ function(add_test_two_stream_radiation TEST_NAME PLTFILE)
     # CHECK_LEVELS is multi-value: as a one-value arg CMake's list semantics
     # split "0;1" into two arguments and only the first was ever seen, so the
     # fine level went unchecked and the test passed vacuously.
-    set(multiValueArgs "CHECK_LEVELS")
+    set(multiValueArgs "CHECK_LEVELS" "DIAG_LEVELS")
     cmake_parse_arguments(ADD_TEST_TSR "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
     # Join with a comma, not a semicolon: a semicolon inside a -D argument is
     # split again when the COMMAND is built. The runner splits on the comma.
     set(tsr_check_levels "0")
-    if(ADD_TEST_TSR_CHECK_LEVELS)
+    # DEFINED, not truthiness: if(<var>) treats the string "0" as false, so a list of
+    # just level 0 would silently fall back to the default.
+    if(DEFINED ADD_TEST_TSR_CHECK_LEVELS)
         string(JOIN "," tsr_check_levels ${ADD_TEST_TSR_CHECK_LEVELS})
+    endif()
+    # Levels that must appear in the diagnostics CSV; defaults to the checked levels.
+    set(tsr_diag_levels "${tsr_check_levels}")
+    if(DEFINED ADD_TEST_TSR_DIAG_LEVELS)
+        string(JOIN "," tsr_diag_levels ${ADD_TEST_TSR_DIAG_LEVELS})
     endif()
     setup_test()
     resolve_test_exe("" "erf_exec" TEST_EXE)
@@ -225,6 +232,7 @@ function(add_test_two_stream_radiation TEST_NAME PLTFILE)
         -DPLOTFILE=${CURRENT_TEST_BINARY_DIR}/${PLTFILE}
         "-DRUNTIME_OPTIONS=${ADD_TEST_TSR_RUNTIME_OPTIONS}"
         "-DCHECK_LEVELS=${tsr_check_levels}"
+        "-DDIAG_LEVELS=${tsr_diag_levels}"
         -P ${PROJECT_SOURCE_DIR}/Tests/RunTwoStreamRadiation.cmake)
     set_tests_properties(${TEST_NAME}
         PROPERTIES
@@ -1410,9 +1418,14 @@ add_test_abort(TwoStream_TaggedZPartial_abort
 #    longwave boundary condition reads and runs on level 0 only, so a refined
 #    run would give level 0 and its fine levels two different surface boundary
 #    conditions. Refused rather than left to disagree.
+# Driven with a tagging threshold that tags nothing, so this pins that the refusal happens
+# when the inputs are read rather than when a fine level is built: with the check in
+# define_level the run completed, and with erf.regrid_int > 0 it would have aborted at the
+# first regrid instead of at start-up.
 add_test_abort(TwoStream_PrognosticSEBMultiLevel_abort
     ${PROJECT_SOURCE_DIR}/Tests/test_files/TwoStream_ColumnHeating_TwoLevel TwoStream_ColumnHeating_TwoLevel.i
-    "is supported on a single level" "erf.radiation.seb_enable=true erf.radiation.seb_prognostic_enable=true")
+    "is supported on a single level"
+    "erf.radiation.seb_enable=true erf.radiation.seb_prognostic_enable=true erf.lowth.value_less=200.0")
 add_test_plotfile_header(Plotfile3D_TwoStreamHeatingSelection "" "erf_exec" "plt00000")
 
 add_test_0(CouetteFlow_x                     "" "erf_exec" "plt00050" RUNTIME_OPTIONS "erf.vert_implicit=false ")

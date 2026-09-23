@@ -92,7 +92,42 @@ if(NOT DEFINED CHECK_LEVELS OR "${CHECK_LEVELS}" STREQUAL "")
     set(CHECK_LEVELS "0")
 endif()
 string(REPLACE "," ";" check_level_list "${CHECK_LEVELS}")
+# Levels required to appear in the diagnostics CSV; defaults to the checked levels.
+if(NOT DEFINED DIAG_LEVELS OR "${DIAG_LEVELS}" STREQUAL "")
+    set(DIAG_LEVELS "${CHECK_LEVELS}")
+endif()
+string(REPLACE "," ";" diag_level_list "${DIAG_LEVELS}")
 message(STATUS "TwoStream column check will run on level(s): ${check_level_list}")
+
+# The diagnostics CSV must actually carry a row for every level that swept.
+#
+# The 1-rank vs NRANKS byte-comparison above cannot see this: it passes just as well if every
+# fine-level row is dropped in both runs, which is precisely the defect the per-level writer
+# fixes (one shared writer deduplicates on (step, call_site, time), which every level reports
+# identically). So assert the content, not only that two runs agree.
+if(EXISTS "${diag_nranks}")
+    file(STRINGS "${diag_nranks}" diag_lines)
+    list(POP_FRONT diag_lines diag_header)
+    if(NOT diag_header MATCHES ",level$")
+        message(FATAL_ERROR
+            "TwoStream diagnostics CSV header does not end with the level column: ${diag_header}")
+    endif()
+    foreach(diag_level IN LISTS diag_level_list)
+        set(found_level FALSE)
+        foreach(row IN LISTS diag_lines)
+            if(row MATCHES ",${diag_level}$")
+                set(found_level TRUE)
+                break()
+            endif()
+        endforeach()
+        if(NOT found_level)
+            message(FATAL_ERROR
+                "TwoStream diagnostics CSV has no row for level ${diag_level}; the per-level "
+                "writer is not emitting one row set per level")
+        endif()
+    endforeach()
+    message(STATUS "TwoStream diagnostics CSV carries rows for level(s): ${diag_level_list}")
+endif()
 
 two_stream_launcher(1 checker_launcher)
 foreach(check_level IN LISTS check_level_list)

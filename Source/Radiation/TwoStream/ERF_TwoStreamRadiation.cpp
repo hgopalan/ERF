@@ -244,22 +244,6 @@ TwoStreamRadiation::define_level (int lev,
     // only asks whether a level was decomposed in the vertical. A refinement
     // patch confined to the lower part of the domain is not split in z and
     // still fails here, which is the case that matters.
-    // The prognostic surface energy balance is a single-level feature. It owns
-    // the surface temperature that the longwave boundary condition reads, and
-    // it runs on level 0 only (see the seb_active gate in advance). A refined
-    // run would therefore give level 0 an evolving force-restore temperature
-    // while every fine level fell back to the surface layer or the scalar
-    // default -- two different surface boundary conditions for one surface.
-    // Refuse that rather than let the levels disagree silently. The column
-    // sweep itself is unaffected and runs on every level.
-    if (lev > 0 && rad_choice.seb_prognostic_enable) {
-        amrex::Abort("erf.radiation.seb_prognostic_enable = true is supported on a single level "
-                     "only: the force-restore surface temperature it evolves is the longwave "
-                     "boundary condition, and fine levels have no copy of it. Set "
-                     "amr.max_level = 0, or turn off erf.radiation.seb_prognostic_enable to run "
-                     "two-stream radiation on a refined hierarchy.");
-    }
-
     for (int ibox = 0; ibox < ba.size(); ++ibox) {
         const Box& b = ba[ibox];
         if (b.smallEnd(2) != domain.smallEnd(2) || b.bigEnd(2) != domain.bigEnd(2)) {

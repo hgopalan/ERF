@@ -274,9 +274,10 @@ consequences follow and are worth stating plainly:
 
 - **A lateral seam.** Across the edge of a patch, the coarse and the fine solution of the same
   physical column differ slightly, because they are computed on different grids. For a smooth
-  broadband two-stream model the difference is small, but nothing smooths it. Coarse cells
-  underneath a patch have their state replaced by the fine solution at the end of each step
-  (``AverageDown``), so the discrepancy does not accumulate there.
+  broadband two-stream model the difference is small, but nothing smooths it. Under
+  ``erf.coupling_type = TwoWay`` (the default) coarse cells underneath a patch have their state
+  replaced by the fine solution at the end of each step (``AverageDown``), so the discrepancy
+  does not accumulate there; under ``OneWay`` there is no such replacement and it does.
 - **No feedback upward.** The fine level's own structure does not influence the coarse level's
   radiation.
 
@@ -291,7 +292,8 @@ writes or reads that state in a checkpoint. The diagnostic SEB residual is likew
 level 0. Because the prognostic surface temperature *is* the longwave boundary condition,
 combining ``erf.radiation.seb_prognostic_enable`` with ``amr.max_level > 0`` would leave level 0
 and its fine levels with two different surface boundary conditions for one surface; that
-combination is refused at start-up rather than allowed to disagree silently.
+combination is refused when the inputs are read -- so it holds whether or not a fine level is
+ever built -- rather than allowed to disagree silently.
 
 Limitations
 --------------------------------------
