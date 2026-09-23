@@ -12,17 +12,20 @@ Tests are organized by model:
   - Balbi (2020) convective-radiative model and couplings (10 tests)
   - Directional ROS projection (5 tests)
   - Cheney-Gould (1998) grassland model (4 tests)
-  - Per-fuel wind height tables (5 tests)
+  - Per-fuel wind height tables (3 tests)
 
 Reference implementations extracted from:
   - ERF_BalbiModel.H: macarthur_ros(), compute_balbi_angle(), ROS formula
   - ERF_CheneyGouldModel.H: cheney_gould_ros()
-  - ERF_FuelWindHeight.H: build_fcwh_table(), build_fcz0_table()
+  - ERF_FuelWindHeight.H: build_fcwh_table()
 
 Run: python3 test_ros_models.py
 """
 
+import ast
 import math
+import os
+import re
 import sys
 
 
@@ -972,123 +975,271 @@ def test_cheney_gould_increases_with_curing():
 # Per-Fuel Wind Height Tests
 # ============================================================================
 
+def _source_path(name):
+    """Absolute path of a file under Source/Fire, relative to this script."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(here, "..", "..", "..", "..", "Source", "Fire", name)
+
+
+def _eval_int_expr(expr, consts, what, seen=()):
+    """Value of a C++ integer constant expression.
+
+    Walks the expression as an AST and accepts integer literals, the names in
+    `consts`, + - * and unary minus. Anything else raises, so an expression this
+    function cannot evaluate is reported rather than guessed at.
+    """
+    def value(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, int):
+            return node.value
+        if isinstance(node, ast.Name):
+            return _int_constant(node.id, consts, seen)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+            return -value(node.operand)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult)):
+            left, right = value(node.left), value(node.right)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            return left * right
+        raise RuntimeError(f"unsupported expression for {what}: {expr.strip()}")
+
+    try:
+        tree = ast.parse(expr.strip(), mode="eval")
+    except SyntaxError as exc:
+        raise RuntimeError(f"cannot parse {what} = {expr.strip()}") from exc
+    return value(tree.body)
+
+
+def _int_constant(name, consts, seen=()):
+    """Value of an integer constexpr, resolving the names it is written in terms of."""
+    if name in seen:
+        raise RuntimeError(f"circular definition of {name}: {' -> '.join(seen)}")
+    if name not in consts:
+        raise RuntimeError(f"{name} not found in the fire headers")
+    return _eval_int_expr(consts[name], consts, name, seen + (name,))
+
+
+def fuel_constants():
+    """The integer constexprs of ERF_FuelModels.H and ERF_FuelWindHeight.H."""
+    consts = {}
+    for header in ("ERF_FuelModels.H", "ERF_FuelWindHeight.H"):
+        with open(_source_path(header)) as f:
+            consts.update(re.findall(r"inline constexpr int\s+(\w+)\s*=\s*([^;]+);",
+                                     f.read()))
+    return consts
+
+
+def fuel_slot_count():
+    """FUEL_SLOT_COUNT as declared in ERF_FuelModels.H.
+
+    The declaration is written in terms of the other constants of that header
+    (FUEL_SLOT_CUSTOM_BASE + CUSTOM_FUEL_MAX), so resolve the names it uses.
+    """
+    return _int_constant("FUEL_SLOT_COUNT", fuel_constants())
+
+
 def build_fcwh_table(global_z_ref, use_per_fuel=False):
     """
-    Build per-fuel wind height (fcwh) table indexed 0..13.
+    Build the per-fuel wind height (fcwh) table, one entry per fuel slot.
 
-    Implementation from ERF_FuelWindHeight.H lines 44-63:
-    - When use_per_fuel=False: all entries 1-13 equal global_z_ref
-    - When use_per_fuel=True: all entries 1-13 equal 6.096 (WRF-SFIRE default)
+    Implementation from ERF_FuelWindHeight.H build_fcwh_table():
+    - When use_per_fuel=False: every entry from slot 1 up equals global_z_ref
+    - When use_per_fuel=True: every entry from slot 1 up equals 6.096
+      (WRF-SFIRE default)
 
     Args:
         global_z_ref: Global fallback wind reference height [m]
         use_per_fuel: When True, use WRF-SFIRE defaults; when False, use global_z_ref
 
     Returns:
-        List of size 14; index 0 unused, 1-13 valid
+        List of size FUEL_SLOT_COUNT; slot 0 unused, slots 1 and up valid
     """
-    fcwh = [0.0] * 14
-    if use_per_fuel:
-        for i in range(1, 14):
-            fcwh[i] = 6.096
-    else:
-        for i in range(1, 14):
-            fcwh[i] = global_z_ref
+    n = fuel_slot_count()
+    fcwh = [0.0] * n
+    value = 6.096 if use_per_fuel else global_z_ref
+    for i in range(1, n):
+        fcwh[i] = value
     return fcwh
 
 
-def build_fcz0_table():
-    """
-    Build per-fuel roughness length (fcz0) table indexed 0..13.
-
-    Implementation from ERF_FuelWindHeight.H lines 73-93.
-    WRF-SFIRE data statement values [m].
-
-    Returns:
-        List of size 14; index 0 unused, 1-13 valid
-    """
-    fcz0 = [0.0] * 14
-    fcz0[1]  = 0.0396   # FM1
-    fcz0[2]  = 0.0396   # FM2
-    fcz0[3]  = 0.100    # FM3
-    fcz0[4]  = 0.2378   # FM4
-    fcz0[5]  = 0.0793   # FM5
-    fcz0[6]  = 0.0991   # FM6
-    fcz0[7]  = 0.0991   # FM7
-    fcz0[8]  = 0.0079   # FM8
-    fcz0[9]  = 0.0079   # FM9
-    fcz0[10] = 0.0396   # FM10
-    fcz0[11] = 0.0396   # FM11
-    fcz0[12] = 0.0911   # FM12
-    fcz0[13] = 0.1188   # FM13
-    return fcz0
-
-
 def test_fcwh_uniform_mode():
-    """Test 29: fcwh uniform mode returns global_z_ref for all fuels."""
+    """Test 29: fcwh uniform mode returns global_z_ref for every fuel slot."""
     global_z_ref = 6.1
+    n = fuel_slot_count()
     fcwh = build_fcwh_table(global_z_ref, use_per_fuel=False)
-    passed = (len(fcwh) == 14 and
-              all(fcwh[i] == global_z_ref for i in range(1, 14)))
-    status = "✓" if passed else "✗"
-    print(f"{status} Test 29: fcwh uniform mode (all fuels = {global_z_ref})")
+    passed = (len(fcwh) == n and
+              all(fcwh[i] == global_z_ref for i in range(1, n)))
+    status = "\u2713" if passed else "\u2717"
+    print(f"{status} Test 29: fcwh uniform mode (all {n - 1} fuel slots = {global_z_ref})")
     if not passed:
-        print(f"    Length: {len(fcwh)}, entries 1-13 all {global_z_ref}: "
-              f"{all(fcwh[i] == global_z_ref for i in range(1, 14))}")
+        print(f"    Length: {len(fcwh)}, expected {n}; entries 1-{n - 1} all "
+              f"{global_z_ref}: {all(fcwh[i] == global_z_ref for i in range(1, n))}")
     return passed
 
 
 def test_fcwh_per_fuel_mode():
-    """Test 30: fcwh per-fuel mode returns 6.096 for all fuels."""
+    """Test 30: fcwh per-fuel mode returns 6.096 for every fuel slot."""
     global_z_ref = 6.1
+    n = fuel_slot_count()
     fcwh = build_fcwh_table(global_z_ref, use_per_fuel=True)
     expected = 6.096
-    passed = (len(fcwh) == 14 and
-              all(abs(fcwh[i] - expected) < 1e-6 for i in range(1, 14)))
-    status = "✓" if passed else "✗"
-    print(f"{status} Test 30: fcwh per-fuel mode (all fuels = 6.096 m)")
+    passed = (len(fcwh) == n and
+              all(abs(fcwh[i] - expected) < 1e-6 for i in range(1, n)))
+    status = "\u2713" if passed else "\u2717"
+    print(f"{status} Test 30: fcwh per-fuel mode (all {n - 1} fuel slots = 6.096 m)")
     if not passed:
-        print(f"    Length: {len(fcwh)}")
-        for i in range(1, 14):
+        print(f"    Length: {len(fcwh)}, expected {n}")
+        for i in range(1, min(len(fcwh), n)):
             if abs(fcwh[i] - expected) >= 1e-6:
                 print(f"    fcwh[{i}] = {fcwh[i]}, expected {expected}")
     return passed
 
 
-def test_fcz0_fm4_chaparral():
-    """Test 31: fcz0 FM4 value equals 0.2378 (chaparral, highest roughness)."""
-    fcz0 = build_fcz0_table()
-    expected = 0.2378
-    passed = abs(fcz0[4] - expected) < 1e-6
-    status = "✓" if passed else "✗"
-    print(f"{status} Test 31: fcz0 FM4 = 0.2378 m (chaparral)")
+def _blank_cxx_comments_and_literals(text):
+    """`text` with //, /* */, "..." and \'...\' blanked out, length preserved.
+
+    Braces and identifiers inside a comment or a literal must not be seen by the
+    scans below; keeping the length means every offset still lines up.
+    """
+    out = list(text)
+    i, n = 0, len(text)
+    while i < n:
+        two = text[i:i + 2]
+        if two == "//":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            out[i:j] = " " * (j - i)
+            i = j
+        elif two == "/*":
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            for k in range(i, j):
+                if text[k] != "\n":
+                    out[k] = " "
+            i = j
+        elif text[i] in "\"'":
+            quote, j = text[i], i + 1
+            while j < n and text[j] != quote:
+                j += 2 if text[j] == "\\" else 1
+            j = min(j + 1, n)
+            for k in range(i, j):
+                if text[k] != "\n":
+                    out[k] = " "
+            i = j
+        else:
+            i += 1
+    return "".join(out)
+
+
+def _function_body(text, start):
+    """Text between the braces of the function whose signature starts at `start`.
+
+    `text` must already have comments and literals blanked out, so a brace in a
+    comment cannot unbalance the count.
+    """
+    open_brace = text.index("{", start)
+    depth = 0
+    for i in range(open_brace, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[open_brace + 1:i]
+    raise RuntimeError("unbalanced braces in ERF_FuelWindHeight.H")
+
+
+def _first_argument(text, open_paren):
+    """The first argument of the call whose '(' is at `open_paren`.
+
+    Counts parentheses, so a size written as static_cast<std::size_t>(N) or
+    (std::size_t) N comes back whole rather than cut at its first ')'.
+    """
+    depth = 0
+    for i in range(open_paren, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_paren + 1:i].strip()
+        elif text[i] == "," and depth == 1:
+            return text[open_paren + 1:i].strip()
+    raise RuntimeError("unbalanced parentheses in ERF_FuelWindHeight.H")
+
+
+# A cast around a table size is not part of the size: static_cast<std::size_t>(N)
+# and (std::size_t) N both size the table as N.
+_SIZE_CAST = re.compile(r"static_cast\s*<[^>]*>\s*|"
+                        r"\(\s*(?:std::)?(?:size_t|ptrdiff_t|int|unsigned|long)\s*\)\s*")
+
+
+def fuel_table_sizes():
+    """{table name: size expression} for each table built in ERF_FuelWindHeight.H.
+
+    A per-fuel table is the vector a build_<name>_table() function declares under
+    that same <name>; a helper vector living elsewhere in the header, or inside
+    such a function under another name, is not one and is not checked.
+    """
+    with open(_source_path("ERF_FuelWindHeight.H")) as f:
+        header = _blank_cxx_comments_and_literals(f.read())
+
+    sizes = {}
+    for m in re.finditer(r"\bbuild_(\w+)_table\s*\(", header):
+        name = m.group(1)
+        body = _function_body(header, m.end())
+        decl = re.search(r"std::vector\s*<[^>]*>\s+" + re.escape(name) + r"\s*\(", body)
+        # None means the builder no longer declares a vector under its own name:
+        # report it rather than pass on a table this check can no longer see.
+        sizes[name] = _first_argument(body, decl.end() - 1) if decl else None
+    return sizes
+
+
+def fuel_table_size_value(expr, consts):
+    """The number of entries a size expression asks for, or None if unevaluable."""
+    if expr is None:
+        return None
+    try:
+        return _eval_int_expr(_SIZE_CAST.sub("", expr), consts, "a table size")
+    except RuntimeError:
+        return None
+
+
+def test_fuel_tables_are_sized_by_slot_count():
+    """Test 31: every table in ERF_FuelWindHeight.H holds FUEL_SLOT_COUNT entries.
+
+    A per-fuel table shorter than FUEL_SLOT_COUNT is read out of bounds as soon
+    as it is indexed by fuel slot: the Scott-Burgan codes occupy slots 14 and up,
+    and the deck-defined codes 54 and up. The removed roughness table
+    build_fcz0_table() was hard-coded to 14 entries and this check fails on it.
+    The size is evaluated, not matched as text, so FUEL_SLOT_COUNT - 1 fails too.
+    """
+    expected = fuel_slot_count()
+    consts = fuel_constants()
+    sizes = fuel_table_sizes()
+    values = {name: fuel_table_size_value(expr, consts) for name, expr in sizes.items()}
+
+    passed = bool(sizes) and all(v == expected for v in values.values())
+    status = "\u2713" if passed else "\u2717"
+    print(f"{status} Test 31: fuel tables in ERF_FuelWindHeight.H hold "
+          f"FUEL_SLOT_COUNT ({expected}) entries")
     if not passed:
-        print(f"    Expected: {expected}, Got: {fcz0[4]}")
-    return passed
-
-
-def test_fcz0_fm1_fm2_equal():
-    """Test 32: fcz0 FM1 and FM2 both equal 0.0396."""
-    fcz0 = build_fcz0_table()
-    expected = 0.0396
-    passed = (abs(fcz0[1] - expected) < 1e-6 and
-              abs(fcz0[2] - expected) < 1e-6 and
-              fcz0[1] == fcz0[2])
-    status = "✓" if passed else "✗"
-    print(f"{status} Test 32: fcz0 FM1 and FM2 both equal 0.0396 m")
-    if not passed:
-        print(f"    fcz0[1] = {fcz0[1]}, fcz0[2] = {fcz0[2]}, expected {expected}")
-    return passed
-
-
-def test_fcz0_table_size():
-    """Test 18: fcz0 table has size 14 (indices 0-13)."""
-    fcz0 = build_fcz0_table()
-    passed = len(fcz0) == 14
-    status = "✓" if passed else "✗"
-    print(f"{status} Test 33: fcz0 table size = 14")
-    if not passed:
-        print(f"    Expected length 14, got {len(fcz0)}")
+        if not sizes:
+            print("    No build_*_table() function found in ERF_FuelWindHeight.H")
+        for name in sorted(sizes):
+            expr, value = sizes[name], values[name]
+            if value == expected:
+                continue
+            if expr is None:
+                print(f"    build_{name}_table() declares no vector named {name}; "
+                      f"update this check")
+            elif value is None:
+                print(f"    build_{name}_table() sizes {name} as '{expr}', which this "
+                      f"check cannot evaluate; update this check")
+            else:
+                print(f"    build_{name}_table() sizes {name} as '{expr}' = {value}, "
+                      f"expected {expected}")
     return passed
 
 
@@ -1097,7 +1248,7 @@ def test_fcz0_table_size():
 # ============================================================================
 
 def main():
-    """Run all 38 tests and return exit code (0 = all pass, 1 = any fail)."""
+    """Run all 36 tests and return exit code (0 = all pass, 1 = any fail)."""
     print("=" * 70)
     print("Phase 13 ROS Model Unit Tests")
     print("=" * 70)
@@ -1162,14 +1313,12 @@ def main():
     results.append(test_cheney_gould_increases_with_curing())
     print()
 
-    # Per-fuel wind height tests (5)
+    # Per-fuel wind height tests (3)
     print("Per-Fuel Wind Height Tests")
     print("-" * 70)
     results.append(test_fcwh_uniform_mode())
     results.append(test_fcwh_per_fuel_mode())
-    results.append(test_fcz0_fm4_chaparral())
-    results.append(test_fcz0_fm1_fm2_equal())
-    results.append(test_fcz0_table_size())
+    results.append(test_fuel_tables_are_sized_by_slot_count())
     print()
 
     # Summary

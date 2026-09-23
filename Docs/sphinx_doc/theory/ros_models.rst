@@ -420,54 +420,12 @@ Enabling :cpp:`erf.fire.use_per_fuel_wind_ht = true` causes wind extraction to u
 
 WRF-SFIRE defaults are 6.096 m for all 13 Anderson fuel models, which is identical to the :cpp:`wind_ref_ht` default of 6.1 m. Enabling this flag has no practical effect unless the :cpp:`fcwh` table is modified.
 
-**Fuel model roughness lengths (fcz0):**
-
-.. list-table::
-   :widths: 10 40 15
-   :header-rows: 1
-
-   * - Fuel Model
-     - Name
-     - fcz0 [m]
-   * - FM1
-     - Short Grass
-     - 0.0396
-   * - FM2
-     - Timber Grass and Understory
-     - 0.0396
-   * - FM3
-     - Tall Grass
-     - 0.100
-   * - FM4
-     - Chaparral
-     - 0.2378
-   * - FM5
-     - Timber Litter
-     - 0.0793
-   * - FM6
-     - Logging Slash and Blowdown
-     - 0.0991
-   * - FM7
-     - Timber Litter and Understory
-     - 0.0991
-   * - FM8
-     - Closed Timber Litter
-     - 0.0079
-   * - FM9
-     - Hardwood Litter
-     - 0.0079
-   * - FM10
-     - Timber Litter and Grass
-     - 0.0396
-   * - FM11
-     - Intermediate Fuel Load Timber Litter
-     - 0.0396
-   * - FM12
-     - High Load Conifer Litter
-     - 0.0911
-   * - FM13
-     - Heavy Logging Slash
-     - 0.1188
+**Surface roughness:** the fire model does not carry a per-fuel roughness length.
+The roughness of the wind profile is the surface-layer value :cpp:`erf.most.z0`,
+and the two-height log interpolation of the sampled wind uses
+:cpp:`erf.fire.wind_sample_z0`. The canopy reduction from the reference height to
+the midflame wind is the Wind Adjustment Factor (:cpp:`erf.fire.waf_formula`),
+which is a function of fuel bed depth, not of roughness.
 
 **References:**
 
@@ -798,14 +756,38 @@ naming the input rather than being clamped. A bed depth at or below
 spread there without a word.
 
 A deck-defined code takes a fuel table slot above the published sets
-(1000 maps to slot 54), so it is read by every rate-of-spread model, by
-the heat flux, by the per-cell fuel load and by the burnout exactly as a
-published model is, and it is recognised under either fuel set: one fuel
+(1000 maps to slot 54) and is recognised under either fuel set, so one fuel
 raster may mix deck-defined codes with the Anderson 13 or with the Scott
-and Burgan 40, and one front crosses between them with no seam. A code in
-the range that no block defines is rejected when the raster is read; it is
-non-burnable in the fuel tables, so it can never fall through to a
-published model's properties.
+and Burgan 40 and one front crosses between them with no seam.
+
+How far the code reaches depends on how it is used. As the uniform model,
+:cpp:`erf.fire.fuel_model_id`, it is a published model's equal: all six
+rate-of-spread models build their uniform state from the same
+``FuelModelParams`` and respond to it. Per cell from a fuel map, only the
+models with a per-fuel coefficient table evaluate it — Rothermel under
+:cpp:`erf.fire.rothermel_per_fuel`, on the isotropic and the level-set
+paths alike, and Balbi. BEHAVE, MacArthur, Cheney-Gould and FBP hold one
+uniform state for the whole grid whatever the map says, so a code in a
+raster does not change their rate; that is a limit of those models'
+plumbing rather than of the fuel table. The heat flux, the per-cell fuel
+load, the flame residence time and the burnout time read the slot tables per
+cell in every case.
+
+Two quantities are still built from :cpp:`erf.fire.fuel_model_id` even in a
+per-fuel run, which a deck should know: the wind adjustment factor and the
+fuel wind height use the uniform model's bed depth, and the Byram fireline
+intensity and flame length use its initial fuel load, so under
+:cpp:`erf.fire.fuel_map.load_from_map` those two diagnostics do not
+correspond to the cell's own fuel. ERF prints this at start-up when
+:cpp:`erf.fire.rothermel_per_fuel` and :cpp:`erf.fire.use_waf` are both set.
+The rate of spread, the heat flux and the fuel load are unaffected.
+
+A code in the custom range that no block defines is rejected: the raster is
+checked when it is read, and :cpp:`erf.fire.fuel_model_id` when the uniform
+properties are first taken, so it can never fall through to a published
+model's unknown-code default and burn as grass. A code listed in
+:cpp:`erf.fire.fuel_map.nonburnable_codes` is exempt from the raster check,
+since a fuel that never spreads needs no properties.
 
 Two differences from a published model are worth stating. A deck-defined
 model has no herbaceous curing transfer: the loads given are the loads

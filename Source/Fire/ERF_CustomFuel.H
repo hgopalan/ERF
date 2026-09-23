@@ -19,11 +19,31 @@
  * and the Scott and Burgan 40 — are compiled-in tables. A fuel complex that is
  * in neither set therefore had no way in. This class is that way in: codes
  * CUSTOM_FUEL_CODE_BASE to CUSTOM_FUEL_CODE_BASE + CUSTOM_FUEL_MAX - 1 carry
- * their properties from the input deck, take the fuel table slots above the
- * published sets, and from there are indistinguishable from a published model:
- * Rothermel, BEHAVE, Balbi, MacArthur, Cheney-Gould and FBP all consume the
- * same FuelModelParams, and the heat flux, fuel load and burnout paths read the
- * same slot tables.
+ * their properties from the input deck and take the fuel table slots above the
+ * published sets.
+ *
+ * How far a deck-defined code reaches depends on how it is used, and the two
+ * cases are not the same:
+ *
+ *  - As the uniform model, erf.fire.fuel_model_id, it is a published model's
+ *    equal everywhere: every rate-of-spread model (Rothermel, BEHAVE, Balbi,
+ *    MacArthur, Cheney-Gould, FBP) builds its uniform state from the same
+ *    FuelModelParams, so all six respond to it.
+ *  - From a spatial fuel map, per cell, only the models that have a per-fuel
+ *    coefficient table evaluate it: Rothermel (with
+ *    erf.fire.rothermel_per_fuel, on the isotropic and the level-set paths) and
+ *    Balbi. BEHAVE, MacArthur, Cheney-Gould and FBP keep one uniform state for
+ *    the whole grid, whatever the map says, so a deck-defined code in a raster
+ *    does not change their rate. That is a property of those models' plumbing,
+ *    not of this class.
+ *
+ * The heat flux, the per-cell fuel load, the flame residence time and the
+ * burnout time read the slot tables per cell in every case.
+ *
+ * Still uniform even in a per-fuel run, and reported at start-up: the wind
+ * adjustment factor and the fuel wind height take the bed depth of
+ * erf.fire.fuel_model_id, and the Byram intensity and flame length its initial
+ * load. The rate of spread, the heat flux and the fuel load do not.
  *
  * Properties are given in SI, the units a fuel measurement is reported in, and
  * converted once here to the US units FuelModelParams carries internally.
@@ -102,9 +122,15 @@ public:
      * erf.fire.custom_fuel.1004 block would fall through to the fuel set's
      * unknown-code default (Anderson model 1 or GR1) and burn as grass.
      *
-     * @param[in] fuel_model Per-cell fuel code field
+     * A code the deck lists in erf.fire.fuel_map.nonburnable_codes is exempt:
+     * it never spreads, so it needs no properties, and a raster that carries a
+     * code the run is meant to ignore does not have to be edited.
+     *
+     * @param[in] fuel_model      Per-cell fuel code field
+     * @param[in] nonburnable_codes erf.fire.fuel_map.nonburnable_codes
      */
-    void validate_map_codes (const amrex::MultiFab& fuel_model) const;
+    void validate_map_codes (const amrex::MultiFab& fuel_model,
+                             const std::vector<int>& nonburnable_codes) const;
 
 private:
     std::array<CustomFuelEntry, CUSTOM_FUEL_MAX> m_entry{};
@@ -117,11 +143,27 @@ private:
  *
  * The host-side counterpart of get_fuel_params(): identical for every
  * published code, and the deck's entry for a custom code.
+ *
+ * A code in the custom range that the deck never defines aborts rather than
+ * falling through to get_fuel_params(), which would hand back the fuel set's
+ * unknown-code default (Anderson model 1 or GR1) and burn a structural fuel as
+ * grass. The fuel raster has the same guard in validate_map_codes(); this one
+ * covers erf.fire.fuel_model_id, which the raster check never sees.
+ *
+ * @param[in] where Which input named this code, for the abort message
  */
 inline FuelModelParams fuel_params_with_custom (int code, int fuel_set, amrex::Real M_live,
-                                                const CustomFuelTable& cft)
+                                                const CustomFuelTable& cft,
+                                                const char* where = "erf.fire.fuel_model_id")
 {
     if (cft.has_code(code)) { return cft.params(code); }
+    if (custom_fuel_code(code)) {
+        amrex::Abort("ERF-Fire custom fuel: " + std::string(where) + " = " + std::to_string(code)
+                     + " is in the custom range " + std::to_string(CUSTOM_FUEL_CODE_BASE) + "-"
+                     + std::to_string(CUSTOM_FUEL_CODE_BASE + CUSTOM_FUEL_MAX - 1)
+                     + " but no erf.fire.custom_fuel." + std::to_string(code)
+                     + ".* block defines it; add one or use a published fuel code");
+    }
     return get_fuel_params(code, fuel_set, M_live);
 }
 

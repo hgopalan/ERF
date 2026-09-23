@@ -1,0 +1,14 @@
+FILE = inputs_custom_map
+
+# The same mixed-map run with a different erf.fire.fuel_model_id. With
+# erf.fire.rothermel_per_fuel every cell takes its own Rothermel coefficients,
+# so the uniform model must not reach the front at all. Before the level-set
+# path read the per-cell table it did, and the two runs differed (608 against
+# 704 burned cells at 30 s).
+#
+# Anderson 10 rather than 13: both it and the deck's Anderson 1 have a 1 ft bed
+# depth and the standard particle density, so the wind adjustment factor and the
+# fuel wind height -- which are still built from the uniform model -- are
+# identical here and the comparison isolates the coefficients. The loads differ,
+# which is why the Byram diagnostics are exempt.
+erf.fire.fuel_model_id = 10

@@ -2,7 +2,7 @@
 """Cross-check the fire and dust input keys three ways: what the code reads,
 what the documentation lists, and what the decks set.
 
-    python3 Tests/check_fire_dust_inputs.py [repo_root]
+    python3 Tests/check_fire_dust_inputs.py [repo_root] [--extra-deck PATH]...
 
 Fails (exit 1) when
   * a key documented anywhere under Docs/sphinx_doc is not read by the code
@@ -13,15 +13,44 @@ Fails (exit 1) when
   * the fire master reference deck lacks a key the code reads, or
   * the dust inputs generator and the generated Inputs.rst table disagree with
     the dust parser.
-ParmParse reads are collected from the four files that parse these keys; add a
+ParmParse reads are collected from the five files that parse these keys; add a
 file here if a new one starts reading erf.fire.* or erf.dust.* keys.
+
+Two key families are not string literals in the source: the code builds their
+names at run time from an index (erf.fire.firebreak.<n>.* and
+erf.fire.custom_fuel.<code>.*). Both are indexed here as <family>.N.<property>,
+the same spelling Inputs.rst uses. The custom_fuel property names are read out
+of ERF_CustomFuel.cpp, so renaming one there fails this test; the firebreak ones
+are listed in code_keys() and have to be kept in step by hand.
+
+--extra-deck adds a deck to the ones scanned by rule 3; it exists so that
+Tests/test_check_fire_dust_inputs.py can feed this checker decks that must
+fail, and is not used by the build.
 """
 import glob
 import os
 import re
 import sys
 
-ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else \
+def _parse_argv(argv):
+    root, extra = None, []
+    it = iter(argv)
+    for a in it:
+        if a == "--extra-deck":
+            extra.append(next(it, None))
+        elif a.startswith("--"):
+            sys.exit("usage: check_fire_dust_inputs.py [repo_root] [--extra-deck PATH]...")
+        elif root is None:
+            root = a
+        else:
+            sys.exit("check_fire_dust_inputs.py: only one repo root may be given")
+    if any(e is None for e in extra):
+        sys.exit("check_fire_dust_inputs.py: --extra-deck needs a path")
+    return root, extra
+
+_root, EXTRA_DECKS = _parse_argv(sys.argv[1:])
+
+ROOT = os.path.abspath(_root) if _root else \
     os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 def read(path):
@@ -35,12 +64,54 @@ def in_family(k):
     return any(k.startswith(f) for f in FAMILIES)
 
 def norm(k):
-    """firebreak.<digit>.x -> firebreak.N.x ; drop a _lev<N> suffix ; strip trailing dot"""
+    """firebreak.<n>.x -> firebreak.N.x ; custom_fuel.<code>.x -> custom_fuel.N.x ;
+    drop a _lev<N> suffix ; strip trailing dot"""
     k = re.sub(r"firebreak\.\d+\.", "firebreak.N.", k)
+    k = re.sub(r"custom_fuel\.\d+\.", "custom_fuel.N.", k)
     k = re.sub(r"_lev\d+$", "", k)
     return k.rstrip(".")
 
 # ---------------------------------------------------------------- code reads
+def custom_fuel_keys():
+    """erf.fire.custom_fuel.*, read by Source/Fire/ERF_CustomFuel.cpp.
+
+    Only custom_fuel.codes is a string literal there; the per-fuel properties are
+    queried through a prefix built at run time from the fuel code, so grepping for
+    whole key names finds nothing and every key a FireCustomFuel deck sets would
+    look dead.  Take the prefix and the property names from the source instead of
+    listing them here, so that renaming a property in the source (without the deck
+    or Inputs.rst following) still fails this test.  Both spots are asserted: a
+    rewrite that stops matching them stops the test rather than passing it.
+    """
+    src = os.path.join(ROOT, "Source/Fire/ERF_CustomFuel.cpp")
+    s = read(src)
+    keys = set()
+    for m in re.finditer(r'\bpp\.(?:query|queryarr|contains)\s*\(\s*"([^"]+)"', s):
+        keys.add("erf.fire." + m.group(1))
+
+    # const std::string pre = "custom_fuel." + std::to_string(code) + ".";
+    m = re.search(r'\bconst\s+std::string\s+pre\s*=\s*"([^"]+)"\s*\+\s*std::to_string', s)
+    if m is None:
+        sys.exit("check_fire_dust_inputs.py: ERF_CustomFuel.cpp no longer builds its "
+                 "per-fuel keys from a \"pre\" prefix; update custom_fuel_keys()")
+    pre = "erf.fire." + m.group(1) + "N."
+    if norm("erf.fire." + m.group(1) + "1000.probe") != pre + "probe":
+        sys.exit("check_fire_dust_inputs.py: norm() does not fold the index out of "
+                 "erf.fire." + m.group(1) + "<code>.*; update both together")
+
+    # pp.query((pre + "name").c_str(), ...) and the need() helper, which queries
+    # (pre + name) and aborts when the deck leaves it out. contains is a read as
+    # well -- it asks whether the deck set the key -- and is accepted by the
+    # literal scan above, so the two stay on the same list of call names.
+    props = set(re.findall(r'\bpp\.(?:query|queryarr|contains)\s*\(\s*\(\s*pre\s*\+\s*"([^"]+)"', s))
+    props |= set(re.findall(r'\bneed\s*\(\s*"([^"]+)"\s*,', s))
+    if not props:
+        sys.exit("check_fire_dust_inputs.py: found no " + pre + "* property reads in "
+                 + os.path.relpath(src, ROOT) + "; update custom_fuel_keys()")
+    for name in props:
+        keys.add(pre + name)
+    return keys
+
 def code_keys():
     keys = set()
     s = read(os.path.join(ROOT, "Source/Fire/ERF_FireParams.H"))
@@ -57,6 +128,7 @@ def code_keys():
     s = read(os.path.join(ROOT, "Source/ERF.cpp"))
     for m in re.finditer(r'\bpp\.query\s*\(\s*"(fire_[A-Za-z0-9_]+)"', s):
         keys.add("erf." + m.group(1))
+    keys |= custom_fuel_keys()
     s = read(os.path.join(ROOT, "Source/DataStructs/ERF_TurbStruct.H"))
     for m in re.finditer(r'query_one_or_per_level\s*\(\s*pp,\s*"([^"]+)"', s):
         k = "erf." + m.group(1)
@@ -101,7 +173,23 @@ def deck_files():
     for d in DECK_DIRS:
         files += glob.glob(os.path.join(ROOT, d, "**/inputs*"), recursive=True)
     files += glob.glob(os.path.join(ROOT, "Exec/RegTests/Fire*/inputs*"))
+    # The glob results are filtered below, but an --extra-deck was named by hand:
+    # dropping a mistyped one would leave the run reporting PASS having scanned one
+    # deck fewer than it was asked to.
+    for f in EXTRA_DECKS:
+        if not os.path.isfile(f):
+            sys.exit("check_fire_dust_inputs.py: --extra-deck " + f + " is not a file")
+        files.append(os.path.abspath(f))
     return sorted(f for f in files if os.path.isfile(f))
+
+def show(path):
+    """A deck's path as the report names it: relative to the root when it is under
+    the root, as given for an --extra-deck outside it. Tested for the prefix rather
+    than handed to os.path.relpath, which raises ValueError -- not a walk-up path --
+    for two paths on different Windows drives, as an --extra-deck in a temporary
+    directory may well be."""
+    head = os.path.join(ROOT, "")
+    return path[len(head):] if path.startswith(head) else path
 
 def deck_keys(path, commented=False):
     pat = r"^\s*#?\s*(erf\.[A-Za-z0-9_.]+)\s*=" if commented else r"^\s*(erf\.[A-Za-z0-9_.]+)\s*="
@@ -140,7 +228,7 @@ def main():
     for path in decks:
         for k in sorted(deck_keys(path)):
             if in_family(k) and k not in code:
-                problems.append(f"{os.path.relpath(path, ROOT)} sets a key nothing reads: {k}")
+                problems.append(f"{show(path)} sets a key nothing reads: {k}")
 
     # 4. the fire master reference lists every fire-side key (active or commented)
     master = os.path.join(ROOT, "Exec/CanonicalTests/Fire/inputs_fire_master_reference")

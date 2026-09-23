@@ -24,6 +24,9 @@ Properties are given in SI and converted once to the units
 | `inputs_bad_heat` | a heat content left in BTU/lb instead of J/kg |
 | `inputs_bad_burnout` | `burnout_model = sfire` on a deck-defined model with no burn time |
 | `inputs_bad_undeclared` | a raster holding a custom code the deck never defines |
+| `inputs_bad_uniform_code` | `fuel_model_id` in the custom range with no block defining it |
+| `inputs_custom_map_altid` | the mixed map with a different uniform `fuel_model_id`, which a per-fuel run must ignore |
+| `inputs_undeclared_nonburnable` | the undeclared-code raster with that code declared non-burnable, which must run |
 
 `fuel_map_mixed.asc` and `fuel_map_undeclared.asc` come from
 `python3 make_fuel_map.py`.
@@ -64,6 +67,25 @@ first, with values just inside and just outside each band.
 * **box parity** — the map run on the default decomposition and on one box
   agree bitwise, which covers the per-cell slot lookup and the cross-rank
   reduction in the raster check.
+* **uniform id is not read** — `custom_map_altid` differs from `custom_map`
+  only in `erf.fire.fuel_model_id`, which a run with
+  `erf.fire.rothermel_per_fuel` must ignore entirely. Every number agrees over
+  1920 lines and every plotfile field is bitwise equal, except the two Byram
+  diagnostics (see below). On the binary before the level-set path read the
+  per-cell table this check fails: the front followed the uniform coefficients
+  and the two runs burned 608 against 704 cells at 30 s.
+
+  The deck uses Anderson 10 as the alternative because it shares Anderson 1's
+  1 ft bed depth. The wind adjustment factor and the fuel wind height are still
+  built from the uniform model's depth, so a depth-matched pair isolates the
+  coefficients; with Anderson 13 the effective wind itself differs by 27%.
+* **known limitation, exempted explicitly** — `fire_fireline_intensity` and
+  `fire_flame_length` come from Byram's relation on the *uniform* initial fuel
+  load, so under `load_from_map` they scale with `erf.fire.fuel_model_id`
+  instead of the cell's own load and can be exactly zero. The identity check
+  exempts `I_B_max` and `L_max` by name and reports an exemption that has
+  stopped differing, so the exemption cannot outlive the defect. The rate of
+  spread, the heat flux, the residence time and the fuel load are per cell.
 * **aborts** — each of the six bad decks stops the run with a message naming
   the input. `bad_undeclared` was also run on one and two ranks: its reduction
   aborts on both rather than hanging on one.
@@ -92,7 +114,12 @@ first, with values just inside and just outside each band.
 | `anderson1` | 774 | 0.2160244347 | 8496.8 | 8305.8 |
 | `custom_grass` | 774 | 0.2160244347 | 8496.8 | 8305.8 |
 | `custom_heavy` | 548 | 0.05470070803 | 1126379.1 | 1118114.9 |
-| `custom_map` | 774 | 0.1558625579 | 193427.9 | 191412.9 |
+| `custom_map` | 558 | 0.1558625579 | 193418.8 | 188870.3 |
+
+`custom_map` is re-measured: with the level-set path reading the per-cell
+coefficients it burns 558 cells at 60 s where it burned 774 before, since the
+front no longer spreads at the uniform grass rate inside the coarse block.
+At 30 s the count is 500 against the previous 608.
 
 `custom_map`'s max ROS is GR2's rate, the fastest fuel on its grid; the
 deck-defined block spreads at 0.05287 m/s in the same run.

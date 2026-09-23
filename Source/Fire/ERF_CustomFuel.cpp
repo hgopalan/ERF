@@ -166,15 +166,24 @@ CustomFuelTable::print_summary () const
 }
 
 void
-CustomFuelTable::validate_map_codes (const amrex::MultiFab& fuel_model) const
+CustomFuelTable::validate_map_codes (const amrex::MultiFab& fuel_model,
+                                    const std::vector<int>& nonburnable_codes) const
 {
     // A raster cell holding an undefined custom code would otherwise fall
     // through to the fuel set's unknown-code default and burn as grass.
-    // has_code() is host-side, so the defined set travels into the kernel as a
+    // has_code() is host-side, so the accepted set travels into the kernel as a
     // bitmask captured by value, one bit per custom slot.
+    //
+    // A code the deck marks non-burnable is accepted without a block: it never
+    // spreads, so it needs no properties. build_nonburnable_mask() reads the
+    // same list later, and the slot table already gives an undefined custom
+    // slot a zero load, so the two agree.
     int defined_mask = 0;
     for (int i = 0; i < CUSTOM_FUEL_MAX; ++i) {
         if (m_defined[i]) { defined_mask |= (1 << i); }
+    }
+    for (int code : nonburnable_codes) {
+        if (custom_fuel_code(code)) { defined_mask |= (1 << (code - CUSTOM_FUEL_CODE_BASE)); }
     }
 
     amrex::Gpu::DeviceScalar<int> d_bad(0);
