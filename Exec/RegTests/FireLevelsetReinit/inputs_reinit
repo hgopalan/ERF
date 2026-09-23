@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# ERF_Reinitialize.H's compiled-in defaults: reinit every 5 level-set
+# subcycles, 10 Sussman iterations (both left unset here on purpose --
+# these ARE the defaults, not a tuned choice).
+
+erf.fire_plot_file           = "plt_reinit_"
+erf.fire.fire_stats_csv_file = "fire_stats_reinit.csv"

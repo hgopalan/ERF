@@ -9,9 +9,11 @@
  * to phi = +dist_to_boundary (unburned). Boundary is determined by the winding
  * number test (point is inside if winding number != 0).
  *
- * Polyline mode: cells within half_width set to phi = -half_width (burned);
- * others set to distance from nearest segment. A polyline is an open path of
- * line segments (not closed).
+ * Polyline mode: phi = dist_to_nearest_segment - half_width everywhere (a
+ * true signed distance function shifted by the constant half_width, so
+ * |grad phi| = 1 from construction, matching how WRF-Fire's ignite_fire
+ * builds its level set: lfn_new = d - radius). A polyline is an open path
+ * of line segments (not closed).
  *
  * Both modes use min(phi, new_val) stamping, so ignitions merge with existing
  * fire state without overwriting it.
@@ -281,9 +283,11 @@ void init_phi_from_polygon(
 /**
  * @brief Initialize level-set field from a polyline (open line fire).
  *
- * Sets phi for cells near a polyline segment sequence:
- * - phi = -half_width for cells within half_width of any segment
- * - phi = distance from segment for cells farther away
+ * Sets phi to a signed distance function shifted by half_width:
+ * - phi = dist_to_nearest_segment - half_width (negative inside the burned
+ *   band, positive outside, zero exactly half_width from the nearest
+ *   segment) -- a real ramp, not a flat clamp, so |grad phi| = 1 everywhere
+ *   from construction rather than only after the first reinitialization.
  * - Uses min(phi, new_val) semantics to merge with existing fire
  *
  * A polyline is an open path (not closed), defined by a sequence of vertices
@@ -342,8 +346,13 @@ void init_phi_from_polyline(
                 }
             }
 
-            // Set phi: negative within half_width, positive otherwise
-            Real new_phi = (min_dist <= half_width) ? -half_width : min_dist;
+            // True signed distance function shifted inward by half_width, so
+            // phi ramps continuously through zero at min_dist == half_width
+            // rather than jumping from a flat -half_width interior straight
+            // to +half_width outside. Empirically, the old clamped version
+            // made |grad phi| spike to about 1.5-1.8 at that transition,
+            // so this continuous ramp preserves the expected |grad phi| = 1.
+            Real new_phi = min_dist - half_width;
 
             // Apply min() semantics to merge with existing fire
             p(i, j, k) = amrex::min(p(i, j, k), new_phi);

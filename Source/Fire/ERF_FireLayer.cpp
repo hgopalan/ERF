@@ -464,6 +464,10 @@ void FireLayer::initialize(const ERF& erf,
                                     fire_params.moisture_10hr,
                                     fire_params.moisture_100hr,
                                     fire_params.use_wind_limit);
+    if (fire_params.fire_debug) {
+        amrex::Print() << "[FIRE DEBUG] Init Rothermel coefficients: R0=" << m_rc.R0
+                       << " m/s  I_R=" << m_rc.I_R << " beta=" << m_rc.beta << std::endl;
+    }
 
     // Phase 13A: Build the per-fuel wind height table and copy it to device.
     // When use_per_fuel_wind_ht = false, every fuel slot (1..FUEL_SLOT_COUNT-1;
