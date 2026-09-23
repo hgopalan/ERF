@@ -43,6 +43,19 @@ for v in $BAD_VARIANTS; do
     ${MPIRUN:-} "$EXE" "inputs_$v" max_step=1 "$@" > "run_$v.log" 2>&1
 done
 
+# Every rate-of-spread model reads its fuel through FuelModelParams, so each
+# has to respond to the deck-defined properties. Ten short runs, grass against
+# the coarse deck fuel, at 10 s.
+MODELS="rothermel balbi behave macarthur cheney_gould"
+for m in $MODELS; do
+    for v in anderson1 custom_heavy; do
+        if [ "${SKIP_RUN:-0}" = "1" ] && [ -f "run_model_${m}_$v.log" ]; then continue; fi
+        ${MPIRUN:-} "$EXE" "inputs_$v" erf.fire.ros_model=$m stop_time=10.0 \
+            erf.fire_plot_int=-1 "$@" > "run_model_${m}_$v.log" 2>&1 \
+            || { echo "run $m/$v failed (see run_model_${m}_$v.log)"; exit 1; }
+    done
+done
+
 ros() { grep 'max_ROS=' "run_$1.log" | tail -1 | sed 's/.*max_ROS=\([^ ]*\) .*/\1/'; }
 fuel() { grep 'Current max heat flux' "run_$1.log" | sed 's/.*fuel_kg=\([^ ]*\).*/\1/'; }
 cells() { grep 'active fire cells' "run_$1.log" | tail -1 | awk '{print $NF}'; }
@@ -55,7 +68,27 @@ for v in $RUN_VARIANTS; do
 done
 echo
 
+printf "%-14s %16s %16s\n" ros_model grass_ROS deck_fuel_ROS
+printf "%-14s %16s %16s\n" -------------- ---------------- ----------------
+for m in $MODELS; do
+    printf "%-14s %16s %16s\n" "$m" "$(ros model_${m}_anderson1 | cut -c1-16)" \
+        "$(ros model_${m}_custom_heavy | cut -c1-16)"
+done
+echo
+
 status=0
+for m in $MODELS; do
+    a=$(ros model_${m}_anderson1); b=$(ros model_${m}_custom_heavy)
+    if [ -z "$a" ] || [ -z "$b" ]; then
+        echo "  FAIL $m: one of the runs printed no max_ROS"; status=1
+    elif python3 -c "import sys; sys.exit(0 if abs($a-$b) > 1e-6*max(abs($a),1.0) else 1)"; then
+        echo "  PASS $m responds to the deck-defined fuel ($a -> $b m/s)"
+    else
+        echo "  FAIL $m gives the same rate for grass and the deck fuel ($a); it is not reading the entry"
+        status=1
+    fi
+done
+
 python3 check_custom_fuel.py --selftest                                          || status=1
 python3 check_custom_fuel.py identity run_anderson1.log run_custom_grass.log     || status=1
 python3 check_custom_fuel.py summary  run_custom_grass.log 1000                  || status=1

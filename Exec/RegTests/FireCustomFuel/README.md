@@ -68,6 +68,23 @@ first, with values just inside and just outside each band.
   the input. `bad_undeclared` was also run on one and two ranks: its reduction
   aborts on both rather than hanging on one.
 
+* **model sweep** — ten 10 s runs pair grass against the coarse deck fuel for
+  every rate-of-spread model. Each has to give a different rate, since each
+  reads its fuel through the same `FuelModelParams`:
+
+  | `ros_model` | grass [m/s] | deck fuel [m/s] |
+  | --- | --- | --- |
+  | `rothermel` | 0.2160244347 | 0.05470070803 |
+  | `balbi` | 0.4534711647 | 0.00221418181 |
+  | `behave` | 0.2160244347 | 0.06701721308 |
+  | `macarthur` | 1.793275906 | 6.309411001 |
+  | `cheney_gould` | 0.1962616261 | 0.2316395252 |
+
+  MacArthur and Cheney-Gould rise rather than fall: they are grassland
+  correlations driven by the load and the bed depth, so a deeper, heavier bed
+  speeds them up where Rothermel's reaction term and Balbi's radiation, which
+  read the surface-area-to-volume ratio, slow down.
+
 ## Measured numbers
 
 | variant | active fire cells at 60 s | max ROS [m/s] | fuel at 0 s [kg] | fuel at 60 s [kg] |
