@@ -22,6 +22,7 @@ Reference implementations extracted from:
 Run: python3 test_ros_models.py
 """
 
+import ast
 import math
 import os
 import re
@@ -980,27 +981,51 @@ def _source_path(name):
     return os.path.join(here, "..", "..", "..", "..", "Source", "Fire", name)
 
 
+def _int_constant(name, consts, seen=()):
+    """Value of an integer constexpr, resolving the names it is written in terms of.
+
+    Walks the expression as an AST and accepts integer literals, the names in
+    `consts`, + - * and unary minus. Anything else raises, so an expression this
+    function cannot evaluate is reported rather than guessed at.
+    """
+    if name in seen:
+        raise RuntimeError(f"circular definition of {name}: {' -> '.join(seen)}")
+    if name not in consts:
+        raise RuntimeError(f"{name} not found in ERF_FuelModels.H")
+
+    def value(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, int):
+            return node.value
+        if isinstance(node, ast.Name):
+            return _int_constant(node.id, consts, seen + (name,))
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+            return -value(node.operand)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult)):
+            left, right = value(node.left), value(node.right)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            return left * right
+        raise RuntimeError(f"unsupported expression for {name}: {consts[name].strip()}")
+
+    try:
+        tree = ast.parse(consts[name].strip(), mode="eval")
+    except SyntaxError as exc:
+        raise RuntimeError(f"cannot parse {name} = {consts[name].strip()}") from exc
+    return value(tree.body)
+
+
 def fuel_slot_count():
     """FUEL_SLOT_COUNT as declared in ERF_FuelModels.H.
 
     The declaration is written in terms of the other constants of that header
-    (FUEL_SLOT_CUSTOM_BASE + CUSTOM_FUEL_MAX), so resolve names to values
-    before evaluating it.
+    (FUEL_SLOT_CUSTOM_BASE + CUSTOM_FUEL_MAX), so resolve the names it uses.
     """
     with open(_source_path("ERF_FuelModels.H")) as f:
         text = f.read()
     consts = dict(re.findall(r"inline constexpr int\s+(\w+)\s*=\s*([^;]+);", text))
-    if "FUEL_SLOT_COUNT" not in consts:
-        raise RuntimeError("FUEL_SLOT_COUNT not found in ERF_FuelModels.H")
-
-    expr = consts["FUEL_SLOT_COUNT"]
-    for _ in range(10):
-        if re.fullmatch(r"[\d\s+*()-]+", expr):
-            return int(eval(expr))  # digits and + - * ( ) only
-        expr = re.sub(r"\b([A-Za-z_]\w*)\b",
-                      lambda m: "(" + consts[m.group(1)] + ")"
-                      if m.group(1) in consts else m.group(0), expr)
-    raise RuntimeError(f"cannot resolve FUEL_SLOT_COUNT: {expr}")
+    return _int_constant("FUEL_SLOT_COUNT", consts)
 
 
 def build_fcwh_table(global_z_ref, use_per_fuel=False):
@@ -1060,23 +1085,67 @@ def test_fcwh_per_fuel_mode():
     return passed
 
 
+def _function_body(text, start):
+    """Text between the braces of the function whose signature starts at `start`."""
+    open_brace = text.index("{", start)
+    depth = 0
+    for i in range(open_brace, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[open_brace + 1:i]
+    raise RuntimeError("unbalanced braces in ERF_FuelWindHeight.H")
+
+
+def fuel_table_sizes():
+    """{table name: size expression} for each table built in ERF_FuelWindHeight.H.
+
+    A per-fuel table is the vector a build_<name>_table() function declares under
+    that same <name>; a helper vector living elsewhere in the header, or inside
+    such a function under another name, is not one and is not checked.
+    """
+    with open(_source_path("ERF_FuelWindHeight.H")) as f:
+        header = f.read()
+
+    sizes = {}
+    for m in re.finditer(r"\bbuild_(\w+)_table\s*\(", header):
+        name = m.group(1)
+        body = _function_body(header, m.end())
+        decl = re.search(r"std::vector\s*<[^>]*>\s+" + re.escape(name) + r"\s*\(([^,;)]+)",
+                         body)
+        # None means the builder no longer declares a vector under its own name:
+        # report it rather than pass on a table this check can no longer see.
+        sizes[name] = decl.group(1).strip() if decl else None
+    return sizes
+
+
 def test_fuel_tables_are_sized_by_slot_count():
     """Test 31: every table in ERF_FuelWindHeight.H is sized FUEL_SLOT_COUNT.
 
     A per-fuel table with a hard-coded length shorter than FUEL_SLOT_COUNT is
     read out of bounds as soon as it is indexed by fuel slot: the Scott-Burgan
-    codes occupy slots 14 and up. The removed roughness table build_fcz0_table()
-    was hard-coded to 14 entries and this check fails on it.
+    codes occupy slots 14 and up, and the deck-defined codes 54 and up. The
+    removed roughness table build_fcz0_table() was hard-coded to 14 entries and
+    this check fails on it.
     """
-    with open(_source_path("ERF_FuelWindHeight.H")) as f:
-        header = f.read()
-    sizes = re.findall(r"std::vector<amrex::Real>\s+\w+\(\s*([A-Za-z_0-9]+)\s*,",
-                       header)
-    passed = len(sizes) > 0 and all(size == "FUEL_SLOT_COUNT" for size in sizes)
+    sizes = fuel_table_sizes()
+    passed = bool(sizes) and all(
+        size is not None and re.search(r"\bFUEL_SLOT_COUNT\b", size)
+        for size in sizes.values())
     status = "\u2713" if passed else "\u2717"
     print(f"{status} Test 31: fuel tables in ERF_FuelWindHeight.H sized FUEL_SLOT_COUNT")
     if not passed:
-        print(f"    Table sizes found: {sizes or 'none'}")
+        if not sizes:
+            print("    No build_*_table() function found in ERF_FuelWindHeight.H")
+        for name, size in sorted(sizes.items()):
+            if size is None:
+                print(f"    build_{name}_table() declares no vector named {name}; "
+                      f"update this check")
+            elif not re.search(r"\bFUEL_SLOT_COUNT\b", size):
+                print(f"    build_{name}_table() sizes {name} as '{size}', "
+                      f"not FUEL_SLOT_COUNT")
     return passed
 
 
