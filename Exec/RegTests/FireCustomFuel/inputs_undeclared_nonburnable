@@ -1,0 +1,8 @@
+FILE = inputs_custom_map
+
+# The raster whose block is 1007, which no erf.fire.custom_fuel.1007.* block
+# defines, but with 1007 declared non-burnable. A code that never spreads needs
+# no properties, so this has to run rather than abort: it is the remedy the
+# abort message of inputs_bad_undeclared points at.
+erf.fire.fuel_map.file = "fuel_map_undeclared.asc"
+erf.fire.fuel_map.nonburnable_codes = 91 98 1007

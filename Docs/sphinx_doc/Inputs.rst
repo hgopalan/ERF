@@ -4492,7 +4492,8 @@ Fuel and moisture
 |                                                | the uniform model's                                        |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.rothermel_per_fuel**                | Evaluate Rothermel coefficients per cell from the fuel map | Boolean                        | false                  |
-|                                                | instead of fuel_model_id                                   |                                |                        |
+|                                                | instead of fuel_model_id, on the isotropic and the         |                                |                        |
+|                                                | level-set paths alike                                      |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.custom_fuel.codes**                 | Fuel codes described in the deck instead of a published    | Ints                           | none                   |
 |                                                | set; each must be in 1000-1015                             |                                |                        |

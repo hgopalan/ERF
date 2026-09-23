@@ -392,7 +392,8 @@ void FireLayer::initialize(const ERF& erf,
             m_has_spatial_fuel = true;
             // A custom code in the raster with no block in the deck would
             // otherwise fall through to the set's unknown-code default.
-            m_custom_fuel.validate_map_codes(*fire_fuel_model);
+            m_custom_fuel.validate_map_codes(*fire_fuel_model,
+                                             m_params.fuel_map.nonburnable_codes);
             if (m_params.fuel_map.load_from_map) {
                 // Each cell starts with its own model's load rather than the
                 // uniform one; non-burnable codes of the Scott-Burgan set carry
@@ -597,7 +598,21 @@ void FireLayer::initialize(const ERF& erf,
                                 m_params.moisture_100hr);
         if (m_params.fire_debug) {
             amrex::Print() << "[FIRE DEBUG] Rothermel: per-cell coefficients from the "
-                           << "spatial fuel map (" << m_d_rc_table.size() << " codes)\n";
+                           << "spatial fuel map (" << m_d_rc_table.size() << " codes), "
+                           << "isotropic and level-set paths\n";
+        }
+        // What is still taken from erf.fire.fuel_model_id in a per-fuel run,
+        // stated once so a deck does not have to discover it: the wind
+        // adjustment factor and the fuel wind height are built from the uniform
+        // model's bed depth, and the Byram intensity and flame length from its
+        // initial load. The rate of spread, the heat flux, the residence time
+        // and the fuel load are per cell.
+        if (m_params.use_waf) {
+            amrex::Print() << "[FIRE] erf.fire.rothermel_per_fuel: the rate of spread, heat flux, "
+                           << "residence time and fuel load are per cell, but the wind adjustment "
+                           << "factor still uses erf.fire.fuel_model_id = " << m_params.fuel_model_id
+                           << " (its bed depth), as do the Byram intensity and flame length "
+                           << "(its initial load)\n";
         }
     }
 
@@ -1119,6 +1134,11 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 };
                 set_member(m_params.hybrid.primary,   spec.primary_model,   spec.primary_state);
                 set_member(m_params.hybrid.secondary, spec.secondary_model, spec.secondary_state);
+                const bool hyb_per_fuel = !m_d_rc_table.empty() && fire_fuel_model;
+                spec.fuel_model  = hyb_per_fuel ? fire_fuel_model.get() : nullptr;
+                spec.rc_tbl      = hyb_per_fuel ? m_d_rc_table.data() : nullptr;
+                spec.rc_tbl_size = hyb_per_fuel ? static_cast<int>(m_d_rc_table.size()) : 0;
+                spec.fuel_set    = m_params.fuel_map.fuel_set_id();
                 spec.wind_eff   = fire_wind_eff.get();
                 spec.balbi_wind = (m_params.balbi.wind_source == 1)
                                 ? fire_wind_ref.get() : fire_wind_eff.get();
@@ -1145,6 +1165,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 // FBP reads the reference-height wind unless told otherwise;
                 // every other model takes the midflame wind.
                 const bool fbp_ref = (m_params.ros_model == "fbp") && (m_params.fbp.wind_source == 0);
+                // erf.fire.rothermel_per_fuel: the front is advected with the
+                // cell's own coefficients, the same table the isotropic
+                // compute_ros_field uses. Without this the level-set path
+                // propagated with the uniform erf.fire.fuel_model_id however
+                // the fuel map varied, while fire_ros still plotted per-cell
+                // rates that nothing advected with.
+                const bool dir_per_fuel = !m_d_rc_table.empty() && fire_fuel_model;
                 advect_levelset_directional_rk3(*fire_phi, fbp_ref ? *fire_wind_ref : *fire_wind_eff,
                                                 *fire_slopes, m_fg.geom, dt_ls,
                                                 m_params.levelset_eps_visc,
@@ -1153,7 +1180,11 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                                 m_params.directional_ellipse_lw,
                                                 m_params.directional_ellipse_lw_max,
                                                 accel_factor.get(),
-                                                m_params.directional_wind_coupling);
+                                                m_params.directional_wind_coupling,
+                                                dir_per_fuel ? fire_fuel_model.get() : nullptr,
+                                                dir_per_fuel ? m_d_rc_table.data() : nullptr,
+                                                dir_per_fuel ? static_cast<int>(m_d_rc_table.size()) : 0,
+                                                m_params.fuel_map.fuel_set_id());
             } else if (m_params.levelset_ellipse) {
                 // Huygens ellipse: the model's rate is the head rate and the
                 // normal speed follows the ellipse set by the midflame wind.
@@ -1607,8 +1638,10 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
         // Masked ROS diagnostics (only for burning cells where phi < 0)
         const auto ros_stats = erf_fire_diag::burning_ros_stats(*fire_ros, *fire_phi);
 
-        amrex::Print() << "[FIRE DEBUG] tau_sav=" << tau_sav
-                       << " s  (dx_fire=" << m_fg.geom.CellSize(0)
+        const bool tau_per_fuel = m_has_spatial_fuel && !(m_params.tau_residence_s > 0.0_rt);
+        amrex::Print() << "[FIRE DEBUG] tau_sav="
+                       << (tau_per_fuel ? std::string("per fuel cell") : std::to_string(tau_sav) + " s")
+                       << "  (dx_fire=" << m_fg.geom.CellSize(0)
                        << " m, max_ROS=" << ros_stats.max_ros << " m/s)" << std::endl;
     }
 
@@ -1638,7 +1671,10 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
                         (sfire_burnout && !m_has_spatial_fuel) ? burnout_tau_s(m_params.fuel_model_id) : 0.0_rt,
                         (sfire_burnout && m_has_spatial_fuel) ? m_d_burnout_tau.data() : nullptr,
                         m_params.fuel_map.fuel_set_id(), m_params.moisture_live,
-                        fuel_params_table(), fuel_params_table_size());
+                        fuel_params_table(), fuel_params_table_size(),
+                        // The floor comes from the cell's own fuel where a map
+                        // gives one and the deck did not pin the residence time.
+                        m_has_spatial_fuel && !(m_params.tau_residence_s > 0.0_rt));
     add_prescribed_heat_flux();
 
     const Real h_kJ_per_kg = fp.heat_content * 2.326_rt;

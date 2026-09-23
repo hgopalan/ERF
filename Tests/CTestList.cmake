@@ -1505,6 +1505,12 @@ add_test_fire(FireRosComparison_rothermel   FireRosComparison     inputs_rotherm
 add_test_fire(FireScottBurgan_gr2           FireScottBurgan       inputs_sb_gr2              40)
 add_test_fire(FireCustomFuel_uniform        FireCustomFuel        inputs_custom_grass        40)
 add_test_fire(FireCustomFuel_map            FireCustomFuel        inputs_custom_map          40)
+# erf.fire.rothermel_per_fuel with the level-set path: the deck differs from
+# FireCustomFuel_map only in erf.fire.fuel_model_id, which a per-fuel run must
+# ignore entirely. run_custom_fuel.sh compares the two runs line for line.
+add_test_fire(FireCustomFuel_map_altid      FireCustomFuel        inputs_custom_map_altid    40)
+# a custom code the deck declares non-burnable needs no properties block
+add_test_fire(FireCustomFuel_nonburnable    FireCustomFuel        inputs_undeclared_nonburnable 40)
 add_test_fire(FireStickMoisture_stick       FireStickMoisture     inputs_stick               40)
 add_test_fire(FireStructureIgnition_on      FireStructureIgnition inputs_on                  40 NRANKS 1)
 add_test_fire(FirePrecipSource_atmosphere   FirePrecipSource      inputs_atmosphere          40 NRANKS 1)
@@ -1533,6 +1539,8 @@ add_test_fire_abort(FireCustomFuelBurnout_abort     FireCustomFuel inputs_bad_bu
     "needs erf.fire.custom_fuel.1000.burnout_time_s" "max_step=1")
 add_test_fire_abort(FireCustomFuelUndeclared_abort  FireCustomFuel inputs_bad_undeclared
     "the fuel map holds code 1007" "max_step=1")
+add_test_fire_abort(FireCustomFuelUniformCode_abort FireCustomFuel inputs_bad_uniform_code
+    "erf.fire.fuel_model_id = 1000 is in the custom range" "max_step=1")
 # a fuel map is placed by cell index, so it must have the fire grid's size
 add_test_fire_abort(FireFuelMapSize_abort     FireScottBurgan       inputs_sb_map
     "has 256 x 128 cells but the fire grid has 128 x 64" "erf.fire.grid_ratio=2")
