@@ -1644,9 +1644,24 @@ add_test_fire_abort(FireStructureIgnition_no_exposure_abort FireStructureIgnitio
     "needs erf.fire.exposure.enable" "erf.fire.exposure.enable=false")
 add_test_fire_abort(FireStructureIgnition_curve_abort FireStructureIgnition inputs_on
     "exceeds 70 % of fuel_load_J_m2" "erf.fire.structures.ignition.growth_time_s=100.0")
-# every documented fire/dust key is read, every read key is documented, no deck sets an unread key
+# every documented fire/dust key is read, every read key is documented, no deck sets an unread key.
+# Labelled unit as well as docs: no CI job runs "ctest -L docs", so on the docs label alone this
+# test went red for a whole PR without anyone seeing it (erf.fire.custom_fuel.*). It is pure
+# Python and needs no binary, like the other checker self-tests under the unit label.
 add_test(FireDustInputsDocs ${ERF_RANS_PYTHON} ${PROJECT_SOURCE_DIR}/Tests/check_fire_dust_inputs.py ${PROJECT_SOURCE_DIR})
-set_tests_properties(FireDustInputsDocs PROPERTIES LABELS "docs;fire" TIMEOUT 120)
+set_tests_properties(FireDustInputsDocs PROPERTIES LABELS "docs;fire;unit" TIMEOUT 120)
+# That checker's own pass/fail logic: an unread key is caught by nothing else, so a
+# checker that stopped reporting one would pass the build in silence. Decks with a
+# known verdict, including the key families whose names the code builds at run time
+# (erf.fire.custom_fuel.<code>.*, erf.fire.firebreak.<n>.*), which used to read as
+# dead. Pure Python, no ERF run.
+add_test(FireDustInputsDocs_SelfTest ${ERF_RANS_PYTHON}
+    ${PROJECT_SOURCE_DIR}/Tests/test_check_fire_dust_inputs.py ${PROJECT_SOURCE_DIR})
+set_tests_properties(FireDustInputsDocs_SelfTest
+    PROPERTIES
+    TIMEOUT 300
+    PROCESSORS 1
+    LABELS "docs;fire;unit")
 if(ERF_ENABLE_DUST)
 add_test_fire(FireRestart_dust_straight     FireRestart           inputs_dust_straight       40 NRANKS 1)
 # the three fire-dust couplings applied once per step, in the right order
