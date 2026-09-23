@@ -763,3 +763,59 @@ model's fuel load instead of the uniform model's, which matters as soon as
 the map mixes light and heavy fuels. ``Exec/RegTests/FireScottBurgan``
 checks the table, the per-cell loads, the non-burnable codes and the
 crosswalk.
+
+.. _sec:ROS_CustomFuel:
+
+Fuel models defined in the deck
+-------------------------------
+
+A fuel complex in neither published set is described in the input deck.
+:cpp:`erf.fire.custom_fuel.codes` lists the codes to define, each of which
+must lie in 1000 to 1015, and one block per code gives its properties:
+
+.. code-block:: python
+
+   erf.fire.custom_fuel.codes = 1000 1001
+   erf.fire.custom_fuel.1000.name                   = coastal_scrub
+   erf.fire.custom_fuel.1000.w_1h_kg_m2             = 0.60
+   erf.fire.custom_fuel.1000.sav_1h_1_m             = 5000.0
+   erf.fire.custom_fuel.1000.depth_m                = 0.60
+   erf.fire.custom_fuel.1000.moisture_ext           = 0.25
+   erf.fire.custom_fuel.1000.heat_content_J_kg      = 1.86e7
+   erf.fire.custom_fuel.1000.density_kg_m3 = 512.0
+
+The properties are given in SI, the units a fuel measurement is reported
+in, and converted once to the units ``FuelModelParams`` carries
+internally, so a deck never states a load in lb/ft² or a
+surface-area-to-volume ratio in ft⁻¹. ``w_1h_kg_m2``, ``sav_1h_1_m``,
+``depth_m``, ``moisture_ext`` and ``heat_content_J_kg`` are required; the
+10-h, 100-h, live herbaceous and live woody loads, the live
+surface-area-to-volume ratios, the particle density and the flaming burn
+time default. Every property is range-checked at start-up against the
+range the input table below states, and a value outside it stops the run
+naming the input rather than being clamped. A bed depth at or below
+0.01 m is rejected in particular, since the Balbi models return zero
+spread there without a word.
+
+A deck-defined code takes a fuel table slot above the published sets
+(1000 maps to slot 54), so it is read by every rate-of-spread model, by
+the heat flux, by the per-cell fuel load and by the burnout exactly as a
+published model is, and it is recognised under either fuel set: one fuel
+raster may mix deck-defined codes with the Anderson 13 or with the Scott
+and Burgan 40, and one front crosses between them with no seam. A code in
+the range that no block defines is rejected when the raster is read; it is
+non-burnable in the fuel tables, so it can never fall through to a
+published model's properties.
+
+Two differences from a published model are worth stating. A deck-defined
+model has no herbaceous curing transfer: the loads given are the loads
+used, whatever :cpp:`erf.fire.moisture_live` is, and the BEHAVE path reads
+the same entry. And :cpp:`erf.fire.burnout_model = "sfire"` has no
+published burn time to fall back on, so a deck-defined code used with it
+must set ``burnout_time_s``; the run stops if it does not.
+
+``Exec/RegTests/FireCustomFuel`` checks that a deck-defined model written
+out in SI from the Anderson table reproduces the compiled model, that a
+raster mixing a published set with a deck-defined code starts with each
+cell's own load and burns both with their own rates, that a coarse woody
+bed spreads more slowly than grass, and that every range check aborts.

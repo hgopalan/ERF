@@ -605,7 +605,8 @@ Problem Location: `Exec/CanonicalTests/EkmanSpiral`_
 Fire and dust smoke tests
 -------------------------
 Every fire suite under ``Exec/RegTests`` (``FireAccelerationClock``, ``FireBurnout``,
-``FireDirectionalShape``, ``FireEmcModel``, ``FireExposure``, ``FireFbp``,
+``FireCustomFuel``, ``FireDirectionalShape``, ``FireEmcModel``,
+``FireExposure``, ``FireFbp``,
 ``FireFluxPartition``, ``FireHeatPlacement``, ``FireHybridObstacles``,
 ``FireLevelSetEllipse``, ``FireLiveMoisture``, ``FireNearWall``,
 ``FirePerimeterIgnition``, ``FirePrecipSource``, ``FireRestart``,
@@ -643,6 +644,21 @@ the TL3 load (1.2329 kg/m²) on the northernmost fire cell and none on the
 southernmost: the map's first data row lies in its TL3 band and its last in the
 NB8 water. Until 2026-09-11 the reader put the first data row on the south edge,
 which fails both checks.
+
+``FireCustomFuel_uniform`` and ``FireCustomFuel_map`` run the deck-defined
+fuel models of :ref:`sec:ROS_CustomFuel`: a fuel model written out in SI in the
+deck, uniform and from a raster that mixes it with the Scott-Burgan 40. Six
+abort tests cover the validation, each passing only when the run stops at
+start-up with the message naming its input: ``FireCustomFuelBadCode_abort`` (a
+code outside 1000-1015), ``FireCustomFuelMissing_abort`` (a block without its
+surface-area-to-volume ratio), ``FireCustomFuelBadDepth_abort`` (a bed depth
+under the 0.01 m floor, where the Balbi models return zero spread without a
+word), ``FireCustomFuelBadHeat_abort`` (a heat content left in BTU/lb),
+``FireCustomFuelBurnout_abort`` (``burnout_model = sfire`` with no burn time,
+which would otherwise fall to Anderson model 1's 7 s) and
+``FireCustomFuelUndeclared_abort`` (a raster code no block defines, which would
+otherwise burn as grass). ``run_custom_fuel.sh`` adds the identity, per-cell
+load, spread-contrast and box-parity checks that are too long for CI.
 
 ``FireSuppression_<scenario>_levelset`` and ``FireSuppression_<scenario>_farsite``
 run the ``FireSuppression`` decks (``line_early``, ``line_late``,

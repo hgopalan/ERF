@@ -168,6 +168,10 @@ amrex::Real deplete_fuel_load(
  *                                a spatial fuel map; nullptr keeps the residence time
  * @param[in] fuel_set            Fuel model set of the map's codes (ERF_FuelModels.H)
  * @param[in] M_live              Live herbaceous moisture for the Scott-Burgan curing transfer
+ * @param[in] fp_tbl              Device fuel properties by slot, so the deck-defined
+ *                                models of ERF_CustomFuel.H carry their own heat
+ *                                content; nullptr reads the published sets only
+ * @param[in] fp_tbl_size         Entries in fp_tbl
  */
 inline void fill_fire_heat_flux(
     amrex::MultiFab& fire_heat_flux,
@@ -182,7 +186,9 @@ inline void fill_fire_heat_flux(
     amrex::Real tau_burnout_uniform = 0.0,
     const amrex::Real* d_tau_burnout = nullptr,
     int fuel_set = 0,
-    amrex::Real M_live = -1.0)
+    amrex::Real M_live = -1.0,
+    const FuelModelParams* fp_tbl = nullptr,
+    int fp_tbl_size = 0)
 {
     using namespace amrex;
 
@@ -216,7 +222,7 @@ inline void fill_fire_heat_flux(
 
                 // Get per-cell fuel code and look up heat content
                 int fuel_code = static_cast<int>(fuel_code_arr(i, j, k) + 0.5_rt);
-                FuelModelParams fp_cell = get_fuel_params(fuel_code, fuel_set, M_live);
+                FuelModelParams fp_cell = fuel_params_at_code(fuel_code, fuel_set, M_live, fp_tbl, fp_tbl_size);
                 Real h_fuel_cell = fp_cell.heat_content * 2326.0_rt;
 
                 // Per-cell residence time: floor ROS at 1e-6 m/s to avoid divide-by-zero;

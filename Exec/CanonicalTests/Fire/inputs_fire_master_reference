@@ -482,6 +482,29 @@ erf.fire.fuel_map.fuel_set = "anderson13"
 erf.fire.fuel_map.sb40_crosswalk = false
 erf.fire.fuel_map.load_from_map = false
 
+# Fuel models described in this deck instead of a published set. The codes
+# listed take fuel table slots above the Anderson 13 and the Scott-Burgan 40,
+# are recognised under either set, and are read by every rate-of-spread model,
+# the heat flux, the per-cell fuel load and the burnout. Each code must be in
+# 1000-1015. Properties are in SI. w_1h_kg_m2, sav_1h_1_m, depth_m,
+# moisture_ext and heat_content_J_kg are required; the rest default as shown.
+# No code is defined unless erf.fire.custom_fuel.codes lists it.
+#   erf.fire.custom_fuel.codes = 1000
+#   erf.fire.custom_fuel.1000.name               = custom_1000
+#   erf.fire.custom_fuel.1000.w_1h_kg_m2         = 0.60    # [0, 500] kg/m2
+#   erf.fire.custom_fuel.1000.w_10h_kg_m2        = 0.0     # [0, 500] kg/m2
+#   erf.fire.custom_fuel.1000.w_100h_kg_m2       = 0.0     # [0, 500] kg/m2
+#   erf.fire.custom_fuel.1000.w_live_herb_kg_m2  = 0.0     # [0, 500] kg/m2, no curing transfer
+#   erf.fire.custom_fuel.1000.w_live_woody_kg_m2 = 0.0     # [0, 500] kg/m2
+#   erf.fire.custom_fuel.1000.sav_1h_1_m         = 5000.0  # [10, 12000] 1/m
+#   erf.fire.custom_fuel.1000.sav_live_herb_1_m  = 5000.0  # [10, 12000] 1/m, default sav_1h_1_m
+#   erf.fire.custom_fuel.1000.sav_live_woody_1_m = 5000.0  # [10, 12000] 1/m, default sav_1h_1_m
+#   erf.fire.custom_fuel.1000.depth_m            = 0.60    # (0.01, 50] m
+#   erf.fire.custom_fuel.1000.moisture_ext       = 0.25    # [0.01, 2] fraction
+#   erf.fire.custom_fuel.1000.heat_content_J_kg  = 1.86e7  # [5e6, 5e7] J/kg
+#   erf.fire.custom_fuel.1000.density_kg_m3      = 512.0   # [50, 2000] kg/m3
+#   erf.fire.custom_fuel.1000.burnout_time_s     = 0.0     # [0, 1e5] s, required with burnout_model = sfire
+
 # Hold the firebreak cells in the mask as well (they are otherwise only
 # stamped into phi once, which the level-set reinitialisation can erode)
 erf.fire.firebreak.use_mask = false

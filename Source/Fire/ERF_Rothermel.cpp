@@ -165,7 +165,8 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
     Real moisture_100hr,
     int fuel_set,
     Real moisture_live,
-    bool use_wind_limit)
+    bool use_wind_limit,
+    const FuelModelParams* fp_tbl)
 {
     std::vector<RothermelComputed> table(ROTHERMEL_TABLE_SIZE);
 
@@ -173,10 +174,28 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
     // kernel returns zero spread whatever the wind and slope.
     table[0] = RothermelComputed{};
 
-    // Slots 1-13 hold the Anderson models at their own codes; 14-53 the Scott-Burgan models.
+    // Slots 1-13 hold the Anderson models at their own codes, 14-53 the
+    // Scott-Burgan models and 54-69 the deck-defined ones, which only the
+    // caller's slot table knows.
     for (int slot = 1; slot < ROTHERMEL_TABLE_SIZE; ++slot) {
-        table[slot] = compute_rothermel_params(get_fuel_params(fuel_code_from_slot(slot), (slot >= 14) ? 1 : fuel_set, moisture_live),
-                                              moisture_1hr, moisture_10hr, moisture_100hr, use_wind_limit);
+        if (fp_tbl == nullptr && slot >= FUEL_SLOT_CUSTOM_BASE) {
+            table[slot] = RothermelComputed{};   // no slot table, so no deck-defined fuel: no spread
+            continue;
+        }
+        const FuelModelParams fp = (fp_tbl != nullptr)
+            ? fp_tbl[slot]
+            : get_fuel_params(fuel_code_from_slot(slot),
+                              (slot >= FUEL_SLOT_SB40_BASE) ? FUEL_SET_SCOTT_BURGAN40 : fuel_set,
+                              moisture_live);
+        // A slot with no fuel gets the zeroed entry slot 0 carries rather than
+        // the coefficients of a zero load, which divide by the packing ratio and
+        // come out non-finite. Custom slots the deck leaves undefined are the
+        // case that reaches this; a zero-load entry can never spread anyway.
+        if (!(fuel_total_load_kg_m2(fp) > 0.0)) {
+            table[slot] = RothermelComputed{};
+            continue;
+        }
+        table[slot] = compute_rothermel_params(fp, moisture_1hr, moisture_10hr, moisture_100hr, use_wind_limit);
     }
     return table;
 }

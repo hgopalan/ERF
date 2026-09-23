@@ -1,0 +1,6 @@
+FILE = inputs_custom_grass
+
+# erf.fire.burnout_model = sfire on a deck-defined model with no
+# burnout_time_s: the published burn times are keyed on the Anderson 13, and
+# the custom code would otherwise fall to model 1's 7 s.
+erf.fire.burnout_model = "sfire"

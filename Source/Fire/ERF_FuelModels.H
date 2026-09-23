@@ -29,8 +29,10 @@
  * Tables indexed by fuel are sized FUEL_SLOT_COUNT and addressed by
  * fuel_slot(code): 0 non-burnable, 1-13 the Anderson models at their own
  * codes (so the historical lookups are unchanged), 14-53 the Scott-Burgan
- * models in code order. fuel_table_index() gives a table index with the
- * set's semantics: with the Anderson set a code outside 0-13 is outside the
+ * models in code order, and 54-69 the deck-defined models of ERF_CustomFuel.H
+ * at codes 1000-1015. fuel_table_index() gives a table index with the
+ * set's semantics: a deck-defined code resolves under either set; with the
+ * Anderson set a code outside 0-13 is otherwise outside the
  * table, as before; with the Scott-Burgan set the non-burnable codes land on
  * slot 0 and unknown codes are outside the table.
  *
@@ -41,17 +43,38 @@
 
 inline constexpr int FUEL_SET_ANDERSON13     = 0;
 inline constexpr int FUEL_SET_SCOTT_BURGAN40 = 1;
-inline constexpr int FUEL_SLOT_COUNT         = 54;   ///< 0 non-burnable, 1-13 Anderson, 14-53 Scott-Burgan
+
+/// First fuel code whose properties come from the input deck (ERF_CustomFuel.H).
+inline constexpr int CUSTOM_FUEL_CODE_BASE = 1000;
+
+/// How many custom codes exist, 1000 to 1000 + CUSTOM_FUEL_MAX - 1.
+inline constexpr int CUSTOM_FUEL_MAX = 16;
+
+inline constexpr int FUEL_SLOT_SB40_BASE   = 14;   ///< First Scott-Burgan slot
+inline constexpr int FUEL_SLOT_CUSTOM_BASE = 54;   ///< First deck-defined slot
+inline constexpr int FUEL_SLOT_COUNT       = FUEL_SLOT_CUSTOM_BASE + CUSTOM_FUEL_MAX;
+///< 0 non-burnable, 1-13 Anderson, 14-53 Scott-Burgan, 54-69 deck-defined
+
+/// True for a fuel code in the deck-defined range, whether or not the deck defines it.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+bool custom_fuel_code(int code) noexcept
+{
+    return code >= CUSTOM_FUEL_CODE_BASE && code < CUSTOM_FUEL_CODE_BASE + CUSTOM_FUEL_MAX;
+}
+
+static_assert(ROTHERMEL_TABLE_SIZE == FUEL_SLOT_COUNT,
+              "ROTHERMEL_TABLE_SIZE in ERF_Rothermel.H must equal FUEL_SLOT_COUNT");
 
 /// Non-burnable code of the Scott-Burgan set (91-99), or the map's 0.
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 bool sb40_nonburnable(int code) noexcept { return code == 0 || (code >= 91 && code <= 99); }
 
-/// Table slot of a fuel code: 1-13 Anderson, 14-53 Scott-Burgan, 0 otherwise.
+/// Table slot of a fuel code: 1-13 Anderson, 14-53 Scott-Burgan, 54-69 deck-defined, 0 otherwise.
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 int fuel_slot(int code) noexcept
 {
     if (code >= 1 && code <= 13) return code;
+    if (custom_fuel_code(code)) return FUEL_SLOT_CUSTOM_BASE + (code - CUSTOM_FUEL_CODE_BASE);
     switch (code) {
     case 101: return 14;
     case 102: return 15;
@@ -144,7 +167,10 @@ int fuel_code_from_slot(int slot) noexcept
         204,
     };
     if (slot >= 1 && slot <= 13) return slot;
-    if (slot >= 14 && slot < FUEL_SLOT_COUNT) return sb[slot - 14];
+    if (slot >= FUEL_SLOT_CUSTOM_BASE && slot < FUEL_SLOT_COUNT) {
+        return CUSTOM_FUEL_CODE_BASE + (slot - FUEL_SLOT_CUSTOM_BASE);
+    }
+    if (slot >= FUEL_SLOT_SB40_BASE && slot < FUEL_SLOT_CUSTOM_BASE) return sb[slot - FUEL_SLOT_SB40_BASE];
     return 0;
 }
 
@@ -155,6 +181,7 @@ int fuel_code_from_slot(int slot) noexcept
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 int fuel_table_index(int code, int fuel_set) noexcept
 {
+    if (custom_fuel_code(code)) return fuel_slot(code);   // deck-defined, in either set
     if (fuel_set == FUEL_SET_ANDERSON13) return (code >= 0 && code <= 13) ? code : -1;   // as the 14-entry tables behaved
     if (sb40_nonburnable(code)) return 0;
     const int s = fuel_slot(code);
@@ -500,6 +527,24 @@ FuelModelParams get_fuel_params(int code, int fuel_set, amrex::Real M_live = -1.
         return fp;
     }
     return get_scott_burgan_fuel_params(code, M_live);
+}
+
+/**
+ * @brief Fuel properties at one cell, from the slot table when it is given.
+ *
+ * With tbl == nullptr this is get_fuel_params(), which is what the standalone
+ * kernels and the unit tests use; with the table it is the same values read
+ * from memory, and the custom codes resolve as well.
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+FuelModelParams fuel_params_at_code (int code, int fuel_set, amrex::Real M_live,
+                                     const FuelModelParams* tbl, int tbl_size) noexcept
+{
+    if (tbl != nullptr) {
+        const int idx = fuel_table_index(code, fuel_set);
+        if (idx >= 0 && idx < tbl_size) { return tbl[idx]; }
+    }
+    return get_fuel_params(code, fuel_set, M_live);
 }
 
 /// Total oven-dry load of a fuel model [kg/m2] from its lb/ft2 loads.

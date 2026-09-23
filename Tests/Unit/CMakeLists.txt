@@ -213,6 +213,7 @@ if(ERF_ENABLE_FIRE)
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFuelMap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestStructureIgnition.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireSuppression.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestCustomFuel.cpp
   )
 endif()
 if(ERF_ENABLE_NETCDF)

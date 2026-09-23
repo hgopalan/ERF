@@ -370,20 +370,26 @@ void compute_ros_field(
     const amrex::MultiFab& fire_slopes,
     const RothermelComputed& rc);
 
-/// Entries in the per-fuel Rothermel table: code 0 (non-burnable) plus FBFM 1-13.
-inline constexpr int ROTHERMEL_TABLE_SIZE = 54;   ///< FUEL_SLOT_COUNT: 0 non-burnable, 1-13 Anderson, 14-53 Scott-Burgan
+/// Entries in the per-fuel Rothermel table, one per fuel table slot.
+inline constexpr int ROTHERMEL_TABLE_SIZE = 70;   ///< FUEL_SLOT_COUNT: 0 non-burnable, 1-13 Anderson, 14-53 Scott-Burgan, 54-69 deck-defined
+///< ERF_FuelModels.H static_asserts this against FUEL_SLOT_COUNT; this header cannot include it (it is included by it).
 
 /**
  * @brief Build a per-fuel-code lookup table of Rothermel coefficients
  *
- * Mirrors build_fuel_balbi_table(): indexed by integer fuel code, with index 0
- * holding a zeroed entry (R0 = 0, no spread) and 1-13 the Anderson models at
- * the given dead fuel moistures.
+ * Mirrors build_fuel_balbi_table(): indexed by fuel table slot, with index 0
+ * holding a zeroed entry (R0 = 0, no spread), 1-13 the Anderson models, 14-53
+ * the Scott-Burgan models and 54-69 the deck-defined ones, at the given dead
+ * fuel moistures.
  *
  * @param[in] moisture_1hr   1-hour dead fuel moisture [fraction]
  * @param[in] moisture_10hr  10-hour dead fuel moisture [fraction]
  * @param[in] moisture_100hr 100-hour dead fuel moisture [fraction]
  * @param[in] use_wind_limit Apply the MEWS cap (erf.fire.use_wind_limit)
+ * @param[in] fp_tbl         Fuel properties of every slot
+ *                           (build_fuel_params_slot_table), which is how the
+ *                           deck-defined models of ERF_CustomFuel.H reach the
+ *                           coefficients; nullptr takes the published sets only
  * @return host-side vector of size ROTHERMEL_TABLE_SIZE
  */
 std::vector<RothermelComputed> build_fuel_rothermel_table(
@@ -392,7 +398,8 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
     amrex::Real moisture_100hr,
     int fuel_set = 0,
     amrex::Real moisture_live = -1.0,
-    bool use_wind_limit = true);
+    bool use_wind_limit = true,
+    const FuelModelParams* fp_tbl = nullptr);
 
 /**
  * @brief Compute the rate-of-spread field with per-cell Rothermel coefficients
