@@ -16,9 +16,13 @@ this test feeds it decks whose verdict is known:
     erf.fire.firebreak.<n>.*), must pass, so that the families are recognised by
     being read rather than by being skipped;
   * with the source mutated so that a property is read under a new name, the
-    checker must fail on the decks that still use the old one.  That last case is
-    what keeps the custom_fuel property list derived from ERF_CustomFuel.cpp
-    instead of hard-coded here.
+    checker must fail on the decks that still use the old one.  That case is what
+    keeps the custom_fuel property list derived from ERF_CustomFuel.cpp instead of
+    hard-coded here, and its sibling -- a property moved from pp.query to
+    pp.contains -- must still be seen as read;
+  * misuse of the command line (a deck path that is not there, --extra-deck with
+    no path, an unknown option) must exit non-zero, because a deck silently
+    dropped is a pass that scanned one deck fewer than it was asked to.
 """
 import os
 import re
@@ -64,13 +68,16 @@ DEAD_KEYS = {
     "erf.dust.no_such_dust_key": "erf.dust.no_such_dust_key",
 }
 
-def run(root, extra_deck=None):
-    cmd = [sys.executable, CHECKER, root]
-    if extra_deck:
-        cmd += ["--extra-deck", extra_deck]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                       universal_newlines=True)
+def run_argv(args):
+    p = subprocess.run([sys.executable, CHECKER] + args, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, universal_newlines=True)
     return p.returncode, p.stdout
+
+def run(root, extra_deck=None):
+    args = [root]
+    if extra_deck:
+        args += ["--extra-deck", extra_deck]
+    return run_argv(args)
 
 def write_deck(tmp, name, text):
     path = os.path.join(tmp, name)
@@ -137,12 +144,32 @@ def main():
                 got = [l for l in out.splitlines() if name in l] or ["(nothing about " + name + ")"]
                 failures.append("setting %s should report %r, got: %s"
                                 % (dead, want, " | ".join(got)))
-            # and it must not blame any of the live keys in the same deck
             for line in out.splitlines():
+                # it must not blame any of the live keys in the same deck
                 if name in line and expect not in line:
                     failures.append("setting %s also reported a live key: %s" % (dead, line.strip()))
+                # and this deck is outside the tree, so it must be named as it was
+                # given.  A walk-up relative path is not only unreadable here, it is
+                # something os.path.relpath cannot build at all across two Windows
+                # drives, where it raises ValueError instead.
+                if name in line and os.pardir + os.sep in line:
+                    failures.append("an out-of-tree deck was reported by a walk-up path: "
+                                    + line.strip())
 
-        # 3. the custom_fuel property names must come from the source, not from a
+        # 3. misuse of the command line must be loud.  deck_files() drops anything
+        #    that is not a file, so a mistyped --extra-deck would otherwise leave the
+        #    run passing having scanned one deck fewer than it was asked to.
+        for argv, what in (
+                ([ROOT, "--extra-deck", os.path.join(tmp, "inputs_not_there")],
+                 "a deck that is not there"),
+                ([ROOT, "--extra-deck"], "--extra-deck with no path"),
+                ([ROOT, "--no-such-option"], "an unknown option"),
+                ([ROOT, ROOT], "two repo roots")):
+            rc, out = run_argv(argv)
+            if rc == 0:
+                failures.append("the checker accepted %s and reported PASS" % what)
+
+        # 4. the custom_fuel property names must come from the source, not from a
         #    list inside the checker: rename one in a shadow copy of the source and
         #    the decks that still set the old name must be reported
         def rename(text):
@@ -150,6 +177,17 @@ def main():
             if n != 1:
                 raise SystemExit("test_check_fire_dust_inputs.py: cannot find the "
                                  "w_1h_kg_m2 read in " + CUSTOM_FUEL_SRC)
+            return new
+
+        # pp.contains is a read too -- it decides whether the deck set the key -- and
+        # the checker's literal scan already counts it.  The per-property scan has to
+        # agree, or moving one property to contains would make it read as dead.
+        def to_contains(text):
+            new, n = re.subn(r'pp\.query\(\(pre \+ "burnout_time_s"\)\.c_str\(\), burn_s\);',
+                             'pp.contains((pre + "burnout_time_s").c_str());', text)
+            if n != 1:
+                raise SystemExit("test_check_fire_dust_inputs.py: cannot find the "
+                                 "burnout_time_s read in " + CUSTOM_FUEL_SRC)
             return new
         try:
             # the shadow tree must be faithful, or a failure below would prove nothing
@@ -159,10 +197,11 @@ def main():
                                 "below proves nothing: " + " | ".join(
                                     l for l in out.splitlines() if l.startswith("FAIL"))[:400])
             rc, out = run(shadow_root(tmp, rename))
+            rc_c, out_c = run(shadow_root(tmp, to_contains))
         except OSError as e:
             # the shadow tree is symlinked, which an unprivileged Windows account
             # cannot do; the rest of this test carries on without it
-            print("SKIP  the renamed-property case needs symlinks: %s" % e)
+            print("SKIP  the mutated-source cases need symlinks: %s" % e)
             mutation_ran = False
         else:
             mutation_ran = True
@@ -174,6 +213,10 @@ def main():
                 failures.append("after renaming w_1h_kg_m2 the checker failed for another "
                                 "reason: " + " | ".join(l for l in out.splitlines()
                                                         if l.startswith("FAIL"))[:400])
+            if rc_c != 0:
+                failures.append("a property read through pp.contains instead of pp.query "
+                                "read as dead: " + " | ".join(l for l in out_c.splitlines()
+                                                              if l.startswith("FAIL"))[:400])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -185,7 +228,8 @@ def main():
     print("PASS  check_fire_dust_inputs.py accepts %d live keys and reports each of the %d "
           "dead keys by name%s"
           % (len(LIVE_DECK.strip().splitlines()), len(DEAD_KEYS),
-             ", and follows a renamed property in the source" if mutation_ran else ""))
+             ", follows a renamed property in the source and reads one through pp.contains"
+             if mutation_ran else ""))
     return 0
 
 if __name__ == "__main__":

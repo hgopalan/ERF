@@ -100,8 +100,10 @@ def custom_fuel_keys():
                  "erf.fire." + m.group(1) + "<code>.*; update both together")
 
     # pp.query((pre + "name").c_str(), ...) and the need() helper, which queries
-    # (pre + name) and aborts when the deck leaves it out
-    props = set(re.findall(r'\bpp\.(?:query|queryarr)\s*\(\s*\(\s*pre\s*\+\s*"([^"]+)"', s))
+    # (pre + name) and aborts when the deck leaves it out. contains is a read as
+    # well -- it asks whether the deck set the key -- and is accepted by the
+    # literal scan above, so the two stay on the same list of call names.
+    props = set(re.findall(r'\bpp\.(?:query|queryarr|contains)\s*\(\s*\(\s*pre\s*\+\s*"([^"]+)"', s))
     props |= set(re.findall(r'\bneed\s*\(\s*"([^"]+)"\s*,', s))
     if not props:
         sys.exit("check_fire_dust_inputs.py: found no " + pre + "* property reads in "
@@ -171,14 +173,23 @@ def deck_files():
     for d in DECK_DIRS:
         files += glob.glob(os.path.join(ROOT, d, "**/inputs*"), recursive=True)
     files += glob.glob(os.path.join(ROOT, "Exec/RegTests/Fire*/inputs*"))
-    files += [os.path.abspath(f) for f in EXTRA_DECKS]
+    # The glob results are filtered below, but an --extra-deck was named by hand:
+    # dropping a mistyped one would leave the run reporting PASS having scanned one
+    # deck fewer than it was asked to.
+    for f in EXTRA_DECKS:
+        if not os.path.isfile(f):
+            sys.exit("check_fire_dust_inputs.py: --extra-deck " + f + " is not a file")
+        files.append(os.path.abspath(f))
     return sorted(f for f in files if os.path.isfile(f))
 
 def show(path):
-    """A deck's path as the report names it: relative to the root when it is in
-    the tree, as given for an --extra-deck outside it."""
-    rel = os.path.relpath(path, ROOT)
-    return path if rel.startswith(os.pardir) else rel
+    """A deck's path as the report names it: relative to the root when it is under
+    the root, as given for an --extra-deck outside it. Tested for the prefix rather
+    than handed to os.path.relpath, which raises ValueError -- not a walk-up path --
+    for two paths on different Windows drives, as an --extra-deck in a temporary
+    directory may well be."""
+    head = os.path.join(ROOT, "")
+    return path[len(head):] if path.startswith(head) else path
 
 def deck_keys(path, commented=False):
     pat = r"^\s*#?\s*(erf\.[A-Za-z0-9_.]+)\s*=" if commented else r"^\s*(erf\.[A-Za-z0-9_.]+)\s*="
