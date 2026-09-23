@@ -981,23 +981,18 @@ def _source_path(name):
     return os.path.join(here, "..", "..", "..", "..", "Source", "Fire", name)
 
 
-def _int_constant(name, consts, seen=()):
-    """Value of an integer constexpr, resolving the names it is written in terms of.
+def _eval_int_expr(expr, consts, what, seen=()):
+    """Value of a C++ integer constant expression.
 
     Walks the expression as an AST and accepts integer literals, the names in
     `consts`, + - * and unary minus. Anything else raises, so an expression this
     function cannot evaluate is reported rather than guessed at.
     """
-    if name in seen:
-        raise RuntimeError(f"circular definition of {name}: {' -> '.join(seen)}")
-    if name not in consts:
-        raise RuntimeError(f"{name} not found in ERF_FuelModels.H")
-
     def value(node):
         if isinstance(node, ast.Constant) and isinstance(node.value, int):
             return node.value
         if isinstance(node, ast.Name):
-            return _int_constant(node.id, consts, seen + (name,))
+            return _int_constant(node.id, consts, seen)
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
             return -value(node.operand)
         if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult)):
@@ -1007,13 +1002,32 @@ def _int_constant(name, consts, seen=()):
             if isinstance(node.op, ast.Sub):
                 return left - right
             return left * right
-        raise RuntimeError(f"unsupported expression for {name}: {consts[name].strip()}")
+        raise RuntimeError(f"unsupported expression for {what}: {expr.strip()}")
 
     try:
-        tree = ast.parse(consts[name].strip(), mode="eval")
+        tree = ast.parse(expr.strip(), mode="eval")
     except SyntaxError as exc:
-        raise RuntimeError(f"cannot parse {name} = {consts[name].strip()}") from exc
+        raise RuntimeError(f"cannot parse {what} = {expr.strip()}") from exc
     return value(tree.body)
+
+
+def _int_constant(name, consts, seen=()):
+    """Value of an integer constexpr, resolving the names it is written in terms of."""
+    if name in seen:
+        raise RuntimeError(f"circular definition of {name}: {' -> '.join(seen)}")
+    if name not in consts:
+        raise RuntimeError(f"{name} not found in the fire headers")
+    return _eval_int_expr(consts[name], consts, name, seen + (name,))
+
+
+def fuel_constants():
+    """The integer constexprs of ERF_FuelModels.H and ERF_FuelWindHeight.H."""
+    consts = {}
+    for header in ("ERF_FuelModels.H", "ERF_FuelWindHeight.H"):
+        with open(_source_path(header)) as f:
+            consts.update(re.findall(r"inline constexpr int\s+(\w+)\s*=\s*([^;]+);",
+                                     f.read()))
+    return consts
 
 
 def fuel_slot_count():
@@ -1022,10 +1036,7 @@ def fuel_slot_count():
     The declaration is written in terms of the other constants of that header
     (FUEL_SLOT_CUSTOM_BASE + CUSTOM_FUEL_MAX), so resolve the names it uses.
     """
-    with open(_source_path("ERF_FuelModels.H")) as f:
-        text = f.read()
-    consts = dict(re.findall(r"inline constexpr int\s+(\w+)\s*=\s*([^;]+);", text))
-    return _int_constant("FUEL_SLOT_COUNT", consts)
+    return _int_constant("FUEL_SLOT_COUNT", fuel_constants())
 
 
 def build_fcwh_table(global_z_ref, use_per_fuel=False):
@@ -1085,8 +1096,48 @@ def test_fcwh_per_fuel_mode():
     return passed
 
 
+def _blank_cxx_comments_and_literals(text):
+    """`text` with //, /* */, "..." and \'...\' blanked out, length preserved.
+
+    Braces and identifiers inside a comment or a literal must not be seen by the
+    scans below; keeping the length means every offset still lines up.
+    """
+    out = list(text)
+    i, n = 0, len(text)
+    while i < n:
+        two = text[i:i + 2]
+        if two == "//":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            out[i:j] = " " * (j - i)
+            i = j
+        elif two == "/*":
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            for k in range(i, j):
+                if text[k] != "\n":
+                    out[k] = " "
+            i = j
+        elif text[i] in "\"'":
+            quote, j = text[i], i + 1
+            while j < n and text[j] != quote:
+                j += 2 if text[j] == "\\" else 1
+            j = min(j + 1, n)
+            for k in range(i, j):
+                if text[k] != "\n":
+                    out[k] = " "
+            i = j
+        else:
+            i += 1
+    return "".join(out)
+
+
 def _function_body(text, start):
-    """Text between the braces of the function whose signature starts at `start`."""
+    """Text between the braces of the function whose signature starts at `start`.
+
+    `text` must already have comments and literals blanked out, so a brace in a
+    comment cannot unbalance the count.
+    """
     open_brace = text.index("{", start)
     depth = 0
     for i in range(open_brace, len(text)):
@@ -1099,6 +1150,31 @@ def _function_body(text, start):
     raise RuntimeError("unbalanced braces in ERF_FuelWindHeight.H")
 
 
+def _first_argument(text, open_paren):
+    """The first argument of the call whose '(' is at `open_paren`.
+
+    Counts parentheses, so a size written as static_cast<std::size_t>(N) or
+    (std::size_t) N comes back whole rather than cut at its first ')'.
+    """
+    depth = 0
+    for i in range(open_paren, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_paren + 1:i].strip()
+        elif text[i] == "," and depth == 1:
+            return text[open_paren + 1:i].strip()
+    raise RuntimeError("unbalanced parentheses in ERF_FuelWindHeight.H")
+
+
+# A cast around a table size is not part of the size: static_cast<std::size_t>(N)
+# and (std::size_t) N both size the table as N.
+_SIZE_CAST = re.compile(r"static_cast\s*<[^>]*>\s*|"
+                        r"\(\s*(?:std::)?(?:size_t|ptrdiff_t|int|unsigned|long)\s*\)\s*")
+
+
 def fuel_table_sizes():
     """{table name: size expression} for each table built in ERF_FuelWindHeight.H.
 
@@ -1107,45 +1183,63 @@ def fuel_table_sizes():
     such a function under another name, is not one and is not checked.
     """
     with open(_source_path("ERF_FuelWindHeight.H")) as f:
-        header = f.read()
+        header = _blank_cxx_comments_and_literals(f.read())
 
     sizes = {}
     for m in re.finditer(r"\bbuild_(\w+)_table\s*\(", header):
         name = m.group(1)
         body = _function_body(header, m.end())
-        decl = re.search(r"std::vector\s*<[^>]*>\s+" + re.escape(name) + r"\s*\(([^,;)]+)",
-                         body)
+        decl = re.search(r"std::vector\s*<[^>]*>\s+" + re.escape(name) + r"\s*\(", body)
         # None means the builder no longer declares a vector under its own name:
         # report it rather than pass on a table this check can no longer see.
-        sizes[name] = decl.group(1).strip() if decl else None
+        sizes[name] = _first_argument(body, decl.end() - 1) if decl else None
     return sizes
 
 
-def test_fuel_tables_are_sized_by_slot_count():
-    """Test 31: every table in ERF_FuelWindHeight.H is sized FUEL_SLOT_COUNT.
+def fuel_table_size_value(expr, consts):
+    """The number of entries a size expression asks for, or None if unevaluable."""
+    if expr is None:
+        return None
+    try:
+        return _eval_int_expr(_SIZE_CAST.sub("", expr), consts, "a table size")
+    except RuntimeError:
+        return None
 
-    A per-fuel table with a hard-coded length shorter than FUEL_SLOT_COUNT is
-    read out of bounds as soon as it is indexed by fuel slot: the Scott-Burgan
-    codes occupy slots 14 and up, and the deck-defined codes 54 and up. The
-    removed roughness table build_fcz0_table() was hard-coded to 14 entries and
-    this check fails on it.
+
+def test_fuel_tables_are_sized_by_slot_count():
+    """Test 31: every table in ERF_FuelWindHeight.H holds FUEL_SLOT_COUNT entries.
+
+    A per-fuel table shorter than FUEL_SLOT_COUNT is read out of bounds as soon
+    as it is indexed by fuel slot: the Scott-Burgan codes occupy slots 14 and up,
+    and the deck-defined codes 54 and up. The removed roughness table
+    build_fcz0_table() was hard-coded to 14 entries and this check fails on it.
+    The size is evaluated, not matched as text, so FUEL_SLOT_COUNT - 1 fails too.
     """
+    expected = fuel_slot_count()
+    consts = fuel_constants()
     sizes = fuel_table_sizes()
-    passed = bool(sizes) and all(
-        size is not None and re.search(r"\bFUEL_SLOT_COUNT\b", size)
-        for size in sizes.values())
+    values = {name: fuel_table_size_value(expr, consts) for name, expr in sizes.items()}
+
+    passed = bool(sizes) and all(v == expected for v in values.values())
     status = "\u2713" if passed else "\u2717"
-    print(f"{status} Test 31: fuel tables in ERF_FuelWindHeight.H sized FUEL_SLOT_COUNT")
+    print(f"{status} Test 31: fuel tables in ERF_FuelWindHeight.H hold "
+          f"FUEL_SLOT_COUNT ({expected}) entries")
     if not passed:
         if not sizes:
             print("    No build_*_table() function found in ERF_FuelWindHeight.H")
-        for name, size in sorted(sizes.items()):
-            if size is None:
+        for name in sorted(sizes):
+            expr, value = sizes[name], values[name]
+            if value == expected:
+                continue
+            if expr is None:
                 print(f"    build_{name}_table() declares no vector named {name}; "
                       f"update this check")
-            elif not re.search(r"\bFUEL_SLOT_COUNT\b", size):
-                print(f"    build_{name}_table() sizes {name} as '{size}', "
-                      f"not FUEL_SLOT_COUNT")
+            elif value is None:
+                print(f"    build_{name}_table() sizes {name} as '{expr}', which this "
+                      f"check cannot evaluate; update this check")
+            else:
+                print(f"    build_{name}_table() sizes {name} as '{expr}' = {value}, "
+                      f"expected {expected}")
     return passed
 
 

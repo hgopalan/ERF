@@ -465,7 +465,8 @@ void FireLayer::initialize(const ERF& erf,
                                     fire_params.use_wind_limit);
 
     // Phase 13A: Build the per-fuel wind height table and copy it to device.
-    // When use_per_fuel_wind_ht = false, all entries equal wind_ref_ht (no-op).
+    // When use_per_fuel_wind_ht = false, every fuel slot (1..FUEL_SLOT_COUNT-1;
+    // slot 0 is the non-burnable slot and stays zero) equals wind_ref_ht (no-op).
     m_use_per_fuel_wind_ht = m_params.use_per_fuel_wind_ht;
     {
         auto h_fcwh = build_fcwh_table(m_params.wind_ref_ht, m_params.use_per_fuel_wind_ht);
