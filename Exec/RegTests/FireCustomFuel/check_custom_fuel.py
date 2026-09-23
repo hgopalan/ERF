@@ -2,6 +2,7 @@
 """Checks of the deck-defined fuel models (erf.fire.custom_fuel.*).
 
     python3 check_custom_fuel.py identity run_anderson1.log run_custom_grass.log
+    python3 check_custom_fuel.py identity run_custom_map.log run_custom_map_altid.log I_B_max L_max
     python3 check_custom_fuel.py summary  run_custom_grass.log 1000
     python3 check_custom_fuel.py fuel     run_custom_map.log fuel_map_mixed.asc 1.25
     python3 check_custom_fuel.py slower   run_anderson1.log run_custom_heavy.log 2.0
@@ -9,9 +10,12 @@
     python3 check_custom_fuel.py abort    run_bad_depth.log depth_m
     python3 check_custom_fuel.py --selftest
 
-identity: a deck-defined model written out in SI from the Anderson table
-          reproduces the compiled model. Not bitwise: the deck carries the SI
-          values to eight digits, so the comparison is relative, at IDENT_TOL.
+identity: two runs that must agree. Not bitwise: a deck carries its SI values
+          to eight digits, so the comparison is relative, at IDENT_TOL. Any
+          trailing arguments name `label=` quantities exempted from the
+          comparison, for a known defect the run is not meant to guard; the
+          check reports an exemption that no longer differs so it can be
+          dropped once the defect is fixed.
 summary:  the [FIRE DEBUG] custom fuel line reports back the SI the deck gave,
           which is the round trip through FuelModelParams' US units.
 fuel:     the initial fuel on the grid equals the sum over the raster of each
@@ -67,28 +71,54 @@ def numbers(line):
     return [float(t) for t in re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", line)]
 
 
-def check_identity(log_a, log_b):
+def labelled_numbers(line):
+    """(label, value) for every `label=value` on a line, plus bare numbers.
+
+    The labels let a comparison exempt a named quantity without loosening the
+    tolerance on everything else.
+    """
+    out = [(m.group(1), float(m.group(2)))
+           for m in re.finditer(r"(\w+)=([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)", line)]
+    if out:
+        return out
+    return [("", v) for v in numbers(line)]
+
+
+def check_identity(log_a, log_b, exempt=()):
     a, b = debug_lines(log_a), debug_lines(log_b)
     if not a:
         return fail(f"{log_a} has no fire debug lines")
     if len(a) != len(b):
         return fail(f"{log_a} has {len(a)} fire debug lines, {log_b} has {len(b)}")
 
-    worst, worst_at = 0.0, ""
+    worst, worst_at, worst_label = 0.0, "", ""
+    seen_exempt = set()
     for la, lb in zip(a, b):
-        na, nb = numbers(la), numbers(lb)
+        na, nb = labelled_numbers(la), labelled_numbers(lb)
         if len(na) != len(nb):
             return fail(f"line shape differs:\n    {la}\n    {lb}")
-        for xa, xb in zip(na, nb):
+        for (label, xa), (_, xb) in zip(na, nb):
             denom = max(abs(xa), 1.0)
             rel = abs(xa - xb) / denom
+            if label in exempt:
+                if rel > IDENT_TOL:
+                    seen_exempt.add(label)
+                continue
             if rel > worst:
-                worst, worst_at = rel, la
+                worst, worst_at, worst_label = rel, la, label
     if worst > IDENT_TOL:
-        return fail(f"deck-defined fuel differs from the compiled model by {worst:.3e} "
+        return fail(f"{worst_label or 'a value'} differs by {worst:.3e} "
                     f"(> {IDENT_TOL:.0e}) at:\n    {worst_at}")
-    return ok(f"deck-defined fuel reproduces the compiled model over {len(a)} lines "
-              f"(worst relative difference {worst:.3e})")
+
+    note = ""
+    if exempt:
+        missing = [e for e in exempt if e not in seen_exempt]
+        # An exemption that never fires is a stale exemption: say so rather than
+        # quietly keeping it once the underlying defect is fixed.
+        note = (f"; exempt and differing: {sorted(seen_exempt) or 'none'}"
+                + (f"; exempt but now equal (drop them): {missing}" if missing else ""))
+    return ok(f"the runs agree over {len(a)} lines "
+              f"(worst relative difference {worst:.3e}){note}")
 
 
 def check_summary(log, code):
@@ -279,7 +309,7 @@ def main():
     if mode == "--selftest":
         return 0 if selftest() else 1
     if mode == "identity":
-        return 0 if check_identity(sys.argv[2], sys.argv[3]) else 1
+        return 0 if check_identity(sys.argv[2], sys.argv[3], tuple(sys.argv[4:])) else 1
     if mode == "summary":
         return 0 if check_summary(sys.argv[2], int(sys.argv[3])) else 1
     if mode == "fuel":

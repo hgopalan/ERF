@@ -16,8 +16,8 @@ set -u
 EXE=${1:?usage: run_custom_fuel.sh /path/to/erf_exec [extra args]}
 shift || true
 
-RUN_VARIANTS="anderson1 custom_grass custom_heavy custom_map"
-BAD_VARIANTS="bad_code bad_missing bad_depth bad_heat bad_burnout bad_undeclared"
+RUN_VARIANTS="anderson1 custom_grass custom_heavy custom_map custom_map_altid undeclared_nonburnable"
+BAD_VARIANTS="bad_code bad_missing bad_depth bad_heat bad_burnout bad_undeclared bad_uniform_code"
 
 for v in $RUN_VARIANTS; do
     if [ "${SKIP_RUN:-0}" = "1" ] && [ -f "run_$v.log" ]; then continue; fi
@@ -104,6 +104,26 @@ fi
 
 python3 check_custom_fuel.py identity run_custom_map.log run_custom_map_onebox.log || status=1
 
+# erf.fire.rothermel_per_fuel means the uniform fuel model does not enter the
+# answer at all. The two runs differ only in erf.fire.fuel_model_id, so every
+# number has to match; before the directional path read the per-cell table the
+# level-set front followed the uniform coefficients and they did not.
+# I_B_max and L_max are exempt: the Byram diagnostics take the *uniform* initial
+# fuel load, so under erf.fire.fuel_map.load_from_map they scale with
+# erf.fire.fuel_model_id rather than with the cell's own load, and can come out
+# exactly zero. That is a separate pre-existing defect in
+# fill_fire_diagnostics(), not a propagation one; everything the front and the
+# heat flux depend on has to match exactly.
+python3 check_custom_fuel.py identity run_custom_map.log run_custom_map_altid.log I_B_max L_max || status=1
+
+# A raster code the deck declares non-burnable needs no properties, so this
+# deck must run rather than abort.
+if grep -q "custom fuel" run_undeclared_nonburnable.log 2>/dev/null; then
+    echo "  FAIL an undeclared custom code listed in nonburnable_codes still aborted"; status=1
+else
+    echo "  PASS an undeclared custom code listed in nonburnable_codes runs"
+fi
+
 if [ -n "${FCOMPARE:-}" ]; then
     # -a allows the two BoxArrays; the tolerances are the round-off a different
     # decomposition leaves, not a physics tolerance.
@@ -123,5 +143,6 @@ python3 check_custom_fuel.py abort run_bad_depth.log      depth_m               
 python3 check_custom_fuel.py abort run_bad_heat.log       heat_content_J_kg          || status=1
 python3 check_custom_fuel.py abort run_bad_burnout.log    burnout_time_s             || status=1
 python3 check_custom_fuel.py abort run_bad_undeclared.log 1007                       || status=1
+python3 check_custom_fuel.py abort run_bad_uniform_code.log "erf.fire.fuel_model_id = 1000" || status=1
 
 exit $status
