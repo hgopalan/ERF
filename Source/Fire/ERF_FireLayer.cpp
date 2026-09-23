@@ -464,16 +464,14 @@ void FireLayer::initialize(const ERF& erf,
                                     fire_params.moisture_100hr,
                                     fire_params.use_wind_limit);
 
-    // Phase 13A: Build per-fuel wind height tables and copy to device.
-    // When use_per_fuel_wind_ht = false, all entries equal wind_ref_ht (no-op).
+    // Phase 13A: Build the per-fuel wind height table and copy it to device.
+    // When use_per_fuel_wind_ht = false, every fuel slot (1..FUEL_SLOT_COUNT-1;
+    // slot 0 is the non-burnable slot and stays zero) equals wind_ref_ht (no-op).
     m_use_per_fuel_wind_ht = m_params.use_per_fuel_wind_ht;
     {
         auto h_fcwh = build_fcwh_table(m_params.wind_ref_ht, m_params.use_per_fuel_wind_ht);
-        auto h_fcz0 = build_fcz0_table();
         m_d_fcwh.resize(h_fcwh.size());
-        m_d_fcz0.resize(h_fcz0.size());
         amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_fcwh.begin(), h_fcwh.end(), m_d_fcwh.begin());
-        amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_fcz0.begin(), h_fcz0.end(), m_d_fcz0.begin());
         if (m_params.fire_debug && m_params.use_per_fuel_wind_ht) {
             amrex::Print() << "[FIRE DEBUG] Per-fuel wind height enabled. "
                            << "FM1 fcwh=" << h_fcwh[1] << " m, FM4 fcwh=" << h_fcwh[4] << " m\n";
