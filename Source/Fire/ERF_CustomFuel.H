@@ -37,13 +37,14 @@
  *    does not change their rate. That is a property of those models' plumbing,
  *    not of this class.
  *
- * The heat flux, the per-cell fuel load, the flame residence time and the
- * burnout time read the slot tables per cell in every case.
+ * The heat flux, the per-cell fuel load, the flame residence time, the burnout
+ * time, the wind adjustment factor (from the cell's bed depth) and the Byram
+ * intensity and flame length (from the cell's heat content, and its initial
+ * load under erf.fire.fuel_map.load_from_map) read the slot tables per cell in
+ * every case, whatever rate-of-spread model is in use.
  *
- * Still uniform even in a per-fuel run, and reported at start-up: the wind
- * adjustment factor and the fuel wind height take the bed depth of
- * erf.fire.fuel_model_id, and the Byram intensity and flame length its initial
- * load. The rate of spread, the heat flux and the fuel load do not.
+ * erf.fire.fuel_model_id then names only the fuel a deck without a map burns
+ * and, with erf.fire.fuel_map.load_from_map off, the load every cell starts at.
  *
  * Properties are given in SI, the units a fuel measurement is reported in, and
  * converted once here to the US units FuelModelParams carries internally.

@@ -56,9 +56,13 @@ corrections:
 - The wind adjustment factor reduces the reference wind to the midflame
   height of the fuel bed. :cpp:`erf.fire.waf_formula = "andrews"` (default)
   uses the unsheltered logarithmic form of Andrews (2012) driven by the fuel
-  bed depth of the domain fuel model, and ``"behaviorplus"`` the linear
-  BehavePlus form; :cpp:`erf.fire.use_waf = false` passes the reference wind
-  through. The Balbi model can bypass the factor with
+  bed depth, and ``"behaviorplus"`` the linear BehavePlus form;
+  :cpp:`erf.fire.use_waf = false` passes the reference wind through. The
+  depth is the domain fuel model's on a uniform fuel and each cell's own
+  wherever a spatial fuel map is read, so on a map the factor is a field:
+  Anderson 1's 1 ft bed gives 0.362 and Anderson 13's 3 ft bed 0.459, a 27 %
+  difference in the midflame wind that the rate of spread carries. The Balbi
+  model can bypass the factor with
   :cpp:`erf.fire.balbi.wind_source = "reference"`, since it normalises the
   wind by its own vertical velocity scale.
 - The FARSITE terrain corrections (:cpp:`erf.fire.use_terrain_wind`, default

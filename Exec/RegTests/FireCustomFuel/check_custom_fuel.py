@@ -2,12 +2,13 @@
 """Checks of the deck-defined fuel models (erf.fire.custom_fuel.*).
 
     python3 check_custom_fuel.py identity run_anderson1.log run_custom_grass.log
-    python3 check_custom_fuel.py identity run_custom_map.log run_custom_map_altid.log I_B_max L_max
+    python3 check_custom_fuel.py identity run_custom_map.log run_custom_map_altid.log
     python3 check_custom_fuel.py summary  run_custom_grass.log 1000
     python3 check_custom_fuel.py fuel     run_custom_map.log fuel_map_mixed.asc 1.25
     python3 check_custom_fuel.py slower   run_anderson1.log run_custom_heavy.log 2.0
     python3 check_custom_fuel.py crossed  plt_fire_custom_map/plt_fire_00480 1000 102 2.0
     python3 check_custom_fuel.py abort    run_bad_depth.log depth_m
+    python3 check_custom_fuel.py ran      run_undeclared_nonburnable.log
     python3 check_custom_fuel.py --selftest
 
 identity: two runs that must agree. Not bitwise: a deck carries its SI values
@@ -27,6 +28,9 @@ crossed:  in the mixed raster the front has burned cells of both codes, and the
           rate of spread inside the deck-defined block is the block's own, at
           most 1/factor of the published model's around it. Needs yt.
 abort:    the run stopped with the custom fuel message naming that input.
+ran:      the deck ran to completion: no custom fuel abort, and the log carries
+          the run's own finalize line. The absence of a loose substring is not
+          evidence a run succeeded; an abort of any other kind fails this too.
 """
 import re
 import sys
@@ -97,7 +101,15 @@ def check_identity(log_a, log_b, exempt=()):
         na, nb = labelled_numbers(la), labelled_numbers(lb)
         if len(na) != len(nb):
             return fail(f"line shape differs:\n    {la}\n    {lb}")
-        for (label, xa), (_, xb) in zip(na, nb):
+        for (label, xa), (label_b, xb) in zip(na, nb):
+            # Position alone does not say two numbers are the same quantity. A
+            # renamed or reordered field would otherwise be compared against its
+            # neighbour and could agree by luck, and an exemption would silence
+            # the wrong number; say the format drifted instead.
+            if label != label_b:
+                return fail(f"the two logs label the same position differently "
+                            f"({label!r} against {label_b!r}); the debug line format drifted:"
+                            f"\n    {la}\n    {lb}")
             denom = max(abs(xa), 1.0)
             rel = abs(xa - xb) / denom
             if label in exempt:
@@ -244,6 +256,26 @@ def check_crossed(plotfile, block_code, other_code, factor):
               f"{r_other:.4g} m/s")
 
 
+# What ERF prints once the run has torn down cleanly. An abort never reaches it.
+FINALIZE_RE = re.compile(r"AMReX \(.*?\) finalized")
+# Every abort this suite's fuel code raises carries this prefix.
+CUSTOM_FUEL_ABORT = "ERF-Fire custom fuel:"
+
+
+def check_ran(log):
+    try:
+        text = open(log).read()
+    except OSError as exc:
+        return fail(f"{log} cannot be read: {exc}")
+    if CUSTOM_FUEL_ABORT in text:
+        msg = re.search(re.escape(CUSTOM_FUEL_ABORT) + r"(.*?)(?:!!!|\n)", text, re.S)
+        return fail(f"{log} stopped on a custom fuel abort:"
+                    f"{' ' + ' '.join(msg.group(1).split()) if msg else ''}")
+    if not FINALIZE_RE.search(text):
+        return fail(f"{log} never reached the end of the run")
+    return ok(f"{log} ran to completion with no custom fuel abort")
+
+
 def check_abort(log, key):
     text = open(log).read()
     m = re.search(r"amrex::Abort.*?ERF-Fire custom fuel: (.*?) !!!", text, re.S)
@@ -287,6 +319,36 @@ def selftest():
         if not check_slower(a, b, 1.0):
             good = fail("selftest: slower failed at factor 1 on equal spreads")
 
+        # identity: a renamed or reordered label must fail, not be compared by
+        # position against its neighbour
+        open(a, "w").write("[FIRE] max_ROS=0.5 m/s  mean_ROS=0.5 m/s\n")
+        # the renamed field is the second one, so the line is still selected and
+        # the failure is the label mismatch rather than a dropped line
+        open(b, "w").write("[FIRE] max_ROS=0.5 m/s  mean_ros=0.5 m/s\n")
+        if check_identity(a, b):
+            good = fail("selftest: identity passed a renamed label")
+        open(b, "w").write("[FIRE] mean_ROS=0.5 m/s  max_ROS=0.5 m/s\n")
+        if check_identity(a, b):
+            good = fail("selftest: identity passed two reordered labels")
+        # and an exemption must not silence the drift
+        if check_identity(a, b, ("max_ROS",)):
+            good = fail("selftest: an exemption hid a reordered label")
+
+        # ran: a finished run passes; an abort and a truncated log do not
+        open(a, "w").write("Coarse STEP 480 ends.\nAMReX (26.09) finalized\n")
+        if not check_ran(a):
+            good = fail("selftest: ran failed a finished run")
+        open(b, "w").write("amrex::Abort::0::ERF-Fire custom fuel: code 1007 !!!\n")
+        if check_ran(b):
+            good = fail("selftest: ran passed a custom fuel abort")
+        open(b, "w").write("Coarse STEP 3 ends.\n")
+        if check_ran(b):
+            good = fail("selftest: ran passed a log that never finished")
+        # a run whose summary mentions custom fuel models is not an abort
+        open(b, "w").write("[FIRE DEBUG] Custom fuel models: 1\nAMReX (26.09) finalized\n")
+        if not check_ran(b):
+            good = fail("selftest: ran mistook the custom fuel summary for an abort")
+
         # abort: a clean log must fail, and a wrong key must fail
         open(b, "w").write("all fine\n")
         if check_abort(b, "depth_m"):
@@ -321,6 +383,8 @@ def main():
                                   float(sys.argv[5])) else 1
     if mode == "abort":
         return 0 if check_abort(sys.argv[2], sys.argv[3]) else 1
+    if mode == "ran":
+        return 0 if check_ran(sys.argv[2]) else 1
     print(f"unknown mode {mode}")
     return 2
 

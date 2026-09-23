@@ -2,7 +2,7 @@
 //
 // Byram (1959) fireline intensity:
 //   I_B [kW/m] = h_fuel [kJ/kg] * w_consumed [kg/m²] * ros [m/s]
-//   where w_consumed = fuel_load_initial * f_c
+//   where w_consumed = fuel_load_initial - fuel_load_remain
 //
 // Thomas (1963) flame length:
 //   L [m] = 0.0775 * I_B^0.46    (I_B in kW/m)
@@ -17,6 +17,7 @@
 #define ERF_FIRE_DIAGNOSTICS_H
 
 #include <AMReX_MultiFab.H>
+#include <ERF_FuelModels.H>
 #include <cmath>
 #include <string>
 
@@ -88,6 +89,15 @@ amrex::Real compute_flame_length_m(amrex::Real I_B_kW_per_m) noexcept
  * fuel_load_initial is the initial total fuel load for the fuel model [kg/m²].
  * h_fuel_kJ_per_kg = fp.heat_content [BTU/lb] * 2.326  (1 BTU/lb = 2.326 kJ/kg)
  *
+ * With a per-cell fuel map both of those come from the cell's own model rather
+ * than from erf.fire.fuel_model_id: the heat content whenever the map exists,
+ * and the initial load under erf.fire.fuel_map.load_from_map, which is what
+ * started each cell off. Byram's I_B is h (w_initial - w_remain) R, so a
+ * uniform w_initial against a per-cell w_remain is not a scaling error but a
+ * different fire: where the uniform model is the lighter of the two the
+ * difference clamps at zero and the intensity vanishes, and where it is the
+ * heavier the consumed load is whatever erf.fire.fuel_model_id holds.
+ *
  * This is a local operation: no MPI communication required.
  *
  * @param[out] fireline_intensity  Byram fireline intensity [kW/m]
@@ -95,8 +105,23 @@ amrex::Real compute_flame_length_m(amrex::Real I_B_kW_per_m) noexcept
  * @param[in] fire_phi             Level-set field
  * @param[in] fire_ros             Rate of spread [m/s]
  * @param[in] fire_fuel_load       Remaining fuel load [kg/m²]
- * @param[in] fuel_load_initial_kg_m2  Initial fuel load [kg/m²]
- * @param[in] h_fuel_kJ_per_kg     Heat content [kJ/kg]
+ * @param[in] fuel_load_initial_kg_m2  Initial fuel load [kg/m²], used where the
+ *                                 initial load is not per cell
+ * @param[in] h_fuel_kJ_per_kg     Heat content [kJ/kg], used where the fuel is uniform
+ * @param[in] fuel_model_mf        Optional per-cell fuel model codes (nullptr = uniform)
+ * @param[in] fuel_set             Fuel model set of the map's codes (ERF_FuelModels.H)
+ * @param[in] M_live               Live herbaceous moisture for the Scott-Burgan curing transfer
+ * @param[in] fp_tbl               Device fuel properties by slot, so the deck-defined
+ *                                 models of ERF_CustomFuel.H carry their own load and
+ *                                 heat content; nullptr reads the published sets only
+ * @param[in] fp_tbl_size          Entries in fp_tbl
+ * @param[in] load_from_map        Each cell started with its own model's load
+ *                                 (erf.fire.fuel_map.load_from_map), so take the
+ *                                 initial load from the slot table rather than
+ *                                 from fuel_load_initial_kg_m2
+ * @param[in] sb40                 Whether the Scott-Burgan codes are active, so the
+ *                                 non-burnable ones carry no initial load, exactly
+ *                                 as fill_fuel_load_from_map() started them
  */
 inline void fill_fire_diagnostics(
     amrex::MultiFab& fireline_intensity,
@@ -105,9 +130,21 @@ inline void fill_fire_diagnostics(
     const amrex::MultiFab& fire_ros,
     const amrex::MultiFab& fire_fuel_load,
     amrex::Real fuel_load_initial_kg_m2,
-    amrex::Real h_fuel_kJ_per_kg)
+    amrex::Real h_fuel_kJ_per_kg,
+    const amrex::MultiFab* fuel_model_mf = nullptr,
+    int fuel_set = 0,
+    amrex::Real M_live = -1.0,
+    const FuelModelParams* fp_tbl = nullptr,
+    int fp_tbl_size = 0,
+    bool load_from_map = false,
+    bool sb40 = false)
 {
     using namespace amrex;
+
+    // The initial load is only per cell where the map gave each cell one; with
+    // load_from_map off every cell was started at the uniform load and that
+    // scalar is the right one.
+    const bool w0_per_cell = (fuel_model_mf != nullptr) && load_from_map;
 
     for (MFIter mfi(fire_phi); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -118,22 +155,54 @@ inline void fill_fire_diagnostics(
         auto I_B_arr = fireline_intensity.array(mfi);
         auto L_arr = flame_length.array(mfi);
 
-        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(const IntVect& iv) {
-            int i = iv[0], j = iv[1], k = iv[2];
+        if (fuel_model_mf != nullptr) {
+            auto const fuel_code_arr = fuel_model_mf->const_array(mfi);
 
-            Real phi_val = phi_arr(i, j, k);
-            Real ros_val = ros_arr(i, j, k);
-            Real w_remain = fuel_arr(i, j, k);
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(const IntVect& iv) {
+                int i = iv[0], j = iv[1], k = iv[2];
 
-            // Compute Byram fireline intensity
-            Real I_B = compute_fireline_intensity_kW_per_m(
-                phi_val, ros_val, fuel_load_initial_kg_m2, w_remain, h_fuel_kJ_per_kg);
-            I_B_arr(i, j, k) = I_B;
+                Real phi_val = phi_arr(i, j, k);
+                Real ros_val = ros_arr(i, j, k);
+                Real w_remain = fuel_arr(i, j, k);
 
-            // Compute Thomas flame length from Byram intensity
-            Real L = compute_flame_length_m(I_B);
-            L_arr(i, j, k) = L;
-        });
+                const int fuel_code = static_cast<int>(fuel_code_arr(i, j, k) + 0.5_rt);
+                const FuelModelParams fp_cell =
+                    fuel_params_at_code(fuel_code, fuel_set, M_live, fp_tbl, fp_tbl_size);
+
+                // The same expression fill_fuel_load_from_map() started the
+                // field with, so w_initial - w_remain is a real consumption.
+                Real w_initial = fuel_load_initial_kg_m2;
+                if (w0_per_cell) {
+                    w_initial = (sb40 && sb40_nonburnable(fuel_code))
+                              ? Real(0.0) : fuel_total_load_kg_m2(fp_cell);
+                }
+                const Real h_cell = fp_cell.heat_content * 2.326_rt;
+
+                Real I_B = compute_fireline_intensity_kW_per_m(
+                    phi_val, ros_val, w_initial, w_remain, h_cell);
+                I_B_arr(i, j, k) = I_B;
+
+                Real L = compute_flame_length_m(I_B);
+                L_arr(i, j, k) = L;
+            });
+        } else {
+            amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(const IntVect& iv) {
+                int i = iv[0], j = iv[1], k = iv[2];
+
+                Real phi_val = phi_arr(i, j, k);
+                Real ros_val = ros_arr(i, j, k);
+                Real w_remain = fuel_arr(i, j, k);
+
+                // Compute Byram fireline intensity
+                Real I_B = compute_fireline_intensity_kW_per_m(
+                    phi_val, ros_val, fuel_load_initial_kg_m2, w_remain, h_fuel_kJ_per_kg);
+                I_B_arr(i, j, k) = I_B;
+
+                // Compute Thomas flame length from Byram intensity
+                Real L = compute_flame_length_m(I_B);
+                L_arr(i, j, k) = L;
+            });
+        }
     }
 }
 

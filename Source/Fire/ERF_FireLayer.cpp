@@ -601,18 +601,21 @@ void FireLayer::initialize(const ERF& erf,
                            << "spatial fuel map (" << m_d_rc_table.size() << " codes), "
                            << "isotropic and level-set paths\n";
         }
-        // What is still taken from erf.fire.fuel_model_id in a per-fuel run,
-        // stated once so a deck does not have to discover it: the wind
-        // adjustment factor and the fuel wind height are built from the uniform
-        // model's bed depth, and the Byram intensity and flame length from its
-        // initial load. The rate of spread, the heat flux, the residence time
-        // and the fuel load are per cell.
-        if (m_params.use_waf) {
-            amrex::Print() << "[FIRE] erf.fire.rothermel_per_fuel: the rate of spread, heat flux, "
-                           << "residence time and fuel load are per cell, but the wind adjustment "
-                           << "factor still uses erf.fire.fuel_model_id = " << m_params.fuel_model_id
-                           << " (its bed depth), as do the Byram intensity and flame length "
-                           << "(its initial load)\n";
+        // Nothing the Rothermel path consumes is taken from
+        // erf.fire.fuel_model_id any more: the rate of spread, the heat flux,
+        // the residence time, the fuel load, the wind adjustment factor and the
+        // Byram diagnostics all read the cell's own model. What the uniform id
+        // still sets on this deck is the load every cell starts at, and only
+        // while erf.fire.fuel_map.load_from_map is off.
+        if (m_params.fire_debug) {
+            amrex::Print() << "[FIRE DEBUG] erf.fire.rothermel_per_fuel: rate of spread, heat flux, "
+                           << "residence time, fuel load, wind adjustment factor and Byram "
+                           << "diagnostics all come from the cell's own fuel model"
+                           << (m_params.fuel_map.load_from_map
+                               ? "; erf.fire.fuel_model_id does not enter the answer"
+                               : "; erf.fire.fuel_map.load_from_map is off, so every cell still "
+                                 "starts at the load of erf.fire.fuel_model_id")
+                           << "\n";
         }
     }
 
@@ -1514,11 +1517,49 @@ void FireLayer::check_edge_guard()
 
 void FireLayer::apply_waf_to_wind()
 {
-    Real waf = 0.4_rt;
-    if      (m_params.waf_formula == "andrews")      waf = compute_waf_unsheltered(m_fuel_bed_depth_ft);
-    else if (m_params.waf_formula == "behaviorplus")  waf = compute_waf_behaviorplus(m_fuel_bed_depth_ft);
-    else amrex::Abort("[FIRE] Unknown waf_formula '" + m_params.waf_formula + "'");
-    fire_wind_eff->mult(waf, 0, 2, 0);
+    // Both formulas are a function of the fuel bed depth alone, so on a spatial
+    // fuel map the factor is a field, not a scalar: Anderson 1's 1 ft grass bed
+    // gives 0.362 and Anderson 13's 3 ft slash bed 0.459, and the rate of spread
+    // carries the difference. Taking the depth from erf.fire.fuel_model_id
+    // reduced the whole grid by one factor the raster could not change -- 27 %
+    // of the effective wind between those two on the FireCustomFuel mixed map.
+    const int formula_id = (m_params.waf_formula == "andrews")      ? 0
+                         : (m_params.waf_formula == "behaviorplus") ? 1
+                         : -1;
+    if (formula_id < 0) {
+        amrex::Abort("[FIRE] Unknown waf_formula '" + m_params.waf_formula + "'");
+    }
+
+    if (!m_has_spatial_fuel || !fire_fuel_model) {
+        const Real waf = (formula_id == 0) ? compute_waf_unsheltered(m_fuel_bed_depth_ft)
+                                           : compute_waf_behaviorplus(m_fuel_bed_depth_ft);
+        fire_wind_eff->mult(waf, 0, 2, 0);
+        return;
+    }
+
+    const int  fuel_set    = m_params.fuel_map.fuel_set_id();
+    const Real M_live      = m_params.moisture_live;
+    const FuelModelParams* fp_tbl = fuel_params_table();
+    const int  fp_tbl_size = fuel_params_table_size();
+
+    for (MFIter mfi(*fire_wind_eff); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto       wind_arr = fire_wind_eff->array(mfi);
+        auto const code_arr = fire_fuel_model->const_array(mfi);
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const int fuel_code = static_cast<int>(code_arr(i, j, k) + 0.5_rt);
+            const FuelModelParams fp_cell =
+                fuel_params_at_code(fuel_code, fuel_set, M_live, fp_tbl, fp_tbl_size);
+            // delta is the bed depth in feet, which is what both formulas take;
+            // compute_waf_unsheltered floors it, so a zero-depth entry cannot
+            // divide by zero here.
+            const Real waf_cell = (formula_id == 0) ? compute_waf_unsheltered(fp_cell.delta)
+                                                    : compute_waf_behaviorplus(fp_cell.delta);
+            wind_arr(i, j, k, 0) *= waf_cell;
+            wind_arr(i, j, k, 1) *= waf_cell;
+        });
+    }
 }
 
 void FireLayer::advance_fuel_moisture(Real dt_s,
@@ -1709,9 +1750,20 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
         }
     }
 
+    // The Byram intensity and the flame length that follows it come from the
+    // cell's own fuel where the map gives one: the heat content always, and the
+    // initial load under erf.fire.fuel_map.load_from_map, which is the load the
+    // cell actually started with. These are not diagnostics only -- the
+    // intensity launches embers, sets the flame temperature and tilt, and is
+    // the surface intensity the crown criterion is tested against.
     fill_fire_diagnostics(*fire_fireline_intensity, *fire_flame_length,
                           *fire_phi, *fire_ros, *fire_fuel_load,
-                          m_fuel_load_initial_kg_m2, h_kJ_per_kg);
+                          m_fuel_load_initial_kg_m2, h_kJ_per_kg,
+                          m_has_spatial_fuel ? fire_fuel_model.get() : nullptr,
+                          m_params.fuel_map.fuel_set_id(), m_params.moisture_live,
+                          fuel_params_table(), fuel_params_table_size(),
+                          m_params.fuel_map.load_from_map,
+                          m_params.fuel_map.sb40_active());
 
     const Real dead_load = fp.w_d1 + fp.w_d10 + fp.w_d100;
     Real M_f = m_params.moisture_1hr;
@@ -1762,7 +1814,12 @@ void FireLayer::apply_crown_fire_ros()
 
     fill_fire_diagnostics(surface_intensity, surface_flame_length,
                           *fire_phi, surface_ros, *fire_fuel_load,
-                          m_fuel_load_initial_kg_m2, h_kJ_per_kg);
+                          m_fuel_load_initial_kg_m2, h_kJ_per_kg,
+                          m_has_spatial_fuel ? fire_fuel_model.get() : nullptr,
+                          m_params.fuel_map.fuel_set_id(), m_params.moisture_live,
+                          fuel_params_table(), fuel_params_table_size(),
+                          m_params.fuel_map.load_from_map,
+                          m_params.fuel_map.sb40_active());
 
     const auto& crown = m_params.crown;
     const Real canopy_base_ht = crown.canopy_base_ht;

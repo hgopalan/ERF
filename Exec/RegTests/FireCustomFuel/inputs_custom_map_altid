@@ -1,14 +1,20 @@
 FILE = inputs_custom_map
 
 # The same mixed-map run with a different erf.fire.fuel_model_id. With
-# erf.fire.rothermel_per_fuel every cell takes its own Rothermel coefficients,
-# so the uniform model must not reach the front at all. Before the level-set
-# path read the per-cell table it did, and the two runs differed (608 against
-# 704 burned cells at 30 s).
+# erf.fire.rothermel_per_fuel and erf.fire.fuel_map.load_from_map every cell
+# takes its own fuel, so the uniform model must not reach the answer at all.
 #
-# Anderson 10 rather than 13: both it and the deck's Anderson 1 have a 1 ft bed
-# depth and the standard particle density, so the wind adjustment factor and the
-# fuel wind height -- which are still built from the uniform model -- are
-# identical here and the comparison isolates the coefficients. The loads differ,
-# which is why the Byram diagnostics are exempt.
-erf.fire.fuel_model_id = 10
+# Anderson 13 rather than a depth-matched model: its 3.0 ft bed depth and
+# 13.03 kg/m2 load are the furthest the Anderson set gets from the deck's
+# Anderson 1 (1.0 ft, 0.166 kg/m2), which is what makes this a real test of
+# the three paths that used to read the uniform model.
+#   - the Rothermel coefficients, until the level-set path read the per-cell
+#     table (608 against 704 burned cells at 30 s)
+#   - the wind adjustment factor, built from the bed depth: 0.3621 at 1 ft
+#     against 0.4587 at 3 ft, 27% of the effective midflame wind
+#   - the Byram intensity and flame length, built from the initial load: at
+#     Anderson 1's 0.166 kg/m2 the difference against the deck block's own
+#     22 kg/m2 remaining clamps and I_B came out exactly 0 over the grid; at
+#     Anderson 13's load it came out 37076 kW/m in the GR2 cells
+# The identity check therefore takes no exemptions.
+erf.fire.fuel_model_id = 13

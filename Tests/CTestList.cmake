@@ -1506,8 +1506,11 @@ add_test_fire(FireScottBurgan_gr2           FireScottBurgan       inputs_sb_gr2 
 add_test_fire(FireCustomFuel_uniform        FireCustomFuel        inputs_custom_grass        40)
 add_test_fire(FireCustomFuel_map            FireCustomFuel        inputs_custom_map          40)
 # erf.fire.rothermel_per_fuel with the level-set path: the deck differs from
-# FireCustomFuel_map only in erf.fire.fuel_model_id, which a per-fuel run must
-# ignore entirely. run_custom_fuel.sh compares the two runs line for line.
+# FireCustomFuel_map only in erf.fire.fuel_model_id, which a per-fuel run over a
+# load_from_map raster must ignore entirely -- the Rothermel coefficients, the
+# wind adjustment factor built from the bed depth and the Byram diagnostics built
+# from the initial load each used to read it. run_custom_fuel.sh compares the two
+# runs line for line and, with fcompare, field for field.
 add_test_fire(FireCustomFuel_map_altid      FireCustomFuel        inputs_custom_map_altid    40)
 # a custom code the deck declares non-burnable needs no properties block
 add_test_fire(FireCustomFuel_nonburnable    FireCustomFuel        inputs_undeclared_nonburnable 40)
