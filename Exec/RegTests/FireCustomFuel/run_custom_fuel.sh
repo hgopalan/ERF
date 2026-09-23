@@ -104,25 +104,21 @@ fi
 
 python3 check_custom_fuel.py identity run_custom_map.log run_custom_map_onebox.log || status=1
 
-# erf.fire.rothermel_per_fuel means the uniform fuel model does not enter the
-# answer at all. The two runs differ only in erf.fire.fuel_model_id, so every
-# number has to match; before the directional path read the per-cell table the
-# level-set front followed the uniform coefficients and they did not.
-# I_B_max and L_max are exempt: the Byram diagnostics take the *uniform* initial
-# fuel load, so under erf.fire.fuel_map.load_from_map they scale with
-# erf.fire.fuel_model_id rather than with the cell's own load, and can come out
-# exactly zero. That is a separate pre-existing defect in
-# fill_fire_diagnostics(), not a propagation one; everything the front and the
-# heat flux depend on has to match exactly.
-python3 check_custom_fuel.py identity run_custom_map.log run_custom_map_altid.log I_B_max L_max || status=1
+# erf.fire.rothermel_per_fuel with erf.fire.fuel_map.load_from_map means the
+# uniform fuel model does not enter the answer at all. The two runs differ only
+# in erf.fire.fuel_model_id, so every number has to match, with no exemptions:
+# the coefficients, the wind adjustment factor built from the bed depth and the
+# Byram diagnostics built from the initial load each used to leak the uniform
+# model into this run, and each is now per cell.
+python3 check_custom_fuel.py identity run_custom_map.log run_custom_map_altid.log || status=1
 
 # A raster code the deck declares non-burnable needs no properties, so this
-# deck must run rather than abort.
-if grep -q "custom fuel" run_undeclared_nonburnable.log 2>/dev/null; then
-    echo "  FAIL an undeclared custom code listed in nonburnable_codes still aborted"; status=1
-else
-    echo "  PASS an undeclared custom code listed in nonburnable_codes runs"
-fi
+# deck must run rather than abort. The check is positive -- no custom fuel abort
+# *and* the run reached its finalize line -- rather than the absence of the
+# substring "custom fuel", which tested nothing about the abort itself: the
+# start-up summary is "Custom fuel models:" and one capitalisation away from
+# failing this deck, and an abort of any other kind passed it.
+python3 check_custom_fuel.py ran run_undeclared_nonburnable.log || status=1
 
 if [ -n "${FCOMPARE:-}" ]; then
     # -a allows the two BoxArrays; the tolerances are the round-off a different
@@ -134,6 +130,21 @@ if [ -n "${FCOMPARE:-}" ]; then
         echo "  PASS box parity: the split and one-box fire plotfiles agree"
     else
         echo "  FAIL box parity (fcompare exit $rc)"; echo "$out" | tail -8; status=1
+    fi
+
+    # The uniform id field by field, not only at the maxima the log carries.
+    # fire_fireline_intensity and fire_flame_length are components of the fire
+    # plotfile, so a per-cell Byram that was right only where the maximum falls
+    # would still be caught here. Same BoxArray, so no -a; fcompare's default
+    # tolerances are zero, which is the comparison wanted.
+    out=$("$FCOMPARE" --abort_if_not_all_found \
+          plt_fire_custom_map/plt_fire_00480 plt_fire_custom_map_altid/plt_fire_00480 2>&1)
+    rc=$?
+    if [ $rc -eq 0 ]; then
+        echo "  PASS the uniform id changes no fire plotfile field"
+    else
+        echo "  FAIL the uniform id reaches a fire plotfile field (fcompare exit $rc)"
+        echo "$out" | tail -12; status=1
     fi
 fi
 

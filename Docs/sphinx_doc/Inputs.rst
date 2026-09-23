@@ -4656,7 +4656,9 @@ Wind
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.use_waf**                           | Apply the wind adjustment factor to the reference wind     | Boolean                        | true                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.waf_formula**                       | Wind adjustment factor formula                             | "andrews", "behaviorplus"      | "andrews"              |
+| **erf.fire.waf_formula**                       | Wind adjustment factor formula, from the fuel bed depth:   | "andrews", "behaviorplus"      | "andrews"              |
+|                                                | the domain model's on a uniform fuel, each cell's own      |                                |                        |
+|                                                | wherever a spatial fuel map is read                        |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.use_wind_limit**                    | Cap the midflame wind at Rothermel's maximum effective     | Boolean                        | true                   |
 |                                                | wind speed (Rothermel and BEHAVE kernels); false: no cap   |                                |                        |

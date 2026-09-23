@@ -25,7 +25,7 @@ Properties are given in SI and converted once to the units
 | `inputs_bad_burnout` | `burnout_model = sfire` on a deck-defined model with no burn time |
 | `inputs_bad_undeclared` | a raster holding a custom code the deck never defines |
 | `inputs_bad_uniform_code` | `fuel_model_id` in the custom range with no block defining it |
-| `inputs_custom_map_altid` | the mixed map with a different uniform `fuel_model_id`, which a per-fuel run must ignore |
+| `inputs_custom_map_altid` | the mixed map with Anderson 13 as the uniform `fuel_model_id`, which a per-fuel run over a `load_from_map` raster must ignore |
 | `inputs_undeclared_nonburnable` | the undeclared-code raster with that code declared non-burnable, which must run |
 
 `fuel_map_mixed.asc` and `fuel_map_undeclared.asc` come from
@@ -55,12 +55,17 @@ first, with values just inside and just outside each band.
   cell's model load; 96% of it comes from the deck-defined block, so a run that
   ignored the block could not pass.
 * **crossed** — the ignition circle straddles the block edge, so one front
-  burns in both fuels. At 60 s it has burned 508 cells of the deck-defined code
-  at 0.05287 m/s and 266 of GR2 at 0.1559 m/s: the deck's properties reach the
+  burns in both fuels. At 60 s it has burned 318 cells of the deck-defined code
+  at 0.0547 m/s and 246 of GR2 at 0.1559 m/s: the deck's properties reach the
   per-cell kernel, not just the uniform path. The front is asymmetric because
   the sounding's wind carries the head fire east into the block and leaves a
   backing fire in GR2, so the burned counts are a wind effect, not a fuel one;
   the rates are the fuel one. Needs `yt`.
+
+  The deck-defined rate is 0.05287 m/s on the binary before the wind adjustment
+  factor was taken per cell: the block's 2 m bed gives 0.560 against the 1 ft
+  uniform model's 0.362, so its midflame wind rose by 55% and its rate by 3.4%.
+  GR2's own bed is 1 ft, so its rate is unchanged.
 * **slower** — the coarse bed spreads at 0.0547 m/s against grass's 0.2160 m/s.
   The deck's properties drive the spread; they are not a published model in
   disguise.
@@ -69,23 +74,25 @@ first, with values just inside and just outside each band.
   reduction in the raster check.
 * **uniform id is not read** — `custom_map_altid` differs from `custom_map`
   only in `erf.fire.fuel_model_id`, which a run with
-  `erf.fire.rothermel_per_fuel` must ignore entirely. Every number agrees over
-  1920 lines and every plotfile field is bitwise equal, except the two Byram
-  diagnostics (see below). On the binary before the level-set path read the
-  per-cell table this check fails: the front followed the uniform coefficients
-  and the two runs burned 608 against 704 cells at 30 s.
+  `erf.fire.rothermel_per_fuel` over a `load_from_map` raster must ignore
+  entirely. Every number agrees over 1920 lines, with **no exemptions**, and
+  `fcompare` finds no difference in any fire plotfile field.
 
-  The deck uses Anderson 10 as the alternative because it shares Anderson 1's
-  1 ft bed depth. The wind adjustment factor and the fuel wind height are still
-  built from the uniform model's depth, so a depth-matched pair isolates the
-  coefficients; with Anderson 13 the effective wind itself differs by 27%.
-* **known limitation, exempted explicitly** — `fire_fireline_intensity` and
-  `fire_flame_length` come from Byram's relation on the *uniform* initial fuel
-  load, so under `load_from_map` they scale with `erf.fire.fuel_model_id`
-  instead of the cell's own load and can be exactly zero. The identity check
-  exempts `I_B_max` and `L_max` by name and reports an exemption that has
-  stopped differing, so the exemption cannot outlive the defect. The rate of
-  spread, the heat flux, the residence time and the fuel load are per cell.
+  The deck uses Anderson 13, the furthest the Anderson set gets from the deck's
+  Anderson 1: 3 ft of bed against 1 ft and 13.03 kg/m2 of load against
+  0.166 kg/m2. Each of the three paths that used to read the uniform model
+  fails this check on its own:
+
+  | Path | How it failed | Where |
+  | --- | --- | --- |
+  | Rothermel coefficients | the level-set front followed the uniform rate: 608 against 704 cells at 30 s | fixed in #444 |
+  | wind adjustment factor | built from the uniform bed depth: 0.362 at 1 ft against 0.459 at 3 ft, 27% of the midflame wind, so the two runs burned 558 against 566 cells at 60 s | fixed here |
+  | Byram intensity and flame length | built from the uniform initial load: `I_B_max` differed by 37076 kW/m, the whole grid clamped to exactly 0 with Anderson 1 | fixed here |
+
+  The Byram row is why the deck could not use Anderson 13 before: #444 had to
+  fall back to Anderson 10, which shares Anderson 1's 1 ft depth, to isolate the
+  coefficients from the wind adjustment factor, and still exempt `I_B_max` and
+  `L_max` by name.
 * **aborts** — each of the six bad decks stops the run with a message naming
   the input. `bad_undeclared` was also run on one and two ranks: its reduction
   aborts on both rather than hanging on one.
@@ -114,12 +121,19 @@ first, with values just inside and just outside each band.
 | `anderson1` | 774 | 0.2160244347 | 8496.8 | 8305.8 |
 | `custom_grass` | 774 | 0.2160244347 | 8496.8 | 8305.8 |
 | `custom_heavy` | 548 | 0.05470070803 | 1126379.1 | 1118114.9 |
-| `custom_map` | 558 | 0.1558625579 | 193418.8 | 188870.3 |
+| `custom_map` | 564 | 0.1558625579 | 193418.8 | 188824.2 |
+| `custom_map_altid` | 564 | 0.1558625579 | 193418.8 | 188824.2 |
 
-`custom_map` is re-measured: with the level-set path reading the per-cell
-coefficients it burns 558 cells at 60 s where it burned 774 before, since the
-front no longer spreads at the uniform grass rate inside the coarse block.
-At 30 s the count is 500 against the previous 608.
+`custom_map` is re-measured twice over. With the level-set path reading the
+per-cell coefficients (#444) it burned 558 cells at 60 s where it burned 774
+before, since the front no longer spreads at the uniform grass rate inside the
+coarse block. With the wind adjustment factor taken per cell it burns 564: the
+block's 2 m bed sees more of the wind than the 1 ft uniform model allowed it.
 
 `custom_map`'s max ROS is GR2's rate, the fastest fuel on its grid; the
-deck-defined block spreads at 0.05287 m/s in the same run.
+deck-defined block spreads at 0.0547 m/s in the same run (0.05287 m/s before
+the factor was per cell).
+
+`custom_map_altid` is listed because its agreeing with `custom_map` to the last
+digit is the point of the deck; it differed in the two Byram diagnostics and in
+the cell count until the two leaks above were closed.

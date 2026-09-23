@@ -773,14 +773,27 @@ plumbing rather than of the fuel table. The heat flux, the per-cell fuel
 load, the flame residence time and the burnout time read the slot tables per
 cell in every case.
 
-Two quantities are still built from :cpp:`erf.fire.fuel_model_id` even in a
-per-fuel run, which a deck should know: the wind adjustment factor and the
-fuel wind height use the uniform model's bed depth, and the Byram fireline
-intensity and flame length use its initial fuel load, so under
-:cpp:`erf.fire.fuel_map.load_from_map` those two diagnostics do not
-correspond to the cell's own fuel. ERF prints this at start-up when
-:cpp:`erf.fire.rothermel_per_fuel` and :cpp:`erf.fire.use_waf` are both set.
-The rate of spread, the heat flux and the fuel load are unaffected.
+The wind adjustment factor is a field on a fuel map, not a scalar. Both
+formulas (:cpp:`erf.fire.waf_formula`) are a function of the fuel bed depth
+alone, so a 1 ft grass bed and a 2.3 ft slash bed do not see the same
+midflame wind; taking the depth from :cpp:`erf.fire.fuel_model_id` reduced
+the whole grid by one factor that the raster could not change. Wherever a
+fuel map is read the factor now comes from the cell's own bed depth, whatever
+rate-of-spread model is in use, and the rate of spread carries it.
+
+The Byram fireline intensity and the Thomas flame length that follows it
+likewise come from the cell's own model: the heat content wherever a map is
+read, and, under :cpp:`erf.fire.fuel_map.load_from_map`, the initial load
+each cell was started with. Byram's :math:`I_B = h\,(w_0 - w)\,R` differences
+the initial load against the remaining one, so a uniform :math:`w_0` against
+a per-cell :math:`w` was not a scaling error but a different fire: where the
+uniform model was the lighter of the two the difference clamped and the
+intensity came out exactly zero. This is not confined to the plot file —
+:cpp:`fire_fireline_intensity` launches the Albini embers, sets the flame
+temperature and the flame tilt, and is the surface intensity the crown
+criterion is tested against. With :cpp:`load_from_map` off every cell still
+starts at the load of :cpp:`erf.fire.fuel_model_id`, which is then the
+correct initial load to difference against.
 
 A code in the custom range that no block defines is rejected: the raster is
 checked when it is read, and :cpp:`erf.fire.fuel_model_id` when the uniform
