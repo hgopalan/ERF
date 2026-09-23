@@ -195,7 +195,17 @@ endfunction(add_test_cloud_chamber)
 # (surface at k = 0, cooling to space from the top layer).
 function(add_test_two_stream_radiation TEST_NAME PLTFILE)
     set(oneValueArgs "RUNTIME_OPTIONS")
-    cmake_parse_arguments(ADD_TEST_TSR "" "${oneValueArgs}" "" ${ARGN})
+    # CHECK_LEVELS is multi-value: as a one-value arg CMake's list semantics
+    # split "0;1" into two arguments and only the first was ever seen, so the
+    # fine level went unchecked and the test passed vacuously.
+    set(multiValueArgs "CHECK_LEVELS")
+    cmake_parse_arguments(ADD_TEST_TSR "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+    # Join with a comma, not a semicolon: a semicolon inside a -D argument is
+    # split again when the COMMAND is built. The runner splits on the comma.
+    set(tsr_check_levels "0")
+    if(ADD_TEST_TSR_CHECK_LEVELS)
+        string(JOIN "," tsr_check_levels ${ADD_TEST_TSR_CHECK_LEVELS})
+    endif()
     setup_test()
     resolve_test_exe("" "erf_exec" TEST_EXE)
     set(test_input "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.i")
@@ -214,6 +224,7 @@ function(add_test_two_stream_radiation TEST_NAME PLTFILE)
         -DCHECKER=${TWO_STREAM_RADIATION_CHECKER}
         -DPLOTFILE=${CURRENT_TEST_BINARY_DIR}/${PLTFILE}
         "-DRUNTIME_OPTIONS=${ADD_TEST_TSR_RUNTIME_OPTIONS}"
+        "-DCHECK_LEVELS=${tsr_check_levels}"
         -P ${PROJECT_SOURCE_DIR}/Tests/RunTwoStreamRadiation.cmake)
     set_tests_properties(${TEST_NAME}
         PROPERTIES
@@ -1363,7 +1374,45 @@ if(ERF_ENABLE_MPI AND NOT WIN32)
   # the runner's 1-rank vs NRANKS comparison of the diagnostics CSV has a
   # real signal (rank-local means fail it).
   add_test_two_stream_radiation(TwoStream_ColumnHeating_Terrain "plt00002")
+  # Two levels. The same column physics must hold on the fine level, which runs
+  # its own sweep: CHECK_LEVELS 0 1 runs the vertical-structure assertions on
+  # both, so a fine level left at the allocation's zero heating fails the
+  # "qsrc_sw is zero everywhere" check. The refinement patch is tagged (not an
+  # explicit erf.boxN), so amr.refine_whole_domain_dir = 2 is what makes it span
+  # z -- which is also the remediation the model's abort recommends.
+  add_test_two_stream_radiation(TwoStream_ColumnHeating_TwoLevel "plt00002"
+                                CHECK_LEVELS 0 1)
 endif()
+
+# TwoStream multi-level start-up checks. Every level's grids must span that
+# level's domain in z, because the column sweep applies the top-of-atmosphere
+# and surface boundary conditions at the ends of a box. Two paths reach that
+# requirement and each has its own check, plus the one sub-option that stays
+# single-level.
+#
+# Unguarded, like the other add_test_abort calls: the Windows job resolves
+# `sh -c` through Git for Windows and runs the same sh -c + glob pattern that
+# add_test_r uses, so these run there too.
+#
+# 1. An explicit erf.boxN whose z extent stops short -- caught in
+#    ERF_RefineBox.cpp, beside the equivalent check the PBL schemes have.
+add_test_abort(TwoStream_RefineBoxZPartial_abort
+    ${PROJECT_SOURCE_DIR}/Tests/test_files/TwoStream_RefineBox_ZPartial TwoStream_RefineBox_ZPartial.i
+    "TwoStream needs refinement boxes that go from the bottom to the top of the domain" "")
+# 2. A tagged patch that stops short -- ERF_RefineBox.cpp never sees this path,
+#    so TwoStreamRadiation::define_level is the backstop. Same deck as the
+#    passing two-level case with the grid guarantee switched off, so the test
+#    also pins what amr.refine_whole_domain_dir is doing there.
+add_test_abort(TwoStream_TaggedZPartial_abort
+    ${PROJECT_SOURCE_DIR}/Tests/test_files/TwoStream_ColumnHeating_TwoLevel TwoStream_ColumnHeating_TwoLevel.i
+    "requires grids that span the domain in z" "amr.refine_whole_domain_dir=-1")
+# 3. The prognostic surface energy balance owns the surface temperature the
+#    longwave boundary condition reads and runs on level 0 only, so a refined
+#    run would give level 0 and its fine levels two different surface boundary
+#    conditions. Refused rather than left to disagree.
+add_test_abort(TwoStream_PrognosticSEBMultiLevel_abort
+    ${PROJECT_SOURCE_DIR}/Tests/test_files/TwoStream_ColumnHeating_TwoLevel TwoStream_ColumnHeating_TwoLevel.i
+    "is supported on a single level" "erf.radiation.seb_enable=true erf.radiation.seb_prognostic_enable=true")
 add_test_plotfile_header(Plotfile3D_TwoStreamHeatingSelection "" "erf_exec" "plt00000")
 
 add_test_0(CouetteFlow_x                     "" "erf_exec" "plt00050" RUNTIME_OPTIONS "erf.vert_implicit=false ")
