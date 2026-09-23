@@ -12,17 +12,19 @@ Tests are organized by model:
   - Balbi (2020) convective-radiative model and couplings (10 tests)
   - Directional ROS projection (5 tests)
   - Cheney-Gould (1998) grassland model (4 tests)
-  - Per-fuel wind height tables (5 tests)
+  - Per-fuel wind height tables (3 tests)
 
 Reference implementations extracted from:
   - ERF_BalbiModel.H: macarthur_ros(), compute_balbi_angle(), ROS formula
   - ERF_CheneyGouldModel.H: cheney_gould_ros()
-  - ERF_FuelWindHeight.H: build_fcwh_table(), build_fcz0_table()
+  - ERF_FuelWindHeight.H: build_fcwh_table()
 
 Run: python3 test_ros_models.py
 """
 
 import math
+import os
+import re
 import sys
 
 
@@ -972,123 +974,109 @@ def test_cheney_gould_increases_with_curing():
 # Per-Fuel Wind Height Tests
 # ============================================================================
 
+def _source_path(name):
+    """Absolute path of a file under Source/Fire, relative to this script."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(here, "..", "..", "..", "..", "Source", "Fire", name)
+
+
+def fuel_slot_count():
+    """FUEL_SLOT_COUNT as declared in ERF_FuelModels.H.
+
+    The declaration is written in terms of the other constants of that header
+    (FUEL_SLOT_CUSTOM_BASE + CUSTOM_FUEL_MAX), so resolve names to values
+    before evaluating it.
+    """
+    with open(_source_path("ERF_FuelModels.H")) as f:
+        text = f.read()
+    consts = dict(re.findall(r"inline constexpr int\s+(\w+)\s*=\s*([^;]+);", text))
+    if "FUEL_SLOT_COUNT" not in consts:
+        raise RuntimeError("FUEL_SLOT_COUNT not found in ERF_FuelModels.H")
+
+    expr = consts["FUEL_SLOT_COUNT"]
+    for _ in range(10):
+        if re.fullmatch(r"[\d\s+*()-]+", expr):
+            return int(eval(expr))  # digits and + - * ( ) only
+        expr = re.sub(r"\b([A-Za-z_]\w*)\b",
+                      lambda m: "(" + consts[m.group(1)] + ")"
+                      if m.group(1) in consts else m.group(0), expr)
+    raise RuntimeError(f"cannot resolve FUEL_SLOT_COUNT: {expr}")
+
+
 def build_fcwh_table(global_z_ref, use_per_fuel=False):
     """
-    Build per-fuel wind height (fcwh) table indexed 0..13.
+    Build the per-fuel wind height (fcwh) table, one entry per fuel slot.
 
-    Implementation from ERF_FuelWindHeight.H lines 44-63:
-    - When use_per_fuel=False: all entries 1-13 equal global_z_ref
-    - When use_per_fuel=True: all entries 1-13 equal 6.096 (WRF-SFIRE default)
+    Implementation from ERF_FuelWindHeight.H build_fcwh_table():
+    - When use_per_fuel=False: every entry from slot 1 up equals global_z_ref
+    - When use_per_fuel=True: every entry from slot 1 up equals 6.096
+      (WRF-SFIRE default)
 
     Args:
         global_z_ref: Global fallback wind reference height [m]
         use_per_fuel: When True, use WRF-SFIRE defaults; when False, use global_z_ref
 
     Returns:
-        List of size 14; index 0 unused, 1-13 valid
+        List of size FUEL_SLOT_COUNT; slot 0 unused, slots 1 and up valid
     """
-    fcwh = [0.0] * 14
-    if use_per_fuel:
-        for i in range(1, 14):
-            fcwh[i] = 6.096
-    else:
-        for i in range(1, 14):
-            fcwh[i] = global_z_ref
+    n = fuel_slot_count()
+    fcwh = [0.0] * n
+    value = 6.096 if use_per_fuel else global_z_ref
+    for i in range(1, n):
+        fcwh[i] = value
     return fcwh
 
 
-def build_fcz0_table():
-    """
-    Build per-fuel roughness length (fcz0) table indexed 0..13.
-
-    Implementation from ERF_FuelWindHeight.H lines 73-93.
-    WRF-SFIRE data statement values [m].
-
-    Returns:
-        List of size 14; index 0 unused, 1-13 valid
-    """
-    fcz0 = [0.0] * 14
-    fcz0[1]  = 0.0396   # FM1
-    fcz0[2]  = 0.0396   # FM2
-    fcz0[3]  = 0.100    # FM3
-    fcz0[4]  = 0.2378   # FM4
-    fcz0[5]  = 0.0793   # FM5
-    fcz0[6]  = 0.0991   # FM6
-    fcz0[7]  = 0.0991   # FM7
-    fcz0[8]  = 0.0079   # FM8
-    fcz0[9]  = 0.0079   # FM9
-    fcz0[10] = 0.0396   # FM10
-    fcz0[11] = 0.0396   # FM11
-    fcz0[12] = 0.0911   # FM12
-    fcz0[13] = 0.1188   # FM13
-    return fcz0
-
-
 def test_fcwh_uniform_mode():
-    """Test 29: fcwh uniform mode returns global_z_ref for all fuels."""
+    """Test 29: fcwh uniform mode returns global_z_ref for every fuel slot."""
     global_z_ref = 6.1
+    n = fuel_slot_count()
     fcwh = build_fcwh_table(global_z_ref, use_per_fuel=False)
-    passed = (len(fcwh) == 14 and
-              all(fcwh[i] == global_z_ref for i in range(1, 14)))
-    status = "✓" if passed else "✗"
-    print(f"{status} Test 29: fcwh uniform mode (all fuels = {global_z_ref})")
+    passed = (len(fcwh) == n and
+              all(fcwh[i] == global_z_ref for i in range(1, n)))
+    status = "\u2713" if passed else "\u2717"
+    print(f"{status} Test 29: fcwh uniform mode (all {n - 1} fuel slots = {global_z_ref})")
     if not passed:
-        print(f"    Length: {len(fcwh)}, entries 1-13 all {global_z_ref}: "
-              f"{all(fcwh[i] == global_z_ref for i in range(1, 14))}")
+        print(f"    Length: {len(fcwh)}, expected {n}; entries 1-{n - 1} all "
+              f"{global_z_ref}: {all(fcwh[i] == global_z_ref for i in range(1, n))}")
     return passed
 
 
 def test_fcwh_per_fuel_mode():
-    """Test 30: fcwh per-fuel mode returns 6.096 for all fuels."""
+    """Test 30: fcwh per-fuel mode returns 6.096 for every fuel slot."""
     global_z_ref = 6.1
+    n = fuel_slot_count()
     fcwh = build_fcwh_table(global_z_ref, use_per_fuel=True)
     expected = 6.096
-    passed = (len(fcwh) == 14 and
-              all(abs(fcwh[i] - expected) < 1e-6 for i in range(1, 14)))
-    status = "✓" if passed else "✗"
-    print(f"{status} Test 30: fcwh per-fuel mode (all fuels = 6.096 m)")
+    passed = (len(fcwh) == n and
+              all(abs(fcwh[i] - expected) < 1e-6 for i in range(1, n)))
+    status = "\u2713" if passed else "\u2717"
+    print(f"{status} Test 30: fcwh per-fuel mode (all {n - 1} fuel slots = 6.096 m)")
     if not passed:
-        print(f"    Length: {len(fcwh)}")
-        for i in range(1, 14):
+        print(f"    Length: {len(fcwh)}, expected {n}")
+        for i in range(1, min(len(fcwh), n)):
             if abs(fcwh[i] - expected) >= 1e-6:
                 print(f"    fcwh[{i}] = {fcwh[i]}, expected {expected}")
     return passed
 
 
-def test_fcz0_fm4_chaparral():
-    """Test 31: fcz0 FM4 value equals 0.2378 (chaparral, highest roughness)."""
-    fcz0 = build_fcz0_table()
-    expected = 0.2378
-    passed = abs(fcz0[4] - expected) < 1e-6
-    status = "✓" if passed else "✗"
-    print(f"{status} Test 31: fcz0 FM4 = 0.2378 m (chaparral)")
+def test_fuel_tables_are_sized_by_slot_count():
+    """Test 31: every table in ERF_FuelWindHeight.H is sized FUEL_SLOT_COUNT.
+
+    A per-fuel table with a hard-coded length shorter than FUEL_SLOT_COUNT is
+    read out of bounds as soon as it is indexed by fuel slot: the Scott-Burgan
+    codes occupy slots 14 and up. The removed roughness table build_fcz0_table()
+    was hard-coded to 14 entries and this check fails on it.
+    """
+    with open(_source_path("ERF_FuelWindHeight.H")) as f:
+        header = f.read()
+    sizes = re.findall(r"std::vector<amrex::Real>\s+\w+\(\s*([A-Za-z_0-9]+)\s*,",
+                       header)
+    passed = len(sizes) > 0 and all(size == "FUEL_SLOT_COUNT" for size in sizes)
+    status = "\u2713" if passed else "\u2717"
+    print(f"{status} Test 31: fuel tables in ERF_FuelWindHeight.H sized FUEL_SLOT_COUNT")
     if not passed:
-        print(f"    Expected: {expected}, Got: {fcz0[4]}")
-    return passed
-
-
-def test_fcz0_fm1_fm2_equal():
-    """Test 32: fcz0 FM1 and FM2 both equal 0.0396."""
-    fcz0 = build_fcz0_table()
-    expected = 0.0396
-    passed = (abs(fcz0[1] - expected) < 1e-6 and
-              abs(fcz0[2] - expected) < 1e-6 and
-              fcz0[1] == fcz0[2])
-    status = "✓" if passed else "✗"
-    print(f"{status} Test 32: fcz0 FM1 and FM2 both equal 0.0396 m")
-    if not passed:
-        print(f"    fcz0[1] = {fcz0[1]}, fcz0[2] = {fcz0[2]}, expected {expected}")
-    return passed
-
-
-def test_fcz0_table_size():
-    """Test 18: fcz0 table has size 14 (indices 0-13)."""
-    fcz0 = build_fcz0_table()
-    passed = len(fcz0) == 14
-    status = "✓" if passed else "✗"
-    print(f"{status} Test 33: fcz0 table size = 14")
-    if not passed:
-        print(f"    Expected length 14, got {len(fcz0)}")
+        print(f"    Table sizes found: {sizes or 'none'}")
     return passed
 
 
@@ -1097,7 +1085,7 @@ def test_fcz0_table_size():
 # ============================================================================
 
 def main():
-    """Run all 38 tests and return exit code (0 = all pass, 1 = any fail)."""
+    """Run all 36 tests and return exit code (0 = all pass, 1 = any fail)."""
     print("=" * 70)
     print("Phase 13 ROS Model Unit Tests")
     print("=" * 70)
@@ -1162,14 +1150,12 @@ def main():
     results.append(test_cheney_gould_increases_with_curing())
     print()
 
-    # Per-fuel wind height tests (5)
+    # Per-fuel wind height tests (3)
     print("Per-Fuel Wind Height Tests")
     print("-" * 70)
     results.append(test_fcwh_uniform_mode())
     results.append(test_fcwh_per_fuel_mode())
-    results.append(test_fcz0_fm4_chaparral())
-    results.append(test_fcz0_fm1_fm2_equal())
-    results.append(test_fcz0_table_size())
+    results.append(test_fuel_tables_are_sized_by_slot_count())
     print()
 
     # Summary

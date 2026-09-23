@@ -894,10 +894,9 @@ private:
     // Initial fuel load [kg/m²] for diagnostics (Phase 5)
     amrex::Real                              m_fuel_load_initial_kg_m2 = 0.0;
 
-    // Phase 13A: Per-fuel wind height device tables
-    amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcwh;          // fcwh[0..13], device copy
+    // Phase 13A: Per-fuel wind height device table
+    amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcwh;          // fcwh[0..FUEL_SLOT_COUNT-1], device copy
     amrex::Gpu::DeviceVector<amrex::Real> m_d_burnout_tau;   ///< burnout e-folding time by fuel code (index 1-13) [s], erf.fire.burnout_model = sfire
-    amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcz0;          // fcz0[0..13], device copy
     bool                                     m_use_per_fuel_wind_ht = false;
 
     // Deck-defined fuel models (erf.fire.custom_fuel.*) and the slot table of

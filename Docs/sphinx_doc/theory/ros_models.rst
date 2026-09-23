@@ -420,54 +420,12 @@ Enabling :cpp:`erf.fire.use_per_fuel_wind_ht = true` causes wind extraction to u
 
 WRF-SFIRE defaults are 6.096 m for all 13 Anderson fuel models, which is identical to the :cpp:`wind_ref_ht` default of 6.1 m. Enabling this flag has no practical effect unless the :cpp:`fcwh` table is modified.
 
-**Fuel model roughness lengths (fcz0):**
-
-.. list-table::
-   :widths: 10 40 15
-   :header-rows: 1
-
-   * - Fuel Model
-     - Name
-     - fcz0 [m]
-   * - FM1
-     - Short Grass
-     - 0.0396
-   * - FM2
-     - Timber Grass and Understory
-     - 0.0396
-   * - FM3
-     - Tall Grass
-     - 0.100
-   * - FM4
-     - Chaparral
-     - 0.2378
-   * - FM5
-     - Timber Litter
-     - 0.0793
-   * - FM6
-     - Logging Slash and Blowdown
-     - 0.0991
-   * - FM7
-     - Timber Litter and Understory
-     - 0.0991
-   * - FM8
-     - Closed Timber Litter
-     - 0.0079
-   * - FM9
-     - Hardwood Litter
-     - 0.0079
-   * - FM10
-     - Timber Litter and Grass
-     - 0.0396
-   * - FM11
-     - Intermediate Fuel Load Timber Litter
-     - 0.0396
-   * - FM12
-     - High Load Conifer Litter
-     - 0.0911
-   * - FM13
-     - Heavy Logging Slash
-     - 0.1188
+**Surface roughness:** the fire model does not carry a per-fuel roughness length.
+The roughness of the wind profile is the surface-layer value :cpp:`erf.most.z0`,
+and the two-height log interpolation of the sampled wind uses
+:cpp:`erf.fire.wind_sample_z0`. The canopy reduction from the reference height to
+the midflame wind is the Wind Adjustment Factor (:cpp:`erf.fire.waf_formula`),
+which is a function of fuel bed depth, not of roughness.
 
 **References:**
 
