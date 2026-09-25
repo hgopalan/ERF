@@ -56,8 +56,8 @@ function(erf_register_gtest_suite target)
     set(ERF_GTEST_DISCOVERY_TIMEOUT 60)
   endif()
 
-  if(NOT ERF_GTEST_EXECUTION_TIMEOUT)
-    set(ERF_GTEST_EXECUTION_TIMEOUT 900)
+  if(NOT DEFINED ERF_GTEST_EXECUTION_TIMEOUT)
+    set(ERF_GTEST_EXECUTION_TIMEOUT 600)
   endif()
 
   if(NOT DEFINED ERF_GTEST_SKIP_RETURN_CODE)
@@ -126,12 +126,25 @@ target_sources(${erf_exe_name}
     # density representation or treat explicit zero as absent.
     ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestWallBCMetadata.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestInflowProfile.cpp
+    # Motivation: where two open lateral boundaries meet, each boundary cell must be
+    # written by exactly one open-BC kernel, and by the same one however the grid is split.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Advection/ERF_GTestOpenBCCorners.cpp
+    # Motivation: reusable scalar advection must honor explicit source, flux, and
+    # tendency components instead of inferring primitive storage from native cons layout.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Advection/ERF_GTestScalarAdvection.cpp
+    # Motivation: the z-momentum box must be shrunk only at the bottom and top of the
+    # domain, so that a grid split in z leaves no w-face without a source term.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Advection/ERF_GTestZmomBoxDecomposition.cpp
     # Motivation: the chamber profile and perturbation must remain analytic,
     # bounded, and independent of MPI decomposition and tile shape.
     ${CMAKE_CURRENT_SOURCE_DIR}/Prob/ERF_GTestCloudChamber.cpp
     # Motivation: production scalar diffusion must use the exact low/high
     # physical-face stencil in every rotated Cartesian direction.
     ${CMAKE_CURRENT_SOURCE_DIR}/Diffusion/ERF_GTestStateDiffusionDirichlet.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Diffusion/ERF_GTestTKEBuoyancySource.cpp
+    # Motivation: reusable scalar diffusion must honor explicit scalar, coefficient,
+    # flux, and tendency components while preserving ERF's N/S/T mapped discretizations.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Diffusion/ERF_GTestScalarDiffusion.cpp
     # Motivation: the k-eqn RANS closure (AL01) must keep its stability
     # functions finite and its length-scale limits exact for any Rt.
     ${CMAKE_CURRENT_SOURCE_DIR}/Diffusion/ERF_GTestRANSClosure.cpp
@@ -143,20 +156,31 @@ target_sources(${erf_exe_name}
     # at neutral, follow the published closed forms on both sides and weaken
     # mixing monotonically with the bulk Richardson number.
     ${CMAKE_CURRENT_SOURCE_DIR}/SourceTerms/ERF_GTestIBSEBLouis.cpp
+    # Motivation: observation nudging must read a station file exactly, relax
+    # to the closed-form target with the right weight, sigma band and rate cap,
+    # and put its sources on the right faces over flat, fitted and immersed
+    # terrain.
+    ${CMAKE_CURRENT_SOURCE_DIR}/SourceTerms/ERF_GTestObsNudging.cpp
     # Motivation: the two-stream radiation sweep must keep k = 0 as the
     # surface, cool to space from the top layer, use Exner temperature,
     # and reflect (1 - eps) of the downwelling LW at a gray surface.
     ${CMAKE_CURRENT_SOURCE_DIR}/Radiation/ERF_GTestTwoStreamKernels.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Radiation/ERF_GTestTwoStreamColumn.cpp
     # Motivation: RRTMGP consumes absolute surface temperature; a
-    # SurfaceLayer fallback must convert theta at the lowest-cell pressure,
+    # SurfaceLayer fallback must convert theta at the physical surface
+    # pressure diagnosed from the lowest atmospheric cell,
     # respect land/water precedence, and preserve valid land LSM temperatures.
     ${CMAKE_CURRENT_SOURCE_DIR}/Radiation/ERF_GTestRRTMGP_SurfaceTemperature.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Radiation/ERF_GTestOrbitalGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestPlotfile2D.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestPlotfileSelection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestStationSampler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestProvenance.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestCheckpoint.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestEpochTime.cpp
+    # Motivation: a station placed by latitude/longitude must land where the
+    # lat/lon arrays put it on a rotated grid and on a grid across 180 degrees.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestLatLonMap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestGridUtils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestJoinBoxesStackedInZ.cpp
     # Motivation: a BTF fine level's mesh must not depend on how its grids are split in z.
@@ -239,20 +263,20 @@ target_sources(${erf_exe_name} PRIVATE
 # only available when particles are enabled.
 if(ERF_ENABLE_PARTICLES)
   target_sources(${erf_exe_name} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/TerminalVelocity/ERF_GTestTerminalVelocityScalar.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/TerminalVelocity/ERF_GTestTerminalVelocityKernel.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/IceDeposition/ERF_GTestIceDepositionScalar.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/IceDeposition/ERF_GTestIceDepositionKernel.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/Condensation/ERF_GTestCondensationScalar.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/Condensation/ERF_GTestCondensationKernel.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/Melting/ERF_GTestMeltingScalar.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/Melting/ERF_GTestMeltingKernel.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/Freezing/ERF_GTestFreezingScalar.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/Freezing/ERF_GTestFreezingKernel.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/Coalescence/ERF_GTestCoalescenceScalar.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/Coalescence/ERF_GTestCoalescenceKernel.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/Riming/ERF_GTestRimingScalar.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/Riming/ERF_GTestRimingKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/TerminalVelocity/ERF_GTestTerminalVelocityScalar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/TerminalVelocity/ERF_GTestTerminalVelocityKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/IceDeposition/ERF_GTestIceDepositionScalar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/IceDeposition/ERF_GTestIceDepositionKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/Condensation/ERF_GTestCondensationScalar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/Condensation/ERF_GTestCondensationKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/Melting/ERF_GTestMeltingScalar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/Melting/ERF_GTestMeltingKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/Freezing/ERF_GTestFreezingScalar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/Freezing/ERF_GTestFreezingKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/Coalescence/ERF_GTestCoalescenceScalar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/Coalescence/ERF_GTestCoalescenceKernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/Riming/ERF_GTestRimingScalar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Microphysics/SDM/Riming/ERF_GTestRimingKernel.cpp
   )
 endif()
 
@@ -267,7 +291,7 @@ target_link_libraries(${erf_exe_name} PRIVATE GTest::gtest)
 erf_register_gtest_suite(${erf_exe_name}
   LABELS unit
   DISCOVERY_TIMEOUT 60
-  EXECUTION_TIMEOUT 900
+  EXECUTION_TIMEOUT 600
 )
 
 add_test(NAME erf_unit_tests_shuffle_repeat
@@ -279,7 +303,7 @@ add_test(NAME erf_unit_tests_shuffle_repeat
 set_tests_properties(erf_unit_tests_shuffle_repeat
   PROPERTIES
     LABELS "stress"
-    TIMEOUT 2700
+    TIMEOUT 600
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
@@ -457,7 +481,7 @@ endif()
       -DERF_MPI_PREFLAGS=${erf_parallel_test_mpiexec_preflags_arg}
       -DERF_MPI_RANKS=${erf_parallel_test_ranks_arg}
       -DERF_CROSSCOMPILING_EMULATOR=${erf_parallel_test_emulator_arg}
-      -DTEST_TIMEOUT=1800
+      -DTEST_TIMEOUT=600
       -P ${CMAKE_CURRENT_LIST_DIR}/GenerateERFParallelCTest.cmake
     COMMAND_EXPAND_LISTS
     VERBATIM

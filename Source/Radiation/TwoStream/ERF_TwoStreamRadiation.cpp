@@ -3,6 +3,7 @@
 #include <AMReX_VisMF.H>
 #include <AMReX_PlotFileUtil.H>
 #include <AMReX_Utility.H>
+#include <AMReX_Math.H>
 #include <ERF_RadiationDiagnostics.H>
 #include <ERF_TwoStreamColumn.H>
 #include <ERF_PrognosticCloudFraction.H>
@@ -215,16 +216,49 @@ TwoStreamRadiation::resize (int nlevs_max)
     m_t_deep.resize(nlevs_max);
     m_q_deep.resize(nlevs_max);
     m_flux_diag.resize(nlevs_max);
+    m_diag.resize(nlevs_max);
 }
 
 void
 TwoStreamRadiation::define_level (int lev,
                                   const RadChoice& rad_choice,
+                                  const amrex::Real rdOcp,
                                   const BoxArray& ba2d,
-                                  const DistributionMapping& dm)
+                                  const DistributionMapping& dm,
+                                  const BoxArray& ba,
+                                  const Box& domain)
 {
     if (!rad_choice.enabled) { return; }
     m_rad = &rad_choice;
+    m_rdOcp = rdOcp;
+
+    // The sweep integrates a whole column in one pass inside a single box, applying the
+    // top-of-atmosphere boundary condition above the top layer and the surface condition
+    // below the bottom one. So the requirement is per box: every box must span the domain
+    // in z. Levels that do not meet it come in several shapes -- a shallow nest, a level
+    // tagged at different heights in different horizontal regions, grids decomposed in z --
+    // and they all have the same consequence, that no box holds a column to sweep.
+    //
+    // Above level 0 that is not an error: ERF::advance_radiation interpolates the level's
+    // heating rates and fluxes from its parent, the route RRTMGP takes for a nested patch,
+    // and level_needs_interpolation() there applies this same per-box test so the two agree.
+    //
+    // On level 0 there is no parent to interpolate from, so it is fatal. Level 0 always
+    // covers the domain, which makes a box that does not span z there exactly the
+    // decomposed-in-z case -- and the remedies below are the ones that apply to it.
+    if (lev == 0) {
+        for (int ibox = 0; ibox < ba.size(); ++ibox) {
+            const Box& b = ba[ibox];
+            if (b.smallEnd(2) != domain.smallEnd(2) || b.bigEnd(2) != domain.bigEnd(2)) {
+                amrex::Abort("erf.radiation_model = TwoStream cannot run on a level 0 whose "
+                             "grids are decomposed in z: a box there holds only part of a "
+                             "column, and level 0 has no parent to interpolate from. Set "
+                             "amr.max_grid_size_z to at least the number of cells in z, or "
+                             "leave amr.no_box_split_dir at its default of 2 so grids are "
+                             "never split in z.");
+            }
+        }
+    }
 
     // 2D surface fields on the horizontal BoxArray, one ghost cell in x and y
     const IntVect ng_sfc{1,1,0};
@@ -261,7 +295,12 @@ TwoStreamRadiation::write_checkpoint (int lev, const std::string& checkpointname
 {
     // The force-restore state is the only part of this model a restart must
     // carry; without it T_s and q_s restart from the scalar defaults.
-    if (!active() || !m_rad->seb_enable) { return; }
+    //
+    // Level 0 only, matching the seb_active gate in advance: no fine level ever
+    // evolves this state, so writing a fine level's copy would only persist the
+    // untouched define_level defaults and invite a later read to treat them as
+    // restored state.
+    if (!active() || !m_rad->seb_enable || lev > 0) { return; }
     if (m_t_sfc[lev]) {
         VisMF::Write(*m_t_sfc[lev],
                      MultiFabFileFullPrefix(lev, checkpointname, "Level_", "TwoStream_TSfc"));
@@ -276,8 +315,9 @@ void
 TwoStreamRadiation::read_checkpoint (int lev, const std::string& restart_chkfile)
 {
     // Older checkpoints do not carry the state; then the defaults set by
-    // define_level stand.
-    if (!active() || !m_rad->seb_enable) { return; }
+    // define_level stand. Level 0 only, matching write_checkpoint: a fine level
+    // has no file to read and no state that would use it.
+    if (!active() || !m_rad->seb_enable || lev > 0) { return; }
     const std::string tsfc_name =
         MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "TwoStream_TSfc");
     if (m_t_sfc[lev] && amrex::FileExists(tsfc_name + "_H")) {
@@ -314,6 +354,21 @@ TwoStreamRadiation::advance (int lev,
     if (!active()) { return; }
     const RadChoice& rad_choice = *m_rad;
 
+    // A level on which no box holds a whole column has nothing for the sweep or the surface
+    // state to work on; ERF::advance_radiation interpolates its fields from the parent
+    // instead. Returning here covers the post-dycore call too, which comes from ERF::Advance
+    // and does not test for it. Per box, and identical to level_needs_interpolation() there:
+    // if the two tests disagreed, one of them would try to sweep a level the other had
+    // already interpolated.
+    if (lev > 0) {
+        const BoxArray& lev_ba = cons_old.boxArray();
+        const Box& dom = geom.Domain();
+        for (int ibox = 0; ibox < lev_ba.size(); ++ibox) {
+            const Box& b = lev_ba[ibox];
+            if (b.smallEnd(2) != dom.smallEnd(2) || b.bigEnd(2) != dom.bigEnd(2)) { return; }
+        }
+    }
+
     // ---- Contract checks. Each of these would otherwise surface as a wrong
     // heating rate or an out-of-bounds read several routines away.
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(call_site == "pre_dycore" || call_site == "post_dycore",
@@ -342,6 +397,22 @@ TwoStreamRadiation::advance (int lev,
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dt_step > 0.0 && std::isfinite(dt_step),
             "TwoStreamRadiation: the force-restore update needs a positive, finite dt_step");
     }
+
+    // The surface energy balance runs on level 0 only, while the column sweep
+    // runs on every level.
+    //
+    // The surface is one physical object and its force-restore state is
+    // prognostic and checkpointed, so it needs a single owner. The update is
+    // applied in place (see the untiled loop below, which already relies on
+    // visiting each column exactly once); a column covered by two levels would
+    // otherwise be advanced twice per step, once per level.
+    //
+    // This changes nothing for any existing deck: before multi-level support
+    // the model aborted above level 0, so the SEB has only ever run on one
+    // level. Giving fine levels their own surface state would mean deciding how
+    // it transfers between levels -- the 2D interpolation Noah-MP does -- which
+    // is deliberately left out of this change.
+    const bool seb_active = rad_choice.seb_enable && (lev == 0);
     // The column kernel would substitute placeholders (rho = 1, rho*theta of
     // 288 K) for a non-finite or non-positive density or rho*theta and carry
     // on, hiding a corrupt state behind plausible heating rates. Refuse such
@@ -364,8 +435,8 @@ TwoStreamRadiation::advance (int lev,
                     constexpr amrex::Real neg_inf = -std::numeric_limits<amrex::Real>::infinity();
                     const amrex::Real rho = arr(i,j,k,Rho_comp);
                     const amrex::Real rth = arr(i,j,k,RhoTheta_comp);
-                    return {std::isfinite(rho) ? rho : neg_inf,
-                            std::isfinite(rth) ? rth : neg_inf};
+                    return {amrex::Math::isfinite(rho) ? rho : neg_inf,
+                            amrex::Math::isfinite(rth) ? rth : neg_inf};
                 });
         }
         auto state_tuple = state_data.value(state_ops);
@@ -392,18 +463,21 @@ TwoStreamRadiation::advance (int lev,
     // and only advances the surface-energy-balance state.
     const bool do_sweep = (call_site != "post_dycore");
 
-    // One diagnostics writer for the life of the run, so its header-written
-    // flag and (step, call_site, time) duplicate guard actually carry over
-    // between calls.
-    if (!m_diag) {
-        m_diag = std::make_unique<RadiationDiagnostics>(
-            rad_choice.verbosity, rad_choice.diag_file,
+    // One diagnostics writer per level for the life of the run, so the
+    // header-written flag and the (step, call_site, time) duplicate guard carry
+    // over between calls. Per level rather than one for the run: the levels of a
+    // hierarchy report the same step, call_site and time, so a single shared
+    // guard would drop every level but the first. All of them append to the one
+    // CSV, whose `level` column tells the rows apart.
+    if (!m_diag[lev]) {
+        m_diag[lev] = std::make_unique<RadiationDiagnostics>(
+            rad_choice.verbosity, rad_choice.diag_file, lev,
             rad_choice.diag_enable, rad_choice.diag_stdout_enable,
             rad_choice.diag_tagged_enable, rad_choice.diag_regtest_line_enable,
             rad_choice.diag_csv_enable, rad_choice.diag_callsite_mode,
             rad_choice.diag_dedup_tol);
     }
-    RadiationDiagnostics& rad_diag = *m_diag;
+    RadiationDiagnostics& rad_diag = *m_diag[lev];
 
     // ========================================
     // GPU-Safe ParallelFor Implementation with Cloud Fraction
@@ -438,7 +512,7 @@ TwoStreamRadiation::advance (int lev,
     // with the sun of this call from the inputs shared with RRTMGP. The
     // incident SW at the top (SW_TOA) is a domain mean formed by the sweep,
     // since with a calendar sun it varies across the columns.
-    TwoStreamParams ts_params = make_two_stream_params(rad_choice);
+    TwoStreamParams ts_params = make_two_stream_params(rad_choice, m_rdOcp);
     if (do_sweep) { set_solar_state(ts_params, rad_choice, m_orbit, epoch_time, have_datetime, lev, nstep); }
 
         // Host-side storage for reduction results (will be set by device-side reduction)
@@ -469,14 +543,14 @@ TwoStreamRadiation::advance (int lev,
         // fluxes the column sweep below computes at the surface (written per
         // column by the sweep and left in place for the post-dycore call);
         // otherwise the scalar defaults.
-        const bool sw_flux_from_rad = rad_choice.seb_enable &&
+        const bool sw_flux_from_rad = seb_active &&
                                       rad_choice.seb_use_radiation_fluxes &&
                                       !lsm_has_field(lsm, lev, "sav");
-        const bool lw_flux_from_rad = rad_choice.seb_enable &&
+        const bool lw_flux_from_rad = seb_active &&
                                       rad_choice.seb_use_radiation_fluxes &&
                                       !lsm_has_field(lsm, lev, "fira");
 
-        if (rad_choice.seb_enable) {
+        if (seb_active) {
             fill_or_copy_seb_field(m_alb_sw[lev].get(), lsm, lev, "sfc_alb_dir_vis", rad_choice.surface_albedo_sw);
             fill_or_copy_seb_field(m_emiss_lw[lev].get(), lsm, lev, "sfc_emis", rad_choice.surface_emissivity_lw);
 
@@ -599,41 +673,40 @@ TwoStreamRadiation::advance (int lev,
                 }
             }
 
-            // Surface temperature for the longwave boundary condition, in
-            // the order RRTMGP uses: the land-surface model's field, else the
-            // surface layer's temperature, else this model's own field (the
-            // erf.rad_t_sfc value, or the LSM copy). The prognostic surface
-            // energy balance owns the surface temperature when it is on, so
-            // its state comes before the surface layer's; the gate is the one
-            // the force-restore update itself uses (init_params turns
-            // seb_enable on with seb_prognostic_enable, so the two agree).
-            bool has_t_sfc_field = false;
-            bool t_sfc_is_theta = false;   // the surface layer works in potential temperature
-            Array4<const amrex::Real> t_sfc_arr;
+            // Keep the surface-temperature sources separate until the column
+            // kernel resolves them per cell. An LSM field can exist globally
+            // while carrying an undefined sentinel in an individual column;
+            // that column must still fall through to SurfaceLayer theta.
+            // The kernel's precedence is valid LSM absolute temperature,
+            // valid prognostic SEB absolute temperature, SurfaceLayer theta,
+            // then the scalar absolute-temperature fallback.
+            bool has_lsm_t_sfc = false;
+            Array4<const amrex::Real> lsm_t_sfc_arr;
+            bool has_seb_t_sfc = false;
+            Array4<const amrex::Real> seb_t_sfc_arr;
+            bool has_surface_layer = false;
+            Array4<const amrex::Real> surface_layer_theta_arr;
             {
-                // Each source is tried in turn, so an LSM that lists the
-                // field but hands back no data falls through to the next one.
                 std::string varname_t_sfc = "t_sfc";
                 int lsm_idx = lsm.Get_DataIdx(lev, varname_t_sfc);
                 if (lsm_idx >= 0) {
                     auto lsm_ptr = lsm.Get_Data_Ptr(lev, lsm_idx);
                     if (lsm_ptr) {
-                        t_sfc_arr = lsm_ptr->const_array(mfi);
-                        has_t_sfc_field = true;
+                        lsm_t_sfc_arr = lsm_ptr->const_array(mfi);
+                        has_lsm_t_sfc = true;
                     }
                 }
-                if (!has_t_sfc_field && rad_choice.seb_prognostic_enable && rad_choice.seb_enable && m_t_sfc[lev]) {
-                    t_sfc_arr = m_t_sfc[lev]->const_array(mfi);
-                    has_t_sfc_field = true;
+                // Prognostic SEB is a level-wide alternative to Noah t_sfc.
+                // When Noah exposes t_sfc on this level, m_t_sfc is not advanced,
+                // so it must not be offered as a per-cell fallback.
+                if (!has_lsm_t_sfc && rad_choice.seb_prognostic_enable &&
+                    seb_active && m_t_sfc[lev]) {
+                    seb_t_sfc_arr = m_t_sfc[lev]->const_array(mfi);
+                    has_seb_t_sfc = true;
                 }
-                if (!has_t_sfc_field && t_surf != nullptr) {
-                    t_sfc_arr = t_surf->const_array(mfi);
-                    has_t_sfc_field = true;
-                    t_sfc_is_theta = true;
-                }
-                if (!has_t_sfc_field && m_t_sfc[lev]) {
-                    t_sfc_arr = m_t_sfc[lev]->const_array(mfi);
-                    has_t_sfc_field = true;
+                if (t_surf != nullptr) {
+                    surface_layer_theta_arr = t_surf->const_array(mfi);
+                    has_surface_layer = true;
                 }
             }
 
@@ -740,7 +813,9 @@ TwoStreamRadiation::advance (int lev,
                         z_phys_nd_arr, scratch_arr,
                         has_hetero_alb_sw, &hetero_alb_sw_arr,
                         has_hetero_emiss_lw, &hetero_emiss_lw_arr,
-                        has_t_sfc_field, &t_sfc_arr, t_sfc_is_theta,
+                        has_lsm_t_sfc, &lsm_t_sfc_arr,
+                        has_seb_t_sfc, &seb_t_sfc_arr,
+                        has_surface_layer, &surface_layer_theta_arr,
                         has_latlon, &lat_arr, &lon_arr,
                         write_fluxes ? &rad_flux_clear_arr : nullptr);
 
@@ -768,7 +843,9 @@ TwoStreamRadiation::advance (int lev,
                             z_phys_nd_arr, scratch_arr,
                             has_hetero_alb_sw, &hetero_alb_sw_arr,
                             has_hetero_emiss_lw, &hetero_emiss_lw_arr,
-                            has_t_sfc_field, &t_sfc_arr, t_sfc_is_theta,
+                            has_lsm_t_sfc, &lsm_t_sfc_arr,
+                            has_seb_t_sfc, &seb_t_sfc_arr,
+                            has_surface_layer, &surface_layer_theta_arr,
                             has_latlon, &lat_arr, &lon_arr,
                             write_fluxes ? &rad_flux_cloudy_arr : nullptr);
 
@@ -862,7 +939,7 @@ TwoStreamRadiation::advance (int lev,
         }
 
          // Warn if diagnostic is requested but SEB infrastructure isn't enabled
-        if (rad_choice.seb_diagnostic_enable && !rad_choice.seb_enable) {
+        if (rad_choice.seb_diagnostic_enable && !rad_choice.seb_enable && lev == 0) {
             static bool warned_seb_misconfig = false;
             if (!warned_seb_misconfig && ParallelDescriptor::IOProcessor()) {
                 Print() << "WARNING: erf.radiation.seb_diagnostic_enable=true but "
@@ -873,7 +950,7 @@ TwoStreamRadiation::advance (int lev,
             }
         }
         // Compute SEB residual diagnostics if enabled
-        if (rad_choice.seb_diagnostic_enable && rad_choice.seb_enable) {
+        if (rad_choice.seb_diagnostic_enable && seb_active) {
             seb_residual_max = 0.0;
             // Second loop over boxes to compute SEB residual from populated SEB
             // MultiFabs. Untiled: the work below is per surface column, and a
@@ -937,7 +1014,7 @@ TwoStreamRadiation::advance (int lev,
 
         //  Prognostic SEB surface temperature and moisture evolution
         // Only run if prognostic mode is enabled and Noah-MP is NOT driving LSM at this level
-        if (rad_choice.seb_prognostic_enable && rad_choice.seb_enable &&
+        if (rad_choice.seb_prognostic_enable && seb_active &&
             call_site == "post_dycore") {
             // Check if Noah-MP is active at this level by attempting to get the LSM t_sfc field
             std::string varname_t_sfc_prog = "t_sfc";
@@ -1109,11 +1186,22 @@ TwoStreamRadiation::advance (int lev,
                 LW_up_TOA      = lw_up_toa_sum * inv_n;
             }
             heating_rate_max = max_heating_global;
-            m_flux_diag[lev] = FluxDiag{SW_surface, SW_TOA, SW_up_TOA,
-                                                         LW_net_surface, LW_up_TOA,
-                                                         heating_rate_max};
+            m_flux_diag[lev] = FluxDiag{true, SW_surface, SW_TOA, SW_up_TOA,
+                                        LW_net_surface, LW_up_TOA,
+                                        heating_rate_max};
         } else {
             const FluxDiag& cached = m_flux_diag[lev];
+            if (!cached.valid) {
+                // No sweep has run on this level yet, so there is nothing to report. This
+                // happens on the first step of a level built by interp_atmos_from_coarse:
+                // ERF::advance_radiation interpolates that level's fields and returns
+                // before the pre-dycore sweep, while this post-dycore call still arrives
+                // from ERF::Advance. Emitting here would write a row of zeros that reads
+                // exactly like a real zero-flux result. A nested patch already contributes
+                // no rows for the same reason; this is the same rule for a level that
+                // simply has not swept yet.
+                return;
+            }
             SW_surface       = cached.SW_surface;
             SW_TOA           = cached.SW_TOA;
             SW_up_TOA        = cached.SW_up_TOA;
@@ -1123,7 +1211,7 @@ TwoStreamRadiation::advance (int lev,
         }
 
         // Compute SEB residual mean from sum
-        if (rad_choice.seb_diagnostic_enable && rad_choice.seb_enable && n_seb_columns > 0) {
+        if (rad_choice.seb_diagnostic_enable && seb_active && n_seb_columns > 0) {
             seb_residual_mean = seb_residual_sum / static_cast<amrex::Real>(n_seb_columns);
         } else {
             // When feature is disabled, use NaN for backward compatibility

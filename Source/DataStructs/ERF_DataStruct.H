@@ -890,6 +890,10 @@ struct SolverChoice {
                          "onto the nodes rather than reconstructing them).");
         }
 
+        // Interpolate atmospheric state from coarse level instead of reading from wrfinput
+        // when creating a finer level from coarse at a later time?
+        pp.queryAdd("interp_atmos_from_coarse", interp_atmos_from_coarse);
+
         // Rebalance wrf state?
         pp.queryAdd("rebalance_wrf_input", rebalance_wrf_input);
 
@@ -1137,6 +1141,14 @@ struct SolverChoice {
         pp.queryAdd("spatial_moisture_forcing", spatial_moisture_forcing);
 
         pp.queryAdd("nudging_from_input_sounding", nudging_from_input_sounding);
+
+        // Nudging towards observations at stations; the stations and the
+        // parameters are read by the ObsNudging class, under erf.obs_nudging
+        pp.queryAdd("nudging_from_observations", nudging_from_observations);
+        if (nudging_from_observations && terrain_type == TerrainType::EB) {
+            amrex::Abort("erf.nudging_from_observations does not support erf.terrain_type = EB; "
+                         "use a terrain-fitted mesh or immersed forcing");
+        }
 
         int nudging_u_z1_set = pp.queryAdd("nudging_u_z1", nudging_u_z1);
         int nudging_u_z2_set = pp.queryAdd("nudging_u_z2", nudging_u_z2);
@@ -1426,6 +1438,17 @@ struct SolverChoice {
                     vert_implicit_fac[lev][0] = zero;
                     vert_implicit_fac[lev][1] = zero;
                     vert_implicit_fac[lev][2] = zero;
+                }
+            }
+        }
+
+        // The EB diffusion path adds no buoyancy, shear or dissipation source for
+        // a prognostic TKE closure
+        if (terrain_type == TerrainType::EB) {
+            for (int lev = 0; lev <= max_level; lev++) {
+                if (turbChoice[lev].use_keqn) {
+                    amrex::Error("erf.terrain_type = EB cannot be used with erf.les_type = Deardorff "
+                                 "or erf.rans_type = kEqn: the EB diffusion path has no TKE sources");
                 }
             }
         }
@@ -2071,6 +2094,10 @@ struct SolverChoice {
     //    the time-varying data provided in input sounding files?
     bool nudging_from_input_sounding = false;
 
+    // Do we nudge the solution towards observations at stations (met masts,
+    //    lidars)?  See ERF_ObsNudging.H.
+    bool nudging_from_observations = false;
+
     amrex::Real nudging_u_z1 = amrex::Real(-1.0e36);
     amrex::Real nudging_u_z2 = amrex::Real(1.0e36);
     amrex::Real nudging_t_z1 = zero;
@@ -2273,6 +2300,9 @@ struct SolverChoice {
 
     // Average the input z-face heights onto the nodes rather than reconstructing them?
     bool avg_grid_faces_to_nodes {false};
+
+    // Interpolate atmospheric state from coarse when creating finer level at later time?
+    bool interp_atmos_from_coarse {false};
 
     // Use forest canopy model?
     bool do_forest_drag {false};
@@ -2478,6 +2508,8 @@ struct SolverChoice {
  * @brief Whether spatially varying moisture forcing is enabled.
  * @var SolverChoice::nudging_from_input_sounding
  * @brief Whether solution fields are nudged toward input sounding data.
+ * @var SolverChoice::nudging_from_observations
+ * @brief Whether solution fields are nudged toward observations at stations.
  * @var SolverChoice::use_rotate_surface_flux
  * @brief Whether MOST surface fluxes are rotated with terrain.
  * @var SolverChoice::use_eamxx_shoc
