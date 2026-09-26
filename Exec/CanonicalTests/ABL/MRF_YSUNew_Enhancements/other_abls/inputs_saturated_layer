@@ -97,7 +97,6 @@ erf.pbl_type = "MRF"
 erf.enable_mrf_cloud_adjustment = false
 erf.enable_mrf_countergradient = true
 erf.enable_mrf_unbounded_vpert = false
-erf.mrf_moistvars = true
 erf.pbl_mrf_Ribcr = 0.5
 erf.pbl_mrf_const_b = 7.8
 erf.pbl_mrf_coriolis_freq = 1.0e-4
@@ -134,7 +133,6 @@ erf.pbl_mrf_use_zero_ri_extent = false
 
 # Enable cloud-aware stability adjustments for fog/stratus
 # This helps with proper mixing in saturated layers
-erf.enable_mrf_cloud_aware = true  # Uses cloud water content for φ adjustments
 
 # CORIOLIS EFFECT
 erf.latitude = 40.0  # mid-latitude (typical for marine stratus)

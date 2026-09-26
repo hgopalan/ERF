@@ -31,9 +31,11 @@
     [[maybe_unused]] const Real inv_theta_ref = one / amrex::max(turbChoice.theta_ref, std::numeric_limits<Real>::min());
     [[maybe_unused]] const Real l_inv_theta0 = (use_ref_theta) ? inv_theta_ref : one;
 
-    // vertical diffusivities are defined in ERF_SetupVertDiff.H
+    // Horizontal companions of eddy_diff_idz, which is built along with
+    //   alpha_eff in ERF_SetupVertDiff.H; see the notes there.  The two
+    //   horizontal directions use the same components.
     // Indexed by primitive component, so the tables must cover every scalar slot
-    //   (base, dust and smoke) as well as the moist quantities that follow them
+    //   (base, dust and smoke) as well as the moist quantities that follow them.
     Vector<int> eddy_diff_idx(NPRIMVAR_max, EddyDiff::Q_h);
     eddy_diff_idx[PrimTheta_comp] = EddyDiff::Theta_h;
     eddy_diff_idx[PrimKE_comp]    = EddyDiff::KE_h;
@@ -41,6 +43,12 @@
         eddy_diff_idx[PrimScalar_comp + n] = EddyDiff::Scalar_h;
     }
     Vector<int> eddy_diff_idy(eddy_diff_idx);
+
+    // The tables are indexed by primitive component, i.e. by qty_index-1, so the
+    //   highest index this call can reach is end_comp-1.
+    AMREX_ALWAYS_ASSERT(eddy_diff_idx.size() == eddy_diff_idz.size());
+    AMREX_ALWAYS_ASSERT(eddy_diff_idx.size() == alpha_eff.size());
+    AMREX_ALWAYS_ASSERT(end_comp-1 < static_cast<int>(alpha_eff.size()));
 
     // Device vectors
     Gpu::AsyncVector<int>  eddy_diff_idx_d;
@@ -53,6 +61,6 @@
     Gpu::copy(Gpu::hostToDevice, eddy_diff_idy.begin(), eddy_diff_idy.end(), eddy_diff_idy_d.begin());
 
     // Capture pointers for device code
-    int*  d_eddy_diff_idx = eddy_diff_idx_d.data();
-    int*  d_eddy_diff_idy = eddy_diff_idy_d.data();
+    [[maybe_unused]] int*  d_eddy_diff_idx = eddy_diff_idx_d.data();
+    [[maybe_unused]] int*  d_eddy_diff_idy = eddy_diff_idy_d.data();
 /** \endcond */

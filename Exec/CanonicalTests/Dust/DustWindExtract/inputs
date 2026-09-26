@@ -68,7 +68,6 @@ erf.pbl_mrf_Ribcr = 0.5
 erf.pbl_mrf_const_b = 7.8
 erf.pbl_mrf_sf = 0.1
 erf.enable_mrf_countergradient = true
-erf.mrf_moistvars = false
 
 # CORIOLIS EFFECT
 erf.latitude = 45.0

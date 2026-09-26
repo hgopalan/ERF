@@ -381,6 +381,8 @@ ERF::Evolve ()
 
     WriteAtFinalTime();
 
+    flush_stations();
+
     BL_PROFILE_VAR_STOP(evolve);
 }
 
@@ -717,6 +719,12 @@ ERF::post_timestep (int nstep, double time, double dt_lev0)
     if (plane_sampler && is_it_time_for_action(nstep+1, time, dt_lev0, plane_sampling_interval, plane_sampling_per)) {
         plane_sampler->get_sample_data(geom, vars_new);
         plane_sampler->write_sample_data(t_new, istep, ref_ratio, geom);
+    }
+
+    // Write station time series
+    if (station_sampler &&
+        is_it_time_for_action(nstep+1, time, dt_lev0, station_sampling_interval, station_sampling_per)) {
+        sample_stations(static_cast<Real>(time));
     }
 
     // Moving terrain
@@ -1519,6 +1527,7 @@ ERF::InitData_post ()
                                                                  solverChoice.mesh_type,
                                                                  solverChoice.terrain_type,
                                                                  solverChoice.turbChoice[finest_level],
+                                                                 solverChoice.rdOcp,
 #ifdef ERF_USE_NETCDF
                                                                  start_low_time, final_low_time, low_time_interval,
 #else
@@ -2096,6 +2105,43 @@ if (m_DustLayer && restart_chkfile.empty()) {
         plane_sampler = std::make_unique<PlaneSampler>();
     }
 
+    // Create the object that writes station time series if any stations are named
+    {
+        // Naming stations turns the output on; an explicit erf.do_station_sampling
+        // = false turns it back off, so a deck can keep its stations and have the
+        // output switched off from the command line.
+        bool do_station = (pp.countval("station_names") > 0);
+        pp.queryAdd("do_station_sampling", do_station);
+        if (do_station && pp.countval("station_names") == 0) {
+            Abort("erf.do_station_sampling is true but erf.station_names is empty, "
+                  "so there is nothing to sample");
+        }
+        if (do_station) {
+            if (station_sampling_interval < 0 && station_sampling_per < 0) {
+                // No default, as for the line and plane samplers above.  A
+                // sample costs a fillpatch and a fill of every requested
+                // variable over every level that hosts a station, so defaulting
+                // to every step would make a run with a one-second time step
+                // pay for output nobody asked for, and write a row a second.
+                Abort("Need to specify station_sampling_interval or station_sampling_per");
+            }
+            station_sampler = std::make_unique<StationSampler>(pp_prefix);
+            station_sampler->setRestart(!restart_chkfile.empty());
+            init_stations();
+            // Start the series at the initial condition, as WRF's tslist does.
+            // A restart does not repeat it: the row at that time is already in
+            // the file the earlier run wrote.
+            if (restart_chkfile.empty()) {
+                sample_stations(static_cast<Real>(t_new[0]));
+            }
+        }
+    }
+
+    // Nudging towards observations at stations
+    if (solverChoice.nudging_from_observations) {
+        init_obs_nudging();
+    }
+
     if ( solverChoice.terrain_type == TerrainType::EB ||
          solverChoice.terrain_type == TerrainType::ImmersedForcing  ||
          solverChoice.buildings_type == BuildingsType::ImmersedForcing )
@@ -2121,6 +2167,33 @@ if (m_DustLayer && restart_chkfile.empty()) {
                          m_fire_params);
     }
 #endif*/
+}
+
+//
+// Build the observation nudging: read the stations, place them on the grid and
+// set the rotation of their winds.  The latitude/longitude arrays exist by now
+// on every initialization path that has them, restarts included.
+//
+void
+ERF::init_obs_nudging ()
+{
+    AMREX_ALWAYS_ASSERT(solverChoice.nudging_from_observations);
+
+    obs_nudging = std::make_unique<ObsNudging>(solverChoice.terrain_type, prob.get(),
+                                               use_datetime, start_time);
+
+    const bool have_latlon = (lat_m[0] != nullptr && lon_m[0] != nullptr);
+    std::unique_ptr<LatLonMap> latlon;
+    if (have_latlon && obs_nudging->wants_latlon()) {
+        latlon = std::make_unique<LatLonMap>(*lat_m[0], *lon_m[0], ba2d[0], dmap[0], geom[0]);
+    }
+    obs_nudging->resolve_positions(geom[0], latlon.get());
+    obs_nudging->print_summary();
+
+    for (int lev = 0; lev <= finest_level; ++lev) {
+        obs_nudging->prepare_level(lev, geom[lev], vars_new[lev][Vars::cons],
+                                   z_phys_nd[lev].get(), t_new[lev]);
+    }
 }
 
 //
@@ -3018,6 +3091,7 @@ ERF::ReadParameters ()
         int nlevs_max = max_level + 1;
         istep.resize(nlevs_max, 0);
         nsubsteps.resize(nlevs_max, 1);
+        rad_interp_from_coarse_pending.resize(nlevs_max, 0);
         // This is the default
         for (int lev = 1; lev <= max_level; ++lev) {
             nsubsteps[lev] = MaxRefRatio(lev-1);
@@ -3311,6 +3385,8 @@ ERF::ReadParameters ()
         pp.queryAdd("line_sampling_interval", line_sampling_interval);
         pp.queryAdd("plane_sampling_per", plane_sampling_per);
         pp.queryAdd("plane_sampling_interval", plane_sampling_interval);
+        pp.queryAdd("station_sampling_per", station_sampling_per);
+        pp.queryAdd("station_sampling_interval", station_sampling_interval);
 
         // Specify information about outputting planes of data
         pp.queryAdd("output_bndry_planes", output_bndry_planes);
@@ -3342,6 +3418,34 @@ ERF::ReadParameters ()
 #endif
 
     solverChoice.init_params(max_level,pp_prefix);
+
+    // Implicit acoustic substepping inverts one tridiagonal system per column, so it is
+    // only well posed if no column is chopped between boxes.  That does not require one
+    // box per column: a level may have several boxes over the same (i,j) -- as it does
+    // where the refined region is a staircase in z, or covers two separate layers -- as
+    // long as they do not touch, so that each contiguous run of cells in the column is
+    // solved by itself.  What must not happen is two boxes sharing a face normal to z,
+    // which would split one column into pieces solved separately, with spurious internal
+    // boundaries at the seam and an answer that depends on the decomposition.
+    // amr.no_box_split_dir = 2 -- the ERF default, set in add_par -- is what rules that
+    // out: the grid generator merges the boxes it makes along z, so no two of them share
+    // a face normal to z.  Refuse to run with any other value while a level substeps
+    // implicitly.
+    for (int lev = 0; lev <= max_level; lev++) {
+        if ( (solverChoice.substepping_type[lev] == SubsteppingType::Implicit) &&
+             (no_box_split_dir != 2) )
+        {
+            Abort("erf.substepping_type = Implicit at level " + std::to_string(lev) +
+                  " requires amr.no_box_split_dir = 2 (the ERF default), so that no two grids "
+                  "share a face normal to z: the implicit substep solve inverts one tridiagonal "
+                  "system per column, and a column chopped at such a seam would instead be "
+                  "solved in pieces, giving an answer that depends on the grid decomposition.  "
+                  "(Boxes stacked over the same column are fine as long as they do not touch.)  "
+                  "Either remove amr.no_box_split_dir = " +
+                  std::to_string(no_box_split_dir) + " from the inputs file, or set "
+                  "erf.substepping_type = None.");
+        }
+    }
 
     // Set a default value for write_erfbdy following these rules.
     // Prioritize write_erfbdy provided by user.
@@ -3832,9 +3936,12 @@ ERF::MakeDiagnosticAverage (Vector<Real>& h_havg, MultiFab& S, int n)
     h_havg.resize(size_z, 0.0_rt);
 
     // Get the cell centered data and construct sums
-#ifdef _OPENMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
+    //
+    // NOTE: deliberately not threaded.  Every iteration does "h_havg[k] += ..." into the
+    //       same shared Vector with no atomic and no per-thread partials, so threading it
+    //       would be an outright data race on top of an order-dependent sum.  The body is
+    //       a pure reduction, so running it serially costs little.
+    //
     for (MFIter mfi(S); mfi.isValid(); ++mfi) {
         const Box& box = mfi.validbox();
         const IntVect& se = box.smallEnd();

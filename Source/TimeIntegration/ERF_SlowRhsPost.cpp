@@ -262,6 +262,16 @@ void erf_slow_rhs_post (int level, int finest_level,
         avg_zmom.ParallelCopy(S_data[IntVars::zmom], 0, 0, 1, 0, 1, geom.periodicity());
     }
 
+    // Non-EB Anelastic: the slow scalars are advected with the projected momentum.  Copy it
+    // before the tile loop below: a copy per tile inside that loop left the faces of the tiles
+    // not yet visited at their values from the previous stage while earlier tiles were already
+    // advecting with them, so the scalars depended on the tile size.
+    if (l_anelastic && !l_use_eb) {
+        MultiFab::Copy(avg_xmom, S_data[IntVars::xmom], 0, 0, 1, 0);
+        MultiFab::Copy(avg_ymom, S_data[IntVars::ymom], 0, 0, 1, 0);
+        MultiFab::Copy(avg_zmom, S_data[IntVars::zmom], 0, 0, 1, 0);
+    }
+
     // *************************************************************************
     // Define updates and fluxes in the current RK stage
     // *************************************************************************

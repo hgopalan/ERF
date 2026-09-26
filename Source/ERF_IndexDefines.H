@@ -43,8 +43,11 @@
 #define NBCVAR_max ((NDRY + 1 + NMOIST_max + 1) + 2*5) // allow up to 5 non-moist species
 
 // Number of primitive components: one per conserved component after Rho_comp,
-// counting every passive scalar (base, dust and smoke) and the moist quantities
-#define NPRIMVAR_max (NDRY + NSCALARS + NMOIST_max)
+// counting every passive scalar (base, dust and smoke) and the moist quantities.
+// The trailing 2*5 mirrors NVAR_max: a microphysics model may append up to 5 non-moist
+// species (two components each) after the water species, and the diffusion coefficient
+// tables are indexed by primitive component over that full range as well.
+#define NPRIMVAR_max ((NDRY + NSCALARS + NMOIST_max) + 2*5)
 
 // Cell-centered state variables
 #define Rho_comp       0

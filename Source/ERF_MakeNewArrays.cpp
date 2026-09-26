@@ -515,20 +515,32 @@ ERF::init_stuff (int lev, const BoxArray& ba, const DistributionMapping& dm,
     // way whichever one erf.radiation_model selects.
     if (solverChoice.rad_type != RadiationType::None)
     {
-        qheating_rates[lev] = std::make_unique<MultiFab>(ba, dm, 2, 0);
+        // Allocate with 1 ghost cell for interpolation stencil (cell_cons_interp)
+        // and FillBoundary operations (needed for nested patches)
+        qheating_rates[lev] = std::make_unique<MultiFab>(ba, dm, 2, 1);
         // Level layout (RRTMGP's): index k holds the fluxes at the lower
         // interface of layer k, and the top-of-atmosphere interface sits in
         // the z-ghost cell above the top layer (k = khi + 1), which is why
         // the array carries one ghost cell in z. See ERF.H.
-        rad_fluxes[lev]     = std::make_unique<MultiFab>(ba, dm, 4, IntVect(0,0,1));
+        //
+        // The ghost cells in x and y are not part of that layout. They are here so that
+        // this array can be the coarse source of an InterpFromCoarseLevel, exactly as
+        // qheating_rates is: that overload asserts that the coarse source itself carries
+        // the ghost cells the interpolation stencil reads, and its ParallelCopy then
+        // reads them. See the note in ERF_AdvanceRadiation.cpp.
+        rad_fluxes[lev]     = std::make_unique<MultiFab>(ba, dm, 4, IntVect(1,1,1));
         qheating_rates[lev]->setVal(zero);
+        // Zeroing the ghost cells too is load-bearing, not tidiness: the ghost cells that
+        // lie outside the physical domain are never written by anything else, and they are
+        // read as interpolation-stencil neighbors when this level is a parent.
         rad_fluxes[lev]->setVal(zero);
     }
 
     // Two-stream radiation: the model owns its 2D surface and SEB fields.
     if (solverChoice.rad_type == RadiationType::TwoStream)
     {
-        two_stream_rad.define_level(lev, solverChoice.radChoice, ba2d[lev], dm);
+        two_stream_rad.define_level(lev, solverChoice.radChoice, solverChoice.rdOcp, ba2d[lev], dm,
+                                    ba, geom[lev].Domain());
     }
 
     //*********************************************************
@@ -1321,12 +1333,15 @@ ERF::make_physbcs (int lev)
 
     physbcs_cons[lev] = std::make_unique<ERFPhysBCFunct_cons> (lev, geom[lev], domain_bcs_type, domain_bcs_type_d,
                                                                m_bc_extdir_vals, m_bc_neumann_vals,
+                                                               solverChoice.terrain_type,
                                                                z_phys_nd[lev], l_use_real_bcs, th_bc_data[lev].data());
     physbcs_u[lev]    = std::make_unique<ERFPhysBCFunct_u> (lev, geom[lev], domain_bcs_type, domain_bcs_type_d,
                                                             m_bc_extdir_vals, m_bc_neumann_vals,
+                                                            solverChoice.terrain_type,
                                                             z_phys_nd[lev], l_use_real_bcs, xvel_bc_data[lev].data());
     physbcs_v[lev]    = std::make_unique<ERFPhysBCFunct_v> (lev, geom[lev], domain_bcs_type, domain_bcs_type_d,
                                                             m_bc_extdir_vals, m_bc_neumann_vals,
+                                                            solverChoice.terrain_type,
                                                             z_phys_nd[lev], l_use_real_bcs, yvel_bc_data[lev].data());
     physbcs_w[lev]    = std::make_unique<ERFPhysBCFunct_w> (lev, geom[lev], domain_bcs_type, domain_bcs_type_d,
                                                             m_bc_extdir_vals, m_bc_neumann_vals,

@@ -9,76 +9,31 @@
     bool l_consA  = (diffChoice.molec_diff_type == MolecDiffType::ConstantAlpha);
     bool l_turb   = turbChoice.use_kturb;
 
-    // Theta, KE, Scalar
+    // Molecular diffusivity by primitive component.  Only theta, the passive
+    //   scalar and the water species through Q6 have one defined; everything
+    //   else -- KE, the number concentrations, and any non-moist species a
+    //   scheme appends after its water species -- is left at zero.  This
+    //   matches ResolveNativeScalarDiffusionPolicy() in
+    //   ERF_NativeScalarDiffusion.H, which the explicit paths use instead of
+    //   these tables.
     Vector<Real> alpha_eff(NPRIMVAR_max, zero);
-    if (l_consA) {
-        for (int i = 0; i < NPRIMVAR_max; ++i) {
-           switch (i) {
-               case PrimTheta_comp:
-                    alpha_eff[PrimTheta_comp] = diffChoice.alpha_T;
-                    break;
-               case PrimScalar_comp:
-                    alpha_eff[PrimScalar_comp] = diffChoice.alpha_C;
-                    break;
-               case PrimQ1_comp:
-                    alpha_eff[PrimQ1_comp] = diffChoice.alpha_C;
-                    break;
-               case PrimQ2_comp:
-                    alpha_eff[PrimQ2_comp] = diffChoice.alpha_C;
-                    break;
-               case PrimQ3_comp:
-                   alpha_eff[PrimQ3_comp] = diffChoice.alpha_C;
-                   break;
-               case PrimQ4_comp:
-                   alpha_eff[PrimQ4_comp] = diffChoice.alpha_C;
-                   break;
-               case PrimQ5_comp:
-                   alpha_eff[PrimQ5_comp] = diffChoice.alpha_C;
-                   break;
-               case PrimQ6_comp:
-                   alpha_eff[PrimQ6_comp] = diffChoice.alpha_C;
-                   break;
-               default:
-                    alpha_eff[i] = zero;
-                    break;
-          }
-       }
-    } else {
-        for (int i = 0; i < NPRIMVAR_max; ++i) {
-           switch (i) {
-               case PrimTheta_comp:
-                    alpha_eff[PrimTheta_comp] = diffChoice.rhoAlpha_T;
-                    break;
-               case PrimScalar_comp:
-                    alpha_eff[PrimScalar_comp] = diffChoice.rhoAlpha_C;
-                    break;
-               case PrimQ1_comp:
-                    alpha_eff[PrimQ1_comp] = diffChoice.rhoAlpha_C;
-                    break;
-               case PrimQ2_comp:
-                    alpha_eff[PrimQ2_comp] = diffChoice.rhoAlpha_C;
-                    break;
-               case PrimQ3_comp:
-                    alpha_eff[PrimQ3_comp] = diffChoice.rhoAlpha_C;
-                    break;
-               case PrimQ4_comp:
-                   alpha_eff[PrimQ4_comp] = diffChoice.rhoAlpha_C;
-                   break;
-               case PrimQ5_comp:
-                   alpha_eff[PrimQ5_comp] = diffChoice.rhoAlpha_C;
-                   break;
-               case PrimQ6_comp:
-                   alpha_eff[PrimQ6_comp] = diffChoice.rhoAlpha_C;
-                   break;
-               default:
-                    alpha_eff[i] = zero;
-                    break;
-          }
-       }
+    {
+        const Real alpha_T_eff = l_consA ? diffChoice.alpha_T : diffChoice.rhoAlpha_T;
+        const Real alpha_C_eff = l_consA ? diffChoice.alpha_C : diffChoice.rhoAlpha_C;
+
+        alpha_eff[PrimTheta_comp]  = alpha_T_eff;
+        alpha_eff[PrimScalar_comp] = alpha_C_eff;
+        for (int i = PrimQ1_comp; i <= PrimQ6_comp; ++i) {
+            alpha_eff[i] = alpha_C_eff;
+        }
     }
 
-    // Indexed by primitive component, so the table must cover every scalar slot
-    //   (base, dust and smoke) as well as the moist quantities that follow them
+    // Vertical eddy diffusivity component by primitive component.  Every
+    //   component above the passive scalars takes the Q category, including the
+    //   non-moist species a scheme may append; the table spans NPRIMVAR_max,
+    //   which tracks NVAR_max, so it always covers the full primitive range the
+    //   callers can request.  Every scalar slot (base, dust and smoke) takes the
+    //   Scalar category.
     Vector<int> eddy_diff_idz(NPRIMVAR_max, EddyDiff::Q_v);
     eddy_diff_idz[PrimTheta_comp] = EddyDiff::Theta_v;
     eddy_diff_idz[PrimKE_comp]    = EddyDiff::KE_v;
@@ -96,6 +51,6 @@
     Gpu::copy(Gpu::hostToDevice, eddy_diff_idz.begin(), eddy_diff_idz.end(), eddy_diff_idz_d.begin());
 
     // Capture pointers for device code
-    Real* d_alpha_eff     = alpha_eff_d.data();
+    [[maybe_unused]] Real* d_alpha_eff     = alpha_eff_d.data();
     [[maybe_unused]] int*  d_eddy_diff_idz = eddy_diff_idz_d.data();
 /** \endcond */

@@ -7,7 +7,6 @@ erf.most.pblh_calc = "MRF"
 erf.enable_mrf_cloud_adjustment = false
 erf.enable_mrf_countergradient = true
 erf.enable_mrf_unbounded_vpert = false
-erf.mrf_moistvars = false
 erf.pbl_mrf_Ribcr = 0.5
 erf.pbl_mrf_const_b = 7.8
 erf.pbl_mrf_coriolis_freq = 9.34e-5
