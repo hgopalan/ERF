@@ -23,6 +23,12 @@ geometry.is_periodic = 1 1 0
 amr.max_level = 0
 amr.max_grid_size = 16      # 16 x 16 and 16 x 8 boxes: both divide by the fire grid ratio
 amr.max_grid_size_z = 8     # the fire module forbids z-decomposition
+# The fire module requires every level-0 box to have x and y lengths divisible by
+# erf.fire.grid_ratio. amr.max_grid_size alone does not guarantee that: it is an upper
+# bound, and the grid generator is free to chop 24 into 12 + 12 rather than 16 + 8 --
+# which it now does, since amr.no_box_split_dir = 2 stops it relieving the load in z.
+# blocking_factor states the requirement directly.
+amr.blocking_factor = 8
 zlo.type = "surface_layer"  # the fire module needs the surface layer at the ground
 zhi.type = "SlipWall"
 # Zero bulk transfer coefficients: no surface drag, so the wind does not decay.
