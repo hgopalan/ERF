@@ -17,7 +17,9 @@
 //   air_density         (kg/m^3, default 1.225)
 //
 // Node ordering follows ExtInfw: node 0 is the hub, then the blades in turn, root to tip, then
-// the tower from base to top. Positions and forces are float, like the real interface.
+// the tower from base to top. Positions are in the turbine's own frame (the base at the origin,
+// as OpenFAST reports them; the driver adds the turbine position), and positions and forces are
+// float, like the real interface.
 
 #include "FAST_Library.h"
 
@@ -198,7 +200,7 @@ void free_interface (StubTurbine& t)
 void update_positions (StubTurbine& t)
 {
     ExtInfw_InputType_t& in = *t.to_cfd;
-    const double hub[3] = {t.base_pos[0], t.base_pos[1], t.base_pos[2] + t.hub_height};
+    const double hub[3] = {0.0, 0.0, t.hub_height};   // turbine frame: base at the origin
     auto place = [&](float* px, float* py, float* pz, int nodes_per_blade, int tower_nodes) {
         int n = 0;
         px[n] = static_cast<float>(hub[0]); py[n] = static_cast<float>(hub[1]); pz[n] = static_cast<float>(hub[2]);
@@ -214,9 +216,9 @@ void update_positions (StubTurbine& t)
         }
         for (int i = 0; i < tower_nodes; ++i, ++n) {
             const double z = (i + 0.5) / tower_nodes * t.hub_height;
-            px[n] = static_cast<float>(t.base_pos[0]);
-            py[n] = static_cast<float>(t.base_pos[1]);
-            pz[n] = static_cast<float>(t.base_pos[2] + z);
+            px[n] = 0.0f;
+            py[n] = 0.0f;
+            pz[n] = static_cast<float>(z);
         }
     };
     place(in.pxVel, in.pyVel, in.pzVel, t.num_blade_nodes, t.num_tower_nodes);
@@ -255,7 +257,7 @@ void update_forces (StubTurbine& t)
     const int nf = t.num_force_nodes();
     for (int n = 0; n < nf; ++n) { in.fx[n] = in.fy[n] = in.fz[n] = 0.0f; in.momentx[n] = in.momenty[n] = in.momentz[n] = 0.0f; }
     if (nfb == 0) { return; }
-    const double hub[3] = {t.base_pos[0], t.base_pos[1], t.base_pos[2] + t.hub_height};
+    const double hub[3] = {0.0, 0.0, t.hub_height};
     double sum_r2 = 0.0;
     for (int n = 1; n <= nfb; ++n) {
         const double ry = in.pyForce[n] - hub[1];
@@ -414,9 +416,10 @@ void FAST_HubPosition (int* iTurb, float* absolute_position, float* rotation_veo
 {
     StubTurbine* t = turbine_at(iTurb, ErrStat, ErrMsg);
     if (!t) { return; }
-    absolute_position[0] = static_cast<float>(t->base_pos[0]);
-    absolute_position[1] = static_cast<float>(t->base_pos[1]);
-    absolute_position[2] = static_cast<float>(t->base_pos[2] + t->hub_height);
+    // the same frame as the node positions: the turbine's own, base at the origin
+    absolute_position[0] = 0.0f;
+    absolute_position[1] = 0.0f;
+    absolute_position[2] = static_cast<float>(t->hub_height);
     rotation_veocity[0] = static_cast<float>(t->rotor_speed);
     rotation_veocity[1] = 0.0f;
     rotation_veocity[2] = 0.0f;

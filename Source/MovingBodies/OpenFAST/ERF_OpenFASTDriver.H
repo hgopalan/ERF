@@ -50,6 +50,7 @@ struct TurbineState
     std::vector<amrex::Real> vel_pos;    //!< 3*num_vel_nodes velocity-node positions (m)
     std::vector<amrex::Real> force_pos;  //!< 3*num_force_nodes force-node positions (m)
     std::vector<amrex::Real> force;      //!< 3*num_force_nodes forces on the structure, as OpenFAST reports them (N)
+    std::vector<amrex::Real> node_vel;   //!< 3*num_vel_nodes velocities the flow supplied at the velocity nodes (m/s)
     std::array<amrex::Real,3> hub_pos{{0.0, 0.0, 0.0}};
     amrex::Real rotor_speed{0.0};        //!< rad/s about the hub axis
     // ExtInfw buffers, owner rank only; positions and forces come from OpenFAST in to_cfd and the
@@ -74,27 +75,41 @@ public:
     OpenFASTDriver& operator= (const OpenFASTDriver&) = delete;
 
     /**
-     * Allocate and initialise every turbine, run its first solution, and broadcast the node
-     * layout. Aborts when a model does not take external inflow (CompInflow must be 2) or when
-     * dt_cfd is not a whole multiple of the model's dt.
+     * Allocate and initialise every turbine and broadcast the node layout, so the caller can
+     * sample the flow at the velocity nodes before the first solution. Aborts when a model does
+     * not take external inflow (CompInflow must be 2) or when dt_cfd is not a whole multiple of
+     * the model's dt.
      * @param dt_cfd the fixed ERF step
      * @param t_max the OpenFAST stop time
-     * @param initial_velocity the uniform velocity given to every node before the first solution
      */
-    void init (double dt_cfd, double t_max, const std::array<amrex::Real,3>& initial_velocity);
+    void init (double dt_cfd, double t_max);
 
-    /** Set the same velocity at every velocity node of every turbine (owner ranks). */
+    /**
+     * Run OpenFAST's first solution with the node velocities set so far, then broadcast the
+     * positions and forces and open the diagnostics files. Must follow init() and precede step().
+     */
+    void solution0 ();
+
+    /** Set the same velocity at every velocity node of every turbine. */
     void set_uniform_velocity (const std::array<amrex::Real,3>& vel);
+
+    /** Set the velocity at each velocity node of turbine i (3*num_vel_nodes values, node order). */
+    void set_node_velocities (int i, const std::vector<amrex::Real>& uvw);
 
     /** Advance every turbine by one ERF step (num_substeps OpenFAST steps) and broadcast. */
     void step ();
 
-    /** Append one diagnostics row per turbine (time, rotor speed, thrust, torque, power). */
+    /**
+     * Append one row per turbine to its two diagnostics files: <output_root>_erf.csv with time,
+     * rotor speed, thrust, torque and power, and <output_root>_flow.csv with the velocity the
+     * flow supplied at the hub node and its mean over the blade nodes.
+     */
     void write_diagnostics (double time);
 
     const std::vector<TurbineState>& turbines () const { return m_turb; }
     bool is_owner (int i) const;
     bool initialized () const { return m_initialized; }
+    bool solved0 () const { return m_solved0; }
 
     /** Thrust vector: sum of the blade-node forces (N). */
     std::array<amrex::Real,3> thrust (const TurbineState& t) const;
@@ -104,6 +119,7 @@ public:
 private:
     std::vector<TurbineState> m_turb;
     bool m_initialized{false};
+    bool m_solved0{false};
     int m_num_local{0};
 
     void fast_check (int err_stat, const char* err_msg, const std::string& where) const;

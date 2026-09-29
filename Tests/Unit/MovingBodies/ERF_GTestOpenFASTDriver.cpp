@@ -179,8 +179,13 @@ TEST(OpenFASTDriver, InitReportsTheStubNodeLayout)
     const auto dir = scratch_dir("layout");
     const std::string fst = write_stub_deck(dir, d);
     erf_openfast::OpenFASTDriver driver({one_turbine(fst, dir)});
-    driver.init(0.05, 1.0, {{10.0, 0.0, 0.0}});
+    driver.init(0.05, 1.0);
     ASSERT_TRUE(driver.initialized());
+    // the node layout is known before the first solution, so the flow can be sampled at it
+    EXPECT_FALSE(driver.solved0());
+    driver.set_uniform_velocity({{10.0, 0.0, 0.0}});
+    driver.solution0();
+    ASSERT_TRUE(driver.solved0());
     ASSERT_EQ(driver.turbines().size(), 1u);
     const erf_openfast::TurbineState& t = driver.turbines()[0];
 
@@ -220,7 +225,9 @@ TEST(OpenFASTDriver, StepAdvancesTheRotorAndReturnsTheDiskLoads)
     const std::string fst = write_stub_deck(dir, d);
     erf_openfast::OpenFASTDriver driver({one_turbine(fst, dir)});
     const double u_inf = 10.0;
-    driver.init(0.05, 1.0, {{static_cast<Real>(u_inf), 0.0, 0.0}});
+    driver.init(0.05, 1.0);
+    driver.set_uniform_velocity({{static_cast<Real>(u_inf), 0.0, 0.0}});
+    driver.solution0();
     driver.step();
     driver.step();
     const erf_openfast::TurbineState& t = driver.turbines()[0];
@@ -258,4 +265,11 @@ TEST(OpenFASTDriver, StepAdvancesTheRotorAndReturnsTheDiskLoads)
     EXPECT_EQ(line, "time,rotor_speed,thrust_x,thrust_y,thrust_z,torque,power");
     ASSERT_TRUE(std::getline(csv, line));
     EXPECT_EQ(line.rfind("0.1,", 0), 0u) << line;
+    // the flow file carries the velocities the nodes were given: the uniform 10 m/s here
+    std::ifstream flow((dir / "T1_flow.csv"));
+    ASSERT_TRUE(flow.good());
+    ASSERT_TRUE(std::getline(flow, line));
+    EXPECT_EQ(line, "time,hub_u,hub_v,hub_w,blade_mean_u,blade_mean_v,blade_mean_w");
+    ASSERT_TRUE(std::getline(flow, line));
+    EXPECT_EQ(line, "0.1,10,0,0,10,0,0") << line;
 }

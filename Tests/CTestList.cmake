@@ -889,6 +889,48 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT)
   add_test_r(OpenFAST_DriverOnly "" "erf_exec" "plt00005")
 endif()
 
+if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
+  # The velocity at the stub turbine's nodes is sampled from a linear shear profile, which
+  # the sampler reproduces exactly: the diagnostics log must match its gold and the analytic
+  # hub and blade-mean velocities in every row.
+  function(add_test_actuator_sampling TEST_NAME TEST_FILES_DIR HUB_U HUB_V)
+      setup_test()
+      resolve_test_exe("" "erf_exec" TEST_EXE)
+      add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+          "-DMPIEXEC=${MPIEXEC_EXECUTABLE}"
+          "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+          "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+          "-DNRANKS=${NP}"
+          "-DTEST_EXE=${TEST_EXE}"
+          "-DCONFIG=$<CONFIG>"
+          "-DINPUT=${CURRENT_TEST_BINARY_DIR}/${TEST_FILES_DIR}.i"
+          "-DWORKING_DIRECTORY=${CURRENT_TEST_BINARY_DIR}"
+          "-DCSV=T1_flow.csv"
+          "-DGOLD=${CURRENT_TEST_SOURCE_DIR}/T1_flow.csv.gold"
+          "-DSIGDIGITS=10"
+          "-DHUB_U=${HUB_U}"
+          "-DHUB_V=${HUB_V}"
+          -P ${PROJECT_SOURCE_DIR}/Tests/RunActuatorSampling.cmake)
+      set_tests_properties(${TEST_NAME}
+          PROPERTIES
+          TIMEOUT 600
+          PROCESSORS ${NP}
+          WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+          LABELS "regression;moving-bodies"
+          ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/simulation.log")
+  endfunction()
+  add_test_actuator_sampling(Actuator_Sampling Actuator_Sampling 12.5 2.5)
+
+  # The same sampling with the domain in one box and split unevenly in x and y (never in z):
+  # the sampled velocities must agree to 8 significant digits (the FFT solution itself differs
+  # at roundoff between decompositions), so a node on a box face is read through the ghost cells.
+  add_test_box_parity(ActuatorSampling_BoxParity Actuator_Sampling "plt00005"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=8 amr.max_grid_size_y=5 amr.max_grid_size_z=64"
+      DATALOG "T1_flow.csv"
+      DATALOG_SIGDIGITS 8)
+endif()
+
 if(ERF_ENABLE_MPI)
 add_test_anelastic_wall_diffusion(AnelasticWallDiffusion_X 0)
 add_test_anelastic_wall_diffusion(AnelasticWallDiffusion_Y 1)

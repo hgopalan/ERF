@@ -593,6 +593,24 @@ Test Location: `Tests/test_files/OpenFAST_DriverOnly`_
 
 .. _`Tests/test_files/OpenFAST_DriverOnly`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_DriverOnly
 
+Actuator velocity sampling
+--------------------------
+``Actuator_Sampling`` (builds with ``ERF_ENABLE_OPENFAST=ON``,
+``ERF_OPENFAST_USE_STUB=ON``, ``ERF_ENABLE_FFT=ON`` and MPI, not Windows) starts
+an anelastic box from a sounding with the linear shear ``u = 5 + 0.05 z``,
+``v = 1 + 0.01 z`` and samples the flow at the nodes of one stub OpenFAST rotor
+(hub at 150 m). The sampler is exact for a linear field, so the turbine's
+flow file ``T1_flow.csv`` must match its gold log to ten significant digits
+and, in every row, show ``u = 12.5``, ``v = 2.5`` and ``w = 0`` at the hub and
+as the blade mean (``Tests/RunActuatorSampling.cmake``).
+``ActuatorSampling_BoxParity`` runs the same deck with the domain in one box and
+split unevenly in x and y and requires the flow files to agree to eight
+significant digits.
+
+Test Location: `Tests/test_files/Actuator_Sampling`_
+
+.. _`Tests/test_files/Actuator_Sampling`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Actuator_Sampling
+
 Restart parity
 --------------
 ``MoistBubble_Kessler_Restart`` (MPI builds, not Windows) runs the moist bubble
