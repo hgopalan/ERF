@@ -155,6 +155,15 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
 
 #endif
 
+#ifdef ERF_USE_MOVING_BODIES
+    // **************************************************************************************
+    // Advance the moving bodies (OpenFAST turbines) by one step on their anchor level
+    // **************************************************************************************
+    if (moving_bodies) {
+        moving_bodies->advance(lev, time, dt_lev);
+    }
+#endif
+
     // **************************************************************************************
     // Update the radiation sources with the "old" state
     // **************************************************************************************

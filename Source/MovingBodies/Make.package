@@ -1,0 +1,4 @@
+CEXE_headers += ERF_MovingBodies.H
+CEXE_headers += ERF_MovingBodiesInputs.H
+CEXE_sources += ERF_MovingBodies.cpp
+CEXE_sources += ERF_MovingBodiesInputs.cpp

@@ -295,6 +295,11 @@ ERF::ERF_shared ()
     initializeWindFarm(nlevs_max);
 #endif
 
+#ifdef ERF_USE_MOVING_BODIES
+    // nullptr unless erf.moving_bodies.bodies is given
+    moving_bodies = MovingBodies::create(solverChoice, max_level);
+#endif
+
 #ifdef ERF_USE_EAMXX_SHOC
     eamxx_shoc_interface.resize(nlevs_max);
     for (int lev = 0; lev <= max_level; ++lev) {

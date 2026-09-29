@@ -578,6 +578,14 @@ CMake can also generate makefiles for the Ninja build system for faster compilat
      - Enables Noah-MP land surface model (requires ``ERF_ENABLE_NETCDF=ON``)
      - OFF
      - ON/OFF
+   * - ``ERF_ENABLE_OPENFAST``
+     - Enables the OpenFAST turbine coupling (OpenFAST 4; set ``OPENFAST_DIR`` to the install prefix); turns on ``ERF_ENABLE_MOVING_BODIES``
+     - OFF
+     - ON/OFF
+   * - ``ERF_OPENFAST_USE_STUB``
+     - Builds the OpenFAST coupling against the bundled stub library instead of OpenFAST, for testing
+     - OFF
+     - ON/OFF
    * - ``ERF_ENABLE_RRTMGP``
      - Enables RRTMGP radiation model (requires ``ERF_ENABLE_NETCDF=ON``, ``ERF_ENABLE_MPI=ON``)
      - OFF
@@ -653,6 +661,11 @@ CMake can also generate makefiles for the Ninja build system for faster compilat
 
      - Requires ``ERF_ENABLE_MPI=ON``
      - Automatically enables ``ERF_ENABLE_EKAT=ON`` (provides Kokkos)
+
+   * ``ERF_ENABLE_OPENFAST`` - OpenFAST turbine coupling (moving bodies)
+
+     - Requires an OpenFAST 4 installation (``-DOPENFAST_DIR=<prefix>``), or ``ERF_OPENFAST_USE_STUB=ON`` for testing
+     - Automatically enables ``ERF_ENABLE_MOVING_BODIES=ON``
 
    * ``ERF_ENABLE_NOAHMP`` - NOAHMP land surface model
 

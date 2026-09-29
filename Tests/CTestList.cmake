@@ -882,6 +882,13 @@ endfunction(add_test_shoc_mutation)
 # and expose stable diagnostic fields for automated CI forensics.
 add_test_cloud_chamber_fixed_dt_guard(CloudChamber_Bulk_FixedDtGuard)
 
+if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT)
+  # The OpenFAST driver steps a stub turbine through a uniform anelastic flow (FFT solver)
+  # without adding any forcing yet; the gold plotfile is the same deck run without moving
+  # bodies, so the flow must come out unchanged.
+  add_test_r(OpenFAST_DriverOnly "" "erf_exec" "plt00005")
+endif()
+
 if(ERF_ENABLE_MPI)
 add_test_anelastic_wall_diffusion(AnelasticWallDiffusion_X 0)
 add_test_anelastic_wall_diffusion(AnelasticWallDiffusion_Y 1)

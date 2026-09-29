@@ -1,0 +1,2 @@
+CEXE_headers += ERF_OpenFASTDriver.H
+CEXE_sources += ERF_OpenFASTDriver.cpp

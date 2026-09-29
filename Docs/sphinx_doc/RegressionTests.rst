@@ -578,6 +578,21 @@ Problem Location: `Exec/CanonicalTests/Canonical_RANS`_
 
 .. _`Exec/CanonicalTests/Canonical_RANS`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/Canonical_RANS
 
+OpenFAST driver
+---------------
+``OpenFAST_DriverOnly`` (builds with ``ERF_ENABLE_OPENFAST=ON``,
+``ERF_OPENFAST_USE_STUB=ON`` and ``ERF_ENABLE_FFT=ON``) steps one moving body
+(:ref:`sec:MovingBodiesInputs`) through five steps of a uniform anelastic flow.
+The body is an IEA-15-MW-sized rotor of the bundled OpenFAST stub library,
+driven by a prescribed uniform velocity and adding no forcing to the flow, so
+the plotfile must equal the gold file, which is the same deck run without the
+``erf.moving_bodies`` block. The turbine's diagnostics file ``T1_erf.csv``
+(time, rotor speed, thrust, torque, power) is written alongside.
+
+Test Location: `Tests/test_files/OpenFAST_DriverOnly`_
+
+.. _`Tests/test_files/OpenFAST_DriverOnly`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_DriverOnly
+
 Restart parity
 --------------
 ``MoistBubble_Kessler_Restart`` (MPI builds, not Windows) runs the moist bubble
