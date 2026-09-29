@@ -9,30 +9,13 @@
 #include <AMReX_MFIter.H>
 #include <AMReX_ParallelDescriptor.H>
 
+#include "ERF_ActuatorGeometry.H"
+
 using namespace amrex;
 
 namespace erf_actuator {
 
 namespace {
-
-// Height of the centre of face (i,j,k) of the staggered grid dir (0: x face, 1: y face,
-// 2: z face): the mean of the four nodes of that face on a terrain-following mesh, or the
-// nominal height on a uniform-dz mesh.
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-Real face_height (int dir, int i, int j, int k,
-                  Array4<Real const> const& znd, bool has_znd, Real zlo, Real dz)
-{
-    if (!has_znd) {
-        return (dir == 2) ? zlo + k * dz : zlo + (k + Real(0.5)) * dz;
-    }
-    if (dir == 0) {
-        return Real(0.25) * (znd(i,j,k) + znd(i,j+1,k) + znd(i,j,k+1) + znd(i,j+1,k+1));
-    }
-    if (dir == 1) {
-        return Real(0.25) * (znd(i,j,k) + znd(i+1,j,k) + znd(i,j,k+1) + znd(i+1,j,k+1));
-    }
-    return Real(0.25) * (znd(i,j,k) + znd(i+1,j,k) + znd(i,j+1,k) + znd(i+1,j+1,k));
-}
 
 // Value of the face field f at height z in the column (i,j) of its staggered grid, linear in
 // the physical height between the two faces that bracket z. The faces klo..khi are searched;

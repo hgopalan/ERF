@@ -43,12 +43,10 @@ MovingBodiesInputs::read ()
         ParmParse ppb("erf.moving_bodies." + name);
 
         ppb.get("type", b.type);
-        if (b.type != "openfast_turbine") {
+        if (b.type != "openfast_turbine" && b.type != "ct_disk") {
             Abort("erf.moving_bodies." + name + ".type = '" + b.type +
-                  "' is not known; this version supports openfast_turbine");
+                  "' is not known; this version supports openfast_turbine and ct_disk");
         }
-
-        ppb.get("fst_file", b.fst_file);
 
         std::vector<Real> pos;
         ppb.getarr("base_pos", pos);
@@ -57,22 +55,58 @@ MovingBodiesInputs::read ()
         }
         for (int d = 0; d < 3; ++d) { b.base_pos[d] = pos[d]; }
 
-        ppb.query("mode", b.mode);
-        if (b.mode != "adm" && b.mode != "alm") {
-            Abort("erf.moving_bodies." + name + ".mode must be adm or alm, not '" + b.mode + "'");
-        }
-
-        ppb.query("num_force_points_blade", b.num_force_points_blade);
-        if (b.num_force_points_blade < 1) {
-            Abort("erf.moving_bodies." + name + ".num_force_points_blade must be >= 1");
-        }
-        ppb.query("num_force_points_tower", b.num_force_points_tower);
-        if (b.num_force_points_tower < 0) {
-            Abort("erf.moving_bodies." + name + ".num_force_points_tower must be >= 0");
+        ppb.query("epsilon", b.epsilon);
+        if (!(b.epsilon > 0.0)) {
+            Abort("erf.moving_bodies." + name + ".epsilon must be positive (in units of dx)");
         }
 
         b.output_root = in.diagnostics_dir + "/" + name;
         ppb.query("output_root", b.output_root);
+
+        if (b.type == "openfast_turbine") {
+            ppb.get("fst_file", b.fst_file);
+
+            ppb.query("mode", b.mode);
+            if (b.mode != "adm" && b.mode != "alm") {
+                Abort("erf.moving_bodies." + name + ".mode must be adm or alm, not '" + b.mode + "'");
+            }
+
+            ppb.query("num_force_points_blade", b.num_force_points_blade);
+            if (b.num_force_points_blade < 1) {
+                Abort("erf.moving_bodies." + name + ".num_force_points_blade must be >= 1");
+            }
+            ppb.query("num_force_points_tower", b.num_force_points_tower);
+            if (b.num_force_points_tower < 0) {
+                Abort("erf.moving_bodies." + name + ".num_force_points_tower must be >= 0");
+            }
+        } else {
+            ppb.get("rotor_radius", b.rotor_radius);
+            if (!(b.rotor_radius > 0.0)) {
+                Abort("erf.moving_bodies." + name + ".rotor_radius must be positive");
+            }
+            ppb.get("hub_height", b.hub_height);
+            if (!(b.hub_height > b.rotor_radius)) {
+                Abort("erf.moving_bodies." + name + ".hub_height must exceed rotor_radius so the disk clears the base");
+            }
+            ppb.get("ct", b.ct);
+            if (!(b.ct > 0.0 && b.ct < 1.0)) {
+                Abort("erf.moving_bodies." + name + ".ct must lie in (0, 1)");
+            }
+            ppb.query("yaw", b.yaw_deg);
+            ppb.query("num_points_r", b.num_points_r);
+            ppb.query("num_points_t", b.num_points_t);
+            if (b.num_points_r < 1 || b.num_points_t < 1) {
+                Abort("erf.moving_bodies." + name + ".num_points_r and num_points_t must be >= 1");
+            }
+            ppb.query("sample_diameters_upstream", b.sample_diameters_upstream);
+            if (!(b.sample_diameters_upstream > 0.0)) {
+                Abort("erf.moving_bodies." + name + ".sample_diameters_upstream must be positive");
+            }
+            ppb.query("air_density", b.air_density);
+            if (!(b.air_density > 0.0)) {
+                Abort("erf.moving_bodies." + name + ".air_density must be positive");
+            }
+        }
 
         in.bodies.push_back(b);
     }

@@ -1,3 +1,6 @@
+CEXE_headers += ERF_ActuatorGeometry.H
 CEXE_headers += ERF_ActuatorPoints.H
 CEXE_headers += ERF_ActuatorSampling.H
+CEXE_headers += ERF_ActuatorSpreading.H
 CEXE_sources += ERF_ActuatorSampling.cpp
+CEXE_sources += ERF_ActuatorSpreading.cpp
