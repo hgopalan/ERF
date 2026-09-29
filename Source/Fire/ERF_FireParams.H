@@ -140,12 +140,13 @@ struct FireParams
     amrex::Real       levelset_cfl            = 0.4;   ///< CFL for level-set subcycle
     amrex::Real       levelset_eps_visc       = 0.4;   ///< Artificial viscosity coefficient ε
     int               levelset_reinit_every   = 5;     ///< Reinitialize φ every N fire subcycles
-    int               levelset_reinit_iters   = 10;    ///< Sussman reinitialization iterations
-    amrex::Real       levelset_reinit_band_m  = -1.0;  ///< Band half-width L [m] where |phi| reaches 1; <=0 selects 3*min(dx,dy)
-    amrex::Real       levelset_reinit_dtau    = -1.0;  ///< Reinitialization pseudo-dt (<0 = auto = 0.5*min(dx,dy))
+    int               levelset_reinit_iters   = 1;     ///< Outer RK3 pseudo-time steps per reinitialization (WRF's fire_lsm_reinit_iter; WRF's own comment: "1 iter each time step is enough")
+    amrex::Real       levelset_reinit_dtau    = -1.0;  ///< Reinitialization pseudo-dt [m] (<=0 = auto: 0.01*dx for both schemes, as in WRF-Fire)
+    std::string       levelset_reinit_scheme  = "wrf"; ///< "wrf" (default, port of WRF-Fire's reinit_ls_rk3) or "jiang_peng" (Jiang & Peng 2000 HJ-WENO5 + SSP-RK3); see ERF_Reinitialize.H
+    amrex::Real       levelset_reinit_jp_sign_eps2 = -1.0; ///< jiang_peng only: term added to phi0^2 under the smoothed-sign sqrt (<=0 = auto dx^2, Jiang & Peng's "delta comparable to the spatial step size" read as an area scale); set to dx to test the literal-linear reading
     std::string       levelset_gradient       = "weno5z_front"; ///< One-sided derivatives: "upwind" (first order), "weno5z" (HJ-WENO5-Z everywhere) or "weno5z_front" (WENO within weno_band_cells of the front, first order elsewhere; the WRF-Fire default)
     int               levelset_grad_scheme    = 2;     ///< levelset_gradient resolved: 0 upwind, 1 weno5z, 2 weno5z_front
-    int               levelset_weno_band_cells = 4;    ///< Half-width in fire cells of the front band that uses WENO with "weno5z_front" (WRF-Fire fire_lsm_band_ngp)
+    int               levelset_weno_band_cells = 4;    ///< Half-width in fire cells of the front band that uses WENO with "weno5z_front" (WRF-Fire fire_lsm_band_ngp), and the WENO5-vs-ENO1 band threshold for reinitialize_phi (ERF_FireLayer.cpp scales this same value by dx for both call sites)
     amrex::Real       levelset_eps_visc_front  = 0.1;  ///< Artificial viscosity within visc_front_cells of the front (WRF-Fire fire_viscosity_bg; Jimenez y Munoz et al. 2026 use 0.1); < 0 uses eps_visc everywhere
     int               levelset_visc_front_cells = 2;   ///< Half-width in fire cells of the near-front viscosity band (WRF-Fire fire_viscosity_ngp)
     amrex::Real       levelset_visc_transition_cells = 2.0; ///< Width in fire cells of the linear blend from eps_visc_front to eps_visc beyond that band (WRF-Fire: fire_viscosity_band x fire_lsm_band_ngp = 0.5 x 4)
@@ -896,8 +897,10 @@ struct FireParams
        pp.query("levelset.eps_visc", levelset_eps_visc);
        pp.query("levelset.reinit_every", levelset_reinit_every);
        pp.query("levelset.reinit_iters", levelset_reinit_iters);
-       pp.query("levelset.reinit_band_m", levelset_reinit_band_m);
        pp.query("levelset.reinit_dtau", levelset_reinit_dtau);
+       pp.query("levelset.reinit_scheme", levelset_reinit_scheme);
+       one_of("levelset.reinit_scheme", levelset_reinit_scheme, {"wrf", "jiang_peng"});
+       pp.query("levelset.reinit_jp_sign_eps2", levelset_reinit_jp_sign_eps2);
        pp.query("levelset.wall_extrapolate", levelset_wall_extrapolate);
        pp.query("levelset.ellipse",        levelset_ellipse);
        pp.query("levelset.ellipse_lw",     levelset_ellipse_lw);

@@ -36,8 +36,11 @@ static constexpr double REL = (sizeof(amrex::Real) == 8) ? 1e-10 : 1e-4;
  * advance accumulates in a modest number of steps -- and the head's actual
  * position (found by a 1D bilinear-sampled bisection for the zero crossing
  * along the wind ray through the capsule's own centre, i.e. away from its
- * two rounded end corners) is compared to the analytic Rf * T. This test
- * runs the split path alone (advection only, no reinitialisation). The other
+ * two rounded end corners) is compared to the analytic Rf * T. One test runs
+ * the split path alone (advection only, no reinitialisation); a second
+ * interleaves the Jiang-Peng reinitialisation every step to confirm the fix
+ * holds up with reinit active too, the combination that showed the
+ * multi-hundred-metre wing with the baseline (un-split) scheme. The other
  * tests check that per-fuel Rothermel coefficients, a mixed fuel map and the
  * per-cell ROS scale reach the split path.
  */
@@ -219,6 +222,46 @@ TEST(SplitHamiltonianAdvection, HeadRateAt34DegreesMatchesAnalyticRf)
     const Real traveled = d1 - d0;
     const Real expected = target_rf * (nsteps * dt);
     EXPECT_NEAR(traveled, expected, 0.02 * expected)
+        << "traveled=" << traveled << " expected=" << expected;
+}
+
+/// Same setup, but with the Jiang-Peng reinitialisation
+/// (erf.fire.levelset.reinit_scheme = "jiang_peng") applied every step -- the
+/// combination that showed a multi-hundred-metre wing at 34deg with the
+/// baseline (un-split) advection scheme. With the split path, head rate still
+/// matches the analytic Rf to within 3% (a slightly looser tolerance than the
+/// pure advection test, since reinit has its own small bias, which this test
+/// does not aim to eliminate -- only to confirm the Hamiltonian-splitting bug
+/// is not reintroducing a much larger error on top of it).
+TEST(SplitHamiltonianAdvection, ReinitHeadRateAt34DegreesMatchesAnalyticRf)
+{
+    const Real target_rf = TARGET_RF;
+    CapsuleFixture f(target_rf);
+    const DirectionalRosState st = rothermel_state();
+
+    MultiFab phi(f.ba, f.dm, 1, 3), wind(f.ba, f.dm, 2, 0), slopes(f.ba, f.dm, 2, 0);
+    f.capsule(phi);
+    wind.setVal(f.wx, 0, 1);
+    wind.setVal(f.wy, 1, 1);
+    slopes.setVal(0.0);
+
+    const Real dt   = 0.015;
+    const int  nsteps = 2000;  // same 30s/180m as the advection-only test above, but 2000 reinit calls
+    const Real eps_visc = 0.4;
+    const Real dtau  = 0.01 * DX;   // matches WRF-Fire's own default, ERF_FireLayer.cpp
+
+    const Real d0 = f.head_position(phi);
+    for (int step = 0; step < nsteps; ++step) {
+        advect_levelset_directional_rk3_split(phi, wind, slopes, f.geom, dt, eps_visc, st);
+        fire_fill_boundary(phi, f.geom);
+        reinitialize_phi_jiang_peng(phi, f.geom, 1, dtau);
+        fire_fill_boundary(phi, f.geom);
+    }
+    const Real d1 = f.head_position(phi);
+
+    const Real traveled = d1 - d0;
+    const Real expected = target_rf * (nsteps * dt);
+    EXPECT_NEAR(traveled, expected, 0.03 * expected)
         << "traveled=" << traveled << " expected=" << expected;
 }
 

@@ -9,219 +9,496 @@
 
 /**
  * @file ERF_Reinitialize.H
- * @brief Sussman reinitialization of the level-set function
+ * @brief Level-set reinitialization: restore phi to a metric signed distance
+ * (|grad phi| = 1) without moving the front. Two schemes, selected by
+ * erf.fire.levelset.reinit_scheme:
  *
- * Ported from wildfire_levelset/src/reinitialization.H
- * Resets φ to a normalized signed-distance function via Sussman's method.
+ *  "wrf" (default), reinitialize_phi(): WRF-Fire's reinit_ls_rk3 /
+ *  advance_ls_reinit (module_fr_fire_core.F).
+ *   - Smoothed sign S(phi0) = phi0/sqrt(phi0^2 + dx^2), computed once from
+ *     the field at call entry and held fixed across every outer iteration
+ *     and RK stage.
+ *   - Wicker & Skamarock (2002) 3-stage RK3 (not Shu-Osher SSP-RK3): every
+ *     stage advances from the same fixed phi0 base,
+ *       phi1 = phi0 + (dtau/3) L(phi0)
+ *       phi2 = phi0 + (dtau/2) L(phi1)
+ *       phi3 = phi0 +  dtau    L(phi2)
+ *   - dtau = 0.01*dx by default (WRF's value) and n_outer = 1 pseudo-time
+ *     steps per call (WRF's fire_lsm_reinit_iter; its comment: "1 iter each
+ *     time step is enough").
+ *   - Hybrid gradient: Jiang-Shu flux-form WENO5 on phi values within `band`
+ *     of the front, first-order ENO1 (Godunov) elsewhere, with WRF's own band
+ *     test on phi itself (not abs(phi)), reproduced as WRF has it.
+ *   - WENO5's upwind side is selected by sign(S(phi0) * D4th), D4th a
+ *     4th-order central difference of the current iterate (WRF's select_4th).
+ *   - No subcell (Russo-Smereka) correction.
+ *   - Final safeguard phi_out = min(phi_out, phi_in) against the field at
+ *     call entry ("fire area can only increase").
  *
- * NOTE ON UNITS. The textbook Sussman update drives |∇φ| → 1, which presumes φ
- * is a signed distance measured in metres. ERF-Hazard's φ is not: it is
- * normalized and clamped to [-1, 1] (initialize_ignition sets φ = (d - r)/r,
- * and the FARSITE path and ember spotting use the same convention). Applying
- * the textbook form to a normalized φ leaves the bracket (1 - |∇φ|) near 1 for
- * every cell, so each iteration added ~dtau and the field diverged by
- * n_iters * dtau per call. The update below instead targets |∇φ| = 1/L for an
- * explicit band length L, so φ reaches ±1 at distance L from the front, which
- * is the convention the rest of the module already uses.
+ *  "jiang_peng", reinitialize_phi_jiang_peng(): Jiang & Peng (2000)
+ *  HJ-WENO5 with true Shu-Osher SSP-RK3. It differs from the WRF scheme in
+ *  two ways: WENO is applied to one-sided divided differences (the
+ *  Hamilton-Jacobi form, which ERF's advection already uses) rather than to
+ *  phi values in flux form, which suits a conserved density but not phi; and
+ *  the time integrator is third order for this nonlinear right-hand side,
+ *  where Wicker-Skamarock is second order. The same dtau default and the same
+ *  final min() safeguard apply. Neither scheme removes the error of building
+ *  the gradient from independent x and y one-sided derivatives.
+ *
+ * Differences from WRF in the "wrf" scheme, by design:
+ *   - Units: WRF's LFN and ERF's fire_phi are both metric signed distance at
+ *     the call site (ERF_FireLayer.cpp), so there is no normalized [-1, 1]
+ *     mode.
+ *   - Boundary handling: ghost cells are filled with fire_fill_boundary(),
+ *     the same routine the advection path uses, not WRF's
+ *     continue_at_boundary extrapolation or its forced-ENO1 band near the
+ *     domain edge.
+ *   - Non-burnable mask / wall_extrap: WRF has no equivalent. Masked cells
+ *     pass through unchanged every stage and their neighbours are read
+ *     through WallStencil, the convention fill_directional_ros uses.
  */
 
 namespace fire_levelset {
 
+namespace wrf_reinit {
+
+/** WRF's 1st-order ENO selection (module_fr_fire_core.F's select_eno). */
+AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+amrex::Real select_eno(amrex::Real diffL, amrex::Real diffR) noexcept
+{
+    using namespace amrex;
+    if (!(diffL > 0) && !(diffR > 0)) { return diffR; }
+    if (!(diffL < 0) && !(diffR < 0)) { return diffL; }
+    if (!(diffL < 0) && !(diffR > 0)) {
+        return (!(std::abs(diffR) < std::abs(diffL))) ? diffR : diffL;
+    }
+    return 0.0_rt;
+}
+
+/** WRF's 4th-order central difference, used only to pick WENO5's upwind
+ * side (module_fr_fire_core.F's select_4th). */
+AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+amrex::Real select_4th(amrex::Real dx, amrex::Real p_i, amrex::Real p_im1,
+                        amrex::Real p_im2, amrex::Real p_ip1, amrex::Real p_ip2) noexcept
+{
+    using namespace amrex;
+    const amrex::Real dp = (7.0_rt*p_ip1 + 7.0_rt*p_i - p_ip2 - p_im1) / (12.0_rt*dx);
+    const amrex::Real dm = (7.0_rt*p_i + 7.0_rt*p_im1 - p_ip1 - p_im2) / (12.0_rt*dx);
+    return dp - dm;
+}
+
+/** Classic Jiang-Shu flux-form WENO5 on phi VALUES (module_fr_fire_core.F's
+ * select_weno5), NOT HJ-WENO5-Z on divided differences. `uf`'s sign selects
+ * the upwind stencil side. Verified against the exact WRF source, including
+ * that the i+1/2 and i-1/2 faces use different (not simply shifted) beta
+ * formulas. */
+AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+amrex::Real select_weno5(amrex::Real dx,
+                          amrex::Real p_i, amrex::Real p_im1, amrex::Real p_im2, amrex::Real p_im3,
+                          amrex::Real p_ip1, amrex::Real p_ip2, amrex::Real p_ip3,
+                          amrex::Real uf) noexcept
+{
+    using namespace amrex;
+    constexpr Real g1 = 1.0_rt/10.0_rt, g2 = 3.0_rt/5.0_rt, g3 = 3.0_rt/10.0_rt, tol = 1.0e-6_rt;
+
+    Real i0, im1, im2, im3, ip1, ip2;
+    if (uf >= 0.0_rt) {
+        i0 = p_i; im1 = p_im1; im2 = p_im2; im3 = p_im3; ip1 = p_ip1; ip2 = p_ip2;
+    } else {
+        i0 = p_i; im1 = p_ip1; im2 = p_ip2; im3 = p_ip3; ip1 = p_im1; ip2 = p_im2;
+    }
+
+    auto weno5_blend = [=](Real fh_1, Real fh_2, Real fh_3,
+                            Real beta1, Real beta2, Real beta3) {
+        const Real w1t = g1/((beta1+tol)*(beta1+tol));
+        const Real w2t = g2/((beta2+tol)*(beta2+tol));
+        const Real w3t = g3/((beta3+tol)*(beta3+tol));
+        const Real wsum = w1t + w2t + w3t;
+        return (w1t*fh_1 + w2t*fh_2 + w3t*fh_3) / wsum;
+    };
+
+    // Face at i+1/2, from (im2,im1,i,ip1,ip2).
+    const Real flux_p = weno5_blend(
+        (2.0_rt*im2 - 7.0_rt*im1 + 11.0_rt*i0) / 6.0_rt,
+        (-1.0_rt*im1 + 5.0_rt*i0 + 2.0_rt*ip1) / 6.0_rt,
+        (2.0_rt*i0 + 5.0_rt*ip1 - 1.0_rt*ip2) / 6.0_rt,
+        (13.0_rt/12.0_rt)*(im2-2.0_rt*im1+i0)*(im2-2.0_rt*im1+i0) + 0.25_rt*(im2-4.0_rt*im1+3.0_rt*i0)*(im2-4.0_rt*im1+3.0_rt*i0),
+        (13.0_rt/12.0_rt)*(im1-2.0_rt*i0+ip1)*(im1-2.0_rt*i0+ip1) + 0.25_rt*(im1-ip1)*(im1-ip1),
+        (13.0_rt/12.0_rt)*(i0-2.0_rt*ip1+ip2)*(i0-2.0_rt*ip1+ip2) + 0.25_rt*(3.0_rt*i0-4.0_rt*ip1+ip2)*(3.0_rt*i0-4.0_rt*ip1+ip2));
+
+    // Face at i-1/2, from (im3,im2,im1,i,ip1).
+    const Real flux_m = weno5_blend(
+        (2.0_rt*im3 - 7.0_rt*im2 + 11.0_rt*im1) / 6.0_rt,
+        (-1.0_rt*im2 + 5.0_rt*im1 + 2.0_rt*i0) / 6.0_rt,
+        (2.0_rt*im1 + 5.0_rt*i0 - 1.0_rt*ip1) / 6.0_rt,
+        (13.0_rt/12.0_rt)*(im3-2.0_rt*im2+im1)*(im3-2.0_rt*im2+im1) + 0.25_rt*(im3-4.0_rt*im2+3.0_rt*im1)*(im3-4.0_rt*im2+3.0_rt*im1),
+        (13.0_rt/12.0_rt)*(im2-2.0_rt*im1+i0)*(im2-2.0_rt*im1+i0) + 0.25_rt*(im2-i0)*(im2-i0),
+        (13.0_rt/12.0_rt)*(im1-2.0_rt*i0+ip1)*(im1-2.0_rt*i0+ip1) + 0.25_rt*(3.0_rt*im1-4.0_rt*i0+ip1)*(3.0_rt*im1-4.0_rt*i0+ip1));
+
+    return (uf >= 0.0_rt) ? (flux_p - flux_m) / dx : -(flux_p - flux_m) / dx;
+}
+
+/** Per-cell RHS L(phi) = S(phi0)*(1-|grad phi|), WRF's fire_upwinding_reinit=4
+ * (hybrid WENO5/ENO1) branch, band test WITHOUT abs() -- mirrors WRF
+ * exactly. Neighbour reads go through `wall` so a masked (non-burnable)
+ * cell's stale value never enters the stencil -- WRF has no analogue to
+ * this, it is ERF's own terrain-mask convention layered on top. */
+AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+amrex::Real reinit_rhs_cell(amrex::Array4<amrex::Real const> const& lfn_curr,
+                             amrex::Array4<amrex::Real const> const& lfn_s0,
+                             const WallStencil& wall,
+                             int i, int j, int k,
+                             amrex::Real dx, amrex::Real dy,
+                             amrex::Real threshold_HLu) noexcept
+{
+    using namespace amrex;
+    auto P = [=](int di, int dj) { return wall.at(lfn_curr, i, j, k, di, dj); };
+    const Real p_ij = lfn_curr(i, j, k);
+
+    Real diff2x, diff2y;
+    if (p_ij < threshold_HLu) {
+        const Real d4x = select_4th(dx, p_ij, P(-1,0), P(-2,0), P(1,0), P(2,0));
+        const Real d4y = select_4th(dy, p_ij, P(0,-1), P(0,-2), P(0,1), P(0,2));
+        diff2x = select_weno5(dx, p_ij, P(-1,0), P(-2,0), P(-3,0),
+                               P(1,0), P(2,0), P(3,0), lfn_s0(i,j,k)*d4x);
+        diff2y = select_weno5(dy, p_ij, P(0,-1), P(0,-2), P(0,-3),
+                               P(0,1), P(0,2), P(0,3), lfn_s0(i,j,k)*d4y);
+    } else {
+        const Real diffLx = (p_ij - P(-1,0))/dx, diffRx = (P(1,0) - p_ij)/dx;
+        const Real diffLy = (p_ij - P(0,-1))/dy, diffRy = (P(0,1) - p_ij)/dy;
+        diff2x = select_eno(diffLx, diffRx);
+        diff2y = select_eno(diffLy, diffRy);
+    }
+
+    const Real grad = std::sqrt(diff2x*diff2x + diff2y*diff2y);
+    return lfn_s0(i,j,k) * (1.0_rt - grad);
+}
+
+} // namespace wrf_reinit
+
+namespace jiang_peng {
+
 /**
- * @brief Reinitialize φ to a normalized signed-distance function
+ * @brief Godunov |grad phi| for the reinit Hamiltonian
+ *        phi_tau + S*(|grad phi| - 1) = 0, Jiang & Peng (2000) eq. (3.12).
  *
- * Solves the band-normalized reinitialization PDE
+ * (a)+ = max(a,0), (a)- = -min(a,0). For S>=0 (expanding, phi0>0 side):
+ * |grad phi| = sqrt( max((D-x)+,(D+x)-)^2 + max((D-y)+,(D+y)-)^2 ), and the
+ * mirror image for S<0. This is the same Osher-Sethian upwind selection
+ * ERF's own godunov_norm_grad_phi (ERF_NumericalSchemes.H) uses for the
+ * ADVECTION equation's |grad phi|>=0 Hamiltonian; here it is applied to the
+ * reinit Hamiltonian instead, whose sign of propagation is S(phi0), not a
+ * fixed-sign rate of spread.
+ */
+AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+amrex::Real godunov_norm(amrex::Real s, amrex::Real dxm, amrex::Real dxp,
+                          amrex::Real dym, amrex::Real dyp) noexcept
+{
+    using namespace amrex;
+    Real gx, gy;
+    if (s >= 0.0_rt) {
+        gx = amrex::max(-amrex::min(dxp, 0.0_rt), amrex::max(dxm, 0.0_rt));
+        gy = amrex::max(-amrex::min(dyp, 0.0_rt), amrex::max(dym, 0.0_rt));
+    } else {
+        gx = amrex::max(amrex::max(dxp, 0.0_rt), -amrex::min(dxm, 0.0_rt));
+        gy = amrex::max(amrex::max(dyp, 0.0_rt), -amrex::min(dym, 0.0_rt));
+    }
+    return std::sqrt(gx*gx + gy*gy);
+}
+
+/**
+ * @brief Per-cell RHS L(phi) = -S(phi0)*(|grad phi|_Godunov - 1), Jiang &
+ * Peng's reinit scheme.
  *
- *   ∂φ/∂τ = sgn(φ₀) * (1 - L |∇φ|) / L
+ * Two structural differences from wrf_reinit::reinit_rhs_cell above: (1)
+ * the one-sided derivatives come from ERF's existing HJ-WENO5-Z
+ * (one_sided_derivatives/hj_weno5z, the same machinery the ADVECTION path
+ * already uses) on DIVIDED DIFFERENCES of phi, not a flux-form WENO5 on
+ * phi VALUES -- the "HJ form", appropriate for a Hamilton-Jacobi variable
+ * that is not a conserved density; (2) the upwind side is picked by the
+ * Godunov/Osher-Sethian rule (sign of S, i.e. of phi0) rather than by a
+ * 4th-order-central-difference-based rule. delta ~ dx is the smoothed-sign
+ * width (same role as WRF's fixed dx, not scaled by any band). No hybrid
+ * WENO5/ENO1 split by band -- HJ-WENO5-Z is used everywhere.
+ */
+AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+amrex::Real reinit_rhs_cell(amrex::Array4<amrex::Real const> const& phi_state,
+                             amrex::Array4<amrex::Real const> const& phi_in,
+                             const WallStencil& wall,
+                             int i, int j, int k,
+                             amrex::Real dx0, amrex::Real dx1,
+                             amrex::Real delta,
+                             const LevelSetGradient& grad) noexcept
+{
+    using namespace amrex;
+    Real dxm, dxp, dym, dyp;
+    one_sided_derivatives(phi_state, dx0, i, j, k, 1, 0, grad, wall, dxm, dxp);
+    one_sided_derivatives(phi_state, dx1, i, j, k, 0, 1, grad, wall, dym, dyp);
+
+    const Real p0 = phi_in(i, j, k);
+    const Real s = p0 / std::sqrt(p0*p0 + delta*delta);
+    const Real g = godunov_norm(s, dxm, dxp, dym, dyp);
+    return -s * (g - 1.0_rt);
+}
+
+} // namespace jiang_peng
+
+/**
+ * @brief Reinitialize phi via Jiang & Peng's (2000) HJ-WENO5 scheme
+ * (SIAM J. Sci. Comput. 21, Example 6, eqs. 3.10-3.12), as an alternative
+ * to WRF's ported algorithm above. It fixes the flux-form/HJ-form mismatch (WRF's
+ * select_weno5 reconstructs phi VALUES like a conserved quantity; phi is
+ * not one) and the Wicker-Skamarock-vs-true-SSP-RK3 mismatch (WS-RK3 is
+ * only 2nd-order accurate for this nonlinear RHS), while still using
+ * dimensionally-split (independent x/y) one-sided derivatives like every
+ * grid-based Eikonal solver here -- so it is NOT expected to remove the
+ * splitting-driven directional bias on its own, only the other two.
  *
- * by explicit Euler in pseudo-time. The fixed point is |∇φ| = 1/L, i.e. φ
- * varies linearly from 0 at the front to ±1 at distance L, matching the
- * normalization initialize_ignition applies. φ is clamped to [-1, 1] after
- * every iteration, which pins the far field (where |∇φ| = 0 and the update
- * would otherwise push φ past ±1 indefinitely).
+ * True 3-stage Shu-Osher SSP-RK3 (every stage additive from the previous
+ * one, not from a fixed base -- unlike Wicker-Skamarock):
+ *   phi1 = phi0 + dtau*L(phi0)
+ *   phi2 = 3/4 phi0 + 1/4*(phi1 + dtau*L(phi1))
+ *   phi3 = 1/3 phi0 + 2/3*(phi2 + dtau*L(phi2))
  *
- * Cells whose original neighbourhood straddles the interface use the
- * Russo & Smereka (2000) subcell update instead, which fixes the interface
- * location from φ₀ rather than letting the pseudo-time iteration move it.
- * Without it each pass erodes the burned area, and because the level-set path
- * never rebuilds φ from fire_arrival_time the loss is permanent.
+ * No subcell fix, no per-iteration clamp (matching JP's own scheme, which
+ * has neither) -- but the SAME final min(phi_out, phi_in) safeguard as
+ * reinitialize_phi() is applied here too, since production needs "fire
+ * area can only increase" regardless of which internal scheme produced
+ * the update; JP's own scheme has no clamp at all, so this is a
+ * production-integration difference, not part of JP's scheme itself.
  *
- * Each iteration moves φ by at most dtau/L, so with the default
- * dtau = 0.5*min(dx,dy) the change per iteration is half a cell measured in
- * band lengths.
+ * @param[in,out] phi        Level-set field [m], modified in place.
+ * @param[in]     geom       Domain geometry.
+ * @param[in]     n_iters    Number of SSP-RK3 pseudo-time steps.
+ * @param[in]     dtau       Pseudo-timestep [m]. JP's stability limit is
+ *                           dtau <= 0.6*dx (CFL from |dH/dp|<=1); pass a
+ *                           value at or below that.
+ * @param[in]     mask       Optional non-burnable mask, read only with
+ *                           wall_extrap.
+ * @param[in]     wall_extrap  Leave mask cells untouched and read
+ *                           neighbours through a wall stencil.
+ */
+inline void reinitialize_phi_jiang_peng(amrex::MultiFab& phi,
+                                         const amrex::Geometry& geom,
+                                         int n_iters,
+                                         amrex::Real dtau,
+                                         const amrex::MultiFab* mask = nullptr,
+                                         bool wall_extrap = false,
+                                         amrex::Real sign_eps2_override = -1.0)
+{
+    using namespace amrex;
+    const auto* dx = geom.CellSize();
+    // Jiang & Peng (1997 CAM 97-29 / 2000 SIAM), Example 6: s = phi0/sqrt(phi0^2+delta)
+    // with "delta comparable to the spatial step size" -- their delta is the term
+    // ADDED to phi0^2 (area-scale, so delta~dx^2 is the only dimensionally consistent
+    // reading; that is our default below). sign_eps2_override lets a caller instead
+    // test the literal-linear reading delta=dx (i.e. pass dx here, not dx^2), to
+    // measure sensitivity to which reading is meant.
+    const Real sign_eps2 = (sign_eps2_override > 0.0_rt) ? sign_eps2_override : dx[0]*dx[0];
+    const Real delta = std::sqrt(sign_eps2);
+    const LevelSetGradient grad{LEVELSET_GRAD_WENO5Z, -1.0, -1.0, 0.0, 0.0};
+
+    MultiFab phi_in(phi.boxArray(), phi.DistributionMap(), 1, 3);
+    phi_in.ParallelCopy(phi);
+
+    MultiFab phi_work(phi.boxArray(), phi.DistributionMap(), 1, 3);
+    phi_work.ParallelCopy(phi);
+    MultiFab stage1(phi.boxArray(), phi.DistributionMap(), 1, 3);
+    MultiFab stage2(phi.boxArray(), phi.DistributionMap(), 1, 3);
+
+    for (int iter = 0; iter < n_iters; ++iter) {
+        fire_fill_boundary(phi_work, geom);
+
+        // Stage 1: phi1 = phi0 + dtau*L(phi0) -> stage1. S(phi_in) uses the
+        // field fixed at CALL ENTRY, not phi0/phi_work (which is only fixed
+        // per outer iteration), as in WRF's "held fixed across every outer
+        // iteration and RK stage" convention.
+        for (MFIter mfi(phi_work); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            auto p0 = phi_work.const_array(mfi);
+            auto pin = phi_in.const_array(mfi);
+            auto out = stage1.array(mfi);
+            const WallStencil wall = make_wall_stencil(mask, wall_extrap, mfi);
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                if (wall.masked(i, j, k)) { out(i, j, k) = p0(i, j, k); return; }
+                const Real L = jiang_peng::reinit_rhs_cell(p0, pin, wall, i, j, k, dx[0], dx[1], delta, grad);
+                out(i, j, k) = p0(i, j, k) + dtau * L;
+            });
+        }
+        fire_fill_boundary(stage1, geom);
+
+        // Stage 2: phi2 = 3/4 phi0 + 1/4*(phi1 + dtau*L(phi1)) -> stage2
+        for (MFIter mfi(phi_work); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            auto p0 = phi_work.const_array(mfi);
+            auto p1 = stage1.const_array(mfi);
+            auto pin = phi_in.const_array(mfi);
+            auto out = stage2.array(mfi);
+            const WallStencil wall = make_wall_stencil(mask, wall_extrap, mfi);
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                if (wall.masked(i, j, k)) { out(i, j, k) = p0(i, j, k); return; }
+                const Real L = jiang_peng::reinit_rhs_cell(p1, pin, wall, i, j, k, dx[0], dx[1], delta, grad);
+                out(i, j, k) = 0.75_rt * p0(i, j, k) + 0.25_rt * (p1(i, j, k) + dtau * L);
+            });
+        }
+        fire_fill_boundary(stage2, geom);
+
+        // Stage 3: phi3 = 1/3 phi0 + 2/3*(phi2 + dtau*L(phi2)) -> back into phi_work
+        for (MFIter mfi(phi_work); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            auto p0 = phi_work.const_array(mfi);
+            auto p2 = stage2.const_array(mfi);
+            auto pin = phi_in.const_array(mfi);
+            auto out = stage1.array(mfi); // stage1's contents no longer needed
+            const WallStencil wall = make_wall_stencil(mask, wall_extrap, mfi);
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                if (wall.masked(i, j, k)) { out(i, j, k) = p0(i, j, k); return; }
+                const Real L = jiang_peng::reinit_rhs_cell(p2, pin, wall, i, j, k, dx[0], dx[1], delta, grad);
+                out(i, j, k) = (1.0_rt/3.0_rt) * p0(i, j, k) + (2.0_rt/3.0_rt) * (p2(i, j, k) + dtau * L);
+            });
+        }
+        MultiFab::Copy(phi_work, stage1, 0, 0, 1, 0);
+    }
+
+    // Same final safeguard as reinitialize_phi() -- see its comment.
+    for (MFIter mfi(phi_work); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto out = phi_work.array(mfi);
+        auto pin = phi_in.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            out(i, j, k) = amrex::min(out(i, j, k), pin(i, j, k));
+        });
+    }
+
+    phi.ParallelCopy(phi_work);
+}
+
+/**
+ * @brief Reinitialize phi via WRF-Fire's reinit_ls_rk3 algorithm (metric
+ * signed distance, no normalized/banded mode).
  *
- * @param[in,out] phi      Level-set field; modified in-place
- * @param[in]     geom     Domain geometry
- * @param[in]     n_iters  Number of Sussman iterations
- * @param[in]     dtau     Pseudo-timestep [m] for reinitialization
- * @param[in]     band_m   Band half-width L [m]: the distance from the front at
- *                         which φ reaches ±1. Values <= 0 select 3*min(dx,dy).
- * @param[in]     mask     Optional non-burnable mask, read only with wall_extrap
- * @param[in]     wall_extrap  Leave mask cells untouched and read neighbours
- *                         through a wall stencil, so the wall is a zero-gradient
- *                         boundary of the distance function rather than a front
+ * @param[in,out] phi        Level-set field [m], modified in place.
+ * @param[in]     geom       Domain geometry.
+ * @param[in]     n_outer    Number of outer RK3 pseudo-time steps
+ *                           (WRF's fire_lsm_reinit_iter; WRF's own comment:
+ *                           "1 iter each time step is enough").
+ * @param[in]     dtau       Pseudo-timestep [m]. WRF's own default is
+ *                           0.01*dx; pass that explicitly, this function has
+ *                           no implicit default (ERF_FireLayer.cpp resolves
+ *                           <= 0 to 0.01*dx at the call site).
+ * @param[in]     band_m     WENO5/ENO1 band threshold [m] (WRF's
+ *                           threshold_HLu = fire_lsm_band_ngp*dx; pass that
+ *                           product directly -- this function takes a
+ *                           length, not a cell count, matching how
+ *                           ERF_FireLayer.cpp already precomputes
+ *                           LevelSetGradient::band for the advection path).
+ * @param[in]     mask       Optional non-burnable mask, read only with
+ *                           wall_extrap.
+ * @param[in]     wall_extrap  Leave mask cells untouched and read
+ *                           neighbours through a wall stencil.
  */
 inline void reinitialize_phi(amrex::MultiFab& phi,
                               const amrex::Geometry& geom,
-                              int n_iters,
+                              int n_outer,
                               amrex::Real dtau,
-                              amrex::Real band_m = -1.0,
-                              bool normalized = true,
+                              amrex::Real band_m,
                               const amrex::MultiFab* mask = nullptr,
-                              bool wall_extrap = false,
-                              const LevelSetGradient& grad = LevelSetGradient{})
+                              bool wall_extrap = false)
 {
     using namespace amrex;
-
     const auto* dx = geom.CellSize();
+    const Real threshold_HLu = band_m;
 
-    // Band half-width. The default spreads the [-1, 1] range over three cells,
-    // the usual interface thickness for a level-set band.
-    // In signed-distance mode phi is already in metres, so the band length is
-    // 1 m: the update targets |grad phi| = 1 and nothing is clamped. In
-    // normalized mode phi is dimensionless and reaches +/-1 at distance L.
-    const Real L    = normalized ? ((band_m > 0.0) ? band_m
-                                                  : 3.0 * amrex::min(dx[0], dx[1]))
-                                 : 1.0;
-    const Real Linv = 1.0 / L;
+    MultiFab phi_in(phi.boxArray(), phi.DistributionMap(), 1, 3);
+    phi_in.ParallelCopy(phi); // lfn_in: fixed for the whole call (final clamp reference)
 
-    // Isotropic spacing for the Russo-Smereka subcell term. The fire grid is
-    // square in practice; min() is the conservative choice if it ever is not.
-    const Real h    = amrex::min(dx[0], dx[1]);
-    const Real hinv = 1.0 / h;
-    AMREX_ASSERT(L > 0.0 && h > 0.0);
-
-    // Make a working copy for pseudo-time iteration
-    MultiFab phi_work(phi.boxArray(), phi.DistributionMap(), 1, 3);
-    phi_work.ParallelCopy(phi);
-
-    // Jacobi scratch. The update below reads phi_work at i±1 / j±1 while writing
-    // the centre cell, so writing back into phi_work in place would be a
-    // read-write race between neighbouring GPU threads -- each cell would see
-    // either the old or the new neighbour depending on scheduling, making the
-    // result non-deterministic and different from the CPU sweep. Write into a
-    // separate fab and swap once the pass is complete.
-    MultiFab phi_next(phi.boxArray(), phi.DistributionMap(), 1, 3);
-    // Freshly allocated fabs hold indeterminate values. Only the valid region is
-    // written and only the valid region is copied back, but leaving the ghosts
-    // indeterminate makes the run depend on whatever the allocator hands over.
-    phi_next.setVal(0.0);
-
-    for (int iter = 0; iter < n_iters; ++iter) {
-        // Fill boundary ghosts
-        fire_fill_boundary(phi_work, geom);
-
-        // Update RHS via Sussman reinitialization
-        for (MFIter mfi(phi_work); mfi.isValid(); ++mfi) {
+    MultiFab S(phi.boxArray(), phi.DistributionMap(), 1, 3);
+    {
+        // S(phi0) computed ONCE from the field at call entry, held fixed
+        // across every outer iteration and every RK stage.
+        for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
             const Box& bx = mfi.validbox();
-            auto phi_arr = phi_work.const_array(mfi);
-            auto phi_out = phi_next.array(mfi);
-            auto phi_in  = phi.const_array(mfi);
+            auto p = phi.const_array(mfi);
+            auto s = S.array(mfi);
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                const Real p0 = p(i, j, k);
+                s(i, j, k) = p0 / std::sqrt(p0*p0 + dx[0]*dx[0]);
+            });
+        }
+        fire_fill_boundary(S, geom);
+    }
+
+    MultiFab phi0(phi.boxArray(), phi.DistributionMap(), 1, 3);
+    MultiFab stage(phi.boxArray(), phi.DistributionMap(), 1, 3);
+    MultiFab stage2(phi.boxArray(), phi.DistributionMap(), 1, 3);
+    phi0.ParallelCopy(phi); // lfn_s3, the base each outer iteration's 3 RK stages advance from
+
+    for (int outer = 0; outer < n_outer; ++outer) {
+        fire_fill_boundary(phi0, geom);
+
+        // Stage 1: phi1 = phi0 + (dtau/3) L(phi0) -> into `stage`.
+        for (MFIter mfi(phi0); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            auto p0 = phi0.const_array(mfi);
+            auto s  = S.const_array(mfi);
+            auto out = stage.array(mfi);
             const WallStencil wall = make_wall_stencil(mask, wall_extrap, mfi);
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                if (wall.masked(i, j, k)) { out(i, j, k) = p0(i, j, k); return; }
+                const Real L = wrf_reinit::reinit_rhs_cell(p0, s, wall, i, j, k, dx[0], dx[1], threshold_HLu);
+                out(i, j, k) = p0(i, j, k) + (dtau/3.0_rt) * L;
+            });
+        }
+        fire_fill_boundary(stage, geom);
 
-            ParallelFor(bx, [=] AMREX_GPU_DEVICE (const IntVect& iv) noexcept {
-                int i = iv[0], j = iv[1], k = iv[2];
+        // Stage 2: phi2 = phi0 + (dtau/2) L(phi1) -> into `stage2`.
+        for (MFIter mfi(phi0); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            auto p0 = phi0.const_array(mfi);
+            auto p1 = stage.const_array(mfi);
+            auto s  = S.const_array(mfi);
+            auto out = stage2.array(mfi);
+            const WallStencil wall = make_wall_stencil(mask, wall_extrap, mfi);
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                if (wall.masked(i, j, k)) { out(i, j, k) = p0(i, j, k); return; }
+                const Real L = wrf_reinit::reinit_rhs_cell(p1, s, wall, i, j, k, dx[0], dx[1], threshold_HLu);
+                out(i, j, k) = p0(i, j, k) + (dtau/2.0_rt) * L;
+            });
+        }
+        fire_fill_boundary(stage2, geom);
 
-                // Mask cells are not part of the distance function: they keep
-                // their value and their neighbours read through the wall.
-                if (wall.masked(i, j, k)) { phi_out(i, j, k) = phi_arr(i, j, k); return; }
-
-                // One-sided differences for the gradient, first order or
-                // HJ-WENO5-Z as the advection uses (WRF-Fire solves the
-                // reinitialisation with the same hybrid scheme).
-                Real dxm, dxp, dym, dyp;
-                one_sided_derivatives(phi_arr, dx[0], i, j, k, 1, 0, grad, wall, dxm, dxp);
-                one_sided_derivatives(phi_arr, dx[1], i, j, k, 0, 1, grad, wall, dym, dyp);
-
-                // Sign of original level-set
-                Real sgn_phi0 = (phi_in(i, j, k) > 0.0) ? 1.0 :
-                                (phi_in(i, j, k) < 0.0) ? -1.0 : 0.0;
-
-                // Godunov upwind norm for the reinitialization Hamiltonian.
-                // The one-sided difference is selected by the sign of phi_0, not
-                // by which has the larger magnitude: taking the larger magnitude
-                // unconditionally is not the Godunov scheme and is unstable near
-                // extrema, which showed up as the front flooding the domain once
-                // enough pseudo-time iterations were taken.
-                Real gx2, gy2;
-                if (sgn_phi0 > 0.0_rt) {
-                    Real a = amrex::max(dxm, 0.0_rt), b = amrex::min(dxp, 0.0_rt);
-                    gx2 = amrex::max(a * a, b * b);
-                    Real c = amrex::max(dym, 0.0_rt), d = amrex::min(dyp, 0.0_rt);
-                    gy2 = amrex::max(c * c, d * d);
-                } else {
-                    Real a = amrex::min(dxm, 0.0_rt), b = amrex::max(dxp, 0.0_rt);
-                    gx2 = amrex::max(a * a, b * b);
-                    Real c = amrex::min(dym, 0.0_rt), d = amrex::max(dyp, 0.0_rt);
-                    gy2 = amrex::max(c * c, d * d);
-                }
-                Real norm_grad = std::sqrt(gx2 + gy2 + 1.0e-14);
-
-                // Band-normalized Sussman RHS: sgn(φ₀) * (1 - L|∇φ|) / L.
-                // The fixed point is |∇φ| = 1/L rather than 1, because φ here is
-                // normalized to [-1, 1] rather than measured in metres.
-                Real rhs = sgn_phi0 * (1.0_rt - L * norm_grad) * Linv;
-
-                Real phi_new = phi_arr(i, j, k) + dtau * rhs;
-
-                // Russo-Smereka (2000) subcell fix.
-                //
-                // The plain Sussman iteration does not preserve the zero level
-                // set, so each pass walks the front and permanently erodes the
-                // burned area -- the level-set path never rebuilds phi from
-                // fire_arrival_time the way the FARSITE path does, so nothing
-                // puts it back. For cells whose ORIGINAL neighbourhood straddles
-                // the interface, replace the Godunov update with one driven by
-                // the distance to the interface implied by phi_0 itself, so the
-                // interface location is set by phi_0 and not by the iteration.
-                const Real p0c = phi_in(i, j, k);
-                const Real p0xp = wall.at(phi_in, i, j, k, 1, 0);
-                const Real p0xm = wall.at(phi_in, i, j, k, -1, 0);
-                const Real p0yp = wall.at(phi_in, i, j, k, 0, 1);
-                const Real p0ym = wall.at(phi_in, i, j, k, 0, -1);
-                const bool near_front =
-                    (p0c * p0xp < 0.0_rt) || (p0c * p0xm < 0.0_rt) ||
-                    (p0c * p0yp < 0.0_rt) || (p0c * p0ym < 0.0_rt);
-
-                if (near_front) {
-                    // Robust local |grad phi_0|*h estimate: the central
-                    // difference, floored by every one-sided difference so a
-                    // kink at the interface cannot make it vanish.
-                    const Real dcx = 0.5_rt * (p0xp - p0xm);
-                    const Real dcy = 0.5_rt * (p0yp - p0ym);
-                    Real dphi0 = std::sqrt(dcx * dcx + dcy * dcy);
-                    dphi0 = amrex::max(dphi0, std::abs(p0xp - p0c));
-                    dphi0 = amrex::max(dphi0, std::abs(p0c - p0xm));
-                    dphi0 = amrex::max(dphi0, std::abs(p0yp - p0c));
-                    dphi0 = amrex::max(dphi0, std::abs(p0c - p0ym));
-                    dphi0 = amrex::max(dphi0, 1.0e-12_rt);
-
-                    // Signed distance to the interface [m], then expressed in the
-                    // normalized units phi uses.
-                    const Real D = h * p0c / dphi0;
-
-                    phi_new = phi_arr(i, j, k)
-                            - dtau * hinv * (sgn_phi0 * std::abs(phi_arr(i, j, k)) - D * Linv);
-                }
-
-                // Clamp only in normalized mode, where it pins the far field:
-                // there |grad phi| = 0 and the update would otherwise drive phi
-                // past +/-1 without limit. In signed-distance mode phi is meant
-                // to keep growing with distance, so clamping is exactly the
-                // thing that breaks it.
-                phi_out(i, j, k) = normalized
-                    ? amrex::max(-1.0_rt, amrex::min(1.0_rt, phi_new))
-                    : phi_new;
+        // Stage 3: phi3 = phi0 + dtau*L(phi2) -> written into `stage` (its
+        // stage-1 contents are no longer needed; does not alias phi0 or
+        // stage2, both only read here).
+        for (MFIter mfi(phi0); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.validbox();
+            auto p0 = phi0.const_array(mfi);
+            auto p2 = stage2.const_array(mfi);
+            auto s  = S.const_array(mfi);
+            auto out = stage.array(mfi);
+            const WallStencil wall = make_wall_stencil(mask, wall_extrap, mfi);
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                if (wall.masked(i, j, k)) { out(i, j, k) = p0(i, j, k); return; }
+                const Real L = wrf_reinit::reinit_rhs_cell(p2, s, wall, i, j, k, dx[0], dx[1], threshold_HLu);
+                out(i, j, k) = p0(i, j, k) + dtau * L;
             });
         }
 
-        // phi_next now holds the whole updated valid region; make it the input
-        // for the next sweep. Ghost cells are refilled at the top of the loop.
-        MultiFab::Copy(phi_work, phi_next, 0, 0, 1, 0);
+        MultiFab::Copy(phi0, stage, 0, 0, 1, 0); // phi3 becomes next outer iteration's base
     }
 
-    // Copy result back to phi
-    phi.ParallelCopy(phi_work);
+    // lfn_out = min(lfn_out, lfn_in): reinitialization can never revert an
+    // already-burned cell (phi < 0) back to unburned.
+    for (MFIter mfi(phi0); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto out = phi0.array(mfi);
+        auto pin = phi_in.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            out(i, j, k) = amrex::min(out(i, j, k), pin(i, j, k));
+        });
+    }
+
+    phi.ParallelCopy(phi0);
 }
 
 } // namespace fire_levelset

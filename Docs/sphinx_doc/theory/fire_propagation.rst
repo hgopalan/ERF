@@ -371,24 +371,37 @@ Reinitialisation
 ~~~~~~~~~~~~~~~~
 
 Advection steepens and flattens :math:`\phi`, so every
-:cpp:`erf.fire.levelset.reinit_every` subcycles (default 5) it is restored to
-a signed distance by :cpp:`erf.fire.levelset.reinit_iters` (default 10)
-pseudo-time iterations of a band-normalised Sussman update,
+:cpp:`erf.fire.levelset.reinit_every` subcycles (default 5) it is restored to a
+metric signed distance, :math:`|\nabla\phi| = 1`, by
+:cpp:`erf.fire.levelset.reinit_iters` (default 1) outer pseudo-time steps of
 
 .. math::
 
-   \frac{\partial \phi}{\partial \tau} = \operatorname{sgn}(\phi_0)\,\frac{1 - L\,|\nabla\phi|}{L},
+   \frac{\partial \phi}{\partial \tau} = S(\phi_0)\,(1 - |\nabla\phi|),
+   \qquad S(\phi_0) = \frac{\phi_0}{\sqrt{\phi_0^2 + \Delta x^2}},
 
-whose fixed point is :math:`|\nabla \phi| = 1/L`: :math:`\phi` varies linearly
-from 0 at the front to :math:`\pm 1` at the band half-width :math:`L`, which is
-:cpp:`erf.fire.levelset.reinit_band_m` or three cells when that is not
-positive. Cells whose neighbourhood straddles the interface use the Russo and
-Smereka (2000) subcell correction, which fixes the front from :math:`\phi_0`
-instead of letting the iteration move it; without it every pass would erode
-the burned area, and the level-set path never rebuilds :math:`\phi` from the
-arrival time. The pseudo-timestep :cpp:`erf.fire.levelset.reinit_dtau`
-defaults to a quarter of the cell size, half the Sussman stability limit.
-:math:`\phi` is clamped to :math:`[-1, 1]` after every iteration.
+with the smoothed sign :math:`S` computed once from the field at call entry.
+:cpp:`erf.fire.levelset.reinit_scheme` selects the discretisation.
+
+``"wrf"`` (default) is WRF-Fire's :cpp:`reinit_ls_rk3`: the Wicker and
+Skamarock (2002) three-stage Runge-Kutta scheme, every stage advancing from the
+field at call entry; flux-form WENO5 on :math:`\phi` within
+:cpp:`erf.fire.levelset.weno_band_cells` of the front and first-order ENO
+elsewhere, its upwind side chosen by the sign of :math:`S` times a fourth-order
+central difference. ``"jiang_peng"`` is Jiang and Peng's (2000) HJ-WENO5 with
+third-order SSP-RK3: WENO is applied to one-sided divided differences (the
+Hamilton-Jacobi form the advection also uses) rather than to :math:`\phi` in
+flux form, and the time integrator is third order for this right-hand side
+where Wicker-Skamarock is second. The pseudo-timestep
+:cpp:`erf.fire.levelset.reinit_dtau` defaults to :math:`0.01\,\Delta x` for
+both, WRF-Fire's value.
+
+Neither scheme corrects the distance in cells that straddle the front, and
+both keep :math:`\phi_{out} = \min(\phi_{out}, \phi_{in})`, so the burned area
+never shrinks; non-burnable cells are left unchanged and their neighbours are
+read through the wall stencil. Both build the gradient from independent
+:math:`x` and :math:`y` one-sided derivatives, which leaves a small error that
+depends on the front's angle to the grid axes.
 
 Non-burnable cells
 ------------------
