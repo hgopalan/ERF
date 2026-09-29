@@ -50,7 +50,8 @@ public:
     amrex::Real area () const { return m_area_total; }
 
     /** Write the header of <output_root>_disk.csv (truncating it). */
-    void open_diagnostics () const;
+    /** Open <output_root>_disk.csv: truncated for a fresh run, appended to after a restart. */
+    void open_diagnostics (bool truncate) const;
     /** Append one row: time, u_inf, u_disk, thrust, power, plus the integrated source total. */
     void write_diagnostics (amrex::Real time, amrex::Real spread_total) const;
 

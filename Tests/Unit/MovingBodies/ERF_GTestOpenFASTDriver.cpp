@@ -246,6 +246,62 @@ TEST(OpenFASTDriver, InitReportsTheStubNodeLayout)
     EXPECT_NEAR(t.rotor_speed, d.omega(), 1.0e-6);
 }
 
+TEST(OpenFASTDriver, CheckpointAndRestartReproduceTheUninterruptedRun)
+{
+    // a run of five ERF steps, checkpointed after three; a second driver restored from that
+    // checkpoint and stepped twice must report exactly the state of the uninterrupted run
+    // (the stub is deterministic, and the interface stores the same floats)
+    const StubDeck d;
+    const auto dir = scratch_dir("restart");
+    const std::string fst = write_stub_deck(dir, d);
+    const std::string prefix = (dir / "chk_").string();
+    const std::array<Real,3> vel{{static_cast<Real>(10.0), static_cast<Real>(0.5), 0.0}};
+
+    std::vector<Real> pos_ref, force_ref;
+    std::array<Real,3> hub_ref;
+    int index_ref = 0;
+    {
+        erf_openfast::OpenFASTDriver a(std::vector<MovingBodyInputs>{one_turbine(fst, dir)});
+        a.init(0.05, 1.0);
+        a.set_uniform_velocity(vel);
+        a.solution0();
+        for (int n = 0; n < 3; ++n) { a.step(); }
+        a.create_checkpoint(prefix);
+        EXPECT_TRUE(std::filesystem::exists(dir / "chk_T1.chkp"));
+        for (int n = 0; n < 2; ++n) { a.step(); }
+        const erf_openfast::TurbineState& t = a.turbines()[0];
+        pos_ref = t.force_pos;
+        force_ref = t.force;
+        hub_ref = t.hub_pos;
+        index_ref = t.time_index;
+    }
+    EXPECT_EQ(index_ref, 25);
+
+    // the stub's turbines are re-allocated by the second driver, so the first is gone by now
+    erf_openfast::OpenFASTDriver b(std::vector<MovingBodyInputs>{one_turbine(fst, dir)});
+    b.restart(prefix, 0.05);
+    EXPECT_TRUE(b.initialized());
+    EXPECT_TRUE(b.solved0());
+    EXPECT_EQ(b.turbines()[0].time_index, 15);
+    EXPECT_EQ(b.turbines()[0].num_substeps, 5);
+    b.set_uniform_velocity(vel);
+    for (int n = 0; n < 2; ++n) { b.step(); }
+    const erf_openfast::TurbineState& t = b.turbines()[0];
+    EXPECT_EQ(t.time_index, index_ref);
+    ASSERT_EQ(t.force_pos.size(), pos_ref.size());
+    ASSERT_EQ(t.force.size(), force_ref.size());
+    for (std::size_t i = 0; i < pos_ref.size(); ++i) {
+        EXPECT_EQ(t.force_pos[i], pos_ref[i]) << "position entry " << i;
+        EXPECT_EQ(t.force[i], force_ref[i]) << "force entry " << i;
+    }
+    for (int k = 0; k < 3; ++k) { EXPECT_EQ(t.hub_pos[k], hub_ref[k]); }
+    // the logs were appended to, not truncated: the header is still the first line
+    std::ifstream csv((dir / "T1_erf.csv"));
+    std::string line;
+    ASSERT_TRUE(std::getline(csv, line));
+    EXPECT_EQ(line.rfind("time,", 0), 0u) << line;
+}
+
 TEST(OpenFASTDriver, StepAdvancesTheRotorAndReturnsTheDiskLoads)
 {
     const StubDeck d;

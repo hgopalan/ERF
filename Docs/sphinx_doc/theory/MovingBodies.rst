@@ -117,6 +117,22 @@ diagnostics file records the upstream speed, the disk-averaged speed, the
 thrust, the power ``T U_d`` and the integrated momentum source projected on
 the normal, which equals the thrust when the disk is the only body.
 
+Checkpoint and restart
+----------------------
+
+An ERF checkpoint carries the bodies' state under ``<chk>/moving_bodies``:
+a ``state`` file with the step count and each turbine's OpenFAST time index,
+and each OpenFAST turbine's own checkpoint ``<name>.chkp``, written through
+``FAST_CreateCheckpoint`` by the rank that owns the turbine. On a restart the
+turbines are restored with ``FAST_ExtInfw_Restart`` instead of being
+initialised, ERF checks that the time index OpenFAST reports is the one its
+own checkpoint expects, and the run continues with the next step; the
+momentum sources are not stored but rebuilt at that step from the restored
+loads, as they would have been in the run being continued. The diagnostics
+files are appended to (a restart in a clean directory starts them afresh
+with their headers). The ``erf.moving_bodies`` block of the restarted run
+must name the same bodies as the run that wrote the checkpoint.
+
 Solver requirements
 -------------------
 

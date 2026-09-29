@@ -1,5 +1,7 @@
 #include "ERF_OpenFASTDriver.H"
 
+#include "ERF_DiagnosticsLog.H"
+
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -139,17 +141,48 @@ OpenFASTDriver::fast_check (int err_stat, const char* err_msg, const std::string
 }
 
 void
+OpenFASTDriver::allocate ()
+{
+    if (m_num_local > 0) {
+        int err_stat = ErrID_None;
+        char err_msg[INTERFACE_STRING_LENGTH];
+        int n = m_num_local;
+        FAST_AllocateTurbines(&n, &err_stat, err_msg);
+        fast_check(err_stat, err_msg, "FAST_AllocateTurbines");
+    }
+}
+
+// after FAST_ExtInfw_Init or FAST_ExtInfw_Restart on the owner rank: the node counts, the
+// substep count and the first pull of the positions
+void
+OpenFASTDriver::finish_setup (TurbineState& t, double dt_cfd)
+{
+    if (t.to_cfd.fx_Len == 1 + t.num_blades * t.num_force_pts_blade) {
+        // no tower in the model: OpenFAST allocated no tower force nodes
+        t.num_force_pts_tower = 0;
+    }
+    t.num_vel_nodes = t.to_cfd.pxVel_Len;
+    t.num_force_nodes = t.to_cfd.fx_Len;
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+        t.num_force_nodes == 1 + t.num_blades * t.num_force_pts_blade + t.num_force_pts_tower,
+        "OpenFAST force-node count does not match hub + blades + tower for " + t.name);
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
+        t.from_cfd.u_Len == t.num_vel_nodes && t.to_cfd.pxForce_Len == t.num_force_nodes,
+        "OpenFAST ExtInfw array lengths are inconsistent for " + t.name);
+
+    std::string err;
+    t.num_substeps = substep_count(dt_cfd, t.dt_fast, err);
+    if (t.num_substeps == 0) { Abort("erf.moving_bodies." + t.name + ": " + err); }
+    pull_from_fast(t);
+}
+
+void
 OpenFASTDriver::init (double dt_cfd, double t_max)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_initialized, "OpenFASTDriver::init called twice");
     int err_stat = ErrID_None;
     char err_msg[INTERFACE_STRING_LENGTH];
-
-    if (m_num_local > 0) {
-        int n = m_num_local;
-        FAST_AllocateTurbines(&n, &err_stat, err_msg);
-        fast_check(err_stat, err_msg, "FAST_AllocateTurbines");
-    }
+    allocate();
 
     for (int i = 0; i < static_cast<int>(m_turb.size()); ++i) {
         TurbineState& t = m_turb[i];
@@ -174,37 +207,75 @@ OpenFASTDriver::init (double dt_cfd, double t_max)
                 Abort("OpenFAST model '" + t.fst_file + "' for " + t.name +
                       " does not take external inflow; set CompInflow = 2 in the .fst file");
             }
-            if (t.to_cfd.fx_Len == 1 + t.num_blades * t.num_force_pts_blade) {
-                // no tower in the model: OpenFAST allocated no tower force nodes
-                t.num_force_pts_tower = 0;
-            }
-            t.num_vel_nodes = t.to_cfd.pxVel_Len;
-            t.num_force_nodes = t.to_cfd.fx_Len;
-            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
-                t.num_force_nodes == 1 + t.num_blades * t.num_force_pts_blade + t.num_force_pts_tower,
-                "OpenFAST force-node count does not match hub + blades + tower for " + t.name);
-            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
-                t.from_cfd.u_Len == t.num_vel_nodes && t.to_cfd.pxForce_Len == t.num_force_nodes,
-                "OpenFAST ExtInfw array lengths are inconsistent for " + t.name);
-
-            std::string err;
-            t.num_substeps = substep_count(dt_cfd, t.dt_fast, err);
-            if (t.num_substeps == 0) { Abort("erf.moving_bodies." + t.name + ": " + err); }
-
             // still air until the caller supplies the flow at the nodes
-            for (int nd = 0; nd < t.num_vel_nodes; ++nd) {
+            for (int nd = 0; nd < t.to_cfd.pxVel_Len; ++nd) {
                 t.from_cfd.u[nd] = 0.0f;
                 t.from_cfd.v[nd] = 0.0f;
                 t.from_cfd.w[nd] = 0.0f;
             }
             t.time_index = 0;
-            pull_from_fast(t);
+            finish_setup(t, dt_cfd);
         }
         broadcast_state(t);
         // every rank keeps the node velocities; still air until the flow is supplied
         t.node_vel.assign(3 * static_cast<std::size_t>(t.num_vel_nodes), 0.0);
     }
     m_initialized = true;
+}
+
+void
+OpenFASTDriver::restart (const std::string& prefix, double dt_cfd)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_initialized, "OpenFASTDriver::restart after init or restart");
+    int err_stat = ErrID_None;
+    char err_msg[INTERFACE_STRING_LENGTH];
+    allocate();
+
+    for (int i = 0; i < static_cast<int>(m_turb.size()); ++i) {
+        TurbineState& t = m_turb[i];
+        if (is_owner(i)) {
+            const std::string root = prefix + t.name;
+            int abort_lev = ErrID_Fatal;
+            int n_t_global = 0;
+            FAST_ExtInfw_Restart(&t.tid_local, root.c_str(), &abort_lev, &t.dt_fast,
+                                 &t.num_blades, &t.num_blade_elem, &t.num_tower_elem, &n_t_global,
+                                 &t.to_cfd, &t.from_cfd, &err_stat, err_msg);
+            fast_check(err_stat, err_msg, "FAST_ExtInfw_Restart for " + t.name + " from " + root + ".chkp");
+            t.time_index = n_t_global;
+            finish_setup(t, dt_cfd);
+        }
+        broadcast_state(t);
+        // the velocities OpenFAST restored at its nodes, so the diagnostics continue from them
+        t.node_vel.assign(3 * static_cast<std::size_t>(t.num_vel_nodes), 0.0);
+        if (is_owner(i)) {
+            for (int nd = 0; nd < t.num_vel_nodes; ++nd) {
+                t.node_vel[3*nd]   = t.from_cfd.u[nd];
+                t.node_vel[3*nd+1] = t.from_cfd.v[nd];
+                t.node_vel[3*nd+2] = t.from_cfd.w[nd];
+            }
+            // the logs continue; a restart in a clean directory starts them with a header
+            open_diagnostics(t, false);
+        }
+        ParallelDescriptor::Bcast(t.node_vel.data(), static_cast<int>(t.node_vel.size()), t.owner_rank);
+    }
+    m_initialized = true;
+    m_solved0 = true;
+}
+
+void
+OpenFASTDriver::create_checkpoint (const std::string& prefix) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_initialized, "OpenFASTDriver::create_checkpoint needs init() or restart() first");
+    int err_stat = ErrID_None;
+    char err_msg[INTERFACE_STRING_LENGTH];
+    for (int i = 0; i < static_cast<int>(m_turb.size()); ++i) {
+        const TurbineState& t = m_turb[i];
+        if (!is_owner(i)) { continue; }
+        const std::string root = prefix + t.name;
+        int tid = t.tid_local;
+        FAST_CreateCheckpoint(&tid, root.c_str(), &err_stat, err_msg);
+        fast_check(err_stat, err_msg, "FAST_CreateCheckpoint for " + t.name + " to " + root + ".chkp");
+    }
 }
 
 void
@@ -219,7 +290,7 @@ OpenFASTDriver::solution0 ()
             FAST_CFD_Solution0(&t.tid_local, &err_stat, err_msg);
             fast_check(err_stat, err_msg, "FAST_CFD_Solution0 for " + t.name);
             pull_from_fast(t);
-            open_diagnostics(t);
+            open_diagnostics(t, true);
         }
         broadcast_state(t);
     }
@@ -385,20 +456,16 @@ OpenFASTDriver::torque (const TurbineState& t) const
 }
 
 void
-OpenFASTDriver::open_diagnostics (const TurbineState& t) const
+OpenFASTDriver::open_diagnostics (const TurbineState& t, bool truncate) const
 {
-    const std::string fname = t.output_root + "_erf.csv";
-    const auto slash = fname.rfind('/');
-    if (slash != std::string::npos) {
-        UtilCreateDirectory(fname.substr(0, slash), 0755);
+    std::ofstream out;
+    if (erf_actuator::open_log(out, t.output_root + "_erf.csv", truncate)) {
+        out << "time,rotor_speed,thrust_x,thrust_y,thrust_z,torque,power,axis_x,axis_y,axis_z\n";
     }
-    std::ofstream out(fname, std::ios::trunc);
-    if (!out) { Abort("cannot open moving-bodies diagnostics file '" + fname + "'"); }
-    out << "time,rotor_speed,thrust_x,thrust_y,thrust_z,torque,power,axis_x,axis_y,axis_z\n";
-    const std::string fflow = t.output_root + "_flow.csv";
-    std::ofstream flow(fflow, std::ios::trunc);
-    if (!flow) { Abort("cannot open moving-bodies diagnostics file '" + fflow + "'"); }
-    flow << "time,hub_u,hub_v,hub_w,blade_mean_u,blade_mean_v,blade_mean_w\n";
+    std::ofstream flow;
+    if (erf_actuator::open_log(flow, t.output_root + "_flow.csv", truncate)) {
+        flow << "time,hub_u,hub_v,hub_w,blade_mean_u,blade_mean_v,blade_mean_w\n";
+    }
 }
 
 void

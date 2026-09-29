@@ -1,5 +1,7 @@
 #include "ERF_PrescribedCtDisk.H"
 
+#include "ERF_DiagnosticsLog.H"
+
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -83,15 +85,13 @@ PrescribedCtDisk::update (const std::vector<Real>& sample_vel, const std::vector
 }
 
 void
-PrescribedCtDisk::open_diagnostics () const
+PrescribedCtDisk::open_diagnostics (bool truncate) const
 {
     if (!ParallelDescriptor::IOProcessor()) { return; }
-    const std::string fname = m_output_root + "_disk.csv";
-    const auto slash = fname.rfind('/');
-    if (slash != std::string::npos) { UtilCreateDirectory(fname.substr(0, slash), 0755); }
-    std::ofstream out(fname, std::ios::trunc);
-    if (!out) { Abort("cannot open moving-bodies diagnostics file '" + fname + "'"); }
-    out << "time,u_inf,u_disk,thrust,power,spread_thrust\n";
+    std::ofstream out;
+    if (erf_actuator::open_log(out, m_output_root + "_disk.csv", truncate)) {
+        out << "time,u_inf,u_disk,thrust,power,spread_thrust\n";
+    }
 }
 
 void

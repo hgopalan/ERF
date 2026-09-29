@@ -38,7 +38,20 @@ public:
      * Read erf.moving_bodies.*, check the solver settings and initialise the bodies.
      * Returns nullptr when no bodies are given.
      */
-    static std::unique_ptr<MovingBodies> create (const SolverChoice& sc, int max_level);
+    static std::unique_ptr<MovingBodies> create (const SolverChoice& sc, int max_level, bool restarting);
+
+    /**
+     * Write the bodies' state into ERF's checkpoint directory: <chkdir>/moving_bodies/state
+     * (the step count) and each OpenFAST turbine's own checkpoint <chkdir>/moving_bodies/<name>.chkp.
+     */
+    void write_checkpoint (const std::string& chkdir) const;
+
+    /**
+     * Restore the state written by write_checkpoint() from <chkdir>; called once, on a restart,
+     * before the first step. The momentum sources are not stored: they are rebuilt from the
+     * restored OpenFAST loads at the first step, as in the run being continued.
+     */
+    void read_checkpoint (const std::string& chkdir);
 
     /**
      * Advance the bodies by one ERF step; a no-op unless lev is the anchor level.
@@ -65,7 +78,7 @@ public:
     const MovingBodiesInputs& inputs () const { return m_in; }
 
 private:
-    MovingBodies (MovingBodiesInputs in, double dt, double t_max);
+    MovingBodies (MovingBodiesInputs in, double dt, double t_max, bool restarting);
 
     /** Sample (or prescribe) the flow at every body's velocity nodes and hand it to the bodies. */
     void supply_velocities (const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
@@ -74,6 +87,9 @@ private:
     MovingBodiesInputs m_in;
     double m_dt{0.0};
     int m_step{0};
+    bool m_restarting{false};   //!< created for a restart: read_checkpoint() must follow
+    bool m_restored{false};
+    bool m_logs_reopened{false};
     std::vector<std::unique_ptr<erf_actuator::BodyMotion>> m_motion;  //!< one per body
     erf_actuator::ActuatorPoints m_points;                             //!< all bodies' velocity nodes
     std::vector<std::unique_ptr<erf_actuator::PrescribedCtDisk>> m_disks;

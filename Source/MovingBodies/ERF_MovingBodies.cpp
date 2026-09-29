@@ -4,6 +4,8 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <map>
+#include <sstream>
 
 #include <AMReX.H>
 #include <AMReX_ParallelDescriptor.H>
@@ -12,13 +14,14 @@
 #include <AMReX_Utility.H>
 
 #include "ERF_ActuatorSampling.H"
+#include "ERF_DiagnosticsLog.H"
 #include "ERF_ActuatorSpreading.H"
 #include "ERF_DataStruct.H"
 
 using namespace amrex;
 
 std::unique_ptr<MovingBodies>
-MovingBodies::create (const SolverChoice& sc, int max_level)
+MovingBodies::create (const SolverChoice& sc, int max_level, bool restarting)
 {
     MovingBodiesInputs in = MovingBodiesInputs::read();
     if (!in.active) { return nullptr; }
@@ -75,11 +78,11 @@ MovingBodies::create (const SolverChoice& sc, int max_level)
         }
     }
 
-    return std::unique_ptr<MovingBodies>(new MovingBodies(std::move(in), fixed_dt, stop_time));
+    return std::unique_ptr<MovingBodies>(new MovingBodies(std::move(in), fixed_dt, stop_time, restarting));
 }
 
-MovingBodies::MovingBodies (MovingBodiesInputs in, double dt, double t_max)
-    : m_in(std::move(in)), m_dt(dt)
+MovingBodies::MovingBodies (MovingBodiesInputs in, double dt, double t_max, bool restarting)
+    : m_in(std::move(in)), m_dt(dt), m_restarting(restarting)
 {
     Print() << "Moving bodies: " << m_in.bodies.size() << " body(ies), ERF dt " << m_dt
             << ", OpenFAST stop time " << t_max << ", velocities "
@@ -107,15 +110,88 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, double dt, double t_max)
     // the models are set up now, so their inputs are checked at start-up; the first OpenFAST
     // solution waits for the first step, when the flow exists to be sampled
     m_driver = std::make_unique<erf_openfast::OpenFASTDriver>(turbines);
-    m_driver->init(m_dt, t_max);
-    for (const auto& t : m_driver->turbines()) {
-        Print() << "  " << t.name << ": OpenFAST dt " << t.dt_fast << ", " << t.num_substeps
-                << " substeps per ERF step, " << t.num_blades << " blades, "
-                << t.num_vel_nodes << " velocity nodes, " << t.num_force_nodes << " force nodes\n";
+    if (!m_restarting) {
+        m_driver->init(m_dt, t_max);
+        for (const auto& t : m_driver->turbines()) {
+            Print() << "  " << t.name << ": OpenFAST dt " << t.dt_fast << ", " << t.num_substeps
+                    << " substeps per ERF step, " << t.num_blades << " blades, "
+                    << t.num_vel_nodes << " velocity nodes, " << t.num_force_nodes << " force nodes\n";
+        }
     }
+    // on a restart the turbines are restored by read_checkpoint(), from ERF's checkpoint read
 #else
     amrex::ignore_unused(t_max);
 #endif
+}
+
+void
+MovingBodies::write_checkpoint (const std::string& chkdir) const
+{
+    const std::string dir = chkdir + "/moving_bodies";
+    if (ParallelDescriptor::IOProcessor()) {
+        UtilCreateDirectory(dir, 0755);
+        std::ofstream out(dir + "/state", std::ios::trunc);
+        if (!out) { Abort("cannot write the moving-bodies checkpoint state '" + dir + "/state'"); }
+        out << "step = " << m_step << "\n";
+#ifdef ERF_USE_OPENFAST
+        for (const auto& t : m_driver->turbines()) {
+            out << "time_index " << t.name << " = " << t.time_index << "\n";
+        }
+#endif
+    }
+    ParallelDescriptor::Barrier();
+#ifdef ERF_USE_OPENFAST
+    m_driver->create_checkpoint(dir + "/");
+#endif
+}
+
+void
+MovingBodies::read_checkpoint (const std::string& chkdir)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_restarting && !m_restored,
+                                     "MovingBodies::read_checkpoint: only once, and only on a restart");
+    const std::string dir = chkdir + "/moving_bodies";
+    // the state file: the step count, and the OpenFAST time index each turbine must report
+    std::map<std::string,int> time_index;
+    {
+        Vector<char> chars;
+        ParallelDescriptor::ReadAndBcastFile(dir + "/state", chars);
+        std::istringstream in(std::string(chars.dataPtr(), chars.size()));
+        std::string line;
+        bool have_step = false;
+        while (std::getline(in, line)) {
+            std::istringstream ls(line);
+            std::string key, name, eq;
+            if (!(ls >> key)) { continue; }
+            if (key == "step") {
+                if (!(ls >> eq >> m_step) || eq != "=") { Abort("malformed step line in '" + dir + "/state'"); }
+                have_step = true;
+            } else if (key == "time_index") {
+                int n = 0;
+                if (!(ls >> name >> eq >> n) || eq != "=") { Abort("malformed time_index line in '" + dir + "/state'"); }
+                time_index[name] = n;
+            }
+        }
+        if (!have_step) { Abort("no step count in the moving-bodies checkpoint '" + dir + "/state'"); }
+    }
+#ifdef ERF_USE_OPENFAST
+    m_driver->restart(dir + "/", m_dt);
+    for (const auto& t : m_driver->turbines()) {
+        const auto it = time_index.find(t.name);
+        if (it == time_index.end()) {
+            Abort("the moving-bodies checkpoint '" + dir + "' has no turbine " + t.name +
+                  "; the erf.moving_bodies block must match the run being restarted");
+        }
+        if (it->second != t.time_index) {
+            Abort("erf.moving_bodies." + t.name + ": the OpenFAST checkpoint is at time index " +
+                  std::to_string(t.time_index) + " but ERF's checkpoint expects " + std::to_string(it->second));
+        }
+        Print() << "  " << t.name << ": restored from " << dir << "/" << t.name << ".chkp at OpenFAST time index "
+                << t.time_index << ", " << t.num_substeps << " substeps per ERF step\n";
+    }
+#endif
+    Print() << "Moving bodies: restarted after step " << m_step << "\n";
+    m_restored = true;
 }
 
 void
@@ -128,6 +204,9 @@ MovingBodies::advance (int lev, double time, double dt,
     if (std::abs(dt - m_dt) > 1.0e-10 * m_dt) {
         Abort("erf.moving_bodies: the time step changed from " + std::to_string(m_dt) + " to " +
               std::to_string(dt) + "; OpenFAST needs the fixed step it was initialised with");
+    }
+    if (m_restarting && !m_restored) {
+        Abort("erf.moving_bodies: restarting, but the checkpoint holds no moving-bodies state (was it written by a run with bodies?)");
     }
     ++m_step;
     const bool first = (m_step == 1);
@@ -151,7 +230,11 @@ MovingBodies::advance (int lev, double time, double dt,
     // about to take
     if (any_forcing()) {
         spread_sources(U, z_phys_nd, detJ_cc, geom);
-        if (first) { for (auto& d : m_disks) { d->open_diagnostics(); } }
+        if (first) { for (auto& d : m_disks) { d->open_diagnostics(true); } }
+        if (m_restored && !m_logs_reopened) {
+            for (auto& d : m_disks) { d->open_diagnostics(false); }
+            m_logs_reopened = true;
+        }
         if (first || m_step % m_in.diagnostics_int == 0) {
             write_source_diagnostics(time, detJ_cc, geom, first);
         }
@@ -179,14 +262,10 @@ MovingBodies::write_source_diagnostics (double time, const MultiFab* detJ_cc, co
         d->write_diagnostics(time, -(n[0]*fx + n[1]*fy + n[2]*fz));
     }
     if (ParallelDescriptor::IOProcessor()) {
-        const std::string fname = m_in.diagnostics_dir + "/momentum_source.csv";
-        if (first) {
-            UtilCreateDirectory(m_in.diagnostics_dir, 0755);
-            std::ofstream out(fname, std::ios::trunc);
-            if (!out) { Abort("cannot open moving-bodies diagnostics file '" + fname + "'"); }
+        std::ofstream out;
+        if (erf_actuator::open_log(out, m_in.diagnostics_dir + "/momentum_source.csv", first)) {
             out << "time,fx,fy,fz\n";
         }
-        std::ofstream out(fname, std::ios::app);
         out << std::setprecision(10) << time << "," << fx << "," << fy << "," << fz << "\n";
     }
 }
