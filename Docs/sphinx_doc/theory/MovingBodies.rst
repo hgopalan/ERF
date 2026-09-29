@@ -49,6 +49,37 @@ of its boxes, reading neighbours from the ghost cells, and the values are
 summed across ranks, so the result does not depend on the domain
 decomposition; a node outside the domain aborts the run with its coordinates.
 
+Force spreading and momentum source
+-----------------------------------
+
+The force a body exerts on the fluid is carried by actuator points (the disk
+points of a prescribed-Ct disk in this version) and spread onto ERF's
+face-centred momentum sources with a 3-D Gaussian kernel of width
+``epsilon`` (given in units of dx), cut off beyond three widths. The kernel is
+normalised discretely on each staggered grid, with the face volumes
+(``dx dy dz detJ`` on a terrain-following mesh), so the source integrates back
+to the point force exactly for every point and component, whatever the
+resolution and however much of the kernel the ground or the domain top cuts
+off; the kernel's shape is Gaussian only where it is resolved. Distances take
+the minimum image in periodic directions, so a kernel wraps across a periodic
+boundary. Faces on a non-periodic domain boundary get no source. The sources are computed once per
+step, from the velocities sampled at the start of the step, and added to the
+momentum right-hand side in every stage of the step, before the anelastic
+projection, which removes their divergent part.
+
+Prescribed uniform-Ct disk
+--------------------------
+
+``type = ct_disk`` is the classical test rotor: a uniformly loaded disk of
+radius ``R`` and normal ``n`` (yawed in the horizontal plane) covered by a
+polar grid of points. The free-stream speed ``U`` is the area-weighted mean of
+the normal velocity sampled on the same grid ``sample_diameters_upstream``
+diameters upstream, the thrust is ``T = 1/2 rho Ct U^2 pi R^2``, and each disk
+point carries the share of ``-T n`` proportional to its area. The disk's
+diagnostics file records the upstream speed, the disk-averaged speed, the
+thrust, the power ``T U_d`` and the integrated momentum source projected on
+the normal, which equals the thrust when the disk is the only body.
+
 Solver requirements
 -------------------
 

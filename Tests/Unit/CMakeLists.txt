@@ -270,6 +270,17 @@ if(ERF_ENABLE_MOVING_BODIES)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestActuatorSampling.cpp
   )
+  # Motivation: a point force spread onto the momentum sources must integrate back to the
+  # force exactly on every component, with the terrain cell volumes, under the ground
+  # cut-off, for several points, and however the domain is split.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestActuatorSpreading.cpp
+  )
+  # Motivation: the prescribed-Ct disk's point areas must sum to the disk area, its forces
+  # to -T n with T from the upstream speed, and its inputs must be parsed with their ranges.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestPrescribedCtDisk.cpp
+  )
 endif()
 if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   # Motivation: the OpenFAST driver must keep the ERF step a whole multiple of the
@@ -508,6 +519,7 @@ if(ERF_ENABLE_MPI)
     # the rank count or on which rank holds the point.
     target_sources(${erf_parallel_exe_name} PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestActuatorSampling.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestActuatorSpreading.cpp
     )
   endif()
   build_erf_exe(${erf_parallel_exe_name} NO_ERF_MAIN)

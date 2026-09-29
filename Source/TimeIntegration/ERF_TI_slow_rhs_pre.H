@@ -216,6 +216,13 @@
                          input_sounding_data, lsf, lsf_data[level],
                          get_eb(level), true);
 
+#ifdef ERF_USE_MOVING_BODIES
+        // The moving bodies' momentum sources, fixed over the step
+        if (moving_bodies) {
+            moving_bodies->add_momentum_sources(level, xmom_src, ymom_src, zmom_src);
+        }
+#endif
+
         // Nudging of the velocity towards observations at stations
         if (solverChoice.nudging_from_observations && obs_nudging) {
             obs_nudging->add_momentum_sources(level, old_stage_time, static_cast<Real>(slow_dt), fine_geom,

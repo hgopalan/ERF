@@ -611,6 +611,22 @@ Test Location: `Tests/test_files/Actuator_Sampling`_
 
 .. _`Tests/test_files/Actuator_Sampling`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Actuator_Sampling
 
+Actuator disk force spreading
+-----------------------------
+``Actuator_UniformCtDisk`` (builds with ``ERF_ENABLE_MOVING_BODIES=ON``,
+``ERF_ENABLE_FFT=ON`` and MPI, not Windows) runs a uniform 10 m/s anelastic
+flow for ten steps through a prescribed uniform-Ct disk (radius 120 m, hub
+150 m, ``Ct = 0.75``, ``epsilon = 2 dx``). ``Tests/RunCtDisk.cmake`` compares
+the plotfile with its gold, the disk's log ``D1_disk.csv`` with its gold to ten
+significant digits, and requires in every row that the integrated momentum
+source equals the disk's thrust, since the spreading is normalised exactly.
+``ActuatorCtDisk_BoxParity`` runs the same deck in one box and split unevenly
+in x and y and requires the plotfiles and the disk logs to agree.
+
+Test Location: `Tests/test_files/Actuator_UniformCtDisk`_
+
+.. _`Tests/test_files/Actuator_UniformCtDisk`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Actuator_UniformCtDisk
+
 Restart parity
 --------------
 ``MoistBubble_Kessler_Restart`` (MPI builds, not Windows) runs the moist bubble
