@@ -63,12 +63,20 @@ MovingBodiesInputs::read ()
         b.output_root = in.diagnostics_dir + "/" + name;
         ppb.query("output_root", b.output_root);
 
+        ppb.query("num_points_t", b.num_points_t);
+        if (b.num_points_t < 1) {
+            Abort("erf.moving_bodies." + name + ".num_points_t must be >= 1");
+        }
+
         if (b.type == "openfast_turbine") {
             ppb.get("fst_file", b.fst_file);
 
             ppb.query("mode", b.mode);
-            if (b.mode != "adm" && b.mode != "alm") {
-                Abort("erf.moving_bodies." + name + ".mode must be adm or alm, not '" + b.mode + "'");
+            if (b.mode == "alm") {
+                Abort("erf.moving_bodies." + name + ".mode = alm is not available in this version; use adm or none");
+            }
+            if (b.mode != "adm" && b.mode != "none") {
+                Abort("erf.moving_bodies." + name + ".mode must be adm or none, not '" + b.mode + "'");
             }
 
             ppb.query("num_force_points_blade", b.num_force_points_blade);
@@ -78,6 +86,9 @@ MovingBodiesInputs::read ()
             ppb.query("num_force_points_tower", b.num_force_points_tower);
             if (b.num_force_points_tower < 0) {
                 Abort("erf.moving_bodies." + name + ".num_force_points_tower must be >= 0");
+            }
+            if (b.num_force_points_tower > 0) {
+                Abort("erf.moving_bodies." + name + ".num_force_points_tower > 0: tower forcing is not available in this version");
             }
         } else {
             ppb.get("rotor_radius", b.rotor_radius);
@@ -94,9 +105,8 @@ MovingBodiesInputs::read ()
             }
             ppb.query("yaw", b.yaw_deg);
             ppb.query("num_points_r", b.num_points_r);
-            ppb.query("num_points_t", b.num_points_t);
-            if (b.num_points_r < 1 || b.num_points_t < 1) {
-                Abort("erf.moving_bodies." + name + ".num_points_r and num_points_t must be >= 1");
+            if (b.num_points_r < 1) {
+                Abort("erf.moving_bodies." + name + ".num_points_r must be >= 1");
             }
             ppb.query("sample_diameters_upstream", b.sample_diameters_upstream);
             if (!(b.sample_diameters_upstream > 0.0)) {

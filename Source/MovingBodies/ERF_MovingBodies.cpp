@@ -1,10 +1,15 @@
 #include "ERF_MovingBodies.H"
 
+#include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <iomanip>
 
 #include <AMReX.H>
+#include <AMReX_ParallelDescriptor.H>
 #include <AMReX_ParmParse.H>
 #include <AMReX_Print.H>
+#include <AMReX_Utility.H>
 
 #include "ERF_ActuatorSampling.H"
 #include "ERF_ActuatorSpreading.H"
@@ -94,6 +99,7 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, double dt, double t_max)
                     << " points, spreading " << b.epsilon << " dx\n";
         } else {
             turbines.push_back(b);
+            m_turbine_points_t.push_back((b.mode == "none") ? 0 : b.num_points_t);
         }
     }
     m_epsilon_dx = m_in.bodies.empty() ? 2.0 : m_in.bodies[0].epsilon;
@@ -136,27 +142,52 @@ MovingBodies::advance (int lev, double time, double dt,
     supply_velocities(U, V, W, z_phys_nd, geom);
 #ifdef ERF_USE_OPENFAST
     m_driver->step();
-    if (m_step % m_in.diagnostics_int == 0) {
+    if (first || m_step % m_in.diagnostics_int == 0) {
         m_driver->write_diagnostics(time + dt);
     }
 #endif
-    // the disks' forces come from the velocities just sampled, so the source is fixed over the
-    // step ERF is about to take
-    if (!m_disks.empty()) {
+    // the bodies' forces come from the velocities just sampled (the disks) or from the
+    // OpenFAST step just taken (the turbines), so the source is fixed over the step ERF is
+    // about to take
+    if (any_forcing()) {
         spread_sources(U, z_phys_nd, detJ_cc, geom);
         if (first) { for (auto& d : m_disks) { d->open_diagnostics(); } }
         if (first || m_step % m_in.diagnostics_int == 0) {
-            const Real fx = erf_actuator::integrate_source(0, m_src_x, detJ_cc, geom);
-            const Real fy = erf_actuator::integrate_source(1, m_src_y, detJ_cc, geom);
-            const Real fz = erf_actuator::integrate_source(2, m_src_z, detJ_cc, geom);
-            for (auto& d : m_disks) {
-                const auto n = d->normal();
-                // the integrated source over all bodies, projected on this disk's normal and
-                // signed as a thrust: equals the disk's thrust when it is the only body
-                const Real spread_thrust = -(n[0]*fx + n[1]*fy + n[2]*fz);
-                d->write_diagnostics(time, spread_thrust);
-            }
+            write_source_diagnostics(time, detJ_cc, geom, first);
         }
+    }
+}
+
+bool
+MovingBodies::any_forcing () const
+{
+    if (!m_disks.empty()) { return true; }
+    for (int n : m_turbine_points_t) { if (n > 0) { return true; } }
+    return false;
+}
+
+void
+MovingBodies::write_source_diagnostics (double time, const MultiFab* detJ_cc, const Geometry& geom, bool first)
+{
+    const Real fx = erf_actuator::integrate_source(0, m_src_x, detJ_cc, geom);
+    const Real fy = erf_actuator::integrate_source(1, m_src_y, detJ_cc, geom);
+    const Real fz = erf_actuator::integrate_source(2, m_src_z, detJ_cc, geom);
+    for (auto& d : m_disks) {
+        const auto n = d->normal();
+        // the integrated source over all bodies, projected on this disk's normal and signed
+        // as a thrust: equals the disk's thrust when it is the only body
+        d->write_diagnostics(time, -(n[0]*fx + n[1]*fy + n[2]*fz));
+    }
+    if (ParallelDescriptor::IOProcessor()) {
+        const std::string fname = m_in.diagnostics_dir + "/momentum_source.csv";
+        if (first) {
+            UtilCreateDirectory(m_in.diagnostics_dir, 0755);
+            std::ofstream out(fname, std::ios::trunc);
+            if (!out) { Abort("cannot open moving-bodies diagnostics file '" + fname + "'"); }
+            out << "time,fx,fy,fz\n";
+        }
+        std::ofstream out(fname, std::ios::app);
+        out << std::setprecision(10) << time << "," << fx << "," << fy << "," << fz << "\n";
     }
 }
 
@@ -173,6 +204,30 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
         m_src_defined = true;
     }
     std::vector<Real> pos, force;
+#ifdef ERF_USE_OPENFAST
+    // each turbine's loads as actuator-disk rings (mode = adm; none puts no force in the flow)
+    {
+        const auto& turbs = m_driver->turbines();
+        for (std::size_t i = 0; i < turbs.size(); ++i) {
+            if (m_turbine_points_t[i] == 0) { continue; }
+            if (!m_axis_checked) {
+                const Real s = erf_actuator::max_out_of_plane_sine(turbs[i]);
+                const double deg = std::asin(std::min(s, Real(1.0))) * 180.0 / 3.14159265358979323846;
+                if (s > Real(0.35)) {   // ~20 degrees: well beyond precone plus shaft tilt
+                    Abort("erf.moving_bodies." + turbs[i].name + ": the blade nodes lie up to " +
+                          std::to_string(deg) +
+                          " degrees out of the plane normal to the hub axis; the hub orientation convention does not match this OpenFAST");
+                }
+                const auto& n = turbs[i].hub_axis;
+                Print() << "erf.moving_bodies." << turbs[i].name << ": hub axis (" << n[0] << ", " << n[1] << ", " << n[2]
+                        << "), blade force nodes within " << deg << " degrees of the rotor plane, "
+                        << m_turbine_points_t[i] << " points per ring\n";
+            }
+            erf_actuator::adm_rings(turbs[i], m_turbine_points_t[i], pos, force);
+        }
+        m_axis_checked = true;
+    }
+#endif
     for (const auto& d : m_disks) {
         const auto& p = d->disk_points();
         const auto& f = d->forces();

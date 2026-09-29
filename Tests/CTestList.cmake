@@ -931,6 +931,54 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       DATALOG_SIGDIGITS 8)
 endif()
 
+if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
+  # A stub OpenFAST turbine as an actuator disk in a uniform anelastic flow: its loads are
+  # spread as rings about the hub axis and slow the flow. The gold plotfile and the sampled
+  # flow log are the regression; in every row the integrated source must equal minus the
+  # turbine's thrust, since the rings preserve the rotor force and the spreading is exact.
+  function(add_test_openfast_adm TEST_NAME TEST_FILES_DIR PLTFILE)
+      setup_test()
+      resolve_test_exe("" "erf_exec" TEST_EXE)
+      add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+          "-DMPIEXEC=${MPIEXEC_EXECUTABLE}"
+          "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+          "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+          "-DNRANKS=${NP}"
+          "-DTEST_EXE=${TEST_EXE}"
+          "-DCONFIG=$<CONFIG>"
+          "-DINPUT=${CURRENT_TEST_BINARY_DIR}/${TEST_FILES_DIR}.i"
+          "-DWORKING_DIRECTORY=${CURRENT_TEST_BINARY_DIR}"
+          "-DFCOMPARE=${FCOMPARE_EXE}"
+          "-DPLTFILE=${PLTFILE}"
+          "-DPLOT_GOLD=${PLOT_GOLD}"
+          "-DRTOL=${ERF_TEST_FCOMPARE_RTOL}"
+          "-DATOL=${ERF_TEST_FCOMPARE_ATOL}"
+          "-DFLOW_CSV=T1_flow.csv"
+          "-DFLOW_GOLD=${CURRENT_TEST_SOURCE_DIR}/T1_flow.csv.gold"
+          "-DSIGDIGITS=10"
+          "-DTURBINE_CSV=T1_erf.csv"
+          "-DSOURCE_CSV=moving_bodies/momentum_source.csv"
+          -P ${PROJECT_SOURCE_DIR}/Tests/RunOpenFASTADM.cmake)
+      set_tests_properties(${TEST_NAME}
+          PROPERTIES
+          TIMEOUT 600
+          PROCESSORS ${NP}
+          WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+          LABELS "regression;moving-bodies"
+          ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/simulation.log")
+  endfunction()
+  add_test_openfast_adm(OpenFAST_ADM_Uniform OpenFAST_ADM_Uniform "plt00010")
+
+  # The same turbine with the domain in one box and split unevenly in x and y: plotfile and
+  # sampled flow log must agree, so the rings and their spreading are independent of the
+  # decomposition.
+  add_test_box_parity(OpenFASTADM_BoxParity OpenFAST_ADM_Uniform "plt00010"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
+      DATALOG "T1_flow.csv"
+      DATALOG_SIGDIGITS 8)
+endif()
+
 if(ERF_ENABLE_MOVING_BODIES AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # A prescribed uniform-Ct disk in a uniform anelastic flow: its force is spread onto the
   # momentum sources and slows the flow. The gold plotfile and the disk's log are the

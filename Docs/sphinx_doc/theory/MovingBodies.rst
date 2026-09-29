@@ -25,7 +25,12 @@ OpenFAST 4). Every ERF step:
 #. OpenFAST returns the positions of its actuator force points and the
    aerodynamic force on each. OpenFAST reports every position in the
    turbine's own frame, with the tower base at the origin; ERF adds
-   ``erf.moving_bodies.<name>.base_pos`` to put them in the domain.
+   ``erf.moving_bodies.<name>.base_pos`` to put them in the domain. The hub's
+   orientation matrix gives the shaft axis (its first row, the hub frame's x
+   axis in the global frame), which the actuator-disk representation below
+   needs;
+#. the forces, with the sign reversed to act on the fluid, are spread onto the
+   momentum sources that ERF adds during the step it is about to take.
 
 The models are initialised at start-up, so their inputs are checked then, but
 OpenFAST's first solution is taken at the first step, once the flow exists to be
@@ -52,20 +57,52 @@ decomposition; a node outside the domain aborts the run with its coordinates.
 Force spreading and momentum source
 -----------------------------------
 
-The force a body exerts on the fluid is carried by actuator points (the disk
-points of a prescribed-Ct disk in this version) and spread onto ERF's
-face-centred momentum sources with a 3-D Gaussian kernel of width
+The force a body exerts on the fluid is carried by actuator points (the rings
+of an OpenFAST rotor's actuator disk, the disk points of a prescribed-Ct disk)
+and spread onto ERF's face-centred momentum sources with a 3-D Gaussian kernel of width
 ``epsilon`` (given in units of dx), cut off beyond three widths. The kernel is
 normalised discretely on each staggered grid, with the face volumes
 (``dx dy dz detJ`` on a terrain-following mesh), so the source integrates back
 to the point force exactly for every point and component, whatever the
 resolution and however much of the kernel the ground or the domain top cuts
-off; the kernel's shape is Gaussian only where it is resolved. Distances take
-the minimum image in periodic directions, so a kernel wraps across a periodic
-boundary. Faces on a non-periodic domain boundary get no source. The sources are computed once per
-step, from the velocities sampled at the start of the step, and added to the
-momentum right-hand side in every stage of the step, before the anelastic
-projection, which removes their divergent part.
+off; the kernel's shape is Gaussian only where it is resolved. Each point is
+visited over the faces within three widths of it, and again as its periodic
+images, so a kernel wraps across a periodic boundary and the cost grows with
+the number of points, not with the mesh. Faces on a non-periodic domain
+boundary get no source. The sources are computed once per step, from the
+velocities sampled at the start of the step (the disks) or from the OpenFAST
+step just taken (the turbines), and added to the momentum right-hand side in
+every stage of the step, before the anelastic projection, which removes their
+divergent part.
+
+OpenFAST rotor as an actuator disk
+----------------------------------
+
+With ``mode = adm`` the loads OpenFAST computes on its blade force nodes are put
+into the flow as a disk rather than as rotating lines. Each blade node, at
+radius ``r`` from the hub in the plane normal to the shaft axis, is replaced by
+a ring of ``num_points_t`` points at that radius, equally spaced in azimuth,
+each carrying ``1 / num_points_t`` of the node's force with the axial component
+kept and the radial and tangential components rotated with the ring azimuth.
+The force along the shaft and the torque about it are therefore preserved
+exactly; the net force in the rotor plane, which a three-bladed rotor carries
+only through the differences between its blades' loads at an instant, is
+averaged away with the azimuth, as an actuator disk does (OpenFAST still sees
+the true blade positions, only the flow does not). The integrated momentum
+source therefore equals minus the thrust vector for a rotor whose blade loads
+are alike, and minus its shaft component in general. The hub node keeps its own point. At the first step ERF checks that
+the blade nodes lie within about 20 degrees of the plane normal to the axis it
+took from the hub orientation, so that a mismatched orientation convention
+aborts rather than spreading the load along the blades. The velocities ERF
+samples then already contain the rotor's induction, so AeroDyn's own wake model
+must be off: ERF reads the AeroDyn file named in the ``.fst`` and refuses to
+start when its ``Wake_Mod`` is not 0 (``mode = none`` leaves it to the model).
+The thrust in the diagnostics is the sum of the hub and blade node forces, so
+its shaft component equals minus that of the integrated source. With ``mode = none``
+the turbine is driven by the flow but puts no force into it (one-way
+coupling, as for a loads analysis in a precomputed flow). Tower forces and
+the actuator-line representation (``mode = alm``) are not available in this
+version and are refused at start-up.
 
 Prescribed uniform-Ct disk
 --------------------------
@@ -92,11 +129,16 @@ Diagnostics
 -----------
 
 Every turbine writes ``<output_root>_erf.csv`` with the time, rotor speed, the
-thrust vector (the sum of the blade-node forces, as OpenFAST reports them: the
-force of the fluid on the structure, so along the inflow), the aerodynamic
-torque about the hub axis and the power (torque times rotor speed), and
+thrust vector (the sum of the hub and blade node forces, as OpenFAST reports
+them: the force of the fluid on the structure, so along the inflow), the
+aerodynamic torque about the hub axis, the power (torque times rotor speed)
+and the unit hub axis (the shaft direction, which follows yaw, tilt and the
+tower's deflection), and
 ``<output_root>_flow.csv`` with the velocity the flow supplied at the hub node
 and its mean over the blade nodes. OpenFAST also writes its own output files as
-configured in the ``.fst`` file.
+configured in the ``.fst`` file. Whenever a body puts a force into the flow,
+``<diagnostics_dir>/momentum_source.csv`` records the time and the momentum
+source integrated over the domain, which equals the sum of the forces on the
+fluid (minus the turbines' thrust vectors, plus the disks' ``-T n``).
 
 Inputs are listed in :ref:`sec:MovingBodiesInputs`.

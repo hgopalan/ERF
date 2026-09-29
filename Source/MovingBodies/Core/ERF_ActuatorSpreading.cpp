@@ -1,5 +1,6 @@
 #include "ERF_ActuatorSpreading.H"
 
+#include <array>
 #include <cmath>
 
 #include <AMReX.H>
@@ -16,22 +17,18 @@ namespace erf_actuator {
 
 namespace {
 
-// Squared distance from face (i,j,k) of grid dir to the point, with the minimum image in
-// the periodic directions so that a kernel wraps across a periodic boundary and both copies
-// of a periodic image face see the same distance, and the kernel's cut-off
+// Squared distance from face (i,j,k) of grid dir to the point (or one of its periodic images)
+// and the kernel's cut-off
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 Real kernel_weight (int dir, int i, int j, int k, Real px, Real py, Real pz,
                     const GpuArray<Real,AMREX_SPACEDIM>& plo,
                     const GpuArray<Real,AMREX_SPACEDIM>& dx,
-                    const GpuArray<Real,AMREX_SPACEDIM>& period,   // 0 where not periodic
                     Array4<Real const> const& znd, bool has_znd,
                     Real inv_eps2, Real reach2)
 {
-    Real ddx = plo[0] + (i + ((dir == 0) ? Real(0.0) : Real(0.5))) * dx[0] - px;
-    Real ddy = plo[1] + (j + ((dir == 1) ? Real(0.0) : Real(0.5))) * dx[1] - py;
+    const Real ddx = plo[0] + (i + ((dir == 0) ? Real(0.0) : Real(0.5))) * dx[0] - px;
+    const Real ddy = plo[1] + (j + ((dir == 1) ? Real(0.0) : Real(0.5))) * dx[1] - py;
     const Real ddz = face_height(dir, i, j, k, znd, has_znd, plo[2], dx[2]) - pz;
-    if (period[0] > Real(0.0)) { ddx -= period[0] * std::round(ddx / period[0]); }
-    if (period[1] > Real(0.0)) { ddy -= period[1] * std::round(ddy / period[1]); }
     const Real r2 = ddx*ddx + ddy*ddy + ddz*ddz;
     return (r2 > reach2) ? Real(0.0) : std::exp(-r2 * inv_eps2);
 }
@@ -89,16 +86,43 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
     const bool has_znd = (z_phys_nd != nullptr);
     const bool has_detj = (detJ_cc != nullptr);
 
-    Gpu::DeviceVector<Real> d_pos(pos.size());
-    Gpu::DeviceVector<Real> d_force(force.size());
-    Gpu::copyAsync(Gpu::hostToDevice, pos.begin(), pos.end(), d_pos.begin());
-    Gpu::copyAsync(Gpu::hostToDevice, force.begin(), force.end(), d_force.begin());
-    // normalisation of every point on each of the three face grids
-    Gpu::DeviceVector<Real> d_norm(3 * npts, Real(0.0));
-    const Real* p_pos = d_pos.data();
-    const Real* p_force = d_force.data();
-    Real* p_norm = d_norm.data();
+    // Work per point over the faces within its reach, so the cost is npts x (6 eps / dx)^3
+    // rather than nfaces x npts. A point near a periodic boundary is visited again as its
+    // periodic image(s), which is how the kernel wraps.
+    const int reach_cells[3] = {static_cast<int>(std::ceil(Real(3.0) * epsilon / dx[0])) + 1,
+                                static_cast<int>(std::ceil(Real(3.0) * epsilon / dx[1])) + 1,
+                                static_cast<int>(std::ceil(Real(3.0) * epsilon / dx[2])) + 1};
+    // the index box of the faces of grid dir within reach of a point at (px,py,pz)
+    auto reach_box = [&](int dir, Real px, Real py, Real pz) {
+        const Real pc[3] = {px, py, pz};
+        IntVect lo, hi;
+        for (int d = 0; d < 3; ++d) {
+            const Real fi = (pc[d] - plo[d]) / dx[d] - ((d == dir) ? Real(0.0) : Real(0.5));
+            lo[d] = static_cast<int>(std::floor(fi)) - reach_cells[d];
+            hi[d] = static_cast<int>(std::floor(fi)) + reach_cells[d] + 1;
+        }
+        return Box(lo, hi, IntVect::TheDimensionVector(dir));
+    };
+    // the periodic images of a point that can reach the domain: shifts of -n L .. +n L per
+    // periodic direction, with n the number of domain widths the kernel reaches (one unless
+    // the domain is narrower than 3 epsilon, as in a unit test)
+    int n_img[2] = {0, 0};
+    for (int d = 0; d < 2; ++d) {
+        if (per[d] != 0) { n_img[d] = static_cast<int>(std::ceil(Real(3.0) * epsilon / period[d])); }
+    }
+    std::vector<std::array<Real,3>> images;
+    auto point_images = [&](Real px, Real py, Real pz) {
+        images.clear();
+        for (int sx = -n_img[0]; sx <= n_img[0]; ++sx) {
+            for (int sy = -n_img[1]; sy <= n_img[1]; ++sy) {
+                images.push_back({{px + sx * period[0], py + sy * period[1], pz}});
+            }
+        }
+    };
 
+    std::vector<Real> norm(3 * npts, 0.0);
+    Gpu::DeviceVector<Real> d_norm(3 * npts, Real(0.0));
+    Real* p_norm = d_norm.data();
     MultiFab* src[3] = {&src_x, &src_y, &src_z};
 
     // pass 1: S_p = sum over the faces of w_p dV, each physical face once (the owned faces of
@@ -109,20 +133,26 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
         Array4<Real const> detj = has_detj ? detJ_cc->const_array(mfi) : Array4<Real const>{};
         for (int dir = 0; dir < 3; ++dir) {
             const Box fbx = owned_faces(dir, vbx);
-            ParallelFor(fbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
-            {
-                if (boundary_face(dir, i, j, k, per, dlo, dhi)) { return; }
-                const Real dV = face_volume(dir, i, j, k, detj, has_detj, dxdydz);
-                for (int p = 0; p < npts; ++p) {
-                    const Real w = kernel_weight(dir, i, j, k, p_pos[3*p], p_pos[3*p+1], p_pos[3*p+2],
-                                                 plo, dx, period, znd, has_znd, inv_eps2, reach2);
-                    if (w > Real(0.0)) { Gpu::Atomic::AddNoRet(&p_norm[3*p+dir], w * dV); }
+            for (int p = 0; p < npts; ++p) {
+                point_images(pos[3*p], pos[3*p+1], pos[3*p+2]);
+                for (const auto& q : images) {
+                    const Box rb = reach_box(dir, q[0], q[1], q[2]) & fbx;
+                    if (rb.isEmpty()) { continue; }
+                    const Real qx = q[0], qy = q[1], qz = q[2];
+                    Real* np = &p_norm[3*p+dir];
+                    ParallelFor(rb, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                    {
+                        if (boundary_face(dir, i, j, k, per, dlo, dhi)) { return; }
+                        const Real w = kernel_weight(dir, i, j, k, qx, qy, qz, plo, dx, znd, has_znd, inv_eps2, reach2);
+                        if (w > Real(0.0)) {
+                            Gpu::Atomic::AddNoRet(np, w * face_volume(dir, i, j, k, detj, has_detj, dxdydz));
+                        }
+                    });
                 }
-            });
+            }
         }
     }
     Gpu::streamSynchronize();
-    std::vector<Real> norm(3 * npts, 0.0);
     Gpu::copy(Gpu::deviceToHost, d_norm.begin(), d_norm.end(), norm.begin());
     ParallelDescriptor::ReduceRealSum(norm.data(), 3 * npts);
     for (int p = 0; p < npts; ++p) {
@@ -134,27 +164,30 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
             }
         }
     }
-    Gpu::copyAsync(Gpu::hostToDevice, norm.begin(), norm.end(), d_norm.begin());
 
-    // pass 2: src(face) = sum over the points of F_p w_p / S_p, on every face of every box so
-    // that both copies of a shared or periodic image face carry the same value
+    // pass 2: src(face) += F_p w_p / S_p on every face of every box, so that both copies of a
+    // shared or periodic image face carry the same value
     for (MFIter mfi(src_x, false); mfi.isValid(); ++mfi) {
         Array4<Real const> znd = has_znd ? z_phys_nd->const_array(mfi) : Array4<Real const>{};
         for (int dir = 0; dir < 3; ++dir) {
             const Box fbx = mfi.validbox().convert(IntVect::TheDimensionVector(dir));
             Array4<Real> const& s = src[dir]->array(mfi);
-            ParallelFor(fbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
-            {
-                Real acc = Real(0.0);
-                if (!boundary_face(dir, i, j, k, per, dlo, dhi)) {
-                    for (int p = 0; p < npts; ++p) {
-                        const Real w = kernel_weight(dir, i, j, k, p_pos[3*p], p_pos[3*p+1], p_pos[3*p+2],
-                                                     plo, dx, period, znd, has_znd, inv_eps2, reach2);
-                        if (w > Real(0.0)) { acc += p_force[3*p+dir] * w / p_norm[3*p+dir]; }
-                    }
+            for (int p = 0; p < npts; ++p) {
+                const Real f_over_s = force[3*p+dir] / norm[3*p+dir];
+                if (f_over_s == Real(0.0)) { continue; }
+                point_images(pos[3*p], pos[3*p+1], pos[3*p+2]);
+                for (const auto& q : images) {
+                    const Box rb = reach_box(dir, q[0], q[1], q[2]) & fbx;
+                    if (rb.isEmpty()) { continue; }
+                    const Real qx = q[0], qy = q[1], qz = q[2];
+                    ParallelFor(rb, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                    {
+                        if (boundary_face(dir, i, j, k, per, dlo, dhi)) { return; }
+                        const Real w = kernel_weight(dir, i, j, k, qx, qy, qz, plo, dx, znd, has_znd, inv_eps2, reach2);
+                        if (w > Real(0.0)) { Gpu::Atomic::AddNoRet(&s(i,j,k), f_over_s * w); }
+                    });
                 }
-                s(i,j,k) = acc;
-            });
+            }
         }
     }
     Gpu::streamSynchronize();

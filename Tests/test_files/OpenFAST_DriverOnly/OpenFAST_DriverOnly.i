@@ -34,6 +34,7 @@ erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
 # an IEA-15-MW-sized stub rotor, driven by the prescribed velocity
 erf.moving_bodies.bodies                     = T1
 erf.moving_bodies.T1.type                    = openfast_turbine
+erf.moving_bodies.T1.mode                    = none
 erf.moving_bodies.T1.fst_file                = stub_turbine.fst
 erf.moving_bodies.T1.base_pos                = 600. 600. 0.
 erf.moving_bodies.T1.num_force_points_blade  = 20

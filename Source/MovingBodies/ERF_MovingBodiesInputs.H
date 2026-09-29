@@ -19,7 +19,7 @@ struct MovingBodyInputs
     std::string output_root;                 //!< prefix of the per-body diagnostics files
     // openfast_turbine
     std::string fst_file;                    //!< OpenFAST primary input file
-    std::string mode{"adm"};                 //!< adm | alm: how the OpenFAST loads are spread
+    std::string mode{"adm"};                 //!< none | adm: how the OpenFAST loads reach the flow (none: they do not)
     int num_force_points_blade{50};          //!< actuator force points per blade requested from OpenFAST
     int num_force_points_tower{0};           //!< actuator force points on the tower (0: no tower forcing)
     // ct_disk
@@ -28,7 +28,7 @@ struct MovingBodyInputs
     amrex::Real ct{0.0};                     //!< thrust coefficient on the upstream speed
     amrex::Real yaw_deg{0.0};                //!< disk normal, degrees from +x in the horizontal plane
     int num_points_r{8};                     //!< polar grid: rings
-    int num_points_t{16};                    //!< polar grid: points per ring
+    int num_points_t{16};                    //!< points per ring (ct_disk grid, and the turbine's actuator-disk rings)
     amrex::Real sample_diameters_upstream{1.0}; //!< where the free-stream speed is sampled
     amrex::Real air_density{1.225};          //!< density in the thrust (kg/m^3)
 };
