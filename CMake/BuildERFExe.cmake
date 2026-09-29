@@ -371,6 +371,28 @@ function(build_erf_lib erf_lib_name)
     target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_WINDFARM)
   endif()
 
+  if(ERF_ENABLE_MOVING_BODIES)
+    target_sources(${erf_lib_name} PRIVATE
+      ${SRC_DIR}/MovingBodies/ERF_MovingBodies.cpp
+      ${SRC_DIR}/MovingBodies/ERF_MovingBodiesInputs.cpp
+    )
+    target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${SRC_DIR}/MovingBodies>)
+    target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_MOVING_BODIES)
+    if(ERF_ENABLE_OPENFAST)
+      target_sources(${erf_lib_name} PRIVATE
+        ${SRC_DIR}/MovingBodies/OpenFAST/ERF_OpenFASTDriver.cpp
+      )
+      target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${SRC_DIR}/MovingBodies/OpenFAST>)
+      target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_OPENFAST)
+      if(ERF_OPENFAST_USE_STUB)
+        target_link_libraries(${erf_lib_name} PUBLIC erf_openfast_stub)
+      else()
+        target_include_directories(${erf_lib_name} PUBLIC ${ERF_OPENFAST_INCLUDE_DIRS})
+        target_link_libraries(${erf_lib_name} PUBLIC openfastlib)
+      endif()
+    endif()
+  endif()
+
   if(ERF_BUILD_LIBRARY_ONLY)
     # In library-only superbuild mode, archive extraction + weak amrex_probinit
     # requires a forced reference path (see ERF.cpp/ERF_Prob.cpp link anchor).

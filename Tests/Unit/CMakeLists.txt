@@ -262,6 +262,15 @@ if(ERF_ENABLE_NOAHMP)
     ${CMAKE_CURRENT_SOURCE_DIR}/LandSurfaceModel/Noah-MP/ERF_GTestNoahMPResultPolicy.cpp
   )
 endif()
+if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
+  # Motivation: the OpenFAST driver must keep the ERF step a whole multiple of the
+  # OpenFAST step, accept only the anelastic solver with a fixed step, refuse a model
+  # without external inflow, and report the same node layout on every rank. The
+  # bundled stub library stands in for OpenFAST.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTDriver.cpp
+  )
+endif()
 build_erf_exe(${erf_exe_name} NO_ERF_MAIN)
 target_link_libraries(${erf_exe_name} PRIVATE GTest::gtest)
 

@@ -172,6 +172,9 @@ option(ERF_ENABLE_NOAHMP "Enable Noah-MP" OFF)
 
 #Other parameterizations
 option(ERF_ENABLE_WINDFARM "Enable wind farm parameterizations" OFF)
+option(ERF_ENABLE_MOVING_BODIES "Enable the moving-bodies actuator framework (erf.moving_bodies.*)" OFF)
+option(ERF_ENABLE_OPENFAST "Enable the OpenFAST turbine coupling (implies ERF_ENABLE_MOVING_BODIES)" OFF)
+option(ERF_OPENFAST_USE_STUB "Build the OpenFAST coupling against the bundled stub library instead of OpenFAST (for testing)" OFF)
 option(ERF_ENABLE_WSM6_FORT "Enable WSM6 Fortran bridge calls" OFF)
 option(ERF_ENABLE_WDM6_FORT "Enable WDM6 Fortran bridge calls" OFF)
 
@@ -586,6 +589,50 @@ if(ERF_ENABLE_NETCDF OR ERF_ENABLE_TOOLS)
   endif()
 
   message(STATUS "NetCDF configuration complete")
+  list(POP_BACK CMAKE_MESSAGE_CONTEXT)
+endif()
+
+########################## OPENFAST ##################################
+
+if(ERF_ENABLE_OPENFAST)
+  list(APPEND CMAKE_MESSAGE_CONTEXT "OpenFAST")
+  message(STATUS "Configuring OpenFAST")
+
+  # the coupling lives in the moving-bodies framework
+  set(ERF_ENABLE_MOVING_BODIES ON CACHE BOOL
+      "Enable the moving-bodies actuator framework (erf.moving_bodies.*)" FORCE)
+
+  if(ERF_OPENFAST_USE_STUB)
+    # A stand-in for libopenfastlib with the same C API, so the coupling builds and its tests
+    # run where OpenFAST is not installed.
+    message(STATUS "Using the bundled OpenFAST stub library (ERF_OPENFAST_USE_STUB=ON)")
+    add_library(erf_openfast_stub STATIC
+      ${PROJECT_SOURCE_DIR}/Source/MovingBodies/OpenFAST/Stub/ERF_OpenFASTStub.cpp)
+    target_include_directories(erf_openfast_stub PUBLIC
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/Source/MovingBodies/OpenFAST/Stub>)
+    # erf_srclib is exported through ERFTargets, so its link dependency must be exported too
+    install(TARGETS erf_openfast_stub EXPORT ERFTargets ARCHIVE DESTINATION lib)
+  else()
+    set(CMAKE_PREFIX_PATH ${OPENFAST_DIR} ${CMAKE_PREFIX_PATH})
+    find_package(OpenFAST REQUIRED COMPONENTS openfastlib)
+    message(STATUS "Found OpenFAST: ${OpenFAST_INCLUDE_DIRS}")
+    # ERF uses the OpenFAST 4 external-inflow API only (FAST_ExtInfw_*); version 3 named it
+    # FAST_OpFM_* and is not supported
+    find_file(ERF_OPENFAST_C_HEADER FAST_Library.h
+      PATHS ${OpenFAST_INCLUDE_DIRS} ${OpenFAST_INCLUDE_DIRS}/openfast
+      NO_DEFAULT_PATH)
+    if(NOT ERF_OPENFAST_C_HEADER)
+      message(FATAL_ERROR "FAST_Library.h not found under ${OpenFAST_INCLUDE_DIRS}")
+    endif()
+    file(STRINGS "${ERF_OPENFAST_C_HEADER}" _erf_openfast_extinfw REGEX "FAST_ExtInfw_Init")
+    if(NOT _erf_openfast_extinfw)
+      message(FATAL_ERROR "ERF needs OpenFAST 4: FAST_ExtInfw_Init is not declared in ${ERF_OPENFAST_C_HEADER}")
+    endif()
+    get_filename_component(ERF_OPENFAST_INCLUDE_DIRS "${ERF_OPENFAST_C_HEADER}" DIRECTORY)
+    message(STATUS "OpenFAST C API header: ${ERF_OPENFAST_C_HEADER}")
+  endif()
+
+  message(STATUS "OpenFAST configuration complete")
   list(POP_BACK CMAKE_MESSAGE_CONTEXT)
 endif()
 

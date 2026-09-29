@@ -2333,6 +2333,52 @@ The wind farm parameterization is selected with ``erf.windfarm_type``.
   or ``-DERF_ENABLE_WINDFARM`` (cmake) at build time.
   See :ref:`sec:WindFarmModels` for theory and examples.
 
+.. _sec:MovingBodiesInputs:
+
+Moving Bodies (OpenFAST turbines)
+---------------------------------
+
+The moving-bodies framework couples ERF to OpenFAST turbines through OpenFAST's
+external-inflow interface; see :ref:`sec:MovingBodies` for the coupling. It is
+built with ``-DERF_ENABLE_OPENFAST=ON`` (cmake) and requires the anelastic solver,
+a fixed time step (``erf.fixed_dt``) that is a whole multiple of the OpenFAST
+time step, a single level (``amr.max_level = 0``) and no floating-point traps
+(``amrex.fpe_trap_invalid``, ``amrex.fpe_trap_zero`` and ``amrex.fpe_trap_overflow``
+off, since OpenFAST raises exceptions of its own during initialisation); the run
+aborts at start-up otherwise. Bodies are named in ``erf.moving_bodies.bodies``; each body has its own
+``erf.moving_bodies.<name>.*`` block.
+
++------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
+| Parameter                                            | Definition                                               | Acceptable Values  | Default                  |
++======================================================+==========================================================+====================+==========================+
+| **erf.moving_bodies.bodies**                         | names of the bodies; the framework is off when absent    | Strings            | none                     |
++------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
+| **erf.moving_bodies.<name>.type**                    | kind of body                                             | openfast_turbine   | must be set              |
++------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
+| **erf.moving_bodies.<name>.fst_file**                | OpenFAST primary input file; it must set ``CompInflow =  | String             | must be set              |
+|                                                      | 2`` (external inflow)                                    |                    |                          |
++------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
+| **erf.moving_bodies.<name>.base_pos**                | tower base position in ERF coordinates (m)               | 3 Reals            | must be set              |
++------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
+| **erf.moving_bodies.<name>.mode**                    | how the OpenFAST loads are represented in the flow       | adm, alm           | adm                      |
++------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
+| **erf.moving_bodies.<name>.num_force_points_blade**  | actuator force points per blade requested from OpenFAST  | Int > 0            | 50                       |
++------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
+| **erf.moving_bodies.<name>.num_force_points_tower**  | actuator force points on the tower; 0 leaves the tower   | Int >= 0           | 0                        |
+|                                                      | out                                                      |                    |                          |
++------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
+| **erf.moving_bodies.<name>.output_root**             | prefix of the body's diagnostics file                    | String             | <diagnostics_dir>/<name> |
+|                                                      | ``<output_root>_erf.csv`` (time, rotor speed, thrust,    |                    |                          |
+|                                                      | torque, power)                                           |                    |                          |
++------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
+| **erf.moving_bodies.diagnostics_int**                | write a diagnostics row every this many steps            | Int > 0            | 1                        |
++------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
+| **erf.moving_bodies.diagnostics_dir**                | directory of the default diagnostics files               | String             | moving_bodies            |
++------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
+| **erf.moving_bodies.prescribed_velocity**            | testing aid: the uniform velocity given to every body    | 3 Reals            | none (0 0 0 is used)     |
+|                                                      | node instead of the flow velocity                        |                    |                          |
++------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
+
 .. _sec:ConstantMassFluxInputs:
 
 Constant Mass Flux
