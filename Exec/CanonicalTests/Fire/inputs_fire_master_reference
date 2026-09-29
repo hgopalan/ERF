@@ -295,6 +295,13 @@ erf.fire.directional_shape = "projection"
 # "advective"
 erf.fire.directional_wind_coupling = "projection"
 
+# Upwind the isotropic and the wind/slope terms of the advective Hamiltonian
+# separately, each wind/slope term by the sign of its own velocity, instead of
+# one front-normal flux. Removes the grid-orientation dependence at oblique
+# wind angles. Needs directional_wind_coupling = "advective", Rothermel and the
+# "projection" shape. false (default) keeps the front-normal flux.
+erf.fire.directional_split_hamiltonian = false
+
 # Flank rate of the "ellipse" shape (needs directional_shape = "ellipse").
 # "model" (default) keeps the model's no-wind, no-slope rate at the flanks, so
 #          the length-to-width ratio (R_h/R0 + 1)/2 is not capped

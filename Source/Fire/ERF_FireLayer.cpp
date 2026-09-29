@@ -1175,19 +1175,33 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 // the fuel map varied, while fire_ros still plotted per-cell
                 // rates that nothing advected with.
                 const bool dir_per_fuel = !m_d_rc_table.empty() && fire_fuel_model;
-                advect_levelset_directional_rk3(*fire_phi, fbp_ref ? *fire_wind_ref : *fire_wind_eff,
-                                                *fire_slopes, m_fg.geom, dt_ls,
-                                                m_params.levelset_eps_visc,
-                                                dir_state, fire_nonburnable.get(), wall_extrap,
-                                                ls_grad, m_params.directional_shape,
-                                                m_params.directional_ellipse_lw,
-                                                m_params.directional_ellipse_lw_max,
-                                                accel_factor.get(),
-                                                m_params.directional_wind_coupling,
-                                                dir_per_fuel ? fire_fuel_model.get() : nullptr,
-                                                dir_per_fuel ? m_d_rc_table.data() : nullptr,
-                                                dir_per_fuel ? static_cast<int>(m_d_rc_table.size()) : 0,
-                                                m_params.fuel_map.fuel_set_id());
+                if (m_params.directional_split_hamiltonian) {
+                    advect_levelset_directional_rk3_split(*fire_phi,
+                                                    fbp_ref ? *fire_wind_ref : *fire_wind_eff,
+                                                    *fire_slopes, m_fg.geom, dt_ls,
+                                                    m_params.levelset_eps_visc,
+                                                    dir_state, fire_nonburnable.get(), wall_extrap,
+                                                    ls_grad,
+                                                    dir_per_fuel ? fire_fuel_model.get() : nullptr,
+                                                    dir_per_fuel ? m_d_rc_table.data() : nullptr,
+                                                    dir_per_fuel ? static_cast<int>(m_d_rc_table.size()) : 0,
+                                                    m_params.fuel_map.fuel_set_id(),
+                                                    accel_factor.get());
+                } else {
+                    advect_levelset_directional_rk3(*fire_phi, fbp_ref ? *fire_wind_ref : *fire_wind_eff,
+                                                    *fire_slopes, m_fg.geom, dt_ls,
+                                                    m_params.levelset_eps_visc,
+                                                    dir_state, fire_nonburnable.get(), wall_extrap,
+                                                    ls_grad, m_params.directional_shape,
+                                                    m_params.directional_ellipse_lw,
+                                                    m_params.directional_ellipse_lw_max,
+                                                    accel_factor.get(),
+                                                    m_params.directional_wind_coupling,
+                                                    dir_per_fuel ? fire_fuel_model.get() : nullptr,
+                                                    dir_per_fuel ? m_d_rc_table.data() : nullptr,
+                                                    dir_per_fuel ? static_cast<int>(m_d_rc_table.size()) : 0,
+                                                    m_params.fuel_map.fuel_set_id());
+                }
             } else if (m_params.levelset_ellipse) {
                 // Huygens ellipse: the model's rate is the head rate and the
                 // normal speed follows the ellipse set by the midflame wind.

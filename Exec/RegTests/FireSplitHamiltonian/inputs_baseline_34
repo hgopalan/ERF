@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# 34 deg wind, the baseline scheme: R(n) from an estimated front normal times one Godunov |grad phi|.
+erf.fire.ignition.polygon_file = "line_34.csv"
+erf.fire.prescribed_wind_x = 3.3203
+erf.fire.prescribed_wind_y = 2.2396
+erf.fire.directional_split_hamiltonian = false
+erf.fire_plot_file = "plt_fire_baseline_34_"

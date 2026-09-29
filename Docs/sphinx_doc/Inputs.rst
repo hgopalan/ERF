@@ -5133,6 +5133,13 @@ Rate of spread
 |                                                | which keeps a point or finite-line fire's head at the head |                                |                        |
 |                                                | rate; needs ros_model = rothermel                          |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.directional_split_hamiltonian**     | With directional_wind_coupling = advective: upwind the     | true, false                    | false                  |
+|                                                | isotropic term and the wind and slope terms of the level-  |                                |                        |
+|                                                | set Hamiltonian separately, each advective term by the     |                                |                        |
+|                                                | sign of its own velocity, instead of one front-normal      |                                |                        |
+|                                                | flux; removes the grid-orientation dependence at oblique   |                                |                        |
+|                                                | wind angles; needs ros_model = rothermel                   |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.directional_ellipse_lw**            | Flank rate of that ellipse: the model's no-wind, no-slope  | "model", "anderson"            | "model"                |
 |                                                | rate, or b over Anderson's (1983) length-to-width ratio at |                                |                        |
 |                                                | the effective wind speed; head and back unchanged; needs   |                                |                        |

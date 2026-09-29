@@ -292,6 +292,27 @@ way, so for Rothermel the two options happen to agree.
 on a finite ignition line, where the projection's wedge shows at the line's
 ends rather than a point.
 
+With the advective coupling the equation is a genuine two-term Hamiltonian,
+:math:`\phi_t + R_0|\nabla\phi| + \max(\mathbf V\cdot\nabla\phi, 0) = 0`, but the
+default scheme still builds one scalar :math:`R(\hat n)` from an estimated front
+normal and multiplies it by a single Godunov-upwinded :math:`|\nabla\phi|`. That
+upwinds the wind-driven term along the front normal, while its information
+travels along :math:`\mathbf V`, including the component tangential to the
+front, and the error depends on the angle between :math:`\mathbf V` and the grid
+axes: none for a grid-aligned wind, a wing on the flanks for an oblique one.
+:cpp:`erf.fire.directional_split_hamiltonian = true` (default ``false``) upwinds
+the terms separately: :math:`R_0|\nabla\phi|` with the Godunov flux, and each of
+the wind and slope terms by the sign of its own velocity components
+(ordinary linear-advection upwind), with :math:`R_0`, :math:`\mathbf V_w` and
+:math:`\mathbf V_s` built once per advection call. It needs the same
+combination as the advective coupling (Rothermel, ``projection`` shape) and
+takes the per-fuel coefficient table and the acceleration and suppression
+scale factor the default path takes. The unit test
+``ERF_GTestSplitHamiltonianAdvection`` checks the head rate, per-fuel
+coefficients, a mixed fuel map and the scale factor, and
+``Exec/RegTests/FireSplitHamiltonian`` compares the two schemes on a line fire
+at 0 and 34 degrees to the wind.
+
 Flanks at :math:`R_0` are the projection's claim, not an observation, and give
 a length-to-width ratio far above the observed one: 5.7 for short grass in a
 1.5 m/s wind, where Anderson (1983) gives 1.5.

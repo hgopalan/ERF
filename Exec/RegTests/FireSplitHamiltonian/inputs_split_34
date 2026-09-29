@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# 34 deg wind, erf.fire.directional_split_hamiltonian: R0 and each of the wind/slope terms upwinded separately.
+erf.fire.ignition.polygon_file = "line_34.csv"
+erf.fire.prescribed_wind_x = 3.3203
+erf.fire.prescribed_wind_y = 2.2396
+erf.fire.directional_split_hamiltonian = true
+erf.fire_plot_file = "plt_fire_split_34_"
