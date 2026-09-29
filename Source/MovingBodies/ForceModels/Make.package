@@ -1,2 +1,6 @@
 CEXE_headers += ERF_PrescribedCtDisk.H
 CEXE_sources += ERF_PrescribedCtDisk.cpp
+ifeq ($(USE_OPENFAST), TRUE)
+  CEXE_headers += ERF_OpenFASTRotor.H
+  CEXE_sources += ERF_OpenFASTRotor.cpp
+endif

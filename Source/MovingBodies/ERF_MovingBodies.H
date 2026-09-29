@@ -12,6 +12,9 @@
 #include "ERF_BodyMotion.H"
 #include "ERF_MovingBodiesInputs.H"
 #include "ERF_PrescribedCtDisk.H"
+#ifdef ERF_USE_OPENFAST
+#include "ERF_OpenFASTRotor.H"
+#endif
 
 #ifdef ERF_USE_OPENFAST
 #include "ERF_OpenFASTDriver.H"
@@ -24,9 +27,9 @@ struct SolverChoice;
  * talks to them: created once from erf.moving_bodies.*, advanced once per ERF step on the
  * anchor level. Each step the flow velocity is sampled at every body's velocity nodes (or the
  * prescribed uniform velocity is used) and handed to the bodies, which are then stepped; the
- * forces of the bodies that carry them (the prescribed-Ct disks in this version) are spread
- * onto face-centred momentum sources, which ERF adds to its momentum right-hand side in every
- * stage of the step through add_momentum_sources().
+ * forces of the bodies (the OpenFAST turbines' loads as actuator-disk rings, the prescribed-Ct
+ * disks) are spread onto face-centred momentum sources, which ERF adds to its momentum
+ * right-hand side in every stage of the step through add_momentum_sources().
  */
 class MovingBodies
 {
@@ -74,13 +77,20 @@ private:
     std::vector<std::unique_ptr<erf_actuator::BodyMotion>> m_motion;  //!< one per body
     erf_actuator::ActuatorPoints m_points;                             //!< all bodies' velocity nodes
     std::vector<std::unique_ptr<erf_actuator::PrescribedCtDisk>> m_disks;
+    std::vector<int> m_turbine_points_t;                               //!< ring points per turbine (0: mode none)
     amrex::Real m_epsilon_dx{2.0};                                     //!< spreading width, dx units
+    bool m_axis_checked{false};
     bool m_src_defined{false};
     amrex::MultiFab m_src_x, m_src_y, m_src_z;                         //!< anchor-level momentum sources
 
-    /** Spread the disks' forces onto the momentum sources (defined on first use). */
+    /** Spread the bodies' forces onto the momentum sources (defined on first use). */
     void spread_sources (const amrex::MultiFab& U, const amrex::MultiFab* z_phys_nd,
                          const amrex::MultiFab* detJ_cc, const amrex::Geometry& geom);
+
+    /** Append time and the integrated source vector to <diagnostics_dir>/momentum_source.csv. */
+    void write_source_diagnostics (double time, const amrex::MultiFab* detJ_cc,
+                                   const amrex::Geometry& geom, bool first);
+    bool any_forcing () const;
 #ifdef ERF_USE_OPENFAST
     std::unique_ptr<erf_openfast::OpenFASTDriver> m_driver;
 #endif

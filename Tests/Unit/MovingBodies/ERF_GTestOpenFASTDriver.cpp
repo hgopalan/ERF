@@ -109,6 +109,32 @@ TEST(OpenFASTDriver, SubstepCountRefusesANonMultipleStep)
     EXPECT_FALSE(err.empty());
 }
 
+TEST(OpenFASTDriver, InductionCheckReadsWakeModFromTheAeroDynFile)
+{
+    const auto dir = scratch_dir("induction");
+    auto write = [&](const std::string& name, const std::string& text) {
+        std::ofstream out(dir / name);
+        out << text;
+        return (dir / name).string();
+    };
+    const std::string ad_bem = write("ad_bem.dat", "------- AERODYN INPUT -------\n1   Wake_Mod  - Wake/induction model (switch)\n");
+    const std::string ad_off = write("ad_off.dat", "------- AERODYN INPUT -------\n0   Wake_Mod  - Wake/induction model (switch)\n");
+    const std::string ad_old = write("ad_old.dat", "1   WakeMod   - Type of wake/induction model\n");
+    const std::string ad_none = write("ad_none.dat", "no such line here\n");
+    auto fst = [&](const std::string& name, const std::string& comp, const std::string& ad) {
+        return write(name, "2   CompAero  - Compute aerodynamic loads\n" + comp +
+                     "\"" + ad + "\"  AeroFile  - Name of file containing aerodynamic input parameters\n");
+    };
+    // relative AeroFile names resolve against the .fst directory; absolute ones are used as given
+    EXPECT_TRUE(erf_openfast::check_induction_off(fst("bem.fst", "", "ad_bem.dat")).find("Wake_Mod = 1") != std::string::npos);
+    EXPECT_TRUE(erf_openfast::check_induction_off(fst("off.fst", "", ad_off)).empty());
+    EXPECT_TRUE(erf_openfast::check_induction_off(fst("old.fst", "", "ad_old.dat")).find("Wake_Mod = 1") != std::string::npos);
+    EXPECT_TRUE(erf_openfast::check_induction_off(fst("none.fst", "", "ad_none.dat")).find("no Wake_Mod") != std::string::npos);
+    // no aerodynamics, or no AeroFile line (the stub deck): nothing to check
+    EXPECT_TRUE(erf_openfast::check_induction_off(write("noaero.fst", "0   CompAero  - off\n\"ad_bem.dat\"  AeroFile  - x\n")).empty());
+    EXPECT_TRUE(erf_openfast::check_induction_off(write("stub.fst", "dt = 0.01\nnum_blades = 3\n")).empty());
+}
+
 TEST(MovingBodiesInputs, ValidateSolverAcceptsOnlyAnelasticFixedStepSingleLevelNoTraps)
 {
     EXPECT_TRUE(MovingBodiesInputs::validate_solver(true, true, 0, false).empty());
@@ -132,9 +158,9 @@ TEST(MovingBodiesInputs, ReadFillsEveryBodyFromItsBlock)
         pa.add("type", std::string("openfast_turbine"));
         pa.add("fst_file", std::string("TA/turbine.fst"));
         pa.addarr("base_pos", std::vector<Real>{1000.0, 1000.0, 0.0});
-        pa.add("mode", std::string("alm"));
+        pa.add("mode", std::string("none"));
         pa.add("num_force_points_blade", 40);
-        pa.add("num_force_points_tower", 12);
+        pa.add("num_points_t", 24);
         pa.add("output_root", std::string("out/TA"));
     }
     {
@@ -158,18 +184,20 @@ TEST(MovingBodiesInputs, ReadFillsEveryBodyFromItsBlock)
     EXPECT_EQ(a.fst_file, "TA/turbine.fst");
     EXPECT_DOUBLE_EQ(a.base_pos[0], 1000.0);
     EXPECT_DOUBLE_EQ(a.base_pos[2], 0.0);
-    EXPECT_EQ(a.mode, "alm");
+    EXPECT_EQ(a.mode, "none");
     EXPECT_EQ(a.num_force_points_blade, 40);
-    EXPECT_EQ(a.num_force_points_tower, 12);
+    EXPECT_EQ(a.num_force_points_tower, 0);
+    EXPECT_EQ(a.num_points_t, 24);
     EXPECT_EQ(a.output_root, "out/TA");
 
-    // defaults: adm, 50 blade points, no tower, output under the diagnostics directory
+    // defaults: adm, 50 blade points, no tower, 16 ring points, output under the diagnostics directory
     const MovingBodyInputs& b = in.bodies[1];
     EXPECT_EQ(b.name, "TB");
     EXPECT_DOUBLE_EQ(b.base_pos[0], 2680.0);
     EXPECT_EQ(b.mode, "adm");
     EXPECT_EQ(b.num_force_points_blade, 50);
     EXPECT_EQ(b.num_force_points_tower, 0);
+    EXPECT_EQ(b.num_points_t, 16);
     EXPECT_EQ(b.output_root, "moving_bodies/TB");
 }
 
@@ -262,9 +290,10 @@ TEST(OpenFASTDriver, StepAdvancesTheRotorAndReturnsTheDiskLoads)
     ASSERT_TRUE(csv.good());
     std::string line;
     ASSERT_TRUE(std::getline(csv, line));
-    EXPECT_EQ(line, "time,rotor_speed,thrust_x,thrust_y,thrust_z,torque,power");
+    EXPECT_EQ(line, "time,rotor_speed,thrust_x,thrust_y,thrust_z,torque,power,axis_x,axis_y,axis_z");
     ASSERT_TRUE(std::getline(csv, line));
     EXPECT_EQ(line.rfind("0.1,", 0), 0u) << line;
+    EXPECT_EQ(line.substr(line.size() - 6), ",1,0,0") << line;   // the stub's hub axis is x
     // the flow file carries the velocities the nodes were given: the uniform 10 m/s here
     std::ifstream flow((dir / "T1_flow.csv"));
     ASSERT_TRUE(flow.good());

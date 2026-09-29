@@ -21,6 +21,16 @@ namespace erf_openfast {
 int substep_count (double dt_cfd, double dt_fast, std::string& err);
 
 /**
+ * Whether the OpenFAST model computes its own rotor induction. When ERF puts the rotor's
+ * loads into the flow, the velocities it samples already contain the induction, so AeroDyn's
+ * wake model must be off (Wake_Mod = 0, or WakeMod = 0 in older AeroDyn files). Reads the
+ * AeroFile named in the .fst; a model without one (CompAero = 0, or the bundled stub) passes.
+ *
+ * @return an empty string when the model is acceptable, otherwise the reason
+ */
+std::string check_induction_off (const std::string& fst_file);
+
+/**
  * One OpenFAST turbine. Sizes and node data are valid on every rank after init(); the ExtInfw
  * buffers are only allocated on the owner rank, which is the only rank that calls OpenFAST.
  */
@@ -52,6 +62,7 @@ struct TurbineState
     std::vector<amrex::Real> force;      //!< 3*num_force_nodes forces on the structure, as OpenFAST reports them (N)
     std::vector<amrex::Real> node_vel;   //!< 3*num_vel_nodes velocities the flow supplied at the velocity nodes (m/s)
     std::array<amrex::Real,3> hub_pos{{0.0, 0.0, 0.0}};
+    std::array<amrex::Real,3> hub_axis{{1.0, 0.0, 0.0}}; //!< unit shaft axis (hub frame x) in ERF's frame
     amrex::Real rotor_speed{0.0};        //!< rad/s about the hub axis
     // ExtInfw buffers, owner rank only; positions and forces come from OpenFAST in to_cfd and the
     // velocities the flow supplies go into from_cfd
@@ -101,8 +112,9 @@ public:
 
     /**
      * Append one row per turbine to its two diagnostics files: <output_root>_erf.csv with time,
-     * rotor speed, thrust, torque and power, and <output_root>_flow.csv with the velocity the
-     * flow supplied at the hub node and its mean over the blade nodes.
+     * rotor speed, thrust (hub and blade nodes), torque and power about the hub axis and the
+     * hub axis itself, and <output_root>_flow.csv with the velocity the flow supplied at the
+     * hub node and its mean over the blade nodes.
      */
     void write_diagnostics (double time);
 

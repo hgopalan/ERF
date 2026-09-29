@@ -290,6 +290,12 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTDriver.cpp
   )
+  # Motivation: the actuator-disk rings built from a rotor's force nodes must lie in the
+  # rotor plane at the nodes' radii and carry minus the rotor's force and torque exactly,
+  # on a yawed and tilted axis as well as on x; a wrong hub axis must be detectable.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTRotor.cpp
+  )
 endif()
 build_erf_exe(${erf_exe_name} NO_ERF_MAIN)
 target_link_libraries(${erf_exe_name} PRIVATE GTest::gtest)

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <sstream>
 #include <iomanip>
 
 #include <AMReX.H>
@@ -37,6 +38,55 @@ substep_count (double dt_cfd, double dt_fast, std::string& err)
     return n;
 }
 
+namespace {
+
+// The value field of an OpenFAST input line "value  Name  - description" for the named key,
+// or an empty string when the file has no such line. Quotes around the value are removed.
+std::string openfast_value (const std::string& fname, const std::string& key)
+{
+    std::ifstream in(fname);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream ls(line);
+        std::string value, name;
+        if (!(ls >> value >> name)) { continue; }
+        if (name == key) {
+            if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+                value = value.substr(1, value.size() - 2);
+            }
+            return value;
+        }
+    }
+    return {};
+}
+
+} // namespace
+
+std::string
+check_induction_off (const std::string& fst_file)
+{
+    const std::string aero = openfast_value(fst_file, "AeroFile");
+    if (aero.empty()) { return {}; }
+    const std::string comp = openfast_value(fst_file, "CompAero");
+    if (comp == "0") { return {}; }
+    std::string path = aero;
+    const auto slash = fst_file.find_last_of('/');
+    if (slash != std::string::npos && !aero.empty() && aero.front() != '/') {
+        path = fst_file.substr(0, slash + 1) + aero;
+    }
+    std::string wake = openfast_value(path, "Wake_Mod");
+    if (wake.empty()) { wake = openfast_value(path, "WakeMod"); }
+    if (wake.empty()) {
+        return "the AeroDyn file '" + path + "' named by '" + fst_file + "' has no Wake_Mod (or WakeMod) line";
+    }
+    if (wake != "0") {
+        return "the AeroDyn file '" + path + "' sets Wake_Mod = " + wake +
+               "; set it to 0: the velocities ERF samples already contain the rotor's induction "
+               "once its loads act on the flow";
+    }
+    return {};
+}
+
 OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
 {
     const int nprocs = ParallelDescriptor::NProcs();
@@ -49,6 +99,10 @@ OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
         t.base_pos = b.base_pos;
         t.num_force_pts_blade = b.num_force_points_blade;
         t.num_force_pts_tower = b.num_force_points_tower;
+        if (b.mode != "none") {
+            const std::string err = check_induction_off(b.fst_file);
+            if (!err.empty()) { Abort("erf.moving_bodies." + b.name + ": " + err); }
+        }
         t.owner_rank = i % nprocs;
         if (t.owner_rank == ParallelDescriptor::MyProc()) {
             t.tid_local = m_num_local++;
@@ -256,6 +310,14 @@ OpenFASTDriver::pull_from_fast (TurbineState& t)
     fast_check(err_stat, err_msg, "FAST_HubPosition for " + t.name);
     for (int d = 0; d < 3; ++d) { t.hub_pos[d] = t.base_pos[d] + hub[d]; }
     t.rotor_speed = std::sqrt(rot[0]*rot[0] + rot[1]*rot[1] + rot[2]*rot[2]);
+    // OpenFAST orientation matrices map global to local: their rows are the local axes in
+    // global coordinates. The 9 doubles are the Fortran column-major flattening, so the hub
+    // frame's x axis (the shaft) is elements 0, 3, 6.
+    {
+        Real n[3] = {static_cast<Real>(dcm[0]), static_cast<Real>(dcm[3]), static_cast<Real>(dcm[6])};
+        const Real len = std::sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+        if (len > Real(0.0)) { for (int d = 0; d < 3; ++d) { t.hub_axis[d] = n[d] / len; } }
+    }
     // the first velocity node is the hub: the two positions must agree, else the frame
     // conventions above no longer hold for this OpenFAST build
     if (nv > 0) {
@@ -290,30 +352,34 @@ OpenFASTDriver::broadcast_state (TurbineState& t)
     if (!t.force_pos.empty()) { ParallelDescriptor::Bcast(t.force_pos.data(), static_cast<int>(t.force_pos.size()), root); }
     if (!t.force.empty())     { ParallelDescriptor::Bcast(t.force.data(),     static_cast<int>(t.force.size()),     root); }
     ParallelDescriptor::Bcast(t.hub_pos.data(), 3, root);
+    ParallelDescriptor::Bcast(t.hub_axis.data(), 3, root);
     ParallelDescriptor::Bcast(&t.rotor_speed, 1, root);
 }
 
 std::array<Real,3>
 OpenFASTDriver::thrust (const TurbineState& t) const
 {
+    // the rotor: the hub node and the blade nodes (the tower nodes follow the blades)
     std::array<Real,3> f{{0.0, 0.0, 0.0}};
     const int nfb = t.num_blades * t.num_force_pts_blade;
-    for (int n = 1; n <= nfb && n < t.num_force_nodes; ++n) {
+    for (int n = 0; n <= nfb && n < t.num_force_nodes; ++n) {
         for (int d = 0; d < 3; ++d) { f[d] += t.force[3*n+d]; }
     }
     return f;
 }
 
-// torque about the hub axis, taken as the x axis of the turbine frame in this version
+// torque of the rotor's node forces about the hub axis through the hub
 Real
 OpenFASTDriver::torque (const TurbineState& t) const
 {
     Real q = 0.0;
     const int nfb = t.num_blades * t.num_force_pts_blade;
-    for (int n = 1; n <= nfb && n < t.num_force_nodes; ++n) {
+    for (int n = 0; n <= nfb && n < t.num_force_nodes; ++n) {
+        const Real rx = t.force_pos[3*n]   - t.hub_pos[0];
         const Real ry = t.force_pos[3*n+1] - t.hub_pos[1];
         const Real rz = t.force_pos[3*n+2] - t.hub_pos[2];
-        q += ry * t.force[3*n+2] - rz * t.force[3*n+1];
+        const Real fx = t.force[3*n], fy = t.force[3*n+1], fz = t.force[3*n+2];
+        q += t.hub_axis[0] * (ry * fz - rz * fy) + t.hub_axis[1] * (rz * fx - rx * fz) + t.hub_axis[2] * (rx * fy - ry * fx);
     }
     return q;
 }
@@ -328,7 +394,7 @@ OpenFASTDriver::open_diagnostics (const TurbineState& t) const
     }
     std::ofstream out(fname, std::ios::trunc);
     if (!out) { Abort("cannot open moving-bodies diagnostics file '" + fname + "'"); }
-    out << "time,rotor_speed,thrust_x,thrust_y,thrust_z,torque,power\n";
+    out << "time,rotor_speed,thrust_x,thrust_y,thrust_z,torque,power,axis_x,axis_y,axis_z\n";
     const std::string fflow = t.output_root + "_flow.csv";
     std::ofstream flow(fflow, std::ios::trunc);
     if (!flow) { Abort("cannot open moving-bodies diagnostics file '" + fflow + "'"); }
@@ -356,7 +422,8 @@ OpenFASTDriver::write_diagnostics (double time)
         }
         std::ofstream out(t.output_root + "_erf.csv", std::ios::app);
         out << std::setprecision(10) << time << "," << t.rotor_speed << ","
-            << f[0] << "," << f[1] << "," << f[2] << "," << q << "," << q * t.rotor_speed << "\n";
+            << f[0] << "," << f[1] << "," << f[2] << "," << q << "," << q * t.rotor_speed << ","
+            << t.hub_axis[0] << "," << t.hub_axis[1] << "," << t.hub_axis[2] << "\n";
         std::ofstream flow(t.output_root + "_flow.csv", std::ios::app);
         flow << std::setprecision(10) << time << ","
              << hub[0] << "," << hub[1] << "," << hub[2] << ","

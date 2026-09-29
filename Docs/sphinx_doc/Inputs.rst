@@ -2364,22 +2364,25 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.output_root**               | prefix of the body's diagnostics files:                  | String                   | <diagnostics_dir>/<name> |
 |                                                        | ``<output_root>_erf.csv`` (time, rotor speed, thrust,    |                          |                          |
-|                                                        | torque, power) and ``<output_root>_flow.csv`` (sampled   |                          |                          |
-|                                                        | hub and blade-mean velocity) for a turbine,              |                          |                          |
+|                                                        | torque, power, hub axis) and ``<output_root>_flow.csv``  |                          |                          |
+|                                                        | (sampled hub and blade-mean velocity) for a turbine,     |                          |                          |
 |                                                        | ``<output_root>_disk.csv`` (time, upstream speed, disk   |                          |                          |
 |                                                        | speed, thrust, power, integrated source) for a disk      |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.fst_file**                  | openfast_turbine: OpenFAST primary input file; it must   | String                   | must be set              |
-|                                                        | set ``CompInflow = 2`` (external inflow)                 |                          |                          |
+|                                                        | set ``CompInflow = 2`` (external inflow) and, unless     |                          |                          |
+|                                                        | ``mode = none``, ``Wake_Mod = 0`` in its AeroDyn file    |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.mode**                      | openfast_turbine: how the OpenFAST loads are represented | adm, alm                 | adm                      |
-|                                                        | in the flow                                              |                          |                          |
+| **erf.moving_bodies.<name>.mode**                      | openfast_turbine: how the OpenFAST loads reach the flow; | adm, none                | adm                      |
+|                                                        | ``adm`` spreads each blade node's force as a ring about  |                          |                          |
+|                                                        | the hub axis, ``none`` lets the turbine see the flow     |                          |                          |
+|                                                        | without forcing it (``alm`` is not available yet)        |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.num_force_points_blade**    | openfast_turbine: actuator force points per blade        | Int > 0                  | 50                       |
 |                                                        | requested from OpenFAST                                  |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.num_force_points_tower**    | openfast_turbine: actuator force points on the tower; 0  | Int >= 0                 | 0                        |
-|                                                        | leaves the tower out                                     |                          |                          |
+| **erf.moving_bodies.<name>.num_force_points_tower**    | openfast_turbine: actuator force points on the tower;    | 0                        | 0                        |
+|                                                        | only 0 (no tower forcing) is available yet               |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.rotor_radius**              | ct_disk: disk radius (m)                                 | Real > 0                 | must be set              |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
@@ -2394,7 +2397,8 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.num_points_r**              | ct_disk: rings of the polar point grid                   | Int > 0                  | 8                        |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.num_points_t**              | ct_disk: points per ring                                 | Int > 0                  | 16                       |
+| **erf.moving_bodies.<name>.num_points_t**              | points per ring: of the ct_disk polar grid, or of the    | Int > 0                  | 16                       |
+|                                                        | rings an openfast_turbine's blade nodes are spread over  |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.sample_diameters_upstream** | ct_disk: where the upstream speed is sampled, in         | Real > 0                 | 1.0                      |
 |                                                        | diameters along the normal                               |                          |                          |
@@ -2403,7 +2407,8 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.diagnostics_int**                  | write a diagnostics row every this many steps            | Int > 0                  | 1                        |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.diagnostics_dir**                  | directory of the default diagnostics files               | String                   | moving_bodies            |
+| **erf.moving_bodies.diagnostics_dir**                  | directory of the default diagnostics files and of        | String                   | moving_bodies            |
+|                                                        | ``momentum_source.csv`` (time, integrated source vector) |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.prescribed_velocity**              | testing aid: the uniform velocity given to every body    | 3 Reals                  | none (0 0 0 is used)     |
 |                                                        | node instead of the flow velocity                        |                          |                          |

@@ -580,14 +580,14 @@ Problem Location: `Exec/CanonicalTests/Canonical_RANS`_
 
 OpenFAST driver
 ---------------
-``OpenFAST_DriverOnly`` (builds with ``ERF_ENABLE_OPENFAST=ON``,
+``OpenFAST_DriverOnly`` (``mode = none``; builds with ``ERF_ENABLE_OPENFAST=ON``,
 ``ERF_OPENFAST_USE_STUB=ON`` and ``ERF_ENABLE_FFT=ON``) steps one moving body
 (:ref:`sec:MovingBodiesInputs`) through five steps of a uniform anelastic flow.
 The body is an IEA-15-MW-sized rotor of the bundled OpenFAST stub library,
 driven by a prescribed uniform velocity and adding no forcing to the flow, so
 the plotfile must equal the gold file, which is the same deck run without the
 ``erf.moving_bodies`` block. The turbine's diagnostics file ``T1_erf.csv``
-(time, rotor speed, thrust, torque, power) is written alongside.
+(time, rotor speed, thrust, torque, power, hub axis) is written alongside.
 
 Test Location: `Tests/test_files/OpenFAST_DriverOnly`_
 
@@ -626,6 +626,26 @@ in x and y and requires the plotfiles and the disk logs to agree.
 Test Location: `Tests/test_files/Actuator_UniformCtDisk`_
 
 .. _`Tests/test_files/Actuator_UniformCtDisk`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Actuator_UniformCtDisk
+
+OpenFAST rotor as an actuator disk
+----------------------------------
+``OpenFAST_ADM_Uniform`` (builds with ``ERF_ENABLE_OPENFAST=ON``,
+``ERF_OPENFAST_USE_STUB=ON``, ``ERF_ENABLE_FFT=ON`` and MPI, not Windows) runs a
+uniform 10 m/s anelastic flow for ten steps through one stub OpenFAST turbine
+in ``mode = adm``: the stub's loads, from the velocities sampled at its nodes,
+are spread as rings about the hub axis (``num_points_t = 16``,
+``epsilon = 2 dx``) and slow the flow. ``Tests/RunOpenFASTADM.cmake`` compares
+the plotfile with its gold, the sampled flow log ``T1_flow.csv`` with its gold
+to ten significant digits, and requires in every row that the integrated
+momentum source in ``moving_bodies/momentum_source.csv`` equals minus the
+thrust in ``T1_erf.csv``, since the rings preserve the rotor force and the
+spreading is normalised exactly. ``OpenFASTADM_BoxParity`` runs the same deck
+in one box and split unevenly in x and y and requires the plotfiles and the
+flow logs to agree.
+
+Test Location: `Tests/test_files/OpenFAST_ADM_Uniform`_
+
+.. _`Tests/test_files/OpenFAST_ADM_Uniform`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_Uniform
 
 Restart parity
 --------------
