@@ -333,39 +333,60 @@ TEST(LevelSetAdvection, DiscExpandsAtRos)
     }
 }
 
-/// Reinitialisation on the signed-distance path: a disc field stretched to
-/// |grad phi| = 1.5 comes back to a unit gradient within the band the
-/// pseudo-time sweeps reach, the zero contour (burned-cell count) does not
-/// move, and the field stays finite.
+/// Reinitialisation on the signed-distance path ends with
+/// min(phi_out, phi_in) ("fire area can only increase"), so phi can only fall.
+/// The gradient is therefore restored where that lowers phi -- outside the
+/// front of a field that is too steep (|grad phi| = 1.5), inside it of a field
+/// that is too flat (|grad phi| = 0.5) -- and the other side is left exactly as
+/// it was. In both cases the zero contour (burned-cell count) does not move,
+/// the sign is kept everywhere, phi never rises and the field stays finite.
 TEST(LevelSetAdvection, ReinitialisationRestoresUnitGradient)
 {
     FireGridFixture f;
     MultiFab phi(f.ba, f.dm, 1, 3), phi0(f.ba, f.dm, 1, 3), R(f.ba, f.dm, 1, 0), rhs(f.ba, f.dm, 1, 0), ref(f.ba, f.dm, 1, 0);
+    MultiFab rise(f.ba, f.dm, 1, 0);
     R.setVal(1.0);
     ref.setVal(-1.0);
     const Real R0 = 50.0;
-    const int  iters = 20;
+    const int  iters = 40;
     const Real dtau  = 0.25 * DX;
+    const LevelSetGradient g = scheme(LEVELSET_GRAD_WENO5Z_FRONT, 3.0 * DX);
 
-    for (int s : {LEVELSET_GRAD_UPWIND1, LEVELSET_GRAD_WENO5Z_FRONT}) {
-        const LevelSetGradient g = scheme(s, 3.0 * DX);
-        f.disc(phi, R0, 1.5);
-        f.disc(phi0, R0, 1.5);
+    struct Case { Real stretch; bool restore_outside; };
+    for (const Case c : {Case{1.5, true}, Case{0.5, false}}) {
+        f.disc(phi, R0, c.stretch);
+        f.disc(phi0, R0, c.stretch);
         const amrex::Long n0 = burned_cells(phi);
 
-        // |grad phi| = 1.5 before: the RHS with R = 1 is -1.5 off the axes too
+        // Cells more than a cell from the front, on the side the clamp allows
+        // to change (restored) and on the side it holds (held).
+        auto restored = [&f, R0, c] (int i, int j) {
+            const Real d = f.radius(i, j) - R0;
+            return c.restore_outside ? (d > DX && d < 3.0 * DX) : (d < -DX && d > -3.0 * DX);
+        };
+        auto held = [&f, R0, c] (int i, int j) {
+            const Real d = f.radius(i, j) - R0;
+            return c.restore_outside ? (d < -DX) : (d > DX);
+        };
+
+        // |grad phi| = stretch before: the RHS with R = 1 is -stretch off the axes too
         compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, nullptr, nullptr, false, g);
-        auto band = [&f, R0] (int i, int j) { return std::abs(f.radius(i, j) - R0) < 3.0 * DX; };
-        EXPECT_GT(max_abs_diff(rhs, ref, band), 0.4) << "scheme " << s;
+        EXPECT_GT(max_abs_diff(rhs, ref, restored), 0.4) << "stretch " << c.stretch;
 
         reinitialize_phi(phi, f.geom, iters, dtau, 4.0 * DX);
         fire_fill_boundary(phi, f.geom);
 
         compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, nullptr, nullptr, false, g);
-        EXPECT_LT(max_abs_diff(rhs, ref, band), 0.1) << "scheme " << s;
-        EXPECT_EQ(burned_cells(phi), n0) << "scheme " << s;
+        EXPECT_LT(max_abs_diff(rhs, ref, restored), 0.1) << "stretch " << c.stretch;
+        // the side the clamp holds is untouched
+        EXPECT_EQ(max_abs_diff(phi, phi0, held), Real(0.0)) << "stretch " << c.stretch;
+
+        MultiFab::Copy(rise, phi, 0, 0, 1, 0);
+        MultiFab::Subtract(rise, phi0, 0, 0, 1, 0);
+        EXPECT_LE(rise.max(0), Real(0.0)) << "phi rose somewhere, stretch " << c.stretch;
+        EXPECT_EQ(burned_cells(phi), n0) << "stretch " << c.stretch;
         // the sign is kept everywhere, not only at the front
-        EXPECT_EQ(sign_changes(phi, phi0), 0) << "scheme " << s;
-        EXPECT_EQ(nonfinite_cells(phi), 0) << "scheme " << s;
+        EXPECT_EQ(sign_changes(phi, phi0), 0) << "stretch " << c.stretch;
+        EXPECT_EQ(nonfinite_cells(phi), 0) << "stretch " << c.stretch;
     }
 }
