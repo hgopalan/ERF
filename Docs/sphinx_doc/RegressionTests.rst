@@ -647,6 +647,20 @@ Test Location: `Tests/test_files/OpenFAST_ADM_Uniform`_
 
 .. _`Tests/test_files/OpenFAST_ADM_Uniform`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_Uniform
 
+OpenFAST turbine restart
+------------------------
+``OpenFAST_ADM_Restart`` (same build requirements) runs the actuator-disk case
+straight to step 10, then to a checkpoint at step 5 and from that checkpoint
+to step 10 (``Tests/RunRestartParity.cmake``). The turbine is restored from
+its OpenFAST checkpoint under ``chk00005/moving_bodies`` and the momentum
+source is rebuilt from the restored loads, so the restarted run's plotfile
+must equal the straight run's with zero tolerance and its turbine log
+``T1_erf.csv`` must match to ten significant digits.
+
+Test Location: `Tests/test_files/OpenFAST_ADM_Restart`_
+
+.. _`Tests/test_files/OpenFAST_ADM_Restart`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_Restart
+
 Restart parity
 --------------
 ``MoistBubble_Kessler_Restart`` (MPI builds, not Windows) runs the moist bubble

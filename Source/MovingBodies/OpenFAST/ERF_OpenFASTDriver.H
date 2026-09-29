@@ -96,6 +96,16 @@ public:
     void init (double dt_cfd, double t_max);
 
     /**
+     * Instead of init(): restore every turbine from the OpenFAST checkpoint <prefix><name>.chkp
+     * written by create_checkpoint(), and take the time index from it. The first solution is
+     * then already taken; the next call is step().
+     */
+    void restart (const std::string& prefix, double dt_cfd);
+
+    /** Write every turbine's OpenFAST checkpoint as <prefix><name>.chkp (its owner rank writes). */
+    void create_checkpoint (const std::string& prefix) const;
+
+    /**
      * Run OpenFAST's first solution with the node velocities set so far, then broadcast the
      * positions and forces and open the diagnostics files. Must follow init() and precede step().
      */
@@ -137,7 +147,9 @@ private:
     void fast_check (int err_stat, const char* err_msg, const std::string& where) const;
     void pull_from_fast (TurbineState& t);
     void broadcast_state (TurbineState& t);
-    void open_diagnostics (const TurbineState& t) const;
+    void allocate ();
+    void finish_setup (TurbineState& t, double dt_cfd);
+    void open_diagnostics (const TurbineState& t, bool truncate) const;
 };
 
 } // namespace erf_openfast

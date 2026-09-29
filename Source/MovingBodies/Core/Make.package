@@ -1,4 +1,5 @@
 CEXE_headers += ERF_ActuatorGeometry.H
+CEXE_headers += ERF_DiagnosticsLog.H
 CEXE_headers += ERF_ActuatorPoints.H
 CEXE_headers += ERF_ActuatorSampling.H
 CEXE_headers += ERF_ActuatorSpreading.H

@@ -178,6 +178,11 @@ ERF::WriteCheckpointFile () const
     // ---- ParallelDescriptor::IOProcessor() creates the directories
     PreBuildDirectorHierarchy(checkpointname, "Level_", nlevels, true);
 
+#ifdef ERF_USE_MOVING_BODIES
+    // the bodies' state and the OpenFAST turbines' own checkpoints, under <chk>/moving_bodies
+    if (moving_bodies) { moving_bodies->write_checkpoint(checkpointname); }
+#endif
+
     if (sbm_state_manager) {
         const std::string schema_file = checkpointname + "/SBM_Schema";
         if (ParallelDescriptor::IOProcessor()) {
@@ -879,6 +884,10 @@ void
 ERF::ReadCheckpointFile ()
 {
     Print() << "Restart from native checkpoint " << restart_chkfile << "\n";
+
+#ifdef ERF_USE_MOVING_BODIES
+    if (moving_bodies) { moving_bodies->read_checkpoint(restart_chkfile); }
+#endif
 
     if (sbm_state_manager) {
         const std::string schema_file = restart_chkfile + "/SBM_Schema";

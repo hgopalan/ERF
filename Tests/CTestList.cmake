@@ -977,6 +977,14 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
       DATALOG "T1_flow.csv"
       DATALOG_SIGDIGITS 8)
+
+  # The same case checkpointed at step 5 and restarted to step 10: the turbine comes back
+  # from its OpenFAST checkpoint and the momentum source is rebuilt from the restored loads,
+  # so the plotfile and the turbine log must equal the straight run's exactly.
+  add_test_restart_parity(OpenFAST_ADM_Restart OpenFAST_ADM_Restart 5 10
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      DATALOG "T1_erf.csv"
+      DATALOG_SIGDIGITS 10)
 endif()
 
 if(ERF_ENABLE_MOVING_BODIES AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
