@@ -262,6 +262,15 @@ if(ERF_ENABLE_NOAHMP)
     ${CMAKE_CURRENT_SOURCE_DIR}/LandSurfaceModel/Noah-MP/ERF_GTestNoahMPResultPolicy.cpp
   )
 endif()
+if(ERF_ENABLE_MOVING_BODIES)
+  # Motivation: the actuator velocity sampler must reproduce a field linear in x, y and the
+  # physical height exactly, from each component's own staggered grid, on uniform, stretched
+  # and terrain-following meshes, and find every point in exactly one box however the domain
+  # is split.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestActuatorSampling.cpp
+  )
+endif()
 if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   # Motivation: the OpenFAST driver must keep the ERF step a whole multiple of the
   # OpenFAST step, accept only the anelastic solver with a fixed step, refuse a model
@@ -491,6 +500,14 @@ if(ERF_ENABLE_MPI)
     # WPS edge/corner regression exercises every rank.
     target_sources(${erf_parallel_exe_name} PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestTerrainNetCDF.cpp
+    )
+  endif()
+  if(ERF_ENABLE_MOVING_BODIES)
+    # Motivation: with the domain distributed over ranks, each actuator point is sampled by
+    # the one rank owning its cell and summed across ranks; the result must not depend on
+    # the rank count or on which rank holds the point.
+    target_sources(${erf_parallel_exe_name} PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestActuatorSampling.cpp
     )
   endif()
   build_erf_exe(${erf_parallel_exe_name} NO_ERF_MAIN)

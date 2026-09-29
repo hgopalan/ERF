@@ -17,18 +17,37 @@ ERF talks to OpenFAST through its external-inflow C interface (``ExtInfw``,
 OpenFAST 4). Every ERF step:
 
 #. the flow velocity at OpenFAST's velocity nodes (hub, blade and tower
-   structural nodes) is handed to OpenFAST;
+   structural nodes) is sampled from ERF's velocity field and handed to
+   OpenFAST (or, for testing, the uniform ``erf.moving_bodies.prescribed_velocity``);
 #. OpenFAST advances its own, smaller, time step ``n`` times, where ``n`` is the
    ratio of ``erf.fixed_dt`` to the OpenFAST ``DT``; ERF refuses to start when
    the ratio is not a whole number;
 #. OpenFAST returns the positions of its actuator force points and the
-   aerodynamic force on each.
+   aerodynamic force on each. OpenFAST reports every position in the
+   turbine's own frame, with the tower base at the origin; ERF adds
+   ``erf.moving_bodies.<name>.base_pos`` to put them in the domain.
 
-Each turbine is owned by one MPI rank, which is the only rank that calls
+The models are initialised at start-up, so their inputs are checked then, but
+OpenFAST's first solution is taken at the first step, once the flow exists to be
+sampled at the nodes. Each turbine is owned by one MPI rank, which is the only rank that calls
 OpenFAST; the node positions and forces are broadcast afterwards so that every
 rank sees the same turbine. The OpenFAST model must set ``CompInflow = 2``
 (external inflow) so that the velocities come from ERF rather than from
 InflowWind.
+
+Velocity sampling
+-----------------
+
+Each velocity component is interpolated to a node from its own staggered
+grid: ``u`` from the x faces, ``v`` from the y faces and ``w`` from the z
+faces, bilinearly in the horizontal between the four surrounding columns and
+linearly in the physical height within each column, using the face heights of
+``z_phys_nd`` on a stretched or terrain-following mesh. A field linear in
+``x``, ``y`` and the physical height is therefore reproduced exactly, on every
+mesh type. Every MPI rank samples the nodes whose containing cell lies in one
+of its boxes, reading neighbours from the ghost cells, and the values are
+summed across ranks, so the result does not depend on the domain
+decomposition; a node outside the domain aborts the run with its coordinates.
 
 Solver requirements
 -------------------
@@ -44,7 +63,9 @@ Diagnostics
 Every turbine writes ``<output_root>_erf.csv`` with the time, rotor speed, the
 thrust vector (the sum of the blade-node forces, as OpenFAST reports them: the
 force of the fluid on the structure, so along the inflow), the aerodynamic
-torque about the hub axis and the power (torque times rotor speed). OpenFAST
-also writes its own output files as configured in the ``.fst`` file.
+torque about the hub axis and the power (torque times rotor speed), and
+``<output_root>_flow.csv`` with the velocity the flow supplied at the hub node
+and its mean over the blade nodes. OpenFAST also writes its own output files as
+configured in the ``.fst`` file.
 
 Inputs are listed in :ref:`sec:MovingBodiesInputs`.

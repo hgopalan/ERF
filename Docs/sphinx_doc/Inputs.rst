@@ -2346,7 +2346,8 @@ time step, a single level (``amr.max_level = 0``) and no floating-point traps
 (``amrex.fpe_trap_invalid``, ``amrex.fpe_trap_zero`` and ``amrex.fpe_trap_overflow``
 off, since OpenFAST raises exceptions of its own during initialisation); the run
 aborts at start-up otherwise. Bodies are named in ``erf.moving_bodies.bodies``; each body has its own
-``erf.moving_bodies.<name>.*`` block.
+``erf.moving_bodies.<name>.*`` block. The velocity at each body's nodes is sampled
+from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is given.
 
 +------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
 | Parameter                                            | Definition                                               | Acceptable Values  | Default                  |
@@ -2367,9 +2368,10 @@ aborts at start-up otherwise. Bodies are named in ``erf.moving_bodies.bodies``; 
 | **erf.moving_bodies.<name>.num_force_points_tower**  | actuator force points on the tower; 0 leaves the tower   | Int >= 0           | 0                        |
 |                                                      | out                                                      |                    |                          |
 +------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
-| **erf.moving_bodies.<name>.output_root**             | prefix of the body's diagnostics file                    | String             | <diagnostics_dir>/<name> |
+| **erf.moving_bodies.<name>.output_root**             | prefix of the body's diagnostics files                   | String             | <diagnostics_dir>/<name> |
 |                                                      | ``<output_root>_erf.csv`` (time, rotor speed, thrust,    |                    |                          |
-|                                                      | torque, power)                                           |                    |                          |
+|                                                      | torque, power) and ``<output_root>_flow.csv`` (sampled   |                    |                          |
+|                                                      | hub and blade-mean velocity)                             |                    |                          |
 +------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+
 | **erf.moving_bodies.diagnostics_int**                | write a diagnostics row every this many steps            | Int > 0            | 1                        |
 +------------------------------------------------------+----------------------------------------------------------+--------------------+--------------------------+

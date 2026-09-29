@@ -31,6 +31,15 @@ set(SPLIT_DIR "${WORKING_DIRECTORY}/split")
 file(REMOVE_RECURSE "${REF_DIR}" "${SPLIT_DIR}")
 file(MAKE_DIRECTORY "${REF_DIR}" "${SPLIT_DIR}")
 
+# Stage the deck's auxiliary inputs (soundings, turbine files, ...) into each run directory,
+# since the runs read them relative to their own working directory
+file(GLOB _bp_aux LIST_DIRECTORIES false "${WORKING_DIRECTORY}/*")
+list(FILTER _bp_aux EXCLUDE REGEX "\\.(i|log|log\\..*)$")
+foreach(_bp_f IN LISTS _bp_aux)
+    file(COPY "${_bp_f}" DESTINATION "${REF_DIR}")
+    file(COPY "${_bp_f}" DESTINATION "${SPLIT_DIR}")
+endforeach()
+
 # MPIEXEC may be a multi-word command such as "flux run"; the helper splits
 # it, validates the program and applies MPIEXEC_PREFLAGS. An empty MPIEXEC
 # yields an empty prefix, so the runs stay serial.

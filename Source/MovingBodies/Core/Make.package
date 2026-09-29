@@ -1,0 +1,3 @@
+CEXE_headers += ERF_ActuatorPoints.H
+CEXE_headers += ERF_ActuatorSampling.H
+CEXE_sources += ERF_ActuatorSampling.cpp
