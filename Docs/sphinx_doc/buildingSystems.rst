@@ -666,6 +666,11 @@ CMake can also generate makefiles for the Ninja build system for faster compilat
 
      - Requires an OpenFAST 5 installation (``-DOPENFAST_DIR=<prefix>``; 4.2.1 has the same C API), or ``ERF_OPENFAST_USE_STUB=ON`` for testing
      - Automatically enables ``ERF_ENABLE_MOVING_BODIES=ON``
+     - ``Build/setup_openfast.sh --version 5.0.0`` downloads the release, builds it the way
+       ERF needs (shared libraries, double precision, the C API on) and installs it under
+       ``$HOME/opt/openfast-<version>`` (``--prefix``, ``--src``, ``--jobs``, ``--fortran``
+       and ``--configure-only`` are the options); it prints the ``-DOPENFAST_DIR`` to use
+       and the library path to export at run time
 
    * ``ERF_ENABLE_NOAHMP`` - NOAHMP land surface model
 
