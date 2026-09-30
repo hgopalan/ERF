@@ -650,6 +650,24 @@ Test Location: `Tests/test_files/OpenFAST_ADM_Uniform`_
 
 .. _`Tests/test_files/OpenFAST_ADM_Uniform`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_Uniform
 
+OpenFAST rotor as an actuator line
+----------------------------------
+``OpenFAST_ALM_Uniform`` (same build requirements) runs the actuator-disk deck
+with ``mode = alm``: the stub's loads are spread from its rotating blade nodes
+(20 per blade, ``epsilon = 2 dx``) instead of as rings, so the three lines of
+force turn through the 50 m cells at 0.9 cells per step, under the one-cell
+limit ``erf.moving_bodies.alm_max_tip_cells`` (a 1 s step aborts at the first
+step). The same three checks apply: plotfile and ``T1_flow.csv`` against their
+golds, and the integrated momentum source equal to minus the thrust in every
+row, which for the line holds for the full force vector.
+``OpenFASTALM_BoxParity`` runs the deck in one box and split unevenly in x and
+y: the blade points cross box faces as they turn, so the plotfiles and flow logs
+must agree.
+
+Test Location: `Tests/test_files/OpenFAST_ALM_Uniform`_
+
+.. _`Tests/test_files/OpenFAST_ALM_Uniform`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_Uniform
+
 Wake sampling lines
 -------------------
 ``OpenFAST_ADM_Wake`` (same build requirements) is the actuator-disk case with

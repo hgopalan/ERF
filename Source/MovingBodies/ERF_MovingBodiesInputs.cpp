@@ -43,6 +43,8 @@ MovingBodiesInputs::read ()
     }
     pp.query("avg_start", in.avg_start);
     if (in.avg_start < 0.0) { Abort("erf.moving_bodies.avg_start must be >= 0"); }
+    pp.query("alm_max_tip_cells", in.alm_max_tip_cells);
+    if (!(in.alm_max_tip_cells > 0.0)) { Abort("erf.moving_bodies.alm_max_tip_cells must be > 0 (cells swept by a blade tip per step)"); }
 
     std::vector<Real> vel;
     if (pp.queryarr("prescribed_velocity", vel)) {
@@ -92,11 +94,8 @@ MovingBodiesInputs::read ()
             ppb.get("fst_file", b.fst_file);
 
             ppb.query("mode", b.mode);
-            if (b.mode == "alm") {
-                Abort("erf.moving_bodies." + name + ".mode = alm is not available in this version; use adm or none");
-            }
-            if (b.mode != "adm" && b.mode != "none") {
-                Abort("erf.moving_bodies." + name + ".mode must be adm or none, not '" + b.mode + "'");
+            if (b.mode != "adm" && b.mode != "alm" && b.mode != "none") {
+                Abort("erf.moving_bodies." + name + ".mode must be adm, alm or none, not '" + b.mode + "'");
             }
 
             ppb.query("num_force_points_blade", b.num_force_points_blade);

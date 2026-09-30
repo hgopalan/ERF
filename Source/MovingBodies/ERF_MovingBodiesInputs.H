@@ -19,7 +19,7 @@ struct MovingBodyInputs
     std::string output_root;                 //!< prefix of the per-body diagnostics files
     // openfast_turbine
     std::string fst_file;                    //!< OpenFAST primary input file
-    std::string mode{"adm"};                 //!< none | adm: how the OpenFAST loads reach the flow (none: they do not)
+    std::string mode{"adm"};                 //!< adm | alm | none: how the OpenFAST loads reach the flow (none: they do not)
     int num_force_points_blade{50};          //!< actuator force points per blade requested from OpenFAST
     int num_force_points_tower{0};           //!< actuator force points on the tower (0: no tower forcing)
     // ct_disk
@@ -40,7 +40,7 @@ struct MovingBodyInputs
  *   erf.moving_bodies.T1.type        = openfast_turbine
  *   erf.moving_bodies.T1.fst_file    = T1/IEA-15-240-RWT.fst
  *   erf.moving_bodies.T1.base_pos    = 1000 1000 0
- *   erf.moving_bodies.T1.mode        = adm
+ *   erf.moving_bodies.T1.mode        = adm                (adm: disk rings; alm: a point per blade node; none)
  *   erf.moving_bodies.T1.num_force_points_blade = 50
  *   erf.moving_bodies.T1.num_force_points_tower = 0
  *   erf.moving_bodies.T1.output_root = moving_bodies/T1
@@ -53,6 +53,7 @@ struct MovingBodyInputs
  *   erf.moving_bodies.diagnostics_int = 1
  *   erf.moving_bodies.wake.lines_xD   = 2 4 7      (wake lines behind every rotor; see WakeInputs)
  *   erf.moving_bodies.avg_start       = 400.0      (running averages and statistics start here)
+ *   erf.moving_bodies.alm_max_tip_cells = 1.0      (abort when a blade tip sweeps more cells than this per step)
  *   erf.moving_bodies.prescribed_velocity = 10.59 0 0   (testing aid: fixed inflow to every body)
  */
 /** erf.moving_bodies.wake.*: sampling lines behind every rotor (off unless lines_xD is given). */
@@ -75,6 +76,7 @@ struct MovingBodiesInputs
     std::array<amrex::Real,3> prescribed_velocity{{0.0, 0.0, 0.0}};
     WakeInputs wake;
     amrex::Real avg_start{0.0};              //!< time from which the running averages and statistics accumulate
+    amrex::Real alm_max_tip_cells{1.0};      //!< actuator line: largest tip travel per ERF step, in cells
 
     /** Read erf.moving_bodies.*; aborts on an unknown type, a duplicate name or a bad value. */
     static MovingBodiesInputs read ();

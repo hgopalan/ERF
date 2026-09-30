@@ -974,10 +974,11 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
 endif()
 
 if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
-  # A stub OpenFAST turbine as an actuator disk in a uniform anelastic flow: its loads are
-  # spread as rings about the hub axis and slow the flow. The gold plotfile and the sampled
-  # flow log are the regression; in every row the integrated source must equal minus the
-  # turbine's thrust, since the rings preserve the rotor force and the spreading is exact.
+  # A stub OpenFAST turbine as an actuator disk (or, below, an actuator line) in a uniform
+  # anelastic flow: its loads are spread as rings about the hub axis (or from the rotating
+  # blade nodes) and slow the flow. The gold plotfile and the sampled flow log are the
+  # regression; in every row the integrated source must equal minus the turbine's thrust,
+  # since the rings (and the line) preserve the rotor force and the spreading is exact.
   function(add_test_openfast_adm TEST_NAME TEST_FILES_DIR PLTFILE)
       # optional 4th argument: the log compared with its gold (default T1_flow.csv)
       set(_log "T1_flow.csv")
@@ -1020,6 +1021,19 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # sampled flow log must agree, so the rings and their spreading are independent of the
   # decomposition.
   add_test_box_parity(OpenFASTADM_BoxParity OpenFAST_ADM_Uniform "plt00010"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
+      DATALOG "T1_flow.csv"
+      DATALOG_SIGDIGITS 8)
+
+  # The same stub turbine as an actuator line (mode = alm): one point per rotating blade node,
+  # the tip sweeping 0.9 cells per step under the one-cell limit. Same three checks; the
+  # integrated source equals minus the full thrust vector, so fx == -thrust_x holds exactly.
+  add_test_openfast_adm(OpenFAST_ALM_Uniform OpenFAST_ALM_Uniform "plt00010")
+
+  # The actuator line in one box and split unevenly in x and y: the blade points fall on
+  # different box faces every step, so the plotfile and the flow log must agree.
+  add_test_box_parity(OpenFASTALM_BoxParity OpenFAST_ALM_Uniform "plt00010"
       REFERENCE_OPTIONS "amr.max_grid_size=1024"
       SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
       DATALOG "T1_flow.csv"

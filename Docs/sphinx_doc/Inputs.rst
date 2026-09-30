@@ -2373,10 +2373,11 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 |                                                        | set ``CompInflow = 2`` (external inflow) and, unless     |                          |                          |
 |                                                        | ``mode = none``, ``Wake_Mod = 0`` in its AeroDyn file    |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.mode**                      | openfast_turbine: how the OpenFAST loads reach the flow; | adm, none                | adm                      |
+| **erf.moving_bodies.<name>.mode**                      | openfast_turbine: how the OpenFAST loads reach the flow; | adm, alm, none           | adm                      |
 |                                                        | ``adm`` spreads each blade node's force as a ring about  |                          |                          |
-|                                                        | the hub axis, ``none`` lets the turbine see the flow     |                          |                          |
-|                                                        | without forcing it (``alm`` is not available yet)        |                          |                          |
+|                                                        | the hub axis, ``alm`` spreads it from the rotating blade |                          |                          |
+|                                                        | node itself, ``none`` lets the turbine see the flow      |                          |                          |
+|                                                        | without forcing it                                       |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.num_force_points_blade**    | openfast_turbine: actuator force points per blade        | Int > 0                  | 50                       |
 |                                                        | requested from OpenFAST                                  |                          |                          |
@@ -2425,6 +2426,11 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.avg_start**                        | time (s) from which the wake running averages and the    | Real >= 0                | 0                        |
 |                                                        | bodies' statistics accumulate                            |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.alm_max_tip_cells**                | actuator line: the most cells a blade tip may sweep in   | Real > 0                 | 1.0                      |
+|                                                        | one step (rotor speed times tip radius times dt over the |                          |                          |
+|                                                        | smallest cell size); the run aborts above it, naming the |                          |                          |
+|                                                        | largest ``erf.fixed_dt`` that passes                     |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 
 .. _sec:ConstantMassFluxInputs:

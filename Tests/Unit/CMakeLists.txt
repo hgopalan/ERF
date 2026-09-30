@@ -303,7 +303,9 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   )
   # Motivation: the actuator-disk rings built from a rotor's force nodes must lie in the
   # rotor plane at the nodes' radii and carry minus the rotor's force and torque exactly,
-  # on a yawed and tilted axis as well as on x; a wrong hub axis must be detectable.
+  # on a yawed and tilted axis as well as on x; a wrong hub axis must be detectable. The
+  # actuator-line points must be the force nodes with the forces on the fluid, tower nodes
+  # left out, and the tip travel per step must follow the rotor speed and the tip radius.
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTRotor.cpp
   )
