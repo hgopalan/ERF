@@ -104,6 +104,14 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, double dt, double t_max, bool
             turbines.push_back(b);
             m_turbine_mode.push_back(b.mode);
             m_turbine_points_t.push_back(b.num_points_t);
+            m_turbine_in.push_back(b);
+            if (b.mode != "none" && b.num_force_points_tower > 0) {
+                Print() << "  " << b.name << ": tower loads forced on " << b.num_force_points_tower << " points\n";
+            }
+            if (b.mode != "none" && b.nacelle_cd > 0.0) {
+                Print() << "  " << b.name << ": nacelle drag point, cd " << b.nacelle_cd << ", area " << b.nacelle_area
+                        << " m^2, density " << b.air_density << "\n";
+            }
         }
     }
     m_epsilon_dx = m_in.bodies.empty() ? 2.0 : m_in.bodies[0].epsilon;
@@ -126,6 +134,14 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, double dt, double t_max, bool
             Print() << "  " << t.name << ": OpenFAST dt " << t.dt_fast << ", " << t.num_substeps
                     << " substeps per ERF step, " << t.num_blades << " blades, "
                     << t.num_vel_nodes << " velocity nodes, " << t.num_force_nodes << " force nodes\n";
+        }
+    }
+    for (std::size_t i = 0; i < turbines.size(); ++i) {
+        // the tower's wake now reaches the blades through the flow: AeroDyn's own tower-shadow
+        // correction would count it twice
+        if (turbines[i].mode != "none" && turbines[i].num_force_points_tower > 0) {
+            const std::string w = erf_openfast::check_tower_shadow_off(turbines[i].fst_file);
+            if (!w.empty()) { Print() << "WARNING: erf.moving_bodies." << turbines[i].name << ": " << w << "\n"; }
         }
     }
     // on a restart the turbines are restored by read_checkpoint(), from ERF's checkpoint read
@@ -444,6 +460,15 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
                 }
                 erf_actuator::alm_points(turbs[i], pos, force);
             }
+            // the tower's loads (OpenFAST's tower force nodes, if the model has them and the
+            // user asked for them) and the nacelle drag point at the hub, in either mode
+            erf_actuator::tower_points(turbs[i], pos, force);
+            if (m_turbine_in[i].nacelle_cd > 0.0) {
+                for (int d = 0; d < 3; ++d) {
+                    pos.push_back(turbs[i].hub_pos[d]);
+                    force.push_back(-turbs[i].nacelle_force[d]);   // on the fluid
+                }
+            }
         }
         m_axis_checked = true;
     }
@@ -496,6 +521,21 @@ MovingBodies::supply_velocities (const MultiFab& U, const MultiFab& V, const Mul
 #ifdef ERF_USE_OPENFAST
     for (int i = 0; i < nturb; ++i) {
         m_driver->set_node_velocities(i, m_points.body_velocities(i));
+        // the nacelle drag from the hub node's velocity (the first velocity node), corrected
+        // for the drag point's own kernel; recorded on the structure for the diagnostics
+        const MovingBodyInputs& b = m_turbine_in[i];
+        std::array<Real,3> f_nac{{0.0, 0.0, 0.0}};
+        if (m_turbine_mode[i] != "none" && b.nacelle_cd > 0.0) {
+            const std::vector<Real>& uvw = m_points.body_velocities(i);
+            if (uvw.size() >= 3) {
+                const std::array<Real,3> u_hub{{uvw[0], uvw[1], uvw[2]}};
+                const Real eps = m_epsilon_dx * geom.CellSize(0);
+                const auto u_free = erf_actuator::nacelle_corrected_velocity(u_hub, b.nacelle_cd, b.nacelle_area, eps);
+                const auto f_fluid = erf_actuator::nacelle_drag_force(u_free, b.air_density, b.nacelle_cd, b.nacelle_area);
+                for (int d = 0; d < 3; ++d) { f_nac[d] = -f_fluid[d]; }
+            }
+        }
+        m_driver->set_nacelle_force(i, f_nac);
     }
 #endif
     for (std::size_t k = 0; k < m_disks.size(); ++k) {

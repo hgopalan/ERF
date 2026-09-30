@@ -6,6 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,8 @@ struct StubDeck {
     double ct = 0.8;
     double cp = 0.45;
     double air_density = 1.225;
+    double tower_diameter = 0.0;   // > 0 with tower_cd: the stub puts a cylinder drag on its tower force nodes
+    double tower_cd = 0.0;
 
     double omega () const { return rotor_speed_rpm * 2.0 * pi / 60.0; }
     double area () const { return pi * rotor_radius * rotor_radius; }
@@ -60,7 +63,9 @@ std::string write_stub_deck (const std::filesystem::path& dir, const StubDeck& d
         << "rotor_speed_rpm = " << d.rotor_speed_rpm << "\n"
         << "ct = " << d.ct << "\n"
         << "cp = " << d.cp << "\n"
-        << "air_density = " << d.air_density << "\n";
+        << "air_density = " << d.air_density << "\n"
+        << "tower_diameter = " << d.tower_diameter << "\n"
+        << "tower_cd = " << d.tower_cd << "\n";
     return fname.string();
 }
 
@@ -346,10 +351,25 @@ TEST(OpenFASTDriver, StepAdvancesTheRotorAndReturnsTheDiskLoads)
     ASSERT_TRUE(csv.good());
     std::string line;
     ASSERT_TRUE(std::getline(csv, line));
-    EXPECT_EQ(line, "time,rotor_speed,thrust_x,thrust_y,thrust_z,torque,power,axis_x,axis_y,axis_z");
+    EXPECT_EQ(line, "time,rotor_speed,thrust_x,thrust_y,thrust_z,torque,power,axis_x,axis_y,axis_z,"
+                    "tower_x,tower_y,tower_z,nacelle_x,nacelle_y,nacelle_z,load_x,load_y,load_z");
     ASSERT_TRUE(std::getline(csv, line));
     EXPECT_EQ(line.rfind("0.1,", 0), 0u) << line;
-    EXPECT_EQ(line.substr(line.size() - 6), ",1,0,0") << line;   // the stub's hub axis is x
+    std::vector<std::string> fields;
+    {
+        std::istringstream ls(line);
+        std::string fld;
+        while (std::getline(ls, fld, ',')) { fields.push_back(fld); }
+    }
+    ASSERT_EQ(fields.size(), 19u) << line;
+    EXPECT_EQ(fields[7], "1") << line;   // the stub's hub axis is x
+    EXPECT_EQ(fields[8], "0") << line;
+    EXPECT_EQ(fields[9], "0") << line;
+    // no tower force nodes and no nacelle set: those columns are zero and the load is the thrust
+    for (int k = 10; k < 16; ++k) { EXPECT_EQ(fields[k], "0") << "column " << k << ": " << line; }
+    EXPECT_EQ(fields[16], fields[2]) << line;
+    EXPECT_EQ(fields[17], fields[3]) << line;
+    EXPECT_EQ(fields[18], fields[4]) << line;
     // the flow file carries the velocities the nodes were given: the uniform 10 m/s here
     std::ifstream flow((dir / "T1_flow.csv"));
     ASSERT_TRUE(flow.good());
@@ -357,4 +377,86 @@ TEST(OpenFASTDriver, StepAdvancesTheRotorAndReturnsTheDiskLoads)
     EXPECT_EQ(line, "time,hub_u,hub_v,hub_w,blade_mean_u,blade_mean_v,blade_mean_w");
     ASSERT_TRUE(std::getline(flow, line));
     EXPECT_EQ(line, "0.1,10,0,0,10,0,0") << line;
+}
+
+// The stub's tower: with tower nodes in the deck and tower force points requested, every tower
+// force node carries the cylinder drag of its length for the velocity the flow supplied, along
+// the flow (on the structure), and the rotor's loads are unchanged by the tower.
+TEST(OpenFASTDriver, TowerNodesCarryTheCylinderDragForAPrescribedVelocity)
+{
+    StubDeck d;
+    d.num_tower_nodes = 6;
+    d.tower_diameter = 8.0;
+    d.tower_cd = 1.0;
+    const auto dir = scratch_dir("tower");
+    const std::string fst = write_stub_deck(dir, d);
+    MovingBodyInputs b = one_turbine(fst, dir);
+    b.num_force_points_tower = 10;
+    erf_openfast::OpenFASTDriver driver({b});
+    driver.init(0.05, 1.0);
+    const std::array<Real,3> wind{{10.0, -2.0, 0.0}};
+    driver.set_uniform_velocity(wind);
+    driver.solution0();
+    const erf_openfast::TurbineState& t = driver.turbines()[0];
+    EXPECT_EQ(t.num_tower_elem, 6);
+    EXPECT_EQ(t.num_force_pts_tower, 10);
+    ASSERT_EQ(t.num_vel_nodes, 1 + d.num_blades * d.num_blade_nodes + 6);
+    ASSERT_EQ(t.num_force_nodes, 1 + d.num_blades * 6 + 10);
+    // tower force nodes: on the tower axis (the base), base to top at half-segment heights
+    const int first = 1 + d.num_blades * 6;
+    for (int k = 0; k < 10; ++k) {
+        const int n = first + k;
+        EXPECT_NEAR(t.force_pos[3*n],   500.0, 1.0e-4) << "tower node " << k;
+        EXPECT_NEAR(t.force_pos[3*n+1], 500.0, 1.0e-4) << "tower node " << k;
+        EXPECT_NEAR(t.force_pos[3*n+2], (k + 0.5) / 10.0 * d.hub_height, 1.0e-3) << "tower node " << k;
+    }
+    // each node: 1/2 rho Cd D dz |u_h| u_h along the horizontal wind, nothing vertical
+    const double speed = std::sqrt(wind[0]*wind[0] + wind[1]*wind[1]);
+    const double per_node = 0.5 * d.air_density * d.tower_cd * d.tower_diameter * (d.hub_height / 10.0) * speed;
+    for (int k = 0; k < 10; ++k) {
+        const int n = first + k;
+        EXPECT_NEAR(t.force[3*n],   per_node * wind[0], 1.0e-3 * per_node * speed) << "tower node " << k;
+        EXPECT_NEAR(t.force[3*n+1], per_node * wind[1], 1.0e-3 * per_node * speed) << "tower node " << k;
+        EXPECT_NEAR(t.force[3*n+2], 0.0, 1.0e-6) << "tower node " << k;
+    }
+    const auto ft = driver.tower_force(t);
+    EXPECT_NEAR(ft[0], 10 * per_node * wind[0], 1.0e-2 * per_node * speed);
+    EXPECT_NEAR(ft[1], 10 * per_node * wind[1], 1.0e-2 * per_node * speed);
+    // the rotor's thrust is the disk model's, untouched by the tower
+    const auto f = driver.thrust(t);
+    const double u_axial = wind[0];
+    EXPECT_NEAR(f[0], 0.5 * d.air_density * d.ct * u_axial * u_axial * d.area(), 1.0e-3 * 0.5 * d.air_density * d.ct * u_axial * u_axial * d.area());
+    // the nacelle force is the caller's: zero until set, then reported as given
+    EXPECT_EQ(t.nacelle_force[0], Real(0.0));
+    driver.set_nacelle_force(0, {{123.0, -4.0, 0.5}});
+    EXPECT_EQ(driver.turbines()[0].nacelle_force[0], Real(123.0));
+    EXPECT_EQ(driver.turbines()[0].nacelle_force[1], Real(-4.0));
+    // without tower force points the deck's tower nodes carry no force nodes at all
+    MovingBodyInputs b0 = one_turbine(fst, dir);
+    b0.num_force_points_tower = 0;
+    erf_openfast::OpenFASTDriver bare({b0});
+    bare.init(0.05, 1.0);
+    EXPECT_EQ(bare.turbines()[0].num_force_nodes, 1 + d.num_blades * 6);
+    EXPECT_EQ(bare.tower_force(bare.turbines()[0])[0], Real(0.0));
+}
+
+TEST(OpenFASTDriver, TowerShadowCheckReadsTwrShadowFromTheAeroDynFile)
+{
+    const auto dir = scratch_dir("shadow");
+    auto write = [&](const std::string& name, const std::string& body) {
+        std::ofstream out(dir / name);
+        out << body;
+        return (dir / name).string();
+    };
+    write("ad_shadow.dat", "0   Wake_Mod  - none\n1   TwrShadow  - Powles\n");
+    write("ad_noshadow.dat", "0   Wake_Mod  - none\n0   TwrShadow  - off\n");
+    write("ad_old.dat", "0   WakeMod  - none\n");
+    auto fst = [&](const std::string& name, const std::string& ad) {
+        return write(name, "1   CompAero  - on\n\"" + ad + "\"  AeroFile  - x\n");
+    };
+    EXPECT_TRUE(erf_openfast::check_tower_shadow_off(fst("s.fst", "ad_shadow.dat")).find("TwrShadow = 1") != std::string::npos);
+    EXPECT_TRUE(erf_openfast::check_tower_shadow_off(fst("n.fst", "ad_noshadow.dat")).empty());
+    EXPECT_TRUE(erf_openfast::check_tower_shadow_off(fst("o.fst", "ad_old.dat")).empty());   // no such line: nothing to warn about
+    EXPECT_TRUE(erf_openfast::check_tower_shadow_off(write("noaero.fst", "0   CompAero  - off\n\"ad_shadow.dat\"  AeroFile  - x\n")).empty());
+    EXPECT_TRUE(erf_openfast::check_tower_shadow_off(write("stub.fst", "dt = 0.01\n")).empty());
 }

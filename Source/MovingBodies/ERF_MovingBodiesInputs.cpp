@@ -106,8 +106,20 @@ MovingBodiesInputs::read ()
             if (b.num_force_points_tower < 0) {
                 Abort("erf.moving_bodies." + name + ".num_force_points_tower must be >= 0");
             }
-            if (b.num_force_points_tower > 0) {
-                Abort("erf.moving_bodies." + name + ".num_force_points_tower > 0: tower forcing is not available in this version");
+            ppb.query("nacelle_cd", b.nacelle_cd);
+            if (b.nacelle_cd < 0.0) {
+                Abort("erf.moving_bodies." + name + ".nacelle_cd must be >= 0");
+            }
+            ppb.query("nacelle_area", b.nacelle_area);
+            if (b.nacelle_area < 0.0) {
+                Abort("erf.moving_bodies." + name + ".nacelle_area must be >= 0 (m^2)");
+            }
+            if (b.nacelle_cd > 0.0 && !(b.nacelle_area > 0.0)) {
+                Abort("erf.moving_bodies." + name + ".nacelle_cd > 0 needs nacelle_area > 0 (m^2)");
+            }
+            ppb.query("air_density", b.air_density);
+            if (!(b.air_density > 0.0)) {
+                Abort("erf.moving_bodies." + name + ".air_density must be positive");
             }
         } else {
             ppb.get("rotor_radius", b.rotor_radius);

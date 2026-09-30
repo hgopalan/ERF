@@ -980,10 +980,15 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # regression; in every row the integrated source must equal minus the turbine's thrust,
   # since the rings (and the line) preserve the rotor force and the spreading is exact.
   function(add_test_openfast_adm TEST_NAME TEST_FILES_DIR PLTFILE)
-      # optional 4th argument: the log compared with its gold (default T1_flow.csv)
+      # optional 4th argument: the log compared with its gold (default T1_flow.csv); optional
+      # 5th: the T1_erf.csv column the integrated source must equal minus (default thrust_x)
       set(_log "T1_flow.csv")
       if(ARGC GREATER 3)
           set(_log "${ARGV3}")
+      endif()
+      set(_force "thrust_x")
+      if(ARGC GREATER 4)
+          set(_force "${ARGV4}")
       endif()
       setup_test()
       resolve_test_exe("" "erf_exec" TEST_EXE)
@@ -1005,6 +1010,7 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
           "-DFLOW_GOLD=${CURRENT_TEST_SOURCE_DIR}/${_log}.gold"
           "-DSIGDIGITS=10"
           "-DTURBINE_CSV=T1_erf.csv"
+          "-DFORCE_COLUMN=${_force}"
           "-DSOURCE_CSV=moving_bodies/momentum_source.csv"
           -P ${PROJECT_SOURCE_DIR}/Tests/RunOpenFASTADM.cmake)
       set_tests_properties(${TEST_NAME}
@@ -1036,6 +1042,20 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   add_test_box_parity(OpenFASTALM_BoxParity OpenFAST_ALM_Uniform "plt00010"
       REFERENCE_OPTIONS "amr.max_grid_size=1024"
       SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
+      DATALOG "T1_flow.csv"
+      DATALOG_SIGDIGITS 8)
+
+  # The actuator line with the tower and nacelle forced too: the stub's cylinder drag on 10 tower
+  # force nodes and ERF's nacelle drag point at the hub. The integrated source must equal minus
+  # the total load (thrust + tower + nacelle: load_x), so the tower and nacelle points are spread
+  # exactly; the plotfile carries the tower wake below the rotor.
+  add_test_openfast_adm(OpenFAST_ALM_Tower OpenFAST_ALM_Tower "plt00010" "T1_flow.csv" "load_x")
+
+  # The tower and nacelle points sit on the tower axis, which the uneven split puts on a box
+  # face: the plotfiles and flow logs must agree with the one-box run.
+  add_test_box_parity(OpenFASTALM_Tower_BoxParity OpenFAST_ALM_Tower "plt00010"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=15 amr.max_grid_size_y=12 amr.max_grid_size_z=64"
       DATALOG "T1_flow.csv"
       DATALOG_SIGDIGITS 8)
 

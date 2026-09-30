@@ -3,7 +3,9 @@
 // the axis must be preserved, the ring points must lie in the node's rotor plane at its
 // radius, and the forces must be those on the fluid. The actuator-line representation: the
 // points are the force nodes themselves with the forces on the fluid, and the tip travel per
-// step that limits the time step follows from the rotor speed and the tip radius.
+// step that limits the time step follows from the rotor speed and the tip radius. The tower
+// points are the tower force nodes after the blades, and the nacelle drag point follows the
+// drag law with the kernel's self-induction correction.
 
 #include <array>
 #include <cmath>
@@ -266,4 +268,77 @@ TEST(OpenFASTRotor, TipTravelPerStepFromRotorSpeedAndTipRadius)
     bare.force_pos.assign(3, 0.0); bare.force.assign(3, 0.0);
     bare.rotor_speed = 1.0;
     EXPECT_EQ(erf_actuator::tip_radius(bare), Real(0.0));
+}
+
+TEST(OpenFASTRotor, TowerPointsAreTheTowerNodesAfterTheBlades)
+{
+    const std::array<Real,3> hub{{500.0, 500.0, 150.0}};
+    const std::array<Real,3> axis{{1.0, 0.0, 0.0}};
+    const int nodes = 4, ntow = 3;
+    TurbineState t = make_rotor(hub, axis, nodes, 120.0, 2.0e4, 3.0e3);
+    // no tower nodes yet: nothing appended, zero tower force
+    std::vector<Real> pos, f;
+    erf_actuator::tower_points(t, pos, f);
+    EXPECT_TRUE(pos.empty());
+    EXPECT_TRUE(f.empty());
+    // three tower nodes base to top carrying drag along +x (on the structure) and a little in y
+    t.num_force_pts_tower = ntow;
+    t.num_force_nodes += ntow;
+    for (int k = 0; k < ntow; ++k) {
+        t.force_pos.insert(t.force_pos.end(), {hub[0], hub[1], Real(25.0 + 50.0 * k)});
+        t.force.insert(t.force.end(), {Real(1.0e3 * (k + 1)), Real(10.0), Real(0.0)});
+    }
+    pos.assign(3, Real(-1.0)); f.assign(3, Real(-2.0));
+    erf_actuator::tower_points(t, pos, f);
+    ASSERT_EQ(pos.size(), 3u * (1 + ntow));
+    ASSERT_EQ(f.size(), pos.size());
+    EXPECT_EQ(pos[0], Real(-1.0));   // what was there is kept
+    for (int k = 0; k < ntow; ++k) {
+        const int nd = 1 + 3 * nodes + k;
+        for (int d = 0; d < 3; ++d) {
+            EXPECT_EQ(pos[3 * (1 + k) + d], t.force_pos[3*nd+d]) << "tower node " << k << " component " << d;
+            EXPECT_EQ(f[3 * (1 + k) + d], -t.force[3*nd+d]) << "tower node " << k << " component " << d;
+        }
+    }
+    // the blade points are unaffected by the tower nodes
+    std::vector<Real> pb, fb;
+    erf_actuator::alm_points(t, pb, fb);
+    EXPECT_EQ(pb.size(), 3u * (1 + 3 * nodes));
+    // a node count shorter than the tower claims: only the nodes that exist are taken
+    t.num_force_nodes -= 1;
+    pos.clear(); f.clear();
+    erf_actuator::tower_points(t, pos, f);
+    EXPECT_EQ(pos.size(), 3u * (ntow - 1));
+}
+
+TEST(OpenFASTRotor, NacelleDragFollowsTheDragLawWithTheKernelCorrection)
+{
+    const Real rho = 1.2, cd = 1.0, area = 50.0;
+    // head-on: -1/2 rho cd A U^2 along the flow
+    auto f = erf_actuator::nacelle_drag_force({{10.0, 0.0, 0.0}}, rho, cd, area);
+    EXPECT_NEAR(f[0], -0.5 * rho * cd * area * 100.0, tol() * 3000.0);
+    EXPECT_EQ(f[1], Real(0.0));
+    EXPECT_EQ(f[2], Real(0.0));
+    // oblique: along -u with magnitude 1/2 rho cd A |u|^2
+    const std::array<Real,3> u{{6.0, -8.0, 2.0}};
+    f = erf_actuator::nacelle_drag_force(u, rho, cd, area);
+    const Real speed2 = 36.0 + 64.0 + 4.0;
+    const Real mag = std::sqrt(f[0]*f[0] + f[1]*f[1] + f[2]*f[2]);
+    EXPECT_NEAR(mag, 0.5 * rho * cd * area * speed2, tol() * 3200.0);
+    for (int d = 0; d < 3; ++d) { EXPECT_NEAR(f[d] / mag, -u[d] / std::sqrt(speed2), tol()); }
+    // at rest, or without drag: nothing
+    f = erf_actuator::nacelle_drag_force({{0.0, 0.0, 0.0}}, rho, cd, area);
+    EXPECT_EQ(f[0], Real(0.0));
+    f = erf_actuator::nacelle_drag_force(u, rho, 0.0, area);
+    EXPECT_EQ(f[1], Real(0.0));
+    // the correction: u / (1 - cd A / (4 pi eps^2)); with eps = sqrt(2 cd A / pi) (Kynema's
+    // choice) the factor is 1 - 1/8, so the corrected velocity is 8/7 of the sampled one
+    const Real eps = std::sqrt(2.0 * cd * area / pi);
+    const auto uc = erf_actuator::nacelle_corrected_velocity(u, cd, area, eps);
+    for (int d = 0; d < 3; ++d) { EXPECT_NEAR(uc[d], u[d] * 8.0 / 7.0, tol() * 10.0) << "component " << d; }
+    // a wide kernel changes almost nothing; a zero drag area nothing at all
+    const auto uw = erf_actuator::nacelle_corrected_velocity(u, cd, area, 1.0e4);
+    EXPECT_NEAR(uw[0], u[0], 1.0e-6);
+    const auto u0 = erf_actuator::nacelle_corrected_velocity(u, 0.0, area, 1.0);
+    EXPECT_EQ(u0[0], u[0]);
 }

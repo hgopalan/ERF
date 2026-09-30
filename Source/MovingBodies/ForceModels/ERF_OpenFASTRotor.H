@@ -24,6 +24,37 @@ void alm_points (const erf_openfast::TurbineState& t,
                  std::vector<amrex::Real>& pos, std::vector<amrex::Real>& force);
 
 /**
+ * The tower force nodes as actuator points: the nodes after the blades (num_force_pts_tower of
+ * them, base to top, at the positions OpenFAST reports) carrying minus the tower loads OpenFAST
+ * computed from the velocities sampled at its tower nodes (AeroDyn's tower drag, or the stub's
+ * cylinder drag). Nothing is appended for a model without tower force nodes.
+ *
+ * @param[in] t the turbine after a step
+ * @param[out] pos 3*n point positions (m), appended
+ * @param[out] force 3*n forces on the fluid (N), appended
+ */
+void tower_points (const erf_openfast::TurbineState& t,
+                   std::vector<amrex::Real>& pos, std::vector<amrex::Real>& force);
+
+/**
+ * Drag of the nacelle on the fluid: -1/2 rho cd area |u| u for the velocity u at the hub, a
+ * single point force at the hub node. cd and area are the user's.
+ */
+std::array<amrex::Real,3> nacelle_drag_force (const std::array<amrex::Real,3>& u_hub,
+                                              amrex::Real rho, amrex::Real cd, amrex::Real area);
+
+/**
+ * The velocity the nacelle sees, corrected for the drag point's own kernel: a Gaussian body
+ * force of width epsilon induces -F / (4 pi rho epsilon^2 ... ) at its own centre, so the
+ * sampled hub velocity understates the free velocity by the factor 1 - cd area / (4 pi eps^2)
+ * (Kynema's correction, here with the run's kernel width). Returns u_sampled divided by that
+ * factor; aborts when the factor is not positive, which means the kernel is far too narrow
+ * for the nacelle's drag area.
+ */
+std::array<amrex::Real,3> nacelle_corrected_velocity (const std::array<amrex::Real,3>& u_sampled,
+                                                      amrex::Real cd, amrex::Real area, amrex::Real epsilon);
+
+/**
  * The rotor's tip radius: the largest distance of a blade force node from the hub axis (m).
  * Zero for a rotor without blade nodes.
  */

@@ -31,6 +31,14 @@ int substep_count (double dt_cfd, double dt_fast, std::string& err);
 std::string check_induction_off (const std::string& fst_file);
 
 /**
+ * Whether the OpenFAST model applies its own tower-shadow correction to the blade inflow. When
+ * ERF puts the tower's drag into the flow, the tower wake reaches the blades through the
+ * sampled velocities, so AeroDyn's TwrShadow should be 0. Returns an empty string when it is
+ * (or the model has no AeroDyn file), otherwise a warning naming the setting.
+ */
+std::string check_tower_shadow_off (const std::string& fst_file);
+
+/**
  * One OpenFAST turbine. Sizes and node data are valid on every rank after init(); the ExtInfw
  * buffers are only allocated on the owner rank, which is the only rank that calls OpenFAST.
  */
@@ -64,6 +72,7 @@ struct TurbineState
     std::array<amrex::Real,3> hub_pos{{0.0, 0.0, 0.0}};
     std::array<amrex::Real,3> hub_axis{{1.0, 0.0, 0.0}}; //!< unit shaft axis (hub frame x) in ERF's frame
     amrex::Real rotor_speed{0.0};        //!< rad/s about the hub axis
+    std::array<amrex::Real,3> nacelle_force{{0.0, 0.0, 0.0}}; //!< the flow's drag on the nacelle (on the structure, N), set by the caller
     // ExtInfw buffers, owner rank only; positions and forces come from OpenFAST in to_cfd and the
     // velocities the flow supplies go into from_cfd
     ExtInfw_InputType_t  to_cfd{};
@@ -117,14 +126,18 @@ public:
     /** Set the velocity at each velocity node of turbine i (3*num_vel_nodes values, node order). */
     void set_node_velocities (int i, const std::vector<amrex::Real>& uvw);
 
+    /** Record the nacelle drag of turbine i (the force on the structure, N) for the diagnostics. */
+    void set_nacelle_force (int i, const std::array<amrex::Real,3>& f);
+
     /** Advance every turbine by one ERF step (num_substeps OpenFAST steps) and broadcast. */
     void step ();
 
     /**
      * Append one row per turbine to its two diagnostics files: <output_root>_erf.csv with time,
-     * rotor speed, thrust (hub and blade nodes), torque and power about the hub axis and the
-     * hub axis itself, and <output_root>_flow.csv with the velocity the flow supplied at the
-     * hub node and its mean over the blade nodes.
+     * rotor speed, thrust (hub and blade nodes), torque and power about the hub axis, the hub
+     * axis itself, the tower force (its force nodes, zero without them) and the nacelle drag
+     * (zero unless set), all forces on the structure; and <output_root>_flow.csv with the
+     * velocity the flow supplied at the hub node and its mean over the blade nodes.
      */
     void write_diagnostics (double time);
 
@@ -133,8 +146,10 @@ public:
     bool initialized () const { return m_initialized; }
     bool solved0 () const { return m_solved0; }
 
-    /** Thrust vector: sum of the blade-node forces (N). */
+    /** Thrust vector: sum of the hub and blade-node forces (N). */
     std::array<amrex::Real,3> thrust (const TurbineState& t) const;
+    /** Sum of the tower-node forces (N); zero without tower force nodes. */
+    std::array<amrex::Real,3> tower_force (const TurbineState& t) const;
     /** The velocity the flow supplied at the hub node and its mean over the blade nodes. */
     void node_velocity_means (const TurbineState& t, std::array<amrex::Real,3>& hub, std::array<amrex::Real,3>& blade) const;
     /** Aerodynamic torque about the hub axis from the blade-node forces (N m). */

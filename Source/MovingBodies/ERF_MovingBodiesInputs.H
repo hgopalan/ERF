@@ -22,6 +22,8 @@ struct MovingBodyInputs
     std::string mode{"adm"};                 //!< adm | alm | none: how the OpenFAST loads reach the flow (none: they do not)
     int num_force_points_blade{50};          //!< actuator force points per blade requested from OpenFAST
     int num_force_points_tower{0};           //!< actuator force points on the tower (0: no tower forcing)
+    amrex::Real nacelle_cd{0.0};             //!< nacelle drag coefficient (0: no nacelle drag)
+    amrex::Real nacelle_area{0.0};           //!< nacelle frontal area (m^2), needed when nacelle_cd > 0
     // ct_disk
     amrex::Real rotor_radius{0.0};           //!< disk radius (m)
     amrex::Real hub_height{0.0};             //!< disk centre above the base (m)
@@ -30,7 +32,7 @@ struct MovingBodyInputs
     int num_points_r{8};                     //!< polar grid: rings
     int num_points_t{16};                    //!< points per ring (ct_disk grid, and the turbine's actuator-disk rings)
     amrex::Real sample_diameters_upstream{1.0}; //!< where the free-stream speed is sampled
-    amrex::Real air_density{1.225};          //!< density in the thrust (kg/m^3)
+    amrex::Real air_density{1.225};          //!< density in the ct_disk thrust and the nacelle drag (kg/m^3)
 };
 
 /**
@@ -42,7 +44,9 @@ struct MovingBodyInputs
  *   erf.moving_bodies.T1.base_pos    = 1000 1000 0
  *   erf.moving_bodies.T1.mode        = adm                (adm: disk rings; alm: a point per blade node; none)
  *   erf.moving_bodies.T1.num_force_points_blade = 50
- *   erf.moving_bodies.T1.num_force_points_tower = 0
+ *   erf.moving_bodies.T1.num_force_points_tower = 0    (> 0: the tower's loads from OpenFAST forced too)
+ *   erf.moving_bodies.T1.nacelle_cd  = 0                (> 0 with nacelle_area: a drag point at the hub)
+ *   erf.moving_bodies.T1.nacelle_area = 0               (m^2)
  *   erf.moving_bodies.T1.output_root = moving_bodies/T1
  *   erf.moving_bodies.T1.epsilon     = 2.0                (spreading width, dx units)
  *   erf.moving_bodies.D1.type        = ct_disk

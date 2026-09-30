@@ -662,11 +662,20 @@ golds, and the integrated momentum source equal to minus the thrust in every
 row, which for the line holds for the full force vector.
 ``OpenFASTALM_BoxParity`` runs the deck in one box and split unevenly in x and
 y: the blade points cross box faces as they turn, so the plotfiles and flow logs
-must agree.
+must agree. ``OpenFAST_ALM_Tower`` adds the tower and the nacelle: the stub
+puts a cylinder drag (8 m, ``Cd`` 1) on 10 tower force nodes from the
+velocities sampled at its 6 tower nodes, and ERF adds a nacelle drag point
+(``Cd`` 1, 60 m^2) at the hub; the integrated momentum source must equal
+minus the total load ``load_x`` (thrust plus tower plus nacelle) in every
+row, and the plotfile with the tower wake matches its gold;
+``OpenFASTALM_Tower_BoxParity`` splits the domain so that the tower axis falls
+on a box face and requires the plotfiles and flow logs to agree with the
+one-box run.
 
-Test Location: `Tests/test_files/OpenFAST_ALM_Uniform`_
+Test Location: `Tests/test_files/OpenFAST_ALM_Uniform`_ and `Tests/test_files/OpenFAST_ALM_Tower`_
 
 .. _`Tests/test_files/OpenFAST_ALM_Uniform`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_Uniform
+.. _`Tests/test_files/OpenFAST_ALM_Tower`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_Tower
 
 Wake sampling lines
 -------------------

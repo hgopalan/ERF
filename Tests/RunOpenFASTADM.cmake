@@ -3,14 +3,16 @@
 # (FLOW_CSV: by default <output_root>_flow.csv, the sampled hub and blade-mean velocities,
 # which the rotor's induction lowers) against the committed gold log; and, row by row, that
 # the integrated momentum source (fx in SOURCE_CSV) equals minus the turbine's thrust
-# (thrust_x in TURBINE_CSV): the disk rings and the line points preserve the rotor's force and
-# the spreading is normalised exactly, so the two must agree to roundoff. The turbine log's first row is the
+# (thrust_x in TURBINE_CSV, or the FORCE_COLUMN given: load_x, the sum of thrust, tower and
+# nacelle forces, for a turbine with a forced tower and nacelle): the disk rings and the line
+# points preserve the rotor's force and the spreading is normalised exactly, so the two must
+# agree to roundoff. The turbine log's first row is the
 # initial solution before any step; the source log's first row belongs to the state after the
 # first step, so turbine row r + 1 pairs with source row r.
 #
 # Variables: MPIEXEC, MPIEXEC_NUMPROC_FLAG, MPIEXEC_PREFLAGS, NRANKS, TEST_EXE, CONFIG, INPUT,
 # WORKING_DIRECTORY, FCOMPARE, PLTFILE, PLOT_GOLD, RTOL, ATOL, FLOW_CSV, FLOW_GOLD, SIGDIGITS,
-# TURBINE_CSV, SOURCE_CSV.
+# TURBINE_CSV, SOURCE_CSV, and optionally FORCE_COLUMN (default thrust_x).
 
 cmake_minimum_required(VERSION 3.20)
 include("${CMAKE_CURRENT_LIST_DIR}/MPILauncher.cmake")
@@ -27,6 +29,9 @@ if(NOT DEFINED NRANKS OR "${NRANKS}" STREQUAL "")
 endif()
 if(NOT DEFINED SIGDIGITS OR "${SIGDIGITS}" STREQUAL "")
     set(SIGDIGITS 10)
+endif()
+if(NOT DEFINED FORCE_COLUMN OR "${FORCE_COLUMN}" STREQUAL "")
+    set(FORCE_COLUMN "thrust_x")
 endif()
 
 erf_resolve_executable(TEST_EXE "${TEST_EXE}" CONFIG "${CONFIG}"
@@ -98,7 +103,7 @@ function(column_index csv_rows name out_var)
 endfunction()
 file(STRINGS "${WORKING_DIRECTORY}/${TURBINE_CSV}" turb_rows)
 file(STRINGS "${WORKING_DIRECTORY}/${SOURCE_CSV}" src_rows)
-column_index("${turb_rows}" "thrust_x" it)
+column_index("${turb_rows}" "${FORCE_COLUMN}" it)
 column_index("${src_rows}" "fx" is)
 list(LENGTH turb_rows nturb)
 list(LENGTH src_rows nsrc)
@@ -120,7 +125,7 @@ foreach(r RANGE 1 ${nsrc_data})
     list(GET sfields ${is} fx)
     erf_read_decimal("${thrust}" ok sign digits exp)
     if(NOT ok OR "${digits}" STREQUAL "0")
-        message(FATAL_ERROR "RunOpenFASTADM.cmake: row ${r}: thrust_x = '${thrust}' is zero or not a number; the rotor carried no load")
+        message(FATAL_ERROR "RunOpenFASTADM.cmake: row ${r}: ${FORCE_COLUMN} = '${thrust}' is zero or not a number; the bodies carried no load")
     endif()
     if("${sign}" STREQUAL "-")
         set(minus_thrust "${digits}e${exp}")
@@ -129,7 +134,7 @@ foreach(r RANGE 1 ${nsrc_data})
     endif()
     erf_numbers_close("${minus_thrust}" "${fx}" 8 2 close)
     if(NOT close)
-        message(FATAL_ERROR "RunOpenFASTADM.cmake: row ${r}: fx = ${fx} differs from -thrust_x = ${minus_thrust}; the spread rotor force does not integrate back to the thrust")
+        message(FATAL_ERROR "RunOpenFASTADM.cmake: row ${r}: fx = ${fx} differs from -${FORCE_COLUMN} = ${minus_thrust}; the spread forces do not integrate back to the bodies' loads")
     endif()
 endforeach()
-message(STATUS "RunOpenFASTADM.cmake: plotfile matches the gold, ${FLOW_CSV} matches its gold, and fx equals -thrust_x in ${nsrc_data} rows")
+message(STATUS "RunOpenFASTADM.cmake: plotfile matches the gold, ${FLOW_CSV} matches its gold, and fx equals -${FORCE_COLUMN} in ${nsrc_data} rows")
