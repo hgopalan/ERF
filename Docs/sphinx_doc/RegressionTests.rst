@@ -647,15 +647,30 @@ Test Location: `Tests/test_files/OpenFAST_ADM_Uniform`_
 
 .. _`Tests/test_files/OpenFAST_ADM_Uniform`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_Uniform
 
+Wake sampling lines
+-------------------
+``OpenFAST_ADM_Wake`` (same build requirements) is the actuator-disk case with
+wake lines 2, 4 and 7 diameters behind the rotor (41 points over ±1.5 D,
+lateral and vertical), sampled every two steps and averaged from 2 s on. The
+running average ``T1_wake_avg.csv`` must match its gold to ten significant
+digits and the plotfile its gold. ``OpenFASTADM_Wake_BoxParity`` runs the deck
+in one box and split unevenly and requires the instantaneous wake file
+``T1_wake.csv`` to agree to eight digits.
+
+Test Location: `Tests/test_files/OpenFAST_ADM_Wake`_
+
+.. _`Tests/test_files/OpenFAST_ADM_Wake`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_Wake
+
 OpenFAST turbine restart
 ------------------------
 ``OpenFAST_ADM_Restart`` (same build requirements) runs the actuator-disk case
-straight to step 10, then to a checkpoint at step 5 and from that checkpoint
-to step 10 (``Tests/RunRestartParity.cmake``). The turbine is restored from
-its OpenFAST checkpoint under ``chk00005/moving_bodies`` and the momentum
-source is rebuilt from the restored loads, so the restarted run's plotfile
-must equal the straight run's with zero tolerance and its turbine log
-``T1_erf.csv`` must match to ten significant digits.
+with two wake lines straight to step 10, then to a checkpoint at step 5 and
+from that checkpoint to step 10 (``Tests/RunRestartParity.cmake``). The turbine
+is restored from its OpenFAST checkpoint under ``chk00005/moving_bodies``, the
+momentum source is rebuilt from the restored loads and the wake running
+average continues from its checkpointed sums, so the restarted run's plotfile
+must equal the straight run's with zero tolerance and its wake average
+``T1_wake_avg.csv`` must match to ten significant digits.
 
 Test Location: `Tests/test_files/OpenFAST_ADM_Restart`_
 

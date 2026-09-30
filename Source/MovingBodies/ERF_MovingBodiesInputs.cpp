@@ -24,6 +24,23 @@ MovingBodiesInputs::read ()
     }
     pp.query("diagnostics_dir", in.diagnostics_dir);
 
+    {
+        ParmParse pw("erf.moving_bodies.wake");
+        pw.queryarr("lines_xD", in.wake.lines_xD);
+        for (const Real xD : in.wake.lines_xD) {
+            if (!(xD > 0.0)) { Abort("erf.moving_bodies.wake.lines_xD must be positive distances in rotor diameters"); }
+        }
+        pw.query("half_width", in.wake.half_width);
+        if (!(in.wake.half_width > 0.0)) { Abort("erf.moving_bodies.wake.half_width must be > 0 (rotor diameters)"); }
+        pw.query("num_points", in.wake.num_points);
+        if (in.wake.num_points < 2) { Abort("erf.moving_bodies.wake.num_points must be >= 2"); }
+        pw.query("int", in.wake.interval);
+        if (in.wake.interval < 0) { Abort("erf.moving_bodies.wake.int must be >= 1 (0 uses diagnostics_int)"); }
+        if (in.wake.interval == 0) { in.wake.interval = in.diagnostics_int; }
+        pw.query("avg_start", in.wake.avg_start);
+        if (in.wake.avg_start < 0.0) { Abort("erf.moving_bodies.wake.avg_start must be >= 0"); }
+    }
+
     std::vector<Real> vel;
     if (pp.queryarr("prescribed_velocity", vel)) {
         if (vel.size() != 3) {

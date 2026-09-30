@@ -2413,6 +2413,17 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.prescribed_velocity**              | testing aid: the uniform velocity given to every body    | 3 Reals                  | none (0 0 0 is used)     |
 |                                                        | node instead of the flow velocity                        |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.wake.lines_xD**                    | wake sampling lines behind every rotor at these          | Reals > 0                | none (no wake lines)     |
+|                                                        | distances along its axis, in rotor diameters             |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.wake.half_width**                  | half-length of each line, in rotor diameters             | Real > 0                 | 1.5                      |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.wake.num_points**                  | points per line                                          | Int >= 2                 | 61                       |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.wake.int**                         | sample the lines every this many steps                   | Int >= 1                 | diagnostics_int          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.wake.avg_start**                   | time (s) from which the running average accumulates      | Real >= 0                | 0                        |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 
 .. _sec:ConstantMassFluxInputs:
 

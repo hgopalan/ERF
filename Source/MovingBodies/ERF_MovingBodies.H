@@ -12,6 +12,7 @@
 #include "ERF_BodyMotion.H"
 #include "ERF_MovingBodiesInputs.H"
 #include "ERF_PrescribedCtDisk.H"
+#include "ERF_WakeLines.H"
 #ifdef ERF_USE_OPENFAST
 #include "ERF_OpenFASTRotor.H"
 #endif
@@ -86,6 +87,7 @@ private:
 
     MovingBodiesInputs m_in;
     double m_dt{0.0};
+    double m_t_max{0.0};
     int m_step{0};
     bool m_restarting{false};   //!< created for a restart: read_checkpoint() must follow
     bool m_restored{false};
@@ -107,6 +109,17 @@ private:
     void write_source_diagnostics (double time, const amrex::MultiFab* detJ_cc,
                                    const amrex::Geometry& geom, bool first);
     bool any_forcing () const;
+
+    /** Build the wake lines from the rotors' current hub, axis and diameter; abort if a point leaves the domain. */
+    void build_wake_lines (const amrex::Geometry& geom);
+    /** Sample the wake lines, accumulate the running averages and write both files. */
+    void write_wake_diagnostics (double time, const amrex::MultiFab& U, const amrex::MultiFab& V,
+                                 const amrex::MultiFab& W, const amrex::MultiFab* z_phys_nd,
+                                 const amrex::Geometry& geom);
+    std::vector<std::unique_ptr<erf_actuator::WakeLines>> m_wakes;   //!< one per rotor, built at the first write
+    bool m_wakes_built{false};
+    bool m_wake_written{false};
+    std::string m_wake_state_dir;   //!< checkpoint directory whose running averages the lines take over
 #ifdef ERF_USE_OPENFAST
     std::unique_ptr<erf_openfast::OpenFASTDriver> m_driver;
 #endif

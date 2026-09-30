@@ -47,6 +47,8 @@ public:
     amrex::Real thrust () const { return m_thrust; }
     amrex::Real power () const { return m_thrust * m_u_disk; }
     std::array<amrex::Real,3> normal () const { return m_normal; }
+    std::array<amrex::Real,3> center () const { return m_center; }
+    amrex::Real radius () const { return m_radius; }
     amrex::Real area () const { return m_area_total; }
 
     /** Write the header of <output_root>_disk.csv (truncating it). */

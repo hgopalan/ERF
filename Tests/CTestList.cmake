@@ -308,7 +308,7 @@ endfunction(add_test_cloud_chamber_parity)
 # COMMON_OPTIONS go to both runs, REFERENCE_OPTIONS must make the grid a single box and
 # SPLIT_OPTIONS give the split (the deck's own grid when empty).
 function(add_test_box_parity TEST_NAME TEST_FILES_DIR PLTFILE)
-    set(oneValueArgs "COMMON_OPTIONS" "REFERENCE_OPTIONS" "SPLIT_OPTIONS" "FCOMPARE_RTOL" "FCOMPARE_ATOL" "DATALOG" "DATALOG_SIGDIGITS")
+    set(oneValueArgs "COMMON_OPTIONS" "REFERENCE_OPTIONS" "SPLIT_OPTIONS" "FCOMPARE_RTOL" "FCOMPARE_ATOL" "DATALOG" "DATALOG_SIGDIGITS" "DATALOG_ZERO_EXPONENT")
     cmake_parse_arguments(ADD_TEST_BP "" "${oneValueArgs}" "" ${ARGN})
     setup_test()
     resolve_test_exe("" "erf_exec" TEST_EXE)
@@ -340,6 +340,7 @@ function(add_test_box_parity TEST_NAME TEST_FILES_DIR PLTFILE)
         "-DSPLIT_OPTIONS=${ADD_TEST_BP_SPLIT_OPTIONS}"
         "-DDATALOG=${ADD_TEST_BP_DATALOG}"
         "-DDATALOG_SIGDIGITS=${ADD_TEST_BP_DATALOG_SIGDIGITS}"
+        "-DDATALOG_ZERO_EXPONENT=${ADD_TEST_BP_DATALOG_ZERO_EXPONENT}"
         -P ${PROJECT_SOURCE_DIR}/Tests/RunBoxParity.cmake)
     set_tests_properties(${TEST_NAME}
         PROPERTIES
@@ -424,7 +425,7 @@ set_tests_properties(ResolveExecutable_SelfTest
 # time limit; the default stays at 600, but an explicit RUN_TIMEOUT is forwarded
 # unchanged to each leg and used to size the outer CTest watchdog.
 function(add_test_restart_parity TEST_NAME TEST_FILES_DIR STEP_CHK STEP_END)
-    set(oneValueArgs "COMMON_OPTIONS" "FCOMPARE_RTOL" "FCOMPARE_ATOL" "RUN_TIMEOUT" "DATALOG" "DATALOG_SIGDIGITS" "PLT2DFILE")
+    set(oneValueArgs "COMMON_OPTIONS" "FCOMPARE_RTOL" "FCOMPARE_ATOL" "RUN_TIMEOUT" "DATALOG" "DATALOG_SIGDIGITS" "DATALOG_ZERO_EXPONENT" "PLT2DFILE")
     cmake_parse_arguments(ADD_TEST_RP "" "${oneValueArgs}" "" ${ARGN})
     setup_test()
     resolve_test_exe("" "erf_exec" TEST_EXE)
@@ -462,6 +463,7 @@ function(add_test_restart_parity TEST_NAME TEST_FILES_DIR STEP_CHK STEP_END)
         "-DCOMMON_OPTIONS=${ADD_TEST_RP_COMMON_OPTIONS}"
         "-DDATALOG=${ADD_TEST_RP_DATALOG}"
         "-DDATALOG_SIGDIGITS=${ADD_TEST_RP_DATALOG_SIGDIGITS}"
+        "-DDATALOG_ZERO_EXPONENT=${ADD_TEST_RP_DATALOG_ZERO_EXPONENT}"
         "-DPLT2DFILE=${ADD_TEST_RP_PLT2DFILE}"
         -P ${PROJECT_SOURCE_DIR}/Tests/RunRestartParity.cmake)
     set_tests_properties(${TEST_NAME}
@@ -937,6 +939,11 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
   # flow log are the regression; in every row the integrated source must equal minus the
   # turbine's thrust, since the rings preserve the rotor force and the spreading is exact.
   function(add_test_openfast_adm TEST_NAME TEST_FILES_DIR PLTFILE)
+      # optional 4th argument: the log compared with its gold (default T1_flow.csv)
+      set(_log "T1_flow.csv")
+      if(ARGC GREATER 3)
+          set(_log "${ARGV3}")
+      endif()
       setup_test()
       resolve_test_exe("" "erf_exec" TEST_EXE)
       add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
@@ -953,8 +960,8 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
           "-DPLOT_GOLD=${PLOT_GOLD}"
           "-DRTOL=${ERF_TEST_FCOMPARE_RTOL}"
           "-DATOL=${ERF_TEST_FCOMPARE_ATOL}"
-          "-DFLOW_CSV=T1_flow.csv"
-          "-DFLOW_GOLD=${CURRENT_TEST_SOURCE_DIR}/T1_flow.csv.gold"
+          "-DFLOW_CSV=${_log}"
+          "-DFLOW_GOLD=${CURRENT_TEST_SOURCE_DIR}/${_log}.gold"
           "-DSIGDIGITS=10"
           "-DTURBINE_CSV=T1_erf.csv"
           "-DSOURCE_CSV=moving_bodies/momentum_source.csv"
@@ -978,12 +985,29 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       DATALOG "T1_flow.csv"
       DATALOG_SIGDIGITS 8)
 
+  # The same case with wake lines 2, 4 and 7 D behind the rotor, sampled every two steps and
+  # averaged from 2 s: the running average must match its gold (the sampler is exact on the
+  # faces' trilinear field) and the plotfile its gold.
+  add_test_openfast_adm(OpenFAST_ADM_Wake OpenFAST_ADM_Wake "plt00010" "T1_wake_avg.csv")
+
+  # The wake lines sampled with the domain in one box and split unevenly: the instantaneous
+  # wake file must agree, so a line point on a box face reads the same through the ghost cells.
+  # The lateral velocity on the centreline of this symmetric flow is roundoff, so values
+  # below 1e-5 m/s count as zero.
+  add_test_box_parity(OpenFASTADM_Wake_BoxParity OpenFAST_ADM_Wake "plt00010"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
+      DATALOG "T1_wake.csv"
+      DATALOG_SIGDIGITS 8
+      DATALOG_ZERO_EXPONENT -5)
+
   # The same case checkpointed at step 5 and restarted to step 10: the turbine comes back
-  # from its OpenFAST checkpoint and the momentum source is rebuilt from the restored loads,
-  # so the plotfile and the turbine log must equal the straight run's exactly.
+  # from its OpenFAST checkpoint, the momentum source is rebuilt from the restored loads and
+  # the wake running average continues from its checkpointed sums, so the plotfile and the
+  # wake average must equal the straight run's exactly.
   add_test_restart_parity(OpenFAST_ADM_Restart OpenFAST_ADM_Restart 5 10
       FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
-      DATALOG "T1_erf.csv"
+      DATALOG "T1_wake_avg.csv"
       DATALOG_SIGDIGITS 10)
 endif()
 

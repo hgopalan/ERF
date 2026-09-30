@@ -75,6 +75,33 @@ step just taken (the turbines), and added to the momentum right-hand side in
 every stage of the step, before the anelastic projection, which removes their
 divergent part.
 
+.. note::
+
+   **Why the normalisation is discrete.** Actuator codes in the AMR-Wind and
+   SOWFA lineage (Kynema among them) divide each point's force by the analytic
+   Gaussian volume, ``epsilon^3 pi^(3/2)``, and then sum the kernel over the
+   cells. The sum over cell volumes equals that analytic volume only when the
+   kernel lies wholly inside the domain, is resolved by the mesh and covers
+   cells of one size. Otherwise the momentum the fluid receives is not the
+   force the point carries, and nothing reports it:
+
+   * the part of a kernel below the ground or above the domain top is never
+     deposited; a point at height ``h`` loses the fraction ``erfc(h/epsilon)/2``
+     of its force, about 14 % for the lowest blade tip of the IEA 15 MW rotor
+     with ``epsilon = 40 m`` and up to half for a tower point near the base;
+   * with ``epsilon`` below about two cells the cell sum of a Gaussian is no
+     longer its integral, so the injected momentum is off by a few per cent and
+     changes with the resolution;
+   * on a stretched or terrain-following mesh the cell volumes vary across the
+     kernel, which no constant can account for.
+
+   The symptoms are a wake deficit slightly too weak, a thrust felt by the
+   flow that depends on the grid spacing and on how low the rotor sits, and
+   momentum budgets that do not close. ERF pays a second pass per point to
+   sum the kernel over the faces it actually reaches, with their volumes, so
+   the integrated source equals the force exactly in every case; the
+   regression tests check this identity in every row of the diagnostics.
+
 OpenFAST rotor as an actuator disk
 ----------------------------------
 
@@ -117,13 +144,37 @@ diagnostics file records the upstream speed, the disk-averaged speed, the
 thrust, the power ``T U_d`` and the integrated momentum source projected on
 the normal, which equals the thrust when the disk is the only body.
 
+Wake diagnostics
+----------------
+
+``erf.moving_bodies.wake.lines_xD`` puts sampling lines behind every rotor:
+at each listed distance in rotor diameters along the horizontal projection
+of the rotor axis through the hub (the shaft axis of an OpenFAST turbine,
+the normal of a prescribed-Ct disk; a wake follows the wind at hub height,
+and a shaft tilt of a few degrees would otherwise carry the far lines into
+the ground), one horizontal line normal to that direction and one vertical line, each of
+``num_points`` points spanning ``half_width`` diameters either side of the
+axis; the vertical line is clipped at the ground, so its lowest point may
+sit closer to the axis than ``half_width`` (each point's offset ``s`` is in
+the files). The lines are built at the first sample, from the rotor's
+diameter (the outermost blade force node, or the disk radius), and every
+point must lie in the domain otherwise. Every ``wake.int`` steps the velocity is sampled at the
+points with the actuator sampler, written to ``<output_root>_wake.csv``
+(``time, xD, line, s, x, y, z, u, v, w`` with ``s`` in diameters) and, from
+``wake.avg_start`` on, accumulated into a running time average that
+``<output_root>_wake_avg.csv`` always holds (``samples`` is the number of
+samples in it). The running sums are part of the checkpoint, so the average
+continues across a restart. Nothing is sampled when a prescribed velocity
+replaces the flow.
+
 Checkpoint and restart
 ----------------------
 
 An ERF checkpoint carries the bodies' state under ``<chk>/moving_bodies``:
 a ``state`` file with the step count and each turbine's OpenFAST time index,
-and each OpenFAST turbine's own checkpoint ``<name>.chkp``, written through
-``FAST_CreateCheckpoint`` by the rank that owns the turbine. On a restart the
+each OpenFAST turbine's own checkpoint ``<name>.chkp``, written through
+``FAST_CreateCheckpoint`` by the rank that owns the turbine, and the wake
+lines' running sums. On a restart the
 turbines are restored with ``FAST_ExtInfw_Restart`` instead of being
 initialised, ERF checks that the time index OpenFAST reports is the one its
 own checkpoint expects, and the run continues with the next step; the
@@ -131,7 +182,9 @@ momentum sources are not stored but rebuilt at that step from the restored
 loads, as they would have been in the run being continued. The diagnostics
 files are appended to (a restart in a clean directory starts them afresh
 with their headers). The ``erf.moving_bodies`` block of the restarted run
-must name the same bodies as the run that wrote the checkpoint.
+must name the same bodies as the run that wrote the checkpoint. A checkpoint
+written by a run without bodies (a precursor) can be restarted with bodies:
+they then start afresh at the restart.
 
 Solver requirements
 -------------------
