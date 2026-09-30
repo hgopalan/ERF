@@ -161,11 +161,38 @@ diameter (the outermost blade force node, or the disk radius), and every
 point must lie in the domain otherwise. Every ``wake.int`` steps the velocity is sampled at the
 points with the actuator sampler, written to ``<output_root>_wake.csv``
 (``time, xD, line, s, x, y, z, u, v, w`` with ``s`` in diameters) and, from
-``wake.avg_start`` on, accumulated into a running time average that
+``erf.moving_bodies.avg_start`` on, accumulated into a running time average that
 ``<output_root>_wake_avg.csv`` always holds (``samples`` is the number of
 samples in it). The running sums are part of the checkpoint, so the average
 continues across a restart. Nothing is sampled when a prescribed velocity
 replaces the flow.
+
+Body statistics
+---------------
+
+From ``erf.moving_bodies.avg_start`` on, every step adds the state of each
+body to its running statistics, and ``<output_root>_stats.csv`` always holds
+the current sample count, the first and last sample times and, per quantity,
+the mean, the root mean square, the minimum and the maximum. For an OpenFAST
+turbine the quantities are the thrust along the shaft and along x, the torque,
+the power, the rotor speed, the hub-node velocity and the blade-mean
+streamwise velocity; for a prescribed-Ct disk the upstream and disk speeds,
+the thrust and the power. The sums are part of the checkpoint, so the
+statistics continue across a restart. These are the numbers a turbulent-inflow
+LES is compared on, where a single instant means little.
+
+Turbulent inflow
+----------------
+
+Nothing in the coupling depends on the lateral boundary conditions: a
+turbine can run in a periodic box, or with ERF's inflow and outflow
+boundaries fed from a precursor's boundary planes
+(``erf.input_bndry_planes``), or with a steady inflow profile and ERF's cell
+perturbation method (``erf.perturbation_type = CPM``) making the turbulence
+just inside the inflow face, which needs no precursor. The anelastic FFT
+Poisson solve handles the non-periodic direction. The regression tests
+``OpenFAST_ADM_LES`` (precursor planes) and ``OpenFAST_ADM_CPM`` (cell
+perturbation) run the rotor both ways.
 
 Checkpoint and restart
 ----------------------
@@ -173,8 +200,8 @@ Checkpoint and restart
 An ERF checkpoint carries the bodies' state under ``<chk>/moving_bodies``:
 a ``state`` file with the step count and each turbine's OpenFAST time index,
 each OpenFAST turbine's own checkpoint ``<name>.chkp``, written through
-``FAST_CreateCheckpoint`` by the rank that owns the turbine, and the wake
-lines' running sums. On a restart the
+``FAST_CreateCheckpoint`` by the rank that owns the turbine, the wake
+lines' running sums and the bodies' statistics. On a restart the
 turbines are restored with ``FAST_ExtInfw_Restart`` instead of being
 initialised, ERF checks that the time index OpenFAST reports is the one its
 own checkpoint expects, and the run continues with the next step; the

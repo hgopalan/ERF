@@ -439,6 +439,22 @@ OpenFASTDriver::thrust (const TurbineState& t) const
     return f;
 }
 
+// hub node first, then the blade nodes; the tower nodes (if any) come after the blades
+void
+OpenFASTDriver::node_velocity_means (const TurbineState& t, std::array<Real,3>& hub, std::array<Real,3>& blade) const
+{
+    hub = {{0.0, 0.0, 0.0}};
+    blade = {{0.0, 0.0, 0.0}};
+    const int nbn = t.num_blades * t.num_blade_elem;
+    if (static_cast<int>(t.node_vel.size()) >= 3 * (1 + nbn)) {
+        for (int d = 0; d < 3; ++d) { hub[d] = t.node_vel[d]; }
+        for (int nd = 1; nd <= nbn; ++nd) {
+            for (int d = 0; d < 3; ++d) { blade[d] += t.node_vel[3*nd+d]; }
+        }
+        if (nbn > 0) { for (int d = 0; d < 3; ++d) { blade[d] /= nbn; } }
+    }
+}
+
 // torque of the rotor's node forces about the hub axis through the hub
 Real
 OpenFASTDriver::torque (const TurbineState& t) const
@@ -476,17 +492,8 @@ OpenFASTDriver::write_diagnostics (double time)
         const TurbineState& t = m_turb[i];
         const std::array<Real,3> f = thrust(t);
         const Real q = torque(t);
-        // hub node first, then the blade nodes; the tower nodes (if any) come after the blades
-        std::array<Real,3> hub{{0.0, 0.0, 0.0}};
-        std::array<Real,3> blade{{0.0, 0.0, 0.0}};
-        const int nbn = t.num_blades * t.num_blade_elem;
-        if (static_cast<int>(t.node_vel.size()) >= 3 * (1 + nbn)) {
-            for (int d = 0; d < 3; ++d) { hub[d] = t.node_vel[d]; }
-            for (int nd = 1; nd <= nbn; ++nd) {
-                for (int d = 0; d < 3; ++d) { blade[d] += t.node_vel[3*nd+d]; }
-            }
-            if (nbn > 0) { for (int d = 0; d < 3; ++d) { blade[d] /= nbn; } }
-        }
+        std::array<Real,3> hub, blade;
+        node_velocity_means(t, hub, blade);
         std::ofstream out(t.output_root + "_erf.csv", std::ios::app);
         out << std::setprecision(10) << time << "," << t.rotor_speed << ","
             << f[0] << "," << f[1] << "," << f[2] << "," << q << "," << q * t.rotor_speed << ","

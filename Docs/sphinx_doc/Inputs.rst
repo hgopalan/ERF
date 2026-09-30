@@ -2409,6 +2409,7 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.diagnostics_dir**                  | directory of the default diagnostics files and of        | String                   | moving_bodies            |
 |                                                        | ``momentum_source.csv`` (time, integrated source vector) |                          |                          |
+|                                                        | and of ``<name>_stats.csv`` (running statistics)         |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.prescribed_velocity**              | testing aid: the uniform velocity given to every body    | 3 Reals                  | none (0 0 0 is used)     |
 |                                                        | node instead of the flow velocity                        |                          |                          |
@@ -2422,7 +2423,8 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.wake.int**                         | sample the lines every this many steps                   | Int >= 1                 | diagnostics_int          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.wake.avg_start**                   | time (s) from which the running average accumulates      | Real >= 0                | 0                        |
+| **erf.moving_bodies.avg_start**                        | time (s) from which the wake running averages and the    | Real >= 0                | 0                        |
+|                                                        | bodies' statistics accumulate                            |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 
 .. _sec:ConstantMassFluxInputs:

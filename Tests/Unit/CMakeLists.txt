@@ -287,6 +287,11 @@ if(ERF_ENABLE_MOVING_BODIES)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestWakeLines.cpp
   )
+  # Motivation: a body's running statistics must be the exact mean, rms, minimum and maximum
+  # of the samples since the averaging start and must survive a checkpoint round trip.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestRunningStats.cpp
+  )
 endif()
 if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   # Motivation: the OpenFAST driver must keep the ERF step a whole multiple of the

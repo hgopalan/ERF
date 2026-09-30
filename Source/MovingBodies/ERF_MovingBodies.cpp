@@ -106,6 +106,15 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, double dt, double t_max, bool
         }
     }
     m_epsilon_dx = m_in.bodies.empty() ? 2.0 : m_in.bodies[0].epsilon;
+    for (const auto& d : m_disks) {
+        m_disk_stats.emplace_back(d->name(), m_in.diagnostics_dir + "/" + d->name(),
+                                  std::vector<std::string>{"u_inf", "u_disk", "thrust", "power"});
+    }
+    for (const MovingBodyInputs& b : turbines) {
+        m_turbine_stats.emplace_back(b.name, b.output_root,
+                                     std::vector<std::string>{"thrust_shaft", "thrust_x", "torque", "power", "rotor_speed",
+                                                              "hub_u", "hub_v", "hub_w", "blade_mean_u"});
+    }
 #ifdef ERF_USE_OPENFAST
     // the models are set up now, so their inputs are checked at start-up; the first OpenFAST
     // solution waits for the first step, when the flow exists to be sampled
@@ -141,6 +150,8 @@ MovingBodies::write_checkpoint (const std::string& chkdir) const
     }
     ParallelDescriptor::Barrier();
     for (const auto& w : m_wakes) { w->write_state(dir); }
+    for (const auto& st : m_turbine_stats) { st.write_state(dir); }
+    for (const auto& st : m_disk_stats) { st.write_state(dir); }
 #ifdef ERF_USE_OPENFAST
     m_driver->create_checkpoint(dir + "/");
 #endif
@@ -162,6 +173,8 @@ MovingBodies::read_checkpoint (const std::string& chkdir)
         return;
     }
     m_wake_state_dir = dir;
+    for (auto& st : m_turbine_stats) { st.read_state(dir); }
+    for (auto& st : m_disk_stats) { st.read_state(dir); }
     // the state file: the step count, and the OpenFAST time index each turbine must report
     std::map<std::string,int> time_index;
     {
@@ -250,8 +263,32 @@ MovingBodies::advance (int lev, double time, double dt,
             write_source_diagnostics(time, detJ_cc, geom, first);
         }
     }
+    if (time + dt >= m_in.avg_start) { accumulate_statistics(time + dt); }
     if (m_in.wake.active() && !m_in.has_prescribed_velocity && (first || m_step % m_in.wake.interval == 0)) {
         write_wake_diagnostics(time, U, V, W, z_phys_nd, geom);
+    }
+}
+
+void
+MovingBodies::accumulate_statistics (double time)
+{
+#ifdef ERF_USE_OPENFAST
+    const auto& turbs = m_driver->turbines();
+    for (std::size_t i = 0; i < turbs.size(); ++i) {
+        const auto& t = turbs[i];
+        const std::array<Real,3> f = m_driver->thrust(t);
+        std::array<Real,3> hub, blade;
+        m_driver->node_velocity_means(t, hub, blade);
+        const Real q = m_driver->torque(t);
+        m_turbine_stats[i].accumulate(time, {f[0]*t.hub_axis[0] + f[1]*t.hub_axis[1] + f[2]*t.hub_axis[2], f[0], q,
+                                             q * t.rotor_speed, t.rotor_speed, hub[0], hub[1], hub[2], blade[0]});
+        if (m_step % m_in.diagnostics_int == 0) { m_turbine_stats[i].write(); }
+    }
+#endif
+    for (std::size_t k = 0; k < m_disks.size(); ++k) {
+        const auto& d = m_disks[k];
+        m_disk_stats[k].accumulate(time, {d->free_stream_speed(), d->disk_speed(), d->thrust(), d->power()});
+        if (m_step % m_in.diagnostics_int == 0) { m_disk_stats[k].write(); }
     }
 }
 
@@ -314,7 +351,7 @@ MovingBodies::write_wake_diagnostics (double time, const MultiFab& U, const Mult
     std::vector<Real> vel;
     for (auto& wl : m_wakes) {
         erf_actuator::sample_velocity(U, V, W, z_phys_nd, geom, wl->positions(), vel);
-        if (time >= m_in.wake.avg_start) { wl->accumulate(vel); }
+        if (time >= m_in.avg_start) { wl->accumulate(vel); }
         wl->write_instantaneous(time, vel, !m_restored && !m_wake_written);
         wl->write_average();
     }

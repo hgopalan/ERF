@@ -1,0 +1,126 @@
+#ifndef ERF_RUNNING_STATS_H
+#define ERF_RUNNING_STATS_H
+
+#include <cmath>
+#include <fstream>
+#include <iomanip>
+#include <limits>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include <AMReX.H>
+#include <AMReX_ParallelDescriptor.H>
+#include <AMReX_REAL.H>
+#include <AMReX_Utility.H>
+#include <AMReX_Vector.H>
+
+#include "ERF_DiagnosticsLog.H"
+
+namespace erf_actuator {
+
+/**
+ * Running statistics of a body's scalar diagnostics (thrust, torque, power, speeds): the
+ * mean, the root mean square, the minimum and the maximum of every sample added since the
+ * averaging start. <output_root>_stats.csv always holds the current values; the sums are part
+ * of the checkpoint, so the statistics continue across a restart.
+ */
+class RunningStats
+{
+public:
+    RunningStats (std::string name, std::string output_root, std::vector<std::string> quantities)
+        : m_name(std::move(name)), m_output_root(std::move(output_root)), m_names(std::move(quantities)),
+          m_sum(m_names.size(), 0.0), m_sum2(m_names.size(), 0.0),
+          m_min(m_names.size(), std::numeric_limits<amrex::Real>::max()),
+          m_max(m_names.size(), std::numeric_limits<amrex::Real>::lowest()) {}
+
+    const std::string& name () const { return m_name; }
+    const std::vector<std::string>& quantities () const { return m_names; }
+    int num_samples () const { return m_count; }
+    double t_first () const { return m_t_first; }
+    double t_last () const { return m_t_last; }
+
+    /** Add one sample of every quantity, taken at time t. */
+    void accumulate (double t, const std::vector<amrex::Real>& values)
+    {
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(values.size() == m_names.size(), "RunningStats::accumulate: one value per quantity");
+        if (m_count == 0) { m_t_first = t; }
+        m_t_last = t;
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            m_sum[i] += values[i];
+            m_sum2[i] += values[i] * values[i];
+            m_min[i] = std::min(m_min[i], values[i]);
+            m_max[i] = std::max(m_max[i], values[i]);
+        }
+        ++m_count;
+    }
+    amrex::Real mean (std::size_t i) const { return (m_count > 0) ? m_sum[i] / m_count : amrex::Real(0.0); }
+    amrex::Real rms (std::size_t i) const { return (m_count > 0) ? std::sqrt(std::max(m_sum2[i] / m_count, amrex::Real(0.0))) : amrex::Real(0.0); }
+    amrex::Real min (std::size_t i) const { return (m_count > 0) ? m_min[i] : amrex::Real(0.0); }
+    amrex::Real max (std::size_t i) const { return (m_count > 0) ? m_max[i] : amrex::Real(0.0); }
+
+    /** Rewrite <output_root>_stats.csv: one row per quantity with the current statistics. */
+    void write () const
+    {
+        if (!amrex::ParallelDescriptor::IOProcessor()) { return; }
+        std::ofstream out;
+        open_log(out, m_output_root + "_stats.csv", true);
+        out << "samples,t_first,t_last,quantity,mean,rms,min,max\n" << std::setprecision(10);
+        for (std::size_t i = 0; i < m_names.size(); ++i) {
+            out << m_count << "," << m_t_first << "," << m_t_last << "," << m_names[i] << ","
+                << mean(i) << "," << rms(i) << "," << min(i) << "," << max(i) << "\n";
+        }
+    }
+
+    /** The state for a checkpoint: <dir>/<name>_stats.dat. */
+    void write_state (const std::string& dir) const
+    {
+        if (!amrex::ParallelDescriptor::IOProcessor()) { return; }
+        std::ofstream out(dir + "/" + m_name + "_stats.dat", std::ios::trunc);
+        if (!out) { amrex::Abort("cannot write the statistics checkpoint for " + m_name + " in '" + dir + "'"); }
+        out << std::setprecision(17) << "count = " << m_count << "\nsize = " << m_names.size()
+            << "\nt_first = " << m_t_first << "\nt_last = " << m_t_last << "\n";
+        for (std::size_t i = 0; i < m_names.size(); ++i) {
+            out << m_names[i] << " " << m_sum[i] << " " << m_sum2[i] << " " << m_min[i] << " " << m_max[i] << "\n";
+        }
+    }
+    /** Restore the state written by write_state(); false when there is none. */
+    bool read_state (const std::string& dir)
+    {
+        const std::string fname = dir + "/" + m_name + "_stats.dat";
+        if (!amrex::FileExists(fname)) { return false; }
+        amrex::Vector<char> chars;
+        amrex::ParallelDescriptor::ReadAndBcastFile(fname, chars);
+        std::istringstream in(std::string(chars.dataPtr(), chars.size()));
+        std::string key, eq, qname;
+        std::size_t size = 0;
+        int count = 0;
+        double t0 = 0.0, t1 = 0.0;
+        if (!(in >> key >> eq >> count) || key != "count" || !(in >> key >> eq >> size) || key != "size" ||
+            !(in >> key >> eq >> t0) || key != "t_first" || !(in >> key >> eq >> t1) || key != "t_last") {
+            amrex::Abort("malformed statistics checkpoint '" + fname + "'");
+        }
+        if (size != m_names.size()) {
+            amrex::Abort("the statistics checkpoint '" + fname + "' holds " + std::to_string(size) + " quantities but " +
+                         m_name + " has " + std::to_string(m_names.size()));
+        }
+        for (std::size_t i = 0; i < size; ++i) {
+            if (!(in >> qname >> m_sum[i] >> m_sum2[i] >> m_min[i] >> m_max[i]) || qname != m_names[i]) {
+                amrex::Abort("the statistics checkpoint '" + fname + "' does not list " + m_names[i] + " where expected");
+            }
+        }
+        m_count = count; m_t_first = t0; m_t_last = t1;
+        return true;
+    }
+
+private:
+    std::string m_name, m_output_root;
+    std::vector<std::string> m_names;
+    std::vector<amrex::Real> m_sum, m_sum2, m_min, m_max;
+    int m_count{0};
+    double m_t_first{0.0}, m_t_last{0.0};
+};
+
+} // namespace erf_actuator
+
+#endif

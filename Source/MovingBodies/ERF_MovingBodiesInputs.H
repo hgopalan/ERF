@@ -52,6 +52,7 @@ struct MovingBodyInputs
  *   erf.moving_bodies.D1.ct          = 0.75
  *   erf.moving_bodies.diagnostics_int = 1
  *   erf.moving_bodies.wake.lines_xD   = 2 4 7      (wake lines behind every rotor; see WakeInputs)
+ *   erf.moving_bodies.avg_start       = 400.0      (running averages and statistics start here)
  *   erf.moving_bodies.prescribed_velocity = 10.59 0 0   (testing aid: fixed inflow to every body)
  */
 /** erf.moving_bodies.wake.*: sampling lines behind every rotor (off unless lines_xD is given). */
@@ -61,7 +62,6 @@ struct WakeInputs
     amrex::Real half_width{1.5};         //!< half-length of each line, in diameters
     int num_points{61};                  //!< points per line
     int interval{0};                     //!< sample every this many steps (0: diagnostics_int)
-    amrex::Real avg_start{0.0};          //!< time from which the running average accumulates
     bool active () const { return !lines_xD.empty(); }
 };
 
@@ -74,6 +74,7 @@ struct MovingBodiesInputs
     bool has_prescribed_velocity{false};
     std::array<amrex::Real,3> prescribed_velocity{{0.0, 0.0, 0.0}};
     WakeInputs wake;
+    amrex::Real avg_start{0.0};              //!< time from which the running averages and statistics accumulate
 
     /** Read erf.moving_bodies.*; aborts on an unknown type, a duplicate name or a bad value. */
     static MovingBodiesInputs read ();

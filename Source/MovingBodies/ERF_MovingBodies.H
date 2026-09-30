@@ -12,6 +12,7 @@
 #include "ERF_BodyMotion.H"
 #include "ERF_MovingBodiesInputs.H"
 #include "ERF_PrescribedCtDisk.H"
+#include "ERF_RunningStats.H"
 #include "ERF_WakeLines.H"
 #ifdef ERF_USE_OPENFAST
 #include "ERF_OpenFASTRotor.H"
@@ -120,6 +121,11 @@ private:
     bool m_wakes_built{false};
     bool m_wake_written{false};
     std::string m_wake_state_dir;   //!< checkpoint directory whose running averages the lines take over
+
+    /** Feed every body's statistics with the state after this step and rewrite the files. */
+    void accumulate_statistics (double time);
+    std::vector<erf_actuator::RunningStats> m_turbine_stats;   //!< one per OpenFAST turbine
+    std::vector<erf_actuator::RunningStats> m_disk_stats;      //!< one per prescribed-Ct disk
 #ifdef ERF_USE_OPENFAST
     std::unique_ptr<erf_openfast::OpenFASTDriver> m_driver;
 #endif
