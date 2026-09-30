@@ -68,6 +68,8 @@ struct TurbineState
     std::vector<amrex::Real> vel_pos;    //!< 3*num_vel_nodes velocity-node positions (m)
     std::vector<amrex::Real> force_pos;  //!< 3*num_force_nodes force-node positions (m)
     std::vector<amrex::Real> force;      //!< 3*num_force_nodes forces on the structure, as OpenFAST reports them (N)
+    std::vector<amrex::Real> force_vel;  //!< 3*num_force_nodes velocities of the force nodes (the blade motion, m/s)
+    std::vector<amrex::Real> chord;      //!< num_force_nodes chord at the force nodes (m; OpenFAST's, zero on the hub and tower)
     std::vector<amrex::Real> node_vel;   //!< 3*num_vel_nodes velocities the flow supplied at the velocity nodes (m/s)
     std::array<amrex::Real,3> hub_pos{{0.0, 0.0, 0.0}};
     std::array<amrex::Real,3> hub_axis{{1.0, 0.0, 0.0}}; //!< unit shaft axis (hub frame x) in ERF's frame
@@ -128,6 +130,14 @@ public:
 
     /** Record the nacelle drag of turbine i (the force on the structure, N) for the diagnostics. */
     void set_nacelle_force (int i, const std::array<amrex::Real,3>& f);
+
+    /**
+     * After restart(): give turbine i the node forces (3*num_force_nodes) and node velocities
+     * (3*num_vel_nodes) ERF checkpointed at the same time, so that what depends on the loads of
+     * the step before the checkpoint (the lifting-line correction) continues exactly; a library
+     * that restores them itself reports the same values.
+     */
+    void set_restored_loads (int i, const std::vector<amrex::Real>& force, const std::vector<amrex::Real>& node_vel);
 
     /** Advance every turbine by one ERF step (num_substeps OpenFAST steps) and broadcast. */
     void step ();

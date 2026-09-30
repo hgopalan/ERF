@@ -378,6 +378,8 @@ OpenFASTDriver::pull_from_fast (TurbineState& t)
     t.vel_pos.resize(3 * nv);
     t.force_pos.resize(3 * nf);
     t.force.resize(3 * nf);
+    t.force_vel.resize(3 * nf);
+    t.chord.resize(nf);
     for (int n = 0; n < nv; ++n) {
         t.vel_pos[3*n+0] = t.base_pos[0] + t.to_cfd.pxVel[n];
         t.vel_pos[3*n+1] = t.base_pos[1] + t.to_cfd.pyVel[n];
@@ -390,6 +392,10 @@ OpenFASTDriver::pull_from_fast (TurbineState& t)
         t.force[3*n+0] = t.to_cfd.fx[n];
         t.force[3*n+1] = t.to_cfd.fy[n];
         t.force[3*n+2] = t.to_cfd.fz[n];
+        t.force_vel[3*n+0] = t.to_cfd.xdotForce[n];
+        t.force_vel[3*n+1] = t.to_cfd.ydotForce[n];
+        t.force_vel[3*n+2] = t.to_cfd.zdotForce[n];
+        t.chord[n] = t.to_cfd.forceNodesChord[n];
     }
     int err_stat = ErrID_None;
     char err_msg[INTERFACE_STRING_LENGTH];
@@ -438,9 +444,13 @@ OpenFASTDriver::broadcast_state (TurbineState& t)
     t.vel_pos.resize(3 * t.num_vel_nodes);
     t.force_pos.resize(3 * t.num_force_nodes);
     t.force.resize(3 * t.num_force_nodes);
+    t.force_vel.resize(3 * t.num_force_nodes);
+    t.chord.resize(t.num_force_nodes);
     if (!t.vel_pos.empty())   { ParallelDescriptor::Bcast(t.vel_pos.data(),   static_cast<int>(t.vel_pos.size()),   root); }
     if (!t.force_pos.empty()) { ParallelDescriptor::Bcast(t.force_pos.data(), static_cast<int>(t.force_pos.size()), root); }
     if (!t.force.empty())     { ParallelDescriptor::Bcast(t.force.data(),     static_cast<int>(t.force.size()),     root); }
+    if (!t.force_vel.empty()) { ParallelDescriptor::Bcast(t.force_vel.data(), static_cast<int>(t.force_vel.size()), root); }
+    if (!t.chord.empty())     { ParallelDescriptor::Bcast(t.chord.data(),     static_cast<int>(t.chord.size()),     root); }
     ParallelDescriptor::Bcast(t.hub_pos.data(), 3, root);
     ParallelDescriptor::Bcast(t.hub_axis.data(), 3, root);
     ParallelDescriptor::Bcast(&t.rotor_speed, 1, root);
@@ -485,6 +495,18 @@ OpenFASTDriver::tower_force (const TurbineState& t) const
         for (int d = 0; d < 3; ++d) { f[d] += t.force[3*n+d]; }
     }
     return f;
+}
+
+void
+OpenFASTDriver::set_restored_loads (int i, const std::vector<Real>& force, const std::vector<Real>& node_vel)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(i >= 0 && i < static_cast<int>(m_turb.size()), "set_restored_loads: no such turbine");
+    TurbineState& t = m_turb[i];
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(force.size() == 3 * static_cast<std::size_t>(t.num_force_nodes) &&
+                                     node_vel.size() == 3 * static_cast<std::size_t>(t.num_vel_nodes),
+                                     "set_restored_loads: the checkpointed node arrays do not match the node counts of " + t.name);
+    t.force = force;
+    set_node_velocities(i, node_vel);
 }
 
 void

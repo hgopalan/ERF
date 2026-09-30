@@ -121,6 +121,26 @@ MovingBodiesInputs::read ()
             if (!(b.air_density > 0.0)) {
                 Abort("erf.moving_bodies." + name + ".air_density must be positive");
             }
+            ppb.query("fllc", b.fllc);
+            if (b.fllc && b.mode != "alm") {
+                Abort("erf.moving_bodies." + name + ".fllc = true needs mode = alm; the correction is for an actuator line");
+            }
+            ppb.query("fllc_relax", b.fllc_relax);
+            if (!(b.fllc_relax > 0.0 && b.fllc_relax <= 1.0)) {
+                Abort("erf.moving_bodies." + name + ".fllc_relax must lie in (0, 1]");
+            }
+            ppb.query("fllc_start_time", b.fllc_start_time);
+            if (b.fllc_start_time < 0.0) {
+                Abort("erf.moving_bodies." + name + ".fllc_start_time must be >= 0");
+            }
+            ppb.query("fllc_eps_chord", b.fllc_eps_chord);
+            if (!(b.fllc_eps_chord > 0.0)) {
+                Abort("erf.moving_bodies." + name + ".fllc_eps_chord must be positive (chords)");
+            }
+            ppb.query("fllc_eps_dr", b.fllc_eps_dr);
+            if (!(b.fllc_eps_dr > 0.0)) {
+                Abort("erf.moving_bodies." + name + ".fllc_eps_dr must be positive");
+            }
         } else {
             ppb.get("rotor_radius", b.rotor_radius);
             if (!(b.rotor_radius > 0.0)) {

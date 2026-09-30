@@ -313,6 +313,13 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTRotor.cpp
   )
+  # Motivation: the filtered lifting-line correction must reproduce the classical uniform
+  # downwash of an elliptic lift distribution in the narrow-kernel limit, vanish when the run's
+  # kernel is the optimal one, act against the lift for a wider kernel, relax as specified and
+  # survive a checkpoint.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestFLLC.cpp
+  )
 endif()
 build_erf_exe(${erf_exe_name} NO_ERF_MAIN)
 target_link_libraries(${erf_exe_name} PRIVATE GTest::gtest)

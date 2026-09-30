@@ -154,6 +154,45 @@ step because the rotor speed is OpenFAST's to change. The velocities OpenFAST
 receives are still sampled at its structural nodes, and the same ``Wake_Mod = 0``
 requirement and hub-axis check apply as for the disk.
 
+Filtered lifting-line correction
+--------------------------------
+
+An actuator line spread with a kernel of width ``epsilon`` (two cells or so,
+tens of metres for a 240 m rotor) sees at its own points a weaker induced
+velocity than the vortex sheet of a real blade, whose kernel is of the order
+of the chord: the blades then see too much wind and the line over-predicts
+power, more so for wider kernels. The filtered lifting-line correction
+(Martinez-Tossas and Meneveau, 2019), ``fllc = true`` with ``mode = alm``,
+computes the velocity the trailing vorticity of the line's own lift
+distribution induces at the line for the kernel actually used and for the
+optimal one, ``epsilon_opt = fllc_eps_chord * chord`` (a quarter chord by
+default, the chord being OpenFAST's at each force node), and adds the relaxed
+difference to the velocities OpenFAST is given at its blade nodes. For each
+blade, with the force on the fluid per unit density ``F``, the relative
+velocity ``v`` (flow minus blade motion) and the node width ``dr``, the lift
+force per unit span is ``G = (F - v (F . v) / |v|^2) / dr`` and the induced
+velocity of the sources ``G / |v|`` is
+
+.. math::
+
+   u(r) = \frac{1}{2\pi} \sum_j \frac{G_j}{|v_j|} \, k(|r - r_j|, \epsilon_j) \, dr_j,
+   \qquad k(r, \epsilon) = \frac{e^{-r^2/\epsilon^2}}{\epsilon^2} + \frac{e^{-r^2/\epsilon^2} - 1}{2 r^2},
+
+the derivative form of the Gaussian-filtered vortex kernel (its far field is
+the unfiltered ``-1 / (2 r^2)``). The sum runs over a fine span grid with
+spacing ``epsilon_opt / fllc_eps_dr`` onto which ``G / |v|`` and
+``epsilon_opt`` are interpolated, since the optimal kernel is far narrower
+than the node spacing. The correction ``du = (1 - f) du + f (u_opt - u_les)``
+with ``f = fllc_relax`` is a downwash (against the lift) when the run's kernel
+is wider than the optimal one, and vanishes when they coincide. It is
+computed at the force nodes from the loads of the step just taken, applied
+after the sampling by linear interpolation along the span between OpenFAST's
+velocity and force nodes, starts at ``fllc_start_time``, and is checkpointed
+(it is a relaxed state). ``<output_root>_fllc.csv`` records its largest and
+root-mean-square value over the blades. This follows Kynema's variable-chord
+operator; the loads are divided by the body's ``air_density``, which must be
+the model's ``AirDens``.
+
 Tower and nacelle
 -----------------
 

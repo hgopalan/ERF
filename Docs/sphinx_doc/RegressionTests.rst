@@ -672,10 +672,22 @@ row, and the plotfile with the tower wake matches its gold;
 on a box face and requires the plotfiles and flow logs to agree with the
 one-box run.
 
-Test Location: `Tests/test_files/OpenFAST_ALM_Uniform`_ and `Tests/test_files/OpenFAST_ALM_Tower`_
+``OpenFAST_ALM_FLLC`` runs the actuator-line deck with the filtered
+lifting-line correction on (the stub reports a chord of 6 m, so the optimal
+kernel is 1.5 m against the run's 100 m): the correction log
+``T1_fllc.csv`` and the plotfile must match their golds, and the integrated
+source still equals minus the thrust in every row (the correction changes the
+velocities the blades see, not the force identity).
+``OpenFAST_ALM_FLLC_Restart`` checkpoints that case at step 5 and restarts to
+step 10: the relaxed correction comes back from the checkpoint, so the
+plotfile and the correction log must equal the straight run's exactly.
+
+Test Location: `Tests/test_files/OpenFAST_ALM_Uniform`_, `Tests/test_files/OpenFAST_ALM_Tower`_, `Tests/test_files/OpenFAST_ALM_FLLC`_ and `Tests/test_files/OpenFAST_ALM_FLLC_Restart`_
 
 .. _`Tests/test_files/OpenFAST_ALM_Uniform`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_Uniform
 .. _`Tests/test_files/OpenFAST_ALM_Tower`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_Tower
+.. _`Tests/test_files/OpenFAST_ALM_FLLC`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_FLLC
+.. _`Tests/test_files/OpenFAST_ALM_FLLC_Restart`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_FLLC_Restart
 
 Wake sampling lines
 -------------------

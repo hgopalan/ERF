@@ -15,6 +15,7 @@
 #include "ERF_RunningStats.H"
 #include "ERF_WakeLines.H"
 #ifdef ERF_USE_OPENFAST
+#include "ERF_FLLC.H"
 #include "ERF_OpenFASTRotor.H"
 #endif
 
@@ -83,8 +84,12 @@ public:
 private:
     MovingBodies (MovingBodiesInputs in, double dt, double t_max, bool restarting);
 
-    /** Sample (or prescribe) the flow at every body's velocity nodes and hand it to the bodies. */
-    void supply_velocities (const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
+    /**
+     * Sample (or prescribe) the flow at every body's velocity nodes and hand it to the bodies;
+     * the actuator lines with the lifting-line correction on get their blade velocities corrected
+     * first (time decides whether the correction has started).
+     */
+    void supply_velocities (double time, const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
                             const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
 
     MovingBodiesInputs m_in;
@@ -131,6 +136,16 @@ private:
     std::vector<erf_actuator::RunningStats> m_disk_stats;      //!< one per prescribed-Ct disk
 #ifdef ERF_USE_OPENFAST
     std::unique_ptr<erf_openfast::OpenFASTDriver> m_driver;
+    /** Build the lifting-line correction of every turbine that asks for it, once the node layout and chords are known. */
+    void build_fllc (const amrex::Geometry& geom);
+    /** Correct the blade velocity nodes of turbine i in uvw (3 per velocity node) with its lifting-line correction. */
+    void apply_fllc (int i, double time, std::vector<amrex::Real>& uvw);
+    /** Append a row to <output_root>_fllc.csv for every corrected turbine. */
+    void write_fllc_diagnostics (double time, bool first);
+    std::vector<std::vector<std::unique_ptr<erf_actuator::FLLC>>> m_fllc;   //!< per turbine, one per blade (empty: off)
+    bool m_fllc_built{false};
+    bool m_fllc_written{false};
+    std::string m_fllc_state_dir;   //!< checkpoint directory whose correction state the blades take over
 #endif
 };
 

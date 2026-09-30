@@ -2392,6 +2392,19 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.<name>.nacelle_area**              | openfast_turbine: frontal area of the nacelle (m^2);     | Real >= 0                | 0                        |
 |                                                        | must be positive when nacelle_cd is                      |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.fllc**                      | openfast_turbine, mode alm: filtered lifting-line        | true, false              | false                    |
+|                                                        | correction of the velocities the blades are given        |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.fllc_relax**                | relaxation factor of the correction                      | 0 < Real <= 1            | 0.1                      |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.fllc_start_time**           | time (s) from which the correction is applied            | Real >= 0                | 0                        |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.fllc_eps_chord**            | optimal kernel width in chords (OpenFAST's chord at each | Real > 0                 | 0.25                     |
+|                                                        | force node)                                              |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.fllc_eps_dr**               | fine span grid of the correction: spacing =              | Real > 0                 | 1.0                      |
+|                                                        | optimal kernel width / fllc_eps_dr                       |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.rotor_radius**              | ct_disk: disk radius (m)                                 | Real > 0                 | must be set              |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.hub_height**                | ct_disk: disk centre above the base (m); must exceed the | Real > rotor_radius      | must be set              |
