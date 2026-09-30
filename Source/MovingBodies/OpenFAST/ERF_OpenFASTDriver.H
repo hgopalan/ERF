@@ -21,6 +21,13 @@ namespace erf_openfast {
 int substep_count (double dt_cfd, double dt_fast, std::string& err);
 
 /**
+ * The MPI rank that owns turbine i of a farm: the turbines are dealt round-robin over the
+ * ranks, so a farm of up to nprocs turbines has one OpenFAST instance per rank and a larger
+ * one spreads evenly. Every rank computes the same assignment.
+ */
+int owner_rank_for (int turbine_index, int nprocs);
+
+/**
  * Whether the OpenFAST model computes its own rotor induction. When ERF puts the rotor's
  * loads into the flow, the velocities it samples already contain the induction, so AeroDyn's
  * wake model must be off (Wake_Mod = 0, or WakeMod = 0 in older AeroDyn files). Reads the
@@ -83,8 +90,9 @@ struct TurbineState
 
 /**
  * Drives one or more OpenFAST turbines through the ExtInfw C API. Each turbine is owned by one
- * MPI rank; after every step the node positions and forces are broadcast so every rank can use
- * them. This version initialises, steps and reports; the flow velocity at the nodes is
+ * MPI rank (owner_rank_for), which alone runs its OpenFAST instance; after every step the node
+ * positions and forces are broadcast so every rank can use them. A farm therefore costs each
+ * rank only the turbines it owns, and the result does not depend on the rank count. This version initialises, steps and reports; the flow velocity at the nodes is
  * uniform and prescribed by the caller.
  */
 class OpenFASTDriver

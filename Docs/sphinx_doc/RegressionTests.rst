@@ -689,6 +689,23 @@ Test Location: `Tests/test_files/OpenFAST_ALM_Uniform`_, `Tests/test_files/OpenF
 .. _`Tests/test_files/OpenFAST_ALM_FLLC`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_FLLC
 .. _`Tests/test_files/OpenFAST_ALM_FLLC_Restart`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_FLLC_Restart
 
+Farms
+-----
+``OpenFAST_ADM_TwoTurbines`` (same build requirements) runs two stub turbines
+as actuator disks, the second two diameters downstream of the first: each has
+its own OpenFAST instance on its owner rank and its own logs, and the
+integrated momentum source must equal minus the farm's total load
+(``load_x`` in ``moving_bodies/total_load.csv``) in every row; the downstream
+turbine's sampled flow log ``T2_flow.csv`` and the plotfile are the golds.
+``OpenFASTADM_TwoTurbines_BoxParity`` runs the farm on one rank (both turbines
+on rank 0) against two ranks with the domain split (one turbine per rank) and
+requires the plotfiles and ``T2_flow.csv`` to agree, so the ownership does
+not change the answer.
+
+Test Location: `Tests/test_files/OpenFAST_ADM_TwoTurbines`_
+
+.. _`Tests/test_files/OpenFAST_ADM_TwoTurbines`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_TwoTurbines
+
 Wake sampling lines
 -------------------
 ``OpenFAST_ADM_Wake`` (same build requirements) is the actuator-disk case with

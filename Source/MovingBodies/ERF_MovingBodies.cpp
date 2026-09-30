@@ -137,7 +137,8 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, double dt, double t_max, bool
         for (const auto& t : m_driver->turbines()) {
             Print() << "  " << t.name << ": OpenFAST dt " << t.dt_fast << ", " << t.num_substeps
                     << " substeps per ERF step, " << t.num_blades << " blades, "
-                    << t.num_vel_nodes << " velocity nodes, " << t.num_force_nodes << " force nodes\n";
+                    << t.num_vel_nodes << " velocity nodes, " << t.num_force_nodes << " force nodes, on rank "
+                    << t.owner_rank << "\n";
         }
     }
     for (std::size_t i = 0; i < turbines.size(); ++i) {
@@ -303,6 +304,7 @@ MovingBodies::advance (int lev, double time, double dt,
         supply_velocities(time, U, V, W, z_phys_nd, geom);
         m_driver->solution0();
         m_driver->write_diagnostics(time);
+        write_total_load(time, true);
     }
 #endif
     supply_velocities(time, U, V, W, z_phys_nd, geom);
@@ -311,6 +313,7 @@ MovingBodies::advance (int lev, double time, double dt,
     if (first || m_step % m_in.diagnostics_int == 0) {
         m_driver->write_diagnostics(time + dt);
         write_fllc_diagnostics(time, first);
+        write_total_load(time + dt, false);
     }
 #endif
     // the bodies' forces come from the velocities just sampled (the disks) or from the
@@ -428,6 +431,38 @@ MovingBodies::any_forcing () const
     if (!m_disks.empty()) { return true; }
     for (const std::string& m : m_turbine_mode) { if (m != "none") { return true; } }
     return false;
+}
+
+void
+MovingBodies::write_total_load (double time, bool first)
+{
+    if (!ParallelDescriptor::IOProcessor()) { return; }
+    std::array<Real,3> load{{0.0, 0.0, 0.0}};
+    Real power = 0.0;
+#ifdef ERF_USE_OPENFAST
+    {
+        const auto& turbs = m_driver->turbines();
+        for (std::size_t i = 0; i < turbs.size(); ++i) {
+            if (m_turbine_mode[i] == "none") { continue; }   // no force in the flow
+            const auto& t = turbs[i];
+            const auto f = m_driver->thrust(t);
+            const auto ft = m_driver->tower_force(t);
+            for (int d = 0; d < 3; ++d) { load[d] += f[d] + ft[d] + t.nacelle_force[d]; }
+            power += m_driver->torque(t) * t.rotor_speed;
+        }
+    }
+#endif
+    for (const auto& d : m_disks) {
+        const auto n = d->normal();
+        for (int c = 0; c < 3; ++c) { load[c] += d->thrust() * n[c]; }
+    }
+    std::ofstream out;
+    const bool truncate = first && !m_restored && !m_total_written;
+    if (erf_actuator::open_log(out, m_in.diagnostics_dir + "/total_load.csv", truncate)) {
+        out << "time,load_x,load_y,load_z,power\n";
+    }
+    out << std::setprecision(10) << time << "," << load[0] << "," << load[1] << "," << load[2] << "," << power << "\n";
+    m_total_written = true;
 }
 
 void

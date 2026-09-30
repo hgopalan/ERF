@@ -460,3 +460,72 @@ TEST(OpenFASTDriver, TowerShadowCheckReadsTwrShadowFromTheAeroDynFile)
     EXPECT_TRUE(erf_openfast::check_tower_shadow_off(write("noaero.fst", "0   CompAero  - off\n\"ad_shadow.dat\"  AeroFile  - x\n")).empty());
     EXPECT_TRUE(erf_openfast::check_tower_shadow_off(write("stub.fst", "dt = 0.01\n")).empty());
 }
+
+// A farm: turbine i is owned by rank i modulo the rank count, every rank computes the same
+// assignment, and on one rank two turbines run as two OpenFAST instances with their own
+// identities, positions, loads and logs.
+TEST(OpenFASTDriver, TurbinesAreDealtRoundRobinOverTheRanks)
+{
+    // one rank: everything on rank 0; more ranks than turbines: one turbine per rank; fewer:
+    // the deal wraps around
+    for (int i = 0; i < 5; ++i) { EXPECT_EQ(erf_openfast::owner_rank_for(i, 1), 0); }
+    EXPECT_EQ(erf_openfast::owner_rank_for(0, 8), 0);
+    EXPECT_EQ(erf_openfast::owner_rank_for(1, 8), 1);
+    EXPECT_EQ(erf_openfast::owner_rank_for(7, 8), 7);
+    EXPECT_EQ(erf_openfast::owner_rank_for(8, 8), 0);
+    EXPECT_EQ(erf_openfast::owner_rank_for(9, 8), 1);
+    // every turbine has a valid rank and, up to the rank count, a distinct one
+    for (int np = 1; np <= 6; ++np) {
+        std::vector<int> seen(np, 0);
+        for (int i = 0; i < np; ++i) {
+            const int r = erf_openfast::owner_rank_for(i, np);
+            ASSERT_GE(r, 0); ASSERT_LT(r, np);
+            ++seen[r];
+        }
+        for (int r = 0; r < np; ++r) { EXPECT_EQ(seen[r], 1) << "np " << np << " rank " << r; }
+    }
+}
+
+TEST(OpenFASTDriver, TwoTurbinesRunAsTwoInstancesWithTheirOwnLoads)
+{
+    StubDeck d;
+    const auto dir = scratch_dir("farm");
+    const std::string fst = write_stub_deck(dir, d);
+    MovingBodyInputs a = one_turbine(fst, dir);
+    MovingBodyInputs b = one_turbine(fst, dir);
+    b.name = "T2";
+    b.base_pos = {{1230.0, 500.0, 0.0}};
+    b.output_root = (dir / "T2").string();
+    erf_openfast::OpenFASTDriver driver({a, b});
+    driver.init(0.05, 1.0);
+    ASSERT_EQ(driver.turbines().size(), 2u);
+    // on the single rank of this test both are owned here, as two OpenFAST instances
+    EXPECT_TRUE(driver.is_owner(0));
+    EXPECT_TRUE(driver.is_owner(1));
+    EXPECT_EQ(driver.turbines()[0].owner_rank, 0);
+    EXPECT_EQ(driver.turbines()[1].owner_rank, 0);
+    EXPECT_NE(driver.turbines()[0].tid_local, driver.turbines()[1].tid_local);
+    // their own places in the domain
+    EXPECT_NEAR(driver.turbines()[0].hub_pos[0], 500.0, 1.0e-4);
+    EXPECT_NEAR(driver.turbines()[1].hub_pos[0], 1230.0, 1.0e-4);
+    // different winds at the two rotors give different loads, each the disk model's own
+    std::vector<Real> u1(3 * driver.turbines()[0].num_vel_nodes), u2(3 * driver.turbines()[1].num_vel_nodes);
+    for (std::size_t k = 0; k < u1.size(); k += 3) { u1[k] = 10.0; u1[k+1] = 0.0; u1[k+2] = 0.0; }
+    for (std::size_t k = 0; k < u2.size(); k += 3) { u2[k] = 8.0;  u2[k+1] = 0.0; u2[k+2] = 0.0; }
+    driver.set_node_velocities(0, u1);
+    driver.set_node_velocities(1, u2);
+    driver.solution0();
+    const auto f1 = driver.thrust(driver.turbines()[0]);
+    const auto f2 = driver.thrust(driver.turbines()[1]);
+    const double t1 = 0.5 * d.air_density * d.ct * 100.0 * d.area();
+    const double t2 = 0.5 * d.air_density * d.ct * 64.0 * d.area();
+    EXPECT_NEAR(f1[0], t1, 1.0e-5 * t1);
+    EXPECT_NEAR(f2[0], t2, 1.0e-5 * t2);
+    // a step advances both; their logs are separate files
+    driver.step();
+    driver.write_diagnostics(0.05);
+    EXPECT_TRUE(std::filesystem::exists(dir / "T1_erf.csv"));
+    EXPECT_TRUE(std::filesystem::exists(dir / "T2_erf.csv"));
+    EXPECT_EQ(driver.turbines()[0].time_index, driver.turbines()[1].time_index);
+    EXPECT_EQ(driver.turbines()[0].time_index, 5);
+}

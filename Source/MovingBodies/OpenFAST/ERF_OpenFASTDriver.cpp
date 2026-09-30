@@ -108,6 +108,13 @@ check_tower_shadow_off (const std::string& fst_file)
            "velocities, so AeroDyn's tower-shadow correction counts it twice: set TwrShadow = 0";
 }
 
+int
+owner_rank_for (int turbine_index, int nprocs)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(turbine_index >= 0 && nprocs >= 1, "owner_rank_for: a non-negative turbine index and at least one rank");
+    return turbine_index % nprocs;
+}
+
 OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
 {
     const int nprocs = ParallelDescriptor::NProcs();
@@ -124,7 +131,7 @@ OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
             const std::string err = check_induction_off(b.fst_file);
             if (!err.empty()) { Abort("erf.moving_bodies." + b.name + ": " + err); }
         }
-        t.owner_rank = i % nprocs;
+        t.owner_rank = owner_rank_for(i, nprocs);
         if (t.owner_rank == ParallelDescriptor::MyProc()) {
             t.tid_local = m_num_local++;
         }
