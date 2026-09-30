@@ -27,6 +27,8 @@ box for ten steps or so, and is checked by the runner named below.
 | `OpenFAST_ADM_LES` | stub turbine, disk, precursor planes | `RunPrecursorInflow.cmake` | turbulent inflow from a precursor; body statistics |
 | `OpenFAST_ADM_CPM` | stub turbine, disk, cell perturbations | `RunOpenFASTADM.cmake` | turbulent inflow from the perturbation method; statistics |
 | `OpenFAST_ADM_TwoTurbines` | two stub turbines, disks | `RunOpenFASTADM.cmake` | a farm: `fx == -load_x` of `total_load.csv`; ownership parity |
+| `OpenFAST_ADM_TwoLevel` | stub turbine, disk, on level 1 of two | `RunOpenFASTADM.cmake` | the anchor level: sampled and forced on the fine patch, stepped with its step |
+| `OpenFAST_ADM_TwoLevel_Restart` | as above | `RunRestartParity.cmake` | restart parity with the fine level |
 | `OpenFAST_ALM_Uniform` | stub turbine, line | `RunOpenFASTADM.cmake` | the rotating line; tip-travel limit |
 | `OpenFAST_ALM_Tower` | stub turbine, line, tower, nacelle | `RunOpenFASTADM.cmake` | `fx == -load_x` with the tower and nacelle |
 | `OpenFAST_ALM_FLLC` | stub turbine, line, lifting-line correction | `RunOpenFASTADM.cmake` | the correction log |

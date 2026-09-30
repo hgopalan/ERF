@@ -26,7 +26,7 @@
 using namespace amrex;
 
 std::unique_ptr<MovingBodies>
-MovingBodies::create (const SolverChoice& sc, int max_level, bool restarting)
+MovingBodies::create (const SolverChoice& sc, int max_level, const Vector<double>& fixed_dt_levels, bool restarting)
 {
     MovingBodiesInputs in = MovingBodiesInputs::read();
     if (!in.active) { return nullptr; }
@@ -62,8 +62,13 @@ MovingBodies::create (const SolverChoice& sc, int max_level, bool restarting)
         }
     }
 
-    const std::string err = MovingBodiesInputs::validate_solver(all_anelastic, fixed_dt > 0.0, max_level, fpe_traps);
+    const int anchor = MovingBodiesInputs::resolve_anchor_level(in.anchor_level, max_level);
+    const std::string err = MovingBodiesInputs::validate_solver(all_anelastic, fixed_dt > 0.0, max_level, anchor, fpe_traps);
     if (!err.empty()) { Abort(err); }
+    // the anchor level's step: erf.fixed_dt divided by the sub-cycling ratios down to that level
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(anchor < static_cast<int>(fixed_dt_levels.size()) && fixed_dt_levels[anchor] > 0.0,
+                                     "erf.moving_bodies: no fixed step is known for the anchor level");
+    fixed_dt = static_cast<Real>(fixed_dt_levels[anchor]);
     if (stop_time <= 0.0) {
         Abort("erf.moving_bodies: set stop_time or max_step so the OpenFAST stop time is known");
     }
@@ -83,13 +88,13 @@ MovingBodies::create (const SolverChoice& sc, int max_level, bool restarting)
         }
     }
 
-    return std::unique_ptr<MovingBodies>(new MovingBodies(std::move(in), fixed_dt, stop_time, restarting));
+    return std::unique_ptr<MovingBodies>(new MovingBodies(std::move(in), anchor, fixed_dt, stop_time, restarting));
 }
 
-MovingBodies::MovingBodies (MovingBodiesInputs in, double dt, double t_max, bool restarting)
-    : m_in(std::move(in)), m_dt(dt), m_t_max(t_max), m_restarting(restarting)
+MovingBodies::MovingBodies (MovingBodiesInputs in, int anchor, double dt, double t_max, bool restarting)
+    : m_in(std::move(in)), m_anchor(anchor), m_dt(dt), m_t_max(t_max), m_restarting(restarting)
 {
-    Print() << "Moving bodies: " << m_in.bodies.size() << " body(ies), ERF dt " << m_dt
+    Print() << "Moving bodies: " << m_in.bodies.size() << " body(ies) on level " << m_anchor << ", ERF dt there " << m_dt
             << ", OpenFAST stop time " << t_max << ", velocities "
             << (m_in.has_prescribed_velocity ? "prescribed" : "sampled from the flow") << "\n";
     // every body stands still in this version; its base is where the motion puts it at t = 0
@@ -296,7 +301,7 @@ MovingBodies::advance (int lev, double time, double dt,
     if (lev != anchor_level()) { return; }
     // the OpenFAST substep count was fixed at init from erf.fixed_dt
     if (std::abs(dt - m_dt) > 1.0e-10 * m_dt) {
-        Abort("erf.moving_bodies: the time step changed from " + std::to_string(m_dt) + " to " +
+        Abort("erf.moving_bodies: the time step on level " + std::to_string(m_anchor) + " changed from " + std::to_string(m_dt) + " to " +
               std::to_string(dt) + "; OpenFAST needs the fixed step it was initialised with");
     }
     if (m_restarting && !m_restored) {
@@ -305,7 +310,7 @@ MovingBodies::advance (int lev, double time, double dt,
     ++m_step;
     const bool first = (m_step == 1);
 #ifdef ERF_USE_OPENFAST
-    if (!m_audited_setup) { audit_turbines_setup(geom); }
+    if (!m_audited_setup) { audit_turbines_setup(U.boxArray(), geom); }
     if (first && !m_driver->solved0()) {
         // first step: OpenFAST's first solution sees the initial flow at its nodes
         supply_velocities(time, U, V, W, z_phys_nd, geom);
@@ -371,7 +376,7 @@ MovingBodies::accumulate_statistics (double time)
 }
 
 void
-MovingBodies::build_wake_lines (const Geometry& geom)
+MovingBodies::build_wake_lines (const BoxArray& level_grids, const Geometry& geom)
 {
     const auto& w = m_in.wake;
     auto add = [&](const std::string& name, const std::string& root, const std::array<Real,3>& hub,
@@ -402,6 +407,11 @@ MovingBodies::build_wake_lines (const Geometry& geom)
     const auto phi = geom.ProbHiArray();
     for (const auto& wl : m_wakes) {
         const auto& pos = wl->positions();
+        std::string outside;
+        if (!erf_actuator::points_covered_by(level_grids, geom, pos, geom.CellSize(0), outside)) {
+            Abort("erf.moving_bodies.wake: the sampling point " + outside + " of " + wl->name() + " is not covered by the grids of level " +
+                  std::to_string(m_anchor) + "; shorten lines_xD or half_width, or enlarge the refinement region behind the rotor");
+        }
         for (std::size_t p = 0; p < pos.size() / 3; ++p) {
             for (int d = 0; d < 3; ++d) {
                 if (geom.isPeriodic(d)) { continue; }
@@ -425,7 +435,7 @@ void
 MovingBodies::write_wake_diagnostics (double time, const MultiFab& U, const MultiFab& V, const MultiFab& W,
                                       const MultiFab* z_phys_nd, const Geometry& geom)
 {
-    if (!m_wakes_built) { build_wake_lines(geom); }
+    if (!m_wakes_built) { build_wake_lines(U.boxArray(), geom); }
     std::vector<Real> vel;
     for (auto& wl : m_wakes) {
         erf_actuator::sample_velocity(U, V, W, z_phys_nd, geom, wl->positions(), vel);
@@ -573,6 +583,17 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
         force.insert(force.end(), f.begin(), f.end());
     }
     const Real eps = m_epsilon_dx * geom.CellSize(0);
+    if (!m_disk_coverage_checked) {
+        m_disk_coverage_checked = true;
+        for (const auto& d : m_disks) {
+            std::string outside;
+            if (!erf_actuator::points_covered_by(U.boxArray(), geom, d->disk_points(), Real(3.0) * eps + geom.CellSize(0), outside) ||
+                !erf_actuator::points_covered_by(U.boxArray(), geom, d->sample_points(), geom.CellSize(0), outside)) {
+                Abort("erf.moving_bodies." + d->name() + ": point " + outside + " (with the kernel reach) is not covered by the grids of level " +
+                      std::to_string(m_anchor) + "; enlarge the refinement region around the disk");
+            }
+        }
+    }
     erf_actuator::spread_forces(pos, force, eps, z_phys_nd, detJ_cc, geom, m_src_x, m_src_y, m_src_z);
 }
 
@@ -647,11 +668,26 @@ MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab&
 
 #ifdef ERF_USE_OPENFAST
 void
-MovingBodies::audit_turbines_setup (const Geometry& geom)
+MovingBodies::audit_turbines_setup (const BoxArray& level_grids, const Geometry& geom)
 {
     m_audited_setup = true;
     const auto& turbs = m_driver->turbines();
     if (turbs.empty()) { return; }
+    // every node of every turbine, with the kernel's reach, must lie on the anchor level's grids:
+    // on a refined level those are not the whole domain, and the sampler and spreader read only
+    // the level's own cells
+    {
+        const Real reach = Real(3.0) * m_epsilon_dx * geom.CellSize(0) + geom.CellSize(0);
+        for (const auto& t : turbs) {
+            std::string outside;
+            if (!erf_actuator::points_covered_by(level_grids, geom, t.force_pos, reach, outside) ||
+                !erf_actuator::points_covered_by(level_grids, geom, t.vel_pos, geom.CellSize(0), outside)) {
+                Abort("erf.moving_bodies." + t.name + ": node " + outside + " (with the kernel reach " + std::to_string(reach) +
+                      " m) is not covered by the grids of level " + std::to_string(m_anchor) +
+                      "; enlarge the refinement region around the rotor, or set erf.moving_bodies.anchor_level to a level that covers it");
+            }
+        }
+    }
     std::array<Real,3> plo, phi, dx;
     std::array<int,3> per;
     for (int d = 0; d < 3; ++d) {

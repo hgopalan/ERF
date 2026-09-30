@@ -140,14 +140,22 @@ TEST(OpenFASTDriver, InductionCheckReadsWakeModFromTheAeroDynFile)
     EXPECT_TRUE(erf_openfast::check_induction_off(write("stub.fst", "dt = 0.01\nnum_blades = 3\n")).empty());
 }
 
-TEST(MovingBodiesInputs, ValidateSolverAcceptsOnlyAnelasticFixedStepSingleLevelNoTraps)
+TEST(MovingBodiesInputs, ValidateSolverAcceptsAnelasticFixedStepNoTrapsOnAnyAnchorLevel)
 {
-    EXPECT_TRUE(MovingBodiesInputs::validate_solver(true, true, 0, false).empty());
-    EXPECT_NE(MovingBodiesInputs::validate_solver(false, true, 0, false).find("anelastic"), std::string::npos);
-    EXPECT_NE(MovingBodiesInputs::validate_solver(true, false, 0, false).find("fixed"), std::string::npos);
-    EXPECT_NE(MovingBodiesInputs::validate_solver(true, true, 1, false).find("max_level"), std::string::npos);
+    EXPECT_TRUE(MovingBodiesInputs::validate_solver(true, true, 0, 0, false).empty());
+    EXPECT_NE(MovingBodiesInputs::validate_solver(false, true, 0, 0, false).find("anelastic"), std::string::npos);
+    EXPECT_NE(MovingBodiesInputs::validate_solver(true, false, 0, 0, false).find("fixed"), std::string::npos);
+    // two levels: the anchor may be either; a level that does not exist is refused
+    EXPECT_TRUE(MovingBodiesInputs::validate_solver(true, true, 1, 1, false).empty());
+    EXPECT_TRUE(MovingBodiesInputs::validate_solver(true, true, 1, 0, false).empty());
+    EXPECT_NE(MovingBodiesInputs::validate_solver(true, true, 1, 2, false).find("anchor_level"), std::string::npos);
+    EXPECT_NE(MovingBodiesInputs::validate_solver(true, true, 1, -1, false).find("anchor_level"), std::string::npos);
+    // the default anchor is the finest level
+    EXPECT_EQ(MovingBodiesInputs::resolve_anchor_level(-1, 0), 0);
+    EXPECT_EQ(MovingBodiesInputs::resolve_anchor_level(-1, 2), 2);
+    EXPECT_EQ(MovingBodiesInputs::resolve_anchor_level(1, 2), 1);
     // OpenFAST 4.2.1 raises floating-point exceptions in FAST_ProgStart; a trapped run dies there
-    EXPECT_NE(MovingBodiesInputs::validate_solver(true, true, 0, true).find("fpe_trap"), std::string::npos);
+    EXPECT_NE(MovingBodiesInputs::validate_solver(true, true, 0, 0, true).find("fpe_trap"), std::string::npos);
 }
 
 TEST(MovingBodiesInputs, ReadFillsEveryBodyFromItsBlock)

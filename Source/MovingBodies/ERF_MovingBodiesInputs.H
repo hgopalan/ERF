@@ -66,6 +66,7 @@ struct MovingBodyInputs
  *   erf.moving_bodies.avg_start       = 400.0      (running averages and statistics start here)
  *   erf.moving_bodies.alm_max_tip_cells = 1.0      (abort when a blade tip sweeps more cells than this per step)
  *   erf.moving_bodies.density_tolerance = 0.05     (abort when ERF's density at a hub is further from the model's)
+ *   erf.moving_bodies.anchor_level    = 1          (the level the bodies are sampled and forced on; default the finest)
  *   erf.moving_bodies.prescribed_velocity = 10.59 0 0   (testing aid: fixed inflow to every body)
  */
 /** erf.moving_bodies.wake.*: sampling lines behind every rotor (off unless lines_xD is given). */
@@ -90,6 +91,7 @@ struct MovingBodiesInputs
     amrex::Real avg_start{0.0};              //!< time from which the running averages and statistics accumulate
     amrex::Real alm_max_tip_cells{1.0};      //!< actuator line: largest tip travel per ERF step, in cells
     amrex::Real density_tolerance{0.05};     //!< relative tolerance between ERF's density at a hub and the OpenFAST model's
+    int anchor_level{-1};                    //!< the level the bodies live on (-1: the finest level, amr.max_level)
 
     /** Read erf.moving_bodies.*; aborts on an unknown type, a duplicate name or a bad value. */
     static MovingBodiesInputs read ();
@@ -99,11 +101,15 @@ struct MovingBodiesInputs
      * the message to abort with. A function of plain flags so a unit test can check the contract.
      * @param all_levels_anelastic every level runs the anelastic solver
      * @param fixed_dt the run uses erf.fixed_dt (OpenFAST needs a fixed step)
-     * @param max_level amr.max_level (a single level in this version)
+     * @param max_level amr.max_level
+     * @param anchor_level the level the bodies live on, already resolved (0 <= anchor <= max_level)
      * @param fpe_traps an amrex.fpe_trap_* input is on (OpenFAST's Fortran is not trap clean)
      */
     static std::string validate_solver (bool all_levels_anelastic, bool fixed_dt, int max_level,
-                                        bool fpe_traps);
+                                        int anchor_level, bool fpe_traps);
+
+    /** The anchor level for the input (-1: the finest level). */
+    static int resolve_anchor_level (int requested, int max_level) { return requested < 0 ? max_level : requested; }
 };
 
 #endif

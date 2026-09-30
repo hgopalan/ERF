@@ -13,6 +13,7 @@
 
 #include <AMReX_Box.H>
 #include <AMReX_BoxArray.H>
+#include <AMReX_BoxList.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
@@ -214,4 +215,39 @@ TEST(ActuatorSampling, EmptyPointListIsAllowed)
     std::vector<Real> vel{1.0, 2.0, 3.0};
     erf_actuator::sample_velocity(f.u, f.v, f.w, nullptr, f.geom, {}, vel);
     EXPECT_TRUE(vel.empty());
+}
+
+// On a refined level the grids are not the whole domain: a point is usable only if the cells it
+// and its reach need are all on the level.
+TEST(ActuatorSampling, CoverageByALevelIncludesTheReach)
+{
+    // a 3000 x 1200 x 600 m domain on 50 m cells, periodic in x and y; the level covers only
+    // x in [500, 1500), y in [300, 900), z in [0, 450) as two boxes
+    amrex::Box domain(amrex::IntVect(0, 0, 0), amrex::IntVect(59, 23, 11));
+    amrex::RealBox rb({0.0, 0.0, 0.0}, {3000.0, 1200.0, 600.0});
+    amrex::Geometry geom(domain, rb, 0, {1, 1, 0});
+    amrex::BoxList bl;
+    bl.push_back(amrex::Box(amrex::IntVect(10, 6, 0), amrex::IntVect(19, 17, 8)));
+    bl.push_back(amrex::Box(amrex::IntVect(20, 6, 0), amrex::IntVect(29, 17, 8)));
+    amrex::BoxArray ba(bl);
+    std::string outside;
+    // a point well inside with a 150 m reach: covered
+    EXPECT_TRUE(erf_actuator::points_covered_by(ba, geom, {750.0, 600.0, 150.0}, 150.0, outside));
+    EXPECT_TRUE(outside.empty());
+    // the same point with a reach that crosses the level's x edge (500 m): not covered, named
+    EXPECT_FALSE(erf_actuator::points_covered_by(ba, geom, {750.0, 600.0, 150.0}, 300.0, outside));
+    EXPECT_NE(outside.find("750"), std::string::npos);
+    // a point across the two boxes' shared face: the union covers it
+    EXPECT_TRUE(erf_actuator::points_covered_by(ba, geom, {1000.0, 600.0, 150.0}, 100.0, outside));
+    // a point outside the level, and one above its top
+    EXPECT_FALSE(erf_actuator::points_covered_by(ba, geom, {2000.0, 600.0, 150.0}, 0.0, outside));
+    EXPECT_FALSE(erf_actuator::points_covered_by(ba, geom, {750.0, 600.0, 500.0}, 0.0, outside));
+    // several points: the first outside is the one named
+    EXPECT_FALSE(erf_actuator::points_covered_by(ba, geom, {750.0, 600.0, 150.0, 2500.0, 600.0, 150.0, 2600.0, 600.0, 150.0}, 0.0, outside));
+    EXPECT_NE(outside.find("2500"), std::string::npos);
+    // a level covering the whole domain covers everything, reach or not
+    amrex::BoxArray whole(domain);
+    EXPECT_TRUE(erf_actuator::points_covered_by(whole, geom, {10.0, 10.0, 10.0, 2990.0, 1190.0, 590.0}, 400.0, outside));
+    // an empty point list is covered
+    EXPECT_TRUE(erf_actuator::points_covered_by(ba, geom, {}, 100.0, outside));
 }

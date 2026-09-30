@@ -1086,6 +1086,25 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       DATALOG "T1_fllc.csv"
       DATALOG_SIGDIGITS 10)
 
+  # The disk on two levels: level 1 (25 m) over a box around the rotor is the anchor, sampled and
+  # forced with the fine level's step, level 0 sees it through the average-down. Plotfile and
+  # flow-log golds, and the source still integrates to minus the thrust.
+  add_test_openfast_adm(OpenFAST_ADM_TwoLevel OpenFAST_ADM_TwoLevel "plt00010")
+
+  # The two-level case in one box per level against the fine level split unevenly on two ranks.
+  add_test_box_parity(OpenFASTADM_TwoLevel_BoxParity OpenFAST_ADM_TwoLevel "plt00010"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
+      DATALOG "T1_flow.csv"
+      DATALOG_SIGDIGITS 8)
+
+  # The two-level case checkpointed at step 5 and restarted to step 10: the fine level and the
+  # turbine on it come back exactly.
+  add_test_restart_parity(OpenFAST_ADM_TwoLevel_Restart OpenFAST_ADM_TwoLevel_Restart 5 10
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      DATALOG "T1_flow.csv"
+      DATALOG_SIGDIGITS 10)
+
   # Two stub turbines as actuator disks, the second two diameters downstream of the first: each
   # runs in its own OpenFAST instance on its owner rank (both on rank 0 here) and writes its own
   # logs; the integrated source must equal minus the farm's total load, and the downstream
