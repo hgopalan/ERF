@@ -1,4 +1,4 @@
-// Stand-in for libopenfastlib, implementing the subset of the OpenFAST 4 C API declared in
+// Stand-in for libopenfastlib, implementing the subset of the OpenFAST 5 C API (unchanged since 4.0) declared in
 // Stub/FAST_Library.h. It lets the ERF coupling be built and tested where OpenFAST is not
 // installed (CI). The turbine is a rigid three-axis rotor: straight blades turning at a fixed
 // speed about the +x axis, forces from a uniform-Ct disk model spread over the blade nodes, and

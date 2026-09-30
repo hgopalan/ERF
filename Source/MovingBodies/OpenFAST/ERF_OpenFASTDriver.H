@@ -9,7 +9,7 @@
 
 #include "ERF_MovingBodiesInputs.H"
 
-// OpenFAST 4 C API (the real header, or Stub/FAST_Library.h when ERF_OPENFAST_USE_STUB is set)
+// OpenFAST 5 C API, unchanged since 4.0 (the real header, or Stub/FAST_Library.h when ERF_OPENFAST_USE_STUB is set)
 #include "FAST_Library.h"
 
 namespace erf_openfast {
