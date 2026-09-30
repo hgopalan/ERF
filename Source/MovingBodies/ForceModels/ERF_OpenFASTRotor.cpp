@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <string>
 
 #include <AMReX.H>
 #include <AMReX_BLassert.H>
@@ -45,6 +46,45 @@ alm_points (const erf_openfast::TurbineState& t, std::vector<Real>& pos, std::ve
             force.push_back(-t.force[3*nd+d]);   // on the fluid
         }
     }
+}
+
+void
+tower_points (const erf_openfast::TurbineState& t, std::vector<Real>& pos, std::vector<Real>& force)
+{
+    const int first = 1 + t.num_blades * t.num_force_pts_blade;
+    const int last = std::min(t.num_force_nodes, first + t.num_force_pts_tower);
+    if (last <= first) { return; }
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(static_cast<int>(t.force_pos.size()) >= 3 * last &&
+                                     static_cast<int>(t.force.size()) >= 3 * last,
+                                     "tower_points: the turbine's node arrays are shorter than its node count");
+    for (int nd = first; nd < last; ++nd) {
+        for (int d = 0; d < 3; ++d) {
+            pos.push_back(t.force_pos[3*nd+d]);
+            force.push_back(-t.force[3*nd+d]);   // on the fluid
+        }
+    }
+}
+
+std::array<Real,3>
+nacelle_drag_force (const std::array<Real,3>& u, Real rho, Real cd, Real area)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(rho > Real(0.0) && cd >= Real(0.0) && area >= Real(0.0),
+                                     "nacelle_drag_force: rho must be positive, cd and area non-negative");
+    const Real speed = std::sqrt(u[0]*u[0] + u[1]*u[1] + u[2]*u[2]);
+    const Real c = -Real(0.5) * rho * cd * area * speed;
+    return {{c * u[0], c * u[1], c * u[2]}};
+}
+
+std::array<Real,3>
+nacelle_corrected_velocity (const std::array<Real,3>& u, Real cd, Real area, Real epsilon)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(epsilon > Real(0.0), "nacelle_corrected_velocity: epsilon must be positive");
+    const Real fac = Real(1.0) - cd * area / (Real(4.0) * pi * epsilon * epsilon);
+    if (!(fac > Real(0.0))) {
+        amrex::Abort("nacelle drag: cd * area = " + std::to_string(cd * area) + " m^2 exceeds 4 pi epsilon^2 = " +
+                     std::to_string(4.0 * pi * epsilon * epsilon) + " m^2; the spreading kernel is too narrow for the nacelle");
+    }
+    return {{u[0] / fac, u[1] / fac, u[2] / fac}};
 }
 
 Real

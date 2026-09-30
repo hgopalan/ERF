@@ -2382,8 +2382,15 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.<name>.num_force_points_blade**    | openfast_turbine: actuator force points per blade        | Int > 0                  | 50                       |
 |                                                        | requested from OpenFAST                                  |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.num_force_points_tower**    | openfast_turbine: actuator force points on the tower;    | 0                        | 0                        |
-|                                                        | only 0 (no tower forcing) is available yet               |                          |                          |
+| **erf.moving_bodies.<name>.num_force_points_tower**    | openfast_turbine: actuator force points on the tower     | Int >= 0                 | 0                        |
+|                                                        | requested from OpenFAST, whose tower loads are then      |                          |                          |
+|                                                        | spread into the flow (0: the tower puts no force in it)  |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.nacelle_cd**                | openfast_turbine: drag coefficient of a nacelle drag     | Real >= 0                | 0                        |
+|                                                        | point at the hub (0: no nacelle drag)                    |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.nacelle_area**              | openfast_turbine: frontal area of the nacelle (m^2);     | Real >= 0                | 0                        |
+|                                                        | must be positive when nacelle_cd is                      |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.rotor_radius**              | ct_disk: disk radius (m)                                 | Real > 0                 | must be set              |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
@@ -2404,7 +2411,8 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.<name>.sample_diameters_upstream** | ct_disk: where the upstream speed is sampled, in         | Real > 0                 | 1.0                      |
 |                                                        | diameters along the normal                               |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.air_density**               | ct_disk: density in the thrust (kg/m^3)                  | Real > 0                 | 1.225                    |
+| **erf.moving_bodies.<name>.air_density**               | density in the ct_disk thrust and in the nacelle drag    | Real > 0                 | 1.225                    |
+|                                                        | (kg/m^3)                                                 |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.diagnostics_int**                  | write a diagnostics row every this many steps            | Int > 0                  | 1                        |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+

@@ -127,8 +127,7 @@ start when its ``Wake_Mod`` is not 0 (``mode = none`` leaves it to the model).
 The thrust in the diagnostics is the sum of the hub and blade node forces, so
 its shaft component equals minus that of the integrated source. With ``mode = none``
 the turbine is driven by the flow but puts no force into it (one-way
-coupling, as for a loads analysis in a precomputed flow). Tower forces are not
-available in this version and are refused at start-up.
+coupling, as for a loads analysis in a precomputed flow).
 
 OpenFAST rotor as an actuator line
 ----------------------------------
@@ -154,6 +153,31 @@ about 90 m/s) one cell per step means ``dt <= dx / 90``. The check runs every
 step because the rotor speed is OpenFAST's to change. The velocities OpenFAST
 receives are still sampled at its structural nodes, and the same ``Wake_Mod = 0``
 requirement and hub-axis check apply as for the disk.
+
+Tower and nacelle
+-----------------
+
+Both are off unless asked for, in either rotor mode. With
+``num_force_points_tower > 0`` OpenFAST is asked for that many tower force
+nodes (base to top); AeroDyn computes the tower's drag from the velocities ERF
+samples at its tower nodes (``TwrAero`` must be on in the AeroDyn file, and the
+stub applies a cylinder drag with its own ``tower_diameter`` and ``tower_cd``),
+and ERF spreads each tower node's force on the fluid with the same Gaussian
+kernel as the rotor points, so the tower wake and its shadow on the rotor
+appear in the flow. AeroDyn's own tower-shadow correction of the blade inflow
+(``TwrShadow``) would then count the shadow twice, so ERF reads it from the
+AeroDyn file and prints a warning when it is not 0. With ``nacelle_cd > 0``
+and ``nacelle_area`` ERF adds one drag point at the hub node,
+``-1/2 rho cd area |u| u`` on the fluid with ``rho`` the body's
+``air_density`` and ``u`` the velocity sampled at the hub node, corrected for
+the point's own kernel: a Gaussian force of width ``epsilon`` induces a
+velocity at its own centre that lowers the sampled one by the factor
+``1 - cd area / (4 pi epsilon^2)``, so the sampled velocity is divided by it
+(the correction Kynema applies with its own nacelle kernel width; here the
+run's kernel width is used, and the run aborts if the factor is not positive,
+which needs a kernel narrower than the nacelle). The tower force and the
+nacelle drag are written in the turbine diagnostics with the thrust, and the
+integrated momentum source equals minus their sum.
 
 Prescribed uniform-Ct disk
 --------------------------
@@ -252,14 +276,16 @@ Diagnostics
 Every turbine writes ``<output_root>_erf.csv`` with the time, rotor speed, the
 thrust vector (the sum of the hub and blade node forces, as OpenFAST reports
 them: the force of the fluid on the structure, so along the inflow), the
-aerodynamic torque about the hub axis, the power (torque times rotor speed)
-and the unit hub axis (the shaft direction, which follows yaw, tilt and the
-tower's deflection), and
+aerodynamic torque about the hub axis, the power (torque times rotor speed),
+the unit hub axis (the shaft direction, which follows yaw, tilt and the
+tower's deflection), the tower force (the sum over its force nodes, zero
+without them), the nacelle drag (zero unless asked for) and the total load
+(thrust plus tower plus nacelle, all on the structure), and
 ``<output_root>_flow.csv`` with the velocity the flow supplied at the hub node
 and its mean over the blade nodes. OpenFAST also writes its own output files as
 configured in the ``.fst`` file. Whenever a body puts a force into the flow,
 ``<diagnostics_dir>/momentum_source.csv`` records the time and the momentum
 source integrated over the domain, which equals the sum of the forces on the
-fluid (minus the turbines' thrust vectors, plus the disks' ``-T n``).
+fluid (minus the turbines' total loads, plus the disks' ``-T n``).
 
 Inputs are listed in :ref:`sec:MovingBodiesInputs`.

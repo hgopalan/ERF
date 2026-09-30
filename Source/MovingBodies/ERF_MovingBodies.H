@@ -30,7 +30,8 @@ struct SolverChoice;
  * anchor level. Each step the flow velocity is sampled at every body's velocity nodes (or the
  * prescribed uniform velocity is used) and handed to the bodies, which are then stepped; the
  * forces of the bodies (the OpenFAST turbines' loads as actuator-disk rings or as actuator
- * lines on the blade nodes, the prescribed-Ct disks) are spread onto face-centred momentum sources, which ERF adds to its momentum
+ * lines on the blade nodes, their tower loads and nacelle drag when asked for, the
+ * prescribed-Ct disks) are spread onto face-centred momentum sources, which ERF adds to its momentum
  * right-hand side in every stage of the step through add_momentum_sources().
  */
 class MovingBodies
@@ -97,6 +98,7 @@ private:
     erf_actuator::ActuatorPoints m_points;                             //!< all bodies' velocity nodes
     std::vector<std::unique_ptr<erf_actuator::PrescribedCtDisk>> m_disks;
     std::vector<std::string> m_turbine_mode;                           //!< per OpenFAST turbine: adm | alm | none
+    std::vector<MovingBodyInputs> m_turbine_in;                        //!< per OpenFAST turbine: its inputs (nacelle, density)
     std::vector<int> m_turbine_points_t;                               //!< ring points per turbine (adm)
     amrex::Real m_epsilon_dx{2.0};                                     //!< spreading width, dx units
     bool m_axis_checked{false};

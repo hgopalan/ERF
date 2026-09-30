@@ -15,6 +15,8 @@
 //   rotor_speed_rpm     fixed rotor speed
 //   ct, cp              thrust and power coefficients of the disk model
 //   air_density         (kg/m^3, default 1.225)
+//   tower_diameter      (m, default 0: the tower carries no force)
+//   tower_cd            drag coefficient of the tower (default 0)
 //
 // Node ordering follows ExtInfw: node 0 is the hub, then the blades in turn, root to tip, then
 // the tower from base to top. Positions are in the turbine's own frame (the base at the origin,
@@ -53,6 +55,8 @@ struct StubTurbine {
     double ct = 0.0;
     double cp = 0.0;
     double air_density = 1.225;
+    double tower_diameter = 0.0;
+    double tower_cd = 0.0;
     double azimuth = 0.0;       // rad, blade 0
     int time_index = 0;
     ExtInfw_InputType_t* to_cfd = nullptr;
@@ -114,6 +118,8 @@ bool read_input_file (StubTurbine& t, const std::string& fname, std::string& err
         else if (key == "ct")               { t.ct = value; }
         else if (key == "cp")               { t.cp = value; }
         else if (key == "air_density")      { t.air_density = value; }
+        else if (key == "tower_diameter")   { t.tower_diameter = value; }
+        else if (key == "tower_cd")         { t.tower_cd = value; }
         else {
             err = "OpenFAST stub: unknown key '" + key + "' in '" + fname + "'";
             return false;
@@ -124,7 +130,7 @@ bool read_input_file (StubTurbine& t, const std::string& fname, std::string& err
         return false;
     }
     if (t.num_blades < 1 || t.num_blade_nodes < 1 || t.num_tower_nodes < 0 ||
-        t.rotor_radius <= 0.0 || t.hub_height <= 0.0) {
+        t.rotor_radius <= 0.0 || t.hub_height <= 0.0 || t.tower_diameter < 0.0 || t.tower_cd < 0.0) {
         err = "OpenFAST stub: '" + fname + "' has a non-positive geometry or node count";
         return false;
     }
@@ -239,7 +245,10 @@ void update_positions (StubTurbine& t)
 // the blade nodes), spread evenly over the blade force nodes; a tangential force proportional
 // to radius whose torque is Q = 1/2 rho Cp U^3 A / omega. Like OpenFAST, the forces are those
 // the fluid exerts ON THE STRUCTURE: the thrust points along the inflow (+x for +x wind), the
-// torque along the rotation. Tower and hub carry no force.
+// torque along the rotation. The hub carries no force. Each tower force node carries the drag
+// of its length of a cylinder of diameter tower_diameter, 1/2 rho Cd D dz |u_h| u_h with u_h
+// the horizontal velocity the CFD supplied at the nearest tower velocity node (zero without
+// tower nodes, or when tower_diameter or tower_cd is zero).
 void update_forces (StubTurbine& t)
 {
     ExtInfw_InputType_t& in = *t.to_cfd;
@@ -256,6 +265,25 @@ void update_forces (StubTurbine& t)
     const int nfb = t.num_blades * t.num_force_pts_blade;
     const int nf = t.num_force_nodes();
     for (int n = 0; n < nf; ++n) { in.fx[n] = in.fy[n] = in.fz[n] = 0.0f; in.momentx[n] = in.momenty[n] = in.momentz[n] = 0.0f; }
+    // the tower: drag on each force node from the horizontal velocity at the nearest velocity node
+    if (t.num_force_pts_tower > 0 && t.num_tower_nodes > 0 && t.tower_diameter > 0.0 && t.tower_cd > 0.0) {
+        const int first_vel = 1 + nbn;
+        const double dz = t.hub_height / t.num_force_pts_tower;
+        for (int k = 0; k < t.num_force_pts_tower; ++k) {
+            const int n = 1 + nfb + k;
+            int nearest = first_vel;
+            double best = 1.0e300;
+            for (int m = first_vel; m < first_vel + t.num_tower_nodes; ++m) {
+                const double dist = std::abs(static_cast<double>(in.pzVel[m]) - static_cast<double>(in.pzForce[n]));
+                if (dist < best) { best = dist; nearest = m; }
+            }
+            const double u = out.u[nearest], v = out.v[nearest];
+            const double speed = std::sqrt(u * u + v * v);
+            const double c = 0.5 * t.air_density * t.tower_cd * t.tower_diameter * dz * speed;
+            in.fx[n] = static_cast<float>(c * u);   // on the structure: along the flow
+            in.fy[n] = static_cast<float>(c * v);
+        }
+    }
     if (nfb == 0) { return; }
     const double hub[3] = {0.0, 0.0, t.hub_height};
     double sum_r2 = 0.0;

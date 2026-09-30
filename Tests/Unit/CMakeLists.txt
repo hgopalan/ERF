@@ -296,8 +296,10 @@ endif()
 if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   # Motivation: the OpenFAST driver must keep the ERF step a whole multiple of the
   # OpenFAST step, accept only the anelastic solver with a fixed step, refuse a model
-  # without external inflow, and report the same node layout on every rank. The
-  # bundled stub library stands in for OpenFAST.
+  # without external inflow, and report the same node layout on every rank; with tower
+  # force points the tower nodes must carry the model's drag for the velocity supplied,
+  # and the tower-shadow check must read TwrShadow. The bundled stub library stands in
+  # for OpenFAST.
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTDriver.cpp
   )
@@ -305,7 +307,9 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   # rotor plane at the nodes' radii and carry minus the rotor's force and torque exactly,
   # on a yawed and tilted axis as well as on x; a wrong hub axis must be detectable. The
   # actuator-line points must be the force nodes with the forces on the fluid, tower nodes
-  # left out, and the tip travel per step must follow the rotor speed and the tip radius.
+  # left out, and the tip travel per step must follow the rotor speed and the tip radius;
+  # the tower points must be the tower nodes, and the nacelle drag must follow the drag law
+  # with the kernel's self-induction correction.
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTRotor.cpp
   )

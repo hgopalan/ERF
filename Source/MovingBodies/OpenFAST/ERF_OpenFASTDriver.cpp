@@ -89,6 +89,25 @@ check_induction_off (const std::string& fst_file)
     return {};
 }
 
+std::string
+check_tower_shadow_off (const std::string& fst_file)
+{
+    const std::string aero = openfast_value(fst_file, "AeroFile");
+    if (aero.empty()) { return {}; }
+    const std::string comp = openfast_value(fst_file, "CompAero");
+    if (comp == "0") { return {}; }
+    std::string path = aero;
+    const auto slash = fst_file.find_last_of('/');
+    if (slash != std::string::npos && aero.front() != '/') {
+        path = fst_file.substr(0, slash + 1) + aero;
+    }
+    const std::string shadow = openfast_value(path, "TwrShadow");
+    if (shadow.empty() || shadow == "0") { return {}; }
+    return "the AeroDyn file '" + path + "' sets TwrShadow = " + shadow +
+           "; with the tower's loads in the flow its wake reaches the blades through the sampled "
+           "velocities, so AeroDyn's tower-shadow correction counts it twice: set TwrShadow = 0";
+}
+
 OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
 {
     const int nprocs = ParallelDescriptor::NProcs();
@@ -455,6 +474,26 @@ OpenFASTDriver::node_velocity_means (const TurbineState& t, std::array<Real,3>& 
     }
 }
 
+// the tower nodes follow the blades; zero without tower force nodes
+std::array<Real,3>
+OpenFASTDriver::tower_force (const TurbineState& t) const
+{
+    std::array<Real,3> f{{0.0, 0.0, 0.0}};
+    const int first = 1 + t.num_blades * t.num_force_pts_blade;
+    const int last = std::min(t.num_force_nodes, first + t.num_force_pts_tower);
+    for (int n = first; n < last; ++n) {
+        for (int d = 0; d < 3; ++d) { f[d] += t.force[3*n+d]; }
+    }
+    return f;
+}
+
+void
+OpenFASTDriver::set_nacelle_force (int i, const std::array<Real,3>& f)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(i >= 0 && i < static_cast<int>(m_turb.size()), "set_nacelle_force: no such turbine");
+    m_turb[i].nacelle_force = f;
+}
+
 // torque of the rotor's node forces about the hub axis through the hub
 Real
 OpenFASTDriver::torque (const TurbineState& t) const
@@ -476,7 +515,8 @@ OpenFASTDriver::open_diagnostics (const TurbineState& t, bool truncate) const
 {
     std::ofstream out;
     if (erf_actuator::open_log(out, t.output_root + "_erf.csv", truncate)) {
-        out << "time,rotor_speed,thrust_x,thrust_y,thrust_z,torque,power,axis_x,axis_y,axis_z\n";
+        out << "time,rotor_speed,thrust_x,thrust_y,thrust_z,torque,power,axis_x,axis_y,axis_z,"
+               "tower_x,tower_y,tower_z,nacelle_x,nacelle_y,nacelle_z,load_x,load_y,load_z\n";
     }
     std::ofstream flow;
     if (erf_actuator::open_log(flow, t.output_root + "_flow.csv", truncate)) {
@@ -495,9 +535,14 @@ OpenFASTDriver::write_diagnostics (double time)
         std::array<Real,3> hub, blade;
         node_velocity_means(t, hub, blade);
         std::ofstream out(t.output_root + "_erf.csv", std::ios::app);
+        const std::array<Real,3> ft = tower_force(t);
         out << std::setprecision(10) << time << "," << t.rotor_speed << ","
             << f[0] << "," << f[1] << "," << f[2] << "," << q << "," << q * t.rotor_speed << ","
-            << t.hub_axis[0] << "," << t.hub_axis[1] << "," << t.hub_axis[2] << "\n";
+            << t.hub_axis[0] << "," << t.hub_axis[1] << "," << t.hub_axis[2] << ","
+            << ft[0] << "," << ft[1] << "," << ft[2] << ","
+            << t.nacelle_force[0] << "," << t.nacelle_force[1] << "," << t.nacelle_force[2] << ","
+            << f[0] + ft[0] + t.nacelle_force[0] << "," << f[1] + ft[1] + t.nacelle_force[1] << ","
+            << f[2] + ft[2] + t.nacelle_force[2] << "\n";
         std::ofstream flow(t.output_root + "_flow.csv", std::ios::app);
         flow << std::setprecision(10) << time << ","
              << hub[0] << "," << hub[1] << "," << hub[2] << ","
