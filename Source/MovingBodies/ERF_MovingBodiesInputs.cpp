@@ -43,6 +43,8 @@ MovingBodiesInputs::read ()
     }
     pp.query("avg_start", in.avg_start);
     if (in.avg_start < 0.0) { Abort("erf.moving_bodies.avg_start must be >= 0"); }
+    pp.query("density_tolerance", in.density_tolerance);
+    if (in.density_tolerance < 0.0) { Abort("erf.moving_bodies.density_tolerance must be >= 0 (relative)"); }
     pp.query("alm_max_tip_cells", in.alm_max_tip_cells);
     if (!(in.alm_max_tip_cells > 0.0)) { Abort("erf.moving_bodies.alm_max_tip_cells must be > 0 (cells swept by a blade tip per step)"); }
 

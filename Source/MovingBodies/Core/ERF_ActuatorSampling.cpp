@@ -141,4 +141,105 @@ sample_velocity (const MultiFab& U, const MultiFab& V, const MultiFab& W,
     }
 }
 
+namespace {
+
+// height of the centre of cell (i,j,k): the mean of its bottom and top face heights
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+Real centre_height (int i, int j, int k, Array4<Real const> const& znd, bool has_znd, Real zlo, Real dz)
+{
+    return Real(0.5) * (face_height(2, i, j, k, znd, has_znd, zlo, dz) + face_height(2, i, j, k+1, znd, has_znd, zlo, dz));
+}
+
+// the cell-centred field in column (i,j) at height z: linear between the two centres that
+// bracket z, the nearest pair extrapolating beyond the first and last centre
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+Real centre_column_value (Array4<Real const> const& f, int comp, int i, int j, int klo, int khi, Real z,
+                          Array4<Real const> const& znd, bool has_znd, Real zlo, Real dz)
+{
+    int k0 = klo;
+    for (int k = klo; k < khi; ++k) {
+        if (z >= centre_height(i, j, k, znd, has_znd, zlo, dz)) { k0 = k; } else { break; }
+    }
+    const Real h0 = centre_height(i, j, k0,   znd, has_znd, zlo, dz);
+    const Real h1 = centre_height(i, j, k0+1, znd, has_znd, zlo, dz);
+    const Real w  = (z - h0) / (h1 - h0);
+    return (Real(1.0) - w) * f(i,j,k0,comp) + w * f(i,j,k0+1,comp);
+}
+
+} // namespace
+
+void
+sample_cell_scalar (const MultiFab& mf, int comp, const MultiFab* z_phys_nd, const Geometry& geom,
+                    const std::vector<Real>& pos, std::vector<Real>& val)
+{
+    const int npts = static_cast<int>(pos.size() / 3);
+    val.assign(npts, 0.0);
+    if (npts == 0) { return; }
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(mf.nGrow() >= 1, "sample_cell_scalar: the field needs a filled ghost cell");
+    const auto plo = geom.ProbLoArray();
+    const auto dxi = geom.InvCellSizeArray();
+    const Real dz = geom.CellSize(2);
+    const Box& domain = geom.Domain();
+    const int klo = domain.smallEnd(2), khi = domain.bigEnd(2);
+    const bool has_znd = (z_phys_nd != nullptr);
+
+    Gpu::DeviceVector<Real> d_pos(pos.size()), d_val(npts, 0.0);
+    Gpu::DeviceVector<int> d_cnt(npts, 0);
+    Gpu::copy(Gpu::hostToDevice, pos.begin(), pos.end(), d_pos.begin());
+    Real* p_pos = d_pos.data();
+    Real* p_val = d_val.data();
+    int* p_cnt = d_cnt.data();
+
+    for (MFIter mfi(mf, false); mfi.isValid(); ++mfi) {
+        const Box vbx = mfi.validbox();
+        Array4<Real const> const& f = mf.const_array(mfi);
+        Array4<Real const> znd = has_znd ? z_phys_nd->const_array(mfi) : Array4<Real const>{};
+        ParallelFor(npts, [=] AMREX_GPU_DEVICE (int p) noexcept
+        {
+            const Real x = p_pos[3*p], y = p_pos[3*p+1], z = p_pos[3*p+2];
+            const int ic = static_cast<int>(std::floor((x - plo[0]) * dxi[0]));
+            const int jc = static_cast<int>(std::floor((y - plo[1]) * dxi[1]));
+            if (ic < vbx.smallEnd(0) || ic > vbx.bigEnd(0) ||
+                jc < vbx.smallEnd(1) || jc > vbx.bigEnd(1)) { return; }
+            int kc = -1;
+            if (!has_znd) {
+                const int k = static_cast<int>(std::floor((z - plo[2]) * dxi[2]));
+                if (k >= klo && k <= khi) { kc = k; }
+            } else {
+                for (int k = klo; k <= khi; ++k) {
+                    const Real zb = face_height(2, ic, jc, k,   znd, true, plo[2], dz);
+                    const Real zt = face_height(2, ic, jc, k+1, znd, true, plo[2], dz);
+                    if (z >= zb && z < zt) { kc = k; break; }
+                }
+            }
+            if (kc < vbx.smallEnd(2) || kc > vbx.bigEnd(2)) { return; }
+            // bilinear between the cell centres around (x, y), each column at height z
+            const Real xi = (x - plo[0]) * dxi[0] - Real(0.5);
+            const Real yi = (y - plo[1]) * dxi[1] - Real(0.5);
+            const int i0 = static_cast<int>(std::floor(xi));
+            const int j0 = static_cast<int>(std::floor(yi));
+            const Real wx = xi - i0, wy = yi - j0;
+            const Real f00 = centre_column_value(f, comp, i0,   j0,   klo, khi, z, znd, has_znd, plo[2], dz);
+            const Real f10 = centre_column_value(f, comp, i0+1, j0,   klo, khi, z, znd, has_znd, plo[2], dz);
+            const Real f01 = centre_column_value(f, comp, i0,   j0+1, klo, khi, z, znd, has_znd, plo[2], dz);
+            const Real f11 = centre_column_value(f, comp, i0+1, j0+1, klo, khi, z, znd, has_znd, plo[2], dz);
+            p_val[p] = (Real(1.0) - wy) * ((Real(1.0) - wx) * f00 + wx * f10) + wy * ((Real(1.0) - wx) * f01 + wx * f11);
+            p_cnt[p] = 1;
+        });
+    }
+    Gpu::streamSynchronize();
+    std::vector<int> cnt(npts, 0);
+    Gpu::copy(Gpu::deviceToHost, d_val.begin(), d_val.end(), val.begin());
+    Gpu::copy(Gpu::deviceToHost, d_cnt.begin(), d_cnt.end(), cnt.begin());
+    ParallelDescriptor::ReduceRealSum(val.data(), npts);
+    ParallelDescriptor::ReduceIntSum(cnt.data(), npts);
+    for (int p = 0; p < npts; ++p) {
+        if (cnt[p] != 1) {
+            Abort("sample_cell_scalar: point (" + std::to_string(pos[3*p]) + ", " + std::to_string(pos[3*p+1]) +
+                  ", " + std::to_string(pos[3*p+2]) + ") was sampled by " + std::to_string(cnt[p]) +
+                  " boxes; the points must lie inside the domain");
+        }
+    }
+}
+
 } // namespace erf_actuator

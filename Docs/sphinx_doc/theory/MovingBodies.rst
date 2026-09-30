@@ -320,6 +320,33 @@ must name the same bodies as the run that wrote the checkpoint. A checkpoint
 written by a run without bodies (a precursor) can be restarted with bodies:
 they then start afresh at the restart.
 
+Start-up audit
+--------------
+
+At the first step, once the node layout, the flow at the nodes and ERF's
+density at the hubs are known, every OpenFAST turbine is audited against the
+ERF set-up and the findings are printed together under ``OpenFAST input audit
+for <name>``; a fatal finding aborts the run after the whole list has been
+printed. Fatal: the model's air density (``AirDens`` of the primary file, or
+of the AeroDyn file when the primary says default) differs from the body's
+``air_density``; ERF's density sampled at the hub differs from the model's by
+more than ``erf.moving_bodies.density_tolerance`` (5 % by default; the loads
+OpenFAST computes with its density go into a flow of ERF's, so the two must
+agree, and an ABL's base state thins with height, hence the tolerance);
+``CompAero = 0`` while the loads are meant to go into the flow; a rotor that
+reaches below the ground, above the domain top or across a non-periodic side;
+a base outside the domain; two rotors whose swept discs intersect. Warnings:
+the model's gravity differs from ERF's; a forced tower with AeroDyn's
+``TwrAero`` off; fewer than 8 cells across the rotor diameter; a kernel
+narrower than a cell; an actuator line whose points are farther apart than
+the kernel; a kernel cut by a non-periodic boundary; a rotor facing away from
+the wind at its hub or yawed more than 30 degrees from it. The bundled stub's
+deck is not an OpenFAST primary file, so its model-file checks are skipped
+with a note. The checks made at start-up before the flow exists remain: the
+fixed step a whole multiple of the OpenFAST step, external inflow on,
+``Wake_Mod = 0``, ``TwrShadow = 0`` with a forced tower, and later the
+tip-travel limit and the hub-axis convention.
+
 Solver requirements
 -------------------
 

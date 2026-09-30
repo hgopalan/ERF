@@ -1,6 +1,7 @@
 #include "ERF_OpenFASTDriver.H"
 
 #include "ERF_DiagnosticsLog.H"
+#include "ERF_OpenFASTAudit.H"
 
 #include <cmath>
 #include <cstring>
@@ -40,42 +41,14 @@ substep_count (double dt_cfd, double dt_fast, std::string& err)
     return n;
 }
 
-namespace {
-
-// The value field of an OpenFAST input line "value  Name  - description" for the named key,
-// or an empty string when the file has no such line. Quotes around the value are removed.
-std::string openfast_value (const std::string& fname, const std::string& key)
-{
-    std::ifstream in(fname);
-    std::string line;
-    while (std::getline(in, line)) {
-        std::istringstream ls(line);
-        std::string value, name;
-        if (!(ls >> value >> name)) { continue; }
-        if (name == key) {
-            if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
-                value = value.substr(1, value.size() - 2);
-            }
-            return value;
-        }
-    }
-    return {};
-}
-
-} // namespace
 
 std::string
 check_induction_off (const std::string& fst_file)
 {
-    const std::string aero = openfast_value(fst_file, "AeroFile");
-    if (aero.empty()) { return {}; }
+    const std::string path = openfast_module_path(fst_file, "AeroFile");
+    if (path.empty()) { return {}; }
     const std::string comp = openfast_value(fst_file, "CompAero");
     if (comp == "0") { return {}; }
-    std::string path = aero;
-    const auto slash = fst_file.find_last_of('/');
-    if (slash != std::string::npos && !aero.empty() && aero.front() != '/') {
-        path = fst_file.substr(0, slash + 1) + aero;
-    }
     std::string wake = openfast_value(path, "Wake_Mod");
     if (wake.empty()) { wake = openfast_value(path, "WakeMod"); }
     if (wake.empty()) {
@@ -92,15 +65,10 @@ check_induction_off (const std::string& fst_file)
 std::string
 check_tower_shadow_off (const std::string& fst_file)
 {
-    const std::string aero = openfast_value(fst_file, "AeroFile");
-    if (aero.empty()) { return {}; }
+    const std::string path = openfast_module_path(fst_file, "AeroFile");
+    if (path.empty()) { return {}; }
     const std::string comp = openfast_value(fst_file, "CompAero");
     if (comp == "0") { return {}; }
-    std::string path = aero;
-    const auto slash = fst_file.find_last_of('/');
-    if (slash != std::string::npos && aero.front() != '/') {
-        path = fst_file.substr(0, slash + 1) + aero;
-    }
     const std::string shadow = openfast_value(path, "TwrShadow");
     if (shadow.empty() || shadow == "0") { return {}; }
     return "the AeroDyn file '" + path + "' sets TwrShadow = " + shadow +

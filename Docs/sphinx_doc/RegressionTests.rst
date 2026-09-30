@@ -592,9 +592,9 @@ the plotfile must equal the gold file, which is the same deck run without the
 ``erf.moving_bodies`` block. The turbine's diagnostics file ``T1_erf.csv``
 (time, rotor speed, thrust, torque, power, hub axis) is written alongside.
 
-Test Location: `Tests/test_files/OpenFAST_DriverOnly`_
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_DriverOnly`_
 
-.. _`Tests/test_files/OpenFAST_DriverOnly`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_DriverOnly
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_DriverOnly`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_DriverOnly
 
 Actuator velocity sampling
 --------------------------
@@ -610,9 +610,9 @@ as the blade mean (``Tests/RunActuatorSampling.cmake``).
 split unevenly in x and y and requires the flow files to agree to eight
 significant digits.
 
-Test Location: `Tests/test_files/Actuator_Sampling`_
+Test Location: `Exec/CanonicalTests/MovingBodies/Actuator_Sampling`_
 
-.. _`Tests/test_files/Actuator_Sampling`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Actuator_Sampling
+.. _`Exec/CanonicalTests/MovingBodies/Actuator_Sampling`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/Actuator_Sampling
 
 Actuator disk force spreading
 -----------------------------
@@ -626,12 +626,15 @@ source equals the disk's thrust, since the spreading is normalised exactly.
 ``ActuatorCtDisk_BoxParity`` runs the same deck in one box and split unevenly
 in x and y and requires the plotfiles and the disk logs to agree.
 
-Test Location: `Tests/test_files/Actuator_UniformCtDisk`_
+Test Location: `Exec/CanonicalTests/MovingBodies/Actuator_UniformCtDisk`_
 
-.. _`Tests/test_files/Actuator_UniformCtDisk`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Actuator_UniformCtDisk
+.. _`Exec/CanonicalTests/MovingBodies/Actuator_UniformCtDisk`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/Actuator_UniformCtDisk
 
 OpenFAST rotor as an actuator disk
 ----------------------------------
+The moving-bodies cases live in ``Exec/CanonicalTests/MovingBodies``, one
+directory per case with its deck, the stub turbine file and its gold logs (the
+gold plotfiles stay in ``Tests/ERFGoldFiles``); the README there lists them.
 ``OpenFAST_ADM_Uniform`` (builds with ``ERF_ENABLE_OPENFAST=ON``,
 ``ERF_OPENFAST_USE_STUB=ON``, ``ERF_ENABLE_FFT=ON`` and MPI, not Windows) runs a
 uniform 10 m/s anelastic flow for ten steps through one stub OpenFAST turbine
@@ -646,9 +649,9 @@ spreading is normalised exactly. ``OpenFASTADM_BoxParity`` runs the same deck
 in one box and split unevenly in x and y and requires the plotfiles and the
 flow logs to agree.
 
-Test Location: `Tests/test_files/OpenFAST_ADM_Uniform`_
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Uniform`_
 
-.. _`Tests/test_files/OpenFAST_ADM_Uniform`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_Uniform
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Uniform`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Uniform
 
 OpenFAST rotor as an actuator line
 ----------------------------------
@@ -682,12 +685,12 @@ velocities the blades see, not the force identity).
 step 10: the relaxed correction comes back from the checkpoint, so the
 plotfile and the correction log must equal the straight run's exactly.
 
-Test Location: `Tests/test_files/OpenFAST_ALM_Uniform`_, `Tests/test_files/OpenFAST_ALM_Tower`_, `Tests/test_files/OpenFAST_ALM_FLLC`_ and `Tests/test_files/OpenFAST_ALM_FLLC_Restart`_
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Uniform`_, `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Tower`_, `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC`_ and `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC_Restart`_
 
-.. _`Tests/test_files/OpenFAST_ALM_Uniform`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_Uniform
-.. _`Tests/test_files/OpenFAST_ALM_Tower`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_Tower
-.. _`Tests/test_files/OpenFAST_ALM_FLLC`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_FLLC
-.. _`Tests/test_files/OpenFAST_ALM_FLLC_Restart`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ALM_FLLC_Restart
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Uniform`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Uniform
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Tower`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Tower
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC_Restart`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC_Restart
 
 Farms
 -----
@@ -702,9 +705,9 @@ on rank 0) against two ranks with the domain split (one turbine per rank) and
 requires the plotfiles and ``T2_flow.csv`` to agree, so the ownership does
 not change the answer.
 
-Test Location: `Tests/test_files/OpenFAST_ADM_TwoTurbines`_
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoTurbines`_
 
-.. _`Tests/test_files/OpenFAST_ADM_TwoTurbines`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_TwoTurbines
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoTurbines`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoTurbines
 
 Wake sampling lines
 -------------------
@@ -716,9 +719,9 @@ digits and the plotfile its gold. ``OpenFASTADM_Wake_BoxParity`` runs the deck
 in one box and split unevenly and requires the instantaneous wake file
 ``T1_wake.csv`` to agree to eight digits.
 
-Test Location: `Tests/test_files/OpenFAST_ADM_Wake`_
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Wake`_
 
-.. _`Tests/test_files/OpenFAST_ADM_Wake`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_Wake
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Wake`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Wake
 
 Turbulent inflow from a precursor
 ---------------------------------
@@ -736,10 +739,10 @@ steady 10 m/s inflow profile and ERF's cell perturbation method
 (``erf.perturbation_type = CPM``) just inside the inflow face; the same three
 checks apply.
 
-Test Location: `Tests/test_files/OpenFAST_ADM_LES`_ and `Tests/test_files/OpenFAST_ADM_CPM`_
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_LES`_ and `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_CPM`_
 
-.. _`Tests/test_files/OpenFAST_ADM_LES`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_LES
-.. _`Tests/test_files/OpenFAST_ADM_CPM`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_CPM
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_LES`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_LES
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_CPM`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_CPM
 
 OpenFAST turbine restart
 ------------------------
@@ -752,9 +755,9 @@ average continues from its checkpointed sums, so the restarted run's plotfile
 must equal the straight run's with zero tolerance and its wake average
 ``T1_wake_avg.csv`` must match to ten significant digits.
 
-Test Location: `Tests/test_files/OpenFAST_ADM_Restart`_
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Restart`_
 
-.. _`Tests/test_files/OpenFAST_ADM_Restart`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_Restart
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Restart`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Restart
 
 Restart parity
 --------------
