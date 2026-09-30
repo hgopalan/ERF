@@ -1041,6 +1041,49 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       DATALOG_SIGDIGITS 8
       DATALOG_ZERO_EXPONENT -5)
 
+  # Turbulent inflow: a periodic Smagorinsky precursor writes its boundary planes, then the
+  # stub rotor as a disk runs in the same box with inflow from those planes and outflow, the
+  # anelastic FFT solve handling the non-periodic direction. The plotfile, the turbine's
+  # running statistics and the integrated-source identity are the regression.
+  function(add_test_precursor_inflow TEST_NAME TEST_FILES_DIR PLTFILE)
+      setup_test()
+      resolve_test_exe("" "erf_exec" TEST_EXE)
+      add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+          "-DMPIEXEC=${MPIEXEC_EXECUTABLE}"
+          "-DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+          "-DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}"
+          "-DNRANKS=${NP}"
+          "-DTEST_EXE=${TEST_EXE}"
+          "-DCONFIG=$<CONFIG>"
+          "-DPRECURSOR_INPUT=${CURRENT_TEST_BINARY_DIR}/precursor.i"
+          "-DINPUT=${CURRENT_TEST_BINARY_DIR}/${TEST_FILES_DIR}.i"
+          "-DWORKING_DIRECTORY=${CURRENT_TEST_BINARY_DIR}"
+          "-DFCOMPARE=${FCOMPARE_EXE}"
+          "-DPLTFILE=${PLTFILE}"
+          "-DPLOT_GOLD=${PLOT_GOLD}"
+          "-DRTOL=${ERF_TEST_FCOMPARE_RTOL}"
+          "-DATOL=${ERF_TEST_FCOMPARE_ATOL}"
+          "-DSTATS_CSV=T1_stats.csv"
+          "-DSTATS_GOLD=${CURRENT_TEST_SOURCE_DIR}/T1_stats.csv.gold"
+          "-DSIGDIGITS=10"
+          "-DTURBINE_CSV=T1_erf.csv"
+          "-DSOURCE_CSV=moving_bodies/momentum_source.csv"
+          "-DBNDRY_DIR=BndryFiles"
+          -P ${PROJECT_SOURCE_DIR}/Tests/RunPrecursorInflow.cmake)
+      set_tests_properties(${TEST_NAME}
+          PROPERTIES
+          TIMEOUT 900
+          PROCESSORS ${NP}
+          WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+          LABELS "regression;moving-bodies"
+          ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/precursor.log;${CURRENT_TEST_BINARY_DIR}/simulation.log")
+  endfunction()
+  add_test_precursor_inflow(OpenFAST_ADM_LES OpenFAST_ADM_LES "plt00010")
+
+  # The same rotor with the turbulent inflow made by the cell perturbation method instead of
+  # a precursor: one run, a steady inflow profile with perturbation boxes behind it.
+  add_test_openfast_adm(OpenFAST_ADM_CPM OpenFAST_ADM_CPM "plt00010" "T1_stats.csv")
+
   # The same case checkpointed at step 5 and restarted to step 10: the turbine comes back
   # from its OpenFAST checkpoint, the momentum source is rebuilt from the restored loads and
   # the wake running average continues from its checkpointed sums, so the plotfile and the

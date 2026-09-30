@@ -37,9 +37,12 @@ MovingBodiesInputs::read ()
         pw.query("int", in.wake.interval);
         if (in.wake.interval < 0) { Abort("erf.moving_bodies.wake.int must be >= 1 (0 uses diagnostics_int)"); }
         if (in.wake.interval == 0) { in.wake.interval = in.diagnostics_int; }
-        pw.query("avg_start", in.wake.avg_start);
-        if (in.wake.avg_start < 0.0) { Abort("erf.moving_bodies.wake.avg_start must be >= 0"); }
+        if (pw.contains("avg_start")) {
+            Abort("erf.moving_bodies.wake.avg_start was renamed erf.moving_bodies.avg_start (it also starts the body statistics)");
+        }
     }
+    pp.query("avg_start", in.avg_start);
+    if (in.avg_start < 0.0) { Abort("erf.moving_bodies.avg_start must be >= 0"); }
 
     std::vector<Real> vel;
     if (pp.queryarr("prescribed_velocity", vel)) {

@@ -1,5 +1,6 @@
 CEXE_headers += ERF_ActuatorGeometry.H
 CEXE_headers += ERF_DiagnosticsLog.H
+CEXE_headers += ERF_RunningStats.H
 CEXE_headers += ERF_WakeLines.H
 CEXE_sources += ERF_WakeLines.cpp
 CEXE_headers += ERF_ActuatorPoints.H

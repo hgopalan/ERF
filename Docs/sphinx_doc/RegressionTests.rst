@@ -664,6 +664,27 @@ Test Location: `Tests/test_files/OpenFAST_ADM_Wake`_
 
 .. _`Tests/test_files/OpenFAST_ADM_Wake`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_Wake
 
+Turbulent inflow from a precursor
+---------------------------------
+``OpenFAST_ADM_LES`` (same build requirements) first runs a periodic anelastic
+Smagorinsky precursor of the actuator-disk box (perturbed uniform 10 m/s flow,
+14 steps) that writes its boundary planes every step, then the stub rotor as a
+disk in the same box for ten steps with inflow read from those planes, outflow
+downstream and the anelastic FFT solve on the non-periodic direction
+(``Tests/RunPrecursorInflow.cmake``). The plotfile and the turbine's running
+statistics ``T1_stats.csv`` must match their golds and the integrated momentum
+source must equal minus the thrust in every row.
+
+``OpenFAST_ADM_CPM`` makes the turbulent inflow in one run instead, with a
+steady 10 m/s inflow profile and ERF's cell perturbation method
+(``erf.perturbation_type = CPM``) just inside the inflow face; the same three
+checks apply.
+
+Test Location: `Tests/test_files/OpenFAST_ADM_LES`_ and `Tests/test_files/OpenFAST_ADM_CPM`_
+
+.. _`Tests/test_files/OpenFAST_ADM_LES`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_LES
+.. _`Tests/test_files/OpenFAST_ADM_CPM`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/OpenFAST_ADM_CPM
+
 OpenFAST turbine restart
 ------------------------
 ``OpenFAST_ADM_Restart`` (same build requirements) runs the actuator-disk case

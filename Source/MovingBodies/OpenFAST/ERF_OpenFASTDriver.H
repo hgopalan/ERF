@@ -135,6 +135,8 @@ public:
 
     /** Thrust vector: sum of the blade-node forces (N). */
     std::array<amrex::Real,3> thrust (const TurbineState& t) const;
+    /** The velocity the flow supplied at the hub node and its mean over the blade nodes. */
+    void node_velocity_means (const TurbineState& t, std::array<amrex::Real,3>& hub, std::array<amrex::Real,3>& blade) const;
     /** Aerodynamic torque about the hub axis from the blade-node forces (N m). */
     amrex::Real torque (const TurbineState& t) const;
 
