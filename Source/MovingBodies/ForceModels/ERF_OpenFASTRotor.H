@@ -11,6 +11,32 @@
 namespace erf_actuator {
 
 /**
+ * Actuator-line representation of an OpenFAST rotor's loads: one point per force node (the hub
+ * and every blade node, at the positions OpenFAST reports for the rotating, yawed and deflected
+ * blades after its step) carrying the node's force on the fluid, the negative of OpenFAST's.
+ * Tower nodes are not handled here.
+ *
+ * @param[in] t the turbine after a step (positions and forces)
+ * @param[out] pos 3*n point positions (m), appended
+ * @param[out] force 3*n forces on the fluid (N), appended
+ */
+void alm_points (const erf_openfast::TurbineState& t,
+                 std::vector<amrex::Real>& pos, std::vector<amrex::Real>& force);
+
+/**
+ * The rotor's tip radius: the largest distance of a blade force node from the hub axis (m).
+ * Zero for a rotor without blade nodes.
+ */
+amrex::Real tip_radius (const erf_openfast::TurbineState& t);
+
+/**
+ * How many cells the blade tip sweeps in one ERF step: rotor_speed * tip_radius * dt / dx.
+ * The actuator line's force must not jump over cells between two steps, so the caller aborts
+ * when this exceeds its limit (one cell by default).
+ */
+amrex::Real tip_cells_per_step (const erf_openfast::TurbineState& t, amrex::Real dt, amrex::Real dx);
+
+/**
  * Actuator-disk representation of an OpenFAST rotor's loads.
  *
  * Each blade force node, at radius r from the hub on the shaft axis, is replaced by a ring of

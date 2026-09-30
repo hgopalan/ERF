@@ -127,9 +127,33 @@ start when its ``Wake_Mod`` is not 0 (``mode = none`` leaves it to the model).
 The thrust in the diagnostics is the sum of the hub and blade node forces, so
 its shaft component equals minus that of the integrated source. With ``mode = none``
 the turbine is driven by the flow but puts no force into it (one-way
-coupling, as for a loads analysis in a precomputed flow). Tower forces and
-the actuator-line representation (``mode = alm``) are not available in this
-version and are refused at start-up.
+coupling, as for a loads analysis in a precomputed flow). Tower forces are not
+available in this version and are refused at start-up.
+
+OpenFAST rotor as an actuator line
+----------------------------------
+
+With ``mode = alm`` the blade force nodes themselves are the actuator points:
+after every OpenFAST step the positions it reports for the rotating, yawed and
+deflected blades (``num_force_points_blade`` per blade, root to tip, plus the
+hub node) carry minus its node forces into the Gaussian spreading, so the flow
+sees the three moving lines of force and the tip and root vortices they shed,
+which the disk averages away. The integrated momentum source equals minus the
+full thrust vector, the torque about the shaft is preserved, and no in-plane
+force is lost. The kernel width ``epsilon`` is in units of ``dx``; the usual
+choice is ``epsilon = 2 dx`` with cells small enough that the kernel is no
+wider than a few chord lengths near the tip (about 4 to 5 m cells for a 240 m
+rotor), since a kernel wider than the chord smears the tip loading and raises
+the power for a given inflow. The line must not jump over cells between two
+steps: at every step ERF computes how many cells the blade tip sweeps,
+``rotor_speed * tip_radius * dt / min(dx, dy, dz)``, with the tip radius the
+largest distance of a blade node from the hub axis, and aborts when it exceeds
+``erf.moving_bodies.alm_max_tip_cells`` (1 by default), naming the largest
+``erf.fixed_dt`` that passes. For the IEA 15 MW at rated speed (tip speed
+about 90 m/s) one cell per step means ``dt <= dx / 90``. The check runs every
+step because the rotor speed is OpenFAST's to change. The velocities OpenFAST
+receives are still sampled at its structural nodes, and the same ``Wake_Mod = 0``
+requirement and hub-axis check apply as for the disk.
 
 Prescribed uniform-Ct disk
 --------------------------
@@ -219,7 +243,8 @@ Solver requirements
 This version supports the anelastic solver only, with a fixed time step and a
 single level, and the AMReX floating-point traps must be off: OpenFAST's
 initialisation raises exceptions of its own, and a trapped run dies inside the
-library. The requirements are checked at start-up.
+library. The requirements are checked at start-up; the actuator line's tip
+travel per step is checked at every step, since it depends on the rotor speed.
 
 Diagnostics
 -----------

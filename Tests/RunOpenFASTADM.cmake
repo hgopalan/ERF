@@ -1,9 +1,10 @@
-# Run the OpenFAST_ADM_Uniform deck and check it three ways: the plotfile against its gold with
-# fcompare; a log of the turbine (FLOW_CSV: by default <output_root>_flow.csv, the sampled hub and blade-mean
-# velocities, which the disk's induction lowers) against the committed gold log; and, row by
-# row, that the integrated momentum source (fx in SOURCE_CSV) equals minus the turbine's thrust
-# (thrust_x in TURBINE_CSV): the rings preserve the rotor's force and the spreading is
-# normalised exactly, so the two must agree to roundoff. The turbine log's first row is the
+# Run an OpenFAST turbine deck (OpenFAST_ADM_Uniform, OpenFAST_ALM_Uniform and their variants)
+# and check it three ways: the plotfile against its gold with fcompare; a log of the turbine
+# (FLOW_CSV: by default <output_root>_flow.csv, the sampled hub and blade-mean velocities,
+# which the rotor's induction lowers) against the committed gold log; and, row by row, that
+# the integrated momentum source (fx in SOURCE_CSV) equals minus the turbine's thrust
+# (thrust_x in TURBINE_CSV): the disk rings and the line points preserve the rotor's force and
+# the spreading is normalised exactly, so the two must agree to roundoff. The turbine log's first row is the
 # initial solution before any step; the source log's first row belongs to the state after the
 # first step, so turbine row r + 1 pairs with source row r.
 #

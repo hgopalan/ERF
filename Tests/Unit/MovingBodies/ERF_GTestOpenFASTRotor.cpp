@@ -1,7 +1,9 @@
 // The actuator-disk representation of an OpenFAST rotor: each blade force node becomes a ring
 // of points at its radius about the hub axis; the rotor's total force and its torque about
 // the axis must be preserved, the ring points must lie in the node's rotor plane at its
-// radius, and the forces must be those on the fluid.
+// radius, and the forces must be those on the fluid. The actuator-line representation: the
+// points are the force nodes themselves with the forces on the fluid, and the tip travel per
+// step that limits the time step follows from the rotor speed and the tip radius.
 
 #include <array>
 #include <cmath>
@@ -184,4 +186,84 @@ TEST(OpenFASTRotor, OutOfPlaneSineFlagsAWrongAxis)
     // the axis taken along the blades instead of the shaft
     t.hub_axis = {{0.0, 0.0, 1.0}};
     EXPECT_GT(erf_actuator::max_out_of_plane_sine(t), 0.9);
+}
+
+TEST(OpenFASTRotor, LinePointsAreTheForceNodesWithTheForceOnTheFluid)
+{
+    const std::array<Real,3> hub{{500.0, 500.0, 150.0}};
+    std::array<Real,3> axis{{static_cast<Real>(std::cos(0.3)), static_cast<Real>(std::sin(0.3)), Real(-0.1)}};   // yawed and tilted
+    const Real la = std::sqrt(axis[0]*axis[0] + axis[1]*axis[1] + axis[2]*axis[2]);
+    for (auto& a : axis) { a /= la; }
+    const int nodes = 5;
+    TurbineState t = make_rotor(hub, axis, nodes, 120.0, 2.0e4, 3.0e3, 1.1);
+    // two tower nodes after the blades: they must be left out
+    t.num_force_pts_tower = 2;
+    t.num_force_nodes += 2;
+    for (int k = 0; k < 2; ++k) {
+        t.force_pos.insert(t.force_pos.end(), {hub[0], hub[1], Real(20.0 + 60.0 * k)});
+        t.force.insert(t.force.end(), {Real(1.0e3), Real(0.0), Real(0.0)});
+    }
+    std::vector<Real> pos, f;
+    erf_actuator::alm_points(t, pos, f);
+    ASSERT_EQ(pos.size(), 3u * (1 + 3 * nodes));
+    ASSERT_EQ(f.size(), pos.size());
+    for (std::size_t k = 0; k < pos.size(); ++k) {
+        EXPECT_EQ(pos[k], t.force_pos[k]) << "position entry " << k;
+        EXPECT_EQ(f[k], -t.force[k]) << "force entry " << k;
+    }
+    // the line carries minus the rotor's force and torque exactly, tower excluded
+    std::array<Real,3> got, want;
+    Real q_got, q_want;
+    totals(pos, f, hub, axis, got, q_got);
+    std::vector<Real> rotor_pos(t.force_pos.begin(), t.force_pos.begin() + 3 * (1 + 3 * nodes));
+    std::vector<Real> rotor_f(t.force.begin(), t.force.begin() + 3 * (1 + 3 * nodes));
+    totals(rotor_pos, rotor_f, hub, axis, want, q_want);
+    EXPECT_GT(q_want, 0.0);
+    for (int d = 0; d < 3; ++d) { EXPECT_NEAR(got[d], -want[d], tol() * 15 * 2.0e4) << "component " << d; }
+    EXPECT_NEAR(q_got, -q_want, tol() * std::abs(q_want));
+    // appending to non-empty lists keeps what was there
+    std::vector<Real> pos2(3, Real(7.0)), f2(3, Real(8.0));
+    erf_actuator::alm_points(t, pos2, f2);
+    EXPECT_EQ(pos2.size(), 3u + pos.size());
+    EXPECT_EQ(pos2[0], Real(7.0));
+    EXPECT_EQ(pos2[3], pos[0]);
+}
+
+TEST(OpenFASTRotor, TipTravelPerStepFromRotorSpeedAndTipRadius)
+{
+    const std::array<Real,3> hub{{500.0, 500.0, 150.0}};
+    std::array<Real,3> axis{{static_cast<Real>(std::cos(0.5)), static_cast<Real>(std::sin(0.5)), Real(0.1)}};
+    const Real la = std::sqrt(axis[0]*axis[0] + axis[1]*axis[1] + axis[2]*axis[2]);
+    for (auto& a : axis) { a /= la; }
+    const int nodes = 4;
+    const Real R = 120.0;
+    TurbineState t = make_rotor(hub, axis, nodes, R, 1.0e4, 1.0e3);
+    // make_rotor puts the outermost node at (nodes - 0.5) / nodes * R, in the rotor plane;
+    // shift every blade node along the axis: the tip radius is measured in the plane
+    for (int nd = 1; nd < t.num_force_nodes; ++nd) {
+        for (int d = 0; d < 3; ++d) { t.force_pos[3*nd+d] += Real(3.0) * axis[d]; }
+    }
+    const Real r_tip = (nodes - Real(0.5)) / nodes * R;
+    EXPECT_NEAR(erf_actuator::tip_radius(t), r_tip, tol() * R);
+
+    t.rotor_speed = 0.79;   // rad/s: the IEA 15 MW at rated, tip speed ~ 90 m/s
+    const Real dt = 0.5, dx = 50.0;
+    const Real want = Real(0.79) * r_tip * dt / dx;
+    EXPECT_NEAR(erf_actuator::tip_cells_per_step(t, dt, dx), want, tol() * want);
+    EXPECT_GT(want, Real(0.7));
+    EXPECT_LT(want, Real(1.0));   // the regression deck's margin: half a metre per step under one cell
+    // a step twice as long, or cells half as wide, doubles the travel
+    EXPECT_NEAR(erf_actuator::tip_cells_per_step(t, 2 * dt, dx), 2 * want, tol() * want);
+    EXPECT_NEAR(erf_actuator::tip_cells_per_step(t, dt, dx / 2), 2 * want, tol() * want);
+    // a parked rotor sweeps nothing; a rotor turning the other way the same amount
+    t.rotor_speed = 0.0;
+    EXPECT_EQ(erf_actuator::tip_cells_per_step(t, dt, dx), Real(0.0));
+    t.rotor_speed = -0.79;
+    EXPECT_NEAR(erf_actuator::tip_cells_per_step(t, dt, dx), want, tol() * want);
+    // no blade nodes: zero radius
+    TurbineState bare;
+    bare.num_blades = 3; bare.num_force_pts_blade = 0; bare.num_force_nodes = 1;
+    bare.force_pos.assign(3, 0.0); bare.force.assign(3, 0.0);
+    bare.rotor_speed = 1.0;
+    EXPECT_EQ(erf_actuator::tip_radius(bare), Real(0.0));
 }

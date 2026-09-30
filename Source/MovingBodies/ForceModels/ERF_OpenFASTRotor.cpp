@@ -31,6 +31,46 @@ void plane_basis (const std::array<Real,3>& n, std::array<Real,3>& e1, std::arra
 } // namespace
 
 void
+alm_points (const erf_openfast::TurbineState& t, std::vector<Real>& pos, std::vector<Real>& force)
+{
+    // the hub node and the blade nodes, in OpenFAST's order; the tower nodes that may follow
+    // them are left out
+    const int n = std::min(t.num_force_nodes, 1 + t.num_blades * t.num_force_pts_blade);
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(static_cast<int>(t.force_pos.size()) >= 3 * n &&
+                                     static_cast<int>(t.force.size()) >= 3 * n,
+                                     "alm_points: the turbine's node arrays are shorter than its node count");
+    for (int nd = 0; nd < n; ++nd) {
+        for (int d = 0; d < 3; ++d) {
+            pos.push_back(t.force_pos[3*nd+d]);
+            force.push_back(-t.force[3*nd+d]);   // on the fluid
+        }
+    }
+}
+
+Real
+tip_radius (const erf_openfast::TurbineState& t)
+{
+    const std::array<Real,3>& n = t.hub_axis;
+    Real r2max = 0.0;
+    const int nfb = t.num_blades * t.num_force_pts_blade;
+    for (int nd = 1; nd <= nfb && nd < t.num_force_nodes; ++nd) {
+        Real rv[3], rn = 0.0;
+        for (int d = 0; d < 3; ++d) { rv[d] = t.force_pos[3*nd+d] - t.hub_pos[d]; rn += rv[d] * n[d]; }
+        Real r2 = 0.0;
+        for (int d = 0; d < 3; ++d) { const Real c = rv[d] - rn * n[d]; r2 += c * c; }   // in the rotor plane
+        r2max = std::max(r2max, r2);
+    }
+    return std::sqrt(r2max);
+}
+
+Real
+tip_cells_per_step (const erf_openfast::TurbineState& t, Real dt, Real dx)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dx > Real(0.0), "tip_cells_per_step: dx must be positive");
+    return std::abs(t.rotor_speed) * tip_radius(t) * dt / dx;
+}
+
+void
 adm_rings (const erf_openfast::TurbineState& t, int num_points_t,
            std::vector<Real>& pos, std::vector<Real>& force)
 {

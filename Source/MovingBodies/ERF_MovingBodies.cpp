@@ -102,7 +102,8 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, double dt, double t_max, bool
                     << " points, spreading " << b.epsilon << " dx\n";
         } else {
             turbines.push_back(b);
-            m_turbine_points_t.push_back((b.mode == "none") ? 0 : b.num_points_t);
+            m_turbine_mode.push_back(b.mode);
+            m_turbine_points_t.push_back(b.num_points_t);
         }
     }
     m_epsilon_dx = m_in.bodies.empty() ? 2.0 : m_in.bodies[0].epsilon;
@@ -362,7 +363,7 @@ bool
 MovingBodies::any_forcing () const
 {
     if (!m_disks.empty()) { return true; }
-    for (int n : m_turbine_points_t) { if (n > 0) { return true; } }
+    for (const std::string& m : m_turbine_mode) { if (m != "none") { return true; } }
     return false;
 }
 
@@ -401,11 +402,13 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
     }
     std::vector<Real> pos, force;
 #ifdef ERF_USE_OPENFAST
-    // each turbine's loads as actuator-disk rings (mode = adm; none puts no force in the flow)
+    // each turbine's loads as actuator-disk rings (mode = adm) or as an actuator line on its
+    // blade nodes (mode = alm); none puts no force in the flow
     {
         const auto& turbs = m_driver->turbines();
+        const Real dx_min = std::min(geom.CellSize(0), std::min(geom.CellSize(1), geom.CellSize(2)));
         for (std::size_t i = 0; i < turbs.size(); ++i) {
-            if (m_turbine_points_t[i] == 0) { continue; }
+            if (m_turbine_mode[i] == "none") { continue; }
             if (!m_axis_checked) {
                 const Real s = erf_actuator::max_out_of_plane_sine(turbs[i]);
                 const double deg = std::asin(std::min(s, Real(1.0))) * 180.0 / 3.14159265358979323846;
@@ -416,10 +419,31 @@ MovingBodies::spread_sources (const MultiFab& U, const MultiFab* z_phys_nd,
                 }
                 const auto& n = turbs[i].hub_axis;
                 Print() << "erf.moving_bodies." << turbs[i].name << ": hub axis (" << n[0] << ", " << n[1] << ", " << n[2]
-                        << "), blade force nodes within " << deg << " degrees of the rotor plane, "
-                        << m_turbine_points_t[i] << " points per ring\n";
+                        << "), blade force nodes within " << deg << " degrees of the rotor plane, ";
+                if (m_turbine_mode[i] == "adm") {
+                    Print() << m_turbine_points_t[i] << " points per ring\n";
+                } else {
+                    Print() << "actuator line of " << turbs[i].num_blades * turbs[i].num_force_pts_blade
+                            << " blade points, tip radius " << erf_actuator::tip_radius(turbs[i]) << " m\n";
+                }
             }
-            erf_actuator::adm_rings(turbs[i], m_turbine_points_t[i], pos, force);
+            if (m_turbine_mode[i] == "adm") {
+                erf_actuator::adm_rings(turbs[i], m_turbine_points_t[i], pos, force);
+            } else {
+                // the line's force must not jump over cells between two steps: the tip, the
+                // fastest point, may sweep at most alm_max_tip_cells cells per ERF step
+                const Real cells = erf_actuator::tip_cells_per_step(turbs[i], m_dt, dx_min);
+                if (cells > m_in.alm_max_tip_cells) {
+                    const Real r_tip = erf_actuator::tip_radius(turbs[i]);
+                    const Real dt_max = m_in.alm_max_tip_cells * dx_min / std::max(std::abs(turbs[i].rotor_speed) * r_tip, Real(1.0e-30));
+                    Abort("erf.moving_bodies." + turbs[i].name + ": the blade tip sweeps " + std::to_string(cells) +
+                          " cells per step (rotor speed " + std::to_string(turbs[i].rotor_speed) + " rad/s, tip radius " +
+                          std::to_string(r_tip) + " m, dt " + std::to_string(m_dt) + " s, smallest cell " + std::to_string(dx_min) +
+                          " m), more than erf.moving_bodies.alm_max_tip_cells = " + std::to_string(m_in.alm_max_tip_cells) +
+                          "; use erf.fixed_dt <= " + std::to_string(dt_max) + " or finer cells for the actuator line");
+                }
+                erf_actuator::alm_points(turbs[i], pos, force);
+            }
         }
         m_axis_checked = true;
     }
