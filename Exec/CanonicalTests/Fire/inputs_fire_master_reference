@@ -326,6 +326,9 @@ erf.fire.levelset.reinit_every = 5
 erf.fire.levelset.reinit_iters = 1
 erf.fire.levelset.reinit_dtau = -1.0
 erf.fire.levelset.reinit_scheme = "wrf"
+# jiang_peng only: term added to phi0^2 under the smoothed-sign square root;
+# <= 0 selects dx^2 (Jiang and Peng's "delta comparable to the spatial step size").
+erf.fire.levelset.reinit_jp_sign_eps2 = -1.0
 
 # Level-set path only: extrapolate the level set into non-burnable cells
 # inside every stencil (gradient, Laplacian, front normal, reinitialisation),
