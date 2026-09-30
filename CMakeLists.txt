@@ -616,7 +616,7 @@ if(ERF_ENABLE_OPENFAST)
     set(CMAKE_PREFIX_PATH ${OPENFAST_DIR} ${CMAKE_PREFIX_PATH})
     find_package(OpenFAST REQUIRED COMPONENTS openfastlib)
     message(STATUS "Found OpenFAST: ${OpenFAST_INCLUDE_DIRS}")
-    # ERF uses the OpenFAST 4 external-inflow API only (FAST_ExtInfw_*); version 3 named it
+    # ERF uses the OpenFAST 5 external-inflow API only (FAST_ExtInfw_*, unchanged since 4.0); version 3 named it
     # FAST_OpFM_* and is not supported
     find_file(ERF_OPENFAST_C_HEADER FAST_Library.h
       PATHS ${OpenFAST_INCLUDE_DIRS} ${OpenFAST_INCLUDE_DIRS}/openfast
@@ -626,7 +626,7 @@ if(ERF_ENABLE_OPENFAST)
     endif()
     file(STRINGS "${ERF_OPENFAST_C_HEADER}" _erf_openfast_extinfw REGEX "FAST_ExtInfw_Init")
     if(NOT _erf_openfast_extinfw)
-      message(FATAL_ERROR "ERF needs OpenFAST 4: FAST_ExtInfw_Init is not declared in ${ERF_OPENFAST_C_HEADER}")
+      message(FATAL_ERROR "ERF needs OpenFAST 5 (or 4.x): FAST_ExtInfw_Init is not declared in ${ERF_OPENFAST_C_HEADER}")
     endif()
     get_filename_component(ERF_OPENFAST_INCLUDE_DIRS "${ERF_OPENFAST_C_HEADER}" DIRECTORY)
     message(STATUS "OpenFAST C API header: ${ERF_OPENFAST_C_HEADER}")

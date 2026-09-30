@@ -579,7 +579,7 @@ CMake can also generate makefiles for the Ninja build system for faster compilat
      - OFF
      - ON/OFF
    * - ``ERF_ENABLE_OPENFAST``
-     - Enables the OpenFAST turbine coupling (OpenFAST 4; set ``OPENFAST_DIR`` to the install prefix); turns on ``ERF_ENABLE_MOVING_BODIES``
+     - Enables the OpenFAST turbine coupling (OpenFAST 5.0, tested with 5.0.0 and 4.2.1; set ``OPENFAST_DIR`` to the install prefix); turns on ``ERF_ENABLE_MOVING_BODIES``
      - OFF
      - ON/OFF
    * - ``ERF_OPENFAST_USE_STUB``
@@ -664,8 +664,13 @@ CMake can also generate makefiles for the Ninja build system for faster compilat
 
    * ``ERF_ENABLE_OPENFAST`` - OpenFAST turbine coupling (moving bodies)
 
-     - Requires an OpenFAST 4 installation (``-DOPENFAST_DIR=<prefix>``), or ``ERF_OPENFAST_USE_STUB=ON`` for testing
+     - Requires an OpenFAST 5 installation (``-DOPENFAST_DIR=<prefix>``; 4.2.1 has the same C API), or ``ERF_OPENFAST_USE_STUB=ON`` for testing
      - Automatically enables ``ERF_ENABLE_MOVING_BODIES=ON``
+     - ``Build/setup_openfast.sh --version 5.0.0`` downloads the release, builds it the way
+       ERF needs (shared libraries, double precision, the C API on) and installs it under
+       ``$HOME/opt/openfast-<version>`` (``--prefix``, ``--src``, ``--jobs``, ``--fortran``
+       and ``--configure-only`` are the options); it prints the ``-DOPENFAST_DIR`` to use
+       and the library path to export at run time
 
    * ``ERF_ENABLE_NOAHMP`` - NOAHMP land surface model
 

@@ -14,7 +14,7 @@ Coupling
 --------
 
 ERF talks to OpenFAST through its external-inflow C interface (``ExtInfw``,
-OpenFAST 4). Every ERF step:
+OpenFAST 5; the interface is the same in 4.2). Every ERF step:
 
 #. the flow velocity at OpenFAST's velocity nodes (hub, blade and tower
    structural nodes) is sampled from ERF's velocity field and handed to

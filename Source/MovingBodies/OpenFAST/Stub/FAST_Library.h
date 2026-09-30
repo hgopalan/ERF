@@ -2,7 +2,7 @@
 #define FAST_LIBRARY_H
 
 // ERF stand-in for OpenFAST's C API header (modules/openfast-library/src/FAST_Library.h,
-// OpenFAST 4.2.1, Apache-2.0). It declares only the entry points the ERF driver uses, with the
+// OpenFAST 4.2.1, identical in 5.0.0, Apache-2.0). It declares only the entry points the ERF driver uses, with the
 // same signatures, so ERF_OpenFASTDriver.cpp compiles unchanged against either this header or
 // the real one. The implementation is ERF_OpenFASTStub.cpp: a rigid rotor with a uniform-Ct
 // disk model, enough to exercise the coupling without an OpenFAST installation.

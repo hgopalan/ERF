@@ -1,4 +1,4 @@
-// Copied from OpenFAST 4.2.1 (modules/externalinflow/src/ExternalInflow_Types.h, Apache-2.0)
+// Copied from OpenFAST 4.2.1, identical in 5.0.0 (modules/externalinflow/src/ExternalInflow_Types.h, Apache-2.0)
 // for the ERF stub build; tabs and trailing whitespace were removed, nothing else changed.
 //!STARTOFREGISTRYGENERATEDFILE 'ExternalInflow_Types.h'
 //!
