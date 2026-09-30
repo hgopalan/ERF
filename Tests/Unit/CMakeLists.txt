@@ -281,6 +281,12 @@ if(ERF_ENABLE_MOVING_BODIES)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestPrescribedCtDisk.cpp
   )
+  # Motivation: the wake sampling lines must sit at the requested x/D behind the hub along the
+  # rotor axis, their running average must be the mean of the samples (an analytic wake comes
+  # back exactly), and that average must survive a checkpoint round trip.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestWakeLines.cpp
+  )
 endif()
 if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   # Motivation: the OpenFAST driver must keep the ERF step a whole multiple of the

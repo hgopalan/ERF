@@ -1,8 +1,7 @@
-# The OpenFAST_ADM_Uniform case run for restart parity: straight to step 10, and again to a
-# checkpoint at step 5 restarted to step 10. The turbine is restored from its OpenFAST
-# checkpoint, the momentum source is rebuilt from the restored loads and the wake running
-# average continues from its checkpointed sums, so the plotfile and the wake average of the
-# restarted run must equal the straight run's.
+# The OpenFAST_ADM_Uniform case with wake sampling lines 2, 4 and 7 diameters behind the
+# stub rotor (a lateral and a vertical line of 41 points spanning +-1.5 D at each): the lines
+# are sampled every two steps from 2 s on and averaged; the running average T1_wake_avg.csv
+# must match its gold, and the plotfile its gold.
 
 max_step = 10
 stop_time = 5.0
@@ -29,7 +28,6 @@ prob.U_0   = 10.0
 
 erf.sum_interval = -1
 erf.check_int    = -1
-erf.check_file   = chk
 erf.plot_file_1  = plt
 erf.plot_int_1   = 10
 erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
@@ -46,6 +44,9 @@ erf.moving_bodies.T1.epsilon                 = 2.0
 erf.moving_bodies.T1.output_root             = T1
 erf.moving_bodies.diagnostics_dir            = moving_bodies
 
-# wake lines: their running average must continue across the restart
-erf.moving_bodies.wake.lines_xD             = 2 4
-erf.moving_bodies.wake.num_points           = 21
+# wake lines behind the rotor
+erf.moving_bodies.wake.lines_xD             = 2 4 7
+erf.moving_bodies.wake.half_width           = 1.5
+erf.moving_bodies.wake.num_points           = 41
+erf.moving_bodies.wake.int                  = 2
+erf.moving_bodies.wake.avg_start            = 2.0

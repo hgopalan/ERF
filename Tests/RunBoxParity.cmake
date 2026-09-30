@@ -132,7 +132,10 @@ if(NOT "${DATALOG}" STREQUAL "")
     if("${DATALOG_SIGDIGITS}" STREQUAL "")
         set(DATALOG_SIGDIGITS 6)
     endif()
-    erf_compare_data_logs("${REF_DIR}/${DATALOG}" "${SPLIT_DIR}/${DATALOG}" ${DATALOG_SIGDIGITS} 2 logs_agree log_message)
+    # Values below 10^DATALOG_ZERO_EXPONENT count as zero (a symmetric flow's lateral velocity
+    # on the centreline is roundoff that no number of significant digits can compare).
+    erf_compare_data_logs("${REF_DIR}/${DATALOG}" "${SPLIT_DIR}/${DATALOG}" ${DATALOG_SIGDIGITS} 2 logs_agree log_message
+                          "${DATALOG_ZERO_EXPONENT}")
     if(NOT logs_agree)
         message(FATAL_ERROR "RunBoxParity.cmake: data log ${DATALOG} differs between the single-box "
                             "and split runs: ${log_message}")

@@ -82,7 +82,7 @@ MovingBodies::create (const SolverChoice& sc, int max_level, bool restarting)
 }
 
 MovingBodies::MovingBodies (MovingBodiesInputs in, double dt, double t_max, bool restarting)
-    : m_in(std::move(in)), m_dt(dt), m_restarting(restarting)
+    : m_in(std::move(in)), m_dt(dt), m_t_max(t_max), m_restarting(restarting)
 {
     Print() << "Moving bodies: " << m_in.bodies.size() << " body(ies), ERF dt " << m_dt
             << ", OpenFAST stop time " << t_max << ", velocities "
@@ -140,6 +140,7 @@ MovingBodies::write_checkpoint (const std::string& chkdir) const
 #endif
     }
     ParallelDescriptor::Barrier();
+    for (const auto& w : m_wakes) { w->write_state(dir); }
 #ifdef ERF_USE_OPENFAST
     m_driver->create_checkpoint(dir + "/");
 #endif
@@ -151,6 +152,16 @@ MovingBodies::read_checkpoint (const std::string& chkdir)
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_restarting && !m_restored,
                                      "MovingBodies::read_checkpoint: only once, and only on a restart");
     const std::string dir = chkdir + "/moving_bodies";
+    if (!FileExists(dir + "/state")) {
+        // a checkpoint written without bodies (a precursor, say): the bodies start afresh here
+        Print() << "Moving bodies: the checkpoint " << chkdir << " holds no moving-bodies state; the bodies start now\n";
+#ifdef ERF_USE_OPENFAST
+        m_driver->init(m_dt, m_t_max);
+#endif
+        m_restored = true;
+        return;
+    }
+    m_wake_state_dir = dir;
     // the state file: the step count, and the OpenFAST time index each turbine must report
     std::map<std::string,int> time_index;
     {
@@ -239,6 +250,75 @@ MovingBodies::advance (int lev, double time, double dt,
             write_source_diagnostics(time, detJ_cc, geom, first);
         }
     }
+    if (m_in.wake.active() && !m_in.has_prescribed_velocity && (first || m_step % m_in.wake.interval == 0)) {
+        write_wake_diagnostics(time, U, V, W, z_phys_nd, geom);
+    }
+}
+
+void
+MovingBodies::build_wake_lines (const Geometry& geom)
+{
+    const auto& w = m_in.wake;
+    auto add = [&](const std::string& name, const std::string& root, const std::array<Real,3>& hub,
+                   const std::array<Real,3>& axis, Real diameter) {
+        m_wakes.push_back(std::make_unique<erf_actuator::WakeLines>(name, root, hub, axis, diameter,
+                                                                    w.lines_xD, w.half_width, w.num_points,
+                                                                    static_cast<Real>(geom.ProbLo(2))));
+    };
+#ifdef ERF_USE_OPENFAST
+    for (const auto& t : m_driver->turbines()) {
+        // the rotor diameter from the outermost blade force node
+        Real r2max = 0.0;
+        const int nfb = t.num_blades * t.num_force_pts_blade;
+        for (int nd = 1; nd <= nfb && nd < t.num_force_nodes; ++nd) {
+            Real r2 = 0.0;
+            for (int d = 0; d < 3; ++d) { const Real dd = t.force_pos[3*nd+d] - t.hub_pos[d]; r2 += dd * dd; }
+            r2max = std::max(r2max, r2);
+        }
+        if (!(r2max > 0.0)) { Abort("erf.moving_bodies.wake: " + t.name + " has no blade force nodes to size the wake lines from"); }
+        add(t.name, t.output_root, t.hub_pos, t.hub_axis, Real(2.0) * std::sqrt(r2max));
+    }
+#endif
+    for (const auto& d : m_disks) {
+        add(d->name(), m_in.diagnostics_dir + "/" + d->name(), d->center(), d->normal(), Real(2.0) * d->radius());
+    }
+    // every sampling point must lie in the domain (periodic directions wrap)
+    const auto plo = geom.ProbLoArray();
+    const auto phi = geom.ProbHiArray();
+    for (const auto& wl : m_wakes) {
+        const auto& pos = wl->positions();
+        for (std::size_t p = 0; p < pos.size() / 3; ++p) {
+            for (int d = 0; d < 3; ++d) {
+                if (geom.isPeriodic(d)) { continue; }
+                if (pos[3*p+d] < plo[d] || pos[3*p+d] > phi[d]) {
+                    Abort("erf.moving_bodies.wake: a sampling line of " + wl->name() + " leaves the domain at (" +
+                          std::to_string(pos[3*p]) + ", " + std::to_string(pos[3*p+1]) + ", " + std::to_string(pos[3*p+2]) +
+                          ") m; shorten lines_xD or half_width");
+                }
+            }
+        }
+        if (!m_wake_state_dir.empty() && wl->read_state(m_wake_state_dir)) {
+            Print() << "  " << wl->name() << ": wake running average restored (" << wl->num_samples() << " samples)\n";
+        }
+        Print() << "  " << wl->name() << ": wake lines at " << w.lines_xD.size() << " downstream distances, "
+                << wl->num_points() << " points, diameter " << wl->diameter() << " m\n";
+    }
+    m_wakes_built = true;
+}
+
+void
+MovingBodies::write_wake_diagnostics (double time, const MultiFab& U, const MultiFab& V, const MultiFab& W,
+                                      const MultiFab* z_phys_nd, const Geometry& geom)
+{
+    if (!m_wakes_built) { build_wake_lines(geom); }
+    std::vector<Real> vel;
+    for (auto& wl : m_wakes) {
+        erf_actuator::sample_velocity(U, V, W, z_phys_nd, geom, wl->positions(), vel);
+        if (time >= m_in.wake.avg_start) { wl->accumulate(vel); }
+        wl->write_instantaneous(time, vel, !m_restored && !m_wake_written);
+        wl->write_average();
+    }
+    m_wake_written = true;
 }
 
 bool

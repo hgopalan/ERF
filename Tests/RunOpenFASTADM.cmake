@@ -1,5 +1,5 @@
 # Run the OpenFAST_ADM_Uniform deck and check it three ways: the plotfile against its gold with
-# fcompare; the turbine's flow log (<output_root>_flow.csv, the sampled hub and blade-mean
+# fcompare; a log of the turbine (FLOW_CSV: by default <output_root>_flow.csv, the sampled hub and blade-mean
 # velocities, which the disk's induction lowers) against the committed gold log; and, row by
 # row, that the integrated momentum source (fx in SOURCE_CSV) equals minus the turbine's thrust
 # (thrust_x in TURBINE_CSV): the rings preserve the rotor's force and the spreading is

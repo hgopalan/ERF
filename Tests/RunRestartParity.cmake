@@ -191,7 +191,7 @@ if(NOT "${DATALOG}" STREQUAL "")
     include("${CMAKE_CURRENT_LIST_DIR}/CompareDataLogs.cmake")
     erf_compare_data_logs("${WORKING_DIRECTORY}/datalog_straight.txt"
                           "${WORKING_DIRECTORY}/datalog_restart.txt"
-                          ${DATALOG_SIGDIGITS} 2 logs_agree log_message)
+                          ${DATALOG_SIGDIGITS} 2 logs_agree log_message "${DATALOG_ZERO_EXPONENT}")
     if(NOT logs_agree)
         message(FATAL_ERROR "RunRestartParity.cmake: ${DATALOG} differs between the straight run "
                             "and the restarted run: ${log_message}")
