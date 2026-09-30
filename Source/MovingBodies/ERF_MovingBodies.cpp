@@ -112,6 +112,10 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, double dt, double t_max, bool
                 Print() << "  " << b.name << ": nacelle drag point, cd " << b.nacelle_cd << ", area " << b.nacelle_area
                         << " m^2, density " << b.air_density << "\n";
             }
+            if (b.fllc) {
+                Print() << "  " << b.name << ": filtered lifting-line correction, optimal kernel " << b.fllc_eps_chord
+                        << " chords, relaxation " << b.fllc_relax << ", from t = " << b.fllc_start_time << " s\n";
+            }
         }
     }
     m_epsilon_dx = m_in.bodies.empty() ? 2.0 : m_in.bodies[0].epsilon;
@@ -170,6 +174,24 @@ MovingBodies::write_checkpoint (const std::string& chkdir) const
     for (const auto& st : m_turbine_stats) { st.write_state(dir); }
     for (const auto& st : m_disk_stats) { st.write_state(dir); }
 #ifdef ERF_USE_OPENFAST
+    if (ParallelDescriptor::IOProcessor()) {
+        const auto& turbs = m_driver->turbines();
+        // every turbine's node loads and velocities at the checkpoint: what depends on the
+        // loads of the step before a restart (the lifting-line correction) continues from them
+        for (const auto& t : turbs) {
+            std::ofstream out(dir + "/" + t.name + "_nodes.dat", std::ios::trunc);
+            if (!out) { Abort("cannot write the node-load checkpoint for " + t.name + " in '" + dir + "'"); }
+            out << std::setprecision(17) << "nodes " << t.name << " " << t.num_force_nodes << " " << t.num_vel_nodes << "\n";
+            for (Real v : t.force) { out << v << "\n"; }
+            for (Real v : t.node_vel) { out << v << "\n"; }
+        }
+        for (std::size_t i = 0; i < m_fllc.size(); ++i) {
+            if (m_fllc[i].empty()) { continue; }
+            std::ofstream out(dir + "/" + turbs[i].name + "_fllc.dat", std::ios::trunc);
+            if (!out) { Abort("cannot write the lifting-line correction checkpoint for " + turbs[i].name + " in '" + dir + "'"); }
+            for (const auto& f : m_fllc[i]) { f->write_state(out); }
+        }
+    }
     m_driver->create_checkpoint(dir + "/");
 #endif
 }
@@ -190,6 +212,9 @@ MovingBodies::read_checkpoint (const std::string& chkdir)
         return;
     }
     m_wake_state_dir = dir;
+#ifdef ERF_USE_OPENFAST
+    m_fllc_state_dir = dir;
+#endif
     for (auto& st : m_turbine_stats) { st.read_state(dir); }
     for (auto& st : m_disk_stats) { st.read_state(dir); }
     // the state file: the step count, and the OpenFAST time index each turbine must report
@@ -230,6 +255,27 @@ MovingBodies::read_checkpoint (const std::string& chkdir)
         Print() << "  " << t.name << ": restored from " << dir << "/" << t.name << ".chkp at OpenFAST time index "
                 << t.time_index << ", " << t.num_substeps << " substeps per ERF step\n";
     }
+    // the node loads and velocities ERF checkpointed (a checkpoint from before they were written has none)
+    {
+        const auto& turbs = m_driver->turbines();
+        for (std::size_t i = 0; i < turbs.size(); ++i) {
+            const std::string fname = dir + "/" + turbs[i].name + "_nodes.dat";
+            if (!FileExists(fname)) { continue; }
+            Vector<char> chars;
+            ParallelDescriptor::ReadAndBcastFile(fname, chars);
+            std::istringstream in(std::string(chars.dataPtr(), chars.size()));
+            std::string key, name;
+            int nf = 0, nv = 0;
+            if (!(in >> key >> name >> nf >> nv) || key != "nodes" || name != turbs[i].name ||
+                nf != turbs[i].num_force_nodes || nv != turbs[i].num_vel_nodes) {
+                Abort("the node-load checkpoint '" + fname + "' does not match turbine " + turbs[i].name);
+            }
+            std::vector<Real> force(3 * nf), node_vel(3 * nv);
+            for (Real& v : force) { if (!(in >> v)) { Abort("the node-load checkpoint '" + fname + "' is truncated"); } }
+            for (Real& v : node_vel) { if (!(in >> v)) { Abort("the node-load checkpoint '" + fname + "' is truncated"); } }
+            m_driver->set_restored_loads(static_cast<int>(i), force, node_vel);
+        }
+    }
 #endif
     Print() << "Moving bodies: restarted after step " << m_step << "\n";
     m_restored = true;
@@ -254,16 +300,17 @@ MovingBodies::advance (int lev, double time, double dt,
 #ifdef ERF_USE_OPENFAST
     if (first && !m_driver->solved0()) {
         // first step: OpenFAST's first solution sees the initial flow at its nodes
-        supply_velocities(U, V, W, z_phys_nd, geom);
+        supply_velocities(time, U, V, W, z_phys_nd, geom);
         m_driver->solution0();
         m_driver->write_diagnostics(time);
     }
 #endif
-    supply_velocities(U, V, W, z_phys_nd, geom);
+    supply_velocities(time, U, V, W, z_phys_nd, geom);
 #ifdef ERF_USE_OPENFAST
     m_driver->step();
     if (first || m_step % m_in.diagnostics_int == 0) {
         m_driver->write_diagnostics(time + dt);
+        write_fllc_diagnostics(time, first);
     }
 #endif
     // the bodies' forces come from the velocities just sampled (the disks) or from the
@@ -495,9 +542,10 @@ MovingBodies::add_momentum_sources (int lev, MultiFab& xmom_src, MultiFab& ymom_
 }
 
 void
-MovingBodies::supply_velocities (const MultiFab& U, const MultiFab& V, const MultiFab& W,
+MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab& V, const MultiFab& W,
                                  const MultiFab* z_phys_nd, const Geometry& geom)
 {
+    amrex::ignore_unused(time);
     // one flattened list: the OpenFAST turbines' velocity nodes, then each disk's upstream
     // sampling points and disk points
     m_points.clear();
@@ -519,8 +567,15 @@ MovingBodies::supply_velocities (const MultiFab& U, const MultiFab& V, const Mul
         erf_actuator::sample_velocity(U, V, W, z_phys_nd, geom, m_points.positions(), m_points.velocities());
     }
 #ifdef ERF_USE_OPENFAST
+    if (!m_fllc_built) { build_fllc(geom); }
     for (int i = 0; i < nturb; ++i) {
-        m_driver->set_node_velocities(i, m_points.body_velocities(i));
+        if (m_fllc[i].empty()) {
+            m_driver->set_node_velocities(i, m_points.body_velocities(i));
+        } else {
+            std::vector<Real> uvw = m_points.body_velocities(i);
+            apply_fllc(i, time, uvw);
+            m_driver->set_node_velocities(i, uvw);
+        }
         // the nacelle drag from the hub node's velocity (the first velocity node), corrected
         // for the drag point's own kernel; recorded on the structure for the diagnostics
         const MovingBodyInputs& b = m_turbine_in[i];
@@ -543,3 +598,126 @@ MovingBodies::supply_velocities (const MultiFab& U, const MultiFab& V, const Mul
         m_disks[k]->update(m_points.body_velocities(b), m_points.body_velocities(b + 1));
     }
 }
+
+#ifdef ERF_USE_OPENFAST
+// span coordinate of a node: its distance from the hub
+namespace {
+Real span_of (const std::vector<Real>& pos, int nd, const std::array<Real,3>& hub)
+{
+    Real r2 = 0.0;
+    for (int d = 0; d < 3; ++d) { const Real dd = pos[3*nd+d] - hub[d]; r2 += dd * dd; }
+    return std::sqrt(r2);
+}
+} // namespace
+
+void
+MovingBodies::build_fllc (const Geometry& geom)
+{
+    const auto& turbs = m_driver->turbines();
+    m_fllc.clear();
+    m_fllc.resize(turbs.size());
+    const Real eps = m_epsilon_dx * geom.CellSize(0);
+    for (std::size_t i = 0; i < turbs.size(); ++i) {
+        const MovingBodyInputs& b = m_turbine_in[i];
+        if (!b.fllc) { continue; }
+        const auto& t = turbs[i];
+        const int nfb = t.num_force_pts_blade;
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(nfb >= 2 && t.num_force_nodes >= 1 + t.num_blades * nfb,
+                                         "erf.moving_bodies." + t.name + ".fllc needs at least two force points per blade");
+        for (int bl = 0; bl < t.num_blades; ++bl) {
+            std::vector<Real> r(nfb), chord(nfb);
+            for (int k = 0; k < nfb; ++k) {
+                const int nd = 1 + bl * nfb + k;
+                r[k] = span_of(t.force_pos, nd, t.hub_pos);
+                chord[k] = t.chord[nd];
+                if (!(chord[k] > 0.0)) {
+                    Abort("erf.moving_bodies." + t.name + ".fllc: OpenFAST reports no chord at blade " + std::to_string(bl) +
+                          " force node " + std::to_string(k) + "; the correction needs the chord (forceNodesChord)");
+                }
+            }
+            m_fllc[i].push_back(std::make_unique<erf_actuator::FLLC>(t.name + "_blade" + std::to_string(bl), r, chord, eps,
+                                                                      b.fllc_eps_chord, b.fllc_eps_dr, b.fllc_relax));
+        }
+        if (!m_fllc_state_dir.empty()) {
+            const std::string fname = m_fllc_state_dir + "/" + t.name + "_fllc.dat";
+            if (FileExists(fname)) {
+                Vector<char> chars;
+                ParallelDescriptor::ReadAndBcastFile(fname, chars);
+                std::istringstream in(std::string(chars.dataPtr(), chars.size()));
+                for (auto& f : m_fllc[i]) {
+                    if (!f->read_state(in)) { Abort("the lifting-line correction checkpoint '" + fname + "' lacks " + f->name()); }
+                }
+                Print() << "  " << t.name << ": lifting-line correction restored from " << fname << "\n";
+            }
+        }
+        Print() << "erf.moving_bodies." << t.name << ": lifting-line correction on " << t.num_blades << " blades, kernel "
+                << eps << " m, optimal kernel " << b.fllc_eps_chord * t.chord[1 + nfb - 1] << " m at the tip, "
+                << m_fllc[i].front()->num_fine_points() << " fine points per blade\n";
+    }
+    m_fllc_built = true;
+}
+
+void
+MovingBodies::apply_fllc (int i, double time, std::vector<Real>& uvw)
+{
+    const auto& t = m_driver->turbines()[i];
+    const MovingBodyInputs& b = m_turbine_in[i];
+    const int nfb = t.num_force_pts_blade;
+    const int nbe = t.num_blade_elem;
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(static_cast<int>(uvw.size()) >= 3 * (1 + t.num_blades * nbe),
+                                     "apply_fllc: fewer velocities than blade velocity nodes for " + t.name);
+    for (int bl = 0; bl < t.num_blades; ++bl) {
+        erf_actuator::FLLC& f = *m_fllc[i][bl];
+        // the sampled velocities at this blade's velocity nodes, and their span coordinates
+        std::vector<Real> rv(nbe), uv(3 * nbe);
+        for (int m = 0; m < nbe; ++m) {
+            const int nd = 1 + bl * nbe + m;
+            rv[m] = span_of(t.vel_pos, nd, t.hub_pos);
+            for (int d = 0; d < 3; ++d) { uv[3*m+d] = uvw[3*nd+d]; }
+        }
+        if (time >= b.fllc_start_time) {
+            // relative velocity and force on the fluid per unit density at the force nodes
+            const std::vector<Real>& rf = f.span();
+            std::vector<Real> uf, vel_rel(3 * nfb), force(3 * nfb);
+            erf_actuator::interpolate_along(rv, uv, rf, uf);
+            for (int k = 0; k < nfb; ++k) {
+                const int nd = 1 + bl * nfb + k;
+                for (int d = 0; d < 3; ++d) {
+                    vel_rel[3*k+d] = uf[3*k+d] - t.force_vel[3*nd+d];
+                    force[3*k+d] = -t.force[3*nd+d] / b.air_density;
+                }
+            }
+            f.update(force, vel_rel);
+        }
+        // the relaxed correction, back onto the velocity nodes
+        std::vector<Real> du_v;
+        erf_actuator::interpolate_along(f.span(), f.correction(), rv, du_v);
+        for (int m = 0; m < nbe; ++m) {
+            const int nd = 1 + bl * nbe + m;
+            for (int d = 0; d < 3; ++d) { uvw[3*nd+d] += du_v[3*m+d]; }
+        }
+    }
+}
+
+void
+MovingBodies::write_fllc_diagnostics (double time, bool first)
+{
+    if (!ParallelDescriptor::IOProcessor()) { return; }
+    const auto& turbs = m_driver->turbines();
+    for (std::size_t i = 0; i < m_fllc.size(); ++i) {
+        if (m_fllc[i].empty()) { continue; }
+        Real du_max = 0.0, sum2 = 0.0;
+        for (const auto& f : m_fllc[i]) {
+            du_max = std::max(du_max, f->max_correction());
+            sum2 += f->rms_correction() * f->rms_correction();
+        }
+        std::ofstream out;
+        const bool truncate = first && !m_restored && !m_fllc_written;
+        if (erf_actuator::open_log(out, turbs[i].output_root + "_fllc.csv", truncate)) {
+            out << "time,du_max,du_rms\n";
+        }
+        out << std::setprecision(10) << time << "," << du_max << "," << std::sqrt(sum2 / static_cast<Real>(m_fllc[i].size())) << "\n";
+    }
+    m_fllc_written = true;
+}
+#endif

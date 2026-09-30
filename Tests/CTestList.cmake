@@ -1059,6 +1059,18 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       DATALOG "T1_flow.csv"
       DATALOG_SIGDIGITS 8)
 
+  # The actuator line with the filtered lifting-line correction: the correction log and the
+  # plotfile against their golds, and the source still integrates to minus the thrust.
+  add_test_openfast_adm(OpenFAST_ALM_FLLC OpenFAST_ALM_FLLC "plt00010" "T1_fllc.csv")
+
+  # The same case checkpointed at step 5 and restarted to step 10: the relaxed correction comes
+  # back from the checkpoint, so the plotfile and the correction log must equal the straight
+  # run's exactly.
+  add_test_restart_parity(OpenFAST_ALM_FLLC_Restart OpenFAST_ALM_FLLC_Restart 5 10
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      DATALOG "T1_fllc.csv"
+      DATALOG_SIGDIGITS 10)
+
   # The same case with wake lines 2, 4 and 7 D behind the rotor, sampled every two steps and
   # averaged from 2 s: the running average must match its gold (the sampler is exact on the
   # faces' trilinear field) and the plotfile its gold.

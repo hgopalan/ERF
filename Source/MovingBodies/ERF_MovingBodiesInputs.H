@@ -24,6 +24,11 @@ struct MovingBodyInputs
     int num_force_points_tower{0};           //!< actuator force points on the tower (0: no tower forcing)
     amrex::Real nacelle_cd{0.0};             //!< nacelle drag coefficient (0: no nacelle drag)
     amrex::Real nacelle_area{0.0};           //!< nacelle frontal area (m^2), needed when nacelle_cd > 0
+    bool fllc{false};                        //!< filtered lifting-line correction of the sampled blade velocities (alm only)
+    amrex::Real fllc_relax{0.1};             //!< relaxation factor of the correction, in (0, 1]
+    amrex::Real fllc_start_time{0.0};        //!< the correction starts at this time (s)
+    amrex::Real fllc_eps_chord{0.25};        //!< optimal kernel width in chords
+    amrex::Real fllc_eps_dr{1.0};            //!< fine-grid spacing of the correction as a fraction of the optimal kernel width
     // ct_disk
     amrex::Real rotor_radius{0.0};           //!< disk radius (m)
     amrex::Real hub_height{0.0};             //!< disk centre above the base (m)
@@ -47,6 +52,8 @@ struct MovingBodyInputs
  *   erf.moving_bodies.T1.num_force_points_tower = 0    (> 0: the tower's loads from OpenFAST forced too)
  *   erf.moving_bodies.T1.nacelle_cd  = 0                (> 0 with nacelle_area: a drag point at the hub)
  *   erf.moving_bodies.T1.nacelle_area = 0               (m^2)
+ *   erf.moving_bodies.T1.fllc        = false              (alm: filtered lifting-line correction)
+ *   erf.moving_bodies.T1.fllc_relax  = 0.1                fllc_start_time = 0, fllc_eps_chord = 0.25, fllc_eps_dr = 1
  *   erf.moving_bodies.T1.output_root = moving_bodies/T1
  *   erf.moving_bodies.T1.epsilon     = 2.0                (spreading width, dx units)
  *   erf.moving_bodies.D1.type        = ct_disk

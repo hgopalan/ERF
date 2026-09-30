@@ -1,5 +1,7 @@
 CEXE_headers += ERF_PrescribedCtDisk.H
 CEXE_sources += ERF_PrescribedCtDisk.cpp
+CEXE_headers += ERF_FLLC.H
+CEXE_sources += ERF_FLLC.cpp
 ifeq ($(USE_OPENFAST), TRUE)
   CEXE_headers += ERF_OpenFASTRotor.H
   CEXE_sources += ERF_OpenFASTRotor.cpp
