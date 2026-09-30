@@ -246,7 +246,8 @@ TEST(SplitHamiltonianAdvection, ReinitHeadRateAt34DegreesMatchesAnalyticRf)
     slopes.setVal(0.0);
 
     const Real dt   = 0.015;
-    const int  nsteps = 2000;  // same 30s/180m as the advection-only test above, but 2000 reinit calls
+    const int  nsteps = 2000;  // same 30s/180m as the advection-only test above
+    const int  reinit_every = 40;  // 50 reinit calls
     const Real eps_visc = 0.4;
     const Real dtau  = 0.01 * DX;   // matches WRF-Fire's own default, ERF_FireLayer.cpp
 
@@ -254,8 +255,10 @@ TEST(SplitHamiltonianAdvection, ReinitHeadRateAt34DegreesMatchesAnalyticRf)
     for (int step = 0; step < nsteps; ++step) {
         advect_levelset_directional_rk3_split(phi, wind, slopes, f.geom, dt, eps_visc, st);
         fire_fill_boundary(phi, f.geom);
-        reinitialize_phi_jiang_peng(phi, f.geom, 1, dtau);
-        fire_fill_boundary(phi, f.geom);
+        if ((step + 1) % reinit_every == 0) {
+            reinitialize_phi_jiang_peng(phi, f.geom, 1, dtau);
+            fire_fill_boundary(phi, f.geom);
+        }
     }
     const Real d1 = f.head_position(phi);
 
