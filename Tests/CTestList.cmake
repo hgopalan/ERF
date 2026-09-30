@@ -990,6 +990,12 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       if(ARGC GREATER 4)
           set(_force "${ARGV4}")
       endif()
+      # optional 6th: the file holding that column (default T1_erf.csv; a farm uses
+      # moving_bodies/total_load.csv, whose rows the manager writes with the turbine logs)
+      set(_turbine_csv "T1_erf.csv")
+      if(ARGC GREATER 5)
+          set(_turbine_csv "${ARGV5}")
+      endif()
       setup_test()
       resolve_test_exe("" "erf_exec" TEST_EXE)
       add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
@@ -1009,7 +1015,7 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
           "-DFLOW_CSV=${_log}"
           "-DFLOW_GOLD=${CURRENT_TEST_SOURCE_DIR}/${_log}.gold"
           "-DSIGDIGITS=10"
-          "-DTURBINE_CSV=T1_erf.csv"
+          "-DTURBINE_CSV=${_turbine_csv}"
           "-DFORCE_COLUMN=${_force}"
           "-DSOURCE_CSV=moving_bodies/momentum_source.csv"
           -P ${PROJECT_SOURCE_DIR}/Tests/RunOpenFASTADM.cmake)
@@ -1070,6 +1076,20 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
       DATALOG "T1_fllc.csv"
       DATALOG_SIGDIGITS 10)
+
+  # Two stub turbines as actuator disks, the second two diameters downstream of the first: each
+  # runs in its own OpenFAST instance on its owner rank (both on rank 0 here) and writes its own
+  # logs; the integrated source must equal minus the farm's total load, and the downstream
+  # turbine's sampled flow log is the gold.
+  add_test_openfast_adm(OpenFAST_ADM_TwoTurbines OpenFAST_ADM_TwoTurbines "plt00010" "T2_flow.csv" "load_x" "moving_bodies/total_load.csv")
+
+  # The farm on one rank (both turbines owned by rank 0, one box) against two ranks with the
+  # domain split (one turbine per rank): the ownership must not change the answer.
+  add_test_box_parity(OpenFASTADM_TwoTurbines_BoxParity OpenFAST_ADM_TwoTurbines "plt00010"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=32 amr.max_grid_size_y=12 amr.max_grid_size_z=64"
+      DATALOG "T2_flow.csv"
+      DATALOG_SIGDIGITS 8)
 
   # The same case with wake lines 2, 4 and 7 D behind the rotor, sampled every two steps and
   # averaged from 2 s: the running average must match its gold (the sampler is exact on the

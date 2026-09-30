@@ -114,6 +114,14 @@ private:
     void spread_sources (const amrex::MultiFab& U, const amrex::MultiFab* z_phys_nd,
                          const amrex::MultiFab* detJ_cc, const amrex::Geometry& geom);
 
+    /**
+     * Append time, the sum of every body's load on the structure (the turbines' thrust, tower
+     * and nacelle forces, the disks' thrust) and the turbines' total power to
+     * <diagnostics_dir>/total_load.csv: the farm's totals, and what the integrated momentum
+     * source must equal minus.
+     */
+    void write_total_load (double time, bool first);
+    bool m_total_written{false};
     /** Append time and the integrated source vector to <diagnostics_dir>/momentum_source.csv. */
     void write_source_diagnostics (double time, const amrex::MultiFab* detJ_cc,
                                    const amrex::Geometry& geom, bool first);

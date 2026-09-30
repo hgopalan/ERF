@@ -298,7 +298,8 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   # OpenFAST step, accept only the anelastic solver with a fixed step, refuse a model
   # without external inflow, and report the same node layout on every rank; with tower
   # force points the tower nodes must carry the model's drag for the velocity supplied,
-  # and the tower-shadow check must read TwrShadow. The bundled stub library stands in
+  # and the tower-shadow check must read TwrShadow; a farm deals its turbines round-robin
+  # over the ranks and runs them as separate instances. The bundled stub library stands in
   # for OpenFAST.
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTDriver.cpp

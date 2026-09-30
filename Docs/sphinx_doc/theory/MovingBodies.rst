@@ -281,6 +281,26 @@ Poisson solve handles the non-periodic direction. The regression tests
 ``OpenFAST_ADM_LES`` (precursor planes) and ``OpenFAST_ADM_CPM`` (cell
 perturbation) run the rotor both ways.
 
+Farms
+-----
+
+Any number of bodies can be listed in ``erf.moving_bodies.bodies``; each has
+its own input block, its own diagnostics files (``<output_root>_*.csv``) and,
+for an OpenFAST turbine, its own OpenFAST instance. Turbine ``i`` (in the
+order of the list) is owned by MPI rank ``i`` modulo the number of ranks, so a
+farm of up to as many turbines as ranks runs one OpenFAST instance per rank
+and a larger one spreads evenly; only the owner rank calls OpenFAST, and the
+node positions, loads and velocities are broadcast after every step so that
+every rank samples and spreads for every body. The result does not depend on
+the rank count or on which rank owns which turbine. All bodies share one
+spreading width and their forces are spread onto the same momentum sources.
+``<diagnostics_dir>/total_load.csv`` records the sum of every body's load on
+the structure (the turbines' thrust, tower and nacelle forces and the disks'
+thrust) and the turbines' total aerodynamic power, at the times of the turbine
+logs; minus that load is what the integrated momentum source must equal. Wake
+lines are built behind every rotor, so a downstream turbine's lines start
+behind it, not behind the first.
+
 Checkpoint and restart
 ----------------------
 
@@ -325,6 +345,8 @@ and its mean over the blade nodes. OpenFAST also writes its own output files as
 configured in the ``.fst`` file. Whenever a body puts a force into the flow,
 ``<diagnostics_dir>/momentum_source.csv`` records the time and the momentum
 source integrated over the domain, which equals the sum of the forces on the
-fluid (minus the turbines' total loads, plus the disks' ``-T n``).
+fluid (minus the turbines' total loads, plus the disks' ``-T n``), and
+``<diagnostics_dir>/total_load.csv`` the bodies' total load and power (see
+Farms).
 
 Inputs are listed in :ref:`sec:MovingBodiesInputs`.
