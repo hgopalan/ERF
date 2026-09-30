@@ -807,6 +807,12 @@ ERF::MakeNewLevelFromCoarse (int lev, Real time, const BoxArray& ba,
         initRayleigh_at_level(lev);
     }
 
+    // ********************************************************************************************
+    // Wall data on the new grids: fraction-stress wall-face masks and the RANS wall distance
+    // (neither is interpolated from the coarse level)
+    // ********************************************************************************************
+    make_wall_data_lev(lev);
+
 }
 
 // Remake an existing level using provided BoxArray and DistributionMapping and
@@ -1438,6 +1444,12 @@ ERF::RemakeLevel (int lev, Real time, const BoxArray& ba, const DistributionMapp
     {
         initRayleigh_at_level(lev);
     }
+
+    // ********************************************************************************************
+    // Wall data on the new grids: fraction-stress wall-face masks and the RANS wall distance
+    // (neither is interpolated from the coarse level)
+    // ********************************************************************************************
+    make_wall_data_lev(lev);
 
     // Particle redistribute handled in timeStep() after regrid() completes.
     // Calling it here causes stale-grid crashes.

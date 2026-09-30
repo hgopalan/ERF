@@ -94,6 +94,16 @@ if(ERF_ENABLE_TESTS)
   set(ANELASTIC_WALL_DIFFUSION_CHECKER
       "${CMAKE_CURRENT_BINARY_DIR}/erf_anelastic_wall_diffusion_check${CMAKE_EXECUTABLE_SUFFIX}")
 
+  # Motivation: multi-level and diffusion-limited regressions (fine-level sounding init, the
+  # immersed c/f fill and flux balance, the anelastic diffusion dt limit) check physical
+  # properties of a plotfile instead of gold files.
+  add_executable(erf_multilevel_property_check
+    ${CMAKE_CURRENT_SOURCE_DIR}/MultiLevelPropertyCheck.cpp)
+  target_link_libraries(erf_multilevel_property_check PRIVATE AMReX::amrex)
+  target_compile_features(erf_multilevel_property_check PRIVATE cxx_std_17)
+  set(MULTILEVEL_PROPERTY_CHECKER
+      "${CMAKE_CURRENT_BINARY_DIR}/erf_multilevel_property_check${CMAKE_EXECUTABLE_SUFFIX}")
+
   # Motivation: the chamber regressions must prove the initializer is wired
   # into a real 3-D run and that the SatAdj deck forms finite cloud water.
   add_executable(erf_cloud_chamber_check

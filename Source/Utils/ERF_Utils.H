@@ -103,6 +103,157 @@ void
 fill_wall_dist_ghost_cells (amrex::MultiFab& wdist, const amrex::Geometry& geom);
 
 /**
+ * Wall distance over terrain represented by immersed forcing, measured from the wall the
+ * immersed wall law uses: the bottom face of the topmost cell of each column that holds solid
+ * (terrain_blank >= small_volfrac). The distance is vertical, |z_cc - z_wall|; a column without
+ * solid measures from the bottom of the domain. Every box must hold whole columns unless the
+ * coarser level's wall height is given.
+ * @param[out] wdist Wall distance (valid cells; ghost cells are left untouched).
+ * @param[in] terrain_blank Cell-centred solid fraction.
+ * @param[in] z_phys_nd Node heights.
+ * @param[in] z_phys_cc Cell-centre heights.
+ * @param[in] domain Index domain of the level.
+ * @param[in] small_volfrac Solid fraction below which a cell counts as fluid.
+ * @param[in] true_surface Measure from the surface itself (erf.if_wall_form = fraction_stress)
+ *            rather than from the bottom face of the top cell holding solid (legacy wall law).
+ * @param[out] wall_height Optional: the height measured from in each column (the wall face, or the
+ *            surface), on the level's BoxArray flattened to the bottom cell (same DistributionMapping).
+ * @param[in] wall_height_crse Optional, fine levels: wall_height of the coarser level brought to
+ *            this level's flattened BoxArray. With it a box need not hold whole columns: a box
+ *            that does not see the surface of a column (it lies inside the solid, or above the
+ *            surface without reaching the bottom) measures from this height.
+ */
+void
+immersed_wall_dist (amrex::MultiFab& wdist,
+                    const amrex::MultiFab& terrain_blank,
+                    const amrex::MultiFab& z_phys_nd,
+                    const amrex::MultiFab& z_phys_cc,
+                    const amrex::Box& domain,
+                    amrex::Real small_volfrac,
+                    bool true_surface = false,
+                    amrex::MultiFab* wall_height = nullptr,
+                    const amrex::MultiFab* wall_height_crse = nullptr);
+
+/**
+ * Lateral wall distance for immersed buildings: each fluid cell (solid fraction below one half)
+ * looks for the nearest solid cell (at least one half) in its own horizontal plane within nsearch
+ * cells, and the wall distance becomes the smaller of its present value (the height above the roof
+ * or the ground, from immersed_wall_dist) and the distance to the nearest face of that cell, so the
+ * RANS length scale also feels the vertical walls.
+ * @param[inout] wdist Wall distance (valid cells).
+ * @param[in] terrain_blank Cell-centred solid fraction.
+ * @param[in] geom Geometry of the level (cell sizes, periodicity).
+ * @param[in] nsearch Search half-width in cells.
+ */
+void
+immersed_lateral_wall_dist (amrex::MultiFab& wdist,
+                            const amrex::MultiFab& terrain_blank,
+                            const amrex::Geometry& geom,
+                            int nsearch);
+
+/**
+ * Wall-face masks of the fraction-stress wall law (erf.if_wall_form = fraction_stress):
+ * zero on the xz (yz) edge that is the bottom face of the wall cell of an x-face (y-face)
+ * column, one elsewhere. The vertical flux of x (y) momentum is multiplied by them, so no
+ * resolved flux crosses the wall face (see ERF_ImmersedWallCell.H).
+ * @param[in] terrain_blank Cell-centred solid fraction; needs one more ghost cell than the masks.
+ * @param[out] mask13 On convert(ba, IntVect(1,0,1)), valid and ghost cells.
+ * @param[out] mask23 On convert(ba, IntVect(0,1,1)), valid and ghost cells.
+ * @param[out] mask33 On convert(ba, IntVect(0,0,1)): the same for the cell columns, applied to
+ *             the vertical diffusive fluxes of theta and TKE (zero on the bottom face of the wall cell).
+ * @param[in] domain Index domain of the level.
+ * @param[in] small_volfrac Solid fraction below which a cell counts as fluid.
+ * @param[in] spacing erf.if_wall_face_spacing (0 grid, 1 physical, 2 log): the face ABOVE the wall
+ *            cell gets ib_wall::face_above_factor instead of one.
+ * @param[in] dz Cell height (constant-dz mesh).
+ * @param[in] z0 Roughness length of the wall law.
+ */
+void
+make_ib_wall_face_masks (const amrex::MultiFab& terrain_blank,
+                         amrex::MultiFab& mask13,
+                         amrex::MultiFab& mask23,
+                         amrex::MultiFab& mask33,
+                         const amrex::Box& domain,
+                         amrex::Real small_volfrac,
+                         int spacing = 0,
+                         amrex::Real dz = amrex::Real(1.0),
+                         amrex::Real z0 = amrex::Real(0.1));
+
+/**
+ * Fluid-weighted average down for immersed forcing (terrain or buildings). Each level builds its
+ * own volume fraction and forces its solid and partial cells, so a plain average mixes solid
+ * values into coarse fluid cells. A covered coarse cell that holds fluid on its own level
+ * (terrain_blank < 1) takes the fine cells under it weighted by their fluid fraction 1 - beta_f;
+ * with mass_weighted the specific value is averaged with the fluid mass,
+ * S_c = rho_c sum (1 - beta_f) S_f / sum (1 - beta_f) rho_f, where rho_c is the averaged density
+ * when Rho_comp is in the range and the coarse cell's own density otherwise (anelastic), so a
+ * uniform theta stays uniform. A coarse cell that is solid on its own level, or has no fluid fine
+ * cell under it, keeps its value. The momenta are not averaged this way: the plain face average
+ * is the fine mass flux through the coarse face and keeps the anelastic constraint.
+ * @param[in] S_fine Fine cell-centred data (the conserved state when mass_weighted).
+ * @param[in,out] S_crse Coarse cell-centred data.
+ * @param[in] beta_fine Fine solid fraction (terrain_blanking).
+ * @param[in] beta_crse Coarse solid fraction (terrain_blanking).
+ * @param[in] scomp First component.
+ * @param[in] ncomp Number of components.
+ * @param[in] ratio Refinement ratio.
+ * @param[in] mass_weighted Weight by the fluid mass (component Rho_comp holds the density).
+ */
+void
+if_average_down (const amrex::MultiFab& S_fine,
+                 amrex::MultiFab& S_crse,
+                 const amrex::MultiFab& beta_fine,
+                 const amrex::MultiFab& beta_crse,
+                 int scomp, int ncomp,
+                 const amrex::IntVect& ratio,
+                 bool mass_weighted = true);
+
+/**
+ * Where the coarse and fine levels disagree on an immersed surface along the lateral coarse-fine
+ * faces of the fine level (the surface on a coarse cell's mid-plane: a coarse cell half solid over
+ * fine cells that are all solid and all fluid). For each coarse cell covered by the fine level and
+ * next to an uncovered one, the spread (max - min) of the fine solid fractions under it.
+ * @param[in] fine_tb Fine solid fraction (terrain_blanking).
+ * @param[in] fine_grids Fine BoxArray.
+ * @param[in] crse_grids Coarse BoxArray.
+ * @param[in] crse_dmap Coarse DistributionMapping.
+ * @param[in] crse_geom Coarse Geometry.
+ * @param[in] ratio Refinement ratio.
+ * @param[in] warn Spread at or above which a cell is counted.
+ * @return The number of counted cells over all ranks, and the largest spread along those faces.
+ */
+std::pair<int, amrex::Real>
+if_cf_surface_mismatch (const amrex::MultiFab& fine_tb,
+                        const amrex::BoxArray& fine_grids,
+                        const amrex::BoxArray& crse_grids,
+                        const amrex::DistributionMapping& crse_dmap,
+                        const amrex::Geometry& crse_geom,
+                        const amrex::IntVect& ratio,
+                        amrex::Real warn);
+
+/**
+ * Immersed forcing with the anelastic model: remove the net mass flux through the coarse-fine faces
+ * of each fine subdomain, taking it off the fluid c/f faces in equal parts per unit area (less
+ * inflow, more outflow). Faces on the domain boundary and faces next to a fully solid cell are
+ * left alone. See ERF::balance_cf_fluxes.
+ * @param[in] geom Fine Geometry.
+ * @param[in] subdomains Fine subdomains (each fine box lies in one).
+ * @param[in] grids Fine BoxArray.
+ * @param[in,out] mom The x, y and z momenta of the fine level (c/f faces filled).
+ * @param[in] mask The c/f masks of the x, y and z face fills (ERFFillPatcher::GetMask).
+ * @param[in] set_val The mask value of the filled c/f faces, per direction.
+ * @param[in] tb Fine solid fraction (terrain_blanking, one ghost cell).
+ */
+void
+if_balance_cf_fluxes (const amrex::Geometry& geom,
+                      const amrex::Vector<amrex::BoxArray>& subdomains,
+                      const amrex::BoxArray& grids,
+                      const amrex::Array<amrex::MultiFab*, 3>& mom,
+                      const amrex::Array<const amrex::iMultiFab*, 3>& mask,
+                      const amrex::Array<int, 3>& set_val,
+                      const amrex::MultiFab& tb);
+
+/**
  * Compute total water mixing ratio from conservative state.
  * @param[in] cons_state Conservative state MultiFab.
  * @param[out] qt MultiFab to store total water.

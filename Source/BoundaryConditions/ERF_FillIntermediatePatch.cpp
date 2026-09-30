@@ -55,9 +55,11 @@ ERF::FillIntermediatePatch (int lev, double time_d,
             FPr_c[lev-1].FillSet(*mfs_vel[Vars::cons], time, null_bc, domain_bcs_type);
         }
         if ( !cons_only && (cf_set_width >= 0) ) {
+            set_cf_solid_fraction(lev);
             FPr_u[lev-1].FillSet(*mfs_mom[IntVars::xmom], time, null_bc, domain_bcs_type);
             FPr_v[lev-1].FillSet(*mfs_mom[IntVars::ymom], time, null_bc, domain_bcs_type);
             FPr_w[lev-1].FillSet(*mfs_mom[IntVars::zmom], time, null_bc, domain_bcs_type);
+            balance_cf_fluxes(lev, *mfs_mom[IntVars::xmom], *mfs_mom[IntVars::ymom], *mfs_mom[IntVars::zmom]);
         }
     }
 

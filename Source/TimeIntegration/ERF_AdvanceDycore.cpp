@@ -56,9 +56,6 @@ void ERF::advance_dycore (int level,
         cloud_chamber_budget->set_initial_state(state_old[IntVars::cons], fine_geom, 0, old_time);
     }
 
-    DiffChoice dc    = solverChoice.diffChoice;
-    TurbChoice tc    = solverChoice.turbChoice[level];
-
     MultiFab r_hse (base_state[level], make_alias, BaseState::r0_comp , 1);
     MultiFab p_hse (base_state[level], make_alias, BaseState::p0_comp , 1);
 
@@ -95,12 +92,6 @@ void ERF::advance_dycore (int level,
     }
 
     bool l_use_terrain_fitted_coords = (solverChoice.mesh_type != MeshType::ConstantDz);
-    bool l_use_kturb   = tc.use_kturb;
-    bool l_use_diff    = ( (dc.molec_diff_type != MolecDiffType::None) ||
-                           l_use_kturb );
-
-    const bool use_SurfLayer = (m_SurfaceLayer[Orientation(Direction::z, Orientation::low)] != nullptr);
-    const MultiFab* z_0      = (use_SurfLayer) ? m_SurfaceLayer[Orientation(Direction::z, Orientation::low)]->get_z0(level) : nullptr;
 
     const bool use_nudging = solverChoice.nudging_from_input_sounding;
     const bool has_moisture = (solverChoice.moisture_type != MoistureType::None);
@@ -503,6 +494,170 @@ void ERF::advance_dycore (int level,
     }
 
     // **************************************************************************************
+    // Strain (for the slow RHS and the Smagorinsky model) and the eddy viscosity & diffusivities
+    // **************************************************************************************
+    compute_strain_and_eddy_diffs(level, state_old, state_new, xvel_old, yvel_old, zvel_old,
+                                  fine_geom, dt_advance);
+
+#include "ERF_TI_utils.H"
+
+    // Additional SFS quantities, calculated once per timestep
+    MultiFab* Hfx1  = SFS_hfx1_lev[level].get();
+    MultiFab* Hfx2  = SFS_hfx2_lev[level].get();
+    MultiFab* Hfx3  = SFS_hfx3_lev[level].get();
+    MultiFab* Q1fx1 = SFS_q1fx1_lev[level].get();
+    MultiFab* Q1fx2 = SFS_q1fx2_lev[level].get();
+    MultiFab* Q1fx3 = SFS_q1fx3_lev[level].get();
+    MultiFab* Q2fx3 = SFS_q2fx3_lev[level].get();
+    MultiFab* Diss  = SFS_diss_lev[level].get();
+
+    MultiFab* Hfx3_EB = nullptr;
+    if (solverChoice.terrain_type == TerrainType::EB) {
+        Hfx3_EB = hfx3_EB[level].get();
+    }
+
+
+    // ***********************************************************************************************
+    // Update user-defined source terms -- these are defined once per time step (not per RK stage)
+    // ***********************************************************************************************
+    if (solverChoice.custom_rhotheta_forcing) {
+        prob->update_rhotheta_sources(old_time,
+                                      rhotheta_src_ptr,
+                                      fine_geom, z_phys_cc[level]);
+    }
+
+    if (solverChoice.custom_moisture_forcing) {
+        prob->update_rhoqt_sources(old_time,
+                                   rhoqt_src_ptr,
+                                   fine_geom, z_phys_cc[level]);
+    }
+
+    if (solverChoice.custom_geostrophic_profile) {
+        prob->update_geostrophic_profile(old_time,
+                                   h_u_geos[level], d_u_geos[level],
+                                   h_v_geos[level], d_v_geos[level],
+                                   fine_geom, z_phys_cc[level]);
+    }
+
+    if (solverChoice.custom_w_subsidence) {
+        prob->update_w_subsidence(old_time,
+                                  h_w_subsid[level], d_w_subsid[level],base_state[level],
+                                  fine_geom, z_phys_nd[level]);
+    }
+
+    // ***********************************************************************************************
+    // Convert old velocity available on faces to old momentum on faces to be used in time integration
+    // ***********************************************************************************************
+    MultiFab density(state_old[IntVars::cons], make_alias, Rho_comp, 1);
+
+    //
+    // This is an optimization since we won't need more than one ghost
+    // cell of momentum in the integrator if not using numerical diffusion
+    //
+    IntVect ngu = (!solverChoice.use_num_diff) ? IntVect(1,1,1) : xvel_old.nGrowVect();
+    IntVect ngv = (!solverChoice.use_num_diff) ? IntVect(1,1,1) : yvel_old.nGrowVect();
+    IntVect ngw = (!solverChoice.use_num_diff) ? IntVect(1,1,0) : zvel_old.nGrowVect();
+
+    const MultiFab* c_vfrac = nullptr;
+    if (solverChoice.terrain_type == TerrainType::EB) {
+        c_vfrac = &((get_eb(level).get_const_factory())->getVolFrac());
+    }
+
+    VelocityToMomentum(xvel_old, ngu, yvel_old, ngv, zvel_old, ngw, density,
+                       state_old[IntVars::xmom],
+                       state_old[IntVars::ymom],
+                       state_old[IntVars::zmom],
+                       domain, domain_bcs_type, c_vfrac);
+
+    MultiFab::Copy(xvel_new,xvel_old,0,0,1,xvel_old.nGrowVect());
+    MultiFab::Copy(yvel_new,yvel_old,0,0,1,yvel_old.nGrowVect());
+    MultiFab::Copy(zvel_new,zvel_old,0,0,1,zvel_old.nGrowVect());
+
+    bool fast_only = false;
+    bool vel_and_mom_synced = true;
+
+    apply_bcs(state_old, old_time,
+              state_old[IntVars::cons].nGrow(), state_old[IntVars::xmom].nGrow(),
+              fast_only, vel_and_mom_synced);
+
+    cons_to_prim(state_old[IntVars::cons], S_prim, state_old[IntVars::cons].nGrow());
+
+    make_pi_stage(state_old[IntVars::cons]);
+
+    // ***********************************************************************************************
+    // Define a new MultiFab that holds q_total and fill it by summing the moisture components --
+    //      to be used in buoyancy calculation and as part of the inertial weighting in the
+    // ***********************************************************************************************
+
+    const bool l_eb_terrain = (solverChoice.terrain_type == TerrainType::EB);
+    MultiFab qt(grids[level], dmap[level], 1, (l_eb_terrain) ? 2 : 1);
+    qt.setVal(0);
+
+#include "ERF_TI_no_substep_fun.H"
+#include "ERF_TI_substep_fun.H"
+#include "ERF_TI_slow_rhs_pre.H"
+#include "ERF_TI_slow_rhs_post.H"
+
+    // ***************************************************************************************
+    // Setup the integrator and integrate for a single timestep
+    // **************************************************************************************
+    MRISplitIntegrator<Vector<MultiFab> >& mri_integrator = *mri_integrator_mem[level];
+
+    // Define rhs and 'post update' utility function that is called after calculating
+    // any state data (e.g. at RK stages or at the end of a timestep)
+    mri_integrator.set_slow_rhs_pre(slow_rhs_fun_pre);
+    mri_integrator.set_slow_rhs_post(slow_rhs_fun_post);
+
+    mri_integrator.set_acoustic_substepping(acoustic_substepping_fun);
+    mri_integrator.set_slow_fast_timestep_ratio(fixed_mri_dt_ratio > 0 ? fixed_mri_dt_ratio : dt_mri_ratio[level]);
+    mri_integrator.set_no_substep(no_substep_fun);
+
+    mri_integrator.advance(state_old, state_new, old_time, dt_advance);
+
+    if (verbose) Print() << "Done with advance_dycore at level " << level << std::endl;
+}
+
+/**
+ * Compute the strain (for the slow RHS and the Smagorinsky model) and, with a turbulence closure,
+ * the eddy viscosity and diffusivities of a level, once per time step. Called from advance_dycore,
+ * and before the first time step so that the explicit-diffusion dt limit (erf.diffusive_cfl) sees
+ * the eddy diffusivities of the initial state (ERF::init_eddy_diffs_for_dt).
+ *
+ * @param[in] level      level
+ * @param[in] state_old  state whose conserved variables the closure reads
+ * @param[in] state_new  state whose layout the strain loop uses
+ * @param[in] xvel_old   x-velocity (ghost cells filled)
+ * @param[in] yvel_old   y-velocity (ghost cells filled)
+ * @param[in] zvel_old   z-velocity (ghost cells filled)
+ * @param[in] fine_geom  geometry of the level
+ * @param[in] dt_advance time step
+ */
+void
+ERF::compute_strain_and_eddy_diffs (int level,
+                                    Vector<MultiFab>& state_old,
+                                    Vector<MultiFab>& state_new,
+                                    MultiFab& xvel_old, MultiFab& yvel_old, MultiFab& zvel_old,
+                                    const Geometry& fine_geom, double dt_advance)
+{
+    const Box& domain = fine_geom.Domain();
+
+    DiffChoice dc = solverChoice.diffChoice;
+    TurbChoice tc = solverChoice.turbChoice[level];
+
+    bool l_use_terrain_fitted_coords = (solverChoice.mesh_type != MeshType::ConstantDz);
+    bool l_use_kturb = tc.use_kturb;
+    bool l_use_diff  = ( (dc.molec_diff_type != MolecDiffType::None) || l_use_kturb );
+
+    const bool use_SurfLayer = (m_SurfaceLayer[Orientation(Direction::z, Orientation::low)] != nullptr);
+    const MultiFab* z_0      = (use_SurfLayer) ? m_SurfaceLayer[Orientation(Direction::z, Orientation::low)]->get_z0(level) : nullptr;
+
+    MultiFab* eddyDiffs = eddyDiffs_lev[level].get();
+    MultiFab* Hfx1  = SFS_hfx1_lev[level].get();
+    MultiFab* Hfx2  = SFS_hfx2_lev[level].get();
+    MultiFab* Hfx3  = SFS_hfx3_lev[level].get();
+    MultiFab* Diss  = SFS_diss_lev[level].get();
+
+    // **************************************************************************************
     // Compute strain for use in slow RHS and Smagorinsky model
     // **************************************************************************************
     {
@@ -607,23 +762,6 @@ void ERF::advance_dycore (int level,
     } // l_use_diff
     } // profile
 
-#include "ERF_TI_utils.H"
-
-    // Additional SFS quantities, calculated once per timestep
-    MultiFab* Hfx1  = SFS_hfx1_lev[level].get();
-    MultiFab* Hfx2  = SFS_hfx2_lev[level].get();
-    MultiFab* Hfx3  = SFS_hfx3_lev[level].get();
-    MultiFab* Q1fx1 = SFS_q1fx1_lev[level].get();
-    MultiFab* Q1fx2 = SFS_q1fx2_lev[level].get();
-    MultiFab* Q1fx3 = SFS_q1fx3_lev[level].get();
-    MultiFab* Q2fx3 = SFS_q2fx3_lev[level].get();
-    MultiFab* Diss  = SFS_diss_lev[level].get();
-
-    MultiFab* Hfx3_EB = nullptr;
-    if (solverChoice.terrain_type == TerrainType::EB) {
-        Hfx3_EB = hfx3_EB[level].get();
-    }
-
     // *************************************************************************
     // Calculate cell-centered eddy viscosity & diffusivities
     //
@@ -678,103 +816,4 @@ void ERF::advance_dycore (int level,
             }
         }
     }
-
-    // ***********************************************************************************************
-    // Update user-defined source terms -- these are defined once per time step (not per RK stage)
-    // ***********************************************************************************************
-    if (solverChoice.custom_rhotheta_forcing) {
-        prob->update_rhotheta_sources(old_time,
-                                      rhotheta_src_ptr,
-                                      fine_geom, z_phys_cc[level]);
-    }
-
-    if (solverChoice.custom_moisture_forcing) {
-        prob->update_rhoqt_sources(old_time,
-                                   rhoqt_src_ptr,
-                                   fine_geom, z_phys_cc[level]);
-    }
-
-    if (solverChoice.custom_geostrophic_profile) {
-        prob->update_geostrophic_profile(old_time,
-                                   h_u_geos[level], d_u_geos[level],
-                                   h_v_geos[level], d_v_geos[level],
-                                   fine_geom, z_phys_cc[level]);
-    }
-
-    if (solverChoice.custom_w_subsidence) {
-        prob->update_w_subsidence(old_time,
-                                  h_w_subsid[level], d_w_subsid[level],base_state[level],
-                                  fine_geom, z_phys_nd[level]);
-    }
-
-    // ***********************************************************************************************
-    // Convert old velocity available on faces to old momentum on faces to be used in time integration
-    // ***********************************************************************************************
-    MultiFab density(state_old[IntVars::cons], make_alias, Rho_comp, 1);
-
-    //
-    // This is an optimization since we won't need more than one ghost
-    // cell of momentum in the integrator if not using numerical diffusion
-    //
-    IntVect ngu = (!solverChoice.use_num_diff) ? IntVect(1,1,1) : xvel_old.nGrowVect();
-    IntVect ngv = (!solverChoice.use_num_diff) ? IntVect(1,1,1) : yvel_old.nGrowVect();
-    IntVect ngw = (!solverChoice.use_num_diff) ? IntVect(1,1,0) : zvel_old.nGrowVect();
-
-    const MultiFab* c_vfrac = nullptr;
-    if (solverChoice.terrain_type == TerrainType::EB) {
-        c_vfrac = &((get_eb(level).get_const_factory())->getVolFrac());
-    }
-
-    VelocityToMomentum(xvel_old, ngu, yvel_old, ngv, zvel_old, ngw, density,
-                       state_old[IntVars::xmom],
-                       state_old[IntVars::ymom],
-                       state_old[IntVars::zmom],
-                       domain, domain_bcs_type, c_vfrac);
-
-    MultiFab::Copy(xvel_new,xvel_old,0,0,1,xvel_old.nGrowVect());
-    MultiFab::Copy(yvel_new,yvel_old,0,0,1,yvel_old.nGrowVect());
-    MultiFab::Copy(zvel_new,zvel_old,0,0,1,zvel_old.nGrowVect());
-
-    bool fast_only = false;
-    bool vel_and_mom_synced = true;
-
-    apply_bcs(state_old, old_time,
-              state_old[IntVars::cons].nGrow(), state_old[IntVars::xmom].nGrow(),
-              fast_only, vel_and_mom_synced);
-
-    cons_to_prim(state_old[IntVars::cons], S_prim, state_old[IntVars::cons].nGrow());
-
-    make_pi_stage(state_old[IntVars::cons]);
-
-    // ***********************************************************************************************
-    // Define a new MultiFab that holds q_total and fill it by summing the moisture components --
-    //      to be used in buoyancy calculation and as part of the inertial weighting in the
-    // ***********************************************************************************************
-
-    const bool l_eb_terrain = (solverChoice.terrain_type == TerrainType::EB);
-    MultiFab qt(grids[level], dmap[level], 1, (l_eb_terrain) ? 2 : 1);
-    qt.setVal(0);
-
-#include "ERF_TI_no_substep_fun.H"
-#include "ERF_TI_substep_fun.H"
-#include "ERF_TI_slow_rhs_pre.H"
-#include "ERF_TI_slow_rhs_post.H"
-
-    // ***************************************************************************************
-    // Setup the integrator and integrate for a single timestep
-    // **************************************************************************************
-    MRISplitIntegrator<Vector<MultiFab> >& mri_integrator = *mri_integrator_mem[level];
-
-    // Define rhs and 'post update' utility function that is called after calculating
-    // any state data (e.g. at RK stages or at the end of a timestep)
-    mri_integrator.set_slow_rhs_pre(slow_rhs_fun_pre);
-    mri_integrator.set_slow_rhs_post(slow_rhs_fun_post);
-
-    mri_integrator.set_acoustic_substepping(acoustic_substepping_fun);
-    mri_integrator.set_slow_fast_timestep_ratio(fixed_mri_dt_ratio > 0 ? fixed_mri_dt_ratio : dt_mri_ratio[level]);
-    mri_integrator.set_no_substep(no_substep_fun);
-
-    mri_integrator.advance(state_old, state_new, old_time, dt_advance);
-
-    if (verbose) Print() << "Done with advance_dycore at level " << level << std::endl;
 }

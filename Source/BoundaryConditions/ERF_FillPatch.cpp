@@ -71,9 +71,11 @@ ERF::FillPatchFineLevel (int lev, double time_d,
                                Geom(lev).Domain(),
                                domain_bcs_type, c_vfrac);
 
+            set_cf_solid_fraction(lev);
             FPr_u[lev-1].FillSet(*mfs_mom[IntVars::xmom], time, null_bc, domain_bcs_type);
             FPr_v[lev-1].FillSet(*mfs_mom[IntVars::ymom], time, null_bc, domain_bcs_type);
             FPr_w[lev-1].FillSet(*mfs_mom[IntVars::zmom], time, null_bc, domain_bcs_type);
+            balance_cf_fluxes(lev, *mfs_mom[IntVars::xmom], *mfs_mom[IntVars::ymom], *mfs_mom[IntVars::zmom]);
 
             MomentumToVelocity(*mfs_vel[Vars::xvel], *mfs_vel[Vars::yvel], *mfs_vel[Vars::zvel],
                                *mfs_vel[Vars::cons],
@@ -390,4 +392,75 @@ ERF::FillPatchCrseLevel (int lev, double time_d,
         (*physbcs_w[lev])(*mfs_vel[Vars::zvel],*mfs_vel[Vars::xvel],*mfs_vel[Vars::yvel],
                           ngvect_vels,time,BCVars::zvel_bc, do_fb);
     }
+}
+
+/**
+ * Give the c/f face fill of level lev (FPr_u/v/w[lev-1]) the solid fraction of level lev when the
+ * terrain or buildings are immersed and the level is anelastic: the anelastic update holds fully
+ * solid cells still, so a c/f face next to one must carry no flux, while the coarse face over it may
+ * be open (a coarse cell half solid over fine cells that are all solid and all fluid). The fill then
+ * closes those faces and moves their flux to the fluid faces of the same coarse face. Otherwise the
+ * fill is left as it was. Also sets up the log-law fill next to the wall (erf.cf_loglaw_fill).
+ *
+ * @param lev Fine level whose c/f faces are filled
+ */
+void
+ERF::set_cf_solid_fraction (int lev)
+{
+    if (lev < 1) { return; }
+    const bool immersed = (solverChoice.terrain_type   == TerrainType::ImmersedForcing ||
+                           solverChoice.buildings_type == BuildingsType::ImmersedForcing);
+    const MultiFab* tb = (immersed && solverChoice.anelastic[lev] && terrain_blanking[lev])
+                       ? terrain_blanking[lev].get() : nullptr;
+    FPr_u[lev-1].SetSolidFraction(tb);
+    FPr_v[lev-1].SetSolidFraction(tb);
+    FPr_w[lev-1].SetSolidFraction(tb);
+
+    // Log-law fill of the lateral c/f faces next to the wall (erf.cf_loglaw_fill): the immersed
+    // surface (from the solid fraction) or a surface-layer bottom; constant dz only, not with EB
+    // terrain (its wall is not the bottom of the domain)
+    const bool bottom_wall = (phys_bc_type[Orientation(Direction::z,Orientation::low)] == ERF_BC::surface_layer);
+    const bool loglaw = solverChoice.cf_loglaw_fill &&
+                        (SolverChoice::mesh_type == MeshType::ConstantDz) &&
+                        ((immersed && terrain_blanking[lev]) ||
+                         (!immersed && bottom_wall && solverChoice.terrain_type != TerrainType::EB));
+    Real z0 = solverChoice.if_z0;
+    if (loglaw && !immersed) {
+        ParmParse pp("erf");
+        pp.query("most.z0", z0);
+    }
+    const MultiFab* wall_tb = (immersed && terrain_blanking[lev]) ? terrain_blanking[lev].get() : nullptr;
+    FPr_u[lev-1].SetLogLawFill(loglaw, z0, wall_tb);
+    FPr_v[lev-1].SetLogLawFill(loglaw, z0, wall_tb);
+    FPr_w[lev-1].SetLogLawFill(loglaw, z0, wall_tb);
+}
+
+/**
+ * Immersed forcing with the anelastic model: after the c/f faces of level lev are filled from the
+ * coarse level, remove the net mass flux through them, subdomain by subdomain. The coarse level
+ * zeroes its faces between two fully solid cells after its projection, so the coarse fluxes
+ * around a fine box whose c/f faces cross the solid do not sum to zero; the fine projection
+ * (Neumann at c/f, singular) would then subtract the mean of its right-hand side, i.e. spread the
+ * imbalance as a uniform divergence, which advects a uniform theta into a spurious heat source.
+ * The net inflow is taken off the fluid c/f faces in equal parts per unit area (less inflow, more
+ * outflow); faces on the domain boundary and faces next to a fully solid cell are left alone.
+ *
+ * @param lev  Fine level
+ * @param xmom x-momentum of level lev (c/f faces filled)
+ * @param ymom y-momentum of level lev (c/f faces filled)
+ * @param zmom z-momentum of level lev (c/f faces filled)
+ */
+void
+ERF::balance_cf_fluxes (int lev, MultiFab& xmom, MultiFab& ymom, MultiFab& zmom)
+{
+    if (lev < 1) { return; }
+    const bool immersed = (solverChoice.terrain_type   == TerrainType::ImmersedForcing ||
+                           solverChoice.buildings_type == BuildingsType::ImmersedForcing);
+    if (!(immersed && solverChoice.anelastic[lev] && terrain_blanking[lev])) { return; }
+    if (subdomains[lev].empty()) { return; }
+
+    if_balance_cf_fluxes(geom[lev], subdomains[lev], grids[lev], {&xmom, &ymom, &zmom},
+                         {FPr_u[lev-1].GetMask(), FPr_v[lev-1].GetMask(), FPr_w[lev-1].GetMask()},
+                         {FPr_u[lev-1].GetSetMaskVal(), FPr_v[lev-1].GetSetMaskVal(), FPr_w[lev-1].GetSetMaskVal()},
+                         *terrain_blanking[lev]);
 }

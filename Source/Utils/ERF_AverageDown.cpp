@@ -96,7 +96,20 @@ ERF::AverageDownTo (int crse_lev, int scomp, int ncomp, bool do_perturbational_a
                            BaseState::th0_comp,RhoTheta_comp,1,IntVect{0});
     }
 
-    if (SolverChoice::terrain_type != TerrainType::EB) {
+    // Immersed forcing: each level forces its own solid and partial cells, so the cell average
+    // is weighted by the fluid mass and coarse cells that are solid on their own level keep
+    // their value (a plain average mixes solid values into coarse fluid cells). With the
+    // perturbational interpolation the density slot holds a perturbation: fluid weight only.
+    const bool is_immersed = (solverChoice.terrain_type   == TerrainType::ImmersedForcing ||
+                              solverChoice.buildings_type == BuildingsType::ImmersedForcing);
+
+    if (is_immersed) {
+        const bool perturbational = (do_perturbational_and_momenta &&
+                                     interpolation_type == StateInterpType::Perturbational);
+        if_average_down(vars_new[fine_lev][Vars::cons], vars_new[crse_lev][Vars::cons],
+                        *terrain_blanking[fine_lev], *terrain_blanking[crse_lev],
+                        scomp, ncomp, refRatio(crse_lev), !perturbational);
+    } else if (SolverChoice::terrain_type != TerrainType::EB) {
         average_down(vars_new[crse_lev+1][Vars::cons],vars_new[crse_lev  ][Vars::cons],
                     scomp, ncomp, refRatio(crse_lev));
     } else {
@@ -206,6 +219,9 @@ ERF::AverageDownTo (int crse_lev, int scomp, int ncomp, bool do_perturbational_a
                         c_vfrac);
     }
 
+    // The momenta of immersed forcing take the plain face average as well: it is the fine mass
+    // flux through the coarse face, so the coarse velocity keeps the anelastic constraint (a
+    // fluid-weighted face average does not, and advecting theta with it heats the flow)
     if (SolverChoice::terrain_type != TerrainType::EB) {
         average_down_faces(rU_new[crse_lev+1], rU_new[crse_lev], refRatio(crse_lev), geom[crse_lev]);
         average_down_faces(rV_new[crse_lev+1], rV_new[crse_lev], refRatio(crse_lev), geom[crse_lev]);

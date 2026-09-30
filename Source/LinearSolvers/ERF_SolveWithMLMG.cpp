@@ -41,10 +41,28 @@ solve_with_mlmg (int lev, Vector<MultiFab>& rhs, Vector<MultiFab>& phi,
 
     LPInfo info;
     // Allow a hidden direction if the domain is one cell wide in any lateral direction
+    const bool hidden = (dom_lo.x == dom_hi.x) || (dom_lo.y == dom_hi.y);
     if (dom_lo.x == dom_hi.x) {
         info.setHiddenDirection(0);
     } else if (dom_lo.y == dom_hi.y) {
         info.setHiddenDirection(1);
+    }
+
+    // A lateral direction fewer than 8 cells wide stops the multigrid coarsening early, and the
+    // bottom solver is then left with nearly the whole problem: the solve stalls above the
+    // tolerance (MLMG failed), and loosening the tolerance instead leaves a divergent velocity
+    // whose theta errors grow until the run blows up. One cell (a hidden direction, handled
+    // above) or a width that can be halved several times avoids it.
+    const IntVect len = geom.Domain().length();
+    if (!hidden && (len[0] < 8 || len[1] < 8)) {
+        static bool warned = false;
+        if (!warned) {
+            amrex::Print() << "WARNING: the domain is " << len[0] << " x " << len[1]
+                           << " cells laterally; the multigrid Poisson solve cannot coarsen and may"
+                           << " stall. Use one cell (a 2D run) or a width that halves several times,"
+                           << " and do not loosen erf.poisson_abstol/reltol to get past it" << std::endl;
+            warned = true;
+        }
     }
 
     // Make sure the solver only sees the levels over which we are solving

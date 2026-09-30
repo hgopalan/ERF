@@ -224,9 +224,35 @@ choices are offered through ``erf.wall_dist_type``:
   no linear solve. It cannot see side walls or overhangs, which the
   Poisson distance can.
 
+With terrain immersed forcing (``erf.terrain_type = ImmersedForcing``) the
+mesh is flat, and without further input the distance is the height above
+the bottom of the domain, inside the solid. ``terrain_height`` then
+measures the distance from the wall the immersed forcing uses: the wall
+law acts in the top cell of each column that holds solid (solid fraction
+above 0.005, none above it) and places the wall at the bottom face of that
+cell, with the target velocity at :math:`\Delta z/2` and the friction
+velocity from the cell above at :math:`3\Delta z/2`. The distance is
+:math:`d = |z - z_w|` with :math:`z_w` that face, so the wall cell has
+:math:`d = \Delta z/2` and the cell above :math:`3\Delta z/2`, as on flat
+ground, and the length scale agrees with the wall law. The distance is
+vertical (the wall law is), and a column without solid keeps the bottom
+of the domain as its wall. On a refined level a box need not hold the whole
+column: where a box does not see the surface of a column (it lies wholly
+inside the solid, or above the surface without reaching the bottom of the
+domain) the distance is measured from the wall height of the coarser level.
+
+With immersed buildings (``erf.buildings_type = ImmersedForcing``, height-map buildings over the
+bottom of the domain) ``terrain_height`` measures, in each column, from the top of the solid: the
+roof inside a footprint and the ground elsewhere. The vertical walls are found by a local search:
+each fluid cell (solid fraction below one half) looks for the nearest solid cell in its own
+horizontal plane within ``erf.if_wall_dist_search`` cells (8 by default), and the distance becomes
+the smaller of the height above the roof or ground and the distance to the nearest face of that
+cell. Without it the length scale near a building is set by the height above the ground, and the
+eddy viscosity there is several times too large.
+
 The distance is available as the plot variable ``walldist``. It is
-computed once at initialisation, also on a restart; it is not recomputed
-after a regrid.
+computed at initialisation, also on a restart, and for every level a
+regrid makes or remakes.
 
 Limitations
 -----------
@@ -276,7 +302,11 @@ Inputs
 +----------------------------------------+------------------------------------------------------------+------------------+
 | **erf.rans_lscale_min**                | floor of that cap [m]                                      | 1                |
 +----------------------------------------+------------------------------------------------------------+------------------+
-| **erf.wall_dist_type**                 | ``poisson`` or ``terrain_height`` on a fitted mesh         | ``poisson``      |
+| **erf.wall_dist_type**                 | ``poisson`` or ``terrain_height`` (fitted mesh or immersed | ``poisson``      |
+|                                        | forcing)                                                   |                  |
++----------------------------------------+------------------------------------------------------------+------------------+
+| **erf.if_wall_dist_search**            | immersed buildings with ``terrain_height``: half-width     | 8                |
+|                                        | [cells] of the search for the nearest vertical wall        |                  |
 +----------------------------------------+------------------------------------------------------------+------------------+
 
 See :ref:`sec:Inputs` for the full descriptions.

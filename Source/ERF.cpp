@@ -58,6 +58,7 @@ double ERF::low_time_interval  = std::numeric_limits<double>::max();
 // Time step control
 Real ERF::cfl            = Real(0.8);
 Real ERF::sub_cfl        = one;
+Real ERF::diffusive_cfl  = Real(0.8);
 Real ERF::init_shrink    = one;
 Real ERF::change_max     = Real(1.1);
 double ERF::dt_max_initial = static_cast<double>(bogus_large_value);
@@ -507,7 +508,7 @@ ERF::post_timestep (int nstep, double time, double dt_lev0)
             } // mfi
 
             // This call refluxes all "slow" cell-centered variables
-            // (i.e. not density or (rho theta) or velocities) from the lev/lev+1 interface onto lev
+            // (i.e. not density or (rho theta) or velocities) from the lev/lev+1 interface onto lev.
             getAdvFluxReg(lev+1)->Reflux(vars_new[lev][Vars::cons], 2, 2, ncomp-2);
 
             // Here we multiply (rho S) by m^2 after refluxing
@@ -1369,25 +1370,9 @@ ERF::InitData_post ()
    // send_to_ww3(my_lev);
 #endif
 
-    // Create wall distance field for RANS model
+    // Wall-face masks of the fraction-stress immersed wall law and the RANS wall distance
     for (int lev = 0; lev <= finest_level; lev++) {
-        if (solverChoice.turbChoice[lev].rans_type != RANSType::None) {
-            // Handle bottom boundary
-            poisson_wall_dist(lev);
-
-            // Correct the wall distance for immersed bodies
-            if (solverChoice.advChoice.have_zero_flux_faces) {
-                thinbody_wall_dist(walldist[lev],
-                                   solverChoice.advChoice.zero_xflux,
-                                   solverChoice.advChoice.zero_yflux,
-                                   solverChoice.advChoice.zero_zflux,
-                                   geom[lev],
-                                   z_phys_cc[lev]);
-
-                // The correction is only applied on the valid region
-                fill_wall_dist_ghost_cells(*walldist[lev], geom[lev]);
-            }
-        }
+        make_wall_data_lev(lev);
     }
 
     if (solverChoice.lsm_type != LandSurfaceType::None ||
@@ -1750,6 +1735,18 @@ ERF::InitData_post ()
                           "moisture and momentum fluxes reach the atmosphere only through "
                           "the surface layer, so they will not be applied; set "
                           "zlo.type = \"surface_layer\".\n";
+    }
+
+    // The explicit-diffusion limit (erf.diffusive_cfl) needs the eddy diffusivities, which are
+    // otherwise first computed inside the first step. Compute them now that every surface layer
+    // exists (fluxes, PBL height and a TKE from u* are set above), and limit the first dt again.
+    // Later steps, restarts and regrids grow dt from a limited one by at most erf.change_max.
+    if (restart_chkfile.empty()) {
+        bool any_eddy_diffs = false;
+        for (int lev = 0; lev <= finest_level; ++lev) {
+            any_eddy_diffs = init_eddy_diffs_for_dt(lev) || any_eddy_diffs;
+        }
+        if (any_eddy_diffs) { ComputeDt(); }
     }
 
     if (!restart_chkfile.empty()) {
@@ -3015,6 +3012,8 @@ ERF::ReadParameters ()
         // Time step controls
         pp.queryAdd("cfl", cfl);
         pp.queryAdd("substepping_cfl", sub_cfl);
+        pp.queryAdd("diffusive_cfl", diffusive_cfl);
+        if (diffusive_cfl < zero) { amrex::Abort("erf.diffusive_cfl must be >= 0 (0 turns the diffusion limit off)"); }
         pp.queryAdd("init_shrink", init_shrink);
         pp.queryAdd("change_max", change_max);
         pp.queryAdd("dt_max_initial", dt_max_initial);
@@ -4198,4 +4197,37 @@ ERF::has_surface_layer_inputs (const std::string& prefix) const
         }
     }
     return false;
+}
+
+/**
+ * Eddy diffusivities of the initial state of a level, so that the explicit-diffusion time-step limit
+ * of the anelastic model (erf.diffusive_cfl) applies to the first step too: the closure otherwise
+ * computes them only inside the step, and a run started with a large TKE took the advective step
+ * first. Only for anelastic levels with an LES or RANS closure; PBL schemes are left out (their
+ * first-step diffusivities have not been checked this way). Called after the surface layers are set up.
+ *
+ * @param[in] lev level
+ * @return whether the eddy diffusivities of the level were computed
+ */
+bool
+ERF::init_eddy_diffs_for_dt (int lev)
+{
+    const TurbChoice& tc = solverChoice.turbChoice[lev];
+    if (!(solverChoice.anelastic[lev] && diffusive_cfl > zero && eddyDiffs_lev[lev] && tc.use_kturb &&
+          tc.pbl_type == PBLType::None)) {
+        return false;
+    }
+    // The closure reads one ghost cell beyond the grids; a fine level's ghost cells at the
+    // coarse-fine boundary are only set from the coarse level at the start of a step
+    if (lev > 0) {
+        FillPatchFineLevel(lev, t_new[lev],
+                           {&vars_new[lev][Vars::cons], &vars_new[lev][Vars::xvel],
+                            &vars_new[lev][Vars::yvel], &vars_new[lev][Vars::zvel]},
+                           {&vars_new[lev][Vars::cons], &rU_old[lev], &rV_old[lev], &rW_old[lev]},
+                           base_state[lev], base_state[lev], false);
+    }
+    compute_strain_and_eddy_diffs(lev, vars_new[lev], vars_new[lev],
+                                  vars_new[lev][Vars::xvel], vars_new[lev][Vars::yvel], vars_new[lev][Vars::zvel],
+                                  geom[lev], dt[lev]);
+    return true;
 }

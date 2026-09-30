@@ -43,6 +43,57 @@ void ERF::poisson_wall_dist (int lev)
 
     auto const& zphys_arr = z_phys_nd[lev]->const_arrays();
 
+    const bool if_buildings = (solverChoice.buildings_type == BuildingsType::ImmersedForcing);
+    if ((solverChoice.terrain_type == TerrainType::ImmersedForcing || if_buildings) &&
+        solverChoice.wall_dist_type == "terrain_height") {
+        // Immersed terrain: measure from the wall of the immersed wall law (the bottom face of the
+        // top cell holding solid), so the length scale and the wall law see the same geometry.
+        // Immersed buildings (height maps over the domain bottom): measure from the top of the
+        // solid in each column, the roof inside a footprint and the ground elsewhere
+        Print() << "Calculating wall distance from the immersed forcing wall cell" << std::endl;
+        AMREX_ALWAYS_ASSERT(terrain_blanking[lev]);
+        const int klo = geomdata.Domain().smallEnd(2);
+        const DistributionMapping& dm = walldist[lev]->DistributionMap();
+        BoxList bl2d = walldist[lev]->boxArray().boxList();
+        for (Box& b : bl2d) { b.setRange(2, klo); }
+        BoxArray ba2d(std::move(bl2d));
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ba2d.isDisjoint(),
+            "poisson_wall_dist: the immersed wall distance needs one box per column at each level");
+        ib_wall_height[lev] = std::make_unique<MultiFab>(ba2d, dm, 1, 0);
+
+        // A fine level need not reach the surface or the top: bring the coarser level's wall
+        // height to this level's columns (piecewise constant) for the boxes that do not see it
+        std::unique_ptr<MultiFab> height_crse;
+        if (lev > 0) {
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ib_wall_height[lev-1],
+                "poisson_wall_dist: the immersed wall distance of a fine level needs the coarser level's");
+            const IntVect rr = refRatio(lev-1);
+            BoxArray cba2d = ba2d; cba2d.coarsen(rr);
+            MultiFab tmp(cba2d, dm, 1, 0);
+            tmp.ParallelCopy(*ib_wall_height[lev-1], 0, 0, 1, IntVect(0), IntVect(0), geom[lev-1].periodicity());
+            height_crse = std::make_unique<MultiFab>(ba2d, dm, 1, 0);
+            for (MFIter mfi(*height_crse); mfi.isValid(); ++mfi) {
+                auto const hf = height_crse->array(mfi);
+                auto const hc = tmp.const_array(mfi);
+                ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                {
+                    hf(i,j,k) = hc(amrex::coarsen(i,rr[0]), amrex::coarsen(j,rr[1]), amrex::coarsen(k,rr[2]));
+                });
+            }
+        }
+        immersed_wall_dist(*walldist[lev], *terrain_blanking[lev], *z_phys_nd[lev], *z_phys_cc[lev],
+                           geomdata.Domain(), Real(0.005),    // small_volfrac of the terrain kernels
+                           solverChoice.if_fraction_stress || if_buildings,   // from the surface itself
+                           ib_wall_height[lev].get(), height_crse.get());
+        // vertical building walls: the nearest solid cell in the same horizontal plane
+        if (if_buildings) {
+            immersed_lateral_wall_dist(*walldist[lev], *terrain_blanking[lev], geomdata,
+                                       solverChoice.if_wall_dist_search);
+        }
+        fill_wall_dist_ghost_cells(*walldist[lev], geom[lev]);
+        return;
+    }
+
     if (havewall) {
 #if 1
         // Bypass wall dist calc in the trivial cases
@@ -568,4 +619,93 @@ void ERF::poisson_wall_dist (int lev)
 
     // The solve only fills the valid region, so fill the ghost cells here
     fill_wall_dist_ghost_cells(*walldist[lev], geom[lev]);
+}
+
+/**
+ * Build the wall-face masks of the fraction-stress immersed wall law (see ERF_ImmersedWallCell.H)
+ * from the solid fraction of this level. The vertical momentum fluxes tau13 and tau23 and the
+ * matching coefficients of the implicit vertical solve are multiplied by them.
+ *
+ * @param lev Level index
+ */
+void ERF::make_ib_wall_face_masks_lev (int lev)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(solverChoice.mesh_type == MeshType::ConstantDz,
+        "erf.if_wall_form = fraction_stress needs a constant-dz mesh");
+    AMREX_ALWAYS_ASSERT(terrain_blanking[lev]);
+    const BoxArray& ba = grids[lev];
+    const DistributionMapping& dm = dmap[lev];
+    ib_wall_face13[lev] = std::make_unique<MultiFab>(convert(ba, IntVect(1,0,1)), dm, 1, 1);
+    ib_wall_face23[lev] = std::make_unique<MultiFab>(convert(ba, IntVect(0,1,1)), dm, 1, 1);
+    ib_wall_face33[lev] = std::make_unique<MultiFab>(convert(ba, IntVect(0,0,1)), dm, 1, 1);
+    ib_wall_hfx[lev]    = std::make_unique<MultiFab>(ba, dm, 1, 0);
+    ib_wall_hfx[lev]->setVal(zero);
+    make_ib_wall_face_masks(*terrain_blanking[lev], *ib_wall_face13[lev], *ib_wall_face23[lev],
+                            *ib_wall_face33[lev],
+                            geom[lev].Domain(), Real(0.005),   // small_volfrac of the terrain kernels
+                            solverChoice.if_wall_face_spacing, geom[lev].CellSize(2), solverChoice.if_z0);
+}
+
+/**
+ * Wall data of one level: the fraction-stress wall-face masks (erf.if_wall_form = fraction_stress)
+ * and the RANS wall distance. Called for every level at start-up and again whenever a level is
+ * made or remade by a regrid, since both depend on the grids and the level's solid fraction.
+ *
+ * @param lev Level index
+ */
+void ERF::make_wall_data_lev (int lev)
+{
+    if (solverChoice.if_fraction_stress) {
+        make_ib_wall_face_masks_lev(lev);
+    }
+
+    check_if_cf_mismatch(lev);
+
+    if (solverChoice.turbChoice[lev].rans_type != RANSType::None) {
+        // Handle bottom boundary
+        poisson_wall_dist(lev);
+
+        // Correct the wall distance for immersed bodies
+        if (solverChoice.advChoice.have_zero_flux_faces) {
+            thinbody_wall_dist(walldist[lev],
+                               solverChoice.advChoice.zero_xflux,
+                               solverChoice.advChoice.zero_yflux,
+                               solverChoice.advChoice.zero_zflux,
+                               geom[lev],
+                               z_phys_cc[lev]);
+
+            // The correction is only applied on the valid region
+            fill_wall_dist_ghost_cells(*walldist[lev], geom[lev]);
+        }
+    }
+}
+
+/**
+ * Warn where a lateral coarse-fine boundary of level lev crosses the immersed surface in a way the
+ * two levels describe differently (erf.if_cf_mismatch_warning; the terrain_cf_mismatch check of
+ * kynema-sgf). For each coarse cell covered by level lev that has an uncovered lateral neighbour,
+ * the spread (largest minus smallest) of the solid fractions of its fine cells is taken; a coarse
+ * cell half solid over one fully solid and one fully fluid fine cell has a spread of 1, one over two
+ * partial fine cells about 0.5. Where the spread reaches the threshold the c/f face fill cannot give
+ * both levels the same flux near the surface, and the flow near the refinement edge is wrong (tens
+ * of percent in a two-level ABL); refinement that keeps its lateral edges off the surface avoids it.
+ *
+ * @param lev Fine level just made
+ */
+void ERF::check_if_cf_mismatch (int lev)
+{
+    const Real warn = solverChoice.if_cf_mismatch_warning;
+    if (lev < 1 || warn <= zero || !terrain_blanking[lev] || !terrain_blanking[lev-1]) { return; }
+
+    const auto [nflagged, worst] = if_cf_surface_mismatch(*terrain_blanking[lev], grids[lev],
+                                                          grids[lev-1], dmap[lev-1], geom[lev-1],
+                                                          refRatio(lev-1), warn);
+    if (nflagged > 0) {
+        Print() << "WARNING: immersed forcing: " << nflagged << " level-" << lev-1
+                << " cells along lateral coarse-fine faces of level " << lev
+                << " where the levels disagree on the immersed surface (spread of the fine solid fraction >= "
+                << warn << ", worst " << worst << "). Keep refinement edges off the surface, e.g. with a"
+                << " refined band along the surface, a full-width level, or edges where the surface lies on a"
+                << " coarse cell face (erf.if_cf_mismatch_warning)." << std::endl;
+    }
 }

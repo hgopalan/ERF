@@ -1,0 +1,99 @@
+# unstable ABL, surface heat flux 0.05 K m/s: immersed terrain plane at h = 42.5 m with the form 7 wall law, level 1 patch over x = 160-320 m up to 200 m, dz = 20 -> 10 m; k-eqn RANS, anelastic MidPoint, implicit vertical diffusion, FFT
+erf.prob_name = "ABL"
+stop_time = 14400.0
+max_step  = -1
+amrex.fpe_trap_invalid = 1
+fabarray.mfiter_tile_size = 1024 1024 1024
+
+geometry.prob_lo     = 0.0 0.0 0.0
+geometry.prob_hi     = 480.0 80.0 1040.0
+amr.n_cell           = 24 4 52
+amr.max_grid_size    = 256
+amr.blocking_factor  = 2
+amr.max_level        = 1
+geometry.is_periodic = 1 1 0
+
+zlo.type = "NoSlipWall"   # inside the solid; the immersed forcing carries the wall
+
+erf.terrain_type      = ImmersedForcing
+erf.terrain_file_name = "terrain.txt"
+erf.if_use_most       = true
+erf.if_z0             = 0.1
+erf.if_implicit_drag  = true
+erf.if_wall_form      = fraction_stress   # form 7 of the kynema-sgf immersed terrain
+erf.if_wall_tke       = true   # wall value of the k-eqn TKE (AL01 Eq. 16), as erf.dirichlet_k on flat ground
+
+# k-eqn wall distance from the wall of the immersed wall law (bottom face of the top solid cell)
+erf.wall_dist_type = terrain_height
+erf.if_surf_temp_flux   = 0.05
+zhi.type       = "SlipWall"
+zhi.theta_grad = 0.0
+
+# anelastic, implicit vertical diffusion (solved in the first MidPoint stage)
+erf.anelastic      = 1
+erf.anelastic_type = MidPoint
+erf.vert_implicit  = true
+erf.use_fft        = true    # FFT Poisson solve (flat, periodic in x and y)
+erf.cfl            = 0.5
+
+erf.init_type           = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type       = "Ideal"
+
+erf.sum_interval    = 60
+erf.v               = 1
+amr.v               = 0
+erf.data_log        = surf_hist.dat mean_profiles.dat flux_profiles.dat sfs_profiles.dat
+erf.profile_int     = 600
+erf.destag_profiles = false
+
+erf.check_file  = chk
+erf.check_int   = -1
+erf.plot_file_1 = plt
+erf.plot_int_1  = 3600
+erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta KE Kmv Khv Lturb walldist diss Rt terrain_IB_mask
+
+erf.dycore_horiz_adv_type  = "Upwind_5th"
+erf.dycore_vert_adv_type   = "Upwind_3rd"
+erf.dryscal_horiz_adv_type = "Upwind_5th"
+erf.dryscal_vert_adv_type  = "Upwind_3rd"
+
+erf.use_gravity  = true
+erf.use_coriolis = true
+erf.coriolis_3d  = false
+erf.latitude     = 90.0
+erf.rotational_time_period = 125663.7061435917
+erf.abl_driver_type = "GeostrophicWind"
+erf.abl_geo_wind    = 15.0 0.0 0.0
+
+# top sponge toward the sounding (10 m/s), as the kynema-sgf deck; dampcoef * dt = 0.05
+erf.rayleigh_damp_U   = true
+erf.rayleigh_damp_V   = true
+erf.rayleigh_damp_W   = true
+erf.rayleigh_dampcoef = 0.05
+erf.rayleigh_zdamp    = 200.0
+
+erf.molec_diff_type = "None"
+erf.les_type        = "None"
+erf.rans_type       = "kEqn"
+erf.theta_ref       = 300.0
+
+# same initial k in every case: 0.84 m2/s2, linear decay to zero at 900 m above z = 0
+prob.KE_0            = 0.84
+prob.KE_decay_height = 900.0
+prob.KE_decay_order  = 1
+prob.pert_deltaU  = 0.0
+prob.pert_deltaV  = 0.0
+prob.T_0_Pert_Mag = 0.0
+prob.U_0_Pert_Mag = 0.0
+prob.V_0_Pert_Mag = 0.0
+prob.W_0_Pert_Mag = 0.0
+erf.if_wall_face_spacing = log
+amr.ref_ratio = 2 2 2
+erf.coupling_type = "TwoWay"
+erf.refinement_indicators = box1
+erf.box1.max_level = 1
+erf.box1.in_box_lo_indices_crse = 8 0 0
+erf.box1.in_box_hi_indices_crse = 15 3 9
+erf.if_implicit_projection = true
+eb2.cover_multiple_cuts = 1

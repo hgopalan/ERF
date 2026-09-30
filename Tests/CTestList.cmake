@@ -166,6 +166,49 @@ function(add_test_anelastic_wall_diffusion TEST_NAME TEST_AXIS)
         ATTACHED_FILES_ON_FAIL "${test_simulation_log};${test_checker_log}")
 endfunction(add_test_anelastic_wall_diffusion)
 
+# Run a case and check a property of its plotfile (Tests/MultiLevelPropertyCheck.cpp) instead of
+# comparing with a gold file: MODE is sounding, uniform or bounded, ARG_A / ARG_B its two values.
+function(add_test_property TEST_NAME MODE PLTFILE ARG_A ARG_B)
+    set(options )
+    set(oneValueArgs "TEST_FILES_DIR" "RUNTIME_OPTIONS" "LABELS")
+    set(multiValueArgs )
+    cmake_parse_arguments(ADD_TEST_P "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+    set(TEST_FILES_DIR "${ADD_TEST_P_TEST_FILES_DIR}")
+    setup_test()
+    resolve_test_exe("" "erf_exec" TEST_EXE)
+    if("${TEST_FILES_DIR}" STREQUAL "")
+        set(test_input "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.i")
+    else()
+        set(test_input "${CURRENT_TEST_BINARY_DIR}/${TEST_FILES_DIR}.i")
+    endif()
+    set(test_simulation_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.simulation.log")
+    set(test_checker_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.checker.log")
+    add_test(${TEST_NAME} ${CMAKE_COMMAND}
+        -DMPIEXEC=${MPIEXEC_EXECUTABLE}
+        -DMPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}
+        -DMPIEXEC_PREFLAGS=${MPIEXEC_PREFLAGS}
+        -DNRANKS=${NP}
+        -DTEST_EXE=${TEST_EXE}
+        -DINPUT=${test_input}
+        "-DRUNTIME_OPTIONS=${ADD_TEST_P_RUNTIME_OPTIONS}"
+        -DWORKING_DIRECTORY=${CURRENT_TEST_BINARY_DIR}
+        -DSIMULATION_LOG=${test_simulation_log}
+        -DCHECKER_LOG=${test_checker_log}
+        -DCHECKER=${MULTILEVEL_PROPERTY_CHECKER}
+        -DMODE=${MODE}
+        -DPLOTFILE=${CURRENT_TEST_BINARY_DIR}/${PLTFILE}
+        -DARG_A=${ARG_A}
+        -DARG_B=${ARG_B}
+        -P ${PROJECT_SOURCE_DIR}/Tests/RunPropertyCheck.cmake)
+    set_tests_properties(${TEST_NAME}
+        PROPERTIES
+        TIMEOUT 1800
+        PROCESSORS ${NP}
+        WORKING_DIRECTORY "${CURRENT_TEST_BINARY_DIR}/"
+        LABELS "regression;${ADD_TEST_P_LABELS}"
+        ATTACHED_FILES_ON_FAIL "${test_simulation_log};${test_checker_log}")
+endfunction(add_test_property)
+
 # Checker-driven Cloud Chamber tests.  The short run checks the exact initial
 # conserved-state correction and a bounded early buoyant response; it
 # intentionally avoids a fragile turbulent gold file.
@@ -924,6 +967,22 @@ add_test_cloud_chamber_fixed_dt_guard(CloudChamber_Bulk_FixedDtGuard)
 
 if(ERF_ENABLE_MPI)
 add_test_anelastic_wall_diffusion(AnelasticWallDiffusion_X 0)
+# A fine level down to the ground must see the input sounding at its own heights: with
+# erf.most.surf_temp the surface line (303 K) must not blend into the fine cell at 5 m (300 K air),
+# and the coarse bottom cells must be the fine average (the anelastic densities agree)
+add_test_property(SurfTempSounding2Lev sounding plt00000 300.0 0.01 LABELS "multilevel")
+# Immersed LES on two levels, a patch whose c/f faces cross the surface: the c/f fill and flux
+# balance must leave no net heat source (the fluid-mean theta drifted 0.017 K without them)
+add_test_property(ImmersedLES2LevHeatBalance mean plt00020 300.0 0.004 LABELS "multilevel;immersed;les")
+# Immersed LES on two levels with the surface on a coarse mid-plane and a theta gradient: the average
+# down must give each covered coarse cell the fluid-weighted average of the fine cells over it (a
+# plain average mixed the solid fine cell in, 0.10 K off here)
+add_test_property(ImmersedLES2LevAverageDown fluidavg plt00005 0.001 0 LABELS "multilevel;immersed;les")
+# Anelastic LES whose time step is limited by explicit diffusion (erf.diffusive_cfl): theta must
+# stay within its initial bounds (with the limit off a grid-scale checkerboard grows); Deardorff over
+# flat ground, and Smagorinsky over embedded-boundary terrain (EB takes no TKE closure)
+add_test_property(AnelasticLESDiffusionDt bounded plt00030 299.5 300.5 LABELS "anelastic;les")
+add_test_property(AnelasticLESDiffusionDt_EB bounded plt00030 299.5 300.5 LABELS "anelastic;les;eb")
 add_test_anelastic_wall_diffusion(AnelasticWallDiffusion_Y 1)
 add_test_anelastic_wall_diffusion(AnelasticWallDiffusion_Z 2)
 # Same stationary state as the _X case, but with erf.anelastic_type = MidPoint so the

@@ -183,6 +183,31 @@ target_sources(${erf_exe_name}
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestGridUtils.cpp
     # Motivation: a BTF fine level's mesh must not depend on how its grids are split in z.
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestTerrainFineColumns.cpp
+    # Motivation: over immersed-forcing terrain the RANS wall distance must be measured from
+    # the wall the immersed wall law uses, not from the bottom of the domain inside the solid.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestImmersedWallDist.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestImmersedAverageDown.cpp
+    # Motivation: the fraction-stress immersed wall law must force the wall cell (the fluid cell
+    # on a face-aligned surface too, which the old law left unforced), close its bottom face to
+    # diffusion and measure the RANS wall distance from the surface.
+    ${CMAKE_CURRENT_SOURCE_DIR}/SourceTerms/ERF_GTestImmersedFractionStress.cpp
+    # Motivation: the anelastic projection with the implicit immersed drag must leave the momenta
+    # divergence free in the solid cells too, or the solid row under the surface is a mass sink.
+    ${CMAKE_CURRENT_SOURCE_DIR}/LinearSolvers/ERF_GTestImmersedPoisson.cpp
+    # Motivation: the log-law c/f fill must keep the flux of every coarse face and share the wall
+    # face's flux by ln(1 + z/z0), closing the solid sub-faces of immersed terrain.
+    ${CMAKE_CURRENT_SOURCE_DIR}/BoundaryConditions/ERF_GTestCFLogLawFill.cpp
+    # Motivation: the anelastic explicit-diffusion dt limit must take the largest diffusivity of any
+    # variable over the density and drop the directions without a grid-scale mode.
+    ${CMAKE_CURRENT_SOURCE_DIR}/TimeIntegration/ERF_GTestDiffusionTimestep.cpp
+    # Motivation: a fine level must see the input sounding at its own heights, not the level-0
+    # profile, which blends the surface line into fine cells below the first level-0 centre.
+    # Motivation: the implicit solves must carry no flux through the wall face of the fraction-stress
+    # wall law, and a partial wall cell must dissipate like flat ground's first cell.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Diffusion/ERF_GTestImmersedWallFace.cpp
+    # Motivation: the c/f surface-mismatch warning must count only coarse cells along c/f faces, and
+    # the c/f flux balance must zero the net flux on the fluid faces only.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestImmersedCFFaces.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/HashRng/ERF_GTestHashRngScalar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/HashRng/ERF_GTestHashRngKernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/EOS/ERF_GTestEOSScalar.cpp
@@ -474,6 +499,8 @@ if(ERF_ENABLE_MPI)
       ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestColumnBandsParallel.cpp
       # The column boxes are distributed afresh, so check the copies across ranks too
       ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestTerrainFineColumns.cpp
+      # The immersed average down copies the fine sums to the coarse layout: check it across ranks
+      ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestImmersedAverageDown.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestProvenanceParallel.cpp
   )
   if(ERF_ENABLE_NETCDF)

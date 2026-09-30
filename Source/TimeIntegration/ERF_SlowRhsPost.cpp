@@ -104,7 +104,8 @@ void erf_slow_rhs_post (int level, int finest_level,
                         const MultiFab* cloud_chamber_base_state,
                         const erf_cloud_chamber::Config* cloud_chamber_config,
                         CloudChamberBudget* cloud_budget,
-                        erf_auxiliary::AuxiliaryInertTracer* auxiliary_inert_tracer)
+                        erf_auxiliary::AuxiliaryInertTracer* auxiliary_inert_tracer,
+                        const MultiFab* ib_wall_face33)
 {
     BL_PROFILE_REGION("erf_slow_rhs_post()");
 
@@ -638,7 +639,8 @@ void erf_slow_rhs_post (int level, int finest_level,
                                                mf_my, mf_uy, mf_vy,
                                                hfx_x, hfx_y, hfx_z, q1fx_x, q1fx_y, q1fx_z, q2fx_z, diss,
                                                mu_turb, solverChoice, level,
-                                               tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, SurfLayer, l_vert_implicit_fac);
+                                               tm_arr, grav_gpu, bc_ptr_d, l_apply_surface_layer_fluxes_in_diffusion, SurfLayer, l_vert_implicit_fac,
+                                               (ib_wall_face33) ? ib_wall_face33->const_array(mfi) : Array4<const Real>{});
                     }
                     if (use_physical_chamber_wall_flux) {
                         // Apply the physical wall correction immediately to
@@ -800,12 +802,16 @@ void erf_slow_rhs_post (int level, int finest_level,
         {
         BL_PROFILE("rhs_post_10()");
         if (l_anelastic && terrain_blank) { // explicitly set fully immersed cells to have 0 velocities for anelastic (unstable for fully compressible).
+            // With erf.if_implicit_projection the drag of the solid is inside the projection, which
+            // already left these momenta divergence free; zeroing the faces between solid cells here
+            // would leave the surface faces unbalanced (a mass sink in the solid below them).
+            const bool l_freeze_mom = !solverChoice.if_implicit_projection;
             ParallelFor(xtbx, ytbx, ztbx,
             [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
                 // Use face-centered terrain_blanking if available, otherwise average from cell centers
                 Real t_blank = (t_blank_xface_arr) ? t_blank_xface_arr(i, j, k) :
                                myhalf * (t_blank_arr(i, j, k) + t_blank_arr(i-1, j, k));
-                if (t_blank == one) {
+                if (l_freeze_mom && t_blank == one) {
                     new_xmom(i,j,k) = zero;
                 } else {
                     new_xmom(i,j,k) = cur_xmom(i,j,k);
@@ -815,7 +821,7 @@ void erf_slow_rhs_post (int level, int finest_level,
                 // Use face-centered terrain_blanking if available, otherwise average from cell centers
                 Real t_blank = (t_blank_yface_arr) ? t_blank_yface_arr(i, j, k) :
                                myhalf * (t_blank_arr(i, j, k) + t_blank_arr(i, j-1, k));
-                if (t_blank == one) {
+                if (l_freeze_mom && t_blank == one) {
                     new_ymom(i,j,k) = zero;
                 } else {
                     new_ymom(i,j,k) = cur_ymom(i,j,k);
@@ -825,7 +831,7 @@ void erf_slow_rhs_post (int level, int finest_level,
                 // Use face-centered terrain_blanking if available, otherwise average from cell centers
                 Real t_blank = (t_blank_zface_arr) ? t_blank_zface_arr(i, j, k) :
                                myhalf * (t_blank_arr(i, j, k) + t_blank_arr(i, j, k-1));
-                if (t_blank == one) {
+                if (l_freeze_mom && t_blank == one) {
                     new_zmom(i,j,k) = zero;
                 } else {
                     new_zmom(i,j,k) = cur_zmom(i,j,k);

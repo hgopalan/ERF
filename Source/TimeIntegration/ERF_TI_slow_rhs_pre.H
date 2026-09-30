@@ -128,7 +128,7 @@
                      dptr_wbar_sub, d_rayleigh_ptrs_at_lev, d_sinesq_at_lev,
                      turbPert,
                      r_avg_to_pass, t_avg_to_pass,
-                     true);
+                     true, ib_wall_hfx[level].get());
 
         // Heat flux from the building faces (immersed-boundary surface energy
         // balance), added to the freshly rebuilt source; no-op unless enabled.
@@ -252,7 +252,9 @@
                          native_shoc_driver[level].get(),
                          fr_as_crse, fr_as_fine, &base_to_use,
                          cloud_chamber_config.active ? &cloud_chamber_config : nullptr,
-                         cloud_chamber_budget.get());
+                         cloud_chamber_budget.get(),
+                         ib_wall_face13[level].get(), ib_wall_face23[level].get(),
+                         ib_wall_face33[level].get(), ib_wall_hfx[level].get());
 
         if ((solverChoice.vert_implicit_fac[level][nrk] > zero_d) && solverChoice.implicit_before_substep) {
             const Real stage_dt = static_cast<Real>(slow_dt);

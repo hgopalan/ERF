@@ -384,13 +384,37 @@ public:
 
     // Project the velocities to be divergence-free -- this is only relevant if anelastic == 1
     void project_initial_velocity (int lev, double time, double dt);
-    void project_momenta (int lev, double l_time, double l_dt, amrex::Vector<amrex::MultiFab >& vars);
+    //! apply_if_drag = false projects without the implicit immersed drag (the initial projection)
+    void project_momenta (int lev, double l_time, double l_dt, amrex::Vector<amrex::MultiFab >& vars,
+                          bool apply_if_drag = true);
+
+    //! Face coefficients sigma = 1 / (1 + dt rate) of the implicit immersed drag in the projection
+    //! (erf.if_implicit_projection); 1 on faces on the boundary of the level's grids
+    void make_if_projection_sigma (int lev, amrex::Real dt, amrex::Array<amrex::MultiFab,AMREX_SPACEDIM>& sigma);
 
     // Project the velocities to be divergence-free with a thin body
     void project_velocity_tb (int lev, double dt, amrex::Vector<amrex::MultiFab >& vars);
 
     // Calculate wall distance by solving a Poisson equation
     void poisson_wall_dist (int lev);
+
+    //! Build the wall-face masks of the fraction-stress immersed wall law at this level
+    void make_ib_wall_face_masks_lev (int lev);
+
+    //! Build the wall data of this level: fraction-stress wall-face masks and RANS wall distance
+    void make_wall_data_lev (int lev);
+
+    //! Warn where a lateral coarse-fine boundary of level lev crosses the immersed surface in a way
+    //! the two levels describe differently (erf.if_cf_mismatch_warning)
+    void check_if_cf_mismatch (int lev);
+
+    //! Give the c/f face fill of level lev the fine solid fraction (immersed forcing, anelastic),
+    //! so no flux enters a fully solid fine cell at the c/f boundary; otherwise clear it
+    void set_cf_solid_fraction (int lev);
+
+    //! Immersed forcing, anelastic: remove the net mass flux through the c/f faces of each fine
+    //! subdomain (from the fluid c/f faces), so the fine projection sees a balanced boundary
+    void balance_cf_fluxes (int lev, amrex::MultiFab& xmom, amrex::MultiFab& ymom, amrex::MultiFab& zmom);
 
     void make_subdomains(const amrex::BoxList& ba, amrex::Vector<amrex::BoxArray>& bins);
 
@@ -400,6 +424,12 @@ public:
                          amrex::MultiFab& rhs, amrex::MultiFab& p,
                          amrex::Array<amrex::MultiFab,AMREX_SPACEDIM>& fluxes);
 #endif
+    //! FFT-preconditioned GMRES solve of div(sigma grad phi) = rhs (erf.if_implicit_projection);
+    //! fluxes = -grad phi, without sigma
+    void solve_with_if_gmres (int lev, const amrex::Box& subdomain,
+                              amrex::MultiFab& rhs, amrex::MultiFab& phi,
+                              amrex::Array<amrex::MultiFab,AMREX_SPACEDIM>& fluxes,
+                              amrex::Array<amrex::MultiFab const*,AMREX_SPACEDIM> const& sigma);
     void solve_with_gmres (int lev, const amrex::Box& subdomain,
                            amrex::MultiFab& rhs, amrex::MultiFab& p,
                            amrex::Array<amrex::MultiFab,AMREX_SPACEDIM>& fluxes,
@@ -589,6 +619,17 @@ public:
                          amrex::MultiFab& ymom_src,  amrex::MultiFab& zmom_src,
                          amrex::MultiFab& buoyancy,  amrex::Geometry fine_geom,
                          double dt, double time);
+
+    // Strain and eddy viscosity/diffusivities of a level, once per step (see ERF_AdvanceDycore.cpp)
+    void compute_strain_and_eddy_diffs (int level,
+                                        amrex::Vector<amrex::MultiFab>& state_old,
+                                        amrex::Vector<amrex::MultiFab>& state_new,
+                                        amrex::MultiFab& xvel_old, amrex::MultiFab& yvel_old,
+                                        amrex::MultiFab& zvel_old,
+                                        const amrex::Geometry& fine_geom, double dt_advance);
+
+    // Eddy diffusivities of the initial state, for the explicit-diffusion dt limit of the first step
+    bool init_eddy_diffs_for_dt (int lev);
 
     void advance_microphysics (int lev,
                                amrex::MultiFab& cons_in,
@@ -1456,6 +1497,19 @@ private:
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> terrain_blanking_xface;
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> terrain_blanking_yface;
     amrex::Vector<std::unique_ptr<amrex::MultiFab>> terrain_blanking_zface;
+    // Wall-face masks of the fraction-stress immersed wall law (erf.if_wall_form = fraction_stress):
+    // zero on the bottom face of the wall cell of each x-face (xz edges) and y-face (yz edges) column
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> ib_wall_face13;
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> ib_wall_face23;
+    // and zero on the bottom face of the wall cell of each cell column (z faces), for theta and TKE
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> ib_wall_face33;
+    // kinematic wall heat flux -u* theta* of the fraction-stress law in the wall cell (zero elsewhere),
+    // written by the immersed scalar forcing, read as the TKE buoyancy flux on the wall face
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> ib_wall_hfx;
+    // Height the immersed wall distance is measured from in each column (erf.wall_dist_type =
+    // terrain_height with immersed terrain), on the level's BoxArray flattened to its bottom cell;
+    // a fine box that does not see the surface of a column takes it from the coarser level
+    amrex::Vector<std::unique_ptr<amrex::MultiFab>> ib_wall_height;
 
     // Wall distance function
     amrex::Vector<std::unique_ptr<amrex::MultiFab>>  walldist;
@@ -1566,6 +1620,8 @@ private:
     // Time step controls
     static amrex::Real cfl;
     static amrex::Real sub_cfl;
+    // fraction of the explicit-diffusion stability limit (anelastic); 0 turns the limit off
+    static amrex::Real diffusive_cfl;
     static amrex::Real init_shrink;
     static amrex::Real change_max;
     static double dt_max_initial;

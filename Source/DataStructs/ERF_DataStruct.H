@@ -1113,10 +1113,17 @@ struct SolverChoice {
         pp.queryAdd("ncorr", ncorr);
         // Wall distance on a terrain-fitted mesh (RANS): "poisson" (Tucker 2003
         // differential-equation distance) or "terrain_height" (height above the
-        // local surface projected on its normal, no linear solve)
+        // local surface projected on its normal, no linear solve; with immersed
+        // forcing, from the wall of the immersed wall law)
         pp.queryAdd("wall_dist_type", wall_dist_type);
         if (wall_dist_type != "poisson" && wall_dist_type != "terrain_height") {
             amrex::Error("erf.wall_dist_type must be poisson or terrain_height");
+        }
+        // Immersed buildings with wall_dist_type = terrain_height: half-width, in cells, of the search
+        // for the nearest vertical wall in each horizontal plane (immersed_lateral_wall_dist)
+        pp.queryAdd("if_wall_dist_search", if_wall_dist_search);
+        if (if_wall_dist_search < 1) {
+            amrex::Abort("erf.if_wall_dist_search must be at least 1 (cells)");
         }
         pp.queryAdd("poisson_abstol", poisson_abstol);
         pp.queryAdd("poisson_reltol", poisson_reltol);
@@ -1185,6 +1192,96 @@ struct SolverChoice {
             if_implicit_drag = true;
         }
         pp.queryAdd("if_stability_correction",if_stability_correction);
+
+        // Wall law of the terrain immersed forcing: "legacy" relaxes the top partial cell toward
+        // the log law at fixed 0.5/1.5 dz; "fraction_stress" applies the wall stress of
+        // ERF_ImmersedWallCell.H in the wall cell and closes the wall face to diffusion
+        std::string if_wall_form_in = "legacy";
+        pp.queryAdd("if_wall_form", if_wall_form_in);
+        if (if_wall_form_in == "fraction_stress") {
+            if_fraction_stress = true;
+        } else if (if_wall_form_in != "legacy") {
+            amrex::Abort("erf.if_wall_form must be legacy or fraction_stress, not " + if_wall_form_in);
+        }
+        // Spacing of the face above the wall cell (fraction_stress only): "log" (default) gives
+        // that face the relative error of flat ground's first interior face for a log profile,
+        // "physical" the centroid spacing, "grid" the cell height (ib_wall::face_above_factor)
+        std::string if_wall_face_spacing_in = "log";
+        const bool spacing_given = pp.queryAdd("if_wall_face_spacing", if_wall_face_spacing_in);
+        if (spacing_given && !if_fraction_stress) {
+            amrex::Abort("erf.if_wall_face_spacing belongs to erf.if_wall_form = fraction_stress");
+        }
+        if      (if_wall_face_spacing_in == "grid")     { if_wall_face_spacing = 0; }
+        else if (if_wall_face_spacing_in == "physical") { if_wall_face_spacing = 1; }
+        else if (if_wall_face_spacing_in == "log")      { if_wall_face_spacing = 2; }
+        else { amrex::Abort("erf.if_wall_face_spacing must be log, physical or grid"); }
+        // Wall value of the k-eqn TKE in the fraction-stress wall cell: relax toward
+        // (u*^3 + kappa B d1)^(2/3) / Cmu0^2 over if_wall_tke_time_factor steps (the value
+        // erf.dirichlet_k holds over flat ground; kynema-sgf does the same at its immersed wall)
+        pp.queryAdd("if_wall_tke", if_wall_tke);
+        pp.queryAdd("if_wall_tke_time_factor", if_wall_tke_time_factor);
+        if (if_wall_tke && !if_fraction_stress) {
+            amrex::Abort("erf.if_wall_tke belongs to erf.if_wall_form = fraction_stress");
+        }
+        // Partial wall cells of the fraction-stress law dissipate TKE with the length scale of flat
+        // ground's first cell (kynema-sgf KLAxell.flat_wall_dissipation); on by default with it
+        if_flat_wall_dissipation = if_fraction_stress;
+        pp.queryAdd("if_flat_wall_dissipation", if_flat_wall_dissipation);
+        if (if_flat_wall_dissipation && !if_fraction_stress) {
+            amrex::Abort("erf.if_flat_wall_dissipation belongs to erf.if_wall_form = fraction_stress");
+        }
+        if (!(if_wall_tke_time_factor >= one)) {
+            amrex::Abort("erf.if_wall_tke_time_factor must be >= 1 (steps over which the wall TKE is relaxed)");
+        }
+        // Implicit drag of the terrain immersed forcing inside the anelastic projection (the
+        // kynema-sgf ImmersedTerrain.implicit_projection): each face momentum becomes
+        // (m* - grad phi) / (1 + dt rate), with rate the drag rate of the source term on that face,
+        // and the solid is not frozen afterwards, so the projected field stays divergence free
+        // Warn where a lateral c/f boundary crosses the immersed surface so that the levels disagree
+        // (spread of the fine solid fraction under a coarse edge cell at least this; 0 turns it off)
+        pp.queryAdd("if_cf_mismatch_warning", if_cf_mismatch_warning);
+        pp.queryAdd("if_implicit_projection", if_implicit_projection);
+        if (if_implicit_projection) {
+            const bool if_terrain   = (terrain_type   == TerrainType::ImmersedForcing);
+            const bool if_buildings = (buildings_type == BuildingsType::ImmersedForcing);
+            if (if_terrain == if_buildings) {
+                amrex::Abort("erf.if_implicit_projection needs erf.terrain_type = ImmersedForcing or "
+                             "erf.buildings_type = ImmersedForcing (one of the two)");
+            }
+            if (mesh_type != MeshType::ConstantDz) {
+                amrex::Abort("erf.if_implicit_projection needs a constant-dz mesh");
+            }
+            for (int lev = 0; lev <= max_level; ++lev) {
+                if (!anelastic[lev]) {
+                    amrex::Abort("erf.if_implicit_projection needs erf.anelastic = 1 on every level");
+                }
+            }
+#ifndef ERF_USE_FFT
+            amrex::Abort("erf.if_implicit_projection needs a build with FFT (its GMRES solve is FFT-preconditioned)");
+#endif
+        }
+        if (if_fraction_stress) {
+            if (terrain_type != TerrainType::ImmersedForcing) {
+                amrex::Abort("erf.if_wall_form = fraction_stress needs erf.terrain_type = ImmersedForcing");
+            }
+            if (buildings_type == BuildingsType::ImmersedForcing) {
+                amrex::Abort("erf.if_wall_form = fraction_stress is not available with erf.buildings_type = ImmersedForcing");
+            }
+            if (!if_use_most) {
+                amrex::Abort("erf.if_wall_form = fraction_stress is a wall law: it needs erf.if_use_most = true");
+            }
+            // One surface condition (heat flux, surface temperature - optionally changing at
+            // erf.if_surf_heating_rate - or Obukhov length; none is neutral, checked below); the MOST
+            // stability functions always apply, as on the flat surface layer, so
+            // erf.if_stability_correction (a legacy switch) must not be set
+            if (if_surf_heating_rate != zero && !(if_init_surf_temp > zero)) {
+                amrex::Abort("erf.if_surf_heating_rate needs erf.if_init_surf_temp");
+            }
+            if (if_stability_correction) {
+                amrex::Abort("erf.if_wall_form = fraction_stress always applies the stability functions; "
+                             "erf.if_stability_correction is for the legacy wall law");
+            }
+        }
         pp.queryAdd("if_ws_floor",if_ws_floor);
         pp.queryAdd("if_damp_alpha",if_damp_alpha);
 
@@ -1595,6 +1692,11 @@ struct SolverChoice {
         if (any_anelastic && any_compress) {
             coupling_type = CouplingType::OneWay;
         }
+
+        // Log-law coarse-fine fill: on a lateral coarse-fine face, the flux of the first coarse face
+        // above the wall (immersed surface or a surface-layer bottom) is shared among its fine
+        // sub-faces by the log law at their heights, instead of the linear interpolation
+        pp.queryAdd("cf_loglaw_fill", cf_loglaw_fill);
 
         // Which type of windfarm model
         windfarm_type = WindFarmType::None; // Default
@@ -2144,6 +2246,7 @@ struct SolverChoice {
 
     int         ncorr               = 1;
     std::string wall_dist_type      = "poisson";
+    int         if_wall_dist_search = 8;   // erf.if_wall_dist_search: lateral wall search half-width [cells]
 #ifdef AMREX_USE_FLOAT
     amrex::Real poisson_abstol      = amrex::Real(1e-6);
     amrex::Real poisson_reltol      = amrex::Real(1e-6);
@@ -2184,6 +2287,13 @@ struct SolverChoice {
     bool        if_use_most              = false;
     bool        if_snap_partial_cells    = false;
     bool        if_stability_correction  = false;
+    bool        if_fraction_stress       = false;  // erf.if_wall_form = fraction_stress
+    int         if_wall_face_spacing     = 2;      // erf.if_wall_face_spacing: 0 grid, 1 physical, 2 log (default)
+    bool        if_wall_tke              = false;  // erf.if_wall_tke: wall value of the k-eqn TKE in the wall cell
+    amrex::Real if_wall_tke_time_factor  = amrex::Real(5.0); // erf.if_wall_tke_time_factor: relaxation steps
+    bool        if_implicit_projection   = false;  // erf.if_implicit_projection: solid drag inside the anelastic projection
+    bool        if_flat_wall_dissipation = false;  // erf.if_flat_wall_dissipation: flat-ground TKE dissipation length in partial wall cells
+    amrex::Real if_cf_mismatch_warning   = amrex::Real(0.75); // erf.if_cf_mismatch_warning: c/f surface mismatch threshold
     amrex::Real if_ws_floor              = 0.001;  // [m/s]
     amrex::Real if_damp_alpha            = 0.5;    // [-]
 
@@ -2375,6 +2485,7 @@ struct SolverChoice {
     amrex::Real num_diff_coeff{zero};
 
     CouplingType coupling_type;
+    bool         cf_loglaw_fill      = false;  // erf.cf_loglaw_fill
     MoistureType moisture_type;
     int sbm_nbins{4};
     int sbm_moment_mode{1};

@@ -1,5 +1,6 @@
 /** \file ERF_ComputeTurbulentViscosity.cpp */
 
+#include "ERF_ImmersedWallCell.H"
 #include "ERF_SurfaceLayer.H"
 #include "ERF_Constants.H"
 #include "ERF_EddyViscosity.H"
@@ -582,6 +583,9 @@ void ComputeTurbulentViscosityLES_EB (Vector<std::unique_ptr<MultiFab>>& Tau_lev
  * @param[in]  const_grav gravitational acceleration
  * @param[in]  SurfLayer optional surface-layer model
  * @param[in]  z_0 roughness length
+ * @param[in]  ib_blank solid fraction of the fraction-stress immersed wall law (else nullptr)
+ * @param[in]  flat_wall_diss erf.if_flat_wall_dissipation: partial wall cells dissipate with the
+ *             length scale of flat ground's first cell
  */
 void ComputeTurbulentViscosityRANS (int level,
                                     const MultiFab& cons_in,
@@ -594,7 +598,9 @@ void ComputeTurbulentViscosityRANS (int level,
                                     const TurbChoice& turbChoice,
                                     const Real const_grav,
                                     std::unique_ptr<SurfaceLayer>& SurfLayer,
-                                    const MultiFab* z_0)
+                                    const MultiFab* z_0,
+                                    const MultiFab* ib_blank,
+                                    bool flat_wall_diss)
 {
     const GpuArray<Real, AMREX_SPACEDIM> cellSizeInv = geom.InvCellSizeArray();
     const bool use_SurfLayer = (SurfLayer != nullptr);
@@ -655,6 +661,10 @@ void ComputeTurbulentViscosityRANS (int level,
             const Array4<Real const>& cell_data = cons_in.array(mfi);
 
             const Array4<Real const>& z_nd_arr = z_phys_nd->const_array(mfi);
+            // fraction-stress immersed wall law: solid fraction, to find the wall cell
+            const Array4<Real const>& ib_arr = (ib_blank) ? ib_blank->const_array(mfi) : Array4<Real const>{};
+            const int ib_klo = geom.Domain().smallEnd(2);
+            const int ib_khi = geom.Domain().bigEnd(2);
 
             ParallelFor(bxcc, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
             {
@@ -667,8 +677,19 @@ void ComputeTurbulentViscosityRANS (int level,
                     // the terrain grid is only deformed in z for now
                     dzInv /= Compute_h_zeta_AtCellCenter(i,j,k, cellSizeInv, z_nd_arr);
                 }
+                // In the wall cell of the fraction-stress immersed wall law the cell below is
+                // solid: read the wall cell itself there, as the first-order extrapolated ghost
+                // of the zlo face does on flat ground, not the solid's temperature
+                int km1 = k-1;
+                if (ib_arr) {
+                    auto b = [&] (int kk) -> Real {
+                        const Real v = ib_arr(i,j,amrex::min(amrex::max(kk, ib_klo), ib_khi));
+                        return (v < Real(0.005)) ? zero : v;
+                    };
+                    if (ib_wall::is_wall_cell(b(k-1), b(k), b(k+1), Real(0.005))) { km1 = k; }
+                }
                 Real dtheta_dz = myhalf * ( cell_data(i,j,k+1,RhoTheta_comp)/cell_data(i,j,k+1,Rho_comp)
-                                          - cell_data(i,j,k-1,RhoTheta_comp)/cell_data(i,j,k-1,Rho_comp) )*dzInv;
+                                          - cell_data(i,j,km1,RhoTheta_comp)/cell_data(i,j,km1,Rho_comp) )*dzInv;
                 Real N2 = abs_g * inv_theta0 * dtheta_dz; // Brunt–Väisälä frequency squared
                 if (!use_ref_theta) {
                     // inv_theta0 == 1, divide by actual theta
@@ -695,6 +716,23 @@ void ComputeTurbulentViscosityRANS (int level,
 
                 // Dissipation rate (AL01, Eqn. 19)
                 diss(i, j, k) = AL01::dissipation(cell_data(i, j, k, Rho_comp), Cmu0_pow3, tke, length);
+
+                // erf.if_flat_wall_dissipation (kynema-sgf KLAxell.flat_wall_dissipation): a partial
+                // wall cell of the fraction-stress law has its length at the fluid centroid,
+                // (1 - beta) dz / 2 from the surface, and a nearly solid one then dissipates TKE
+                // several times faster than flat ground's first cell, faster than the wall value
+                // restores it. Keep the centroid length for the viscosity, but dissipate with the
+                // length the same formula gives at dz / 2, the distance of flat ground's first cell
+                if (flat_wall_diss && ib_arr) {
+                    const Real bk = ib_arr(i,j,k);
+                    if (bk >= Real(0.005) && bk < one) {
+                        Real l_flat = (z0_arr) ? KAPPA * (myhalf / cellSizeInv[2] + z0_arr(i, j, 0))
+                                               : KAPPA * (myhalf / cellSizeInv[2]);
+                        l_flat = AL01::geom_length(l_flat, l_cap);
+                        const Real len_flat = AL01::turb_length(l_flat, N2, tke, Cmu0_pow3, inv_Cb_sq, Rt_crit, Rt_min, eps);
+                        diss(i, j, k) = AL01::dissipation(cell_data(i, j, k, Rho_comp), Cmu0_pow3, tke, len_flat);
+                    }
+                }
 
                 // Turbulent Richardson number (AL01, Eqn. 29 combined with Eqn. 19),
                 // smoothed below Rt_crit (Burchard & Petersen)
@@ -887,7 +925,9 @@ void ComputeTurbulentViscosity (double dt,
                                       Diss,
                                       geom, use_terrain_fitted_coords,
                                       z_phys_nd, turbChoice, const_grav,
-                                      SurfLayer, z_0);
+                                      SurfLayer, z_0,
+                                      (solverChoice.if_fraction_stress) ? terrain_blank : nullptr,
+                                      solverChoice.if_flat_wall_dissipation);
     }
 
     if (turbChoice.pbl_type == PBLType::MYJ) {

@@ -870,6 +870,15 @@ List of Parameters
 +--------------------------------------+----------------------------------------------------------+--------------------+-------------------+
 | **erf.cfl**                          | CFL number used to compute level 0 dt                    | Real > 0 and <= 1  | 0.8               |
 +--------------------------------------+----------------------------------------------------------+--------------------+-------------------+
+| **erf.diffusive_cfl**                | anelastic: fraction of the explicit-diffusion stability  | Real >= 0          | 0.8               |
+|                                      | limit, 1 / (2 K (1/dx^2 + 1/dy^2 [+ 1/dz^2])), that caps |                    |                   |
+|                                      | dt (K the largest eddy diffusivity; dz only without the  |                    |                   |
+|                                      | implicit vertical solve; 0 turns the limit off). The     |                    |                   |
+|                                      | eddy diffusivities of the initial state are computed     |                    |                   |
+|                                      | before the first step (LES and RANS closures, not PBL    |                    |                   |
+|                                      | schemes), so the first step is limited too. Not applied  |                    |                   |
+|                                      | with erf.fixed_dt                                        |                    |                   |
++--------------------------------------+----------------------------------------------------------+--------------------+-------------------+
 | **erf.substepping_cfl**              | CFL number used to compute the number of substeps        | Real > 0 and <= 1  | 1.0               |
 +--------------------------------------+----------------------------------------------------------+--------------------+-------------------+
 | **erf.fixed_dt**                     | set level 0 dt as this value regardless of cfl or other  | Real > 0           | unused if not set |
@@ -1992,6 +2001,15 @@ List of Parameters
 | **erf.wall_dist_type**                 | wall distance for RANS on a terrain-fitted mesh:         | "poisson",         | "poisson"        |
 |                                        | Tucker (2003) Poisson distance, or the height above the  | "terrain_height"   |                  |
 |                                        | local surface projected on its normal (no linear solve)  |                    |                  |
+|                                        | With erf.terrain_type = ImmersedForcing, terrain_height  |                    |                  |
+|                                        | measures from the wall of the immersed wall law (bottom  |                    |                  |
+|                                        | face of the top cell holding solid); with                |                    |                  |
+|                                        | erf.buildings_type = ImmersedForcing, from the roof or   |                    |                  |
+|                                        | the ground below and the nearest vertical wall           |                    |                  |
++----------------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.if_wall_dist_search**            | immersed buildings with wall_dist_type = terrain_height: | Integer >= 1       | 8                |
+|                                        | half-width [cells] of the search for the nearest         |                    |                  |
+|                                        | vertical wall in each horizontal plane                   |                    |                  |
 +----------------------------------------+----------------------------------------------------------+--------------------+------------------+
 
 Note: in the equations for the evolution of momentum, potential temperature and advected scalars, the
@@ -3376,6 +3394,33 @@ selected with ``erf.terrain_type`` = ``ImmersedForcing`` or
 | **erf.if_use_most**               | use the Monin-Obukhov similarity theory wall model at    | Boolean            | false            |
 |                                   | immersed surfaces                                        |                    |                  |
 +-----------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.if_wall_form**              | wall law of the terrain immersed forcing: legacy (MOST   | "legacy",          | "legacy"         |
+|                                   | relaxation of the top partial cell at fixed 0.5/1.5 dz)  | "fraction_stress"  |                  |
+|                                   | or fraction_stress (wall stress in the wall cell with    |                    |                  |
+|                                   | u* mixed by the immersed fraction, no diffusion through  |                    |                  |
+|                                   | the wall face); fraction_stress needs if_use_most and    |                    |                  |
+|                                   | constant dz, takes one of if_surf_temp_flux,             |                    |                  |
+|                                   | if_init_surf_temp (+ if_surf_heating_rate), if_Olen (or  |                    |                  |
+|                                   | none: neutral) and always                                |                    |                  |
+|                                   | applies the stability functions                          |                    |                  |
++-----------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.if_wall_face_spacing**      | fraction_stress only: spacing of the face above the wall | "log", "physical", | "log"            |
+|                                   | cell; log gives it flat ground's first-face error for a  | "grid"             |                  |
+|                                   | log profile, physical the centroid spacing, grid dz      |                    |                  |
++-----------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.if_wall_tke**               | fraction_stress with the k-eqn only: relax the wall-cell | Boolean            | false            |
+|                                   | TKE toward (u*^3 + kappa B d1)^(2/3)/Cmu0^2 (the value   |                    |                  |
+|                                   | erf.dirichlet_k holds over flat ground), from the wall   |                    |                  |
+|                                   | law's u* and theta*, d1 the fluid-centroid height        |                    |                  |
++-----------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.if_wall_tke_time_factor**   | steps over which erf.if_wall_tke relaxes the wall TKE    | Real >= 1          | 5                |
++-----------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.if_implicit_projection**    | anelastic, constant dz, FFT build: apply the drag of the | Boolean            | false            |
+|                                   | solid inside the projection, m = (m* - grad phi) /       |                    |                  |
+|                                   | (1 + dt rate) on each face (FFT-preconditioned GMRES),   |                    |                  |
+|                                   | and do not freeze the solid faces afterwards, so the     |                    |                  |
+|                                   | projected momenta are divergence free in the solid too   |                    |                  |
++-----------------------------------+----------------------------------------------------------+--------------------+------------------+
 | **erf.if_snap_partial_cells**     | read the blanking snapped to solid or fluid at half, so  | Boolean            | false            |
 |                                   | a height-map building becomes a staircase of whole cells |                    |                  |
 |                                   | with no sliver cells: the wall law sits on the boundary  |                    |                  |
@@ -3804,13 +3849,22 @@ For coupled simulations with AMR-Wind or WaveWatch3, this controls the direction
 List of Parameters
 ------------------
 
-+------------------------+----------------------------------------------------------+--------------------+------------------+
-| Parameter              | Definition                                               | Acceptable Values  | Default          |
-+========================+==========================================================+====================+==================+
-| **erf.coupling_type**  | how data is exchanged between AMR levels.  Forced to     | OneWay, TwoWay     | TwoWay           |
-|                        | ``OneWay`` if some levels are anelastic and others       |                    |                  |
-|                        | compressible                                             |                    |                  |
-+------------------------+----------------------------------------------------------+--------------------+------------------+
++--------------------------------+----------------------------------------------------------+--------------------+------------------+
+| Parameter                      | Definition                                               | Acceptable Values  | Default          |
++================================+==========================================================+====================+==================+
+| **erf.coupling_type**          | how data is exchanged between AMR levels.  Forced to     | OneWay, TwoWay     | TwoWay           |
+|                                | ``OneWay`` if some levels are anelastic and others       |                    |                  |
+|                                | compressible                                             |                    |                  |
++--------------------------------+----------------------------------------------------------+--------------------+------------------+
+| **erf.cf_loglaw_fill**         | Lateral coarse-fine faces next to a wall (the immersed   | Boolean            | false            |
+|                                | surface, or a surface-layer bottom; constant dz): share  |                    |                  |
+|                                | the flux of the first coarse face above the wall among   |                    |                  |
+|                                | its fine sub-faces by ln(1 + z/z0) at their heights      |                    |                  |
+|                                | above the wall (z0: erf.if_z0 or erf.most.z0) instead    |                    |                  |
+|                                | of the linear interpolation, which gives the fine cell   |                    |                  |
+|                                | at the wall too much flow. The flux of each coarse face  |                    |                  |
+|                                | is kept                                                  |                    |                  |
++--------------------------------+----------------------------------------------------------+--------------------+------------------+
 
 Notes
 -----
@@ -4939,7 +4993,7 @@ Equation Set
 ------------
 
 * :ref:`Coupling Type (Data Exchange) <inputs-coupling-type-data-exchange>` --
-  ``erf.coupling_type``
+  ``erf.coupling_type``, ``erf.cf_loglaw_fill``
 * :ref:`Forcing Terms <inputs-forcing-terms>` -- ``erf.use_gravity``
 * :ref:`Governing Equations <inputs-governing-equations>` -- ``erf.anelastic``,
   ``erf.buoyancy_type``, ``erf.c_p``, ``erf.fixed_density``, ``erf.gradp_type``,
@@ -5016,7 +5070,7 @@ Immersed Forcing and Canopy Source Terms
 * :ref:`Terrain <inputs-terrain>` -- ``erf.if_Cd_momentum``, ``erf.if_Cd_scalar``,
   ``erf.if_Olen``, ``erf.if_damp_alpha``, ``erf.if_implicit_drag``,
   ``erf.if_init_surf_temp``, ``erf.if_stability_correction``, ``erf.if_surf_heating_rate``,
-  ``erf.if_snap_partial_cells``, ``erf.if_surf_temp_flux``, ``erf.if_use_most``, ``erf.if_ws_floor``, ``erf.if_z0``,
+  ``erf.if_snap_partial_cells``, ``erf.if_surf_temp_flux``, ``erf.if_use_most``, ``erf.if_wall_face_spacing``, ``erf.if_wall_form``, ``erf.if_wall_tke``, ``erf.if_wall_tke_time_factor``, ``erf.if_implicit_projection``, ``erf.if_wall_dist_search``, ``erf.if_ws_floor``, ``erf.if_z0``,
   ``erf.immersed_forcing_substep``, ``erf.use_rotate_surface_flux``
 
 Lateral Boundary Nudging for Real-Data Runs

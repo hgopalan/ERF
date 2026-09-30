@@ -6,6 +6,7 @@
 #include <ERF.H>
 #include "Diffusion/ERF_CloudChamberWallFlux.H"
 #include "TimeIntegration/ERF_CloudChamberWallDtGuard.H"
+#include "TimeIntegration/ERF_DiffusionTimestep.H"
 
 using namespace amrex;
 
@@ -358,6 +359,16 @@ ERF::estTimeStep (int level, long& dt_fast_ratio) const
     if (estdt_lowM_inv_T > zero) { estdt_lowM_T = cfl / estdt_lowM_inv_T; }
     if (estdt_lowM_inv_N > zero) { estdt_lowM_N = cfl / estdt_lowM_inv_N; }
 
+    // Explicit-diffusion limit (anelastic, erf.diffusive_cfl): see ERF_DiffusionTimestep.H
+    Real estdt_diff = bogus_large_value;
+    if (l_anelastic && diffusive_cfl > zero && eddyDiffs_lev[level]) {
+        const bool vert_explicit = !(solverChoice.vert_implicit_fac[level][0] > zero);
+        const Real inv_dt_diff = erf_dt::anelastic_diffusion_inv_dt(
+            S_new, *eddyDiffs_lev[level],
+            erf_dt::diffusion_inv_dx2({dxinv[0], dxinv[1], dxinv_EB[2]}, nxc, nyc, vert_explicit));
+        if (inv_dt_diff > zero) { estdt_diff = diffusive_cfl / inv_dt_diff; }
+    }
+
      Real max_wall_rate = Real(0.0);
      Real estdt_wall = bogus_large_value;
      if (cloud_chamber_config.active &&
@@ -606,8 +617,15 @@ ERF::estTimeStep (int level, long& dt_fast_ratio) const
          // Anelastic (substepping is not allowed)
          if (l_anelastic) {
 
-            // Make sure that timestep is less than the dt_max
+            // Make sure that timestep is less than the dt_max and the explicit-diffusion limit
             estdt_lowM_T = std::min(estdt_lowM_T, dt_max);
+            if (estdt_diff < estdt_lowM_T) {
+                if (verbose) {
+                    Print() << "Diffusion-limited dt at level " << level << ": " << estdt_diff
+                            << " (advective " << estdt_lowM_T << ")" << std::endl;
+                }
+                estdt_lowM_T = estdt_diff;
+            }
 
             // On the first timestep enforce dt_max_initial
             if (istep[level] == 0) {
