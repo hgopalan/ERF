@@ -426,6 +426,23 @@ struct FireParams
     // ignore this flag.
     int               directional_wind_coupling = 0;
 
+    // erf.fire.directional_split_hamiltonian (opt-in, default false; needs
+    // directional_wind_coupling = "advective", directional_shape =
+    // "projection" and ros_model = "rothermel" -- the only combination where
+    // R(n)|grad phi| reduces to R0|grad phi| + max(V.grad phi,0), a genuine
+    // two-term Hamiltonian). When false (default), R(n) is built from a front
+    // normal (fill_directional_ros) and multiplied by a single Godunov-upwinded
+    // |grad phi|. That is correct for the isotropic R0 term but upwinds the
+    // wind-driven max(V.grad phi,0) term along the front normal, whereas its
+    // information travels along V, including the component tangential to the
+    // front; the resulting error depends on the angle between V and the grid
+    // axes. When true, the terms are upwinded separately: R0's isotropic
+    // Godunov flux as before, plus each advective term upwinded by the sign of
+    // V component by component (ordinary linear-advection upwind; V is known
+    // from the wind and slope fields, not derived from phi's gradient). See
+    // advect_levelset_directional_rk3_split() in ERF_DirectionalRos.H.
+    bool              directional_split_hamiltonian = false;
+
     // Flank rule of that ellipse, erf.fire.directional_ellipse_lw. "model" (0,
     // default) keeps the model's no-wind, no-slope rate at the flanks, so the
     // length-to-width ratio (R_h/R0 + 1)/2 is not capped. "anderson" (1) sets the
@@ -1084,6 +1101,7 @@ struct FireParams
            } else {
                amrex::Abort("erf.fire.directional_wind_coupling must be \"projection\" or \"advective\"");
            }
+           pp.query("directional_split_hamiltonian", directional_split_hamiltonian);
 
            std::string lw_str = (directional_ellipse_lw == 1) ? "anderson" : "model";
            pp.query("directional_ellipse_lw", lw_str);
@@ -1549,6 +1567,8 @@ struct FireParams
            if (is_hybrid() || !uses_model("rothermel")) {
                amrex::Abort("erf.fire.directional_wind_coupling = \"advective\" is implemented for erf.fire.ros_model = \"rothermel\" only, not hybrid or another model");
            }
+       } else if (directional_split_hamiltonian) {
+           amrex::Abort("erf.fire.directional_split_hamiltonian needs erf.fire.directional_wind_coupling = \"advective\"");
        }
     }
 

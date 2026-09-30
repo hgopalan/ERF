@@ -1,0 +1,83 @@
+# FireSplitHamiltonian: a finite ignition line in a strong uniform wind, run
+# at 0 deg and at 34 deg (the same scenario rigidly rotated about the domain
+# centre), with the baseline advective level-set scheme and with
+# erf.fire.directional_split_hamiltonian = true. See README.md; this deck
+# holds everything the four variants (inputs_baseline_0, inputs_baseline_34,
+# inputs_split_0, inputs_split_34) share.
+#
+# Short grass (Anderson fuel model 1) at 6 % moisture in a 4.005 m/s wind gives
+# Rothermel a head rate Rf = 1.701 m/s. Reinitialization is on every
+# level-set substep: that is the combination in which the baseline scheme
+# develops a "wing" at oblique wind angles.
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 4800.0 4800.0 500.0
+amr.n_cell = 48 48 10
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.max_grid_size = 24
+amr.max_grid_size_z = 10
+# The fire module requires every level-0 box to have x and y lengths divisible by
+# erf.fire.grid_ratio (4). amr.max_grid_size alone does not guarantee that -- it is an
+# upper bound -- so blocking_factor states the requirement directly.
+amr.blocking_factor = 8
+
+zlo.type = "surface_layer"
+zhi.type = "SlipWall"
+erf.most.z0 = 0.01
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+erf.molec_diff_type = "None"
+erf.les_type = "Smagorinsky"
+erf.Cs = 0.1
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+
+erf.init_type = "input_sounding"
+erf.sounding_type = Ideal
+erf.input_sounding_file = "input_sounding"
+
+erf.fixed_dt = 2.0
+erf.substepping_cfl = 0.5
+max_step = 100000
+stop_time = 1200.0
+
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+erf.plot_int = -1
+erf.fire_plot_int = 150                    # every 300 s
+
+erf.fire.enable = true
+erf.fire.fire_debug = false
+erf.fire.grid_ratio = 4                    # 25 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.directional_ros = true
+erf.fire.directional_wind_coupling = "advective"
+erf.fire.fuel_model_id = 1                 # short grass
+erf.fire.moisture_1hr = 0.06
+erf.fire.moisture_10hr = 0.08
+erf.fire.moisture_100hr = 0.10
+erf.fire.moisture_dynamic = false
+erf.fire.ignition_r = 0.0                  # no point ignition: the polyline is the only source
+erf.fire.ignition_x = 0.0
+erf.fire.ignition_y = 0.0
+erf.fire.ignition.polygon_type = "polyline"
+erf.fire.ignition.polyline_width = 25.0    # one fire cell wide
+erf.fire.wind_ref_ht = 6.1
+erf.fire.use_waf = false
+erf.fire.use_wind_limit = false            # keeps the full 4.005 m/s in phi_w
+erf.fire.use_terrain_wind = false
+erf.fire.ros_model = "rothermel"
+erf.fire.write_fire_stats_csv = false
+erf.fire.coupling_type = "lagged"
+erf.fire.fire_atm_feedback = 0.0           # one-way: isolates level-set numerics
+
+# Reinitialize every level-set substep.
+erf.fire.levelset.reinit_every  = 1
+
+# Constant wind bypassing atmospheric interpolation, so every variant sees the
+# same wind magnitude: 4.005 m/s. The heading is set per variant.
+erf.fire.prescribed_wind = true
