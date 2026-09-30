@@ -313,7 +313,11 @@ farm of up to as many turbines as ranks runs one OpenFAST instance per rank
 and a larger one spreads evenly; only the owner rank calls OpenFAST, and the
 node positions, loads and velocities are broadcast after every step so that
 every rank samples and spreads for every body. The result does not depend on
-the rank count or on which rank owns which turbine. All bodies share one
+the rank count or on which rank owns which turbine. OpenFAST keeps a single
+step counter for all the turbines of a process, so the turbines a rank owns
+are stepped in turn, one OpenFAST time step at a time; they must therefore
+use the same OpenFAST ``DT`` (the run aborts at start-up otherwise), and the
+stub enforces the same order. All bodies share one
 spreading width and their forces are spread onto the same momentum sources.
 ``<diagnostics_dir>/total_load.csv`` records the sum of every body's load on
 the structure (the turbines' thrust, tower and nacelle forces and the disks'

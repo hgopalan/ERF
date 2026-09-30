@@ -20,11 +20,15 @@ erf.refinement_indicators = rotor
 erf.rotor.in_box_lo  = 500. 300. 0.
 erf.rotor.in_box_hi  = 1500. 900. 450.
 erf.rotor.max_level  = 1
-geometry.is_periodic = 1 1 0
+geometry.is_periodic = 0 1 0
+xlo.type     = "Inflow"
+xlo.velocity = 10.0 0. 0.   # uniform freestream; conserved variables extrapolated from the interior
+xhi.type     = "Outflow"
 zlo.type = "SlipWall"
 zhi.type = "SlipWall"
 
 erf.anelastic = 1
+erf.vert_implicit = true
 erf.use_fft   = true
 erf.molec_diff_type = "None"
 erf.les_type        = "None"

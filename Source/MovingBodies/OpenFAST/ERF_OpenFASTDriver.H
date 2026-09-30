@@ -149,6 +149,10 @@ public:
 
     /** Advance every turbine by one ERF step (num_substeps OpenFAST steps) and broadcast. */
     void step ();
+    //! substeps per ERF step of the turbines this rank owns (-1 when it owns none)
+    int local_substeps () const;
+    //! abort unless every turbine this rank owns runs the same OpenFAST time step
+    void check_lockstep () const;
 
     /**
      * Append one row per turbine to its two diagnostics files: <output_root>_erf.csv with time,
