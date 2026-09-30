@@ -321,6 +321,13 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestFLLC.cpp
   )
+  # Motivation: the start-up audit must read the model's density, gravity and module files,
+  # flag a density that differs from the body's or from ERF's at the hub, aerodynamics that
+  # are off, a rotor outside the domain or overlapping another, a coarse mesh, a broken line
+  # and a rotor facing away from the wind, as fatal or as warnings, and pass the stub by.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTAudit.cpp
+  )
 endif()
 build_erf_exe(${erf_exe_name} NO_ERF_MAIN)
 target_link_libraries(${erf_exe_name} PRIVATE GTest::gtest)

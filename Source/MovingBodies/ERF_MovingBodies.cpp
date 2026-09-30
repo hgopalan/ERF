@@ -14,9 +14,14 @@
 #include <AMReX_Utility.H>
 
 #include "ERF_ActuatorSampling.H"
+#ifdef ERF_USE_OPENFAST
+#include "ERF_OpenFASTAudit.H"
+#endif
 #include "ERF_DiagnosticsLog.H"
 #include "ERF_ActuatorSpreading.H"
 #include "ERF_DataStruct.H"
+#include "ERF_Constants.H"
+#include "ERF_IndexDefines.H"
 
 using namespace amrex;
 
@@ -284,6 +289,7 @@ MovingBodies::read_checkpoint (const std::string& chkdir)
 
 void
 MovingBodies::advance (int lev, double time, double dt,
+                       const MultiFab& cons,
                        const MultiFab& U, const MultiFab& V, const MultiFab& W,
                        const MultiFab* z_phys_nd, const MultiFab* detJ_cc, const Geometry& geom)
 {
@@ -299,6 +305,7 @@ MovingBodies::advance (int lev, double time, double dt,
     ++m_step;
     const bool first = (m_step == 1);
 #ifdef ERF_USE_OPENFAST
+    if (!m_audited_setup) { audit_turbines_setup(geom); }
     if (first && !m_driver->solved0()) {
         // first step: OpenFAST's first solution sees the initial flow at its nodes
         supply_velocities(time, U, V, W, z_phys_nd, geom);
@@ -309,6 +316,7 @@ MovingBodies::advance (int lev, double time, double dt,
 #endif
     supply_velocities(time, U, V, W, z_phys_nd, geom);
 #ifdef ERF_USE_OPENFAST
+    if (!m_audited_flow) { audit_turbines_flow(cons, z_phys_nd, geom); }
     m_driver->step();
     if (first || m_step % m_in.diagnostics_int == 0) {
         m_driver->write_diagnostics(time + dt);
@@ -330,6 +338,9 @@ MovingBodies::advance (int lev, double time, double dt,
             write_source_diagnostics(time, detJ_cc, geom, first);
         }
     }
+#ifndef ERF_USE_OPENFAST
+    amrex::ignore_unused(cons);
+#endif
     if (time + dt >= m_in.avg_start) { accumulate_statistics(time + dt); }
     if (m_in.wake.active() && !m_in.has_prescribed_velocity && (first || m_step % m_in.wake.interval == 0)) {
         write_wake_diagnostics(time, U, V, W, z_phys_nd, geom);
@@ -635,6 +646,70 @@ MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab&
 }
 
 #ifdef ERF_USE_OPENFAST
+void
+MovingBodies::audit_turbines_setup (const Geometry& geom)
+{
+    m_audited_setup = true;
+    const auto& turbs = m_driver->turbines();
+    if (turbs.empty()) { return; }
+    std::array<Real,3> plo, phi, dx;
+    std::array<int,3> per;
+    for (int d = 0; d < 3; ++d) {
+        plo[d] = static_cast<Real>(geom.ProbLo(d)); phi[d] = static_cast<Real>(geom.ProbHi(d));
+        dx[d] = static_cast<Real>(geom.CellSize(d)); per[d] = geom.isPeriodic(d) ? 1 : 0;
+    }
+    const Real eps = m_epsilon_dx * geom.CellSize(0);
+    bool any_fatal = false;
+    for (std::size_t i = 0; i < turbs.size(); ++i) {
+        const MovingBodyInputs& b = m_turbine_in[i];
+        std::vector<erf_openfast::AuditFinding> f = erf_openfast::audit_model(b, CONST_GRAV);
+        const auto fg = erf_openfast::audit_geometry(turbs[i], b, eps, plo, phi, dx, per);
+        f.insert(f.end(), fg.begin(), fg.end());
+        erf_openfast::report_audit(turbs[i].name + " (model and geometry)", f, any_fatal);
+    }
+    const auto overlap = erf_openfast::audit_overlap(turbs);
+    if (!overlap.empty()) { erf_openfast::report_audit("the farm", overlap, any_fatal); }
+    if (any_fatal) {
+        Abort("erf.moving_bodies: the OpenFAST input audit found errors (listed above); fix them or set mode = none where no loads are wanted");
+    }
+}
+
+void
+MovingBodies::audit_turbines_flow (const MultiFab& cons, const MultiFab* z_phys_nd, const Geometry& geom)
+{
+    m_audited_flow = true;
+    const auto& turbs = m_driver->turbines();
+    if (turbs.empty()) { return; }
+    // ERF's density at every hub
+    std::vector<Real> hubs, rho_hub;
+    for (const auto& t : turbs) { for (int d = 0; d < 3; ++d) { hubs.push_back(t.hub_pos[d]); } }
+    erf_actuator::sample_cell_scalar(cons, Rho_comp, z_phys_nd, geom, hubs, rho_hub);
+    bool any_fatal = false;
+    for (std::size_t i = 0; i < turbs.size(); ++i) {
+        const MovingBodyInputs& b = m_turbine_in[i];
+        std::vector<erf_openfast::AuditFinding> f;
+        Real rho_model = 0.0;
+        if (erf_openfast::openfast_air_density(b.fst_file, rho_model)) {
+            f = erf_openfast::audit_density(turbs[i].name, rho_model, rho_hub[i], m_in.density_tolerance);
+            if (f.empty()) {
+                f.push_back({false, "ERF's density at the hub is " + std::to_string(rho_hub[i]) + " kg/m^3, the model's " +
+                                    std::to_string(rho_model) + " (within " + std::to_string(100.0 * m_in.density_tolerance) + " %)"});
+            }
+        } else {
+            f.push_back({false, "ERF's density at the hub is " + std::to_string(rho_hub[i]) + " kg/m^3; the model gives none to compare with"});
+        }
+        const std::vector<Real>& uvw = m_points.body_velocities(static_cast<int>(i));
+        if (uvw.size() >= 3) {
+            const auto ff = erf_openfast::audit_facing(turbs[i], {{uvw[0], uvw[1], uvw[2]}});
+            f.insert(f.end(), ff.begin(), ff.end());
+        }
+        erf_openfast::report_audit(turbs[i].name + " (density and wind)", f, any_fatal);
+    }
+    if (any_fatal) {
+        Abort("erf.moving_bodies: the OpenFAST input audit found errors (listed above); fix them or set mode = none where no loads are wanted");
+    }
+}
+
 // span coordinate of a node: its distance from the hub
 namespace {
 Real span_of (const std::vector<Real>& pos, int nd, const std::array<Real,3>& hub)

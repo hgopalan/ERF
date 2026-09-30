@@ -65,6 +65,7 @@ struct MovingBodyInputs
  *   erf.moving_bodies.wake.lines_xD   = 2 4 7      (wake lines behind every rotor; see WakeInputs)
  *   erf.moving_bodies.avg_start       = 400.0      (running averages and statistics start here)
  *   erf.moving_bodies.alm_max_tip_cells = 1.0      (abort when a blade tip sweeps more cells than this per step)
+ *   erf.moving_bodies.density_tolerance = 0.05     (abort when ERF's density at a hub is further from the model's)
  *   erf.moving_bodies.prescribed_velocity = 10.59 0 0   (testing aid: fixed inflow to every body)
  */
 /** erf.moving_bodies.wake.*: sampling lines behind every rotor (off unless lines_xD is given). */
@@ -88,6 +89,7 @@ struct MovingBodiesInputs
     WakeInputs wake;
     amrex::Real avg_start{0.0};              //!< time from which the running averages and statistics accumulate
     amrex::Real alm_max_tip_cells{1.0};      //!< actuator line: largest tip travel per ERF step, in cells
+    amrex::Real density_tolerance{0.05};     //!< relative tolerance between ERF's density at a hub and the OpenFAST model's
 
     /** Read erf.moving_bodies.*; aborts on an unknown type, a duplicate name or a bad value. */
     static MovingBodiesInputs read ();

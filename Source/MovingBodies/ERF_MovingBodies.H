@@ -59,11 +59,13 @@ public:
 
     /**
      * Advance the bodies by one ERF step; a no-op unless lev is the anchor level.
+     * @param cons the level's conserved state at the start of the step (its density is audited at the hubs on the first step)
      * @param U,V,W the level's face-centred velocities at the start of the step, ghost cells filled
      * @param z_phys_nd nodal heights, or nullptr on a uniform-dz mesh
      * @param geom the level's geometry
      */
     void advance (int lev, double time, double dt,
+                  const amrex::MultiFab& cons,
                   const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
                   const amrex::MultiFab* z_phys_nd, const amrex::MultiFab* detJ_cc,
                   const amrex::Geometry& geom);
@@ -144,6 +146,17 @@ private:
     std::vector<erf_actuator::RunningStats> m_disk_stats;      //!< one per prescribed-Ct disk
 #ifdef ERF_USE_OPENFAST
     std::unique_ptr<erf_openfast::OpenFASTDriver> m_driver;
+    /**
+     * The start-up audit of every OpenFAST turbine against ERF's set-up, in two parts at the
+     * first step: the model files, the geometry and the overlaps before the flow is first
+     * sampled (so a rotor outside the domain is explained rather than tripping the sampler),
+     * then the density at the hubs and the facing once the flow at the nodes is known. Each
+     * part prints its findings together and a fatal one aborts.
+     */
+    void audit_turbines_setup (const amrex::Geometry& geom);
+    void audit_turbines_flow (const amrex::MultiFab& cons, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
+    bool m_audited_setup{false};
+    bool m_audited_flow{false};
     /** Build the lifting-line correction of every turbine that asks for it, once the node layout and chords are known. */
     void build_fllc (const amrex::Geometry& geom);
     /** Correct the blade velocity nodes of turbine i in uvw (3 per velocity node) with its lifting-line correction. */

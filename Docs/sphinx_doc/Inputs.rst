@@ -2448,6 +2448,10 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.avg_start**                        | time (s) from which the wake running averages and the    | Real >= 0                | 0                        |
 |                                                        | bodies' statistics accumulate                            |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.density_tolerance**                | relative difference allowed between ERF's density at a   | Real >= 0                | 0.05                     |
+|                                                        | hub and the OpenFAST model's AirDens; the run aborts     |                          |                          |
+|                                                        | above it                                                 |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.alm_max_tip_cells**                | actuator line: the most cells a blade tip may sweep in   | Real > 0                 | 1.0                      |
 |                                                        | one step (rotor speed times tip radius times dt over the |                          |                          |
 |                                                        | smallest cell size); the run aborts above it, naming the |                          |                          |

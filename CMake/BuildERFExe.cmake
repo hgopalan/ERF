@@ -396,6 +396,7 @@ function(build_erf_lib erf_lib_name)
     if(ERF_ENABLE_OPENFAST)
       target_sources(${erf_lib_name} PRIVATE
         ${SRC_DIR}/MovingBodies/OpenFAST/ERF_OpenFASTDriver.cpp
+        ${SRC_DIR}/MovingBodies/OpenFAST/ERF_OpenFASTAudit.cpp
         ${SRC_DIR}/MovingBodies/ForceModels/ERF_OpenFASTRotor.cpp
       )
       target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${SRC_DIR}/MovingBodies/OpenFAST>)

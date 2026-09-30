@@ -38,6 +38,22 @@ void sample_velocity (const amrex::MultiFab& U,
                       const std::vector<amrex::Real>& pos,
                       std::vector<amrex::Real>& vel);
 
+/**
+ * Sample one component of a cell-centred field at a set of points: bilinear between the four
+ * cell centres around the point in the horizontal and linear in the physical height between
+ * the two cell centres that bracket it in the column (cell-centre heights from z_phys_nd on a
+ * stretched or terrain-following mesh). Same ownership rules and reduction as
+ * sample_velocity(); the field needs one filled ghost cell.
+ *
+ * @param[in] mf the cell-centred field, comp the component
+ * @param[out] val n sampled values, the same on every rank on return
+ */
+void sample_cell_scalar (const amrex::MultiFab& mf, int comp,
+                         const amrex::MultiFab* z_phys_nd,
+                         const amrex::Geometry& geom,
+                         const std::vector<amrex::Real>& pos,
+                         std::vector<amrex::Real>& val);
+
 } // namespace erf_actuator
 
 #endif

@@ -36,7 +36,13 @@ macro(setup_test)
     else()
         set(_test_source_dir_name "${TEST_NAME}")
     endif()
-    set(CURRENT_TEST_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test_files/${_test_source_dir_name})
+    # the decks live under Tests/test_files unless the caller points TEST_SOURCE_ROOT at another
+    # tree (the canonical cases under Exec/CanonicalTests/<group>, one directory per case)
+    if(DEFINED TEST_SOURCE_ROOT AND NOT "${TEST_SOURCE_ROOT}" STREQUAL "")
+        set(CURRENT_TEST_SOURCE_DIR ${TEST_SOURCE_ROOT}/${_test_source_dir_name})
+    else()
+        set(CURRENT_TEST_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test_files/${_test_source_dir_name})
+    endif()
     set(CURRENT_TEST_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/test_files/${TEST_NAME})
     set(PLOT_GOLD ${ERF_TEST_GOLD_FILES_DIRECTORY}/${TEST_NAME})
 
@@ -924,6 +930,9 @@ endfunction(add_test_shoc_mutation)
 # and expose stable diagnostic fields for automated CI forensics.
 add_test_cloud_chamber_fixed_dt_guard(CloudChamber_Bulk_FixedDtGuard)
 
+# The moving-bodies cases live in Exec/CanonicalTests/MovingBodies, one directory per case
+# (deck, stub turbine file and gold logs); their gold plotfiles stay in Tests/ERFGoldFiles.
+set(TEST_SOURCE_ROOT ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/MovingBodies)
 if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT)
   # The OpenFAST driver steps a stub turbine through a uniform anelastic flow (FFT solver)
   # without adding any forcing yet; the gold plotfile is the same deck run without moving
@@ -1206,6 +1215,7 @@ if(ERF_ENABLE_MOVING_BODIES AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
       DATALOG "D1_disk.csv"
       DATALOG_SIGDIGITS 8)
 endif()
+unset(TEST_SOURCE_ROOT)
 
 if(ERF_ENABLE_MPI)
 add_test_anelastic_wall_diffusion(AnelasticWallDiffusion_X 0)
