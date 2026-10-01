@@ -85,7 +85,12 @@ jobs:
 
     - name: Actuator and MoorDyn Unit Tests
       run: |
-        Tests/Unit/erf_unit_tests --gtest_filter='ActuatorSampling.*:ActuatorSpreading.*:WakeLines.*:RunningStats.*:MoorDynSystem.*'
+        Tests/Unit/erf_unit_tests --gtest_filter='ActuatorSampling.*:ActuatorSpreading.*:WakeLines.*:RunningStats.*:MoorDynSystem.*:ConductorInputs.*:MoorDynInputWriter.*:ConductorSpan.*'
+      working-directory: ${{runner.workspace}}/ERF/build
+
+    - name: Conductor Regression Tests
+      run: |
+        ctest -L conductors --output-on-failure --no-tests=error
       working-directory: ${{runner.workspace}}/ERF/build
 
     - name: Actuator Unit Tests on Two Ranks

@@ -732,3 +732,23 @@ Test Location: `Tests/test_files/EkmanSpiral`_
 Problem Location: `Exec/CanonicalTests/EkmanSpiral`_
 
 .. _`Exec/CanonicalTests/EkmanSpiral`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/EkmanSpiral
+
+Conductor spans
+---------------------------
+``Conductors_PrescribedWind`` (builds with ``ERF_ENABLE_MOORDYN=ON`` and
+``ERF_MOORDYN_USE_STUB=ON``, ``ERF_ENABLE_FFT=ON`` and MPI, not Windows) hangs a 300 m conductor span (795 kcmil ACSR, 1.5 m of slack, 30 m
+above flat ground) in a uniform anelastic flow and blows it with a prescribed
+15 m/s crosswind handed to MoorDyn at every line node for ten steps of 0.5 s.
+The runner ``Tests/RunConductors.cmake`` checks the plotfile against the
+flow's own gold (the span puts nothing into the flow) and the span's log
+``S1.dat`` (mid-span position, sag, lateral offset, swing angle, end and
+maximum tensions, one row per step) against its committed gold to eight
+significant digits. Label ``conductors``. The gold log was written by the
+bundled stub, whose quasi-static span relaxes to the blowout angle with a
+one-second lag. The real MoorDyn swings the span dynamically about the same
+angle (from rest it overshoots to about 1.7 times the static angle at half a
+swing period), so the test is registered for the stub build only.
+
+Test Location: `Tests/test_files/Conductors_PrescribedWind`_
+
+.. _`Tests/test_files/Conductors_PrescribedWind`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_PrescribedWind
