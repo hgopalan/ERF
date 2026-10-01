@@ -214,6 +214,7 @@ OpenFASTDriver::init (double dt_cfd, double t_max)
         // every rank keeps the node velocities; still air until the flow is supplied
         t.node_vel.assign(3 * static_cast<std::size_t>(t.num_vel_nodes), 0.0);
     }
+    check_lockstep();
     m_initialized = true;
 }
 
@@ -252,6 +253,7 @@ OpenFASTDriver::restart (const std::string& prefix, double dt_cfd)
         }
         ParallelDescriptor::Bcast(t.node_vel.data(), static_cast<int>(t.node_vel.size()), t.owner_rank);
     }
+    check_lockstep();
     m_initialized = true;
     m_solved0 = true;
 }
@@ -324,17 +326,51 @@ OpenFASTDriver::step ()
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_solved0, "OpenFASTDriver::step before solution0");
     int err_stat = ErrID_None;
     char err_msg[INTERFACE_STRING_LENGTH];
+    // OpenFAST's C library keeps ONE step counter (n_t_global) for all the turbines of a process and
+    // advances it only after the call for its last turbine, so every OpenFAST step has to be applied to
+    // the local turbines in turn (tid_local order): substeps outermost, turbines inner. Stepping one
+    // turbine through all its substeps first leaves its clock frozen and OpenFAST aborts with
+    // "t(1) must not equal t(2)" in ED_Input_ExtrapInterp. check_lockstep() made the substep counts equal.
+    const int nsub = local_substeps();
+    for (int s = 0; s < nsub; ++s) {
+        for (int i = 0; i < static_cast<int>(m_turb.size()); ++i) {
+            TurbineState& t = m_turb[i];
+            if (!is_owner(i)) { continue; }
+            FAST_CFD_Step(&t.tid_local, &err_stat, err_msg);
+            fast_check(err_stat, err_msg, "FAST_CFD_Step for " + t.name);
+            ++t.time_index;
+        }
+    }
     for (int i = 0; i < static_cast<int>(m_turb.size()); ++i) {
         TurbineState& t = m_turb[i];
-        if (is_owner(i)) {
-            for (int s = 0; s < t.num_substeps; ++s) {
-                FAST_CFD_Step(&t.tid_local, &err_stat, err_msg);
-                fast_check(err_stat, err_msg, "FAST_CFD_Step for " + t.name);
-                ++t.time_index;
-            }
-            pull_from_fast(t);
-        }
+        if (is_owner(i)) { pull_from_fast(t); }
         broadcast_state(t);
+    }
+}
+
+// The turbines owned by this rank share OpenFAST's step counter, so they must run the same OpenFAST
+// time step: the substep count per ERF step has to be the same for all of them.
+int
+OpenFASTDriver::local_substeps () const
+{
+    int nsub = -1;
+    for (int i = 0; i < static_cast<int>(m_turb.size()); ++i) {
+        if (is_owner(i)) { nsub = m_turb[i].num_substeps; break; }
+    }
+    return nsub;
+}
+
+void
+OpenFASTDriver::check_lockstep () const
+{
+    const int nsub = local_substeps();
+    for (int i = 0; i < static_cast<int>(m_turb.size()); ++i) {
+        if (is_owner(i) && m_turb[i].num_substeps != nsub) {
+            Abort("OpenFAST turbines " + m_turb[i].name + " and the first one owned by this rank use different "
+                  "time steps (" + std::to_string(m_turb[i].num_substeps) + " vs " + std::to_string(nsub) +
+                  " substeps per ERF step): OpenFAST steps all the turbines of a process together, so their "
+                  "DT must be equal; set the same DT in the .fst files or give each turbine its own rank");
+        }
     }
 }
 

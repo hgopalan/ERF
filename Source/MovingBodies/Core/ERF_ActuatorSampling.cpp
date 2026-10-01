@@ -242,4 +242,35 @@ sample_cell_scalar (const MultiFab& mf, int comp, const MultiFab* z_phys_nd, con
     }
 }
 
+bool
+points_covered_by (const BoxArray& ba, const Geometry& geom, const std::vector<Real>& pos, Real reach, std::string& first_outside)
+{
+    first_outside.clear();
+    const BoxArray cc = amrex::convert(ba, IntVect::TheZeroVector());
+    const auto plo = geom.ProbLoArray();
+    const auto dxi = geom.InvCellSizeArray();
+    const Box& domain = geom.Domain();
+    for (std::size_t p = 0; p < pos.size() / 3; ++p) {
+        IntVect lo, hi;
+        for (int d = 0; d < 3; ++d) {
+            lo[d] = static_cast<int>(std::floor((pos[3*p+d] - reach - plo[d]) * dxi[d]));
+            hi[d] = static_cast<int>(std::floor((pos[3*p+d] + reach - plo[d]) * dxi[d]));
+            if (geom.isPeriodic(d)) {
+                // the union covers the whole periodic extent or none of it: clamp to the domain
+                lo[d] = std::max(lo[d], domain.smallEnd(d));
+                hi[d] = std::min(hi[d], domain.bigEnd(d));
+            } else {
+                lo[d] = std::max(lo[d], domain.smallEnd(d));
+                hi[d] = std::min(hi[d], domain.bigEnd(d));
+            }
+        }
+        const Box needed(lo, hi);
+        if (!cc.contains(needed, true)) {
+            first_outside = "(" + std::to_string(pos[3*p]) + ", " + std::to_string(pos[3*p+1]) + ", " + std::to_string(pos[3*p+2]) + ") m";
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace erf_actuator

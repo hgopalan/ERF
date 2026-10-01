@@ -281,6 +281,27 @@ Poisson solve handles the non-periodic direction. The regression tests
 ``OpenFAST_ADM_LES`` (precursor planes) and ``OpenFAST_ADM_CPM`` (cell
 perturbation) run the rotor both ways.
 
+Anchor level on multi-level grids
+---------------------------------
+
+On a run with refinement the bodies live on one level, the anchor: the finest
+level unless ``erf.moving_bodies.anchor_level`` names a coarser one. Their
+nodes are sampled from that level's velocities, their momentum sources are
+spread onto that level's faces with the kernel width in that level's cells,
+and OpenFAST is stepped with that level's fixed step (``erf.fixed_dt`` divided
+by the sub-cycling ratios down to it), so a fine patch around the rotor gives
+an actuator line its 4 to 5 m cells without refining the whole domain.
+Coarser levels carry no source of their own: they see the rotor through ERF's
+average-down of the state after every coarse step, as any fine-level physics
+does; finer levels than the anchor are not supported. Everything the bodies
+read or write on the level must lie on its grids: at the first step every
+node with the kernel's reach, every disk point, and every wake sampling
+point is checked against the anchor level's box union (periodic directions
+wrap), and a point outside aborts naming it, since the sampler and spreader
+read only the level's own cells. Enlarge the refinement region or choose a
+coarser anchor. The refinement region must also let the FFT solver run on
+the level, that is be a rectangular union of boxes, as for any anelastic run.
+
 Farms
 -----
 
@@ -292,7 +313,11 @@ farm of up to as many turbines as ranks runs one OpenFAST instance per rank
 and a larger one spreads evenly; only the owner rank calls OpenFAST, and the
 node positions, loads and velocities are broadcast after every step so that
 every rank samples and spreads for every body. The result does not depend on
-the rank count or on which rank owns which turbine. All bodies share one
+the rank count or on which rank owns which turbine. OpenFAST keeps a single
+step counter for all the turbines of a process, so the turbines a rank owns
+are stepped in turn, one OpenFAST time step at a time; they must therefore
+use the same OpenFAST ``DT`` (the run aborts at start-up otherwise), and the
+stub enforces the same order. All bodies share one
 spreading width and their forces are spread onto the same momentum sources.
 ``<diagnostics_dir>/total_load.csv`` records the sum of every body's load on
 the structure (the turbines' thrust, tower and nacelle forces and the disks'
@@ -350,8 +375,9 @@ tip-travel limit and the hub-axis convention.
 Solver requirements
 -------------------
 
-This version supports the anelastic solver only, with a fixed time step and a
-single level, and the AMReX floating-point traps must be off: OpenFAST's
+This version supports the anelastic solver only, with a fixed time step, on
+one anchor level of a possibly refined grid, and the AMReX floating-point
+traps must be off: OpenFAST's
 initialisation raises exceptions of its own, and a trapped run dies inside the
 library. The requirements are checked at start-up; the actuator line's tip
 travel per step is checked at every step, since it depends on the rotor speed.

@@ -2448,6 +2448,9 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.avg_start**                        | time (s) from which the wake running averages and the    | Real >= 0                | 0                        |
 |                                                        | bodies' statistics accumulate                            |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.anchor_level**                     | the level the bodies are sampled and forced on; coarser  | 0 .. amr.max_level, or   | -1 (the finest level)    |
+|                                                        | levels see them through the average-down of the state    | -1                       |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.density_tolerance**                | relative difference allowed between ERF's density at a   | Real >= 0                | 0.05                     |
 |                                                        | hub and the OpenFAST model's AirDens; the run aborts     |                          |                          |
 |                                                        | above it                                                 |                          |                          |

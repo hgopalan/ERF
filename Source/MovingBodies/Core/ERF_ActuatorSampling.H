@@ -1,6 +1,7 @@
 #ifndef ERF_ACTUATOR_SAMPLING_H
 #define ERF_ACTUATOR_SAMPLING_H
 
+#include <string>
 #include <vector>
 
 #include <AMReX_Geometry.H>
@@ -53,6 +54,15 @@ void sample_cell_scalar (const amrex::MultiFab& mf, int comp,
                          const amrex::Geometry& geom,
                          const std::vector<amrex::Real>& pos,
                          std::vector<amrex::Real>& val);
+
+/**
+ * Whether every point, with the cells within `reach` metres around it, lies inside the union
+ * of boxes of a level (the anchor level's grids): the sampler needs the neighbouring cells and
+ * the spreader the kernel's reach, and on a refined level that is not the whole domain. Periodic
+ * directions wrap. Returns false and names the first point outside in `first_outside`.
+ */
+bool points_covered_by (const amrex::BoxArray& ba, const amrex::Geometry& geom,
+                        const std::vector<amrex::Real>& pos, amrex::Real reach, std::string& first_outside);
 
 } // namespace erf_actuator
 

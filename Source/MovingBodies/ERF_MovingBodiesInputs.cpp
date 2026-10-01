@@ -43,6 +43,8 @@ MovingBodiesInputs::read ()
     }
     pp.query("avg_start", in.avg_start);
     if (in.avg_start < 0.0) { Abort("erf.moving_bodies.avg_start must be >= 0"); }
+    pp.query("anchor_level", in.anchor_level);
+    if (in.anchor_level < -1) { Abort("erf.moving_bodies.anchor_level must be a level (0 .. amr.max_level) or -1 for the finest"); }
     pp.query("density_tolerance", in.density_tolerance);
     if (in.density_tolerance < 0.0) { Abort("erf.moving_bodies.density_tolerance must be >= 0 (relative)"); }
     pp.query("alm_max_tip_cells", in.alm_max_tip_cells);
@@ -178,7 +180,7 @@ MovingBodiesInputs::read ()
 
 std::string
 MovingBodiesInputs::validate_solver (bool all_levels_anelastic, bool fixed_dt, int max_level,
-                                     bool fpe_traps)
+                                     int anchor_level, bool fpe_traps)
 {
     if (!all_levels_anelastic) {
         return "erf.moving_bodies: this version supports the anelastic solver only; set erf.anelastic = 1";
@@ -186,8 +188,9 @@ MovingBodiesInputs::validate_solver (bool all_levels_anelastic, bool fixed_dt, i
     if (!fixed_dt) {
         return "erf.moving_bodies: OpenFAST needs a fixed time step; set erf.fixed_dt to a whole multiple of the OpenFAST dt";
     }
-    if (max_level != 0) {
-        return "erf.moving_bodies: this version supports a single level; set amr.max_level = 0";
+    if (anchor_level < 0 || anchor_level > max_level) {
+        return "erf.moving_bodies.anchor_level = " + std::to_string(anchor_level) + " is not a level of this run (amr.max_level = " +
+               std::to_string(max_level) + "); leave it out for the finest level";
     }
     if (fpe_traps) {
         // OpenFAST's initialisation raises floating-point exceptions of its own (seen in

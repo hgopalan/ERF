@@ -41,8 +41,10 @@ public:
     /**
      * Read erf.moving_bodies.*, check the solver settings and initialise the bodies.
      * Returns nullptr when no bodies are given.
+     * @param fixed_dt ERF's fixed step on every level (the anchor level's is OpenFAST's coupling step)
      */
-    static std::unique_ptr<MovingBodies> create (const SolverChoice& sc, int max_level, bool restarting);
+    static std::unique_ptr<MovingBodies> create (const SolverChoice& sc, int max_level,
+                                                 const amrex::Vector<double>& fixed_dt, bool restarting);
 
     /**
      * Write the bodies' state into ERF's checkpoint directory: <chkdir>/moving_bodies/state
@@ -58,7 +60,10 @@ public:
     void read_checkpoint (const std::string& chkdir);
 
     /**
-     * Advance the bodies by one ERF step; a no-op unless lev is the anchor level.
+     * Advance the bodies by one ERF step of the anchor level; a no-op on every other level. The
+     * momentum sources live on the anchor level's grids; coarser levels see the bodies through
+     * ERF's average-down of the state, finer levels are not supported (the anchor is the finest
+     * unless asked otherwise).
      * @param cons the level's conserved state at the start of the step (its density is audited at the hubs on the first step)
      * @param U,V,W the level's face-centred velocities at the start of the step, ghost cells filled
      * @param z_phys_nd nodal heights, or nullptr on a uniform-dz mesh
@@ -80,11 +85,12 @@ public:
 
     bool has_sources () const { return m_src_defined; }
 
-    int anchor_level () const { return 0; }
+    /** The level the bodies are sampled and forced on: the finest unless erf.moving_bodies.anchor_level says otherwise. */
+    int anchor_level () const { return m_anchor; }
     const MovingBodiesInputs& inputs () const { return m_in; }
 
 private:
-    MovingBodies (MovingBodiesInputs in, double dt, double t_max, bool restarting);
+    MovingBodies (MovingBodiesInputs in, int anchor, double dt, double t_max, bool restarting);
 
     /**
      * Sample (or prescribe) the flow at every body's velocity nodes and hand it to the bodies;
@@ -95,6 +101,7 @@ private:
                             const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
 
     MovingBodiesInputs m_in;
+    int m_anchor{0};
     double m_dt{0.0};
     double m_t_max{0.0};
     int m_step{0};
@@ -129,8 +136,9 @@ private:
                                    const amrex::Geometry& geom, bool first);
     bool any_forcing () const;
 
-    /** Build the wake lines from the rotors' current hub, axis and diameter; abort if a point leaves the domain. */
-    void build_wake_lines (const amrex::Geometry& geom);
+    /** Build the wake lines from the rotors' current hub, axis and diameter; abort if a point leaves the domain or the anchor level's grids. */
+    void build_wake_lines (const amrex::BoxArray& level_grids, const amrex::Geometry& geom);
+    bool m_disk_coverage_checked{false};
     /** Sample the wake lines, accumulate the running averages and write both files. */
     void write_wake_diagnostics (double time, const amrex::MultiFab& U, const amrex::MultiFab& V,
                                  const amrex::MultiFab& W, const amrex::MultiFab* z_phys_nd,
@@ -153,7 +161,7 @@ private:
      * then the density at the hubs and the facing once the flow at the nodes is known. Each
      * part prints its findings together and a fatal one aborts.
      */
-    void audit_turbines_setup (const amrex::Geometry& geom);
+    void audit_turbines_setup (const amrex::BoxArray& level_grids, const amrex::Geometry& geom);
     void audit_turbines_flow (const amrex::MultiFab& cons, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
     bool m_audited_setup{false};
     bool m_audited_flow{false};

@@ -433,6 +433,17 @@ void FAST_CFD_Step (int* iTurb, int* ErrStat, char* ErrMsg)
 {
     StubTurbine* t = turbine_at(iTurb, ErrStat, ErrMsg);
     if (!t) { return; }
+    // OpenFAST shares one step counter between the turbines of a process and advances it after the
+    // last turbine's call: a turbine stepped ahead of the others would see t(1) == t(2) there. Emulate
+    // that so a driver stepping the turbines out of lockstep fails here as it does with OpenFAST.
+    for (const auto& other : g_turbines) {
+        if (other && other->time_index < t->time_index) {
+            set_error(ErrStat, ErrMsg, ErrID_Fatal,
+                      "OpenFAST stub: turbine stepped ahead of another turbine of this process (OpenFAST shares "
+                      "n_t_global; step every local turbine once per OpenFAST time step, in turn)");
+            return;
+        }
+    }
     t->azimuth = std::fmod(t->azimuth + t->rotor_speed * t->dt, 2.0 * pi);
     ++t->time_index;
     update_positions(*t);

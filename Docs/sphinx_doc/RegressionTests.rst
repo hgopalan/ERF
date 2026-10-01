@@ -692,6 +692,24 @@ Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_Uniform`_, `Exec/C
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC_Restart`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ALM_FLLC_Restart
 
+Anchor level on two levels
+--------------------------
+``OpenFAST_ADM_TwoLevel`` (same build requirements) runs the actuator-disk
+deck with a level 1 of 25 m cells over a box around the rotor and its near
+wake: the turbine lives on level 1 (the default anchor), is sampled and forced
+there with the fine level's step, and level 0 sees it through the
+average-down. The two-level plotfile and ``T1_flow.csv`` match their golds and
+the integrated source equals minus the thrust in every row.
+``OpenFASTADM_TwoLevel_BoxParity`` splits the fine level unevenly over two
+ranks and requires the plotfiles and the flow log to agree, and
+``OpenFAST_ADM_TwoLevel_Restart`` checkpoints at step 5 and restarts to step
+10 with the fine level and the turbine restored exactly.
+
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoLevel`_ and `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoLevel_Restart`_
+
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoLevel`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoLevel
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoLevel_Restart`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_TwoLevel_Restart
+
 Farms
 -----
 ``OpenFAST_ADM_TwoTurbines`` (same build requirements) runs two stub turbines
