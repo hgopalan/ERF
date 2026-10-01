@@ -18,7 +18,9 @@ void interpolate_along (const std::vector<amrex::Real>& x_src, const std::vector
 
 /**
  * Filtered lifting-line correction (Martinez-Tossas and Meneveau, 2019) for one blade of an
- * actuator line, following Kynema's variable-chord operator.
+ * actuator line, in the generalized form for a chord that varies along the span (Martinez-Tossas,
+ * Sakievich, Churchfield and Meneveau, Wind Energy 27:101, 2024, eq. 4: the optimal kernel width
+ * stays inside the span integral), as Kynema's variable-chord operator implements it.
  *
  * An actuator line spread with a Gaussian of width epsilon sees, at its own points, a weaker
  * induced velocity than the vortex sheet of a real blade: the kernel is much wider than the

@@ -253,8 +253,10 @@ tens of metres for a 240 m rotor) sees at its own points a weaker induced
 velocity than the vortex sheet of a real blade, whose kernel is of the order
 of the chord: the blades then see too much wind and the line over-predicts
 power, more so for wider kernels. The filtered lifting-line correction
-(Martinez-Tossas and Meneveau, 2019), on by default with ``mode = alm`` (``fllc = false`` switches it off),
-computes the velocity the trailing vorticity of the line's own lift
+(Martinez-Tossas and Meneveau, 2019, in the generalized form for blades whose
+chord varies along the span of Martinez-Tossas, Sakievich, Churchfield and
+Meneveau, Wind Energy 27:101, 2024), on by default with ``mode = alm``
+(``fllc = false`` switches it off), computes the velocity the trailing vorticity of the line's own lift
 distribution induces at the line for the kernel actually used and for the
 optimal one, ``epsilon_opt = fllc_eps_chord * chord`` (a quarter chord by
 default, the chord being OpenFAST's at each force node), and adds the relaxed
