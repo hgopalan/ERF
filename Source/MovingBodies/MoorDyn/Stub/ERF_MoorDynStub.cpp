@@ -1,0 +1,535 @@
+// Stand-in for libmoordyn, implementing the subset of the MoorDyn-C v2 C API declared in
+// Stub/moordyn/MoorDyn2.h. It lets ERF's line coupling be built and tested where MoorDyn is not
+// installed (CI). It reads the same input file (LINE TYPES, POINT PROPERTIES, LINES, OPTIONS) and
+// has the geometry, ordering and data flow of the real API, but no line dynamics: every line hangs
+// between its two attachment points as a parabola with the catenary sag of its unstretched length,
+// swings about the chord to the quasi-static blowout angle atan(q / w) set by the fluid velocity it
+// is given (q the drag per unit length, w the weight per unit length), relaxing towards that angle
+// with a one-second lag so that the state depends on time, and carries the catenary tension. Only
+// fixed and coupled points are accepted; the fluid loads act on nodes below z = 0, as in MoorDyn.
+
+#include "moordyn/MoorDyn2.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <fstream>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace {
+
+constexpr double pi = 3.14159265358979323846;
+
+struct LineType {
+    std::string name;
+    double diam = 0.0, mass = 0.0, EA = 0.0, Cd = 1.0;
+};
+
+struct Point {
+    int type = 1;    // -1 coupled, 0 free, 1 fixed
+    double pos[3] = {0.0, 0.0, 0.0};
+    double force[3] = {0.0, 0.0, 0.0};
+};
+
+struct Line {
+    int type_index = 0;
+    int attachA = 0, attachB = 0;   // point ids, from 1
+    double length = 0.0;            // unstretched
+    unsigned nseg = 1;
+    double phi = 0.0;               // swing angle about the chord (rad), 0 = hanging straight down
+    double sag = 0.0;               // sag at mid-span (m)
+    double H = 0.0;                 // horizontal tension (m)
+    double w_eff = 0.0;             // effective weight per unit length (N/m)
+    std::vector<double> pos, vel, ten;   // 3*(nseg+1) each
+};
+
+struct StubSystem {
+    std::vector<LineType> types;
+    std::vector<Point> points;
+    std::vector<Line> lines;
+    double dtM = 0.001, g = 9.80665, rho = 1025.0, depth = 0.0;
+    int wave_kin = 0;
+    bool initialised = false;
+    unsigned nkin = 0;
+    std::vector<double> U;          // 3*nkin, the fluid velocity last set
+    double t = 0.0;
+};
+
+std::string lower (std::string s)
+{
+    for (auto& c : s) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
+    return s;
+}
+
+std::vector<std::string> tokens (const std::string& line)
+{
+    std::istringstream in(line);
+    std::vector<std::string> out;
+    std::string tok;
+    while (in >> tok) { out.push_back(tok); }
+    return out;
+}
+
+bool is_header (const std::string& line) { return line.find("---") != std::string::npos; }
+
+bool parse (const std::string& fname, StubSystem& s)
+{
+    std::ifstream in(fname);
+    if (!in) { std::fprintf(stderr, "MoorDyn stub: cannot open '%s'\n", fname.c_str()); return false; }
+    std::string section, line;
+    int skip = 0;
+    while (std::getline(in, line)) {
+        if (is_header(line)) {
+            const std::string u = lower(line);
+            if (u.find("line type") != std::string::npos) { section = "types"; skip = 2; }
+            else if (u.find("point") != std::string::npos || u.find("connection") != std::string::npos) { section = "points"; skip = 2; }
+            else if (u.find("line") != std::string::npos) { section = "lines"; skip = 2; }
+            else if (u.find("option") != std::string::npos) { section = "options"; skip = 0; }
+            else { section = "other"; skip = 0; }
+            continue;
+        }
+        if (skip > 0) { --skip; continue; }
+        const auto tok = tokens(line);
+        if (tok.empty()) { continue; }
+        if (section == "types") {
+            if (tok.size() < 4) { std::fprintf(stderr, "MoorDyn stub: bad line type row '%s'\n", line.c_str()); return false; }
+            LineType t;
+            t.name = tok[0]; t.diam = std::stod(tok[1]); t.mass = std::stod(tok[2]); t.EA = std::stod(tok[3]);
+            if (tok.size() >= 10) { t.Cd = std::stod(tok[6]); }        // v2 columns: EI Cd Ca CdAx CaAx after BA
+            else if (tok.size() >= 8) { t.Cd = std::stod(tok[6]); }   // v1 columns: Can Cat Cdn Cdt after BA
+            s.types.push_back(t);
+        } else if (section == "points") {
+            if (tok.size() < 5) { std::fprintf(stderr, "MoorDyn stub: bad point row '%s'\n", line.c_str()); return false; }
+            Point p;
+            const std::string ty = lower(tok[1]);
+            if (ty.rfind("fix", 0) == 0 || ty.rfind("anch", 0) == 0) { p.type = 1; }
+            else if (ty.rfind("coupled", 0) == 0 || ty.rfind("vessel", 0) == 0 || ty.rfind("cpld", 0) == 0) { p.type = -1; }
+            else { std::fprintf(stderr, "MoorDyn stub: point type '%s' is not supported (fixed or coupled only)\n", tok[1].c_str()); return false; }
+            for (int d = 0; d < 3; ++d) { p.pos[d] = std::stod(tok[2 + d]); }
+            s.points.push_back(p);
+        } else if (section == "lines") {
+            if (tok.size() < 6) { std::fprintf(stderr, "MoorDyn stub: bad line row '%s'\n", line.c_str()); return false; }
+            Line l;
+            const std::string ty = tok[1];
+            auto it = std::find_if(s.types.begin(), s.types.end(), [&](const LineType& t) { return t.name == ty; });
+            if (it == s.types.end()) { std::fprintf(stderr, "MoorDyn stub: unknown line type '%s'\n", ty.c_str()); return false; }
+            l.type_index = static_cast<int>(it - s.types.begin());
+            l.attachA = std::stoi(tok[2]); l.attachB = std::stoi(tok[3]);
+            l.length = std::stod(tok[4]); l.nseg = static_cast<unsigned>(std::stoi(tok[5]));
+            if (l.nseg < 1) { std::fprintf(stderr, "MoorDyn stub: a line needs at least one segment\n"); return false; }
+            s.lines.push_back(l);
+        } else if (section == "options") {
+            if (tok.size() < 2) { continue; }
+            const std::string key = lower(tok[1]);
+            if (key == "dtm" || key == "dt") { s.dtM = std::stod(tok[0]); }
+            else if (key == "g" || key == "gravity") { s.g = std::stod(tok[0]); }
+            else if (key == "rho" || key == "wtrdnsty") { s.rho = std::stod(tok[0]); }
+            else if (key == "wtrdpth") { s.depth = std::stod(tok[0]); }
+            else if (key == "wavekin") { s.wave_kin = std::stoi(tok[0]); }
+        }
+    }
+    if (s.lines.empty()) { std::fprintf(stderr, "MoorDyn stub: no lines in '%s'\n", fname.c_str()); return false; }
+    for (const auto& l : s.lines) {
+        if (l.attachA < 1 || l.attachA > static_cast<int>(s.points.size()) || l.attachB < 1 || l.attachB > static_cast<int>(s.points.size())) {
+            std::fprintf(stderr, "MoorDyn stub: a line attaches to a point that does not exist\n"); return false;
+        }
+    }
+    return true;
+}
+
+// Shape and tension of one line from its end points, its swing angle and the fluid velocity.
+void place (StubSystem& s, Line& l, const double* U_nodes, double dt)
+{
+    const LineType& ty = s.types[static_cast<std::size_t>(l.type_index)];
+    const Point& A = s.points[static_cast<std::size_t>(l.attachA - 1)];
+    const Point& B = s.points[static_cast<std::size_t>(l.attachB - 1)];
+    const unsigned nn = l.nseg + 1;
+    double chord[3], c = 0.0;
+    for (int d = 0; d < 3; ++d) { chord[d] = B.pos[d] - A.pos[d]; c += chord[d] * chord[d]; }
+    c = std::sqrt(c);
+    double ec[3] = {1.0, 0.0, 0.0};
+    if (c > 0.0) { for (int d = 0; d < 3; ++d) { ec[d] = chord[d] / c; } }
+
+    // net weight per unit length in the fluid, and the drag per unit length from the mean normal velocity
+    const double area = 0.25 * pi * ty.diam * ty.diam;
+    const double w = (ty.mass - s.rho * area) * s.g;
+    double Um[3] = {0.0, 0.0, 0.0};
+    const double zmid = 0.5 * (A.pos[2] + B.pos[2]);
+    if (U_nodes != nullptr && zmid <= 0.0) {
+        for (unsigned i = 0; i < nn; ++i) { for (int d = 0; d < 3; ++d) { Um[d] += U_nodes[3*i+d] / nn; } }
+    }
+    const double Udotc = Um[0]*ec[0] + Um[1]*ec[1] + Um[2]*ec[2];
+    double Un[3];
+    for (int d = 0; d < 3; ++d) { Un[d] = Um[d] - Udotc * ec[d]; }
+    const double Un2 = Un[0]*Un[0] + Un[1]*Un[1] + Un[2]*Un[2];
+    const double q = 0.5 * s.rho * ty.Cd * ty.diam * Un2;
+
+    // sag: the parabola whose length is the unstretched length (slack), or the elastic sag (taut)
+    double sag;
+    if (l.length > c) {
+        sag = std::sqrt(3.0 * c * (l.length - c) / 8.0);
+    } else {
+        const double T = ty.EA * (c - l.length) / std::max(l.length, 1.0e-12);
+        sag = (T > 0.0) ? w * c * c / (8.0 * T) : 0.0;
+    }
+    sag = std::max(sag, 1.0e-6 * std::max(c, 1.0));
+
+    // the sag direction: down, rotated about the chord towards the normal fluid velocity by the swing angle
+    double down[3] = {0.0, 0.0, -1.0};
+    const double ddotc = down[0]*ec[0] + down[1]*ec[1] + down[2]*ec[2];
+    for (int d = 0; d < 3; ++d) { down[d] -= ddotc * ec[d]; }
+    double dn = std::sqrt(down[0]*down[0] + down[1]*down[1] + down[2]*down[2]);
+    if (dn < 1.0e-12) { down[0] = 0.0; down[1] = 1.0; down[2] = 0.0; dn = 1.0; }
+    for (int d = 0; d < 3; ++d) { down[d] /= dn; }
+    double side[3] = {0.0, 0.0, 0.0};
+    if (Un2 > 0.0) {
+        const double un = std::sqrt(Un2);
+        for (int d = 0; d < 3; ++d) { side[d] = Un[d] / un; }
+    }
+    const double phi_static = (w > 0.0) ? std::atan2(q, w) : 0.0;
+    const double tau = 1.0;
+    l.phi = (dt > 0.0) ? phi_static + (l.phi - phi_static) * std::exp(-dt / tau) : l.phi;
+    double es[3];
+    for (int d = 0; d < 3; ++d) { es[d] = std::cos(l.phi) * down[d] + std::sin(l.phi) * side[d]; }
+    l.sag = sag;
+    l.w_eff = std::sqrt(w * w + q * q);
+    l.H = (sag > 0.0) ? l.w_eff * c * c / (8.0 * sag) : 0.0;
+
+    std::vector<double> newpos(3 * nn), newten(3 * nn);
+    for (unsigned i = 0; i < nn; ++i) {
+        const double xi = static_cast<double>(i) / l.nseg;
+        const double y = 4.0 * sag * xi * (1.0 - xi);
+        const double slope = 4.0 * sag * (1.0 - 2.0 * xi) / std::max(c, 1.0e-12);
+        for (int d = 0; d < 3; ++d) {
+            newpos[3*i+d] = A.pos[d] + xi * chord[d] + y * es[d];
+            newten[3*i+d] = l.H * (ec[d] + slope * es[d]);   // the tension along the tangent, horizontal component H
+        }
+    }
+    l.vel.assign(3 * nn, 0.0);
+    if (dt > 0.0 && l.pos.size() == newpos.size()) {
+        for (std::size_t k = 0; k < newpos.size(); ++k) { l.vel[k] = (newpos[k] - l.pos[k]) / dt; }
+    }
+    l.pos = newpos;
+    l.ten = newten;
+}
+
+void update_point_forces (StubSystem& s)
+{
+    // the pull of each line on its attachments is the end tension directed into the line; MoorDyn
+    // reports it as the net force of the points it integrates only, so fixed points keep zero
+    for (auto& p : s.points) { for (int d = 0; d < 3; ++d) { p.force[d] = 0.0; } }
+    for (const auto& l : s.lines) {
+        const unsigned last = l.nseg;
+        Point& A = s.points[static_cast<std::size_t>(l.attachA - 1)];
+        Point& B = s.points[static_cast<std::size_t>(l.attachB - 1)];
+        for (int d = 0; d < 3; ++d) {
+            if (A.type != 1) { A.force[d] += l.ten[d]; }
+            if (B.type != 1) { B.force[d] -= l.ten[3*last+d]; }
+        }
+    }
+}
+
+void set_coupled (StubSystem& s, const double* x)
+{
+    if (x == nullptr) { return; }
+    unsigned ix = 0;
+    for (auto& p : s.points) {
+        if (p.type == -1) { for (int d = 0; d < 3; ++d) { p.pos[d] = x[ix + d]; } ix += 3; }
+    }
+}
+
+unsigned coupled_dof (const StubSystem& s)
+{
+    unsigned n = 0;
+    for (const auto& p : s.points) { if (p.type == -1) { n += 3; } }
+    return n;
+}
+
+unsigned kin_points (const StubSystem& s)
+{
+    unsigned n = 0;
+    for (const auto& l : s.lines) { n += l.nseg + 1; }
+    return n + static_cast<unsigned>(s.points.size());
+}
+
+void advance (StubSystem& s, double dt)
+{
+    unsigned off = 0;
+    for (auto& l : s.lines) {
+        const double* U = (s.nkin > 0 && !s.U.empty()) ? &s.U[3 * off] : nullptr;
+        place(s, l, U, dt);
+        off += l.nseg + 1;
+    }
+    update_point_forces(s);
+}
+
+void coupled_forces (const StubSystem& s, double* f)
+{
+    if (f == nullptr) { return; }
+    unsigned ix = 0;
+    for (const auto& p : s.points) {
+        if (p.type == -1) { for (int d = 0; d < 3; ++d) { f[ix + d] = p.force[d]; } ix += 3; }
+    }
+}
+
+StubSystem* sys (MoorDyn h) { return reinterpret_cast<StubSystem*>(h); }
+
+struct LineHandle { StubSystem* s; unsigned index; };
+struct PointHandle { StubSystem* s; unsigned index; };
+
+} // namespace
+
+extern "C" {
+
+MoorDyn MoorDyn_Create (const char* infilename)
+{
+    if (infilename == nullptr) { return nullptr; }
+    auto s = std::make_unique<StubSystem>();
+    if (!parse(infilename, *s)) { return nullptr; }
+    return reinterpret_cast<MoorDyn>(s.release());
+}
+
+int MoorDyn_NCoupledDOF (MoorDyn system, unsigned int* n)
+{
+    if (system == nullptr || n == nullptr) { return MOORDYN_INVALID_VALUE; }
+    *n = coupled_dof(*sys(system));
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_SetVerbosity (MoorDyn system, int) { return system ? MOORDYN_SUCCESS : MOORDYN_INVALID_VALUE; }
+int MoorDyn_SetLogFile (MoorDyn system, const char* path)
+{
+    if (system == nullptr) { return MOORDYN_INVALID_VALUE; }
+    std::ofstream out(path, std::ios::trunc);
+    return out ? MOORDYN_SUCCESS : MOORDYN_INVALID_OUTPUT_FILE;
+}
+int MoorDyn_SetLogLevel (MoorDyn system, int) { return system ? MOORDYN_SUCCESS : MOORDYN_INVALID_VALUE; }
+
+static int stub_init (MoorDyn system, const double* x, bool)
+{
+    if (system == nullptr) { return MOORDYN_INVALID_VALUE; }
+    StubSystem& s = *sys(system);
+    if (coupled_dof(s) > 0 && x == nullptr) { return MOORDYN_INVALID_VALUE; }
+    set_coupled(s, x);
+    s.t = 0.0;
+    for (auto& l : s.lines) { l.phi = 0.0; l.pos.clear(); }
+    advance(s, 0.0);
+    s.initialised = true;
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_Init (MoorDyn system, const double* x, const double*) { return stub_init(system, x, true); }
+int MoorDyn_Init_NoIC (MoorDyn system, const double* x, const double*) { return stub_init(system, x, false); }
+
+int MoorDyn_Step (MoorDyn system, const double* x, const double*, double* f, double* t, double* dt)
+{
+    if (system == nullptr || t == nullptr || dt == nullptr) { return MOORDYN_INVALID_VALUE; }
+    StubSystem& s = *sys(system);
+    if (!s.initialised) { return MOORDYN_INVALID_VALUE; }
+    if (coupled_dof(s) > 0 && (x == nullptr || f == nullptr)) { return MOORDYN_INVALID_VALUE; }
+    if (*dt <= 0.0) { coupled_forces(s, f); return MOORDYN_SUCCESS; }
+    set_coupled(s, x);
+    advance(s, *dt);
+    s.t += *dt;
+    *t = s.t;
+    coupled_forces(s, f);
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_Close (MoorDyn system)
+{
+    if (system == nullptr) { return MOORDYN_INVALID_VALUE; }
+    delete sys(system);
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_ExternalWaveKinInit (MoorDyn system, unsigned int* n)
+{
+    if (system == nullptr || n == nullptr) { return MOORDYN_INVALID_VALUE; }
+    StubSystem& s = *sys(system);
+    s.nkin = (s.wave_kin == 1) ? kin_points(s) : 0;   // as MoorDyn: no points unless the waves are external
+    s.U.assign(3 * static_cast<std::size_t>(s.nkin), 0.0);
+    *n = s.nkin;
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_ExternalWaveKinGetN (MoorDyn system, unsigned int* n)
+{
+    if (system == nullptr || n == nullptr) { return MOORDYN_INVALID_VALUE; }
+    *n = sys(system)->nkin;
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_ExternalWaveKinGetCoordinates (MoorDyn system, double* r)
+{
+    if (system == nullptr || r == nullptr) { return MOORDYN_INVALID_VALUE; }
+    const StubSystem& s = *sys(system);
+    if (s.nkin == 0) { return MOORDYN_INVALID_VALUE; }
+    unsigned k = 0;
+    for (const auto& l : s.lines) {
+        for (std::size_t j = 0; j < l.pos.size(); ++j) { r[k++] = l.pos[j]; }
+    }
+    for (const auto& p : s.points) { for (int d = 0; d < 3; ++d) { r[k++] = p.pos[d]; } }
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_ExternalWaveKinSet (MoorDyn system, const double* U, const double*, double)
+{
+    if (system == nullptr || U == nullptr) { return MOORDYN_INVALID_VALUE; }
+    StubSystem& s = *sys(system);
+    if (s.nkin == 0) { return MOORDYN_INVALID_VALUE; }
+    s.U.assign(U, U + 3 * static_cast<std::size_t>(s.nkin));
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_GetNumberPoints (MoorDyn system, unsigned int* n)
+{
+    if (system == nullptr || n == nullptr) { return MOORDYN_INVALID_VALUE; }
+    *n = static_cast<unsigned>(sys(system)->points.size());
+    return MOORDYN_SUCCESS;
+}
+
+MoorDynPoint MoorDyn_GetPoint (MoorDyn system, unsigned int c)
+{
+    if (system == nullptr) { return nullptr; }
+    StubSystem& s = *sys(system);
+    if (c < 1 || c > s.points.size()) { return nullptr; }
+    return reinterpret_cast<MoorDynPoint>(new PointHandle{&s, c - 1});   // handles are small and leaked, as the tests are short
+}
+
+int MoorDyn_GetNumberLines (MoorDyn system, unsigned int* n)
+{
+    if (system == nullptr || n == nullptr) { return MOORDYN_INVALID_VALUE; }
+    *n = static_cast<unsigned>(sys(system)->lines.size());
+    return MOORDYN_SUCCESS;
+}
+
+MoorDynLine MoorDyn_GetLine (MoorDyn system, unsigned int l)
+{
+    if (system == nullptr) { return nullptr; }
+    StubSystem& s = *sys(system);
+    if (l < 1 || l > s.lines.size()) { return nullptr; }
+    return reinterpret_cast<MoorDynLine>(new LineHandle{&s, l - 1});
+}
+
+int MoorDyn_GetDt (MoorDyn system, double* dt)
+{
+    if (system == nullptr || dt == nullptr) { return MOORDYN_INVALID_VALUE; }
+    *dt = sys(system)->dtM;
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_SetDt (MoorDyn system, double dt)
+{
+    if (system == nullptr || dt <= 0.0) { return MOORDYN_INVALID_VALUE; }
+    sys(system)->dtM = dt;
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_Save (MoorDyn system, const char* filepath)
+{
+    if (system == nullptr || filepath == nullptr) { return MOORDYN_INVALID_VALUE; }
+    const StubSystem& s = *sys(system);
+    std::ofstream out(filepath, std::ios::trunc);
+    if (!out) { return MOORDYN_INVALID_OUTPUT_FILE; }
+    out.precision(17);
+    out << "moordyn-stub-state " << s.t << " " << s.lines.size() << "\n";
+    for (const auto& l : s.lines) {
+        out << l.phi;
+        for (double v : l.pos) { out << " " << v; }
+        out << "\n";
+    }
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_Load (MoorDyn system, const char* filepath)
+{
+    if (system == nullptr || filepath == nullptr) { return MOORDYN_INVALID_VALUE; }
+    StubSystem& s = *sys(system);
+    if (!s.initialised) { return MOORDYN_INVALID_VALUE; }
+    std::ifstream in(filepath);
+    if (!in) { return MOORDYN_INVALID_INPUT_FILE; }
+    std::string tag;
+    std::size_t nl = 0;
+    if (!(in >> tag >> s.t >> nl) || tag != "moordyn-stub-state" || nl != s.lines.size()) { return MOORDYN_INVALID_INPUT; }
+    for (auto& l : s.lines) {
+        if (!(in >> l.phi)) { return MOORDYN_INVALID_INPUT; }
+        for (double& v : l.pos) { if (!(in >> v)) { return MOORDYN_INVALID_INPUT; } }
+    }
+    // the tensions and velocities follow from the restored angle; velocities restart from rest
+    unsigned off = 0;
+    for (auto& l : s.lines) {
+        const double phi = l.phi;
+        const double* U = (s.nkin > 0 && !s.U.empty()) ? &s.U[3 * off] : nullptr;
+        place(s, l, U, 0.0);
+        l.phi = phi;
+        off += l.nseg + 1;
+    }
+    update_point_forces(s);
+    return MOORDYN_SUCCESS;
+}
+
+#define STUB_LINE(h) if ((h) == nullptr) { return MOORDYN_INVALID_VALUE; } \
+    const Line& L = reinterpret_cast<LineHandle*>(h)->s->lines[reinterpret_cast<LineHandle*>(h)->index]
+
+int MoorDyn_GetLineN (MoorDynLine l, unsigned int* n) { STUB_LINE(l); if (!n) { return MOORDYN_INVALID_VALUE; } *n = L.nseg; return MOORDYN_SUCCESS; }
+int MoorDyn_GetLineNumberNodes (MoorDynLine l, unsigned int* n) { STUB_LINE(l); if (!n) { return MOORDYN_INVALID_VALUE; } *n = L.nseg + 1; return MOORDYN_SUCCESS; }
+int MoorDyn_GetLineUnstretchedLength (MoorDynLine l, double* ul) { STUB_LINE(l); if (!ul) { return MOORDYN_INVALID_VALUE; } *ul = L.length; return MOORDYN_SUCCESS; }
+
+int MoorDyn_GetLineNodePos (MoorDynLine l, unsigned int i, double pos[3])
+{
+    STUB_LINE(l);
+    if (pos == nullptr || i > L.nseg) { return MOORDYN_INVALID_VALUE; }
+    for (int d = 0; d < 3; ++d) { pos[d] = L.pos[3*i+d]; }
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_GetLineNodeVel (MoorDynLine l, unsigned int i, double vel[3])
+{
+    STUB_LINE(l);
+    if (vel == nullptr || i > L.nseg) { return MOORDYN_INVALID_VALUE; }
+    for (int d = 0; d < 3; ++d) { vel[d] = L.vel[3*i+d]; }
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_GetLineNodeTen (MoorDynLine l, unsigned int i, double t[3])
+{
+    STUB_LINE(l);
+    if (t == nullptr || i > L.nseg) { return MOORDYN_INVALID_VALUE; }
+    for (int d = 0; d < 3; ++d) { t[d] = L.ten[3*i+d]; }
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_GetLineFairTen (MoorDynLine l, double* t)
+{
+    STUB_LINE(l);
+    if (t == nullptr) { return MOORDYN_INVALID_VALUE; }
+    const unsigned i = L.nseg;
+    *t = std::sqrt(L.ten[3*i]*L.ten[3*i] + L.ten[3*i+1]*L.ten[3*i+1] + L.ten[3*i+2]*L.ten[3*i+2]);
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_GetLineMaxTen (MoorDynLine l, double* t)
+{
+    STUB_LINE(l);
+    if (t == nullptr) { return MOORDYN_INVALID_VALUE; }
+    double m = 0.0;
+    for (unsigned i = 0; i <= L.nseg; ++i) {
+        m = std::max(m, std::sqrt(L.ten[3*i]*L.ten[3*i] + L.ten[3*i+1]*L.ten[3*i+1] + L.ten[3*i+2]*L.ten[3*i+2]));
+    }
+    *t = m;
+    return MOORDYN_SUCCESS;
+}
+
+#define STUB_POINT(h) if ((h) == nullptr) { return MOORDYN_INVALID_VALUE; } \
+    const Point& P = reinterpret_cast<PointHandle*>(h)->s->points[reinterpret_cast<PointHandle*>(h)->index]
+
+int MoorDyn_GetPointType (MoorDynPoint p, int* t) { STUB_POINT(p); if (!t) { return MOORDYN_INVALID_VALUE; } *t = P.type; return MOORDYN_SUCCESS; }
+int MoorDyn_GetPointPos (MoorDynPoint p, double pos[3]) { STUB_POINT(p); if (!pos) { return MOORDYN_INVALID_VALUE; } for (int d = 0; d < 3; ++d) { pos[d] = P.pos[d]; } return MOORDYN_SUCCESS; }
+int MoorDyn_GetPointForce (MoorDynPoint p, double f[3]) { STUB_POINT(p); if (!f) { return MOORDYN_INVALID_VALUE; } for (int d = 0; d < 3; ++d) { f[d] = P.force[d]; } return MOORDYN_SUCCESS; }
+
+} // extern "C"

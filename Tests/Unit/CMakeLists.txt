@@ -296,6 +296,16 @@ if(ERF_ENABLE_MOVING_BODIES)
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestRunningStats.cpp
   )
 endif()
+if(ERF_ENABLE_MOORDYN)
+  # Motivation: the MoorDyn system wrapper must report the configured version and a missing input
+  # file, initialise a fixed-fixed span with no coupled degree of freedom at the catenary sag and
+  # tension, expose the external kinematics points starting with the line nodes, blow the span out
+  # under a crosswind towards the quasi-static angle, and continue identically from a saved state.
+  # The bundled stub or the installed MoorDyn-C answers, whichever the build links.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestMoorDynSystem.cpp
+  )
+endif()
 build_erf_exe(${erf_exe_name} NO_ERF_MAIN)
 target_link_libraries(${erf_exe_name} PRIVATE GTest::gtest)
 
