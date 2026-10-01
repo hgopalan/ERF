@@ -145,15 +145,8 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, int anchor, double dt, double
     // the models are set up now, so their inputs are checked at start-up; the first OpenFAST
     // solution waits for the first step, when the flow exists to be sampled
     m_driver = std::make_unique<erf_openfast::OpenFASTDriver>(turbines);
-    if (!m_restarting) {
-        m_driver->init(m_dt, t_max);
-        for (const auto& t : m_driver->turbines()) {
-            Print() << "  " << t.name << ": OpenFAST dt " << t.dt_fast << ", " << t.num_substeps
-                    << " substeps per ERF step, " << t.num_blades << " blades, "
-                    << t.num_vel_nodes << " velocity nodes, " << t.num_force_nodes << " force nodes, on rank "
-                    << t.owner_rank << "\n";
-        }
-    }
+    // OpenFAST is initialised at the first step (after set_ground() has placed the bases on
+    // the terrain) or restored by read_checkpoint()
     for (std::size_t i = 0; i < turbines.size(); ++i) {
         // the tower's wake now reaches the blades through the flow: AeroDyn's own tower-shadow
         // correction would count it twice
@@ -216,10 +209,62 @@ MovingBodies::write_checkpoint (const std::string& chkdir) const
 }
 
 void
+MovingBodies::set_ground (const MultiFab* z_phys_nd, const Geometry& geom)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_ground_set, "MovingBodies::set_ground: called twice");
+    m_ground_set = true;
+    std::vector<Real> pos;
+    for (const auto& m : m_motion) { const auto b = m->position(0.0); pos.insert(pos.end(), {b[0], b[1], b[2]}); }
+    erf_actuator::terrain_heights(z_phys_nd, geom, pos, m_ground);
+    const Real floor_z = static_cast<Real>(geom.ProbLo(2));
+    std::size_t idisk = 0, iturb = 0;
+    for (std::size_t i = 0; i < m_in.bodies.size(); ++i) {
+        const Real dz = m_ground[i] - floor_z;   // the terrain above the domain floor: zero on a flat mesh
+        m_motion[i]->shift_base({{0.0, 0.0, dz}});
+        if (m_in.bodies[i].type == "ct_disk") {
+            m_disks[idisk++]->shift_z(dz);
+        } else {
+            m_turbine_in[iturb].base_pos[2] += dz;
+#ifdef ERF_USE_OPENFAST
+            m_driver->shift_base_z(static_cast<int>(iturb), dz);
+#endif
+            ++iturb;
+        }
+        if (dz != Real(0.0)) {
+            Print() << "erf.moving_bodies." << m_in.bodies[i].name << ": base raised by " << dz
+                    << " m onto the terrain surface at z = " << m_ground[i] << " m\n";
+        }
+    }
+#ifdef ERF_USE_OPENFAST
+    // a fresh start: OpenFAST sees the bases on the terrain; a restart is restored by read_checkpoint()
+    if (!m_restarting && !m_driver->initialized()) {
+        m_driver->init(m_dt, m_t_max);
+        for (const auto& t : m_driver->turbines()) {
+            Print() << "  " << t.name << ": OpenFAST dt " << t.dt_fast << ", " << t.num_substeps
+                    << " substeps per ERF step, " << t.num_blades << " blades, "
+                    << t.num_vel_nodes << " velocity nodes, " << t.num_force_nodes << " force nodes, on rank "
+                    << t.owner_rank << "\n";
+        }
+    }
+#endif
+    if (ParallelDescriptor::IOProcessor()) {
+        UtilCreateDirectory(m_in.diagnostics_dir, 0755);
+        std::ofstream out(m_in.diagnostics_dir + "/ground.csv", std::ios::trunc);
+        out << "body,x,y,ground,base_z\n" << std::setprecision(10);
+        for (std::size_t i = 0; i < m_in.bodies.size(); ++i) {
+            const auto b = m_motion[i]->position(0.0);
+            out << m_in.bodies[i].name << "," << b[0] << "," << b[1] << "," << m_ground[i] << "," << b[2] << "\n";
+        }
+    }
+}
+
+void
 MovingBodies::read_checkpoint (const std::string& chkdir)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_restarting && !m_restored,
                                      "MovingBodies::read_checkpoint: only once, and only on a restart");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_ground_set,
+                                     "MovingBodies::read_checkpoint: set_ground() must come first (the mesh must be read)");
     const std::string dir = chkdir + "/moving_bodies";
     if (!FileExists(dir + "/state")) {
         // a checkpoint written without bodies (a precursor, say): the bodies start afresh here
@@ -329,10 +374,12 @@ MovingBodies::advance (int lev, double time, double dt,
     if (m_restarting && !m_restored) {
         Abort("erf.moving_bodies: restarting, but the checkpoint holds no moving-bodies state (was it written by a run with bodies?)");
     }
+    if (!m_ground_set) { set_ground(z_phys_nd, geom); }
     ++m_step;
     const bool first = (m_step == 1);
 #ifdef ERF_USE_OPENFAST
-    if (!m_audited_setup) { audit_turbines_setup(U.boxArray(), geom); }
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_driver->initialized(), "MovingBodies::advance: OpenFAST is not initialised (set_ground() initialises it on a fresh start)");
+    if (!m_audited_setup) { audit_turbines_setup(U.boxArray(), z_phys_nd, geom); }
     if (first && !m_driver->solved0()) {
         // first step: OpenFAST's first solution sees the initial flow at its nodes
         supply_velocities(time, U, V, W, z_phys_nd, geom);
@@ -399,14 +446,16 @@ MovingBodies::accumulate_statistics (double time)
 }
 
 void
-MovingBodies::build_wake_lines (const BoxArray& level_grids, const Geometry& geom)
+MovingBodies::build_wake_lines (const BoxArray& level_grids, const MultiFab* z_phys_nd, const Geometry& geom)
 {
     const auto& w = m_in.wake;
+    // the vertical line of each rotor stops at the terrain under its hub
     auto add = [&](const std::string& name, const std::string& root, const std::array<Real,3>& hub,
                    const std::array<Real,3>& axis, Real diameter) {
+        std::vector<Real> ground;
+        erf_actuator::terrain_heights(z_phys_nd, geom, {hub[0], hub[1], hub[2]}, ground);
         m_wakes.push_back(std::make_unique<erf_actuator::WakeLines>(name, root, hub, axis, diameter,
-                                                                    w.lines_xD, w.half_width, w.num_points,
-                                                                    static_cast<Real>(geom.ProbLo(2))));
+                                                                    w.lines_xD, w.half_width, w.num_points, ground[0]));
     };
 #ifdef ERF_USE_OPENFAST
     for (const auto& t : m_driver->turbines()) {
@@ -458,7 +507,7 @@ void
 MovingBodies::write_wake_diagnostics (double time, const MultiFab& U, const MultiFab& V, const MultiFab& W,
                                       const MultiFab* z_phys_nd, const Geometry& geom)
 {
-    if (!m_wakes_built) { build_wake_lines(U.boxArray(), geom); }
+    if (!m_wakes_built) { build_wake_lines(U.boxArray(), z_phys_nd, geom); }
     std::vector<Real> vel;
     for (auto& wl : m_wakes) {
         erf_actuator::sample_velocity(U, V, W, z_phys_nd, geom, wl->positions(), vel);
@@ -747,8 +796,17 @@ MovingBodies::write_correction_diagnostics (double time, bool first)
     if (any) { m_corr_written = true; }
 }
 
+std::vector<Real>
+MovingBodies::hub_ground (const MultiFab* z_phys_nd, const Geometry& geom) const
+{
+    std::vector<Real> pos, ground;
+    for (const auto& t : m_driver->turbines()) { pos.insert(pos.end(), {t.hub_pos[0], t.hub_pos[1], t.hub_pos[2]}); }
+    erf_actuator::terrain_heights(z_phys_nd, geom, pos, ground);
+    return ground;
+}
+
 void
-MovingBodies::audit_turbines_setup (const BoxArray& level_grids, const Geometry& geom)
+MovingBodies::audit_turbines_setup (const BoxArray& level_grids, const MultiFab* z_phys_nd, const Geometry& geom)
 {
     m_audited_setup = true;
     const auto& turbs = m_driver->turbines();
@@ -776,6 +834,7 @@ MovingBodies::audit_turbines_setup (const BoxArray& level_grids, const Geometry&
         dx[d] = static_cast<Real>(geom.CellSize(d)); per[d] = geom.isPeriodic(d) ? 1 : 0;
     }
     const Real eps = m_epsilon_dx * geom.CellSize(0);
+    const std::vector<Real> ground = hub_ground(z_phys_nd, geom);
     bool any_fatal = false;
     for (std::size_t i = 0; i < turbs.size(); ++i) {
         const MovingBodyInputs& b = m_turbine_in[i];
@@ -790,7 +849,7 @@ MovingBodies::audit_turbines_setup (const BoxArray& level_grids, const Geometry&
             }
         }
         std::vector<erf_openfast::AuditFinding> f = erf_openfast::audit_model(b, CONST_GRAV);
-        const auto fg = erf_openfast::audit_geometry(turbs[i], b, eps, plo, phi, dx, per);
+        const auto fg = erf_openfast::audit_geometry(turbs[i], b, eps, plo, phi, dx, per, ground[i]);
         f.insert(f.end(), fg.begin(), fg.end());
         erf_openfast::report_audit(turbs[i].name + " (model and geometry)", f, any_fatal);
     }

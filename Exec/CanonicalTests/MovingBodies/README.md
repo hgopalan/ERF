@@ -23,6 +23,7 @@ box for ten steps or so, and is checked by the runner named below.
 | `Actuator_UniformCtDisk` | prescribed-Ct disk | `RunCtDisk.cmake` | the disk's force integrates back exactly; deficit vs momentum theory |
 | `OpenFAST_ADM_Uniform` | stub turbine, disk | `RunOpenFASTADM.cmake` | plotfile, sampled flow log, `fx == -thrust_x` |
 | `OpenFAST_ADM_Upstream` | stub turbine, disk, velocities sampled 1 D upstream | `RunOpenFASTADM.cmake` | plotfile, sampled flow log, `fx == -thrust_x` |
+| `OpenFAST_ADM_Terrain` | stub turbine, disk, on a Witch-of-Agnesi ridge (fitted mesh) | `RunOpenFASTADM.cmake` | ground heights log, plotfile, `fx == -thrust_x` |
 | `OpenFAST_ADM_DiskCorrected` | stub turbine, disk, free stream recovered with the filtered-disk factor | `RunOpenFASTADM.cmake`, `RunRestartParity.cmake` | plotfile, flow log, `fx == -thrust_x`; restart parity of the correction log |
 | `OpenFAST_ADM_Wake` | stub turbine, disk, wake lines | `RunOpenFASTADM.cmake` | wake running average |
 | `OpenFAST_ADM_Restart` | stub turbine, disk | `RunRestartParity.cmake` | restart parity of plotfile and wake average |

@@ -885,10 +885,6 @@ ERF::ReadCheckpointFile ()
 {
     Print() << "Restart from native checkpoint " << restart_chkfile << "\n";
 
-#ifdef ERF_USE_MOVING_BODIES
-    if (moving_bodies) { moving_bodies->read_checkpoint(restart_chkfile); }
-#endif
-
     if (sbm_state_manager) {
         const std::string schema_file = restart_chkfile + "/SBM_Schema";
         if (!FileExists(schema_file)) {
@@ -1918,6 +1914,16 @@ ERF::ReadCheckpointFile ()
                 Print() << "Restart: Loaded erfbdy time index " << itime << std::endl;
             }
         }
+    }
+#endif
+
+#ifdef ERF_USE_MOVING_BODIES
+    // the bodies' state and the OpenFAST turbines' own checkpoints, once the mesh is read: the
+    // bases are placed on the terrain before the turbines are restored
+    if (moving_bodies) {
+        const int lev = moving_bodies->anchor_level();
+        moving_bodies->set_ground(z_phys_nd[lev].get(), Geom(lev));
+        moving_bodies->read_checkpoint(restart_chkfile);
     }
 #endif
 }

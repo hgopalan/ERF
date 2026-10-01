@@ -201,6 +201,21 @@ above the true value and the thrust coefficient it implies (0.76 against the BEM
 correction settles from its start-up transient within about 50 s with no
 oscillation.
 
+Bodies on terrain
+-----------------
+On a terrain-fitted mesh the z of ``base_pos`` is the height of the body's base
+above the terrain surface at its (x, y): the surface is the k = 0 node plane of
+the mesh, interpolated bilinearly between the four nodes around the base, and
+that height is added to the given z once at start-up, before OpenFAST is
+initialised or restored (on a uniform-dz mesh nothing is added, so z is the
+absolute height). The sampler and the spreader already work in the physical
+heights of the fitted mesh (``z_phys_nd``) and with the cell volumes
+(``detJ``), so the nodes, the rings and the kernel follow the terrain without
+further change. The start-up audit measures the rotor's ground clearance from
+the terrain height under the hub, and the vertical wake line of each rotor
+stops at the terrain under its hub. The heights added are written to
+``<diagnostics_dir>/ground.csv`` (body, x, y, terrain height, base z).
+
 OpenFAST rotor as an actuator line
 ----------------------------------
 

@@ -58,6 +58,14 @@ PrescribedCtDisk::PrescribedCtDisk (const MovingBodyInputs& in)
 }
 
 void
+PrescribedCtDisk::shift_z (Real dz)
+{
+    m_center[2] += dz;
+    for (std::size_t p = 2; p < m_disk_pos.size(); p += 3) { m_disk_pos[p] += dz; }
+    for (std::size_t p = 2; p < m_sample_pos.size(); p += 3) { m_sample_pos[p] += dz; }
+}
+
+void
 PrescribedCtDisk::update (const std::vector<Real>& sample_vel, const std::vector<Real>& disk_vel)
 {
     const int n = num_points();

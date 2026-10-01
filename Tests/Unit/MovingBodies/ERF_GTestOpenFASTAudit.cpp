@@ -158,31 +158,36 @@ TEST(OpenFASTAudit, GeometryChecksTheRotorAgainstTheDomainAndTheMesh)
     b.base_pos = {{750.0, 600.0, 0.0}};
     // a 240 m rotor at 150 m on 50 m cells with a 100 m kernel: fine but coarse (4.8 cells across)
     auto t = rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 10);
-    auto f = erf_openfast::audit_geometry(t, b, 100.0, plo, phi, dx, per);
+    auto f = erf_openfast::audit_geometry(t, b, 100.0, plo, phi, dx, per, 0.0);
     EXPECT_EQ(fatal_count(f), 0); EXPECT_TRUE(mentions(f, "cells across the rotor diameter"));
     // on 10 m cells nothing is left to say
-    EXPECT_TRUE(erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per).empty());
+    EXPECT_TRUE(erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0).empty());
     // the rotor cuts the ground / the top: fatal
-    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 100.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per);
+    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 100.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
     EXPECT_EQ(fatal_count(f), 1); EXPECT_TRUE(mentions(f, "below the ground"));
-    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 500.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per);
+    // on terrain the ground under the hub is the terrain surface: a 150 m hub with a 120 m rotor clears
+    // flat ground but not a 100 m hill beneath it
+    EXPECT_EQ(fatal_count(erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0)), 0);
+    f = erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 100.0);
+    EXPECT_EQ(fatal_count(f), 1); EXPECT_TRUE(mentions(f, "terrain surface at z = 100"));
+    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 500.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
     EXPECT_EQ(fatal_count(f), 1); EXPECT_TRUE(mentions(f, "above the domain top"));
     // the base outside the domain: fatal
     b.base_pos = {{-10.0, 600.0, 0.0}};
-    f = erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per);
+    f = erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
     EXPECT_EQ(fatal_count(f), 1); EXPECT_TRUE(mentions(f, "outside the domain in x"));
     b.base_pos = {{750.0, 600.0, 0.0}};
     // a non-periodic y boundary: the rotor near it warns about the kernel, across it is fatal
     const std::array<int,3> per_y{{1, 0, 0}};
-    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 150.0, 150.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per_y);
+    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 150.0, 150.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per_y, 0.0);
     EXPECT_EQ(fatal_count(f), 0); EXPECT_TRUE(mentions(f, "kernel"));
-    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 100.0, 150.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per_y);
+    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 100.0, 150.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per_y, 0.0);
     EXPECT_EQ(fatal_count(f), 1); EXPECT_TRUE(mentions(f, "non-periodic y boundary"));
     // an actuator line whose points are farther apart than the kernel; a kernel under a cell
     b.mode = "alm";
-    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 4), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per);
+    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 4), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
     EXPECT_EQ(fatal_count(f), 0); EXPECT_TRUE(mentions(f, "farther apart than the kernel"));
-    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 50), b, 5.0, plo, phi, {{10.0, 10.0, 10.0}}, per);
+    f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 50), b, 5.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
     EXPECT_EQ(fatal_count(f), 0); EXPECT_TRUE(mentions(f, "narrower than the smallest cell"));
 }
 

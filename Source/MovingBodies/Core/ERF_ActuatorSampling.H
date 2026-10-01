@@ -56,6 +56,17 @@ void sample_cell_scalar (const amrex::MultiFab& mf, int comp,
                          std::vector<amrex::Real>& val);
 
 /**
+ * Height of the terrain surface (the k = 0 node plane of z_phys_nd, bilinear between the four
+ * nodes around each point's (x, y)) under a set of points; prob_lo z everywhere on a uniform-dz
+ * mesh (z_phys_nd null). Same ownership rules and reduction as sample_velocity(): the points
+ * must lie inside the domain horizontally; z is ignored.
+ *
+ * @param[in] pos 3*n positions, @param[out] h n surface heights, the same on every rank on return
+ */
+void terrain_heights (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom,
+                      const std::vector<amrex::Real>& pos, std::vector<amrex::Real>& h);
+
+/**
  * Whether every point, with the cells within `reach` metres around it, lies inside the union
  * of boxes of a level (the anchor level's grids): the sampler needs the neighbouring cells and
  * the spreader the kernel's reach, and on a refined level that is not the whole domain. Periodic

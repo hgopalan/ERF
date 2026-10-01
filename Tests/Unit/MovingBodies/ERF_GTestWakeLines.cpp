@@ -109,6 +109,19 @@ TEST(WakeLines, VerticalLineIsClippedAtTheGround)
     EXPECT_EQ(line.rfind("0,2,vertical,-0.625,", 0), 0u) << line;
 }
 
+TEST(WakeLines, VerticalLineIsClippedAtTheTerrainUnderTheHub)
+{
+    // the same rotor on a 100 m hill: the vertical line starts at the terrain surface, not at z = 0
+    const std::array<Real,3> hub{{500.0, 500.0, 250.0}};
+    const std::array<Real,3> axis{{1.0, 0.0, 0.0}};
+    const int npts = 7;
+    WakeLines w("T1", "out/T1", hub, axis, 240.0, {2.0}, 1.5, npts, Real(100.0));
+    const auto& pos = w.positions();
+    EXPECT_NEAR(pos[3*npts + 2], 100.0, tol() * 240.0);                        // vertical start on the hill
+    EXPECT_NEAR(pos[3*(2*npts-1) + 2], 250.0 + 1.5 * 240.0, tol() * 240.0);    // vertical end unchanged
+    for (int i = npts; i < 2 * npts; ++i) { EXPECT_GE(pos[3*i + 2], 100.0 - tol()) << "point " << i << " below the hill"; }
+}
+
 TEST(WakeLines, RunningAverageRecoversTheAnalyticWake)
 {
     const std::array<Real,3> hub{{0.0, 0.0, 150.0}};

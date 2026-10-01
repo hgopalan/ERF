@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <AMReX_BLassert.H>
 #include <AMReX_REAL.H>
 
 #include "ERF_MovingBodiesInputs.H"
@@ -171,6 +172,12 @@ public:
     const std::vector<TurbineState>& turbines () const { return m_turb; }
     bool is_owner (int i) const;
     bool initialized () const { return m_initialized; }
+    /** Raise turbine i's base by dz (m) before init or restart: the terrain height under its base. */
+    void shift_base_z (int i, amrex::Real dz)
+    {
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_initialized, "OpenFASTDriver::shift_base_z: the turbines are already initialised");
+        m_turb[i].base_pos[2] += dz;
+    }
     bool solved0 () const { return m_solved0; }
 
     /** Thrust vector: sum of the hub and blade-node forces (N). */
