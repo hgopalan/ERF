@@ -313,7 +313,8 @@ public:
     void WriteLinePlot(const std::string& filename,
                        amrex::Vector<std::array<amrex::Real, 2>>& points_xy);
 
-    void HurricaneEyeTracker(const SolverChoice& solverChoice);
+    void HurricaneEyeTracker(const SolverChoice& solverChoice,
+                             const amrex::MultiFab& mf_cc_vel);
 
     void HurricaneEyeTrackerInitial(const SolverChoice& sc,
                                     const amrex::Geometry& geom,
@@ -323,8 +324,8 @@ public:
 
     void HurricaneEyeTrackerNotInitial(const SolverChoice& sc,
                                        const amrex::Geometry& geom,
-                                       const amrex::Vector<amrex::MultiFab>& S_data,
-                                       MoistureType moisture_type);
+                                       const amrex::MultiFab& mf_cc_vel,
+                                       const amrex::Vector<amrex::MultiFab>& S_data);
 
     void ComputeGlobalMinLocation(const SolverChoice& sc,
                                   const amrex::Geometry& geom,
@@ -443,6 +444,36 @@ public:
 
     //! Fill a newly built level's two-stream SEB state from its parent
     void fill_seb_from_coarse (int lev);
+
+    //! With erf.radiation.seb_surface_layer_uses_skin, hand the two-stream surface energy
+    //! balance's skin temperature of level lev to the zlo surface layer before it
+    //! computes its fluxes
+    void set_surface_layer_skin (int lev);
+
+    //! Start-up checks of the two-stream balance's coupling with the zlo surface layer:
+    //! warnings for a scalar default the surface layer's flux replaces and for rotated
+    //! surface fluxes, aborts for erf.radiation.seb_surface_layer_uses_skin conflicts
+    void check_seb_surface_layer ();
+
+    //! check_seb_surface_layer has run
+    bool m_seb_surface_layer_checked = false;
+
+    //! Per level: the "takes its radiation from its parent, no skin coupling" warning
+    //! of set_surface_layer_skin has been printed since the level last coupled
+    amrex::Vector<int> m_skin_uncoupled_warned;
+
+    //! The zlo surface layer's applied heat and moisture fluxes for the two-stream
+    //! surface energy balance's H and LE, or nullptr where it applies none
+    void seb_surface_layer_fluxes (int lev,
+                                   const amrex::MultiFab*& sens_flux,
+                                   const amrex::MultiFab*& laten_flux) const;
+
+    //! The conservative surface heat and moisture fluxes (z faces) applied to level
+    //! lev, or nullptr where there is none. The sensible_heat_flux/latent_heat_flux
+    //! 2D outputs and the two-stream surface energy balance both read them here.
+    void surface_flux_sources (int lev,
+                               const amrex::MultiFab*& sens_flux,
+                               const amrex::MultiFab*& laten_flux) const;
 
     // Called after every level 0 timestep
     void post_timestep (int nstep, double time, double dt_lev);
