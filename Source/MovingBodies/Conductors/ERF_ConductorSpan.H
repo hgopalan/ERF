@@ -36,10 +36,15 @@ public:
     unsigned num_nodes () const { return m_nodes; }
     unsigned num_kinematics_points () const { return m_nkin; }
 
-    /** The points MoorDyn wants the wind at, in ERF's frame (3*n): the line nodes first, then the attachments. */
+    /**
+     * The points MoorDyn wants the wind at, in ERF's frame (3*n): the line nodes first, then MoorDyn's
+     * fixed entries (the attachment points and one entry at MoorDyn's origin).
+     */
     std::vector<amrex::Real> kinematics_points () const;
     /** Hand MoorDyn the wind (3*n velocities, ERF's frame, no acceleration) valid at time t. */
     void set_wind (const std::vector<amrex::Real>& uvw, double t);
+    /** The wind last handed to MoorDyn at a kinematics point (the line nodes come first); zero before the first. */
+    std::array<amrex::Real,3> wind_at_point (unsigned point) const;
     /** Advance the line by dt from time, in the configured number of MoorDyn calls. */
     void step (double time, double dt);
 
@@ -71,6 +76,7 @@ private:
     std::unique_ptr<erf_moordyn::MoorDynSystem> m_sys;
     unsigned m_nodes{0};
     unsigned m_nkin{0};
+    std::vector<amrex::Real> m_wind;   //!< 3*m_nkin, the wind last handed to MoorDyn
 };
 
 } // namespace erf_conductors

@@ -1,9 +1,11 @@
 // Contract of Conductors, the manager ERF holds: the attachments are placed at their height above
 // the terrain surface under each end (the k = 0 node plane of z_phys_nd, bilinear between the
 // nodes) and ground.dat records it; on a uniform-dz mesh the given heights are absolute; the
-// spans step only on the anchor level and write one diagnostics row per step; and attachments
-// outside the domain are refused.
+// spans step only on the anchor level and write one diagnostics row per step; and without a
+// prescribed velocity the wind handed to MoorDyn is ERF's velocity sampled where the line is
+// now, not where it hung.
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -41,6 +43,22 @@ struct Mesh {
 
     Real h (Real x, Real y) const { return slope_x * x + slope_y * y; }
 
+    // the crosswind v = v0 + vy (y - 500) + vz z, u = w = 0: linear, so the sampler reproduces it exactly
+    Real v0 = 10.0, vy = 0.02, vz = 0.05;
+    Real v_at (Real y, Real z) const { return v0 + vy * (y - 500.0) + vz * z; }
+    void fill_crosswind ()
+    {
+        const Real dx = Lx / nx, dy = Ly / ny, dz = H / nz;
+        u.setVal(0.0); w.setVal(0.0);
+        for (amrex::MFIter mfi(v); mfi.isValid(); ++mfi) {
+            auto va = v.array(mfi);
+            amrex::LoopOnCpu(mfi.growntilebox(), [&](int i, int j, int k) {
+                amrex::ignore_unused(i, dx);
+                va(i,j,k) = v_at(j * dy, (k + 0.5) * dz);
+            });
+        }
+    }
+
     explicit Mesh (bool terrain)
     {
         const amrex::Box domain(amrex::IntVect(0, 0, 0), amrex::IntVect(nx-1, ny-1, nz-1));
@@ -76,14 +94,16 @@ std::string scratch (const std::string& tag)
 }
 
 // one span, 300 m along x at y = 500, ends 30 m above the local surface
-void set_inputs (const std::string& dir, const std::string& name,
+void set_inputs (const std::string& dir, const std::string& name, bool prescribed = true,
                  const std::array<Real,3>& a = {{300.0, 500.0, 30.0}}, const std::array<Real,3>& b = {{600.0, 500.0, 30.0}})
 {
     amrex::ParmParse pp("erf.conductors");
     pp.add("spans", name);
     pp.add("diagnostics_dir", dir);
     pp.add("air_density", 1.2);
-    pp.addarr("prescribed_velocity", std::vector<Real>{0.0, 10.0, 0.0});
+    // ParmParse is global to the test binary: drop what another test left before setting this one's
+    pp.remove("prescribed_velocity");
+    if (prescribed) { pp.addarr("prescribed_velocity", std::vector<Real>{0.0, 10.0, 0.0}); }
     amrex::ParmParse ps("erf.conductors." + name);
     ps.addarr("end_a", std::vector<Real>{a[0], a[1], a[2]});
     ps.addarr("end_b", std::vector<Real>{b[0], b[1], b[2]});
@@ -164,4 +184,35 @@ TEST(Conductors, SpansStepOnTheAnchorLevelOnlyAndLogEveryStep)
     int rows = 0;
     while (std::getline(f, line)) { if (!line.empty() && line.rfind("time", 0) != 0) { ++rows; } }
     EXPECT_EQ(rows, 4) << "the initial row and one per step";
+}
+
+TEST(Conductors, TheFlowIsSampledWhereTheLineIsNow)
+{
+    const std::string dir = scratch("sampled");
+    set_inputs(dir, "Tsampled", false);
+    amrex::ParmParse pp("erf.conductors");
+    ASSERT_FALSE(pp.contains("prescribed_velocity")) << "set_inputs must have removed the prescribed velocity";
+    Mesh m(false);
+    m.fill_crosswind();
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(nullptr, m.geom);
+    const auto& span = *c->spans().front();
+    Real moved = 0.0;
+    for (int s = 0; s < 20; ++s) {
+        const std::vector<Real> where = span.kinematics_points();   // where the line is when the wind is sampled
+        c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, nullptr, m.geom);
+        for (unsigned p = 0; p < span.num_kinematics_points(); ++p) {
+            // the flow at the line nodes; no wind at MoorDyn's fixed entries after them
+            const auto uvw = span.wind_at_point(p);
+            const Real expect = (p < span.num_nodes()) ? m.v_at(where[3*p+1], where[3*p+2]) : Real(0.0);
+            ASSERT_NEAR(uvw[0], 0.0, 1.0e-9) << "step " << s << " point " << p;
+            ASSERT_NEAR(uvw[1], expect, 1.0e-9 * std::max(Real(1.0), expect)) << "step " << s << " point " << p;
+            ASSERT_NEAR(uvw[2], 0.0, 1.0e-9) << "step " << s << " point " << p;
+        }
+        moved = std::max(moved, span.mid_offset());
+    }
+    // the line really moved, so sampling at the initial positions would have handed a different wind
+    EXPECT_GT(moved, 0.5) << "the span must blow out in the sampled crosswind";
+    EXPECT_GT(m.vy * moved, 1.0e-3) << "the field must change measurably over the distance the line moved";
 }

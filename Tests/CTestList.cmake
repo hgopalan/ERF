@@ -2326,14 +2326,16 @@ add_test_restart_parity(ObsNudging_Hill_Restart ObsNudging_Hill 10 20
 #=============================================================================
 # Conductor spans (MoorDyn lines): a span in a prescribed crosswind
 #=============================================================================
-if(ERF_ENABLE_MOORDYN AND ERF_MOORDYN_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
-  # A 300 m conductor span hangs over flat ground in a uniform anelastic flow and is blown by
-  # a prescribed crosswind handed to MoorDyn at its nodes; the span's log (mid-span position,
-  # sag, offset, swing angle, tensions) must match its gold, and the plotfile the flow's gold,
-  # since nothing is put into the flow. The gold log is the bundled stub's quasi-static span; the
-  # real MoorDyn swings dynamically about the same angle, so the test is registered for the stub.
-  function(add_test_conductors TEST_NAME TEST_FILES_DIR PLTFILE LOG)
+if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
+  # A conductor span hangs over flat ground in a uniform anelastic flow; the span's log (mid-span
+  # position, sag, offset, swing angle, tensions, the wind handed to MoorDyn at the middle node)
+  # must match its gold to SIGDIGITS digits, and the plotfile the flow's gold, since nothing is
+  # put back into the flow. The bundled stub relaxes to the quasi-static angle while the real
+  # MoorDyn swings about it, so each library has its own gold log (GOLD_LOG) and the stub and
+  # real-library tests share the flow's gold plotfile (PLOT_GOLD_NAME).
+  function(add_test_conductors TEST_NAME TEST_FILES_DIR PLTFILE LOG GOLD_LOG SIGDIGITS PLOT_GOLD_NAME)
       setup_test()
+      set(PLOT_GOLD ${ERF_TEST_GOLD_FILES_DIRECTORY}/${PLOT_GOLD_NAME})
       resolve_test_exe("" "erf_exec" TEST_EXE)
       add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
           "-DMPIEXEC=${MPIEXEC_EXECUTABLE}"
@@ -2350,8 +2352,8 @@ if(ERF_ENABLE_MOORDYN AND ERF_MOORDYN_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENABLE
           "-DRTOL=${ERF_TEST_FCOMPARE_RTOL}"
           "-DATOL=${ERF_TEST_FCOMPARE_ATOL}"
           "-DLOG=${LOG}"
-          "-DGOLD=${CURRENT_TEST_SOURCE_DIR}/${LOG}.gold"
-          "-DSIGDIGITS=8"
+          "-DGOLD=${CURRENT_TEST_SOURCE_DIR}/${GOLD_LOG}"
+          "-DSIGDIGITS=${SIGDIGITS}"
           -P ${PROJECT_SOURCE_DIR}/Tests/RunConductors.cmake)
       set_tests_properties(${TEST_NAME}
           PROPERTIES
@@ -2361,5 +2363,17 @@ if(ERF_ENABLE_MOORDYN AND ERF_MOORDYN_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENABLE
           LABELS "regression;conductors"
           ATTACHED_FILES_ON_FAIL "${CURRENT_TEST_BINARY_DIR}/simulation.log")
   endfunction()
-  add_test_conductors(Conductors_PrescribedWind Conductors_PrescribedWind "plt00010" "S1.dat")
+  if(ERF_MOORDYN_USE_STUB)
+    # a prescribed 15 m/s crosswind handed to the line at every node, against the stub
+    add_test_conductors(Conductors_PrescribedWind Conductors_PrescribedWind "plt00010" "S1.dat"
+                        "S1.dat.gold" 8 Conductors_PrescribedWind)
+    # the wind sampled from ERF's 15 m/s crosswind at the line's current nodes, against the stub
+    add_test_conductors(Conductors_FlowWind Conductors_FlowWind "plt00010" "S1.dat"
+                        "S1.dat.gold" 8 Conductors_FlowWind)
+  else()
+    # the same coupled case against the real MoorDyn-C: the span swings about the blowout angle;
+    # compared to 6 digits, since the line integration is not bit-reproducible across compilers
+    add_test_conductors(Conductors_FlowWind_MoorDyn Conductors_FlowWind "plt00010" "S1.dat"
+                        "S1.dat.moordyn.gold" 6 Conductors_FlowWind)
+  endif()
 endif()

@@ -5016,8 +5016,8 @@ each has its own ``erf.conductors.<name>.*`` block.
 | **erf.conductors.surface_offset**          | MoorDyn's free surface sits this far above ERF's z = 0   | Real > 0             | 10000                    |
 |                                            | (m); the attachments must stay below it                  |                      |                          |
 +--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.prescribed_velocity**     | a uniform wind at every line node (m/s); still air when  | 3 Reals              | none                     |
-|                                            | absent (the flow is not sampled in this version)         |                      |                          |
+| **erf.conductors.prescribed_velocity**     | a uniform wind at every line node (m/s) instead of the   | 3 Reals              | none (the flow is        |
+|                                            | flow's, for testing                                      |                      | sampled at the nodes)    |
 +--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 
 .. _sec:SolverChoice:

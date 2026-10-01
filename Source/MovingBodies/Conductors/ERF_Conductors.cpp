@@ -1,5 +1,6 @@
 #include "ERF_Conductors.H"
 
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
 
@@ -28,7 +29,7 @@ Conductors::create (int max_level)
     if (!err.empty()) { Abort(err); }
     Print() << "erf.conductors: " << in.spans.size() << " span(s) on MoorDyn-C " << erf_moordyn::library_version()
             << (erf_moordyn::is_stub() ? " (the bundled stub stands in for MoorDyn)" : "") << ", anchor level " << anchor
-            << ", wind " << (in.has_prescribed_velocity ? "prescribed" : "still air (no sampling in this version)") << "\n";
+            << ", wind " << (in.has_prescribed_velocity ? "prescribed" : "sampled from the flow at the line nodes") << "\n";
     return std::unique_ptr<Conductors>(new Conductors(std::move(in), anchor));
 }
 
@@ -91,14 +92,43 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom)
 }
 
 std::vector<Real>
-Conductors::wind_at (const ConductorSpan& span) const
+Conductors::wind_at (const ConductorSpan& span,
+                     const MultiFab& U, const MultiFab& V, const MultiFab& W,
+                     const MultiFab* z_phys_nd, const Geometry& geom) const
 {
     std::vector<Real> uvw(3 * static_cast<std::size_t>(span.num_kinematics_points()), 0.0);
     if (m_in.has_prescribed_velocity) {
         for (std::size_t p = 0; p < uvw.size() / 3; ++p) {
             for (int d = 0; d < 3; ++d) { uvw[3*p+d] = m_in.prescribed_velocity[d]; }
         }
+        return uvw;
     }
+    // where the line is now: a blown-out span samples the wind metres away from where it hung. MoorDyn
+    // lists the line nodes first, then fixed entries (the attachment points and one entry at its own
+    // origin, far outside ERF's domain); only the line nodes carry a fluid load here, so the flow is
+    // sampled at the nodes and the fixed entries get no wind
+    const std::vector<Real> kin = span.kinematics_points();
+    const std::vector<Real> pos(kin.begin(), kin.begin() + 3 * static_cast<std::ptrdiff_t>(span.num_nodes()));
+    for (std::size_t p = 0; p < pos.size() / 3; ++p) {
+        for (int d = 0; d < 3; ++d) {
+            const bool inside = geom.isPeriodic(d) ||
+                                (pos[3*p+d] >= geom.ProbLo(d) && pos[3*p+d] <= geom.ProbHi(d));
+            if (!inside) {
+                Abort("erf.conductors." + span.name() + ": node " + std::to_string(p) + " at (" + std::to_string(pos[3*p]) + ", " +
+                      std::to_string(pos[3*p+1]) + ", " + std::to_string(pos[3*p+2]) + ") m has left the domain");
+            }
+        }
+    }
+    // the sampler reads the cells around each point: on a refined anchor level they must be on its grids
+    const Real reach = std::max(geom.CellSize(0), geom.CellSize(1));
+    std::string outside;
+    if (!erf_actuator::points_covered_by(U.boxArray(), geom, pos, reach, outside)) {
+        Abort("erf.conductors." + span.name() + ": the point " + outside + " is not covered, with the cells around it, by the "
+              "grids of the anchor level " + std::to_string(m_anchor) + "; refine around the whole span or lower anchor_level");
+    }
+    std::vector<Real> at_nodes;
+    erf_actuator::sample_velocity(U, V, W, z_phys_nd, geom, pos, at_nodes);
+    std::copy(at_nodes.begin(), at_nodes.end(), uvw.begin());
     return uvw;
 }
 
@@ -109,12 +139,12 @@ Conductors::advance (int lev, double time, double dt,
 {
     if (lev != m_anchor) { return; }
     if (!m_ground_set) { set_ground(z_phys_nd, geom); }
-    amrex::ignore_unused(U, V, W);
     ++m_step;
     const bool first = (m_step == 1);
     for (auto& span : m_spans) {
+        // the wind of the flow at the start of the step, where the line is, held over the step
+        span->set_wind(wind_at(*span, U, V, W, z_phys_nd, geom), time + 0.5 * dt);
         if (first) { span->write_diagnostics(time, true); }
-        span->set_wind(wind_at(*span), time + 0.5 * dt);
         span->step(time, dt);
         if (m_step % m_in.diagnostics_int == 0) { span->write_diagnostics(time + dt, false); }
     }

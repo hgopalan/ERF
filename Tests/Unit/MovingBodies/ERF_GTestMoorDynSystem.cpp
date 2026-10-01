@@ -187,6 +187,15 @@ TEST(MoorDynSystem, ExternalKinematicsPointsStartWithTheLineNodes)
         const auto p = sys->line_node_position(1, i);
         for (int d = 0; d < 3; ++d) { EXPECT_NEAR(r[3*i+d], p[static_cast<std::size_t>(d)], 1.0e-9) << "node " << i << " dir " << d; }
     }
+    // after the nodes MoorDyn lists the two attachment points and then one more entry at its origin
+    // (MoorDyn-C 2.7.1 reports no bodies but adds it): a caller that samples a flow at every entry
+    // would sample far outside its domain
+    ASSERT_EQ(n, nn + 3) << "the line nodes, the two points and the entry at the origin";
+    for (unsigned p = 1; p <= 2; ++p) {
+        const auto a = sys->point_position(p);
+        for (int d = 0; d < 3; ++d) { EXPECT_NEAR(r[3*(nn+p-1)+d], a[static_cast<std::size_t>(d)], 1.0e-9) << "point " << p << " dir " << d; }
+    }
+    for (int d = 0; d < 3; ++d) { EXPECT_NEAR(r[3*(nn+2)+d], 0.0, 1.0e-9) << "entry at the origin, dir " << d; }
 }
 
 TEST(MoorDynSystem, CrosswindBlowsTheSpanOutTowardsTheStaticAngle)

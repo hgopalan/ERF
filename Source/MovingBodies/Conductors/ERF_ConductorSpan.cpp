@@ -58,8 +58,17 @@ void ConductorSpan::set_wind (const std::vector<Real>& uvw, double t)
         Abort("erf.conductors." + m_in.name + ": " + std::to_string(3 * m_nkin) + " wind components are needed, " +
               std::to_string(uvw.size()) + " were given");
     }
+    // the fluid acceleration enters MoorDyn's added-mass (Froude-Krylov) load, which in air is
+    // smaller than the line's own inertia by the density ratio (about 1e-3): it is left at zero
     std::vector<double> U(uvw.begin(), uvw.end()), Ud(uvw.size(), 0.0);
     m_sys->set_kinematics(U, Ud, t);
+    m_wind = uvw;
+}
+
+std::array<Real,3> ConductorSpan::wind_at_point (unsigned point) const
+{
+    if (m_wind.empty() || point >= m_nkin) { return {{0.0, 0.0, 0.0}}; }
+    return {{m_wind[3*point], m_wind[3*point+1], m_wind[3*point+2]}};
 }
 
 void ConductorSpan::step (double time, double dt)
@@ -151,12 +160,14 @@ void ConductorSpan::write_diagnostics (double time, bool first) const
     std::ofstream out;
     const bool header = erf_actuator::open_log(out, m_in.output_root + ".dat", first);
     if (header) {
-        out << "time mid_x mid_y mid_z mid_sag mid_offset swing_deg tension_a tension_b max_tension\n";
+        out << "time mid_x mid_y mid_z mid_sag mid_offset swing_deg tension_a tension_b max_tension mid_u mid_v mid_w\n";
     }
-    const auto m = node_position((m_nodes - 1) / 2);
+    const unsigned mid = (m_nodes - 1) / 2;
+    const auto m = node_position(mid);
+    const auto u = wind_at_point(mid);
     out << std::setprecision(10) << time << " " << m[0] << " " << m[1] << " " << m[2] << " " << mid_sag() << " "
         << mid_offset() << " " << swing_angle() * 180.0 / 3.14159265358979323846 << " " << tension_a() << " "
-        << tension_b() << " " << max_tension() << "\n";
+        << tension_b() << " " << max_tension() << " " << u[0] << " " << u[1] << " " << u[2] << "\n";
 }
 
 } // namespace erf_conductors
