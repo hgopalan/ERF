@@ -136,7 +136,7 @@ resolved flow supplies the induction. On a grid that does not resolve the smeare
 disk (``epsilon`` of two 20 m cells for a 240 m rotor) the sampled velocity lies
 well above the momentum-theory disk velocity, and the loads, computed by OpenFAST
 without induction from that velocity, exceed the blade-element-momentum values
-(phase 12B measured the IEA 15 MW disk 29 % high in power at 20 m). With
+(the IEA 15 MW disk on 20 m cells measured 29 % high in power). With
 ``sampling = upstream`` every velocity node is shifted ``sample_diameters_upstream``
 diameters ahead of the hub along the shaft axis, where the flow is the free stream
 (the rotor's influence one diameter ahead is a few percent of the induction), and
