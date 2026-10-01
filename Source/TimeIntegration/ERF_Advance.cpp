@@ -156,6 +156,15 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
 
 #endif
 
+#ifdef ERF_USE_MOORDYN
+    // **************************************************************************************
+    // Advance the conductor spans (MoorDyn lines) by one step on their anchor level
+    // **************************************************************************************
+    if (conductors) {
+        conductors->advance(lev, time, dt_lev, U_old, V_old, W_old, z_phys_nd[lev].get(), Geom(lev));
+    }
+#endif
+
     // **************************************************************************************
     // Update the radiation sources with the "old" state
     // **************************************************************************************

@@ -76,6 +76,9 @@
 #ifdef ERF_USE_WINDFARM
 #include "ERF_WindFarm.H"
 #endif
+#ifdef ERF_USE_MOORDYN
+#include "ERF_Conductors.H"
+#endif
 #include <ERF_SurfaceModel.H>
 
 #include <ERF_RadiationModels.H>
@@ -1366,6 +1369,11 @@ private:
     amrex::Vector<amrex::MultiFab> SMark; // A multifab that holds an integer corresponding
                                                    // to the number of the wind turbine to sample
                                                    // velocity upstream of the turbine
+#endif
+
+#ifdef ERF_USE_MOORDYN
+    // conductor spans as MoorDyn lines (erf.conductors.*); nullptr unless spans are given
+    std::unique_ptr<Conductors> conductors;
 #endif
 
     std::unique_ptr<SurfaceModel> m_SurfaceModel = nullptr;

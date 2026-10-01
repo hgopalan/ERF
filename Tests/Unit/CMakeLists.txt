@@ -305,6 +305,19 @@ if(ERF_ENABLE_MOORDYN)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestMoorDynSystem.cpp
   )
+  # Motivation: the conductor inputs must be read with their defaults and refuse every value
+  # outside its documented range with a message naming the key; the MoorDyn input written from
+  # them must carry the span lowered by the surface offset, the air density, external kinematics
+  # and fixed attachments, and MoorDyn must accept it; a span must hang at the catenary sag in
+  # still air, report positions in ERF's frame, and blow out towards atan(q/w) in a prescribed
+  # crosswind, stepping in lockstep with ERF's clock; the manager must place the attachments
+  # at their height above the terrain under each end and step on the anchor level only.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorInputs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestMoorDynInputWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorSpan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductors.cpp
+  )
 endif()
 build_erf_exe(${erf_exe_name} NO_ERF_MAIN)
 target_link_libraries(${erf_exe_name} PRIVATE GTest::gtest)

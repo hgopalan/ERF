@@ -106,6 +106,35 @@ Two properties of MoorDyn's input matter for lines in air:
   and ``WtrDpth`` deep enough that the bottom is below the ground; the body
   that writes the input shifts ERF's heights accordingly.
 
+A minimal case
+--------------
+
+A 300 m span of 795 kcmil ACSR (Drake) with 1.5 m of slack, 30 m above the
+ground, blown by a prescribed 15 m/s crosswind in a uniform anelastic flow
+(the regression test ``Conductors_PrescribedWind``):
+
+.. code-block:: text
+
+   erf.anelastic      = 1
+   erf.anelastic_type = MidPoint
+   erf.vert_implicit  = true
+   erf.use_fft        = true
+   erf.fixed_dt       = 0.5
+
+   erf.conductors.spans               = S1
+   erf.conductors.S1.end_a            = 300. 500. 30.    # z above the terrain surface
+   erf.conductors.S1.end_b            = 600. 500. 30.
+   erf.conductors.S1.length           = 301.5           # unstretched, more than the 300 m chord
+   erf.conductors.S1.diameter         = 0.0281
+   erf.conductors.S1.mass_per_length  = 1.628
+   erf.conductors.S1.axial_stiffness  = 3.0e7
+   erf.conductors.air_density         = 1.0
+   erf.conductors.prescribed_velocity = 0. 15. 0.
+
+The physics and the diagnostics are in :ref:`sec:Conductors`; the inputs,
+with their defaults and ranges, in the "Conductor spans" section of
+:doc:`Inputs <Inputs>`.
+
 The unit test ``MoorDynSystem`` (``Tests/Unit/MovingBodies``) runs a 300 m
 fixed-fixed span of 795 kcmil ACSR with 1.5 m of slack in air against
 whichever library the build links: the span initialises with no coupled

@@ -4949,6 +4949,77 @@ List of Parameters
 |                                           | the perturbation               |                     |             |
 +-------------------------------------------+--------------------------------+---------------------+-------------+
 
+.. _sec:ConductorInputs:
+
+Conductor spans (MoorDyn lines)
+-------------------------------
+
+Overhead conductor spans hanging between fixed attachments, their motion in
+the wind computed by MoorDyn-C; see :ref:`sec:Conductors` for the model and
+:doc:`CouplingToMoorDyn` for building ERF with MoorDyn. The feature is built
+with ``-DERF_ENABLE_MOORDYN=ON`` (cmake) and refuses to start with any
+``amrex.fpe_trap_*`` input on, since MoorDyn's initial-condition solver
+overflows an intermediate value. Spans are named in ``erf.conductors.spans``;
+each has its own ``erf.conductors.<name>.*`` block.
+
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| Parameter                                  | Definition                                               | Acceptable Values    | Default                  |
++============================================+==========================================================+======================+==========================+
+| **erf.conductors.spans**                   | names of the spans; the feature is off when absent       | Strings              | none                     |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.end_a**            | first attachment (m): x, y in ERF coordinates, z the     | 3 Reals inside the   | must be set              |
+|                                            | height above the terrain surface at (x, y) (on a flat    | domain               |                          |
+|                                            | mesh the absolute height)                                |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.end_b**            | second attachment, as end_a                              | 3 Reals inside the   | must be set              |
+|                                            |                                                          | domain               |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.length**           | unstretched length of the line (m); the slack above the  | Real > chord         | must be set              |
+|                                            | chord sets the sag                                       |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.diameter**         | conductor diameter (m)                                   | Real > 0             | must be set              |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.mass_per_length**  | mass per unit length (kg/m)                              | Real > 0             | must be set              |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.axial_stiffness**  | axial stiffness EA (N)                                   | Real > 0             | must be set              |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.drag_coefficient** | drag coefficient normal to the line, on the diameter     | Real >= 0            | 1.0                      |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.damping_ratio**    | internal damping of the line as a fraction of critical   | Real in (0, 1]       | 0.5                      |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.segments**         | line segments (nodes = segments + 1)                     | Integer >= 2         | 20                       |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.output_root**      | prefix of the span's diagnostics file <output_root>.dat  | String               | <diagnostics_dir>/<name> |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.diagnostics_dir**         | directory of the MoorDyn input files, ground.dat and the | String               | conductors               |
+|                                            | diagnostics                                              |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.diagnostics_int**         | write a diagnostics row every this many steps            | Integer >= 1         | 1                        |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.anchor_level**            | the level the spans are stepped with (-1: the finest     | -1 .. amr.max_level  | -1                       |
+|                                            | level)                                                   |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.air_density**             | the fluid density MoorDyn applies the drag with (kg/m^3) | Real > 0             | 1.225                    |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.substeps**                | MoorDyn calls per ERF step, the wind held over the step  | Integer >= 1         | 1                        |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.moordyn_dt**              | an upper bound on MoorDyn's internal step (s); 0: no     | Real >= 0            | 0                        |
+|                                            | bound beyond moordyn_cfl                                 |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.moordyn_cfl**             | the Courant factor that sets MoorDyn's internal step;    | Real in (0, 0.15]    | 0.1                      |
+|                                            | larger values make the line integration diverge or give  |                      |                          |
+|                                            | a wrong sag                                              |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.moordyn_log_level**       | MoorDyn's verbosity: 0 debug, 1 messages, 2 warnings, 3  | 0 .. 3               | 2                        |
+|                                            | errors only                                              |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.surface_offset**          | MoorDyn's free surface sits this far above ERF's z = 0   | Real > 0             | 10000                    |
+|                                            | (m); the attachments must stay below it                  |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.prescribed_velocity**     | a uniform wind at every line node (m/s); still air when  | 3 Reals              | none                     |
+|                                            | absent (the flow is not sampled in this version)         |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+
 .. _sec:SolverChoice:
 
 Solver Options in ``SolverChoice``

@@ -83,7 +83,9 @@ MoorDynSystem::~MoorDynSystem ()
 void MoorDynSystem::check (int rc, const std::string& what) const
 {
     if (rc != MOORDYN_SUCCESS) {
-        amrex::Abort(what + " failed with " + error_name(rc) + " for the MoorDyn system from '" + m_file + "'");
+        const std::string hint = (rc == MOORDYN_NAN_ERROR)
+            ? ": the line integration diverged; reduce MoorDyn's internal step (the CFL or dtM option of the input file)" : "";
+        amrex::Abort(what + " failed with " + error_name(rc) + " for the MoorDyn system from '" + m_file + "'" + hint);
     }
 }
 
