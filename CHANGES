@@ -1,3 +1,16 @@
+#ERF-MovingBodies 26.10 (standalone branch, hgopalan/ERF #449-#468)
+    -- Moving-bodies actuator framework: velocity sampling and force spreading on
+       uniform, stretched and terrain-fitted meshes; anchor level on multi-level grids
+
+    -- OpenFAST turbine coupling (FAST_Library, ExtInfw): lockstep stepping, restart,
+       start-up audit; actuator disk (plain, upstream and corrected sampling) and
+       actuator line with the filtered lifting-line correction; tower and nacelle forces
+
+    -- Prescribed-Ct disks, farms, wake lines, running statistics, turbulent inflow
+       from precursor planes or cell perturbations, bodies on terrain
+
+    -- Canonical cases with golds, box-parity and restart-parity tests, OpenFAST-stub CI job
+
 #26.09
     -- Surface Layer restart w/ input_sounding fix (#3956)
 

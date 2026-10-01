@@ -81,6 +81,8 @@ jobs:
             -DERF_DIM:STRING=3 \
             -DERF_ENABLE_MPI:BOOL=ON \
             -DERF_ENABLE_CUDA:BOOL=ON \
+            -DERF_ENABLE_OPENFAST:BOOL=ON \
+            -DERF_OPENFAST_USE_STUB:BOOL=ON \
             -DERF_ENABLE_PARTICLES:BOOL=${{matrix.particles}} \
             -DERF_PRECISION:STRING=${{matrix.mesh_precision}} \
             -DERF_PARTICLES_PRECISION:STRING=${{matrix.particles_precision}} \
