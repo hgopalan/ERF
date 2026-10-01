@@ -5,15 +5,17 @@ with and without erf.fire.directional_split_hamiltonian.
     python3 check_firesplithamiltonian.py
 
 A 1 km ignition line burns FM1 (short grass) at 6 % moisture in a uniform
-4.005 m/s wind (Rothermel head rate Rf = 1.701 m/s), with the level set
-reinitialized every substep. The scenario runs twice per scheme:
+4.005 m/s wind (Rothermel head rate Rf = 1.701 m/s), with Jiang-Peng
+reinitialization every level-set substep. The scenario runs twice per scheme:
 wind along +x, and the same scenario rigidly rotated by 34 deg about the domain
 centre (wind, ignition line and standoff all rotated). A scheme that respects
 the rotation gives the same burned region in both after un-rotating; the fire
 is far from the periodic edges, so the domain's square grid is the only thing
 that breaks the symmetry.
 
-Two measurements per scheme:
+Two measurements per scheme (the mismatch at every saved time from 300 s on, and
+the baseline's required to exceed its bound only once the wing has formed, from
+600 s):
 
   mismatch   Area where the 0 deg burned region (phi < 0) and the un-rotated
              34 deg burned region disagree, as a fraction of the 0 deg burned
@@ -24,9 +26,7 @@ Two measurements per scheme:
              independent port of the equations in Source/Fire/ERF_Rothermel.cpp.
 
 The baseline scheme (R(n) from an estimated front normal times one Godunov
-|grad phi|) grows a wing at the oblique angle; the split Hamiltonian grows a
-much smaller one. With the current reinitialization the split reduces the
-mismatch without removing it, so the bounds below are set by that.
+|grad phi|) grows a wing at the oblique angle; the split Hamiltonian does not.
 """
 
 import functools, glob, math, re, sys
@@ -44,13 +44,12 @@ STANDOFF = 1200.0             # ignition line midpoint, upwind of the centre [m]
 ANGLE = 34.0                  # rotation of the oblique case [deg]
 U = 4.005
 M_F = 0.06
-T_MISMATCH_MIN = 300.0        # first time the mismatch is reported [s]
-T_CMP_MIN = 900.0             # comparative checks apply from here, once the baseline's wing has formed [s]
+T_MISMATCH_MIN = 300.0        # first time the mismatch is checked [s]
 T_FIT_MIN = 600.0             # head rate is fitted over t >= this [s]
 
-MAX_MISMATCH_SPLIT = 0.05     # split: footprints agree to 5 % for t >= T_CMP_MIN (measured 2.1-3.6 %)
-MIN_MISMATCH_BASELINE = 0.06  # baseline: at least 6 % disagreement for t >= T_CMP_MIN (measured 7.1-12.0 %)
-MIN_MISMATCH_RATIO = 2.0      # baseline mismatch at least 2x the split's for t >= T_CMP_MIN (measured >= 3.3x)
+MAX_MISMATCH_SPLIT = 0.01     # split: rotated and native footprints agree to 1 % (measured ~0.1 %)
+MIN_MISMATCH_BASELINE = 0.05  # baseline: at least 5 % disagreement once the wing has formed, t >= T_FIT_MIN (measured 9-13 %)
+MIN_MISMATCH_RATIO = 10.0     # baseline mismatch at least 10x the split's
 TOL_HEAD = 0.03               # split head rate within 3 % of Rf
 
 FT_MIN_TO_M_S = 0.00508
@@ -153,19 +152,16 @@ def main():
         print(f"{scheme:9s} mismatch  " + "  ".join(f"t={t:.0f}s: {100 * m:.2f}%" for t, m in mm[scheme].items()))
 
     print("\nRotation invariance (0 deg vs the 34 deg case un-rotated)")
-    late = [t for t in mm["baseline"] if t >= T_CMP_MIN]
-    worst_split = max(mm["split"][t] for t in late)
-    check("split mismatch <= %.0f %% for t >= %.0f s" % (100 * MAX_MISMATCH_SPLIT, T_CMP_MIN),
-          worst_split <= MAX_MISMATCH_SPLIT, f"worst {100 * worst_split:.2f} %")
+    worst_split = max(mm["split"].values())
+    check("split mismatch <= %.0f %% at every time" % (100 * MAX_MISMATCH_SPLIT), worst_split <= MAX_MISMATCH_SPLIT,
+          f"worst {100 * worst_split:.3f} %")
+    late = [t for t in mm["baseline"] if t >= T_FIT_MIN]
     lowest_base = min(mm["baseline"][t] for t in late)
-    check("baseline mismatch >= %.0f %% for t >= %.0f s" % (100 * MIN_MISMATCH_BASELINE, T_CMP_MIN),
+    check("baseline mismatch >= %.0f %% for t >= %.0f s" % (100 * MIN_MISMATCH_BASELINE, T_FIT_MIN),
           lowest_base >= MIN_MISMATCH_BASELINE, f"lowest {100 * lowest_base:.2f} %")
     ratios = [mm["baseline"][t] / max(mm["split"][t], 1e-6) for t in late]
-    check("baseline / split mismatch >= %.0fx for t >= %.0f s" % (MIN_MISMATCH_RATIO, T_CMP_MIN),
-          min(ratios) >= MIN_MISMATCH_RATIO, f"smallest ratio {min(ratios):.1f}x")
-    beat = [t for t in mm["baseline"] if t >= T_FIT_MIN and mm["split"][t] >= mm["baseline"][t]]
-    check("split below baseline at every t >= %.0f s" % T_FIT_MIN, not beat,
-          "yes" if not beat else f"not at t = {beat}")
+    check("baseline / split mismatch >= %.0fx for t >= %.0f s" % (MIN_MISMATCH_RATIO, T_FIT_MIN), min(ratios) >= MIN_MISMATCH_RATIO,
+          f"smallest ratio {min(ratios):.0f}x")
 
     print("\nHead rate along the wind, fit over t >= %.0f s (Rothermel Rf = %.4f m/s)" % (T_FIT_MIN, Rf))
     for angle in (0, 34):

@@ -5459,13 +5459,16 @@ Propagation
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.reinit_every**             | Reinitialise every N subcycles                             | Integer > 0                    | 5                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.levelset.reinit_iters**             | Sussman iterations per reinitialisation                    | Integer > 0                    | 10                     |
+| **erf.fire.levelset.reinit_iters**             | Outer RK3 pseudo-time steps per reinitialisation           | Integer > 0                    | 1                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.levelset.reinit_band_m**            | Band half-width at which the level set reaches 1 [m]; <= 0 | Real                           | -1.0                   |
-|                                                | selects three cells                                        |                                |                        |
+| **erf.fire.levelset.reinit_dtau**              | Reinitialisation pseudo-timestep [m]; <= 0 selects 0.01 dx | Real                           | -1.0                   |
+|                                                | (WRF-Fire's value) for both schemes                        |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.levelset.reinit_dtau**              | Reinitialisation pseudo-timestep [m]; < 0 selects a        | Real                           | -1.0                   |
-|                                                | quarter cell                                               |                                |                        |
+| **erf.fire.levelset.reinit_scheme**            | Reinitialisation scheme: WRF-Fire's reinit_ls_rk3, or      | "wrf", "jiang_peng"            | "wrf"                  |
+|                                                | Jiang and Peng's (2000) HJ-WENO5 with SSP-RK3              |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.levelset.reinit_jp_sign_eps2**      | jiang_peng only: term added to phi0^2 under the            | Real                           | -1.0                   |
+|                                                | smoothed-sign square root; <= 0 selects dx^2               |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.wall_extrapolate**         | Extrapolate the level set into non-burnable cells inside   | Boolean                        | false                  |
 |                                                | every stencil, so a masked wall is a zero-gradient boundary|                                |                        |

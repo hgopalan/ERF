@@ -3,8 +3,8 @@
 ## Purpose
 Exercises the level-set fire-front solver: the Godunov upwind gradient with
 first-order, WENO5-Z or hybrid WENO5-Z/first-order one-sided derivatives, a
-three-stage SSP-RK3 step subcycled on its own CFL condition, and Sussman
-signed-distance reinitialization.
+three-stage SSP-RK3 step subcycled on its own CFL condition, and
+signed-distance reinitialization (WRF-Fire's scheme by default).
 
 ## Physics / Model Features Exercised
 - Level-set advection of the fire front (`propagation_method = "levelset"`)
@@ -17,7 +17,8 @@ signed-distance reinitialization.
   viscosity (`eps_visc_front` = 0.1 within two cells of the front, the
   default since 2026-09-05; the other decks pin a single viscosity)
 - CFL-based subcycling within one atmospheric step
-- Sussman reinitialization of the signed-distance property
+- Reinitialization of the signed-distance property (`erf.fire.levelset.reinit_scheme`,
+  default `"wrf"`)
 
 ## Status
 
@@ -34,7 +35,7 @@ positive outside, `|grad phi| = 1`. The FARSITE path keeps its own normalized
 between them.
 
 This matters. A level-set method's advection, its Godunov Hamiltonian and the
-Russo-Smereka subcell term are all derived for a signed distance in metres.
+reinitialization are all derived for a signed distance in metres.
 Running the solver on a `[-1, 1]`-clamped field flattens everything outside the
 band, so the front eventually advances into ground carrying no gradient
 information. That produced discontinuous jumps in burned area — 44 to 528 cells
@@ -43,7 +44,10 @@ is what ruled out band width as the cause and indicted the normalization itself.
 
 ## Expected Results
 
-Burned-cell count at t = 150 / 300 / 450 / 600 s, measured on 1 rank:
+Burned-cell count at t = 150 / 300 / 450 / 600 s, measured on 1 rank. These counts
+were measured with the previous reinitialization and on a 25 m fire grid; the decks
+now run on a 10 m fire grid, so they have not been re-measured and are not a current
+reference:
 
 | | 150 s | 300 s | 450 s | 600 s |
 |---|---|---|---|---|
@@ -97,19 +101,17 @@ nothing accumulates, and its neighbour access is guarded with in-box bounds
 (`i+1 <= hi.x`) rather than reaching into ghosts. It exits cleanly under the
 signaling-NaN trap that made the level-set path abort.
 
-## Defects fixed in the reinitializer
+## Reinitialization
 
-| Defect | Symptom before the fix |
-|---|---|
-| `phi` clamped to `[-1, 1]` rather than a signed distance in metres | Front advanced into a flat field; burned area jumped 44 to 528 cells in one step |
-| Update targeted `\|grad phi\| = 1` while `phi` was normalized | `phi` diverged to about `1e7` in 20 steps; the jump equalled `n_iters * dtau` exactly |
-| Gradient took the larger-magnitude one-sided difference, not the Godunov upwind | Burned cells flooded from 32 to 20786, over half the domain |
-| No subcell fix, so the iteration moved the zero level set | Each pass eroded the front: 32 to 24 cells, and the fire went out entirely by 100 s |
-| Default `dtau = 0.5*dx` sat exactly on the `dtau <= dx/2` limit | Unstable at 10 or more iterations |
-
-The Russo-Smereka (2000) subcell update now fixes the interface from `phi_0` for
-cells whose original neighbourhood straddles it, so a pass no longer erodes the
-front: 32 cells before and after, at every iteration count tested from 5 to 80.
+`erf.fire.levelset.reinit_scheme` selects the scheme: `"wrf"` (default),
+WRF-Fire's `reinit_ls_rk3` (Wicker-Skamarock RK3, flux-form WENO5 near the
+front, `dtau = 0.01*dx`), or `"jiang_peng"`, Jiang and Peng's HJ-WENO5 with
+SSP-RK3. Neither has a subcell correction; both end with
+`phi = min(phi_out, phi_in)`, so the burned area never shrinks and `phi` is
+restored toward a unit gradient only where that lowers it. The decks here keep
+`reinit_iters = 100` (WRF-Fire uses one step per call, at the same `dtau`),
+which costs three right-hand-side evaluations per step, against one for the
+previous forward-Euler iteration.
 
 ## Key Parameters
 | Parameter | Value | Description |
@@ -118,9 +120,11 @@ front: 32 cells before and after, at every iteration count tested from 5 to 80.
 | `erf.fire.levelset.cfl` | `0.4` / `0.25` | Subcycle CFL number. Must be `> 0`; a non-positive value is rejected at startup. |
 | `erf.fire.levelset.eps_visc` | `0.4` / `0.2` | Artificial viscosity coefficient on the Laplacian term. |
 | `erf.fire.levelset.reinit_every` | `1000000` / `1` | Reinitialize every N subcycles. Must be `>= 1`; it is a modulus divisor. Set high in the baseline to disable it. |
-| `erf.fire.levelset.reinit_iters` | `10` / `20` | Sussman pseudo-time iterations per reinitialization. |
-| `erf.fire.levelset.reinit_dtau` | `-1.0` / `2.0` | Pseudo-time step; `<= 0` selects `0.5*min(dx,dy)`. |
+| `erf.fire.levelset.reinit_iters` | `100` | Outer RK3 pseudo-time steps per reinitialization (default `1`). |
+| `erf.fire.levelset.reinit_dtau` | `-1.0` / `2.0` | Pseudo-time step [m]; `<= 0` selects `0.01*dx`. |
 
 ## References
 - Osher & Sethian 1988, Fronts propagating with curvature-dependent speed.
 - Sussman, Smereka & Osher 1994, A level set approach for computing solutions to incompressible two-phase flow.
+- Jiang & Peng 2000, Weighted ENO schemes for Hamilton-Jacobi equations, SIAM J. Sci. Comput. 21, 2126-2143.
+- Wicker & Skamarock 2002, Time-splitting methods for elastic models using forward time schemes, Mon. Wea. Rev. 130, 2088-2097.
