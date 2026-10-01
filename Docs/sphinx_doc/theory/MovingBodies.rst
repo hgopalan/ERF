@@ -181,6 +181,9 @@ disk sampling, 20 m + 10 m anchor patch           1.095      1.316     8.64
 disk sampling, 10 m cells, kernel 2 dx            1.072      1.243     8.36
 upstream sampling 1 D, BEM on, 20 m and 10 m      0.977      0.954     10.43
 upstream sampling 2 D, BEM on, 20 m               0.993      0.999     10.58
+disk_corrected, 20 m cells, kernel 2 dx           0.997      1.000     8.74 -> 10.77
+disk_corrected, 10 m cells, kernel 2 dx           1.001      0.993     8.44 -> 10.82
+disk_corrected, 20 m cells, kernel 3 dx           0.991      0.994     8.99 -> 10.67
 ================================================  =========  ========  =====================
 
 The ratios do not depend on the advection scheme (third- or fifth-order upwind,
@@ -188,7 +191,14 @@ WENO, or blended upwind give the same loads within 0.1 %) nor on the boundary
 conditions (a periodic box changes them by 1 to 2 %). The one-diameter sample
 sits 1.5 % below the free stream because of the rotor's own upstream induction,
 and the loads follow that velocity squared and cubed; at two diameters the bias
-is below 1 %, which is the turbine default.
+is below 1 %, which is the turbine default. The corrected disk recovers the loads
+within 1 % on every grid and kernel tried (filter widths of 0.40, 0.81 and 1.21
+rotor radii) from the disk velocity alone, with no upstream points to cover: the
+recovered free stream (the second velocity in the last three rows) sits 1 to 2 %
+above the true value and the thrust coefficient it implies (0.76 against the BEM
+0.80) correspondingly below, and the two biases cancel in the loads. The
+correction settles from its start-up transient within about 50 s with no
+oscillation.
 
 OpenFAST rotor as an actuator line
 ----------------------------------
