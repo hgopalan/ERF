@@ -327,11 +327,22 @@ if(TARGET erf_exec AND ERF_DIM STREQUAL "3" AND
     ${CMAKE_CURRENT_SOURCE_DIR}/ERF_GTestRuntimeStubs.cpp)
   build_erf_exe(erf_sbm_checkpoint_corruptor NO_ERF_MAIN)
 
+  # The fork's dust and fire-smoke scalars add components ahead of the moisture
+  # ones in the checkpoint (NSCALARS in ERF_IndexDefines.H).
+  set(_sbm_extra_scalars 0)
+  if(ERF_ENABLE_FIRE)
+    math(EXPR _sbm_extra_scalars "${_sbm_extra_scalars} + 1")
+  endif()
+  if(ERF_ENABLE_DUST)
+    math(EXPR _sbm_extra_scalars "${_sbm_extra_scalars} + 1")
+  endif()
+
   add_test(NAME SBM_ZeroTransport_ERF_Smoke
     COMMAND ${CMAKE_COMMAND}
       -DERF_EXECUTABLE=$<TARGET_FILE:erf_exec>
       -DINPUT_FILE=${PROJECT_SOURCE_DIR}/Tests/test_files/SBM/inputs_zero_transport
       -DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}
+      -DEXTRA_SCALAR_COMPONENTS=${_sbm_extra_scalars}
       -P ${PROJECT_SOURCE_DIR}/Tests/test_files/SBM/RunZeroTransportSmoke.cmake)
   set_tests_properties(SBM_ZeroTransport_ERF_Smoke PROPERTIES
     LABELS "integration;sbm"
@@ -345,6 +356,7 @@ if(TARGET erf_exec AND ERF_DIM STREQUAL "3" AND
       -DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}
       -DEXPECTED_SPECTRUM_VALUES=1.50000000000000004e-06,6.00000000000000015e-06,1.80000000000000005e-05,4.80000000000000012e-05,1.00000000000000000e+12,2.00000000000000000e+12,3.00000000000000000e+12,4.00000000000000000e+12,
       -DEXPECTED_CORE_VALUES=1.00000000000000000e+00,2.99999999999999886e+02,0.00000000000000000e+00,0.00000000000000000e+00,0.00000000000000000e+00,7.50000000000000019e-06,6.60000000000000051e-05,
+      -DEXTRA_SCALAR_COMPONENTS=${_sbm_extra_scalars}
       -P ${PROJECT_SOURCE_DIR}/Tests/test_files/SBM/RunZeroTransportSmoke.cmake)
   set_tests_properties(SBM_ZeroTransport_2M_ERF_Smoke PROPERTIES
     LABELS "integration;sbm"
