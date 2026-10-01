@@ -2428,8 +2428,8 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.<name>.num_points_t**              | points per ring: of the ct_disk polar grid, or of the    | Int > 0                  | 16                       |
 |                                                        | rings an openfast_turbine's blade nodes are spread over  |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.sample_diameters_upstream** | ct_disk, and openfast_turbine with sampling = upstream:  | Real > 0                 | 1.0                      |
-|                                                        | where the free stream is sampled, in diameters ahead     |                          |                          |
+| **erf.moving_bodies.<name>.sample_diameters_upstream** | ct_disk, and openfast_turbine with sampling = upstream:  | Real > 0                 | 1.0 (ct_disk),           |
+|                                                        | where the free stream is sampled, in diameters ahead     |                          | 2.0 (turbine)            |
 |                                                        | along the normal / shaft axis                            |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.air_density**               | density in the ct_disk thrust and in the nacelle drag    | Real > 0                 | 1.225                    |

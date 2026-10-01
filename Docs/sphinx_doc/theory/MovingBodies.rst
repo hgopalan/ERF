@@ -146,6 +146,29 @@ receives them as rings. The shifted sampling points must be covered by the ancho
 level like the nodes. The actuator line keeps disk sampling: it resolves its own
 induction, and the filtered lifting-line correction accounts for the kernel.
 
+The IEA 15 MW rotor in a uniform 10.59 m/s inflow (open boundaries, no sponge,
+no turbulence closure) against the standalone OpenFAST BEM solution (aerodynamic
+thrust 2.482 MN, power 15.79 MW, momentum-theory disk velocity 7.67 m/s):
+
+================================================  =========  ========  =====================
+Disk set-up                                       thrust     power     sampled velocity (m/s)
+================================================  =========  ========  =====================
+disk sampling, 20 m cells, kernel 1.5 dx          1.084      1.288     8.40
+disk sampling, 20 m cells, kernel 2 dx            1.093      1.328     8.47
+disk sampling, 20 m cells, kernel 3 dx            1.112      1.403     8.63
+disk sampling, 20 m + 10 m anchor patch           1.095      1.316     8.64
+disk sampling, 10 m cells, kernel 2 dx            1.072      1.243     8.36
+upstream sampling 1 D, BEM on, 20 m and 10 m      0.977      0.954     10.43
+upstream sampling 2 D, BEM on, 20 m               0.993      0.999     10.58
+================================================  =========  ========  =====================
+
+The ratios do not depend on the advection scheme (third- or fifth-order upwind,
+WENO, or blended upwind give the same loads within 0.1 %) nor on the boundary
+conditions (a periodic box changes them by 1 to 2 %). The one-diameter sample
+sits 1.5 % below the free stream because of the rotor's own upstream induction,
+and the loads follow that velocity squared and cubed; at two diameters the bias
+is below 1 %, which is the turbine default.
+
 OpenFAST rotor as an actuator line
 ----------------------------------
 

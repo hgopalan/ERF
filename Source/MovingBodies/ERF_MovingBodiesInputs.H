@@ -38,7 +38,7 @@ struct MovingBodyInputs
     amrex::Real yaw_deg{0.0};                //!< disk normal, degrees from +x in the horizontal plane
     int num_points_r{8};                     //!< polar grid: rings
     int num_points_t{16};                    //!< points per ring (ct_disk grid, and the turbine's actuator-disk rings)
-    amrex::Real sample_diameters_upstream{1.0}; //!< where the free-stream speed is sampled
+    amrex::Real sample_diameters_upstream{1.0}; //!< where the free-stream speed is sampled (ct_disk 1 D; turbines default to 2 D)
     amrex::Real air_density{1.225};          //!< density in the ct_disk thrust and the nacelle drag (kg/m^3)
 };
 

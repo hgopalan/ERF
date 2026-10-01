@@ -109,6 +109,7 @@ MovingBodiesInputs::read ()
             if (b.sampling == "upstream" && b.mode != "adm") {
                 Abort("erf.moving_bodies." + name + ".sampling = upstream needs mode = adm: an actuator line resolves its own induction");
             }
+            b.sample_diameters_upstream = 2.0;   // turbines: two diameters, where the rotor's upstream induction is ~0.5 %
             ppb.query("sample_diameters_upstream", b.sample_diameters_upstream);
             if (!(b.sample_diameters_upstream > 0.0)) {
                 Abort("erf.moving_bodies." + name + ".sample_diameters_upstream must be positive (diameters ahead of the hub)");
