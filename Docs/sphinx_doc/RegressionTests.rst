@@ -681,6 +681,19 @@ Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskCorrected`_
 
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskCorrected`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskCorrected
 
+``OpenFAST_ADM_Terrain`` runs the uniform-inflow disk on a terrain-fitted mesh:
+a 100 m Witch-of-Agnesi ridge across the flow with the stub turbine on its top
+and ``base_pos`` z = 0, which on a fitted mesh is the terrain surface there. The
+log compared with its gold is ``moving_bodies/ground.csv`` (body, x, y, terrain
+height, base z); the ridge top is a mesh node, so the recorded height is exactly
+100 m. The plotfile gold and the ``fx == -thrust_x`` check exercise the sampler
+and the spreader in the fitted mesh's physical heights and cell volumes.
+``OpenFASTADM_Terrain_BoxParity`` splits the ridge between boxes.
+
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Terrain`_
+
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Terrain`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Terrain
+
 OpenFAST rotor as an actuator line
 ----------------------------------
 ``OpenFAST_ALM_Uniform`` (same build requirements) runs the actuator-disk deck

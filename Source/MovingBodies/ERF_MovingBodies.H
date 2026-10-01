@@ -60,6 +60,18 @@ public:
     void read_checkpoint (const std::string& chkdir);
 
     /**
+     * Place the bodies on the terrain: the height of the terrain surface (the k = 0 node plane
+     * of z_phys_nd, bilinear) under each body's base is added to its base_pos z, so that z is
+     * the height above the ground there (on a uniform-dz mesh, z_phys_nd null, nothing is
+     * added). Called once by ERF when the mesh exists: on a fresh start from InitData, before
+     * the step-0 checkpoint or plotfile (it then initialises OpenFAST); on a restart before
+     * read_checkpoint(), once the mesh is read. The heights are written to
+     * <diagnostics_dir>/ground.csv.
+     */
+    void set_ground (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
+    bool ground_set () const { return m_ground_set; }
+
+    /**
      * Advance the bodies by one ERF step of the anchor level; a no-op on every other level. The
      * momentum sources live on the anchor level's grids; coarser levels see the bodies through
      * ERF's average-down of the state, finer levels are not supported (the anchor is the finest
@@ -106,6 +118,8 @@ private:
     double m_t_max{0.0};
     int m_step{0};
     bool m_restarting{false};   //!< created for a restart: read_checkpoint() must follow
+    bool m_ground_set{false};   //!< set_ground() done: the bases sit on the terrain
+    std::vector<amrex::Real> m_ground;   //!< per body: the terrain height under its base (m)
     bool m_restored{false};
     bool m_logs_reopened{false};
     std::vector<std::unique_ptr<erf_actuator::BodyMotion>> m_motion;  //!< one per body
@@ -137,7 +151,7 @@ private:
     bool any_forcing () const;
 
     /** Build the wake lines from the rotors' current hub, axis and diameter; abort if a point leaves the domain or the anchor level's grids. */
-    void build_wake_lines (const amrex::BoxArray& level_grids, const amrex::Geometry& geom);
+    void build_wake_lines (const amrex::BoxArray& level_grids, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
     bool m_disk_coverage_checked{false};
     /** Sample the wake lines, accumulate the running averages and write both files. */
     void write_wake_diagnostics (double time, const amrex::MultiFab& U, const amrex::MultiFab& V,
@@ -161,7 +175,9 @@ private:
      * then the density at the hubs and the facing once the flow at the nodes is known. Each
      * part prints its findings together and a fatal one aborts.
      */
-    void audit_turbines_setup (const amrex::BoxArray& level_grids, const amrex::Geometry& geom);
+    void audit_turbines_setup (const amrex::BoxArray& level_grids, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
+    //! the terrain height under each turbine's hub (prob_lo z on a flat mesh), for the audit and the wake lines
+    std::vector<amrex::Real> hub_ground (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
     //! where turbine i's node velocities are sampled: its nodes, or (sampling = upstream) the nodes shifted
     //! sample_diameters_upstream diameters ahead of the hub along the shaft axis
     std::vector<amrex::Real> sampling_positions (int i) const;

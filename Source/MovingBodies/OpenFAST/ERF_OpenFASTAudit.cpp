@@ -123,7 +123,7 @@ audit_model (const MovingBodyInputs& b, Real erf_gravity)
 std::vector<AuditFinding>
 audit_geometry (const TurbineState& t, const MovingBodyInputs& b, Real epsilon,
                 const std::array<Real,3>& prob_lo, const std::array<Real,3>& prob_hi,
-                const std::array<Real,3>& dx, const std::array<int,3>& periodic)
+                const std::array<Real,3>& dx, const std::array<int,3>& periodic, Real ground_z)
 {
     std::vector<AuditFinding> f;
     const Real R = erf_actuator::tip_radius(t);
@@ -138,9 +138,9 @@ audit_geometry (const TurbineState& t, const MovingBodyInputs& b, Real epsilon,
     }
     if (R > Real(0.0)) {
         // the swept disc: the hub +- R in every direction (a bound that ignores the tilt)
-        if (t.hub_pos[2] - R < prob_lo[2]) {
+        if (t.hub_pos[2] - R < ground_z) {
             f.push_back({true, "the rotor reaches below the ground: hub height " + fmt(t.hub_pos[2]) + " m minus the tip radius " + fmt(R) +
-                               " m is under prob_lo z = " + fmt(prob_lo[2])});
+                               " m is under the terrain surface at z = " + fmt(ground_z) + " m beneath the hub"});
         }
         if (t.hub_pos[2] + R > prob_hi[2]) {
             f.push_back({true, "the rotor reaches above the domain top: hub height " + fmt(t.hub_pos[2]) + " m plus the tip radius " + fmt(R) +

@@ -251,3 +251,37 @@ TEST(ActuatorSampling, CoverageByALevelIncludesTheReach)
     // an empty point list is covered
     EXPECT_TRUE(erf_actuator::points_covered_by(ba, geom, {}, 100.0, outside));
 }
+
+// The terrain surface under a point: the k = 0 node plane of z_phys_nd, bilinear between the four
+// nodes around (x, y); prob_lo z on a uniform-dz mesh
+TEST(ActuatorSampling, TerrainHeightIsTheBilinearNodeSurface)
+{
+    MeshSpec m; m.hill = 80.0; m.max_grid = {{4, 5, 1024}};   // several boxes: each point has one owner
+    Fields f(m, false);
+    std::vector<Real> pos, expect;
+    // at nodes: exact
+    for (int i : {0, 3, 7, m.nx}) { for (int j : {0, 4, m.ny}) {
+        pos.insert(pos.end(), {i * m.dx(), j * m.dy(), 999.0}); expect.push_back(m.z_node(i, j, 0));
+    } }
+    // at a cell centre and at general points: bilinear between the four nodes
+    auto bilin = [&](Real x, Real y) {
+        const int i = static_cast<int>(std::floor(x / m.dx())), j = static_cast<int>(std::floor(y / m.dy()));
+        const Real wx = x / m.dx() - i, wy = y / m.dy() - j;
+        return (1 - wy) * ((1 - wx) * m.z_node(i, j, 0) + wx * m.z_node(i+1, j, 0)) + wy * ((1 - wx) * m.z_node(i, j+1, 0) + wx * m.z_node(i+1, j+1, 0));
+    };
+    for (auto xy : {std::array<Real,2>{{250.0, 350.0}}, std::array<Real,2>{{612.5, 137.25}}, std::array<Real,2>{{1199.0, 999.0}}}) {
+        pos.insert(pos.end(), {xy[0], xy[1], 0.0}); expect.push_back(bilin(xy[0], xy[1]));
+    }
+    std::vector<Real> h;
+    erf_actuator::terrain_heights(f.znd.get(), f.geom, pos, h);
+    ASSERT_EQ(h.size(), expect.size());
+    for (std::size_t p = 0; p < h.size(); ++p) { EXPECT_NEAR(h[p], expect[p], 1.0e-9) << "point " << p; }
+    EXPECT_GT(*std::max_element(h.begin(), h.end()), 40.0);   // the hill is really there
+    // a uniform-dz mesh: the domain floor everywhere
+    Fields flat(m, true);
+    erf_actuator::terrain_heights(flat.znd.get(), flat.geom, pos, h);
+    for (const Real v : h) { EXPECT_DOUBLE_EQ(v, 0.0); }
+    // no points: nothing to do
+    erf_actuator::terrain_heights(f.znd.get(), f.geom, {}, h);
+    EXPECT_TRUE(h.empty());
+}

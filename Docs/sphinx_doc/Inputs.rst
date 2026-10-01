@@ -2357,7 +2357,10 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.<name>.type**                      | kind of body                                             | openfast_turbine,        | must be set              |
 |                                                        |                                                          | ct_disk                  |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.base_pos**                  | tower base position in ERF coordinates (m)               | 3 Reals                  | must be set              |
+| **erf.moving_bodies.<name>.base_pos**                  | tower base (m): x, y in ERF coordinates, z the height    | 3 Reals                  | must be set              |
+|                                                        | above the terrain surface at (x, y), i.e. above the      |                          |                          |
+|                                                        | k = 0 face there (on a flat mesh the absolute height);   |                          |                          |
+|                                                        | 0 puts the base on the ground                            |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.epsilon**                   | Gaussian width of the force spreading, in units of dx;   | Real > 0                 | 2.0                      |
 |                                                        | every body must use the same value                       |                          |                          |

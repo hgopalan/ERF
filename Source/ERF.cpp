@@ -1844,6 +1844,15 @@ ERF::InitData_post ()
     const std::string& pv2d_1 = "plot2d_vars_1"; appendPlotVariables(pv2d_1,plot2d_var_names_1);
     const std::string& pv2d_2 = "plot2d_vars_2"; appendPlotVariables(pv2d_2,plot2d_var_names_2);
 
+#ifdef ERF_USE_MOVING_BODIES
+    // a fresh start: place the bodies on the terrain and initialise OpenFAST now that the mesh
+    // exists, before the step-0 checkpoint or plotfile (a restart did this in ReadCheckpointFile)
+    if (moving_bodies && !moving_bodies->ground_set()) {
+        const int lev = moving_bodies->anchor_level();
+        moving_bodies->set_ground(z_phys_nd[lev].get(), Geom(lev));
+    }
+#endif
+
     if ( restart_chkfile.empty() && (m_check_int > 0 || m_check_per > zero) )
     {
         WriteCheckpointFile();

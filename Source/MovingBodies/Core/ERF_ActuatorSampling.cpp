@@ -242,6 +242,65 @@ sample_cell_scalar (const MultiFab& mf, int comp, const MultiFab* z_phys_nd, con
     }
 }
 
+void
+terrain_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector<Real>& pos, std::vector<Real>& h)
+{
+    const int npts = static_cast<int>(pos.size() / 3);
+    h.assign(npts, static_cast<Real>(geom.ProbLo(2)));
+    if (npts == 0 || z_phys_nd == nullptr) { return; }
+    const auto plo = geom.ProbLoArray();
+    const auto dxi = geom.InvCellSizeArray();
+    const Box& domain = geom.Domain();
+    const int ilo = domain.smallEnd(0), ihi = domain.bigEnd(0);
+    const int jlo = domain.smallEnd(1), jhi = domain.bigEnd(1);
+    const int klo = domain.smallEnd(2);
+
+    Gpu::DeviceVector<Real> d_pos(pos.size()), d_h(npts, 0.0);
+    Gpu::DeviceVector<int> d_cnt(npts, 0);
+    Gpu::copy(Gpu::hostToDevice, pos.begin(), pos.end(), d_pos.begin());
+    Real* p_pos = d_pos.data();
+    Real* p_h = d_h.data();
+    int* p_cnt = d_cnt.data();
+
+    for (MFIter mfi(*z_phys_nd, false); mfi.isValid(); ++mfi) {
+        const Box nbx = mfi.validbox();
+        if (nbx.smallEnd(2) > klo || nbx.bigEnd(2) < klo) { continue; }
+        // the cells whose four lower nodes this nodal box holds; cell boxes are disjoint, so
+        // every point has exactly one owner
+        const Box cbx = amrex::enclosedCells(nbx);
+        Array4<Real const> const& znd = z_phys_nd->const_array(mfi);
+        ParallelFor(npts, [=] AMREX_GPU_DEVICE (int p) noexcept
+        {
+            const Real xi = (p_pos[3*p]   - plo[0]) * dxi[0];
+            const Real yi = (p_pos[3*p+1] - plo[1]) * dxi[1];
+            int ic = static_cast<int>(std::floor(xi));
+            int jc = static_cast<int>(std::floor(yi));
+            // a point on the domain's upper face belongs to the last cell
+            if (ic == ihi + 1 && xi == static_cast<Real>(ic)) { ic = ihi; }
+            if (jc == jhi + 1 && yi == static_cast<Real>(jc)) { jc = jhi; }
+            if (ic < ilo || ic > ihi || jc < jlo || jc > jhi) { return; }
+            if (ic < cbx.smallEnd(0) || ic > cbx.bigEnd(0) || jc < cbx.smallEnd(1) || jc > cbx.bigEnd(1)) { return; }
+            const Real wx = xi - static_cast<Real>(ic), wy = yi - static_cast<Real>(jc);
+            const Real z00 = znd(ic,   jc,   klo), z10 = znd(ic+1, jc,   klo);
+            const Real z01 = znd(ic,   jc+1, klo), z11 = znd(ic+1, jc+1, klo);
+            p_h[p] = (Real(1.0) - wy) * ((Real(1.0) - wx) * z00 + wx * z10) + wy * ((Real(1.0) - wx) * z01 + wx * z11);
+            p_cnt[p] = 1;
+        });
+    }
+    Gpu::streamSynchronize();
+    std::vector<int> cnt(npts, 0);
+    Gpu::copy(Gpu::deviceToHost, d_h.begin(), d_h.end(), h.begin());
+    Gpu::copy(Gpu::deviceToHost, d_cnt.begin(), d_cnt.end(), cnt.begin());
+    ParallelDescriptor::ReduceRealSum(h.data(), npts);
+    ParallelDescriptor::ReduceIntSum(cnt.data(), npts);
+    for (int p = 0; p < npts; ++p) {
+        if (cnt[p] != 1) {
+            Abort("terrain_heights: the point (" + std::to_string(pos[3*p]) + ", " + std::to_string(pos[3*p+1]) +
+                  ") was found in " + std::to_string(cnt[p]) + " boxes; the bodies' bases must lie inside the domain");
+        }
+    }
+}
+
 bool
 points_covered_by (const BoxArray& ba, const Geometry& geom, const std::vector<Real>& pos, Real reach, std::string& first_outside)
 {

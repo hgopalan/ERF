@@ -26,6 +26,9 @@ public:
 
     /** Whether the base point ever moves; a fixed body's derived data can be cached. */
     virtual bool is_fixed () const = 0;
+
+    /** Move the base point by d (m): the terrain height under the base is added to its z at start-up. */
+    virtual void shift_base (const std::array<amrex::Real,3>& d) = 0;
 };
 
 /** A body that does not move: the position is its base position for all time. */
@@ -37,6 +40,7 @@ public:
     std::array<amrex::Real,3> position (amrex::Real /*t*/) const override { return m_base; }
     std::array<amrex::Real,3> velocity (amrex::Real /*t*/) const override { return {{0.0, 0.0, 0.0}}; }
     bool is_fixed () const override { return true; }
+    void shift_base (const std::array<amrex::Real,3>& d) override { for (int c = 0; c < 3; ++c) { m_base[c] += d[c]; } }
 
 private:
     std::array<amrex::Real,3> m_base;

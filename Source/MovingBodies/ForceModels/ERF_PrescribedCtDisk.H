@@ -51,6 +51,9 @@ public:
     amrex::Real radius () const { return m_radius; }
     amrex::Real area () const { return m_area_total; }
 
+    /** Raise the disk and its sampling points by dz (m): the terrain height under the base, at start-up. */
+    void shift_z (amrex::Real dz);
+
     /** Write the header of <output_root>_disk.csv (truncating it). */
     /** Open <output_root>_disk.csv: truncated for a fresh run, appended to after a restart. */
     void open_diagnostics (bool truncate) const;

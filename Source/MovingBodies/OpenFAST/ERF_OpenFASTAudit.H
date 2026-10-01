@@ -55,11 +55,13 @@ std::vector<AuditFinding> audit_model (const MovingBodyInputs& b, amrex::Real er
  * should resolve the rotor (at least 8 cells across the diameter), the kernel should be at
  * least a cell wide, an actuator line's points should be no farther apart than the kernel,
  * and the kernel should not be cut by a non-periodic boundary (warnings).
- * @param prob_lo,prob_hi the domain, dx the cell sizes, periodic 1 for each periodic direction
+ * @param prob_lo,prob_hi the domain, dx the cell sizes, periodic 1 for each periodic direction,
+ *        ground_z the height of the terrain surface under the hub (prob_lo z on a flat mesh)
  */
 std::vector<AuditFinding> audit_geometry (const TurbineState& t, const MovingBodyInputs& b, amrex::Real epsilon,
                                           const std::array<amrex::Real,3>& prob_lo, const std::array<amrex::Real,3>& prob_hi,
-                                          const std::array<amrex::Real,3>& dx, const std::array<int,3>& periodic);
+                                          const std::array<amrex::Real,3>& dx, const std::array<int,3>& periodic,
+                                          amrex::Real ground_z);
 
 /** Two rotors whose swept discs intersect (fatal). */
 std::vector<AuditFinding> audit_overlap (const std::vector<TurbineState>& turbs);
