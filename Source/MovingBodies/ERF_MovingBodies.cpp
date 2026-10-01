@@ -4,6 +4,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <sstream>
 
@@ -138,6 +139,8 @@ MovingBodies::MovingBodies (MovingBodiesInputs in, int anchor, double dt, double
                                      std::vector<std::string>{"thrust_shaft", "thrust_x", "torque", "power", "rotor_speed",
                                                               "hub_u", "hub_v", "hub_w", "blade_mean_u"});
     }
+    m_corr_uinf.assign(turbines.size(), 0.0);
+    m_corr_last.assign(turbines.size(), erf_actuator::DiskCorrection{});
 #ifdef ERF_USE_OPENFAST
     // the models are set up now, so their inputs are checked at start-up; the first OpenFAST
     // solution waits for the first step, when the flow exists to be sampled
@@ -175,8 +178,13 @@ MovingBodies::write_checkpoint (const std::string& chkdir) const
         if (!out) { Abort("cannot write the moving-bodies checkpoint state '" + dir + "/state'"); }
         out << "step = " << m_step << "\n";
 #ifdef ERF_USE_OPENFAST
-        for (const auto& t : m_driver->turbines()) {
-            out << "time_index " << t.name << " = " << t.time_index << "\n";
+        const auto& turbs = m_driver->turbines();
+        for (std::size_t i = 0; i < turbs.size(); ++i) {
+            out << "time_index " << turbs[i].name << " = " << turbs[i].time_index << "\n";
+            if (m_turbine_in[i].sampling == "disk_corrected") {
+                out << "corr_uinf " << turbs[i].name << " = "
+                    << std::setprecision(std::numeric_limits<Real>::max_digits10) << m_corr_uinf[i] << "\n";
+            }
         }
 #endif
     }
@@ -230,6 +238,7 @@ MovingBodies::read_checkpoint (const std::string& chkdir)
     for (auto& st : m_disk_stats) { st.read_state(dir); }
     // the state file: the step count, and the OpenFAST time index each turbine must report
     std::map<std::string,int> time_index;
+    std::map<std::string,Real> corr_uinf;
     {
         Vector<char> chars;
         ParallelDescriptor::ReadAndBcastFile(dir + "/state", chars);
@@ -247,12 +256,25 @@ MovingBodies::read_checkpoint (const std::string& chkdir)
                 int n = 0;
                 if (!(ls >> name >> eq >> n) || eq != "=") { Abort("malformed time_index line in '" + dir + "/state'"); }
                 time_index[name] = n;
+            } else if (key == "corr_uinf") {
+                Real u = 0.0;
+                if (!(ls >> name >> eq >> u) || eq != "=") { Abort("malformed corr_uinf line in '" + dir + "/state'"); }
+                corr_uinf[name] = u;
             }
         }
         if (!have_step) { Abort("no step count in the moving-bodies checkpoint '" + dir + "/state'"); }
     }
 #ifdef ERF_USE_OPENFAST
     m_driver->restart(dir + "/", m_dt);
+    for (std::size_t i = 0; i < m_driver->turbines().size(); ++i) {
+        if (m_turbine_in[i].sampling != "disk_corrected") { continue; }
+        const auto it = corr_uinf.find(m_driver->turbines()[i].name);
+        if (it == corr_uinf.end()) {
+            Abort("the moving-bodies checkpoint '" + dir + "/state' holds no corr_uinf line for turbine " +
+                  m_driver->turbines()[i].name + " (sampling = disk_corrected)");
+        }
+        m_corr_uinf[i] = it->second;
+    }
     for (const auto& t : m_driver->turbines()) {
         const auto it = time_index.find(t.name);
         if (it == time_index.end()) {
@@ -326,6 +348,7 @@ MovingBodies::advance (int lev, double time, double dt,
     if (first || m_step % m_in.diagnostics_int == 0) {
         m_driver->write_diagnostics(time + dt);
         write_fllc_diagnostics(time, first);
+        write_correction_diagnostics(time, first);
         write_total_load(time + dt, false);
     }
 #endif
@@ -608,6 +631,21 @@ MovingBodies::add_momentum_sources (int lev, MultiFab& xmom_src, MultiFab& ymom_
     MultiFab::Add(zmom_src, m_src_z, 0, 0, 1, 0);
 }
 
+std::vector<Real>
+MovingBodies::sampling_positions (int i) const
+{
+#ifdef ERF_USE_OPENFAST
+    const erf_openfast::TurbineState& t = m_driver->turbines()[i];
+    if (m_turbine_in[i].sampling == "upstream") {
+        return erf_actuator::upstream_sampling_positions(t, m_turbine_in[i].sample_diameters_upstream);
+    }
+    return t.vel_pos;
+#else
+    amrex::ignore_unused(i);
+    return {};
+#endif
+}
+
 void
 MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab& V, const MultiFab& W,
                                  const MultiFab* z_phys_nd, const Geometry& geom)
@@ -618,7 +656,7 @@ MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab&
     m_points.clear();
     int nturb = 0;
 #ifdef ERF_USE_OPENFAST
-    for (const auto& t : m_driver->turbines()) { m_points.add_body(t.vel_pos); ++nturb; }
+    for (int i = 0; i < static_cast<int>(m_driver->turbines().size()); ++i) { m_points.add_body(sampling_positions(i)); ++nturb; }
 #endif
     for (const auto& d : m_disks) {
         m_points.add_body(d->sample_points());
@@ -636,11 +674,10 @@ MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab&
 #ifdef ERF_USE_OPENFAST
     if (!m_fllc_built) { build_fllc(geom); }
     for (int i = 0; i < nturb; ++i) {
-        if (m_fllc[i].empty()) {
-            m_driver->set_node_velocities(i, m_points.body_velocities(i));
-        } else {
+        {
             std::vector<Real> uvw = m_points.body_velocities(i);
-            apply_fllc(i, time, uvw);
+            if (m_turbine_in[i].sampling == "disk_corrected") { apply_disk_correction(i, uvw, geom); }
+            if (!m_fllc[i].empty()) { apply_fllc(i, time, uvw); }
             m_driver->set_node_velocities(i, uvw);
         }
         // the nacelle drag from the hub node's velocity (the first velocity node), corrected
@@ -668,6 +705,49 @@ MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab&
 
 #ifdef ERF_USE_OPENFAST
 void
+MovingBodies::apply_disk_correction (int i, std::vector<Real>& uvw, const Geometry& geom)
+{
+    const erf_openfast::TurbineState& t = m_driver->turbines()[i];
+    const MovingBodyInputs& b = m_turbine_in[i];
+    const Real u_disk = erf_actuator::disk_axial_velocity(t, uvw);
+    // the rotor thrust of the previous step along the shaft (force on the structure)
+    const auto f = m_driver->thrust(t);
+    Real thrust = 0.0;
+    for (int d = 0; d < 3; ++d) { thrust += f[d] * t.hub_axis[d]; }
+    const Real eps = m_epsilon_dx * geom.CellSize(0);
+    const erf_actuator::DiskCorrection c =
+        erf_actuator::filtered_disk_correction(u_disk, thrust, m_corr_uinf[i], b.air_density, erf_actuator::tip_radius(t), eps);
+    // the hub and the blade velocity nodes see the free stream; the tower nodes keep the resolved flow
+    const int nb = t.num_blades * t.num_blade_elem;
+    for (int nd = 0; nd <= nb && 3*nd+2 < static_cast<int>(uvw.size()); ++nd) {
+        for (int d = 0; d < 3; ++d) { uvw[3*nd+d] *= c.factor; }
+    }
+    m_corr_uinf[i] = c.u_inf;
+    m_corr_last[i] = c;
+}
+
+void
+MovingBodies::write_correction_diagnostics (double time, bool first)
+{
+    if (!ParallelDescriptor::IOProcessor()) { return; }
+    const auto& turbs = m_driver->turbines();
+    bool any = false;
+    for (std::size_t i = 0; i < turbs.size(); ++i) {
+        if (m_turbine_in[i].sampling != "disk_corrected") { continue; }
+        any = true;
+        const erf_actuator::DiskCorrection& c = m_corr_last[i];
+        std::ofstream out;
+        const bool truncate = first && !m_restored && !m_corr_written;
+        if (erf_actuator::open_log(out, turbs[i].output_root + "_correction.csv", truncate)) {
+            out << "time,u_disk,ct,a,ct_prime,M,u_inf,factor\n";
+        }
+        out << std::setprecision(10) << time << "," << c.u_disk << "," << c.ct << "," << c.a << "," << c.ct_prime << ","
+            << c.M << "," << c.u_inf << "," << c.factor << "\n";
+    }
+    if (any) { m_corr_written = true; }
+}
+
+void
 MovingBodies::audit_turbines_setup (const BoxArray& level_grids, const Geometry& geom)
 {
     m_audited_setup = true;
@@ -678,10 +758,11 @@ MovingBodies::audit_turbines_setup (const BoxArray& level_grids, const Geometry&
     // the level's own cells
     {
         const Real reach = Real(3.0) * m_epsilon_dx * geom.CellSize(0) + geom.CellSize(0);
-        for (const auto& t : turbs) {
+        for (int i = 0; i < static_cast<int>(turbs.size()); ++i) {
+            const auto& t = turbs[i];
             std::string outside;
             if (!erf_actuator::points_covered_by(level_grids, geom, t.force_pos, reach, outside) ||
-                !erf_actuator::points_covered_by(level_grids, geom, t.vel_pos, geom.CellSize(0), outside)) {
+                !erf_actuator::points_covered_by(level_grids, geom, sampling_positions(i), geom.CellSize(0), outside)) {
                 Abort("erf.moving_bodies." + t.name + ": node " + outside + " (with the kernel reach " + std::to_string(reach) +
                       " m) is not covered by the grids of level " + std::to_string(m_anchor) +
                       "; enlarge the refinement region around the rotor, or set erf.moving_bodies.anchor_level to a level that covers it");
@@ -698,6 +779,16 @@ MovingBodies::audit_turbines_setup (const BoxArray& level_grids, const Geometry&
     bool any_fatal = false;
     for (std::size_t i = 0; i < turbs.size(); ++i) {
         const MovingBodyInputs& b = m_turbine_in[i];
+        if (b.sampling == "disk_corrected") {
+            // the filtered-disk factor was derived for filter widths up to about 1.25 rotor radii
+            const Real ratio = erf_actuator::filter_width_from_eps(eps) / erf_actuator::tip_radius(turbs[i]);
+            Print() << "erf.moving_bodies." << turbs[i].name << ": disk_corrected sampling, filter width sqrt(6) eps = "
+                    << erf_actuator::filter_width_from_eps(eps) << " m, " << ratio << " rotor radii\n";
+            if (ratio > Real(1.25) && ParallelDescriptor::IOProcessor()) {
+                Warning("erf.moving_bodies." + turbs[i].name + ": the filter width is " + std::to_string(ratio) +
+                        " rotor radii; the filtered-disk correction was derived for widths up to about 1.25 radii");
+            }
+        }
         std::vector<erf_openfast::AuditFinding> f = erf_openfast::audit_model(b, CONST_GRAV);
         const auto fg = erf_openfast::audit_geometry(turbs[i], b, eps, plo, phi, dx, per);
         f.insert(f.end(), fg.begin(), fg.end());

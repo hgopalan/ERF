@@ -87,6 +87,64 @@ nacelle_corrected_velocity (const std::array<Real,3>& u, Real cd, Real area, Rea
     return {{u[0] / fac, u[1] / fac, u[2] / fac}};
 }
 
+std::vector<Real>
+upstream_sampling_positions (const erf_openfast::TurbineState& t, Real diameters)
+{
+    const Real shift = diameters * Real(2.0) * tip_radius(t);
+    std::vector<Real> pos(t.vel_pos);
+    for (std::size_t n = 0; n + 2 < pos.size(); n += 3) {
+        for (int d = 0; d < 3; ++d) { pos[n+d] -= shift * t.hub_axis[d]; }
+    }
+    return pos;
+}
+
+Real
+filter_width_from_eps (Real eps) { return std::sqrt(Real(6.0)) * eps; }
+
+Real
+filtered_disk_factor (Real ct_prime, Real delta_over_R)
+{
+    const Real inv_sqrt_3pi = Real(1.0) / std::sqrt(Real(3.0) * pi);
+    return Real(1.0) / (Real(1.0) + Real(0.25) * ct_prime * delta_over_R * inv_sqrt_3pi);
+}
+
+DiskCorrection
+filtered_disk_correction (Real u_disk, Real thrust, Real u_inf_prev, Real rho, Real tip_radius, Real eps)
+{
+    DiskCorrection c;
+    c.u_disk = u_disk;
+    if (!(u_disk > Real(0.1)) || !(thrust > Real(0.0)) || !(u_inf_prev > Real(0.1)) || !(tip_radius > Real(0.0))) {
+        c.u_inf = u_disk; c.factor = Real(1.0); return c;
+    }
+    const Real area = pi * tip_radius * tip_radius;
+    c.ct = std::min(Real(0.96), std::max(Real(0.0), thrust / (Real(0.5) * rho * area * u_inf_prev * u_inf_prev)));
+    c.a = Real(0.5) * (Real(1.0) - std::sqrt(Real(1.0) - c.ct));
+    c.ct_prime = Real(4.0) * c.a / (Real(1.0) - c.a);
+    c.M = filtered_disk_factor(c.ct_prime, filter_width_from_eps(eps) / tip_radius);
+    c.u_inf = c.M * u_disk / (Real(1.0) - c.a);
+    c.factor = c.u_inf / u_disk;
+    return c;
+}
+
+Real
+disk_axial_velocity (const erf_openfast::TurbineState& t, const std::vector<Real>& uvw)
+{
+    const auto& n = t.hub_axis;
+    const int nb = t.num_blades * t.num_blade_elem;   // velocity nodes 1 .. nb are the blades
+    Real wsum = 0.0, usum = 0.0;
+    for (int nd = 1; nd <= nb && 3*nd+2 < static_cast<int>(uvw.size()) && 3*nd+2 < static_cast<int>(t.vel_pos.size()); ++nd) {
+        Real rv[3], rn = 0.0;
+        for (int d = 0; d < 3; ++d) { rv[d] = t.vel_pos[3*nd+d] - t.hub_pos[d]; rn += rv[d] * n[d]; }
+        Real r2 = 0.0;
+        for (int d = 0; d < 3; ++d) { const Real p = rv[d] - rn * n[d]; r2 += p * p; }
+        const Real w = std::sqrt(r2);
+        Real ua = 0.0;
+        for (int d = 0; d < 3; ++d) { ua += uvw[3*nd+d] * n[d]; }
+        wsum += w; usum += w * ua;
+    }
+    return (wsum > Real(0.0)) ? usum / wsum : Real(0.0);
+}
+
 Real
 tip_radius (const erf_openfast::TurbineState& t)
 {

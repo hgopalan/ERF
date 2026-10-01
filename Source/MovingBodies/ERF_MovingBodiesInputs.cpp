@@ -102,6 +102,19 @@ MovingBodiesInputs::read ()
                 Abort("erf.moving_bodies." + name + ".mode must be adm, alm or none, not '" + b.mode + "'");
             }
 
+            ppb.query("sampling", b.sampling);
+            if (b.sampling.empty()) { b.sampling = (b.mode == "adm") ? "disk_corrected" : "disk"; }
+            if (b.sampling != "disk" && b.sampling != "upstream" && b.sampling != "disk_corrected") {
+                Abort("erf.moving_bodies." + name + ".sampling must be disk, upstream or disk_corrected, not '" + b.sampling + "'");
+            }
+            if (b.sampling != "disk" && b.mode != "adm") {
+                Abort("erf.moving_bodies." + name + ".sampling = " + b.sampling + " needs mode = adm: an actuator line resolves its own induction");
+            }
+            b.sample_diameters_upstream = 2.0;   // turbines: two diameters, where the rotor's upstream induction is ~0.5 %
+            ppb.query("sample_diameters_upstream", b.sample_diameters_upstream);
+            if (!(b.sample_diameters_upstream > 0.0)) {
+                Abort("erf.moving_bodies." + name + ".sample_diameters_upstream must be positive (diameters ahead of the hub)");
+            }
             ppb.query("num_force_points_blade", b.num_force_points_blade);
             if (b.num_force_points_blade < 1) {
                 Abort("erf.moving_bodies." + name + ".num_force_points_blade must be >= 1");
@@ -125,7 +138,7 @@ MovingBodiesInputs::read ()
             if (!(b.air_density > 0.0)) {
                 Abort("erf.moving_bodies." + name + ".air_density must be positive");
             }
-            ppb.query("fllc", b.fllc);
+            if (!ppb.query("fllc", b.fllc)) { b.fllc = (b.mode == "alm"); }   // an actuator line runs with the correction unless told not to
             if (b.fllc && b.mode != "alm") {
                 Abort("erf.moving_bodies." + name + ".fllc = true needs mode = alm; the correction is for an actuator line");
             }

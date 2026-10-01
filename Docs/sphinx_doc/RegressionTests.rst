@@ -638,7 +638,7 @@ gold plotfiles stay in ``Tests/ERFGoldFiles``); the README there lists them.
 ``OpenFAST_ADM_Uniform`` (builds with ``ERF_ENABLE_OPENFAST=ON``,
 ``ERF_OPENFAST_USE_STUB=ON``, ``ERF_ENABLE_FFT=ON`` and MPI, not Windows) runs a
 uniform 10 m/s anelastic flow for ten steps through one stub OpenFAST turbine
-in ``mode = adm``: the stub's loads, from the velocities sampled at its nodes,
+in ``mode = adm`` with ``sampling = disk``: the stub's loads, from the velocities sampled at its nodes,
 are spread as rings about the hub axis (``num_points_t = 16``,
 ``epsilon = 2 dx``) and slow the flow. ``Tests/RunOpenFASTADM.cmake`` compares
 the plotfile with its gold, the sampled flow log ``T1_flow.csv`` with its gold
@@ -653,10 +653,38 @@ Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Uniform`_
 
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Uniform`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Uniform
 
+``OpenFAST_ADM_Upstream`` runs the same deck with ``sampling = upstream``: the
+velocities handed to the stub come from one diameter ahead of the hub along the
+shaft axis instead of from the disk, so the free stream and not the resolved
+induction sets the loads (with OpenFAST this mode requires ``Wake_Mod = 1``).
+The shifted sampling points are covered like the nodes; the rings and the
+spreading are unchanged, so the same three checks apply, and
+``OpenFASTADM_Upstream_BoxParity`` is its one-box-versus-split twin.
+
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream`_
+
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream
+
+``OpenFAST_ADM_DiskCorrected`` runs the same deck with ``sampling = disk_corrected``:
+the velocities are sampled at the disk, and the free stream handed to the stub is
+recovered from the radius-weighted axial disk velocity with the filtered-disk
+factor of Shapiro, Gayme and Meneveau (2019) and momentum theory on the previous
+step's thrust, logged in ``T1_correction.csv`` (with OpenFAST this mode requires
+``Wake_Mod = 1``); the kernel is one cell wide so the filter width stays within
+the range the factor was derived for. The same three checks apply;
+``OpenFASTADM_DiskCorrected_BoxParity`` is the one-box-versus-split twin, and
+``OpenFAST_ADM_DiskCorrected_Restart`` runs it straight to step 10 and again
+through a checkpoint at step 5, requiring the plotfiles and the correction logs
+to agree: the recovered free stream is part of the moving-bodies checkpoint.
+
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskCorrected`_
+
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskCorrected`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskCorrected
+
 OpenFAST rotor as an actuator line
 ----------------------------------
 ``OpenFAST_ALM_Uniform`` (same build requirements) runs the actuator-disk deck
-with ``mode = alm``: the stub's loads are spread from its rotating blade nodes
+with ``mode = alm`` and ``fllc = false`` (the plain line): the stub's loads are spread from its rotating blade nodes
 (20 per blade, ``epsilon = 2 dx``) instead of as rings, so the three lines of
 force turn through the 50 m cells at 0.9 cells per step, under the one-cell
 limit ``erf.moving_bodies.alm_max_tip_cells`` (a 1 s step aborts at the first

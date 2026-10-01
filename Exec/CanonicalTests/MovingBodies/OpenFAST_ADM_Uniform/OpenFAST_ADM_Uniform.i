@@ -42,6 +42,7 @@ erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
 erf.moving_bodies.bodies                     = T1
 erf.moving_bodies.T1.type                    = openfast_turbine
 erf.moving_bodies.T1.mode                    = adm
+erf.moving_bodies.T1.sampling                = disk   # plain disk sampling (the adm default is disk_corrected)
 erf.moving_bodies.T1.fst_file                = stub_turbine.fst
 erf.moving_bodies.T1.base_pos                = 750. 600. 0.
 erf.moving_bodies.T1.num_force_points_blade  = 20

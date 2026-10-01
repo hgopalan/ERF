@@ -2392,7 +2392,18 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.<name>.nacelle_area**              | openfast_turbine: frontal area of the nacelle (m^2);     | Real >= 0                | 0                        |
 |                                                        | must be positive when nacelle_cd is                      |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.fllc**                      | openfast_turbine, mode alm: filtered lifting-line        | true, false              | false                    |
+| **erf.moving_bodies.<name>.sampling**                  | openfast_turbine, mode = adm: where the node velocities  | disk, upstream,          | disk_corrected           |
+|                                                        | handed to OpenFAST are sampled: disk (at the nodes;      | disk_corrected           |                          |
+|                                                        | AeroDyn Wake_Mod must be 0); upstream                    |                          |                          |
+|                                                        | (sample_diameters_upstream diameters ahead of the hub    |                          |                          |
+|                                                        | along the shaft, the free stream); or disk_corrected     |                          |                          |
+|                                                        | (at the nodes, the free stream recovered from the disk   |                          |                          |
+|                                                        | velocity with the filtered-disk factor of Shapiro et al. |                          |                          |
+|                                                        | 2019 and momentum theory on the previous step's thrust). |                          |                          |
+|                                                        | With upstream and disk_corrected, Wake_Mod must be 1 so  |                          |                          |
+|                                                        | OpenFAST applies its own induction                       |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.fllc**                      | openfast_turbine, mode alm: filtered lifting-line        | true, false              | true (alm), false (adm)  |
 |                                                        | correction of the velocities the blades are given        |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.fllc_relax**                | relaxation factor of the correction                      | 0 < Real <= 1            | 0.1                      |
@@ -2421,8 +2432,9 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.<name>.num_points_t**              | points per ring: of the ct_disk polar grid, or of the    | Int > 0                  | 16                       |
 |                                                        | rings an openfast_turbine's blade nodes are spread over  |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.sample_diameters_upstream** | ct_disk: where the upstream speed is sampled, in         | Real > 0                 | 1.0                      |
-|                                                        | diameters along the normal                               |                          |                          |
+| **erf.moving_bodies.<name>.sample_diameters_upstream** | ct_disk, and openfast_turbine with sampling = upstream:  | Real > 0                 | 1.0 (ct_disk),           |
+|                                                        | where the free stream is sampled, in diameters ahead     |                          | 2.0 (turbine)            |
+|                                                        | along the normal / shaft axis                            |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.air_density**               | density in the ct_disk thrust and in the nacelle drag    | Real > 0                 | 1.225                    |
 |                                                        | (kg/m^3)                                                 |                          |                          |

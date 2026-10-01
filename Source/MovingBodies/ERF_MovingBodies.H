@@ -162,6 +162,9 @@ private:
      * part prints its findings together and a fatal one aborts.
      */
     void audit_turbines_setup (const amrex::BoxArray& level_grids, const amrex::Geometry& geom);
+    //! where turbine i's node velocities are sampled: its nodes, or (sampling = upstream) the nodes shifted
+    //! sample_diameters_upstream diameters ahead of the hub along the shaft axis
+    std::vector<amrex::Real> sampling_positions (int i) const;
     void audit_turbines_flow (const amrex::MultiFab& cons, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
     bool m_audited_setup{false};
     bool m_audited_flow{false};
@@ -171,6 +174,15 @@ private:
     void apply_fllc (int i, double time, std::vector<amrex::Real>& uvw);
     /** Append a row to <output_root>_fllc.csv for every corrected turbine. */
     void write_fllc_diagnostics (double time, bool first);
+
+    /** sampling = disk_corrected: scale the hub and blade node velocities of turbine i from the disk
+     *  velocity to the free stream recovered with the filtered-disk factor (Shapiro et al. 2019) and
+     *  momentum theory on the previous step's thrust; the tower nodes keep the resolved flow. */
+    void apply_disk_correction (int i, std::vector<amrex::Real>& uvw, const amrex::Geometry& geom);
+    void write_correction_diagnostics (double time, bool first);
+    std::vector<amrex::Real> m_corr_uinf;                     //!< per turbine: the corrected free stream of the previous step (checkpointed)
+    std::vector<erf_actuator::DiskCorrection> m_corr_last;    //!< per turbine: the last correction, for the diagnostics
+    bool m_corr_written{false};
     std::vector<std::vector<std::unique_ptr<erf_actuator::FLLC>>> m_fllc;   //!< per turbine, one per blade (empty: off)
     bool m_fllc_built{false};
     bool m_fllc_written{false};

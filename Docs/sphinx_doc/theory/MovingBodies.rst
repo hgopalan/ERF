@@ -129,6 +129,78 @@ its shaft component equals minus that of the integrated source. With ``mode = no
 the turbine is driven by the flow but puts no force into it (one-way
 coupling, as for a loads analysis in a precomputed flow).
 
+**Where the velocities are sampled.** With ``sampling = disk`` the
+node velocities handed to OpenFAST are sampled at the nodes, inside the rotor's
+own induction zone, and AeroDyn's induction model is off (``Wake_Mod = 0``): the
+resolved flow supplies the induction. On a grid that does not resolve the smeared
+disk (``epsilon`` of two 20 m cells for a 240 m rotor) the sampled velocity lies
+well above the momentum-theory disk velocity, and the loads, computed by OpenFAST
+without induction from that velocity, exceed the blade-element-momentum values
+(the IEA 15 MW disk on 20 m cells measured 29 % high in power). With
+``sampling = upstream`` every velocity node is shifted ``sample_diameters_upstream``
+diameters ahead of the hub along the shaft axis, where the flow is the free stream
+(the rotor's influence one diameter ahead is a few percent of the induction), and
+AeroDyn keeps its induction model (``Wake_Mod = 1`` is required): the loads are
+then the BEM loads for that free stream whatever the grid, and the resolved flow
+receives them as rings. The shifted sampling points must be covered by the anchor
+level like the nodes. With ``sampling = disk_corrected`` (the default for
+``mode = adm``) the velocities stay at the nodes and the free stream is recovered
+from them: the velocity a Gaussian-smeared
+disk samples is not the thin-disk velocity :math:`U_\infty (1 - a)` but that
+velocity divided by the factor of Shapiro, Gayme and Meneveau (2019, eq. 25),
+
+.. math::
+
+   M = \left( 1 + \frac{C_T'}{4} \frac{\Delta / R}{\sqrt{3 \pi}} \right)^{-1},
+   \qquad C_T' = \frac{4 a}{1 - a} = \frac{C_T}{(1 - a)^2},
+
+where :math:`\Delta` is the width of their filter
+:math:`G = (6 / \pi \Delta^2)^{3/2} \exp(-6 r^2 / \Delta^2)`; ERF's kernel
+:math:`\exp(-r^2 / \epsilon^2)` is that filter with :math:`\Delta = \sqrt{6}\,\epsilon`.
+Each step the radius-weighted axial velocity over the blade nodes :math:`u_d` is
+sampled, :math:`C_T` is evaluated from the previous step's shaft thrust and
+previous free stream (clamped to 0.96), :math:`a = (1 - \sqrt{1 - C_T}) / 2`, and
+the hub and blade node velocities are scaled by :math:`U_\infty / u_d` with
+:math:`U_\infty = M u_d / (1 - a)`; AeroDyn then applies its own induction
+(``Wake_Mod = 1`` is required). The tower nodes keep the resolved flow. The
+recovered free stream is checkpointed and logged in ``<output_root>_correction.csv``;
+the factor was derived for :math:`\Delta / R` up to about 1.25, and a wider kernel
+is warned about. The actuator line keeps disk sampling: it resolves its own
+induction, and the filtered lifting-line correction accounts for the kernel.
+
+The IEA 15 MW rotor in a uniform 10.59 m/s inflow (open boundaries, no sponge,
+no turbulence closure) against the standalone OpenFAST BEM solution (aerodynamic
+thrust 2.482 MN, power 15.79 MW, momentum-theory disk velocity 7.67 m/s):
+
+================================================  =========  ========  =====================
+Disk set-up                                       thrust     power     sampled velocity (m/s)
+================================================  =========  ========  =====================
+disk sampling, 20 m cells, kernel 1.5 dx          1.084      1.288     8.40
+disk sampling, 20 m cells, kernel 2 dx            1.093      1.328     8.47
+disk sampling, 20 m cells, kernel 3 dx            1.112      1.403     8.63
+disk sampling, 20 m + 10 m anchor patch           1.095      1.316     8.64
+disk sampling, 10 m cells, kernel 2 dx            1.072      1.243     8.36
+upstream sampling 1 D, BEM on, 20 m and 10 m      0.977      0.954     10.43
+upstream sampling 2 D, BEM on, 20 m               0.993      0.999     10.58
+disk_corrected, 20 m cells, kernel 2 dx           0.997      1.000     8.74 -> 10.77
+disk_corrected, 10 m cells, kernel 2 dx           1.001      0.993     8.44 -> 10.82
+disk_corrected, 20 m cells, kernel 3 dx           0.991      0.994     8.99 -> 10.67
+================================================  =========  ========  =====================
+
+The ratios do not depend on the advection scheme (third- or fifth-order upwind,
+WENO, or blended upwind give the same loads within 0.1 %) nor on the boundary
+conditions (a periodic box changes them by 1 to 2 %). The one-diameter sample
+sits 1.5 % below the free stream because of the rotor's own upstream induction,
+and the loads follow that velocity squared and cubed; at two diameters the bias
+is below 1 %, which is the turbine default. The corrected disk recovers the loads
+within 1 % on every grid and kernel tried (filter widths of 0.40, 0.81 and 1.21
+rotor radii) from the disk velocity alone, with no upstream points to cover: the
+recovered free stream (the second velocity in the last three rows) sits 1 to 2 %
+above the true value and the thrust coefficient it implies (0.76 against the BEM
+0.80) correspondingly below, and the two biases cancel in the loads. The
+correction settles from its start-up transient within about 50 s with no
+oscillation.
+
 OpenFAST rotor as an actuator line
 ----------------------------------
 
@@ -162,7 +234,7 @@ tens of metres for a 240 m rotor) sees at its own points a weaker induced
 velocity than the vortex sheet of a real blade, whose kernel is of the order
 of the chord: the blades then see too much wind and the line over-predicts
 power, more so for wider kernels. The filtered lifting-line correction
-(Martinez-Tossas and Meneveau, 2019), ``fllc = true`` with ``mode = alm``,
+(Martinez-Tossas and Meneveau, 2019), on by default with ``mode = alm`` (``fllc = false`` switches it off),
 computes the velocity the trailing vorticity of the line's own lift
 distribution induces at the line for the kernel actually used and for the
 optimal one, ``epsilon_opt = fllc_eps_chord * chord`` (a quarter chord by
