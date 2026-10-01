@@ -316,14 +316,19 @@ erf.fire.directional_ellipse_lw_max = 8.0
 erf.fire.propagation_method = "farsite"
 
 # Level-set numerics: subcycle CFL, artificial viscosity away from the front
-# (eps_visc_front below applies near it), and the Sussman reinitialisation
-# (every N subcycles, iterations, band half-width in m and pseudo-dt; <0 = auto)
+# (eps_visc_front below applies near it), and the reinitialisation (every N
+# subcycles, outer RK3 steps, pseudo-dt in m (<= 0 selects 0.01*dx), and scheme:
+# "wrf" (default, WRF-Fire's reinit_ls_rk3) or "jiang_peng" (Jiang and Peng's
+# HJ-WENO5 with SSP-RK3))
 erf.fire.levelset.cfl = 0.4
 erf.fire.levelset.eps_visc = 0.4
 erf.fire.levelset.reinit_every = 5
-erf.fire.levelset.reinit_iters = 10
-erf.fire.levelset.reinit_band_m = -1.0
+erf.fire.levelset.reinit_iters = 1
 erf.fire.levelset.reinit_dtau = -1.0
+erf.fire.levelset.reinit_scheme = "wrf"
+# jiang_peng only: term added to phi0^2 under the smoothed-sign square root;
+# <= 0 selects dx^2 (Jiang and Peng's "delta comparable to the spatial step size").
+erf.fire.levelset.reinit_jp_sign_eps2 = -1.0
 
 # Level-set path only: extrapolate the level set into non-burnable cells
 # inside every stencil (gradient, Laplacian, front normal, reinitialisation),

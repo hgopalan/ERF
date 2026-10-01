@@ -25,9 +25,10 @@ Rf = 1.701 m/s), 25 m fire cells, one-way coupling. The 1 km ignition line sits
 1200 m upwind of the domain centre, perpendicular to the wind, and the fire
 runs 1200 s -- far from the periodic edges, so the square grid is the only thing
 that breaks the rotational symmetry. `erf.fire.directional_wind_coupling =
-"advective"` and reinitialization every level-set substep
-(`reinit_every = 1`) are on in every deck: that is the combination in which
-the baseline scheme grows a wing at an oblique angle.
+"advective"` and the Jiang-Peng reinitialization every level-set substep
+(`reinit_every = 1`, `reinit_scheme = "jiang_peng"`) are on in every deck:
+that is the combination in which the baseline scheme grows a wing at an
+oblique angle.
 
 | deck | wind heading | `directional_split_hamiltonian` |
 |---|---|---|
@@ -69,18 +70,14 @@ per advection call.
 
 | check | bound | measured |
 |---|---|---|
-| split mismatch, t >= 900 s | <= 5 % | 2.1-3.6 % |
-| baseline mismatch, t >= 900 s | >= 6 % | 7.1-12.0 % |
-| baseline / split mismatch, t >= 900 s | >= 2x | >= 3.3x |
-| split below baseline, t >= 600 s | every time | yes |
-| split head rate, 0 deg and 34 deg | within 3 % of Rf | -0.00 %, +0.01 % |
+| split mismatch, every time | <= 1 % | 0.00-0.10 % |
+| baseline mismatch, t >= 600 s | >= 5 % | 9.1-13.4 % |
+| baseline / split mismatch, t >= 600 s | >= 10x | >= 87x |
+| split head rate, 0 deg and 34 deg | within 3 % of Rf | +0.02 %, +0.01 % |
 
-The mismatches start together, 4.6 % (baseline) and 5.1 % (split) at 300 s, and
-the baseline's grows as its wing develops while the split's stays lower, which
-is why the comparative bounds start at 900 s. With the current reinitialization
-the split reduces the wing without removing it; the reinitialization itself
-contributes error that the split does not touch. The baseline head rate is also
-within 0.03 % of Rf at both angles (printed for reference, not asserted): the
-artifact is in the flanks and corners, not the head, so the head-rate check
-confirms the split scheme does not trade accuracy for invariance rather than
-discriminating between the schemes.
+The baseline mismatch is 4.6 % at 300 s and grows as the wing develops, which
+is why its bound starts at 600 s. The baseline head rate is also within 0.03 %
+of Rf at both angles (printed for reference, not asserted): the artifact is in
+the flanks and corners, not the head, so the head-rate check confirms the split
+scheme does not trade accuracy for invariance rather than discriminating
+between the schemes.

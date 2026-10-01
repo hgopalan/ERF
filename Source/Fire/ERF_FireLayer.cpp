@@ -1223,17 +1223,24 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
 
             ++m_levelset_subcycle_count;
             if (m_levelset_subcycle_count % m_params.levelset_reinit_every == 0) {
-                // Sussman reinitialization is stable for dtau <= dx/2; 0.5*dx sits
-                // exactly on that limit and went unstable once enough iterations
-                // were taken, so default to half of it.
+                const bool use_jp = (m_params.levelset_reinit_scheme == "jiang_peng");
+                // Default dtau is 0.01*dx for both schemes, matching WRF-Fire's
+                // reinit pseudo-timestep (module_fr_fire_core.F), so the two
+                // schemes are compared at equal reinit strength.
                 amrex::Real dtau = (m_params.levelset_reinit_dtau > 0.0)
                     ? m_params.levelset_reinit_dtau
-                    : 0.25 * std::min(m_fg.geom.CellSize()[0], m_fg.geom.CellSize()[1]);
-                fire_levelset::reinitialize_phi(*fire_phi, m_fg.geom,
-                                      m_params.levelset_reinit_iters, dtau,
-                                      m_params.levelset_reinit_band_m,
-                                      /*normalized=*/false,
-                                      fire_nonburnable.get(), wall_extrap, ls_grad);
+                    : 0.01 * m_fg.geom.CellSize()[0];
+                if (use_jp) {
+                    fire_levelset::reinitialize_phi_jiang_peng(*fire_phi, m_fg.geom,
+                                          m_params.levelset_reinit_iters, dtau,
+                                          fire_nonburnable.get(), wall_extrap,
+                                          m_params.levelset_reinit_jp_sign_eps2);
+                } else {
+                    fire_levelset::reinitialize_phi(*fire_phi, m_fg.geom,
+                                          m_params.levelset_reinit_iters, dtau,
+                                          ls_grad.band,
+                                          fire_nonburnable.get(), wall_extrap);
+                }
                 enforce_nonburnable_phi();
                 fire_fill_boundary(*fire_phi, m_fg.geom);
             }
