@@ -638,7 +638,7 @@ gold plotfiles stay in ``Tests/ERFGoldFiles``); the README there lists them.
 ``OpenFAST_ADM_Uniform`` (builds with ``ERF_ENABLE_OPENFAST=ON``,
 ``ERF_OPENFAST_USE_STUB=ON``, ``ERF_ENABLE_FFT=ON`` and MPI, not Windows) runs a
 uniform 10 m/s anelastic flow for ten steps through one stub OpenFAST turbine
-in ``mode = adm``: the stub's loads, from the velocities sampled at its nodes,
+in ``mode = adm`` with ``sampling = disk``: the stub's loads, from the velocities sampled at its nodes,
 are spread as rings about the hub axis (``num_points_t = 16``,
 ``epsilon = 2 dx``) and slow the flow. ``Tests/RunOpenFASTADM.cmake`` compares
 the plotfile with its gold, the sampled flow log ``T1_flow.csv`` with its gold
@@ -684,7 +684,7 @@ Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskCorrected`_
 OpenFAST rotor as an actuator line
 ----------------------------------
 ``OpenFAST_ALM_Uniform`` (same build requirements) runs the actuator-disk deck
-with ``mode = alm``: the stub's loads are spread from its rotating blade nodes
+with ``mode = alm`` and ``fllc = false`` (the plain line): the stub's loads are spread from its rotating blade nodes
 (20 per blade, ``epsilon = 2 dx``) instead of as rings, so the three lines of
 force turn through the 50 m cells at 0.9 cells per step, under the one-cell
 limit ``erf.moving_bodies.alm_max_tip_cells`` (a 1 s step aborts at the first

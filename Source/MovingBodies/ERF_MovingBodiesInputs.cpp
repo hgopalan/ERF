@@ -103,6 +103,7 @@ MovingBodiesInputs::read ()
             }
 
             ppb.query("sampling", b.sampling);
+            if (b.sampling.empty()) { b.sampling = (b.mode == "adm") ? "disk_corrected" : "disk"; }
             if (b.sampling != "disk" && b.sampling != "upstream" && b.sampling != "disk_corrected") {
                 Abort("erf.moving_bodies." + name + ".sampling must be disk, upstream or disk_corrected, not '" + b.sampling + "'");
             }
@@ -137,7 +138,7 @@ MovingBodiesInputs::read ()
             if (!(b.air_density > 0.0)) {
                 Abort("erf.moving_bodies." + name + ".air_density must be positive");
             }
-            ppb.query("fllc", b.fllc);
+            if (!ppb.query("fllc", b.fllc)) { b.fllc = (b.mode == "alm"); }   // an actuator line runs with the correction unless told not to
             if (b.fllc && b.mode != "alm") {
                 Abort("erf.moving_bodies." + name + ".fllc = true needs mode = alm; the correction is for an actuator line");
             }

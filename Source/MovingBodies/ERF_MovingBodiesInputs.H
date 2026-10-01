@@ -20,15 +20,15 @@ struct MovingBodyInputs
     // openfast_turbine
     std::string fst_file;                    //!< OpenFAST primary input file
     std::string mode{"adm"};                 //!< adm | alm | none: how the OpenFAST loads reach the flow (none: they do not)
-    std::string sampling{"disk"};            //!< adm: disk (velocities at the nodes, OpenFAST induction off) | disk_corrected (disk
+    std::string sampling;                    //!< adm: disk (velocities at the nodes, OpenFAST induction off) | disk_corrected (disk
                                              //!< velocities, free stream recovered with the filtered-disk factor of Shapiro et al. 2019
-                                             //!< and momentum theory, OpenFAST induction on) | upstream (free stream
+                                             //!< and momentum theory, OpenFAST induction on; the adm default) | upstream (free stream
                                              //!< sample_diameters_upstream diameters ahead of the hub, OpenFAST's own BEM induction on)
     int num_force_points_blade{50};          //!< actuator force points per blade requested from OpenFAST
     int num_force_points_tower{0};           //!< actuator force points on the tower (0: no tower forcing)
     amrex::Real nacelle_cd{0.0};             //!< nacelle drag coefficient (0: no nacelle drag)
     amrex::Real nacelle_area{0.0};           //!< nacelle frontal area (m^2), needed when nacelle_cd > 0
-    bool fllc{false};                        //!< filtered lifting-line correction of the sampled blade velocities (alm only)
+    bool fllc{false};                        //!< filtered lifting-line correction of the sampled blade velocities (alm only; on by default for alm)
     amrex::Real fllc_relax{0.1};             //!< relaxation factor of the correction, in (0, 1]
     amrex::Real fllc_start_time{0.0};        //!< the correction starts at this time (s)
     amrex::Real fllc_eps_chord{0.25};        //!< optimal kernel width in chords
@@ -52,13 +52,13 @@ struct MovingBodyInputs
  *   erf.moving_bodies.T1.fst_file    = T1/IEA-15-240-RWT.fst
  *   erf.moving_bodies.T1.base_pos    = 1000 1000 0
  *   erf.moving_bodies.T1.mode        = adm                (adm: disk rings; alm: a point per blade node; none)
- *   erf.moving_bodies.T1.sampling    = disk               (adm: disk | disk_corrected | upstream; upstream samples the free stream
+ *   erf.moving_bodies.T1.sampling    = disk_corrected     (adm: disk | disk_corrected | upstream; upstream samples the free stream
  *                                                          sample_diameters_upstream diameters ahead and keeps OpenFAST's BEM)
  *   erf.moving_bodies.T1.num_force_points_blade = 50
  *   erf.moving_bodies.T1.num_force_points_tower = 0    (> 0: the tower's loads from OpenFAST forced too)
  *   erf.moving_bodies.T1.nacelle_cd  = 0                (> 0 with nacelle_area: a drag point at the hub)
  *   erf.moving_bodies.T1.nacelle_area = 0               (m^2)
- *   erf.moving_bodies.T1.fllc        = false              (alm: filtered lifting-line correction)
+ *   erf.moving_bodies.T1.fllc        = true               (alm: filtered lifting-line correction; the alm default, set false to run without it)
  *   erf.moving_bodies.T1.fllc_relax  = 0.1                fllc_start_time = 0, fllc_eps_chord = 0.25, fllc_eps_dr = 1
  *   erf.moving_bodies.T1.output_root = moving_bodies/T1
  *   erf.moving_bodies.T1.epsilon     = 2.0                (spreading width, dx units)

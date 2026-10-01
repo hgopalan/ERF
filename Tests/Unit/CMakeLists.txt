@@ -328,6 +328,13 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestOpenFASTAudit.cpp
   )
+  # Motivation: the actuator-disk sampling mode must default to the corrected disk for
+  # mode = adm and to plain disk sampling for an actuator line, keep an explicit choice, the
+  # turbine's upstream sampling distance must default to two diameters, and the lifting-line
+  # correction must be on by default for an actuator line only.
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestMovingBodiesInputs.cpp
+  )
 endif()
 build_erf_exe(${erf_exe_name} NO_ERF_MAIN)
 target_link_libraries(${erf_exe_name} PRIVATE GTest::gtest)

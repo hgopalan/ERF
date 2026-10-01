@@ -2392,7 +2392,7 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.<name>.nacelle_area**              | openfast_turbine: frontal area of the nacelle (m^2);     | Real >= 0                | 0                        |
 |                                                        | must be positive when nacelle_cd is                      |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.sampling**                  | openfast_turbine, mode = adm: where the node velocities  | disk, upstream,          | disk                     |
+| **erf.moving_bodies.<name>.sampling**                  | openfast_turbine, mode = adm: where the node velocities  | disk, upstream,          | disk_corrected           |
 |                                                        | handed to OpenFAST are sampled: disk (at the nodes;      | disk_corrected           |                          |
 |                                                        | AeroDyn Wake_Mod must be 0); upstream                    |                          |                          |
 |                                                        | (sample_diameters_upstream diameters ahead of the hub    |                          |                          |
@@ -2403,7 +2403,7 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 |                                                        | With upstream and disk_corrected, Wake_Mod must be 1 so  |                          |                          |
 |                                                        | OpenFAST applies its own induction                       |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.fllc**                      | openfast_turbine, mode alm: filtered lifting-line        | true, false              | false                    |
+| **erf.moving_bodies.<name>.fllc**                      | openfast_turbine, mode alm: filtered lifting-line        | true, false              | true (alm), false (adm)  |
 |                                                        | correction of the velocities the blades are given        |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.fllc_relax**                | relaxation factor of the correction                      | 0 < Real <= 1            | 0.1                      |

@@ -129,7 +129,7 @@ its shaft component equals minus that of the integrated source. With ``mode = no
 the turbine is driven by the flow but puts no force into it (one-way
 coupling, as for a loads analysis in a precomputed flow).
 
-**Where the velocities are sampled.** With ``sampling = disk`` (the default) the
+**Where the velocities are sampled.** With ``sampling = disk`` the
 node velocities handed to OpenFAST are sampled at the nodes, inside the rotor's
 own induction zone, and AeroDyn's induction model is off (``Wake_Mod = 0``): the
 resolved flow supplies the induction. On a grid that does not resolve the smeared
@@ -143,8 +143,9 @@ diameters ahead of the hub along the shaft axis, where the flow is the free stre
 AeroDyn keeps its induction model (``Wake_Mod = 1`` is required): the loads are
 then the BEM loads for that free stream whatever the grid, and the resolved flow
 receives them as rings. The shifted sampling points must be covered by the anchor
-level like the nodes. With ``sampling = disk_corrected`` the velocities stay at the
-nodes and the free stream is recovered from them: the velocity a Gaussian-smeared
+level like the nodes. With ``sampling = disk_corrected`` (the default for
+``mode = adm``) the velocities stay at the nodes and the free stream is recovered
+from them: the velocity a Gaussian-smeared
 disk samples is not the thin-disk velocity :math:`U_\infty (1 - a)` but that
 velocity divided by the factor of Shapiro, Gayme and Meneveau (2019, eq. 25),
 
@@ -233,7 +234,7 @@ tens of metres for a 240 m rotor) sees at its own points a weaker induced
 velocity than the vortex sheet of a real blade, whose kernel is of the order
 of the chord: the blades then see too much wind and the line over-predicts
 power, more so for wider kernels. The filtered lifting-line correction
-(Martinez-Tossas and Meneveau, 2019), ``fllc = true`` with ``mode = alm``,
+(Martinez-Tossas and Meneveau, 2019), on by default with ``mode = alm`` (``fllc = false`` switches it off),
 computes the velocity the trailing vorticity of the line's own lift
 distribution induces at the line for the kernel actually used and for the
 optimal one, ``epsilon_opt = fllc_eps_chord * chord`` (a quarter chord by

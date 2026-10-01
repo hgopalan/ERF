@@ -44,6 +44,7 @@ erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
 erf.moving_bodies.bodies                     = T1
 erf.moving_bodies.T1.type                    = openfast_turbine
 erf.moving_bodies.T1.mode                    = alm
+erf.moving_bodies.T1.fllc                    = false   # the plain line; the alm default is the filtered lifting-line correction
 erf.moving_bodies.T1.fst_file                = stub_turbine.fst
 erf.moving_bodies.T1.base_pos                = 750. 600. 0.
 erf.moving_bodies.T1.num_force_points_blade  = 20
