@@ -165,7 +165,11 @@ the hub and blade node velocities are scaled by :math:`U_\infty / u_d` with
 (``Wake_Mod = 1`` is required). The tower nodes keep the resolved flow. The
 recovered free stream is checkpointed and logged in ``<output_root>_correction.csv``;
 the factor was derived for :math:`\Delta / R` up to about 1.25, and a wider kernel
-is warned about. The actuator line keeps disk sampling: it resolves its own
+is warned about: keep :math:`\sqrt{6}\,\epsilon \le 1.25 R`, i.e. :math:`\epsilon \le 0.5 R`,
+so on cells coarser than a quarter of the radius use a kernel narrower than the
+usual two cells (1.5 cells of 40 m for a 120 m rotor). Beyond that range the
+thrust coefficient the correction infers runs into its 0.96 clamp and the
+recovered free stream is low. The actuator line keeps disk sampling: it resolves its own
 induction, and the filtered lifting-line correction accounts for the kernel.
 
 The IEA 15 MW rotor in a uniform 10.59 m/s inflow (open boundaries, no sponge,
