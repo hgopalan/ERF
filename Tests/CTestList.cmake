@@ -1686,6 +1686,16 @@ if(ERF_ENABLE_MPI AND NOT WIN32)
 endif()
 
 if(ERF_ENABLE_MPI AND NOT WIN32)
+  # The two-stream model supplies Noah-MP's radiative forcing on a single level only, so
+  # a refined run with the pair must stop at start-up rather than run unverified. The
+  # check sits in SolverChoice::init_params, ahead of anything that needs the Noah-MP
+  # build, so it runs in every build: the two-level two-stream deck with Noah-MP selected.
+  add_test_abort(TwoStream_NoahMP_MultiLevelAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/TwoStream_ColumnHeating_TwoLevel
+                 TwoStream_ColumnHeating_TwoLevel.i
+                 "with erf.land_surface_model = NOAHMP is supported on a single level only"
+                 "erf.land_surface_model=NOAHMP")
+
   # A shallow nest -- a fine level that stops below the domain top -- has no complete
   # column, so the sweep cannot run on it. That is a supported configuration, not an
   # error: advance_radiation interpolates the level's heating rates and fluxes from its
