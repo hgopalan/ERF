@@ -1,0 +1,273 @@
+#include "ERF_MoorDynSystem.H"
+
+#include <cmath>
+
+#include <AMReX.H>
+#include <AMReX_ParmParse.H>
+
+namespace erf_moordyn {
+
+std::string library_version ()
+{
+#ifdef ERF_MOORDYN_USE_STUB
+    return "stub";
+#else
+    return ERF_MOORDYN_VERSION;
+#endif
+}
+
+bool is_stub ()
+{
+#ifdef ERF_MOORDYN_USE_STUB
+    return true;
+#else
+    return false;
+#endif
+}
+
+std::string error_name (int code)
+{
+    switch (code) {
+    case MOORDYN_SUCCESS:             return "MOORDYN_SUCCESS";
+    case MOORDYN_INVALID_INPUT_FILE:  return "MOORDYN_INVALID_INPUT_FILE";
+    case MOORDYN_INVALID_OUTPUT_FILE: return "MOORDYN_INVALID_OUTPUT_FILE";
+    case MOORDYN_INVALID_INPUT:       return "MOORDYN_INVALID_INPUT";
+    case MOORDYN_NAN_ERROR:           return "MOORDYN_NAN_ERROR";
+    case MOORDYN_MEM_ERROR:           return "MOORDYN_MEM_ERROR";
+    case MOORDYN_INVALID_VALUE:       return "MOORDYN_INVALID_VALUE";
+    case MOORDYN_NON_IMPLEMENTED:     return "MOORDYN_NON_IMPLEMENTED";
+    case MOORDYN_UNHANDLED_ERROR:     return "MOORDYN_UNHANDLED_ERROR";
+    default:                          return "MoorDyn error " + std::to_string(code);
+    }
+}
+
+bool fpe_traps_requested ()
+{
+    amrex::ParmParse pp("amrex");
+    bool traps = false;
+    for (const char* key : {"fpe_trap_invalid", "fpe_trap_zero", "fpe_trap_overflow"}) {
+        int trap = 0;
+        pp.query(key, trap);
+        traps = traps || (trap != 0);
+    }
+    return traps;
+}
+
+std::unique_ptr<MoorDynSystem>
+MoorDynSystem::create (const std::string& input_file, const std::string& log_file, int log_level, std::string& err)
+{
+    err.clear();
+    MoorDyn sys = MoorDyn_Create(input_file.c_str());
+    if (sys == nullptr) {
+        err = "MoorDyn (" + library_version() + ") could not create a system from '" + input_file +
+              "': the file is missing or malformed (MoorDyn's message is on stderr)";
+        return nullptr;
+    }
+    std::unique_ptr<MoorDynSystem> s(new MoorDynSystem(sys, input_file));
+    s->check(MoorDyn_SetVerbosity(sys, log_level), "MoorDyn_SetVerbosity");
+    if (!log_file.empty()) {
+        s->check(MoorDyn_SetLogFile(sys, log_file.c_str()), "MoorDyn_SetLogFile");
+        s->check(MoorDyn_SetLogLevel(sys, log_level), "MoorDyn_SetLogLevel");
+    }
+    return s;
+}
+
+MoorDynSystem::MoorDynSystem (MoorDyn sys, std::string file)
+    : m_sys(sys), m_file(std::move(file)) {}
+
+MoorDynSystem::~MoorDynSystem ()
+{
+    if (m_sys != nullptr) { MoorDyn_Close(m_sys); }
+}
+
+void MoorDynSystem::check (int rc, const std::string& what) const
+{
+    if (rc != MOORDYN_SUCCESS) {
+        amrex::Abort(what + " failed with " + error_name(rc) + " for the MoorDyn system from '" + m_file + "'");
+    }
+}
+
+unsigned MoorDynSystem::num_coupled_dof () const
+{
+    unsigned n = 0;
+    check(MoorDyn_NCoupledDOF(m_sys, &n), "MoorDyn_NCoupledDOF");
+    return n;
+}
+
+std::string MoorDynSystem::init (const std::vector<double>& x, const std::vector<double>& xd, bool compute_ic)
+{
+    const unsigned ndof = num_coupled_dof();
+    if (x.size() != ndof || xd.size() != ndof) {
+        return "MoorDyn system from '" + m_file + "' has " + std::to_string(ndof) + " coupled degrees of freedom but " +
+               std::to_string(x.size()) + " positions and " + std::to_string(xd.size()) + " velocities were given";
+    }
+    const double* px = ndof > 0 ? x.data() : nullptr;
+    const double* pv = ndof > 0 ? xd.data() : nullptr;
+    const int rc = compute_ic ? MoorDyn_Init(m_sys, px, pv) : MoorDyn_Init_NoIC(m_sys, px, pv);
+    if (rc != MOORDYN_SUCCESS) {
+        return std::string(compute_ic ? "MoorDyn_Init" : "MoorDyn_Init_NoIC") + " failed with " + error_name(rc) +
+               " for the system from '" + m_file + "'";
+    }
+    return std::string();
+}
+
+unsigned MoorDynSystem::external_kinematics_init (std::string& err)
+{
+    err.clear();
+    unsigned n = 0;
+    const int rc = MoorDyn_ExternalWaveKinInit(m_sys, &n);
+    if (rc != MOORDYN_SUCCESS) {
+        err = "MoorDyn_ExternalWaveKinInit failed with " + error_name(rc) + " for the system from '" + m_file + "'";
+        return 0;
+    }
+    if (n == 0) {
+        err = "the MoorDyn system from '" + m_file + "' takes no external fluid kinematics: its OPTIONS must set WaveKin = 1";
+        return 0;
+    }
+    m_nkin = n;
+    return n;
+}
+
+std::vector<double> MoorDynSystem::kinematics_points () const
+{
+    std::vector<double> r(3 * static_cast<std::size_t>(m_nkin), 0.0);
+    if (m_nkin > 0) { check(MoorDyn_ExternalWaveKinGetCoordinates(m_sys, r.data()), "MoorDyn_ExternalWaveKinGetCoordinates"); }
+    return r;
+}
+
+void MoorDynSystem::set_kinematics (const std::vector<double>& U, const std::vector<double>& Ud, double t)
+{
+    if (U.size() != 3 * static_cast<std::size_t>(m_nkin) || Ud.size() != U.size()) {
+        amrex::Abort("MoorDynSystem::set_kinematics: " + std::to_string(3 * m_nkin) + " velocity and acceleration components are needed, " +
+                     std::to_string(U.size()) + " and " + std::to_string(Ud.size()) + " were given (system from '" + m_file + "')");
+    }
+    check(MoorDyn_ExternalWaveKinSet(m_sys, U.data(), Ud.data(), t), "MoorDyn_ExternalWaveKinSet");
+}
+
+void MoorDynSystem::step (const std::vector<double>& x, const std::vector<double>& xd, std::vector<double>& f, double& t, double dt)
+{
+    const unsigned ndof = num_coupled_dof();
+    if (x.size() != ndof || xd.size() != ndof) {
+        amrex::Abort("MoorDynSystem::step: " + std::to_string(ndof) + " coupled positions and velocities are needed, " +
+                     std::to_string(x.size()) + " and " + std::to_string(xd.size()) + " were given (system from '" + m_file + "')");
+    }
+    f.assign(ndof, 0.0);
+    const double* px = ndof > 0 ? x.data() : nullptr;
+    const double* pv = ndof > 0 ? xd.data() : nullptr;
+    double* pf = ndof > 0 ? f.data() : nullptr;
+    double dt_in = dt;
+    check(MoorDyn_Step(m_sys, px, pv, pf, &t, &dt_in), "MoorDyn_Step");
+}
+
+double MoorDynSystem::dt () const
+{
+    double v = 0.0;
+    check(MoorDyn_GetDt(m_sys, &v), "MoorDyn_GetDt");
+    return v;
+}
+
+void MoorDynSystem::set_dt (double v) { check(MoorDyn_SetDt(m_sys, v), "MoorDyn_SetDt"); }
+
+unsigned MoorDynSystem::num_lines () const
+{
+    unsigned n = 0;
+    check(MoorDyn_GetNumberLines(m_sys, &n), "MoorDyn_GetNumberLines");
+    return n;
+}
+
+MoorDynLine MoorDynSystem::line (unsigned l) const
+{
+    MoorDynLine h = MoorDyn_GetLine(m_sys, l);
+    if (h == nullptr) { amrex::Abort("MoorDyn_GetLine: no line " + std::to_string(l) + " in the system from '" + m_file + "'"); }
+    return h;
+}
+
+MoorDynPoint MoorDynSystem::point (unsigned p) const
+{
+    MoorDynPoint h = MoorDyn_GetPoint(m_sys, p);
+    if (h == nullptr) { amrex::Abort("MoorDyn_GetPoint: no point " + std::to_string(p) + " in the system from '" + m_file + "'"); }
+    return h;
+}
+
+unsigned MoorDynSystem::line_num_nodes (unsigned l) const
+{
+    unsigned n = 0;
+    check(MoorDyn_GetLineNumberNodes(line(l), &n), "MoorDyn_GetLineNumberNodes");
+    return n;
+}
+
+double MoorDynSystem::line_unstretched_length (unsigned l) const
+{
+    double v = 0.0;
+    check(MoorDyn_GetLineUnstretchedLength(line(l), &v), "MoorDyn_GetLineUnstretchedLength");
+    return v;
+}
+
+std::array<double,3> MoorDynSystem::line_node_position (unsigned l, unsigned node) const
+{
+    std::array<double,3> r{{0.0, 0.0, 0.0}};
+    check(MoorDyn_GetLineNodePos(line(l), node, r.data()), "MoorDyn_GetLineNodePos");
+    return r;
+}
+
+std::array<double,3> MoorDynSystem::line_node_velocity (unsigned l, unsigned node) const
+{
+    std::array<double,3> v{{0.0, 0.0, 0.0}};
+    check(MoorDyn_GetLineNodeVel(line(l), node, v.data()), "MoorDyn_GetLineNodeVel");
+    return v;
+}
+
+std::array<double,3> MoorDynSystem::line_node_tension (unsigned l, unsigned node) const
+{
+    std::array<double,3> t{{0.0, 0.0, 0.0}};
+    check(MoorDyn_GetLineNodeTen(line(l), node, t.data()), "MoorDyn_GetLineNodeTen");
+    return t;
+}
+
+double MoorDynSystem::line_end_tension (unsigned l) const
+{
+    double v = 0.0;
+    check(MoorDyn_GetLineFairTen(line(l), &v), "MoorDyn_GetLineFairTen");
+    return v;
+}
+
+double MoorDynSystem::line_max_tension (unsigned l) const
+{
+    double v = 0.0;
+    check(MoorDyn_GetLineMaxTen(line(l), &v), "MoorDyn_GetLineMaxTen");
+    return v;
+}
+
+unsigned MoorDynSystem::num_points () const
+{
+    unsigned n = 0;
+    check(MoorDyn_GetNumberPoints(m_sys, &n), "MoorDyn_GetNumberPoints");
+    return n;
+}
+
+int MoorDynSystem::point_type (unsigned p) const
+{
+    int t = 0;
+    check(MoorDyn_GetPointType(point(p), &t), "MoorDyn_GetPointType");
+    return t;
+}
+
+std::array<double,3> MoorDynSystem::point_position (unsigned p) const
+{
+    std::array<double,3> r{{0.0, 0.0, 0.0}};
+    check(MoorDyn_GetPointPos(point(p), r.data()), "MoorDyn_GetPointPos");
+    return r;
+}
+
+std::array<double,3> MoorDynSystem::point_force (unsigned p) const
+{
+    std::array<double,3> f{{0.0, 0.0, 0.0}};
+    check(MoorDyn_GetPointForce(point(p), f.data()), "MoorDyn_GetPointForce");
+    return f;
+}
+
+void MoorDynSystem::save (const std::string& path) { check(MoorDyn_Save(m_sys, path.c_str()), "MoorDyn_Save"); }
+
+void MoorDynSystem::load (const std::string& path) { check(MoorDyn_Load(m_sys, path.c_str()), "MoorDyn_Load"); }
+
+} // namespace erf_moordyn
