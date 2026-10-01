@@ -24,6 +24,7 @@ zhi.type = "SlipWall"
 
 erf.anelastic = 1
 erf.vert_implicit = true
+erf.anelastic_type = MidPoint   # RK2 ignores the implicit vertical solve; MidPoint honours it
 erf.use_fft   = true
 erf.molec_diff_type = "None"
 erf.les_type        = "None"
