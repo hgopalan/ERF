@@ -61,6 +61,13 @@ std::array<amrex::Real,3> nacelle_corrected_velocity (const std::array<amrex::Re
 amrex::Real tip_radius (const erf_openfast::TurbineState& t);
 
 /**
+ * The velocity nodes shifted upstream along the shaft axis by diameters * 2 * tip_radius, where the
+ * flow is the free stream: there OpenFAST's own induction model applies (sampling = upstream). Every
+ * node moves by the same vector, so the blade nodes keep their radii and the hub node leads them.
+ */
+std::vector<amrex::Real> upstream_sampling_positions (const erf_openfast::TurbineState& t, amrex::Real diameters);
+
+/**
  * How many cells the blade tip sweeps in one ERF step: rotor_speed * tip_radius * dt / dx.
  * The actuator line's force must not jump over cells between two steps, so the caller aborts
  * when this exceeds its limit (one cell by default).

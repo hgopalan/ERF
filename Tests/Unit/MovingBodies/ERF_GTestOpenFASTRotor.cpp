@@ -342,3 +342,36 @@ TEST(OpenFASTRotor, NacelleDragFollowsTheDragLawWithTheKernelCorrection)
     const auto u0 = erf_actuator::nacelle_corrected_velocity(u, 0.0, area, 1.0);
     EXPECT_EQ(u0[0], u[0]);
 }
+
+// sampling = upstream: every velocity node moves by sample_diameters_upstream * 2 R against the shaft
+// axis, so the hub node leads the rotor by that distance and the blade nodes keep their radii
+TEST(OpenFASTRotor, UpstreamSamplingPositionsShiftEveryNodeAlongTheAxis)
+{
+    const std::array<Real,3> hub{{600.0, 600.0, 150.0}};
+    std::array<Real,3> axis{{0.8, 0.6, 0.0}};   // yawed rotor: the shift follows the shaft, not x
+    TurbineState t = make_rotor(hub, axis, 6, 120.0, 1.0e4, 1.0e3);
+    t.vel_pos = t.force_pos;   // the fixture places the force nodes; the velocity nodes sit on them here
+    t.num_vel_nodes = t.num_force_nodes;
+    const Real R = erf_actuator::tip_radius(t);
+    ASSERT_GT(R, 0.0);   // the fixture's outermost node sits inside the nominal radius; the shift uses the node radius
+    const std::vector<Real> up = erf_actuator::upstream_sampling_positions(t, 1.5);
+    ASSERT_EQ(up.size(), t.vel_pos.size());
+    const Real shift = 1.5 * 2.0 * R;
+    for (std::size_t n = 0; n + 2 < up.size(); n += 3) {
+        for (int d = 0; d < 3; ++d) { EXPECT_NEAR(up[n+d] - t.vel_pos[n+d], -shift * t.hub_axis[d], 1.0e-9); }
+        // the radius about the shifted hub is unchanged
+        Real r0 = 0.0, r1 = 0.0;
+        for (int d = 0; d < 3; ++d) {
+            const Real a = t.vel_pos[n+d] - hub[d], b = up[n+d] - (hub[d] - shift * t.hub_axis[d]);
+            r0 += a * a; r1 += b * b;
+        }
+        EXPECT_NEAR(std::sqrt(r0), std::sqrt(r1), 1.0e-9);
+    }
+    // the hub node (node 0) leads by the shift along the axis
+    Real lead = 0.0;
+    for (int d = 0; d < 3; ++d) { lead += (hub[d] - up[d]) * t.hub_axis[d]; }
+    EXPECT_NEAR(lead, shift, 1.0e-9);
+    // zero diameters: the nodes themselves
+    EXPECT_EQ(erf_actuator::upstream_sampling_positions(t, 0.0), t.vel_pos);
+}
+

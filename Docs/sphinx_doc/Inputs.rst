@@ -2392,6 +2392,13 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.<name>.nacelle_area**              | openfast_turbine: frontal area of the nacelle (m^2);     | Real >= 0                | 0                        |
 |                                                        | must be positive when nacelle_cd is                      |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.sampling**                  | openfast_turbine, mode = adm: where the node velocities  | disk, upstream           | disk                     |
+|                                                        | handed to OpenFAST are sampled: disk (at the nodes;      |                          |                          |
+|                                                        | AeroDyn Wake_Mod must be 0) or upstream                  |                          |                          |
+|                                                        | (sample_diameters_upstream diameters ahead of the hub    |                          |                          |
+|                                                        | along the shaft, the free stream; Wake_Mod must then be  |                          |                          |
+|                                                        | 1 so OpenFAST applies its own induction)                 |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.fllc**                      | openfast_turbine, mode alm: filtered lifting-line        | true, false              | false                    |
 |                                                        | correction of the velocities the blades are given        |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
@@ -2421,8 +2428,9 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.<name>.num_points_t**              | points per ring: of the ct_disk polar grid, or of the    | Int > 0                  | 16                       |
 |                                                        | rings an openfast_turbine's blade nodes are spread over  |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.sample_diameters_upstream** | ct_disk: where the upstream speed is sampled, in         | Real > 0                 | 1.0                      |
-|                                                        | diameters along the normal                               |                          |                          |
+| **erf.moving_bodies.<name>.sample_diameters_upstream** | ct_disk, and openfast_turbine with sampling = upstream:  | Real > 0                 | 1.0                      |
+|                                                        | where the free stream is sampled, in diameters ahead     |                          |
+|                                                        | along the normal / shaft axis                            |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.air_density**               | density in the ct_disk thrust and in the nacelle drag    | Real > 0                 | 1.225                    |
 |                                                        | (kg/m^3)                                                 |                          |                          |

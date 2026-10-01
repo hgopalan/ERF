@@ -22,6 +22,7 @@ box for ten steps or so, and is checked by the runner named below.
 | `Actuator_Sampling` | stub turbine, `mode = none` | `RunActuatorSampling.cmake` | sampled velocities at the nodes against the analytic shear |
 | `Actuator_UniformCtDisk` | prescribed-Ct disk | `RunCtDisk.cmake` | the disk's force integrates back exactly; deficit vs momentum theory |
 | `OpenFAST_ADM_Uniform` | stub turbine, disk | `RunOpenFASTADM.cmake` | plotfile, sampled flow log, `fx == -thrust_x` |
+| `OpenFAST_ADM_Upstream` | stub turbine, disk, velocities sampled 1 D upstream | `RunOpenFASTADM.cmake` | plotfile, sampled flow log, `fx == -thrust_x` |
 | `OpenFAST_ADM_Wake` | stub turbine, disk, wake lines | `RunOpenFASTADM.cmake` | wake running average |
 | `OpenFAST_ADM_Restart` | stub turbine, disk | `RunRestartParity.cmake` | restart parity of plotfile and wake average |
 | `OpenFAST_ADM_LES` | stub turbine, disk, precursor planes | `RunPrecursorInflow.cmake` | turbulent inflow from a precursor; body statistics |

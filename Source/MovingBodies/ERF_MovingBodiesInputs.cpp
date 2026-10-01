@@ -102,6 +102,17 @@ MovingBodiesInputs::read ()
                 Abort("erf.moving_bodies." + name + ".mode must be adm, alm or none, not '" + b.mode + "'");
             }
 
+            ppb.query("sampling", b.sampling);
+            if (b.sampling != "disk" && b.sampling != "upstream") {
+                Abort("erf.moving_bodies." + name + ".sampling must be disk or upstream, not '" + b.sampling + "'");
+            }
+            if (b.sampling == "upstream" && b.mode != "adm") {
+                Abort("erf.moving_bodies." + name + ".sampling = upstream needs mode = adm: an actuator line resolves its own induction");
+            }
+            ppb.query("sample_diameters_upstream", b.sample_diameters_upstream);
+            if (!(b.sample_diameters_upstream > 0.0)) {
+                Abort("erf.moving_bodies." + name + ".sample_diameters_upstream must be positive (diameters ahead of the hub)");
+            }
             ppb.query("num_force_points_blade", b.num_force_points_blade);
             if (b.num_force_points_blade < 1) {
                 Abort("erf.moving_bodies." + name + ".num_force_points_blade must be >= 1");

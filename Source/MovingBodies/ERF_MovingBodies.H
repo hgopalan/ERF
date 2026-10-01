@@ -162,6 +162,9 @@ private:
      * part prints its findings together and a fatal one aborts.
      */
     void audit_turbines_setup (const amrex::BoxArray& level_grids, const amrex::Geometry& geom);
+    //! where turbine i's node velocities are sampled: its nodes, or (sampling = upstream) the nodes shifted
+    //! sample_diameters_upstream diameters ahead of the hub along the shaft axis
+    std::vector<amrex::Real> sampling_positions (int i) const;
     void audit_turbines_flow (const amrex::MultiFab& cons, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
     bool m_audited_setup{false};
     bool m_audited_flow{false};

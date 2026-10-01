@@ -43,7 +43,7 @@ substep_count (double dt_cfd, double dt_fast, std::string& err)
 
 
 std::string
-check_induction_off (const std::string& fst_file)
+check_induction (const std::string& fst_file, bool want_off)
 {
     const std::string path = openfast_module_path(fst_file, "AeroFile");
     if (path.empty()) { return {}; }
@@ -54,13 +54,20 @@ check_induction_off (const std::string& fst_file)
     if (wake.empty()) {
         return "the AeroDyn file '" + path + "' named by '" + fst_file + "' has no Wake_Mod (or WakeMod) line";
     }
-    if (wake != "0") {
+    if (want_off && wake != "0") {
         return "the AeroDyn file '" + path + "' sets Wake_Mod = " + wake +
-               "; set it to 0: the velocities ERF samples already contain the rotor's induction "
-               "once its loads act on the flow";
+               "; set it to 0: the velocities ERF samples at the rotor already contain its induction "
+               "once its loads act on the flow (or sample the free stream with sampling = upstream)";
+    }
+    if (!want_off && wake == "0") {
+        return "the AeroDyn file '" + path + "' sets Wake_Mod = 0 but sampling = upstream feeds OpenFAST the free "
+               "stream, so its own induction model is needed: set Wake_Mod = 1 (BEMT)";
     }
     return {};
 }
+
+std::string
+check_induction_off (const std::string& fst_file) { return check_induction(fst_file, true); }
 
 std::string
 check_tower_shadow_off (const std::string& fst_file)
@@ -96,7 +103,7 @@ OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
         t.num_force_pts_blade = b.num_force_points_blade;
         t.num_force_pts_tower = b.num_force_points_tower;
         if (b.mode != "none") {
-            const std::string err = check_induction_off(b.fst_file);
+            const std::string err = check_induction(b.fst_file, b.sampling != "upstream");
             if (!err.empty()) { Abort("erf.moving_bodies." + b.name + ": " + err); }
         }
         t.owner_rank = owner_rank_for(i, nprocs);

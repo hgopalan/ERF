@@ -653,6 +653,18 @@ Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Uniform`_
 
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Uniform`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Uniform
 
+``OpenFAST_ADM_Upstream`` runs the same deck with ``sampling = upstream``: the
+velocities handed to the stub come from one diameter ahead of the hub along the
+shaft axis instead of from the disk, so the free stream and not the resolved
+induction sets the loads (with OpenFAST this mode requires ``Wake_Mod = 1``).
+The shifted sampling points are covered like the nodes; the rings and the
+spreading are unchanged, so the same three checks apply, and
+``OpenFASTADM_Upstream_BoxParity`` is its one-box-versus-split twin.
+
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream`_
+
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream
+
 OpenFAST rotor as an actuator line
 ----------------------------------
 ``OpenFAST_ALM_Uniform`` (same build requirements) runs the actuator-disk deck

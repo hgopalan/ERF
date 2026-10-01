@@ -87,6 +87,17 @@ nacelle_corrected_velocity (const std::array<Real,3>& u, Real cd, Real area, Rea
     return {{u[0] / fac, u[1] / fac, u[2] / fac}};
 }
 
+std::vector<Real>
+upstream_sampling_positions (const erf_openfast::TurbineState& t, Real diameters)
+{
+    const Real shift = diameters * Real(2.0) * tip_radius(t);
+    std::vector<Real> pos(t.vel_pos);
+    for (std::size_t n = 0; n + 2 < pos.size(); n += 3) {
+        for (int d = 0; d < 3; ++d) { pos[n+d] -= shift * t.hub_axis[d]; }
+    }
+    return pos;
+}
+
 Real
 tip_radius (const erf_openfast::TurbineState& t)
 {

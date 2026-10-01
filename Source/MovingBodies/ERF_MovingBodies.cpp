@@ -608,6 +608,21 @@ MovingBodies::add_momentum_sources (int lev, MultiFab& xmom_src, MultiFab& ymom_
     MultiFab::Add(zmom_src, m_src_z, 0, 0, 1, 0);
 }
 
+std::vector<Real>
+MovingBodies::sampling_positions (int i) const
+{
+#ifdef ERF_USE_OPENFAST
+    const erf_openfast::TurbineState& t = m_driver->turbines()[i];
+    if (m_turbine_in[i].sampling == "upstream") {
+        return erf_actuator::upstream_sampling_positions(t, m_turbine_in[i].sample_diameters_upstream);
+    }
+    return t.vel_pos;
+#else
+    amrex::ignore_unused(i);
+    return {};
+#endif
+}
+
 void
 MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab& V, const MultiFab& W,
                                  const MultiFab* z_phys_nd, const Geometry& geom)
@@ -618,7 +633,7 @@ MovingBodies::supply_velocities (double time, const MultiFab& U, const MultiFab&
     m_points.clear();
     int nturb = 0;
 #ifdef ERF_USE_OPENFAST
-    for (const auto& t : m_driver->turbines()) { m_points.add_body(t.vel_pos); ++nturb; }
+    for (int i = 0; i < static_cast<int>(m_driver->turbines().size()); ++i) { m_points.add_body(sampling_positions(i)); ++nturb; }
 #endif
     for (const auto& d : m_disks) {
         m_points.add_body(d->sample_points());
@@ -678,10 +693,11 @@ MovingBodies::audit_turbines_setup (const BoxArray& level_grids, const Geometry&
     // the level's own cells
     {
         const Real reach = Real(3.0) * m_epsilon_dx * geom.CellSize(0) + geom.CellSize(0);
-        for (const auto& t : turbs) {
+        for (int i = 0; i < static_cast<int>(turbs.size()); ++i) {
+            const auto& t = turbs[i];
             std::string outside;
             if (!erf_actuator::points_covered_by(level_grids, geom, t.force_pos, reach, outside) ||
-                !erf_actuator::points_covered_by(level_grids, geom, t.vel_pos, geom.CellSize(0), outside)) {
+                !erf_actuator::points_covered_by(level_grids, geom, sampling_positions(i), geom.CellSize(0), outside)) {
                 Abort("erf.moving_bodies." + t.name + ": node " + outside + " (with the kernel reach " + std::to_string(reach) +
                       " m) is not covered by the grids of level " + std::to_string(m_anchor) +
                       "; enlarge the refinement region around the rotor, or set erf.moving_bodies.anchor_level to a level that covers it");

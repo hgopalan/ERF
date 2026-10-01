@@ -129,6 +129,23 @@ its shaft component equals minus that of the integrated source. With ``mode = no
 the turbine is driven by the flow but puts no force into it (one-way
 coupling, as for a loads analysis in a precomputed flow).
 
+**Where the velocities are sampled.** With ``sampling = disk`` (the default) the
+node velocities handed to OpenFAST are sampled at the nodes, inside the rotor's
+own induction zone, and AeroDyn's induction model is off (``Wake_Mod = 0``): the
+resolved flow supplies the induction. On a grid that does not resolve the smeared
+disk (``epsilon`` of two 20 m cells for a 240 m rotor) the sampled velocity lies
+well above the momentum-theory disk velocity, and the loads, computed by OpenFAST
+without induction from that velocity, exceed the blade-element-momentum values
+(phase 12B measured the IEA 15 MW disk 29 % high in power at 20 m). With
+``sampling = upstream`` every velocity node is shifted ``sample_diameters_upstream``
+diameters ahead of the hub along the shaft axis, where the flow is the free stream
+(the rotor's influence one diameter ahead is a few percent of the induction), and
+AeroDyn keeps its induction model (``Wake_Mod = 1`` is required): the loads are
+then the BEM loads for that free stream whatever the grid, and the resolved flow
+receives them as rings. The shifted sampling points must be covered by the anchor
+level like the nodes. The actuator line keeps disk sampling: it resolves its own
+induction, and the filtered lifting-line correction accounts for the kernel.
+
 OpenFAST rotor as an actuator line
 ----------------------------------
 

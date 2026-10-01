@@ -36,6 +36,11 @@ int owner_rank_for (int turbine_index, int nprocs);
  * @return an empty string when the model is acceptable, otherwise the reason
  */
 std::string check_induction_off (const std::string& fst_file);
+/**
+ * Like check_induction_off when want_off is true; with want_off false (sampling = upstream feeds the free
+ * stream) the AeroDyn file must instead keep its own induction model (Wake_Mod != 0).
+ */
+std::string check_induction (const std::string& fst_file, bool want_off);
 
 /**
  * Whether the OpenFAST model applies its own tower-shadow correction to the blade inflow. When

@@ -1047,6 +1047,17 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       DATALOG "T1_flow.csv"
       DATALOG_SIGDIGITS 8)
 
+  # The same disk with sampling = upstream: the node velocities come from one diameter ahead of the
+  # hub (the free stream, where OpenFAST's own induction model applies) instead of from the disk.
+  # The shifted sampling points must be covered like the nodes, and the rings and spreading are
+  # unchanged, so the same three checks and a box-parity twin apply.
+  add_test_openfast_adm(OpenFAST_ADM_Upstream OpenFAST_ADM_Upstream "plt00010")
+  add_test_box_parity(OpenFASTADM_Upstream_BoxParity OpenFAST_ADM_Upstream "plt00010"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
+      DATALOG "T1_flow.csv"
+      DATALOG_SIGDIGITS 8)
+
   # The same stub turbine as an actuator line (mode = alm): one point per rotating blade node,
   # the tip sweeping 0.9 cells per step under the one-cell limit. Same three checks; the
   # integrated source equals minus the full thrust vector, so fx == -thrust_x holds exactly.
