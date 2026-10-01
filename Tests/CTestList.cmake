@@ -1058,6 +1058,22 @@ if(ERF_ENABLE_OPENFAST AND ERF_OPENFAST_USE_STUB AND ERF_ENABLE_FFT AND ERF_ENAB
       DATALOG "T1_flow.csv"
       DATALOG_SIGDIGITS 8)
 
+  # The same deck with sampling = disk_corrected: the velocities are sampled at the disk and the
+  # free stream handed to the stub is recovered with the filtered-disk factor and momentum theory
+  # on the previous step's thrust (T1_correction.csv). Same three checks, the box-parity twin, and
+  # restart parity: the recovered free stream is checkpointed, so the correction log of a run
+  # restarted from step 5 must equal the straight run's.
+  add_test_openfast_adm(OpenFAST_ADM_DiskCorrected OpenFAST_ADM_DiskCorrected "plt00010")
+  add_test_box_parity(OpenFASTADM_DiskCorrected_BoxParity OpenFAST_ADM_DiskCorrected "plt00010"
+      REFERENCE_OPTIONS "amr.max_grid_size=1024"
+      SPLIT_OPTIONS "amr.max_grid_size_x=16 amr.max_grid_size_y=10 amr.max_grid_size_z=64"
+      DATALOG "T1_correction.csv"
+      DATALOG_SIGDIGITS 8)
+  add_test_restart_parity(OpenFAST_ADM_DiskCorrected_Restart OpenFAST_ADM_DiskCorrected 5 10
+      FCOMPARE_RTOL "0.0" FCOMPARE_ATOL "0.0"
+      DATALOG "T1_correction.csv"
+      DATALOG_SIGDIGITS 10)
+
   # The same stub turbine as an actuator line (mode = alm): one point per rotating blade node,
   # the tip sweeping 0.9 cells per step under the one-cell limit. Same three checks; the
   # integrated source equals minus the full thrust vector, so fx == -thrust_x holds exactly.

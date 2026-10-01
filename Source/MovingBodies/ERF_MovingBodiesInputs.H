@@ -20,7 +20,9 @@ struct MovingBodyInputs
     // openfast_turbine
     std::string fst_file;                    //!< OpenFAST primary input file
     std::string mode{"adm"};                 //!< adm | alm | none: how the OpenFAST loads reach the flow (none: they do not)
-    std::string sampling{"disk"};            //!< adm: disk (velocities at the nodes, OpenFAST induction off) | upstream (free stream
+    std::string sampling{"disk"};            //!< adm: disk (velocities at the nodes, OpenFAST induction off) | disk_corrected (disk
+                                             //!< velocities, free stream recovered with the filtered-disk factor of Shapiro et al. 2019
+                                             //!< and momentum theory, OpenFAST induction on) | upstream (free stream
                                              //!< sample_diameters_upstream diameters ahead of the hub, OpenFAST's own BEM induction on)
     int num_force_points_blade{50};          //!< actuator force points per blade requested from OpenFAST
     int num_force_points_tower{0};           //!< actuator force points on the tower (0: no tower forcing)
@@ -50,7 +52,7 @@ struct MovingBodyInputs
  *   erf.moving_bodies.T1.fst_file    = T1/IEA-15-240-RWT.fst
  *   erf.moving_bodies.T1.base_pos    = 1000 1000 0
  *   erf.moving_bodies.T1.mode        = adm                (adm: disk rings; alm: a point per blade node; none)
- *   erf.moving_bodies.T1.sampling    = disk               (adm: disk | upstream; upstream samples the free stream
+ *   erf.moving_bodies.T1.sampling    = disk               (adm: disk | disk_corrected | upstream; upstream samples the free stream
  *                                                          sample_diameters_upstream diameters ahead and keeps OpenFAST's BEM)
  *   erf.moving_bodies.T1.num_force_points_blade = 50
  *   erf.moving_bodies.T1.num_force_points_tower = 0    (> 0: the tower's loads from OpenFAST forced too)

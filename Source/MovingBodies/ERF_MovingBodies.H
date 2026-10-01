@@ -174,6 +174,15 @@ private:
     void apply_fllc (int i, double time, std::vector<amrex::Real>& uvw);
     /** Append a row to <output_root>_fllc.csv for every corrected turbine. */
     void write_fllc_diagnostics (double time, bool first);
+
+    /** sampling = disk_corrected: scale the hub and blade node velocities of turbine i from the disk
+     *  velocity to the free stream recovered with the filtered-disk factor (Shapiro et al. 2019) and
+     *  momentum theory on the previous step's thrust; the tower nodes keep the resolved flow. */
+    void apply_disk_correction (int i, std::vector<amrex::Real>& uvw, const amrex::Geometry& geom);
+    void write_correction_diagnostics (double time, bool first);
+    std::vector<amrex::Real> m_corr_uinf;                     //!< per turbine: the corrected free stream of the previous step (checkpointed)
+    std::vector<erf_actuator::DiskCorrection> m_corr_last;    //!< per turbine: the last correction, for the diagnostics
+    bool m_corr_written{false};
     std::vector<std::vector<std::unique_ptr<erf_actuator::FLLC>>> m_fllc;   //!< per turbine, one per blade (empty: off)
     bool m_fllc_built{false};
     bool m_fllc_written{false};

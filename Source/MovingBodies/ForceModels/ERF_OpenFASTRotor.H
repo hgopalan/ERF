@@ -68,6 +68,46 @@ amrex::Real tip_radius (const erf_openfast::TurbineState& t);
 std::vector<amrex::Real> upstream_sampling_positions (const erf_openfast::TurbineState& t, amrex::Real diameters);
 
 /**
+ * Filtered-actuator-disk correction factor of Shapiro, Gayme and Meneveau (Wind Energy 22, 2019, eq. 25):
+ * the velocity sampled at a Gaussian-smeared disk understates the thin-disk induction by the factor
+ * M = 1 / (1 + Ct'/4 * (Delta/R) / sqrt(3 pi)), where Ct' = 4a/(1-a) is the thrust coefficient on the
+ * disk velocity and Delta the width of the paper's filter G = (6/(pi Delta^2))^(3/2) exp(-6 r^2/Delta^2);
+ * valid for Delta/R up to about 1.25. ERF's kernel exp(-r^2/eps^2) has Delta = sqrt(6) eps.
+ */
+amrex::Real filtered_disk_factor (amrex::Real ct_prime, amrex::Real delta_over_R);
+
+//! the paper's filter width for ERF's kernel width eps: Delta = sqrt(6) eps
+amrex::Real filter_width_from_eps (amrex::Real eps);
+
+/** One update of the corrected free stream for sampling = disk_corrected. */
+struct DiskCorrection
+{
+    amrex::Real u_disk{0.0};     //!< radius-weighted axial velocity sampled at the blade nodes (m/s)
+    amrex::Real ct{0.0};         //!< thrust coefficient on the previous free stream
+    amrex::Real a{0.0};          //!< axial induction factor from Ct (momentum theory)
+    amrex::Real ct_prime{0.0};   //!< 4a/(1-a)
+    amrex::Real M{1.0};          //!< filtered-disk factor
+    amrex::Real u_inf{0.0};      //!< corrected free stream M u_disk / (1 - a)
+    amrex::Real factor{1.0};     //!< u_inf / u_disk applied to the sampled node velocities
+};
+
+/**
+ * The corrected free stream from the disk velocity u_disk, the rotor thrust of the previous step
+ * (force on the structure along the shaft, N), the previous free stream (the Ct is evaluated on it),
+ * the air density, the tip radius and ERF's kernel width eps (m). With no previous loads (thrust
+ * <= 0 or u_inf_prev <= 0) the free stream is the disk velocity itself. Ct is clamped to [0, 0.96].
+ */
+DiskCorrection filtered_disk_correction (amrex::Real u_disk, amrex::Real thrust, amrex::Real u_inf_prev,
+                                         amrex::Real rho, amrex::Real tip_radius, amrex::Real eps);
+
+/**
+ * Radius-weighted mean of the axial (shaft-axis) velocity over the blade velocity nodes, each node
+ * weighted by its distance from the hub axis (an annulus of equal radial spacing); the hub and
+ * tower nodes carry no weight. Zero for a rotor without blade nodes.
+ */
+amrex::Real disk_axial_velocity (const erf_openfast::TurbineState& t, const std::vector<amrex::Real>& uvw);
+
+/**
  * How many cells the blade tip sweeps in one ERF step: rotor_speed * tip_radius * dt / dx.
  * The actuator line's force must not jump over cells between two steps, so the caller aborts
  * when this exceeds its limit (one cell by default).

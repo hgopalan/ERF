@@ -60,7 +60,7 @@ check_induction (const std::string& fst_file, bool want_off)
                "once its loads act on the flow (or sample the free stream with sampling = upstream)";
     }
     if (!want_off && wake == "0") {
-        return "the AeroDyn file '" + path + "' sets Wake_Mod = 0 but sampling = upstream feeds OpenFAST the free "
+        return "the AeroDyn file '" + path + "' sets Wake_Mod = 0 but sampling = upstream or disk_corrected feeds OpenFAST the free "
                "stream, so its own induction model is needed: set Wake_Mod = 1 (BEMT)";
     }
     return {};
@@ -103,7 +103,7 @@ OpenFASTDriver::OpenFASTDriver (const std::vector<MovingBodyInputs>& bodies)
         t.num_force_pts_blade = b.num_force_points_blade;
         t.num_force_pts_tower = b.num_force_points_tower;
         if (b.mode != "none") {
-            const std::string err = check_induction(b.fst_file, b.sampling != "upstream");
+            const std::string err = check_induction(b.fst_file, b.sampling == "disk");
             if (!err.empty()) { Abort("erf.moving_bodies." + b.name + ": " + err); }
         }
         t.owner_rank = owner_rank_for(i, nprocs);

@@ -103,11 +103,11 @@ MovingBodiesInputs::read ()
             }
 
             ppb.query("sampling", b.sampling);
-            if (b.sampling != "disk" && b.sampling != "upstream") {
-                Abort("erf.moving_bodies." + name + ".sampling must be disk or upstream, not '" + b.sampling + "'");
+            if (b.sampling != "disk" && b.sampling != "upstream" && b.sampling != "disk_corrected") {
+                Abort("erf.moving_bodies." + name + ".sampling must be disk, upstream or disk_corrected, not '" + b.sampling + "'");
             }
-            if (b.sampling == "upstream" && b.mode != "adm") {
-                Abort("erf.moving_bodies." + name + ".sampling = upstream needs mode = adm: an actuator line resolves its own induction");
+            if (b.sampling != "disk" && b.mode != "adm") {
+                Abort("erf.moving_bodies." + name + ".sampling = " + b.sampling + " needs mode = adm: an actuator line resolves its own induction");
             }
             b.sample_diameters_upstream = 2.0;   // turbines: two diameters, where the rotor's upstream induction is ~0.5 %
             ppb.query("sample_diameters_upstream", b.sample_diameters_upstream);

@@ -2392,12 +2392,16 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 | **erf.moving_bodies.<name>.nacelle_area**              | openfast_turbine: frontal area of the nacelle (m^2);     | Real >= 0                | 0                        |
 |                                                        | must be positive when nacelle_cd is                      |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.sampling**                  | openfast_turbine, mode = adm: where the node velocities  | disk, upstream           | disk                     |
-|                                                        | handed to OpenFAST are sampled: disk (at the nodes;      |                          |                          |
-|                                                        | AeroDyn Wake_Mod must be 0) or upstream                  |                          |                          |
+| **erf.moving_bodies.<name>.sampling**                  | openfast_turbine, mode = adm: where the node velocities  | disk, upstream,          | disk                     |
+|                                                        | handed to OpenFAST are sampled: disk (at the nodes;      | disk_corrected           |                          |
+|                                                        | AeroDyn Wake_Mod must be 0); upstream                    |                          |                          |
 |                                                        | (sample_diameters_upstream diameters ahead of the hub    |                          |                          |
-|                                                        | along the shaft, the free stream; Wake_Mod must then be  |                          |                          |
-|                                                        | 1 so OpenFAST applies its own induction)                 |                          |                          |
+|                                                        | along the shaft, the free stream); or disk_corrected     |                          |                          |
+|                                                        | (at the nodes, the free stream recovered from the disk   |                          |                          |
+|                                                        | velocity with the filtered-disk factor of Shapiro et al. |                          |                          |
+|                                                        | 2019 and momentum theory on the previous step's thrust). |                          |                          |
+|                                                        | With upstream and disk_corrected, Wake_Mod must be 1 so  |                          |                          |
+|                                                        | OpenFAST applies its own induction                       |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.fllc**                      | openfast_turbine, mode alm: filtered lifting-line        | true, false              | false                    |
 |                                                        | correction of the velocities the blades are given        |                          |                          |

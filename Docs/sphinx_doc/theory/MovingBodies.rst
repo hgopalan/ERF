@@ -143,7 +143,28 @@ diameters ahead of the hub along the shaft axis, where the flow is the free stre
 AeroDyn keeps its induction model (``Wake_Mod = 1`` is required): the loads are
 then the BEM loads for that free stream whatever the grid, and the resolved flow
 receives them as rings. The shifted sampling points must be covered by the anchor
-level like the nodes. The actuator line keeps disk sampling: it resolves its own
+level like the nodes. With ``sampling = disk_corrected`` the velocities stay at the
+nodes and the free stream is recovered from them: the velocity a Gaussian-smeared
+disk samples is not the thin-disk velocity :math:`U_\infty (1 - a)` but that
+velocity divided by the factor of Shapiro, Gayme and Meneveau (2019, eq. 25),
+
+.. math::
+
+   M = \left( 1 + \frac{C_T'}{4} \frac{\Delta / R}{\sqrt{3 \pi}} \right)^{-1},
+   \qquad C_T' = \frac{4 a}{1 - a} = \frac{C_T}{(1 - a)^2},
+
+where :math:`\Delta` is the width of their filter
+:math:`G = (6 / \pi \Delta^2)^{3/2} \exp(-6 r^2 / \Delta^2)`; ERF's kernel
+:math:`\exp(-r^2 / \epsilon^2)` is that filter with :math:`\Delta = \sqrt{6}\,\epsilon`.
+Each step the radius-weighted axial velocity over the blade nodes :math:`u_d` is
+sampled, :math:`C_T` is evaluated from the previous step's shaft thrust and
+previous free stream (clamped to 0.96), :math:`a = (1 - \sqrt{1 - C_T}) / 2`, and
+the hub and blade node velocities are scaled by :math:`U_\infty / u_d` with
+:math:`U_\infty = M u_d / (1 - a)`; AeroDyn then applies its own induction
+(``Wake_Mod = 1`` is required). The tower nodes keep the resolved flow. The
+recovered free stream is checkpointed and logged in ``<output_root>_correction.csv``;
+the factor was derived for :math:`\Delta / R` up to about 1.25, and a wider kernel
+is warned about. The actuator line keeps disk sampling: it resolves its own
 induction, and the filtered lifting-line correction accounts for the kernel.
 
 The IEA 15 MW rotor in a uniform 10.59 m/s inflow (open boundaries, no sponge,

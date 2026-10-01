@@ -375,3 +375,83 @@ TEST(OpenFASTRotor, UpstreamSamplingPositionsShiftEveryNodeAlongTheAxis)
     EXPECT_EQ(erf_actuator::upstream_sampling_positions(t, 0.0), t.vel_pos);
 }
 
+
+TEST(OpenFASTRotor, FilteredDiskFactorMatchesShapiroEq25)
+{
+    // Ct' = 1, Delta/R = 1: M = 1 / (1 + 0.25 / sqrt(3 pi))
+    EXPECT_NEAR(erf_actuator::filtered_disk_factor(1.0, 1.0), 1.0 / (1.0 + 0.25 / std::sqrt(3.0 * pi)), 1.0e-12);
+    EXPECT_NEAR(erf_actuator::filtered_disk_factor(1.0, 1.0), 0.924698, 1.0e-6);
+    // no thrust or a vanishing filter width: no correction
+    EXPECT_DOUBLE_EQ(erf_actuator::filtered_disk_factor(0.0, 1.0), 1.0);
+    EXPECT_DOUBLE_EQ(erf_actuator::filtered_disk_factor(2.0, 0.0), 1.0);
+    // a wider kernel corrects more
+    EXPECT_LT(erf_actuator::filtered_disk_factor(1.5, 1.2), erf_actuator::filtered_disk_factor(1.5, 0.6));
+    // ERF's kernel exp(-r^2/eps^2) is the paper's filter with Delta = sqrt(6) eps
+    EXPECT_NEAR(erf_actuator::filter_width_from_eps(40.0), std::sqrt(6.0) * 40.0, 1.0e-12);
+}
+
+TEST(OpenFASTRotor, FilteredDiskCorrectionRecoversTheFreeStreamAtTheFixedPoint)
+{
+    // a disk of radius R in a free stream U with thrust coefficient Ct, smeared by ERF's kernel of
+    // width eps: the paper's filtered disk velocity is U (1 - a) / M, and the correction applied to
+    // it, with the thrust and the free stream of the previous step, must hand back U exactly
+    const Real U = 10.0, ct = 0.8, rho = 1.2, Rr = 110.0, eps = 40.0;
+    const Real a = 0.5 * (1.0 - std::sqrt(1.0 - ct));
+    const Real ct_prime = 4.0 * a / (1.0 - a);
+    const Real M = erf_actuator::filtered_disk_factor(ct_prime, erf_actuator::filter_width_from_eps(eps) / Rr);
+    const Real u_disk = U * (1.0 - a) / M;
+    const Real thrust = 0.5 * rho * pi * Rr * Rr * U * U * ct;
+    const auto c = erf_actuator::filtered_disk_correction(u_disk, thrust, U, rho, Rr, eps);
+    EXPECT_NEAR(c.ct, ct, 1.0e-12);
+    EXPECT_NEAR(c.a, a, 1.0e-12);
+    EXPECT_NEAR(c.ct_prime, ct_prime, 1.0e-12);
+    EXPECT_NEAR(c.M, M, 1.0e-12);
+    EXPECT_NEAR(c.u_inf, U, 1.0e-9);
+    EXPECT_NEAR(c.factor, U / u_disk, 1.0e-12);
+    EXPECT_GT(c.factor, 1.0);
+    // a smaller previous free stream raises Ct and the correction; the fixed point is stable from below
+    const auto c_low = erf_actuator::filtered_disk_correction(u_disk, thrust, 0.9 * U, rho, Rr, eps);
+    EXPECT_GT(c_low.ct, ct);
+    EXPECT_GT(c_low.u_inf, U);
+    // no previous loads (the first step, or a stopped rotor): the disk velocity is the free stream
+    const auto c0 = erf_actuator::filtered_disk_correction(u_disk, 0.0, U, rho, Rr, eps);
+    EXPECT_DOUBLE_EQ(c0.u_inf, u_disk);
+    EXPECT_DOUBLE_EQ(c0.factor, 1.0);
+    EXPECT_DOUBLE_EQ(erf_actuator::filtered_disk_correction(u_disk, thrust, 0.0, rho, Rr, eps).factor, 1.0);
+    // an absurd thrust is clamped to Ct = 0.96 and stays finite
+    const auto c_big = erf_actuator::filtered_disk_correction(u_disk, 1.0e3 * thrust, U, rho, Rr, eps);
+    EXPECT_NEAR(c_big.ct, 0.96, 1.0e-12);
+    EXPECT_TRUE(std::isfinite(c_big.u_inf));
+}
+
+TEST(OpenFASTRotor, DiskAxialVelocityWeightsTheBladeNodesByRadius)
+{
+    const std::array<Real,3> hub{{600.0, 600.0, 150.0}};
+    std::array<Real,3> axis{{0.8, 0.6, 0.0}};
+    const int nodes = 5;
+    const Real Rn = 100.0;
+    TurbineState t = make_rotor(hub, axis, nodes, Rn, 1.0e4, 1.0e3);
+    t.vel_pos = t.force_pos;
+    t.num_vel_nodes = t.num_force_nodes;
+    t.num_blade_elem = nodes;
+    const std::array<Real,3> perp{{-0.6, 0.8, 0.0}};   // in the rotor plane: no axial part
+    std::vector<Real> uvw(t.vel_pos.size(), 0.0);
+    // hub node: a large axial velocity that must carry no weight
+    for (int d = 0; d < 3; ++d) { uvw[d] = 100.0 * t.hub_axis[d]; }
+    // blade nodes: axial velocity 7 r / R plus an in-plane component
+    for (int nd = 1; nd <= 3 * nodes; ++nd) {
+        Real r2 = 0.0, rn = 0.0;
+        for (int d = 0; d < 3; ++d) { const Real v = t.vel_pos[3*nd+d] - hub[d]; rn += v * t.hub_axis[d]; }
+        for (int d = 0; d < 3; ++d) { const Real p = t.vel_pos[3*nd+d] - hub[d] - rn * t.hub_axis[d]; r2 += p * p; }
+        const Real r = std::sqrt(r2);
+        for (int d = 0; d < 3; ++d) { uvw[3*nd+d] = 7.0 * r / Rn * t.hub_axis[d] + 3.0 * perp[d]; }
+    }
+    // radii (i + 1/2) / 5 R: the radius-weighted mean of 7 r / R is 7 sum r^2 / (R sum r) = 4.62
+    EXPECT_NEAR(erf_actuator::disk_axial_velocity(t, uvw), 4.62, 1.0e-9);
+    // a uniform axial flow is returned unchanged
+    for (int nd = 0; nd < t.num_vel_nodes; ++nd) { for (int d = 0; d < 3; ++d) { uvw[3*nd+d] = 8.5 * t.hub_axis[d]; } }
+    EXPECT_NEAR(erf_actuator::disk_axial_velocity(t, uvw), 8.5, 1.0e-9);
+    // no blade nodes: zero
+    t.num_blade_elem = 0;
+    EXPECT_DOUBLE_EQ(erf_actuator::disk_axial_velocity(t, uvw), 0.0);
+}

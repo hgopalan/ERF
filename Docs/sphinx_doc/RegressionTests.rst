@@ -665,6 +665,22 @@ Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream`_
 
 .. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Upstream
 
+``OpenFAST_ADM_DiskCorrected`` runs the same deck with ``sampling = disk_corrected``:
+the velocities are sampled at the disk, and the free stream handed to the stub is
+recovered from the radius-weighted axial disk velocity with the filtered-disk
+factor of Shapiro, Gayme and Meneveau (2019) and momentum theory on the previous
+step's thrust, logged in ``T1_correction.csv`` (with OpenFAST this mode requires
+``Wake_Mod = 1``); the kernel is one cell wide so the filter width stays within
+the range the factor was derived for. The same three checks apply;
+``OpenFASTADM_DiskCorrected_BoxParity`` is the one-box-versus-split twin, and
+``OpenFAST_ADM_DiskCorrected_Restart`` runs it straight to step 10 and again
+through a checkpoint at step 5, requiring the plotfiles and the correction logs
+to agree: the recovered free stream is part of the moving-bodies checkpoint.
+
+Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskCorrected`_
+
+.. _`Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskCorrected`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskCorrected
+
 OpenFAST rotor as an actuator line
 ----------------------------------
 ``OpenFAST_ALM_Uniform`` (same build requirements) runs the actuator-disk deck
