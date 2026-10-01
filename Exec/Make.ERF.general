@@ -296,6 +296,15 @@ ifeq ($(USE_WINDFARM), TRUE)
     INCLUDE_LOCATIONS += $(ERF_WINDFARM_GENERALAD_DIR)
 endif
 
+# Actuator core for bodies in the flow (velocity sampling, force spreading, wake lines, statistics)
+ifeq ($(USE_MOVING_BODIES), TRUE)
+    DEFINES += -DERF_USE_MOVING_BODIES
+    ERF_MOVING_BODIES_CORE_DIR = $(ERF_SOURCE_DIR)/MovingBodies/Core
+    include $(ERF_MOVING_BODIES_CORE_DIR)/Make.package
+    VPATH_LOCATIONS   += $(ERF_MOVING_BODIES_CORE_DIR)
+    INCLUDE_LOCATIONS += $(ERF_MOVING_BODIES_CORE_DIR)
+endif
+
 ifeq ($(USE_FFT),TRUE)
     DEFINES += -DERF_USE_FFT
 endif
