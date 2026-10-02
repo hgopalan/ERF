@@ -181,6 +181,15 @@ std::string ConductorInputs::validate_transformer (const TransformerInputs& t)
     return std::string();
 }
 
+std::string ConductorInputs::validate_tower_type (const SpanInputs& s, const std::vector<erf_towers::TowerType>& types)
+{
+    if (s.tower_type.empty()) { return std::string(); }
+    const std::string key = "erf.conductors." + s.name + ".tower_type";
+    if (s.towers.empty()) { return key + " needs towers: a single span between two dead ends has no tower"; }
+    for (const auto& t : types) { if (t.name == s.tower_type) { return std::string(); } }
+    return key + " = " + s.tower_type + " is not one of erf.conductors.tower_types";
+}
+
 std::string ConductorInputs::validate_settings (const ConductorInputs& in)
 {
     if (in.diagnostics_int < 1) { return "erf.conductors.diagnostics_int must be >= 1"; }
@@ -274,6 +283,7 @@ ConductorInputs ConductorInputs::read ()
         for (std::size_t i = 0; i < t.size(); i += 3) { s.towers.push_back({{t[i], t[i+1], t[i+2]}}); }
         ps.queryarr("length", s.lengths);
         ps.query("stringing_tension", s.stringing_tension);
+        ps.query("tower_type", s.tower_type);
         ps.get("diameter", s.diameter);
         ps.get("mass_per_length", s.mass_per_length);
         ps.get("axial_stiffness", s.axial_stiffness);
@@ -290,9 +300,33 @@ ConductorInputs ConductorInputs::read ()
         if (!err.empty()) { Abort(err); }
         in.spans.push_back(s);
     }
+    std::vector<std::string> ttypes;
+    pp.queryarr("tower_types", ttypes);
+    for (const std::string& name : ttypes) {
+        // a tower type's block shares erf.conductors.<name> with the lines' and the transformers'
+        if (!seen.insert(name).second) { Abort("erf.conductors: '" + name + "' names two lines, transformers or tower types"); }
+        erf_towers::TowerType t;
+        t.name = name;
+        ParmParse pt("erf.conductors." + name);
+        pt.get("base_width", t.base_width);
+        pt.get("top_width", t.top_width);
+        pt.get("solidity", t.solidity);
+        pt.get("arm_length", t.arm_length);
+        pt.query("arm_depth", t.arm_depth);
+        pt.query("peak", t.peak);
+        pt.query("drag_coefficient", t.drag_coefficient);
+        pt.query("segments", t.segments);
+        const std::string terr = t.validate();
+        if (!terr.empty()) { Abort(terr); }
+        in.tower_types.push_back(t);
+    }
+    for (const SpanInputs& s : in.spans) {
+        const std::string err = validate_tower_type(s, in.tower_types);
+        if (!err.empty()) { Abort(err); }
+    }
     for (const std::string& name : tnames) {
         // a transformer's block shares erf.conductors.<name> with the lines'
-        if (!seen.insert(name).second) { Abort("erf.conductors: '" + name + "' names two lines or transformers"); }
+        if (!seen.insert(name).second) { Abort("erf.conductors: '" + name + "' names two lines, transformers or tower types"); }
         TransformerInputs t;
         t.name = name;
         ParmParse pt("erf.conductors." + name);

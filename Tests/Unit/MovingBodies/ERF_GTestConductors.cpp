@@ -9,7 +9,10 @@
 // lines is the exact distance between their conductors, flagged against the flashover distance;
 // and a transformer stands on the terrain, takes the pull of the lines ending on it with their
 // moment about its base, flags them against its allowable values, watches how close every
-// conductor comes to its box, and continues its log and statistics across a restart.
+// conductor comes to its box, and continues its log and statistics across a restart; and a line's
+// suspension towers of a tower type stand on the terrain with their cross-arms across the line,
+// carry the members' drag of the wind at their nodes, put it into the flow with the lines', and
+// continue their log, statistics and drag on the flow across a restart.
 
 #include <algorithm>
 #include <array>
@@ -454,6 +457,13 @@ TEST(Conductors, TrimmingALogKeepsTheHeaderAndTheRowsUpToTheCheckpoint)
     EXPECT_EQ(slurp(f), "time a b\n# a comment\n");
     erf_conductors::trim_log_after(dir + "/missing.dat", 1.0);
     EXPECT_FALSE(std::filesystem::exists(dir + "/missing.dat"));
+    // a log whose rows carry the time a step starts at loses the row at the checkpoint time too
+    {
+        std::ofstream out(f, std::ios::trunc);
+        out << "time a\n0.5 1\n1 3\n1.0000000001 9\n1.5 5\n";
+    }
+    erf_conductors::trim_log_after(f, 1.0, true);
+    EXPECT_EQ(slurp(f), "time a\n0.5 1\n");
 }
 
 TEST(Conductors, ASectionIsPlacedOnTheTerrainAtEveryTowerAndLogsEachSpan)
@@ -772,4 +782,129 @@ TEST(Conductors, AStringingTensionSetsTheLengthsFromTheChordsOnTheTerrain)
     EXPECT_NEAR(std::sqrt(fa[0] * fa[0] + fa[1] * fa[1]) / 2.0e4, 1.0, tol) << "the dead end takes the stringing tension";
     ps.remove("stringing_tension");
     ps.remove("towers");
+}
+
+namespace {
+// a section of three spans along x on the ramp with lattice towers at x = 400 and 700
+void set_towered_section (const std::string& dir, const std::string& name)
+{
+    set_inputs(dir, name, true, {{100.0, 500.0, 30.0}}, {{1000.0, 500.0, 30.0}});
+    amrex::ParmParse ps("erf.conductors." + name);
+    ps.remove("length");
+    ps.addarr("length", std::vector<Real>{301.5, 301.5, 301.5});
+    ps.addarr("towers", std::vector<Real>{400.0, 500.0, 30.0, 700.0, 500.0, 30.0});
+    ps.add("tower_type", std::string("lat"));
+    amrex::ParmParse pp("erf.conductors");
+    pp.addarr("tower_types", std::vector<std::string>{"lat"});
+    amrex::ParmParse pt("erf.conductors.lat");
+    for (const char* k : {"base_width", "top_width", "solidity", "arm_length", "arm_depth"}) { pt.remove(k); }
+    pt.add("base_width", 6.0);
+    pt.add("top_width", 1.5);
+    pt.add("solidity", 0.2);
+    pt.add("arm_length", 12.0);
+    pt.add("arm_depth", 1.2);
+}
+void clear_towered_section (const std::string& name)
+{
+    amrex::ParmParse ps("erf.conductors." + name);
+    ps.remove("towers"); ps.remove("tower_type");
+    amrex::ParmParse pp("erf.conductors");
+    pp.addarr("tower_types", std::vector<std::string>{});
+    pp.remove("drag_on_flow");
+    pp.addarr("spans", std::vector<std::string>{});
+}
+} // namespace
+
+TEST(Conductors, LatticeTowersStandAtTheSuspensionPointsAndCarryTheWindsDrag)
+{
+    const std::string dir = scratch("towers");
+    set_towered_section(dir, "Tw");
+    Mesh m(true);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(m.znd.get(), m.geom);
+    ASSERT_EQ(c->towers().size(), 2u);
+    for (int k = 0; k < 2; ++k) {
+        const auto& tw = c->towers()[static_cast<std::size_t>(k)];
+        const Real x = 400.0 + 300.0 * k;
+        EXPECT_EQ(tw.name(), "Tw_t" + std::to_string(k + 1));
+        EXPECT_NEAR(tw.base()[0], x, 1.0e-9);
+        EXPECT_NEAR(tw.base()[2], m.h(x, 500.0), roundoff * 1000) << "the base stands on the ramp";
+        EXPECT_NEAR(tw.arm_height(), 30.0, roundoff * 1000) << "the cross-arm at the conductor's height";
+        EXPECT_NEAR(std::abs(tw.across()[1]), 1.0, 1.0e-12) << "the cross-arm across a line along x";
+    }
+    // the prescribed +y wind runs along the cross-arms: only the bodies carry it, the hand value
+    const Real U = 10.0, q = 0.5 * 1.2 * U * U, cf = 4.0 * 0.04 - 5.9 * 0.2 + 4.0;
+    const Real body = q * cf * 0.2 * 0.5 * (6.0 + 1.5) * 30.0;
+    for (int s = 0; s < 3; ++s) { c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    for (const auto& tw : c->towers()) {
+        const auto F = tw.total_force();
+        EXPECT_NEAR(F[1], body, 1.0e-6 * body) << tw.name();
+        EXPECT_NEAR(F[0], 0.0, roundoff * body) << tw.name();
+        // M_x = -z F_y: the body's q cf phi int w(z) z dz, short by the midpoint sum's H^3 / (12 n^2) on z^2
+        const Real H = 30.0, n = 10.0;
+        const Real mom = q * cf * 0.2 * (6.0 * H * H / 2.0 + (1.5 - 6.0) / H * (H * H * H / 3.0 - H * H * H / (12.0 * n * n)));
+        EXPECT_NEAR(tw.base_moment()[0], -mom, 1.0e-6 * mom) << tw.name();
+    }
+    // towers.dat: a row at the start of every step with every tower's force and base moment
+    std::ifstream f(dir + "/towers.dat");
+    std::string header, row;
+    std::getline(f, header);
+    EXPECT_EQ(header, "time Tw_t1_Fx Tw_t1_Fy Tw_t1_Fz Tw_t1_Mx Tw_t1_My Tw_t2_Fx Tw_t2_Fy Tw_t2_Fz Tw_t2_Mx Tw_t2_My");
+    int rows = 0;
+    while (std::getline(f, row)) {
+        std::istringstream ls(row);
+        std::vector<Real> v;
+        Real x;
+        while (ls >> x) { v.push_back(x); }
+        ASSERT_EQ(v.size(), 11u);
+        EXPECT_NEAR(v[2], body, 1.0e-6 * body);
+        ++rows;
+    }
+    EXPECT_EQ(rows, 3);
+    EXPECT_NE(slurp(dir + "/tower_Tw_t1_stats.csv").find(",drag_h,"), std::string::npos);
+    clear_towered_section("Tw");
+}
+
+TEST(Conductors, TheTowersDragGoesIntoTheFlowWithTheLinesAndSurvivesARestart)
+{
+    const std::string dir = scratch("towers_flow");
+    set_towered_section(dir, "Tf");
+    amrex::ParmParse pp("erf.conductors");
+    pp.add("drag_on_flow", true);
+    pp.remove("prescribed_velocity");
+    Mesh m(true);
+    m.fill_crosswind();
+    const double dt = 0.25;
+    auto a = Conductors::create(0);
+    ASSERT_TRUE(a);
+    a->set_ground(m.znd.get(), m.geom);
+    int step = 0;
+    for (; step < 3; ++step) { a->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    // the source integrates to minus the drag on the lines and on the towers
+    std::array<Real,3> drag{{0.0, 0.0, 0.0}};
+    for (const auto& s : a->spans()) { const auto f = s->total_drag(); for (int d = 0; d < 3; ++d) { drag[d] += f[d]; } }
+    Real towers_y = 0.0;
+    for (const auto& t : a->towers()) { const auto f = t.total_force(); towers_y += f[1]; for (int d = 0; d < 3; ++d) { drag[d] += f[d]; } }
+    EXPECT_GT(towers_y, 0.0);
+    for (int d = 0; d < 3; ++d) { EXPECT_NEAR(a->source_integral()[d], -drag[d], 1.0e-6 * std::abs(drag[1]) + roundoff) << d; }
+    const std::string chk = dir + "/chk00003";
+    std::filesystem::create_directories(chk);
+    a->write_checkpoint(chk);
+    const auto src = a->source_integral();
+    for (; step < 6; ++step) { a->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    const std::string log = slurp(dir + "/towers.dat");
+    const std::string stats = slurp(dir + "/tower_Tf_t2_stats.csv");
+
+    auto b = Conductors::create(0);
+    ASSERT_TRUE(b);
+    b->set_ground(m.znd.get(), m.geom, chk);
+    ASSERT_TRUE(b->restored());
+    // the restored towers' drag is the checkpointed step's, and so is the source spread from it
+    b->restore_sources(0, m.u, m.znd.get(), nullptr, m.geom);
+    for (int d = 0; d < 3; ++d) { EXPECT_EQ(b->source_integral()[d], src[d]) << d; }
+    for (step = 3; step < 6; ++step) { b->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    EXPECT_EQ(slurp(dir + "/towers.dat"), log);
+    EXPECT_EQ(slurp(dir + "/tower_Tf_t2_stats.csv"), stats);
+    clear_towered_section("Tf");
 }

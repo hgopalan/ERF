@@ -393,3 +393,48 @@ TEST(ConductorInputs, AStringingTensionSetsEachSpansLengthSoThatItHangsWithThatT
     fixed.lengths_from_stringing_tension(amrex::Real(w));
     EXPECT_EQ(fixed.lengths, before);
 }
+
+TEST(ConductorInputs, TowerTypesAreReadAndALinesTowerTypeMustNameOne)
+{
+    amrex::ParmParse pp("erf.conductors");
+    pp.add("spans", std::string("C2"));
+    amrex::ParmParse ps("erf.conductors.C2");
+    ps.addarr("end_a", std::vector<amrex::Real>{100.0, 500.0, 30.0});
+    ps.addarr("end_b", std::vector<amrex::Real>{700.0, 500.0, 30.0});
+    ps.addarr("towers", std::vector<amrex::Real>{400.0, 500.0, 30.0});
+    ps.addarr("length", std::vector<amrex::Real>{301.5, 301.5});
+    ps.add("diameter", 0.0281);
+    ps.add("mass_per_length", 1.628);
+    ps.add("axial_stiffness", 3.0e7);
+    ps.add("tower_type", std::string("suspension"));
+    pp.addarr("tower_types", std::vector<std::string>{"suspension"});
+    amrex::ParmParse pt("erf.conductors.suspension");
+    pt.add("base_width", 6.0);
+    pt.add("top_width", 1.5);
+    pt.add("solidity", 0.2);
+    pt.add("arm_length", 12.0);
+    const ConductorInputs in = ConductorInputs::read();
+    ASSERT_EQ(in.tower_types.size(), 1u);
+    const auto& t = in.tower_types[0];
+    EXPECT_EQ(t.name, "suspension");
+    EXPECT_DOUBLE_EQ(t.arm_length, 12.0);
+    EXPECT_EQ(t.segments, 10);
+    EXPECT_DOUBLE_EQ(t.peak, 0.0);
+    EXPECT_DOUBLE_EQ(t.arm_face(), amrex::Real(1.5)) << "arm_depth defaults to top_width";
+    EXPECT_EQ(in.spans[0].tower_type, "suspension");
+    // a line's tower type must be one of the types, and the line must have towers
+    SpanInputs s = in.spans[0];
+    EXPECT_TRUE(ConductorInputs::validate_tower_type(s, in.tower_types).empty());
+    s.tower_type = "dead_end";
+    EXPECT_NE(ConductorInputs::validate_tower_type(s, in.tower_types).find("erf.conductors.C2.tower_type = dead_end is not one of"),
+              std::string::npos);
+    SpanInputs single = good_span();
+    single.tower_type = "suspension";
+    EXPECT_NE(ConductorInputs::validate_tower_type(single, in.tower_types).find("erf.conductors.S.tower_type needs towers"),
+              std::string::npos);
+    SpanInputs none = good_span();
+    EXPECT_TRUE(ConductorInputs::validate_tower_type(none, in.tower_types).empty()) << "no tower type: points only";
+    pp.addarr("spans", std::vector<std::string>{});
+    pp.addarr("tower_types", std::vector<std::string>{});
+    ps.remove("tower_type");
+}

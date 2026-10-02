@@ -316,10 +316,12 @@ ifeq ($(USE_MOVING_BODIES), TRUE)
         DEFINES += -DERF_USE_MOORDYN -DERF_MOORDYN_VERSION=\"$(MOORDYN_VERSION)\"
         ERF_MOORDYN_DIR = $(ERF_SOURCE_DIR)/MovingBodies/MoorDyn
         ERF_CONDUCTORS_DIR = $(ERF_SOURCE_DIR)/MovingBodies/Conductors
+        ERF_TOWERS_DIR = $(ERF_SOURCE_DIR)/MovingBodies/Towers
         include $(ERF_MOORDYN_DIR)/Make.package
         include $(ERF_CONDUCTORS_DIR)/Make.package
-        VPATH_LOCATIONS   += $(ERF_MOORDYN_DIR) $(ERF_CONDUCTORS_DIR)
-        INCLUDE_LOCATIONS += $(ERF_MOORDYN_DIR) $(ERF_CONDUCTORS_DIR) $(MOORDYN_HOME)/include
+        include $(ERF_TOWERS_DIR)/Make.package
+        VPATH_LOCATIONS   += $(ERF_MOORDYN_DIR) $(ERF_CONDUCTORS_DIR) $(ERF_TOWERS_DIR)
+        INCLUDE_LOCATIONS += $(ERF_MOORDYN_DIR) $(ERF_CONDUCTORS_DIR) $(ERF_TOWERS_DIR) $(MOORDYN_HOME)/include
         LIBRARY_LOCATIONS += $(MOORDYN_HOME)/lib
         LIBRARIES += -lmoordyn
     endif

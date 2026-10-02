@@ -211,7 +211,8 @@ Drag on the flow
 ----------------
 
 With ``drag_on_flow`` the lines act on the air as well: after each MoorDyn
-step the air's drag on every node, reversed, is spread onto ERF's
+step the air's drag on every node, reversed (and on every node of the lattice
+towers, see `Towers`_), is spread onto ERF's
 face-centred momentum sources with the actuator core's Gaussian of width
 ``epsilon`` cells, discretely normalised so that the source integrates back
 to the force exactly, and added during the next step. Each node carries its
@@ -333,6 +334,69 @@ the clearance are kept as running statistics in
 each transformer, the height of its base, the line ends on it, the still-air
 load and the closest conductor.
 
+Towers
+------
+
+The suspension towers of a line with a ``tower_type`` are lattice towers
+loaded by the wind (``erf.conductors.tower_types``, a block of its own per
+type). A tower stands on the terrain under its suspension point: a square
+lattice body tapering linearly from ``base_width`` at the ground to
+``top_width`` at the cross-arm (with an optional ``peak`` above it at the top
+width), and a lattice cross-arm of ``arm_length`` and face depth
+``arm_depth`` centred on the body at the height the conductor hangs from,
+across the line (normal to the mean horizontal direction of the spans either
+side). The towers are rigid, and their loads here are the wind's on their
+members; the lines' pull on them is not part of these loads.
+
+Each member is cut into drag nodes at the middle of equal segments
+(``segments`` up the body, four along the arm). A node stands for a length
+:math:`L` of member with axis :math:`\mathbf{e}`, and the wind loads it as a
+slender member does, by the flow normal to it, relative to the node's own
+velocity :math:`\mathbf{v}` (zero for a rigid tower):
+
+.. math::
+
+   \mathbf{F} = \tfrac{1}{2} \rho\, C_f\, w\, L\, |\mathbf{U}_n| \mathbf{U}_n ,
+   \qquad \mathbf{U}_n = (\mathbf{U} - \mathbf{v}) - \big((\mathbf{U} - \mathbf{v})\cdot\mathbf{e}\big)\mathbf{e} ,
+
+with :math:`w` the face width times the ``solidity`` :math:`\phi` (the
+members' area over the face's outline) and :math:`C_f` the ``drag_coefficient``
+or, by default, the force coefficient of a square lattice tower of
+flat-sided members on the projected area of one face,
+:math:`C_f = 4\phi^2 - 5.9\phi + 4` (ASCE 7), which counts the windward and
+the leeward face together: 2.98 at :math:`\phi = 0.2`. A rotor-less tower in
+AeroDyn is the same law with :math:`w` the tower's diameter. The wind is
+ERF's velocity sampled at the nodes with the lines' sampler at the start of
+each step, or the prescribed velocity; a node just above sloping ground,
+below the averaged bottom face of its cell, is read from the bottom cell. The
+aerodynamics sit behind a narrow interface (node positions, axes and
+velocities and the wind in, a force per node out), so another model of the
+members' loads can stand in for the ERF drag.
+
+Every ``diagnostics_int`` steps ``<diagnostics_dir>/towers.dat`` gets, for
+each tower ``<line>_t<k>``, the total drag ``Fx``, ``Fy``, ``Fz`` and its
+moment about the centre of the base ``Mx``, ``My``, at the time the step
+starts (the flow the drag was found from); from ``stats_start`` each tower
+keeps the statistics of its horizontal drag and overturning moment in
+``<diagnostics_dir>/tower_<line>_t<k>_stats.csv``. With ``drag_on_flow`` the
+towers' drag goes into the momentum sources with the lines', and
+``total_load.dat`` counts both. A checkpoint carries the statistics and the
+last node forces, so the drag a restart puts into the flow is the
+checkpointed step's.
+
+Verification (unit tests ``MemberDrag``, ``Tower``): a node takes only the
+normal component of the relative wind (none along its axis, none moving with
+the wind); in a uniform wind a 30 m tower of 6 m base, 1.5 m top width and
+solidity 0.2 carries exactly :math:`q C_f \phi (b_0 + b_t) H / 2` on its body
+(the width is linear, so the segments' midpoint sum is exact) and
+:math:`q C_f \phi d L_a` on its cross-arm, and the base moment equals the
+hand integral up to the midpoint sum's known :math:`H^3/(12 n^2)` on the
+quadratic part; wind along the cross-arm loads only the body; in a log-law
+wind ten segments give the drag and base moment of a 20 000-point integral
+within 1 %. On the terrain test case the hilltop tower in a 25 m/s wind
+carries 25.6 kN, against 25.1 kN from :math:`q C_f \phi` times its face at
+that speed.
+
 A network over hills
 --------------------
 
@@ -340,7 +404,7 @@ A network over hills
 draws four hills of 87 to 99 m on a 3 km by 2 km domain, six transformers
 (three on hilltops, three on flat ground) and the five lines of a minimum
 spanning tree between them, each a section of three spans on insulator
-strings with towers placed for ground clearance, all strung to 20 kN, and a
+strings with lattice towers placed for ground clearance, all strung to 20 kN, and a
 neutral log-law inflow of 18 m/s at 30 m. The k-equation RANS flow spins up
 for 600 s (1.2 million cells), then the lines run 120 s from its checkpoint
 with the real MoorDyn. The wind 30 m above the ground speeds up to about
@@ -349,7 +413,10 @@ about 30 s: the spans running across the wind blow out up to 3.3 m at
 mid-span (swings of 27 to 29 degrees), the one running along it barely
 moves (2 degrees), and the transformers' horizontal loads settle between
 7.2 kN (three lines from different sides) and 21.3 kN (two lines at an
-angle), under their 25 kN allowable. With a steady RANS wind the lines hold a
+angle), under their 25 kN allowable. The lattice towers (6 m base, 1.5 m
+top, solidity 0.2, 12 m cross-arm) carry 18.7 to 20.6 kN of wind drag on the
+hilltops and 6.9 to 9.6 kN below them, the speed-up over the hills raising
+the drag about two and a half times. With a steady RANS wind the lines hold a
 steady blowout; their gust response needs a turbulent inflow.
 
 Restart
@@ -358,7 +425,7 @@ Restart
 A checkpoint carries the lines under ``<chk>/conductors``: each line's whole
 MoorDyn state (node and free-point positions and velocities, internal forces
 and the time integrator's state, through MoorDyn's own save), the running
-statistics of every span, string set, pair of lines and transformer, the step count and
+statistics of every span, string set, pair of lines, transformer and tower, the step count and
 the time. On a restart the line is created from the same
 inputs, initialised without the initial-shape solve and given that state, so
 it continues blown out exactly where the checkpoint left it, on MoorDyn's
@@ -367,12 +434,13 @@ step count of the original run. With ``drag_on_flow`` the restored lines' drag
 is spread into the momentum sources again at once, so a plotfile written at
 the restart shows the source of the checkpointed step. The span and string
 logs, ``<output_root>_nodes.dat``, ``total_load.dat``, ``separation.dat`` and
-``transformers.dat`` are appended to, after
-the rows a run wrote beyond the checkpoint time are dropped, so a run that
-went on past its last checkpoint and is restarted from it leaves no
-duplicated stretch. The lines of a restart must be those of the run that
+``transformers.dat`` are appended to after the rows a run wrote beyond the
+checkpoint time are dropped, so a run that went on past its last checkpoint
+and is restarted from it leaves no duplicated stretch; ``towers.dat``, whose
+rows carry the time a step starts at, loses the row at the checkpoint time as
+well, since the restarted run writes it again. The lines of a restart must be those of the run that
 wrote the checkpoint, in the same order and with the same spans, towers,
-segments and strings, and the same transformers; anything else stops the run naming the line or the transformer. A checkpoint without
+segments and strings, and the same transformers and tower types; anything else stops the run naming the line or the transformer. A checkpoint without
 conductor state, from a run without spans, starts them afresh from their
 still-air shape, with MoorDyn's clock at zero at the restart time.
 

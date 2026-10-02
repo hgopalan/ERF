@@ -15,6 +15,7 @@
 #include "ERF_ConductorSpan.H"
 #include "ERF_RunningStats.H"
 #include "ERF_Transformer.H"
+#include "ERF_Tower.H"
 
 /**
  * The conductor lines of a run (erf.conductors.*): MoorDyn lines between fixed attachment points,
@@ -23,6 +24,8 @@
  * step of the anchor level. Besides each line's own diagnostics, every pair of lines is watched
  * for how close their conductors come, against erf.conductors.flashover_distance, and every
  * transformer the lines end on for the load they put on it and how close any conductor comes to it.
+ * The suspension towers of a line with a tower_type are lattice towers loaded by the wind: the
+ * drag on their members, from the flow sampled at the members' nodes each step.
  */
 class Conductors
 {
@@ -87,6 +90,8 @@ public:
     const std::vector<erf_conductors::Transformer>& transformers () const { return m_transformers; }
     const std::vector<erf_conductors::TransformerLoad>& transformer_loads () const { return m_tload; }
     const std::vector<erf_conductors::Closest>& transformer_clearances () const { return m_tclear; }
+    /** The lattice towers of the lines with a tower_type, with the wind's last load on their members. */
+    const std::vector<erf_towers::Tower>& towers () const { return m_towers; }
 
     int anchor_level () const { return m_anchor; }
     const ConductorInputs_t& inputs () const { return m_in; }
@@ -135,6 +140,17 @@ private:
     void measure_transformers ();
     /** Append a row of the transformers' loads and clearances to <diagnostics_dir>/transformers.dat; header when first. */
     void write_transformers (double time, bool first) const;
+    /** Stand a lattice tower at every suspension point of the lines with a tower_type. */
+    void build_towers ();
+    /** The towers' statistics. */
+    void add_tower_stats ();
+    /** The wind at every tower node (3 per node, the towers in order): the flow sampled there, or the prescribed velocity. */
+    std::vector<amrex::Real> tower_wind (const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
+                                         const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
+    /** The members' drag from the wind at their nodes, handed to each tower. */
+    void load_towers (const std::vector<amrex::Real>& wind);
+    /** Append a row of the towers' drag and base moment to <diagnostics_dir>/towers.dat; header when first. */
+    void write_towers (double time, bool first) const;
     /** The logs a restart continues. */
     std::vector<std::string> log_files () const;
 
@@ -156,6 +172,9 @@ private:
     std::vector<erf_conductors::TransformerLoad> m_tload;           //!< per transformer: the lines' last load
     std::vector<erf_conductors::Closest> m_tclear;                  //!< per transformer: the closest conductor, last
     std::vector<erf_actuator::RunningStats> m_tstats;               //!< per transformer: its load and clearance
+    std::vector<erf_towers::Tower> m_towers;                        //!< the lines' lattice towers, line by line
+    std::unique_ptr<erf_towers::MemberAero> m_aero;                 //!< the members' aerodynamics
+    std::vector<erf_actuator::RunningStats> m_tower_stats;          //!< per tower: its drag and base moment
     bool m_src_defined{false};
     amrex::MultiFab m_src_x, m_src_y, m_src_z;           //!< the lines' momentum sources on the anchor level
     std::array<amrex::Real,3> m_source_integral{{0.0, 0.0, 0.0}};
@@ -166,10 +185,11 @@ namespace erf_conductors {
 /**
  * Drop the data rows of a whitespace-separated log whose time (the first column) is later than t,
  * keeping the header and every other line: a run restarted from a checkpoint at t continues the
- * log from there, without the rows the run it continues wrote after the checkpoint. A missing
- * file is left alone. Call on one rank.
+ * log from there, without the rows the run it continues wrote after the checkpoint. With at_too
+ * the row at t goes as well, for a log whose rows carry the time a step starts at (the restarted
+ * run writes that row again). A missing file is left alone. Call on one rank.
  */
-void trim_log_after (const std::string& fname, double t);
+void trim_log_after (const std::string& fname, double t, bool at_too = false);
 } // namespace erf_conductors
 
 #endif
