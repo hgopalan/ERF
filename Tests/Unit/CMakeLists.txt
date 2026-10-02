@@ -312,8 +312,12 @@ if(ERF_ENABLE_MOORDYN)
   # still air, report positions in ERF's frame, and blow out towards atan(q/w) in a prescribed
   # crosswind, stepping in lockstep with ERF's clock; the manager must place the attachments
   # at their height above the terrain under each end, step on the anchor level only, and hand
-  # MoorDyn ERF's velocity sampled where the line is now.
+  # MoorDyn ERF's velocity sampled where the line is now. A section over towers must be read,
+  # written with its insulator strings and free points, and hang from the strings; the closest
+  # approach of two lines must be the exact minimum distance between their conductors, flagged
+  # against the flashover distance.
   target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorInputs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestMoorDynInputWriter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorSpan.cpp
@@ -321,8 +325,9 @@ if(ERF_ENABLE_MOORDYN)
   )
   # Motivation: against the real MoorDyn-C (the tests skip on the stub, which has no line
   # dynamics), a span's mean swing in a steady crosswind must be the quasi-static blowout angle
-  # atan(q/w), and its free swing after a gust must have the cable's first out-of-plane period
-  # 2 c / sqrt(H/m), each within 1 %.
+  # atan(q/w), its free swing after a gust must have the cable's first out-of-plane period
+  # 2 c / sqrt(H/m), and the suspension strings of a section must swing to the angle of the wind
+  # span over the weight span, each within 1 %.
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorVerification.cpp
   )

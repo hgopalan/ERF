@@ -8,8 +8,9 @@ Coupling To MoorDyn
 ===================
 
 ERF couples to `MoorDyn-C <https://moordyn.readthedocs.io>`_ (the C++ MoorDyn,
-version 2) to simulate flexible lines in the wind: conductor spans, shield
-wires and insulator strings hanging between fixed attachment points. MoorDyn
+version 2) to simulate flexible lines in the wind: conductors and shield
+wires dead-ended at fixed attachment points, as single spans or as sections
+hanging from insulator strings at suspension towers. MoorDyn
 integrates the lumped-mass line dynamics; ERF supplies the fluid velocity at
 MoorDyn's line nodes through its external wave-kinematics interface, so the
 "water" MoorDyn's lines hang in is ERF's air. The actuator core of
@@ -59,9 +60,13 @@ coupling against a bundled stub library with the same C API
 and has the geometry, ordering and data flow of the real interface but no
 line dynamics: each line hangs as a parabola with the catenary sag of its
 slack, swings to the quasi-static blowout angle of the wind it is given with
-a one-second lag, and carries the catenary tension. Its saved state holds
-each line's swing angle and the last wind it was given, which sets the
-direction of the swing, so a restored line is where the saved one was. The
+a one-second lag, and carries the catenary tension. A free point hangs from
+the shortest line that ties it to a fixed point (an insulator string from its
+tower), in the direction the other line attached to it swung at its last
+placement, and that line runs straight down to it. Its saved state holds
+each line's swing angle, the last wind it was given, which sets the direction
+of the swing, and where the free points hang, so a restored line is where
+the saved one was. The
 unit tests and the ``Linux GCC MoorDyn`` CI workflow runs them on it in one
 job; a second job installs MoorDyn-C 2.7.1 with ``Build/setup_moordyn.sh``
 and runs the same tests, the verification tests that need real line dynamics
@@ -140,7 +145,7 @@ MoorDyn is ERF's velocity at the line's nodes (the regression test
    erf.conductors.air_density         = 1.0
 
 The physics and the diagnostics are in :ref:`sec:Conductors`; the inputs,
-with their defaults and ranges, in the "Conductor spans" section of
+with their defaults and ranges, in the "Conductor lines" section of
 :doc:`Inputs <Inputs>`.
 
 The unit test ``MoorDynSystem`` (``Tests/Unit/MovingBodies``) runs a 300 m

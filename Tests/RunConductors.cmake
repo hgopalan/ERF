@@ -6,8 +6,13 @@
 # source_x..z), every row must also have the integrated momentum source equal to the force the lines
 # put into the air, to SIGDIGITS digits: the spreading's normalisation is exact.
 #
+# With EXTRA_LOGS (space-separated files written by the run), each is compared the same way with
+# the gold <GOLD_DIR>/<file name><GOLD_SUFFIX>; a comma-separated table (.csv) is compared as a
+# whitespace-separated one.
+#
 # Variables: MPIEXEC, MPIEXEC_NUMPROC_FLAG, MPIEXEC_PREFLAGS, NRANKS, TEST_EXE, CONFIG, INPUT,
-# WORKING_DIRECTORY, FCOMPARE, PLTFILE, PLOT_GOLD, RTOL, ATOL, LOG, GOLD, SIGDIGITS, TOTALS.
+# WORKING_DIRECTORY, FCOMPARE, PLTFILE, PLOT_GOLD, RTOL, ATOL, LOG, GOLD, SIGDIGITS, TOTALS,
+# EXTRA_LOGS, GOLD_DIR, GOLD_SUFFIX.
 
 cmake_minimum_required(VERSION 3.20)
 include("${CMAKE_CURRENT_LIST_DIR}/MPILauncher.cmake")
@@ -77,6 +82,40 @@ endif()
 file(STRINGS "${WORKING_DIRECTORY}/${LOG}" rows)
 list(LENGTH rows nrows)
 message(STATUS "RunConductors: ${LOG} agrees with its gold (${nrows} rows), plotfile agrees")
+
+# ---- further logs against their golds ----
+if(DEFINED EXTRA_LOGS AND NOT "${EXTRA_LOGS}" STREQUAL "")
+    separate_arguments(extra UNIX_COMMAND "${EXTRA_LOGS}")
+    foreach(extra_log IN LISTS extra)
+        get_filename_component(extra_name "${extra_log}" NAME)
+        set(extra_gold "${GOLD_DIR}/${extra_name}${GOLD_SUFFIX}")
+        if(NOT EXISTS "${WORKING_DIRECTORY}/${extra_log}")
+            message(FATAL_ERROR "RunConductors.cmake: the run wrote no ${extra_log}")
+        endif()
+        if(NOT EXISTS "${extra_gold}")
+            message(FATAL_ERROR "RunConductors.cmake: no gold ${extra_gold} for ${extra_log}")
+        endif()
+        set(run_table "${WORKING_DIRECTORY}/${extra_log}")
+        if(extra_name MATCHES "\\.csv$")
+            foreach(which run gold)
+                if(which STREQUAL "run")
+                    file(READ "${WORKING_DIRECTORY}/${extra_log}" table)
+                else()
+                    file(READ "${extra_gold}" table)
+                endif()
+                string(REPLACE "," " " table "${table}")
+                file(WRITE "${WORKING_DIRECTORY}/compare_${which}_${extra_name}.txt" "${table}")
+            endforeach()
+            set(run_table "${WORKING_DIRECTORY}/compare_run_${extra_name}.txt")
+            set(extra_gold "${WORKING_DIRECTORY}/compare_gold_${extra_name}.txt")
+        endif()
+        erf_compare_data_logs("${run_table}" "${extra_gold}" ${SIGDIGITS} 2 logs_agree log_message)
+        if(NOT logs_agree)
+            message(FATAL_ERROR "RunConductors.cmake: ${extra_log} differs from its gold: ${log_message}")
+        endif()
+        message(STATUS "RunConductors: ${extra_log} agrees with its gold")
+    endforeach()
+endif()
 
 # ---- the spread source integrates to the force on the air ----
 if(DEFINED TOTALS AND NOT "${TOTALS}" STREQUAL "")

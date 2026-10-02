@@ -2,8 +2,10 @@
 // with its nodes reported in ERF's frame and the catenary end tensions; its kinematics points
 // start with the line nodes, in ERF's frame; a prescribed crosswind, handed over step by step
 // in lockstep with ERF's clock, blows it out towards the quasi-static angle atan(q / w) and
-// raises the tension; the diagnostics file carries one row per call with the header once; and a
-// span created from a saved state is where the saved one is and continues as it does.
+// raises the tension; the diagnostics file carries one row per call with the header once; a
+// span created from a saved state is where the saved one is and continues as it does; and a
+// section hangs from its insulator strings, which hang plumb in still air and let the conductor
+// swing further across the wind than clamps at the towers do.
 
 #include <algorithm>
 #include <cmath>
@@ -31,7 +33,7 @@ SpanInputs drake_span (const std::string& name)
     s.name = name;
     s.end_a = {{100.0, 500.0, 30.0}};
     s.end_b = {{400.0, 500.0, 30.0}};
-    s.length = 301.5; s.diameter = 0.0281; s.mass_per_length = 1.628; s.axial_stiffness = 3.0e7;
+    s.lengths = {301.5}; s.diameter = 0.0281; s.mass_per_length = 1.628; s.axial_stiffness = 3.0e7;
     s.output_root = (std::filesystem::temp_directory_path() / "erf_gtest_conductor_span" / name).string();
     return s;
 }
@@ -202,4 +204,69 @@ TEST(ConductorSpan, ASpanCreatedFromASavedStateContinuesIt)
         }
     }
     EXPECT_NEAR(b->tension_a(), a->tension_a(), 1.0e-9 * a->tension_a());
+}
+
+namespace {
+SpanInputs section (const std::string& name, double insulator)
+{
+    SpanInputs s = drake_span(name);
+    s.end_a = {{100.0, 500.0, 30.0}};
+    s.end_b = {{1000.0, 500.0, 30.0}};
+    s.towers = {{{400.0, 500.0, 30.0}}, {{700.0, 500.0, 30.0}}};
+    s.lengths = {301.5, 301.5, 301.5};
+    s.insulator_length = insulator;
+    s.insulator_mass = 60.0;
+    return s;
+}
+} // namespace
+
+TEST(ConductorSpan, ASectionHangsFromItsInsulatorStrings)
+{
+    const ConductorInputs in = settings();
+    const std::string file = in.diagnostics_dir + "/strings.moordyn.txt";
+    ConductorSpan line(section("strings", 2.5), in, 9.81, file);
+    EXPECT_EQ(line.num_spans(), 3);
+    EXPECT_EQ(line.num_insulators(), 2);
+    EXPECT_EQ(line.num_nodes(), 3u * 21u + 2u * 3u);
+    EXPECT_EQ(line.span_first_node(2), 42u);
+    EXPECT_GE(line.num_kinematics_points(), line.num_nodes());
+    EXPECT_EQ(line.conductor_path().size(), 3u * 3u * 21u);
+    // still air: the strings hang plumb and the conductor ends hang 2.5 m under the towers
+    for (int j = 0; j < 2; ++j) {
+        EXPECT_LT(line.insulator_swing(j), 0.01) << "string " << j;
+        EXPECT_GT(line.insulator_tension(j), 1000.0) << "string " << j << " carries the conductor";
+    }
+    const auto a2 = line.node_position(line.span_first_node(1));
+    EXPECT_NEAR(a2[0], 400.0, 0.05);
+    EXPECT_NEAR(a2[2], 27.5, 0.05);
+    // the sag is measured from the towers, so it includes the string
+    EXPECT_NEAR(line.mid_sag(1), line.inputs().catenary_sag(1) + 2.5, 0.25 * line.inputs().catenary_sag(1));
+    EXPECT_NEAR(line.mid_offset(1), 0.0, 1.0e-3);
+
+    // a steady crosswind along +y: the strings swing across the line, with the wind, and let the
+    // middle span blow out further than the same section clamped at its towers
+    ConductorSpan clamped(section("clamped", 0.0), in, 9.81, in.diagnostics_dir + "/clamped.moordyn.txt");
+    EXPECT_EQ(clamped.num_insulators(), 0);
+    const double dt = 0.1;
+    double t = 0.0;
+    for (int n = 0; n < 100; ++n) {
+        line.set_wind(uniform(line.num_kinematics_points(), 0.0, 20.0, 0.0), t + 0.5 * dt);
+        clamped.set_wind(uniform(clamped.num_kinematics_points(), 0.0, 20.0, 0.0), t + 0.5 * dt);
+        line.step(t, dt);
+        clamped.step(t, dt);
+        t += dt;
+    }
+    for (int j = 0; j < 2; ++j) {
+        EXPECT_GT(line.insulator_swing_across(j), 0.05) << "string " << j << " swings with the wind";
+        EXPECT_NEAR(line.insulator_swing_across(j), line.insulator_swing(j), 0.02) << "string " << j << " swings across the line";
+    }
+    EXPECT_GT(line.mid_offset(1), clamped.mid_offset(1) + 0.3) << "the strings add their swing to the span's";
+    // each span's quantities are its own: the middle node of span k, against the chord between its towers
+    for (int k = 0; k < 3; ++k) {
+        const auto m = line.node_position(line.span_first_node(k) + 10);
+        EXPECT_NEAR(line.mid_offset(k), m[1] - 500.0, 1.0e-6) << "span " << k;
+        EXPECT_NEAR(line.mid_sag(k), 30.0 - m[2], 1.0e-6) << "span " << k;
+    }
+    EXPECT_GT(std::abs(line.mid_offset(1) - line.mid_offset(0)), 1.0e-3) << "the middle span hangs from strings at both ends";
+    EXPECT_GT(clamped.mid_offset(1), 1.0);
 }

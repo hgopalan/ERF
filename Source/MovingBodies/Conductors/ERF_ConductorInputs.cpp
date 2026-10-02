@@ -10,17 +10,50 @@ using namespace amrex;
 
 namespace erf_conductors {
 
-Real SpanInputs::chord () const
+const std::array<Real,3>& SpanInputs::point (int k) const
 {
+    if (k == 0) { return end_a; }
+    if (k == num_spans()) { return end_b; }
+    return towers[static_cast<std::size_t>(k - 1)];
+}
+
+std::array<Real,3>& SpanInputs::point (int k)
+{
+    if (k == 0) { return end_a; }
+    if (k == num_spans()) { return end_b; }
+    return towers[static_cast<std::size_t>(k - 1)];
+}
+
+Real SpanInputs::chord (int k) const
+{
+    const auto& a = point(k);
+    const auto& b = point(k + 1);
     Real c2 = 0.0;
-    for (int d = 0; d < 3; ++d) { c2 += (end_b[d] - end_a[d]) * (end_b[d] - end_a[d]); }
+    for (int d = 0; d < 3; ++d) { c2 += (b[d] - a[d]) * (b[d] - a[d]); }
     return std::sqrt(c2);
 }
 
-Real SpanInputs::catenary_sag () const
+Real SpanInputs::catenary_sag (int k) const
 {
-    const Real c = chord();
-    return (length > c) ? std::sqrt(Real(3.0) * c * (length - c) / Real(8.0)) : Real(0.0);
+    const Real c = chord(k);
+    const Real L = lengths[static_cast<std::size_t>(k)];
+    return (L > c) ? std::sqrt(Real(3.0) * c * (L - c) / Real(8.0)) : Real(0.0);
+}
+
+int SpanInputs::num_line_nodes () const
+{
+    const int strings = has_insulators() ? static_cast<int>(towers.size()) : 0;
+    return num_spans() * (segments + 1) + strings * (insulator_segments + 1);
+}
+
+std::string SpanInputs::span_root (int k) const
+{
+    return (num_spans() == 1) ? output_root : output_root + "_span" + std::to_string(k + 1);
+}
+
+std::string SpanInputs::span_name (int k) const
+{
+    return (num_spans() == 1) ? name : name + "_span" + std::to_string(k + 1);
 }
 
 Catenary elastic_catenary (Real chord, Real length, Real w, Real EA)
@@ -63,11 +96,22 @@ Catenary elastic_catenary (Real chord, Real length, Real w, Real EA)
 std::string ConductorInputs::validate_span (const SpanInputs& s)
 {
     const std::string key = "erf.conductors." + s.name + ".";
-    const Real c = s.chord();
-    if (!(c > 0.0)) { return key + "end_a and end_b must be distinct points"; }
-    if (!(s.length > c)) {
-        return key + "length (" + std::to_string(s.length) + " m) must exceed the distance between the ends (" +
-               std::to_string(c) + " m): a span hangs with slack";
+    if (static_cast<int>(s.lengths.size()) != s.num_spans()) {
+        return key + "length needs one unstretched length per span (" + std::to_string(s.num_spans()) + " for " +
+               std::to_string(s.towers.size()) + " tower(s)), " + std::to_string(s.lengths.size()) + " given";
+    }
+    for (int k = 0; k < s.num_spans(); ++k) {
+        const Real c = s.chord(k);
+        const std::string which = (s.num_spans() == 1) ? "" : " of span " + std::to_string(k + 1);
+        if (!(c > 0.0)) {
+            return key + (s.num_spans() == 1 ? std::string("end_a and end_b must be distinct points")
+                                             : "the attachment points" + which + " must be distinct (end_a, towers, end_b)");
+        }
+        const Real L = s.lengths[static_cast<std::size_t>(k)];
+        if (!(L > c)) {
+            return key + "length" + which + " (" + std::to_string(L) + " m) must exceed the distance between its ends (" +
+                   std::to_string(c) + " m): a span hangs with slack";
+        }
     }
     if (!(s.diameter > 0.0)) { return key + "diameter must be positive (m)"; }
     if (!(s.mass_per_length > 0.0)) { return key + "mass_per_length must be positive (kg/m)"; }
@@ -75,6 +119,21 @@ std::string ConductorInputs::validate_span (const SpanInputs& s)
     if (s.drag_coefficient < 0.0) { return key + "drag_coefficient must be >= 0"; }
     if (!(s.damping_ratio > 0.0 && s.damping_ratio <= 1.0)) { return key + "damping_ratio must be in (0, 1] (fraction of critical)"; }
     if (s.segments < 2) { return key + "segments must be >= 2"; }
+    if (s.insulator_length < 0.0) { return key + "insulator_length must be >= 0 (m; 0: the conductor is clamped at the towers)"; }
+    if (s.insulator_length > 0.0) {
+        if (s.towers.empty()) {
+            return key + "insulator_length needs towers: a line is dead-ended at end_a and end_b and hangs from "
+                         "insulator strings only at the towers between them";
+        }
+        if (!(s.insulator_mass > 0.0)) { return key + "insulator_mass must be positive (kg per string) with insulator_length"; }
+        if (!(s.insulator_diameter > 0.0)) { return key + "insulator_diameter must be positive (m)"; }
+        for (std::size_t t = 0; t < s.towers.size(); ++t) {
+            if (!(s.towers[t][2] > s.insulator_length)) {
+                return key + "insulator_length (" + std::to_string(s.insulator_length) + " m) must be less than the height of tower " +
+                       std::to_string(t + 1) + " above the terrain (" + std::to_string(s.towers[t][2]) + " m)";
+            }
+        }
+    }
     return std::string();
 }
 
@@ -94,10 +153,13 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
     if (in.stats_start < 0.0) { return "erf.conductors.stats_start must be >= 0 (s)"; }
     if (in.node_output_int < 0) { return "erf.conductors.node_output_int must be >= 0 (0: no node output)"; }
     if (!(in.epsilon > 0.0)) { return "erf.conductors.epsilon must be positive (cells)"; }
+    if (!(in.flashover_distance > 0.0)) { return "erf.conductors.flashover_distance must be positive (m)"; }
     for (const SpanInputs& s : in.spans) {
-        if (s.end_a[2] >= in.surface_offset || s.end_b[2] >= in.surface_offset) {
-            return "erf.conductors." + s.name + ": the attachment heights must stay below surface_offset (" +
-                   std::to_string(in.surface_offset) + " m), MoorDyn's free surface";
+        for (int k = 0; k <= s.num_spans(); ++k) {
+            if (s.point(k)[2] >= in.surface_offset) {
+                return "erf.conductors." + s.name + ": the attachment heights must stay below surface_offset (" +
+                       std::to_string(in.surface_offset) + " m), MoorDyn's free surface";
+            }
         }
     }
     return std::string();
@@ -139,6 +201,7 @@ ConductorInputs ConductorInputs::read ()
     pp.query("node_output_int", in.node_output_int);
     pp.query("drag_on_flow", in.drag_on_flow);
     pp.query("epsilon", in.epsilon);
+    pp.query("flashover_distance", in.flashover_distance);
     std::vector<Real> vel;
     if (pp.queryarr("prescribed_velocity", vel)) {
         if (vel.size() != 3) { Abort("erf.conductors.prescribed_velocity needs three components (m/s)"); }
@@ -157,13 +220,20 @@ ConductorInputs ConductorInputs::read ()
         ps.getarr("end_b", b);
         if (a.size() != 3 || b.size() != 3) { Abort("erf.conductors." + name + ".end_a and end_b need three components (m)"); }
         for (int d = 0; d < 3; ++d) { s.end_a[d] = a[d]; s.end_b[d] = b[d]; }
-        ps.get("length", s.length);
+        std::vector<Real> t;
+        ps.queryarr("towers", t);
+        if (t.size() % 3 != 0) { Abort("erf.conductors." + name + ".towers needs three components (m) per tower"); }
+        for (std::size_t i = 0; i < t.size(); i += 3) { s.towers.push_back({{t[i], t[i+1], t[i+2]}}); }
+        ps.getarr("length", s.lengths);
         ps.get("diameter", s.diameter);
         ps.get("mass_per_length", s.mass_per_length);
         ps.get("axial_stiffness", s.axial_stiffness);
         ps.query("drag_coefficient", s.drag_coefficient);
         ps.query("damping_ratio", s.damping_ratio);
         ps.query("segments", s.segments);
+        ps.query("insulator_length", s.insulator_length);
+        ps.query("insulator_mass", s.insulator_mass);
+        ps.query("insulator_diameter", s.insulator_diameter);
         s.output_root = in.diagnostics_dir + "/" + name;
         ps.query("output_root", s.output_root);
         const std::string err = validate_span(s);

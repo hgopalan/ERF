@@ -2333,8 +2333,11 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # put back into the flow. The bundled stub relaxes to the quasi-static angle while the real
   # MoorDyn swings about it, so each library has its own gold log (GOLD_LOG) and the stub and
   # real-library tests share the flow's gold plotfile (PLOT_GOLD_NAME) when nothing goes back into the
-  # flow. An optional last argument names the totals file whose source integral is checked.
+  # flow. TOTALS names the totals file whose source integral is checked; EXTRA_LOGS lists further
+  # logs (space separated), each compared with the gold of its file name followed by GOLD_SUFFIX
+  # (".gold" for the stub, ".moordyn.gold" for the real library).
   function(add_test_conductors TEST_NAME TEST_FILES_DIR PLTFILE LOG GOLD_LOG SIGDIGITS PLOT_GOLD_NAME)
+      cmake_parse_arguments(ATC "" "TOTALS;EXTRA_LOGS;GOLD_SUFFIX" "" ${ARGN})
       setup_test()
       set(PLOT_GOLD ${ERF_TEST_GOLD_FILES_DIRECTORY}/${PLOT_GOLD_NAME})
       resolve_test_exe("" "erf_exec" TEST_EXE)
@@ -2355,7 +2358,10 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
           "-DLOG=${LOG}"
           "-DGOLD=${CURRENT_TEST_SOURCE_DIR}/${GOLD_LOG}"
           "-DSIGDIGITS=${SIGDIGITS}"
-          "-DTOTALS=${ARGN}"
+          "-DTOTALS=${ATC_TOTALS}"
+          "-DEXTRA_LOGS=${ATC_EXTRA_LOGS}"
+          "-DGOLD_DIR=${CURRENT_TEST_SOURCE_DIR}"
+          "-DGOLD_SUFFIX=${ATC_GOLD_SUFFIX}"
           -P ${PROJECT_SOURCE_DIR}/Tests/RunConductors.cmake)
       set_tests_properties(${TEST_NAME}
           PROPERTIES
@@ -2374,15 +2380,35 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
                         "S1.dat.gold" 8 Conductors_FlowWind)
     # the lines' drag put back into the flow: the source must integrate to the force on the air
     add_test_conductors(Conductors_DragOnFlow Conductors_DragOnFlow "plt00010" "S1.dat"
-                        "S1.dat.gold" 8 Conductors_DragOnFlow "conductors/total_load.dat")
+                        "S1.dat.gold" 8 Conductors_DragOnFlow TOTALS "conductors/total_load.dat")
   else()
     # the same coupled case against the real MoorDyn-C: the span swings about the blowout angle;
     # compared to 6 digits, since the line integration is not bit-reproducible across compilers
     add_test_conductors(Conductors_FlowWind_MoorDyn Conductors_FlowWind "plt00010" "S1.dat"
                         "S1.dat.moordyn.gold" 6 Conductors_FlowWind)
     add_test_conductors(Conductors_DragOnFlow_MoorDyn Conductors_DragOnFlow "plt00010" "S1.dat"
-                        "S1.dat.moordyn.gold" 6 Conductors_DragOnFlow_MoorDyn "conductors/total_load.dat")
+                        "S1.dat.moordyn.gold" 6 Conductors_DragOnFlow_MoorDyn TOTALS "conductors/total_load.dat")
   endif()
+  # A circuit: three phases 6 m apart hanging from insulator strings over two suspension towers,
+  # and a shield wire clamped above them, across the same sheared crosswind. The middle phase's
+  # middle span, its strings and their statistics, the shield wire's middle span and the
+  # closest-approach statistics of two pairs must match their golds; the flow is Conductors_FlowWind's, since nothing goes back
+  # into it. Where along two parallel lines they come closest is decided by millimetres, so the
+  # location is left to the restart parity (one binary) and the unit tests, not to a gold.
+  set(_circuit_logs "P2_insulators.dat P2_insulators_stats.csv SW_span2.dat conductors/separation_P1-P2_stats.csv conductors/separation_P2-SW_stats.csv")
+  if(ERF_MOORDYN_USE_STUB)
+    add_test_conductors(Conductors_Circuit Conductors_Circuit "plt00010" "P2_span2.dat"
+                        "P2_span2.dat.gold" 8 Conductors_FlowWind EXTRA_LOGS "${_circuit_logs}" GOLD_SUFFIX ".gold")
+    set(_circuit_restart Conductors_Circuit_Restart)
+  else()
+    add_test_conductors(Conductors_Circuit_MoorDyn Conductors_Circuit "plt00010" "P2_span2.dat"
+                        "P2_span2.dat.moordyn.gold" 6 Conductors_FlowWind EXTRA_LOGS "${_circuit_logs}" GOLD_SUFFIX ".moordyn.gold")
+    set(_circuit_restart Conductors_Circuit_Restart_MoorDyn)
+  endif()
+  add_test_restart_parity(${_circuit_restart} Conductors_Circuit 5 10
+      DATALOG "P2_span2.dat P2_insulators.dat SW_span2.dat conductors/separation.dat conductors/separation_P1-P2_stats.csv P2_insulators_stats.csv"
+      DATALOG_SIGDIGITS 10)
+  set_tests_properties(${_circuit_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # Restart parity of the coupled case: ten steps straight, and five steps, a checkpoint and five
   # more from it. The plotfile (the flow and the lines' momentum source) and the span's logs, node
   # output, statistics and total load must come out the same; a line restarted from rest, or

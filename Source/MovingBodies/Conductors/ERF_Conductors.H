@@ -3,20 +3,24 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_REAL.H>
 
+#include "ERF_ConductorGeometry.H"
 #include "ERF_ConductorInputs.H"
 #include "ERF_ConductorSpan.H"
 #include "ERF_RunningStats.H"
 
 /**
- * The conductor spans of a run (erf.conductors.*): MoorDyn lines between fixed attachment
- * points, stepped in lockstep with ERF on their anchor level. ERF holds one of these and calls
- * set_ground() once the mesh exists, then advance() every step of the anchor level.
+ * The conductor lines of a run (erf.conductors.*): MoorDyn lines between fixed attachment points,
+ * single spans or sections over suspension towers, stepped in lockstep with ERF on their anchor
+ * level. ERF holds one of these and calls set_ground() once the mesh exists, then advance() every
+ * step of the anchor level. Besides each line's own diagnostics, every pair of lines is watched
+ * for how close their conductors come, against erf.conductors.flashover_distance.
  */
 class Conductors
 {
@@ -74,6 +78,10 @@ public:
     /** The integral of the momentum source over the anchor level (N), as last spread. */
     const std::array<amrex::Real,3>& source_integral () const { return m_source_integral; }
 
+    /** The pairs of lines watched for clashes (indices into spans()), and their last closest approach. */
+    const std::vector<std::pair<std::size_t,std::size_t>>& pairs () const { return m_pairs; }
+    const std::vector<erf_conductors::Closest>& separations () const { return m_sep; }
+
     int anchor_level () const { return m_anchor; }
     const ConductorInputs_t& inputs () const { return m_in; }
     const std::vector<std::unique_ptr<erf_conductors::ConductorSpan>>& spans () const { return m_spans; }
@@ -102,6 +110,16 @@ private:
 
     /** Read the state write_checkpoint() saved under dir, create the spans from it and trim the logs to its time. */
     void restore (const std::string& dir);
+    /** The running statistics of a line: one set per span, and one for its insulator strings. */
+    void add_stats (const erf_conductors::SpanInputs& s);
+    /** The pairs of lines and their statistics. */
+    void add_pair_stats ();
+    /** The closest approach of every pair of lines' conductors, where they are now. */
+    void measure_separation ();
+    /** Append a row of the pairs' closest approach to <diagnostics_dir>/separation.dat; header when first. */
+    void write_separation (double time, bool first) const;
+    /** The logs a restart continues. */
+    std::vector<std::string> log_files () const;
 
     ConductorInputs_t m_in;
     int m_anchor{0};
@@ -113,7 +131,10 @@ private:
     std::vector<erf_conductors::SpanInputs> m_placed;   //!< the spans with their ends at absolute heights
     std::vector<amrex::Real> m_ground;                  //!< per end (2 per span): the terrain height
     std::vector<std::unique_ptr<erf_conductors::ConductorSpan>> m_spans;
-    std::vector<erf_actuator::RunningStats> m_stats;     //!< per span, from stats_start
+    std::vector<std::vector<erf_actuator::RunningStats>> m_stats;   //!< per line: per span, then the strings', from stats_start
+    std::vector<std::pair<std::size_t,std::size_t>> m_pairs;        //!< the pairs of lines watched for clashes
+    std::vector<erf_actuator::RunningStats> m_pair_stats;           //!< per pair: the closest approach and the clash flag
+    std::vector<erf_conductors::Closest> m_sep;                     //!< per pair: the last closest approach
     bool m_src_defined{false};
     amrex::MultiFab m_src_x, m_src_y, m_src_z;           //!< the lines' momentum sources on the anchor level
     std::array<amrex::Real,3> m_source_integral{{0.0, 0.0, 0.0}};
