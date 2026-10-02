@@ -61,12 +61,13 @@ and has the geometry, ordering and data flow of the real interface but no
 line dynamics: each line hangs as an elastic parabola, as long as its
 unstretched length stretched by its tension (slack or taut), swings to the
 quasi-static blowout angle of the wind it is given with a one-second lag,
-and carries that tension along its tangent. A free point hangs from
-the shortest line that ties it to a fixed point (an insulator string from its
-tower), in the direction the other line attached to it swung at its last
-placement, and that line runs straight down to it. Its saved state holds
+and carries that tension along its tangent. A coupled point moves as MoorDyn
+moves it. A free point hangs from the shortest line that ties it to a fixed or
+coupled point (an insulator string from its tower), in the direction the other
+line attached to it swung at its last placement, and that line runs straight
+down to it. Its saved state holds
 each line's swing angle, the last wind it was given, which sets the direction
-of the swing, and where the free points hang, so a restored line is where
+of the swing, and where the free and coupled points are, so a restored line is where
 the saved one was. The
 unit tests and the ``Linux GCC MoorDyn`` CI workflow runs them on it in one
 job; a second job installs MoorDyn-C 2.7.1 with ``Build/setup_moordyn.sh``
@@ -106,7 +107,12 @@ MoorDyn reports the net force of the points it integrates (free and coupled
 points) only; a fixed attachment reports zero, and its pull is the net force
 MoorDyn finds on the end node of each line attached to it
 (``MoorDyn_GetLineNodeForce``): the end segment's tension with the node's
-share of the weight and the drag, which the fixed point holds still.
+share of the weight and the drag, which the fixed point holds still. A
+coupled point is one the caller moves: each ``MoorDyn_Step`` takes its
+position at the start of the step and a velocity, moves it linearly over the
+step, and returns the net force of the attached lines' end nodes on it, the
+same sum (without the end nodes' inertia). Moving towers use this: their
+cross-arms are coupled points (:ref:`sec:Conductors`).
 
 Two properties of MoorDyn's input matter for lines in air:
 

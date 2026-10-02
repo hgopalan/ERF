@@ -33,10 +33,12 @@ public:
      * Create the line: writes <input_file>, creates the MoorDyn system and solves its initial
      * shape. The attachment points are at their absolute heights (the terrain already added).
      * With a saved state (a file written by save()) the initial-shape solve is skipped and the
-     * line continues from that state instead.
+     * line continues from that state instead. When the line's towers move, their cross-arms are
+     * MoorDyn's coupled points, displaced from where they stand unloaded by tower_displacement (3 per
+     * tower, ERF's frame; empty: not displaced).
      */
     ConductorSpan (const SpanInputs& s, const ConductorInputs& in, amrex::Real gravity, const std::string& input_file,
-                   const std::string& saved_state = "");
+                   const std::string& saved_state = "", const std::vector<amrex::Real>& tower_displacement = {});
 
     const std::string& name () const { return m_in.name; }
     const SpanInputs& inputs () const { return m_in; }
@@ -60,8 +62,21 @@ public:
     void set_wind (const std::vector<amrex::Real>& uvw, double t);
     /** The wind last handed to MoorDyn at a kinematics point (the nodes come first); zero before the first. */
     std::array<amrex::Real,3> wind_at_point (unsigned point) const;
-    /** Advance the line by dt from time, in the configured number of MoorDyn calls. */
+    /** Advance the line by dt from time, in the configured number of MoorDyn calls, the towers held where they are. */
     void step (double time, double dt);
+    /** Whether the towers' cross-arms are MoorDyn's coupled points, which the caller moves (the towers move). */
+    bool towers_move () const { return m_coupled; }
+    /**
+     * Advance the line by dt from time in one MoorDyn call, moving the towers' cross-arms: each starts
+     * displaced by displacement (3 per tower, ERF's frame, from where it stands unloaded) and moves at
+     * velocity (3 per tower) over the step. Only for a line whose towers move.
+     */
+    void step_coupled (double time, double dt, const std::vector<amrex::Real>& displacement,
+                       const std::vector<amrex::Real>& velocity);
+    /** The force MoorDyn's last step left on tower j+1's coupled point (N): the lines' pull on the cross-arm there. */
+    std::array<amrex::Real,3> coupled_force (int j) const;
+    /** Abort, naming the line, unless MoorDyn's clock after its last step plus the clock offset reads time. */
+    void check_clock (double time) const;
     /**
      * ERF's time when MoorDyn's clock read zero: zero for lines created at the start of a run,
      * the restart time for lines first created on a restart. step() requires MoorDyn's clock plus
@@ -151,10 +166,13 @@ private:
     amrex::Real m_offset{0.0};   //!< the surface offset (m)
     int m_substeps{1};
     double m_t0{0.0};            //!< ERF's time at MoorDyn's time zero
+    double m_clock{0.0};         //!< MoorDyn's clock after its last step
     std::string m_file;
     std::unique_ptr<erf_moordyn::MoorDynSystem> m_sys;
     std::vector<unsigned> m_first;     //!< the first node of each MoorDyn line, and the total after the last
     unsigned m_nkin{0};
+    bool m_coupled{false};             //!< the towers' cross-arms are MoorDyn's coupled points
+    std::vector<double> m_x, m_f;      //!< the coupled points where the last step left them (MoorDyn's frame) and their forces
     std::vector<amrex::Real> m_wind;   //!< 3*m_nkin, the wind last handed to MoorDyn
     std::vector<amrex::Real> m_ground; //!< the terrain height under each node
 };

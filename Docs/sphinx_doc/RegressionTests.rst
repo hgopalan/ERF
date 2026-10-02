@@ -818,6 +818,19 @@ step in (6.5e-4 degrees) moves in the fifth digit with it; the restart parity te
 against five, a checkpoint and five more. The flow has its own gold, shared
 by both libraries.
 
+``Conductors_MovingTowers`` (stub) and ``Conductors_MovingTowers_MoorDyn``
+(real library) run the same lines on towers that bend: each sways in its
+first mode, 2 Hz on a rigid foundation lowered to 1.67 Hz by footings that
+tilt, under its members' drag and its line's pull, and MoorDyn moves the
+cross-arms the lines hang from as coupled points. ``conductors/towers.dat``
+with every tower's loads and cross-arm displacement, the statistics of the
+hilltop line's first tower and the middle span of one line are compared with
+golds of each library (the real library's to four digits, as above); the
+restart parity tests ``Conductors_MovingTowers_Restart`` and
+``Conductors_MovingTowers_Restart_MoorDyn`` carry the towers' sway across
+the checkpoint. The flow is ``Conductors_Terrain``'s gold, since nothing
+goes back into it.
+
 The golds of the real library come from another machine than the one that
 runs them, so ``RunConductors.cmake`` counts a logged value below 1e-4 as
 zero: a quantity zero by symmetry, such as the drag along a span set square
@@ -830,7 +843,7 @@ runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with
 
 Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files/Conductors_FlowWind`_,
 `Tests/test_files/Conductors_DragOnFlow`_, `Tests/test_files/Conductors_Circuit`_,
-`Tests/test_files/Conductors_Terrain`_
+`Tests/test_files/Conductors_Terrain`_, `Tests/test_files/Conductors_MovingTowers`_
 
 .. _`Tests/test_files/Conductors_PrescribedWind`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_PrescribedWind
 
@@ -841,3 +854,5 @@ Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files
 .. _`Tests/test_files/Conductors_Circuit`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_Circuit
 
 .. _`Tests/test_files/Conductors_Terrain`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_Terrain
+
+.. _`Tests/test_files/Conductors_MovingTowers`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_MovingTowers

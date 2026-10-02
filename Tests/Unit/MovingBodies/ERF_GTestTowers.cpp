@@ -115,6 +115,18 @@ TEST(TowerType, EveryValueOutsideItsRangeIsRefusedByName)
     bad([](TowerType& t) { t.leg_spacing = -1.0; }, "leg_spacing");
     bad([](TowerType& t) { t.allowable_uplift = -1.0; }, "allowable_uplift");
     bad([](TowerType& t) { t.allowable_compression = -1.0; }, "allowable_compression");
+    bad([](TowerType& t) { t.frequency = -1.0; }, "frequency");
+    bad([](TowerType& t) { t.frequency = 2.0; t.weight = 0.0; }, "frequency");
+    bad([](TowerType& t) { t.damping_ratio = -0.1; }, "damping_ratio");
+    bad([](TowerType& t) { t.damping_ratio = 1.0; }, "damping_ratio");
+    bad([](TowerType& t) { t.foundation_rotational_stiffness = -1.0; }, "foundation_rotational_stiffness");
+    bad([](TowerType& t) { t.foundation_lateral_stiffness = -1.0; }, "foundation_lateral_stiffness");
+    TowerType moving = lattice();
+    moving.frequency = 2.0;
+    moving.weight = 9.0e4;
+    EXPECT_TRUE(moving.validate().empty()) << moving.validate();
+    EXPECT_TRUE(moving.moves());
+    EXPECT_FALSE(lattice().moves()) << "a tower stands still unless it has a frequency";
     TowerType d = lattice();
     d.arm_depth = 0.0;
     EXPECT_EQ(d.arm_face(), d.top_width) << "the arm's face defaults to the top width";

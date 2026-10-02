@@ -201,6 +201,15 @@ struct ConductorInputs
     amrex::Real epsilon{2.0};
     amrex::Real flashover_distance{1.0};
 
+    /** The tower type of a line's towers, or null when they have none. */
+    const erf_towers::TowerType* tower_type (const SpanInputs& s) const;
+    /** Whether a line's towers move (their type has a frequency): MoorDyn then takes their cross-arms as coupled points. */
+    bool towers_move (const SpanInputs& s) const
+    {
+        const erf_towers::TowerType* t = tower_type(s);
+        return t != nullptr && t->moves();
+    }
+
     /** Read erf.conductors.*; aborts with the offending key on a bad value. */
     static ConductorInputs read ();
 

@@ -167,6 +167,9 @@ def main():
                     help="lattice towers: base width, top width, solidity, cross-arm length and depth (m)")
     ap.add_argument("--tower_foundation", type=float, nargs=3, default=[6.0e4, 5.0e4, 1.5e5],
                     help="a tower's weight, and a footing's allowable uplift and compression (N)")
+    ap.add_argument("--tower_sway", type=float, nargs=3, default=[2.0, 0.02, 1.0e9],
+                    help="the towers' first bending frequency on a rigid foundation (Hz; 0: rigid towers), its "
+                         "damping ratio and the footings' rotational stiffness (N m/rad; 0: rigid)")
     ap.add_argument("--max_span", type=float, default=280.0)
     ap.add_argument("--stringing_tension", type=float, default=2.0e4, help="still-air horizontal tension every span is strung to (N)")
     ap.add_argument("--min_clearance", type=float, default=8.0)
@@ -240,7 +243,15 @@ def main():
         tw, au, ac = a.tower_foundation
         f.write(f"erf.conductors.lattice.weight     = {tw:g}\n")
         f.write(f"erf.conductors.lattice.allowable_uplift      = {au:g}\n")
-        f.write(f"erf.conductors.lattice.allowable_compression = {ac:g}\n\n")
+        f.write(f"erf.conductors.lattice.allowable_compression = {ac:g}\n")
+        fr, zr, kr = a.tower_sway
+        if fr > 0.0:
+            f.write("# they bend in their first mode, on footings that tilt; MoorDyn moves the cross-arms\n")
+            f.write(f"erf.conductors.lattice.frequency     = {fr:g}\n")
+            f.write(f"erf.conductors.lattice.damping_ratio = {zr:g}\n")
+            if kr > 0.0:
+                f.write(f"erf.conductors.lattice.foundation_rotational_stiffness = {kr:g}\n")
+        f.write("\n")
         for nm, p in zip(names, pts):
             f.write(f"# {nm}: on {'a hilltop' if p[2] == 'hill' else 'flat ground'}, ground at {height(hills, p[0], p[1]):.1f} m\n")
             f.write(f"erf.conductors.{nm}.position         = {p[0]:.2f} {p[1]:.2f}\n")

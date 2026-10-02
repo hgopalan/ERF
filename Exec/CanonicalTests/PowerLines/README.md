@@ -5,7 +5,9 @@ transformers that stand on hilltops and on flat ground. The flow is the k-equati
 a terrain-following mesh with the implicit anelastic MidPoint scheme and the FFT pressure solve;
 a log law under a capping inversion comes in through the x-low face and leaves through the x-high
 one. Each line is a section on insulator strings over lattice suspension towers, strung to one
-horizontal tension; the towers carry the wind's drag on their members; the transformers take the lines' pull and are checked against an allowable horizontal
+horizontal tension; the towers carry the wind's drag on their members and the lines' pull, their
+footings are checked for uplift and compression, and they bend under those loads in their first
+mode, MoorDyn moving the cross-arms the lines hang from; the transformers take the lines' pull and are checked against an allowable horizontal
 force and overturning moment, and every conductor is watched for how close it comes to each box.
 See the "Conductor lines in the wind" section of the theory documentation.
 
@@ -15,7 +17,8 @@ See the "Conductor lines in the wind" section of the theory documentation.
   (`inflow_profile`, `input_sounding`) and the network (`network.inputs`) from one seed:
   `python3 make_case.py --seed 2026` gives the committed files. Its options set the domain, the
   hills, the number of transformers and how many stand on hilltops, the conductor's stringing
-  tension, the towers' height, spacing and lattice, and the inflow speed.
+  tension, the towers' height, spacing, lattice, foundation and sway (`--tower_sway 0 0 0` for rigid
+  towers), and the inflow speed.
 - `flow.inputs` holds the flow, shared by the two stages.
 - `inputs_spinup` runs the flow alone for 600 s to a checkpoint.
 - `inputs_lines` restarts from it with the lines (the checkpoint holds no conductor state, so the
@@ -31,7 +34,7 @@ Build with `-DERF_ENABLE_MOORDYN=ON` against MoorDyn-C (`Build/setup_moordyn.sh`
 
 The mesh has 1.2 million cells. The lines write their logs under `conductors/`: a log per span
 and per set of strings, `transformers.dat` with every transformer's load, flags and clearance,
-`towers.dat` with every tower's drag and base moment,
+`towers.dat` with every tower's drag, line pull, foundation loads and cross-arm displacement,
 `separation.dat` with the closest approach of every pair of lines, `ground.dat` with where every
 attachment and transformer stands, and the running statistics of all of them from
 `stats_start` on.

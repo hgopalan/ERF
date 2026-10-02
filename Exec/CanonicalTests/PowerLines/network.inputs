@@ -16,6 +16,10 @@ erf.conductors.lattice.arm_depth  = 1.2
 erf.conductors.lattice.weight     = 60000
 erf.conductors.lattice.allowable_uplift      = 50000
 erf.conductors.lattice.allowable_compression = 150000
+# they bend in their first mode, on footings that tilt; MoorDyn moves the cross-arms
+erf.conductors.lattice.frequency     = 2
+erf.conductors.lattice.damping_ratio = 0.02
+erf.conductors.lattice.foundation_rotational_stiffness = 1e+09
 
 # T1: on a hilltop, ground at 87.5 m
 erf.conductors.T1.position         = 1085.62 1156.95

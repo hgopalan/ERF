@@ -16,9 +16,10 @@
 #include "ERF_RunningStats.H"
 #include "ERF_Transformer.H"
 #include "ERF_Tower.H"
+#include "ERF_TowerDynamics.H"
 
 /**
- * The conductor lines of a run (erf.conductors.*): MoorDyn lines between fixed attachment points,
+ * The conductor lines of a run (erf.conductors.*): MoorDyn lines between attachment points,
  * single spans or sections over suspension towers, stepped in lockstep with ERF on their anchor
  * level. ERF holds one of these and calls set_ground() once the mesh exists, then advance() every
  * step of the anchor level. Besides each line's own diagnostics, every pair of lines is watched
@@ -26,7 +27,9 @@
  * transformer the lines end on for the load they put on it and how close any conductor comes to it.
  * The suspension towers of a line with a tower_type are lattice towers loaded by the wind (the
  * drag on their members, from the flow sampled at the members' nodes each step) and by the line
- * hanging from them; their foundations are checked for leg uplift and compression.
+ * hanging from them; their foundations are checked for leg uplift and compression. Towers whose type
+ * has a frequency bend under those loads (a one-mode tower model each): MoorDyn then takes their
+ * cross-arms as coupled points that ERF moves, and hands back the lines' pull on them.
  */
 class Conductors
 {
@@ -93,6 +96,14 @@ public:
     const std::vector<erf_conductors::Closest>& transformer_clearances () const { return m_tclear; }
     /** The lattice towers of the lines with a tower_type, with the wind's last load on their members. */
     const std::vector<erf_towers::Tower>& towers () const { return m_towers; }
+    /** Each tower's structural model, null for a tower that stands still. */
+    const std::vector<std::unique_ptr<erf_towers::TowerModel>>& tower_models () const { return m_models; }
+    /**
+     * The coupling steps a line whose towers move takes over each period of its fastest tower, at
+     * least: in each, its towers advance under the lines' pull from the end of the one before, then
+     * MoorDyn moves their cross-arms from where they were to where they are now.
+     */
+    static constexpr int coupling_steps_per_period = 20;
 
     int anchor_level () const { return m_anchor; }
     const ConductorInputs_t& inputs () const { return m_in; }
@@ -148,8 +159,17 @@ private:
     /** The wind at every tower node (3 per node, the towers in order): the flow sampled there, or the prescribed velocity. */
     std::vector<amrex::Real> tower_wind (const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
                                          const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
-    /** The members' drag from the wind at their nodes, handed to each tower, with the lines' pull. */
+    /** The members' drag from the wind at their nodes (held for the step) and their motion, handed to each tower, with the lines' pull. */
     void load_towers (const std::vector<amrex::Real>& wind);
+    /** The members' drag on tower t from the wind held for the step, at the nodes' current velocities. */
+    void drag_on_tower (std::size_t t);
+    /** Hand tower t its model's motion. */
+    void move_tower (std::size_t t);
+    /**
+     * Advance a line whose towers move by dt from time, in coupling steps: each tower advances under
+     * its members' drag and the lines' pull, then MoorDyn moves its cross-arms there.
+     */
+    void step_moving_line (std::size_t line, double time, double dt);
     /** Hand each tower the pull of its line where it hangs from the tower, as the line is now. */
     void load_towers_with_lines ();
     /** Append a row of the towers' drag and base moment to <diagnostics_dir>/towers.dat; header when first. */
@@ -177,6 +197,9 @@ private:
     std::vector<erf_actuator::RunningStats> m_tstats;               //!< per transformer: its load and clearance
     std::vector<erf_towers::Tower> m_towers;                        //!< the lines' lattice towers, line by line
     std::vector<std::pair<std::size_t,int>> m_tower_of;             //!< per tower: its line and its index on it (from 0)
+    std::vector<std::size_t> m_first_tower;                         //!< per line: the index of its first tower
+    std::vector<std::unique_ptr<erf_towers::TowerModel>> m_models;  //!< per tower: its structural model, null when it stands still
+    std::vector<std::vector<amrex::Real>> m_tower_wind;             //!< per tower: the wind at its nodes, held for the step
     std::unique_ptr<erf_towers::MemberAero> m_aero;                 //!< the members' aerodynamics
     std::vector<erf_actuator::RunningStats> m_tower_stats;          //!< per tower: its drag and base moment
     bool m_src_defined{false};

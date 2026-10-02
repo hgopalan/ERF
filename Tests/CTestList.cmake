@@ -2430,6 +2430,25 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
       DATALOG "conductors/L1_span2.dat conductors/transformers.dat conductors/transformer_T1_stats.csv conductors/towers.dat"
       DATALOG_SIGDIGITS 10)
   set_tests_properties(${_terrain_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
+  # The same lines on towers that bend: each tower sways in its first mode under its members' drag
+  # and its line's pull, and MoorDyn moves the cross-arms as coupled points. The towers' loads and
+  # cross-arm displacements, the statistics of the hilltop line's first tower and the middle span of
+  # L1 must match their golds; the flow is Conductors_Terrain's, since nothing goes back into it. The
+  # restart parity carries the towers' sway across the checkpoint.
+  set(_moving_logs "conductors/towers.dat conductors/tower_L1_t1_stats.csv")
+  if(ERF_MOORDYN_USE_STUB)
+    add_test_conductors(Conductors_MovingTowers Conductors_MovingTowers "plt00010" "conductors/L1_span2.dat"
+                        "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_moving_logs}" GOLD_SUFFIX ".gold")
+    set(_moving_restart Conductors_MovingTowers_Restart)
+  else()
+    add_test_conductors(Conductors_MovingTowers_MoorDyn Conductors_MovingTowers "plt00010" "conductors/L1_span2.dat"
+                        "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_moving_logs}" GOLD_SUFFIX ".moordyn.gold")
+    set(_moving_restart Conductors_MovingTowers_Restart_MoorDyn)
+  endif()
+  add_test_restart_parity(${_moving_restart} Conductors_MovingTowers 5 10
+      DATALOG "conductors/L1_span2.dat conductors/towers.dat conductors/tower_L1_t1_stats.csv"
+      DATALOG_SIGDIGITS 10)
+  set_tests_properties(${_moving_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # Restart parity of the coupled case: ten steps straight, and five steps, a checkpoint and five
   # more from it. The plotfile (the flow and the lines' momentum source) and the span's logs, node
   # output, statistics and total load must come out the same; a line restarted from rest, or

@@ -38,9 +38,12 @@ std::string moordyn_input_text (const SpanInputs& s, const ConductorInputs& in, 
     out << "---------------------- POINT PROPERTIES --------------------------------\n"
         << "ID    Type      X       Y       Z       Mass   Volume  CdA    Ca\n"
         << "(#)   (-)       (m)     (m)     (m)     (kg)   (m^3)   (m^2)  (-)\n";
+    // the towers' cross-arms are coupled points when the towers move: ERF drives them and takes their pull
+    const bool moving = in.towers_move(s);
     for (int k = 0; k <= N; ++k) {
         const auto& p = s.point(k);
-        out << k + 1 << "     Fixed     " << p[0] << "   " << p[1] << "   " << p[2] - in.surface_offset << "   0   0   0   0\n";
+        const char* type = (moving && k > 0 && k < N) ? "Coupled" : "Fixed  ";
+        out << k + 1 << "     " << type << "   " << p[0] << "   " << p[1] << "   " << p[2] - in.surface_offset << "   0   0   0   0\n";
     }
     if (strings) {
         for (int k = 1; k < N; ++k) {

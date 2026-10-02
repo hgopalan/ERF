@@ -400,6 +400,7 @@ function(build_erf_lib erf_lib_name)
         ${SRC_DIR}/MovingBodies/Towers/ERF_MemberDrag.cpp
         ${SRC_DIR}/MovingBodies/Towers/ERF_TowerInputs.cpp
         ${SRC_DIR}/MovingBodies/Towers/ERF_Tower.cpp
+        ${SRC_DIR}/MovingBodies/Towers/ERF_TowerDynamics.cpp
       )
       target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${SRC_DIR}/MovingBodies/MoorDyn>)
       target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${SRC_DIR}/MovingBodies/Conductors>)

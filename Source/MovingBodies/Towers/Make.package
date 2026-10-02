@@ -4,3 +4,5 @@ CEXE_headers += ERF_Tower.H
 CEXE_sources += ERF_MemberDrag.cpp
 CEXE_sources += ERF_TowerInputs.cpp
 CEXE_sources += ERF_Tower.cpp
+CEXE_headers += ERF_TowerDynamics.H
+CEXE_sources += ERF_TowerDynamics.cpp

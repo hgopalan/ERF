@@ -345,9 +345,9 @@ lattice body tapering linearly from ``base_width`` at the ground to
 width), and a lattice cross-arm of ``arm_length`` and face depth
 ``arm_depth`` centred on the body at the height the conductor hangs from,
 across the line (normal to the mean horizontal direction of the spans either
-side). The towers are rigid; they carry the wind's drag on their members and
-the pull of the line hanging from them, and stand on a foundation of four
-footings.
+side). The towers carry the wind's drag on their members and the pull of the
+line hanging from them, and stand on a foundation of four footings; they are
+rigid unless their type has a ``frequency`` (see `Moving towers`_).
 
 Each member is cut into drag nodes at the middle of equal segments
 (``segments`` up the body, four along the arm). A node stands for a length
@@ -438,6 +438,96 @@ drops to the string's bottom, and the lower end takes less of its weight. On the
 carries 25.6 kN, against 25.1 kN from :math:`q C_f \phi` times its face at
 that speed.
 
+Moving towers
+-------------
+
+A tower type with a ``frequency`` (Hz, its first bending frequency on a rigid
+foundation) bends under its loads, and its line hangs from a cross-arm that
+moves: MoorDyn takes the cross-arms as coupled points, which ERF moves and on
+which MoorDyn hands back the line's pull, the way OpenFAST couples MoorDyn to
+a platform. The tower is a single mode, the same in :math:`x` and :math:`y`
+(a square tower), on a foundation that can tilt and slide
+(``foundation_rotational_stiffness`` :math:`k_r` in N m/rad and
+``foundation_lateral_stiffness`` :math:`k_l` in N/m, rigid when 0, the
+default), with the structural ``damping_ratio`` :math:`\zeta` (0.02 by
+default). Its mass, ``weight`` over gravity, is spread over the drag nodes by
+the length of member each stands for. A node at height :math:`z` above the
+base moves horizontally by :math:`\varphi(z)` times the cross-arm's
+displacement :math:`q`,
+
+.. math::
+
+   \varphi(z) = a_b \left(\frac{z}{H}\right)^2 + a_r \frac{z}{H} + a_l ,
+   \qquad a_b = \frac{1/K_b}{c},\; a_r = \frac{H^2/k_r}{c},\; a_l = \frac{1/k_l}{c},\;
+   c = \frac{1}{K_b} + \frac{H^2}{k_r} + \frac{1}{k_l} ,
+
+the cantilever's bending, the footing's tilt and its slide, each in
+proportion to its compliance under a load at the cross-arm (height
+:math:`H`). The generalized mass is :math:`M = \sum m_i \varphi_i^2` and the
+stiffness :math:`K = 1/c`, the strain energy of that shape exactly, with the
+bending stiffness :math:`K_b = (2\pi f)^2 \sum m_i (z_i/H)^4` that gives the
+type's frequency :math:`f` on a rigid foundation; a foundation that gives
+lowers the frequency to :math:`\sqrt{K/M}/2\pi`. In each horizontal direction
+
+.. math::
+
+   M \ddot q + 2 \zeta \omega M \dot q + K q = Q ,
+   \qquad Q = \sum_i \varphi_i F_i + F_{\rm line} ,
+   \qquad \omega^2 = K/M ,
+
+with :math:`F_i` the members' drag and :math:`F_{\rm line}` the line's pull
+at the cross-arm (:math:`\varphi = 1`). A load held over a step is
+integrated exactly, so any step is stable. The tower does not twist, rise or
+sink, and its weight does not add to the overturning as it leans
+(:math:`P`-:math:`\Delta`).
+
+A line whose towers move steps in coupling steps, at least
+``substeps`` and at least 20 over the period of its fastest tower. In each, every
+tower advances first, under its members' drag and the line's pull from the
+end of MoorDyn's last call; then MoorDyn moves the cross-arms from where they
+were to where the towers have taken them, at a constant velocity over the
+call (MoorDyn moves a coupled point linearly), and hands back their pull. The
+members' drag is found again in every coupling step from the wind of the ERF
+step and the members' current velocity, so the wind damps the sway: a
+member moving with the wind feels less of it. The foundation takes the loads
+less the inertia of the nodes (each node's mass times its acceleration), so
+a tower swaying freely still loads its footings. MoorDyn's pull on a coupled
+point leaves out the inertia of the line's end node, a few kilograms against
+the tower's tonnes.
+
+``towers.dat`` gets the cross-arm's displacement ``arm_dx`` and ``arm_dy``
+for each moving tower, and its statistics the size of that displacement,
+``arm_displacement``. The start-up log prints each moving tower's frequency
+on its foundation, generalized mass and stiffness. A tower starts upright and
+at rest, so a run that starts in a wind rings down from the sudden load, over
+about :math:`1/(\zeta\omega)`: 4 s at 2 Hz and 2 %. A checkpoint carries each
+tower's sway, and the line restarts with its cross-arms where the towers had
+taken them. The tower model sits behind a narrow interface (the node loads
+and the line's pull in, the motion of every node and of the cross-arm and the
+nodes' inertia out), so a frame model of the lattice can stand in its place.
+
+Verification (unit tests ``OneModeTower``, ``ConductorSpan``,
+``Conductors``): a load held over a step is integrated exactly however the
+time is cut, and a step of a thousand periods lands on the static
+deflection; released, the tower rings down with the damped period to
+:math:`10^{-4}` and the logarithmic decrement of its damping ratio to
+:math:`10^{-3}`; a load :math:`F` at the cross-arm deflects it by :math:`Fc`
+with the foundation's compliances in series, and a load spread up the body
+by the hand value of the midpoint sum of :math:`p (z/H)^2`; swaying freely,
+its base shear is :math:`\omega^2 q \sum m_i \varphi_i`. Swaying in a steady
+20 m/s wind, a 30 m tower at 2 Hz with 0.5 % structural damping rings down at
+0.9047 % against the 0.5 % plus the 0.4047 % of the linearised relative drag,
+:math:`\sum \varphi_i^2 \rho C_f w_i L_i U / (2 M \omega)`. Against both
+MoorDyn libraries, the pull MoorDyn hands back on a coupled point is the one
+the tower is reported to carry, a coupled step moves the cross-arm by its
+velocity times the step, and a coupled point held still is a fixed one to
+:math:`10^{-9}` m. In a 10 m/s crosswind the towers of a clamped section
+settle 2.6 mm downwind, where their stiffness balances the 4023 N of drag on
+the body (weighted by the shape) and the line's pull of 672 N; that pull is
+within 2 % of the rigid towers'. On the moving-towers test case the towers
+bend at 1.67 Hz (2 Hz lowered by footings of :math:`10^9` N m/rad) and the
+hilltop tower leans about 3 cm in its 25 m/s wind.
+
 A network over hills
 --------------------
 
@@ -460,7 +550,11 @@ hilltops and 6.9 to 9.6 kN below them, the speed-up over the hills raising
 the drag about two and a half times. With the line's pull and a 60 kN tower
 weight on 6 m footings, only the hilltop towers lift a footing, by 11 to
 16 kN (the allowable is 50 kN), their worst legs carrying about 51 kN in
-compression against 29 to 33 kN below the hills. With a steady RANS wind the
+compression against 29 to 33 kN below the hills. The towers bend, at 1.67 Hz
+(2 Hz on footings of :math:`10^9` N m/rad): the hilltop ones settle leaning
+23 to 25 mm downwind, the others 10 to 13 mm; the sudden start overshoots to
+30 mm and briefly lifts the hilltop footings by up to 23 kN, the sway's
+inertia included. With a steady RANS wind the
 lines hold a steady blowout; their gust response needs a turbulent inflow.
 
 Restart
@@ -469,8 +563,8 @@ Restart
 A checkpoint carries the lines under ``<chk>/conductors``: each line's whole
 MoorDyn state (node and free-point positions and velocities, internal forces
 and the time integrator's state, through MoorDyn's own save), the running
-statistics of every span, string set, pair of lines, transformer and tower, the step count and
-the time. On a restart the line is created from the same
+statistics of every span, string set, pair of lines, transformer and tower,
+each moving tower's sway, the step count and the time. On a restart the line is created from the same
 inputs, initialised without the initial-shape solve and given that state, so
 it continues blown out exactly where the checkpoint left it, on MoorDyn's
 clock; the statistics go on accumulating, and the diagnostics continue on the
