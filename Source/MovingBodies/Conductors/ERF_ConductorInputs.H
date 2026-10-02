@@ -7,6 +7,8 @@
 
 #include <AMReX_REAL.H>
 
+#include "ERF_TowerInputs.H"
+
 namespace erf_conductors {
 
 /**
@@ -33,6 +35,8 @@ namespace erf_conductors {
  *   erf.conductors.S1.insulator_mass = 60.             (kg per string; needed with insulator_length)
  *   erf.conductors.S1.insulator_diameter = 0.254       (m, the disc diameter the wind acts on; default 0.254)
  *   erf.conductors.S1.output_root   = conductors/S1    (prefix of the line's diagnostics files)
+ *   erf.conductors.S1.tower_type    = lattice          (the suspension towers are lattice towers of this type,
+ *                                                       loaded by the wind; default none: points only)
  */
 struct SpanInputs
 {
@@ -52,6 +56,7 @@ struct SpanInputs
     amrex::Real insulator_mass{0.0};
     amrex::Real insulator_diameter{0.254};
     std::string output_root;
+    std::string tower_type;                          //!< the type of the suspension towers; empty: none
 
     /** Segments of each insulator string. */
     static constexpr int insulator_segments = 2;
@@ -165,12 +170,14 @@ Catenary elastic_catenary (amrex::Real chord, amrex::Real length, amrex::Real we
  *   erf.conductors.epsilon          = 2.0          (width of the Gaussian that spreads the drag, in cells)
  *   erf.conductors.flashover_distance = 1.0        (m; two lines closer than this are flagged as clashing)
  *   erf.conductors.transformers     = T1 T2        (boxes on the terrain the lines end on, each with its own block; default none)
+ *   erf.conductors.tower_types      = lattice      (lattice tower types the lines' towers can be, each with its own block; default none)
  */
 struct ConductorInputs
 {
     bool active{false};
     std::vector<SpanInputs> spans;
     std::vector<TransformerInputs> transformers;
+    std::vector<erf_towers::TowerType> tower_types;
     std::string diagnostics_dir{"conductors"};
     int diagnostics_int{1};
     int anchor_level{-1};
@@ -211,6 +218,8 @@ struct ConductorInputs
      * terrain wherever the ground under the two ends differs.
      */
     static std::string validate_slack (const SpanInputs& s, bool on_terrain = false);
+    /** Whether a line's tower_type names one of the tower types and the line has towers: an empty string, else the message. */
+    static std::string validate_tower_type (const SpanInputs& s, const std::vector<erf_towers::TowerType>& types);
     /** The range checks of one transformer: an empty string when it is acceptable, else the message to abort with. */
     static std::string validate_transformer (const TransformerInputs& t);
     /** The range checks of the shared settings: an empty string when acceptable, else the message. */

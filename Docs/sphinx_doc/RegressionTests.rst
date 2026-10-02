@@ -806,10 +806,13 @@ hilltop and two on flat ground (made with
 neutral boundary layer, a log law under a capping inversion, enters through
 the x-low face over the terrain-following mesh with the k-equation RANS
 closure and the surface layer, and leaves through the x-high one. Each line
-is a section on insulator strings, strung to 20 kN. The middle span of one
-line, ``conductors/transformers.dat`` with every transformer's load and
-clearance, and the hilltop transformer's statistics are compared with golds
-of each library; the restart parity tests ``Conductors_Terrain_Restart`` and
+is a section on insulator strings hanging from lattice towers, strung to
+20 kN. The middle span of one line, ``conductors/transformers.dat`` with
+every transformer's load and clearance, the hilltop transformer's
+statistics and ``conductors/towers.dat`` with every tower's drag are
+compared with golds of each library, the real library's to four digits: the
+terrain flow differs between compilers at roundoff, and a span's swing one
+step in (6.5e-4 degrees) moves in the fifth digit with it; the restart parity tests ``Conductors_Terrain_Restart`` and
 ``Conductors_Terrain_Restart_MoorDyn`` check the same logs ten steps straight
 against five, a checkpoint and five more. The flow has its own gold, shared
 by both libraries.

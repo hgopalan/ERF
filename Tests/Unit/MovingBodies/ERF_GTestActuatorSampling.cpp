@@ -285,3 +285,27 @@ TEST(ActuatorSampling, TerrainHeightIsTheBilinearNodeSurface)
     erf_actuator::terrain_heights(f.znd.get(), f.geom, {}, h);
     EXPECT_TRUE(h.empty());
 }
+
+// On a slope the ground under a point (bilinear between the four nodes of its cell) lies below the
+// cell's bottom face (their mean) on one side: a point just above the ground there is sampled from
+// the bottom cell, by the column's extrapolation, still exactly for a linear field, on any split
+TEST(ActuatorSampling, APointJustAboveSlopingGroundIsSampled)
+{
+    MeshSpec m; m.stretch = 1.1; m.hill = 120.0; m.max_grid = {{4, 5, 1024}};
+    Fields f(m, false);
+    std::vector<Real> xy;
+    for (int i = 0; i < 40; ++i) { for (int j = 0; j < 30; ++j) { xy.insert(xy.end(), {Real((i + 0.37) * m.Lx / 40), Real((j + 0.61) * m.Ly / 30), Real(0.0)}); } }
+    std::vector<Real> h;
+    erf_actuator::terrain_heights(f.znd.get(), f.geom, xy, h);
+    std::vector<Real> pos;
+    int below_face = 0;
+    for (std::size_t p = 0; p < h.size(); ++p) {
+        const Real x = xy[3*p], y = xy[3*p+1];
+        pos.insert(pos.end(), {x, y, h[p] + Real(0.5)});
+        const int i = static_cast<int>(std::floor(x / m.dx())), j = static_cast<int>(std::floor(y / m.dy()));
+        const Real face = 0.25 * (m.z_node(i, j, 0) + m.z_node(i+1, j, 0) + m.z_node(i, j+1, 0) + m.z_node(i+1, j+1, 0));
+        if (h[p] + 0.5 < face) { ++below_face; }
+    }
+    EXPECT_GT(below_face, 50) << "the slope must put points below their cell's bottom face";
+    f.check(pos, tol);
+}

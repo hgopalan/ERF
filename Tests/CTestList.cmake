@@ -2410,21 +2410,24 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
       DATALOG_SIGDIGITS 10)
   set_tests_properties(${_circuit_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # Lines over hills, dead-ended on transformers: two sections from a hilltop transformer to two on
-  # flat ground, in a neutral boundary layer over terrain with the k-equation RANS closure. The
-  # middle span of L1, the transformers' loads and clearances, and the hilltop transformer's
-  # statistics must match their golds; the flow is the run's own, since nothing goes back into it.
-  set(_terrain_logs "conductors/transformers.dat conductors/transformer_T1_stats.csv")
+  # flat ground, on lattice towers, in a neutral boundary layer over terrain with the k-equation
+  # RANS closure. The middle span of L1, the transformers' loads and clearances, the hilltop
+  # transformer's statistics and the towers' drag must match their golds; the flow is the run's
+  # own, since nothing goes back into it.
+  set(_terrain_logs "conductors/transformers.dat conductors/transformer_T1_stats.csv conductors/towers.dat")
   if(ERF_MOORDYN_USE_STUB)
     add_test_conductors(Conductors_Terrain Conductors_Terrain "plt00010" "conductors/L1_span2.dat"
                         "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_terrain_logs}" GOLD_SUFFIX ".gold")
     set(_terrain_restart Conductors_Terrain_Restart)
   else()
+    # four digits: the terrain RANS flow differs between compilers at roundoff and the lines respond
+    # to it, so a span's swing one step in (6.514e-4 deg) differs in the fifth digit on Linux
     add_test_conductors(Conductors_Terrain_MoorDyn Conductors_Terrain "plt00010" "conductors/L1_span2.dat"
-                        "L1_span2.dat.moordyn.gold" 6 Conductors_Terrain EXTRA_LOGS "${_terrain_logs}" GOLD_SUFFIX ".moordyn.gold")
+                        "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_terrain_logs}" GOLD_SUFFIX ".moordyn.gold")
     set(_terrain_restart Conductors_Terrain_Restart_MoorDyn)
   endif()
   add_test_restart_parity(${_terrain_restart} Conductors_Terrain 5 10
-      DATALOG "conductors/L1_span2.dat conductors/transformers.dat conductors/transformer_T1_stats.csv"
+      DATALOG "conductors/L1_span2.dat conductors/transformers.dat conductors/transformer_T1_stats.csv conductors/towers.dat"
       DATALOG_SIGDIGITS 10)
   set_tests_properties(${_terrain_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # Restart parity of the coupled case: ten steps straight, and five steps, a checkpoint and five

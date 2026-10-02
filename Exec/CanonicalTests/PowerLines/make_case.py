@@ -163,6 +163,8 @@ def main():
     ap.add_argument("--end_height", type=float, default=10.0, help="dead ends above the terrain (m): the box top plus the bushings")
     ap.add_argument("--tower_height", type=float, default=30.0)
     ap.add_argument("--insulator", type=float, default=2.5)
+    ap.add_argument("--tower", type=float, nargs=5, default=[6.0, 1.5, 0.2, 12.0, 1.2],
+                    help="lattice towers: base width, top width, solidity, cross-arm length and depth (m)")
     ap.add_argument("--max_span", type=float, default=280.0)
     ap.add_argument("--stringing_tension", type=float, default=2.0e4, help="still-air horizontal tension every span is strung to (N)")
     ap.add_argument("--min_clearance", type=float, default=8.0)
@@ -224,7 +226,15 @@ def main():
         for (xc, yc, h, s) in hills:
             f.write(f"#   hill at ({xc:.0f}, {yc:.0f}), height {h:.0f} m, radius {s:.0f} m\n")
         f.write("erf.conductors.spans        = " + " ".join(l[0] for l in lines) + "\n")
-        f.write("erf.conductors.transformers = " + " ".join(names) + "\n\n")
+        f.write("erf.conductors.transformers = " + " ".join(names) + "\n")
+        f.write("erf.conductors.tower_types  = lattice\n\n")
+        tb, tt, ts, al, ad = a.tower
+        f.write("# the suspension towers: square lattice, loaded by the wind on their members\n")
+        f.write(f"erf.conductors.lattice.base_width = {tb:g}\n")
+        f.write(f"erf.conductors.lattice.top_width  = {tt:g}\n")
+        f.write(f"erf.conductors.lattice.solidity   = {ts:g}\n")
+        f.write(f"erf.conductors.lattice.arm_length = {al:g}\n")
+        f.write(f"erf.conductors.lattice.arm_depth  = {ad:g}\n\n")
         for nm, p in zip(names, pts):
             f.write(f"# {nm}: on {'a hilltop' if p[2] == 'hill' else 'flat ground'}, ground at {height(hills, p[0], p[1]):.1f} m\n")
             f.write(f"erf.conductors.{nm}.position         = {p[0]:.2f} {p[1]:.2f}\n")
@@ -243,6 +253,7 @@ def main():
             f.write(f"erf.conductors.{nm}.mass_per_length  = 1.628\n")
             f.write(f"erf.conductors.{nm}.axial_stiffness  = 3.0e7\n")
             if len(r) > 2:
+                f.write(f"erf.conductors.{nm}.tower_type       = lattice\n")
                 f.write(f"erf.conductors.{nm}.insulator_length = {a.insulator:g}\n")
                 f.write(f"erf.conductors.{nm}.insulator_mass   = 60.\n")
     print(f"u* = {ustar:.4f} m/s, inflow KE 3.3 u*^2 = {3.3 * ustar ** 2:.4f} m^2/s^2")

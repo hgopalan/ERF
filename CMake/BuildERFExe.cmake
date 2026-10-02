@@ -397,9 +397,13 @@ function(build_erf_lib erf_lib_name)
         ${SRC_DIR}/MovingBodies/Conductors/ERF_ConductorSpan.cpp
         ${SRC_DIR}/MovingBodies/Conductors/ERF_Transformer.cpp
         ${SRC_DIR}/MovingBodies/Conductors/ERF_Conductors.cpp
+        ${SRC_DIR}/MovingBodies/Towers/ERF_MemberDrag.cpp
+        ${SRC_DIR}/MovingBodies/Towers/ERF_TowerInputs.cpp
+        ${SRC_DIR}/MovingBodies/Towers/ERF_Tower.cpp
       )
       target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${SRC_DIR}/MovingBodies/MoorDyn>)
       target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${SRC_DIR}/MovingBodies/Conductors>)
+      target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${SRC_DIR}/MovingBodies/Towers>)
       target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_MOORDYN ERF_MOORDYN_VERSION="${ERF_MOORDYN_VERSION}")
       if(ERF_MOORDYN_USE_STUB)
         target_compile_definitions(${erf_lib_name} PUBLIC ERF_MOORDYN_USE_STUB)

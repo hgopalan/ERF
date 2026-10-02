@@ -4967,7 +4967,9 @@ overflows an intermediate value. Lines are named in ``erf.conductors.spans``;
 each has its own ``erf.conductors.<name>.*`` block and is either a single
 span between two dead-ends or, with ``towers``, a section of spans over
 suspension towers. Transformers, named in ``erf.conductors.transformers``
-with blocks of their own, are boxes on the terrain the lines end on.
+with blocks of their own, are boxes on the terrain the lines end on; tower
+types, named in ``erf.conductors.tower_types``, make a line's towers
+lattice towers loaded by the wind.
 
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | Parameter                                     | Definition                                               | Acceptable Values    | Default                  |
@@ -5018,13 +5020,18 @@ with blocks of their own, are boxes on the terrain the lines end on.
 | **erf.conductors.<name>.insulator_diameter**  | disc diameter of the insulator strings, which the wind   | Real > 0             | 0.254                    |
 |                                               | acts on (m)                                              |                      |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.tower_type**          | the suspension towers of the line are lattice towers of  | one of the tower     | none                     |
+|                                               | this type, loaded by the wind on their members           | types; needs towers  |                          |
+|                                               | (towers.dat); none: the towers are points                |                      |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<name>.output_root**         | prefix of the line's diagnostics files:                  | String               | <diagnostics_dir>/<name> |
 |                                               | <output_root>.dat for a single span,                     |                      |                          |
 |                                               | <output_root>_span<k>.dat per span of a section,         |                      |                          |
 |                                               | <output_root>_insulators.dat                             |                      |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.diagnostics_dir**            | directory of the MoorDyn input files, ground.dat,        | String               | conductors               |
-|                                               | separation.dat, transformers.dat and the diagnostics     |                      |                          |
+|                                               | separation.dat, transformers.dat, towers.dat and the     |                      |                          |
+|                                               | diagnostics                                              |                      |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.diagnostics_int**            | write a diagnostics row every this many steps            | Integer >= 1         | 1                        |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
@@ -5055,16 +5062,18 @@ with blocks of their own, are boxes on the terrain the lines end on.
 |                                               | (<output_root>_stats.csv: mean, rms, minimum, maximum of |                      |                          |
 |                                               | the swing, offset, tensions, minimum clearance and       |                      |                          |
 |                                               | drag), of the insulator strings, of the closest approach |                      |                          |
-|                                               | of every pair of lines and of the transformers' loads    |                      |                          |
-|                                               | and clearances start at this time (s)                    |                      |                          |
+|                                               | of every pair of lines, of the transformers' loads and   |                      |                          |
+|                                               | clearances and of the towers' drag start at this time    |                      |                          |
+|                                               | (s)                                                      |                      |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.node_output_int**            | write every node of every line (position, clearance,     | Integer >= 0         | 0                        |
 |                                               | tension, wind, drag) to <output_root>_nodes.dat every    |                      |                          |
 |                                               | this many steps; 0: never                                |                      |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.drag_on_flow**               | put the air's drag on the lines, reversed, back into the | Boolean              | false                    |
-|                                               | flow as a momentum source (and allow the plot variables  |                      |                          |
-|                                               | conductor_fx, conductor_fy, conductor_fz)                |                      |                          |
+| **erf.conductors.drag_on_flow**               | put the air's drag on the lines and the towers,          | Boolean              | false                    |
+|                                               | reversed, back into the flow as a momentum source (and   |                      |                          |
+|                                               | allow the plot variables conductor_fx, conductor_fy,     |                      |                          |
+|                                               | conductor_fz)                                            |                      |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.epsilon**                    | width of the Gaussian that spreads the drag onto the     | Real > 0             | 2.0                      |
 |                                               | momentum sources, in cells (dx)                          |                      |                          |
@@ -5072,6 +5081,31 @@ with blocks of their own, are boxes on the terrain the lines end on.
 | **erf.conductors.flashover_distance**         | two lines whose conductors come closer than this are     | Real > 0             | 1.0                      |
 |                                               | flagged as clashing in separation.dat, and a conductor   |                      |                          |
 |                                               | this close to a transformer in transformers.dat (m)      |                      |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.tower_types**                | names of the lattice tower types the lines' towers can   | Strings (not the     | none                     |
+|                                               | be, each with its own block                              | name of a line or    |                          |
+|                                               |                                                          | transformer)         |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.base_width**          | the tower body's width at the ground (m)                 | Real > 0             | must be set              |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.top_width**           | its width at the cross-arm (m), the body tapering        | Real in (0,          | must be set              |
+|                                               | linearly between                                         | base_width]          |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.solidity**            | the members' area over the outline of a face, of the     | Real in (0, 1)       | must be set              |
+|                                               | body and the cross-arm                                   |                      |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.arm_length**          | the cross-arm's length across the line, centred on the   | Real > 0             | must be set              |
+|                                               | body (m)                                                 |                      |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.arm_depth**           | the depth of the cross-arm's face (m)                    | Real >= 0 (0:        | top_width                |
+|                                               |                                                          | top_width)           |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.peak**                | the body above the cross-arm, at the top width (m)       | Real >= 0            | 0                        |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.drag_coefficient**    | the force coefficient on the members' area; 0: 4 phi^2 - | Real >= 0            | 0                        |
+|                                               | 5.9 phi + 4 from the solidity phi (square lattice tower) |                      |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.segments**            | drag nodes along the body up to the cross-arm            | Integer >= 1         | 10                       |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.transformers**               | names of the transformers the lines end on: every line   | Strings (not the     | none                     |
 |                                               | end whose x, y lies on a transformer's footprint is      | name of a line)      |                          |

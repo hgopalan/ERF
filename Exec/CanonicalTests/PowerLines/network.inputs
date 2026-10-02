@@ -5,6 +5,14 @@
 #   hill at (1629, 1391), height 87 m, radius 184 m
 erf.conductors.spans        = L1 L2 L3 L4 L5
 erf.conductors.transformers = T1 T2 T3 T4 T5 T6
+erf.conductors.tower_types  = lattice
+
+# the suspension towers: square lattice, loaded by the wind on their members
+erf.conductors.lattice.base_width = 6
+erf.conductors.lattice.top_width  = 1.5
+erf.conductors.lattice.solidity   = 0.2
+erf.conductors.lattice.arm_length = 12
+erf.conductors.lattice.arm_depth  = 1.2
 
 # T1: on a hilltop, ground at 87.5 m
 erf.conductors.T1.position         = 1085.62 1156.95
@@ -45,6 +53,7 @@ erf.conductors.L1.stringing_tension = 20000
 erf.conductors.L1.diameter         = 0.0281
 erf.conductors.L1.mass_per_length  = 1.628
 erf.conductors.L1.axial_stiffness  = 3.0e7
+erf.conductors.L1.tower_type       = lattice
 erf.conductors.L1.insulator_length = 2.5
 erf.conductors.L1.insulator_mass   = 60.
 
@@ -56,6 +65,7 @@ erf.conductors.L2.stringing_tension = 20000
 erf.conductors.L2.diameter         = 0.0281
 erf.conductors.L2.mass_per_length  = 1.628
 erf.conductors.L2.axial_stiffness  = 3.0e7
+erf.conductors.L2.tower_type       = lattice
 erf.conductors.L2.insulator_length = 2.5
 erf.conductors.L2.insulator_mass   = 60.
 
@@ -67,6 +77,7 @@ erf.conductors.L3.stringing_tension = 20000
 erf.conductors.L3.diameter         = 0.0281
 erf.conductors.L3.mass_per_length  = 1.628
 erf.conductors.L3.axial_stiffness  = 3.0e7
+erf.conductors.L3.tower_type       = lattice
 erf.conductors.L3.insulator_length = 2.5
 erf.conductors.L3.insulator_mass   = 60.
 
@@ -78,6 +89,7 @@ erf.conductors.L4.stringing_tension = 20000
 erf.conductors.L4.diameter         = 0.0281
 erf.conductors.L4.mass_per_length  = 1.628
 erf.conductors.L4.axial_stiffness  = 3.0e7
+erf.conductors.L4.tower_type       = lattice
 erf.conductors.L4.insulator_length = 2.5
 erf.conductors.L4.insulator_mass   = 60.
 
@@ -89,5 +101,6 @@ erf.conductors.L5.stringing_tension = 20000
 erf.conductors.L5.diameter         = 0.0281
 erf.conductors.L5.mass_per_length  = 1.628
 erf.conductors.L5.axial_stiffness  = 3.0e7
+erf.conductors.L5.tower_type       = lattice
 erf.conductors.L5.insulator_length = 2.5
 erf.conductors.L5.insulator_mass   = 60.

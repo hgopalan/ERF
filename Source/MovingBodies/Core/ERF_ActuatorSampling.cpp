@@ -115,6 +115,14 @@ sample_velocity (const MultiFab& U, const MultiFab& V, const MultiFab& W,
                     const Real zt = face_height(2, ic, jc, k+1, znd, true, plo[2], dz);
                     if (z >= zb && z < zt) { kc = k; break; }
                 }
+                // the bottom face is the mean of its four nodes, but the ground under (x, y) is
+                // bilinear between them: on a slope a point just above the ground can lie below
+                // the face, and belongs to the bottom cell (read by extrapolation) as long as it is
+                // not below the lowest of the four nodes
+                if (kc < 0 && z < face_height(2, ic, jc, klo, znd, true, plo[2], dz) &&
+                    z >= amrex::min(amrex::min(znd(ic,jc,klo), znd(ic+1,jc,klo)), amrex::min(znd(ic,jc+1,klo), znd(ic+1,jc+1,klo)))) {
+                    kc = klo;
+                }
             }
             if (kc < vbx.smallEnd(2) || kc > vbx.bigEnd(2)) { return; }
 
@@ -210,6 +218,14 @@ sample_cell_scalar (const MultiFab& mf, int comp, const MultiFab* z_phys_nd, con
                     const Real zb = face_height(2, ic, jc, k,   znd, true, plo[2], dz);
                     const Real zt = face_height(2, ic, jc, k+1, znd, true, plo[2], dz);
                     if (z >= zb && z < zt) { kc = k; break; }
+                }
+                // the bottom face is the mean of its four nodes, but the ground under (x, y) is
+                // bilinear between them: on a slope a point just above the ground can lie below
+                // the face, and belongs to the bottom cell (read by extrapolation) as long as it is
+                // not below the lowest of the four nodes
+                if (kc < 0 && z < face_height(2, ic, jc, klo, znd, true, plo[2], dz) &&
+                    z >= amrex::min(amrex::min(znd(ic,jc,klo), znd(ic+1,jc,klo)), amrex::min(znd(ic,jc+1,klo), znd(ic+1,jc+1,klo)))) {
+                    kc = klo;
                 }
             }
             if (kc < vbx.smallEnd(2) || kc > vbx.bigEnd(2)) { return; }
