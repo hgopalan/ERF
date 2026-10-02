@@ -90,8 +90,21 @@ of slack and 20 segments in air of density 1.2 kg/m^3 (the unit tests
   *Cable Structures*, 1981), which does not depend on the sag: 6.658 s
   measured over five periods against 6.655 s.
 
-Both agree within 0.1 %; the tests allow 1 %. They skip on the stub library,
-which has no line dynamics.
+Both agree within 0.1 %; the tests allow 1 %.
+
+* in still air the span hangs in the elastic catenary: the parameter
+  :math:`a = H/w` solves :math:`2a\sinh(c/2a) = L_s`, where the stretched
+  length :math:`L_s` exceeds the unstretched one by the strain integrated
+  along the line, :math:`(H/EA)\,(c/2 + (a/2)\sinh(c/a))`. For the test
+  span this gives a sag of 13.584 m, a horizontal tension of 13 256 N and
+  an end tension of 13 473 N; MoorDyn gives 13.599 m and 13 430 N with 20
+  segments and converges to 13.5838 m with 160 (the parabola estimate,
+  12.99 m, and the inextensible catenary, 13.01 m, are both too low). The
+  start-up log prints MoorDyn's sag and end tension against the elastic
+  catenary for every level span.
+
+The verification tests skip on the stub library, which has no line
+dynamics and hangs a parabola.
 
 Placement on terrain
 --------------------
@@ -104,6 +117,23 @@ attachments must lie inside the domain. ``<diagnostics_dir>/ground.dat`` lists
 each end with the terrain height found under it and its resulting absolute
 height.
 
+Drag on the flow
+----------------
+
+With ``drag_on_flow`` the lines act on the air as well: after each MoorDyn
+step the air's drag on every node, reversed, is spread onto ERF's
+face-centred momentum sources with the actuator core's Gaussian of width
+``epsilon`` cells, discretely normalised so that the source integrates back
+to the force exactly, and added during the next step. Each node carries its
+share of the line's drag, so the force per unit length is resolved as long
+as the node spacing stays below the kernel width. A conductor's drag is
+small next to the momentum of the wind it crosses (4 to 5 N/m in a 17 m/s
+wind for 795 kcmil ACSR), which is why the switch is off by default; it is
+there for dense bundles, many spans in a small domain, and to close the
+momentum budget. The plot variables ``conductor_fx``, ``conductor_fy`` and
+``conductor_fz`` hold the source averaged to the cell centres (N/m^3) on
+the anchor level and are available only with the switch on.
+
 Diagnostics
 -----------
 
@@ -111,8 +141,23 @@ Every ``diagnostics_int`` steps each span appends a row to
 ``<output_root>.dat`` (whitespace separated, like ERF's data logs): the time,
 the middle node's position, its sag below the chord, its lateral offset from
 the chord's vertical plane, the swing angle in degrees, the tension at the
-first and last node, the largest tension on the line, and the wind handed to
-MoorDyn at the middle node. The MoorDyn input
+first and last node, the largest tension on the line, the wind handed to
+MoorDyn at the middle node, the smallest clearance of any node above the
+terrain under it with that node's horizontal position, and the air's total
+drag on the line. The clearance uses the terrain surface under each node
+(``terrain_heights``, the ``k = 0`` node plane), so a blown-out span on a
+slope is measured against the ground it now hangs over.
+
+From ``stats_start`` on each span keeps running statistics, the mean, root
+mean square, minimum and maximum of its swing angle, mid-span offset, end
+and maximum tensions, minimum clearance and crosswind drag, in
+``<output_root>_stats.csv``; these are the numbers a turbulent-wind run is
+judged on. With ``node_output_int`` every node of every span (position,
+clearance, tension, wind and drag) is written to ``<output_root>_nodes.dat``
+for plotting the line's shape. ``<diagnostics_dir>/total_load.dat`` holds
+the air's drag on all lines, the force the lines put into the air (zero
+without ``drag_on_flow``) and the integral of the momentum source, which
+equals that force. The MoorDyn input
 file the span was built from is kept next to it
 (``<diagnostics_dir>/<name>.moordyn.txt``) for inspection or for running
 MoorDyn on its own.

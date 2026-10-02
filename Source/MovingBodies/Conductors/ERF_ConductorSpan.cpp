@@ -65,6 +65,54 @@ void ConductorSpan::set_wind (const std::vector<Real>& uvw, double t)
     m_wind = uvw;
 }
 
+void ConductorSpan::set_ground_under_nodes (const std::vector<Real>& h)
+{
+    if (h.size() != m_nodes) {
+        Abort("erf.conductors." + m_in.name + ": " + std::to_string(m_nodes) + " ground heights are needed, " +
+              std::to_string(h.size()) + " were given");
+    }
+    m_ground = h;
+}
+
+Real ConductorSpan::clearance (unsigned node) const
+{
+    const Real ground = m_ground.empty() ? Real(0.0) : m_ground[node];
+    return node_position(node)[2] - ground;
+}
+
+Real ConductorSpan::min_clearance (unsigned& node) const
+{
+    node = 0;
+    Real best = clearance(0);
+    for (unsigned i = 1; i < m_nodes; ++i) {
+        const Real c = clearance(i);
+        if (c < best) { best = c; node = i; }
+    }
+    return best;
+}
+
+std::array<Real,3> ConductorSpan::node_drag (unsigned node) const
+{
+    const auto f = m_sys->line_node_drag(1, node);
+    return {{static_cast<Real>(f[0]), static_cast<Real>(f[1]), static_cast<Real>(f[2])}};
+}
+
+std::array<Real,3> ConductorSpan::total_drag () const
+{
+    std::array<Real,3> sum{{0.0, 0.0, 0.0}};
+    for (unsigned i = 0; i < m_nodes; ++i) {
+        const auto f = node_drag(i);
+        for (int d = 0; d < 3; ++d) { sum[d] += f[d]; }
+    }
+    return sum;
+}
+
+Real ConductorSpan::node_tension (unsigned node) const
+{
+    const auto t = m_sys->line_node_tension(1, node);
+    return static_cast<Real>(std::sqrt(t[0]*t[0] + t[1]*t[1] + t[2]*t[2]));
+}
+
 std::array<Real,3> ConductorSpan::wind_at_point (unsigned point) const
 {
     if (m_wind.empty() || point >= m_nkin) { return {{0.0, 0.0, 0.0}}; }
@@ -160,14 +208,36 @@ void ConductorSpan::write_diagnostics (double time, bool first) const
     std::ofstream out;
     const bool header = erf_actuator::open_log(out, m_in.output_root + ".dat", first);
     if (header) {
-        out << "time mid_x mid_y mid_z mid_sag mid_offset swing_deg tension_a tension_b max_tension mid_u mid_v mid_w\n";
+        out << "time mid_x mid_y mid_z mid_sag mid_offset swing_deg tension_a tension_b max_tension mid_u mid_v mid_w"
+               " min_clearance min_clearance_x min_clearance_y drag_x drag_y drag_z\n";
     }
     const unsigned mid = (m_nodes - 1) / 2;
     const auto m = node_position(mid);
     const auto u = wind_at_point(mid);
     out << std::setprecision(10) << time << " " << m[0] << " " << m[1] << " " << m[2] << " " << mid_sag() << " "
         << mid_offset() << " " << swing_angle() * 180.0 / 3.14159265358979323846 << " " << tension_a() << " "
-        << tension_b() << " " << max_tension() << " " << u[0] << " " << u[1] << " " << u[2] << "\n";
+        << tension_b() << " " << max_tension() << " " << u[0] << " " << u[1] << " " << u[2];
+    unsigned low = 0;
+    const Real cmin = min_clearance(low);
+    const auto pl = node_position(low);
+    const auto f = total_drag();
+    out << " " << cmin << " " << pl[0] << " " << pl[1] << " " << f[0] << " " << f[1] << " " << f[2] << "\n";
+}
+
+void ConductorSpan::write_nodes (double time, bool first) const
+{
+    if (!ParallelDescriptor::IOProcessor()) { return; }
+    std::ofstream out;
+    const bool header = erf_actuator::open_log(out, m_in.output_root + "_nodes.dat", first);
+    if (header) { out << "time node x y z clearance tension u v w drag_x drag_y drag_z\n"; }
+    out << std::setprecision(10);
+    for (unsigned i = 0; i < m_nodes; ++i) {
+        const auto p = node_position(i);
+        const auto u = wind_at_point(i);
+        const auto f = node_drag(i);
+        out << time << " " << i << " " << p[0] << " " << p[1] << " " << p[2] << " " << clearance(i) << " " << node_tension(i)
+            << " " << u[0] << " " << u[1] << " " << u[2] << " " << f[0] << " " << f[1] << " " << f[2] << "\n";
+    }
 }
 
 } // namespace erf_conductors

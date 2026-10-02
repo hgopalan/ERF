@@ -216,6 +216,13 @@
                          sounding_at_level(level), lsf_at_level(level), lsf_data[level],
                          get_eb(level), true);
 
+#ifdef ERF_USE_MOORDYN
+        // The conductor lines' drag on the air (erf.conductors.drag_on_flow), fixed over the step
+        if (conductors) {
+            conductors->add_momentum_sources(level, xmom_src, ymom_src, zmom_src);
+        }
+#endif
+
         // Nudging of the velocity towards observations at stations
         if (solverChoice.nudging_from_observations && obs_nudging) {
             obs_nudging->add_momentum_sources(level, old_stage_time, static_cast<Real>(slow_dt), fine_geom,

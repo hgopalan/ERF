@@ -66,6 +66,7 @@ int DECLDIR MoorDyn_GetLineUnstretchedLength (MoorDynLine l, double* ul);
 int DECLDIR MoorDyn_GetLineNodePos (MoorDynLine l, unsigned int i, double pos[3]);
 int DECLDIR MoorDyn_GetLineNodeVel (MoorDynLine l, unsigned int i, double vel[3]);
 int DECLDIR MoorDyn_GetLineNodeTen (MoorDynLine l, unsigned int i, double t[3]);
+int DECLDIR MoorDyn_GetLineNodeDrag (MoorDynLine l, unsigned int i, double f[3]);
 int DECLDIR MoorDyn_GetLineFairTen (MoorDynLine l, double* t);
 int DECLDIR MoorDyn_GetLineMaxTen (MoorDynLine l, double* t);
 

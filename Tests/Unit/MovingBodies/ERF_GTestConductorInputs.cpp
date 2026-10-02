@@ -65,6 +65,29 @@ TEST(ConductorInputs, ASpanIsReadWithItsDefaultsAndDerivedGeometry)
     EXPECT_EQ(in.moordyn_log_level, 2);
     EXPECT_DOUBLE_EQ(in.surface_offset, 10000.0);
     EXPECT_FALSE(in.has_prescribed_velocity);
+    EXPECT_DOUBLE_EQ(in.stats_start, 0.0);
+    EXPECT_EQ(in.node_output_int, 0);
+    EXPECT_FALSE(in.drag_on_flow);
+    EXPECT_DOUBLE_EQ(in.epsilon, 2.0);
+}
+
+// The elastic catenary of the 300 m Drake span with 1.5 m of slack (net weight 15.9634 N/m in air of
+// 1.2 kg/m^3, EA 3e7 N): reference values from an independent solution of the same equations, which
+// MoorDyn-C reproduces to 0.002 % with 160 segments (sag 13.5838 m, stretched length 301.6339 m)
+TEST(ConductorInputs, ElasticCatenaryOfALevelSpan)
+{
+    const double w = (1.628 - 1.2 * 0.25 * 3.14159265358979323846 * 0.0281 * 0.0281) * 9.81;
+    const auto cat = erf_conductors::elastic_catenary(300.0, 301.5, w, 3.0e7);
+    EXPECT_NEAR(cat.sag, 13.5841, 1.0e-4 * 13.5841);
+    EXPECT_NEAR(cat.horizontal_tension, 13256.4, 1.0e-4 * 13256.4);
+    EXPECT_NEAR(cat.end_tension, 13473.3, 1.0e-4 * 13473.3);
+    EXPECT_NEAR(cat.stretched_length, 301.6340, 1.0e-6 * 301.634);
+    // inextensible in the limit of a stiff line: sag 13.0131 m, more than the parabola's 12.9904 m
+    const auto stiff = erf_conductors::elastic_catenary(300.0, 301.5, w, 1.0e15);
+    EXPECT_NEAR(stiff.sag, 13.0131, 1.0e-4 * 13.0131);
+    EXPECT_NEAR(stiff.stretched_length, 301.5, 1.0e-6);   // H L / EA = 4e-9 m
+    // no slack, no catenary
+    EXPECT_DOUBLE_EQ(erf_conductors::elastic_catenary(300.0, 300.0, w, 3.0e7).sag, 0.0);
 }
 
 TEST(ConductorInputs, NothingIsReadWithoutSpans)
@@ -124,6 +147,9 @@ TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
     bad([](ConductorInputs& c) { c.moordyn_log_level = 4; }, "moordyn_log_level");
     bad([](ConductorInputs& c) { c.surface_offset = 0.0; }, "surface_offset");
     bad([](ConductorInputs& c) { c.surface_offset = 20.0; }, "surface_offset");   // below the attachments
+    bad([](ConductorInputs& c) { c.stats_start = -1.0; }, "stats_start");
+    bad([](ConductorInputs& c) { c.node_output_int = -1; }, "node_output_int");
+    bad([](ConductorInputs& c) { c.epsilon = 0.0; }, "epsilon");
 }
 
 TEST(ConductorInputs, SolverSettingsAreChecked)

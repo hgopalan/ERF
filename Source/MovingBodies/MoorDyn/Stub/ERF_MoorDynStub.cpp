@@ -6,7 +6,8 @@
 // swings about the chord to the quasi-static blowout angle atan(q / w) set by the fluid velocity it
 // is given (q the drag per unit length, w the weight per unit length), relaxing towards that angle
 // with a one-second lag so that the state depends on time, and carries the catenary tension. Only
-// fixed and coupled points are accepted; the fluid loads act on nodes below z = 0, as in MoorDyn, and
+// fixed and coupled points are accepted; the fluid loads act on nodes below z = 0, as in MoorDyn (the
+// drag on each node is the normal wind's dynamic pressure on its share of the line), and
 // the external kinematics points follow MoorDyn-C 2.7.1's order: the line nodes, the points, then one
 // entry at the origin.
 
@@ -46,7 +47,7 @@ struct Line {
     double sag = 0.0;               // sag at mid-span (m)
     double H = 0.0;                 // horizontal tension (m)
     double w_eff = 0.0;             // effective weight per unit length (N/m)
-    std::vector<double> pos, vel, ten;   // 3*(nseg+1) each
+    std::vector<double> pos, vel, ten, drag;   // 3*(nseg+1) each
 };
 
 struct StubSystem {
@@ -209,6 +210,20 @@ void place (StubSystem& s, Line& l, const double* U_nodes, double dt)
         for (int d = 0; d < 3; ++d) {
             newpos[3*i+d] = A.pos[d] + xi * chord[d] + y * es[d];
             newten[3*i+d] = l.H * (ec[d] + slope * es[d]);   // the tension along the tangent, horizontal component H
+        }
+    }
+    // the drag on each node: the normal wind's dynamic pressure on the node's share of the line
+    l.drag.assign(3 * nn, 0.0);
+    if (U_nodes != nullptr) {
+        const double share = c / l.nseg;
+        for (unsigned i = 0; i < nn; ++i) {
+            if (newpos[3*i+2] > 0.0) { continue; }   // above MoorDyn's surface: no fluid
+            const double udc = U_nodes[3*i]*ec[0] + U_nodes[3*i+1]*ec[1] + U_nodes[3*i+2]*ec[2];
+            double un[3];
+            for (int d = 0; d < 3; ++d) { un[d] = U_nodes[3*i+d] - udc * ec[d]; }
+            const double mag = std::sqrt(un[0]*un[0] + un[1]*un[1] + un[2]*un[2]);
+            const double len = (i == 0 || i == l.nseg) ? 0.5 * share : share;
+            for (int d = 0; d < 3; ++d) { l.drag[3*i+d] = 0.5 * s.rho * ty.Cd * ty.diam * mag * un[d] * len; }
         }
     }
     l.vel.assign(3 * nn, 0.0);
@@ -505,6 +520,14 @@ int MoorDyn_GetLineNodeTen (MoorDynLine l, unsigned int i, double t[3])
     STUB_LINE(l);
     if (t == nullptr || i > L.nseg) { return MOORDYN_INVALID_VALUE; }
     for (int d = 0; d < 3; ++d) { t[d] = L.ten[3*i+d]; }
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_GetLineNodeDrag (MoorDynLine l, unsigned int i, double f[3])
+{
+    STUB_LINE(l);
+    if (f == nullptr || i > L.nseg) { return MOORDYN_INVALID_VALUE; }
+    for (int d = 0; d < 3; ++d) { f[d] = L.drag.empty() ? 0.0 : L.drag[3*i+d]; }
     return MOORDYN_SUCCESS;
 }
 

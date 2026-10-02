@@ -151,6 +151,12 @@ ERF::canonicalizePlot3DVariables (Vector<std::string>& plot_var_names)
                                (derived_names[i] != "num_turb" && derived_names[i] != "SMark0") );
             ok_to_add     &= ( wf_is_AD  || (derived_names[i] != "SMark1") );
 #endif
+#ifdef ERF_USE_MOORDYN
+            // NOTE: mirrors the condition guarding the conductor fill in Write3DPlotFile
+            ok_to_add     &= ( (conductors && conductors->drag_on_flow()) ||
+                               (derived_names[i] != "conductor_fx" && derived_names[i] != "conductor_fy" &&
+                                derived_names[i] != "conductor_fz") );
+#endif
             if (ok_to_add)
             {
                 if (erf_plotfile::plot3d_fixed_variable_available(derived_names[i], capabilities)) {
@@ -944,6 +950,25 @@ ERF::FillPlot3DVars (int lev,
     {
         MultiFab::Copy(mf_dst,SMark[lev],1,mf_comp,1,0);
         mf_comp ++;
+    }
+#endif
+
+#ifdef ERF_USE_MOORDYN
+    // the conductor lines' momentum source on the air (N/m^3), in derived_names order
+    if (conductors && conductors->drag_on_flow()) {
+        const char* names[3] = {"conductor_fx", "conductor_fy", "conductor_fz"};
+        bool any = false;
+        for (const char* n : names) { any = any || containerHasElement(plot_var_names, std::string(n)); }
+        if (any) {
+            MultiFab src(grids[lev], dmap[lev], 3, 0);
+            conductors->cell_sources(lev, src, 0);
+            for (int c = 0; c < 3; ++c) {
+                if (containerHasElement(plot_var_names, std::string(names[c]))) {
+                    MultiFab::Copy(mf_dst, src, c, mf_comp, 1, 0);
+                    mf_comp ++;
+                }
+            }
+        }
     }
 #endif
 

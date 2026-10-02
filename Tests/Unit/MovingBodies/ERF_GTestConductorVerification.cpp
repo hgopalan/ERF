@@ -5,7 +5,7 @@
 // and w the weight per unit length; released after a short gust into still air, it swings at the
 // first out-of-plane frequency of a cable, whose period T = 2 c / sqrt(H / m) does not depend on the
 // sag (Irvine, Cable Structures, 1981), with c the chord, H the horizontal tension and m the mass
-// per unit length.
+// per unit length; and in still air it hangs in the elastic catenary.
 
 #include <cmath>
 #include <filesystem>
@@ -54,6 +54,20 @@ void blow (ConductorSpan& span, double U, double t, double dt)
 }
 
 } // namespace
+
+TEST(ConductorVerification, StillAirShapeIsTheElasticCatenary)
+{
+    if (erf_moordyn::is_stub()) { GTEST_SKIP() << "needs the real MoorDyn-C: the stub hangs a parabola"; }
+    ConductorInputs in;
+    auto span = make("catenary", in);
+    const SpanInputs& s = span->inputs();
+    const double w = (s.mass_per_length - in.air_density * 0.25 * pi * s.diameter * s.diameter) * g;
+    const auto cat = erf_conductors::elastic_catenary(s.chord(), s.length, w, s.axial_stiffness);
+    // MoorDyn's lumped masses converge to the catenary from above: 0.11 % in sag with 20 segments
+    EXPECT_NEAR(span->mid_sag() / cat.sag, 1.0, 0.005) << "sag " << span->mid_sag() << " m, catenary " << cat.sag << " m";
+    EXPECT_NEAR(span->tension_a() / cat.end_tension, 1.0, 0.005) << "end tension " << span->tension_a() << " N, catenary "
+        << cat.end_tension << " N";
+}
 
 TEST(ConductorVerification, MeanSwingIsTheQuasiStaticBlowoutAngle)
 {

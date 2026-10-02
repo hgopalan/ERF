@@ -1,0 +1,30 @@
+HyperCLaw-V1.1
+8
+density
+x_velocity
+y_velocity
+z_velocity
+theta
+conductor_fx
+conductor_fy
+conductor_fz
+3
+5
+0
+0 0 0 
+1500 1000 300 
+
+((0,0,0) (29,19,11) (0,0,0)) 
+10 
+50 50 25 
+0
+0
+0 2 5
+10
+0 750
+0 1000
+0 300
+750 1500
+0 1000
+0 300
+Level_0/Cell

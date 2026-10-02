@@ -2332,7 +2332,8 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # must match its gold to SIGDIGITS digits, and the plotfile the flow's gold, since nothing is
   # put back into the flow. The bundled stub relaxes to the quasi-static angle while the real
   # MoorDyn swings about it, so each library has its own gold log (GOLD_LOG) and the stub and
-  # real-library tests share the flow's gold plotfile (PLOT_GOLD_NAME).
+  # real-library tests share the flow's gold plotfile (PLOT_GOLD_NAME) when nothing goes back into the
+  # flow. An optional last argument names the totals file whose source integral is checked.
   function(add_test_conductors TEST_NAME TEST_FILES_DIR PLTFILE LOG GOLD_LOG SIGDIGITS PLOT_GOLD_NAME)
       setup_test()
       set(PLOT_GOLD ${ERF_TEST_GOLD_FILES_DIRECTORY}/${PLOT_GOLD_NAME})
@@ -2354,6 +2355,7 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
           "-DLOG=${LOG}"
           "-DGOLD=${CURRENT_TEST_SOURCE_DIR}/${GOLD_LOG}"
           "-DSIGDIGITS=${SIGDIGITS}"
+          "-DTOTALS=${ARGN}"
           -P ${PROJECT_SOURCE_DIR}/Tests/RunConductors.cmake)
       set_tests_properties(${TEST_NAME}
           PROPERTIES
@@ -2370,10 +2372,15 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
     # the wind sampled from ERF's 15 m/s crosswind at the line's current nodes, against the stub
     add_test_conductors(Conductors_FlowWind Conductors_FlowWind "plt00010" "S1.dat"
                         "S1.dat.gold" 8 Conductors_FlowWind)
+    # the lines' drag put back into the flow: the source must integrate to the force on the air
+    add_test_conductors(Conductors_DragOnFlow Conductors_DragOnFlow "plt00010" "S1.dat"
+                        "S1.dat.gold" 8 Conductors_DragOnFlow "conductors/total_load.dat")
   else()
     # the same coupled case against the real MoorDyn-C: the span swings about the blowout angle;
     # compared to 6 digits, since the line integration is not bit-reproducible across compilers
     add_test_conductors(Conductors_FlowWind_MoorDyn Conductors_FlowWind "plt00010" "S1.dat"
                         "S1.dat.moordyn.gold" 6 Conductors_FlowWind)
+    add_test_conductors(Conductors_DragOnFlow_MoorDyn Conductors_DragOnFlow "plt00010" "S1.dat"
+                        "S1.dat.moordyn.gold" 6 Conductors_DragOnFlow_MoorDyn "conductors/total_load.dat")
   endif()
 endif()

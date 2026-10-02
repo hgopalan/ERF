@@ -89,6 +89,8 @@ public:
     std::array<double,3> line_node_velocity (unsigned line, unsigned node) const;
     /** The tension force vector at a node (N). */
     std::array<double,3> line_node_tension (unsigned line, unsigned node) const;
+    /** The fluid's drag on a node (N): the force the air exerts on the line there. */
+    std::array<double,3> line_node_drag (unsigned line, unsigned node) const;
     /** The tension at the line's last node (MoorDyn's fairlead tension, N). */
     double line_end_tension (unsigned line) const;
     double line_max_tension (unsigned line) const;
