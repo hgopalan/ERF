@@ -11,8 +11,9 @@
 // moment about its base, flags them against its allowable values, watches how close every
 // conductor comes to its box, and continues its log and statistics across a restart; and a line's
 // suspension towers of a tower type stand on the terrain with their cross-arms across the line,
-// carry the members' drag of the wind at their nodes, put it into the flow with the lines', and
-// continue their log, statistics and drag on the flow across a restart.
+// carry the members' drag of the wind at their nodes and the line's pull where it hangs from
+// them, check their footings' uplift and compression, put the drag into the flow with the lines',
+// and continue their log, statistics and drag on the flow across a restart.
 
 #include <algorithm>
 #include <array>
@@ -803,6 +804,8 @@ void set_towered_section (const std::string& dir, const std::string& name)
     pt.add("solidity", 0.2);
     pt.add("arm_length", 12.0);
     pt.add("arm_depth", 1.2);
+    for (const char* k : {"weight", "allowable_uplift", "allowable_compression"}) { pt.remove(k); }
+    pt.add("weight", 9.0e4);
 }
 void clear_towered_section (const std::string& name)
 {
@@ -836,7 +839,13 @@ TEST(Conductors, LatticeTowersStandAtTheSuspensionPointsAndCarryTheWindsDrag)
     // the prescribed +y wind runs along the cross-arms: only the bodies carry it, the hand value
     const Real U = 10.0, q = 0.5 * 1.2 * U * U, cf = 4.0 * 0.04 - 5.9 * 0.2 + 4.0;
     const Real body = q * cf * 0.2 * 0.5 * (6.0 + 1.5) * 30.0;
-    for (int s = 0; s < 3; ++s) { c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    // the line's pull on each tower at the start of the last step, which the towers carry over it
+    std::vector<std::array<Real,3>> pull;
+    for (int s = 0; s < 3; ++s) {
+        pull.clear();
+        for (int t = 0; t < 2; ++t) { pull.push_back(c->spans()[0]->tower_force(t)); }
+        c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom);
+    }
     for (const auto& tw : c->towers()) {
         const auto F = tw.total_force();
         EXPECT_NEAR(F[1], body, 1.0e-6 * body) << tw.name();
@@ -846,23 +855,39 @@ TEST(Conductors, LatticeTowersStandAtTheSuspensionPointsAndCarryTheWindsDrag)
         const Real mom = q * cf * 0.2 * (6.0 * H * H / 2.0 + (1.5 - 6.0) / H * (H * H * H / 3.0 - H * H * H / (12.0 * n * n)));
         EXPECT_NEAR(tw.base_moment()[0], -mom, 1.0e-6 * mom) << tw.name();
     }
-    // towers.dat: a row at the start of every step with every tower's force and base moment
+    // each tower carries its line's pull where the line hangs from it, and its footings the lot
+    for (std::size_t t = 0; t < 2; ++t) {
+        const auto& tw = c->towers()[t];
+        const auto& F = pull[t];
+        for (int d = 0; d < 3; ++d) { EXPECT_EQ(tw.line_force()[d], F[d]) << tw.name() << " " << d; }
+        EXPECT_LT(F[2], 0.0) << "the clamped conductor weighs on the tower";
+        const auto L = tw.foundation();
+        EXPECT_NEAR(L.vertical, 9.0e4 - F[2] - tw.total_force()[2], roundoff * L.vertical);
+        EXPECT_NEAR(L.legs[0] + L.legs[1] + L.legs[2] + L.legs[3], L.vertical, roundoff * L.vertical);
+        EXPECT_NEAR(L.shear, std::hypot(F[0] + tw.total_force()[0], F[1] + tw.total_force()[1]), roundoff * L.shear);
+    }
+    // towers.dat: a row at the start of every step with every tower's drag, line pull and foundation load
     std::ifstream f(dir + "/towers.dat");
     std::string header, row;
     std::getline(f, header);
-    EXPECT_EQ(header, "time Tw_t1_Fx Tw_t1_Fy Tw_t1_Fz Tw_t1_Mx Tw_t1_My Tw_t2_Fx Tw_t2_Fy Tw_t2_Fz Tw_t2_Mx Tw_t2_My");
+    EXPECT_EQ(header.rfind("time Tw_t1_drag_Fx Tw_t1_drag_Fy Tw_t1_drag_Fz Tw_t1_line_Fx Tw_t1_line_Fy Tw_t1_line_Fz Tw_t1_shear "
+                           "Tw_t1_overturning Tw_t1_vertical Tw_t1_max_compression Tw_t1_max_uplift Tw_t1_over Tw_t2_drag_Fx", 0), 0u)
+        << header;
     int rows = 0;
     while (std::getline(f, row)) {
         std::istringstream ls(row);
         std::vector<Real> v;
         Real x;
         while (ls >> x) { v.push_back(x); }
-        ASSERT_EQ(v.size(), 11u);
+        ASSERT_EQ(v.size(), 25u);
         EXPECT_NEAR(v[2], body, 1.0e-6 * body);
+        EXPECT_EQ(v[12], 0.0) << "no allowable given";
         ++rows;
     }
     EXPECT_EQ(rows, 3);
-    EXPECT_NE(slurp(dir + "/tower_Tw_t1_stats.csv").find(",drag_h,"), std::string::npos);
+    for (const char* q : {",drag_h,", ",line_h,", ",shear,", ",overturning,", ",max_compression,", ",max_uplift,", ",over_allowable,"}) {
+        EXPECT_NE(slurp(dir + "/tower_Tw_t1_stats.csv").find(q), std::string::npos) << q;
+    }
     clear_towered_section("Tw");
 }
 

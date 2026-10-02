@@ -7,8 +7,9 @@
 // sag (Irvine, Cable Structures, 1981), with c the chord, H the horizontal tension and m the mass
 // per unit length; in still air it hangs in the elastic catenary; and in a section over suspension
 // towers the insulator strings swing across the line to the angle of the wind span's load over the
-// weight span's; and the pulls of a level span on its dead ends carry its weight between them, with
-// the elastic catenary's horizontal tension.
+// weight span's; the pulls of a level span on its dead ends carry its weight between them, with
+// the elastic catenary's horizontal tension; and a suspension tower takes the wind span's load
+// across the line, q L plus the string's own drag, and the weight span's down.
 
 #include <algorithm>
 #include <cmath>
@@ -187,4 +188,56 @@ TEST(ConductorVerification, TheDeadEndsCarryTheWeightAndTheCatenarysHorizontalTe
     EXPECT_NEAR(-(a[2] + b[2]) / (w * s.lengths[0]), 1.0, 0.005) << "the two ends share the line's weight";
     EXPECT_NEAR(a[2], b[2], 1.0e-3 * w * s.lengths[0]) << "a level span loads its ends alike";
     EXPECT_NEAR(a[1], 0.0, 1.0e-6 * cat.horizontal_tension);
+}
+
+TEST(ConductorVerification, ASuspensionTowerTakesTheWindSpanAndTheWeightSpan)
+{
+    if (erf_moordyn::is_stub()) { GTEST_SKIP() << "needs the real MoorDyn-C: the stub hangs its strings at the span's swing"; }
+    // four 300 m spans on strings: the middle tower's spans either side both hang from strings, so
+    // it takes half of each, with nothing shifted onto a dead end
+    ConductorInputs in;
+    in.air_density = 1.2;
+    in.diagnostics_dir = (std::filesystem::temp_directory_path() / "erf_gtest_conductor_verification").string();
+    SpanInputs s = drake("tower_loads");
+    s.end_b = {{1300.0, 500.0, 30.0}};
+    s.towers = {{{400.0, 500.0, 30.0}}, {{700.0, 500.0, 30.0}}, {{1000.0, 500.0, 30.0}}};
+    s.lengths = {301.5, 301.5, 301.5, 301.5};
+    s.insulator_length = 2.5;
+    s.insulator_mass = 60.0;
+    ConductorSpan line(s, in, g, in.diagnostics_dir + "/tower_loads.moordyn.txt");
+    const double U = 20.0, dt = 0.05;
+    double t = 0.0, swing = 0.0;
+    std::array<double,3> mean{{0.0, 0.0, 0.0}};
+    int n = 0;
+    while (t < 60.0 - 0.5 * dt) {
+        blow(line, U, t, dt);
+        t += dt;
+        if (t > 30.0) {
+            const auto F = line.tower_force(1);
+            for (int d = 0; d < 3; ++d) { mean[d] += F[d]; }
+            swing += line.insulator_swing_across(1);
+            ++n;
+        }
+    }
+    for (auto& m : mean) { m /= n; }
+    swing /= n;
+    // across the line: the wind span (half of each span either side) and the string's drag; down:
+    // the weight span and the string's weight, less the lift of the string's drag. A string swung
+    // theta across the line sees the normal wind U cos(theta), along (cos theta, sin theta) in the
+    // plane across the line, so its drag is q_i L_i cos^2(theta) (cos theta across, sin theta up).
+    // (The conductor's sloping segments, swung out of the vertical, lift a few newtons more.)
+    const double rho = in.air_density, L = 301.5, Li = s.insulator_length;
+    const double q = 0.5 * rho * s.drag_coefficient * s.diameter * U * U;
+    const double w = (s.mass_per_length - rho * 0.25 * pi * s.diameter * s.diameter) * g;
+    const double Di = 0.5 * rho * SpanInputs::insulator_drag_coefficient * s.insulator_diameter * U * U * Li *
+                      std::cos(swing) * std::cos(swing);
+    const double Wi = (s.insulator_mass - rho * 0.25 * pi * s.insulator_diameter * s.insulator_diameter * Li) * g;
+    const double across = q * L + Di * std::cos(swing), down = w * L + Wi - Di * std::sin(swing);
+    RecordProperty("tower_across_N", std::to_string(mean[1]));
+    RecordProperty("wind_span_N", std::to_string(across));
+    RecordProperty("tower_down_N", std::to_string(-mean[2]));
+    RecordProperty("weight_span_N", std::to_string(down));
+    EXPECT_NEAR(mean[1] / across, 1.0, 0.01);
+    EXPECT_NEAR(-mean[2] / down, 1.0, 0.01);
+    EXPECT_NEAR(mean[0], 0.0, 0.01 * down) << "the spans either side balance along the line";
 }

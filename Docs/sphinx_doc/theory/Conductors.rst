@@ -345,8 +345,9 @@ lattice body tapering linearly from ``base_width`` at the ground to
 width), and a lattice cross-arm of ``arm_length`` and face depth
 ``arm_depth`` centred on the body at the height the conductor hangs from,
 across the line (normal to the mean horizontal direction of the spans either
-side). The towers are rigid, and their loads here are the wind's on their
-members; the lines' pull on them is not part of these loads.
+side). The towers are rigid; they carry the wind's drag on their members and
+the pull of the line hanging from them, and stand on a foundation of four
+footings.
 
 Each member is cut into drag nodes at the middle of equal segments
 (``segments`` up the body, four along the arm). A node stands for a length
@@ -373,12 +374,41 @@ aerodynamics sit behind a narrow interface (node positions, axes and
 velocities and the wind in, a force per node out), so another model of the
 members' loads can stand in for the ERF drag.
 
+The line pulls on the tower where it hangs from it: the net force MoorDyn
+finds on the top node of the insulator string there, or, for a conductor
+clamped to the tower, on the end nodes of the two spans meeting there. In
+still air a tower of a level section carries the weight of one span (half of
+each span either side) and its string, the spans' pulls along the line
+cancelling; in a crosswind it also takes the wind on that length, the wind
+span. Drag and pull together load the foundation: the base shear (the
+horizontal force), the overturning moment about the centre of the base and
+the downward load :math:`P`, the tower's ``weight`` included. The four legs
+stand at :math:`(\pm s/2, \pm s/2)` in the frame of the line and the
+cross-arm, :math:`s` the ``leg_spacing`` (the base width by default), and,
+as a rigid square, share :math:`P` equally and the overturning moment
+:math:`\mathbf{M}` linearly,
+
+.. math::
+
+   N_i = \frac{P}{4} + \frac{M_y x_i - M_x y_i}{4 (s/2)^2} ,
+
+compression positive, so that the reactions balance the loads. The largest
+compression and the largest uplift (the most negative :math:`N_i`) are
+flagged against ``allowable_compression`` and ``allowable_uplift``, a
+footing's bearing and pull-out capacity (0, the default, is not checked). A
+pull along the diagonal loads the corner leg :math:`\sqrt{2}` times more
+than the same pull face-on.
+
 Every ``diagnostics_int`` steps ``<diagnostics_dir>/towers.dat`` gets, for
-each tower ``<line>_t<k>``, the total drag ``Fx``, ``Fy``, ``Fz`` and its
-moment about the centre of the base ``Mx``, ``My``, at the time the step
-starts (the flow the drag was found from); from ``stats_start`` each tower
-keeps the statistics of its horizontal drag and overturning moment in
-``<diagnostics_dir>/tower_<line>_t<k>_stats.csv``. With ``drag_on_flow`` the
+each tower ``<line>_t<k>``, the drag ``drag_Fx``, ``drag_Fy``, ``drag_Fz``,
+the line's pull ``line_Fx``, ``line_Fy``, ``line_Fz``, the ``shear``, the
+``overturning`` moment, the ``vertical`` load, the ``max_compression`` and
+``max_uplift`` of the legs and the allowable flag ``over``, at the time the
+step starts (the flow the drag was found from and the line as it was then);
+from ``stats_start`` each tower keeps the statistics of its horizontal drag
+and pull, shear, overturning moment, leg compression and uplift and the flag
+in ``<diagnostics_dir>/tower_<line>_t<k>_stats.csv``. The start-up log prints
+each tower's still-air pull and leg loads. With ``drag_on_flow`` the
 towers' drag goes into the momentum sources with the lines', and
 ``total_load.dat`` counts both. A checkpoint carries the statistics and the
 last node forces, so the drag a restart puts into the flow is the
@@ -393,7 +423,18 @@ solidity 0.2 carries exactly :math:`q C_f \phi (b_0 + b_t) H / 2` on its body
 hand integral up to the midpoint sum's known :math:`H^3/(12 n^2)` on the
 quadratic part; wind along the cross-arm loads only the body; in a log-law
 wind ten segments give the drag and base moment of a 20 000-point integral
-within 1 %. On the terrain test case the hilltop tower in a 25 m/s wind
+within 1 %. The legs' reactions are in equilibrium with the loads for any
+orientation, face-on and diagonal pulls give the hand values, and each
+allowable flags on its own. Against the real MoorDyn, the middle tower of four
+300 m spans on 2.5 m strings carries 5403.6 N down in still air against the
+weight span's 5400.1 N; in a steady 20 m/s crosswind it takes 2149 N across
+the line against :math:`qL` plus the swung string's drag, 2154 N, and 5343 N
+down against the weight span less the string drag's lift, 5350 N. (The string,
+swung :math:`\theta` across the line, sees the normal wind
+:math:`U\cos\theta`, along :math:`(\cos\theta, \sin\theta)` in the plane
+across the line, so its drag :math:`q_i L_i \cos^2\theta` lifts as well as
+pushes.) A tower next to a dead end differs: the span from the dead end
+drops to the string's bottom, and the lower end takes less of its weight. On the terrain test case the hilltop tower in a 25 m/s wind
 carries 25.6 kN, against 25.1 kN from :math:`q C_f \phi` times its face at
 that speed.
 
@@ -416,8 +457,11 @@ moves (2 degrees), and the transformers' horizontal loads settle between
 angle), under their 25 kN allowable. The lattice towers (6 m base, 1.5 m
 top, solidity 0.2, 12 m cross-arm) carry 18.7 to 20.6 kN of wind drag on the
 hilltops and 6.9 to 9.6 kN below them, the speed-up over the hills raising
-the drag about two and a half times. With a steady RANS wind the lines hold a
-steady blowout; their gust response needs a turbulent inflow.
+the drag about two and a half times. With the line's pull and a 60 kN tower
+weight on 6 m footings, only the hilltop towers lift a footing, by 11 to
+16 kN (the allowable is 50 kN), their worst legs carrying about 51 kN in
+compression against 29 to 33 kN below the hills. With a steady RANS wind the
+lines hold a steady blowout; their gust response needs a turbulent inflow.
 
 Restart
 -------

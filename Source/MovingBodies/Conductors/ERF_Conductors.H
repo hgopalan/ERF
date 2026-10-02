@@ -24,8 +24,9 @@
  * step of the anchor level. Besides each line's own diagnostics, every pair of lines is watched
  * for how close their conductors come, against erf.conductors.flashover_distance, and every
  * transformer the lines end on for the load they put on it and how close any conductor comes to it.
- * The suspension towers of a line with a tower_type are lattice towers loaded by the wind: the
- * drag on their members, from the flow sampled at the members' nodes each step.
+ * The suspension towers of a line with a tower_type are lattice towers loaded by the wind (the
+ * drag on their members, from the flow sampled at the members' nodes each step) and by the line
+ * hanging from them; their foundations are checked for leg uplift and compression.
  */
 class Conductors
 {
@@ -147,8 +148,10 @@ private:
     /** The wind at every tower node (3 per node, the towers in order): the flow sampled there, or the prescribed velocity. */
     std::vector<amrex::Real> tower_wind (const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
                                          const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
-    /** The members' drag from the wind at their nodes, handed to each tower. */
+    /** The members' drag from the wind at their nodes, handed to each tower, with the lines' pull. */
     void load_towers (const std::vector<amrex::Real>& wind);
+    /** Hand each tower the pull of its line where it hangs from the tower, as the line is now. */
+    void load_towers_with_lines ();
     /** Append a row of the towers' drag and base moment to <diagnostics_dir>/towers.dat; header when first. */
     void write_towers (double time, bool first) const;
     /** The logs a restart continues. */
@@ -173,6 +176,7 @@ private:
     std::vector<erf_conductors::Closest> m_tclear;                  //!< per transformer: the closest conductor, last
     std::vector<erf_actuator::RunningStats> m_tstats;               //!< per transformer: its load and clearance
     std::vector<erf_towers::Tower> m_towers;                        //!< the lines' lattice towers, line by line
+    std::vector<std::pair<std::size_t,int>> m_tower_of;             //!< per tower: its line and its index on it (from 0)
     std::unique_ptr<erf_towers::MemberAero> m_aero;                 //!< the members' aerodynamics
     std::vector<erf_actuator::RunningStats> m_tower_stats;          //!< per tower: its drag and base moment
     bool m_src_defined{false};

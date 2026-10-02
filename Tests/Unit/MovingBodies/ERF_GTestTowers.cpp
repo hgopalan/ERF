@@ -4,7 +4,10 @@
 // tower stands its body's nodes up the tapering body and its cross-arm across the line at the
 // conductor's height; and in a uniform wind the drag and base moment are the hand values, the
 // body's drag exactly (its width is linear in height), in a log-law wind within the segments'
-// quadrature error of a fine integral.
+// quadrature error of a fine integral; and the foundation's four legs share the downward load
+// equally and the overturning moment linearly, in equilibrium with the loads, the same whichever
+// way the tower faces, the corner leg taking sqrt(2) times more from a diagonal pull, each leg
+// load flagged against its allowable.
 
 #include <array>
 #include <cmath>
@@ -108,6 +111,10 @@ TEST(TowerType, EveryValueOutsideItsRangeIsRefusedByName)
     bad([](TowerType& t) { t.peak = -1.0; }, "peak");
     bad([](TowerType& t) { t.drag_coefficient = -1.0; }, "drag_coefficient");
     bad([](TowerType& t) { t.segments = 0; }, "segments");
+    bad([](TowerType& t) { t.weight = -1.0; }, "weight");
+    bad([](TowerType& t) { t.leg_spacing = -1.0; }, "leg_spacing");
+    bad([](TowerType& t) { t.allowable_uplift = -1.0; }, "allowable_uplift");
+    bad([](TowerType& t) { t.allowable_compression = -1.0; }, "allowable_compression");
     TowerType d = lattice();
     d.arm_depth = 0.0;
     EXPECT_EQ(d.arm_face(), d.top_width) << "the arm's face defaults to the top width";
@@ -189,4 +196,91 @@ TEST(Tower, InALogLawWindTheDragIsTheFineIntegral)
     // ten segments resolve the log law's curvature near the ground to about 1 %
     EXPECT_NEAR(tw.total_force()[0] / (drag + arm), 1.0, 0.01);
     EXPECT_NEAR(tw.base_moment()[1] / (mom + arm * H), 1.0, 0.01);
+}
+
+namespace {
+// the legs' reactions balance the tower's loads: their sum is the downward load and their moments
+// about the base cancel the loads' overturning moment
+void expect_equilibrium (const Tower& tw, const erf_towers::FoundationLoad& L)
+{
+    const Real a = 0.5 * tw.type().legs();
+    const std::array<Real,2> across{{tw.across()[0], tw.across()[1]}}, along{{tw.across()[1], -tw.across()[0]}};
+    Real sum = 0.0, mx = 0.0, my = 0.0;
+    int i = 0;
+    for (const Real su : {Real(1.0), Real(-1.0)}) {
+        for (const Real sv : {Real(1.0), Real(-1.0)}) {
+            const Real x = a * (su * along[0] + sv * across[0]), y = a * (su * along[1] + sv * across[1]);
+            const Real R = L.legs[static_cast<std::size_t>(i++)];
+            sum += R; mx += y * R; my -= x * R;
+        }
+    }
+    const Real scale = std::abs(L.vertical) + L.overturning / a + 1.0;
+    EXPECT_NEAR(sum, L.vertical, 1.0e2 * tol * scale);
+    EXPECT_NEAR(mx, -L.moment[0], 1.0e2 * tol * scale * a);
+    EXPECT_NEAR(my, -L.moment[1], 1.0e2 * tol * scale * a);
+}
+} // namespace
+
+TEST(Tower, TheLegsShareTheLoadAndResistTheOverturningMoment)
+{
+    TowerType t = lattice();
+    t.weight = 9.0e4;
+    const Real H = 30.0, a = 3.0;   // legs 6 m apart, the base width
+    Tower tw("T", t, {{50.0, 60.0, 10.0}}, H, {{0.0, 1.0, 0.0}});
+    // the line pulls 10 kN along x and 8 kN down at the cross-arm, no wind
+    const Real f = 1.0e4, down = 8.0e3;
+    tw.set_line_load({{f, Real(0.0), Real(-down)}}, {{Real(50.0), Real(60.0), Real(10.0 + H)}});
+    auto L = tw.foundation();
+    const Real P = t.weight + down;
+    EXPECT_NEAR(L.vertical, P, 1.0e2 * tol * P);
+    EXPECT_NEAR(L.shear, f, 1.0e2 * tol * f);
+    EXPECT_NEAR(L.overturning, H * f, 1.0e2 * tol * H * f);
+    // face-on: two legs at P/4 + H f / (4 a), two at P/4 - H f / (4 a)
+    EXPECT_NEAR(L.max_compression, P / 4 + H * f / (4 * a), 1.0e2 * tol * P);
+    EXPECT_NEAR(L.max_uplift, std::max(Real(0.0), -(P / 4 - H * f / (4 * a))), 1.0e2 * tol * P);
+    EXPECT_GT(L.max_uplift, 0.0) << "this pull lifts the windward legs: H f / 4a = 25 kN > P/4 = 24.5 kN";
+    expect_equilibrium(tw, L);
+    // the same pull along the diagonal: the corner leg takes sqrt(2) times the face-on moment share
+    tw.set_line_load({{Real(f / std::sqrt(Real(2.0))), Real(f / std::sqrt(Real(2.0))), Real(-down)}}, {{Real(50.0), Real(60.0), Real(10.0 + H)}});
+    L = tw.foundation();
+    EXPECT_NEAR(L.max_compression - P / 4, std::sqrt(Real(2.0)) * H * f / (4 * a), 1.0e3 * tol * P);
+    expect_equilibrium(tw, L);
+    // a tower facing another way carries a pull across its line the same way
+    Tower turned("T", t, {{50.0, 60.0, 10.0}}, H, {{1.0, 0.0, 0.0}});
+    turned.set_line_load({{Real(0.0), f, Real(-down)}}, {{Real(50.0), Real(60.0), Real(10.0 + H)}});
+    const auto Lt = turned.foundation();
+    EXPECT_NEAR(Lt.max_compression, P / 4 + H * f / (4 * a), 1.0e2 * tol * P);
+    expect_equilibrium(turned, Lt);
+    // the wind's drag adds to the line's pull
+    blow(tw, [&](Real) { return P3{{20.0, 0.0, 0.0}}; });
+    tw.set_line_load({{f, Real(0.0), Real(-down)}}, {{Real(50.0), Real(60.0), Real(10.0 + H)}});
+    L = tw.foundation();
+    EXPECT_NEAR(L.force[0], f + tw.total_force()[0], 1.0e2 * tol * f);
+    EXPECT_NEAR(L.moment[1], H * f + tw.base_moment()[1], 1.0e2 * tol * H * f);
+    expect_equilibrium(tw, L);
+}
+
+TEST(Tower, EachLegLoadIsFlaggedOverItsAllowable)
+{
+    TowerType t = lattice();
+    t.weight = 9.0e4;
+    auto flagged = [&](Real uplift, Real compression) {
+        TowerType u = t;
+        u.allowable_uplift = uplift;
+        u.allowable_compression = compression;
+        Tower tw("T", u, {{0.0, 0.0, 0.0}}, 30.0, {{0.0, 1.0, 0.0}});
+        tw.set_line_load({{1.0e4, 0.0, -8.0e3}}, {{0.0, 0.0, 30.0}});   // 49.5 kN compression, 0.5 kN uplift
+        return tw.foundation().over_allowable;
+    };
+    EXPECT_FALSE(flagged(0.0, 0.0)) << "no allowable: not checked";
+    EXPECT_TRUE(flagged(400.0, 0.0));
+    EXPECT_FALSE(flagged(600.0, 0.0));
+    EXPECT_TRUE(flagged(0.0, 4.9e4));
+    EXPECT_FALSE(flagged(0.0, 5.0e4));
+    EXPECT_TRUE(flagged(600.0, 4.9e4)) << "the compression alone is over";
+    // legs default to the base width; a type gives its own spacing
+    TowerType w = t;
+    w.leg_spacing = 8.0;
+    EXPECT_EQ(t.legs(), t.base_width);
+    EXPECT_EQ(w.legs(), Real(8.0));
 }

@@ -809,7 +809,8 @@ closure and the surface layer, and leaves through the x-high one. Each line
 is a section on insulator strings hanging from lattice towers, strung to
 20 kN. The middle span of one line, ``conductors/transformers.dat`` with
 every transformer's load and clearance, the hilltop transformer's
-statistics and ``conductors/towers.dat`` with every tower's drag are
+statistics and ``conductors/towers.dat`` with every tower's drag, line pull
+and leg loads are
 compared with golds of each library, the real library's to four digits: the
 terrain flow differs between compilers at roundoff, and a span's swing one
 step in (6.5e-4 degrees) moves in the fifth digit with it; the restart parity tests ``Conductors_Terrain_Restart`` and
