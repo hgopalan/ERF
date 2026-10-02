@@ -11,7 +11,7 @@ motion in the wind is computed by MoorDyn-C (:doc:`../CouplingToMoorDyn`)
 while ERF supplies the wind. The questions it answers are those of a line
 exposed to a fire wind: how far the spans blow out, how their clearance to
 the ground and to the neighbouring lines changes, and what tension the
-attachments carry.
+attachments carry, down to the transformers the lines end on.
 
 Model
 -----
@@ -152,11 +152,42 @@ of slack and 20 segments in air of density 1.2 kg/m^3 (the unit tests
   12.99 m, and the inextensible catenary, 13.01 m, are both too low). The
   start-up log prints MoorDyn's sag and end tension against the elastic
   catenary for every level span between fixed points.
+* the dead ends of that span carry its weight and the catenary's horizontal
+  tension: the pulls MoorDyn gives on the two fixed points add up to
+  4812.82 N downwards against the line's weight of 4812.96 N, and each
+  pulls 13 234 N along the chord against the catenary's 13 256 N (0.17 %).
 
 The blowout and swing period agree within 0.1 %, the string swing within
 0.3 % and the still-air sag within 0.11 %; the tests allow 1 % (0.5 % for the
 catenary). The verification tests skip on the stub library, which has no line
-dynamics and hangs a parabola.
+dynamics and hangs an elastic parabola.
+
+Stringing
+---------
+
+A line is either given an unstretched ``length`` per span or strung to a
+``stringing_tension``, the horizontal tension :math:`H` every span carries in
+still air, as a line crew strings a section. A section strung so hangs its
+strings plumb, the spans either side of every tower pulling alike, whatever
+their lengths; equal sag ratios instead would leave a short span far slacker
+than a long one and drag the string between them along the line. Once the
+attachments stand on the terrain, each span's length is set from the points
+the conductor hangs from (the bottoms of the strings at the towers), a chord
+:math:`c` over a horizontal distance :math:`h`: the parabola of horizontal
+tension :math:`H` under the weight :math:`w` per unit length is
+
+.. math::
+
+   l = c + \frac{w^2 h^4}{24 H^2 c}
+
+long, the tension along the chord :math:`H c / h` stretches the line by that
+over :math:`EA`, and the unstretched length is
+:math:`l / (1 + H c / (EA\,h))`. A short span may then be shorter than its
+chord unstretched, held taut by its stretch, which MoorDyn handles like any
+other. On the terrain test case MoorDyn's still-air solve gives every span
+of the two lines strung to 20 kN end tensions of 19.8 to 20.9 kN, the
+tension along the line being a little above the horizontal one on the
+inclined spans.
 
 Placement on terrain
 --------------------
@@ -166,10 +197,15 @@ the terrain surface at its ``(x, y)``: the surface height is read from the
 mesh with the actuator core's ``terrain_heights`` (the ``k = 0`` node plane,
 bilinear between the nodes) and added once at start-up, so on a flat mesh
 ``z`` is the absolute height, and a tower on a hill top holds its conductor
-that much higher. The attachments must lie inside the domain.
+that much higher. Each span's ``length`` must exceed the distance between
+its attachments where they stand: on a slope a dead end 10 m above a summit
+and a tower 30 m above the hillside below it can be closer, or further
+apart, than their heights above the ground suggest, so the slack is checked
+once they are placed. The attachments must lie inside the domain.
 ``<diagnostics_dir>/ground.dat`` lists each attachment (``a``, the towers
 ``t1``, ``t2``, ..., ``b``) with the terrain height found under it and its
-resulting absolute height.
+resulting absolute height, and each transformer (point ``transformer``) with
+the terrain height under its centre and the height of its top.
 
 Drag on the flow
 ----------------
@@ -245,13 +281,84 @@ parallel lines are almost equally far apart along their whole length, so
 where they come closest can move by a span on a millimetre's difference;
 the distance itself is well defined.
 
+Transformers
+------------
+
+The lines of a network end somewhere: at a substation, on a transformer. A
+transformer (``erf.conductors.transformers``, a block of its own per name) is
+a box of ``size`` (length along ``x``, width along ``y``, height) standing on
+the terrain: its base is at the terrain height under the centre of its
+footprint, ``position``. Every line end, ``end_a`` or ``end_b``, whose
+``(x, y)`` lies on a footprint (edges included) is dead-ended on that
+transformer, at the end's own height above the terrain, which must clear the
+box's top; the MoorDyn line is unchanged, its end still a fixed point. Two
+transformers may not overlap under an end, and a transformer on which no line
+ends is refused.
+
+A dead end takes the pull of its line: the net force MoorDyn finds on the
+line's end node, which the fixed point holds still, that is the end
+segment's tension with the node's share of the weight and the drag. The
+load on a transformer is the sum :math:`\mathbf{F}` of those pulls and
+their moment about the centre of its base,
+
+.. math::
+
+   \mathbf{M} = \sum_e (\mathbf{x}_e - \mathbf{x}_b) \times \mathbf{F}_e ,
+
+where :math:`\mathbf{x}_e` is the dead end and :math:`\mathbf{x}_b` the base
+centre. The horizontal force :math:`F_h = |(F_x, F_y)|` and the overturning
+moment :math:`M_h = |(M_x, M_y)|`, the one that tips the box, are checked
+against ``allowable_force`` and ``allowable_moment``; the flag is up when
+either is exceeded, and an allowable of 0 (the default) is not checked.
+Lines pulling from different sides partly cancel, so the check is on the
+vector sum, which is what the foundation and the bushings carry. In still air
+two lines ending on a transformer from opposite sides balance; in a crosswind
+they no longer do.
+
+Every conductor is also watched for how close it comes to each box: the
+closest approach of the polyline through its span nodes to the box, found by
+a golden-section search along each segment (the distance from a point moving
+along a segment to a box is convex). The lines ending on a transformer count
+too: their ends clear its top by their standoff, and a conductor dropping
+steeply from its bushing towards a valley comes closer. The clearance is
+flagged against ``flashover_distance`` like a pair of lines.
+
+Every ``diagnostics_int`` steps ``<diagnostics_dir>/transformers.dat`` gets,
+for each transformer ``T``, the force components ``T_Fx``, ``T_Fy``,
+``T_Fz``, ``T_Fh``, the moment ``T_Mx``, ``T_My``, ``T_Mh``, the allowable
+flag ``T_over``, the clearance ``T_clearance`` and its flag ``T_clash``; from
+``stats_start`` the horizontal force, the overturning moment, both flags and
+the clearance are kept as running statistics in
+``<diagnostics_dir>/transformer_T_stats.csv``. The start-up log prints, for
+each transformer, the height of its base, the line ends on it, the still-air
+load and the closest conductor.
+
+A network over hills
+--------------------
+
+``Exec/CanonicalTests/PowerLines`` puts the pieces together: ``make_case.py``
+draws four hills of 87 to 99 m on a 3 km by 2 km domain, six transformers
+(three on hilltops, three on flat ground) and the five lines of a minimum
+spanning tree between them, each a section of three spans on insulator
+strings with towers placed for ground clearance, all strung to 20 kN, and a
+neutral log-law inflow of 18 m/s at 30 m. The k-equation RANS flow spins up
+for 600 s (1.2 million cells), then the lines run 120 s from its checkpoint
+with the real MoorDyn. The wind 30 m above the ground speeds up to about
+25 m/s over the hilltops and slows in their lee. The lines settle within
+about 30 s: the spans running across the wind blow out up to 3.3 m at
+mid-span (swings of 27 to 29 degrees), the one running along it barely
+moves (2 degrees), and the transformers' horizontal loads settle between
+7.2 kN (three lines from different sides) and 21.3 kN (two lines at an
+angle), under their 25 kN allowable. With a steady RANS wind the lines hold a
+steady blowout; their gust response needs a turbulent inflow.
+
 Restart
 -------
 
 A checkpoint carries the lines under ``<chk>/conductors``: each line's whole
 MoorDyn state (node and free-point positions and velocities, internal forces
 and the time integrator's state, through MoorDyn's own save), the running
-statistics of every span, string set and pair of lines, the step count and
+statistics of every span, string set, pair of lines and transformer, the step count and
 the time. On a restart the line is created from the same
 inputs, initialised without the initial-shape solve and given that state, so
 it continues blown out exactly where the checkpoint left it, on MoorDyn's
@@ -259,13 +366,13 @@ clock; the statistics go on accumulating, and the diagnostics continue on the
 step count of the original run. With ``drag_on_flow`` the restored lines' drag
 is spread into the momentum sources again at once, so a plotfile written at
 the restart shows the source of the checkpointed step. The span and string
-logs, ``<output_root>_nodes.dat``, ``total_load.dat`` and ``separation.dat``
-are appended to, after
+logs, ``<output_root>_nodes.dat``, ``total_load.dat``, ``separation.dat`` and
+``transformers.dat`` are appended to, after
 the rows a run wrote beyond the checkpoint time are dropped, so a run that
 went on past its last checkpoint and is restarted from it leaves no
 duplicated stretch. The lines of a restart must be those of the run that
 wrote the checkpoint, in the same order and with the same spans, towers,
-segments and strings; anything else stops the run naming the line. A checkpoint without
+segments and strings, and the same transformers; anything else stops the run naming the line or the transformer. A checkpoint without
 conductor state, from a run without spans, starts them afresh from their
 still-air shape, with MoorDyn's clock at zero at the restart time.
 
@@ -275,7 +382,8 @@ Checks at start-up
 A run with spans refuses to start with any ``amrex.fpe_trap_*`` input on
 (MoorDyn's initial-condition solver overflows an intermediate value), with an
 anchor level that is not a level of the run, with a span whose length does not
-exceed its chord, with a length missing for a span of a section, with
+exceed the distance between its attachments placed on the terrain, with a length missing for a span of a section, with
 insulator strings on a line without towers or longer than a tower is high,
-or with any other value outside its documented range. Every message names the
-input key.
+with a line end on two overlapping transformers or not above the top of the
+transformer it ends on, with a transformer no line ends on, or with any other
+value outside its documented range. Every message names the input key.

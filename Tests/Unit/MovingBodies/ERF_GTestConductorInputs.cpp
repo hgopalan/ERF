@@ -1,7 +1,8 @@
 // Contract of erf_conductors::ConductorInputs: a span block is read with its defaults and its
 // derived chord and catenary sag; a section over towers is read with a length per span and its
 // insulator strings; every value outside its documented range is refused with a message naming
-// the key; the shared settings and the solver settings are checked the same way.
+// the key; the shared settings and the solver settings are checked the same way; and the
+// transformers the lines end on are read with their footprints, and refused by name out of range.
 
 #include <cmath>
 #include <string>
@@ -17,6 +18,7 @@
 
 using erf_conductors::ConductorInputs;
 using erf_conductors::SpanInputs;
+using erf_conductors::TransformerInputs;
 
 namespace {
 
@@ -89,8 +91,11 @@ TEST(ConductorInputs, ElasticCatenaryOfALevelSpan)
     const auto stiff = erf_conductors::elastic_catenary(300.0, 301.5, w, 1.0e15);
     EXPECT_NEAR(stiff.sag, 13.0131, 1.0e-4 * 13.0131);
     EXPECT_NEAR(stiff.stretched_length, 301.5, 1.0e-6);   // H L / EA = 4e-9 m
-    // no slack, no catenary
-    EXPECT_DOUBLE_EQ(erf_conductors::elastic_catenary(300.0, 300.0, w, 3.0e7).sag, 0.0);
+    // no slack: the line is held by its stretch alone, which matches the parabola's extra length
+    // 8 d^2 / 3c to the stretch H c / EA with H = w c^2 / 8d, so d^3 = 3 w c^4 / (64 EA): 5.874 m
+    const auto taut = erf_conductors::elastic_catenary(300.0, 300.0, w, 3.0e7);
+    EXPECT_NEAR(taut.sag, std::cbrt(3.0 * w * std::pow(300.0, 4) / (64.0 * 3.0e7)), 0.01 * taut.sag);
+    EXPECT_GT(taut.stretched_length, 300.0);
 }
 
 TEST(ConductorInputs, NothingIsReadWithoutSpans)
@@ -245,4 +250,146 @@ TEST(ConductorInputs, SectionValuesOutsideTheirRangeAreRefusedByName)
     EXPECT_TRUE(ConductorInputs::validate_span(clamped).empty());
     EXPECT_FALSE(clamped.has_insulators());
     EXPECT_EQ(clamped.num_line_nodes(), 3 * 21);
+}
+
+TEST(ConductorInputs, TransformersAreReadWithTheirFootprintsAndDefaults)
+{
+    set_span("L1");
+    amrex::ParmParse pp("erf.conductors");
+    pp.addarr("transformers", std::vector<std::string>{"T1", "T2"});
+    amrex::ParmParse t1("erf.conductors.T1");
+    t1.addarr("position", std::vector<amrex::Real>{100.0, 500.0});
+    t1.addarr("size", std::vector<amrex::Real>{8.0, 5.0, 6.0});
+    t1.add("allowable_force", 2.0e4);
+    t1.add("allowable_moment", 1.5e5);
+    amrex::ParmParse t2("erf.conductors.T2");
+    t2.addarr("position", std::vector<amrex::Real>{400.0, 500.0});
+    t2.addarr("size", std::vector<amrex::Real>{6.0, 4.0, 5.0});
+    const ConductorInputs in = ConductorInputs::read();
+    ASSERT_EQ(in.transformers.size(), 2u);
+    const TransformerInputs& a = in.transformers[0];
+    EXPECT_EQ(a.name, "T1");
+    EXPECT_DOUBLE_EQ(a.size[2], 6.0);
+    EXPECT_DOUBLE_EQ(a.allowable_force, amrex::Real(2.0e4));
+    EXPECT_DOUBLE_EQ(a.allowable_moment, amrex::Real(1.5e5));
+    // unchecked unless given
+    EXPECT_DOUBLE_EQ(in.transformers[1].allowable_force, 0.0);
+    EXPECT_DOUBLE_EQ(in.transformers[1].allowable_moment, 0.0);
+    // the footprint, its edges included
+    EXPECT_TRUE(a.on_footprint(100.0, 500.0));
+    EXPECT_TRUE(a.on_footprint(104.0, 502.5));
+    EXPECT_TRUE(a.on_footprint(96.0, 497.5));
+    EXPECT_FALSE(a.on_footprint(104.1, 500.0));
+    EXPECT_FALSE(a.on_footprint(100.0, 497.4));
+    pp.addarr("transformers", std::vector<std::string>{});
+    pp.addarr("spans", std::vector<std::string>{});
+}
+
+TEST(ConductorInputs, TransformerValuesOutsideTheirRangeAreRefusedByName)
+{
+    TransformerInputs good;
+    good.name = "T";
+    good.position = {{100.0, 500.0}};
+    good.size = {{8.0, 5.0, 6.0}};
+    EXPECT_TRUE(ConductorInputs::validate_transformer(good).empty());
+    auto bad = [&good](auto mutate, const std::string& key) {
+        TransformerInputs t = good;
+        mutate(t);
+        const std::string err = ConductorInputs::validate_transformer(t);
+        EXPECT_FALSE(err.empty()) << key;
+        EXPECT_NE(err.find("erf.conductors.T." + key), std::string::npos) << err;
+    };
+    bad([](TransformerInputs& t) { t.size[0] = 0.0; }, "size");
+    bad([](TransformerInputs& t) { t.size[1] = -1.0; }, "size");
+    bad([](TransformerInputs& t) { t.size[2] = 0.0; }, "size");
+    bad([](TransformerInputs& t) { t.allowable_force = -1.0; }, "allowable_force");
+    bad([](TransformerInputs& t) { t.allowable_moment = -1.0; }, "allowable_moment");
+}
+
+TEST(ConductorInputs, TheSlackIsCheckedBetweenTheEndsWhereTheyStandOnTheTerrain)
+{
+    // a short span down a hillside: a dead end 10 m above a summit at 60 m and the first tower,
+    // 30 m tall, 40 m away on ground 40 m lower. Above the terrain the ends are 20 m apart in
+    // height, on the terrain 20 m the other way: the same 44.7 m chord, and 44.9 m has slack
+    SpanInputs s = good_span();
+    s.end_a = {{100.0, 500.0, 10.0}};
+    s.end_b = {{140.0, 500.0, 30.0}};
+    s.lengths = {44.9};
+    EXPECT_TRUE(ConductorInputs::validate_span(s, false).empty());
+    SpanInputs placed = s;
+    placed.end_a[2] += 60.0;   // the summit
+    placed.end_b[2] += 20.0;   // the hillside
+    EXPECT_TRUE(ConductorInputs::validate_slack(placed, true).empty());
+    // the tower on ground 30 m below the summit instead: 10 m apart in height on the terrain, a
+    // 41.2 m chord, so 42 m has slack there although the heights above the terrain give 44.7 m
+    s.lengths = {42.0};
+    EXPECT_FALSE(ConductorInputs::validate_slack(s).empty()) << "the heights above the terrain alone refuse it";
+    EXPECT_TRUE(ConductorInputs::validate_span(s, false).empty()) << "read() leaves the slack to the placement";
+    placed = s;
+    placed.end_a[2] += 60.0;
+    placed.end_b[2] += 30.0;
+    EXPECT_TRUE(ConductorInputs::validate_slack(placed, true).empty());
+    // and a span with too little slack on the terrain is refused there, naming it
+    placed.lengths = {41.0};
+    const std::string err = ConductorInputs::validate_slack(placed, true);
+    EXPECT_NE(err.find("erf.conductors.S.length"), std::string::npos) << err;
+    EXPECT_NE(err.find("where they stand on the terrain"), std::string::npos) << err;
+}
+
+TEST(ConductorInputs, AStringingTensionSetsEachSpansLengthSoThatItHangsWithThatTension)
+{
+    SpanInputs s = good_section();
+    s.lengths.clear();
+    s.stringing_tension = 2.0e4;
+    EXPECT_TRUE(ConductorInputs::validate_span(s).empty()) << "no lengths needed with a stringing tension";
+    // spans of 300 m, 100 m (a tower moved up the line) and 500 m: each must hang with H = 20 kN
+    s.towers[0][0] = 400.0;
+    s.towers[1][0] = 500.0;
+    const double w = s.mass_per_length * 9.81;
+    s.lengths_from_stringing_tension(amrex::Real(w));
+    ASSERT_EQ(static_cast<int>(s.lengths.size()), s.num_spans());
+    for (int k = 0; k < s.num_spans(); ++k) {
+        const double c = s.chord(k);
+        const double L = s.lengths[static_cast<std::size_t>(k)];
+        // level spans: the parabola's 8 d^2 / 3c with d = w c^2 / 8H, stretched by H / EA
+        const double d = w * c * c / (8.0 * 2.0e4);
+        EXPECT_NEAR(L, (c + 8.0 * d * d / (3.0 * c)) / (1.0 + 2.0e4 / s.axial_stiffness), 1.0e-4 * c) << k;
+        // the elastic catenary of that unstretched length carries the stringing tension (the 100 m
+        // span is taut: shorter than its chord unstretched, held by its stretch)
+        const auto cat = erf_conductors::elastic_catenary(s.chord(k), s.lengths[static_cast<std::size_t>(k)],
+                                                          amrex::Real(w), s.axial_stiffness);
+        EXPECT_NEAR(cat.horizontal_tension / 2.0e4, 1.0, 0.01) << "span " << k << " of " << c << " m";
+    }
+    EXPECT_TRUE(ConductorInputs::validate_slack(s, true).empty()) << "a strung line is not held to slack";
+    // on strings the conductor hangs from their bottoms: a span from a dead end up to a tower is
+    // measured to 2.5 m below the tower top, which on a steep short span changes the chord by more
+    // than the span's slack
+    SpanInputs hung = s;
+    hung.end_a = {{100.0, 500.0, 10.0}};
+    hung.towers[0] = {{140.0, 500.0, 40.0}};
+    hung.insulator_length = 2.5;
+    hung.insulator_mass = 60.0;
+    hung.lengths_from_stringing_tension(amrex::Real(w));
+    EXPECT_EQ(hung.conductor_point(1)[2], amrex::Real(37.5));
+    EXPECT_EQ(hung.conductor_point(0)[2], amrex::Real(10.0)) << "a dead end has no string";
+    const double c0 = std::sqrt(40.0 * 40.0 + 27.5 * 27.5);
+    EXPECT_NEAR(hung.lengths[0], (c0 + w * w * std::pow(40.0, 4) / (24.0 * 4.0e8 * c0)) / (1.0 + 2.0e4 * c0 / (s.axial_stiffness * 40.0)),
+                1.0e-5 * c0);
+    auto bad = [](auto mutate, const std::string& key) {
+        SpanInputs t = good_section();
+        t.lengths.clear();
+        t.stringing_tension = 2.0e4;
+        mutate(t);
+        const std::string err = ConductorInputs::validate_span(t);
+        EXPECT_FALSE(err.empty()) << key;
+        EXPECT_NE(err.find("erf.conductors.S." + key), std::string::npos) << err;
+    };
+    bad([](SpanInputs& t) { t.stringing_tension = -1.0; }, "stringing_tension");
+    bad([](SpanInputs& t) { t.lengths = {301.5, 301.5, 301.5}; }, "length and stringing_tension");
+    bad([](SpanInputs& t) { t.stringing_tension = 0.0; }, "length");   // neither given
+    // without a stringing tension the lengths are left alone
+    SpanInputs fixed = good_section();
+    const auto before = fixed.lengths;
+    fixed.lengths_from_stringing_tension(amrex::Real(w));
+    EXPECT_EQ(fixed.lengths, before);
 }

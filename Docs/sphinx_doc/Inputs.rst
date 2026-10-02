@@ -4962,7 +4962,8 @@ built with ``-DERF_ENABLE_MOORDYN=ON`` (cmake) and refuses to start with any
 overflows an intermediate value. Lines are named in ``erf.conductors.spans``;
 each has its own ``erf.conductors.<name>.*`` block and is either a single
 span between two dead-ends or, with ``towers``, a section of spans over
-suspension towers.
+suspension towers. Transformers, named in ``erf.conductors.transformers``
+with blocks of their own, are boxes on the terrain the lines end on.
 
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | Parameter                                     | Definition                                               | Acceptable Values    | Default                  |
@@ -4981,8 +4982,14 @@ suspension towers.
 |                                               | end_a, three Reals each as end_a; the line is then a     | inside the domain    |                          |
 |                                               | section of one span more than the towers                 |                      |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.<name>.length**              | unstretched length of each span (m), one per span; the   | Reals > each chord   | must be set              |
-|                                               | slack above the chord sets the sag                       |                      |                          |
+| **erf.conductors.<name>.length**              | unstretched length of each span (m), one per span; the   | Reals > each chord   | must be set, or          |
+|                                               | slack above the chord between the attachments, placed on | on the terrain       | stringing_tension        |
+|                                               | the terrain, sets the sag                                |                      |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.stringing_tension**   | instead of length: the horizontal tension every span     | Real > 0             | none                     |
+|                                               | carries in still air (N); each span's length is set from |                      |                          |
+|                                               | its chord on the terrain, between the bottoms of the     |                      |                          |
+|                                               | strings at the towers                                    |                      |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<name>.diameter**            | conductor diameter (m)                                   | Real > 0             | must be set              |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
@@ -5013,7 +5020,7 @@ suspension towers.
 |                                               | <output_root>_insulators.dat                             |                      |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.diagnostics_dir**            | directory of the MoorDyn input files, ground.dat,        | String               | conductors               |
-|                                               | separation.dat and the diagnostics                       |                      |                          |
+|                                               | separation.dat, transformers.dat and the diagnostics     |                      |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.diagnostics_int**            | write a diagnostics row every this many steps            | Integer >= 1         | 1                        |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
@@ -5043,8 +5050,9 @@ suspension towers.
 | **erf.conductors.stats_start**                | the running statistics of every span                     | Real >= 0            | 0                        |
 |                                               | (<output_root>_stats.csv: mean, rms, minimum, maximum of |                      |                          |
 |                                               | the swing, offset, tensions, minimum clearance and       |                      |                          |
-|                                               | drag), of the insulator strings and of the closest       |                      |                          |
-|                                               | approach of every pair of lines start at this time (s)   |                      |                          |
+|                                               | drag), of the insulator strings, of the closest approach |                      |                          |
+|                                               | of every pair of lines and of the transformers' loads    |                      |                          |
+|                                               | and clearances start at this time (s)                    |                      |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.node_output_int**            | write every node of every line (position, clearance,     | Integer >= 0         | 0                        |
 |                                               | tension, wind, drag) to <output_root>_nodes.dat every    |                      |                          |
@@ -5058,7 +5066,24 @@ suspension towers.
 |                                               | momentum sources, in cells (dx)                          |                      |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.flashover_distance**         | two lines whose conductors come closer than this are     | Real > 0             | 1.0                      |
-|                                               | flagged as clashing in separation.dat (m)                |                      |                          |
+|                                               | flagged as clashing in separation.dat, and a conductor   |                      |                          |
+|                                               | this close to a transformer in transformers.dat (m)      |                      |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.transformers**               | names of the transformers the lines end on: every line   | Strings (not the     | none                     |
+|                                               | end whose x, y lies on a transformer's footprint is      | name of a line)      |                          |
+|                                               | dead-ended on it                                         |                      |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.position**            | the centre of the transformer's footprint (m); the box   | 2 Reals inside the   | must be set              |
+|                                               | stands on the terrain under it                           | domain               |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.size**                | the box's length along x, width along y and height (m);  | 3 Reals > 0          | must be set              |
+|                                               | the line ends on it must be above its top                |                      |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.allowable_force**     | the horizontal pull of the lines the transformer may     | Real >= 0 (0: not    | 0                        |
+|                                               | take (N); flagged in transformers.dat above it           | checked)             |                          |
++-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.allowable_moment**    | the overturning moment about the centre of its base it   | Real >= 0 (0: not    | 0                        |
+|                                               | may take (N m); flagged above it                         | checked)             |                          |
 +-----------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 
 .. _sec:SolverChoice:

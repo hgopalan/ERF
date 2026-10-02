@@ -2,7 +2,8 @@
 // Stub/moordyn/MoorDyn2.h. It lets ERF's line coupling be built and tested where MoorDyn is not
 // installed (CI). It reads the same input file (LINE TYPES, POINT PROPERTIES, LINES, OPTIONS) and
 // has the geometry, ordering and data flow of the real API, but no line dynamics: every line hangs
-// between its two attachment points as a parabola with the catenary sag of its unstretched length,
+// between its two attachment points as an elastic parabola, as long as its unstretched length
+// stretched by its tension, slack or taut,
 // swings about the chord to the quasi-static blowout angle atan(q / w) set by the fluid velocity it
 // is given (q the drag per unit length, w the weight per unit length), relaxing towards that angle
 // with a one-second lag so that the state depends on time, and carries the catenary tension. Fixed,
@@ -201,15 +202,24 @@ void place (StubSystem& s, Line& l, const double* U_nodes, double dt)
     const double Un2 = Un[0]*Un[0] + Un[1]*Un[1] + Un[2]*Un[2];
     const double q = 0.5 * s.rho * ty.Cd * ty.diam * Un2;
 
-    // sag: the parabola whose length is the unstretched length (slack), or the elastic sag (taut)
-    double sag;
-    if (l.length > c) {
-        sag = std::sqrt(3.0 * c * (l.length - c) / 8.0);
-    } else {
-        const double T = ty.EA * (c - l.length) / std::max(l.length, 1.0e-12);
-        sag = (T > 0.0) ? w * c * c / (8.0 * T) : 0.0;
+    // sag: the elastic parabola, slack or taut alike. Under the tension H along the chord the line is
+    // stretched to L (1 + H / EA), and the parabola of sag w_e c^2 / (8 H) under the effective weight
+    // w_e is c + 8 sag^2 / (3 c) long; the first grows with H and the second shrinks, so the H at which
+    // they agree is found by bisection (on log H)
+    const double w_e = std::sqrt(w * w + q * q);
+    double sag = 1.0e-6 * std::max(c, 1.0);
+    if (c > 0.0 && w_e > 0.0) {
+        auto excess = [&](double H) {
+            const double d = w_e * c * c / (8.0 * H);
+            return c + 8.0 * d * d / (3.0 * c) - l.length * (1.0 + H / ty.EA);
+        };
+        double lo = std::log(1.0e-6), hi = std::log(1.0e3 * ty.EA);
+        for (int it = 0; it < 200; ++it) {
+            const double mid = 0.5 * (lo + hi);
+            if (excess(std::exp(mid)) > 0.0) { lo = mid; } else { hi = mid; }
+        }
+        sag = std::max(sag, w_e * c * c / (8.0 * std::exp(0.5 * (lo + hi))));
     }
-    sag = std::max(sag, 1.0e-6 * std::max(c, 1.0));
 
     // the sag direction: down, rotated about the chord towards the normal fluid velocity by the swing angle
     double down[3] = {0.0, 0.0, -1.0};
@@ -627,6 +637,18 @@ int MoorDyn_GetLineNodeDrag (MoorDynLine l, unsigned int i, double f[3])
     STUB_LINE(l);
     if (f == nullptr || i > L.nseg) { return MOORDYN_INVALID_VALUE; }
     for (int d = 0; d < 3; ++d) { f[d] = L.drag.empty() ? 0.0 : L.drag[3*i+d]; }
+    return MOORDYN_SUCCESS;
+}
+
+// the stub's lines are in equilibrium: an inner node carries no net force, and an end node the
+// pull of the line on its support, the tension along the line's tangent there (which carries the
+// line's weight and drag as the parabola's slope does)
+int MoorDyn_GetLineNodeForce (MoorDynLine l, unsigned int i, double f[3])
+{
+    STUB_LINE(l);
+    if (f == nullptr || i > L.nseg) { return MOORDYN_INVALID_VALUE; }
+    const double sign = (i == 0) ? 1.0 : (i == L.nseg ? -1.0 : 0.0);
+    for (int d = 0; d < 3; ++d) { f[d] = sign * L.ten[3*i+d]; }
     return MOORDYN_SUCCESS;
 }
 

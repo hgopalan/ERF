@@ -2409,6 +2409,24 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
       DATALOG "P2_span2.dat P2_insulators.dat SW_span2.dat conductors/separation.dat conductors/separation_P1-P2_stats.csv P2_insulators_stats.csv"
       DATALOG_SIGDIGITS 10)
   set_tests_properties(${_circuit_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
+  # Lines over hills, dead-ended on transformers: two sections from a hilltop transformer to two on
+  # flat ground, in a neutral boundary layer over terrain with the k-equation RANS closure. The
+  # middle span of L1, the transformers' loads and clearances, and the hilltop transformer's
+  # statistics must match their golds; the flow is the run's own, since nothing goes back into it.
+  set(_terrain_logs "conductors/transformers.dat conductors/transformer_T1_stats.csv")
+  if(ERF_MOORDYN_USE_STUB)
+    add_test_conductors(Conductors_Terrain Conductors_Terrain "plt00010" "conductors/L1_span2.dat"
+                        "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_terrain_logs}" GOLD_SUFFIX ".gold")
+    set(_terrain_restart Conductors_Terrain_Restart)
+  else()
+    add_test_conductors(Conductors_Terrain_MoorDyn Conductors_Terrain "plt00010" "conductors/L1_span2.dat"
+                        "L1_span2.dat.moordyn.gold" 6 Conductors_Terrain EXTRA_LOGS "${_terrain_logs}" GOLD_SUFFIX ".moordyn.gold")
+    set(_terrain_restart Conductors_Terrain_Restart_MoorDyn)
+  endif()
+  add_test_restart_parity(${_terrain_restart} Conductors_Terrain 5 10
+      DATALOG "conductors/L1_span2.dat conductors/transformers.dat conductors/transformer_T1_stats.csv"
+      DATALOG_SIGDIGITS 10)
+  set_tests_properties(${_terrain_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # Restart parity of the coupled case: ten steps straight, and five steps, a checkpoint and five
   # more from it. The plotfile (the flow and the lines' momentum source) and the span's logs, node
   # output, statistics and total load must come out the same; a line restarted from rest, or

@@ -7,7 +7,8 @@
 // sag (Irvine, Cable Structures, 1981), with c the chord, H the horizontal tension and m the mass
 // per unit length; in still air it hangs in the elastic catenary; and in a section over suspension
 // towers the insulator strings swing across the line to the angle of the wind span's load over the
-// weight span's.
+// weight span's; and the pulls of a level span on its dead ends carry its weight between them, with
+// the elastic catenary's horizontal tension.
 
 #include <algorithm>
 #include <cmath>
@@ -164,4 +165,26 @@ TEST(ConductorVerification, SuspensionStringsSwingToTheWindSpanOverWeightSpanAng
     EXPECT_NEAR(mean / theta, 1.0, 0.01) << "mean string swing " << mean * 180.0 / pi << " deg, wind span / weight span "
                                          << theta * 180.0 / pi << " deg";
     EXPECT_LT(along, 0.01) << "the spans either side balance the pull along the line";
+}
+
+TEST(ConductorVerification, TheDeadEndsCarryTheWeightAndTheCatenarysHorizontalTension)
+{
+    if (erf_moordyn::is_stub()) { GTEST_SKIP() << "needs the real MoorDyn-C: the stub hangs a parabola"; }
+    ConductorInputs in;
+    auto span = make("dead_ends", in);
+    const SpanInputs& s = span->inputs();
+    const double w = (s.mass_per_length - in.air_density * 0.25 * pi * s.diameter * s.diameter) * g;
+    const auto cat = erf_conductors::elastic_catenary(s.chord(), s.lengths[0], w, s.axial_stiffness);
+    const auto a = span->end_force(0);
+    const auto b = span->end_force(1);
+    // each support is pulled towards the other and down: H along the chord, half the weight each
+    RecordProperty("end_a_horizontal_N", std::to_string(a[0]));
+    RecordProperty("catenary_horizontal_N", std::to_string(cat.horizontal_tension));
+    RecordProperty("ends_vertical_N", std::to_string(-(a[2] + b[2])));
+    RecordProperty("line_weight_N", std::to_string(w * s.lengths[0]));
+    EXPECT_NEAR(a[0] / cat.horizontal_tension, 1.0, 0.005);
+    EXPECT_NEAR(-b[0] / cat.horizontal_tension, 1.0, 0.005);
+    EXPECT_NEAR(-(a[2] + b[2]) / (w * s.lengths[0]), 1.0, 0.005) << "the two ends share the line's weight";
+    EXPECT_NEAR(a[2], b[2], 1.0e-3 * w * s.lengths[0]) << "a level span loads its ends alike";
+    EXPECT_NEAR(a[1], 0.0, 1.0e-6 * cat.horizontal_tension);
 }

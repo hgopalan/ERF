@@ -79,6 +79,12 @@ public:
     amrex::Real tension_b (int k = 0) const;
     amrex::Real max_tension (int k = 0) const;
     /**
+     * The pull of the line on its dead end at end_a (end 0) or end_b (end 1) (N): the net force
+     * MoorDyn finds on the line's end node, which the fixed support takes, the end segment's tension
+     * with the node's share of weight and drag.
+     */
+    std::array<amrex::Real,3> end_force (int end) const;
+    /**
      * The sag of span k's middle node below the chord between the span's attachment points (m),
      * and its lateral offset from the vertical plane of that chord (m): with insulator strings both
      * include how far the strings have let the conductor drop and swing.

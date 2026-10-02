@@ -27,6 +27,7 @@ using namespace amrex;
 using erf_conductors::ConductorInputs;
 using erf_conductors::ConductorSpan;
 using erf_conductors::SpanInputs;
+using erf_conductors::Transformer;
 
 namespace {
 constexpr Real rad2deg = Real(180.0 / 3.14159265358979323846);
@@ -74,6 +75,8 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
     const Real floor_z = static_cast<Real>(geom.ProbLo(2));
     m_placed = m_in.spans;
     std::size_t ip = 0;
+    // a misplaced line is reported after ground.dat is written, so that the placement can be looked at
+    std::string misplaced;
     for (SpanInputs& s : m_placed) {
         for (int k = 0; k <= s.num_spans(); ++k, ++ip) {
             auto& e = s.point(k);
@@ -82,7 +85,13 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
                 Abort("erf.conductors." + s.name + ": an attachment at height " + std::to_string(e[2]) + " m lies outside the domain");
             }
         }
+        s.lengths_from_stringing_tension((s.mass_per_length - m_in.air_density * Real(0.25) * Real(3.14159265358979323846) *
+                                          s.diameter * s.diameter) * CONST_GRAV);
+        const std::string slack = ConductorInputs::validate_slack(s, true);
+        if (misplaced.empty()) { misplaced = slack; }
     }
+    const std::string on_transformers = place_transformers(z_phys_nd, geom);
+    if (misplaced.empty()) { misplaced = on_transformers; }
     if (ParallelDescriptor::IOProcessor()) {
         UtilCreateDirectory(m_in.diagnostics_dir, 0755);
         std::ofstream out(m_in.diagnostics_dir + "/ground.dat", std::ios::trunc);
@@ -95,8 +104,14 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
                 out << s.name << " " << label << " " << e[0] << " " << e[1] << " " << m_ground[ip] << " " << e[2] << "\n";
             }
         }
+        // a transformer's row: the centre of its base on the terrain and the height of its top
+        for (const Transformer& t : m_transformers) {
+            const auto b = t.base();
+            out << t.name() << " transformer " << b[0] << " " << b[1] << " " << b[2] << " " << t.box_hi()[2] << "\n";
+        }
     }
     ParallelDescriptor::Barrier();
+    if (!misplaced.empty()) { Abort(misplaced + " (the placement is in " + m_in.diagnostics_dir + "/ground.dat)"); }
 
     if (!restart_chkdir.empty()) {
         const std::string dir = restart_chkdir + "/conductors";
@@ -104,6 +119,7 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
             restore(dir);
             update_ground_under_nodes(z_phys_nd, geom);
             measure_separation();
+            measure_transformers();
             return;
         }
         // a checkpoint written without conductors (a precursor, say): the spans start afresh here
@@ -134,14 +150,109 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
         add_stats(s);
     }
     add_pair_stats();
+    add_transformer_stats();
     update_ground_under_nodes(z_phys_nd, geom);
     measure_separation();
+    measure_transformers();
     for (std::size_t p = 0; p < m_pairs.size(); ++p) {
         const auto& c = m_sep[p];
         Print() << "erf.conductors: " << m_spans[m_pairs[p].first]->name() << " and " << m_spans[m_pairs[p].second]->name()
                 << " hang " << c.distance << " m apart at their closest"
                 << (c.distance < m_in.flashover_distance ? ", already inside the flashover distance" : "") << "\n";
     }
+    for (std::size_t t = 0; t < m_transformers.size(); ++t) {
+        const Transformer& tr = m_transformers[t];
+        const auto& L = m_tload[t];
+        Print() << "erf.conductors." << tr.name() << ": base at " << tr.base()[2] << " m, ends of";
+        for (const auto& e : tr.ends()) { Print() << " " << m_spans[e.line]->name() << (e.end == 0 ? ".end_a" : ".end_b"); }
+        Print() << "; still-air pull " << L.horizontal_force << " N horizontal, " << L.force[2] << " N vertical, overturning moment "
+                << L.overturning_moment << " N m" << (L.over_allowable ? ", already over its allowable" : "")
+                << "; closest conductor " << m_tclear[t].distance << " m from the box"
+                << (m_tclear[t].distance < m_in.flashover_distance ? ", inside the flashover distance" : "") << "\n";
+    }
+}
+
+std::string
+Conductors::place_transformers (const MultiFab* z_phys_nd, const Geometry& geom)
+{
+    if (m_in.transformers.empty()) { return std::string(); }
+    std::vector<Real> pos;
+    for (const auto& t : m_in.transformers) {
+        for (int d = 0; d < 2; ++d) {
+            if (t.position[d] < geom.ProbLo(d) || t.position[d] > geom.ProbHi(d)) {
+                Abort("erf.conductors." + t.name + ".position (" + std::to_string(t.position[0]) + ", " +
+                      std::to_string(t.position[1]) + ") lies outside the domain");
+            }
+        }
+        pos.insert(pos.end(), {t.position[0], t.position[1], Real(0.0)});
+    }
+    std::vector<Real> h;
+    erf_actuator::terrain_heights(z_phys_nd, geom, pos, h);
+    m_transformers.clear();
+    for (std::size_t t = 0; t < m_in.transformers.size(); ++t) { m_transformers.emplace_back(m_in.transformers[t], h[t]); }
+    return erf_conductors::attach_line_ends(m_transformers, m_placed);
+}
+
+void
+Conductors::add_transformer_stats ()
+{
+    m_tstats.clear();
+    for (const Transformer& t : m_transformers) {
+        const std::string name = "transformer_" + t.name();
+        m_tstats.emplace_back(name, m_in.diagnostics_dir + "/" + name,
+                              std::vector<std::string>{"horizontal_force", "overturning_moment", "over_allowable", "clearance", "clash"});
+    }
+}
+
+void
+Conductors::measure_transformers ()
+{
+    m_tload.resize(m_transformers.size());
+    m_tclear.resize(m_transformers.size());
+    std::vector<std::vector<Real>> paths;
+    for (const auto& span : m_spans) { paths.push_back(span->conductor_path()); }
+    for (std::size_t t = 0; t < m_transformers.size(); ++t) {
+        const Transformer& tr = m_transformers[t];
+        std::vector<std::array<Real,3>> at, force;
+        for (const auto& e : tr.ends()) {
+            const SpanInputs& s = m_placed[e.line];
+            at.push_back(e.end == 0 ? s.end_a : s.end_b);
+            force.push_back(m_spans[e.line]->end_force(e.end));
+        }
+        m_tload[t] = tr.load(at, force);
+        // every conductor, the ones ending on it as well: their ends clear the top by their standoff
+        erf_conductors::Closest best;
+        for (const auto& P : paths) {
+            const erf_conductors::Closest c = erf_conductors::closest_polyline_box(P, tr.box_lo(), tr.box_hi());
+            if (c.distance < best.distance) { best = c; }
+        }
+        m_tclear[t] = best;
+    }
+}
+
+void
+Conductors::write_transformers (double time, bool first) const
+{
+    if (m_transformers.empty() || !ParallelDescriptor::IOProcessor()) { return; }
+    std::ofstream out;
+    const bool header = erf_actuator::open_log(out, m_in.diagnostics_dir + "/transformers.dat", first);
+    if (header) {
+        out << "time";
+        for (const Transformer& t : m_transformers) {
+            const std::string& n = t.name();
+            out << " " << n << "_Fx " << n << "_Fy " << n << "_Fz " << n << "_Fh " << n << "_Mx " << n << "_My " << n << "_Mh "
+                << n << "_over " << n << "_clearance " << n << "_clash";
+        }
+        out << "\n";
+    }
+    out << std::setprecision(10) << time;
+    for (std::size_t t = 0; t < m_transformers.size(); ++t) {
+        const auto& L = m_tload[t];
+        out << " " << L.force[0] << " " << L.force[1] << " " << L.force[2] << " " << L.horizontal_force << " " << L.moment[0]
+            << " " << L.moment[1] << " " << L.overturning_moment << " " << (L.over_allowable ? 1 : 0) << " " << m_tclear[t].distance
+            << " " << (m_tclear[t].distance < m_in.flashover_distance ? 1 : 0);
+    }
+    out << "\n";
 }
 
 void
@@ -223,6 +334,7 @@ Conductors::log_files () const
     }
     f.push_back(m_in.diagnostics_dir + "/total_load.dat");
     f.push_back(m_in.diagnostics_dir + "/separation.dat");
+    f.push_back(m_in.diagnostics_dir + "/transformers.dat");
     return f;
 }
 
@@ -291,6 +403,13 @@ Conductors::restore (const std::string& dir)
     for (auto& st : m_pair_stats) {
         if (!st.read_state(dir)) { Abort("the conductor checkpoint '" + dir + "' holds no statistics " + st.name()); }
     }
+    add_transformer_stats();
+    for (auto& st : m_tstats) {
+        if (!st.read_state(dir)) {
+            Abort("the conductor checkpoint '" + dir + "' holds no statistics " + st.name() +
+                  "; the erf.conductors.transformers must match the run being restarted");
+        }
+    }
     // the logs continue from the checkpoint: rows a run wrote after it are dropped
     if (ParallelDescriptor::IOProcessor()) {
         for (const std::string& f : log_files()) { erf_conductors::trim_log_after(f, m_time); }
@@ -318,6 +437,7 @@ Conductors::write_checkpoint (const std::string& chkdir) const
     ParallelDescriptor::Barrier();
     for (const auto& line : m_stats) { for (const auto& st : line) { st.write_state(dir); } }
     for (const auto& st : m_pair_stats) { st.write_state(dir); }
+    for (const auto& st : m_tstats) { st.write_state(dir); }
     ParallelDescriptor::Barrier();
 }
 
@@ -404,7 +524,7 @@ Conductors::advance (int lev, double time, double dt,
     ++m_step;
     const bool first = (m_step == 1);
     const bool write = first || (m_step % m_in.diagnostics_int == 0);
-    if (first) { write_separation(time, true); }
+    if (first) { write_separation(time, true); write_transformers(time, true); }
     for (auto& span : m_spans) {
         // the wind of the flow at the start of the step, where the line is, held over the step
         span->set_wind(wind_at(*span, U, V, W, z_phys_nd, geom), time + 0.5 * dt);
@@ -449,6 +569,18 @@ Conductors::advance (int lev, double time, double dt,
         for (std::size_t p = 0; p < m_pairs.size(); ++p) {
             m_pair_stats[p].accumulate(time + dt, {m_sep[p].distance, m_sep[p].distance < m_in.flashover_distance ? Real(1.0) : Real(0.0)});
             if (write) { m_pair_stats[p].write(); }
+        }
+    }
+    // the lines' load on the transformers they end on, and how close any conductor comes to each
+    measure_transformers();
+    if (m_step % m_in.diagnostics_int == 0) { write_transformers(time + dt, false); }
+    if (sample) {
+        for (std::size_t t = 0; t < m_transformers.size(); ++t) {
+            const auto& L = m_tload[t];
+            const Real d = m_tclear[t].distance;
+            m_tstats[t].accumulate(time + dt, {L.horizontal_force, L.overturning_moment, L.over_allowable ? Real(1.0) : Real(0.0),
+                                               d, d < m_in.flashover_distance ? Real(1.0) : Real(0.0)});
+            if (write) { m_tstats[t].write(); }
         }
     }
     // the lines' drag on the air, spread into the momentum sources ERF adds over the next step

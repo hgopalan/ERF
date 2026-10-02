@@ -1,0 +1,59 @@
+# The flow of the hills case, shared by the two stages: a neutral boundary layer over the hills of
+# terrain_hills.txt, k-equation RANS, entering through x-low as the log law of inflow_profile and
+# leaving through x-high, slip walls at the sides and the top, the implicit anelastic MidPoint
+# scheme with the FFT pressure solve.
+
+geometry.prob_lo     = 0.    0.    0.
+geometry.prob_hi     = 3000. 2000. 800.
+amr.n_cell           = 150   100   80      # 20 m x 20 m x 10 m
+amr.max_level        = 0
+amr.max_grid_size    = 50
+amr.blocking_factor  = 2
+geometry.is_periodic = 0 0 0
+erf.fixed_dt         = 0.35                # at most 27 m/s aloft on 20 m cells: Courant 0.47
+
+xlo.type           = "Inflow"
+xlo.dirichlet_file = "inflow_profile"      # z u v w theta; no constant inflow density (it would rescale theta)
+xlo.KE             = 5.2523                # 3.3 u*^2, u* = 1.2616 m/s (18 m/s at 30 m, z0 = 0.1 m)
+xhi.type           = "Outflow"
+ylo.type           = "SlipWall"
+yhi.type           = "SlipWall"
+zhi.type           = "SlipWall"
+zlo.type           = "surface_layer"
+erf.most.z0        = 0.1
+
+erf.terrain_type      = StaticFittedMesh
+erf.terrain_smoothing = 2
+erf.terrain_file_name = "terrain_hills.txt"
+erf.wall_dist_type    = terrain_height
+
+erf.anelastic      = 1
+erf.anelastic_type = MidPoint              # RK2 ignores the implicit vertical solve; MidPoint honours it
+erf.vert_implicit  = true
+erf.use_fft        = true
+
+erf.init_type           = "input_sounding"
+erf.input_sounding_file = "input_sounding"    # the inflow profile; surface pressure in hPa
+erf.prob_name           = "ABL"
+erf.use_gravity         = true
+
+erf.dycore_horiz_adv_type  = "Upwind_5th"
+erf.dycore_vert_adv_type   = "Upwind_3rd"
+erf.dryscal_horiz_adv_type = "Upwind_5th"
+erf.dryscal_vert_adv_type  = "Upwind_3rd"
+erf.molec_diff_type        = "None"
+erf.les_type               = "None"
+erf.rans_type              = "kEqn"
+erf.dirichlet_k            = true
+erf.init_tke_from_ustar    = true
+erf.rans_consistent_diffusivities = true
+erf.rans_lscale_min        = 1.0
+erf.max_geom_lscale        = 20.0          # 0.1 kappa zi for the 500 m inversion
+erf.theta_ref              = 300.0
+
+amrex.fpe_trap_invalid = 0                 # MoorDyn's initial-condition solver overflows under a trap
+erf.v            = 1
+erf.sum_interval = 20
+erf.plot_file_1  = plt
+erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta KE Kmv z_phys
+erf.check_file   = chk

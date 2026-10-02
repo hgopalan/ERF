@@ -1,0 +1,6 @@
+# Stage 1: the flow alone, 600 s (about two flow-throughs at the line height), to a checkpoint.
+FILE = flow.inputs
+max_step   = 1715
+stop_time  = 600.25
+erf.plot_int_1 = 1715
+erf.check_int  = 1715

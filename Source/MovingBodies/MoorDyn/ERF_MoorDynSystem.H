@@ -91,6 +91,12 @@ public:
     std::array<double,3> line_node_tension (unsigned line, unsigned node) const;
     /** The fluid's drag on a node (N): the force the air exerts on the line there. */
     std::array<double,3> line_node_drag (unsigned line, unsigned node) const;
+    /**
+     * The net force on a node (N): the tensions of the segments either side, the weight, the fluid's
+     * drag and the rest MoorDyn adds up to move the node. At a fixed end node it is the force the
+     * line puts on its support, since the support holds the node still.
+     */
+    std::array<double,3> line_node_force (unsigned line, unsigned node) const;
     /** The tension at the line's last node (MoorDyn's fairlead tension, N). */
     double line_end_tension (unsigned line) const;
     double line_max_tension (unsigned line) const;

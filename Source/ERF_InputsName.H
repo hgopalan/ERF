@@ -2,6 +2,7 @@
 #define ERF_INPUTS_NAME_H_
 
 #include <AMReX.H>
+#include <AMReX_ParmParse.H>
 #include <AMReX_Print.H>
 
 #include <fstream>
@@ -63,6 +64,9 @@ CheckForDuplicateInputs (const std::string& inputs_file)
 
         std::string key   = trim_copy(line.substr(0, eq_pos));
         std::string value = trim_copy(line.substr(eq_pos + 1));
+
+        // FILE = <name> includes another inputs file; a deck may include several
+        if (key == amrex::ParmParse::FileKeyword) continue;
 
         auto it = seen.find(key);
 

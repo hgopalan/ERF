@@ -6,7 +6,10 @@
 // now, not where it hung; a restart from a checkpoint continues the lines, their drag on the
 // air, their statistics and their logs exactly where the checkpoint left them; a section is placed
 // on the terrain at every tower and logs each span and its strings; and the closest approach of two
-// lines is the exact distance between their conductors, flagged against the flashover distance.
+// lines is the exact distance between their conductors, flagged against the flashover distance;
+// and a transformer stands on the terrain, takes the pull of the lines ending on it with their
+// moment about its base, flags them against its allowable values, watches how close every
+// conductor comes to its box, and continues its log and statistics across a restart.
 
 #include <algorithm>
 #include <array>
@@ -14,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -29,6 +33,7 @@
 
 #include "ERF_ActuatorSpreading.H"
 #include "ERF_Conductors.H"
+#include "ERF_MoorDynSystem.H"
 
 namespace {
 
@@ -467,6 +472,7 @@ TEST(Conductors, ASectionIsPlacedOnTheTerrainAtEveryTowerAndLogsEachSpan)
     c->set_ground(m.znd.get(), m.geom);
     const auto& line = *c->spans().front();
     ASSERT_EQ(line.num_spans(), 3);
+    EXPECT_EQ(line.inputs().lengths, (std::vector<Real>{301.5, 301.5, 301.5})) << "given lengths are kept";
     // the towers stand on the ramp, and the conductor hangs 2.5 m under each
     for (int k = 1; k <= 2; ++k) {
         const Real x = 100.0 + 300.0 * k;
@@ -602,4 +608,168 @@ TEST(Conductors, ARestartContinuesASectionItsStringsAndTheSeparationOfTheLines)
     ps.remove("towers");
     ps.remove("insulator_length");
     ps.remove("insulator_mass");
+}
+
+TEST(Conductors, TransformersTakeThePullOfTheLinesEndingOnThemAndContinueAcrossARestart)
+{
+    const std::string dir = scratch("transformers");
+    // a span from T1 to T2 on the ramp, 12 m above the ground at its ends (6 m over the tops), and
+    // a second line dead-ended on open ground 2 m beside T2 and 3 m higher than its top; a +y wind
+    set_inputs(dir, "Lt", true, {{302.0, 500.0, 12.0}}, {{598.0, 500.0, 12.0}});
+    set_inputs(dir, "Lo", true, {{606.0, 500.0, 9.0}}, {{606.0, 800.0, 9.0}});
+    amrex::ParmParse("erf.conductors.Lt").remove("length");
+    amrex::ParmParse("erf.conductors.Lt").add("length", 297.5);
+    amrex::ParmParse pp("erf.conductors");
+    pp.addarr("spans", std::vector<std::string>{"Lt", "Lo"});
+    pp.addarr("transformers", std::vector<std::string>{"T1", "T2"});
+    for (const char* t : {"T1", "T2"}) {
+        amrex::ParmParse pt(std::string("erf.conductors.") + t);
+        pt.addarr("position", std::vector<Real>{t[1] == '1' ? Real(300.0) : Real(600.0), Real(500.0)});
+        pt.addarr("size", std::vector<Real>{8.0, 5.0, 6.0});
+    }
+    amrex::ParmParse("erf.conductors.T1").add("allowable_force", 1.0);   // any pull is over it
+    Mesh m(true);
+    const double dt = 0.25;
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(m.znd.get(), m.geom);
+    ASSERT_EQ(c->transformers().size(), 2u);
+    const auto& T1 = c->transformers()[0];
+    const auto& T2 = c->transformers()[1];
+    // the boxes stand on the ramp under their centres; Lt ends on both, Lo on neither
+    EXPECT_NEAR(T1.base()[2], m.h(300.0, 500.0), roundoff * 1000);
+    EXPECT_NEAR(T2.box_hi()[2], m.h(600.0, 500.0) + 6.0, roundoff * 1000);
+    ASSERT_EQ(T1.ends().size(), 1u);
+    ASSERT_EQ(T2.ends().size(), 1u);
+    EXPECT_EQ(T1.ends()[0].end, 0);
+    EXPECT_EQ(T2.ends()[0].end, 1);
+    std::ifstream g(dir + "/ground.dat");
+    std::string row, name, label;
+    int boxes = 0;
+    while (std::getline(g, row)) {
+        std::istringstream ls(row);
+        Real x, y, ground, top;
+        if (ls >> name >> label >> x >> y >> ground >> top && label == "transformer") {
+            ++boxes;
+            EXPECT_NEAR(ground, m.h(x, y), 1.0e-6) << name;
+            EXPECT_NEAR(top, m.h(x, y) + 6.0, 1.0e-6) << name;
+        }
+    }
+    EXPECT_EQ(boxes, 2);
+
+    auto check = [&](const Conductors& cc, const char* when) {
+        const auto& span = *cc.spans()[0];
+        const auto& L1 = cc.transformer_loads()[0];
+        const auto& L2 = cc.transformer_loads()[1];
+        const auto fa = span.end_force(0);
+        const auto fb = span.end_force(1);
+        for (int d = 0; d < 3; ++d) {
+            EXPECT_EQ(L1.force[d], fa[d]) << when << " T1 carries Lt's end_a alone, component " << d;
+            EXPECT_EQ(L2.force[d], fb[d]) << when << " T2 carries Lt's end_b alone, component " << d;
+        }
+        // the moment about the base centre of the pull at the end
+        const auto& e = span.inputs().end_a;
+        const auto b = cc.transformers()[0].base();
+        const Real rx = e[0] - b[0], ry = e[1] - b[1], rz = e[2] - b[2];
+        EXPECT_NEAR(L1.moment[0], ry * fa[2] - rz * fa[1], roundoff * 1.0e3 * std::abs(L1.moment[1])) << when;
+        EXPECT_NEAR(L1.moment[1], rz * fa[0] - rx * fa[2], roundoff * 1.0e3 * std::abs(L1.moment[1])) << when;
+        EXPECT_GT(L1.horizontal_force, 0.0);
+        EXPECT_TRUE(L1.over_allowable) << when;
+        EXPECT_FALSE(L2.over_allowable) << when << " no allowable on T2";
+        // the closest conductor to each box: the exact distance over every line
+        for (std::size_t t = 0; t < 2; ++t) {
+            const auto& tr = cc.transformers()[t];
+            Real best = 1.0e30;
+            for (const auto& sp : cc.spans()) {
+                best = std::min(best, erf_conductors::closest_polyline_box(sp->conductor_path(), tr.box_lo(), tr.box_hi()).distance);
+            }
+            EXPECT_EQ(cc.transformer_clearances()[t].distance, best) << when << " " << tr.name();
+        }
+    };
+    check(*c, "at rest");
+    // Lo's end is about 3.9 m from T2's top edge, nearer than Lt's 6 m standoff; only Lt comes near T1
+    EXPECT_GT(c->transformer_clearances()[1].distance, 3.0);
+    EXPECT_LT(c->transformer_clearances()[1].distance, 4.5);
+    EXPECT_LE(c->transformer_clearances()[0].distance, 6.0 + 0.2);
+
+    int step = 0;
+    for (; step < 3; ++step) { c->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    check(*c, "blown out");
+    const std::string chk = dir + "/chk00003";
+    std::filesystem::create_directories(chk);
+    c->write_checkpoint(chk);
+    for (; step < 6; ++step) { c->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    const std::string log = slurp(dir + "/transformers.dat");
+    const std::string stats1 = slurp(dir + "/transformer_T1_stats.csv");
+    const std::string stats2 = slurp(dir + "/transformer_T2_stats.csv");
+    // the log: a row at the start and one per step, T1 over its allowable throughout
+    std::istringstream lg(log);
+    std::string header;
+    std::getline(lg, header);
+    EXPECT_EQ(header.rfind("time T1_Fx T1_Fy T1_Fz T1_Fh T1_Mx T1_My T1_Mh T1_over T1_clearance T1_clash T2_Fx ", 0), 0u) << header;
+    int rows = 0;
+    while (std::getline(lg, row)) {
+        std::istringstream ls(row);
+        std::vector<Real> v;
+        Real x;
+        while (ls >> x) { v.push_back(x); }
+        ASSERT_EQ(v.size(), 21u) << row;
+        EXPECT_EQ(v[8], 1.0) << "T1_over";
+        EXPECT_EQ(v[18], 0.0) << "T2_over";
+        EXPECT_EQ(v[20], v[19] < 1.0 ? 1.0 : 0.0) << "T2_clash against the 1 m flashover distance";
+        ++rows;
+    }
+    EXPECT_EQ(rows, 7);
+    EXPECT_NE(stats1.find(",overturning_moment,"), std::string::npos) << stats1;
+
+    // restarted from the checkpoint: the same log, statistics and loads
+    auto r = Conductors::create(0);
+    ASSERT_TRUE(r);
+    r->set_ground(m.znd.get(), m.geom, chk);
+    ASSERT_TRUE(r->restored());
+    for (step = 3; step < 6; ++step) { r->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    EXPECT_EQ(slurp(dir + "/transformers.dat"), log);
+    EXPECT_EQ(slurp(dir + "/transformer_T1_stats.csv"), stats1);
+    EXPECT_EQ(slurp(dir + "/transformer_T2_stats.csv"), stats2);
+    for (int d = 0; d < 3; ++d) { EXPECT_EQ(r->transformer_loads()[0].force[d], c->transformer_loads()[0].force[d]); }
+
+    pp.addarr("spans", std::vector<std::string>{});
+    pp.addarr("transformers", std::vector<std::string>{});
+    amrex::ParmParse("erf.conductors.T1").remove("allowable_force");
+}
+
+TEST(Conductors, AStringingTensionSetsTheLengthsFromTheChordsOnTheTerrain)
+{
+    const std::string dir = scratch("stringing");
+    // a section up the ramp, clamped at the towers, with spans of 300, 150 and 450 m strung to 20 kN
+    set_inputs(dir, "Tstr", true, {{100.0, 500.0, 30.0}}, {{1000.0, 500.0, 30.0}});
+    amrex::ParmParse ps("erf.conductors.Tstr");
+    ps.remove("length");
+    ps.add("stringing_tension", 2.0e4);
+    ps.addarr("towers", std::vector<Real>{400.0, 500.0, 30.0, 550.0, 500.0, 30.0});
+    Mesh m(true);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(m.znd.get(), m.geom);
+    const auto& line = *c->spans().front();
+    const auto& s = line.inputs();
+    ASSERT_EQ(s.lengths.size(), 3u);
+    const std::array<Real,3> h{{300.0, 150.0, 450.0}};
+    for (int k = 0; k < 3; ++k) {
+        // the chord between the attachments on the ramp, which rises 5 m per 100 m
+        const Real c_on_terrain = h[k] * std::sqrt(Real(1.0) + m.slope_x * m.slope_x);
+        EXPECT_NEAR(s.chord(k), c_on_terrain, roundoff * 1.0e4) << k;
+    }
+    // every span pulls on its towers with about the stringing tension along the line: the real
+    // MoorDyn within the parabola's few per cent, the stub (no stretch) within its sag error
+    const Real tol = erf_moordyn::is_stub() ? Real(0.25) : Real(0.04);
+    for (int k = 0; k < 3; ++k) {
+        const Real T = line.tension_a(k);
+        EXPECT_GT(T / 2.0e4, 1.0 - tol) << "span " << k;
+        EXPECT_LT(T / 2.0e4, 1.0 + 2.0 * tol) << "span " << k;
+    }
+    const auto fa = line.end_force(0);
+    EXPECT_NEAR(std::sqrt(fa[0] * fa[0] + fa[1] * fa[1]) / 2.0e4, 1.0, tol) << "the dead end takes the stringing tension";
+    ps.remove("stringing_tension");
+    ps.remove("towers");
 }
