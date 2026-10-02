@@ -1,7 +1,9 @@
 #include "ERF_MoorDynInputWriter.H"
 
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 
 #include <AMReX.H>
@@ -13,24 +15,54 @@ namespace erf_conductors {
 
 std::string moordyn_input_text (const SpanInputs& s, const ConductorInputs& in, Real gravity)
 {
+    const int N = s.num_spans();
+    const bool strings = s.has_insulators();
+    const std::string ins_type = s.name + "_insulator";
+    // the point a span ends on at attachment k: the fixed point itself, or the free point under the
+    // tower's string
+    auto hang = [&] (int k) { return (strings && k > 0 && k < N) ? N + 1 + k : k + 1; };
     std::ostringstream out;
-    out << std::setprecision(12);
-    out << "MoorDyn-C input written by ERF for conductor span " << s.name << " (erf.conductors." << s.name << ".*)\n"
+    // twelve digits, or as many as a Real holds: a single-precision build writes 0.0281, not 0.0280999993
+    out << std::setprecision(std::min(12, std::numeric_limits<Real>::digits10));
+    out << "MoorDyn-C input written by ERF for conductor line " << s.name << " (erf.conductors." << s.name << ".*)\n"
         << "----------------------- LINE TYPES ------------------------------------------\n"
         << "TypeName   Diam     Mass/m     EA         BA/-zeta    EI         Cd     Ca     CdAx    CaAx\n"
         << "(name)     (m)      (kg/m)     (N)        (N-s/-)     (N-m^2)    (-)    (-)    (-)     (-)\n"
         << s.name << "   " << s.diameter << "   " << s.mass_per_length << "   " << s.axial_stiffness
-        << "   " << -s.damping_ratio << "   0   " << s.drag_coefficient << "   0.0   0.0   0.0\n"
-        << "---------------------- POINT PROPERTIES --------------------------------\n"
+        << "   " << -s.damping_ratio << "   0   " << s.drag_coefficient << "   0.0   0.0   0.0\n";
+    if (strings) {
+        out << ins_type << "   " << s.insulator_diameter << "   " << s.insulator_mass / s.insulator_length << "   "
+            << SpanInputs::insulator_axial_stiffness << "   " << -s.damping_ratio << "   0   "
+            << SpanInputs::insulator_drag_coefficient << "   0.0   0.0   0.0\n";
+    }
+    out << "---------------------- POINT PROPERTIES --------------------------------\n"
         << "ID    Type      X       Y       Z       Mass   Volume  CdA    Ca\n"
-        << "(#)   (-)       (m)     (m)     (m)     (kg)   (m^3)   (m^2)  (-)\n"
-        << "1     Fixed     " << s.end_a[0] << "   " << s.end_a[1] << "   " << s.end_a[2] - in.surface_offset << "   0   0   0   0\n"
-        << "2     Fixed     " << s.end_b[0] << "   " << s.end_b[1] << "   " << s.end_b[2] - in.surface_offset << "   0   0   0   0\n"
-        << "---------------------- LINES ----------------------------------------\n"
+        << "(#)   (-)       (m)     (m)     (m)     (kg)   (m^3)   (m^2)  (-)\n";
+    for (int k = 0; k <= N; ++k) {
+        const auto& p = s.point(k);
+        out << k + 1 << "     Fixed     " << p[0] << "   " << p[1] << "   " << p[2] - in.surface_offset << "   0   0   0   0\n";
+    }
+    if (strings) {
+        for (int k = 1; k < N; ++k) {
+            const auto& p = s.point(k);
+            out << N + 1 + k << "     Free      " << p[0] << "   " << p[1] << "   " << p[2] - s.insulator_length - in.surface_offset
+                << "   0   0   0   0\n";
+        }
+    }
+    out << "---------------------- LINES ----------------------------------------\n"
         << "ID   LineType   AttachA  AttachB  UnstrLen  NumSegs  LineOutputs\n"
-        << "(#)   (name)     (#)      (#)       (m)       (-)     (-)\n"
-        << "1     " << s.name << "      1        2         " << s.length << "   " << s.segments << "   -\n"
-        << "---------------------- OPTIONS -----------------------------------------\n"
+        << "(#)   (name)     (#)      (#)       (m)       (-)     (-)\n";
+    for (int k = 0; k < N; ++k) {
+        out << k + 1 << "     " << s.name << "      " << hang(k) << "        " << hang(k + 1) << "         "
+            << s.lengths[static_cast<std::size_t>(k)] << "   " << s.segments << "   -\n";
+    }
+    if (strings) {
+        for (int k = 1; k < N; ++k) {
+            out << N + k << "     " << ins_type << "      " << k + 1 << "        " << N + 1 + k << "         "
+                << s.insulator_length << "   " << SpanInputs::insulator_segments << "   -\n";
+        }
+    }
+    out << "---------------------- OPTIONS -----------------------------------------\n"
         << "0             writeLog      ERF writes the diagnostics\n";
     if (in.moordyn_dt > 0.0) {
         out << in.moordyn_dt << "   dtM           upper bound on MoorDyn's internal step (s, erf.conductors.moordyn_dt)\n";

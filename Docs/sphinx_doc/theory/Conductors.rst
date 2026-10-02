@@ -1,15 +1,17 @@
 .. _sec:Conductors:
 
-Conductor spans in the wind
+Conductor lines in the wind
 ===========================
 
-A conductor span (``Source/MovingBodies/Conductors``, inputs ``erf.conductors.*``)
-is a flexible line hanging between two fixed attachment points, an overhead
-power-line conductor, shield wire or insulator string, whose motion in the
-wind is computed by MoorDyn-C (:doc:`../CouplingToMoorDyn`) while ERF supplies
-the wind. The questions it answers are those of a line exposed to a fire wind:
-how far the span blows out, how its clearance to the ground and to its
-neighbours changes, and what tension the attachments carry.
+A conductor line (``Source/MovingBodies/Conductors``, inputs ``erf.conductors.*``)
+is an overhead power-line conductor or shield wire hanging between two
+dead-end attachments, either as a single span or as a section of spans over
+suspension towers, where it hangs from insulator strings or is clamped. Its
+motion in the wind is computed by MoorDyn-C (:doc:`../CouplingToMoorDyn`)
+while ERF supplies the wind. The questions it answers are those of a line
+exposed to a fire wind: how far the spans blow out, how their clearance to
+the ground and to the neighbouring lines changes, and what tension the
+attachments carry.
 
 Model
 -----
@@ -37,6 +39,49 @@ quasi-static blowout angle :math:`\phi = \arctan(q / w)` and its tension rises
 with the effective weight :math:`\sqrt{w^2 + q^2}`. The diagnostics report
 the swing angle of the middle node about the chord against exactly this
 reference.
+
+Sections and insulator strings
+------------------------------
+
+On a real line the conductor runs over many towers. At a suspension tower it
+hangs from an insulator string, a chain of porcelain or glass discs a few
+metres long that swings freely, and the spans on either side pull along the
+line with nearly the same force, so the string only swings across the line
+with the wind. At a dead-end (strain) tower the conductor is anchored. A
+single span between two fixed points cannot hang from suspension strings:
+nothing would balance its horizontal tension, some 13 kN for the test
+conductor, and the strings would be dragged along the line until nearly
+horizontal. The ``towers`` of a line are therefore the suspension points
+between its two dead-ends: the line becomes a section of one span more than
+the towers, each span with its own unstretched ``length``, written as one
+MoorDyn system. With ``insulator_length`` the conductor hangs at each tower
+from a string, a short MoorDyn line from a fixed point at the tower down to a
+free point where the spans either side meet, with the string's mass, the
+wind on its disc diameter, an axial stiffness of 1e7 N (a 2.5 m string gives
+4 mm under a 15 kN conductor) and two segments; without it the conductor is
+clamped to the towers, as a shield wire is at the tower peaks.
+
+The span quantities (sag, offset, swing, tensions, clearance, drag) are
+reported per span, measured from the chord between the span's attachment
+points at the towers, so the sag and the blowout of a span on strings
+include the drop and the swing of its strings: the blowout is the conductor's
+displacement from the vertical plane of the tower attachments, the number
+that sets its clearance. Each string's angle from the vertical, its angle
+across the line (positive to the left of the direction from ``end_a`` to
+``end_b``, the side a positive offset is on) and the tension at its top are
+reported too.
+
+In a steady crosswind each string of a long section swings to the angle of
+the transverse load over the vertical load it carries, the wind span over
+the weight span: with equal spans of length :math:`L` either side,
+
+.. math::
+
+   \tan\theta = \frac{q L + q_i L_i / 2}{w L + W_i / 2},
+
+where :math:`q_i = \rho C_d D_i U^2 / 2` is the wind load per unit length of
+the string of length :math:`L_i` and diameter :math:`D_i`, and :math:`W_i` its
+weight net of buoyancy.
 
 Lockstep with ERF
 -----------------
@@ -90,10 +135,13 @@ of slack and 20 segments in air of density 1.2 kg/m^3 (the unit tests
 * released after a one-second gust into still air, the span swings with the
   first out-of-plane period of a cable, :math:`T = 2c/\sqrt{H/m}` (Irvine,
   *Cable Structures*, 1981), which does not depend on the sag: 6.658 s
-  measured over five periods against 6.655 s.
-
-Both agree within 0.1 %; the tests allow 1 %.
-
+  measured over five periods against 6.655 s;
+* a section of three such spans over two suspension towers, hanging from
+  2.5 m strings of 60 kg, swings its strings in a steady 20 m/s crosswind to
+  22.382 degrees on average over 30 to 60 s, against 22.446 degrees from the
+  wind span over the weight span (0.3 %), and at most 0.11 degrees along
+  the line, the spans either side balancing (a probe gave 5.904 against
+  5.896 degrees at 10 m/s and 42.56 against 42.91 at 30 m/s);
 * in still air the span hangs in the elastic catenary: the parameter
   :math:`a = H/w` solves :math:`2a\sinh(c/2a) = L_s`, where the stretched
   length :math:`L_s` exceeds the unstretched one by the strain integrated
@@ -103,21 +151,25 @@ Both agree within 0.1 %; the tests allow 1 %.
   segments and converges to 13.5838 m with 160 (the parabola estimate,
   12.99 m, and the inextensible catenary, 13.01 m, are both too low). The
   start-up log prints MoorDyn's sag and end tension against the elastic
-  catenary for every level span.
+  catenary for every level span between fixed points.
 
-The verification tests skip on the stub library, which has no line
+The blowout and swing period agree within 0.1 %, the string swing within
+0.3 % and the still-air sag within 0.11 %; the tests allow 1 % (0.5 % for the
+catenary). The verification tests skip on the stub library, which has no line
 dynamics and hangs a parabola.
 
 Placement on terrain
 --------------------
 
-The ``z`` of each attachment is its height above the terrain surface at its
-``(x, y)``: the surface height is read from the mesh with the actuator core's
-``terrain_heights`` (the ``k = 0`` node plane, bilinear between the nodes) and
-added once at start-up, so on a flat mesh ``z`` is the absolute height. The
-attachments must lie inside the domain. ``<diagnostics_dir>/ground.dat`` lists
-each end with the terrain height found under it and its resulting absolute
-height.
+The ``z`` of each attachment, the ends and the towers, is its height above
+the terrain surface at its ``(x, y)``: the surface height is read from the
+mesh with the actuator core's ``terrain_heights`` (the ``k = 0`` node plane,
+bilinear between the nodes) and added once at start-up, so on a flat mesh
+``z`` is the absolute height, and a tower on a hill top holds its conductor
+that much higher. The attachments must lie inside the domain.
+``<diagnostics_dir>/ground.dat`` lists each attachment (``a``, the towers
+``t1``, ``t2``, ..., ``b``) with the terrain height found under it and its
+resulting absolute height.
 
 Drag on the flow
 ----------------
@@ -140,21 +192,28 @@ Diagnostics
 -----------
 
 Every ``diagnostics_int`` steps each span appends a row to
-``<output_root>.dat`` (whitespace separated, like ERF's data logs): the time,
+``<output_root>.dat`` for a single span, or ``<output_root>_span<k>.dat`` for
+span ``k`` of a section (whitespace separated, like ERF's data logs): the time,
 the middle node's position, its sag below the chord, its lateral offset from
 the chord's vertical plane, the swing angle in degrees, the tension at the
 first and last node, the largest tension on the line, the wind handed to
 MoorDyn at the middle node, the smallest clearance of any node above the
 terrain under it with that node's horizontal position, and the air's total
-drag on the line. The clearance uses the terrain surface under each node
+drag on the span. A line on strings also writes
+``<output_root>_insulators.dat``: for each tower ``t<j>`` the string's swing
+from the vertical and across the line in degrees and the tension at its top.
+The clearance uses the terrain surface under each node
 (``terrain_heights``, the ``k = 0`` node plane), so a blown-out span on a
 slope is measured against the ground it now hangs over.
 
 From ``stats_start`` on each span keeps running statistics, the mean, root
 mean square, minimum and maximum of its swing angle, mid-span offset, end
 and maximum tensions, minimum clearance and crosswind drag, in
-``<output_root>_stats.csv``; these are the numbers a turbulent-wind run is
-judged on. With ``node_output_int`` every node of every span (position,
+``<output_root>_stats.csv`` (``<output_root>_span<k>_stats.csv`` in a
+section), and the strings theirs in ``<output_root>_insulators_stats.csv``;
+these are the numbers a turbulent-wind run is judged on. With
+``node_output_int`` every node of every line (the spans' in order, then the
+strings'; position,
 clearance, tension, wind and drag) is written to ``<output_root>_nodes.dat``
 for plotting the line's shape. ``<diagnostics_dir>/total_load.dat`` holds
 the air's drag on all lines, the force the lines put into the air (zero
@@ -164,25 +223,49 @@ file the span was built from is kept next to it
 (``<diagnostics_dir>/<name>.moordyn.txt``) for inspection or for running
 MoorDyn on its own.
 
+Clearance between lines
+-----------------------
+
+Every pair of lines is watched for how close their conductors come: the
+closest approach of the two polylines through their span nodes (the
+strings left out, since a string belongs to its own phase), found exactly
+from the closest points of every pair of segments. Every
+``diagnostics_int`` steps ``<diagnostics_dir>/separation.dat`` gets, for
+each pair ``A-B``, that distance, the point midway between the closest
+points and a clash flag, 1 when the distance is below
+``flashover_distance``, the gap an arc is assumed to jump. The flashover
+distance depends on the voltage and the line's insulation coordination; the
+default of 1 m is a placeholder to be set for the line studied. From
+``stats_start`` each pair keeps the mean, root mean square, minimum and
+maximum of the distance and of the flag, whose mean is the fraction of the
+time spent in a clash, in ``<diagnostics_dir>/separation_A-B_stats.csv``.
+The start-up log prints how far apart each pair hangs in still air and
+warns when a pair starts inside the flashover distance. Two identical
+parallel lines are almost equally far apart along their whole length, so
+where they come closest can move by a span on a millimetre's difference;
+the distance itself is well defined.
+
 Restart
 -------
 
-A checkpoint carries the spans under ``<chk>/conductors``: each line's whole
-MoorDyn state (node positions and velocities, internal forces and the time
-integrator's state, through MoorDyn's own save), the running statistics, the
-step count and the time. On a restart the line is created from the same
+A checkpoint carries the lines under ``<chk>/conductors``: each line's whole
+MoorDyn state (node and free-point positions and velocities, internal forces
+and the time integrator's state, through MoorDyn's own save), the running
+statistics of every span, string set and pair of lines, the step count and
+the time. On a restart the line is created from the same
 inputs, initialised without the initial-shape solve and given that state, so
 it continues blown out exactly where the checkpoint left it, on MoorDyn's
 clock; the statistics go on accumulating, and the diagnostics continue on the
 step count of the original run. With ``drag_on_flow`` the restored lines' drag
 is spread into the momentum sources again at once, so a plotfile written at
-the restart shows the source of the checkpointed step. The span logs,
-``<output_root>_nodes.dat`` and ``total_load.dat`` are appended to, after
+the restart shows the source of the checkpointed step. The span and string
+logs, ``<output_root>_nodes.dat``, ``total_load.dat`` and ``separation.dat``
+are appended to, after
 the rows a run wrote beyond the checkpoint time are dropped, so a run that
 went on past its last checkpoint and is restarted from it leaves no
-duplicated stretch. The spans of a restart must be those of the run that
-wrote the checkpoint, in the same order and with the same number of
-segments; anything else stops the run naming the span. A checkpoint without
+duplicated stretch. The lines of a restart must be those of the run that
+wrote the checkpoint, in the same order and with the same spans, towers,
+segments and strings; anything else stops the run naming the line. A checkpoint without
 conductor state, from a run without spans, starts them afresh from their
 still-air shape, with MoorDyn's clock at zero at the restart time.
 
@@ -192,5 +275,7 @@ Checks at start-up
 A run with spans refuses to start with any ``amrex.fpe_trap_*`` input on
 (MoorDyn's initial-condition solver overflows an intermediate value), with an
 anchor level that is not a level of the run, with a span whose length does not
-exceed its chord, or with any span value outside its documented range. Every
-message names the input key.
+exceed its chord, with a length missing for a span of a section, with
+insulator strings on a line without towers or longer than a tower is high,
+or with any other value outside its documented range. Every message names the
+input key.

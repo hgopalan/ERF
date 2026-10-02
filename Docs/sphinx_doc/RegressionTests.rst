@@ -782,15 +782,34 @@ start over make the logs differ, and a stub that forgot the direction of the
 last wind on its restore moved the blown-out line back into its vertical
 plane.
 
+``Conductors_Circuit`` (stub) and ``Conductors_Circuit_MoorDyn`` (real
+library) are a circuit in the same sheared crosswind: three phases 6 m apart,
+each a section of three 300 m spans hanging from 2.5 m insulator strings at
+two suspension towers, and a steel shield wire 7 m above the middle phase,
+clamped at the towers. The middle phase's middle span, its strings and their
+statistics, the shield wire's middle span and the closest-approach
+statistics of two pairs of lines are compared with golds of each library
+(``EXTRA_LOGS`` in ``add_test_conductors``, with ``.gold`` or
+``.moordyn.gold`` after the file name; a ``.csv`` table is compared as a
+whitespace-separated one). Where two identical parallel lines come closest
+is decided by millimetres, so ``separation.dat`` with its locations is
+checked by the restart parity tests ``Conductors_Circuit_Restart`` and
+``Conductors_Circuit_Restart_MoorDyn``, ten steps straight against five, a
+checkpoint and five more, one binary against itself, together with the
+strings' log, the span logs and the statistics. The flow is
+``Conductors_FlowWind``'s gold, since nothing goes back into it.
+
 The ``Linux GCC MoorDyn`` CI workflow
 runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with
 ``Build/setup_moordyn.sh``, the real-library tests in another.
 
 Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files/Conductors_FlowWind`_,
-`Tests/test_files/Conductors_DragOnFlow`_
+`Tests/test_files/Conductors_DragOnFlow`_, `Tests/test_files/Conductors_Circuit`_
 
 .. _`Tests/test_files/Conductors_PrescribedWind`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_PrescribedWind
 
 .. _`Tests/test_files/Conductors_FlowWind`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_FlowWind
 
 .. _`Tests/test_files/Conductors_DragOnFlow`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_DragOnFlow
+
+.. _`Tests/test_files/Conductors_Circuit`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_Circuit

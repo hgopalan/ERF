@@ -11,17 +11,21 @@
 namespace erf_conductors {
 
 /**
- * The MoorDyn-C input file of one span, generated from the ERF inputs.
+ * The MoorDyn-C input file of one conductor line, generated from the ERF inputs.
+ *
+ * Points 1 .. N+1 are the attachment points in order (end_a, the towers, end_b), all fixed; with
+ * insulator strings, points N+2 .. 2N are the free points at the lower end of the string at each
+ * tower, where the conductor hangs. Lines 1 .. N are the spans, from end_a to end_b; with
+ * insulator strings, lines N+1 .. 2N-1 are the strings, each from its tower down to its free point.
  *
  * MoorDyn applies its fluid loads to nodes below its free surface at z = 0 and puts a flat
  * bottom at -WtrDpth, so the span is written in MoorDyn's frame, every height lowered by
  * surface_offset (z_md = z_erf - surface_offset); the bottom is placed another surface_offset
  * lower, where nothing reaches it. The fluid density is the air density, the fluid kinematics
- * are external (WaveKin = 1, the wind ERF samples at the nodes), both attachments are fixed,
- * the initial shape comes from MoorDyn's stationary solver, and MoorDyn's own outputs are off
+ * are external (WaveKin = 1, the wind ERF samples at the nodes), the initial shape comes from MoorDyn's stationary solver, and MoorDyn's own outputs are off
  * (ERF writes the diagnostics).
  *
- * @param s the span; end_a and end_b already at their absolute heights (the terrain added)
+ * @param s the line; its attachment points already at their absolute heights (the terrain added)
  * @param in the shared settings (air density, surface offset, MoorDyn step, CFL)
  * @param gravity ERF's gravity (m/s^2)
  */

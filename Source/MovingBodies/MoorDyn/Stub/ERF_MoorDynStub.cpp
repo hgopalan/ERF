@@ -5,8 +5,11 @@
 // between its two attachment points as a parabola with the catenary sag of its unstretched length,
 // swings about the chord to the quasi-static blowout angle atan(q / w) set by the fluid velocity it
 // is given (q the drag per unit length, w the weight per unit length), relaxing towards that angle
-// with a one-second lag so that the state depends on time, and carries the catenary tension. Only
-// fixed and coupled points are accepted; the fluid loads act on nodes below z = 0, as in MoorDyn (the
+// with a one-second lag so that the state depends on time, and carries the catenary tension. Fixed,
+// coupled and free points are accepted. A free point hangs from the shortest line that ties it to a
+// fixed point (an insulator string from its tower), at the swing direction of the other line attached
+// to it as that line was last placed, and the hanging line runs straight from the fixed point to it;
+// the fluid loads act on nodes below z = 0, as in MoorDyn (the
 // drag on each node is the normal wind's dynamic pressure on its share of the line), and
 // the external kinematics points follow MoorDyn-C 2.7.1's order: the line nodes, the points, then one
 // entry at the origin.
@@ -36,6 +39,8 @@ struct Point {
     int type = 1;    // -1 coupled, 0 free, 1 fixed
     double pos[3] = {0.0, 0.0, 0.0};
     double force[3] = {0.0, 0.0, 0.0};
+    int hang_line = -1;   // a free point: the line it hangs from (index into lines)
+    int swing_line = -1;  // a free point: the line whose swing direction it follows
 };
 
 struct Line {
@@ -48,6 +53,8 @@ struct Line {
     double H = 0.0;                 // horizontal tension (m)
     double w_eff = 0.0;             // effective weight per unit length (N/m)
     std::vector<double> pos, vel, ten, drag;   // 3*(nseg+1) each
+    bool hanging = false;            // ties a free point to a fixed point: placed straight between them
+    double es[3] = {0.0, 0.0, -1.0}; // the direction of the sag, as last placed
 };
 
 struct StubSystem {
@@ -111,7 +118,8 @@ bool parse (const std::string& fname, StubSystem& s)
             const std::string ty = lower(tok[1]);
             if (ty.rfind("fix", 0) == 0 || ty.rfind("anch", 0) == 0) { p.type = 1; }
             else if (ty.rfind("coupled", 0) == 0 || ty.rfind("vessel", 0) == 0 || ty.rfind("cpld", 0) == 0) { p.type = -1; }
-            else { std::fprintf(stderr, "MoorDyn stub: point type '%s' is not supported (fixed or coupled only)\n", tok[1].c_str()); return false; }
+            else if (ty.rfind("free", 0) == 0 || ty.rfind("conn", 0) == 0) { p.type = 0; }
+            else { std::fprintf(stderr, "MoorDyn stub: point type '%s' is not supported (fixed, coupled or free)\n", tok[1].c_str()); return false; }
             for (int d = 0; d < 3; ++d) { p.pos[d] = std::stod(tok[2 + d]); }
             s.points.push_back(p);
         } else if (section == "lines") {
@@ -140,6 +148,28 @@ bool parse (const std::string& fname, StubSystem& s)
         if (l.attachA < 1 || l.attachA > static_cast<int>(s.points.size()) || l.attachB < 1 || l.attachB > static_cast<int>(s.points.size())) {
             std::fprintf(stderr, "MoorDyn stub: a line attaches to a point that does not exist\n"); return false;
         }
+    }
+    // each free point hangs from the shortest line that ties it to a fixed point, and swings with
+    // another line attached to it
+    for (std::size_t ip = 0; ip < s.points.size(); ++ip) {
+        Point& p = s.points[ip];
+        if (p.type != 0) { continue; }
+        const int id = static_cast<int>(ip) + 1;
+        for (std::size_t il = 0; il < s.lines.size(); ++il) {
+            const Line& l = s.lines[il];
+            const int other = (l.attachA == id) ? l.attachB : ((l.attachB == id) ? l.attachA : 0);
+            if (other == 0) { continue; }
+            if (s.points[static_cast<std::size_t>(other - 1)].type == 1 &&
+                (p.hang_line < 0 || l.length < s.lines[static_cast<std::size_t>(p.hang_line)].length)) {
+                p.hang_line = static_cast<int>(il);
+            }
+        }
+        for (std::size_t il = 0; il < s.lines.size(); ++il) {
+            const Line& l = s.lines[il];
+            if (static_cast<int>(il) != p.hang_line && (l.attachA == id || l.attachB == id)) { p.swing_line = static_cast<int>(il); break; }
+        }
+        if (p.hang_line < 0) { std::fprintf(stderr, "MoorDyn stub: free point %d hangs from no fixed point\n", id); return false; }
+        s.lines[static_cast<std::size_t>(p.hang_line)].hanging = true;
     }
     return true;
 }
@@ -196,7 +226,7 @@ void place (StubSystem& s, Line& l, const double* U_nodes, double dt)
     const double phi_static = (w > 0.0) ? std::atan2(q, w) : 0.0;
     const double tau = 1.0;
     l.phi = (dt > 0.0) ? phi_static + (l.phi - phi_static) * std::exp(-dt / tau) : l.phi;
-    double es[3];
+    double* es = l.es;
     for (int d = 0; d < 3; ++d) { es[d] = std::cos(l.phi) * down[d] + std::sin(l.phi) * side[d]; }
     l.sag = sag;
     l.w_eff = std::sqrt(w * w + q * q);
@@ -274,16 +304,80 @@ unsigned kin_points (const StubSystem& s)
     return n + 1 + static_cast<unsigned>(s.points.size());
 }
 
-void advance (StubSystem& s, double dt)
+// A hanging line from its fixed point straight to its free point, with the weight of the lines it
+// carries and its own as its tension, and the normal wind's drag on its nodes.
+void place_hanging (StubSystem& s, Line& l, const double* U_nodes)
 {
-    unsigned off = 0;
-    for (auto& l : s.lines) {
-        const double* U = (s.nkin > 0 && !s.U.empty()) ? &s.U[3 * off] : nullptr;
-        place(s, l, U, dt);
-        off += l.nseg + 1;
+    const LineType& ty = s.types[static_cast<std::size_t>(l.type_index)];
+    const bool a_fixed = s.points[static_cast<std::size_t>(l.attachA - 1)].type == 1;
+    const Point& top = s.points[static_cast<std::size_t>((a_fixed ? l.attachA : l.attachB) - 1)];
+    const Point& bot = s.points[static_cast<std::size_t>((a_fixed ? l.attachB : l.attachA) - 1)];
+    const int bot_id = a_fixed ? l.attachB : l.attachA;
+    const unsigned nn = l.nseg + 1;
+    double e[3], len = 0.0;
+    for (int d = 0; d < 3; ++d) { e[d] = bot.pos[d] - top.pos[d]; len += e[d] * e[d]; }
+    len = std::sqrt(len);
+    for (int d = 0; d < 3; ++d) { e[d] /= std::max(len, 1.0e-12); }
+    double load = (ty.mass - s.rho * 0.25 * pi * ty.diam * ty.diam) * s.g * l.length;
+    for (const auto& o : s.lines) {
+        if (&o == &l || (o.attachA != bot_id && o.attachB != bot_id)) { continue; }
+        double c = 0.0;
+        for (int d = 0; d < 3; ++d) {
+            const double dd = s.points[static_cast<std::size_t>(o.attachB - 1)].pos[d] - s.points[static_cast<std::size_t>(o.attachA - 1)].pos[d];
+            c += dd * dd;
+        }
+        load += 0.5 * o.w_eff * std::sqrt(c);
+    }
+    std::vector<double> newpos(3 * nn);
+    l.ten.assign(3 * nn, 0.0);
+    l.drag.assign(3 * nn, 0.0);
+    for (unsigned i = 0; i < nn; ++i) {
+        const double xi = static_cast<double>(i) / l.nseg;
+        for (int d = 0; d < 3; ++d) {
+            const double from = a_fixed ? top.pos[d] : bot.pos[d];
+            const double to = a_fixed ? bot.pos[d] : top.pos[d];
+            newpos[3*i+d] = from + xi * (to - from);
+            l.ten[3*i+d] = load * (a_fixed ? -e[d] : e[d]);
+        }
+        if (U_nodes == nullptr || newpos[3*i+2] > 0.0) { continue; }
+        const double udc = U_nodes[3*i]*e[0] + U_nodes[3*i+1]*e[1] + U_nodes[3*i+2]*e[2];
+        double un[3];
+        for (int d = 0; d < 3; ++d) { un[d] = U_nodes[3*i+d] - udc * e[d]; }
+        const double mag = std::sqrt(un[0]*un[0] + un[1]*un[1] + un[2]*un[2]);
+        const double share = (i == 0 || i == l.nseg) ? 0.5 * len / l.nseg : len / l.nseg;
+        for (int d = 0; d < 3; ++d) { l.drag[3*i+d] = 0.5 * s.rho * ty.Cd * ty.diam * mag * un[d] * share; }
+    }
+    l.vel.assign(3 * nn, 0.0);
+    l.pos = newpos;
+    l.w_eff = 0.0;
+}
+
+// Place every line: the free points first (hanging below their fixed point at the swing direction
+// their line had when last placed) unless they are kept, then the other lines, then the hanging ones.
+void place_all (StubSystem& s, double dt, bool move_free_points)
+{
+    if (move_free_points) {
+        for (auto& p : s.points) {
+            if (p.type != 0) { continue; }
+            const Line& h = s.lines[static_cast<std::size_t>(p.hang_line)];
+            const Point& top = s.points[static_cast<std::size_t>((s.points[static_cast<std::size_t>(h.attachA - 1)].type == 1 ? h.attachA : h.attachB) - 1)];
+            const double* es = (p.swing_line >= 0) ? s.lines[static_cast<std::size_t>(p.swing_line)].es : h.es;
+            for (int d = 0; d < 3; ++d) { p.pos[d] = top.pos[d] + h.length * es[d]; }
+        }
+    }
+    std::vector<unsigned> off(s.lines.size(), 0);
+    for (std::size_t i = 1; i < s.lines.size(); ++i) { off[i] = off[i-1] + s.lines[i-1].nseg + 1; }
+    const bool wind = (s.nkin > 0 && !s.U.empty());
+    for (std::size_t i = 0; i < s.lines.size(); ++i) {
+        if (!s.lines[i].hanging) { place(s, s.lines[i], wind ? &s.U[3 * off[i]] : nullptr, dt); }
+    }
+    for (std::size_t i = 0; i < s.lines.size(); ++i) {
+        if (s.lines[i].hanging) { place_hanging(s, s.lines[i], wind ? &s.U[3 * off[i]] : nullptr); }
     }
     update_point_forces(s);
 }
+
+void advance (StubSystem& s, double dt) { place_all(s, dt, true); }
 
 void coupled_forces (const StubSystem& s, double* f)
 {
@@ -334,7 +428,7 @@ static int stub_init (MoorDyn system, const double* x, bool)
     if (coupled_dof(s) > 0 && x == nullptr) { return MOORDYN_INVALID_VALUE; }
     set_coupled(s, x);
     s.t = 0.0;
-    for (auto& l : s.lines) { l.phi = 0.0; l.pos.clear(); }
+    for (auto& l : s.lines) { l.phi = 0.0; l.pos.clear(); l.es[0] = 0.0; l.es[1] = 0.0; l.es[2] = -1.0; }
     advance(s, 0.0);
     s.initialised = true;
     return MOORDYN_SUCCESS;
@@ -466,6 +560,8 @@ int MoorDyn_Save (MoorDyn system, const char* filepath)
     // restored line would hang in the plane of its swing angle but towards no wind
     for (double v : s.U) { out << v << " "; }
     out << "\n";
+    // where the free points hang: they follow their lines' swing of the step before
+    for (const auto& p : s.points) { if (p.type == 0) { out << p.pos[0] << " " << p.pos[1] << " " << p.pos[2] << "\n"; } }
     return MOORDYN_SUCCESS;
 }
 
@@ -486,16 +582,12 @@ int MoorDyn_Load (MoorDyn system, const char* filepath)
     // the fluid velocity of the last step, for the points ExternalWaveKinInit set up
     if (nu != s.U.size()) { return MOORDYN_INVALID_INPUT; }
     for (double& v : s.U) { if (!(in >> v)) { return MOORDYN_INVALID_INPUT; } }
-    // the shape, tensions and drag follow from the restored angle and fluid velocity; velocities restart from rest
-    unsigned off = 0;
-    for (auto& l : s.lines) {
-        const double phi = l.phi;
-        const double* U = (s.nkin > 0 && !s.U.empty()) ? &s.U[3 * off] : nullptr;
-        place(s, l, U, 0.0);
-        l.phi = phi;
-        off += l.nseg + 1;
+    for (auto& p : s.points) {
+        if (p.type == 0) { for (double& v : p.pos) { if (!(in >> v)) { return MOORDYN_INVALID_INPUT; } } }
     }
-    update_point_forces(s);
+    // the shape, tensions and drag follow from the restored angles, free points and fluid velocity;
+    // velocities restart from rest
+    place_all(s, 0.0, false);
     return MOORDYN_SUCCESS;
 }
 

@@ -2,11 +2,17 @@
 // (heights lowered by the surface offset), with the air density, gravity, external kinematics,
 // a flat bottom below everything, both attachments fixed, the line's properties and segments;
 // MoorDyn (the stub or the real library) accepts the file and puts the end nodes on the
-// attachments, and to_erf_frame brings the positions back.
+// attachments, and to_erf_frame brings the positions back. A section is written with fixed points
+// at every attachment, a free point under each tower's insulator string, the spans between them
+// and the strings from the towers down, and MoorDyn hangs the conductor from the strings.
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -25,7 +31,7 @@ SpanInputs span ()
     s.name = "S1";
     s.end_a = {{100.0, 500.0, 30.0}};
     s.end_b = {{400.0, 500.0, 40.0}};
-    s.length = 301.5; s.diameter = 0.0281; s.mass_per_length = 1.628; s.axial_stiffness = 3.0e7;
+    s.lengths = {301.5}; s.diameter = 0.0281; s.mass_per_length = 1.628; s.axial_stiffness = 3.0e7;
     s.drag_coefficient = 1.1; s.damping_ratio = 0.4; s.segments = 16;
     return s;
 }
@@ -42,6 +48,32 @@ ConductorInputs settings ()
 
 bool has_row (const std::string& text, const std::string& row) { return text.find(row) != std::string::npos; }
 
+// the numbers of the row whose first token is name (the line types are written with as many digits
+// as a Real holds, so they are compared as numbers)
+std::vector<double> row_numbers (const std::string& text, const std::string& name)
+{
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream ls(line);
+        std::string first;
+        if (!(ls >> first) || first != name) { continue; }
+        std::vector<double> v;
+        double x;
+        while (ls >> x) { v.push_back(x); }
+        return v;
+    }
+    return {};
+}
+
+void expect_numbers (const std::vector<double>& got, const std::vector<double>& want, const std::string& what)
+{
+    ASSERT_GE(got.size(), want.size()) << what;
+    for (std::size_t i = 0; i < want.size(); ++i) {
+        EXPECT_NEAR(got[i], want[i], 1.0e-6 * std::max(1.0, std::abs(want[i]))) << what << " column " << i;
+    }
+}
+
 } // namespace
 
 TEST(MoorDynInputWriter, TheSpanIsWrittenInMoorDynsFrameWithAirAndExternalKinematics)
@@ -52,7 +84,7 @@ TEST(MoorDynInputWriter, TheSpanIsWrittenInMoorDynsFrameWithAirAndExternalKinema
     EXPECT_TRUE(has_row(text, "LINES"));
     EXPECT_TRUE(has_row(text, "OPTIONS"));
     // the line type row: diameter, mass, EA, -damping ratio (MoorDyn's "-zeta" form), EI 0, Cd
-    EXPECT_TRUE(has_row(text, "S1   0.0281   1.628   30000000   -0.4   0   1.1")) << text;
+    expect_numbers(row_numbers(text, "S1"), {0.0281, 1.628, 3.0e7, -0.4, 0.0, 1.1}, "line type");
     // the attachments, fixed, lowered by the surface offset
     EXPECT_TRUE(has_row(text, "1     Fixed     100   500   -4970")) << text;
     EXPECT_TRUE(has_row(text, "2     Fixed     400   500   -4960")) << text;
@@ -97,4 +129,49 @@ TEST(MoorDynInputWriter, MoorDynAcceptsTheFileAndTheEndsComeBackInERFsFrame)
         EXPECT_NEAR(b[static_cast<std::size_t>(d)], s.end_b[static_cast<std::size_t>(d)], 1.0e-6) << "end b, dir " << d;
     }
     ASSERT_GT(sys->external_kinematics_init(err), 0u) << err;
+}
+
+TEST(MoorDynInputWriter, ASectionIsWrittenWithItsInsulatorStringsAndFreePoints)
+{
+    SpanInputs s = span();
+    s.end_b = {{1000.0, 500.0, 30.0}};
+    s.towers = {{{400.0, 500.0, 30.0}}, {{700.0, 500.0, 30.0}}};
+    s.lengths = {301.5, 301.5, 301.5};
+    s.end_b[2] = 30.0;
+    s.insulator_length = 2.5;
+    s.insulator_mass = 60.0;
+    s.segments = 20;
+    ConductorInputs in = settings();
+    const std::string text = erf_conductors::moordyn_input_text(s, in, 9.81);
+    // the string's line type: disc diameter, mass per length, its fixed stiffness, the damping, its drag
+    expect_numbers(row_numbers(text, "S1_insulator"), {0.254, 24.0, 1.0e7, -0.4, 0.0, 1.0}, "string line type");
+    // fixed points at every attachment, free points 2.5 m under the towers
+    EXPECT_TRUE(has_row(text, "1     Fixed     100   500   -4970")) << text;
+    EXPECT_TRUE(has_row(text, "2     Fixed     400   500   -4970")) << text;
+    EXPECT_TRUE(has_row(text, "4     Fixed     1000   500   -4970")) << text;
+    EXPECT_TRUE(has_row(text, "5     Free      400   500   -4972.5")) << text;
+    EXPECT_TRUE(has_row(text, "6     Free      700   500   -4972.5")) << text;
+    // the spans hang from the free points; the strings run from the towers down to them
+    EXPECT_TRUE(has_row(text, "1     S1      1        5         301.5   20")) << text;
+    EXPECT_TRUE(has_row(text, "2     S1      5        6         301.5   20")) << text;
+    EXPECT_TRUE(has_row(text, "3     S1      6        4         301.5   20")) << text;
+    EXPECT_TRUE(has_row(text, "4     S1_insulator      2        5         2.5   2")) << text;
+    EXPECT_TRUE(has_row(text, "5     S1_insulator      3        6         2.5   2")) << text;
+
+    // MoorDyn hangs the line from the strings: the free points sit 2.5 m under the towers in still air
+    in.moordyn_dt = 0.0;
+    const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_moordyn_writer";
+    std::filesystem::create_directories(dir);
+    const std::string file = (dir / "section.txt").string();
+    erf_conductors::write_moordyn_input(file, s, in, 9.81);
+    std::string err;
+    auto sys = erf_moordyn::MoorDynSystem::create(file, "", 3, err);
+    ASSERT_TRUE(sys) << err;
+    ASSERT_TRUE(sys->init({}, {}).empty());
+    EXPECT_EQ(sys->num_lines(), 5u);
+    for (unsigned p : {5u, 6u}) {
+        const auto pos = erf_conductors::to_erf_frame(sys->point_position(p), in.surface_offset);
+        EXPECT_NEAR(pos[2], 27.5, 0.05) << "free point " << p;
+        EXPECT_NEAR(pos[1], 500.0, 1.0e-6) << "free point " << p;
+    }
 }

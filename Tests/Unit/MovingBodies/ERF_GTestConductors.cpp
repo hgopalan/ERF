@@ -3,8 +3,10 @@
 // nodes) and ground.dat records it; on a uniform-dz mesh the given heights are absolute; the
 // spans step only on the anchor level and write one diagnostics row per step; and without a
 // prescribed velocity the wind handed to MoorDyn is ERF's velocity sampled where the line is
-// now, not where it hung; and a restart from a checkpoint continues the lines, their drag on the
-// air, their statistics and their logs exactly where the checkpoint left them.
+// now, not where it hung; a restart from a checkpoint continues the lines, their drag on the
+// air, their statistics and their logs exactly where the checkpoint left them; a section is placed
+// on the terrain at every tower and logs each span and its strings; and the closest approach of two
+// lines is the exact distance between their conductors, flagged against the flashover distance.
 
 #include <algorithm>
 #include <array>
@@ -108,7 +110,7 @@ void set_inputs (const std::string& dir, const std::string& name, bool prescribe
     pp.add("diagnostics_dir", dir);
     pp.add("air_density", 1.2);
     // ParmParse is global to the test binary: drop what another test left before setting this one's
-    for (const char* key : {"prescribed_velocity", "drag_on_flow", "epsilon", "node_output_int", "stats_start"}) { pp.remove(key); }
+    for (const char* key : {"prescribed_velocity", "drag_on_flow", "epsilon", "node_output_int", "stats_start", "flashover_distance"}) { pp.remove(key); }
     if (prescribed) { pp.addarr("prescribed_velocity", std::vector<Real>{0.0, 10.0, 0.0}); }
     amrex::ParmParse ps("erf.conductors." + name);
     ps.addarr("end_a", std::vector<Real>{a[0], a[1], a[2]});
@@ -447,4 +449,157 @@ TEST(Conductors, TrimmingALogKeepsTheHeaderAndTheRowsUpToTheCheckpoint)
     EXPECT_EQ(slurp(f), "time a b\n# a comment\n");
     erf_conductors::trim_log_after(dir + "/missing.dat", 1.0);
     EXPECT_FALSE(std::filesystem::exists(dir + "/missing.dat"));
+}
+
+TEST(Conductors, ASectionIsPlacedOnTheTerrainAtEveryTowerAndLogsEachSpan)
+{
+    const std::string dir = scratch("section");
+    set_inputs(dir, "Tsec", true, {{100.0, 500.0, 30.0}}, {{1000.0, 500.0, 30.0}});
+    amrex::ParmParse ps("erf.conductors.Tsec");
+    ps.remove("length");
+    ps.addarr("length", std::vector<Real>{301.5, 301.5, 301.5});
+    ps.addarr("towers", std::vector<Real>{400.0, 500.0, 30.0, 700.0, 500.0, 30.0});
+    ps.add("insulator_length", 2.5);
+    ps.add("insulator_mass", 60.0);
+    Mesh m(true);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(m.znd.get(), m.geom);
+    const auto& line = *c->spans().front();
+    ASSERT_EQ(line.num_spans(), 3);
+    // the towers stand on the ramp, and the conductor hangs 2.5 m under each
+    for (int k = 1; k <= 2; ++k) {
+        const Real x = 100.0 + 300.0 * k;
+        const auto p = line.node_position(line.span_first_node(k));
+        EXPECT_NEAR(p[0], x, 0.05) << "tower " << k;
+        EXPECT_NEAR(p[2], m.h(x, 500.0) + 30.0 - 2.5, 0.05) << "tower " << k;
+    }
+    std::ifstream g(dir + "/ground.dat");
+    std::string header, name, label;
+    Real x, y, ground, z;
+    std::getline(g, header);
+    std::vector<std::string> labels;
+    while (g >> name >> label >> x >> y >> ground >> z) {
+        labels.push_back(label);
+        EXPECT_NEAR(ground, m.h(x, y), 1.0e-6) << label;
+        EXPECT_NEAR(z, m.h(x, y) + 30.0, 1.0e-6) << label;
+    }
+    EXPECT_EQ(labels, (std::vector<std::string>{"a", "t1", "t2", "b"}));
+    for (int s = 0; s < 3; ++s) { c->advance(0, 0.2 * s, 0.2, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    // a log per span, one for the strings, and their statistics
+    for (const char* f : {"/Tsec_span1.dat", "/Tsec_span2.dat", "/Tsec_span3.dat", "/Tsec_insulators.dat",
+                          "/Tsec_span2_stats.csv", "/Tsec_insulators_stats.csv"}) {
+        EXPECT_TRUE(std::filesystem::exists(dir + f)) << f;
+    }
+    std::ifstream ins(dir + "/Tsec_insulators.dat");
+    std::getline(ins, header);
+    EXPECT_EQ(header, "time t1_swing_deg t1_across_deg t1_tension t2_swing_deg t2_across_deg t2_tension");
+    // the strings' statistics: a sample per step, the strings swinging with the +y wind
+    std::ifstream st(dir + "/Tsec_insulators_stats.csv");
+    std::getline(st, header);
+    std::string row;
+    std::getline(st, row);
+    EXPECT_EQ(row.substr(0, row.find(',')), "3") << row;
+    EXPECT_NE(row.find(",t1_swing_deg,"), std::string::npos) << row;
+    const Real mean_swing = std::stod(row.substr(row.find("t1_swing_deg,") + 13));
+    EXPECT_GT(mean_swing, 0.1) << row;
+    EXPECT_FALSE(std::filesystem::exists(dir + "/separation.dat")) << "one line: no pairs to watch";
+    ps.remove("towers");
+    ps.remove("insulator_length");
+    ps.remove("insulator_mass");
+}
+
+TEST(Conductors, TheClosestApproachOfTwoLinesIsFlaggedAgainstTheFlashoverDistance)
+{
+    const std::string dir = scratch("clash");
+    // two parallel spans 6 m apart across a +y wind; the upwind one is lighter, swings further and
+    // closes on the other
+    set_inputs(dir, "Pa", true, {{300.0, 500.0, 30.0}}, {{600.0, 500.0, 30.0}});
+    set_inputs(dir, "Pb", true, {{300.0, 506.0, 30.0}}, {{600.0, 506.0, 30.0}});
+    amrex::ParmParse pp("erf.conductors");
+    pp.addarr("spans", std::vector<std::string>{"Pa", "Pb"});
+    pp.add("flashover_distance", 5.5);
+    amrex::ParmParse("erf.conductors.Pa").add("mass_per_length", 1.0);
+    amrex::ParmParse("erf.conductors.Pb").add("mass_per_length", 3.0);
+    Mesh m(false);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(nullptr, m.geom);
+    ASSERT_EQ(c->pairs().size(), 1u);
+    EXPECT_NEAR(c->separations()[0].distance, 6.0, 0.1) << "at rest the spans hang side by side";
+    Real closest = 1.0e30;
+    for (int s = 0; s < 40; ++s) {
+        c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, nullptr, nullptr, m.geom);
+        // the distance is the exact minimum between the two conductors where they are now
+        const auto exact = erf_conductors::closest_polylines(c->spans()[0]->conductor_path(), c->spans()[1]->conductor_path());
+        ASSERT_NEAR(c->separations()[0].distance, exact.distance, 1.0e-12 * exact.distance) << "step " << s;
+        closest = std::min(closest, c->separations()[0].distance);
+    }
+    EXPECT_LT(closest, 5.5) << "the lighter line must close on the heavier one";
+    // separation.dat: the pair's columns, the flag off at rest and on once inside the flashover distance
+    std::ifstream f(dir + "/separation.dat");
+    std::string header;
+    std::getline(f, header);
+    EXPECT_EQ(header, "time Pa-Pb_distance Pa-Pb_x Pa-Pb_y Pa-Pb_z Pa-Pb_clash");
+    std::vector<std::array<Real,6>> rows;
+    std::array<Real,6> r{};
+    while (f >> r[0] >> r[1] >> r[2] >> r[3] >> r[4] >> r[5]) { rows.push_back(r); }
+    ASSERT_EQ(rows.size(), 41u) << "the initial row and one per step";
+    for (const auto& row : rows) { EXPECT_EQ(row[5], (row[1] < 5.5) ? 1.0 : 0.0) << "t = " << row[0]; }
+    EXPECT_EQ(rows.front()[5], 0.0);
+    EXPECT_EQ(rows.back()[5], 1.0);
+    EXPECT_GT(rows.back()[3], 500.0);
+    EXPECT_LT(rows.back()[3], 506.0) << "the closest point lies between the lines";
+    // the statistics: the fraction of samples in a clash is the mean of the flag
+    const std::string stats = slurp(dir + "/separation_Pa-Pb_stats.csv");
+    EXPECT_NE(stats.find(",clash,"), std::string::npos) << stats;
+    pp.addarr("spans", std::vector<std::string>{});
+    amrex::ParmParse("erf.conductors.Pa").remove("mass_per_length");
+    amrex::ParmParse("erf.conductors.Pb").remove("mass_per_length");
+}
+
+TEST(Conductors, ARestartContinuesASectionItsStringsAndTheSeparationOfTheLines)
+{
+    const std::string dir = scratch("restart_circuit");
+    // a section on strings and a single span beside its middle span
+    set_inputs(dir, "Rs", true, {{100.0, 500.0, 30.0}}, {{1000.0, 500.0, 30.0}});
+    set_inputs(dir, "Rp", true, {{400.0, 506.0, 30.0}}, {{700.0, 506.0, 30.0}});
+    amrex::ParmParse pp("erf.conductors");
+    pp.addarr("spans", std::vector<std::string>{"Rs", "Rp"});
+    amrex::ParmParse ps("erf.conductors.Rs");
+    ps.remove("length");
+    ps.addarr("length", std::vector<Real>{301.5, 301.5, 301.5});
+    ps.addarr("towers", std::vector<Real>{400.0, 500.0, 30.0, 700.0, 500.0, 30.0});
+    ps.add("insulator_length", 2.5);
+    ps.add("insulator_mass", 60.0);
+    Mesh m(false);
+    const double dt = 0.25;
+    auto a = Conductors::create(0);
+    ASSERT_TRUE(a);
+    a->set_ground(nullptr, m.geom);
+    int step = 0;
+    for (; step < 4; ++step) { a->advance(0, dt * step, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom); }
+    const std::string chk = dir + "/chk00004";
+    std::filesystem::create_directories(chk);
+    a->write_checkpoint(chk);
+    for (; step < 7; ++step) { a->advance(0, dt * step, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom); }
+    const auto files = std::vector<std::string>{"/separation.dat", "/separation_Rs-Rp_stats.csv", "/Rs_span2.dat",
+                                                "/Rs_insulators.dat", "/Rs_insulators_stats.csv", "/Rp.dat"};
+    std::vector<std::string> before;
+    for (const auto& f : files) { before.push_back(slurp(dir + f)); ASSERT_FALSE(before.back().empty()) << f; }
+    const Real sep = a->separations()[0].distance;
+
+    auto b = Conductors::create(0);
+    ASSERT_TRUE(b);
+    b->set_ground(nullptr, m.geom, chk);
+    ASSERT_TRUE(b->restored());
+    EXPECT_LT(slurp(dir + "/separation.dat").size(), before[0].size()) << "the separation log ends at the checkpoint";
+    for (step = 4; step < 7; ++step) { b->advance(0, dt * step, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom); }
+    for (std::size_t i = 0; i < files.size(); ++i) { EXPECT_EQ(slurp(dir + files[i]), before[i]) << files[i]; }
+    EXPECT_NEAR(b->separations()[0].distance, sep, 1.0e-9 * sep);
+    EXPECT_NEAR(b->spans()[0]->insulator_swing(0), a->spans()[0]->insulator_swing(0), roundoff);
+    pp.addarr("spans", std::vector<std::string>{});
+    ps.remove("towers");
+    ps.remove("insulator_length");
+    ps.remove("insulator_mass");
 }

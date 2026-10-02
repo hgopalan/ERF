@@ -1,0 +1,3 @@
+samples,t_first,t_last,quantity,mean,rms,min,max
+10,0.5,5,distance,6.940180639,6.940183053,6.929703078,6.946908122
+10,0.5,5,clash,0,0,0,0

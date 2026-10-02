@@ -20,12 +20,17 @@
 #include "ERF_ActuatorSpreading.H"
 #include "ERF_DiagnosticsLog.H"
 #include "ERF_Constants.H"
+#include "ERF_ConductorGeometry.H"
 #include "ERF_MoorDynSystem.H"
 
 using namespace amrex;
 using erf_conductors::ConductorInputs;
 using erf_conductors::ConductorSpan;
 using erf_conductors::SpanInputs;
+
+namespace {
+constexpr Real rad2deg = Real(180.0 / 3.14159265358979323846);
+}
 
 std::unique_ptr<Conductors>
 Conductors::create (int max_level)
@@ -35,7 +40,7 @@ Conductors::create (int max_level)
     const int anchor = ConductorInputs::resolve_anchor_level(in.anchor_level, max_level);
     const std::string err = ConductorInputs::validate_solver(max_level, anchor, erf_moordyn::fpe_traps_requested());
     if (!err.empty()) { Abort(err); }
-    Print() << "erf.conductors: " << in.spans.size() << " span(s) on MoorDyn-C " << erf_moordyn::library_version()
+    Print() << "erf.conductors: " << in.spans.size() << " line(s) on MoorDyn-C " << erf_moordyn::library_version()
             << (erf_moordyn::is_stub() ? " (the bundled stub stands in for MoorDyn)" : "") << ", anchor level " << anchor
             << ", wind " << (in.has_prescribed_velocity ? "prescribed" : "sampled from the flow at the line nodes")
             << ", drag " << (in.drag_on_flow ? "put back into the flow (epsilon " + std::to_string(in.epsilon) + " cells)" : "not put into the flow") << "\n";
@@ -52,40 +57,43 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
     m_ground_set = true;
 
     // the attachments must lie inside the domain horizontally: the terrain height is read there
-    for (const SpanInputs& s : m_in.spans) {
-        for (const auto* e : {&s.end_a, &s.end_b}) {
-            for (int d = 0; d < 2; ++d) {
-                if ((*e)[d] < geom.ProbLo(d) || (*e)[d] > geom.ProbHi(d)) {
-                    Abort("erf.conductors." + s.name + ": an attachment at (" + std::to_string((*e)[0]) + ", " +
-                          std::to_string((*e)[1]) + ") lies outside the domain");
-                }
-            }
-        }
-    }
     std::vector<Real> pos;
     for (const SpanInputs& s : m_in.spans) {
-        pos.insert(pos.end(), {s.end_a[0], s.end_a[1], s.end_a[2], s.end_b[0], s.end_b[1], s.end_b[2]});
+        for (int k = 0; k <= s.num_spans(); ++k) {
+            const auto& e = s.point(k);
+            for (int d = 0; d < 2; ++d) {
+                if (e[d] < geom.ProbLo(d) || e[d] > geom.ProbHi(d)) {
+                    Abort("erf.conductors." + s.name + ": an attachment at (" + std::to_string(e[0]) + ", " +
+                          std::to_string(e[1]) + ") lies outside the domain");
+                }
+            }
+            pos.insert(pos.end(), {e[0], e[1], e[2]});
+        }
     }
     erf_actuator::terrain_heights(z_phys_nd, geom, pos, m_ground);
     const Real floor_z = static_cast<Real>(geom.ProbLo(2));
     m_placed = m_in.spans;
-    for (std::size_t i = 0; i < m_placed.size(); ++i) {
-        m_placed[i].end_a[2] += m_ground[2*i] - floor_z;
-        m_placed[i].end_b[2] += m_ground[2*i+1] - floor_z;
-        for (const auto* e : {&m_placed[i].end_a, &m_placed[i].end_b}) {
-            if ((*e)[2] < geom.ProbLo(2) || (*e)[2] > geom.ProbHi(2)) {
-                Abort("erf.conductors." + m_placed[i].name + ": an attachment at height " + std::to_string((*e)[2]) +
-                      " m lies outside the domain");
+    std::size_t ip = 0;
+    for (SpanInputs& s : m_placed) {
+        for (int k = 0; k <= s.num_spans(); ++k, ++ip) {
+            auto& e = s.point(k);
+            e[2] += m_ground[ip] - floor_z;
+            if (e[2] < geom.ProbLo(2) || e[2] > geom.ProbHi(2)) {
+                Abort("erf.conductors." + s.name + ": an attachment at height " + std::to_string(e[2]) + " m lies outside the domain");
             }
         }
     }
     if (ParallelDescriptor::IOProcessor()) {
         UtilCreateDirectory(m_in.diagnostics_dir, 0755);
         std::ofstream out(m_in.diagnostics_dir + "/ground.dat", std::ios::trunc);
-        out << "span end x y ground z\n" << std::setprecision(10);
-        for (std::size_t i = 0; i < m_placed.size(); ++i) {
-            out << m_placed[i].name << " a " << m_placed[i].end_a[0] << " " << m_placed[i].end_a[1] << " " << m_ground[2*i] << " " << m_placed[i].end_a[2] << "\n"
-                << m_placed[i].name << " b " << m_placed[i].end_b[0] << " " << m_placed[i].end_b[1] << " " << m_ground[2*i+1] << " " << m_placed[i].end_b[2] << "\n";
+        out << "span point x y ground z\n" << std::setprecision(10);
+        ip = 0;
+        for (const SpanInputs& s : m_placed) {
+            for (int k = 0; k <= s.num_spans(); ++k, ++ip) {
+                const auto& e = s.point(k);
+                const std::string label = (k == 0) ? "a" : (k == s.num_spans() ? "b" : "t" + std::to_string(k));
+                out << s.name << " " << label << " " << e[0] << " " << e[1] << " " << m_ground[ip] << " " << e[2] << "\n";
+            }
         }
     }
     ParallelDescriptor::Barrier();
@@ -95,6 +103,7 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
         if (FileExists(dir + "/state")) {
             restore(dir);
             update_ground_under_nodes(z_phys_nd, geom);
+            measure_separation();
             return;
         }
         // a checkpoint written without conductors (a precursor, say): the spans start afresh here
@@ -104,28 +113,123 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
         const std::string file = m_in.diagnostics_dir + "/" + s.name + ".moordyn.txt";
         m_spans.push_back(std::make_unique<ConductorSpan>(s, m_in, CONST_GRAV, file));
         const ConductorSpan& c = *m_spans.back();
-        Print() << "erf.conductors." << s.name << ": chord " << s.chord() << " m, length " << s.length << " m, "
-                << c.num_nodes() << " nodes, initial sag " << c.mid_sag() << " m, end tensions " << c.tension_a() << " and "
-                << c.tension_b() << " N, MoorDyn input " << file << "\n";
-        if (std::abs(s.end_b[2] - s.end_a[2]) < Real(1.0e-6) * s.chord()) {
-            // a level span: compare MoorDyn's still-air shape with the elastic catenary
-            const Real w = (s.mass_per_length - m_in.air_density * Real(0.25) * Real(3.14159265358979323846) * s.diameter * s.diameter) * CONST_GRAV;
-            const erf_conductors::Catenary cat = erf_conductors::elastic_catenary(s.chord(), s.length, w, s.axial_stiffness);
-            Print() << "erf.conductors." << s.name << ": elastic catenary sag " << cat.sag << " m, end tension "
-                    << cat.end_tension << " N (MoorDyn's differ by " << 100.0 * (c.mid_sag() / cat.sag - 1.0) << " % and "
-                    << 100.0 * (c.tension_a() / cat.end_tension - 1.0) << " %)\n";
+        Print() << "erf.conductors." << s.name << ": " << s.num_spans() << " span(s)";
+        if (s.has_insulators()) { Print() << ", hanging from insulator strings of " << s.insulator_length << " m at the towers"; }
+        else if (!s.towers.empty()) { Print() << ", clamped at the towers"; }
+        Print() << ", " << c.num_nodes() << " nodes, MoorDyn input " << file << "\n";
+        for (int k = 0; k < s.num_spans(); ++k) {
+            const std::string which = (s.num_spans() == 1) ? "" : " span " + std::to_string(k + 1);
+            Print() << "  " << s.name << which << ": chord " << s.chord(k) << " m, length " << s.lengths[static_cast<std::size_t>(k)]
+                    << " m, initial sag " << c.mid_sag(k) << " m, end tensions " << c.tension_a(k) << " and " << c.tension_b(k) << " N\n";
+            if (!s.has_insulators() && std::abs(s.point(k + 1)[2] - s.point(k)[2]) < Real(1.0e-6) * s.chord(k)) {
+                // a level span between fixed points: compare MoorDyn's still-air shape with the elastic catenary
+                const Real w = (s.mass_per_length - m_in.air_density * Real(0.25) * Real(3.14159265358979323846) * s.diameter * s.diameter) * CONST_GRAV;
+                const erf_conductors::Catenary cat =
+                    erf_conductors::elastic_catenary(s.chord(k), s.lengths[static_cast<std::size_t>(k)], w, s.axial_stiffness);
+                Print() << "  " << s.name << which << ": elastic catenary sag " << cat.sag << " m, end tension "
+                        << cat.end_tension << " N (MoorDyn's differ by " << 100.0 * (c.mid_sag(k) / cat.sag - 1.0) << " % and "
+                        << 100.0 * (c.tension_a(k) / cat.end_tension - 1.0) << " %)\n";
+            }
         }
-        m_stats.emplace_back(s.name, s.output_root,
-                             std::vector<std::string>{"swing_deg", "mid_offset", "tension_a", "tension_b", "max_tension",
-                                                      "min_clearance", "drag_y"});
+        add_stats(s);
     }
+    add_pair_stats();
     update_ground_under_nodes(z_phys_nd, geom);
+    measure_separation();
+    for (std::size_t p = 0; p < m_pairs.size(); ++p) {
+        const auto& c = m_sep[p];
+        Print() << "erf.conductors: " << m_spans[m_pairs[p].first]->name() << " and " << m_spans[m_pairs[p].second]->name()
+                << " hang " << c.distance << " m apart at their closest"
+                << (c.distance < m_in.flashover_distance ? ", already inside the flashover distance" : "") << "\n";
+    }
+}
+
+void
+Conductors::add_stats (const SpanInputs& s)
+{
+    std::vector<erf_actuator::RunningStats> st;
+    for (int k = 0; k < s.num_spans(); ++k) {
+        st.emplace_back(s.span_name(k), s.span_root(k),
+                        std::vector<std::string>{"swing_deg", "mid_offset", "tension_a", "tension_b", "max_tension",
+                                                 "min_clearance", "drag_y"});
+    }
+    if (s.has_insulators()) {
+        std::vector<std::string> q;
+        for (std::size_t j = 0; j < s.towers.size(); ++j) {
+            const std::string t = "t" + std::to_string(j + 1);
+            q.insert(q.end(), {t + "_swing_deg", t + "_across_deg", t + "_tension"});
+        }
+        st.emplace_back(s.name + "_insulators", s.output_root + "_insulators", q);
+    }
+    m_stats.push_back(std::move(st));
+}
+
+void
+Conductors::add_pair_stats ()
+{
+    m_pairs.clear();
+    m_pair_stats.clear();
+    for (std::size_t i = 0; i < m_spans.size(); ++i) {
+        for (std::size_t j = i + 1; j < m_spans.size(); ++j) {
+            m_pairs.emplace_back(i, j);
+            const std::string name = "separation_" + m_spans[i]->name() + "-" + m_spans[j]->name();
+            m_pair_stats.emplace_back(name, m_in.diagnostics_dir + "/" + name, std::vector<std::string>{"distance", "clash"});
+        }
+    }
+}
+
+void
+Conductors::measure_separation ()
+{
+    m_sep.resize(m_pairs.size());
+    std::vector<std::vector<Real>> paths;
+    for (const auto& span : m_spans) { paths.push_back(span->conductor_path()); }
+    for (std::size_t p = 0; p < m_pairs.size(); ++p) {
+        m_sep[p] = erf_conductors::closest_polylines(paths[m_pairs[p].first], paths[m_pairs[p].second]);
+    }
+}
+
+void
+Conductors::write_separation (double time, bool first) const
+{
+    if (m_pairs.empty() || !ParallelDescriptor::IOProcessor()) { return; }
+    std::ofstream out;
+    const bool header = erf_actuator::open_log(out, m_in.diagnostics_dir + "/separation.dat", first);
+    if (header) {
+        out << "time";
+        for (const auto& pr : m_pairs) {
+            const std::string n = m_spans[pr.first]->name() + "-" + m_spans[pr.second]->name();
+            out << " " << n << "_distance " << n << "_x " << n << "_y " << n << "_z " << n << "_clash";
+        }
+        out << "\n";
+    }
+    out << std::setprecision(10) << time;
+    for (const auto& c : m_sep) {
+        out << " " << c.distance;
+        for (int d = 0; d < 3; ++d) { out << " " << Real(0.5) * (c.a[d] + c.b[d]); }
+        out << " " << (c.distance < m_in.flashover_distance ? 1 : 0);
+    }
+    out << "\n";
+}
+
+std::vector<std::string>
+Conductors::log_files () const
+{
+    std::vector<std::string> f;
+    for (const SpanInputs& s : m_placed) {
+        for (int k = 0; k < s.num_spans(); ++k) { f.push_back(s.span_root(k) + ".dat"); }
+        f.push_back(s.output_root + "_nodes.dat");
+        if (s.has_insulators()) { f.push_back(s.output_root + "_insulators.dat"); }
+    }
+    f.push_back(m_in.diagnostics_dir + "/total_load.dat");
+    f.push_back(m_in.diagnostics_dir + "/separation.dat");
+    return f;
 }
 
 void
 Conductors::restore (const std::string& dir)
 {
-    // the state file: the step count, the time, and the spans with their node counts, in order
+    // the state file: the step count, the time, and the lines with their node counts, in order
     Vector<char> chars;
     ParallelDescriptor::ReadAndBcastFile(dir + "/state", chars);
     std::istringstream in(std::string(chars.dataPtr(), chars.size()));
@@ -156,39 +260,40 @@ Conductors::restore (const std::string& dir)
         Abort("no step count, time or clock offset in the conductor checkpoint '" + dir + "/state'");
     }
     if (saved.size() != m_placed.size()) {
-        Abort("the conductor checkpoint '" + dir + "' holds " + std::to_string(saved.size()) + " span(s) but erf.conductors.spans lists " +
+        Abort("the conductor checkpoint '" + dir + "' holds " + std::to_string(saved.size()) + " line(s) but erf.conductors.spans lists " +
               std::to_string(m_placed.size()) + "; the erf.conductors block must match the run being restarted");
     }
     for (std::size_t i = 0; i < m_placed.size(); ++i) {
         const SpanInputs& s = m_placed[i];
         if (saved[i].first != s.name) {
-            Abort("the conductor checkpoint '" + dir + "' holds span " + saved[i].first + " where erf.conductors.spans lists " +
+            Abort("the conductor checkpoint '" + dir + "' holds line " + saved[i].first + " where erf.conductors.spans lists " +
                   s.name + "; the erf.conductors block must match the run being restarted");
         }
-        if (saved[i].second != static_cast<unsigned>(s.segments) + 1) {
+        if (saved[i].second != static_cast<unsigned>(s.num_line_nodes())) {
             Abort("erf.conductors." + s.name + ": the checkpoint '" + dir + "' holds a line of " + std::to_string(saved[i].second) +
-                  " nodes but the inputs give " + std::to_string(s.segments + 1));
+                  " nodes but the inputs give " + std::to_string(s.num_line_nodes()) +
+                  " (spans, towers, segments and insulator strings must match the run being restarted)");
         }
         const std::string file = m_in.diagnostics_dir + "/" + s.name + ".moordyn.txt";
         m_spans.push_back(std::make_unique<ConductorSpan>(s, m_in, CONST_GRAV, file, dir + "/" + s.name + ".moordyn"));
         m_spans.back()->set_clock_offset(m_t0);
-        m_stats.emplace_back(s.name, s.output_root,
-                             std::vector<std::string>{"swing_deg", "mid_offset", "tension_a", "tension_b", "max_tension",
-                                                      "min_clearance", "drag_y"});
-        if (!m_stats.back().read_state(dir)) {
-            Abort("erf.conductors." + s.name + ": the checkpoint '" + dir + "' holds no statistics for the span");
+        add_stats(s);
+        for (auto& st : m_stats.back()) {
+            if (!st.read_state(dir)) {
+                Abort("erf.conductors." + s.name + ": the checkpoint '" + dir + "' holds no statistics " + st.name());
+            }
         }
         const ConductorSpan& c = *m_spans.back();
         Print() << "erf.conductors." << s.name << ": continued from " << dir << " at t = " << m_time << " s (step " << m_step
                 << "), mid-span offset " << c.mid_offset() << " m, sag " << c.mid_sag() << " m\n";
     }
+    add_pair_stats();
+    for (auto& st : m_pair_stats) {
+        if (!st.read_state(dir)) { Abort("the conductor checkpoint '" + dir + "' holds no statistics " + st.name()); }
+    }
     // the logs continue from the checkpoint: rows a run wrote after it are dropped
     if (ParallelDescriptor::IOProcessor()) {
-        for (const SpanInputs& s : m_placed) {
-            erf_conductors::trim_log_after(s.output_root + ".dat", m_time);
-            erf_conductors::trim_log_after(s.output_root + "_nodes.dat", m_time);
-        }
-        erf_conductors::trim_log_after(m_in.diagnostics_dir + "/total_load.dat", m_time);
+        for (const std::string& f : log_files()) { erf_conductors::trim_log_after(f, m_time); }
     }
     ParallelDescriptor::Barrier();
     m_restored = true;
@@ -211,7 +316,8 @@ Conductors::write_checkpoint (const std::string& chkdir) const
         for (const auto& span : m_spans) { span->save(dir + "/" + span->name() + ".moordyn"); }
     }
     ParallelDescriptor::Barrier();
-    for (const auto& st : m_stats) { st.write_state(dir); }
+    for (const auto& line : m_stats) { for (const auto& st : line) { st.write_state(dir); } }
+    for (const auto& st : m_pair_stats) { st.write_state(dir); }
     ParallelDescriptor::Barrier();
 }
 
@@ -298,6 +404,7 @@ Conductors::advance (int lev, double time, double dt,
     ++m_step;
     const bool first = (m_step == 1);
     const bool write = first || (m_step % m_in.diagnostics_int == 0);
+    if (first) { write_separation(time, true); }
     for (auto& span : m_spans) {
         // the wind of the flow at the start of the step, where the line is, held over the step
         span->set_wind(wind_at(*span, U, V, W, z_phys_nd, geom), time + 0.5 * dt);
@@ -311,18 +418,37 @@ Conductors::advance (int lev, double time, double dt,
     // where the lines are now: their clearance to the terrain, then the outputs and statistics
     update_ground_under_nodes(z_phys_nd, geom);
     m_drag_total = {{0.0, 0.0, 0.0}};
+    const bool sample = (time + dt >= m_in.stats_start);
     for (std::size_t i = 0; i < m_spans.size(); ++i) {
         const ConductorSpan& span = *m_spans[i];
         const auto f = span.total_drag();
         for (int d = 0; d < 3; ++d) { m_drag_total[d] += f[d]; }
         if (m_step % m_in.diagnostics_int == 0) { span.write_diagnostics(time + dt, false); }
         if (m_in.node_output_int > 0 && m_step % m_in.node_output_int == 0) { span.write_nodes(time + dt, false); }
-        if (time + dt >= m_in.stats_start) {
+        if (!sample) { continue; }
+        for (int k = 0; k < span.num_spans(); ++k) {
             unsigned low = 0;
-            const Real cmin = span.min_clearance(low);
-            m_stats[i].accumulate(time + dt, {span.swing_angle() * Real(180.0 / 3.14159265358979323846), span.mid_offset(),
-                                              span.tension_a(), span.tension_b(), span.max_tension(), cmin, f[1]});
-            if (write) { m_stats[i].write(); }
+            const Real cmin = span.min_clearance(low, k);
+            m_stats[i][static_cast<std::size_t>(k)].accumulate(time + dt,
+                {span.swing_angle(k) * rad2deg, span.mid_offset(k), span.tension_a(k), span.tension_b(k), span.max_tension(k),
+                 cmin, span.span_drag(k)[1]});
+        }
+        if (span.num_insulators() > 0) {
+            std::vector<Real> q;
+            for (int j = 0; j < span.num_insulators(); ++j) {
+                q.insert(q.end(), {span.insulator_swing(j) * rad2deg, span.insulator_swing_across(j) * rad2deg, span.insulator_tension(j)});
+            }
+            m_stats[i].back().accumulate(time + dt, q);
+        }
+        if (write) { for (const auto& st : m_stats[i]) { st.write(); } }
+    }
+    // how close the lines come to each other
+    measure_separation();
+    if (m_step % m_in.diagnostics_int == 0) { write_separation(time + dt, false); }
+    if (sample) {
+        for (std::size_t p = 0; p < m_pairs.size(); ++p) {
+            m_pair_stats[p].accumulate(time + dt, {m_sep[p].distance, m_sep[p].distance < m_in.flashover_distance ? Real(1.0) : Real(0.0)});
+            if (write) { m_pair_stats[p].write(); }
         }
     }
     // the lines' drag on the air, spread into the momentum sources ERF adds over the next step
