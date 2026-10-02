@@ -5019,6 +5019,22 @@ each has its own ``erf.conductors.<name>.*`` block.
 | **erf.conductors.prescribed_velocity**     | a uniform wind at every line node (m/s) instead of the   | 3 Reals              | none (the flow is        |
 |                                            | flow's, for testing                                      |                      | sampled at the nodes)    |
 +--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.stats_start**             | the running statistics of every span                     | Real >= 0            | 0                        |
+|                                            | (<output_root>_stats.csv: mean, rms, minimum, maximum of |                      |                          |
+|                                            | the swing, offset, tensions, minimum clearance and drag) |                      |                          |
+|                                            | start at this time (s)                                   |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.node_output_int**         | write every node of every span (position, clearance,     | Integer >= 0         | 0                        |
+|                                            | tension, wind, drag) to <output_root>_nodes.dat every    |                      |                          |
+|                                            | this many steps; 0: never                                |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.drag_on_flow**            | put the air's drag on the lines, reversed, back into the | Boolean              | false                    |
+|                                            | flow as a momentum source (and allow the plot variables  |                      |                          |
+|                                            | conductor_fx, conductor_fy, conductor_fz)                |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.epsilon**                 | width of the Gaussian that spreads the drag onto the     | Real > 0             | 2.0                      |
+|                                            | momentum sources, in cells (dx)                          |                      |                          |
++--------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 
 .. _sec:SolverChoice:
 

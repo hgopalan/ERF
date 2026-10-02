@@ -23,6 +23,7 @@
 
 #include <gtest/gtest.h>
 
+#include "ERF_ActuatorSpreading.H"
 #include "ERF_Conductors.H"
 
 namespace {
@@ -102,7 +103,7 @@ void set_inputs (const std::string& dir, const std::string& name, bool prescribe
     pp.add("diagnostics_dir", dir);
     pp.add("air_density", 1.2);
     // ParmParse is global to the test binary: drop what another test left before setting this one's
-    pp.remove("prescribed_velocity");
+    for (const char* key : {"prescribed_velocity", "drag_on_flow", "epsilon", "node_output_int", "stats_start"}) { pp.remove(key); }
     if (prescribed) { pp.addarr("prescribed_velocity", std::vector<Real>{0.0, 10.0, 0.0}); }
     amrex::ParmParse ps("erf.conductors." + name);
     ps.addarr("end_a", std::vector<Real>{a[0], a[1], a[2]});
@@ -173,10 +174,10 @@ TEST(Conductors, SpansStepOnTheAnchorLevelOnlyAndLogEveryStep)
     c->set_ground(nullptr, m.geom);
     const auto& span = *c->spans().front();
     const Real off0 = span.mid_offset();
-    c->advance(0, 0.0, 0.1, m.u, m.v, m.w, nullptr, m.geom);   // level 0: nothing happens
+    c->advance(0, 0.0, 0.1, m.u, m.v, m.w, nullptr, nullptr, m.geom);   // level 0: nothing happens
     EXPECT_DOUBLE_EQ(span.mid_offset(), off0);
     EXPECT_FALSE(std::filesystem::exists(dir + "/Tadv.dat"));
-    for (int s = 0; s < 3; ++s) { c->advance(1, 0.1 * s, 0.1, m.u, m.v, m.w, nullptr, m.geom); }
+    for (int s = 0; s < 3; ++s) { c->advance(1, 0.1 * s, 0.1, m.u, m.v, m.w, nullptr, nullptr, m.geom); }
     EXPECT_GT(span.mid_offset(), off0) << "the prescribed +y wind must move the span towards +y";
     std::ifstream f(dir + "/Tadv.dat");
     ASSERT_TRUE(f.good());
@@ -201,7 +202,7 @@ TEST(Conductors, TheFlowIsSampledWhereTheLineIsNow)
     Real moved = 0.0;
     for (int s = 0; s < 20; ++s) {
         const std::vector<Real> where = span.kinematics_points();   // where the line is when the wind is sampled
-        c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, nullptr, m.geom);
+        c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, nullptr, nullptr, m.geom);
         for (unsigned p = 0; p < span.num_kinematics_points(); ++p) {
             // the flow at the line nodes; no wind at MoorDyn's fixed entries after them
             const auto uvw = span.wind_at_point(p);
@@ -215,4 +216,111 @@ TEST(Conductors, TheFlowIsSampledWhereTheLineIsNow)
     // the line really moved, so sampling at the initial positions would have handed a different wind
     EXPECT_GT(moved, 0.5) << "the span must blow out in the sampled crosswind";
     EXPECT_GT(m.vy * moved, 1.0e-3) << "the field must change measurably over the distance the line moved";
+}
+
+TEST(Conductors, ClearanceIsTheHeightAboveTheTerrainUnderEachNode)
+{
+    const std::string dir = scratch("clearance");
+    set_inputs(dir, "Tclear");
+    amrex::ParmParse("erf.conductors").add("node_output_int", 1);
+    Mesh m(true);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(m.znd.get(), m.geom);
+    for (int s = 0; s < 3; ++s) { c->advance(0, 0.2 * s, 0.2, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    const auto& span = *c->spans().front();
+    Real lowest = 1.0e30;
+    unsigned lowest_node = 0;
+    for (unsigned n = 0; n < span.num_nodes(); ++n) {
+        const auto p = span.node_position(n);
+        const Real expect = p[2] - m.h(p[0], p[1]);   // the ramp: the bilinear surface is exact
+        EXPECT_NEAR(span.clearance(n), expect, 1.0e-9) << "node " << n;
+        if (expect < lowest) { lowest = expect; lowest_node = n; }
+    }
+    unsigned node = 0;
+    EXPECT_NEAR(span.min_clearance(node), lowest, 1.0e-9);
+    EXPECT_EQ(node, lowest_node);
+    EXPECT_LT(lowest, 30.0) << "the sagging middle sits lower above the ground than the attachments";
+    // the node file: one row per node per write (the initial write and three steps)
+    std::ifstream f(dir + "/Tclear_nodes.dat");
+    ASSERT_TRUE(f.good());
+    std::string line;
+    int rows = 0;
+    while (std::getline(f, line)) { if (!line.empty() && line.rfind("time", 0) != 0) { ++rows; } }
+    EXPECT_EQ(rows, 4 * static_cast<int>(span.num_nodes()));
+    // the statistics file lists every quantity
+    std::ifstream st(dir + "/Tclear_stats.csv");
+    ASSERT_TRUE(st.good());
+    std::string all((std::istreambuf_iterator<char>(st)), std::istreambuf_iterator<char>());
+    for (const char* q : {"swing_deg", "mid_offset", "tension_a", "tension_b", "max_tension", "min_clearance", "drag_y"}) {
+        EXPECT_NE(all.find(q), std::string::npos) << q;
+    }
+}
+
+TEST(Conductors, TheSpreadDragIntegratesToMinusTheDragOnTheLines)
+{
+    const std::string dir = scratch("drag");
+    set_inputs(dir, "Tdrag");   // a prescribed 10 m/s crosswind along +y
+    amrex::ParmParse("erf.conductors").add("drag_on_flow", true);
+    Mesh m(true);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    EXPECT_TRUE(c->drag_on_flow());
+    c->set_ground(m.znd.get(), m.geom);
+    // a terrain-following mesh: the face volumes carry detJ, the cell's physical height over its nominal
+    // height, which shrinks where the ramp rises (the columns span H - h)
+    amrex::MultiFab detJ(m.ba, m.dm, 1, 1);
+    for (amrex::MFIter mfi(detJ); mfi.isValid(); ++mfi) {
+        const auto za = m.znd->const_array(mfi);
+        auto ja = detJ.array(mfi);
+        const Real dz = m.H / m.nz;
+        amrex::LoopOnCpu(mfi.growntilebox(), [&](int i, int j, int k) {
+            ja(i,j,k) = Real(0.25) * ((za(i,j,k+1) - za(i,j,k)) + (za(i+1,j,k+1) - za(i+1,j,k)) +
+                                      (za(i,j+1,k+1) - za(i,j+1,k)) + (za(i+1,j+1,k+1) - za(i+1,j+1,k))) / dz;
+        });
+    }
+    EXPECT_LT(detJ.min(0), 0.99 * detJ.max(0)) << "the Jacobian must vary over the ramp";
+    for (int s = 0; s < 2; ++s) { c->advance(0, 0.2 * s, 0.2, m.u, m.v, m.w, m.znd.get(), &detJ, m.geom); }
+    const auto& span = *c->spans().front();
+    const auto drag = span.total_drag();
+    EXPECT_GT(drag[1], 1.0) << "a crosswind along +y must drag the line along +y";
+    const auto& integral = c->source_integral();
+    for (int d = 0; d < 3; ++d) {
+        EXPECT_NEAR(integral[d], -drag[d], 1.0e-10 * std::max(Real(1.0), std::abs(drag[d]))) << "component " << d;
+    }
+    // the sources ERF adds integrate to the same force
+    amrex::MultiFab sx(amrex::convert(m.ba, amrex::IntVect(1,0,0)), m.dm, 1, 0);
+    amrex::MultiFab sy(amrex::convert(m.ba, amrex::IntVect(0,1,0)), m.dm, 1, 0);
+    amrex::MultiFab sz(amrex::convert(m.ba, amrex::IntVect(0,0,1)), m.dm, 1, 0);
+    sx.setVal(0.0); sy.setVal(0.0); sz.setVal(0.0);
+    c->add_momentum_sources(0, sx, sy, sz);
+    EXPECT_NEAR(erf_actuator::integrate_source(1, sy, &detJ, m.geom), -drag[1], 1.0e-10 * std::abs(drag[1]));
+    c->add_momentum_sources(1, sx, sy, sz);   // not the anchor level: nothing is added
+    EXPECT_NEAR(erf_actuator::integrate_source(1, sy, &detJ, m.geom), -drag[1], 1.0e-10 * std::abs(drag[1]));
+    // the cell-centred plot field
+    amrex::MultiFab cells(m.ba, m.dm, 3, 0);
+    c->cell_sources(0, cells, 0);
+    EXPECT_LT(cells.min(1), 0.0) << "the air is pushed against the wind (-y) around the line";
+    c->cell_sources(1, cells, 0);
+    EXPECT_DOUBLE_EQ(cells.norm0(1), 0.0);
+}
+
+TEST(Conductors, WithoutDragOnFlowNothingIsPutIntoTheFlow)
+{
+    const std::string dir = scratch("nodrag");
+    set_inputs(dir, "Tnodrag");
+    Mesh m(false);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    EXPECT_FALSE(c->drag_on_flow());
+    c->set_ground(nullptr, m.geom);
+    c->advance(0, 0.0, 0.2, m.u, m.v, m.w, nullptr, nullptr, m.geom);
+    EXPECT_GT(c->spans().front()->total_drag()[1], 1.0) << "the line still feels the drag";
+    for (int d = 0; d < 3; ++d) { EXPECT_DOUBLE_EQ(c->source_integral()[d], 0.0); }
+    amrex::MultiFab sy(amrex::convert(m.ba, amrex::IntVect(0,1,0)), m.dm, 1, 0);
+    amrex::MultiFab sx(amrex::convert(m.ba, amrex::IntVect(1,0,0)), m.dm, 1, 0);
+    amrex::MultiFab sz(amrex::convert(m.ba, amrex::IntVect(0,0,1)), m.dm, 1, 0);
+    sx.setVal(0.0); sy.setVal(0.0); sz.setVal(0.0);
+    c->add_momentum_sources(0, sx, sy, sz);
+    EXPECT_DOUBLE_EQ(sy.norm0(), 0.0);
 }

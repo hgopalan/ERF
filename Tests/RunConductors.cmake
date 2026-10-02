@@ -2,8 +2,12 @@
 # and the span's log (<output_root>.dat, written every step) against the committed gold log,
 # field by field to SIGDIGITS significant digits.
 #
+# With TOTALS (a file such as conductors/total_load.dat, columns time, drag_x..z, force_on_air_x..z,
+# source_x..z), every row must also have the integrated momentum source equal to the force the lines
+# put into the air, to SIGDIGITS digits: the spreading's normalisation is exact.
+#
 # Variables: MPIEXEC, MPIEXEC_NUMPROC_FLAG, MPIEXEC_PREFLAGS, NRANKS, TEST_EXE, CONFIG, INPUT,
-# WORKING_DIRECTORY, FCOMPARE, PLTFILE, PLOT_GOLD, RTOL, ATOL, LOG, GOLD, SIGDIGITS.
+# WORKING_DIRECTORY, FCOMPARE, PLTFILE, PLOT_GOLD, RTOL, ATOL, LOG, GOLD, SIGDIGITS, TOTALS.
 
 cmake_minimum_required(VERSION 3.20)
 include("${CMAKE_CURRENT_LIST_DIR}/MPILauncher.cmake")
@@ -73,3 +77,44 @@ endif()
 file(STRINGS "${WORKING_DIRECTORY}/${LOG}" rows)
 list(LENGTH rows nrows)
 message(STATUS "RunConductors: ${LOG} agrees with its gold (${nrows} rows), plotfile agrees")
+
+# ---- the spread source integrates to the force on the air ----
+if(DEFINED TOTALS AND NOT "${TOTALS}" STREQUAL "")
+    if(NOT EXISTS "${WORKING_DIRECTORY}/${TOTALS}")
+        message(FATAL_ERROR "RunConductors.cmake: the run wrote no ${TOTALS}")
+    endif()
+    file(STRINGS "${WORKING_DIRECTORY}/${TOTALS}" total_rows)
+    list(LENGTH total_rows ntotal)
+    if(ntotal LESS 2)
+        message(FATAL_ERROR "RunConductors.cmake: ${TOTALS} holds no data rows")
+    endif()
+    set(nonzero FALSE)
+    foreach(row IN LISTS total_rows)
+        if(row MATCHES "^time")
+            continue()
+        endif()
+        string(REGEX MATCHALL "[^ \t]+" fields "${row}")
+        list(LENGTH fields nfields)
+        if(NOT nfields EQUAL 10)
+            message(FATAL_ERROR "RunConductors.cmake: ${TOTALS} row '${row}' does not have 10 columns")
+        endif()
+        foreach(d 0 1 2)
+            math(EXPR ia "4 + ${d}")
+            math(EXPR ib "7 + ${d}")
+            list(GET fields ${ia} force)
+            list(GET fields ${ib} source)
+            erf_numbers_close("${force}" "${source}" ${SIGDIGITS} 2 close)
+            if(NOT close)
+                message(FATAL_ERROR "RunConductors.cmake: ${TOTALS}: the integrated source ${source} N differs from the "
+                                    "force on the air ${force} N in row '${row}'")
+            endif()
+            if(NOT "${force}" STREQUAL "0")
+                set(nonzero TRUE)
+            endif()
+        endforeach()
+    endforeach()
+    if(NOT nonzero)
+        message(FATAL_ERROR "RunConductors.cmake: ${TOTALS}: every force on the air is zero; nothing was checked")
+    endif()
+    message(STATUS "RunConductors: the integrated source equals the force on the air in every row of ${TOTALS}")
+endif()

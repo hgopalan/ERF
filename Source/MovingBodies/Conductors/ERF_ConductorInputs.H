@@ -45,6 +45,25 @@ struct SpanInputs
     amrex::Real catenary_sag () const;
 };
 
+/** The still-air shape of an elastic catenary between two points at the same height. */
+struct Catenary
+{
+    amrex::Real sag{0.0};                //!< mid-span sag below the chord (m)
+    amrex::Real horizontal_tension{0.0}; //!< H (N)
+    amrex::Real end_tension{0.0};        //!< tension at the attachments (N)
+    amrex::Real stretched_length{0.0};   //!< the line's length under its own weight (m)
+};
+
+/**
+ * The elastic catenary of a line of unstretched length L, net weight w per unit length and axial
+ * stiffness EA hanging between two points at the same height a chord c apart: the catenary
+ * parameter a = H / w solves 2 a sinh(c / 2a) = L_s, where the stretched length L_s exceeds L by
+ * the strain integrated along the line, (H / EA) (c/2 + (a/2) sinh(c/a)). Solved by Newton
+ * iteration on a inside a fixed-point iteration on L_s. Used to check MoorDyn's still-air shape.
+ */
+Catenary elastic_catenary (amrex::Real chord, amrex::Real length, amrex::Real weight_per_length,
+                           amrex::Real axial_stiffness);
+
 /**
  * The erf.conductors.* inputs: named spans, each with its own block, and the settings they share.
  *
@@ -58,6 +77,10 @@ struct SpanInputs
  *   erf.conductors.moordyn_log_level = 2           (0 debug, 1 messages, 2 warnings, 3 errors only)
  *   erf.conductors.surface_offset   = 10000.       (m; MoorDyn's free surface sits this far above ERF's z = 0)
  *   erf.conductors.prescribed_velocity = 0. 15. 0. (m/s; a uniform wind at every line node instead of the flow, for testing)
+ *   erf.conductors.stats_start      = 0.           (s; the running statistics of every span start here)
+ *   erf.conductors.node_output_int  = 0            (write every node of every span every this many steps; 0: never)
+ *   erf.conductors.drag_on_flow     = false        (put the lines' drag back into the flow as a momentum source)
+ *   erf.conductors.epsilon          = 2.0          (width of the Gaussian that spreads the drag, in cells)
  */
 struct ConductorInputs
 {
@@ -80,6 +103,10 @@ struct ConductorInputs
     amrex::Real surface_offset{10000.0};
     bool has_prescribed_velocity{false};
     std::array<amrex::Real,3> prescribed_velocity{{0.0, 0.0, 0.0}};
+    amrex::Real stats_start{0.0};
+    int node_output_int{0};
+    bool drag_on_flow{false};
+    amrex::Real epsilon{2.0};
 
     /** Read erf.conductors.*; aborts with the offending key on a bad value. */
     static ConductorInputs read ();

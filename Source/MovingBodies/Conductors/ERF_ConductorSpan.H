@@ -61,8 +61,22 @@ public:
     /** The swing angle of the middle node about the chord, from the vertical (rad, positive with the offset). */
     amrex::Real swing_angle () const;
 
+    /** The terrain height under each line node (num_nodes() values), set by the caller after each step. */
+    void set_ground_under_nodes (const std::vector<amrex::Real>& h);
+    /** A node's height above the terrain under it (m); the ground is the plane z = 0 until set_ground_under_nodes(). */
+    amrex::Real clearance (unsigned node) const;
+    /** The smallest clearance along the line (m) and the node where it occurs. */
+    amrex::Real min_clearance (unsigned& node) const;
+    /** The air's drag on a node and on the whole line (N), from MoorDyn's last step. */
+    std::array<amrex::Real,3> node_drag (unsigned node) const;
+    std::array<amrex::Real,3> total_drag () const;
+    /** The tension magnitude at a node (N). */
+    amrex::Real node_tension (unsigned node) const;
+
     /** Append a diagnostics row (whitespace separated, like ERF's data logs) to <output_root>.dat; header when first. */
     void write_diagnostics (double time, bool first) const;
+    /** Append every node (position, clearance, tension, wind, drag) at this time to <output_root>_nodes.dat; header when first. */
+    void write_nodes (double time, bool first) const;
 
     const erf_moordyn::MoorDynSystem& system () const { return *m_sys; }
 
@@ -77,6 +91,7 @@ private:
     unsigned m_nodes{0};
     unsigned m_nkin{0};
     std::vector<amrex::Real> m_wind;   //!< 3*m_nkin, the wind last handed to MoorDyn
+    std::vector<amrex::Real> m_ground; //!< the terrain height under each node
 };
 
 } // namespace erf_conductors

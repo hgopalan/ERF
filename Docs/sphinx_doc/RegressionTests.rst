@@ -758,12 +758,24 @@ eight significant digits. In a build against an installed MoorDyn-C it is
 registered as ``Conductors_FlowWind_MoorDyn`` and compared with the real
 library's gold log (``S1.dat.moordyn.gold``, the dynamic swing) to six
 digits, since the line integration is not bit-reproducible across compilers;
-both share the flow's gold plotfile. The ``Linux GCC MoorDyn`` CI workflow
+both share the flow's gold plotfile.
+
+``Conductors_DragOnFlow`` (and ``Conductors_DragOnFlow_MoorDyn``) is the same
+coupled case with ``drag_on_flow`` on, the three ``conductor_f*`` plot
+variables and node output: besides the span's log and the plotfile, which now
+carries the source and its small wake and so has a gold per library, the
+runner checks in every row of ``conductors/total_load.dat`` that the
+integrated momentum source equals the force the lines put into the air.
+
+The ``Linux GCC MoorDyn`` CI workflow
 runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with
 ``Build/setup_moordyn.sh``, the real-library tests in another.
 
-Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files/Conductors_FlowWind`_
+Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files/Conductors_FlowWind`_,
+`Tests/test_files/Conductors_DragOnFlow`_
 
 .. _`Tests/test_files/Conductors_PrescribedWind`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_PrescribedWind
 
 .. _`Tests/test_files/Conductors_FlowWind`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_FlowWind
+
+.. _`Tests/test_files/Conductors_DragOnFlow`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_DragOnFlow

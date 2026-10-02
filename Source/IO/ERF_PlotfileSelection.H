@@ -170,6 +170,11 @@ plot3d_fixed_unconditional_diagnostic (const std::string& name)
     if (name == "xvel_err" || name == "yvel_err" || name == "zvel_err" ||
         name == "pp_err") return true;
 #endif
+#ifdef ERF_USE_MOORDYN
+    // the conductor lines' momentum source on the air; ERF_Plotfile.cpp drops them unless the
+    // lines put their drag into the flow
+    if (name == "conductor_fx" || name == "conductor_fy" || name == "conductor_fz") return true;
+#endif
 
     return false;
 }

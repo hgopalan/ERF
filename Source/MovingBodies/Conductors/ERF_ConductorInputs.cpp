@@ -23,6 +23,43 @@ Real SpanInputs::catenary_sag () const
     return (length > c) ? std::sqrt(Real(3.0) * c * (length - c) / Real(8.0)) : Real(0.0);
 }
 
+Catenary elastic_catenary (Real chord, Real length, Real w, Real EA)
+{
+    Catenary cat;
+    if (!(chord > 0.0 && length > chord && w > 0.0 && EA > 0.0)) { return cat; }
+    // a for a given stretched length: f(a) = 2 a sinh(c / 2a) - L_s, decreasing in a
+    auto parameter = [chord] (Real Ls, Real a) {
+        for (int it = 0; it < 200; ++it) {
+            const Real x = chord / (Real(2.0) * a);
+            const Real f = Real(2.0) * a * std::sinh(x) - Ls;
+            const Real df = Real(2.0) * std::sinh(x) - Real(2.0) * x * std::cosh(x);
+            const Real step = f / df;
+            Real next = a - step;
+            if (!(next > 0.0)) { next = Real(0.5) * a; }   // stay on the positive branch
+            if (std::abs(next - a) <= Real(1.0e-13) * a) { return next; }
+            a = next;
+        }
+        return a;
+    };
+    Real Ls = length;
+    Real a = chord * chord / (Real(8.0) * std::sqrt(Real(3.0) * chord * (length - chord) / Real(8.0)));   // the parabola's
+    for (int it = 0; it < 100; ++it) {
+        a = parameter(Ls, a);
+        const Real H = w * a;
+        const Real strain_integral = Real(0.5) * chord + Real(0.5) * a * std::sinh(chord / a);
+        const Real L0 = Ls - H / EA * strain_integral;   // the unstretched length of this shape
+        const Real correction = length - L0;
+        Ls += correction;
+        if (std::abs(correction) <= Real(1.0e-12) * length) { break; }
+    }
+    a = parameter(Ls, a);
+    cat.horizontal_tension = w * a;
+    cat.sag = a * (std::cosh(chord / (Real(2.0) * a)) - Real(1.0));
+    cat.end_tension = cat.horizontal_tension * std::cosh(chord / (Real(2.0) * a));
+    cat.stretched_length = Ls;
+    return cat;
+}
+
 std::string ConductorInputs::validate_span (const SpanInputs& s)
 {
     const std::string key = "erf.conductors." + s.name + ".";
@@ -54,6 +91,9 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
     }
     if (in.moordyn_log_level < 0 || in.moordyn_log_level > 3) { return "erf.conductors.moordyn_log_level must be 0 (debug) to 3 (errors only)"; }
     if (!(in.surface_offset > 0.0)) { return "erf.conductors.surface_offset must be positive (m)"; }
+    if (in.stats_start < 0.0) { return "erf.conductors.stats_start must be >= 0 (s)"; }
+    if (in.node_output_int < 0) { return "erf.conductors.node_output_int must be >= 0 (0: no node output)"; }
+    if (!(in.epsilon > 0.0)) { return "erf.conductors.epsilon must be positive (cells)"; }
     for (const SpanInputs& s : in.spans) {
         if (s.end_a[2] >= in.surface_offset || s.end_b[2] >= in.surface_offset) {
             return "erf.conductors." + s.name + ": the attachment heights must stay below surface_offset (" +
@@ -95,6 +135,10 @@ ConductorInputs ConductorInputs::read ()
     pp.query("moordyn_cfl", in.moordyn_cfl);
     pp.query("moordyn_log_level", in.moordyn_log_level);
     pp.query("surface_offset", in.surface_offset);
+    pp.query("stats_start", in.stats_start);
+    pp.query("node_output_int", in.node_output_int);
+    pp.query("drag_on_flow", in.drag_on_flow);
+    pp.query("epsilon", in.epsilon);
     std::vector<Real> vel;
     if (pp.queryarr("prescribed_velocity", vel)) {
         if (vel.size() != 3) { Abort("erf.conductors.prescribed_velocity needs three components (m/s)"); }
