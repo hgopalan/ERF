@@ -331,6 +331,7 @@ if(ERF_ENABLE_MOORDYN)
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestTransformer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestTowers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestTowerDynamics.cpp
   )
   # Motivation: against the real MoorDyn-C (the tests skip on the stub, which has no line
   # dynamics), a span's mean swing in a steady crosswind must be the quasi-static blowout angle

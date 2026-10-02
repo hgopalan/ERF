@@ -809,6 +809,8 @@ void set_towered_section (const std::string& dir, const std::string& name)
 }
 void clear_towered_section (const std::string& name)
 {
+    amrex::ParmParse pt("erf.conductors.lat");
+    for (const char* k : {"frequency", "damping_ratio"}) { pt.remove(k); }
     amrex::ParmParse ps("erf.conductors." + name);
     ps.remove("towers"); ps.remove("tower_type");
     amrex::ParmParse pp("erf.conductors");
@@ -932,4 +934,123 @@ TEST(Conductors, TheTowersDragGoesIntoTheFlowWithTheLinesAndSurvivesARestart)
     EXPECT_EQ(slurp(dir + "/towers.dat"), log);
     EXPECT_EQ(slurp(dir + "/tower_Tf_t2_stats.csv"), stats);
     clear_towered_section("Tf");
+}
+
+namespace {
+// the section's towers bend at 2 Hz with the damping ratio given
+void make_towers_move (Real damping)
+{
+    amrex::ParmParse pt("erf.conductors.lat");
+    for (const char* k : {"frequency", "damping_ratio"}) { pt.remove(k); }
+    pt.add("frequency", 2.0);
+    pt.add("damping_ratio", damping);
+}
+} // namespace
+
+TEST(Conductors, MovingTowersSettleWhereTheirStiffnessBalancesTheWindAndTheLine)
+{
+    const double dt = 0.25;
+    // the same section with towers that stand still, for the line's pull on rigid towers
+    const std::string rdir = scratch("still_towers");
+    set_towered_section(rdir, "Ms");
+    Mesh m(true);
+    std::vector<std::array<Real,3>> rigid_pull;
+    {
+        auto c = Conductors::create(0);
+        ASSERT_TRUE(c);
+        c->set_ground(m.znd.get(), m.geom);
+        for (int s = 0; s < 40; ++s) { c->advance(0, dt * s, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+        for (const auto& tw : c->towers()) { rigid_pull.push_back(tw.line_force()); }
+        EXPECT_EQ(c->tower_models()[0], nullptr);
+    }
+    clear_towered_section("Ms");
+    const std::string dir = scratch("moving_towers");
+    set_towered_section(dir, "Mv");
+    make_towers_move(0.3);   // heavily damped, so that they settle in a few periods
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(m.znd.get(), m.geom);
+    ASSERT_TRUE(c->spans()[0]->towers_move());
+    for (int s = 0; s < 40; ++s) { c->advance(0, dt * s, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    for (std::size_t t = 0; t < 2; ++t) {
+        const auto& tw = c->towers()[t];
+        const auto* model = dynamic_cast<const erf_towers::OneModeTower*>(c->tower_models()[t].get());
+        ASSERT_NE(model, nullptr);
+        // at rest, the stiffness carries the members' drag by the mode shape and the line's pull
+        std::array<double,2> Q{{tw.line_force()[0], tw.line_force()[1]}};
+        for (std::size_t i = 0; i < tw.nodes().size(); ++i) {
+            for (int d = 0; d < 2; ++d) { Q[d] += model->mode_shape(i) * tw.loads()[3*i+d]; }
+        }
+        // (the real MoorDyn's conductors still swing slowly after 10 s, lightly damped, and the tower
+        // follows their pull: 0.6 % from the balance; without the pull, or with it reversed, the
+        // balance is off by tens of per cent)
+        const auto x = tw.arm_displacement();
+        EXPECT_GT(x[1], 1.0e-3) << tw.name() << " leans with the +y wind";
+        EXPECT_NEAR(x[1] * model->stiffness() / Q[1], 1.0, 0.02) << tw.name();
+        EXPECT_NEAR(x[0] * model->stiffness(), Q[0], 0.02 * Q[1]) << tw.name();
+        EXPECT_LT(std::abs(model->v()[1]), 0.02 * 2.0 * 3.14159265 * model->frequency() * x[1]) << tw.name() << " has settled";
+        RecordProperty(tw.name() + "_lean_m", std::to_string(x[1]));
+        // a few millimetres of lean barely change the line's pull from the rigid towers'
+        const auto& Fr = rigid_pull[t];
+        for (int d = 0; d < 3; ++d) {
+            EXPECT_NEAR(tw.line_force()[d], Fr[d], 0.02 * std::abs(Fr[2])) << tw.name() << " dir " << d;
+        }
+        // the line hangs from the cross-arm where the tower has taken it
+        const auto p = c->spans()[0]->node_position(c->spans()[0]->span_first_node(static_cast<int>(t) + 1));
+        const Real ptol = std::is_same<Real, float>::value ? Real(1.0e-4) : Real(1.0e-6);   // a Real's spacing at 500 m
+        EXPECT_NEAR(p[0], 400.0 + 300.0 * t + x[0], ptol);
+        EXPECT_NEAR(p[1], 500.0 + x[1], ptol);
+    }
+    // towers.dat carries each moving tower's cross-arm displacement, and the statistics its size
+    std::ifstream f(dir + "/towers.dat");
+    std::string header, row, last;
+    std::getline(f, header);
+    EXPECT_NE(header.find("Mv_t1_over Mv_t1_arm_dx Mv_t1_arm_dy Mv_t2_drag_Fx"), std::string::npos) << header;
+    while (std::getline(f, row)) { last = row; }
+    std::istringstream ls(last);
+    std::vector<Real> v;
+    Real x;
+    while (ls >> x) { v.push_back(x); }
+    ASSERT_EQ(v.size(), 29u);
+    EXPECT_GT(v[14], 1.0e-3) << "the row's cross-arm displacement across";
+    EXPECT_NE(slurp(dir + "/tower_Mv_t1_stats.csv").find(",arm_displacement"), std::string::npos);
+    clear_towered_section("Mv");
+}
+
+TEST(Conductors, MovingTowersContinueAcrossARestart)
+{
+    const std::string dir = scratch("moving_restart");
+    set_towered_section(dir, "Mr");
+    make_towers_move(0.02);   // still swaying at the checkpoint
+    Mesh m(true);
+    const double dt = 0.25;
+    auto a = Conductors::create(0);
+    ASSERT_TRUE(a);
+    a->set_ground(m.znd.get(), m.geom);
+    int step = 0;
+    for (; step < 3; ++step) { a->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    const std::string chk = dir + "/chk00003";
+    std::filesystem::create_directories(chk);
+    a->write_checkpoint(chk);
+    for (; step < 6; ++step) { a->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    const auto* ma = dynamic_cast<const erf_towers::OneModeTower*>(a->tower_models()[1].get());
+    ASSERT_NE(ma, nullptr);
+    EXPECT_GT(std::abs(ma->v()[1]), 1.0e-4) << "the test needs the towers moving";
+    const std::string towers = slurp(dir + "/towers.dat");
+    const std::string stats = slurp(dir + "/tower_Mr_t2_stats.csv");
+    const std::string span = slurp(dir + "/Mr_span2.dat");
+
+    auto b = Conductors::create(0);
+    ASSERT_TRUE(b);
+    b->set_ground(m.znd.get(), m.geom, chk);
+    ASSERT_TRUE(b->restored());
+    for (step = 3; step < 6; ++step) { b->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    const auto* mb = dynamic_cast<const erf_towers::OneModeTower*>(b->tower_models()[1].get());
+    ASSERT_NE(mb, nullptr);
+    EXPECT_EQ(mb->q()[1], ma->q()[1]);
+    EXPECT_EQ(mb->v()[1], ma->v()[1]);
+    EXPECT_EQ(slurp(dir + "/towers.dat"), towers);
+    EXPECT_EQ(slurp(dir + "/tower_Mr_t2_stats.csv"), stats);
+    EXPECT_EQ(slurp(dir + "/Mr_span2.dat"), span);
+    clear_towered_section("Mr");
 }

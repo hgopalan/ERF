@@ -26,6 +26,11 @@ std::string TowerType::validate () const
     if (leg_spacing < 0.0) { return key + "leg_spacing must be >= 0 (m; 0: base_width)"; }
     if (allowable_uplift < 0.0) { return key + "allowable_uplift must be >= 0 (N; 0: not checked)"; }
     if (allowable_compression < 0.0) { return key + "allowable_compression must be >= 0 (N; 0: not checked)"; }
+    if (frequency < 0.0) { return key + "frequency must be >= 0 (Hz; 0: the tower stands still)"; }
+    if (frequency > 0.0 && !(weight > 0.0)) { return key + "frequency needs the tower's weight (N), which sets its mass"; }
+    if (!(damping_ratio >= 0.0 && damping_ratio < 1.0)) { return key + "damping_ratio must be in [0, 1)"; }
+    if (foundation_rotational_stiffness < 0.0) { return key + "foundation_rotational_stiffness must be >= 0 (N m/rad; 0: rigid)"; }
+    if (foundation_lateral_stiffness < 0.0) { return key + "foundation_lateral_stiffness must be >= 0 (N/m; 0: rigid)"; }
     return std::string();
 }
 

@@ -20,21 +20,35 @@ constexpr Real rad2deg = Real(180.0 / 3.14159265358979323846);
 }
 
 ConductorSpan::ConductorSpan (const SpanInputs& s, const ConductorInputs& in, Real gravity, const std::string& input_file,
-                              const std::string& saved_state)
-    : m_in(s), m_offset(in.surface_offset), m_substeps(in.substeps), m_file(input_file)
+                              const std::string& saved_state, const std::vector<Real>& tower_displacement)
+    : m_in(s), m_offset(in.surface_offset), m_substeps(in.substeps), m_file(input_file), m_coupled(in.towers_move(s))
 {
     write_moordyn_input(m_file, s, in, gravity);
     ParallelDescriptor::Barrier();   // every rank reads the file the I/O rank wrote
     std::string err;
     m_sys = erf_moordyn::MoorDynSystem::create(m_file, "", in.moordyn_log_level, err);
     if (!m_sys) { Abort("erf.conductors." + s.name + ": " + err); }
-    if (m_sys->num_coupled_dof() != 0) {
+    // the towers' cross-arms, in order, when they move: MoorDyn lists its coupled points in the input's order
+    const std::size_t ncoupled = m_coupled ? s.towers.size() : 0;
+    if (m_sys->num_coupled_dof() != 3 * ncoupled) {
         Abort("erf.conductors." + s.name + ": the MoorDyn system has " + std::to_string(m_sys->num_coupled_dof()) +
-              " coupled degrees of freedom; this version supports fixed attachments only");
+              " coupled degrees of freedom, " + std::to_string(3 * ncoupled) + " were written");
     }
+    if (!tower_displacement.empty() && tower_displacement.size() != 3 * ncoupled) {
+        Abort("erf.conductors." + s.name + ": " + std::to_string(3 * ncoupled) + " tower displacements are needed, " +
+              std::to_string(tower_displacement.size()) + " were given");
+    }
+    for (std::size_t j = 0; j < ncoupled; ++j) {
+        const auto& p = s.towers[j];
+        for (int d = 0; d < 3; ++d) {
+            const Real moved = tower_displacement.empty() ? Real(0.0) : tower_displacement[3*j+d];
+            m_x.push_back(static_cast<double>(p[d] + moved - (d == 2 ? m_offset : Real(0.0))));
+        }
+    }
+    m_f.assign(m_x.size(), 0.0);
     // a restored line takes its state from the file below, not from the initial-shape solve
     const bool restoring = !saved_state.empty();
-    err = m_sys->init({}, {}, !restoring);
+    err = m_sys->init(m_x, std::vector<double>(m_x.size(), 0.0), !restoring);
     if (!err.empty()) { Abort("erf.conductors." + s.name + ": " + err); }
     const unsigned nlines = static_cast<unsigned>(s.num_spans() + num_insulators());
     if (m_sys->num_lines() != nlines) {
@@ -162,15 +176,54 @@ std::array<Real,3> ConductorSpan::wind_at_point (unsigned point) const
 
 void ConductorSpan::step (double time, double dt)
 {
-    std::vector<double> f;
+    // MoorDyn returns its own clock in t
     double t = time;
     const double sub = dt / m_substeps;
+    const std::vector<double> still(m_x.size(), 0.0);
     for (int i = 0; i < m_substeps; ++i) {
-        m_sys->step({}, {}, f, t, sub);
+        m_sys->step(m_x, still, m_f, t, sub);
     }
-    if (std::abs(m_t0 + t - (time + dt)) > 1.0e-8 * std::max(1.0, std::abs(time + dt))) {
+    m_clock = t;
+    check_clock(time + dt);
+}
+
+void ConductorSpan::step_coupled (double time, double dt, const std::vector<Real>& displacement, const std::vector<Real>& velocity)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_coupled, "ConductorSpan::step_coupled: the line's towers do not move");
+    if (displacement.size() != m_x.size() || velocity.size() != m_x.size()) {
+        Abort("erf.conductors." + m_in.name + ": " + std::to_string(m_x.size()) + " tower displacements and velocities are "
+              "needed, " + std::to_string(displacement.size()) + " and " + std::to_string(velocity.size()) + " were given");
+    }
+    // MoorDyn moves a coupled point from x at the start of the step at xd over it
+    std::vector<double> xd(m_x.size());
+    for (std::size_t j = 0; j < m_x.size() / 3; ++j) {
+        const auto& p = m_in.towers[j];
+        for (int d = 0; d < 3; ++d) {
+            m_x[3*j+d] = static_cast<double>(p[d] + displacement[3*j+d] - (d == 2 ? m_offset : Real(0.0)));
+            xd[3*j+d] = static_cast<double>(velocity[3*j+d]);
+        }
+    }
+    double t = time;
+    m_sys->step(m_x, xd, m_f, t, dt);
+    m_clock = t;
+    // where the step left them, for a step that holds them still
+    for (std::size_t k = 0; k < m_x.size(); ++k) { m_x[k] += xd[k] * dt; }
+}
+
+std::array<Real,3> ConductorSpan::coupled_force (int j) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_coupled && j >= 0 && 3 * static_cast<std::size_t>(j) < m_f.size(),
+                                     "ConductorSpan::coupled_force: no such coupled point");
+    const std::size_t k = 3 * static_cast<std::size_t>(j);
+    return {{static_cast<Real>(m_f[k]), static_cast<Real>(m_f[k+1]), static_cast<Real>(m_f[k+2])}};
+}
+
+void ConductorSpan::check_clock (double time) const
+{
+    const double t = m_clock;
+    if (std::abs(m_t0 + t - time) > 1.0e-8 * std::max(1.0, std::abs(time))) {
         Abort("erf.conductors." + m_in.name + ": MoorDyn's clock (" + std::to_string(t) + " s since ERF's " +
-              std::to_string(m_t0) + " s) left ERF's (" + std::to_string(time + dt) + ")");
+              std::to_string(m_t0) + " s) left ERF's (" + std::to_string(time) + ")");
     }
 }
 

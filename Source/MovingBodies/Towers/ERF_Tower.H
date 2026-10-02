@@ -53,6 +53,20 @@ public:
     const std::vector<MemberNode>& nodes () const { return m_nodes; }
     int num_body_nodes () const { return m_nbody; }
 
+    /**
+     * Hand over how the tower moves (3 per node each): every node's displacement from where it stands
+     * unloaded (m), its velocity (m/s) and its inertial force, minus its mass times its acceleration
+     * (N). A tower that stands still keeps them zero.
+     */
+    void set_motion (const std::vector<amrex::Real>& displacement, const std::vector<amrex::Real>& velocity,
+                     const std::vector<amrex::Real>& inertia);
+    /** The nodes where they are now, moved by their displacement. */
+    std::vector<MemberNode> current_nodes () const;
+    /** The nodes' velocities (3 per node, m/s), zero for a tower that stands still. */
+    const std::vector<amrex::Real>& node_velocities () const { return m_vel; }
+    /** The cross-arm's displacement (m): where the lines hang from has moved by it. */
+    std::array<amrex::Real,3> arm_displacement () const;
+
     /** Hand over the force on every node (3 per node, N) from the members' aerodynamics. */
     void set_loads (const std::vector<amrex::Real>& force) { m_force = force; }
     const std::vector<amrex::Real>& loads () const { return m_force; }
@@ -69,8 +83,10 @@ public:
     const std::array<amrex::Real,3>& line_force () const { return m_line_force; }
     /**
      * The foundation's load from the wind's drag and the lines' pull together, with the tower's
-     * weight: the legs stand at (+-s/2, +-s/2) in the frame of the line and the cross-arm, s the
-     * leg spacing, and share the downward load P equally and the overturning moment M linearly,
+     * weight and, for a tower that moves, the inertial forces of its nodes (the reactions balance
+     * the loads less the mass times the acceleration of every node): the legs stand at
+     * (+-s/2, +-s/2) in the frame of the line and the cross-arm, s the leg spacing, and share
+     * the downward load P equally and the overturning moment M linearly,
      * N_i = P/4 + (M_y x_i - M_x y_i) / (4 (s/2)^2) in that frame.
      */
     FoundationLoad foundation () const;
@@ -84,6 +100,9 @@ private:
     std::vector<MemberNode> m_nodes;
     int m_nbody{0};
     std::vector<amrex::Real> m_force;
+    std::vector<amrex::Real> m_disp;      //!< 3 per node: the displacement from where it stands unloaded
+    std::vector<amrex::Real> m_vel;       //!< 3 per node
+    std::vector<amrex::Real> m_inertia;   //!< 3 per node: minus mass times acceleration
     std::array<amrex::Real,3> m_line_force{{0.0, 0.0, 0.0}};
     std::array<amrex::Real,3> m_line_at{{0.0, 0.0, 0.0}};
 };

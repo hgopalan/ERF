@@ -8,13 +8,17 @@
 // swing further across the wind than clamps at the towers do; the pulls on the two dead ends
 // of a level span in still air balance along the chord and carry the line's weight; and a
 // tower of a level section carries the weight of one span (and its string), the spans either
-// side balancing along the line.
+// side balancing along the line; the cross-arms of towers that move are MoorDyn's coupled points,
+// which a coupled step moves from where they start at the velocity it is given and which take the
+// line's pull the tower is reported to carry; and held still, a coupled point is a fixed one.
 
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -22,6 +26,7 @@
 #include "ERF_ConductorInputs.H"
 #include "ERF_ConductorSpan.H"
 #include "ERF_MoorDynSystem.H"
+#include "ERF_TowerInputs.H"
 
 using erf_conductors::ConductorInputs;
 using erf_conductors::ConductorSpan;
@@ -325,4 +330,92 @@ TEST(ConductorSpan, ATowerOfALevelSectionCarriesOneSpansWeight)
     EXPECT_NEAR(F[0], 0.0, tol * w * 301.5);
     // and the force on the tower is the string's pull: down the string
     EXPECT_LT(F[2], 0.0);
+}
+
+namespace {
+// the section's towers as a type that bends at 2 Hz: their cross-arms are coupled points
+ConductorInputs moving_settings ()
+{
+    ConductorInputs in = settings();
+    erf_towers::TowerType t;
+    t.name = "lat";
+    t.base_width = 6.0; t.top_width = 1.5; t.solidity = 0.2; t.arm_length = 12.0;
+    t.weight = 9.0e4; t.frequency = 2.0;
+    in.tower_types = {t};
+    return in;
+}
+std::string slurp (const std::string& fname)
+{
+    std::ifstream f(fname);
+    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+}
+} // namespace
+
+TEST(ConductorSpan, MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull)
+{
+    const ConductorInputs in = moving_settings();
+    for (const double ins : {2.5, 0.0}) {
+        const std::string name = ins > 0.0 ? "coupled_strings" : "coupled_clamped";
+        SpanInputs s = section(name, ins);
+        s.tower_type = "lat";
+        const std::string file = in.diagnostics_dir + "/" + name + ".moordyn.txt";
+        ConductorSpan line(s, in, 9.81, file);
+        ASSERT_TRUE(line.towers_move()) << name;
+        const std::string text = slurp(file);
+        EXPECT_NE(text.find("2     Coupled   400   500   -9970"), std::string::npos) << text;
+        EXPECT_NE(text.find("3     Coupled   700   500   -9970"), std::string::npos) << text;
+        EXPECT_NE(text.find("1     Fixed     100   500   -9970"), std::string::npos) << "the dead ends stay fixed";
+        // tower 1's cross-arm moves at 0.2 m/s across the line for 0.1 s; tower 2's stays
+        line.set_wind(uniform(line.num_kinematics_points(), 0.0, 0.0, 0.0), 0.05);
+        const std::vector<amrex::Real> start(6, 0.0), velocity{0.0, 0.2, 0.0, 0.0, 0.0, 0.0};
+        line.step_coupled(0.0, 0.1, start, velocity);
+        // where the line meets each cross-arm: the string's top, or the next span's first node
+        auto at_tower = [&] (int j) {
+            const unsigned string_top = line.span_first_node(3) + static_cast<unsigned>((SpanInputs::insulator_segments + 1) * j);
+            return line.node_position(ins > 0.0 ? string_top : line.span_first_node(j + 1));
+        };
+        // positions 500 m from the origin carry a Real's spacing there: 3e-5 m in single precision
+        const double ptol = std::is_same<amrex::Real, float>::value ? 1.0e-4 : 1.0e-9;
+        const auto p1 = at_tower(0), p2 = at_tower(1);
+        EXPECT_NEAR(p1[0], 400.0, ptol) << name;
+        EXPECT_NEAR(p1[1], 500.02, ptol) << name << ": moved 0.2 m/s for 0.1 s";
+        EXPECT_NEAR(p1[2], 30.0, ptol) << name;
+        EXPECT_NEAR(p2[1], 500.0, ptol) << name;
+        // the force MoorDyn hands back on each coupled point is the pull the tower is reported to carry
+        for (int j = 0; j < 2; ++j) {
+            const auto f = line.coupled_force(j), F = line.tower_force(j);
+            const double mag = std::sqrt(F[0] * F[0] + F[1] * F[1] + F[2] * F[2]);
+            EXPECT_GT(mag, 1000.0) << name << " tower " << j + 1;
+            for (int d = 0; d < 3; ++d) { EXPECT_NEAR(f[d], F[d], 1.0e-6 * mag) << name << " tower " << j + 1 << " dir " << d; }
+        }
+        // a step that holds the towers keeps the cross-arm where the coupled step left it
+        line.step(0.1, 0.1);
+        EXPECT_NEAR(at_tower(0)[1], 500.02, ptol) << name;
+    }
+}
+
+TEST(ConductorSpan, HeldStillACoupledPointIsAFixedOne)
+{
+    const ConductorInputs in = moving_settings();
+    SpanInputs s = section("held_coupled", 2.5);
+    s.tower_type = "lat";
+    ConductorSpan coupled(s, in, 9.81, in.diagnostics_dir + "/held_coupled.moordyn.txt");
+    ConductorSpan fixed(section("held_fixed", 2.5), in, 9.81, in.diagnostics_dir + "/held_fixed.moordyn.txt");
+    ASSERT_TRUE(coupled.towers_move());
+    ASSERT_FALSE(fixed.towers_move());
+    const double dt = 0.1;
+    for (int n = 0; n < 30; ++n) {
+        coupled.set_wind(uniform(coupled.num_kinematics_points(), 0.0, 20.0, 0.0), n * dt + 0.5 * dt);
+        fixed.set_wind(uniform(fixed.num_kinematics_points(), 0.0, 20.0, 0.0), n * dt + 0.5 * dt);
+        coupled.step(n * dt, dt);
+        fixed.step(n * dt, dt);
+    }
+    for (unsigned i = 0; i < fixed.num_nodes(); ++i) {
+        const auto a = coupled.node_position(i), b = fixed.node_position(i);
+        for (int d = 0; d < 3; ++d) { EXPECT_NEAR(a[d], b[d], 1.0e-9) << "node " << i << " dir " << d; }
+    }
+    for (int j = 0; j < 2; ++j) {
+        const auto a = coupled.tower_force(j), b = fixed.tower_force(j);
+        for (int d = 0; d < 3; ++d) { EXPECT_NEAR(a[d], b[d], 1.0e-6 * std::abs(b[2])) << "tower " << j + 1 << " dir " << d; }
+    }
 }

@@ -4,6 +4,9 @@
 #include <cmath>
 #include <utility>
 
+#include <AMReX.H>
+#include <AMReX_BLassert.H>
+
 using amrex::Real;
 
 namespace erf_towers {
@@ -40,6 +43,32 @@ Tower::Tower (std::string name, const TowerType& type, const std::array<Real,3>&
                                      m_across, da, phi * m_type.arm_face(), cf});
     }
     m_force.assign(3 * m_nodes.size(), 0.0);
+    m_disp.assign(3 * m_nodes.size(), 0.0);
+    m_vel.assign(3 * m_nodes.size(), 0.0);
+    m_inertia.assign(3 * m_nodes.size(), 0.0);
+}
+
+void Tower::set_motion (const std::vector<Real>& displacement, const std::vector<Real>& velocity, const std::vector<Real>& inertia)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(displacement.size() == 3 * m_nodes.size() && velocity.size() == 3 * m_nodes.size() &&
+                                     inertia.size() == 3 * m_nodes.size(), "Tower::set_motion: 3 values per node are needed");
+    m_disp = displacement;
+    m_vel = velocity;
+    m_inertia = inertia;
+}
+
+std::vector<MemberNode> Tower::current_nodes () const
+{
+    std::vector<MemberNode> nodes = m_nodes;
+    for (std::size_t i = 0; i < nodes.size(); ++i) { for (int d = 0; d < 3; ++d) { nodes[i].pos[d] += m_disp[3*i+d]; } }
+    return nodes;
+}
+
+std::array<Real,3> Tower::arm_displacement () const
+{
+    // the cross-arm's nodes follow the body's nodes
+    const std::size_t i = static_cast<std::size_t>(m_nbody);
+    return {{m_disp[3*i], m_disp[3*i+1], m_disp[3*i+2]}};
 }
 
 std::array<Real,3> Tower::total_force () const
@@ -65,8 +94,17 @@ std::array<Real,3> Tower::base_moment () const
 FoundationLoad Tower::foundation () const
 {
     FoundationLoad L;
-    const auto Fd = total_force();
-    const auto Md = base_moment();
+    auto Fd = total_force();
+    auto Md = base_moment();
+    // a moving tower's nodes also carry their inertial forces to the foundation
+    for (std::size_t i = 0; i < m_nodes.size(); ++i) {
+        const Real rx = m_nodes[i].pos[0] - m_base[0], ry = m_nodes[i].pos[1] - m_base[1], rz = m_nodes[i].pos[2] - m_base[2];
+        const Real fx = m_inertia[3*i], fy = m_inertia[3*i+1], fz = m_inertia[3*i+2];
+        Fd[0] += fx; Fd[1] += fy; Fd[2] += fz;
+        Md[0] += ry * fz - rz * fy;
+        Md[1] += rz * fx - rx * fz;
+        Md[2] += rx * fy - ry * fx;
+    }
     const Real rx = m_line_at[0] - m_base[0], ry = m_line_at[1] - m_base[1], rz = m_line_at[2] - m_base[2];
     const auto& F = m_line_force;
     for (int d = 0; d < 3; ++d) { L.force[d] = Fd[d] + F[d]; }

@@ -73,9 +73,10 @@ public:
     void set_kinematics (const std::vector<double>& U, const std::vector<double>& Ud, double t);
 
     /**
-     * Advance the system by dt from t (MoorDyn sub-steps internally with its own dtM): x and xd are
-     * the coupled positions and velocities at the end of the step, f receives the coupled forces.
-     * t is advanced to t + dt.
+     * Advance the system by dt (MoorDyn sub-steps internally with its own dtM): the coupled points
+     * start the step at x and move at xd over it (MoorDyn places them at x + xd s, s the time into
+     * the step), and f receives the coupled forces at its end, the net force of the line ends on each
+     * coupled point. t receives MoorDyn's clock, the time since it was initialised.
      */
     void step (const std::vector<double>& x, const std::vector<double>& xd, std::vector<double>& f, double& t, double dt);
 

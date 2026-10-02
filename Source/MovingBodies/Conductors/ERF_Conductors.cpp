@@ -182,6 +182,13 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
                     << " N down; legs " << L.max_compression << " N compression, " << L.max_uplift << " N uplift at most"
                     << (L.over_allowable ? ", already over an allowable" : "") << "\n";
         }
+        for (std::size_t t = 0; t < m_towers.size(); ++t) {
+            const auto* m = dynamic_cast<const erf_towers::OneModeTower*>(m_models[t].get());
+            if (m == nullptr) { continue; }
+            Print() << "  " << m_towers[t].name() << " bends at " << m->frequency() << " Hz (" << m_towers[t].type().frequency
+                    << " Hz on a rigid foundation): generalized mass " << m->generalized_mass() << " kg, stiffness "
+                    << m->stiffness() << " N/m at the cross-arm; MoorDyn moves its cross-arm as a coupled point\n";
+        }
     }
 }
 
@@ -190,11 +197,14 @@ Conductors::build_towers ()
 {
     m_towers.clear();
     m_tower_of.clear();
+    m_first_tower.clear();
+    m_models.clear();
     m_aero = std::make_unique<erf_towers::MemberDrag>(m_in.air_density);
     std::size_t ip = 0;
     for (std::size_t line = 0; line < m_placed.size(); ++line) {
         const SpanInputs& s = m_placed[line];
         const int npoints = s.num_spans() + 1;
+        m_first_tower.push_back(m_towers.size());
         if (!s.tower_type.empty()) {
             const erf_towers::TowerType* type = nullptr;
             for (const auto& t : m_in.tower_types) { if (t.name == s.tower_type) { type = &t; } }
@@ -217,6 +227,7 @@ Conductors::build_towers ()
                 m_towers.emplace_back(s.name + "_t" + std::to_string(k), *type, std::array<Real,3>{{p[0], p[1], ground}},
                                       p[2] - ground, across);
                 m_tower_of.emplace_back(line, k - 1);
+                m_models.push_back(type->moves() ? std::make_unique<erf_towers::OneModeTower>(m_towers.back(), CONST_GRAV) : nullptr);
             }
         }
         ip += static_cast<std::size_t>(npoints);
@@ -229,9 +240,9 @@ Conductors::add_tower_stats ()
     m_tower_stats.clear();
     for (const auto& t : m_towers) {
         const std::string name = "tower_" + t.name();
-        m_tower_stats.emplace_back(name, m_in.diagnostics_dir + "/" + name,
-                                   std::vector<std::string>{"drag_h", "line_h", "shear", "overturning", "max_compression",
-                                                            "max_uplift", "over_allowable"});
+        std::vector<std::string> q{"drag_h", "line_h", "shear", "overturning", "max_compression", "max_uplift", "over_allowable"};
+        if (t.type().moves()) { q.emplace_back("arm_displacement"); }
+        m_tower_stats.emplace_back(name, m_in.diagnostics_dir + "/" + name, q);
     }
 }
 
@@ -239,7 +250,8 @@ std::vector<Real>
 Conductors::tower_wind (const MultiFab& U, const MultiFab& V, const MultiFab& W, const MultiFab* z_phys_nd, const Geometry& geom) const
 {
     std::vector<Real> pos;
-    for (const auto& t : m_towers) { for (const auto& n : t.nodes()) { pos.insert(pos.end(), {n.pos[0], n.pos[1], n.pos[2]}); } }
+    // where the members are now: a moving tower's nodes have left where they stood
+    for (const auto& t : m_towers) { for (const auto& n : t.current_nodes()) { pos.insert(pos.end(), {n.pos[0], n.pos[1], n.pos[2]}); } }
     std::vector<Real> uvw(pos.size(), 0.0);
     if (m_in.has_prescribed_velocity) {
         for (std::size_t p = 0; p < uvw.size() / 3; ++p) { for (int d = 0; d < 3; ++d) { uvw[3*p+d] = m_in.prescribed_velocity[d]; } }
@@ -259,16 +271,78 @@ void
 Conductors::load_towers (const std::vector<Real>& wind)
 {
     std::size_t off = 0;
-    for (auto& t : m_towers) {
-        const std::size_t n = 3 * t.nodes().size();
-        const std::vector<Real> u(wind.begin() + static_cast<std::ptrdiff_t>(off), wind.begin() + static_cast<std::ptrdiff_t>(off + n));
-        const std::vector<Real> still(n, 0.0);   // rigid towers: the members do not move
-        std::vector<Real> f;
-        m_aero->loads(t.nodes(), u, still, f);
-        t.set_loads(f);
+    m_tower_wind.resize(m_towers.size());
+    for (std::size_t t = 0; t < m_towers.size(); ++t) {
+        const std::size_t n = 3 * m_towers[t].nodes().size();
+        m_tower_wind[t].assign(wind.begin() + static_cast<std::ptrdiff_t>(off), wind.begin() + static_cast<std::ptrdiff_t>(off + n));
+        drag_on_tower(t);
         off += n;
     }
     load_towers_with_lines();
+}
+
+void
+Conductors::drag_on_tower (std::size_t t)
+{
+    // the wind relative to the members: a tower that stands still has none of its own
+    erf_towers::Tower& tw = m_towers[t];
+    std::vector<Real> f;
+    m_aero->loads(tw.current_nodes(), m_tower_wind[t], tw.node_velocities(), f);
+    tw.set_loads(f);
+}
+
+void
+Conductors::move_tower (std::size_t t)
+{
+    const erf_towers::TowerModel& m = *m_models[t];
+    const std::size_t n = m_towers[t].nodes().size();
+    std::vector<Real> disp(3 * n), vel(3 * n), inertia(3 * n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto x = m.displacement(i), v = m.velocity(i), f = m.inertial_force(i);
+        for (int d = 0; d < 3; ++d) { disp[3*i+d] = x[d]; vel[3*i+d] = v[d]; inertia[3*i+d] = f[d]; }
+    }
+    m_towers[t].set_motion(disp, vel, inertia);
+}
+
+void
+Conductors::step_moving_line (std::size_t line, double time, double dt)
+{
+    ConductorSpan& span = *m_spans[line];
+    const SpanInputs& s = m_placed[line];
+    const std::size_t first = m_first_tower[line], nt = s.towers.size();
+    // enough coupling steps for the fastest tower to take coupling_steps_per_period over its period
+    double fmax = 0.0;
+    for (std::size_t t = first; t < first + nt; ++t) { fmax = std::max(fmax, static_cast<double>(m_models[t]->frequency())); }
+    const int n = std::max(m_in.substeps, static_cast<int>(std::ceil(dt * fmax * coupling_steps_per_period - 1.0e-9)));
+    const double h = dt / n;
+    std::vector<Real> start(3 * nt), velocity(3 * nt);
+    for (int k = 0; k < n; ++k) {
+        for (std::size_t j = 0; j < nt; ++j) {
+            const std::size_t t = first + j;
+            erf_towers::TowerModel& m = *m_models[t];
+            const auto x0 = m.attachment_displacement();
+            // the members' drag in the wind held for the step at the nodes' velocities, and the lines'
+            // pull from the end of MoorDyn's last call, held over the coupling step
+            drag_on_tower(t);
+            m.step(static_cast<Real>(h), m_towers[t].loads(), m_towers[t].line_force());
+            move_tower(t);
+            const auto x1 = m.attachment_displacement();
+            for (int d = 0; d < 3; ++d) {
+                start[3*j+d] = x0[d];
+                velocity[3*j+d] = static_cast<Real>((x1[d] - x0[d]) / h);
+            }
+        }
+        // MoorDyn moves the cross-arms from where they were to where the towers have taken them
+        span.step_coupled(time + k * h, h, start, velocity);
+        for (std::size_t j = 0; j < nt; ++j) {
+            const std::size_t t = first + j;
+            auto at = s.point(static_cast<int>(j) + 1);
+            const auto x = m_models[t]->attachment_displacement();
+            for (int d = 0; d < 3; ++d) { at[d] += x[d]; }
+            m_towers[t].set_line_load(span.tower_force(static_cast<int>(j)), at);
+        }
+    }
+    span.check_clock(time + dt);
 }
 
 void
@@ -276,7 +350,11 @@ Conductors::load_towers_with_lines ()
 {
     for (std::size_t t = 0; t < m_towers.size(); ++t) {
         const auto [line, j] = m_tower_of[t];
-        m_towers[t].set_line_load(m_spans[line]->tower_force(j), m_placed[line].point(j + 1));
+        // where the line hangs from the cross-arm, which a moving tower has displaced
+        auto at = m_placed[line].point(j + 1);
+        const auto x = m_towers[t].arm_displacement();
+        for (int d = 0; d < 3; ++d) { at[d] += x[d]; }
+        m_towers[t].set_line_load(m_spans[line]->tower_force(j), at);
     }
 }
 
@@ -292,6 +370,7 @@ Conductors::write_towers (double time, bool first) const
             const std::string& n = t.name();
             for (const char* c : {"_drag_Fx", "_drag_Fy", "_drag_Fz", "_line_Fx", "_line_Fy", "_line_Fz", "_shear", "_overturning",
                                   "_vertical", "_max_compression", "_max_uplift", "_over"}) { out << " " << n << c; }
+            if (t.type().moves()) { out << " " << n << "_arm_dx " << n << "_arm_dy"; }
         }
         out << "\n";
     }
@@ -302,6 +381,10 @@ Conductors::write_towers (double time, bool first) const
         const auto L = t.foundation();
         out << " " << D[0] << " " << D[1] << " " << D[2] << " " << F[0] << " " << F[1] << " " << F[2] << " " << L.shear << " "
             << L.overturning << " " << L.vertical << " " << L.max_compression << " " << L.max_uplift << " " << (L.over_allowable ? 1 : 0);
+        if (t.type().moves()) {
+            const auto x = t.arm_displacement();
+            out << " " << x[0] << " " << x[1];
+        }
     }
     out << "\n";
 }
@@ -505,6 +588,29 @@ Conductors::restore (const std::string& dir)
     if (!have_step || !have_time || !have_t0) {
         Abort("no step count, time or clock offset in the conductor checkpoint '" + dir + "/state'");
     }
+    // the moving towers' state first: their lines start with the cross-arms where the towers had taken them
+    if (std::any_of(m_models.begin(), m_models.end(), [] (const auto& m) { return m != nullptr; })) {
+        if (!FileExists(dir + "/tower_motion")) {
+            Abort("the conductor checkpoint '" + dir + "' holds no tower sway, but the towers of erf.conductors.tower_types "
+                  "now have a frequency; the tower types must match the run being restarted");
+        }
+        Vector<char> mchars;
+        ParallelDescriptor::ReadAndBcastFile(dir + "/tower_motion", mchars);
+        std::istringstream tm(std::string(mchars.dataPtr(), mchars.size()));
+        for (std::size_t t = 0; t < m_towers.size(); ++t) {
+            if (!m_models[t]) { continue; }
+            std::string name;
+            std::size_t n = 0;
+            if (!(tm >> name >> n) || name != m_towers[t].name()) {
+                Abort("the conductor checkpoint '" + dir + "/tower_motion' holds no state for tower " + m_towers[t].name() +
+                      "; the lines' tower_type and erf.conductors.tower_types must match the run being restarted");
+            }
+            std::vector<double> st(n);
+            for (auto& v : st) { if (!(tm >> v)) { Abort("the conductor checkpoint '" + dir + "/tower_motion' is truncated"); } }
+            if (!m_models[t]->set_state(st)) { Abort("the conductor checkpoint '" + dir + "/tower_motion' does not fit tower " + m_towers[t].name()); }
+            move_tower(t);
+        }
+    }
     if (saved.size() != m_placed.size()) {
         Abort("the conductor checkpoint '" + dir + "' holds " + std::to_string(saved.size()) + " line(s) but erf.conductors.spans lists " +
               std::to_string(m_placed.size()) + "; the erf.conductors block must match the run being restarted");
@@ -521,7 +627,14 @@ Conductors::restore (const std::string& dir)
                   " (spans, towers, segments and insulator strings must match the run being restarted)");
         }
         const std::string file = m_in.diagnostics_dir + "/" + s.name + ".moordyn.txt";
-        m_spans.push_back(std::make_unique<ConductorSpan>(s, m_in, CONST_GRAV, file, dir + "/" + s.name + ".moordyn"));
+        std::vector<Real> moved;
+        if (m_in.towers_move(s)) {
+            for (std::size_t j = 0; j < s.towers.size(); ++j) {
+                const auto x = m_towers[m_first_tower[i] + j].arm_displacement();
+                moved.insert(moved.end(), {x[0], x[1], x[2]});
+            }
+        }
+        m_spans.push_back(std::make_unique<ConductorSpan>(s, m_in, CONST_GRAV, file, dir + "/" + s.name + ".moordyn", moved));
         m_spans.back()->set_clock_offset(m_t0);
         add_stats(s);
         for (auto& st : m_stats.back()) {
@@ -602,8 +715,20 @@ Conductors::write_checkpoint (const std::string& chkdir) const
         out << std::setprecision(std::numeric_limits<double>::max_digits10);
         for (const auto& t : m_towers) { for (const Real v : t.loads()) { out << static_cast<double>(v) << "\n"; } }
         if (!out) { Abort("cannot write the conductor checkpoint '" + dir + "/tower_loads'"); }
+        if (std::any_of(m_models.begin(), m_models.end(), [] (const auto& m) { return m != nullptr; })) {
+            // each moving tower's name, the size of its state and the state
+            std::ofstream mo(dir + "/tower_motion", std::ios::trunc);
+            mo << std::setprecision(std::numeric_limits<double>::max_digits10);
+            for (std::size_t t = 0; t < m_towers.size(); ++t) {
+                if (!m_models[t]) { continue; }
+                const auto st = m_models[t]->state();
+                mo << m_towers[t].name() << " " << st.size();
+                for (const double v : st) { mo << " " << v; }
+                mo << "\n";
+            }
+            if (!mo) { Abort("cannot write the conductor checkpoint '" + dir + "/tower_motion'"); }
+        }
     }
-    ParallelDescriptor::Barrier();
     ParallelDescriptor::Barrier();
 }
 
@@ -700,20 +825,26 @@ Conductors::advance (int lev, double time, double dt,
                 const auto D = m_towers[t].total_force();
                 const auto& F = m_towers[t].line_force();
                 const auto L = m_towers[t].foundation();
-                m_tower_stats[t].accumulate(time, {std::hypot(D[0], D[1]), std::hypot(F[0], F[1]), L.shear, L.overturning,
-                                                   L.max_compression, L.max_uplift, L.over_allowable ? Real(1.0) : Real(0.0)});
+                std::vector<Real> q{std::hypot(D[0], D[1]), std::hypot(F[0], F[1]), L.shear, L.overturning,
+                                    L.max_compression, L.max_uplift, L.over_allowable ? Real(1.0) : Real(0.0)};
+                if (m_models[t]) {
+                    const auto x = m_towers[t].arm_displacement();
+                    q.push_back(std::hypot(x[0], x[1]));
+                }
+                m_tower_stats[t].accumulate(time, q);
                 if (write) { m_tower_stats[t].write(); }
             }
         }
     }
-    for (auto& span : m_spans) {
+    for (std::size_t line = 0; line < m_spans.size(); ++line) {
+        ConductorSpan& span = *m_spans[line];
         // the wind of the flow at the start of the step, where the line is, held over the step
-        span->set_wind(wind_at(*span, U, V, W, z_phys_nd, geom), time + 0.5 * dt);
+        span.set_wind(wind_at(span, U, V, W, z_phys_nd, geom), time + 0.5 * dt);
         if (first) {
-            span->write_diagnostics(time, true);
-            if (m_in.node_output_int > 0) { span->write_nodes(time, true); }
+            span.write_diagnostics(time, true);
+            if (m_in.node_output_int > 0) { span.write_nodes(time, true); }
         }
-        span->step(time, dt);
+        if (span.towers_move()) { step_moving_line(line, time, dt); } else { span.step(time, dt); }
     }
     m_time = time + dt;
     // where the lines are now: their clearance to the terrain, then the outputs and statistics
@@ -796,8 +927,9 @@ Conductors::spread_drag (const MultiFab& U, const MultiFab* z_phys_nd, const Mul
         }
     }
     for (const auto& t : m_towers) {
-        for (std::size_t n = 0; n < t.nodes().size(); ++n) {
-            const auto& p = t.nodes()[n].pos;
+        const auto nodes = t.current_nodes();
+        for (std::size_t n = 0; n < nodes.size(); ++n) {
+            const auto& p = nodes[n].pos;
             pos.insert(pos.end(), {p[0], p[1], p[2]});
             force.insert(force.end(), {-t.loads()[3*n], -t.loads()[3*n+1], -t.loads()[3*n+2]});
         }

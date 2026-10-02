@@ -81,6 +81,13 @@ std::string SpanInputs::span_name (int k) const
     return (num_spans() == 1) ? name : name + "_span" + std::to_string(k + 1);
 }
 
+const erf_towers::TowerType* ConductorInputs::tower_type (const SpanInputs& s) const
+{
+    if (s.tower_type.empty()) { return nullptr; }
+    for (const auto& t : tower_types) { if (t.name == s.tower_type) { return &t; } }
+    return nullptr;
+}
+
 Catenary elastic_catenary (Real chord, Real length, Real w, Real EA)
 {
     Catenary cat;
@@ -320,6 +327,10 @@ ConductorInputs ConductorInputs::read ()
         pt.query("leg_spacing", t.leg_spacing);
         pt.query("allowable_uplift", t.allowable_uplift);
         pt.query("allowable_compression", t.allowable_compression);
+        pt.query("frequency", t.frequency);
+        pt.query("damping_ratio", t.damping_ratio);
+        pt.query("foundation_rotational_stiffness", t.foundation_rotational_stiffness);
+        pt.query("foundation_lateral_stiffness", t.foundation_lateral_stiffness);
         const std::string terr = t.validate();
         if (!terr.empty()) { Abort(terr); }
         in.tower_types.push_back(t);

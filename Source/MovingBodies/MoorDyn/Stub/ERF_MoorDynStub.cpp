@@ -7,9 +7,11 @@
 // swings about the chord to the quasi-static blowout angle atan(q / w) set by the fluid velocity it
 // is given (q the drag per unit length, w the weight per unit length), relaxing towards that angle
 // with a one-second lag so that the state depends on time, and carries the catenary tension. Fixed,
-// coupled and free points are accepted. A free point hangs from the shortest line that ties it to a
-// fixed point (an insulator string from its tower), at the swing direction of the other line attached
-// to it as that line was last placed, and the hanging line runs straight from the fixed point to it;
+// coupled and free points are accepted; a coupled point moves as MoorDyn moves it, from the position
+// it is given at the start of a step at the velocity it is given over the step. A free point hangs
+// from the shortest line that ties it to a held point, fixed or coupled (an insulator string from its
+// tower), at the swing direction of the other line attached to it as that line was last placed, and
+// the hanging line runs straight from the held point to it;
 // the fluid loads act on nodes below z = 0, as in MoorDyn (the
 // drag on each node is the normal wind's dynamic pressure on its share of the line), and
 // the external kinematics points follow MoorDyn-C 2.7.1's order: the line nodes, the points, then one
@@ -150,7 +152,7 @@ bool parse (const std::string& fname, StubSystem& s)
             std::fprintf(stderr, "MoorDyn stub: a line attaches to a point that does not exist\n"); return false;
         }
     }
-    // each free point hangs from the shortest line that ties it to a fixed point, and swings with
+    // each free point hangs from the shortest line that ties it to a held point, and swings with
     // another line attached to it
     for (std::size_t ip = 0; ip < s.points.size(); ++ip) {
         Point& p = s.points[ip];
@@ -160,7 +162,7 @@ bool parse (const std::string& fname, StubSystem& s)
             const Line& l = s.lines[il];
             const int other = (l.attachA == id) ? l.attachB : ((l.attachB == id) ? l.attachA : 0);
             if (other == 0) { continue; }
-            if (s.points[static_cast<std::size_t>(other - 1)].type == 1 &&
+            if (s.points[static_cast<std::size_t>(other - 1)].type != 0 &&
                 (p.hang_line < 0 || l.length < s.lines[static_cast<std::size_t>(p.hang_line)].length)) {
                 p.hang_line = static_cast<int>(il);
             }
@@ -169,7 +171,7 @@ bool parse (const std::string& fname, StubSystem& s)
             const Line& l = s.lines[il];
             if (static_cast<int>(il) != p.hang_line && (l.attachA == id || l.attachB == id)) { p.swing_line = static_cast<int>(il); break; }
         }
-        if (p.hang_line < 0) { std::fprintf(stderr, "MoorDyn stub: free point %d hangs from no fixed point\n", id); return false; }
+        if (p.hang_line < 0) { std::fprintf(stderr, "MoorDyn stub: free point %d hangs from no fixed or coupled point\n", id); return false; }
         s.lines[static_cast<std::size_t>(p.hang_line)].hanging = true;
     }
     return true;
@@ -290,12 +292,16 @@ void update_point_forces (StubSystem& s)
     }
 }
 
-void set_coupled (StubSystem& s, const double* x)
+// the coupled points where a step of dt leaves them: from x at xd, as MoorDyn moves them
+void set_coupled (StubSystem& s, const double* x, const double* xd, double dt)
 {
     if (x == nullptr) { return; }
     unsigned ix = 0;
     for (auto& p : s.points) {
-        if (p.type == -1) { for (int d = 0; d < 3; ++d) { p.pos[d] = x[ix + d]; } ix += 3; }
+        if (p.type == -1) {
+            for (int d = 0; d < 3; ++d) { p.pos[d] = x[ix + d] + (xd != nullptr ? xd[ix + d] * dt : 0.0); }
+            ix += 3;
+        }
     }
 }
 
@@ -314,12 +320,12 @@ unsigned kin_points (const StubSystem& s)
     return n + 1 + static_cast<unsigned>(s.points.size());
 }
 
-// A hanging line from its fixed point straight to its free point, with the weight of the lines it
+// A hanging line from its held point straight to its free point, with the weight of the lines it
 // carries and its own as its tension, and the normal wind's drag on its nodes.
 void place_hanging (StubSystem& s, Line& l, const double* U_nodes)
 {
     const LineType& ty = s.types[static_cast<std::size_t>(l.type_index)];
-    const bool a_fixed = s.points[static_cast<std::size_t>(l.attachA - 1)].type == 1;
+    const bool a_fixed = s.points[static_cast<std::size_t>(l.attachA - 1)].type != 0;   // held: fixed or coupled
     const Point& top = s.points[static_cast<std::size_t>((a_fixed ? l.attachA : l.attachB) - 1)];
     const Point& bot = s.points[static_cast<std::size_t>((a_fixed ? l.attachB : l.attachA) - 1)];
     const int bot_id = a_fixed ? l.attachB : l.attachA;
@@ -371,7 +377,7 @@ void place_all (StubSystem& s, double dt, bool move_free_points)
         for (auto& p : s.points) {
             if (p.type != 0) { continue; }
             const Line& h = s.lines[static_cast<std::size_t>(p.hang_line)];
-            const Point& top = s.points[static_cast<std::size_t>((s.points[static_cast<std::size_t>(h.attachA - 1)].type == 1 ? h.attachA : h.attachB) - 1)];
+            const Point& top = s.points[static_cast<std::size_t>((s.points[static_cast<std::size_t>(h.attachA - 1)].type != 0 ? h.attachA : h.attachB) - 1)];
             const double* es = (p.swing_line >= 0) ? s.lines[static_cast<std::size_t>(p.swing_line)].es : h.es;
             for (int d = 0; d < 3; ++d) { p.pos[d] = top.pos[d] + h.length * es[d]; }
         }
@@ -437,7 +443,7 @@ static int stub_init (MoorDyn system, const double* x, bool)
     if (system == nullptr) { return MOORDYN_INVALID_VALUE; }
     StubSystem& s = *sys(system);
     if (coupled_dof(s) > 0 && x == nullptr) { return MOORDYN_INVALID_VALUE; }
-    set_coupled(s, x);
+    set_coupled(s, x, nullptr, 0.0);
     s.t = 0.0;
     for (auto& l : s.lines) { l.phi = 0.0; l.pos.clear(); l.es[0] = 0.0; l.es[1] = 0.0; l.es[2] = -1.0; }
     advance(s, 0.0);
@@ -448,14 +454,14 @@ static int stub_init (MoorDyn system, const double* x, bool)
 int MoorDyn_Init (MoorDyn system, const double* x, const double*) { return stub_init(system, x, true); }
 int MoorDyn_Init_NoIC (MoorDyn system, const double* x, const double*) { return stub_init(system, x, false); }
 
-int MoorDyn_Step (MoorDyn system, const double* x, const double*, double* f, double* t, double* dt)
+int MoorDyn_Step (MoorDyn system, const double* x, const double* xd, double* f, double* t, double* dt)
 {
     if (system == nullptr || t == nullptr || dt == nullptr) { return MOORDYN_INVALID_VALUE; }
     StubSystem& s = *sys(system);
     if (!s.initialised) { return MOORDYN_INVALID_VALUE; }
     if (coupled_dof(s) > 0 && (x == nullptr || f == nullptr)) { return MOORDYN_INVALID_VALUE; }
     if (*dt <= 0.0) { coupled_forces(s, f); return MOORDYN_SUCCESS; }
-    set_coupled(s, x);
+    set_coupled(s, x, xd, *dt);
     advance(s, *dt);
     s.t += *dt;
     *t = s.t;
@@ -571,8 +577,9 @@ int MoorDyn_Save (MoorDyn system, const char* filepath)
     // restored line would hang in the plane of its swing angle but towards no wind
     for (double v : s.U) { out << v << " "; }
     out << "\n";
-    // where the free points hang: they follow their lines' swing of the step before
-    for (const auto& p : s.points) { if (p.type == 0) { out << p.pos[0] << " " << p.pos[1] << " " << p.pos[2] << "\n"; } }
+    // where the free points hang (they follow their lines' swing of the step before) and where the
+    // coupled points were moved to
+    for (const auto& p : s.points) { if (p.type != 1) { out << p.pos[0] << " " << p.pos[1] << " " << p.pos[2] << "\n"; } }
     return MOORDYN_SUCCESS;
 }
 
@@ -594,9 +601,9 @@ int MoorDyn_Load (MoorDyn system, const char* filepath)
     if (nu != s.U.size()) { return MOORDYN_INVALID_INPUT; }
     for (double& v : s.U) { if (!(in >> v)) { return MOORDYN_INVALID_INPUT; } }
     for (auto& p : s.points) {
-        if (p.type == 0) { for (double& v : p.pos) { if (!(in >> v)) { return MOORDYN_INVALID_INPUT; } } }
+        if (p.type != 1) { for (double& v : p.pos) { if (!(in >> v)) { return MOORDYN_INVALID_INPUT; } } }
     }
-    // the shape, tensions and drag follow from the restored angles, free points and fluid velocity;
+    // the shape, tensions and drag follow from the restored angles, points and fluid velocity;
     // velocities restart from rest
     place_all(s, 0.0, false);
     return MOORDYN_SUCCESS;
