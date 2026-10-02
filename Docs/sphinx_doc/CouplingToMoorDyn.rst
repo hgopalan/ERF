@@ -60,8 +60,10 @@ and has the geometry, ordering and data flow of the real interface but no
 line dynamics: each line hangs as a parabola with the catenary sag of its
 slack, swings to the quasi-static blowout angle of the wind it is given with
 a one-second lag, and carries the catenary tension. The unit tests and the
-``Linux GCC MoorDyn stub`` CI job run on it; the regression tests of the
-coupled bodies will too.
+``Linux GCC MoorDyn`` CI workflow runs them on it in one job; a second job
+installs MoorDyn-C 2.7.1 with ``Build/setup_moordyn.sh`` and runs the same
+tests, the verification tests that need real line dynamics and the coupled
+regression test against the real library.
 
 The GNU make build takes ``USE_MOORDYN = TRUE`` with ``MOORDYN_HOME`` set to
 the install prefix (and ``MOORDYN_VERSION`` to the version string it should
@@ -110,8 +112,9 @@ A minimal case
 --------------
 
 A 300 m span of 795 kcmil ACSR (Drake) with 1.5 m of slack, 30 m above the
-ground, blown by a prescribed 15 m/s crosswind in a uniform anelastic flow
-(the regression test ``Conductors_PrescribedWind``):
+ground, across a uniform 15 m/s anelastic crosswind; the wind handed to
+MoorDyn is ERF's velocity at the line's nodes (the regression test
+``Conductors_FlowWind``):
 
 .. code-block:: text
 
@@ -120,16 +123,19 @@ ground, blown by a prescribed 15 m/s crosswind in a uniform anelastic flow
    erf.vert_implicit  = true
    erf.use_fft        = true
    erf.fixed_dt       = 0.5
+   geometry.is_periodic = 1 0 0
+   ylo.type     = "Inflow"
+   ylo.velocity = 0. 15.0 0.
+   yhi.type     = "Outflow"
 
    erf.conductors.spans               = S1
-   erf.conductors.S1.end_a            = 300. 500. 30.    # z above the terrain surface
-   erf.conductors.S1.end_b            = 600. 500. 30.
+   erf.conductors.S1.end_a            = 600. 500. 30.    # z above the terrain surface
+   erf.conductors.S1.end_b            = 900. 500. 30.
    erf.conductors.S1.length           = 301.5           # unstretched, more than the 300 m chord
    erf.conductors.S1.diameter         = 0.0281
    erf.conductors.S1.mass_per_length  = 1.628
    erf.conductors.S1.axial_stiffness  = 3.0e7
    erf.conductors.air_density         = 1.0
-   erf.conductors.prescribed_velocity = 0. 15. 0.
 
 The physics and the diagnostics are in :ref:`sec:Conductors`; the inputs,
 with their defaults and ranges, in the "Conductor spans" section of

@@ -43,11 +43,27 @@ Lockstep with ERF
 
 The spans live on their anchor level (``anchor_level``, the finest level by
 default). Every step of that level, the wind is handed to MoorDyn at the
-points it asks for (the line nodes first, then the attachments), valid at the
-middle of the step, and the line is advanced by ERF's step in ``substeps``
+line nodes (MoorDyn also lists its fixed entries after them, the attachments
+and one entry at its own origin, which get no wind), valid at the middle of
+the step, and the line is advanced by ERF's step in ``substeps``
 MoorDyn calls; MoorDyn sub-steps internally with its own time step, set by
 the Courant factor ``moordyn_cfl`` and bounded further by ``moordyn_dt`` when
 that is given. ERF's clock and MoorDyn's must agree at the end of every step.
+
+The wind handed to MoorDyn is ERF's velocity at the start of the step,
+sampled with the actuator core at the points where the line is at that
+moment, not where it hung: a span blown out by several metres sits in a
+different part of the flow, which matters on a ridge or near a plume. Each
+component is interpolated from its own staggered grid, bilinearly in the
+horizontal and linearly in the physical height, so a field linear in
+``x``, ``y`` and the height is handed over exactly. The fluid acceleration
+MoorDyn also accepts enters only its added-mass load, which in air is about
+a thousandth of the line's own inertia, and is left at zero. Before every
+sampling the points are checked: a point that has left the domain, or whose
+surrounding cells are not on the anchor level's grids (a refined patch that
+does not cover the whole span), stops the run with the span, the point and
+its position. ``prescribed_velocity`` replaces the sampled wind by a uniform
+one, for testing.
 
 The Courant factor matters more than its name suggests. For a 300 m span of
 795 kcmil ACSR with 20 segments, MoorDyn's own default of 0.5 (an internal
@@ -56,10 +72,26 @@ second in a 20 m/s wind; 0.2 runs but more than doubles the still-air sag
 (36.6 m instead of 16.4 m); 0.15 and 0.1 agree to the millimetre. ERF
 therefore writes 0.1 by default and refuses values above 0.15. A MoorDyn
 step that still diverges aborts with ``MOORDYN_NAN_ERROR`` and the advice to
-reduce the internal step. In this version the wind at
-the nodes is the uniform ``prescribed_velocity`` (still air when it is not
-given); sampling the flow at the nodes' current positions comes with the next
-step of the coupling.
+reduce the internal step.
+
+Verification
+------------
+
+Against the real MoorDyn-C 2.7.1, a 300 m span of 795 kcmil ACSR with 1.5 m
+of slack and 20 segments in air of density 1.2 kg/m^3 (the unit tests
+``ConductorVerification``):
+
+* in a steady crosswind the mean swing angle over 20 to 60 s is the
+  quasi-static blowout angle :math:`\arctan(q/w)`: 6.023 against 6.029
+  degrees at 10 m/s, 22.893 against 22.903 at 20 m/s and 43.519 against
+  43.548 at 30 m/s;
+* released after a one-second gust into still air, the span swings with the
+  first out-of-plane period of a cable, :math:`T = 2c/\sqrt{H/m}` (Irvine,
+  *Cable Structures*, 1981), which does not depend on the sag: 6.658 s
+  measured over five periods against 6.655 s.
+
+Both agree within 0.1 %; the tests allow 1 %. They skip on the stub library,
+which has no line dynamics.
 
 Placement on terrain
 --------------------
@@ -79,7 +111,8 @@ Every ``diagnostics_int`` steps each span appends a row to
 ``<output_root>.dat`` (whitespace separated, like ERF's data logs): the time,
 the middle node's position, its sag below the chord, its lateral offset from
 the chord's vertical plane, the swing angle in degrees, the tension at the
-first and last node and the largest tension on the line. The MoorDyn input
+first and last node, the largest tension on the line, and the wind handed to
+MoorDyn at the middle node. The MoorDyn input
 file the span was built from is kept next to it
 (``<diagnostics_dir>/<name>.moordyn.txt``) for inspection or for running
 MoorDyn on its own.

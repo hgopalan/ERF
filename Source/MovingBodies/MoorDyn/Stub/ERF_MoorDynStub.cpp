@@ -6,7 +6,9 @@
 // swings about the chord to the quasi-static blowout angle atan(q / w) set by the fluid velocity it
 // is given (q the drag per unit length, w the weight per unit length), relaxing towards that angle
 // with a one-second lag so that the state depends on time, and carries the catenary tension. Only
-// fixed and coupled points are accepted; the fluid loads act on nodes below z = 0, as in MoorDyn.
+// fixed and coupled points are accepted; the fluid loads act on nodes below z = 0, as in MoorDyn, and
+// the external kinematics points follow MoorDyn-C 2.7.1's order: the line nodes, the points, then one
+// entry at the origin.
 
 #include "moordyn/MoorDyn2.h"
 
@@ -251,9 +253,10 @@ unsigned coupled_dof (const StubSystem& s)
 
 unsigned kin_points (const StubSystem& s)
 {
+    // as MoorDyn-C 2.7.1: the line nodes, the points, then one entry at the origin
     unsigned n = 0;
     for (const auto& l : s.lines) { n += l.nseg + 1; }
-    return n + static_cast<unsigned>(s.points.size());
+    return n + 1 + static_cast<unsigned>(s.points.size());
 }
 
 void advance (StubSystem& s, double dt)
@@ -374,6 +377,7 @@ int MoorDyn_ExternalWaveKinGetCoordinates (MoorDyn system, double* r)
         for (std::size_t j = 0; j < l.pos.size(); ++j) { r[k++] = l.pos[j]; }
     }
     for (const auto& p : s.points) { for (int d = 0; d < 3; ++d) { r[k++] = p.pos[d]; } }
+    for (int d = 0; d < 3; ++d) { r[k++] = 0.0; }   // the entry MoorDyn adds at its origin
     return MOORDYN_SUCCESS;
 }
 

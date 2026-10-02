@@ -57,7 +57,7 @@ struct SpanInputs
  *   erf.conductors.moordyn_cfl      = 0.1          (MoorDyn's Courant factor, which sets its internal step; at most 0.15)
  *   erf.conductors.moordyn_log_level = 2           (0 debug, 1 messages, 2 warnings, 3 errors only)
  *   erf.conductors.surface_offset   = 10000.       (m; MoorDyn's free surface sits this far above ERF's z = 0)
- *   erf.conductors.prescribed_velocity = 0. 15. 0. (m/s; a uniform wind at every line node instead of the flow)
+ *   erf.conductors.prescribed_velocity = 0. 15. 0. (m/s; a uniform wind at every line node instead of the flow, for testing)
  */
 struct ConductorInputs
 {

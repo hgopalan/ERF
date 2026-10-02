@@ -31,7 +31,8 @@ bool fpe_traps_requested ();
  *
  * Lines and points are numbered from 1, as in MoorDyn. The fluid velocity the lines feel comes
  * through MoorDyn's external wave-kinematics calls: external_kinematics_init() returns the number
- * of points MoorDyn wants the velocity at (every line node, then the rods, bodies and points),
+ * of points MoorDyn wants the velocity at (every line node first; in MoorDyn-C 2.7.1 a fixed-ended
+ * line is followed by its attachment points and one entry at MoorDyn's origin),
  * kinematics_points() their current coordinates, and set_kinematics() hands the velocity and
  * acceleration there before each step. The input file must set `WaveKin = 1` for this, and the
  * nodes must lie below z = 0 in MoorDyn's frame, which is where MoorDyn applies its fluid loads.

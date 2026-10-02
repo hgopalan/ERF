@@ -43,8 +43,16 @@ public:
 
 private:
     Conductors (ConductorInputs_t in, int anchor);
-    /** The wind at a span's kinematics points: the prescribed velocity in this version. */
-    std::vector<amrex::Real> wind_at (const erf_conductors::ConductorSpan& span) const;
+    /**
+     * The wind at a span's kinematics points where the line is now: ERF's velocity sampled at the line
+     * nodes with the actuator core (each component from its own staggered grid, linear in the physical
+     * height) and none at MoorDyn's fixed entries after them, or the prescribed velocity everywhere when
+     * one is given. Aborts, naming the span and the node, when a node has left the domain or the anchor
+     * level's grids do not cover the cells the sampler reads.
+     */
+    std::vector<amrex::Real> wind_at (const erf_conductors::ConductorSpan& span,
+                                      const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
+                                      const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
 
     ConductorInputs_t m_in;
     int m_anchor{0};

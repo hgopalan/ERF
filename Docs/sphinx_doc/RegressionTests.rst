@@ -749,6 +749,21 @@ one-second lag. The real MoorDyn swings the span dynamically about the same
 angle (from rest it overshoots to about 1.7 times the static angle at half a
 swing period), so the test is registered for the stub build only.
 
-Test Location: `Tests/test_files/Conductors_PrescribedWind`_
+``Conductors_FlowWind`` is the coupled case: the same span across a uniform
+15 m/s anelastic crosswind entering through the y-low face (x periodic), with
+no prescribed velocity, so the wind handed to MoorDyn each step is ERF's
+velocity sampled at the line's current nodes; the log carries that wind at
+the middle node. In a stub build it is compared with the stub's gold log to
+eight significant digits. In a build against an installed MoorDyn-C it is
+registered as ``Conductors_FlowWind_MoorDyn`` and compared with the real
+library's gold log (``S1.dat.moordyn.gold``, the dynamic swing) to six
+digits, since the line integration is not bit-reproducible across compilers;
+both share the flow's gold plotfile. The ``Linux GCC MoorDyn`` CI workflow
+runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with
+``Build/setup_moordyn.sh``, the real-library tests in another.
+
+Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files/Conductors_FlowWind`_
 
 .. _`Tests/test_files/Conductors_PrescribedWind`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_PrescribedWind
+
+.. _`Tests/test_files/Conductors_FlowWind`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_FlowWind
