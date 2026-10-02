@@ -767,6 +767,21 @@ carries the source and its small wake and so has a gold per library, the
 runner checks in every row of ``conductors/total_load.dat`` that the
 integrated momentum source equals the force the lines put into the air.
 
+``Conductors_Restart`` (stub) and ``Conductors_Restart_MoorDyn`` (real
+library) are the restart parity tests of that coupled case: ten steps
+straight, and five steps, a checkpoint and five more from it
+(``Tests/RunRestartParity.cmake``, label ``restart-parity`` as well as
+``conductors``). The plotfiles at step 10, which carry the flow and the
+lines' momentum source, must be identical, and so must the span's log, its
+node output, its statistics and ``conductors/total_load.dat``, to the ten
+digits they print (``DATALOG`` takes several files, separated by spaces, and
+reads a comma-separated table as a whitespace-separated one). Each way the
+restart can go wrong fails it: a line restarted from its still-air shape
+stops the restarted run on MoorDyn's clock, statistics or a step count that
+start over make the logs differ, and a stub that forgot the direction of the
+last wind on its restore moved the blown-out line back into its vertical
+plane.
+
 The ``Linux GCC MoorDyn`` CI workflow
 runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with
 ``Build/setup_moordyn.sh``, the real-library tests in another.

@@ -456,12 +456,16 @@ int MoorDyn_Save (MoorDyn system, const char* filepath)
     std::ofstream out(filepath, std::ios::trunc);
     if (!out) { return MOORDYN_INVALID_OUTPUT_FILE; }
     out.precision(17);
-    out << "moordyn-stub-state " << s.t << " " << s.lines.size() << "\n";
+    out << "moordyn-stub-state " << s.t << " " << s.lines.size() << " " << s.U.size() << "\n";
     for (const auto& l : s.lines) {
         out << l.phi;
         for (double v : l.pos) { out << " " << v; }
         out << "\n";
     }
+    // the fluid velocity of the last step sets the direction the lines swing to: without it a
+    // restored line would hang in the plane of its swing angle but towards no wind
+    for (double v : s.U) { out << v << " "; }
+    out << "\n";
     return MOORDYN_SUCCESS;
 }
 
@@ -473,13 +477,16 @@ int MoorDyn_Load (MoorDyn system, const char* filepath)
     std::ifstream in(filepath);
     if (!in) { return MOORDYN_INVALID_INPUT_FILE; }
     std::string tag;
-    std::size_t nl = 0;
-    if (!(in >> tag >> s.t >> nl) || tag != "moordyn-stub-state" || nl != s.lines.size()) { return MOORDYN_INVALID_INPUT; }
+    std::size_t nl = 0, nu = 0;
+    if (!(in >> tag >> s.t >> nl >> nu) || tag != "moordyn-stub-state" || nl != s.lines.size()) { return MOORDYN_INVALID_INPUT; }
     for (auto& l : s.lines) {
         if (!(in >> l.phi)) { return MOORDYN_INVALID_INPUT; }
         for (double& v : l.pos) { if (!(in >> v)) { return MOORDYN_INVALID_INPUT; } }
     }
-    // the tensions and velocities follow from the restored angle; velocities restart from rest
+    // the fluid velocity of the last step, for the points ExternalWaveKinInit set up
+    if (nu != s.U.size()) { return MOORDYN_INVALID_INPUT; }
+    for (double& v : s.U) { if (!(in >> v)) { return MOORDYN_INVALID_INPUT; } }
+    // the shape, tensions and drag follow from the restored angle and fluid velocity; velocities restart from rest
     unsigned off = 0;
     for (auto& l : s.lines) {
         const double phi = l.phi;

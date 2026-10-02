@@ -27,8 +27,11 @@ public:
     /**
      * Create the span: writes <input_file>, creates the MoorDyn system and solves its initial
      * shape. ends are the attachment points at their absolute heights (the terrain already added).
+     * With a saved state (a file written by save()) the initial-shape solve is skipped and the
+     * line continues from that state instead.
      */
-    ConductorSpan (const SpanInputs& s, const ConductorInputs& in, amrex::Real gravity, const std::string& input_file);
+    ConductorSpan (const SpanInputs& s, const ConductorInputs& in, amrex::Real gravity, const std::string& input_file,
+                   const std::string& saved_state = "");
 
     const std::string& name () const { return m_in.name; }
     const SpanInputs& inputs () const { return m_in; }
@@ -47,6 +50,12 @@ public:
     std::array<amrex::Real,3> wind_at_point (unsigned point) const;
     /** Advance the line by dt from time, in the configured number of MoorDyn calls. */
     void step (double time, double dt);
+    /**
+     * ERF's time when MoorDyn's clock read zero: zero for spans created at the start of a run,
+     * the restart time for spans first created on a restart. step() requires MoorDyn's clock plus
+     * this to be ERF's.
+     */
+    void set_clock_offset (double t0) { m_t0 = t0; }
 
     /** The line nodes in ERF's frame (3*n). */
     std::vector<amrex::Real> node_positions () const;
@@ -78,6 +87,9 @@ public:
     /** Append every node (position, clearance, tension, wind, drag) at this time to <output_root>_nodes.dat; header when first. */
     void write_nodes (double time, bool first) const;
 
+    /** Write the MoorDyn state of the line (positions, velocities, the integrator's) to a file; call on one rank. */
+    void save (const std::string& path) const;
+
     const erf_moordyn::MoorDynSystem& system () const { return *m_sys; }
 
 private:
@@ -86,6 +98,7 @@ private:
     SpanInputs m_in;
     amrex::Real m_offset{0.0};   //!< the surface offset (m)
     int m_substeps{1};
+    double m_t0{0.0};   //!< ERF's time at MoorDyn's time zero
     std::string m_file;
     std::unique_ptr<erf_moordyn::MoorDynSystem> m_sys;
     unsigned m_nodes{0};

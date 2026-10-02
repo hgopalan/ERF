@@ -195,6 +195,11 @@ ERF::WriteCheckpointFile () const
         write_surface_temperature_contract(checkpointname);
     }
 
+#ifdef ERF_USE_MOORDYN
+    // the conductor spans' MoorDyn states, statistics and step count, under <chk>/conductors
+    if (conductors) { conductors->write_checkpoint(checkpointname); }
+#endif
+
     int ncomp_cons = vars_new[0][Vars::cons].nComp();
 
     // write Header file

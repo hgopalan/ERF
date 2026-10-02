@@ -14,7 +14,8 @@ using namespace amrex;
 
 namespace erf_conductors {
 
-ConductorSpan::ConductorSpan (const SpanInputs& s, const ConductorInputs& in, Real gravity, const std::string& input_file)
+ConductorSpan::ConductorSpan (const SpanInputs& s, const ConductorInputs& in, Real gravity, const std::string& input_file,
+                              const std::string& saved_state)
     : m_in(s), m_offset(in.surface_offset), m_substeps(in.substeps), m_file(input_file)
 {
     write_moordyn_input(m_file, s, in, gravity);
@@ -26,7 +27,9 @@ ConductorSpan::ConductorSpan (const SpanInputs& s, const ConductorInputs& in, Re
         Abort("erf.conductors." + s.name + ": the MoorDyn system has " + std::to_string(m_sys->num_coupled_dof()) +
               " coupled degrees of freedom; this version supports fixed attachments only");
     }
-    err = m_sys->init({}, {});
+    // a restored line takes its state from the file below, not from the initial-shape solve
+    const bool restoring = !saved_state.empty();
+    err = m_sys->init({}, {}, !restoring);
     if (!err.empty()) { Abort("erf.conductors." + s.name + ": " + err); }
     if (m_sys->num_lines() != 1) {
         Abort("erf.conductors." + s.name + ": the MoorDyn system holds " + std::to_string(m_sys->num_lines()) + " lines, one was written");
@@ -38,6 +41,13 @@ ConductorSpan::ConductorSpan (const SpanInputs& s, const ConductorInputs& in, Re
         Abort("erf.conductors." + s.name + ": MoorDyn asks for the wind at " + std::to_string(m_nkin) +
               " points but the line has " + std::to_string(m_nodes) + " nodes");
     }
+    // after the external kinematics are set up: MoorDyn's state holds the line, not the wind points
+    if (restoring) { m_sys->load(saved_state); }
+}
+
+void ConductorSpan::save (const std::string& path) const
+{
+    m_sys->save(path);
 }
 
 std::vector<Real> ConductorSpan::kinematics_points () const
@@ -127,9 +137,9 @@ void ConductorSpan::step (double time, double dt)
     for (int i = 0; i < m_substeps; ++i) {
         m_sys->step({}, {}, f, t, sub);
     }
-    if (std::abs(t - (time + dt)) > 1.0e-8 * std::max(1.0, std::abs(time + dt))) {
-        Abort("erf.conductors." + m_in.name + ": MoorDyn's clock (" + std::to_string(t) + ") left ERF's (" +
-              std::to_string(time + dt) + ")");
+    if (std::abs(m_t0 + t - (time + dt)) > 1.0e-8 * std::max(1.0, std::abs(time + dt))) {
+        Abort("erf.conductors." + m_in.name + ": MoorDyn's clock (" + std::to_string(t) + " s since ERF's " +
+              std::to_string(m_t0) + " s) left ERF's (" + std::to_string(time + dt) + ")");
     }
 }
 

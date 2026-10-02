@@ -2383,4 +2383,16 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
     add_test_conductors(Conductors_DragOnFlow_MoorDyn Conductors_DragOnFlow "plt00010" "S1.dat"
                         "S1.dat.moordyn.gold" 6 Conductors_DragOnFlow_MoorDyn "conductors/total_load.dat")
   endif()
+  # Restart parity of the coupled case: ten steps straight, and five steps, a checkpoint and five
+  # more from it. The plotfile (the flow and the lines' momentum source) and the span's logs, node
+  # output, statistics and total load must come out the same; a line restarted from rest, or
+  # statistics, step count or logs started over, all show. One test per library.
+  if(ERF_MOORDYN_USE_STUB)
+    set(_conductors_restart Conductors_Restart)
+  else()
+    set(_conductors_restart Conductors_Restart_MoorDyn)
+  endif()
+  add_test_restart_parity(${_conductors_restart} Conductors_DragOnFlow 5 10
+      DATALOG "S1.dat S1_nodes.dat S1_stats.csv conductors/total_load.dat" DATALOG_SIGDIGITS 10)
+  set_tests_properties(${_conductors_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
 endif()

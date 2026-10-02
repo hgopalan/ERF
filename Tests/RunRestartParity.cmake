@@ -154,16 +154,18 @@ if(NOT "${PLT2DFILE}" STREQUAL "")
     message(STATUS "RunRestartParity: restart also reproduces ${PLT2DFILE}")
 endif()
 
-# Optional: a time series that the run appends to, such as a station file written by
-# erf.station_names, must come out the same whether it was written in one run or in two.
-# The restarted run marks the restart with a comment line the straight run does not have,
-# so the comparison is of the data lines only.
+# Optional: time series that the run appends to, such as a station file written by
+# erf.station_names, must come out the same whether they were written in one run or in two.
+# DATALOG names one file or several separated by spaces; comma-separated tables compare as
+# whitespace-separated ones. The restarted run marks the restart with a comment line the
+# straight run does not have, so the comparison is of the data lines only.
 if(NOT "${DATALOG}" STREQUAL "")
     function(strip_comments in_file out_file out_count)
         file(STRINGS "${in_file}" _lines)
         set(_kept "")
         foreach(_line IN LISTS _lines)
             if(NOT _line MATCHES "^#")
+                string(REPLACE "," " " _line "${_line}")
                 list(APPEND _kept "${_line}")
             endif()
         endforeach()
@@ -173,28 +175,34 @@ if(NOT "${DATALOG}" STREQUAL "")
         set(${out_count} ${_n} PARENT_SCOPE)
     endfunction()
 
-    foreach(dir "${STRAIGHT_DIR}" "${RESTART_DIR}")
-        if(NOT EXISTS "${dir}/${DATALOG}")
-            message(FATAL_ERROR "RunRestartParity.cmake: no time series ${dir}/${DATALOG}")
-        endif()
-    endforeach()
-
-    strip_comments("${STRAIGHT_DIR}/${DATALOG}" "${WORKING_DIRECTORY}/datalog_straight.txt" straight_rows)
-    strip_comments("${RESTART_DIR}/${DATALOG}"  "${WORKING_DIRECTORY}/datalog_restart.txt"  restart_rows)
-    if(straight_rows LESS 2)
-        message(FATAL_ERROR "RunRestartParity.cmake: ${DATALOG} has ${straight_rows} data rows; the comparison would be trivial")
-    endif()
-
     if("${DATALOG_SIGDIGITS}" STREQUAL "")
         set(DATALOG_SIGDIGITS 6)
     endif()
     include("${CMAKE_CURRENT_LIST_DIR}/CompareDataLogs.cmake")
-    erf_compare_data_logs("${WORKING_DIRECTORY}/datalog_straight.txt"
-                          "${WORKING_DIRECTORY}/datalog_restart.txt"
-                          ${DATALOG_SIGDIGITS} 2 logs_agree log_message)
-    if(NOT logs_agree)
-        message(FATAL_ERROR "RunRestartParity.cmake: ${DATALOG} differs between the straight run "
-                            "and the restarted run: ${log_message}")
-    endif()
-    message(STATUS "RunRestartParity: ${DATALOG} agrees (${straight_rows} rows)")
+
+    separate_arguments(_datalogs UNIX_COMMAND "${DATALOG}")
+    set(_ilog 0)
+    foreach(_log IN LISTS _datalogs)
+        foreach(dir "${STRAIGHT_DIR}" "${RESTART_DIR}")
+            if(NOT EXISTS "${dir}/${_log}")
+                message(FATAL_ERROR "RunRestartParity.cmake: no time series ${dir}/${_log}")
+            endif()
+        endforeach()
+
+        set(_straight "${WORKING_DIRECTORY}/datalog_straight_${_ilog}.txt")
+        set(_restart  "${WORKING_DIRECTORY}/datalog_restart_${_ilog}.txt")
+        strip_comments("${STRAIGHT_DIR}/${_log}" "${_straight}" straight_rows)
+        strip_comments("${RESTART_DIR}/${_log}"  "${_restart}"  restart_rows)
+        if(straight_rows LESS 2)
+            message(FATAL_ERROR "RunRestartParity.cmake: ${_log} has ${straight_rows} data rows; the comparison would be trivial")
+        endif()
+
+        erf_compare_data_logs("${_straight}" "${_restart}" ${DATALOG_SIGDIGITS} 2 logs_agree log_message)
+        if(NOT logs_agree)
+            message(FATAL_ERROR "RunRestartParity.cmake: ${_log} differs between the straight run "
+                                "and the restarted run: ${log_message}")
+        endif()
+        message(STATUS "RunRestartParity: ${_log} agrees (${straight_rows} rows)")
+        math(EXPR _ilog "${_ilog} + 1")
+    endforeach()
 endif()

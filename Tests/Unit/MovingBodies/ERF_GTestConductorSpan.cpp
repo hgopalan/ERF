@@ -2,8 +2,10 @@
 // with its nodes reported in ERF's frame and the catenary end tensions; its kinematics points
 // start with the line nodes, in ERF's frame; a prescribed crosswind, handed over step by step
 // in lockstep with ERF's clock, blows it out towards the quasi-static angle atan(q / w) and
-// raises the tension; and the diagnostics file carries one row per call with the header once.
+// raises the tension; the diagnostics file carries one row per call with the header once; and a
+// span created from a saved state is where the saved one is and continues as it does.
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -150,4 +152,54 @@ TEST(ConductorSpan, DiagnosticsRowsCarryTheHeaderOnce)
     }
     EXPECT_EQ(headers, 1);
     EXPECT_EQ(rows, 2);
+}
+
+TEST(ConductorSpan, ASpanCreatedFromASavedStateContinuesIt)
+{
+    const ConductorInputs in = settings();
+    auto a = make("saved_a", in);
+    const unsigned nk = a->num_kinematics_points();
+    const double dt = 0.1;
+    double t = 0.0;
+    for (int n = 0; n < 40; ++n) {
+        a->set_wind(uniform(nk, 0.0, 15.0, 0.0), t + 0.5 * dt);
+        a->step(t, dt);
+        t += dt;
+    }
+    ASSERT_GT(a->mid_offset(), 1.0) << "the saved span must be blown out, so a restart from rest would show";
+    const std::string state = in.diagnostics_dir + "/saved_a.state";
+    a->save(state);
+
+    const std::string file = in.diagnostics_dir + "/saved_b.moordyn.txt";
+    auto b = std::make_unique<ConductorSpan>(drake_span("saved_b"), in, 9.81, file, state);
+    // before any step: where the saved span is, with its drag and tensions
+    ASSERT_EQ(b->num_nodes(), a->num_nodes());
+    for (unsigned n = 0; n < a->num_nodes(); ++n) {
+        const auto pa = a->node_position(n);
+        const auto pb = b->node_position(n);
+        const auto da = a->node_drag(n);
+        const auto db = b->node_drag(n);
+        for (int d = 0; d < 3; ++d) {
+            EXPECT_NEAR(pb[d], pa[d], 1.0e-9 * std::max(amrex::Real(1.0), std::abs(pa[d]))) << "node " << n << " position " << d;
+            EXPECT_NEAR(db[d], da[d], 1.0e-9 * std::max(amrex::Real(1.0), std::abs(da[d]))) << "node " << n << " drag " << d;
+        }
+    }
+    EXPECT_NEAR(b->tension_a(), a->tension_a(), 1.0e-9 * a->tension_a());
+    // the same wind from here on: the two stay together, on the same clock
+    for (int n = 0; n < 20; ++n) {
+        const double gust = 15.0 + 3.0 * std::sin(0.7 * t);
+        a->set_wind(uniform(nk, 0.0, gust, 0.0), t + 0.5 * dt);
+        b->set_wind(uniform(nk, 0.0, gust, 0.0), t + 0.5 * dt);
+        a->step(t, dt);
+        b->step(t, dt);
+        t += dt;
+    }
+    for (unsigned n = 0; n < a->num_nodes(); ++n) {
+        const auto pa = a->node_position(n);
+        const auto pb = b->node_position(n);
+        for (int d = 0; d < 3; ++d) {
+            EXPECT_NEAR(pb[d], pa[d], 1.0e-9 * std::max(amrex::Real(1.0), std::abs(pa[d]))) << "node " << n << " position " << d;
+        }
+    }
+    EXPECT_NEAR(b->tension_a(), a->tension_a(), 1.0e-9 * a->tension_a());
 }
