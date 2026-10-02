@@ -316,6 +316,10 @@ ConductorInputs ConductorInputs::read ()
         pt.query("peak", t.peak);
         pt.query("drag_coefficient", t.drag_coefficient);
         pt.query("segments", t.segments);
+        pt.query("weight", t.weight);
+        pt.query("leg_spacing", t.leg_spacing);
+        pt.query("allowable_uplift", t.allowable_uplift);
+        pt.query("allowable_compression", t.allowable_compression);
         const std::string terr = t.validate();
         if (!terr.empty()) { Abort(terr); }
         in.tower_types.push_back(t);

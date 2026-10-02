@@ -24,6 +24,10 @@ namespace erf_towers {
  *   erf.conductors.lattice.drag_coefficient = 0. (the force coefficient on the members' area; default 0:
  *                                                 4 phi^2 - 5.9 phi + 4 from the solidity phi)
  *   erf.conductors.lattice.segments   = 10     (drag nodes along the body up to the cross-arm; default 10)
+ *   erf.conductors.lattice.weight     = 9.0e4  (N, the tower's own weight on its foundation; default 0)
+ *   erf.conductors.lattice.leg_spacing = 6.    (m, between the four legs' footings, a square; default base_width)
+ *   erf.conductors.lattice.allowable_uplift      = 1.0e5 (N, a footing's pull-out capacity; default 0: not checked)
+ *   erf.conductors.lattice.allowable_compression = 3.0e5 (N, a footing's bearing capacity; default 0: not checked)
  */
 struct TowerType
 {
@@ -36,12 +40,18 @@ struct TowerType
     amrex::Real peak{0.0};
     amrex::Real drag_coefficient{0.0};
     int segments{10};
+    amrex::Real weight{0.0};
+    amrex::Real leg_spacing{0.0};
+    amrex::Real allowable_uplift{0.0};
+    amrex::Real allowable_compression{0.0};
 
     /** The nodes of the cross-arm. */
     static constexpr int arm_segments = 4;
 
     /** The depth of the cross-arm's face: arm_depth, or top_width when not given. */
     amrex::Real arm_face () const { return arm_depth > 0.0 ? arm_depth : top_width; }
+    /** The spacing of the legs' footings: leg_spacing, or base_width when not given. */
+    amrex::Real legs () const { return leg_spacing > 0.0 ? leg_spacing : base_width; }
     /** The force coefficient on the members' area: drag_coefficient, or the lattice value of the solidity. */
     amrex::Real force_coefficient () const;
     /** The range checks: an empty string when acceptable, else the message, naming the key. */

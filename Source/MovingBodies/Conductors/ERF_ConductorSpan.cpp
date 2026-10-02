@@ -222,6 +222,22 @@ std::array<Real,3> ConductorSpan::end_force (int end) const
     return {{static_cast<Real>(f[0]), static_cast<Real>(f[1]), static_cast<Real>(f[2])}};
 }
 
+std::array<Real,3> ConductorSpan::tower_force (int j) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(j >= 0 && j < num_spans() - 1, "ConductorSpan::tower_force: no such tower");
+    std::array<Real,3> F{{0.0, 0.0, 0.0}};
+    auto add = [&F] (const std::array<double,3>& f) { for (int d = 0; d < 3; ++d) { F[d] += static_cast<Real>(f[d]); } };
+    if (m_in.has_insulators()) {
+        // the string of tower j+1 is MoorDyn line num_spans + j + 1, its node 0 at the tower
+        add(m_sys->line_node_force(static_cast<unsigned>(num_spans() + j) + 1, 0));
+    } else {
+        // span j ends at the tower and span j+1 starts there
+        add(m_sys->line_node_force(static_cast<unsigned>(j) + 1, span_num_nodes(j) - 1));
+        add(m_sys->line_node_force(static_cast<unsigned>(j) + 2, 0));
+    }
+    return F;
+}
+
 void ConductorSpan::chord_frame_offsets (unsigned node, int k, Real& along, Real& down, Real& side) const
 {
     // the chord's unit vector, the "down" direction normal to it in the vertical plane, and the

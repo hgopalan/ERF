@@ -11,6 +11,9 @@ erf.conductors.lattice.top_width  = 1.5
 erf.conductors.lattice.solidity   = 0.2
 erf.conductors.lattice.arm_length = 12
 erf.conductors.lattice.arm_depth  = 1.2
+erf.conductors.lattice.weight     = 60000
+erf.conductors.lattice.allowable_uplift      = 50000
+erf.conductors.lattice.allowable_compression = 150000
 
 # T1: on a hilltop, ground at 55.0 m
 erf.conductors.T1.position         = 894.07 729.47

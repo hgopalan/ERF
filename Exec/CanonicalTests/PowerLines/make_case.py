@@ -165,6 +165,8 @@ def main():
     ap.add_argument("--insulator", type=float, default=2.5)
     ap.add_argument("--tower", type=float, nargs=5, default=[6.0, 1.5, 0.2, 12.0, 1.2],
                     help="lattice towers: base width, top width, solidity, cross-arm length and depth (m)")
+    ap.add_argument("--tower_foundation", type=float, nargs=3, default=[6.0e4, 5.0e4, 1.5e5],
+                    help="a tower's weight, and a footing's allowable uplift and compression (N)")
     ap.add_argument("--max_span", type=float, default=280.0)
     ap.add_argument("--stringing_tension", type=float, default=2.0e4, help="still-air horizontal tension every span is strung to (N)")
     ap.add_argument("--min_clearance", type=float, default=8.0)
@@ -234,7 +236,11 @@ def main():
         f.write(f"erf.conductors.lattice.top_width  = {tt:g}\n")
         f.write(f"erf.conductors.lattice.solidity   = {ts:g}\n")
         f.write(f"erf.conductors.lattice.arm_length = {al:g}\n")
-        f.write(f"erf.conductors.lattice.arm_depth  = {ad:g}\n\n")
+        f.write(f"erf.conductors.lattice.arm_depth  = {ad:g}\n")
+        tw, au, ac = a.tower_foundation
+        f.write(f"erf.conductors.lattice.weight     = {tw:g}\n")
+        f.write(f"erf.conductors.lattice.allowable_uplift      = {au:g}\n")
+        f.write(f"erf.conductors.lattice.allowable_compression = {ac:g}\n\n")
         for nm, p in zip(names, pts):
             f.write(f"# {nm}: on {'a hilltop' if p[2] == 'hill' else 'flat ground'}, ground at {height(hills, p[0], p[1]):.1f} m\n")
             f.write(f"erf.conductors.{nm}.position         = {p[0]:.2f} {p[1]:.2f}\n")

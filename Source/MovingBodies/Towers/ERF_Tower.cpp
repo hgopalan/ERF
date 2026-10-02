@@ -62,4 +62,36 @@ std::array<Real,3> Tower::base_moment () const
     return M;
 }
 
+FoundationLoad Tower::foundation () const
+{
+    FoundationLoad L;
+    const auto Fd = total_force();
+    const auto Md = base_moment();
+    const Real rx = m_line_at[0] - m_base[0], ry = m_line_at[1] - m_base[1], rz = m_line_at[2] - m_base[2];
+    const auto& F = m_line_force;
+    for (int d = 0; d < 3; ++d) { L.force[d] = Fd[d] + F[d]; }
+    L.moment = {{Md[0] + ry * F[2] - rz * F[1], Md[1] + rz * F[0] - rx * F[2], Md[2] + rx * F[1] - ry * F[0]}};
+    L.shear = std::hypot(L.force[0], L.force[1]);
+    L.overturning = std::hypot(L.moment[0], L.moment[1]);
+    L.vertical = m_type.weight - L.force[2];
+    // the legs in the frame of the line (along) and the cross-arm (across), a = s / 2 from the centre
+    const Real a = Real(0.5) * m_type.legs();
+    const std::array<Real,2> across{{m_across[0], m_across[1]}};
+    const std::array<Real,2> along{{m_across[1], -m_across[0]}};
+    int i = 0;
+    for (const Real su : {Real(1.0), Real(-1.0)}) {
+        for (const Real sv : {Real(1.0), Real(-1.0)}) {
+            const Real x = a * (su * along[0] + sv * across[0]);
+            const Real y = a * (su * along[1] + sv * across[1]);
+            // the reactions R_i balance the load: sum R_i = P, sum x_i R_i = M_y, sum y_i R_i = -M_x
+            L.legs[static_cast<std::size_t>(i++)] = Real(0.25) * L.vertical + (L.moment[1] * x - L.moment[0] * y) / (Real(4.0) * a * a);
+        }
+    }
+    L.max_compression = std::max({L.legs[0], L.legs[1], L.legs[2], L.legs[3], Real(0.0)});
+    L.max_uplift = std::max(Real(0.0), -std::min({L.legs[0], L.legs[1], L.legs[2], L.legs[3]}));
+    L.over_allowable = (m_type.allowable_uplift > 0.0 && L.max_uplift > m_type.allowable_uplift) ||
+                       (m_type.allowable_compression > 0.0 && L.max_compression > m_type.allowable_compression);
+    return L;
+}
+
 } // namespace erf_towers

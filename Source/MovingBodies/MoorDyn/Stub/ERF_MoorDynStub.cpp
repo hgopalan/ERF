@@ -347,7 +347,8 @@ void place_hanging (StubSystem& s, Line& l, const double* U_nodes)
             const double from = a_fixed ? top.pos[d] : bot.pos[d];
             const double to = a_fixed ? bot.pos[d] : top.pos[d];
             newpos[3*i+d] = from + xi * (to - from);
-            l.ten[3*i+d] = load * (a_fixed ? -e[d] : e[d]);
+            // MoorDyn's tension points along the line from A to B: down the string from a fixed top
+            l.ten[3*i+d] = load * (a_fixed ? e[d] : -e[d]);
         }
         if (U_nodes == nullptr || newpos[3*i+2] > 0.0) { continue; }
         const double udc = U_nodes[3*i]*e[0] + U_nodes[3*i+1]*e[1] + U_nodes[3*i+2]*e[2];

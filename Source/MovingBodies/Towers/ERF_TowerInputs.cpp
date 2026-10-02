@@ -22,6 +22,10 @@ std::string TowerType::validate () const
     if (peak < 0.0) { return key + "peak must be >= 0 (m)"; }
     if (drag_coefficient < 0.0) { return key + "drag_coefficient must be >= 0 (0: from the solidity)"; }
     if (segments < 1) { return key + "segments must be >= 1"; }
+    if (weight < 0.0) { return key + "weight must be >= 0 (N)"; }
+    if (leg_spacing < 0.0) { return key + "leg_spacing must be >= 0 (m; 0: base_width)"; }
+    if (allowable_uplift < 0.0) { return key + "allowable_uplift must be >= 0 (N; 0: not checked)"; }
+    if (allowable_compression < 0.0) { return key + "allowable_compression must be >= 0 (N; 0: not checked)"; }
     return std::string();
 }
 

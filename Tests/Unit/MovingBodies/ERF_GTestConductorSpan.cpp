@@ -5,8 +5,10 @@
 // raises the tension; the diagnostics file carries one row per call with the header once; a
 // span created from a saved state is where the saved one is and continues as it does; and a
 // section hangs from its insulator strings, which hang plumb in still air and let the conductor
-// swing further across the wind than clamps at the towers do; and the pulls on the two dead ends
-// of a level span in still air balance along the chord and carry the line's weight.
+// swing further across the wind than clamps at the towers do; the pulls on the two dead ends
+// of a level span in still air balance along the chord and carry the line's weight; and a
+// tower of a level section carries the weight of one span (and its string), the spans either
+// side balancing along the line.
 
 #include <algorithm>
 #include <cmath>
@@ -19,6 +21,7 @@
 
 #include "ERF_ConductorInputs.H"
 #include "ERF_ConductorSpan.H"
+#include "ERF_MoorDynSystem.H"
 
 using erf_conductors::ConductorInputs;
 using erf_conductors::ConductorSpan;
@@ -291,4 +294,35 @@ TEST(ConductorSpan, TheDeadEndsOfALevelSpanArePulledTogetherAndDown)
     EXPECT_NEAR(-(a[2] + b[2]), W, 0.05 * W);
     // the pull is the end tension
     EXPECT_NEAR(std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]), span->tension_a(), 0.02 * span->tension_a());
+}
+
+TEST(ConductorSpan, ATowerOfALevelSectionCarriesOneSpansWeight)
+{
+    const ConductorInputs in = settings();
+    // the stub's parabola is a few per cent from the catenary; the real MoorDyn's lumped masses much closer
+    const double tol = erf_moordyn::is_stub() ? 0.1 : 0.01;
+    const double w = weight(drake_span("w"), in.air_density);
+    // clamped: every tower of a level section carries one span's weight
+    {
+        ConductorSpan line(section("tower_clamped", 0.0), in, 9.81, in.diagnostics_dir + "/tower_clamped.moordyn.txt");
+        for (int j = 0; j < 2; ++j) {
+            const auto F = line.tower_force(j);
+            EXPECT_NEAR(-F[2] / (w * 301.5), 1.0, tol) << "tower " << j + 1 << ": half of each span either side";
+            EXPECT_NEAR(F[0], 0.0, tol * w * 301.5) << "tower " << j + 1 << ": the spans balance along the line";
+            EXPECT_NEAR(F[1], 0.0, 1.0e-6 * w * 301.5) << "tower " << j + 1;
+        }
+    }
+    // on strings: the middle tower of four spans, whose spans either side both hang from strings
+    // (a span from a dead end drops to the string's bottom, and the lower end takes less weight)
+    SpanInputs s = section("tower_strings", 2.5);
+    s.end_b = {{1300.0, 500.0, 30.0}};
+    s.towers.push_back({{1000.0, 500.0, 30.0}});
+    s.lengths.push_back(301.5);
+    ConductorSpan line(s, in, 9.81, in.diagnostics_dir + "/tower_strings.moordyn.txt");
+    const double Wi = (s.insulator_mass - in.air_density * 0.25 * pi * s.insulator_diameter * s.insulator_diameter * 2.5) * 9.81;
+    const auto F = line.tower_force(1);
+    EXPECT_NEAR(-F[2] / (w * 301.5 + Wi), 1.0, tol) << "a span's weight and the string's";
+    EXPECT_NEAR(F[0], 0.0, tol * w * 301.5);
+    // and the force on the tower is the string's pull: down the string
+    EXPECT_LT(F[2], 0.0);
 }

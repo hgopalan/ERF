@@ -85,6 +85,14 @@ public:
      */
     std::array<amrex::Real,3> end_force (int end) const;
     /**
+     * The pull of the line on tower j+1 (j from 0), where its fixed point is (N): the net force
+     * MoorDyn finds on the top node of the insulator string hanging there, or, clamped at the
+     * tower, on the end nodes of the two spans meeting there. In still air it carries the weight
+     * of the conductor between the mid-spans either side (and of the string); in a crosswind also
+     * the wind on that length.
+     */
+    std::array<amrex::Real,3> tower_force (int j) const;
+    /**
      * The sag of span k's middle node below the chord between the span's attachment points (m),
      * and its lateral offset from the vertical plane of that chord (m): with insulator strings both
      * include how far the strings have let the conductor drop and swing.

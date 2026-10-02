@@ -413,6 +413,8 @@ TEST(ConductorInputs, TowerTypesAreReadAndALinesTowerTypeMustNameOne)
     pt.add("top_width", 1.5);
     pt.add("solidity", 0.2);
     pt.add("arm_length", 12.0);
+    pt.add("weight", 9.0e4);
+    pt.add("allowable_uplift", 1.0e5);
     const ConductorInputs in = ConductorInputs::read();
     ASSERT_EQ(in.tower_types.size(), 1u);
     const auto& t = in.tower_types[0];
@@ -421,6 +423,10 @@ TEST(ConductorInputs, TowerTypesAreReadAndALinesTowerTypeMustNameOne)
     EXPECT_EQ(t.segments, 10);
     EXPECT_DOUBLE_EQ(t.peak, 0.0);
     EXPECT_DOUBLE_EQ(t.arm_face(), amrex::Real(1.5)) << "arm_depth defaults to top_width";
+    EXPECT_DOUBLE_EQ(t.weight, amrex::Real(9.0e4));
+    EXPECT_DOUBLE_EQ(t.allowable_uplift, amrex::Real(1.0e5));
+    EXPECT_DOUBLE_EQ(t.allowable_compression, 0.0);
+    EXPECT_DOUBLE_EQ(t.legs(), amrex::Real(6.0)) << "the legs at the base width";
     EXPECT_EQ(in.spans[0].tower_type, "suspension");
     // a line's tower type must be one of the types, and the line must have towers
     SpanInputs s = in.spans[0];
