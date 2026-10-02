@@ -184,6 +184,9 @@ target_sources(${erf_exe_name}
     ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestStationSampler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestProvenance.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestCheckpoint.cpp
+    # Motivation: a deck may include several files with FILE = <name>; the duplicate-input check
+    # must not refuse it.
+    ${CMAKE_CURRENT_SOURCE_DIR}/IO/ERF_GTestInputsName.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils/ERF_GTestEpochTime.cpp
     # Motivation: a station placed by latitude/longitude must land where the
     # lat/lon arrays put it on a rotated grid and on a grid across 180 degrees.
@@ -315,19 +318,24 @@ if(ERF_ENABLE_MOORDYN)
   # MoorDyn ERF's velocity sampled where the line is now. A section over towers must be read,
   # written with its insulator strings and free points, and hang from the strings; the closest
   # approach of two lines must be the exact minimum distance between their conductors, flagged
-  # against the flashover distance.
+  # against the flashover distance. The line ends on a transformer's footprint must be dead-ended
+  # on it, and its load must be the sum of the lines' pulls and their moment about its base,
+  # flagged against its allowable values; the closest approach of a conductor to its box must be
+  # the exact distance.
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorInputs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestMoorDynInputWriter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorSpan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductors.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestTransformer.cpp
   )
   # Motivation: against the real MoorDyn-C (the tests skip on the stub, which has no line
   # dynamics), a span's mean swing in a steady crosswind must be the quasi-static blowout angle
   # atan(q/w), its free swing after a gust must have the cable's first out-of-plane period
   # 2 c / sqrt(H/m), and the suspension strings of a section must swing to the angle of the wind
-  # span over the weight span, each within 1 %.
+  # span over the weight span, each within 1 %; the pulls on a level span's dead ends must carry
+  # its weight and the elastic catenary's horizontal tension.
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorVerification.cpp
   )

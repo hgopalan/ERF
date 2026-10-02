@@ -5,7 +5,8 @@
 // raises the tension; the diagnostics file carries one row per call with the header once; a
 // span created from a saved state is where the saved one is and continues as it does; and a
 // section hangs from its insulator strings, which hang plumb in still air and let the conductor
-// swing further across the wind than clamps at the towers do.
+// swing further across the wind than clamps at the towers do; and the pulls on the two dead ends
+// of a level span in still air balance along the chord and carry the line's weight.
 
 #include <algorithm>
 #include <cmath>
@@ -269,4 +270,25 @@ TEST(ConductorSpan, ASectionHangsFromItsInsulatorStrings)
     }
     EXPECT_GT(std::abs(line.mid_offset(1) - line.mid_offset(0)), 1.0e-3) << "the middle span hangs from strings at both ends";
     EXPECT_GT(clamped.mid_offset(1), 1.0);
+}
+
+TEST(ConductorSpan, TheDeadEndsOfALevelSpanArePulledTogetherAndDown)
+{
+    const ConductorInputs in = settings();
+    auto span = make("dead_ends", in);
+    const SpanInputs& s = span->inputs();
+    const auto a = span->end_force(0);
+    const auto b = span->end_force(1);
+    // end_a is pulled towards end_b (+x) and down, end_b the other way along x, the same down
+    EXPECT_GT(a[0], 0.0);
+    EXPECT_LT(b[0], 0.0);
+    EXPECT_NEAR(a[0], -b[0], 1.0e-3 * a[0]);
+    EXPECT_LT(a[2], 0.0);
+    EXPECT_NEAR(a[2], b[2], 1.0e-3 * std::abs(a[2]));
+    EXPECT_NEAR(a[1], 0.0, 1.0e-6 * a[0]);
+    // between them the line's weight (the stub's parabola within its sag error)
+    const double W = weight(s, in.air_density) * s.lengths[0];
+    EXPECT_NEAR(-(a[2] + b[2]), W, 0.05 * W);
+    // the pull is the end tension
+    EXPECT_NEAR(std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]), span->tension_a(), 0.02 * span->tension_a());
 }

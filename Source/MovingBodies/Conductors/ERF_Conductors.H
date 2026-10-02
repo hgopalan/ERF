@@ -14,13 +14,15 @@
 #include "ERF_ConductorInputs.H"
 #include "ERF_ConductorSpan.H"
 #include "ERF_RunningStats.H"
+#include "ERF_Transformer.H"
 
 /**
  * The conductor lines of a run (erf.conductors.*): MoorDyn lines between fixed attachment points,
  * single spans or sections over suspension towers, stepped in lockstep with ERF on their anchor
  * level. ERF holds one of these and calls set_ground() once the mesh exists, then advance() every
  * step of the anchor level. Besides each line's own diagnostics, every pair of lines is watched
- * for how close their conductors come, against erf.conductors.flashover_distance.
+ * for how close their conductors come, against erf.conductors.flashover_distance, and every
+ * transformer the lines end on for the load they put on it and how close any conductor comes to it.
  */
 class Conductors
 {
@@ -81,6 +83,10 @@ public:
     /** The pairs of lines watched for clashes (indices into spans()), and their last closest approach. */
     const std::vector<std::pair<std::size_t,std::size_t>>& pairs () const { return m_pairs; }
     const std::vector<erf_conductors::Closest>& separations () const { return m_sep; }
+    /** The transformers the lines end on, the lines' last load on each, and the closest any conductor came to each. */
+    const std::vector<erf_conductors::Transformer>& transformers () const { return m_transformers; }
+    const std::vector<erf_conductors::TransformerLoad>& transformer_loads () const { return m_tload; }
+    const std::vector<erf_conductors::Closest>& transformer_clearances () const { return m_tclear; }
 
     int anchor_level () const { return m_anchor; }
     const ConductorInputs_t& inputs () const { return m_in; }
@@ -118,6 +124,17 @@ private:
     void measure_separation ();
     /** Append a row of the pairs' closest approach to <diagnostics_dir>/separation.dat; header when first. */
     void write_separation (double time, bool first) const;
+    /**
+     * Stand the transformers on the terrain and dead-end the lines on them: an empty string, or the
+     * message to abort with on a misplaced end (aborts at once on a transformer outside the domain).
+     */
+    std::string place_transformers (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
+    /** The transformers' statistics. */
+    void add_transformer_stats ();
+    /** The lines' load on every transformer and the closest any conductor comes to its box, where the lines are now. */
+    void measure_transformers ();
+    /** Append a row of the transformers' loads and clearances to <diagnostics_dir>/transformers.dat; header when first. */
+    void write_transformers (double time, bool first) const;
     /** The logs a restart continues. */
     std::vector<std::string> log_files () const;
 
@@ -135,6 +152,10 @@ private:
     std::vector<std::pair<std::size_t,std::size_t>> m_pairs;        //!< the pairs of lines watched for clashes
     std::vector<erf_actuator::RunningStats> m_pair_stats;           //!< per pair: the closest approach and the clash flag
     std::vector<erf_conductors::Closest> m_sep;                     //!< per pair: the last closest approach
+    std::vector<erf_conductors::Transformer> m_transformers;        //!< standing on the terrain, with the ends on each
+    std::vector<erf_conductors::TransformerLoad> m_tload;           //!< per transformer: the lines' last load
+    std::vector<erf_conductors::Closest> m_tclear;                  //!< per transformer: the closest conductor, last
+    std::vector<erf_actuator::RunningStats> m_tstats;               //!< per transformer: its load and clearance
     bool m_src_defined{false};
     amrex::MultiFab m_src_x, m_src_y, m_src_z;           //!< the lines' momentum sources on the anchor level
     std::array<amrex::Real,3> m_source_integral{{0.0, 0.0, 0.0}};

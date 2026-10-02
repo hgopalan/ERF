@@ -799,12 +799,34 @@ checkpoint and five more, one binary against itself, together with the
 strings' log, the span logs and the statistics. The flow is
 ``Conductors_FlowWind``'s gold, since nothing goes back into it.
 
+``Conductors_Terrain`` (stub) and ``Conductors_Terrain_MoorDyn`` (real
+library) put two lines over hills, dead-ended on three transformers, one on a
+hilltop and two on flat ground (made with
+``Exec/CanonicalTests/PowerLines/make_case.py`` on a smaller domain): a
+neutral boundary layer, a log law under a capping inversion, enters through
+the x-low face over the terrain-following mesh with the k-equation RANS
+closure and the surface layer, and leaves through the x-high one. Each line
+is a section on insulator strings, strung to 20 kN. The middle span of one
+line, ``conductors/transformers.dat`` with every transformer's load and
+clearance, and the hilltop transformer's statistics are compared with golds
+of each library; the restart parity tests ``Conductors_Terrain_Restart`` and
+``Conductors_Terrain_Restart_MoorDyn`` check the same logs ten steps straight
+against five, a checkpoint and five more. The flow has its own gold, shared
+by both libraries.
+
+The golds of the real library come from another machine than the one that
+runs them, so ``RunConductors.cmake`` counts a logged value below 1e-4 as
+zero: a quantity zero by symmetry, such as the drag along a span set square
+to the wind, prints as roundoff that differs between compilers. Every
+quantity the logs carry is many orders larger where it is not zero.
+
 The ``Linux GCC MoorDyn`` CI workflow
 runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with
 ``Build/setup_moordyn.sh``, the real-library tests in another.
 
 Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files/Conductors_FlowWind`_,
-`Tests/test_files/Conductors_DragOnFlow`_, `Tests/test_files/Conductors_Circuit`_
+`Tests/test_files/Conductors_DragOnFlow`_, `Tests/test_files/Conductors_Circuit`_,
+`Tests/test_files/Conductors_Terrain`_
 
 .. _`Tests/test_files/Conductors_PrescribedWind`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_PrescribedWind
 
@@ -813,3 +835,5 @@ Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files
 .. _`Tests/test_files/Conductors_DragOnFlow`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_DragOnFlow
 
 .. _`Tests/test_files/Conductors_Circuit`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_Circuit
+
+.. _`Tests/test_files/Conductors_Terrain`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_Terrain

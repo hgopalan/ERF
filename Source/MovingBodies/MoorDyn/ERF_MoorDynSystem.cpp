@@ -233,6 +233,13 @@ std::array<double,3> MoorDynSystem::line_node_drag (unsigned l, unsigned node) c
     return f;
 }
 
+std::array<double,3> MoorDynSystem::line_node_force (unsigned l, unsigned node) const
+{
+    std::array<double,3> f{{0.0, 0.0, 0.0}};
+    check(MoorDyn_GetLineNodeForce(line(l), node, f.data()), "MoorDyn_GetLineNodeForce");
+    return f;
+}
+
 double MoorDynSystem::line_end_tension (unsigned l) const
 {
     double v = 0.0;

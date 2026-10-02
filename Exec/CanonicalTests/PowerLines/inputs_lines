@@ -1,0 +1,16 @@
+# Stage 2: the lines, from the spun-up flow. The checkpoint holds no conductor state, so the lines
+# start in still-air shape at the restart and blow out in the flow; statistics from 30 s on.
+FILE = flow.inputs
+amr.restart = chk01715
+max_step    = 2058                         # 120 s more
+stop_time   = 720.5
+erf.plot_int_1 = 171                       # about every 60 s
+erf.check_int  = 171
+
+erf.conductors.diagnostics_dir   = conductors
+erf.conductors.diagnostics_int   = 3      # about every second
+erf.conductors.node_output_int   = 29     # every line's nodes about every 10 s
+erf.conductors.stats_start       = 630.
+erf.conductors.air_density       = 1.16   # the anelastic base density near the ground
+erf.conductors.flashover_distance = 1.5
+FILE = network.inputs

@@ -212,6 +212,16 @@ Real ConductorSpan::tension_b (int k) const { return static_cast<Real>(m_sys->li
 
 Real ConductorSpan::max_tension (int k) const { return static_cast<Real>(m_sys->line_max_tension(static_cast<unsigned>(k) + 1)); }
 
+std::array<Real,3> ConductorSpan::end_force (int end) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(end == 0 || end == 1, "ConductorSpan::end_force: end must be 0 (end_a) or 1 (end_b)");
+    // end_a is the first node of the first span's MoorDyn line, end_b the last of the last span's
+    const int k = (end == 0) ? 0 : num_spans() - 1;
+    const unsigned node = (end == 0) ? 0 : span_num_nodes(k) - 1;
+    const auto f = m_sys->line_node_force(static_cast<unsigned>(k) + 1, node);
+    return {{static_cast<Real>(f[0]), static_cast<Real>(f[1]), static_cast<Real>(f[2])}};
+}
+
 void ConductorSpan::chord_frame_offsets (unsigned node, int k, Real& along, Real& down, Real& side) const
 {
     // the chord's unit vector, the "down" direction normal to it in the vertical plane, and the

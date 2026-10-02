@@ -18,6 +18,11 @@ cmake_minimum_required(VERSION 3.20)
 include("${CMAKE_CURRENT_LIST_DIR}/MPILauncher.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/ResolveExecutable.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/CompareDataLogs.cmake")
+# The golds come from another machine: a quantity zero by symmetry (the drag along a span set
+# square to the wind, the wind along it) prints as roundoff, 1e-12 here and 1e-7 there, which no
+# number of significant digits compares. Below 1e-4 a logged value counts as zero; every quantity
+# the logs carry (m, N, m/s, degrees) is many orders larger where it is not zero.
+set(ERF_DATALOG_ZERO_EXPONENT -4)
 
 foreach(arg TEST_EXE INPUT WORKING_DIRECTORY FCOMPARE PLTFILE PLOT_GOLD LOG GOLD)
     if(NOT DEFINED ${arg} OR "${${arg}}" STREQUAL "")

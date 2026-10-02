@@ -1,6 +1,7 @@
 #include "ERF_ConductorInputs.H"
 
 #include <cmath>
+#include <limits>
 #include <set>
 
 #include <AMReX.H>
@@ -33,6 +34,30 @@ Real SpanInputs::chord (int k) const
     return std::sqrt(c2);
 }
 
+std::array<Real,3> SpanInputs::conductor_point (int k) const
+{
+    std::array<Real,3> p = point(k);
+    if (has_insulators() && k > 0 && k < num_spans()) { p[2] -= insulator_length; }
+    return p;
+}
+
+void SpanInputs::lengths_from_stringing_tension (Real w)
+{
+    if (!(stringing_tension > 0.0)) { return; }
+    lengths.resize(static_cast<std::size_t>(num_spans()));
+    const Real H = stringing_tension;
+    for (int k = 0; k < num_spans(); ++k) {
+        const auto a = conductor_point(k);
+        const auto b = conductor_point(k + 1);
+        const Real h = std::sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]));
+        const Real c = std::sqrt(h * h + (b[2] - a[2]) * (b[2] - a[2]));
+        const Real extra = w * w * h * h * h * h / (Real(24.0) * H * H * c);
+        // a vertical span (h = 0) has no parabola: it hangs straight under its weight's stretch
+        const Real stretch = (h > 0.0) ? H * c / (axial_stiffness * h) : Real(0.0);
+        lengths[static_cast<std::size_t>(k)] = (c + extra) / (Real(1.0) + stretch);
+    }
+}
+
 Real SpanInputs::catenary_sag (int k) const
 {
     const Real c = chord(k);
@@ -59,59 +84,69 @@ std::string SpanInputs::span_name (int k) const
 Catenary elastic_catenary (Real chord, Real length, Real w, Real EA)
 {
     Catenary cat;
-    if (!(chord > 0.0 && length > chord && w > 0.0 && EA > 0.0)) { return cat; }
-    // a for a given stretched length: f(a) = 2 a sinh(c / 2a) - L_s, decreasing in a
-    auto parameter = [chord] (Real Ls, Real a) {
-        for (int it = 0; it < 200; ++it) {
-            const Real x = chord / (Real(2.0) * a);
-            const Real f = Real(2.0) * a * std::sinh(x) - Ls;
-            const Real df = Real(2.0) * std::sinh(x) - Real(2.0) * x * std::cosh(x);
-            const Real step = f / df;
-            Real next = a - step;
-            if (!(next > 0.0)) { next = Real(0.5) * a; }   // stay on the positive branch
-            if (std::abs(next - a) <= Real(1.0e-13) * a) { return next; }
-            a = next;
-        }
-        return a;
+    if (!(chord > 0.0 && length > 0.0 && w > 0.0 && EA > 0.0)) { return cat; }
+    // for a horizontal tension H the catenary parameter is a = H / w, the stretched length
+    // L_s = 2 a sinh(c / 2a), and the unstretched length L_s - (H / EA) (c/2 + (a/2) sinh(c/a));
+    // the latter falls as H grows, slack line or taut, so the H that gives the line's length is
+    // found by bisection (on log H, in double precision whatever Real is)
+    const double c = chord, L = length;
+    auto unstretched = [&](double H) {
+        const double a = H / static_cast<double>(w);
+        const double x = c / (2.0 * a);
+        if (x > 300.0) { return std::numeric_limits<double>::max(); }   // so slack that sinh overflows
+        return 2.0 * a * std::sinh(x) - H / static_cast<double>(EA) * (0.5 * c + 0.5 * a * std::sinh(c / a));
     };
-    Real Ls = length;
-    Real a = chord * chord / (Real(8.0) * std::sqrt(Real(3.0) * chord * (length - chord) / Real(8.0)));   // the parabola's
-    for (int it = 0; it < 100; ++it) {
-        a = parameter(Ls, a);
-        const Real H = w * a;
-        const Real strain_integral = Real(0.5) * chord + Real(0.5) * a * std::sinh(chord / a);
-        const Real L0 = Ls - H / EA * strain_integral;   // the unstretched length of this shape
-        const Real correction = length - L0;
-        Ls += correction;
-        if (std::abs(correction) <= Real(1.0e-12) * length) { break; }
+    double lo = std::log(1.0e-6 * static_cast<double>(w) * c), hi = std::log(1.0e3 * static_cast<double>(EA));
+    for (int it = 0; it < 200; ++it) {
+        const double mid = 0.5 * (lo + hi);
+        if (unstretched(std::exp(mid)) > L) { lo = mid; } else { hi = mid; }
     }
-    a = parameter(Ls, a);
-    cat.horizontal_tension = w * a;
-    cat.sag = a * (std::cosh(chord / (Real(2.0) * a)) - Real(1.0));
-    cat.end_tension = cat.horizontal_tension * std::cosh(chord / (Real(2.0) * a));
-    cat.stretched_length = Ls;
+    const double H = std::exp(0.5 * (lo + hi));
+    const double a = H / static_cast<double>(w);
+    cat.horizontal_tension = static_cast<Real>(H);
+    cat.sag = static_cast<Real>(a * (std::cosh(c / (2.0 * a)) - 1.0));
+    cat.end_tension = static_cast<Real>(H * std::cosh(c / (2.0 * a)));
+    cat.stretched_length = static_cast<Real>(2.0 * a * std::sinh(c / (2.0 * a)));
     return cat;
 }
 
-std::string ConductorInputs::validate_span (const SpanInputs& s)
+std::string ConductorInputs::validate_slack (const SpanInputs& s, bool on_terrain)
+{
+    if (s.stringing_tension > 0.0) { return std::string(); }
+    for (int k = 0; k < s.num_spans(); ++k) {
+        const Real c = s.chord(k);
+        const std::string which = (s.num_spans() == 1) ? "" : " of span " + std::to_string(k + 1);
+        const Real L = s.lengths[static_cast<std::size_t>(k)];
+        if (!(L > c)) {
+            return "erf.conductors." + s.name + ".length" + which + " (" + std::to_string(L) +
+                   " m) must exceed the distance between its ends (" + std::to_string(c) + " m" +
+                   (on_terrain ? std::string(" where they stand on the terrain") : std::string()) + "): a span hangs with slack";
+        }
+    }
+    return std::string();
+}
+
+std::string ConductorInputs::validate_span (const SpanInputs& s, bool check_slack)
 {
     const std::string key = "erf.conductors." + s.name + ".";
-    if (static_cast<int>(s.lengths.size()) != s.num_spans()) {
+    if (s.stringing_tension < 0.0) { return key + "stringing_tension must be positive (N), or 0 with length"; }
+    if (s.stringing_tension > 0.0 && !s.lengths.empty()) { return key + "length and stringing_tension both given: give one of them"; }
+    if (s.stringing_tension > 0.0) {
+        // the lengths come from the chords once the attachments stand on the terrain
+    } else if (static_cast<int>(s.lengths.size()) != s.num_spans()) {
         return key + "length needs one unstretched length per span (" + std::to_string(s.num_spans()) + " for " +
                std::to_string(s.towers.size()) + " tower(s)), " + std::to_string(s.lengths.size()) + " given";
     }
     for (int k = 0; k < s.num_spans(); ++k) {
-        const Real c = s.chord(k);
         const std::string which = (s.num_spans() == 1) ? "" : " of span " + std::to_string(k + 1);
-        if (!(c > 0.0)) {
+        if (!(s.chord(k) > 0.0)) {
             return key + (s.num_spans() == 1 ? std::string("end_a and end_b must be distinct points")
                                              : "the attachment points" + which + " must be distinct (end_a, towers, end_b)");
         }
-        const Real L = s.lengths[static_cast<std::size_t>(k)];
-        if (!(L > c)) {
-            return key + "length" + which + " (" + std::to_string(L) + " m) must exceed the distance between its ends (" +
-                   std::to_string(c) + " m): a span hangs with slack";
-        }
+    }
+    if (check_slack) {
+        const std::string err = validate_slack(s);
+        if (!err.empty()) { return err; }
     }
     if (!(s.diameter > 0.0)) { return key + "diameter must be positive (m)"; }
     if (!(s.mass_per_length > 0.0)) { return key + "mass_per_length must be positive (kg/m)"; }
@@ -134,6 +169,15 @@ std::string ConductorInputs::validate_span (const SpanInputs& s)
             }
         }
     }
+    return std::string();
+}
+
+std::string ConductorInputs::validate_transformer (const TransformerInputs& t)
+{
+    const std::string key = "erf.conductors." + t.name + ".";
+    if (!(t.size[0] > 0.0 && t.size[1] > 0.0 && t.size[2] > 0.0)) { return key + "size needs a positive length, width and height (m)"; }
+    if (t.allowable_force < 0.0) { return key + "allowable_force must be >= 0 (N; 0: not checked)"; }
+    if (t.allowable_moment < 0.0) { return key + "allowable_moment must be >= 0 (N m; 0: not checked)"; }
     return std::string();
 }
 
@@ -183,10 +227,14 @@ ConductorInputs ConductorInputs::read ()
     ConductorInputs in;
     ParmParse pp("erf.conductors");
 
-    std::vector<std::string> names;
+    std::vector<std::string> names, tnames;
     pp.queryarr("spans", names);
+    pp.queryarr("transformers", tnames);
     in.active = !names.empty();
-    if (!in.active) { return in; }
+    if (!in.active) {
+        if (!tnames.empty()) { Abort("erf.conductors.transformers needs lines ending on them (erf.conductors.spans)"); }
+        return in;
+    }
 
     pp.query("diagnostics_dir", in.diagnostics_dir);
     pp.query("diagnostics_int", in.diagnostics_int);
@@ -224,7 +272,8 @@ ConductorInputs ConductorInputs::read ()
         ps.queryarr("towers", t);
         if (t.size() % 3 != 0) { Abort("erf.conductors." + name + ".towers needs three components (m) per tower"); }
         for (std::size_t i = 0; i < t.size(); i += 3) { s.towers.push_back({{t[i], t[i+1], t[i+2]}}); }
-        ps.getarr("length", s.lengths);
+        ps.queryarr("length", s.lengths);
+        ps.query("stringing_tension", s.stringing_tension);
         ps.get("diameter", s.diameter);
         ps.get("mass_per_length", s.mass_per_length);
         ps.get("axial_stiffness", s.axial_stiffness);
@@ -236,9 +285,29 @@ ConductorInputs ConductorInputs::read ()
         ps.query("insulator_diameter", s.insulator_diameter);
         s.output_root = in.diagnostics_dir + "/" + name;
         ps.query("output_root", s.output_root);
-        const std::string err = validate_span(s);
+        // the slack is checked once the ends stand on the terrain: their heights here are above it
+        const std::string err = validate_span(s, false);
         if (!err.empty()) { Abort(err); }
         in.spans.push_back(s);
+    }
+    for (const std::string& name : tnames) {
+        // a transformer's block shares erf.conductors.<name> with the lines'
+        if (!seen.insert(name).second) { Abort("erf.conductors: '" + name + "' names two lines or transformers"); }
+        TransformerInputs t;
+        t.name = name;
+        ParmParse pt("erf.conductors." + name);
+        std::vector<Real> p, sz;
+        pt.getarr("position", p);
+        pt.getarr("size", sz);
+        if (p.size() != 2) { Abort("erf.conductors." + name + ".position needs two components, x and y (m)"); }
+        if (sz.size() != 3) { Abort("erf.conductors." + name + ".size needs three components, length, width and height (m)"); }
+        for (int d = 0; d < 2; ++d) { t.position[d] = p[d]; }
+        for (int d = 0; d < 3; ++d) { t.size[d] = sz[d]; }
+        pt.query("allowable_force", t.allowable_force);
+        pt.query("allowable_moment", t.allowable_moment);
+        const std::string terr = validate_transformer(t);
+        if (!terr.empty()) { Abort(terr); }
+        in.transformers.push_back(t);
     }
     const std::string err = validate_settings(in);
     if (!err.empty()) { Abort(err); }

@@ -58,9 +58,10 @@ Without a MoorDyn installation, ``-DERF_MOORDYN_USE_STUB=ON`` builds the
 coupling against a bundled stub library with the same C API
 (``Source/MovingBodies/MoorDyn/Stub``). The stub reads the same input file
 and has the geometry, ordering and data flow of the real interface but no
-line dynamics: each line hangs as a parabola with the catenary sag of its
-slack, swings to the quasi-static blowout angle of the wind it is given with
-a one-second lag, and carries the catenary tension. A free point hangs from
+line dynamics: each line hangs as an elastic parabola, as long as its
+unstretched length stretched by its tension (slack or taut), swings to the
+quasi-static blowout angle of the wind it is given with a one-second lag,
+and carries that tension along its tangent. A free point hangs from
 the shortest line that ties it to a fixed point (an insulator string from its
 tower), in the direction the other line attached to it swung at its last
 placement, and that line runs straight down to it. Its saved state holds
@@ -90,8 +91,8 @@ degrees of freedom (none when every attachment is fixed), the external
 kinematics (the number of points MoorDyn wants the fluid velocity at, their
 current coordinates, and the velocity and acceleration to set there before
 each step), the step itself (MoorDyn sub-steps internally with its own
-``dtM`` within the step it is given), the line node positions, velocities and
-tensions, the end and maximum tensions, the attachment points' positions and
+``dtM`` within the step it is given), the line node positions, velocities,
+tensions and net forces, the end and maximum tensions, the attachment points' positions and
 forces, and MoorDyn's save and load of the whole system state for restarts.
 
 MoorDyn-C is not clean under floating-point traps: its stationary
@@ -102,8 +103,10 @@ MoorDyn refuses to start with any ``amrex.fpe_trap_*`` input on;
 :cpp:`erf_moordyn::fpe_traps_requested()` is the check.
 
 MoorDyn reports the net force of the points it integrates (free and coupled
-points) only; a fixed attachment reports zero, and its pull is the tension
-vector at the end node of each line attached to it.
+points) only; a fixed attachment reports zero, and its pull is the net force
+MoorDyn finds on the end node of each line attached to it
+(``MoorDyn_GetLineNodeForce``): the end segment's tension with the node's
+share of the weight and the drag, which the fixed point holds still.
 
 Two properties of MoorDyn's input matter for lines in air:
 
