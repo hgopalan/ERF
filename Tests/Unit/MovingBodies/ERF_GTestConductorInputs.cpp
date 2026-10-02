@@ -58,10 +58,10 @@ TEST(ConductorInputs, ASpanIsReadWithItsDefaultsAndDerivedGeometry)
     EXPECT_EQ(s.output_root, "conductors/S1");
     EXPECT_EQ(in.diagnostics_int, 1);
     EXPECT_EQ(in.anchor_level, -1);
-    EXPECT_DOUBLE_EQ(in.air_density, 1.225);
+    EXPECT_EQ(in.air_density, amrex::Real(1.225));
     EXPECT_EQ(in.substeps, 1);
     EXPECT_DOUBLE_EQ(in.moordyn_dt, 0.0);
-    EXPECT_DOUBLE_EQ(in.moordyn_cfl, 0.1);
+    EXPECT_EQ(in.moordyn_cfl, amrex::Real(0.1));
     EXPECT_EQ(in.moordyn_log_level, 2);
     EXPECT_DOUBLE_EQ(in.surface_offset, 10000.0);
     EXPECT_FALSE(in.has_prescribed_velocity);

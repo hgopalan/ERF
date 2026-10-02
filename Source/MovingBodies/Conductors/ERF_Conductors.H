@@ -28,10 +28,29 @@ public:
 
     /**
      * Place the attachments on the terrain (their z is the height above the surface at x, y),
-     * write the MoorDyn inputs and create the spans. Called once, before the first step.
+     * write the MoorDyn inputs and create the spans. Called once, before the first step. On a
+     * restart (restart_chkdir is the checkpoint ERF restarts from) the spans continue from the
+     * state write_checkpoint() saved there, with their statistics, step count and logs; a
+     * checkpoint without conductor state starts them afresh.
      */
-    void set_ground (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
+    void set_ground (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom,
+                     const std::string& restart_chkdir = "");
     bool ground_set () const { return m_ground_set; }
+    /** Whether set_ground() continued the spans from a checkpoint. */
+    bool restored () const { return m_restored; }
+
+    /**
+     * Save the spans' state under <chkdir>/conductors: every span's MoorDyn state, the statistics,
+     * the step count and the time. Nothing is written before set_ground().
+     */
+    void write_checkpoint (const std::string& chkdir) const;
+    /**
+     * After a restart with drag_on_flow, spread the restored lines' drag into the momentum sources
+     * again, so that the sources (and a plotfile written at the restart) are those of the step the
+     * checkpoint was written at. Nothing happens on other levels, without drag_on_flow or on a fresh start.
+     */
+    void restore_sources (int lev, const amrex::MultiFab& U, const amrex::MultiFab* z_phys_nd,
+                          const amrex::MultiFab* detJ_cc, const amrex::Geometry& geom);
 
     /**
      * Advance the spans by one step of the anchor level (other levels return at once): hand each its
@@ -81,10 +100,16 @@ private:
                       const amrex::Geometry& geom);
     void write_total_load (double time, bool first) const;
 
+    /** Read the state write_checkpoint() saved under dir, create the spans from it and trim the logs to its time. */
+    void restore (const std::string& dir);
+
     ConductorInputs_t m_in;
     int m_anchor{0};
     bool m_ground_set{false};
+    bool m_restored{false};
     int m_step{0};
+    double m_time{0.0};                                  //!< the time the spans have reached
+    double m_t0{0.0};                                    //!< ERF's time when the spans' MoorDyn clocks read zero
     std::vector<erf_conductors::SpanInputs> m_placed;   //!< the spans with their ends at absolute heights
     std::vector<amrex::Real> m_ground;                  //!< per end (2 per span): the terrain height
     std::vector<std::unique_ptr<erf_conductors::ConductorSpan>> m_spans;
@@ -94,5 +119,15 @@ private:
     std::array<amrex::Real,3> m_source_integral{{0.0, 0.0, 0.0}};
     std::array<amrex::Real,3> m_drag_total{{0.0, 0.0, 0.0}};   //!< the air's drag on all lines (N)
 };
+
+namespace erf_conductors {
+/**
+ * Drop the data rows of a whitespace-separated log whose time (the first column) is later than t,
+ * keeping the header and every other line: a run restarted from a checkpoint at t continues the
+ * log from there, without the rows the run it continues wrote after the checkpoint. A missing
+ * file is left alone. Call on one rank.
+ */
+void trim_log_after (const std::string& fname, double t);
+} // namespace erf_conductors
 
 #endif

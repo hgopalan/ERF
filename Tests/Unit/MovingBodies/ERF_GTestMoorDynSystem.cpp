@@ -265,6 +265,24 @@ TEST(MoorDynSystem, SavedStateContinuesIdenticallyInAFreshSystem)
     ASSERT_TRUE(b);
     ASSERT_GT(b->external_kinematics_init(err), 0u) << err;
     b->load(state);
+    // before any further step the restored line is where the saved one is and feels the same drag:
+    // ERF samples the wind at these nodes, and spreads this drag, before the first step after a restart
+    {
+        const unsigned nn = a->line_num_nodes(1);
+        ASSERT_EQ(b->line_num_nodes(1), nn);
+        for (unsigned i = 0; i < nn; ++i) {
+            const auto pa = a->line_node_position(1, i);
+            const auto pb = b->line_node_position(1, i);
+            const auto da = a->line_node_drag(1, i);
+            const auto db = b->line_node_drag(1, i);
+            for (std::size_t d = 0; d < 3; ++d) {
+                EXPECT_NEAR(pb[d], pa[d], 1.0e-9 * std::max(1.0, std::fabs(pa[d]))) << "node " << i << " position " << d;
+                EXPECT_NEAR(db[d], da[d], 1.0e-9 * std::max(1.0, std::fabs(da[d]))) << "node " << i << " drag " << d;
+            }
+        }
+        const auto m = mid_node(*b);
+        EXPECT_GT(m[1], 1.0) << "the restored span must still be blown out along the wind (+y)";
+    }
     double tb = t;
     while (t < 15.0 - 0.5 * dt) {
         set_uniform_wind(*a, {{0.0, U, 0.0}}, t + 0.5 * dt);

@@ -4,6 +4,9 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <limits>
+#include <map>
+#include <sstream>
 
 #include <AMReX.H>
 #include <AMReX_Gpu.H>
@@ -43,7 +46,7 @@ Conductors::Conductors (ConductorInputs_t in, int anchor)
     : m_in(std::move(in)), m_anchor(anchor) {}
 
 void
-Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom)
+Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const std::string& restart_chkdir)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_ground_set, "Conductors::set_ground: called twice");
     m_ground_set = true;
@@ -87,6 +90,16 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom)
     }
     ParallelDescriptor::Barrier();
 
+    if (!restart_chkdir.empty()) {
+        const std::string dir = restart_chkdir + "/conductors";
+        if (FileExists(dir + "/state")) {
+            restore(dir);
+            update_ground_under_nodes(z_phys_nd, geom);
+            return;
+        }
+        // a checkpoint written without conductors (a precursor, say): the spans start afresh here
+        Print() << "erf.conductors: the checkpoint " << restart_chkdir << " holds no conductor state; the spans start now\n";
+    }
     for (const SpanInputs& s : m_placed) {
         const std::string file = m_in.diagnostics_dir + "/" + s.name + ".moordyn.txt";
         m_spans.push_back(std::make_unique<ConductorSpan>(s, m_in, CONST_GRAV, file));
@@ -107,6 +120,106 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom)
                                                       "min_clearance", "drag_y"});
     }
     update_ground_under_nodes(z_phys_nd, geom);
+}
+
+void
+Conductors::restore (const std::string& dir)
+{
+    // the state file: the step count, the time, and the spans with their node counts, in order
+    Vector<char> chars;
+    ParallelDescriptor::ReadAndBcastFile(dir + "/state", chars);
+    std::istringstream in(std::string(chars.dataPtr(), chars.size()));
+    std::string line;
+    bool have_step = false, have_time = false, have_t0 = false;
+    std::vector<std::pair<std::string,unsigned>> saved;
+    while (std::getline(in, line)) {
+        std::istringstream ls(line);
+        std::string key, eq;
+        if (!(ls >> key)) { continue; }
+        if (key == "step") {
+            if (!(ls >> eq >> m_step) || eq != "=") { Abort("malformed step line in '" + dir + "/state'"); }
+            have_step = true;
+        } else if (key == "time") {
+            if (!(ls >> eq >> m_time) || eq != "=") { Abort("malformed time line in '" + dir + "/state'"); }
+            have_time = true;
+        } else if (key == "clock_offset") {
+            if (!(ls >> eq >> m_t0) || eq != "=") { Abort("malformed clock_offset line in '" + dir + "/state'"); }
+            have_t0 = true;
+        } else if (key == "span") {
+            std::string name;
+            unsigned nodes = 0;
+            if (!(ls >> name >> nodes)) { Abort("malformed span line in '" + dir + "/state'"); }
+            saved.emplace_back(name, nodes);
+        }
+    }
+    if (!have_step || !have_time || !have_t0) {
+        Abort("no step count, time or clock offset in the conductor checkpoint '" + dir + "/state'");
+    }
+    if (saved.size() != m_placed.size()) {
+        Abort("the conductor checkpoint '" + dir + "' holds " + std::to_string(saved.size()) + " span(s) but erf.conductors.spans lists " +
+              std::to_string(m_placed.size()) + "; the erf.conductors block must match the run being restarted");
+    }
+    for (std::size_t i = 0; i < m_placed.size(); ++i) {
+        const SpanInputs& s = m_placed[i];
+        if (saved[i].first != s.name) {
+            Abort("the conductor checkpoint '" + dir + "' holds span " + saved[i].first + " where erf.conductors.spans lists " +
+                  s.name + "; the erf.conductors block must match the run being restarted");
+        }
+        if (saved[i].second != static_cast<unsigned>(s.segments) + 1) {
+            Abort("erf.conductors." + s.name + ": the checkpoint '" + dir + "' holds a line of " + std::to_string(saved[i].second) +
+                  " nodes but the inputs give " + std::to_string(s.segments + 1));
+        }
+        const std::string file = m_in.diagnostics_dir + "/" + s.name + ".moordyn.txt";
+        m_spans.push_back(std::make_unique<ConductorSpan>(s, m_in, CONST_GRAV, file, dir + "/" + s.name + ".moordyn"));
+        m_spans.back()->set_clock_offset(m_t0);
+        m_stats.emplace_back(s.name, s.output_root,
+                             std::vector<std::string>{"swing_deg", "mid_offset", "tension_a", "tension_b", "max_tension",
+                                                      "min_clearance", "drag_y"});
+        if (!m_stats.back().read_state(dir)) {
+            Abort("erf.conductors." + s.name + ": the checkpoint '" + dir + "' holds no statistics for the span");
+        }
+        const ConductorSpan& c = *m_spans.back();
+        Print() << "erf.conductors." << s.name << ": continued from " << dir << " at t = " << m_time << " s (step " << m_step
+                << "), mid-span offset " << c.mid_offset() << " m, sag " << c.mid_sag() << " m\n";
+    }
+    // the logs continue from the checkpoint: rows a run wrote after it are dropped
+    if (ParallelDescriptor::IOProcessor()) {
+        for (const SpanInputs& s : m_placed) {
+            erf_conductors::trim_log_after(s.output_root + ".dat", m_time);
+            erf_conductors::trim_log_after(s.output_root + "_nodes.dat", m_time);
+        }
+        erf_conductors::trim_log_after(m_in.diagnostics_dir + "/total_load.dat", m_time);
+    }
+    ParallelDescriptor::Barrier();
+    m_restored = true;
+}
+
+void
+Conductors::write_checkpoint (const std::string& chkdir) const
+{
+    if (!m_ground_set) { return; }
+    const std::string dir = chkdir + "/conductors";
+    if (ParallelDescriptor::IOProcessor()) {
+        UtilCreateDirectory(dir, 0755);
+        std::ofstream out(dir + "/state", std::ios::trunc);
+        if (!out) { Abort("cannot write the conductor checkpoint state '" + dir + "/state'"); }
+        out << std::setprecision(std::numeric_limits<double>::max_digits10)
+            << "step = " << m_step << "\ntime = " << m_time << "\nclock_offset = " << m_t0 << "\n";
+        for (const auto& span : m_spans) { out << "span " << span->name() << " " << span->num_nodes() << "\n"; }
+        if (!out) { Abort("cannot write the conductor checkpoint state '" + dir + "/state'"); }
+        // every rank holds the same line; one copy of each is saved
+        for (const auto& span : m_spans) { span->save(dir + "/" + span->name() + ".moordyn"); }
+    }
+    ParallelDescriptor::Barrier();
+    for (const auto& st : m_stats) { st.write_state(dir); }
+    ParallelDescriptor::Barrier();
+}
+
+void
+Conductors::restore_sources (int lev, const MultiFab& U, const MultiFab* z_phys_nd, const MultiFab* detJ_cc, const Geometry& geom)
+{
+    if (lev != m_anchor || !m_restored || !m_in.drag_on_flow) { return; }
+    spread_drag(U, z_phys_nd, detJ_cc, geom);
 }
 
 void
@@ -175,6 +288,13 @@ Conductors::advance (int lev, double time, double dt,
 {
     if (lev != m_anchor) { return; }
     if (!m_ground_set) { set_ground(z_phys_nd, geom); }
+    if (m_step == 0 && !m_restored) {
+        // the spans' MoorDyn clocks start at zero now: at ERF's time zero in a fresh run, at the
+        // restart time when a restart creates them afresh (a checkpoint without conductor state)
+        m_t0 = time;
+        m_time = time;
+        for (auto& span : m_spans) { span->set_clock_offset(m_t0); }
+    }
     ++m_step;
     const bool first = (m_step == 1);
     const bool write = first || (m_step % m_in.diagnostics_int == 0);
@@ -187,6 +307,7 @@ Conductors::advance (int lev, double time, double dt,
         }
         span->step(time, dt);
     }
+    m_time = time + dt;
     // where the lines are now: their clearance to the terrain, then the outputs and statistics
     update_ground_under_nodes(z_phys_nd, geom);
     m_drag_total = {{0.0, 0.0, 0.0}};
@@ -286,3 +407,29 @@ Conductors::write_total_load (double time, bool first) const
     for (int d = 0; d < 3; ++d) { out << " " << m_source_integral[d]; }
     out << "\n";
 }
+
+namespace erf_conductors {
+
+void trim_log_after (const std::string& fname, double t)
+{
+    std::ifstream in(fname);
+    if (!in) { return; }
+    std::vector<std::string> kept;
+    std::string line;
+    bool dropped = false;
+    // the logs print the time to ten significant digits
+    const double tol = 1.0e-9 * std::max(1.0, std::abs(t));
+    while (std::getline(in, line)) {
+        std::istringstream ls(line);
+        double row_t = 0.0;
+        if ((ls >> row_t) && row_t > t + tol) { dropped = true; continue; }
+        kept.push_back(line);
+    }
+    in.close();
+    if (!dropped) { return; }
+    std::ofstream out(fname, std::ios::trunc);
+    if (!out) { Abort("cannot rewrite the conductor log '" + fname + "'"); }
+    for (const auto& l : kept) { out << l << "\n"; }
+}
+
+} // namespace erf_conductors

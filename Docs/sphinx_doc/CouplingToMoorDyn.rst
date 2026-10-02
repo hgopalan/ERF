@@ -59,11 +59,13 @@ coupling against a bundled stub library with the same C API
 and has the geometry, ordering and data flow of the real interface but no
 line dynamics: each line hangs as a parabola with the catenary sag of its
 slack, swings to the quasi-static blowout angle of the wind it is given with
-a one-second lag, and carries the catenary tension. The unit tests and the
-``Linux GCC MoorDyn`` CI workflow runs them on it in one job; a second job
-installs MoorDyn-C 2.7.1 with ``Build/setup_moordyn.sh`` and runs the same
-tests, the verification tests that need real line dynamics and the coupled
-regression test against the real library.
+a one-second lag, and carries the catenary tension. Its saved state holds
+each line's swing angle and the last wind it was given, which sets the
+direction of the swing, so a restored line is where the saved one was. The
+unit tests and the ``Linux GCC MoorDyn`` CI workflow runs them on it in one
+job; a second job installs MoorDyn-C 2.7.1 with ``Build/setup_moordyn.sh``
+and runs the same tests, the verification tests that need real line dynamics
+and the coupled regression tests against the real library.
 
 The GNU make build takes ``USE_MOORDYN = TRUE`` with ``MOORDYN_HOME`` set to
 the install prefix (and ``MOORDYN_VERSION`` to the version string it should

@@ -1972,10 +1972,12 @@ ERF::InitData_post ()
 
 #ifdef ERF_USE_MOORDYN
     // place the conductor attachments on the terrain and create the MoorDyn lines now that the
-    // mesh exists, before the step-0 outputs
+    // mesh exists, before the step-0 outputs; a restart continues the lines from the checkpoint,
+    // and with drag_on_flow their drag on the air is spread again as it was at the checkpoint
     if (conductors && !conductors->ground_set()) {
         const int lev = conductors->anchor_level();
-        conductors->set_ground(z_phys_nd[lev].get(), Geom(lev));
+        conductors->set_ground(z_phys_nd[lev].get(), Geom(lev), restart_chkfile);
+        conductors->restore_sources(lev, vars_new[lev][Vars::xvel], z_phys_nd[lev].get(), detJ_cc[lev].get(), Geom(lev));
     }
 #endif
 

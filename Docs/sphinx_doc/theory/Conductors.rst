@@ -48,7 +48,9 @@ and one entry at its own origin, which get no wind), valid at the middle of
 the step, and the line is advanced by ERF's step in ``substeps``
 MoorDyn calls; MoorDyn sub-steps internally with its own time step, set by
 the Courant factor ``moordyn_cfl`` and bounded further by ``moordyn_dt`` when
-that is given. ERF's clock and MoorDyn's must agree at the end of every step.
+that is given. MoorDyn's clock starts at zero when the spans are created, at
+ERF's time zero in a fresh run, and ERF's clock and MoorDyn's (plus ERF's time
+at its zero) must agree at the end of every step.
 
 The wind handed to MoorDyn is ERF's velocity at the start of the step,
 sampled with the actuator core at the points where the line is at that
@@ -161,6 +163,28 @@ equals that force. The MoorDyn input
 file the span was built from is kept next to it
 (``<diagnostics_dir>/<name>.moordyn.txt``) for inspection or for running
 MoorDyn on its own.
+
+Restart
+-------
+
+A checkpoint carries the spans under ``<chk>/conductors``: each line's whole
+MoorDyn state (node positions and velocities, internal forces and the time
+integrator's state, through MoorDyn's own save), the running statistics, the
+step count and the time. On a restart the line is created from the same
+inputs, initialised without the initial-shape solve and given that state, so
+it continues blown out exactly where the checkpoint left it, on MoorDyn's
+clock; the statistics go on accumulating, and the diagnostics continue on the
+step count of the original run. With ``drag_on_flow`` the restored lines' drag
+is spread into the momentum sources again at once, so a plotfile written at
+the restart shows the source of the checkpointed step. The span logs,
+``<output_root>_nodes.dat`` and ``total_load.dat`` are appended to, after
+the rows a run wrote beyond the checkpoint time are dropped, so a run that
+went on past its last checkpoint and is restarted from it leaves no
+duplicated stretch. The spans of a restart must be those of the run that
+wrote the checkpoint, in the same order and with the same number of
+segments; anything else stops the run naming the span. A checkpoint without
+conductor state, from a run without spans, starts them afresh from their
+still-air shape, with MoorDyn's clock at zero at the restart time.
 
 Checks at start-up
 ------------------
