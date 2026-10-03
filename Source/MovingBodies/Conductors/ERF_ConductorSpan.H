@@ -2,6 +2,7 @@
 #define ERF_CONDUCTOR_SPAN_H
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -75,6 +76,20 @@ public:
                        const std::vector<amrex::Real>& velocity);
     /** The force MoorDyn's last step left on tower j+1's coupled point (N): the lines' pull on the cross-arm there. */
     std::array<amrex::Real,3> coupled_force (int j) const;
+    /** The line's whole state in memory (MoorDyn's and the coupled points'), so that a coupled step can be redone. */
+    struct State {
+        std::vector<std::uint64_t> moordyn;
+        std::vector<double> x, f;
+        double clock{0.0};
+    };
+    State state () const { return State{m_sys->serialize(), m_x, m_f, m_clock}; }
+    void set_state (const State& s)
+    {
+        m_sys->deserialize(s.moordyn);
+        m_x = s.x;
+        m_f = s.f;
+        m_clock = s.clock;
+    }
     /** Abort, naming the line, unless MoorDyn's clock after its last step plus the clock offset reads time. */
     void check_clock (double time) const;
     /**

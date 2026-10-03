@@ -38,3 +38,9 @@ and per set of strings, `transformers.dat` with every transformer's load, flags 
 `separation.dat` with the closest approach of every pair of lines, `ground.dat` with where every
 attachment and transformer stands, and the running statistics of all of them from
 `stats_start` on.
+
+## The same lines in a turbulent wind
+
+`les/` runs a circuit network over hills in a large-eddy simulation: a periodic precursor over flat
+land, then the hills as an immersed boundary fed by the precursor's boundary planes. See
+`les/README.md`.

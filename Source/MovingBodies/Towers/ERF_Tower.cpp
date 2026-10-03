@@ -57,6 +57,26 @@ void Tower::set_motion (const std::vector<Real>& displacement, const std::vector
     m_inertia = inertia;
 }
 
+std::size_t Tower::add_attachment (const std::array<Real,3>& at)
+{
+    m_attach.push_back(at);
+    return m_attach.size() - 1;
+}
+
+void Tower::set_line_loads (const std::vector<std::array<Real,3>>& force, const std::vector<std::array<Real,3>>& at)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(force.size() == at.size(), "Tower::set_line_loads: one point per force is needed");
+    m_line_force = force;
+    m_line_at = at;
+}
+
+std::array<Real,3> Tower::line_force () const
+{
+    std::array<Real,3> F{{0.0, 0.0, 0.0}};
+    for (const auto& f : m_line_force) { for (int d = 0; d < 3; ++d) { F[d] += f[d]; } }
+    return F;
+}
+
 std::vector<MemberNode> Tower::current_nodes () const
 {
     std::vector<MemberNode> nodes = m_nodes;
@@ -105,10 +125,17 @@ FoundationLoad Tower::foundation () const
         Md[1] += rz * fx - rx * fz;
         Md[2] += rx * fy - ry * fx;
     }
-    const Real rx = m_line_at[0] - m_base[0], ry = m_line_at[1] - m_base[1], rz = m_line_at[2] - m_base[2];
-    const auto& F = m_line_force;
-    for (int d = 0; d < 3; ++d) { L.force[d] = Fd[d] + F[d]; }
-    L.moment = {{Md[0] + ry * F[2] - rz * F[1], Md[1] + rz * F[0] - rx * F[2], Md[2] + rx * F[1] - ry * F[0]}};
+    L.force = Fd;
+    L.moment = Md;
+    // each line's pull where it hangs from the tower
+    for (std::size_t a = 0; a < m_line_force.size(); ++a) {
+        const auto& F = m_line_force[a];
+        const Real rx = m_line_at[a][0] - m_base[0], ry = m_line_at[a][1] - m_base[1], rz = m_line_at[a][2] - m_base[2];
+        for (int d = 0; d < 3; ++d) { L.force[d] += F[d]; }
+        L.moment[0] += ry * F[2] - rz * F[1];
+        L.moment[1] += rz * F[0] - rx * F[2];
+        L.moment[2] += rx * F[1] - ry * F[0];
+    }
     L.shear = std::hypot(L.force[0], L.force[1]);
     L.overturning = std::hypot(L.moment[0], L.moment[1]);
     L.vertical = m_type.weight - L.force[2];

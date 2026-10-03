@@ -63,10 +63,10 @@ unstretched length stretched by its tension (slack or taut), swings to the
 quasi-static blowout angle of the wind it is given with a one-second lag,
 and carries that tension along its tangent. A coupled point moves as MoorDyn
 moves it. A free point hangs from the shortest line that ties it to a fixed or
-coupled point (an insulator string from its tower), in the direction the other
-line attached to it swung at its last placement, and that line runs straight
-down to it. Its saved state holds
-each line's swing angle, the last wind it was given, which sets the direction
+coupled point (an insulator string from its tower), plumb below it and swung
+across the line by the wind across the other line attached to it (on that
+line's weight, with the same lag), and that line runs straight down to it. Its saved state holds
+each line's swing angles, the last wind it was given, which sets the direction
 of the swing, and where the free and coupled points are, so a restored line is where
 the saved one was. The
 unit tests and the ``Linux GCC MoorDyn`` CI workflow runs them on it in one
@@ -112,7 +112,11 @@ coupled point is one the caller moves: each ``MoorDyn_Step`` takes its
 position at the start of the step and a velocity, moves it linearly over the
 step, and returns the net force of the attached lines' end nodes on it, the
 same sum (without the end nodes' inertia). Moving towers use this: their
-cross-arms are coupled points (:ref:`sec:Conductors`).
+cross-arms are coupled points (:ref:`sec:Conductors`). A system's whole state
+can also be kept in memory and restored (``MoorDyn_Serialize`` and
+``MoorDyn_Deserialize``, the stub too), so that a coupled step can be redone:
+the coupling with the moving towers iterates each step until the towers and the
+lines agree.
 
 Two properties of MoorDyn's input matter for lines in air:
 

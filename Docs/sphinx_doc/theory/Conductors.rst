@@ -207,6 +207,18 @@ once they are placed. The attachments must lie inside the domain.
 resulting absolute height, and each transformer (point ``transformer``) with
 the terrain height under its centre and the height of its top.
 
+With an immersed terrain (``erf.terrain_type = ImmersedForcing``) the mesh is
+flat and the hills are solid cells inside it, so the mesh's bottom says nothing
+about the ground. The lines then take the terrain's height from the surface the
+immersed boundary is built from (``erf.terrain_file_name`` or the problem's
+own terrain, at the nodes of the anchor level), bilinear between its nodes as on
+a fitted mesh's bottom: the ends, the towers, the transformers and the ground
+under every node for the clearance. The wind is sampled at the nodes' absolute
+heights, which on the flat mesh are the mesh's own. Placed on an immersed ramp,
+a section and its towers stand exactly where they stand on the same ramp as a
+fitted mesh. A precursor run on the flat mesh can therefore seed a run over
+immersed hills from its checkpoint.
+
 Drag on the flow
 ----------------
 
@@ -349,6 +361,18 @@ side). The towers carry the wind's drag on their members and the pull of the
 line hanging from them, and stand on a foundation of four footings; they are
 rigid unless their type has a ``frequency`` (see `Moving towers`_).
 
+A circuit's phases and its shield wire hang from one row of towers: a line
+with ``share_towers = <line>`` hangs from the towers of that line, which has
+the ``tower_type``, each at its own point on them, its ``towers`` points. The
+phases sit across the cross-arm and the shield wire on the ``peak`` above it;
+a point off the tower (further from its axis than half the cross-arm, or above
+its top) stops the run naming the line and the tower. A shared tower stands
+under the owning line's point, and the other lines' points are placed above
+its base, not above the ground under each point, so that a cross-arm on a slope
+stays level. The tower takes each line's pull at its own point, the
+foundation all of them, and the lines that share a moving tower step with it
+together.
+
 Each member is cut into drag nodes at the middle of equal segments
 (``segments`` up the body, four along the arm). A node stands for a length
 :math:`L` of member with axis :math:`\mathbf{e}`, and the wind loads it as a
@@ -481,15 +505,31 @@ integrated exactly, so any step is stable. The tower does not twist, rise or
 sink, and its weight does not add to the overturning as it leans
 (:math:`P`-:math:`\Delta`).
 
-A line whose towers move steps in coupling steps, at least
-``substeps`` and at least 20 over the period of its fastest tower. In each, every
-tower advances first, under its members' drag and the line's pull from the
-end of MoorDyn's last call; then MoorDyn moves the cross-arms from where they
-were to where the towers have taken them, at a constant velocity over the
-call (MoorDyn moves a coupled point linearly), and hands back their pull. The
-members' drag is found again in every coupling step from the wind of the ERF
-step and the members' current velocity, so the wind damps the sway: a
-member moving with the wind feels less of it. The foundation takes the loads
+A line whose towers move steps in coupling steps, at least ``substeps`` and
+at least 20 over the period of its fastest tower; lines that share towers step
+together. In each, every tower advances under its members' drag and the mean of
+the lines' pull at the start and at the end of the coupling step; then MoorDyn
+moves each line's points on the towers from where they were to where the towers
+have taken them, at a constant velocity over the call (MoorDyn moves a coupled
+point linearly), and hands back their pull. The pull at the end is not known
+before MoorDyn's call, so the coupling step is iterated: the lines' MoorDyn
+states and the towers' are kept at its start and restored for each iteration
+(MoorDyn's in-memory serialization), and the estimate of the end pull is
+updated with Aitken's relaxation until it changes by less than
+:math:`10^{-4}` of the largest pull (at most 50 iterations). A single exchange,
+the towers stepping with the pull from the end of the last call, is only
+conditionally stable: a short, nearly taut span pulls back in milliseconds,
+and a pull that lags a coupling step acts on the tower as negative damping,
+:math:`k h / 2` for a span of stiffness :math:`k` and a step :math:`h`, which
+outgrows the tower's own damping once :math:`k` exceeds the tower's stiffness.
+Iterated, the coupling is the implicit one; it takes about four iterations
+where the towers carry strings and a clamped shield wire, and one once they are
+still. ``<diagnostics_dir>/coupling.dat`` logs, every ``diagnostics_int``
+steps, the most iterations a coupling step took and how many did not converge
+(the run warns once and goes on with the last iterate). The members' drag is
+found again in every coupling step from the wind of the ERF step and the
+members' current velocity, so the wind damps the sway: a member moving with the
+wind feels less of it. The foundation takes the loads
 less the inertia of the nodes (each node's mass times its acceleration), so
 a tower swaying freely still loads its footings. MoorDyn's pull on a coupled
 point leaves out the inertia of the line's end node, a few kilograms against
@@ -524,7 +564,10 @@ velocity times the step, and a coupled point held still is a fixed one to
 :math:`10^{-9}` m. In a 10 m/s crosswind the towers of a clamped section
 settle 2.6 mm downwind, where their stiffness balances the 4023 N of drag on
 the body (weighted by the shape) and the line's pull of 672 N; that pull is
-within 2 % of the rigid towers'. On the moving-towers test case the towers
+within 2 % of the rigid towers'. A circuit's shield wire clamped 40 m from
+its dead end to the peak of a tower at 2 Hz with 2 % damping, in the same wind,
+settles at 4 mm when the coupling steps are iterated; with a single exchange per
+coupling step the tower is still growing through 18 mm after 15 s. On the moving-towers test case the towers
 bend at 1.67 Hz (2 Hz lowered by footings of :math:`10^9` N m/rad) and the
 hilltop tower leans about 3 cm in its 25 m/s wind.
 

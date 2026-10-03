@@ -2,7 +2,9 @@
 // derived chord and catenary sag; a section over towers is read with a length per span and its
 // insulator strings; every value outside its documented range is refused with a message naming
 // the key; the shared settings and the solver settings are checked the same way; and the
-// transformers the lines end on are read with their footprints, and refused by name out of range.
+// transformers the lines end on are read with their footprints, and refused by name out of range;
+// and a line may hang from the towers of another line that has a tower_type, as many as it has,
+// taking their type, but not from a line that itself shares towers, nor with a type of its own.
 
 #include <cmath>
 #include <string>
@@ -443,4 +445,55 @@ TEST(ConductorInputs, TowerTypesAreReadAndALinesTowerTypeMustNameOne)
     pp.addarr("spans", std::vector<std::string>{});
     pp.addarr("tower_types", std::vector<std::string>{});
     ps.remove("tower_type");
+}
+
+TEST(ConductorInputs, ALineSharesTheTowersOfAnotherLineWithATowerType)
+{
+    erf_towers::TowerType lat;
+    lat.name = "lat";
+    lat.base_width = 6.0; lat.top_width = 1.5; lat.solidity = 0.2; lat.arm_length = 12.0;
+    ConductorInputs in;
+    in.tower_types = {lat};
+    SpanInputs owner = good_section();
+    owner.name = "P2";
+    owner.tower_type = "lat";
+    SpanInputs phase = good_section();
+    phase.name = "P1";
+    phase.share_towers = "P2";
+    in.spans = {owner, phase};
+    EXPECT_TRUE(ConductorInputs::validate_shared_towers(in.spans).empty()) << ConductorInputs::validate_shared_towers(in.spans);
+    // the sharing line's towers are the owner's: their type, and whether they move
+    EXPECT_EQ(&in.tower_owner(in.spans[1]), &in.spans[0]);
+    ASSERT_NE(in.tower_type(in.spans[1]), nullptr);
+    EXPECT_EQ(in.tower_type(in.spans[1])->name, "lat");
+    EXPECT_FALSE(in.towers_move(in.spans[1]));
+    in.tower_types[0].frequency = 2.0;
+    in.tower_types[0].weight = 9.0e4;
+    EXPECT_TRUE(in.towers_move(in.spans[1])) << "a line on moving towers moves with them";
+    auto refused = [&](std::vector<SpanInputs> spans, const std::string& what) {
+        const std::string err = ConductorInputs::validate_shared_towers(spans);
+        EXPECT_NE(err.find("erf.conductors.P1.share_towers"), std::string::npos) << what << ": " << err;
+        EXPECT_NE(err.find(what), std::string::npos) << err;
+    };
+    SpanInputs p = phase;
+    p.share_towers = "P9";
+    refused({owner, p}, "is not another line");
+    p.share_towers = "P1";
+    refused({owner, p}, "is not another line");
+    SpanInputs bare = owner;
+    bare.tower_type.clear();
+    refused({bare, phase}, "has no tower_type");
+    p = phase;
+    p.tower_type = "lat";
+    refused({owner, p}, "drop its own tower_type");
+    p = phase;
+    p.towers.pop_back();
+    refused({owner, p}, "hangs from every tower");
+    SpanInputs chained = owner;
+    chained.tower_type.clear();
+    chained.share_towers = "P3";
+    SpanInputs third = good_section();
+    third.name = "P3";
+    third.tower_type = "lat";
+    refused({chained, phase, third}, "name the line the towers belong to");
 }

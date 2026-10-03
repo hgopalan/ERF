@@ -3,8 +3,9 @@
 // reported, not fatal; a fixed-fixed span in air initialises with no coupled degree of freedom, its
 // end nodes on the attachment points and the catenary sag at mid-span; the external kinematics
 // points start with the line's nodes; a steady crosswind blows the span out towards the quasi-static
-// angle atan(q / w) and raises the end tension; and a saved state restored into a fresh system
-// continues identically.
+// angle atan(q / w) and raises the end tension; a saved state restored into a fresh system
+// continues identically; and a state kept in memory and restored redoes a step exactly, so that a
+// coupled step can be iterated.
 
 #include <algorithm>
 #include <array>
@@ -302,4 +303,48 @@ TEST(MoorDynSystem, SavedStateContinuesIdenticallyInAFreshSystem)
     EXPECT_LT(max_diff, 1.0e-6) << "restored run differs by " << max_diff << " m";
     EXPECT_NEAR(a->line_end_tension(1), b->line_end_tension(1), 1.0e-6 * std::max(1.0, a->line_end_tension(1)));
     EXPECT_GT(norm(mid_node(*a)), 0.0);
+}
+
+TEST(MoorDynSystem, AStateKeptInMemoryRedoesAStepExactly)
+{
+    const Span s;
+    auto a = make_span("memory", s);
+    ASSERT_TRUE(a);
+    std::string err;
+    ASSERT_GT(a->external_kinematics_init(err), 0u) << err;
+    const double dt = 0.05;
+    double t = 0.0;
+    std::vector<double> f;
+    while (t < 2.0 - 0.5 * dt) {
+        set_uniform_wind(*a, {{0.0, 15.0, 0.0}}, t + 0.5 * dt);
+        a->step({}, {}, f, t, dt);
+    }
+    const auto kept = a->serialize();
+    const double t0 = t;
+    ASSERT_FALSE(kept.empty());
+    // a step, then back to the kept state and the same step again
+    // (positions and velocities: a node's velocity carries where it was before the step)
+    std::vector<std::array<double,3>> first, first_v;
+    for (int pass = 0; pass < 2; ++pass) {
+        if (pass == 1) { a->deserialize(kept); t = t0; }
+        a->step({}, {}, f, t, dt);
+        EXPECT_NEAR(t, t0 + dt, 1.0e-12) << "the clock comes back with the state";
+        const unsigned nn = a->line_num_nodes(1);
+        for (unsigned i = 0; i < nn; ++i) {
+            const auto p = a->line_node_position(1, i);
+            const auto v = a->line_node_velocity(1, i);
+            if (pass == 0) { first.push_back(p); first_v.push_back(v); continue; }
+            for (std::size_t d = 0; d < 3; ++d) {
+                EXPECT_EQ(p[d], first[i][d]) << "node " << i << " dir " << d;
+                EXPECT_EQ(v[d], first_v[i][d]) << "node " << i << " velocity " << d;
+            }
+        }
+    }
+    // a different step from the kept state goes elsewhere: the state, not the last result, is restored
+    a->deserialize(kept);
+    t = t0;
+    set_uniform_wind(*a, {{0.0, 30.0, 0.0}}, t + 0.5 * dt);
+    for (int n = 0; n < 2; ++n) { a->step({}, {}, f, t, dt); }
+    const auto m = a->line_node_position(1, a->line_num_nodes(1) / 2);
+    EXPECT_NE(m[1], first[a->line_num_nodes(1) / 2][1]);
 }

@@ -37,6 +37,9 @@ namespace erf_conductors {
  *   erf.conductors.S1.output_root   = conductors/S1    (prefix of the line's diagnostics files)
  *   erf.conductors.S1.tower_type    = lattice          (the suspension towers are lattice towers of this type,
  *                                                       loaded by the wind; default none: points only)
+ *   erf.conductors.S1.share_towers  = P2               (the line hangs from the towers of line P2, at its own
+ *                                                       points on them: a circuit's phases and shield wire on one
+ *                                                       tower; default: its own towers)
  */
 struct SpanInputs
 {
@@ -57,6 +60,7 @@ struct SpanInputs
     amrex::Real insulator_diameter{0.254};
     std::string output_root;
     std::string tower_type;                          //!< the type of the suspension towers; empty: none
+    std::string share_towers;                        //!< the line whose towers this one hangs from; empty: its own
 
     /** Segments of each insulator string. */
     static constexpr int insulator_segments = 2;
@@ -201,7 +205,9 @@ struct ConductorInputs
     amrex::Real epsilon{2.0};
     amrex::Real flashover_distance{1.0};
 
-    /** The tower type of a line's towers, or null when they have none. */
+    /** The line a line's towers belong to: the line whose towers it shares, or itself. */
+    const SpanInputs& tower_owner (const SpanInputs& s) const;
+    /** The tower type of a line's towers (those of the line it shares them with), or null when they have none. */
     const erf_towers::TowerType* tower_type (const SpanInputs& s) const;
     /** Whether a line's towers move (their type has a frequency): MoorDyn then takes their cross-arms as coupled points. */
     bool towers_move (const SpanInputs& s) const
@@ -229,6 +235,12 @@ struct ConductorInputs
     static std::string validate_slack (const SpanInputs& s, bool on_terrain = false);
     /** Whether a line's tower_type names one of the tower types and the line has towers: an empty string, else the message. */
     static std::string validate_tower_type (const SpanInputs& s, const std::vector<erf_towers::TowerType>& types);
+    /**
+     * Whether every line that shares towers names a line of the run that has a tower_type, shares
+     * no other line's, and has as many towers, and sets no tower_type of its own: an empty string,
+     * else the message.
+     */
+    static std::string validate_shared_towers (const std::vector<SpanInputs>& spans);
     /** The range checks of one transformer: an empty string when it is acceptable, else the message to abort with. */
     static std::string validate_transformer (const TransformerInputs& t);
     /** The range checks of the shared settings: an empty string when acceptable, else the message. */

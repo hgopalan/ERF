@@ -11,7 +11,9 @@ Hills are Gaussian bumps at random places; transformers stand on some hilltops a
 at random places, and a minimum spanning tree of lines joins them. Each line is a section dead-ended
 on its two transformers, hanging from insulator strings on suspension towers at most max_span
 apart, every span strung to the same horizontal tension; a span that would come closer to the ground than min_clearance in still air gets a tower
-at its lowest point. Everything is drawn from one seed, so the same arguments give the same case.
+at its lowest point. With --circuit each connection is a circuit: three phases across the cross-arms
+of one row of towers (the middle phase's, which the others share) and a shield wire on the towers'
+peaks. Everything is drawn from one seed, so the same arguments give the same case.
 """
 
 import argparse
@@ -39,7 +41,7 @@ def make_hills(rng, a):
     hills = []
     while len(hills) < a.hills:
         xc = rng.uniform(a.lx * 0.27, a.lx * 0.8)
-        yc = rng.uniform(a.ly * 0.2, a.ly * 0.8)
+        yc = rng.uniform(a.ly * a.hill_margin, a.ly * (1.0 - a.hill_margin))
         if any(math.hypot(xc - p[0], yc - p[1]) < a.hill_spacing for p in hills):
             continue
         hills.append((xc, yc, rng.uniform(*a.hill_height), rng.uniform(*a.hill_radius)))
@@ -140,6 +142,61 @@ def route(a, hills, pa, pb):
     return pts
 
 
+def across_at(r, k):
+    """The horizontal unit normal of route r at point k (left of the direction of travel), as ERF's cross-arms."""
+    def unit(p, q):
+        dx, dy = q[0] - p[0], q[1] - p[1]
+        n = math.hypot(dx, dy)
+        return dx / n, dy / n
+    if k == 0:
+        ux, uy = unit(r[0], r[1])
+    elif k == len(r) - 1:
+        ux, uy = unit(r[-2], r[-1])
+    else:
+        b, f = unit(r[k - 1], r[k]), unit(r[k], r[k + 1])
+        ux, uy = b[0] + f[0], b[1] + f[1]
+        n = math.hypot(ux, uy)
+        ux, uy = ux / n, uy / n
+    return -uy, ux
+
+
+def offset_route(r, side, a):
+    """An outer phase: the route moved across the line, by the cross-arm offset at the towers and less at the ends."""
+    out = []
+    for k, p in enumerate(r):
+        nx, ny = across_at(r, k)
+        d = side * (a.phase_spacing[0] if p[3] else a.phase_spacing[1])
+        out.append((p[0] + d * nx, p[1] + d * ny, p[2], p[3]))
+    return out
+
+
+def write_line(f, a, nm, r, owner, kind):
+    f.write(f"erf.conductors.{nm}.end_a  = {r[0][0]:.2f} {r[0][1]:.2f} {r[0][2]:g}\n")
+    if len(r) > 2:
+        f.write(f"erf.conductors.{nm}.towers = " + "  ".join(f"{p[0]:.2f} {p[1]:.2f} {p[2]:g}" for p in r[1:-1]) + "\n")
+    f.write(f"erf.conductors.{nm}.end_b  = {r[-1][0]:.2f} {r[-1][1]:.2f} {r[-1][2]:g}\n")
+    # ERF sets each span's length from its chord on ERF's own terrain
+    if kind == "shield":
+        # 7/16 in. high-strength steel: lighter, strung tighter so that it sags less than the phases
+        f.write(f"erf.conductors.{nm}.stringing_tension = {0.5 * a.stringing_tension:g}\n")
+        f.write(f"erf.conductors.{nm}.diameter         = 0.0111\n")
+        f.write(f"erf.conductors.{nm}.mass_per_length  = 0.406\n")
+        f.write(f"erf.conductors.{nm}.axial_stiffness  = 9.7e6\n")
+    else:
+        f.write(f"erf.conductors.{nm}.stringing_tension = {a.stringing_tension:g}\n")
+        f.write(f"erf.conductors.{nm}.diameter         = 0.0281\n")
+        f.write(f"erf.conductors.{nm}.mass_per_length  = 1.628\n")
+        f.write(f"erf.conductors.{nm}.axial_stiffness  = 3.0e7\n")
+    if len(r) > 2:
+        if owner is None:
+            f.write(f"erf.conductors.{nm}.tower_type       = lattice\n")
+        else:
+            f.write(f"erf.conductors.{nm}.share_towers     = {owner}\n")
+        if kind == "phase":
+            f.write(f"erf.conductors.{nm}.insulator_length = {a.insulator:g}\n")
+            f.write(f"erf.conductors.{nm}.insulator_mass   = 60.\n")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=".")
@@ -152,13 +209,15 @@ def main():
     ap.add_argument("--hill_height", type=float, nargs=2, default=[60.0, 120.0])
     ap.add_argument("--hill_radius", type=float, nargs=2, default=[150.0, 250.0], help="e-folding radius (m)")
     ap.add_argument("--hill_spacing", type=float, default=550.0)
+    ap.add_argument("--hill_margin", type=float, default=0.2,
+                    help="the hills' centres stay this fraction of the width from the y faces (a y-periodic run wants them flat)")
     ap.add_argument("--transformers", type=int, default=6)
     ap.add_argument("--on_hills", type=int, default=3)
     ap.add_argument("--transformer_spacing", type=float, default=450.0)
     ap.add_argument("--flat_height", type=float, default=2.0, help="highest terrain counted as flat ground (m)")
     ap.add_argument("--box", type=float, nargs=3, default=[8.0, 5.0, 6.0], help="transformer length, width, height (m)")
     ap.add_argument("--end_inset", type=float, default=0.7, help="the line ends lie this fraction of the way to the box's edge")
-    ap.add_argument("--allowable_force", type=float, default=2.5e4, help="above a dead end's stringing tension (N)")
+    ap.add_argument("--allowable_force", type=float, default=2.5e4, help="above a dead end's stringing tension (N); four times this with --circuit")
     ap.add_argument("--allowable_moment", type=float, default=2.5e5, help="(N m)")
     ap.add_argument("--end_height", type=float, default=10.0, help="dead ends above the terrain (m): the box top plus the bushings")
     ap.add_argument("--tower_height", type=float, default=30.0)
@@ -170,6 +229,11 @@ def main():
     ap.add_argument("--tower_sway", type=float, nargs=3, default=[2.0, 0.02, 1.0e9],
                     help="the towers' first bending frequency on a rigid foundation (Hz; 0: rigid towers), its "
                          "damping ratio and the footings' rotational stiffness (N m/rad; 0: rigid)")
+    ap.add_argument("--circuit", action="store_true",
+                    help="three phases and a shield wire per connection, on shared towers")
+    ap.add_argument("--phase_spacing", type=float, nargs=2, default=[5.5, 1.5],
+                    help="the outer phases' offset across the line at the towers and at the transformers (m)")
+    ap.add_argument("--shield_height", type=float, default=7.0, help="the shield wire above the cross-arm (m), on the peak")
     ap.add_argument("--max_span", type=float, default=280.0)
     ap.add_argument("--stringing_tension", type=float, default=2.0e4, help="still-air horizontal tension every span is strung to (N)")
     ap.add_argument("--min_clearance", type=float, default=8.0)
@@ -230,7 +294,8 @@ def main():
         f.write(f"# generated by make_case.py --seed {a.seed}: {len(pts)} transformers, {len(lines)} lines\n")
         for (xc, yc, h, s) in hills:
             f.write(f"#   hill at ({xc:.0f}, {yc:.0f}), height {h:.0f} m, radius {s:.0f} m\n")
-        f.write("erf.conductors.spans        = " + " ".join(l[0] for l in lines) + "\n")
+        span_names = [l[0] for l in lines] if not a.circuit else [l[0] + k for l in lines for k in ("a", "b", "c", "sw")]
+        f.write("erf.conductors.spans        = " + " ".join(span_names) + "\n")
         f.write("erf.conductors.transformers = " + " ".join(names) + "\n")
         f.write("erf.conductors.tower_types  = lattice\n\n")
         tb, tt, ts, al, ad = a.tower
@@ -240,6 +305,8 @@ def main():
         f.write(f"erf.conductors.lattice.solidity   = {ts:g}\n")
         f.write(f"erf.conductors.lattice.arm_length = {al:g}\n")
         f.write(f"erf.conductors.lattice.arm_depth  = {ad:g}\n")
+        if a.circuit:
+            f.write(f"erf.conductors.lattice.peak       = {a.shield_height + 1.0:g}   # the shield wire's peak\n")
         tw, au, ac = a.tower_foundation
         f.write(f"erf.conductors.lattice.weight     = {tw:g}\n")
         f.write(f"erf.conductors.lattice.allowable_uplift      = {au:g}\n")
@@ -256,23 +323,21 @@ def main():
             f.write(f"# {nm}: on {'a hilltop' if p[2] == 'hill' else 'flat ground'}, ground at {height(hills, p[0], p[1]):.1f} m\n")
             f.write(f"erf.conductors.{nm}.position         = {p[0]:.2f} {p[1]:.2f}\n")
             f.write(f"erf.conductors.{nm}.size             = {a.box[0]:g} {a.box[1]:g} {a.box[2]:g}\n")
-            f.write(f"erf.conductors.{nm}.allowable_force  = {a.allowable_force:g}\n")
-            f.write(f"erf.conductors.{nm}.allowable_moment = {a.allowable_moment:g}\n")
+            # a circuit dead-ends four lines on each transformer where a single line ends one
+            per = 4.0 if a.circuit else 1.0
+            f.write(f"erf.conductors.{nm}.allowable_force  = {per * a.allowable_force:g}\n")
+            f.write(f"erf.conductors.{nm}.allowable_moment = {per * a.allowable_moment:g}\n")
         for (nm, i, j, r) in lines:
             f.write(f"\n# {nm}: {names[i]} to {names[j]}, {len(r) - 1} span(s)\n")
-            f.write(f"erf.conductors.{nm}.end_a  = {r[0][0]:.2f} {r[0][1]:.2f} {r[0][2]:g}\n")
-            if len(r) > 2:
-                f.write(f"erf.conductors.{nm}.towers = " + "  ".join(f"{p[0]:.2f} {p[1]:.2f} {p[2]:g}" for p in r[1:-1]) + "\n")
-            f.write(f"erf.conductors.{nm}.end_b  = {r[-1][0]:.2f} {r[-1][1]:.2f} {r[-1][2]:g}\n")
-            # ERF sets each span's length from its chord on ERF's own terrain
-            f.write(f"erf.conductors.{nm}.stringing_tension = {a.stringing_tension:g}\n")
-            f.write(f"erf.conductors.{nm}.diameter         = 0.0281\n")
-            f.write(f"erf.conductors.{nm}.mass_per_length  = 1.628\n")
-            f.write(f"erf.conductors.{nm}.axial_stiffness  = 3.0e7\n")
-            if len(r) > 2:
-                f.write(f"erf.conductors.{nm}.tower_type       = lattice\n")
-                f.write(f"erf.conductors.{nm}.insulator_length = {a.insulator:g}\n")
-                f.write(f"erf.conductors.{nm}.insulator_mass   = 60.\n")
+            if not a.circuit:
+                write_line(f, a, nm, r, owner=None, kind="phase")
+                continue
+            # a circuit: the middle phase owns the towers, the outer phases and the shield wire share them
+            write_line(f, a, nm + "b", r, owner=None, kind="phase")
+            write_line(f, a, nm + "a", offset_route(r, +1.0, a), owner=nm + "b", kind="phase")
+            write_line(f, a, nm + "c", offset_route(r, -1.0, a), owner=nm + "b", kind="phase")
+            sw = [(p[0], p[1], p[2] + (a.shield_height if t else 2.0), t) for p, t in zip(r, [q[3] for q in r])]
+            write_line(f, a, nm + "sw", sw, owner=nm + "b", kind="shield")
     print(f"u* = {ustar:.4f} m/s, inflow KE 3.3 u*^2 = {3.3 * ustar ** 2:.4f} m^2/s^2")
     for (nm, i, j, r) in lines:
         print(f"{nm}: {names[i]} ({pts[i][2]}) to {names[j]} ({pts[j][2]}), {len(r) - 1} spans")

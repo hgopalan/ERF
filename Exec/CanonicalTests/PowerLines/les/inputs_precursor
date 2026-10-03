@@ -1,0 +1,77 @@
+# Periodic neutral LES precursor over land for the power lines over hills: pressure-gradient driven
+# half channel, no Coriolis, slip top, z0 = 0.1 m (u* ~ 1 m/s: ~14 m/s at 30 m, the lines' height).
+# 3072 x 1536 x 768 m on 16 m cells (192 x 96 x 48), Deardorff TKE LES, anelastic MidPoint with the
+# implicit vertical solve, FFT Poisson. 7200 s of spin-up (about 9 eddy turnovers H/u*), then
+# boundary planes every 1.5 s from 7190 s to 9000 s for the plane-driven structures run.
+erf.prob_name = "ABL"      # enables the prob.* perturbations below
+max_step  = 30000
+stop_time = 9000.0
+erf.fixed_dt = 0.3          # ~22 m/s at the top on 16 m cells: Courant ~0.4 mean, ~0.55 in gusts
+
+geometry.prob_extent = 3072. 1536. 768.
+amr.n_cell           = 192   96   48
+amr.max_level        = 0
+amr.max_grid_size    = 32
+amr.blocking_factor  = 4
+geometry.is_periodic = 1 1 0
+zlo.type       = "surface_layer"
+erf.most.z0    = 0.1        # open country with scattered trees
+zhi.type       = "SlipWall"
+
+erf.anelastic      = 1
+erf.anelastic_type = MidPoint
+erf.vert_implicit  = true
+erf.use_fft        = true
+erf.init_type           = "input_sounding"
+erf.input_sounding_file = "input_sounding"   # neutral 300 K, log law u* = 1, z0 = 0.1; surface pressure hPa
+erf.sounding_type       = "Ideal"
+erf.use_gravity  = true
+erf.use_coriolis = false
+erf.abl_driver_type   = "PressureGradient"
+erf.abl_pressure_grad = -1.51e-3 0.0 0.0     # dp/dx = -rho u*^2 / H (rho 1.16, u* 1.0, H 768 m)
+
+erf.dycore_horiz_adv_type  = "Blended_5th6th"
+erf.dycore_horiz_upw_frac  = 0.2
+erf.dycore_vert_adv_type   = "Blended_3rd4th"
+erf.dycore_vert_upw_frac   = 0.2
+erf.dryscal_horiz_adv_type = "Blended_5th6th"
+erf.dryscal_horiz_upw_frac = 0.2
+erf.dryscal_vert_adv_type  = "Blended_3rd4th"
+erf.dryscal_vert_upw_frac  = 0.2
+erf.molec_diff_type = "None"
+erf.les_type        = "Deardorff"
+erf.rans_type       = "None"
+erf.theta_ref       = 300.0
+
+# structures: divergence-free streaks + random u/v + small theta noise below 100 m, SGS KE seed
+prob.pert_ref_height = 100.0
+prob.pert_deltaU     = 2.0
+prob.pert_deltaV     = 2.0
+prob.pert_periods_U  = 6.0     # spanwise wavelength 256 m
+prob.pert_periods_V  = 6.0     # streamwise wavelength 512 m
+prob.U_0_Pert_Mag    = 2.0
+prob.V_0_Pert_Mag    = 2.0
+prob.W_0_Pert_Mag    = 0.0
+prob.T_0_Pert_Mag    = 0.1
+prob.KE_0            = 1.0
+prob.KE_decay_height = 300.0
+erf.fix_random_seed  = 1
+amrex.fpe_trap_invalid = 0
+erf.v = 1
+erf.sum_interval = 200
+erf.data_log     = surf_hist.dat mean_profiles.dat
+erf.profile_int  = 200         # every 60 s
+
+erf.check_file  = chk
+erf.check_int   = 4000         # every 1200 s
+erf.plot_file_1 = plt
+erf.plot_int_1  = 4000
+erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta KE
+
+erf.output_bndry_planes      = 1
+erf.bndry_output_planes_per  = 1.5
+erf.bndry_output_start_time  = 7190.0
+erf.bndry_output_planes_file = "BndryFiles"
+erf.bndry_output_var_names   = density velocity temperature ke
+erf.bndry_output_box_lo      = 0.    0.
+erf.bndry_output_box_hi      = 3072. 1536.

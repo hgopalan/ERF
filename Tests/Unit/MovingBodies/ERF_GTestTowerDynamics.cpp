@@ -7,7 +7,8 @@
 // drives it by the shape, the hand value of the midpoint sum of p (z/H)^2; the foundation takes the
 // loads less the nodes' inertia, so swaying freely its base shear is omega^2 q sum m phi; swaying
 // in a steady wind, the drag on the members relative to their own velocity damps it by
-// sum phi^2 rho Cf w L U / (2 M omega) more; and its state restores the same motion.
+// sum phi^2 rho Cf w L U / (2 M omega) more; its state restores the same motion; and a line on
+// the peak moves, and pulls, by the shape at its height.
 
 #include <array>
 #include <cmath>
@@ -259,4 +260,28 @@ TEST(OneModeTower, ItsStateRestoresTheSameMotion)
     for (int s = 0; s < 5; ++s) { a.step(Real(0.05), no_load(tw), F); b.step(Real(0.05), no_load(tw), F); }
     for (int d = 0; d < 2; ++d) { EXPECT_EQ(a.q()[d], b.q()[d]); EXPECT_EQ(a.v()[d], b.v()[d]); }
     for (std::size_t i = 0; i < tw.nodes().size(); ++i) { EXPECT_EQ(a.inertial_force(i)[0], b.inertial_force(i)[0]); }
+}
+
+TEST(OneModeTower, ALineOnThePeakMovesAndPullsByTheShapeThere)
+{
+    TowerType t = swaying();
+    t.peak = 8.0;
+    Tower tw = standing(t);
+    // a phase at the cross-arm (phi = 1) and a shield wire 7 m above it on the peak
+    tw.add_attachment(P3{{500.0, 500.0, 50.0}});
+    tw.add_attachment(P3{{500.0, 500.0, 57.0}});
+    OneModeTower m(tw, Real(g));
+    ASSERT_EQ(m.num_attachments(), 2u);
+    const double z = 37.0 / 30.0;
+    EXPECT_NEAR(m.attachment_shape(0), 1.0, 1.0e-14);
+    EXPECT_NEAR(m.attachment_shape(1), z * z, 1.0e-12) << "the bending shape on the peak";
+    // held loads at both: the generalized force weights each by its shape
+    const std::vector<P3> F{{{Real(1000.0), 0.0, 0.0}}, {{Real(400.0), 0.0, 0.0}}};
+    m.step(Real(1000.0), no_load(tw), F);
+    EXPECT_NEAR(m.q()[0] * m.stiffness() / (1000.0 + z * z * 400.0), 1.0, tol);
+    EXPECT_NEAR(m.attachment_displacement(1)[0] / m.attachment_displacement(0)[0], z * z, tol);
+    // a tower with no attachment takes its line at the cross-arm
+    OneModeTower bare(standing(t), Real(g));
+    EXPECT_EQ(bare.num_attachments(), 1u);
+    EXPECT_NEAR(bare.attachment_shape(0), 1.0, 1.0e-14);
 }

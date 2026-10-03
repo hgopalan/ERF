@@ -71,7 +71,23 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
             pos.insert(pos.end(), {e[0], e[1], e[2]});
         }
     }
-    erf_actuator::terrain_heights(z_phys_nd, geom, pos, m_ground);
+    ground_heights(z_phys_nd, geom, pos, m_ground);
+    // a line hanging from another line's towers stands its points on those towers: their heights
+    // are above the tower's base, so that a cross-arm on sloping ground stays level
+    {
+        std::vector<std::size_t> first(m_in.spans.size() + 1, 0);
+        for (std::size_t i = 0; i < m_in.spans.size(); ++i) { first[i+1] = first[i] + static_cast<std::size_t>(m_in.spans[i].num_spans() + 1); }
+        for (std::size_t i = 0; i < m_in.spans.size(); ++i) {
+            const SpanInputs& s = m_in.spans[i];
+            if (s.share_towers.empty()) { continue; }
+            std::size_t owner = 0;
+            while (m_in.spans[owner].name != s.share_towers) { ++owner; }
+            for (int k = 1; k < s.num_spans(); ++k) {
+                const auto kk = static_cast<std::size_t>(k);
+                m_ground[first[i] + kk] = m_ground[first[owner] + kk];
+            }
+        }
+    }
     const Real floor_z = static_cast<Real>(geom.ProbLo(2));
     m_placed = m_in.spans;
     std::size_t ip = 0;
@@ -196,41 +212,81 @@ void
 Conductors::build_towers ()
 {
     m_towers.clear();
-    m_tower_of.clear();
-    m_first_tower.clear();
+    m_tower_lines.clear();
+    m_line_towers.assign(m_placed.size(), {});
     m_models.clear();
     m_aero = std::make_unique<erf_towers::MemberDrag>(m_in.air_density);
-    std::size_t ip = 0;
+    std::vector<std::size_t> first(m_placed.size() + 1, 0);
+    for (std::size_t i = 0; i < m_placed.size(); ++i) { first[i+1] = first[i] + static_cast<std::size_t>(m_placed[i].num_spans() + 1); }
+    // the towers of the lines with a tower_type, each line hanging from its own at the centre of the cross-arm
     for (std::size_t line = 0; line < m_placed.size(); ++line) {
         const SpanInputs& s = m_placed[line];
-        const int npoints = s.num_spans() + 1;
-        m_first_tower.push_back(m_towers.size());
-        if (!s.tower_type.empty()) {
-            const erf_towers::TowerType* type = nullptr;
-            for (const auto& t : m_in.tower_types) { if (t.name == s.tower_type) { type = &t; } }
-            AMREX_ALWAYS_ASSERT(type != nullptr);   // checked when the inputs were read
-            for (int k = 1; k < s.num_spans(); ++k) {
-                // the cross-arm runs across the line: normal to the mean horizontal direction of the spans either side
-                const auto& a = s.point(k - 1);
-                const auto& p = s.point(k);
-                const auto& b = s.point(k + 1);
-                Real back[2] = {p[0] - a[0], p[1] - a[1]}, ahead[2] = {b[0] - p[0], b[1] - p[1]};
-                const Real nback = std::hypot(back[0], back[1]), nahead = std::hypot(ahead[0], ahead[1]);
-                Real along[2] = {back[0] / nback + ahead[0] / nahead, back[1] / nback + ahead[1] / nahead};
-                const Real na = std::hypot(along[0], along[1]);
-                if (!(na > Real(1.0e-6))) {
-                    Abort("erf.conductors." + s.name + ": the line turns back on itself at tower " + std::to_string(k) +
-                          "; a cross-arm across it is undefined");
+        if (s.tower_type.empty()) { continue; }
+        const erf_towers::TowerType* type = m_in.tower_type(s);
+        AMREX_ALWAYS_ASSERT(type != nullptr);   // checked when the inputs were read
+        for (int k = 1; k < s.num_spans(); ++k) {
+            // the cross-arm runs across the line: normal to the mean horizontal direction of the spans either side
+            const auto& a = s.point(k - 1);
+            const auto& p = s.point(k);
+            const auto& b = s.point(k + 1);
+            Real back[2] = {p[0] - a[0], p[1] - a[1]}, ahead[2] = {b[0] - p[0], b[1] - p[1]};
+            const Real nback = std::hypot(back[0], back[1]), nahead = std::hypot(ahead[0], ahead[1]);
+            Real along[2] = {back[0] / nback + ahead[0] / nahead, back[1] / nback + ahead[1] / nahead};
+            const Real na = std::hypot(along[0], along[1]);
+            if (!(na > Real(1.0e-6))) {
+                Abort("erf.conductors." + s.name + ": the line turns back on itself at tower " + std::to_string(k) +
+                      "; a cross-arm across it is undefined");
+            }
+            const std::array<Real,3> across{{-along[1] / na, along[0] / na, 0.0}};
+            const Real ground = m_ground[first[line] + static_cast<std::size_t>(k)];
+            m_towers.emplace_back(s.name + "_t" + std::to_string(k), *type, std::array<Real,3>{{p[0], p[1], ground}},
+                                  p[2] - ground, across);
+            const std::size_t att = m_towers.back().add_attachment(p);
+            m_tower_lines.push_back({{line, k - 1}});
+            m_line_towers[line].emplace_back(m_towers.size() - 1, att);
+        }
+    }
+    // the lines hanging from another line's towers, each at its own point on them
+    for (std::size_t line = 0; line < m_placed.size(); ++line) {
+        const SpanInputs& s = m_placed[line];
+        if (s.share_towers.empty()) { continue; }
+        std::size_t owner = 0;
+        while (m_placed[owner].name != s.share_towers) { ++owner; }
+        for (int k = 1; k < s.num_spans(); ++k) {
+            const std::size_t t = m_line_towers[owner][static_cast<std::size_t>(k - 1)].first;
+            erf_towers::Tower& tw = m_towers[t];
+            const auto& p = s.point(k);
+            const Real off = std::hypot(p[0] - tw.base()[0], p[1] - tw.base()[1]);
+            const Real top = tw.arm_height() + tw.type().peak;
+            const Real slack = Real(1.0) + Real(1.0e-6);
+            if (off > Real(0.5) * tw.type().arm_length * slack || p[2] < tw.base()[2] || p[2] > tw.base()[2] + top * slack) {
+                Abort("erf.conductors." + s.name + ": its point on tower " + tw.name() + " lies " + std::to_string(off) + " m from the tower's axis and " +
+                      std::to_string(p[2] - tw.base()[2]) + " m above its base, off the tower (half the cross-arm " +
+                      std::to_string(Real(0.5) * tw.type().arm_length) + " m, the top " + std::to_string(top) + " m)");
+            }
+            const std::size_t att = tw.add_attachment(p);
+            m_tower_lines[t].emplace_back(line, k - 1);
+            m_line_towers[line].emplace_back(t, att);
+        }
+    }
+    // the structural models once every line hangs from its towers
+    for (const auto& tw : m_towers) {
+        m_models.push_back(tw.type().moves() ? std::make_unique<erf_towers::OneModeTower>(tw, CONST_GRAV) : nullptr);
+    }
+    // the lines that step together: those joined by the towers they share
+    m_groups.clear();
+    std::vector<int> group(m_placed.size(), -1);
+    for (std::size_t line = 0; line < m_placed.size(); ++line) {
+        if (group[line] >= 0) { continue; }
+        group[line] = static_cast<int>(m_groups.size());
+        m_groups.push_back({line});
+        for (std::size_t g = 0; g < m_groups.back().size(); ++g) {
+            for (const auto& ta : m_line_towers[m_groups.back()[g]]) {
+                for (const auto& lj : m_tower_lines[ta.first]) {
+                    if (group[lj.first] < 0) { group[lj.first] = group[line]; m_groups.back().push_back(lj.first); }
                 }
-                const std::array<Real,3> across{{-along[1] / na, along[0] / na, 0.0}};
-                const Real ground = m_ground[ip + static_cast<std::size_t>(k)];
-                m_towers.emplace_back(s.name + "_t" + std::to_string(k), *type, std::array<Real,3>{{p[0], p[1], ground}},
-                                      p[2] - ground, across);
-                m_tower_of.emplace_back(line, k - 1);
-                m_models.push_back(type->moves() ? std::make_unique<erf_towers::OneModeTower>(m_towers.back(), CONST_GRAV) : nullptr);
             }
         }
-        ip += static_cast<std::size_t>(npoints);
     }
 }
 
@@ -305,57 +361,139 @@ Conductors::move_tower (std::size_t t)
 }
 
 void
-Conductors::step_moving_line (std::size_t line, double time, double dt)
+Conductors::step_moving_group (const std::vector<std::size_t>& lines, double time, double dt)
 {
-    ConductorSpan& span = *m_spans[line];
-    const SpanInputs& s = m_placed[line];
-    const std::size_t first = m_first_tower[line], nt = s.towers.size();
-    // enough coupling steps for the fastest tower to take coupling_steps_per_period over its period
-    double fmax = 0.0;
-    for (std::size_t t = first; t < first + nt; ++t) { fmax = std::max(fmax, static_cast<double>(m_models[t]->frequency())); }
-    const int n = std::max(m_in.substeps, static_cast<int>(std::ceil(dt * fmax * coupling_steps_per_period - 1.0e-9)));
-    const double h = dt / n;
-    std::vector<Real> start(3 * nt), velocity(3 * nt);
-    for (int k = 0; k < n; ++k) {
-        for (std::size_t j = 0; j < nt; ++j) {
-            const std::size_t t = first + j;
-            erf_towers::TowerModel& m = *m_models[t];
-            const auto x0 = m.attachment_displacement();
-            // the members' drag in the wind held for the step at the nodes' velocities, and the lines'
-            // pull from the end of MoorDyn's last call, held over the coupling step
-            drag_on_tower(t);
-            m.step(static_cast<Real>(h), m_towers[t].loads(), m_towers[t].line_force());
-            move_tower(t);
-            const auto x1 = m.attachment_displacement();
-            for (int d = 0; d < 3; ++d) {
-                start[3*j+d] = x0[d];
-                velocity[3*j+d] = static_cast<Real>((x1[d] - x0[d]) / h);
-            }
-        }
-        // MoorDyn moves the cross-arms from where they were to where the towers have taken them
-        span.step_coupled(time + k * h, h, start, velocity);
-        for (std::size_t j = 0; j < nt; ++j) {
-            const std::size_t t = first + j;
-            auto at = s.point(static_cast<int>(j) + 1);
-            const auto x = m_models[t]->attachment_displacement();
-            for (int d = 0; d < 3; ++d) { at[d] += x[d]; }
-            m_towers[t].set_line_load(span.tower_force(static_cast<int>(j)), at);
+    // the towers the group's lines hang from
+    std::vector<std::size_t> towers;
+    for (const std::size_t line : lines) {
+        for (const auto& ta : m_line_towers[line]) {
+            if (std::find(towers.begin(), towers.end(), ta.first) == towers.end()) { towers.push_back(ta.first); }
         }
     }
-    span.check_clock(time + dt);
+    // enough coupling steps for the fastest tower to take coupling_steps_per_period over its period
+    double fmax = 0.0;
+    for (const std::size_t t : towers) { fmax = std::max(fmax, static_cast<double>(m_models[t]->frequency())); }
+    const int n = std::max(m_in.substeps, static_cast<int>(std::ceil(dt * fmax * coupling_steps_per_period - 1.0e-9)));
+    const double h = dt / n;
+    // the interface: every line's pull on every attachment of the group's towers, in one vector
+    std::vector<std::size_t> first(towers.size() + 1, 0);
+    for (std::size_t i = 0; i < towers.size(); ++i) { first[i+1] = first[i] + 3 * m_tower_lines[towers[i]].size(); }
+    auto pulls = [&] () {
+        std::vector<double> F(first.back());
+        for (std::size_t i = 0; i < towers.size(); ++i) {
+            const auto& tl = m_tower_lines[towers[i]];
+            for (std::size_t a = 0; a < tl.size(); ++a) {
+                const auto f = m_spans[tl[a].first]->tower_force(tl[a].second);
+                for (int d = 0; d < 3; ++d) { F[first[i] + 3*a + static_cast<std::size_t>(d)] = static_cast<double>(f[d]); }
+            }
+        }
+        return F;
+    };
+    for (int k = 0; k < n; ++k) {
+        // the state at the start of the coupling step, to which each iteration returns
+        std::vector<ConductorSpan::State> line_state;
+        for (const std::size_t line : lines) { line_state.push_back(m_spans[line]->state()); }
+        std::vector<std::vector<double>> tower_state;
+        std::vector<std::vector<std::array<Real,3>>> x0;
+        for (const std::size_t t : towers) {
+            tower_state.push_back(m_models[t]->state());
+            std::vector<std::array<Real,3>> x(m_models[t]->num_attachments());
+            for (std::size_t a = 0; a < x.size(); ++a) { x[a] = m_models[t]->attachment_displacement(a); }
+            x0.push_back(x);
+        }
+        const std::vector<double> F0 = pulls();
+        double scale = 1.0;
+        for (const double f : F0) { scale = std::max(scale, std::abs(f)); }
+        // the towers advance under the mean of the pulls at the start and the end of the coupling step,
+        // and MoorDyn moves the lines' points to where the towers have taken them; the end pulls are
+        // found by fixed-point iteration with Aitken's relaxation, so that a stiff span (a short, taut
+        // one) cannot drive the exchange unstable
+        std::vector<double> F = F0, r_prev;
+        double omega = coupling_initial_relaxation;
+        int it = 0;
+        bool converged = false;
+        for (; it < coupling_max_iterations; ++it) {
+            for (std::size_t i = 0; i < towers.size(); ++i) {
+                const std::size_t t = towers[i];
+                if (it > 0) { m_models[t]->set_state(tower_state[i]); move_tower(t); }
+                // the members' drag in the wind held for the step at the nodes' velocities at its start
+                drag_on_tower(t);
+                std::vector<std::array<Real,3>> mean(m_tower_lines[t].size());
+                for (std::size_t a = 0; a < mean.size(); ++a) {
+                    for (int d = 0; d < 3; ++d) {
+                        const std::size_t c = first[i] + 3*a + static_cast<std::size_t>(d);
+                        mean[a][d] = static_cast<Real>(0.5 * (F0[c] + F[c]));
+                    }
+                }
+                m_models[t]->step(static_cast<Real>(h), m_towers[t].loads(), mean);
+                move_tower(t);
+            }
+            for (std::size_t m = 0; m < lines.size(); ++m) {
+                const std::size_t line = lines[m];
+                if (it > 0) { m_spans[line]->set_state(line_state[m]); }
+                const std::size_t nt = m_line_towers[line].size();
+                std::vector<Real> start(3 * nt), velocity(3 * nt);
+                for (std::size_t j = 0; j < nt; ++j) {
+                    const auto [t, att] = m_line_towers[line][j];
+                    const std::size_t i = static_cast<std::size_t>(std::find(towers.begin(), towers.end(), t) - towers.begin());
+                    const auto x1 = m_models[t]->attachment_displacement(att);
+                    for (int d = 0; d < 3; ++d) {
+                        start[3*j+d] = x0[i][att][d];
+                        velocity[3*j+d] = static_cast<Real>((x1[d] - x0[i][att][d]) / h);
+                    }
+                }
+                m_spans[line]->step_coupled(time + k * h, h, start, velocity);
+            }
+            const std::vector<double> Fn = pulls();
+            std::vector<double> r(F.size());
+            double rmax = 0.0;
+            for (std::size_t c = 0; c < F.size(); ++c) { r[c] = Fn[c] - F[c]; rmax = std::max(rmax, std::abs(r[c])); }
+            if (rmax <= coupling_tolerance * scale) { converged = true; ++it; break; }
+            if (!r_prev.empty()) {
+                double num = 0.0, den = 0.0;
+                for (std::size_t c = 0; c < r.size(); ++c) { num += r_prev[c] * (r[c] - r_prev[c]); den += (r[c] - r_prev[c]) * (r[c] - r_prev[c]); }
+                if (den > 0.0) { omega = std::clamp(-omega * num / den, 0.01, 1.0); }
+            }
+            for (std::size_t c = 0; c < F.size(); ++c) { F[c] += omega * r[c]; }
+            r_prev = r;
+        }
+        m_coupling_iterations = std::max(m_coupling_iterations, it);
+        if (!converged) {
+            ++m_coupling_unconverged;
+            if (!m_coupling_warned) {
+                m_coupling_warned = true;
+                Print() << "erf.conductors: the coupling of " << m_spans[lines.front()]->name() << " and its towers did not converge in "
+                        << coupling_max_iterations << " iterations at t = " << time + k * h << " s; it goes on with the last iterate"
+                        << " (each step's count is in coupling.dat)\n";
+            }
+        }
+        for (const std::size_t t : towers) { load_tower_with_lines(t); }
+    }
+    for (const std::size_t line : lines) { m_spans[line]->check_clock(time + dt); }
 }
 
 void
 Conductors::load_towers_with_lines ()
 {
-    for (std::size_t t = 0; t < m_towers.size(); ++t) {
-        const auto [line, j] = m_tower_of[t];
-        // where the line hangs from the cross-arm, which a moving tower has displaced
-        auto at = m_placed[line].point(j + 1);
-        const auto x = m_towers[t].arm_displacement();
-        for (int d = 0; d < 3; ++d) { at[d] += x[d]; }
-        m_towers[t].set_line_load(m_spans[line]->tower_force(j), at);
+    for (std::size_t t = 0; t < m_towers.size(); ++t) { load_tower_with_lines(t); }
+}
+
+void
+Conductors::load_tower_with_lines (std::size_t t)
+{
+    // each line where it hangs from the tower, which a moving tower has displaced
+    const auto& lines = m_tower_lines[t];
+    std::vector<std::array<Real,3>> force(lines.size()), at(lines.size());
+    for (std::size_t a = 0; a < lines.size(); ++a) {
+        const auto [line, j] = lines[a];
+        force[a] = m_spans[line]->tower_force(j);
+        at[a] = m_towers[t].attachments()[a];
+        if (m_models[t]) {
+            const auto x = m_models[t]->attachment_displacement(a);
+            for (int d = 0; d < 3; ++d) { at[a][d] += x[d]; }
+        }
     }
+    m_towers[t].set_line_loads(force, at);
 }
 
 void
@@ -404,7 +542,7 @@ Conductors::place_transformers (const MultiFab* z_phys_nd, const Geometry& geom)
         pos.insert(pos.end(), {t.position[0], t.position[1], Real(0.0)});
     }
     std::vector<Real> h;
-    erf_actuator::terrain_heights(z_phys_nd, geom, pos, h);
+    ground_heights(z_phys_nd, geom, pos, h);
     m_transformers.clear();
     for (std::size_t t = 0; t < m_in.transformers.size(); ++t) { m_transformers.emplace_back(m_in.transformers[t], h[t]); }
     return erf_conductors::attach_line_ends(m_transformers, m_placed);
@@ -552,6 +690,7 @@ Conductors::log_files () const
     f.push_back(m_in.diagnostics_dir + "/total_load.dat");
     f.push_back(m_in.diagnostics_dir + "/separation.dat");
     f.push_back(m_in.diagnostics_dir + "/transformers.dat");
+    f.push_back(m_in.diagnostics_dir + "/coupling.dat");
     return f;
 }
 
@@ -630,7 +769,8 @@ Conductors::restore (const std::string& dir)
         std::vector<Real> moved;
         if (m_in.towers_move(s)) {
             for (std::size_t j = 0; j < s.towers.size(); ++j) {
-                const auto x = m_towers[m_first_tower[i] + j].arm_displacement();
+                const auto [t, att] = m_line_towers[i][j];
+                const auto x = m_models[t]->attachment_displacement(att);
                 moved.insert(moved.end(), {x[0], x[1], x[2]});
             }
         }
@@ -755,13 +895,45 @@ Conductors::check_nodes_in_domain (const ConductorSpan& span, const std::vector<
 }
 
 void
+Conductors::set_ground_surface (const FArrayBox& surface, const Geometry& geom)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_ground_set, "Conductors::set_ground_surface: call before set_ground");
+    m_surface = std::make_unique<FArrayBox>(surface.box(), 1, The_Pinned_Arena());
+    m_surface->template copy<RunOn::Host>(surface, 0, 0, 1);
+    m_surface_geom = geom;
+}
+
+void
+Conductors::ground_heights (const MultiFab* z_phys_nd, const Geometry& geom, const std::vector<Real>& pos, std::vector<Real>& h) const
+{
+    if (!m_surface) {
+        erf_actuator::terrain_heights(z_phys_nd, geom, pos, h);
+        return;
+    }
+    // bilinear between the surface's nodes, the cell's four corners, as on a fitted mesh's bottom
+    const Box& b = m_surface->box();
+    const int k = b.smallEnd(2);
+    const auto plo = m_surface_geom.ProbLoArray();
+    const auto dxi = m_surface_geom.InvCellSizeArray();
+    const auto s = m_surface->const_array();
+    h.resize(pos.size() / 3);
+    for (std::size_t p = 0; p < h.size(); ++p) {
+        const Real xi = (pos[3*p] - plo[0]) * dxi[0], yi = (pos[3*p+1] - plo[1]) * dxi[1];
+        const int i = std::clamp(static_cast<int>(std::floor(xi)), b.smallEnd(0), b.bigEnd(0) - 1);
+        const int j = std::clamp(static_cast<int>(std::floor(yi)), b.smallEnd(1), b.bigEnd(1) - 1);
+        const Real wx = xi - static_cast<Real>(i), wy = yi - static_cast<Real>(j);
+        h[p] = (Real(1.0) - wy) * ((Real(1.0) - wx) * s(i, j, k) + wx * s(i+1, j, k)) + wy * ((Real(1.0) - wx) * s(i, j+1, k) + wx * s(i+1, j+1, k));
+    }
+}
+
+void
 Conductors::update_ground_under_nodes (const MultiFab* z_phys_nd, const Geometry& geom)
 {
     for (auto& span : m_spans) {
         const std::vector<Real> pos = span->node_positions();
         check_nodes_in_domain(*span, pos, geom);
         std::vector<Real> h;
-        erf_actuator::terrain_heights(z_phys_nd, geom, pos, h);
+        ground_heights(z_phys_nd, geom, pos, h);
         span->set_ground_under_nodes(h);
     }
 }
@@ -844,9 +1016,27 @@ Conductors::advance (int lev, double time, double dt,
             span.write_diagnostics(time, true);
             if (m_in.node_output_int > 0) { span.write_nodes(time, true); }
         }
-        if (span.towers_move()) { step_moving_line(line, time, dt); } else { span.step(time, dt); }
+    }
+    // the lines on towers that move step with their towers, those sharing towers together
+    m_coupling_iterations = 0;
+    m_coupling_unconverged = 0;
+    for (const auto& g : m_groups) {
+        if (m_spans[g.front()]->towers_move()) {
+            step_moving_group(g, time, dt);
+        } else {
+            for (const std::size_t line : g) { m_spans[line]->step(time, dt); }
+        }
     }
     m_time = time + dt;
+    if (std::any_of(m_models.begin(), m_models.end(), [] (const auto& m) { return m != nullptr; }) &&
+        m_step % m_in.diagnostics_int == 0 && ParallelDescriptor::IOProcessor()) {
+        // how hard the lines and their moving towers worked to agree over the step
+        std::ofstream out;
+        if (erf_actuator::open_log(out, m_in.diagnostics_dir + "/coupling.dat", m_step == m_in.diagnostics_int && !m_restored)) {
+            out << "time max_iterations unconverged\n";
+        }
+        out << std::setprecision(10) << time + dt << " " << m_coupling_iterations << " " << m_coupling_unconverged << "\n";
+    }
     // where the lines are now: their clearance to the terrain, then the outputs and statistics
     update_ground_under_nodes(z_phys_nd, geom);
     // the air's drag on the lines and on the towers' members

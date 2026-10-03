@@ -831,6 +831,21 @@ restart parity tests ``Conductors_MovingTowers_Restart`` and
 the checkpoint. The flow is ``Conductors_Terrain``'s gold, since nothing
 goes back into it.
 
+``Conductors_ImmersedHills`` (stub) and ``Conductors_ImmersedHills_MoorDyn``
+(real library) put the same hills on a flat mesh as an immersed boundary
+(``ImmersedForcing``, the wall law on the hill surface) under a log-law inflow
+with Deardorff LES, and one circuit over them: three phases on strings across
+the cross-arms and a shield wire clamped to the peaks of two shared lattice
+towers that bend. Everything stands on the hills' surface, read from the terrain
+file, since the mesh's bottom is flat. ``conductors/towers.dat`` with the shared
+towers' loads and sway, ``conductors/transformers.dat`` and the middle phase's
+middle span are compared with golds of each library (the real library's to four
+digits); the restart parity tests ``Conductors_ImmersedHills_Restart`` and
+``Conductors_ImmersedHills_Restart_MoorDyn`` carry the four lines and their
+shared towers across the checkpoint. The flow has its own gold, shared by both
+libraries. The shield wire's first span, 40 m from the hilltop dead end, is
+short and taut: the case runs only because each coupling step is iterated.
+
 The golds of the real library come from another machine than the one that
 runs them, so ``RunConductors.cmake`` counts a logged value below 1e-4 as
 zero: a quantity zero by symmetry, such as the drag along a span set square
@@ -843,7 +858,8 @@ runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with
 
 Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files/Conductors_FlowWind`_,
 `Tests/test_files/Conductors_DragOnFlow`_, `Tests/test_files/Conductors_Circuit`_,
-`Tests/test_files/Conductors_Terrain`_, `Tests/test_files/Conductors_MovingTowers`_
+`Tests/test_files/Conductors_Terrain`_, `Tests/test_files/Conductors_MovingTowers`_,
+`Tests/test_files/Conductors_ImmersedHills`_
 
 .. _`Tests/test_files/Conductors_PrescribedWind`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_PrescribedWind
 
@@ -856,3 +872,5 @@ Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files
 .. _`Tests/test_files/Conductors_Terrain`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_Terrain
 
 .. _`Tests/test_files/Conductors_MovingTowers`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_MovingTowers
+
+.. _`Tests/test_files/Conductors_ImmersedHills`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_ImmersedHills

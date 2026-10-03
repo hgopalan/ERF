@@ -2,6 +2,7 @@
 #define ERF_MOORDYN_SYSTEM_H
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -117,6 +118,9 @@ public:
     void save (const std::string& path);
     /** Restore a state written by save() into a system created from the same input and initialised without an IC solve. */
     void load (const std::string& path);
+    /** The whole system state in memory (MoorDyn_Serialize) and its restoration (MoorDyn_Deserialize), to redo a step. */
+    std::vector<std::uint64_t> serialize () const;
+    void deserialize (const std::vector<std::uint64_t>& data);
 
 private:
     MoorDynSystem (MoorDyn sys, std::string file);

@@ -2449,6 +2449,26 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
       DATALOG "conductors/L1_span2.dat conductors/towers.dat conductors/tower_L1_t1_stats.csv"
       DATALOG_SIGDIGITS 10)
   set_tests_properties(${_moving_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
+  # A circuit over hills that are an immersed boundary on a flat mesh: three phases and a shield wire
+  # hang from two shared lattice towers that bend, standing on the hills' surface read from the
+  # terrain file (the mesh's bottom is flat). The towers' loads and sway, the middle phase's middle
+  # span and the transformers' loads must match their golds; the flow has its own gold, shared by
+  # both libraries, since nothing goes back into it. The restart parity carries the shared towers'
+  # sway and every line hanging from them across the checkpoint.
+  set(_ib_logs "conductors/towers.dat conductors/transformers.dat")
+  if(ERF_MOORDYN_USE_STUB)
+    add_test_conductors(Conductors_ImmersedHills Conductors_ImmersedHills "plt00010" "conductors/L1b_span2.dat"
+                        "L1b_span2.dat.gold" 8 Conductors_ImmersedHills EXTRA_LOGS "${_ib_logs}" GOLD_SUFFIX ".gold")
+    set(_ib_restart Conductors_ImmersedHills_Restart)
+  else()
+    add_test_conductors(Conductors_ImmersedHills_MoorDyn Conductors_ImmersedHills "plt00010" "conductors/L1b_span2.dat"
+                        "L1b_span2.dat.moordyn.gold" 4 Conductors_ImmersedHills EXTRA_LOGS "${_ib_logs}" GOLD_SUFFIX ".moordyn.gold")
+    set(_ib_restart Conductors_ImmersedHills_Restart_MoorDyn)
+  endif()
+  add_test_restart_parity(${_ib_restart} Conductors_ImmersedHills 5 10
+      DATALOG "conductors/L1b_span2.dat conductors/L1a_span2.dat conductors/L1sw_span2.dat conductors/towers.dat conductors/transformers.dat"
+      DATALOG_SIGDIGITS 10)
+  set_tests_properties(${_ib_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # Restart parity of the coupled case: ten steps straight, and five steps, a checkpoint and five
   # more from it. The plotfile (the flow and the lines' momentum source) and the span's logs, node
   # output, statistics and total load must come out the same; a line restarted from rest, or

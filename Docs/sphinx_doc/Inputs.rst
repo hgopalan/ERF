@@ -5026,6 +5026,13 @@ type has a ``frequency``.
 |                                                           | the line, on four footings (towers.dat); none: the       |                      |                          |
 |                                                           | towers are points                                        |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<name>.share_towers**                    | the line hangs from the towers of this line (which has   | a line of            | none: its own towers     |
+|                                                           | the tower_type), each at its own towers point on them: a | erf.conductors.spans |                          |
+|                                                           | circuit's phases across the cross-arm and its shield     | with a tower_type    |                          |
+|                                                           | wire on the peak; the points stand above the tower's     | and as many towers;  |                          |
+|                                                           | base                                                     | no tower_type of its |                          |
+|                                                           |                                                          | own                  |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<name>.output_root**                     | prefix of the line's diagnostics files:                  | String               | <diagnostics_dir>/<name> |
 |                                                           | <output_root>.dat for a single span,                     |                      |                          |
 |                                                           | <output_root>_span<k>.dat per span of a section,         |                      |                          |
