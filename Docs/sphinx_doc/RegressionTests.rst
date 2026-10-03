@@ -833,8 +833,9 @@ goes back into it.
 
 ``Conductors_ImmersedHills`` (stub) and ``Conductors_ImmersedHills_MoorDyn``
 (real library) put the same hills on a flat mesh as an immersed boundary
-(``ImmersedForcing``, the wall law on the hill surface) under a log-law inflow
-with Deardorff LES, and one circuit over them: three phases on strings across
+(``ImmersedForcing``, the wall law on the hill surface, the point-implicit
+forcing on the slow step) under a log-law inflow with Deardorff LES, and one
+circuit over them: three phases on strings across
 the cross-arms and a shield wire clamped to the peaks of two shared lattice
 towers that bend. Everything stands on the hills' surface, read from the terrain
 file, since the mesh's bottom is flat. ``conductors/towers.dat`` with the shared
@@ -842,8 +843,9 @@ towers' loads and sway, ``conductors/transformers.dat`` and the middle phase's
 middle span are compared with golds of each library (the real library's to four
 digits); the restart parity tests ``Conductors_ImmersedHills_Restart`` and
 ``Conductors_ImmersedHills_Restart_MoorDyn`` carry the four lines and their
-shared towers across the checkpoint. The flow has its own gold, shared by both
-libraries. The shield wire's first span, 40 m from the hilltop dead end, is
+shared towers across the checkpoint, and with them the immersed forcing, which
+a restart must apply to the same cells as the run it continues. The flow has its
+own gold, shared by both libraries. The shield wire's first span, 40 m from the hilltop dead end, is
 short and taut: the case runs only because each coupling step is iterated.
 
 The golds of the real library come from another machine than the one that

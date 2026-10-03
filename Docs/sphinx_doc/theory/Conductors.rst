@@ -217,7 +217,12 @@ under every node for the clearance. The wind is sampled at the nodes' absolute
 heights, which on the flat mesh are the mesh's own. Placed on an immersed ramp,
 a section and its towers stand exactly where they stand on the same ramp as a
 fitted mesh. A precursor run on the flat mesh can therefore seed a run over
-immersed hills from its checkpoint.
+immersed hills from its checkpoint. An anelastic run takes no acoustic substeps,
+so its immersed forcing must act on the slow step (``erf.immersed_forcing_substep``
+false, the default for anelastic runs), and the point-implicit form
+(``erf.if_implicit_drag = true``) keeps it stable at the flow's step: explicitly,
+the drag on a solid cell, :math:`C_d |u| / \Delta z`, about 60 s\ :sup:`-1` for 20
+m/s on 16 m cells, is far beyond a 0.3 s step.
 
 Drag on the flow
 ----------------

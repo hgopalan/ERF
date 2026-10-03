@@ -27,8 +27,8 @@ erf.most.z0        = 0.1
 
 erf.terrain_type             = ImmersedForcing
 erf.terrain_file_name        = "terrain_hills.txt"
-erf.immersed_forcing_substep = true
 eb2.small_volfrac            = 0.005
+erf.if_implicit_drag         = true     # point-implicit forcing in the hills: stable at the flow's step
 erf.if_use_most              = true     # the wall law on the hills
 erf.if_z0                    = 0.1
 
