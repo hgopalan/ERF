@@ -3,6 +3,7 @@
 #include "ERF_TowerInputs.H"
 
 #include <cmath>
+#include <utility>
 
 #include "ERF_MemberDrag.H"
 
@@ -37,6 +38,18 @@ std::string TowerType::validate () const
     if (!non_negative(allowable_uplift)) { return key + "allowable_uplift must be finite and >= 0 (N; 0: not checked)"; }
     if (!non_negative(allowable_compression)) { return key + "allowable_compression must be finite and >= 0 (N; 0: not checked)"; }
     if (!non_negative(frequency)) { return key + "frequency must be finite and >= 0 (Hz; 0: the tower stands still)"; }
+    if (!frame_file.empty()) {
+        // the frame model gives the stiffness, the mass and the footings
+        const std::pair<const char*, Real> from_frame[] = {
+            {"frequency", frequency}, {"weight", weight}, {"foundation_rotational_stiffness", foundation_rotational_stiffness},
+            {"foundation_lateral_stiffness", foundation_lateral_stiffness}};
+        for (const auto& kv : from_frame) {
+            if (kv.second != 0.0) {
+                return key + kv.first + " is not given with " + key + "frame_file: the frame model sets the tower's stiffness, "
+                       "mass and footings";
+            }
+        }
+    }
     if (frequency > 0.0 && !(weight > 0.0)) { return key + "frequency needs the tower's weight (N), which sets its mass"; }
     if (!(damping_ratio >= 0.0 && damping_ratio < 1.0)) { return key + "damping_ratio must be in [0, 1) (fraction of critical)"; }
     if (!non_negative(foundation_rotational_stiffness)) {

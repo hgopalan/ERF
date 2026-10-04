@@ -18,6 +18,11 @@ compare ERF's condensed stiffness at the peak joint with SubDyn's.
 | `caseA` | Euler-Bernoulli (FEMMod 1) | 1 | arbitrary (MType 4), spin 0 | 4 legs fixed |
 | `caseB` | Timoshenko (FEMMod 3) | 2 | circular legs (1c), rectangular struts and peak members (1r), arbitrary diagonals spun 30 deg, arbitrary cross-arm | 3 legs fixed; joint 1 free on a 6 x 6 spring (`towerB_SSI_joint1.dat`, with a Kxty coupling) |
 | `caseC` | as `caseB` | 2 | as `caseB`, plus a 400 kg concentrated mass at each arm tip (centre 1.5 m below, offset across, products of inertia) | as `caseB`, the spring with a 6 x 6 mass (with an Mxty coupling) |
+| `caseT` | Euler-Bernoulli (FEMMod 1) | 1 | arbitrary (MType 4) as `caseA`; a 30 m tower, 6 m wide at the base and 1.5 m at the top, 4 panels, a 12 m cross-arm with a centre joint | 4 legs fixed |
+
+Case T is the lattice of the `Conductors_FrameTowers` test (copied there as `lattice_frame.dat`), in
+tower-local axes: origin at the base centre, x along the line, y along the cross-arm, z up. Its
+interface joint is the cross-arm's centre (joint 21), the point the test's lines hang from.
 
 Both cases have one interface joint, the peak (joint 17), locked to the transition piece. The
 driver's reference point is at that joint.
@@ -45,8 +50,9 @@ python3 make_cases.py
 cd caseA && subdyn_driver towerA.dvr && cd ..
 cd caseB && subdyn_driver towerB.dvr && cd ..
 cd caseC && subdyn_driver towerC.dvr && cd ..
+cd caseT && subdyn_driver towerT.dvr && cd ..
 ```
 
 `make_cases.py` rewrites the `.dat`, `.dvr` and SSI files byte for byte. Copy `KBBt` from each
-`.SD.sum.yaml` into `tower<case>_kbbt.txt` (cases A and B), and `Full_frequencies` into
+`.SD.sum.yaml` into `tower<case>_kbbt.txt` (cases A, B and T), and `Full_frequencies` into
 `tower<case>_frequencies.txt`; the `#` header lines of those files are comments.

@@ -13,8 +13,9 @@ precision (``ERF_Frame.H``, ``ERF_FrameDynamics.H``). Its element stiffness and
 mass, local axes, section properties, concentrated masses and gravity loads
 follow OpenFAST's SubDyn module, and it reads SubDyn input files, so that a tower
 described for SubDyn has the same stiffness and natural frequencies in ERF.
-The frame model is a library with unit tests; towers in an ERF run use
-the one-mode tower of :ref:`sec:Conductors` (``erf.conductors.<type>.frequency``).
+A tower type that gives ``erf.conductors.<type>.frame_file`` stands on this frame
+in a run (section "Coupling to the conductor lines"); without it, towers use the
+one-mode tower of :ref:`sec:Conductors` (``erf.conductors.<type>.frequency``).
 
 Conventions
 -----------
@@ -214,6 +215,46 @@ in static equilibrium, or from a given displacement and velocity (the
 acceleration then follows from the equation of motion), and its state (the
 time, displacement, velocity and acceleration) can be saved and restored.
 
+Coupling to the conductor lines
+-------------------------------
+
+This section describes how a tower in a run stands on the frame
+(``ERF_FrameTower.H``), behind the same interface as the one-mode tower.
+
+- Axes: the frame file's coordinates are tower-local, origin at the centre of
+  the tower's base on the terrain, :math:`x` along the line
+  (:math:`(a_y, -a_x, 0)` for the cross-arm direction :math:`\mathbf a`), :math:`y`
+  along the cross-arm, :math:`z` up. Every load and motion is turned between
+  these axes and ERF's.
+- Links: each drag node of the tower (the equivalent lattice that takes the
+  wind, as for any tower) and each line attachment is tied rigidly to its four
+  nearest frame nodes, or to one node it lies on. A force :math:`\mathbf F` at the
+  point :math:`\mathbf p` is shared as
+  :math:`\mathbf F_i = \mathbf F/n + \mathbf w \times \mathbf d_i`, with :math:`\mathbf d_i` the
+  node's offset from the nodes' centroid :math:`\mathbf c`,
+  :math:`\mathbf w = I^+ ((\mathbf p - \mathbf c) \times \mathbf F)`,
+  :math:`I = \sum (|\mathbf d_i|^2 1 - \mathbf d_i \mathbf d_i^T)` and :math:`^+` the
+  pseudo-inverse: the force and its moment are kept. The point moves as the
+  adjoint, :math:`\mathbf u_p = \bar{\mathbf u} + \boldsymbol\theta \times (\mathbf p - \mathbf c)`,
+  :math:`\boldsymbol\theta = I^+ \sum \mathbf d_i \times (\mathbf u_i - \bar{\mathbf u})`, so
+  the links do no work. Every drag node and attachment must lie within the
+  type's ``base_width`` of a frame node, and the frame must stand on four
+  supports at :math:`z = 0`, one per quadrant of the base, which give the four
+  legs.
+- Motion: the frame moves about its static equilibrium under its own weight,
+  so the cross-arm starts where the lines were built. Each coupling step
+  advances it by Newmark's method with the drag and the lines' pull of that
+  step; the coupling resolves its first natural frequency, and Newmark's
+  method integrates the higher modes stably. The type's ``damping_ratio`` sets
+  the Rayleigh damping at the first natural frequency and at ten times it.
+- Footings: the reactions at the four supports are those under the weight
+  plus :math:`K\mathbf u + a_1 K \dot{\mathbf u} + M\ddot{\mathbf u} - \mathbf f` (the
+  mass-proportional damping excluded). Their resultant gives the base shear and
+  the overturning moment, and each support's upward reaction is its leg's
+  compression. Before the first step the footings take the static reactions
+  under the tower's present loads.
+- Restart: the checkpoint holds each frame's Newmark state and its last loads.
+
 Reading SubDyn input files
 --------------------------
 
@@ -280,6 +321,14 @@ This section lists what the unit tests ``DirectionCosines``, ``BeamElement``,
   products of inertia) and a mass on the spring base equal those SubDyn writes
   as ``Full_frequencies``, to its 7 digits; case B's cluster of eight modes within
   0.25 % of each other included.
+- Coupling: a link keeps a force and its moment and does no work; a tower of
+  case T (``Tests/test_files/FrameSubDynTower/caseT``, the frame-towers test
+  case's lattice) turned 30 degrees rings at SubDyn's first frequency
+  (4.219267 Hz, 6800.110 kg), settles under steady drag and a line's pull where
+  the frame's static solution of the linked loads puts it, and its footings
+  carry the applied loads, their moment and the weight, the downwind legs the
+  more compressed; a frame whose cross-arm is far from the lines' attachment is
+  refused.
 - Time response: a cantilever released in its first mode follows
   :math:`\cos(2 n \arctan(\omega h/2))` and keeps its energy to :math:`10^{-11}`; with Rayleigh
   damping the mode follows Newmark's recursion for the damped oscillator of its

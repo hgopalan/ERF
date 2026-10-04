@@ -7,10 +7,11 @@
 // FrameSubDyn.RefusesWhatTheFrameCannotModelNamingIt: cables, rigid links, tapered members,
 //   FEMMod 2, NDiv 0, non-cantilever joints, unknown joints, a missing SSI file, a negative
 //   modulus and a short table are each refused with a message naming the item.
-// FrameSubDyn.TheStiffnessAtThePeakIsSubDyns: for both cases (Euler-Bernoulli with arbitrary
+// FrameSubDyn.TheStiffnessAtThePeakIsSubDyns: for cases A and B (Euler-Bernoulli with arbitrary
 //   sections; Timoshenko with circular, rectangular and spun arbitrary sections, two elements per
-//   member and a coupled spring base) the 6 x 6 stiffness at the peak equals SubDyn's to the 7
-//   digits it prints.
+//   member and a coupled spring base) the 6 x 6 stiffness at the peak, and for case T (the
+//   frame-towers test case's lattice) at the cross-arm's centre, equals SubDyn's to the 7 digits it
+//   prints.
 
 #include <gtest/gtest.h>
 
@@ -171,14 +172,15 @@ TEST(FrameSubDyn, RefusesWhatTheFrameCannotModelNamingIt)
 
 TEST(FrameSubDyn, TheStiffnessAtThePeakIsSubDyns)
 {
-    for (const std::string c : {"A", "B"}) {
+    for (const std::string c : {"A", "B", "T"}) {
         FrameInputs in;
         const std::string err = read_subdyn(case_file(c), in);
         ASSERT_TRUE(err.empty()) << err;
         std::string ferr;
         auto f = Frame::create(in, ferr);
         ASSERT_TRUE(f) << ferr;
-        const auto ours = condensed_stiffness(*f, 17);
+        // the interface joint: the peak of cases A and B, the cross-arm's centre of case T
+        const auto ours = condensed_stiffness(*f, c == "T" ? 21 : 17);
         const auto theirs = subdyn_kbbt(c);
         // each entry to 2e-6 of the geometric mean of its row's and column's diagonal: SubDyn prints 7 digits
         for (std::size_t i = 0; i < 6; ++i) {
