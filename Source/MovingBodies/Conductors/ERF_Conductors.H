@@ -235,6 +235,12 @@ private:
     void write_transformers (double time, bool first) const;
     /** Stand a lattice tower at every suspension point of the lines with a tower_type. */
     void build_towers ();
+    /**
+     * Write <diagnostics_dir>/asce74.csv when erf.conductors.asce74_wind is given: per span its height (the mean of
+     * its two attachment points' heights above the ground under them), chord, unstretched length, and ASCE 74's
+     * quasi-static wind load, swing, sag, blowout and tension under that gust (ERF_ASCE74.H).
+     */
+    void write_asce74 () const;
     /** The towers' statistics, and their members' where they are checked. */
     void add_tower_stats ();
     /** A frame model built once and shared by the towers it fits, with its members' design data (null: none). */

@@ -4,7 +4,8 @@
 # slip walls without diffusion): the wind handed to MoorDyn is ERF's velocity sampled at the line's
 # nodes where they are each step, so it changes as the span swings up and down through the shear.
 # The span's log (mid-span position, sag, offset, swing angle, tensions and the sampled wind) must
-# match its gold; the plotfile is the flow's gold, since nothing is put back into the flow.
+# match its gold, and so must the span's ASCE 74 design check for a 40 m/s gust over suburban terrain
+# (conductors/asce74.csv); the plotfile is the flow's gold, since nothing is put back into the flow.
 
 max_step = 10
 stop_time = 5.0
@@ -49,3 +50,5 @@ erf.conductors.S1.axial_stiffness  = 3.0e7
 erf.conductors.S1.output_root      = S1
 erf.conductors.diagnostics_dir     = conductors
 erf.conductors.air_density         = 1.0
+erf.conductors.asce74_wind         = 40.    # m/s, the 3-second gust at 10 m of an ASCE 74 design check
+erf.conductors.asce74_exposure     = B

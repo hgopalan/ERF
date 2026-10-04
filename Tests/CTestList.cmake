@@ -2391,9 +2391,9 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
     add_test_conductors(Conductors_PrescribedWind Conductors_PrescribedWind "plt00010" "S1.dat"
                         "S1.dat.gold" 8 Conductors_PrescribedWind)
     # the wind sampled from ERF's sheared crosswind (v = 15 m/s at the ground, 45 m/s at 300 m) at
-    # the line's current nodes, against the stub
+    # the line's current nodes, against the stub; and the span's ASCE 74 design check (asce74.csv)
     add_test_conductors(Conductors_FlowWind Conductors_FlowWind "plt00010" "S1.dat"
-                        "S1.dat.gold" 8 Conductors_FlowWind)
+                        "S1.dat.gold" 8 Conductors_FlowWind EXTRA_LOGS "conductors/asce74.csv" GOLD_SUFFIX ".gold")
     # the lines' drag put back into the flow: the source must integrate to the force on the air
     add_test_conductors(Conductors_DragOnFlow Conductors_DragOnFlow "plt00010" "S1.dat"
                         "S1.dat.gold" 8 Conductors_DragOnFlow TOTALS "conductors/total_load.dat")
@@ -2401,17 +2401,19 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
     # the same two cases against the real MoorDyn-C: the span swings about the blowout angle;
     # compared to 6 digits, since the line integration is not bit-reproducible across compilers
     add_test_conductors(Conductors_FlowWind_MoorDyn Conductors_FlowWind "plt00010" "S1.dat"
-                        "S1.dat.moordyn.gold" 6 Conductors_FlowWind)
+                        "S1.dat.moordyn.gold" 6 Conductors_FlowWind EXTRA_LOGS "conductors/asce74.csv" GOLD_SUFFIX ".moordyn.gold")
     add_test_conductors(Conductors_DragOnFlow_MoorDyn Conductors_DragOnFlow "plt00010" "S1.dat"
                         "S1.dat.moordyn.gold" 6 Conductors_DragOnFlow_MoorDyn TOTALS "conductors/total_load.dat")
   endif()
   # A circuit: three phases 6 m apart hanging from insulator strings over two suspension towers,
   # and a shield wire clamped above them, across the same sheared crosswind. The middle phase's
   # middle span, its strings and their statistics, the shield wire's middle span and the
-  # closest-approach statistics of the pairs P1-P2 and P2-SW must match their golds; the flow is
-  # Conductors_FlowWind's, since nothing goes back into it. Where along two parallel lines they come closest is decided by millimetres, so the
-  # location is left to the restart parity (one binary) and the unit tests, not to a gold.
+  # closest-approach statistics of the pairs P1-P2 and P2-SW and every span's ASCE 74 design check must
+  # match their golds; the flow is Conductors_FlowWind's, since nothing goes back into it. Where along
+  # two parallel lines they come closest is decided by millimetres, so the location is left to the
+  # restart parity (one binary) and the unit tests, not to a gold.
   set(_circuit_logs "P2_insulators.dat P2_insulators_stats.csv SW_span2.dat conductors/separation_P1-P2_stats.csv conductors/separation_P2-SW_stats.csv")
+  string(APPEND _circuit_logs " conductors/asce74.csv")
   if(ERF_MOORDYN_USE_STUB)
     add_test_conductors(Conductors_Circuit Conductors_Circuit "plt00010" "P2_span2.dat"
                         "P2_span2.dat.gold" 8 Conductors_FlowWind EXTRA_LOGS "${_circuit_logs}" GOLD_SUFFIX ".gold")

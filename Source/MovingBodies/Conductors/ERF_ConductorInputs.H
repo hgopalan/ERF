@@ -261,6 +261,12 @@ std::string first_nonfinite (const std::vector<T>& v, std::size_t per_point, con
  *                                                   needs lines; default none)
  *   erf.conductors.tower_types      = lattice      (lattice tower types the lines' towers can be, each with its own
  *                                                   block; needs lines; default none)
+ *   erf.conductors.asce74_wind      = 40.          (m/s, >= 0; the 3-second gust at 10 m over open country a design
+ *                                                   check by ASCE 74 takes (ERF_ASCE74.H): every span's quasi-static
+ *                                                   wind load, swing, blowout and tension under it are written to
+ *                                                   <diagnostics_dir>/asce74.csv at start-up; default 0: none)
+ *   erf.conductors.asce74_exposure  = C            (B or C, ASCE 74's terrain exposure of that check; default C;
+ *                                                   needs asce74_wind)
  *
  * Every Real input must be finite.
  */
@@ -292,6 +298,8 @@ struct ConductorInputs
     bool drag_on_flow{false};
     amrex::Real epsilon{2.0};                           //!< (units of the anchor level's dx)
     amrex::Real flashover_distance{1.0};                //!< (m)
+    amrex::Real asce74_wind{0.0};                       //!< (m/s); 0: no ASCE 74 table
+    std::string asce74_exposure;                        //!< B or C; empty: C
 
     /** The line a line's towers belong to: the line whose towers it shares, or itself. */
     const LineInputs& tower_owner (const LineInputs& s) const;

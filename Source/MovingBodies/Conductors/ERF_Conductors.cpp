@@ -16,6 +16,7 @@
 #include <AMReX_Print.H>
 #include <AMReX_Utility.H>
 
+#include "ERF_ASCE74.H"
 #include "ERF_ActuatorSampling.H"
 #include "ERF_ActuatorSpreading.H"
 #include "ERF_DiagnosticsLog.H"
@@ -159,6 +160,7 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
     ParallelDescriptor::Barrier();
     if (!misplaced.empty()) { Abort(misplaced + " (the placement is in " + m_in.diagnostics_dir + "/ground.dat)"); }
     build_towers();
+    write_asce74();
 
     if (!restart_chkdir.empty()) {
         const std::string dir = restart_chkdir + "/conductors";
@@ -273,6 +275,43 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
         }
         write_member_tables();
     }
+}
+
+void
+Conductors::write_asce74 () const
+{
+    if (!(m_in.asce74_wind > 0.0)) { return; }
+    erf_conductors::Exposure e = erf_conductors::Exposure::C;
+    if (!m_in.asce74_exposure.empty()) { erf_conductors::parse_exposure(m_in.asce74_exposure, e); }
+    const std::string file = m_in.diagnostics_dir + "/asce74.csv";
+    Print() << "erf.conductors: ASCE 74 design check for a " << m_in.asce74_wind << " m/s 3-second gust at 10 m, exposure "
+            << (e == erf_conductors::Exposure::B ? "B" : "C") << ", in " << file << "\n";
+    if (!ParallelDescriptor::IOProcessor()) { return; }
+    std::ofstream out(file, std::ios::trunc);
+    if (!out) { Abort("cannot write '" + file + "'"); }
+    out << "line,span,height,chord,length,kz,gust_response,pressure,load,weight,swing_deg,sag,blowout,tension\n" << std::setprecision(10);
+    std::size_t ip = 0;
+    for (const LineInputs& s : m_placed) {
+        const double w = static_cast<double>((s.mass_per_length - m_in.air_density * Real(0.25) * Real(3.14159265358979323846) *
+                                              s.diameter * s.diameter) * CONST_GRAV);
+        for (int k = 0; k < s.num_spans(); ++k) {
+            // the height of the conductor above the ground at each end of the span, averaged
+            const double za = static_cast<double>(s.conductor_point(k)[2] - m_ground[ip + static_cast<std::size_t>(k)]);
+            const double zb = static_cast<double>(s.conductor_point(k + 1)[2] - m_ground[ip + static_cast<std::size_t>(k) + 1]);
+            const double z = 0.5 * (za + zb);
+            if (!(z > 0.0)) { Abort("erf.conductors." + s.name + ": span " + std::to_string(k + 1) + " is not above the ground"); }
+            const auto L = erf_conductors::wire_wind_load(e, static_cast<double>(m_in.asce74_wind), z, static_cast<double>(s.chord(k)),
+                                                          static_cast<double>(s.diameter), static_cast<double>(s.drag_coefficient), w,
+                                                          static_cast<double>(s.lengths[static_cast<std::size_t>(k)]),
+                                                          static_cast<double>(s.axial_stiffness), static_cast<double>(m_in.air_density));
+            out << s.name << "," << k + 1 << "," << z << "," << s.chord(k) << "," << s.lengths[static_cast<std::size_t>(k)] << ","
+                << L.kz << "," << L.gust_response << ","
+                << L.pressure << "," << L.load << "," << L.weight << "," << L.swing * 180.0 / 3.14159265358979323846 << ","
+                << L.sag << "," << L.blowout << "," << L.tension << "\n";
+        }
+        ip += static_cast<std::size_t>(s.num_spans() + 1);
+    }
+    if (!out) { Abort("cannot write '" + file + "'"); }
 }
 
 void

@@ -5127,6 +5127,15 @@ wind, which bend under their loads when the type has a ``frequency``.
 |                                                           | flagged as clashing in separation.dat, and a conductor   |                      |                          |
 |                                                           | this close to a transformer in transformers.dat (m)      |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.asce74_wind**                            | the 3-second gust at 10 m over open country of an ASCE   | Real >= 0            | 0: no check              |
+|                                                           | 74 design check (m/s): every span's quasi-static wind    |                      |                          |
+|                                                           | load, swing, blowout and tension under it are written to |                      |                          |
+|                                                           | diagnostics_dir/asce74.csv at start-up (see the ASCE 74  |                      |                          |
+|                                                           | design check of the conductor theory)                    |                      |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.asce74_exposure**                        | ASCE 74's terrain exposure of that check: B (suburban or | B or C; needs        | C                        |
+|                                                           | wooded) or C (open country)                              | asce74_wind          |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.tower_types**                            | names of the lattice tower types the lines' towers can   | Strings (not the     | none                     |
 |                                                           | be, each with its own block; needs erf.conductors.lines  | name of a line or    |                          |
 |                                                           |                                                          | transformer)         |                          |

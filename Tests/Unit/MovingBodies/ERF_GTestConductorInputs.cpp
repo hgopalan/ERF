@@ -6,7 +6,7 @@
 // EveryLineValueOutsideItsRangeIsRefusedByName: validate_line names the key of every bad value,
 //     non-finite values included.
 // SharedSettingsOutsideTheirRangeAreRefusedByName: validate_settings names the key, non-finite
-//     values and a conductor lighter than the air it displaces included.
+//     values, a conductor lighter than the air it displaces, and the ASCE 74 check's gust and exposure included.
 // AnchorLevelMustExistAndFpeTrapsAreRefused: validate_solver and resolve_anchor_level.
 // SurfaceOffsetMustHoldTheWholeDomain: validate_frame against the domain's top and bottom.
 // ASectionIsReadWithItsTowersLengthsAndInsulatorStrings: a section's towers, lengths and strings.
@@ -198,6 +198,16 @@ TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
     bad([](ConductorInputs& c) { c.stats_start = -1.0; }, "stats_start");
     bad([](ConductorInputs& c) { c.node_output_int = -1; }, "node_output_int");
     bad([](ConductorInputs& c) { c.epsilon = 0.0; }, "epsilon");
+    bad([](ConductorInputs& c) { c.asce74_wind = -1.0; }, "asce74_wind");
+    bad([](ConductorInputs& c) { c.asce74_wind = std::numeric_limits<amrex::Real>::quiet_NaN(); }, "asce74_wind must be finite");
+    bad([](ConductorInputs& c) { c.asce74_wind = 40.0; c.asce74_exposure = "D"; }, "asce74_exposure must be B or C");
+    bad([](ConductorInputs& c) { c.asce74_exposure = "B"; }, "asce74_exposure needs erf.conductors.asce74_wind");
+    {
+        ConductorInputs c = in;
+        c.asce74_wind = 40.0;
+        c.asce74_exposure = "b";
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "an exposure in lower case is accepted";
+    }
     // every Real input must be finite
     const amrex::Real nan = std::numeric_limits<amrex::Real>::quiet_NaN();
     const amrex::Real inf = std::numeric_limits<amrex::Real>::infinity();
