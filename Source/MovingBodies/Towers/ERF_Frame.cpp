@@ -47,6 +47,25 @@ std::array<double,12> rotate12 (const std::array<double,9>& dc, const std::array
     return out;
 }
 
+/** T A T^T for a 12 x 12 element matrix A in local axes, T block-diagonal with four dc. */
+std::array<double,144> to_frame (const std::array<double,144>& local, const std::array<double,9>& dc)
+{
+    std::array<double,144> tmp{}, out{};
+    for (int j = 0; j < 12; ++j) {          // rotate every column to the frame
+        std::array<double,12> col{};
+        for (int i = 0; i < 12; ++i) { col[static_cast<std::size_t>(i)] = local[static_cast<std::size_t>(12 * i + j)]; }
+        col = rotate12(dc, col, false);
+        for (int i = 0; i < 12; ++i) { tmp[static_cast<std::size_t>(12 * i + j)] = col[static_cast<std::size_t>(i)]; }
+    }
+    for (int i = 0; i < 12; ++i) {          // then every row
+        std::array<double,12> rowv{};
+        for (int j = 0; j < 12; ++j) { rowv[static_cast<std::size_t>(j)] = tmp[static_cast<std::size_t>(12 * i + j)]; }
+        rowv = rotate12(dc, rowv, false);
+        for (int j = 0; j < 12; ++j) { out[static_cast<std::size_t>(12 * i + j)] = rowv[static_cast<std::size_t>(j)]; }
+    }
+    return out;
+}
+
 } // namespace
 
 BeamProperties beam_properties (const FrameSection& s, BeamTheory theory)
@@ -194,22 +213,60 @@ std::array<double,144> beam_stiffness_local (const BeamProperties& p, double L)
 
 std::array<double,144> beam_stiffness (const BeamProperties& p, double L, const std::array<double,9>& dc)
 {
-    const std::array<double,144> kl = beam_stiffness_local(p, L);
-    // K = T K_local T^T, T block-diagonal: rotate each column to the frame, then each row
-    std::array<double,144> tmp{}, k{};
-    for (int j = 0; j < 12; ++j) {
-        std::array<double,12> col{};
-        for (int i = 0; i < 12; ++i) { col[static_cast<std::size_t>(i)] = kl[static_cast<std::size_t>(12 * i + j)]; }
-        col = rotate12(dc, col, false);
-        for (int i = 0; i < 12; ++i) { tmp[static_cast<std::size_t>(12 * i + j)] = col[static_cast<std::size_t>(i)]; }
-    }
-    for (int i = 0; i < 12; ++i) {
-        std::array<double,12> rowv{};
-        for (int j = 0; j < 12; ++j) { rowv[static_cast<std::size_t>(j)] = tmp[static_cast<std::size_t>(12 * i + j)]; }
-        rowv = rotate12(dc, rowv, false);
-        for (int j = 0; j < 12; ++j) { k[static_cast<std::size_t>(12 * i + j)] = rowv[static_cast<std::size_t>(j)]; }
-    }
-    return k;
+    return to_frame(beam_stiffness_local(p, L), dc);
+}
+
+std::array<double,144> beam_mass_local (const BeamProperties& p, double L)
+{
+    std::array<double,144> m{};
+    auto M = [&m] (int i, int j) -> double& { return m[static_cast<std::size_t>(12 * (i - 1) + (j - 1))]; };   // SubDyn's 1-based M(i,j)
+    const double t = p.rho * p.A * L, rx = p.rho * p.Ixx, ry = p.rho * p.Iyy, po = p.rho * p.J0 * L;
+    M(9, 9) = t / 3.0;
+    M(7, 7) = 13.0 * t / 35.0 + 6.0 * ry / (5.0 * L);
+    M(8, 8) = 13.0 * t / 35.0 + 6.0 * rx / (5.0 * L);
+    M(12, 12) = po / 3.0;
+    M(10, 10) = t * L * L / 105.0 + 2.0 * L * rx / 15.0;
+    M(11, 11) = t * L * L / 105.0 + 2.0 * L * ry / 15.0;
+    M(2, 4) = -11.0 * t * L / 210.0 - rx / 10.0;
+    M(1, 5) = 11.0 * t * L / 210.0 + ry / 10.0;
+    M(3, 9) = t / 6.0;
+    M(5, 7) = 13.0 * t * L / 420.0 - ry / 10.0;
+    M(4, 8) = -13.0 * t * L / 420.0 + rx / 10.0;
+    M(6, 12) = po / 6.0;
+    M(2, 10) = 13.0 * t * L / 420.0 - rx / 10.0;
+    M(1, 11) = -13.0 * t * L / 420.0 + ry / 10.0;
+    M(8, 10) = 11.0 * t * L / 210.0 + rx / 10.0;
+    M(7, 11) = -11.0 * t * L / 210.0 - ry / 10.0;
+    M(1, 7) = 9.0 * t / 70.0 - 6.0 * ry / (5.0 * L);
+    M(2, 8) = 9.0 * t / 70.0 - 6.0 * rx / (5.0 * L);
+    M(4, 10) = -L * L * t / 140.0 - rx * L / 30.0;
+    M(5, 11) = -L * L * t / 140.0 - ry * L / 30.0;
+    M(3, 3) = M(9, 9);
+    M(1, 1) = M(7, 7);
+    M(2, 2) = M(8, 8);
+    M(6, 6) = M(12, 12);
+    M(4, 4) = M(10, 10);
+    M(5, 5) = M(11, 11);
+    // the lower triangle mirrors the upper
+    for (int i = 1; i <= 12; ++i) { for (int j = i + 1; j <= 12; ++j) { M(j, i) = M(i, j); } }
+    return m;
+}
+
+std::array<double,144> beam_mass (const BeamProperties& p, double L, const std::array<double,9>& dc)
+{
+    return to_frame(beam_mass_local(p, L), dc);
+}
+
+std::array<double,36> rigid_body_mass (const FrameMass& c)
+{
+    const double m = c.mass, x = c.offset[0], y = c.offset[1], z = c.offset[2];
+    const double jxx = c.inertia[0], jyy = c.inertia[1], jzz = c.inertia[2], jxy = c.inertia[3], jxz = c.inertia[4], jyz = c.inertia[5];
+    return {{ m,      0.0,    0.0,    0.0,                       z * m,                     -y * m,
+              0.0,    m,      0.0,   -z * m,                     0.0,                        x * m,
+              0.0,    0.0,    m,      y * m,                    -x * m,                      0.0,
+              0.0,   -z * m,  y * m,  jxx + m * (y * y + z * z), jxy - m * x * y,            jxz - m * x * z,
+              z * m,  0.0,   -x * m,  jxy - m * x * y,           jyy + m * (x * x + z * z),  jyz - m * y * z,
+             -y * m,  x * m,  0.0,    jxz - m * x * z,           jyz - m * y * z,            jzz + m * (x * x + y * y)}};
 }
 
 std::array<double,12> beam_gravity_load (const BeamProperties& p, double L, const std::array<double,9>& dc, double gravity)
@@ -281,40 +338,149 @@ std::unique_ptr<Frame> Frame::create (const FrameInputs& in, std::string& err)
     if (f->m_free.empty()) { err = in.file + ": every degree of freedom is fixed; nothing is left to solve"; return nullptr; }
     // the stiffness of the free degrees of freedom: the elements, then the support springs
     const std::size_t nf = f->m_free.size();
-    std::vector<double> kf(nf * nf, 0.0);
-    for (const auto& e : f->m_elems) {
-        const std::array<double,144> ke = beam_stiffness(e.prop, e.length, e.dc);
-        for (int i = 0; i < 12; ++i) {
-            const std::size_t gi = element_dof(e, i);
-            const long fi = f->m_free_index[gi];
-            if (fi < 0) { continue; }
-            for (int j = 0; j < 12; ++j) {
-                const std::size_t gj = element_dof(e, j);
-                const long fj = f->m_free_index[gj];
-                if (fj >= 0) {
-                    kf[static_cast<std::size_t>(fi) * nf + static_cast<std::size_t>(fj)] += ke[static_cast<std::size_t>(12 * i + j)];
-                }
-            }
-        }
-    }
-    const auto entries = ssi_entries();
-    for (const auto& s : in.supports) {
-        const std::size_t node = static_cast<std::size_t>(in.joint_index(s.joint));
-        for (std::size_t k = 0; k < 21; ++k) {
-            const double v = s.stiffness[k];
-            if (v == 0.0) { continue; }
-            const long fi = f->m_free_index[6 * node + static_cast<std::size_t>(entries[k].first)];
-            const long fj = f->m_free_index[6 * node + static_cast<std::size_t>(entries[k].second)];
-            if (fi < 0 || fj < 0) { continue; }
-            kf[static_cast<std::size_t>(fi) * nf + static_cast<std::size_t>(fj)] += v;
-            if (fi != fj) { kf[static_cast<std::size_t>(fj) * nf + static_cast<std::size_t>(fi)] += v; }
-        }
-    }
+    const std::vector<double> kf = f->assemble_free(1.0, 0.0);
     const long bad = f->m_chol.factor(kf, nf);
     if (bad >= 0) {
         err = in.file + ": the frame is a mechanism: nothing holds the " + f->describe_dof(f->m_free[static_cast<std::size_t>(bad)]) +
               " (add a support, a member or a bracing there)";
         return nullptr;
+    }
+    return f;
+}
+
+std::vector<double> Frame::assemble_free (double cK, double cM) const
+{
+    const std::size_t nf = m_free.size();
+    std::vector<double> a(nf * nf, 0.0);
+    auto add = [&] (std::size_t gi, std::size_t gj, double v) {
+        const long fi = m_free_index[gi], fj = m_free_index[gj];
+        if (fi >= 0 && fj >= 0) { a[static_cast<std::size_t>(fi) * nf + static_cast<std::size_t>(fj)] += v; }
+    };
+    for (const auto& e : m_elems) {
+        const std::array<double,144> ke = beam_stiffness(e.prop, e.length, e.dc);
+        const std::array<double,144> me = (cM != 0.0) ? beam_mass(e.prop, e.length, e.dc) : std::array<double,144>{};
+        for (int i = 0; i < 12; ++i) {
+            for (int j = 0; j < 12; ++j) {
+                const std::size_t k = static_cast<std::size_t>(12 * i + j);
+                add(element_dof(e, i), element_dof(e, j), cK * ke[k] + cM * me[k]);
+            }
+        }
+    }
+    const auto entries = ssi_entries();
+    for (const auto& s : m_in.supports) {
+        const std::size_t node = static_cast<std::size_t>(m_in.joint_index(s.joint));
+        for (std::size_t k = 0; k < 21; ++k) {
+            const double v = cK * s.stiffness[k] + cM * s.mass[k];
+            if (v == 0.0) { continue; }
+            const std::size_t gi = 6 * node + static_cast<std::size_t>(entries[k].first);
+            const std::size_t gj = 6 * node + static_cast<std::size_t>(entries[k].second);
+            add(gi, gj, v);
+            if (gi != gj) { add(gj, gi, v); }
+        }
+    }
+    if (cM != 0.0) {
+        for (const auto& c : m_in.masses) {
+            const std::size_t node = static_cast<std::size_t>(m_in.joint_index(c.joint));
+            const std::array<double,36> m66 = rigid_body_mass(c);
+            for (std::size_t i = 0; i < 6; ++i) {
+                for (std::size_t j = 0; j < 6; ++j) { add(6 * node + i, 6 * node + j, cM * m66[6 * i + j]); }
+            }
+        }
+    }
+    return a;
+}
+
+std::vector<double> Frame::apply_stiffness (const std::vector<double>& u) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(u.size() == num_dofs(), "Frame::apply_stiffness: one value per degree of freedom is needed");
+    std::vector<double> r(u.size(), 0.0);
+    for (const auto& e : m_elems) {
+        const std::array<double,144> ke = beam_stiffness(e.prop, e.length, e.dc);
+        for (int i = 0; i < 12; ++i) {
+            double s = 0.0;
+            for (int j = 0; j < 12; ++j) { s += ke[static_cast<std::size_t>(12 * i + j)] * u[element_dof(e, j)]; }
+            r[element_dof(e, i)] += s;
+        }
+    }
+    const auto entries = ssi_entries();
+    for (const auto& sp : m_in.supports) {
+        const std::size_t node = static_cast<std::size_t>(m_in.joint_index(sp.joint));
+        for (std::size_t k = 0; k < 21; ++k) {
+            const double v = sp.stiffness[k];
+            if (v == 0.0) { continue; }
+            const std::size_t gi = 6 * node + static_cast<std::size_t>(entries[k].first);
+            const std::size_t gj = 6 * node + static_cast<std::size_t>(entries[k].second);
+            r[gi] += v * u[gj];
+            if (gi != gj) { r[gj] += v * u[gi]; }
+        }
+    }
+    return r;
+}
+
+std::vector<double> Frame::apply_mass (const std::vector<double>& a) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(a.size() == num_dofs(), "Frame::apply_mass: one value per degree of freedom is needed");
+    std::vector<double> r(a.size(), 0.0);
+    for (const auto& e : m_elems) {
+        const std::array<double,144> me = beam_mass(e.prop, e.length, e.dc);
+        for (int i = 0; i < 12; ++i) {
+            double s = 0.0;
+            for (int j = 0; j < 12; ++j) { s += me[static_cast<std::size_t>(12 * i + j)] * a[element_dof(e, j)]; }
+            r[element_dof(e, i)] += s;
+        }
+    }
+    const auto entries = ssi_entries();
+    for (const auto& sp : m_in.supports) {
+        const std::size_t node = static_cast<std::size_t>(m_in.joint_index(sp.joint));
+        for (std::size_t k = 0; k < 21; ++k) {
+            const double v = sp.mass[k];
+            if (v == 0.0) { continue; }
+            const std::size_t gi = 6 * node + static_cast<std::size_t>(entries[k].first);
+            const std::size_t gj = 6 * node + static_cast<std::size_t>(entries[k].second);
+            r[gi] += v * a[gj];
+            if (gi != gj) { r[gj] += v * a[gi]; }
+        }
+    }
+    for (const auto& c : m_in.masses) {
+        const std::size_t node = static_cast<std::size_t>(m_in.joint_index(c.joint));
+        const std::array<double,36> m66 = rigid_body_mass(c);
+        for (std::size_t i = 0; i < 6; ++i) {
+            for (std::size_t j = 0; j < 6; ++j) { r[6 * node + i] += m66[6 * i + j] * a[6 * node + j]; }
+        }
+    }
+    return r;
+}
+
+std::vector<double> Frame::point_loads (const std::vector<double>& node_loads, double gravity) const
+{
+    const std::size_t ndof = num_dofs();
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node_loads.empty() || node_loads.size() == ndof, "Frame: 6 loads per node are needed");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(std::isfinite(gravity) && gravity >= 0.0, "Frame: gravity must be finite and >= 0 (m/s^2)");
+    std::vector<double> point(ndof, 0.0);
+    for (std::size_t d = 0; d < node_loads.size(); ++d) {
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(std::isfinite(node_loads[d]), "Frame: a node load is not finite");
+        point[d] = node_loads[d];
+    }
+    if (gravity > 0.0) {
+        for (const auto& c : m_in.masses) {
+            const std::size_t node = static_cast<std::size_t>(m_in.joint_index(c.joint));
+            const double fz = -c.mass * gravity;
+            point[6 * node + 2] += fz;
+            point[6 * node + 3] += c.offset[1] * fz;     // r x F with F = (0, 0, fz)
+            point[6 * node + 4] -= c.offset[0] * fz;
+        }
+    }
+    return point;
+}
+
+std::vector<double> Frame::load_vector (const std::vector<double>& node_loads, double gravity) const
+{
+    std::vector<double> f = point_loads(node_loads, gravity);
+    if (gravity > 0.0) {
+        for (const auto& e : m_elems) {
+            const std::array<double,12> fg = beam_gravity_load(e.prop, e.length, e.dc, gravity);
+            for (int i = 0; i < 12; ++i) { f[element_dof(e, i)] += fg[static_cast<std::size_t>(i)]; }
+        }
     }
     return f;
 }
@@ -367,30 +533,13 @@ std::vector<double> Frame::stiffness () const
 FrameSolution Frame::solve (const std::vector<double>& node_loads, double gravity) const
 {
     const std::size_t ndof = num_dofs();
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node_loads.empty() || node_loads.size() == ndof, "Frame::solve: 6 loads per node are needed");
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(std::isfinite(gravity) && gravity >= 0.0, "Frame::solve: gravity must be finite and >= 0 (m/s^2)");
-    // the loads applied at the nodes: the given ones and the concentrated masses' weight
-    std::vector<double> point(ndof, 0.0);
-    for (std::size_t d = 0; d < node_loads.size(); ++d) {
-        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(std::isfinite(node_loads[d]), "Frame::solve: a node load is not finite");
-        point[d] = node_loads[d];
-    }
-    if (gravity > 0.0) {
-        for (const auto& c : m_in.masses) {
-            const std::size_t node = static_cast<std::size_t>(m_in.joint_index(c.joint));
-            const double fz = -c.mass * gravity;
-            point[6 * node + 2] += fz;
-            point[6 * node + 3] += c.offset[1] * fz;     // r x F with F = (0, 0, fz)
-            point[6 * node + 4] -= c.offset[0] * fz;
-        }
-    }
-    // plus the members' weight, as element loads
-    std::vector<double> f = point;
+    // the loads applied at the nodes, and with them the members' weight as element loads
+    const std::vector<double> point = point_loads(node_loads, gravity);
+    const std::vector<double> f = load_vector(node_loads, gravity);
     std::vector<std::array<double,12>> fg(m_elems.size());
     for (std::size_t e = 0; e < m_elems.size(); ++e) {
         const FrameElement& el = m_elems[e];
         fg[e] = (gravity > 0.0) ? beam_gravity_load(el.prop, el.length, el.dc, gravity) : std::array<double,12>{};
-        for (int i = 0; i < 12; ++i) { f[element_dof(el, i)] += fg[e][static_cast<std::size_t>(i)]; }
     }
     std::vector<double> b(m_free.size());
     for (std::size_t i = 0; i < m_free.size(); ++i) { b[i] = f[m_free[i]]; }

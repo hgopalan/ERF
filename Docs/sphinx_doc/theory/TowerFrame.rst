@@ -8,10 +8,12 @@ The frame model (``Source/MovingBodies/Towers/ERF_Frame.H``) is a linear,
 three-dimensional finite-element model of a lattice tower: every member is a
 two-node beam with six degrees of freedom per node, the base joints are fixed
 or stand on six-component springs, and the static response to nodal loads and
-gravity is solved in double precision. Its element, local axes, section
-properties and gravity loads follow OpenFAST's SubDyn module, and it reads
-SubDyn input files, so that a tower described for SubDyn has the same stiffness
-in ERF. The frame model is a library with unit tests; towers in an ERF run use
+gravity, the natural modes and the time response are solved in double
+precision (``ERF_Frame.H``, ``ERF_FrameDynamics.H``). Its element stiffness and
+mass, local axes, section properties, concentrated masses and gravity loads
+follow OpenFAST's SubDyn module, and it reads SubDyn input files, so that a tower
+described for SubDyn has the same stiffness and natural frequencies in ERF.
+The frame model is a library with unit tests; towers in an ERF run use
 the one-mode tower of :ref:`sec:Conductors` (``erf.conductors.<type>.frequency``).
 
 Conventions
@@ -140,6 +142,78 @@ A solve returns:
 The model is linear: no geometric (stress) stiffness and no large rotations,
 as in SubDyn's beams.
 
+Mass
+----
+
+This section gives the mass matrix the modes and the time response use.
+
+An element's mass is SubDyn's ``ElemM_Beam``: the consistent mass of the cubic
+beam, :math:`\rho A L` in translation, the rotary inertia of the cross-section
+(:math:`\rho I_{xx}`, :math:`\rho I_{yy}`) and the torsional inertia :math:`\rho J_0 L`,
+rotated to the frame's axes as the stiffness is. A concentrated mass adds
+SubDyn's rigid-body matrix at its joint: the mass :math:`m` at the offset
+:math:`\mathbf r = (x, y, z)` of its centre from the joint, with the inertia tensor
+entries :math:`J_{xx}, J_{yy}, J_{zz}, J_{xy}, J_{xz}, J_{yz}` about its centre,
+
+.. math::
+
+   M_{66} = \begin{pmatrix} m I & -m [\mathbf r]_\times \\ m [\mathbf r]_\times & J + m (|\mathbf r|^2 I - \mathbf r \mathbf r^T) \end{pmatrix},
+
+with :math:`[\mathbf r]_\times` the cross-product matrix of :math:`\mathbf r`. A support's SSI
+file adds its 6 x 6 mass (entries ``Mxx`` ... ``Mtztz``, in the order of the
+stiffness entries) to the support's joint.
+
+Natural modes
+-------------
+
+This section describes how the lowest natural modes are found and checked.
+
+``frame_modes`` finds the lowest :math:`p` solutions of
+:math:`K \boldsymbol\phi = \omega^2 M \boldsymbol\phi` on the free degrees of freedom by
+subspace iteration with :math:`q = \max(2p, p + 8)` trial vectors (Bathe): each
+iteration solves :math:`K Y = M X` with the factored stiffness and solves the
+projected :math:`q \times q` problem by Jacobi rotations, through the projected
+stiffness so that a degree of freedom without mass gives an infinite frequency
+instead of a singular matrix. The iteration stops when the first :math:`p + 1`
+eigenvalues change by less than :math:`10^{-12}` of themselves. A Sturm sequence
+count then checks that no mode was missed: the number of negative pivots of
+:math:`K - \sigma M`, :math:`\sigma` between the :math:`p`-th and the next
+eigenvalue, must be :math:`p`. The modes are returned with their frequencies (Hz)
+and their shapes, mass-normalised (:math:`\boldsymbol\phi^T M \boldsymbol\phi = 1`) on
+every degree of freedom (0 on the fixed ones).
+
+Time response
+-------------
+
+This section gives the time integration and its properties.
+
+``FrameDynamics`` advances :math:`M \ddot{\mathbf u} + C \dot{\mathbf u} + K \mathbf u = \mathbf f(t)`
+by Newmark's average-acceleration method (:math:`\beta = 1/4`, :math:`\gamma = 1/2`)
+with Rayleigh damping :math:`C = a_0 M + a_1 K`. Over a step :math:`h` (s), with the
+loads at the end of the step,
+
+.. math::
+
+   \left(K + \tfrac{2}{h} C + \tfrac{4}{h^2} M\right) \mathbf u_{n+1} =
+   \mathbf f_{n+1} + M\left(\tfrac{4}{h^2} \mathbf u_n + \tfrac{4}{h} \dot{\mathbf u}_n + \ddot{\mathbf u}_n\right)
+   + C\left(\tfrac{2}{h} \mathbf u_n + \dot{\mathbf u}_n\right),
+
+   \ddot{\mathbf u}_{n+1} = \tfrac{4}{h^2} (\mathbf u_{n+1} - \mathbf u_n) - \tfrac{4}{h} \dot{\mathbf u}_n - \ddot{\mathbf u}_n, \qquad
+   \dot{\mathbf u}_{n+1} = \dot{\mathbf u}_n + \tfrac{h}{2} (\ddot{\mathbf u}_n + \ddot{\mathbf u}_{n+1}).
+
+The effective stiffness on the left is factored once per step size. The method
+is unconditionally stable and second-order accurate and adds no numerical
+damping: an undamped free vibration keeps its energy
+:math:`\tfrac12 \dot{\mathbf u}^T M \dot{\mathbf u} + \tfrac12 \mathbf u^T K \mathbf u` exactly, and a
+mode of angular frequency :math:`\omega` advances by the phase
+:math:`2 \arctan(\omega h / 2)` per step (a period lengthened by about
+:math:`(\omega h)^2/12`). ``rayleigh_coefficients`` gives :math:`a_0` (1/s) and
+:math:`a_1` (s) for damping ratios at two frequencies; a mode of angular frequency
+:math:`\omega` then has the ratio :math:`(a_0/\omega + a_1 \omega)/2`. A run starts at rest
+in static equilibrium, or from a given displacement and velocity (the
+acceleration then follows from the equation of motion), and its state (the
+time, displacement, velocity and acceleration) can be saved and restored.
+
 Reading SubDyn input files
 --------------------------
 
@@ -187,10 +261,27 @@ This section lists what the unit tests ``DirectionCosines``, ``BeamElement``,
   reactions.
 - Equilibrium: on a lattice tower with a spring base, the reactions balance
   arbitrary joint loads and gravity in force and in moment.
-- SubDyn: two SubDyn input files of a 25 m lattice tower
+- SubDyn stiffness: two SubDyn input files of a 25 m lattice tower
   (``Tests/test_files/FrameSubDynTower``) read by ERF's reader give the stiffness
   condensed to the tower's peak, a 6 x 6 matrix, that SubDyn writes as ``KBBt``
   (OpenFAST 5.0.0, double precision), to the 7 digits SubDyn prints. One case
   has Euler-Bernoulli arbitrary sections; the other Timoshenko circular,
   rectangular and spun arbitrary sections, two elements per member and a base
   joint on a coupled spring.
+- Mass: an element moves :math:`\rho A L` in every translation and :math:`\rho J_0 L` in a
+  twist; a concentrated mass's 6 x 6 matrix gives the kinetic energy of the
+  offset rigid body for any motion.
+- Modes: a cantilever's bending (two modes in each plane), axial and torsional
+  frequencies from beam theory; mass orthonormality and the eigenproblem's
+  residual; a stiff post on a spring base with masses ringing at the base's own
+  coupled frequencies; the Sturm count of modes below a shift.
+- SubDyn modes: the 20 lowest natural frequencies of the two cases above and of a
+  third with concentrated masses at the cross-arm tips (offset centres and
+  products of inertia) and a mass on the spring base equal those SubDyn writes
+  as ``Full_frequencies``, to its 7 digits; case B's cluster of eight modes within
+  0.25 % of each other included.
+- Time response: a cantilever released in its first mode follows
+  :math:`\cos(2 n \arctan(\omega h/2))` and keeps its energy to :math:`10^{-11}`; with Rayleigh
+  damping the mode follows Newmark's recursion for the damped oscillator of its
+  frequency and ratio; a damped tower under a sudden load and gravity settles at
+  the static solution; a saved and restored state continues bit for bit.

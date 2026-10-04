@@ -169,9 +169,12 @@ def write_dat(case, path, ssi_name=None):
     w("COSMID    COSM11    COSM12    COSM13    COSM21    COSM22    COSM23    COSM31    COSM32    COSM33")
     w(" (-)       (-)       (-)       (-)       (-)       (-)       (-)       (-)       (-)       (-)     ")
     w("------------------------ JOINT ADDITIONAL CONCENTRATED MASSES--------------------------")
-    w("             0   NCmass      - Number of joints with concentrated masses; Global Coordinate System")
+    cmass = CMASSES if case == "C" else []
+    w("%14d   NCmass      - Number of joints with concentrated masses; Global Coordinate System" % len(cmass))
     w("CMJointID       JMass            JMXX             JMYY             JMZZ          JMXY        JMXZ         JMYZ        MCGX      MCGY        MCGZ")
     w("  (-)            (kg)          (kg*m^2)         (kg*m^2)         (kg*m^2)      (kg*m^2)    (kg*m^2)     (kg*m^2)       (m)      (m)          (m)")
+    for row in cmass:
+        w("   %3d   " % row[0] + "  ".join("%14.6E" % v for v in row[1:]))
     w("---------------------------- OUTPUT: SUMMARY & OUTFILE --------------------------------")
     w("True             SumPrint    - Output a Summary File (flag)")
     w("0                OutCBModes  - Output Guyan and Craig-Bampton modes {0: No output, 1: JSON output}, (flag)")
@@ -228,29 +231,38 @@ def write_dvr(case, path, datname, root):
         f.write("\n".join(x.rstrip() for x in L) + "\n")
 
 
-def write_ssi(path):
+# case C: case B plus the masses an insulator string and a line clamp put on each arm tip, hanging
+# 1.5 m below it (mass, Jxx Jyy Jzz Jxy Jxz Jyz about its centre, centre offset x y z), and a
+# foundation mass on joint 1's spring
+CMASSES = [(18, 400.0, 20.0, 30.0, 25.0, 2.0, -1.0, 1.5, 0.1, -0.2, -1.5),
+           (19, 400.0, 20.0, 30.0, 25.0, 2.0, -1.0, 1.5, -0.1, 0.2, -1.5)]
+SSI_MASS = {"Mxx": 2.0e3, "Myy": 2.0e3, "Mzz": 2.0e3, "Mtxtx": 5.0e2, "Mtyty": 5.0e2, "Mtztz": 4.0e2, "Mxty": 1.0e2}
+
+
+def write_ssi(path, with_mass=False):
     K = {"Kxx": 2.0e8, "Kyy": 2.0e8, "Kzz": 5.0e8,
          "Ktxtx": 3.0e8, "Ktyty": 3.0e8, "Ktztz": 1.0e8, "Kxty": 1.0e7}
     names = ['Kxx', 'Kxy', 'Kyy', 'Kxz', 'Kyz', 'Kzz', 'Kxtx', 'Kytx', 'Kztx', 'Ktxtx',
              'Kxty', 'Kyty', 'Kzty', 'Ktxty', 'Ktyty', 'Kxtz', 'Kytz', 'Kztz', 'Ktxtz', 'Ktytz', 'Ktztz']
-    L = ["!---------------- SSI spring at joint 1 (+3,+3,0): K entries, M all zero -------------------!",
+    L = ["!---------------- SSI spring at joint 1 (+3,+3,0): K entries, M %s -------------------!" % ("entries" if with_mass else "all zero"),
          "!Upper-triangular names, value first then name; Kxty couples x-translation with y-rotation (K(1,5))"]
     for n in names:
         L.append("   %.6E        %s" % (K.get(n, 0.0), n))
     for n in names:
-        L.append("   %.6E        %s" % (0.0, "M" + n[1:]))
+        m = "M" + n[1:]
+        L.append("   %.6E        %s" % (SSI_MASS.get(m, 0.0) if with_mass else 0.0, m))
     with open(path, "w") as f:
         f.write("\n".join(x.rstrip() for x in L) + "\n")
 
 
 if __name__ == "__main__":
-    for case in ("A", "B"):
+    for case in ("A", "B", "C"):
         d = os.path.join(HERE, "case" + case)
         os.makedirs(d, exist_ok=True)
         root = "tower" + case
-        ssi = "tower%s_SSI_joint1.dat" % case if case == "B" else None
+        ssi = "tower%s_SSI_joint1.dat" % case if case != "A" else None
         write_dat(case, os.path.join(d, root + ".dat"), ssi)
         write_dvr(case, os.path.join(d, root + ".dvr"), root + ".dat", root)
         if ssi:
-            write_ssi(os.path.join(d, ssi))
+            write_ssi(os.path.join(d, ssi), with_mass=(case == "C"))
     print("joints", len(joints()), "members", len(members()))
