@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <set>
 #include <sstream>
 #include <utility>
@@ -432,6 +433,16 @@ std::string FrameInputs::validate () const
     for (const int id : interface_joints) {
         if (joint_index(id) < 0) { return where + ": interface joint " + std::to_string(id) + " is not in STRUCTURE JOINTS"; }
     }
+    if (!temperature.empty() && temperature.size() != members.size()) {
+        return where + ": " + std::to_string(temperature.size()) + " member temperatures for " + std::to_string(members.size()) +
+               " members";
+    }
+    for (std::size_t m = 0; m < temperature.size(); ++m) {
+        if (!(std::isfinite(temperature[m]) && temperature[m] < 1200.0)) {
+            return where + ": member " + std::to_string(members[m].id) + " has a temperature of " + std::to_string(temperature[m]) +
+                   " C; the steel keeps no stiffness at 1200 C (EN 1993-1-2), so it must be below 1200 C";
+        }
+    }
     for (const auto& m : masses) {
         if (joint_index(m.joint) < 0) {
             return where + ": concentrated mass joint " + std::to_string(m.joint) + " is not in STRUCTURE JOINTS";
@@ -445,6 +456,189 @@ std::string FrameInputs::validate () const
             }
         }
     }
+    return std::string();
+}
+
+namespace {
+
+/** A value at 17 significant digits, which reads back to the same double. */
+std::string exact (double v)
+{
+    std::ostringstream os;
+    os << std::setprecision(17) << std::scientific << v;
+    return os.str();
+}
+
+/** The upper-case names of SubDyn's 21 SSI entries, the upper triangle column by column. */
+const char* const ssi_names[21] = {"Kxx", "Kxy", "Kyy", "Kxz", "Kyz", "Kzz", "Kxtx", "Kytx", "Kztx", "Ktxtx", "Kxty",
+                                   "Kyty", "Kzty", "Ktxty", "Ktyty", "Kxtz", "Kytz", "Kztz", "Ktxtz", "Ktytz", "Ktztz"};
+
+} // namespace
+
+std::string write_subdyn (const FrameInputs& in, const std::string& path, const std::string& title)
+{
+    const std::string err = in.validate();
+    if (!err.empty()) { return err; }
+    if (in.interface_joints.empty()) { return path + ": SubDyn needs at least one interface joint"; }
+    const std::string stem = (path.size() > 4 && path.compare(path.size() - 4, 4, ".dat") == 0) ? path.substr(0, path.size() - 4) : path;
+    const std::string base = stem.substr(stem.rfind('/') == std::string::npos ? 0 : stem.rfind('/') + 1);
+    std::ostringstream o;
+    o << "----------- SubDyn MultiMember Support Structure Input File ---------------------------\n" << title << "\n"
+      << "-------------------------- SIMULATION CONTROL -----------------------------------------\n"
+      << "False            Echo        - Echo input data to \"<rootname>.SD.ech\" (flag)\n"
+      << "\"DEFAULT\"        SDdeltaT    - Local Integration Step. If \"default\", the glue-code integration step will be used.\n"
+      << "             3   IntMethod   - Integration Method [1/2/3/4 = RK4/AB4/ABM4/AM2].\n"
+      << "False            SttcSolve   - Solve dynamics about static equilibrium point\n"
+      << "-------------------- FEA and CRAIG-BAMPTON PARAMETERS ---------------------------------\n"
+      << "             " << (in.theory == BeamTheory::EulerBernoulli ? 1 : 3) << "   FEMMod      - FEM switch: element model in the FEM. "
+      << "[1= Euler-Bernoulli(E-B);  2=Tapered E-B (unavailable);  3= 2-node Timoshenko;  4= 2-node tapered Timoshenko (unavailable)]\n"
+      << "             " << in.divisions << "   NDiv        - Number of sub-elements per member\n"
+      << "             0   Nmodes      - Number of internal modes to retain. If Nmodes=0 --> Guyan Reduction. "
+         "If Nmodes<0 --> retain all modes.\n"
+      << "             0   JDampings   - Damping Ratios for each retained mode (% of critical)\n"
+      << "             0   GuyanDampMod - Guyan damping {0=none, 1=Rayleigh Damping, 2=user specified 6x6 matrix}\n"
+      << "  0.000, 0.000   RayleighDamp - Mass and stiffness proportional damping coefficients (Rayleigh Damping) "
+         "[only if GuyanDampMod=1]\n"
+      << "             6   GuyanDampSize - Guyan damping matrix (6x6) [only if GuyanDampMod=2]\n";
+    for (int r = 0; r < 6; ++r) { o << "   0.0000e+00   0.0000e+00   0.0000e+00   0.0000e+00   0.0000e+00   0.0000e+00\n"; }
+    o << "------- INITIAL RIGID-BODY POSITION [used only for floating structure with more than one transition pieces] -------\n"
+      << "RBSurge    RBSway     RBHeave    RBRoll     RBPitch    RBYaw\n"
+      << "  (m)        (m)        (m)      (deg)      (deg)      (deg)\n"
+      << "  0.0        0.0        0.0       0.0        0.0        0.0\n"
+      << "---- STRUCTURE JOINTS: joints connect structure members (~Hydrodyn Input File) --------\n"
+      << "   " << in.joints.size() << "   NJoints     - Number of joints (-)\n"
+      << "JointID   JointXss   JointYss   JointZss   JointType   JointDirX   JointDirY   JointDirZ   JointStiff\n"
+      << "  (-)       (m)        (m)        (m)         (-)         (-)         (-)         (-)       (Nm/rad)\n";
+    for (const auto& j : in.joints) {
+        o << "  " << j.id << "   " << exact(j.x[0]) << "   " << exact(j.x[1]) << "   " << exact(j.x[2]) << "   1   0.0   0.0   0.0   0.0\n";
+    }
+    o << "------------------- BASE REACTION JOINTS: 1/0 for Locked/Free DOF @ each Reaction Node ---------------------\n"
+      << "   " << in.supports.size() << "   NReact      - Number of Joints with reaction forces\n"
+      << "RJointID   RctTDXss    RctTDYss    RctTDZss    RctRDXss    RctRDYss    RctRDZss     SSIfile\n"
+      << "  (-)       (flag)      (flag)      (flag)      (flag)      (flag)      (flag)      (string)\n";
+    for (const auto& s : in.supports) {
+        o << "   " << s.joint;
+        for (const bool f : s.fixed) { o << "   " << (f ? 1 : 0); }
+        const bool spring = std::any_of(s.stiffness.begin(), s.stiffness.end(), [] (double v) { return v != 0.0; }) ||
+                            std::any_of(s.mass.begin(), s.mass.end(), [] (double v) { return v != 0.0; });
+        if (spring) {
+            const std::string ssi = stem + "_ssi_" + std::to_string(s.joint) + ".dat";
+            std::ofstream f(ssi, std::ios::trunc);
+            if (!f) { return "cannot write the SSI file '" + ssi + "'"; }
+            f << "! SSI stiffness and mass of base reaction joint " << s.joint << ": value, then name\n";
+            for (int k = 0; k < 21; ++k) { f << exact(s.stiffness[static_cast<std::size_t>(k)]) << "   " << ssi_names[k] << "\n"; }
+            for (int k = 0; k < 21; ++k) {
+                std::string name = ssi_names[k];
+                name[0] = 'M';
+                f << exact(s.mass[static_cast<std::size_t>(k)]) << "   " << name << "\n";
+            }
+            if (!f) { return "cannot write the SSI file '" + ssi + "'"; }
+            o << "   \"" << base << "_ssi_" << s.joint << ".dat\"";
+        }
+        o << "\n";
+    }
+    o << "------- INTERFACE JOINTS: 1/0 for Locked (to the TP)/Free DOF @each Interface Joint "
+         "(only Locked-to-TP implemented thus far (=rigid TP)) ---------\n"
+      << "   " << in.interface_joints.size() << "   NInterf     - Number of interface joints locked to the Transition Piece (TP)\n"
+      << "IJointID   TPID   ItfTDXss    ItfTDYss    ItfTDZss    ItfRDXss    ItfRDYss    ItfRDZss\n"
+      << "  (-)      (-)     (flag)      (flag)      (flag)      (flag)      (flag)      (flag)\n";
+    for (const int id : in.interface_joints) { o << "   " << id << "   1   1   1   1   1   1   1\n"; }
+    o << "----------------------------------- MEMBERS -------------------------------------------\n"
+      << "   " << in.members.size() << "   NMembers    - Number of members (-)\n"
+      << "MemberID   MJointID1   MJointID2   MPropSetID1   MPropSetID2   MType   COSMID/MSpin\n"
+      << "  (-)         (-)         (-)          (-)           (-)        (-)    (-)/(deg)\n";
+    for (const auto& m : in.members) {
+        const char* type = (m.shape == SectionShape::Circular) ? "1c" : (m.shape == SectionShape::Rectangular) ? "1r" : "4";
+        o << "   " << m.id << "   " << m.joint_a << "   " << m.joint_b << "   " << m.section << "   " << m.section << "   " << type
+          << "   " << exact(m.spin * 180.0 / 3.14159265358979323846) << "\n";
+    }
+    auto count = [&] (SectionShape shape) {
+        return std::count_if(in.sections.begin(), in.sections.end(), [shape] (const FrameSection& s) { return s.shape == shape; });
+    };
+    auto material = [] (const FrameSection& s) { return exact(s.E) + "   " + exact(s.G) + "   " + exact(s.rho); };
+    o << "------------------ CIRCULAR BEAM CROSS-SECTION PROPERTIES -----------------------------\n"
+      << "   " << count(SectionShape::Circular) << "   NPropSetsCyl - Number of structurally unique circular cross-sections\n"
+      << "PropSetID     YoungE          ShearG          MatDens          XsecD           XsecT\n"
+      << "  (-)         (N/m2)          (N/m2)          (kg/m3)           (m)             (m)\n";
+    for (const auto& s : in.sections) {
+        if (s.shape == SectionShape::Circular) {
+            o << "   " << s.id << "   " << material(s) << "   " << exact(s.D) << "   " << exact(s.t) << "\n";
+        }
+    }
+    o << "----------------- RECTANGULAR BEAM CROSS-SECTION PROPERTIES ---------------------------\n"
+      << "   " << count(SectionShape::Rectangular) << "   NPropSetsRec - Number of structurally unique rectangular cross-sections\n"
+      << "PropSetID     YoungE          ShearG          MatDens          XsecSa         XsecSb          XsecT\n"
+      << "  (-)         (N/m2)          (N/m2)          (kg/m3)           (m)            (m)             (m)\n";
+    for (const auto& s : in.sections) {
+        if (s.shape == SectionShape::Rectangular) {
+            o << "   " << s.id << "   " << material(s) << "   " << exact(s.Sa) << "   " << exact(s.Sb) << "   " << exact(s.t) << "\n";
+        }
+    }
+    o << "----------------- ARBITRARY BEAM CROSS-SECTION PROPERTIES -----------------------------\n"
+      << "   " << count(SectionShape::Arbitrary) << "   NXPropSets   - Number of structurally unique arbitrary cross-sections\n"
+      << "PropSetID     YoungE          ShearG          MatDens          XsecA          XsecAsx       XsecAsy"
+         "       XsecJxx       XsecJyy        XsecJ0    XsecJt\n"
+      << "  (-)         (N/m2)          (N/m2)          (kg/m3)          (m2)            (m2)          (m2)"
+         "          (m4)          (m4)          (m4)       (m4)\n";
+    for (const auto& s : in.sections) {
+        if (s.shape == SectionShape::Arbitrary) {
+            o << "   " << s.id << "   " << material(s) << "   " << exact(s.A) << "   " << exact(s.Asx) << "   " << exact(s.Asy) << "   "
+              << exact(s.Ixx) << "   " << exact(s.Iyy) << "   " << exact(s.J0) << "   " << exact(s.Jt) << "\n";
+        }
+    }
+    o << "-------------------------- CABLE PROPERTIES -------------------------------------------\n"
+      << "             0   NCablePropSets   - Number of cable cable properties\n"
+      << "PropSetID     EA          MatDens        T0         CtrlChannel\n"
+      << "  (-)         (N)         (kg/m)        (N)             (-)\n"
+      << "----------------------- RIGID LINK PROPERTIES -----------------------------------------\n"
+      << "             0   NRigidPropSets - Number of rigid link properties\n"
+      << "PropSetID   MatDens\n"
+      << "  (-)       (kg/m)\n"
+      << "----------------------- SPRING ELEMENT PROPERTIES -------------------------------------\n"
+      << "             0   NSpringPropSets - Number of spring properties\n"
+      << "PropSetID   k11     k12     k13     k14     k15     k16     k22     k23     k24     k25     k26     k33     k34     k35     k36"
+         "     k44      k45      k46      k55      k56      k66\n"
+      << "  (-)      (N/m)   (N/m)   (N/m)  (N/rad) (N/rad) (N/rad)  (N/m)   (N/m)  (N/rad) (N/rad) (N/rad)  (N/m)  (N/rad) (N/rad) (N/rad)"
+         " (Nm/rad) (Nm/rad) (Nm/rad) (Nm/rad) (Nm/rad) (Nm/rad)\n"
+      << "---------------------- MEMBER COSINE MATRICES COSM(i,j) -------------------------------\n"
+      << "             0   NCOSMs      - Number of unique cosine matrices\n"
+      << "COSMID    COSM11    COSM12    COSM13    COSM21    COSM22    COSM23    COSM31    COSM32    COSM33\n"
+      << " (-)       (-)       (-)       (-)       (-)       (-)       (-)       (-)       (-)       (-)\n"
+      << "------------------------ JOINT ADDITIONAL CONCENTRATED MASSES--------------------------\n"
+      << "   " << in.masses.size() << "   NCmass      - Number of joints with concentrated masses; Global Coordinate System\n"
+      << "CMJointID       JMass            JMXX             JMYY             JMZZ          JMXY        JMXZ"
+         "         JMYZ        MCGX      MCGY        MCGZ\n"
+      << "  (-)            (kg)          (kg*m^2)         (kg*m^2)         (kg*m^2)      (kg*m^2)    (kg*m^2)"
+         "     (kg*m^2)       (m)      (m)          (m)\n";
+    for (const auto& c : in.masses) {
+        o << "   " << c.joint << "   " << exact(c.mass);
+        for (const double v : c.inertia) { o << "   " << exact(v); }
+        for (const double v : c.offset) { o << "   " << exact(v); }
+        o << "\n";
+    }
+    o << "---------------------------- OUTPUT: SUMMARY & OUTFILE --------------------------------\n"
+      << "True             SumPrint    - Output a Summary File (flag)\n"
+      << "0                OutCBModes  - Output Guyan and Craig-Bampton modes {0: No output, 1: JSON output}, (flag)\n"
+      << "0                OutFEMModes - Output first 30 FEM modes {0: No output, 1: JSON output} (flag)\n"
+      << "False            OutCOSM     - Output cosine matrices with the selected output member forces (flag)\n"
+      << "False            OutAll      - [T/F] Output all members' end forces\n"
+      << "             1   OutSwtch    - [1/2/3] Output requested channels to: 1=<rootname>.SD.out;  "
+         "2=<rootname>.out (generated by FAST);  3=both files.\n"
+      << "True             TabDelim    - Generate a tab-delimited output in the <rootname>.SD.out file\n"
+      << "             1   OutDec      - Decimation of output in the <rootname>.SD.out file\n"
+      << "\"ES11.4e2\"       OutFmt      - Output format for numerical results in the <rootname>.SD.out file\n"
+      << "\"A11\"            OutSFmt     - Output format for header strings in the <rootname>.SD.out file\n"
+      << "------------------------- MEMBER OUTPUT LIST ------------------------------------------\n"
+      << "             0   NMOutputs   - Number of members whose forces/displacements/velocities/accelerations "
+         "will be output (-) [Must be <= 99].\n"
+      << "MemberID   NOutCnt    NodeCnt\n"
+      << "  (-)        (-)        (-)\n"
+      << "------------------------- SSOutList: The next line(s) contains a list of output parameters. ------\n"
+      << "END of output channels and end of file. (the word \"END\" must appear in the first 3 columns of this line)\n";
+    std::ofstream f(path, std::ios::trunc);
+    if (!f) { return "cannot write the SubDyn file '" + path + "'"; }
+    f << o.str();
+    if (!f) { return "cannot write the SubDyn file '" + path + "'"; }
     return std::string();
 }
 

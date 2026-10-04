@@ -669,6 +669,21 @@ loads come from the frame's support reactions. On the frame-towers test case
 with the real library, the hilltop tower carries the base shear of the one-mode
 tower (23.1 kN in both) and its cross-arm moves 4.4 mm, the frame being stiffer.
 
+A tower type can instead have ERF generate its frame from its dimensions
+(``erf.conductors.<type>.frame_panels`` with the angles of its legs and its
+bracing; :ref:`sec:TowerFrame`, section "Generated lattice towers"), and every
+member of a generated frame, or of a frame file given with ``member_file``, is
+checked against its strength in tension and compression (ASCE 10-15) every step;
+``towers.dat`` carries each tower's largest utilisation and the member it is in.
+``steel_temperature`` sets the steel's temperature, which lowers its stiffness
+and strength (EN 1993-1-2). On the generated-towers test case (the moving-towers
+lines on generated towers of 8 panels, 310 members and 11.1 t) the hilltop
+tower's most utilised member, a leg at the base, reaches 0.12 of its design
+strength at 20 C, 0.23 at 500 C and 0.66 at 650 C, while the tower's first
+natural frequency falls from 3.31 Hz to 2.56 and 1.55 Hz and its cross-arm's
+largest sway grows from 5 mm to 12 and 36 mm; the coupling converges in three
+iterations per coupling step with the real library.
+
 A network over hills
 --------------------
 

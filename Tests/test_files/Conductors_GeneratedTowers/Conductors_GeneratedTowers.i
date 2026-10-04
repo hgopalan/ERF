@@ -1,12 +1,12 @@
 # The lines over hills of Conductors_Terrain (two sections dead-ended on three transformers, in a
 # neutral boundary layer over terrain with the k-equation RANS closure), with lattice towers that
-# bend as their frame model: every tower of the lattice type stands on the SubDyn frame of
-# lattice_frame.dat (76 beam members, four fixed legs; case T of Tests/test_files/FrameSubDynTower),
-# loaded by its members' drag and its line's pull, and MoorDyn moves the cross-arms the lines hang
-# from as coupled points; lattice_members.dat gives the members' design data, so each is checked
-# against its strength (ASCE 10-15). The towers' loads, footings, cross-arm displacements and
-# largest member utilisation, the statistics of L1's first tower (tower_L1_t1) and the middle span
-# of L1 must match their golds; nothing goes back into the flow.
+# bend as a frame ERF generates from the lattice type's dimensions: 8 panels of equal-leg angles
+# with crossed bracing on every face, a cross-arm truss on each side, and the members' design data,
+# so every member is checked against its strength (ASCE 10-15) every step. The steel is at 500 C,
+# which lowers its stiffness and yield strength (EN 1993-1-2). MoorDyn moves the cross-arms the
+# lines hang from as coupled points. The towers' loads, footings, cross-arm displacements and largest
+# member utilisation, the statistics of L1's first tower (tower_L1_t1), its members' design
+# strengths and the middle span of L1 must match their golds; nothing goes back into the flow.
 
 max_step = 10
 stop_time = 9.0
@@ -62,11 +62,16 @@ erf.plot_int_1   = 10
 erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta KE
 
 erf.conductors.diagnostics_dir = conductors
+erf.conductors.node_output_int = 5   # every 5 steps: the lines' nodes and the towers' frames (tower_<tower>_frame.dat)
 erf.conductors.air_density     = 1.2
 FILE = network.inputs
 
-# the towers bend as the frame model of lattice_frame.dat, in tower-local axes (the lattice type's
-# other keys are in network.inputs); its first natural frequency is 4.22 Hz
-erf.conductors.lattice.frame_file    = lattice_frame.dat
-erf.conductors.lattice.member_file   = lattice_members.dat   # case T's towerT_members.dat
+# the towers bend as a frame generated from the lattice type's dimensions (its other keys are in
+# network.inputs): 8 panels below the cross-arm, legs and cross-arm chords of 150 x 12 mm angles,
+# the rest 100 x 8 mm, the steel at 500 C (k_y = 0.78, k_E = 0.6); each frame is written to
+# conductors/frame_<tower>.dat
+erf.conductors.lattice.frame_panels      = 8
+erf.conductors.lattice.leg_angle         = 0.15 0.012
+erf.conductors.lattice.brace_angle       = 0.10 0.008
+erf.conductors.lattice.steel_temperature = 500
 erf.conductors.lattice.damping_ratio = 0.02

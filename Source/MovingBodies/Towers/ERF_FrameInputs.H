@@ -95,6 +95,12 @@ struct FrameInputs
     std::vector<FrameSupport> supports;
     std::vector<int> interface_joints;           //!< SubDyn's INTERFACE JOINTS ids, kept for reference
     std::vector<FrameMass> masses;
+    /**
+     * The steel's temperature of each member (C, input order; empty: 20 C everywhere), which reduces its
+     * Young's and shear moduli by EN 1993-1-2's k_E (steel_reduction() in ERF_MemberChecks.H). Not part
+     * of a SubDyn file.
+     */
+    std::vector<double> temperature;
 
     /** The index (0-based, input order) of the joint with this id, or -1. */
     int joint_index (int id) const;
@@ -114,6 +120,15 @@ struct FrameInputs
  * direction cosine matrices, the damping inputs and the output sections are skipped.
  */
 std::string read_subdyn (const std::string& path, FrameInputs& in);
+
+/**
+ * Write the frame as a SubDyn input file (OpenFAST 5.0 layout) that read_subdyn() and SubDyn read
+ * back to the same frame: the joints, the supports (a support with a spring writes its SSI file next
+ * to path, named <path without .dat>_ssi_<joint>.dat), the interface joints, the members and their
+ * sections, the concentrated masses; every value at 17 significant digits. The members' temperatures
+ * are not written. title is the file's second line. Returns an empty string, or the problem.
+ */
+std::string write_subdyn (const FrameInputs& in, const std::string& path, const std::string& title);
 
 } // namespace erf_towers
 

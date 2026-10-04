@@ -125,7 +125,8 @@ class Frame
 {
 public:
     /**
-     * Build and factor the frame. Returns null with err set when the inputs are invalid
+     * Build and factor the frame, each member's E and G reduced for its temperature (FrameInputs::temperature,
+     * EN 1993-1-2's k_E). Returns null with err set when the inputs are invalid
      * (FrameInputs::validate) or the structure is a mechanism, naming the joint (or member node)
      * and the degree of freedom that nothing holds.
      */
@@ -174,9 +175,18 @@ public:
      */
     FrameSolution solve (const std::vector<double>& node_loads, double gravity) const;
 
+    /**
+     * The end forces of every element at the displacement u (num_dofs() values, m and rad): K_e u_e less the
+     * element's weight as nodal loads when gravity > 0 (m/s^2), in the element's local axes, as
+     * FrameSolution::element_force (the forces on the element at node_a, then at node_b; N, N m).
+     */
+    std::vector<std::array<double,12>> element_forces (const std::vector<double>& u, double gravity) const;
+
 private:
     Frame () = default;
     std::string describe_dof (std::size_t dof) const;
+    /** One element's end forces at the displacement u, in the frame's axes (12 values, N and N m). */
+    std::array<double,12> end_forces (const FrameElement& el, const std::vector<double>& u, double gravity) const;
     /** node_loads and the concentrated masses' weight, the loads applied at the nodes themselves. */
     std::vector<double> point_loads (const std::vector<double>& node_loads, double gravity) const;
 

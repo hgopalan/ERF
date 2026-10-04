@@ -589,7 +589,10 @@ plotfile) straight to step 8,
 again to a checkpoint at step 4, and from that checkpoint to step 8, and
 requires the two plotfiles at step 8 to be identical (``Tests/RunRestartParity.cmake``,
 no gold file; label ``restart-parity``). Every run has a time limit of its own,
-so a restart whose first step never finishes fails with a message. Until
+so a restart whose first step never finishes fails with a message. A parity test
+given ``OVERRUN`` lets the checkpointing run go on to the last step before the
+restart, so the logs it appended to hold rows from after the checkpoint, which the
+restarted run must drop to match the straight run's. Until
 September 2026 the restart path handed the microphysics its minimum cell
 height only on terrain-fitted meshes; on a constant-dz mesh the sedimentation
 substep count of the first restarted step was computed from an uninitialised
@@ -843,12 +846,31 @@ goes back into it.
 ``lattice_frame.dat`` (76 beam members on four fixed legs, first natural
 frequency 4.22 Hz; case T of ``Tests/test_files/FrameSubDynTower``), its
 members' drag and its line's pull carried onto the frame's nodes, and MoorDyn
-moves the cross-arms as coupled points. ``conductors/towers.dat`` (loads,
-footings from the frame's support reactions, cross-arm displacement), the
+moves the cross-arms as coupled points; ``lattice_members.dat`` gives the
+members' design data, so each is checked against its strength.
+``conductors/towers.dat`` (loads, footings from the frame's support reactions,
+cross-arm displacement, largest member utilisation), the
 statistics of L1's first tower and the middle span of one line are compared
 with golds of each library; the restart parity tests
 ``Conductors_FrameTowers_Restart`` and ``Conductors_FrameTowers_Restart_MoorDyn``
 carry the frames' Newmark state across the checkpoint. The flow is
+``Conductors_Terrain``'s gold.
+
+``Conductors_GeneratedTowers`` (stub) and ``Conductors_GeneratedTowers_MoorDyn``
+(real library) run the same lines on towers that bend as a frame ERF generates
+from the lattice type's dimensions (:ref:`sec:TowerFrame`, section "Generated
+lattice towers": 8 panels of angles with crossed bracing and a cross-arm truss,
+103 nodes and 310 members), with the steel at 500 C, so that EN 1993-1-2's
+reductions of its stiffness and yield strength act, and every member checked
+against its strength (ASCE 10-15) every step. ``conductors/towers.dat`` (with
+each tower's largest member utilisation and its member), the statistics of L1's
+first tower, its members' design strengths (``tower_L1_t1_members.csv``) and the
+middle span of one line are compared with golds of each library; the restart
+parity tests ``Conductors_GeneratedTowers_Restart`` and
+``Conductors_GeneratedTowers_Restart_MoorDyn`` carry the frames' state, the
+members' statistics and the frames' log across the checkpoint, the checkpointing
+run going on past it (``OVERRUN``), so every conductor log is also trimmed back to
+the checkpoint. The flow is
 ``Conductors_Terrain``'s gold.
 
 ``Conductors_ImmersedHills`` (stub) and ``Conductors_ImmersedHills_MoorDyn``
@@ -901,7 +923,8 @@ runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with
 Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files/Conductors_FlowWind`_,
 `Tests/test_files/Conductors_DragOnFlow`_, `Tests/test_files/Conductors_Circuit`_,
 `Tests/test_files/Conductors_Terrain`_, `Tests/test_files/Conductors_MovingTowers`_,
-`Tests/test_files/Conductors_FrameTowers`_, `Tests/test_files/Conductors_ImmersedHills`_
+`Tests/test_files/Conductors_FrameTowers`_, `Tests/test_files/Conductors_GeneratedTowers`_,
+`Tests/test_files/Conductors_ImmersedHills`_
 
 .. _`Tests/test_files/Conductors_PrescribedWind`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_PrescribedWind
 
@@ -916,5 +939,7 @@ Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files
 .. _`Tests/test_files/Conductors_MovingTowers`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_MovingTowers
 
 .. _`Tests/test_files/Conductors_FrameTowers`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_FrameTowers
+
+.. _`Tests/test_files/Conductors_GeneratedTowers`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_GeneratedTowers
 
 .. _`Tests/test_files/Conductors_ImmersedHills`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_ImmersedHills

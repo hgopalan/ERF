@@ -18,10 +18,21 @@
 // FrameTower.RefusesAFrameThatDoesNotFitItsTowerOrItsType: a frame whose cross-arm is far from the
 //   lines' attachment aborts naming the frame file; a type giving a frame and a frequency, a weight or
 //   a foundation stiffness is refused.
+// FrameTower.ItsMembersAreCheckedUnderTheFramesForces: on a generated frame with design data, the
+//   members' checks before the first step and once settled under steady loads are those of the
+//   frame's static solution under the linked loads and the weight; without design data, none.
+// FrameTower.HeatingKeepsItsPlaceThenSettlesOnTheSofterFrame: heated to 600 C while settled, the
+//   cross-arm stays put, the first frequency drops by sqrt(k_E), and the tower settles where the hot
+//   frame's static solution puts it, its checks those of the hot steel; bad temperatures are refused.
+// FrameTower.ItsStateCarriesTheTemperatures: a cold tower restored from a heated one's state heats up
+//   and continues bit for bit; a state without temperatures keeps the present ones.
+// TowerType.RefusesFrameKeysThatDoNotFit: frame_panels with frame_file, frame keys without their frame,
+//   angles without two values in order, an unknown bracing, a bad yield strength or temperature.
 
 #include <array>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -31,6 +42,7 @@
 #include <gtest/gtest.h>
 
 #include "ERF_FrameTower.H"
+#include "ERF_LatticeFrame.H"
 #include "ERF_GTestThrowOnAbort.H"
 
 using amrex::Real;
@@ -273,4 +285,210 @@ TEST(FrameTower, RefusesAFrameThatDoesNotFitItsTowerOrItsType)
     t = framed();
     t.foundation_rotational_stiffness = 1.0e9;
     EXPECT_NE(t.validate().find("foundation_rotational_stiffness is not given with"), std::string::npos) << t.validate();
+}
+
+namespace {
+
+/** The generated case G (a 30 m tower with a 3 m peak) and the type that stands it. */
+TowerType generated_type (double zeta = 0.02)
+{
+    TowerType t;
+    t.name = "generated";
+    t.base_width = 6.0; t.top_width = 1.5; t.solidity = 0.2; t.arm_length = 12.0; t.arm_depth = 1.5; t.peak = 3.0;
+    t.damping_ratio = static_cast<Real>(zeta);
+    t.frame_panels = 6;
+    t.leg_angle = {Real(0.15), Real(0.012)};
+    t.brace_angle = {Real(0.09), Real(0.007)};
+    return t;
+}
+
+struct Generated
+{
+    std::shared_ptr<const Frame> frame;
+    std::shared_ptr<const std::vector<MemberDesign>> designs;
+    std::vector<std::size_t> links;     //!< the nodes loads may be tied to: all but the diagonals' crossings
+};
+
+Generated generated (double theta = 20.0)
+{
+    LatticeSpec s;
+    s.base_width = 6.0; s.top_width = 1.5; s.arm_height = 30.0; s.arm_length = 12.0; s.arm_depth = 1.5; s.peak = 3.0;
+    s.panels = 6; s.leg_b = 0.15; s.leg_t = 0.012; s.brace_b = 0.09; s.brace_t = 0.007;
+    FrameInputs in;
+    std::vector<MemberDesign> d;
+    std::vector<int> load_joints;
+    const std::string gerr = lattice_frame(s, in, d, &load_joints);
+    EXPECT_TRUE(gerr.empty()) << gerr;
+    if (theta != 20.0) { in.temperature.assign(in.members.size(), theta); }
+    std::string err;
+    Generated g;
+    g.frame = Frame::create(in, err);
+    EXPECT_TRUE(g.frame) << err;
+    g.designs = std::make_shared<const std::vector<MemberDesign>>(d);
+    for (const int id : load_joints) { g.links.push_back(g.frame->node_of_joint(id)); }
+    return g;
+}
+
+/**
+ * The frame loads of the tower's drag fd and the line's pull at the cross-arm's centre, as FrameTower links them
+ * to the nodes links (tower-local axes).
+ */
+std::vector<double> linked_loads (const Frame& frame, const Tower& tw, const std::vector<Real>& fd, const std::vector<std::size_t>& links)
+{
+    const double c = std::cos(0.5235987755982988), s = std::sin(0.5235987755982988);
+    const std::array<double,3> along{{c, s, 0.0}}, across{{-s, c, 0.0}};
+    auto local = [&] (double x, double y, double z) {
+        return std::array<double,3>{{x * along[0] + y * along[1], x * across[0] + y * across[1], z}};
+    };
+    std::vector<double> loads(frame.num_dofs(), 0.0);
+    for (std::size_t i = 0; i < tw.nodes().size(); ++i) {
+        const auto& p = tw.nodes()[i].pos;
+        RigidLink(frame, local(p[0] - 100.0, p[1] - 200.0, p[2] - 50.0), 4, &links)
+            .add_load(local(fd[3 * i], fd[3 * i + 1], fd[3 * i + 2]), loads);
+    }
+    RigidLink(frame, {{0.0, 0.0, 30.0}}, 4, &links).add_load(local(pull[0], pull[1], pull[2]), loads);
+    return loads;
+}
+
+} // namespace
+
+TEST(FrameTower, ItsMembersAreCheckedUnderTheFramesForces)
+{
+    Tower tw = turned(generated_type(0.3));
+    const Generated gen = generated();
+    FrameTower ft(tw, gen.frame, g, gen.designs, "case G", gen.links);
+    ASSERT_TRUE(ft.has_member_checks());
+    const std::vector<Real> fd = drag(tw);
+    // before the first step: the static forces under the tower's present loads and the weight
+    tw.set_loads(fd);
+    tw.set_line_loads({pull}, {tw.attachments()[0]});
+    const std::vector<double> loads = linked_loads(*gen.frame, tw, fd, gen.links);
+    const FrameSolution st = gen.frame->solve(loads, g);
+    const auto expected = check_members(*gen.frame, *gen.designs, st.element_force, {});
+    auto at_rest = ft.member_checks(tw);
+    ASSERT_EQ(at_rest.size(), expected.size());
+    double umax = 0.0;
+    for (std::size_t m = 0; m < expected.size(); ++m) {
+        EXPECT_NEAR(at_rest[m].utilisation, expected[m].utilisation, tol * (expected[m].utilisation + 1e-3)) << "member " << m + 1;
+        umax = std::max(umax, expected[m].utilisation);
+    }
+    ASSERT_GT(umax, 0.01) << "the loads must work the members: the check is not vacuous";
+    // settled under the same loads, the dynamic forces about the weight's equilibrium add up to the same
+    const double h = 1.0 / (20.0 * static_cast<double>(ft.frequency()));
+    for (int n = 0; n < 1500; ++n) { ft.step(static_cast<Real>(h), fd, std::vector<std::array<Real,3>>{pull}); }
+    const auto settled = ft.member_checks(tw);
+    for (std::size_t m = 0; m < expected.size(); ++m) {
+        EXPECT_NEAR(settled[m].utilisation, expected[m].utilisation, 1e-5 * umax + tol * umax) << "member " << m + 1;
+    }
+    // a frame without design data checks nothing
+    const FrameTower plain(tw, gen.frame, g);
+    EXPECT_FALSE(plain.has_member_checks());
+    EXPECT_TRUE(plain.member_checks(tw).empty());
+}
+
+TEST(FrameTower, HeatingKeepsItsPlaceThenSettlesOnTheSofterFrame)
+{
+    const Tower tw = turned(generated_type(0.3));
+    const Generated cold = generated(), hot = generated(600.0);
+    FrameTower ft(tw, cold.frame, g, cold.designs, "case G", cold.links);
+    const std::vector<Real> fd = drag(tw);
+    double h = 1.0 / (20.0 * static_cast<double>(ft.frequency()));
+    for (int n = 0; n < 1500; ++n) { ft.step(static_cast<Real>(h), fd, std::vector<std::array<Real,3>>{pull}); }
+    const auto before = ft.attachment_displacement(0);
+    const double f_cold = static_cast<double>(ft.frequency());
+    const std::string err = ft.set_temperature(std::vector<double>(cold.frame->inputs().members.size(), 600.0));
+    ASSERT_TRUE(err.empty()) << err;
+    // the same place at the switch
+    const auto after = ft.attachment_displacement(0);
+    for (std::size_t d = 0; d < 3; ++d) { EXPECT_NEAR(static_cast<double>(after[d]), static_cast<double>(before[d]), tol * 1.0e-2) << d; }
+    // every member softened by k_E = 0.31: the frequency by its square root
+    EXPECT_NEAR(static_cast<double>(ft.frequency()), f_cold * std::sqrt(0.31), 1e-6 * f_cold);
+    // the Rayleigh damping is the cold frame's, lighter on some of the hot frame's modes: settle twice as long
+    h = 1.0 / (20.0 * static_cast<double>(ft.frequency()));
+    for (int n = 0; n < 3000; ++n) { ft.step(static_cast<Real>(h), fd, std::vector<std::array<Real,3>>{pull}); }
+    // settled: the hot frame's static response to the loads and its weight, measured from the cold frame's sag
+    const std::vector<double> loads = linked_loads(*cold.frame, tw, fd, cold.links);
+    const FrameSolution s_hot = hot.frame->solve(loads, g), sag_cold = cold.frame->solve({}, g);
+    const RigidLink arm(*hot.frame, {{0.0, 0.0, 30.0}}, 4, &cold.links);
+    const auto u_hot = arm.motion(s_hot.displacement), u_sag = arm.motion(sag_cold.displacement);
+    const double c = std::cos(0.5235987755982988), s = std::sin(0.5235987755982988);
+    const std::array<double,3> ul{{u_hot[0] - u_sag[0], u_hot[1] - u_sag[1], u_hot[2] - u_sag[2]}};
+    const std::array<double,3> expected{{ul[0] * c - ul[1] * s, ul[0] * s + ul[1] * c, ul[2]}};
+    const auto got = ft.attachment_displacement(0);
+    const double scale = std::sqrt(expected[0] * expected[0] + expected[1] * expected[1] + expected[2] * expected[2]);
+    for (std::size_t d = 0; d < 3; ++d) { EXPECT_NEAR(static_cast<double>(got[d]), expected[d], 1e-5 * scale + tol * scale) << d; }
+    // and the members' checks see the hot steel: the same forces, 0.47 of the tension strength
+    const auto checks = ft.member_checks(tw);
+    const auto expected_checks = check_members(*hot.frame, *hot.designs, s_hot.element_force, hot.frame->inputs().temperature);
+    double umax = 0.0;
+    for (const auto& c : expected_checks) { umax = std::max(umax, c.utilisation); }
+    for (std::size_t m = 0; m < checks.size(); ++m) {
+        EXPECT_NEAR(checks[m].utilisation, expected_checks[m].utilisation, 1e-5 * umax + tol * umax) << m + 1;
+    }
+    // a temperature for each member is needed, below 1200 C; nothing changes otherwise
+    EXPECT_NE(ft.set_temperature({600.0}).find("temperatures for"), std::string::npos);
+    EXPECT_NE(ft.set_temperature(std::vector<double>(checks.size(), 1250.0)).find("below 1200"), std::string::npos);
+    EXPECT_EQ(ft.temperature().front(), 600.0);
+}
+
+TEST(FrameTower, ItsStateCarriesTheTemperatures)
+{
+    const Tower tw = turned(generated_type());
+    const Generated gen = generated();
+    FrameTower a(tw, gen.frame, g, gen.designs, "case G", gen.links), b(tw, gen.frame, g, gen.designs, "case G", gen.links);
+    const std::vector<Real> fd = drag(tw);
+    for (int n = 0; n < 10; ++n) { a.step(Real(0.01), fd, std::vector<std::array<Real,3>>{pull}); }
+    std::vector<double> theta(gen.frame->inputs().members.size(), 20.0);
+    for (std::size_t m = 0; m < theta.size(); ++m) { theta[m] = 20.0 + 5.0 * static_cast<double>(m % 100); }
+    ASSERT_TRUE(a.set_temperature(theta).empty());
+    for (int n = 0; n < 10; ++n) { a.step(Real(0.01), fd, std::vector<std::array<Real,3>>{pull}); }
+    // a cold tower restored from the hot one's state heats up and continues bit for bit
+    ASSERT_TRUE(b.set_state(a.state()));
+    EXPECT_EQ(b.temperature(), theta);
+    for (int n = 0; n < 10; ++n) {
+        a.step(Real(0.01), fd, std::vector<std::array<Real,3>>{pull});
+        b.step(Real(0.01), fd, std::vector<std::array<Real,3>>{pull});
+    }
+    EXPECT_EQ(a.state(), b.state());
+    EXPECT_EQ(a.attachment_displacement(0), b.attachment_displacement(0));
+    // a state without the temperatures keeps the present ones
+    std::vector<double> short_state = a.state();
+    short_state.resize(short_state.size() - theta.size());
+    ASSERT_TRUE(b.set_state(short_state));
+    EXPECT_EQ(b.temperature(), theta);
+    // a temperature that is not finite is refused
+    std::vector<double> bad = a.state();
+    bad.back() = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_FALSE(b.set_state(bad));
+}
+
+TEST(TowerType, RefusesFrameKeysThatDoNotFit)
+{
+    auto refused = [] (const TowerType& t, const std::string& part) {
+        const std::string e = t.validate();
+        EXPECT_NE(e.find(part), std::string::npos) << "expected '" << part << "' in: " << e;
+    };
+    EXPECT_TRUE(generated_type().validate().empty()) << generated_type().validate();
+    { TowerType t = generated_type(); t.frame_file = "x.dat"; refused(t, "both give the tower's frame"); }
+    { TowerType t = generated_type(); t.weight = 1.0e4; refused(t, "weight is not given with erf.conductors.generated.frame_panels"); }
+    { TowerType t = generated_type(); t.leg_angle = {Real(0.1)}; refused(t, "leg_angle needs two values"); }
+    { TowerType t = generated_type(); t.brace_angle = {Real(0.01), Real(0.02)}; refused(t, "brace_angle needs two values"); }
+    { TowerType t = generated_type(); t.frame_panels = 0; refused(t, "leg_angle needs erf.conductors.generated.frame_panels"); }
+    { TowerType t = generated_type(); t.frame_panels = 201; refused(t, "frame_panels must be in [0, 200]"); }
+    { TowerType t = generated_type(); t.bracing = "k"; refused(t, "bracing must be crossed or single"); }
+    { TowerType t = generated_type(); t.yield_strength = Real(-1.0); refused(t, "yield_strength must be finite"); }
+    { TowerType t = generated_type(); t.steel_temperature = Real(1200.0); refused(t, "below 1200"); }
+    { TowerType t = generated_type(); t.steel_temperature = std::numeric_limits<Real>::quiet_NaN(); refused(t, "below 1200"); }
+    TowerType bare;
+    bare.name = "bare";
+    bare.base_width = 6.0; bare.top_width = 1.5; bare.solidity = 0.2; bare.arm_length = 12.0;
+    ASSERT_TRUE(bare.validate().empty());
+    { TowerType t = bare; t.member_file = "m.dat"; refused(t, "member_file needs erf.conductors.bare.frame_file"); }
+    { TowerType t = bare; t.bracing = "single"; refused(t, "bracing needs erf.conductors.bare.frame_panels"); }
+    { TowerType t = bare; t.yield_strength = Real(3.0e8); refused(t, "yield_strength needs erf.conductors.bare.frame_panels"); }
+    { TowerType t = bare; t.steel_temperature = Real(500.0); refused(t, "steel_temperature needs a frame model"); }
+    EXPECT_TRUE(generated_type().moves());
+    EXPECT_TRUE(generated_type().has_frame());
+    EXPECT_FALSE(bare.moves());
+    EXPECT_EQ(generated_type().yield(), Real(3.45e8));
 }

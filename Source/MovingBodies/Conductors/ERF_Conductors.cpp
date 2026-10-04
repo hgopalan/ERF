@@ -21,6 +21,7 @@
 #include "ERF_DiagnosticsLog.H"
 #include "ERF_Constants.H"
 #include "ERF_ConductorGeometry.H"
+#include "ERF_LatticeFrame.H"
 #include "ERF_MoorDynSystem.H"
 
 using namespace amrex;
@@ -39,6 +40,17 @@ std::string point_key (const LineInputs& s, int k)
     if (k == 0) { return base + ".end_a"; }
     if (k == s.num_spans()) { return base + ".end_b"; }
     return base + ".towers (tower " + std::to_string(k) + ")";
+}
+
+// the largest utilisation of a tower's members, and the member it is in (0 and 0 without members)
+std::pair<Real,int> governing (const std::vector<erf_towers::MemberCheck>& checks)
+{
+    std::pair<Real,int> g{Real(0.0), 0};
+    for (std::size_t m = 0; m < checks.size(); ++m) {
+        const Real u = static_cast<Real>(checks[m].utilisation);
+        if (m == 0 || u > g.first) { g = {u, checks[m].member}; }
+    }
+    return g;
 }
 }
 
@@ -230,11 +242,27 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
                     << (L.over_allowable ? ", already over an allowable" : "") << "\n";
         }
         for (std::size_t t = 0; t < m_towers.size(); ++t) {
-            if (const auto* fr = dynamic_cast<const erf_towers::FrameTower*>(m_models[t].get())) {
-                Print() << "  " << m_towers[t].name() << " bends as the frame of " << m_towers[t].type().frame_file << ": "
-                        << fr->frame().num_nodes() << " nodes, " << fr->frame().num_free_dofs() << " free degrees of freedom, "
-                        << fr->mass() << " kg, first natural frequency " << fr->frequency()
-                        << " Hz; MoorDyn moves its cross-arm as a coupled point\n";
+            if (const erf_towers::FrameTower* fr = frame_tower(t)) {
+                Print() << "  " << m_towers[t].name() << " bends as " << fr->source() << ": " << fr->frame().num_nodes() << " nodes, "
+                        << fr->frame().inputs().members.size() << " members, " << fr->frame().num_free_dofs()
+                        << " free degrees of freedom, " << fr->mass() << " kg, first natural frequency " << fr->frequency() << " Hz";
+                const Real theta = m_towers[t].type().steel_temperature;
+                if (theta != Real(20.0)) { Print() << " with its steel at " << theta << " C"; }
+                Print() << "; MoorDyn moves its cross-arm as a coupled point\n";
+                const auto checks = fr->member_checks(m_towers[t]);
+                if (!checks.empty()) {
+                    std::size_t worst = 0;
+                    int slender = 0, thin = 0;
+                    for (std::size_t m = 0; m < checks.size(); ++m) {
+                        if (checks[m].utilisation > checks[worst].utilisation) { worst = m; }
+                        slender += checks[m].slender ? 1 : 0;
+                        thin += checks[m].thin ? 1 : 0;
+                    }
+                    Print() << "    members (ASCE 10-15, in still air): utilisation " << checks[worst].utilisation << " at most, member "
+                            << checks[worst].member << " (" << erf_towers::role_name(checks[worst].role) << "); " << slender
+                            << " over their slenderness limit, " << thin << " with w/t over 25 (tower_" << m_towers[t].name()
+                            << "_members.csv)\n";
+                }
                 continue;
             }
             const auto* m = dynamic_cast<const erf_towers::OneModeTower*>(m_models[t].get());
@@ -243,6 +271,7 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
                     << " Hz on a rigid foundation): generalized mass " << m->generalized_mass() << " kg, stiffness "
                     << m->stiffness() << " N/m at the cross-arm; MoorDyn moves its cross-arm as a coupled point\n";
         }
+        write_member_tables();
     }
 }
 
@@ -311,24 +340,21 @@ Conductors::build_towers ()
         }
     }
     // the structural models once every line hangs from its towers: a frame model where the type gives a
-    // frame file (one frame per type, shared by its towers), else one mode where it gives a frequency
+    // frame file (one frame per type, shared by its towers) or generates one (one per type and cross-arm
+    // height to the millimetre, the first such tower's), else one mode where it gives a frequency
     m_frames.clear();
     for (const auto& tw : m_towers) {
         const erf_towers::TowerType& type = tw.type();
-        if (!type.frame_file.empty()) {
-            if (m_frames.count(type.name) == 0) {
-                const std::string key = "erf.conductors." + type.name + ".frame_file = " + type.frame_file;
-                erf_towers::FrameInputs fin;
-                std::string err = erf_towers::read_subdyn(type.frame_file, fin);
-                std::shared_ptr<const erf_towers::Frame> frame;
-                if (err.empty()) { frame = erf_towers::Frame::create(fin, err); }
-                if (!frame) { Abort(key + ": " + err); }
-                m_frames[type.name] = frame;
-            }
-            m_models.push_back(std::make_unique<erf_towers::FrameTower>(tw, m_frames[type.name], CONST_GRAV));
-        } else {
+        if (!type.has_frame()) {
             m_models.push_back(type.moves() ? std::make_unique<erf_towers::OneModeTower>(tw, CONST_GRAV) : nullptr);
+            continue;
         }
+        std::ostringstream fkey;
+        fkey << type.name;
+        if (type.frame_panels > 0) { fkey << " " << std::llround(1000.0 * static_cast<double>(tw.arm_height())); }
+        if (m_frames.count(fkey.str()) == 0) { m_frames[fkey.str()] = make_frame(tw); }
+        const TowerFrame& tf = m_frames[fkey.str()];
+        m_models.push_back(std::make_unique<erf_towers::FrameTower>(tw, tf.frame, CONST_GRAV, tf.designs, tf.source, tf.link_nodes));
     }
     // one attachment per line hanging from a tower, in the same order on the tower and in its model
     for (std::size_t t = 0; t < m_towers.size(); ++t) {
@@ -354,15 +380,162 @@ Conductors::build_towers ()
     }
 }
 
+Conductors::TowerFrame
+Conductors::make_frame (const erf_towers::Tower& tw) const
+{
+    const erf_towers::TowerType& type = tw.type();
+    const std::string key = "erf.conductors." + type.name;
+    TowerFrame tf;
+    erf_towers::FrameInputs fin;
+    std::vector<erf_towers::MemberDesign> designs;
+    std::string err;
+    std::string written;
+    std::vector<int> load_joints;
+    if (!type.frame_file.empty()) {
+        tf.source = key + ".frame_file = " + type.frame_file;
+        err = erf_towers::read_subdyn(type.frame_file, fin);
+        if (err.empty() && !type.member_file.empty()) {
+            const std::string mkey = key + ".member_file = " + type.member_file;
+            err = erf_towers::read_member_designs(type.member_file, designs);
+            if (err.empty()) { err = erf_towers::match_designs(fin, designs, type.member_file); }
+            if (!err.empty()) { Abort(mkey + ": " + err); }
+        }
+    } else {
+        written = m_in.diagnostics_dir + "/frame_" + tw.name() + ".dat";
+        tf.source = "the frame generated for " + key + " (frame_panels = " + std::to_string(type.frame_panels) + ", written to " +
+                    written + ")";
+        erf_towers::LatticeSpec spec;
+        spec.base_width = static_cast<double>(type.base_width);
+        spec.top_width = static_cast<double>(type.top_width);
+        spec.arm_height = static_cast<double>(tw.arm_height());
+        spec.arm_length = static_cast<double>(type.arm_length);
+        spec.arm_depth = static_cast<double>(type.arm_face());
+        spec.peak = static_cast<double>(type.peak);
+        spec.panels = type.frame_panels;
+        spec.crossed = (type.bracing != "single");
+        spec.leg_b = static_cast<double>(type.leg_angle[0]);
+        spec.leg_t = static_cast<double>(type.leg_angle[1]);
+        spec.brace_b = static_cast<double>(type.brace_angle[0]);
+        spec.brace_t = static_cast<double>(type.brace_angle[1]);
+        spec.yield = static_cast<double>(type.yield());
+        err = erf_towers::lattice_frame(spec, fin, designs, &load_joints);
+        if (!err.empty()) { err = "tower " + tw.name() + " (cross-arm " + std::to_string(spec.arm_height) + " m): " + err; }
+    }
+    if (!err.empty()) { Abort(tf.source + ": " + err); }
+    if (type.steel_temperature != Real(20.0)) { fin.temperature.assign(fin.members.size(), static_cast<double>(type.steel_temperature)); }
+    std::unique_ptr<erf_towers::Frame> frame = erf_towers::Frame::create(fin, err);
+    if (!frame) { Abort(tf.source + ": " + err); }
+    tf.frame = std::move(frame);
+    for (const int id : load_joints) { tf.link_nodes.push_back(tf.frame->node_of_joint(id)); }
+    if (!designs.empty()) { tf.designs = std::make_shared<const std::vector<erf_towers::MemberDesign>>(std::move(designs)); }
+    // a generated frame is written out, to read or to run through SubDyn
+    if (!written.empty() && ParallelDescriptor::IOProcessor()) {
+        std::ostringstream title;
+        title << "Lattice tower generated by ERF for " << key << " with its cross-arm at " << tw.arm_height()
+              << " m (tower-local axes: x along the line, y along the cross-arm, z up)";
+        err = erf_towers::write_subdyn(fin, written, title.str());
+        if (!err.empty()) { Abort(tf.source + ": " + err); }
+        const std::string mfile = m_in.diagnostics_dir + "/frame_" + tw.name() + "_members.dat";
+        if (!erf_towers::write_member_designs(mfile, *tf.designs, "Member design data of " + written)) {
+            Abort(tf.source + ": cannot write '" + mfile + "'");
+        }
+    }
+    return tf;
+}
+
+const erf_towers::FrameTower*
+Conductors::frame_tower (std::size_t t) const
+{
+    return dynamic_cast<const erf_towers::FrameTower*>(m_models[t].get());
+}
+
+std::vector<erf_towers::MemberCheck>
+Conductors::member_checks (std::size_t t) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(t < m_towers.size(), "Conductors::member_checks: no such tower");
+    const erf_towers::FrameTower* fr = frame_tower(t);
+    return fr ? fr->member_checks(m_towers[t]) : std::vector<erf_towers::MemberCheck>();
+}
+
 void
 Conductors::add_tower_stats ()
 {
     m_tower_stats.clear();
-    for (const auto& t : m_towers) {
-        const std::string name = "tower_" + t.name();
+    m_member_stats.clear();
+    for (std::size_t t = 0; t < m_towers.size(); ++t) {
+        const std::string name = "tower_" + m_towers[t].name();
         std::vector<std::string> q{"drag_h", "line_h", "shear", "overturning", "max_compression", "max_uplift", "over_allowable"};
-        if (t.type().moves()) { q.emplace_back("arm_displacement"); }
+        if (m_towers[t].type().moves()) { q.emplace_back("arm_displacement"); }
+        const erf_towers::FrameTower* fr = frame_tower(t);
+        const bool checked = fr && fr->has_member_checks();
+        if (checked) { q.emplace_back("max_utilisation"); }
         m_tower_stats.emplace_back(name, m_in.diagnostics_dir + "/" + name, q);
+        m_member_stats.emplace_back();
+        if (checked) {
+            // per member: its axial force (tension positive, the larger of its tension and compression) and its utilisation
+            std::vector<std::string> mq;
+            for (const auto& m : fr->frame().inputs().members) {
+                mq.push_back("m" + std::to_string(m.id) + "_axial");
+                mq.push_back("m" + std::to_string(m.id) + "_utilisation");
+            }
+            m_member_stats.back() = std::make_unique<erf_actuator::RunningStats>(name + "_members",
+                                                                                 m_in.diagnostics_dir + "/" + name + "_members", mq);
+        }
+    }
+}
+
+void
+Conductors::write_member_tables () const
+{
+    if (!ParallelDescriptor::IOProcessor()) { return; }
+    for (std::size_t t = 0; t < m_towers.size(); ++t) {
+        const erf_towers::FrameTower* fr = frame_tower(t);
+        if (!fr || !fr->has_member_checks()) { continue; }
+        const std::string file = m_in.diagnostics_dir + "/tower_" + m_towers[t].name() + "_members.csv";
+        std::ofstream out(file, std::ios::trunc);
+        if (!out) { Abort("cannot write '" + file + "'"); }
+        out << "member,role,joint_a,joint_b,temperature,length,r,L_r,KL_r,limit,w_t,yield,E,Fa,tension_capacity,compression_capacity,"
+               "slender,thin\n" << std::setprecision(10);
+        const auto checks = fr->member_checks(m_towers[t]);
+        const auto& in = fr->frame().inputs();
+        for (std::size_t m = 0; m < checks.size(); ++m) {
+            const auto& c = checks[m];
+            out << c.member << "," << erf_towers::role_name(c.role) << "," << in.members[m].joint_a << ","
+                << in.members[m].joint_b << ","
+                << fr->temperature()[m] << "," << c.length << "," << c.r << "," << c.slenderness << "," << c.effective << ","
+                << c.limit << ","
+                << c.w_t << "," << c.yield << "," << c.E << "," << c.compression_stress << "," << c.tension_capacity << ","
+                << c.compression_capacity << "," << (c.slender ? 1 : 0) << "," << (c.thin ? 1 : 0) << "\n";
+        }
+        if (!out) { Abort("cannot write '" + file + "'"); }
+    }
+}
+
+void
+Conductors::write_tower_frames (double time, bool first) const
+{
+    if (!ParallelDescriptor::IOProcessor()) { return; }
+    for (std::size_t t = 0; t < m_towers.size(); ++t) {
+        const erf_towers::FrameTower* fr = frame_tower(t);
+        if (!fr) { continue; }
+        const erf_towers::Frame& f = fr->frame();
+        std::ofstream out;
+        if (erf_actuator::open_log(out, m_in.diagnostics_dir + "/tower_" + m_towers[t].name() + "_frame.dat", first)) {
+            // the header: the nodes' positions (frame axes, m), then the members checked
+            out << "# nodes " << f.num_nodes() << ":";
+            for (std::size_t n = 0; n < f.num_nodes(); ++n) {
+                const auto& x = f.node_position(n);
+                out << " " << x[0] << " " << x[1] << " " << x[2];
+            }
+            out << "\n# members " << (fr->has_member_checks() ? f.inputs().members.size() : 0) << ":";
+            if (fr->has_member_checks()) { for (const auto& m : f.inputs().members) { out << " " << m.id; } }
+            out << "\n# time, then dx dy dz per node (m), then the utilisation per member\n";
+        }
+        out << std::setprecision(10) << time;
+        const auto u = fr->node_displacements();
+        for (std::size_t n = 0; n < f.num_nodes(); ++n) { out << " " << u[6 * n] << " " << u[6 * n + 1] << " " << u[6 * n + 2]; }
+        for (const auto& c : fr->member_checks(m_towers[t])) { out << " " << c.utilisation; }
+        out << "\n";
     }
 }
 
@@ -584,11 +757,13 @@ Conductors::write_towers (double time, bool first) const
     const bool header = erf_actuator::open_log(out, m_in.diagnostics_dir + "/towers.dat", first);
     if (header) {
         out << "time";
-        for (const auto& t : m_towers) {
+        for (std::size_t ti = 0; ti < m_towers.size(); ++ti) {
+            const auto& t = m_towers[ti];
             const std::string& n = t.name();
             for (const char* c : {"_drag_Fx", "_drag_Fy", "_drag_Fz", "_line_Fx", "_line_Fy", "_line_Fz", "_shear", "_overturning",
                                   "_vertical", "_max_compression", "_max_uplift", "_over"}) { out << " " << n << c; }
             if (t.type().moves()) { out << " " << n << "_arm_dx " << n << "_arm_dy"; }
+            if (m_member_stats[ti]) { out << " " << n << "_utilisation " << n << "_member"; }
         }
         out << "\n";
     }
@@ -603,6 +778,10 @@ Conductors::write_towers (double time, bool first) const
         if (t.type().moves()) {
             const auto x = t.arm_displacement();
             out << " " << x[0] << " " << x[1];
+        }
+        if (m_member_stats[ti]) {
+            const auto g = governing(member_checks(ti));
+            out << " " << g.first << " " << g.second;
         }
     }
     out << "\n";
@@ -884,6 +1063,12 @@ Conductors::restore (const std::string& dir)
                   "; the lines' tower_type and erf.conductors.tower_types must match the run being restarted");
         }
     }
+    for (auto& st : m_member_stats) {
+        if (st && !st->read_state(dir)) {
+            Abort("the conductor checkpoint '" + dir + "' holds no statistics " + st->name() +
+                  "; the towers' frames and their member design data must match the run being restarted");
+        }
+    }
     if (!m_towers.empty()) {
         // the members' last drag, so that the restored drag on the flow is the checkpointed step's
         Vector<char> chars;
@@ -911,7 +1096,13 @@ Conductors::restore (const std::string& dir)
         for (const std::string& f : log_files()) { erf_conductors::trim_log_after(f, m_time); }
         // the towers' rows carry the time their step starts at: the restarted run writes the row at m_time
         erf_conductors::trim_log_after(m_in.diagnostics_dir + "/towers.dat", m_time, true);
+        for (std::size_t t = 0; t < m_towers.size(); ++t) {
+            if (frame_tower(t) && m_in.node_output_int > 0) {
+                erf_conductors::trim_log_after(m_in.diagnostics_dir + "/tower_" + m_towers[t].name() + "_frame.dat", m_time, true);
+            }
+        }
     }
+    write_member_tables();
     ParallelDescriptor::Barrier();
     m_restored = true;
 }
@@ -938,6 +1129,7 @@ Conductors::write_checkpoint (const std::string& chkdir) const
     for (const auto& st : m_pair_stats) { st.write_state(dir); }
     for (const auto& st : m_tstats) { st.write_state(dir); }
     for (const auto& st : m_tower_stats) { st.write_state(dir); }
+    for (const auto& st : m_member_stats) { if (st) { st->write_state(dir); } }
     if (!m_towers.empty() && ParallelDescriptor::IOProcessor()) {
         std::ofstream out(dir + "/tower_loads", std::ios::trunc);
         out << std::setprecision(std::numeric_limits<double>::max_digits10);
@@ -1083,6 +1275,7 @@ Conductors::advance (int lev, double time, double dt,
         // the members' drag from the flow at the start of the step, which the step holds
         load_towers(tower_wind(U, V, W, z_phys_nd, geom));
         if (first || m_step % m_in.diagnostics_int == 0) { write_towers(time, first); }
+        if (m_in.node_output_int > 0 && (first || m_step % m_in.node_output_int == 0)) { write_tower_frames(time, first); }
         // the same gate as the other statistics: the steps that end at or after stats_start
         if (time + dt >= m_in.stats_start) {
             for (std::size_t t = 0; t < m_towers.size(); ++t) {
@@ -1094,6 +1287,18 @@ Conductors::advance (int lev, double time, double dt,
                 if (m_models[t]) {
                     const auto x = m_towers[t].arm_displacement();
                     q.push_back(std::hypot(x[0], x[1]));
+                }
+                if (m_member_stats[t]) {
+                    const auto checks = member_checks(t);
+                    q.push_back(governing(checks).first);
+                    std::vector<Real> mq;
+                    mq.reserve(2 * checks.size());
+                    for (const auto& c : checks) {
+                        mq.push_back(static_cast<Real>(c.tension >= c.compression ? c.tension : -c.compression));
+                        mq.push_back(static_cast<Real>(c.utilisation));
+                    }
+                    m_member_stats[t]->accumulate(time, mq);
+                    if (write) { m_member_stats[t]->write(); }
                 }
                 m_tower_stats[t].accumulate(time, q);
                 if (write) { m_tower_stats[t].write(); }

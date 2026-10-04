@@ -38,17 +38,50 @@ std::string TowerType::validate () const
     if (!non_negative(allowable_uplift)) { return key + "allowable_uplift must be finite and >= 0 (N; 0: not checked)"; }
     if (!non_negative(allowable_compression)) { return key + "allowable_compression must be finite and >= 0 (N; 0: not checked)"; }
     if (!non_negative(frequency)) { return key + "frequency must be finite and >= 0 (Hz; 0: the tower stands still)"; }
-    if (!frame_file.empty()) {
+    if (frame_panels < 0 || frame_panels > 200) { return key + "frame_panels must be in [0, 200] (0: no generated frame)"; }
+    if (!frame_file.empty() && frame_panels > 0) {
+        return key + "frame_file and " + key + "frame_panels both give the tower's frame; give one";
+    }
+    if (has_frame()) {
         // the frame model gives the stiffness, the mass and the footings
+        const std::string source = key + (frame_file.empty() ? "frame_panels" : "frame_file");
         const std::pair<const char*, Real> from_frame[] = {
             {"frequency", frequency}, {"weight", weight}, {"foundation_rotational_stiffness", foundation_rotational_stiffness},
             {"foundation_lateral_stiffness", foundation_lateral_stiffness}};
         for (const auto& kv : from_frame) {
             if (kv.second != 0.0) {
-                return key + kv.first + " is not given with " + key + "frame_file: the frame model sets the tower's stiffness, "
+                return key + kv.first + " is not given with " + source + ": the frame model sets the tower's stiffness, "
                        "mass and footings";
             }
         }
+    }
+    if (!member_file.empty() && frame_file.empty()) {
+        return key + "member_file needs " + key + "frame_file, whose members it describes (a generated frame has its own)";
+    }
+    const std::pair<const char*, const std::vector<Real>*> angles[] = {{"leg_angle", &leg_angle}, {"brace_angle", &brace_angle}};
+    for (const auto& kv : angles) {
+        const std::vector<Real>& a = *kv.second;
+        if (frame_panels == 0) {
+            if (!a.empty()) { return key + kv.first + " needs " + key + "frame_panels, the frame it sizes"; }
+            continue;
+        }
+        if (a.size() != 2 || !positive(a[0]) || !positive(a[1]) || !(a[1] < a[0])) {
+            return key + kv.first + " needs two values, the equal-leg angle's leg width and thickness (m), with 0 < thickness < width";
+        }
+    }
+    if (frame_panels == 0 && !bracing.empty()) { return key + "bracing needs " + key + "frame_panels, the frame it braces"; }
+    if (!bracing.empty() && bracing != "crossed" && bracing != "single") {
+        return key + "bracing must be crossed or single, not '" + bracing + "'";
+    }
+    if (!non_negative(yield_strength)) { return key + "yield_strength must be finite and >= 0 (Pa; 0: 3.45e8)"; }
+    if (frame_panels == 0 && yield_strength != 0.0) {
+        return key + "yield_strength needs " + key + "frame_panels (the members of frame_file take theirs from member_file)";
+    }
+    if (!(std::isfinite(steel_temperature) && steel_temperature > -273.15 && steel_temperature < 1200.0)) {
+        return key + "steel_temperature must be above -273.15 and below 1200 (C): the steel keeps no stiffness at 1200 C";
+    }
+    if (steel_temperature != 20.0 && !has_frame()) {
+        return key + "steel_temperature needs a frame model (" + key + "frame_file or " + key + "frame_panels), whose steel it heats";
     }
     if (frequency > 0.0 && !(weight > 0.0)) { return key + "frequency needs the tower's weight (N), which sets its mass"; }
     if (!(damping_ratio >= 0.0 && damping_ratio < 1.0)) { return key + "damping_ratio must be in [0, 1) (fraction of critical)"; }

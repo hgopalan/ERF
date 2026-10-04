@@ -462,6 +462,13 @@ ConductorInputs ConductorInputs::read ()
         pt.query("foundation_rotational_stiffness", t.foundation_rotational_stiffness);
         pt.query("foundation_lateral_stiffness", t.foundation_lateral_stiffness);
         pt.query("frame_file", t.frame_file);
+        pt.query("member_file", t.member_file);
+        pt.query("frame_panels", t.frame_panels);
+        pt.queryarr("leg_angle", t.leg_angle);
+        pt.queryarr("brace_angle", t.brace_angle);
+        pt.query("bracing", t.bracing);
+        pt.query("yield_strength", t.yield_strength);
+        pt.query("steel_temperature", t.steel_temperature);
         const std::string terr = t.validate();
         if (!terr.empty()) { Abort(terr); }
         in.tower_types.push_back(t);

@@ -1,6 +1,8 @@
 # Run a deck straight to STEP_END, run it again to STEP_CHK with a checkpoint there,
 # restart from that checkpoint to STEP_END, and require the restarted run's plotfile
-# at STEP_END to equal the straight run's with fcompare. Each leg uses the forwarded
+# at STEP_END to equal the straight run's with fcompare. With OVERRUN set, the second run
+# goes on past its checkpoint to STEP_END before the restart, so the logs it appended to
+# hold rows from after the checkpoint, which the restarted run must drop. Each leg uses the forwarded
 # RUN_TIMEOUT, and the enclosing CTest timeout is sized separately by the caller.
 # -DX= defines X as empty, so test for a value, not for DEFINED
 include("${CMAKE_CURRENT_LIST_DIR}/MPILauncher.cmake")
@@ -98,9 +100,13 @@ endif()
 run_erf("${STRAIGHT_DIR}" "simulation.log" ${RUN_TIMEOUT}
         "max_step=${STEP_END}" "erf.check_int=-1" "erf.plot_int_1=${STEP_END}"
         ${plot2d_end})
-# to the checkpoint step, writing it there
+# to the checkpoint step, writing it there (on to the end with OVERRUN)
+set(_chk_run_end ${STEP_CHK})
+if(OVERRUN)
+    set(_chk_run_end ${STEP_END})
+endif()
 run_erf("${RESTART_DIR}" "checkpoint.log" ${RUN_TIMEOUT}
-        "max_step=${STEP_CHK}" "erf.check_int=${STEP_CHK}" "erf.plot_int_1=-1"
+        "max_step=${_chk_run_end}" "erf.check_int=${STEP_CHK}" "erf.plot_int_1=-1"
         ${plot2d_off})
 if(NOT EXISTS "${RESTART_DIR}/${CHKFILE}/Header")
     message(FATAL_ERROR "RunRestartParity.cmake: no ${CHKFILE} written by the checkpoint run")
