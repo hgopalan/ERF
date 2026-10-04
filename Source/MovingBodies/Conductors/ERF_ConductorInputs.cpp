@@ -461,6 +461,7 @@ ConductorInputs ConductorInputs::read ()
         pt.query("damping_ratio", t.damping_ratio);
         pt.query("foundation_rotational_stiffness", t.foundation_rotational_stiffness);
         pt.query("foundation_lateral_stiffness", t.foundation_lateral_stiffness);
+        pt.query("frame_file", t.frame_file);
         const std::string terr = t.validate();
         if (!terr.empty()) { Abort(terr); }
         in.tower_types.push_back(t);

@@ -837,6 +837,20 @@ restart parity tests ``Conductors_MovingTowers_Restart`` and
 the checkpoint. The flow is ``Conductors_Terrain``'s gold, since nothing
 goes back into it.
 
+``Conductors_FrameTowers`` (stub) and ``Conductors_FrameTowers_MoorDyn``
+(real library) run the same lines on towers that bend as their frame model
+(:ref:`sec:TowerFrame`): every lattice tower stands on the SubDyn frame of
+``lattice_frame.dat`` (76 beam members on four fixed legs, first natural
+frequency 4.22 Hz; case T of ``Tests/test_files/FrameSubDynTower``), its
+members' drag and its line's pull carried onto the frame's nodes, and MoorDyn
+moves the cross-arms as coupled points. ``conductors/towers.dat`` (loads,
+footings from the frame's support reactions, cross-arm displacement), the
+statistics of L1's first tower and the middle span of one line are compared
+with golds of each library; the restart parity tests
+``Conductors_FrameTowers_Restart`` and ``Conductors_FrameTowers_Restart_MoorDyn``
+carry the frames' Newmark state across the checkpoint. The flow is
+``Conductors_Terrain``'s gold.
+
 ``Conductors_ImmersedHills`` (stub) and ``Conductors_ImmersedHills_MoorDyn``
 (real library) put the same hills on a flat mesh as an immersed boundary
 (``ImmersedForcing``, the wall law on the hill surface, the point-implicit
@@ -887,7 +901,7 @@ runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with
 Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files/Conductors_FlowWind`_,
 `Tests/test_files/Conductors_DragOnFlow`_, `Tests/test_files/Conductors_Circuit`_,
 `Tests/test_files/Conductors_Terrain`_, `Tests/test_files/Conductors_MovingTowers`_,
-`Tests/test_files/Conductors_ImmersedHills`_
+`Tests/test_files/Conductors_FrameTowers`_, `Tests/test_files/Conductors_ImmersedHills`_
 
 .. _`Tests/test_files/Conductors_PrescribedWind`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_PrescribedWind
 
@@ -900,5 +914,7 @@ Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files
 .. _`Tests/test_files/Conductors_Terrain`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_Terrain
 
 .. _`Tests/test_files/Conductors_MovingTowers`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_MovingTowers
+
+.. _`Tests/test_files/Conductors_FrameTowers`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_FrameTowers
 
 .. _`Tests/test_files/Conductors_ImmersedHills`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_ImmersedHills

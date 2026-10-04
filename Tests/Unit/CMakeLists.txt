@@ -341,11 +341,14 @@ if(ERF_ENABLE_MOORDYN)
   # refuse what it cannot model, and give the stiffness at a lattice tower's peak that SubDyn
   # gives for the same input file (Tests/test_files/FrameSubDynTower). Its mass and modes must
   # match beam theory and SubDyn's natural frequencies, and its Newmark response the exact discrete
-  # response of each mode, without losing energy when undamped.
+  # response of each mode, without losing energy when undamped. A tower standing on its frame must
+  # carry its drag and line loads onto the frame without losing force or moment, settle where the
+  # frame's static solution puts it, and give its footings the loads and its weight.
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestFrame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestFrameSubDyn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestFrameDynamics.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestFrameTower.cpp
   )
   target_compile_definitions(${erf_exe_name} PRIVATE ERF_FRAME_TEST_FILES="${PROJECT_SOURCE_DIR}/Tests/test_files/FrameSubDynTower")
   # Motivation: against the real MoorDyn-C (the tests skip on the stub, which has no line

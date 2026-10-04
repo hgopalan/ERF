@@ -5168,12 +5168,24 @@ wind, which bend under their loads when the type has a ``frequency``.
 |                                                           | point; 0: the tower stands still and its attachments are |                      |                          |
 |                                                           | fixed MoorDyn points                                     |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.<type>.damping_ratio**                   | the structural damping ratio of that mode (-, fraction   | Real in [0, 1)       | 0.02                     |
-|                                                           | of critical)                                             |                      |                          |
+| **erf.conductors.<type>.damping_ratio**                   | the structural damping ratio (-, fraction of critical):  | Real in [0, 1)       | 0.02                     |
+|                                                           | of the one mode with frequency; with frame_file, the     |                      |                          |
+|                                                           | frame's Rayleigh damping at its first natural frequency  |                      |                          |
+|                                                           | and at ten times it                                      |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.foundation_rotational_stiffness** | the footing's resistance to tilting (N m/rad)            | Real >= 0 (0: rigid) | 0                        |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.foundation_lateral_stiffness**    | the footing's resistance to sliding (N/m)                | Real >= 0 (0: rigid) | 0                        |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.frame_file**                      | a SubDyn input file of the tower's frame in tower-local  | File name; not with  | none                     |
+|                                                           | axes (origin at the base centre, x along the line, y     | frequency, weight or |                          |
+|                                                           | along the cross-arm, z up; see the lattice tower frame   | the foundation       |                          |
+|                                                           | model): the tower bends as that frame, which gives its   | stiffnesses          |                          |
+|                                                           | stiffness, mass and footing loads; MoorDyn moves its     |                      |                          |
+|                                                           | cross-arm as a coupled point. Its four supports stand at |                      |                          |
+|                                                           | z = 0, one per quadrant, and every drag node and line    |                      |                          |
+|                                                           | attachment of the tower lies within base_width of a      |                      |                          |
+|                                                           | frame node                                               |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.transformers**                           | names of the transformers the lines end on: every line   | Strings, each the    | none                     |
 |                                                           | end whose x, y lies on a transformer's footprint is      | name of no line or   |                          |

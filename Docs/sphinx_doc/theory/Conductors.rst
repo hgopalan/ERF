@@ -658,6 +658,17 @@ coupling step the tower is still growing through 18 mm after 15 s. On the moving
 bend at 1.67 Hz (2 Hz lowered by footings of :math:`10^9` N m/rad) and the
 hilltop tower leans about 3 cm in its 25 m/s wind.
 
+A tower type that gives ``erf.conductors.<type>.frame_file`` bends as a frame
+model instead of one mode: the SubDyn input file of its lattice, in tower-local
+axes, gives every member's stiffness and mass (:ref:`sec:TowerFrame`, section
+"Coupling to the conductor lines"). The drag nodes and the attachments are tied
+to the frame's nodes, so the coupling above runs unchanged, and the footings'
+loads come from the frame's support reactions. On the frame-towers test case
+(the moving-towers lines on a 76-member frame with a first natural frequency of
+4.22 Hz) the coupling converges in three or four iterations per coupling step
+with the real library, the hilltop tower carries the base shear of the one-mode
+tower (23.1 kN in both) and its cross-arm moves 4.4 mm, the frame being stiffer.
+
 A network over hills
 --------------------
 

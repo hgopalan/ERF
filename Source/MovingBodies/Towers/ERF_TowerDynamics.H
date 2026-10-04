@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include <AMReX.H>
 #include <AMReX_REAL.H>
 
 #include "ERF_Tower.H"
@@ -66,6 +67,16 @@ public:
     virtual std::vector<double> state () const = 0;
     /** Restore a state from state(): returns false, changing nothing, when the values do not fit the model or are not finite. */
     virtual bool set_state (const std::vector<double>& s) = 0;
+    /**
+     * The load on the tower's footings, when the model knows its support reactions: fills load and
+     * returns true. Otherwise returns false and Tower::foundation() estimates it from the drag nodes'
+     * loads and inertial forces (d'Alembert). Frame: ERF, z up.
+     */
+    virtual bool foundation (const Tower& tower, FoundationLoad& load) const
+    {
+        amrex::ignore_unused(tower, load);
+        return false;
+    }
 };
 
 /**

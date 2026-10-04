@@ -45,6 +45,12 @@ namespace erf_towers {
  *                                                                   >= 0, default 0: rigid)
  *   erf.conductors.lattice.foundation_lateral_stiffness    = 1.0e8 (N/m, the footing's resistance to sliding;
  *                                                                   >= 0, default 0: rigid)
+ *   erf.conductors.lattice.frame_file = tower.dat (a SubDyn input file of the tower's frame in tower-local axes:
+ *                                       origin at the base centre, x along the line, y along the cross-arm,
+ *                                       z up; default none. The tower then bends as that frame model, which
+ *                                       gives its stiffness, mass and footings: frequency, weight and the
+ *                                       foundation stiffnesses are not given with it. damping_ratio sets the
+ *                                       frame's Rayleigh damping at its first natural frequency and ten times it)
  *
  * Every value must also be finite. The members mirror the keys, with the same units.
  */
@@ -67,6 +73,7 @@ struct TowerType
     amrex::Real damping_ratio{0.02};                   //!< - (fraction of critical)
     amrex::Real foundation_rotational_stiffness{0.0};  //!< N m/rad; 0: rigid
     amrex::Real foundation_lateral_stiffness{0.0};     //!< N/m; 0: rigid
+    std::string frame_file;                            //!< SubDyn input file of the tower's frame; empty: none
 
     /** The number of drag nodes on the cross-arm, one at the middle of each of its equal segments. */
     static constexpr int arm_segments = 4;
@@ -75,8 +82,8 @@ struct TowerType
     amrex::Real arm_face () const { return arm_depth > 0.0 ? arm_depth : top_width; }
     /** The spacing of the legs' footings (m): leg_spacing, or base_width when leg_spacing is 0. */
     amrex::Real legs () const { return leg_spacing > 0.0 ? leg_spacing : base_width; }
-    /** Whether the tower bends under its loads (a frequency is given) or stands still. */
-    bool moves () const { return frequency > 0.0; }
+    /** Whether the tower bends under its loads (a frequency or a frame file is given) or stands still. */
+    bool moves () const { return frequency > 0.0 || !frame_file.empty(); }
     /** The force coefficient on the members' area (-): drag_coefficient, or the lattice value of the solidity. */
     amrex::Real force_coefficient () const;
     /** Check every range: returns an empty string when the type is acceptable, else the message, naming the key. */

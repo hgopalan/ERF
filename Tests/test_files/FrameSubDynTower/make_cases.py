@@ -60,19 +60,62 @@ def members():
     return m
 
 
+def joints_t():
+    """Case T: the lattice tower of the Conductors_FrameTowers deck in tower-local axes (x along the
+    line, y along the cross-arm, z up, origin at the base centre): 5 levels at z = 7.5 k, half-width
+    3 - 2.25 z / 30; 21 = the cross-arm's centre (0, 0, 30) the line hangs from; 22, 23 = the arm tips
+    (0, +-6, 30)."""
+    out = []
+    for k in range(5):
+        z = 7.5 * k
+        h = 3.0 - 2.25 * z / 30.0
+        for c in range(4):
+            sx, sy = SIGNS[c]
+            out.append((jid(k, c), sx * h, sy * h, z))
+    out.append((21, 0.0, 0.0, 30.0))
+    out.append((22, 0.0, 6.0, 30.0))
+    out.append((23, 0.0, -6.0, 30.0))
+    return out
+
+
+def members_t():
+    m = []
+    for c in range(4):
+        for k in range(4):
+            m.append(("leg", jid(k, c), jid(k + 1, c)))
+    for k in range(1, 5):
+        for c in range(4):
+            m.append(("strut", jid(k, c), jid(k, c + 1)))
+    for k in range(4):
+        for c in range(4):
+            m.append(("diag", jid(k, c), jid(k + 1, c + 1)))
+            m.append(("diag", jid(k, c + 1), jid(k + 1, c)))
+    for c in range(4):
+        m.append(("centre", jid(4, c), 21))
+    # each arm tip to the two top corners and the two corners one level down on its side
+    for tip, corners in ((22, (0, 1)), (23, (2, 3))):
+        for k in (4, 3):
+            for c in corners:
+                m.append(("arm", jid(k, c), tip))
+    return m
+
+
 STEEL = "2.0E+11  7.7E+10  7850.0"
 
 
 def write_dat(case, path, ssi_name=None):
-    A = case == "A"
+    A = case in ("A", "T")
     femmod = 1 if A else 3
     ndiv = 1 if A else 2
-    J = joints()
-    M = members()
+    J = joints_t() if case == "T" else joints()
+    M = members_t() if case == "T" else members()
+    interface = 21 if case == "T" else 17
     L = []
     w = L.append
     w("----------- SubDyn MultiMember Support Structure Input File ---------------------------")
-    w("Lattice tower oracle case %s for the ERF frame solver (4 tapered legs, struts, X-bracing, peak, cross-arm)." % case)
+    w(("Lattice tower case T for the ERF conductor coupling, tower-local axes (4 tapered legs, struts, X-bracing, cross-arm)."
+       if case == "T" else
+       "Lattice tower oracle case %s for the ERF frame solver (4 tapered legs, struts, X-bracing, peak, cross-arm)." % case))
     w("-------------------------- SIMULATION CONTROL -----------------------------------------")
     w("%-16s Echo        - Echo input data to \"<rootname>.SD.ech\" (flag)" % ("False" if A else "True"))
     w("\"DEFAULT\"        SDdeltaT    - Local Integration Step. If \"default\", the glue-code integration step will be used.")
@@ -111,7 +154,7 @@ def write_dat(case, path, ssi_name=None):
     w("             1   NInterf     - Number of interface joints locked to the Transition Piece (TP):  be sure to remove all rigid motion dofs")
     w("IJointID   TPID   ItfTDXss    ItfTDYss    ItfTDZss    ItfRDXss    ItfRDYss    ItfRDZss     ![Global Coordinate System]")
     w("  (-)      (-)     (flag)      (flag)      (flag)      (flag)      (flag)      (flag)")
-    w("  17        1        1           1           1           1           1           1")
+    w("  %2d        1        1           1           1           1           1           1" % interface)
     w("----------------------------------- MEMBERS -------------------------------------------")
     w("            %2d   NMembers    - Number of members (-)" % len(M))
     w("MemberID   MJointID1   MJointID2   MPropSetID1   MPropSetID2  MType  COSMID/MSpin   ![MType={1:beam circ., 2:cable, 3:rigid, 4:beam arb., 5:spring}. COMSID={-1:none}]")
@@ -199,8 +242,10 @@ def write_dat(case, path, ssi_name=None):
 def write_dvr(case, path, datname, root):
     L = []
     w = L.append
+    zref = 30 if case == "T" else 25
     w("SubDyn Driver file for stand-alone applications")
-    w("Lattice tower oracle case %s: Guyan KBBt at the peak joint (TP ref point 0,0,25)." % case)
+    w(("Lattice tower case T: Guyan KBBt at the cross-arm centre (TP ref point 0,0,30)." if case == "T" else
+       "Lattice tower oracle case %s: Guyan KBBt at the peak joint (TP ref point 0,0,25)." % case))
     w("False               Echo           - Echo the input file data (flag)")
     w("---------------------- ENVIRONMENTAL CONDITIONS -------------------------------------------------")
     w("9.80665             Gravity        - Gravity (m/s^2).")
@@ -213,7 +258,7 @@ def write_dvr(case, path, datname, root):
     w("1                                   NTPs           - Number of transition pieces")
     w("0                                   TP_RefPoint_X  - X location of the TP reference points in global coordinates (m) {require NTPs entries}")
     w("0                                   TP_RefPoint_Y  - Y location of the TP reference points in global coordinates (m) {require NTPs entries}")
-    w("25                                  TP_RefPoint_Z  - Z location of the TP reference points in global coordinates (m) {require NTPs entries}")
+    w("%-36dTP_RefPoint_Z  - Z location of the TP reference points in global coordinates (m) {require NTPs entries}" % zref)
     w("0                                   SubRotateZ     - Rotation angle of the structure geometry in [deg] about the global Z axis.")
     w("---------------------- INPUTS -------------------------------------------------------------------")
     w("0                   InputsMod      - Inputs model {0: all inputs are zero for every timestep, 1: steady state inputs, 2: read inputs from a file (InputsFile)} (switch)")
@@ -256,11 +301,11 @@ def write_ssi(path, with_mass=False):
 
 
 if __name__ == "__main__":
-    for case in ("A", "B", "C"):
+    for case in ("A", "B", "C", "T"):
         d = os.path.join(HERE, "case" + case)
         os.makedirs(d, exist_ok=True)
         root = "tower" + case
-        ssi = "tower%s_SSI_joint1.dat" % case if case != "A" else None
+        ssi = "tower%s_SSI_joint1.dat" % case if case in ("B", "C") else None
         write_dat(case, os.path.join(d, root + ".dat"), ssi)
         write_dvr(case, os.path.join(d, root + ".dvr"), root + ".dat", root)
         if ssi:

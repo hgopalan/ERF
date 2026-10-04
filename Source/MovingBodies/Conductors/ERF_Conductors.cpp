@@ -221,14 +221,22 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
     if (!m_towers.empty()) {
         load_towers_with_lines();
         Print() << "erf.conductors: " << m_towers.size() << " lattice tower(s) loaded by the wind and the lines:\n";
-        for (const auto& t : m_towers) {
-            const auto L = t.foundation();
+        for (std::size_t ti = 0; ti < m_towers.size(); ++ti) {
+            const auto& t = m_towers[ti];
+            const auto L = tower_foundation(ti);
             Print() << "  " << t.name() << " (" << t.type().name << ", cross-arm " << t.arm_height() << " m): still-air line pull "
                     << std::hypot(t.line_force()[0], t.line_force()[1]) << " N horizontal, " << -t.line_force()[2]
                     << " N down; legs " << L.max_compression << " N compression, " << L.max_uplift << " N uplift at most"
                     << (L.over_allowable ? ", already over an allowable" : "") << "\n";
         }
         for (std::size_t t = 0; t < m_towers.size(); ++t) {
+            if (const auto* fr = dynamic_cast<const erf_towers::FrameTower*>(m_models[t].get())) {
+                Print() << "  " << m_towers[t].name() << " bends as the frame of " << m_towers[t].type().frame_file << ": "
+                        << fr->frame().num_nodes() << " nodes, " << fr->frame().num_free_dofs() << " free degrees of freedom, "
+                        << fr->mass() << " kg, first natural frequency " << fr->frequency()
+                        << " Hz; MoorDyn moves its cross-arm as a coupled point\n";
+                continue;
+            }
             const auto* m = dynamic_cast<const erf_towers::OneModeTower*>(m_models[t].get());
             if (m == nullptr) { continue; }
             Print() << "  " << m_towers[t].name() << " bends at " << m->frequency() << " Hz (" << m_towers[t].type().frequency
@@ -302,9 +310,25 @@ Conductors::build_towers ()
             m_line_towers[line].emplace_back(t, att);
         }
     }
-    // the structural models once every line hangs from its towers
+    // the structural models once every line hangs from its towers: a frame model where the type gives a
+    // frame file (one frame per type, shared by its towers), else one mode where it gives a frequency
+    m_frames.clear();
     for (const auto& tw : m_towers) {
-        m_models.push_back(tw.type().moves() ? std::make_unique<erf_towers::OneModeTower>(tw, CONST_GRAV) : nullptr);
+        const erf_towers::TowerType& type = tw.type();
+        if (!type.frame_file.empty()) {
+            if (m_frames.count(type.name) == 0) {
+                const std::string key = "erf.conductors." + type.name + ".frame_file = " + type.frame_file;
+                erf_towers::FrameInputs fin;
+                std::string err = erf_towers::read_subdyn(type.frame_file, fin);
+                std::shared_ptr<const erf_towers::Frame> frame;
+                if (err.empty()) { frame = erf_towers::Frame::create(fin, err); }
+                if (!frame) { Abort(key + ": " + err); }
+                m_frames[type.name] = frame;
+            }
+            m_models.push_back(std::make_unique<erf_towers::FrameTower>(tw, m_frames[type.name], CONST_GRAV));
+        } else {
+            m_models.push_back(type.moves() ? std::make_unique<erf_towers::OneModeTower>(tw, CONST_GRAV) : nullptr);
+        }
     }
     // one attachment per line hanging from a tower, in the same order on the tower and in its model
     for (std::size_t t = 0; t < m_towers.size(); ++t) {
@@ -390,6 +414,14 @@ Conductors::drag_on_tower (std::size_t t)
     std::vector<Real> f;
     m_aero->loads(tw.current_nodes(), m_tower_wind[t], tw.node_velocities(), f);
     tw.set_loads(f);
+}
+
+erf_towers::FoundationLoad
+Conductors::tower_foundation (std::size_t t) const
+{
+    erf_towers::FoundationLoad L;
+    if (m_models[t] && m_models[t]->foundation(m_towers[t], L)) { return L; }
+    return m_towers[t].foundation();
 }
 
 void
@@ -561,10 +593,11 @@ Conductors::write_towers (double time, bool first) const
         out << "\n";
     }
     out << std::setprecision(10) << time;
-    for (const auto& t : m_towers) {
+    for (std::size_t ti = 0; ti < m_towers.size(); ++ti) {
+        const auto& t = m_towers[ti];
         const auto D = t.total_force();
         const auto& F = t.line_force();
-        const auto L = t.foundation();
+        const auto L = tower_foundation(ti);
         out << " " << D[0] << " " << D[1] << " " << D[2] << " " << F[0] << " " << F[1] << " " << F[2] << " " << L.shear << " "
             << L.overturning << " " << L.vertical << " " << L.max_compression << " " << L.max_uplift << " " << (L.over_allowable ? 1 : 0);
         if (t.type().moves()) {
@@ -1055,7 +1088,7 @@ Conductors::advance (int lev, double time, double dt,
             for (std::size_t t = 0; t < m_towers.size(); ++t) {
                 const auto D = m_towers[t].total_force();
                 const auto& F = m_towers[t].line_force();
-                const auto L = m_towers[t].foundation();
+                const auto L = tower_foundation(t);
                 std::vector<Real> q{std::hypot(D[0], D[1]), std::hypot(F[0], F[1]), L.shear, L.overturning,
                                     L.max_compression, L.max_uplift, L.over_allowable ? Real(1.0) : Real(0.0)};
                 if (m_models[t]) {

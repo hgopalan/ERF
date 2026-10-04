@@ -3,6 +3,7 @@
 
 /** Conductors: the run's conductor lines, transformers and lattice towers, stepped with ERF on one AMR level. */
 
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -19,6 +20,7 @@
 #include "ERF_RunningStats.H"
 #include "ERF_Transformer.H"
 #include "ERF_Tower.H"
+#include "ERF_FrameTower.H"
 #include "ERF_TowerDynamics.H"
 
 /**
@@ -121,6 +123,11 @@ public:
     const std::vector<std::vector<std::pair<std::size_t,int>>>& tower_lines () const { return m_tower_lines; }
     /** Each tower's structural model, null for a tower that stands still. */
     const std::vector<std::unique_ptr<erf_towers::TowerModel>>& tower_models () const { return m_models; }
+    /**
+     * The load on tower t's footings: from its model's support reactions when the model has them (a
+     * frame), else Tower::foundation()'s estimate from the drag nodes' loads and inertial forces.
+     */
+    erf_towers::FoundationLoad tower_foundation (std::size_t t) const;
     /**
      * The fewest coupling steps a group of lines whose towers move takes over one period of its
      * highest tower frequency; the count is also at least erf.conductors.substeps. In each coupling
@@ -293,6 +300,8 @@ private:
     std::unique_ptr<amrex::FArrayBox> m_surface;                    //!< the terrain's height at the nodes, for an immersed terrain
     amrex::Geometry m_surface_geom;
     std::vector<std::unique_ptr<erf_towers::TowerModel>> m_models;  //!< per tower: its structural model, null when it stands still
+    /** Per tower type with a frame_file: its frame model, built once and shared by the type's towers. */
+    std::map<std::string, std::shared_ptr<const erf_towers::Frame>> m_frames;
     std::vector<std::vector<amrex::Real>> m_tower_wind;             //!< per tower: the wind at its nodes (m/s), held for the step
     std::unique_ptr<erf_towers::MemberAero> m_aero;                 //!< the members' aerodynamics
     std::vector<erf_actuator::RunningStats> m_tower_stats;          //!< per tower: its drag and base moment

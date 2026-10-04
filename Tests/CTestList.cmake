@@ -2465,6 +2465,26 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
       DATALOG "conductors/L1_span2.dat conductors/towers.dat conductors/tower_L1_t1_stats.csv"
       DATALOG_SIGDIGITS 10)
   set_tests_properties(${_moving_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
+  # The same lines on towers that bend as their frame model: every lattice tower stands on the
+  # SubDyn frame of lattice_frame.dat (76 beam members on four fixed legs), its members' drag and
+  # its line's pull carried onto the frame's nodes, and MoorDyn moves the cross-arms as coupled
+  # points. The towers' loads, footings (from the frame's support reactions) and cross-arm
+  # displacements, the statistics of L1's first tower and the middle span of L1 must match their
+  # golds; the flow is Conductors_Terrain's. The restart parity carries the frames' Newmark state
+  # across the checkpoint.
+  if(ERF_MOORDYN_USE_STUB)
+    add_test_conductors(Conductors_FrameTowers Conductors_FrameTowers "plt00010" "conductors/L1_span2.dat"
+                        "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_moving_logs}" GOLD_SUFFIX ".gold")
+    set(_frame_restart Conductors_FrameTowers_Restart)
+  else()
+    add_test_conductors(Conductors_FrameTowers_MoorDyn Conductors_FrameTowers "plt00010" "conductors/L1_span2.dat"
+                        "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_moving_logs}" GOLD_SUFFIX ".moordyn.gold")
+    set(_frame_restart Conductors_FrameTowers_Restart_MoorDyn)
+  endif()
+  add_test_restart_parity(${_frame_restart} Conductors_FrameTowers 5 10
+      DATALOG "conductors/L1_span2.dat conductors/towers.dat conductors/tower_L1_t1_stats.csv"
+      DATALOG_SIGDIGITS 10)
+  set_tests_properties(${_frame_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # A circuit over hills that are an immersed boundary on a flat mesh: three phases and a shield wire
   # hang from two shared lattice towers that bend, standing on the hills' surface read from the
   # terrain file (the mesh's bottom is flat). The towers' loads and sway, the middle phase's middle
