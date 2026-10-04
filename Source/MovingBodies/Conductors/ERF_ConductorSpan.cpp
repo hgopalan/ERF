@@ -21,7 +21,8 @@ constexpr Real rad2deg = Real(180.0 / 3.14159265358979323846);
 
 ConductorSpan::ConductorSpan (const SpanInputs& s, const ConductorInputs& in, Real gravity, const std::string& input_file,
                               const std::string& saved_state, const std::vector<Real>& tower_displacement)
-    : m_in(s), m_offset(in.surface_offset), m_substeps(in.substeps), m_file(input_file), m_coupled(in.towers_move(s))
+    : m_in(s), m_offset(in.surface_offset), m_rho(in.air_density), m_g(gravity), m_substeps(in.substeps), m_file(input_file),
+      m_coupled(in.towers_move(s))
 {
     write_moordyn_input(m_file, s, in, gravity);
     ParallelDescriptor::Barrier();   // every rank reads the file the I/O rank wrote
@@ -370,6 +371,25 @@ Real ConductorSpan::insulator_tension (int j) const
 {
     const auto t = m_sys->line_node_tension(static_cast<unsigned>(num_spans() + j) + 1, 0);
     return static_cast<Real>(std::sqrt(t[0]*t[0] + t[1]*t[1] + t[2]*t[2]));
+}
+
+Real ConductorSpan::string_load (int j) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_in.has_insulators() && j >= 0 && j < num_insulators(),
+                                     "ConductorSpan::string_load: no such string");
+    const Real r = Real(0.5) * m_in.insulator_diameter;
+    const Real weight = (m_in.insulator_mass - m_rho * Real(3.14159265358979323846) * r * r * m_in.insulator_length) * m_g;
+    return -tower_force(j)[2] - weight;
+}
+
+bool ConductorSpan::string_in_uplift (int j, Real weight_per_length) const
+{
+    // the half spans either side of tower j+1, horizontally
+    const auto& a = m_in.point(j);
+    const auto& p = m_in.point(j + 1);
+    const auto& b = m_in.point(j + 2);
+    const Real half = Real(0.5) * (std::hypot(p[0] - a[0], p[1] - a[1]) + std::hypot(b[0] - p[0], b[1] - p[1]));
+    return string_load(j) < uplift_fraction * weight_per_length * half;
 }
 
 void ConductorSpan::write_diagnostics (double time, bool first) const

@@ -1,4 +1,5 @@
 #include "ERF.H"
+#include "ERF_BndryPlaneIndex.H"
 
 using namespace amrex;
 
@@ -27,6 +28,10 @@ ERF::fill_from_bndryregs (const Vector<MultiFab*>& mfs, const double time)
     Vector<std::unique_ptr<PlaneVector>>& bndry_data = m_r2d->interp_in_time(time + start_time);
 
     const BCRec* bc_ptr = domain_bcs_type_d.data();
+
+    // the ghost cells beside a face along a periodic direction take the periodic image
+    const bool xper = geom[lev].isPeriodic(0);
+    const bool yper = geom[lev].isPeriodic(1);
 
     // xlo: ori = 0
     // ylo: ori = 1
@@ -77,8 +82,8 @@ ERF::fill_from_bndryregs (const Vector<MultiFab*>& mfs, const double time)
                     int bc_comp = (icomp+n >= RhoScalar_comp && icomp+n < RhoScalar_comp+NSCALARS) ?
                                    BCVars::RhoScalar_bc_comp : icomp+n;
                     if (bc_ptr[bc_comp].lo(0) == ERFBCType::ext_dir_ingested) {
-                        int jb = std::min(std::max(j,dom_lo.y),dom_hi.y);
-                        int kb = std::min(std::max(k,dom_lo.z),dom_hi.z);
+                        int jb = bndry_plane_index(j, dom_lo.y, dom_hi.y, yper);
+                        int kb = bndry_plane_index(k, dom_lo.z, dom_hi.z, false);
                         dest_arr(i,j,k,icomp+n) = bdatxlo(dom_lo.x-1,jb,kb,bccomp+n);
                     }
                 },
@@ -86,8 +91,8 @@ ERF::fill_from_bndryregs (const Vector<MultiFab*>& mfs, const double time)
                     int bc_comp = (icomp+n >= RhoScalar_comp && icomp+n < RhoScalar_comp+NSCALARS) ?
                                    BCVars::RhoScalar_bc_comp : icomp+n;
                     if (bc_ptr[bc_comp].hi(0) == ERFBCType::ext_dir_ingested) {
-                        int jb = std::min(std::max(j,dom_lo.y),dom_hi.y);
-                        int kb = std::min(std::max(k,dom_lo.z),dom_hi.z);
+                        int jb = bndry_plane_index(j, dom_lo.y, dom_hi.y, yper);
+                        int kb = bndry_plane_index(k, dom_lo.z, dom_hi.z, false);
                         dest_arr(i,j,k,icomp+n) = bdatxhi(dom_hi.x+1,jb,kb,bccomp+n);
                     }
                 }
@@ -106,8 +111,8 @@ ERF::fill_from_bndryregs (const Vector<MultiFab*>& mfs, const double time)
                     int bc_comp = (icomp+n >= RhoScalar_comp && icomp+n < RhoScalar_comp+NSCALARS) ?
                                    BCVars::RhoScalar_bc_comp : icomp+n;
                     if (bc_ptr[bc_comp].lo(1) == ERFBCType::ext_dir_ingested) {
-                        int ib = std::min(std::max(i,dom_lo.x),dom_hi.x);
-                        int kb = std::min(std::max(k,dom_lo.z),dom_hi.z);
+                        int ib = bndry_plane_index(i, dom_lo.x, dom_hi.x, xper);
+                        int kb = bndry_plane_index(k, dom_lo.z, dom_hi.z, false);
                         dest_arr(i,j,k,icomp+n) = bdatylo(ib,dom_lo.y-1,kb,bccomp+n);
                     }
                 },
@@ -115,8 +120,8 @@ ERF::fill_from_bndryregs (const Vector<MultiFab*>& mfs, const double time)
                     int bc_comp = (icomp+n >= RhoScalar_comp && icomp+n < RhoScalar_comp+NSCALARS) ?
                                    BCVars::RhoScalar_bc_comp : icomp+n;
                     if (bc_ptr[bc_comp].hi(1) == ERFBCType::ext_dir_ingested) {
-                        int ib = std::min(std::max(i,dom_lo.x),dom_hi.x);
-                        int kb = std::min(std::max(k,dom_lo.z),dom_hi.z);
+                        int ib = bndry_plane_index(i, dom_lo.x, dom_hi.x, xper);
+                        int kb = bndry_plane_index(k, dom_lo.z, dom_hi.z, false);
                         dest_arr(i,j,k,icomp+n) = bdatyhi(ib,dom_hi.y+1,kb,bccomp+n);
                     }
                 }

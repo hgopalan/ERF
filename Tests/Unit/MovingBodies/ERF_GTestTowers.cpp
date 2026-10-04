@@ -7,7 +7,8 @@
 // quadrature error of a fine integral; and the foundation's four legs share the downward load
 // equally and the overturning moment linearly, in equilibrium with the loads, the same whichever
 // way the tower faces, the corner leg taking sqrt(2) times more from a diagonal pull, each leg
-// load flagged against its allowable.
+// load flagged against its allowable; and several lines on one tower each pull at their own point,
+// the footings taking them all.
 
 #include <array>
 #include <cmath>
@@ -295,4 +296,28 @@ TEST(Tower, EachLegLoadIsFlaggedOverItsAllowable)
     w.leg_spacing = 8.0;
     EXPECT_EQ(t.legs(), t.base_width);
     EXPECT_EQ(w.legs(), Real(8.0));
+}
+
+TEST(Tower, EachLinePullsWhereItHangsAndTheFootingsTakeThemAll)
+{
+    TowerType t = lattice();
+    t.weight = 9.0e4;
+    t.peak = 8.0;
+    Tower tw("t", t, P3{{500.0, 500.0, 20.0}}, Real(30.0), P3{{0.0, 1.0, 0.0}});
+    // three phases across the cross-arm and a shield wire on the peak
+    const std::vector<P3> at{{{500.0, 500.0, 50.0}}, {{500.0, 505.5, 50.0}}, {{500.0, 494.5, 50.0}}, {{500.0, 500.0, 57.0}}};
+    for (const auto& p : at) { tw.add_attachment(p); }
+    EXPECT_EQ(tw.attachments().size(), 4u);
+    const std::vector<P3> F{{{0.0, 1000.0, -5000.0}}, {{0.0, 1200.0, -5000.0}}, {{0.0, 800.0, -5000.0}}, {{0.0, 300.0, -1300.0}}};
+    tw.set_line_loads(F, at);
+    const P3 sum = tw.line_force();
+    EXPECT_NEAR(sum[1], 3300.0, tol * 1.0e4);
+    EXPECT_NEAR(sum[2], -16300.0, tol * 1.0e5);
+    // each pull's own lever arm: M_x = sum (y_i - y_b) F_z - (z_i - z_b) F_y
+    double Mx = 0.0;
+    for (std::size_t i = 0; i < at.size(); ++i) { Mx += (at[i][1] - 500.0) * F[i][2] - (at[i][2] - 20.0) * F[i][1]; }
+    const auto L = tw.foundation();
+    EXPECT_NEAR(L.moment[0], Mx, 10.0 * tol * std::abs(Mx));
+    EXPECT_NEAR(L.vertical, 9.0e4 + 16300.0, 1.0e-6 * L.vertical);
+    expect_equilibrium(tw, L);
 }

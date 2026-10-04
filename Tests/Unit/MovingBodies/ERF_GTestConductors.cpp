@@ -13,7 +13,13 @@
 // suspension towers of a tower type stand on the terrain with their cross-arms across the line,
 // carry the members' drag of the wind at their nodes and the line's pull where it hangs from
 // them, check their footings' uplift and compression, put the drag into the flow with the lines',
-// and continue their log, statistics and drag on the flow across a restart.
+// and continue their log, statistics and drag on the flow across a restart; towers that bend
+// settle where their stiffness balances the wind and the lines, and continue across a restart; a
+// circuit's phases and shield wire hang from one row of towers, each at its own point, standing
+// on the tower's base so that the cross-arm is level, and the towers take every line's pull and,
+// when they bend, move every line's point; a short taut span on bending towers stays stable,
+// since each coupling step is iterated until the towers and the lines agree; and an immersed
+// terrain, on a flat mesh, places everything on its surface as a fitted mesh does on its bottom.
 
 #include <algorithm>
 #include <array>
@@ -1053,4 +1059,230 @@ TEST(Conductors, MovingTowersContinueAcrossARestart)
     EXPECT_EQ(slurp(dir + "/tower_Mr_t2_stats.csv"), stats);
     EXPECT_EQ(slurp(dir + "/Mr_span2.dat"), span);
     clear_towered_section("Mr");
+}
+
+namespace {
+// a circuit along x on the ramp: the middle phase C2 owns the lattice towers at x = 400 and 700,
+// the outer phases C1 and C3 hang 5.5 m to either side of it on the cross-arm (1.5 m at the dead
+// ends) and the shield wire CS 7 m above the cross-arm on the peak; the phases on strings
+void set_circuit (const std::string& dir, Real damping = 0.0)
+{
+    amrex::ParmParse pp("erf.conductors");
+    pp.addarr("spans", std::vector<std::string>{"C1", "C2", "C3", "CS"});
+    pp.add("diagnostics_dir", dir);
+    pp.add("air_density", 1.2);
+    for (const char* key : {"prescribed_velocity", "drag_on_flow", "epsilon", "node_output_int", "stats_start", "flashover_distance"}) { pp.remove(key); }
+    pp.addarr("prescribed_velocity", std::vector<Real>{0.0, 10.0, 0.0});
+    pp.addarr("tower_types", std::vector<std::string>{"lat"});
+    amrex::ParmParse pt("erf.conductors.lat");
+    for (const char* k : {"base_width", "top_width", "solidity", "arm_length", "arm_depth", "peak", "weight", "allowable_uplift",
+                          "allowable_compression", "frequency", "damping_ratio"}) { pt.remove(k); }
+    pt.add("base_width", 6.0); pt.add("top_width", 1.5); pt.add("solidity", 0.2); pt.add("arm_length", 12.0);
+    pt.add("arm_depth", 1.2); pt.add("peak", 8.0); pt.add("weight", 9.0e4);
+    if (damping > 0.0) { pt.add("frequency", 2.0); pt.add("damping_ratio", damping); }
+    const struct { const char* name; Real tower_y, end_y, z_tower, z_end; bool phase; } lines[] = {
+        {"C1", 494.5, 498.5, 30.0, 30.0, true}, {"C2", 500.0, 500.0, 30.0, 30.0, true},
+        {"C3", 505.5, 501.5, 30.0, 30.0, true}, {"CS", 500.0, 500.0, 37.0, 32.0, false}};
+    for (const auto& l : lines) {
+        amrex::ParmParse ps(std::string("erf.conductors.") + l.name);
+        for (const char* k : {"end_a", "end_b", "towers", "length", "stringing_tension", "diameter", "mass_per_length", "axial_stiffness",
+                              "tower_type", "share_towers", "insulator_length", "insulator_mass", "output_root"}) { ps.remove(k); }
+        ps.addarr("end_a", std::vector<Real>{100.0, l.end_y, l.z_end});
+        ps.addarr("end_b", std::vector<Real>{1000.0, l.end_y, l.z_end});
+        ps.addarr("towers", std::vector<Real>{400.0, l.tower_y, l.z_tower, 700.0, l.tower_y, l.z_tower});
+        ps.add("stringing_tension", l.phase ? 20000.0 : 10000.0);
+        ps.add("diameter", l.phase ? 0.0281 : 0.0111);
+        ps.add("mass_per_length", l.phase ? 1.628 : 0.406);
+        ps.add("axial_stiffness", l.phase ? 3.0e7 : 9.7e6);
+        if (std::string(l.name) == "C2") { ps.add("tower_type", std::string("lat")); }
+        else { ps.add("share_towers", std::string("C2")); }
+        if (l.phase) { ps.add("insulator_length", 2.5); ps.add("insulator_mass", 60.0); }
+        ps.add("output_root", dir + "/" + l.name);
+    }
+}
+void clear_circuit ()
+{
+    amrex::ParmParse pp("erf.conductors");
+    pp.addarr("spans", std::vector<std::string>{});
+    pp.addarr("tower_types", std::vector<std::string>{});
+    amrex::ParmParse pt("erf.conductors.lat");
+    for (const char* k : {"peak", "frequency", "damping_ratio"}) { pt.remove(k); }
+    for (const char* n : {"C1", "C2", "C3", "CS"}) {
+        amrex::ParmParse ps(std::string("erf.conductors.") + n);
+        for (const char* k : {"tower_type", "share_towers", "stringing_tension", "insulator_length", "insulator_mass"}) { ps.remove(k); }
+    }
+}
+} // namespace
+
+TEST(Conductors, ACircuitHangsFromOneRowOfTowersEachLineAtItsOwnPoint)
+{
+    const std::string dir = scratch("circuit_towers");
+    set_circuit(dir);
+    Mesh m(true);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(m.znd.get(), m.geom);
+    ASSERT_EQ(c->towers().size(), 2u) << "one row of towers for the four lines";
+    for (std::size_t t = 0; t < 2; ++t) {
+        const auto& tw = c->towers()[t];
+        EXPECT_EQ(tw.name(), "C2_t" + std::to_string(t + 1));
+        ASSERT_EQ(c->tower_lines()[t].size(), 4u);
+        ASSERT_EQ(tw.attachments().size(), 4u);
+        // the owner first, at the centre of the cross-arm, then the others in the order of erf.conductors.spans
+        EXPECT_EQ(c->spans()[c->tower_lines()[t][0].first]->name(), "C2");
+        // every line's point stands on the tower's base: the ramp rises 0.11 m across the 5.5 m to C1,
+        // which the cross-arm does not follow
+        for (std::size_t a = 0; a < 4; ++a) {
+            const auto [line, j] = c->tower_lines()[t][a];
+            const auto& p = c->spans()[line]->inputs().point(j + 1);
+            const Real above = (c->spans()[line]->name() == "CS") ? Real(37.0) : Real(30.0);
+            EXPECT_NEAR(p[2], tw.base()[2] + above, roundoff * 1000) << c->spans()[line]->name();
+            EXPECT_EQ(tw.attachments()[a], p);
+        }
+        const auto& c1 = c->spans()[0]->inputs().point(static_cast<int>(t) + 1);
+        EXPECT_GT(std::abs(c1[2] - (m.h(c1[0], c1[1]) + 30.0)), 0.1) << "the test must see the level cross-arm";
+    }
+    std::vector<std::array<Real,3>> pull(2, {{0.0, 0.0, 0.0}});
+    for (int s = 0; s < 3; ++s) {
+        for (std::size_t t = 0; t < 2; ++t) {
+            pull[t] = {{0.0, 0.0, 0.0}};
+            for (const auto& [line, j] : c->tower_lines()[t]) {
+                const auto f = c->spans()[line]->tower_force(j);
+                for (int d = 0; d < 3; ++d) { pull[t][d] += f[d]; }
+            }
+        }
+        c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom);
+    }
+    for (std::size_t t = 0; t < 2; ++t) {
+        const auto& tw = c->towers()[t];
+        for (int d = 0; d < 3; ++d) { EXPECT_NEAR(tw.line_force()[d], pull[t][d], roundoff * 1.0e5) << "the four lines' pull, dir " << d; }
+        EXPECT_LT(pull[t][2], -3.0 * 4000.0) << "three phases and a shield wire weigh on the tower";
+        const auto L = tw.foundation();
+        EXPECT_NEAR(L.vertical, 9.0e4 - pull[t][2] - tw.total_force()[2], roundoff * L.vertical);
+    }
+    clear_circuit();
+}
+
+TEST(Conductors, ACircuitOnBendingTowersMovesEveryLinesPoint)
+{
+    const std::string dir = scratch("circuit_moving");
+    set_circuit(dir, 0.3);
+    Mesh m(true);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(m.znd.get(), m.geom);
+    for (const auto& span : c->spans()) { EXPECT_TRUE(span->towers_move()) << span->name() << " moves with the towers it shares"; }
+    const double dt = 0.25;
+    int most = 0, unconverged = 0;
+    for (int s = 0; s < 40; ++s) {
+        c->advance(0, dt * s, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom);
+        most = std::max(most, c->coupling_iterations());
+        unconverged += c->coupling_unconverged();
+    }
+    EXPECT_GE(most, 2) << "the coupling steps are iterated while the towers move";
+    EXPECT_EQ(unconverged, 0);
+    for (std::size_t t = 0; t < 2; ++t) {
+        const auto& tw = c->towers()[t];
+        const auto* model = dynamic_cast<const erf_towers::OneModeTower*>(c->tower_models()[t].get());
+        ASSERT_NE(model, nullptr);
+        // at rest the stiffness carries the drag by the shape and every line's pull by the shape where it hangs
+        double Q = 0.0;
+        for (std::size_t a = 0; a < tw.line_forces().size(); ++a) { Q += model->attachment_shape(a) * tw.line_forces()[a][1]; }
+        for (std::size_t i = 0; i < tw.nodes().size(); ++i) { Q += model->mode_shape(i) * tw.loads()[3*i+1]; }
+        EXPECT_GT(model->q()[1], 1.0e-3) << tw.name() << " leans with the +y wind";
+        EXPECT_NEAR(model->q()[1] * model->stiffness() / Q, 1.0, 0.02) << tw.name();
+        // each line's point has moved with the tower by the shape at its height
+        const Real ptol = std::is_same<Real, float>::value ? Real(1.0e-4) : Real(1.0e-6);
+        for (std::size_t a = 0; a < tw.attachments().size(); ++a) {
+            const auto [line, j] = c->tower_lines()[t][a];
+            const erf_conductors::ConductorSpan& span = *c->spans()[line];
+            // the point the line hangs from: the top of its string, or the first node of the span after the tower
+            const unsigned node = span.num_insulators() > 0
+                ? span.span_first_node(span.num_spans()) + static_cast<unsigned>((erf_conductors::SpanInputs::insulator_segments + 1) * j)
+                : span.span_first_node(j + 1);
+            const auto p = span.node_position(node);
+            const auto x = model->attachment_displacement(a);
+            EXPECT_NEAR(p[1], tw.attachments()[a][1] + x[1], ptol) << span.name() << " on " << tw.name();
+        }
+    }
+    clear_circuit();
+}
+
+TEST(Conductors, AShortTautSpanOnBendingTowersStaysStable)
+{
+    // the shield wire's first span is 40 m long, clamped to the peak and strung tight: its pull
+    // changes by ~2.4e5 N/m of the peak's travel, 1.5 times the tower's own stiffness once weighted
+    // by the shape there; with the pull lagging a coupling step behind, the exchange pumps energy in
+    const std::string dir = scratch("short_span");
+    set_circuit(dir, 0.02);
+    for (const char* n : {"C1", "C2", "C3", "CS"}) {
+        amrex::ParmParse ps(std::string("erf.conductors.") + n);
+        std::vector<Real> t;
+        ps.getarr("towers", t);
+        t[0] = 140.0;
+        ps.remove("towers");
+        ps.addarr("towers", t);
+    }
+    Mesh m(true);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(m.znd.get(), m.geom);
+    const double dt = 0.25;
+    Real peak = 0.0, last = 0.0;
+    int unconverged = 0;
+    for (int s = 0; s < 60; ++s) {
+        c->advance(0, dt * s, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom);
+        unconverged += c->coupling_unconverged();
+        const auto x = c->towers()[0].arm_displacement();
+        last = std::hypot(x[0], x[1]);
+        peak = std::max(peak, last);
+    }
+    EXPECT_EQ(unconverged, 0);
+    EXPECT_LT(peak, Real(0.05)) << "the first tower's cross-arm stays within a few centimetres";
+    EXPECT_LT(last, peak) << "and settles";
+    // about 4 mm, where the stiffness holds the drag and the pulls; a single exchange per coupling
+    // step leaves it still growing through 18 mm at the end
+    EXPECT_LT(last, Real(0.006));
+    clear_circuit();
+}
+
+TEST(Conductors, AnImmersedTerrainPlacesEverythingOnItsSurface)
+{
+    // the same section and towers on the ramp, once on the fitted mesh and once on a flat mesh with
+    // the ramp given as the immersed terrain's surface
+    std::vector<std::array<Real,3>> fitted;
+    std::vector<Real> fitted_clearance;
+    for (int pass = 0; pass < 2; ++pass) {
+        const std::string dir = scratch(pass == 0 ? "ib_fitted" : "ib_surface");
+        set_circuit(dir);
+        Mesh m(pass == 0);
+        auto c = Conductors::create(0);
+        ASSERT_TRUE(c);
+        if (pass == 1) {
+            const amrex::Box nodes = amrex::surroundingNodes(m.geom.Domain());
+            amrex::FArrayBox h(amrex::makeSlab(amrex::grow(nodes, 3), 2, 0), 1);
+            const Real dx = m.Lx / m.nx, dy = m.Ly / m.ny;
+            const auto a = h.array();
+            amrex::LoopOnCpu(h.box(), [&](int i, int j, int k) { a(i,j,k) = m.h(i * dx, j * dy); });
+            c->set_ground_surface(h, m.geom);
+        }
+        c->set_ground(pass == 0 ? m.znd.get() : nullptr, m.geom);
+        std::vector<std::array<Real,3>> placed;
+        std::vector<Real> clear;
+        for (const auto& span : c->spans()) {
+            for (int k = 0; k <= span->num_spans(); ++k) { placed.push_back(span->inputs().point(k)); }
+            for (unsigned i = 0; i < span->num_nodes(); ++i) { clear.push_back(span->clearance(i)); }
+        }
+        for (const auto& tw : c->towers()) { placed.push_back(tw.base()); }
+        if (pass == 0) { fitted = placed; fitted_clearance = clear; continue; }
+        ASSERT_EQ(placed.size(), fitted.size());
+        for (std::size_t p = 0; p < placed.size(); ++p) {
+            for (int d = 0; d < 3; ++d) { EXPECT_NEAR(placed[p][d], fitted[p][d], roundoff * 1000) << "point " << p << " dir " << d; }
+        }
+        ASSERT_EQ(clear.size(), fitted_clearance.size());
+        for (std::size_t i = 0; i < clear.size(); ++i) { EXPECT_NEAR(clear[i], fitted_clearance[i], roundoff * 1000) << "node " << i; }
+        // the flat mesh's own bottom is z = 0: without the surface the hills would not be seen
+        EXPECT_GT(fitted[0][2], 30.0 + 1.0);
+    }
+    clear_circuit();
 }

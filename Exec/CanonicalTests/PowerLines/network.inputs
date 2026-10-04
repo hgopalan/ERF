@@ -54,7 +54,7 @@ erf.conductors.T6.allowable_moment = 250000
 
 # L1: T1 to T5, 3 span(s)
 erf.conductors.L1.end_a  = 1086.18 1158.70 10
-erf.conductors.L1.towers = 1106.53 1222.65 30  1160.17 1391.25 30
+erf.conductors.L1.towers = 1106.53 1222.65 30  1160.17 1391.25 40
 erf.conductors.L1.end_b  = 1234.15 1623.80 10
 erf.conductors.L1.stringing_tension = 20000
 erf.conductors.L1.diameter         = 0.0281
@@ -66,7 +66,7 @@ erf.conductors.L1.insulator_mass   = 60.
 
 # L2: T1 to T4, 3 span(s)
 erf.conductors.L2.end_a  = 1087.47 1155.20 10
-erf.conductors.L2.towers = 1128.06 1116.70 30  1267.90 984.10 30
+erf.conductors.L2.towers = 1128.06 1116.70 30  1267.90 984.10 40
 erf.conductors.L2.end_b  = 1448.33 813.00 10
 erf.conductors.L2.stringing_tension = 20000
 erf.conductors.L2.diameter         = 0.0281
@@ -90,7 +90,7 @@ erf.conductors.L3.insulator_mass   = 60.
 
 # L4: T6 to T2, 3 span(s)
 erf.conductors.L4.end_a  = 2046.39 1066.13 10
-erf.conductors.L4.towers = 2147.91 838.97 30  2226.59 662.92 30
+erf.conductors.L4.towers = 2147.91 838.97 46  2226.59 662.92 30
 erf.conductors.L4.end_b  = 2249.43 611.81 10
 erf.conductors.L4.stringing_tension = 20000
 erf.conductors.L4.diameter         = 0.0281
@@ -102,7 +102,7 @@ erf.conductors.L4.insulator_mass   = 60.
 
 # L5: T6 to T3, 3 span(s)
 erf.conductors.L5.end_a  = 2046.90 1069.63 10
-erf.conductors.L5.towers = 2199.80 1276.11 30  2314.48 1430.96 30
+erf.conductors.L5.towers = 2199.80 1276.11 36  2314.48 1430.96 30
 erf.conductors.L5.end_b  = 2352.70 1482.58 10
 erf.conductors.L5.stringing_tension = 20000
 erf.conductors.L5.diameter         = 0.0281

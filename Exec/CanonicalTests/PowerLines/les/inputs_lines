@@ -1,0 +1,73 @@
+# Power lines over hills in a turbulent wind: three circuits (three phases and a shield wire each, on shared lattice
+# towers that bend) between four transformers over three hills, in the turbulent flow of the land
+# LES precursor (../precursor). The hills are an immersed boundary on the precursor's flat 16 m mesh,
+# so its checkpoint at 7200 s seeds the run; the inflow at x = 0 comes from its boundary planes
+# (every 1.5 s, time-interpolated), pressure outflow at x = 3072 m, y periodic, no sponge. Deardorff
+# LES, anelastic MidPoint with the implicit vertical solve, FFT. Runs to 9000 s; statistics from 7500 s.
+amr.restart    = "../precursor/chk24000"   # the precursor at t = 7200 s (no conductors: the lines start here)
+stop_time      = 9000.0
+max_step       = 30000
+erf.fixed_dt   = 0.3
+
+geometry.prob_extent = 3072. 1536. 768.
+amr.n_cell           = 192   96   48
+amr.max_level        = 0
+amr.max_grid_size    = 32
+amr.blocking_factor  = 4
+geometry.is_periodic = 0 1 0
+xlo.type       = "Inflow"
+xhi.type       = "Outflow"
+zlo.type       = "surface_layer"   # the flat ground between the hills, as in the precursor
+erf.most.z0    = 0.1
+zhi.type       = "SlipWall"
+
+erf.terrain_type             = ImmersedForcing
+erf.terrain_file_name        = "terrain_hills.txt"
+eb2.small_volfrac            = 0.005
+erf.if_implicit_drag         = true     # point-implicit forcing in the hills: stable at the flow's step
+erf.if_use_most              = true     # the wall law on the hills, with the precursor's roughness
+erf.if_z0                    = 0.1
+
+erf.anelastic      = 1
+erf.anelastic_type = MidPoint
+erf.vert_implicit  = true
+erf.use_fft        = true
+erf.init_type           = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type       = "Ideal"
+erf.use_gravity  = true
+erf.use_coriolis = false
+erf.abl_driver_type   = "PressureGradient"
+erf.abl_pressure_grad = -1.51e-3 0.0 0.0
+
+erf.dycore_horiz_adv_type  = "Blended_5th6th"
+erf.dycore_horiz_upw_frac  = 0.2
+erf.dycore_vert_adv_type   = "Blended_3rd4th"
+erf.dycore_vert_upw_frac   = 0.2
+erf.dryscal_horiz_adv_type = "Blended_5th6th"
+erf.dryscal_horiz_upw_frac = 0.2
+erf.dryscal_vert_adv_type  = "Blended_3rd4th"
+erf.dryscal_vert_upw_frac  = 0.2
+erf.molec_diff_type = "None"
+erf.les_type        = "Deardorff"
+erf.rans_type       = "None"
+erf.theta_ref       = 300.0
+amrex.fpe_trap_invalid = 0
+erf.v = 1
+erf.sum_interval = 100
+
+erf.input_bndry_planes    = 1
+erf.bndry_file            = "../precursor/BndryFiles"
+erf.bndry_input_var_names = density velocity temperature ke
+
+erf.check_file  = chk
+erf.check_int   = 2000        # every 600 s
+erf.plot_file_1 = plt
+erf.plot_int_1  = 500         # every 150 s
+erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta KE terrain_IB_mask
+
+erf.conductors.diagnostics_dir = conductors
+erf.conductors.diagnostics_int = 1          # every step, 0.3 s: the gusts
+erf.conductors.air_density     = 1.16
+erf.conductors.stats_start     = 7500.0
+FILE = network.inputs

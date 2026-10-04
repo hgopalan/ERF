@@ -59,6 +59,8 @@ int DECLDIR MoorDyn_GetDt (MoorDyn system, double* dt);
 int DECLDIR MoorDyn_SetDt (MoorDyn system, double dt);
 int DECLDIR MoorDyn_Save (MoorDyn system, const char* filepath);
 int DECLDIR MoorDyn_Load (MoorDyn system, const char* filepath);
+int DECLDIR MoorDyn_Serialize (MoorDyn system, size_t* size, uint64_t* data);
+int DECLDIR MoorDyn_Deserialize (MoorDyn system, const uint64_t* data);
 
 int DECLDIR MoorDyn_GetLineN (MoorDynLine l, unsigned int* n);
 int DECLDIR MoorDyn_GetLineNumberNodes (MoorDynLine l, unsigned int* n);

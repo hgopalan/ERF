@@ -81,11 +81,47 @@ std::string SpanInputs::span_name (int k) const
     return (num_spans() == 1) ? name : name + "_span" + std::to_string(k + 1);
 }
 
+const SpanInputs& ConductorInputs::tower_owner (const SpanInputs& s) const
+{
+    if (s.share_towers.empty()) { return s; }
+    for (const auto& o : spans) { if (o.name == s.share_towers) { return o; } }
+    return s;   // checked when the inputs were read
+}
+
 const erf_towers::TowerType* ConductorInputs::tower_type (const SpanInputs& s) const
 {
-    if (s.tower_type.empty()) { return nullptr; }
-    for (const auto& t : tower_types) { if (t.name == s.tower_type) { return &t; } }
+    const SpanInputs& owner = tower_owner(s);
+    if (owner.tower_type.empty()) { return nullptr; }
+    for (const auto& t : tower_types) { if (t.name == owner.tower_type) { return &t; } }
     return nullptr;
+}
+
+std::string ConductorInputs::validate_shared_towers (const std::vector<SpanInputs>& spans)
+{
+    for (const auto& s : spans) {
+        if (s.share_towers.empty()) { continue; }
+        const std::string key = "erf.conductors." + s.name + ".share_towers";
+        const SpanInputs* owner = nullptr;
+        for (const auto& o : spans) { if (o.name == s.share_towers) { owner = &o; } }
+        if (owner == nullptr || owner == &s) {
+            return key + " = " + s.share_towers + " is not another line of erf.conductors.spans";
+        }
+        if (!owner->share_towers.empty()) {
+            return key + " = " + s.share_towers + ", which shares the towers of " + owner->share_towers +
+                   "; name the line the towers belong to";
+        }
+        if (owner->tower_type.empty()) {
+            return key + " = " + s.share_towers + ", which has no tower_type: only lattice towers are shared";
+        }
+        if (!s.tower_type.empty()) {
+            return key + ": the line hangs from " + s.share_towers + "'s towers and takes their type; drop its own tower_type";
+        }
+        if (s.towers.size() != owner->towers.size()) {
+            return key + ": the line has " + std::to_string(s.towers.size()) + " tower(s) and " + s.share_towers + " has " +
+                   std::to_string(owner->towers.size()) + "; a line hangs from every tower of the line it shares them with";
+        }
+    }
+    return std::string();
 }
 
 Catenary elastic_catenary (Real chord, Real length, Real w, Real EA)
@@ -291,6 +327,7 @@ ConductorInputs ConductorInputs::read ()
         ps.queryarr("length", s.lengths);
         ps.query("stringing_tension", s.stringing_tension);
         ps.query("tower_type", s.tower_type);
+        ps.query("share_towers", s.share_towers);
         ps.get("diameter", s.diameter);
         ps.get("mass_per_length", s.mass_per_length);
         ps.get("axial_stiffness", s.axial_stiffness);
@@ -337,6 +374,10 @@ ConductorInputs ConductorInputs::read ()
     }
     for (const SpanInputs& s : in.spans) {
         const std::string err = validate_tower_type(s, in.tower_types);
+        if (!err.empty()) { Abort(err); }
+    }
+    {
+        const std::string err = validate_shared_towers(in.spans);
         if (!err.empty()) { Abort(err); }
     }
     for (const std::string& name : tnames) {

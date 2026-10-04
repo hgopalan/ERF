@@ -132,7 +132,10 @@ abort with an error message.
 
 We note that the boundary plane data will only be used on faces identified in the inputs file as inflow faces, i.e. if
 we specific inflow/outflow in the x-direction, and periodic in the y-direction, as below, then only the "xlo" boundary data
-from :cpp:`BndryFiles` will actually be used.
+from :cpp:`BndryFiles` will actually be used. A plane holds the domain's cells only along its face;
+the ghost cells beside the face in the other directions take the plane's periodic image along a
+periodic direction (as the interior cells across the seam do) and its nearest cell along a
+non-periodic one.
 
 ::
 

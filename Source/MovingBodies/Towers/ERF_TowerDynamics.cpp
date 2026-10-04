@@ -37,21 +37,28 @@ OneModeTower::OneModeTower (const Tower& tower, Real gravity)
     const double cr = (type.foundation_rotational_stiffness > 0.0) ? H * H / type.foundation_rotational_stiffness : 0.0;
     const double cl = (type.foundation_lateral_stiffness > 0.0) ? 1.0 / type.foundation_lateral_stiffness : 0.0;
     const double c = cb + cr + cl;
+    auto shape = [&] (double z) { return (cb * z * z + cr * z + cl) / c; };
     for (std::size_t i = 0; i < nodes.size(); ++i) {
-        m_phi.push_back((cb * zh[i] * zh[i] + cr * zh[i] + cl) / c);
+        m_phi.push_back(shape(zh[i]));
         m_M += m_mass[i] * m_phi[i] * m_phi[i];
     }
+    // the lines hang from the tower's attachments, or from the centre of its cross-arm
+    for (const auto& at : tower.attachments()) { m_phi_att.push_back(shape((at[2] - tower.base()[2]) / H)); }
+    if (m_phi_att.empty()) { m_phi_att.push_back(1.0); }
     m_K = 1.0 / c;
     m_omega = std::sqrt(m_K / m_M);
     m_zeta = type.damping_ratio;
 }
 
-void OneModeTower::step (Real dt, const std::vector<Real>& node_force, const std::array<Real,3>& line_force)
+void OneModeTower::step (Real dt, const std::vector<Real>& node_force, const std::vector<std::array<Real,3>>& line_force)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node_force.size() == 3 * m_phi.size(), "OneModeTower::step: 3 forces per node are needed");
-    // the generalized force: each node's horizontal load by the shape there, the lines' pull at the cross-arm (phi = 1)
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(line_force.size() == m_phi_att.size(),
+                                     "OneModeTower::step: one line pull per attachment is needed");
+    // the generalized force: each node's horizontal load and each line's pull by the shape where it acts
     for (int d = 0; d < 2; ++d) {
-        m_Q[d] = line_force[d];
+        m_Q[d] = 0.0;
+        for (std::size_t a = 0; a < m_phi_att.size(); ++a) { m_Q[d] += m_phi_att[a] * line_force[a][d]; }
         for (std::size_t i = 0; i < m_phi.size(); ++i) { m_Q[d] += m_phi[i] * node_force[3*i+d]; }
     }
     // the damped oscillation about the static displacement Q / K, exact for a load held over the step
@@ -83,14 +90,14 @@ std::array<Real,3> OneModeTower::inertial_force (std::size_t node) const
     return {{static_cast<Real>(-m * acceleration(0)), static_cast<Real>(-m * acceleration(1)), Real(0.0)}};
 }
 
-std::array<Real,3> OneModeTower::attachment_displacement () const
+std::array<Real,3> OneModeTower::attachment_displacement (std::size_t a) const
 {
-    return {{static_cast<Real>(m_q[0]), static_cast<Real>(m_q[1]), Real(0.0)}};
+    return {{static_cast<Real>(m_phi_att[a] * m_q[0]), static_cast<Real>(m_phi_att[a] * m_q[1]), Real(0.0)}};
 }
 
-std::array<Real,3> OneModeTower::attachment_velocity () const
+std::array<Real,3> OneModeTower::attachment_velocity (std::size_t a) const
 {
-    return {{static_cast<Real>(m_v[0]), static_cast<Real>(m_v[1]), Real(0.0)}};
+    return {{static_cast<Real>(m_phi_att[a] * m_v[0]), static_cast<Real>(m_phi_att[a] * m_v[1]), Real(0.0)}};
 }
 
 Real OneModeTower::frequency () const { return static_cast<Real>(m_omega / two_pi); }

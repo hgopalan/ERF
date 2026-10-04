@@ -10,8 +10,8 @@
 // coupled and free points are accepted; a coupled point moves as MoorDyn moves it, from the position
 // it is given at the start of a step at the velocity it is given over the step. A free point hangs
 // from the shortest line that ties it to a held point, fixed or coupled (an insulator string from its
-// tower), at the swing direction of the other line attached to it as that line was last placed, and
-// the hanging line runs straight from the held point to it;
+// tower), plumb below it swung across the line by the wind across the other line attached to it
+// as that line was last placed, and the hanging line runs straight from the held point to it;
 // the fluid loads act on nodes below z = 0, as in MoorDyn (the
 // drag on each node is the normal wind's dynamic pressure on its share of the line), and
 // the external kinematics points follow MoorDyn-C 2.7.1's order: the line nodes, the points, then one
@@ -23,6 +23,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -58,6 +59,8 @@ struct Line {
     std::vector<double> pos, vel, ten, drag;   // 3*(nseg+1) each
     bool hanging = false;            // ties a free point to a fixed point: placed straight between them
     double es[3] = {0.0, 0.0, -1.0}; // the direction of the sag, as last placed
+    double across[3] = {0.0, 1.0, 0.0};  // the horizontal normal of its chord, as last placed
+    double phi_across = 0.0;             // the angle the across-line wind swings a string it hangs from (rad)
 };
 
 struct StubSystem {
@@ -240,6 +243,15 @@ void place (StubSystem& s, Line& l, const double* U_nodes, double dt)
     l.phi = (dt > 0.0) ? phi_static + (l.phi - phi_static) * std::exp(-dt / tau) : l.phi;
     double* es = l.es;
     for (int d = 0; d < 3; ++d) { es[d] = std::cos(l.phi) * down[d] + std::sin(l.phi) * side[d]; }
+    // a string the line hangs from swings across the line, by the angle of the wind across it on the
+    // line's weight, with the same lag; the wind along an inclined chord swings the span in its own
+    // plane but not the string, which the spans either side hold along the line
+    const double nh = std::hypot(ec[0], ec[1]);
+    if (nh > 1.0e-12) { l.across[0] = -ec[1] / nh; l.across[1] = ec[0] / nh; l.across[2] = 0.0; }
+    const double ua = Um[0] * l.across[0] + Um[1] * l.across[1];
+    const double qa = 0.5 * s.rho * ty.Cd * ty.diam * ua * std::abs(ua);
+    const double phia_static = (w > 0.0) ? std::atan2(qa, w) : 0.0;
+    l.phi_across = (dt > 0.0) ? phia_static + (l.phi_across - phia_static) * std::exp(-dt / tau) : l.phi_across;
     l.sag = sag;
     l.w_eff = std::sqrt(w * w + q * q);
     l.H = (sag > 0.0) ? l.w_eff * c * c / (8.0 * sag) : 0.0;
@@ -369,8 +381,8 @@ void place_hanging (StubSystem& s, Line& l, const double* U_nodes)
     l.w_eff = 0.0;
 }
 
-// Place every line: the free points first (hanging below their fixed point at the swing direction
-// their line had when last placed) unless they are kept, then the other lines, then the hanging ones.
+// Place every line: the free points first (hanging below their held point, swung by the angle their
+// line had when last placed) unless they are kept, then the other lines, then the hanging ones.
 void place_all (StubSystem& s, double dt, bool move_free_points)
 {
     if (move_free_points) {
@@ -378,8 +390,14 @@ void place_all (StubSystem& s, double dt, bool move_free_points)
             if (p.type != 0) { continue; }
             const Line& h = s.lines[static_cast<std::size_t>(p.hang_line)];
             const Point& top = s.points[static_cast<std::size_t>((s.points[static_cast<std::size_t>(h.attachA - 1)].type != 0 ? h.attachA : h.attachB) - 1)];
-            const double* es = (p.swing_line >= 0) ? s.lines[static_cast<std::size_t>(p.swing_line)].es : h.es;
-            for (int d = 0; d < 3; ++d) { p.pos[d] = top.pos[d] + h.length * es[d]; }
+            // a string hangs plumb, swung across the line by the wind across the line it carries: on a
+            // sloping span the sag direction leans along the chord, and a string hung along it would
+            // pull the span's end along the line and stretch a short span taut
+            const Line& sw = (p.swing_line >= 0) ? s.lines[static_cast<std::size_t>(p.swing_line)] : h;
+            for (int d = 0; d < 3; ++d) {
+                const double plumb = (d == 2) ? -1.0 : 0.0;
+                p.pos[d] = top.pos[d] + h.length * (std::cos(sw.phi_across) * plumb + std::sin(sw.phi_across) * sw.across[d]);
+            }
         }
     }
     std::vector<unsigned> off(s.lines.size(), 0);
@@ -410,6 +428,32 @@ StubSystem* sys (MoorDyn h) { return reinterpret_cast<StubSystem*>(h); }
 struct LineHandle { StubSystem* s; unsigned index; };
 struct PointHandle { StubSystem* s; unsigned index; };
 
+} // namespace
+
+// The whole state in memory, as doubles: the clock, then every line's angles, shape and the arrays of
+// its nodes (each with its length first), then every point's position and force. The fluid velocity
+// is not part of it: like MoorDyn's, it stays as last set.
+namespace {
+void pack (std::vector<double>& b, const std::vector<double>& v) { b.push_back(static_cast<double>(v.size())); b.insert(b.end(), v.begin(), v.end()); }
+bool unpack (const double*& p, const double* end, std::vector<double>& v)
+{
+    if (p >= end) { return false; }
+    const auto n = static_cast<std::size_t>(*p++);
+    if (p + n > end) { return false; }
+    v.assign(p, p + n);
+    p += n;
+    return true;
+}
+std::vector<double> stub_state (const StubSystem& s)
+{
+    std::vector<double> b{s.t};
+    for (const auto& l : s.lines) {
+        b.insert(b.end(), {l.phi, l.phi_across, l.sag, l.H, l.w_eff, l.es[0], l.es[1], l.es[2], l.across[0], l.across[1], l.across[2]});
+        pack(b, l.pos); pack(b, l.vel); pack(b, l.ten); pack(b, l.drag);
+    }
+    for (const auto& pt : s.points) { b.insert(b.end(), {pt.pos[0], pt.pos[1], pt.pos[2], pt.force[0], pt.force[1], pt.force[2]}); }
+    return b;
+}
 } // namespace
 
 extern "C" {
@@ -445,7 +489,7 @@ static int stub_init (MoorDyn system, const double* x, bool)
     if (coupled_dof(s) > 0 && x == nullptr) { return MOORDYN_INVALID_VALUE; }
     set_coupled(s, x, nullptr, 0.0);
     s.t = 0.0;
-    for (auto& l : s.lines) { l.phi = 0.0; l.pos.clear(); l.es[0] = 0.0; l.es[1] = 0.0; l.es[2] = -1.0; }
+    for (auto& l : s.lines) { l.phi = 0.0; l.phi_across = 0.0; l.pos.clear(); l.es[0] = 0.0; l.es[1] = 0.0; l.es[2] = -1.0; }
     advance(s, 0.0);
     s.initialised = true;
     return MOORDYN_SUCCESS;
@@ -569,7 +613,7 @@ int MoorDyn_Save (MoorDyn system, const char* filepath)
     out.precision(17);
     out << "moordyn-stub-state " << s.t << " " << s.lines.size() << " " << s.U.size() << "\n";
     for (const auto& l : s.lines) {
-        out << l.phi;
+        out << l.phi << " " << l.phi_across;
         for (double v : l.pos) { out << " " << v; }
         out << "\n";
     }
@@ -594,7 +638,7 @@ int MoorDyn_Load (MoorDyn system, const char* filepath)
     std::size_t nl = 0, nu = 0;
     if (!(in >> tag >> s.t >> nl >> nu) || tag != "moordyn-stub-state" || nl != s.lines.size()) { return MOORDYN_INVALID_INPUT; }
     for (auto& l : s.lines) {
-        if (!(in >> l.phi)) { return MOORDYN_INVALID_INPUT; }
+        if (!(in >> l.phi >> l.phi_across)) { return MOORDYN_INVALID_INPUT; }
         for (double& v : l.pos) { if (!(in >> v)) { return MOORDYN_INVALID_INPUT; } }
     }
     // the fluid velocity of the last step, for the points ExternalWaveKinInit set up
@@ -608,6 +652,47 @@ int MoorDyn_Load (MoorDyn system, const char* filepath)
     place_all(s, 0.0, false);
     return MOORDYN_SUCCESS;
 }
+
+
+
+int MoorDyn_Serialize (MoorDyn system, size_t* size, uint64_t* data)
+{
+    if (system == nullptr) { return MOORDYN_INVALID_VALUE; }
+    const std::vector<double> b = stub_state(*sys(system));
+    // a leading count, then the doubles' bits
+    if (size != nullptr) { *size = (b.size() + 1) * sizeof(uint64_t); }
+    if (data != nullptr) {
+        data[0] = static_cast<uint64_t>(b.size());
+        std::memcpy(data + 1, b.data(), b.size() * sizeof(double));
+    }
+    return MOORDYN_SUCCESS;
+}
+
+int MoorDyn_Deserialize (MoorDyn system, const uint64_t* data)
+{
+    if (system == nullptr || data == nullptr) { return MOORDYN_INVALID_VALUE; }
+    StubSystem& s = *sys(system);
+    std::vector<double> b(static_cast<std::size_t>(data[0]));
+    std::memcpy(b.data(), data + 1, b.size() * sizeof(double));
+    const double* p = b.data();
+    const double* end = b.data() + b.size();
+    if (p >= end) { return MOORDYN_INVALID_INPUT; }
+    s.t = *p++;
+    for (auto& l : s.lines) {
+        if (p + 11 > end) { return MOORDYN_INVALID_INPUT; }
+        l.phi = p[0]; l.phi_across = p[1]; l.sag = p[2]; l.H = p[3]; l.w_eff = p[4];
+        for (int d = 0; d < 3; ++d) { l.es[d] = p[5+d]; l.across[d] = p[8+d]; }
+        p += 11;
+        if (!unpack(p, end, l.pos) || !unpack(p, end, l.vel) || !unpack(p, end, l.ten) || !unpack(p, end, l.drag)) { return MOORDYN_INVALID_INPUT; }
+    }
+    for (auto& pt : s.points) {
+        if (p + 6 > end) { return MOORDYN_INVALID_INPUT; }
+        for (int d = 0; d < 3; ++d) { pt.pos[d] = p[d]; pt.force[d] = p[3+d]; }
+        p += 6;
+    }
+    return (p == end) ? MOORDYN_SUCCESS : MOORDYN_INVALID_INPUT;
+}
+
 
 #define STUB_LINE(h) if ((h) == nullptr) { return MOORDYN_INVALID_VALUE; } \
     const Line& L = reinterpret_cast<LineHandle*>(h)->s->lines[reinterpret_cast<LineHandle*>(h)->index]
