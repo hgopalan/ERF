@@ -33,8 +33,11 @@
  * The suspension towers of a line with a tower_type are lattice towers loaded by the wind (the
  * drag on their members, from the flow sampled at the members' nodes each step) and by the line
  * hanging from them; their foundations are checked for leg uplift and compression. Towers whose type
- * has a frequency bend under those loads (a one-mode tower model each): MoorDyn then takes their
- * cross-arms as coupled points that ERF moves, and hands back the lines' pull on them.
+ * has a frequency bend under those loads (a one-mode tower model each), and towers whose type gives a
+ * frame model (a SubDyn file, or one generated from the type's dimensions) bend as that frame: MoorDyn
+ * then takes their cross-arms as coupled points that ERF moves, and hands back the lines' pull on them.
+ * A frame tower whose members' design data is known has every member checked against its strength
+ * (ASCE 10-15) every step.
  */
 class Conductors
 {
@@ -128,6 +131,8 @@ public:
      * frame), else Tower::foundation()'s estimate from the drag nodes' loads and inertial forces.
      */
     erf_towers::FoundationLoad tower_foundation (std::size_t t) const;
+    /** The strength checks of tower t's members at present (ERF_MemberChecks.H); empty unless it is a frame tower with design data. */
+    std::vector<erf_towers::MemberCheck> member_checks (std::size_t t) const;
     /**
      * The fewest coupling steps a group of lines whose towers move takes over one period of its
      * highest tower frequency; the count is also at least erf.conductors.substeps. In each coupling
@@ -230,8 +235,39 @@ private:
     void write_transformers (double time, bool first) const;
     /** Stand a lattice tower at every suspension point of the lines with a tower_type. */
     void build_towers ();
-    /** The towers' statistics. */
+    /** The towers' statistics, and their members' where they are checked. */
     void add_tower_stats ();
+    /** A frame model built once and shared by the towers it fits, with its members' design data (null: none). */
+    struct TowerFrame
+    {
+        std::shared_ptr<const erf_towers::Frame> frame;
+        std::shared_ptr<const std::vector<erf_towers::MemberDesign>> designs;
+        std::string source;     //!< where it came from, for messages
+        std::vector<std::size_t> link_nodes;   //!< the nodes the towers' loads may be tied to (empty: every node)
+    };
+    /**
+     * The frame model of tower tw: read from its type's frame_file (with member_file's design data), or
+     * generated from its type's dimensions and its cross-arm's height (frame_panels), and then written to
+     * <diagnostics_dir>/frame_<tower>.dat with its design data in frame_<tower>_members.dat; the members at
+     * the type's steel_temperature. Aborts, naming the key, when it cannot be built.
+     */
+    TowerFrame make_frame (const erf_towers::Tower& tw) const;
+    /** Tower t's model when it is a frame, else null. */
+    const erf_towers::FrameTower* frame_tower (std::size_t t) const;
+    /**
+     * Write <diagnostics_dir>/tower_<name>_members.csv for every tower whose members are checked: per member its role,
+     * joints, length, slenderness, the design stresses and strengths at its temperature, and the slenderness and
+     * width-to-thickness flags.
+     */
+    void write_member_tables () const;
+    /**
+     * Append a row of every frame tower's node displacements (from where it stands under its weight at its first
+     * temperature, x y z per node, frame axes, m) and, where checked, its members' utilisation to
+     * <diagnostics_dir>/tower_<name>_frame.dat.
+     * first truncates the file; the header (the nodes' positions, then the member ids) is written after truncating,
+     * or when appending to a missing or empty file.
+     */
+    void write_tower_frames (double time, bool first) const;
     /**
      * The wind (m/s) at every tower node (3 per node, the towers in order): the flow sampled there, or
      * the prescribed velocity. Aborts on a sampled value that is not finite.
@@ -300,11 +336,13 @@ private:
     std::unique_ptr<amrex::FArrayBox> m_surface;                    //!< the terrain's height at the nodes, for an immersed terrain
     amrex::Geometry m_surface_geom;
     std::vector<std::unique_ptr<erf_towers::TowerModel>> m_models;  //!< per tower: its structural model, null when it stands still
-    /** Per tower type with a frame_file: its frame model, built once and shared by the type's towers. */
-    std::map<std::string, std::shared_ptr<const erf_towers::Frame>> m_frames;
+    /** The frame models: per tower type with a frame_file, per tower type and cross-arm height (mm) with frame_panels. */
+    std::map<std::string, TowerFrame> m_frames;
     std::vector<std::vector<amrex::Real>> m_tower_wind;             //!< per tower: the wind at its nodes (m/s), held for the step
     std::unique_ptr<erf_towers::MemberAero> m_aero;                 //!< the members' aerodynamics
     std::vector<erf_actuator::RunningStats> m_tower_stats;          //!< per tower: its drag and base moment
+    /** per tower: its members' axial force and utilisation, null when they are not checked */
+    std::vector<std::unique_ptr<erf_actuator::RunningStats>> m_member_stats;
     bool m_src_defined{false};
     /** the momentum sources of the lines and the towers' members on the anchor level (N/m^3) */
     amrex::MultiFab m_src_x, m_src_y, m_src_z;

@@ -1,6 +1,7 @@
 // The frame model: SubDyn's beam element, assembly, supports, the static solve and its recovery.
 
 #include "ERF_Frame.H"
+#include "ERF_MemberChecks.H"
 
 #include <algorithm>
 #include <cmath>
@@ -300,7 +301,14 @@ std::unique_ptr<Frame> Frame::create (const FrameInputs& in, std::string& err)
         const auto& xa = in.joints[a].x;
         const auto& xb = in.joints[b].x;
         const std::array<double,9> dc = direction_cosines(xa, xb, mem.spin);
-        const BeamProperties prop = beam_properties(*in.section(mem.section, mem.shape), in.theory);
+        BeamProperties prop = beam_properties(*in.section(mem.section, mem.shape), in.theory);
+        if (!in.temperature.empty()) {
+            // the steel's stiffness at the member's temperature (EN 1993-1-2); G keeps its ratio to E
+            double k_y = 1.0, k_E = 1.0;
+            steel_reduction(in.temperature[m], k_y, k_E);
+            prop.E *= k_E;
+            prop.G *= k_E;
+        }
         const int n = in.divisions;
         std::size_t prev = a;
         for (int k = 1; k <= n; ++k) {
@@ -530,17 +538,33 @@ std::vector<double> Frame::stiffness () const
     return k;
 }
 
+std::array<double,12> Frame::end_forces (const FrameElement& el, const std::vector<double>& u, double gravity) const
+{
+    const std::array<double,144> ke = beam_stiffness(el.prop, el.length, el.dc);
+    const std::array<double,12> fg = (gravity > 0.0) ? beam_gravity_load(el.prop, el.length, el.dc, gravity) : std::array<double,12>{};
+    std::array<double,12> fe{};
+    for (int i = 0; i < 12; ++i) {
+        double s = -fg[static_cast<std::size_t>(i)];
+        for (int j = 0; j < 12; ++j) { s += ke[static_cast<std::size_t>(12 * i + j)] * u[element_dof(el, j)]; }
+        fe[static_cast<std::size_t>(i)] = s;
+    }
+    return fe;
+}
+
+std::vector<std::array<double,12>> Frame::element_forces (const std::vector<double>& u, double gravity) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(u.size() == num_dofs(), "Frame::element_forces: one displacement per degree of freedom is needed");
+    std::vector<std::array<double,12>> out(m_elems.size());
+    for (std::size_t e = 0; e < m_elems.size(); ++e) { out[e] = rotate12(m_elems[e].dc, end_forces(m_elems[e], u, gravity), true); }
+    return out;
+}
+
 FrameSolution Frame::solve (const std::vector<double>& node_loads, double gravity) const
 {
     const std::size_t ndof = num_dofs();
     // the loads applied at the nodes, and with them the members' weight as element loads
     const std::vector<double> point = point_loads(node_loads, gravity);
     const std::vector<double> f = load_vector(node_loads, gravity);
-    std::vector<std::array<double,12>> fg(m_elems.size());
-    for (std::size_t e = 0; e < m_elems.size(); ++e) {
-        const FrameElement& el = m_elems[e];
-        fg[e] = (gravity > 0.0) ? beam_gravity_load(el.prop, el.length, el.dc, gravity) : std::array<double,12>{};
-    }
     std::vector<double> b(m_free.size());
     for (std::size_t i = 0; i < m_free.size(); ++i) { b[i] = f[m_free[i]]; }
     m_chol.solve(b);
@@ -552,15 +576,8 @@ FrameSolution Frame::solve (const std::vector<double>& node_loads, double gravit
     sol.element_force.resize(m_elems.size());
     for (std::size_t e = 0; e < m_elems.size(); ++e) {
         const FrameElement& el = m_elems[e];
-        const std::array<double,144> ke = beam_stiffness(el.prop, el.length, el.dc);
-        std::array<double,12> u_el{}, fe{};
-        for (int i = 0; i < 12; ++i) { u_el[static_cast<std::size_t>(i)] = sol.displacement[element_dof(el, i)]; }
-        for (int i = 0; i < 12; ++i) {
-            double s = -fg[e][static_cast<std::size_t>(i)];
-            for (int j = 0; j < 12; ++j) { s += ke[static_cast<std::size_t>(12 * i + j)] * u_el[static_cast<std::size_t>(j)]; }
-            fe[static_cast<std::size_t>(i)] = s;
-            taken[element_dof(el, i)] += s;
-        }
+        const std::array<double,12> fe = end_forces(el, sol.displacement, gravity);
+        for (int i = 0; i < 12; ++i) { taken[element_dof(el, i)] += fe[static_cast<std::size_t>(i)]; }
         sol.element_force[e] = rotate12(el.dc, fe, true);
     }
     // a support's reaction: what its node's elements take from it less what is applied there (springs included)

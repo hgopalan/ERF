@@ -13,9 +13,14 @@ precision (``ERF_Frame.H``, ``ERF_FrameDynamics.H``). Its element stiffness and
 mass, local axes, section properties, concentrated masses and gravity loads
 follow OpenFAST's SubDyn module, and it reads SubDyn input files, so that a tower
 described for SubDyn has the same stiffness and natural frequencies in ERF.
-A tower type that gives ``erf.conductors.<type>.frame_file`` stands on this frame
-in a run (section "Coupling to the conductor lines"); without it, towers use the
-one-mode tower of :ref:`sec:Conductors` (``erf.conductors.<type>.frequency``).
+A tower type that gives ``erf.conductors.<type>.frame_file``, or generates its
+frame with ``erf.conductors.<type>.frame_panels`` (section "Generated lattice
+towers"), stands on this frame in a run (section "Coupling to the conductor
+lines"); without either, towers use the one-mode tower of :ref:`sec:Conductors`
+(``erf.conductors.<type>.frequency``). With the members' design data, every
+member is checked against its strength in tension and compression (section
+"Member checks", ASCE 10-15), and the steel can be set at a temperature that
+lowers its stiffness and strength (section "Steel at temperature", EN 1993-1-2).
 
 Conventions
 -----------
@@ -228,7 +233,9 @@ This section describes how a tower in a run stands on the frame
   these axes and ERF's.
 - Links: each drag node of the tower (the equivalent lattice that takes the
   wind, as for any tower) and each line attachment is tied rigidly to its four
-  nearest frame nodes, or to one node it lies on. A force :math:`\mathbf F` at the
+  nearest frame nodes, or to one node it lies on; on a generated frame, to its
+  nearest joints but the crossings of diagonals, so a panel's wind acts at its
+  leg joints. A force :math:`\mathbf F` at the
   point :math:`\mathbf p` is shared as
   :math:`\mathbf F_i = \mathbf F/n + \mathbf w \times \mathbf d_i`, with :math:`\mathbf d_i` the
   node's offset from the nodes' centroid :math:`\mathbf c`,
@@ -253,7 +260,160 @@ This section describes how a tower in a run stands on the frame
   the overturning moment, and each support's upward reaction is its leg's
   compression. Before the first step the footings take the static reactions
   under the tower's present loads.
-- Restart: the checkpoint holds each frame's Newmark state and its last loads.
+- Restart: the checkpoint holds each frame's Newmark state, its last loads and
+  its members' temperatures.
+
+Generated lattice towers
+------------------------
+
+This section describes the frame ERF builds from a tower type's dimensions when
+the type gives ``erf.conductors.<type>.frame_panels`` (``ERF_LatticeFrame.H``), in
+the tower-local axes of the previous section. Every member is an equal-leg
+angle, one Euler-Bernoulli element per member, steel with
+:math:`E = 200` GPa, :math:`G = 77` GPa, :math:`\rho = 7850` kg/m\ :sup:`3` and the
+type's ``yield_strength`` (345 MPa by default).
+
+- Shaft: four legs from the base corners, :math:`(\pm b/2, \pm b/2, 0)` with
+  :math:`b` the ``base_width``, tapering linearly to ``top_width`` at the
+  cross-arm's height :math:`H` (the height the tower's line hangs at); the peak,
+  when ``peak`` > 0, continues at ``top_width`` to :math:`H` + ``peak``. Levels:
+  ``frame_panels`` equal panels from the ground to the cross-arm's bottom,
+  :math:`H` minus its depth (``arm_depth``, or ``top_width`` when that is 0), then
+  the cross-arm's top, then the peak's, in equal panels no taller than the
+  shaft's. Horizontal struts join the corners of every level above the ground.
+- Faces: ``bracing = crossed`` (the default) puts two diagonals on every panel
+  face, bolted where they cross, so each half is a member; the struts are then
+  redundant members. ``bracing = single`` puts one diagonal per face,
+  alternating in direction from panel to panel.
+- Cross-arm: on each side a truss of four chords from the shaft's corners at the
+  cross-arm's top and bottom to its tip, :math:`(0, \pm L_a/2, H)` with :math:`L_a` the
+  ``arm_length``, in panels about as long as the cross-arm is deep, with a frame of four struts and
+  a diagonal at each inner station and a diagonal on each face of every panel
+  but the last.
+- Loads: the tower's drag and its lines' pull are tied to every joint but the
+  crossings of diagonals, which only the diagonals' bending holds out of their
+  face; a panel's wind acts at its leg joints, as lattice tower analyses apply it.
+- Hanger: a joint at the cross-arm's centre, :math:`(0, 0, H)`, where a line that
+  hangs at the tower's centre is attached, joined to the four corners at the
+  cross-arm's top and the four at its bottom; it is SubDyn's interface joint.
+- Supports: the four base corners, fixed.
+- Sizes: the legs and the cross-arm's chords are ``leg_angle`` (leg width and
+  thickness, m), every other member ``brace_angle``. An angle :math:`b \times t`
+  without its root fillet has the area :math:`t(2b - t)`, the principal second
+  moments of its two legs as rectangles meeting at the heel, the torsion constant
+  :math:`(2b - t)t^3/3` and the least radius of gyration :math:`r_v`.
+- Design data: the legs and chords are legs (bolted in both faces); every other
+  member is bracing, or redundant for the struts between crossed diagonals,
+  bolted by one leg with a normal framing eccentricity at both ends and no
+  rotational restraint.
+
+One frame is built per tower type and cross-arm height (to the millimetre), for
+the first tower of that height, and shared by the others. It is written to
+``<diagnostics_dir>/frame_<tower>.dat`` as a SubDyn input file, which SubDyn's
+driver reads to the same stiffness, and its design data to
+``frame_<tower>_members.dat`` in the member file layout of the next section.
+
+Member checks
+-------------
+
+This section describes the strength check of every member
+(``ERF_MemberChecks.H``), following ASCE 10-15 (Design of Latticed Steel
+Transmission Structures) for angle members. A frame from ``frame_file`` is
+checked when the type also gives ``member_file``; a generated frame always is.
+
+- Forces: a member's elements' end forces in their local axes, at present: those
+  under the frame's weight plus :math:`K_e(\mathbf u + a_1 \dot{\mathbf u})` of its
+  motion (the elastic and the stiffness-proportional damping forces), or the
+  static forces under the tower's present loads before the first step. The
+  member's tension :math:`T` and compression :math:`C` are the largest along it.
+- Slenderness: :math:`L/r` with :math:`L` the member's length joint to joint and
+  :math:`r` the angle's :math:`r_v` (or, for a member that is not an angle, the
+  least of its section's). Legs take :math:`KL/r = L/r`. Bracing and redundant
+  members take, for :math:`L/r \le 120`, :math:`L/r` (concentric at both ends,
+  curve 1), :math:`30 + 0.75 L/r` (eccentric at one end, curve 2) or
+  :math:`60 + 0.5 L/r` (eccentric at both, curve 3); beyond 120, :math:`L/r`
+  (unrestrained, curve 4), :math:`28.6 + 0.762 L/r` (partly restrained at one
+  end, curve 5) or :math:`46.2 + 0.615 L/r` (at both, curve 6). The limits are
+  :math:`L/r \le 150` for legs and :math:`KL/r \le 200` for bracing and 250 for
+  redundant members; a member over its limit is flagged.
+- Local buckling: an angle leg's :math:`w/t = (b - t)/t` against
+  :math:`(w/t)_1 = 80\sqrt{E/F_y}/\sqrt{29000}` and
+  :math:`(w/t)_2 = 144\sqrt{E/F_y}/\sqrt{29000}` (ASCE 10-15's
+  :math:`80\psi/\sqrt{F_y}` and :math:`144\psi/\sqrt{F_y}`, written for any units and
+  any :math:`E`, equal to them at :math:`E` = 29000 ksi): the yield stress stands up to
+  :math:`(w/t)_1`, then :math:`F_{cr} = [1.677 - 0.677 (w/t)/(w/t)_1] F_y` up to
+  :math:`(w/t)_2`, then :math:`F_{cr} = 0.0332 \pi^2 E/(w/t)^2`. :math:`w/t > 25` is flagged.
+- Compression: :math:`F_a = [1 - (KL/r)^2/(2 C_c^2)] F_{cr}` up to
+  :math:`C_c = \pi\sqrt{2E/F_{cr}}`, then :math:`\pi^2 E/(KL/r)^2`, on the gross area.
+- Tension: :math:`F_y` on the net area (``NetArea`` times the gross area), or
+  :math:`0.9 F_y` for an angle bolted by one leg.
+- Utilisation: :math:`\max(T/(F_t A_n), C/(F_a A))`, 1 at the design strength. The
+  strengths are nominal and the loads those computed, without load factors.
+  Bending of the members, which the frame carries at its rigid joints, is not
+  checked: ASCE 10-15's effective slenderness accounts for the end
+  eccentricities of bolted angles.
+
+A member file has one row per frame member, blank lines and lines starting with
+``#`` or ``!`` skipped::
+
+    # MemberID  Role  Fy(Pa)  b(m)  t(m)  NetArea(-)  Bolted  Ends  Restraint
+    1  leg      3.45e8  0.15  0.012  0.85  both  concentric  none
+    61 bracing  3.45e8  0.09  0.007  0.85  one   both        none
+
+``Role`` is ``leg``, ``bracing`` or ``redundant``; ``Bolted`` is ``one`` or
+``both`` (the angle's legs bolted at its ends); ``Ends`` is ``concentric``,
+``one`` or ``both`` (the ends with a normal framing eccentricity, curves 1 to 3);
+``Restraint`` is ``none``, ``one`` or ``both`` (the ends partly restrained
+against rotation, curves 4 to 6). ``b = t = 0`` marks a member that is not an
+angle. An angle's area must be within 10 % of its frame section's, so that the
+strength and the stiffness describe the same member.
+
+Steel at temperature
+--------------------
+
+This section describes how the steel's temperature softens and weakens the
+frame, by EN 1993-1-2 (Eurocode 3, structural fire design) Table 3.1, linear
+between its rows:
+
+==================  ==  ===  ===  ===  ====  ====  ====  ====  ======  =====  ======  ====
+:math:`\theta` (C)  20  200  300  400  500   600   700   800   900     1000   1100    1200
+:math:`k_y`         1   1    1    1    0.78  0.47  0.23  0.11  0.06    0.04   0.02    0
+:math:`k_E`         1   0.9  0.8  0.7  0.6   0.31  0.13  0.09  0.0675  0.045  0.0225  0
+==================  ==  ===  ===  ===  ====  ====  ====  ====  ======  =====  ======  ====
+
+(both 1 at 100 C and below). A member at :math:`\theta` has :math:`k_E E` and
+:math:`k_E G` in its stiffness, and :math:`k_y F_y` and :math:`k_E E` in its checks; its
+mass is unchanged, and thermal expansion is not modelled. Temperatures must stay
+below 1200 C, where no stiffness is left.
+
+``erf.conductors.<type>.steel_temperature`` sets every member of the type's
+frames at one temperature for the run. A frame tower can also be heated member by
+member while it moves (``FrameTower::set_temperature()``, the entry point for a
+fire model): the frame is rebuilt and re-factored, the tower carries on from the
+same position and velocity, and its static equilibrium under the weight, its
+support reactions under it, its first natural frequency and its Newmark
+factorisation follow the heated frame's stiffness; the Rayleigh coefficients stay those of
+the frame at its first temperature.
+
+Outputs
+-------
+
+This section lists what a frame tower writes to ``erf.conductors.diagnostics_dir``.
+
+- ``towers.dat``: for a tower whose members are checked, ``<tower>_utilisation``
+  and ``<tower>_member``, the largest utilisation and the member it is in.
+- ``tower_<tower>_stats.csv``: ``max_utilisation`` among the quantities.
+- ``tower_<tower>_members_stats.csv``: per member, ``m<id>_axial`` (its tension, or
+  minus its compression, whichever is larger; N) and ``m<id>_utilisation``, with
+  their mean, rms, minimum and maximum since ``stats_start``.
+- ``tower_<tower>_members.csv``: per member its role, joints, temperature, length,
+  :math:`r`, :math:`L/r`, :math:`KL/r` and its limit, :math:`w/t`, :math:`F_y` and :math:`E` at
+  its temperature, :math:`F_a`, its tensile and compressive strengths and the two
+  flags.
+- ``tower_<tower>_frame.dat``, every ``node_output_int`` steps: the frame nodes'
+  displacements (frame axes, from where the frame stands under its weight at its
+  first temperature) and the members' utilisations; its header lists the nodes'
+  positions and the members' ids.
 
 Reading SubDyn input files
 --------------------------
@@ -276,6 +436,10 @@ Circular, rectangular, arbitrary properties every row
 Cable, rigid link, spring, cosine matrices  skipped
 Joint additional concentrated masses        mass, inertia and the centre's offset
 =========================================== ===============================================================
+
+``write_subdyn()`` writes a frame back in the same layout, every value to 17
+significant digits (and a support spring to an SSI file beside it), so that this
+reader and SubDyn read the same frame; it writes no temperatures.
 
 Every check names the file, and the line or the item: an unknown joint, a
 property set missing from its member type's table, a zero-length member, a
@@ -329,6 +493,26 @@ This section lists what the unit tests ``DirectionCosines``, ``BeamElement``,
   carry the applied loads, their moment and the weight, the downwind legs the
   more compressed; a frame whose cross-arm is far from the lines' attachment is
   refused.
+- Generated towers: a generated 30 m tower with a peak (case G,
+  ``Tests/test_files/FrameSubDynTower/caseG``, written by ``write_subdyn()``) has
+  SubDyn's ``KBBt`` at the cross-arm's centre and its 10 lowest natural
+  frequencies, to SubDyn's 7 digits; its geometry (corners, taper, crossings,
+  tips) and member counts are those described; under a lateral load at the
+  cross-arm, the members cut by any horizontal plane balance the load above it,
+  the legs carrying more than three quarters of the overturning moment; a written file
+  reads back to the same frame.
+- Member checks: an angle's properties against the two rectangles by hand and a
+  tabulated L100x100x10; the six slenderness curves and their meeting at 120; the
+  local-buckling and column curves continuous at their limits; EN 1993-1-2's
+  table; tensile and compressive strengths, flags and heated members; a column's
+  axial force; the member file's round trip and its refusals. A frame tower's
+  checks equal those of the frame's static solution, at rest before its first
+  step and settled under steady loads.
+- Steel at temperature: a frame at a uniform 600 C moves :math:`1/k_E` as far under
+  the same loads and gravity, with the same member forces; a tower heated while
+  settled keeps its place, rings at :math:`\sqrt{k_E}` times its frequency and
+  settles where the heated frame's static solution puts it; a saved state
+  carries the members' temperatures.
 - Time response: a cantilever released in its first mode follows
   :math:`\cos(2 n \arctan(\omega h/2))` and keeps its energy to :math:`10^{-11}`; with Rayleigh
   damping the mode follows Newmark's recursion for the damped oscillator of its

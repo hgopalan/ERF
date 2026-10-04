@@ -508,7 +508,7 @@ endif()
 # unchanged to each leg and used to size the outer CTest watchdog.
 function(add_test_restart_parity TEST_NAME TEST_FILES_DIR STEP_CHK STEP_END)
     set(oneValueArgs "COMMON_OPTIONS" "FCOMPARE_RTOL" "FCOMPARE_ATOL" "RUN_TIMEOUT" "DATALOG" "DATALOG_SIGDIGITS" "PLT2DFILE")
-    cmake_parse_arguments(ADD_TEST_RP "" "${oneValueArgs}" "" ${ARGN})
+    cmake_parse_arguments(ADD_TEST_RP "OVERRUN" "${oneValueArgs}" "" ${ARGN})
     setup_test()
     resolve_test_exe("" "erf_exec" TEST_EXE)
 
@@ -546,6 +546,7 @@ function(add_test_restart_parity TEST_NAME TEST_FILES_DIR STEP_CHK STEP_END)
         "-DDATALOG=${ADD_TEST_RP_DATALOG}"
         "-DDATALOG_SIGDIGITS=${ADD_TEST_RP_DATALOG_SIGDIGITS}"
         "-DPLT2DFILE=${ADD_TEST_RP_PLT2DFILE}"
+        "-DOVERRUN=${ADD_TEST_RP_OVERRUN}"
         -P ${PROJECT_SOURCE_DIR}/Tests/RunRestartParity.cmake)
     set_tests_properties(${TEST_NAME}
         PROPERTIES
@@ -2468,10 +2469,11 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # The same lines on towers that bend as their frame model: every lattice tower stands on the
   # SubDyn frame of lattice_frame.dat (76 beam members on four fixed legs), its members' drag and
   # its line's pull carried onto the frame's nodes, and MoorDyn moves the cross-arms as coupled
-  # points. The towers' loads, footings (from the frame's support reactions) and cross-arm
-  # displacements, the statistics of L1's first tower and the middle span of L1 must match their
-  # golds; the flow is Conductors_Terrain's. The restart parity carries the frames' Newmark state
-  # across the checkpoint.
+  # points; lattice_members.dat gives the members' design data, so each is checked against its
+  # strength. The towers' loads, footings (from the frame's support reactions), cross-arm
+  # displacements and largest member utilisation, the statistics of L1's first tower and the middle
+  # span of L1 must match their golds; the flow is Conductors_Terrain's. The restart parity carries
+  # the frames' Newmark state across the checkpoint.
   if(ERF_MOORDYN_USE_STUB)
     add_test_conductors(Conductors_FrameTowers Conductors_FrameTowers "plt00010" "conductors/L1_span2.dat"
                         "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_moving_logs}" GOLD_SUFFIX ".gold")
@@ -2485,6 +2487,29 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
       DATALOG "conductors/L1_span2.dat conductors/towers.dat conductors/tower_L1_t1_stats.csv"
       DATALOG_SIGDIGITS 10)
   set_tests_properties(${_frame_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
+  # The same lines on towers that bend as a frame ERF generates from the lattice type's dimensions
+  # (8 panels of angles with crossed bracing and a cross-arm truss) with the steel at 500 C, every
+  # member checked against its strength (ASCE 10-15) every step. The towers' loads, footings,
+  # cross-arm displacements and largest member utilisation, the statistics of L1's first tower, its
+  # members' design strengths and the middle span of L1 must match their golds; the flow is
+  # Conductors_Terrain's. The restart parity carries the frames' Newmark state, the members'
+  # statistics and the frames' log across the checkpoint; its checkpointing run goes on past the
+  # checkpoint (OVERRUN), so the restarted run must also drop the rows written after it.
+  set(_generated_logs "conductors/towers.dat conductors/tower_L1_t1_stats.csv conductors/tower_L1_t1_members.csv")
+  if(ERF_MOORDYN_USE_STUB)
+    add_test_conductors(Conductors_GeneratedTowers Conductors_GeneratedTowers "plt00010" "conductors/L1_span2.dat"
+                        "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_generated_logs}" GOLD_SUFFIX ".gold")
+    set(_generated_restart Conductors_GeneratedTowers_Restart)
+  else()
+    add_test_conductors(Conductors_GeneratedTowers_MoorDyn Conductors_GeneratedTowers "plt00010" "conductors/L1_span2.dat"
+                        "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_generated_logs}" GOLD_SUFFIX ".moordyn.gold")
+    set(_generated_restart Conductors_GeneratedTowers_Restart_MoorDyn)
+  endif()
+  set(_generated_parity_logs "conductors/L1_span2.dat conductors/towers.dat conductors/tower_L1_t1_stats.csv")
+  string(APPEND _generated_parity_logs " conductors/tower_L1_t1_members_stats.csv conductors/tower_L1_t1_frame.dat")
+  add_test_restart_parity(${_generated_restart} Conductors_GeneratedTowers 5 10
+      DATALOG "${_generated_parity_logs}" DATALOG_SIGDIGITS 10 OVERRUN)
+  set_tests_properties(${_generated_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # A circuit over hills that are an immersed boundary on a flat mesh: three phases and a shield wire
   # hang from two shared lattice towers that bend, standing on the hills' surface read from the
   # terrain file (the mesh's bottom is flat). The towers' loads and sway, the middle phase's middle
@@ -2535,6 +2560,19 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
                  Conductors_FlowWind.i
                  "erf.conductors.S1.end_b at \\(1600[.0-9]*, 500[.0-9]*\\) lies outside the domain horizontally"
                  "erf.conductors.S1.end_b=1600. 500. 30.")
-  set_tests_properties(Conductors_SpansKeyAbort Conductors_AttachmentOutsideAbort
-                       PROPERTIES LABELS "regression;conductors")
+  # a generated frame that cannot stand on its tower stops the run naming the tower and its cross-arm:
+  # a cross-arm 40 m deep on a tower whose cross-arm is 30 m up
+  add_test_abort(Conductors_GeneratedFrameAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_GeneratedTowers
+                 Conductors_GeneratedTowers.i
+                 "tower L1_t1 \\(cross-arm 30[.0-9]* m\\): the cross-arm's depth \\(40 m\\) must be in"
+                 "erf.conductors.lattice.arm_depth=40")
+  # a member design file that cannot be read stops the run naming its key
+  add_test_abort(Conductors_MemberFileAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_FrameTowers
+                 Conductors_FrameTowers.i
+                 "erf.conductors.lattice.member_file = missing.dat: cannot read the member design file 'missing.dat'"
+                 "erf.conductors.lattice.member_file=missing.dat")
+  set_tests_properties(Conductors_SpansKeyAbort Conductors_AttachmentOutsideAbort Conductors_GeneratedFrameAbort
+                       Conductors_MemberFileAbort PROPERTIES LABELS "regression;conductors")
 endif()

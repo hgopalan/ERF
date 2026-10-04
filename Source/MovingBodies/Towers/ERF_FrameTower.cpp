@@ -75,16 +75,22 @@ std::array<double,3> times (const std::array<double,9>& m, const std::array<doub
 
 } // namespace
 
-RigidLink::RigidLink (const Frame& frame, const std::array<double,3>& p, std::size_t count)
+RigidLink::RigidLink (const Frame& frame, const std::array<double,3>& p, std::size_t count, const std::vector<std::size_t>* candidates)
 {
-    const std::size_t n = frame.num_nodes();
-    std::vector<double> dist(n);
-    for (std::size_t i = 0; i < n; ++i) {
+    std::vector<std::size_t> order;
+    if (candidates != nullptr && !candidates->empty()) {
+        order = *candidates;
+    } else {
+        order.resize(frame.num_nodes());
+        std::iota(order.begin(), order.end(), std::size_t(0));
+    }
+    const std::size_t n = order.size();
+    std::vector<double> dist(frame.num_nodes(), 0.0);
+    for (const std::size_t i : order) {
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(i < frame.num_nodes(), "RigidLink: a candidate node is not a node of the frame");
         const auto& x = frame.node_position(i);
         dist[i] = std::sqrt((x[0] - p[0]) * (x[0] - p[0]) + (x[1] - p[1]) * (x[1] - p[1]) + (x[2] - p[2]) * (x[2] - p[2]));
     }
-    std::vector<std::size_t> order(n);
-    std::iota(order.begin(), order.end(), std::size_t(0));
     std::stable_sort(order.begin(), order.end(), [&] (std::size_t a, std::size_t b) { return dist[a] < dist[b]; });
     m_distance = dist[order[0]];
     const std::size_t k = (m_distance <= 1.0e-6) ? 1 : std::min(count, n);
@@ -133,11 +139,14 @@ std::array<double,3> RigidLink::motion (const std::vector<double>& u) const
     return {{mean[0] + turn[0], mean[1] + turn[1], mean[2] + turn[2]}};
 }
 
-FrameTower::FrameTower (const Tower& tower, std::shared_ptr<const Frame> frame, double gravity)
-    : m_frame(std::move(frame)), m_name(tower.name())
+FrameTower::FrameTower (const Tower& tower, std::shared_ptr<const Frame> frame, double gravity,
+                        std::shared_ptr<const std::vector<MemberDesign>> designs, const std::string& source,
+                        const std::vector<std::size_t>& link_nodes)
+    : m_frame(std::move(frame)), m_name(tower.name()), m_designs(std::move(designs)), m_gravity(gravity)
 {
     const TowerType& type = tower.type();
-    const std::string key = "erf.conductors." + type.name + ".frame_file = " + type.frame_file;
+    const std::string key = source.empty() ? "erf.conductors." + type.name + ".frame_file = " + type.frame_file : source;
+    m_source = key;
     const auto& ac = tower.across();
     m_across = {{static_cast<double>(ac[0]), static_cast<double>(ac[1]), 0.0}};
     m_along = {{m_across[1], -m_across[0], 0.0}};
@@ -147,7 +156,7 @@ FrameTower::FrameTower (const Tower& tower, std::shared_ptr<const Frame> frame, 
     };
     const double reach = static_cast<double>(type.base_width);
     for (std::size_t i = 0; i < tower.nodes().size(); ++i) {
-        m_drag.emplace_back(*m_frame, local_point(tower.nodes()[i].pos));
+        m_drag.emplace_back(*m_frame, local_point(tower.nodes()[i].pos), 4, &link_nodes);
         if (!(m_drag.back().distance() <= reach)) {
             amrex::Abort("tower " + m_name + ": drag node " + std::to_string(i) + " lies " + std::to_string(m_drag.back().distance()) +
                          " m from the nearest node of " + key + ", more than the base width; the frame's axes must be "
@@ -155,7 +164,7 @@ FrameTower::FrameTower (const Tower& tower, std::shared_ptr<const Frame> frame, 
         }
     }
     for (std::size_t a = 0; a < tower.attachments().size(); ++a) {
-        m_attach.emplace_back(*m_frame, local_point(tower.attachments()[a]));
+        m_attach.emplace_back(*m_frame, local_point(tower.attachments()[a]), 4, &link_nodes);
         if (!(m_attach.back().distance() <= reach)) {
             amrex::Abort("tower " + m_name + ": the line attachment " + std::to_string(a) + " lies " +
                          std::to_string(m_attach.back().distance()) + " m from the nearest node of " + key +
@@ -178,9 +187,19 @@ FrameTower::FrameTower (const Tower& tower, std::shared_ptr<const Frame> frame, 
         seen[leg] = static_cast<int>(s);
         m_leg_support[leg] = s;
     }
+    const std::size_t nm = m_frame->inputs().members.size();
+    if (m_designs && m_designs->size() != nm) {
+        amrex::Abort("tower " + m_name + ": " + key + " has " + std::to_string(nm) + " members but " +
+                     std::to_string(m_designs->size()) + " rows of design data");
+    }
+    m_theta = m_frame->inputs().temperature;
+    if (m_theta.empty()) { m_theta.assign(nm, 20.0); }
     // the static equilibrium under the frame's weight, about which it moves
     const FrameSolution s0 = m_frame->solve({}, gravity);
     m_static = s0.reaction;
+    m_static_force = s0.element_force;
+    m_sag = s0.displacement;
+    m_sag0 = m_sag;
     FrameModes modes;
     const std::string err = frame_modes(*m_frame, 1, modes);
     if (!err.empty()) { amrex::Abort("tower " + m_name + ": " + key + ": " + err); }
@@ -188,6 +207,7 @@ FrameTower::FrameTower (const Tower& tower, std::shared_ptr<const Frame> frame, 
     double a0 = 0.0, a1 = 0.0;
     const double zeta = static_cast<double>(type.damping_ratio);
     if (zeta > 0.0) { rayleigh_coefficients(m_f1, zeta, 10.0 * m_f1, zeta, a0, a1); }
+    m_a0 = a0;
     m_a1 = a1;
     m_dyn = std::make_unique<FrameDynamics>(*m_frame, a0, a1);
     m_dyn->start_static({}, 0.0);
@@ -226,7 +246,7 @@ void FrameTower::step (Real dt, const std::vector<Real>& node_force, const std::
 std::array<Real,3> FrameTower::displacement (std::size_t node) const
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node < m_drag.size(), "FrameTower: no such drag node");
-    return to_erf(m_drag[node].motion(m_dyn->displacement()));
+    return to_erf(moved(m_drag[node], m_dyn->displacement()));
 }
 
 std::array<Real,3> FrameTower::velocity (std::size_t node) const
@@ -244,7 +264,7 @@ std::array<Real,3> FrameTower::inertial_force (std::size_t node) const
 std::array<Real,3> FrameTower::attachment_displacement (std::size_t a) const
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(a < m_attach.size(), "FrameTower: no such attachment");
-    return to_erf(m_attach[a].motion(m_dyn->displacement()));
+    return to_erf(moved(m_attach[a], m_dyn->displacement()));
 }
 
 std::array<Real,3> FrameTower::attachment_velocity (std::size_t a) const
@@ -253,22 +273,109 @@ std::array<Real,3> FrameTower::attachment_velocity (std::size_t a) const
     return to_erf(m_attach[a].motion(m_dyn->velocity()));
 }
 
+std::array<double,3> FrameTower::moved (const RigidLink& link, const std::vector<double>& u) const
+{
+    std::array<double,3> p = link.motion(u);
+    if (m_sag != m_sag0) {
+        const std::array<double,3> now = link.motion(m_sag), first = link.motion(m_sag0);
+        for (std::size_t d = 0; d < 3; ++d) { p[d] += now[d] - first[d]; }
+    }
+    return p;
+}
+
 std::vector<double> FrameTower::state () const
 {
     std::vector<double> s = m_dyn->state();
     s.insert(s.end(), m_load.begin(), m_load.end());
+    s.insert(s.end(), m_theta.begin(), m_theta.end());
     return s;
 }
 
 bool FrameTower::set_state (const std::vector<double>& s)
 {
     const std::size_t n = m_frame->num_dofs();
-    if (s.size() != 1 + 4 * n) { return false; }
+    const std::size_t nm = m_theta.size();
+    // a state without the members' temperatures (1 + 4 num_dofs() values) keeps the present ones
+    if (s.size() != 1 + 4 * n + nm && s.size() != 1 + 4 * n) { return false; }
     for (const double x : s) { if (!std::isfinite(x)) { return false; } }
+    if (s.size() == 1 + 4 * n + nm) {
+        const std::vector<double> theta(s.begin() + static_cast<long>(1 + 4 * n), s.end());
+        if (theta != m_theta && !set_temperature(theta).empty()) { return false; }
+    }
     if (!m_dyn->set_state(std::vector<double>(s.begin(), s.begin() + static_cast<long>(1 + 3 * n)))) { return false; }
-    m_load.assign(s.begin() + static_cast<long>(1 + 3 * n), s.end());
+    m_load.assign(s.begin() + static_cast<long>(1 + 3 * n), s.begin() + static_cast<long>(1 + 4 * n));
     m_stepped = true;
     return true;
+}
+
+std::vector<double> FrameTower::present_loads (const Tower& tower) const
+{
+    std::vector<double> load(m_frame->num_dofs(), 0.0);
+    const auto& drag = tower.loads();
+    for (std::size_t i = 0; i < m_drag.size() && 3 * i + 2 < drag.size(); ++i) {
+        m_drag[i].add_load(to_local({{drag[3 * i], drag[3 * i + 1], drag[3 * i + 2]}}), load);
+    }
+    const auto& pulls = tower.line_forces();
+    for (std::size_t a = 0; a < m_attach.size() && a < pulls.size(); ++a) { m_attach[a].add_load(to_local(pulls[a]), load); }
+    return load;
+}
+
+std::vector<std::array<double,12>> FrameTower::element_forces (const Tower& tower) const
+{
+    if (!m_stepped) { return m_frame->solve(present_loads(tower), m_gravity).element_force; }
+    const auto& u = m_dyn->displacement();
+    const auto& v = m_dyn->velocity();
+    std::vector<double> w(u.size());
+    for (std::size_t i = 0; i < u.size(); ++i) { w[i] = u[i] + m_a1 * v[i]; }
+    std::vector<std::array<double,12>> f = m_frame->element_forces(w, 0.0);
+    for (std::size_t e = 0; e < f.size(); ++e) {
+        for (std::size_t i = 0; i < 12; ++i) { f[e][i] += m_static_force[e][i]; }
+    }
+    return f;
+}
+
+std::vector<MemberCheck> FrameTower::member_checks (const Tower& tower) const
+{
+    if (!m_designs) { return {}; }
+    return check_members(*m_frame, *m_designs, element_forces(tower), m_theta);
+}
+
+std::vector<double> FrameTower::node_displacements () const
+{
+    std::vector<double> u = m_dyn->displacement();
+    for (std::size_t i = 0; i < u.size(); ++i) { u[i] += m_sag[i] - m_sag0[i]; }
+    return u;
+}
+
+std::string FrameTower::set_temperature (const std::vector<double>& theta)
+{
+    const std::size_t n = m_frame->num_dofs();
+    if (theta.size() != m_theta.size()) {
+        return "tower " + m_name + ": " + std::to_string(theta.size()) + " temperatures for " + std::to_string(m_theta.size()) + " members";
+    }
+    FrameInputs in = m_frame->inputs();
+    in.temperature = theta;
+    std::string err;
+    std::shared_ptr<const Frame> frame(Frame::create(in, err));
+    if (!frame) { return "tower " + m_name + ": " + m_source + ": " + err; }
+    FrameModes modes;
+    err = frame_modes(*frame, 1, modes);
+    if (!err.empty()) { return "tower " + m_name + ": " + m_source + ": " + err; }
+    const FrameSolution s0 = frame->solve({}, m_gravity);
+    // the same position and velocity: the motion about the heated frame's static equilibrium makes up the change in sag
+    std::vector<double> u = m_dyn->displacement();
+    for (std::size_t i = 0; i < n; ++i) { u[i] += m_sag[i] - s0.displacement[i]; }
+    auto dyn = std::make_unique<FrameDynamics>(*frame, m_a0, m_a1);
+    err = dyn->start(u, m_dyn->velocity(), m_load, 0.0, m_dyn->time());
+    if (!err.empty()) { return "tower " + m_name + ": " + m_source + ": " + err; }
+    m_dyn = std::move(dyn);
+    m_frame = frame;
+    m_static = s0.reaction;
+    m_static_force = s0.element_force;
+    m_sag = s0.displacement;
+    m_f1 = modes.frequency[0];
+    m_theta = theta;
+    return std::string();
 }
 
 bool FrameTower::foundation (const Tower& tower, FoundationLoad& L) const
@@ -291,14 +398,7 @@ bool FrameTower::foundation (const Tower& tower, FoundationLoad& L) const
         }
     } else {
         // at rest before the first step: the static reactions under the tower's present loads
-        std::vector<double> load(n, 0.0);
-        const auto& drag = tower.loads();
-        for (std::size_t i = 0; i < m_drag.size() && 3 * i + 2 < drag.size(); ++i) {
-            m_drag[i].add_load(to_local({{drag[3 * i], drag[3 * i + 1], drag[3 * i + 2]}}), load);
-        }
-        const auto& pulls = tower.line_forces();
-        for (std::size_t a = 0; a < m_attach.size() && a < pulls.size(); ++a) { m_attach[a].add_load(to_local(pulls[a]), load); }
-        reaction = m_frame->solve(load, 0.0).reaction;
+        reaction = m_frame->solve(present_loads(tower), 0.0).reaction;
     }
     // their resultant about the base centre
     std::array<double,3> force{{0.0, 0.0, 0.0}}, moment{{0.0, 0.0, 0.0}};

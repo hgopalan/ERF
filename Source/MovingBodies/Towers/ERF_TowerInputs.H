@@ -4,6 +4,7 @@
 /** The inputs of a lattice tower type (erf.conductors.<type>.*) and their range checks. */
 
 #include <string>
+#include <vector>
 
 #include <AMReX_REAL.H>
 
@@ -51,6 +52,25 @@ namespace erf_towers {
  *                                       gives its stiffness, mass and footings: frequency, weight and the
  *                                       foundation stiffnesses are not given with it. damping_ratio sets the
  *                                       frame's Rayleigh damping at its first natural frequency and ten times it)
+ *   erf.conductors.lattice.member_file = members.dat (the design data of every member of frame_file's frame, for
+ *                                       the members' strength checks (ERF_MemberChecks.H: role, yield strength,
+ *                                       angle, net area, end conditions); default none: no checks; needs frame_file)
+ *   erf.conductors.lattice.frame_panels = 10 (generate the tower's frame (ERF_LatticeFrame.H) from this type's
+ *                                       dimensions, with this many panels of the shaft below the cross-arm;
+ *                                       >= 0, at most 200, default 0: none. Not given with frame_file; like it,
+ *                                       not with frequency, weight or the foundation stiffnesses)
+ *   erf.conductors.lattice.leg_angle   = 0.15 0.012 (m, the leg width and thickness of the equal-leg angle of the
+ *                                       generated frame's legs and cross-arm chords; required with frame_panels,
+ *                                       0 < thickness < width)
+ *   erf.conductors.lattice.brace_angle = 0.09 0.007 (m, the same for every other member; required with frame_panels)
+ *   erf.conductors.lattice.bracing     = crossed (the generated frame's face bracing: crossed, two diagonals per
+ *                                       panel face bolted where they cross, or single, one diagonal alternating
+ *                                       from panel to panel; default crossed; only with frame_panels)
+ *   erf.conductors.lattice.yield_strength = 3.45e8 (Pa, the generated frame's steel; > 0, default 0: 3.45e8;
+ *                                          only with frame_panels)
+ *   erf.conductors.lattice.steel_temperature = 20. (C, the steel's temperature, which lowers its stiffness and
+ *                                          yield strength by EN 1993-1-2; above -273.15 and below 1200, default 20;
+ *                                          only with a frame model, frame_file or frame_panels)
  *
  * Every value must also be finite. The members mirror the keys, with the same units.
  */
@@ -74,6 +94,13 @@ struct TowerType
     amrex::Real foundation_rotational_stiffness{0.0};  //!< N m/rad; 0: rigid
     amrex::Real foundation_lateral_stiffness{0.0};     //!< N/m; 0: rigid
     std::string frame_file;                            //!< SubDyn input file of the tower's frame; empty: none
+    std::string member_file;                           //!< the design data of frame_file's members; empty: none
+    int frame_panels{0};                               //!< the generated frame's shaft panels; 0: no generated frame
+    std::vector<amrex::Real> leg_angle;                //!< m: width, thickness
+    std::vector<amrex::Real> brace_angle;              //!< m: width, thickness
+    std::string bracing;                               //!< crossed or single; empty: crossed
+    amrex::Real yield_strength{0.0};                   //!< Pa; 0: 3.45e8
+    amrex::Real steel_temperature{20.0};               //!< C
 
     /** The number of drag nodes on the cross-arm, one at the middle of each of its equal segments. */
     static constexpr int arm_segments = 4;
@@ -82,8 +109,12 @@ struct TowerType
     amrex::Real arm_face () const { return arm_depth > 0.0 ? arm_depth : top_width; }
     /** The spacing of the legs' footings (m): leg_spacing, or base_width when leg_spacing is 0. */
     amrex::Real legs () const { return leg_spacing > 0.0 ? leg_spacing : base_width; }
-    /** Whether the tower bends under its loads (a frequency or a frame file is given) or stands still. */
-    bool moves () const { return frequency > 0.0 || !frame_file.empty(); }
+    /** Whether the tower bends as a frame model, read from frame_file or generated (frame_panels > 0). */
+    bool has_frame () const { return !frame_file.empty() || frame_panels > 0; }
+    /** Whether the tower bends under its loads (a frequency or a frame model is given) or stands still. */
+    bool moves () const { return frequency > 0.0 || has_frame(); }
+    /** The generated frame's yield strength (Pa): yield_strength, or 3.45e8 when it is 0. */
+    amrex::Real yield () const { return yield_strength > 0.0 ? yield_strength : amrex::Real(3.45e8); }
     /** The force coefficient on the members' area (-): drag_coefficient, or the lattice value of the solidity. */
     amrex::Real force_coefficient () const;
     /** Check every range: returns an empty string when the type is acceptable, else the message, naming the key. */

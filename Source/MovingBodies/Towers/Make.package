@@ -15,3 +15,7 @@ CEXE_headers += ERF_FrameDynamics.H
 CEXE_sources += ERF_FrameDynamics.cpp
 CEXE_headers += ERF_FrameTower.H
 CEXE_sources += ERF_FrameTower.cpp
+CEXE_headers += ERF_MemberChecks.H
+CEXE_sources += ERF_MemberChecks.cpp
+CEXE_headers += ERF_LatticeFrame.H
+CEXE_sources += ERF_LatticeFrame.cpp

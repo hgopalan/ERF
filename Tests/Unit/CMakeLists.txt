@@ -349,6 +349,7 @@ if(ERF_ENABLE_MOORDYN)
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestFrameSubDyn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestFrameDynamics.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestFrameTower.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestMemberChecks.cpp
   )
   target_compile_definitions(${erf_exe_name} PRIVATE ERF_FRAME_TEST_FILES="${PROJECT_SOURCE_DIR}/Tests/test_files/FrameSubDynTower")
   # Motivation: against the real MoorDyn-C (the tests skip on the stub, which has no line

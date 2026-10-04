@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate SubDyn reference inputs (cases A and B) for a small lattice tower.
+"""Generate SubDyn reference inputs (cases A, B, C and T, and case G's driver file) for small lattice towers.
 
 Joint numbering (1-based):
   level k = 0..3 at z = 7k, half-width h = 3 - 2 z / 21
@@ -101,6 +101,23 @@ def members_t():
 
 
 STEEL = "2.0E+11  7.7E+10  7850.0"
+
+
+def write_members_t(path):
+    """Case T's member design file (ERF_MemberChecks.H): equal-leg angles whose areas are within 2.5 % of
+    the arbitrary sections' (legs 4.0e-3 m^2: 150 x 14 mm; the rest 1.0e-3 m^2: 65 x 8 mm), 345 MPa
+    steel; the legs bolted in both faces, the rest by one leg with framing eccentricity at both ends,
+    the struts redundant."""
+    L = ["# Member design data of case T (towerT.dat, the Conductors_FrameTowers lattice), for ERF's member checks",
+         "# MemberID  Role  Fy(Pa)  b(m)  t(m)  NetArea(-)  Bolted  Ends  Restraint"]
+    for n, (g, _, _) in enumerate(members_t(), start=1):
+        if g == "leg":
+            L.append("%d leg 3.45e8 0.15 0.014 1.0 both concentric none" % n)
+        else:
+            role = "redundant" if g == "strut" else "bracing"
+            L.append("%d %s 3.45e8 0.065 0.008 0.85 one both none" % (n, role))
+    with open(path, "w") as f:
+        f.write("\n".join(L) + "\n")
 
 
 def write_dat(case, path, ssi_name=None):
@@ -242,9 +259,9 @@ def write_dat(case, path, ssi_name=None):
 def write_dvr(case, path, datname, root):
     L = []
     w = L.append
-    zref = 30 if case == "T" else 25
+    zref = 30 if case in ("T", "G") else 25
     w("SubDyn Driver file for stand-alone applications")
-    w(("Lattice tower case T: Guyan KBBt at the cross-arm centre (TP ref point 0,0,30)." if case == "T" else
+    w(("Lattice tower case %s: Guyan KBBt at the cross-arm centre (TP ref point 0,0,30)." % case if case in ("T", "G") else
        "Lattice tower oracle case %s: Guyan KBBt at the peak joint (TP ref point 0,0,25)." % case))
     w("False               Echo           - Echo the input file data (flag)")
     w("---------------------- ENVIRONMENTAL CONDITIONS -------------------------------------------------")
@@ -310,4 +327,9 @@ if __name__ == "__main__":
         write_dvr(case, os.path.join(d, root + ".dvr"), root + ".dat", root)
         if ssi:
             write_ssi(os.path.join(d, ssi), with_mass=(case == "C"))
+        if case == "T":
+            write_members_t(os.path.join(d, "towerT_members.dat"))
+    # case G's .dat is written by ERF itself (write_subdyn of the generated tower); only its driver file is here
+    os.makedirs(os.path.join(HERE, "caseG"), exist_ok=True)
+    write_dvr("G", os.path.join(HERE, "caseG", "towerG.dvr"), "towerG.dat", "towerG")
     print("joints", len(joints()), "members", len(members()))

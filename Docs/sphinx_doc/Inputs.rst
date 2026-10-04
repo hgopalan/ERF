@@ -5110,8 +5110,10 @@ wind, which bend under their loads when the type has a ``frequency``.
 |                                                           | loads                                                    |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.node_output_int**                        | write every node of every line (position, clearance,     | Integer >= 0         | 0                        |
-|                                                           | tension, wind, drag) to <output_root>_nodes.dat every    |                      |                          |
-|                                                           | this many steps (steps); 0: never                        |                      |                          |
+|                                                           | tension, wind, drag) to <output_root>_nodes.dat, and     |                      |                          |
+|                                                           | every frame tower's node displacements and member        |                      |                          |
+|                                                           | utilisations to diagnostics_dir/tower_<tower>_frame.dat, |                      |                          |
+|                                                           | every this many steps (steps); 0: never                  |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.drag_on_flow**                           | put the air's drag on the lines and the towers,          | Boolean              | false                    |
 |                                                           | reversed, back into the flow as a momentum source (and   |                      |                          |
@@ -5169,23 +5171,56 @@ wind, which bend under their loads when the type has a ``frequency``.
 |                                                           | fixed MoorDyn points                                     |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.damping_ratio**                   | the structural damping ratio (-, fraction of critical):  | Real in [0, 1)       | 0.02                     |
-|                                                           | of the one mode with frequency; with frame_file, the     |                      |                          |
-|                                                           | frame's Rayleigh damping at its first natural frequency  |                      |                          |
-|                                                           | and at ten times it                                      |                      |                          |
+|                                                           | of the one mode with frequency; with frame_file or       |                      |                          |
+|                                                           | frame_panels, the frame's Rayleigh damping at its first  |                      |                          |
+|                                                           | natural frequency and at ten times it                    |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.foundation_rotational_stiffness** | the footing's resistance to tilting (N m/rad)            | Real >= 0 (0: rigid) | 0                        |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.foundation_lateral_stiffness**    | the footing's resistance to sliding (N/m)                | Real >= 0 (0: rigid) | 0                        |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.frame_file**                      | a SubDyn input file of the tower's frame in tower-local  | File name; not with  | none                     |
-|                                                           | axes (origin at the base centre, x along the line, y     | frequency, weight or |                          |
-|                                                           | along the cross-arm, z up; see the lattice tower frame   | the foundation       |                          |
-|                                                           | model): the tower bends as that frame, which gives its   | stiffnesses          |                          |
-|                                                           | stiffness, mass and footing loads; MoorDyn moves its     |                      |                          |
+|                                                           | axes (origin at the base centre, x along the line, y     | frame_panels,        |                          |
+|                                                           | along the cross-arm, z up; see the lattice tower frame   | frequency, weight or |                          |
+|                                                           | model): the tower bends as that frame, which gives its   | the foundation       |                          |
+|                                                           | stiffness, mass and footing loads; MoorDyn moves its     | stiffnesses          |                          |
 |                                                           | cross-arm as a coupled point. Its four supports stand at |                      |                          |
 |                                                           | z = 0, one per quadrant, and every drag node and line    |                      |                          |
 |                                                           | attachment of the tower lies within base_width of a      |                      |                          |
 |                                                           | frame node                                               |                      |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.member_file**                     | the design data of every member of frame_file's frame    | File name; needs     | none: no checks          |
+|                                                           | (role, yield strength, angle, net area, end conditions;  | frame_file           |                          |
+|                                                           | see the lattice tower frame model): each member is       |                      |                          |
+|                                                           | checked against its strength (ASCE 10-15) every step     |                      |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.frame_panels**                    | generate the tower's frame from this type's dimensions,  | Integer in [0, 200]; | 0: none                  |
+|                                                           | with this many panels of the shaft below the cross-arm:  | not with frame_file, |                          |
+|                                                           | a lattice of equal-leg angles (see the lattice tower     | frequency, weight or |                          |
+|                                                           | frame model), one per type and cross-arm height, written | the foundation       |                          |
+|                                                           | to diagnostics_dir/frame_<tower>.dat as a SubDyn file;   | stiffnesses          |                          |
+|                                                           | its members are checked                                  |                      |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.leg_angle**                       | the leg width and thickness (m) of the equal-leg angle   | 2 Reals, 0 <         | must be set with         |
+|                                                           | of the generated frame's legs and cross-arm chords       | thickness < width;   | frame_panels             |
+|                                                           |                                                          | needs frame_panels   |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.brace_angle**                     | the same for every other member of the generated frame   | 2 Reals, 0 <         | must be set with         |
+|                                                           |                                                          | thickness < width;   | frame_panels             |
+|                                                           |                                                          | needs frame_panels   |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.bracing**                         | the generated frame's face bracing: crossed (two         | crossed or single;   | crossed                  |
+|                                                           | diagonals per panel face, bolted where they cross) or    | needs frame_panels   |                          |
+|                                                           | single (one diagonal, alternating from panel to panel)   |                      |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.yield_strength**                  | the yield strength of the generated frame's steel (Pa)   | Real >= 0 (0:        | 3.45e8                   |
+|                                                           |                                                          | 3.45e8); needs       |                          |
+|                                                           |                                                          | frame_panels         |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.steel_temperature**               | the steel's temperature (C): it lowers the frame's       | Real in (-273.15,    | 20                       |
+|                                                           | stiffness and its members' yield strength by EN 1993-1-2 | 1200); not 20 needs  |                          |
+|                                                           | Table 3.1                                                | frame_file or        |                          |
+|                                                           |                                                          | frame_panels         |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.transformers**                           | names of the transformers the lines end on: every line   | Strings, each the    | none                     |
 |                                                           | end whose x, y lies on a transformer's footprint is      | name of no line or   |                          |
