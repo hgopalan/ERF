@@ -1,10 +1,13 @@
-// Contract of erf_conductors::moordyn_input_text: the span is written in MoorDyn's frame
-// (heights lowered by the surface offset), with the air density, gravity, external kinematics,
-// a flat bottom below everything, both attachments fixed, the line's properties and segments;
-// MoorDyn (the stub or the real library) accepts the file and puts the end nodes on the
-// attachments, and to_erf_frame brings the positions back. A section is written with fixed points
-// at every attachment, a free point under each tower's insulator string, the spans between them
-// and the strings from the towers down, and MoorDyn hangs the conductor from the strings.
+// Unit tests of erf_conductors::moordyn_input_text and write_moordyn_input, the MoorDyn-C input of one line.
+//
+// ASingleSpanLineIsWrittenInMoorDynsFrameWithAirAndExternalKinematics: heights lowered by the surface
+//     offset (z_md = z_erf - surface_offset), the air density, gravity, external kinematics, a flat
+//     bottom below everything, both dead ends Fixed, the line's properties and segments.
+// MoorDynAcceptsTheFileAndTheEndsComeBackInERFsFrame: MoorDyn (the stub or the real library) puts the
+//     end nodes on the attachment points, and to_erf_frame brings the positions back.
+// ASectionIsWrittenWithItsInsulatorStringsAndFreePoints: Fixed points at every attachment point, a
+//     Free point under each tower's string, the spans between them and the strings from the towers
+//     down; MoorDyn hangs the conductor from the strings.
 
 #include <algorithm>
 #include <cmath>
@@ -12,6 +15,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -24,6 +28,9 @@ using erf_conductors::ConductorInputs;
 using erf_conductors::LineInputs;
 
 namespace {
+
+// to_erf_frame returns Reals: positions of a few hundred metres carry a float's spacing, 3e-5 m at 500 m
+constexpr double ptol = (std::is_same<amrex::Real, float>::value) ? 1.0e-4 : 1.0e-6;
 
 LineInputs span ()
 {
@@ -76,7 +83,7 @@ void expect_numbers (const std::vector<double>& got, const std::vector<double>& 
 
 } // namespace
 
-TEST(MoorDynInputWriter, TheSpanIsWrittenInMoorDynsFrameWithAirAndExternalKinematics)
+TEST(MoorDynInputWriter, ASingleSpanLineIsWrittenInMoorDynsFrameWithAirAndExternalKinematics)
 {
     const std::string text = erf_conductors::moordyn_input_text(span(), settings(), 9.81);
     EXPECT_TRUE(has_row(text, "LINE TYPES"));
@@ -125,8 +132,8 @@ TEST(MoorDynInputWriter, MoorDynAcceptsTheFileAndTheEndsComeBackInERFsFrame)
     const auto a = erf_conductors::to_erf_frame(sys->line_node_position(1, 0), in.surface_offset);
     const auto b = erf_conductors::to_erf_frame(sys->line_node_position(1, nn - 1), in.surface_offset);
     for (int d = 0; d < 3; ++d) {
-        EXPECT_NEAR(a[static_cast<std::size_t>(d)], s.end_a[static_cast<std::size_t>(d)], 1.0e-6) << "end a, dir " << d;
-        EXPECT_NEAR(b[static_cast<std::size_t>(d)], s.end_b[static_cast<std::size_t>(d)], 1.0e-6) << "end b, dir " << d;
+        EXPECT_NEAR(a[static_cast<std::size_t>(d)], s.end_a[static_cast<std::size_t>(d)], ptol) << "end a, dir " << d;
+        EXPECT_NEAR(b[static_cast<std::size_t>(d)], s.end_b[static_cast<std::size_t>(d)], ptol) << "end b, dir " << d;
     }
     ASSERT_GT(sys->external_kinematics_init(err), 0u) << err;
 }
@@ -172,6 +179,6 @@ TEST(MoorDynInputWriter, ASectionIsWrittenWithItsInsulatorStringsAndFreePoints)
     for (unsigned p : {5u, 6u}) {
         const auto pos = erf_conductors::to_erf_frame(sys->point_position(p), in.surface_offset);
         EXPECT_NEAR(pos[2], 27.5, 0.05) << "free point " << p;
-        EXPECT_NEAR(pos[1], 500.0, 1.0e-6) << "free point " << p;
+        EXPECT_NEAR(pos[1], 500.0, ptol) << "free point " << p;
     }
 }

@@ -1,21 +1,48 @@
 // Stand-in for libmoordyn, implementing the subset of the MoorDyn-C v2 C API declared in
-// Stub/moordyn/MoorDyn2.h. It lets ERF's line coupling be built and tested where MoorDyn is not
-// installed (CI). It reads the same input file (LINE TYPES, POINT PROPERTIES, LINES, OPTIONS) and
-// has the geometry, ordering and data flow of the real API, but no line dynamics: every line hangs
-// between its two attachment points as an elastic parabola, as long as its unstretched length
-// stretched by its tension, slack or taut,
-// swings about the chord to the quasi-static blowout angle atan(q / w) set by the fluid velocity it
-// is given (q the drag per unit length, w the weight per unit length), relaxing towards that angle
-// with a one-second lag so that the state depends on time, and carries the catenary tension. Fixed,
-// coupled and free points are accepted; a coupled point moves as MoorDyn moves it, from the position
-// it is given at the start of a step at the velocity it is given over the step. A free point hangs
-// from the shortest line that ties it to a held point, fixed or coupled (an insulator string from its
-// tower), plumb below it swung across the line by the wind across the other line attached to it
-// as that line was last placed, and the hanging line runs straight from the held point to it;
-// the fluid loads act on nodes below z = 0, as in MoorDyn (the
-// drag on each node is the normal wind's dynamic pressure on its share of the line), and
-// the external kinematics points follow MoorDyn-C 2.7.1's order: the line nodes, the points, then one
-// entry at the origin.
+// Stub/moordyn/MoorDyn2.h. It lets ERF's conductor coupling be built and tested where MoorDyn is
+// not installed (CI). It reads the same input file (LINE TYPES, POINTS or POINT PROPERTIES, LINES,
+// OPTIONS) and has the geometry, the numbering and the order of the kinematics points of the real
+// API, but no line dynamics. "Line" in this file is a MoorDyn line (in the conductor module one
+// span or one insulator string).
+//
+// What it approximates: every MoorDyn line hangs between its two end points as an elastic
+// parabola, as long as its unstretched length stretched by its tension, slack or taut. It swings
+// about the chord to the quasi-static blowout angle atan(q / w) set by the fluid velocity it is
+// given (q the drag per unit length, w the weight minus buoyancy per unit length, both N/m),
+// relaxing towards that angle with a one-second time constant so that the state depends on time,
+// and carries the parabola's tension (H along the chord, w_e c^2/(8 sag)). Fixed, coupled and free
+// points are accepted; a coupled point moves as MoorDyn moves it, from the position it is given at
+// the start of a step at the velocity it is given over the step. A free point hangs from the
+// shortest line that ties it to a held point, fixed or coupled (an insulator string from its
+// tower), plumb below that point and swung across by the wind across the other line attached to
+// it, as that line was last placed; the hanging line runs straight from the held point to it. The
+// fluid loads act on nodes below z = 0, as in MoorDyn (the drag on each node is
+// 0.5 rho Cd D |u_n| u_n over its share of the chord), and the kinematics points follow MoorDyn-C
+// 2.7.1's order: the line nodes, the points, then one entry at the origin (the ground body).
+//
+// Differences from MoorDyn-C 2.7.1:
+//  - no dynamics: each step places every line quasi-statically; dtM is stored but never used for
+//    sub-steps, and the CFL option is ignored;
+//  - MoorDyn_Init and MoorDyn_Init_NoIC are identical: both place the static shape (no
+//    initial-condition solve), and the coupled velocities xd are ignored;
+//  - the swing angle relaxes to atan(q / w) with a fixed 1 s time constant; q comes from the normal
+//    fluid velocity averaged over the line, and only when the chord's midpoint is below z = 0; w is
+//    the weight minus buoyancy in the fluid of density rho (WtrDnsty, default 1025 kg/m^3);
+//  - node tensions are the parabola's, H (ec + slope es), with no internal damping, bending
+//    stiffness or seabed contact; node velocities are finite differences of successive placements;
+//  - MoorDyn_GetLineNodeForce is zero at inner nodes and plus or minus the end tension at the end
+//    nodes (no end-node weight, drag or inertia);
+//  - MoorDyn_GetLineMaxTen includes the last node (MoorDyn-C stops at node N-1);
+//  - point forces have no point mass, volume or CdA terms;
+//  - MoorDyn_ExternalWaveKinInit returns 0 unless WaveKin = 1 (MoorDyn-C returns the full count
+//    whatever WaveKin is); MoorDyn_ExternalWaveKinSet ignores Ud and t;
+//  - MoorDyn_Save stores the swing angles, the node positions, the last fluid velocity and the free
+//    and coupled points in a text format; MoorDyn_Load restarts the node velocities from rest;
+//    MoorDyn_Serialize stores the whole stub state as doubles in its own format, the fluid velocity
+//    excluded;
+//  - input: v2 or v1 LINE TYPES columns; point types fixed/anchor, coupled/vessel/cpld and
+//    free/connect; line ends on rods or bodies (R1, B1) are not supported, and a malformed
+//    number makes MoorDyn_Create fail.
 
 #include "moordyn/MoorDyn2.h"
 
@@ -24,6 +51,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -36,43 +64,57 @@ constexpr double pi = 3.14159265358979323846;
 
 struct LineType {
     std::string name;
-    double diam = 0.0, mass = 0.0, EA = 0.0, Cd = 1.0;
+    double diam = 0.0;   // m
+    double mass = 0.0;   // kg/m
+    double EA = 0.0;     // N
+    double Cd = 1.0;     // - (normal drag coefficient)
 };
 
 struct Point {
-    int type = 1;    // -1 coupled, 0 free, 1 fixed
-    double pos[3] = {0.0, 0.0, 0.0};
-    double force[3] = {0.0, 0.0, 0.0};
-    int hang_line = -1;   // a free point: the line it hangs from (index into lines)
-    int swing_line = -1;  // a free point: the line whose swing direction it follows
+    int type = 1;                         // -1 coupled, 0 free, 1 fixed
+    double pos[3] = {0.0, 0.0, 0.0};      // position (m, MoorDyn's frame)
+    double force[3] = {0.0, 0.0, 0.0};    // net force of the lines' ends on the point (N)
+    int hang_line = -1;   // a free point: the MoorDyn line it hangs from (0-based index into lines)
+    int swing_line = -1;  // a free point: the MoorDyn line whose swing direction it follows (0-based)
 };
 
 struct Line {
-    int type_index = 0;
-    int attachA = 0, attachB = 0;   // point ids, from 1
-    double length = 0.0;            // unstretched
-    unsigned nseg = 1;
+    int type_index = 0;             // 0-based index into types
+    int attachA = 0, attachB = 0;   // MoorDyn point ids of the line's ends, from 1
+    double length = 0.0;            // unstretched length (m)
+    unsigned nseg = 1;              // segments; nodes = nseg + 1
     double phi = 0.0;               // swing angle about the chord (rad), 0 = hanging straight down
     double sag = 0.0;               // sag at mid-span (m)
-    double H = 0.0;                 // horizontal tension (m)
-    double w_eff = 0.0;             // effective weight per unit length (N/m)
-    std::vector<double> pos, vel, ten, drag;   // 3*(nseg+1) each
-    bool hanging = false;            // ties a free point to a fixed point: placed straight between them
-    double es[3] = {0.0, 0.0, -1.0}; // the direction of the sag, as last placed
-    double across[3] = {0.0, 1.0, 0.0};  // the horizontal normal of its chord, as last placed
+    double H = 0.0;                 // tension component along the chord (N): the parabola's H in the chord frame
+    double w_eff = 0.0;             // effective load per unit length, sqrt(w^2 + q^2) (N/m)
+    std::vector<double> pos, vel, ten, drag;   // 3*(nseg+1) each: m, m/s, N, N
+    bool hanging = false;            // ties a free point to a held point: placed straight between them
+    double es[3] = {0.0, 0.0, -1.0}; // unit direction of the sag, as last placed
+    double across[3] = {0.0, 1.0, 0.0};  // unit horizontal normal of its chord, as last placed
     double phi_across = 0.0;             // the angle the across-line wind swings a string it hangs from (rad)
 };
+
+struct StubSystem;
+struct LineHandle { StubSystem* s; unsigned index; };    // index 0-based
+struct PointHandle { StubSystem* s; unsigned index; };   // index 0-based
 
 struct StubSystem {
     std::vector<LineType> types;
     std::vector<Point> points;
     std::vector<Line> lines;
-    double dtM = 0.001, g = 9.80665, rho = 1025.0, depth = 0.0;
+    double dtM = 0.001;      // s
+    double g = 9.80665;      // m/s^2
+    double rho = 1025.0;     // kg/m^3: MoorDyn's water default; ERF writes the air density
+    double depth = 0.0;      // m, read and unused
     int wave_kin = 0;
     bool initialised = false;
     unsigned nkin = 0;
-    std::vector<double> U;          // 3*nkin, the fluid velocity last set
-    double t = 0.0;
+    std::vector<double> U;          // 3*nkin, the fluid velocity last set (m/s)
+    double t = 0.0;                 // the clock (s)
+    // one handle per MoorDyn line and point, made once the input is read: MoorDyn_GetLine and
+    // MoorDyn_GetPoint return these, so repeated calls allocate nothing
+    std::vector<LineHandle> line_handles;
+    std::vector<PointHandle> point_handles;
 };
 
 std::string lower (std::string s)
@@ -116,7 +158,7 @@ bool parse (const std::string& fname, StubSystem& s)
             LineType t;
             t.name = tok[0]; t.diam = std::stod(tok[1]); t.mass = std::stod(tok[2]); t.EA = std::stod(tok[3]);
             if (tok.size() >= 10) { t.Cd = std::stod(tok[6]); }        // v2 columns: EI Cd Ca CdAx CaAx after BA
-            else if (tok.size() >= 8) { t.Cd = std::stod(tok[6]); }   // v1 columns: Can Cat Cdn Cdt after BA
+            else if (tok.size() >= 8) { t.Cd = std::stod(tok[7]); }   // v1 columns: Can Cat Cdn Cdt after BA
             s.types.push_back(t);
         } else if (section == "points") {
             if (tok.size() < 5) { std::fprintf(stderr, "MoorDyn stub: bad point row '%s'\n", line.c_str()); return false; }
@@ -136,8 +178,10 @@ bool parse (const std::string& fname, StubSystem& s)
             if (it == s.types.end()) { std::fprintf(stderr, "MoorDyn stub: unknown line type '%s'\n", ty.c_str()); return false; }
             l.type_index = static_cast<int>(it - s.types.begin());
             l.attachA = std::stoi(tok[2]); l.attachB = std::stoi(tok[3]);
-            l.length = std::stod(tok[4]); l.nseg = static_cast<unsigned>(std::stoi(tok[5]));
-            if (l.nseg < 1) { std::fprintf(stderr, "MoorDyn stub: a line needs at least one segment\n"); return false; }
+            l.length = std::stod(tok[4]);
+            const int nseg = std::stoi(tok[5]);
+            if (nseg < 1) { std::fprintf(stderr, "MoorDyn stub: a line needs at least one segment, %d given\n", nseg); return false; }
+            l.nseg = static_cast<unsigned>(nseg);
             s.lines.push_back(l);
         } else if (section == "options") {
             if (tok.size() < 2) { continue; }
@@ -180,7 +224,8 @@ bool parse (const std::string& fname, StubSystem& s)
     return true;
 }
 
-// Shape and tension of one line from its end points, its swing angle and the fluid velocity.
+// Place MoorDyn line l (shape, tension and drag) from its end points, its swing angles and the
+// fluid velocity U_nodes (m/s, 3 per node; null: none) over dt (s; 0: no relaxation, no velocity).
 void place (StubSystem& s, Line& l, const double* U_nodes, double dt)
 {
     const LineType& ty = s.types[static_cast<std::size_t>(l.type_index)];
@@ -193,7 +238,7 @@ void place (StubSystem& s, Line& l, const double* U_nodes, double dt)
     double ec[3] = {1.0, 0.0, 0.0};
     if (c > 0.0) { for (int d = 0; d < 3; ++d) { ec[d] = chord[d] / c; } }
 
-    // net weight per unit length in the fluid, and the drag per unit length from the mean normal velocity
+    // net weight per unit length in the fluid (N/m), and the drag per unit length from the mean normal velocity (N/m)
     const double area = 0.25 * pi * ty.diam * ty.diam;
     const double w = (ty.mass - s.rho * area) * s.g;
     double Um[3] = {0.0, 0.0, 0.0};
@@ -263,10 +308,11 @@ void place (StubSystem& s, Line& l, const double* U_nodes, double dt)
         const double slope = 4.0 * sag * (1.0 - 2.0 * xi) / std::max(c, 1.0e-12);
         for (int d = 0; d < 3; ++d) {
             newpos[3*i+d] = A.pos[d] + xi * chord[d] + y * es[d];
-            newten[3*i+d] = l.H * (ec[d] + slope * es[d]);   // the tension along the tangent, horizontal component H
+            newten[3*i+d] = l.H * (ec[d] + slope * es[d]);   // the tension along the tangent; its component along the chord is H (N)
         }
     }
-    // the drag on each node: the normal wind's dynamic pressure on the node's share of the line
+    // the drag on each node: 0.5 rho Cd D |u_n| u_n (N/m) over its share of the chord (half a segment
+    // at the ends), only below z = 0
     l.drag.assign(3 * nn, 0.0);
     if (U_nodes != nullptr) {
         const double share = c / l.nseg;
@@ -290,8 +336,8 @@ void place (StubSystem& s, Line& l, const double* U_nodes, double dt)
 
 void update_point_forces (StubSystem& s)
 {
-    // the pull of each line on its attachments is the end tension directed into the line; MoorDyn
-    // reports it as the net force of the points it integrates only, so fixed points keep zero
+    // the pull of each line on its end points is the end tension directed into the line; MoorDyn
+    // reports a net force for free and coupled points only, so fixed points keep zero
     for (auto& p : s.points) { for (int d = 0; d < 3; ++d) { p.force[d] = 0.0; } }
     for (const auto& l : s.lines) {
         const unsigned last = l.nseg;
@@ -304,7 +350,7 @@ void update_point_forces (StubSystem& s)
     }
 }
 
-// the coupled points where a step of dt leaves them: from x at xd, as MoorDyn moves them
+// the coupled points where a step of dt (s) leaves them: from x (m) at xd (m/s), as MoorDyn moves them
 void set_coupled (StubSystem& s, const double* x, const double* xd, double dt)
 {
     if (x == nullptr) { return; }
@@ -332,8 +378,9 @@ unsigned kin_points (const StubSystem& s)
     return n + 1 + static_cast<unsigned>(s.points.size());
 }
 
-// A hanging line from its held point straight to its free point, with the weight of the lines it
-// carries and its own as its tension, and the normal wind's drag on its nodes.
+// A hanging line (an insulator string) from its held point straight to its free point. Its
+// tension, uniform along it, is its own net weight plus half the effective load (weight and drag,
+// w_eff) of every other line at its free point; the normal wind drags its nodes.
 void place_hanging (StubSystem& s, Line& l, const double* U_nodes)
 {
     const LineType& ty = s.types[static_cast<std::size_t>(l.type_index)];
@@ -381,8 +428,9 @@ void place_hanging (StubSystem& s, Line& l, const double* U_nodes)
     l.w_eff = 0.0;
 }
 
-// Place every line: the free points first (hanging below their held point, swung by the angle their
-// line had when last placed) unless they are kept, then the other lines, then the hanging ones.
+// Place every line: the free points first (hanging plumb below their held point, swung across by the
+// angle phi_across that the span attached to them had when last placed) unless move_free_points is
+// false, then the other lines, then the hanging ones.
 void place_all (StubSystem& s, double dt, bool move_free_points)
 {
     if (move_free_points) {
@@ -425,9 +473,6 @@ void coupled_forces (const StubSystem& s, double* f)
 
 StubSystem* sys (MoorDyn h) { return reinterpret_cast<StubSystem*>(h); }
 
-struct LineHandle { StubSystem* s; unsigned index; };
-struct PointHandle { StubSystem* s; unsigned index; };
-
 } // namespace
 
 // The whole state in memory, as doubles: the clock, then every line's angles, shape and the arrays of
@@ -462,7 +507,16 @@ MoorDyn MoorDyn_Create (const char* infilename)
 {
     if (infilename == nullptr) { return nullptr; }
     auto s = std::make_unique<StubSystem>();
-    if (!parse(infilename, *s)) { return nullptr; }
+    // a malformed number throws in std::stod or std::stoi: report it as a failed creation, since
+    // an exception must not leave this C interface
+    try {
+        if (!parse(infilename, *s)) { return nullptr; }
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "MoorDyn stub: a malformed number in '%s' (%s)\n", infilename, e.what());
+        return nullptr;
+    }
+    for (unsigned i = 0; i < s->lines.size(); ++i) { s->line_handles.push_back(LineHandle{s.get(), i}); }
+    for (unsigned i = 0; i < s->points.size(); ++i) { s->point_handles.push_back(PointHandle{s.get(), i}); }
     return reinterpret_cast<MoorDyn>(s.release());
 }
 
@@ -524,7 +578,9 @@ int MoorDyn_ExternalWaveKinInit (MoorDyn system, unsigned int* n)
 {
     if (system == nullptr || n == nullptr) { return MOORDYN_INVALID_VALUE; }
     StubSystem& s = *sys(system);
-    s.nkin = (s.wave_kin == 1) ? kin_points(s) : 0;   // as MoorDyn: no points unless the waves are external
+    // unlike MoorDyn-C 2.7.1, which counts the points whatever WaveKin is: the stub reports 0 so
+    // that a missing WaveKin = 1 is caught where only the stub runs
+    s.nkin = (s.wave_kin == 1) ? kin_points(s) : 0;
     s.U.assign(3 * static_cast<std::size_t>(s.nkin), 0.0);
     *n = s.nkin;
     return MOORDYN_SUCCESS;
@@ -572,7 +628,7 @@ MoorDynPoint MoorDyn_GetPoint (MoorDyn system, unsigned int c)
     if (system == nullptr) { return nullptr; }
     StubSystem& s = *sys(system);
     if (c < 1 || c > s.points.size()) { return nullptr; }
-    return reinterpret_cast<MoorDynPoint>(new PointHandle{&s, c - 1});   // handles are small and leaked, as the tests are short
+    return reinterpret_cast<MoorDynPoint>(&s.point_handles[c - 1]);
 }
 
 int MoorDyn_GetNumberLines (MoorDyn system, unsigned int* n)
@@ -587,7 +643,7 @@ MoorDynLine MoorDyn_GetLine (MoorDyn system, unsigned int l)
     if (system == nullptr) { return nullptr; }
     StubSystem& s = *sys(system);
     if (l < 1 || l > s.lines.size()) { return nullptr; }
-    return reinterpret_cast<MoorDynLine>(new LineHandle{&s, l - 1});
+    return reinterpret_cast<MoorDynLine>(&s.line_handles[l - 1]);
 }
 
 int MoorDyn_GetDt (MoorDyn system, double* dt)

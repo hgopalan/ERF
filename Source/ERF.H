@@ -1373,7 +1373,7 @@ private:
 #endif
 
 #ifdef ERF_USE_MOORDYN
-    // conductor spans as MoorDyn lines (erf.conductors.*); nullptr unless spans are given
+    // the conductor lines (erf.conductors.*), one MoorDyn system each; nullptr unless erf.conductors.lines is given
     std::unique_ptr<Conductors> conductors;
 #endif
 

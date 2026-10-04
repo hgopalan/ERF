@@ -1971,9 +1971,10 @@ ERF::InitData_post ()
     const std::string& pv2d_2 = "plot2d_vars_2"; appendPlotVariables(pv2d_2,plot2d_var_names_2);
 
 #ifdef ERF_USE_MOORDYN
-    // place the conductor attachments on the terrain and create the MoorDyn lines now that the
-    // mesh exists, before the step-0 outputs; a restart continues the lines from the checkpoint,
-    // and with drag_on_flow their drag on the air is spread again as it was at the checkpoint
+    // place the conductor attachment points on the terrain and create the conductor lines (one
+    // MoorDyn system each) once the mesh exists, before the step-0 outputs; a restart continues
+    // the lines from the checkpoint, and with drag_on_flow the force the lines and the towers'
+    // members exert on the air is spread again as it was at the checkpoint
     if (conductors && !conductors->ground_set()) {
         const int lev = conductors->anchor_level();
         if (solverChoice.terrain_type == TerrainType::ImmersedForcing) {

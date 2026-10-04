@@ -1,6 +1,8 @@
 #ifndef ERF_WAKE_LINES_H
 #define ERF_WAKE_LINES_H
 
+/** Wake sampling lines behind one rotor and their running time average. */
+
 #include <array>
 #include <string>
 #include <vector>
@@ -18,11 +20,24 @@ namespace erf_actuator {
  *
  * Point order: for each x/D, the lateral line then the vertical line, each from -half_width
  * to +half_width; the vertical line is clipped at z_min (the ground), so its lowest point may
- * sit above -half_width. Every point's offset s (in diameters) is recorded in the files.
+ * sit above -half_width. Every point's offset s (in diameters) is recorded in the files. The
+ * lateral line runs along (-axis_y, axis_x, 0), from the right of the downstream direction to
+ * its left; the vertical line runs up. Positions in m, ERF domain coordinates; velocities in m/s.
  */
 class WakeLines
 {
 public:
+    /**
+     * Build the sampling points.
+     *
+     * @param hub         the rotor's hub (m)
+     * @param axis        the rotor axis (any non-vertical vector; its horizontal projection is used)
+     * @param diameter    the rotor diameter (m, > 0)
+     * @param lines_xD    downstream distances of the lines, in diameters (at least one)
+     * @param half_width  half the length of each line, in diameters (> 0)
+     * @param num_points  points per line (>= 2)
+     * @param z_min       the ground under the hub (m, finite): the vertical line starts no lower
+     */
     WakeLines (std::string name, std::string output_root,
                const std::array<amrex::Real,3>& hub, const std::array<amrex::Real,3>& axis,
                amrex::Real diameter, const std::vector<amrex::Real>& lines_xD,
@@ -38,24 +53,32 @@ public:
     amrex::Real diameter () const { return m_diameter; }
     int num_samples () const { return m_count; }
 
-    /** Add one set of sampled velocities (3*n) to the running average. */
+    /** Add one set of sampled velocities (3*n, m/s, finite) to the running average. */
     void accumulate (const std::vector<amrex::Real>& vel);
     /** The running mean velocities (3*n); zeros before the first sample. */
     std::vector<amrex::Real> average () const;
 
-    /** Append the sampled velocities to <output_root>_wake.csv (header when needed). */
+    /**
+     * Write the sampled velocities to <output_root>_wake.csv, one row per point: truncate starts
+     * the file afresh, otherwise the rows are appended; the header is written when open_log()
+     * asks for one. Units: time s, x y z m, u v w m/s.
+     */
     void write_instantaneous (double time, const std::vector<amrex::Real>& vel, bool truncate) const;
     /** Rewrite <output_root>_wake_avg.csv with the running average (the file always holds the current mean). */
     void write_average () const;
 
     /**
      * The lines' state for a checkpoint, <dir>/<name>_wake_avg.dat: the sampling geometry
-     * (hub, axis, diameter, the points) and the running sums. The geometry is stored because a
-     * turbine's hub and outermost node come from OpenFAST's single-precision arrays and would
-     * be rebuilt slightly differently after a restart.
+     * (hub, axis, diameter, the points) and the running sums. The geometry is stored because the
+     * rotor's hub and diameter (from its outermost blade node) come from OpenFAST's
+     * single-precision arrays and would be rebuilt slightly differently after a restart.
      */
     void write_state (const std::string& dir) const;
-    /** Restore the state written by write_state(), geometry included; false when there is none. */
+    /**
+     * Restore the state written by write_state(), geometry included; false when there is none.
+     * Aborts, changing nothing, when the file is malformed: a negative count, a diameter that is
+     * not positive, an axis that is not a horizontal unit vector, or a non-finite value.
+     */
     bool read_state (const std::string& dir);
 
 private:

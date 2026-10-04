@@ -1,9 +1,13 @@
-// Contract of erf_actuator::sample_velocity: each velocity component is interpolated from its
-// own staggered grid, linearly in the physical height, so a field linear in x, y and physical
-// z is reproduced exactly on a uniform-dz mesh, on a stretched mesh (z_phys_nd with equal
-// columns) and on a terrain-following mesh (z_phys_nd varying with x and y), at points inside
-// the cells, on faces, near the ground and near the top; and every point is found by exactly
-// one box, however the domain is split.
+// Contract of the actuator sampler (Core/ERF_ActuatorSampling).
+//
+// - sample_velocity: each velocity component is interpolated from its own staggered grid,
+//   linearly in the physical height, so a field linear in x, y and physical z is reproduced
+//   exactly on a uniform-dz mesh, on a stretched mesh (z_phys_nd with equal columns) and on a
+//   terrain-following mesh (z_phys_nd varying with x and y), at points inside the cells, on faces,
+//   near the ground and near the top; every point is found by exactly one box, however the
+//   domain is split; a point outside the domain aborts, naming it.
+// - points_covered_by: the reach counts, and wraps across a periodic seam.
+// - terrain_heights: the bilinear k = 0 node surface.
 
 #include <algorithm>
 #include <array>
@@ -23,6 +27,7 @@
 #include <gtest/gtest.h>
 
 #include "ERF_ActuatorSampling.H"
+#include "ERF_GTestThrowOnAbort.H"
 
 namespace {
 
@@ -36,7 +41,7 @@ struct LinearField {
     static Real eval (const std::array<Real,4>& c, Real x, Real y, Real z) { return c[0] + c[1]*x + c[2]*y + c[3]*z; }
 };
 
-// BTF-style terrain-following heights: z(x,y,eta) = h(x,y) + (H - h(x,y)) * eta, with eta the
+// basic terrain-following (BTF) heights: z(x,y,eta) = h(x,y) + (H - h(x,y)) * eta, with eta the
 // stretched nominal level fraction; h = 0 gives a flat stretched mesh
 struct MeshSpec {
     int nx = 12, ny = 10, nz = 8;
@@ -197,7 +202,7 @@ TEST(ActuatorSampling, IndependentOfBoxDecomposition)
 {
     MeshSpec m;
     m.hill = 60.0;
-    m.max_grid = {{4, 5, 1024}};     // 3 x 2 uneven boxes, never split in z
+    m.max_grid = {{4, 5, 1024}};     // 3 x 2 boxes of 4 x 5 cells, never split in z
     Fields f(m, false);
     std::vector<Real> pos = test_points(m);
     // points exactly on the box faces x = 4 dx and y = 5 dy
@@ -208,7 +213,7 @@ TEST(ActuatorSampling, IndependentOfBoxDecomposition)
     f.check(pos, tol);
 }
 
-TEST(ActuatorSampling, EmptyPointListIsAllowed)
+TEST(ActuatorSampling, AnEmptyPointListGivesNoVelocities)
 {
     MeshSpec m;
     Fields f(m, true);
@@ -252,6 +257,50 @@ TEST(ActuatorSampling, CoverageByALevelIncludesTheReach)
     EXPECT_TRUE(erf_actuator::points_covered_by(ba, geom, {}, 100.0, outside));
 }
 
+// In a periodic direction the cells a point needs wrap across the seam: a level that covers part
+// of the periodic extent must also hold the cells on the far side of the seam
+TEST(ActuatorSampling, CoverageWrapsAcrossAPeriodicSeam)
+{
+    // 3000 m in x on 50 m cells (60 cells), periodic in x and y
+    amrex::Box domain(amrex::IntVect(0, 0, 0), amrex::IntVect(59, 23, 11));
+    amrex::RealBox rb({0.0, 0.0, 0.0}, {3000.0, 1200.0, 600.0});
+    amrex::Geometry geom(domain, rb, 0, {1, 1, 0});
+    std::string outside;
+    // the level holds the first half in x: a point 25 m from the seam with a 100 m reach needs the
+    // cells 58 and 59 across it, which the level does not hold
+    const amrex::BoxArray half(amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(29, 23, 11)));
+    EXPECT_FALSE(erf_actuator::points_covered_by(half, geom, {25.0, 600.0, 150.0}, 100.0, outside));
+    EXPECT_NE(outside.find("25"), std::string::npos) << outside;
+    // the same point well inside the half: covered
+    EXPECT_TRUE(erf_actuator::points_covered_by(half, geom, {750.0, 600.0, 150.0}, 100.0, outside));
+    // a level holding both sides of the seam covers the point, from either side
+    amrex::BoxList bl;
+    bl.push_back(amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(9, 23, 11)));
+    bl.push_back(amrex::Box(amrex::IntVect(50, 0, 0), amrex::IntVect(59, 23, 11)));
+    const amrex::BoxArray seam(bl);
+    EXPECT_TRUE(erf_actuator::points_covered_by(seam, geom, {25.0, 600.0, 150.0}, 100.0, outside));
+    EXPECT_TRUE(erf_actuator::points_covered_by(seam, geom, {2975.0, 600.0, 150.0}, 100.0, outside));
+    // a reach wider than the period needs the whole periodic extent
+    EXPECT_FALSE(erf_actuator::points_covered_by(seam, geom, {25.0, 600.0, 150.0}, 4000.0, outside));
+    // the wrap is in y too, and a non-periodic z is clamped to the domain
+    const amrex::BoxArray low_y(amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(59, 11, 11)));
+    EXPECT_FALSE(erf_actuator::points_covered_by(low_y, geom, {750.0, 25.0, 10.0}, 100.0, outside));
+    EXPECT_TRUE(erf_actuator::points_covered_by(amrex::BoxArray(domain), geom, {750.0, 600.0, 10.0}, 100.0, outside));
+}
+
+// A point outside the domain is found by no box: the sampler aborts and names it
+TEST(ActuatorSampling, APointOutsideTheDomainIsRefusedNamingIt)
+{
+    MeshSpec m;
+    Fields f(m, true);
+    std::vector<Real> vel;
+    const std::string msg = erf_gtest::abort_message([&] {
+        erf_actuator::sample_velocity(f.u, f.v, f.w, nullptr, f.geom, {Real(5000.0), Real(500.0), Real(100.0)}, vel);
+    });
+    EXPECT_NE(msg.find("5000"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("sampled by 0 boxes"), std::string::npos) << msg;
+}
+
 // The terrain surface under a point: the k = 0 node plane of z_phys_nd, bilinear between the four
 // nodes around (x, y); prob_lo z on a uniform-dz mesh
 TEST(ActuatorSampling, TerrainHeightIsTheBilinearNodeSurface)
@@ -275,7 +324,9 @@ TEST(ActuatorSampling, TerrainHeightIsTheBilinearNodeSurface)
     std::vector<Real> h;
     erf_actuator::terrain_heights(f.znd.get(), f.geom, pos, h);
     ASSERT_EQ(h.size(), expect.size());
-    for (std::size_t p = 0; p < h.size(); ++p) { EXPECT_NEAR(h[p], expect[p], 1.0e-9) << "point " << p; }
+    // heights up to 80 m: 1e-9 m in double, a few float spacings (8e-6 m at 80 m) in single precision
+    const Real htol = (sizeof(Real) == 8) ? Real(1.0e-9) : Real(5.0e-5);
+    for (std::size_t p = 0; p < h.size(); ++p) { EXPECT_NEAR(h[p], expect[p], htol) << "point " << p; }
     EXPECT_GT(*std::max_element(h.begin(), h.end()), 40.0);   // the hill is really there
     // a uniform-dz mesh: the domain floor everywhere
     Fields flat(m, true);

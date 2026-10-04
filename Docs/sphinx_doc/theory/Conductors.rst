@@ -16,34 +16,43 @@ attachments carry, down to the transformers the lines end on.
 Model
 -----
 
-MoorDyn integrates the lumped-mass line dynamics: the line is a chain of
-``segments`` elastic segments of axial stiffness ``EA`` with internal damping,
-each node carrying its share of the mass per unit length, the weight, the
-added mass and the drag of the fluid relative to it. The fluid is ERF's air:
-MoorDyn's "water" density is ``erf.conductors.air_density``, its free surface
-and flat bottom are placed far above and below the span (``surface_offset``),
-and the fluid velocity at every line node comes from ERF through MoorDyn's
-external wave-kinematics interface instead of a wave model. The attachments
-are fixed points, so the line has no coupled degree of freedom and MoorDyn
-needs nothing back from ERF but the wind.
+MoorDyn integrates the lumped-mass dynamics of each span, one MoorDyn line
+per span: a span is a chain of ``segments`` elastic segments of axial
+stiffness ``EA`` (N) with internal damping, each node carrying its share of
+the mass per unit length, the weight net of the air's buoyancy and the drag of
+the air normal to the line, relative to the node (ERF writes the added-mass
+coefficients Ca and CaAx and the axial drag coefficient CdAx as 0). The fluid
+is ERF's air: MoorDyn's "water" density is ``erf.conductors.air_density``, its
+free surface and flat bottom are placed ``surface_offset`` above and below
+ERF's ``z = 0``, beyond the domain's top and bottom, and the fluid velocity at every line node comes from ERF
+through MoorDyn's external wave-kinematics interface instead of a wave model.
+The dead ends are fixed points. The tower attachments are fixed points too,
+unless the towers bend (`Moving towers`_), when they are MoorDyn coupled
+points that ERF moves; a line on rigid towers has no coupled degree of freedom
+and needs nothing back from ERF but the wind.
 
-For a span of chord :math:`c` and unstretched length :math:`L > c` the
-still-air shape is close to a parabola of mid-span sag
-:math:`s = \sqrt{3 c (L - c) / 8}`, with the horizontal tension
-:math:`H = w c^2 / (8 s)` for a weight :math:`w` per unit length; MoorDyn's
-stationary solver finds the elastic catenary itself, and the start-up log
-prints both the solved sag and this estimate. A steady crosswind of speed
-:math:`U` normal to the span loads it with :math:`q = \tfrac12 \rho C_d D U^2`
-per unit length, so the span swings out of its vertical plane towards the
-quasi-static blowout angle :math:`\phi = \arctan(q / w)` and its tension rises
-with the effective weight :math:`\sqrt{w^2 + q^2}`. The diagnostics report
-the swing angle of the middle node about the chord against exactly this
-reference.
+For a span of chord :math:`c` (m) and unstretched length :math:`L > c` (m)
+the still-air shape is close to a parabola of mid-span sag
+:math:`s = \sqrt{3 c (L - c) / 8}` (m), with the horizontal tension
+:math:`H = w c^2 / (8 s)` (N) for a weight :math:`w` (N/m, net of the air's
+buoyancy) per unit length. MoorDyn's stationary solver finds the elastic
+catenary itself, and for every level span between fixed points the start-up
+log prints MoorDyn's sag and end tension against those of the elastic
+catenary (see `Verification`_). A steady crosswind of speed :math:`U` (m/s)
+normal to the span loads it with :math:`q = \tfrac12 \rho C_d D U^2` (N/m) per
+unit length, :math:`\rho` the ``air_density`` (kg/m^3), :math:`C_d` the line's
+``drag_coefficient`` and :math:`D` its ``diameter`` (m), so the span swings
+out of its vertical plane towards the quasi-static blowout angle
+:math:`\phi_b = \arctan(q / w)` and its tension rises with the effective
+weight :math:`\sqrt{w^2 + q^2}`. The diagnostics report the swing angle of
+the middle node about the chord against exactly this reference.
 
 Sections and insulator strings
 ------------------------------
 
-On a real line the conductor runs over many towers. At a suspension tower it
+A line with ``towers`` is a section: several spans hanging at suspension
+towers from insulator strings, or clamped to them. On a real line the
+conductor runs over many towers. At a suspension tower it
 hangs from an insulator string, a chain of porcelain or glass discs a few
 metres long that swings freely, and the spans on either side pull along the
 line with nearly the same force, so the string only swings across the line
@@ -71,22 +80,25 @@ across the line (positive to the left of the direction from ``end_a`` to
 ``end_b``, the side a positive offset is on) and the tension at its top are
 reported too.
 
-In a steady crosswind each string of a long section swings to the angle of
-the transverse load over the vertical load it carries, the wind span over
-the weight span: with equal spans of length :math:`L` either side,
+In a steady crosswind each string of a long section swings across the line
+to the angle :math:`\theta` from the vertical whose tangent is the transverse
+load over the vertical load it carries, the wind span over the weight span:
+with equal spans of length :math:`L` (m) either side,
 
 .. math::
 
    \tan\theta = \frac{q L + q_i L_i / 2}{w L + W_i / 2},
 
-where :math:`q_i = \rho C_d D_i U^2 / 2` is the wind load per unit length of
-the string of length :math:`L_i` and diameter :math:`D_i`, and :math:`W_i` its
-weight net of buoyancy.
+where :math:`q_i = \rho C_{d,i} D_i U^2 / 2` (N/m) is the wind load per unit
+length of the string of length :math:`L_i` (m, ``insulator_length``) and disc
+diameter :math:`D_i` (m, ``insulator_diameter``), :math:`C_{d,i} = 1` the drag
+coefficient ERF writes for a string, and :math:`W_i` (N) the string's weight
+net of buoyancy.
 
 A string takes only the weight span: a span strung to the horizontal tension
-:math:`H` pulls down on its end by :math:`w h / 2 + H \Delta z / h`, with
-:math:`h` its horizontal length and :math:`\Delta z` the height of the end
-above the other, so a tower in a dip, the spans either side rising away from
+:math:`H` pulls down on its end by :math:`w h / 2 + H \Delta z / h` (N), with
+:math:`h` (m) its horizontal length and :math:`\Delta z` (m) the height of the
+end above the other, so a tower in a dip, the spans either side rising away from
 it, can be pulled up. Its string then carries none of the conductor and flips
 over the cross-arm, the line slackening on either side; in practice such a
 point needs a strain tower or a taller one. The start-up log warns, naming the
@@ -100,14 +112,16 @@ span's weight each.
 Lockstep with ERF
 -----------------
 
-The spans live on their anchor level (``anchor_level``, the finest level by
-default). Every step of that level, the wind is handed to MoorDyn at the
-line nodes (MoorDyn also lists its fixed entries after them, the attachments
-and one entry at its own origin, which get no wind), valid at the middle of
+Each line is advanced in step with ERF on one level, with the wind sampled
+where its nodes are at the start of the step. The lines live on their anchor
+level (``anchor_level``, the finest level by default). Every step of that
+level, the wind is handed to MoorDyn at the line nodes (MoorDyn lists its
+points after the line nodes, the attachments and the strings' lower ends, and
+then one entry at its own origin; these get no wind), valid at the middle of
 the step, and the line is advanced by ERF's step in ``substeps``
 MoorDyn calls; MoorDyn sub-steps internally with its own time step, set by
 the Courant factor ``moordyn_cfl`` and bounded further by ``moordyn_dt`` when
-that is given. MoorDyn's clock starts at zero when the spans are created, at
+that is given. MoorDyn's clock starts at zero when the lines are created, at
 ERF's time zero in a fresh run, and ERF's clock and MoorDyn's (plus ERF's time
 at its zero) must agree at the end of every step.
 
@@ -118,19 +132,27 @@ different part of the flow, which matters on a ridge or near a plume. Each
 component is interpolated from its own staggered grid, bilinearly in the
 horizontal and linearly in the physical height, so a field linear in
 ``x``, ``y`` and the height is handed over exactly. The fluid acceleration
-MoorDyn also accepts enters only its added-mass load, which in air is about
-a thousandth of the line's own inertia, and is left at zero. Before every
+MoorDyn also accepts enters only its fluid-inertia (Froude-Krylov) load,
+which in air is about a thousandth of the line's own inertia, and is left at
+zero. Before every
 sampling the points are checked: a point that has left the domain, or whose
 surrounding cells are not on the anchor level's grids (a refined patch that
-does not cover the whole span), stops the run with the span, the point and
-its position. ``prescribed_velocity`` replaces the sampled wind by a uniform
+does not cover the whole line), stops the run, naming the line, the point
+and its position. ``prescribed_velocity`` replaces the sampled wind by a uniform
 one, for testing.
 
+Every step the values crossing between ERF and MoorDyn are checked for NaN and
+infinity: the wind handed to each line and to the towers, the node positions
+and coupled-point forces MoorDyn returns, the lines' pull on the towers in the
+coupling iteration, and the forces and positions spread into the flow. A
+non-finite value stops the run, naming the line (or the towers) and the point.
+
 The Courant factor matters more than its name suggests. For a 300 m span of
-795 kcmil ACSR with 20 segments, MoorDyn's own default of 0.5 (an internal
+795 kcmil (thousand circular mils) ACSR (aluminium conductor, steel
+reinforced; the Drake conductor) with 20 segments, MoorDyn's own default of 0.5 (an internal
 step of 11 ms) and 0.25 make the line integration diverge within half a
-second in a 20 m/s wind; 0.2 runs but more than doubles the still-air sag
-(36.6 m instead of 16.4 m); 0.15 and 0.1 agree to the millimetre. ERF
+second in a 20 m/s wind; 0.2 runs but more than doubles the still-air sag;
+0.15 and 0.1 agree to the millimetre. ERF
 therefore writes 0.1 by default and refuses values above 0.15. A MoorDyn
 step that still diverges aborts with ``MOORDYN_NAN_ERROR`` and the advice to
 reduce the internal step.
@@ -147,15 +169,15 @@ of slack and 20 segments in air of density 1.2 kg/m^3 (the unit tests
   degrees at 10 m/s, 22.893 against 22.903 at 20 m/s and 43.519 against
   43.548 at 30 m/s;
 * released after a one-second gust into still air, the span swings with the
-  first out-of-plane period of a cable, :math:`T = 2c/\sqrt{H/m}` (Irvine,
+  first out-of-plane period of a cable, :math:`T = 2c/\sqrt{H/m}` (s),
+  :math:`m` the ``mass_per_length`` (kg/m) (Irvine,
   *Cable Structures*, 1981), which does not depend on the sag: 6.658 s
   measured over five periods against 6.655 s;
 * a section of three such spans over two suspension towers, hanging from
   2.5 m strings of 60 kg, swings its strings in a steady 20 m/s crosswind to
   22.382 degrees on average over 30 to 60 s, against 22.446 degrees from the
   wind span over the weight span (0.3 %), and at most 0.11 degrees along
-  the line, the spans either side balancing (a probe gave 5.904 against
-  5.896 degrees at 10 m/s and 42.56 against 42.91 at 30 m/s);
+  the line, the spans either side balancing;
 * in still air the span hangs in the elastic catenary: the parameter
   :math:`a = H/w` solves :math:`2a\sinh(c/2a) = L_s`, where the stretched
   length :math:`L_s` exceeds the unstretched one by the strain integrated
@@ -212,14 +234,17 @@ mesh with the actuator core's ``terrain_heights`` (the ``k = 0`` node plane,
 bilinear between the nodes) and added once at start-up, so on a flat mesh
 ``z`` is the absolute height, and a tower on a hill top holds its conductor
 that much higher. Each span's ``length`` must exceed the distance between
-its attachments where they stand: on a slope a dead end 10 m above a summit
+the points the conductor hangs from where they stand (the attachments, or the
+bottoms of the insulator strings at the towers): on a slope a dead end 10 m above a summit
 and a tower 30 m above the hillside below it can be closer, or further
 apart, than their heights above the ground suggest, so the slack is checked
 once they are placed. The attachments must lie inside the domain.
-``<diagnostics_dir>/ground.dat`` lists each attachment (``a``, the towers
-``t1``, ``t2``, ..., ``b``) with the terrain height found under it and its
-resulting absolute height, and each transformer (point ``transformer``) with
-the terrain height under its centre and the height of its top.
+``<diagnostics_dir>/ground.dat`` (columns ``line point x y ground z``) lists
+each attachment of each line (point ``a``, the towers ``t1``, ``t2``, ... from
+``end_a``, then ``b``) with the terrain height found under it (``ground``, m)
+and its resulting absolute height (``z``, m), and each transformer (its name
+in the ``line`` column, point ``transformer``) with the terrain height under
+its centre (``ground``) and the height of its top (``z``).
 
 With an immersed terrain (``erf.terrain_type = ImmersedForcing``) the mesh is
 flat and the hills are solid cells inside it, so the mesh's bottom says nothing
@@ -241,12 +266,14 @@ m/s on 16 m cells, is far beyond a 0.3 s step.
 Drag on the flow
 ----------------
 
-With ``drag_on_flow`` the lines act on the air as well: after each MoorDyn
-step the air's drag on every node, reversed (and on every node of the lattice
-towers, see `Towers`_), is spread onto ERF's
-face-centred momentum sources with the actuator core's Gaussian of width
-``epsilon`` cells, discretely normalised so that the source integrates back
-to the force exactly, and added during the next step. Each node carries its
+With ``drag_on_flow`` the lines act on the air as well. In each step of the
+anchor level ERF advances the lines first, from the wind at the start of the
+step; the air's drag on every line node at the end of that MoorDyn step,
+reversed (and on every node of the lattice towers, see `Towers`_), is then
+spread onto ERF's face-centred momentum sources with the actuator core's
+Gaussian of width ``epsilon`` cells, discretely normalised so that the source
+integrates back to the force exactly, and held constant as a source over the
+same ERF step, from :math:`t` to :math:`t + \Delta t`. Each node carries its
 share of the line's drag, so the force per unit length is resolved as long
 as the node spacing stays below the kernel width. A conductor's drag is
 small next to the momentum of the wind it crosses (4 to 5 N/m in a 17 m/s
@@ -259,35 +286,50 @@ the anchor level and are available only with the switch on.
 Diagnostics
 -----------
 
-Every ``diagnostics_int`` steps each span appends a row to
-``<output_root>.dat`` for a single span, or ``<output_root>_span<k>.dat`` for
-span ``k`` of a section (whitespace separated, like ERF's data logs): the time,
+At the first step and then every ``diagnostics_int`` steps each span appends
+a row to ``<output_root>.dat`` for a single span, or
+``<output_root>_span<k>.dat`` for span ``k`` of a section (``k`` from 1 at
+``end_a``; whitespace separated, like ERF's data logs): the time,
 the middle node's position, its sag below the chord, its lateral offset from
 the chord's vertical plane, the swing angle in degrees, the tension at the
 first and last node, the largest tension on the line, the wind handed to
 MoorDyn at the middle node, the smallest clearance of any node above the
 terrain under it with that node's horizontal position, and the air's total
-drag on the span. A line on strings also writes
-``<output_root>_insulators.dat``: for each tower ``t<j>`` the string's swing
-from the vertical and across the line in degrees and the tension at its top.
-The clearance uses the terrain surface under each node
-(``terrain_heights``, the ``k = 0`` node plane), so a blown-out span on a
-slope is measured against the ground it now hangs over.
+drag on the span (columns ``time mid_x mid_y mid_z mid_sag mid_offset
+swing_deg tension_a tension_b max_tension mid_u mid_v mid_w min_clearance
+min_clearance_x min_clearance_y drag_x drag_y drag_z``). All vectors are in
+ERF's frame (z up), in m, m/s or N: ``drag_x``, ``drag_y``, ``drag_z`` are the
+force of the air on the span, ``mid_sag`` is positive below the chord, and
+``mid_offset`` and ``swing_deg`` are positive to the left of the direction
+from ``end_a`` to ``end_b``. A line on strings also writes
+``<output_root>_insulators.dat``: for each tower ``t<j>`` (``j`` from 1 at the
+tower next to ``end_a``) the string's swing from the vertical and across the
+line in degrees and the tension at its top (N). The clearance uses the
+terrain surface under each node (on a fitted mesh the ``k = 0`` node plane
+from ``terrain_heights``; with an immersed terrain the surface the immersed
+boundary is built from), so a blown-out span on a slope is measured against
+the ground it hangs over at that moment.
 
 From ``stats_start`` on each span keeps running statistics, the mean, root
-mean square, minimum and maximum of its swing angle, mid-span offset, end
-and maximum tensions, minimum clearance and crosswind drag, in
+mean square, minimum and maximum of its swing angle (``swing_deg``), mid-span
+offset (``mid_offset``, m), tensions at the first and last node
+(``tension_a``, ``tension_b``, N), largest tension (``max_tension``, N),
+minimum clearance (``min_clearance``, m) and the ERF-frame y component of the
+air's drag on the span (``drag_y``, N), in
 ``<output_root>_stats.csv`` (``<output_root>_span<k>_stats.csv`` in a
 section), and the strings theirs in ``<output_root>_insulators_stats.csv``;
 these are the numbers a turbulent-wind run is judged on. With
-``node_output_int`` every node of every line (the spans' in order, then the
-strings'; position,
-clearance, tension, wind and drag) is written to ``<output_root>_nodes.dat``
-for plotting the line's shape. ``<diagnostics_dir>/total_load.dat`` holds
-the air's drag on all lines, the force the lines put into the air (zero
-without ``drag_on_flow``) and the integral of the momentum source, which
-equals that force. The MoorDyn input
-file the span was built from is kept next to it
+``node_output_int`` every node of every line (the ``node`` column counts
+from 0: the spans' nodes from ``end_a``, then each string's from its top;
+position, clearance, tension, wind and drag) is written to
+``<output_root>_nodes.dat`` for plotting the line's shape.
+``<diagnostics_dir>/total_load.dat`` holds, every ``diagnostics_int`` steps,
+the air's drag on all lines and all lattice towers (``drag_x``, ``drag_y``,
+``drag_z``, N, ERF frame), the force they put into the air (``force_on_air_x``
+to ``force_on_air_z``: minus the drag with ``drag_on_flow``, zero without) and
+the integral of the momentum source (``source_x`` to ``source_z``, N), which
+equals that force. The MoorDyn input file the line was built from is kept
+next to it
 (``<diagnostics_dir>/<name>.moordyn.txt``) for inspection or for running
 MoorDyn on its own.
 
@@ -310,13 +352,15 @@ time spent in a clash, in ``<diagnostics_dir>/separation_A-B_stats.csv``.
 The start-up log prints how far apart each pair hangs in still air and
 warns when a pair starts inside the flashover distance. Two identical
 parallel lines are almost equally far apart along their whole length, so
-where they come closest can move by a span on a millimetre's difference;
+where they come closest can move by a span's length on a millimetre's
+difference;
 the distance itself is well defined.
 
 Transformers
 ------------
 
-The lines of a network end somewhere: at a substation, on a transformer. A
+A transformer is a box on the terrain on which lines are dead-ended; ERF
+reports the lines' load on it and how close any conductor comes to it. A
 transformer (``erf.conductors.transformers``, a block of its own per name) is
 a box of ``size`` (length along ``x``, width along ``y``, height) standing on
 the terrain: its base is at the terrain height under the centre of its
@@ -345,7 +389,7 @@ either is exceeded, and an allowable of 0 (the default) is not checked.
 Lines pulling from different sides partly cancel, so the check is on the
 vector sum, which is what the foundation and the bushings carry. In still air
 two lines ending on a transformer from opposite sides balance; in a crosswind
-they no longer do.
+they do not.
 
 Every conductor is also watched for how close it comes to each box: the
 closest approach of the polyline through its span nodes to the box, found by
@@ -358,7 +402,9 @@ flagged against ``flashover_distance`` like a pair of lines.
 Every ``diagnostics_int`` steps ``<diagnostics_dir>/transformers.dat`` gets,
 for each transformer ``T``, the force components ``T_Fx``, ``T_Fy``,
 ``T_Fz``, ``T_Fh``, the moment ``T_Mx``, ``T_My``, ``T_Mh``, the allowable
-flag ``T_over``, the clearance ``T_clearance`` and its flag ``T_clash``; from
+flag ``T_over``, the clearance ``T_clearance`` and its flag ``T_clash``
+(``T_F*`` is the force of the lines on the transformer, N, and ``T_M*`` its
+moment about the centre of the base, N m, both in ERF's frame); from
 ``stats_start`` the horizontal force, the overturning moment, both flags and
 the clearance are kept as running statistics in
 ``<diagnostics_dir>/transformer_T_stats.csv``. The start-up log prints, for
@@ -384,32 +430,37 @@ A circuit's phases and its shield wire hang from one row of towers: a line
 with ``share_towers = <line>`` hangs from the towers of that line, which has
 the ``tower_type``, each at its own point on them, its ``towers`` points. The
 phases sit across the cross-arm and the shield wire on the ``peak`` above it;
-a point off the tower (further from its axis than half the cross-arm, or above
-its top) stops the run naming the line and the tower. A shared tower stands
+a point off the tower (further from its axis than half the cross-arm, below
+its base, or above the top of its peak) stops the run naming the line and the
+tower. A shared tower stands
 under the owning line's point, and the other lines' points are placed above
 its base, not above the ground under each point, so that a cross-arm on a slope
 stays level. The tower takes each line's pull at its own point, the
 foundation all of them, and the lines that share a moving tower step with it
 together.
 
-Each member is cut into drag nodes at the middle of equal segments
-(``segments`` up the body, four along the arm). A node stands for a length
-:math:`L` of member with axis :math:`\mathbf{e}`, and the wind loads it as a
-slender member does, by the flow normal to it, relative to the node's own
-velocity :math:`\mathbf{v}` (zero for a rigid tower):
+Each member is cut into drag nodes at the middle of equal segments:
+``segments`` up the body to the cross-arm, as many on the ``peak`` as fit at
+that spacing (at least one), and four along the arm. A node stands for a
+length :math:`\ell` (m) of member with axis :math:`\mathbf{e}` (a unit
+vector), and the wind :math:`\mathbf{U}` (m/s) loads it as a slender member
+does, by the flow normal to it, relative to the node's own velocity
+:math:`\mathbf{v}` (m/s, zero for a rigid tower):
 
 .. math::
 
-   \mathbf{F} = \tfrac{1}{2} \rho\, C_f\, w\, L\, |\mathbf{U}_n| \mathbf{U}_n ,
+   \mathbf{F} = \tfrac{1}{2} \rho\, C_f\, b\, \ell\, |\mathbf{U}_n| \mathbf{U}_n ,
    \qquad \mathbf{U}_n = (\mathbf{U} - \mathbf{v}) - \big((\mathbf{U} - \mathbf{v})\cdot\mathbf{e}\big)\mathbf{e} ,
 
-with :math:`w` the face width times the ``solidity`` :math:`\phi` (the
-members' area over the face's outline) and :math:`C_f` the ``drag_coefficient``
-or, by default, the force coefficient of a square lattice tower of
-flat-sided members on the projected area of one face,
-:math:`C_f = 4\phi^2 - 5.9\phi + 4` (ASCE 7), which counts the windward and
-the leeward face together: 2.98 at :math:`\phi = 0.2`. A rotor-less tower in
-AeroDyn is the same law with :math:`w` the tower's diameter. The wind is
+with :math:`\mathbf{F}` (N) the force of the air on the node, :math:`\rho`
+the ``air_density``, :math:`b` (m) the face width times the ``solidity``
+:math:`\sigma` (the members' area over the face's outline) and :math:`C_f`
+the ``drag_coefficient`` or, by default, the force coefficient of a square
+lattice tower of flat-sided members on the projected area of one face,
+:math:`C_f = 4\sigma^2 - 5.9\sigma + 4` (ASCE 7, the load standard of the
+American Society of Civil Engineers), which counts the windward and the
+leeward face together: 2.98 at :math:`\sigma = 0.2`. A rotor-less tower in
+AeroDyn is the same law with :math:`b` the tower's diameter. The wind is
 ERF's velocity sampled at the nodes with the lines' sampler at the start of
 each step, or the prescribed velocity; a node just above sloping ground,
 below the averaged bottom face of its cell, is read from the bottom cell. The
@@ -425,19 +476,21 @@ each span either side) and its string, the spans' pulls along the line
 cancelling; in a crosswind it also takes the wind on that length, the wind
 span. Drag and pull together load the foundation: the base shear (the
 horizontal force), the overturning moment about the centre of the base and
-the downward load :math:`P`, the tower's ``weight`` included. The four legs
-stand at :math:`(\pm s/2, \pm s/2)` in the frame of the line and the
-cross-arm, :math:`s` the ``leg_spacing`` (the base width by default), and,
-as a rigid square, share :math:`P` equally and the overturning moment
-:math:`\mathbf{M}` linearly,
+the downward load :math:`P` (N), the tower's ``weight`` included. The four
+legs stand at :math:`(x_i, y_i) = (\pm s/2, \pm s/2)` in the frame of the line
+and the cross-arm, :math:`s` (m) the ``leg_spacing`` (the base width by
+default), and, as a rigid square, share :math:`P` equally and the moment
+:math:`\mathbf{M}` (N m) of all loads about the centre of the base linearly,
 
 .. math::
 
    N_i = \frac{P}{4} + \frac{M_y x_i - M_x y_i}{4 (s/2)^2} ,
 
-compression positive, so that the reactions balance the loads. The largest
-compression and the largest uplift (the most negative :math:`N_i`) are
-flagged against ``allowable_compression`` and ``allowable_uplift``, a
+:math:`N_i` (N) the axial force of leg :math:`i`, compression positive, so
+that the reactions balance the loads. The largest compression,
+:math:`\max(0, \max_i N_i)`, and the largest uplift,
+:math:`\max(0, -\min_i N_i)`, reported as a positive force (0 when no leg
+pulls), are flagged against ``allowable_compression`` and ``allowable_uplift``, a
 footing's bearing and pull-out capacity (0, the default, is not checked). A
 pull along the diagonal loads the corner leg :math:`\sqrt{2}` times more
 than the same pull face-on.
@@ -450,7 +503,11 @@ the line's pull ``line_Fx``, ``line_Fy``, ``line_Fz``, the ``shear``, the
 step starts (the flow the drag was found from and the line as it was then);
 from ``stats_start`` each tower keeps the statistics of its horizontal drag
 and pull, shear, overturning moment, leg compression and uplift and the flag
-in ``<diagnostics_dir>/tower_<line>_t<k>_stats.csv``. The start-up log prints
+in ``<diagnostics_dir>/tower_<line>_t<k>_stats.csv`` (``k`` from 1 at the
+tower next to ``end_a``). In ``towers.dat`` all vectors are in ERF's frame,
+in N and N m: ``drag_F*`` is the force of the air on the tower's members,
+``line_F*`` the force of the lines on the tower, ``vertical`` is positive
+down and ``max_uplift`` is a positive tension. The start-up log prints
 each tower's still-air pull and leg loads. With ``drag_on_flow`` the
 towers' drag goes into the momentum sources with the lines', and
 ``total_load.dat`` counts both. A checkpoint carries the statistics and the
@@ -460,11 +517,14 @@ checkpointed step's.
 Verification (unit tests ``MemberDrag``, ``Tower``): a node takes only the
 normal component of the relative wind (none along its axis, none moving with
 the wind); in a uniform wind a 30 m tower of 6 m base, 1.5 m top width and
-solidity 0.2 carries exactly :math:`q C_f \phi (b_0 + b_t) H / 2` on its body
-(the width is linear, so the segments' midpoint sum is exact) and
-:math:`q C_f \phi d L_a` on its cross-arm, and the base moment equals the
-hand integral up to the midpoint sum's known :math:`H^3/(12 n^2)` on the
-quadratic part; wind along the cross-arm loads only the body; in a log-law
+solidity 0.2 carries exactly :math:`p\, C_f \sigma (b_0 + b_t) z_a / 2` on its
+body, :math:`p = \rho U^2 / 2` the dynamic pressure, :math:`b_0` and
+:math:`b_t` the base and top widths and :math:`z_a` the cross-arm height (the
+width is linear, so the segments' midpoint sum is exact), and
+:math:`p\, C_f \sigma d L_a` on its cross-arm, :math:`d` the ``arm_depth`` and
+:math:`L_a` the ``arm_length``; the base moment equals the hand integral up to
+the midpoint sum's known :math:`z_a^3/(12 n^2)` on the quadratic part,
+:math:`n` the ``segments``; wind along the cross-arm loads only the body; in a log-law
 wind ten segments give the drag and base moment of a 20 000-point integral
 within 1 %. The legs' reactions are in equilibrium with the loads for any
 orientation, face-on and diagonal pulls give the hand values, and each
@@ -478,8 +538,8 @@ swung :math:`\theta` across the line, sees the normal wind
 across the line, so its drag :math:`q_i L_i \cos^2\theta` lifts as well as
 pushes.) A tower next to a dead end differs: the span from the dead end
 drops to the string's bottom, and the lower end takes less of its weight. On the terrain test case the hilltop tower in a 25 m/s wind
-carries 25.6 kN, against 25.1 kN from :math:`q C_f \phi` times its face at
-that speed.
+carries 25.6 kN, against 25.1 kN from :math:`p\, C_f \sigma` times its face
+at that speed.
 
 Moving towers
 -------------
@@ -494,32 +554,37 @@ a platform. The tower is a single mode, the same in :math:`x` and :math:`y`
 ``foundation_lateral_stiffness`` :math:`k_l` in N/m, rigid when 0, the
 default), with the structural ``damping_ratio`` :math:`\zeta` (0.02 by
 default). Its mass, ``weight`` over gravity, is spread over the drag nodes by
-the length of member each stands for. A node at height :math:`z` above the
-base moves horizontally by :math:`\varphi(z)` times the cross-arm's
-displacement :math:`q`,
+the length of member each stands for, :math:`m_i` (kg) at node :math:`i`. A
+node at height :math:`z` (m) above the base moves horizontally by
+:math:`\psi(z)` times the cross-arm's displacement :math:`x_a` (m),
 
 .. math::
 
-   \varphi(z) = a_b \left(\frac{z}{H}\right)^2 + a_r \frac{z}{H} + a_l ,
-   \qquad a_b = \frac{1/K_b}{c},\; a_r = \frac{H^2/k_r}{c},\; a_l = \frac{1/k_l}{c},\;
-   c = \frac{1}{K_b} + \frac{H^2}{k_r} + \frac{1}{k_l} ,
+   \psi(z) = a_b \left(\frac{z}{z_a}\right)^2 + a_r \frac{z}{z_a} + a_l ,
+   \qquad a_b = \frac{1/K_b}{C},\; a_r = \frac{z_a^2/k_r}{C},\; a_l = \frac{1/k_l}{C},\;
+   C = \frac{1}{K_b} + \frac{z_a^2}{k_r} + \frac{1}{k_l} ,
 
 the cantilever's bending, the footing's tilt and its slide, each in
-proportion to its compliance under a load at the cross-arm (height
-:math:`H`). The generalized mass is :math:`M = \sum m_i \varphi_i^2` and the
-stiffness :math:`K = 1/c`, the strain energy of that shape exactly, with the
-bending stiffness :math:`K_b = (2\pi f)^2 \sum m_i (z_i/H)^4` that gives the
-type's frequency :math:`f` on a rigid foundation; a foundation that gives
-lowers the frequency to :math:`\sqrt{K/M}/2\pi`. In each horizontal direction
+proportion to its compliance under a load at the cross-arm, :math:`z_a` (m)
+the cross-arm's height above the base and :math:`C` (m/N) the total
+compliance (a term with a stiffness of 0, a rigid foundation, is left out).
+The generalized mass is :math:`M_g = \sum m_i \psi_i^2` (kg) and the stiffness
+:math:`K_g = 1/C` (N/m), the strain energy of that shape exactly, with the
+bending stiffness :math:`K_b = (2\pi f)^2 \sum m_i (z_i/z_a)^4` (N/m) that
+gives the type's frequency :math:`f` (Hz) on a rigid foundation; a foundation
+that gives lowers the frequency to :math:`\sqrt{K_g/M_g}/2\pi`. In each
+horizontal direction
 
 .. math::
 
-   M \ddot q + 2 \zeta \omega M \dot q + K q = Q ,
-   \qquad Q = \sum_i \varphi_i F_i + F_{\rm line} ,
-   \qquad \omega^2 = K/M ,
+   M_g \ddot x_a + 2 \zeta \omega M_g \dot x_a + K_g x_a = Q ,
+   \qquad Q = \sum_i \psi_i F_i + \sum_a \psi_a F_a ,
+   \qquad \omega^2 = K_g/M_g ,
 
-with :math:`F_i` the members' drag and :math:`F_{\rm line}` the line's pull
-at the cross-arm (:math:`\varphi = 1`). A load held over a step is
+with :math:`F_i` (N) the members' drag and :math:`F_a` (N) the pull of the
+line hanging at attachment :math:`a`, weighted by the shape at the
+attachment's height (:math:`\psi_a = 1` at the cross-arm, above 1 for a shield
+wire on the peak). A load held over a step is
 integrated exactly, so any step is stable. The tower does not twist, rise or
 sink, and its weight does not add to the overturning as it leans
 (:math:`P`-:math:`\Delta`).
@@ -539,13 +604,15 @@ updated with Aitken's relaxation until it changes by less than
 the towers stepping with the pull from the end of the last call, is only
 conditionally stable: a short, nearly taut span pulls back in milliseconds,
 and a pull that lags a coupling step acts on the tower as negative damping,
-:math:`k h / 2` for a span of stiffness :math:`k` and a step :math:`h`, which
-outgrows the tower's own damping once :math:`k` exceeds the tower's stiffness.
+:math:`k \Delta t_c / 2` (N s/m) for a span of stiffness :math:`k` (N/m) and a
+coupling step :math:`\Delta t_c` (s), which outgrows the tower's own damping
+once :math:`k` exceeds the tower's stiffness.
 Iterated, the coupling is the implicit one; it takes about four iterations
 where the towers carry strings and a clamped shield wire, and one once they are
 still. ``<diagnostics_dir>/coupling.dat`` logs, every ``diagnostics_int``
 steps, the most iterations a coupling step took and how many did not converge
-(the run warns once and goes on with the last iterate). The members' drag is
+(the run warns once and goes on with the last iterate). A pull that is not
+finite stops the run instead, naming the line and the time. The members' drag is
 found again in every coupling step from the wind of the ERF step and the
 members' current velocity, so the wind damps the sway: a member moving with the
 wind feels less of it. The foundation takes the loads
@@ -570,13 +637,14 @@ Verification (unit tests ``OneModeTower``, ``ConductorLine``,
 time is cut, and a step of a thousand periods lands on the static
 deflection; released, the tower rings down with the damped period to
 :math:`10^{-4}` and the logarithmic decrement of its damping ratio to
-:math:`10^{-3}`; a load :math:`F` at the cross-arm deflects it by :math:`Fc`
-with the foundation's compliances in series, and a load spread up the body
-by the hand value of the midpoint sum of :math:`p (z/H)^2`; swaying freely,
-its base shear is :math:`\omega^2 q \sum m_i \varphi_i`. Swaying in a steady
+:math:`10^{-3}`; a load :math:`F` at the cross-arm deflects it by
+:math:`F C` with the foundation's compliances in series, and a load
+:math:`p_l (z/z_a)^2` (N/m) spread up the body by the hand value of its
+midpoint sum; swaying freely, its base shear is
+:math:`\omega^2 x_a \sum m_i \psi_i`. Swaying in a steady
 20 m/s wind, a 30 m tower at 2 Hz with 0.5 % structural damping rings down at
 0.9047 % against the 0.5 % plus the 0.4047 % of the linearised relative drag,
-:math:`\sum \varphi_i^2 \rho C_f w_i L_i U / (2 M \omega)`. Against both
+:math:`\sum \psi_i^2 \rho C_f b_i \ell_i U / (2 M_g \omega)`. Against both
 MoorDyn libraries, the pull MoorDyn hands back on a coupled point is the one
 the tower is reported to carry, a coupled step moves the cross-arm by its
 velocity times the step, and a coupled point held still is a fixed one to
@@ -600,9 +668,11 @@ spanning tree between them, each a section of three spans on insulator
 strings with lattice towers placed for ground clearance, all strung to 20 kN, and a
 neutral log-law inflow of 18 m/s at 30 m. A tower in a dip, which the spans
 either side would pull up, is raised until the line weighs on it: four of the
-ten stand 36 to 46 m tall rather than 30 m. The k-equation RANS flow spins up
-for 600 s (1.2 million cells), then the lines run 120 s from its checkpoint
-with the real MoorDyn. The wind 30 m above the ground speeds up to about
+ten stand 36 to 46 m tall rather than 30 m. The k-equation RANS
+(Reynolds-averaged) flow spins up for 600 s (1.2 million cells), then the
+lines run 120 s from its checkpoint with the real MoorDyn. The numbers below
+come from one run of the committed decks against MoorDyn-C 2.7.1; no test
+checks them. The wind 30 m above the ground speeds up to about
 25 m/s over the hilltops and slows in their lee. The lines settle within
 about 30 s, every span at 20 to 22 kN: the spans running across the wind blow
 out up to 2.3 m at mid-span (swings of 12 to 22 degrees), the one running along
@@ -614,18 +684,23 @@ the raised towers and about 7 kN on the 30 m towers on flat ground. With the
 line's pull and a 60 kN tower weight on 6 m footings, the towers on the hills
 and the raised ones lift a footing by 11 to 22 kN (the allowable is 50 kN),
 their worst legs carrying 42 to 53 kN in compression against 29 kN on flat
-ground. The towers bend, at 1.67 Hz (2 Hz on footings of :math:`10^9` N
-m/rad), and settle leaning 20 to 32 mm downwind, 10 mm on flat ground. With a
+ground. The towers bend at 1.44 to 1.67 Hz: 2 Hz on a rigid foundation,
+lowered by footings of :math:`10^9` N m/rad the more the taller the tower
+(1.67 Hz at 30 m, 1.44 Hz at 46 m, from the one-mode model above; the start-up
+log prints each tower's frequency). They settle leaning 20 to 32 mm downwind,
+10 mm on flat ground. With a
 steady RANS wind the lines hold a steady blowout; their gust response needs a
 turbulent inflow.
 
 The same lines in a turbulent wind (``les/`` in the same directory): a periodic
-precursor over flat land (Deardorff LES, 16 m cells, 3072 by 1536 by 768 m,
+precursor over flat land (Deardorff large-eddy simulation, LES, 16 m cells,
+3072 by 1536 by 768 m,
 :math:`z_0` = 0.1 m, :math:`u_*` about 1 m/s) spins up for 7200 s and writes
 boundary planes every 1.5 s; a run over three immersed hills restarts from its
 checkpoint and takes its inflow from the planes, with three circuits (three
-phases and a shield wire each, 12 lines) on five shared towers that bend. Over
-1500 s of statistics the wind at the conductors' middles peaks about 1.3 times
+phases and a shield wire each, 12 lines) on five shared towers that bend. The
+numbers below come from one run of the committed decks; no test checks them.
+Over 1500 s of statistics the wind at the conductors' middles peaks about 1.3 times
 its mean (16.6 and 21.4 m/s on the line across the wind); that line swings 15
 degrees on average and 22 at its peaks, the lines along the wind 3 and 6; the
 conductors' tension moves by about 1 %, the strings taking up the swing; the
@@ -640,33 +715,61 @@ Restart
 A checkpoint carries the lines under ``<chk>/conductors``: each line's whole
 MoorDyn state (node and free-point positions and velocities, internal forces
 and the time integrator's state, through MoorDyn's own save), the running
-statistics of every span, string set, pair of lines, transformer and tower,
-each moving tower's sway, the step count and the time. On a restart the line is created from the same
-inputs, initialised without the initial-shape solve and given that state, so
+statistics of every span, of each line's strings, of every pair of lines,
+transformer and tower, each moving tower's sway, the step count and the time.
+On a restart the line is created from the same inputs, initialised without the initial-shape solve and given that state, so
 it continues blown out exactly where the checkpoint left it, on MoorDyn's
 clock; the statistics go on accumulating, and the diagnostics continue on the
 step count of the original run. With ``drag_on_flow`` the restored lines' drag
 is spread into the momentum sources again at once, so a plotfile written at
 the restart shows the source of the checkpointed step. The span and string
-logs, ``<output_root>_nodes.dat``, ``total_load.dat``, ``separation.dat`` and
-``transformers.dat`` are appended to after the rows a run wrote beyond the
+logs, ``<output_root>_nodes.dat``, ``total_load.dat``, ``separation.dat``,
+``transformers.dat`` and ``coupling.dat`` are appended to after the rows a run wrote beyond the
 checkpoint time are dropped, so a run that went on past its last checkpoint
 and is restarted from it leaves no duplicated stretch; ``towers.dat``, whose
 rows carry the time a step starts at, loses the row at the checkpoint time as
-well, since the restarted run writes it again. The lines of a restart must be those of the run that
-wrote the checkpoint, in the same order and with the same spans, towers,
-segments and strings, and the same transformers and tower types; anything else stops the run naming the line or the transformer. A checkpoint without
-conductor state, from a run without spans, starts them afresh from their
-still-air shape, with MoorDyn's clock at zero at the restart time.
+well, since the restarted run writes it again.
+
+The lines of a restart must be those of the run that wrote the checkpoint.
+The run stops, naming the line, when the checkpoint holds a different number
+of lines, another line name at a position of ``erf.conductors.lines``, or a
+line with another number of nodes (spans, segments, strings). It also stops,
+naming the statistics set or the tower, when a pair's, transformer's or
+tower's statistics or a moving tower's sway is missing or has another number
+of quantities, when the checkpoint holds tower sway and no tower type has a
+``frequency`` (or the other way round), or when ``surface_offset`` differs
+from the one the checkpoint records, the frame MoorDyn's saved state is in.
+Values that leave these counts unchanged (lengths, positions,
+sizes, stiffnesses) are not compared: the restarted run uses the values of its
+inputs. A checkpoint without conductor state, from a run without conductor
+lines, starts the lines afresh from their still-air shape, with MoorDyn's
+clock at zero at the restart time.
 
 Checks at start-up
 ------------------
 
-A run with spans refuses to start with any ``amrex.fpe_trap_*`` input on
-(MoorDyn's initial-condition solver overflows an intermediate value), with an
-anchor level that is not a level of the run, with a span whose length does not
-exceed the distance between its attachments placed on the terrain, with a length missing for a span of a section, with
-insulator strings on a line without towers or longer than a tower is high,
-with a line end on two overlapping transformers or not above the top of the
-transformer it ends on, with a transformer no line ends on, or with any other
-value outside its documented range. Every message names the input key.
+A run with conductor lines refuses to start with ``amrex.fpe_trap_invalid``,
+``amrex.fpe_trap_zero`` or ``amrex.fpe_trap_overflow`` on (MoorDyn's
+initial-condition solver overflows an intermediate value), with an anchor
+level that is not a level of the run, with a ``surface_offset`` that does
+not put MoorDyn's free surface above the domain top and its bottom below the
+domain bottom, with a span whose length does not exceed the distance between
+the points the conductor hangs from placed on the terrain, with a
+length missing for a span of a section, with both ``length`` and
+``stringing_tension`` on a line, with a ``mass_per_length`` no larger than
+the mass of the air the conductor displaces, with insulator strings on a line
+without towers or longer than a tower is high, with ``insulator_mass`` or
+``insulator_diameter`` on a line without strings, with the attachment points
+either side of a string's tower at the same ``(x, y)``, with two lines
+writing to the same ``output_root``, with a ``tower_type`` that names no
+tower type or is on a line without towers, with a ``share_towers`` line that
+has no ``tower_type``, shares another line's towers or has another number of
+towers, with a name used twice among the lines, transformers and tower types,
+with an attachment or transformer outside the domain, with a shared point off
+its tower, with a line that turns back on itself at a tower, with a line end
+on two overlapping transformers or not above the top of the transformer it
+ends on, with a transformer no line ends on, with transformers or tower
+types but no lines, with the key ``erf.conductors.spans`` (the lines are
+listed in ``erf.conductors.lines``), with a Real input that is not finite, or
+with any other value outside its documented range. Every message names the
+input key.

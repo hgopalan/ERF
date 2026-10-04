@@ -3,6 +3,7 @@
 #include <cmath>
 #include <limits>
 #include <set>
+#include <utility>
 
 #include <AMReX.H>
 #include <AMReX_ParmParse.H>
@@ -10,6 +11,10 @@
 using namespace amrex;
 
 namespace erf_conductors {
+
+namespace {
+bool finite3 (const std::array<Real,3>& p) { return std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]); }
+}
 
 const std::array<Real,3>& LineInputs::point (int k) const
 {
@@ -157,13 +162,31 @@ std::string ConductorInputs::validate_slack (const LineInputs& s, bool on_terrai
 {
     if (s.stringing_tension > 0.0) { return std::string(); }
     for (int k = 0; k < s.num_spans(); ++k) {
-        const Real c = s.chord(k);
+        // the span hangs between the points the conductor hangs from: the bottoms of the strings at the towers
+        const auto a = s.conductor_point(k);
+        const auto b = s.conductor_point(k + 1);
+        const Real c = std::sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]) + (b[2] - a[2]) * (b[2] - a[2]));
         const std::string which = (s.num_spans() == 1) ? "" : " of span " + std::to_string(k + 1);
         const Real L = s.lengths[static_cast<std::size_t>(k)];
         if (!(L > c)) {
             return "erf.conductors." + s.name + ".length" + which + " (" + std::to_string(L) +
-                   " m) must exceed the distance between its ends (" + std::to_string(c) + " m" +
-                   (on_terrain ? std::string(" where they stand on the terrain") : std::string()) + "): a span hangs with slack";
+                   " m) must exceed the distance between the points the conductor hangs from (" + std::to_string(c) + " m" +
+                   (on_terrain ? std::string(" where they stand on the terrain") : std::string()) +
+                   (s.has_insulators() ? std::string("; the bottoms of the insulator strings at the towers") : std::string()) +
+                   "): a span hangs with slack";
+        }
+    }
+    return std::string();
+}
+
+std::string ConductorInputs::validate_output_roots (const std::vector<LineInputs>& lines)
+{
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        for (std::size_t j = 0; j < i; ++j) {
+            if (lines[i].output_root == lines[j].output_root) {
+                return "erf.conductors." + lines[i].name + ".output_root = " + lines[i].output_root + " is also " +
+                       lines[j].name + "'s: two lines would write the same diagnostics files";
+            }
         }
     }
     return std::string();
@@ -172,10 +195,21 @@ std::string ConductorInputs::validate_slack (const LineInputs& s, bool on_terrai
 std::string ConductorInputs::validate_line (const LineInputs& s, bool check_slack)
 {
     const std::string key = "erf.conductors." + s.name + ".";
+    if (!finite3(s.end_a)) { return key + "end_a must be finite"; }
+    if (!finite3(s.end_b)) { return key + "end_b must be finite"; }
+    for (const auto& t : s.towers) { if (!finite3(t)) { return key + "towers must be finite"; } }
+    for (const Real L : s.lengths) { if (!std::isfinite(L)) { return key + "length must be finite"; } }
+    const std::pair<const char*, Real> scalars[] = {
+        {"stringing_tension", s.stringing_tension}, {"diameter", s.diameter}, {"mass_per_length", s.mass_per_length},
+        {"axial_stiffness", s.axial_stiffness}, {"drag_coefficient", s.drag_coefficient}, {"damping_ratio", s.damping_ratio},
+        {"insulator_length", s.insulator_length}, {"insulator_mass", s.insulator_mass}, {"insulator_diameter", s.insulator_diameter}};
+    for (const auto& kv : scalars) {
+        if (!std::isfinite(kv.second)) { return key + kv.first + " must be finite"; }
+    }
     if (s.stringing_tension < 0.0) { return key + "stringing_tension must be positive (N), or 0 with length"; }
     if (s.stringing_tension > 0.0 && !s.lengths.empty()) { return key + "length and stringing_tension both given: give one of them"; }
     if (s.stringing_tension > 0.0) {
-        // the lengths come from the chords once the attachments stand on the terrain
+        // the lengths come from the chords once the attachment points stand on the terrain
     } else if (static_cast<int>(s.lengths.size()) != s.num_spans()) {
         return key + "length needs one unstretched length per span (" + std::to_string(s.num_spans()) + " for " +
                std::to_string(s.towers.size()) + " tower(s)), " + std::to_string(s.lengths.size()) + " given";
@@ -187,10 +221,6 @@ std::string ConductorInputs::validate_line (const LineInputs& s, bool check_slac
                                              : "the attachment points" + which + " must be distinct (end_a, towers, end_b)");
         }
     }
-    if (check_slack) {
-        const std::string err = validate_slack(s);
-        if (!err.empty()) { return err; }
-    }
     if (!(s.diameter > 0.0)) { return key + "diameter must be positive (m)"; }
     if (!(s.mass_per_length > 0.0)) { return key + "mass_per_length must be positive (kg/m)"; }
     if (!(s.axial_stiffness > 0.0)) { return key + "axial_stiffness must be positive (N)"; }
@@ -198,6 +228,16 @@ std::string ConductorInputs::validate_line (const LineInputs& s, bool check_slac
     if (!(s.damping_ratio > 0.0 && s.damping_ratio <= 1.0)) { return key + "damping_ratio must be in (0, 1] (fraction of critical)"; }
     if (s.segments < 2) { return key + "segments must be >= 2"; }
     if (s.insulator_length < 0.0) { return key + "insulator_length must be >= 0 (m; 0: the conductor is clamped at the towers)"; }
+    if (!(s.insulator_length > 0.0)) {
+        if (s.insulator_mass_given) {
+            return key + "insulator_mass is given but insulator_length is 0: the conductor is clamped at the towers and "
+                         "the strings' mass is unused";
+        }
+        if (s.insulator_diameter_given) {
+            return key + "insulator_diameter is given but insulator_length is 0: the conductor is clamped at the towers "
+                         "and the strings' diameter is unused";
+        }
+    }
     if (s.insulator_length > 0.0) {
         if (s.towers.empty()) {
             return key + "insulator_length needs towers: a line is dead-ended at end_a and end_b and hangs from "
@@ -211,6 +251,21 @@ std::string ConductorInputs::validate_line (const LineInputs& s, bool check_slac
                        std::to_string(t + 1) + " above the terrain (" + std::to_string(s.towers[t][2]) + " m)";
             }
         }
+        // a string swings across the line, normal to the direction between the attachment points either side of its tower
+        for (int j = 0; j + 2 <= s.num_spans(); ++j) {
+            const auto& a = s.point(j);
+            const auto& b = s.point(j + 2);
+            if (!(std::hypot(b[0] - a[0], b[1] - a[1]) > 0.0)) {
+                return key + "towers: the attachment points either side of tower " + std::to_string(j + 1) +
+                       " stand at the same x, y, so the line turns back on itself there and the insulator string's "
+                       "across-line direction is undefined";
+            }
+        }
+    }
+    // the slack last: it is measured to the bottoms of the insulator strings, so it needs them valid
+    if (check_slack) {
+        const std::string err = validate_slack(s);
+        if (!err.empty()) { return err; }
     }
     return std::string();
 }
@@ -218,6 +273,10 @@ std::string ConductorInputs::validate_line (const LineInputs& s, bool check_slac
 std::string ConductorInputs::validate_transformer (const TransformerInputs& t)
 {
     const std::string key = "erf.conductors." + t.name + ".";
+    if (!(std::isfinite(t.position[0]) && std::isfinite(t.position[1]))) { return key + "position must be finite"; }
+    if (!finite3(t.size)) { return key + "size must be finite"; }
+    if (!std::isfinite(t.allowable_force)) { return key + "allowable_force must be finite"; }
+    if (!std::isfinite(t.allowable_moment)) { return key + "allowable_moment must be finite"; }
     if (!(t.size[0] > 0.0 && t.size[1] > 0.0 && t.size[2] > 0.0)) { return key + "size needs a positive length, width and height (m)"; }
     if (t.allowable_force < 0.0) { return key + "allowable_force must be >= 0 (N; 0: not checked)"; }
     if (t.allowable_moment < 0.0) { return key + "allowable_moment must be >= 0 (N m; 0: not checked)"; }
@@ -235,6 +294,16 @@ std::string ConductorInputs::validate_tower_type (const LineInputs& s, const std
 
 std::string ConductorInputs::validate_settings (const ConductorInputs& in)
 {
+    const std::pair<const char*, Real> scalars[] = {
+        {"air_density", in.air_density}, {"moordyn_dt", in.moordyn_dt}, {"moordyn_cfl", in.moordyn_cfl},
+        {"surface_offset", in.surface_offset}, {"stats_start", in.stats_start}, {"epsilon", in.epsilon},
+        {"flashover_distance", in.flashover_distance}};
+    for (const auto& kv : scalars) {
+        if (!std::isfinite(kv.second)) { return std::string("erf.conductors.") + kv.first + " must be finite"; }
+    }
+    if (in.has_prescribed_velocity && !finite3(in.prescribed_velocity)) {
+        return "erf.conductors.prescribed_velocity must be finite";
+    }
     if (in.diagnostics_int < 1) { return "erf.conductors.diagnostics_int must be >= 1"; }
     if (in.anchor_level < -1) { return "erf.conductors.anchor_level must be a level (0 .. amr.max_level) or -1 for the finest"; }
     if (!(in.air_density > 0.0)) { return "erf.conductors.air_density must be positive (kg/m^3)"; }
@@ -250,13 +319,29 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
     if (in.node_output_int < 0) { return "erf.conductors.node_output_int must be >= 0 (0: no node output)"; }
     if (!(in.epsilon > 0.0)) { return "erf.conductors.epsilon must be positive (cells)"; }
     if (!(in.flashover_distance > 0.0)) { return "erf.conductors.flashover_distance must be positive (m)"; }
+    // a conductor lighter than the air it displaces has no still-air shape (and no elastic catenary)
     for (const LineInputs& s : in.lines) {
-        for (int k = 0; k <= s.num_spans(); ++k) {
-            if (s.point(k)[2] >= in.surface_offset) {
-                return "erf.conductors." + s.name + ": the attachment heights must stay below surface_offset (" +
-                       std::to_string(in.surface_offset) + " m), MoorDyn's free surface";
-            }
+        const Real displaced = in.air_density * Real(0.25) * Real(3.14159265358979323846) * s.diameter * s.diameter;
+        if (!(s.mass_per_length > displaced)) {
+            return "erf.conductors." + s.name + ".mass_per_length (" + std::to_string(s.mass_per_length) +
+                   " kg/m) must exceed the mass of the air the conductor displaces, air_density * pi * diameter^2 / 4 (" +
+                   std::to_string(displaced) + " kg/m)";
         }
+    }
+    return std::string();
+}
+
+std::string ConductorInputs::validate_frame (Real surface_offset, Real prob_lo_z, Real prob_hi_z)
+{
+    if (!(surface_offset > prob_hi_z)) {
+        return "erf.conductors.surface_offset (" + std::to_string(surface_offset) + " m) must exceed the domain top, "
+               "geometry.prob_hi[2] (" + std::to_string(prob_hi_z) + " m): MoorDyn applies no fluid load above its free "
+               "surface at ERF z = surface_offset";
+    }
+    if (!(-surface_offset < prob_lo_z)) {
+        return "erf.conductors.surface_offset (" + std::to_string(surface_offset) + " m): -surface_offset must lie below "
+               "the domain bottom, geometry.prob_lo[2] (" + std::to_string(prob_lo_z) + " m), so that no node reaches "
+               "MoorDyn's flat bottom at ERF z = -surface_offset";
     }
     return std::string();
 }
@@ -282,12 +367,14 @@ ConductorInputs ConductorInputs::read ()
     if (pp.contains("spans")) {
         Abort("erf.conductors.spans is not an input: list the conductor lines in erf.conductors.lines");
     }
-    std::vector<std::string> names, tnames;
+    std::vector<std::string> names, tnames, ttypes;
     pp.queryarr("lines", names);
     pp.queryarr("transformers", tnames);
+    pp.queryarr("tower_types", ttypes);
     in.active = !names.empty();
     if (!in.active) {
         if (!tnames.empty()) { Abort("erf.conductors.transformers needs lines ending on them (erf.conductors.lines)"); }
+        if (!ttypes.empty()) { Abort("erf.conductors.tower_types needs lines hanging from them (erf.conductors.lines)"); }
         return in;
     }
 
@@ -338,17 +425,20 @@ ConductorInputs ConductorInputs::read ()
         ps.query("damping_ratio", s.damping_ratio);
         ps.query("segments", s.segments);
         ps.query("insulator_length", s.insulator_length);
-        ps.query("insulator_mass", s.insulator_mass);
-        ps.query("insulator_diameter", s.insulator_diameter);
+        s.insulator_mass_given = ps.query("insulator_mass", s.insulator_mass) != 0;
+        s.insulator_diameter_given = ps.query("insulator_diameter", s.insulator_diameter) != 0;
         s.output_root = in.diagnostics_dir + "/" + name;
         ps.query("output_root", s.output_root);
-        // the slack is checked once the ends stand on the terrain: their heights here are above it
+        // the slack is checked in Conductors::set_ground once the attachment points stand on the
+        // terrain: here their z is still the height above the terrain
         const std::string err = validate_line(s, false);
         if (!err.empty()) { Abort(err); }
         in.lines.push_back(s);
     }
-    std::vector<std::string> ttypes;
-    pp.queryarr("tower_types", ttypes);
+    {
+        const std::string err = validate_output_roots(in.lines);
+        if (!err.empty()) { Abort(err); }
+    }
     for (const std::string& name : ttypes) {
         // a tower type's block shares erf.conductors.<name> with the lines' and the transformers'
         if (!seen.insert(name).second) { Abort("erf.conductors: '" + name + "' names two lines, transformers or tower types"); }

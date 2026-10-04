@@ -1,12 +1,31 @@
-// Contract of erf_conductors::ConductorInputs: a span block is read with its defaults and its
-// derived chord and catenary sag; a section over towers is read with a length per span and its
-// insulator strings; every value outside its documented range is refused with a message naming
-// the key; the shared settings and the solver settings are checked the same way; and the
-// transformers the lines end on are read with their footprints, and refused by name out of range;
-// and a line may hang from the towers of another line that has a tower_type, as many as it has,
-// taking their type, but not from a line that itself shares towers, nor with a type of its own.
+// Unit tests of erf_conductors::ConductorInputs, the erf.conductors.* inputs and their checks.
+//
+// ASingleSpanLineIsReadWithItsDefaultsAndDerivedGeometry: the defaults, the chord and the catenary sag.
+// ElasticCatenaryOfALevelSpan: the elastic catenary against an independent solution.
+// NothingIsReadWithoutLines: an empty erf.conductors.lines switches the module off.
+// EveryLineValueOutsideItsRangeIsRefusedByName: validate_line names the key of every bad value,
+//     non-finite values included.
+// SharedSettingsOutsideTheirRangeAreRefusedByName: validate_settings names the key, non-finite
+//     values and a conductor lighter than the air it displaces included.
+// AnchorLevelMustExistAndFpeTrapsAreRefused: validate_solver and resolve_anchor_level.
+// SurfaceOffsetMustHoldTheWholeDomain: validate_frame against the domain's top and bottom.
+// ASectionIsReadWithItsTowersLengthsAndInsulatorStrings: a section's towers, lengths and strings.
+// SectionValuesOutsideTheirRangeAreRefusedByName: a section's bad values, a line that turns back at a
+//     string, and string keys given without strings.
+// TransformersAreReadWithTheirFootprintsAndDefaults: transformer blocks and the footprint test.
+// TransformerValuesOutsideTheirRangeAreRefusedByName: validate_transformer, non-finite values included.
+// TheSlackIsCheckedBetweenTheEndsWhereTheyStandOnTheTerrain: validate_slack on placed heights.
+// TheSlackIsCheckedBetweenTheBottomsOfTheStrings: a span hangs between the conductor points.
+// AStringingTensionSetsEachSpansLengthSoThatItHangsWithThatTension: lengths_from_stringing_tension.
+// TowerTypesAreReadAndALinesTowerTypeMustNameOne: tower-type blocks and validate_tower_type.
+// ALineSharesTheTowersOfAnotherLineWithATowerType: validate_shared_towers and tower_owner.
+// EveryLineNeedsAnOutputRootOfItsOwn: validate_output_roots.
+// TheFirstNonFiniteValueIsNamedWithItsPoint: first_nonfinite, used at the module's boundaries.
+// ReadRefusesMalformedInputsNamingTheKey: every abort of read() fires and names its key.
 
 #include <cmath>
+#include <functional>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -17,6 +36,7 @@
 #include <gtest/gtest.h>
 
 #include "ERF_ConductorInputs.H"
+#include "ERF_GTestThrowOnAbort.H"
 
 using erf_conductors::ConductorInputs;
 using erf_conductors::LineInputs;
@@ -49,7 +69,7 @@ LineInputs good_span ()
 
 } // namespace
 
-TEST(ConductorInputs, ASpanIsReadWithItsDefaultsAndDerivedGeometry)
+TEST(ConductorInputs, ASingleSpanLineIsReadWithItsDefaultsAndDerivedGeometry)
 {
     set_span("S1");
     const ConductorInputs in = ConductorInputs::read();
@@ -92,23 +112,25 @@ TEST(ConductorInputs, ElasticCatenaryOfALevelSpan)
     // inextensible in the limit of a stiff line: sag 13.0131 m, more than the parabola's 12.9904 m
     const auto stiff = erf_conductors::elastic_catenary(300.0, 301.5, w, 1.0e15);
     EXPECT_NEAR(stiff.sag, 13.0131, 1.0e-4 * 13.0131);
-    EXPECT_NEAR(stiff.stretched_length, 301.5, 1.0e-6);   // H L / EA = 4e-9 m
+    // H L / EA = 4e-9 m; a float holds 301.5 to 3e-5 m
+    EXPECT_NEAR(stiff.stretched_length, 301.5, (std::is_same<amrex::Real, float>::value) ? 1.0e-4 : 1.0e-6);
     // no slack: the line is held by its stretch alone, which matches the parabola's extra length
-    // 8 d^2 / 3c to the stretch H c / EA with H = w c^2 / 8d, so d^3 = 3 w c^4 / (64 EA): 5.874 m
+    // 8 d^2 / 3c to the stretch H c / EA with H = w c^2 / 8d, so d^3 = 3 w c^4 / (64 EA): 5.868 m
     const auto taut = erf_conductors::elastic_catenary(300.0, 300.0, w, 3.0e7);
     EXPECT_NEAR(taut.sag, std::cbrt(3.0 * w * std::pow(300.0, 4) / (64.0 * 3.0e7)), 0.01 * taut.sag);
     EXPECT_GT(taut.stretched_length, 300.0);
 }
 
-TEST(ConductorInputs, NothingIsReadWithoutSpans)
+TEST(ConductorInputs, NothingIsReadWithoutLines)
 {
-    // the spans key of the previous test still exists; an empty list switches the feature off
+    // a line listed, then an empty list after it: the last list counts, and an empty one switches the module off
+    set_span("S0");
     amrex::ParmParse pp("erf.conductors");
     pp.addarr("lines", std::vector<std::string>{});
     EXPECT_FALSE(ConductorInputs::read().active);
 }
 
-TEST(ConductorInputs, EverySpanValueOutsideItsRangeIsRefusedByName)
+TEST(ConductorInputs, EveryLineValueOutsideItsRangeIsRefusedByName)
 {
     EXPECT_TRUE(ConductorInputs::validate_line(good_span()).empty());
     auto bad = [](auto mutate, const std::string& key) {
@@ -128,6 +150,21 @@ TEST(ConductorInputs, EverySpanValueOutsideItsRangeIsRefusedByName)
     bad([](LineInputs& s) { s.damping_ratio = 0.0; }, "damping_ratio");
     bad([](LineInputs& s) { s.damping_ratio = 1.5; }, "damping_ratio");
     bad([](LineInputs& s) { s.segments = 1; }, "segments");
+    // every Real input must be finite
+    const amrex::Real nan = std::numeric_limits<amrex::Real>::quiet_NaN();
+    const amrex::Real inf = std::numeric_limits<amrex::Real>::infinity();
+    bad([nan](LineInputs& s) { s.end_a[1] = nan; }, "end_a must be finite");
+    bad([inf](LineInputs& s) { s.end_b[2] = inf; }, "end_b must be finite");
+    bad([nan](LineInputs& s) { s.lengths = {nan}; }, "length must be finite");
+    bad([inf](LineInputs& s) { s.stringing_tension = inf; }, "stringing_tension must be finite");
+    bad([inf](LineInputs& s) { s.diameter = inf; }, "diameter must be finite");
+    bad([nan](LineInputs& s) { s.mass_per_length = nan; }, "mass_per_length must be finite");
+    bad([inf](LineInputs& s) { s.axial_stiffness = inf; }, "axial_stiffness must be finite");
+    bad([nan](LineInputs& s) { s.drag_coefficient = nan; }, "drag_coefficient must be finite");
+    bad([nan](LineInputs& s) { s.damping_ratio = nan; }, "damping_ratio must be finite");
+    bad([nan](LineInputs& s) { s.insulator_length = nan; }, "insulator_length must be finite");
+    bad([nan](LineInputs& s) { s.insulator_mass = nan; }, "insulator_mass must be finite");
+    bad([inf](LineInputs& s) { s.insulator_diameter = inf; }, "insulator_diameter must be finite");
 }
 
 TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
@@ -156,14 +193,32 @@ TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
         EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "the bound itself is accepted";
     }
     bad([](ConductorInputs& c) { c.moordyn_log_level = 4; }, "moordyn_log_level");
+    bad([](ConductorInputs& c) { c.moordyn_log_level = -1; }, "moordyn_log_level");
     bad([](ConductorInputs& c) { c.surface_offset = 0.0; }, "surface_offset");
-    bad([](ConductorInputs& c) { c.surface_offset = 20.0; }, "surface_offset");   // below the attachments
     bad([](ConductorInputs& c) { c.stats_start = -1.0; }, "stats_start");
     bad([](ConductorInputs& c) { c.node_output_int = -1; }, "node_output_int");
     bad([](ConductorInputs& c) { c.epsilon = 0.0; }, "epsilon");
+    // every Real input must be finite
+    const amrex::Real nan = std::numeric_limits<amrex::Real>::quiet_NaN();
+    const amrex::Real inf = std::numeric_limits<amrex::Real>::infinity();
+    bad([inf](ConductorInputs& c) { c.air_density = inf; }, "erf.conductors.air_density must be finite");
+    bad([nan](ConductorInputs& c) { c.moordyn_dt = nan; }, "erf.conductors.moordyn_dt must be finite");
+    bad([inf](ConductorInputs& c) { c.surface_offset = inf; }, "erf.conductors.surface_offset must be finite");
+    bad([nan](ConductorInputs& c) { c.stats_start = nan; }, "erf.conductors.stats_start must be finite");
+    bad([inf](ConductorInputs& c) { c.epsilon = inf; }, "erf.conductors.epsilon must be finite");
+    bad([inf](ConductorInputs& c) { c.flashover_distance = inf; }, "erf.conductors.flashover_distance must be finite");
+    bad([nan](ConductorInputs& c) { c.has_prescribed_velocity = true; c.prescribed_velocity[1] = nan; },
+        "erf.conductors.prescribed_velocity must be finite");
+    {
+        ConductorInputs c = in;
+        c.prescribed_velocity[1] = nan;
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "an unused prescribed velocity is not read";
+    }
+    // a conductor lighter than the air it displaces (7.6e-4 kg/m for 28.1 mm in 1.225 kg/m^3)
+    bad([](ConductorInputs& c) { c.lines[0].mass_per_length = 5.0e-4; }, "erf.conductors.S.mass_per_length");
 }
 
-TEST(ConductorInputs, SolverSettingsAreChecked)
+TEST(ConductorInputs, AnchorLevelMustExistAndFpeTrapsAreRefused)
 {
     EXPECT_TRUE(ConductorInputs::validate_solver(1, 1, false).empty());
     EXPECT_TRUE(ConductorInputs::validate_solver(1, 0, false).empty());
@@ -171,6 +226,20 @@ TEST(ConductorInputs, SolverSettingsAreChecked)
     EXPECT_NE(ConductorInputs::validate_solver(0, 0, true).find("fpe_trap"), std::string::npos);
     EXPECT_EQ(ConductorInputs::resolve_anchor_level(-1, 2), 2);
     EXPECT_EQ(ConductorInputs::resolve_anchor_level(1, 2), 1);
+}
+
+TEST(ConductorInputs, SurfaceOffsetMustHoldTheWholeDomain)
+{
+    // MoorDyn's free surface at ERF z = surface_offset above the top, its bottom at -surface_offset below the floor
+    EXPECT_TRUE(ConductorInputs::validate_frame(10000.0, 0.0, 400.0).empty());
+    EXPECT_TRUE(ConductorInputs::validate_frame(500.0, -100.0, 400.0).empty());
+    const std::string top = ConductorInputs::validate_frame(300.0, 0.0, 400.0);
+    EXPECT_NE(top.find("erf.conductors.surface_offset"), std::string::npos) << top;
+    EXPECT_NE(top.find("geometry.prob_hi[2]"), std::string::npos) << top;
+    EXPECT_FALSE(ConductorInputs::validate_frame(400.0, 0.0, 400.0).empty()) << "the top itself is refused";
+    const std::string bottom = ConductorInputs::validate_frame(500.0, -600.0, 400.0);
+    EXPECT_NE(bottom.find("erf.conductors.surface_offset"), std::string::npos) << bottom;
+    EXPECT_NE(bottom.find("geometry.prob_lo[2]"), std::string::npos) << bottom;
 }
 
 namespace {
@@ -208,7 +277,7 @@ TEST(ConductorInputs, ASectionIsReadWithItsTowersLengthsAndInsulatorStrings)
     EXPECT_DOUBLE_EQ(s.point(2)[2], 32.0);
     EXPECT_DOUBLE_EQ(s.point(3)[0], 1000.0);
     EXPECT_DOUBLE_EQ(s.lengths[2], amrex::Real(301.7));
-    constexpr double chord_tol = std::is_same<amrex::Real, float>::value ? 1.0e-4 : 1.0e-9;
+    constexpr double chord_tol = (std::is_same<amrex::Real, float>::value) ? 1.0e-4 : 1.0e-9;
     EXPECT_NEAR(s.chord(1), std::sqrt(300.0 * 300.0 + 4.0), chord_tol);
     EXPECT_TRUE(s.has_insulators());
     EXPECT_DOUBLE_EQ(s.insulator_diameter, amrex::Real(0.254));
@@ -239,6 +308,13 @@ TEST(ConductorInputs, SectionValuesOutsideTheirRangeAreRefusedByName)
     bad([](LineInputs& s) { s.insulator_mass = 0.0; }, "insulator_mass");
     bad([](LineInputs& s) { s.insulator_diameter = 0.0; }, "insulator_diameter");
     bad([](LineInputs& s) { s.insulator_length = 31.0; }, "insulator_length");  // longer than the tower is high
+    // the attachment points either side of a tower at the same x, y: a string's across-line direction is undefined
+    bad([](LineInputs& s) { s.towers[1] = {{100.0, 500.0, 30.0}}; s.lengths = {301.5, 301.5, 901.0}; },
+        "towers: the attachment points either side of tower 1");
+    // string keys given for a line clamped at its towers
+    bad([](LineInputs& s) { s.insulator_length = 0.0; s.insulator_mass_given = true; }, "insulator_mass is given but insulator_length is 0");
+    bad([](LineInputs& s) { s.insulator_length = 0.0; s.insulator_mass = 0.0; s.insulator_diameter_given = true; },
+        "insulator_diameter is given but insulator_length is 0");
     // strings hang only at towers: a single span is dead-ended at both ends
     LineInputs single = good_span();
     single.insulator_length = 2.5;
@@ -306,6 +382,11 @@ TEST(ConductorInputs, TransformerValuesOutsideTheirRangeAreRefusedByName)
     bad([](TransformerInputs& t) { t.size[2] = 0.0; }, "size");
     bad([](TransformerInputs& t) { t.allowable_force = -1.0; }, "allowable_force");
     bad([](TransformerInputs& t) { t.allowable_moment = -1.0; }, "allowable_moment");
+    const amrex::Real nan = std::numeric_limits<amrex::Real>::quiet_NaN();
+    bad([nan](TransformerInputs& t) { t.position[0] = nan; }, "position must be finite");
+    bad([nan](TransformerInputs& t) { t.size[2] = nan; }, "size must be finite");
+    bad([nan](TransformerInputs& t) { t.allowable_force = nan; }, "allowable_force must be finite");
+    bad([nan](TransformerInputs& t) { t.allowable_moment = nan; }, "allowable_moment must be finite");
 }
 
 TEST(ConductorInputs, TheSlackIsCheckedBetweenTheEndsWhereTheyStandOnTheTerrain)
@@ -336,6 +417,21 @@ TEST(ConductorInputs, TheSlackIsCheckedBetweenTheEndsWhereTheyStandOnTheTerrain)
     const std::string err = ConductorInputs::validate_slack(placed, true);
     EXPECT_NE(err.find("erf.conductors.S.length"), std::string::npos) << err;
     EXPECT_NE(err.find("where they stand on the terrain"), std::string::npos) << err;
+}
+
+TEST(ConductorInputs, TheSlackIsCheckedBetweenTheBottomsOfTheStrings)
+{
+    // the first span runs from a dead end at 30 m to the bottom of a 2.5 m string under a tower top
+    // at 30 m: 300 m across and 2.5 m down, 300.0104 m. 300.005 m has slack between the attachment
+    // points but none between the points the conductor hangs from
+    LineInputs s = good_section();
+    s.lengths = {amrex::Real(300.005), 301.5, 301.5};
+    EXPECT_GT(s.lengths[0], s.chord(0)) << "longer than the chord between the attachment points";
+    const std::string err = ConductorInputs::validate_slack(s);
+    EXPECT_NE(err.find("erf.conductors.S.length of span 1"), std::string::npos) << err;
+    EXPECT_NE(err.find("the bottoms of the insulator strings"), std::string::npos) << err;
+    s.lengths[0] = 300.1;
+    EXPECT_TRUE(ConductorInputs::validate_slack(s).empty()) << ConductorInputs::validate_slack(s);
 }
 
 TEST(ConductorInputs, AStringingTensionSetsEachSpansLengthSoThatItHangsWithThatTension)
@@ -496,4 +592,135 @@ TEST(ConductorInputs, ALineSharesTheTowersOfAnotherLineWithATowerType)
     third.name = "P3";
     third.tower_type = "lat";
     refused({chained, phase, third}, "name the line the towers belong to");
+}
+
+TEST(ConductorInputs, EveryLineNeedsAnOutputRootOfItsOwn)
+{
+    LineInputs a = good_span();
+    a.name = "A";
+    a.output_root = "conductors/A";
+    LineInputs b = good_span();
+    b.name = "B";
+    b.output_root = "conductors/B";
+    EXPECT_TRUE(ConductorInputs::validate_output_roots({a, b}).empty());
+    b.output_root = a.output_root;
+    const std::string err = ConductorInputs::validate_output_roots({a, b});
+    EXPECT_NE(err.find("erf.conductors.B.output_root = conductors/A is also A's"), std::string::npos) << err;
+}
+
+TEST(ConductorInputs, TheFirstNonFiniteValueIsNamedWithItsPoint)
+{
+    std::vector<amrex::Real> v{1.0, 2.0, 3.0, 4.0, 5.0, 6.0};
+    EXPECT_TRUE(erf_conductors::first_nonfinite(v, 3, "the wind (m/s) at point").empty());
+    v[4] = std::numeric_limits<amrex::Real>::quiet_NaN();
+    const std::string err = erf_conductors::first_nonfinite(v, 3, "the wind (m/s) at point");
+    EXPECT_EQ(err.rfind("the wind (m/s) at point 1 is not finite (4", 0), 0u) << err;
+    const std::vector<double> d{0.0, std::numeric_limits<double>::infinity()};
+    const std::string derr = erf_conductors::first_nonfinite(d, 1, "entry");
+    EXPECT_NE(derr.find("entry 1 is not finite (inf)"), std::string::npos) << derr;
+}
+
+namespace {
+// the required keys of a single-span line under erf.conductors.<name>
+void add_line_block (const std::string& name)
+{
+    amrex::ParmParse ps("erf.conductors." + name);
+    ps.addarr("end_a", std::vector<amrex::Real>{100.0, 500.0, 30.0});
+    ps.addarr("end_b", std::vector<amrex::Real>{400.0, 500.0, 30.0});
+    ps.add("length", 301.5);
+    ps.add("diameter", 0.0281);
+    ps.add("mass_per_length", 1.628);
+    ps.add("axial_stiffness", 3.0e7);
+}
+
+// read() after setup, with aborts turned into exceptions: the abort's message, empty when read()
+// returned. The shared keys a setup may add are removed again, so that the next test starts clean.
+std::string read_after (const std::function<void()>& setup)
+{
+    setup();
+    const std::string msg = erf_gtest::abort_message([] { ConductorInputs::read(); });
+    amrex::ParmParse pp("erf.conductors");
+    for (const char* key : {"lines", "transformers", "tower_types", "prescribed_velocity"}) { pp.remove(key); }
+    return msg;
+}
+} // namespace
+
+TEST(ConductorInputs, ReadRefusesMalformedInputsNamingTheKey)
+{
+    amrex::ParmParse pp("erf.conductors");
+    // start without the shared keys other tests may have left
+    for (const char* key : {"lines", "transformers", "tower_types", "prescribed_velocity"}) { pp.remove(key); }
+    struct Case { const char* expected; std::function<void()> setup; };
+    const std::vector<Case> cases = {
+        {"erf.conductors.tower_types needs lines", [&] { pp.addarr("tower_types", std::vector<std::string>{"RT"}); }},
+        {"erf.conductors.transformers needs lines", [&] { pp.addarr("transformers", std::vector<std::string>{"RX"}); }},
+        {"erf.conductors.lines lists 'RA' twice", [&] {
+            add_line_block("RA");
+            pp.addarr("lines", std::vector<std::string>{"RA", "RA"});
+        }},
+        {"erf.conductors.prescribed_velocity needs three components", [&] {
+            add_line_block("RB");
+            pp.add("lines", std::string("RB"));
+            pp.addarr("prescribed_velocity", std::vector<amrex::Real>{0.0, 15.0});
+        }},
+        {"erf.conductors.RC.end_a and end_b need three components", [&] {
+            add_line_block("RC");
+            amrex::ParmParse("erf.conductors.RC").addarr("end_a", std::vector<amrex::Real>{100.0, 500.0});
+            pp.add("lines", std::string("RC"));
+        }},
+        {"erf.conductors.RD.towers needs three components (m) per tower", [&] {
+            add_line_block("RD");
+            amrex::ParmParse("erf.conductors.RD").addarr("towers", std::vector<amrex::Real>{250.0, 500.0, 30.0, 300.0});
+            pp.add("lines", std::string("RD"));
+        }},
+        {"erf.conductors.RE.insulator_mass is given but insulator_length is 0", [&] {
+            add_line_block("RE");
+            amrex::ParmParse("erf.conductors.RE").add("insulator_mass", 60.0);
+            pp.add("lines", std::string("RE"));
+        }},
+        {"erf.conductors.RG.output_root = shared is also RF's", [&] {
+            add_line_block("RF");
+            add_line_block("RG");
+            amrex::ParmParse("erf.conductors.RF").add("output_root", std::string("shared"));
+            amrex::ParmParse("erf.conductors.RG").add("output_root", std::string("shared"));
+            pp.addarr("lines", std::vector<std::string>{"RF", "RG"});
+        }},
+        {"erf.conductors: 'RH' names two lines, transformers or tower types", [&] {
+            add_line_block("RH");
+            pp.add("lines", std::string("RH"));
+            pp.addarr("tower_types", std::vector<std::string>{"RH"});
+        }},
+        {"erf.conductors.RJ.position needs two components", [&] {
+            add_line_block("RI");
+            pp.add("lines", std::string("RI"));
+            pp.addarr("transformers", std::vector<std::string>{"RJ"});
+            amrex::ParmParse pt("erf.conductors.RJ");
+            pt.addarr("position", std::vector<amrex::Real>{100.0});
+            pt.addarr("size", std::vector<amrex::Real>{8.0, 5.0, 6.0});
+        }},
+        {"erf.conductors: 'RM' names two lines, transformers or tower types", [&] {
+            add_line_block("RM");
+            pp.add("lines", std::string("RM"));
+            pp.addarr("transformers", std::vector<std::string>{"RM"});
+        }},
+        {"erf.conductors.RO.size needs three components", [&] {
+            add_line_block("RN");
+            pp.add("lines", std::string("RN"));
+            pp.addarr("transformers", std::vector<std::string>{"RO"});
+            amrex::ParmParse pt("erf.conductors.RO");
+            pt.addarr("position", std::vector<amrex::Real>{100.0, 500.0});
+            pt.addarr("size", std::vector<amrex::Real>{8.0, 5.0});
+        }},
+        {"erf.conductors.RK.diameter must be finite", [&] {
+            add_line_block("RK");
+            amrex::ParmParse("erf.conductors.RK").add("diameter", std::numeric_limits<double>::quiet_NaN());
+            pp.add("lines", std::string("RK"));
+        }},
+    };
+    for (const auto& c : cases) {
+        const std::string msg = read_after(c.setup);
+        EXPECT_NE(msg.find(c.expected), std::string::npos) << "expected \"" << c.expected << "\", got \"" << msg << "\"";
+    }
+    // a well-formed line is read without an abort
+    EXPECT_TRUE(read_after([&] { add_line_block("RL"); pp.add("lines", std::string("RL")); }).empty());
 }

@@ -1,31 +1,42 @@
-// Contract of Conductors, the manager ERF holds: the attachments are placed at their height above
-// the terrain surface under each end (the k = 0 node plane of z_phys_nd, bilinear between the
-// nodes) and ground.dat records it; on a uniform-dz mesh the given heights are absolute; the
-// spans step only on the anchor level and write one diagnostics row per step; and without a
-// prescribed velocity the wind handed to MoorDyn is ERF's velocity sampled where the line is
-// now, not where it hung; a restart from a checkpoint continues the lines, their drag on the
-// air, their statistics and their logs exactly where the checkpoint left them; a section is placed
-// on the terrain at every tower and logs each span and its strings; and the closest approach of two
-// lines is the exact distance between their conductors, flagged against the flashover distance;
-// and a transformer stands on the terrain, takes the pull of the lines ending on it with their
-// moment about its base, flags them against its allowable values, watches how close every
-// conductor comes to its box, and continues its log and statistics across a restart; and a line's
-// suspension towers of a tower type stand on the terrain with their cross-arms across the line,
-// carry the members' drag of the wind at their nodes and the line's pull where it hangs from
-// them, check their footings' uplift and compression, put the drag into the flow with the lines',
-// and continue their log, statistics and drag on the flow across a restart; towers that bend
-// settle where their stiffness balances the wind and the lines, and continue across a restart; a
-// circuit's phases and shield wire hang from one row of towers, each at its own point, standing
-// on the tower's base so that the cross-arm is level, and the towers take every line's pull and,
-// when they bend, move every line's point; a short taut span on bending towers stays stable,
-// since each coupling step is iterated until the towers and the lines agree; and an immersed
-// terrain, on a flat mesh, places everything on its surface as a fitted mesh does on its bottom.
+// Unit tests of Conductors, the manager ERF holds for the conductor lines, transformers and towers.
+//
+// AttachmentsArePlacedAboveTheTerrainUnderEachEnd: the attachment points stand at their height above
+//     the k = 0 node plane of z_phys_nd (bilinear between the nodes), as ground.dat records.
+// OnAUniformMeshTheHeightsAreAbsolute: without terrain the given heights are absolute.
+// LinesStepOnTheAnchorLevelOnlyAndLogEveryStep: other levels return at once; one row per step.
+// TheFlowIsSampledAtTheLinesCurrentPosition: without a prescribed velocity, MoorDyn gets ERF's
+//     velocity at the line's current position, not where it hung.
+// ClearanceIsTheHeightAboveTheTerrainUnderEachNode: the clearance against the terrain under each node.
+// TheSpreadDragIntegratesToMinusTheDragOnTheLines: the momentum source integrates to minus the drag.
+// WithoutDragOnFlowNothingIsPutIntoTheFlow: drag_on_flow off leaves the sources empty.
+// ARestartContinuesTheLinesTheirSourcesStatisticsAndLogs: a restart continues where the checkpoint left off.
+// TrimmingALogKeepsTheHeaderAndTheRowsUpToTheCheckpoint: trim_log_after.
+// ASectionIsPlacedOnTheTerrainAtEveryTowerAndLogsEachSpan: a section's towers and per-span logs.
+// TheClosestApproachOfTwoLinesIsFlaggedAgainstTheFlashoverDistance: the exact separation and the flag.
+// ARestartContinuesASectionItsStringsAndTheSeparationOfTheLines: a section's restart.
+// TransformersTakeThePullOfTheLinesEndingOnThemAndContinueAcrossARestart: transformer loads,
+//     allowables, clearances, and their restart.
+// AStringingTensionSetsTheLengthsFromTheChordsOnTheTerrain: strung lengths from the placed chords.
+// LatticeTowersStandAtTheSuspensionPointsAndCarryTheWindsDrag: tower placement, member drag, the
+//     line's pull and the footing checks.
+// TheTowersDragGoesIntoTheFlowWithTheLinesAndSurvivesARestart: the towers' drag in the sources.
+// MovingTowersSettleWhereTheirStiffnessBalancesTheWindAndTheLine: bending towers at rest.
+// MovingTowersContinueAcrossARestart: bending towers' restart.
+// ACircuitHangsFromOneRowOfTowersEachLineAtItsOwnPoint: shared towers, points on the tower's base.
+// ACircuitOnBendingTowersMovesEveryLinesPoint: bending shared towers move every line's point.
+// AShortTautSpanOnBendingTowersStaysStable: the iterated coupling keeps a stiff span stable.
+// AnImmersedTerrainPlacesEverythingOnItsSurface: an immersed terrain on a flat mesh.
+// SetGroundRefusesASurfaceOffsetBelowTheDomainTop: erf.conductors.surface_offset must hold the domain.
+// AnAttachmentOutsideTheDomainIsRefusedNamingItsKey: the abort names end_a, end_b or the tower.
+// ANonFiniteCouplingPullIsRefusedNotConverged: coupling_converged on NaN pulls.
+// ARestartChecksTheTowerSwayAndTheSurfaceOffset: restart_mismatch.
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -43,6 +54,7 @@
 
 #include "ERF_ActuatorSpreading.H"
 #include "ERF_Conductors.H"
+#include "ERF_GTestThrowOnAbort.H"
 #include "ERF_MoorDynSystem.H"
 
 namespace {
@@ -50,7 +62,11 @@ namespace {
 using amrex::Real;
 
 // the roundoff of the sampling, the terrain read and the source sums: about 1e-7 relative in single precision
-constexpr Real roundoff = std::is_same<Real, float>::value ? Real(1.0e-5) : Real(1.0e-9);
+constexpr Real roundoff = (std::is_same<Real, float>::value) ? Real(1.0e-5) : Real(1.0e-9);
+// positions and heights of a few hundred metres carry a Real's spacing there: 3e-5 m at 500 m in single precision
+constexpr Real postol = (std::is_same<Real, float>::value) ? Real(1.0e-4) : Real(1.0e-6);
+// the same quantity computed twice the same way: a few units of the last place
+constexpr Real tight = (std::is_same<Real, float>::value) ? Real(1.0e-6) : Real(1.0e-12);
 
 // a 1200 m x 1000 m x 400 m box of 12 x 10 x 8 cells; terrain-following nodes over a ramp
 // h = slope_x x + slope_y y, so the bilinear surface under any point is exact
@@ -152,10 +168,10 @@ TEST(Conductors, AttachmentsArePlacedAboveTheTerrainUnderEachEnd)
     const auto a = span.node_position(0);
     const auto b = span.node_position(last);
     // the ramp rises 15 m from x = 300 to x = 600: the two ends sit at different absolute heights
-    EXPECT_NEAR(a[2], m.h(300.0, 500.0) + 30.0, 1.0e-6);
-    EXPECT_NEAR(b[2], m.h(600.0, 500.0) + 30.0, 1.0e-6);
-    EXPECT_NEAR(a[0], 300.0, 1.0e-6);
-    EXPECT_NEAR(b[0], 600.0, 1.0e-6);
+    EXPECT_NEAR(a[2], m.h(300.0, 500.0) + 30.0, postol);
+    EXPECT_NEAR(b[2], m.h(600.0, 500.0) + 30.0, postol);
+    EXPECT_NEAR(a[0], 300.0, postol);
+    EXPECT_NEAR(b[0], 600.0, postol);
     EXPECT_GT(b[2] - a[2], 10.0);
     // ground.dat records the surface and the absolute height of each end
     std::ifstream g(dir + "/ground.dat");
@@ -165,11 +181,11 @@ TEST(Conductors, AttachmentsArePlacedAboveTheTerrainUnderEachEnd)
     std::getline(g, header);
     ASSERT_TRUE(static_cast<bool>(g >> name >> end >> x >> y >> ground >> z));
     EXPECT_EQ(name, "Tterrain"); EXPECT_EQ(end, "a");
-    EXPECT_NEAR(ground, m.h(300.0, 500.0), 1.0e-6);
-    EXPECT_NEAR(z, m.h(300.0, 500.0) + 30.0, 1.0e-6);
+    EXPECT_NEAR(ground, m.h(300.0, 500.0), postol);
+    EXPECT_NEAR(z, m.h(300.0, 500.0) + 30.0, postol);
     ASSERT_TRUE(static_cast<bool>(g >> name >> end >> x >> y >> ground >> z));
     EXPECT_EQ(end, "b");
-    EXPECT_NEAR(ground, m.h(600.0, 500.0), 1.0e-6);
+    EXPECT_NEAR(ground, m.h(600.0, 500.0), postol);
 }
 
 TEST(Conductors, OnAUniformMeshTheHeightsAreAbsolute)
@@ -181,11 +197,11 @@ TEST(Conductors, OnAUniformMeshTheHeightsAreAbsolute)
     ASSERT_TRUE(c);
     c->set_ground(nullptr, m.geom);
     const auto& span = *c->lines().front();
-    EXPECT_NEAR(span.node_position(0)[2], 30.0, 1.0e-6);
-    EXPECT_NEAR(span.node_position(span.num_nodes() - 1)[2], 30.0, 1.0e-6);
+    EXPECT_NEAR(span.node_position(0)[2], 30.0, postol);
+    EXPECT_NEAR(span.node_position(span.num_nodes() - 1)[2], 30.0, postol);
 }
 
-TEST(Conductors, SpansStepOnTheAnchorLevelOnlyAndLogEveryStep)
+TEST(Conductors, LinesStepOnTheAnchorLevelOnlyAndLogEveryStep)
 {
     const std::string dir = scratch("advance");
     set_inputs(dir, "Tadv");
@@ -209,7 +225,7 @@ TEST(Conductors, SpansStepOnTheAnchorLevelOnlyAndLogEveryStep)
     EXPECT_EQ(rows, 4) << "the initial row and one per step";
 }
 
-TEST(Conductors, TheFlowIsSampledWhereTheLineIsNow)
+TEST(Conductors, TheFlowIsSampledAtTheLinesCurrentPosition)
 {
     const std::string dir = scratch("sampled");
     set_inputs(dir, "Tsampled", false);
@@ -378,6 +394,8 @@ TEST(Conductors, ARestartContinuesTheLinesTheirSourcesStatisticsAndLogs)
     const std::string chk = dir + "/chk00004";
     std::filesystem::create_directories(chk);
     a->write_checkpoint(chk);
+    // the state file records the frame MoorDyn's saved state is in
+    EXPECT_NE(slurp(chk + "/conductors/state").find("surface_offset = 10000"), std::string::npos);
     amrex::MultiFab src_at_chk(m.ba, m.dm, 3, 0);
     a->cell_sources(0, src_at_chk, 0);
     ASSERT_GT(src_at_chk.norm0(1), 0.0) << "the lines must push on the air";
@@ -399,7 +417,7 @@ TEST(Conductors, ARestartContinuesTheLinesTheirSourcesStatisticsAndLogs)
     const std::vector<Real> pos_b = span_b.node_positions();
     ASSERT_EQ(pos_b.size(), pos_at_chk.size());
     for (std::size_t i = 0; i < pos_b.size(); ++i) {
-        ASSERT_NEAR(pos_b[i], pos_at_chk[i], 1.0e-9 * std::max(Real(1.0), std::abs(pos_at_chk[i]))) << "component " << i;
+        ASSERT_NEAR(pos_b[i], pos_at_chk[i], roundoff * std::max(Real(1.0), std::abs(pos_at_chk[i]))) << "component " << i;
     }
     EXPECT_GT(span_b.mid_offset(), 0.1) << "restored blown out, not hanging still";
     // the logs end at the checkpoint until the restarted run writes again
@@ -409,19 +427,19 @@ TEST(Conductors, ARestartContinuesTheLinesTheirSourcesStatisticsAndLogs)
     amrex::MultiFab src_b(m.ba, m.dm, 3, 0);
     b->cell_sources(0, src_b, 0);
     amrex::MultiFab::Subtract(src_b, src_at_chk, 0, 0, 3, 0);
-    EXPECT_LE(src_b.norm0(1), 1.0e-12 * src_at_chk.norm0(1));
+    EXPECT_LE(src_b.norm0(1), tight * src_at_chk.norm0(1));
     // the same three steps: the lines, the logs and the statistics come out as in the run without the restart
     for (step = 4; step < 7; ++step) { b->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), &detJ, m.geom); }
     const std::vector<Real> pos_b_end = span_b.node_positions();
     for (std::size_t i = 0; i < pos_end.size(); ++i) {
-        EXPECT_NEAR(pos_b_end[i], pos_end[i], 1.0e-9 * std::max(Real(1.0), std::abs(pos_end[i]))) << "component " << i;
+        EXPECT_NEAR(pos_b_end[i], pos_end[i], roundoff * std::max(Real(1.0), std::abs(pos_end[i]))) << "component " << i;
     }
     EXPECT_EQ(slurp(dir + "/Trst.dat"), log_a);
     EXPECT_EQ(slurp(dir + "/Trst_nodes.dat"), nodes_a);
     EXPECT_EQ(slurp(dir + "/Trst_stats.csv"), stats_a);
     EXPECT_EQ(slurp(dir + "/total_load.dat"), load_a);
 
-    // a checkpoint without conductor state (a precursor's, say): the spans start afresh, from
+    // a checkpoint without conductor state (a precursor's, say): the lines start afresh, from
     // still air, at the restart time; MoorDyn's clock starts at zero there
     const std::string bare = dir + "/chk_bare";
     std::filesystem::create_directories(bare);
@@ -445,7 +463,7 @@ TEST(Conductors, ARestartContinuesTheLinesTheirSourcesStatisticsAndLogs)
     const std::vector<Real> pc = c->lines().front()->node_positions();
     const std::vector<Real> pd = d->lines().front()->node_positions();
     for (std::size_t i = 0; i < pc.size(); ++i) {
-        EXPECT_NEAR(pd[i], pc[i], 1.0e-9 * std::max(Real(1.0), std::abs(pc[i]))) << "component " << i;
+        EXPECT_NEAR(pd[i], pc[i], roundoff * std::max(Real(1.0), std::abs(pc[i]))) << "component " << i;
     }
 }
 
@@ -504,8 +522,8 @@ TEST(Conductors, ASectionIsPlacedOnTheTerrainAtEveryTowerAndLogsEachSpan)
     std::vector<std::string> labels;
     while (g >> name >> label >> x >> y >> ground >> z) {
         labels.push_back(label);
-        EXPECT_NEAR(ground, m.h(x, y), 1.0e-6) << label;
-        EXPECT_NEAR(z, m.h(x, y) + 30.0, 1.0e-6) << label;
+        EXPECT_NEAR(ground, m.h(x, y), postol) << label;
+        EXPECT_NEAR(z, m.h(x, y) + 30.0, postol) << label;
     }
     EXPECT_EQ(labels, (std::vector<std::string>{"a", "t1", "t2", "b"}));
     for (int s = 0; s < 3; ++s) { c->advance(0, 0.2 * s, 0.2, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
@@ -553,9 +571,9 @@ TEST(Conductors, TheClosestApproachOfTwoLinesIsFlaggedAgainstTheFlashoverDistanc
     Real closest = 1.0e30;
     for (int s = 0; s < 40; ++s) {
         c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, nullptr, nullptr, m.geom);
-        // the distance is the exact minimum between the two conductors where they are now
+        // the distance is the exact minimum between the two conductors at their current positions
         const auto exact = erf_conductors::closest_polylines(c->lines()[0]->conductor_path(), c->lines()[1]->conductor_path());
-        ASSERT_NEAR(c->separations()[0].distance, exact.distance, 1.0e-12 * exact.distance) << "step " << s;
+        ASSERT_NEAR(c->separations()[0].distance, exact.distance, tight * exact.distance) << "step " << s;
         closest = std::min(closest, c->separations()[0].distance);
     }
     EXPECT_LT(closest, 5.5) << "the lighter line must close on the heavier one";
@@ -619,7 +637,7 @@ TEST(Conductors, ARestartContinuesASectionItsStringsAndTheSeparationOfTheLines)
     EXPECT_LT(slurp(dir + "/separation.dat").size(), before[0].size()) << "the separation log ends at the checkpoint";
     for (step = 4; step < 7; ++step) { b->advance(0, dt * step, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom); }
     for (std::size_t i = 0; i < files.size(); ++i) { EXPECT_EQ(slurp(dir + files[i]), before[i]) << files[i]; }
-    EXPECT_NEAR(b->separations()[0].distance, sep, 1.0e-9 * sep);
+    EXPECT_NEAR(b->separations()[0].distance, sep, roundoff * sep);
     EXPECT_NEAR(b->lines()[0]->insulator_swing(0), a->lines()[0]->insulator_swing(0), roundoff);
     pp.addarr("lines", std::vector<std::string>{});
     ps.remove("towers");
@@ -668,8 +686,8 @@ TEST(Conductors, TransformersTakeThePullOfTheLinesEndingOnThemAndContinueAcrossA
         Real x, y, ground, top;
         if (ls >> name >> label >> x >> y >> ground >> top && label == "transformer") {
             ++boxes;
-            EXPECT_NEAR(ground, m.h(x, y), 1.0e-6) << name;
-            EXPECT_NEAR(top, m.h(x, y) + 6.0, 1.0e-6) << name;
+            EXPECT_NEAR(ground, m.h(x, y), postol) << name;
+            EXPECT_NEAR(top, m.h(x, y) + 6.0, postol) << name;
         }
     }
     EXPECT_EQ(boxes, 2);
@@ -839,12 +857,13 @@ TEST(Conductors, LatticeTowersStandAtTheSuspensionPointsAndCarryTheWindsDrag)
         const auto& tw = c->towers()[static_cast<std::size_t>(k)];
         const Real x = 400.0 + 300.0 * k;
         EXPECT_EQ(tw.name(), "Tw_t" + std::to_string(k + 1));
-        EXPECT_NEAR(tw.base()[0], x, 1.0e-9);
+        EXPECT_NEAR(tw.base()[0], x, (std::is_same<Real, float>::value) ? Real(1.0e-4) : Real(1.0e-9));
         EXPECT_NEAR(tw.base()[2], m.h(x, 500.0), roundoff * 1000) << "the base stands on the ramp";
         EXPECT_NEAR(tw.arm_height(), 30.0, roundoff * 1000) << "the cross-arm at the conductor's height";
-        EXPECT_NEAR(std::abs(tw.across()[1]), 1.0, 1.0e-12) << "the cross-arm across a line along x";
+        EXPECT_NEAR(std::abs(tw.across()[1]), 1.0, tight) << "the cross-arm across a line along x";
     }
-    // the prescribed +y wind runs along the cross-arms: only the bodies carry it, the hand value
+    // the prescribed +y wind runs along the cross-arms: only the bodies carry it; the body's drag by
+    // hand, q Cf phi (b0 + b1)/2 H (N), with Cf = 4 phi^2 - 5.9 phi + 4 for the solidity phi = 0.2
     const Real U = 10.0, q = 0.5 * 1.2 * U * U, cf = 4.0 * 0.04 - 5.9 * 0.2 + 4.0;
     const Real body = q * cf * 0.2 * 0.5 * (6.0 + 1.5) * 30.0;
     // the line's pull on each tower at the start of the last step, which the towers carry over it
@@ -988,8 +1007,7 @@ TEST(Conductors, MovingTowersSettleWhereTheirStiffnessBalancesTheWindAndTheLine)
             for (int d = 0; d < 2; ++d) { Q[d] += model->mode_shape(i) * tw.loads()[3*i+d]; }
         }
         // (the real MoorDyn's conductors still swing slowly after 10 s, lightly damped, and the tower
-        // follows their pull: 0.6 % from the balance; without the pull, or with it reversed, the
-        // balance is off by tens of per cent)
+        // follows their pull, hence the 2 % tolerance below)
         const auto x = tw.arm_displacement();
         EXPECT_GT(x[1], 1.0e-3) << tw.name() << " leans with the +y wind";
         EXPECT_NEAR(x[1] * model->stiffness() / Q[1], 1.0, 0.02) << tw.name();
@@ -1003,7 +1021,7 @@ TEST(Conductors, MovingTowersSettleWhereTheirStiffnessBalancesTheWindAndTheLine)
         }
         // the line hangs from the cross-arm where the tower has taken it
         const auto p = c->lines()[0]->node_position(c->lines()[0]->span_first_node(static_cast<int>(t) + 1));
-        const Real ptol = std::is_same<Real, float>::value ? Real(1.0e-4) : Real(1.0e-6);   // a Real's spacing at 500 m
+        const Real ptol = (std::is_same<Real, float>::value) ? Real(1.0e-4) : Real(1.0e-6);   // a Real's spacing at 500 m
         EXPECT_NEAR(p[0], 400.0 + 300.0 * t + x[0], ptol);
         EXPECT_NEAR(p[1], 500.0 + x[1], ptol);
     }
@@ -1130,6 +1148,9 @@ TEST(Conductors, ACircuitHangsFromOneRowOfTowersEachLineAtItsOwnPoint)
         ASSERT_EQ(tw.attachments().size(), 4u);
         // the owner first, at the centre of the cross-arm, then the others in the order of erf.conductors.lines
         EXPECT_EQ(c->lines()[c->tower_lines()[t][0].first]->name(), "C2");
+        EXPECT_EQ(c->lines()[c->tower_lines()[t][1].first]->name(), "C1");
+        EXPECT_EQ(c->lines()[c->tower_lines()[t][2].first]->name(), "C3");
+        EXPECT_EQ(c->lines()[c->tower_lines()[t][3].first]->name(), "CS");
         // every line's point stands on the tower's base: the ramp rises 0.11 m across the 5.5 m to C1,
         // which the cross-arm does not follow
         for (std::size_t a = 0; a < 4; ++a) {
@@ -1192,7 +1213,7 @@ TEST(Conductors, ACircuitOnBendingTowersMovesEveryLinesPoint)
         EXPECT_GT(model->q()[1], 1.0e-3) << tw.name() << " leans with the +y wind";
         EXPECT_NEAR(model->q()[1] * model->stiffness() / Q, 1.0, 0.02) << tw.name();
         // each line's point has moved with the tower by the shape at its height
-        const Real ptol = std::is_same<Real, float>::value ? Real(1.0e-4) : Real(1.0e-6);
+        const Real ptol = (std::is_same<Real, float>::value) ? Real(1.0e-4) : Real(1.0e-6);
         for (std::size_t a = 0; a < tw.attachments().size(); ++a) {
             const auto [line, j] = c->tower_lines()[t][a];
             const erf_conductors::ConductorLine& span = *c->lines()[line];
@@ -1240,8 +1261,8 @@ TEST(Conductors, AShortTautSpanOnBendingTowersStaysStable)
     EXPECT_EQ(unconverged, 0);
     EXPECT_LT(peak, Real(0.05)) << "the first tower's cross-arm stays within a few centimetres";
     EXPECT_LT(last, peak) << "and settles";
-    // about 4 mm, where the stiffness holds the drag and the pulls; a single exchange per coupling
-    // step leaves it still growing through 18 mm at the end
+    // about 4 mm, where the stiffness holds the drag and the pulls; without the iteration of each
+    // coupling step the exchange pumps energy into the cross-arm and this bound fails
     EXPECT_LT(last, Real(0.006));
     clear_circuit();
 }
@@ -1285,4 +1306,59 @@ TEST(Conductors, AnImmersedTerrainPlacesEverythingOnItsSurface)
         EXPECT_GT(fitted[0][2], 30.0 + 1.0);
     }
     clear_circuit();
+}
+
+TEST(Conductors, SetGroundRefusesASurfaceOffsetBelowTheDomainTop)
+{
+    const std::string dir = scratch("frame");
+    set_inputs(dir, "Tframe");
+    amrex::ParmParse pp("erf.conductors");
+    pp.add("surface_offset", 300.0);   // below the 400 m domain top
+    Mesh m(false);
+    auto c = Conductors::create(0);
+    pp.remove("surface_offset");
+    ASSERT_TRUE(c);
+    const std::string msg = erf_gtest::abort_message([&] { c->set_ground(nullptr, m.geom); });
+    EXPECT_NE(msg.find("erf.conductors.surface_offset"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("geometry.prob_hi[2]"), std::string::npos) << msg;
+    EXPECT_FALSE(c->ground_set()) << "the check comes before anything is placed";
+}
+
+TEST(Conductors, AnAttachmentOutsideTheDomainIsRefusedNamingItsKey)
+{
+    const std::string dir = scratch("outside");
+    // the domain ends at x = 1200 m
+    set_inputs(dir, "Tout", true, {{300.0, 500.0, 30.0}}, {{1300.0, 500.0, 30.0}});
+    Mesh m(false);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    const std::string msg = erf_gtest::abort_message([&] { c->set_ground(nullptr, m.geom); });
+    EXPECT_NE(msg.find("erf.conductors.Tout.end_b at (1300"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("lies outside the domain horizontally"), std::string::npos) << msg;
+}
+
+TEST(Conductors, ANonFiniteCouplingPullIsRefusedNotConverged)
+{
+    const std::vector<double> F0{1000.0, 0.0, -2000.0}, F{1000.0, 0.0, -2000.0};
+    bool converged = false;
+    // the tolerance is 1e-4 of the largest pull at the step's start, 2000 N: 0.2 N
+    EXPECT_TRUE(erf_conductors::coupling_converged(F0, F, {1000.1, 0.0, -2000.0}, 1.0e-4, converged).empty());
+    EXPECT_TRUE(converged) << "0.1 N within 0.2 N";
+    EXPECT_TRUE(erf_conductors::coupling_converged(F0, F, {1001.0, 0.0, -2000.0}, 1.0e-4, converged).empty());
+    EXPECT_FALSE(converged) << "1 N beyond 0.2 N";
+    const std::string err = erf_conductors::coupling_converged(F0, F, {std::numeric_limits<double>::quiet_NaN(), 0.0, -2000.0},
+                                                               1.0e-4, converged);
+    EXPECT_NE(err.find("is not finite"), std::string::npos) << err;
+    EXPECT_FALSE(converged) << "a pull that is not finite never counts as converged";
+}
+
+TEST(Conductors, ARestartChecksTheTowerSwayAndTheSurfaceOffset)
+{
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_TRUE(erf_conductors::restart_mismatch(false, false, 10000.0, 10000.0).empty());
+    EXPECT_TRUE(erf_conductors::restart_mismatch(true, true, 10000.0, 10000.0).empty());
+    EXPECT_TRUE(erf_conductors::restart_mismatch(false, false, nan, 5000.0).empty()) << "a checkpoint without the record";
+    EXPECT_NE(erf_conductors::restart_mismatch(false, true, nan, 10000.0).find("holds no tower sway"), std::string::npos);
+    EXPECT_NE(erf_conductors::restart_mismatch(true, false, nan, 10000.0).find("holds tower sway, but no tower type"), std::string::npos);
+    EXPECT_NE(erf_conductors::restart_mismatch(false, false, 10000.0, 5000.0).find("erf.conductors.surface_offset"), std::string::npos);
 }

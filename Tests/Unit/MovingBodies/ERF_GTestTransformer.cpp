@@ -1,9 +1,13 @@
-// Contract of erf_conductors::Transformer: the line ends whose x, y lie on a transformer's
-// footprint are dead-ended on it, and an end on two footprints, an end not above the box's top
-// or a transformer no line ends on is refused by name; the box stands on the terrain under its
-// centre; and the lines' load on it is the sum of their pulls and their moment about the centre
-// of the base, flagged when the horizontal force or the overturning moment exceeds its allowable
-// value, a zero allowable being left unchecked.
+// Unit tests of erf_conductors::Transformer, a box on the terrain the conductor lines dead-end on.
+//
+// TheBoxStandsOnTheTerrainUnderItsCentre: the base at the terrain height under the footprint's centre.
+// LineEndsOnAFootprintAreDeadEndedOnIt: every line end whose x, y lies on the footprint.
+// MisplacedEndsAndIdleTransformersAreRefusedByName: an end on two footprints, an end not above the
+//     box's top, or a transformer no line ends on.
+// TheLoadIsTheSumOfThePullsAndTheirMomentAboutTheBase: the force (N) and the moment (N m) about the
+//     centre of the base.
+// TheLoadIsFlaggedOverEitherAllowable: the horizontal force or the overturning moment over its
+//     allowable value; a zero allowable is not checked.
 
 #include <array>
 #include <cmath>
@@ -23,7 +27,7 @@ using P3 = std::array<Real,3>;
 
 namespace {
 
-constexpr Real tol = std::is_same<Real, float>::value ? Real(1.0e-3) : Real(1.0e-9);
+constexpr Real tol = (std::is_same<Real, float>::value) ? Real(1.0e-3) : Real(1.0e-9);
 
 TransformerInputs box (const std::string& name, Real x, Real y)
 {

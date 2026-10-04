@@ -2,6 +2,9 @@
 
 #include <cmath>
 
+#include <AMReX.H>
+#include <AMReX_BLassert.H>
+
 using amrex::Real;
 
 namespace erf_conductors {
@@ -18,6 +21,7 @@ std::array<Real,3> Transformer::box_hi () const
 
 TransformerLoad Transformer::load (const std::vector<std::array<Real,3>>& at, const std::vector<std::array<Real,3>>& force) const
 {
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(at.size() == force.size(), "Transformer::load: one force is needed per line end");
     TransformerLoad L;
     const auto b = base();
     for (std::size_t i = 0; i < at.size() && i < force.size(); ++i) {

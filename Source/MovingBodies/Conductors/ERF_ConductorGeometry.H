@@ -1,22 +1,30 @@
 #ifndef ERF_CONDUCTOR_GEOMETRY_H
 #define ERF_CONDUCTOR_GEOMETRY_H
 
+/**
+ * Closest-approach geometry of the conductor module: segment-segment, polyline-polyline,
+ * segment-box and polyline-box distances, used to flag lines that clash and conductors that come
+ * close to a transformer. Coordinates and distances are in ERF's frame (m).
+ */
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
 #include <vector>
 
+#include <AMReX.H>
+#include <AMReX_BLassert.H>
 #include <AMReX_REAL.H>
 
 namespace erf_conductors {
 
-/** The closest approach of two curves: the distance and the closest point on each. */
+/** The closest approach of two curves, or of a curve and a box: the distance and the closest point on each. */
 struct Closest
 {
-    amrex::Real distance{std::numeric_limits<amrex::Real>::max()};
-    std::array<amrex::Real,3> a{{0.0, 0.0, 0.0}};
-    std::array<amrex::Real,3> b{{0.0, 0.0, 0.0}};
+    amrex::Real distance{std::numeric_limits<amrex::Real>::max()};   //!< |a - b| (m); the largest Real when nothing was compared
+    std::array<amrex::Real,3> a{{0.0, 0.0, 0.0}};                    //!< the closest point on the first curve (m, ERF frame)
+    std::array<amrex::Real,3> b{{0.0, 0.0, 0.0}};                    //!< the closest point on the second curve or on the box (m, ERF frame)
 };
 
 /**
@@ -59,10 +67,15 @@ inline Closest closest_segments (const std::array<amrex::Real,3>& p0, const std:
     return out;
 }
 
-/** The closest approach of two polylines given as 3 coordinates per vertex (each at least two vertices). */
+/**
+ * The closest approach of two polylines given as 3 coordinates per vertex.
+ * Precondition: each has at least two vertices (aborts otherwise).
+ */
 inline Closest closest_polylines (const std::vector<amrex::Real>& P, const std::vector<amrex::Real>& Q)
 {
     using amrex::Real;
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(P.size() % 3 == 0 && Q.size() % 3 == 0 && P.size() >= 6 && Q.size() >= 6,
+                                     "closest_polylines: each polyline needs 3 coordinates per vertex and at least two vertices");
     Closest best;
     const std::size_t np = P.size() / 3, nq = Q.size() / 3;
     auto at = [] (const std::vector<Real>& v, std::size_t i) { return std::array<Real,3>{{v[3*i], v[3*i+1], v[3*i+2]}}; };
@@ -116,11 +129,16 @@ inline Closest closest_segment_box (const std::array<amrex::Real,3>& p0, const s
     return out;
 }
 
-/** The closest approach of a polyline (3 coordinates per vertex, at least two vertices) and the axis-aligned box [lo, hi]. */
+/**
+ * The closest approach of a polyline (3 coordinates per vertex) and the axis-aligned box [lo, hi].
+ * Precondition: the polyline has at least two vertices (aborts otherwise).
+ */
 inline Closest closest_polyline_box (const std::vector<amrex::Real>& P,
                                      const std::array<amrex::Real,3>& lo, const std::array<amrex::Real,3>& hi)
 {
     using amrex::Real;
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(P.size() % 3 == 0 && P.size() >= 6,
+                                     "closest_polyline_box: the polyline needs 3 coordinates per vertex and at least two vertices");
     Closest best;
     auto at = [&] (std::size_t i) { return std::array<Real,3>{{P[3*i], P[3*i+1], P[3*i+2]}}; };
     for (std::size_t i = 0; i + 1 < P.size() / 3; ++i) {

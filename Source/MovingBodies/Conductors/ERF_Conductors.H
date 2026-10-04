@@ -1,6 +1,8 @@
 #ifndef ERF_CONDUCTORS_H
 #define ERF_CONDUCTORS_H
 
+/** Conductors: the run's conductor lines, transformers and lattice towers, stepped with ERF on one AMR level. */
+
 #include <memory>
 #include <string>
 #include <utility>
@@ -20,8 +22,8 @@
 #include "ERF_TowerDynamics.H"
 
 /**
- * The conductor lines of a run (erf.conductors.*): MoorDyn lines between attachment points,
- * single spans or sections over suspension towers, stepped in lockstep with ERF on their anchor
+ * The conductor lines of a run (erf.conductors.*), each one MoorDyn system between its attachment
+ * points, single spans or sections over suspension towers, stepped in lockstep with ERF on their anchor
  * level. ERF holds one of these and calls set_ground() once the mesh exists, then advance() every
  * step of the anchor level. Besides each line's own diagnostics, every pair of lines is watched
  * for how close their conductors come, against erf.conductors.flashover_distance, and every
@@ -37,56 +39,68 @@ class Conductors
 public:
     using ConductorInputs_t = erf_conductors::ConductorInputs;
 
-    /** nullptr unless erf.conductors.lines is given; aborts on inputs this version does not support. */
+    /** nullptr unless erf.conductors.lines is given; aborts on inputs the conductor module does not support (validate_solver). */
     static std::unique_ptr<Conductors> create (int max_level);
 
     /**
-     * Place the attachments on the terrain (their z is the height above the surface at x, y),
-     * write the MoorDyn inputs and create the spans. Called once, before the first step. On a
-     * restart (restart_chkdir is the checkpoint ERF restarts from) the spans continue from the
-     * state write_checkpoint() saved there, with their statistics, step count and logs; a
-     * checkpoint without conductor state starts them afresh.
+     * Place the attachment points on the terrain (z - geometry.prob_lo[2] is their height above the
+     * surface at x, y), write the MoorDyn inputs and create the lines. It also checks that MoorDyn's
+     * frame holds the domain (erf.conductors.surface_offset), stands the transformers on the terrain,
+     * dead-ends lines on them and builds the lattice towers, writes <diagnostics_dir>/ground.dat, and
+     * aborts on a misplaced attachment point after writing it. ERF calls it from ERF::InitData;
+     * advance() calls it on its first call when ERF has not. On a restart (restart_chkdir is the
+     * checkpoint ERF restarts from) the lines continue from the state write_checkpoint() saved there,
+     * with their statistics, step count and logs; a checkpoint without conductor state starts them
+     * afresh.
      */
     void set_ground (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom,
                      const std::string& restart_chkdir = "");
     /**
      * Take the terrain's height from a surface rather than from the bottom of the mesh: an
      * immersed terrain stands on a flat mesh. surface holds the height (m) at the nodes of geom's
-     * cells, x and y, as ERF's terrain reader fills it (k = 0, any z index); call before set_ground().
+     * cells, x and y, as ERF's terrain reader fills it: one z plane, the box's lowest z index is read;
+     * heights between nodes are bilinear. Call before set_ground().
      */
     void set_ground_surface (const amrex::FArrayBox& surface, const amrex::Geometry& geom);
     bool ground_set () const { return m_ground_set; }
-    /** Whether set_ground() continued the spans from a checkpoint. */
+    /** Whether set_ground() continued the lines from a checkpoint. */
     bool restored () const { return m_restored; }
 
     /**
-     * Save the spans' state under <chkdir>/conductors: every span's MoorDyn state, the statistics,
-     * the step count and the time. Nothing is written before set_ground().
+     * Save the lines' state under <chkdir>/conductors: the step count, the time, the MoorDyn clock
+     * offset and surface_offset (file state), every line's MoorDyn state (<name>.moordyn), every
+     * running statistic, the towers' member loads (tower_loads) and the moving towers' model state
+     * (tower_motion). Nothing is written before set_ground().
      */
     void write_checkpoint (const std::string& chkdir) const;
     /**
-     * After a restart with drag_on_flow, spread the restored lines' drag into the momentum sources
-     * again, so that the sources (and a plotfile written at the restart) are those of the step the
+     * After a restart with drag_on_flow, spread the force the restored lines and the towers' members
+     * exert on the air into the momentum sources again, so that the sources (and a plotfile written at the restart) are those of the step the
      * checkpoint was written at. Nothing happens on other levels, without drag_on_flow or on a fresh start.
      */
     void restore_sources (int lev, const amrex::MultiFab& U, const amrex::MultiFab* z_phys_nd,
                           const amrex::MultiFab* detJ_cc, const amrex::Geometry& geom);
 
     /**
-     * Advance the spans by one step of the anchor level (other levels return at once): hand each its
+     * Advance the lines by one step of the anchor level (other levels return at once): hand each its
      * wind, step it, measure its clearance to the terrain, update the statistics and the outputs, and,
-     * with drag_on_flow, spread the lines' drag on the air into the momentum sources of the next step.
+     * with drag_on_flow, spread the force the lines and the towers' members exert on the air into the
+     * momentum sources of the next step.
+     * Units: time, dt (s). U, V, W are the face velocities of level lev at the start of the step.
      */
     void advance (int lev, double time, double dt,
                   const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
                   const amrex::MultiFab* z_phys_nd, const amrex::MultiFab* detJ_cc, const amrex::Geometry& geom);
 
-    /** Add the lines' drag on the air to the momentum sources of the anchor level (nothing without drag_on_flow). */
+    /**
+     * Add the force the lines and the towers' members exert on the air (minus the air's drag on them,
+     * N/m^3) to the face momentum sources of the anchor level; nothing without drag_on_flow.
+     */
     void add_momentum_sources (int lev, amrex::MultiFab& xmom_src, amrex::MultiFab& ymom_src, amrex::MultiFab& zmom_src) const;
-    /** Whether the lines put their drag into the flow (erf.conductors.drag_on_flow). */
+    /** Whether the lines and towers put their drag into the flow (erf.conductors.drag_on_flow). */
     bool drag_on_flow () const { return m_in.drag_on_flow; }
     /**
-     * The lines' momentum source on the air (N/m^3), averaged from the faces to the cell centres, into
+     * The momentum source of the lines and the towers' members on the air (N/m^3), averaged from the faces to the cell centres, into
      * component comp of dst (three components x, y, z); zero on levels other than the anchor level or
      * before the first step.
      */
@@ -94,7 +108,7 @@ public:
     /** The integral of the momentum source over the anchor level (N), as last spread. */
     const std::array<amrex::Real,3>& source_integral () const { return m_source_integral; }
 
-    /** The pairs of lines watched for clashes (indices into lines()), and their last closest approach. */
+    /** The pairs of lines watched for clashes (0-based indices into lines()), and their last closest approach. */
     const std::vector<std::pair<std::size_t,std::size_t>>& pairs () const { return m_pairs; }
     const std::vector<erf_conductors::Closest>& separations () const { return m_sep; }
     /** The transformers the lines end on, the lines' last load on each, and the closest any conductor came to each. */
@@ -108,15 +122,19 @@ public:
     /** Each tower's structural model, null for a tower that stands still. */
     const std::vector<std::unique_ptr<erf_towers::TowerModel>>& tower_models () const { return m_models; }
     /**
-     * The coupling steps a line whose towers move takes over each period of its fastest tower, at
-     * least: in each, its towers advance under the lines' pull from the end of the one before, then
-     * MoorDyn moves their cross-arms from where they were to where they are now.
+     * The fewest coupling steps a group of lines whose towers move takes over one period of its
+     * highest tower frequency; the count is also at least erf.conductors.substeps. In each coupling
+     * step the towers advance under the mean of the lines' pull at the step's start and the iterated
+     * pull at its end, then MoorDyn moves the cross-arms (its coupled points) from where they were to
+     * where the towers took them. The step is repeated until that end pull converges (coupling_tolerance).
      */
     static constexpr int coupling_steps_per_period = 20;
     /**
-     * Each coupling step is iterated until the lines' pull on the towers at its end changes by less
-     * than coupling_tolerance of the largest pull, at most coupling_max_iterations times, starting
-     * from the relaxation factor coupling_initial_relaxation (Aitken's method adapts it).
+     * Each coupling step is iterated until no component of the lines' pull on the towers at its end
+     * changes by more than coupling_tolerance times the largest pull component at the step's start
+     * (at least 1 N), at most coupling_max_iterations times (erf_conductors::coupling_converged). The
+     * relaxation factor starts at coupling_initial_relaxation and Aitken's method adapts it within
+     * [0.01, 1]. A pull that is not finite aborts the run.
      */
     static constexpr double coupling_tolerance = 1.0e-4;
     static constexpr int coupling_max_iterations = 50;
@@ -132,37 +150,61 @@ public:
 private:
     Conductors (ConductorInputs_t in, int anchor);
     /**
-     * The wind at a span's kinematics points where the line is now: ERF's velocity sampled at the line
-     * nodes with the actuator core (each component from its own staggered grid, linear in the physical
-     * height) and none at MoorDyn's fixed entries after them, or the prescribed velocity everywhere when
-     * one is given. Aborts, naming the span and the node, when a node has left the domain or the anchor
-     * level's grids do not cover the cells the sampler reads.
+     * The wind (m/s) at a line's kinematics points at the line's current position: ERF's velocity
+     * sampled at the line nodes with the actuator core (each component from its own staggered grid,
+     * linear in the physical height) and zero at MoorDyn's point entries after them, or the prescribed
+     * velocity everywhere when one is given. Aborts, naming the line and the node, when a node has
+     * left the domain or the anchor level's grids do not cover the cells the sampler reads.
      */
     std::vector<amrex::Real> wind_at (const erf_conductors::ConductorLine& span,
                                       const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
                                       const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
-    /** Abort, naming the span and the node, when a line node lies outside the domain (periodic directions wrap). */
+    /**
+     * Abort, naming the line and the node (0-based over the line), when a line node lies outside the domain;
+     * periodic directions are not checked.
+     */
     void check_nodes_in_domain (const erf_conductors::ConductorLine& span, const std::vector<amrex::Real>& pos,
                                 const amrex::Geometry& geom) const;
-    /** The terrain height under each point (3 per point): the surface's when one was given, else the mesh's bottom. */
+    /**
+     * The terrain height (m) under each point: pos holds 3 coordinates per point (m); h receives one
+     * height per point, from the immersed surface when one was given, else from z_phys_nd's bottom
+     * node plane, or prob_lo z without terrain.
+     */
     void ground_heights (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom, const std::vector<amrex::Real>& pos,
                          std::vector<amrex::Real>& h) const;
-    /** Read the terrain height under each node of every span (the k = 0 node plane, or the domain floor). */
+    /**
+     * Read the terrain height under each node of every line (the immersed surface when
+     * set_ground_surface() gave one, else z_phys_nd's k = 0 node plane, or prob_lo z without
+     * terrain); aborts when a node has left the domain.
+     */
     void update_ground_under_nodes (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
-    /** Spread the lines' drag on the air into the face momentum sources, and record their integral. */
+    /**
+     * Spread the force the lines and the towers' members exert on the air (minus the air's drag on
+     * them) into the face momentum sources, and record their integral. Aborts on a force or position
+     * that is not finite.
+     */
     void spread_drag (const amrex::MultiFab& U, const amrex::MultiFab* z_phys_nd, const amrex::MultiFab* detJ_cc,
                       const amrex::Geometry& geom);
+    /**
+     * Append a row to <diagnostics_dir>/total_load.dat: the air's drag on the lines and the towers'
+     * members (N), the force put into the air (N; zero without drag_on_flow) and the spread source's
+     * integral (N). first truncates the file; the header is written after truncating, or when
+     * appending to a missing or empty file.
+     */
     void write_total_load (double time, bool first) const;
 
-    /** Read the state write_checkpoint() saved under dir, create the spans from it and trim the logs to its time. */
+    /** Read the state write_checkpoint() saved under dir, create the lines from it and trim the logs to its time. */
     void restore (const std::string& dir);
     /** The running statistics of a line: one set per span, and one for its insulator strings. */
     void add_stats (const erf_conductors::LineInputs& s);
     /** The pairs of lines and their statistics. */
     void add_pair_stats ();
-    /** The closest approach of every pair of lines' conductors, where they are now. */
+    /** The closest approach of every pair of lines' conductors, at their current positions. */
     void measure_separation ();
-    /** Append a row of the pairs' closest approach to <diagnostics_dir>/separation.dat; header when first. */
+    /**
+     * Append a row of the pairs' closest approach to <diagnostics_dir>/separation.dat. first truncates
+     * the file; the header is written after truncating, or when appending to a missing or empty file.
+     */
     void write_separation (double time, bool first) const;
     /**
      * Stand the transformers on the terrain and dead-end the lines on them: an empty string, or the
@@ -171,15 +213,22 @@ private:
     std::string place_transformers (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
     /** The transformers' statistics. */
     void add_transformer_stats ();
-    /** The lines' load on every transformer and the closest any conductor comes to its box, where the lines are now. */
+    /** The lines' load on every transformer and the closest any conductor comes to its box, at the lines' current positions. */
     void measure_transformers ();
-    /** Append a row of the transformers' loads and clearances to <diagnostics_dir>/transformers.dat; header when first. */
+    /**
+     * Append a row of the transformers' loads and clearances to <diagnostics_dir>/transformers.dat.
+     * first truncates the file; the header is written after truncating, or when appending to a missing
+     * or empty file.
+     */
     void write_transformers (double time, bool first) const;
     /** Stand a lattice tower at every suspension point of the lines with a tower_type. */
     void build_towers ();
     /** The towers' statistics. */
     void add_tower_stats ();
-    /** The wind at every tower node (3 per node, the towers in order): the flow sampled there, or the prescribed velocity. */
+    /**
+     * The wind (m/s) at every tower node (3 per node, the towers in order): the flow sampled there, or
+     * the prescribed velocity. Aborts on a sampled value that is not finite.
+     */
     std::vector<amrex::Real> tower_wind (const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
                                          const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
     /** The members' drag from the wind at their nodes (held for the step) and their motion, handed to each tower, with the lines' pull. */
@@ -194,13 +243,20 @@ private:
      * on the towers there. Lines that share towers form one group.
      */
     void step_moving_group (const std::vector<std::size_t>& lines, double time, double dt);
-    /** Hand each tower the pull of its lines where they hang from it, as the lines are now. */
+    /** Hand each tower the pull of its lines where they hang from it, at the lines' current state. */
     void load_towers_with_lines ();
-    /** The same for tower t. */
+    /** Hand tower t the pull of every line hanging from it, where each hangs (displaced by a moving tower), at the lines' current state. */
     void load_tower_with_lines (std::size_t t);
-    /** Append a row of the towers' drag and base moment to <diagnostics_dir>/towers.dat; header when first. */
+    /**
+     * Append a row of the towers' drag and base moment to <diagnostics_dir>/towers.dat. first
+     * truncates the file; the header is written after truncating, or when appending to a missing or
+     * empty file.
+     */
     void write_towers (double time, bool first) const;
-    /** The logs a restart continues. */
+    /**
+     * The logs that restore() trims to the checkpoint time with trim_log_after (towers.dat, whose
+     * rows carry a step's start time, is trimmed separately with at_too).
+     */
     std::vector<std::string> log_files () const;
 
     ConductorInputs_t m_in;
@@ -208,10 +264,12 @@ private:
     bool m_ground_set{false};
     bool m_restored{false};
     int m_step{0};
-    double m_time{0.0};                                  //!< the time the spans have reached
-    double m_t0{0.0};                                    //!< ERF's time when the spans' MoorDyn clocks read zero
-    std::vector<erf_conductors::LineInputs> m_placed;   //!< the spans with their ends at absolute heights
-    std::vector<amrex::Real> m_ground;                  //!< per end (2 per span): the terrain height
+    double m_time{0.0};                                  //!< the time the lines have reached (s)
+    double m_t0{0.0};                                    //!< ERF's time when the lines' MoorDyn clocks read zero (s)
+    std::vector<erf_conductors::LineInputs> m_placed;   //!< the lines with every attachment point (ends and towers) at its absolute height
+    //! per attachment point of every line, in line order (num_spans()+1 per line: end_a, the towers, end_b): the
+    //! terrain height under it (m); a share_towers line's tower entries hold the ground under the shared tower's base
+    std::vector<amrex::Real> m_ground;
     std::vector<std::unique_ptr<erf_conductors::ConductorLine>> m_lines;
     std::vector<std::vector<erf_actuator::RunningStats>> m_stats;   //!< per line: per span, then the strings', from stats_start
     std::vector<std::pair<std::size_t,std::size_t>> m_pairs;        //!< the pairs of lines watched for clashes
@@ -223,7 +281,11 @@ private:
     std::vector<erf_actuator::RunningStats> m_tstats;               //!< per transformer: its load and clearance
     std::vector<erf_towers::Tower> m_towers;                        //!< the lines' lattice towers, line by line
     std::vector<std::vector<std::pair<std::size_t,int>>> m_tower_lines;   //!< per tower: (line, its tower index) per attachment
-    std::vector<std::vector<std::pair<std::size_t,std::size_t>>> m_line_towers;   //!< per line: (tower, attachment) per tower of the line
+    /**
+     * per line: (index into m_towers, attachment index on that tower), both 0-based, per tower of the line in
+     * order
+     */
+    std::vector<std::vector<std::pair<std::size_t,std::size_t>>> m_line_towers;
     std::vector<std::vector<std::size_t>> m_groups;                 //!< lines that step together: those sharing towers
     int m_coupling_iterations{0};                                   //!< the most iterations of a coupling step, this step
     int m_coupling_unconverged{0};                                  //!< coupling steps that did not converge, this step
@@ -231,13 +293,15 @@ private:
     std::unique_ptr<amrex::FArrayBox> m_surface;                    //!< the terrain's height at the nodes, for an immersed terrain
     amrex::Geometry m_surface_geom;
     std::vector<std::unique_ptr<erf_towers::TowerModel>> m_models;  //!< per tower: its structural model, null when it stands still
-    std::vector<std::vector<amrex::Real>> m_tower_wind;             //!< per tower: the wind at its nodes, held for the step
+    std::vector<std::vector<amrex::Real>> m_tower_wind;             //!< per tower: the wind at its nodes (m/s), held for the step
     std::unique_ptr<erf_towers::MemberAero> m_aero;                 //!< the members' aerodynamics
     std::vector<erf_actuator::RunningStats> m_tower_stats;          //!< per tower: its drag and base moment
     bool m_src_defined{false};
-    amrex::MultiFab m_src_x, m_src_y, m_src_z;           //!< the lines' momentum sources on the anchor level
-    std::array<amrex::Real,3> m_source_integral{{0.0, 0.0, 0.0}};
-    std::array<amrex::Real,3> m_drag_total{{0.0, 0.0, 0.0}};   //!< the air's drag on all lines (N)
+    /** the momentum sources of the lines and the towers' members on the anchor level (N/m^3) */
+    amrex::MultiFab m_src_x, m_src_y, m_src_z;
+    std::array<amrex::Real,3> m_source_integral{{0.0, 0.0, 0.0}};   //!< the integral of the sources over the anchor level (N)
+    /** the air's drag on all lines and on the towers' members (N); total_load.dat drag_x..z */
+    std::array<amrex::Real,3> m_drag_total{{0.0, 0.0, 0.0}};
 };
 
 namespace erf_conductors {
@@ -249,6 +313,24 @@ namespace erf_conductors {
  * run writes that row again). A missing file is left alone. Call on one rank.
  */
 void trim_log_after (const std::string& fname, double t, bool at_too = false);
+
+/**
+ * The convergence test of one iteration of a coupling step between lines and their moving towers.
+ * F0 holds the lines' pulls on the towers at the coupling step's start, F the iterate, Fn the pulls
+ * MoorDyn returned from it (N, 3 per attachment). converged is set when no |Fn - F| exceeds
+ * tolerance times max(1 N, the largest |F0|). Returns an empty string, or the message when any of
+ * F0, F, Fn is not finite (converged is then false).
+ */
+std::string coupling_converged (const std::vector<double>& F0, const std::vector<double>& F, const std::vector<double>& Fn,
+                                double tolerance, bool& converged);
+
+/**
+ * Whether a conductor checkpoint fits the run restarted from it: an empty string, else the message.
+ * saved_tower_motion: the checkpoint holds tower_motion; towers_move: some tower type of the run
+ * has a frequency; saved_offset: the checkpoint's surface_offset (m), NaN when the checkpoint has
+ * no surface_offset record (it is then not compared); surface_offset: the run's (m).
+ */
+std::string restart_mismatch (bool saved_tower_motion, bool towers_move, double saved_offset, double surface_offset);
 } // namespace erf_conductors
 
 #endif

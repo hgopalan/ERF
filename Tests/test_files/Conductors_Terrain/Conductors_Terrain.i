@@ -1,15 +1,17 @@
 # Two lines over hills, dead-ended on three transformers: one on a hilltop, two on flat ground,
-# generated with Exec/CanonicalTests/PowerLines/make_case.py --seed 7 (a smaller domain, two hills,
-# three transformers). A neutral boundary layer, a log law under a capping inversion, comes in
+# from a case written by Exec/CanonicalTests/PowerLines/make_case.py with --seed 7 on a smaller
+# domain (1500 m x 1000 m x 400 m, two hills, three transformers), which the script's defaults do
+# not reproduce. A neutral boundary layer, a log law at 300 K throughout the 400 m domain, comes in
 # through the x-low face and leaves through the x-high one over the terrain-following mesh, with
-# the k-equation RANS closure, the surface layer and the implicit anelastic MidPoint scheme. Each
-# line hangs from insulator strings on two suspension towers and samples the flow at its nodes;
-# the transformers take the lines' pull. The middle span of L1, the transformers' log and the
-# statistics of the hilltop transformer must match their golds; nothing goes back into the flow.
+# the k-equation RANS closure, the surface layer and the implicit anelastic MidPoint scheme. L1
+# hangs from insulator strings on two lattice suspension towers and L2 on one; each line samples
+# the flow at its nodes, and the transformers take the lines' pull. The middle span of L1, the
+# transformers' log, the statistics of the hilltop transformer and the towers' drag must match
+# their golds; nothing goes back into the flow.
 
 max_step = 10
 stop_time = 9.0
-erf.fixed_dt = 0.9          # at most 26 m/s aloft on 50 m cells: Courant 0.47
+erf.fixed_dt = 0.9          # s: at most 26 m/s aloft on 50 m horizontal cells, Courant 0.47
 
 geometry.prob_lo     = 0.    0.    0.
 geometry.prob_hi     = 1500. 1000. 400.
@@ -17,8 +19,8 @@ amr.n_cell           = 30    20    16
 amr.max_level        = 0
 geometry.is_periodic = 0 0 0
 xlo.type           = "Inflow"
-xlo.dirichlet_file = "inflow_profile"   # z u v w theta; no constant inflow density (it would rescale theta)
-xlo.KE             = 5.2523             # 3.3 u*^2, u* = 1.2616 m/s
+xlo.dirichlet_file = "inflow_profile"   # z u v w theta; no constant inflow density (it would rescale theta),
+                                        # so the inflow k is zero-gradient
 xhi.type           = "Outflow"
 ylo.type           = "SlipWall"
 yhi.type           = "SlipWall"
@@ -51,8 +53,7 @@ erf.rans_type              = "kEqn"
 erf.dirichlet_k            = true
 erf.init_tke_from_ustar    = true
 erf.rans_consistent_diffusivities = true
-erf.rans_lscale_min        = 1.0
-erf.max_geom_lscale        = 20.0   # 0.1 kappa zi for the 500 m inversion
+erf.max_geom_lscale        = 20.0   # m: 0.1 kappa zi with zi = 500 m, an inversion base above this domain
 erf.theta_ref              = 300.0
 
 erf.sum_interval = -1

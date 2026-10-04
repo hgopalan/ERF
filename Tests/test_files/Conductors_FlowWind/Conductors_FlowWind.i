@@ -1,4 +1,5 @@
-# A 300 m conductor span (795 kcmil ACSR, 1.5 m slack) hanging 30 m above flat ground across a
+# A 300 m conductor span (795 kcmil, thousand circular mils, ACSR, aluminium conductor steel
+# reinforced; 1.5 m slack) hanging 30 m above flat ground across a
 # sheared anelastic crosswind v = 15 + 0.1 z m/s entering through the y-low face (steady between
 # slip walls without diffusion): the wind handed to MoorDyn is ERF's velocity sampled at the line's
 # nodes where they are each step, so it changes as the span swings up and down through the shear.
@@ -15,14 +16,14 @@ amr.n_cell           = 30    20    12
 amr.max_level        = 0
 geometry.is_periodic = 1 0 0
 ylo.type     = "Inflow"
-ylo.dirichlet_file = "inflow_profile"   # z u v w; no constant inflow density (it would rescale theta)
+ylo.dirichlet_file = "inflow_profile"   # z u v w; no constant inflow density, which would also need ylo.theta
 yhi.type     = "Outflow"
 zlo.type = "SlipWall"
 zhi.type = "SlipWall"
 
 erf.anelastic = 1
 erf.vert_implicit = true
-erf.anelastic_type = MidPoint   # RK2 ignores the implicit vertical solve; MidPoint honours it
+erf.anelastic_type = MidPoint   # the anelastic MidPoint scheme, as in the decks over hills
 erf.use_fft   = true
 erf.molec_diff_type = "None"
 erf.les_type        = "None"

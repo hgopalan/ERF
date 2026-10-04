@@ -171,8 +171,8 @@ plot3d_fixed_unconditional_diagnostic (const std::string& name)
         name == "pp_err") return true;
 #endif
 #ifdef ERF_USE_MOORDYN
-    // the conductor lines' momentum source on the air; ERF_Plotfile.cpp drops them unless the
-    // lines put their drag into the flow
+    // the momentum source of the conductor lines and the towers' members on the air;
+    // ERF_Plotfile.cpp drops them unless erf.conductors.drag_on_flow puts that drag into the flow
     if (name == "conductor_fx" || name == "conductor_fy" || name == "conductor_fz") return true;
 #endif
 

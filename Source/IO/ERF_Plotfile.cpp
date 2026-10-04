@@ -954,7 +954,7 @@ ERF::FillPlot3DVars (int lev,
 #endif
 
 #ifdef ERF_USE_MOORDYN
-    // the conductor lines' momentum source on the air (N/m^3), in derived_names order
+    // the momentum source of the conductor lines and the towers' members on the air (N/m^3), in derived_names order
     if (conductors && conductors->drag_on_flow()) {
         const char* names[3] = {"conductor_fx", "conductor_fy", "conductor_fz"};
         bool any = false;

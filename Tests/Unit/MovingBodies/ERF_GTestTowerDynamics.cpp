@@ -1,23 +1,29 @@
-// Contract of the one-mode tower: on a rigid foundation it sways at its type's frequency, its mass
-// the type's weight, its shape the cantilever's (z/H)^2 with the cross-arm at 1; a load held over a
-// step is integrated exactly, so the result does not depend on how the time is cut and any step is
-// stable; free, it rings down at the damped frequency with the logarithmic decrement of its damping
-// ratio; the foundation's tilt and slide add their compliances to the bending's in series, so a
-// load at the cross-arm deflects it by F (1/K_b + H^2/k_r + 1/k_l); a load spread up the body
-// drives it by the shape, the hand value of the midpoint sum of p (z/H)^2; the foundation takes the
-// loads less the nodes' inertia, so swaying freely its base shear is omega^2 q sum m phi; swaying
-// in a steady wind, the drag on the members relative to their own velocity damps it by
-// sum phi^2 rho Cf w L U / (2 M omega) more; its state restores the same motion; and a line on
-// the peak moves, and pulls, by the shape at its height.
+// Contract of the one-mode tower (OneModeTower).
+//
+// - OnARigidFoundationItSwaysAtItsTypesFrequencyInTheQuadraticShape: its mass is the type's
+//   weight over gravity, its shape the assumed (z/H)^2 with the cross-arm at 1.
+// - AHeldLoadIsIntegratedExactlyHoweverTheTimeIsCut: so any step is stable.
+// - FreeItRingsDownAtTheDampedFrequencyWithItsDecrement: the logarithmic decrement of its damping ratio.
+// - TheFoundationsTiltAndSlideAddTheirCompliancesInSeries: a load F at the cross-arm deflects it by
+//   F (1/K_b + H^2/k_r + 1/k_l).
+// - ALoadSpreadUpTheBodyDrivesItByTheShape: the hand value of the midpoint sum of p (z/H)^2.
+// - TheFoundationTakesTheLoadsLessTheInertia: swaying freely, its base shear is omega^2 q sum m phi.
+// - TheWindDampsItsSwayByTheDragRelativeToTheMembers: by sum phi^2 rho Cf w L U / (2 M omega) more.
+// - ItsStateRestoresTheSameMotion, and a non-finite state is refused.
+// - ALineOnThePeakMovesAndPullsByTheShapeThere.
+// - ABadStepOrANonFiniteLoadIsRefusedNamingTheTower and
+//   ATowerThatCannotMoveIsRefusedNamingItsKeys: the aborts name the tower and the input keys.
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "ERF_GTestThrowOnAbort.H"
 #include "ERF_MemberDrag.H"
 #include "ERF_Tower.H"
 #include "ERF_TowerDynamics.H"
@@ -35,7 +41,7 @@ namespace {
 constexpr double pi = 3.14159265358979323846;
 constexpr double g = 9.81;
 // the model integrates in double whatever Real is; what reaches it as Real carries Real's roundoff
-constexpr double tol = std::is_same<Real, float>::value ? 1.0e-5 : 1.0e-12;
+constexpr double tol = (std::is_same<Real, float>::value) ? 1.0e-5 : 1.0e-12;
 
 TowerType swaying (Real f = 2.0, Real zeta = 0.02)
 {
@@ -55,7 +61,7 @@ std::vector<Real> no_load (const Tower& tw) { return std::vector<Real>(3 * tw.no
 
 } // namespace
 
-TEST(OneModeTower, OnARigidFoundationItSwaysAtItsTypesFrequencyInTheCantileverShape)
+TEST(OneModeTower, OnARigidFoundationItSwaysAtItsTypesFrequencyInTheQuadraticShape)
 {
     const Tower tw = standing(swaying());
     const OneModeTower m(tw, Real(g));
@@ -69,8 +75,9 @@ TEST(OneModeTower, OnARigidFoundationItSwaysAtItsTypesFrequencyInTheCantileverSh
         M += m.node_mass(i) * z * z * z * z;
     }
     EXPECT_NEAR(mass, 9.0e4 / g, tol * mass) << "the type's weight over gravity";
-    EXPECT_NEAR(m.generalized_mass(), M, 1.0e-9);
-    EXPECT_NEAR(m.stiffness(), M * std::pow(2.0 * pi * 2.0, 2), 1.0e-6);
+    // both sums run in double over the same node masses and heights: equal to roundoff
+    EXPECT_NEAR(m.generalized_mass(), M, 1.0e-12 * M);
+    EXPECT_NEAR(m.stiffness(), M * std::pow(2.0 * pi * 2.0, 2), 1.0e-12 * m.stiffness());
     // the cross-arm's nodes are at its height: they move as the cross-arm, phi = 1
     for (std::size_t i = static_cast<std::size_t>(tw.num_body_nodes()); i < tw.nodes().size(); ++i) {
         EXPECT_NEAR(m.mode_shape(i), 1.0, 1.0e-14) << i;
@@ -257,6 +264,11 @@ TEST(OneModeTower, ItsStateRestoresTheSameMotion)
     for (int s = 0; s < 5; ++s) { a.step(Real(0.05), no_load(tw), F); }
     ASSERT_TRUE(b.set_state(a.state()));
     EXPECT_FALSE(b.set_state({1.0, 2.0}));
+    // a non-finite value, as a corrupt checkpoint would hold, is refused and changes nothing
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_FALSE(b.set_state({nan, 0.0, 0.0, 0.0, 0.0, 0.0}));
+    EXPECT_FALSE(b.set_state({0.0, 0.0, 0.0, 0.0, std::numeric_limits<double>::infinity(), 0.0}));
+    EXPECT_EQ(b.q()[0], a.q()[0]);
     for (int s = 0; s < 5; ++s) { a.step(Real(0.05), no_load(tw), F); b.step(Real(0.05), no_load(tw), F); }
     for (int d = 0; d < 2; ++d) { EXPECT_EQ(a.q()[d], b.q()[d]); EXPECT_EQ(a.v()[d], b.v()[d]); }
     for (std::size_t i = 0; i < tw.nodes().size(); ++i) { EXPECT_EQ(a.inertial_force(i)[0], b.inertial_force(i)[0]); }
@@ -284,4 +296,44 @@ TEST(OneModeTower, ALineOnThePeakMovesAndPullsByTheShapeThere)
     OneModeTower bare(standing(t), Real(g));
     EXPECT_EQ(bare.num_attachments(), 1u);
     EXPECT_NEAR(bare.attachment_shape(0), 1.0, 1.0e-14);
+}
+
+TEST(OneModeTower, ABadStepOrANonFiniteLoadIsRefusedNamingTheTower)
+{
+    const Tower tw = standing(swaying());   // named "t"
+    OneModeTower m(tw, Real(g));
+    const P3 F{{Real(1000.0), Real(0.0), Real(0.0)}};
+    std::string msg = erf_gtest::abort_message([&] { m.step(Real(0.0), no_load(tw), F); });
+    EXPECT_NE(msg.find("OneModeTower t:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("positive"), std::string::npos) << msg;
+    EXPECT_FALSE(erf_gtest::abort_message([&] { m.step(Real(-0.1), no_load(tw), F); }).empty());
+    // a NaN pull, as a diverged MoorDyn line would give: refused before the state moves
+    const P3 bad{{std::numeric_limits<Real>::quiet_NaN(), Real(0.0), Real(0.0)}};
+    msg = erf_gtest::abort_message([&] { m.step(Real(0.05), no_load(tw), bad); });
+    EXPECT_NE(msg.find("tower t:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("erf.conductors.moordyn_cfl"), std::string::npos) << msg;
+    EXPECT_EQ(m.q()[0], 0.0);
+    EXPECT_EQ(m.state()[4], 0.0) << "the generalized force of the refused step is not kept";
+    // a NaN drag on one drag node is refused the same way
+    std::vector<Real> drag = no_load(tw);
+    drag[3] = std::numeric_limits<Real>::infinity();
+    EXPECT_NE(erf_gtest::abort_message([&] { m.step(Real(0.05), drag, F); }).find("not finite"), std::string::npos);
+    EXPECT_TRUE(erf_gtest::abort_message([&] { m.step(Real(0.05), no_load(tw), F); }).empty());
+}
+
+TEST(OneModeTower, ATowerThatCannotMoveIsRefusedNamingItsKeys)
+{
+    // a type without a frequency stands still: it has no mode
+    const Tower still = standing(swaying(Real(0.0)));
+    std::string msg = erf_gtest::abort_message([&] { OneModeTower m(still, Real(g)); });
+    EXPECT_NE(msg.find("OneModeTower t:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("erf.conductors.lattice.frequency"), std::string::npos) << msg;
+    // a frequency without a weight has no mass: the tower's own type check refuses it first
+    TowerType light = swaying();
+    light.weight = 0.0;
+    msg = erf_gtest::abort_message([&] { OneModeTower m(standing(light), Real(g)); });
+    EXPECT_NE(msg.find("erf.conductors.lattice.frequency"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("weight"), std::string::npos) << msg;
+    msg = erf_gtest::abort_message([&] { OneModeTower m(standing(swaying()), Real(0.0)); });
+    EXPECT_NE(msg.find("gravitational acceleration"), std::string::npos) << msg;
 }

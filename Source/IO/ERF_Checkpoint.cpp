@@ -196,7 +196,8 @@ ERF::WriteCheckpointFile () const
     }
 
 #ifdef ERF_USE_MOORDYN
-    // the conductor spans' MoorDyn states, statistics and step count, under <chk>/conductors
+    // the conductor lines' MoorDyn states, statistics, step count, time, clock offset, surface_offset
+    // and tower state, under <chk>/conductors
     if (conductors) { conductors->write_checkpoint(checkpointname); }
 #endif
 

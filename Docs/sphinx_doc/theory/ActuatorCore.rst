@@ -90,8 +90,8 @@ regression tests of a body model compare with the force it carries.
    * the part of a kernel below the ground or above the domain top is never
      deposited; a point at height ``h`` loses the fraction ``erfc(h/epsilon)/2``
      of its force, up to half for a point near the ground;
-   * with ``epsilon`` below about two cells the cell sum of a Gaussian is no
-     longer its integral, so the injected momentum is off by a few per cent and
+   * with ``epsilon`` below about two cells the cell sum of a Gaussian differs
+     from its integral, so the injected momentum is off by a few per cent and
      changes with the resolution;
    * on a stretched or terrain-following mesh the cell volumes vary across the
      kernel, which no constant can account for.
@@ -146,6 +146,7 @@ means little.
 Diagnostics files
 -----------------
 
-``open_log`` opens a CSV diagnostics file for writing, creating its directory.
+``open_log`` opens a diagnostics file (CSV or whitespace-separated) for
+writing, creating its directory.
 A fresh run truncates the file; a restarted run appends to what the run it
-continues wrote, and the header is written only when the file is new or empty.
+continues wrote, and the header is written only when the file does not exist yet or is empty.

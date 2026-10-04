@@ -51,7 +51,8 @@ erf.rans_lscale_min        = 1.0
 erf.max_geom_lscale        = 20.0          # 0.1 kappa zi for the 500 m inversion
 erf.theta_ref              = 300.0
 
-amrex.fpe_trap_invalid = 0                 # MoorDyn's initial-condition solver overflows under a trap
+amrex.fpe_trap_invalid = 0                 # AMReX's default; the lines refuse to start with fpe_trap_invalid, _zero or _overflow on
+                                           # (MoorDyn's initial-condition solver overflows)
 erf.v            = 1
 erf.sum_interval = 20
 erf.plot_file_1  = plt

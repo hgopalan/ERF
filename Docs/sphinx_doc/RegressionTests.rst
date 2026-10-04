@@ -733,24 +733,28 @@ Problem Location: `Exec/CanonicalTests/EkmanSpiral`_
 
 .. _`Exec/CanonicalTests/EkmanSpiral`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/EkmanSpiral
 
-Conductor spans
+Conductor lines
 ---------------------------
 ``Conductors_PrescribedWind`` (builds with ``ERF_ENABLE_MOORDYN=ON`` and
-``ERF_MOORDYN_USE_STUB=ON``, ``ERF_ENABLE_FFT=ON`` and MPI, not Windows) hangs a 300 m conductor span (795 kcmil ACSR, 1.5 m of slack, 30 m
+``ERF_MOORDYN_USE_STUB=ON``, ``ERF_ENABLE_FFT=ON`` and MPI, not Windows) hangs
+a single-span conductor line of 300 m (795 kcmil, thousand circular mils, ACSR:
+aluminium conductor, steel reinforced; 1.5 m of slack, 30 m
 above flat ground) in a uniform anelastic flow and blows it with a prescribed
 15 m/s crosswind handed to MoorDyn at every line node for ten steps of 0.5 s.
 The runner ``Tests/RunConductors.cmake`` checks the plotfile against the
 flow's own gold (the span puts nothing into the flow) and the span's log
 ``S1.dat`` (mid-span position, sag, lateral offset, swing angle, end and
-maximum tensions, one row per step) against its committed gold to eight
+maximum tensions, the wind at the middle node, the minimum clearance and the
+span's drag, one row per step) against its committed gold to eight
 significant digits. Label ``conductors``. The gold log was written by the
 bundled stub, whose quasi-static span relaxes to the blowout angle with a
 one-second lag. The real MoorDyn swings the span dynamically about the same
 angle (from rest it overshoots to about 1.7 times the static angle at half a
 swing period), so the test is registered for the stub build only.
 
-``Conductors_FlowWind`` is the coupled case: the same span across a uniform
-15 m/s anelastic crosswind entering through the y-low face (x periodic), with
+``Conductors_FlowWind`` is the coupled case: the same span across a sheared
+anelastic crosswind, v = 15 + 0.1 z m/s, entering through the y-low face
+(x periodic), with
 no prescribed velocity, so the wind handed to MoorDyn each step is ERF's
 velocity sampled at the line's current nodes; the log carries that wind at
 the middle node. In a stub build it is compared with the stub's gold log to
@@ -762,13 +766,14 @@ both share the flow's gold plotfile.
 
 ``Conductors_DragOnFlow`` (and ``Conductors_DragOnFlow_MoorDyn``) is the same
 coupled case with ``drag_on_flow`` on, the three ``conductor_f*`` plot
-variables and node output: besides the span's log and the plotfile, which now
+variables and node output: besides the span's log and the plotfile, which
 carries the source and its small wake and so has a gold per library, the
 runner checks in every row of ``conductors/total_load.dat`` that the
 integrated momentum source equals the force the lines put into the air.
 
 ``Conductors_Restart`` (stub) and ``Conductors_Restart_MoorDyn`` (real
-library) are the restart parity tests of that coupled case: ten steps
+library) are the restart parity tests of ``Conductors_DragOnFlow``, the
+coupled case with ``drag_on_flow`` on: ten steps
 straight, and five steps, a checkpoint and five more from it
 (``Tests/RunRestartParity.cmake``, label ``restart-parity`` as well as
 ``conductors``). The plotfiles at step 10, which carry the flow and the
@@ -778,15 +783,16 @@ digits they print (``DATALOG`` takes several files, separated by spaces, and
 reads a comma-separated table as a whitespace-separated one). Each way the
 restart can go wrong fails it: a line restarted from its still-air shape
 stops the restarted run on MoorDyn's clock, statistics or a step count that
-start over make the logs differ, and a stub that forgot the direction of the
-last wind on its restore moved the blown-out line back into its vertical
-plane.
+start over make the logs differ, and a restored line that lost the direction
+of its last wind would swing back into its vertical plane.
 
 ``Conductors_Circuit`` (stub) and ``Conductors_Circuit_MoorDyn`` (real
-library) are a circuit in the same sheared crosswind: three phases 6 m apart,
-each a section of three 300 m spans hanging from 2.5 m insulator strings at
-two suspension towers, and a steel shield wire 7 m above the middle phase,
-clamped at the towers. The middle phase's middle span, its strings and their
+library) are three parallel phases and a shield wire in the same sheared
+crosswind: four independent lines whose suspension points stand at the same
+x (the towers are points, with no shared lattice towers), the phases 6 m
+apart, each a section of three 300 m spans hanging from 2.5 m insulator
+strings at two suspension towers, and a steel shield wire 7 m above the
+middle phase, clamped at the towers. The middle phase's middle span, its strings and their
 statistics, the shield wire's middle span and the closest-approach
 statistics of two pairs of lines are compared with golds of each library
 (``EXTRA_LOGS`` in ``add_test_conductors``, with ``.gold`` or
@@ -849,10 +855,30 @@ own gold, shared by both libraries. The shield wire's first span, 40 m from the 
 short and taut: the case runs only because each coupling step is iterated.
 
 The golds of the real library come from another machine than the one that
-runs them, so ``RunConductors.cmake`` counts a logged value below 1e-4 as
-zero: a quantity zero by symmetry, such as the drag along a span set square
-to the wind, prints as roundoff that differs between compilers. Every
-quantity the logs carry is many orders larger where it is not zero.
+runs them, so ``RunConductors.cmake`` compares the conductor logs by groups
+of columns (``Tests/ConductorLogGroups.cmake``, read through
+``ERF_DATALOG_GROUPS`` in ``Tests/CompareDataLogs.cmake``): the components of
+one force or moment, the vertical load and leg reactions of one tower, the
+cross-arm displacement of one tower, the drag on a span, the wind at its
+middle node, its mid-span sag and offset, and the mean, rms, minimum and
+maximum of one statistic. Each value of a group must agree to the test's
+significant digits of the largest magnitude in its group in that row, so the
+along-line pull on a suspension tower, a few N left from tens of kN on its
+two sides, is held to the accuracy of the pulls and not to digits that
+roundoff decides. A value in no group counts as zero below 1e-4: a quantity
+zero by symmetry prints as roundoff that differs between compilers, and every
+ungrouped quantity the logs carry is many orders larger where it is not zero.
+``CompareDataLogs_Groups`` (label ``unit``, pure CMake, no ERF run) checks
+the grouped comparison on two rows of a real-library ``towers.dat`` gold: the
+near-cancelling pull agrees, a small cross-arm displacement is compared, and
+a real change of a large component fails.
+
+Two start-up checks have tests that expect the run to stop with a given
+message, on the ``Conductors_FlowWind`` deck: ``Conductors_SpansKeyAbort``
+gives ``erf.conductors.spans`` (not an input; the message names
+``erf.conductors.lines``), and ``Conductors_AttachmentOutsideAbort`` moves
+``end_b`` to x = 1600 m, outside the 1500 m domain (the message names the line
+end and its position).
 
 The ``Linux GCC MoorDyn`` CI workflow
 runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with

@@ -460,6 +460,18 @@ set_tests_properties(CompareDataLogs_SelfTest
     PROCESSORS 1
     LABELS "unit;box-parity")
 
+# The normwise column groups the conductor tests compare their logs with: the near-cancelling
+# along-line pull on a tower must agree within its vector, and a real change of a large component
+# or of a small cross-arm displacement must not. Pure CMake, no ERF run, hence the "unit" label.
+add_test(CompareDataLogs_Groups ${CMAKE_COMMAND}
+    "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test_files/CompareDataLogs_Groups"
+    -P ${PROJECT_SOURCE_DIR}/Tests/CompareDataLogsGroupsSelfTest.cmake)
+set_tests_properties(CompareDataLogs_Groups
+    PROPERTIES
+    TIMEOUT 60
+    PROCESSORS 1
+    LABELS "unit;conductors")
+
 # The wildcard expansion the same scripts rely on to find erf_exec and fcompare in a
 # multi-config build tree.  A resolution that picks the wrong binary, or none at all, only
 # shows up on Windows, and there as a regression test that fails before it starts, so it is
@@ -2324,18 +2336,20 @@ add_test_restart_parity(ObsNudging_Hill_Restart ObsNudging_Hill 10 20
 #=============================================================================
 
 #=============================================================================
-# Conductor spans (MoorDyn lines): a span in a prescribed crosswind
+# Power-line conductors (MoorDyn-C lines): single spans, circuits, towers and transformers,
+# against golds and across restarts, and start-up checks of their inputs
 #=============================================================================
 if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
-  # A conductor span hangs over flat ground in a uniform anelastic flow; the span's log (mid-span
-  # position, sag, offset, swing angle, tensions, the wind handed to MoorDyn at the middle node)
-  # must match its gold to SIGDIGITS digits, and the plotfile the flow's gold, since nothing is
-  # put back into the flow. The bundled stub relaxes to the quasi-static angle while the real
-  # MoorDyn swings about it, so each library has its own gold log (GOLD_LOG) and the stub and
-  # real-library tests share the flow's gold plotfile (PLOT_GOLD_NAME) when nothing goes back into the
-  # flow. TOTALS names the totals file whose source integral is checked; EXTRA_LOGS lists further
-  # logs (space separated), each compared with the gold of its file name followed by GOLD_SUFFIX
-  # (".gold" for the stub, ".moordyn.gold" for the real library).
+  # Run a conductor deck: the log LOG of one span (mid-span position, sag, offset, swing angle,
+  # tensions, the wind handed to MoorDyn at the middle node) must match its gold GOLD_LOG to
+  # SIGDIGITS digits, and the plotfile the gold PLOT_GOLD_NAME: the flow's gold, shared by the stub
+  # and real-library tests, when nothing goes back into the flow, the case's own when the lines'
+  # drag does (drag_on_flow). The bundled stub relaxes to the quasi-static angle while the real
+  # MoorDyn swings about it, so each library has its own gold logs. TOTALS names the totals file
+  # whose source integral is checked; EXTRA_LOGS lists further logs (space separated), each
+  # compared with the gold of its file name followed by GOLD_SUFFIX (".gold" for the stub,
+  # ".moordyn.gold" for the real library). RunConductors.cmake compares the components of one
+  # vector, a tower's loads say, normwise (Tests/ConductorLogGroups.cmake).
   function(add_test_conductors TEST_NAME TEST_FILES_DIR PLTFILE LOG GOLD_LOG SIGDIGITS PLOT_GOLD_NAME)
       cmake_parse_arguments(ATC "" "TOTALS;EXTRA_LOGS;GOLD_SUFFIX" "" ${ARGN})
       setup_test()
@@ -2375,14 +2389,15 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
     # a prescribed 15 m/s crosswind handed to the line at every node, against the stub
     add_test_conductors(Conductors_PrescribedWind Conductors_PrescribedWind "plt00010" "S1.dat"
                         "S1.dat.gold" 8 Conductors_PrescribedWind)
-    # the wind sampled from ERF's 15 m/s crosswind at the line's current nodes, against the stub
+    # the wind sampled from ERF's sheared crosswind (v = 15 m/s at the ground, 45 m/s at 300 m) at
+    # the line's current nodes, against the stub
     add_test_conductors(Conductors_FlowWind Conductors_FlowWind "plt00010" "S1.dat"
                         "S1.dat.gold" 8 Conductors_FlowWind)
     # the lines' drag put back into the flow: the source must integrate to the force on the air
     add_test_conductors(Conductors_DragOnFlow Conductors_DragOnFlow "plt00010" "S1.dat"
                         "S1.dat.gold" 8 Conductors_DragOnFlow TOTALS "conductors/total_load.dat")
   else()
-    # the same coupled case against the real MoorDyn-C: the span swings about the blowout angle;
+    # the same two cases against the real MoorDyn-C: the span swings about the blowout angle;
     # compared to 6 digits, since the line integration is not bit-reproducible across compilers
     add_test_conductors(Conductors_FlowWind_MoorDyn Conductors_FlowWind "plt00010" "S1.dat"
                         "S1.dat.moordyn.gold" 6 Conductors_FlowWind)
@@ -2392,8 +2407,8 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # A circuit: three phases 6 m apart hanging from insulator strings over two suspension towers,
   # and a shield wire clamped above them, across the same sheared crosswind. The middle phase's
   # middle span, its strings and their statistics, the shield wire's middle span and the
-  # closest-approach statistics of two pairs must match their golds; the flow is Conductors_FlowWind's, since nothing goes back
-  # into it. Where along two parallel lines they come closest is decided by millimetres, so the
+  # closest-approach statistics of the pairs P1-P2 and P2-SW must match their golds; the flow is
+  # Conductors_FlowWind's, since nothing goes back into it. Where along two parallel lines they come closest is decided by millimetres, so the
   # location is left to the restart parity (one binary) and the unit tests, not to a gold.
   set(_circuit_logs "P2_insulators.dat P2_insulators_stats.csv SW_span2.dat conductors/separation_P1-P2_stats.csv conductors/separation_P2-SW_stats.csv")
   if(ERF_MOORDYN_USE_STUB)
@@ -2420,8 +2435,9 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
                         "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_terrain_logs}" GOLD_SUFFIX ".gold")
     set(_terrain_restart Conductors_Terrain_Restart)
   else()
-    # four digits: the terrain RANS flow differs between compilers at roundoff and the lines respond
-    # to it, so a span's swing one step in (6.514e-4 deg) differs in the fifth digit on Linux
+    # four digits: the lines start from MoorDyn's stationary initial-condition solve, whose
+    # residual (the swing at time 0, 6.514e-4 deg) differs between compilers in the fifth digit,
+    # and the RANS flow they then sample differs at roundoff
     add_test_conductors(Conductors_Terrain_MoorDyn Conductors_Terrain "plt00010" "conductors/L1_span2.dat"
                         "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_terrain_logs}" GOLD_SUFFIX ".moordyn.gold")
     set(_terrain_restart Conductors_Terrain_Restart_MoorDyn)
@@ -2461,6 +2477,9 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
                         "L1b_span2.dat.gold" 8 Conductors_ImmersedHills EXTRA_LOGS "${_ib_logs}" GOLD_SUFFIX ".gold")
     set(_ib_restart Conductors_ImmersedHills_Restart)
   else()
+    # four digits: the residual of MoorDyn's initial-condition solve and the LES flow differ between
+    # compilers in the fifth digit; the towers' along-line pull at time 0, a few N left of span
+    # pulls of 10 to 20 kN, is held to four digits of its tower's loads (ConductorLogGroups.cmake)
     add_test_conductors(Conductors_ImmersedHills_MoorDyn Conductors_ImmersedHills "plt00010" "conductors/L1b_span2.dat"
                         "L1b_span2.dat.moordyn.gold" 4 Conductors_ImmersedHills EXTRA_LOGS "${_ib_logs}" GOLD_SUFFIX ".moordyn.gold")
     set(_ib_restart Conductors_ImmersedHills_Restart_MoorDyn)
@@ -2470,7 +2489,7 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
       DATALOG_SIGDIGITS 10)
   set_tests_properties(${_ib_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # Restart parity of the coupled case: ten steps straight, and five steps, a checkpoint and five
-  # more from it. The plotfile (the flow and the lines' momentum source) and the span's logs, node
+  # more from it. The plotfile (the flow and the lines' momentum source) and the line's logs, node
   # output, statistics and total load must come out the same; a line restarted from rest, or
   # statistics, step count or logs started over, all show. One test per library.
   if(ERF_MOORDYN_USE_STUB)
@@ -2481,4 +2500,21 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   add_test_restart_parity(${_conductors_restart} Conductors_DragOnFlow 5 10
       DATALOG "S1.dat S1_nodes.dat S1_stats.csv conductors/total_load.dat" DATALOG_SIGDIGITS 10)
   set_tests_properties(${_conductors_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
+  # Start-up checks that stop a run before it starts, on the flow-sampled single span: the
+  # conductor lines are listed in erf.conductors.lines, and giving erf.conductors.spans stops
+  # the run with a message naming erf.conductors.lines
+  add_test_abort(Conductors_SpansKeyAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_FlowWind
+                 Conductors_FlowWind.i
+                 "erf.conductors.spans is not an input: list the conductor lines in erf.conductors.lines"
+                 "erf.conductors.spans=S1")
+  # an attachment outside the domain horizontally (x = 1600 m beyond the 1500 m domain) stops the
+  # run when the line is placed on the ground, naming the line
+  add_test_abort(Conductors_AttachmentOutsideAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_FlowWind
+                 Conductors_FlowWind.i
+                 "erf.conductors.S1.end_b at \\(1600[.0-9]*, 500[.0-9]*\\) lies outside the domain horizontally"
+                 "erf.conductors.S1.end_b=1600. 500. 30.")
+  set_tests_properties(Conductors_SpansKeyAbort Conductors_AttachmentOutsideAbort
+                       PROPERTIES LABELS "regression;conductors")
 endif()

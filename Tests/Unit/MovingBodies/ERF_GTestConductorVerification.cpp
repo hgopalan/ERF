@@ -1,15 +1,23 @@
-// Verification of a conductor span against analytic results, run against the real MoorDyn-C (the
-// bundled stub has no line dynamics, so these tests skip on it). A 300 m span of 795 kcmil ACSR with
-// 1.5 m of slack in air: in a steady crosswind U normal to it, the mean swing angle of the middle
-// node about the chord is the quasi-static blowout angle atan(q / w), q = rho Cd D U^2 / 2 the drag
-// and w the weight per unit length; released after a short gust into still air, it swings at the
-// first out-of-plane frequency of a cable, whose period T = 2 c / sqrt(H / m) does not depend on the
-// sag (Irvine, Cable Structures, 1981), with c the chord, H the horizontal tension and m the mass
-// per unit length; in still air it hangs in the elastic catenary; and in a section over suspension
-// towers the insulator strings swing across the line to the angle of the wind span's load over the
-// weight span's; the pulls of a level span on its dead ends carry its weight between them, with
-// the elastic catenary's horizontal tension; and a suspension tower takes the wind span's load
-// across the line, q L plus the string's own drag, and the weight span's down.
+// Verification of conductor lines against analytic results, run against the real MoorDyn-C (the
+// bundled stub has no line dynamics, so these tests skip on it). The line is a single 300 m span of
+// 795 kcmil (thousand circular mils) ACSR (aluminium conductor, steel reinforced) "Drake" with
+// 1.5 m of slack in air, or a section of three such spans over two suspension towers. q = rho Cd D
+// U^2 / 2 is the drag (N/m) and w the weight (N/m) per unit length; c the chord (m), H the horizontal
+// tension (N), m the mass per unit length (kg/m); the wind span and the weight span of a tower are
+// the lengths of conductor whose wind load and weight it carries.
+//
+// StillAirShapeIsTheElasticCatenary: the still-air sag and end tension of the elastic catenary.
+// MeanSwingIsTheQuasiStaticBlowoutAngle: in a steady crosswind U normal to the span, the mean swing of
+//     the middle node about the chord is atan(q / w).
+// FreeSwingHasTheCableOutOfPlanePeriod: released after a short gust, the span swings with the cable's
+//     first out-of-plane period T = 2 c / sqrt(H / m), which does not depend on the sag (Irvine,
+//     Cable Structures, 1981).
+// SuspensionStringsSwingToTheWindSpanOverWeightSpanAngle: the strings swing across the line to the
+//     angle of the wind span's load over the weight span's.
+// TheDeadEndsCarryTheWeightAndTheCatenarysHorizontalTension: the dead-end pulls of a level span carry
+//     its weight between them, with the elastic catenary's horizontal tension.
+// ASuspensionTowerTakesTheWindSpanAndTheWeightSpan: a tower takes q L plus the string's own drag
+//     across the line, and the weight span's weight down.
 
 #include <algorithm>
 #include <cmath>

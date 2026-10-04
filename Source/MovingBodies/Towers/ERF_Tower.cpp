@@ -1,7 +1,10 @@
+// Tower: drag nodes, line loads and the foundation's reactions.
+
 #include "ERF_Tower.H"
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <utility>
 
 #include <AMReX.H>
@@ -15,9 +18,19 @@ Tower::Tower (std::string name, const TowerType& type, const std::array<Real,3>&
               const std::array<Real,3>& across)
     : m_name(std::move(name)), m_type(type), m_base(base), m_arm_height(arm_height), m_across(across)
 {
+    // preconditions the callers establish: a validated type, a cross-arm above the base, a horizontal unit cross-arm
+    const std::string terr = m_type.validate();
+    if (!terr.empty()) { amrex::Abort("Tower " + m_name + ": " + terr); }
+    if (!(std::isfinite(m_arm_height) && m_arm_height > 0.0)) {
+        amrex::Abort("Tower " + m_name + ": the cross-arm height above the base (" + std::to_string(m_arm_height) + " m) must be positive");
+    }
+    const Real across_norm = std::sqrt(m_across[0] * m_across[0] + m_across[1] * m_across[1] + m_across[2] * m_across[2]);
+    if (!(std::abs(across_norm - Real(1.0)) < Real(1.0e-4) && std::abs(m_across[2]) < Real(1.0e-4))) {
+        amrex::Abort("Tower " + m_name + ": the cross-arm direction must be a horizontal unit vector");
+    }
     const Real phi = m_type.solidity;
     const Real cf = m_type.force_coefficient();
-    // the body up to the cross-arm, tapering, then the peak at the top width
+    // the shaft up to the cross-arm, tapering, then the peak at the top width
     const int n = m_type.segments;
     const Real dz = m_arm_height / n;
     for (int i = 0; i < n; ++i) {
@@ -34,7 +47,7 @@ Tower::Tower (std::string name, const TowerType& type, const std::array<Real,3>&
         }
     }
     m_nbody = static_cast<int>(m_nodes.size());
-    // the cross-arm, centred on the body
+    // the cross-arm, centred on the shaft
     const int na = TowerType::arm_segments;
     const Real da = m_type.arm_length / na;
     for (int i = 0; i < na; ++i) {
@@ -51,7 +64,7 @@ Tower::Tower (std::string name, const TowerType& type, const std::array<Real,3>&
 void Tower::set_motion (const std::vector<Real>& displacement, const std::vector<Real>& velocity, const std::vector<Real>& inertia)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(displacement.size() == 3 * m_nodes.size() && velocity.size() == 3 * m_nodes.size() &&
-                                     inertia.size() == 3 * m_nodes.size(), "Tower::set_motion: 3 values per node are needed");
+                                     inertia.size() == 3 * m_nodes.size(), "Tower::set_motion: 3 values per drag node are needed");
     m_disp = displacement;
     m_vel = velocity;
     m_inertia = inertia;
@@ -63,9 +76,29 @@ std::size_t Tower::add_attachment (const std::array<Real,3>& at)
     return m_attach.size() - 1;
 }
 
+void Tower::set_loads (const std::vector<Real>& force)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(force.size() == 3 * m_nodes.size(), "Tower::set_loads: 3 forces per drag node are needed");
+    m_force = force;
+}
+
 void Tower::set_line_loads (const std::vector<std::array<Real,3>>& force, const std::vector<std::array<Real,3>>& at)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(force.size() == at.size(), "Tower::set_line_loads: one point per force is needed");
+    const bool fits = m_attach.empty() ? force.size() <= 1 : force.size() == m_attach.size();
+    if (!fits) {
+        amrex::Abort("Tower " + m_name + ": " + std::to_string(force.size()) + " line pulls for " + std::to_string(m_attach.size()) +
+                     " attachments; one pull per attachment is needed");
+    }
+    for (std::size_t a = 0; a < force.size(); ++a) {
+        for (int d = 0; d < 3; ++d) {
+            if (!std::isfinite(force[a][d]) || !std::isfinite(at[a][d])) {
+                amrex::Abort("Tower " + m_name + ": the pull of the line at attachment " + std::to_string(a) +
+                             " (0-based) or its point is not finite; MoorDyn's line integration may have diverged: "
+                             "reduce erf.conductors.moordyn_cfl or erf.conductors.moordyn_dt");
+            }
+        }
+    }
     m_line_force = force;
     m_line_at = at;
 }
@@ -86,7 +119,7 @@ std::vector<MemberNode> Tower::current_nodes () const
 
 std::array<Real,3> Tower::arm_displacement () const
 {
-    // the cross-arm's nodes follow the body's nodes
+    // the cross-arm's drag nodes follow the shaft's
     const std::size_t i = static_cast<std::size_t>(m_nbody);
     return {{m_disp[3*i], m_disp[3*i+1], m_disp[3*i+2]}};
 }
@@ -148,7 +181,8 @@ FoundationLoad Tower::foundation () const
         for (const Real sv : {Real(1.0), Real(-1.0)}) {
             const Real x = a * (su * along[0] + sv * across[0]);
             const Real y = a * (su * along[1] + sv * across[1]);
-            // the reactions R_i balance the load: sum R_i = P, sum x_i R_i = M_y, sum y_i R_i = -M_x
+            // the leg compressions R_i (N) balance the load: sum R_i = P, sum x_i R_i = M_y, sum y_i R_i = -M_x,
+            // x_i and y_i the leg offsets in the ERF frame
             L.legs[static_cast<std::size_t>(i++)] = Real(0.25) * L.vertical + (L.moment[1] * x - L.moment[0] * y) / (Real(4.0) * a * a);
         }
     }

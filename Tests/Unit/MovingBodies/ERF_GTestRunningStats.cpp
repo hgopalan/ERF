@@ -1,10 +1,13 @@
 // Running statistics of a body's diagnostics: mean, root mean square, minimum and maximum of
-// the samples since the averaging start, exact for a known sequence, written as a CSV, and
-// carried across a checkpoint round trip.
+// the samples since the averaging start, exact for a known sequence, written as a CSV, carried
+// across a checkpoint round trip; a non-finite sample or a malformed checkpoint aborts, naming
+// the statistics or the file.
 
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -12,6 +15,7 @@
 
 #include <gtest/gtest.h>
 
+#include "ERF_GTestThrowOnAbort.H"
 #include "ERF_RunningStats.H"
 
 namespace {
@@ -77,4 +81,41 @@ TEST(RunningStats, StateRoundTripsThroughACheckpointAndTheFileHasTheRows)
     EXPECT_EQ(line.rfind("3,1,3,thrust,3000000,", 0), 0u) << line;
     ASSERT_TRUE(std::getline(csv, line));
     EXPECT_EQ(line.rfind("3,1,3,power,", 0), 0u) << line;
+}
+
+TEST(RunningStats, ANonFiniteSampleOrAMalformedCheckpointIsRefused)
+{
+    RunningStats s("L1_span1", "out/L1_span1", {"swing", "tension"});
+    s.accumulate(1.0, {Real(3.0), Real(1.0e4)});
+    std::string msg = erf_gtest::abort_message([&] { s.accumulate(2.0, {Real(3.0), std::numeric_limits<Real>::quiet_NaN()}); });
+    EXPECT_NE(msg.find("RunningStats L1_span1"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("tension"), std::string::npos) << msg;
+    EXPECT_EQ(s.num_samples(), 1) << "a refused sample is not counted";
+
+    const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_stats_bad";
+    std::filesystem::create_directories(dir);
+    s.write_state(dir.string());
+    std::string good;
+    {
+        std::ifstream in(dir / "L1_span1_stats.dat");
+        std::stringstream ss;
+        ss << in.rdbuf();
+        good = ss.str();
+    }
+    auto refused = [&] (const std::string& from, const std::string& to) {
+        std::string text = good;
+        const auto at = text.find(from);
+        EXPECT_NE(at, std::string::npos) << from;
+        if (at != std::string::npos) { text.replace(at, from.size(), to); }
+        std::ofstream(dir / "L1_span1_stats.dat", std::ios::trunc) << text;
+        RunningStats b("L1_span1", "out/L1_span1", {"swing", "tension"});
+        const std::string m = erf_gtest::abort_message([&] { b.read_state(dir.string()); });
+        EXPECT_EQ(b.num_samples(), 0) << "a refused checkpoint changes nothing";
+        EXPECT_EQ(b.mean(0), 0.0);
+        return m;
+    };
+    EXPECT_NE(refused("count = 1", "count = -1").find("malformed statistics checkpoint"), std::string::npos);
+    EXPECT_NE(refused("t_last = 1", "t_last = 0.5").find("t_first <= t_last"), std::string::npos);
+    EXPECT_NE(refused("tension", "power").find("does not list tension"), std::string::npos);
+    EXPECT_NE(refused("size = 2", "size = 3").find("holds 3 quantities"), std::string::npos);
 }

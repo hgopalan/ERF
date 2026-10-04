@@ -52,7 +52,7 @@ erf.molec_diff_type = "None"
 erf.les_type        = "Deardorff"
 erf.rans_type       = "None"
 erf.theta_ref       = 300.0
-amrex.fpe_trap_invalid = 0
+amrex.fpe_trap_invalid = 0   # AMReX's default; the lines refuse to start with fpe_trap_invalid, _zero or _overflow on
 erf.v = 1
 erf.sum_interval = 100
 

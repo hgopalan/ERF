@@ -22,7 +22,7 @@ using erf_conductors::closest_segments;
 using P3 = std::array<Real,3>;
 
 namespace {
-constexpr Real tol = std::is_same<Real, float>::value ? Real(1.0e-5) : Real(1.0e-12);
+constexpr Real tol = (std::is_same<Real, float>::value) ? Real(1.0e-5) : Real(1.0e-12);
 void expect_point (const P3& got, const P3& want, const char* what)
 {
     for (int d = 0; d < 3; ++d) { EXPECT_NEAR(got[d], want[d], tol * 100) << what << " component " << d; }
@@ -52,7 +52,7 @@ TEST(ConductorGeometry, TheClosestPointsAreClampedToTheSegments)
     expect_point(e.b, {{3, 0, 0}}, "b");
 }
 
-TEST(ConductorGeometry, ParallelAndDegenerateSegments)
+TEST(ConductorGeometry, ParallelAndDegenerateSegmentsAreMeasuredBetweenTheirNearestPoints)
 {
     // parallel, overlapping: the separation of the lines
     EXPECT_NEAR(closest_segments({{0, 0, 0}}, {{10, 0, 0}}, {{3, 6, 0}}, {{12, 6, 0}}).distance, 6.0, tol);
@@ -87,7 +87,7 @@ const P3 hi{{4.0, 2.5, 106.0}};
 // the search fixes the distance to round-off, but where a stretch of the segment is equally close
 // (alongside a face) the squared distance is flat to round-off over about sqrt(epsilon) of the
 // segment, so the closest point is only that close: 8e-6 x 80 m in double, 3e-4 x 80 m in single
-constexpr Real ptol = std::is_same<Real, float>::value ? Real(0.05) : Real(1.0e-5);
+constexpr Real ptol = (std::is_same<Real, float>::value) ? Real(0.05) : Real(1.0e-5);
 void expect_near_point (const P3& got, const P3& want, const char* what)
 {
     for (int d = 0; d < 3; ++d) { EXPECT_NEAR(got[d], want[d], ptol) << what << " component " << d; }

@@ -24,7 +24,7 @@ ConductorLine::ConductorLine (const LineInputs& s, const ConductorInputs& in, Re
     : m_in(s), m_offset(in.surface_offset), m_rho(in.air_density), m_g(gravity), m_substeps(in.substeps), m_file(input_file),
       m_coupled(in.towers_move(s))
 {
-    write_moordyn_input(m_file, s, in, gravity);
+    if (ParallelDescriptor::IOProcessor()) { write_moordyn_input(m_file, s, in, gravity); }
     ParallelDescriptor::Barrier();   // every rank reads the file the I/O rank wrote
     std::string err;
     m_sys = erf_moordyn::MoorDynSystem::create(m_file, "", in.moordyn_log_level, err);
@@ -47,7 +47,8 @@ ConductorLine::ConductorLine (const LineInputs& s, const ConductorInputs& in, Re
         }
     }
     m_f.assign(m_x.size(), 0.0);
-    // a restored line takes its state from the file below, not from the initial-shape solve
+    // a restored line takes its state from saved_state (loaded at the end of this constructor), not
+    // from the initial-shape solve
     const bool restoring = !saved_state.empty();
     err = m_sys->init(m_x, std::vector<double>(m_x.size(), 0.0), !restoring);
     if (!err.empty()) { Abort("erf.conductors." + s.name + ": " + err); }
@@ -73,8 +74,34 @@ void ConductorLine::save (const std::string& path) const
     m_sys->save(path);
 }
 
+void ConductorLine::check_span (int k) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(k >= 0 && k < num_spans(), "ConductorLine: no such span");
+}
+
+void ConductorLine::check_string (int j) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(j >= 0 && j < num_insulators(), "ConductorLine: no such insulator string");
+}
+
+void ConductorLine::check_node (unsigned node) const
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node < num_nodes(), "ConductorLine: no such node");
+}
+
+void ConductorLine::check_outputs_finite (double time) const
+{
+    std::string err = first_nonfinite(node_positions(), 3, "MoorDyn's position (m) of node");
+    if (err.empty()) { err = first_nonfinite(m_f, 3, "MoorDyn's force (N) on the coupled point of tower index"); }
+    if (!err.empty()) {
+        Abort("erf.conductors." + m_in.name + ": " + err + " at t = " + std::to_string(time) +
+              " s; lower erf.conductors.moordyn_cfl or set erf.conductors.moordyn_dt");
+    }
+}
+
 void ConductorLine::locate (unsigned node, unsigned& line, unsigned& local) const
 {
+    check_node(node);
     const auto it = std::upper_bound(m_first.begin(), m_first.end(), node);
     const auto l = static_cast<unsigned>(it - m_first.begin()) - 1;
     line = l + 1;
@@ -99,6 +126,10 @@ void ConductorLine::set_wind (const std::vector<Real>& uvw, double t)
         Abort("erf.conductors." + m_in.name + ": " + std::to_string(3 * m_nkin) + " wind components are needed, " +
               std::to_string(uvw.size()) + " were given");
     }
+    const std::string err = first_nonfinite(uvw, 3, "the wind (m/s) at kinematics point");
+    if (!err.empty()) {
+        Abort("erf.conductors." + m_in.name + ": " + err + "; the flow on the anchor level holds NaN or Inf");
+    }
     // the fluid acceleration enters MoorDyn's added-mass (Froude-Krylov) load, which in air is
     // smaller than the line's own inertia by the density ratio (about 1e-3): it is left at zero
     std::vector<double> U(uvw.begin(), uvw.end()), Ud(uvw.size(), 0.0);
@@ -117,6 +148,7 @@ void ConductorLine::set_ground_under_nodes (const std::vector<Real>& h)
 
 Real ConductorLine::clearance (unsigned node) const
 {
+    check_node(node);
     const Real ground = m_ground.empty() ? Real(0.0) : m_ground[node];
     return node_position(node)[2] - ground;
 }
@@ -177,6 +209,8 @@ std::array<Real,3> ConductorLine::wind_at_point (unsigned point) const
 
 void ConductorLine::step (double time, double dt)
 {
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dt > 0.0 && std::isfinite(dt) && std::isfinite(time),
+                                     "ConductorLine::step: dt must be positive and finite");
     // MoorDyn returns its own clock in t
     double t = time;
     const double sub = dt / m_substeps;
@@ -186,11 +220,14 @@ void ConductorLine::step (double time, double dt)
     }
     m_clock = t;
     check_clock(time + dt);
+    check_outputs_finite(time + dt);
 }
 
 void ConductorLine::step_coupled (double time, double dt, const std::vector<Real>& displacement, const std::vector<Real>& velocity)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_coupled, "ConductorLine::step_coupled: the line's towers do not move");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dt > 0.0 && std::isfinite(dt) && std::isfinite(time),
+                                     "ConductorLine::step_coupled: dt must be positive and finite");
     if (displacement.size() != m_x.size() || velocity.size() != m_x.size()) {
         Abort("erf.conductors." + m_in.name + ": " + std::to_string(m_x.size()) + " tower displacements and velocities are "
               "needed, " + std::to_string(displacement.size()) + " and " + std::to_string(velocity.size()) + " were given");
@@ -209,6 +246,7 @@ void ConductorLine::step_coupled (double time, double dt, const std::vector<Real
     m_clock = t;
     // where the step left them, for a step that holds them still
     for (std::size_t k = 0; k < m_x.size(); ++k) { m_x[k] += xd[k] * dt; }
+    check_outputs_finite(time + dt);
 }
 
 std::array<Real,3> ConductorLine::coupled_force (int j) const
@@ -258,13 +296,22 @@ std::vector<Real> ConductorLine::conductor_path () const
 
 Real ConductorLine::tension_a (int k) const
 {
+    check_span(k);
     const auto t = m_sys->line_node_tension(static_cast<unsigned>(k) + 1, 0);
     return static_cast<Real>(std::sqrt(t[0]*t[0] + t[1]*t[1] + t[2]*t[2]));
 }
 
-Real ConductorLine::tension_b (int k) const { return static_cast<Real>(m_sys->line_end_tension(static_cast<unsigned>(k) + 1)); }
+Real ConductorLine::tension_b (int k) const
+{
+    check_span(k);
+    return static_cast<Real>(m_sys->line_end_tension(static_cast<unsigned>(k) + 1));
+}
 
-Real ConductorLine::max_tension (int k) const { return static_cast<Real>(m_sys->line_max_tension(static_cast<unsigned>(k) + 1)); }
+Real ConductorLine::max_tension (int k) const
+{
+    check_span(k);
+    return static_cast<Real>(m_sys->line_max_tension(static_cast<unsigned>(k) + 1));
+}
 
 std::array<Real,3> ConductorLine::end_force (int end) const
 {
@@ -350,6 +397,7 @@ std::array<Real,3> ConductorLine::across_direction (int j) const
 
 Real ConductorLine::insulator_swing (int j) const
 {
+    check_string(j);
     const unsigned line = static_cast<unsigned>(num_spans() + j) + 1;
     const auto top = m_sys->line_node_position(line, 0);
     const auto bot = m_sys->line_node_position(line, m_sys->line_num_nodes(line) - 1);
@@ -359,6 +407,7 @@ Real ConductorLine::insulator_swing (int j) const
 
 Real ConductorLine::insulator_swing_across (int j) const
 {
+    check_string(j);
     const unsigned line = static_cast<unsigned>(num_spans() + j) + 1;
     const auto top = m_sys->line_node_position(line, 0);
     const auto bot = m_sys->line_node_position(line, m_sys->line_num_nodes(line) - 1);
@@ -369,6 +418,7 @@ Real ConductorLine::insulator_swing_across (int j) const
 
 Real ConductorLine::insulator_tension (int j) const
 {
+    check_string(j);
     const auto t = m_sys->line_node_tension(static_cast<unsigned>(num_spans() + j) + 1, 0);
     return static_cast<Real>(std::sqrt(t[0]*t[0] + t[1]*t[1] + t[2]*t[2]));
 }

@@ -706,13 +706,14 @@ if(ERF_ENABLE_MOORDYN)
   list(APPEND CMAKE_MESSAGE_CONTEXT "MoorDyn")
   message(STATUS "Configuring MoorDyn")
 
-  # the line coupling lives on the actuator core
+  # the conductor coupling needs the actuator core (Source/MovingBodies/Core): force ERF_ENABLE_MOVING_BODIES on
   set(ERF_ENABLE_MOVING_BODIES ON CACHE BOOL
       "Enable the actuator core for bodies in the flow (Source/MovingBodies/Core)" FORCE)
 
   if(ERF_MOORDYN_USE_STUB)
-    # A stand-in for libmoordyn with the same C API, so the coupling builds and its tests
-    # run where MoorDyn-C is not installed.
+    # A stand-in for libmoordyn implementing the subset of the MoorDyn-C v2 C API that ERF calls,
+    # so the coupling builds and its tests run where MoorDyn-C is not installed; it has no line
+    # dynamics (see Source/MovingBodies/MoorDyn/Stub/ERF_MoorDynStub.cpp).
     message(STATUS "Using the bundled MoorDyn stub library (ERF_MOORDYN_USE_STUB=ON)")
     add_library(erf_moordyn_stub STATIC
       ${PROJECT_SOURCE_DIR}/Source/MovingBodies/MoorDyn/Stub/ERF_MoorDynStub.cpp)

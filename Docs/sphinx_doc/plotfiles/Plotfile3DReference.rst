@@ -1155,6 +1155,38 @@ The following quantities are available only in builds with
 |                             | [1]              |
 +-----------------------------+------------------+
 
+Conductor-line variables
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The following quantities are available only in builds with
+``ERF_ENABLE_MOORDYN`` and only with ``erf.conductors.drag_on_flow = true``;
+otherwise ERF drops them from the plot list (:ref:`sec:Conductors`).
+
++-----------------------------+------------------+
+| Variable                    | Definition       |
++=============================+==================+
+| **conductor_fx**            | x component of   |
+|                             | the conductor    |
+|                             | lines' and       |
+|                             | lattice towers'  |
+|                             | momentum source  |
+|                             | on the air,      |
+|                             | averaged from    |
+|                             | the faces to the |
+|                             | cell centres;    |
+|                             | zero off the     |
+|                             | anchor level     |
+|                             | [N/m^3]          |
++-----------------------------+------------------+
+| **conductor_fy**            | y component, as  |
+|                             | conductor_fx     |
+|                             | [N/m^3]          |
++-----------------------------+------------------+
+| **conductor_fz**            | z component, as  |
+|                             | conductor_fx     |
+|                             | [N/m^3]          |
++-----------------------------+------------------+
+
 Morrison microphysics variables
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -1,23 +1,31 @@
-// Contract of erf_conductors::ConductorLine: a span hangs at the catenary sag in still air
-// with its nodes reported in ERF's frame and the catenary end tensions; its kinematics points
-// start with the line nodes, in ERF's frame; a prescribed crosswind, handed over step by step
-// in lockstep with ERF's clock, blows it out towards the quasi-static angle atan(q / w) and
-// raises the tension; the diagnostics file carries one row per call with the header once; a
-// span created from a saved state is where the saved one is and continues as it does; and a
-// section hangs from its insulator strings, which hang plumb in still air and let the conductor
-// swing further across the wind than clamps at the towers do; the pulls on the two dead ends
-// of a level span in still air balance along the chord and carry the line's weight; and a
-// tower of a level section carries the weight of one span (and its string), the spans either
-// side balancing along the line; the cross-arms of towers that move are MoorDyn's coupled points,
-// which a coupled step moves from where they start at the velocity it is given and which take the
-// line's pull the tower is reported to carry; held still, a coupled point is a fixed one; and a
-// string at a tower in a dip, which the spans either side pull up, is flagged in uplift.
+// Unit tests of erf_conductors::ConductorLine, one conductor line as one MoorDyn system.
+//
+// HangsAtTheCatenarySagInStillAirInERFsFrame: a single-span line hangs at the catenary sag with the
+//     catenary end tensions, its nodes in ERF's frame, its kinematics points starting with the nodes.
+// APrescribedCrosswindBlowsItOutInLockstepWithERFsClock: a crosswind handed over step by step blows
+//     the span out towards the quasi-static angle atan(q / w) and raises the tension.
+// FourSubstepsAdvanceMoorDynsClockByOneStep: four MoorDyn calls per step end on ERF's clock.
+// ANonFiniteWindIsRefusedNamingTheLineAndThePoint: set_wind aborts on NaN, naming the line and the point.
+// DiagnosticsRowsCarryTheHeaderOnce: the diagnostics file has one row per call and one header.
+// ALineCreatedFromASavedStateContinuesIt: a line created from a saved state is where the saved one
+//     is and continues as it does.
+// ASectionHangsFromItsInsulatorStrings: strings hang plumb in still air and let the conductor swing
+//     further across the wind than clamps at the towers do.
+// TheDeadEndsOfALevelSpanArePulledTogetherAndDown: the dead-end pulls balance along the chord and
+//     carry the line's weight.
+// ATowerOfALevelSectionCarriesOneSpansWeight: a tower carries one span's weight (and its string's),
+//     the spans either side balancing along the line.
+// MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull: a coupled step moves the cross-arms at
+//     the velocity it is given, and MoorDyn's force on them is the pull the tower carries.
+// HeldStillACoupledPointIsAFixedOne: a coupled point held still behaves as a fixed one.
+// AStringInADipIsFlaggedInUplift: a string the spans either side pull up is flagged in uplift.
 
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -26,6 +34,7 @@
 
 #include "ERF_ConductorInputs.H"
 #include "ERF_ConductorLine.H"
+#include "ERF_GTestThrowOnAbort.H"
 #include "ERF_MoorDynSystem.H"
 #include "ERF_TowerInputs.H"
 
@@ -36,6 +45,11 @@ using erf_conductors::LineInputs;
 namespace {
 
 constexpr double pi = 3.14159265358979323846;   // MSVC has no M_PI
+// positions of a few hundred metres carry a Real's spacing there: 3e-5 m at 500 m in single precision
+constexpr double ptol = (std::is_same<amrex::Real, float>::value) ? 1.0e-4 : 1.0e-6;
+// the same computation repeated (a restored state, a coupled point held still): roundoff only
+constexpr double ttol = (std::is_same<amrex::Real, float>::value) ? 1.0e-4 : 1.0e-9;
+constexpr double rtol = (std::is_same<amrex::Real, float>::value) ? 1.0e-5 : 1.0e-9;
 
 LineInputs drake_span (const std::string& name)
 {
@@ -83,13 +97,13 @@ TEST(ConductorLine, HangsAtTheCatenarySagInStillAirInERFsFrame)
     EXPECT_GE(span->num_kinematics_points(), 21u);
     const auto a = span->node_position(0);
     const auto b = span->node_position(20);
-    EXPECT_NEAR(a[0], 100.0, 1.0e-6); EXPECT_NEAR(a[1], 500.0, 1.0e-6); EXPECT_NEAR(a[2], 30.0, 1.0e-6);
-    EXPECT_NEAR(b[0], 400.0, 1.0e-6); EXPECT_NEAR(b[1], 500.0, 1.0e-6); EXPECT_NEAR(b[2], 30.0, 1.0e-6);
+    EXPECT_NEAR(a[0], 100.0, ptol); EXPECT_NEAR(a[1], 500.0, ptol); EXPECT_NEAR(a[2], 30.0, ptol);
+    EXPECT_NEAR(b[0], 400.0, ptol); EXPECT_NEAR(b[1], 500.0, ptol); EXPECT_NEAR(b[2], 30.0, ptol);
     EXPECT_NEAR(span->mid_sag(), s.catenary_sag(), 0.25 * s.catenary_sag());
     EXPECT_NEAR(span->mid_offset(), 0.0, 1.0e-3);
     EXPECT_NEAR(span->swing_angle(), 0.0, 1.0e-4);
     const auto m = span->node_position(10);
-    EXPECT_NEAR(m[2], 30.0 - span->mid_sag(), 1.0e-6);
+    EXPECT_NEAR(m[2], 30.0 - span->mid_sag(), ptol);
     // the catenary tension at both ends
     const double w = weight(s, in.air_density);
     const double H = w * 300.0 * 300.0 / (8.0 * s.catenary_sag());
@@ -101,8 +115,8 @@ TEST(ConductorLine, HangsAtTheCatenarySagInStillAirInERFsFrame)
     const auto k = span->kinematics_points();
     const auto n = span->node_positions();
     ASSERT_GE(k.size(), n.size());
-    for (std::size_t i = 0; i < n.size(); ++i) { EXPECT_NEAR(k[i], n[i], 1.0e-9) << "component " << i; }
-    // the MoorDyn input is where the span says
+    for (std::size_t i = 0; i < n.size(); ++i) { EXPECT_NEAR(k[i], n[i], ttol) << "component " << i; }
+    // the MoorDyn input is where the line says
     EXPECT_TRUE(std::filesystem::exists(span->input_file()));
 }
 
@@ -135,14 +149,28 @@ TEST(ConductorLine, APrescribedCrosswindBlowsItOutInLockstepWithERFsClock)
     EXPECT_LT(ten_sum / n, 1.6 * T0);
 }
 
-TEST(ConductorLine, SubstepsReachTheSameClock)
+TEST(ConductorLine, FourSubstepsAdvanceMoorDynsClockByOneStep)
 {
     ConductorInputs in = settings();
     in.substeps = 4;
     auto span = make("substeps", in);
     span->set_wind(uniform(span->num_kinematics_points(), 0.0, 10.0, 0.0), 0.025);
-    span->step(0.0, 0.05);   // four MoorDyn calls of 0.0125 s; the clock check inside would abort otherwise
+    span->step(0.0, 0.05);   // four MoorDyn calls of 0.0125 s
+    EXPECT_NEAR(span->state().clock, 0.05, 1.0e-12) << "MoorDyn's clock after four substeps";
     EXPECT_GT(span->mid_offset(), -1.0e-9);
+}
+
+TEST(ConductorLine, ANonFiniteWindIsRefusedNamingTheLineAndThePoint)
+{
+    const ConductorInputs in = settings();
+    auto line = make("nan_wind", in);
+    std::vector<amrex::Real> uvw = uniform(line->num_kinematics_points(), 0.0, 10.0, 0.0);
+    uvw[3 * 3 + 1] = std::numeric_limits<amrex::Real>::quiet_NaN();
+    const std::string msg = erf_gtest::abort_message([&] { line->set_wind(uvw, 0.025); });
+    EXPECT_NE(msg.find("erf.conductors.nan_wind"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("kinematics point 3 is not finite"), std::string::npos) << msg;
+    // a finite wind is taken
+    EXPECT_TRUE(erf_gtest::abort_message([&] { line->set_wind(uniform(line->num_kinematics_points(), 0.0, 10.0, 0.0), 0.025); }).empty());
 }
 
 TEST(ConductorLine, DiagnosticsRowsCarryTheHeaderOnce)
@@ -166,7 +194,7 @@ TEST(ConductorLine, DiagnosticsRowsCarryTheHeaderOnce)
     EXPECT_EQ(rows, 2);
 }
 
-TEST(ConductorLine, ASpanCreatedFromASavedStateContinuesIt)
+TEST(ConductorLine, ALineCreatedFromASavedStateContinuesIt)
 {
     const ConductorInputs in = settings();
     auto a = make("saved_a", in);
@@ -178,13 +206,13 @@ TEST(ConductorLine, ASpanCreatedFromASavedStateContinuesIt)
         a->step(t, dt);
         t += dt;
     }
-    ASSERT_GT(a->mid_offset(), 1.0) << "the saved span must be blown out, so a restart from rest would show";
+    ASSERT_GT(a->mid_offset(), 1.0) << "the saved line must be blown out, so a restart from rest would show";
     const std::string state = in.diagnostics_dir + "/saved_a.state";
     a->save(state);
 
     const std::string file = in.diagnostics_dir + "/saved_b.moordyn.txt";
     auto b = std::make_unique<ConductorLine>(drake_span("saved_b"), in, 9.81, file, state);
-    // before any step: where the saved span is, with its drag and tensions
+    // before any step: where the saved line is, with its drag and tensions
     ASSERT_EQ(b->num_nodes(), a->num_nodes());
     for (unsigned n = 0; n < a->num_nodes(); ++n) {
         const auto pa = a->node_position(n);
@@ -192,11 +220,11 @@ TEST(ConductorLine, ASpanCreatedFromASavedStateContinuesIt)
         const auto da = a->node_drag(n);
         const auto db = b->node_drag(n);
         for (int d = 0; d < 3; ++d) {
-            EXPECT_NEAR(pb[d], pa[d], 1.0e-9 * std::max(amrex::Real(1.0), std::abs(pa[d]))) << "node " << n << " position " << d;
-            EXPECT_NEAR(db[d], da[d], 1.0e-9 * std::max(amrex::Real(1.0), std::abs(da[d]))) << "node " << n << " drag " << d;
+            EXPECT_NEAR(pb[d], pa[d], rtol * std::max(amrex::Real(1.0), std::abs(pa[d]))) << "node " << n << " position " << d;
+            EXPECT_NEAR(db[d], da[d], rtol * std::max(amrex::Real(1.0), std::abs(da[d]))) << "node " << n << " drag " << d;
         }
     }
-    EXPECT_NEAR(b->tension_a(), a->tension_a(), 1.0e-9 * a->tension_a());
+    EXPECT_NEAR(b->tension_a(), a->tension_a(), rtol * a->tension_a());
     // the same wind from here on: the two stay together, on the same clock
     for (int n = 0; n < 20; ++n) {
         const double gust = 15.0 + 3.0 * std::sin(0.7 * t);
@@ -210,10 +238,10 @@ TEST(ConductorLine, ASpanCreatedFromASavedStateContinuesIt)
         const auto pa = a->node_position(n);
         const auto pb = b->node_position(n);
         for (int d = 0; d < 3; ++d) {
-            EXPECT_NEAR(pb[d], pa[d], 1.0e-9 * std::max(amrex::Real(1.0), std::abs(pa[d]))) << "node " << n << " position " << d;
+            EXPECT_NEAR(pb[d], pa[d], rtol * std::max(amrex::Real(1.0), std::abs(pa[d]))) << "node " << n << " position " << d;
         }
     }
-    EXPECT_NEAR(b->tension_a(), a->tension_a(), 1.0e-9 * a->tension_a());
+    EXPECT_NEAR(b->tension_a(), a->tension_a(), rtol * a->tension_a());
 }
 
 namespace {
@@ -274,8 +302,8 @@ TEST(ConductorLine, ASectionHangsFromItsInsulatorStrings)
     // each span's quantities are its own: the middle node of span k, against the chord between its towers
     for (int k = 0; k < 3; ++k) {
         const auto m = line.node_position(line.span_first_node(k) + 10);
-        EXPECT_NEAR(line.mid_offset(k), m[1] - 500.0, 1.0e-6) << "span " << k;
-        EXPECT_NEAR(line.mid_sag(k), 30.0 - m[2], 1.0e-6) << "span " << k;
+        EXPECT_NEAR(line.mid_offset(k), m[1] - 500.0, ptol) << "span " << k;
+        EXPECT_NEAR(line.mid_sag(k), 30.0 - m[2], ptol) << "span " << k;
     }
     EXPECT_GT(std::abs(line.mid_offset(1) - line.mid_offset(0)), 1.0e-3) << "the middle span hangs from strings at both ends";
     EXPECT_GT(clamped.mid_offset(1), 1.0);
@@ -376,12 +404,11 @@ TEST(ConductorLine, MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull)
             return line.node_position(ins > 0.0 ? string_top : line.span_first_node(j + 1));
         };
         // positions 500 m from the origin carry a Real's spacing there: 3e-5 m in single precision
-        const double ptol = std::is_same<amrex::Real, float>::value ? 1.0e-4 : 1.0e-9;
         const auto p1 = at_tower(0), p2 = at_tower(1);
-        EXPECT_NEAR(p1[0], 400.0, ptol) << name;
-        EXPECT_NEAR(p1[1], 500.02, ptol) << name << ": moved 0.2 m/s for 0.1 s";
-        EXPECT_NEAR(p1[2], 30.0, ptol) << name;
-        EXPECT_NEAR(p2[1], 500.0, ptol) << name;
+        EXPECT_NEAR(p1[0], 400.0, ttol) << name;
+        EXPECT_NEAR(p1[1], 500.02, ttol) << name << ": moved 0.2 m/s for 0.1 s";
+        EXPECT_NEAR(p1[2], 30.0, ttol) << name;
+        EXPECT_NEAR(p2[1], 500.0, ttol) << name;
         // the force MoorDyn hands back on each coupled point is the pull the tower is reported to carry
         for (int j = 0; j < 2; ++j) {
             const auto f = line.coupled_force(j), F = line.tower_force(j);
@@ -391,7 +418,7 @@ TEST(ConductorLine, MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull)
         }
         // a step that holds the towers keeps the cross-arm where the coupled step left it
         line.step(0.1, 0.1);
-        EXPECT_NEAR(at_tower(0)[1], 500.02, ptol) << name;
+        EXPECT_NEAR(at_tower(0)[1], 500.02, ttol) << name;
     }
 }
 
@@ -413,7 +440,7 @@ TEST(ConductorLine, HeldStillACoupledPointIsAFixedOne)
     }
     for (unsigned i = 0; i < fixed.num_nodes(); ++i) {
         const auto a = coupled.node_position(i), b = fixed.node_position(i);
-        for (int d = 0; d < 3; ++d) { EXPECT_NEAR(a[d], b[d], 1.0e-9) << "node " << i << " dir " << d; }
+        for (int d = 0; d < 3; ++d) { EXPECT_NEAR(a[d], b[d], ttol) << "node " << i << " dir " << d; }
     }
     for (int j = 0; j < 2; ++j) {
         const auto a = coupled.tower_force(j), b = fixed.tower_force(j);
