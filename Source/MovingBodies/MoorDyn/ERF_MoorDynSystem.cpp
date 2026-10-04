@@ -286,4 +286,18 @@ void MoorDynSystem::save (const std::string& path) { check(MoorDyn_Save(m_sys, p
 
 void MoorDynSystem::load (const std::string& path) { check(MoorDyn_Load(m_sys, path.c_str()), "MoorDyn_Load"); }
 
+std::vector<std::uint64_t> MoorDynSystem::serialize () const
+{
+    std::size_t bytes = 0;
+    check(MoorDyn_Serialize(m_sys, &bytes, nullptr), "MoorDyn_Serialize");
+    std::vector<std::uint64_t> data((bytes + sizeof(std::uint64_t) - 1) / sizeof(std::uint64_t));
+    check(MoorDyn_Serialize(m_sys, nullptr, data.data()), "MoorDyn_Serialize");
+    return data;
+}
+
+void MoorDynSystem::deserialize (const std::vector<std::uint64_t>& data)
+{
+    check(MoorDyn_Deserialize(m_sys, data.data()), "MoorDyn_Deserialize");
+}
+
 } // namespace erf_moordyn

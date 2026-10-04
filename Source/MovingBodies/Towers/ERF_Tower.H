@@ -74,13 +74,25 @@ public:
     std::array<amrex::Real,3> total_force () const;
     std::array<amrex::Real,3> base_moment () const;
 
-    /** Hand over the pull of the lines on the tower (N), applied where they hang from it. */
+    /**
+     * Add a point a line hangs from (where it stands unloaded), returning its index: a circuit's
+     * phases and shield wire each hang from their own point of one tower. A tower with none takes
+     * its lines at the centre of the cross-arm.
+     */
+    std::size_t add_attachment (const std::array<amrex::Real,3>& at);
+    /** The points the lines hang from, where they stand unloaded. */
+    const std::vector<std::array<amrex::Real,3>>& attachments () const { return m_attach; }
+    /** Hand over the pull of each line on the tower (N), applied where it hangs from it now (one per attachment). */
+    void set_line_loads (const std::vector<std::array<amrex::Real,3>>& force, const std::vector<std::array<amrex::Real,3>>& at);
+    /** The same for a tower with a single line. */
     void set_line_load (const std::array<amrex::Real,3>& force, const std::array<amrex::Real,3>& at)
     {
-        m_line_force = force;
-        m_line_at = at;
+        set_line_loads({force}, {at});
     }
-    const std::array<amrex::Real,3>& line_force () const { return m_line_force; }
+    /** The pull of every line on the tower together (N). */
+    std::array<amrex::Real,3> line_force () const;
+    /** The pull of each line, one per attachment (N). */
+    const std::vector<std::array<amrex::Real,3>>& line_forces () const { return m_line_force; }
     /**
      * The foundation's load from the wind's drag and the lines' pull together, with the tower's
      * weight and, for a tower that moves, the inertial forces of its nodes (the reactions balance
@@ -103,8 +115,9 @@ private:
     std::vector<amrex::Real> m_disp;      //!< 3 per node: the displacement from where it stands unloaded
     std::vector<amrex::Real> m_vel;       //!< 3 per node
     std::vector<amrex::Real> m_inertia;   //!< 3 per node: minus mass times acceleration
-    std::array<amrex::Real,3> m_line_force{{0.0, 0.0, 0.0}};
-    std::array<amrex::Real,3> m_line_at{{0.0, 0.0, 0.0}};
+    std::vector<std::array<amrex::Real,3>> m_attach;       //!< where the lines hang from, unloaded
+    std::vector<std::array<amrex::Real,3>> m_line_force;   //!< per line: its pull
+    std::vector<std::array<amrex::Real,3>> m_line_at;      //!< per line: where it pulls now
 };
 
 } // namespace erf_towers

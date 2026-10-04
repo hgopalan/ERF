@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include <AMReX_FArrayBox.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_REAL.H>
@@ -48,6 +49,12 @@ public:
      */
     void set_ground (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom,
                      const std::string& restart_chkdir = "");
+    /**
+     * Take the terrain's height from a surface rather than from the bottom of the mesh: an
+     * immersed terrain stands on a flat mesh. surface holds the height (m) at the nodes of geom's
+     * cells, x and y, as ERF's terrain reader fills it (k = 0, any z index); call before set_ground().
+     */
+    void set_ground_surface (const amrex::FArrayBox& surface, const amrex::Geometry& geom);
     bool ground_set () const { return m_ground_set; }
     /** Whether set_ground() continued the spans from a checkpoint. */
     bool restored () const { return m_restored; }
@@ -96,6 +103,8 @@ public:
     const std::vector<erf_conductors::Closest>& transformer_clearances () const { return m_tclear; }
     /** The lattice towers of the lines with a tower_type, with the wind's last load on their members. */
     const std::vector<erf_towers::Tower>& towers () const { return m_towers; }
+    /** The lines hanging from each tower, in the order of its attachments: (line, tower of that line from 0). */
+    const std::vector<std::vector<std::pair<std::size_t,int>>>& tower_lines () const { return m_tower_lines; }
     /** Each tower's structural model, null for a tower that stands still. */
     const std::vector<std::unique_ptr<erf_towers::TowerModel>>& tower_models () const { return m_models; }
     /**
@@ -104,6 +113,17 @@ public:
      * MoorDyn moves their cross-arms from where they were to where they are now.
      */
     static constexpr int coupling_steps_per_period = 20;
+    /**
+     * Each coupling step is iterated until the lines' pull on the towers at its end changes by less
+     * than coupling_tolerance of the largest pull, at most coupling_max_iterations times, starting
+     * from the relaxation factor coupling_initial_relaxation (Aitken's method adapts it).
+     */
+    static constexpr double coupling_tolerance = 1.0e-4;
+    static constexpr int coupling_max_iterations = 50;
+    static constexpr double coupling_initial_relaxation = 0.5;
+    /** The most iterations a coupling step took in the last step of the anchor level, and how many did not converge. */
+    int coupling_iterations () const { return m_coupling_iterations; }
+    int coupling_unconverged () const { return m_coupling_unconverged; }
 
     int anchor_level () const { return m_anchor; }
     const ConductorInputs_t& inputs () const { return m_in; }
@@ -124,6 +144,9 @@ private:
     /** Abort, naming the span and the node, when a line node lies outside the domain (periodic directions wrap). */
     void check_nodes_in_domain (const erf_conductors::ConductorSpan& span, const std::vector<amrex::Real>& pos,
                                 const amrex::Geometry& geom) const;
+    /** The terrain height under each point (3 per point): the surface's when one was given, else the mesh's bottom. */
+    void ground_heights (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom, const std::vector<amrex::Real>& pos,
+                         std::vector<amrex::Real>& h) const;
     /** Read the terrain height under each node of every span (the k = 0 node plane, or the domain floor). */
     void update_ground_under_nodes (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
     /** Spread the lines' drag on the air into the face momentum sources, and record their integral. */
@@ -166,12 +189,15 @@ private:
     /** Hand tower t its model's motion. */
     void move_tower (std::size_t t);
     /**
-     * Advance a line whose towers move by dt from time, in coupling steps: each tower advances under
-     * its members' drag and the lines' pull, then MoorDyn moves its cross-arms there.
+     * Advance the lines of a group whose towers move by dt from time, in coupling steps: each tower
+     * advances under its members' drag and every line's pull, then MoorDyn moves each line's points
+     * on the towers there. Lines that share towers form one group.
      */
-    void step_moving_line (std::size_t line, double time, double dt);
-    /** Hand each tower the pull of its line where it hangs from the tower, as the line is now. */
+    void step_moving_group (const std::vector<std::size_t>& lines, double time, double dt);
+    /** Hand each tower the pull of its lines where they hang from it, as the lines are now. */
     void load_towers_with_lines ();
+    /** The same for tower t. */
+    void load_tower_with_lines (std::size_t t);
     /** Append a row of the towers' drag and base moment to <diagnostics_dir>/towers.dat; header when first. */
     void write_towers (double time, bool first) const;
     /** The logs a restart continues. */
@@ -196,8 +222,14 @@ private:
     std::vector<erf_conductors::Closest> m_tclear;                  //!< per transformer: the closest conductor, last
     std::vector<erf_actuator::RunningStats> m_tstats;               //!< per transformer: its load and clearance
     std::vector<erf_towers::Tower> m_towers;                        //!< the lines' lattice towers, line by line
-    std::vector<std::pair<std::size_t,int>> m_tower_of;             //!< per tower: its line and its index on it (from 0)
-    std::vector<std::size_t> m_first_tower;                         //!< per line: the index of its first tower
+    std::vector<std::vector<std::pair<std::size_t,int>>> m_tower_lines;   //!< per tower: (line, its tower index) per attachment
+    std::vector<std::vector<std::pair<std::size_t,std::size_t>>> m_line_towers;   //!< per line: (tower, attachment) per tower of the line
+    std::vector<std::vector<std::size_t>> m_groups;                 //!< lines that step together: those sharing towers
+    int m_coupling_iterations{0};                                   //!< the most iterations of a coupling step, this step
+    int m_coupling_unconverged{0};                                  //!< coupling steps that did not converge, this step
+    bool m_coupling_warned{false};
+    std::unique_ptr<amrex::FArrayBox> m_surface;                    //!< the terrain's height at the nodes, for an immersed terrain
+    amrex::Geometry m_surface_geom;
     std::vector<std::unique_ptr<erf_towers::TowerModel>> m_models;  //!< per tower: its structural model, null when it stands still
     std::vector<std::vector<amrex::Real>> m_tower_wind;             //!< per tower: the wind at its nodes, held for the step
     std::unique_ptr<erf_towers::MemberAero> m_aero;                 //!< the members' aerodynamics

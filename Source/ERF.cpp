@@ -1976,6 +1976,15 @@ ERF::InitData_post ()
     // and with drag_on_flow their drag on the air is spread again as it was at the checkpoint
     if (conductors && !conductors->ground_set()) {
         const int lev = conductors->anchor_level();
+        if (solverChoice.terrain_type == TerrainType::ImmersedForcing) {
+            // an immersed terrain stands on a flat mesh: the lines take the terrain's height from the
+            // surface the immersed boundary was built from, at the nodes of the anchor level
+            Box terrain_bx(surroundingNodes(geom[lev].Domain()));
+            terrain_bx.grow(3);
+            FArrayBox surface(makeSlab(terrain_bx, 2, 0), 1, The_Pinned_Arena());
+            prob->init_terrain_surface(geom[lev], surface, Real(0.0));
+            conductors->set_ground_surface(surface, Geom(lev));
+        }
         conductors->set_ground(z_phys_nd[lev].get(), Geom(lev), restart_chkfile);
         conductors->restore_sources(lev, vars_new[lev][Vars::xvel], z_phys_nd[lev].get(), detJ_cc[lev].get(), Geom(lev));
     }

@@ -83,6 +83,20 @@ where :math:`q_i = \rho C_d D_i U^2 / 2` is the wind load per unit length of
 the string of length :math:`L_i` and diameter :math:`D_i`, and :math:`W_i` its
 weight net of buoyancy.
 
+A string takes only the weight span: a span strung to the horizontal tension
+:math:`H` pulls down on its end by :math:`w h / 2 + H \Delta z / h`, with
+:math:`h` its horizontal length and :math:`\Delta z` the height of the end
+above the other, so a tower in a dip, the spans either side rising away from
+it, can be pulled up. Its string then carries none of the conductor and flips
+over the cross-arm, the line slackening on either side; in practice such a
+point needs a strain tower or a taller one. The start-up log warns, naming the
+line and the tower, about every string that carries less than a tenth of the
+weight of the half spans either side in still air. Against the real MoorDyn, a
+section whose dead ends stand 80 m above its two towers, strung to 20 kN (each
+span rising 80 m over 300 m pulls up 5.3 kN a side against 2.4 kN of weight),
+flags both strings, and a level section neither, its strings carrying one
+span's weight each.
+
 Lockstep with ERF
 -----------------
 
@@ -206,6 +220,23 @@ once they are placed. The attachments must lie inside the domain.
 ``t1``, ``t2``, ..., ``b``) with the terrain height found under it and its
 resulting absolute height, and each transformer (point ``transformer``) with
 the terrain height under its centre and the height of its top.
+
+With an immersed terrain (``erf.terrain_type = ImmersedForcing``) the mesh is
+flat and the hills are solid cells inside it, so the mesh's bottom says nothing
+about the ground. The lines then take the terrain's height from the surface the
+immersed boundary is built from (``erf.terrain_file_name`` or the problem's
+own terrain, at the nodes of the anchor level), bilinear between its nodes as on
+a fitted mesh's bottom: the ends, the towers, the transformers and the ground
+under every node for the clearance. The wind is sampled at the nodes' absolute
+heights, which on the flat mesh are the mesh's own. Placed on an immersed ramp,
+a section and its towers stand exactly where they stand on the same ramp as a
+fitted mesh. A precursor run on the flat mesh can therefore seed a run over
+immersed hills from its checkpoint. An anelastic run takes no acoustic substeps,
+so its immersed forcing must act on the slow step (``erf.immersed_forcing_substep``
+false, the default for anelastic runs), and the point-implicit form
+(``erf.if_implicit_drag = true``) keeps it stable at the flow's step: explicitly,
+the drag on a solid cell, :math:`C_d |u| / \Delta z`, about 60 s\ :sup:`-1` for 20
+m/s on 16 m cells, is far beyond a 0.3 s step.
 
 Drag on the flow
 ----------------
@@ -349,6 +380,18 @@ side). The towers carry the wind's drag on their members and the pull of the
 line hanging from them, and stand on a foundation of four footings; they are
 rigid unless their type has a ``frequency`` (see `Moving towers`_).
 
+A circuit's phases and its shield wire hang from one row of towers: a line
+with ``share_towers = <line>`` hangs from the towers of that line, which has
+the ``tower_type``, each at its own point on them, its ``towers`` points. The
+phases sit across the cross-arm and the shield wire on the ``peak`` above it;
+a point off the tower (further from its axis than half the cross-arm, or above
+its top) stops the run naming the line and the tower. A shared tower stands
+under the owning line's point, and the other lines' points are placed above
+its base, not above the ground under each point, so that a cross-arm on a slope
+stays level. The tower takes each line's pull at its own point, the
+foundation all of them, and the lines that share a moving tower step with it
+together.
+
 Each member is cut into drag nodes at the middle of equal segments
 (``segments`` up the body, four along the arm). A node stands for a length
 :math:`L` of member with axis :math:`\mathbf{e}`, and the wind loads it as a
@@ -481,15 +524,31 @@ integrated exactly, so any step is stable. The tower does not twist, rise or
 sink, and its weight does not add to the overturning as it leans
 (:math:`P`-:math:`\Delta`).
 
-A line whose towers move steps in coupling steps, at least
-``substeps`` and at least 20 over the period of its fastest tower. In each, every
-tower advances first, under its members' drag and the line's pull from the
-end of MoorDyn's last call; then MoorDyn moves the cross-arms from where they
-were to where the towers have taken them, at a constant velocity over the
-call (MoorDyn moves a coupled point linearly), and hands back their pull. The
-members' drag is found again in every coupling step from the wind of the ERF
-step and the members' current velocity, so the wind damps the sway: a
-member moving with the wind feels less of it. The foundation takes the loads
+A line whose towers move steps in coupling steps, at least ``substeps`` and
+at least 20 over the period of its fastest tower; lines that share towers step
+together. In each, every tower advances under its members' drag and the mean of
+the lines' pull at the start and at the end of the coupling step; then MoorDyn
+moves each line's points on the towers from where they were to where the towers
+have taken them, at a constant velocity over the call (MoorDyn moves a coupled
+point linearly), and hands back their pull. The pull at the end is not known
+before MoorDyn's call, so the coupling step is iterated: the lines' MoorDyn
+states and the towers' are kept at its start and restored for each iteration
+(MoorDyn's in-memory serialization), and the estimate of the end pull is
+updated with Aitken's relaxation until it changes by less than
+:math:`10^{-4}` of the largest pull (at most 50 iterations). A single exchange,
+the towers stepping with the pull from the end of the last call, is only
+conditionally stable: a short, nearly taut span pulls back in milliseconds,
+and a pull that lags a coupling step acts on the tower as negative damping,
+:math:`k h / 2` for a span of stiffness :math:`k` and a step :math:`h`, which
+outgrows the tower's own damping once :math:`k` exceeds the tower's stiffness.
+Iterated, the coupling is the implicit one; it takes about four iterations
+where the towers carry strings and a clamped shield wire, and one once they are
+still. ``<diagnostics_dir>/coupling.dat`` logs, every ``diagnostics_int``
+steps, the most iterations a coupling step took and how many did not converge
+(the run warns once and goes on with the last iterate). The members' drag is
+found again in every coupling step from the wind of the ERF step and the
+members' current velocity, so the wind damps the sway: a member moving with the
+wind feels less of it. The foundation takes the loads
 less the inertia of the nodes (each node's mass times its acceleration), so
 a tower swaying freely still loads its footings. MoorDyn's pull on a coupled
 point leaves out the inertia of the line's end node, a few kilograms against
@@ -524,7 +583,10 @@ velocity times the step, and a coupled point held still is a fixed one to
 :math:`10^{-9}` m. In a 10 m/s crosswind the towers of a clamped section
 settle 2.6 mm downwind, where their stiffness balances the 4023 N of drag on
 the body (weighted by the shape) and the line's pull of 672 N; that pull is
-within 2 % of the rigid towers'. On the moving-towers test case the towers
+within 2 % of the rigid towers'. A circuit's shield wire clamped 40 m from
+its dead end to the peak of a tower at 2 Hz with 2 % damping, in the same wind,
+settles at 4 mm when the coupling steps are iterated; with a single exchange per
+coupling step the tower is still growing through 18 mm after 15 s. On the moving-towers test case the towers
 bend at 1.67 Hz (2 Hz lowered by footings of :math:`10^9` N m/rad) and the
 hilltop tower leans about 3 cm in its 25 m/s wind.
 
@@ -536,26 +598,41 @@ draws four hills of 87 to 99 m on a 3 km by 2 km domain, six transformers
 (three on hilltops, three on flat ground) and the five lines of a minimum
 spanning tree between them, each a section of three spans on insulator
 strings with lattice towers placed for ground clearance, all strung to 20 kN, and a
-neutral log-law inflow of 18 m/s at 30 m. The k-equation RANS flow spins up
+neutral log-law inflow of 18 m/s at 30 m. A tower in a dip, which the spans
+either side would pull up, is raised until the line weighs on it: four of the
+ten stand 36 to 46 m tall rather than 30 m. The k-equation RANS flow spins up
 for 600 s (1.2 million cells), then the lines run 120 s from its checkpoint
 with the real MoorDyn. The wind 30 m above the ground speeds up to about
 25 m/s over the hilltops and slows in their lee. The lines settle within
-about 30 s: the spans running across the wind blow out up to 3.3 m at
-mid-span (swings of 27 to 29 degrees), the one running along it barely
-moves (2 degrees), and the transformers' horizontal loads settle between
-7.2 kN (three lines from different sides) and 21.3 kN (two lines at an
-angle), under their 25 kN allowable. The lattice towers (6 m base, 1.5 m
-top, solidity 0.2, 12 m cross-arm) carry 18.7 to 20.6 kN of wind drag on the
-hilltops and 6.9 to 9.6 kN below them, the speed-up over the hills raising
-the drag about two and a half times. With the line's pull and a 60 kN tower
-weight on 6 m footings, only the hilltop towers lift a footing, by 11 to
-16 kN (the allowable is 50 kN), their worst legs carrying about 51 kN in
-compression against 29 to 33 kN below the hills. The towers bend, at 1.67 Hz
-(2 Hz on footings of :math:`10^9` N m/rad): the hilltop ones settle leaning
-23 to 25 mm downwind, the others 10 to 13 mm; the sudden start overshoots to
-30 mm and briefly lifts the hilltop footings by up to 23 kN, the sway's
-inertia included. With a steady RANS wind the
-lines hold a steady blowout; their gust response needs a turbulent inflow.
+about 30 s, every span at 20 to 22 kN: the spans running across the wind blow
+out up to 2.3 m at mid-span (swings of 12 to 22 degrees), the one running along
+it barely moves (2 degrees), and the transformers' horizontal loads settle
+between 10.8 kN (three lines from different sides) and 22.1 kN, under their
+25 kN allowable. The lattice towers (6 m base, 1.5 m top, solidity 0.2, 12 m
+cross-arm) carry 18.7 to 20.6 kN of wind drag on the hilltops, 10.5 to 15 kN on
+the raised towers and about 7 kN on the 30 m towers on flat ground. With the
+line's pull and a 60 kN tower weight on 6 m footings, the towers on the hills
+and the raised ones lift a footing by 11 to 22 kN (the allowable is 50 kN),
+their worst legs carrying 42 to 53 kN in compression against 29 kN on flat
+ground. The towers bend, at 1.67 Hz (2 Hz on footings of :math:`10^9` N
+m/rad), and settle leaning 20 to 32 mm downwind, 10 mm on flat ground. With a
+steady RANS wind the lines hold a steady blowout; their gust response needs a
+turbulent inflow.
+
+The same lines in a turbulent wind (``les/`` in the same directory): a periodic
+precursor over flat land (Deardorff LES, 16 m cells, 3072 by 1536 by 768 m,
+:math:`z_0` = 0.1 m, :math:`u_*` about 1 m/s) spins up for 7200 s and writes
+boundary planes every 1.5 s; a run over three immersed hills restarts from its
+checkpoint and takes its inflow from the planes, with three circuits (three
+phases and a shield wire each, 12 lines) on five shared towers that bend. Over
+1500 s of statistics the wind at the conductors' middles peaks about 1.3 times
+its mean (16.6 and 21.4 m/s on the line across the wind); that line swings 15
+degrees on average and 22 at its peaks, the lines along the wind 3 and 6; the
+conductors' tension moves by about 1 %, the strings taking up the swing; the
+towers' sway and base shear peak at 1.4 to 2 times their means, up to 35 mm and
+20 kN; and the footings' uplift varies most, a tower lifting 9 kN on average
+reaching 33 kN in a gust. Each coupling step converges in at most four
+iterations.
 
 Restart
 -------
