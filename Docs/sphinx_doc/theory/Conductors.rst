@@ -83,6 +83,20 @@ where :math:`q_i = \rho C_d D_i U^2 / 2` is the wind load per unit length of
 the string of length :math:`L_i` and diameter :math:`D_i`, and :math:`W_i` its
 weight net of buoyancy.
 
+A string takes only the weight span: a span strung to the horizontal tension
+:math:`H` pulls down on its end by :math:`w h / 2 + H \Delta z / h`, with
+:math:`h` its horizontal length and :math:`\Delta z` the height of the end
+above the other, so a tower in a dip, the spans either side rising away from
+it, can be pulled up. Its string then carries none of the conductor and flips
+over the cross-arm, the line slackening on either side; in practice such a
+point needs a strain tower or a taller one. The start-up log warns, naming the
+line and the tower, about every string that carries less than a tenth of the
+weight of the half spans either side in still air. Against the real MoorDyn, a
+section whose dead ends stand 80 m above its two towers, strung to 20 kN (each
+span rising 80 m over 300 m pulls up 5.3 kN a side against 2.4 kN of weight),
+flags both strings, and a level section neither, its strings carrying one
+span's weight each.
+
 Lockstep with ERF
 -----------------
 
@@ -584,26 +598,41 @@ draws four hills of 87 to 99 m on a 3 km by 2 km domain, six transformers
 (three on hilltops, three on flat ground) and the five lines of a minimum
 spanning tree between them, each a section of three spans on insulator
 strings with lattice towers placed for ground clearance, all strung to 20 kN, and a
-neutral log-law inflow of 18 m/s at 30 m. The k-equation RANS flow spins up
+neutral log-law inflow of 18 m/s at 30 m. A tower in a dip, which the spans
+either side would pull up, is raised until the line weighs on it: four of the
+ten stand 36 to 46 m tall rather than 30 m. The k-equation RANS flow spins up
 for 600 s (1.2 million cells), then the lines run 120 s from its checkpoint
 with the real MoorDyn. The wind 30 m above the ground speeds up to about
 25 m/s over the hilltops and slows in their lee. The lines settle within
-about 30 s: the spans running across the wind blow out up to 3.3 m at
-mid-span (swings of 27 to 29 degrees), the one running along it barely
-moves (2 degrees), and the transformers' horizontal loads settle between
-7.2 kN (three lines from different sides) and 21.3 kN (two lines at an
-angle), under their 25 kN allowable. The lattice towers (6 m base, 1.5 m
-top, solidity 0.2, 12 m cross-arm) carry 18.7 to 20.6 kN of wind drag on the
-hilltops and 6.9 to 9.6 kN below them, the speed-up over the hills raising
-the drag about two and a half times. With the line's pull and a 60 kN tower
-weight on 6 m footings, only the hilltop towers lift a footing, by 11 to
-16 kN (the allowable is 50 kN), their worst legs carrying about 51 kN in
-compression against 29 to 33 kN below the hills. The towers bend, at 1.67 Hz
-(2 Hz on footings of :math:`10^9` N m/rad): the hilltop ones settle leaning
-23 to 25 mm downwind, the others 10 to 13 mm; the sudden start overshoots to
-30 mm and briefly lifts the hilltop footings by up to 23 kN, the sway's
-inertia included. With a steady RANS wind the
-lines hold a steady blowout; their gust response needs a turbulent inflow.
+about 30 s, every span at 20 to 22 kN: the spans running across the wind blow
+out up to 2.3 m at mid-span (swings of 12 to 22 degrees), the one running along
+it barely moves (2 degrees), and the transformers' horizontal loads settle
+between 10.8 kN (three lines from different sides) and 22.1 kN, under their
+25 kN allowable. The lattice towers (6 m base, 1.5 m top, solidity 0.2, 12 m
+cross-arm) carry 18.7 to 20.6 kN of wind drag on the hilltops, 10.5 to 15 kN on
+the raised towers and about 7 kN on the 30 m towers on flat ground. With the
+line's pull and a 60 kN tower weight on 6 m footings, the towers on the hills
+and the raised ones lift a footing by 11 to 22 kN (the allowable is 50 kN),
+their worst legs carrying 42 to 53 kN in compression against 29 kN on flat
+ground. The towers bend, at 1.67 Hz (2 Hz on footings of :math:`10^9` N
+m/rad), and settle leaning 20 to 32 mm downwind, 10 mm on flat ground. With a
+steady RANS wind the lines hold a steady blowout; their gust response needs a
+turbulent inflow.
+
+The same lines in a turbulent wind (``les/`` in the same directory): a periodic
+precursor over flat land (Deardorff LES, 16 m cells, 3072 by 1536 by 768 m,
+:math:`z_0` = 0.1 m, :math:`u_*` about 1 m/s) spins up for 7200 s and writes
+boundary planes every 1.5 s; a run over three immersed hills restarts from its
+checkpoint and takes its inflow from the planes, with three circuits (three
+phases and a shield wire each, 12 lines) on five shared towers that bend. Over
+1500 s of statistics the wind at the conductors' middles peaks about 1.3 times
+its mean (16.6 and 21.4 m/s on the line across the wind); that line swings 15
+degrees on average and 22 at its peaks, the lines along the wind 3 and 6; the
+conductors' tension moves by about 1 %, the strings taking up the swing; the
+towers' sway and base shear peak at 1.4 to 2 times their means, up to 35 mm and
+20 kN; and the footings' uplift varies most, a tower lifting 9 kN on average
+reaching 33 kN in a gust. Each coupling step converges in at most four
+iterations.
 
 Restart
 -------

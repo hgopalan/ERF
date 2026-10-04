@@ -139,7 +139,36 @@ def route(a, hills, pa, pb):
                 break
         if not changed:
             break
+    # a suspension tower in a dip, where the spans either side rise away from it, is pulled up by them:
+    # its string would carry none of the line's weight and flip over the cross-arm. Raise such a tower
+    # until the line weighs on it with at least min_weight_span of a span's weight
+    for _ in range(200):
+        changed = False
+        for k in range(1, len(pts) - 1):
+            if pts[k][3] and weight_on_tower(a, hills, pts, k) < a.min_weight_span:
+                if pts[k][2] + 2.0 > a.max_tower_height:
+                    raise SystemExit(f"a tower at ({pts[k][0]:.0f}, {pts[k][1]:.0f}) stays in uplift up to "
+                                     f"{a.max_tower_height:g} m; try another --seed")
+                pts[k] = (pts[k][0], pts[k][1], pts[k][2] + 2.0, True)
+                changed = True
+        if not changed:
+            break
     return pts
+
+
+def weight_on_tower(a, hills, pts, k):
+    """The still-air downward pull of the conductor on tower k, as a fraction of the mean of its spans'
+    weights: each span hangs as a parabola strung to the stringing tension H between the conductor's
+    points (the strings' bottoms at towers), so the vertical pull at its end is w h / 2 plus H times the
+    rise to the other end over h."""
+    def zc(p):
+        return height(hills, p[0], p[1]) + p[2] - (a.insulator if p[3] else 0.0)
+    total, spans = 0.0, 0.0
+    for j in (k - 1, k + 1):
+        h = math.hypot(pts[j][0] - pts[k][0], pts[j][1] - pts[k][1])
+        total += W * h / 2.0 + a.stringing_tension * (zc(pts[k]) - zc(pts[j])) / h
+        spans += 0.5 * W * h
+    return total / spans
 
 
 def across_at(r, k):
@@ -237,6 +266,10 @@ def main():
     ap.add_argument("--max_span", type=float, default=280.0)
     ap.add_argument("--stringing_tension", type=float, default=2.0e4, help="still-air horizontal tension every span is strung to (N)")
     ap.add_argument("--min_clearance", type=float, default=8.0)
+    ap.add_argument("--min_weight_span", type=float, default=0.3,
+                    help="the line's pull on a suspension tower, at least this fraction of its spans' weight: "
+                         "a tower in a dip is raised until the line weighs on it")
+    ap.add_argument("--max_tower_height", type=float, default=60.0)
     ap.add_argument("--u_ref", type=float, default=18.0, help="inflow speed at z_ref (m/s)")
     ap.add_argument("--z_ref", type=float, default=30.0)
     ap.add_argument("--z0", type=float, default=0.1)

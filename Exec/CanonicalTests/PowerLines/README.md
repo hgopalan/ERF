@@ -18,7 +18,8 @@ See the "Conductor lines in the wind" section of the theory documentation.
   `python3 make_case.py --seed 2026` gives the committed files. Its options set the domain, the
   hills, the number of transformers and how many stand on hilltops, the conductor's stringing
   tension, the towers' height, spacing, lattice, foundation and sway (`--tower_sway 0 0 0` for rigid
-  towers), and the inflow speed.
+  towers), and the inflow speed. A suspension tower in a dip, where the spans either side would pull
+  it up, is raised until the line weighs on it (`--min_weight_span`, at most `--max_tower_height`).
 - `flow.inputs` holds the flow, shared by the two stages.
 - `inputs_spinup` runs the flow alone for 600 s to a checkpoint.
 - `inputs_lines` restarts from it with the lines (the checkpoint holds no conductor state, so the

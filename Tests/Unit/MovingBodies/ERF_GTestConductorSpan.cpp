@@ -10,7 +10,8 @@
 // tower of a level section carries the weight of one span (and its string), the spans either
 // side balancing along the line; the cross-arms of towers that move are MoorDyn's coupled points,
 // which a coupled step moves from where they start at the velocity it is given and which take the
-// line's pull the tower is reported to carry; and held still, a coupled point is a fixed one.
+// line's pull the tower is reported to carry; held still, a coupled point is a fixed one; and a
+// string at a tower in a dip, which the spans either side pull up, is flagged in uplift.
 
 #include <algorithm>
 #include <cmath>
@@ -417,5 +418,35 @@ TEST(ConductorSpan, HeldStillACoupledPointIsAFixedOne)
     for (int j = 0; j < 2; ++j) {
         const auto a = coupled.tower_force(j), b = fixed.tower_force(j);
         for (int d = 0; d < 3; ++d) { EXPECT_NEAR(a[d], b[d], 1.0e-6 * std::abs(b[2])) << "tower " << j + 1 << " dir " << d; }
+    }
+}
+
+TEST(ConductorSpan, AStringInADipIsFlaggedInUplift)
+{
+    if (erf_moordyn::is_stub()) {
+        GTEST_SKIP() << "needs the real MoorDyn-C: the stub hangs every string under its spans' weight";
+    }
+    const ConductorInputs in = settings();
+    const double w = weight(drake_span("w"), in.air_density);
+    // level: each string carries a span's weight
+    {
+        ConductorSpan line(section("level_strings", 2.5), in, 9.81, in.diagnostics_dir + "/level_strings.moordyn.txt");
+        for (int j = 0; j < 2; ++j) {
+            EXPECT_NEAR(line.string_load(j) / (w * 301.5), 1.0, 0.05) << "string " << j + 1;
+            EXPECT_FALSE(line.string_in_uplift(j, static_cast<amrex::Real>(w))) << "string " << j + 1;
+        }
+    }
+    // the dead ends 80 m above the towers, strung to 20 kN: each span rises 80 m over 300 m away from
+    // its tower, pulling up 20 kN x 80 / 300 = 5.3 kN a side against 2.4 kN of weight
+    SpanInputs s = section("dip_strings", 2.5);
+    s.end_a[2] = 110.0;
+    s.end_b[2] = 110.0;
+    s.lengths.clear();
+    s.stringing_tension = 20000.0;
+    s.lengths_from_stringing_tension(static_cast<amrex::Real>(w));
+    ConductorSpan line(s, in, 9.81, in.diagnostics_dir + "/dip_strings.moordyn.txt");
+    for (int j = 0; j < 2; ++j) {
+        EXPECT_TRUE(line.string_in_uplift(j, static_cast<amrex::Real>(w)))
+            << "string " << j + 1 << " carries " << line.string_load(j) << " N";
     }
 }

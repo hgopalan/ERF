@@ -146,6 +146,18 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
         const std::string file = m_in.diagnostics_dir + "/" + s.name + ".moordyn.txt";
         m_spans.push_back(std::make_unique<ConductorSpan>(s, m_in, CONST_GRAV, file));
         const ConductorSpan& c = *m_spans.back();
+        // a string the line does not weigh on is pulled up by the spans either side (uplift)
+        if (s.has_insulators()) {
+            const Real w = (s.mass_per_length - m_in.air_density * Real(0.25) * Real(3.14159265358979323846) * s.diameter * s.diameter) * CONST_GRAV;
+            for (int j = 0; j < static_cast<int>(s.towers.size()); ++j) {
+                if (m_spans.back()->string_in_uplift(j, w)) {
+                    Print() << "erf.conductors." << s.name << ": WARNING the string at tower " << j + 1 << " carries "
+                            << m_spans.back()->string_load(j) << " N of the conductor in still air: the spans either side "
+                            << "rise away from the tower and pull it up (uplift), and the string flips over the cross-arm; "
+                            << "raise that tower or make it a strain tower\n";
+                }
+            }
+        }
         Print() << "erf.conductors." << s.name << ": " << s.num_spans() << " span(s)";
         if (s.has_insulators()) { Print() << ", hanging from insulator strings of " << s.insulator_length << " m at the towers"; }
         else if (!s.towers.empty()) { Print() << ", clamped at the towers"; }

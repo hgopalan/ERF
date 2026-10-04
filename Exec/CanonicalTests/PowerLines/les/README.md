@@ -19,7 +19,7 @@ that bend, the lines moving with them as MoorDyn coupled points.
 
 The network and the terrain come from `../make_case.py`:
 
-    python3 ../make_case.py --out . --seed 2 --lx 3072 --ly 1536 --lz 768 --terrain_dx 16 \
+    python3 ../make_case.py --out . --seed 1 --lx 3072 --ly 1536 --lz 768 --terrain_dx 16 \
         --hills 3 --hill_height 60 100 --hill_radius 120 170 --hill_spacing 500 --hill_margin 0.3 \
         --transformers 4 --on_hills 2 --transformer_spacing 400 --circuit
 

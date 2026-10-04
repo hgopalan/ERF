@@ -141,6 +141,16 @@ public:
     amrex::Real insulator_swing_across (int j) const;
     /** The tension at the top of insulator string j (N). */
     amrex::Real insulator_tension (int j) const;
+    /**
+     * The conductor's weight insulator string j carries (N): the line's downward pull on its tower
+     * less the string's own weight in the fluid. Near zero or negative, the spans either side rise
+     * away from the tower and pull it up (uplift): the string carries nothing and flips over the
+     * cross-arm, where a strain tower or a taller one is needed.
+     */
+    amrex::Real string_load (int j) const;
+    /** Whether string j carries less than uplift_fraction of the weight of the half spans either side of its tower. */
+    bool string_in_uplift (int j, amrex::Real weight_per_length) const;
+    static constexpr amrex::Real uplift_fraction = 0.1;
 
     /** The terrain height under each node (num_nodes() values), set by the caller after each step. */
     void set_ground_under_nodes (const std::vector<amrex::Real>& h);
@@ -179,6 +189,8 @@ private:
 
     SpanInputs m_in;
     amrex::Real m_offset{0.0};   //!< the surface offset (m)
+    amrex::Real m_rho{1.225};    //!< the air's density (kg/m^3)
+    amrex::Real m_g{9.81};       //!< gravity (m/s^2)
     int m_substeps{1};
     double m_t0{0.0};            //!< ERF's time at MoorDyn's time zero
     double m_clock{0.0};         //!< MoorDyn's clock after its last step
