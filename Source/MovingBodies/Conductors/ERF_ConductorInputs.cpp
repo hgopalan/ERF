@@ -11,21 +11,21 @@ using namespace amrex;
 
 namespace erf_conductors {
 
-const std::array<Real,3>& SpanInputs::point (int k) const
+const std::array<Real,3>& LineInputs::point (int k) const
 {
     if (k == 0) { return end_a; }
     if (k == num_spans()) { return end_b; }
     return towers[static_cast<std::size_t>(k - 1)];
 }
 
-std::array<Real,3>& SpanInputs::point (int k)
+std::array<Real,3>& LineInputs::point (int k)
 {
     if (k == 0) { return end_a; }
     if (k == num_spans()) { return end_b; }
     return towers[static_cast<std::size_t>(k - 1)];
 }
 
-Real SpanInputs::chord (int k) const
+Real LineInputs::chord (int k) const
 {
     const auto& a = point(k);
     const auto& b = point(k + 1);
@@ -34,14 +34,14 @@ Real SpanInputs::chord (int k) const
     return std::sqrt(c2);
 }
 
-std::array<Real,3> SpanInputs::conductor_point (int k) const
+std::array<Real,3> LineInputs::conductor_point (int k) const
 {
     std::array<Real,3> p = point(k);
     if (has_insulators() && k > 0 && k < num_spans()) { p[2] -= insulator_length; }
     return p;
 }
 
-void SpanInputs::lengths_from_stringing_tension (Real w)
+void LineInputs::lengths_from_stringing_tension (Real w)
 {
     if (!(stringing_tension > 0.0)) { return; }
     lengths.resize(static_cast<std::size_t>(num_spans()));
@@ -58,53 +58,53 @@ void SpanInputs::lengths_from_stringing_tension (Real w)
     }
 }
 
-Real SpanInputs::catenary_sag (int k) const
+Real LineInputs::catenary_sag (int k) const
 {
     const Real c = chord(k);
     const Real L = lengths[static_cast<std::size_t>(k)];
     return (L > c) ? std::sqrt(Real(3.0) * c * (L - c) / Real(8.0)) : Real(0.0);
 }
 
-int SpanInputs::num_line_nodes () const
+int LineInputs::num_line_nodes () const
 {
     const int strings = has_insulators() ? static_cast<int>(towers.size()) : 0;
     return num_spans() * (segments + 1) + strings * (insulator_segments + 1);
 }
 
-std::string SpanInputs::span_root (int k) const
+std::string LineInputs::span_root (int k) const
 {
     return (num_spans() == 1) ? output_root : output_root + "_span" + std::to_string(k + 1);
 }
 
-std::string SpanInputs::span_name (int k) const
+std::string LineInputs::span_name (int k) const
 {
     return (num_spans() == 1) ? name : name + "_span" + std::to_string(k + 1);
 }
 
-const SpanInputs& ConductorInputs::tower_owner (const SpanInputs& s) const
+const LineInputs& ConductorInputs::tower_owner (const LineInputs& s) const
 {
     if (s.share_towers.empty()) { return s; }
-    for (const auto& o : spans) { if (o.name == s.share_towers) { return o; } }
+    for (const auto& o : lines) { if (o.name == s.share_towers) { return o; } }
     return s;   // checked when the inputs were read
 }
 
-const erf_towers::TowerType* ConductorInputs::tower_type (const SpanInputs& s) const
+const erf_towers::TowerType* ConductorInputs::tower_type (const LineInputs& s) const
 {
-    const SpanInputs& owner = tower_owner(s);
+    const LineInputs& owner = tower_owner(s);
     if (owner.tower_type.empty()) { return nullptr; }
     for (const auto& t : tower_types) { if (t.name == owner.tower_type) { return &t; } }
     return nullptr;
 }
 
-std::string ConductorInputs::validate_shared_towers (const std::vector<SpanInputs>& spans)
+std::string ConductorInputs::validate_shared_towers (const std::vector<LineInputs>& lines)
 {
-    for (const auto& s : spans) {
+    for (const auto& s : lines) {
         if (s.share_towers.empty()) { continue; }
         const std::string key = "erf.conductors." + s.name + ".share_towers";
-        const SpanInputs* owner = nullptr;
-        for (const auto& o : spans) { if (o.name == s.share_towers) { owner = &o; } }
+        const LineInputs* owner = nullptr;
+        for (const auto& o : lines) { if (o.name == s.share_towers) { owner = &o; } }
         if (owner == nullptr || owner == &s) {
-            return key + " = " + s.share_towers + " is not another line of erf.conductors.spans";
+            return key + " = " + s.share_towers + " is not another line of erf.conductors.lines";
         }
         if (!owner->share_towers.empty()) {
             return key + " = " + s.share_towers + ", which shares the towers of " + owner->share_towers +
@@ -153,7 +153,7 @@ Catenary elastic_catenary (Real chord, Real length, Real w, Real EA)
     return cat;
 }
 
-std::string ConductorInputs::validate_slack (const SpanInputs& s, bool on_terrain)
+std::string ConductorInputs::validate_slack (const LineInputs& s, bool on_terrain)
 {
     if (s.stringing_tension > 0.0) { return std::string(); }
     for (int k = 0; k < s.num_spans(); ++k) {
@@ -169,7 +169,7 @@ std::string ConductorInputs::validate_slack (const SpanInputs& s, bool on_terrai
     return std::string();
 }
 
-std::string ConductorInputs::validate_span (const SpanInputs& s, bool check_slack)
+std::string ConductorInputs::validate_line (const LineInputs& s, bool check_slack)
 {
     const std::string key = "erf.conductors." + s.name + ".";
     if (s.stringing_tension < 0.0) { return key + "stringing_tension must be positive (N), or 0 with length"; }
@@ -224,7 +224,7 @@ std::string ConductorInputs::validate_transformer (const TransformerInputs& t)
     return std::string();
 }
 
-std::string ConductorInputs::validate_tower_type (const SpanInputs& s, const std::vector<erf_towers::TowerType>& types)
+std::string ConductorInputs::validate_tower_type (const LineInputs& s, const std::vector<erf_towers::TowerType>& types)
 {
     if (s.tower_type.empty()) { return std::string(); }
     const std::string key = "erf.conductors." + s.name + ".tower_type";
@@ -250,7 +250,7 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
     if (in.node_output_int < 0) { return "erf.conductors.node_output_int must be >= 0 (0: no node output)"; }
     if (!(in.epsilon > 0.0)) { return "erf.conductors.epsilon must be positive (cells)"; }
     if (!(in.flashover_distance > 0.0)) { return "erf.conductors.flashover_distance must be positive (m)"; }
-    for (const SpanInputs& s : in.spans) {
+    for (const LineInputs& s : in.lines) {
         for (int k = 0; k <= s.num_spans(); ++k) {
             if (s.point(k)[2] >= in.surface_offset) {
                 return "erf.conductors." + s.name + ": the attachment heights must stay below surface_offset (" +
@@ -279,12 +279,15 @@ ConductorInputs ConductorInputs::read ()
     ConductorInputs in;
     ParmParse pp("erf.conductors");
 
+    if (pp.contains("spans")) {
+        Abort("erf.conductors.spans is not an input: list the conductor lines in erf.conductors.lines");
+    }
     std::vector<std::string> names, tnames;
-    pp.queryarr("spans", names);
+    pp.queryarr("lines", names);
     pp.queryarr("transformers", tnames);
     in.active = !names.empty();
     if (!in.active) {
-        if (!tnames.empty()) { Abort("erf.conductors.transformers needs lines ending on them (erf.conductors.spans)"); }
+        if (!tnames.empty()) { Abort("erf.conductors.transformers needs lines ending on them (erf.conductors.lines)"); }
         return in;
     }
 
@@ -311,8 +314,8 @@ ConductorInputs ConductorInputs::read ()
 
     std::set<std::string> seen;
     for (const std::string& name : names) {
-        if (!seen.insert(name).second) { Abort("erf.conductors.spans lists '" + name + "' twice"); }
-        SpanInputs s;
+        if (!seen.insert(name).second) { Abort("erf.conductors.lines lists '" + name + "' twice"); }
+        LineInputs s;
         s.name = name;
         ParmParse ps("erf.conductors." + name);
         std::vector<Real> a, b;
@@ -340,9 +343,9 @@ ConductorInputs ConductorInputs::read ()
         s.output_root = in.diagnostics_dir + "/" + name;
         ps.query("output_root", s.output_root);
         // the slack is checked once the ends stand on the terrain: their heights here are above it
-        const std::string err = validate_span(s, false);
+        const std::string err = validate_line(s, false);
         if (!err.empty()) { Abort(err); }
-        in.spans.push_back(s);
+        in.lines.push_back(s);
     }
     std::vector<std::string> ttypes;
     pp.queryarr("tower_types", ttypes);
@@ -372,12 +375,12 @@ ConductorInputs ConductorInputs::read ()
         if (!terr.empty()) { Abort(terr); }
         in.tower_types.push_back(t);
     }
-    for (const SpanInputs& s : in.spans) {
+    for (const LineInputs& s : in.lines) {
         const std::string err = validate_tower_type(s, in.tower_types);
         if (!err.empty()) { Abort(err); }
     }
     {
-        const std::string err = validate_shared_towers(in.spans);
+        const std::string err = validate_shared_towers(in.lines);
         if (!err.empty()) { Abort(err); }
     }
     for (const std::string& name : tnames) {

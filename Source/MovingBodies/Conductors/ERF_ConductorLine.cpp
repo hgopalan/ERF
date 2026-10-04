@@ -1,4 +1,4 @@
-#include "ERF_ConductorSpan.H"
+#include "ERF_ConductorLine.H"
 
 #include <algorithm>
 #include <cmath>
@@ -19,7 +19,7 @@ namespace {
 constexpr Real rad2deg = Real(180.0 / 3.14159265358979323846);
 }
 
-ConductorSpan::ConductorSpan (const SpanInputs& s, const ConductorInputs& in, Real gravity, const std::string& input_file,
+ConductorLine::ConductorLine (const LineInputs& s, const ConductorInputs& in, Real gravity, const std::string& input_file,
                               const std::string& saved_state, const std::vector<Real>& tower_displacement)
     : m_in(s), m_offset(in.surface_offset), m_rho(in.air_density), m_g(gravity), m_substeps(in.substeps), m_file(input_file),
       m_coupled(in.towers_move(s))
@@ -68,12 +68,12 @@ ConductorSpan::ConductorSpan (const SpanInputs& s, const ConductorInputs& in, Re
     if (restoring) { m_sys->load(saved_state); }
 }
 
-void ConductorSpan::save (const std::string& path) const
+void ConductorLine::save (const std::string& path) const
 {
     m_sys->save(path);
 }
 
-void ConductorSpan::locate (unsigned node, unsigned& line, unsigned& local) const
+void ConductorLine::locate (unsigned node, unsigned& line, unsigned& local) const
 {
     const auto it = std::upper_bound(m_first.begin(), m_first.end(), node);
     const auto l = static_cast<unsigned>(it - m_first.begin()) - 1;
@@ -81,7 +81,7 @@ void ConductorSpan::locate (unsigned node, unsigned& line, unsigned& local) cons
     local = node - m_first[l];
 }
 
-std::vector<Real> ConductorSpan::kinematics_points () const
+std::vector<Real> ConductorLine::kinematics_points () const
 {
     const std::vector<double> r = m_sys->kinematics_points();
     std::vector<Real> out(r.size());
@@ -93,7 +93,7 @@ std::vector<Real> ConductorSpan::kinematics_points () const
     return out;
 }
 
-void ConductorSpan::set_wind (const std::vector<Real>& uvw, double t)
+void ConductorLine::set_wind (const std::vector<Real>& uvw, double t)
 {
     if (uvw.size() != 3 * static_cast<std::size_t>(m_nkin)) {
         Abort("erf.conductors." + m_in.name + ": " + std::to_string(3 * m_nkin) + " wind components are needed, " +
@@ -106,7 +106,7 @@ void ConductorSpan::set_wind (const std::vector<Real>& uvw, double t)
     m_wind = uvw;
 }
 
-void ConductorSpan::set_ground_under_nodes (const std::vector<Real>& h)
+void ConductorLine::set_ground_under_nodes (const std::vector<Real>& h)
 {
     if (h.size() != num_nodes()) {
         Abort("erf.conductors." + m_in.name + ": " + std::to_string(num_nodes()) + " ground heights are needed, " +
@@ -115,13 +115,13 @@ void ConductorSpan::set_ground_under_nodes (const std::vector<Real>& h)
     m_ground = h;
 }
 
-Real ConductorSpan::clearance (unsigned node) const
+Real ConductorLine::clearance (unsigned node) const
 {
     const Real ground = m_ground.empty() ? Real(0.0) : m_ground[node];
     return node_position(node)[2] - ground;
 }
 
-Real ConductorSpan::min_clearance (unsigned& node, int k) const
+Real ConductorLine::min_clearance (unsigned& node, int k) const
 {
     const unsigned first = span_first_node(k), n = span_num_nodes(k);
     node = first;
@@ -133,7 +133,7 @@ Real ConductorSpan::min_clearance (unsigned& node, int k) const
     return best;
 }
 
-std::array<Real,3> ConductorSpan::node_drag (unsigned node) const
+std::array<Real,3> ConductorLine::node_drag (unsigned node) const
 {
     unsigned line, local;
     locate(node, line, local);
@@ -141,7 +141,7 @@ std::array<Real,3> ConductorSpan::node_drag (unsigned node) const
     return {{static_cast<Real>(f[0]), static_cast<Real>(f[1]), static_cast<Real>(f[2])}};
 }
 
-std::array<Real,3> ConductorSpan::total_drag () const
+std::array<Real,3> ConductorLine::total_drag () const
 {
     std::array<Real,3> sum{{0.0, 0.0, 0.0}};
     for (unsigned i = 0; i < num_nodes(); ++i) {
@@ -151,7 +151,7 @@ std::array<Real,3> ConductorSpan::total_drag () const
     return sum;
 }
 
-std::array<Real,3> ConductorSpan::span_drag (int k) const
+std::array<Real,3> ConductorLine::span_drag (int k) const
 {
     std::array<Real,3> sum{{0.0, 0.0, 0.0}};
     for (unsigned i = span_first_node(k); i < span_first_node(k) + span_num_nodes(k); ++i) {
@@ -161,7 +161,7 @@ std::array<Real,3> ConductorSpan::span_drag (int k) const
     return sum;
 }
 
-Real ConductorSpan::node_tension (unsigned node) const
+Real ConductorLine::node_tension (unsigned node) const
 {
     unsigned line, local;
     locate(node, line, local);
@@ -169,13 +169,13 @@ Real ConductorSpan::node_tension (unsigned node) const
     return static_cast<Real>(std::sqrt(t[0]*t[0] + t[1]*t[1] + t[2]*t[2]));
 }
 
-std::array<Real,3> ConductorSpan::wind_at_point (unsigned point) const
+std::array<Real,3> ConductorLine::wind_at_point (unsigned point) const
 {
     if (m_wind.empty() || point >= m_nkin) { return {{0.0, 0.0, 0.0}}; }
     return {{m_wind[3*point], m_wind[3*point+1], m_wind[3*point+2]}};
 }
 
-void ConductorSpan::step (double time, double dt)
+void ConductorLine::step (double time, double dt)
 {
     // MoorDyn returns its own clock in t
     double t = time;
@@ -188,9 +188,9 @@ void ConductorSpan::step (double time, double dt)
     check_clock(time + dt);
 }
 
-void ConductorSpan::step_coupled (double time, double dt, const std::vector<Real>& displacement, const std::vector<Real>& velocity)
+void ConductorLine::step_coupled (double time, double dt, const std::vector<Real>& displacement, const std::vector<Real>& velocity)
 {
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_coupled, "ConductorSpan::step_coupled: the line's towers do not move");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_coupled, "ConductorLine::step_coupled: the line's towers do not move");
     if (displacement.size() != m_x.size() || velocity.size() != m_x.size()) {
         Abort("erf.conductors." + m_in.name + ": " + std::to_string(m_x.size()) + " tower displacements and velocities are "
               "needed, " + std::to_string(displacement.size()) + " and " + std::to_string(velocity.size()) + " were given");
@@ -211,15 +211,15 @@ void ConductorSpan::step_coupled (double time, double dt, const std::vector<Real
     for (std::size_t k = 0; k < m_x.size(); ++k) { m_x[k] += xd[k] * dt; }
 }
 
-std::array<Real,3> ConductorSpan::coupled_force (int j) const
+std::array<Real,3> ConductorLine::coupled_force (int j) const
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_coupled && j >= 0 && 3 * static_cast<std::size_t>(j) < m_f.size(),
-                                     "ConductorSpan::coupled_force: no such coupled point");
+                                     "ConductorLine::coupled_force: no such coupled point");
     const std::size_t k = 3 * static_cast<std::size_t>(j);
     return {{static_cast<Real>(m_f[k]), static_cast<Real>(m_f[k+1]), static_cast<Real>(m_f[k+2])}};
 }
 
-void ConductorSpan::check_clock (double time) const
+void ConductorLine::check_clock (double time) const
 {
     const double t = m_clock;
     if (std::abs(m_t0 + t - time) > 1.0e-8 * std::max(1.0, std::abs(time))) {
@@ -228,7 +228,7 @@ void ConductorSpan::check_clock (double time) const
     }
 }
 
-std::vector<Real> ConductorSpan::node_positions () const
+std::vector<Real> ConductorLine::node_positions () const
 {
     std::vector<Real> out(3 * static_cast<std::size_t>(num_nodes()));
     for (unsigned i = 0; i < num_nodes(); ++i) {
@@ -238,14 +238,14 @@ std::vector<Real> ConductorSpan::node_positions () const
     return out;
 }
 
-std::array<Real,3> ConductorSpan::node_position (unsigned node) const
+std::array<Real,3> ConductorLine::node_position (unsigned node) const
 {
     unsigned line, local;
     locate(node, line, local);
     return to_erf_frame(m_sys->line_node_position(line, local), m_offset);
 }
 
-std::vector<Real> ConductorSpan::conductor_path () const
+std::vector<Real> ConductorLine::conductor_path () const
 {
     std::vector<Real> out;
     out.reserve(3 * static_cast<std::size_t>(m_first[static_cast<std::size_t>(num_spans())]));
@@ -256,19 +256,19 @@ std::vector<Real> ConductorSpan::conductor_path () const
     return out;
 }
 
-Real ConductorSpan::tension_a (int k) const
+Real ConductorLine::tension_a (int k) const
 {
     const auto t = m_sys->line_node_tension(static_cast<unsigned>(k) + 1, 0);
     return static_cast<Real>(std::sqrt(t[0]*t[0] + t[1]*t[1] + t[2]*t[2]));
 }
 
-Real ConductorSpan::tension_b (int k) const { return static_cast<Real>(m_sys->line_end_tension(static_cast<unsigned>(k) + 1)); }
+Real ConductorLine::tension_b (int k) const { return static_cast<Real>(m_sys->line_end_tension(static_cast<unsigned>(k) + 1)); }
 
-Real ConductorSpan::max_tension (int k) const { return static_cast<Real>(m_sys->line_max_tension(static_cast<unsigned>(k) + 1)); }
+Real ConductorLine::max_tension (int k) const { return static_cast<Real>(m_sys->line_max_tension(static_cast<unsigned>(k) + 1)); }
 
-std::array<Real,3> ConductorSpan::end_force (int end) const
+std::array<Real,3> ConductorLine::end_force (int end) const
 {
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(end == 0 || end == 1, "ConductorSpan::end_force: end must be 0 (end_a) or 1 (end_b)");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(end == 0 || end == 1, "ConductorLine::end_force: end must be 0 (end_a) or 1 (end_b)");
     // end_a is the first node of the first span's MoorDyn line, end_b the last of the last span's
     const int k = (end == 0) ? 0 : num_spans() - 1;
     const unsigned node = (end == 0) ? 0 : span_num_nodes(k) - 1;
@@ -276,9 +276,9 @@ std::array<Real,3> ConductorSpan::end_force (int end) const
     return {{static_cast<Real>(f[0]), static_cast<Real>(f[1]), static_cast<Real>(f[2])}};
 }
 
-std::array<Real,3> ConductorSpan::tower_force (int j) const
+std::array<Real,3> ConductorLine::tower_force (int j) const
 {
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(j >= 0 && j < num_spans() - 1, "ConductorSpan::tower_force: no such tower");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(j >= 0 && j < num_spans() - 1, "ConductorLine::tower_force: no such tower");
     std::array<Real,3> F{{0.0, 0.0, 0.0}};
     auto add = [&F] (const std::array<double,3>& f) { for (int d = 0; d < 3; ++d) { F[d] += static_cast<Real>(f[d]); } };
     if (m_in.has_insulators()) {
@@ -292,7 +292,7 @@ std::array<Real,3> ConductorSpan::tower_force (int j) const
     return F;
 }
 
-void ConductorSpan::chord_frame_offsets (unsigned node, int k, Real& along, Real& down, Real& side) const
+void ConductorLine::chord_frame_offsets (unsigned node, int k, Real& along, Real& down, Real& side) const
 {
     // the chord's unit vector, the "down" direction normal to it in the vertical plane, and the
     // horizontal normal to that plane; a node's offset from the chord is split on the latter two
@@ -316,28 +316,28 @@ void ConductorSpan::chord_frame_offsets (unsigned node, int k, Real& along, Real
     side  = r[0]*es[0] + r[1]*es[1] + r[2]*es[2];
 }
 
-Real ConductorSpan::mid_sag (int k) const
+Real ConductorLine::mid_sag (int k) const
 {
     Real along, down, side;
     chord_frame_offsets(span_first_node(k) + (span_num_nodes(k) - 1) / 2, k, along, down, side);
     return down;
 }
 
-Real ConductorSpan::mid_offset (int k) const
+Real ConductorLine::mid_offset (int k) const
 {
     Real along, down, side;
     chord_frame_offsets(span_first_node(k) + (span_num_nodes(k) - 1) / 2, k, along, down, side);
     return side;
 }
 
-Real ConductorSpan::swing_angle (int k) const
+Real ConductorLine::swing_angle (int k) const
 {
     Real along, down, side;
     chord_frame_offsets(span_first_node(k) + (span_num_nodes(k) - 1) / 2, k, along, down, side);
     return std::atan2(side, down);
 }
 
-std::array<Real,3> ConductorSpan::across_direction (int j) const
+std::array<Real,3> ConductorLine::across_direction (int j) const
 {
     // the line's horizontal direction at tower j+1, from the attachment before it to the one after
     const auto& a = m_in.point(j);
@@ -348,7 +348,7 @@ std::array<Real,3> ConductorSpan::across_direction (int j) const
     return {{-ey, ex, 0.0}};   // z x e: to the left of the line looking down
 }
 
-Real ConductorSpan::insulator_swing (int j) const
+Real ConductorLine::insulator_swing (int j) const
 {
     const unsigned line = static_cast<unsigned>(num_spans() + j) + 1;
     const auto top = m_sys->line_node_position(line, 0);
@@ -357,7 +357,7 @@ Real ConductorSpan::insulator_swing (int j) const
     return static_cast<Real>(std::atan2(h, top[2] - bot[2]));
 }
 
-Real ConductorSpan::insulator_swing_across (int j) const
+Real ConductorLine::insulator_swing_across (int j) const
 {
     const unsigned line = static_cast<unsigned>(num_spans() + j) + 1;
     const auto top = m_sys->line_node_position(line, 0);
@@ -367,22 +367,22 @@ Real ConductorSpan::insulator_swing_across (int j) const
     return static_cast<Real>(std::atan2(side, top[2] - bot[2]));
 }
 
-Real ConductorSpan::insulator_tension (int j) const
+Real ConductorLine::insulator_tension (int j) const
 {
     const auto t = m_sys->line_node_tension(static_cast<unsigned>(num_spans() + j) + 1, 0);
     return static_cast<Real>(std::sqrt(t[0]*t[0] + t[1]*t[1] + t[2]*t[2]));
 }
 
-Real ConductorSpan::string_load (int j) const
+Real ConductorLine::string_load (int j) const
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_in.has_insulators() && j >= 0 && j < num_insulators(),
-                                     "ConductorSpan::string_load: no such string");
+                                     "ConductorLine::string_load: no such string");
     const Real r = Real(0.5) * m_in.insulator_diameter;
     const Real weight = (m_in.insulator_mass - m_rho * Real(3.14159265358979323846) * r * r * m_in.insulator_length) * m_g;
     return -tower_force(j)[2] - weight;
 }
 
-bool ConductorSpan::string_in_uplift (int j, Real weight_per_length) const
+bool ConductorLine::string_in_uplift (int j, Real weight_per_length) const
 {
     // the half spans either side of tower j+1, horizontally
     const auto& a = m_in.point(j);
@@ -392,7 +392,7 @@ bool ConductorSpan::string_in_uplift (int j, Real weight_per_length) const
     return string_load(j) < uplift_fraction * weight_per_length * half;
 }
 
-void ConductorSpan::write_diagnostics (double time, bool first) const
+void ConductorLine::write_diagnostics (double time, bool first) const
 {
     if (!ParallelDescriptor::IOProcessor()) { return; }
     for (int k = 0; k < num_spans(); ++k) {
@@ -433,7 +433,7 @@ void ConductorSpan::write_diagnostics (double time, bool first) const
     }
 }
 
-void ConductorSpan::write_nodes (double time, bool first) const
+void ConductorLine::write_nodes (double time, bool first) const
 {
     if (!ParallelDescriptor::IOProcessor()) { return; }
     std::ofstream out;

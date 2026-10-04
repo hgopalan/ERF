@@ -39,7 +39,7 @@ erf.plot_file_1  = plt
 erf.plot_int_1   = 10
 erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
 
-erf.conductors.spans               = P1 P2 P3 SW
+erf.conductors.lines               = P1 P2 P3 SW
 erf.conductors.diagnostics_dir     = conductors
 erf.conductors.air_density         = 1.0
 

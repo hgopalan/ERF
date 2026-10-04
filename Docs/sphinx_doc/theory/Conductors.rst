@@ -565,7 +565,7 @@ taken them. The tower model sits behind a narrow interface (the node loads
 and the line's pull in, the motion of every node and of the cross-arm and the
 nodes' inertia out), so a frame model of the lattice can stand in its place.
 
-Verification (unit tests ``OneModeTower``, ``ConductorSpan``,
+Verification (unit tests ``OneModeTower``, ``ConductorLine``,
 ``Conductors``): a load held over a step is integrated exactly however the
 time is cut, and a step of a thousand periods lands on the static
 deflection; released, the tower rings down with the damped period to

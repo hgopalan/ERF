@@ -328,7 +328,7 @@ def main():
         for (xc, yc, h, s) in hills:
             f.write(f"#   hill at ({xc:.0f}, {yc:.0f}), height {h:.0f} m, radius {s:.0f} m\n")
         span_names = [l[0] for l in lines] if not a.circuit else [l[0] + k for l in lines for k in ("a", "b", "c", "sw")]
-        f.write("erf.conductors.spans        = " + " ".join(span_names) + "\n")
+        f.write("erf.conductors.lines        = " + " ".join(span_names) + "\n")
         f.write("erf.conductors.transformers = " + " ".join(names) + "\n")
         f.write("erf.conductors.tower_types  = lattice\n\n")
         tb, tt, ts, al, ad = a.tower

@@ -19,7 +19,7 @@
 #include "ERF_ConductorInputs.H"
 
 using erf_conductors::ConductorInputs;
-using erf_conductors::SpanInputs;
+using erf_conductors::LineInputs;
 using erf_conductors::TransformerInputs;
 
 namespace {
@@ -27,7 +27,7 @@ namespace {
 void set_span (const std::string& name)
 {
     amrex::ParmParse pp("erf.conductors");
-    pp.add("spans", name);
+    pp.add("lines", name);
     amrex::ParmParse ps("erf.conductors." + name);
     ps.addarr("end_a", std::vector<amrex::Real>{100.0, 500.0, 30.0});
     ps.addarr("end_b", std::vector<amrex::Real>{400.0, 500.0, 30.0});
@@ -37,9 +37,9 @@ void set_span (const std::string& name)
     ps.add("axial_stiffness", 3.0e7);
 }
 
-SpanInputs good_span ()
+LineInputs good_span ()
 {
-    SpanInputs s;
+    LineInputs s;
     s.name = "S";
     s.end_a = {{100.0, 500.0, 30.0}};
     s.end_b = {{400.0, 500.0, 30.0}};
@@ -54,8 +54,8 @@ TEST(ConductorInputs, ASpanIsReadWithItsDefaultsAndDerivedGeometry)
     set_span("S1");
     const ConductorInputs in = ConductorInputs::read();
     ASSERT_TRUE(in.active);
-    ASSERT_EQ(in.spans.size(), 1u);
-    const SpanInputs& s = in.spans.front();
+    ASSERT_EQ(in.lines.size(), 1u);
+    const LineInputs& s = in.lines.front();
     EXPECT_EQ(s.name, "S1");
     EXPECT_DOUBLE_EQ(s.chord(), 300.0);
     EXPECT_NEAR(s.catenary_sag(), 12.99, 0.01);
@@ -104,36 +104,36 @@ TEST(ConductorInputs, NothingIsReadWithoutSpans)
 {
     // the spans key of the previous test still exists; an empty list switches the feature off
     amrex::ParmParse pp("erf.conductors");
-    pp.addarr("spans", std::vector<std::string>{});
+    pp.addarr("lines", std::vector<std::string>{});
     EXPECT_FALSE(ConductorInputs::read().active);
 }
 
 TEST(ConductorInputs, EverySpanValueOutsideItsRangeIsRefusedByName)
 {
-    EXPECT_TRUE(ConductorInputs::validate_span(good_span()).empty());
+    EXPECT_TRUE(ConductorInputs::validate_line(good_span()).empty());
     auto bad = [](auto mutate, const std::string& key) {
-        SpanInputs s = good_span();
+        LineInputs s = good_span();
         mutate(s);
-        const std::string err = ConductorInputs::validate_span(s);
+        const std::string err = ConductorInputs::validate_line(s);
         EXPECT_FALSE(err.empty()) << key;
         EXPECT_NE(err.find("erf.conductors.S." + key), std::string::npos) << err;
     };
-    bad([](SpanInputs& s) { s.end_b = s.end_a; }, "end_a");
-    bad([](SpanInputs& s) { s.lengths = {300.0}; }, "length");      // equal to the chord: no slack
-    bad([](SpanInputs& s) { s.lengths = {250.0}; }, "length");
-    bad([](SpanInputs& s) { s.diameter = 0.0; }, "diameter");
-    bad([](SpanInputs& s) { s.mass_per_length = -1.0; }, "mass_per_length");
-    bad([](SpanInputs& s) { s.axial_stiffness = 0.0; }, "axial_stiffness");
-    bad([](SpanInputs& s) { s.drag_coefficient = -0.1; }, "drag_coefficient");
-    bad([](SpanInputs& s) { s.damping_ratio = 0.0; }, "damping_ratio");
-    bad([](SpanInputs& s) { s.damping_ratio = 1.5; }, "damping_ratio");
-    bad([](SpanInputs& s) { s.segments = 1; }, "segments");
+    bad([](LineInputs& s) { s.end_b = s.end_a; }, "end_a");
+    bad([](LineInputs& s) { s.lengths = {300.0}; }, "length");      // equal to the chord: no slack
+    bad([](LineInputs& s) { s.lengths = {250.0}; }, "length");
+    bad([](LineInputs& s) { s.diameter = 0.0; }, "diameter");
+    bad([](LineInputs& s) { s.mass_per_length = -1.0; }, "mass_per_length");
+    bad([](LineInputs& s) { s.axial_stiffness = 0.0; }, "axial_stiffness");
+    bad([](LineInputs& s) { s.drag_coefficient = -0.1; }, "drag_coefficient");
+    bad([](LineInputs& s) { s.damping_ratio = 0.0; }, "damping_ratio");
+    bad([](LineInputs& s) { s.damping_ratio = 1.5; }, "damping_ratio");
+    bad([](LineInputs& s) { s.segments = 1; }, "segments");
 }
 
 TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
 {
     ConductorInputs in;
-    in.spans.push_back(good_span());
+    in.lines.push_back(good_span());
     EXPECT_TRUE(ConductorInputs::validate_settings(in).empty());
     auto bad = [&](auto mutate, const std::string& key) {
         ConductorInputs c = in;
@@ -174,9 +174,9 @@ TEST(ConductorInputs, SolverSettingsAreChecked)
 }
 
 namespace {
-SpanInputs good_section ()
+LineInputs good_section ()
 {
-    SpanInputs s = good_span();
+    LineInputs s = good_span();
     s.end_b = {{1000.0, 500.0, 30.0}};
     s.towers = {{{400.0, 500.0, 30.0}}, {{700.0, 500.0, 30.0}}};
     s.lengths = {301.5, 301.5, 301.5};
@@ -189,7 +189,7 @@ SpanInputs good_section ()
 TEST(ConductorInputs, ASectionIsReadWithItsTowersLengthsAndInsulatorStrings)
 {
     amrex::ParmParse pp("erf.conductors");
-    pp.add("spans", std::string("C1"));
+    pp.add("lines", std::string("C1"));
     amrex::ParmParse ps("erf.conductors.C1");
     ps.addarr("end_a", std::vector<amrex::Real>{100.0, 500.0, 30.0});
     ps.addarr("end_b", std::vector<amrex::Real>{1000.0, 500.0, 30.0});
@@ -201,8 +201,8 @@ TEST(ConductorInputs, ASectionIsReadWithItsTowersLengthsAndInsulatorStrings)
     ps.add("insulator_length", 2.5);
     ps.add("insulator_mass", 60.0);
     const ConductorInputs in = ConductorInputs::read();
-    ASSERT_EQ(in.spans.size(), 1u);
-    const SpanInputs& s = in.spans[0];
+    ASSERT_EQ(in.lines.size(), 1u);
+    const LineInputs& s = in.lines[0];
     EXPECT_EQ(s.num_spans(), 3);
     ASSERT_EQ(s.towers.size(), 2u);
     EXPECT_DOUBLE_EQ(s.point(2)[2], 32.0);
@@ -212,11 +212,11 @@ TEST(ConductorInputs, ASectionIsReadWithItsTowersLengthsAndInsulatorStrings)
     EXPECT_NEAR(s.chord(1), std::sqrt(300.0 * 300.0 + 4.0), chord_tol);
     EXPECT_TRUE(s.has_insulators());
     EXPECT_DOUBLE_EQ(s.insulator_diameter, amrex::Real(0.254));
-    EXPECT_EQ(s.num_line_nodes(), 3 * 21 + 2 * (SpanInputs::insulator_segments + 1));
+    EXPECT_EQ(s.num_line_nodes(), 3 * 21 + 2 * (LineInputs::insulator_segments + 1));
     EXPECT_EQ(s.span_root(1), "conductors/C1_span2");
     EXPECT_EQ(s.span_name(0), "C1_span1");
     EXPECT_DOUBLE_EQ(in.flashover_distance, 1.0);
-    pp.addarr("spans", std::vector<std::string>{});
+    pp.addarr("lines", std::vector<std::string>{});
     // a single span keeps its plain names
     EXPECT_EQ(good_span().span_root(0), good_span().output_root);
     EXPECT_EQ(good_span().span_name(0), "S");
@@ -224,32 +224,32 @@ TEST(ConductorInputs, ASectionIsReadWithItsTowersLengthsAndInsulatorStrings)
 
 TEST(ConductorInputs, SectionValuesOutsideTheirRangeAreRefusedByName)
 {
-    EXPECT_TRUE(ConductorInputs::validate_span(good_section()).empty());
+    EXPECT_TRUE(ConductorInputs::validate_line(good_section()).empty());
     auto bad = [](auto mutate, const std::string& key) {
-        SpanInputs s = good_section();
+        LineInputs s = good_section();
         mutate(s);
-        const std::string err = ConductorInputs::validate_span(s);
+        const std::string err = ConductorInputs::validate_line(s);
         EXPECT_FALSE(err.empty()) << key;
         EXPECT_NE(err.find("erf.conductors.S." + key), std::string::npos) << err;
     };
-    bad([](SpanInputs& s) { s.lengths = {301.5, 301.5}; }, "length");        // one per span
-    bad([](SpanInputs& s) { s.lengths[1] = 299.0; }, "length");               // span 2 without slack
-    bad([](SpanInputs& s) { s.towers[0] = s.end_a; }, "the attachment points");
-    bad([](SpanInputs& s) { s.insulator_length = -1.0; }, "insulator_length");
-    bad([](SpanInputs& s) { s.insulator_mass = 0.0; }, "insulator_mass");
-    bad([](SpanInputs& s) { s.insulator_diameter = 0.0; }, "insulator_diameter");
-    bad([](SpanInputs& s) { s.insulator_length = 31.0; }, "insulator_length");  // longer than the tower is high
+    bad([](LineInputs& s) { s.lengths = {301.5, 301.5}; }, "length");        // one per span
+    bad([](LineInputs& s) { s.lengths[1] = 299.0; }, "length");               // span 2 without slack
+    bad([](LineInputs& s) { s.towers[0] = s.end_a; }, "the attachment points");
+    bad([](LineInputs& s) { s.insulator_length = -1.0; }, "insulator_length");
+    bad([](LineInputs& s) { s.insulator_mass = 0.0; }, "insulator_mass");
+    bad([](LineInputs& s) { s.insulator_diameter = 0.0; }, "insulator_diameter");
+    bad([](LineInputs& s) { s.insulator_length = 31.0; }, "insulator_length");  // longer than the tower is high
     // strings hang only at towers: a single span is dead-ended at both ends
-    SpanInputs single = good_span();
+    LineInputs single = good_span();
     single.insulator_length = 2.5;
     single.insulator_mass = 60.0;
-    const std::string err = ConductorInputs::validate_span(single);
+    const std::string err = ConductorInputs::validate_line(single);
     EXPECT_NE(err.find("insulator_length needs towers"), std::string::npos) << err;
     // clamped at the towers: no strings, no mass needed
-    SpanInputs clamped = good_section();
+    LineInputs clamped = good_section();
     clamped.insulator_length = 0.0;
     clamped.insulator_mass = 0.0;
-    EXPECT_TRUE(ConductorInputs::validate_span(clamped).empty());
+    EXPECT_TRUE(ConductorInputs::validate_line(clamped).empty());
     EXPECT_FALSE(clamped.has_insulators());
     EXPECT_EQ(clamped.num_line_nodes(), 3 * 21);
 }
@@ -284,7 +284,7 @@ TEST(ConductorInputs, TransformersAreReadWithTheirFootprintsAndDefaults)
     EXPECT_FALSE(a.on_footprint(104.1, 500.0));
     EXPECT_FALSE(a.on_footprint(100.0, 497.4));
     pp.addarr("transformers", std::vector<std::string>{});
-    pp.addarr("spans", std::vector<std::string>{});
+    pp.addarr("lines", std::vector<std::string>{});
 }
 
 TEST(ConductorInputs, TransformerValuesOutsideTheirRangeAreRefusedByName)
@@ -313,12 +313,12 @@ TEST(ConductorInputs, TheSlackIsCheckedBetweenTheEndsWhereTheyStandOnTheTerrain)
     // a short span down a hillside: a dead end 10 m above a summit at 60 m and the first tower,
     // 30 m tall, 40 m away on ground 40 m lower. Above the terrain the ends are 20 m apart in
     // height, on the terrain 20 m the other way: the same 44.7 m chord, and 44.9 m has slack
-    SpanInputs s = good_span();
+    LineInputs s = good_span();
     s.end_a = {{100.0, 500.0, 10.0}};
     s.end_b = {{140.0, 500.0, 30.0}};
     s.lengths = {44.9};
-    EXPECT_TRUE(ConductorInputs::validate_span(s, false).empty());
-    SpanInputs placed = s;
+    EXPECT_TRUE(ConductorInputs::validate_line(s, false).empty());
+    LineInputs placed = s;
     placed.end_a[2] += 60.0;   // the summit
     placed.end_b[2] += 20.0;   // the hillside
     EXPECT_TRUE(ConductorInputs::validate_slack(placed, true).empty());
@@ -326,7 +326,7 @@ TEST(ConductorInputs, TheSlackIsCheckedBetweenTheEndsWhereTheyStandOnTheTerrain)
     // 41.2 m chord, so 42 m has slack there although the heights above the terrain give 44.7 m
     s.lengths = {42.0};
     EXPECT_FALSE(ConductorInputs::validate_slack(s).empty()) << "the heights above the terrain alone refuse it";
-    EXPECT_TRUE(ConductorInputs::validate_span(s, false).empty()) << "read() leaves the slack to the placement";
+    EXPECT_TRUE(ConductorInputs::validate_line(s, false).empty()) << "read() leaves the slack to the placement";
     placed = s;
     placed.end_a[2] += 60.0;
     placed.end_b[2] += 30.0;
@@ -340,10 +340,10 @@ TEST(ConductorInputs, TheSlackIsCheckedBetweenTheEndsWhereTheyStandOnTheTerrain)
 
 TEST(ConductorInputs, AStringingTensionSetsEachSpansLengthSoThatItHangsWithThatTension)
 {
-    SpanInputs s = good_section();
+    LineInputs s = good_section();
     s.lengths.clear();
     s.stringing_tension = 2.0e4;
-    EXPECT_TRUE(ConductorInputs::validate_span(s).empty()) << "no lengths needed with a stringing tension";
+    EXPECT_TRUE(ConductorInputs::validate_line(s).empty()) << "no lengths needed with a stringing tension";
     // spans of 300 m, 100 m (a tower moved up the line) and 500 m: each must hang with H = 20 kN
     s.towers[0][0] = 400.0;
     s.towers[1][0] = 500.0;
@@ -366,7 +366,7 @@ TEST(ConductorInputs, AStringingTensionSetsEachSpansLengthSoThatItHangsWithThatT
     // on strings the conductor hangs from their bottoms: a span from a dead end up to a tower is
     // measured to 2.5 m below the tower top, which on a steep short span changes the chord by more
     // than the span's slack
-    SpanInputs hung = s;
+    LineInputs hung = s;
     hung.end_a = {{100.0, 500.0, 10.0}};
     hung.towers[0] = {{140.0, 500.0, 40.0}};
     hung.insulator_length = 2.5;
@@ -378,19 +378,19 @@ TEST(ConductorInputs, AStringingTensionSetsEachSpansLengthSoThatItHangsWithThatT
     EXPECT_NEAR(hung.lengths[0], (c0 + w * w * std::pow(40.0, 4) / (24.0 * 4.0e8 * c0)) / (1.0 + 2.0e4 * c0 / (s.axial_stiffness * 40.0)),
                 1.0e-5 * c0);
     auto bad = [](auto mutate, const std::string& key) {
-        SpanInputs t = good_section();
+        LineInputs t = good_section();
         t.lengths.clear();
         t.stringing_tension = 2.0e4;
         mutate(t);
-        const std::string err = ConductorInputs::validate_span(t);
+        const std::string err = ConductorInputs::validate_line(t);
         EXPECT_FALSE(err.empty()) << key;
         EXPECT_NE(err.find("erf.conductors.S." + key), std::string::npos) << err;
     };
-    bad([](SpanInputs& t) { t.stringing_tension = -1.0; }, "stringing_tension");
-    bad([](SpanInputs& t) { t.lengths = {301.5, 301.5, 301.5}; }, "length and stringing_tension");
-    bad([](SpanInputs& t) { t.stringing_tension = 0.0; }, "length");   // neither given
+    bad([](LineInputs& t) { t.stringing_tension = -1.0; }, "stringing_tension");
+    bad([](LineInputs& t) { t.lengths = {301.5, 301.5, 301.5}; }, "length and stringing_tension");
+    bad([](LineInputs& t) { t.stringing_tension = 0.0; }, "length");   // neither given
     // without a stringing tension the lengths are left alone
-    SpanInputs fixed = good_section();
+    LineInputs fixed = good_section();
     const auto before = fixed.lengths;
     fixed.lengths_from_stringing_tension(amrex::Real(w));
     EXPECT_EQ(fixed.lengths, before);
@@ -399,7 +399,7 @@ TEST(ConductorInputs, AStringingTensionSetsEachSpansLengthSoThatItHangsWithThatT
 TEST(ConductorInputs, TowerTypesAreReadAndALinesTowerTypeMustNameOne)
 {
     amrex::ParmParse pp("erf.conductors");
-    pp.add("spans", std::string("C2"));
+    pp.add("lines", std::string("C2"));
     amrex::ParmParse ps("erf.conductors.C2");
     ps.addarr("end_a", std::vector<amrex::Real>{100.0, 500.0, 30.0});
     ps.addarr("end_b", std::vector<amrex::Real>{700.0, 500.0, 30.0});
@@ -429,20 +429,20 @@ TEST(ConductorInputs, TowerTypesAreReadAndALinesTowerTypeMustNameOne)
     EXPECT_DOUBLE_EQ(t.allowable_uplift, amrex::Real(1.0e5));
     EXPECT_DOUBLE_EQ(t.allowable_compression, 0.0);
     EXPECT_DOUBLE_EQ(t.legs(), amrex::Real(6.0)) << "the legs at the base width";
-    EXPECT_EQ(in.spans[0].tower_type, "suspension");
+    EXPECT_EQ(in.lines[0].tower_type, "suspension");
     // a line's tower type must be one of the types, and the line must have towers
-    SpanInputs s = in.spans[0];
+    LineInputs s = in.lines[0];
     EXPECT_TRUE(ConductorInputs::validate_tower_type(s, in.tower_types).empty());
     s.tower_type = "dead_end";
     EXPECT_NE(ConductorInputs::validate_tower_type(s, in.tower_types).find("erf.conductors.C2.tower_type = dead_end is not one of"),
               std::string::npos);
-    SpanInputs single = good_span();
+    LineInputs single = good_span();
     single.tower_type = "suspension";
     EXPECT_NE(ConductorInputs::validate_tower_type(single, in.tower_types).find("erf.conductors.S.tower_type needs towers"),
               std::string::npos);
-    SpanInputs none = good_span();
+    LineInputs none = good_span();
     EXPECT_TRUE(ConductorInputs::validate_tower_type(none, in.tower_types).empty()) << "no tower type: points only";
-    pp.addarr("spans", std::vector<std::string>{});
+    pp.addarr("lines", std::vector<std::string>{});
     pp.addarr("tower_types", std::vector<std::string>{});
     ps.remove("tower_type");
 }
@@ -454,33 +454,33 @@ TEST(ConductorInputs, ALineSharesTheTowersOfAnotherLineWithATowerType)
     lat.base_width = 6.0; lat.top_width = 1.5; lat.solidity = 0.2; lat.arm_length = 12.0;
     ConductorInputs in;
     in.tower_types = {lat};
-    SpanInputs owner = good_section();
+    LineInputs owner = good_section();
     owner.name = "P2";
     owner.tower_type = "lat";
-    SpanInputs phase = good_section();
+    LineInputs phase = good_section();
     phase.name = "P1";
     phase.share_towers = "P2";
-    in.spans = {owner, phase};
-    EXPECT_TRUE(ConductorInputs::validate_shared_towers(in.spans).empty()) << ConductorInputs::validate_shared_towers(in.spans);
+    in.lines = {owner, phase};
+    EXPECT_TRUE(ConductorInputs::validate_shared_towers(in.lines).empty()) << ConductorInputs::validate_shared_towers(in.lines);
     // the sharing line's towers are the owner's: their type, and whether they move
-    EXPECT_EQ(&in.tower_owner(in.spans[1]), &in.spans[0]);
-    ASSERT_NE(in.tower_type(in.spans[1]), nullptr);
-    EXPECT_EQ(in.tower_type(in.spans[1])->name, "lat");
-    EXPECT_FALSE(in.towers_move(in.spans[1]));
+    EXPECT_EQ(&in.tower_owner(in.lines[1]), &in.lines[0]);
+    ASSERT_NE(in.tower_type(in.lines[1]), nullptr);
+    EXPECT_EQ(in.tower_type(in.lines[1])->name, "lat");
+    EXPECT_FALSE(in.towers_move(in.lines[1]));
     in.tower_types[0].frequency = 2.0;
     in.tower_types[0].weight = 9.0e4;
-    EXPECT_TRUE(in.towers_move(in.spans[1])) << "a line on moving towers moves with them";
-    auto refused = [&](std::vector<SpanInputs> spans, const std::string& what) {
+    EXPECT_TRUE(in.towers_move(in.lines[1])) << "a line on moving towers moves with them";
+    auto refused = [&](std::vector<LineInputs> spans, const std::string& what) {
         const std::string err = ConductorInputs::validate_shared_towers(spans);
         EXPECT_NE(err.find("erf.conductors.P1.share_towers"), std::string::npos) << what << ": " << err;
         EXPECT_NE(err.find(what), std::string::npos) << err;
     };
-    SpanInputs p = phase;
+    LineInputs p = phase;
     p.share_towers = "P9";
     refused({owner, p}, "is not another line");
     p.share_towers = "P1";
     refused({owner, p}, "is not another line");
-    SpanInputs bare = owner;
+    LineInputs bare = owner;
     bare.tower_type.clear();
     refused({bare, phase}, "has no tower_type");
     p = phase;
@@ -489,10 +489,10 @@ TEST(ConductorInputs, ALineSharesTheTowersOfAnotherLineWithATowerType)
     p = phase;
     p.towers.pop_back();
     refused({owner, p}, "hangs from every tower");
-    SpanInputs chained = owner;
+    LineInputs chained = owner;
     chained.tower_type.clear();
     chained.share_towers = "P3";
-    SpanInputs third = good_section();
+    LineInputs third = good_section();
     third.name = "P3";
     third.tower_type = "lat";
     refused({chained, phase, third}, "name the line the towers belong to");

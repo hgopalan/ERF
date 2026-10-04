@@ -37,7 +37,7 @@ erf.plot_file_1  = plt
 erf.plot_int_1   = 10
 erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
 
-erf.conductors.spans               = S1
+erf.conductors.lines               = S1
 erf.conductors.S1.end_a            = 300. 500. 30.
 erf.conductors.S1.end_b            = 600. 500. 30.
 erf.conductors.S1.length           = 301.5

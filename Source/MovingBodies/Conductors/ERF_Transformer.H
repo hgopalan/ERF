@@ -13,7 +13,7 @@
 
 namespace erf_conductors {
 
-/** A line's end: the line (an index into erf.conductors.spans) and which end, 0 for end_a and 1 for end_b. */
+/** A line's end: the line (an index into erf.conductors.lines) and which end, 0 for end_a and 1 for end_b. */
 struct LineEnd
 {
     std::size_t line{0};
@@ -71,7 +71,7 @@ private:
  * empty string, or the message to abort with when an end lies on two footprints, when an end on a
  * footprint is not above the box's top, or when no line ends on a transformer.
  */
-std::string attach_line_ends (std::vector<Transformer>& transformers, const std::vector<SpanInputs>& placed);
+std::string attach_line_ends (std::vector<Transformer>& transformers, const std::vector<LineInputs>& placed);
 
 } // namespace erf_conductors
 

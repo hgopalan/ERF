@@ -19,7 +19,7 @@ namespace erf_conductors {
  * insulator_length is 0), so that the spans on either side of a tower balance their pull along
  * the line as on a real line.
  *
- *   erf.conductors.spans            = S1
+ *   erf.conductors.lines            = S1
  *   erf.conductors.S1.end_a         = 100. 500. 30.    (m; z is the height above the terrain surface at x, y)
  *   erf.conductors.S1.end_b         = 1000. 500. 30.
  *   erf.conductors.S1.towers        = 400. 500. 30.  700. 500. 30.   (m, the suspension points between the ends, in order; none: one span)
@@ -41,7 +41,7 @@ namespace erf_conductors {
  *                                                       points on them: a circuit's phases and shield wire on one
  *                                                       tower; default: its own towers)
  */
-struct SpanInputs
+struct LineInputs
 {
     std::string name;
     std::array<amrex::Real,3> end_a{{0.0, 0.0, 0.0}};
@@ -179,7 +179,7 @@ Catenary elastic_catenary (amrex::Real chord, amrex::Real length, amrex::Real we
 struct ConductorInputs
 {
     bool active{false};
-    std::vector<SpanInputs> spans;
+    std::vector<LineInputs> lines;
     std::vector<TransformerInputs> transformers;
     std::vector<erf_towers::TowerType> tower_types;
     std::string diagnostics_dir{"conductors"};
@@ -206,11 +206,11 @@ struct ConductorInputs
     amrex::Real flashover_distance{1.0};
 
     /** The line a line's towers belong to: the line whose towers it shares, or itself. */
-    const SpanInputs& tower_owner (const SpanInputs& s) const;
+    const LineInputs& tower_owner (const LineInputs& s) const;
     /** The tower type of a line's towers (those of the line it shares them with), or null when they have none. */
-    const erf_towers::TowerType* tower_type (const SpanInputs& s) const;
+    const erf_towers::TowerType* tower_type (const LineInputs& s) const;
     /** Whether a line's towers move (their type has a frequency): MoorDyn then takes their cross-arms as coupled points. */
-    bool towers_move (const SpanInputs& s) const
+    bool towers_move (const LineInputs& s) const
     {
         const erf_towers::TowerType* t = tower_type(s);
         return t != nullptr && t->moves();
@@ -224,7 +224,7 @@ struct ConductorInputs
      * with. With check_slack the lengths are checked against the chords as well (validate_slack);
      * read() leaves that to after the attachments are placed on the terrain.
      */
-    static std::string validate_span (const SpanInputs& s, bool check_slack = true);
+    static std::string validate_line (const LineInputs& s, bool check_slack = true);
     /**
      * Whether every span's unstretched length exceeds the distance between its attachment points (a
      * line strung to a tension is not checked: a short span is taut, held by its stretch):
@@ -232,15 +232,15 @@ struct ConductorInputs
      * their absolute heights (on_terrain), which differ from the chords of their heights above the
      * terrain wherever the ground under the two ends differs.
      */
-    static std::string validate_slack (const SpanInputs& s, bool on_terrain = false);
+    static std::string validate_slack (const LineInputs& s, bool on_terrain = false);
     /** Whether a line's tower_type names one of the tower types and the line has towers: an empty string, else the message. */
-    static std::string validate_tower_type (const SpanInputs& s, const std::vector<erf_towers::TowerType>& types);
+    static std::string validate_tower_type (const LineInputs& s, const std::vector<erf_towers::TowerType>& types);
     /**
      * Whether every line that shares towers names a line of the run that has a tower_type, shares
      * no other line's, and has as many towers, and sets no tower_type of its own: an empty string,
      * else the message.
      */
-    static std::string validate_shared_towers (const std::vector<SpanInputs>& spans);
+    static std::string validate_shared_towers (const std::vector<LineInputs>& lines);
     /** The range checks of one transformer: an empty string when it is acceptable, else the message to abort with. */
     static std::string validate_transformer (const TransformerInputs& t);
     /** The range checks of the shared settings: an empty string when acceptable, else the message. */

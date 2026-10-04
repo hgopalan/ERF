@@ -3,7 +3,7 @@
 # shield wire on their peaks. The middle phase L1b owns the towers; L1a, L1c and the shield wire share
 # them. Written from Conductors_Terrain/network.inputs with the circuit helpers of
 # Exec/CanonicalTests/PowerLines/make_case.py.
-erf.conductors.spans        = L1a L1b L1c L1sw
+erf.conductors.lines        = L1a L1b L1c L1sw
 erf.conductors.transformers = T1 T3
 erf.conductors.tower_types  = lattice
 

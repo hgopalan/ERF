@@ -1,5 +1,5 @@
-#ifndef ERF_CONDUCTOR_SPAN_H
-#define ERF_CONDUCTOR_SPAN_H
+#ifndef ERF_CONDUCTOR_LINE_H
+#define ERF_CONDUCTOR_LINE_H
 
 #include <array>
 #include <cstdint>
@@ -15,7 +15,7 @@
 namespace erf_conductors {
 
 /**
- * One conductor line of erf.conductors.spans, a single span or a section of spans over
+ * One conductor line of erf.conductors.lines, a single span or a section of spans over
  * suspension towers, as one MoorDyn system stepped in lockstep with ERF. The line writes its
  * MoorDyn input from the ERF inputs, creates and initialises the MoorDyn system, takes the wind
  * at its nodes each step through MoorDyn's external kinematics, and reports positions and
@@ -27,7 +27,7 @@ namespace erf_conductors {
  * the insulator strings, one per tower. The per-span quantities take the span's index, 0 for a
  * single span.
  */
-class ConductorSpan
+class ConductorLine
 {
 public:
     /**
@@ -38,11 +38,11 @@ public:
      * MoorDyn's coupled points, displaced from where they stand unloaded by tower_displacement (3 per
      * tower, ERF's frame; empty: not displaced).
      */
-    ConductorSpan (const SpanInputs& s, const ConductorInputs& in, amrex::Real gravity, const std::string& input_file,
+    ConductorLine (const LineInputs& s, const ConductorInputs& in, amrex::Real gravity, const std::string& input_file,
                    const std::string& saved_state = "", const std::vector<amrex::Real>& tower_displacement = {});
 
     const std::string& name () const { return m_in.name; }
-    const SpanInputs& inputs () const { return m_in; }
+    const LineInputs& inputs () const { return m_in; }
     const std::string& input_file () const { return m_file; }
     int num_spans () const { return m_in.num_spans(); }
     /** The insulator strings, one per tower when the line hangs from strings, else none. */
@@ -169,7 +169,7 @@ public:
 
     /**
      * Append a diagnostics row per span (whitespace separated, like ERF's data logs) to
-     * SpanInputs::span_root(k).dat, and one for the strings to <output_root>_insulators.dat; headers when first.
+     * LineInputs::span_root(k).dat, and one for the strings to <output_root>_insulators.dat; headers when first.
      */
     void write_diagnostics (double time, bool first) const;
     /** Append every node (position, clearance, tension, wind, drag) at this time to <output_root>_nodes.dat; header when first. */
@@ -187,7 +187,7 @@ private:
     /** The horizontal unit normal of the line at tower j+1, to the left of the direction from end_a to end_b. */
     std::array<amrex::Real,3> across_direction (int j) const;
 
-    SpanInputs m_in;
+    LineInputs m_in;
     amrex::Real m_offset{0.0};   //!< the surface offset (m)
     amrex::Real m_rho{1.225};    //!< the air's density (kg/m^3)
     amrex::Real m_g{9.81};       //!< gravity (m/s^2)

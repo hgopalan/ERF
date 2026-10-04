@@ -148,7 +148,7 @@ MoorDyn is ERF's velocity at the line's nodes (the regression test
    ylo.velocity = 0. 15.0 0.
    yhi.type     = "Outflow"
 
-   erf.conductors.spans               = S1
+   erf.conductors.lines               = S1
    erf.conductors.S1.end_a            = 600. 500. 30.    # z above the terrain surface
    erf.conductors.S1.end_b            = 900. 500. 30.
    erf.conductors.S1.length           = 301.5           # unstretched, more than the 300 m chord

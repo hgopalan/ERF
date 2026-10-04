@@ -121,7 +121,7 @@ void set_inputs (const std::string& dir, const std::string& name, bool prescribe
                  const std::array<Real,3>& a = {{300.0, 500.0, 30.0}}, const std::array<Real,3>& b = {{600.0, 500.0, 30.0}})
 {
     amrex::ParmParse pp("erf.conductors");
-    pp.add("spans", name);
+    pp.add("lines", name);
     pp.add("diagnostics_dir", dir);
     pp.add("air_density", 1.2);
     // ParmParse is global to the test binary: drop what another test left before setting this one's
@@ -146,8 +146,8 @@ TEST(Conductors, AttachmentsArePlacedAboveTheTerrainUnderEachEnd)
     auto c = Conductors::create(0);
     ASSERT_TRUE(c);
     c->set_ground(m.znd.get(), m.geom);
-    ASSERT_EQ(c->spans().size(), 1u);
-    const auto& span = *c->spans().front();
+    ASSERT_EQ(c->lines().size(), 1u);
+    const auto& span = *c->lines().front();
     const unsigned last = span.num_nodes() - 1;
     const auto a = span.node_position(0);
     const auto b = span.node_position(last);
@@ -180,7 +180,7 @@ TEST(Conductors, OnAUniformMeshTheHeightsAreAbsolute)
     auto c = Conductors::create(0);
     ASSERT_TRUE(c);
     c->set_ground(nullptr, m.geom);
-    const auto& span = *c->spans().front();
+    const auto& span = *c->lines().front();
     EXPECT_NEAR(span.node_position(0)[2], 30.0, 1.0e-6);
     EXPECT_NEAR(span.node_position(span.num_nodes() - 1)[2], 30.0, 1.0e-6);
 }
@@ -194,7 +194,7 @@ TEST(Conductors, SpansStepOnTheAnchorLevelOnlyAndLogEveryStep)
     ASSERT_TRUE(c);
     EXPECT_EQ(c->anchor_level(), 1);
     c->set_ground(nullptr, m.geom);
-    const auto& span = *c->spans().front();
+    const auto& span = *c->lines().front();
     const Real off0 = span.mid_offset();
     c->advance(0, 0.0, 0.1, m.u, m.v, m.w, nullptr, nullptr, m.geom);   // level 0: nothing happens
     EXPECT_DOUBLE_EQ(span.mid_offset(), off0);
@@ -220,7 +220,7 @@ TEST(Conductors, TheFlowIsSampledWhereTheLineIsNow)
     auto c = Conductors::create(0);
     ASSERT_TRUE(c);
     c->set_ground(nullptr, m.geom);
-    const auto& span = *c->spans().front();
+    const auto& span = *c->lines().front();
     Real moved = 0.0;
     for (int s = 0; s < 20; ++s) {
         const std::vector<Real> where = span.kinematics_points();   // where the line is when the wind is sampled
@@ -250,7 +250,7 @@ TEST(Conductors, ClearanceIsTheHeightAboveTheTerrainUnderEachNode)
     ASSERT_TRUE(c);
     c->set_ground(m.znd.get(), m.geom);
     for (int s = 0; s < 3; ++s) { c->advance(0, 0.2 * s, 0.2, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
-    const auto& span = *c->spans().front();
+    const auto& span = *c->lines().front();
     Real lowest = 1.0e30;
     unsigned lowest_node = 0;
     for (unsigned n = 0; n < span.num_nodes(); ++n) {
@@ -303,7 +303,7 @@ TEST(Conductors, TheSpreadDragIntegratesToMinusTheDragOnTheLines)
     }
     EXPECT_LT(detJ.min(0), 0.99 * detJ.max(0)) << "the Jacobian must vary over the ramp";
     for (int s = 0; s < 2; ++s) { c->advance(0, 0.2 * s, 0.2, m.u, m.v, m.w, m.znd.get(), &detJ, m.geom); }
-    const auto& span = *c->spans().front();
+    const auto& span = *c->lines().front();
     const auto drag = span.total_drag();
     EXPECT_GT(drag[1], 1.0) << "a crosswind along +y must drag the line along +y";
     const auto& integral = c->source_integral();
@@ -337,7 +337,7 @@ TEST(Conductors, WithoutDragOnFlowNothingIsPutIntoTheFlow)
     EXPECT_FALSE(c->drag_on_flow());
     c->set_ground(nullptr, m.geom);
     c->advance(0, 0.0, 0.2, m.u, m.v, m.w, nullptr, nullptr, m.geom);
-    EXPECT_GT(c->spans().front()->total_drag()[1], 1.0) << "the line still feels the drag";
+    EXPECT_GT(c->lines().front()->total_drag()[1], 1.0) << "the line still feels the drag";
     for (int d = 0; d < 3; ++d) { EXPECT_DOUBLE_EQ(c->source_integral()[d], 0.0); }
     amrex::MultiFab sy(amrex::convert(m.ba, amrex::IntVect(0,1,0)), m.dm, 1, 0);
     amrex::MultiFab sx(amrex::convert(m.ba, amrex::IntVect(1,0,0)), m.dm, 1, 0);
@@ -381,9 +381,9 @@ TEST(Conductors, ARestartContinuesTheLinesTheirSourcesStatisticsAndLogs)
     amrex::MultiFab src_at_chk(m.ba, m.dm, 3, 0);
     a->cell_sources(0, src_at_chk, 0);
     ASSERT_GT(src_at_chk.norm0(1), 0.0) << "the lines must push on the air";
-    const std::vector<Real> pos_at_chk = a->spans().front()->node_positions();
+    const std::vector<Real> pos_at_chk = a->lines().front()->node_positions();
     for (; step < 7; ++step) { a->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), &detJ, m.geom); }
-    const std::vector<Real> pos_end = a->spans().front()->node_positions();
+    const std::vector<Real> pos_end = a->lines().front()->node_positions();
     const std::string log_a = slurp(dir + "/Trst.dat");
     const std::string nodes_a = slurp(dir + "/Trst_nodes.dat");
     const std::string stats_a = slurp(dir + "/Trst_stats.csv");
@@ -395,7 +395,7 @@ TEST(Conductors, ARestartContinuesTheLinesTheirSourcesStatisticsAndLogs)
     ASSERT_TRUE(b);
     b->set_ground(m.znd.get(), m.geom, chk);
     ASSERT_TRUE(b->restored());
-    const auto& span_b = *b->spans().front();
+    const auto& span_b = *b->lines().front();
     const std::vector<Real> pos_b = span_b.node_positions();
     ASSERT_EQ(pos_b.size(), pos_at_chk.size());
     for (std::size_t i = 0; i < pos_b.size(); ++i) {
@@ -429,9 +429,9 @@ TEST(Conductors, ARestartContinuesTheLinesTheirSourcesStatisticsAndLogs)
     ASSERT_TRUE(c);
     c->set_ground(m.znd.get(), m.geom, bare);
     EXPECT_FALSE(c->restored());
-    EXPECT_NEAR(c->spans().front()->mid_offset(), 0.0, 1.0e-3);
+    EXPECT_NEAR(c->lines().front()->mid_offset(), 0.0, 1.0e-3);
     for (step = 7; step < 9; ++step) { c->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), &detJ, m.geom); }
-    EXPECT_GT(c->spans().front()->mid_offset(), 0.01) << "the span started at the restart time moves";
+    EXPECT_GT(c->lines().front()->mid_offset(), 0.01) << "the span started at the restart time moves";
     // and a restart from a checkpoint of that run continues it on the same clock
     const std::string chk_c = dir + "/chk00009";
     std::filesystem::create_directories(chk_c);
@@ -442,8 +442,8 @@ TEST(Conductors, ARestartContinuesTheLinesTheirSourcesStatisticsAndLogs)
     ASSERT_TRUE(d->restored());
     c->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), &detJ, m.geom);
     d->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), &detJ, m.geom);
-    const std::vector<Real> pc = c->spans().front()->node_positions();
-    const std::vector<Real> pd = d->spans().front()->node_positions();
+    const std::vector<Real> pc = c->lines().front()->node_positions();
+    const std::vector<Real> pd = d->lines().front()->node_positions();
     for (std::size_t i = 0; i < pc.size(); ++i) {
         EXPECT_NEAR(pd[i], pc[i], 1.0e-9 * std::max(Real(1.0), std::abs(pc[i]))) << "component " << i;
     }
@@ -487,7 +487,7 @@ TEST(Conductors, ASectionIsPlacedOnTheTerrainAtEveryTowerAndLogsEachSpan)
     auto c = Conductors::create(0);
     ASSERT_TRUE(c);
     c->set_ground(m.znd.get(), m.geom);
-    const auto& line = *c->spans().front();
+    const auto& line = *c->lines().front();
     ASSERT_EQ(line.num_spans(), 3);
     EXPECT_EQ(line.inputs().lengths, (std::vector<Real>{301.5, 301.5, 301.5})) << "given lengths are kept";
     // the towers stand on the ramp, and the conductor hangs 2.5 m under each
@@ -540,7 +540,7 @@ TEST(Conductors, TheClosestApproachOfTwoLinesIsFlaggedAgainstTheFlashoverDistanc
     set_inputs(dir, "Pa", true, {{300.0, 500.0, 30.0}}, {{600.0, 500.0, 30.0}});
     set_inputs(dir, "Pb", true, {{300.0, 506.0, 30.0}}, {{600.0, 506.0, 30.0}});
     amrex::ParmParse pp("erf.conductors");
-    pp.addarr("spans", std::vector<std::string>{"Pa", "Pb"});
+    pp.addarr("lines", std::vector<std::string>{"Pa", "Pb"});
     pp.add("flashover_distance", 5.5);
     amrex::ParmParse("erf.conductors.Pa").add("mass_per_length", 1.0);
     amrex::ParmParse("erf.conductors.Pb").add("mass_per_length", 3.0);
@@ -554,7 +554,7 @@ TEST(Conductors, TheClosestApproachOfTwoLinesIsFlaggedAgainstTheFlashoverDistanc
     for (int s = 0; s < 40; ++s) {
         c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, nullptr, nullptr, m.geom);
         // the distance is the exact minimum between the two conductors where they are now
-        const auto exact = erf_conductors::closest_polylines(c->spans()[0]->conductor_path(), c->spans()[1]->conductor_path());
+        const auto exact = erf_conductors::closest_polylines(c->lines()[0]->conductor_path(), c->lines()[1]->conductor_path());
         ASSERT_NEAR(c->separations()[0].distance, exact.distance, 1.0e-12 * exact.distance) << "step " << s;
         closest = std::min(closest, c->separations()[0].distance);
     }
@@ -576,7 +576,7 @@ TEST(Conductors, TheClosestApproachOfTwoLinesIsFlaggedAgainstTheFlashoverDistanc
     // the statistics: the fraction of samples in a clash is the mean of the flag
     const std::string stats = slurp(dir + "/separation_Pa-Pb_stats.csv");
     EXPECT_NE(stats.find(",clash,"), std::string::npos) << stats;
-    pp.addarr("spans", std::vector<std::string>{});
+    pp.addarr("lines", std::vector<std::string>{});
     amrex::ParmParse("erf.conductors.Pa").remove("mass_per_length");
     amrex::ParmParse("erf.conductors.Pb").remove("mass_per_length");
 }
@@ -588,7 +588,7 @@ TEST(Conductors, ARestartContinuesASectionItsStringsAndTheSeparationOfTheLines)
     set_inputs(dir, "Rs", true, {{100.0, 500.0, 30.0}}, {{1000.0, 500.0, 30.0}});
     set_inputs(dir, "Rp", true, {{400.0, 506.0, 30.0}}, {{700.0, 506.0, 30.0}});
     amrex::ParmParse pp("erf.conductors");
-    pp.addarr("spans", std::vector<std::string>{"Rs", "Rp"});
+    pp.addarr("lines", std::vector<std::string>{"Rs", "Rp"});
     amrex::ParmParse ps("erf.conductors.Rs");
     ps.remove("length");
     ps.addarr("length", std::vector<Real>{301.5, 301.5, 301.5});
@@ -620,8 +620,8 @@ TEST(Conductors, ARestartContinuesASectionItsStringsAndTheSeparationOfTheLines)
     for (step = 4; step < 7; ++step) { b->advance(0, dt * step, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom); }
     for (std::size_t i = 0; i < files.size(); ++i) { EXPECT_EQ(slurp(dir + files[i]), before[i]) << files[i]; }
     EXPECT_NEAR(b->separations()[0].distance, sep, 1.0e-9 * sep);
-    EXPECT_NEAR(b->spans()[0]->insulator_swing(0), a->spans()[0]->insulator_swing(0), roundoff);
-    pp.addarr("spans", std::vector<std::string>{});
+    EXPECT_NEAR(b->lines()[0]->insulator_swing(0), a->lines()[0]->insulator_swing(0), roundoff);
+    pp.addarr("lines", std::vector<std::string>{});
     ps.remove("towers");
     ps.remove("insulator_length");
     ps.remove("insulator_mass");
@@ -637,7 +637,7 @@ TEST(Conductors, TransformersTakeThePullOfTheLinesEndingOnThemAndContinueAcrossA
     amrex::ParmParse("erf.conductors.Lt").remove("length");
     amrex::ParmParse("erf.conductors.Lt").add("length", 297.5);
     amrex::ParmParse pp("erf.conductors");
-    pp.addarr("spans", std::vector<std::string>{"Lt", "Lo"});
+    pp.addarr("lines", std::vector<std::string>{"Lt", "Lo"});
     pp.addarr("transformers", std::vector<std::string>{"T1", "T2"});
     for (const char* t : {"T1", "T2"}) {
         amrex::ParmParse pt(std::string("erf.conductors.") + t);
@@ -675,7 +675,7 @@ TEST(Conductors, TransformersTakeThePullOfTheLinesEndingOnThemAndContinueAcrossA
     EXPECT_EQ(boxes, 2);
 
     auto check = [&](const Conductors& cc, const char* when) {
-        const auto& span = *cc.spans()[0];
+        const auto& span = *cc.lines()[0];
         const auto& L1 = cc.transformer_loads()[0];
         const auto& L2 = cc.transformer_loads()[1];
         const auto fa = span.end_force(0);
@@ -697,7 +697,7 @@ TEST(Conductors, TransformersTakeThePullOfTheLinesEndingOnThemAndContinueAcrossA
         for (std::size_t t = 0; t < 2; ++t) {
             const auto& tr = cc.transformers()[t];
             Real best = 1.0e30;
-            for (const auto& sp : cc.spans()) {
+            for (const auto& sp : cc.lines()) {
                 best = std::min(best, erf_conductors::closest_polyline_box(sp->conductor_path(), tr.box_lo(), tr.box_hi()).distance);
             }
             EXPECT_EQ(cc.transformer_clearances()[t].distance, best) << when << " " << tr.name();
@@ -750,7 +750,7 @@ TEST(Conductors, TransformersTakeThePullOfTheLinesEndingOnThemAndContinueAcrossA
     EXPECT_EQ(slurp(dir + "/transformer_T2_stats.csv"), stats2);
     for (int d = 0; d < 3; ++d) { EXPECT_EQ(r->transformer_loads()[0].force[d], c->transformer_loads()[0].force[d]); }
 
-    pp.addarr("spans", std::vector<std::string>{});
+    pp.addarr("lines", std::vector<std::string>{});
     pp.addarr("transformers", std::vector<std::string>{});
     amrex::ParmParse("erf.conductors.T1").remove("allowable_force");
 }
@@ -768,7 +768,7 @@ TEST(Conductors, AStringingTensionSetsTheLengthsFromTheChordsOnTheTerrain)
     auto c = Conductors::create(0);
     ASSERT_TRUE(c);
     c->set_ground(m.znd.get(), m.geom);
-    const auto& line = *c->spans().front();
+    const auto& line = *c->lines().front();
     const auto& s = line.inputs();
     ASSERT_EQ(s.lengths.size(), 3u);
     const std::array<Real,3> h{{300.0, 150.0, 450.0}};
@@ -822,7 +822,7 @@ void clear_towered_section (const std::string& name)
     amrex::ParmParse pp("erf.conductors");
     pp.addarr("tower_types", std::vector<std::string>{});
     pp.remove("drag_on_flow");
-    pp.addarr("spans", std::vector<std::string>{});
+    pp.addarr("lines", std::vector<std::string>{});
 }
 } // namespace
 
@@ -851,7 +851,7 @@ TEST(Conductors, LatticeTowersStandAtTheSuspensionPointsAndCarryTheWindsDrag)
     std::vector<std::array<Real,3>> pull;
     for (int s = 0; s < 3; ++s) {
         pull.clear();
-        for (int t = 0; t < 2; ++t) { pull.push_back(c->spans()[0]->tower_force(t)); }
+        for (int t = 0; t < 2; ++t) { pull.push_back(c->lines()[0]->tower_force(t)); }
         c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom);
     }
     for (const auto& tw : c->towers()) {
@@ -916,7 +916,7 @@ TEST(Conductors, TheTowersDragGoesIntoTheFlowWithTheLinesAndSurvivesARestart)
     for (; step < 3; ++step) { a->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
     // the source integrates to minus the drag on the lines and on the towers
     std::array<Real,3> drag{{0.0, 0.0, 0.0}};
-    for (const auto& s : a->spans()) { const auto f = s->total_drag(); for (int d = 0; d < 3; ++d) { drag[d] += f[d]; } }
+    for (const auto& s : a->lines()) { const auto f = s->total_drag(); for (int d = 0; d < 3; ++d) { drag[d] += f[d]; } }
     Real towers_y = 0.0;
     for (const auto& t : a->towers()) { const auto f = t.total_force(); towers_y += f[1]; for (int d = 0; d < 3; ++d) { drag[d] += f[d]; } }
     EXPECT_GT(towers_y, 0.0);
@@ -976,7 +976,7 @@ TEST(Conductors, MovingTowersSettleWhereTheirStiffnessBalancesTheWindAndTheLine)
     auto c = Conductors::create(0);
     ASSERT_TRUE(c);
     c->set_ground(m.znd.get(), m.geom);
-    ASSERT_TRUE(c->spans()[0]->towers_move());
+    ASSERT_TRUE(c->lines()[0]->towers_move());
     for (int s = 0; s < 40; ++s) { c->advance(0, dt * s, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
     for (std::size_t t = 0; t < 2; ++t) {
         const auto& tw = c->towers()[t];
@@ -1002,7 +1002,7 @@ TEST(Conductors, MovingTowersSettleWhereTheirStiffnessBalancesTheWindAndTheLine)
             EXPECT_NEAR(tw.line_force()[d], Fr[d], 0.02 * std::abs(Fr[2])) << tw.name() << " dir " << d;
         }
         // the line hangs from the cross-arm where the tower has taken it
-        const auto p = c->spans()[0]->node_position(c->spans()[0]->span_first_node(static_cast<int>(t) + 1));
+        const auto p = c->lines()[0]->node_position(c->lines()[0]->span_first_node(static_cast<int>(t) + 1));
         const Real ptol = std::is_same<Real, float>::value ? Real(1.0e-4) : Real(1.0e-6);   // a Real's spacing at 500 m
         EXPECT_NEAR(p[0], 400.0 + 300.0 * t + x[0], ptol);
         EXPECT_NEAR(p[1], 500.0 + x[1], ptol);
@@ -1068,7 +1068,7 @@ namespace {
 void set_circuit (const std::string& dir, Real damping = 0.0)
 {
     amrex::ParmParse pp("erf.conductors");
-    pp.addarr("spans", std::vector<std::string>{"C1", "C2", "C3", "CS"});
+    pp.addarr("lines", std::vector<std::string>{"C1", "C2", "C3", "CS"});
     pp.add("diagnostics_dir", dir);
     pp.add("air_density", 1.2);
     for (const char* key : {"prescribed_velocity", "drag_on_flow", "epsilon", "node_output_int", "stats_start", "flashover_distance"}) { pp.remove(key); }
@@ -1103,7 +1103,7 @@ void set_circuit (const std::string& dir, Real damping = 0.0)
 void clear_circuit ()
 {
     amrex::ParmParse pp("erf.conductors");
-    pp.addarr("spans", std::vector<std::string>{});
+    pp.addarr("lines", std::vector<std::string>{});
     pp.addarr("tower_types", std::vector<std::string>{});
     amrex::ParmParse pt("erf.conductors.lat");
     for (const char* k : {"peak", "frequency", "damping_ratio"}) { pt.remove(k); }
@@ -1128,18 +1128,18 @@ TEST(Conductors, ACircuitHangsFromOneRowOfTowersEachLineAtItsOwnPoint)
         EXPECT_EQ(tw.name(), "C2_t" + std::to_string(t + 1));
         ASSERT_EQ(c->tower_lines()[t].size(), 4u);
         ASSERT_EQ(tw.attachments().size(), 4u);
-        // the owner first, at the centre of the cross-arm, then the others in the order of erf.conductors.spans
-        EXPECT_EQ(c->spans()[c->tower_lines()[t][0].first]->name(), "C2");
+        // the owner first, at the centre of the cross-arm, then the others in the order of erf.conductors.lines
+        EXPECT_EQ(c->lines()[c->tower_lines()[t][0].first]->name(), "C2");
         // every line's point stands on the tower's base: the ramp rises 0.11 m across the 5.5 m to C1,
         // which the cross-arm does not follow
         for (std::size_t a = 0; a < 4; ++a) {
             const auto [line, j] = c->tower_lines()[t][a];
-            const auto& p = c->spans()[line]->inputs().point(j + 1);
-            const Real above = (c->spans()[line]->name() == "CS") ? Real(37.0) : Real(30.0);
-            EXPECT_NEAR(p[2], tw.base()[2] + above, roundoff * 1000) << c->spans()[line]->name();
+            const auto& p = c->lines()[line]->inputs().point(j + 1);
+            const Real above = (c->lines()[line]->name() == "CS") ? Real(37.0) : Real(30.0);
+            EXPECT_NEAR(p[2], tw.base()[2] + above, roundoff * 1000) << c->lines()[line]->name();
             EXPECT_EQ(tw.attachments()[a], p);
         }
-        const auto& c1 = c->spans()[0]->inputs().point(static_cast<int>(t) + 1);
+        const auto& c1 = c->lines()[0]->inputs().point(static_cast<int>(t) + 1);
         EXPECT_GT(std::abs(c1[2] - (m.h(c1[0], c1[1]) + 30.0)), 0.1) << "the test must see the level cross-arm";
     }
     std::vector<std::array<Real,3>> pull(2, {{0.0, 0.0, 0.0}});
@@ -1147,7 +1147,7 @@ TEST(Conductors, ACircuitHangsFromOneRowOfTowersEachLineAtItsOwnPoint)
         for (std::size_t t = 0; t < 2; ++t) {
             pull[t] = {{0.0, 0.0, 0.0}};
             for (const auto& [line, j] : c->tower_lines()[t]) {
-                const auto f = c->spans()[line]->tower_force(j);
+                const auto f = c->lines()[line]->tower_force(j);
                 for (int d = 0; d < 3; ++d) { pull[t][d] += f[d]; }
             }
         }
@@ -1171,7 +1171,7 @@ TEST(Conductors, ACircuitOnBendingTowersMovesEveryLinesPoint)
     auto c = Conductors::create(0);
     ASSERT_TRUE(c);
     c->set_ground(m.znd.get(), m.geom);
-    for (const auto& span : c->spans()) { EXPECT_TRUE(span->towers_move()) << span->name() << " moves with the towers it shares"; }
+    for (const auto& span : c->lines()) { EXPECT_TRUE(span->towers_move()) << span->name() << " moves with the towers it shares"; }
     const double dt = 0.25;
     int most = 0, unconverged = 0;
     for (int s = 0; s < 40; ++s) {
@@ -1195,10 +1195,10 @@ TEST(Conductors, ACircuitOnBendingTowersMovesEveryLinesPoint)
         const Real ptol = std::is_same<Real, float>::value ? Real(1.0e-4) : Real(1.0e-6);
         for (std::size_t a = 0; a < tw.attachments().size(); ++a) {
             const auto [line, j] = c->tower_lines()[t][a];
-            const erf_conductors::ConductorSpan& span = *c->spans()[line];
+            const erf_conductors::ConductorLine& span = *c->lines()[line];
             // the point the line hangs from: the top of its string, or the first node of the span after the tower
             const unsigned node = span.num_insulators() > 0
-                ? span.span_first_node(span.num_spans()) + static_cast<unsigned>((erf_conductors::SpanInputs::insulator_segments + 1) * j)
+                ? span.span_first_node(span.num_spans()) + static_cast<unsigned>((erf_conductors::LineInputs::insulator_segments + 1) * j)
                 : span.span_first_node(j + 1);
             const auto p = span.node_position(node);
             const auto x = model->attachment_displacement(a);
@@ -1269,7 +1269,7 @@ TEST(Conductors, AnImmersedTerrainPlacesEverythingOnItsSurface)
         c->set_ground(pass == 0 ? m.znd.get() : nullptr, m.geom);
         std::vector<std::array<Real,3>> placed;
         std::vector<Real> clear;
-        for (const auto& span : c->spans()) {
+        for (const auto& span : c->lines()) {
             for (int k = 0; k <= span->num_spans(); ++k) { placed.push_back(span->inputs().point(k)); }
             for (unsigned i = 0; i < span->num_nodes(); ++i) { clear.push_back(span->clearance(i)); }
         }

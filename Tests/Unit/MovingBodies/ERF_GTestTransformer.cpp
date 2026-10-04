@@ -16,7 +16,7 @@
 #include "ERF_Transformer.H"
 
 using amrex::Real;
-using erf_conductors::SpanInputs;
+using erf_conductors::LineInputs;
 using erf_conductors::Transformer;
 using erf_conductors::TransformerInputs;
 using P3 = std::array<Real,3>;
@@ -35,9 +35,9 @@ TransformerInputs box (const std::string& name, Real x, Real y)
 }
 
 // a line at its absolute heights: ends 10 m above ground at 50 m
-SpanInputs line (const std::string& name, const P3& a, const P3& b)
+LineInputs line (const std::string& name, const P3& a, const P3& b)
 {
-    SpanInputs s;
+    LineInputs s;
     s.name = name;
     s.end_a = a;
     s.end_b = b;
@@ -59,7 +59,7 @@ TEST(Transformer, LineEndsOnAFootprintAreDeadEndedOnIt)
 {
     std::vector<Transformer> ts{Transformer(box("T1", 100.0, 200.0), 50.0), Transformer(box("T2", 400.0, 200.0), 50.0)};
     // L1 from T1 to T2, L2 from T1's edge to open ground, L3 nowhere near either
-    const std::vector<SpanInputs> lines{line("L1", {{102.0, 200.0, 60.0}}, {{398.0, 200.0, 60.0}}),
+    const std::vector<LineInputs> lines{line("L1", {{102.0, 200.0, 60.0}}, {{398.0, 200.0, 60.0}}),
                                         line("L2", {{104.0, 202.5, 58.0}}, {{300.0, 400.0, 60.0}}),
                                         line("L3", {{200.0, 600.0, 60.0}}, {{500.0, 600.0, 60.0}})};
     EXPECT_EQ(erf_conductors::attach_line_ends(ts, lines), "");

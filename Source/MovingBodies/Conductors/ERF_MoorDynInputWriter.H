@@ -29,10 +29,10 @@ namespace erf_conductors {
  * @param in the shared settings (air density, surface offset, MoorDyn step, CFL)
  * @param gravity ERF's gravity (m/s^2)
  */
-std::string moordyn_input_text (const SpanInputs& s, const ConductorInputs& in, amrex::Real gravity);
+std::string moordyn_input_text (const LineInputs& s, const ConductorInputs& in, amrex::Real gravity);
 
 /** Write moordyn_input_text() to a file (creating its directory); aborts when the file cannot be written. */
-void write_moordyn_input (const std::string& fname, const SpanInputs& s, const ConductorInputs& in, amrex::Real gravity);
+void write_moordyn_input (const std::string& fname, const LineInputs& s, const ConductorInputs& in, amrex::Real gravity);
 
 /** A position in ERF's frame from MoorDyn's (the surface offset added back). */
 inline std::array<amrex::Real,3> to_erf_frame (const std::array<double,3>& p, amrex::Real surface_offset)

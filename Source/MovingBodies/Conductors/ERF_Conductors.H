@@ -13,7 +13,7 @@
 
 #include "ERF_ConductorGeometry.H"
 #include "ERF_ConductorInputs.H"
-#include "ERF_ConductorSpan.H"
+#include "ERF_ConductorLine.H"
 #include "ERF_RunningStats.H"
 #include "ERF_Transformer.H"
 #include "ERF_Tower.H"
@@ -37,7 +37,7 @@ class Conductors
 public:
     using ConductorInputs_t = erf_conductors::ConductorInputs;
 
-    /** nullptr unless erf.conductors.spans is given; aborts on inputs this version does not support. */
+    /** nullptr unless erf.conductors.lines is given; aborts on inputs this version does not support. */
     static std::unique_ptr<Conductors> create (int max_level);
 
     /**
@@ -94,7 +94,7 @@ public:
     /** The integral of the momentum source over the anchor level (N), as last spread. */
     const std::array<amrex::Real,3>& source_integral () const { return m_source_integral; }
 
-    /** The pairs of lines watched for clashes (indices into spans()), and their last closest approach. */
+    /** The pairs of lines watched for clashes (indices into lines()), and their last closest approach. */
     const std::vector<std::pair<std::size_t,std::size_t>>& pairs () const { return m_pairs; }
     const std::vector<erf_conductors::Closest>& separations () const { return m_sep; }
     /** The transformers the lines end on, the lines' last load on each, and the closest any conductor came to each. */
@@ -127,7 +127,7 @@ public:
 
     int anchor_level () const { return m_anchor; }
     const ConductorInputs_t& inputs () const { return m_in; }
-    const std::vector<std::unique_ptr<erf_conductors::ConductorSpan>>& spans () const { return m_spans; }
+    const std::vector<std::unique_ptr<erf_conductors::ConductorLine>>& lines () const { return m_lines; }
 
 private:
     Conductors (ConductorInputs_t in, int anchor);
@@ -138,11 +138,11 @@ private:
      * one is given. Aborts, naming the span and the node, when a node has left the domain or the anchor
      * level's grids do not cover the cells the sampler reads.
      */
-    std::vector<amrex::Real> wind_at (const erf_conductors::ConductorSpan& span,
+    std::vector<amrex::Real> wind_at (const erf_conductors::ConductorLine& span,
                                       const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
                                       const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
     /** Abort, naming the span and the node, when a line node lies outside the domain (periodic directions wrap). */
-    void check_nodes_in_domain (const erf_conductors::ConductorSpan& span, const std::vector<amrex::Real>& pos,
+    void check_nodes_in_domain (const erf_conductors::ConductorLine& span, const std::vector<amrex::Real>& pos,
                                 const amrex::Geometry& geom) const;
     /** The terrain height under each point (3 per point): the surface's when one was given, else the mesh's bottom. */
     void ground_heights (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom, const std::vector<amrex::Real>& pos,
@@ -157,7 +157,7 @@ private:
     /** Read the state write_checkpoint() saved under dir, create the spans from it and trim the logs to its time. */
     void restore (const std::string& dir);
     /** The running statistics of a line: one set per span, and one for its insulator strings. */
-    void add_stats (const erf_conductors::SpanInputs& s);
+    void add_stats (const erf_conductors::LineInputs& s);
     /** The pairs of lines and their statistics. */
     void add_pair_stats ();
     /** The closest approach of every pair of lines' conductors, where they are now. */
@@ -210,9 +210,9 @@ private:
     int m_step{0};
     double m_time{0.0};                                  //!< the time the spans have reached
     double m_t0{0.0};                                    //!< ERF's time when the spans' MoorDyn clocks read zero
-    std::vector<erf_conductors::SpanInputs> m_placed;   //!< the spans with their ends at absolute heights
+    std::vector<erf_conductors::LineInputs> m_placed;   //!< the spans with their ends at absolute heights
     std::vector<amrex::Real> m_ground;                  //!< per end (2 per span): the terrain height
-    std::vector<std::unique_ptr<erf_conductors::ConductorSpan>> m_spans;
+    std::vector<std::unique_ptr<erf_conductors::ConductorLine>> m_lines;
     std::vector<std::vector<erf_actuator::RunningStats>> m_stats;   //!< per line: per span, then the strings', from stats_start
     std::vector<std::pair<std::size_t,std::size_t>> m_pairs;        //!< the pairs of lines watched for clashes
     std::vector<erf_actuator::RunningStats> m_pair_stats;           //!< per pair: the closest approach and the clash flag

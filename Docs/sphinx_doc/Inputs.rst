@@ -4963,7 +4963,7 @@ in the wind computed by MoorDyn-C; see :ref:`sec:Conductors` for the model
 and :doc:`CouplingToMoorDyn` for building ERF with MoorDyn. The feature is
 built with ``-DERF_ENABLE_MOORDYN=ON`` (cmake) and refuses to start with any
 ``amrex.fpe_trap_*`` input on, since MoorDyn's initial-condition solver
-overflows an intermediate value. Lines are named in ``erf.conductors.spans``;
+overflows an intermediate value. Lines are named in ``erf.conductors.lines``;
 each has its own ``erf.conductors.<name>.*`` block and is either a single
 span between two dead-ends or, with ``towers``, a section of spans over
 suspension towers. Transformers, named in ``erf.conductors.transformers``
@@ -4975,7 +4975,7 @@ type has a ``frequency``.
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | Parameter                                                 | Definition                                               | Acceptable Values    | Default                  |
 +===========================================================+==========================================================+======================+==========================+
-| **erf.conductors.spans**                                  | names of the conductor lines; the feature is off when    | Strings              | none                     |
+| **erf.conductors.lines**                                  | names of the conductor lines; the feature is off when    | Strings              | none                     |
 |                                                           | absent                                                   |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<name>.end_a**                           | first dead-end attachment (m): x, y in ERF coordinates,  | 3 Reals inside the   | must be set              |
@@ -5027,7 +5027,7 @@ type has a ``frequency``.
 |                                                           | towers are points                                        |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<name>.share_towers**                    | the line hangs from the towers of this line (which has   | a line of            | none: its own towers     |
-|                                                           | the tower_type), each at its own towers point on them: a | erf.conductors.spans |                          |
+|                                                           | the tower_type), each at its own towers point on them: a | erf.conductors.lines |                          |
 |                                                           | circuit's phases across the cross-arm and its shield     | with a tower_type    |                          |
 |                                                           | wire on the peak; the points stand above the tower's     | and as many towers;  |                          |
 |                                                           | base                                                     | no tower_type of its |                          |

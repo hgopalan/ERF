@@ -21,13 +21,13 @@
 #include "ERF_MoorDynSystem.H"
 
 using erf_conductors::ConductorInputs;
-using erf_conductors::SpanInputs;
+using erf_conductors::LineInputs;
 
 namespace {
 
-SpanInputs span ()
+LineInputs span ()
 {
-    SpanInputs s;
+    LineInputs s;
     s.name = "S1";
     s.end_a = {{100.0, 500.0, 30.0}};
     s.end_b = {{400.0, 500.0, 40.0}};
@@ -108,7 +108,7 @@ TEST(MoorDynInputWriter, MoorDynAcceptsTheFileAndTheEndsComeBackInERFsFrame)
 {
     const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_moordyn_writer";
     const std::string fname = (dir / "S1.moordyn.txt").string();
-    const SpanInputs s = span();
+    const LineInputs s = span();
     const ConductorInputs in = settings();
     erf_conductors::write_moordyn_input(fname, s, in, 9.81);
     ASSERT_TRUE(std::filesystem::exists(fname));
@@ -133,7 +133,7 @@ TEST(MoorDynInputWriter, MoorDynAcceptsTheFileAndTheEndsComeBackInERFsFrame)
 
 TEST(MoorDynInputWriter, ASectionIsWrittenWithItsInsulatorStringsAndFreePoints)
 {
-    SpanInputs s = span();
+    LineInputs s = span();
     s.end_b = {{1000.0, 500.0, 30.0}};
     s.towers = {{{400.0, 500.0, 30.0}}, {{700.0, 500.0, 30.0}}};
     s.lengths = {301.5, 301.5, 301.5};

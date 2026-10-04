@@ -25,8 +25,8 @@
 
 using namespace amrex;
 using erf_conductors::ConductorInputs;
-using erf_conductors::ConductorSpan;
-using erf_conductors::SpanInputs;
+using erf_conductors::ConductorLine;
+using erf_conductors::LineInputs;
 using erf_conductors::Transformer;
 
 namespace {
@@ -41,7 +41,7 @@ Conductors::create (int max_level)
     const int anchor = ConductorInputs::resolve_anchor_level(in.anchor_level, max_level);
     const std::string err = ConductorInputs::validate_solver(max_level, anchor, erf_moordyn::fpe_traps_requested());
     if (!err.empty()) { Abort(err); }
-    Print() << "erf.conductors: " << in.spans.size() << " line(s) on MoorDyn-C " << erf_moordyn::library_version()
+    Print() << "erf.conductors: " << in.lines.size() << " line(s) on MoorDyn-C " << erf_moordyn::library_version()
             << (erf_moordyn::is_stub() ? " (the bundled stub stands in for MoorDyn)" : "") << ", anchor level " << anchor
             << ", wind " << (in.has_prescribed_velocity ? "prescribed" : "sampled from the flow at the line nodes")
             << ", drag " << (in.drag_on_flow ? "put back into the flow (epsilon " + std::to_string(in.epsilon) + " cells)" : "not put into the flow") << "\n";
@@ -59,7 +59,7 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
 
     // the attachments must lie inside the domain horizontally: the terrain height is read there
     std::vector<Real> pos;
-    for (const SpanInputs& s : m_in.spans) {
+    for (const LineInputs& s : m_in.lines) {
         for (int k = 0; k <= s.num_spans(); ++k) {
             const auto& e = s.point(k);
             for (int d = 0; d < 2; ++d) {
@@ -75,13 +75,13 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
     // a line hanging from another line's towers stands its points on those towers: their heights
     // are above the tower's base, so that a cross-arm on sloping ground stays level
     {
-        std::vector<std::size_t> first(m_in.spans.size() + 1, 0);
-        for (std::size_t i = 0; i < m_in.spans.size(); ++i) { first[i+1] = first[i] + static_cast<std::size_t>(m_in.spans[i].num_spans() + 1); }
-        for (std::size_t i = 0; i < m_in.spans.size(); ++i) {
-            const SpanInputs& s = m_in.spans[i];
+        std::vector<std::size_t> first(m_in.lines.size() + 1, 0);
+        for (std::size_t i = 0; i < m_in.lines.size(); ++i) { first[i+1] = first[i] + static_cast<std::size_t>(m_in.lines[i].num_spans() + 1); }
+        for (std::size_t i = 0; i < m_in.lines.size(); ++i) {
+            const LineInputs& s = m_in.lines[i];
             if (s.share_towers.empty()) { continue; }
             std::size_t owner = 0;
-            while (m_in.spans[owner].name != s.share_towers) { ++owner; }
+            while (m_in.lines[owner].name != s.share_towers) { ++owner; }
             for (int k = 1; k < s.num_spans(); ++k) {
                 const auto kk = static_cast<std::size_t>(k);
                 m_ground[first[i] + kk] = m_ground[first[owner] + kk];
@@ -89,11 +89,11 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
         }
     }
     const Real floor_z = static_cast<Real>(geom.ProbLo(2));
-    m_placed = m_in.spans;
+    m_placed = m_in.lines;
     std::size_t ip = 0;
     // a misplaced line is reported after ground.dat is written, so that the placement can be looked at
     std::string misplaced;
-    for (SpanInputs& s : m_placed) {
+    for (LineInputs& s : m_placed) {
         for (int k = 0; k <= s.num_spans(); ++k, ++ip) {
             auto& e = s.point(k);
             e[2] += m_ground[ip] - floor_z;
@@ -111,9 +111,9 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
     if (ParallelDescriptor::IOProcessor()) {
         UtilCreateDirectory(m_in.diagnostics_dir, 0755);
         std::ofstream out(m_in.diagnostics_dir + "/ground.dat", std::ios::trunc);
-        out << "span point x y ground z\n" << std::setprecision(10);
+        out << "line point x y ground z\n" << std::setprecision(10);
         ip = 0;
-        for (const SpanInputs& s : m_placed) {
+        for (const LineInputs& s : m_placed) {
             for (int k = 0; k <= s.num_spans(); ++k, ++ip) {
                 const auto& e = s.point(k);
                 const std::string label = (k == 0) ? "a" : (k == s.num_spans() ? "b" : "t" + std::to_string(k));
@@ -142,17 +142,17 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
         // a checkpoint written without conductors (a precursor, say): the spans start afresh here
         Print() << "erf.conductors: the checkpoint " << restart_chkdir << " holds no conductor state; the spans start now\n";
     }
-    for (const SpanInputs& s : m_placed) {
+    for (const LineInputs& s : m_placed) {
         const std::string file = m_in.diagnostics_dir + "/" + s.name + ".moordyn.txt";
-        m_spans.push_back(std::make_unique<ConductorSpan>(s, m_in, CONST_GRAV, file));
-        const ConductorSpan& c = *m_spans.back();
+        m_lines.push_back(std::make_unique<ConductorLine>(s, m_in, CONST_GRAV, file));
+        const ConductorLine& c = *m_lines.back();
         // a string the line does not weigh on is pulled up by the spans either side (uplift)
         if (s.has_insulators()) {
             const Real w = (s.mass_per_length - m_in.air_density * Real(0.25) * Real(3.14159265358979323846) * s.diameter * s.diameter) * CONST_GRAV;
             for (int j = 0; j < static_cast<int>(s.towers.size()); ++j) {
-                if (m_spans.back()->string_in_uplift(j, w)) {
+                if (m_lines.back()->string_in_uplift(j, w)) {
                     Print() << "erf.conductors." << s.name << ": WARNING the string at tower " << j + 1 << " carries "
-                            << m_spans.back()->string_load(j) << " N of the conductor in still air: the spans either side "
+                            << m_lines.back()->string_load(j) << " N of the conductor in still air: the spans either side "
                             << "rise away from the tower and pull it up (uplift), and the string flips over the cross-arm; "
                             << "raise that tower or make it a strain tower\n";
                 }
@@ -186,7 +186,7 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
     measure_transformers();
     for (std::size_t p = 0; p < m_pairs.size(); ++p) {
         const auto& c = m_sep[p];
-        Print() << "erf.conductors: " << m_spans[m_pairs[p].first]->name() << " and " << m_spans[m_pairs[p].second]->name()
+        Print() << "erf.conductors: " << m_lines[m_pairs[p].first]->name() << " and " << m_lines[m_pairs[p].second]->name()
                 << " hang " << c.distance << " m apart at their closest"
                 << (c.distance < m_in.flashover_distance ? ", already inside the flashover distance" : "") << "\n";
     }
@@ -194,7 +194,7 @@ Conductors::set_ground (const MultiFab* z_phys_nd, const Geometry& geom, const s
         const Transformer& tr = m_transformers[t];
         const auto& L = m_tload[t];
         Print() << "erf.conductors." << tr.name() << ": base at " << tr.base()[2] << " m, ends of";
-        for (const auto& e : tr.ends()) { Print() << " " << m_spans[e.line]->name() << (e.end == 0 ? ".end_a" : ".end_b"); }
+        for (const auto& e : tr.ends()) { Print() << " " << m_lines[e.line]->name() << (e.end == 0 ? ".end_a" : ".end_b"); }
         Print() << "; still-air pull " << L.horizontal_force << " N horizontal, " << L.force[2] << " N vertical, overturning moment "
                 << L.overturning_moment << " N m" << (L.over_allowable ? ", already over its allowable" : "")
                 << "; closest conductor " << m_tclear[t].distance << " m from the box"
@@ -232,7 +232,7 @@ Conductors::build_towers ()
     for (std::size_t i = 0; i < m_placed.size(); ++i) { first[i+1] = first[i] + static_cast<std::size_t>(m_placed[i].num_spans() + 1); }
     // the towers of the lines with a tower_type, each line hanging from its own at the centre of the cross-arm
     for (std::size_t line = 0; line < m_placed.size(); ++line) {
-        const SpanInputs& s = m_placed[line];
+        const LineInputs& s = m_placed[line];
         if (s.tower_type.empty()) { continue; }
         const erf_towers::TowerType* type = m_in.tower_type(s);
         AMREX_ALWAYS_ASSERT(type != nullptr);   // checked when the inputs were read
@@ -260,7 +260,7 @@ Conductors::build_towers ()
     }
     // the lines hanging from another line's towers, each at its own point on them
     for (std::size_t line = 0; line < m_placed.size(); ++line) {
-        const SpanInputs& s = m_placed[line];
+        const LineInputs& s = m_placed[line];
         if (s.share_towers.empty()) { continue; }
         std::size_t owner = 0;
         while (m_placed[owner].name != s.share_towers) { ++owner; }
@@ -395,7 +395,7 @@ Conductors::step_moving_group (const std::vector<std::size_t>& lines, double tim
         for (std::size_t i = 0; i < towers.size(); ++i) {
             const auto& tl = m_tower_lines[towers[i]];
             for (std::size_t a = 0; a < tl.size(); ++a) {
-                const auto f = m_spans[tl[a].first]->tower_force(tl[a].second);
+                const auto f = m_lines[tl[a].first]->tower_force(tl[a].second);
                 for (int d = 0; d < 3; ++d) { F[first[i] + 3*a + static_cast<std::size_t>(d)] = static_cast<double>(f[d]); }
             }
         }
@@ -403,8 +403,8 @@ Conductors::step_moving_group (const std::vector<std::size_t>& lines, double tim
     };
     for (int k = 0; k < n; ++k) {
         // the state at the start of the coupling step, to which each iteration returns
-        std::vector<ConductorSpan::State> line_state;
-        for (const std::size_t line : lines) { line_state.push_back(m_spans[line]->state()); }
+        std::vector<ConductorLine::State> line_state;
+        for (const std::size_t line : lines) { line_state.push_back(m_lines[line]->state()); }
         std::vector<std::vector<double>> tower_state;
         std::vector<std::vector<std::array<Real,3>>> x0;
         for (const std::size_t t : towers) {
@@ -442,7 +442,7 @@ Conductors::step_moving_group (const std::vector<std::size_t>& lines, double tim
             }
             for (std::size_t m = 0; m < lines.size(); ++m) {
                 const std::size_t line = lines[m];
-                if (it > 0) { m_spans[line]->set_state(line_state[m]); }
+                if (it > 0) { m_lines[line]->set_state(line_state[m]); }
                 const std::size_t nt = m_line_towers[line].size();
                 std::vector<Real> start(3 * nt), velocity(3 * nt);
                 for (std::size_t j = 0; j < nt; ++j) {
@@ -454,7 +454,7 @@ Conductors::step_moving_group (const std::vector<std::size_t>& lines, double tim
                         velocity[3*j+d] = static_cast<Real>((x1[d] - x0[i][att][d]) / h);
                     }
                 }
-                m_spans[line]->step_coupled(time + k * h, h, start, velocity);
+                m_lines[line]->step_coupled(time + k * h, h, start, velocity);
             }
             const std::vector<double> Fn = pulls();
             std::vector<double> r(F.size());
@@ -474,14 +474,14 @@ Conductors::step_moving_group (const std::vector<std::size_t>& lines, double tim
             ++m_coupling_unconverged;
             if (!m_coupling_warned) {
                 m_coupling_warned = true;
-                Print() << "erf.conductors: the coupling of " << m_spans[lines.front()]->name() << " and its towers did not converge in "
+                Print() << "erf.conductors: the coupling of " << m_lines[lines.front()]->name() << " and its towers did not converge in "
                         << coupling_max_iterations << " iterations at t = " << time + k * h << " s; it goes on with the last iterate"
                         << " (each step's count is in coupling.dat)\n";
             }
         }
         for (const std::size_t t : towers) { load_tower_with_lines(t); }
     }
-    for (const std::size_t line : lines) { m_spans[line]->check_clock(time + dt); }
+    for (const std::size_t line : lines) { m_lines[line]->check_clock(time + dt); }
 }
 
 void
@@ -498,7 +498,7 @@ Conductors::load_tower_with_lines (std::size_t t)
     std::vector<std::array<Real,3>> force(lines.size()), at(lines.size());
     for (std::size_t a = 0; a < lines.size(); ++a) {
         const auto [line, j] = lines[a];
-        force[a] = m_spans[line]->tower_force(j);
+        force[a] = m_lines[line]->tower_force(j);
         at[a] = m_towers[t].attachments()[a];
         if (m_models[t]) {
             const auto x = m_models[t]->attachment_displacement(a);
@@ -577,14 +577,14 @@ Conductors::measure_transformers ()
     m_tload.resize(m_transformers.size());
     m_tclear.resize(m_transformers.size());
     std::vector<std::vector<Real>> paths;
-    for (const auto& span : m_spans) { paths.push_back(span->conductor_path()); }
+    for (const auto& span : m_lines) { paths.push_back(span->conductor_path()); }
     for (std::size_t t = 0; t < m_transformers.size(); ++t) {
         const Transformer& tr = m_transformers[t];
         std::vector<std::array<Real,3>> at, force;
         for (const auto& e : tr.ends()) {
-            const SpanInputs& s = m_placed[e.line];
+            const LineInputs& s = m_placed[e.line];
             at.push_back(e.end == 0 ? s.end_a : s.end_b);
-            force.push_back(m_spans[e.line]->end_force(e.end));
+            force.push_back(m_lines[e.line]->end_force(e.end));
         }
         m_tload[t] = tr.load(at, force);
         // every conductor, the ones ending on it as well: their ends clear the top by their standoff
@@ -623,7 +623,7 @@ Conductors::write_transformers (double time, bool first) const
 }
 
 void
-Conductors::add_stats (const SpanInputs& s)
+Conductors::add_stats (const LineInputs& s)
 {
     std::vector<erf_actuator::RunningStats> st;
     for (int k = 0; k < s.num_spans(); ++k) {
@@ -647,10 +647,10 @@ Conductors::add_pair_stats ()
 {
     m_pairs.clear();
     m_pair_stats.clear();
-    for (std::size_t i = 0; i < m_spans.size(); ++i) {
-        for (std::size_t j = i + 1; j < m_spans.size(); ++j) {
+    for (std::size_t i = 0; i < m_lines.size(); ++i) {
+        for (std::size_t j = i + 1; j < m_lines.size(); ++j) {
             m_pairs.emplace_back(i, j);
-            const std::string name = "separation_" + m_spans[i]->name() + "-" + m_spans[j]->name();
+            const std::string name = "separation_" + m_lines[i]->name() + "-" + m_lines[j]->name();
             m_pair_stats.emplace_back(name, m_in.diagnostics_dir + "/" + name, std::vector<std::string>{"distance", "clash"});
         }
     }
@@ -661,7 +661,7 @@ Conductors::measure_separation ()
 {
     m_sep.resize(m_pairs.size());
     std::vector<std::vector<Real>> paths;
-    for (const auto& span : m_spans) { paths.push_back(span->conductor_path()); }
+    for (const auto& span : m_lines) { paths.push_back(span->conductor_path()); }
     for (std::size_t p = 0; p < m_pairs.size(); ++p) {
         m_sep[p] = erf_conductors::closest_polylines(paths[m_pairs[p].first], paths[m_pairs[p].second]);
     }
@@ -676,7 +676,7 @@ Conductors::write_separation (double time, bool first) const
     if (header) {
         out << "time";
         for (const auto& pr : m_pairs) {
-            const std::string n = m_spans[pr.first]->name() + "-" + m_spans[pr.second]->name();
+            const std::string n = m_lines[pr.first]->name() + "-" + m_lines[pr.second]->name();
             out << " " << n << "_distance " << n << "_x " << n << "_y " << n << "_z " << n << "_clash";
         }
         out << "\n";
@@ -694,7 +694,7 @@ std::vector<std::string>
 Conductors::log_files () const
 {
     std::vector<std::string> f;
-    for (const SpanInputs& s : m_placed) {
+    for (const LineInputs& s : m_placed) {
         for (int k = 0; k < s.num_spans(); ++k) { f.push_back(s.span_root(k) + ".dat"); }
         f.push_back(s.output_root + "_nodes.dat");
         if (s.has_insulators()) { f.push_back(s.output_root + "_insulators.dat"); }
@@ -729,10 +729,10 @@ Conductors::restore (const std::string& dir)
         } else if (key == "clock_offset") {
             if (!(ls >> eq >> m_t0) || eq != "=") { Abort("malformed clock_offset line in '" + dir + "/state'"); }
             have_t0 = true;
-        } else if (key == "span") {
+        } else if (key == "line" || key == "span") {   // "span" is read as the same record
             std::string name;
             unsigned nodes = 0;
-            if (!(ls >> name >> nodes)) { Abort("malformed span line in '" + dir + "/state'"); }
+            if (!(ls >> name >> nodes)) { Abort("malformed " + key + " line in '" + dir + "/state'"); }
             saved.emplace_back(name, nodes);
         }
     }
@@ -763,13 +763,13 @@ Conductors::restore (const std::string& dir)
         }
     }
     if (saved.size() != m_placed.size()) {
-        Abort("the conductor checkpoint '" + dir + "' holds " + std::to_string(saved.size()) + " line(s) but erf.conductors.spans lists " +
+        Abort("the conductor checkpoint '" + dir + "' holds " + std::to_string(saved.size()) + " line(s) but erf.conductors.lines lists " +
               std::to_string(m_placed.size()) + "; the erf.conductors block must match the run being restarted");
     }
     for (std::size_t i = 0; i < m_placed.size(); ++i) {
-        const SpanInputs& s = m_placed[i];
+        const LineInputs& s = m_placed[i];
         if (saved[i].first != s.name) {
-            Abort("the conductor checkpoint '" + dir + "' holds line " + saved[i].first + " where erf.conductors.spans lists " +
+            Abort("the conductor checkpoint '" + dir + "' holds line " + saved[i].first + " where erf.conductors.lines lists " +
                   s.name + "; the erf.conductors block must match the run being restarted");
         }
         if (saved[i].second != static_cast<unsigned>(s.num_line_nodes())) {
@@ -786,15 +786,15 @@ Conductors::restore (const std::string& dir)
                 moved.insert(moved.end(), {x[0], x[1], x[2]});
             }
         }
-        m_spans.push_back(std::make_unique<ConductorSpan>(s, m_in, CONST_GRAV, file, dir + "/" + s.name + ".moordyn", moved));
-        m_spans.back()->set_clock_offset(m_t0);
+        m_lines.push_back(std::make_unique<ConductorLine>(s, m_in, CONST_GRAV, file, dir + "/" + s.name + ".moordyn", moved));
+        m_lines.back()->set_clock_offset(m_t0);
         add_stats(s);
         for (auto& st : m_stats.back()) {
             if (!st.read_state(dir)) {
                 Abort("erf.conductors." + s.name + ": the checkpoint '" + dir + "' holds no statistics " + st.name());
             }
         }
-        const ConductorSpan& c = *m_spans.back();
+        const ConductorLine& c = *m_lines.back();
         Print() << "erf.conductors." << s.name << ": continued from " << dir << " at t = " << m_time << " s (step " << m_step
                 << "), mid-span offset " << c.mid_offset() << " m, sag " << c.mid_sag() << " m\n";
     }
@@ -852,10 +852,10 @@ Conductors::write_checkpoint (const std::string& chkdir) const
         if (!out) { Abort("cannot write the conductor checkpoint state '" + dir + "/state'"); }
         out << std::setprecision(std::numeric_limits<double>::max_digits10)
             << "step = " << m_step << "\ntime = " << m_time << "\nclock_offset = " << m_t0 << "\n";
-        for (const auto& span : m_spans) { out << "span " << span->name() << " " << span->num_nodes() << "\n"; }
+        for (const auto& line : m_lines) { out << "line " << line->name() << " " << line->num_nodes() << "\n"; }
         if (!out) { Abort("cannot write the conductor checkpoint state '" + dir + "/state'"); }
         // every rank holds the same line; one copy of each is saved
-        for (const auto& span : m_spans) { span->save(dir + "/" + span->name() + ".moordyn"); }
+        for (const auto& span : m_lines) { span->save(dir + "/" + span->name() + ".moordyn"); }
     }
     ParallelDescriptor::Barrier();
     for (const auto& line : m_stats) { for (const auto& st : line) { st.write_state(dir); } }
@@ -892,7 +892,7 @@ Conductors::restore_sources (int lev, const MultiFab& U, const MultiFab* z_phys_
 }
 
 void
-Conductors::check_nodes_in_domain (const ConductorSpan& span, const std::vector<Real>& pos, const Geometry& geom) const
+Conductors::check_nodes_in_domain (const ConductorLine& span, const std::vector<Real>& pos, const Geometry& geom) const
 {
     for (std::size_t p = 0; p < pos.size() / 3; ++p) {
         for (int d = 0; d < 3; ++d) {
@@ -941,7 +941,7 @@ Conductors::ground_heights (const MultiFab* z_phys_nd, const Geometry& geom, con
 void
 Conductors::update_ground_under_nodes (const MultiFab* z_phys_nd, const Geometry& geom)
 {
-    for (auto& span : m_spans) {
+    for (auto& span : m_lines) {
         const std::vector<Real> pos = span->node_positions();
         check_nodes_in_domain(*span, pos, geom);
         std::vector<Real> h;
@@ -951,7 +951,7 @@ Conductors::update_ground_under_nodes (const MultiFab* z_phys_nd, const Geometry
 }
 
 std::vector<Real>
-Conductors::wind_at (const ConductorSpan& span,
+Conductors::wind_at (const ConductorLine& span,
                      const MultiFab& U, const MultiFab& V, const MultiFab& W,
                      const MultiFab* z_phys_nd, const Geometry& geom) const
 {
@@ -994,7 +994,7 @@ Conductors::advance (int lev, double time, double dt,
         // restart time when a restart creates them afresh (a checkpoint without conductor state)
         m_t0 = time;
         m_time = time;
-        for (auto& span : m_spans) { span->set_clock_offset(m_t0); }
+        for (auto& span : m_lines) { span->set_clock_offset(m_t0); }
     }
     ++m_step;
     const bool first = (m_step == 1);
@@ -1020,8 +1020,8 @@ Conductors::advance (int lev, double time, double dt,
             }
         }
     }
-    for (std::size_t line = 0; line < m_spans.size(); ++line) {
-        ConductorSpan& span = *m_spans[line];
+    for (std::size_t line = 0; line < m_lines.size(); ++line) {
+        ConductorLine& span = *m_lines[line];
         // the wind of the flow at the start of the step, where the line is, held over the step
         span.set_wind(wind_at(span, U, V, W, z_phys_nd, geom), time + 0.5 * dt);
         if (first) {
@@ -1033,10 +1033,10 @@ Conductors::advance (int lev, double time, double dt,
     m_coupling_iterations = 0;
     m_coupling_unconverged = 0;
     for (const auto& g : m_groups) {
-        if (m_spans[g.front()]->towers_move()) {
+        if (m_lines[g.front()]->towers_move()) {
             step_moving_group(g, time, dt);
         } else {
-            for (const std::size_t line : g) { m_spans[line]->step(time, dt); }
+            for (const std::size_t line : g) { m_lines[line]->step(time, dt); }
         }
     }
     m_time = time + dt;
@@ -1058,8 +1058,8 @@ Conductors::advance (int lev, double time, double dt,
         for (int d = 0; d < 3; ++d) { m_drag_total[d] += F[d]; }
     }
     const bool sample = (time + dt >= m_in.stats_start);
-    for (std::size_t i = 0; i < m_spans.size(); ++i) {
-        const ConductorSpan& span = *m_spans[i];
+    for (std::size_t i = 0; i < m_lines.size(); ++i) {
+        const ConductorLine& span = *m_lines[i];
         const auto f = span.total_drag();
         for (int d = 0; d < 3; ++d) { m_drag_total[d] += f[d]; }
         if (m_step % m_in.diagnostics_int == 0) { span.write_diagnostics(time + dt, false); }
@@ -1120,7 +1120,7 @@ Conductors::spread_drag (const MultiFab& U, const MultiFab* z_phys_nd, const Mul
     }
     // the force each node exerts on the air is minus the air's drag on it
     std::vector<Real> pos, force;
-    for (const auto& span : m_spans) {
+    for (const auto& span : m_lines) {
         const std::vector<Real> p = span->node_positions();
         pos.insert(pos.end(), p.begin(), p.end());
         for (unsigned n = 0; n < span->num_nodes(); ++n) {

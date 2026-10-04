@@ -35,10 +35,10 @@ TransformerLoad Transformer::load (const std::vector<std::array<Real,3>>& at, co
     return L;
 }
 
-std::string attach_line_ends (std::vector<Transformer>& transformers, const std::vector<SpanInputs>& placed)
+std::string attach_line_ends (std::vector<Transformer>& transformers, const std::vector<LineInputs>& placed)
 {
     for (std::size_t i = 0; i < placed.size(); ++i) {
-        const SpanInputs& s = placed[i];
+        const LineInputs& s = placed[i];
         for (int end = 0; end < 2; ++end) {
             const auto& p = (end == 0) ? s.end_a : s.end_b;
             const std::string which = s.name + (end == 0 ? ".end_a" : ".end_b");
