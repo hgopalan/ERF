@@ -1,3 +1,5 @@
+// OneModeTower: assembly of the mode and its exact step.
+
 #include "ERF_TowerDynamics.H"
 
 #include <cmath>
@@ -14,14 +16,21 @@ constexpr double two_pi = 2.0 * 3.14159265358979323846;
 }
 
 OneModeTower::OneModeTower (const Tower& tower, Real gravity)
+    : m_name(tower.name()), m_type(tower.type().name)
 {
     const TowerType& type = tower.type();
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(type.moves() && type.weight > 0.0 && gravity > 0.0,
-                                     "OneModeTower: the tower type needs a frequency and a weight");
+    const std::string key = "erf.conductors." + m_type + ".";
+    const std::string who = "OneModeTower " + m_name + ": ";
+    if (!type.moves()) { amrex::Abort(who + key + "frequency must be positive (Hz) for a tower that moves"); }
+    if (!(type.weight > 0.0)) { amrex::Abort(who + key + "frequency > 0 needs " + key + "weight > 0 (N), which sets the mass"); }
+    if (!(gravity > 0.0)) { amrex::Abort(who + "the gravitational acceleration must be positive (m/s^2)"); }
+    if (!(type.damping_ratio >= 0.0 && type.damping_ratio < 1.0)) { amrex::Abort(who + key + "damping_ratio must be in [0, 1)"); }
     const auto& nodes = tower.nodes();
     const double H = tower.arm_height();
+    if (!(H > 0.0)) { amrex::Abort(who + "the cross-arm height above the base must be positive (m)"); }
     double length = 0.0;
     for (const auto& n : nodes) { length += n.length; }
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(length > 0.0, "OneModeTower: the drag nodes stand for no length of member");
     // the bending shape's generalized mass on a rigid foundation sets the bending stiffness
     const double mass = static_cast<double>(type.weight) / static_cast<double>(gravity);
     double Mb = 0.0;
@@ -31,6 +40,7 @@ OneModeTower::OneModeTower (const Tower& tower, Real gravity)
         zh[i] = (nodes[i].pos[2] - tower.base()[2]) / H;
         Mb += m_mass[i] * std::pow(zh[i], 4);
     }
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(Mb > 0.0, "OneModeTower: no drag node stands above the base");
     m_Kb = Mb * std::pow(two_pi * static_cast<double>(type.frequency), 2);
     // the compliances in series under a load at the cross-arm; a stiffness of 0 is a rigid foundation
     const double cb = 1.0 / m_Kb;
@@ -52,16 +62,25 @@ OneModeTower::OneModeTower (const Tower& tower, Real gravity)
 
 void OneModeTower::step (Real dt, const std::vector<Real>& node_force, const std::vector<std::array<Real,3>>& line_force)
 {
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node_force.size() == 3 * m_phi.size(), "OneModeTower::step: 3 forces per node are needed");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node_force.size() == 3 * m_phi.size(), "OneModeTower::step: 3 forces per drag node are needed");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(line_force.size() == m_phi_att.size(),
                                      "OneModeTower::step: one line pull per attachment is needed");
-    // the generalized force: each node's horizontal load and each line's pull by the shape where it acts
-    for (int d = 0; d < 2; ++d) {
-        m_Q[d] = 0.0;
-        for (std::size_t a = 0; a < m_phi_att.size(); ++a) { m_Q[d] += m_phi_att[a] * line_force[a][d]; }
-        for (std::size_t i = 0; i < m_phi.size(); ++i) { m_Q[d] += m_phi[i] * node_force[3*i+d]; }
+    if (!(std::isfinite(dt) && dt > 0.0)) {
+        amrex::Abort("OneModeTower " + m_name + ": the step must be finite and positive (s), " + std::to_string(dt) + " given");
     }
-    // the damped oscillation about the static displacement Q / K, exact for a load held over the step
+    // the generalized force: each node's horizontal load and each line's pull by the shape where it acts
+    std::array<double,2> Q{{0.0, 0.0}};
+    for (int d = 0; d < 2; ++d) {
+        for (std::size_t a = 0; a < m_phi_att.size(); ++a) { Q[d] += m_phi_att[a] * line_force[a][d]; }
+        for (std::size_t i = 0; i < m_phi.size(); ++i) { Q[d] += m_phi[i] * node_force[3*i+d]; }
+    }
+    if (!std::isfinite(Q[0]) || !std::isfinite(Q[1])) {
+        amrex::Abort("tower " + m_name + ": the generalized load on its mode is not finite (the lines' pull or the members' drag); "
+                     "MoorDyn's line integration may have diverged: reduce erf.conductors.moordyn_cfl or erf.conductors.moordyn_dt");
+    }
+    m_Q = Q;
+    // the damped oscillation about the static displacement Q / K, exact for a load held over the step:
+    // a = zeta omega (1/s), wd = omega sqrt(1 - zeta^2) (rad/s), x0 the offset from Q/K (m)
     const double h = dt;
     const double a = m_zeta * m_omega;
     const double wd = m_omega * std::sqrt(1.0 - m_zeta * m_zeta);
@@ -76,27 +95,32 @@ void OneModeTower::step (Real dt, const std::vector<Real>& node_force, const std
 
 std::array<Real,3> OneModeTower::displacement (std::size_t node) const
 {
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node < m_phi.size(), "OneModeTower::displacement: no such drag node");
     return {{static_cast<Real>(m_phi[node] * m_q[0]), static_cast<Real>(m_phi[node] * m_q[1]), Real(0.0)}};
 }
 
 std::array<Real,3> OneModeTower::velocity (std::size_t node) const
 {
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node < m_phi.size(), "OneModeTower::velocity: no such drag node");
     return {{static_cast<Real>(m_phi[node] * m_v[0]), static_cast<Real>(m_phi[node] * m_v[1]), Real(0.0)}};
 }
 
 std::array<Real,3> OneModeTower::inertial_force (std::size_t node) const
 {
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node < m_phi.size(), "OneModeTower::inertial_force: no such drag node");
     const double m = m_mass[node] * m_phi[node];
     return {{static_cast<Real>(-m * acceleration(0)), static_cast<Real>(-m * acceleration(1)), Real(0.0)}};
 }
 
 std::array<Real,3> OneModeTower::attachment_displacement (std::size_t a) const
 {
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(a < m_phi_att.size(), "OneModeTower::attachment_displacement: no such attachment");
     return {{static_cast<Real>(m_phi_att[a] * m_q[0]), static_cast<Real>(m_phi_att[a] * m_q[1]), Real(0.0)}};
 }
 
 std::array<Real,3> OneModeTower::attachment_velocity (std::size_t a) const
 {
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(a < m_phi_att.size(), "OneModeTower::attachment_velocity: no such attachment");
     return {{static_cast<Real>(m_phi_att[a] * m_v[0]), static_cast<Real>(m_phi_att[a] * m_v[1]), Real(0.0)}};
 }
 
@@ -110,6 +134,7 @@ std::vector<double> OneModeTower::state () const
 bool OneModeTower::set_state (const std::vector<double>& s)
 {
     if (s.size() != 6) { return false; }
+    for (const double x : s) { if (!std::isfinite(x)) { return false; } }
     m_q = {{s[0], s[1]}};
     m_v = {{s[2], s[3]}};
     m_Q = {{s[4], s[5]}};

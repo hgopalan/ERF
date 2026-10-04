@@ -1,15 +1,23 @@
-// Verification of a conductor span against analytic results, run against the real MoorDyn-C (the
-// bundled stub has no line dynamics, so these tests skip on it). A 300 m span of 795 kcmil ACSR with
-// 1.5 m of slack in air: in a steady crosswind U normal to it, the mean swing angle of the middle
-// node about the chord is the quasi-static blowout angle atan(q / w), q = rho Cd D U^2 / 2 the drag
-// and w the weight per unit length; released after a short gust into still air, it swings at the
-// first out-of-plane frequency of a cable, whose period T = 2 c / sqrt(H / m) does not depend on the
-// sag (Irvine, Cable Structures, 1981), with c the chord, H the horizontal tension and m the mass
-// per unit length; in still air it hangs in the elastic catenary; and in a section over suspension
-// towers the insulator strings swing across the line to the angle of the wind span's load over the
-// weight span's; the pulls of a level span on its dead ends carry its weight between them, with
-// the elastic catenary's horizontal tension; and a suspension tower takes the wind span's load
-// across the line, q L plus the string's own drag, and the weight span's down.
+// Verification of conductor lines against analytic results, run against the real MoorDyn-C (the
+// bundled stub has no line dynamics, so these tests skip on it). The line is a single 300 m span of
+// 795 kcmil (thousand circular mils) ACSR (aluminium conductor, steel reinforced) "Drake" with
+// 1.5 m of slack in air, or a section of three such spans over two suspension towers. q = rho Cd D
+// U^2 / 2 is the drag (N/m) and w the weight (N/m) per unit length; c the chord (m), H the horizontal
+// tension (N), m the mass per unit length (kg/m); the wind span and the weight span of a tower are
+// the lengths of conductor whose wind load and weight it carries.
+//
+// StillAirShapeIsTheElasticCatenary: the still-air sag and end tension of the elastic catenary.
+// MeanSwingIsTheQuasiStaticBlowoutAngle: in a steady crosswind U normal to the span, the mean swing of
+//     the middle node about the chord is atan(q / w).
+// FreeSwingHasTheCableOutOfPlanePeriod: released after a short gust, the span swings with the cable's
+//     first out-of-plane period T = 2 c / sqrt(H / m), which does not depend on the sag (Irvine,
+//     Cable Structures, 1981).
+// SuspensionStringsSwingToTheWindSpanOverWeightSpanAngle: the strings swing across the line to the
+//     angle of the wind span's load over the weight span's.
+// TheDeadEndsCarryTheWeightAndTheCatenarysHorizontalTension: the dead-end pulls of a level span carry
+//     its weight between them, with the elastic catenary's horizontal tension.
+// ASuspensionTowerTakesTheWindSpanAndTheWeightSpan: a tower takes q L plus the string's own drag
+//     across the line, and the weight span's weight down.
 
 #include <algorithm>
 #include <cmath>
@@ -20,21 +28,21 @@
 #include <gtest/gtest.h>
 
 #include "ERF_ConductorInputs.H"
-#include "ERF_ConductorSpan.H"
+#include "ERF_ConductorLine.H"
 #include "ERF_MoorDynSystem.H"
 
 using erf_conductors::ConductorInputs;
-using erf_conductors::ConductorSpan;
-using erf_conductors::SpanInputs;
+using erf_conductors::ConductorLine;
+using erf_conductors::LineInputs;
 
 namespace {
 
 constexpr double pi = 3.14159265358979323846;   // MSVC has no M_PI
 constexpr double g = 9.81;
 
-SpanInputs drake (const std::string& name)
+LineInputs drake (const std::string& name)
 {
-    SpanInputs s;
+    LineInputs s;
     s.name = name;
     s.end_a = {{100.0, 500.0, 30.0}};
     s.end_b = {{400.0, 500.0, 30.0}};
@@ -43,14 +51,14 @@ SpanInputs drake (const std::string& name)
     return s;
 }
 
-std::unique_ptr<ConductorSpan> make (const std::string& name, ConductorInputs& in)
+std::unique_ptr<ConductorLine> make (const std::string& name, ConductorInputs& in)
 {
     in.air_density = 1.2;
     in.diagnostics_dir = (std::filesystem::temp_directory_path() / "erf_gtest_conductor_verification").string();
-    return std::make_unique<ConductorSpan>(drake(name), in, g, in.diagnostics_dir + "/" + name + ".moordyn.txt");
+    return std::make_unique<ConductorLine>(drake(name), in, g, in.diagnostics_dir + "/" + name + ".moordyn.txt");
 }
 
-void blow (ConductorSpan& span, double U, double t, double dt)
+void blow (ConductorLine& span, double U, double t, double dt)
 {
     std::vector<amrex::Real> uvw(3 * static_cast<std::size_t>(span.num_kinematics_points()), 0.0);
     for (std::size_t p = 0; p < uvw.size() / 3; ++p) { uvw[3*p+1] = U; }
@@ -65,7 +73,7 @@ TEST(ConductorVerification, StillAirShapeIsTheElasticCatenary)
     if (erf_moordyn::is_stub()) { GTEST_SKIP() << "needs the real MoorDyn-C: the stub hangs a parabola"; }
     ConductorInputs in;
     auto span = make("catenary", in);
-    const SpanInputs& s = span->inputs();
+    const LineInputs& s = span->inputs();
     const double w = (s.mass_per_length - in.air_density * 0.25 * pi * s.diameter * s.diameter) * g;
     const auto cat = erf_conductors::elastic_catenary(s.chord(), s.lengths[0], w, s.axial_stiffness);
     // MoorDyn's lumped masses converge to the catenary from above: 0.11 % in sag with 20 segments
@@ -80,7 +88,7 @@ TEST(ConductorVerification, MeanSwingIsTheQuasiStaticBlowoutAngle)
     for (const double U : {10.0, 20.0, 30.0}) {
         ConductorInputs in;
         auto span = make("blowout" + std::to_string(static_cast<int>(U)), in);
-        const SpanInputs& s = span->inputs();
+        const LineInputs& s = span->inputs();
         const double w = (s.mass_per_length - in.air_density * 0.25 * pi * s.diameter * s.diameter) * g;
         const double q = 0.5 * in.air_density * s.drag_coefficient * s.diameter * U * U;
         const double phi_static = std::atan2(q, w);
@@ -103,7 +111,7 @@ TEST(ConductorVerification, FreeSwingHasTheCableOutOfPlanePeriod)
     if (erf_moordyn::is_stub()) { GTEST_SKIP() << "needs the real MoorDyn-C: the stub has no line dynamics"; }
     ConductorInputs in;
     auto span = make("swing", in);
-    const SpanInputs& s = span->inputs();
+    const LineInputs& s = span->inputs();
     // the horizontal tension of the still-air span from MoorDyn's own solution (the chord runs along x)
     const double H = std::fabs(span->system().line_node_tension(1, 0)[0]);
     const double T_theory = 2.0 * s.chord() / std::sqrt(H / s.mass_per_length);
@@ -133,13 +141,13 @@ TEST(ConductorVerification, SuspensionStringsSwingToTheWindSpanOverWeightSpanAng
     ConductorInputs in;
     in.air_density = 1.2;
     in.diagnostics_dir = (std::filesystem::temp_directory_path() / "erf_gtest_conductor_verification").string();
-    SpanInputs s = drake("section");
+    LineInputs s = drake("section");
     s.end_b = {{1000.0, 500.0, 30.0}};
     s.towers = {{{400.0, 500.0, 30.0}}, {{700.0, 500.0, 30.0}}};
     s.lengths = {301.5, 301.5, 301.5};
     s.insulator_length = 2.5;
     s.insulator_mass = 60.0;
-    ConductorSpan line(s, in, g, in.diagnostics_dir + "/section.moordyn.txt");
+    ConductorLine line(s, in, g, in.diagnostics_dir + "/section.moordyn.txt");
     const double U = 20.0, dt = 0.05;
     double t = 0.0, sum = 0.0, along = 0.0;
     int n = 0;
@@ -156,7 +164,7 @@ TEST(ConductorVerification, SuspensionStringsSwingToTheWindSpanOverWeightSpanAng
     const double rho = in.air_density, L = 301.5, Li = s.insulator_length;
     const double q = 0.5 * rho * s.drag_coefficient * s.diameter * U * U;
     const double w = (s.mass_per_length - rho * 0.25 * pi * s.diameter * s.diameter) * g;
-    const double qi = 0.5 * rho * SpanInputs::insulator_drag_coefficient * s.insulator_diameter * U * U;
+    const double qi = 0.5 * rho * LineInputs::insulator_drag_coefficient * s.insulator_diameter * U * U;
     const double Wi = (s.insulator_mass - rho * 0.25 * pi * s.insulator_diameter * s.insulator_diameter * Li) * g;
     const double theta = std::atan((q * L + 0.5 * qi * Li) / (w * L + 0.5 * Wi));
     const double mean = sum / n;
@@ -173,7 +181,7 @@ TEST(ConductorVerification, TheDeadEndsCarryTheWeightAndTheCatenarysHorizontalTe
     if (erf_moordyn::is_stub()) { GTEST_SKIP() << "needs the real MoorDyn-C: the stub hangs a parabola"; }
     ConductorInputs in;
     auto span = make("dead_ends", in);
-    const SpanInputs& s = span->inputs();
+    const LineInputs& s = span->inputs();
     const double w = (s.mass_per_length - in.air_density * 0.25 * pi * s.diameter * s.diameter) * g;
     const auto cat = erf_conductors::elastic_catenary(s.chord(), s.lengths[0], w, s.axial_stiffness);
     const auto a = span->end_force(0);
@@ -198,13 +206,13 @@ TEST(ConductorVerification, ASuspensionTowerTakesTheWindSpanAndTheWeightSpan)
     ConductorInputs in;
     in.air_density = 1.2;
     in.diagnostics_dir = (std::filesystem::temp_directory_path() / "erf_gtest_conductor_verification").string();
-    SpanInputs s = drake("tower_loads");
+    LineInputs s = drake("tower_loads");
     s.end_b = {{1300.0, 500.0, 30.0}};
     s.towers = {{{400.0, 500.0, 30.0}}, {{700.0, 500.0, 30.0}}, {{1000.0, 500.0, 30.0}}};
     s.lengths = {301.5, 301.5, 301.5, 301.5};
     s.insulator_length = 2.5;
     s.insulator_mass = 60.0;
-    ConductorSpan line(s, in, g, in.diagnostics_dir + "/tower_loads.moordyn.txt");
+    ConductorLine line(s, in, g, in.diagnostics_dir + "/tower_loads.moordyn.txt");
     const double U = 20.0, dt = 0.05;
     double t = 0.0, swing = 0.0;
     std::array<double,3> mean{{0.0, 0.0, 0.0}};
@@ -229,7 +237,7 @@ TEST(ConductorVerification, ASuspensionTowerTakesTheWindSpanAndTheWeightSpan)
     const double rho = in.air_density, L = 301.5, Li = s.insulator_length;
     const double q = 0.5 * rho * s.drag_coefficient * s.diameter * U * U;
     const double w = (s.mass_per_length - rho * 0.25 * pi * s.diameter * s.diameter) * g;
-    const double Di = 0.5 * rho * SpanInputs::insulator_drag_coefficient * s.insulator_diameter * U * U * Li *
+    const double Di = 0.5 * rho * LineInputs::insulator_drag_coefficient * s.insulator_diameter * U * U * Li *
                       std::cos(swing) * std::cos(swing);
     const double Wi = (s.insulator_mass - rho * 0.25 * pi * s.insulator_diameter * s.insulator_diameter * Li) * g;
     const double across = q * L + Di * std::cos(swing), down = w * L + Wi - Di * std::sin(swing);

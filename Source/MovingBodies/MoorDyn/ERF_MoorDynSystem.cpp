@@ -1,11 +1,31 @@
+// MoorDynSystem: MoorDyn-C v2 C API calls with ERF's error handling.
+
 #include "ERF_MoorDynSystem.H"
 
+#include <cctype>
 #include <cmath>
+#include <fstream>
+#include <sstream>
 
 #include <AMReX.H>
 #include <AMReX_ParmParse.H>
 
 namespace erf_moordyn {
+
+namespace {
+std::string lower (std::string s)
+{
+    for (auto& c : s) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
+    return s;
+}
+
+// whether every value is finite; the first offending index in `bad`
+bool all_finite (const std::vector<double>& v, std::size_t& bad)
+{
+    for (std::size_t i = 0; i < v.size(); ++i) { if (!std::isfinite(v[i])) { bad = i; return false; } }
+    return true;
+}
+} // namespace
 
 std::string library_version ()
 {
@@ -53,6 +73,31 @@ bool fpe_traps_requested ()
     return traps;
 }
 
+std::string check_wave_kinematics_option (const std::string& input_file)
+{
+    std::ifstream in(input_file);
+    if (!in) { return "cannot read the MoorDyn input file '" + input_file + "'"; }
+    // the OPTIONS block runs from its "--- OPTIONS ---" header to the next "---" line; each option
+    // line is "value name [description]"
+    std::string row;
+    bool options = false;
+    while (std::getline(in, row)) {
+        if (row.find("---") != std::string::npos) {
+            options = (lower(row).find("option") != std::string::npos);
+            continue;
+        }
+        if (!options) { continue; }
+        std::istringstream tok(row);
+        std::string value, name;
+        if (!(tok >> value >> name) || lower(name) != "wavekin") { continue; }
+        if (value == "1") { return std::string(); }
+        return "the MoorDyn input file '" + input_file + "' sets WaveKin = " + value +
+               "; ERF passes the wind through MoorDyn's external kinematics, which need WaveKin = 1 in its OPTIONS";
+    }
+    return "the MoorDyn input file '" + input_file + "' does not set WaveKin in its OPTIONS; ERF passes the wind through "
+           "MoorDyn's external kinematics, which need WaveKin = 1";
+}
+
 std::unique_ptr<MoorDynSystem>
 MoorDynSystem::create (const std::string& input_file, const std::string& log_file, int log_level, std::string& err)
 {
@@ -69,6 +114,9 @@ MoorDynSystem::create (const std::string& input_file, const std::string& log_fil
         s->check(MoorDyn_SetLogFile(sys, log_file.c_str()), "MoorDyn_SetLogFile");
         s->check(MoorDyn_SetLogLevel(sys, log_level), "MoorDyn_SetLogLevel");
     }
+    // MoorDyn-C reports kinematics points whatever WaveKin is, so the option is read from the file
+    err = check_wave_kinematics_option(input_file);
+    if (!err.empty()) { return nullptr; }
     return s;
 }
 
@@ -84,7 +132,8 @@ void MoorDynSystem::check (int rc, const std::string& what) const
 {
     if (rc != MOORDYN_SUCCESS) {
         const std::string hint = (rc == MOORDYN_NAN_ERROR)
-            ? ": the line integration diverged; reduce MoorDyn's internal step (the CFL or dtM option of the input file)" : "";
+            ? ": the line integration diverged; reduce MoorDyn's internal step (erf.conductors.moordyn_cfl or "
+              "erf.conductors.moordyn_dt for a conductor line; CFL and dtM in the input file)" : "";
         amrex::Abort(what + " failed with " + error_name(rc) + " for the MoorDyn system from '" + m_file + "'" + hint);
     }
 }
@@ -102,6 +151,11 @@ std::string MoorDynSystem::init (const std::vector<double>& x, const std::vector
     if (x.size() != ndof || xd.size() != ndof) {
         return "MoorDyn system from '" + m_file + "' has " + std::to_string(ndof) + " coupled degrees of freedom but " +
                std::to_string(x.size()) + " positions and " + std::to_string(xd.size()) + " velocities were given";
+    }
+    std::size_t bad = 0;
+    if (!all_finite(x, bad) || !all_finite(xd, bad)) {
+        return "MoorDyn system from '" + m_file + "': coupled position or velocity component " + std::to_string(bad) +
+               " (0-based) is not finite";
     }
     const double* px = ndof > 0 ? x.data() : nullptr;
     const double* pv = ndof > 0 ? xd.data() : nullptr;
@@ -143,11 +197,21 @@ void MoorDynSystem::set_kinematics (const std::vector<double>& U, const std::vec
         amrex::Abort("MoorDynSystem::set_kinematics: " + std::to_string(3 * m_nkin) + " velocity and acceleration components are needed, " +
                      std::to_string(U.size()) + " and " + std::to_string(Ud.size()) + " were given (system from '" + m_file + "')");
     }
+    std::size_t bad = 0;
+    if (!all_finite(U, bad) || !all_finite(Ud, bad)) {
+        amrex::Abort("MoorDynSystem::set_kinematics: a non-finite fluid velocity or acceleration at kinematics point " +
+                     std::to_string(bad / 3) + " (0-based) for the system from '" + m_file + "'");
+    }
     check(MoorDyn_ExternalWaveKinSet(m_sys, U.data(), Ud.data(), t), "MoorDyn_ExternalWaveKinSet");
 }
 
 void MoorDynSystem::step (const std::vector<double>& x, const std::vector<double>& xd, std::vector<double>& f, double& t, double dt)
 {
+    // MoorDyn returns the forces without stepping when dt <= 0
+    if (!(std::isfinite(dt) && dt > 0.0)) {
+        amrex::Abort("MoorDynSystem::step: the step must be finite and positive (s), " + std::to_string(dt) +
+                     " given, for the system from '" + m_file + "'");
+    }
     const unsigned ndof = num_coupled_dof();
     if (x.size() != ndof || xd.size() != ndof) {
         amrex::Abort("MoorDynSystem::step: " + std::to_string(ndof) + " coupled positions and velocities are needed, " +
@@ -159,6 +223,12 @@ void MoorDynSystem::step (const std::vector<double>& x, const std::vector<double
     double* pf = ndof > 0 ? f.data() : nullptr;
     double dt_in = dt;
     check(MoorDyn_Step(m_sys, px, pv, pf, &t, &dt_in), "MoorDyn_Step");
+    std::size_t bad = 0;
+    if (!all_finite(f, bad)) {
+        amrex::Abort("MoorDyn_Step returned a non-finite coupled force (component " + std::to_string(bad) +
+                     ", 0-based) for the system from '" + m_file + "': reduce MoorDyn's internal step "
+                     "(erf.conductors.moordyn_cfl or erf.conductors.moordyn_dt for a conductor line)");
+    }
 }
 
 double MoorDynSystem::dt () const
@@ -168,7 +238,14 @@ double MoorDynSystem::dt () const
     return v;
 }
 
-void MoorDynSystem::set_dt (double v) { check(MoorDyn_SetDt(m_sys, v), "MoorDyn_SetDt"); }
+void MoorDynSystem::set_dt (double v)
+{
+    if (!(std::isfinite(v) && v > 0.0)) {
+        amrex::Abort("MoorDynSystem::set_dt: MoorDyn's internal step must be finite and positive (s), " + std::to_string(v) +
+                     " given, for the system from '" + m_file + "'");
+    }
+    check(MoorDyn_SetDt(m_sys, v), "MoorDyn_SetDt");
+}
 
 unsigned MoorDynSystem::num_lines () const
 {
@@ -292,11 +369,17 @@ std::vector<std::uint64_t> MoorDynSystem::serialize () const
     check(MoorDyn_Serialize(m_sys, &bytes, nullptr), "MoorDyn_Serialize");
     std::vector<std::uint64_t> data((bytes + sizeof(std::uint64_t) - 1) / sizeof(std::uint64_t));
     check(MoorDyn_Serialize(m_sys, nullptr, data.data()), "MoorDyn_Serialize");
+    m_serial_words = data.size();
     return data;
 }
 
 void MoorDynSystem::deserialize (const std::vector<std::uint64_t>& data)
 {
+    // MoorDyn_Deserialize reads the buffer without a size: a buffer from another system is undefined behaviour
+    if (data.empty() || (m_serial_words > 0 && data.size() != m_serial_words)) {
+        amrex::Abort("MoorDynSystem::deserialize: " + std::to_string(data.size()) + " words given, " + std::to_string(m_serial_words) +
+                     " expected from serialize() for the system from '" + m_file + "'");
+    }
     check(MoorDyn_Deserialize(m_sys, data.data()), "MoorDyn_Deserialize");
 }
 

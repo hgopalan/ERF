@@ -1,6 +1,8 @@
 #ifndef ERF_DIAGNOSTICS_LOG_H
 #define ERF_DIAGNOSTICS_LOG_H
 
+/** Opening of the moving-bodies diagnostics files for a fresh or a restarted run. */
+
 #include <fstream>
 #include <string>
 
@@ -10,8 +12,9 @@
 namespace erf_actuator {
 
 /**
- * Open a CSV diagnostics file for writing, creating its directory. A fresh run truncates
- * the file; a restarted run appends to what the run it continues wrote. Returns whether the
+ * Open a diagnostics text file for writing (the caller writes CSV or space-separated rows),
+ * creating its directory. With truncate (a fresh run) the file starts empty; without it (a
+ * restarted run) the rows are appended to what the run it continues wrote. Returns whether the
  * caller must write the header: always after truncating, and on append only when the file is
  * new or empty (a restart in a clean directory).
  */

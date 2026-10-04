@@ -1,6 +1,12 @@
+// Member drag 0.5 rho Cd w L |U_n| U_n and the ASCE 7 lattice force coefficient.
+
 #include "ERF_MemberDrag.H"
 
 #include <cmath>
+#include <string>
+
+#include <AMReX.H>
+#include <AMReX_BLassert.H>
 
 using amrex::Real;
 
@@ -21,9 +27,19 @@ Real lattice_force_coefficient (Real phi)
     return Real(4.0) * phi * phi - Real(5.9) * phi + Real(4.0);
 }
 
+MemberDrag::MemberDrag (Real rho)
+    : m_rho(rho)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(std::isfinite(rho) && rho > 0.0, "MemberDrag: the air density must be finite and positive (kg/m^3)");
+}
+
 void MemberDrag::loads (const std::vector<MemberNode>& nodes, const std::vector<Real>& wind,
                         const std::vector<Real>& velocity, std::vector<Real>& force) const
 {
+    if (wind.size() != 3 * nodes.size() || velocity.size() != wind.size()) {
+        amrex::Abort("MemberDrag::loads: 3 wind and 3 velocity components per drag node are needed (" + std::to_string(nodes.size()) +
+                     " nodes, " + std::to_string(wind.size()) + " wind and " + std::to_string(velocity.size()) + " velocity values given)");
+    }
     force.assign(3 * nodes.size(), 0.0);
     for (std::size_t i = 0; i < nodes.size(); ++i) {
         const std::array<Real,3> u{{wind[3*i], wind[3*i+1], wind[3*i+2]}};

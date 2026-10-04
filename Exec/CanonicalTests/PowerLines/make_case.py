@@ -2,16 +2,21 @@
 """Generate the hills-and-transformers power-line case: terrain, inflow, sounding and network.
 
 Writes, into the output directory:
-  terrain_hills.txt   ERF's ASCII terrain file (nx, ny, the x values, the y values, z with x fastest)
+  terrain_hills.txt   ERF's ASCII terrain file (nx, ny, the x values, the y values, z with y fastest:
+                      z[i*ny + j], the order ERF's reader takes)
   inflow_profile      the xlo Dirichlet profile, z u v w theta: a neutral log law under a capping inversion
   input_sounding      the same profile as ERF's input sounding (surface pressure in hPa)
-  network.inputs      the erf.conductors block: transformers and the lines between them
+  network.inputs      the erf.conductors block: the tower type, the transformers and the lines between them
 
 Hills are Gaussian bumps at random places; transformers stand on some hilltops and on flat ground
 at random places, and a minimum spanning tree of lines joins them. Each line is a section dead-ended
-on its two transformers, hanging from insulator strings on suspension towers at most max_span
-apart, every span strung to the same horizontal tension; a span that would come closer to the ground than min_clearance in still air gets a tower
-at its lowest point. With --circuit each connection is a circuit: three phases across the cross-arms
+on its two transformers, hanging from insulator strings (clamped to the towers with --insulator 0)
+on suspension towers at most max_span apart, every span strung to the same horizontal tension; a
+span that would come closer to the ground than min_clearance in still air gets a tower at its
+lowest point. A suspension tower in a
+dip, which the spans either side would pull up, is raised in 2 m steps until the line weighs on it
+with at least min_weight_span of its spans' weight (at most max_tower_height). With --circuit each
+connection (two transformers joined by the spanning tree) is a circuit: three phases across the cross-arms
 of one row of towers (the middle phase's, which the others share) and a shield wire on the towers'
 peaks. Everything is drawn from one seed, so the same arguments give the same case.
 """
@@ -101,7 +106,8 @@ W = 1.628 * 9.81   # the conductor's weight per unit length (N/m)
 
 
 def route(a, hills, pa, pb):
-    """The suspension points between the two dead ends: evenly spaced, split where a span is too low."""
+    """The suspension points between the two dead ends: evenly spaced, split where a span is too low, and
+    raised where the spans either side would pull a tower up."""
     def top(x, y, ht):
         return height(hills, x, y) + ht
 
@@ -206,7 +212,8 @@ def write_line(f, a, nm, r, owner, kind):
     f.write(f"erf.conductors.{nm}.end_b  = {r[-1][0]:.2f} {r[-1][1]:.2f} {r[-1][2]:g}\n")
     # ERF sets each span's length from its chord on ERF's own terrain
     if kind == "shield":
-        # 7/16 in. high-strength steel: lighter, strung tighter so that it sags less than the phases
+        # 7/16 in. high-strength steel: a quarter of the phases' weight, strung to half their tension,
+        # so that it sags half as much
         f.write(f"erf.conductors.{nm}.stringing_tension = {0.5 * a.stringing_tension:g}\n")
         f.write(f"erf.conductors.{nm}.diameter         = 0.0111\n")
         f.write(f"erf.conductors.{nm}.mass_per_length  = 0.406\n")
@@ -221,38 +228,41 @@ def write_line(f, a, nm, r, owner, kind):
             f.write(f"erf.conductors.{nm}.tower_type       = lattice\n")
         else:
             f.write(f"erf.conductors.{nm}.share_towers     = {owner}\n")
-        if kind == "phase":
+        if kind == "phase" and a.insulator > 0:
             f.write(f"erf.conductors.{nm}.insulator_length = {a.insulator:g}\n")
             f.write(f"erf.conductors.{nm}.insulator_mass   = 60.\n")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out", default=".")
-    ap.add_argument("--seed", type=int, default=2026)
-    ap.add_argument("--lx", type=float, default=3000.0)
-    ap.add_argument("--ly", type=float, default=2000.0)
-    ap.add_argument("--lz", type=float, default=800.0)
+    ap.add_argument("--out", default=".", help="directory the four files are written to")
+    ap.add_argument("--seed", type=int, default=2026, help="random seed: the same arguments and seed give the same case")
+    ap.add_argument("--lx", type=float, default=3000.0, help="domain length along x (m)")
+    ap.add_argument("--ly", type=float, default=2000.0, help="domain length along y (m)")
+    ap.add_argument("--lz", type=float, default=800.0, help="domain height (m), the top of the inflow profile")
     ap.add_argument("--terrain_dx", type=float, default=25.0, help="spacing of the terrain file (m)")
-    ap.add_argument("--hills", type=int, default=4)
-    ap.add_argument("--hill_height", type=float, nargs=2, default=[60.0, 120.0])
+    ap.add_argument("--hills", type=int, default=4, help="number of Gaussian hills")
+    ap.add_argument("--hill_height", type=float, nargs=2, default=[60.0, 120.0], help="range of hill heights (m)")
     ap.add_argument("--hill_radius", type=float, nargs=2, default=[150.0, 250.0], help="e-folding radius (m)")
-    ap.add_argument("--hill_spacing", type=float, default=550.0)
+    ap.add_argument("--hill_spacing", type=float, default=550.0, help="smallest distance between hill centres (m)")
     ap.add_argument("--hill_margin", type=float, default=0.2,
                     help="the hills' centres stay this fraction of the width from the y faces (a y-periodic run wants them flat)")
-    ap.add_argument("--transformers", type=int, default=6)
-    ap.add_argument("--on_hills", type=int, default=3)
-    ap.add_argument("--transformer_spacing", type=float, default=450.0)
+    ap.add_argument("--transformers", type=int, default=6, help="number of transformers")
+    ap.add_argument("--on_hills", type=int, default=3, help="how many of them stand on hilltops")
+    ap.add_argument("--transformer_spacing", type=float, default=450.0,
+                    help="smallest distance of a flat-ground transformer from the others (m)")
     ap.add_argument("--flat_height", type=float, default=2.0, help="highest terrain counted as flat ground (m)")
     ap.add_argument("--box", type=float, nargs=3, default=[8.0, 5.0, 6.0], help="transformer length, width, height (m)")
     ap.add_argument("--end_inset", type=float, default=0.7, help="the line ends lie this fraction of the way to the box's edge")
-    ap.add_argument("--allowable_force", type=float, default=2.5e4, help="above a dead end's stringing tension (N); four times this with --circuit")
-    ap.add_argument("--allowable_moment", type=float, default=2.5e5, help="(N m)")
+    ap.add_argument("--allowable_force", type=float, default=2.5e4,
+                    help="a transformer's allowable horizontal pull of the lines, allowable_force (N); four times this with --circuit")
+    ap.add_argument("--allowable_moment", type=float, default=2.5e5,
+                    help="a transformer's allowable overturning moment, allowable_moment (N m); four times this with --circuit")
     ap.add_argument("--end_height", type=float, default=10.0, help="dead ends above the terrain (m): the box top plus the bushings")
-    ap.add_argument("--tower_height", type=float, default=30.0)
-    ap.add_argument("--insulator", type=float, default=2.5)
+    ap.add_argument("--tower_height", type=float, default=30.0, help="suspension-point height above the terrain (m)")
+    ap.add_argument("--insulator", type=float, default=2.5, help="insulator string length of the phases (m); 0: the phases are clamped to the towers")
     ap.add_argument("--tower", type=float, nargs=5, default=[6.0, 1.5, 0.2, 12.0, 1.2],
-                    help="lattice towers: base width, top width, solidity, cross-arm length and depth (m)")
+                    help="lattice towers: base width (m), top width (m), solidity (-), cross-arm length (m) and depth (m)")
     ap.add_argument("--tower_foundation", type=float, nargs=3, default=[6.0e4, 5.0e4, 1.5e5],
                     help="a tower's weight, and a footing's allowable uplift and compression (N)")
     ap.add_argument("--tower_sway", type=float, nargs=3, default=[2.0, 0.02, 1.0e9],
@@ -263,16 +273,16 @@ def main():
     ap.add_argument("--phase_spacing", type=float, nargs=2, default=[5.5, 1.5],
                     help="the outer phases' offset across the line at the towers and at the transformers (m)")
     ap.add_argument("--shield_height", type=float, default=7.0, help="the shield wire above the cross-arm (m), on the peak")
-    ap.add_argument("--max_span", type=float, default=280.0)
+    ap.add_argument("--max_span", type=float, default=280.0, help="largest horizontal span length (m)")
     ap.add_argument("--stringing_tension", type=float, default=2.0e4, help="still-air horizontal tension every span is strung to (N)")
-    ap.add_argument("--min_clearance", type=float, default=8.0)
+    ap.add_argument("--min_clearance", type=float, default=8.0, help="smallest still-air ground clearance of a span (m)")
     ap.add_argument("--min_weight_span", type=float, default=0.3,
                     help="the line's pull on a suspension tower, at least this fraction of its spans' weight: "
                          "a tower in a dip is raised until the line weighs on it")
-    ap.add_argument("--max_tower_height", type=float, default=60.0)
+    ap.add_argument("--max_tower_height", type=float, default=60.0, help="tallest a tower in a dip may be raised to (m)")
     ap.add_argument("--u_ref", type=float, default=18.0, help="inflow speed at z_ref (m/s)")
-    ap.add_argument("--z_ref", type=float, default=30.0)
-    ap.add_argument("--z0", type=float, default=0.1)
+    ap.add_argument("--z_ref", type=float, default=30.0, help="height of u_ref (m)")
+    ap.add_argument("--z0", type=float, default=0.1, help="roughness length of the log law (m)")
     ap.add_argument("--inversion", type=float, default=500.0, help="base of the capping inversion (m)")
     ap.add_argument("--lapse", type=float, default=0.01, help="theta gradient above the inversion (K/m)")
     a = ap.parse_args()
@@ -327,8 +337,8 @@ def main():
         f.write(f"# generated by make_case.py --seed {a.seed}: {len(pts)} transformers, {len(lines)} lines\n")
         for (xc, yc, h, s) in hills:
             f.write(f"#   hill at ({xc:.0f}, {yc:.0f}), height {h:.0f} m, radius {s:.0f} m\n")
-        span_names = [l[0] for l in lines] if not a.circuit else [l[0] + k for l in lines for k in ("a", "b", "c", "sw")]
-        f.write("erf.conductors.spans        = " + " ".join(span_names) + "\n")
+        line_names = [l[0] for l in lines] if not a.circuit else [l[0] + k for l in lines for k in ("a", "b", "c", "sw")]
+        f.write("erf.conductors.lines        = " + " ".join(line_names) + "\n")
         f.write("erf.conductors.transformers = " + " ".join(names) + "\n")
         f.write("erf.conductors.tower_types  = lattice\n\n")
         tb, tt, ts, al, ad = a.tower

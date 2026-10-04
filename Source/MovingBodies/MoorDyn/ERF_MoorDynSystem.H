@@ -1,6 +1,11 @@
 #ifndef ERF_MOORDYN_SYSTEM_H
 #define ERF_MOORDYN_SYSTEM_H
 
+/**
+ * ERF's wrapper of one MoorDyn-C system (the v2 C API, from the installed library or the bundled
+ * stub), with ERF's error handling, and helpers for the library version and the FPE traps.
+ */
+
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -18,32 +23,54 @@ bool is_stub ();
 /** The name of a MoorDyn error code (MOORDYN_SUCCESS, MOORDYN_INVALID_INPUT_FILE, ...). */
 std::string error_name (int code);
 /**
- * Whether any amrex.fpe_trap_* input is on (read from ParmParse). MoorDyn-C is not trap clean: its
- * stationary initial-condition solver overflows intermediate values (amrex.fpe_trap_overflow ends
- * the run with SIGILL inside MoorDyn_Init in 2.7.1; the invalid and zero traps pass), so a body
- * that runs MoorDyn refuses to start with any of the traps on.
+ * Whether any of amrex.fpe_trap_invalid, amrex.fpe_trap_zero and amrex.fpe_trap_overflow is on
+ * (read from ParmParse; amrex.signal_handling is not consulted). MoorDyn-C is not trap clean: its
+ * stationary initial-condition solver overflows intermediate values (amrex.fpe_trap_overflow
+ * stops the run inside MoorDyn_Init in 2.7.1: SIGILL on Apple arm64, SIGFPE on Linux; the
+ * invalid and zero traps pass), so a body that runs MoorDyn refuses to start with any of the traps on.
  */
 bool fpe_traps_requested ();
 
 /**
- * One MoorDyn-C system (one input file) behind the v2 C API, with ERF's error handling: creation
- * and initialisation report their failure in a string, so a body can name its input; every later
- * call aborts with the MoorDyn function and error code, since nothing sensible can follow it.
+ * Check the OPTIONS block of a MoorDyn input file for `1 WaveKin`, the external fluid kinematics
+ * ERF's wrapper relies on. Returns an empty string when the option is there, else the message,
+ * naming the file. MoorDyn-C 2.7.1 reports kinematics points whatever WaveKin is and then
+ * ignores the velocities ERF sets unless WaveKin = 1, so the file itself is checked.
+ */
+std::string check_wave_kinematics_option (const std::string& input_file);
+
+/**
+ * One MoorDyn-C system (one input file) behind the v2 C API, with ERF's error handling:
+ * creation, initialisation and external_kinematics_init() report their failure in a string, so a
+ * body can name its input; every other call aborts with the MoorDyn function and error code,
+ * since nothing sensible can follow it.
  *
- * Lines and points are numbered from 1, as in MoorDyn. The fluid velocity the lines feel comes
- * through MoorDyn's external wave-kinematics calls: external_kinematics_init() returns the number
- * of points MoorDyn wants the velocity at (every line node first; in MoorDyn-C 2.7.1 a fixed-ended
- * line is followed by its attachment points and one entry at MoorDyn's origin),
- * kinematics_points() their current coordinates, and set_kinematics() hands the velocity and
- * acceleration there before each step. The input file must set `WaveKin = 1` for this, and the
- * nodes must lie below z = 0 in MoorDyn's frame, which is where MoorDyn applies its fluid loads.
+ * A "line" here is a MoorDyn line (in the conductor module one span or one insulator string; the
+ * conductor line is the whole system). MoorDyn lines and points are numbered from 1, as in
+ * MoorDyn. Node indices are 0-based: 0 at a MoorDyn line's first end (end A) to
+ * line_num_nodes(line) - 1 at its second end (end B).
+ *
+ * The fluid velocity the MoorDyn lines feel comes through MoorDyn's external wave-kinematics
+ * calls: external_kinematics_init() returns the number of kinematics points MoorDyn wants the
+ * velocity at (the nodes of MoorDyn line 1, nodes 0..N, then of line 2, and so on; then the nodes
+ * of any rods; then every point, fixed, coupled or free, in input order; then every body, the
+ * ground body at MoorDyn's origin first. For ERF's inputs, which have no rods or bodies, that is
+ * the line nodes, the points and one entry at the origin), kinematics_points() their current
+ * coordinates, and set_kinematics() hands the velocity and acceleration there before each step.
+ * The input file must set `WaveKin = 1` for this (create() checks it), and the nodes must lie
+ * below z = 0 in MoorDyn's frame, which is where MoorDyn applies its fluid loads.
+ *
+ * MoorDyn's frame is the coordinates of the input file. The conductor module writes ERF
+ * coordinates lowered by erf.conductors.surface_offset, so that the lines lie below MoorDyn's
+ * free surface z = 0.
  */
 class MoorDynSystem
 {
 public:
     /**
-     * Create a system from a MoorDyn input file. Returns null and sets err when MoorDyn cannot read
-     * it. log_level is a MOORDYN_*_LEVEL value; log_file, when not empty, receives MoorDyn's log.
+     * Create a system from a MoorDyn input file. Returns null and sets err when MoorDyn cannot
+     * read the file or when its OPTIONS do not set `WaveKin = 1`. log_level is a
+     * MOORDYN_*_LEVEL value; log_file, when not empty, receives MoorDyn's log.
      */
     static std::unique_ptr<MoorDynSystem> create (const std::string& input_file,
                                                   const std::string& log_file,
@@ -55,62 +82,92 @@ public:
 
     const std::string& input_file () const { return m_file; }
 
-    /** The number of coupled degrees of freedom (3 per coupled point): 0 when every attachment is fixed. */
+    /** The number of coupled degrees of freedom: 3 per coupled point (ERF's inputs couple only points); 0 when no point is coupled. */
     unsigned num_coupled_dof () const;
 
     /**
-     * Initialise the system with the coupled positions and velocities (num_coupled_dof() values
-     * each, empty when there are none); with compute_ic MoorDyn solves for the static initial
-     * shape, without it the state is expected from load(). Returns an error message, empty on success.
+     * Initialise the system with the coupled positions (m) and velocities (m/s), num_coupled_dof()
+     * finite values each in MoorDyn's frame (empty when there are none). With compute_ic MoorDyn
+     * solves for the static initial shape; without it the state is expected from load() or
+     * deserialize(). Returns an error message, empty on success.
      */
     std::string init (const std::vector<double>& x, const std::vector<double>& xd, bool compute_ic = true);
 
-    /** Start the external kinematics; returns the number of points, 0 with err set when the input file does not enable them. */
+    /**
+     * Start the external kinematics; returns the number of kinematics points MoorDyn takes the
+     * fluid velocity at. The stub returns 0 (and err is set) when the input file does not set
+     * WaveKin = 1; MoorDyn-C 2.7.1 returns the full count whatever WaveKin is (create() has
+     * checked the option). Also 0 with err set when MoorDyn reports an error.
+     */
     unsigned external_kinematics_init (std::string& err);
     unsigned num_kinematics_points () const { return m_nkin; }
-    /** 3*n coordinates of the kinematics points, in MoorDyn's frame. */
+    /** 3*n coordinates of the kinematics points (m, MoorDyn's frame). */
     std::vector<double> kinematics_points () const;
-    /** Set the fluid velocity and acceleration (3*n each) at the kinematics points, valid at time t. */
+    /**
+     * Set the fluid velocity (m/s) and acceleration (m/s^2), 3*n finite values each, at the
+     * kinematics points, valid at time t (s). MoorDyn-C 2.7.1 and the stub ignore t; the values
+     * hold until the next call. Aborts, naming the input file, on a non-finite value.
+     */
     void set_kinematics (const std::vector<double>& U, const std::vector<double>& Ud, double t);
 
     /**
      * Advance the system by dt (MoorDyn sub-steps internally with its own dtM): the coupled points
      * start the step at x and move at xd over it (MoorDyn places them at x + xd s, s the time into
-     * the step), and f receives the coupled forces at its end, the net force of the line ends on each
-     * coupled point. t receives MoorDyn's clock, the time since it was initialised.
+     * the step), and f receives the coupled forces at its end. t receives MoorDyn's clock, the
+     * time since it was initialised.
+     *
+     * Units: x m, xd m/s, f N, t and dt s; MoorDyn's frame. f is the force ON each coupled point
+     * BY the lines ending there (plus the point's own weight, buoyancy and drag, zero for the
+     * massless points ERF writes). Aborts when dt is not positive or a returned force is not finite.
      */
     void step (const std::vector<double>& x, const std::vector<double>& xd, std::vector<double>& f, double& t, double dt);
 
+    /** MoorDyn's internal step dtM (s), the bound on the sub-steps step() takes. */
     double dt () const;
+    /** Set MoorDyn's internal step dtM (s, finite and > 0). */
     void set_dt (double dt);
 
+    /** The number of MoorDyn lines. */
     unsigned num_lines () const;
+    /** The number of nodes of MoorDyn line `line` (1-based): its segments + 1. */
     unsigned line_num_nodes (unsigned line) const;
+    /** The unstretched length of MoorDyn line `line` (m). */
     double line_unstretched_length (unsigned line) const;
+    /** The position of node `node` (0-based) of MoorDyn line `line` (1-based) (m, MoorDyn's frame). */
     std::array<double,3> line_node_position (unsigned line, unsigned node) const;
+    /** The velocity of node `node` of MoorDyn line `line` (m/s). */
     std::array<double,3> line_node_velocity (unsigned line, unsigned node) const;
-    /** The tension force vector at a node (N). */
+    /**
+     * The tension at node `node` (N, MoorDyn's frame, internal damping included): at an inner
+     * node the mean of the two adjacent segments, at an end node the end segment's. It points
+     * from node i towards node i+1.
+     */
     std::array<double,3> line_node_tension (unsigned line, unsigned node) const;
-    /** The fluid's drag on a node (N): the force the air exerts on the line there. */
+    /** The fluid's drag on a node (N): the force the air exerts on the MoorDyn line there. */
     std::array<double,3> line_node_drag (unsigned line, unsigned node) const;
     /**
-     * The net force on a node (N): the tensions of the segments either side, the weight, the fluid's
-     * drag and the rest MoorDyn adds up to move the node. At a fixed end node it is the force the
-     * line puts on its support, since the support holds the node still.
+     * The net force on a node (N): the tensions of the segments either side, the weight, the
+     * fluid's drag and the rest MoorDyn adds up to move the node. At an end node on a fixed or
+     * coupled point it is the force the MoorDyn line puts on that point, since the point holds the node.
      */
     std::array<double,3> line_node_force (unsigned line, unsigned node) const;
-    /** The tension at the line's last node (MoorDyn's fairlead tension, N). */
+    /** The magnitude of the tension at the MoorDyn line's last node (MoorDyn's fairlead tension, N). */
     double line_end_tension (unsigned line) const;
+    /** The largest node tension magnitude (N): over nodes 0..N-1 in MoorDyn-C 2.7.1, over 0..N in the stub. */
     double line_max_tension (unsigned line) const;
 
+    /** The number of MoorDyn points. */
     unsigned num_points () const;
-    /** -1 coupled, 0 free, 1 fixed. */
+    /** The type of point `point` (1-based): -1 coupled, 0 free, 1 fixed. */
     int point_type (unsigned point) const;
+    /** The position of point `point` (m, MoorDyn's frame). */
     std::array<double,3> point_position (unsigned point) const;
     /**
      * The net force on a point (N). MoorDyn computes it for the points it integrates (free) and
-     * for the coupled ones; a fixed attachment reports zero, and its pull is the tension vector at
-     * the end node of each line attached to it (line_node_tension at node 0 or at the last node).
+     * for the coupled ones; a fixed point reports zero. The pull of a MoorDyn line on a fixed
+     * point is line_node_tension(line, 0) where the line starts at the point and
+     * -line_node_tension(line, N) where it ends there (N = line_num_nodes(line) - 1): MoorDyn's
+     * node tension points from node i towards node i+1.
      */
     std::array<double,3> point_force (unsigned point) const;
 
@@ -118,8 +175,13 @@ public:
     void save (const std::string& path);
     /** Restore a state written by save() into a system created from the same input and initialised without an IC solve. */
     void load (const std::string& path);
-    /** The whole system state in memory (MoorDyn_Serialize) and its restoration (MoorDyn_Deserialize), to redo a step. */
+    /**
+     * The whole system state in memory (MoorDyn_Serialize), to redo a step: MoorDyn's integrator
+     * (with its clock), points and lines. The fluid kinematics last set by set_kinematics() are
+     * not part of it, so set them again before the next step.
+     */
     std::vector<std::uint64_t> serialize () const;
+    /** Restore a state from serialize() of this system (MoorDyn_Deserialize); aborts when its size differs. */
     void deserialize (const std::vector<std::uint64_t>& data);
 
 private:
@@ -131,6 +193,7 @@ private:
     MoorDyn m_sys;
     std::string m_file;
     unsigned m_nkin{0};
+    mutable std::size_t m_serial_words{0};   //!< size of the last serialize(), in 64-bit words; 0 before the first
 };
 
 } // namespace erf_moordyn

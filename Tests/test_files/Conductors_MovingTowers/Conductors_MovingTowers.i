@@ -1,13 +1,14 @@
 # The lines over hills of Conductors_Terrain (two sections dead-ended on three transformers, in a
 # neutral boundary layer over terrain with the k-equation RANS closure), with lattice towers that
-# bend: each sways in its first mode at 2 Hz on a rigid foundation, lowered by a footing that can
-# tilt, under its members' drag and its line's pull, and MoorDyn moves the cross-arms the lines
-# hang from as coupled points. The towers' loads and cross-arm displacements, a tower's statistics
-# and the middle span of L1 must match their golds; nothing goes back into the flow.
+# bend: each sways in its first mode, at 2 Hz on a rigid foundation and lower on its footing,
+# which can tilt (foundation_rotational_stiffness), under its members' drag and its line's pull,
+# and MoorDyn moves the cross-arms the lines hang from as coupled points. The towers' loads and
+# cross-arm displacements, the statistics of L1's first tower (tower_L1_t1) and the middle span of
+# L1 must match their golds; nothing goes back into the flow.
 
 max_step = 10
 stop_time = 9.0
-erf.fixed_dt = 0.9          # at most 26 m/s aloft on 50 m cells: Courant 0.47
+erf.fixed_dt = 0.9          # s: at most 26 m/s aloft on 50 m horizontal cells, Courant 0.47
 
 geometry.prob_lo     = 0.    0.    0.
 geometry.prob_hi     = 1500. 1000. 400.
@@ -15,8 +16,8 @@ amr.n_cell           = 30    20    16
 amr.max_level        = 0
 geometry.is_periodic = 0 0 0
 xlo.type           = "Inflow"
-xlo.dirichlet_file = "inflow_profile"   # z u v w theta; no constant inflow density (it would rescale theta)
-xlo.KE             = 5.2523             # 3.3 u*^2, u* = 1.2616 m/s
+xlo.dirichlet_file = "inflow_profile"   # z u v w theta; no constant inflow density (it would rescale theta),
+                                        # so the inflow k is zero-gradient
 xhi.type           = "Outflow"
 ylo.type           = "SlipWall"
 yhi.type           = "SlipWall"
@@ -49,8 +50,7 @@ erf.rans_type              = "kEqn"
 erf.dirichlet_k            = true
 erf.init_tke_from_ustar    = true
 erf.rans_consistent_diffusivities = true
-erf.rans_lscale_min        = 1.0
-erf.max_geom_lscale        = 20.0   # 0.1 kappa zi for the 500 m inversion
+erf.max_geom_lscale        = 20.0   # m: 0.1 kappa zi with zi = 500 m, an inversion base above this domain
 erf.theta_ref              = 300.0
 
 erf.sum_interval = -1

@@ -1,6 +1,8 @@
 #ifndef ERF_TRANSFORMER_H
 #define ERF_TRANSFORMER_H
 
+/** Transformers the conductor lines dead-end on: the box on the terrain, the lines' load on it, and the attachment of line ends to it. */
+
 #include <array>
 #include <cstddef>
 #include <string>
@@ -13,7 +15,10 @@
 
 namespace erf_conductors {
 
-/** A line's end: the line (an index into erf.conductors.spans) and which end, 0 for end_a and 1 for end_b. */
+/**
+ * A line's end: the line (0-based index into ConductorInputs::lines, the order of
+ * erf.conductors.lines) and which end, 0 for end_a and 1 for end_b.
+ */
 struct LineEnd
 {
     std::size_t line{0};
@@ -37,6 +42,7 @@ struct TransformerLoad
 class Transformer
 {
 public:
+    /** Stand the transformer on the terrain: base_z is the terrain height (m) under the footprint's centre. */
     Transformer (TransformerInputs in, amrex::Real base_z) : m_in(std::move(in)), m_base_z(base_z) {}
 
     const std::string& name () const { return m_in.name; }
@@ -55,6 +61,9 @@ public:
      * puts on it there (one entry per end, in the order of ends()): the sum of the forces, their
      * moment about the base centre, and whether the horizontal force or the overturning moment
      * exceeds its allowable value (a zero allowable is not checked).
+     * Units: at (m, ERF frame, absolute heights); force (N, the force ON the transformer BY the line).
+     * The moment is about the base centre, right-handed in ERF's frame. Precondition: at and force
+     * have the same size (aborts otherwise).
      */
     TransformerLoad load (const std::vector<std::array<amrex::Real,3>>& at,
                           const std::vector<std::array<amrex::Real,3>>& force) const;
@@ -71,7 +80,7 @@ private:
  * empty string, or the message to abort with when an end lies on two footprints, when an end on a
  * footprint is not above the box's top, or when no line ends on a transformer.
  */
-std::string attach_line_ends (std::vector<Transformer>& transformers, const std::vector<SpanInputs>& placed);
+std::string attach_line_ends (std::vector<Transformer>& transformers, const std::vector<LineInputs>& placed);
 
 } // namespace erf_conductors
 

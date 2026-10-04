@@ -1,6 +1,8 @@
 #ifndef ERF_RUNNING_STATS_H
 #define ERF_RUNNING_STATS_H
 
+/** Running mean, rms, minimum and maximum of a body's scalar diagnostics, carried across checkpoints. */
+
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -10,6 +12,7 @@
 #include <vector>
 
 #include <AMReX.H>
+#include <AMReX_BLassert.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_REAL.H>
 #include <AMReX_Utility.H>
@@ -20,10 +23,11 @@
 namespace erf_actuator {
 
 /**
- * Running statistics of a body's scalar diagnostics (thrust, torque, power, speeds): the
- * mean, the root mean square, the minimum and the maximum of every sample added since the
- * averaging start. <output_root>_stats.csv always holds the current values; the sums are part
- * of the checkpoint, so the statistics continue across a restart.
+ * One set of running statistics: the mean, the root mean square, the minimum and the maximum of
+ * each named scalar quantity over every sample added since the caller's averaging start (for
+ * example erf.conductors.stats_start). write() rewrites <output_root>_stats.csv with the current
+ * values; the sums are part of the checkpoint, so the statistics continue across a restart.
+ * A non-finite sample aborts, naming the statistics and the quantity.
  */
 class RunningStats
 {
@@ -40,10 +44,17 @@ public:
     double t_first () const { return m_t_first; }
     double t_last () const { return m_t_last; }
 
-    /** Add one sample of every quantity, taken at time t. */
+    /** Add one sample of every quantity, taken at time t (s). */
     void accumulate (double t, const std::vector<amrex::Real>& values)
     {
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(values.size() == m_names.size(), "RunningStats::accumulate: one value per quantity");
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            if (!std::isfinite(values[i])) {
+                std::ostringstream msg;
+                msg << "RunningStats " << m_name << ": quantity " << m_names[i] << " is not finite at t = " << t << " s";
+                amrex::Abort(msg.str());
+            }
+        }
         if (m_count == 0) { m_t_first = t; }
         m_t_last = t;
         for (std::size_t i = 0; i < values.size(); ++i) {
@@ -84,7 +95,11 @@ public:
             out << m_names[i] << " " << m_sum[i] << " " << m_sum2[i] << " " << m_min[i] << " " << m_max[i] << "\n";
         }
     }
-    /** Restore the state written by write_state(); false when there is none. */
+    /**
+     * Restore the state written by write_state(); false when there is none. Aborts, changing
+     * nothing, when the file is malformed: a negative count, t_last before t_first, a non-finite
+     * value, or quantities other than this object's.
+     */
     bool read_state (const std::string& dir)
     {
         const std::string fname = dir + "/" + m_name + "_stats.dat";
@@ -104,11 +119,19 @@ public:
             amrex::Abort("the statistics checkpoint '" + fname + "' holds " + std::to_string(size) + " quantities but " +
                          m_name + " has " + std::to_string(m_names.size()));
         }
+        if (count < 0 || !std::isfinite(t0) || !std::isfinite(t1) || (count > 0 && t1 < t0)) {
+            amrex::Abort("malformed statistics checkpoint '" + fname + "': the count must be >= 0 and t_first <= t_last, both finite");
+        }
+        std::vector<amrex::Real> sum(size), sum2(size), mn(size), mx(size);
         for (std::size_t i = 0; i < size; ++i) {
-            if (!(in >> qname >> m_sum[i] >> m_sum2[i] >> m_min[i] >> m_max[i]) || qname != m_names[i]) {
+            if (!(in >> qname >> sum[i] >> sum2[i] >> mn[i] >> mx[i]) || qname != m_names[i]) {
                 amrex::Abort("the statistics checkpoint '" + fname + "' does not list " + m_names[i] + " where expected");
             }
+            if (!std::isfinite(sum[i]) || !std::isfinite(sum2[i]) || !std::isfinite(mn[i]) || !std::isfinite(mx[i])) {
+                amrex::Abort("malformed statistics checkpoint '" + fname + "': a value of " + m_names[i] + " is not finite");
+            }
         }
+        m_sum = sum; m_sum2 = sum2; m_min = mn; m_max = mx;
         m_count = count; m_t_first = t0; m_t_last = t1;
         return true;
     }

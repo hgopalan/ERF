@@ -33,7 +33,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "setup_moordyn.sh: --version must look like 2.7.1, not '$version'" >&2; exit 1; }
-[[ "${version%%.*}" -ge 2 ]] || { echo "setup_moordyn.sh: ERF needs MoorDyn-C 2 (the v2 C API), not $version" >&2; exit 1; }
+major="${version%%.*}"; minor="${version#*.}"; minor="${minor%%.*}"
+if [[ "$major" -lt 2 || ( "$major" -eq 2 && "$minor" -lt 3 ) ]]; then
+    echo "setup_moordyn.sh: ERF needs MoorDyn-C 2.3 or newer (the v2 C API with the MoorDyn_ExternalWaveKin* calls), not $version" >&2
+    exit 1
+fi
 [[ -n "$prefix" ]] || prefix="${HOME}/opt/moordyn-${version}"
 for tool in git cmake; do
     command -v "$tool" > /dev/null || { echo "setup_moordyn.sh: '$tool' not found in PATH" >&2; exit 1; }

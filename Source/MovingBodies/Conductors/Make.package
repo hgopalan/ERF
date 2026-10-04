@@ -1,11 +1,11 @@
 CEXE_headers += ERF_ConductorGeometry.H
 CEXE_headers += ERF_ConductorInputs.H
 CEXE_headers += ERF_MoorDynInputWriter.H
-CEXE_headers += ERF_ConductorSpan.H
+CEXE_headers += ERF_ConductorLine.H
 CEXE_headers += ERF_Transformer.H
 CEXE_headers += ERF_Conductors.H
 CEXE_sources += ERF_ConductorInputs.cpp
 CEXE_sources += ERF_MoorDynInputWriter.cpp
-CEXE_sources += ERF_ConductorSpan.cpp
+CEXE_sources += ERF_ConductorLine.cpp
 CEXE_sources += ERF_Transformer.cpp
 CEXE_sources += ERF_Conductors.cpp

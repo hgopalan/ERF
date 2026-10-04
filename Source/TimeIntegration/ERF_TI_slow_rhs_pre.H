@@ -217,7 +217,8 @@
                          get_eb(level), true);
 
 #ifdef ERF_USE_MOORDYN
-        // The conductor lines' drag on the air (erf.conductors.drag_on_flow), fixed over the step
+        // The force the conductor lines and the towers' members exert on the air, minus the air's drag
+        // on them (erf.conductors.drag_on_flow), fixed over the step
         if (conductors) {
             conductors->add_momentum_sources(level, xmom_src, ymom_src, zmom_src);
         }

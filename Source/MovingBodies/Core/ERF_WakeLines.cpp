@@ -1,3 +1,5 @@
+// WakeLines: sampling points behind a rotor, the running average, its files and checkpoint.
+
 #include "ERF_WakeLines.H"
 
 #include <algorithm>
@@ -26,6 +28,8 @@ WakeLines::WakeLines (std::string name, std::string output_root,
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_diameter > 0.0, "WakeLines: the rotor diameter must be positive");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_npts >= 2, "WakeLines: at least two points per line");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_half_width > 0.0, "WakeLines: half_width must be positive");
+    if (m_xD.empty()) { Abort("WakeLines " + m_name + ": no downstream distances (x/D) are given"); }
+    if (!std::isfinite(z_min)) { Abort("WakeLines " + m_name + ": the ground height z_min must be finite (m)"); }
     // the downstream direction is the rotor axis projected on the horizontal plane: a shaft
     // tilt of a few degrees would otherwise put the far lines into the ground or the sky
     m_axis[2] = 0.0;
@@ -60,6 +64,11 @@ void
 WakeLines::accumulate (const std::vector<Real>& vel)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(vel.size() == m_pos.size(), "WakeLines::accumulate: one velocity per point");
+    for (std::size_t i = 0; i < vel.size(); ++i) {
+        if (!std::isfinite(vel[i])) {
+            Abort("WakeLines " + m_name + ": the sampled velocity at point " + std::to_string(i / 3) + " (0-based) is not finite");
+        }
+    }
     for (std::size_t i = 0; i < vel.size(); ++i) { m_sum[i] += vel[i]; }
     ++m_count;
 }
@@ -153,17 +162,28 @@ WakeLines::read_state (const std::string& dir)
         Abort("the wake-average checkpoint '" + fname + "' holds " + std::to_string(size) + " values but the lines of " +
               m_name + " have " + std::to_string(m_sum.size()) + "; the wake inputs must match the run being restarted");
     }
+    const Real naxis = std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+    const bool finite = std::isfinite(hub[0]) && std::isfinite(hub[1]) && std::isfinite(hub[2]) && std::isfinite(naxis);
+    if (count < 0 || !finite || !(std::isfinite(diameter) && diameter > 0.0) ||
+        !(std::abs(naxis - Real(1.0)) < Real(1.0e-4) && std::abs(axis[2]) < Real(1.0e-4))) {
+        Abort("malformed wake-average checkpoint '" + fname + "': the count must be >= 0, the diameter positive, "
+              "the axis a horizontal unit vector and every value finite");
+    }
     // the geometry is taken over as it was: the rotor's hub and diameter come from OpenFAST's
     // single-precision arrays and differ at the last digits from one build of the lines to another
-    for (std::size_t i = 0; i < m_s.size(); ++i) {
-        if (!(in >> m_s[i])) { Abort("truncated wake-average checkpoint '" + fname + "'"); }
-    }
-    for (std::size_t i = 0; i < size; ++i) {
-        if (!(in >> m_pos[i])) { Abort("truncated wake-average checkpoint '" + fname + "'"); }
-    }
-    for (std::size_t i = 0; i < size; ++i) {
-        if (!(in >> m_sum[i])) { Abort("truncated wake-average checkpoint '" + fname + "'"); }
-    }
+    std::vector<Real> s(m_s.size()), pos(size), sum(size);
+    auto read_all = [&] (std::vector<Real>& v) {
+        for (auto& x : v) {
+            if (!(in >> x)) { Abort("truncated wake-average checkpoint '" + fname + "'"); }
+            if (!std::isfinite(x)) { Abort("malformed wake-average checkpoint '" + fname + "': a value is not finite"); }
+        }
+    };
+    read_all(s);
+    read_all(pos);
+    read_all(sum);
+    m_s = s;
+    m_pos = pos;
+    m_sum = sum;
     m_hub = hub;
     m_axis = axis;
     m_diameter = diameter;

@@ -158,7 +158,7 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
 
 #ifdef ERF_USE_MOORDYN
     // **************************************************************************************
-    // Advance the conductor spans (MoorDyn lines) by one step on their anchor level
+    // Advance the conductor lines (one MoorDyn system each) by one step on their anchor level
     // **************************************************************************************
     if (conductors) {
         conductors->advance(lev, time, dt_lev, U_old, V_old, W_old, z_phys_nd[lev].get(), detJ_cc[lev].get(), Geom(lev));

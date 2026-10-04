@@ -3,7 +3,7 @@
 #   hill at (2249, 613), height 99 m, radius 180 m
 #   hill at (2347, 1504), height 98 m, radius 225 m
 #   hill at (1629, 1391), height 87 m, radius 184 m
-erf.conductors.spans        = L1 L2 L3 L4 L5
+erf.conductors.lines        = L1 L2 L3 L4 L5
 erf.conductors.transformers = T1 T2 T3 T4 T5 T6
 erf.conductors.tower_types  = lattice
 

@@ -5,6 +5,10 @@
  * Stand-in for MoorDyn-C's <moordyn/MoorDyn2.h>: the subset of the v2 C API that ERF's line
  * coupling calls, with the same names, signatures, error codes and log levels, implemented by
  * ERF_MoorDynStub.cpp. It lets the coupling be built and tested where MoorDyn is not installed.
+ * MoorDyn line and point ids are 1-based as in MoorDyn; node indices are 0-based. Bodies, rods,
+ * waves other than external ones, line failures and the per-component force getters (weight,
+ * bending, seabed) are not declared. ERF_MoorDynStub.cpp lists where the stub's results differ
+ * from MoorDyn-C 2.7.1.
  */
 
 #include <stddef.h>

@@ -45,7 +45,7 @@ TEST(InputsName, SeveralFileIncludesAreNotDuplicates)
 {
     Deck d;
     d.write("flow.inputs", "erf.fixed_dt = 0.5\nerf.use_gravity = true\n");
-    d.write("network.inputs", "erf.conductors.spans = L1  # generated\n");
+    d.write("network.inputs", "erf.conductors.lines = L1  # generated\n");
     const std::string deck = d.write("inputs", "# shared settings and a generated block\nFILE = " + d.path("flow.inputs") +
                                      "\nmax_step = 10\nFILE = \"" + d.path("network.inputs") + "\"   # quoted\nerf.v = 1\n");
     EXPECT_FALSE(has_duplicates(deck));

@@ -1,9 +1,9 @@
 # A circuit over hills that are an immersed boundary on a flat mesh: the hills of Conductors_Terrain
 # (ImmersedForcing, the wall law on the hill surface), a neutral log-law inflow through the x-low
 # face and out through the x-high one, Deardorff LES, the implicit anelastic MidPoint scheme. Three
-# phases and a shield wire hang from two shared lattice towers that bend; their attachments stand on
-# the hills' surface, read from the terrain file the immersed boundary is built from, since the
-# mesh is flat. The towers' loads and sway, the middle phase's middle span and the transformers'
+# phases and a shield wire hang from two shared lattice towers that bend; the towers and the line
+# ends stand on the hills' surface, read from the terrain file the immersed boundary is built from,
+# since the mesh is flat. The towers' loads and sway, the middle phase's middle span and the transformers'
 # loads must match their golds; nothing goes back into the flow.
 
 max_step = 10
@@ -16,8 +16,8 @@ amr.n_cell           = 60    40    16
 amr.max_level        = 0
 geometry.is_periodic = 0 0 0
 xlo.type           = "Inflow"
-xlo.dirichlet_file = "inflow_profile"   # z u v w theta; no constant inflow density (it would rescale theta)
-xlo.KE             = 0.1
+xlo.dirichlet_file = "inflow_profile"   # z u v w theta; no constant inflow density (it would rescale theta),
+                                        # so the inflow k is zero-gradient
 xhi.type           = "Outflow"
 ylo.type           = "SlipWall"
 yhi.type           = "SlipWall"

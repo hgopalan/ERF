@@ -1,23 +1,31 @@
-// Contract of erf_conductors::ConductorSpan: a span hangs at the catenary sag in still air
-// with its nodes reported in ERF's frame and the catenary end tensions; its kinematics points
-// start with the line nodes, in ERF's frame; a prescribed crosswind, handed over step by step
-// in lockstep with ERF's clock, blows it out towards the quasi-static angle atan(q / w) and
-// raises the tension; the diagnostics file carries one row per call with the header once; a
-// span created from a saved state is where the saved one is and continues as it does; and a
-// section hangs from its insulator strings, which hang plumb in still air and let the conductor
-// swing further across the wind than clamps at the towers do; the pulls on the two dead ends
-// of a level span in still air balance along the chord and carry the line's weight; and a
-// tower of a level section carries the weight of one span (and its string), the spans either
-// side balancing along the line; the cross-arms of towers that move are MoorDyn's coupled points,
-// which a coupled step moves from where they start at the velocity it is given and which take the
-// line's pull the tower is reported to carry; held still, a coupled point is a fixed one; and a
-// string at a tower in a dip, which the spans either side pull up, is flagged in uplift.
+// Unit tests of erf_conductors::ConductorLine, one conductor line as one MoorDyn system.
+//
+// HangsAtTheCatenarySagInStillAirInERFsFrame: a single-span line hangs at the catenary sag with the
+//     catenary end tensions, its nodes in ERF's frame, its kinematics points starting with the nodes.
+// APrescribedCrosswindBlowsItOutInLockstepWithERFsClock: a crosswind handed over step by step blows
+//     the span out towards the quasi-static angle atan(q / w) and raises the tension.
+// FourSubstepsAdvanceMoorDynsClockByOneStep: four MoorDyn calls per step end on ERF's clock.
+// ANonFiniteWindIsRefusedNamingTheLineAndThePoint: set_wind aborts on NaN, naming the line and the point.
+// DiagnosticsRowsCarryTheHeaderOnce: the diagnostics file has one row per call and one header.
+// ALineCreatedFromASavedStateContinuesIt: a line created from a saved state is where the saved one
+//     is and continues as it does.
+// ASectionHangsFromItsInsulatorStrings: strings hang plumb in still air and let the conductor swing
+//     further across the wind than clamps at the towers do.
+// TheDeadEndsOfALevelSpanArePulledTogetherAndDown: the dead-end pulls balance along the chord and
+//     carry the line's weight.
+// ATowerOfALevelSectionCarriesOneSpansWeight: a tower carries one span's weight (and its string's),
+//     the spans either side balancing along the line.
+// MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull: a coupled step moves the cross-arms at
+//     the velocity it is given, and MoorDyn's force on them is the pull the tower carries.
+// HeldStillACoupledPointIsAFixedOne: a coupled point held still behaves as a fixed one.
+// AStringInADipIsFlaggedInUplift: a string the spans either side pull up is flagged in uplift.
 
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -25,21 +33,27 @@
 #include <gtest/gtest.h>
 
 #include "ERF_ConductorInputs.H"
-#include "ERF_ConductorSpan.H"
+#include "ERF_ConductorLine.H"
+#include "ERF_GTestThrowOnAbort.H"
 #include "ERF_MoorDynSystem.H"
 #include "ERF_TowerInputs.H"
 
 using erf_conductors::ConductorInputs;
-using erf_conductors::ConductorSpan;
-using erf_conductors::SpanInputs;
+using erf_conductors::ConductorLine;
+using erf_conductors::LineInputs;
 
 namespace {
 
 constexpr double pi = 3.14159265358979323846;   // MSVC has no M_PI
+// positions of a few hundred metres carry a Real's spacing there: 3e-5 m at 500 m in single precision
+constexpr double ptol = (std::is_same<amrex::Real, float>::value) ? 1.0e-4 : 1.0e-6;
+// the same computation repeated (a restored state, a coupled point held still): roundoff only
+constexpr double ttol = (std::is_same<amrex::Real, float>::value) ? 1.0e-4 : 1.0e-9;
+constexpr double rtol = (std::is_same<amrex::Real, float>::value) ? 1.0e-5 : 1.0e-9;
 
-SpanInputs drake_span (const std::string& name)
+LineInputs drake_span (const std::string& name)
 {
-    SpanInputs s;
+    LineInputs s;
     s.name = name;
     s.end_a = {{100.0, 500.0, 30.0}};
     s.end_b = {{400.0, 500.0, 30.0}};
@@ -56,14 +70,14 @@ ConductorInputs settings ()
     return in;
 }
 
-std::unique_ptr<ConductorSpan> make (const std::string& name, const ConductorInputs& in)
+std::unique_ptr<ConductorLine> make (const std::string& name, const ConductorInputs& in)
 {
     const std::string file = in.diagnostics_dir + "/" + name + ".moordyn.txt";
-    return std::make_unique<ConductorSpan>(drake_span(name), in, 9.81, file);
+    return std::make_unique<ConductorLine>(drake_span(name), in, 9.81, file);
 }
 
-double weight (const SpanInputs& s, double rho) { return (s.mass_per_length - rho * 0.25 * pi * s.diameter * s.diameter) * 9.81; }
-double drag (const SpanInputs& s, double rho, double U) { return 0.5 * rho * s.drag_coefficient * s.diameter * U * U; }
+double weight (const LineInputs& s, double rho) { return (s.mass_per_length - rho * 0.25 * pi * s.diameter * s.diameter) * 9.81; }
+double drag (const LineInputs& s, double rho, double U) { return 0.5 * rho * s.drag_coefficient * s.diameter * U * U; }
 
 std::vector<amrex::Real> uniform (unsigned n, double u, double v, double w)
 {
@@ -74,22 +88,22 @@ std::vector<amrex::Real> uniform (unsigned n, double u, double v, double w)
 
 } // namespace
 
-TEST(ConductorSpan, HangsAtTheCatenarySagInStillAirInERFsFrame)
+TEST(ConductorLine, HangsAtTheCatenarySagInStillAirInERFsFrame)
 {
     const ConductorInputs in = settings();
     auto span = make("still", in);
-    const SpanInputs& s = span->inputs();
+    const LineInputs& s = span->inputs();
     EXPECT_EQ(span->num_nodes(), 21u);
     EXPECT_GE(span->num_kinematics_points(), 21u);
     const auto a = span->node_position(0);
     const auto b = span->node_position(20);
-    EXPECT_NEAR(a[0], 100.0, 1.0e-6); EXPECT_NEAR(a[1], 500.0, 1.0e-6); EXPECT_NEAR(a[2], 30.0, 1.0e-6);
-    EXPECT_NEAR(b[0], 400.0, 1.0e-6); EXPECT_NEAR(b[1], 500.0, 1.0e-6); EXPECT_NEAR(b[2], 30.0, 1.0e-6);
+    EXPECT_NEAR(a[0], 100.0, ptol); EXPECT_NEAR(a[1], 500.0, ptol); EXPECT_NEAR(a[2], 30.0, ptol);
+    EXPECT_NEAR(b[0], 400.0, ptol); EXPECT_NEAR(b[1], 500.0, ptol); EXPECT_NEAR(b[2], 30.0, ptol);
     EXPECT_NEAR(span->mid_sag(), s.catenary_sag(), 0.25 * s.catenary_sag());
     EXPECT_NEAR(span->mid_offset(), 0.0, 1.0e-3);
     EXPECT_NEAR(span->swing_angle(), 0.0, 1.0e-4);
     const auto m = span->node_position(10);
-    EXPECT_NEAR(m[2], 30.0 - span->mid_sag(), 1.0e-6);
+    EXPECT_NEAR(m[2], 30.0 - span->mid_sag(), ptol);
     // the catenary tension at both ends
     const double w = weight(s, in.air_density);
     const double H = w * 300.0 * 300.0 / (8.0 * s.catenary_sag());
@@ -101,16 +115,16 @@ TEST(ConductorSpan, HangsAtTheCatenarySagInStillAirInERFsFrame)
     const auto k = span->kinematics_points();
     const auto n = span->node_positions();
     ASSERT_GE(k.size(), n.size());
-    for (std::size_t i = 0; i < n.size(); ++i) { EXPECT_NEAR(k[i], n[i], 1.0e-9) << "component " << i; }
-    // the MoorDyn input is where the span says
+    for (std::size_t i = 0; i < n.size(); ++i) { EXPECT_NEAR(k[i], n[i], ttol) << "component " << i; }
+    // the MoorDyn input is where the line says
     EXPECT_TRUE(std::filesystem::exists(span->input_file()));
 }
 
-TEST(ConductorSpan, APrescribedCrosswindBlowsItOutInLockstepWithERFsClock)
+TEST(ConductorLine, APrescribedCrosswindBlowsItOutInLockstepWithERFsClock)
 {
     const ConductorInputs in = settings();
     auto span = make("wind", in);
-    const SpanInputs& s = span->inputs();
+    const LineInputs& s = span->inputs();
     const double U = 20.0;
     const double phi_static = std::atan2(drag(s, in.air_density, U), weight(s, in.air_density));
     const double dt = 0.05;
@@ -135,17 +149,31 @@ TEST(ConductorSpan, APrescribedCrosswindBlowsItOutInLockstepWithERFsClock)
     EXPECT_LT(ten_sum / n, 1.6 * T0);
 }
 
-TEST(ConductorSpan, SubstepsReachTheSameClock)
+TEST(ConductorLine, FourSubstepsAdvanceMoorDynsClockByOneStep)
 {
     ConductorInputs in = settings();
     in.substeps = 4;
     auto span = make("substeps", in);
     span->set_wind(uniform(span->num_kinematics_points(), 0.0, 10.0, 0.0), 0.025);
-    span->step(0.0, 0.05);   // four MoorDyn calls of 0.0125 s; the clock check inside would abort otherwise
+    span->step(0.0, 0.05);   // four MoorDyn calls of 0.0125 s
+    EXPECT_NEAR(span->state().clock, 0.05, 1.0e-12) << "MoorDyn's clock after four substeps";
     EXPECT_GT(span->mid_offset(), -1.0e-9);
 }
 
-TEST(ConductorSpan, DiagnosticsRowsCarryTheHeaderOnce)
+TEST(ConductorLine, ANonFiniteWindIsRefusedNamingTheLineAndThePoint)
+{
+    const ConductorInputs in = settings();
+    auto line = make("nan_wind", in);
+    std::vector<amrex::Real> uvw = uniform(line->num_kinematics_points(), 0.0, 10.0, 0.0);
+    uvw[3 * 3 + 1] = std::numeric_limits<amrex::Real>::quiet_NaN();
+    const std::string msg = erf_gtest::abort_message([&] { line->set_wind(uvw, 0.025); });
+    EXPECT_NE(msg.find("erf.conductors.nan_wind"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("kinematics point 3 is not finite"), std::string::npos) << msg;
+    // a finite wind is taken
+    EXPECT_TRUE(erf_gtest::abort_message([&] { line->set_wind(uniform(line->num_kinematics_points(), 0.0, 10.0, 0.0), 0.025); }).empty());
+}
+
+TEST(ConductorLine, DiagnosticsRowsCarryTheHeaderOnce)
 {
     const ConductorInputs in = settings();
     auto span = make("diag", in);
@@ -166,7 +194,7 @@ TEST(ConductorSpan, DiagnosticsRowsCarryTheHeaderOnce)
     EXPECT_EQ(rows, 2);
 }
 
-TEST(ConductorSpan, ASpanCreatedFromASavedStateContinuesIt)
+TEST(ConductorLine, ALineCreatedFromASavedStateContinuesIt)
 {
     const ConductorInputs in = settings();
     auto a = make("saved_a", in);
@@ -178,13 +206,13 @@ TEST(ConductorSpan, ASpanCreatedFromASavedStateContinuesIt)
         a->step(t, dt);
         t += dt;
     }
-    ASSERT_GT(a->mid_offset(), 1.0) << "the saved span must be blown out, so a restart from rest would show";
+    ASSERT_GT(a->mid_offset(), 1.0) << "the saved line must be blown out, so a restart from rest would show";
     const std::string state = in.diagnostics_dir + "/saved_a.state";
     a->save(state);
 
     const std::string file = in.diagnostics_dir + "/saved_b.moordyn.txt";
-    auto b = std::make_unique<ConductorSpan>(drake_span("saved_b"), in, 9.81, file, state);
-    // before any step: where the saved span is, with its drag and tensions
+    auto b = std::make_unique<ConductorLine>(drake_span("saved_b"), in, 9.81, file, state);
+    // before any step: where the saved line is, with its drag and tensions
     ASSERT_EQ(b->num_nodes(), a->num_nodes());
     for (unsigned n = 0; n < a->num_nodes(); ++n) {
         const auto pa = a->node_position(n);
@@ -192,11 +220,11 @@ TEST(ConductorSpan, ASpanCreatedFromASavedStateContinuesIt)
         const auto da = a->node_drag(n);
         const auto db = b->node_drag(n);
         for (int d = 0; d < 3; ++d) {
-            EXPECT_NEAR(pb[d], pa[d], 1.0e-9 * std::max(amrex::Real(1.0), std::abs(pa[d]))) << "node " << n << " position " << d;
-            EXPECT_NEAR(db[d], da[d], 1.0e-9 * std::max(amrex::Real(1.0), std::abs(da[d]))) << "node " << n << " drag " << d;
+            EXPECT_NEAR(pb[d], pa[d], rtol * std::max(amrex::Real(1.0), std::abs(pa[d]))) << "node " << n << " position " << d;
+            EXPECT_NEAR(db[d], da[d], rtol * std::max(amrex::Real(1.0), std::abs(da[d]))) << "node " << n << " drag " << d;
         }
     }
-    EXPECT_NEAR(b->tension_a(), a->tension_a(), 1.0e-9 * a->tension_a());
+    EXPECT_NEAR(b->tension_a(), a->tension_a(), rtol * a->tension_a());
     // the same wind from here on: the two stay together, on the same clock
     for (int n = 0; n < 20; ++n) {
         const double gust = 15.0 + 3.0 * std::sin(0.7 * t);
@@ -210,16 +238,16 @@ TEST(ConductorSpan, ASpanCreatedFromASavedStateContinuesIt)
         const auto pa = a->node_position(n);
         const auto pb = b->node_position(n);
         for (int d = 0; d < 3; ++d) {
-            EXPECT_NEAR(pb[d], pa[d], 1.0e-9 * std::max(amrex::Real(1.0), std::abs(pa[d]))) << "node " << n << " position " << d;
+            EXPECT_NEAR(pb[d], pa[d], rtol * std::max(amrex::Real(1.0), std::abs(pa[d]))) << "node " << n << " position " << d;
         }
     }
-    EXPECT_NEAR(b->tension_a(), a->tension_a(), 1.0e-9 * a->tension_a());
+    EXPECT_NEAR(b->tension_a(), a->tension_a(), rtol * a->tension_a());
 }
 
 namespace {
-SpanInputs section (const std::string& name, double insulator)
+LineInputs section (const std::string& name, double insulator)
 {
-    SpanInputs s = drake_span(name);
+    LineInputs s = drake_span(name);
     s.end_a = {{100.0, 500.0, 30.0}};
     s.end_b = {{1000.0, 500.0, 30.0}};
     s.towers = {{{400.0, 500.0, 30.0}}, {{700.0, 500.0, 30.0}}};
@@ -230,11 +258,11 @@ SpanInputs section (const std::string& name, double insulator)
 }
 } // namespace
 
-TEST(ConductorSpan, ASectionHangsFromItsInsulatorStrings)
+TEST(ConductorLine, ASectionHangsFromItsInsulatorStrings)
 {
     const ConductorInputs in = settings();
     const std::string file = in.diagnostics_dir + "/strings.moordyn.txt";
-    ConductorSpan line(section("strings", 2.5), in, 9.81, file);
+    ConductorLine line(section("strings", 2.5), in, 9.81, file);
     EXPECT_EQ(line.num_spans(), 3);
     EXPECT_EQ(line.num_insulators(), 2);
     EXPECT_EQ(line.num_nodes(), 3u * 21u + 2u * 3u);
@@ -255,7 +283,7 @@ TEST(ConductorSpan, ASectionHangsFromItsInsulatorStrings)
 
     // a steady crosswind along +y: the strings swing across the line, with the wind, and let the
     // middle span blow out further than the same section clamped at its towers
-    ConductorSpan clamped(section("clamped", 0.0), in, 9.81, in.diagnostics_dir + "/clamped.moordyn.txt");
+    ConductorLine clamped(section("clamped", 0.0), in, 9.81, in.diagnostics_dir + "/clamped.moordyn.txt");
     EXPECT_EQ(clamped.num_insulators(), 0);
     const double dt = 0.1;
     double t = 0.0;
@@ -274,18 +302,18 @@ TEST(ConductorSpan, ASectionHangsFromItsInsulatorStrings)
     // each span's quantities are its own: the middle node of span k, against the chord between its towers
     for (int k = 0; k < 3; ++k) {
         const auto m = line.node_position(line.span_first_node(k) + 10);
-        EXPECT_NEAR(line.mid_offset(k), m[1] - 500.0, 1.0e-6) << "span " << k;
-        EXPECT_NEAR(line.mid_sag(k), 30.0 - m[2], 1.0e-6) << "span " << k;
+        EXPECT_NEAR(line.mid_offset(k), m[1] - 500.0, ptol) << "span " << k;
+        EXPECT_NEAR(line.mid_sag(k), 30.0 - m[2], ptol) << "span " << k;
     }
     EXPECT_GT(std::abs(line.mid_offset(1) - line.mid_offset(0)), 1.0e-3) << "the middle span hangs from strings at both ends";
     EXPECT_GT(clamped.mid_offset(1), 1.0);
 }
 
-TEST(ConductorSpan, TheDeadEndsOfALevelSpanArePulledTogetherAndDown)
+TEST(ConductorLine, TheDeadEndsOfALevelSpanArePulledTogetherAndDown)
 {
     const ConductorInputs in = settings();
     auto span = make("dead_ends", in);
-    const SpanInputs& s = span->inputs();
+    const LineInputs& s = span->inputs();
     const auto a = span->end_force(0);
     const auto b = span->end_force(1);
     // end_a is pulled towards end_b (+x) and down, end_b the other way along x, the same down
@@ -302,7 +330,7 @@ TEST(ConductorSpan, TheDeadEndsOfALevelSpanArePulledTogetherAndDown)
     EXPECT_NEAR(std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]), span->tension_a(), 0.02 * span->tension_a());
 }
 
-TEST(ConductorSpan, ATowerOfALevelSectionCarriesOneSpansWeight)
+TEST(ConductorLine, ATowerOfALevelSectionCarriesOneSpansWeight)
 {
     const ConductorInputs in = settings();
     // the stub's parabola is a few per cent from the catenary; the real MoorDyn's lumped masses much closer
@@ -310,7 +338,7 @@ TEST(ConductorSpan, ATowerOfALevelSectionCarriesOneSpansWeight)
     const double w = weight(drake_span("w"), in.air_density);
     // clamped: every tower of a level section carries one span's weight
     {
-        ConductorSpan line(section("tower_clamped", 0.0), in, 9.81, in.diagnostics_dir + "/tower_clamped.moordyn.txt");
+        ConductorLine line(section("tower_clamped", 0.0), in, 9.81, in.diagnostics_dir + "/tower_clamped.moordyn.txt");
         for (int j = 0; j < 2; ++j) {
             const auto F = line.tower_force(j);
             EXPECT_NEAR(-F[2] / (w * 301.5), 1.0, tol) << "tower " << j + 1 << ": half of each span either side";
@@ -320,11 +348,11 @@ TEST(ConductorSpan, ATowerOfALevelSectionCarriesOneSpansWeight)
     }
     // on strings: the middle tower of four spans, whose spans either side both hang from strings
     // (a span from a dead end drops to the string's bottom, and the lower end takes less weight)
-    SpanInputs s = section("tower_strings", 2.5);
+    LineInputs s = section("tower_strings", 2.5);
     s.end_b = {{1300.0, 500.0, 30.0}};
     s.towers.push_back({{1000.0, 500.0, 30.0}});
     s.lengths.push_back(301.5);
-    ConductorSpan line(s, in, 9.81, in.diagnostics_dir + "/tower_strings.moordyn.txt");
+    ConductorLine line(s, in, 9.81, in.diagnostics_dir + "/tower_strings.moordyn.txt");
     const double Wi = (s.insulator_mass - in.air_density * 0.25 * pi * s.insulator_diameter * s.insulator_diameter * 2.5) * 9.81;
     const auto F = line.tower_force(1);
     EXPECT_NEAR(-F[2] / (w * 301.5 + Wi), 1.0, tol) << "a span's weight and the string's";
@@ -352,15 +380,15 @@ std::string slurp (const std::string& fname)
 }
 } // namespace
 
-TEST(ConductorSpan, MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull)
+TEST(ConductorLine, MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull)
 {
     const ConductorInputs in = moving_settings();
     for (const double ins : {2.5, 0.0}) {
         const std::string name = ins > 0.0 ? "coupled_strings" : "coupled_clamped";
-        SpanInputs s = section(name, ins);
+        LineInputs s = section(name, ins);
         s.tower_type = "lat";
         const std::string file = in.diagnostics_dir + "/" + name + ".moordyn.txt";
-        ConductorSpan line(s, in, 9.81, file);
+        ConductorLine line(s, in, 9.81, file);
         ASSERT_TRUE(line.towers_move()) << name;
         const std::string text = slurp(file);
         EXPECT_NE(text.find("2     Coupled   400   500   -9970"), std::string::npos) << text;
@@ -372,16 +400,15 @@ TEST(ConductorSpan, MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull)
         line.step_coupled(0.0, 0.1, start, velocity);
         // where the line meets each cross-arm: the string's top, or the next span's first node
         auto at_tower = [&] (int j) {
-            const unsigned string_top = line.span_first_node(3) + static_cast<unsigned>((SpanInputs::insulator_segments + 1) * j);
+            const unsigned string_top = line.span_first_node(3) + static_cast<unsigned>((LineInputs::insulator_segments + 1) * j);
             return line.node_position(ins > 0.0 ? string_top : line.span_first_node(j + 1));
         };
         // positions 500 m from the origin carry a Real's spacing there: 3e-5 m in single precision
-        const double ptol = std::is_same<amrex::Real, float>::value ? 1.0e-4 : 1.0e-9;
         const auto p1 = at_tower(0), p2 = at_tower(1);
-        EXPECT_NEAR(p1[0], 400.0, ptol) << name;
-        EXPECT_NEAR(p1[1], 500.02, ptol) << name << ": moved 0.2 m/s for 0.1 s";
-        EXPECT_NEAR(p1[2], 30.0, ptol) << name;
-        EXPECT_NEAR(p2[1], 500.0, ptol) << name;
+        EXPECT_NEAR(p1[0], 400.0, ttol) << name;
+        EXPECT_NEAR(p1[1], 500.02, ttol) << name << ": moved 0.2 m/s for 0.1 s";
+        EXPECT_NEAR(p1[2], 30.0, ttol) << name;
+        EXPECT_NEAR(p2[1], 500.0, ttol) << name;
         // the force MoorDyn hands back on each coupled point is the pull the tower is reported to carry
         for (int j = 0; j < 2; ++j) {
             const auto f = line.coupled_force(j), F = line.tower_force(j);
@@ -391,17 +418,17 @@ TEST(ConductorSpan, MovingTowersCrossArmsAreCoupledPointsThatTakeTheLinesPull)
         }
         // a step that holds the towers keeps the cross-arm where the coupled step left it
         line.step(0.1, 0.1);
-        EXPECT_NEAR(at_tower(0)[1], 500.02, ptol) << name;
+        EXPECT_NEAR(at_tower(0)[1], 500.02, ttol) << name;
     }
 }
 
-TEST(ConductorSpan, HeldStillACoupledPointIsAFixedOne)
+TEST(ConductorLine, HeldStillACoupledPointIsAFixedOne)
 {
     const ConductorInputs in = moving_settings();
-    SpanInputs s = section("held_coupled", 2.5);
+    LineInputs s = section("held_coupled", 2.5);
     s.tower_type = "lat";
-    ConductorSpan coupled(s, in, 9.81, in.diagnostics_dir + "/held_coupled.moordyn.txt");
-    ConductorSpan fixed(section("held_fixed", 2.5), in, 9.81, in.diagnostics_dir + "/held_fixed.moordyn.txt");
+    ConductorLine coupled(s, in, 9.81, in.diagnostics_dir + "/held_coupled.moordyn.txt");
+    ConductorLine fixed(section("held_fixed", 2.5), in, 9.81, in.diagnostics_dir + "/held_fixed.moordyn.txt");
     ASSERT_TRUE(coupled.towers_move());
     ASSERT_FALSE(fixed.towers_move());
     const double dt = 0.1;
@@ -413,7 +440,7 @@ TEST(ConductorSpan, HeldStillACoupledPointIsAFixedOne)
     }
     for (unsigned i = 0; i < fixed.num_nodes(); ++i) {
         const auto a = coupled.node_position(i), b = fixed.node_position(i);
-        for (int d = 0; d < 3; ++d) { EXPECT_NEAR(a[d], b[d], 1.0e-9) << "node " << i << " dir " << d; }
+        for (int d = 0; d < 3; ++d) { EXPECT_NEAR(a[d], b[d], ttol) << "node " << i << " dir " << d; }
     }
     for (int j = 0; j < 2; ++j) {
         const auto a = coupled.tower_force(j), b = fixed.tower_force(j);
@@ -421,7 +448,7 @@ TEST(ConductorSpan, HeldStillACoupledPointIsAFixedOne)
     }
 }
 
-TEST(ConductorSpan, AStringInADipIsFlaggedInUplift)
+TEST(ConductorLine, AStringInADipIsFlaggedInUplift)
 {
     if (erf_moordyn::is_stub()) {
         GTEST_SKIP() << "needs the real MoorDyn-C: the stub hangs every string under its spans' weight";
@@ -430,7 +457,7 @@ TEST(ConductorSpan, AStringInADipIsFlaggedInUplift)
     const double w = weight(drake_span("w"), in.air_density);
     // level: each string carries a span's weight
     {
-        ConductorSpan line(section("level_strings", 2.5), in, 9.81, in.diagnostics_dir + "/level_strings.moordyn.txt");
+        ConductorLine line(section("level_strings", 2.5), in, 9.81, in.diagnostics_dir + "/level_strings.moordyn.txt");
         for (int j = 0; j < 2; ++j) {
             EXPECT_NEAR(line.string_load(j) / (w * 301.5), 1.0, 0.05) << "string " << j + 1;
             EXPECT_FALSE(line.string_in_uplift(j, static_cast<amrex::Real>(w))) << "string " << j + 1;
@@ -438,13 +465,13 @@ TEST(ConductorSpan, AStringInADipIsFlaggedInUplift)
     }
     // the dead ends 80 m above the towers, strung to 20 kN: each span rises 80 m over 300 m away from
     // its tower, pulling up 20 kN x 80 / 300 = 5.3 kN a side against 2.4 kN of weight
-    SpanInputs s = section("dip_strings", 2.5);
+    LineInputs s = section("dip_strings", 2.5);
     s.end_a[2] = 110.0;
     s.end_b[2] = 110.0;
     s.lengths.clear();
     s.stringing_tension = 20000.0;
     s.lengths_from_stringing_tension(static_cast<amrex::Real>(w));
-    ConductorSpan line(s, in, 9.81, in.diagnostics_dir + "/dip_strings.moordyn.txt");
+    ConductorLine line(s, in, 9.81, in.diagnostics_dir + "/dip_strings.moordyn.txt");
     for (int j = 0; j < 2; ++j) {
         EXPECT_TRUE(line.string_in_uplift(j, static_cast<amrex::Real>(w)))
             << "string " << j + 1 << " carries " << line.string_load(j) << " N";

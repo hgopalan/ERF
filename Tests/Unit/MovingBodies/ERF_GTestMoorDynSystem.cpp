@@ -1,23 +1,32 @@
 // Contract of erf_moordyn::MoorDynSystem over the MoorDyn-C v2 C API (the bundled stub or the real
-// library, whichever the build links): the configured version is known; a missing input file is
-// reported, not fatal; a fixed-fixed span in air initialises with no coupled degree of freedom, its
-// end nodes on the attachment points and the catenary sag at mid-span; the external kinematics
-// points start with the line's nodes; a steady crosswind blows the span out towards the quasi-static
-// angle atan(q / w) and raises the end tension; a saved state restored into a fresh system
-// continues identically; and a state kept in memory and restored redoes a step exactly, so that a
-// coupled step can be iterated.
+// library, whichever the build links). "Line" here is a MoorDyn line; the input is one span.
+//
+// - VersionAndErrorNamesAreKnown.
+// - MissingInputFileIsReportedNotFatal; AnInputWithoutWaveKinIsRefusedAtCreation (both libraries);
+//   AMalformedStubInputIsReportedNotFatal (stub only).
+// - FixedSpanHangsBetweenItsPointsWithTheCatenarySag: no coupled degree of freedom, the end nodes on
+//   the end points, the catenary sag at mid-span, the end tensions directed into the line.
+// - ExternalKinematicsPointsStartWithTheLineNodes: then the points.
+// - CrosswindBlowsTheSpanOutTowardsTheStaticAngle: atan(q / w), and the end tension rises.
+// - SavedStateContinuesIdenticallyInAFreshSystem.
+// - AStateKeptInMemoryRedoesAStepExactly: so that a coupled step can be iterated.
+// - InitRefusesWrongSizesAndNonFiniteValues: as error strings.
+// - BadStepsKinematicsAndStatesAreRefusedNamingTheInput: the aborts name the input file.
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "ERF_GTestThrowOnAbort.H"
 #include "ERF_MoorDynSystem.H"
 
 namespace {
@@ -26,13 +35,15 @@ using erf_moordyn::MoorDynSystem;
 
 constexpr double pi = 3.14159265358979323846;   // MSVC has no M_PI
 
-// a 300 m span of 795 kcmil "Drake" ACSR, 1.5 m slack, both ends fixed 100 m below MoorDyn's
-// surface so that the fluid loads act (MoorDyn applies them below z = 0 only)
+// a 300 m span of 795 kcmil (thousand circular mils) ACSR (aluminium conductor, steel reinforced)
+// "Drake", 1.5 m slack, both ends fixed 100 m below MoorDyn's surface so that the fluid loads act
+// (MoorDyn applies them below z = 0 only)
 struct Span {
     double chord = 300.0, slack = 1.5, z = -100.0;
     double diam = 0.0281, mass = 1.628, EA = 3.0e7, Cd = 1.0;
     double rho = 1.2, g = 9.81;
     int nseg = 20;
+    std::string edit_from, edit_to;   // a text replacement applied to the written input, for malformed inputs
     double length () const { return chord + slack; }
     double weight () const { return (mass - rho * 0.25 * pi * diam * diam) * g; }    // N/m, in the fluid
     double drag (double U) const { return 0.5 * rho * Cd * diam * U * U; }             // N/m, normal wind U
@@ -44,7 +55,7 @@ std::string write_input (const std::filesystem::path& dir, const Span& s)
 {
     std::filesystem::create_directories(dir);
     const auto fname = dir / "span.txt";
-    std::ofstream out(fname, std::ios::trunc);
+    std::ostringstream out;
     out << "MoorDyn-C input for a single fixed-fixed conductor span (unit test)\n"
         << "----------------------- LINE TYPES ------------------------------------------\n"
         << "TypeName   Diam     Mass/m     EA         BA/-zeta    EI         Cd     Ca     CdAx    CaAx\n"
@@ -70,6 +81,13 @@ std::string write_input (const std::filesystem::path& dir, const Span& s)
         << "1             disableOutput\n"
         << "1             disableOutTime\n"
         << "------------------------- need this line --------------------------------------\n";
+    std::string text = out.str();
+    if (!s.edit_from.empty()) {
+        const auto at = text.find(s.edit_from);
+        EXPECT_NE(at, std::string::npos) << "the input has no '" << s.edit_from << "'";
+        if (at != std::string::npos) { text.replace(at, s.edit_from.size(), s.edit_to); }
+    }
+    std::ofstream(fname, std::ios::trunc) << text;
     return fname.string();
 }
 
@@ -106,7 +124,7 @@ double norm (const std::array<double,3>& v) { return std::sqrt(v[0]*v[0] + v[1]*
 
 } // namespace
 
-TEST(MoorDynSystem, VersionIsKnown)
+TEST(MoorDynSystem, VersionAndErrorNamesAreKnown)
 {
     EXPECT_FALSE(erf_moordyn::library_version().empty());
     EXPECT_EQ(erf_moordyn::is_stub(), erf_moordyn::library_version() == "stub");
@@ -154,7 +172,7 @@ TEST(MoorDynSystem, FixedSpanHangsBetweenItsPointsWithTheCatenarySag)
     const double T_end = std::sqrt(H * H + std::pow(0.5 * s.weight() * s.chord, 2));
     EXPECT_NEAR(sys->line_end_tension(1), T_end, 0.25 * T_end);
     EXPECT_GE(sys->line_max_tension(1), 0.99 * sys->line_end_tension(1));
-    // the end-node tension vectors are the pull on the attachments, directed into the line: the same
+    // the end-node tension vectors are the pull on the end points, directed into the line: the same
     // horizontal tension H at both ends, and the weight of half the span downwards at the first node
     // (the line leaves it downwards) and upwards at the last
     const auto ta = sys->line_node_tension(1, 0);
@@ -164,7 +182,7 @@ TEST(MoorDynSystem, FixedSpanHangsBetweenItsPointsWithTheCatenarySag)
     EXPECT_NEAR(tb[0], H, 0.15 * H);
     EXPECT_NEAR(ta[2], -V, 0.25 * V);
     EXPECT_NEAR(tb[2], V, 0.25 * V);
-    // MoorDyn computes the net force only for the points it integrates: a fixed point reports none
+    // MoorDyn computes the net force only for free and coupled points: a fixed point reports none
     for (unsigned p = 1; p <= 2; ++p) {
         const auto fp = sys->point_force(p);
         EXPECT_NEAR(norm(fp), 0.0, 1.0e-9) << "fixed point " << p;
@@ -188,15 +206,18 @@ TEST(MoorDynSystem, ExternalKinematicsPointsStartWithTheLineNodes)
         const auto p = sys->line_node_position(1, i);
         for (int d = 0; d < 3; ++d) { EXPECT_NEAR(r[3*i+d], p[static_cast<std::size_t>(d)], 1.0e-9) << "node " << i << " dir " << d; }
     }
-    // after the nodes MoorDyn lists the two attachment points and then one more entry at its origin
-    // (MoorDyn-C 2.7.1 reports no bodies but adds it): a caller that samples a flow at every entry
-    // would sample far outside its domain
-    ASSERT_EQ(n, nn + 3) << "the line nodes, the two points and the entry at the origin";
+    // after the nodes MoorDyn lists the two end points; MoorDyn-C 2.7.1 (and the stub) then add one
+    // more entry, the ground body at MoorDyn's origin, although the input has no bodies: a caller
+    // that samples a flow at every entry would sample far outside its domain
+    ASSERT_GE(n, nn + 2) << "the line nodes and the two points";
     for (unsigned p = 1; p <= 2; ++p) {
         const auto a = sys->point_position(p);
         for (int d = 0; d < 3; ++d) { EXPECT_NEAR(r[3*(nn+p-1)+d], a[static_cast<std::size_t>(d)], 1.0e-9) << "point " << p << " dir " << d; }
     }
-    for (int d = 0; d < 3; ++d) { EXPECT_NEAR(r[3*(nn+2)+d], 0.0, 1.0e-9) << "entry at the origin, dir " << d; }
+    if (erf_moordyn::is_stub() || erf_moordyn::library_version() == "2.7.1") {
+        ASSERT_EQ(n, nn + 3) << "the line nodes, the two points and the entry at the origin";
+        for (int d = 0; d < 3; ++d) { EXPECT_NEAR(r[3*(nn+2)+d], 0.0, 1.0e-9) << "entry at the origin, dir " << d; }
+    }
 }
 
 TEST(MoorDynSystem, CrosswindBlowsTheSpanOutTowardsTheStaticAngle)
@@ -322,6 +343,8 @@ TEST(MoorDynSystem, AStateKeptInMemoryRedoesAStepExactly)
     const auto kept = a->serialize();
     const double t0 = t;
     ASSERT_FALSE(kept.empty());
+    std::vector<std::array<double,3>> before;
+    for (unsigned i = 0; i < a->line_num_nodes(1); ++i) { before.push_back(a->line_node_position(1, i)); }
     // a step, then back to the kept state and the same step again
     // (positions and velocities: a node's velocity carries where it was before the step)
     std::vector<std::array<double,3>> first, first_v;
@@ -340,11 +363,108 @@ TEST(MoorDynSystem, AStateKeptInMemoryRedoesAStepExactly)
             }
         }
     }
-    // a different step from the kept state goes elsewhere: the state, not the last result, is restored
+    // restoring brings back the state before the step, not the last result: the nodes stand where
+    // they stood when the state was kept, which the step had moved them from
     a->deserialize(kept);
-    t = t0;
-    set_uniform_wind(*a, {{0.0, 30.0, 0.0}}, t + 0.5 * dt);
-    for (int n = 0; n < 2; ++n) { a->step({}, {}, f, t, dt); }
-    const auto m = a->line_node_position(1, a->line_num_nodes(1) / 2);
-    EXPECT_NE(m[1], first[a->line_num_nodes(1) / 2][1]);
+    const unsigned mid = a->line_num_nodes(1) / 2;
+    for (unsigned i = 0; i < a->line_num_nodes(1); ++i) {
+        const auto p = a->line_node_position(1, i);
+        for (std::size_t d = 0; d < 3; ++d) { EXPECT_EQ(p[d], before[i][d]) << "node " << i << " dir " << d; }
+    }
+    EXPECT_NE(before[mid][1], first[mid][1]) << "the step must move the mid-span node for this check to mean anything";
+}
+
+TEST(MoorDynSystem, AnInputWithoutWaveKinIsRefusedAtCreation)
+{
+    // MoorDyn-C reports kinematics points whatever WaveKin is and then ignores the wind: the
+    // wrapper reads the option from the file, so this holds for the real library and the stub
+    for (const std::string& row : {std::string("0             WaveKin"), std::string("0             writeLog2")}) {
+        Span s;
+        s.edit_from = "1             WaveKin";
+        s.edit_to = row;
+        const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_moordyn_wavekin";
+        const std::string fname = write_input(dir, s);
+        std::string err;
+        auto sys = MoorDynSystem::create(fname, "", MOORDYN_ERR_LEVEL, err);
+        EXPECT_EQ(sys, nullptr) << row;
+        EXPECT_NE(err.find("WaveKin"), std::string::npos) << err;
+        EXPECT_NE(err.find(fname), std::string::npos) << err;
+    }
+    EXPECT_EQ(erf_moordyn::check_wave_kinematics_option("/no/such/dir/span.txt").find("cannot read"), 0u);
+}
+
+TEST(MoorDynSystem, AMalformedStubInputIsReportedNotFatal)
+{
+    if (!erf_moordyn::is_stub()) { GTEST_SKIP() << "the stub's parser; MoorDyn-C reads numbers its own way"; }
+    // a malformed number, and a negative segment count, make creation fail instead of ending the run
+    for (const auto& edit : {std::array<std::string,2>{{"3e+07", "x3e7"}}, std::array<std::string,2>{{"   20   -", "   -20   -"}}}) {
+        Span s;
+        s.edit_from = edit[0];
+        s.edit_to = edit[1];
+        const std::string fname = write_input(std::filesystem::temp_directory_path() / "erf_gtest_moordyn_malformed", s);
+        std::string err;
+        auto sys = MoorDynSystem::create(fname, "", MOORDYN_ERR_LEVEL, err);
+        EXPECT_EQ(sys, nullptr) << edit[1];
+        EXPECT_NE(err.find("malformed"), std::string::npos) << err;
+    }
+}
+
+TEST(MoorDynSystem, InitRefusesWrongSizesAndNonFiniteValues)
+{
+    // the far end coupled: three coupled degrees of freedom
+    Span s;
+    s.edit_from = "2     Fixed     ";
+    s.edit_to = "2     Coupled   ";
+    const std::string fname = write_input(std::filesystem::temp_directory_path() / "erf_gtest_moordyn_init", s);
+    std::string err;
+    auto sys = MoorDynSystem::create(fname, "", MOORDYN_ERR_LEVEL, err);
+    ASSERT_TRUE(sys) << err;
+    ASSERT_EQ(sys->num_coupled_dof(), 3u);
+    err = sys->init({1.0, 2.0}, {0.0, 0.0});
+    EXPECT_NE(err.find("coupled degrees of freedom"), std::string::npos) << err;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    err = sys->init({s.chord, 0.0, nan}, {0.0, 0.0, 0.0});
+    EXPECT_NE(err.find("not finite"), std::string::npos) << err;
+    err = sys->init({s.chord, 0.0, s.z}, {0.0, 0.0, 0.0});
+    EXPECT_TRUE(err.empty()) << err;
+}
+
+TEST(MoorDynSystem, BadStepsKinematicsAndStatesAreRefusedNamingTheInput)
+{
+    const Span s;
+    auto sys = make_span("refused", s);
+    ASSERT_TRUE(sys);
+    std::string err;
+    ASSERT_GT(sys->external_kinematics_init(err), 0u) << err;
+    std::vector<double> f;
+    double t = 0.0;
+    // a step that is not positive: MoorDyn would return the forces without stepping
+    std::string msg = erf_gtest::abort_message([&] { sys->step({}, {}, f, t, 0.0); });
+    EXPECT_NE(msg.find("step must be finite and positive"), std::string::npos) << msg;
+    EXPECT_NE(msg.find(sys->input_file()), std::string::npos) << msg;
+    // a non-finite wind
+    const unsigned n = sys->num_kinematics_points();
+    std::vector<double> u(3 * n, 0.0), ud(3 * n, 0.0);
+    u[4] = std::numeric_limits<double>::quiet_NaN();
+    msg = erf_gtest::abort_message([&] { sys->set_kinematics(u, ud, 0.0); });
+    EXPECT_NE(msg.find("kinematics point 1"), std::string::npos) << msg;
+    // an internal step that is not positive
+    msg = erf_gtest::abort_message([&] { sys->set_dt(0.0); });
+    EXPECT_NE(msg.find("internal step must be finite and positive"), std::string::npos) << msg;
+    // a state of another size than serialize() returns
+    auto kept = sys->serialize();
+    ASSERT_GT(kept.size(), 1u);
+    kept.pop_back();
+    msg = erf_gtest::abort_message([&] { sys->deserialize(kept); });
+    EXPECT_NE(msg.find("expected from serialize()"), std::string::npos) << msg;
+    msg = erf_gtest::abort_message([&] { sys->deserialize({}); });
+    EXPECT_NE(msg.find("0 words given"), std::string::npos) << msg;
+    // a saved state that is not there (the stub's error code; MoorDyn-C's handling of a missing file is its own)
+    if (erf_moordyn::is_stub()) {
+        msg = erf_gtest::abort_message([&] { sys->load("/no/such/dir/state.dat"); });
+        EXPECT_NE(msg.find("MoorDyn_Load failed"), std::string::npos) << msg;
+    }
+    // the system still steps after every refusal
+    set_uniform_wind(*sys, {{0.0, 10.0, 0.0}}, 0.025);
+    EXPECT_TRUE(erf_gtest::abort_message([&] { sys->step({}, {}, f, t, 0.05); }).empty());
 }

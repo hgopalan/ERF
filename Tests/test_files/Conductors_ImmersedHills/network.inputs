@@ -3,7 +3,7 @@
 # shield wire on their peaks. The middle phase L1b owns the towers; L1a, L1c and the shield wire share
 # them. Written from Conductors_Terrain/network.inputs with the circuit helpers of
 # Exec/CanonicalTests/PowerLines/make_case.py.
-erf.conductors.spans        = L1a L1b L1c L1sw
+erf.conductors.lines        = L1a L1b L1c L1sw
 erf.conductors.transformers = T1 T3
 erf.conductors.tower_types  = lattice
 
@@ -13,7 +13,7 @@ erf.conductors.lattice.top_width  = 1.5
 erf.conductors.lattice.solidity   = 0.2
 erf.conductors.lattice.arm_length = 12
 erf.conductors.lattice.arm_depth  = 1.2
-erf.conductors.lattice.peak       = 8     # the shield wire's peak
+erf.conductors.lattice.peak       = 8     # m of tower above the cross-arm; the shield wire is clamped 7 m up
 erf.conductors.lattice.weight     = 60000
 erf.conductors.lattice.allowable_uplift      = 50000
 erf.conductors.lattice.allowable_compression = 150000
@@ -22,11 +22,11 @@ erf.conductors.lattice.foundation_rotational_stiffness = 1.0e9
 
 erf.conductors.T1.position         = 894.07 729.47
 erf.conductors.T1.size             = 8 5 6
-erf.conductors.T1.allowable_force  = 100000   # a circuit: four lines end on it
+erf.conductors.T1.allowable_force  = 100000   # N: four lines of the circuit end on it
 erf.conductors.T1.allowable_moment = 1000000
 erf.conductors.T3.position         = 1300.28 704.86
 erf.conductors.T3.size             = 8 5 6
-erf.conductors.T3.allowable_force  = 100000   # a circuit: four lines end on it
+erf.conductors.T3.allowable_force  = 100000   # N: four lines of the circuit end on it
 erf.conductors.T3.allowable_moment = 1000000
 
 erf.conductors.L1b.end_a  = 896.87 729.30 10
@@ -59,6 +59,8 @@ erf.conductors.L1c.axial_stiffness  = 3.0e7
 erf.conductors.L1c.share_towers     = L1b
 erf.conductors.L1c.insulator_length = 2.5
 erf.conductors.L1c.insulator_mass   = 60.
+# the shield wire: a steel strand, 0.0111 m in diameter for its drag, 0.406 kg/m and EA (axial
+# stiffness) 9.7e6 N, strung to 10 kN
 erf.conductors.L1sw.end_a  = 896.87 729.30 12
 erf.conductors.L1sw.towers = 936.93 726.87 37  1097.17 717.16 37
 erf.conductors.L1sw.end_b  = 1297.48 705.03 12
@@ -68,7 +70,7 @@ erf.conductors.L1sw.mass_per_length  = 0.406
 erf.conductors.L1sw.axial_stiffness  = 9.7e6
 erf.conductors.L1sw.share_towers     = L1b
 
-# fewer segments than the default for the test's short run
+# 10 segments per span instead of the default 20, for the test's short run
 erf.conductors.L1a.segments = 10
 erf.conductors.L1b.segments = 10
 erf.conductors.L1c.segments = 10

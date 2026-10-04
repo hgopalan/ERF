@@ -13,7 +13,7 @@ using namespace amrex;
 
 namespace erf_conductors {
 
-std::string moordyn_input_text (const SpanInputs& s, const ConductorInputs& in, Real gravity)
+std::string moordyn_input_text (const LineInputs& s, const ConductorInputs& in, Real gravity)
 {
     const int N = s.num_spans();
     const bool strings = s.has_insulators();
@@ -32,8 +32,8 @@ std::string moordyn_input_text (const SpanInputs& s, const ConductorInputs& in, 
         << "   " << -s.damping_ratio << "   0   " << s.drag_coefficient << "   0.0   0.0   0.0\n";
     if (strings) {
         out << ins_type << "   " << s.insulator_diameter << "   " << s.insulator_mass / s.insulator_length << "   "
-            << SpanInputs::insulator_axial_stiffness << "   " << -s.damping_ratio << "   0   "
-            << SpanInputs::insulator_drag_coefficient << "   0.0   0.0   0.0\n";
+            << LineInputs::insulator_axial_stiffness << "   " << -s.damping_ratio << "   0   "
+            << LineInputs::insulator_drag_coefficient << "   0.0   0.0   0.0\n";
     }
     out << "---------------------- POINT PROPERTIES --------------------------------\n"
         << "ID    Type      X       Y       Z       Mass   Volume  CdA    Ca\n"
@@ -62,7 +62,7 @@ std::string moordyn_input_text (const SpanInputs& s, const ConductorInputs& in, 
     if (strings) {
         for (int k = 1; k < N; ++k) {
             out << N + k << "     " << ins_type << "      " << k + 1 << "        " << N + 1 + k << "         "
-                << s.insulator_length << "   " << SpanInputs::insulator_segments << "   -\n";
+                << s.insulator_length << "   " << LineInputs::insulator_segments << "   -\n";
         }
     }
     out << "---------------------- OPTIONS -----------------------------------------\n"
@@ -82,7 +82,7 @@ std::string moordyn_input_text (const SpanInputs& s, const ConductorInputs& in, 
     return out.str();
 }
 
-void write_moordyn_input (const std::string& fname, const SpanInputs& s, const ConductorInputs& in, Real gravity)
+void write_moordyn_input (const std::string& fname, const LineInputs& s, const ConductorInputs& in, Real gravity)
 {
     const auto slash = fname.rfind('/');
     if (slash != std::string::npos) { UtilCreateDirectory(fname.substr(0, slash), 0755); }

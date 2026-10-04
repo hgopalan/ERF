@@ -328,7 +328,7 @@ if(ERF_ENABLE_MOORDYN)
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorInputs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestMoorDynInputWriter.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorSpan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorLine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestTransformer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestTowers.cpp

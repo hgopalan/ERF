@@ -1,10 +1,11 @@
-# Run a conductor-span deck and check it two ways: the plotfile against its gold with fcompare,
-# and the span's log (<output_root>.dat, written every step) against the committed gold log,
-# field by field to SIGDIGITS significant digits.
+# Run a conductor deck and check what it writes: the plotfile against its gold with fcompare,
+# and the log LOG (a line's log, <output_root>.dat for a single span or <output_root>_spanK.dat
+# for span K of a line on towers, one row per step) against the committed gold log GOLD, field
+# by field to SIGDIGITS significant digits.
 #
 # With TOTALS (a file such as conductors/total_load.dat, columns time, drag_x..z, force_on_air_x..z,
-# source_x..z), every row must also have the integrated momentum source equal to the force the lines
-# put into the air, to SIGDIGITS digits: the spreading's normalisation is exact.
+# source_x..z, in N), every row must also have the integrated momentum source equal to the force
+# the lines put into the air, to SIGDIGITS digits: the spreading's normalisation is exact.
 #
 # With EXTRA_LOGS (space-separated files written by the run), each is compared the same way with
 # the gold <GOLD_DIR>/<file name><GOLD_SUFFIX>; a comma-separated table (.csv) is compared as a
@@ -19,10 +20,15 @@ include("${CMAKE_CURRENT_LIST_DIR}/MPILauncher.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/ResolveExecutable.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/CompareDataLogs.cmake")
 # The golds come from another machine: a quantity zero by symmetry (the drag along a span set
-# square to the wind, the wind along it) prints as roundoff, 1e-12 here and 1e-7 there, which no
-# number of significant digits compares. Below 1e-4 a logged value counts as zero; every quantity
-# the logs carry (m, N, m/s, degrees) is many orders larger where it is not zero.
+# square to the wind, the wind along it) prints as roundoff, 1e-12 on one machine and 1e-7 on
+# another, which no number of significant digits compares. Below 1e-4 an ungrouped logged value
+# counts as zero. The rule is for such roundoff of exact zeros (the stub's swing_deg at time 0,
+# say); a small value that is real (a cross-arm displacement of 1e-5 m, the drag along a span in
+# N) belongs to one of the groups below, which do not use the rule.
 set(ERF_DATALOG_ZERO_EXPONENT -4)
+# The components of one vector, the loads one support carries and the statistics of one quantity
+# compare normwise (ConductorLogGroups.cmake)
+include("${CMAKE_CURRENT_LIST_DIR}/ConductorLogGroups.cmake")
 
 foreach(arg TEST_EXE INPUT WORKING_DIRECTORY FCOMPARE PLTFILE PLOT_GOLD LOG GOLD)
     if(NOT DEFINED ${arg} OR "${${arg}}" STREQUAL "")
@@ -132,6 +138,7 @@ if(DEFINED TOTALS AND NOT "${TOTALS}" STREQUAL "")
     if(ntotal LESS 2)
         message(FATAL_ERROR "RunConductors.cmake: ${TOTALS} holds no data rows")
     endif()
+    # at least one force of 1 N or more, so that the check is not of roundoff alone
     set(nonzero FALSE)
     foreach(row IN LISTS total_rows)
         if(row MATCHES "^time")
@@ -152,13 +159,18 @@ if(DEFINED TOTALS AND NOT "${TOTALS}" STREQUAL "")
                 message(FATAL_ERROR "RunConductors.cmake: ${TOTALS}: the integrated source ${source} N differs from the "
                                     "force on the air ${force} N in row '${row}'")
             endif()
-            if(NOT "${force}" STREQUAL "0")
-                set(nonzero TRUE)
+            erf_read_decimal("${force}" force_ok force_sign force_digits force_exp)
+            if(force_ok AND NOT "${force_digits}" STREQUAL "0")
+                string(LENGTH "${force_digits}" force_ndigits)
+                math(EXPR force_lead "${force_exp} + ${force_ndigits} - 1")
+                if(NOT force_lead LESS 0)
+                    set(nonzero TRUE)
+                endif()
             endif()
         endforeach()
     endforeach()
     if(NOT nonzero)
-        message(FATAL_ERROR "RunConductors.cmake: ${TOTALS}: every force on the air is zero; nothing was checked")
+        message(FATAL_ERROR "RunConductors.cmake: ${TOTALS}: no force on the air reaches 1 N; nothing was checked")
     endif()
     message(STATUS "RunConductors: the integrated source equals the force on the air in every row of ${TOTALS}")
 endif()

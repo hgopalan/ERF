@@ -1,6 +1,7 @@
-# A 300 m conductor span (795 kcmil ACSR, 1.5 m slack) hanging 30 m above flat ground in a
-# uniform 10 m/s anelastic flow, blown by a prescribed 15 m/s crosswind handed to MoorDyn at
-# every line node (the flow itself is not sampled in this version). The span's log must match
+# A 300 m conductor span (795 kcmil, thousand circular mils, ACSR, aluminium conductor steel
+# reinforced; 1.5 m slack) hanging 30 m above flat ground in a uniform 10 m/s anelastic flow, blown
+# by a prescribed 15 m/s crosswind handed to MoorDyn at every line node
+# (erf.conductors.prescribed_velocity replaces the flow sampled at the nodes). The span's log must match
 # its gold; the plotfile is the flow's own gold, since the span puts nothing into the flow.
 
 max_step = 10
@@ -20,7 +21,7 @@ zhi.type = "SlipWall"
 
 erf.anelastic = 1
 erf.vert_implicit = true
-erf.anelastic_type = MidPoint   # RK2 ignores the implicit vertical solve; MidPoint honours it
+erf.anelastic_type = MidPoint   # the anelastic MidPoint scheme, as in the decks over hills
 erf.use_fft   = true
 erf.molec_diff_type = "None"
 erf.les_type        = "None"
@@ -37,7 +38,7 @@ erf.plot_file_1  = plt
 erf.plot_int_1   = 10
 erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
 
-erf.conductors.spans               = S1
+erf.conductors.lines               = S1
 erf.conductors.S1.end_a            = 300. 500. 30.
 erf.conductors.S1.end_b            = 600. 500. 30.
 erf.conductors.S1.length           = 301.5

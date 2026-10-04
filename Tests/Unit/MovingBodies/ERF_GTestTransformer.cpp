@@ -1,9 +1,13 @@
-// Contract of erf_conductors::Transformer: the line ends whose x, y lie on a transformer's
-// footprint are dead-ended on it, and an end on two footprints, an end not above the box's top
-// or a transformer no line ends on is refused by name; the box stands on the terrain under its
-// centre; and the lines' load on it is the sum of their pulls and their moment about the centre
-// of the base, flagged when the horizontal force or the overturning moment exceeds its allowable
-// value, a zero allowable being left unchecked.
+// Unit tests of erf_conductors::Transformer, a box on the terrain the conductor lines dead-end on.
+//
+// TheBoxStandsOnTheTerrainUnderItsCentre: the base at the terrain height under the footprint's centre.
+// LineEndsOnAFootprintAreDeadEndedOnIt: every line end whose x, y lies on the footprint.
+// MisplacedEndsAndIdleTransformersAreRefusedByName: an end on two footprints, an end not above the
+//     box's top, or a transformer no line ends on.
+// TheLoadIsTheSumOfThePullsAndTheirMomentAboutTheBase: the force (N) and the moment (N m) about the
+//     centre of the base.
+// TheLoadIsFlaggedOverEitherAllowable: the horizontal force or the overturning moment over its
+//     allowable value; a zero allowable is not checked.
 
 #include <array>
 #include <cmath>
@@ -16,14 +20,14 @@
 #include "ERF_Transformer.H"
 
 using amrex::Real;
-using erf_conductors::SpanInputs;
+using erf_conductors::LineInputs;
 using erf_conductors::Transformer;
 using erf_conductors::TransformerInputs;
 using P3 = std::array<Real,3>;
 
 namespace {
 
-constexpr Real tol = std::is_same<Real, float>::value ? Real(1.0e-3) : Real(1.0e-9);
+constexpr Real tol = (std::is_same<Real, float>::value) ? Real(1.0e-3) : Real(1.0e-9);
 
 TransformerInputs box (const std::string& name, Real x, Real y)
 {
@@ -35,9 +39,9 @@ TransformerInputs box (const std::string& name, Real x, Real y)
 }
 
 // a line at its absolute heights: ends 10 m above ground at 50 m
-SpanInputs line (const std::string& name, const P3& a, const P3& b)
+LineInputs line (const std::string& name, const P3& a, const P3& b)
 {
-    SpanInputs s;
+    LineInputs s;
     s.name = name;
     s.end_a = a;
     s.end_b = b;
@@ -59,7 +63,7 @@ TEST(Transformer, LineEndsOnAFootprintAreDeadEndedOnIt)
 {
     std::vector<Transformer> ts{Transformer(box("T1", 100.0, 200.0), 50.0), Transformer(box("T2", 400.0, 200.0), 50.0)};
     // L1 from T1 to T2, L2 from T1's edge to open ground, L3 nowhere near either
-    const std::vector<SpanInputs> lines{line("L1", {{102.0, 200.0, 60.0}}, {{398.0, 200.0, 60.0}}),
+    const std::vector<LineInputs> lines{line("L1", {{102.0, 200.0, 60.0}}, {{398.0, 200.0, 60.0}}),
                                         line("L2", {{104.0, 202.5, 58.0}}, {{300.0, 400.0, 60.0}}),
                                         line("L3", {{200.0, 600.0, 60.0}}, {{500.0, 600.0, 60.0}})};
     EXPECT_EQ(erf_conductors::attach_line_ends(ts, lines), "");

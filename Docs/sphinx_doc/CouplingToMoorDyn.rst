@@ -1,8 +1,8 @@
 
- .. role:: cpp(code)
-    :language: c++
+.. role:: cpp(code)
+   :language: c++
 
- .. _CouplingToMoorDyn:
+.. _sec:CouplingToMoorDyn:
 
 Coupling To MoorDyn
 ===================
@@ -21,8 +21,8 @@ layer in ``Source/MovingBodies/MoorDyn`` checks.
 Building
 --------
 
-Build and install MoorDyn-C 2.7.1 (any 2.3 or newer release works) with the
-script in the ERF tree, which clones the release tag, configures the C/C++
+Build and install MoorDyn-C 2.7.1 (any 2.3 or newer release works; the script
+refuses an older version) with the script in the ERF tree, which clones the release tag, configures the C/C++
 library only (no Python, MATLAB, Fortran or Rust wrappers, no tests, no docs,
 the bundled Eigen) and installs it under ``$HOME/opt/moordyn-<version>``:
 
@@ -41,9 +41,9 @@ install prefix, where CMake finds MoorDyn's package configuration
          -DMOORDYN_DIR=$HOME/opt/moordyn-2.7.1 ..
 
 The configure step records the MoorDyn version it found and refuses a MoorDyn
-whose ``MoorDyn2.h`` does not declare the external wave-kinematics calls
-(``MoorDyn_ExternalWaveKinInit``, ``MoorDyn_ExternalWaveKinGetCoordinates``,
-``MoorDyn_ExternalWaveKinSet``), which replaced the version 1 names in 2.3.
+whose ``MoorDyn2.h`` does not declare ``MoorDyn_ExternalWaveKinSet``, one of
+the external wave-kinematics calls (``MoorDyn_ExternalWaveKin*``) that
+replaced the version 1 names in 2.3.
 The version is compiled into ERF and reported by
 :cpp:`erf_moordyn::library_version()`; a run prints it at start-up with its
 bodies.
@@ -68,14 +68,15 @@ across the line by the wind across the other line attached to it (on that
 line's weight, with the same lag), and that line runs straight down to it. Its saved state holds
 each line's swing angles, the last wind it was given, which sets the direction
 of the swing, and where the free and coupled points are, so a restored line is where
-the saved one was. The
-unit tests and the ``Linux GCC MoorDyn`` CI workflow runs them on it in one
-job; a second job installs MoorDyn-C 2.7.1 with ``Build/setup_moordyn.sh``
+the saved one was. The ``Linux GCC MoorDyn`` CI workflow runs the unit tests
+and the stub regression tests against the stub in one job; a second job
+installs MoorDyn-C 2.7.1 with ``Build/setup_moordyn.sh``
 and runs the same tests, the verification tests that need real line dynamics
 and the coupled regression tests against the real library.
 
-The GNU make build takes ``USE_MOORDYN = TRUE`` with ``MOORDYN_HOME`` set to
-the install prefix (and ``MOORDYN_VERSION`` to the version string it should
+The GNU make build takes ``USE_MOVING_BODIES = TRUE`` and
+``USE_MOORDYN = TRUE`` (the latter is ignored without the former), with
+``MOORDYN_HOME`` set to the install prefix (and ``MOORDYN_VERSION`` to the version string it should
 report).
 
 What the coupling layer does
@@ -100,7 +101,8 @@ MoorDyn-C is not clean under floating-point traps: its stationary
 initial-condition solver overflows intermediate values, so a run with
 ``amrex.fpe_trap_overflow = 1`` ends with SIGILL inside ``MoorDyn_Init``
 (2.7.1; the invalid and zero traps pass). As for OpenFAST, a body that runs
-MoorDyn refuses to start with any ``amrex.fpe_trap_*`` input on;
+MoorDyn refuses to start with ``amrex.fpe_trap_invalid``,
+``amrex.fpe_trap_zero`` or ``amrex.fpe_trap_overflow`` on;
 :cpp:`erf_moordyn::fpe_traps_requested()` is the check.
 
 MoorDyn reports the net force of the points it integrates (free and coupled
@@ -121,7 +123,8 @@ lines agree.
 Two properties of MoorDyn's input matter for lines in air:
 
 - the ``OPTIONS`` must set ``WaveKin = 1`` (the fluid kinematics come through
-  the API); the wrapper reports a system that takes no external kinematics;
+  the API). Creating the system refuses an input file whose ``OPTIONS`` do not
+  set it: MoorDyn-C 2.7.1 would otherwise run without the wind ERF hands it;
 - MoorDyn applies its fluid loads to nodes below ``z = 0`` only, its free
   surface, and the flat bottom lies at ``-WtrDpth``. Lines in air therefore
   live below ``z = 0`` in MoorDyn's frame, with ``WtrDnsty`` the air density
@@ -131,10 +134,13 @@ Two properties of MoorDyn's input matter for lines in air:
 A minimal case
 --------------
 
-A 300 m span of 795 kcmil ACSR (Drake) with 1.5 m of slack, 30 m above the
-ground, across a uniform 15 m/s anelastic crosswind; the wind handed to
-MoorDyn is ERF's velocity at the line's nodes (the regression test
-``Conductors_FlowWind``):
+A single-span line, 300 m of 795 kcmil (thousand circular mils) ACSR
+(aluminium conductor, steel reinforced; the Drake conductor) with 1.5 m of
+slack, 30 m above flat ground, across a sheared anelastic crosswind,
+v = 15 + 0.1 z m/s, entering through the y-low face; the wind handed to
+MoorDyn is ERF's velocity at the line's nodes. The block shows the lines that
+matter; the full deck is ``Tests/test_files/Conductors_FlowWind/Conductors_FlowWind.i``
+(the regression test ``Conductors_FlowWind``):
 
 .. code-block:: text
 
@@ -145,10 +151,12 @@ MoorDyn is ERF's velocity at the line's nodes (the regression test
    erf.fixed_dt       = 0.5
    geometry.is_periodic = 1 0 0
    ylo.type     = "Inflow"
-   ylo.velocity = 0. 15.0 0.
+   ylo.dirichlet_file = "inflow_profile"   # z u v w: v = 15 m/s at z = 0, 45 m/s at z = 300 m
    yhi.type     = "Outflow"
+   zlo.type     = "SlipWall"
+   zhi.type     = "SlipWall"
 
-   erf.conductors.spans               = S1
+   erf.conductors.lines               = S1
    erf.conductors.S1.end_a            = 600. 500. 30.    # z above the terrain surface
    erf.conductors.S1.end_b            = 900. 500. 30.
    erf.conductors.S1.length           = 301.5           # unstretched, more than the 300 m chord
@@ -158,8 +166,7 @@ MoorDyn is ERF's velocity at the line's nodes (the regression test
    erf.conductors.air_density         = 1.0
 
 The physics and the diagnostics are in :ref:`sec:Conductors`; the inputs,
-with their defaults and ranges, in the "Conductor lines" section of
-:doc:`Inputs <Inputs>`.
+with their defaults and ranges, in :ref:`sec:ConductorInputs`.
 
 The unit test ``MoorDynSystem`` (``Tests/Unit/MovingBodies``) runs a 300 m
 fixed-fixed span of 795 kcmil ACSR with 1.5 m of slack in air against

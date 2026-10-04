@@ -389,12 +389,12 @@ function(build_erf_lib erf_lib_name)
     target_include_directories(${erf_lib_name} PUBLIC $<BUILD_INTERFACE:${SRC_DIR}/MovingBodies/Core>)
     target_compile_definitions(${erf_lib_name} PUBLIC ERF_USE_MOVING_BODIES)
     if(ERF_ENABLE_MOORDYN)
-      # The MoorDyn-C line dynamics behind the v2 C API, against the installed library or the stub.
+      # The conductor, tower and MoorDyn-wrapper sources: they need MoorDyn-C's v2 C API, from the installed library or the stub.
       target_sources(${erf_lib_name} PRIVATE
         ${SRC_DIR}/MovingBodies/MoorDyn/ERF_MoorDynSystem.cpp
         ${SRC_DIR}/MovingBodies/Conductors/ERF_ConductorInputs.cpp
         ${SRC_DIR}/MovingBodies/Conductors/ERF_MoorDynInputWriter.cpp
-        ${SRC_DIR}/MovingBodies/Conductors/ERF_ConductorSpan.cpp
+        ${SRC_DIR}/MovingBodies/Conductors/ERF_ConductorLine.cpp
         ${SRC_DIR}/MovingBodies/Conductors/ERF_Transformer.cpp
         ${SRC_DIR}/MovingBodies/Conductors/ERF_Conductors.cpp
         ${SRC_DIR}/MovingBodies/Towers/ERF_MemberDrag.cpp

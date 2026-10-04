@@ -1,7 +1,11 @@
+// Point sampling of face and cell fields and of the terrain height, and the coverage check.
+
 #include "ERF_ActuatorSampling.H"
 
 #include <cmath>
+#include <array>
 #include <string>
+#include <vector>
 
 #include <AMReX.H>
 #include <AMReX_Array4.H>
@@ -16,6 +20,16 @@ using namespace amrex;
 namespace erf_actuator {
 
 namespace {
+
+// The layout the samplers rely on: a field read through the MFIter of `ref` must share its
+// distribution and cell boxes and have `ngrow` ghost cells (host-side check).
+void check_layout (const MultiFab& ref, const MultiFab* other, int ngrow, const std::string& what)
+{
+    if (other == nullptr) { return; }
+    if (!(other->nGrow() >= ngrow && other->DistributionMap() == ref.DistributionMap() && other->boxArray().CellEqual(ref.boxArray()))) {
+        Abort(what + " must have " + std::to_string(ngrow) + " ghost cell(s) and the boxes and distribution of the field sampled");
+    }
+}
 
 // Value of the face field f at height z in the column (i,j) of its staggered grid, linear in
 // the physical height between the two faces that bracket z. The faces klo..khi are searched;
@@ -69,6 +83,9 @@ sample_velocity (const MultiFab& U, const MultiFab& V, const MultiFab& W,
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(pos.size() % 3 == 0, "sample_velocity: pos holds x,y,z triples");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(U.nGrow() >= 1 && V.nGrow() >= 1 && W.nGrow() >= 1,
                                      "sample_velocity needs one filled ghost cell on the velocities");
+    check_layout(U, &V, 1, "sample_velocity: V");
+    check_layout(U, &W, 1, "sample_velocity: W");
+    check_layout(U, z_phys_nd, 1, "sample_velocity: z_phys_nd");
     const int npts = static_cast<int>(pos.size() / 3);
     vel.assign(3 * static_cast<std::size_t>(npts), Real(0.0));
     if (npts == 0) { return; }
@@ -180,10 +197,12 @@ void
 sample_cell_scalar (const MultiFab& mf, int comp, const MultiFab* z_phys_nd, const Geometry& geom,
                     const std::vector<Real>& pos, std::vector<Real>& val)
 {
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(pos.size() % 3 == 0, "sample_cell_scalar: pos holds x,y,z triples");
     const int npts = static_cast<int>(pos.size() / 3);
     val.assign(npts, 0.0);
     if (npts == 0) { return; }
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(mf.nGrow() >= 1, "sample_cell_scalar: the field needs a filled ghost cell");
+    check_layout(mf, z_phys_nd, 1, "sample_cell_scalar: z_phys_nd");
     const auto plo = geom.ProbLoArray();
     const auto dxi = geom.InvCellSizeArray();
     const Real dz = geom.CellSize(2);
@@ -326,21 +345,41 @@ points_covered_by (const BoxArray& ba, const Geometry& geom, const std::vector<R
     const auto dxi = geom.InvCellSizeArray();
     const Box& domain = geom.Domain();
     for (std::size_t p = 0; p < pos.size() / 3; ++p) {
-        IntVect lo, hi;
+        // per direction, the index ranges of the cells needed: one range, or two in a periodic
+        // direction whose range crosses the seam (the part beyond it wrapped to the other side)
+        std::array<std::vector<std::array<int,2>>,3> ranges;
         for (int d = 0; d < 3; ++d) {
-            lo[d] = static_cast<int>(std::floor((pos[3*p+d] - reach - plo[d]) * dxi[d]));
-            hi[d] = static_cast<int>(std::floor((pos[3*p+d] + reach - plo[d]) * dxi[d]));
+            int lo = static_cast<int>(std::floor((pos[3*p+d] - reach - plo[d]) * dxi[d]));
+            int hi = static_cast<int>(std::floor((pos[3*p+d] + reach - plo[d]) * dxi[d]));
+            const int dlo = domain.smallEnd(d), dhi = domain.bigEnd(d), n = dhi - dlo + 1;
             if (geom.isPeriodic(d)) {
-                // the union covers the whole periodic extent or none of it: clamp to the domain
-                lo[d] = std::max(lo[d], domain.smallEnd(d));
-                hi[d] = std::min(hi[d], domain.bigEnd(d));
+                // shift by whole periods so that lo lies in the domain
+                const int s = static_cast<int>(std::floor(static_cast<double>(lo - dlo) / n));
+                lo -= s * n;
+                hi -= s * n;
+                if (hi - lo + 1 >= n) {
+                    ranges[d].push_back({{dlo, dhi}});
+                } else if (hi <= dhi) {
+                    ranges[d].push_back({{lo, hi}});
+                } else {
+                    ranges[d].push_back({{lo, dhi}});
+                    ranges[d].push_back({{dlo, hi - n}});
+                }
             } else {
-                lo[d] = std::max(lo[d], domain.smallEnd(d));
-                hi[d] = std::min(hi[d], domain.bigEnd(d));
+                ranges[d].push_back({{std::max(lo, dlo), std::min(hi, dhi)}});
             }
         }
-        const Box needed(lo, hi);
-        if (!cc.contains(needed, true)) {
+        bool covered = true;
+        for (const auto& rx : ranges[0]) {
+            for (const auto& ry : ranges[1]) {
+                for (const auto& rz : ranges[2]) {
+                    const Box needed(IntVect(rx[0], ry[0], rz[0]), IntVect(rx[1], ry[1], rz[1]));
+                    // a range outside a non-periodic domain gives an empty box, which is not covered
+                    if (!cc.contains(needed, true)) { covered = false; }
+                }
+            }
+        }
+        if (!covered) {
             first_outside = "(" + std::to_string(pos[3*p]) + ", " + std::to_string(pos[3*p+1]) + ", " + std::to_string(pos[3*p+2]) + ") m";
             return false;
         }

@@ -1,10 +1,11 @@
 # A circuit across a sheared anelastic crosswind v = 15 + 0.1 z m/s entering through the y-low face
-# (steady between slip walls without diffusion): three phases of 795 kcmil ACSR, 6 m apart, each a
-# section of three 300 m spans hanging from 2.5 m insulator strings at two suspension towers and
-# dead-ended at both ends, and a steel shield wire 7 m above the middle phase, clamped at the
-# towers. Each line samples the flow at its nodes where they are each step. The middle phase's
-# middle span and strings, the shield wire's middle span and the closest approach of every pair of
-# lines must match their golds; the flow is Conductors_FlowWind's, since nothing goes back into it.
+# (steady between slip walls without diffusion): three phases of 795 kcmil (thousand circular
+# mils) ACSR (aluminium conductor, steel reinforced), 6 m apart, each a line of three 300 m spans
+# hanging from 2.5 m insulator strings at two suspension towers and dead-ended at both ends, and a
+# steel shield wire clamped at the towers 7 m above the phases' attachment points. Each line samples
+# the flow at its nodes where they are each step. The middle phase's middle span and strings, the
+# shield wire's middle span and the closest-approach statistics of the pairs P1-P2 and P2-SW must
+# match their golds; the flow is Conductors_FlowWind's, since nothing goes back into it.
 
 max_step = 10
 stop_time = 5.0
@@ -16,14 +17,14 @@ amr.n_cell           = 30    20    12
 amr.max_level        = 0
 geometry.is_periodic = 1 0 0
 ylo.type     = "Inflow"
-ylo.dirichlet_file = "inflow_profile"   # z u v w; no constant inflow density (it would rescale theta)
+ylo.dirichlet_file = "inflow_profile"   # z u v w; no constant inflow density, which would also need ylo.theta
 yhi.type     = "Outflow"
 zlo.type = "SlipWall"
 zhi.type = "SlipWall"
 
 erf.anelastic = 1
 erf.vert_implicit = true
-erf.anelastic_type = MidPoint   # RK2 ignores the implicit vertical solve; MidPoint honours it
+erf.anelastic_type = MidPoint   # the anelastic MidPoint scheme, as in the decks over hills
 erf.use_fft   = true
 erf.molec_diff_type = "None"
 erf.les_type        = "None"
@@ -39,7 +40,7 @@ erf.plot_file_1  = plt
 erf.plot_int_1   = 10
 erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
 
-erf.conductors.spans               = P1 P2 P3 SW
+erf.conductors.lines               = P1 P2 P3 SW
 erf.conductors.diagnostics_dir     = conductors
 erf.conductors.air_density         = 1.0
 

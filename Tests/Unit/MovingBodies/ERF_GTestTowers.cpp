@@ -1,23 +1,34 @@
-// Contract of the tower aerodynamics: the drag on a member node is 1/2 rho Cd w L |U_n| U_n with
-// only the flow normal to the member and relative to it counting; the lattice force coefficient
-// is ASCE 7's square-tower curve; a tower type refuses every value outside its range by key; a
-// tower stands its body's nodes up the tapering body and its cross-arm across the line at the
-// conductor's height; and in a uniform wind the drag and base moment are the hand values, the
-// body's drag exactly (its width is linear in height), in a log-law wind within the segments'
-// quadrature error of a fine integral; and the foundation's four legs share the downward load
-// equally and the overturning moment linearly, in equilibrium with the loads, the same whichever
-// way the tower faces, the corner leg taking sqrt(2) times more from a diagonal pull, each leg
-// load flagged against its allowable; and several lines on one tower each pull at their own point,
-// the footings taking them all.
+// Contract of the lattice tower (shaft and cross-arm drag, foundation reactions) and of its type's inputs.
+//
+// - MemberDrag.OnlyTheFlowNormalToTheMemberAndRelativeToItLoadsIt: the drag on a drag node is
+//   1/2 rho Cd w L |U_n| U_n, only the flow normal to the member and relative to it counting.
+// - MemberDrag.TheLatticeForceCoefficientIsTheSquareTowerCurve: the lattice force coefficient is
+//   the square-tower curve of ASCE 7 (American Society of Civil Engineers, minimum design loads).
+// - TowerType.EveryValueOutsideItsRangeIsRefusedByName: validate() names the key of every value
+//   outside its range, NaN and infinity included.
+// - Tower.TheBodyTapersUpToTheCrossArmWhichRunsAcrossTheLine: the shaft's drag nodes stand up the
+//   tapering shaft, the cross-arm's across the line at the conductor's height.
+// - Tower.InAUniformWindTheDragAndBaseMomentAreTheHandValues: the shaft's drag exactly (its width
+//   is linear in height), the base moment to the midpoint rule's known error.
+// - Tower.InALogLawWindTheDragIsTheFineIntegral: within the segments' quadrature error.
+// - Tower.TheLegsShareTheLoadAndResistTheOverturningMoment: the four legs share the downward load
+//   equally and the overturning moment linearly, in equilibrium, whichever way the tower faces;
+//   the corner leg takes sqrt(2) times more from a diagonal pull.
+// - Tower.EachLegLoadIsFlaggedOverItsAllowable.
+// - Tower.EachLinePullsWhereItHangsAndTheFootingsTakeThemAll: several lines on one tower.
+// - Tower.ANonFiniteLinePullIsRefusedNamingTheTower and
+//   Tower.AFlatOrBadlyAimedTowerIsRefusedNamingIt: the preconditions abort with the tower's name.
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "ERF_GTestThrowOnAbort.H"
 #include "ERF_MemberDrag.H"
 #include "ERF_Tower.H"
 #include "ERF_TowerInputs.H"
@@ -31,7 +42,7 @@ using P3 = std::array<Real,3>;
 
 namespace {
 
-constexpr Real tol = std::is_same<Real, float>::value ? Real(1.0e-5) : Real(1.0e-12);
+constexpr Real tol = (std::is_same<Real, float>::value) ? Real(1.0e-5) : Real(1.0e-12);
 constexpr Real rho = 1.2;
 
 TowerType lattice ()
@@ -122,6 +133,25 @@ TEST(TowerType, EveryValueOutsideItsRangeIsRefusedByName)
     bad([](TowerType& t) { t.damping_ratio = 1.0; }, "damping_ratio");
     bad([](TowerType& t) { t.foundation_rotational_stiffness = -1.0; }, "foundation_rotational_stiffness");
     bad([](TowerType& t) { t.foundation_lateral_stiffness = -1.0; }, "foundation_lateral_stiffness");
+    // NaN passes a test written as x < 0 and infinity one written as x > 0: every key refuses both
+    const Real nan = std::numeric_limits<Real>::quiet_NaN(), inf = std::numeric_limits<Real>::infinity();
+    for (const Real v : {nan, inf}) {
+        bad([v](TowerType& t) { t.base_width = v; }, "base_width");
+        bad([v](TowerType& t) { t.top_width = v; }, "top_width");
+        bad([v](TowerType& t) { t.solidity = v; }, "solidity");
+        bad([v](TowerType& t) { t.arm_length = v; }, "arm_length");
+        bad([v](TowerType& t) { t.arm_depth = v; }, "arm_depth");
+        bad([v](TowerType& t) { t.peak = v; }, "peak");
+        bad([v](TowerType& t) { t.drag_coefficient = v; }, "drag_coefficient");
+        bad([v](TowerType& t) { t.weight = v; }, "weight");
+        bad([v](TowerType& t) { t.leg_spacing = v; }, "leg_spacing");
+        bad([v](TowerType& t) { t.allowable_uplift = v; }, "allowable_uplift");
+        bad([v](TowerType& t) { t.allowable_compression = v; }, "allowable_compression");
+        bad([v](TowerType& t) { t.frequency = v; }, "frequency");
+        bad([v](TowerType& t) { t.damping_ratio = v; }, "damping_ratio");
+        bad([v](TowerType& t) { t.foundation_rotational_stiffness = v; }, "foundation_rotational_stiffness");
+        bad([v](TowerType& t) { t.foundation_lateral_stiffness = v; }, "foundation_lateral_stiffness");
+    }
     TowerType moving = lattice();
     moving.frequency = 2.0;
     moving.weight = 9.0e4;
@@ -320,4 +350,39 @@ TEST(Tower, EachLinePullsWhereItHangsAndTheFootingsTakeThemAll)
     EXPECT_NEAR(L.moment[0], Mx, 10.0 * tol * std::abs(Mx));
     EXPECT_NEAR(L.vertical, 9.0e4 + 16300.0, 1.0e-6 * L.vertical);
     expect_equilibrium(tw, L);
+}
+
+TEST(Tower, ANonFiniteLinePullIsRefusedNamingTheTower)
+{
+    TowerType t = lattice();
+    t.weight = 9.0e4;
+    Tower tw("L1_t3", t, P3{{500.0, 500.0, 20.0}}, Real(30.0), P3{{0.0, 1.0, 0.0}});
+    tw.add_attachment(P3{{500.0, 500.0, 50.0}});
+    const Real nan = std::numeric_limits<Real>::quiet_NaN();
+    // a NaN pull, as a diverged MoorDyn line would give: refused, and the pulls already set are kept
+    tw.set_line_loads({P3{{0.0, 1000.0, -5000.0}}}, {P3{{500.0, 500.0, 50.0}}});
+    std::string msg = erf_gtest::abort_message([&] { tw.set_line_loads({P3{{nan, 0.0, 0.0}}}, {P3{{500.0, 500.0, 50.0}}}); });
+    EXPECT_NE(msg.find("L1_t3"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("erf.conductors.moordyn_cfl"), std::string::npos) << msg;
+    EXPECT_EQ(tw.line_forces()[0][1], Real(1000.0));
+    // two pulls for one attachment
+    msg = erf_gtest::abort_message([&] {
+        tw.set_line_loads({P3{{0.0, 0.0, 0.0}}, P3{{0.0, 0.0, 0.0}}}, {P3{{500.0, 500.0, 50.0}}, P3{{500.0, 500.0, 50.0}}});
+    });
+    EXPECT_NE(msg.find("2 line pulls for 1 attachments"), std::string::npos) << msg;
+}
+
+TEST(Tower, AFlatOrBadlyAimedTowerIsRefusedNamingIt)
+{
+    const TowerType t = lattice();
+    std::string msg = erf_gtest::abort_message([&] { Tower tw("T9", t, P3{{0.0, 0.0, 0.0}}, Real(0.0), P3{{0.0, 1.0, 0.0}}); });
+    EXPECT_NE(msg.find("T9"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("cross-arm height"), std::string::npos) << msg;
+    msg = erf_gtest::abort_message([&] { Tower tw("T9", t, P3{{0.0, 0.0, 0.0}}, Real(30.0), P3{{0.0, 0.6, 0.8}}); });
+    EXPECT_NE(msg.find("horizontal unit vector"), std::string::npos) << msg;
+    TowerType bad = t;
+    bad.solidity = 0.0;
+    msg = erf_gtest::abort_message([&] { Tower tw("T9", bad, P3{{0.0, 0.0, 0.0}}, Real(30.0), P3{{0.0, 1.0, 0.0}}); });
+    EXPECT_NE(msg.find("erf.conductors.lattice.solidity"), std::string::npos) << msg;
+    EXPECT_TRUE(erf_gtest::abort_message([&] { Tower tw("T9", t, P3{{0.0, 0.0, 0.0}}, Real(30.0), P3{{0.0, 1.0, 0.0}}); }).empty());
 }

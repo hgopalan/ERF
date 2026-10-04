@@ -296,7 +296,16 @@ ERF::ERF_shared ()
 #endif
 
 #ifdef ERF_USE_MOORDYN
+    // the conductor lines (erf.conductors.*), one MoorDyn system each; nullptr unless erf.conductors.lines is given
     conductors = Conductors::create(max_level);
+#else
+    // a build without MoorDyn refuses the conductor inputs instead of ignoring them
+    {
+        amrex::ParmParse pp_conductors("erf.conductors");
+        if (pp_conductors.contains("lines") || pp_conductors.contains("spans")) {
+            amrex::Abort("erf.conductors.lines needs ERF built with MoorDyn (ERF_ENABLE_MOORDYN=ON in CMake)");
+        }
+    }
 #endif
 
 #ifdef ERF_USE_EAMXX_SHOC
