@@ -334,6 +334,17 @@ if(ERF_ENABLE_MOORDYN)
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestTowers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestTowerDynamics.cpp
   )
+  # Motivation: a lattice tower's frame model must reproduce the closed-form static response of beams
+  # (cantilever bending with and without shear deformation, axial and torsional stiffness, a
+  # spring base, a fixed portal frame, a triangulated truss), balance every load with its support
+  # reactions, refuse a mechanism naming the free degree of freedom, read a SubDyn input file and
+  # refuse what it cannot model, and give the stiffness at a lattice tower's peak that SubDyn
+  # gives for the same input file (Tests/test_files/FrameSubDynTower).
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestFrame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestFrameSubDyn.cpp
+  )
+  target_compile_definitions(${erf_exe_name} PRIVATE ERF_FRAME_TEST_FILES="${PROJECT_SOURCE_DIR}/Tests/test_files/FrameSubDynTower")
   # Motivation: against the real MoorDyn-C (the tests skip on the stub, which has no line
   # dynamics), a span's mean swing in a steady crosswind must be the quasi-static blowout angle
   # atan(q/w), its free swing after a gust must have the cable's first out-of-plane period
