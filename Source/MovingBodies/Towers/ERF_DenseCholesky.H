@@ -75,6 +75,29 @@ private:
     std::vector<double> m_l;   //!< L, row i at [i(i+1)/2, i(i+1)/2 + i]
 };
 
+/**
+ * The number of negative pivots of the LDL^T factorisation of the n x n symmetric matrix a
+ * (row-major, lower triangle read), without pivoting: by Sylvester's law of inertia, the number of
+ * negative eigenvalues of a. For a = K - sigma M with K and M positive definite, it is the number of
+ * eigenvalues of K phi = lambda M phi below sigma (the Sturm sequence count). A zero pivot counts as
+ * negative; sigma should not sit on an eigenvalue.
+ */
+inline std::size_t negative_pivots (std::vector<double> a, std::size_t n)
+{
+    std::size_t count = 0;
+    for (std::size_t k = 0; k < n; ++k) {
+        const double d = a[k * n + k];
+        if (!(d > 0.0)) { ++count; }
+        if (d == 0.0) { continue; }
+        for (std::size_t i = k + 1; i < n; ++i) {
+            const double l = a[i * n + k] / d;
+            if (l == 0.0) { continue; }
+            for (std::size_t j = k + 1; j <= i; ++j) { a[i * n + j] -= l * a[j * n + k]; }
+        }
+    }
+    return count;
+}
+
 } // namespace erf_towers
 
 #endif

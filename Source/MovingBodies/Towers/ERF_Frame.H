@@ -78,6 +78,24 @@ std::array<double,144> beam_stiffness (const BeamProperties& p, double L, const 
  */
 std::array<double,12> beam_gravity_load (const BeamProperties& p, double L, const std::array<double,9>& dc, double gravity);
 
+/**
+ * The 12 x 12 consistent mass of a beam element of length L (m) in its local axes, row-major, as
+ * SubDyn's ElemM_Beam: the translational mass rho A L with cubic shape functions, the rotary
+ * inertia rho Ixx and rho Iyy of the cross-section, and the torsional inertia rho J0 L (kg, kg m, kg m^2).
+ */
+std::array<double,144> beam_mass_local (const BeamProperties& p, double L);
+
+/** The element mass in the frame's axes: T M_local T^T. */
+std::array<double,144> beam_mass (const BeamProperties& p, double L, const std::array<double,9>& dc);
+
+/**
+ * The 6 x 6 mass matrix (row-major) a concentrated mass adds at its joint, as SubDyn's
+ * rigidBodyMassMatrix: the rigid body of mass m whose centre sits at the offset (x, y, z) from
+ * the joint, with the inertia tensor entries Jxx Jyy Jzz Jxy Jxz Jyz about its centre, moved to
+ * the joint (parallel axes; the translation-rotation coupling m [r]x). Units: kg, kg m, kg m^2.
+ */
+std::array<double,36> rigid_body_mass (const FrameMass& c);
+
 /** One element: its nodes (0-based), the member it belongs to (0-based, input order), length (m), axes and properties. */
 struct FrameElement
 {
@@ -129,6 +147,27 @@ public:
     /** The assembled stiffness of every degree of freedom (num_dofs()^2, row-major), supports and springs left out. */
     std::vector<double> stiffness () const;
 
+    /** The free degrees of freedom (indices into the num_dofs() vectors), ascending. */
+    const std::vector<std::size_t>& free_dofs () const { return m_free; }
+    /**
+     * cK K + cM M on the free degrees of freedom, row-major (num_free_dofs()^2): K the elements'
+     * stiffness and the support springs, M the elements' consistent mass, the concentrated masses
+     * and the support springs' masses.
+     */
+    std::vector<double> assemble_free (double cK, double cM) const;
+    /** K u for a displacement u of every degree of freedom (num_dofs(); springs included): N, N m. */
+    std::vector<double> apply_stiffness (const std::vector<double>& u) const;
+    /** M a for an acceleration a of every degree of freedom (num_dofs(); concentrated and spring masses included): N, N m. */
+    std::vector<double> apply_mass (const std::vector<double>& a) const;
+    /**
+     * The load on every degree of freedom (num_dofs(), N and N m): node_loads (empty: none) and,
+     * when gravity > 0 (m/s^2), the members' weight as element loads and the concentrated masses'
+     * weight with its moment about the joint.
+     */
+    std::vector<double> load_vector (const std::vector<double>& node_loads, double gravity) const;
+    /** Solve K x = b on the free degrees of freedom with the factored stiffness: b holds num_free_dofs() values, x on return. */
+    void solve_free (std::vector<double>& b) const { m_chol.solve(b); }
+
     /**
      * The static response to node_loads (6 per node, frame axes, N and N m; empty: none) plus, when
      * gravity > 0 (m/s^2), the weight of the members and the concentrated masses along -z.
@@ -138,6 +177,8 @@ public:
 private:
     Frame () = default;
     std::string describe_dof (std::size_t dof) const;
+    /** node_loads and the concentrated masses' weight, the loads applied at the nodes themselves. */
+    std::vector<double> point_loads (const std::vector<double>& node_loads, double gravity) const;
 
     FrameInputs m_in;
     std::vector<std::array<double,3>> m_x;          //!< node positions (m)
