@@ -45,3 +45,25 @@ add a fixed cost per step that more ranks do not reduce. The lines write their l
 every step: the spans, the strings, `towers.dat` with every tower's loads and sway,
 `transformers.dat`, `separation.dat`, and `coupling.dat` with the iterations the moving towers'
 coupling took.
+
+## Comparing with ASCE 74
+
+`compare_asce74.py` compares the spans of a run with the quasi-static wire load of ASCE Manual of
+Practice 74 (`ERF_ASCE74.H`; the conductor theory's "ASCE 74 design check"). For conductors without
+towers, keep one phase of each circuit in `network.inputs` (the `b` phases), drop the
+`erf.conductors.tower_types` block and each line's `tower_type`, `share_towers` and insulator keys,
+so that every line hangs clamped at fixed points where its towers stood, and give the run
+
+    erf.conductors.asce74_wind     = 40.
+    erf.conductors.asce74_exposure = C
+
+so that ERF writes `conductors/asce74.csv` (each span's height, chord, length and weight with the
+design check). Then, in the run's directory,
+
+    python3 compare_asce74.py . --exposure C
+
+For every span it takes the wind at mid-span normal to the span from the span's log, its mean and
+its peak 3-second average V3 (the gust at the span's height), and compares the span's peak load per
+metre with ASCE 74's (rho/2) Cf d V3^2 Gw, and its peak swing and tension with the quasi-static ones
+under that load, over the samples from `erf.conductors.stats_start`. It writes
+`asce74_comparison.csv` and `asce74_comparison.png`.

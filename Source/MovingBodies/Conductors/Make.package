@@ -9,3 +9,5 @@ CEXE_sources += ERF_MoorDynInputWriter.cpp
 CEXE_sources += ERF_ConductorLine.cpp
 CEXE_sources += ERF_Transformer.cpp
 CEXE_sources += ERF_Conductors.cpp
+CEXE_headers += ERF_ASCE74.H
+CEXE_sources += ERF_ASCE74.cpp

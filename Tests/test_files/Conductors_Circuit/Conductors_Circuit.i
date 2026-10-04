@@ -5,7 +5,8 @@
 # steel shield wire clamped at the towers 7 m above the phases' attachment points. Each line samples
 # the flow at its nodes where they are each step. The middle phase's middle span and strings, the
 # shield wire's middle span and the closest-approach statistics of the pairs P1-P2 and P2-SW must
-# match their golds; the flow is Conductors_FlowWind's, since nothing goes back into it.
+# match their golds, and so must every span's ASCE 74 design check for a 40 m/s gust over open
+# country (conductors/asce74.csv); the flow is Conductors_FlowWind's, since nothing goes back into it.
 
 max_step = 10
 stop_time = 5.0
@@ -43,6 +44,8 @@ erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
 erf.conductors.lines               = P1 P2 P3 SW
 erf.conductors.diagnostics_dir     = conductors
 erf.conductors.air_density         = 1.0
+erf.conductors.asce74_wind         = 40.    # m/s, the 3-second gust at 10 m of an ASCE 74 design check
+erf.conductors.asce74_exposure     = C
 
 # the phases: dead-ended at x = 300 and 1200, suspension towers at x = 600 and 900
 erf.conductors.P1.end_a            = 300.  494. 30.

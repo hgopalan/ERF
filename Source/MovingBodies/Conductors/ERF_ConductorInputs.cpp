@@ -1,4 +1,5 @@
 #include "ERF_ConductorInputs.H"
+#include "ERF_ASCE74.H"
 
 #include <cmath>
 #include <limits>
@@ -297,7 +298,7 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
     const std::pair<const char*, Real> scalars[] = {
         {"air_density", in.air_density}, {"moordyn_dt", in.moordyn_dt}, {"moordyn_cfl", in.moordyn_cfl},
         {"surface_offset", in.surface_offset}, {"stats_start", in.stats_start}, {"epsilon", in.epsilon},
-        {"flashover_distance", in.flashover_distance}};
+        {"flashover_distance", in.flashover_distance}, {"asce74_wind", in.asce74_wind}};
     for (const auto& kv : scalars) {
         if (!std::isfinite(kv.second)) { return std::string("erf.conductors.") + kv.first + " must be finite"; }
     }
@@ -319,6 +320,15 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
     if (in.node_output_int < 0) { return "erf.conductors.node_output_int must be >= 0 (0: no node output)"; }
     if (!(in.epsilon > 0.0)) { return "erf.conductors.epsilon must be positive (cells)"; }
     if (!(in.flashover_distance > 0.0)) { return "erf.conductors.flashover_distance must be positive (m)"; }
+    if (in.asce74_wind < 0.0) { return "erf.conductors.asce74_wind must be >= 0 (m/s; 0: no ASCE 74 table)"; }
+    if (!in.asce74_exposure.empty()) {
+        Exposure e = Exposure::C;
+        if (!parse_exposure(in.asce74_exposure, e)) {
+            return "erf.conductors.asce74_exposure must be B or C (ASCE 74's suburban or open-country exposure), not '" +
+                   in.asce74_exposure + "'";
+        }
+        if (!(in.asce74_wind > 0.0)) { return "erf.conductors.asce74_exposure needs erf.conductors.asce74_wind, the gust it applies to"; }
+    }
     // a conductor lighter than the air it displaces has no still-air shape (and no elastic catenary)
     for (const LineInputs& s : in.lines) {
         const Real displaced = in.air_density * Real(0.25) * Real(3.14159265358979323846) * s.diameter * s.diameter;
@@ -392,6 +402,8 @@ ConductorInputs ConductorInputs::read ()
     pp.query("drag_on_flow", in.drag_on_flow);
     pp.query("epsilon", in.epsilon);
     pp.query("flashover_distance", in.flashover_distance);
+    pp.query("asce74_wind", in.asce74_wind);
+    pp.query("asce74_exposure", in.asce74_exposure);
     std::vector<Real> vel;
     if (pp.queryarr("prescribed_velocity", vel)) {
         if (vel.size() != 3) { Abort("erf.conductors.prescribed_velocity needs three components (m/s)"); }

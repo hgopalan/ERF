@@ -735,6 +735,90 @@ towers' sway and base shear peak at 1.4 to 2 times their means, up to 35 mm and
 reaching 33 kN in a gust. Each coupling step converges in at most four
 iterations.
 
+ASCE 74 design check
+--------------------
+
+This section describes the quasi-static wire wind load of ASCE Manual of
+Practice 74 (Guidelines for Electrical Transmission Line Structural Loading)
+that ERF can compute for every span (``ERF_ASCE74.H``), the design value a run's
+lines are compared with. ``erf.conductors.asce74_wind`` gives the 3-second gust
+:math:`V` at 10 m over open country and ``erf.conductors.asce74_exposure`` the
+terrain exposure, B (suburban or wooded) or C (open country, the default).
+
+The wind load per metre of conductor is
+
+.. math::
+
+   F = Q\, k_z V^2 G_w C_f d,
+
+with :math:`Q = \rho/2` (``air_density``; ASCE 74's 0.613 for 1.226 kg/m\ :sup:`3`),
+:math:`C_f` the line's ``drag_coefficient`` and :math:`d` its ``diameter``. The
+exposure factor :math:`k_z = 2.01 (z/z_g)^{2/\alpha}` raises the gust with the wire's
+height :math:`z`, so that :math:`k_z V^2` is the square of the 3-second gust at that
+height. The wire's gust response factor
+
+.. math::
+
+   G_w = \frac{1 + 2.7 E \sqrt{B_w}}{k_v^2}, \qquad
+   E = 4.9 \sqrt{\kappa} \left(\frac{33\ \mathrm{ft}}{z}\right)^{1/\alpha}, \qquad
+   B_w = \frac{1}{1 + 0.8 L / L_s},
+
+with :math:`k_v = 1.43`, the 3-second gust over the 10-minute mean at 33 ft over
+open country, accounts for the gust not reaching the whole span :math:`L` at once
+(:math:`G_w` falls from about 0.8 for a 100 m span to about 0.6 for 700 m). The
+constants, from ASCE 74's third edition:
+
+========  ========  ==================  =================  ==================
+Exposure  alpha     z_g                 kappa              L_s
+========  ========  ==================  =================  ==================
+B         7.0       1200 ft (365.8 m)   0.010              170 ft (51.8 m)
+C         9.5       900 ft (274.3 m)    0.005              220 ft (67.1 m)
+========  ========  ==================  =================  ==================
+
+Under :math:`F` and its net weight :math:`W` per metre the span swings out of the
+vertical by :math:`\arctan(F/W)` and hangs as the elastic catenary (above) under
+:math:`\sqrt{F^2 + W^2}` in that plane: its sag in the plane, its end tension, and
+its mid-span's sideways blowout, the sag times the sine of the swing. A span's
+height is the mean of its two attachment points' heights above the ground under
+them (the bottoms of the insulator strings at the towers), its length its chord.
+At start-up ERF writes ``<diagnostics_dir>/asce74.csv``: per span its height,
+chord, unstretched length, :math:`k_z`, :math:`G_w`, the pressure
+:math:`Q k_z V^2`, the load, the weight, the swing (degrees), the sag, the
+blowout and the tension.
+
+With these constants the product :math:`k_z G_w` reproduces the ASCE wire load
+ratios that Peyrot (Wind loading: uncertainties and honesty suggest
+simplification, ASCE Electrical Transmission and Substation Structures
+Conference, 2009, Tables 1 and 2) gives for a Drake conductor at five
+attachment heights and spans: to the table's two digits for a 100 m span 10 m
+up (0.80 over open country, 0.64 suburban), and within 0.03 for spans of 350 to
+720 m at 20 to 50 m, the paper not stating the height it took for a sagging
+span (unit test ``ASCE74.WireLoadRatiosArePeyrots``).
+
+``Exec/CanonicalTests/PowerLines/les/compare_asce74.py`` compares a run with it:
+for every span, the LES wind at mid-span normal to the span gives its mean and
+its peak 3-second average :math:`V_3` (the gust at that height, so that
+:math:`k_z V^2 = V_3^2`); ASCE 74's predicted peak load is then
+:math:`(\rho/2) C_f d V_3^2 G_w`, against the LES's peak span load (the span's drag
+normal to it over its chord), and the swing and the tension under it against
+the LES's peaks. The LES's own gust response factor, its peak span load over
+:math:`(\rho/2) C_f d V_3^2`, measures how much of the point gust the whole span
+feels, which is what :math:`G_w` models.
+
+On the hills' LES of the previous section, with the middle phase of each
+circuit clamped at fixed points where the towers stood (eight spans of 36 to
+265 m, 20 to 38 m up), over 600 s of statistics: the 3-second gust at mid-span
+is 1.2 to 1.5 times the mean wind across the span. On the spans the wind
+crosses (16 m/s across the 213 m span, 9 to 11 m/s across two of about 250 m) the
+whole span feels 0.74 to 0.83 of the point gust's load where :math:`G_w` gives
+0.70, so ASCE 74 with the run's own gust falls 6 to 19 % short of the LES's
+peak span load, and 0.97 against 0.83 on a 46 m span; the peak tensions agree
+within 2 %, and the LES's peak swing exceeds the quasi-static one by up to
+5 degrees, the span overshooting as it swings. On the spans the wind runs
+nearly along (under 7 m/s across) the ratio scatters up to 1.4 and does not
+test :math:`G_w`. These numbers come from one run of one realization; no test
+checks them.
+
 Restart
 -------
 

@@ -765,7 +765,9 @@ eight significant digits. In a build against an installed MoorDyn-C it is
 registered as ``Conductors_FlowWind_MoorDyn`` and compared with the real
 library's gold log (``S1.dat.moordyn.gold``, the dynamic swing) to six
 digits, since the line integration is not bit-reproducible across compilers;
-both share the flow's gold plotfile.
+both share the flow's gold plotfile. Both also compare the span's ASCE 74
+design check for a 40 m/s gust over suburban terrain (``conductors/asce74.csv``)
+with a gold.
 
 ``Conductors_DragOnFlow`` (and ``Conductors_DragOnFlow_MoorDyn``) is the same
 coupled case with ``drag_on_flow`` on, the three ``conductor_f*`` plot
@@ -805,7 +807,9 @@ is decided by millimetres, so ``separation.dat`` with its locations is
 checked by the restart parity tests ``Conductors_Circuit_Restart`` and
 ``Conductors_Circuit_Restart_MoorDyn``, ten steps straight against five, a
 checkpoint and five more, one binary against itself, together with the
-strings' log, the span logs and the statistics. The flow is
+strings' log, the span logs and the statistics. Every span's ASCE 74 design
+check for a 40 m/s gust over open country (``conductors/asce74.csv``, the
+heights measured to the bottoms of the strings) is compared with a gold. The flow is
 ``Conductors_FlowWind``'s gold, since nothing goes back into it.
 
 ``Conductors_Terrain`` (stub) and ``Conductors_Terrain_MoorDyn`` (real
