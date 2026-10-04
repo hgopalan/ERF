@@ -69,6 +69,7 @@ In addition to this documentation, there is API documentation for ERF generated 
    theory/WindFarmModels.rst
    theory/ActuatorCore.rst
    theory/Conductors.rst
+   theory/TowerFrame.rst
    theory/Radiation.rst
    Particles.rst
    SuperDroplets.rst
