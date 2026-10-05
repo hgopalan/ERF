@@ -980,8 +980,8 @@ public:
    * @param[in]     lev     level index
    * @param[in,out] cons_in conserved state used by the surface-parameter computation
    */
-  void compute_sfc_params_from_lsm_fluxes(const int& lev,
-                                          amrex::MultiFab& cons_in);
+  void compute_sfc_params_from_lsm_fluxes (const int& lev,
+                                           amrex::MultiFab& cons_in);
 
   /**
    * Fill surface temperature from available SST and TSK data.
@@ -1044,7 +1044,7 @@ public:
                              const amrex::MultiFab& cons_in,
                              const std::unique_ptr<amrex::MultiFab>& z_phys_nd);
 
-  void set_pblh(const int& lev, const amrex::MultiFab& pblh_in);
+  void set_pblh (const int& lev, const amrex::MultiFab& pblh_in);
 
   /**
    * Updates current time index for interpolating data from SFC/SST file.
@@ -1081,6 +1081,15 @@ public:
                     amrex::Vector<amrex::Vector<amrex::MultiFab>>& vars,
                     amrex::MultiFab* z_phys_cc,
                     const MoistureComponentIndices& moisture_indices);
+
+  /**
+   * Set the PBL height of a refined level whose grids do not run from the ground to the top
+   * of the domain in every column from the next coarser level, column by column (see
+   * compute_pblh).  Public because it launches a device lambda.
+   *
+   * @param[in] lev Current level (> 0)
+   */
+  void fill_pblh_from_coarser (const int& lev);
 
   /**
    * Compute planetary-boundary-layer height with the selected estimator.
@@ -1335,7 +1344,7 @@ public:
    * @param[in] lev   level index
    * @param[in] tsurf surface temperature
    */
-  void set_t_surf(const int& lev, const amrex::Real tsurf) { t_surf[lev]->setVal(tsurf); }
+  void set_t_surf (const int& lev, const amrex::Real tsurf) { t_surf[lev]->setVal(tsurf); }
 
   /**
    * Return the surface-moisture field.
@@ -1350,7 +1359,7 @@ public:
    * @param[in] lev   level index
    * @param[in] qsurf surface moisture
    */
-  void set_q_surf(const int& lev, const amrex::Real qsurf) { q_surf[lev]->setVal(qsurf); }
+  void set_q_surf (const int& lev, const amrex::Real qsurf) { q_surf[lev]->setVal(qsurf); }
 
   /**
    * Return the surface-diagnostic provenance field.
@@ -1425,7 +1434,7 @@ public:
    * @param[in] itime   time-slice index
    * @param[in] sst_ptr sea-surface-temperature field pointer
    */
-  void update_sst_ptr(const int lev, const int itime, amrex::MultiFab* sst_ptr) {
+  void update_sst_ptr (const int lev, const int itime, amrex::MultiFab* sst_ptr) {
       m_sst_lev[lev][itime] = sst_ptr;
   }
 
@@ -1436,7 +1445,7 @@ public:
    * @param[in] itime   time-slice index
    * @param[in] tsk_ptr skin-temperature field pointer
    */
-  void update_tsk_ptr(const int lev, const int itime, amrex::MultiFab* tsk_ptr) {
+  void update_tsk_ptr (const int lev, const int itime, amrex::MultiFab* tsk_ptr) {
       m_tsk_lev[lev][itime] = tsk_ptr;
   }
 
@@ -1490,7 +1499,7 @@ public:
    * @return Vector containing each column in the file as a vector
    */
   static amrex::Vector<amrex::Vector<amrex::Real>>
-  read_cols(const std::string& fname, const int skip_nlines = 1);
+  read_cols (const std::string& fname, const int skip_nlines = 1);
 
   /**
    * Fills surface layer data for lateral faces. A normal FillBoundary on
@@ -1635,6 +1644,7 @@ private:
       amrex::BoxArray ba;                 // Grids the columns were built for ...
       amrex::DistributionMapping dm;      // ... and their ranks
       bool needed = false;                // Whether some box does not start at the ground
+      bool full_height = true;            // Whether every column runs from the ground to the top
       amrex::BoxArray ba_col;             // The columns; empty on a level entirely aloft
       amrex::BoxArray ba_col2d;           // Their ground plane
       amrex::DistributionMapping dm_col;

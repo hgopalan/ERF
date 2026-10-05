@@ -332,8 +332,9 @@ Limitations
 - **Refined runs.** Multiple levels are supported; see `Multiple Levels`_ above for the grid
   requirement, the lateral coarse-fine seam, the absence of feedback from fine to coarse, the
   subcycled call cadence, and how the surface energy balance is kept consistent between levels.
-  The one exception is a run with Noah-MP, which is single-level for now; see
-  `Radiative Forcing of a Land-Surface Model`_.
+  A run with Noah-MP is refined as well: every level hands its own Noah-MP its forcing, and a
+  finer level runs the land model on a land setup file of its own, or else takes its land state
+  from level 0; see `Radiative Forcing of a Land-Surface Model`_.
 - **Sun and site.** The sun, the site and the surface temperature come from the inputs the
   RRTMGP interface reads (``erf.fixed_solar_zenith_angle``, ``erf.fixed_total_solar_irradiance``,
   ``erf.rad_t_sfc``, ``erf.rad_cons_lat``/``lon``, ``erf.rad_orbital_*``, ``start_datetime``),
@@ -523,8 +524,28 @@ The two-stream model is broadband, so the visible / near-infrared direct / diffu
 RRTMGP also provides is not written; Noah-MP does not read it. SLM does, so the two-stream model
 does not feed SLM.
 
-The coupling is single-level: ``erf.radiation_model = TwoStream`` with Noah-MP and
-``amr.max_level > 0`` stops at start-up. Without a land model, or with SLM, the two-stream model
+In the other direction the sweep reads Noah-MP's surface: its broadband ``albedo``
+(reflected over incident shortwave, so the shortwave the sweep reflects at the ground is the
+shortwave Noah-MP reflects -- not ``sfc_alb_dir_vis``, the visible direct-beam band of the four
+RRTMGP takes, which over vegetation is several times smaller), its emissivity ``sfc_emis`` and
+its skin temperature ``t_sfc``. Each is taken column by column where Noah-MP holds a value.
+Noah-MP leaves its undefined placeholder over open water and sea ice, in the albedo at night, and
+everywhere before its first step, which runs after the first radiation call; those columns take
+``erf.radiation.surface_albedo_sw``, ``erf.radiation.surface_emissivity_lw`` and the
+surface-layer or ``erf.rad_t_sfc`` temperature. With ``erf.radiation.seb_enable`` the balance's
+inputs from Noah-MP (the absorbed shortwave ``sav + sag``, the net longwave ``-fira``, the ground
+flux ``grdflx`` and the 2 m humidity) follow the same rule and fall back to the ``seb_*_default``
+constants, so a column Noah-MP did not compute no longer carries the placeholder into the
+balance. Noah-MP exposes no ``hfx`` or ``lh`` field, but over land the surface layer applies
+Noah-MP's fluxes (it takes :math:`u_*` and :math:`\theta_*` from them), so with the default
+``seb_turbulent_flux_source = surface_layer`` the balance removes Noah-MP's :math:`H` and
+:math:`\text{LE}` over land and the surface layer's own over water.
+
+On a refined run every level hands its own Noah-MP its forcing. A level whose boxes span the
+domain in z writes the fluxes of its own sweep. A nested patch, which does not sweep, takes
+its parent's, interpolated (piecewise constant) with the rest of its radiation fields. A
+finer level runs Noah-MP on that forcing only if it has a land setup file of its own; otherwise
+it takes its land state from level 0 (see :doc:`../CouplingToNoahMP`). Without a land model, or with SLM, the two-stream model
 stores nothing extra and its results are unchanged. The case
 ``Exec/RegTests/NoahMP_Ideal/inputs_noahmp_twostream`` exercises the coupling.
 

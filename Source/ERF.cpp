@@ -12,6 +12,7 @@
 #include "ERF_EOS.H"
 #include "ERF.H"
 #include "AMReX_buildInfo.H"
+#include "AMReX_FileSystem.H"
 #include "AMReX_Random.H"
 #include "AMReX_WriteEBSurface.H"
 
@@ -236,7 +237,7 @@ ERF::Evolve ()
 }
 
 void
-ERF::WriteAtIntermediateTime(int step, double cur_time)
+ERF::WriteAtIntermediateTime (int step, double cur_time)
 {
     int plotfiles_3d_written = 0;
     bool interval_diagnostic_consumed = false;
@@ -293,7 +294,7 @@ ERF::WriteAtIntermediateTime(int step, double cur_time)
 }
 
 void
-ERF::WriteAtFinalTime()
+ERF::WriteAtFinalTime ()
 {
     // Write plotfiles at final time
     int plotfiles_3d_written = 0;
@@ -1188,7 +1189,7 @@ ERF::InitData_post ()
             rhotheta_src[lev]->setVal(0.);
             prob->update_rhotheta_sources(t_new[0],
                                           rhotheta_src[lev].get(),
-                                          geom[lev], z_phys_cc[lev]);
+                                          geom[lev], z_phys_cc[lev], zlevels_stag[lev]);
         }
     }
 
@@ -1208,7 +1209,7 @@ ERF::InitData_post ()
                 prob->update_geostrophic_profile(t_new[0],
                                                  h_u_geos[lev], d_u_geos[lev],
                                                  h_v_geos[lev], d_v_geos[lev],
-                                                 geom[lev], z_phys_cc[lev]);
+                                                 geom[lev], z_phys_cc[lev], zlevels_stag[lev]);
             } else {
                 if (SolverChoice::mesh_type == MeshType::VariableDz) {
                     amrex::Print() << "Note: 1-D geostrophic wind profile input is not defined for real terrain" << std::endl;
@@ -1240,7 +1241,7 @@ ERF::InitData_post ()
             rhoqt_src[lev]->setVal(0.);
             prob->update_rhoqt_sources(t_new[0],
                                        rhoqt_src[lev].get(),
-                                       geom[lev], z_phys_cc[lev]);
+                                       geom[lev], z_phys_cc[lev], zlevels_stag[lev]);
         }
     }
 
@@ -1254,7 +1255,7 @@ ERF::InitData_post ()
             d_w_subsid[lev].resize(domlen, 0.0_rt);
             prob->update_w_subsidence(t_new[0],
                                       h_w_subsid[lev], d_w_subsid[lev], base_state[lev],
-                                      geom[lev], z_phys_nd[lev]);
+                                      geom[lev], z_phys_nd[lev], zlevels_stag[lev]);
         }
     }
 
@@ -1769,6 +1770,7 @@ ERF::InitData_post ()
             m_SurfaceLayer[ori]->set_surface_layer_faces(surface_layer_faces);
             m_SurfaceLayer[ori]->set_coupled_sst_active(solverChoice.use_coupled_sst &&
                                                         static_cast<int>(ori) == Orientation::zlo());
+
             // This call will allocate the arrays at each level. If we regrid later, either changing
             // the number of levels or just the grids at each existing level, we will call an update routine
             // to redefine the internal arrays in m_SurfaceLayer.
@@ -1782,6 +1784,24 @@ ERF::InitData_post ()
                                                                 Hwave[lev].get(),Lwave[lev].get(),eddyDiffs_lev[lev].get(),
                                                                 lsm_data[lev], lsm_data_name, lsm_flux[lev], lsm_flux_name,
                                                                 sst_lev[lev], tsk_lev[lev], lmask_lev[lev]);
+            }
+
+            // The custom and rico flux types prescribe u*, T* and q* directly: these are
+            // not MOST scales and no Obukhov length is computed, so olen keeps its initial
+            // bogus value. PBL schemes that build near-surface gradients from u* and L
+            // assume MOST consistency, so they cannot be used with these types.
+            // Note: this check must come after make_SurfaceLayer_at_level(), which is where
+            // most.use_sfc_fluxes promotes flux_type to CUSTOM.
+            if (m_SurfaceLayer[ori]->flux_type == SurfaceLayer::FluxCalcType::CUSTOM ||
+                m_SurfaceLayer[ori]->flux_type == SurfaceLayer::FluxCalcType::RICO) {
+                for (const auto& tc : solverChoice.turbChoice) {
+                    if (tc.pbl_type != PBLType::None && !tc.uses_shoc_family()) {
+                        Abort("erf.pbl_type = " + std::string(amrex::getEnumNameString(tc.pbl_type)) +
+                              " requires a MOST-consistent u* and Obukhov length;"
+                              " it cannot be combined with surface_layer.flux_type = custom or rico"
+                              " (note that most.use_sfc_fluxes selects the custom flux type)");
+                    }
+                }
             }
 
             // If initializing from an input_sounding, make sure the surface layer
@@ -2838,7 +2858,7 @@ ERF::initializeMicrophysics (const int& a_nlevsmax /*!< number of AMR levels */)
 
 #ifdef ERF_USE_WINDFARM
 void
-ERF::initializeWindFarm(const int& a_nlevsmax/*!< number of AMR levels */ )
+ERF::initializeWindFarm (const int& a_nlevsmax/*!< number of AMR levels */ )
 {
     windfarm = std::make_unique<WindFarm>(a_nlevsmax, solverChoice.windfarm_type);
 }
@@ -3276,6 +3296,7 @@ ERF::ReadParameters ()
         //       solverChoice.init_type, which is not known until init_params() runs
         //       below, so it is parsed further down once that default has been chosen.
         pp.queryAdd("erfbdy_file",              erfbdy_file);
+        pp.queryAdd("use_erfbdy",               use_erfbdy);
 
         // Set default to FullState for now ... later we will try Perturbation
         interpolation_type = StateInterpType::FullState;
@@ -3541,7 +3562,11 @@ ERF::ReadParameters ()
     // Set a default value for write_erfbdy following these rules.
     // Prioritize write_erfbdy provided by user.
     // write_erfbdy must be false for restarts.
-    // write_erfbdy defaults to true for clean starts of the metgrid or wrfinput pathways.
+    // write_erfbdy defaults to true for clean starts of the metgrid pathway, which
+    //     requires the erfbdy file in order to restart.
+    // write_erfbdy defaults to false for the wrfinput pathway, which reads the boundary
+    //     data from the wrfbdy file named in the inputs file as the data are needed, and
+    //     which stores the boundary data in the checkpoint file when it writes one.
     //
     // The context-dependent default is chosen FIRST and the user's value is parsed on
     // top of it, so that "did the user set this" never has to be asked.  It must not be
@@ -3553,8 +3578,7 @@ ERF::ReadParameters ()
     {
         ParmParse pp_erfbdy(pp_prefix);
         const bool is_restart = !restart_chkfile.empty();
-        if (!is_restart &&
-            ((solverChoice.init_type == InitType::Metgrid) || (solverChoice.init_type == InitType::WRFInput))) {
+        if (!is_restart && (solverChoice.init_type == InitType::Metgrid)) {
             write_erfbdy = true;
         }
 
@@ -3770,7 +3794,29 @@ ERF::ReadParameters ()
         for (int j = 0; j < num_files; j++) {
             AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!nc_init_file[0][j].empty(), "Valid file name must be present at level 0 for init type WRFInput, Metgrid or NCFile.");
         } //j
+
+        // Fail here, rather than inside the NetCDF calls, if any of the files we have been
+        // given don't actually exist -- this way the user is told which name is at fault
+        for (int lev = 0; lev < static_cast<int>(nc_init_file.size()); lev++) {
+            for (int j = 0; j < static_cast<int>(nc_init_file[lev].size()); j++) {
+                const std::string& fname = nc_init_file[lev][j];
+                if (!fname.empty() && !FileSystem::Exists(fname)) {
+                    Abort("Could not find the file \"" + fname + "\" given as erf.nc_init_file_" +
+                          std::to_string(lev) + " (entry " + std::to_string(j) + ")");
+                }
+            } // j
+        } // lev
     } // InitType
+
+    // Same check for the lateral (wrfbdy) and lower (wrflow) boundary files, which are
+    // used whenever a name has been given for them
+    if (!nc_bdy_file.empty() && !FileSystem::Exists(nc_bdy_file)) {
+        Abort("Could not find the file \"" + nc_bdy_file + "\" given as erf.nc_bdy_file");
+    }
+
+    if (!nc_low_file.empty() && !FileSystem::Exists(nc_low_file)) {
+        Abort("Could not find the file \"" + nc_low_file + "\" given as erf.nc_low_file");
+    }
 
     // What type of land surface model to use
     // NOTE: Must be checked after init_params
@@ -4116,8 +4162,8 @@ ERF::Define_ERFFillPatchers (int lev)
 }
 
 bool
-ERF::writeNow(double cur_time, const int nstep, const int plot_int, const double plot_per,
-              const double dt_0, double& next_file_time)
+ERF::writeNow (double cur_time, const int nstep, const int plot_int, const double plot_per,
+               const double dt_0, double& next_file_time)
 {
     bool write_now = false;
 
@@ -4204,7 +4250,7 @@ ERF::check_state_for_nans (MultiFab const& S)
 }
 
 void
-ERF::check_vels_for_nans(MultiFab const& xvel, MultiFab const& yvel, MultiFab const& zvel)
+ERF::check_vels_for_nans (MultiFab const& xvel, MultiFab const& yvel, MultiFab const& zvel)
 {
     //
     // Test at the end of every full timestep whether the solution data contains NaNs
@@ -4219,7 +4265,7 @@ ERF::check_vels_for_nans(MultiFab const& xvel, MultiFab const& yvel, MultiFab co
 }
 
 void
-ERF::check_for_low_temp(amrex::MultiFab& S)
+ERF::check_for_low_temp (amrex::MultiFab& S)
 {
     // *****************************************************************************
     // Test for low temp (low is defined as beyond the microphysics range of validity)
@@ -4254,7 +4300,7 @@ ERF::check_for_low_temp(amrex::MultiFab& S)
 }
 
 void
-ERF::check_for_negative_theta(amrex::MultiFab& S)
+ERF::check_for_negative_theta (amrex::MultiFab& S)
 {
     // *****************************************************************************
     // Test for negative (rho theta)
@@ -4292,7 +4338,7 @@ ERF::check_for_negative_theta(amrex::MultiFab& S)
 
 
 void
-ERF::check_mesh_type(int lev)
+ERF::check_mesh_type (int lev)
 {
    if (SolverChoice::mesh_type == MeshType::VariableDz) {
        MultiFab z_slab(convert(ba2d[lev],IntVect(1,1,1)),dmap[lev],1,0);

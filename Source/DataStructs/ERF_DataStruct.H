@@ -319,7 +319,7 @@ struct MoistureComponentIndices {
     /**
      * @brief Construct an empty map, i.e. a dry run.
      */
-    MoistureComponentIndices() = default;
+    MoistureComponentIndices () = default;
 
     /**
      * @brief Build the complete index map -- conserved-state components and
@@ -988,6 +988,10 @@ struct SolverChoice {
         // Average the input z-face heights onto the nodes, or reconstruct our own
         pp.queryAdd("avg_grid_faces_to_nodes",avg_grid_faces_to_nodes);
 
+        // Build the ERF vertical grid from the file's own mean layer-thickness profile,
+        // or from a single geometric stretch anchored on the file's first layer?
+        pp.queryAdd("wrfinput_zlevels_from_file",wrfinput_zlevels_from_file);
+
         // Catch the old name for the flag above so the error says what to do
         // rather than silently ignoring the setting.
         if (pp.contains("use_wrf_height_grid")) {
@@ -1334,21 +1338,6 @@ struct SolverChoice {
                            << ": only RRTMGP and TwoStream supply the downwelling shortwave, "
                               "downwelling longwave and solar zenith angle Noah-MP needs. Noah-MP "
                               "will run with no radiative forcing (zero SWDOWN, GLW and COSZEN).\n";
-        }
-
-        // The two-stream -> Noah-MP forcing is built and tested on a single level. A refined
-        // run reaches a fine level's Noah-MP inputs by three different routes -- a fine
-        // level that sweeps its own columns, a nested patch interpolated from its parent,
-        // a level created mid-run -- and none of them has been verified. Refuse the
-        // combination rather than run it unverified.
-        if (lsm_type == LandSurfaceType::NOAHMP && rad_type == RadiationType::TwoStream &&
-            max_level > 0)
-        {
-            amrex::Abort("erf.radiation_model = TwoStream with erf.land_surface_model = NOAHMP "
-                         "is supported on a single level only (amr.max_level = " +
-                         std::to_string(max_level) + "): the two-stream model does not yet "
-                         "supply Noah-MP's radiative forcing on refined levels. Set "
-                         "amr.max_level = 0, or use erf.radiation_model = RRTMGP.");
         }
 
         vert_implicit_fac.resize(max_level+1);
@@ -2471,6 +2460,13 @@ struct SolverChoice {
 
     // Average the input z-face heights onto the nodes rather than reconstructing them?
     bool avg_grid_faces_to_nodes {false};
+
+    // When the ERF mesh is reconstructed rather than taken from the file
+    // (avg_grid_faces_to_nodes = false), build zlevels_stag from the domain-mean
+    // layer-thickness profile of the wrfinput file.  Set false to recover the older
+    // construction: a single geometric stretch whose first layer is the thickest first
+    // layer in the file and whose ratio is solved for so the column reaches z_top.
+    bool wrfinput_zlevels_from_file {true};
 
     // Interpolate atmospheric state from coarse when creating finer level at later time?
     bool interp_atmos_from_coarse {false};
