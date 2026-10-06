@@ -7,6 +7,18 @@ for massively parallel block-structured applications.
 .. image:: https://zenodo.org/badge/DOI/10.5281/zenodo.8102984.svg
    :target: https://doi.org/10.5281/zenodo.8102984
 
+ERF-Structures: power lines and towers in the wind
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This branch couples ERF's wind to overhead power lines and the towers that carry them, for studies
+of wind and wildfire risk to energy infrastructure. It follows the OpenFAST framework: the
+conductors are MoorDyn-C lines (OpenFAST's mooring-line module, as a library) that swing in the
+wind ERF computes over terrain, steady (RANS) or turbulent (LES). The towers, the wind drag on
+their members and their footings are, for now, models of ERF's own that stand in for OpenFAST's
+SubDyn, AeroDyn and SoilDyn, and are to be replaced by those modules. Tower members and footings
+are checked against their strength, and results can be compared with the ASCE Manual 74 design
+wind loads. See ``Docs/sphinx_doc/theory/Conductors.rst`` and ``Exec/CanonicalTests/PowerLines``.
+
 Test Status
 ~~~~~~~~~~~
 
