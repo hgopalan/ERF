@@ -12,10 +12,13 @@ Inputs
 The ERF executable reads run-time information from an inputs file which you name on the command line.
 This section describes the inputs which can be specified either in the inputs file or on the command line.
 A value specified on the command line will override a value specified in the inputs file.
-An inputs file may include others with ``FILE = <name>`` lines (the name is opened as written,
-relative to the directory ERF runs in), for instance to share one set of settings between two
-decks. Every input is set in one place: ERF refuses to start when a key appears twice anywhere in
-the inputs file and the files it includes, and names both places.
+An inputs file may include others with ``FILE = <name>`` lines, for instance to share one set of
+settings between two decks. As in AMReX ParmParse, the name is opened relative to the directory ERF
+runs in, with ``$AMREX_INPUTS_FILE_PREFIX`` in front when that is set. A file may re-set a key that
+a file it included earlier set (a base deck included first and then overridden; the last value
+wins), and ``UNSET = <key>`` drops a key so that it may be set again. Otherwise every input is set
+in one place: ERF refuses to start when a key appears twice in one file, in two files included side
+by side, or in a file and again in a file it includes afterwards, and names both places.
 
 Inputs with the ``prob.`` prefix are not listed here: they are read by the
 individual problem setups rather than by ERF itself, so the same name means
@@ -1076,8 +1079,13 @@ Boundary Files
 | Parameter            | Definition                   | Acceptable Values | Default              |
 +======================+==============================+===================+======================+
 | **erf.write_erfbdy** | Write AMReX-native format    | Boolean           | true for non-restart |
-|                      | boundary file for real-data  |                   | real data cases,     |
+|                      | boundary file for real-data  |                   | metgrid cases,       |
 |                      | cases only                   |                   | otherwise false      |
++----------------------+------------------------------+-------------------+----------------------+
+| **erf.use_erfbdy**   | Read the boundary data from  | Boolean           | false                |
+|                      | the erfbdy file instead of   |                   |                      |
+|                      | from nc_bdy_file; applies to |                   |                      |
+|                      | the wrfinput pathway only    |                   |                      |
 +----------------------+------------------------------+-------------------+----------------------+
 | **erf.erfbdy_file**  | Name of the boundary file    | String            | "erfbdy"             |
 +----------------------+------------------------------+-------------------+----------------------+
@@ -3048,6 +3056,15 @@ List of Parameters
 |                                   | nodes rather than reconstructing nodal heights whose     |                              |                    |
 |                                   | four-node average reproduces them                        |                              |                    |
 +-----------------------------------+----------------------------------------------------------+------------------------------+--------------------+
+| **erf.wrfinput_zlevels_from_file**| build the vertical grid from the domain-mean layer       | Boolean                      | true               |
+|                                   | thickness profile of the ``wrfinput`` file, rescaled to  |                              |                    |
+|                                   | reach the domain top.  If false, build it instead by     |                              |                    |
+|                                   | solving for the geometric stretch factor that fills the  |                              |                    |
+|                                   | domain starting from the thickest first layer in the     |                              |                    |
+|                                   | file.  Used only when ``avg_grid_faces_to_nodes`` is     |                              |                    |
+|                                   | false; a level whose grids do not reach the domain top   |                              |                    |
+|                                   | falls back to the geometric construction                 |                              |                    |
++-----------------------------------+----------------------------------------------------------+------------------------------+--------------------+
 | **erf.rebalance_wrf_input**       | rebalance (hydrostatically re-integrate) the state read  | Boolean                      | true               |
 |                                   | from ``wrfinput`` and ``wrfbdy``.  Forced to true if     |                              |                    |
 |                                   | ``avg_grid_faces_to_nodes`` is false                     |                              |                    |
@@ -4020,7 +4037,7 @@ List of Parameters
 +---------------------------------------+----------------------------------------------------------+--------------------+------------------------------------+
 | **erf.rad_freq_in_steps**             | Radiation update frequency (steps)                       | Integer >= 1       | 1                                  |
 +---------------------------------------+----------------------------------------------------------+--------------------+------------------------------------+
-| **erf.rad_ncol_chunk**                | Columns per RRTMGP kernel launch. Controls peak GPU      | Integer >= 1       | 5000. Lower values reduce peak GPU |
+| **erf.rad_ncol_chunk**                | Columns per RRTMGP kernel launch. Controls peak GPU      | Integer >= 1       | 1024. Lower values reduce peak GPU |
 |                                       | memory by processing radiation in batches of this size.  |                    | memory; higher values reduce       |
 |                                       |                                                          |                    | kernel launch overhead.            |
 +---------------------------------------+----------------------------------------------------------+--------------------+------------------------------------+
@@ -5301,7 +5318,7 @@ Initialization, Terrain and Vertical Mesh
   ``erf.initial_dz``, ``erf.terrain_z_levels``, ``erf.zsurface``
 * :ref:`Initialization <inputs-initialization>` -- ``erf.avg_grid_faces_to_nodes``,
   ``erf.init_type``, ``erf.nc_bdy_file``, ``erf.rebalance_wrf_input``,
-  ``erf.sounding_type``, ``erf.use_real_bcs``
+  ``erf.sounding_type``, ``erf.use_real_bcs``, ``erf.wrfinput_zlevels_from_file``
 * :ref:`Terrain <inputs-terrain>` -- ``erf.buildings_type``, ``erf.flat_terrain``,
   ``erf.terrain_type``
 
