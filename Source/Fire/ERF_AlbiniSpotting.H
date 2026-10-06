@@ -8,6 +8,8 @@
 #include <AMReX_Gpu.H>
 #include <algorithm>
 #include <cmath>
+#include <ctime>
+#include <limits>
 #include <vector>
 #include <random>
 #include <string>
@@ -139,7 +141,8 @@ albini_byram_intensity(amrex::Real ros_ms,
     // Total fuel load [lb/ft²]
     amrex::Real w0 = fp.w_d1 + fp.w_d10 + fp.w_d100 + fp.w_lh + fp.w_lw;
     // Convert ROS to ft/min using stored conversion factor (1/ros_conv = m/s → ft/min)
-    amrex::Real R_ftmin = (rc.ros_conv > 0.0) ? ros_ms / rc.ros_conv : 0.0;
+    amrex::Real R_ftmin = (rc.ros_conv > 0.0)
+        ? ros_ms / amrex::max(rc.ros_conv, std::numeric_limits<amrex::Real>::min()) : 0.0;
     // Byram intensity [BTU/ft·s] then convert to [kW/m]
     amrex::Real I_B = R_ftmin * w0 * fp.heat_content / 60.0 * ALBINI_BTU_FTS_TO_KW_M;
     return (I_B > 0.0) ? I_B : 0.0;
@@ -231,7 +234,9 @@ make_rothermel_params_for_albini(const FuelModelParams& /*fp*/)
  *
  * Algorithm:
  *  1. Build CPU host copies of phi, wind, and ROS (GPU-sync first).
- *  2. Identify fire-front cells: phi <= phi_thresh and ROS > 0.
+ *  2. Identify the launch cells: burned (phi < 0) with ROS > 0, and with
+ *     spotting.launch_from = front only those within front_band cells of an
+ *     unburned cell.
  *  3. Compute Byram intensity I_B for each front cell.
  *  4. Compute lofting height H_z = 12.2 × I_B^(1/3).
  *  5. Stochastic launch: draw uniform random; launch if draw < P_launch.
@@ -241,7 +246,9 @@ make_rothermel_params_for_albini(const FuelModelParams& /*fp*/)
  *  9. Skip if the landing cell's remaining fuel fraction < reentry_fuel_thresh.
  * 10. Stamp phi negative within spot_radius of landing location.
  * 11. Record diagnostics in albini_data.
- * 12. MPI: Allgatherv front cells so all ranks apply identical spots.
+ * 12. MPI: the host copies are built by ReduceRealSum of every rank's
+ *     zero-initialised buffer (step 1) and the random seed is broadcast, so
+ *     every rank draws the same brands and stamps identical spots.
  *
  * @param[in,out] phi              Fire level-set MultiFab (modified at landing sites)
  * @param[in,out] albini_data      4-component diagnostic MultiFab (comp 0-3)
@@ -570,7 +577,7 @@ compute_albini_spotting(amrex::MultiFab&                  phi,
             // the fraction of the load the cell started with, as the name says.
             const Real rf = h_fuel[lj * nx + li];
             const Real frac = (fuel_load_initial_kg_m2 > 0.0)
-                            ? rf / fuel_load_initial_kg_m2
+                            ? rf / amrex::max(fuel_load_initial_kg_m2, std::numeric_limits<Real>::min())
                             : Real(1.0);
             if (frac < sp.reentry_fuel_thresh) { continue; }
         }

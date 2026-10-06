@@ -28,10 +28,13 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     // Compute weighted dead fuel moisture
     Real w_d = fp.w_d1 + fp.w_d10 + fp.w_d100;
     Real M_f = 0.0;  // weighted fuel moisture fraction
+    // floored dead load before the branch (a live-only custom fuel has
+    // w_d = 0 and the unselected 0/0 would be speculated under the traps)
+    const Real inv_w_d = 1.0 / amrex::max(w_d, Real(1.0e-6));
     if (w_d > 1.0e-6) {
-        Real r_d1 = fp.w_d1 / w_d;
-        Real r_d10 = fp.w_d10 / w_d;
-        Real r_d100 = fp.w_d100 / w_d;
+        Real r_d1 = fp.w_d1 * inv_w_d;
+        Real r_d10 = fp.w_d10 * inv_w_d;
+        Real r_d100 = fp.w_d100 * inv_w_d;
         M_f = r_d1 * moisture_1hr + r_d10 * moisture_10hr + r_d100 * moisture_100hr;
     }
 
@@ -56,7 +59,7 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     Real beta_op = 3.348 * std::pow(sigma, -0.8189);           // Eq. 37: optimum packing ratio
     Real sigma_1p5 = std::pow(sigma, 1.5);
     Real Gamma_max = sigma_1p5 / (495.0 + 0.0594 * sigma_1p5); // Eq. 36: maximum reaction velocity
-    Real A = 133.0 * std::pow(sigma, -0.7913);                 // Eq. 38: A coefficient
+    Real A = 133.0 * std::pow(sigma, -0.7913);                 // A coefficient, Albini (1976) revision of Rothermel Eq. 39
     Real beta_ratio = beta / beta_op;
     Real Gamma_prime = Gamma_max * std::pow(beta_ratio, A) * std::exp(A * (1.0 - beta_ratio)); // Eq. 38
 
@@ -100,17 +103,17 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     Real phi_s_const = 5.275 * std::pow(beta, -0.3);
 
     // ===================================================================
-    // 21. MEWS wind speed cap (Andrews 2018 / Rothermel 1972)
+    // 21. Wind speed cap
     // ===================================================================
-    // The formula phi_w_max = 0.9 * I_R mixes incompatible quantities:
-    // phi_w (dimensionless) and I_R (BTU/ft²/min ~500 for fine fuels).
-    // This produces a dimensionally incorrect cap of phi_w ~ 475 for FM1,
-    // giving unrealistically high ROS (ROS ~ wind speed × 2-3).
-    //
-    // Instead, use fuel-type-based absolute cap on midflame wind speed,
-    // consistent with published BEHAVE/BehavePlus validation tables:
+    // Rothermel (1972) Eq. 87 caps the WIND SPEED at U_max [ft/min] = 0.9 I_R
+    // [BTU/ft²/min] (the "wind limit" of Andrews 2018); an earlier version of
+    // this code applied that number to phi_w instead and read the result as
+    // a dimensional error. This code uses its own fuel-class rule, an
+    // absolute cap on the midflame wind:
     //   Fine fuels (sigma > 1000 ft⁻¹): cap at 300 ft/min (~1.5 m/s midflame)
     //   Coarse fuels (sigma <= 1000 ft⁻¹): cap at 500 ft/min (~2.5 m/s midflame)
+    // These are this code's choice, not a published rule; the
+    // Rothermel/Andrews limit is not implemented.
     // erf.fire.use_wind_limit = false removes the cap (rothermel_wind_cap_ftmin).
     Real U_max_ftmin = rothermel_wind_cap_ftmin(sigma, use_wind_limit);
 
@@ -125,7 +128,8 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     rc.phi_s_const  = phi_s_const;
     rc.U_max_ftmin  = U_max_ftmin;
     rc.wind_conv    = 196.85;    // m/s → ft/min
-    rc.ros_conv     = 1.0;       // No double conversion: rc.R0 is already in m/s
+    rc.ros_conv     = 1.0;       // 1, not a unit factor: rc.R0 is already in m/s (ERF_AlbiniSpotting.H builds
+                                 // its own rc with 0.00508 when it needs ft/min)
     rc.I_R          = I_R;
 
     return rc;

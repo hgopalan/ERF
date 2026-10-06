@@ -69,11 +69,16 @@ as used by Marticorena and Bergametti (1995),
    Q_s = C_s\, \frac{\rho_a}{g}\, u_*^3 \left(1 - \frac{u_{*t}}{u_*}\right)
          \left(1 + \frac{u_{*t}}{u_*}\right)^2, \qquad C_s = 2.61
 
-and the vertical flux of every bin is the same sandblasting fraction of it,
+and the total vertical flux is a sandblasting fraction of it, shared equally
+between the :math:`N` = :cpp:`erf.dust.n_size_bins` bins (the blast schedule
+divides its mass the same way; before October 2026 every bin carried the
+whole flux, so the atmosphere received :math:`N` times it). The extra
+:math:`f_\mathrm{silt}` factor is this code's choice for mine tailings;
+Marticorena and Bergametti (1995) give :math:`F = \alpha Q_s`:
 
 .. math::
 
-   F_i = \alpha\, f_\mathrm{silt}\, Q_s, \qquad
+   F_i = \frac{\alpha\, f_\mathrm{silt}\, Q_s}{N}, \qquad
    \log_{10}\alpha_\mathrm{[cm^{-1}]} = 0.134\, (100 f_\mathrm{clay}) - 6, \qquad
    \alpha = 100\, \alpha_\mathrm{[cm^{-1}]}, \qquad
    f_\mathrm{clay} = 0.2\, f_\mathrm{silt}

@@ -295,7 +295,9 @@ inline void apply_fire_acceleration_temporal(amrex::MultiFab&       R_mf,
                     // Wind increase: apply exponential lag
                     // New target approaches R_E with time constant tau_wind
                     // R_target(t) = R_prev + (R_E - R_prev) × (1 - exp(-dt/tau_wind))
-                    const amrex::Real lag_factor = 1.0 - std::exp(-dt_loc / tau_wind_loc);
+                    // (tau_wind > 0 is enforced in FireParams; the floor only keeps a
+                    // hand-built params struct from dividing by zero)
+                    const amrex::Real lag_factor = 1.0 - std::exp(-dt_loc / amrex::max(tau_wind_loc, amrex::Real(1.0e-30)));
                     const amrex::Real R_target = R_prev_eq + (R_E - R_prev_eq) * lag_factor;
 
                     // Start new acceleration towards lagged target
@@ -338,8 +340,10 @@ amrex::Real accel_step_mean_factor(amrex::Real s0, amrex::Real a) noexcept
 {
     using namespace amrex::literals;
     const amrex::Real e0 = std::exp(-s0);
+    // floored a before the early return (0/0 of a = 0 would be speculated)
+    const amrex::Real ratio = (-std::expm1(-a)) / amrex::max(a, amrex::Real(1.0e-30));
     if (a <= 0.0_rt) { return 1.0_rt - e0; }
-    return 1.0_rt - e0 * (-std::expm1(-a)) / a;
+    return 1.0_rt - e0 * ratio;
 }
 
 // ============================================================================

@@ -15,7 +15,8 @@
  *   radius       — blast affected radius [m]
  *   mass_kg_m2   — dust mass per unit area injected per blast [kg/m^2]
  *   mineral_type — integer: 0=quartz tailings (default), 1=lithium brine,
- *                  2=REE tailings, 3=copper tailings (matches soil type codes)
+ *                  2=REE tailings, 3=copper tailings (its own 0-3 list; the
+ *                  soil type raster uses codes 100-104, DustParams)
  *   priority     — integer; higher value fires first within the same timestep
  *
  * The blast injects mass_kg_m2 uniformly into all cells within radius of
@@ -261,10 +262,12 @@ void apply_blast_schedule(
     // Prevent division by zero and very small timesteps
     amrex::Real dt_safe = (dt_s > 1.0e-16) ? dt_s : 1.0e-16;
 
-    // Get physical domain from dg
+    // Get physical domain from dg. GpuArrays by value: ProbLo()/CellSize()
+    // return pointers into the host Geometry, which a device kernel cannot
+    // dereference (the road schedule and the surface reader already copy).
     amrex::Geometry const& dust_geom = dg.geom;
-    auto const& plo = dust_geom.ProbLo();
-    auto const& dx = dust_geom.CellSize();
+    const auto plo = dust_geom.ProbLoArray();
+    const auto dx  = dust_geom.CellSizeArray();
 
     // Apply each event via GPU kernel
     for (auto evt : events_due) {

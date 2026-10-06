@@ -253,9 +253,10 @@ public:
     /**
      * @brief Apply Stokes settling tendency to cc_source for all active bins.
      *
-     * Called from ERF_Advance.cpp at the same site as apply_to_cc_source.
-     * When transport_bins_separately = false, uses bin 0 diameter for the
-     * single scalar. When true, applies per-bin settling to each slot.
+     * Called from the slow RHS (ERF_TI_slow_rhs_pre.H) at every RK stage,
+     * right after apply_to_cc_source, with the stage state. With
+     * transport_bins_separately = false it uses the bin 0 diameter for the
+     * single scalar (the only layout the state supports, see DustParams).
      *
      * @param[in,out] cc_source   Cell-centred source MultiFab.
      * @param[in]     S_old       Conserved state at time n.

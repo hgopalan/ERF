@@ -18,19 +18,23 @@ of the choice.
 Level set and ignition
 ----------------------
 
-``fire_phi`` is a normalised signed distance: zero on the front, negative
-inside the burned region, positive outside, clamped to :math:`[-1, 1]`. The
-disc ignition sets
+``fire_phi`` is zero on the front, negative inside the burned region and
+positive outside. On the level-set path it is a signed distance in metres,
+unclamped (the advection, the Godunov Hamiltonian and the reinitialisation
+assume :math:`|\nabla\phi| = 1`); on the FARSITE path it is a normalised
+indicator clamped to :math:`[-1, 1]`. The disc ignition sets
 
 .. math::
 
-   \phi = -\frac{r - d}{r} \quad (d \le r), \qquad \phi = +1 \quad (d > r),
+   \phi = d - r \quad \text{(level set)}, \qquad
+   \phi = \max\!\left(-1, \min\!\left(1, \frac{d - r}{r}\right)\right) \quad \text{(FARSITE)},
 
 where :math:`d` is the distance from the ignition centre
 :cpp:`erf.fire.ignition_x`, :cpp:`erf.fire.ignition_y` and :math:`r` is
-:cpp:`erf.fire.ignition_r`. Polygon, polyline and scheduled ignitions
-(:ref:`sec:MultiIgnition`) and ember landings (:ref:`sec:FireSpottingCrown`)
-stamp negative values with the same convention. Firebreaks
+:cpp:`erf.fire.ignition_r`. Polygon, polyline, threshold and scheduled
+ignitions (:ref:`sec:MultiIgnition`) and ember landings
+(:ref:`sec:FireSpottingCrown`) stamp with the same convention of the path,
+min-merged into the field. Firebreaks
 (:ref:`sec:SpatialFuel`) stamp a large positive sentinel.
 
 ``fire_arrival_time`` starts at :math:`-1` everywhere and is set to the

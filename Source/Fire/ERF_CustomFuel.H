@@ -189,8 +189,10 @@ inline std::vector<FuelModelParams> build_fuel_params_slot_table (int fuel_set, 
     // A custom slot the deck does not define is non-burnable rather than the
     // fuel set's unknown-code default, so a code that slipped past
     // validate_map_codes cannot burn as grass. get_fuel_params(0) under the
-    // Scott-Burgan set is that entry: zero loads on GR1's ratios, so nothing
-    // downstream divides by zero.
+    // Scott-Burgan set is that entry: zero loads on GR1's ratios. The table
+    // builders skip zero-load slots (they get the zeroed coefficient entry),
+    // which is what keeps the kernels from dividing by zero; a direct
+    // compute_rothermel_params call on this entry would not be safe.
     const FuelModelParams fp_none = get_fuel_params(0, FUEL_SET_SCOTT_BURGAN40, M_live);
 
     for (int slot = 0; slot < FUEL_SLOT_COUNT; ++slot) {

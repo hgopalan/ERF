@@ -120,9 +120,10 @@ void read_polygon_vertices(const std::string& filename,
 /**
  * @brief Compute the winding number of a point relative to a polygon.
  *
- * Uses the ray-casting algorithm: count how many times a horizontal ray from
- * the point to infinity crosses the polygon boundary. Odd crossings mean the
- * point is inside.
+ * Sunday's winding-number algorithm: upward edges crossing the horizontal
+ * ray to the right of the point count +1, downward ones -1; the point is
+ * inside when the sum is non-zero (so a self-overlapping polygon counts its
+ * overlap as inside, unlike the parity rule).
  *
  * @param[in] px, py     Query point
  * @param[in] xs, ys     Polygon vertex arrays (device pointers)
@@ -191,8 +192,9 @@ amrex::Real segment_dist_sq(amrex::Real px, amrex::Real py,
         return dpx * dpx + dpy * dpy;
     }
 
-    // Parameter t of closest point on segment
-    amrex::Real t = ((px - ax) * dx + (py - ay) * dy) / len_sq;
+    // Parameter t of closest point on segment (floored length: the early
+    // return above does not stop the optimiser evaluating x/0)
+    amrex::Real t = ((px - ax) * dx + (py - ay) * dy) / amrex::max(len_sq, amrex::Real(1.0e-30));
     t = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(t))));
 
     amrex::Real cx = ax + t * dx;

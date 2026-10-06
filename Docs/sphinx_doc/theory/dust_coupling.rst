@@ -71,10 +71,16 @@ Each bin settles at the Stokes velocity with the Cunningham slip correction,
 
 with :math:`\lambda` = 0.066 µm, :math:`\mu_a` = 1.81e-5 Pa s, the local
 air density, and :math:`d` from :cpp:`erf.dust.bin_diameters` (metres; the
-last entry repeats for extra bins), capped at 1 m/s. The tendency is the
+one entry per bin), capped at 1 m/s. The tendency is the
 first-order upwind divergence of the downward flux :math:`v_s \rho_\mathrm{dust}`
-through the cell faces. With a single transported scalar the diameter of bin
-0 is used.
+through the cell faces, with :math:`\rho_\mathrm{dust}` the dust density of the
+state: cell :math:`k` gains :math:`v_s \rho_\mathrm{dust}(k+1)/\Delta z` from above
+and loses :math:`v_s \rho_\mathrm{dust}(k)/\Delta z` to the cell below; the loss
+through the bottom face of the first cell is the dry deposition below. With a
+single transported scalar the diameter of bin 0 is used. (Before October 2026
+the kernel multiplied :math:`v_s` into the tendency instead of the density and
+took the neighbour from below, so the dust did not settle; the deposition
+flux had the same error.)
 
 Dry deposition
 --------------

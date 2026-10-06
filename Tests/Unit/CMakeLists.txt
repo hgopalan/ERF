@@ -250,6 +250,14 @@ if(ERF_ENABLE_FIRE)
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireSuppression.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestCustomFuel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireDiagnosticsPerFuel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireModelReferences.cpp
+  )
+endif()
+# The dust column kernels (settling, deposition, emission): headers on the
+# include path only when the dust module is built.
+if(ERF_ENABLE_DUST)
+  target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Dust/ERF_GTestDustColumn.cpp
   )
 endif()
 if(ERF_DIM STREQUAL "3")
@@ -310,6 +318,24 @@ erf_register_gtest_suite(${erf_exe_name}
   DISCOVERY_TIMEOUT 60
   EXECUTION_TIMEOUT 600
 )
+
+# The fire and dust kernels under the floating-point traps the fire decks run
+# with. clang at -O2/-O3 evaluates the unselected arm of `c ? a/b : x`, so a
+# guarded 0/0 or log(0) raises FE_INVALID/FE_DIVBYZERO and kills the run; the
+# plain unit run never arms the traps and cannot see it (before the October
+# 2026 audit BehaveTransfer.WindowReachesState died here with SIGILL in the
+# BEHAVE live-weight 0/0 of a fuel without live load).
+if(ERF_ENABLE_FIRE)
+  set(_fire_gtest_suites "BehaveScottBurgan.*:BehaveTransfer.*:CustomFuel.*:DirectionalShape.*:FarsiteFrontCell.*:FarsiteSpreadTest.*:Fbp.*:FireAcceleration.*:FireAnchorLevel.*:FireBoundaryGuard.*:FireDiagnosticsPerFuel.*:FirePrecip.*:FireSuppression.*:FuelMap.*:FuelMoisture.*:FuelMoistureEMC.*:FuelMoistureLive.*:FuelMoistureStick.*:LcpReader.*:LevelSetAdvection.*:LevelSetEllipse.*:PrescribedFire.*:SplitHamiltonianAdvection.*:StructureIgnition.*:WindLimit.*:FireModelReferences.*")
+  if(ERF_ENABLE_DUST)
+    string(APPEND _fire_gtest_suites ":DustColumn.*")
+  endif()
+  add_test(NAME FireDustGTests_FpeTraps
+    COMMAND ${erf_exe_name}
+      --gtest_filter=${_fire_gtest_suites}
+      amrex.fpe_trap_invalid=1 amrex.fpe_trap_zero=1 amrex.fpe_trap_overflow=1)
+  set_tests_properties(FireDustGTests_FpeTraps PROPERTIES LABELS "unit;fire" TIMEOUT 600)
+endif()
 
 add_test(NAME erf_unit_tests_shuffle_repeat
   COMMAND ${erf_exe_name}

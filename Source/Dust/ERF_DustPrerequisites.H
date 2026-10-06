@@ -29,8 +29,10 @@ class ERF;
  * actionable diagnostic messages if any requirement is not met.
  *
  * Checks performed (in order):
- *   1. SurfaceLayer pointer is not null (zlo.type = "surface_layer" required).
- *   2. erf.most.z0 is set (roughness length required for u* computation).
+ *   1. SurfaceLayer pointer is not null (zlo.type = "surface_layer" required),
+ *      and amr.max_level = 0 (the dust layer lives on level 0).
+ *   2. erf.transport_scalar is true (the dust scalar is advected with the
+ *      scalar block; false would drop every emission).
  *   3. No z-direction MPI decomposition: all boxes in ba_atm must span the
  *      full z-extent of the domain (set amr.max_grid_size_z >= domain_nz).
  *   4. grid_ratio >= 1.

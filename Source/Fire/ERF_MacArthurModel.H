@@ -7,10 +7,11 @@
 
 /**
  * @file ERF_MacArthurModel.H
- * @brief MacArthur (1966) Australian fire spread model
+ * @brief McArthur (1966) Australian grassland fire spread formula
  *
- * Implements the MacArthur (1966) Mark 5 Forest Fire Danger Meter ROS formula.
- * Used in WRF-SFIRE as ibeh=0 (Clark et al. 2004).
+ * Implements the grassland rate-of-spread fit of McArthur (1966), "Weather
+ * and Grassland Fire Behaviour", Leaflet 100 (not the 1973 Mark 5 forest
+ * meter), in the form WRF-SFIRE uses as ibeh=0 (Clark et al. 2004).
  *
  * Formula:
  *   R [m/s] = 0.18 * (exp(0.8424 * max(U, 0)) - 1) + 0.18

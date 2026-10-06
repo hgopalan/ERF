@@ -73,7 +73,8 @@ BurningRosStats burning_ros_stats (const amrex::MultiFab& ros,
     BurningRosStats stats;
     stats.max_ros  = max_ros;
     stats.n_cells  = n_cells;
-    stats.mean_ros = (n_cells > 0) ? sum_ros / Real(n_cells) : 0.0_rt;
+    // divide by a floored count before the select (0/0 would be speculated)
+    stats.mean_ros = (n_cells > 0) ? sum_ros / amrex::max(Real(n_cells), Real(1.0)) : 0.0_rt;
     return stats;
 }
 
@@ -313,15 +314,23 @@ void FireLayer::initialize(const ERF& erf,
     m_fuel_bed_depth_ft = fp.delta;
 
     fire_fuel_mc->setVal(0.0);
-    for (MFIter mfi(*fire_fuel_mc); mfi.isValid(); ++mfi) {
-        Array4<Real> mc = fire_fuel_mc->array(mfi);
-        amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv) {
-            mc(iv,0) = fire_params.moisture_1hr;
-            mc(iv,1) = fire_params.moisture_10hr;
-            mc(iv,2) = fire_params.moisture_100hr;
-            mc(iv,3) = fire_params.moisture_live;  // live herbaceous (Phase 15, new component)
-            mc(iv,4) = fire_params.moisture_live;  // live woody      (Phase 15, new component)
-        });
+    {
+        // Locals, not the FireParams reference: a [=] capture of a reference
+        // copies the whole struct (strings and vectors) into the kernel.
+        const Real m1   = fire_params.moisture_1hr;
+        const Real m10  = fire_params.moisture_10hr;
+        const Real m100 = fire_params.moisture_100hr;
+        const Real mlv  = fire_params.moisture_live;
+        for (MFIter mfi(*fire_fuel_mc); mfi.isValid(); ++mfi) {
+            Array4<Real> mc = fire_fuel_mc->array(mfi);
+            amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const IntVect& iv) {
+                mc(iv,0) = m1;
+                mc(iv,1) = m10;
+                mc(iv,2) = m100;
+                mc(iv,3) = mlv;  // live herbaceous
+                mc(iv,4) = mlv;  // live woody
+            });
+        }
     }
 
     fire_mext->setVal(compute_moisture_of_extinction(
@@ -415,10 +424,12 @@ void FireLayer::initialize(const ERF& erf,
                                << fire_nx << "x" << fire_ny << " cells\n";
             }
         } else {
-            amrex::Print() << "[FIRE] WARNING: Cannot read fuel map '"
-                           << m_params.fuel_map.fuel_map_file
-                           << "'; using uniform fuel_model_id="
-                           << m_params.fuel_model_id << "\n";
+            // Abort, not warn: a run without the map it was given silently
+            // spreads with the uniform fuel, and rothermel_per_fuel,
+            // load_from_map, nonburnable_codes and the fuel selector of the
+            // hybrid model all fall back with it.
+            amrex::Abort("[FIRE] erf.fire.fuel_map.file = '" + m_params.fuel_map.fuel_map_file
+                         + "' cannot be read (missing, or not an ESRI ASCII / LCP raster)");
         }
     }
 
@@ -774,8 +785,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         }
         amrex::Print() << "[FIRE DEBUG] Wind extraction completed. Max reference wind: "
                        << fire_wind_ref->max(0) << " m/s" << std::endl;
-        if (m_step > 0)
-            amrex::Print() << "[FIRE DEBUG] Wind extraction height range: min="
+        amrex::Print() << "[FIRE DEBUG] Wind extraction height range: min="
                            << fire_wind_extract_z->min(0) << " m  max="
                            << fire_wind_extract_z->max(0) << " m" << std::endl;
     }
@@ -882,38 +892,57 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         }
     }
 
+    // Ignition window of this step. m_current_time is the START of the step
+    // (ERF passes t_old), so an event is due when its time lies in
+    // (start of the previous step, start of this step]. The previous start is
+    // kept in m_prev_window_end (checkpointed): reconstructing it as
+    // m_current_time - dt uses THIS step's dt and leaves a gap whenever dt
+    // shrinks (CFL-limited coupled decks, change_max ramps), silently dropping
+    // the events and the timed perimeter that fall into it. The first step of
+    // a fresh run takes every event dated at or before its start; a restart
+    // from a checkpoint without the window falls back to the dt form.
+    const Real window_lo = m_have_prev_window ? m_prev_window_end
+                         : ((m_step > 1) ? m_current_time - dt
+                                         : -std::numeric_limits<Real>::max());
+    const Real window_hi = m_current_time;
+
     // Observed-perimeter ignition with spin-up: the polygon of
     // erf.fire.ignition.polygon_file is stamped on the step whose window
-    // (m_current_time - dt, m_current_time] contains polygon_time. After a
-    // restart past that time the window never contains it, so the perimeter
-    // restored from the checkpoint is not stamped again.
+    // contains polygon_time. After a restart past that time the window never
+    // contains it, so the perimeter restored from the checkpoint is not
+    // stamped again.
     if (!m_params.ignition.polygon_file.empty() && !m_polygon_applied && fire_phi
         && m_params.ignition.polygon_time > 0.0
-        && m_params.ignition.polygon_time > m_current_time - dt
-        && m_params.ignition.polygon_time <= m_current_time) {
+        && m_params.ignition.polygon_time > window_lo
+        && m_params.ignition.polygon_time <= window_hi) {
         apply_polygon_ignition(m_params.ignition.polygon_time);
         enforce_nonburnable_phi();
         fire_fill_boundary(*fire_phi, m_fg.geom);
     }
 
     // Suppression actions for this step: lines, drops, hold test and the
-    // burnout ignitions, which enter the schedule applied just below.
+    // burnout ignitions, which enter the schedule applied just below (dated
+    // m_current_time, inside this step's window).
     if (m_suppression) {
         apply_suppression();
     }
 
-    // Phase 11: Apply any scheduled ignition events due this timestep.
-    // Time window: (m_current_time - dt, m_current_time].
+    // Apply any scheduled ignition events due in this step's window, with the
+    // phi convention of the propagation method (signed distance in metres on
+    // the level set, the clamped indicator on FARSITE; see initialize()).
     if (m_has_schedule && fire_phi) {
-        apply_scheduled_ignitions(*fire_phi, m_fg.geom,
-                                  m_ignition_schedule,
-                                  m_current_time,
-                                  m_current_time - dt);
-        // fill_boundary after any phi modification to propagate ghost cells
-        //amrex::FillBoundary(*fire_phi, m_fg.geom);
-        enforce_nonburnable_phi();
-        fire_fill_boundary(*fire_phi, m_fg.geom);
+        const bool phi_normalized = (m_params.propagation_method != "levelset");
+        const int n_fired = apply_scheduled_ignitions(*fire_phi, m_fg.geom,
+                                                      m_ignition_schedule,
+                                                      window_hi, window_lo,
+                                                      phi_normalized);
+        if (n_fired > 0) {
+            enforce_nonburnable_phi();
+            fire_fill_boundary(*fire_phi, m_fg.geom);
+        }
     }
+    m_prev_window_end  = m_current_time;
+    m_have_prev_window = true;
 
     // Temperature-threshold ignition: cells whose near-surface air is hotter
     // than erf.fire.ignition.threshold_temp ignite. fire_surface_temp is the
@@ -1085,10 +1114,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         int n_ls_substeps = 0;
         while (time_remaining > 1.0e-14) {
             amrex::Real max_ros = fire_ros->max(0);
-            amrex::Real dt_ls   = (max_ros > 1.0e-10)
-                ? m_params.levelset_cfl * std::min(m_fg.geom.CellSize()[0],
-                                                   m_fg.geom.CellSize()[1]) / max_ros
-                : time_remaining;
+            // CFL step from a floored rate, computed before the select: before
+            // the first cell burns max_ros is 0 and the unselected x/0 would be
+            // speculated under amrex.fpe_trap_zero
+            const amrex::Real dt_cfl = m_params.levelset_cfl
+                * std::min(m_fg.geom.CellSize()[0], m_fg.geom.CellSize()[1])
+                / amrex::max(max_ros, amrex::Real(1.0e-10));
+            amrex::Real dt_ls   = (max_ros > 1.0e-10) ? dt_cfl : time_remaining;
             dt_ls = std::min(dt_ls, time_remaining);
             AMREX_ASSERT(dt_ls > 0.0 && std::isfinite(dt_ls));
 
@@ -1370,7 +1402,10 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             // substep loop that stamps arrival time, so spot-ignited cells kept
             // the -1 sentinel while burning: an isolated spot ahead of the front
             // had no arrival time at all until the main front overran it. Stamp
-            // them here with the end of this step, the same rule the loop uses.
+            // them here with the end of this step. (The level-set subcycles stamp
+            // the start of each substep and the FARSITE update the start of the
+            // step, so a spot cell carries a time up to one dt later than a cell
+            // the front reached in the same step.)
             const amrex::Real t_spot = m_current_time + dt;
             for (amrex::MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
                 auto p  = fire_phi->const_array(mfi);
@@ -1444,8 +1479,10 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             write_fire_stats_header(m_params.fire_stats_csv_file);
             csv_header_written = true;
         }
+        // row N holds the state at the END of completed step N, i.e. at
+        // m_current_time + dt (m_current_time is the step's start time)
         append_fire_stats(*fire_phi, *fire_arrival_time, m_fg.geom,
-                         m_step, m_current_time, m_params.fire_stats_csv_file,
+                         m_step, m_current_time + m_dt_atm, m_params.fire_stats_csv_file,
                          fire_ros.get(), fire_heat_flux.get(), fire_albini_data.get(),
                          m_n_edge_cells, m_edge_contact_time, fire_precip_rate.get());
     }
@@ -1484,7 +1521,8 @@ void FireLayer::report_edge_reach(Real ros_max, Real dt)
     for (int f = 0; f < 4; ++f) {
         if (dist[f] < Real(0.0)) continue;   // periodic edge
         any_periodic_only = false;
-        const Real t_edge = (ros_max > Real(0.0)) ? dist[f] / ros_max : Real(-1.0);
+        const Real t_edge = (ros_max > Real(0.0))
+            ? dist[f] / amrex::max(ros_max, std::numeric_limits<Real>::min()) : Real(-1.0);
         amrex::Print() << "[FIRE]   " << erf_fire_edge::face_name(f) << " edge: " << dist[f] << " m from the burning region";
         if (t_edge >= Real(0.0)) amrex::Print() << ", reached in about " << t_edge << " s at that rate";
         amrex::Print() << "\n";
@@ -1514,7 +1552,8 @@ void FireLayer::check_edge_guard()
                                                                m_params.boundary_guard_cells, touched);
     if (m_n_edge_cells == 0 || m_edge_contact_time >= Real(0.0)) return;
 
-    m_edge_contact_time = m_current_time;
+    // the front entered the band during this step: time at the end of it
+    m_edge_contact_time = m_current_time + m_dt_atm;
     std::string faces;
     for (int f = 0; f < 4; ++f) {
         if (touched[f] > 0) { faces += (faces.empty() ? "" : ", ") + std::string(erf_fire_edge::face_name(f)); }
@@ -1522,7 +1561,7 @@ void FireLayer::check_edge_guard()
     if (m_params.guard_aborts()) {
         std::ostringstream msg;
         msg << "[FIRE] The fire reached the boundary guard band (" << m_params.boundary_guard_cells
-            << " fire cells) at the " << faces << " edge of the fire grid at t = " << m_current_time
+            << " fire cells) at the " << faces << " edge of the fire grid at t = " << m_edge_contact_time
             << " s. Nothing outside the grid burns. Enlarge the "
             << (m_lev > 0 ? "refinement region of level " + std::to_string(m_lev) : std::string("domain"))
             << ", move the ignition, or set"
@@ -1530,7 +1569,7 @@ void FireLayer::check_edge_guard()
         amrex::Abort(msg.str());
     }
     amrex::Print() << "[FIRE] WARNING: the fire entered the boundary guard band (" << m_params.boundary_guard_cells
-                   << " fire cells) at the " << faces << " edge of the fire grid at t = " << m_current_time
+                   << " fire cells) at the " << faces << " edge of the fire grid at t = " << m_edge_contact_time
                    << " s with " << m_n_edge_cells << " burning cells in it. The front stops at the edge and"
                    << " nothing outside the grid burns; the contact time is in the statistics CSV"
                    << " (erf.fire.boundary_guard_action = warn).\n";
@@ -1794,7 +1833,8 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
         const Real avg10 = (nc > 0) ? fire_fuel_mc->sum(1) / Real(nc) : m_params.moisture_10hr;
         const Real avg100 = (nc > 0) ? fire_fuel_mc->sum(2) / Real(nc) : m_params.moisture_100hr;
         M_f = (dead_load > 1.0e-10_rt)
-            ? (fp.w_d1 * avg1 + fp.w_d10 * avg10 + fp.w_d100 * avg100) / dead_load
+            ? (fp.w_d1 * avg1 + fp.w_d10 * avg10 + fp.w_d100 * avg100)
+              / amrex::max(dead_load, std::numeric_limits<Real>::min())
             : avg1;
     }
 
@@ -1962,7 +2002,8 @@ void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
         amrex::Real avg100 = (nc > 0) ? fire_fuel_mc->sum(2) / amrex::Real(nc) : m_params.moisture_100hr;
         amrex::Real dead_load = fp.w_d1 + fp.w_d10 + fp.w_d100;
         M_f = (dead_load > 1e-10_rt)
-            ? (fp.w_d1*avg1 + fp.w_d10*avg10 + fp.w_d100*avg100) / dead_load
+            ? (fp.w_d1*avg1 + fp.w_d10*avg10 + fp.w_d100*avg100)
+              / amrex::max(dead_load, std::numeric_limits<amrex::Real>::min())
             : avg1;
     }
 
@@ -2210,7 +2251,8 @@ void FireLayer::build_open_fraction(const amrex::Geometry& geom_atm)
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
             const amrex::Real f = amrex::max(0.0_rt, amrex::min(1.0_rt, b(i, j, k)));
             fo(i, j, k) = 1.0_rt - f;
-            hr(i, j, k) = (f > 1.0e-6_rt) ? hs(i, j, k) / f : 0.0_rt;
+            // f = 0 in every open column: divide by the floored value before the select
+            hr(i, j, k) = (f > 1.0e-6_rt) ? hs(i, j, k) / amrex::max(f, 1.0e-6_rt) : 0.0_rt;
         });
     }
     // The bilinear wind stencil reads the column past a non-periodic face for
@@ -2375,7 +2417,7 @@ void FireLayer::init_ros_weight()
                     // ramped linearly over blend_width centred on the edge.
                     const amrex::Real d = amrex::min(amrex::min(x - x_lo, x_hi - x),
                                                      amrex::min(y - y_lo, y_hi - y));
-                    w(i, j, k) = amrex::max(0.0_rt, amrex::min(1.0_rt, 0.5_rt + d / bw));
+                    w(i, j, k) = amrex::max(0.0_rt, amrex::min(1.0_rt, 0.5_rt + d / amrex::max(bw, 1.0e-30_rt)));
                 } else {
                     w(i, j, k) = (x >= x_lo && x < x_hi && y >= y_lo && y < y_hi) ? 1.0_rt : 0.0_rt;
                 }
@@ -2449,7 +2491,7 @@ void FireLayer::init_ros_weight()
                     }
                 }
                 if (bw > 0.0_rt) {
-                    w(i, j, k) = amrex::max(0.0_rt, amrex::min(1.0_rt, 0.5_rt + (D - dmin) / bw));
+                    w(i, j, k) = amrex::max(0.0_rt, amrex::min(1.0_rt, 0.5_rt + (D - dmin) / amrex::max(bw, 1.0e-30_rt)));
                 } else {
                     w(i, j, k) = (dmin <= D) ? 1.0_rt : 0.0_rt;
                 }
@@ -2493,7 +2535,7 @@ void FireLayer::print_hybrid_weight_summary() const
             f(i, j, k) = (w(i, j, k) > 0.5_rt) ? 1.0_rt : 0.0_rt;
         });
     }
-    const long n_half = std::lround(flag.sum(0));
+    const amrex::Long n_half = std::lround(flag.sum(0));
     amrex::Print() << "[FIRE DEBUG] Hybrid ROS: primary=" << m_params.hybrid.primary
                    << " secondary=" << m_params.hybrid.secondary
                    << " selector=" << m_params.hybrid.selector
@@ -2514,9 +2556,12 @@ DirectionalRosState FireLayer::make_directional_state(const std::string& model) 
         st.fbp   = m_fbp;
     } else if (model == "cheney_gould") {
         st.model       = DIRECTIONAL_ROS_CHENEY_GOULD;
+        // moisture and curing from the computed state, so the dynamic
+        // 1-h moisture update (advance_fuel_moisture rebuilds m_cgc) reaches
+        // the directional path exactly as it reaches the isotropic fill
         st.cgc         = m_cgc;
-        st.cg_moisture = m_params.cheney_gould.moisture;
-        st.cg_curing   = m_params.cheney_gould.curing;
+        st.cg_moisture = m_cgc.moisture;
+        st.cg_curing   = m_cgc.curing;
     } else {
         st.model = DIRECTIONAL_ROS_ROTHERMEL;
         st.rc    = m_rc;
@@ -2718,10 +2763,14 @@ void FireLayer::report_exposure()
         const amrex::Real t0  = burned ? tfirst[s] : -1.0;
         const amrex::Real t1  = burned ? tlast[s]  : -1.0;
         const amrex::Real res = burned ? (t1 - t0) : 0.0;
-        const amrex::Real xc  = (foot[s] > 0.0) ? sx[s] / foot[s] : 0.0;
-        const amrex::Real yc  = (foot[s] > 0.0) ? sy[s] / foot[s] : 0.0;
-        const amrex::Real wf  = (wall[s] > 0.0) ? wall_burned[s] / wall[s] : 0.0;
-        const amrex::Real hlm = (wall[s] > 0.0) ? hl_sum[s] / wall[s] * 1.0e-6 : 0.0;
+        // floored counts before the selects (a structure with no footprint or
+        // wall cell gives 0/0 in the unselected arm, which clang speculates)
+        const amrex::Real foot_s = amrex::max(foot[s], amrex::Real(1.0));
+        const amrex::Real wall_s = amrex::max(wall[s], amrex::Real(1.0));
+        const amrex::Real xc  = (foot[s] > 0.0) ? sx[s] / foot_s : 0.0;
+        const amrex::Real yc  = (foot[s] > 0.0) ? sy[s] / foot_s : 0.0;
+        const amrex::Real wf  = (wall[s] > 0.0) ? wall_burned[s] / wall_s : 0.0;
+        const amrex::Real hlm = (wall[s] > 0.0) ? hl_sum[s] / wall_s * 1.0e-6 : 0.0;
         csv << std::setprecision(10)
             << m_current_time << "," << s << "," << xc << "," << yc << "," << hmax[s] << ","
             << static_cast<long>(foot[s]) << "," << static_cast<long>(wall[s]) << ","

@@ -62,8 +62,11 @@ amrex::Real dead_fuel_weighted_sav (amrex::Real w_d1, amrex::Real w_d10, amrex::
                                     amrex::Real sigma_d1)
 {
     const amrex::Real dead_w = w_d1 + w_d10 + w_d100;
-    return (dead_w > 1.0e-10) ? (w_d1*sigma_d1 + w_d10*FIRE_SIGMA_D10 + w_d100*FIRE_SIGMA_D100) / dead_w
-                              : sigma_d1;
+    // floored denominator before the select: a non-burnable slot has zero
+    // loads and the unselected 0/0 is speculated under the fpe traps
+    const amrex::Real sav = (w_d1*sigma_d1 + w_d10*FIRE_SIGMA_D10 + w_d100*FIRE_SIGMA_D100)
+                          / amrex::max(dead_w, amrex::Real(1.0e-10));
+    return (dead_w > 1.0e-10) ? sav : sigma_d1;
 }
 
 /**

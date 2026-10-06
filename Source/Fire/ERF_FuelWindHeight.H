@@ -14,8 +14,9 @@
  *          non-burnable slot and is unused; valid range 1..FUEL_SLOT_COUNT-1.
  *
  * Default values follow WRF-SFIRE namelist.fire defaults: fcwh is 6.096 m
- * (20 ft) for every fuel model, consistent with the BEHAVE midflame height
- * default.
+ * (20 ft) for every fuel model, BEHAVE's 20-ft open-wind reference height
+ * (the height the wind adjustment factor then reduces to midflame; it is
+ * not itself a midflame height).
  *
  * Surface roughness is not carried per fuel model. The roughness the fire model
  * uses comes from the surface layer (erf.most.z0) and, for the two-height log

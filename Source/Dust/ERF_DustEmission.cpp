@@ -44,10 +44,15 @@ void compute_dust_emission_flux(MultiFab& dust_emission_flux,
             // Marticorena & Bergametti (1995), Eq. 9.
             Real alpha = compute_sandblasting_efficiency(silt);
 
-            // Vertical flux per bin. In Phase 6 all bins use the same alpha.
-            // Phase 11 will apply per-bin size-dependent alpha corrections.
+            // Vertical flux per bin: the M&B flux F = alpha G is the TOTAL
+            // vertical flux, shared equally between the bins (the blast
+            // schedule divides its mass the same way). Before 2026-10 every
+            // bin carried the full flux, so the atmosphere received
+            // n_size_bins times the sandblasting flux.
+            const Real F_total = compute_vertical_emission_flux(alpha, silt, Qs);
+            const Real F_bin   = F_total / static_cast<Real>(nbins);
             for (int b = 0; b < nbins; ++b) {
-                flux_arr(i, j, k, b) = compute_vertical_emission_flux(alpha, silt, Qs);
+                flux_arr(i, j, k, b) = F_bin;
             }
         });
     }

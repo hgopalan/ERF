@@ -2013,6 +2013,27 @@ add_test_fire_abort(FireBadRosModel_abort     FireRestart           inputs_level
     "erf.fire.ros_model = \"rothermal\" is not one of" "erf.fire.ros_model=rothermal")
 add_test_fire_abort(FireBadCoupling_abort     FireRestart           inputs_levelset_straight
     "erf.fire.coupling_type = \"laged\" is not one of" "erf.fire.coupling_type=laged")
+# start-up checks added by the October 2026 audit: a value the kernels cannot use,
+# or an input given without the switch that reads it, stops the run naming the key
+# (each of these ran on silently before: Balbi returned 15 m/s with no bisection
+# step, code 50 burned as fuel model 1, tau_wind = 0 divided by zero, and the
+# stick/suppression/thermal-excess keys were ignored)
+add_test_fire_abort(FireBalbiMaxIter_abort    FireRestart           inputs_levelset_straight
+    "erf.fire.balbi.max_iter must be >= 1" "erf.fire.balbi.max_iter=0")
+add_test_fire_abort(FireFuelModelId_abort     FireRestart           inputs_levelset_straight
+    "is not an Anderson code" "erf.fire.fuel_model_id=50")
+add_test_fire_abort(FireAccelTauWind_abort    FireRestart           inputs_levelset_straight
+    "erf.fire.accel.tau_wind must be > 0" "erf.fire.accel.enable=true erf.fire.accel.enable_wind_lag=true erf.fire.accel.tau_wind=0")
+add_test_fire_abort(FireStickKeyNoStick_abort FireRestart           inputs_levelset_straight
+    "need erf.fire.moisture_model = stick" "erf.fire.moisture_dynamic=true erf.fire.stick.n_shells=4")
+add_test_fire_abort(FireSuppressionKeyNoEnable_abort FireRestart    inputs_levelset_straight
+    "needs erf.fire.suppression.enable = true" "erf.fire.suppression.file=actions.txt")
+# the default source_mode = overwrite would discard another theta source on the fire
+# level (here the Rayleigh damping); the deck must choose add or overwrite explicitly
+add_test_fire_abort(FireSourceModeConflict_abort FireRestart        inputs_coupled_straight
+    "the default erf.fire.source_mode = overwrite replaces the theta source" "erf.rayleigh_damp_T=true")
+add_test_fire_abort(FireMrfExcessNoFlux_abort FireRestart           inputs_levelset_straight
+    "erf.pbl_mrf_fire_thermal_excess = true on level 0 needs erf.fire.enable" "erf.pbl_type=MRF erf.pbl_mrf_fire_thermal_excess=true")
 # the fire grid on a refined level (erf.fire.anchor_level, the finest level by default):
 # the same front as a single-level run at that resolution, the level-0 heat budget after
 # average-down (and its loss with the fire on the coarser level), restart, and a restart
@@ -2136,6 +2157,15 @@ add_test_fire_abort(DustBadBins_abort         FireRestart           inputs_dust_
     "erf.dust.n_size_bins must be >= 1" "erf.dust.n_size_bins=0")
 add_test_fire_abort(DustZrefMismatch_abort    FireRestart           inputs_dust_straight
     "must equal erf.most.zref" "erf.most.zref=12.0")
+# October 2026 audit: a missing road file used to hang every rank but the IO rank in
+# a broadcast; the state carries one dust scalar, so separately transported bins
+# overwrote the smoke and vapour slots; zref <= z0 silently gave u* = 0.4 |U|
+add_test_fire_abort(DustRoadFileMissing_abort FireRestart           inputs_dust_straight
+    "erf.dust.road_schedule_file cannot be opened" "erf.dust.road_schedule_file=missing_roads.csv")
+add_test_fire_abort(DustTransportBins_abort   FireRestart           inputs_dust_straight
+    "transport_bins_separately = true needs one state scalar per bin" "erf.dust.transport_bins_separately=true")
+add_test_fire_abort(FireDustWindZref_abort    FireRestart           inputs_dust_straight
+    "erf.fire_dust_wind_zref .* must exceed" "erf.fire_dust_wind_zref=0.05")
 endif()
 endif()
 

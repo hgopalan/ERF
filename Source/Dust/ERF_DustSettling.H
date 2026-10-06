@@ -102,19 +102,24 @@ amrex::Real compute_stokes_settling(amrex::Real d_m, amrex::Real rho_p,
 /**
  * @brief Apply Stokes settling tendency to cc_source for one dust bin.
  *
- * First-order upwind flux divergence:
- *   flux_down(k)   = v_s * RhoDust(k)        (downward flux at top of cell k)
- *   flux_down(k-1) = v_s * RhoDust(k-1)      (downward flux at bottom of cell k)
- *   tend(k) = -(flux_down(k) - flux_down(k-1)) / dz
+ * First-order upwind flux divergence of the downward flux v_s RhoDust, read
+ * from the state S_old (NOT from cc_source, which holds the tendency):
+ *   F_top(k) = v_s(k+1) RhoDust(k+1)   (enters cell k through its top face; 0 at khi)
+ *   F_bot(k) = v_s(k)   RhoDust(k)     (leaves cell k through its bottom face)
+ *   tend(k) += (F_top(k) - F_bot(k)) / dz_k
  *
- * At k = klo: flux_down(k-1) = 0 (no deposition; Phase 12 adds this).
- * At k = khi: uses cell values without extrapolation.
+ * At k = klo the bottom-face flux is the deposition to the surface, which
+ * apply_dust_deposition_to_cc_source removes with the deposition velocity,
+ * so F_bot(klo) = 0 here (the column mass is conserved by this kernel alone).
+ * Before 2026-10 the kernel multiplied v_s into the TENDENCY and took the
+ * neighbour from below, so the dust never settled and the write raced with
+ * the k-1 read; the Stokes column gtest pins the corrected form.
  *
  * v_s is computed per-cell from local air density S_old(Rho_comp).
- * Pattern: follows apply_fire_tendency_to_cc_source in ERF_FireAtmCoupling.H.
+ * dz_k is the centre-to-centre spacing above cell k (dx[2] at khi).
  *
  * @param[in,out] cc_source     Cell-centred source MultiFab on atm grid.
- * @param[in]     S_old         Conserved state at time n (for air density).
+ * @param[in]     S_old         Conserved state at time n (air density and the dust density).
  * @param[in]     z_phys_cc     Cell-centre terrain height [m].
  * @param[in]     geom_atm      Atmospheric geometry.
  * @param[in]     d_m           Particle diameter for this bin [m].
@@ -159,22 +164,25 @@ inline void apply_dust_settling_to_cc_source(
             Real vs_k = compute_stokes_settling(dp, rhop, rho_a,
                                                 DustSettlingConst::MU_AIR_STD);
 
-            // Downward flux at top face of cell k.
-            Real flux_k = vs_k * src_arr(i, j, k, comp);
+            // Downward flux leaving cell k through its bottom face, from the
+            // dust density of the STATE (the surface flux at klo is the
+            // deposition kernel's).
+            Real flux_bot = (k > klo) ? vs_k * amrex::max(s_arr(i, j, k, comp), Real(0.0)) : Real(0.0);
 
-            // Downward flux at bottom face of cell k (from cell k-1).
-            Real flux_km1 = 0.0;
-            if (k > klo) {
-                Real rho_a_km1 = s_arr(i, j, k-1, Rho_comp);
-                if (rho_a_km1 <= 0.0) rho_a_km1 = 1.2;
-                Real vs_km1 = compute_stokes_settling(dp, rhop, rho_a_km1,
+            // Downward flux entering cell k through its top face, from the
+            // cell above (none above the domain top).
+            Real flux_top = 0.0;
+            if (k < khi) {
+                Real rho_a_kp1 = s_arr(i, j, k+1, Rho_comp);
+                if (rho_a_kp1 <= 0.0) rho_a_kp1 = 1.2;
+                Real vs_kp1 = compute_stokes_settling(dp, rhop, rho_a_kp1,
                                                       DustSettlingConst::MU_AIR_STD);
-                flux_km1 = vs_km1 * src_arr(i, j, k-1, comp);
+                flux_top = vs_kp1 * amrex::max(s_arr(i, j, k+1, comp), Real(0.0));
             }
-            // At k=klo: flux_km1 = 0 (Phase 12 will add deposition here).
 
-            // First-order upwind: tend = -(flux_k - flux_km1) / dz
-            src_arr(i, j, k, comp) -= (flux_k - flux_km1) / dz;
+            // First-order upwind: tend += (F_top - F_bot) / dz; every read is
+            // from S_old, so the write never races with a neighbour's read
+            src_arr(i, j, k, comp) += (flux_top - flux_bot) / dz;
         });
     }
 

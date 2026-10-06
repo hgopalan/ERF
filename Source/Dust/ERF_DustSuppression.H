@@ -2,16 +2,18 @@
  * @file ERF_DustSuppression.H
  * @brief Dust suppression agent degradation model for the ERF-Dust 2D layer.
  *
- * Tracks the half-life decay of dust suppression agent (water, MgCl2, lignin
+ * Tracks the decay of dust suppression agent (water, MgCl2, lignin
  * sulfonate) applied to haul roads and tailings surfaces. The coverage fraction
- * in dust_suppression [0,1] decays exponentially with a half-life that depends
- * on surface temperature and wind speed. When coverage falls below
- * DustSuppressionConst::COVERAGE_FLOOR, it is set to zero.
+ * in dust_suppression [0,1] decays exponentially with an e-folding time that
+ * depends on surface temperature and wind speed (half-life = 0.693 tau). When
+ * coverage falls below DustSuppressionConst::COVERAGE_FLOOR, it is set to zero.
+ * T_surf and u_10m are domain-wide scalars: the maximum surface temperature
+ * and the maximum wind SPEED at zref (DustLayer::advance).
  *
  * Decay model:
  *   coverage_new = coverage_old * exp(-dt / tau_eff)
  *
- * where the effective half-life tau_eff [s] is:
+ * where the effective e-folding time tau_eff [s] is:
  *   tau_eff = tau_base / (f_T * f_wind)
  *
  *   f_T    = exp(k_T * (T_surf - T_ref))      temperature acceleration
@@ -113,7 +115,7 @@ amrex::Real compute_wind_factor_supp(amrex::Real u_10m) noexcept
  * @param T_surf_K      Surface temperature [K].
  * @param u_10m         10 m wind speed [m/s].
  * @param dt_s          Timestep [s].
- * @param tau_base_s    Base half-life [s].
+ * @param tau_base_s    Base e-folding time [s] (erf.dust.supp_tau_base_s).
  * @return Updated coverage fraction [0,1].
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE

@@ -72,7 +72,9 @@ SpreadEllipse spread_ellipse(amrex::Real R, amrex::Real U_mps,
     LB = amrex::max(amrex::Real(1.0), amrex::min(LB, lw_max));
     e.LB = LB;
     const amrex::Real s = std::sqrt(amrex::max(static_cast<amrex::Real>(LB * LB - 1.0),  amrex::Real(0.0)));
-    e.HB = (LB - s > 1.0e-12) ? (LB + s) / (LB - s) : 1.0e12;
+    // (LB + s)/(LB - s) = (LB + s)^2 (since (LB - s)(LB + s) = 1): no cancelling
+    // difference in the divisor, so a large LB cannot give 0/0 in single precision
+    e.HB = (LB - s > 1.0e-12) ? (LB + s) * (LB + s) : amrex::Real(1.0e12);
     const amrex::Real Rb = R / e.HB;
     e.b = 0.5 * (R + Rb);
     e.a = e.b / LB;
@@ -144,10 +146,14 @@ inline void fill_ellipse_ros(amrex::MultiFab& R_mf,
             const amrex::Real dpdy = (wall.at(phi_arr, i, j, k, 0, 1)
                                       - wall.at(phi_arr, i, j, k, 0, -1)) / (2.0 * dy);
             const amrex::Real grad = std::sqrt(dpdx * dpdx + dpdy * dpdy);
+            // unit vectors from floored magnitudes, before the early return
+            // (the unselected 0/0 away from the front is speculated)
+            const amrex::Real inv_grad = amrex::Real(1.0) / amrex::max(grad, amrex::Real(ELLIPSE_GRAD_MIN));
+            const amrex::Real inv_U    = amrex::Real(1.0) / amrex::max(U,    amrex::Real(ELLIPSE_WIND_MIN));
             if (grad <= ELLIPSE_GRAD_MIN) { R_arr(i, j, k) = R; return; }
 
-            const amrex::Real nx = dpdx / grad, ny = dpdy / grad;
-            const amrex::Real wx = u / U,       wy = v / U;
+            const amrex::Real nx = dpdx * inv_grad, ny = dpdy * inv_grad;
+            const amrex::Real wx = u * inv_U,       wy = v * inv_U;
             const amrex::Real cos_th = nx * wx + ny * wy;
             const amrex::Real sin_th = nx * wy - ny * wx;
             const SpreadEllipse e = spread_ellipse(R, U, lw_fixed, lw_max);

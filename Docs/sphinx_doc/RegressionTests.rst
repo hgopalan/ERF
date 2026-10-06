@@ -793,7 +793,9 @@ which fails both checks.
 
 ``FireCustomFuel_uniform`` and ``FireCustomFuel_map`` run the deck-defined
 fuel models of :ref:`sec:ROS_CustomFuel`: a fuel model written out in SI in the
-deck, uniform and from a raster that mixes it with the Scott-Burgan 40. Six
+deck, uniform and from a raster that mixes it with the Scott-Burgan 40, with
+``FireCustomFuel_map_altid`` (the same map with another ``fuel_model_id``) and
+``FireCustomFuel_nonburnable`` (an undeclared code held non-burnable). Seven
 abort tests cover the validation, each passing only when the run stops at
 start-up with the message naming its input: ``FireCustomFuelBadCode_abort`` (a
 code outside 1000-1015), ``FireCustomFuelMissing_abort`` (a block without its
@@ -803,8 +805,42 @@ word), ``FireCustomFuelBadHeat_abort`` (a heat content left in BTU/lb),
 ``FireCustomFuelBurnout_abort`` (``burnout_model = sfire`` with no burn time,
 which would otherwise fall to Anderson model 1's 7 s) and
 ``FireCustomFuelUndeclared_abort`` (a raster code no block defines, which would
-otherwise burn as grass). ``run_custom_fuel.sh`` adds the identity, per-cell
-load, spread-contrast and box-parity checks that are too long for CI.
+otherwise burn as grass) and ``FireCustomFuelUniformCode_abort`` (a custom code
+as the uniform ``fuel_model_id`` without its block). ``run_custom_fuel.sh``
+adds the identity, per-cell load, spread-contrast and box-parity checks that
+are too long for CI.
+
+Start-up checks added by the October 2026 fire and dust audit each have an
+abort test on the ``FireRestart`` decks, passing only when the run stops with
+the message that names the input: ``FireBalbiMaxIter_abort``
+(``balbi.max_iter = 0``, which returned 15 m/s everywhere),
+``FireFuelModelId_abort`` (a code outside the fuel set, which burned as model
+1), ``FireAccelTauWind_abort`` (a zero wind-lag time constant, a division by
+zero), ``FireStickKeyNoStick_abort`` and ``FireSuppressionKeyNoEnable_abort``
+(keys given without the switch that reads them), ``FireMrfExcessNoFlux_abort``
+(the MRF fire thermal excess without an injecting fire),
+``FireSourceModeConflict_abort`` (the default ``source_mode = overwrite`` with
+Rayleigh damping of theta, which it would discard),
+``DustRoadFileMissing_abort`` (a missing road file, which left every rank but
+the IO rank waiting in a broadcast), ``DustTransportBins_abort`` (separately
+transported bins, which the single dust scalar cannot hold) and
+``FireDustWindZref_abort`` (a fire-wind reference height below the roughness
+length). ``FireMrfThermalExcess`` runs the MRF fire thermal excess on the
+coupled ``FireRestart`` deck, and ``FireBadRosModel_abort``,
+``FireBadCoupling_abort``, ``DustBadBins_abort`` and
+``DustZrefMismatch_abort`` check the selector and dust start-up messages.
+
+``FireDustGTests_FpeTraps`` (label ``unit``) runs the fire and dust gtests with
+``amrex.fpe_trap_invalid``, ``fpe_trap_zero`` and ``fpe_trap_overflow`` armed.
+At -O2 and above clang evaluates the unselected arm of a guarded division,
+log or square root, so a 0/0 the code never uses still raises the flag and
+kills the run; the plain unit run never arms the traps. Before the audit the
+BEHAVE gtests died here on the live-fuel weights of a fuel without live load.
+The ``FireModelReferences`` gtests check the fire models against their
+sources (the Anderson 1982 fuel table, Rothermel's live heating number, the FBP
+high-wind ISI) and the fixed defects, and the ``DustColumn`` gtests the dust
+settling, deposition and per-bin emission on a single column with a known
+answer.
 
 ``FireSuppression_<scenario>_levelset`` and ``FireSuppression_<scenario>_farsite``
 run the ``FireSuppression`` decks (``line_early``, ``line_late``,

@@ -57,8 +57,10 @@ The ignition schedule is specified in CSV format with one event per line:
 
 - **time_s** (Real): Time at which event fires [seconds]
 - **cx, cy** (Real): Ignition center location [m]
-- **radius** (Real): Ignition sphere radius [m]
-- **source_type** (integer, optional, default=0): 0=sphere, 1=polyline (for future use)
+- **radius** (Real): Ignition disc radius [m]
+- **source_type** (integer, optional, default=0): 0 = disc, the only type implemented. It is
+  read as an integer: a word such as ``sphere`` stops the parse of the line, so the
+  priority after it is never read.
 - **priority** (integer, optional, default=5): Priority ordering; higher fires first in same timestep
 - **suppress_if_burning** (integer, optional, default=0): If 1, skip cells already burning (phi < 0)
 
@@ -69,21 +71,30 @@ Example Schedule File
 
 .. code-block:: text
 
-   # Phase 11 ignition schedule test file.
-   # Primary ignition at t=0, secondary at t=300 s, tertiary at t=600 s
-   0      500.0  1000.0  30.0  sphere  10
-   300    1400.0 1000.0  20.0  sphere   5
-   600    1000.0  400.0  15.0  sphere   5
+   # Ignition schedule: primary ignition at t=0, secondary at t=300 s, tertiary at t=600 s
+   # time_s  cx      cy      radius  source_type  priority
+   0         500.0   1000.0  30.0    0            10
+   300       1400.0  1000.0  20.0    0             5
+   600       1000.0  400.0   15.0    0             5
 
 Fire Front Merging
 ~~~~~~~~~~~~~~~~~~
 
 When multiple ignitions occur at different locations, their fire fronts merge implicitly
-through the SDF stamping mechanism. Each ignition applies:
+through the SDF stamping mechanism. Each ignition applies, with the phi convention of the
+propagation method (as the disc ignition does):
 
 .. code-block:: text
 
-   phi(i,j,k) = min(phi(i,j,k), -(radius - distance))
+   sdf = distance - radius
+   levelset:  phi(i,j,k) = min(phi(i,j,k), sdf)                       (metres, unclamped)
+   farsite:   phi(i,j,k) = min(phi(i,j,k), clamp(sdf / radius, -1, 1)) (indicator)
+
+The level-set stamp keeps the signed distance of the whole field intact; before
+October 2026 it clamped the metric distance to [-1, 1] m, which flattened the field
+everywhere to a 1 m plateau the moment an event fired. Events are due in the window
+from the start of the previous fire step (exclusive) to the start of the current one,
+the previous start kept in the checkpoint, so a shrinking time step cannot skip one.
 
 The min() operation ensures:
 
@@ -114,8 +125,8 @@ Polyline Mode
 An open polyline (sequence of connected line segments) defines a line fire. The level-set
 field is set using:
 
-- **Within half_width**: phi = -half_width (burned cells)
-- **Outside half_width**: phi = +distance_to_nearest_segment (unburned cells)
+- phi = (distance to the nearest segment) - half_width everywhere: negative (burned)
+  within half_width of the line, positive outside, continuous through zero
 
 The half-width parameter sets the initial burn width around the line.
 
@@ -172,7 +183,8 @@ The third source is the atmosphere itself. With
 ``erf.fire.ignition.threshold_enable = true``, every burnable, unburned fire
 cell whose near-surface air temperature exceeds
 ``erf.fire.ignition.threshold_temp`` is ignited on the fire step in which it
-first does so. The temperature is the :math:`k = 0` potential temperature the
+first does so. The temperature is the :math:`k = 0` air temperature
+(potential temperature times the Exner function) the
 fuel-moisture update already maps onto the fire grid (``fire_surface_temp``
 in the fire plotfiles), so what the threshold sees depends on the coupling:
 in a two-way run the fire's own plume, advected over unburned fuel, can start
@@ -234,7 +246,7 @@ All multi-ignition parameters use the ``erf.fire.ignition.*`` prefix in the Parm
      - 10.0
    * - ``ignition.threshold_enable``
      - bool
-     - Ignite unburned, burnable cells whose k = 0 potential temperature exceeds ``threshold_temp``
+     - Ignite unburned, burnable cells whose k = 0 air temperature exceeds ``threshold_temp``
      - false
    * - ``ignition.threshold_temp``
      - Real
@@ -289,9 +301,10 @@ Limitations
 - **2D only**: Polygon and polyline ignition are 2D (fire grid is 2D). Ignition is applied
   uniformly to all vertical levels of the fire grid.
 
-- **No temporal variation**: Polygon and polyline ignitions are applied only at t=0
-  during initialization. For time-varying perimeter changes, use schedule-based ignitions
-  with multiple sphere events or implement custom logic.
+- **One timed perimeter**: a polygon or polyline is applied at t = 0, or once at
+  ``erf.fire.ignition.polygon_time`` with an aged interior
+  (``polygon_interior_ros``, ``polygon_interior_tau``; see "Perimeter ignition with
+  spin-up" in :ref:`sec:FirePropagation`). Further perimeters need schedule events.
 
 Implementation Files
 --------------------

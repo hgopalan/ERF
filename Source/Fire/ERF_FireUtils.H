@@ -103,6 +103,46 @@ void compute_rh_from_conservative(amrex::MultiFab& RH_out,
 }
 
 /**
+ * @brief Air temperature [K] at k = 0 from the conserved state.
+ *
+ * T = theta * (p / p_0)^(R_d / c_p), with p from RhoTheta and qv as in
+ * compute_rh_from_conservative. The fuel-moisture curves (Van Wagner's E_d,
+ * E_w, the time-lag temperature factor, the stick diffusivity), Balbi's
+ * ambient temperature and the threshold ignition all take an air temperature;
+ * until 2026-10 they were handed the potential temperature of the first cell,
+ * which at Marshall (840 hPa) is 14-16 K above the air temperature.
+ *
+ * @param[out] T_out  2D MultiFab (one cell in z) on the level's boxes
+ * @param[in]  S_atm  Conserved state (Rho, RhoTheta, RhoQ1 when moist)
+ */
+inline
+void compute_t_from_conservative(amrex::MultiFab& T_out,
+                                 const amrex::MultiFab& S_atm)
+{
+    using namespace amrex;
+    constexpr Real rdOcp = R_d / Cp_d;
+    for (MFIter mfi(T_out); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.tilebox();
+        Array4<Real>       t_arr = T_out.array(mfi);
+        Array4<const Real> S_arr = S_atm.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(const IntVect& iv) {
+            const int i = iv[0];
+            const int j = iv[1];
+            const int k = 0;
+            const Real rho    = S_arr(i, j, k, Rho_comp);
+            const Real rho_th = S_arr(i, j, k, RhoTheta_comp);
+            Real qv = 0.0_rt;
+            if (RhoQ1_comp < S_arr.nComp()) {
+                qv = S_arr(i, j, k, RhoQ1_comp) / rho;
+            }
+            const Real p     = getPgivenRTh(rho_th, qv);
+            const Real exner = getExnergivenP(p, rdOcp);
+            t_arr(i, j, k)   = (rho_th / rho) * exner;
+        });
+    }
+}
+
+/**
  * Copy the k = 0 plane of a cell-centred atmospheric field into a MultiFab on the
  * same boxes coarsened to one cell in z. A namespace-scope function because nvcc
  * rejects a device kernel inside a private member such as ERF::Advance.

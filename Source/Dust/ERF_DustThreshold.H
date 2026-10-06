@@ -54,7 +54,7 @@ namespace DustThresholdConst {
  *
  * u*_t = A * sqrt(rho_p * g * d / rho_a)
  *
- * @param[in] A        Bagnold coefficient (typically 0.0123) [-].
+ * @param[in] A        Bagnold coefficient (0.1, Bagnold's value; 0.0123 is Shao and Lu's) [-].
  * @param[in] rho_p    Particle density [kg/m^3].
  * @param[in] d_m      Particle diameter [m].
  * @param[in] rho_a    Air density [kg/m^3]. If <= 0, RHO_AIR_STD is used.
@@ -73,7 +73,9 @@ amrex::Real compute_ustar_t_bagnold(amrex::Real A, amrex::Real rho_p,
  * @brief Compute moisture inhibition factor f_moist.
  *
  * f_moist = 1 + beta_m * w; w clamped to [0,1].
- * Reference: Fecan et al. (1999), https://doi.org/10.1007/s00585-999-0149-7
+ * An ad-hoc linear inhibition on the [0, 1] moisture flag of the surface map,
+ * not Fecan et al. (1999)'s factor sqrt(1 + 1.21 (w - w')^0.68), which needs
+ * a gravimetric soil moisture the dust module does not carry.
  *
  * @param[in] w Surface moisture [0,1]. Values outside this range are clamped.
  *

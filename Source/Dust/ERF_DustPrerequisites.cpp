@@ -28,9 +28,19 @@ void verify_dust_prerequisites(const ERF&          erf,
     const amrex::DistributionMapping& dm_atm = erf.DistributionMap(0);
     const amrex::Geometry& geom_atm = erf.Geom(0);
 
-    // Check 2: erf.most.z0 is set (indirectly verified through SurfaceLayer)
-    // This is a ParmParse check that happens at SurfaceLayer construction
-    // For now, trust that it was validated there
+    // Check 2: the dust scalar must be transported. erf.transport_scalar = false
+    // removes the whole scalar block (dust included) from the advection and
+    // from the slow RHS update, so the emission would be injected and dropped.
+    {
+        amrex::ParmParse pp_erf("erf");
+        bool transport_scalar = true;
+        pp_erf.query("transport_scalar", transport_scalar);
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(transport_scalar,
+            "[DUST] erf.transport_scalar = false drops the dust scalar from the transport; "
+            "set erf.transport_scalar = true (the default) with erf.dust.enable");
+    }
+    // (erf.most.z0 is validated where the surface layer reads it; the dust
+    // module takes the surface layer's u* and its own erf.dust.z0_dust)
 
     // Get domain information
     const amrex::Box& domain = geom_atm.Domain();

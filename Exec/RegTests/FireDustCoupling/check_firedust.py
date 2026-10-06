@@ -29,7 +29,13 @@ ALPHA_CRUST = 0.5
 CRUST_INDEX = 1.0
 REDUCTION = 0.8
 KAPPA, Z0, ZREF = 0.4, 3.0, 6.1
-DEP_REF = 1.5596e-02   # deposition_total [kg/m2] at step 40 with the committed deck (2026-09-13, after the MB95 and Bagnold fixes)
+# deposition_total [kg/m2] at step 40 with the committed deck. Re-measured
+# 2026-10-06 after the deposition kernel read the dust density of the state
+# instead of the source tendency, the settling moved dust down instead of up,
+# and the bins shared the emission flux (1.5596e-02 before). The kernels
+# themselves are checked against known answers in the DustColumn gtests; this
+# value guards the once-per-step accumulation (per-stage would give 1.83x).
+DEP_REF = 5.1697e-02
 DEP_TOL = 0.15
 
 results = []

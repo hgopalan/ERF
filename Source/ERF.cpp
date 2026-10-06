@@ -106,7 +106,10 @@ double ERF::last_plot2d_file_time_2 = 0.0;
 double ERF::last_check_file_time    = 0.0;
 
 #ifdef ERF_ENABLE_FIRE
-double ERF::last_fire_plot_time = -1.0;   // double: writeNow() takes double&, as for the other plot times
+// double: writeNow() takes double&, as for the other plot times. Starts at 0 like
+// them (and is realigned on restart below), so fire plots land on k * fire_plot_per;
+// the earlier -1 put them at k * per - 1 s and at the first step of every restart.
+double ERF::last_fire_plot_time = 0.0;
 #endif
 
 bool ERF::plot_file_on_restart = true;
@@ -2022,6 +2025,40 @@ ERF::InitData_post ()
                 pp.query("fire_dust_lofting_k_loft",      m_fire_dust_coupling.lofting_k_loft);
                 pp.query("fire_dust_lofting_Q_threshold", m_fire_dust_coupling.lofting_Q_threshold);
                 pp.query("fire_dust_lofting_Q_ref",       m_fire_dust_coupling.lofting_Q_ref);
+                // Ranges the coupling kernels divide by or take as fractions;
+                // the keys are read only with erf.fire_dust_coupling = true.
+                {
+                    auto& c = m_fire_dust_coupling;
+                    auto fail = [](const std::string& m) { amrex::Abort("[FIRE-DUST] " + m); };
+                    if (!(c.post_fire_crust_reduction >= 0.0 && c.post_fire_crust_reduction <= 1.0)) {
+                        fail("erf.fire_dust_crust_reduction must be in [0, 1], got " + std::to_string(c.post_fire_crust_reduction));
+                    }
+                    if (!(c.fire_wind_z0 > 0.0)) {
+                        fail("erf.fire_dust_wind_z0 must be > 0 m, got " + std::to_string(c.fire_wind_z0));
+                    }
+                    if (!(c.fire_wind_zref > c.fire_wind_z0)) {
+                        fail("erf.fire_dust_wind_zref (" + std::to_string(c.fire_wind_zref) + " m) must exceed"
+                             " erf.fire_dust_wind_z0 (" + std::to_string(c.fire_wind_z0) + " m); the fire wind u* is"
+                             " kappa |U| / ln(zref/z0)");
+                    }
+                    if (!(c.lofting_k_loft >= 0.0)) {
+                        fail("erf.fire_dust_lofting_k_loft must be >= 0, got " + std::to_string(c.lofting_k_loft));
+                    }
+                    if (!(c.lofting_Q_threshold >= 0.0)) {
+                        fail("erf.fire_dust_lofting_Q_threshold must be >= 0 W/m2, got " + std::to_string(c.lofting_Q_threshold));
+                    }
+                    // (erf.fire_dust_lofting_Q_ref <= 0 is the documented off switch:
+                    // apply_fire_lofting_to_emission returns before any division)
+                    if (!c.enabled) {
+                        for (const char* k : {"fire_dust_crust_reduction", "fire_dust_wind_to_dust", "fire_dust_wind_z0",
+                                              "fire_dust_wind_zref", "fire_dust_lofting_enabled", "fire_dust_lofting_k_loft",
+                                              "fire_dust_lofting_Q_threshold", "fire_dust_lofting_Q_ref"}) {
+                            if (pp.contains(k)) {
+                                fail(std::string("erf.") + k + " needs erf.fire_dust_coupling = true");
+                            }
+                        }
+                    }
+                }
                 m_fire_dust_coupling.fire_phi_mf = m_fire_layer->get_levelset();
                 m_fire_dust_coupling.geom_fire   = m_fire_layer->get_fire_geom();
                 m_fire_dust_coupling.debug       = dust_params.dust_debug;
@@ -3056,6 +3093,79 @@ ERF::initializeFire (const int& /*a_nlevsmax*/ /*!< number of AMR levels */)
     }
 #endif
 #ifdef ERF_ENABLE_FIRE
+    // Contracts between the fire inputs and the solver inputs, checked here
+    // where ReadParameters() has filled solverChoice and before any level is
+    // built (the grid-dependent checks stay in verify_fire_prerequisites).
+    if (m_fire_params.enable) {
+        // The smoke tracer is a transported scalar: without the scalar
+        // transport its emission is injected and dropped every stage.
+        if (m_fire_params.smoke_enable && !solverChoice.transport_scalar) {
+            amrex::Abort("[FIRE] erf.fire.smoke_enable = true needs erf.transport_scalar = true"
+                         " (the smoke tracer is advected with the scalars)");
+        }
+        // erf.fire.source_mode = overwrite (the default) REPLACES the theta (and,
+        // with latent heat, the vapour) slots of the cell source on the fire
+        // level every stage, discarding whatever make_sources put there. With
+        // no other source that is the legacy result; with one it silently
+        // drops physics. Make the choice explicit in that case.
+        if (m_fire_params.injects_flux() && !m_fire_params.source_mode_given) {
+            std::string others;
+            auto add = [&others] (bool on, const char* what) {
+                if (on) { others += (others.empty() ? "" : ", ") + std::string(what); }
+            };
+            add(solverChoice.rad_type != RadiationType::None,        "radiation (erf.radiation_model)");
+            add(solverChoice.four_stream_radiation,                   "erf.four_stream_radiation");
+            add(solverChoice.dampingChoice.rayleigh_damp_T,           "erf.rayleigh_damp_T");
+            add(solverChoice.custom_rhotheta_forcing,                 "erf.add_custom_rhotheta_forcing");
+            add(solverChoice.custom_w_subsidence,                     "erf.add_custom_w_subsidence");
+            add(solverChoice.custom_moisture_forcing && m_fire_params.inject_latent,
+                                                                      "erf.add_custom_moisture_forcing");
+            // immersed forcing meets the fire tendency only on the slow step; on
+            // the acoustic substeps (erf.immersed_forcing_substep, the
+            // compressible default) the two modes are identical
+            const bool if_slow = !solverChoice.immersed_forcing_substep;
+            add(if_slow && solverChoice.terrain_type == TerrainType::ImmersedForcing,
+                "slow-step immersed-forcing terrain");
+            add(if_slow && solverChoice.buildings_type == BuildingsType::ImmersedForcing,
+                "slow-step immersed-forcing buildings");
+            if (!others.empty()) {
+                amrex::Abort("[FIRE] the default erf.fire.source_mode = overwrite replaces the theta source on"
+                             " the fire level and would discard: " + others + ". Set erf.fire.source_mode ="
+                             " add to keep them (recommended), or = overwrite to keep the legacy behaviour.");
+            }
+        }
+    }
+    // erf.pbl_mrf_fire_thermal_excess adds the lagged fire flux to the MRF
+    // thermal excess; it is inert without an injecting fire or another PBL.
+    // TurbChoice reads it only under erf.pbl_type = MRF, so with any other PBL
+    // the key was silently ignored: check the deck for it directly.
+    {
+        amrex::ParmParse pp_erf("erf");
+        bool any_mrf = false;
+        for (int lev = 0; lev <= max_level; ++lev) {
+            any_mrf = any_mrf || (solverChoice.turbChoice[lev].pbl_type == PBLType::MRF);
+        }
+        if (!any_mrf && pp_erf.contains("pbl_mrf_fire_thermal_excess")) {
+            amrex::Abort("[FIRE] erf.pbl_mrf_fire_thermal_excess is set but no level runs erf.pbl_type = MRF;"
+                         " the key is read only by the MRF scheme");
+        }
+    }
+    for (int lev = 0; lev <= max_level; ++lev) {
+        const auto& tc = solverChoice.turbChoice[lev];
+        if (!tc.mrf_fire_thermal_excess) { continue; }
+        if (!m_fire_params.enable || !m_fire_params.injects_flux()) {
+            amrex::Abort("[FIRE] erf.pbl_mrf_fire_thermal_excess = true on level " + std::to_string(lev)
+                         + " needs erf.fire.enable = true with erf.fire.coupling_type = lagged or synchronous"
+                         " (the fire flux it adds)");
+        }
+        // the lagged flux carries 5 halo columns (FireLayer::initialize); the
+        // smoothing stencil must fit them, and used to abort at the first step
+        if (tc.enable_pblh_smoothing && tc.pblh_smoothing_passes > 5) {
+            amrex::Abort("[FIRE] erf.pbl_mrf_fire_thermal_excess reads the lagged fire flux in a halo of 5 columns;"
+                         " erf.pblh_smoothing_passes = " + std::to_string(tc.pblh_smoothing_passes) + " needs more."
+                         " Use at most 5 passes with the fire thermal excess.");
+        }
+    }
     if (m_fire_params.enable) {
         m_fire_layer = std::make_unique<FireLayer>();
         amrex::Print() << "[FIRE] Fire module enabled (grid_ratio="
@@ -3132,6 +3242,11 @@ ERF::restart ()
     if (m_plot2d_per_2 > zero) {last_plot2d_file_time_2 = std::floor(cur_time/m_plot2d_per_2) * m_plot2d_per_2;}
     if (m_plot3d_per_1 > zero) {last_plot3d_file_time_1 = std::floor(cur_time/m_plot3d_per_1) * m_plot3d_per_1;}
     if (m_plot3d_per_2 > zero) {last_plot3d_file_time_2 = std::floor(cur_time/m_plot3d_per_2) * m_plot3d_per_2;}
+#ifdef ERF_ENABLE_FIRE
+    // the fire plot clock is realigned like the others, so a restart keeps the
+    // k * fire_plot_per instants instead of writing at its first step
+    if (m_fire_plot_per > zero) {last_fire_plot_time = std::floor(cur_time/m_fire_plot_per) * m_fire_plot_per;}
+#endif
 
     for (int i = 0; i < m_subvol_per.size(); i++) {
         if (m_subvol_per[i] > zero) {last_subvol_time[i] = std::floor(cur_time/m_subvol_per[i]) * m_subvol_per[i];}

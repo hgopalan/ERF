@@ -100,8 +100,10 @@ struct BurnCurve
     amrex::Real flux_at (amrex::Real tau) const noexcept
     {
         if (tau < 0.0) { return 0.0; }
+        // ratio from a floored growth time before the test (t_growth = 0 is a
+        // legal instant-growth curve; the unselected tau/0 is speculated)
+        const amrex::Real r = tau / amrex::max(t_growth, amrex::Real(1.0e-30));
         if (tau < t_growth) {
-            const amrex::Real r = tau / t_growth;
             return q_peak * r * r;
         }
         tau -= t_growth;

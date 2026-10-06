@@ -15,8 +15,9 @@
 //     into one isotherm (his eqs. 18-19). The constant and linear terms are
 //     those of Simard's (1968) RH < 10 % equation, 0.03229 + 0.281073 RH
 //     - 0.000578 RH T (RH and EMC in percent, T in F), applied to fractions;
-//     no source is known for the higher terms. The curves run about twice the
-//     published ones (0.166 and 0.189 at 40 % RH), cross near 66 % RH and both
+//     no source is known for the higher terms. The curves run 60-80 % above
+//     the published ones between 10 and 60 % RH (0.166 and 0.189 at 40 % RH
+//     against Van Wagner's 0.102 and 0.118), cross near 66 % RH and both
 //     reach the 0.35 cap above 70 %. Kept as the default so existing results
 //     do not change.
 //   "van_wagner" — the drying and wetting equilibrium moisture of the Canadian

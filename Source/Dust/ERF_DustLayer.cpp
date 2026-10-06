@@ -415,8 +415,9 @@ DustLayer::initialize(
   }
 
   // The crust the burned-area reduction starts from each step. Refreshed after
-  // a PHREEQC update; not checkpointed, so a restart rebuilds it from the inputs
-  // and rasters and the reduction is re-applied from the checkpointed level set.
+  // a PHREEQC update and checkpointed (DustCrustBaseline): the copy made here
+  // from the inputs and rasters is the fresh-run value, and the restart read
+  // that follows initialize() replaces it with the checkpointed one.
   dust_crust_baseline = std::make_unique<amrex::MultiFab>(m_dg.ba, m_dg.dm, 1, dust_crust_index->nGrowVect());
   amrex::MultiFab::Copy(*dust_crust_baseline, *dust_crust_index, 0, 0, 1, dust_crust_index->nGrowVect());
 
@@ -629,7 +630,21 @@ DustLayer::advance(
   }
 
   amrex::Real T_sfc = have_atm ? dust_tsfc->max(0) : m_params.test_surf_temp_K;
-  amrex::Real u_10m = have_atm ? dust_wind_ref->max(0) : m_params.test_wind_speed;
+  // the domain-maximum wind SPEED at zref: max(0) of the (u, v) field is the
+  // maximum u component, which is <= 0 for a wind along -x or along y and
+  // switched the wind enhancement of the suppression decay off
+  amrex::Real u_10m = m_params.test_wind_speed;
+  if (have_atm) {
+    amrex::MultiFab spd(dust_wind_ref->boxArray(), dust_wind_ref->DistributionMap(), 1, 0);
+    for (amrex::MFIter mfi(spd); mfi.isValid(); ++mfi) {
+      auto const& w = dust_wind_ref->const_array(mfi);
+      auto const& s = spd.array(mfi);
+      amrex::ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+        s(i, j, k) = std::sqrt(w(i, j, k, 0) * w(i, j, k, 0) + w(i, j, k, 1) * w(i, j, k, 1));
+      });
+    }
+    u_10m = spd.max(0);
+  }
 
   bool do_phreeqc =
     (m_last_phreeqc_update < 0.0) ||
@@ -645,6 +660,12 @@ DustLayer::advance(
     if (dust_params.dust_debug)
       amrex::Print() << "[DUST DEBUG] PHREEQC update triggered at step="
                      << m_step << ", time=" << m_time << " s\n";
+    // Start from the baseline crust: with the fire coupling on, dust_crust_index
+    // still carries the previous step's burned-area reduction here, and copying
+    // it back into the baseline below compounded the reduction once per PHREEQC
+    // interval whenever the table had no crust column.
+    if (dust_crust_baseline)
+      amrex::MultiFab::Copy(*dust_crust_index, *dust_crust_baseline, 0, 0, 1, dust_crust_index->nGrowVect());
     update_dust_from_phreeqc(
       *dust_ustar_t, *dust_ustar_base, *dust_crust_index, *dust_silt_fraction,
       *dust_efflor, *dust_suppression, *dust_emission_flux, m_dg, dust_params);
@@ -772,10 +793,11 @@ DustLayer::advance(
 
   // Phase 23: compute critical material flux and write budget.
   if (!m_params.cm_fractions.empty() && dust_emission_flux && dust_cm_flux) {
-    int n_active = m_params.transport_bins_separately
-                 ? m_params.n_size_bins : 1;
+    // the emission flux carries every bin whichever way they are transported,
+    // and the atmosphere receives their sum: the budget sums them all too
+    // (bin 0 alone used to be counted when the bins travel together)
     compute_cm_flux(*dust_cm_flux, *dust_emission_flux,
-                    m_params.cm_fractions, n_active);
+                    m_params.cm_fractions, m_params.n_size_bins);
     append_cm_budget(m_params.cm_budget_file,
                      *dust_cm_flux,
                      dust_site_id.get(),
@@ -819,7 +841,7 @@ DustLayer::advance(
                                    *dust_source_map, *geom_atm, m_dg.geom, dt);
     }
     if (m_params.dust_debug) {
-      long np = m_dust_pc->TotalNumberOfParticles();
+      amrex::Long np = m_dust_pc->TotalNumberOfParticles();
       amrex::Real sm = dust_source_map ? dust_source_map->sum(0) : 0.0;
       amrex::Print() << "[DUST DEBUG] Phase 19: step=" << m_step
                      << " n_particles=" << np
@@ -1077,9 +1099,12 @@ DustLayer::compute_msha_exposure(amrex::Real dt, amrex::Real cur_time, int nstep
     update_msha_dose(*dust_msha_dose, *dust_msha_twa, *dust_pm10, dt);
     compute_msha_exceed(*dust_msha_exceed, *dust_msha_twa, m_params.msha_pel_mg_m3);
 
-    Real sd = m_params.msha_shift_duration_s;
+    // (sd > 0 is enforced in DustParams; the floor keeps the speculated x/0
+    // of the unselected && arm trap-free)
+    const Real sd  = m_params.msha_shift_duration_s;
+    const Real sdf = amrex::max(sd, Real(1.0e-30));
     if (sd > 0.0 && cur_time > dt &&
-        std::floor(cur_time / sd) > std::floor((cur_time - dt) / sd)) {
+        std::floor(cur_time / sdf) > std::floor((cur_time - dt) / sdf)) {
         MultiFab::Copy(*dust_msha_shift_twa, *dust_msha_twa, 0, 0, 1, 0);
         write_msha_shift_summary(++m_msha_shift_count, cur_time,
                                  m_params.msha_shift_file,
@@ -1237,6 +1262,12 @@ DustLayer::checkpoint_fields ()
     add("DustUstarT",         dust_ustar_t.get());
     add("DustUstarBase",      dust_ustar_base.get());
     add("DustCrustIndex",     dust_crust_index.get());
+    // The baseline the fire coupling resets the crust to every step: the raster
+    // or input value until the first PHREEQC update, that table's crust after
+    // it. initialize() rebuilds it from the inputs before the restart read, so
+    // without this field a restart between two PHREEQC updates threw the table's
+    // crust away (the per-step reset overwrote the restored DustCrustIndex).
+    add("DustCrustBaseline",  dust_crust_baseline.get());
     add("DustSiltFraction",   dust_silt_fraction.get());
     add("DustEfflor",         dust_efflor.get());
     add("DustSuppression",    dust_suppression.get());

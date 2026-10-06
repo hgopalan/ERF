@@ -139,13 +139,19 @@ void FireDustCoupling::apply_fire_wind_to_dust_ustar(
 {
     if (!enabled || !fire_wind_to_dust) return;
 
-    // Clamp C to at least 1 (if fire and dust grids have same resolution)
-    const int C_ratio = amrex::max(C, 1);
+    // fire_wind_scratch lives on the DUST BoxArray (ERF.cpp copies the fire
+    // wind onto it by index overlap), so the lookup is cell for cell. The
+    // fire and dust grid ratios are asserted equal at start-up (ERF.cpp); a
+    // ratio other than 1 would have read outside the fab.
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(C == 1,
+        "[FIRE-DUST] apply_fire_wind_to_dust_ustar: the fire wind scratch is on the dust grid, "
+        "the fire-to-dust grid ratio must be 1 (erf.fire.grid_ratio == erf.dust.grid_ratio)");
 
-    // Log-law constant: u* = U * kappa / ln(zref/z0)
+    // Log-law constant: u* = U * kappa / ln(zref/z0); zref > z0 > 0 is
+    // enforced where erf.fire_dust_wind_z0/zref are read (ERF.cpp)
     constexpr amrex::Real kappa = 0.4_rt;
-    const amrex::Real log_ratio = (zref > z0 && z0 > 0.0_rt)
-        ? std::log(zref / z0) : 1.0_rt;
+    const amrex::Real log_ratio = std::log(amrex::max(zref, 1.0e-30_rt) / amrex::max(z0, 1.0e-30_rt));
+    const amrex::Real inv_log   = 1.0_rt / amrex::max(log_ratio, 1.0e-30_rt);
 
     for (amrex::MFIter mfi(dust_ustar_in, amrex::TilingIfNotGPU());
          mfi.isValid(); ++mfi) {
@@ -155,22 +161,12 @@ void FireDustCoupling::apply_fire_wind_to_dust_ustar(
 
         amrex::ParallelFor(bx,
             [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                // Average fire wind over the C×C fire cells that cover
-                // dust cell (i, j). When C=1 this is a direct cell lookup.
-                amrex::Real u_avg = 0.0_rt, v_avg = 0.0_rt;
-                for (int di = 0; di < C_ratio; ++di) {
-                    for (int dj = 0; dj < C_ratio; ++dj) {
-                        u_avg += wind(i*C_ratio + di, j*C_ratio + dj, 0, 0);
-                        v_avg += wind(i*C_ratio + di, j*C_ratio + dj, 0, 1);
-                    }
-                }
-                const amrex::Real inv = 1.0_rt / amrex::Real(C_ratio * C_ratio);
-                u_avg *= inv;
-                v_avg *= inv;
+                const amrex::Real u_avg = wind(i, j, 0, 0);
+                const amrex::Real v_avg = wind(i, j, 0, 1);
 
                 // Derive u* from fire wind speed via log-law
                 const amrex::Real spd        = std::sqrt(u_avg*u_avg + v_avg*v_avg);
-                const amrex::Real ustar_fire = spd * kappa / log_ratio;
+                const amrex::Real ustar_fire = spd * kappa * inv_log;
 
                 // Dust emission driven by the larger of MRF u* and fire u*
                 ustar(i, j, k) = amrex::max(ustar(i, j, k), ustar_fire);
@@ -183,7 +179,7 @@ void FireDustCoupling::apply_fire_wind_to_dust_ustar(
         amrex::Print() << "[DUST DEBUG] Phase 2 fire-wind coupling:"
                        << " fire_wind_max=" << wind_max << " m/s"
                        << " ustar_fire_max=" << ustar_max << " m/s"
-                       << " C=" << C_ratio << "\n";
+                       << " C=" << C << "\n";
     }
 }
 

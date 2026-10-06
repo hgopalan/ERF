@@ -239,6 +239,13 @@ slots: immersed forcing applied on the slow step
 heating, Rayleigh damping. With immersed forcing on the acoustic substeps
 (the compressible default) the scalar relaxation never meets the slow-step
 source and the two modes are identical, as they are with no other source.
+Because the default would silently drop such a source, a run that leaves
+:cpp:`erf.fire.source_mode` unset while the fire injects heat and the
+atmosphere has radiation, :cpp:`erf.four_stream_radiation`,
+:cpp:`erf.rayleigh_damp_T`, custom theta forcing or subsidence (or custom
+moisture forcing with latent heat on), or slow-step immersed forcing stops at
+start-up and names them; setting the key to either value is the explicit
+choice.
 
 Levels
 ~~~~~~

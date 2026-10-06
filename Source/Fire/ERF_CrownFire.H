@@ -17,8 +17,8 @@
  *   6. Crown Fraction Burned (CFB) diagnostic
  *
  * Assumptions:
- *   - Canopy parameters are uniform across the domain; spatially varying canopy
- *     parameters are deferred to Phase 10
+ *   - Canopy parameters are uniform across the domain (erf.fire.crown.*);
+ *     there is no canopy raster
  *   - Cruz et al. (2005) was calibrated for North American conifer stands and is
  *     not appropriate for grass or shrub fuel models FM1–FM3, FM5–FM6
  *   - Crown fire cells do not return to surface fire state once activated
@@ -188,9 +188,11 @@ amrex::Real compute_van_wagner_passive_blend(
     amrex::Real I_B_kwm,
     amrex::Real I_o_kwm) noexcept
 {
+    // floored threshold inside the division: a no-canopy cell has I_o = 0
+    // and the early return does not stop the optimiser evaluating I_B/0
+    amrex::Real ratio = amrex::max(static_cast<amrex::Real>(I_B_kwm / amrex::max(I_o_kwm, amrex::Real(1.0e-6))), static_cast<amrex::Real>(0.0));
     if (I_o_kwm < 1.0e-6 || I_B_kwm <= 0.0) return R_surface_ms;
 
-    amrex::Real ratio = amrex::max(static_cast<amrex::Real>(I_B_kwm / I_o_kwm), static_cast<amrex::Real>(0.0));
     amrex::Real CF = amrex::min(std::pow(ratio, 2.0 / 3.0), 1.0);
     return R_surface_ms * (1.0 - CF) + amrex::max(R_crown_active_ms, R_surface_ms) * CF;
 }
@@ -224,13 +226,14 @@ amrex::Real compute_crown_fraction_burned(
     R_surface     = amrex::max(static_cast<amrex::Real>(R_surface), static_cast<amrex::Real>(0.0));
     R_active_crown = amrex::max(static_cast<amrex::Real>(R_active_crown), static_cast<amrex::Real>(0.0));
 
+    // Scott & Reinhardt (2001) CFB formula, with the denominator floored
+    // before the early return (the unselected x/0 is speculated)
+    amrex::Real CFB = (R_total - R_surface) / amrex::max(R_active_crown - R_surface, amrex::Real(1.0e-8));
+
     // If active crown ROS not greater than surface, no crown fire
     if (R_active_crown <= R_surface + 1.0e-8) {
         return 0.0;
     }
-
-    // Scott & Reinhardt (2001) CFB formula
-    amrex::Real CFB = (R_total - R_surface) / (R_active_crown - R_surface);
 
     // Clamp to valid range [0, 1]
     CFB = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(CFB))));
