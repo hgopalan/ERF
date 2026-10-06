@@ -104,10 +104,9 @@ amrex::Real compute_deposition_velocity(amrex::Real v_s, amrex::Real u_star,
  * dep_flux_out is later mapped to the 2D dust grid by
  * apply_deposition_to_dust_grid. All k > klo: no change from this function.
  *
- * u_star is taken from ustar_atm (a 2D MultiFab at k=0 on the atm grid,
- * filled from SurfaceLayer::get_u_star(0) by fill_dust_ustar_from_surface_layer
- * in Phase 9). When grid_ratio=1, ustar_atm is on the same 2D BoxArray as
- * the dust grid and can be used directly.
+ * u_star is taken from ustar_atm, a 2D MultiFab on the atmospheric columns
+ * that DustLayer fills by average_down of dust_ustar_in (the surface layer's
+ * u*, raised by the fire wind where the coupling is on).
  */
 inline void apply_dust_deposition_bc(
     amrex::MultiFab&       cc_source,
@@ -156,7 +155,9 @@ inline void apply_dust_deposition_bc(
                                               DustSettlingConst::MU_AIR_STD);
             Real vd = compute_deposition_velocity(vs, u_star, e0);
 
-            Real rho_dust = amrex::max(static_cast<amrex::Real>(src(i,j,k,comp)), static_cast<amrex::Real>(0.0));
+            // the airborne dust density of the STATE at klo (not cc_source,
+            // which holds the tendency and gave a flux in kg/m3/s2 until 2026-10)
+            Real rho_dust = amrex::max(static_cast<amrex::Real>(s(i,j,k,comp)), static_cast<amrex::Real>(0.0));
             dep(i,j,0)    = vd * rho_dust;
             src(i,j,k,comp) -= vd * rho_dust / dz;
         });

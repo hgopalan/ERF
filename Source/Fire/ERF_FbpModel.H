@@ -3,7 +3,9 @@
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_Gpu.H>
+#include <cctype>
 #include <cmath>
+#include <limits>
 #include <string>
 
 /**
@@ -107,11 +109,18 @@ amrex::Real fbp_ffmc_function(amrex::Real ffmc) noexcept
     return 91.9 * std::exp(-0.1386 * m) * (1.0 + std::pow(m, 5.31) / 4.93e7);
 }
 
-/// Initial spread index from f(F) and the 10 m wind [km/h]
+/// Initial spread index from f(F) and the 10 m wind [km/h].
+/// f(W) = exp(0.05039 W) up to 40 km/h (FBP 1992 eq. 53) and
+/// 12 (1 - exp(-0.0818 (W - 28))) above it (Wotton et al. 2009 eq. 53a),
+/// which fbp_wse_from_isf inverts (eq. 43a/43b); the two branches agree at
+/// 40 km/h to 0.03 %.
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real fbp_isi(amrex::Real fF, amrex::Real W_kmh) noexcept
 {
-    return 0.208 * fF * std::exp(0.05039 * W_kmh);
+    const amrex::Real fW = (W_kmh > 40.0)
+        ? 12.0 * (1.0 - std::exp(-0.0818 * (W_kmh - 28.0)))
+        : std::exp(0.05039 * W_kmh);
+    return 0.208 * fF * fW;
 }
 
 /// Grass curing factor of the degree of curing C [%] (Wotton et al. 2009)
@@ -127,8 +136,13 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real fbp_buildup_effect(int type, amrex::Real bui) noexcept
 {
     const FbpCoeffs k = fbp_coeffs(type);
+    // operands floored before the early return: the optimiser evaluates the
+    // unselected 1/bui and log(q) even when the function returns 1
+    const amrex::Real arg = 50.0 * std::log(amrex::max(k.q, std::numeric_limits<amrex::Real>::min()))
+                          * (1.0 / amrex::max(bui, amrex::Real(1.0e-30)) - 1.0 / k.bui0);
+    const amrex::Real be  = std::exp(amrex::max(amrex::Real(-80.0), amrex::min(arg, amrex::Real(80.0))));
     if (bui <= 0.0 || k.q >= 1.0) return 1.0;
-    return std::exp(50.0 * std::log(k.q) * (1.0 / bui - 1.0 / k.bui0));
+    return be;
 }
 
 /// a (1 - exp(-b ISI))^c
@@ -161,8 +175,11 @@ amrex::Real fbp_rsi(const FbpComputed& s, amrex::Real isi) noexcept
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real fbp_isf_basic(const FbpCoeffs& k, amrex::Real rsf) noexcept
 {
+    // floored operands before the early return (the unselected pow of a
+    // negative base or rsf/0 would be speculated under the fpe traps)
+    const amrex::Real base = amrex::max(rsf, amrex::Real(0.0)) / amrex::max(k.a, amrex::Real(1.0e-30));
+    const amrex::Real r = amrex::min(static_cast<amrex::Real>(std::pow(base, 1.0 / k.c)),  amrex::Real(0.999));
     if (k.a <= 0.0 || rsf <= 0.0) return 0.0;
-    const amrex::Real r = amrex::min(static_cast<amrex::Real>(std::pow(rsf / k.a, 1.0 / k.c)),  amrex::Real(0.999));
     return std::log(1.0 - r) / (-k.b);
 }
 
@@ -175,9 +192,11 @@ amrex::Real fbp_isf_basic(const FbpCoeffs& k, amrex::Real rsf) noexcept
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real fbp_slope_equivalent_wind(const FbpComputed& s, amrex::Real slope) noexcept
 {
-    if (!s.use_slope || slope <= 0.0) return 0.0;
-    const amrex::Real gs = amrex::min(static_cast<amrex::Real>(100.0 * slope),  amrex::Real(70.0));     // percent, capped as the system does
+    // |slope| inside the pow: on backing and flat cells slope <= 0 and the
+    // unselected pow(negative, 1.2) would be speculated under the fpe traps
+    const amrex::Real gs = amrex::min(static_cast<amrex::Real>(100.0 * std::abs(slope)),  amrex::Real(70.0));     // percent, capped as the system does
     const amrex::Real sf = std::exp(3.533 * std::pow(gs / 100.0, 1.2));
+    if (!s.use_slope || slope <= 0.0) return 0.0;
     const amrex::Real isz = fbp_isi(s.fF, 0.0);                              // zero-wind ISI
     amrex::Real isf;
     switch (s.type) {
@@ -215,7 +234,11 @@ amrex::Real fbp_slope_equivalent_wind(const FbpComputed& s, amrex::Real slope) n
     if (wse > 40.0) {
         // Wotton et al. (2009) eq. 43b for equivalent winds above 40 km/h
         const amrex::Real arg = 1.0 - isf / (2.496 * s.fF);
-        wse = (arg > 0.0) ? 28.0 - std::log(arg) / 0.0818 : 112.0;
+        // log of the clamped argument BEFORE the select: the optimiser
+        // evaluates the unselected arm, and log(arg <= 0) would raise
+        // FE_INVALID / FE_DIVBYZERO under the fpe traps.
+        const amrex::Real log_arg = std::log(amrex::max(arg, std::numeric_limits<amrex::Real>::min()));
+        wse = (arg > 0.0) ? 28.0 - log_arg / 0.0818 : 112.0;
     }
     return amrex::max(wse, amrex::Real(0.0));
 }

@@ -11,7 +11,10 @@
  * @brief Wind extraction and adjustment for fire simulation
  *
  * Implements:
- * 1. MOST wind reconstruction at reference height (Dyer 1974)
+ * 1. Wind at wind_ref_ht above ground, interpolated (linearly in height,
+ *    bilinearly or nearest between the surrounding columns) from the
+ *    atmospheric wind, with an optional two-height log-law resampling
+ *    (erf.fire.wind_sample_ht); no MOST reconstruction is involved
  * 2. Wind Adjustment Factor (WAF) for forest canopy effects
  * 3. FARSITE terrain wind corrections (ridge, shelter, valley, deflection)
  *
@@ -57,13 +60,15 @@
  *    instead would sit half an atmospheric cell above the ground.
  * 3. Lookup wind height:
  *    - If fuel_model_mf != nullptr and d_fcwh != nullptr:
- *      fuel_code = clamp(fuel_model_mf(i_f,j_f,0), 1, nfuelcats)
- *      z_ref_cell = d_fcwh[fuel_code]
+ *      slot = fuel_slot(fuel_model_mf(i_f,j_f,0))  (Anderson 1-13, Scott-Burgan
+ *      101-204 and custom codes map to their slots, unknown codes to slot 1)
+ *      z_ref_cell = d_fcwh[slot]
  *    - Otherwise: z_ref_cell = z_ref (global)
  * 4. Compute target height: z_target = z_surf + z_ref_cell
- * 5. Walk k from 0 to nz-2: find k_lo such that
- *    z_phys_cc(i_a, j_a, k_lo) <= z_target < z_phys_cc(i_a, j_a, k_lo+1)
- *    Clamp to k_lo = nz-2 if z_target exceeds column top
+ * 5. Bisection on the column's z_phys_cc profile for k_lo such that
+ *    z_phys_cc(i_a, j_a, k_lo) <= z_target < z_phys_cc(i_a, j_a, k_lo+1),
+ *    clamped to [0, nz-2] (a target below the first centre extrapolates
+ *    from the lowest pair, above the top from the highest)
  * 6. Compute interpolation weight:
  *    alpha = (z_target - z_phys_cc(i_a, j_a, k_lo)) /
  *            (z_phys_cc(i_a, j_a, k_lo+1) - z_phys_cc(i_a, j_a, k_lo))
@@ -250,17 +255,20 @@ void compute_terrain_curvature(
  * @param[in]     k_valley       Valley channeling factor (≈ 0.8)
  * @param[in]     k_deflect      Wind deflection factor (≈ 0.3)
  *
- * Algorithm (per cell):
+ * Algorithm (per cell, as implemented in ERF_FireWindExtract.cpp):
  * 1. Compute slope magnitude |∇z| and wind magnitude |U|
  * 2. Compute wind-upslope alignment: cos_upslope = (∇z · U) / (|∇z| |U|)
- * 3. Classify terrain:
- *    - Ridge (curv > 0.01, |∇z| > 0.05, cos_upslope > 0): factor = 1 + (k_ridge-1)*min(|∇z|,1)
- *    - Shelter (cos_upslope < -0.5, curv > 0.01): factor = k_shelter
- *    - Valley (curv < -0.01): factor = k_valley + (1-k_valley)*(1-min(|∇z|,1))
+ * 3. Classify terrain (no curvature test for ridge and shelter, since a
+ *    uniform planar slope has zero curvature):
+ *    - Windward slope (|∇z| > 0.05, cos_upslope > 0): factor = k_ridge
+ *    - Lee slope (|∇z| > 0.05, cos_upslope < -0.5): factor = k_shelter
+ *    - Valley (otherwise, curv < -0.01): factor = k_valley + (1-k_valley)*(1-min(|∇z|,1))
  *    - Flat/other: factor = 1
  * 4. Clamp: factor = clamp(factor, 0.1, 3.0)
  * 5. Apply speed scaling: U *= factor
- * 6. For valleys: apply deflection using 2D rotation by angle k_deflect*asin(sin_cross/|U||∇z|*factor)
+ * 6. For valleys (curv < -0.01 and |∇z| > 0.05): rotate the scaled wind by
+ *    k_deflect * asin(sin θ), sin θ = (∇z × U_scaled)_z / (|∇z| |U_scaled|)
+ *    the sine of the wind-slope angle, towards the slope aspect
  */
 void apply_farsite_terrain_wind(
     amrex::MultiFab& fire_wind_eff,

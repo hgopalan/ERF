@@ -95,8 +95,11 @@ struct LevelSetGradient {
         if (eps_visc_front < amrex::Real(0.0)) { return eps_bg; }
         const amrex::Real a = std::abs(phi);
         if (a <= visc_d0) { return eps_visc_front; }
+        // ramp weight from a floored width, computed before the early return:
+        // with the defaults visc_d0 = visc_d1 = 0 the unselected (a-0)/0 of
+        // every cell would be speculated under the fpe traps
+        const amrex::Real w = (a - visc_d0) / amrex::max(visc_d1 - visc_d0, amrex::Real(1.0e-30));
         if (a >= visc_d1 || visc_d1 <= visc_d0) { return eps_bg; }
-        const amrex::Real w = (a - visc_d0) / (visc_d1 - visc_d0);
         return eps_visc_front + w * (eps_bg - eps_visc_front);
     }
 };
@@ -188,12 +191,15 @@ void one_sided_derivatives(const amrex::Array4<const amrex::Real>& phi,
 }
 
 /**
- * @brief Godunov norm of the gradient, with optional terrain arc-length correction
+ * @brief Godunov norm of the gradient, with optional terrain projection
  *
- * Computes |∇φ| with the first-order Godunov upwind scheme for an expanding
- * front (R >= 0).
- * With slope_x and slope_y parameters, applies terrain arc-length correction:
- *   |∇φ|_corrected = sqrt(φ_x^2 + φ_y^2 + (φ_x * slope_x + φ_y * slope_y)^2)
+ * Computes |∇φ| with the Godunov (Osher-Sethian) selection of the one-sided
+ * derivatives for an expanding front (R >= 0); the derivatives are first
+ * order or HJ-WENO5-Z depending on the scheme.
+ * With slope_x and slope_y parameters the map-view norm is reduced to the
+ * along-surface one (the rate R is a surface rate, the front moves R cos θ
+ * in map view):
+ *   |∇φ|_terrain = |∇φ|² / sqrt(|∇φ|² + (φ_x slope_x + φ_y slope_y)²)
  *
  * @param[in] phi         Level-set field (assumed with sufficient ghosts for stencil)
  * @param[in] dx, dy      Cell sizes [m]

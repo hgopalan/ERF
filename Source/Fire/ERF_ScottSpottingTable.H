@@ -58,7 +58,9 @@ scott_max_spot_dist_13(int model_id)
 /**
  * @brief Maximum spotting distance [m] for Scott-Burgan 40 fuel models (fuel_system="40").
  *
- * Indexed 0–39 corresponding to GR1–TU5. Returns 500 m for unrecognised IDs.
+ * Takes the Scott-Burgan code (101-204) and returns a linear ramp per fuel
+ * group: these distances are placeholders, not values from Scott (2006) or
+ * Albini (1983). Returns 500 m for unrecognised codes.
  *
  * @param[in] model_id  Scott-Burgan fuel model ID (101–204)
  * @return Maximum spotting distance [m]; returns 500 m for out-of-range IDs.

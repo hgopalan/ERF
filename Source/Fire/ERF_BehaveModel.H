@@ -35,6 +35,7 @@
 #include <ERF_FuelModels.H>
 #include <ERF_Rothermel.H>
 #include <cmath>
+#include <limits>
 
 /**
  * @struct BehaveState
@@ -219,13 +220,19 @@ BehaveState compute_behave_state(
     Real A_lw = (fp.sigma_lw / fp.rho_p) * fp.w_lw;
     Real A_l_total = A_lh + A_lw;
 
-    // Weighting factors
-    Real f_d1 = (A_d_total > 1.0e-12) ? A_d1 / A_d_total : 0.0;
-    Real f_d10 = (A_d_total > 1.0e-12) ? A_d10 / A_d_total : 0.0;
-    Real f_d100 = (A_d_total > 1.0e-12) ? A_d100 / A_d_total : 0.0;
-    Real f_dh = (A_d_total > 1.0e-12) ? A_dh / A_d_total : 0.0;
-    Real f_lh = (A_l_total > 1.0e-12) ? A_lh / A_l_total : 0.0;
-    Real f_lw = (A_l_total > 1.0e-12) ? A_lw / A_l_total : 0.0;
+    // Weighting factors. The totals are clamped BEFORE the select: at -O3
+    // clang evaluates the division of the unselected arm anyway, and 0/0 for
+    // a fuel with no live (or no dead) load trips amrex.fpe_trap_invalid.
+    // The clamp is the identity for every normal total.
+    constexpr Real tiny = std::numeric_limits<Real>::min();
+    const Real A_d_safe = amrex::max(A_d_total, tiny);
+    const Real A_l_safe = amrex::max(A_l_total, tiny);
+    Real f_d1 = (A_d_total > 1.0e-12) ? A_d1 / A_d_safe : 0.0;
+    Real f_d10 = (A_d_total > 1.0e-12) ? A_d10 / A_d_safe : 0.0;
+    Real f_d100 = (A_d_total > 1.0e-12) ? A_d100 / A_d_safe : 0.0;
+    Real f_dh = (A_d_total > 1.0e-12) ? A_dh / A_d_safe : 0.0;
+    Real f_lh = (A_l_total > 1.0e-12) ? A_lh / A_l_safe : 0.0;
+    Real f_lw = (A_l_total > 1.0e-12) ? A_lw / A_l_safe : 0.0;
 
     // Area-weighted SAV
     Real sigma_dead = f_d1 * fp.sigma_d1 + f_d10 * sigma_d10 + f_d100 * sigma_d100 + f_dh * fp.sigma_lh;
@@ -236,22 +243,26 @@ BehaveState compute_behave_state(
     Real w_live = fuelload_herba_live + fp.w_lw;
     Real w_0 = w_dead + w_live;
 
-    Real f_dead = (w_0 > 1.0e-12) ? w_dead / w_0 : 0.0;
-    Real f_live = (w_0 > 1.0e-12) ? w_live / w_0 : 0.0;
+    const Real w_0_safe = amrex::max(w_0, tiny);
+    Real f_dead = (w_0 > 1.0e-12) ? w_dead / w_0_safe : 0.0;
+    Real f_live = (w_0 > 1.0e-12) ? w_live / w_0_safe : 0.0;
 
     // =====================================================================
     // Step 3: Live moisture of extinction
     // =====================================================================
-    // Computed from dead/live fuel load ratio following Rothermel (1972) Eq. 41
-    // Reference: WRF-SFIRE lines ~421–430
+    // Dead/live loading ratio W' of Rothermel (1972) Eq. 88 (Albini 1976,
+    // Andrews 2018 Eq. 59), evaluated with the category-mean SAVs rather
+    // than per class. Reference: WRF-SFIRE fire_ros_behave, lines ~421-430
 
     Real fuelmce = fp.Mx;  // Dead fuel moisture of extinction (from FuelModelParams)
 
-    // Effective heating number weighting: exp(-138/sigma)
+    // Effective heating numbers: exp(-138/sigma) for the dead category and
+    // exp(-500/sigma) for the live one (Rothermel Eq. 88; the two exponents
+    // differ because live fuel needs a thicker heated layer to ignite)
     Real exp_dead = w_dead * std::exp(-138.0 / amrex::max(static_cast<amrex::Real>(sigma_dead), static_cast<amrex::Real>(1.0)));
-    Real exp_live = w_live * std::exp(-138.0 / amrex::max(static_cast<amrex::Real>(sigma_live), static_cast<amrex::Real>(1.0)));
+    Real exp_live = w_live * std::exp(-500.0 / amrex::max(static_cast<amrex::Real>(sigma_live), static_cast<amrex::Real>(1.0)));
 
-    Real W_prima = (exp_live > 1.0e-12) ? (exp_dead / exp_live) : 0.0;
+    Real W_prima = (exp_live > 1.0e-12) ? (exp_dead / amrex::max(exp_live, tiny)) : 0.0;
 
     // Weighted dead fuel moisture; the dead herbaceous class takes the 1-h moisture
     Real fmc_dead = f_d1 * mc_1hr + f_d10 * mc_10hr + f_d100 * mc_100hr + f_dh * mc_1hr;

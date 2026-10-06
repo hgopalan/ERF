@@ -32,17 +32,26 @@
  *  17. fire_flame_length  (Thomas flame length [m])
  *  18. fire_arrival_time  (fire arrival time [s])
  *
- * Phase 8 spotting diagnostics append 4 components when spotting.enable = true:
- *   fire_lofting_height, fire_spot_brand_count, fire_spot_max_dist, fire_spot_active
- *
- * Phase 9 crown-fire diagnostics append 4 or 5 components when crown fire output
- * is enabled:
- *   fire_crown_active, fire_crown_load, fire_crown_fraction_burned,
- *   [optional] fire_flame_tilt, fire_flame_temp
- *
- * fire_precip_mm_hr, the rain rate per fire cell, comes last when the dead-fuel
- * moisture is dynamic and the deck names a rain source (erf.fire.precip_source =
- * atmosphere, or a positive erf.fire.precip_rate_mm_hr).
+ * The optional blocks follow, in this order (fire_plotfile_var_names):
+ *   live moisture (2): fire_fuel_mc_lh, fire_fuel_mc_lw
+ *   spotting (4, spotting.enable): fire_lofting_height, fire_spot_brand_count,
+ *     fire_spot_max_dist, fire_spot_active
+ *   crown fire (4 or 5, crown.enable): fire_crown_active, fire_crown_load,
+ *     fire_crown_fraction_burned, [fire_flame_tilt with compute_flame_tilt],
+ *     fire_flame_temp (always written with the crown block, nowhere else)
+ *   fuel map (1): fire_fuel_model_code
+ *   hybrid ROS (1): fire_ros_model_weight
+ *   structures (1): fire_structure_height
+ *   non-burnable mask (1): fire_nonburnable
+ *   exposure (4, exposure.enable): fire_structure_id, fire_heat_load,
+ *     fire_peak_intensity, fire_ember_landings
+ *   structure ignition (3): fire_structure_state, fire_structure_ignition_time,
+ *     fire_structure_rad_flux
+ *   precipitation (1): fire_precip_mm_hr, when the dead-fuel moisture is dynamic
+ *     and the deck names a rain source (erf.fire.precip_source = atmosphere, or
+ *     a positive erf.fire.precip_rate_mm_hr)
+ *   suppression (3, suppression.enable): fire_suppression_mask,
+ *     fire_ros_factor, fire_line_progress
  */
 
 /**

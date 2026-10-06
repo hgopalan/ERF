@@ -13,10 +13,12 @@
  * burned area effects on dust emission.
  *
  * The fire level-set phi lives on the fire sub-grid (grid_ratio times
- * finer than the atmosphere). The dust crust index lives on the dust
- * sub-grid (which may have a different grid_ratio). We map burned
- * status from fire to dust using physical (x,y) coordinates so that
- * the two grids do not need to be aligned.
+ * finer than the atmosphere) and the dust crust index on the dust
+ * sub-grid. The two grid ratios must be equal (asserted at start-up in
+ * ERF::InitData_post), and both layers live on level 0 (the dust module's
+ * prerequisite): the crust path maps the burned status by physical (x, y)
+ * position, the fire-wind and fire-heat paths copy the fire fields onto
+ * the dust BoxArray by index overlap (ERF.cpp) and read them cell for cell.
  */
 struct FireDustCoupling {
     bool        enabled                   = false;

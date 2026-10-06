@@ -25,8 +25,8 @@
 /**
  * @brief Compute fire ellipse axes from area and perimeter
  *
- * Approximates the fire as an ellipse given its perimeter and burned area.
- * Uses Ramanujan's approximation for ellipse perimeter.
+ * Approximates the fire as an ellipse with the burned area and perimeter,
+ * using the crude perimeter formula P = pi (a + b) (not Ramanujan's).
  *
  * @param[in] area_m2       Burned area [m²]
  * @param[in] perimeter_m   Fire perimeter [m]

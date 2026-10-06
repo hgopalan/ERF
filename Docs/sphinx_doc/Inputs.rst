@@ -4961,8 +4961,9 @@ Fuel and moisture
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | Parameter                                      | Definition                                                 | Acceptable Values              | Default                |
 +================================================+============================================================+================================+========================+
-| **erf.fire.fuel_model_id**                     | Anderson FBFM13 fuel model used everywhere without a fuel  | 1-13                           | 1                      |
-|                                                | map, and for WAF and coefficients with one                 |                                |                        |
+| **erf.fire.fuel_model_id**                     | Anderson FBFM13 fuel model used everywhere without a fuel  | 1-13; 101-204 with fuel_set    | 1                      |
+|                                                | map, and for WAF and coefficients with one                 | = scott_burgan40; 1000-1015    |                        |
+|                                                |                                                            | custom codes; others abort     |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.moisture_1hr**                      | 1-hour dead fuel moisture [fraction]                       | Real 0-1                       | 0.08                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -4999,7 +5000,7 @@ Fuel and moisture
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.stick.radius_cm**                   | Stick radii of the 1-h, 10-h and 100-h classes [cm]        | 3 Reals > 0                    | 0.15 0.635 2.5         |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.stick.rain_surface_moisture**       | Surface moisture held while it rains                       | Real                           | 0.35                   |
+| **erf.fire.stick.rain_surface_moisture**       | Surface moisture held while it rains                       | Real 0.01-0.40                 | 0.35                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.stick.diffusivity_scale**           | Multiplier on the lag-calibrated diffusivity               | Real > 0                       | 1.0                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -5129,7 +5130,8 @@ Ignition
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.ignition_y**                        | Ignition disc centre y [m]                                 | Real                           | 0.0                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.ignition_r**                        | Ignition disc radius [m]                                   | Real > 0                       | 20.0                   |
+| **erf.fire.ignition_r**                        | Ignition disc radius [m]; 0 = no disc (schedule, polygon   | Real >= 0                      | 20.0                   |
+|                                                | or line ignites instead)                                   |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.ignition.schedule_file**            | CSV of timed ignition events; empty disables               | String                         | ""                     |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -5199,7 +5201,7 @@ Wind
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.use_terrain_wind**                  | Apply the FARSITE terrain wind corrections                 | Boolean                        | true                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.k_ridge**                           | Ridge speed-up factor                                      | Real > 0                       | 1.5                    |
+| **erf.fire.k_ridge**                           | Ridge speed-up factor (needs use_terrain_wind = true)      | Real > 0                       | 1.5                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.k_shelter**                         | Lee sheltering factor                                      | Real > 0                       | 0.6                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -5266,7 +5268,7 @@ Rate of spread
 | **erf.fire.prescribed.by_fuel**                | Flat list of fuel code and base rate pairs overriding      | Reals                          | none                   |
 |                                                | prescribed.ros per cell; needs fuel_map.file               |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.cheney_gould.moisture**             | Cheney-Gould dead fine fuel moisture [%]                   | Real                           | 10.0                   |
+| **erf.fire.cheney_gould.moisture**             | Cheney-Gould dead fine fuel moisture [%]                   | Real 1-40                      | 10.0                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.cheney_gould.curing**               | Cheney-Gould degree of curing                              | Real 0-1                       | 1.0                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -5338,11 +5340,11 @@ Balbi model
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.balbi.rho_a**                       | Air density [kg/m3], 2020 form                             | Real                           | 1.2                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.balbi.sigma_B**                     | Stefan-Boltzmann constant [W/(m2 K4)], 2020 form           | Real                           | 5.6e-8                 |
+| **erf.fire.balbi.sigma_B**                     | Stefan-Boltzmann constant [W/(m2 K4)], 2020 form           | Real > 0                       | 5.670374e-8            |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.balbi.max_iter**                    | Root-solve iteration cap, 2020 form                        | Integer                        | 40                     |
+| **erf.fire.balbi.max_iter**                    | Root-solve iteration cap, 2020 form                        | Integer >= 1                   | 40                     |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.balbi.tol**                         | Root-solve bracket width [m/s], 2020 form                  | Real                           | 1.0e-4                 |
+| **erf.fire.balbi.tol**                         | Root-solve bracket width [m/s], 2020 form                  | Real > 0                       | 1.0e-4                 |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.balbi.directional**                 | Direction-dependent Balbi spread on the level-set path     | Boolean                        | false                  |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -5459,7 +5461,8 @@ Propagation
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.reinit_every**             | Reinitialise every N subcycles                             | Integer > 0                    | 5                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.levelset.reinit_iters**             | Outer RK3 pseudo-time steps per reinitialisation           | Integer > 0                    | 1                      |
+| **erf.fire.levelset.reinit_iters**             | Outer RK3 pseudo-time steps per reinitialisation; 0 skips  | Integer >= 0                   | 1                      |
+|                                                | the reinitialisation                                       |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.reinit_dtau**              | Reinitialisation pseudo-timestep [m]; <= 0 selects 0.01 dx | Real                           | -1.0                   |
 |                                                | (WRF-Fire's value) for both schemes                        |                                |                        |
@@ -5551,7 +5554,10 @@ Heat flux and coupling
 | **erf.fire.prescribed_heat.end_time**          | Time it switches off [s]; negative keeps it on             | Real                           | -1.0                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.source_mode**                       | Replace the theta and vapour source slots (legacy) or add  | "overwrite", "add"             | "overwrite"            |
-|                                                | to the rebuilt stage source                                |                                |                        |
+|                                                | to the rebuilt stage source. Left at the default with      |                                |                        |
+|                                                | another theta source on the fire level (radiation,         |                                |                        |
+|                                                | Rayleigh damping of T, custom forcing or subsidence,       |                                |                        |
+|                                                | immersed forcing) the run stops: set it explicitly         |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.heat_open_fraction**                | Place injected heat only in the open part of columns with  | Boolean                        | false                  |
 |                                                | structures; needs structures.enable                        |                                |                        |
@@ -5599,7 +5605,7 @@ Spotting
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.spotting.reentry_fuel_thresh**      | Minimum remaining fuel fraction for a landing to ignite    | Real 0-1                       | 0.05                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.spotting.random_seed**              | Random seed; 0 seeds from the clock                        | Integer >= 0                   | 0                      |
+| **erf.fire.spotting.random_seed**              | Random seed; <= 0 seeds from the clock (not repeatable)    | Integer                        | 0                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.spotting.spotting_interval**        | Apply spotting every N fire subcycles                      | Integer > 0                    | 1                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -5680,7 +5686,7 @@ Diagnostics and output
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.exposure.interval**                 | Fire steps between exposure rows                           | Integer >= 1                   | 100                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.exposure.ring**                     | Width of the wall band around a footprint [fire cells]     | Integer >= 1                   | 1                      |
+| **erf.fire.exposure.ring**                     | Width of the wall band around a footprint [fire cells]     | Integer 1-4                    | 1                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.suppression.enable**                | Read and apply the suppression action file (fire lines,    | Boolean                        | false                  |
 |                                                | drops, hold test, burnout); see :ref:`sec:FireSuppression` |                                |                        |
@@ -5738,7 +5744,8 @@ checked once at startup and abort with a message naming the input to fix.
 |                                              | erf.fire.grid_ratio when the fire coupling is on           |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.n_size_bins**                     | Number of particle size bins; each bin is one component of | Integer > 0              | 3                                  |
-|                                              | the emission flux                                          |                          |                                    |
+|                                              | the emission flux, which the bins share equally; give one  |                          |                                    |
+|                                              | erf.dust.bin_diameters entry per bin                       |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.bin_diameters**                   | Per-bin diameter [m]; bin 0 sets the Bagnold base          | Reals                    | 7.0e-6 2.5e-6 50.0e-6              |
 |                                              | threshold, and all bins drive settling, deposition and PM  |                          |                                    |
@@ -5895,7 +5902,9 @@ are in :ref:`sec:DustSources`.
 | **erf.dust.blast_reactivity**                | Multiplier on the injected blast mass for fresh surfaces   | Real >= 1                | 2.0                                |
 |                                              | [-]                                                        |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.road_schedule_file**              | Haul road schedule CSV; empty means no road emission       | String                   | ``""``                             |
+| **erf.dust.road_schedule_file**              | Haul road schedule CSV; empty means no road emission; a    | String                   | ``""``                             |
+|                                              | file that cannot be read, or a row with width <= 0,        |                          |                                    |
+|                                              | weight <= 0 or silt < 0, aborts                            |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.road_diag_file**                  | Per-road emission CSV                                      | String                   | ``"dust_road_diag.csv"``           |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
@@ -5917,10 +5926,10 @@ on the same scalar.
 | **erf.dust.atm_feedback**                    | Scale on the injected flux; 0 disables injection for       | Real 0-1                 | 1.0                                |
 |                                              | surface-only diagnostics                                   |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.transport_bins_separately**       | One 3D scalar per bin instead of a single total; only bin  | Boolean                  | false                              |
-|                                              | 0 is returned to the surface at present                    |                          |                                    |
+| **erf.dust.transport_bins_separately**       | One 3D scalar per bin instead of a single total; the state | Boolean                  | false                              |
+|                                              | carries one dust scalar, so true needs n_size_bins = 1     |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.deposition_E0**                   | Surface collection efficiency of the dry-deposition        | Real > 0                 | 3.0e-3                             |
+| **erf.dust.deposition_E0**                   | Surface collection efficiency of the dry-deposition        | Real >= 0                | 3.0e-3                             |
 |                                              | resistance [-]; 3e-3 bare mine surface, 1e-4 paved road,   |                          |                                    |
 |                                              | 1e-2 vegetation                                            |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
@@ -5953,7 +5962,7 @@ models are enabled; see :ref:`sec:DustFire`.
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.fire_dust_wind_z0**                    | Roughness length of that log law [m]                       | Real > 0                 | 0.1                                |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.fire_dust_wind_zref**                  | Reference height of that log law [m]; match                | Real > 0                 | 6.1                                |
+| **erf.fire_dust_wind_zref**                  | Reference height of that log law [m]; match                | Real > fire_dust_wind_z0 | 6.1                                |
 |                                              | erf.fire.wind_ref_ht                                       |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.fire_dust_lofting_enabled**            | Multiply the emission flux by the convective lofting       | Boolean                  | false                              |

@@ -9,8 +9,6 @@
 #include <AMReX_Math.H>
 #include <cmath>
 
-static constexpr double REL = (sizeof(amrex::Real) == 8) ? 1e-10 : 1e-4;
-
 #include "ERF_FireParams.H"   // ERF_CheneyGouldModel.H reads FireParams without including it
 #include "ERF_NumericalSchemes.H"
 #include "ERF_Reinitialize.H"
@@ -79,6 +77,30 @@ DirectionalRosState rothermel_state ()
     st.rc.ros_conv     = 1.0;
     st.rc.I_R          = 0.0;
     return st;
+}
+
+/// Two-fuel map split at x_boundary. A free function: nvcc rejects an extended
+/// device lambda in a gtest case body (the generated TestBody is private).
+void fill_two_fuel_map (MultiFab& fuel, Real x_boundary, int slow_code, int fast_code)
+{
+    for (MFIter mfi(fuel); mfi.isValid(); ++mfi) {
+        auto fa = fuel.array(mfi);
+        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const Real x = (i + Real(0.5)) * DX;
+            fa(i, j, k) = (x < x_boundary) ? Real(slow_code) : Real(fast_code);
+        });
+    }
+}
+
+/// Planar front phi = x - x_front0 on every grown cell (free function, as above).
+void fill_planar_front (MultiFab& phi, Real x_front0)
+{
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        auto p = phi.array(mfi);
+        ParallelFor(mfi.growntilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            p(i, j, k) = (i + Real(0.5)) * DX - x_front0;
+        });
+    }
 }
 
 /// Wind speed [m/s] whose head-on (cos_theta_wind=1) advective-coupling rate
@@ -404,13 +426,7 @@ TEST(SplitHamiltonianAdvection, MixedFuelMapAdvancesEachRegionAtItsOwnRate)
     amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_tbl.begin(), h_tbl.end(), d_tbl.begin());
 
     MultiFab fuel(f.ba, f.dm, 1, 0);
-    for (MFIter mfi(fuel); mfi.isValid(); ++mfi) {
-        auto fa = fuel.array(mfi);
-        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            const Real x = (i + Real(0.5)) * DX;
-            fa(i, j, k) = (x < X_BOUNDARY) ? Real(SLOW_CODE) : Real(FAST_CODE);
-        });
-    }
+    fill_two_fuel_map(fuel, X_BOUNDARY, SLOW_CODE, FAST_CODE);
 
     // Wind along +x with the fixture's speed; slow-fuel head rate is then TARGET_RF.
     MultiFab wind(f.ba, f.dm, 2, 0), slopes(f.ba, f.dm, 2, 0);
@@ -420,12 +436,7 @@ TEST(SplitHamiltonianAdvection, MixedFuelMapAdvancesEachRegionAtItsOwnRate)
 
     // Planar front, burned behind it: phi = x - X_FRONT0.
     MultiFab phi(f.ba, f.dm, 1, 3);
-    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
-        auto p = phi.array(mfi);
-        ParallelFor(mfi.growntilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            p(i, j, k) = (i + Real(0.5)) * DX - X_FRONT0;
-        });
-    }
+    fill_planar_front(phi, X_FRONT0);
 
     auto front_x = [&](Real y) {
         Real lo = 20.0, hi = LDOM - 20.0;

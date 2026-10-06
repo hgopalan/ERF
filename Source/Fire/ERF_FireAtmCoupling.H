@@ -22,31 +22,38 @@
 //   WRF-SFIRE source: phys/module_fr_sfire_atm.F, subroutine fire_tendency.
 //
 // Coupling time lag:
-//   ERF uses one-step explicit lag: fire heat flux computed at time n is
-//   injected into cc_source at the beginning of step n+1, before advance_dycore().
+//   ERF uses one-step explicit lag: the fire heat flux computed at the end of
+//   step n is held in Q_atm_prev and injected into cc_source during step n+1,
+//   from the slow right-hand side of every RK stage (ERF_TI_slow_rhs_pre.H),
+//   after make_sources has rebuilt cc_source for that stage.
 //   This is consistent with WRF-Fire's explicit coupling approach.
 //
 // RK-stage safety:
-//   apply_fire_tendency_to_cc_source may be invoked once per RK stage of the
+//   apply_fire_tendency_to_cc_source is invoked once per RK stage of the
 //   slow-RHS integrator. Because the lagged Q_atm_prev is fixed for the whole
 //   timestep, the fire tendency it produces must also be identical at every
-//   RK stage. We therefore OVERWRITE cc_source[RhoTheta_comp] (and RhoQ1_comp
-//   when latent heat is on) rather than accumulate: the values are cleared to
-//   zero at the top of the routine and then set via '=' inside the kernel.
-//   Accumulating with '+=' across RK stages triples the injected heat and
-//   drives rho negative at the surface within a few timesteps.
+//   RK stage. With erf.fire.source_mode = overwrite (the default) we OVERWRITE
+//   cc_source[RhoTheta_comp] (and RhoQ1_comp when latent heat is on): the
+//   values are cleared to zero at the top of the routine and then set via '='
+//   inside the kernel, which discards every other source make_sources put
+//   there (radiative heating, Rayleigh damping, nudging). source_mode = add
+//   adds to the rebuilt source instead. Accumulating with '+=' across RK
+//   stages without the per-stage rebuild would triple the injected heat.
 //
 // Latent heat:
 //   WRF-Fire computes grnqfx (ground latent heat flux) alongside grnhfx and
 //   passes both through fire_tendency. ERF-Fire follows the same approach:
-//   Q_latent = Lv * bmst * (dmass/dt)   where bmst = M_f / (1 + M_f)
-//   This is stored as fire_latent_flux [W/m2] and distributed with the same
+//   Q_latent = Lv * (bmst + (1 - bmst) * f_water) * (dmass/dt)
+//   with bmst = M_f / (1 + M_f) the fuel-moisture share and f_water = 0.56 the
+//   water of combustion per unit dry mass (compute_fire_latent_flux). This is
+//   stored as fire_latent_flux [W/m2] and distributed with the same
 //   exponential profile.
 //
 // Assumptions:
 //   - The tendency goes into the source of the level the fire grid refines
-//     (erf.fire.anchor_level, the finest level by default); coarser levels see it
-//     through average-down, finer levels not at all.
+//     (erf.fire.anchor_level, the finest level by default); coarser levels see
+//     the result through average-down with erf.coupling_type = TwoWay (the
+//     default), not with OneWay; finer levels not at all.
 //   - fire_heat_flux and fire_latent_flux are on the fire grid (C*nx x C*ny x 1
 //     over the fire region).
 //   - The coarsening from fire grid to atmospheric grid is the area average of
@@ -71,6 +78,7 @@
 #include <AMReX_MFIter.H>
 #include <AMReX_MultiFabUtil.H>
 #include <cmath>
+#include <limits>
 #include <ERF_Constants.H>
 #include <ERF_IndexDefines.H>
 #include <ERF_FireGrid.H>
@@ -171,10 +179,13 @@ inline void compute_fire_latent_flux(
 //
 // Optional fire_debug argument prints per-call tendency diagnostics to stdout:
 //   [FIRE COUPLING] RhoTheta tendency sum = ...  max = ... [kg K m^-3 s^-1]
-//   expected_surface_max = rho * Q_max / Cp * (1 - exp(-dz/alfg)) / dz
+//   expected_surface_max = Q_max / (Cp * 1.2) * (1 - exp(-dz/alfg)) / dz
+//   (the printed estimate uses rho = 1.2 and the default heat_tendency_density
+//   = false form, d(rho theta)/dt = -(1/Cp) dQ/dz; with density on it would
+//   carry an extra factor rho)
 //
-// With Q_max=14330 W/m2, rho~1.2, Cp=1004.64, alfg=45 m, dz=4 m:
-//   expected_surface_max ~ 0.38 kg K m^-3 s^-1  (~0.32 K/s / rho)
+// With Q_max=14330 W/m2, Cp=1004.64, alfg=45 m, dz=5 m (the 5 m fire decks):
+//   expected_surface_max ~ 0.25 K m^-3 s^-1 (kg K m^-3 s^-1 with density on)
 inline void apply_fire_tendency_to_cc_source(
     amrex::MultiFab& cc_source,
     const amrex::MultiFab& Q_atm,
@@ -320,7 +331,7 @@ inline void apply_fire_tendency_to_cc_source(
                 // that total so the two modes inject the same energy per column.
                 const Real z_top   = (z_cc_a(i, j, khi) - z_sfc) + dz_avg;
                 const Real legacy  = 1.0 - std::exp(-z_top / alfg);
-                w_k = (norm > 1.0e-30) ? w_k * share * legacy / norm : 0.0;
+                w_k = (norm > 1.0e-30) ? w_k * share * legacy / amrex::max(norm, Real(1.0e-30)) : 0.0;
             }
 
             // Without the open-fraction option the flux-difference expression is
@@ -412,7 +423,7 @@ inline void apply_fire_tendency_to_cc_source(
                         total += t(i, j, kk);
                         if (zk < hr(i, j, 0)) { below += t(i, j, kk); }
                     }
-                    c(i, j, 0) = (total > 1.0e-30) ? below / total : 0.0;
+                    c(i, j, 0) = (total > 1.0e-30) ? below / amrex::max(total, Real(1.0e-30)) : 0.0;
                 });
             }
             for (MFIter mfi(thb, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
@@ -435,9 +446,10 @@ inline void apply_fire_tendency_to_cc_source(
         // The ratio divides only when e_in > 0, but the optimiser evaluates the division
         // speculatively for both arms of the selection, and 0/0 on the first lagged step
         // raised the invalid flag that aborts the run under amrex.fpe_trap_invalid; the
-        // tiny offset keeps the discarded value finite and the printed one unchanged.
+        // floored denominator (the smallest normal Real, so it holds in single
+        // precision too) keeps the discarded value finite and the printed one unchanged.
         amrex::Print() << "[FIRE COUPLING] energy_in=" << e_in << " W  energy_out=" << e_out
-                       << " W  ratio=" << ((e_in > 0.0) ? e_out / (e_in + 1.0e-300) : 0.0)
+                       << " W  ratio=" << ((e_in > 0.0) ? e_out / amrex::max(e_in, std::numeric_limits<Real>::min()) : 0.0)
                        << "  below_roof_share_max=" << below_roof_max
                        << "  theta_blocked_max=" << theta_blocked_max << "\n";
     }

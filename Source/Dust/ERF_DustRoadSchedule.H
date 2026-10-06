@@ -92,12 +92,15 @@ inline void load_road_schedule(const std::string& filename,
     if (amrex::ParallelDescriptor::IOProcessor()) {
         std::ifstream in(filename);
         if (!in.is_open()) {
-            amrex::Print() << "[DUST] WARNING: Cannot open road schedule: "
-                           << filename << "\n";
-            return;
+            // Abort, not warn: returning here left every other rank waiting
+            // in the Bcast below (a hang on 2+ ranks), and a run without the
+            // roads it was given is not the run that was asked for.
+            amrex::Abort("[DUST] erf.dust.road_schedule_file cannot be opened: " + filename);
         }
         std::string line;
+        int line_no = 0;
         while (std::getline(in, line)) {
+            ++line_no;
             if (line.empty() || line[0] == '#' || line[0] == '!') continue;
             std::replace(line.begin(), line.end(), ',', ' ');
             std::istringstream iss(line);
@@ -105,7 +108,22 @@ inline void load_road_schedule(const std::string& filename,
             iss >> ev.name >> ev.x_lo >> ev.y_lo >> ev.x_hi >> ev.y_hi
                 >> ev.road_width_m >> ev.vehicle_weight_t >> ev.silt_pct
                 >> ev.vmt_per_h >> ev.start_time_s >> ev.end_time_s;
-            if (!iss.fail()) {
+            if (iss.fail()) {
+                amrex::Abort("[DUST] " + filename + " line " + std::to_string(line_no)
+                             + ": expected name x_lo y_lo x_hi y_hi width_m weight_t silt_pct vmt_per_h start_s end_s: \""
+                             + line + "\"");
+            }
+            // The AP-42 factor takes pow(silt/12, 0.9) and pow(weight/3, 0.45)
+            // and divides by width x length: a negative or zero field is NaN
+            // or a division by zero in every step the road is active.
+            if (!(ev.road_width_m > 0.0) || !(ev.vehicle_weight_t > 0.0) || !(ev.silt_pct >= 0.0)
+                || !(ev.vmt_per_h >= 0.0) || !(ev.end_time_s < 0.0 || ev.end_time_s >= ev.start_time_s)
+                || !(ev.x_hi > ev.x_lo || ev.y_hi > ev.y_lo)) {
+                amrex::Abort("[DUST] " + filename + " line " + std::to_string(line_no) + " (road " + ev.name
+                             + "): needs width_m > 0, weight_t > 0, silt_pct >= 0, vmt_per_h >= 0,"
+                             " end_s >= start_s (or < 0 for no end) and a non-degenerate x_lo..x_hi / y_lo..y_hi");
+            }
+            {
                 names.push_back(ev.name);
                 buf.push_back(ev.x_lo); buf.push_back(ev.y_lo);
                 buf.push_back(ev.x_hi); buf.push_back(ev.y_hi);
@@ -237,11 +255,12 @@ inline void apply_road_schedule(
                 * std::pow(ev.silt_pct/12.0, DustRoadConst::A_AP42)
                 * std::pow(ev.vehicle_weight_t/3.0, DustRoadConst::B_AP42);
             amrex::Real road_len = std::max(ev.x_hi-ev.x_lo, ev.y_hi-ev.y_lo);
+            // floored length inside the division (the unselected x/0 is speculated)
+            const amrex::Real F_raw = E_road * DustRoadConst::G_PER_KG * ev.vmt_per_h
+                / (ev.road_width_m * amrex::max(road_len, amrex::Real(1.0e-30)) * DustRoadConst::S_PER_H);
             amrex::Real F_v = (road_len > 0.0)
-                ? amrex::min(E_road * DustRoadConst::G_PER_KG * ev.vmt_per_h
-                             / (ev.road_width_m * road_len * DustRoadConst::S_PER_H),
-                             DustRoadConst::FLUX_MAX)
-                : 0.0;
+                ? amrex::min(F_raw, amrex::Real(DustRoadConst::FLUX_MAX))
+                : amrex::Real(0.0);
             out << nstep << "," << cur_time << "," << ev.name << ","
                 << F_v << "\n";
         }

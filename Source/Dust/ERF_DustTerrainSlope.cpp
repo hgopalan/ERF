@@ -133,12 +133,12 @@ static bool read_terrain_onto_dust_grid(
             Real z_ul = z_ptr[ix_lo * ny_terrain + iy_hi];
             Real z_ur = z_ptr[ix_hi * ny_terrain + iy_hi];
 
-            Real fx = (x_ptr[ix_hi] > x_ptr[ix_lo])
-                        ? (x - x_ptr[ix_lo]) / (x_ptr[ix_hi] - x_ptr[ix_lo])
-                        : 0.0_rt;
-            Real fy = (y_ptr[iy_hi] > y_ptr[iy_lo])
-                        ? (y - y_ptr[iy_lo]) / (y_ptr[iy_hi] - y_ptr[iy_lo])
-                        : 0.0_rt;
+            // floored spacings before the selects (equal coordinates at the
+            // raster edge give 0/0 in the unselected arm, which is speculated)
+            const Real hx = x_ptr[ix_hi] - x_ptr[ix_lo];
+            const Real hy = y_ptr[iy_hi] - y_ptr[iy_lo];
+            Real fx = (hx > 0.0_rt) ? (x - x_ptr[ix_lo]) / amrex::max(hx, 1.0e-30_rt) : 0.0_rt;
+            Real fy = (hy > 0.0_rt) ? (y - y_ptr[iy_lo]) / amrex::max(hy, 1.0e-30_rt) : 0.0_rt;
             fx = amrex::max(0.0_rt, amrex::min(1.0_rt, fx));
             fy = amrex::max(0.0_rt, amrex::min(1.0_rt, fy));
 

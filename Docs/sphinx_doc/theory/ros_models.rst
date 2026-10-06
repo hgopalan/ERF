@@ -236,7 +236,7 @@ The distinction matters because the WAF is a Rothermel construct: it reduces the
      - kg/m³
      - Air density (2020)
    * - :cpp:`erf.fire.balbi.sigma_B`
-     - 5.6e-8
+     - 5.670374e-8
      - W/(m²·K⁴)
      - Stefan-Boltzmann constant (2020)
    * - :cpp:`erf.fire.balbi.max_iter`
@@ -311,7 +311,7 @@ This model is calibrated for Australian open grassland fuels and is based on emp
 
 where :math:`R_b` is the backing rate [m/s], :math:`U` is wind speed [m/s], :math:`M` is dead fine fuel moisture [%], and curing ∈ [0, 1].
 
-The current implementation uses domain-average moisture and curing values inside the GPU kernel (see lines 218-220 of ``ERF_CheneyGouldModel.H``). Per-cell moisture from the Phase 4 ODE system is not yet coupled.
+The kernel takes :math:`M` and the curing from :cpp:`erf.fire.cheney_gould.moisture` and :cpp:`erf.fire.cheney_gould.curing`, or, with :cpp:`erf.fire.moisture_dynamic = true`, the domain-average 1-h moisture, on both the isotropic and the directional path. (Before October 2026 the isotropic path passed fixed 10 % and 1.0, so the two paths disagreed for any other value.) Per-cell moisture is not passed into the kernel.
 
 **Not appropriate for forest or shrub fuels (FM4-FM13).**
 
@@ -349,7 +349,14 @@ The multi-class form of Rothermel's model (Andrews, 2018) carries the dead
 1-h, 10-h and 100-h classes, the live herbaceous and live woody classes, and a
 dead herbaceous class that receives cured live herbaceous fuel, with separate
 dead and live moisture damping and a live moisture of extinction from the
-ratio of dead to live load (``ERF_BehaveModel.H``). With
+ratio of dead to live load (``ERF_BehaveModel.H``):
+:math:`W' = \sum_\mathrm{dead} w\, e^{-138/\sigma} / \sum_\mathrm{live} w\, e^{-500/\sigma}`
+and :math:`M_{x,\mathrm{live}} = 2.9\, W' (1 - M'_f / M_{x,\mathrm{dead}}) - 0.226`
+(Rothermel 1972, Eq. 88; the live sum used :math:`e^{-138/\sigma}` before
+October 2026, which lowered :math:`W'` by about 25 % and damped live fuel
+too strongly), evaluated here with the category-mean SAVs. The fuel-bed SAV
+of the reaction velocity is the dead category's, not the area-weighted mean
+over both categories that BehavePlus uses. With
 :cpp:`erf.fire.moisture_dynamic = true` the state is rebuilt in every fire
 cell from that cell's moistures, and the directional level-set path reads a
 state rebuilt each step from the domain-average moistures; otherwise it is
@@ -616,7 +623,7 @@ Limitations
 
 - All ROS models except Balbi with :cpp:`wind_source = "reference"` consume the midflame wind after the Wind Adjustment Factor, which is a Rothermel calibration construct.
 
-- The Cheney-Gould kernel uses placeholder domain-average moisture and curing values (10.0 % and 1.0 respectively) inside the GPU kernel. Use :cpp:`erf.fire.cheney_gould.moisture` and :cpp:`erf.fire.cheney_gould.curing` for domain-averaged values. Per-cell moisture from the Phase 4 ODE system is not yet passed into the kernel.
+- The Cheney-Gould kernel uses domain-wide moisture and curing values (the deck's, or the domain-average 1-h moisture with dynamic moisture); per-cell moisture is not passed into the kernel.
 
 - Per-fuel wind height (:cpp:`use_per_fuel_wind_ht = true`) uses WRF-SFIRE default :math:`\text{fcwh} = 6.096` m for all 13 Anderson fuel models, which produces the same result as :cpp:`wind_ref_ht = 6.096` m unless the table is customised. Custom :cpp:`fcwh` values are not yet exposed through ParmParse.
 
@@ -655,9 +662,13 @@ O1b grass). The surface rate is
 .. math::
 
    R = a\bigl(1 - e^{-b\,\mathrm{ISI}}\bigr)^c \, \mathrm{BE}, \qquad
-   \mathrm{ISI} = 0.208\, f(F)\, e^{0.05039\, W},
+   \mathrm{ISI} = 0.208\, f(F)\, f(W), \qquad
+   f(W) = \begin{cases} e^{0.05039\, W} & W \le 40 \\
+                        12\,\bigl(1 - e^{-0.0818 (W - 28)}\bigr) & W > 40 \end{cases}
 
-with :math:`W` the 10 m open wind in km/h, :math:`f(F)` the function of the
+(FBP 1992 eq. 53, Wotton et al. 2009 eq. 53a; the high-wind branch was
+missing before October 2026, so ISI kept growing exponentially above
+40 km/h), with :math:`W` the 10 m open wind in km/h, :math:`f(F)` the function of the
 Fine Fuel Moisture Code :cpp:`erf.fire.fbp.ffmc`, and the buildup effect
 :math:`\mathrm{BE} = \exp[50 \ln q\,(1/\mathrm{BUI} - 1/\mathrm{BUI}_0)]`
 from :cpp:`erf.fire.fbp.bui` (none for grass). The mixedwood types are

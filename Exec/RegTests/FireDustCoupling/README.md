@@ -20,4 +20,8 @@ CTest runs it as `FireDustCoupling_check`.
 
 ## Expected results
 See the check script's output; the deposition reference is recorded in
-`check_firedust.py` (`DEP_REF`) with the measured pre-fix value.
+`check_firedust.py` (`DEP_REF`). It was re-measured on 2026-10-06
+(5.1697e-02 kg/m², from 1.5596e-02) when the deposition kernel began reading
+the dust density of the state instead of the source tendency and the bins
+began sharing the emission flux. The kernels have known-answer gtests
+(`DustColumn`); this value guards the once-per-step accumulation.

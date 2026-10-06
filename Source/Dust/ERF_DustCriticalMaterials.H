@@ -45,13 +45,14 @@
  *
  * F_cm(i,j) = sum_b( F_dust(i,j,b) * cm_fraction[b] )
  *
- * When transport_bins_separately=false, emission_flux has 1 component
- * and cm_fraction[0] applies. When true, one component per active bin.
+ * emission_flux always carries n_size_bins components (one per bin), whether
+ * the bins are transported together or separately, so the caller passes
+ * n_size_bins. A shorter cm_fractions list repeats its last value.
  *
  * @param[out] cm_flux       Critical material flux [kg_CM/m^2/s] on dust grid.
- * @param[in]  emission_flux dust_emission_flux MultiFab (1 or n_bins components).
+ * @param[in]  emission_flux dust_emission_flux MultiFab (n_size_bins components).
  * @param[in]  cm_fractions  Per-bin CM mass fractions [kg_CM/kg_dust].
- * @param[in]  n_active      Number of active bins (1 or n_size_bins).
+ * @param[in]  n_active      Number of bins to sum (n_size_bins).
  */
 inline void compute_cm_flux(
     amrex::MultiFab&       cm_flux,

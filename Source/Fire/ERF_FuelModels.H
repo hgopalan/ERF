@@ -514,7 +514,10 @@ FuelModelParams get_scott_burgan_fuel_params(int code, amrex::Real M_live = -1.0
  * Anderson set: get_anderson_fuel_params(code), with its fall-through to
  * model 1 for unknown codes. Scott-Burgan set: 1-13 Anderson, 101-204
  * Scott-Burgan with the curing transfer at M_live, non-burnable codes a zero
- * load (GR1's ratios, so nothing divides by zero), unknown codes GR1.
+ * load on GR1's SAV/depth/density ratios, unknown codes GR1. A zero-load entry
+ * is safe only through the table builders, which replace it with the zeroed
+ * slot entry (compute_rothermel_params / compute_behave_state on it would
+ * raise pow(0, -E) = inf).
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 FuelModelParams get_fuel_params(int code, int fuel_set, amrex::Real M_live = -1.0)

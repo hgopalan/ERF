@@ -471,12 +471,16 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     // Advance the fire on the level its grid refines (erf.fire.anchor_level)
     if (m_fire_layer && lev == m_fire_layer->level()) {
 
-        // T and RH at k=0 for fuel moisture update, derived from pre-dycore state.
-        // This is used in both lagged and synchronous modes: the moisture ODE
-        // uses time-averaged T, and the change in T from fire heating within
-        // one atmospheric step is small relative to the moisture time lag.
+        // Air temperature and RH at k=0 for the fuel moisture update, derived
+        // from the pre-dycore state. This is used in both lagged and synchronous
+        // modes: the moisture ODE uses time-averaged T, and the change in T from
+        // fire heating within one atmospheric step is small relative to the
+        // moisture time lag. The temperature is theta * Exner(p) (the moisture
+        // curves, Balbi's T_a and the threshold ignition take an air
+        // temperature); the plain k = 0 potential temperature used here before
+        // was 14-16 K too warm at 840 hPa.
         MultiFab T_atm_k0(ba2d[lev], S_old.DistributionMap(), 1, 0);
-        fire_copy_k0_plane(T_atm_k0, *Theta_prim[lev]);
+        compute_t_from_conservative(T_atm_k0, S_old);
         MultiFab RH_atm_k0(ba2d[lev], S_old.DistributionMap(), 1, 0);
         compute_rh_from_conservative(RH_atm_k0, S_old, Geom(lev));
 

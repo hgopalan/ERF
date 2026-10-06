@@ -10,8 +10,10 @@
  *   for u* > u*_t; Q_s = 0 otherwise.
  *   Units: [kg m^-1 s^-1]
  *
- * Vertical emission flux per size bin (Marticorena & Bergametti 1995):
- *   F_i = alpha_i * silt_fraction * Q_s
+ * Vertical emission flux (Marticorena & Bergametti 1995 give F = alpha G as
+ * the TOTAL flux; the extra silt_fraction factor is this code's mine-tailings
+ * choice, not part of M&B, and the total is shared equally between the bins):
+ *   F_total = alpha * silt_fraction * Q_s,   F_i = F_total / n_size_bins
  *   Units: [kg m^-2 s^-1]
  *
  * where alpha_i is the sandblasting efficiency for bin i [m^-1],
@@ -91,9 +93,11 @@ amrex::Real compute_saltation_flux(amrex::Real ustar,
                                     amrex::Real ustar_t,
                                     amrex::Real rho_a) noexcept
 {
+    // ratio from a floored u* before the early return (calm columns have
+    // u* = 0 and the unselected x/0 would be speculated under the fpe traps)
+    amrex::Real ratio = ustar_t / amrex::max(ustar, amrex::Real(1.0e-30));
     if (ustar <= ustar_t * DustEmissionConst::USTAR_RATIO_MIN) return 0.0;
     amrex::Real rho = (rho_a > 0.0) ? rho_a : DustEmissionConst::RHO_AIR_STD;
-    amrex::Real ratio = ustar_t / ustar;
     amrex::Real Qs = DustEmissionConst::C_S * rho / DustEmissionConst::G_ACCEL
                    * ustar * ustar * ustar
                    * (1.0 - ratio) * (1.0 + ratio) * (1.0 + ratio);
@@ -123,9 +127,9 @@ amrex::Real compute_sandblasting_efficiency(amrex::Real silt_frac) noexcept
 }
 
 /**
- * @brief Compute vertical emission flux for one size bin [kg/m^2/s].
+ * @brief Compute the TOTAL vertical emission flux [kg/m^2/s] (all bins).
  *
- *   F_i = alpha_i * silt_fraction * Q_s
+ *   F = alpha * silt_fraction * Q_s   (the kernel divides it between the bins)
  *
  * @param alpha   Sandblasting efficiency [m^-1].
  * @param silt    Silt mass fraction [0,1].

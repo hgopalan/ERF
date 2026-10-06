@@ -49,11 +49,14 @@ void polyline_point (const std::vector<Real>& v, Real s, Real& x, Real& y, Real&
     for (int k = 0; k + 1 < nv; ++k) {
         const Real x0 = v[2*k], y0 = v[2*k+1], x1 = v[2*k+2], y1 = v[2*k+3];
         const Real len = std::sqrt((x1 - x0)*(x1 - x0) + (y1 - y0)*(y1 - y0));
+        // floored length before the skip (the unselected x/0 of a repeated
+        // vertex would be speculated under the fpe traps)
+        const Real inv_len = Real(1.0) / amrex::max(len, Real(1.0e-30));
         if (len <= 0.0) { continue; }
-        tx = (x1 - x0) / len; ty = (y1 - y0) / len;
+        tx = (x1 - x0) * inv_len; ty = (y1 - y0) * inv_len;
         seg = k;
         if (s <= acc + len || k + 2 == nv) {
-            const Real f = amrex::max(Real(0.0), amrex::min(Real(1.0), (s - acc) / len));
+            const Real f = amrex::max(Real(0.0), amrex::min(Real(1.0), (s - acc) * inv_len));
             x = x0 + f*(x1 - x0);
             y = y0 + f*(y1 - y0);
             return;

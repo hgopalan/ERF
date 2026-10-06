@@ -5,8 +5,7 @@
  * Parameters are read from the "erf.dust" ParmParse prefix at runtime.
  * Default values correspond to bare quartz soil at an arid site.
  *
- * Phase 1 creates this struct and registers it with CMake and GNUmake.
- * Phase 2 adds grid_ratio and uses this struct in ERF_DustGrid and ERF_DustLayer.
+ * Built with CMake only (ERF_ENABLE_DUST); used by ERF_DustGrid and ERF_DustLayer.
  *
  * References:
  *   Bagnold, R. A. (1941). The Physics of Blown Sand and Desert Dunes.
@@ -38,11 +37,13 @@ struct DustParams {
 
     bool        enable              = false;    ///< Enable dust module
     bool        dust_debug          = false;    ///< Print per-step dust diagnostics (stdout, IO rank)
-    int         n_size_bins         = 3;        ///< Number of particle size bins; each bin maps to
-                                                 ///<   one RhoQ*_comp scalar component in ERF.
-                                                 ///<   Bin 0: coarse  (2.5 um < d <= 10 um)
-                                                 ///<   Bin 1: PM10    (1.0 um < d <= 2.5 um)
-                                                 ///<   Bin 2: PM2.5   (d <= 1.0 um)
+    int         n_size_bins         = 3;        ///< Number of particle size bins. The state carries ONE
+                                                 ///<   dust scalar (RhoAdv_comp): the bins' fluxes are
+                                                 ///<   summed into it (transport_bins_separately needs
+                                                 ///<   n_size_bins = 1). The default diameters are
+                                                 ///<   bin_diameters = {7, 2.5, 50} um: bin 0 PM10-class,
+                                                 ///<   bin 1 PM2.5-class, bin 2 coarse; the PM classes
+                                                 ///<   come from the diameters (is_pm25 / is_pm10).
     int         grid_ratio          = 1;        ///< Refinement factor of dust grid relative to ERF
                                                  ///<   level-0 horizontal grid [dimensionless].
                                                  ///<   grid_ratio = 1 places one dust cell per
@@ -97,7 +98,8 @@ struct DustParams {
     amrex::Real blast_reactivity    = 2.0; ///< Reactivity multiplier for fresh blast
                                            ///<   surfaces relative to weathered tailings [-].
                                            ///<   Applied to injected mass flux.
-    amrex::Real supp_tau_base_s     = 3600.0; ///< Base suppression half-life [s].
+    amrex::Real supp_tau_base_s     = 3600.0; ///< Base suppression decay time [s]: the e-folding time of
+                                           ///<   coverage *= exp(-dt/tau) (half-life = 0.693 tau).
                                            ///<   Water: ~3600 s. MgCl2: ~43200 s.
                                            ///<   Reference: Gillies et al. (2005),
                                            ///<     https://doi.org/10.1080/10473289.2005.10464701
@@ -386,9 +388,44 @@ struct DustParams {
         if (!(zref > z0_dust)) fail("erf.dust.zref (" + std::to_string(zref) + ") must be above z0_dust (" + std::to_string(z0_dust) + ")");
         fraction("silt_fraction", silt_fraction);
         fraction("crust_index",   crust_index);
-        if (atm_feedback < 0.0)  fail("erf.dust.atm_feedback must be >= 0, got " + std::to_string(atm_feedback));
+        fraction("atm_feedback", atm_feedback);   // the share of the emitted mass that enters the air
+        // 0 = no surface collection (compute_r_s floors it at 1e-6, so v_d -> v_s);
+        // FireDustMassConservation uses that
         if (deposition_E0 < 0.0) fail("erf.dust.deposition_E0 must be >= 0, got " + std::to_string(deposition_E0));
         if (blast_reactivity < 0.0) fail("erf.dust.blast_reactivity must be >= 0, got " + std::to_string(blast_reactivity));
+        // Ranges Inputs.rst states for the remaining real inputs; a silent
+        // clamp or an unchecked negative sat behind each of them before.
+        if (alpha_crust  < 0.0) fail("erf.dust.alpha_crust must be >= 0, got "  + std::to_string(alpha_crust));
+        if (alpha_efflor < 0.0) fail("erf.dust.alpha_efflor must be >= 0, got " + std::to_string(alpha_efflor));
+        if (test_ustar   < 0.0) fail("erf.dust.test_ustar must be >= 0, got "   + std::to_string(test_ustar));
+        if (loading_feedback_coeff < 0.0)
+            fail("erf.dust.loading_feedback_coeff must be >= 0, got " + std::to_string(loading_feedback_coeff));
+        positive("msha_pel_mg_m3", msha_pel_mg_m3);
+        positive("msha_shift_duration_s", msha_shift_duration_s);
+        if (visibility_enable) {
+            positive("visibility_road_closure_m", visibility_road_closure_m);
+            positive("visibility_warning_m",      visibility_warning_m);
+        }
+        if (silica_enable) positive("silica_osha_pel_mg_m3", silica_osha_pel_mg_m3);
+        if (stel_enable)   positive("stel_threshold_mg_m3",  stel_threshold_mg_m3);
+        for (auto f : cm_fractions) fraction("cm_fractions", f);
+        if (phreeqc_feedback_interval_s < 0.0)
+            fail("erf.dust.phreeqc_feedback_interval_s must be >= 0, got " + std::to_string(phreeqc_feedback_interval_s));
+        if (static_cast<int>(bin_diameters.size()) != n_size_bins)
+            fail("erf.dust.bin_diameters lists " + std::to_string(bin_diameters.size()) + " diameters but erf.dust.n_size_bins = "
+                 + std::to_string(n_size_bins) + "; give one diameter per bin");
+        // The state carries ONE dust scalar (RhoAdv_comp, ERF_IndexDefines.H); a
+        // second transported bin would be written into the smoke or vapour slot.
+        if (transport_bins_separately && n_size_bins > 1)
+            fail("erf.dust.transport_bins_separately = true needs one state scalar per bin, and the state"
+                 " carries a single dust scalar (NSCALARS in ERF_IndexDefines.H); set n_size_bins = 1 or"
+                 " transport the bins together");
+        // (Particles are a Lagrangian diagnostic of where the emitted dust lands;
+        // they do not feed the atmosphere, so they coexist with atm_feedback > 0.)
+#ifndef ERF_USE_PARTICLES
+        if (enable_particles)
+            fail("erf.dust.enable_particles = true needs a build with ERF_ENABLE_PARTICLES=ON");
+#endif
         if (!phreeqc_output_file.empty()) positive("phreeqc_update_interval_s", phreeqc_update_interval_s);
         if (enable_particles && particle_release_interval < 1)
             fail("erf.dust.particle_release_interval must be >= 1, got " + std::to_string(particle_release_interval));

@@ -10,8 +10,10 @@
  *
  *   dust_surf_moist: Q1fx3 at z-face klo [kg/m^2/s]. Null-safe: zeroed when
  *                    moisture_type == None (SFS_q1fx3_lev is null in that case,
- *                    confirmed in ERF_MakeNewArrays.cpp). Feeds Phase 5 Fecan
- *                    moisture inhibition when moisture is active.
+ *                    confirmed in ERF_MakeNewArrays.cpp). An OUTPUT only (the
+ *                    surface latent flux in dust_surf_qflux); the threshold
+ *                    reads the static moisture flag of the surface map, the
+ *                    dynamic moisture option having been removed.
  *
  * Coarsening pattern (same as fill_dust_scalar_from_atm in ERF_DustWindExtract.H):
  *   dust_field(i,j,0) = atm_field(i/C, j/C, klo)
@@ -85,8 +87,8 @@ inline void fill_dust_conc_from_atm(
  * The null path costs one pointer comparison per call.
  *
  * When Q1fx3 is non-null (moisture_type != None), the full extraction
- * runs and dust_surf_moist carries the surface latent flux for use in
- * the Fecan et al. (1999) moisture inhibition term.
+ * runs and the field carries the surface latent flux, for output (the
+ * threshold does not read it).
  *
  * @param[out] dust_surf_moist  2D MultiFab on dust grid [kg/m^2/s].
  * @param[in]  Q1fx3            Vertical moisture flux (face-staggered z).

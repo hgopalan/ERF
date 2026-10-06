@@ -157,8 +157,10 @@ holds its surface shell at :cpp:`erf.fire.stick.rain_surface_moisture`
 instead); where the rate comes from is set by :cpp:`erf.fire.precip_source`
 (:ref:`sec:FirePrecipSource`).
 
-The drivers are the potential temperature and relative humidity of the
-lowest atmospheric cell, sampled onto the fire grid each step and also
+The drivers are the air temperature (the potential temperature times the
+Exner function of the cell's pressure, the same conversion the relative
+humidity uses) and relative humidity of the lowest atmospheric cell, sampled
+onto the fire grid each step and also
 written as ``fire_surface_temp_K`` and ``fire_surface_rh``. Moisture is
 advanced before the rate of spread is evaluated, so the spread responds
 within the same step. The Rothermel, Balbi and Cheney-Gould coefficients are

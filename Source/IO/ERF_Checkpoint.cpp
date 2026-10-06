@@ -227,6 +227,16 @@ ERF::WriteCheckpointFile () const
        // conservative, cell-centered vars
        HeaderFile << ncomp_cons << "\n";
 
+       // The passive-scalar block is compile-time (NSCALARS: base, plus the
+       // dust scalar with ERF_ENABLE_DUST, plus smoke with ERF_ENABLE_FIRE), so
+       // record it next to the header: a reader built with other modules would
+       // otherwise shift every component after it (and with a difference of one
+       // take the QKE backward-compatibility path below).
+       {
+           std::ofstream layout(checkpointname + "/ScalarLayout");
+           layout << "nscalars " << NSCALARS << "\n";
+       }
+
        // x-velocity on faces
        HeaderFile << 1 << "\n";
 
@@ -803,6 +813,12 @@ ERF::WriteCheckpointFile () const
         if (const amrex::MultiFab* hf = m_fire_layer->get_heat_flux()) {
             VisMF::Write(*hf, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireHeatFlux"));
         }
+        // The suppression hold test reads the previous step's flame length before
+        // the step recomputes it; without it the first restarted step tested
+        // every line against zero flames and held lines that should have failed.
+        if (const amrex::MultiFab* fl = m_fire_layer->get_flame_length()) {
+            VisMF::Write(*fl, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireFlameLength"));
+        }
         if (const amrex::MultiFab* fuel = m_fire_layer->get_fuel_load()) {
             amrex::Print() << "Writing fire fuel load to checkpoint" << std::endl;
             VisMF::Write(*fuel, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireFuelLoad"));
@@ -868,7 +884,8 @@ ERF::WriteCheckpointFile () const
         // State that carries across steps but was not written before: the spotting
         // diagnostics, which are recomputed only every spotting interval and held
         // in between; the temporal acceleration state; and the crown ROS carried
-        // between steps with the crown fraction burned.
+        // between steps. The crown fraction burned is a per-step diagnostic,
+        // written only so the restart plotfile shows it.
         if (const amrex::MultiFab* ad = m_fire_layer->get_albini_data()) {
             VisMF::Write(*ad, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireAlbiniData"));
         }
@@ -894,6 +911,10 @@ ERF::WriteCheckpointFile () const
               // restart neither repeats the warning nor forgets that it fired
               << "edge_contact_time " << m_fire_layer->get_edge_contact_time() << "\n"
               << "edge_reach_checked " << (m_fire_layer->get_edge_reach_checked() ? 1 : 0) << "\n"
+              // the lower end of the next ignition window (start of the last step), so
+              // scheduled ignitions and the timed perimeter keep the (prev, current]
+              // window across the restart instead of the dt-reconstructed one
+              << "prev_window_end " << m_fire_layer->get_prev_window_end() << "\n"
               // where the fire grid is: its level and the lower corner of its region in
               // that level's index space, which a restart must reproduce
               << "anchor_level " << fire_lev << "\n"
@@ -1278,8 +1299,30 @@ ERF::ReadCheckpointFile ()
             "SBM restart requires an exact compact core component count");
     }
 
+    // The passive-scalar block of the writer (ScalarLayout, written since
+    // 2026-10): a different NSCALARS means a build with other fire/dust modules,
+    // whose components would be read shifted.
+    {
+        std::ifstream layout(restart_chkfile + "/ScalarLayout");
+        std::string key; int nsc = -1;
+        if (layout >> key >> nsc && key == "nscalars") {
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(nsc == NSCALARS,
+                ("Checkpoint " + restart_chkfile + " was written with " + std::to_string(nsc)
+                 + " passive scalars but this build has " + std::to_string(NSCALARS)
+                 + " (ERF_ENABLE_FIRE adds the smoke scalar, ERF_ENABLE_DUST the dust scalar);"
+                 " restart with a build configured like the one that wrote it").c_str());
+        } else if (chk_ncomp_cons != ncomp_cons) {
+            amrex::Print() << "WARNING: checkpoint " << restart_chkfile << " has " << chk_ncomp_cons
+                           << " conserved components, this build " << ncomp_cons
+                           << "; it records no scalar layout, so a fire/dust build mismatch cannot be told"
+                           << " apart from the QKE backward-compatibility case\n";
+        }
+    }
+
     // NOTE: QKE was removed so this is for backward compatibility
-    AMREX_ASSERT((chk_ncomp_cons==ncomp_cons) || ((chk_ncomp_cons-1)==ncomp_cons));
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE((chk_ncomp_cons==ncomp_cons) || ((chk_ncomp_cons-1)==ncomp_cons),
+        ("Checkpoint has " + std::to_string(chk_ncomp_cons) + " conserved components, this build "
+         + std::to_string(ncomp_cons) + ": was it written by a build with other modules (fire, dust, moisture)?").c_str());
     //
     // See if we have a written separate file that tells how many components and how many ghost cells
     // we have of the base state
@@ -2341,7 +2384,19 @@ ERF::ReadCheckpointFileFire ()
                            << "; keeping the initialized values.\n";
             return;
         }
-        VisMF::Read(*mf, amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", name));
+        // A width set by an input (FireStickMC = 3 x erf.fire.stick.n_shells)
+        // that changed between the runs used to die inside VisMF::Read on an
+        // assert naming neither width nor the input.
+        const std::string prefix = amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", name);
+        const int ncomp_disk = VisMF(prefix).nComp();
+        if (ncomp_disk != mf->nComp()) {
+            amrex::Abort("[FIRE] checkpoint field " + std::string(name) + " has " + std::to_string(ncomp_disk)
+                         + " components but this run allocates " + std::to_string(mf->nComp())
+                         + (std::string(name) == "FireStickMC"
+                            ? " (3 x erf.fire.stick.n_shells: restart with the n_shells the checkpoint was written with)"
+                            : ""));
+        }
+        VisMF::Read(*mf, prefix);
     };
 
     restore_optional(m_fire_layer->get_fuel_mc_mut(),      "FireFuelMC");
@@ -2365,6 +2420,7 @@ ERF::ReadCheckpointFileFire ()
     restore_optional(m_fire_layer->get_crown_active_mut(), "FireCrownActive");
     restore_optional(m_fire_layer->get_crown_load_mut(),   "FireCrownLoad");
     restore_optional(m_fire_layer->get_heat_flux_mut(),      "FireHeatFlux");
+    restore_optional(m_fire_layer->get_flame_length_mut(),   "FireFlameLength");
     restore_optional(m_fire_layer->get_Q_atm_prev_mut(),     "FireQAtmPrev");
     restore_optional(m_fire_layer->get_Q_lat_atm_prev_mut(), "FireQLatAtmPrev");
     // Their ghost columns feed the MRF fire thermal excess. VisMF restores the
@@ -2417,6 +2473,8 @@ ERF::ReadCheckpointFileFire ()
                     amrex::Real v; f >> v; m_fire_layer->set_edge_contact_time(v);
                 } else if (key == "edge_reach_checked") {
                     int v; f >> v; m_fire_layer->set_edge_reach_checked(v != 0);
+                } else if (key == "prev_window_end") {
+                    amrex::Real v; f >> v; m_fire_layer->set_prev_window_end(v);
                 } else {
                     std::string skip; f >> skip;
                 }

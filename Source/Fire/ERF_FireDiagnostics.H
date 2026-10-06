@@ -409,11 +409,13 @@ amrex::Real compute_flame_tilt_angle_deg(
     // Byram convective plume velocity scale
     amrex::Real I_B_Wm = I_B_kWm * 1000.0;
     amrex::Real buoyancy = std::cbrt(g * I_B_Wm / (rho_air * Cp_air * T_amb));
+    // atan of the floored ratio before the early return: every unburned
+    // cell has I_B = 0 and the unselected wind/0 would be speculated
+    amrex::Real tilt_rad = std::atan(wind_speed / amrex::max(buoyancy, amrex::Real(1.0e-30)));
     if (buoyancy <= 0.0) {
         return 90.0;
     }
 
-    amrex::Real tilt_rad = std::atan(wind_speed / buoyancy);
     return amrex::min(tilt_rad * 180.0 / pi, 90.0);
 }
 

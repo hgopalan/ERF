@@ -162,9 +162,6 @@ erf.fire.emc_model = "legacy"
 # true: advance moisture each timestep via ODEs based on RH, T, precipitation
 erf.fire.moisture_dynamic = false
 
-# Compute moisture of extinction dynamically from fuel SAV (Phase 4)
-# false: use default extinction moisture for fuel model
-
 # ============================================================================
 # IGNITION PARAMETERS
 # ============================================================================
@@ -269,8 +266,9 @@ erf.fire.wind_interp = "bilinear"
 # path, instead of applying one scalar rate in every direction. The wind and
 # slope are projected onto the normal and the selected model is evaluated with
 # the projected scalars, so head, flank and backing spread come from the model.
-# false (default) keeps the isotropic behaviour. No effect on the FARSITE path,
-# which gets its directionality from the Anderson ellipse.
+# true is the default (the WRF-Fire form); false keeps one scalar rate in every
+# direction, and this reference deck sets it off deliberately. No effect on the
+# FARSITE path, which gets its directionality from the Anderson ellipse.
 erf.fire.directional_ros = false
 
 # Form of the directional rate (needs directional_ros; not for balbi or hybrid).
@@ -571,7 +569,7 @@ erf.fire.balbi.T_vap = 373.0      # Water vaporisation temperature [K]
 erf.fire.balbi.K1 = 130.0         # Drag coefficient [s/m]
 erf.fire.balbi.st = 17.0          # Air to pyrolysis-gas mass ratio [-]
 erf.fire.balbi.rho_a = 1.2        # Air density [kg/m3]
-erf.fire.balbi.sigma_B = 5.6e-8   # Stefan-Boltzmann constant [W/(m2 K4)]
+erf.fire.balbi.sigma_B = 5.670374e-8   # Stefan-Boltzmann constant [W/(m2 K4)]
 
 # Balbi (2020) root solve: R = Rb + Rc + Rr is solved by bisection
 erf.fire.balbi.max_iter = 40      # Iteration cap
@@ -677,9 +675,6 @@ erf.fire.burnout_model = "residence"
 erf.fire.burnout_time_to_efold = 0.8514
 #erf.fire.burnout_times_s = 7 7 7 180 100 100 100 900 900 900 900 900 900
 
-# Combustion fraction bounds for heat flux calculation
-# Fraction of fuel consumed: typically 0.2 (minimum) to 0.9 (maximum)
-
 # ============================================================================
 # LEVEL-SET ADVECTION (FARSITE Model, Phase 3)
 # ============================================================================
@@ -711,8 +706,7 @@ erf.fire.farsite.coeff_b = 0.25  # Flank fire coefficient
 erf.fire.farsite.coeff_c = 0.1   # Backing fire coefficient
 
 # Gaussian stamping radius for fire front [m] (legacy update only)
-# < 0: auto-compute from grid resolution
-# > 0: manual override (use for tuning)
+# < 0: single-cell stamp; 0: sigma = dx (automatic); > 0: fixed radius
 erf.fire.farsite.gaussian_sigma = -1.0
 
 # CFL number for fire advection (stability)
@@ -906,9 +900,6 @@ erf.fire.crown.canopy_depth = 10.0
 # 0.5 = 50% moisture (typical moist condition)
 erf.fire.crown.foliar_moisture = 1.0
 
-# Critical foliar moisture (Van Wagner 1977 threshold) [fraction]
-# Below this, crown fire impossible due to moisture
-
 # Canopy heat content (energy released when canopy burns) [BTU/lb]
 # Typical: 8000 BTU/lb (slightly lower than surface fuels due to moisture)
 erf.fire.crown.h_crown_BTU_lb = 8000.0
@@ -1021,7 +1012,7 @@ erf.fire.accel.tau_wind = 60.0
 # Phase 9 flame tilt (when compute_flame_tilt = true):
 #   fire_flame_tilt (1 additional component)
 #
-# Phase 9 flame temp (always written):
+# Flame temperature (written with the crown block, crown.enable = true):
 #   fire_flame_temp (1 additional component)
 
 # ============================================================================

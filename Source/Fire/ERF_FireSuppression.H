@@ -10,7 +10,7 @@
  * The action file is a whitespace-separated table with one action per line
  * and `#` comments (see parse_suppression_line for the format). It is read on
  * the IO rank at start-up and again, every erf.fire.suppression.poll_interval
- * fire steps, whenever its modification time changed; the text is broadcast
+ * fire steps, whenever its modification time or size changed; the text is broadcast
  * and every rank parses the same bytes. Ids already known are skipped, so an
  * action is never applied twice and an edited line has no effect: to change an
  * action, add a new id. Every applied, completed, expired, hold-failed and
@@ -32,6 +32,7 @@
 #include <vector>
 #include <sstream>
 #include <cmath>
+#include <limits>
 #include <cstdlib>
 #include <memory>
 
@@ -258,9 +259,13 @@ bool point_in_polygon (amrex::Real x, amrex::Real y, const amrex::Real* v, int n
         const amrex::Real xj = v[2*j], yj = v[2*j+1];
         const bool straddles = (yi > y) != (yj > y);
         // The division is only meaningful when the edge straddles y (then
-        // yj != yi); the select keeps a speculated evaluation trap-free.
-        const amrex::Real dy = (yj - yi != amrex::Real(0.0)) ? (yj - yi) : amrex::Real(1.0);
-        const amrex::Real xcross = (xj - xi) * (y - yi) / dy + xi;
+        // yj != yi). A select on the divisor is NOT trap-safe (the optimiser
+        // folds x / (c ? a : 1) back into c ? x/a : x and evaluates x/0), so
+        // divide by the floored magnitude and restore the sign.
+        const amrex::Real dyr  = yj - yi;
+        const amrex::Real ady  = amrex::max(std::abs(dyr), amrex::Real(1.0e-30));
+        const amrex::Real sdy  = (dyr < amrex::Real(0.0)) ? amrex::Real(-1.0) : amrex::Real(1.0);
+        const amrex::Real xcross = (xj - xi) * ((y - yi) / ady) * sdy + xi;
         if (straddles && x < xcross) { inside = !inside; }
     }
     return inside;
@@ -274,8 +279,9 @@ amrex::Real segment_distance (amrex::Real px, amrex::Real py,
 {
     const amrex::Real dx = x1 - x0, dy = y1 - y0;
     const amrex::Real L2 = dx*dx + dy*dy;
-    const amrex::Real den = (L2 > amrex::Real(0.0)) ? L2 : amrex::Real(1.0);
-    amrex::Real t = ((px - x0)*dx + (py - y0)*dy) / den;
+    // floored length (a degenerate segment gives 0/0; the select form is
+    // folded back into the division by the optimiser)
+    amrex::Real t = ((px - x0)*dx + (py - y0)*dy) / amrex::max(L2, amrex::Real(1.0e-30));
     t = amrex::max(amrex::Real(0.0), amrex::min(amrex::Real(1.0), t));
     const amrex::Real cx = x0 + t*dx, cy = y0 + t*dy;
     return std::sqrt((px - cx)*(px - cx) + (py - cy)*(py - cy));
@@ -291,10 +297,14 @@ bool segment_crosses_box (amrex::Real x0, amrex::Real y0, amrex::Real x1, amrex:
     const amrex::Real p[4] = {-dx, dx, -dy, dy};
     const amrex::Real q[4] = {x0 - xlo, xhi - x0, y0 - ylo, yhi - y0};
     for (int k = 0; k < 4; ++k) {
+        // r from the floored |p| with the sign restored, before the branch:
+        // every axis-aligned segment has p[k] = 0 and the unselected q/0
+        // would be speculated under the fpe traps
+        const amrex::Real sp = (p[k] < amrex::Real(0.0)) ? amrex::Real(-1.0) : amrex::Real(1.0);
+        const amrex::Real r  = sp * q[k] / amrex::max(std::abs(p[k]), amrex::Real(1.0e-30));
         if (p[k] == amrex::Real(0.0)) {
             if (q[k] < amrex::Real(0.0)) { return false; }
         } else {
-            const amrex::Real r = q[k] / p[k];
             if (p[k] < amrex::Real(0.0)) {
                 if (r > t1) { return false; }
                 if (r > t0) { t0 = r; }
@@ -330,13 +340,18 @@ bool polyline_covers_cell (amrex::Real xc, amrex::Real yc, amrex::Real hx, amrex
         const amrex::Real len = std::sqrt((x1 - x0)*(x1 - x0) + (y1 - y0)*(y1 - y0));
         amrex::Real xe = x1, ye = y1;
         if (s + len > built) {
-            const amrex::Real f = (len > amrex::Real(0.0)) ? (built - s) / len : amrex::Real(0.0);
+            const amrex::Real f = (len > amrex::Real(0.0))
+                ? (built - s) / amrex::max(len, amrex::Real(1.0e-30)) : amrex::Real(0.0);
             xe = x0 + f*(x1 - x0);
             ye = y0 + f*(y1 - y0);
         }
         if (segment_distance(xc, yc, x0, y0, xe, ye) <= half) { return true; }
-        const amrex::Real ex = amrex::Real(1.0e-6) * hx;
-        const amrex::Real ey = amrex::Real(1.0e-6) * hy;
+        // shrink by 1e-6 of the half size, but never below a few ulps of the
+        // coordinate itself (in single precision 1e-6 m vanishes against a
+        // 1000 m coordinate and corner touches would count)
+        constexpr amrex::Real ulp4 = amrex::Real(4.0) * std::numeric_limits<amrex::Real>::epsilon();
+        const amrex::Real ex = amrex::max(amrex::Real(1.0e-6) * hx, ulp4 * (std::abs(xc) + hx));
+        const amrex::Real ey = amrex::max(amrex::Real(1.0e-6) * hy, ulp4 * (std::abs(yc) + hy));
         if (segment_crosses_box(x0, y0, xe, ye, xc - hx + ex, yc - hy + ey, xc + hx - ex, yc + hy - ey)) { return true; }
         s += len;
     }
@@ -381,7 +396,7 @@ public:
                      const amrex::Geometry& geom, bool debug);
 
     /**
-     * @brief Apply the actions for the fire step ending at `time`.
+     * @brief Apply the actions for the fire step starting at `time`.
      *
      * Polls the file when due, starts and expires actions, runs the hold test
      * on the previous step's built cells against `flame_length`, rebuilds the
@@ -389,7 +404,11 @@ public:
      * referenced line into `schedule` as events at `time` (the caller's
      * scheduled-ignition pass stamps them this step).
      *
-     * @param[in]     time          Time at the end of the step [s]
+     * @param[in]     time          Start time of the fire step [s] (FireLayer::advance
+     *                              receives t_old): built_m = rate * (time - start_s)
+     *                              is the length at the start of the step, and an
+     *                              action with start_s = t first applies in the step
+     *                              that starts at or after t
      * @param[in]     dt            Fire step [s]
      * @param[in]     step          Fire step counter (1 on the first step of a fresh run)
      * @param[in]     phi           Level set (burned cells are never stamped)

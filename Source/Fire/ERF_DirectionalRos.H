@@ -229,8 +229,11 @@ amrex::Real directional_ros_cell(const DirectionalRosState& st,
                 // to 1 rather than dividing by (near) zero.
                 const amrex::Real Um = amrex::max(U_mag, U);
                 const amrex::Real sm = amrex::max(s_mag, s);
-                const amrex::Real cos_w = (Um > amrex::Real(1.0e-12)) ? U / Um : amrex::Real(1.0);
-                const amrex::Real cos_s = (sm > amrex::Real(1.0e-12)) ? s / sm : amrex::Real(1.0);
+                // divide by the floored magnitudes before the selects: a calm
+                // or flat cell has Um = 0 or sm = 0 and the unselected 0/0 is
+                // speculated under amrex.fpe_trap_invalid
+                const amrex::Real cos_w = (Um > amrex::Real(1.0e-12)) ? U / amrex::max(Um, amrex::Real(1.0e-12)) : amrex::Real(1.0);
+                const amrex::Real cos_s = (sm > amrex::Real(1.0e-12)) ? s / amrex::max(sm, amrex::Real(1.0e-12)) : amrex::Real(1.0);
                 return rothermel_ros_cell(Um, amrex::Real(0.0), sm, amrex::Real(0.0), st.rc, cos_w, cos_s);
             }
             return rothermel_ros_cell(U, amrex::Real(0.0), s, amrex::Real(0.0), st.rc);
@@ -268,9 +271,17 @@ amrex::Real directional_effective_wind(const DirectionalRosState& st, amrex::Rea
         const amrex::Real B    = behave ? st.bs.B            : st.rc.B;
         const amrex::Real Umax = behave ? st.bs.U_max_ftmin  : st.rc.U_max_ftmin;
         const amrex::Real conv = behave ? st.bs.wind_conv    : st.rc.wind_conv;
-        if (R0 <= zero_r || cE <= zero_r || B <= zero_r || R_h <= R0) { return zero_r; }
-        const amrex::Real U_ft = std::pow((R_h / R0 - one_r) / cE, one_r / B);
-        return amrex::min(U_ft, Umax) / conv;
+        // A non-burnable slot (R0 = cE = B = 0) or a rate below R0 gives no
+        // wind. The operands of the invalid case are replaced by benign ones
+        // (base 1, exponent 1) BEFORE the arithmetic, so nothing the optimiser
+        // evaluates for the unselected arm can raise a floating-point flag.
+        const bool valid = (R0 > zero_r && cE > zero_r && B > zero_r && R_h > R0);
+        const amrex::Real R0s = valid ? R0  : one_r;
+        const amrex::Real cEs = valid ? cE  : one_r;
+        const amrex::Real Bs  = valid ? B   : one_r;
+        const amrex::Real Rhs = valid ? R_h : amrex::Real(2.0);
+        const amrex::Real U_ft = std::pow((Rhs / R0s - one_r) / cEs, one_r / Bs);
+        return valid ? amrex::min(U_ft, Umax) / conv : zero_r;
     }
     amrex::Real lo = zero_r, hi = amrex::Real(30.0);
     if (directional_ros_cell(st, hi, zero_r) <= R_h) { return hi; }
@@ -322,15 +333,21 @@ DirectionalEllipse directional_ellipse_cell(const DirectionalRosState& st,
     const amrex::Real dR_s = amrex::max(directional_ros_cell(st, amrex::Real(0.0), S) - R0, amrex::Real(0.0));
     const amrex::Real dR   = amrex::max(directional_ros_cell(st, U, S) - R0, amrex::Real(0.0));
 
-    // The wind and slope increments as vectors along the wind and upslope
+    // The wind and slope increments as vectors along the wind and upslope.
+    // Unit vectors from floored magnitudes, computed unconditionally: on a
+    // calm or flat cell the unselected 0/0 would be speculated under the
+    // fpe traps, and (0, 0)/tiny = (0, 0) is the value the branch gives.
+    const amrex::Real inv_U = amrex::Real(1.0) / amrex::max(U, tiny);
+    const amrex::Real inv_S = amrex::Real(1.0) / amrex::max(S, tiny);
     amrex::Real px = 0.0, py = 0.0;
-    if (U > tiny) { px += dR_w * u / U;    py += dR_w * v / U; }
-    if (S > tiny) { px += dR_s * dzdx / S; py += dR_s * dzdy / S; }
+    if (U > tiny) { px += dR_w * u * inv_U;    py += dR_w * v * inv_U; }
+    if (S > tiny) { px += dR_s * dzdx * inv_S; py += dR_s * dzdy * inv_S; }
     const amrex::Real P = std::sqrt(px*px + py*py);
-    const amrex::Real g = (dR_w + dR_s > tiny) ? dR / (dR_w + dR_s) : amrex::Real(1.0);
+    const amrex::Real g = (dR_w + dR_s > tiny) ? dR / amrex::max(dR_w + dR_s, tiny) : amrex::Real(1.0);
 
     DirectionalEllipse d;
-    if (P > tiny) { d.hx = px / P; d.hy = py / P; }
+    const amrex::Real inv_P = amrex::Real(1.0) / amrex::max(P, tiny);
+    if (P > tiny) { d.hx = px * inv_P; d.hy = py * inv_P; }
     const amrex::Real R_h = R0 + g * P;
     d.e.b  = amrex::Real(0.5) * (R_h + R0);
     d.e.c  = amrex::Real(0.5) * (R_h - R0);
@@ -343,9 +360,9 @@ DirectionalEllipse directional_ellipse_cell(const DirectionalRosState& st,
         d.e.LB = LB;
     } else {
         d.e.a  = R0;
-        d.e.LB = (R0 > tiny) ? d.e.b / R0 : amrex::Real(1.0e12);
+        d.e.LB = (R0 > tiny) ? d.e.b / amrex::max(R0, tiny) : amrex::Real(1.0e12);
     }
-    d.e.HB = (R0 > tiny) ? R_h / R0 : amrex::Real(1.0e12);
+    d.e.HB = (R0 > tiny) ? R_h / amrex::max(R0, tiny) : amrex::Real(1.0e12);
     return d;
 }
 
@@ -449,13 +466,20 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
                 if (idx >= 0 && idx < rc_tbl_size) { st_cell.rc = rc_tbl[idx]; }
             }
 
+            // Unit normal from a floored gradient, computed before any select:
+            // away from the front grad = 0 and the unselected 0/0 would be
+            // speculated under the fpe traps (grad_min > 0 keeps it finite).
+            const amrex::Real inv_grad = amrex::Real(1.0) / amrex::max(grad, grad_min);
+            const amrex::Real nx = dpdx * inv_grad;
+            const amrex::Real ny = dpdy * inv_grad;
+
             if (shape == DIRECTIONAL_SHAPE_ELLIPSE) {
                 // Support function of the model's spread ellipse, and its head
                 // rate where the normal is undefined
                 const DirectionalEllipse de = directional_ellipse_cell(st_cell, u, v, dzdx, dzdy,
                                                                       ellipse_lw, ellipse_lw_max);
                 R_arr(i, j, k) = (grad > grad_min)
-                    ? directional_ellipse_speed(de, dpdx / grad, dpdy / grad)
+                    ? directional_ellipse_speed(de, nx, ny)
                     : de.e.b + de.e.c;
                 return;
             }
@@ -470,8 +494,6 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
 
             amrex::Real U_n, s_n;
             if (grad > grad_min) {
-                const amrex::Real nx = dpdx / grad;
-                const amrex::Real ny = dpdy / grad;
                 U_n = u*nx + v*ny;
                 s_n = dzdx*nx + dzdy*ny;
             } else {
@@ -551,9 +573,13 @@ inline void fill_advective_VwVs(amrex::MultiFab& VwVs,
             const amrex::Real tan_slope_sq = amrex::min(dzdx*dzdx + dzdy*dzdy, amrex::Real(32.0));
             const amrex::Real phi_s = rc.phi_s_const * tan_slope_sq;
 
+            // unit vectors from floored magnitudes (calm / flat cells give
+            // 0/0 in the unselected arm, which the optimiser evaluates)
+            const amrex::Real inv_U = amrex::Real(1.0) / amrex::max(U_mag, amrex::Real(1.0e-12));
+            const amrex::Real inv_s = amrex::Real(1.0) / amrex::max(s_mag, amrex::Real(1.0e-12));
             amrex::Real Vwx = 0.0, Vwy = 0.0, Vsx = 0.0, Vsy = 0.0;
-            if (U_mag > amrex::Real(1.0e-12)) { Vwx = R0*phi_w*u/U_mag; Vwy = R0*phi_w*v/U_mag; }
-            if (s_mag > amrex::Real(1.0e-12)) { Vsx = R0*phi_s*dzdx/s_mag; Vsy = R0*phi_s*dzdy/s_mag; }
+            if (U_mag > amrex::Real(1.0e-12)) { Vwx = R0*phi_w*u*inv_U; Vwy = R0*phi_w*v*inv_U; }
+            if (s_mag > amrex::Real(1.0e-12)) { Vsx = R0*phi_s*dzdx*inv_s; Vsy = R0*phi_s*dzdy*inv_s; }
 
             // The baseline scales the whole rate R = R0 + wind + slope by this
             // factor (front acceleration clock, suppression drops); scaling

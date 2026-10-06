@@ -28,7 +28,11 @@
  *     time step is enough").
  *   - Hybrid gradient: Jiang-Shu flux-form WENO5 on phi values within `band`
  *     of the front, first-order ENO1 (Godunov) elsewhere, with WRF's own band
- *     test on phi itself (not abs(phi)), reproduced as WRF has it.
+ *     test on phi itself (not abs(phi)), reproduced as WRF has it. Note the
+ *     semantics differ from the advection's: `band` here is
+ *     erf.fire.levelset.weno_band_cells * dx tested as phi < band, so with
+ *     weno_band_cells = 0 the advection uses WENO everywhere while this
+ *     reinitialisation uses WENO on the burned side only.
  *   - WENO5's upwind side is selected by sign(S(phi0) * D4th), D4th a
  *     4th-order central difference of the current iterate (WRF's select_4th).
  *   - No subcell (Russo-Smereka) correction.

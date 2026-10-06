@@ -11,7 +11,7 @@
 #   - Ignition placement is chosen to force interaction with the mapped features.
 #
 # Notes:
-#   - Check supporting ASCII map files in the sibling Supporting_Files directory for context.
+#   - Check supporting ASCII map files in ../../Supporting_Files for context.
 
 geometry.prob_lo = 0.0 0.0 0.0
 geometry.prob_hi = 2000.0 2000.0 500.0
@@ -75,7 +75,7 @@ erf.fire.farsite.cfl_fire = 0.5
 erf.fire.coupling_type = "passive"
 erf.fire.write_fire_stats_csv = true
 
-erf.fire.fuel_map.file = "./fuel_map_phase10_200x200.asc"
+erf.fire.fuel_map.file = "../../Supporting_Files/fuel_map_phase10_200x200.asc"
 erf.fire.fuel_map.format = "ascii"
 erf.fire.fuel_map.blending_fraction = 0.0
 

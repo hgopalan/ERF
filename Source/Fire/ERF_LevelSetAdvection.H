@@ -410,7 +410,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
 
     const auto* dx = geom.CellSize();
 
-    // Allocate stage MultiFabs with 3 ghost cells (the stencil reads one)
+    // Allocate stage MultiFabs with 3 ghost cells (the WENO5-Z stencil reads all three)
     const int nghost = 3;
     MultiFab phi_n(phi.boxArray(), phi.DistributionMap(), 1, nghost);
     MultiFab phi_star(phi.boxArray(), phi.DistributionMap(), 1, nghost);
