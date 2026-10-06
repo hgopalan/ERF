@@ -330,6 +330,7 @@ if(ERF_ENABLE_MOORDYN)
   # the exact distance. A lattice tower's member drag must be the normal-flow drag of every node,
   # equal the hand values in a uniform wind and the fine integral in a log-law wind.
   target_sources(${erf_exe_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorInputsReset.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestConductorInputs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MovingBodies/ERF_GTestASCE74.cpp
