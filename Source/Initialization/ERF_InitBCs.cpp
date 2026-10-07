@@ -147,7 +147,8 @@ void ERF::init_phys_bcs (bool& read_prim_theta)
                     init_inflow_profile(bcid, ori, inflow_profile, pp);
                 } else if (file_exists) {
                     pp.queryAdd("read_prim_theta", read_prim_theta);
-                    init_Dirichlet_bc_data(dirichlet_file);
+                    const bool file_has_theta = init_Dirichlet_bc_data(dirichlet_file);
+                    m_th_file_face[ori] = file_has_theta ? (read_prim_theta ? 2 : 1) : 0;
                 } else {
                     pp.getarr("velocity", v, 0, AMREX_SPACEDIM);
                     m_bc_extdir_vals[BCVars::xvel_bc][ori] = v[0];
@@ -174,7 +175,8 @@ void ERF::init_phys_bcs (bool& read_prim_theta)
                 m_bc_extdir_vals[BCVars::Rho_bc_comp][ori] = rho_in;
             }
 
-            bool th_read  = (th_bc_data[0].data()!=nullptr);
+            // this face's own theta comes from a file only if this face read one with theta
+            bool th_read  = (m_th_file_face[ori] != 0);
             Real theta_in = zero_d;
             if (input_bndry_planes && m_r2d->ingested_theta()) {
                 m_bc_extdir_vals[BCVars::RhoTheta_bc_comp][ori] = zero_d;
@@ -655,10 +657,9 @@ void ERF::init_bcs ()
                 if (side == Orientation::low) {
                     for (int i = 0; i < NBCVAR_max; i++) {
                         domain_bcs_type[BCVars::cons_bc+i].setLo(dir, ERFBCType::ext_dir);
-                        if ((BCVars::cons_bc+i == RhoTheta_comp) &&
-                            (th_bc_data[0].data() != nullptr))
+                        if ((BCVars::cons_bc+i == RhoTheta_comp) && (m_th_file_face[ori] != 0))
                         {
-                            if (read_prim_theta) domain_bcs_type[BCVars::cons_bc+i].setLo(dir, ERFBCType::ext_dir_prim);
+                            if (m_th_file_face[ori] == 2) domain_bcs_type[BCVars::cons_bc+i].setLo(dir, ERFBCType::ext_dir_prim);
                         }
                         else if (input_bndry_planes && dir < 2 && (
                            ( (BCVars::cons_bc+i == BCVars::Rho_bc_comp)       && m_r2d->ingested_density()) ||
@@ -682,10 +683,9 @@ void ERF::init_bcs ()
                 } else {
                     for (int i = 0; i < NBCVAR_max; i++) {
                         domain_bcs_type[BCVars::cons_bc+i].setHi(dir, ERFBCType::ext_dir);
-                        if ((BCVars::cons_bc+i == RhoTheta_comp) &&
-                            (th_bc_data[0].data() != nullptr))
+                        if ((BCVars::cons_bc+i == RhoTheta_comp) && (m_th_file_face[ori] != 0))
                         {
-                            if (read_prim_theta) domain_bcs_type[BCVars::cons_bc+i].setHi(dir, ERFBCType::ext_dir_prim);
+                            if (m_th_file_face[ori] == 2) domain_bcs_type[BCVars::cons_bc+i].setHi(dir, ERFBCType::ext_dir_prim);
                         }
                         else if (input_bndry_planes && dir < 2 && (
                            ( (BCVars::cons_bc+i == BCVars::Rho_bc_comp)       && m_r2d->ingested_density()) ||
@@ -819,7 +819,7 @@ void ERF::init_bcs ()
  *
  * @param input_file Path to the Dirichlet input profile file
  */
-void ERF::init_Dirichlet_bc_data (const std::string input_file)
+bool ERF::init_Dirichlet_bc_data (const std::string input_file)
 {
     // Read the dirichlet_input file
     Print() << "dirichlet_input file location : " << input_file << std::endl;
@@ -962,6 +962,7 @@ void ERF::init_Dirichlet_bc_data (const std::string input_file)
         // NOTE: These device vectors are passed to the PhysBC constructors when that
         //       class is instantiated in ERF_MakeNewArrays.cpp.
     } // lev
+    return th_read;
 }
 
 /**

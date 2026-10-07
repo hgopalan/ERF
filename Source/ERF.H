@@ -91,10 +91,6 @@
 #include "ERF_ShocDriver.H"
 #include "AuxiliaryState/ERF_AuxiliaryInertTracer.H"
 
-#ifdef ERF_USE_P3
-#include "ERF_P3Interface.H"
-#endif
-
 #include <iostream>
 
 #ifdef AMREX_LAZY
@@ -122,7 +118,7 @@ class MultiBlockContainer;
 // Describes one component of a 2D plotfile; defined in
 // IO/ERF_Plotfile2DSampledLevel.H, which ERF.H does not need to include.
 namespace plotfile2d { struct Plotfile2DOutputDescriptor; }
-namespace erf_sbm { class SBMStateManager; }
+namespace erf_sbm { class SBMStateManager; class SBMTransport; }
 
 /**
  * Enum of possible interpolation types between coarse/fine
@@ -155,13 +151,13 @@ public:
     ERF (ERF&&)  noexcept = delete;
 
     // Declare a default move assignment operator
-    ERF& operator=(ERF&& other)  noexcept = delete;
+    ERF& operator= (ERF&& other)  noexcept = delete;
 
     // Delete the copy constructor
     ERF (const ERF& other) = delete;
     //
     // Delete the copy assignment operator
-    ERF& operator=(const ERF& other) = delete;
+    ERF& operator= (const ERF& other) = delete;
 
     // Advance solution to final time
     void Evolve ();
@@ -311,54 +307,54 @@ public:
 
     amrex::Vector<amrex::Vector<amrex::MultiFab>> bckgnd_state;
 
-    std::string MakeVTKFilename(int nstep);
-    std::string MakeVTKFilename_TrackerCircle(int nstep);
-    std::string MakeVTKFilename_EyeTracker_xy(int nstep);
-    std::string MakeFilename_EyeTracker_latlon(int nstep);
-    std::string MakeFilename_EyeTracker_maxvel(int nstep);
-    std::string MakeFilename_EyeTracker_minpressure(int nstep);
-    void WriteVTKPolyline(const std::string& filename,
-                          amrex::Vector<std::array<amrex::Real, 2>>& points_xy);
+    std::string MakeVTKFilename (int nstep);
+    std::string MakeVTKFilename_TrackerCircle (int nstep);
+    std::string MakeVTKFilename_EyeTracker_xy (int nstep);
+    std::string MakeFilename_EyeTracker_latlon (int nstep);
+    std::string MakeFilename_EyeTracker_maxvel (int nstep);
+    std::string MakeFilename_EyeTracker_minpressure (int nstep);
+    void WriteVTKPolyline (const std::string& filename,
+                           amrex::Vector<std::array<amrex::Real, 2>>& points_xy);
 
-    void WriteLinePlot(const std::string& filename,
-                       amrex::Vector<std::array<amrex::Real, 2>>& points_xy);
+    void WriteLinePlot (const std::string& filename,
+                        amrex::Vector<std::array<amrex::Real, 2>>& points_xy);
 
-    void HurricaneEyeTracker(const SolverChoice& solverChoice,
-                             const amrex::MultiFab& mf_cc_vel);
+    void HurricaneEyeTracker (const SolverChoice& solverChoice,
+                              const amrex::MultiFab& mf_cc_vel);
 
-    void HurricaneEyeTrackerInitial(const SolverChoice& sc,
-                                    const amrex::Geometry& geom,
-                                    const amrex::Vector<amrex::MultiFab>& S_data,
-                                    const amrex::Real& hurricane_eye_latitude,
-                                    const amrex::Real& hurricane_eye_longitude);
-
-    void HurricaneEyeTrackerNotInitial(const SolverChoice& sc,
-                                       const amrex::Geometry& geom,
-                                       const amrex::MultiFab& mf_cc_vel,
-                                       const amrex::Vector<amrex::MultiFab>& S_data);
-
-    void ComputeGlobalMinLocation(const SolverChoice& sc,
-                                  const amrex::Geometry& geom,
-                                  const amrex::Vector<amrex::MultiFab>& S_data,
-                                  amrex::Real* d_val_min_ptr,
-                                  int* d_i_min_ptr,
-                                  int* d_j_min_ptr,
-                                  amrex::Real& global_val_min,
-                                  int& global_i_min,
-                                  int& global_j_min);
-
-    void HurricaneMaxVelTracker(const amrex::Geometry& geom,
-                                const amrex::MultiFab& mf_cc_vel,
-                                const double& time);
-
-    void HurricaneMinPressureTracker(MoistureType moisture_type,
+    void HurricaneEyeTrackerInitial (const SolverChoice& sc,
                                      const amrex::Geometry& geom,
-                                     const amrex::MultiFab& mf_cons_var,
-                                     const double& time);
+                                     const amrex::Vector<amrex::MultiFab>& S_data,
+                                     const amrex::Real& hurricane_eye_latitude,
+                                     const amrex::Real& hurricane_eye_longitude);
 
-    void HurricaneTrackerCircle();
+    void HurricaneEyeTrackerNotInitial (const SolverChoice& sc,
+                                        const amrex::Geometry& geom,
+                                        const amrex::MultiFab& mf_cc_vel,
+                                        const amrex::Vector<amrex::MultiFab>& S_data);
 
-    void ReadStormTrackerRestart();
+    void ComputeGlobalMinLocation (const SolverChoice& sc,
+                                   const amrex::Geometry& geom,
+                                   const amrex::Vector<amrex::MultiFab>& S_data,
+                                   amrex::Real* d_val_min_ptr,
+                                   int* d_i_min_ptr,
+                                   int* d_j_min_ptr,
+                                   amrex::Real& global_val_min,
+                                   int& global_i_min,
+                                   int& global_j_min);
+
+    void HurricaneMaxVelTracker (const amrex::Geometry& geom,
+                                 const amrex::MultiFab& mf_cc_vel,
+                                 const double& time);
+
+    void HurricaneMinPressureTracker (MoistureType moisture_type,
+                                      const amrex::Geometry& geom,
+                                      const amrex::MultiFab& mf_cons_var,
+                                      const double& time);
+
+    void HurricaneTrackerCircle ();
+
+    void ReadStormTrackerRestart ();
 
     // Initialize multilevel data
     void InitData ();
@@ -406,7 +402,7 @@ public:
     // Calculate wall distance by solving a Poisson equation
     void poisson_wall_dist (int lev);
 
-    void make_subdomains(const amrex::BoxList& ba, amrex::Vector<amrex::BoxArray>& bins);
+    void make_subdomains (const amrex::BoxList& ba, amrex::Vector<amrex::BoxArray>& bins);
 
 #ifdef ERF_USE_FFT
     void build_fft_solvers (int lev);
@@ -430,18 +426,18 @@ public:
     void restart ();
 
     // Check for NaNs and other bad stuff
-    void check_state_for_nans(amrex::MultiFab const& S);
-    void check_vels_for_nans(amrex::MultiFab const& xvel, amrex::MultiFab const& yvel, amrex::MultiFab const& zvel);
+    void check_state_for_nans (amrex::MultiFab const& S);
+    void check_vels_for_nans (amrex::MultiFab const& xvel, amrex::MultiFab const& yvel, amrex::MultiFab const& zvel);
     void check_for_negative_theta (amrex::MultiFab& S);
     void check_for_low_temp       (amrex::MultiFab& S);
 
-    void compute_max_pressure_gradient_diagnostic(int lev);
+    void compute_max_pressure_gradient_diagnostic (int lev);
 
     // Max of (buoyancy - vertical gradient of perturbational pressure);
     //    this is identically zero if the state is in HSE and buoyancy_type = 1
-    void compute_max_buoyancy_gradp_diagnostic(int lev);
+    void compute_max_buoyancy_gradp_diagnostic (int lev);
 
-    void check_mesh_type(int lev);
+    void check_mesh_type (int lev);
 
     // Is it time to write a plotfile or checkpoint?
     // Note that "cur_time" is always in double precision
@@ -455,14 +451,44 @@ public:
     //! Fill a newly built level's two-stream SEB state from its parent
     void fill_seb_from_coarse (int lev);
 
+    //! With erf.radiation.seb_surface_layer_uses_skin, hand the two-stream surface energy
+    //! balance's skin temperature of level lev to the zlo surface layer before it
+    //! computes its fluxes
+    void set_surface_layer_skin (int lev);
+
+    //! Start-up checks of the two-stream balance's coupling with the zlo surface layer:
+    //! warnings for a scalar default the surface layer's flux replaces and for rotated
+    //! surface fluxes, aborts for erf.radiation.seb_surface_layer_uses_skin conflicts
+    void check_seb_surface_layer ();
+
+    //! check_seb_surface_layer has run
+    bool m_seb_surface_layer_checked = false;
+
+    //! Per level: the "takes its radiation from its parent, no skin coupling" warning
+    //! of set_surface_layer_skin has been printed since the level last coupled
+    amrex::Vector<int> m_skin_uncoupled_warned;
+
+    //! The zlo surface layer's applied heat and moisture fluxes for the two-stream
+    //! surface energy balance's H and LE, or nullptr where it applies none
+    void seb_surface_layer_fluxes (int lev,
+                                   const amrex::MultiFab*& sens_flux,
+                                   const amrex::MultiFab*& laten_flux) const;
+
+    //! The conservative surface heat and moisture fluxes (z faces) applied to level
+    //! lev, or nullptr where there is none. The sensible_heat_flux/latent_heat_flux
+    //! 2D outputs and the two-stream surface energy balance both read them here.
+    void surface_flux_sources (int lev,
+                               const amrex::MultiFab*& sens_flux,
+                               const amrex::MultiFab*& laten_flux) const;
+
     // Called after every level 0 timestep
     void post_timestep (int nstep, double time, double dt_lev);
 
     // Do whatever writing needs to be done at intermediate times
-    void WriteAtIntermediateTime(int nstep, double time);
+    void WriteAtIntermediateTime (int nstep, double time);
 
     // Do whatever writing needs to be done after time-stepping is complete
-    void WriteAtFinalTime();
+    void WriteAtFinalTime ();
 
     // Diagnostics
     void sum_integrated_quantities (double time);
@@ -536,12 +562,12 @@ public:
                                       amrex::Gpu::HostVector<amrex::Real>& h_avg_hfx3,  amrex::Gpu::HostVector<amrex::Real>& h_avg_q1fx3,
                                       amrex::Gpu::HostVector<amrex::Real>& h_avg_q2fx3, amrex::Gpu::HostVector<amrex::Real>& h_avg_diss);
 
-    void derive_forcing_profiles_stag(amrex::Gpu::HostVector<amrex::Real>& h_avg_ttend,  amrex::Gpu::HostVector<amrex::Real>& h_avg_qtend,
-                                      amrex::Gpu::HostVector<amrex::Real>& h_avg_wsub,   amrex::Gpu::HostVector<amrex::Real>& h_avg_thtend,
-                                      amrex::Gpu::HostVector<amrex::Real>& h_avg_qhtend, amrex::Gpu::HostVector<amrex::Real>& h_avg_tvtend,
-                                      amrex::Gpu::HostVector<amrex::Real>& h_avg_qvtend, amrex::Gpu::HostVector<amrex::Real>& h_avg_qcvtend,
-                                      amrex::Gpu::HostVector<amrex::Real>& h_avg_tnudge, amrex::Gpu::HostVector<amrex::Real>& h_avg_qnudge,
-                                      amrex::Gpu::HostVector<amrex::Real>& h_avg_unudge, amrex::Gpu::HostVector<amrex::Real>& h_avg_vnudge);
+    void derive_forcing_profiles_stag (amrex::Gpu::HostVector<amrex::Real>& h_avg_ttend,  amrex::Gpu::HostVector<amrex::Real>& h_avg_qtend,
+                                       amrex::Gpu::HostVector<amrex::Real>& h_avg_wsub,   amrex::Gpu::HostVector<amrex::Real>& h_avg_thtend,
+                                       amrex::Gpu::HostVector<amrex::Real>& h_avg_qhtend, amrex::Gpu::HostVector<amrex::Real>& h_avg_tvtend,
+                                       amrex::Gpu::HostVector<amrex::Real>& h_avg_qvtend, amrex::Gpu::HostVector<amrex::Real>& h_avg_qcvtend,
+                                       amrex::Gpu::HostVector<amrex::Real>& h_avg_tnudge, amrex::Gpu::HostVector<amrex::Real>& h_avg_qnudge,
+                                       amrex::Gpu::HostVector<amrex::Real>& h_avg_unudge, amrex::Gpu::HostVector<amrex::Real>& h_avg_vnudge);
 
     // Perform the volume-weighted sum
     amrex::Real
@@ -592,9 +618,9 @@ public:
 
 #ifdef ERF_USE_WW3_COUPLING
     //amrex::Print() <<  " About to call send_to_ww3 from ERF.H" << std::endl;
-    void send_to_ww3(int lev);
+    void send_to_ww3 (int lev);
     //amrex::Print() <<  " About to call read_waves from ERF.H" << std::endl;
-    void read_waves(int lev);
+    void read_waves (int lev);
     //void send_to_ww3 (int lev);
     //void read_waves (int lev);
 
@@ -667,13 +693,6 @@ public:
                                          amrex::MultiFab* eddyDiffs,
                                          amrex::MultiFab* z_phys_nd,
                                          const double& dt_advance);
-
-#ifdef ERF_USE_P3
-    void compute_p3_tendencies (int lev,
-                                amrex::MultiFab& cons_in,
-                                amrex::MultiFab& source,
-                                const double& dt_advance);
-#endif
 
     void build_fine_mask (int lev, amrex::MultiFab& fine_mask);
 
@@ -818,25 +837,25 @@ public:
 
     void init_thin_body (int lev, const amrex::BoxArray& ba, const amrex::DistributionMapping& dm);
 
-    void FillForecastStateMultiFabs(const int lev,
+    void FillForecastStateMultiFabs (const int lev,
+                                     const std::string& filename,
+                                     const std::unique_ptr<amrex::MultiFab>& z_phys_nd,
+                                     amrex::Vector<amrex::Vector<amrex::MultiFab>>& forecast_state);
+
+    void FillSurfaceStateMultiFabs (const int lev,
                                     const std::string& filename,
-                                    const std::unique_ptr<amrex::MultiFab>& z_phys_nd,
-                                    amrex::Vector<amrex::Vector<amrex::MultiFab>>& forecast_state);
-
-    void FillSurfaceStateMultiFabs(const int lev,
-                                   const std::string& filename,
-                                   amrex::Vector<amrex::MultiFab>& surface_state);
+                                    amrex::Vector<amrex::MultiFab>& surface_state);
 
 
-    void WeatherDataInterpolation(const int nlevs,
-                                  const double time,
-                                  amrex::Vector<std::unique_ptr<amrex::MultiFab>>& z_phys_nd,
-                                  bool regrid_forces_file_read);
+    void WeatherDataInterpolation (const int nlevs,
+                                   const double time,
+                                   amrex::Vector<std::unique_ptr<amrex::MultiFab>>& z_phys_nd,
+                                   bool regrid_forces_file_read);
 
-    void SurfaceDataInterpolation(const int nlevs,
-                                  const double time,
-                                  amrex::Vector<std::unique_ptr<amrex::MultiFab>>& z_phys_nd,
-                                  bool regrid_forces_file_read);
+    void SurfaceDataInterpolation (const int nlevs,
+                                   const double time,
+                                   amrex::Vector<std::unique_ptr<amrex::MultiFab>>& z_phys_nd,
+                                   bool regrid_forces_file_read);
 
     void create_background_state_for_ensemble (int lev,
                                                amrex::MultiFab& mf_cc_pert,
@@ -960,7 +979,7 @@ public:
 #endif // ERF_USE_NETCDF
 
 #ifdef ERF_USE_WINDFARM
-    void init_windfarm(int lev);
+    void init_windfarm (int lev);
     void advance_windfarm (const amrex::Geometry& a_geom,
                            const double& dt_advance,
                            amrex::MultiFab& cons_in,
@@ -1036,6 +1055,8 @@ private:
     void AverageDown ();
 
     void update_diffusive_arrays (int lev, const amrex::BoxArray& ba, const amrex::DistributionMapping& dm);
+
+    void make_flux_register (int lev);
 
     void Construct_ERFFillPatchers (int lev);
 
@@ -1239,7 +1260,7 @@ private:
     amrex::Vector<amrex::TableData<amrex::Real, 1>> t_plane_avg;   // RhoTheta planar average per level
 
     // Function to read and populate above vectors (if input file exists)
-    void init_Dirichlet_bc_data (const std::string input_file);
+    bool init_Dirichlet_bc_data (const std::string input_file);
 
     // Build the terrain-following inflow profile of face ori (xlo.inflow_profile)
     void init_inflow_profile (const std::string& bcid, amrex::Orientation ori,
@@ -1350,6 +1371,9 @@ private:
 
     std::unique_ptr<Microphysics> micro;
     std::unique_ptr<erf_sbm::SBMStateManager> sbm_state_manager;
+    // Declared after the state manager so its non-owning layout reference is
+    // destroyed before the authoritative SBM owner.
+    std::unique_ptr<erf_sbm::SBMTransport> sbm_transport;
     std::unique_ptr<erf_auxiliary::AuxiliaryInertTracer> auxiliary_inert_tracer;
     std::unique_ptr<CloudChamberBudget> cloud_chamber_budget;
     erf_cloud_chamber::Config cloud_chamber_config;
@@ -1411,10 +1435,6 @@ private:
 #endif
 
     amrex::Vector<std::unique_ptr<ShocDriver>> native_shoc_driver; // Native SHOC model at each level
-
-#ifdef ERF_USE_P3
-    amrex::Vector<std::unique_ptr<P3Interface>> p3_interface; // P3 model at each level
-#endif
 
     bool plot_rad = false;
     int rad_datalog_int = -1;
@@ -1512,7 +1532,7 @@ private:
     bool finished_wave = false;
 
     // array of flux registers
-    amrex::Vector<amrex::YAFluxRegister*> advflux_reg;
+    amrex::Vector<std::unique_ptr<amrex::YAFluxRegister>> advflux_reg;
 
     // A BCRec is essentially a 2*DIM integer array storing the boundary
     // condition type at each lo/hi walls in each direction. We have one BCRec
@@ -1537,6 +1557,9 @@ private:
 
     // Per-face flag: non-reflecting inflow (extrapolate RhoTheta instead of prescribing)
     amrex::Array<bool, AMREX_SPACEDIM*2> m_bc_nonreflecting = {{false}};
+    // Per face: whether its Dirichlet theta comes from a dirichlet_file, and in which form
+    // (0: not from a file, 1: the file holds rho*theta, 2: the file holds theta)
+    amrex::Array<int, AMREX_SPACEDIM*2> m_th_file_face = {{0}};
 
     // These are the "physical" boundary condition types (e.g. "inflow")
     amrex::GpuArray<ERF_BC, AMREX_SPACEDIM*2> phys_bc_type;
@@ -1750,7 +1773,7 @@ private:
     bool  m_use_tracer_particles; /*!< tracer particles that advect with flow with optional sedimentation */
 
     /*! Read tracer and hydro particles parameters */
-    void readTracersParams();
+    void readTracersParams ();
 
     /*! Initialize tracer and hydro particles */
     void initializeTracers ( amrex::ParGDBBase*,
@@ -1761,7 +1784,7 @@ private:
     void restartTracers ( amrex::ParGDBBase*, const std::string& );
 
     /*! Evolve tracers and hydro particles */
-    void evolveTracers( int,
+    void evolveTracers ( int,
                         double,
                         amrex::Vector<amrex::Vector<amrex::MultiFab>>&,
                         const amrex::Vector<std::unique_ptr<amrex::MultiFab>>& );
@@ -1823,7 +1846,8 @@ private:
 
     // Options for ERF boundary files for real simulations.
     bool        write_erfbdy{false};   // User-settable: write erfbdy during initialization
-    bool        use_erfbdy{false};     // Internal: set during init or restart
+    bool        use_erfbdy{false};     // User-settable for wrfinput: read erfbdy instead of
+                                       //    nc_bdy_file.  Set internally for metgrid and on restart.
     std::string erfbdy_file{"erfbdy"}; // User-settable: erfbdy file name
     int         nvars_erfbdy{0};       // Internal: number of variables in erfbdy
 
@@ -2053,7 +2077,7 @@ private:
     AMREX_FORCE_INLINE
     amrex::YAFluxRegister* getAdvFluxReg (int lev)
     {
-        return advflux_reg[lev];
+        return advflux_reg[lev].get();
     }
 
     AMREX_FORCE_INLINE
@@ -2322,11 +2346,11 @@ public:
                        double artifact_time_seconds) const;
     static void writeBuildInfo (std::ostream& os);
 
-    static void print_banner(MPI_Comm /*comm*/, std::ostream& /*out*/);
-    static void print_usage(MPI_Comm /*comm*/, std::ostream& /*out*/);
-    static void print_error(MPI_Comm /*comm*/, const std::string& msg);
-    static void print_summary(std::ostream&);
-    static void print_tpls(std::ostream& /*out*/);
+    static void print_banner (MPI_Comm /*comm*/, std::ostream& /*out*/);
+    static void print_usage (MPI_Comm /*comm*/, std::ostream& /*out*/);
+    static void print_error (MPI_Comm /*comm*/, const std::string& msg);
+    static void print_summary (std::ostream&);
+    static void print_tpls (std::ostream& /*out*/);
 };
 
 #endif

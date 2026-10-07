@@ -357,7 +357,8 @@ void
 Problem::update_rhotheta_sources (const double& time,
                                   amrex::MultiFab* src,
                                   const Geometry& geom,
-                                  std::unique_ptr<MultiFab>& z_phys_cc)
+                                  std::unique_ptr<MultiFab>& z_phys_cc,
+                                  const Vector<Real>& zlevels_stag)
 {
     if (src->empty()) return;
 
@@ -374,7 +375,7 @@ Problem::update_rhotheta_sources (const double& time,
     d_zlevels.resize(khi+1);
 
     if (z_phys_cc) {
-        reduce_to_max_per_height(zlevels, z_phys_cc);
+        reduce_to_max_per_height(zlevels, z_phys_cc, zlevels_stag);
         amrex::Gpu::copy(amrex::Gpu::hostToDevice, zlevels.begin(), zlevels.end(), d_zlevels.begin());
     }
 
@@ -405,7 +406,8 @@ void
 Problem::update_rhoqt_sources (const double& time,
                                amrex::MultiFab* qsrc,
                                const Geometry& geom,
-                               std::unique_ptr<MultiFab>& z_phys_cc)
+                               std::unique_ptr<MultiFab>& z_phys_cc,
+                               const Vector<Real>& zlevels_stag)
 {
     if (qsrc->empty()) return;
 
@@ -422,7 +424,7 @@ Problem::update_rhoqt_sources (const double& time,
     d_zlevels.resize(khi+1);
 
     if (z_phys_cc) {
-        reduce_to_max_per_height(zlevels, z_phys_cc);
+        reduce_to_max_per_height(zlevels, z_phys_cc, zlevels_stag);
         amrex::Gpu::copy(amrex::Gpu::hostToDevice, zlevels.begin(), zlevels.end(), d_zlevels.begin());
     }
 
@@ -456,7 +458,8 @@ Problem::update_w_subsidence (const double& time,
                               Gpu::DeviceVector<Real>& d_wbar,
                               const amrex::MultiFab& state,
                               const Geometry& geom,
-                              std::unique_ptr<MultiFab>& z_phys_nd)
+                              std::unique_ptr<MultiFab>& z_phys_nd,
+                              const Vector<Real>& zlevels_stag)
 {
     if (wbar.empty()) return;
 
@@ -468,7 +471,7 @@ Problem::update_w_subsidence (const double& time,
     Vector<Real> zlevels;
     zlevels.resize(khi+2);
     if (z_phys_nd) {
-        reduce_to_max_per_height(zlevels, z_phys_nd);
+        reduce_to_max_per_height(zlevels, z_phys_nd, zlevels_stag);
     }
 
     ParmParse pp_erf("erf");
@@ -499,7 +502,8 @@ Problem::update_geostrophic_profile (const double& /*time*/,
                                      Vector<Real>& v_geos,
                                      Gpu::DeviceVector<Real>& d_v_geos,
                                      const Geometry& geom,
-                                     std::unique_ptr<MultiFab>& z_phys_cc)
+                                     std::unique_ptr<MultiFab>& z_phys_cc,
+                                     const Vector<Real>& zlevels_stag)
 {
     if (u_geos.empty()) return;
 
@@ -511,7 +515,7 @@ Problem::update_geostrophic_profile (const double& /*time*/,
     Vector<Real> zlevels;
     zlevels.resize(khi+1);
     if (z_phys_cc) {
-        reduce_to_max_per_height(zlevels, z_phys_cc);
+        reduce_to_max_per_height(zlevels, z_phys_cc, zlevels_stag);
     }
 
     ParmParse pp_erf("erf");
