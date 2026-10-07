@@ -60,7 +60,7 @@
  * @param L_blend  Blending length scale [m]. Typical: 750 m. 0 = disabled.
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real pbl_blend_factor(amrex::Real dx,
+amrex::Real pbl_blend_factor (amrex::Real dx,
                               amrex::Real L_blend) noexcept
 {
     // Written as dx^2 / (L^2 + dx^2), which is the same function, instead of the
@@ -90,7 +90,7 @@ amrex::Real pbl_blend_factor(amrex::Real dx,
  * @param C_s     Smagorinsky coefficient. Typical: 0.17.
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real pbl_kh_ceiling_smag(amrex::Real dx,
+amrex::Real pbl_kh_ceiling_smag (amrex::Real dx,
                                   amrex::Real SmnSmn,
                                   amrex::Real C_s) noexcept
 {
@@ -110,7 +110,7 @@ amrex::Real pbl_kh_ceiling_smag(amrex::Real dx,
  * @param c_max  Coefficient [m^(2/3) s^-1]. Typical: 0.1.
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real pbl_kh_ceiling_powerlaw(amrex::Real dx,
+amrex::Real pbl_kh_ceiling_powerlaw (amrex::Real dx,
                                      amrex::Real c_max) noexcept
 {
     return c_max * std::pow(dx, amrex::Real(4.0) / amrex::Real(3.0));
@@ -139,7 +139,7 @@ amrex::Real pbl_kh_ceiling_powerlaw(amrex::Real dx,
  * @return         Blended and capped K_h [m^2/s].
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real pbl_kh_blend_and_cap(amrex::Real K_h,
+amrex::Real pbl_kh_blend_and_cap (amrex::Real K_h,
                                    amrex::Real dx,
                                    amrex::Real L_blend,
                                    amrex::Real C_s,

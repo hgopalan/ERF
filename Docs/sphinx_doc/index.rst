@@ -86,6 +86,7 @@ In addition to this documentation, there is API documentation for ERF generated 
    Meshing.rst
    MapFactors.rst
    TimeAdvance.rst
+   AuxiliaryState.rst
    Discretizations.rst
    LinearSolvers.rst
    MeshRefinement.rst

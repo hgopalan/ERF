@@ -291,9 +291,10 @@ void ERF::advance_radiation (int lev,
     //
     // This sits ahead of the model dispatch because the flag is set for whichever model is
     // running (ERF_MakeNewLevel.cpp) and the reason for honouring it is a property of the
-    // state, not of the model.  Skipping the pre-dycore sweep costs the two-stream model
-    // nothing else: the flag is only ever set for lev > 0, and the surface energy balance
-    // that the post-dycore call advances runs on level 0 alone.
+    // state, not of the model.  For the two-stream model, the post-dycore call that still
+    // follows holds back the prognostic surface energy balance on such a level until its
+    // first sweep (TwoStreamRadiation::advance), since the balance takes its surface
+    // radiation from the sweep.
     //
     // The flag is set by whichever routine built the level and is cleared here as soon as
     // it has been acted on, so exactly one step is skipped per level creation.  Levels
@@ -333,9 +334,18 @@ void ERF::advance_radiation (int lev,
             }
         }
 
-        // Force radiation update to sync with lsm?
-        bool lsm_updated = (lev==0 && max_level>0) ? lsm.Get_LSM_Update_Status(lev) : false;
-
+        // NOTE: this used to force a radiation update whenever the land surface model
+        // had updated, via
+        //     (lev==0 && max_level>0) ? lsm.Get_LSM_Update_Status(lev) : false
+        // which did not do what it reads as.  SLM and Noah-MP set their update status
+        // true at the end of every Advance and clear it only at the start of the next
+        // one, and advance_radiation runs before advance_lsm within a step, so from
+        // here it read true on every step after the first.  The effect was that
+        // erf.rad_freq_in_steps was silently ignored -- radiation ran every step --
+        // whenever a run had max_level > 0 and an active LSM, and obeyed otherwise.
+        // Nothing is lost by dropping it: running radiation every step is exactly
+        // erf.rad_freq_in_steps = 1, which a user can ask for directly.
+        //
         // Enter radiation class driver
         double time_for_rad = t_old[lev] + start_time;
         rad[lev]->Run(lev, istep[lev], time_for_rad, dt_advance,
@@ -344,7 +354,7 @@ void ERF::advance_radiation (int lev,
                       lsm_input_ptrs, lsm_output_ptrs,
                       qheating_rates[lev].get(), rad_fluxes[lev].get(),
                       z_phys_nd[lev].get()     , lat_ptr, lon_ptr,
-                      lsm_updated, solar_declin, calday);
+                      false, solar_declin, calday);
 
         if (m_SurfaceModel && rad[lev]->radiation_updated()) {
             m_SurfaceModel->distribute_radiation_outputs(lev);
@@ -394,6 +404,9 @@ void ERF::advance_radiation (int lev,
         const MultiFab* t_surf = (m_SurfaceLayer[Orientation::zlo()])
                                ? m_SurfaceLayer[Orientation::zlo()]->get_t_surf(lev)
                                : nullptr;
+        const MultiFab* sfc_sens_flux = nullptr;
+        const MultiFab* sfc_laten_flux = nullptr;
+        seb_surface_layer_fluxes(lev, sfc_sens_flux, sfc_laten_flux);
         Vector<const MultiFab*> radiation_inputs(6, nullptr);
         bool noahmp_active = solverChoice.lsm_type == LandSurfaceType::NOAHMP;
         if (m_SurfaceModel) {
@@ -403,7 +416,7 @@ void ERF::advance_radiation (int lev,
                                vars_old[lev][Vars::cons], z_phys_nd[lev].get(), geom[lev],
                                lsm, radiation_inputs, noahmp_active,
                                qheating_rates[lev].get(), rad_fluxes[lev].get(),
-                               t_surf, lat_ptr, lon_ptr,
+                               t_surf, sfc_sens_flux, sfc_laten_flux, lat_ptr, lon_ptr,
                                t_old[lev] + start_time, use_datetime);
 
         // Hand the land-surface model the surface forcing of this sweep, as RRTMGP does

@@ -54,9 +54,22 @@ struct DriverResult
 {
     amrex::Real t_sfc = 0.0;
     amrex::Real lw_up_surface = 0.0;
+    amrex::Real seb_hfx = 0.0;
+    amrex::Real seb_lh = 0.0;
 };
 
-DriverResult run_driver (bool external_temperature_provider)
+// The surface layer's applied fluxes handed to advance, in W/m^2; none when
+// surface_layer is false (no zlo surface layer).
+struct SurfaceLayerFluxes
+{
+    bool surface_layer = false;
+    amrex::Real hfx_wm2 = 0.0;
+    amrex::Real lh_wm2 = 0.0;
+    SEBTurbulentFluxSource source = SEBTurbulentFluxSource::SurfaceLayer;
+};
+
+DriverResult run_driver (bool external_temperature_provider,
+                         const SurfaceLayerFluxes& sl = SurfaceLayerFluxes{})
 {
     using namespace amrex;
 
@@ -91,6 +104,7 @@ DriverResult run_driver (bool external_temperature_provider)
     rad.seb_grdflx_default = Real(0.0);
     rad.seb_t_deep_default = Real(300.0);
     rad.seb_surface_heat_capacity = Real(20000.0);
+    rad.seb_turbulent_flux_source = sl.source;
 
     TwoStreamRadiation radiation;
     radiation.resize(1);
@@ -103,6 +117,14 @@ DriverResult run_driver (bool external_temperature_provider)
     MultiFab qheating(ba, dm, 2, 0);
     const BoxArray flux_ba = convert(ba, IntVect(0, 0, 1));
     MultiFab rad_fluxes(flux_ba, dm, 4, 0);
+    // The conservative fluxes the surface layer would write on the z faces
+    // (rho w'theta' and rho w'qv'): the SEB converts them back to W/m^2.
+    MultiFab sfc_sens_flux(flux_ba, dm, 1, 0);
+    MultiFab sfc_laten_flux(flux_ba, dm, 1, 0);
+    sfc_sens_flux.setVal(sl.hfx_wm2 / Cp_d);
+    sfc_laten_flux.setVal(sl.lh_wm2 / L_v);
+    const MultiFab* sens_ptr = sl.surface_layer ? &sfc_sens_flux : nullptr;
+    const MultiFab* laten_ptr = sl.surface_layer ? &sfc_laten_flux : nullptr;
     MultiFab external_tsurf(ba2d, dm, 1, 0);
     external_tsurf.setVal(Real(280.0));
 
@@ -114,22 +136,112 @@ DriverResult run_driver (bool external_temperature_provider)
 
     radiation.advance(0, 1, Real(0.0), Real(1000.0), "pre_dycore",
                       state, nullptr, geom, lsm, radiation_inputs, false,
-                      &qheating, &rad_fluxes, nullptr, nullptr, nullptr,
+                      &qheating, &rad_fluxes, nullptr, sens_ptr, laten_ptr, nullptr, nullptr,
                       0.0, false);
     const Real lw_up_surface = component_at(
         rad_fluxes, IntVect(0, 0, 0), 2);
     radiation.advance(0, 1, Real(1000.0), Real(1000.0), "post_dycore",
                       state, nullptr, geom, lsm, radiation_inputs, false,
-                      nullptr, nullptr, nullptr, nullptr, nullptr,
+                      nullptr, nullptr, nullptr, sens_ptr, laten_ptr, nullptr, nullptr,
                       0.0, false);
 
     const MultiFab* prognostic_t_sfc =
         radiation.prognostic_surface_temperature_state(0);
     AMREX_ALWAYS_ASSERT(prognostic_t_sfc != nullptr);
-    return {prognostic_t_sfc->min(0), lw_up_surface};
+    return {prognostic_t_sfc->min(0), lw_up_surface,
+            radiation.seb_hfx(0)->min(0), radiation.seb_lh(0)->min(0)};
+}
+
+// The force-restore skin after one post-dycore call on a fresh level whose surface
+// radiation comes from the sweep (seb_use_radiation_fluxes), with or without the
+// pre-dycore sweep of that step before it. The SW default is a large +200 W/m^2 and the
+// SW band is off, so a skin that advanced on the defaults warms by 10 K while one that
+// advanced on the sweep's (longwave-only) fluxes cools.
+amrex::Real force_restore_skin_after_post_dycore (bool sweep_first)
+{
+    using namespace amrex;
+
+    const Box domain(IntVect(0, 0, 0), IntVect(0, 0, 3));
+    const RealBox real_box({0.0, 0.0, 0.0}, {100.0, 100.0, 400.0});
+    const int is_periodic[3] = {1, 1, 0};
+    const Geometry geom(domain, &real_box, 0, is_periodic);
+    const BoxArray ba(domain);
+    const DistributionMapping dm(ba);
+
+    MultiFab state(ba, dm, RhoQ2_comp + 1, 0);
+    state.setVal(Real(0.0));
+    state.setVal(Real(1.0), Rho_comp, 1);
+    state.setVal(getThgivenRandT(Real(1.0), Real(290.0), RdoCp), RhoTheta_comp, 1);
+
+    RadChoice rad;
+    rad.enabled = true;
+    rad.sw_enabled = false;
+    rad.lw_enabled = true;
+    rad.fixed_solar_zenith_angle = Real(0.5);
+    rad.fixed_total_solar_irradiance = Real(1360.9);
+    rad.rad_t_sfc = Real(300.0);
+    rad.surface_emissivity_lw = Real(1.0);
+    rad.seb_enable = true;
+    rad.seb_use_radiation_fluxes = true;
+    rad.seb_prognostic_enable = true;
+    rad.seb_sw_flux_default = Real(200.0);
+    rad.seb_lw_flux_default = Real(0.0);
+    rad.seb_hfx_default = Real(0.0);
+    rad.seb_lh_default = Real(0.0);
+    rad.seb_grdflx_default = Real(0.0);
+    rad.seb_t_deep_default = Real(300.0);
+    rad.seb_surface_heat_capacity = Real(20000.0);
+    rad.seb_turbulent_flux_source = SEBTurbulentFluxSource::Defaults;
+
+    TwoStreamRadiation radiation;
+    radiation.resize(1);
+    radiation.define_level(0, rad, RdoCp, collapse_z(ba), dm, ba, domain);
+
+    LandSurface lsm;
+    lsm.ReSize(1);
+    lsm.SetModel<NullSurf>();
+
+    MultiFab qheating(ba, dm, 2, 0);
+    MultiFab rad_fluxes(convert(ba, IntVect(0, 0, 1)), dm, 4, 0);
+    const Vector<const MultiFab*> radiation_inputs {};
+
+    if (sweep_first) {
+        radiation.advance(0, 1, Real(0.0), Real(1000.0), "pre_dycore",
+                          state, nullptr, geom, lsm, radiation_inputs, false,
+                          &qheating, &rad_fluxes, nullptr, nullptr, nullptr, nullptr, nullptr,
+                          0.0, false);
+    }
+    radiation.advance(0, 1, Real(1000.0), Real(1000.0), "post_dycore",
+                      state, nullptr, geom, lsm, radiation_inputs, false,
+                      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                      0.0, false);
+
+    const MultiFab* t_sfc = radiation.prognostic_surface_temperature_state(0);
+    AMREX_ALWAYS_ASSERT(t_sfc != nullptr);
+    return t_sfc->min(0);
 }
 
 } // namespace
+
+// The first step of a level built by interp_atmos_from_coarse: ERF::advance_radiation
+// skips the level's pre-dycore sweep, but the post-dycore call still arrives. The
+// force-restore balance, which takes its surface radiation from the sweep, must not
+// advance the skin on the values define_level left there (the scalar defaults).
+TEST(TwoStreamRadiationDriver, ForceRestoreWaitsForTheLevelsFirstSweep)
+{
+    using amrex::Real;
+    const Real initial = Real(300.0);
+
+    const Real without_sweep = force_restore_skin_after_post_dycore(false);
+    EXPECT_EQ(without_sweep, initial)
+        << "the skin advanced before the level's first sweep (on the defaults: +10 K)";
+
+    // Once the level has swept, the balance advances on the sweep's fluxes: longwave only,
+    // a 300 K surface under 290 K air, so it cools.
+    const Real with_sweep = force_restore_skin_after_post_dycore(true);
+    EXPECT_LT(with_sweep, initial);
+    EXPECT_GT(with_sweep, initial - Real(5.0));
+}
 
 // This exercises TwoStreamRadiation::advance rather than only the per-column
 // resolver: the canonical provider must remain the LW boundary, and ownership
@@ -148,6 +260,35 @@ TEST(TwoStreamRadiationDriver, ExternalCanonicalTemperatureOwnsBoundary)
     EXPECT_EQ(external_provider.t_sfc, amrex::Real(300.0));
     EXPECT_NEAR(external_provider.lw_up_surface,
                 sigma * std::pow(amrex::Real(280.0), 4), flux_tolerance);
+}
+
+// The force-restore update removes the surface layer's H and LE from the ground.
+// Absorbed SW is 200 W/m^2 and T_s starts at T_deep, so one 1000 s step moves T_s
+// by 1000 (200 - H - LE) / 2e4: +10 K with no turbulent fluxes, +5 K when the
+// surface layer carries H = 60 and LE = 40 W/m^2 away. Before the surface layer
+// was consulted, both runs warmed by 10 K.
+TEST(TwoStreamRadiationDriver, ForceRestoreRemovesSurfaceLayerFluxes)
+{
+    const amrex::Real tol = sizeof(amrex::Real) == 8 ? amrex::Real(1.0e-9) : amrex::Real(1.0e-3);
+
+    const DriverResult no_surface_layer = run_driver(false);
+    EXPECT_NEAR(no_surface_layer.t_sfc, amrex::Real(310.0), tol);
+    EXPECT_EQ(no_surface_layer.seb_hfx, amrex::Real(0.0));
+
+    SurfaceLayerFluxes sl;
+    sl.surface_layer = true;
+    sl.hfx_wm2 = amrex::Real(60.0);
+    sl.lh_wm2 = amrex::Real(40.0);
+    const DriverResult with_surface_layer = run_driver(false, sl);
+    EXPECT_NEAR(with_surface_layer.seb_hfx, amrex::Real(60.0), tol);
+    EXPECT_NEAR(with_surface_layer.seb_lh, amrex::Real(40.0), tol);
+    EXPECT_NEAR(with_surface_layer.t_sfc, amrex::Real(305.0), tol);
+
+    // seb_turbulent_flux_source = defaults keeps the old constants (0 here).
+    sl.source = SEBTurbulentFluxSource::Defaults;
+    const DriverResult defaults = run_driver(false, sl);
+    EXPECT_EQ(defaults.seb_hfx, amrex::Real(0.0));
+    EXPECT_NEAR(defaults.t_sfc, amrex::Real(310.0), tol);
 }
 
 namespace {
@@ -217,11 +358,11 @@ LandForcingResult run_land_forcing (bool supply, amrex::Real cloud_fraction)
     MultiFab qheating(ba, dm, 2, 0);
     const BoxArray flux_ba = convert(ba, IntVect(0, 0, 1));
     MultiFab rad_fluxes(flux_ba, dm, 4, 0);
-    const Vector<const MultiFab*> radiation_inputs;
+    const Vector<const MultiFab*> radiation_inputs {};
 
     radiation.advance(0, 1, Real(0.0), Real(10.0), "pre_dycore",
                       state, nullptr, geom, lsm, radiation_inputs, false,
-                      &qheating, &rad_fluxes, nullptr, nullptr, nullptr,
+                      &qheating, &rad_fluxes, nullptr, nullptr, nullptr, nullptr, nullptr,
                       0.0, false);
 
     r.sw_dn  = component_at(*radiation.land_forcing_sw_dn(0), IntVect(1, 0, 0), 0);
@@ -314,10 +455,11 @@ std::pair<amrex::Real, amrex::Real> land_forcing_before_a_sweep ()
     LandSurface lsm;
     lsm.ReSize(2);
     lsm.SetModel<NullSurf>();
-    const Vector<const MultiFab*> radiation_inputs;
+    const Vector<const MultiFab*> radiation_inputs {};
     radiation.advance(1, 1, Real(0.0), Real(10.0), "pre_dycore",
                       state1, nullptr, geom1, lsm, radiation_inputs, false,
-                      nullptr, nullptr, nullptr, nullptr, nullptr, 0.0, false);
+                      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                      0.0, false);
     MultiFab lsm1(collapse_z(ba1), dm1, 1, IntVect(1, 1, 0));
     lsm1.setVal(Real(7.0));
     radiation.write_land_forcing(1, nullptr, nullptr, &lsm1);

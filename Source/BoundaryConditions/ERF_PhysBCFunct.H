@@ -67,7 +67,9 @@ public:
      * @param[in] terrain_type terrain type for the level
      * @param[in] z_phys_nd nodal physical height MultiFab
      * @param[in] use_real_bcs whether real-data boundary conditions are active
-     * @param[in] th_bc_data optional theta boundary data
+     * @param[in] th_bc_data optional theta boundary data (one profile in z)
+     * @param[in] th_file_face per face: 0 the face's theta is not th_bc_data, 1 th_bc_data
+     *            holds rho*theta for that face, 2 it holds theta
      */
     ERFPhysBCFunct_cons (const int lev,
                          const amrex::Geometry& geom, const amrex::Vector<amrex::BCRec>& domain_bcs_type,
@@ -77,7 +79,8 @@ public:
                          const TerrainType& terrain_type,
                          std::unique_ptr<amrex::MultiFab>& z_phys_nd,
                          const bool use_real_bcs,
-                         amrex::Real* th_bc_data)
+                         amrex::Real* th_bc_data,
+                         const amrex::Array<int,AMREX_SPACEDIM*2>& th_file_face)
         : m_lev(lev), m_geom(geom),
           m_domain_bcs_type(domain_bcs_type),
           m_domain_bcs_type_d(domain_bcs_type_d),
@@ -87,7 +90,9 @@ public:
           m_z_phys_nd(z_phys_nd.get()),
           m_use_real_bcs(use_real_bcs),
           m_th_bc_data(th_bc_data)
-    {}
+    {
+        for (int ori = 0; ori < 2*AMREX_SPACEDIM; ++ori) { m_th_file_face[ori] = th_file_face[ori]; }
+    }
 
     /**
      * Destroy the conserved-variable physical boundary-condition functor.
@@ -175,6 +180,7 @@ private:
     bool             m_use_real_bcs;
     amrex::Real*     m_th_bc_data;
     const amrex::Array<InflowProfile,2*AMREX_SPACEDIM>* m_inflow_profiles = nullptr;
+    amrex::GpuArray<int,AMREX_SPACEDIM*2> m_th_file_face;
     BelowGroundGhostSync m_below_ground_sync;
 };
 
