@@ -3,7 +3,7 @@
 plot_hazard_fields.py — ERF-Hazard AMReX plotfile visualisation.
 
 Reads ERF AMReX plotfile directories (plt_1_NNNNN) and produces PNG figures
-for the Phase 5 canonical test cases: smoke plume plan view, vertical
+for the Hazard canonical test cases: smoke plume plan view, vertical
 cross-sections, wind speed maps, and dust emission maps.
 
 Requirements:
