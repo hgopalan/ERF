@@ -1165,7 +1165,11 @@ DustLayer::write_output(int nstep, amrex::Real cur_time, bool is_final)
 {
     // A step reaches here twice when the run ends on it (the time loop, then
     // WriteAtFinalTime) and when a restart starts on it (the original run,
-    // then InitData). The second call writes only what the first one missed.
+    // then InitData). The second call appends no second row and rewrites no
+    // plotfile the interval already wrote. (One case is left: a checkpoint the
+    // time loop writes on the run's last step is saved before WriteAtFinalTime
+    // adds the final plotfile, so a restart from it at that same step writes
+    // that plotfile again.)
     const bool step_written = (nstep == m_last_output_step);
     if (!step_written) {
         append_dust_stats(nstep, cur_time,

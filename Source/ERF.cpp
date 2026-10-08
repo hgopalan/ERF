@@ -2386,6 +2386,13 @@ if (m_DustLayer && restart_chkfile.empty()) {
     const std::string& pv2d_1 = "plot2d_vars_1"; appendPlotVariables(pv2d_1,plot2d_var_names_1);
     const std::string& pv2d_2 = "plot2d_vars_2"; appendPlotVariables(pv2d_2,plot2d_var_names_2);
 
+    // Dust output before the initial checkpoint, as in WriteAtIntermediateTime,
+    // so that chk00000 records step 0 as written
+#ifdef ERF_USE_DUST
+    if (m_DustLayer && m_DustLayer->get_params().dust_plot_int > 0)
+        m_DustLayer->write_output(istep[0], t_new[0], /*is_final=*/false);
+#endif
+
     if ( restart_chkfile.empty() && (m_check_int > 0 || m_check_per > zero) )
     {
         WriteCheckpointFile();
@@ -2448,11 +2455,6 @@ if (m_DustLayer && restart_chkfile.empty()) {
             }
         }
     }
-
-#ifdef ERF_USE_DUST
-    if (m_DustLayer && m_DustLayer->get_params().dust_plot_int > 0)
-        m_DustLayer->write_output(istep[0], t_new[0], /*is_final=*/false);
-#endif
 
     // Set these up here because we need to know which MPI rank "cell" is on...
     ParmParse pp("erf");

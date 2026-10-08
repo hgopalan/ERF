@@ -366,8 +366,8 @@ public:
      * Final-step guard: is_final=true and nstep > m_last_dust_plot_step
      * ensures a write at simulation end regardless of dust_plot_int.
      * A step already written (the time loop's call before WriteAtFinalTime,
-     * or the step a restart starts on) appends no second CSV row and writes
-     * no second plotfile.
+     * or the step a restart starts on) appends no second CSV row, and the
+     * interval rewrites no plotfile it already wrote.
      *
      * @param[in] nstep     Current step number.
      * @param[in] cur_time  Current simulation time [s].
