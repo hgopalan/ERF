@@ -11,6 +11,11 @@ Usage:
         --sigma 600.0 \
         --output gaussian_hill.txt
 
+The HaboobFire* cases centre the feature downstream of the cold pool:
+    python make_gaussian_terrain.py --nx 129 --ny 65 --dx 62.5 --dy 62.5 \
+        --height 200.0 --sigma 600.0 --cx 5000.0 --cy 2000.0 \
+        --output ../HaboobFireHill/haboob_hill_129x65.txt
+
 The terrain file format is:
     nx
     ny
@@ -31,14 +36,17 @@ with one value per line and z stored contiguous in y
 The Gaussian formula is:
     z(x,y) = H * exp(-((x-cx)^2 + (y-cy)^2) / (2*sigma^2))
 
-where cx = xlo + nx*dx/2, cy = ylo + ny*dy/2 (domain centre).
+where cx and cy default to xlo + nx*dx/2 and ylo + ny*dy/2 (--cx and --cy
+override them). Give nx = n_cell + 1 points so the file spans the whole
+domain, nodes included (129 points at 62.5 m cover 0 to 8000 m).
 """
 
 import argparse
 import math
 
 
-def generate_gaussian_terrain(nx, ny, xlo, ylo, dx, dy, height, sigma, output_file):
+def generate_gaussian_terrain(nx, ny, xlo, ylo, dx, dy, height, sigma, output_file,
+                              cx=None, cy=None):
     """
     Generate a Gaussian terrain file in ERF's non-USGS terrain format.
 
@@ -56,10 +64,13 @@ def generate_gaussian_terrain(nx, ny, xlo, ylo, dx, dy, height, sigma, output_fi
         Gaussian width parameter (standard deviation)
     output_file : str
         Path to output file
+    cx, cy : float, optional
+        Feature centre; defaults to xlo + nx*dx/2 and ylo + ny*dy/2
     """
-    # Domain center
-    cx = xlo + 0.5 * nx * dx
-    cy = ylo + 0.5 * ny * dy
+    if cx is None:
+        cx = xlo + 0.5 * nx * dx
+    if cy is None:
+        cy = ylo + 0.5 * ny * dy
 
     x_coords = [xlo + i * dx for i in range(nx)]
     y_coords = [ylo + j * dy for j in range(ny)]
@@ -108,6 +119,8 @@ def main():
     parser.add_argument("--dy", type=float, default=125.0, help="Grid spacing in y")
     parser.add_argument("--height", type=float, default=200.0, help="Gaussian height (+ = hill, - = pit)")
     parser.add_argument("--sigma", type=float, default=600.0, help="Gaussian width parameter")
+    parser.add_argument("--cx", type=float, default=None, help="Feature centre x (default xlo + nx*dx/2)")
+    parser.add_argument("--cy", type=float, default=None, help="Feature centre y (default ylo + ny*dy/2)")
     parser.add_argument("--output", type=str, required=True, help="Output file path")
 
     args = parser.parse_args()
@@ -121,7 +134,9 @@ def main():
         dy=args.dy,
         height=args.height,
         sigma=args.sigma,
-        output_file=args.output
+        output_file=args.output,
+        cx=args.cx,
+        cy=args.cy
     )
 
 

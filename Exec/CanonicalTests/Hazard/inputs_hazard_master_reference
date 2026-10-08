@@ -82,7 +82,9 @@ erf.fire_dust_lofting_Q_ref = 500.0      # heat flux of unit lofting [W/m2]
 # TERRAIN
 # ============================================================================
 # The Hazard cases use ERF's terrain-fitted mesh with a raster file; the
-# Gaussian hill and pit rasters are in Hazard/GaussianTerrain.
+# Gaussian hill and pit rasters are in Hazard/GaussianTerrain, and the
+# HaboobFireHill / HaboobFirePit rasters sit in their case folders. All are
+# written by GaussianTerrain/make_gaussian_terrain.py.
 # erf.terrain_type = StaticFittedMesh
 # erf.terrain_file_name = "../GaussianTerrain/gaussian_hill_32x32.txt"
 # erf.terrain_smoothing = 1
@@ -117,6 +119,8 @@ erf.dust.dust_plot_int = -1      # dust-grid plotfiles, -1 = off
 erf.dust.dust_debug = false      # per-step dust diagnostics
 erf.fire.fire_debug = false      # per-step fire diagnostics
 
-# The haboob cases (Hazard/HaboobFire*) are ordinary sounding-initialised
-# runs; there are no haboob-specific keys. Mass conservation is checked by
-# the FireDustMassConservation case's script, not by an input.
+# The haboob cases (Hazard/HaboobFire*) have no haboob-specific fire or dust
+# keys: their cold pool is the generic bubble perturbation (erf.prob_name =
+# "Bubble" with prob.x_c ... prob.T_pert) on a sounding-initialised
+# boundary layer. Mass conservation is checked by the
+# FireDustMassConservation case's script, not by an input.
