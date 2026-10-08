@@ -38,7 +38,7 @@ The deck's fuel is uniform grass. `Exec/Tools/make_landfire_fuel_map.py` puts LA
 ## Expected Results
 From the 30-minute run on eight ranks (0.85 to 1.0 s per step, 6000 steps):
 
-- The atmosphere runs stable at 0.3 s steps with 8 acoustic substeps; the fire-grid wind reaches 4 to 5 m/s at midflame near the origin and follows the terrain, accelerating over the mesa rims and turning in the drainages.
+- The atmosphere runs stable at 0.3 s steps with 8 acoustic substeps (4 with the corrected 840 hPa sounding); the fire-grid wind reaches 4 to 5 m/s at midflame near the origin and follows the terrain, accelerating over the mesa rims and turning in the drainages.
 - The three fires burn 370 ha at 30 minutes (22 ha at 6 min, 146 ha at 18 min), with a perimeter of 18.7 km and one to three spot fires ahead of the fronts at any time.
 - The origin fire's head advances at 0.44 m/s including its spot fires (0.3 to 0.6 m/s on the ROS field), the order the event averaged over its 10 km run.
 - Those figures are from a run with `erf.fire.directional_ros = false`, the isotropic level set, which also backed the fires into the wind at 0.18 m/s; the committed deck uses the directional default, which keeps the head rate, holds the backing fire at the no-wind rate, and grows each fire as a downwind lobe with a smaller area.

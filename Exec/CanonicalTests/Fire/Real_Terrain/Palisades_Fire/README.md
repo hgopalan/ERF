@@ -90,8 +90,8 @@ and 0.41 s acoustic at start-up, and the automatic substepping takes the minimum
 of four acoustic substeps. A 30-minute run at 0.3 s is stable as well (all six
 checks pass and the advective estimate never drops below 0.79 s), but the spotting
 interval and the level-set reinitialisation are counted in steps, so at 0.3 s
-embers launch every 60 s instead of every 40 s and the fire burns less: 816 ha at
-30 minutes instead of 1235 ha. The deck was first built on a sounding whose surface pressure was in
+embers launch every 60 s instead of every 40 s and the fire burns less (a third
+less area at 30 minutes in a September 2026 run). The deck was first built on a sounding whose surface pressure was in
 Pa (see below), which put the acoustic estimate at 0.217 s; four substeps of
 0.075 s then exceeded the 0.072 s each may take, which is most likely why 0.3 s
 failed at the time. `stop_time = 11268` is the demo's 3.13 hours, which is 56,340
