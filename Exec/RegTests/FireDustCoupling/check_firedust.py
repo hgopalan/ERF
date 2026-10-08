@@ -17,6 +17,9 @@ the pure-Python reader erf_plotfile.py and checks:
   deposit   the deposition total of dust_diag.dat at the last step is within
             15 % of the reference measured after the once-per-step fix and never
             decreases (a per-stage accumulation is 1.83x larger).
+  rows      dust_diag.dat has one row per step, steps strictly increasing. The
+            final step used to be written twice: once by the time loop and again
+            by WriteAtFinalTime.
 
 Exit 1 on any failure. The numbers are for the committed deck; the tolerances
 cover box-layout round-off, not model changes.
@@ -113,6 +116,11 @@ def main():
     # deposition accumulator: monotone, once per step
     try:
         rows = [l.split(",") for l in open(args.diag) if l.strip() and not l.startswith("#") and not l.startswith("step")]
+        nsteps = [int(r[0]) for r in rows]
+        repeated = sorted({n for a, n in zip(nsteps, nsteps[1:]) if n <= a})
+        check("rows", len(nsteps) >= 2 and not repeated,
+              f"{len(nsteps)} rows, steps {nsteps[0]} -> {nsteps[-1]}"
+              + (f", out of order or repeated at steps {repeated}" if repeated else ""))
         dep = [float(r[3]) for r in rows]
         mono = all(b >= a - 1e-30 for a, b in zip(dep, dep[1:]))
         check("dep_mono", mono and len(dep) >= 2, f"{len(dep)} rows, deposition_total {dep[0]:.4e} -> {dep[-1]:.4e} kg/m2")

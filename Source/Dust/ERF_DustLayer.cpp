@@ -1163,16 +1163,23 @@ DustLayer::compute_msha_exposure(amrex::Real dt, amrex::Real cur_time, int nstep
 void
 DustLayer::write_output(int nstep, amrex::Real cur_time, bool is_final)
 {
-    append_dust_stats(nstep, cur_time,
-                      m_params.dust_diag_file,
-                      get_emission_flux(),
-                      get_deposition_rate(),
-                      get_ustar_in(),
-                      get_conc_sfc());
+    // A step reaches here twice when the run ends on it (the time loop, then
+    // WriteAtFinalTime) and when a restart starts on it (the original run,
+    // then InitData). The second call writes only what the first one missed.
+    const bool step_written = (nstep == m_last_output_step);
+    if (!step_written) {
+        append_dust_stats(nstep, cur_time,
+                          m_params.dust_diag_file,
+                          get_emission_flux(),
+                          get_deposition_rate(),
+                          get_ustar_in(),
+                          get_conc_sfc());
+    }
+    m_last_output_step = nstep;
 
     bool write_plt = false;
     if (m_params.dust_plot_int > 0)
-        write_plt = (nstep % m_params.dust_plot_int == 0);
+        write_plt = (nstep % m_params.dust_plot_int == 0) && (nstep != m_last_dust_plot_step);
     if (is_final && nstep > m_last_dust_plot_step)
         write_plt = true;
 
@@ -1313,7 +1320,8 @@ DustLayer::write_checkpoint_state (const std::string& checkpointname) const
       << "msha_shift_count " << m_msha_shift_count << "\n"
       << "last_phreeqc_write_time " << m_last_phreeqc_write_time << "\n"
       << "last_phreeqc_write_step " << m_last_phreeqc_write_step << "\n"
-      << "last_dust_plot_step " << m_last_dust_plot_step << "\n";
+      << "last_dust_plot_step " << m_last_dust_plot_step << "\n"
+      << "last_output_step " << m_last_output_step << "\n";
 }
 
 void
@@ -1337,6 +1345,7 @@ DustLayer::read_checkpoint_state (const std::string& restart_chkfile,
             else if (key == "last_phreeqc_write_time") { f >> m_last_phreeqc_write_time; }
             else if (key == "last_phreeqc_write_step") { f >> m_last_phreeqc_write_step; }
             else if (key == "last_dust_plot_step")     { f >> m_last_dust_plot_step; }
+            else if (key == "last_output_step")        { f >> m_last_output_step; }
             else { std::string skip; f >> skip; }
         }
     } else {

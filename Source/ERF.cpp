@@ -449,16 +449,18 @@ ERF::WriteAtIntermediateTime (int step, double cur_time)
         }
     }
 
+    // Dust output before the checkpoint, so a checkpoint of this step records
+    // the step's dust output as written and a restart from it does not repeat it
+#ifdef ERF_USE_DUST
+    if (m_DustLayer)
+        m_DustLayer->write_output(step+1, cur_time, /*is_final=*/false);
+#endif
+
     if (writeNow(cur_time, step+1, m_check_int, m_check_per, dt[0], last_check_file_time)) {
         last_check_file_step = step+1;
         WriteCheckpointFile();
         if (m_check_per > zero) {last_check_file_time += m_check_per;}
     }
-
-#ifdef ERF_USE_DUST
-    if (m_DustLayer)
-        m_DustLayer->write_output(step+1, cur_time, /*is_final=*/false);
-#endif
 }
 
 void
@@ -503,15 +505,16 @@ ERF::WriteAtFinalTime ()
         }
     }
 
-    if ( (m_check_int > 0 || m_check_per > zero) && istep[0] > last_check_file_step) {
-        WriteCheckpointFile();
-        if (m_check_per > zero) {last_check_file_time += m_check_per;}
-    }
-
+    // Dust output before the checkpoint, as in WriteAtIntermediateTime
 #ifdef ERF_USE_DUST
     if (m_DustLayer)
         m_DustLayer->write_output(istep[0], t_new[0], /*is_final=*/true);
 #endif
+
+    if ( (m_check_int > 0 || m_check_per > zero) && istep[0] > last_check_file_step) {
+        WriteCheckpointFile();
+        if (m_check_per > zero) {last_check_file_time += m_check_per;}
+    }
 }
 
 void
