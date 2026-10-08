@@ -19,7 +19,9 @@ Writes, in the current directory:
   inflow_ylo.txt           z0 = 0.1 m anchored at 38 mph (16.99 m/s) 10 m above
                            that face's mean ground, from 225 degrees; likewise
                            the south face
-  sounding_palisades.txt   ERF input_sounding: neutral to 1500 m, 3 K/km above
+  sounding_palisades.txt   ERF input_sounding: 1013.25 hPa at sea level (ERF
+                           reads the surface pressure in hPa), neutral to
+                           1500 m, 3 K/km above
   palisades_domain.json    corner coordinates, floor elevation, ignition site,
                            sea fraction, cell counts
   palisades_terrain.png    map of the raster with the ignition site and coast
@@ -219,7 +221,10 @@ for fname, zg in (("inflow_xlo.txt", z_west), ("inflow_ylo.txt", z_south)):
             u, v = uv(z); f.write(f"{zg + z:12.4f} {u:11.5f} {v:11.5f} {0.0:6.1f}\n")
 
 with open("sounding_palisades.txt", "w") as f:
-    f.write("101325.0 300.0 0.0\n")        # surface pressure [Pa] at sea level, theta, qv
+    # First line: surface pressure [hPa], theta [K], qv [g/kg]. ERF reads the
+    # pressure in hPa, as WRF does; 101325 (Pa) here gave a 31.5 kg/m^3 surface
+    # density and a 1120 K atmosphere until 2026-09-11.
+    f.write("1013.25 300.0 0.0\n")         # sea level
     for z in zin:
         u, v = uv(z)
         th = 300.0 + max(0.0, z - 1500.0) * 0.003

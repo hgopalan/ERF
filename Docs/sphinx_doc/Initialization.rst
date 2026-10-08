@@ -51,6 +51,14 @@ moist EOS and hydrostatic equilibrium (HSE).
 If **erf.init_type = InputSounding**, then the thermodynamic profiles in the
 provided **erf.input_sounding_file** are used to set initial conditions and the
 base state depending on **erf.sounding_type**.
+The file follows WRF's ``input_sounding`` format. Its first line holds the surface
+pressure in hPa, the surface potential temperature in K and the surface water-vapor
+mixing ratio in g/kg, all at the bottom of the domain (for example
+``1013.25 300.0 0.0``). Each following line holds a height in m, the potential
+temperature in K, the mixing ratio in g/kg, and the u and v velocities in m/s.
+ERF multiplies the surface pressure by 100, so a value written in Pa
+(``101325.0``) starts the run at about 100 atmospheres. The start-up line
+"surface dry air density" shows this as about 30 kg/m^3 instead of about 1.2.
 For an ``Ideal`` sounding (default), a stratified, hydrostatically balanced base
 state is reconstructed from the 1-D input sounding data as described in
 :ref:`sec:BaseState`. The stored base-state density is dry-air density
