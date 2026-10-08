@@ -86,9 +86,10 @@ jobs:
         export return=$(tail -n 1 ${{runner.workspace}}/build-output-warnings.txt | awk '{print $2}')
         exit ${return}
 
-    - name: Actuator and MoorDyn Unit Tests
+    - name: Unit Tests
+      # every suite: the conductor, tower, frame, member-check, ASCE 74 and gust tests compile only with MoorDyn
       run: |
-        Tests/Unit/erf_unit_tests --gtest_filter='ActuatorSampling.*:ActuatorSpreading.*:WakeLines.*:RunningStats.*:MoorDynSystem.*:ConductorInputs.*:MoorDynInputWriter.*:ConductorLine.*:Conductors.*:ConductorVerification.*'
+        Tests/Unit/erf_unit_tests
       working-directory: ${{runner.workspace}}/ERF/build
 
     - name: Conductor Regression Tests
@@ -178,9 +179,10 @@ jobs:
         export return=$(tail -n 1 ${{runner.workspace}}/build-output-warnings.txt | awk '{print $2}')
         exit ${return}
 
-    - name: Actuator and MoorDyn Unit Tests
+    - name: Unit Tests
+      # every suite: the conductor, tower, frame, member-check, ASCE 74 and gust tests compile only with MoorDyn
       run: |
-        Tests/Unit/erf_unit_tests --gtest_filter='ActuatorSampling.*:ActuatorSpreading.*:WakeLines.*:RunningStats.*:MoorDynSystem.*:ConductorInputs.*:MoorDynInputWriter.*:ConductorLine.*:Conductors.*:ConductorVerification.*'
+        Tests/Unit/erf_unit_tests
       working-directory: ${{runner.workspace}}/ERF/build
 
     - name: Conductor Regression Tests

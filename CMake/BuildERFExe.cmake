@@ -394,6 +394,7 @@ function(build_erf_lib erf_lib_name)
         ${SRC_DIR}/MovingBodies/MoorDyn/ERF_MoorDynSystem.cpp
         ${SRC_DIR}/MovingBodies/Conductors/ERF_ConductorInputs.cpp
         ${SRC_DIR}/MovingBodies/Conductors/ERF_ASCE74.cpp
+        ${SRC_DIR}/MovingBodies/Conductors/ERF_Gusts.cpp
         ${SRC_DIR}/MovingBodies/Conductors/ERF_MoorDynInputWriter.cpp
         ${SRC_DIR}/MovingBodies/Conductors/ERF_ConductorLine.cpp
         ${SRC_DIR}/MovingBodies/Conductors/ERF_Transformer.cpp

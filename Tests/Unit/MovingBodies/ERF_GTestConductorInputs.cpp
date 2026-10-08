@@ -6,7 +6,9 @@
 // EveryLineValueOutsideItsRangeIsRefusedByName: validate_line names the key of every bad value,
 //     non-finite values included.
 // SharedSettingsOutsideTheirRangeAreRefusedByName: validate_settings names the key, non-finite
-//     values, a conductor lighter than the air it displaces, and the ASCE 74 check's gust and exposure included.
+//     values, a conductor lighter than the air it displaces, the ASCE 74 check's gust and exposure, and the
+//     gusts' type and keys (only with gust_type = factor, positive, not with a prescribed wind, every span with a
+//     horizontal extent, no line named for another's gust statistics) included.
 // AnchorLevelMustExistAndFpeTrapsAreRefused: validate_solver and resolve_anchor_level.
 // SurfaceOffsetMustHoldTheWholeDomain: validate_frame against the domain's top and bottom.
 // ASectionIsReadWithItsTowersLengthsAndInsulatorStrings: a section's towers, lengths and strings.
@@ -207,6 +209,53 @@ TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
         c.asce74_wind = 40.0;
         c.asce74_exposure = "b";
         EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "an exposure in lower case is accepted";
+    }
+    // the gusts: the type, each of its keys only with gust_type = factor and positive, and not with a prescribed wind
+    bad([](ConductorInputs& c) { c.gust_type = "event"; }, "gust_type must be none or factor");
+    bad([](ConductorInputs& c) { c.has_gust_sigma_factor = true; c.gust_sigma_factor = 1.2; },
+        "gust_sigma_factor needs erf.conductors.gust_type = factor");
+    bad([](ConductorInputs& c) { c.has_gust_peak_factor = true; }, "gust_peak_factor needs erf.conductors.gust_type = factor");
+    bad([](ConductorInputs& c) { c.has_gust_span_length_scale = true; },
+        "gust_span_length_scale needs erf.conductors.gust_type = factor");
+    bad([](ConductorInputs& c) { c.gust_type = "factor"; c.has_gust_sigma_factor = true; c.gust_sigma_factor = 0.0; },
+        "gust_sigma_factor must be positive");
+    bad([](ConductorInputs& c) { c.gust_type = "factor"; c.has_gust_peak_factor = true; c.gust_peak_factor = -2.7; },
+        "gust_peak_factor must be positive");
+    bad([](ConductorInputs& c) { c.gust_type = "factor"; c.has_gust_span_length_scale = true; c.gust_span_length_scale = 0.0; },
+        "gust_span_length_scale must be positive");
+    bad([](ConductorInputs& c) { c.gust_type = "factor"; c.gust_peak_factor = std::numeric_limits<amrex::Real>::infinity(); },
+        "gust_peak_factor must be finite");
+    bad([](ConductorInputs& c) { c.gust_type = "factor"; c.has_prescribed_velocity = true; },
+        "cannot be used with erf.conductors.prescribed_velocity");
+    {
+        ConductorInputs c = in;
+        EXPECT_FALSE(c.gust_factor()) << "gusts are off by default";
+        c.gust_type = "Factor";
+        c.has_gust_sigma_factor = c.has_gust_peak_factor = c.has_gust_span_length_scale = true;
+        c.gust_sigma_factor = 1.39;
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "gust_type = factor with all its keys is accepted";
+        EXPECT_TRUE(c.gust_factor());
+    }
+    {
+        // another line named for a line's gust statistics: refused with gusts, accepted without
+        ConductorInputs c = in;
+        LineInputs other = good_span();
+        other.name = c.lines.front().name + "_gusts";
+        other.output_root = "conductors/" + other.name;
+        c.lines.push_back(other);
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty());
+        c.gust_type = "factor";
+        const std::string err = ConductorInputs::validate_settings(c);
+        EXPECT_NE(err.find("clashes with line " + c.lines.front().name + "'s gust statistics"), std::string::npos) << err;
+    }
+    {
+        // a span straight up has no wind normal to it: refused with gusts, accepted without
+        ConductorInputs c = in;
+        c.lines.front().end_b = {{c.lines.front().end_a[0], c.lines.front().end_a[1], 60.0}};
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty());
+        c.gust_type = "factor";
+        const std::string err = ConductorInputs::validate_settings(c);
+        EXPECT_NE(err.find("span 1 has no horizontal extent"), std::string::npos) << err;
     }
     // every Real input must be finite
     const amrex::Real nan = std::numeric_limits<amrex::Real>::quiet_NaN();

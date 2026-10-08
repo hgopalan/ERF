@@ -3,6 +3,7 @@
 
 /** Conductors: the run's conductor lines, transformers and lattice towers, stepped with ERF on one AMR level. */
 
+#include <array>
 #include <map>
 #include <memory>
 #include <string>
@@ -46,6 +47,17 @@ public:
 
     /** nullptr unless erf.conductors.lines is given; aborts on inputs the conductor module does not support (validate_solver). */
     static std::unique_ptr<Conductors> create (int max_level);
+
+    /**
+     * Tell the lines the turbulence closure of their anchor level, which ERF calls once after
+     * create(): whether it is the k-equation RANS, and its constant Cmu0. With
+     * erf.conductors.gust_type = factor this aborts unless it is the k-equation RANS (the gusts come
+     * from its k) and sets sigma_u / sqrt(k) to erf.conductors.gust_sigma_factor, or to 2.5 Cmu0 when
+     * that is not given (ERF_Gusts.H). advance() aborts with gusts on unless this was called.
+     */
+    void set_closure (bool keqn_rans, amrex::Real Cmu0);
+    /** sigma_u / sqrt(k) of the gusts once set_closure() has run; 0 without gust_type = factor. */
+    double gust_sigma_factor () const { return m_gust_sigma; }
 
     /**
      * Place the attachment points on the terrain (z - geometry.prob_lo[2] is their height above the
@@ -92,10 +104,14 @@ public:
      * with drag_on_flow, spread the force the lines and the towers' members exert on the air into the
      * momentum sources of the next step.
      * Units: time, dt (s). U, V, W are the face velocities of level lev at the start of the step.
+     * cons is the conserved state of level lev at the start of the step, with a filled ghost cell:
+     * with erf.conductors.gust_type = factor, k = (rho k) / rho is read from it at the line nodes,
+     * and a null cons aborts; it is not read otherwise.
      */
     void advance (int lev, double time, double dt,
                   const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
-                  const amrex::MultiFab* z_phys_nd, const amrex::MultiFab* detJ_cc, const amrex::Geometry& geom);
+                  const amrex::MultiFab* z_phys_nd, const amrex::MultiFab* detJ_cc, const amrex::Geometry& geom,
+                  const amrex::MultiFab* cons = nullptr);
 
     /**
      * Add the force the lines and the towers' members exert on the air (minus the air's drag on them,
@@ -166,11 +182,13 @@ private:
      * sampled at the line nodes with the actuator core (each component from its own staggered grid,
      * linear in the physical height) and zero at MoorDyn's point entries after them, or the prescribed
      * velocity everywhere when one is given. Aborts, naming the line and the node, when a node has
-     * left the domain or the anchor level's grids do not cover the cells the sampler reads.
+     * left the domain or the anchor level's grids do not cover the cells the sampler reads. With nodes
+     * given (and the flow sampled), it receives the line nodes' positions the wind was sampled at.
      */
     std::vector<amrex::Real> wind_at (const erf_conductors::ConductorLine& span,
                                       const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
-                                      const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
+                                      const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom,
+                                      std::vector<amrex::Real>* nodes = nullptr) const;
     /**
      * Abort, naming the line and the node (0-based over the line), when a line node lies outside the domain;
      * periodic directions are not checked.
@@ -209,6 +227,24 @@ private:
     void restore (const std::string& dir);
     /** The running statistics of a line: one set per span, and one for its insulator strings. */
     void add_stats (const erf_conductors::LineInputs& s);
+    /**
+     * With gust_type = factor, add one sample of every line's gust statistics, stamped t: per span, the
+     * root-mean-square over its nodes of the horizontal wind speed and of its component normal to the span's
+     * chord (from uvw[i], the wind at line i's nodes at pos[i]), and the mean of k = (rho k) / rho from cons
+     * at the same points (a negative value from extrapolation below the first cell centre counts as 0).
+     * rho and rho k are sampled at every line's nodes in one pass each.
+     */
+    void sample_gusts (double t, const std::vector<std::vector<amrex::Real>>& pos, const std::vector<std::vector<amrex::Real>>& uvw,
+                       const amrex::MultiFab& cons, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
+    /** The unit normal (x, y) to the horizontal projection of line i's span k's chord. */
+    std::array<double,2> span_normal (std::size_t i, int k) const;
+    /**
+     * Write <diagnostics_dir>/gusts.csv from the gust statistics' means (I/O rank): one row per span;
+     * advance() calls it once they hold a sample.
+     */
+    void write_gusts () const;
+    /** The mean height of line i's span k above the ground at its two conductor points, the attachment height (m). */
+    double span_height (std::size_t i, int k) const;
     /** The pairs of lines and their statistics. */
     void add_pair_stats ();
     /** The closest approach of every pair of lines' conductors, at their current positions. */
@@ -321,6 +357,10 @@ private:
     std::vector<amrex::Real> m_ground;
     std::vector<std::unique_ptr<erf_conductors::ConductorLine>> m_lines;
     std::vector<std::vector<erf_actuator::RunningStats>> m_stats;   //!< per line: per span, then the strings', from stats_start
+    //! per line with gust_type = factor: per span, the root-mean-square wind and normal wind and the mean k over its nodes
+    std::vector<erf_actuator::RunningStats> m_gust_stats;
+    bool m_closure_set{false};                                     //!< set_closure() has run
+    double m_gust_sigma{0.0};                                      //!< sigma_u / sqrt(k) of the gusts
     std::vector<std::pair<std::size_t,std::size_t>> m_pairs;        //!< the pairs of lines watched for clashes
     std::vector<erf_actuator::RunningStats> m_pair_stats;           //!< per pair: the closest approach and the clash flag
     std::vector<erf_conductors::Closest> m_sep;                     //!< per pair: the last closest approach

@@ -2555,9 +2555,9 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # Lines over hills, dead-ended on transformers: two sections from a hilltop transformer to two on
   # flat ground, on lattice towers, in a neutral boundary layer over terrain with the k-equation
   # RANS closure. The middle span of L1, the transformers' loads and clearances, the hilltop
-  # transformer's statistics and the towers' drag must match their golds; the flow is the run's
-  # own, since nothing goes back into it.
-  set(_terrain_logs "conductors/transformers.dat conductors/transformer_T1_stats.csv conductors/towers.dat")
+  # transformer's statistics, the towers' drag and every span's gust factor and peak load from the
+  # RANS k (gusts.csv) must match their golds; the flow is the run's own, since nothing goes back into it.
+  set(_terrain_logs "conductors/transformers.dat conductors/transformer_T1_stats.csv conductors/towers.dat conductors/gusts.csv")
   if(ERF_MOORDYN_USE_STUB)
     add_test_conductors(Conductors_Terrain Conductors_Terrain "plt00010" "conductors/L1_span2.dat"
                         "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_terrain_logs}" GOLD_SUFFIX ".gold")
@@ -2571,7 +2571,7 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
     set(_terrain_restart Conductors_Terrain_Restart_MoorDyn)
   endif()
   add_test_restart_parity(${_terrain_restart} Conductors_Terrain 5 10
-      DATALOG "conductors/L1_span2.dat conductors/transformers.dat conductors/transformer_T1_stats.csv conductors/towers.dat"
+      DATALOG "conductors/L1_span2.dat ${_terrain_logs}"
       DATALOG_SIGDIGITS 10)
   set_tests_properties(${_terrain_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # The same lines on towers that bend: each tower sways in its first mode under its members' drag
@@ -2700,6 +2700,25 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
                  Conductors_FrameTowers.i
                  "erf.conductors.lattice.member_file = missing.dat: cannot read the member design file 'missing.dat'"
                  "erf.conductors.lattice.member_file=missing.dat")
+  # gusts from the RANS k: on a run without the k-equation RANS (the laminar flow-sampled span), a gust
+  # input given without gust_type = factor, and gusts with a prescribed wind each stop the run, naming
+  # the input
+  add_test_abort(Conductors_GustNeedsRANSAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_FlowWind
+                 Conductors_FlowWind.i
+                 "erf.conductors.gust_type = factor needs the k-equation RANS \\(erf.rans_type = kEqn\\) on the conductors' anchor level 0"
+                 "erf.conductors.gust_type=factor")
+  add_test_abort(Conductors_GustKeyAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_FlowWind
+                 Conductors_FlowWind.i
+                 "erf.conductors.gust_peak_factor needs erf.conductors.gust_type = factor"
+                 "erf.conductors.gust_peak_factor=3")
+  add_test_abort(Conductors_GustPrescribedWindAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_PrescribedWind
+                 Conductors_PrescribedWind.i
+                 "erf.conductors.gust_type = factor takes k from the flow, so it cannot be used with erf.conductors.prescribed_velocity"
+                 "erf.conductors.gust_type=factor")
   set_tests_properties(Conductors_SpansKeyAbort Conductors_AttachmentOutsideAbort Conductors_GeneratedFrameAbort
-                       Conductors_MemberFileAbort PROPERTIES LABELS "regression;conductors")
+                       Conductors_MemberFileAbort Conductors_GustNeedsRANSAbort Conductors_GustKeyAbort
+                       Conductors_GustPrescribedWindAbort PROPERTIES LABELS "regression;conductors")
 endif()

@@ -6,8 +6,9 @@
 # the k-equation RANS closure, the surface layer and the implicit anelastic MidPoint scheme. L1
 # hangs from insulator strings on two lattice suspension towers and L2 on one; each line samples
 # the flow at its nodes, and the transformers take the lines' pull. The middle span of L1, the
-# transformers' log, the statistics of the hilltop transformer and the towers' drag must match
-# their golds; nothing goes back into the flow.
+# transformers' log, the statistics of the hilltop transformer, the towers' drag and every span's
+# gust factor and peak wind load from the RANS k (gusts.csv) must match their golds; nothing goes
+# back into the flow.
 
 max_step = 10
 stop_time = 9.0
@@ -64,4 +65,7 @@ erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta KE
 
 erf.conductors.diagnostics_dir = conductors
 erf.conductors.air_density     = 1.2
+# every span's gust factor and peak wind load from the RANS wind and k along it (gusts.csv), with
+# sigma_u = 2.5 Cmu0 sqrt(k) and ASCE 74's peak factor and length scale (the defaults)
+erf.conductors.gust_type       = factor
 FILE = network.inputs

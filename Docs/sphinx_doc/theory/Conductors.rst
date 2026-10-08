@@ -819,6 +819,73 @@ nearly along (under 7 m/s across) the ratio scatters up to 1.4 and does not
 test :math:`G_w`. These numbers come from one run of one realization; no test
 checks them.
 
+Gusts from the RANS turbulence
+------------------------------
+
+A steady RANS wind gives the lines their mean load only. With
+``erf.conductors.gust_type = factor`` every span also gets a gust factor and a
+peak wind load from the mean wind and the turbulent kinetic energy :math:`k` of
+the k-equation RANS closure where it hangs (``Source/MovingBodies/Conductors/ERF_Gusts.H``).
+It needs ``erf.rans_type = kEqn`` on the conductors' anchor level and the
+flow's wind (not ``prescribed_velocity``), and every span needs a horizontal
+extent; the run stops otherwise, naming the input. The lines' motion is not
+changed: the gusts are a diagnostic.
+
+The streamwise velocity fluctuation is :math:`\sigma_u = c \sqrt{k}`. In a
+neutral surface layer :math:`\sigma_u` is about :math:`2.5\,u_*`, and the RANS
+closure's equilibrium there is :math:`k = u_*^2 / C_{\mu 0}^2`, so the default
+is :math:`c = 2.5\,C_{\mu 0}` (1.39 with the default ``erf.Cmu0`` of 0.5562);
+``erf.conductors.gust_sigma_factor`` sets :math:`c` instead. The RANS
+:math:`k` (about :math:`3.2\,u_*^2` there) is well below a measured one (about
+:math:`5.5\,u_*^2`), so :math:`c` must not be taken from a measured
+:math:`\sigma_u/\sqrt{k}` (about 1.05). The lateral fluctuation is
+:math:`\sigma_v = 0.8\,\sigma_u`. A span sees the wind's component normal to it:
+with the mean horizontal wind :math:`U` at an angle :math:`\phi` to the span,
+:math:`U_n = U \sin\phi`, and the fluctuation normal to the span is
+:math:`\sigma_n = (\sigma_u^2 \sin^2\phi + \sigma_v^2 \cos^2\phi)^{1/2}`. With
+the turbulence intensity :math:`I_n = \sigma_n / U_n` the span's gust response
+factor takes ASCE 74's form with that intensity in place of the exposure's,
+
+.. math::
+
+   G = 1 + 2 g I_n \sqrt{B}, \qquad B = \frac{1}{1 + 0.8 L / L_s},
+
+with :math:`L` the span's chord, :math:`g` the peak factor
+(``gust_peak_factor``, default 2.7) and :math:`L_s` a length scale
+(``gust_span_length_scale``, default 220 ft = 67.056 m, ASCE 74's exposure C;
+170 ft = 51.816 m is its exposure B). ASCE 74 writes
+:math:`G_w k_v^2 = 1 + 2.7 E \sqrt{B_w}` for wind normal to the span, its
+:math:`E` being twice its exposure's turbulence intensity; for wind normal to
+the span, :math:`g = 2.7` and the exposure's :math:`L_s`, the two are the same
+when :math:`I_n = E/2` (unit test
+``Gusts.WithTheExposuresIntensityItIsASCE74sFactor``, exposures B and C at
+several heights and spans). The peak wind load per length is :math:`G` times
+the mean one, :math:`(\rho/2) C_d d U_n^2`; the peak wind at a point is
+:math:`U + g \sigma_u`. The form is linear in the fluctuation: on a span the
+wind runs nearly along (:math:`U_n` below :math:`\sigma_n`) it misses the
+load of the fluctuation itself and underestimates the peak load, and :math:`G`
+grows as :math:`U_n` falls; the ``valid`` column of ``gusts.csv`` is 1 where
+:math:`U_n \ge \sigma_n` and 0 on such spans. With :math:`U_n = 0` the
+intensity, the factor and the loads are written as 0.
+
+Every step that ends at or after ``stats_start`` takes, per span, the root-mean-square over
+its nodes of the horizontal wind speed and of its component normal to the
+span's chord in the horizontal plane (the mean load goes with the mean of the
+square), and the mean of :math:`k = (\rho k)/\rho` over the nodes (a negative
+:math:`k` from extrapolating below the first cell centre counts as 0), all
+from the state at the step's start, where the nodes are then; the samples are
+stamped with the step's start time, so the first one's time (``t_first``) can be
+one step before ``stats_start``. Their running means per span are
+``<output_root>_gusts_stats.csv`` of each line, and whenever the statistics
+are written ``<diagnostics_dir>/gusts.csv`` gets one row per span from them:
+its attachment height (the mean height above the ground of its two conductor
+points, as in ``asce74.csv``; the nodes sampled sag below it), chord, wind,
+normal wind, :math:`k`, :math:`\sigma_u`, :math:`\sigma_n`, :math:`I_n`,
+:math:`G`, the point gust, the mean load, the peak load and ``valid``. Nothing
+is written before the first sample. The means are checkpointed with the other statistics;
+a run restarted from a checkpoint written without gusts starts them at the
+restart.
+
 Restart
 -------
 
@@ -826,7 +893,8 @@ A checkpoint carries the lines under ``<chk>/conductors``: each line's whole
 MoorDyn state (node and free-point positions and velocities, internal forces
 and the time integrator's state, through MoorDyn's own save), the running
 statistics of every span, of each line's strings, of every pair of lines,
-transformer and tower, each moving tower's sway, the step count and the time.
+transformer and tower, the gusts' per-span means (started afresh when the
+checkpoint has none), each moving tower's sway, the step count and the time.
 On a restart the line is created from the same inputs, initialised without the initial-shape solve and given that state, so
 it continues blown out exactly where the checkpoint left it, on MoorDyn's
 clock; the statistics go on accumulating, and the diagnostics continue on the
