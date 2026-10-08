@@ -2,7 +2,7 @@
 """
 plot_hazard_fields.py — ERF-Hazard AMReX plotfile visualisation.
 
-Reads ERF AMReX plotfile directories (plt_NNNNN) and produces PNG figures
+Reads ERF AMReX plotfile directories (plt_1_NNNNN) and produces PNG figures
 for the Phase 5 canonical test cases: smoke plume plan view, vertical
 cross-sections, wind speed maps, and dust emission maps.
 
@@ -10,11 +10,11 @@ Requirements:
     pip install yt matplotlib numpy
 
 Usage:
-    python plot_hazard_fields.py --plotdir path/to/plt_00020 --case HaboobFireHill
-    python plot_hazard_fields.py --plotdir path/to/plt_00020 --case DustGaussianHill
-    python plot_hazard_fields.py --plotdir path/to/plt_00020 --case HaboobFirePit
-    python plot_hazard_fields.py --plotdir path/to/plt_00020 --case DustGaussianPit
-    python plot_hazard_fields.py --plotdir path/to/plt_00020 --case HaboobFireFlat
+    python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case HaboobFireHill
+    python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case DustGaussianHill
+    python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case HaboobFirePit
+    python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case DustGaussianPit
+    python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case HaboobFireFlat
 
 Outputs (in current directory):
     <case>_smoke_plan.png       Smoke concentration plan view at k=0
@@ -64,7 +64,7 @@ def safe_slice(ds, axis, field, center, width, cmap, log_scale,
     slc.set_cmap(("boxlib", field), cmap)
     slc.set_log(("boxlib", field), log_scale)
     slc.set_colorbar_label(("boxlib", field), cbar_label)
-    slc.set_title(("boxlib", field), title)
+    slc.annotate_title(title)
     slc.save(outfile)
     print(f"  Saved {outfile}")
     return True
@@ -274,7 +274,7 @@ def main():
     )
     parser.add_argument(
         "--plotdir", required=True,
-        help="Path to AMReX plotfile directory (e.g. plt_00020)"
+        help="Path to AMReX plotfile directory (e.g. plt_1_00020)"
     )
     parser.add_argument(
         "--case", default="HaboobFireHill",

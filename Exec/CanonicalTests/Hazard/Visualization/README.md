@@ -9,7 +9,7 @@ No C++ build required — run directly after an ERF-Hazard simulation.
 
 | Script | Input | Requires |
 |---|---|---|
-| `plot_hazard_fields.py` | AMReX plotfile directory (`plt_NNNNN`) | `yt`, `matplotlib`, `numpy` |
+| `plot_hazard_fields.py` | AMReX plotfile directory (`plt_1_NNNNN`) | `yt`, `matplotlib`, `numpy` |
 | `plot_hazard_timeseries.py` | Plain-text CSV/DAT diagnostic files | `matplotlib`, `pandas`, `numpy` |
 
 Install dependencies:
@@ -25,13 +25,13 @@ Reads ERF plotfiles and produces PNG slice plots.
 
 ```bash
 # Smoke plume + terrain + wind for HaboobFireHill
-python plot_hazard_fields.py --plotdir path/to/plt_00020 --case HaboobFireHill
+python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case HaboobFireHill
 
 # Dust emission asymmetry on Gaussian hill
-python plot_hazard_fields.py --plotdir path/to/plt_00020 --case DustGaussianHill
+python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case DustGaussianHill
 
 # Wind recirculation in open pit mine
-python plot_hazard_fields.py --plotdir path/to/plt_00020 --case HaboobFirePit
+python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case HaboobFirePit
 ```
 
 ### Output files per case
@@ -43,6 +43,12 @@ python plot_hazard_fields.py --plotdir path/to/plt_00020 --case HaboobFirePit
 | `HaboobFirePit` | `_wind_recirculation.png`, `_smoke_xz.png`, `_dust_xz.png`, `_theta_xz.png` |
 | `DustGaussianHill` | `_dust_emission.png`, `_wind_sfc.png`, `_dust_xz.png` |
 | `DustGaussianPit` | `_wind_recirculation.png`, `_dust_emission.png`, `_dust_xz.png` |
+
+`dust_emission_flux` lives on the dust grid, so `_dust_emission.png` is made
+only from a dust plotfile (`--plotdir path/to/plt_dust_NNNNN`); the other
+figures need the atmosphere plotfile (`plt_1_NNNNN`). A figure whose field
+is missing is skipped with a message. The slices are in computational
+coordinates, so terrain cases are drawn on the unmapped mesh.
 
 ### Required plotfile fields
 
@@ -58,7 +64,7 @@ only when listed, as mass concentrations in kg/m³, and `erf.plot_int_1` (or
 
 ## plot_hazard_timeseries.py — Diagnostic Time Series
 
-Reads `dust_diag.dat`, `smoke_diag.dat` (plain CSV, no yt needed).
+Reads `dust_diag.dat` (plain CSV written by the dust module, no yt needed).
 
 ### Terrain amplification comparison
 ```bash
@@ -78,6 +84,10 @@ python plot_hazard_timeseries.py --mode dust_diag \
 ```
 
 ### Smoke diagnostic
+
+No ERF output writes `smoke_diag.dat`; this mode plots a CSV you write
+yourself with a `time_s` column and any of `smoke_src_max`,
+`smoke_conc_max_k0` and `smoke_total_mass`.
 ```bash
 python plot_hazard_timeseries.py --mode smoke_diag \
     --file HaboobFireHill/smoke_diag.dat \
