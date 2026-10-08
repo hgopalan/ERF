@@ -5153,6 +5153,22 @@ wind, which bend under their loads when the type has a ``frequency``.
 | **erf.conductors.asce74_exposure**                        | ASCE 74's terrain exposure of that check: B (suburban or | B or C; needs        | C                        |
 |                                                           | wooded) or C (open country)                              | asce74_wind          |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.gust_type**                              | every span's gust factor and peak wind load from the     | none or factor; not  | none                     |
+|                                                           | mean wind and the k-equation RANS's k along it, written  | with                 |                          |
+|                                                           | to diagnostics_dir/gusts.csv (see Gusts from the RANS    | prescribed_velocity; |                          |
+|                                                           | turbulence in the conductor theory); factor needs        | every span needs a   |                          |
+|                                                           | erf.rans_type = kEqn on the anchor level and the flow's  | horizontal extent    |                          |
+|                                                           | wind                                                     |                      |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.gust_sigma_factor**                      | c in sigma_u = c sqrt(k)                                 | Real > 0; needs      | 2.5 erf.Cmu0 (1.39)      |
+|                                                           |                                                          | gust_type = factor   |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.gust_peak_factor**                       | g in the gust factor 1 + 2 g I_n sqrt(B) and the point   | Real > 0; needs      | 2.7 (ASCE 74)            |
+|                                                           | gust U + g sigma_u                                       | gust_type = factor   |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.gust_span_length_scale**                 | L_s in B = 1/(1 + 0.8 L/L_s), L the span's chord (m);    | Real > 0; needs      | 67.056 (220 ft)          |
+|                                                           | the default is ASCE 74's exposure C (51.816 for B)       | gust_type = factor   |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.tower_types**                            | names of the lattice tower types the lines' towers can   | Strings (not the     | none                     |
 |                                                           | be, each with its own block; needs erf.conductors.lines  | name of a line or    |                          |
 |                                                           |                                                          | transformer)         |                          |

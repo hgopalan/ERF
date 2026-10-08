@@ -311,6 +311,11 @@ ERF::ERF_shared ()
 #ifdef ERF_USE_MOORDYN
     // the conductor lines (erf.conductors.*), one MoorDyn system each; nullptr unless erf.conductors.lines is given
     conductors = Conductors::create(max_level);
+    if (conductors) {
+        // the anchor level's closure: gusts on the lines come from the k-equation RANS's k
+        const TurbChoice& tc = solverChoice.turbChoice[conductors->anchor_level()];
+        conductors->set_closure(tc.rans_type == RANSType::kEqn, tc.Cmu0);
+    }
 #else
     // a build without MoorDyn refuses the conductor inputs instead of ignoring them
     {

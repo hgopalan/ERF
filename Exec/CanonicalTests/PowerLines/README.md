@@ -42,6 +42,10 @@ attachment and transformer stands, `coupling.dat` with the iterations each step'
 took, `total_load.dat` with the air's drag on all lines and towers, and the running statistics of all of them from
 `stats_start` on.
 
+Adding `erf.conductors.gust_type = factor` to `inputs_lines` (this case runs the k-equation RANS, which it
+needs) also writes `gusts.csv`: every span's gust factor and peak wind load from the mean wind and the RANS's
+turbulent kinetic energy along it (see "Gusts from the RANS turbulence" in `Docs/sphinx_doc/theory/Conductors.rst`).
+
 ## The same lines in a turbulent wind
 
 `les/` runs a circuit network over hills in a large-eddy simulation: a periodic precursor over flat

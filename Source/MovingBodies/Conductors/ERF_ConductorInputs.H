@@ -267,6 +267,18 @@ std::string first_nonfinite (const std::vector<T>& v, std::size_t per_point, con
  *                                                   <diagnostics_dir>/asce74.csv at start-up; default 0: none)
  *   erf.conductors.asce74_exposure  = C            (B or C, ASCE 74's terrain exposure of that check; default C;
  *                                                   needs asce74_wind)
+ *   erf.conductors.gust_type        = factor       (none or factor; default none. factor: every span's gust factor and
+ *                                                   peak wind load from the mean wind and the k-equation RANS's k
+ *                                                   along it (ERF_Gusts.H), in <diagnostics_dir>/gusts.csv; needs
+ *                                                   erf.rans_type = kEqn on the anchor level and the flow's wind, not
+ *                                                   prescribed_velocity, and every span with a horizontal extent)
+ *   erf.conductors.gust_sigma_factor = 1.39        (> 0; c in sigma_u = c sqrt(k); default 2.5 Cmu0, Cmu0 the RANS
+ *                                                   constant erf.Cmu0; needs gust_type = factor)
+ *   erf.conductors.gust_peak_factor = 2.7          (> 0; g in the gust factor 1 + 2 g I_n sqrt(B) and the peak wind
+ *                                                   U + g sigma_u; default ASCE 74's 2.7; needs gust_type = factor)
+ *   erf.conductors.gust_span_length_scale = 67.056 (m, > 0; L_s in B = 1/(1 + 0.8 L/L_s); default ASCE 74's 220 ft
+ *                                                   of open country, exposure C (51.816 m, 170 ft, for B); needs
+ *                                                   gust_type = factor)
  *
  * Every Real input must be finite.
  */
@@ -300,6 +312,15 @@ struct ConductorInputs
     amrex::Real flashover_distance{1.0};                //!< (m)
     amrex::Real asce74_wind{0.0};                       //!< (m/s); 0: no ASCE 74 table
     std::string asce74_exposure;                        //!< B or C; empty: C
+    std::string gust_type{"none"};                      //!< none or factor
+    bool has_gust_sigma_factor{false};
+    amrex::Real gust_sigma_factor{0.0};                 //!< (-); not given: 2.5 Cmu0 of the k-equation RANS
+    bool has_gust_peak_factor{false};
+    amrex::Real gust_peak_factor{2.7};                  //!< (-)
+    bool has_gust_span_length_scale{false};
+    amrex::Real gust_span_length_scale{67.056};         //!< (m), 220 ft
+    /** Whether gust_type is factor (validate_settings() has checked that it parses). */
+    bool gust_factor () const;
 
     /** The line a line's towers belong to: the line whose towers it shares, or itself. */
     const LineInputs& tower_owner (const LineInputs& s) const;

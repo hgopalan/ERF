@@ -1,5 +1,6 @@
 #include "ERF_ConductorInputs.H"
 #include "ERF_ASCE74.H"
+#include "ERF_Gusts.H"
 
 #include <cmath>
 #include <limits>
@@ -85,6 +86,12 @@ std::string LineInputs::span_root (int k) const
 std::string LineInputs::span_name (int k) const
 {
     return (num_spans() == 1) ? name : name + "_span" + std::to_string(k + 1);
+}
+
+bool ConductorInputs::gust_factor () const
+{
+    GustType g = GustType::None;
+    return parse_gust_type(gust_type, g) && g == GustType::Factor;
 }
 
 const LineInputs& ConductorInputs::tower_owner (const LineInputs& s) const
@@ -298,7 +305,9 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
     const std::pair<const char*, Real> scalars[] = {
         {"air_density", in.air_density}, {"moordyn_dt", in.moordyn_dt}, {"moordyn_cfl", in.moordyn_cfl},
         {"surface_offset", in.surface_offset}, {"stats_start", in.stats_start}, {"epsilon", in.epsilon},
-        {"flashover_distance", in.flashover_distance}, {"asce74_wind", in.asce74_wind}};
+        {"flashover_distance", in.flashover_distance}, {"asce74_wind", in.asce74_wind},
+        {"gust_sigma_factor", in.gust_sigma_factor}, {"gust_peak_factor", in.gust_peak_factor},
+        {"gust_span_length_scale", in.gust_span_length_scale}};
     for (const auto& kv : scalars) {
         if (!std::isfinite(kv.second)) { return std::string("erf.conductors.") + kv.first + " must be finite"; }
     }
@@ -328,6 +337,51 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
                    in.asce74_exposure + "'";
         }
         if (!(in.asce74_wind > 0.0)) { return "erf.conductors.asce74_exposure needs erf.conductors.asce74_wind, the gust it applies to"; }
+    }
+    GustType gust = GustType::None;
+    if (!parse_gust_type(in.gust_type, gust)) {
+        return "erf.conductors.gust_type must be none or factor, not '" + in.gust_type + "'";
+    }
+    const std::pair<const char*, bool> gust_keys[] = {
+        {"gust_sigma_factor", in.has_gust_sigma_factor}, {"gust_peak_factor", in.has_gust_peak_factor},
+        {"gust_span_length_scale", in.has_gust_span_length_scale}};
+    for (const auto& kv : gust_keys) {
+        if (kv.second && gust != GustType::Factor) {
+            return std::string("erf.conductors.") + kv.first + " needs erf.conductors.gust_type = factor";
+        }
+    }
+    if (in.has_gust_sigma_factor && !(in.gust_sigma_factor > 0.0)) { return "erf.conductors.gust_sigma_factor must be positive"; }
+    if (!(in.gust_peak_factor > 0.0)) { return "erf.conductors.gust_peak_factor must be positive"; }
+    if (!(in.gust_span_length_scale > 0.0)) { return "erf.conductors.gust_span_length_scale must be positive (m)"; }
+    if (gust == GustType::Factor && in.has_prescribed_velocity) {
+        return "erf.conductors.gust_type = factor takes k from the flow, so it cannot be used with erf.conductors.prescribed_velocity";
+    }
+    if (gust == GustType::Factor) {
+        // a line's gust statistics are <name>_gusts in the checkpoint and <output_root>_gusts_stats.csv: no other
+        // line or span may carry those names
+        for (const LineInputs& s : in.lines) {
+            for (const LineInputs& o : in.lines) {
+                bool clash = (o.name == s.name + "_gusts" || o.output_root == s.output_root + "_gusts");
+                for (int k = 0; k < o.num_spans(); ++k) {
+                    clash = clash || o.span_name(k) == s.name + "_gusts" || o.span_root(k) == s.output_root + "_gusts";
+                }
+                if (clash) {
+                    return "erf.conductors." + o.name + ": its name or output_root clashes with line " + s.name +
+                           "'s gust statistics (" + s.name + "_gusts); rename it";
+                }
+            }
+        }
+        // the gusts need the wind normal to each span, so a span needs a horizontal extent
+        for (const LineInputs& s : in.lines) {
+            for (int k = 0; k < s.num_spans(); ++k) {
+                const auto a = s.conductor_point(k);
+                const auto b = s.conductor_point(k + 1);
+                if (!(std::hypot(b[0] - a[0], b[1] - a[1]) > Real(1.0e-6))) {
+                    return "erf.conductors." + s.name + ": span " + std::to_string(k + 1) +
+                           " has no horizontal extent, so gust_type = factor has no wind normal to it";
+                }
+            }
+        }
     }
     // a conductor lighter than the air it displaces has no still-air shape (and no elastic catenary)
     for (const LineInputs& s : in.lines) {
@@ -404,6 +458,10 @@ ConductorInputs ConductorInputs::read ()
     pp.query("flashover_distance", in.flashover_distance);
     pp.query("asce74_wind", in.asce74_wind);
     pp.query("asce74_exposure", in.asce74_exposure);
+    pp.query("gust_type", in.gust_type);
+    in.has_gust_sigma_factor = pp.query("gust_sigma_factor", in.gust_sigma_factor) != 0;
+    in.has_gust_peak_factor = pp.query("gust_peak_factor", in.gust_peak_factor) != 0;
+    in.has_gust_span_length_scale = pp.query("gust_span_length_scale", in.gust_span_length_scale) != 0;
     std::vector<Real> vel;
     if (pp.queryarr("prescribed_velocity", vel)) {
         if (vel.size() != 3) { Abort("erf.conductors.prescribed_velocity needs three components (m/s)"); }

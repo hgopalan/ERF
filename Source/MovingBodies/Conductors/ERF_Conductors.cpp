@@ -22,6 +22,8 @@
 #include "ERF_DiagnosticsLog.H"
 #include "ERF_Constants.H"
 #include "ERF_ConductorGeometry.H"
+#include "ERF_Gusts.H"
+#include "ERF_IndexDefines.H"
 #include "ERF_LatticeFrame.H"
 #include "ERF_MoorDynSystem.H"
 
@@ -68,6 +70,22 @@ Conductors::create (int max_level)
             << ", wind " << (in.has_prescribed_velocity ? "prescribed" : "sampled from the flow at the line nodes")
             << ", drag " << (in.drag_on_flow ? "put back into the flow (epsilon " + std::to_string(in.epsilon) + " cells)" : "not put into the flow") << "\n";
     return std::unique_ptr<Conductors>(new Conductors(std::move(in), anchor));
+}
+
+void
+Conductors::set_closure (bool keqn_rans, Real Cmu0)
+{
+    if (!m_in.gust_factor()) { m_closure_set = true; return; }
+    if (!keqn_rans) {
+        Abort("erf.conductors.gust_type = factor needs the k-equation RANS (erf.rans_type = kEqn) on the conductors' anchor level " +
+              std::to_string(m_anchor) + ": the gusts come from its k");
+    }
+    m_gust_sigma = m_in.has_gust_sigma_factor ? static_cast<double>(m_in.gust_sigma_factor)
+                                              : erf_conductors::default_gust_sigma_factor(static_cast<double>(Cmu0));
+    m_closure_set = true;
+    Print() << "erf.conductors: gusts as a static factor per span from the RANS k: sigma_u = " << m_gust_sigma << " sqrt(k)"
+            << (m_in.has_gust_sigma_factor ? "" : " (2.5 Cmu0)") << ", peak factor " << m_in.gust_peak_factor
+            << ", span length scale " << m_in.gust_span_length_scale << " m; written to " << m_in.diagnostics_dir << "/gusts.csv\n";
 }
 
 Conductors::Conductors (ConductorInputs_t in, int anchor)
@@ -290,15 +308,13 @@ Conductors::write_asce74 () const
     std::ofstream out(file, std::ios::trunc);
     if (!out) { Abort("cannot write '" + file + "'"); }
     out << "line,span,height,chord,length,kz,gust_response,pressure,load,weight,swing_deg,sag,blowout,tension\n" << std::setprecision(10);
-    std::size_t ip = 0;
-    for (const LineInputs& s : m_placed) {
+    for (std::size_t i = 0; i < m_placed.size(); ++i) {
+        const LineInputs& s = m_placed[i];
         const double w = static_cast<double>((s.mass_per_length - m_in.air_density * Real(0.25) * Real(3.14159265358979323846) *
                                               s.diameter * s.diameter) * CONST_GRAV);
         for (int k = 0; k < s.num_spans(); ++k) {
             // the height of the conductor above the ground at each end of the span, averaged
-            const double za = static_cast<double>(s.conductor_point(k)[2] - m_ground[ip + static_cast<std::size_t>(k)]);
-            const double zb = static_cast<double>(s.conductor_point(k + 1)[2] - m_ground[ip + static_cast<std::size_t>(k) + 1]);
-            const double z = 0.5 * (za + zb);
+            const double z = span_height(i, k);
             if (!(z > 0.0)) { Abort("erf.conductors." + s.name + ": span " + std::to_string(k + 1) + " is not above the ground"); }
             const auto L = erf_conductors::wire_wind_load(e, static_cast<double>(m_in.asce74_wind), z, static_cast<double>(s.chord(k)),
                                                           static_cast<double>(s.diameter), static_cast<double>(s.drag_coefficient), w,
@@ -309,7 +325,6 @@ Conductors::write_asce74 () const
                 << L.pressure << "," << L.load << "," << L.weight << "," << L.swing * 180.0 / 3.14159265358979323846 << ","
                 << L.sag << "," << L.blowout << "," << L.tension << "\n";
         }
-        ip += static_cast<std::size_t>(s.num_spans() + 1);
     }
     if (!out) { Abort("cannot write '" + file + "'"); }
 }
@@ -927,6 +942,14 @@ Conductors::add_stats (const LineInputs& s)
         st.emplace_back(s.name + "_insulators", s.output_root + "_insulators", q);
     }
     m_stats.push_back(std::move(st));
+    if (m_in.gust_factor()) {
+        std::vector<std::string> q;
+        for (int k = 0; k < s.num_spans(); ++k) {
+            const std::string sp = "span" + std::to_string(k + 1);
+            q.insert(q.end(), {sp + "_wind", sp + "_normal_wind", sp + "_k"});
+        }
+        m_gust_stats.emplace_back(s.name + "_gusts", s.output_root + "_gusts", q);
+    }
 }
 
 void
@@ -1091,6 +1114,16 @@ Conductors::restore (const std::string& dir)
         Print() << "erf.conductors." << s.name << ": continued from " << dir << " at t = " << m_time << " s (step " << m_step
                 << "), mid-span offset " << c.mid_offset() << " m, sag " << c.mid_sag() << " m\n";
     }
+    // the gusts are a diagnostic: a checkpoint written without them starts their statistics at the restart
+    bool gusts_restored = !m_gust_stats.empty();
+    for (auto& st : m_gust_stats) { gusts_restored = st.read_state(dir) && gusts_restored; }
+    if (!m_gust_stats.empty() && !gusts_restored) {
+        for (std::size_t i = 0; i < m_gust_stats.size(); ++i) {
+            m_gust_stats[i] = erf_actuator::RunningStats(m_gust_stats[i].name(), m_placed[i].output_root + "_gusts",
+                                                         m_gust_stats[i].quantities());
+        }
+        Print() << "erf.conductors: the checkpoint '" << dir << "' holds no gust statistics; they start at the restart\n";
+    }
     add_pair_stats();
     for (auto& st : m_pair_stats) {
         if (!st.read_state(dir)) { Abort("the conductor checkpoint '" + dir + "' holds no statistics " + st.name()); }
@@ -1165,6 +1198,7 @@ Conductors::write_checkpoint (const std::string& chkdir) const
     }
     ParallelDescriptor::Barrier();
     for (const auto& line : m_stats) { for (const auto& st : line) { st.write_state(dir); } }
+    for (const auto& st : m_gust_stats) { st.write_state(dir); }
     for (const auto& st : m_pair_stats) { st.write_state(dir); }
     for (const auto& st : m_tstats) { st.write_state(dir); }
     for (const auto& st : m_tower_stats) { st.write_state(dir); }
@@ -1260,7 +1294,7 @@ Conductors::update_ground_under_nodes (const MultiFab* z_phys_nd, const Geometry
 std::vector<Real>
 Conductors::wind_at (const ConductorLine& span,
                      const MultiFab& U, const MultiFab& V, const MultiFab& W,
-                     const MultiFab* z_phys_nd, const Geometry& geom) const
+                     const MultiFab* z_phys_nd, const Geometry& geom, std::vector<Real>* nodes) const
 {
     std::vector<Real> uvw(3 * static_cast<std::size_t>(span.num_kinematics_points()), 0.0);
     if (m_in.has_prescribed_velocity) {
@@ -1287,17 +1321,22 @@ Conductors::wind_at (const ConductorLine& span,
     std::vector<Real> at_nodes;
     erf_actuator::sample_velocity(U, V, W, z_phys_nd, geom, pos, at_nodes);
     std::copy(at_nodes.begin(), at_nodes.end(), uvw.begin());
+    if (nodes != nullptr) { *nodes = pos; }
     return uvw;
 }
 
 void
 Conductors::advance (int lev, double time, double dt,
                      const MultiFab& U, const MultiFab& V, const MultiFab& W,
-                     const MultiFab* z_phys_nd, const MultiFab* detJ_cc, const Geometry& geom)
+                     const MultiFab* z_phys_nd, const MultiFab* detJ_cc, const Geometry& geom,
+                     const MultiFab* cons)
 {
     if (lev != m_anchor) { return; }
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dt > 0.0 && std::isfinite(dt) && std::isfinite(time),
                                      "Conductors::advance: dt must be positive and finite");
+    const bool gusts = m_in.gust_factor();
+    if (gusts && !m_closure_set) { Abort("Conductors::advance: gust_type = factor needs set_closure() first"); }
+    if (gusts && cons == nullptr) { Abort("Conductors::advance: gust_type = factor needs the conserved state (rho, rho k)"); }
     if (!m_ground_set) { set_ground(z_phys_nd, geom); }
     if (m_step == 0 && !m_restored) {
         // the lines' MoorDyn clocks start at zero at this step: at ERF's time zero in a fresh run, at the
@@ -1344,15 +1383,27 @@ Conductors::advance (int lev, double time, double dt,
             }
         }
     }
+    // with gusts, the wind and the nodes of every line at the step's start, sampled together below
+    const bool sample_gusts_now = gusts && time + dt >= m_in.stats_start;
+    std::vector<std::vector<Real>> gust_wind, gust_pos;
     for (std::size_t line = 0; line < m_lines.size(); ++line) {
         ConductorLine& span = *m_lines[line];
         // the wind of the flow at the start of the step, where the line is, held over the step
-        span.set_wind(wind_at(span, U, V, W, z_phys_nd, geom), time + 0.5 * dt);
+        std::vector<Real> nodes;
+        const std::vector<Real> uvw = wind_at(span, U, V, W, z_phys_nd, geom, sample_gusts_now ? &nodes : nullptr);
+        if (sample_gusts_now) {
+            gust_pos.push_back(std::move(nodes));
+            gust_wind.push_back(uvw);
+        }
+        span.set_wind(uvw, time + 0.5 * dt);
         if (first) {
             span.write_diagnostics(time, true);
             if (m_in.node_output_int > 0) { span.write_nodes(time, true); }
         }
     }
+    // the gate of the other statistics (the steps that end at or after stats_start); the samples are
+    // the state at the step's start, so they are stamped with its time, as the towers' statistics are
+    if (sample_gusts_now) { sample_gusts(time, gust_pos, gust_wind, *cons, z_phys_nd, geom); }
     // the lines on towers that move step with their towers, those sharing towers together
     m_coupling_iterations = 0;
     m_coupling_unconverged = 0;
@@ -1426,10 +1477,111 @@ Conductors::advance (int lev, double time, double dt,
             if (write) { m_tstats[t].write(); }
         }
     }
+    // nothing before stats_start: means of no samples would read as calm air (every line is sampled together)
+    if (write && !m_gust_stats.empty() && m_gust_stats.front().num_samples() > 0) {
+        for (const auto& st : m_gust_stats) { st.write(); }
+        write_gusts();
+    }
     // the force the lines and the towers' members exert on the air (minus the air's drag on them),
     // spread into the momentum sources ERF adds over the next step
     if (m_in.drag_on_flow) { spread_drag(U, z_phys_nd, detJ_cc, geom); }
     if (write) { write_total_load(time + dt, first); }
+}
+
+void
+Conductors::sample_gusts (double t, const std::vector<std::vector<Real>>& pos, const std::vector<std::vector<Real>>& uvw,
+                          const MultiFab& cons, const MultiFab* z_phys_nd, const Geometry& geom)
+{
+    AMREX_ALWAYS_ASSERT(pos.size() == m_lines.size() && uvw.size() == m_lines.size());
+    // rho and rho k at every line's nodes in one pass each
+    std::vector<Real> all;
+    for (const auto& p : pos) { all.insert(all.end(), p.begin(), p.end()); }
+    std::vector<Real> rho, rhok;
+    erf_actuator::sample_cell_scalar(cons, Rho_comp, z_phys_nd, geom, all, rho);
+    erf_actuator::sample_cell_scalar(cons, RhoKE_comp, z_phys_nd, geom, all, rhok);
+    std::size_t first = 0;   // the line's first node in the samples
+    for (std::size_t i = 0; i < m_lines.size(); ++i) {
+        const ConductorLine& line = *m_lines[i];
+        const LineInputs& s = m_placed[i];
+        std::vector<Real> q;
+        q.reserve(3 * static_cast<std::size_t>(s.num_spans()));
+        for (int k = 0; k < s.num_spans(); ++k) {
+            const auto n = span_normal(i, k);
+            // root-mean-square over the span's nodes: the mean load goes with the mean of the square
+            double wind2 = 0.0, normal2 = 0.0, kmean = 0.0;
+            const unsigned n0 = line.span_first_node(k), nn = line.span_num_nodes(k);
+            for (unsigned m = n0; m < n0 + nn; ++m) {
+                const double u = static_cast<double>(uvw[i][3*m]), v = static_cast<double>(uvw[i][3*m+1]);
+                const double un = u * n[0] + v * n[1];
+                wind2 += u * u + v * v;
+                normal2 += un * un;
+                const double r = static_cast<double>(rho[first + m]);
+                if (!(r > 0.0)) {
+                    Abort("erf.conductors." + s.name + ": the density at node " + std::to_string(m) + " is not positive");
+                }
+                kmean += std::max(static_cast<double>(rhok[first + m]) / r, 0.0);
+            }
+            q.insert(q.end(), {static_cast<Real>(std::sqrt(wind2 / nn)), static_cast<Real>(std::sqrt(normal2 / nn)),
+                               static_cast<Real>(kmean / nn)});
+        }
+        m_gust_stats[i].accumulate(t, q);
+        first += line.num_nodes();
+    }
+}
+
+std::array<double,2>
+Conductors::span_normal (std::size_t i, int k) const
+{
+    const LineInputs& s = m_placed[i];
+    const auto& a = s.conductor_point(k);
+    const auto& b = s.conductor_point(k + 1);
+    const double dx = static_cast<double>(b[0] - a[0]), dy = static_cast<double>(b[1] - a[1]);
+    const double h = std::hypot(dx, dy);
+    // validate_settings refuses such a span with gust_type = factor
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(h > 1.0e-6, "Conductors::span_normal: the span has no horizontal extent");
+    return {{-dy / h, dx / h}};
+}
+
+double
+Conductors::span_height (std::size_t i, int k) const
+{
+    std::size_t ip = 0;
+    for (std::size_t j = 0; j < i; ++j) { ip += static_cast<std::size_t>(m_placed[j].num_spans() + 1); }
+    const LineInputs& s = m_placed[i];
+    const double za = static_cast<double>(s.conductor_point(k)[2] - m_ground[ip + static_cast<std::size_t>(k)]);
+    const double zb = static_cast<double>(s.conductor_point(k + 1)[2] - m_ground[ip + static_cast<std::size_t>(k) + 1]);
+    return 0.5 * (za + zb);
+}
+
+void
+Conductors::write_gusts () const
+{
+    if (!ParallelDescriptor::IOProcessor()) { return; }
+    const std::string file = m_in.diagnostics_dir + "/gusts.csv";
+    std::ofstream out(file, std::ios::trunc);
+    if (!out) { Abort("cannot write '" + file + "'"); }
+    out << "line,span,height,chord,wind,normal_wind,k,sigma,normal_sigma,intensity,gust_response,gust_wind,mean_load,peak_load,valid\n"
+        << std::setprecision(10);
+    for (std::size_t i = 0; i < m_placed.size(); ++i) {
+        const LineInputs& s = m_placed[i];
+        const auto& st = m_gust_stats[i];
+        for (int k = 0; k < s.num_spans(); ++k) {
+            const std::size_t q = 3 * static_cast<std::size_t>(k);
+            const double wind = static_cast<double>(st.mean(q));
+            // the normal component's root-mean-square never exceeds the speed's; clip roundoff
+            const double normal = std::min(static_cast<double>(st.mean(q + 1)), wind);
+            const double kmean = static_cast<double>(st.mean(q + 2));
+            const auto G = erf_conductors::span_gust(wind, normal, kmean, static_cast<double>(s.chord(k)),
+                                                     static_cast<double>(s.diameter), static_cast<double>(s.drag_coefficient),
+                                                     static_cast<double>(m_in.air_density), m_gust_sigma,
+                                                     static_cast<double>(m_in.gust_peak_factor),
+                                                     static_cast<double>(m_in.gust_span_length_scale));
+            out << s.name << "," << k + 1 << "," << span_height(i, k) << "," << s.chord(k) << "," << wind << "," << normal << ","
+                << kmean << "," << G.sigma << "," << G.normal_sigma << "," << G.intensity << "," << G.gust_response << ","
+                << G.gust_wind << "," << G.mean_load << "," << G.peak_load << "," << (G.linear_valid ? 1 : 0) << "\n";
+        }
+    }
+    if (!out) { Abort("cannot write '" + file + "'"); }
 }
 
 void

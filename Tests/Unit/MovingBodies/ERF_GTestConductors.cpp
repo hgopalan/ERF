@@ -30,6 +30,12 @@
 // AnAttachmentOutsideTheDomainIsRefusedNamingItsKey: the abort names end_a, end_b or the tower.
 // ANonFiniteCouplingPullIsRefusedNotConverged: coupling_converged on NaN pulls.
 // ARestartChecksTheTowerSwayAndTheSurfaceOffset: restart_mismatch.
+// GustsComeFromTheRANSkAlongEachSpan: with gust_type = factor, per span the root-mean-square wind and normal wind
+//     over its nodes and the mean k = (rho k)/rho, from stats_start, sampled where the nodes are at each step's start;
+//     gusts.csv's columns for a line across the wind and one at 45 degrees to it; nothing before stats_start; the
+//     set_closure and conserved-state aborts.
+// GustsSwitchedOnAtARestartStartAfresh: a checkpoint written without gusts restarts with gust_type = factor, the
+//     gust statistics starting at the restart.
 
 #include <algorithm>
 #include <array>
@@ -54,6 +60,8 @@
 
 #include "ERF_ActuatorSpreading.H"
 #include "ERF_Conductors.H"
+#include "ERF_Gusts.H"
+#include "ERF_IndexDefines.H"
 #include "ERF_GTestThrowOnAbort.H"
 #include "ERF_MoorDynSystem.H"
 
@@ -254,6 +262,174 @@ TEST(Conductors, TheFlowIsSampledAtTheLinesCurrentPosition)
     // the line really moved, so sampling at the initial positions would have handed a different wind
     EXPECT_GT(moved, 0.5) << "the span must blow out in the sampled crosswind";
     EXPECT_GT(m.vy * moved, 1.0e-3) << "the field must change measurably over the distance the line moved";
+}
+
+TEST(Conductors, GustsComeFromTheRANSkAlongEachSpan)
+{
+    const std::string dir = scratch("gusts");
+    set_inputs(dir, "Tgust", false);
+    amrex::ParmParse pp("erf.conductors");
+    // a second line at 45 degrees to the wind and 10 m higher: the normal component and the second line's height
+    pp.remove("lines");
+    pp.addarr("lines", std::vector<std::string>{"Tgust", "Tgust2"});
+    {
+        amrex::ParmParse ps("erf.conductors.Tgust2");
+        ps.addarr("end_a", std::vector<Real>{300.0, 300.0, 40.0});
+        ps.addarr("end_b", std::vector<Real>{513.0, 513.0, 40.0});
+        ps.add("length", 301.5);
+        ps.add("diameter", 0.0281);
+        ps.add("mass_per_length", 1.628);
+        ps.add("axial_stiffness", 3.0e7);
+    }
+    pp.add("gust_type", std::string("factor"));
+    // the steps end at 0.25, 0.5, ...: the first is not sampled
+    pp.add("stats_start", 0.5);
+    Mesh m(false);
+    m.fill_crosswind();
+    // rho and rho k with k linear in the height, which the cell sampler reproduces exactly
+    const Real rho0 = 1.2, k0 = 0.5, kz = 0.01;
+    amrex::MultiFab cons(m.ba, m.dm, RhoKE_comp + 1, 1);
+    cons.setVal(0.0);
+    const Real dz = m.H / m.nz;
+    for (amrex::MFIter mfi(cons); mfi.isValid(); ++mfi) {
+        auto ca = cons.array(mfi);
+        amrex::LoopOnCpu(mfi.growntilebox(), [&](int i, int j, int k) {
+            ca(i,j,k,Rho_comp) = rho0;
+            ca(i,j,k,RhoKE_comp) = rho0 * (k0 + kz * (k + 0.5) * dz);
+        });
+    }
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(nullptr, m.geom);
+    {
+        using erf_gtest::abort_message;
+        EXPECT_NE(abort_message([&] { c->advance(0, 0.0, 0.25, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons); })
+                      .find("needs set_closure() first"), std::string::npos);
+        EXPECT_NE(abort_message([&] { c->set_closure(false, 0.5562); }).find("needs the k-equation RANS"), std::string::npos);
+    }
+    c->set_closure(true, 0.5562);
+    // Cmu0 arrives as amrex::Real: a float in single precision
+    EXPECT_NEAR(c->gust_sigma_factor(), 2.5 * 0.5562, 1e-6);
+    EXPECT_NE(erf_gtest::abort_message([&] { c->advance(0, 0.0, 0.25, m.u, m.v, m.w, nullptr, nullptr, m.geom); })
+                  .find("needs the conserved state"), std::string::npos);
+    ASSERT_EQ(c->lines().size(), 2u);
+    // the normals of the two chords' horizontal projections: +y for the line along x, (-1, 1)/sqrt(2) for the other
+    const double ny[2] = {1.0, 1.0 / std::sqrt(2.0)};
+    // the expected means: every sampled step, the root-mean-square wind and normal wind over each span's nodes and
+    // the mean k, where the nodes are when the wind is sampled (u = w = 0, so the wind is |v|)
+    double wind[2] = {0.0, 0.0}, normal[2] = {0.0, 0.0}, kmean[2] = {0.0, 0.0};
+    const int steps = 8;
+    for (int s = 0; s < steps; ++s) {
+        if (s == 1) {
+            EXPECT_FALSE(std::filesystem::exists(dir + "/gusts.csv")) << "no table before the first sample (stats_start)";
+            EXPECT_FALSE(std::filesystem::exists(dir + "/Tgust_gusts_stats.csv")) << "no statistics before stats_start";
+        }
+        if (s > 0) {
+            for (int l = 0; l < 2; ++l) {
+                const auto& span = *c->lines()[static_cast<std::size_t>(l)];
+                const std::vector<Real> where = span.kinematics_points();
+                double w2 = 0.0, kk = 0.0;
+                for (unsigned n = 0; n < span.num_nodes(); ++n) {
+                    const double v = static_cast<double>(m.v_at(where[3*n+1], where[3*n+2]));
+                    w2 += v * v;
+                    kk += static_cast<double>(k0 + kz * where[3*n+2]);
+                }
+                wind[l] += std::sqrt(w2 / span.num_nodes());
+                normal[l] += ny[l] * std::sqrt(w2 / span.num_nodes());
+                kmean[l] += kk / span.num_nodes();
+            }
+        }
+        c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons);
+    }
+    {
+        // the running statistics count the sampled steps only
+        std::ifstream st(dir + "/Tgust_gusts_stats.csv");
+        std::string h, r;
+        ASSERT_TRUE(std::getline(st, h) && std::getline(st, r));
+        EXPECT_EQ(r.substr(0, r.find(',')), std::to_string(steps - 1));
+    }
+    std::ifstream f(dir + "/gusts.csv");
+    ASSERT_TRUE(f.good());
+    std::string header, row;
+    std::getline(f, header);
+    EXPECT_EQ(header, "line,span,height,chord,wind,normal_wind,k,sigma,normal_sigma,intensity,gust_response,gust_wind,mean_load,"
+                      "peak_load,valid");
+    const double tol = (std::is_same<Real, float>::value) ? 1e-4 : 1e-8;
+    const char* names[2] = {"Tgust", "Tgust2"};
+    const double height[2] = {30.0, 40.0}, chord[2] = {300.0, 213.0 * std::sqrt(2.0)};
+    for (int l = 0; l < 2; ++l) {
+        ASSERT_TRUE(std::getline(f, row)) << "one row per span";
+        std::vector<std::string> col;
+        std::stringstream ss(row);
+        for (std::string x; std::getline(ss, x, ',');) { col.push_back(x); }
+        ASSERT_EQ(col.size(), 15u);
+        EXPECT_EQ(col[0], names[l]);
+        EXPECT_EQ(col[1], "1");
+        const double U = wind[l] / (steps - 1), Un = normal[l] / (steps - 1), k = kmean[l] / (steps - 1);
+        EXPECT_NEAR(std::stod(col[2]), height[l], tol * height[l]) << "the attachment height above the flat ground";
+        EXPECT_NEAR(std::stod(col[3]), chord[l], tol * chord[l]);
+        EXPECT_NEAR(std::stod(col[4]), U, tol * U);
+        EXPECT_NEAR(std::stod(col[5]), Un, tol * Un);
+        EXPECT_NEAR(std::stod(col[6]), k, tol * k);
+        // the formulas are pinned by the Gusts unit tests; here the columns must carry them
+        const auto G = erf_conductors::span_gust(U, Un, k, chord[l], 0.0281, 1.0, 1.2, 2.5 * 0.5562, 2.7, 67.056);
+        EXPECT_NEAR(std::stod(col[7]), G.sigma, tol * G.sigma);
+        EXPECT_NEAR(std::stod(col[8]), G.normal_sigma, tol * G.normal_sigma);
+        EXPECT_NEAR(std::stod(col[9]), G.intensity, tol * G.intensity);
+        EXPECT_NEAR(std::stod(col[10]), G.gust_response, tol * G.gust_response);
+        EXPECT_NEAR(std::stod(col[11]), G.gust_wind, tol * G.gust_wind);
+        EXPECT_NEAR(std::stod(col[12]), 0.5 * 1.2 * 1.0 * 0.0281 * Un * Un, tol * G.mean_load);
+        EXPECT_NEAR(std::stod(col[13]), G.peak_load, tol * G.peak_load);
+        EXPECT_EQ(col[14], G.linear_valid ? "1" : "0");
+        EXPECT_TRUE(G.linear_valid) << "about 10 and 7 m/s normal to the spans against sigma_n of about 1.2 m/s";
+    }
+    EXPECT_FALSE(std::getline(f, row)) << "one row per span";
+}
+
+TEST(Conductors, GustsSwitchedOnAtARestartStartAfresh)
+{
+    const std::string dir = scratch("gust_restart");
+    set_inputs(dir, "Tfresh", false);
+    Mesh m(false);
+    m.fill_crosswind();
+    amrex::MultiFab cons(m.ba, m.dm, RhoKE_comp + 1, 1);
+    cons.setVal(0.0);
+    for (amrex::MFIter mfi(cons); mfi.isValid(); ++mfi) {
+        auto ca = cons.array(mfi);
+        amrex::LoopOnCpu(mfi.growntilebox(), [&](int i, int j, int k) {
+            ca(i,j,k,Rho_comp) = 1.2;
+            ca(i,j,k,RhoKE_comp) = 1.2 * 0.8;
+        });
+    }
+    const double dt = 0.25;
+    // a run without gusts writes a checkpoint after three steps
+    auto a = Conductors::create(0);
+    ASSERT_TRUE(a);
+    a->set_closure(true, 0.5562);
+    a->set_ground(nullptr, m.geom);
+    for (int s = 0; s < 3; ++s) { a->advance(0, dt * s, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons); }
+    const std::string chk = dir + "/chk00003";
+    std::filesystem::create_directories(chk);
+    a->write_checkpoint(chk);
+    EXPECT_FALSE(std::filesystem::exists(dir + "/gusts.csv"));
+    // the restart turns gusts on: the lines continue, the gust statistics start at the restart
+    amrex::ParmParse("erf.conductors").add("gust_type", std::string("factor"));
+    auto b = Conductors::create(0);
+    ASSERT_TRUE(b);
+    b->set_closure(true, 0.5562);
+    b->set_ground(nullptr, m.geom, chk);
+    EXPECT_TRUE(b->restored());
+    for (int s = 3; s < 6; ++s) { b->advance(0, dt * s, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons); }
+    std::ifstream st(dir + "/Tfresh_gusts_stats.csv");
+    std::string h, r;
+    ASSERT_TRUE(std::getline(st, h) && std::getline(st, r));
+    std::vector<std::string> col;
+    std::stringstream ss(r);
+    for (std::string x; std::getline(ss, x, ',');) { col.push_back(x); }
+    ASSERT_GE(col.size(), 3u);
+    EXPECT_EQ(col[0], "3") << "the three steps after the restart";
+    EXPECT_DOUBLE_EQ(std::stod(col[1]), 0.75) << "the first sample is the restart step's start";
+    EXPECT_TRUE(std::filesystem::exists(dir + "/gusts.csv"));
 }
 
 TEST(Conductors, ClearanceIsTheHeightAboveTheTerrainUnderEachNode)

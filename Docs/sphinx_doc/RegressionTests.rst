@@ -822,8 +822,9 @@ closure and the surface layer, and leaves through the x-high one. Each line
 is a section on insulator strings hanging from lattice towers, strung to
 20 kN. The middle span of one line, ``conductors/transformers.dat`` with
 every transformer's load and clearance, the hilltop transformer's
-statistics and ``conductors/towers.dat`` with every tower's drag, line pull
-and leg loads are
+statistics, ``conductors/towers.dat`` with every tower's drag, line pull
+and leg loads, and ``conductors/gusts.csv`` with every span's gust factor and
+peak wind load from the RANS :math:`k` (``erf.conductors.gust_type = factor``) are
 compared with golds of each library, the real library's to four digits: the
 terrain flow differs between compilers at roundoff, and a span's swing one
 step in (6.5e-4 degrees) moves in the fifth digit with it; the restart parity tests ``Conductors_Terrain_Restart`` and
@@ -918,7 +919,13 @@ message, on the ``Conductors_FlowWind`` deck: ``Conductors_SpansKeyAbort``
 gives ``erf.conductors.spans`` (not an input; the message names
 ``erf.conductors.lines``), and ``Conductors_AttachmentOutsideAbort`` moves
 ``end_b`` to x = 1600 m, outside the 1500 m domain (the message names the line
-end and its position).
+end and its position). Three more stop runs that ask for gusts the code cannot give:
+``Conductors_GustNeedsRANSAbort`` sets ``erf.conductors.gust_type = factor`` on
+the laminar ``Conductors_FlowWind`` deck (the message names
+``erf.rans_type = kEqn``), ``Conductors_GustKeyAbort`` gives
+``gust_peak_factor`` there without ``gust_type = factor``, and
+``Conductors_GustPrescribedWindAbort`` asks for gusts on the
+``Conductors_PrescribedWind`` deck, whose wind is prescribed.
 
 The ``Linux GCC MoorDyn`` CI workflow
 runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with
