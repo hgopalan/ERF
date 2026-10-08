@@ -27,6 +27,13 @@ geometry.is_periodic = 1 1 0
 amr.max_grid_size = 32
 amr.max_grid_size_z   = 64
 zlo.type = "surface_layer"
+# Local surface-layer averaging, which the hill and pit decks get by default
+# on their terrain-fitted (VariableDz) mesh (there ERF also turns on the
+# normal-vector rotation and the interpolation to zref, which need terrain).
+# The flat (ConstantDz) default is a plane average, which gives every column
+# the same u* and so hides the gust front from the surface drag and from the
+# dust emission.
+erf.most.average_policy = 1
 erf.most.z0 = 0.1
 erf.most.zref = 24.0
 erf.most.surf_temp_flux = 0.0
@@ -126,7 +133,7 @@ erf.fire.heat_flux_alfg = 45.0
 erf.fire.heat_flux_partition = "cfbm"
 erf.fire.fire_atm_feedback = 1.0
 erf.fire.inject_latent = true
-erf.fire.use_terrain_wind = false
+erf.fire.use_terrain_wind = true
 erf.fire.coupling_type = "lagged"
 erf.fire.source_mode = "add"
 erf.fire.smoke_enable = true
@@ -137,6 +144,13 @@ erf.fire_plot_int = 20
 
 # Fire-Dust coupling
 erf.dust.crust_index = 0.5
+# With no terrain the slopes and curvature are zero and the FARSITE factor is
+# 1; the switch still makes the dust u* follow the local wind at zref, as in
+# the hill and pit decks.
+erf.dust.use_terrain_wind = true
+erf.dust.k_ridge = 1.5
+erf.dust.k_shelter = 0.6
+erf.dust.k_valley = 0.8
 erf.fire_dust_coupling = true
 erf.fire_dust_crust_reduction = 0.8
 erf.fire_dust_wind_to_dust = true
