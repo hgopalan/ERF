@@ -30,7 +30,7 @@ python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case HaboobFireHill
 # Dust emission asymmetry on Gaussian hill
 python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case DustGaussianHill
 
-# Wind recirculation in open pit mine
+# Wind in the x-z plane across the Gaussian pit
 python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case HaboobFirePit
 ```
 
@@ -40,7 +40,7 @@ python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case HaboobFirePit
 |---|---|
 | `HaboobFireHill` | `_smoke_plan.png`, `_smoke_xz.png`, `_wind_sfc.png`, `_dust_emission.png`, `_dust_xz.png`, `_theta_xz.png` |
 | `HaboobFireFlat` | Same as HaboobFireHill |
-| `HaboobFirePit` | `_wind_recirculation.png`, `_smoke_xz.png`, `_dust_xz.png`, `_theta_xz.png` |
+| `HaboobFirePit` | `_wind_recirculation.png`, `_dust_emission.png`, `_smoke_xz.png`, `_dust_xz.png`, `_theta_xz.png` |
 | `DustGaussianHill` | `_dust_emission.png`, `_wind_sfc.png`, `_dust_xz.png` |
 | `DustGaussianPit` | `_wind_recirculation.png`, `_dust_emission.png`, `_dust_xz.png` |
 
@@ -108,9 +108,10 @@ python plot_hazard_timeseries.py --mode coupling \
 
 ---
 
-## Most Compelling Single Figure
+## Terrain comparison
 
-The terrain amplification plot from `HaboobFireFlat` vs `HaboobFireHill` vs
-`HaboobFirePit` is the clearest single figure for a paper or presentation —
-it shows in one image how terrain geometry controls dust emission, using
-only the plain-text diagnostic output with no post-processing tools.
+The terrain amplification plot compares the domain-total dust emission and
+the maximum u* of `HaboobFireFlat`, `HaboobFireHill` and `HaboobFirePit`
+from `dust_diag.dat` alone. In the full-length runs the three totals agree
+within 7 %: the terrain moves where dust is raised more than how much, which
+the `_dust_emission.png` maps from `plt_dust_*` plotfiles show.

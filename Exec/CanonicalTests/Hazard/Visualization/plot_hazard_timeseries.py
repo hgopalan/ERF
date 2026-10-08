@@ -4,8 +4,7 @@ plot_hazard_timeseries.py — ERF-Hazard diagnostic time series plots.
 
 Reads plain-text CSV/DAT diagnostic files produced by ERF-Hazard
 (dust_diag.dat; smoke_diag.dat is a user-written CSV, no ERF output writes it)
-and produces publication-quality
-line plots. No yt or AMReX dependency — only matplotlib and pandas.
+and produces publication-quality line plots. No yt or AMReX dependency — only matplotlib and pandas.
 
 Requirements:
     pip install matplotlib pandas numpy

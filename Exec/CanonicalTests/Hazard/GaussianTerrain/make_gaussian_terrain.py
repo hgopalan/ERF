@@ -37,8 +37,11 @@ The Gaussian formula is:
     z(x,y) = H * exp(-((x-cx)^2 + (y-cy)^2) / (2*sigma^2))
 
 where cx and cy default to xlo + nx*dx/2 and ylo + ny*dy/2 (--cx and --cy
-override them). Give nx = n_cell + 1 points so the file spans the whole
-domain, nodes included (129 points at 62.5 m cover 0 to 8000 m).
+override them). The default centre is the domain centre when nx*dx is the
+domain length, as for the 32-point files here, which stop one spacing short
+of the last mesh node (ERF holds the last value there). A file that covers
+every node needs nx = n_cell + 1 points (129 at 62.5 m span 0 to 8000 m);
+then the default centre is dx/2 off the domain centre, so give --cx/--cy.
 """
 
 import argparse
