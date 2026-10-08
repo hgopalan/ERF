@@ -152,7 +152,7 @@ def plot_wind_xz(ds, case):
         cmap="RdBu_r",
         log_scale=False,
         cbar_label="U [m/s]",
-        title=f"{case} — Wind x-z Cross-Section (recirculation)",
+        title=f"{case} — x-Velocity x-z Cross-Section",
         outfile=f"{case}_wind_recirculation.png"
     )
 

@@ -117,7 +117,7 @@ def plot_terrain_amplification(args):
             axes[1].plot(t, df["ustar_max_m_s"], color=color, label=label)
 
     axes[0].set_ylabel("Dust emission total [kg/s]")
-    axes[0].set_title("ERF-Hazard — Terrain Amplification of Dust Emission")
+    axes[0].set_title("ERF-Hazard — Dust Emission over Flat, Hill and Pit Terrain")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
 

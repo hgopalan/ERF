@@ -23,15 +23,16 @@ averaging, sampling along the surface normal and interpolation to
 `erf.most.zref`. The three decks differ only in the terrain lines.
 
 Two fire settings differ from the code defaults on purpose:
-- `erf.fire.use_wind_limit = false`. With the midflame wind cap, fuel model 1
-  spreads at 0.29 m/s from the first step and the fire never responds to the
-  gust front (Andrews et al. 2013 recommend against the original limit).
+- `erf.fire.use_wind_limit = false`. ERF's midflame wind cap (300 ft/min,
+  1.52 m/s, for fine fuels) holds fuel model 1 at 0.28 to 0.29 m/s from the
+  first step, so the fire never responds to the gust front (Andrews et al.
+  2013 recommend against applying a wind limit).
 - `erf.fire.use_terrain_wind = false` (and `erf.dust.use_terrain_wind`
   stays at its default, false). These switches apply FARSITE-style factors
   (x1.5 on slopes facing the wind) to the sampled wind, but the mesh
-  resolves the terrain, so its speed-up is already in that wind. With both
-  on, the y = 1 km dust peak on the hill's flank at 300 s was 36 times the
-  median; without them it is 12.
+  resolves the terrain, so its speed-up is already in that wind. In the hill
+  case with both on, the y = 1 km dust peak on the hill's flank at 300 s was
+  36 times the median; without them it is 12.
 
 ## Running
 The deck is a short regression run: `max_step = 20` (5 s), a few seconds on
@@ -64,28 +65,36 @@ the centre line y = 2 km and along y = 1 km. The dust ratio is the maximum of
 | 600   | 6906 / 6844 | 8.3  | 8.8  | behind the front, (6578, 3828) m |
 
 - Along y = 2 km the front moves at 8.2 m/s from 60 to 300 s and 7.4 m/s
-  from 300 to 600 s. The first-cell wind behind it peaks at 11.6 m/s at
-  210 s.
+  from 300 to 600 s. The table's first-cell wind includes the fire's
+  indraft: the 11.6 m/s maximum at 210 s is at the fire head, just ahead of
+  the front.
 - The fire's head rate of spread rises from 0.40 m/s to 2.11 m/s at 200 s as
   the front crosses it, and falls to 0.26 m/s by 600 s. It burns 16.1 ha by
   600 s (7.4 ha at ignition).
 - Along y = 1 km the emission peak follows 80 to 270 m behind the front on
   the same line until 510 s, at up to 12 times the median. Outside the fire
-  the highest emission is just behind the front.
+  the highest emission is just behind the front, except at about 210 s,
+  when it is at the unburned edge of the fire head, 110 m ahead of the
+  front.
 
 Caveats:
 - The initial wind is a uniform 5 m/s down to the ground, with no surface
-  layer profile. It spins down: the first-cell u at x > 7.5 km falls from
-  5.0 m/s to about 3.9 m/s at 300 s and 3.0 to 3.5 m/s at 600 s, so the
-  later front speeds and dust ratios include that decay.
-- The dust threshold friction velocity (0.04 to 0.05 m/s) is below u* almost
-  everywhere, so emission follows u* (about u*^3); the crust reduction of
-  burned cells changes little. In burning cells (fire heat flux above
+  layer profile. It spins down: ahead of the front (x > 7.5 km) the
+  first-cell u falls from 5.0 m/s to 3.8 to 4.0 m/s by 300 s, so the later
+  front speeds and dust ratios include that decay.
+- The dust threshold friction velocity (0.040 to 0.054 m/s) is below u* in
+  more than 90 % of the dust cells at every output (all of them at 30 s),
+  so emission follows u* (about u*^3); the crust reduction of burned cells
+  changes little. In burning cells (fire heat flux above
   550 W/m2) plume lofting multiplies the emission by 1 + `k_loft` = 3, which
   is why the highest emission is so often inside the fire.
 - The lid is a slip wall at 1.5 km with no damping layer, and turbulence is
   the MRF column scheme with no LES closure at 62.5 m, so the mixing at the
   head of the density current is not resolved.
+- Smoke and dust undershoot to small negative values at sharp edges (at
+  600 s about -1.6e-6 kg/m3 smoke and -2.7e-7 kg/m3 dust, against maxima
+  of 9e-6 and 2e-5). Deposition clamps them at zero, but linear colour maps
+  show them.
 - These are single-run diagnostics, not a validation against observations.
 
 ## References

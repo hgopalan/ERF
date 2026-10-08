@@ -26,15 +26,16 @@ averaging, sampling along the surface normal and interpolation to
 `erf.most.zref`. The three decks differ only in the terrain lines.
 
 Two fire settings differ from the code defaults on purpose:
-- `erf.fire.use_wind_limit = false`. With the midflame wind cap, fuel model 1
-  spreads at 0.29 m/s from the first step and the fire never responds to the
-  gust front (Andrews et al. 2013 recommend against the original limit).
+- `erf.fire.use_wind_limit = false`. ERF's midflame wind cap (300 ft/min,
+  1.52 m/s, for fine fuels) holds fuel model 1 at 0.28 to 0.29 m/s from the
+  first step, so the fire never responds to the gust front (Andrews et al.
+  2013 recommend against applying a wind limit).
 - `erf.fire.use_terrain_wind = false` (and `erf.dust.use_terrain_wind`
   stays at its default, false). These switches apply FARSITE-style factors
   (x1.5 on slopes facing the wind) to the sampled wind, but the mesh
-  resolves the terrain, so its speed-up is already in that wind. With both
-  on, the y = 1 km dust peak on the hill's flank at 300 s was 36 times the
-  median; without them it is 12.
+  resolves the terrain, so its speed-up is already in that wind. In the hill
+  case with both on, the y = 1 km dust peak on the hill's flank at 300 s was
+  36 times the median; without them it is 12.
 
 ## Running
 The deck is a short regression run: `max_step = 20` (5 s), a few seconds on
@@ -79,27 +80,34 @@ the centre line y = 2 km and along y = 1 km. The dust ratio is the maximum of
 - The fire's head rate of spread rises from 0.40 m/s to 1.96 m/s at 203 s as
   the front crosses it (flat: 2.11 m/s at 200 s). It burns 15.0 ha by 600 s,
   against 16.1 ha over flat ground.
-- Outside the fire the highest emission is just behind the front. From 270
-  to 450 s that is on the hill's south flank, about 1 km from the axis
-  (upwind of the crest line until 360 s, on the lee side after); from 480
-  to 540 s it is just downwind of the crest.
-  The highest emission outside the fire at 390 s is 45 % above the flat
-  case's (9.3e-7 against 6.4e-7 kg/m2/s). The domain-total emission stays
-  within 1 % of the flat case's on average.
+- Outside the fire the highest emission is just behind the front until
+  450 s (at about 210 s it is at the unburned edge of the fire head, 50 m
+  ahead of the front); from 270 s that is on the hill's south flank, about 1 km from the
+  axis (upwind of the crest line until 360 s, on the lee side after). From
+  480 to 540 s it stays just downwind of the crest, 640 to 770 m behind the
+  front: a lee feature, not a frontal one. The highest emission outside the
+  fire at 390 s is 44 % above the flat case's (9.26e-7 against
+  6.42e-7 kg/m2/s). The time-averaged domain-total emission is within 1 %
+  of the flat case's; step by step the ratio ranges from 0.93 to 1.08.
 
 Caveats:
 - The initial wind is a uniform 5 m/s down to the ground, with no surface
-  layer profile. It spins down: the first-cell u at x > 7.5 km falls from
-  5.0 m/s to about 3.9 m/s at 300 s and 3.0 to 3.5 m/s at 600 s, so the
-  later front speeds and dust ratios include that decay.
-- The dust threshold friction velocity (0.04 to 0.05 m/s) is below u* almost
-  everywhere, so emission follows u* (about u*^3); the crust reduction of
-  burned cells changes little. In burning cells (fire heat flux above
+  layer profile. It spins down: ahead of the front (x > 7.5 km) the
+  first-cell u falls from 5.0 m/s to 3.8 to 4.0 m/s by 300 s, so the later
+  front speeds and dust ratios include that decay.
+- The dust threshold friction velocity (0.040 to 0.054 m/s) is below u* in
+  more than 90 % of the dust cells at every output (all of them at 30 s),
+  so emission follows u* (about u*^3); the crust reduction of burned cells
+  changes little. In burning cells (fire heat flux above
   550 W/m2) plume lofting multiplies the emission by 1 + `k_loft` = 3, which
   is why the highest emission is so often inside the fire.
 - The lid is a slip wall at 1.5 km with no damping layer, and turbulence is
   the MRF column scheme with no LES closure at 62.5 m, so the mixing at the
   head of the density current is not resolved.
+- Smoke and dust undershoot to small negative values at sharp edges (at
+  600 s about -1.6e-6 kg/m3 smoke and -2.7e-7 kg/m3 dust, against maxima
+  of 9e-6 and 2e-5). Deposition clamps them at zero, but linear colour maps
+  show them.
 - These are single-run diagnostics, not a validation against observations.
 
 ## References

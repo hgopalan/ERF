@@ -112,6 +112,8 @@ python plot_hazard_timeseries.py --mode coupling \
 
 The terrain amplification plot compares the domain-total dust emission and
 the maximum u* of `HaboobFireFlat`, `HaboobFireHill` and `HaboobFirePit`
-from `dust_diag.dat` alone. In the full-length runs the three totals agree
-within 7 %: the terrain moves where dust is raised more than how much, which
-the `_dust_emission.png` maps from `plt_dust_*` plotfiles show.
+from `dust_diag.dat` alone. In the full-length runs the time-averaged totals
+of the hill and the pit are within 1 % and 7 % of the flat case's (step by
+step the ratios range from 0.93 to 1.19): the terrain moves where dust is
+raised more than how much, which the `_dust_emission.png` maps from
+`plt_dust_*` plotfiles show.
