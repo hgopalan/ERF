@@ -3,39 +3,52 @@
 ## Purpose
 A haboob gust front runs over a grass fire and then across a Gaussian pit. A
 cold pool collapses into a density current. The case shows how a depression
-changes the front and where it raises dust. HaboobFireFlat and HaboobFireHill
-run the same cold pool and fire over flat ground and over a hill; only the
-terrain differs.
+changes the front, the fire's response and where dust is raised.
+HaboobFireFlat and HaboobFireHill run the same cold pool and fire over flat
+ground and over a hill; only the terrain differs.
 
 ## Setup
 | Item | Value |
 |------|-------|
-| Domain, grid | 8000 x 4000 x 1500 m, 128 x 64 x 64 cells (62.5 x 62.5 x 23.4 m), periodic in x and y |
+| Domain, grid | 8000 x 4000 x 1500 m, 128 x 64 x 64 cells (62.5 x 62.5 x 23.4 m), periodic in x and y, terrain-fitted mesh |
 | Time step | `erf.fixed_dt = 0.25` s |
-| Background | `sounding_neutral_abl`: theta 300 K to 468 m, inversion to 308 K at 551 m, u = 5 m/s; `erf.abl_geo_wind = 5 0 0`; MRF PBL |
+| Background | `sounding_neutral_abl`: theta 300 K to 468 m, inversion to 308 K at 551 m, u = 5 m/s at all heights; `erf.abl_geo_wind = 5 0 0`; MRF PBL |
 | Cold pool | `erf.prob_name = "Bubble"`: -10 K air temperature (`prob.T_pert_is_airtemp = true`), cos^2 profile centred at (1500, 2000, 0) m with radii (1000, 4000, 600) m |
-| Fire | Fuel model 1 (short grass), 1-h moisture 0.04, ignition disc r = 150 m at (3500, 2000) m; level set with directional ROS, lagged coupling, `source_mode = add`, `heat_flux_partition = cfbm`, smoke |
-| Dust | Three bins, fire-dust coupling (crust reduction, fire wind, plume lofting); `erf.dust.use_terrain_wind = true` takes u* from the local wind at `erf.dust.zref` |
+| Fire | Fuel model 1 (short grass), 1-h moisture 0.04, ignition disc r = 150 m at (3500, 2000) m; level set with directional ROS, lagged two-way coupling, `source_mode = add`, `heat_flux_partition = cfbm`; `use_wind_limit = false`, `use_terrain_wind = false` |
+| Smoke, dust | Passive tracers. Three dust bins; emission from the surface-layer u*, raised by the fire wind and by plume lofting in burning cells (fire-dust coupling) |
 | Terrain | `haboob_pit_129x65.txt`: 200 m deep Gaussian pit, sigma 600 m, centred at (5000, 2000) m |
 
 The bubble uses the computational height, not the height above ground, so it
-is kept over flat ground upwind of the pit. On this terrain-fitted mesh ERF
-switches the surface layer to local averaging (`erf.most.average_policy = 1`
-with the normal-vector rotation and the interpolation to `erf.most.zref`).
+is kept over flat ground upwind of the pit.
 
-`erf.fire.use_wind_limit` keeps its default (true): the midflame wind cap of
-fuel model 1 holds the head rate of spread at 0.29 m/s for the whole run.
+The surface layer uses ERF's default on a terrain-fitted mesh: local
+averaging, sampling along the surface normal and interpolation to
+`erf.most.zref`. The three decks differ only in the terrain lines.
+
+Two fire settings differ from the code defaults on purpose:
+- `erf.fire.use_wind_limit = false`. With the midflame wind cap, fuel model 1
+  spreads at 0.29 m/s from the first step and the fire never responds to the
+  gust front (Andrews et al. 2013 recommend against the original limit).
+- `erf.fire.use_terrain_wind = false` (and `erf.dust.use_terrain_wind`
+  stays at its default, false). These switches apply FARSITE-style factors
+  (x1.5 on slopes facing the wind) to the sampled wind, but the mesh
+  resolves the terrain, so its speed-up is already in that wind. With both
+  on, the y = 1 km dust peak on the hill's flank at 300 s was 36 times the
+  median; without them it is 12.
 
 ## Running
-The deck is a short regression run: `max_step = 20` (5 s), about 8 s on 4
-ranks in Release and 3 min in a Debug build. The cold pool is in place at
-step 0 (theta minimum 290.0 K at the first cell, 10 K below the far field).
+The deck is a short regression run: `max_step = 20` (5 s), a few seconds on
+4 ranks in Release. It covers the cold-pool start on the terrain-fitted mesh
+and the start-up of the fire and dust modules (first-cell theta minimum
+290.0 K, 10 K below the far field), not the front's interaction with them:
+the front reaches the fire after about 150 s.
 
 The full-length run is 600 s:
 
     mpiexec -n 4 erf_exec inputs max_step=2400 erf.plot_int_1=120 erf.fire_plot_int=120 erf.dust.dust_plot_int=120
 
-It takes about 20 min on 4 ranks and writes about 1.1 GB.
+It took 12 to 21 min of wall time on 4 ranks of a shared machine and writes
+about 1.1 GB (21 atmosphere, fire and dust plotfiles each).
 
 To rebuild the terrain file:
 
@@ -44,41 +57,53 @@ To rebuild the terrain file:
 
 ## Results (full-length run)
 The front position is the furthest x downwind of the cold pool where the
-first-cell theta along y = 2 km (which follows the pit floor) is more than
-1 K below the far field. The dust ratio is the maximum of
+first-cell theta on a line of constant y is more than 1 K below the far
+field. The cold pool is a lobe, not a straight front, so it is given along
+the centre line y = 2 km and along y = 1 km. The dust ratio is the maximum of
 `dust_emission_flux` along y = 1 km divided by its median there.
 
-| t [s] | Front x [m] | Max first-cell u [m/s] | Dust max/median at y = 1 km | Highest emission |
-|-------|-------------|------------------------|-----------------------------|------------------|
-| 60    | 2656 | 9.5  | 5.6  | burned ground |
-| 120   | 3156 | 11.3 | 10.5 | behind the front, (2891, 2016) m |
-| 180   | 3656 | 11.5 | 12.0 | burned ground |
-| 300   | 4719 | 10.2 | 8.0  | burned ground |
-| 420   | 5844 | 10.1 | 21.8 | downwind side of the pit, (5703, 2203) m |
-| 600   | 7344 | 9.3  | 25.9 | downwind side of the pit, (6078, 2828) m |
+| t [s] | Front x, y = 2 km / 1 km [m] | Max first-cell u [m/s] | Dust max/median at y = 1 km | Highest emission |
+|-------|------------------------------|------------------------|-----------------------------|------------------|
+| 60    | 2656 / 2594 | 9.5  | 5.7  | burning cells |
+| 120   | 3156 / 3094 | 11.4 | 11.2 | behind the front, (2891, 1953) m |
+| 180   | 3656 / 3594 | 11.5 | 12.4 | burning cells |
+| 300   | 4719 / 4656 | 10.3 | 9.3  | burning cells |
+| 420   | 5844 / 5531 | 9.8  | 7.1  | burning cells |
+| 600   | 7281 / 6656 | 9.1  | 8.5  | behind the front, (6891, 2578) m |
 
-- The front moves at 8.7 m/s both from 60 to 300 s and from 300 to 600 s.
-  Over flat ground it slows to 7.2 m/s after 300 s, so at 600 s the front
-  here is 500 m ahead of the flat-ground front (and 940 m ahead of the hill
-  case).
-- From 330 s the highest emission is in the pit: on its floor at 330 s,
-  then on the downwind side, moving out from 0.2 to 1.4 km from the centre
-  by 510 s. Along y = 1 km the peak is on that side too (1.0 to 1.3 km from
-  the centre), at 21 to 28 times the median from 390 s on (flat ground: at
-  most 12). The dust model multiplies the wind on slopes steeper than 0.05
-  that face into it by `erf.dust.k_ridge = 1.5`; that is consistent with
-  these peaks, though these runs do not separate it from the flow itself.
-- Before that the highest emission is on burned ground (30 to 60 s and 150
-  to 300 s) or just behind the front (90 to 120 s). On burned ground the
-  fire removes 80 % of the crust (`erf.fire_dust_crust_reduction = 0.8`),
-  which lowers the threshold friction velocity, and the fire wind can raise
-  u*.
-- The fire grows from 7.4 to 11.9 ha.
+- Along y = 2 km the front moves at 8.3 m/s from 60 to 300 s and 8.6 m/s
+  from 300 to 600 s (flat: 8.2 and 7.4). It runs fastest through the pit,
+  8 to 10 m/s per 30 s from 300 to 420 s. At 600 s it is 375 m ahead of the
+  flat-ground front along y = 2 km, but 190 m behind it along y = 1 km.
+- The fire's head rate of spread rises from 0.40 m/s to 2.26 m/s at 202 s as
+  the front crosses it (flat: 2.11 m/s at 200 s). It burns 17.0 ha by 600 s,
+  against 16.1 ha over flat ground.
+- Outside the fire the highest emission is just behind the front until
+  330 s (from 270 s on the pit's upwind slope), from 360 to 420 s on its
+  downwind half, 0.3 to 0.7 km from the centre, and then behind the front
+  again beyond the pit. The highest
+  emission outside the fire at 390 s is 40 % above the flat case's
+  (8.9e-7 against 6.4e-7 kg/m2/s). The domain-total emission averages 7 %
+  above the flat case's.
 
-These are single-run diagnostics, not a validation against observations.
+Caveats:
+- The initial wind is a uniform 5 m/s down to the ground, with no surface
+  layer profile. It spins down: the first-cell u at x > 7.5 km falls from
+  5.0 m/s to about 3.9 m/s at 300 s and 3.0 to 3.5 m/s at 600 s, so the
+  later front speeds and dust ratios include that decay.
+- The dust threshold friction velocity (0.04 to 0.05 m/s) is below u* almost
+  everywhere, so emission follows u* (about u*^3); the crust reduction of
+  burned cells changes little. In burning cells (fire heat flux above
+  550 W/m2) plume lofting multiplies the emission by 1 + `k_loft` = 3, which
+  is why the highest emission is so often inside the fire.
+- The lid is a slip wall at 1.5 km with no damping layer, and turbulence is
+  the MRF column scheme with no LES closure at 62.5 m, so the mixing at the
+  head of the density current is not resolved.
+- These are single-run diagnostics, not a validation against observations.
 
 ## References
 - Rothermel 1972, A Mathematical Model for Predicting Fire Spread in Wildland Fuels.
+- Andrews, Cruz and Rothermel 2013, Examination of the wind speed limit function in the Rothermel surface fire spread model.
 - Andrews 2018, The Rothermel surface fire spread model and associated developments.
-- Finney 1998, FARSITE: Fire Area Simulator - model development and evaluation
-  (the terrain wind factors used by the dust model).
+- Benjamin 1968, Gravity currents and related phenomena.
+- Straka et al. 1993, Numerical solutions of a non-linear density current: a benchmark solution and comparisons.

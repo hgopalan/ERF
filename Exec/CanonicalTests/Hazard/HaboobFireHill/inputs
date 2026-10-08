@@ -4,15 +4,19 @@
 # upwind end of an 8 km x 4 km periodic domain in a 5 m/s neutral boundary
 # layer. It collapses into a density current that runs downwind over a grass
 # fire ignited at x = 3.5 km and then over a 200 m Gaussian hill centred at
-# (5000, 2000) m. Fire, smoke and dust are two-way coupled to the atmosphere
-# (coupling_type = lagged); the dust module emits from the surface wind.
+# (5000, 2000) m. The fire is two-way coupled to the atmosphere
+# (coupling_type = lagged); smoke and dust are carried as passive tracers,
+# the dust emitted from the surface-layer u*.
 #
 # The bubble is placed in computational z (prob.z_c is measured from the
 # bottom of the mesh, not from the ground), so it is kept over flat ground
 # upwind of the hill.
 #
-# max_step = 20 (5 s) keeps this a short regression run. The full-length
-# 600 s run and its results are described in README.md.
+# max_step = 20 (5 s) keeps this a short regression run: it covers the
+# cold-pool start on the terrain-fitted mesh and the start-up of the fire
+# and dust modules, not the front's interaction with them (it reaches the
+# fire after about 150 s). The full-length 600 s run and its results are
+# described in README.md.
 #
 # Notes:
 #   - HaboobFireFlat and HaboobFirePit run the same cold pool and fire over
@@ -36,7 +40,7 @@ erf.most.zref = 24.0
 erf.most.surf_temp_flux = 0.0
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.003
-erf.fixed_dt = 0.25
+erf.fixed_dt = 0.25          # under the compressible limit ERF prints: 0.36 s hill, 0.37 s pit, 0.52 s flat
 erf.sum_interval = 20
 erf.v = 1
 amr.v = 1
@@ -113,7 +117,7 @@ erf.dust.suppression_file = ""
 erf.dust.blast_schedule_file = ""
 erf.dust.road_schedule_file = ""
 
-# Fire: grass (fuel model 1), level-set front, two-way coupled
+# Fire: grass (fuel model 1), level-set front, two-way coupled (lagged)
 erf.fire.enable = true
 erf.fire.fire_debug = false
 erf.fire.grid_ratio = 2
@@ -129,26 +133,26 @@ erf.fire.propagation_method = "levelset"
 erf.fire.directional_ros = true
 erf.fire.wind_ref_ht = 6.1
 erf.fire.use_waf = true
-erf.fire.use_wind_limit = true
+# No midflame wind cap: with it, fuel model 1 spreads at 0.29 m/s from the
+# first step and the fire never responds to the gust front (Andrews et al.
+# 2013 recommend against the original limit)
+erf.fire.use_wind_limit = false
 erf.fire.heat_flux_alfg = 45.0
 erf.fire.heat_flux_partition = "cfbm"
 erf.fire.fire_atm_feedback = 1.0
 erf.fire.inject_latent = true
-erf.fire.use_terrain_wind = true
+# No FARSITE terrain wind factors for the fire or the dust: the mesh resolves
+# the terrain, so its speed-up is already in the wind they sample
+erf.fire.use_terrain_wind = false
 erf.fire.coupling_type = "lagged"
 erf.fire.source_mode = "add"
 erf.fire.smoke_enable = true
 erf.fire.smoke_emission_factor = 0.02
-erf.fire.smoke_heat_of_comb = 18700000.0
 erf.fire.smoke_heat_from_fuel = true
 erf.fire_plot_int = 20
 
 # Fire-Dust coupling
 erf.dust.crust_index = 0.5
-erf.dust.use_terrain_wind = true
-erf.dust.k_ridge = 1.5
-erf.dust.k_shelter = 0.6
-erf.dust.k_valley = 0.8
 erf.fire_dust_coupling = true
 erf.fire_dust_crust_reduction = 0.8
 erf.fire_dust_wind_to_dust = true
