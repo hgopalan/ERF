@@ -303,7 +303,8 @@ evolve, the deposition accumulator, the PM averages and flags, the MSHA
 dose, TWA and shift state, the STEL average, the surface concentration the
 next step reads, and the super-particle source map. The layer's counters
 (its step and time, the PHREEQC read and write times, the MSHA shift
-number, the last plotfile step) go to ``DustState`` and the super-particles
+number, the last plotfile step and the last step written to
+``dust_diag_file``) go to ``DustState`` and the super-particles
 to ``DustParticles``. On restart the layer is initialised from the inputs
 and rasters as usual and the checkpointed values are read over it, so a
 checkpoint without dust fields, or one from an older build, still restarts.
@@ -312,6 +313,14 @@ fields, because the dust step runs after the dycore of the same step and the
 first dycore after a restart still uses them. A restarted run reproduces the
 uninterrupted one bit for bit on one rank and on four; the ``dust`` row of
 ``Exec/RegTests/FireRestart`` checks this with the fire coupling on.
+
+The dust output of a step is written once. The step a run ends on (reached
+by the time loop and again by the final write) and the step a restart starts
+on (written by the original run, reached again at start-up) add no second
+row to ``dust_diag_file``, and the dust plotfile interval does not rewrite a
+plotfile it already wrote. The dust output comes before the checkpoint write,
+so a checkpoint counts its own step as written. ``FireRestart_dust_rows``
+checks this across a run end and two restarts.
 
 Limitations
 -----------

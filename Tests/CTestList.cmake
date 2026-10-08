@@ -2387,6 +2387,10 @@ if(ERF_ENABLE_DUST)
 add_test_fire(FireRestart_dust_straight     FireRestart           inputs_dust_straight       40 NRANKS 1)
 # the three fire-dust couplings applied once per step, in the right order
 add_test_fire_check(FireDustCoupling_check  FireDustCoupling      inputs                     40 check_firedust.py NRANKS 1)
+# each step's dust_diag.dat row written once across the final step and two restarts
+if(ERF_ENABLE_MPI AND NOT WIN32)
+add_test_fire_script(FireRestart_dust_rows  FireRestart           run_dust_rows.sh NRANKS 1)
+endif()
 # dust inputs the kernels cannot use stop at start-up
 add_test_fire_abort(DustBadBins_abort         FireRestart           inputs_dust_straight
     "erf.dust.n_size_bins must be >= 1" "erf.dust.n_size_bins=0")

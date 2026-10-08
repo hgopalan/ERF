@@ -1,26 +1,34 @@
-# Initialize a haboob-fire interaction over flat terrain.
+# Haboob gust front over flat ground, with a grass fire and dust on its path.
 #
-# This case couples an idealized cold-pool / dust-storm initialization with fire on flat ground, verifying the basic haboob-fire workflow.
+# A -10 K cold pool (erf.prob_name = "Bubble", prob.* keys) sits at the
+# upwind end of an 8 km x 4 km periodic domain in a 5 m/s neutral boundary
+# layer. It collapses into a density current that runs downwind over a grass
+# fire ignited at x = 3.5 km and on across flat ground; this is the
+# no-terrain reference for the hill and pit cases. The fire is two-way
+# coupled to the atmosphere (coupling_type = lagged); smoke and dust are
+# carried as passive tracers. Dust is emitted from u* (the surface layer's,
+# or the fire wind's where that is larger), times plume lofting in burning
+# cells.
 #
-# Expected result:
-#   - Cold-pool / haboob initialization activates without configuration errors.
-#   - Fire evolution reflects interaction with the imposed density-current environment.
-#
-# Configuration:
-#   - Haboob parameters define the initial disturbance over flat terrain.
-#   - Terrain effects are intentionally absent.
+# max_step = 20 (5 s) keeps this a short regression run: it covers the
+# cold-pool start on the terrain-fitted mesh and the start-up of the fire
+# and dust modules, not the front's interaction with them (it reaches the
+# fire after about 150 s). The full-length 600 s run and its results are
+# described in README.md.
 #
 # Notes:
-#   - Compare against hill and pit variants to isolate topographic modulation.
+#   - HaboobFireHill and HaboobFirePit run the same cold pool and fire over
+#     a 200 m hill and a 200 m deep pit centred at (5000, 2000) m; only the
+#     terrain differs.
 
-erf.prob_name = "ABL"
+erf.prob_name = "Bubble"
 max_step = 20
 amr.max_level = 0
-amrex.fpe_trap_invalid = 0
 fabarray.mfiter_tile_size = 1024 1024 1024
-geometry.prob_extent = 4000.0 4000.0 1500.0
-amr.n_cell = 32 32 64
+geometry.prob_extent = 8000.0 4000.0 1500.0
+amr.n_cell = 128 64 64
 geometry.is_periodic = 1 1 0
+amr.max_grid_size = 32
 amr.max_grid_size_z   = 64
 zlo.type = "surface_layer"
 erf.most.z0 = 0.1
@@ -28,13 +36,13 @@ erf.most.zref = 24.0
 erf.most.surf_temp_flux = 0.0
 zhi.type = "SlipWall"
 zhi.theta_grad = 0.003
-erf.fixed_dt = 0.5
-erf.sum_interval = 1
+erf.fixed_dt = 0.25          # under the compressible limit ERF prints: 0.36 s hill, 0.37 s pit, 0.52 s flat
+erf.sum_interval = 20
 erf.v = 1
 amr.v = 1
 erf.check_int = -1
-erf.plot_int_1 = -1
-erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta
+erf.plot_int_1 = 20
+erf.plot_vars_1 = density x_velocity y_velocity z_velocity theta smoke rhoadv_dust z_phys
 erf.use_gravity = true
 erf.molec_diff_type = "None"
 erf.les_type = "None"
@@ -51,12 +59,30 @@ erf.latitude = 45.0
 erf.abl_driver_type = "GeostrophicWind"
 erf.transport_scalar = true
 
+# Terrain-fitted mesh with no terrain file: flat ground on the same mesh type
+# (VariableDz) and surface-layer treatment as the hill and pit decks (local
+# averaging, sampling along the surface normal, interpolation to most.zref)
+erf.terrain_type = StaticFittedMesh
+
+# Cold pool: a -10 K air-temperature anomaly, cos^2 in the normalised
+# distance from (x_c, y_c, z_c) with radii (x_r, y_r, z_r). y_r = 4000 m
+# is twice the distance to the y boundaries, so the pool spans the domain in
+# y: -10 K at y = 2 km, -5 K at the periodic y boundaries (at x_c, z = 0).
+prob.x_c = 1500.0
+prob.y_c = 2000.0
+prob.z_c = 0.0
+prob.x_r = 1000.0
+prob.y_r = 4000.0
+prob.z_r = 600.0
+prob.T_pert = -10.0
+prob.T_pert_is_airtemp = true
+
 # Geostrophic wind
 erf.abl_geo_wind = 5.0 0.0 0.0
 
 # Dust
 erf.dust.enable = true
-erf.dust.dust_debug = true
+erf.dust.dust_debug = false
 erf.dust.n_size_bins = 3
 erf.dust.grid_ratio = 2
 erf.dust.particle_density = 2650.0
@@ -76,7 +102,7 @@ erf.dust.transport_bins_separately = false
 erf.dust.bin_diameters = 7.0e-6 2.5e-6 50.0e-6
 erf.dust.deposition_E0 = 3.0e-3
 erf.dust.loading_feedback_coeff = 0.0
-erf.dust.dust_plot_int = -1
+erf.dust.dust_plot_int = 20
 erf.dust.dust_diag_file = "dust_diag.dat"
 erf.dust.phreeqc_update_interval_s = 86400.0
 erf.dust.phreeqc_output_file = ""
@@ -88,29 +114,40 @@ erf.dust.suppression_file = ""
 erf.dust.blast_schedule_file = ""
 erf.dust.road_schedule_file = ""
 
-# Fire
+# Fire: grass (fuel model 1), level-set front, two-way coupled (lagged)
 erf.fire.enable = true
-erf.fire.fire_debug = true
+erf.fire.fire_debug = false
 erf.fire.grid_ratio = 2
 erf.fire.fuel_model_id = 1
-erf.fire.moisture_1hr = 0.08
+erf.fire.moisture_1hr = 0.04
 erf.fire.moisture_10hr = 0.08
 erf.fire.moisture_100hr = 0.10
 erf.fire.moisture_dynamic = false
-erf.fire.ignition_x = 2000.0
+erf.fire.ignition_x = 3500.0
 erf.fire.ignition_y = 2000.0
-erf.fire.ignition_r = 600.0
+erf.fire.ignition_r = 150.0
+erf.fire.propagation_method = "levelset"
+erf.fire.directional_ros = true
 erf.fire.wind_ref_ht = 6.1
 erf.fire.use_waf = true
-erf.fire.use_wind_limit = true
+# No midflame wind cap: ERF's cap (300 ft/min, 1.52 m/s, for fine fuels)
+# holds fuel model 1 at 0.28-0.29 m/s from the first step, so the fire never
+# responds to the gust front (Andrews et al. 2013 recommend against
+# applying a wind limit)
+erf.fire.use_wind_limit = false
 erf.fire.heat_flux_alfg = 45.0
+erf.fire.heat_flux_partition = "cfbm"
 erf.fire.fire_atm_feedback = 1.0
 erf.fire.inject_latent = true
+# No FARSITE terrain wind factors for the fire or the dust: the mesh resolves
+# the terrain, so its speed-up is already in the wind they sample
 erf.fire.use_terrain_wind = false
-erf.fire.coupling_type = "passive"
+erf.fire.coupling_type = "lagged"
+erf.fire.source_mode = "add"
 erf.fire.smoke_enable = true
 erf.fire.smoke_emission_factor = 0.02
-erf.fire.smoke_heat_of_comb = 18700000.0
+erf.fire.smoke_heat_from_fuel = true
+erf.fire_plot_int = 20
 
 # Fire-Dust coupling
 erf.dust.crust_index = 0.5

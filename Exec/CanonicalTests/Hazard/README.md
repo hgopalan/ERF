@@ -28,9 +28,9 @@ Canonical hazard tests covering coupled fire+dust scenarios, terrain effects, sm
 | `FireSmokeDustCoupled` | This case validates simultaneous operation of thermal fire forcing, smoke-tracer transport, and dust evolution in one hazard scenario. | empirical / regression |
 | `FireSmokeWindTransport` | This case highlights advection and dispersion of smoke under imposed winds within the hazard framework. | empirical / regression |
 | `GaussianTerrain` | This directory collects related canonical ERF test cases under the GaussianTerrain theme. It provides an organizational overview for the child cases listed below. | analytical |
-| `HaboobFireFlat` | This case couples an idealized cold-pool / dust-storm initialization with fire on flat ground, verifying the basic haboob-fire workflow. | empirical / regression |
-| `HaboobFireHill` | This case adds hill topography to the haboob-fire setup to examine how terrain reshapes the cold-pool flow and resulting fire response. | empirical / regression |
-| `HaboobFirePit` | This case uses bowl-shaped terrain to test confined or sheltered haboob-fire interactions and resulting hazard evolution. | empirical / regression |
+| `HaboobFireFlat` | A -10 K cold pool collapses into a haboob gust front that runs over a grass fire and across flat ground, with two-way fire coupling and dust emission; the no-terrain reference of the haboob set. | empirical / regression |
+| `HaboobFireHill` | The HaboobFireFlat gust front and fire, followed by a 200 m Gaussian hill downwind of the fire. | empirical / regression |
+| `HaboobFirePit` | The HaboobFireFlat gust front and fire, followed by a 200 m deep Gaussian pit downwind of the fire. | empirical / regression |
 | `Visualization` | Documentation and supporting assets. | empirical / regression |
 
 ## Notes

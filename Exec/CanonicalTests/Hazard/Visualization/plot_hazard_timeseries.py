@@ -3,8 +3,8 @@
 plot_hazard_timeseries.py — ERF-Hazard diagnostic time series plots.
 
 Reads plain-text CSV/DAT diagnostic files produced by ERF-Hazard
-(dust_diag.dat, smoke_diag.dat, etc.) and produces publication-quality
-line plots. No yt or AMReX dependency — only matplotlib and pandas.
+(dust_diag.dat; smoke_diag.dat is a user-written CSV, no ERF output writes it)
+and produces publication-quality line plots. No yt or AMReX dependency — only matplotlib and pandas.
 
 Requirements:
     pip install matplotlib pandas numpy
@@ -117,7 +117,7 @@ def plot_terrain_amplification(args):
             axes[1].plot(t, df["ustar_max_m_s"], color=color, label=label)
 
     axes[0].set_ylabel("Dust emission total [kg/s]")
-    axes[0].set_title("ERF-Hazard Phase 5 — Terrain Amplification of Dust Emission")
+    axes[0].set_title("ERF-Hazard — Dust Emission over Flat, Hill and Pit Terrain")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
 

@@ -365,6 +365,9 @@ public:
      *
      * Final-step guard: is_final=true and nstep > m_last_dust_plot_step
      * ensures a write at simulation end regardless of dust_plot_int.
+     * A step already written (the time loop's call before WriteAtFinalTime,
+     * or the step a restart starts on) appends no second CSV row, and the
+     * interval rewrites no plotfile it already wrote.
      *
      * @param[in] nstep     Current step number.
      * @param[in] cur_time  Current simulation time [s].
@@ -481,6 +484,7 @@ private:
     int                                   m_step = 0;
     amrex::Real                           m_time = 0.0;
     int                                   m_last_dust_plot_step = -1;
+    int                                   m_last_output_step = -1;   ///< Last step write_output appended a CSV row for.
     amrex::Real                           m_last_phreeqc_write_time = 0.0; ///< Time of last PHREEQC feedback write.
     int                                   m_last_phreeqc_write_step = -1;      ///< Step of last PHREEQC feedback write.
     amrex::Real                           m_last_phreeqc_update = -1.0e30;

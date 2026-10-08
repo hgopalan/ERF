@@ -449,16 +449,18 @@ ERF::WriteAtIntermediateTime (int step, double cur_time)
         }
     }
 
+    // Dust output before the checkpoint, so a checkpoint of this step records
+    // the step's dust output as written and a restart from it does not repeat it
+#ifdef ERF_USE_DUST
+    if (m_DustLayer)
+        m_DustLayer->write_output(step+1, cur_time, /*is_final=*/false);
+#endif
+
     if (writeNow(cur_time, step+1, m_check_int, m_check_per, dt[0], last_check_file_time)) {
         last_check_file_step = step+1;
         WriteCheckpointFile();
         if (m_check_per > zero) {last_check_file_time += m_check_per;}
     }
-
-#ifdef ERF_USE_DUST
-    if (m_DustLayer)
-        m_DustLayer->write_output(step+1, cur_time, /*is_final=*/false);
-#endif
 }
 
 void
@@ -503,15 +505,16 @@ ERF::WriteAtFinalTime ()
         }
     }
 
-    if ( (m_check_int > 0 || m_check_per > zero) && istep[0] > last_check_file_step) {
-        WriteCheckpointFile();
-        if (m_check_per > zero) {last_check_file_time += m_check_per;}
-    }
-
+    // Dust output before the checkpoint, as in WriteAtIntermediateTime
 #ifdef ERF_USE_DUST
     if (m_DustLayer)
         m_DustLayer->write_output(istep[0], t_new[0], /*is_final=*/true);
 #endif
+
+    if ( (m_check_int > 0 || m_check_per > zero) && istep[0] > last_check_file_step) {
+        WriteCheckpointFile();
+        if (m_check_per > zero) {last_check_file_time += m_check_per;}
+    }
 }
 
 void
@@ -2383,6 +2386,13 @@ if (m_DustLayer && restart_chkfile.empty()) {
     const std::string& pv2d_1 = "plot2d_vars_1"; appendPlotVariables(pv2d_1,plot2d_var_names_1);
     const std::string& pv2d_2 = "plot2d_vars_2"; appendPlotVariables(pv2d_2,plot2d_var_names_2);
 
+    // Dust output before the initial checkpoint, as in WriteAtIntermediateTime,
+    // so that chk00000 records step 0 as written
+#ifdef ERF_USE_DUST
+    if (m_DustLayer && m_DustLayer->get_params().dust_plot_int > 0)
+        m_DustLayer->write_output(istep[0], t_new[0], /*is_final=*/false);
+#endif
+
     if ( restart_chkfile.empty() && (m_check_int > 0 || m_check_per > zero) )
     {
         WriteCheckpointFile();
@@ -2445,11 +2455,6 @@ if (m_DustLayer && restart_chkfile.empty()) {
             }
         }
     }
-
-#ifdef ERF_USE_DUST
-    if (m_DustLayer && m_DustLayer->get_params().dust_plot_int > 0)
-        m_DustLayer->write_output(istep[0], t_new[0], /*is_final=*/false);
-#endif
 
     // Set these up here because we need to know which MPI rank "cell" is on...
     ParmParse pp("erf");
