@@ -64,6 +64,7 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_MFIter.H>
 #include <cmath>
+#include <limits>
 
 namespace DustThresholdConst {
     constexpr amrex::Real USTAR_T_MIN  = 0.001;   ///< Floor for u*_t [m/s].
@@ -185,9 +186,11 @@ amrex::Real compute_slope_factor(amrex::Real slope_x, amrex::Real slope_y,
     const amrex::Real slope_mag = std::sqrt(slope_x * slope_x + slope_y * slope_y);
     if (!(slope_mag > 0.0)) return amrex::Real(1.0);
     const amrex::Real spd = std::sqrt(wind_u * wind_u + wind_v * wind_v);
-    // slope along the wind (signed), or the magnitude with no wind
+    // slope along the wind (signed), or the magnitude with no wind. The
+    // unselected arm's x/0 is speculated under the fpe traps at -O2 (see
+    // Tests/Unit/CMakeLists.txt), so the divisor is floored inside the select.
     const amrex::Real s_along = (spd > 0.0)
-        ? (slope_x * wind_u + slope_y * wind_v) / spd
+        ? (slope_x * wind_u + slope_y * wind_v) / amrex::max(spd, std::numeric_limits<amrex::Real>::min())
         : slope_mag;
     const amrex::Real hyp       = std::sqrt(amrex::Real(1.0) + s_along * s_along);
     const amrex::Real cos_theta = amrex::Real(1.0) / hyp;

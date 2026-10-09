@@ -22,7 +22,10 @@ CTest runs it as `FireDustCoupling_check`.
 See the check script's output; the deposition reference is recorded in
 `check_firedust.py` (`DEP_REF`). Since October 2026 the column is the
 deposited mass in kg (the integral over the bins and the 625 m² cells); the
-reference is 31.591 kg, 2 % under the former cell sum of kg/m² (5.1697e-02,
+reference is 24.159 kg: 31.591 kg with the fire wind's u* applied in every
+cell, 24 % less once it applies inside the fire perimeter only (the check
+`outside` counts the unburned cells that keep the surface layer's u*); 31.591
+was 2 % under the former cell sum of kg/m² (5.1697e-02,
 measured 2026-10-06 when the deposition kernel began reading the dust density
 of the state instead of the source tendency and the bins began sharing the
 emission flux) times the cell area. The kernels have known-answer gtests

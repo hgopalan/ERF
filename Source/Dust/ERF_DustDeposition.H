@@ -5,8 +5,10 @@
  * Replaces the zero lower-boundary flux in ERF_DustSettling.H with the
  * dry deposition velocity v_d from Seinfeld & Pandis (2006) Chapter 19.
  *
- * v_d = v_s + 1 / (r_a + r_s + r_a * r_s * v_s)      (Seinfeld & Pandis eq. 19.7, Slinn 1982)
- *   r_a = 1 / (u* * kappa)    aerodynamic resistance [s/m], neutral
+ * v_d = v_s + 1 / (r_a + r_s + r_a * r_s * v_s)      (the Seinfeld & Pandis eq. 19.7 form, Slinn 1982)
+ *   r_a = 1 / (u* * kappa)    aerodynamic resistance [s/m]: the neutral form
+ *                             without its ln(z_r/z_0) factor (5-7 at z_r = 10 m);
+ *                             r_s dominates by 100x at E_0 = 3e-3, so v_d moves < 2 %
  *   r_s = 1 / (u* * E_0)      surface resistance [s/m]
  *   kappa = 0.4 (von Karman)
  *   E_0 = 3e-3 is this code's tuning constant for a bare mine surface: Zhang
@@ -124,7 +126,7 @@ inline void apply_dust_deposition_bc(
     const amrex::MultiFab& ustar_atm,
     const amrex::MultiFab& detJ,
     const amrex::Geometry& geom_atm,
-    const DustBinDiameters& d_bins, int nb,
+    const DustBinDiameters& d_bins, const DustBinWeights& w_bins, int nb,
     amrex::Real rho_p, amrex::Real E_0,
     int dust_comp, bool dust_debug)
 {
@@ -151,6 +153,7 @@ inline void apply_dust_deposition_bc(
         const Real  rhop  = rho_p;
         const Real  e0    = E_0;
         const DustBinDiameters bins = d_bins;
+        const DustBinWeights   w    = w_bins;
         const int   nbins = nb;
 
         ParallelFor(bx_sfc, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
@@ -162,7 +165,7 @@ inline void apply_dust_deposition_bc(
             if (dz <= 1.0e-10) dz = dz_avg;
 
             Real u_star = amrex::max(static_cast<amrex::Real>(us(i,j,0)), static_cast<amrex::Real>(1.0e-4));
-            Real vs = compute_mean_settling(bins, nbins, rhop, rho_a,
+            Real vs = compute_mean_settling(bins, w, nbins, rhop, rho_a,
                                             DustSettlingConst::MU_AIR_STD);
             Real vd = compute_deposition_velocity(vs, u_star, e0);
 
@@ -176,7 +179,7 @@ inline void apply_dust_deposition_bc(
 
     if (dust_debug) {
         Real us_max  = ustar_atm.max(0);
-        Real vs_ref  = compute_mean_settling(d_bins, nb, rho_p, 1.225,
+        Real vs_ref  = compute_mean_settling(d_bins, w_bins, nb, rho_p, 1.225,
                                              DustSettlingConst::MU_AIR_STD);
         Real vd_ref  = compute_deposition_velocity(vs_ref, us_max, E_0);
         Real dep_max = dep_flux_out.max(0);

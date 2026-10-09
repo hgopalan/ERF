@@ -85,7 +85,7 @@ TEST(DustThreshold, CrustLowersTheEmissionAtTheDefaultThreshold)
 TEST(DustThreshold, SlopeFactorIsSignedAlongTheWind)
 {
     // 10 degree slope rising in +x: tan(10 deg) = 0.1763
-    const Real s = std::tan(10.0 * M_PI / 180.0);
+    const Real s = std::tan(10.0 * (4.0 * std::atan(1.0)) / 180.0);
     const Real up     = compute_slope_factor(s, 0.0,  1.0, 0.0);
     const Real across = compute_slope_factor(s, 0.0,  0.0, 1.0);
     const Real down   = compute_slope_factor(s, 0.0, -1.0, 0.0);

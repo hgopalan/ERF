@@ -98,14 +98,20 @@ EPA NAAQS
 Each bin contributes its whole mass to PM10 when its diameter in
 :cpp:`erf.dust.bin_diameters` is at most 10 µm and to PM2.5 when at most
 2.5 µm. With the bins transported as one scalar (the only layout for more
-than one bin) the scalar's mass is apportioned by the bins' equal shares of
-the emitted flux: with the default bins {7, 2.5, 50} µm PM10 is two thirds
-of the surface dust and PM2.5 one third (until October 2026 the bin-0 diameter
-classified the whole mass: PM10 counted the 50 µm third and PM2.5 was
-identically zero). The 24-hour averages are block means over a ring of 24
-hourly means (:cpp:`erf.dust.averaging = window`, the 40 CFR 50 Appendix K/N
-form; the ring and the open hour are checkpointed), exact for a constant and
-the window mean once the ring is full. :cpp:`erf.dust.averaging = exponential`
+than one bin) the scalar's mass is apportioned by the bins' shares of the mass
+emitted so far (every source, road and blast included; equal shares before
+anything is emitted): with the default bins {7, 2.5, 50} µm and the saltation
+source alone PM10 is two thirds of the surface dust and PM2.5 one third, and
+a haul road alone (bin 0) gives all PM10 and no PM2.5 (until October 2026 the
+bin-0 diameter classified the whole mass: PM10 counted the 50 µm third and
+PM2.5 was identically zero). The 24-hour averages are block means over a ring
+of 24 hourly slots (:cpp:`erf.dust.averaging = window`, the 40 CFR 50
+Appendix K/N form; the slot integrals, their spans and the open hour are
+checkpointed, and a restart with another ``averaging`` aborts), exact for a
+constant and the window mean once the ring is full; the exceedance flags and
+the NAAQS counts compare the mean once 24 hours are covered (the mean of a
+partial window is the mean over the time covered, so a one-step spike would
+otherwise flag the day). :cpp:`erf.dust.averaging = exponential`
 is the running mean used until October 2026,
 
 .. math::

@@ -91,12 +91,18 @@ state: cell :math:`k` gains :math:`v_s \rho_\mathrm{dust}(k+1)/h_k` from above
 and loses :math:`v_s \rho_\mathrm{dust}(k)/h_k` to the cell below, with
 :math:`h_k = J_k \Delta z` the cell thickness; the loss through the bottom face
 of the first cell is the dry deposition below. With the bins transported as
-one scalar the settling velocity is the mean of the bins' velocities, since
-they share the emitted flux equally (:cpp:`erf.dust.lumped_settling = mean`;
-``bin0`` is the form until October 2026, which settled the 50 µm third of the
-default bins at the 7 µm velocity, a residence of 5850 s in a 23 m cell
-instead of 117 s). A start-up check aborts when the explicit settling would be
-unstable, :math:`\max v_s\, \Delta t / h_0 > 1`. (Before October 2026 the kernel
+one scalar the settling velocity is the mean of the bins' velocities weighted
+by their shares of the mass emitted so far (:cpp:`erf.dust.lumped_settling =
+mean`; the shares are checkpointed; ``bin0`` is the form until October 2026,
+which settled the 50 µm third of the default bins at the 7 µm velocity, a
+residence of 5850 s in a 23 m cell instead of 117 s). The shares are those of
+the emission, not of the air: the coarse bins fall out first, so the airborne
+mix grows finer than the emitted one while the mean velocity stays at the
+emitted shares. A check at every step aborts when the explicit settling of
+the coarsest bin is unstable at that step's :math:`\Delta t` on the thinnest
+first cell, :math:`\max v_s\, \Delta t / h_0 > 1` (until October 2026 the check
+ran once on the first RK stage's :math:`\Delta t / 3`, so it fired only above
+3). (Before October 2026 the kernel
 multiplied :math:`v_s` into the tendency instead of the density and took the
 neighbour from below, so the dust did not settle; the deposition flux had the
 same error.)

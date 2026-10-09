@@ -78,12 +78,13 @@ erf.dust.particle_density = 2650.0
 # Air density used in the threshold and saltation flux [kg/m³] [Real > 0]
 erf.dust.rho_air = 1.225
 
-# Roughness length of the emitting surface [m], used by the log-law friction
-# velocity of the terrain-corrected wind [Real > 0]
+# Roughness length of the emitting surface [m]: the log-law friction
+# velocity with use_terrain_wind and terrain_ustar = loglaw; otherwise it
+# only bounds zref (a warning says so when a deck sets it) [Real > 0]
 erf.dust.z0_dust = 0.01
 
 # Height at which the wind is taken from the atmosphere [m]; set equal to
-# erf.most.zref [Real > 0]
+# erf.most.zref [Real > z0_dust, below the domain top]
 erf.dust.zref = 10.0
 
 # ---------------------------------------------------------------------------
@@ -150,8 +151,8 @@ erf.dust.terrain_file = ""
 # ---------------------------------------------------------------------------
 # Wind and terrain
 # ---------------------------------------------------------------------------
-# Apply the FARSITE terrain correction to the wind at zref and recompute u*
-# from it by the log law [Boolean]
+# Apply the FARSITE terrain correction to the wind at zref; u* follows it as
+# terrain_ustar says [Boolean]
 erf.dust.use_terrain_wind = false
 
 # How the friction velocity follows the terrain-corrected wind: scale
@@ -210,7 +211,7 @@ erf.dust.phreeqc_supp_var = "suppression_mod"
 
 # Per-site PHREEQC table read over that site's cells after the global one;
 # an empty entry (or no list) keeps the global table there [Strings]
-erf.dust.site_phreeqc_files = (none)
+# erf.dust.site_phreeqc_files =
 
 # Site bounding-box lower x [m], one per site [Reals]
 # erf.dust.site_x_lo =
@@ -241,7 +242,8 @@ erf.dust.phreeqc_site_summary_file = "dust_dep_site_summary.csv"
 # Blast schedule CSV; empty means no blasts [String]
 erf.dust.blast_schedule_file = ""
 
-# Multiplier on the injected blast mass for fresh surfaces [-] [Real >= 1]
+# Multiplier on the injected blast mass for fresh surfaces [-]; below 1
+# injects less than the charge mass [Real >= 0]
 erf.dust.blast_reactivity = 2.0
 
 # Haul road schedule CSV; empty means no road emission [String]
@@ -261,8 +263,9 @@ erf.dust.supp_tau_base_s = 3600.0
 # diagnostics [Real 0-1]
 erf.dust.atm_feedback = 1.0
 
-# One 3D scalar per bin instead of a single total; only bin 0 is returned to
-# the surface at present [Boolean]
+# One 3D scalar per bin instead of a single total; the state carries one
+# dust scalar, so it is accepted only with n_size_bins = 1 (more aborts)
+# [Boolean]
 erf.dust.transport_bins_separately = false
 
 # Surface collection efficiency of the dry-deposition resistance [-]; 3e-3
@@ -295,15 +298,17 @@ erf.fire_dust_coupling = false
 # [Real 0-1]
 erf.fire_dust_crust_reduction = 0.8
 
-# Raise the dust u* to the log-law value of the fire's effective wind where
-# that is larger [Boolean]
+# Inside the fire perimeter, raise the dust u* to the log-law value of the
+# fire's reference wind (fire_wind_ref, at erf.fire.wind_ref_ht) where that
+# is larger; outside it the surface layer's u* stands [Boolean]
 erf.fire_dust_wind_to_dust = true
 
-# Roughness length of that log law [m] [Real > 0]
+# Roughness length of that log law [m]; a value other than erf.most.z0 is
+# warned about [Real > 0]
 erf.fire_dust_wind_z0 = 0.1
 
-# Reference height of that log law [m]; match erf.fire.wind_ref_ht [Real >
-# 0]
+# Reference height of that log law [m]: follows erf.fire.wind_ref_ht, and a
+# different value aborts [= erf.fire.wind_ref_ht]
 erf.fire_dust_wind_zref = 6.1
 
 # Multiply the emission flux by the convective lofting factor of the fire
@@ -350,8 +355,9 @@ erf.dust.dust_diag_file = "dust_diag.dat"
 # EPA NAAQS PM2.5 and PM10 CSV [String]
 erf.dust.dust_naaqs_file = "dust_naaqs.csv"
 
-# The 24-hour PM averages and the 15-minute STEL: window (block means over a
-# ring of hourly / one-minute means, the 40 CFR 50 form) or exponential (the
+# The 24-hour PM averages and the STEL: window (the block mean of a ring of
+# 24 hourly slots, or 15 slots of the STEL period, the 40 CFR 50 form; the
+# exceedance flags compare once the window is full) or exponential (the
 # running mean until October 2026, 0.632 C after one window of a constant C)
 # [window or exponential]
 erf.dust.averaging = window

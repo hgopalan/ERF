@@ -45,6 +45,9 @@ void verify_dust_prerequisites(const ERF&          erf,
     // Get domain information
     const amrex::Box& domain = geom_atm.Domain();
     int domain_nz = domain.length(2);
+    // the wind extraction places the surface from the first two cell centres
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(domain_nz >= 2,
+        "[DUST] the dust module needs at least two cells in z (amr.n_cell)");
 
     // Check 3: No z-direction MPI decomposition
     for (int i = 0; i < ba_atm.size(); ++i) {

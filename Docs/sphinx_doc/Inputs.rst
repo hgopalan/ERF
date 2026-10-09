@@ -6103,11 +6103,13 @@ checked once at startup and abort with a message naming the input to fix.
 | **erf.dust.rho_air**                         | Air density used in the threshold and saltation flux       | Real > 0                 | 1.225                              |
 |                                              | [kg/m³]                                                    |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.z0_dust**                         | Roughness length of the emitting surface [m], used by the  | Real > 0                 | 0.01                               |
-|                                              | log-law friction velocity of the terrain-corrected wind    |                          |                                    |
+| **erf.dust.z0_dust**                         | Roughness length of the emitting surface [m]: the log-law  | Real > 0                 | 0.01                               |
+|                                              | friction velocity with use_terrain_wind and terrain_ustar  |                          |                                    |
+|                                              | = loglaw; otherwise it only bounds zref (a warning says so |                          |                                    |
+|                                              | when a deck sets it)                                       |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.zref**                            | Height at which the wind is taken from the atmosphere [m]; | Real > 0                 | 10.0                               |
-|                                              | set equal to erf.most.zref                                 |                          |                                    |
+| **erf.dust.zref**                            | Height at which the wind is taken from the atmosphere [m]; | Real > z0_dust, below    | 10.0                               |
+|                                              | set equal to erf.most.zref                                 | the domain top           |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 
 
@@ -6180,8 +6182,8 @@ the ``test_*`` values are the placeholders used when no atmosphere is coupled.
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | Parameter                                    | Definition                                                 | Acceptable Values        | Default                            |
 +==============================================+============================================================+==========================+====================================+
-| **erf.dust.use_terrain_wind**                | Apply the FARSITE terrain correction to the wind at zref   | Boolean                  | false                              |
-|                                              | and recompute u* from it by the log law                    |                          |                                    |
+| **erf.dust.use_terrain_wind**                | Apply the FARSITE terrain correction to the wind at zref;  | Boolean                  | false                              |
+|                                              | u* follows it as terrain_ustar says                        |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.terrain_ustar**                   | How the friction velocity follows the terrain-corrected    | scale or loglaw          | scale                              |
 |                                              | wind: scale multiplies the surface layer's u* by           |                          |                                    |
@@ -6231,7 +6233,7 @@ Sites give each mine its own table.
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.site_names**                      | Names of the mine sites; empty means a single global table | Strings                  | none                               |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.site_phreeqc_files**              | Per-site PHREEQC table read over that site's cells after   | Strings                  | (none)                             |
+| **erf.dust.site_phreeqc_files**              | Per-site PHREEQC table read over that site's cells after   | Strings                  | none                               |
 |                                              | the global one; an empty entry (or no list) keeps the      |                          |                                    |
 |                                              | global table there                                         |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
@@ -6264,8 +6266,8 @@ are in :ref:`sec:DustSources`.
 +==============================================+============================================================+==========================+====================================+
 | **erf.dust.blast_schedule_file**             | Blast schedule CSV; empty means no blasts                  | String                   | ``""``                             |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.blast_reactivity**                | Multiplier on the injected blast mass for fresh surfaces   | Real >= 1                | 2.0                                |
-|                                              | [-]                                                        |                          |                                    |
+| **erf.dust.blast_reactivity**                | Multiplier on the injected blast mass for fresh surfaces   | Real >= 0                | 2.0                                |
+|                                              | [-]; below 1 injects less than the charge mass             |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.road_schedule_file**              | Haul road schedule CSV; empty means no road emission       | String                   | ``""``                             |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
@@ -6289,8 +6291,9 @@ on the same scalar.
 | **erf.dust.atm_feedback**                    | Scale on the injected flux; 0 disables injection for       | Real 0-1                 | 1.0                                |
 |                                              | surface-only diagnostics                                   |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.transport_bins_separately**       | One 3D scalar per bin instead of a single total; only bin  | Boolean                  | false                              |
-|                                              | 0 is returned to the surface at present                    |                          |                                    |
+| **erf.dust.transport_bins_separately**       | One 3D scalar per bin instead of a single total; the state | Boolean                  | false                              |
+|                                              | carries one dust scalar, so it is accepted only with       |                          |                                    |
+|                                              | n_size_bins = 1 (more aborts)                              |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.deposition_E0**                   | Surface collection efficiency of the dry-deposition        | Real >= 0                | 3.0e-3                             |
 |                                              | resistance [-]; 3e-3 bare mine surface, 1e-4 paved road,   |                          |                                    |
@@ -6325,13 +6328,16 @@ models are enabled; see :ref:`sec:DustFire`.
 | **erf.fire_dust_crust_reduction**            | Fraction of the baseline crust index removed in burned     | Real 0-1                 | 0.8                                |
 |                                              | cells each step                                            |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.fire_dust_wind_to_dust**               | Raise the dust u* to the log-law value of the fire's       | Boolean                  | true                               |
-|                                              | effective wind where that is larger                        |                          |                                    |
+| **erf.fire_dust_wind_to_dust**               | Inside the fire perimeter, raise the dust u* to the        | Boolean                  | true                               |
+|                                              | log-law value of the fire's reference wind (fire_wind_ref, |                          |                                    |
+|                                              | at erf.fire.wind_ref_ht) where that is larger; outside it  |                          |                                    |
+|                                              | the surface layer's u* stands                              |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.fire_dust_wind_z0**                    | Roughness length of that log law [m]                       | Real > 0                 | 0.1                                |
+| **erf.fire_dust_wind_z0**                    | Roughness length of that log law [m]; a value other than   | Real > 0                 | 0.1                                |
+|                                              | erf.most.z0 is warned about                                |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.fire_dust_wind_zref**                  | Reference height of that log law [m]; match                | Real > 0                 | 6.1                                |
-|                                              | erf.fire.wind_ref_ht                                       |                          |                                    |
+| **erf.fire_dust_wind_zref**                  | Reference height of that log law [m]: follows              | = erf.fire.wind_ref_ht   | 6.1                                |
+|                                              | erf.fire.wind_ref_ht, and a different value aborts         |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.fire_dust_lofting_enabled**            | Multiply the emission flux by the convective lofting       | Boolean                  | false                              |
 |                                              | factor of the fire heat flux                               |                          |                                    |
@@ -6384,10 +6390,12 @@ the run directory. Formats are in :ref:`sec:DustOutput`.
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.dust_naaqs_file**                 | EPA NAAQS PM2.5 and PM10 CSV                               | String                   | ``"dust_naaqs.csv"``               |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.averaging**                       | The 24-hour PM averages and the 15-minute STEL: window     | window or exponential    | window                             |
-|                                              | (block means over a ring of hourly / one-minute means, the |                          |                                    |
-|                                              | 40 CFR 50 form) or exponential (the running mean until     |                          |                                    |
-|                                              | October 2026, 0.632 C after one window of a constant C)    |                          |                                    |
+| **erf.dust.averaging**                       | The 24-hour PM averages and the STEL: window (the block    | window or exponential    | window                             |
+|                                              | mean of a ring of 24 hourly slots, or 15 slots of the STEL |                          |                                    |
+|                                              | period, the 40 CFR 50 form; the exceedance flags compare   |                          |                                    |
+|                                              | once the window is full) or exponential (the running mean  |                          |                                    |
+|                                              | until October 2026, 0.632 C after one window of a constant |                          |                                    |
+|                                              | C)                                                         |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.msha_pel_mg_m3**                  | MSHA permissible exposure limit on the 8-hour TWA [mg/m³]  | Real > 0                 | 5.0                                |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+

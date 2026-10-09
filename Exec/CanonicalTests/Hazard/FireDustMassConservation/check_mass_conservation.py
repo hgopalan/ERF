@@ -96,16 +96,24 @@ def self_test():
     sys.exit(0 if good else 1)
 
 
-if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
+if "--self-test" in sys.argv[1:]:
     self_test()
 
-log = sys.argv[1] if len(sys.argv) > 1 else "run.log"
-diag = sys.argv[2] if len(sys.argv) > 2 else "dust_diag.dat"
+args = [a for a in sys.argv[1:] if not a.startswith("--")]
+log = args[0] if len(args) > 0 else "run.log"
+diag = args[1] if len(args) > 1 else "dust_diag.dat"
 
-rows = read_diag(diag)
+try:
+    rows = read_diag(diag)
+except (OSError, ValueError, IndexError) as e:
+    print(f"  mass: cannot read the diagnostics file {diag} ({e}); usage: check_mass_conservation.py [run.log] [dust_diag.dat]: FAIL")
+    sys.exit(1)
 if len(rows) < 3:
     print(f"  mass: {len(rows)} rows in {diag}: FAIL"); sys.exit(1)
-times, masses = read_log(log)
+try:
+    times, masses = read_log(log)
+except OSError as e:
+    print(f"  mass: cannot read the run log {log} ({e}): FAIL"); sys.exit(1)
 if len(masses) < 3:
     print(f"  mass: {len(masses)} RHO DUST lines in {log}: FAIL"); sys.exit(1)
 

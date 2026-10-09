@@ -20,7 +20,8 @@
  *   d(RhoDust)/dt += (v_s(k+1)*RhoDust(k+1) - v_s(k)*RhoDust(k)) / h_k
  * with h_k = detJ(k) dz the cell thickness (until October 2026 the
  * centre-to-centre spacing above the cell was used, which creates mass on
- * stretched grids: 5 % per transfer at a 1.05 ratio). Downward flux at k=0 is
+ * stretched grids: (r - 1)/2 per transfer, 2.5 % at a 1.05 ratio, 5 % at 1.1).
+ * Downward flux at k=0 is
  * the deposition kernel's.
  *
  * With the bins transported as one scalar the settling velocity is the mean of
@@ -71,6 +72,8 @@ namespace DustSettlingConst {
 
 /// Diameters of the bins a settling or deposition kernel averages over.
 using DustBinDiameters = amrex::GpuArray<amrex::Real, DustSettlingConst::MAX_BINS>;
+/// Mass shares of the bins a transported scalar carries (sum 1 over the nb used).
+using DustBinWeights   = amrex::GpuArray<amrex::Real, DustSettlingConst::MAX_BINS>;
 
 /**
  * @brief Cunningham slip correction factor for sub-micron particles.
@@ -116,19 +119,31 @@ amrex::Real compute_stokes_settling(amrex::Real d_m, amrex::Real rho_p,
 }
 
 /**
- * @brief Settling velocity of the transported scalar: the mean over nb bins
- *        of the Stokes velocity at the local air density (nb = 1: one bin).
+ * @brief Settling velocity of the transported scalar: the mass-weighted mean
+ *        over nb bins of the Stokes velocity at the local air density (nb = 1:
+ *        one bin). The weights are the bins' shares of the mass emitted so far
+ *        (DustLayer::scalar_bin_diameters); equal shares until anything is
+ *        emitted. Until October 2026 the shares were taken as equal whatever
+ *        the sources had emitted, so haul-road dust (bin 0 only) settled at the
+ *        three-bin mean, 17x its own velocity with the default bins.
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real compute_mean_settling(const DustBinDiameters& d_bins, int nb,
+amrex::Real compute_mean_settling(const DustBinDiameters& d_bins, const DustBinWeights& w_bins, int nb,
                                   amrex::Real rho_p, amrex::Real rho_a, amrex::Real mu_a) noexcept
 {
-    amrex::Real sum = 0.0;
+    amrex::Real sum = 0.0, wsum = 0.0;
     const int n = amrex::max(1, amrex::min(nb, DustSettlingConst::MAX_BINS));
     for (int b = 0; b < n; ++b) {
-        sum += compute_stokes_settling(d_bins[b], rho_p, rho_a, mu_a);
+        const amrex::Real w = amrex::max(w_bins[b], amrex::Real(0.0));
+        sum  += w * compute_stokes_settling(d_bins[b], rho_p, rho_a, mu_a);
+        wsum += w;
     }
-    return sum / amrex::Real(n);
+    if (!(wsum > 0.0)) {   // no shares given: equal
+        sum = 0.0;
+        for (int b = 0; b < n; ++b) sum += compute_stokes_settling(d_bins[b], rho_p, rho_a, mu_a);
+        return sum / amrex::Real(n);
+    }
+    return sum / wsum;
 }
 
 /**
@@ -166,6 +181,7 @@ inline void apply_dust_settling_to_cc_source(
     const amrex::MultiFab& detJ,
     const amrex::Geometry& geom_atm,
     const DustBinDiameters& d_bins,
+    const DustBinWeights&  w_bins,
     int                    nb,
     amrex::Real            rho_p,
     int                    dust_comp,
@@ -185,6 +201,7 @@ inline void apply_dust_settling_to_cc_source(
         const int comp  = dust_comp;
         const Real rhop = rho_p;
         const DustBinDiameters bins = d_bins;
+        const DustBinWeights   w    = w_bins;
         const int nbins = nb;
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
@@ -196,7 +213,7 @@ inline void apply_dust_settling_to_cc_source(
             if (dz <= 1.0e-10) dz = dz_avg;
 
             // Settling velocity at this level using local air density.
-            Real vs_k = compute_mean_settling(bins, nbins, rhop, rho_a,
+            Real vs_k = compute_mean_settling(bins, w, nbins, rhop, rho_a,
                                               DustSettlingConst::MU_AIR_STD);
 
             // Downward flux leaving cell k through its bottom face, from the
@@ -210,7 +227,7 @@ inline void apply_dust_settling_to_cc_source(
             if (k < khi) {
                 Real rho_a_kp1 = s_arr(i, j, k+1, Rho_comp);
                 if (rho_a_kp1 <= 0.0) rho_a_kp1 = 1.2;
-                Real vs_kp1 = compute_mean_settling(bins, nbins, rhop, rho_a_kp1,
+                Real vs_kp1 = compute_mean_settling(bins, w, nbins, rhop, rho_a_kp1,
                                                     DustSettlingConst::MU_AIR_STD);
                 flux_top = vs_kp1 * amrex::max(s_arr(i, j, k+1, comp), Real(0.0));
             }
@@ -222,7 +239,7 @@ inline void apply_dust_settling_to_cc_source(
     }
 
     if (dust_debug) {
-        Real vs_std = compute_mean_settling(d_bins, nb, rho_p, 1.225,
+        Real vs_std = compute_mean_settling(d_bins, w_bins, nb, rho_p, 1.225,
                                             DustSettlingConst::MU_AIR_STD);
         Real tend_max = cc_source.max(dust_comp);
         amrex::Print() << "[DUST SETTLING] " << nb << " bin(s), mean v_s=" << vs_std << " m/s"

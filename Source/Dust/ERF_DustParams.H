@@ -89,7 +89,8 @@ struct DustParams {
                                                  ///<   much slower than the atmospheric timestep.
     amrex::Real alpha_crust     = 0.5;  ///< Crust strength enhancement coefficient for u*_t [-].
                                          ///<   Higher crust (fully crusted, protected soil) increases u*_t (harder to emit).
-                                         ///<   u*_t_final = u*_t_base * (1 + alpha_crust * crust_index) / (f_moist * f_supp).
+                                         ///<   u*_t = u*_t_base * (1 + alpha_crust * crust_index) * f_moist * f_supp * f_slope
+                                         ///<   (every modifier multiplies and raises the threshold, ERF_DustThreshold.H).
                                          ///<   When fire reduces crust (e.g., 1.0 -> 0.01), u*_t decreases, raising emission.
                                          ///<   Reference: Marticorena & Bergametti (1995),
                                          ///<     https://doi.org/10.1029/95JD00690
@@ -247,8 +248,8 @@ struct DustParams {
     std::string phreeqc_site_summary_file    = "dust_dep_site_summary.csv";
 
     // Phase 22: haul road vehicle schedule.
-    // CSV format: road_name, x_lo, y_lo, x_hi, y_hi, road_width_m,
-    //             vehicle_weight_t, silt_pct, vmt_per_h, start_time_s, end_time_s
+    // CSV format: road_name, x_lo, y_lo, x_hi, y_hi, road_width_m (carried, unused),
+    //             vehicle_weight_t, silt_pct, vkt_per_h, start_time_s, end_time_s
     // Reference: EPA AP-42 Ch. 13.2.2. https://www.epa.gov/air-emissions-factors-and-quantification/
     //            ap-42-compilation-air-emissions-factors
     std::string road_schedule_file  = "";             ///< Road schedule CSV. Empty = disabled.
@@ -441,6 +442,28 @@ struct DustParams {
             amrex::Print() << "[DUST] WARNING: erf.dust.terrain_ustar is read only with erf.dust.use_terrain_wind = true\n";
         positive("shao_lu_A_N", shao_lu_A_N);
         if (shao_lu_gamma < 0.0) fail("erf.dust.shao_lu_gamma must be >= 0, got " + std::to_string(shao_lu_gamma));
+        // keys read only inside another option's branch: say so when the branch is off
+        if (ustar_t_base >= 0.0) {
+            for (const char* k : {"threshold_model", "saltation_diameter", "shao_lu_A_N", "shao_lu_gamma", "threshold_A_coeff"})
+                if (pp.contains(k))
+                    amrex::Print() << "[DUST] WARNING: erf.dust." << k << " is not read with erf.dust.ustar_t_base >= 0"
+                                   << " (the base threshold is prescribed)\n";
+        } else if (threshold_model == "shao_lu") {
+            if (pp.contains("threshold_A_coeff"))
+                amrex::Print() << "[DUST] WARNING: erf.dust.threshold_A_coeff is read only with erf.dust.threshold_model = bagnold\n";
+        } else {
+            for (const char* k : {"shao_lu_A_N", "shao_lu_gamma"})
+                if (pp.contains(k))
+                    amrex::Print() << "[DUST] WARNING: erf.dust." << k << " is read only with erf.dust.threshold_model = shao_lu\n";
+        }
+        if (pp.contains("z0_dust") && !(use_terrain_wind && terrain_ustar == "loglaw"))
+            amrex::Print() << "[DUST] WARNING: erf.dust.z0_dust only sets the friction velocity with"
+                              " erf.dust.use_terrain_wind = true and erf.dust.terrain_ustar = loglaw"
+                              " (it still bounds erf.dust.zref)\n";
+        // the haul-road mass is the AP-42 PM-10 factor and is stamped on bin 0
+        if (!road_schedule_file.empty() && !bin_diameters.empty() && bin_diameters[0] > 10.0e-6)
+            fail("erf.dust.road_schedule_file puts the AP-42 PM-10 road mass into bin 0, whose diameter "
+                 + std::to_string(bin_diameters[0]) + " m is above 10 um; list a PM-10 size first in erf.dust.bin_diameters");
         positive("rho_air",           rho_air);
         positive("supp_tau_base_s",   supp_tau_base_s);
         if (!(zref > z0_dust)) fail("erf.dust.zref (" + std::to_string(zref) + ") must be above z0_dust (" + std::to_string(z0_dust) + ")");

@@ -178,10 +178,14 @@ so the emitted mass is the AP-42 rate whatever cells the box covers; a box
 that contains no cell centre aborts at start-up. (Until October 2026 the flux
 per unit road area, :math:`M/(W_\mathrm{road} L_\mathrm{road})`, was stamped on
 every covered cell, 37.5x the AP-42 mass for a 20 m road on 375 m cells.)
-The flux is added to bin 0 of the covered cells; each active road appends a
-row with its mass rate, per-cell flux and cell count to
-:cpp:`erf.dust.road_diag_file`. Wind, blast and road fluxes add in the same
-emission field.
+The ``road_width_m`` column is carried for the file format only: the AP-42
+mass does not depend on it. The flux is the PM-10 factor and is added to bin 0
+of the covered cells, which must therefore be a PM-10 size (at most 10 µm;
+start-up aborts otherwise); the bins' shares of the mass emitted so far, road
+included, weight the PM classes and the mean settling velocity of the lumped
+scalar (:ref:`sec:DustCoupling`). Each active road appends a row with its
+mass rate, per-cell flux and cell count to :cpp:`erf.dust.road_diag_file`.
+Wind, blast and road fluxes add in the same emission field.
 
 Suppression agents
 ------------------

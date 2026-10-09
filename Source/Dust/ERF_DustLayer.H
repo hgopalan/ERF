@@ -308,8 +308,22 @@ public:
                              const amrex::Geometry& geom_atm,
                              amrex::Real            dt);
 
-    /// Diameters of the bins the transported scalar b carries, and their number.
-    DustBinDiameters scalar_bin_diameters (int b, int& nb) const;
+    /// Diameters of the bins the transported scalar b carries, their number,
+    /// and their shares of the mass emitted so far (equal until anything is emitted).
+    DustBinDiameters scalar_bin_diameters (int b, int& nb, DustBinWeights& w) const;
+
+    /// The bins' shares of the mass emitted so far (sum 1; equal before any emission).
+    std::vector<amrex::Real> emitted_shares () const;
+
+    /// Coarsen the emission flux and the friction velocity to the atmosphere
+    /// columns (dust_flux_atm, ustar_atm): once per step at the end of advance(),
+    /// and after a checkpoint read, so the first restarted dycore injects and
+    /// deposits with the restored fields (a restart used to inject nothing).
+    void coarsen_to_atm_columns ();
+
+    /// Abort when the explicit settling of the coarsest bin is unstable at
+    /// this step's dt on the thinnest first cell (v_s dt / h_0 > 1).
+    void check_settling_stability (amrex::Real dt) const;
 
     /**
      * @brief Extract return fields from the 3D solver to the 2D dust grid.
@@ -481,11 +495,11 @@ private:
     std::unique_ptr<amrex::MultiFab>      dust_msha_exceed;     ///< PEL exceedance [0/1].
     std::unique_ptr<amrex::MultiFab>      dust_msha_shift_twa;  ///< TWA at last shift end [mg/m³].
 
+    amrex::Geometry                       m_geom_atm;        ///< Level-0 atmosphere geometry (from initialize): the coarsening and the particles
 #if defined(ERF_USE_PARTICLES)
      // Phase 19: Lagrangian super-particles for source-receptor attribution
      std::unique_ptr<class ERFDustPC>      m_dust_pc;         ///< Particle container
      std::unique_ptr<amrex::MultiFab>     dust_source_map;   ///< Cumulative source deposition [kg/m^2]
-     amrex::Geometry                       m_geom_atm;        ///< Atmospheric geometry (stored for particle use)
 #endif
 
     // Phase 20: multi-mine site assignment
@@ -512,7 +526,9 @@ private:
     const amrex::MultiFab*                m_loft_heat = nullptr;   ///< Fire heat flux on the dust grid for this step's lofting (set_fire_lofting).
     amrex::Real                           m_loft_k = 0.0, m_loft_Q_threshold = 0.0, m_loft_Q_ref = 0.0;
 
-    bool                                  m_settling_cfl_checked = false; ///< the explicit settling stability check ran once
+    amrex::Real                           m_h0_min = -1.0;      ///< thinnest first cell [m], from the first settling call
+    amrex::Vector<amrex::Real>            m_emitted_per_bin;    ///< mass emitted so far per bin [kg] (checkpointed): the shares of the lumped scalar
+    amrex::MultiFab                       m_dust_bin_tmp;       ///< scratch for the per-step coarsening (defined once)
     int                                   m_step = 0;
     amrex::Real                           m_time = 0.0;
     int                                   m_last_dust_plot_step = -1;

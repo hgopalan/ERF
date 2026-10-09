@@ -8,7 +8,7 @@
  *
  * SurfaceLayer accessors used:
  *   get_u_star(0)  — friction velocity [m/s]
- *   get_t_surf(0)  — surface skin temperature [K]
+ *   get_t_surf(0)  — surface potential temperature theta_s [K] (converted with the Exner function in DustLayer)
  *   get_pblh(0)    — PBL height [m]
  *
  * References:

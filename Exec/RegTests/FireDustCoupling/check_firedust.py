@@ -41,10 +41,13 @@ KAPPA, Z0, ZREF = 0.4, 0.1, 6.1
 # the settling moved dust down instead of up, and the bins shared the emission
 # flux; 1.5596e-02 before that). Re-measured 2026-10-09 with the Shao-Lu
 # threshold, the u* scaling, v_d >= v_s and the mean settling of the lumped
-# bins: 31.591 kg, 2 % under the old sum times the area. The kernels themselves
-# are checked against known answers in the DustColumn and DustBudget gtests;
-# this value guards the once-per-step accumulation (per-stage would give 1.83x).
-DEP_REF = 3.1591e+01
+# bins: 31.591 kg, 2 % under the old sum times the area; then 24.159 kg once
+# the fire wind's u* applied inside the fire perimeter only (every one of the
+# 6284 unburned cells had taken the fire-wind value, 24 % more deposition).
+# The kernels themselves are checked against known answers in the DustColumn
+# and DustBudget gtests; this value guards the once-per-step accumulation
+# (per-stage would give 1.83x).
+DEP_REF = 2.4159e+01
 DEP_TOL = 0.15
 
 results = []
@@ -106,18 +109,28 @@ def main():
               f"step {n}: u*_t burned/unburned = {ratio:.4f}, expected {expected_ratio:.4f}"
               f" (compounded would give {1.0 / (1.0 + a * c):.4f})")
         # fire wind -> u*
+        # inside the perimeter (phi < 0) the dust u* is at least the fire wind's
+        # log-law u*; outside it the surface layer's u* stands even where the
+        # fire-wind value would exceed it (the fire path overrode it domain-wide
+        # until October 2026: a neutral log law on fire_dust_wind_z0 with no
+        # stability, so the whole domain emitted at the fire's u*)
         log_ratio = math.log(zref / z0)
-        worst = 0.0; nboost = 0
+        worst = 0.0; nboost = 0; n_outside_kept = 0
         for i in range(nx):
             for j in range(ny):
                 spd = math.hypot(f["fire_wind_ref_u"][i][j][0], f["fire_wind_ref_v"][i][j][0])
                 us_fire = spd * KAPPA / log_ratio
-                deficit = us_fire - ui[i][j][0]
-                worst = max(worst, deficit)
-                if us_fire > 1.0e-6:
-                    nboost += 1
+                if phi[i][j][0] < 0.0:
+                    worst = max(worst, us_fire - ui[i][j][0])
+                    if us_fire > 1.0e-6:
+                        nboost += 1
+                elif us_fire > ui[i][j][0] + 1.0e-6:
+                    n_outside_kept += 1
         check(f"fireu*{n}", worst < 1.0e-6 and nboost > 0,
-              f"step {n}: max(u*_fire - dust u*) = {worst:.3e} m/s over {nboost} cells with fire wind")
+              f"step {n}: max(u*_fire - dust u*) = {worst:.3e} m/s over {nboost} burned cells with fire wind")
+        check(f"outside{n}", n_outside_kept > 0,
+              f"step {n}: {n_outside_kept} unburned cells keep a dust u* below the fire-wind value"
+              " (0 would mean the fire path still overrides the surface layer everywhere)")
 
     # deposition accumulator: monotone, once per step
     try:

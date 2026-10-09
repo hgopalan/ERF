@@ -101,7 +101,7 @@ erf.dust.suppression_file = ""
 
 # Phase 7: Visibility diagnostics
 erf.dust.visibility_enable = true
-erf.dust.visibility_k_ext = 4000.0
+erf.dust.visibility_k_ext = 600.0        # m2/kg, inside the 300-1000 literature range (4000 until October 2026)
 erf.dust.visibility_road_closure_m = 300.0
 erf.dust.visibility_warning_m = 1000.0
 erf.dust.visibility_diag_file = "visibility_diag.csv"

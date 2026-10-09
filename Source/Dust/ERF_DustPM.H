@@ -17,7 +17,7 @@
  * classified the whole lumped mass, so with the default bins {7, 2.5, 50} um
  * PM10 counted the 50 um third and PM2.5 was identically zero.
  *
- * The 24-hour averages are block means over a 24-slot ring of hourly means
+ * The 24-hour averages are block means over a 24-slot ring of hourly slot integrals
  * (erf.dust.averaging = window, the 40 CFR 50 Appendix K/N form); the
  * exponential running mean used until October 2026 (averaging = exponential)
  * reports 0.632 C after 24 h of a constant C, so a 50 ug/m3 day never flagged
@@ -88,19 +88,35 @@ inline void compute_pm_concentrations(
     const amrex::MultiFab& dust_conc,
     const std::vector<amrex::Real>& bin_diameters,
     int n_active,
-    bool lumped = false)
+    bool lumped = false,
+    const std::vector<amrex::Real>& shares = {})
 {
     pm25.setVal(0.0);
     pm10.setVal(0.0);
     const amrex::Real scale = DustPMConst::UG_PER_KG;
 
     if (lumped) {
-        // one scalar carrying every bin with an equal share of the flux
+        // one scalar carrying every bin: each PM class takes the bins' shares
+        // of the mass emitted so far (equal shares when none are given or
+        // nothing has been emitted). The bin-0 diameter classified the whole
+        // scalar until October 2026; then fixed equal shares, which put a
+        // third of haul-road dust (bin 0 only) into PM2.5.
         const int nb = amrex::max(1, (int)bin_diameters.size());
-        int n25 = 0, n10 = 0;
-        for (auto d : bin_diameters) { if (is_pm25(d)) ++n25; if (is_pm10(d)) ++n10; }
-        const amrex::Real f25 = amrex::Real(n25) / amrex::Real(nb);
-        const amrex::Real f10 = amrex::Real(n10) / amrex::Real(nb);
+        amrex::Real f25 = 0.0, f10 = 0.0, wsum = 0.0;
+        for (int b = 0; b < nb; ++b) {
+            const amrex::Real w = (b < (int)shares.size()) ? amrex::max(shares[b], amrex::Real(0.0))
+                                                           : amrex::Real(1.0);
+            wsum += w;
+            if (is_pm25(bin_diameters[b])) f25 += w;
+            if (is_pm10(bin_diameters[b])) f10 += w;
+        }
+        if (wsum > 0.0) { f25 /= wsum; f10 /= wsum; }
+        else {
+            int n25 = 0, n10 = 0;
+            for (auto d : bin_diameters) { if (is_pm25(d)) ++n25; if (is_pm10(d)) ++n10; }
+            f25 = amrex::Real(n25) / amrex::Real(nb);
+            f10 = amrex::Real(n10) / amrex::Real(nb);
+        }
         for (amrex::MFIter mfi(dust_conc, amrex::TilingIfNotGPU());
              mfi.isValid(); ++mfi) {
             const amrex::Box& bx = mfi.tilebox();
@@ -145,7 +161,7 @@ inline void compute_pm_concentrations(
  * @brief Block mean over a window: a ring of n_slots slot means plus the
  *        running accumulation of the current slot.
  *
- * State: ring (n_slots components, the completed slot means), accum (one
+ * State: ring (n_slots components, the completed slot integrals), accum (one
  * component, integral of C over the open slot), slot_elapsed [s], slot_index
  * (next ring entry to overwrite), n_filled (completed slots, <= n_slots).
  * The mean is (sum of the filled slot means times the slot length + the open

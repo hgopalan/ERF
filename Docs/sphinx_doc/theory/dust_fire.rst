@@ -48,14 +48,20 @@ grid and converted to a friction velocity by the log law
 
    u_{*,\mathrm{fire}} = \frac{\kappa\, |U_\mathrm{fire}|}{\ln(z_\mathrm{ref}/z_0)}
 
-with :cpp:`erf.fire_dust_wind_zref` and :cpp:`erf.fire_dust_wind_z0`; the
-larger of it and the surface-layer value is kept. Cells at and downwind of
-the perimeter therefore see the fire's wind where it exceeds the ambient
-one; with no fire modification of the near-surface flow the two friction
-velocities agree, so the fire path wins only where the fire accelerates the
-flow. (Until October 2026 the WAF-reduced midflame wind ``fire_wind_eff`` was
-handed over as if it were the wind at ``wind_ref_ht``, 0.36x for grass, so
-the fire path never exceeded the surface layer's :math:`u_*`.)
+with :cpp:`erf.fire_dust_wind_zref` (which follows :cpp:`erf.fire.wind_ref_ht`)
+and :cpp:`erf.fire_dust_wind_z0`; inside the fire perimeter (level set below
+zero) the larger of it and the surface-layer value is kept, outside it the
+surface layer's :math:`u_*` stands. The fire's reference wind is the
+atmospheric wind at that height everywhere, so outside the perimeter it holds
+nothing the surface layer did not see, while the neutral log law on
+``fire_dust_wind_z0`` ignores the roughness and the stability the surface
+layer used: with ``erf.most.z0 = 0.01`` and the default ``z0 = 0.1`` the fire
+value is 1.5x the surface layer's in every cell, and until October 2026 it
+overrode the surface layer domain-wide (a warning now names a
+``fire_dust_wind_z0`` that differs from ``erf.most.z0``). Earlier still the
+WAF-reduced midflame wind ``fire_wind_eff`` was handed over as if it were the
+wind at ``wind_ref_ht``, 0.36x for grass, so the fire path never exceeded the
+surface layer's :math:`u_*`.
 ``FireDustInteraction2`` uses the weak-wind sounding and
 ``FireDustWindStrength`` varies the ambient wind.
 

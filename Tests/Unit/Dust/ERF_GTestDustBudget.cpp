@@ -110,6 +110,15 @@ DustBinDiameters bins_of (std::initializer_list<Real> ds)
     return b;
 }
 
+/// Weights of a scalar that carries one bin.
+inline DustBinWeights one_weight ()
+{
+    DustBinWeights w{};
+    for (int i = 0; i < DustSettlingConst::MAX_BINS; ++i) w[i] = 0.0;
+    w[0] = 1.0;
+    return w;
+}
+
 } // namespace
 
 TEST(DustBudget, SettlingConservesMassOnAStretchedColumn)
@@ -117,7 +126,7 @@ TEST(DustBudget, SettlingConservesMassOnAStretchedColumn)
     StretchedColumn c;
     c.put_dust(5, 1.0);
     const Real d = 7.0e-6, rho_p = 2650.0;
-    apply_dust_settling_to_cc_source(c.src, c.S, c.detJ, c.geom, bins_of({d}), 1, rho_p, DUST);
+    apply_dust_settling_to_cc_source(c.src, c.S, c.detJ, c.geom, bins_of({d}), one_weight(), 1, rho_p, DUST);
     const Real vs = compute_stokes_settling(d, rho_p, Real(1.225), DustSettlingConst::MU_AIR_STD);
     ASSERT_GT(vs, Real(0.0));
     // the dusty cell loses v_s rho / h_5, the cell below gains v_s rho / h_4
@@ -158,15 +167,28 @@ TEST(DustBudget, LumpedScalarSettlesAtTheMeanOfTheBins)
 {
     const Real rho_p = 2650.0, rho_a = 1.225, mu = DustSettlingConst::MU_AIR_STD;
     const DustBinDiameters b = bins_of({7.0e-6, 2.5e-6, 50.0e-6});
-    const Real mean = compute_mean_settling(b, 3, rho_p, rho_a, mu);
+    DustBinWeights w{}; for (int i = 0; i < 3; ++i) w[i] = 1.0 / 3.0;
+    const Real mean = compute_mean_settling(b, w, 3, rho_p, rho_a, mu);
     Real sum = 0.0;
     for (int i = 0; i < 3; ++i) sum += compute_stokes_settling(b[i], rho_p, rho_a, mu);
     EXPECT_NEAR(mean, sum / 3.0, REAL_RTOL * mean);
     // the coarse third dominates: 17x the bin-0 velocity
     EXPECT_GT(mean, 10.0 * compute_stokes_settling(b[0], rho_p, rho_a, mu))
         << "bin 0 alone settled the 50 um third at the 7 um velocity";
-    EXPECT_NEAR(compute_mean_settling(b, 1, rho_p, rho_a, mu),
+    EXPECT_NEAR(compute_mean_settling(b, w, 1, rho_p, rho_a, mu),
                 compute_stokes_settling(b[0], rho_p, rho_a, mu), REAL_RTOL);
+    // the shares weight the mean: haul-road dust (bin 0 only) settles at the
+    // 7 um velocity, not the three-bin mean (17x faster, the form until October 2026)
+    DustBinWeights road{}; road[0] = 1.0;
+    EXPECT_NEAR(compute_mean_settling(b, road, 3, rho_p, rho_a, mu),
+                compute_stokes_settling(b[0], rho_p, rho_a, mu), REAL_RTOL)
+        << "equal shares gave " << mean << " for a scalar that holds bin 0 only";
+    DustBinWeights half{}; half[0] = 0.5; half[2] = 0.5;
+    EXPECT_NEAR(compute_mean_settling(b, half, 3, rho_p, rho_a, mu),
+                0.5 * (compute_stokes_settling(b[0], rho_p, rho_a, mu) + compute_stokes_settling(b[2], rho_p, rho_a, mu)),
+                REAL_RTOL * mean);
+    DustBinWeights none{};   // no shares: equal
+    EXPECT_NEAR(compute_mean_settling(b, none, 3, rho_p, rho_a, mu), mean, REAL_RTOL * mean);
 }
 
 TEST(DustBudget, HaulRoadEmitsTheAP42MassRateOverTheCellsItCovers)

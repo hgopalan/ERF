@@ -118,6 +118,14 @@ TEST(DustDiagnostics, LumpedScalarIsApportionedByTheBinShares)
     compute_pm_concentrations(pm25, pm10, conc, bins, 1, /*lumped=*/true);
     EXPECT_NEAR(first_value(pm25), 1.0, REAL_RTOL) << "one bin of three is PM2.5 (the bin-0 rule gave 0)";
     EXPECT_NEAR(first_value(pm10), 2.0, REAL_RTOL) << "two bins of three are PM10 (the bin-0 rule gave 3)";
+    // the emitted shares weight the classes: a scalar fed by a haul road alone
+    // (bin 0, 7 um) is all PM10 and no PM2.5 (fixed thirds gave 1 and 2)
+    compute_pm_concentrations(pm25, pm10, conc, bins, 1, true, {1.0, 0.0, 0.0});
+    EXPECT_NEAR(first_value(pm25), 0.0, 1.0e-12) << "road dust is not PM2.5";
+    EXPECT_NEAR(first_value(pm10), 3.0, REAL_RTOL * 3.0) << "road dust is all PM10";
+    compute_pm_concentrations(pm25, pm10, conc, bins, 1, true, {0.25, 0.25, 0.5});
+    EXPECT_NEAR(first_value(pm25), 0.75, REAL_RTOL) << "a quarter of 3";
+    EXPECT_NEAR(first_value(pm10), 1.5, REAL_RTOL) << "half of 3";
     // per-bin scalars classify each bin whole
     MultiFab conc3(s.ba, s.dm, 3, 0);
     conc3.setVal(1.0e-9);

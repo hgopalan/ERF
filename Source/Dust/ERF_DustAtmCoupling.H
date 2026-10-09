@@ -4,7 +4,7 @@
  *        into the ERF 3D conserved state at k=0.
  *
  * Structural analog of ERF_FireAtmCoupling.H from Source/Fire/:
- *   coarsen_fire_flux_to_atm  ->  coarsen_dust_flux_to_atm
+ *   (the coarsening lives in DustLayer::coarsen_to_atm_columns)
  *   apply_fire_tendency_to_cc_source  ->  apply_dust_tendency_to_cc_source
  *
  * The fire module distributes heat flux vertically via an exponential
@@ -16,7 +16,7 @@
  *   d(RhoDust)/dt = F_dust / h_0,   h_0 = detJ(klo) dz
  * where F_dust [kg/m^2/s] is the coarsened total emission flux and h_0 [m]
  * the thickness of the first atmospheric cell (the centre-to-centre spacing
- * above it was used until October 2026, 9 % off at a 1.1 stretching ratio).
+ * above it was used until October 2026, 5 % off at a 1.1 stretching ratio).
  *
  * One-step explicit lag: flux from time n is injected at step n+1,
  * before advance_dycore(). Consistent with ERF_FireAtmCoupling.H.
@@ -40,21 +40,6 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_MFIter.H>
 
-// Coarsen dust_emission_flux from dust grid to atm level-0 grid.
-// Uses amrex::average_down with refinement ratio (grid_ratio, grid_ratio, 1).
-// Direct analog of coarsen_fire_flux_to_atm in ERF_FireAtmCoupling.H.
-inline void coarsen_dust_flux_to_atm(
-    amrex::MultiFab&       Q_dust_atm,     // output: ncomp=1, on atm grid
-    const amrex::MultiFab& Q_dust,         // input:  dust_emission_flux summed over bins
-    const amrex::Geometry& geom_dust,
-    const amrex::Geometry& geom_atm,
-    int                    grid_ratio)
-{
-    // Sum over bins is done before calling this function.
-    // grid_ratio = 1: direct copy (no averaging needed).
-    amrex::average_down(Q_dust, Q_dust_atm, geom_dust, geom_atm,
-                        0, 1, amrex::IntVect(grid_ratio, grid_ratio, 1));
-}
 
 // Apply dust emission flux tendency to cc_source at k=0.
 // All levels above k=0 receive zero tendency from this function.

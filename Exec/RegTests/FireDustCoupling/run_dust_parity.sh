@@ -13,9 +13,12 @@
 # paths that only exist across box edges and ranks: the ParallelCopy of the
 # fire wind, heat and level set onto the dust BoxArray with the dust
 # periodicity, the average_down of the emission flux and friction velocity,
-# the wind extraction at a box's high face, the per-site and receptor
-# reductions, and dust_fill_boundary at interior box edges. Until October 2026
-# every dust CTest ran on one rank and one box.
+# the wind extraction at a box's high face, and the per-site and receptor
+# reductions. Not exercised (the deck is flat, with no terrain file and no
+# terrain wind, no road or blast schedule, no PHREEQC table, and no restart):
+# the slope and curvature stencils and dust_fill_boundary at interior box
+# edges, the FARSITE wind path, the schedule stamping, the raster readers.
+# Until October 2026 every dust CTest ran on one rank and one box.
 #
 # The check asserts that the two legs really differ in their decomposition
 # (Level_0/Cell_H box counts of the dust plotfile), then compares the last dust

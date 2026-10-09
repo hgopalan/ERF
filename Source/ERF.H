@@ -2040,13 +2040,13 @@ private:
 
     #ifdef ERF_USE_DUST
     std::unique_ptr<DustLayer>    m_DustLayer;
-    // Coarsened dust emission flux on atmospheric grid for each level
-    // Updated after DustLayer::advance, applied in ERF_Advance before dycore
+    /// Restore the dust layer's fields and counters from the checkpoint
     void ReadCheckpointFileDust ();
 #if defined(ERF_ENABLE_FIRE) && defined(ERF_USE_DUST)
     FireDustCoupling m_fire_dust_coupling;
     amrex::MultiFab m_fire_heat_scratch_for_lofting;   ///< fire heat flux on the dust grid, for the lofting inside DustLayer::advance
-    amrex::MultiFab m_fire_phi_scratch_for_crust;      ///< fire level set on the dust grid, for the burned-area crust reduction
+    amrex::MultiFab m_fire_phi_scratch_for_crust;      ///< fire level set on the dust grid, for the burned-area crust reduction and the fire-wind mask
+    amrex::MultiFab m_fire_wind_scratch_for_ustar;     ///< fire reference wind (u, v) on the dust grid, for the fire-wind u*
 #endif
     #endif
     amrex::Vector<std::unique_ptr<ForestDrag>> m_forest_drag;

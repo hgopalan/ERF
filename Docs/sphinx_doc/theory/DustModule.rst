@@ -124,8 +124,8 @@ the atmosphere's :math:`\Delta t`, in this order (``DustLayer::advance`` in
    step.
 6. **Threshold friction velocity** from the Shao-Lu base (Bagnold with
    :cpp:`erf.dust.threshold_model = bagnold`), the chemistry,
-   moisture, suppression and slope factors, then the loading feedback and the
-   dynamic moisture inhibition when enabled (:ref:`sec:DustSources`).
+   moisture, suppression and slope factors, then the loading feedback when
+   enabled (:ref:`sec:DustSources`).
 7. **Emission flux** per bin from the saltation model where
    :math:`u_* > u_{*t}`, plus the blast events due in this step and the active
    haul roads.

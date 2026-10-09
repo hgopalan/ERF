@@ -2579,6 +2579,11 @@ add_test_fire_abort(DustRasterMissing_abort   FireRestart           inputs_dust_
     "surface raster cannot be opened" "erf.dust.crust_index_file=missing_crust.asc")
 add_test_fire_abort(DustPhreeqcMissing_abort  FireRestart           inputs_dust_straight
     "PHREEQC file cannot be opened" "erf.dust.phreeqc_output_file=missing_phreeqc.csv")
+# the haul-road mass is the AP-42 PM-10 factor on bin 0; the fire-wind height follows erf.fire.wind_ref_ht
+add_test_fire_abort(DustRoadBinZero_abort      FireRestart           inputs_dust_straight
+    "road mass into bin 0, whose diameter" "erf.dust.bin_diameters=50.0e-6\ 2.5e-6\ 7.0e-6")
+add_test_fire_abort(FireDustWindZrefMatch_abort FireRestart          inputs_dust_straight
+    "must match erf.fire.wind_ref_ht" "erf.fire_dust_wind_zref=10.0")
 endif()
 endif()
 

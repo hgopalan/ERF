@@ -245,8 +245,11 @@ ERF::Evolve ()
                 // Burned area for the crust reduction (applied inside DustLayer::advance
                 // from the crust baseline). The level set used to be gathered into a
                 // fire-domain-sized host vector and all-reduced every step.
+                // the three dust-grid scratch fields are defined once (the dust
+                // BoxArray never changes) and refilled every step
                 if (m_fire_layer->get_levelset() != nullptr) {
-                    m_fire_phi_scratch_for_crust = amrex::MultiFab(dust_ba, dust_dm, 1, 0);
+                    if (!m_fire_phi_scratch_for_crust.ok())
+                        m_fire_phi_scratch_for_crust.define(dust_ba, dust_dm, 1, 0);
                     m_fire_phi_scratch_for_crust.setVal(1.0_rt);   // unburned where no fire cell lands
                     m_fire_phi_scratch_for_crust.ParallelCopy(
                         *m_fire_layer->get_levelset(), 0, 0, 1, 0, 0, per);
@@ -261,8 +264,10 @@ ERF::Evolve ()
                 // if it were the 6.1 m wind, 0.36x for grass, so the fire path never
                 // exceeded the surface layer's u*.
                 if (m_fire_dust_coupling.fire_wind_to_dust &&
-                    m_fire_layer->get_wind_ref() != nullptr) {
-                    amrex::MultiFab fire_wind_scratch(dust_ba, dust_dm, 2, 1);   // (u, v), 1 ghost cell
+                    m_fire_layer->get_wind_ref() != nullptr &&
+                    m_fire_layer->get_levelset() != nullptr) {
+                    amrex::MultiFab& fire_wind_scratch = m_fire_wind_scratch_for_ustar;   // (u, v), 1 ghost cell
+                    if (!fire_wind_scratch.ok()) fire_wind_scratch.define(dust_ba, dust_dm, 2, 1);
                     fire_wind_scratch.setVal(0.0_rt);
                     fire_wind_scratch.ParallelCopy(
                         *m_fire_layer->get_wind_ref(), 0, 0, 2, 0, 1, per);
@@ -280,6 +285,7 @@ ERF::Evolve ()
                         m_fire_dust_coupling.apply_fire_wind_to_dust_ustar(
                             *ustar_in,
                             fire_wind_scratch,
+                            m_fire_phi_scratch_for_crust,   // inside the fire perimeter only
                             m_DustLayer->get_dust_geom(),
                             m_fire_dust_coupling.fire_wind_z0,
                             m_fire_dust_coupling.fire_wind_zref,
@@ -292,7 +298,8 @@ ERF::Evolve ()
                 // DustLayer::advance before the budget and the particles read the flux
                 if (m_fire_dust_coupling.fire_lofting_enabled &&
                     m_fire_layer->get_heat_flux()) {
-                    m_fire_heat_scratch_for_lofting = amrex::MultiFab(dust_ba, dust_dm, 1, 1);
+                    if (!m_fire_heat_scratch_for_lofting.ok())
+                        m_fire_heat_scratch_for_lofting.define(dust_ba, dust_dm, 1, 1);
                     m_fire_heat_scratch_for_lofting.setVal(0.0_rt);
                     m_fire_heat_scratch_for_lofting.ParallelCopy(
                         *m_fire_layer->get_heat_flux(), 0, 0, 1, 0, 1, per);
@@ -2172,7 +2179,29 @@ ERF::InitData_post ()
                 pp.query("fire_dust_crust_reduction", m_fire_dust_coupling.post_fire_crust_reduction);
                 pp.query("fire_dust_wind_to_dust",   m_fire_dust_coupling.fire_wind_to_dust);
                 pp.query("fire_dust_wind_z0",        m_fire_dust_coupling.fire_wind_z0);
-                pp.query("fire_dust_wind_zref",      m_fire_dust_coupling.fire_wind_zref);
+                // the datum of the wind handed over is erf.fire.wind_ref_ht: the
+                // dust-side height follows it, and a different value aborts
+                {
+                    amrex::Real wind_ref_ht = m_fire_layer->get_params().wind_ref_ht;
+                    m_fire_dust_coupling.fire_wind_zref = wind_ref_ht;
+                    amrex::Real zref_given = wind_ref_ht;
+                    if (pp.query("fire_dust_wind_zref", zref_given) &&
+                        std::abs(zref_given - wind_ref_ht) > 1.0e-6 * wind_ref_ht) {
+                        amrex::Abort("[FIRE-DUST] erf.fire_dust_wind_zref = " + std::to_string(zref_given)
+                                     + " m must match erf.fire.wind_ref_ht = " + std::to_string(wind_ref_ht)
+                                     + " m, the height of the wind the fire hands over (fire_wind_ref);"
+                                     " leave it unset to follow wind_ref_ht");
+                    }
+                    amrex::ParmParse pp_most("erf.most");
+                    amrex::Real most_z0 = -1.0;
+                    if (pp_most.query("z0", most_z0) && most_z0 > 0.0 &&
+                        std::abs(most_z0 - m_fire_dust_coupling.fire_wind_z0) > 1.0e-6 * most_z0) {
+                        amrex::Print() << "[FIRE-DUST] WARNING: erf.fire_dust_wind_z0 = " << m_fire_dust_coupling.fire_wind_z0
+                                       << " m differs from erf.most.z0 = " << most_z0
+                                       << " m; inside the fire perimeter the fire wind u* (a neutral log law on"
+                                          " fire_dust_wind_z0) is compared with the surface layer's u*\n";
+                    }
+                }
                 pp.query("fire_dust_lofting_enabled",     m_fire_dust_coupling.fire_lofting_enabled);
                 pp.query("fire_dust_lofting_k_loft",      m_fire_dust_coupling.lofting_k_loft);
                 pp.query("fire_dust_lofting_Q_threshold", m_fire_dust_coupling.lofting_Q_threshold);

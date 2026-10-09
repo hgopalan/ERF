@@ -45,6 +45,7 @@ void FireDustCoupling::apply_burned_area_to_crust(MultiFab& dust_crust_index) co
 void FireDustCoupling::apply_fire_wind_to_dust_ustar(
     amrex::MultiFab&       dust_ustar_in,
     const amrex::MultiFab& fire_wind_scratch,
+    const amrex::MultiFab& fire_phi_scratch,
     const amrex::Geometry& /*geom_dust*/,
     amrex::Real            z0,
     amrex::Real            zref,
@@ -71,9 +72,18 @@ void FireDustCoupling::apply_fire_wind_to_dust_ustar(
         const amrex::Box& bx = mfi.tilebox();
         auto ustar = dust_ustar_in.array(mfi);
         auto wind  = fire_wind_scratch.const_array(mfi);
+        auto phi   = fire_phi_scratch.const_array(mfi);
 
         amrex::ParallelFor(bx,
             [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                // Only inside the fire perimeter (phi < 0). Outside it the
+                // reference wind is the atmospheric wind the surface layer
+                // already saw, and a neutral log law on fire_dust_wind_z0
+                // differs from the surface layer's u* by the roughness and
+                // stability it ignores (1.5x domain-wide for most.z0 = 0.01
+                // against 0.1), which until October 2026 overrode the surface
+                // layer everywhere.
+                if (phi(i, j, 0) >= 0.0) return;
                 const amrex::Real u_avg = wind(i, j, 0, 0);
                 const amrex::Real v_avg = wind(i, j, 0, 1);
 

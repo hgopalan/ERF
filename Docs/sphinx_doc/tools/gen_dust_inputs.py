@@ -45,10 +45,11 @@ p("bin_diameters", "Per-bin diameter of the emitted dust [m], one per bin "
 p("particle_density", "Bulk particle density [kg/m³]", "Real > 0", "2650.0")
 p("rho_air", "Air density used in the threshold and saltation flux [kg/m³]",
   "Real > 0", "1.225")
-p("z0_dust", "Roughness length of the emitting surface [m], used by the "
-  "log-law friction velocity of the terrain-corrected wind", "Real > 0", "0.01")
+p("z0_dust", "Roughness length of the emitting surface [m]: the log-law "
+  "friction velocity with use_terrain_wind and terrain_ustar = loglaw; otherwise "
+  "it only bounds zref (a warning says so when a deck sets it)", "Real > 0", "0.01")
 p("zref", "Height at which the wind is taken from the atmosphere [m]; set "
-  "equal to erf.most.zref", "Real > 0", "10.0")
+  "equal to erf.most.zref", "Real > z0_dust, below the domain top", "10.0")
 
 grp("Surface state",
     "Uniform values apply wherever no raster is given. Rasters are ESRI "
@@ -93,7 +94,7 @@ grp("Wind and terrain",
     "surface layer; the ``test_*`` values are the placeholders used when "
     "no atmosphere is coupled.")
 p("use_terrain_wind", "Apply the FARSITE terrain correction to the wind at "
-  "zref and recompute u* from it by the log law", "Boolean", "false")
+  "zref; u* follows it as terrain_ustar says", "Boolean", "false")
 p("terrain_ustar", "How the friction velocity follows the terrain-corrected wind: "
   "scale multiplies the surface layer's u* by U_corrected / U_raw; loglaw "
   "(the form until October 2026) re-derives u* = kappa U / ln(zref / z0_dust), "
@@ -125,7 +126,7 @@ p("site_names", "Names of the mine sites; empty means a single global table",
   "Strings", "none")
 p("site_phreeqc_files", "Per-site PHREEQC table read over that site's cells after "
   "the global one; an empty entry (or no list) keeps the global table there",
-  "Strings", "(none)")
+  "Strings", "none")
 p("site_x_lo", "Site bounding-box lower x [m], one per site", "Reals", "none")
 p("site_y_lo", "Site bounding-box lower y [m]", "Reals", "none")
 p("site_x_hi", "Site bounding-box upper x [m]", "Reals", "none")
@@ -143,7 +144,7 @@ grp("Scheduled sources and suppression",
     "layouts are in :ref:`sec:DustSources`.")
 p("blast_schedule_file", "Blast schedule CSV; empty means no blasts", "String", '""')
 p("blast_reactivity", "Multiplier on the injected blast mass for fresh "
-  "surfaces [-]", "Real >= 1", "2.0")
+  "surfaces [-]; below 1 injects less than the charge mass", "Real >= 0", "2.0")
 p("road_schedule_file", "Haul road schedule CSV; empty means no road "
   "emission", "String", '""')
 p("road_diag_file", "Per-road emission CSV", "String", '"dust_road_diag.csv"')
@@ -157,7 +158,8 @@ grp("Atmosphere coupling",
 p("atm_feedback", "Scale on the injected flux; 0 disables injection for "
   "surface-only diagnostics", "Real 0-1", "1.0")
 p("transport_bins_separately", "One 3D scalar per bin instead of a single "
-  "total; only bin 0 is returned to the surface at present", "Boolean", "false")
+  "total; the state carries one dust scalar, so it is accepted only with "
+  "n_size_bins = 1 (more aborts)", "Boolean", "false")
 p("deposition_E0", "Surface collection efficiency of the dry-deposition "
   "resistance [-]; 3e-3 bare mine surface, 1e-4 paved road, 1e-2 vegetation; "
   "0 removes the collection term (v_d = v_s)",
@@ -179,11 +181,14 @@ p("erf.fire_dust_coupling", "Enable the fire-dust coupling; requires "
   "erf.dust.grid_ratio = erf.fire.grid_ratio", "Boolean", "false")
 p("erf.fire_dust_crust_reduction", "Fraction of the baseline crust index removed in "
   "burned cells each step", "Real 0-1", "0.8")
-p("erf.fire_dust_wind_to_dust", "Raise the dust u* to the log-law value of "
-  "the fire's effective wind where that is larger", "Boolean", "true")
-p("erf.fire_dust_wind_z0", "Roughness length of that log law [m]", "Real > 0", "0.1")
-p("erf.fire_dust_wind_zref", "Reference height of that log law [m]; match "
-  "erf.fire.wind_ref_ht", "Real > 0", "6.1")
+p("erf.fire_dust_wind_to_dust", "Inside the fire perimeter, raise the dust u* to "
+  "the log-law value of the fire's reference wind (fire_wind_ref, at "
+  "erf.fire.wind_ref_ht) where that is larger; outside it the surface layer's u* "
+  "stands", "Boolean", "true")
+p("erf.fire_dust_wind_z0", "Roughness length of that log law [m]; a value other "
+  "than erf.most.z0 is warned about", "Real > 0", "0.1")
+p("erf.fire_dust_wind_zref", "Reference height of that log law [m]: follows "
+  "erf.fire.wind_ref_ht, and a different value aborts", "= erf.fire.wind_ref_ht", "6.1")
 p("erf.fire_dust_lofting_enabled", "Multiply the emission flux by the "
   "convective lofting factor of the fire heat flux", "Boolean", "false")
 p("erf.fire_dust_lofting_k_loft", "Maximum lofting enhancement [-]", "Real >= 0", "2.0")
@@ -211,8 +216,9 @@ p("dust_plot_int", "Steps between dust plotfiles; <= 0 writes only the final "
 p("dust_plot_prefix", "Dust plotfile prefix", "String", '"plt_dust_"')
 p("dust_diag_file", "Per-step domain statistics CSV", "String", '"dust_diag.dat"')
 p("dust_naaqs_file", "EPA NAAQS PM2.5 and PM10 CSV", "String", '"dust_naaqs.csv"')
-p("averaging", "The 24-hour PM averages and the 15-minute STEL: window (block means "
-  "over a ring of hourly / one-minute means, the 40 CFR 50 form) or exponential "
+p("averaging", "The 24-hour PM averages and the STEL: window (the block mean of "
+  "a ring of 24 hourly slots, or 15 slots of the STEL period, the 40 CFR 50 form; "
+  "the exceedance flags compare once the window is full) or exponential "
   "(the running mean until October 2026, 0.632 C after one window of a constant C)",
   "window or exponential", "window")
 p("msha_pel_mg_m3", "MSHA permissible exposure limit on the 8-hour TWA "
