@@ -1,27 +1,20 @@
 # DustRoadSchedule
 
 ## Purpose
-This case verifies CSV-driven activation of dust sources associated with road activity or haul-road operation.
+The haul-road source alone: `erf.dust.ustar_t_base = 2.0` prescribes a threshold above any friction velocity in the run (the 15 m/s wind gives u* = 1.1 m/s), so no cell emits by wind and every kilogram of dust comes from `road_schedule.csv` through the EPA AP-42 13.2.2 unpaved-road factor, E = 423 (s/12)^0.9 (W/3)^0.45 g per vehicle-kilometre (PM-10 constants, industrial sites). The case checks the schedule reader, the activation window and the mass rate.
 
-## Physics / Model Features Exercised
-- Dust emission / transport / deposition controls
-- Exposure or air-quality diagnostics as configured
+## Setup
+| Item | Value |
+|------|-------|
+| Domain, grid | 3000 x 3000 x 1024 m, 8 x 8 x 64 cells (375 x 375 x 16 m), periodic in x and y, flat; the dust grid is the atmosphere's columns (`erf.dust.grid_ratio = 1`) |
+| Run length | `max_step = 5` at `erf.fixed_dt = 0.5` s: a start-up regression run |
+| Source | `road_schedule.csv` only (the prescribed threshold keeps the wind source off; `test_ustar` is read only without an atmosphere): two roads, `haul_north` for the whole run and `haul_south` from 1.0 to 2.5 s; the columns are road name, bounding box, `road_width_m` (carried for the format, unused), vehicle weight [t], silt [%], vehicle kilometres per hour, start and end times (`-1` = whole run) |
+| Bins | {7, 2.5, 50} um as one scalar; the road mass is the PM-10 factor and lands on bin 0, which must be a PM-10 size (start-up aborts otherwise) |
 
-## Expected Results
-See the input-file header comments in this directory for the specific validation target. In general, these cases should reproduce the documented analytical trend, qualitative regime change, or engineering diagnostic associated with the scenario.
-
-## Key Parameters
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `erf.prob_name` | `"ABL"` | Primary configuration value taken from `inputs`. |
-| `max_step` | `5` | Primary configuration value taken from `inputs`. |
-| `amr.max_level` | `0` | Primary configuration value taken from `inputs`. |
-| `amrex.fpe_trap_invalid` | `0` | Primary configuration value taken from `inputs`. |
-| `fabarray.mfiter_tile_size` | `1024 1024 1024` | Primary configuration value taken from `inputs`. |
-| `geometry.prob_extent` | `3000 3000 1024` | Primary configuration value taken from `inputs`. |
-| `amr.n_cell` | `8 8 64` | Primary configuration value taken from `inputs`. |
-| `geometry.is_periodic` | `1 1 0` | Primary configuration value taken from `inputs`. |
+## What to look at
+- `dust_road_diag.csv`: one row per active road and step with its mass rate M = 1e-3 E VKT/h / 3600 [kg/s], the per-cell flux M / (n A_cell) and the cell count n; the flux times n times the cell area is the AP-42 rate whatever cells the box covers (until October 2026 the flux per unit road area was stamped on every covered cell, 37.5x the AP-42 mass for a 20 m road on 375 m cells).
+- `dust_diag.dat`: `emission_total_kg_s` equals the sum of the active roads' M (one road from 0 s, both from 1.0 to 2.5 s), and nothing else: 2.18e-3 kg/s per road for the 80 t, 10 % silt, 5 km/h entries, 4.37e-3 kg/s while both run.
+- The PM shares in `dust_naaqs.csv`: with the road the only source the emitted mass is all bin 0, so PM10 is the whole surface dust and PM2.5 is zero (the shares follow the emitted mass since October 2026).
 
 ## References
-- Bagnold 1941, The Physics of Blown Sand and Desert Dunes.
-- Marticorena and Bergametti 1995, Modeling the atmospheric dust cycle.
+- EPA AP-42, section 13.2.2, Unpaved roads (2006).

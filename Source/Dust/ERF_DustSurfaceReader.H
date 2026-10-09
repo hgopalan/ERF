@@ -53,7 +53,8 @@ struct DustGrid;
 bool read_ascii_surface_map(amrex::MultiFab&   mf,
                             const DustGrid&    dg,
                             const std::string& filename,
-                            amrex::Real        nodata_fill);
+                            amrex::Real nodata_fill,
+                            bool nearest = false);
 
 /**
  * @brief Read NetCDF 2D variable and fill MultiFab via bilinear interpolation.

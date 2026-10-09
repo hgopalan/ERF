@@ -45,6 +45,9 @@ void verify_dust_prerequisites(const ERF&          erf,
     // Get domain information
     const amrex::Box& domain = geom_atm.Domain();
     int domain_nz = domain.length(2);
+    // the wind extraction places the surface from the first two cell centres
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(domain_nz >= 2,
+        "[DUST] the dust module needs at least two cells in z (amr.n_cell)");
 
     // Check 3: No z-direction MPI decomposition
     for (int i = 0; i < ba_atm.size(); ++i) {
@@ -126,13 +129,24 @@ void verify_dust_prerequisites(const ERF&          erf,
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dust_params.zref < dz, msg.c_str());
     }
 
+    {
+        // The wind at zref is interpolated between cell centres and clamped to
+        // the lowest one: below half the first cell thickness it is the first
+        // centre's wind, not the wind at zref.
+        const amrex::Real dz0 = geom_atm.CellSize(2);
+        if (dust_params.zref < 0.5 * dz0) {
+            amrex::Print() << "[DUST] WARNING: erf.dust.zref = " << dust_params.zref
+                           << " m is below the first cell centre (" << 0.5 * dz0
+                           << " m); the dust wind is the first cell's wind, not the wind at zref\n";
+        }
+    }
     if (dust_params.dust_debug) {
         amrex::Print() << "[DUST DEBUG] Prerequisite check 8 passed: "
                        << "Domain physical height=" << dz << " m > 0\n";
     }
 
     // Check 9: the dust wind-extraction height is the surface layer's reference
-    // height. The dust u* comes from a log law between z0_dust and erf.dust.zref
+    // height. The dust u* is the surface layer's (a log law between z0_dust and erf.dust.zref only with terrain_ustar = loglaw)
     // using the wind the surface layer sampled at erf.most.zref, so the two must
     // agree; with erf.most.zref unset the surface layer picks its own height
     // and the deck has to set erf.dust.zref to the same value.

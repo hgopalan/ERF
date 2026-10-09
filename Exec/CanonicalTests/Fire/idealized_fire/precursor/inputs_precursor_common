@@ -46,6 +46,7 @@ erf.abl_geo_wind = 64.71703 -17.34088 0.0
 
 # SOLVER, as the fire decks
 erf.anelastic = 1
+erf.anelastic_type = "MidPoint"   # RK2 (the default since erf-model/ERF#4021) switches the implicit vertical solve off, which the countergradient needs
 erf.vert_implicit = true
 erf.cfl = 0.5
 erf.use_fft = 1

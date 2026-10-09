@@ -65,15 +65,34 @@ struct Column {
     MultiFab S{ba, dm, NCOMP, 0};
     MultiFab src{ba, dm, NCOMP, 0};
     MultiFab z{ba, dm, 1, 1};
+    MultiFab detJ{ba, dm, 1, 1};
 
     explicit Column (int k_dust)
     {
         S.setVal(0.0);
         S.setVal(1.225, Rho_comp, 1);
         src.setVal(0.0);
+        detJ.setVal(1.0);
         init_column(S, z, k_dust);
     }
 };
+
+DustBinDiameters one_bin (Real d)
+{
+    DustBinDiameters b{};
+    for (int i = 0; i < DustSettlingConst::MAX_BINS; ++i) b[i] = 0.0;
+    b[0] = d;
+    return b;
+}
+
+/// Weights of a scalar that carries one bin.
+inline DustBinWeights one_weight ()
+{
+    DustBinWeights w{};
+    for (int i = 0; i < DustSettlingConst::MAX_BINS; ++i) w[i] = 0.0;
+    w[0] = 1.0;
+    return w;
+}
 
 Real value_at (const MultiFab& mf, int k, int comp)
 {
@@ -107,7 +126,7 @@ TEST(DustColumn, SettlingMovesDustDownFromTheState)
 {
     Column c(5);
     const Real d = 7.0e-6, rho_p = 2650.0;
-    apply_dust_settling_to_cc_source(c.src, c.S, c.z, c.geom, d, rho_p, DUST);
+    apply_dust_settling_to_cc_source(c.src, c.S, c.detJ, c.geom, one_bin(d), one_weight(), 1, rho_p, DUST);
     const Real vs = compute_stokes_settling(d, rho_p, Real(1.225), DustSettlingConst::MU_AIR_STD);
     ASSERT_GT(vs, Real(0.0));
     // the dusty cell loses v_s rho / dz, the cell BELOW gains it, nothing else moves
@@ -128,7 +147,7 @@ TEST(DustColumn, DepositionRemovesTheSurfaceDustAtTheDepositionVelocity)
     MultiFab ustar(ba2d, dm2d, 1, 0), dep(ba2d, dm2d, 1, 0);
     ustar.setVal(0.5);
     const Real d = 7.0e-6, rho_p = 2650.0, E0 = 3.0e-3;
-    apply_dust_deposition_bc(c.src, dep, c.S, ustar, c.z, c.geom, d, rho_p, E0, DUST, false);
+    apply_dust_deposition_bc(c.src, dep, c.S, ustar, c.detJ, c.geom, one_bin(d), one_weight(), 1, rho_p, E0, DUST, false);
     const Real vs = compute_stokes_settling(d, rho_p, Real(1.225), DustSettlingConst::MU_AIR_STD);
     const Real vd = compute_deposition_velocity(vs, Real(0.5), E0);
     ASSERT_GT(vd, vs);

@@ -58,7 +58,6 @@ erf.dust.grid_ratio = 1
 erf.dust.particle_density = 2650.0
 erf.dust.z0_dust = 0.01
 erf.dust.silt_fraction = 0.10
-erf.dust.threshold_A_coeff = 0.1
 erf.dust.crust_index = 0.0
 erf.dust.alpha_crust = 0.5
 erf.dust.alpha_efflor = 0.3
@@ -86,6 +85,7 @@ erf.dust.phreeqc_feedback_file = "dust_dep_feedback.dat"
 erf.dust.phreeqc_site_summary_file = "dust_dep_site_summary.csv"
 erf.dust.cm_budget_file = "dust_cm_budget.csv"
 # Phase 22: road schedule CSV.
+erf.dust.ustar_t_base = 2.0        # a prescribed threshold above any u* here (1.1 m/s): the road is the only source (until October 2026 the wind source was 2e4x the road)
 erf.dust.road_schedule_file = "road_schedule.csv"
 erf.dust.road_diag_file     = "dust_road_diag.csv"
 erf.dust.phreeqc_update_interval_s = 86400.0

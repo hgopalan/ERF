@@ -140,12 +140,15 @@ def plot_dust_diag(args):
 
     channels = [
         ("emission_total_kg_s",  "Emission total [kg/s]",    "#F44336"),
-        ("deposition_total_kg_m2", "Deposition total [kg/m\u00b2]", "#2196F3"),
+        ("deposition_total_kg", "Deposition total [kg]", "#2196F3"),
         ("ustar_max_m_s",        "Max u* [m/s]",             "#FF9800"),
         ("flux_max_kg_m2_s",     "Max emission flux [kg/m\u00b2/s]", "#9C27B0"),
         ("conc_sfc_max_kg_m3",   "Max sfc concentration [kg/m\u00b3]", "#4CAF50"),
     ]
     available = [(col, lbl, col_c) for col, lbl, col_c in channels if col in df.columns]
+    for col, _, _ in channels:
+        if col not in df.columns:
+            print(f"  plot_hazard_timeseries: column {col} missing from the file (have {list(df.columns)})")
 
     if not available:
         sys.exit(f"No recognised columns found. Columns in file: {list(df.columns)}")
@@ -181,6 +184,9 @@ def plot_smoke_diag(args):
         ("smoke_total_mass",    "Total smoke mass [kg]",         "#3F51B5"),
     ]
     available = [(col, lbl, col_c) for col, lbl, col_c in channels if col in df.columns]
+    for col, _, _ in channels:
+        if col not in df.columns:
+            print(f"  plot_hazard_timeseries: column {col} missing from the file (have {list(df.columns)})")
 
     if not available:
         # Fall back to whatever columns are present

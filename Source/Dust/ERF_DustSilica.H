@@ -3,8 +3,10 @@
  * @brief Respirable crystalline silica (RCS) concentration from PM10.
  *
  * RCS [mg/m³] = PM10 [µg/m³] * 1e-3 * silica_fraction
- * OSHA PEL (quartz): 0.05 mg/m³, 29 CFR 1910.1053.
- * NIOSH REL: 0.05 mg/m³ TWA.
+ * OSHA PEL (quartz): 0.05 mg/m³ as an 8-hour TWA of the respirable (PM4)
+ * fraction, 29 CFR 1910.1053; NIOSH REL: 0.05 mg/m³ TWA. What is compared
+ * here is an instantaneous value built on PM10, an upper bound on both counts;
+ * the MSHA dose and TWA carry the time average.
  *
  * References:
  *   29 CFR 1910.1053: https://www.osha.gov/silica-crystalline

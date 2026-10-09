@@ -19,7 +19,7 @@ inline amrex::Vector<std::string> dust_plotfile_var_names()
         "dust_ustar_t",        ///< Threshold friction velocity [m/s]. Shao & Lu (2000).
         "dust_deposition_rate",///< Accumulated dry deposition [kg/m^2]. Zhang et al. (2001).
         "dust_conc_sfc",       ///< Near-surface dust concentration [kg/m^3].
-        "dust_surf_moist",     ///< Surface latent flux Q1fx3 [kg/m^2/s]; zero without a moisture scheme.
+        "dust_surf_qflux_kg_m2_s", ///< Surface latent flux Q1fx3 [kg/m^2/s]; zero without a moisture scheme.
         "dust_suppression",    ///< Suppression agent coverage [0-1].
         "dust_retreat_flag",   ///< Re-treatment flag [0/1].
         // Phase 17: EPA NAAQS fields
@@ -39,10 +39,11 @@ inline amrex::Vector<std::string> dust_plotfile_var_names()
         // Phase 20: Multi-mine site index
         "dust_site_id",            ///< Mine site index [0=unassigned, 1..N].
         // Phase 23: DOE Critical Materials Assessment
-        "dust_cm_flux_kg_CM_m2_s"  ///< Critical material emission flux [kg_CM/m^2/s].
+        "dust_cm_flux_kg_CM_m2_s", ///< Critical material emission flux [kg_CM/m^2/s].
+        "dust_surf_moist"          ///< Moisture flag [0,1] the threshold's f_moist uses (the surface map's).
     };
 }
 
-inline int dust_plotfile_ncomp() { return 21; }
+inline int dust_plotfile_ncomp() { return 22; }
 #endif
 #endif // ERF_DUST_PLOTFILE_CATALOG_H

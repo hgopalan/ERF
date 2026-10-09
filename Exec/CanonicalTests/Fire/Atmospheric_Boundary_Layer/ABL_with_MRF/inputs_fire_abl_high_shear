@@ -36,7 +36,7 @@ erf.check_file      = chk_high_shear
 erf.check_int       = 100
 erf.data_log    = unstable_hist.dat unstable_profiles.dat
 erf.profile_int = 10
-erf.plot_file_1     = plt_unstable      # prefix of plotfile name
+erf.plot_file_1     = plt_high_shear      # prefix of plotfile name
 erf.plot_int_1      = 15                # number of timesteps between plotfiles
 erf.plot_vars_1     = density rhoadv_0 rhoadv_1 x_velocity y_velocity z_velocity pressure temp theta
 erf.use_gravity = true
@@ -92,7 +92,9 @@ erf.fire.fire_stats_csv_file = "fire_stats_abl_high_shear.csv"
 
 # Plot files
 erf.fire_plot_file = plt_fire_abl_high_shear_
-erf.fire_plot_int = 100
+erf.fire_plot_int = 20      # = max_step, so the checker sees the final state
 
-# Geostrophic wind (from sounding file)
+# Geostrophic wind: the Coriolis term is balanced by this large-scale forcing
+# (erf.abl_driver_type selects it; without it erf.abl_geo_wind is never read)
+erf.abl_driver_type = "GeostrophicWind"
 erf.abl_geo_wind = 35.0 0.0 0.0

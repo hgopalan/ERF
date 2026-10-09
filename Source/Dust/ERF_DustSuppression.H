@@ -22,9 +22,11 @@
  * k_T and k_wind are tunable coefficients. Warmer temperatures and higher
  * winds reduce the effective half-life (faster agent degradation).
  *
- * In Phase 8, T_surf and u_10m are read from DustParams as uniform
- * placeholders (test_surf_temp_K, test_wind_speed). Phase 9 will replace
- * these with MRF surface layer fields.
+ * T_surf is the domain maximum of the surface temperature (the surface
+ * layer's potential temperature converted with the surface Exner function;
+ * until October 2026 the potential temperature itself was used, a factor 2 on
+ * the decay rate at 850 hPa) and u_10m the domain maximum wind speed at zref;
+ * without a coupled atmosphere the test_* placeholders of DustParams.
  *
  * Structural reference: ERF_FireBreak.H in Source/Fire/ (local 2D property
  * modification on the fire grid — same pattern adapted for suppression).
@@ -147,6 +149,7 @@ amrex::Real advance_suppression_coverage(amrex::Real coverage_old,
  *
  * @param[in,out] dust_suppression    Suppression coverage [0,1].
  * @param[out]    dust_retreat_flag   Re-treatment flag [0=ok, 1=retreat needed].
+ * @param[in]     dust_treated_mask   1 where the cell was ever treated.
  * @param[in]     T_surf_K            Surface temperature [K] (uniform placeholder).
  * @param[in]     u_10m               10 m wind speed [m/s] (uniform placeholder).
  * @param[in]     dt_s                Timestep [s].
@@ -155,6 +158,7 @@ amrex::Real advance_suppression_coverage(amrex::Real coverage_old,
 inline void advance_dust_suppression(
     amrex::MultiFab& dust_suppression,
     amrex::MultiFab& dust_retreat_flag,
+    const amrex::MultiFab& dust_treated_mask,
     amrex::Real      T_surf_K,
     amrex::Real      u_10m,
     amrex::Real      dt_s,
@@ -168,6 +172,7 @@ inline void advance_dust_suppression(
         const amrex::Box& bx = mfi.tilebox();
         auto supp_arr   = dust_suppression.array(mfi);
         auto retreat_arr= dust_retreat_flag.array(mfi);
+        auto treated    = dust_treated_mask.const_array(mfi);
         const amrex::Real T   = T_surf_K;
         const amrex::Real u   = u_10m;
         const amrex::Real dt  = dt_s;
@@ -177,9 +182,11 @@ inline void advance_dust_suppression(
             amrex::Real c_new = advance_suppression_coverage(
                 supp_arr(i,j,k), T, u, dt, tau);
             supp_arr(i,j,k) = c_new;
-            // Set re-treatment flag when coverage falls below threshold.
-            retreat_arr(i,j,k) = (c_new > DustSuppressionConst::COVERAGE_FLOOR &&
-                       c_new < retreat_thresh) ? 1.0 : 0.0;
+            // Re-treatment flag: a treated cell whose coverage has worn below
+            // the threshold, including one worn to zero (a cell at zero used to
+            // lose the flag and could not be told from one never treated).
+            retreat_arr(i,j,k) = (treated(i,j,k) > amrex::Real(0.5) &&
+                                  c_new < retreat_thresh) ? amrex::Real(1.0) : amrex::Real(0.0);
         });
     }
 }

@@ -10,7 +10,7 @@ Fails (exit 1) when
   * a key the code reads is missing from the Inputs.rst tables,
   * a fire, dust or hazard deck sets a key the code does not read (ParmParse
     never warns, so such a key is a silent no-op),
-  * the fire master reference deck lacks a key the code reads, or
+  * the fire or dust master reference deck lacks a key the code reads, or
   * the dust inputs generator and the generated Inputs.rst table disagree with
     the dust parser.
 ParmParse reads are collected from the five files that parse these keys; add a
@@ -230,12 +230,21 @@ def main():
             if in_family(k) and k not in code:
                 problems.append(f"{show(path)} sets a key nothing reads: {k}")
 
-    # 4. the fire master reference lists every fire-side key (active or commented)
+    # 4. the master references list every key the code reads (active or commented):
+    #    the fire master every key that is not dust-side (including the core keys the
+    #    fire code reads, such as erf.buildings_file_name and erf.*mrf_fire_*), the
+    #    dust master every dust-side key.
+    is_dust = lambda k: k.startswith("erf.dust.") or k == "erf.dust_mrf_Sc_t"
     master = os.path.join(ROOT, "Exec/CanonicalTests/Fire/inputs_fire_master_reference")
     listed = deck_keys(master, commented=True)
     for k in sorted(code):
-        if (k.startswith("erf.fire.") or k.startswith("erf.fire_")) and k not in listed:
+        if not is_dust(k) and k not in listed:
             problems.append(f"fire master reference does not list: {k}")
+    dust_master = os.path.join(ROOT, "Exec/CanonicalTests/Dust/inputs_dust_master_reference")
+    listed = deck_keys(dust_master, commented=True)
+    for k in sorted(code):
+        if is_dust(k) and k not in listed:
+            problems.append(f"dust master reference does not list: {k}")
 
     # 5. dust generator vs parser vs generated table
     gen = generator_keys()

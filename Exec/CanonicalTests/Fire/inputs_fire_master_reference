@@ -402,6 +402,7 @@ erf.fire.hybrid.region = 0.0 0.0 0.0 0.0       # x_lo y_lo x_hi y_hi [m]; requir
 erf.fire.hybrid.blend_width = 0.0             # linear ramp width across the region or structure edge [m]; 0 = step
 # erf.fire.hybrid.secondary_fuel_codes = 3    # required for "fuel"
 # erf.fire.hybrid.structure_file = ""         # ERF terrain-format building heightmap; default erf.buildings_file_name
+# erf.buildings_file_name = ""                # the core key both hybrid.structure_file and structures.file fall back to
 erf.fire.hybrid.structure_min_height = 0.5    # sampled height [m] above which a cell is a structure
 erf.fire.hybrid.structure_distance = 10.0     # cells within this distance of a structure take the secondary [m]
 erf.fire.hybrid.wind_lo = 8.0                 # effective wind speed [m/s] where w reaches 0
@@ -1057,3 +1058,14 @@ erf.fire_dust_lofting_Q_ref = 500.0      # heat flux of unit lofting [W/m2]
 #   - Source/Fire/ERF_FireDiagnostics.H: diagnostic computations
 #   - Documentation: Docs/sphinx_doc/theory/Fire.rst and the pages it links
 # ============================================================================
+
+# ============================================================================
+# MRF PBL: FIRE HEAT FLUX IN THE THERMAL EXCESS (core keys, read by ERF_TurbStruct.H)
+# ============================================================================
+# With erf.pbl_type = "MRF" the fire's surface heat flux can boost the
+# convective velocity scale w* of the K profile (the PBL height itself is not
+# modified). Read only when the MRF scheme is selected; per level like the
+# other erf.pbl_* keys.
+# erf.pbl_mrf_fire_thermal_excess = false   # default false: fire flux left out of w*
+# erf.mrf_fire_q_threshold = 50.0           # fire heat flux [W/m2] below which no boost is applied
+# erf.mrf_fire_t_excess_cap = 50.0          # cap on the thermal excess [K] when the fire is active

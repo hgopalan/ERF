@@ -32,6 +32,10 @@
  *     https://doi.org/10.1029/2000JD900304
  */
 #ifdef ERF_USE_DUST
+// The deposition-grid writer below gathers the whole dust grid into a host
+// vector and all-reduces it (storage sized by the domain): acceptable at the
+// PHREEQC interval (hours to days), not per step. A rank-ordered write would
+// remove it; noted in the October 2026 validation, not changed.
 #ifndef ERF_DUST_PHREEQC_WRITER_H_
 #define ERF_DUST_PHREEQC_WRITER_H_
 

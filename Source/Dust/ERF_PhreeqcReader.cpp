@@ -82,7 +82,9 @@ bool read_phreeqc_csv(MultiFab& mf, const DustGrid& dg,
     if (ParallelDescriptor::IOProcessor()) {
         std::ifstream file(filename);
         if (!file.is_open()) {
-            amrex::Print() << "[DUST] WARNING: Could not open file: " << filename << "\n";
+            // abort, not warn: a run without the chemistry it was given is not
+            // the run that was asked for (the road loader already aborted)
+            amrex::Abort("[DUST] PHREEQC file cannot be opened: " + filename);
         } else {
             std::string line;
 
@@ -103,8 +105,8 @@ bool read_phreeqc_csv(MultiFab& mf, const DustGrid& dg,
                 }
 
                 if (col_idx < 0) {
-                    amrex::Print() << "[DUST] read_phreeqc_csv: column '" << col_name
-                                   << "' not found in " << filename << "\n";
+                    amrex::Abort("[DUST] read_phreeqc_csv: column '" + col_name
+                                 + "' not found in " + filename);
                 } else {
                     // Read all data rows into a flat vector
                     std::vector<Real> rows_flat;
@@ -123,8 +125,10 @@ bool read_phreeqc_csv(MultiFab& mf, const DustGrid& dg,
                                         val = nodata_fill;
                                     rows_flat.push_back(val);
                                 } catch (...) {
-                                    amrex::Print() << "[DUST] read_phreeqc_csv: parse error at row "
-                                                   << rows_flat.size() << "\n";
+                                    // a skipped cell shifted every later row by one cell
+                                    amrex::Abort("[DUST] read_phreeqc_csv: " + filename + " column '" + col_name
+                                                 + "': cannot parse '" + cell + "' at data row "
+                                                 + std::to_string(rows_flat.size()));
                                 }
                                 break;
                             }
@@ -174,10 +178,10 @@ bool read_phreeqc_csv(MultiFab& mf, const DustGrid& dg,
                                     << "); dust grid is " << nx_dst << "x" << ny_dst
                                     << ". Bilinear interpolation will be applied.\n";
                             } else {
-                                amrex::Print()
-                                    << "[DUST] read_phreeqc_csv: cannot determine CSV grid "
-                                    << "dimensions from " << n_rows << " rows for dust grid "
-                                    << nx_dst << "x" << ny_dst << ". Skipping field.\n";
+                                amrex::Abort("[DUST] read_phreeqc_csv: " + filename + " has "
+                                             + std::to_string(n_rows) + " rows, which is not the dust grid ("
+                                             + std::to_string(nx_dst) + "x" + std::to_string(ny_dst)
+                                             + "), a coarsening of it, or a square");
                             }
                         }
                     }
@@ -255,51 +259,35 @@ bool read_phreeqc_netcdf(MultiFab& mf, const DustGrid& dg,
 #endif
 }
 
-void update_ustar_t_from_chemistry(MultiFab& ustar_t, const MultiFab& ustar_base,
-                                   const MultiFab& crust, const MultiFab& efflor)
+namespace {
+/// Copy src into dst where site_id == site (1-based), valid cells only.
+void copy_where_site(MultiFab& dst, const MultiFab& src, const MultiFab& site_id, int site)
 {
-    // u*_t modulation from mineral crust and salt efflorescence.
-    // Higher crust_index (fully crusted, protected soil) increases u*_t (harder to emit).
-    // Lower crust_index (bare, uncrusted soil) decreases u*_t (easier to emit).
-    // This makes burned areas with reduced crust emit more dust, as expected.
-    // Reference: Marticorena & Bergametti (1995), https://doi.org/10.1029/95JD00690
-    const Real alpha_c    = PhreeqcDustConst::ALPHA_CRUST;
-    const Real alpha_e    = PhreeqcDustConst::ALPHA_EFFLOR;
-    const Real ustar_tmin = PhreeqcDustConst::USTAR_T_MIN;
-
-    for (MFIter mfi(ustar_t, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-        const Box& bx    = mfi.tilebox();
-        auto ut_arr      = ustar_t.array(mfi);
-        auto ut_base_arr = ustar_base.const_array(mfi);
-        auto crust_arr   = crust.const_array(mfi);
-        auto efflor_arr  = efflor.const_array(mfi);
-
+    for (MFIter mfi(dst, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.tilebox();
+        auto d = dst.array(mfi);
+        auto s = src.const_array(mfi);
+        auto id = site_id.const_array(mfi);
+        const Real sid = Real(site);
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            // Higher crust and efflorescence both INCREASE u*_t (harder to emit).
-            // This matches the threshold computation: f_chem = (1 + alpha_c * crust) * (1 + alpha_e * efflor)
-            Real f_chem = (Real(1.0) + alpha_c * amrex::min(static_cast<amrex::Real>(amrex::max(static_cast<amrex::Real>(crust_arr(i,j,k)), static_cast<amrex::Real>(0.0))), static_cast<amrex::Real>(1.0)))
-                        * (Real(1.0) + alpha_e * amrex::min(static_cast<amrex::Real>(amrex::max(static_cast<amrex::Real>(efflor_arr(i,j,k)), static_cast<amrex::Real>(0.0))), static_cast<amrex::Real>(1.0)));
-            Real ut = ut_base_arr(i,j,k) * f_chem;
-            ut_arr(i,j,k) = amrex::max(ut, ustar_tmin);
+            if (std::abs(id(i,j,k) - sid) < Real(0.5)) d(i,j,k) = s(i,j,k);
         });
     }
 }
+} // namespace
 
-void update_dust_from_phreeqc(MultiFab&       dust_ustar_t,
-                              const MultiFab& dust_ustar_base,
-                              MultiFab&       dust_crust_index,
+void update_dust_from_phreeqc(MultiFab&       dust_crust_index,
                               MultiFab&       dust_silt_frac,
                               MultiFab&       dust_efflor,
                               MultiFab&       dust_suppression,
-                              MultiFab&       dust_emission,
+                              const MultiFab* dust_site_id,
                               const DustGrid& dg,
                               const DustParams& params)
 {
     if (params.phreeqc_output_file.empty()) return;
 
     // Select reader by file extension
-    auto read_field = [&](MultiFab& mf, const std::string& varname) -> bool {
-        const std::string& filename = params.phreeqc_output_file;
+    auto read_field = [&](MultiFab& mf, const std::string& filename, const std::string& varname) -> bool {
         if (filename.size() > 3) {
             std::string ext = filename.substr(filename.size() - 3);
             if (ext == ".nc")
@@ -307,27 +295,45 @@ void update_dust_from_phreeqc(MultiFab&       dust_ustar_t,
         }
         return read_phreeqc_csv(mf, dg, filename, varname, 0.0);
     };
+    auto read_all = [&](const std::string& filename, MultiFab& crust, MultiFab& silt,
+                        MultiFab& efflor, MultiFab& supp) {
+        if (!params.phreeqc_crust_var.empty())  read_field(crust,  filename, params.phreeqc_crust_var);
+        if (!params.phreeqc_efflor_var.empty()) read_field(efflor, filename, params.phreeqc_efflor_var);
+        if (!params.phreeqc_silt_var.empty())   read_field(silt,   filename, params.phreeqc_silt_var);
+        if (!params.phreeqc_supp_var.empty())   read_field(supp,   filename, params.phreeqc_supp_var);
+    };
 
-    if (!params.phreeqc_crust_var.empty())
-        read_field(dust_crust_index, params.phreeqc_crust_var);
+    // the global table everywhere
+    read_all(params.phreeqc_output_file, dust_crust_index, dust_silt_frac, dust_efflor, dust_suppression);
 
-    if (!params.phreeqc_efflor_var.empty())
-        read_field(dust_efflor, params.phreeqc_efflor_var);
-
-    update_ustar_t_from_chemistry(dust_ustar_t, dust_ustar_base,
-                                  dust_crust_index, dust_efflor);
-
-    if (!params.phreeqc_silt_var.empty())
-        read_field(dust_silt_frac, params.phreeqc_silt_var);
-
-    if (!params.phreeqc_supp_var.empty())
-        read_field(dust_suppression, params.phreeqc_supp_var);
-
-    if (!params.phreeqc_metal_var.empty()) {
-        MultiFab temp_mf(dg.ba, dg.dm, 1, IntVect(1,1,0));
-        if (read_field(temp_mf, params.phreeqc_metal_var))
-            MultiFab::Copy(dust_emission, temp_mf, 0, 0, 1, IntVect(0));
+    // then each site's own table over its cells (documented since the site
+    // registry was added, but no table other than the global one was ever read)
+    const int n_files = (int)params.site_phreeqc_files.size();
+    if (n_files > 0 && dust_site_id) {
+        MultiFab crust_s(dg.ba, dg.dm, 1, IntVect(1,1,0)), silt_s(dg.ba, dg.dm, 1, IntVect(1,1,0)),
+                 efflor_s(dg.ba, dg.dm, 1, IntVect(1,1,0)), supp_s(dg.ba, dg.dm, 1, IntVect(1,1,0));
+        for (int s = 0; s < n_files; ++s) {
+            const std::string& f = params.site_phreeqc_files[s];
+            if (f.empty()) continue;
+            MultiFab::Copy(crust_s,  dust_crust_index, 0, 0, 1, IntVect(0));
+            MultiFab::Copy(silt_s,   dust_silt_frac,   0, 0, 1, IntVect(0));
+            MultiFab::Copy(efflor_s, dust_efflor,      0, 0, 1, IntVect(0));
+            MultiFab::Copy(supp_s,   dust_suppression, 0, 0, 1, IntVect(0));
+            read_all(f, crust_s, silt_s, efflor_s, supp_s);
+            copy_where_site(dust_crust_index, crust_s,  *dust_site_id, s + 1);
+            copy_where_site(dust_silt_frac,   silt_s,   *dust_site_id, s + 1);
+            copy_where_site(dust_efflor,      efflor_s, *dust_site_id, s + 1);
+            copy_where_site(dust_suppression, supp_s,   *dust_site_id, s + 1);
+            amrex::Print() << "[DUST] PHREEQC site " << (s + 1) << " ("
+                           << (s < (int)params.site_names.size() ? params.site_names[s] : std::string("?"))
+                           << ") updated from " << f << "\n";
+        }
     }
+    // (the threshold is recomputed by DustLayer::advance from the new crust and
+    // efflorescence with erf.dust.alpha_crust/alpha_efflor; the reader's own
+    // update with hard-coded 0.5/0.3 and a 0.05 m/s floor, overwritten on the
+    // same step, is gone, as is the metal-fraction column copied into the
+    // emission flux and overwritten before it was read)
 
     amrex::Print() << "[DUST] PHREEQC update from file: "
                    << params.phreeqc_output_file << "\n";

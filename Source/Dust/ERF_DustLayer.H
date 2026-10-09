@@ -131,7 +131,9 @@ public:
                  const amrex::MultiFab* zvel_mf = nullptr,
                  const amrex::MultiFab* z_phys_cc_mf = nullptr,
                  const amrex::Geometry* geom_atm = nullptr,
-                 int                    nz = 0);
+                 int                    nz = 0,
+                 const amrex::MultiFab* cons_mf = nullptr);   ///< the conserved state at the end of the step: the surface
+                                                               ///< Exner function converts the surface layer's theta_s to T_s
 
     // Const accessors for plotfile and diagnostic output
     const amrex::MultiFab* get_ustar_t()         const { return dust_ustar_t.get(); }
@@ -204,6 +206,23 @@ public:
 #endif
 
     /**
+     * @brief Hand advance() the fire heat flux on the dust grid for the
+     *        convective lofting of this step. The multiply happens inside
+     *        advance(), right after the blast and road additions and BEFORE the
+     *        critical-material budget, the particle release and the diagnostics,
+     *        so every consumer of the emission flux sees the lofted value (it
+     *        was applied after advance() returned, so the budget and the
+     *        particles booked a third of what the atmosphere received in burning
+     *        cells). The pointer is dropped after use; set it every step.
+     */
+    void set_fire_lofting(const amrex::MultiFab* heat_on_dust_grid,
+                          amrex::Real k_loft, amrex::Real Q_threshold, amrex::Real Q_ref)
+    {
+        m_loft_heat = heat_on_dust_grid;
+        m_loft_k = k_loft; m_loft_Q_threshold = Q_threshold; m_loft_Q_ref = Q_ref;
+    }
+
+    /**
      * @brief Get the dust scalar component index.
      * @return Component index in cc_source for dust mass density.
      */
@@ -227,6 +246,24 @@ public:
 
     /// Restore those counters; step and time fall back to the atmosphere's when
     /// the file is absent. Blast events dated before the restart are marked fired.
+    /// A fresh start (no restart) removes the dust CSV outputs a previous run
+    /// left in the directory: every writer appends (a restart continues the
+    /// earlier leg), so stale rows from another run or binary accumulated
+    /// ahead of the new ones until October 2026.
+    void remove_outputs_for_fresh_start () const;
+    /// On a restart, drop the CSV rows written after the restart step (a
+    /// restart from any checkpoint but the last duplicated the rows between
+    /// the checkpoint and the stop until October 2026). Files whose rows are
+    /// not keyed by the step (the shift summary) are left as they are.
+    void trim_outputs_after_restart (int step) const;
+    /// (Re)write the dust_diag.dat header (a no-op on a non-empty file).
+    void write_diag_header () const { write_dust_stats_header(m_params.dust_diag_file); }
+
+    /// Abort when the checkpoint's n_size_bins, grid_ratio or averaging differ
+    /// from the deck's: called before the fields are read, since VisMF::Read
+    /// would die on the mismatched layout first with no mention of dust.
+    void check_checkpoint_layout (const std::string& restart_chkfile) const;
+
     void read_checkpoint_state (const std::string& restart_chkfile,
                                 int step, amrex::Real time);
 
@@ -247,7 +284,7 @@ public:
      * @param[in]     geom_atm     Atmospheric geometry at level 0.
      */
     void apply_to_cc_source(amrex::MultiFab&       cc_source,
-                            const amrex::MultiFab& z_phys_cc,
+                            const amrex::MultiFab& detJ_cc,
                             const amrex::Geometry& geom_atm);
 
     /**
@@ -260,13 +297,15 @@ public:
      *
      * @param[in,out] cc_source   Cell-centred source MultiFab.
      * @param[in]     S_old       Conserved state at time n.
-     * @param[in]     z_phys_cc   Cell-centre terrain height [m].
+     * @param[in]     detJ_cc     Cell volume factor (the cell thickness is detJ dz).
      * @param[in]     geom_atm    Atmospheric geometry.
+     * @param[in]     dt          The step's slow dt [s], for the explicit-settling stability check.
      */
     void apply_settling_to_cc_source(amrex::MultiFab&       cc_source,
                                       const amrex::MultiFab& S_old,
-                                      const amrex::MultiFab& z_phys_cc,
-                                      const amrex::Geometry& geom_atm);
+                                      const amrex::MultiFab& detJ_cc,
+                                      const amrex::Geometry& geom_atm,
+                                      amrex::Real            dt);
 
     /**
      * @brief Apply dry deposition BC at k=klo and accumulate deposited mass.
@@ -283,9 +322,26 @@ public:
      */
     void apply_deposition_bc(amrex::MultiFab&       cc_source,
                              const amrex::MultiFab& S_old,
-                             const amrex::MultiFab& z_phys_cc,
+                             const amrex::MultiFab& detJ_cc,
                              const amrex::Geometry& geom_atm,
                              amrex::Real            dt);
+
+    /// Diameters of the bins the transported scalar b carries, their number,
+    /// and their shares of the mass emitted so far (equal until anything is emitted).
+    DustBinDiameters scalar_bin_diameters (int b, int& nb, DustBinWeights& w) const;
+
+    /// The bins' shares of the mass emitted so far (sum 1; equal before any emission).
+    std::vector<amrex::Real> emitted_shares () const;
+
+    /// Coarsen the emission flux and the friction velocity to the atmosphere
+    /// columns (dust_flux_atm, ustar_atm): once per step at the end of advance(),
+    /// and after a checkpoint read, so the first restarted dycore injects and
+    /// deposits with the restored fields (a restart used to inject nothing).
+    void coarsen_to_atm_columns ();
+
+    /// Abort when the explicit settling of the coarsest bin is unstable at
+    /// this step's dt on the thinnest first cell (v_s dt / h_0 > 1).
+    void check_settling_stability (amrex::Real dt) const;
 
     /**
      * @brief Extract return fields from the 3D solver to the 2D dust grid.
@@ -418,7 +474,9 @@ private:
     std::unique_ptr<amrex::MultiFab>      dust_crust_baseline; ///< Crust index before the burned-area reduction (inputs, rasters, PHREEQC).
     std::unique_ptr<amrex::MultiFab>      dep_flux_step;      ///< Sum over bins of the last stage's deposition flux on the atm slab.
     std::unique_ptr<amrex::MultiFab>      dust_ustar_in;
+    std::unique_ptr<amrex::MultiFab>      ustar_atm;          ///< u* coarsened to the atmosphere columns once per step (the deposition kernel reads it)
     std::unique_ptr<amrex::MultiFab>      dust_retreat_flag;
+    std::unique_ptr<amrex::MultiFab>      dust_treated_mask;  ///< 1 where the suppression coverage was ever > 0 (the re-treatment flag needs it)
     std::unique_ptr<amrex::MultiFab>      dust_slopes;     ///< Static terrain slopes on dust grid.
     std::unique_ptr<amrex::MultiFab>      dust_curvature;  ///< Static terrain curvature on dust grid.
 
@@ -445,6 +503,9 @@ private:
     std::unique_ptr<amrex::MultiFab>      dust_pm10_24h;   ///< 24-hour running average PM10.
     std::unique_ptr<amrex::MultiFab>      dust_pm25_exceed; ///< Exceedance flag PM2.5.
     std::unique_ptr<amrex::MultiFab>      dust_pm10_exceed; ///< Exceedance flag PM10.
+    DustWindowMean                        m_pm25_window;    ///< 24 hourly means behind dust_pm25_24h (averaging = window)
+    DustWindowMean                        m_pm10_window;
+    DustWindowMean                        m_stel_window;    ///< 15 one-minute means behind m_stel_avg
 
     // Phase 18: MSHA worker exposure MultiFabs on dust grid.
     std::unique_ptr<amrex::MultiFab>      dust_msha_dose;       ///< Cumulative dose [mg/m³/h].
@@ -452,16 +513,15 @@ private:
     std::unique_ptr<amrex::MultiFab>      dust_msha_exceed;     ///< PEL exceedance [0/1].
     std::unique_ptr<amrex::MultiFab>      dust_msha_shift_twa;  ///< TWA at last shift end [mg/m³].
 
+    amrex::Geometry                       m_geom_atm;        ///< Level-0 atmosphere geometry (from initialize): the coarsening and the particles
 #if defined(ERF_USE_PARTICLES)
      // Phase 19: Lagrangian super-particles for source-receptor attribution
      std::unique_ptr<class ERFDustPC>      m_dust_pc;         ///< Particle container
      std::unique_ptr<amrex::MultiFab>     dust_source_map;   ///< Cumulative source deposition [kg/m^2]
-     amrex::Geometry                       m_geom_atm;        ///< Atmospheric geometry (stored for particle use)
 #endif
 
     // Phase 20: multi-mine site assignment
     std::unique_ptr<amrex::MultiFab>      dust_site_id;      ///< Per-cell site index [0=unassigned, 1..N].
-    amrex::Vector<amrex::Real>            m_site_ustar_t_factors; ///< Per-site u*_t reduction factors
 
     // Phase 23: DOE Critical Materials Assessment
     std::unique_ptr<amrex::MultiFab>      dust_cm_flux;      ///< Critical material flux [kg_CM/m^2/s].
@@ -481,6 +541,12 @@ private:
     const FireDustCoupling* m_fire_dust_coupling = nullptr;
 #endif
 
+    const amrex::MultiFab*                m_loft_heat = nullptr;   ///< Fire heat flux on the dust grid for this step's lofting (set_fire_lofting).
+    amrex::Real                           m_loft_k = 0.0, m_loft_Q_threshold = 0.0, m_loft_Q_ref = 0.0;
+
+    amrex::Real                           m_h0_min = -1.0;      ///< thinnest first cell [m], from the first settling call
+    amrex::Vector<amrex::Real>            m_emitted_per_bin;    ///< mass emitted so far per bin [kg] (checkpointed): the shares of the lumped scalar
+    amrex::MultiFab                       m_dust_bin_tmp;       ///< scratch for the per-step coarsening (defined once)
     int                                   m_step = 0;
     amrex::Real                           m_time = 0.0;
     int                                   m_last_dust_plot_step = -1;
@@ -489,6 +555,8 @@ private:
     int                                   m_last_phreeqc_write_step = -1;      ///< Step of last PHREEQC feedback write.
     amrex::Real                           m_last_phreeqc_update = -1.0e30;
     int                                   m_msha_shift_count = 0; ///< Phase 18: shift counter for MSHA.
+    void write_window_state (std::ostream& f, const char* name, const DustWindowMean& w) const;
+    void read_window_state (const std::string& key, std::istream& f, DustWindowMean& w);
 #ifdef ERF_USE_DUST
     BlastSchedule                         m_blast_schedule;
     bool                                  m_has_blast_schedule = false;
