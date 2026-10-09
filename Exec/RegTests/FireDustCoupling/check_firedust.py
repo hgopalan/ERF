@@ -33,7 +33,7 @@ import erf_plotfile  # noqa: E402
 ALPHA_CRUST = 0.5
 CRUST_INDEX = 1.0
 REDUCTION = 0.8
-KAPPA, Z0, ZREF = 0.4, 3.0, 6.1
+KAPPA, Z0, ZREF = 0.4, 0.1, 6.1
 # deposition_total [kg/m2] at step 40 with the committed deck. Re-measured
 # 2026-10-06 after the deposition kernel read the dust density of the state
 # instead of the source tendency, the settling moved dust down instead of up,

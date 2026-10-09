@@ -173,6 +173,12 @@ struct DustParams {
                                                    ///<   coarse bin (50 um).
                                                    ///<   Reference: Seinfeld & Pandis (2006), Ch. 9.
 
+    std::string lumped_settling = "mean";       ///< Settling and deposition velocity of the single
+                                                 ///<   transported scalar: "mean" (default) averages the Stokes
+                                                 ///<   velocities of the bins (they share the flux equally);
+                                                 ///<   "bin0" (the form until 2026-10) uses bin 0 alone, which
+                                                 ///<   settled the 50 um third at the 7 um velocity.
+
     // Phase 12: Dry deposition parameters
     amrex::Real deposition_E0 = 3.0e-3; ///< Surface collection efficiency [-].
                                         ///<   Zhang et al. (2001):
@@ -324,6 +330,7 @@ struct DustParams {
         pp.query("transport_bins_separately", transport_bins_separately);
         pp.query("atm_feedback", atm_feedback);
         pp.query("deposition_E0", deposition_E0);
+        pp.query("lumped_settling", lumped_settling);
         pp.query("loading_feedback_coeff", loading_feedback_coeff);
         pp.query("dust_plot_int",    dust_plot_int);
         pp.query("dust_plot_prefix", dust_plot_prefix);
@@ -400,6 +407,10 @@ struct DustParams {
             if (!(v >= 0.0 && v <= 1.0)) fail(std::string("erf.dust.") + key + " must be in [0,1], got " + std::to_string(v));
         };
         if (n_size_bins < 1) fail("erf.dust.n_size_bins must be >= 1, got " + std::to_string(n_size_bins));
+        if (n_size_bins > 8) fail("erf.dust.n_size_bins must be <= 8 (the settling kernels carry the bins by value), got "
+                                  + std::to_string(n_size_bins));
+        if (lumped_settling != "mean" && lumped_settling != "bin0")
+            fail("erf.dust.lumped_settling must be mean or bin0, got " + lumped_settling);
         if (grid_ratio < 1)  fail("erf.dust.grid_ratio must be >= 1, got " + std::to_string(grid_ratio));
         if (bin_diameters.empty()) fail("erf.dust.bin_diameters must list at least one diameter [m]");
         for (auto d : bin_diameters) positive("bin_diameters", d);

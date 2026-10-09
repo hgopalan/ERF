@@ -133,7 +133,12 @@ within ``radius`` of (``cx``, ``cy``) receives, in every bin,
 
 with :math:`m` the mass per unit area, :math:`r_b` =
 :cpp:`erf.dust.blast_reactivity` and :math:`N_\mathrm{bins}` =
-:cpp:`erf.dust.n_size_bins`, clamped to :math:`10^{-2}` kg/m²/s per bin. The
+:cpp:`erf.dust.n_size_bins`, so that the sum over the bins of the flux times
+the step is the event's mass (a per-bin cap of :math:`10^{-2}` kg/m²/s
+applied until October 2026 dropped 85 % of a 0.05 kg/m² charge at
+:math:`\Delta t` = 0.5 s and made the delivered mass depend on the step).
+The flux of step :math:`n` is injected in step :math:`n+1`, so under an
+adaptive step the delivered mass is :math:`m r_b \Delta t_{n+1}/\Delta t_n`. The
 mineral type (0 quartz tailings, 1 lithium brine, 2 rare-earth tailings,
 3 copper tailings) is carried for diagnostics. Rank 0 reads the file and
 broadcasts it.
@@ -145,7 +150,7 @@ Haul roads
 
 .. code-block:: text
 
-   road_name  x_lo_m  y_lo_m  x_hi_m  y_hi_m  road_width_m  vehicle_weight_t  silt_pct  vmt_per_h  start_s  end_s
+   road_name  x_lo_m  y_lo_m  x_hi_m  y_hi_m  road_width_m  vehicle_weight_t  silt_pct  vkt_per_h  start_s  end_s
 
 A road is active from ``start_s`` to ``end_s`` (``-1`` means for the whole
 run); overlapping entries for one road give shift patterns. The emission
@@ -159,17 +164,24 @@ were 163x low),
    \quad [\mathrm{g/VKT}]
 
 with :math:`s` the silt content in percent and :math:`W` the vehicle mass in
-tons, spread over the road as
+tonnes (AP-42's :math:`W` is in US short tons, a 4 % difference in the
+weight factor). The column ``vkt_per_h`` is vehicle *kilometres* per hour,
+the unit of :math:`E`. The mass rate :math:`M = 10^{-3} E\, \mathrm{VKT}/3600`
+[kg/s] is spread over the :math:`n` dust cells whose centre lies in the
+bounding box, counted once at start-up,
 
 .. math::
 
-   F_\mathrm{road} = \frac{10^{-3}\, E\, \mathrm{VMT}}{W_\mathrm{road}\, L_\mathrm{road}\, 3600}
-   \quad [\mathrm{kg/m^2/s}]
+   F_\mathrm{road} = \frac{M}{n\, A_\mathrm{cell}} \quad [\mathrm{kg/m^2/s}]
 
-where :math:`L_\mathrm{road}` is the longer side of the bounding box. The flux
-is added to bin 0 of every cell in the box and clamped to :math:`10^{-3}`
-kg/m²/s; each active road appends a row to :cpp:`erf.dust.road_diag_file`.
-Wind, blast and road fluxes add in the same emission field.
+so the emitted mass is the AP-42 rate whatever cells the box covers; a box
+that contains no cell centre aborts at start-up. (Until October 2026 the flux
+per unit road area, :math:`M/(W_\mathrm{road} L_\mathrm{road})`, was stamped on
+every covered cell, 37.5x the AP-42 mass for a 20 m road on 375 m cells.)
+The flux is added to bin 0 of the covered cells; each active road appends a
+row with its mass rate, per-cell flux and cell count to
+:cpp:`erf.dust.road_diag_file`. Wind, blast and road fluxes add in the same
+emission field.
 
 Suppression agents
 ------------------

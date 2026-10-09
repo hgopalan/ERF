@@ -13,8 +13,12 @@
 #     fill that used to overwrite it;
 #   * the deposition accumulator grows once per step (it used to add every RK
 #     stage, 1.83 dt per step); the reference value is in the check script.
-# fire_dust_wind_z0 = 3 m (a test value, not a roughness) makes the fire log-law
-# u* exceed the surface-layer u* so the second check has a signal.
+# The fire wind handed to the dust is the wind at erf.fire.wind_ref_ht
+# (fire_wind_ref); with erf.fire_dust_wind_z0 = erf.most.z0 its log-law u*
+# matches the surface layer's away from the fire and exceeds it where the fire
+# accelerates the near-surface flow. (Until October 2026 the WAF-reduced
+# midflame wind was handed over and the deck used z0 = 3 m, "a test value, not
+# a roughness", to lift it above the surface layer's u*.)
 
 geometry.prob_lo = 0.0 0.0 0.0
 geometry.prob_hi = 2000.0 2000.0 600.0
@@ -95,6 +99,6 @@ erf.dust.dust_diag_file = "dust_diag.dat"
 erf.fire_dust_coupling = true
 erf.fire_dust_crust_reduction = 0.8
 erf.fire_dust_wind_to_dust = true
-erf.fire_dust_wind_z0 = 3.0    # test value: puts the fire log-law u* above the surface-layer u*
+erf.fire_dust_wind_z0 = 0.1    # = erf.most.z0: the fire wind at wind_ref_ht on the same log law as the surface layer
 erf.fire_dust_wind_zref = 6.1
 erf.fire_dust_lofting_enabled = true

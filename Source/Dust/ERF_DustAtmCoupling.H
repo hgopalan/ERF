@@ -13,9 +13,10 @@
  * dycore advection in subsequent steps.
  *
  * Injection formula at k=0:
- *   d(RhoDust)/dt = F_dust / dz_k0
- * where F_dust [kg/m^2/s] is the coarsened total emission flux and
- * dz_k0 [m] is the depth of the first atmospheric cell.
+ *   d(RhoDust)/dt = F_dust / h_0,   h_0 = detJ(klo) dz
+ * where F_dust [kg/m^2/s] is the coarsened total emission flux and h_0 [m]
+ * the thickness of the first atmospheric cell (the centre-to-centre spacing
+ * above it was used until October 2026, 9 % off at a 1.1 stretching ratio).
  *
  * One-step explicit lag: flux from time n is injected at step n+1,
  * before advance_dycore(). Consistent with ERF_FireAtmCoupling.H.
@@ -66,7 +67,7 @@ inline void coarsen_dust_flux_to_atm(
 void apply_dust_tendency_to_cc_source(
     amrex::MultiFab&       cc_source,
     const amrex::MultiFab& Q_dust_atm,    // coarsened emission flux [kg/m^2/s]
-    const amrex::MultiFab& z_phys_cc,     // cell-centre terrain height [m]
+    const amrex::MultiFab& detJ,          // cell volume factor (1 on a flat grid)
     const amrex::Geometry& geom_atm,
     int                    dust_scalar_comp, // scalar component index in cc_source
     amrex::Real            feedback,         // [0,1]; 0 = off, 1 = full coupling

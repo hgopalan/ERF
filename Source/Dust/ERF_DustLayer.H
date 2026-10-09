@@ -264,7 +264,7 @@ public:
      * @param[in]     geom_atm     Atmospheric geometry at level 0.
      */
     void apply_to_cc_source(amrex::MultiFab&       cc_source,
-                            const amrex::MultiFab& z_phys_cc,
+                            const amrex::MultiFab& detJ_cc,
                             const amrex::Geometry& geom_atm);
 
     /**
@@ -277,13 +277,15 @@ public:
      *
      * @param[in,out] cc_source   Cell-centred source MultiFab.
      * @param[in]     S_old       Conserved state at time n.
-     * @param[in]     z_phys_cc   Cell-centre terrain height [m].
+     * @param[in]     detJ_cc     Cell volume factor (the cell thickness is detJ dz).
      * @param[in]     geom_atm    Atmospheric geometry.
+     * @param[in]     dt          The step's slow dt [s], for the explicit-settling stability check.
      */
     void apply_settling_to_cc_source(amrex::MultiFab&       cc_source,
                                       const amrex::MultiFab& S_old,
-                                      const amrex::MultiFab& z_phys_cc,
-                                      const amrex::Geometry& geom_atm);
+                                      const amrex::MultiFab& detJ_cc,
+                                      const amrex::Geometry& geom_atm,
+                                      amrex::Real            dt);
 
     /**
      * @brief Apply dry deposition BC at k=klo and accumulate deposited mass.
@@ -300,9 +302,12 @@ public:
      */
     void apply_deposition_bc(amrex::MultiFab&       cc_source,
                              const amrex::MultiFab& S_old,
-                             const amrex::MultiFab& z_phys_cc,
+                             const amrex::MultiFab& detJ_cc,
                              const amrex::Geometry& geom_atm,
                              amrex::Real            dt);
+
+    /// Diameters of the bins the transported scalar b carries, and their number.
+    DustBinDiameters scalar_bin_diameters (int b, int& nb) const;
 
     /**
      * @brief Extract return fields from the 3D solver to the 2D dust grid.
@@ -478,7 +483,6 @@ private:
 
     // Phase 20: multi-mine site assignment
     std::unique_ptr<amrex::MultiFab>      dust_site_id;      ///< Per-cell site index [0=unassigned, 1..N].
-    amrex::Vector<amrex::Real>            m_site_ustar_t_factors; ///< Per-site u*_t reduction factors
 
     // Phase 23: DOE Critical Materials Assessment
     std::unique_ptr<amrex::MultiFab>      dust_cm_flux;      ///< Critical material flux [kg_CM/m^2/s].
@@ -501,6 +505,7 @@ private:
     const amrex::MultiFab*                m_loft_heat = nullptr;   ///< Fire heat flux on the dust grid for this step's lofting (set_fire_lofting).
     amrex::Real                           m_loft_k = 0.0, m_loft_Q_threshold = 0.0, m_loft_Q_ref = 0.0;
 
+    bool                                  m_settling_cfl_checked = false; ///< the explicit settling stability check ran once
     int                                   m_step = 0;
     amrex::Real                           m_time = 0.0;
     int                                   m_last_dust_plot_step = -1;

@@ -61,9 +61,12 @@ atmosphere grid, and added to the slow right-hand side of the lowest cell as
 .. math::
 
    \left.\frac{\partial \rho_\mathrm{dust}}{\partial t}\right|_{k=0}
-     = f_\mathrm{atm}\, \frac{F_\mathrm{dust}}{\Delta z_0}
+     = f_\mathrm{atm}\, \frac{F_\mathrm{dust}}{h_0}, \qquad h_0 = J_0\, \Delta z
 
-with :math:`f_\mathrm{atm}` = :cpp:`erf.dust.atm_feedback`; setting it to 0
+with :math:`h_0` the thickness of the lowest cell (:math:`J` the cell volume
+factor, 1 on a flat grid; the centre-to-centre spacing above the cell was
+used until October 2026, which lost 5 % of the flux at a 1.1 stretching
+ratio) and :math:`f_\mathrm{atm}` = :cpp:`erf.dust.atm_feedback`; setting it to 0
 keeps the surface diagnostics running without changing the atmosphere. The
 flux computed in step :math:`n` is injected in step :math:`n+1`, the same
 lag as the fire coupling. The scalar starts at zero even when the sounding
@@ -84,13 +87,19 @@ air density, and :math:`d` from :cpp:`erf.dust.bin_diameters` (metres; the
 one entry per bin), capped at 1 m/s. The tendency is the
 first-order upwind divergence of the downward flux :math:`v_s \rho_\mathrm{dust}`
 through the cell faces, with :math:`\rho_\mathrm{dust}` the dust density of the
-state: cell :math:`k` gains :math:`v_s \rho_\mathrm{dust}(k+1)/\Delta z` from above
-and loses :math:`v_s \rho_\mathrm{dust}(k)/\Delta z` to the cell below; the loss
-through the bottom face of the first cell is the dry deposition below. With a
-single transported scalar the diameter of bin 0 is used. (Before October 2026
-the kernel multiplied :math:`v_s` into the tendency instead of the density and
-took the neighbour from below, so the dust did not settle; the deposition
-flux had the same error.)
+state: cell :math:`k` gains :math:`v_s \rho_\mathrm{dust}(k+1)/h_k` from above
+and loses :math:`v_s \rho_\mathrm{dust}(k)/h_k` to the cell below, with
+:math:`h_k = J_k \Delta z` the cell thickness; the loss through the bottom face
+of the first cell is the dry deposition below. With the bins transported as
+one scalar the settling velocity is the mean of the bins' velocities, since
+they share the emitted flux equally (:cpp:`erf.dust.lumped_settling = mean`;
+``bin0`` is the form until October 2026, which settled the 50 µm third of the
+default bins at the 7 µm velocity, a residence of 5850 s in a 23 m cell
+instead of 117 s). A start-up check aborts when the explicit settling would be
+unstable, :math:`\max v_s\, \Delta t / h_0 > 1`. (Before October 2026 the kernel
+multiplied :math:`v_s` into the tendency instead of the density and took the
+neighbour from below, so the dust did not settle; the deposition flux had the
+same error.)
 
 Dry deposition
 --------------
@@ -103,7 +112,11 @@ settling with the aerodynamic and surface resistances,
    v_d = v_s + \frac{1}{r_a + r_s + r_a r_s v_s}, \qquad
    r_a = \frac{1}{\kappa\, u_*}, \qquad r_s = \frac{1}{E_0\, u_*}
 
-with :math:`E_0` = :cpp:`erf.dust.deposition_E0`. The flux
+with :math:`E_0` = :cpp:`erf.dust.deposition_E0`, never below :math:`v_s`
+and capped like it at 1 m/s (a 0.1 m/s cap until October 2026 sat below the
+settling velocity of 50 µm dust, 0.2 m/s, so coarse dust arrived in the lowest
+cell faster than it could leave and piled up to twice the physical
+concentration). The flux
 :math:`v_d \rho_\mathrm{dust}(k=0)` leaves the atmosphere as a sink of the
 lowest cell and accumulates on the dust grid in ``dust_deposition_rate``
 [kg/m²], which is never reset and feeds the MSHA diagnostics, the PHREEQC

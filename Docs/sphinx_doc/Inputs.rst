@@ -6090,13 +6090,13 @@ checked once at startup and abort with a message naming the input to fix.
 |                                              | box length must divide by it, and it must equal            |                          |                                    |
 |                                              | erf.fire.grid_ratio when the fire coupling is on           |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.n_size_bins**                     | Number of particle size bins; each bin is one component of | Integer > 0              | 3                                  |
+| **erf.dust.n_size_bins**                     | Number of particle size bins; each bin is one component of | Integer 1-8              | 3                                  |
 |                                              | the emission flux                                          |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.bin_diameters**                   | Per-bin diameter [m]; bin 0 sets the Bagnold base          | Reals                    | 7.0e-6 2.5e-6 50.0e-6              |
-|                                              | threshold, and all bins drive settling, deposition and PM  |                          |                                    |
-|                                              | classification; the last value repeats when shorter than   |                          |                                    |
-|                                              | n_size_bins                                                |                          |                                    |
+| **erf.dust.bin_diameters**                   | Per-bin diameter of the emitted dust [m], one per bin (the | Reals                    | 7.0e-6 2.5e-6 50.0e-6              |
+|                                              | count must equal n_size_bins); they drive settling,        |                          |                                    |
+|                                              | deposition and the PM classes, not the threshold (see      |                          |                                    |
+|                                              | saltation_diameter)                                        |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.particle_density**                | Bulk particle density [kg/m³]                              | Real > 0                 | 2650.0                             |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
@@ -6294,9 +6294,14 @@ on the same scalar.
 | **erf.dust.transport_bins_separately**       | One 3D scalar per bin instead of a single total; only bin  | Boolean                  | false                              |
 |                                              | 0 is returned to the surface at present                    |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.deposition_E0**                   | Surface collection efficiency of the dry-deposition        | Real > 0                 | 3.0e-3                             |
+| **erf.dust.deposition_E0**                   | Surface collection efficiency of the dry-deposition        | Real >= 0                | 3.0e-3                             |
 |                                              | resistance [-]; 3e-3 bare mine surface, 1e-4 paved road,   |                          |                                    |
-|                                              | 1e-2 vegetation                                            |                          |                                    |
+|                                              | 1e-2 vegetation; 0 removes the collection term (v_d = v_s) |                          |                                    |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| **erf.dust.lumped_settling**                 | Settling and deposition velocity of the single transported | mean or bin0             | mean                               |
+|                                              | scalar: mean averages the bins' Stokes velocities (they    |                          |                                    |
+|                                              | share the flux equally); bin0 (the form until October      |                          |                                    |
+|                                              | 2026) uses bin 0 alone                                     |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.loading_feedback_coeff**          | Shao (2001) loading feedback on the threshold [m³/kg]; 0   | Real >= 0                | 0.0                                |
 |                                              | disables                                                   |                          |                                    |

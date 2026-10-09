@@ -64,12 +64,12 @@ erf.dust.dust_debug = false
 erf.dust.grid_ratio = 1
 
 # Number of particle size bins; each bin is one component of the emission
-# flux [Integer > 0]
+# flux [Integer 1-8]
 erf.dust.n_size_bins = 3
 
-# Per-bin diameter [m]; bin 0 sets the Bagnold base threshold, and all bins
-# drive settling, deposition and PM classification; the last value repeats
-# when shorter than n_size_bins [Reals]
+# Per-bin diameter of the emitted dust [m], one per bin (the count must
+# equal n_size_bins); they drive settling, deposition and the PM classes,
+# not the threshold (see saltation_diameter) [Reals]
 erf.dust.bin_diameters = 7.0e-6 2.5e-6 50.0e-6
 
 # Bulk particle density [kg/m³] [Real > 0]
@@ -268,8 +268,14 @@ erf.dust.atm_feedback = 1.0
 erf.dust.transport_bins_separately = false
 
 # Surface collection efficiency of the dry-deposition resistance [-]; 3e-3
-# bare mine surface, 1e-4 paved road, 1e-2 vegetation [Real > 0]
+# bare mine surface, 1e-4 paved road, 1e-2 vegetation; 0 removes the
+# collection term (v_d = v_s) [Real >= 0]
 erf.dust.deposition_E0 = 3.0e-3
+
+# Settling and deposition velocity of the single transported scalar: mean
+# averages the bins' Stokes velocities (they share the flux equally); bin0
+# (the form until October 2026) uses bin 0 alone [mean or bin0]
+erf.dust.lumped_settling = mean
 
 # Shao (2001) loading feedback on the threshold [m³/kg]; 0 disables [Real >=
 # 0]

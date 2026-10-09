@@ -335,8 +335,10 @@ DustLayer::initialize(
     }
   }
 
-  // Phase 22: load haul road vehicle schedule.
+  // Phase 22: load haul road vehicle schedule, and count the cells each road
+  // covers (the AP-42 mass rate is spread over them).
   load_road_schedule(dust_params.road_schedule_file, m_road_schedule);
+  count_road_cells(m_road_schedule, m_dg.ba, m_dg.geom);
   if (dust_params.dust_debug) {
     amrex::Print() << "[DUST DEBUG] Phase 22: road_schedule_file="
                    << dust_params.road_schedule_file
@@ -348,7 +350,7 @@ DustLayer::initialize(
                        << ev.x_hi << "," << ev.y_hi << "]"
                        << " W=" << ev.vehicle_weight_t << " t"
                        << " silt=" << ev.silt_pct << "%"
-                       << " vmt=" << ev.vmt_per_h << "/h"
+                       << " vkt=" << ev.vkt_per_h << "/h"
                        << " t=[" << ev.start_time_s << ","
                        << ev.end_time_s << "] s\n";
     }
@@ -452,7 +454,8 @@ DustLayer::initialize(
       for (int s = 0; s < n_sites; ++s) {
         amrex::Print() << "[DUST DEBUG] Phase 20: site " << (s+1)
                        << " name=" << dust_params.site_names[s]
-                       << " file=" << dust_params.site_phreeqc_files[s]
+                       << " file=" << (s < (int)dust_params.site_phreeqc_files.size()
+                                       ? dust_params.site_phreeqc_files[s] : std::string("(none)"))
                        << " bbox=["
                        << dust_params.site_x_lo[s] << ","
                        << dust_params.site_y_lo[s] << ","
@@ -462,16 +465,9 @@ DustLayer::initialize(
       }
     }
 
-    m_site_ustar_t_factors.resize(n_sites, 1.0);
-    for (int s = 0; s < n_sites; ++s) {
-      if (!dust_params.site_phreeqc_files[s].empty()) {
-        if (dust_params.dust_debug) {
-          amrex::Print() << "[DUST DEBUG] Phase 20: site " << (s+1)
-                         << " PHREEQC file: "
-                         << dust_params.site_phreeqc_files[s] << "\n";
-        }
-      }
-    }
+    // (site_phreeqc_files may be absent, DustParams allows it; indexing it
+    // for every site read past the Vector and segfaulted at start-up with
+    // site_names alone -- the parity CTest's configuration)
   } else {
     if (dust_params.dust_debug)
       amrex::Print() << "[DUST DEBUG] Phase 20: no site bounding boxes"
@@ -875,7 +871,7 @@ DustLayer::advance(
 void
 DustLayer::apply_to_cc_source(
   amrex::MultiFab& cc_source,
-  const amrex::MultiFab& z_phys_cc,
+  const amrex::MultiFab& detJ_cc,
   const amrex::Geometry& geom_atm)
 {
   if (!dust_flux_atm) return;
@@ -927,7 +923,7 @@ DustLayer::apply_to_cc_source(
     }
 
     apply_dust_tendency_to_cc_source(
-      cc_source, *dust_flux_atm, z_phys_cc, geom_atm,
+      cc_source, *dust_flux_atm, detJ_cc, geom_atm,
       m_dust_scalar_comp + b, m_params.atm_feedback, m_params.dust_debug);
 
     if (!m_params.transport_bins_separately) break;
@@ -941,28 +937,67 @@ DustLayer::apply_to_cc_source(
   }
 }
 
+DustBinDiameters
+DustLayer::scalar_bin_diameters (int b, int& nb) const
+{
+    DustBinDiameters d{};
+    for (int i = 0; i < DustSettlingConst::MAX_BINS; ++i) d[i] = 0.0;
+    const int nd = (int)m_params.bin_diameters.size();
+    if (m_params.transport_bins_separately) {
+        // scalar b carries bin b alone
+        const int idx = amrex::min(b, nd - 1);
+        d[0] = m_params.bin_diameters[idx];
+        nb = 1;
+    } else if (m_params.lumped_settling == "bin0") {
+        d[0] = m_params.bin_diameters[0];
+        nb = 1;
+    } else {
+        // the lumped scalar carries every bin with an equal share of the flux
+        nb = amrex::min(nd, DustSettlingConst::MAX_BINS);
+        for (int i = 0; i < nb; ++i) d[i] = m_params.bin_diameters[i];
+    }
+    return d;
+}
+
 void
 DustLayer::apply_settling_to_cc_source(
     amrex::MultiFab& cc_source,
     const amrex::MultiFab& S_old,
-    const amrex::MultiFab& z_phys_cc,
-    const amrex::Geometry& geom_atm)
+    const amrex::MultiFab& detJ_cc,
+    const amrex::Geometry& geom_atm,
+    amrex::Real dt)
 {
     if (m_params.bin_diameters.empty()) return;
 
     int n_active = m_params.transport_bins_separately ? m_params.n_size_bins : 1;
+    const amrex::Real rhop = m_params.particle_density;
+
+    // Explicit first-order settling is stable for v_s dt / h_0 <= 1; a 100 um
+    // bin (0.8 m/s) with dt = 10 s on 5 m cells is not, and nothing refused it.
+    if (!m_settling_cfl_checked && dt > 0.0) {
+        m_settling_cfl_checked = true;
+        amrex::Real vs_max = 0.0;
+        for (auto d : m_params.bin_diameters)
+            vs_max = amrex::max(vs_max, compute_stokes_settling(d, rhop, amrex::Real(1.225),
+                                                                DustSettlingConst::MU_AIR_STD));
+        const amrex::Real h0 = geom_atm.CellSize(2) * amrex::max(detJ_cc.min(0), amrex::Real(1.0e-10));
+        const amrex::Real cfl = vs_max * dt / h0;
+        if (cfl > 1.0) {
+            amrex::Abort("[DUST] explicit settling is unstable: max v_s * dt / h_0 = "
+                         + std::to_string(cfl) + " (v_s = " + std::to_string(vs_max)
+                         + " m/s, dt = " + std::to_string(dt) + " s, thinnest first cell "
+                         + std::to_string(h0) + " m); shorten erf.fixed_dt or drop the coarse bin");
+        }
+    }
 
     for (int b = 0; b < n_active; ++b) {
-        int d_idx = (b < (int)m_params.bin_diameters.size())
-                  ? b : (int)m_params.bin_diameters.size() - 1;
-        amrex::Real d_m  = m_params.bin_diameters[d_idx];
-        amrex::Real rhop = m_params.particle_density;
+        int nb = 1;
+        const DustBinDiameters bins = scalar_bin_diameters(b, nb);
         int comp = m_dust_scalar_comp + b;
-       AMREX_ASSERT(comp < cc_source.nComp());
         AMREX_ASSERT(comp < cc_source.nComp());
 
-        apply_dust_settling_to_cc_source(cc_source, S_old, z_phys_cc,
-                                         geom_atm, d_m, rhop, comp,
+        apply_dust_settling_to_cc_source(cc_source, S_old, detJ_cc,
+                                         geom_atm, bins, nb, rhop, comp,
                                          m_params.dust_debug);
     }
 
@@ -976,7 +1011,7 @@ DustLayer::apply_settling_to_cc_source(
 void
 DustLayer::apply_deposition_bc(
    amrex::MultiFab& cc_source, const amrex::MultiFab& S_old,
-   const amrex::MultiFab& z_phys_cc, const amrex::Geometry& geom_atm,
+   const amrex::MultiFab& detJ_cc, const amrex::Geometry& geom_atm,
    amrex::Real /*dt*/)
 {
    if (!dep_flux_atm || !dust_ustar_in) return;
@@ -1007,17 +1042,16 @@ DustLayer::apply_deposition_bc(
 
    if (dep_flux_step) dep_flux_step->setVal(0.0);
    for (int b = 0; b < n_active; ++b) {
-       int d_idx = (b < (int)m_params.bin_diameters.size())
-                 ? b : (int)m_params.bin_diameters.size()-1;
-       amrex::Real d_m  = m_params.bin_diameters[d_idx];
+       int nb = 1;
+       const DustBinDiameters bins = scalar_bin_diameters(b, nb);
        amrex::Real rhop = m_params.particle_density;
        amrex::Real E_0  = m_params.deposition_E0;
        int comp = m_dust_scalar_comp + b;
 
        apply_dust_deposition_bc(cc_source, *dep_flux_atm,
                                  S_old, ustar_atm,
-                                 z_phys_cc, geom_atm,
-                                 d_m, rhop, E_0, comp,
+                                 detJ_cc, geom_atm,
+                                 bins, nb, rhop, E_0, comp,
                                  m_params.dust_debug);
 
        if (dep_flux_step)

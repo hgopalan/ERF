@@ -37,10 +37,10 @@ p("grid_ratio", "Dust grid refinement factor in x and y; every atmosphere box "
   "length must divide by it, and it must equal erf.fire.grid_ratio when the "
   "fire coupling is on", "Integer > 0", "1")
 p("n_size_bins", "Number of particle size bins; each bin is one component of "
-  "the emission flux", "Integer > 0", "3")
-p("bin_diameters", "Per-bin diameter [m]; bin 0 sets the Bagnold base threshold, "
-  "and all bins drive settling, deposition and PM classification; the last "
-  "value repeats when shorter than n_size_bins",
+  "the emission flux", "Integer 1-8", "3")
+p("bin_diameters", "Per-bin diameter of the emitted dust [m], one per bin "
+  "(the count must equal n_size_bins); they drive settling, deposition and "
+  "the PM classes, not the threshold (see saltation_diameter)",
   "Reals", "7.0e-6 2.5e-6 50.0e-6")
 p("particle_density", "Bulk particle density [kg/m³]", "Real > 0", "2650.0")
 p("rho_air", "Air density used in the threshold and saltation flux [kg/m³]",
@@ -160,8 +160,13 @@ p("atm_feedback", "Scale on the injected flux; 0 disables injection for "
 p("transport_bins_separately", "One 3D scalar per bin instead of a single "
   "total; only bin 0 is returned to the surface at present", "Boolean", "false")
 p("deposition_E0", "Surface collection efficiency of the dry-deposition "
-  "resistance [-]; 3e-3 bare mine surface, 1e-4 paved road, 1e-2 vegetation",
-  "Real > 0", "3.0e-3")
+  "resistance [-]; 3e-3 bare mine surface, 1e-4 paved road, 1e-2 vegetation; "
+  "0 removes the collection term (v_d = v_s)",
+  "Real >= 0", "3.0e-3")
+p("lumped_settling", "Settling and deposition velocity of the single transported "
+  "scalar: mean averages the bins' Stokes velocities (they share the flux "
+  "equally); bin0 (the form until October 2026) uses bin 0 alone",
+  "mean or bin0", "mean")
 p("loading_feedback_coeff", "Shao (2001) loading feedback on the threshold "
   "[m³/kg]; 0 disables", "Real >= 0", "0.0")
 p("erf.dust_mrf_Sc_t", "Turbulent Schmidt number of the dust scalar in the "
