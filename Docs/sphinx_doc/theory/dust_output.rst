@@ -51,7 +51,9 @@ Besides the AMReX ``Header`` and ``Level_0`` data it carries
      - Instantaneous PM2.5 and PM10.
    * - ``dust_pm25_24h_ug_m3``, ``dust_pm10_24h_ug_m3``
      - µg/m³
-     - 24-hour running averages.
+     - 24-hour means: the block mean of 24 hourly slots
+       (:cpp:`erf.dust.averaging = window`), or the exponential running
+       mean (``exponential``).
    * - ``dust_pm25_exceed``, ``dust_pm10_exceed``
      - -
      - 1 where the 24-hour average exceeds 35 or 150 µg/m³.

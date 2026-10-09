@@ -122,7 +122,8 @@ the atmosphere's :math:`\Delta t`, in this order (``DustLayer::advance`` in
    uniform input value and the burned-area reduction is applied again, so the
    crust follows the current fire perimeter rather than decaying step after
    step.
-6. **Threshold friction velocity** from the Bagnold base, the chemistry,
+6. **Threshold friction velocity** from the Shao-Lu base (Bagnold with
+   :cpp:`erf.dust.threshold_model = bagnold`), the chemistry,
    moisture, suppression and slope factors, then the loading feedback and the
    dynamic moisture inhibition when enabled (:ref:`sec:DustSources`).
 7. **Emission flux** per bin from the saltation model where
@@ -167,7 +168,8 @@ component unless noted.
      - Threshold friction velocity after every modifier.
    * - ``dust_ustar_base``
      - m/s
-     - Bagnold base threshold from bin 0, or :cpp:`erf.dust.ustar_t_base`.
+     - Base threshold of :cpp:`erf.dust.threshold_model` at
+       :cpp:`erf.dust.saltation_diameter`, or :cpp:`erf.dust.ustar_t_base`.
    * - ``dust_ustar_in``
      - m/s
      - Friction velocity seen by the emission model: from the surface layer,

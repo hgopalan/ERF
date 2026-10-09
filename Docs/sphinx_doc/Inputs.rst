@@ -6185,10 +6185,9 @@ the ``test_*`` values are the placeholders used when no atmosphere is coupled.
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.terrain_ustar**                   | How the friction velocity follows the terrain-corrected    | scale or loglaw          | scale                              |
 |                                              | wind: scale multiplies the surface layer's u* by           |                          |                                    |
-|                                              | |U_corrected| / |U_raw|; loglaw (the form until October    |                          |                                    |
-|                                              | 2026) re-derives u* = kappa U / ln(zref / z0_dust), a      |                          |                                    |
-|                                              | neutral law on another roughness that gave 0.70x on flat   |                          |                                    |
-|                                              | ground                                                     |                          |                                    |
+|                                              | U_corrected / U_raw; loglaw (the form until October 2026)  |                          |                                    |
+|                                              | re-derives u* = kappa U / ln(zref / z0_dust), a neutral    |                          |                                    |
+|                                              | law on another roughness that gave 0.70x on flat ground    |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.k_ridge**                         | Ridge speed-up factor of the terrain correction            | Real                     | 1.5                                |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+

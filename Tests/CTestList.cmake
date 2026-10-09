@@ -2511,6 +2511,15 @@ set_tests_properties(FireDustInputsDocs_SelfTest
     TIMEOUT 300
     PROCESSORS 1
     LABELS "docs;fire;unit")
+# the mass-budget checker of FireDustMassConservation on a synthetic closed
+# budget (passes) and a 10 % leak (must fail the budget check). Pure Python.
+add_test(FireDustMassConservation_SelfTest ${ERF_RANS_PYTHON}
+    ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/Hazard/FireDustMassConservation/check_mass_conservation.py --self-test)
+set_tests_properties(FireDustMassConservation_SelfTest
+    PROPERTIES
+    TIMEOUT 60
+    PROCESSORS 1
+    LABELS "fire;unit")
 if(ERF_ENABLE_DUST)
 add_test_fire(FireRestart_dust_straight     FireRestart           inputs_dust_straight       40 NRANKS 1)
 # the three fire-dust couplings applied once per step, in the right order
@@ -2538,6 +2547,38 @@ add_test_fire_abort(DustTransportBins_abort   FireRestart           inputs_dust_
     "transport_bins_separately = true needs one state scalar per bin" "erf.dust.transport_bins_separately=true")
 add_test_fire_abort(FireDustWindZref_abort    FireRestart           inputs_dust_straight
     "erf.fire_dust_wind_zref .* must exceed" "erf.fire_dust_wind_zref=0.05")
+# October 2026 validation: every new selector and range check, and the readers
+# that used to warn and run on with the uniform value, proved to stop
+add_test_fire_abort(DustThresholdModel_abort  FireRestart           inputs_dust_straight
+    "erf.dust.threshold_model must be shao_lu or bagnold" "erf.dust.threshold_model=owen")
+add_test_fire_abort(DustSaltationDiam_abort   FireRestart           inputs_dust_straight
+    "erf.dust.saltation_diameter must be > 0" "erf.dust.saltation_diameter=0.0")
+add_test_fire_abort(DustShaoLuAN_abort        FireRestart           inputs_dust_straight
+    "erf.dust.shao_lu_A_N must be > 0" "erf.dust.shao_lu_A_N=0.0")
+add_test_fire_abort(DustShaoLuGamma_abort     FireRestart           inputs_dust_straight
+    "erf.dust.shao_lu_gamma must be >= 0" "erf.dust.shao_lu_gamma=-1.0e-4")
+add_test_fire_abort(DustTerrainUstar_abort    FireRestart           inputs_dust_straight
+    "erf.dust.terrain_ustar must be scale or loglaw" "erf.dust.terrain_ustar=log")
+add_test_fire_abort(DustLumpedSettling_abort  FireRestart           inputs_dust_straight
+    "erf.dust.lumped_settling must be mean or bin0" "erf.dust.lumped_settling=max")
+add_test_fire_abort(DustAveraging_abort       FireRestart           inputs_dust_straight
+    "erf.dust.averaging must be window or exponential" "erf.dust.averaging=running")
+add_test_fire_abort(DustTooManyBins_abort     FireRestart           inputs_dust_straight
+    "erf.dust.n_size_bins must be <= 8" "erf.dust.n_size_bins=9")
+add_test_fire_abort(DustCmBudgetInt_abort     FireRestart           inputs_dust_straight
+    "erf.dust.cm_budget_int must be >= 1" "erf.dust.cm_budget_int=0")
+add_test_fire_abort(DustVisibilityKext_abort  FireRestart           inputs_dust_straight
+    "erf.dust.visibility_k_ext must be > 0" "erf.dust.visibility_k_ext=0.0")
+add_test_fire_abort(DustStelAveraging_abort   FireRestart           inputs_dust_straight
+    "erf.dust.stel_averaging_s must be > 0" "erf.dust.stel_averaging_s=0.0")
+add_test_fire_abort(DustMetalVarRemoved_abort FireRestart           inputs_dust_straight
+    "erf.dust.phreeqc_metal_var was removed" "erf.dust.phreeqc_metal_var=metal_fraction")
+add_test_fire_abort(DustTerrainFileMissing_abort FireRestart        inputs_dust_straight
+    "erf.dust.terrain_file cannot be opened" "erf.dust.terrain_file=missing_terrain.asc")
+add_test_fire_abort(DustRasterMissing_abort   FireRestart           inputs_dust_straight
+    "surface raster cannot be opened" "erf.dust.crust_index_file=missing_crust.asc")
+add_test_fire_abort(DustPhreeqcMissing_abort  FireRestart           inputs_dust_straight
+    "PHREEQC file cannot be opened" "erf.dust.phreeqc_output_file=missing_phreeqc.csv")
 endif()
 endif()
 

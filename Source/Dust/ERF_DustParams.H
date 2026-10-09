@@ -461,11 +461,15 @@ struct DustParams {
         positive("msha_pel_mg_m3", msha_pel_mg_m3);
         positive("msha_shift_duration_s", msha_shift_duration_s);
         if (visibility_enable) {
+            positive("visibility_k_ext",          visibility_k_ext);
             positive("visibility_road_closure_m", visibility_road_closure_m);
             positive("visibility_warning_m",      visibility_warning_m);
         }
         if (silica_enable) positive("silica_osha_pel_mg_m3", silica_osha_pel_mg_m3);
-        if (stel_enable)   positive("stel_threshold_mg_m3",  stel_threshold_mg_m3);
+        if (stel_enable) {
+            positive("stel_threshold_mg_m3", stel_threshold_mg_m3);
+            positive("stel_averaging_s",     stel_averaging_s);   // the window ring divides by it
+        }
         for (auto f : cm_fractions) fraction("cm_fractions", f);
         if (phreeqc_feedback_interval_s < 0.0)
             fail("erf.dust.phreeqc_feedback_interval_s must be >= 0, got " + std::to_string(phreeqc_feedback_interval_s));

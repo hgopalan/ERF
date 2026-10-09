@@ -14,6 +14,7 @@ Run the deck and the checker:
 
 ```
 erf_exec inputs > run.log && python3 check_mass_conservation.py run.log dust_diag.dat
+python3 check_mass_conservation.py --self-test   # the checker on a closed and a leaky synthetic budget (CTest FireDustMassConservation_SelfTest)
 ```
 
 It passes when `|M_air - (emitted - deposited)| / emitted < 2 %` at every printed step (the flux of step n enters the air in step n+1, the documented lag), and both the emitted and the deposited totals are positive. A run with `erf.dust.atm_feedback = 0.5` fails it (half the emitted mass never reaches the air). Until October 2026 the case asserted nothing.

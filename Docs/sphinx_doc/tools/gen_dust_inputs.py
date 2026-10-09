@@ -95,7 +95,7 @@ grp("Wind and terrain",
 p("use_terrain_wind", "Apply the FARSITE terrain correction to the wind at "
   "zref and recompute u* from it by the log law", "Boolean", "false")
 p("terrain_ustar", "How the friction velocity follows the terrain-corrected wind: "
-  "scale multiplies the surface layer's u* by |U_corrected| / |U_raw|; loglaw "
+  "scale multiplies the surface layer's u* by U_corrected / U_raw; loglaw "
   "(the form until October 2026) re-derives u* = kappa U / ln(zref / z0_dust), "
   "a neutral law on another roughness that gave 0.70x on flat ground",
   "scale or loglaw", "scale")

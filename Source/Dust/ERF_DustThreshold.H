@@ -187,7 +187,7 @@ amrex::Real compute_slope_factor(amrex::Real slope_x, amrex::Real slope_y,
     const amrex::Real spd = std::sqrt(wind_u * wind_u + wind_v * wind_v);
     // slope along the wind (signed), or the magnitude with no wind
     const amrex::Real s_along = (spd > 0.0)
-        ? (slope_x * wind_u + slope_y * wind_v) / amrex::max(spd, amrex::Real(1.0e-30))
+        ? (slope_x * wind_u + slope_y * wind_v) / spd
         : slope_mag;
     const amrex::Real hyp       = std::sqrt(amrex::Real(1.0) + s_along * s_along);
     const amrex::Real cos_theta = amrex::Real(1.0) / hyp;
