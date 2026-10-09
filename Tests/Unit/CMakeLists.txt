@@ -301,6 +301,10 @@ endif()
 if(ERF_ENABLE_DUST)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Dust/ERF_GTestDustColumn.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Dust/ERF_GTestDustThreshold.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Dust/ERF_GTestDustWind.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Dust/ERF_GTestDustBudget.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Dust/ERF_GTestDustDiagnostics.cpp
   )
 endif()
 if(ERF_DIM STREQUAL "3")
@@ -373,7 +377,7 @@ erf_register_gtest_suite(${erf_exe_name}
 if(ERF_ENABLE_FIRE)
   set(_fire_gtest_suites "BehaveScottBurgan.*:BehaveTransfer.*:CustomFuel.*:DirectionalShape.*:FarsiteFrontCell.*:FarsiteSpreadTest.*:Fbp.*:FireAcceleration.*:FireAnchorLevel.*:FireBoundaryGuard.*:FireDiagnosticsPerFuel.*:FirePrecip.*:FireSuppression.*:FuelMap.*:FuelMoisture.*:FuelMoistureEMC.*:FuelMoistureLive.*:FuelMoistureStick.*:LcpReader.*:LevelSetAdvection.*:LevelSetEllipse.*:PrescribedFire.*:SplitHamiltonianAdvection.*:StructureIgnition.*:WindLimit.*:FireModelReferences.*:FireDefaults.*:BehaveNetLoad.*:CheneyGould98.*:MacArthurCap.*:FarsiteShape.*:FireHeatBudget.*:ByramIntensity.*:ArrivalStamp.*:FbpSlopeVector.*:PerimeterCount.*:FuelBlendingParity.*:CrownFront.*:ExnerTendency.*:SmokeInjection.*:RothermelCellMoisture.*:EmberDrift.*")
   if(ERF_ENABLE_DUST)
-    string(APPEND _fire_gtest_suites ":DustColumn.*")
+    string(APPEND _fire_gtest_suites ":DustColumn.*:DustThreshold.*:DustWind.*:DustBudget.*:DustDiagnostics.*")
   endif()
   add_test(NAME FireDustGTests_FpeTraps
     COMMAND ${erf_exe_name}

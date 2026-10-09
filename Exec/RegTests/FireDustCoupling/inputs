@@ -8,13 +8,18 @@
 #   * the threshold u* in burned cells is (1 + 0.5 * 0.2) / (1 + 0.5 * 1.0) of the
 #     unburned value at both steps: the crust reduction is applied to the
 #     baseline crust once, not compounded every step (0.2^n before the fix);
-#   * the dust u* is at least the log-law u* of the fire wind in every cell:
+#   * the dust u* is at least the log-law u* of the fire wind in every burned cell (phi < 0); unburned cells keep the surface layer's u*:
 #     the fire wind is applied inside the dust step, after the surface-layer
 #     fill that used to overwrite it;
 #   * the deposition accumulator grows once per step (it used to add every RK
 #     stage, 1.83 dt per step); the reference value is in the check script.
-# fire_dust_wind_z0 = 3 m (a test value, not a roughness) makes the fire log-law
-# u* exceed the surface-layer u* so the second check has a signal.
+# The fire wind handed to the dust is the wind at erf.fire.wind_ref_ht
+# (fire_wind_ref), the same atmospheric wind the surface layer saw: its
+# neutral log-law u* on erf.fire_dust_wind_z0 stands in for the surface
+# layer's u* inside the fire perimeter only (every unburned cell took it
+# before, 1.5x the surface layer's for most.z0 = 0.01 against 0.1). (Until October 2026 the WAF-reduced
+# midflame wind was handed over and the deck used z0 = 3 m, "a test value, not
+# a roughness", to lift it above the surface layer's u*.)
 
 geometry.prob_lo = 0.0 0.0 0.0
 geometry.prob_hi = 2000.0 2000.0 600.0
@@ -95,6 +100,6 @@ erf.dust.dust_diag_file = "dust_diag.dat"
 erf.fire_dust_coupling = true
 erf.fire_dust_crust_reduction = 0.8
 erf.fire_dust_wind_to_dust = true
-erf.fire_dust_wind_z0 = 3.0    # test value: puts the fire log-law u* above the surface-layer u*
+erf.fire_dust_wind_z0 = 0.1    # = erf.most.z0: the fire wind at wind_ref_ht on the same log law as the surface layer
 erf.fire_dust_wind_zref = 6.1
 erf.fire_dust_lofting_enabled = true

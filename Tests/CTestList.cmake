@@ -1466,7 +1466,7 @@ function(add_test_fire_script TEST_NAME SUITE_DIR SCRIPT)
     resolve_test_exe("" "erf_exec" TEST_EXE)
     set(test_log "${CURRENT_TEST_BINARY_DIR}/${TEST_NAME}.log")
     # the script removes its own earlier output before running
-    set(test_command sh -c "cd ${CURRENT_TEST_BINARY_DIR} && MPIRUN='${MPI_COMMANDS}' PYTHON=${ERF_RANS_PYTHON} sh ${CURRENT_TEST_BINARY_DIR}/${SCRIPT} ${TEST_EXE} > ${test_log} 2>&1 || ( cat ${test_log} && false ) && cat ${test_log}")
+    set(test_command sh -c "cd ${CURRENT_TEST_BINARY_DIR} && MPIRUN='${MPI_COMMANDS}' PYTHON=${ERF_RANS_PYTHON} FCOMPARE=${FCOMPARE_EXE} sh ${CURRENT_TEST_BINARY_DIR}/${SCRIPT} ${TEST_EXE} > ${test_log} 2>&1 || ( cat ${test_log} && false ) && cat ${test_log}")
 
     add_test(${TEST_NAME} ${test_command})
     set_tests_properties(${TEST_NAME}
@@ -2538,6 +2538,15 @@ set_tests_properties(FireDustInputsDocs_SelfTest
     TIMEOUT 300
     PROCESSORS 1
     LABELS "docs;fire;unit")
+# the mass-budget checker of FireDustMassConservation on a synthetic closed
+# budget (passes) and a 10 % leak (must fail the budget check). Pure Python.
+add_test(FireDustMassConservation_SelfTest ${ERF_RANS_PYTHON}
+    ${PROJECT_SOURCE_DIR}/Exec/CanonicalTests/Hazard/FireDustMassConservation/check_mass_conservation.py --self-test)
+set_tests_properties(FireDustMassConservation_SelfTest
+    PROPERTIES
+    TIMEOUT 60
+    PROCESSORS 1
+    LABELS "fire;unit")
 if(ERF_ENABLE_DUST)
 add_test_fire(FireRestart_dust_straight     FireRestart           inputs_dust_straight       40 NRANKS 1)
 # the three fire-dust couplings applied once per step, in the right order
@@ -2545,6 +2554,11 @@ add_test_fire_check(FireDustCoupling_check  FireDustCoupling      inputs        
 # each step's dust_diag.dat row written once across the final step and two restarts
 if(ERF_ENABLE_MPI AND NOT WIN32)
 add_test_fire_script(FireRestart_dust_rows  FireRestart           run_dust_rows.sh NRANKS 1)
+# one rank and one box against two ranks and four boxes: the same dust fields,
+# dust_diag.dat, CM budget and receptor sample (every dust CTest ran on one box
+# until October 2026, so the ParallelCopy, average_down, box-edge and reduction
+# paths had no coverage)
+add_test_fire_script(FireDustCoupling_parity FireDustCoupling     run_dust_parity.sh NRANKS 2)
 endif()
 # dust inputs the kernels cannot use stop at start-up
 add_test_fire_abort(DustBadBins_abort         FireRestart           inputs_dust_straight
@@ -2559,7 +2573,44 @@ add_test_fire_abort(DustRoadFileMissing_abort FireRestart           inputs_dust_
 add_test_fire_abort(DustTransportBins_abort   FireRestart           inputs_dust_straight
     "transport_bins_separately = true needs one state scalar per bin" "erf.dust.transport_bins_separately=true")
 add_test_fire_abort(FireDustWindZref_abort    FireRestart           inputs_dust_straight
-    "erf.fire_dust_wind_zref .* must exceed" "erf.fire_dust_wind_zref=0.05")
+    "erf.fire_dust_wind_zref .* must exceed" "erf.fire_dust_wind_z0=10.0")   # zref follows erf.fire.wind_ref_ht = 6.1
+# October 2026 validation: every new selector and range check, and the readers
+# that used to warn and run on with the uniform value, proved to stop
+add_test_fire_abort(DustThresholdModel_abort  FireRestart           inputs_dust_straight
+    "erf.dust.threshold_model must be shao_lu or bagnold" "erf.dust.threshold_model=owen")
+add_test_fire_abort(DustSaltationDiam_abort   FireRestart           inputs_dust_straight
+    "erf.dust.saltation_diameter must be > 0" "erf.dust.saltation_diameter=0.0")
+add_test_fire_abort(DustShaoLuAN_abort        FireRestart           inputs_dust_straight
+    "erf.dust.shao_lu_A_N must be > 0" "erf.dust.shao_lu_A_N=0.0")
+add_test_fire_abort(DustShaoLuGamma_abort     FireRestart           inputs_dust_straight
+    "erf.dust.shao_lu_gamma must be >= 0" "erf.dust.shao_lu_gamma=-1.0e-4")
+add_test_fire_abort(DustTerrainUstar_abort    FireRestart           inputs_dust_straight
+    "erf.dust.terrain_ustar must be scale or loglaw" "erf.dust.terrain_ustar=log")
+add_test_fire_abort(DustLumpedSettling_abort  FireRestart           inputs_dust_straight
+    "erf.dust.lumped_settling must be mean or bin0" "erf.dust.lumped_settling=max")
+add_test_fire_abort(DustAveraging_abort       FireRestart           inputs_dust_straight
+    "erf.dust.averaging must be window or exponential" "erf.dust.averaging=running")
+add_test_fire_abort(DustTooManyBins_abort     FireRestart           inputs_dust_straight
+    "erf.dust.n_size_bins must be <= 8" "erf.dust.n_size_bins=9")
+add_test_fire_abort(DustCmBudgetInt_abort     FireRestart           inputs_dust_straight
+    "erf.dust.cm_budget_int must be >= 1" "erf.dust.cm_budget_int=0")
+add_test_fire_abort(DustVisibilityKext_abort  FireRestart           inputs_dust_straight
+    "erf.dust.visibility_k_ext must be > 0" "erf.dust.visibility_k_ext=0.0")
+add_test_fire_abort(DustStelAveraging_abort   FireRestart           inputs_dust_straight
+    "erf.dust.stel_averaging_s must be > 0" "erf.dust.stel_averaging_s=0.0")
+add_test_fire_abort(DustMetalVarRemoved_abort FireRestart           inputs_dust_straight
+    "erf.dust.phreeqc_metal_var was removed" "erf.dust.phreeqc_metal_var=metal_fraction")
+add_test_fire_abort(DustTerrainFileMissing_abort FireRestart        inputs_dust_straight
+    "erf.dust.terrain_file cannot be opened" "erf.dust.terrain_file=missing_terrain.asc")
+add_test_fire_abort(DustRasterMissing_abort   FireRestart           inputs_dust_straight
+    "surface raster cannot be opened" "erf.dust.crust_index_file=missing_crust.asc")
+add_test_fire_abort(DustPhreeqcMissing_abort  FireRestart           inputs_dust_straight
+    "PHREEQC file cannot be opened" "erf.dust.phreeqc_output_file=missing_phreeqc.csv")
+# the haul-road mass is the AP-42 PM-10 factor on bin 0; the fire-wind height follows erf.fire.wind_ref_ht
+add_test_fire_abort(DustRoadBinZero_abort      FireRestart           inputs_dust_straight
+    "road mass into bin 0, whose diameter" "erf.dust.bin_diameters=50.0e-6\ 2.5e-6\ 7.0e-6")
+add_test_fire_abort(FireDustWindZrefMatch_abort FireRestart          inputs_dust_straight
+    "must match erf.fire.wind_ref_ht" "erf.fire_dust_wind_zref=10.0")
 endif()
 endif()
 

@@ -4,7 +4,9 @@
  *
  * TWA model: dose += PM_resp * dt/3600, TWA_8h = dose/8
  * PM_resp = dust_pm10[ug/m3] * 1e-3  (converts to mg/m3)
- * MSHA PEL: 5 mg/m3, 30 CFR 56.5001.
+ * PEL default 5 mg/m3: the OSHA respirable PNOR limit (29 CFR 1910.1000 Table
+ * Z-1), which 30 CFR 56.5001 reaches by adopting the ACGIH TLVs; the
+ * concentration compared is the dust module's PM10, not a respirable (PM4) sample.
  * Shift reset: dose zeroed when floor(t/T_shift) increases.
  *
  * References:
@@ -29,7 +31,7 @@ namespace DustMSHAConst {
     constexpr amrex::Real UG_TO_MG  = 1.0e-3;     ///< Convert µg/m³ to mg/m³
     constexpr amrex::Real S_TO_H    = 1.0/3600.0; ///< Convert seconds to hours
     constexpr amrex::Real TWA_HOURS = 8.0;        ///< 8-hour time-weighted average
-    constexpr amrex::Real PEL_DEF   = 5.0;        ///< Default PEL [mg/m³], 30 CFR 56.5001
+    constexpr amrex::Real PEL_DEF   = 5.0;        ///< Default PEL [mg/m³] (OSHA respirable PNOR; 30 CFR 56.5001 adopts the ACGIH TLVs)
 }
 
 /**

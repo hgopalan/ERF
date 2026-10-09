@@ -35,31 +35,47 @@ crusted surface the threshold in burned cells drops by the factor
 :math:`(1 + 0.5 \cdot 0.01)/(1 + 0.5)`, about a third, and emission rises
 there. ``FireDustInteraction1`` isolates this path.
 
-Fire outflow wind raises the friction velocity
+Fire wind and the friction velocity
 ----------------------------------------------
 
 With :cpp:`erf.fire_dust_wind_to_dust` (on by default once the coupling is
-on) the fire's effective wind, the wind the spread model sees at
-:cpp:`erf.fire.wind_ref_ht`, is averaged over the fire cells covering each
-dust cell and converted to a friction velocity by the log law
+on) the fire's wind at :cpp:`erf.fire.wind_ref_ht` (``fire_wind_ref``, the
+reference wind before the wind adjustment factor; it is the datum
+:cpp:`erf.fire_dust_wind_zref` names) is copied cell for cell onto the dust
+grid and converted to a friction velocity by the log law
 
 .. math::
 
    u_{*,\mathrm{fire}} = \frac{\kappa\, |U_\mathrm{fire}|}{\ln(z_\mathrm{ref}/z_0)}
 
-with :cpp:`erf.fire_dust_wind_zref` and :cpp:`erf.fire_dust_wind_z0`; the
-larger of it and the surface-layer value is kept. Cells at and downwind of
-the perimeter therefore see the fire's wind where it exceeds the ambient
-one. In the neutral ABL of the canonical cases the ambient :math:`u_*` is
-already above the fire's, so ``FireDustInteraction2`` uses the weak-wind
-sounding to make the fire path the larger one, and ``FireDustWindStrength``
-varies the ambient wind.
+with :cpp:`erf.fire_dust_wind_zref` (which follows :cpp:`erf.fire.wind_ref_ht`)
+and :cpp:`erf.fire_dust_wind_z0`; inside the fire perimeter (level set below
+zero) the larger of it and the surface-layer value is kept, outside it the
+surface layer's :math:`u_*` stands. The fire's reference wind is the
+atmospheric wind interpolated to that height, inside the perimeter as well as
+outside, so this path adds no wind the surface layer did not see: it is a
+neutral log law on ``fire_dust_wind_z0`` in place of the surface layer's
+stability-corrected :math:`u_*` at ``erf.most.zref``, kept as a stand-in for
+the fire-modified surface layer in burning cells. With ``erf.most.z0 = 0.01``
+and the default ``z0 = 0.1`` the fire value is 1.5x the surface layer's in
+every cell, and until October 2026 it overrode the surface layer domain-wide
+(a warning now names a ``fire_dust_wind_z0`` that differs from
+``erf.most.z0``). Earlier still the
+WAF-reduced midflame wind ``fire_wind_eff`` was handed over as if it were the
+wind at ``wind_ref_ht``, 0.36x for grass, so the fire path never exceeded the
+surface layer's :math:`u_*`.
+``FireDustInteraction2`` uses the weak-wind sounding and
+``FireDustWindStrength`` varies the ambient wind.
 
 Fire heat lofts the dust
 ------------------------
 
 With :cpp:`erf.fire_dust_lofting_enabled` the emission flux of every bin is
-multiplied, after the dust step, by
+multiplied, inside the dust step right after the blast and haul-road
+additions and before the critical-material budget, the super-particle
+release and the diagnostics read it (until October 2026 it was applied after
+the dust step, so the budget and the particles booked a third of what the
+atmosphere received in burning cells), by
 
 .. math::
 

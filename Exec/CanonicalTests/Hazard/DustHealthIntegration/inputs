@@ -58,7 +58,6 @@ erf.dust.grid_ratio = 1
 erf.dust.particle_density = 2650.0
 erf.dust.z0_dust = 0.01
 erf.dust.silt_fraction = 0.10
-erf.dust.threshold_A_coeff = 0.1
 erf.dust.crust_index = 0.0
 erf.dust.alpha_crust = 0.5
 erf.dust.alpha_efflor = 0.3
@@ -103,7 +102,7 @@ erf.dust.suppression_file = ""
 # Phase 7: All three health exposure diagnostics enabled
 # Visibility
 erf.dust.visibility_enable = true
-erf.dust.visibility_k_ext = 4000.0
+erf.dust.visibility_k_ext = 600.0        # m2/kg, inside the 300-1000 literature range (4000 until October 2026)
 erf.dust.visibility_road_closure_m = 300.0
 erf.dust.visibility_warning_m = 1000.0
 erf.dust.visibility_diag_file = "visibility_diag.csv"

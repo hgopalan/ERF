@@ -1,124 +1,37 @@
 #include <ERF_FireDustCoupling.H>
-#include <ERF_HostFabView.H>
 
 #if defined(ERF_ENABLE_FIRE) && defined(ERF_USE_DUST)
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_MFIter.H>
-#include <AMReX_Loop.H>
 
 using namespace amrex;
 
-void FireDustCoupling::apply_burned_area_to_crust(
-    MultiFab&       dust_crust_index,
-    const Geometry& geom_dust) const
+void FireDustCoupling::apply_burned_area_to_crust(MultiFab& dust_crust_index) const
 {
-    if (!enabled || fire_phi_mf == nullptr) {
+    if (!enabled || fire_phi_scratch == nullptr) {
         return;
     }
-
-    // -----------------------------------------------------------------------
-    // Build a host-side flat array of fire phi values so we can look up
-    // any fire cell by (i_f, j_f) index without needing MFIter alignment.
-    // This is safe because the fire sub-grid is small (e.g. 16x16x1).
-    // -----------------------------------------------------------------------
-    const Box& fire_domain = geom_fire.Domain();
-    const int fi_lo = fire_domain.smallEnd(0);
-    const int fj_lo = fire_domain.smallEnd(1);
-    const int fi_hi = fire_domain.bigEnd(0);
-    const int fj_hi = fire_domain.bigEnd(1);
-    const int fnx   = fi_hi - fi_lo + 1;
-    const int fny   = fj_hi - fj_lo + 1;
-
-    // Copy fire phi into a CPU vector indexed as phi_host[j * fnx + i]
-    amrex::Vector<amrex::Real> phi_host(fnx * fny, 0.0_rt);
-
-    for (MFIter mfi_f(*fire_phi_mf); mfi_f.isValid(); ++mfi_f) {
-        const Box& bx_f = mfi_f.validbox();
-        // amrex::Loop runs on the host, and under CUDA the fire level set lives
-        // in device memory, so stage the FAB before reading it. Gathering into a
-        // flat host vector is the right shape here: the result feeds an MPI
-        // reduce so every rank ends up with the whole fire field.
-        const ERFHostFabView phi_view((*fire_phi_mf)[mfi_f]);
-        auto phi_arr = phi_view.array();
-        amrex::Loop(bx_f, [&](int i, int j, int /*k*/) {
-            int ii = i - fi_lo;
-            int jj = j - fj_lo;
-            if (ii >= 0 && ii < fnx && jj >= 0 && jj < fny) {
-                phi_host[jj * fnx + ii] = phi_arr(i, j, 0);
-            }
-        });
-    }
-    // Reduce across MPI ranks so every rank has the full fire phi array
-    amrex::ParallelDescriptor::ReduceRealSum(
-        phi_host.data(), static_cast<int>(phi_host.size()));
-
-    // -----------------------------------------------------------------------
-    // For each dust cell, map its physical centre to a fire cell index and
-    // check whether fire_phi < 0 (burned). Apply crust reduction if so.
-    // -----------------------------------------------------------------------
-    const auto& fire_plo  = geom_fire.ProbLoArray();
-    const auto  fire_dx   = geom_fire.CellSizeArray();
-    const auto& dust_plo  = geom_dust.ProbLoArray();
-    const auto  dust_dx   = geom_dust.CellSizeArray();
+    // fire_phi_scratch lives on the dust BoxArray (ERF.cpp copies the level set
+    // onto it by index overlap with the dust periodicity), so burned cells are
+    // read cell for cell: no host gather, no all-reduce, no domain-sized copy.
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(fire_phi_scratch->boxArray() == dust_crust_index.boxArray(),
+        "[FIRE-DUST] apply_burned_area_to_crust: the fire level-set scratch must be on the dust BoxArray");
 
     const amrex::Real reduction = post_fire_crust_reduction;
-
-    // Copy fire phi into a GPU-resident vector for device access
-    amrex::Gpu::DeviceVector<amrex::Real> phi_device(fnx * fny);
-    amrex::Gpu::copy(amrex::Gpu::hostToDevice, phi_host.begin(), phi_host.end(), phi_device.begin());
-
-    // Capture geometry data as integers to avoid floating-point issues
-    const int fi_lo_int = fi_lo;
-    const int fj_lo_int = fj_lo;
-    const int fi_hi_int = fi_hi;
-    const int fj_hi_int = fj_hi;
-    const int fnx_int = fnx;
 
     for (MFIter mfi(dust_crust_index, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
         auto crust = dust_crust_index.array(mfi);
-
-        // Get raw device pointer for GPU access
-        const amrex::Real* phi_ptr = phi_device.data();
-        const amrex::Real fire_plo_0 = fire_plo[0];
-        const amrex::Real fire_plo_1 = fire_plo[1];
-        const amrex::Real fire_dx_0 = fire_dx[0];
-        const amrex::Real fire_dx_1 = fire_dx[1];
-        const amrex::Real dust_plo_0 = dust_plo[0];
-        const amrex::Real dust_plo_1 = dust_plo[1];
-        const amrex::Real dust_dx_0 = dust_dx[0];
-        const amrex::Real dust_dx_1 = dust_dx[1];
-
-        // Use ParallelFor for GPU/CPU compatibility
+        auto phi   = fire_phi_scratch->const_array(mfi);
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            // Physical centre of this dust cell
-            amrex::Real xc = dust_plo_0 + (i + 0.5_rt) * dust_dx_0;
-            amrex::Real yc = dust_plo_1 + (j + 0.5_rt) * dust_dx_1;
-
-            // Corresponding fire cell index (nearest cell containing xc, yc)
-            int i_f = static_cast<int>((xc - fire_plo_0) / fire_dx_0);
-            int j_f = static_cast<int>((yc - fire_plo_1) / fire_dx_1);
-
-            // Clamp to valid fire domain
-            i_f = amrex::max(fi_lo_int, amrex::min(fi_hi_int, i_f + fi_lo_int));
-            j_f = amrex::max(fj_lo_int, amrex::min(fj_hi_int, j_f + fj_lo_int));
-
-            int ii = i_f - fi_lo_int;
-            int jj = j_f - fj_lo_int;
-
-            // Apply crust reduction if fire_phi < 0 (burned)
-            if (phi_ptr[jj * fnx_int + ii] < 0.0_rt) {
+            if (phi(i, j, 0) < 0.0_rt) {
                 crust(i, j, k) *= (1.0_rt - reduction);
                 crust(i, j, k)  = amrex::max(crust(i, j, k), 0.0_rt);
             }
         });
     }
-
-    // ParallelFor is asynchronous; phi_device frees its device allocation at the
-    // end of this function. Let the kernels finish reading it.
-    amrex::Gpu::streamSynchronize();
 
     if (debug) {
         amrex::Real crust_min = dust_crust_index.min(0);
@@ -132,6 +45,7 @@ void FireDustCoupling::apply_burned_area_to_crust(
 void FireDustCoupling::apply_fire_wind_to_dust_ustar(
     amrex::MultiFab&       dust_ustar_in,
     const amrex::MultiFab& fire_wind_scratch,
+    const amrex::MultiFab& fire_phi_scratch,
     const amrex::Geometry& /*geom_dust*/,
     amrex::Real            z0,
     amrex::Real            zref,
@@ -158,9 +72,18 @@ void FireDustCoupling::apply_fire_wind_to_dust_ustar(
         const amrex::Box& bx = mfi.tilebox();
         auto ustar = dust_ustar_in.array(mfi);
         auto wind  = fire_wind_scratch.const_array(mfi);
+        auto phi   = fire_phi_scratch.const_array(mfi);
 
         amrex::ParallelFor(bx,
             [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                // Only inside the fire perimeter (phi < 0). Outside it the
+                // reference wind is the atmospheric wind the surface layer
+                // already saw, and a neutral log law on fire_dust_wind_z0
+                // differs from the surface layer's u* by the roughness and
+                // stability it ignores (1.5x domain-wide for most.z0 = 0.01
+                // against 0.1), which until October 2026 overrode the surface
+                // layer everywhere.
+                if (phi(i, j, 0) >= 0.0) return;
                 const amrex::Real u_avg = wind(i, j, 0, 0);
                 const amrex::Real v_avg = wind(i, j, 0, 1);
 

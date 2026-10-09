@@ -64,12 +64,12 @@ erf.dust.dust_debug = false
 erf.dust.grid_ratio = 1
 
 # Number of particle size bins; each bin is one component of the emission
-# flux [Integer > 0]
+# flux [Integer 1-8]
 erf.dust.n_size_bins = 3
 
-# Per-bin diameter [m]; bin 0 sets the Bagnold base threshold, and all bins
-# drive settling, deposition and PM classification; the last value repeats
-# when shorter than n_size_bins [Reals]
+# Per-bin diameter of the emitted dust [m], one per bin (the count must
+# equal n_size_bins); they drive settling, deposition and the PM classes,
+# not the threshold (see saltation_diameter) [Reals]
 erf.dust.bin_diameters = 7.0e-6 2.5e-6 50.0e-6
 
 # Bulk particle density [kg/m³] [Real > 0]
@@ -78,12 +78,13 @@ erf.dust.particle_density = 2650.0
 # Air density used in the threshold and saltation flux [kg/m³] [Real > 0]
 erf.dust.rho_air = 1.225
 
-# Roughness length of the emitting surface [m], used by the log-law friction
-# velocity of the terrain-corrected wind [Real > 0]
+# Roughness length of the emitting surface [m]: the log-law friction
+# velocity with use_terrain_wind and terrain_ustar = loglaw; otherwise it
+# only bounds zref (a warning says so when a deck sets it) [Real > 0]
 erf.dust.z0_dust = 0.01
 
 # Height at which the wind is taken from the atmosphere [m]; set equal to
-# erf.most.zref [Real > 0]
+# erf.most.zref [Real > z0_dust, below the domain top]
 erf.dust.zref = 10.0
 
 # ---------------------------------------------------------------------------
@@ -95,17 +96,33 @@ erf.dust.silt_fraction = 0.10
 # Surface crust strength index; 0 loose, 1 fully crusted [Real 0-1]
 erf.dust.crust_index = 0.0
 
-# Bagnold fluid-threshold constant A [-] (0.1; 0.0123 is Shao and Lu's
-# coefficient of a different formula and gave 8x too low a threshold) [Real
-# > 0]
+# Base threshold formula for the saltating grains: shao_lu (Shao and Lu 2000
+# with the cohesion term, 0.204 m/s at 75 um) or bagnold (inertial branch
+# only, valid above ~100 um) [shao_lu or bagnold]
+erf.dust.threshold_model = shao_lu
+
+# Diameter of the saltating grains the threshold is evaluated for [m]; the
+# bin diameters are the emitted sizes. Until October 2026 the threshold was
+# Bagnold's at the 7 um bin-0 diameter (0.0385 m/s), 13x too low [Real > 0]
+erf.dust.saltation_diameter = 75.0e-6
+
+# Shao and Lu (2000) coefficient A_N [-] [Real > 0]
+erf.dust.shao_lu_A_N = 0.0123
+
+# Shao and Lu (2000) cohesion parameter gamma [kg/s^2] [Real >= 0]
+erf.dust.shao_lu_gamma = 1.65e-4
+
+# Bagnold fluid-threshold constant A [-] (threshold_model = bagnold) [Real >
+# 0]
 erf.dust.threshold_A_coeff = 0.1
 
 # Base threshold friction velocity before the modifiers [m/s]; negative
-# computes the Bagnold value from bin 0 at startup [Real]
+# computes it from threshold_model at saltation_diameter at startup (0.0385
+# reproduces the pre-October-2026 runs) [Real]
 erf.dust.ustar_t_base = -1.0
 
 # Crust factor on the threshold: f_chem carries (1 + alpha_crust *
-# crust_index) [Real >= 0]
+# crust_index); every modifier multiplies the threshold [Real >= 0]
 erf.dust.alpha_crust = 0.5
 
 # Efflorescence factor on the threshold: (1 + alpha_efflor * efflorescence)
@@ -134,9 +151,16 @@ erf.dust.terrain_file = ""
 # ---------------------------------------------------------------------------
 # Wind and terrain
 # ---------------------------------------------------------------------------
-# Apply the FARSITE terrain correction to the wind at zref and recompute u*
-# from it by the log law [Boolean]
+# Apply the FARSITE terrain correction to the wind at zref; u* follows it as
+# terrain_ustar says [Boolean]
 erf.dust.use_terrain_wind = false
+
+# How the friction velocity follows the terrain-corrected wind: scale
+# multiplies the surface layer's u* by U_corrected / U_raw; loglaw (the form
+# until October 2026) re-derives u* = kappa U / ln(zref / z0_dust), a
+# neutral law on another roughness that gave 0.70x on flat ground [scale or
+# loglaw]
+erf.dust.terrain_ustar = scale
 
 # Ridge speed-up factor of the terrain correction [Real]
 erf.dust.k_ridge = 1.5
@@ -182,13 +206,11 @@ erf.dust.phreeqc_efflor_var = "efflorescence"
 # Column holding the suppression modifier [String]
 erf.dust.phreeqc_supp_var = "suppression_mod"
 
-# Column holding the toxic-metal mass fraction of bin 0 [String]
-erf.dust.phreeqc_metal_var = "metal_as_bin0"
-
 # Names of the mine sites; empty means a single global table [Strings]
 # erf.dust.site_names =
 
-# Per-site PHREEQC table; an empty entry uses the global table [Strings]
+# Per-site PHREEQC table read over that site's cells after the global one;
+# an empty entry (or no list) keeps the global table there [Strings]
 # erf.dust.site_phreeqc_files =
 
 # Site bounding-box lower x [m], one per site [Reals]
@@ -220,7 +242,8 @@ erf.dust.phreeqc_site_summary_file = "dust_dep_site_summary.csv"
 # Blast schedule CSV; empty means no blasts [String]
 erf.dust.blast_schedule_file = ""
 
-# Multiplier on the injected blast mass for fresh surfaces [-] [Real >= 1]
+# Multiplier on the injected blast mass for fresh surfaces [-]; below 1
+# injects less than the charge mass [Real >= 0]
 erf.dust.blast_reactivity = 2.0
 
 # Haul road schedule CSV; empty means no road emission [String]
@@ -240,13 +263,21 @@ erf.dust.supp_tau_base_s = 3600.0
 # diagnostics [Real 0-1]
 erf.dust.atm_feedback = 1.0
 
-# One 3D scalar per bin instead of a single total; only bin 0 is returned to
-# the surface at present [Boolean]
+# One 3D scalar per bin instead of a single total; the state carries one
+# dust scalar, so it is accepted only with n_size_bins = 1 (more aborts)
+# [Boolean]
 erf.dust.transport_bins_separately = false
 
 # Surface collection efficiency of the dry-deposition resistance [-]; 3e-3
-# bare mine surface, 1e-4 paved road, 1e-2 vegetation [Real > 0]
+# bare mine surface, 1e-4 paved road, 1e-2 vegetation; 0 removes the
+# collection term (v_d = v_s) [Real >= 0]
 erf.dust.deposition_E0 = 3.0e-3
+
+# Settling and deposition velocity of the single transported scalar: mean
+# averages the bins' Stokes velocities weighted by their shares of the mass
+# emitted so far (equal until anything is emitted); bin0 (the form until
+# October 2026) uses bin 0 alone [mean or bin0]
+erf.dust.lumped_settling = mean
 
 # Shao (2001) loading feedback on the threshold [m³/kg]; 0 disables [Real >=
 # 0]
@@ -268,15 +299,19 @@ erf.fire_dust_coupling = false
 # [Real 0-1]
 erf.fire_dust_crust_reduction = 0.8
 
-# Raise the dust u* to the log-law value of the fire's effective wind where
-# that is larger [Boolean]
+# Inside the fire perimeter, raise the dust u* to the log-law value of the
+# fire's reference wind (fire_wind_ref, at erf.fire.wind_ref_ht) where that
+# is larger; outside it the surface layer's u* stands [Boolean]
 erf.fire_dust_wind_to_dust = true
 
-# Roughness length of that log law [m] [Real > 0]
+# Roughness length of that log law [m]; with the fire wind feeding the dust
+# a value other than erf.most.z0 is warned about, otherwise the key is not
+# read (warned) [Real > 0]
 erf.fire_dust_wind_z0 = 0.1
 
-# Reference height of that log law [m]; match erf.fire.wind_ref_ht [Real >
-# 0]
+# Reference height of that log law [m]: follows erf.fire.wind_ref_ht; with
+# the fire wind feeding the dust a different value aborts, otherwise the key
+# is not read (warned) [= erf.fire.wind_ref_ht]
 erf.fire_dust_wind_zref = 6.1
 
 # Multiply the emission flux by the convective lofting factor of the fire
@@ -310,8 +345,8 @@ erf.mrf_fire_t_excess_cap = 50.0
 # ---------------------------------------------------------------------------
 # Output and diagnostics
 # ---------------------------------------------------------------------------
-# Steps between dust plotfiles; -1 disables, 0 writes only at the final step
-# [Integer]
+# Steps between dust plotfiles; <= 0 writes only the final step's plotfile
+# (and the step-0 CSV row is written whatever the value) [Integer]
 erf.dust.dust_plot_int = -1
 
 # Dust plotfile prefix [String]
@@ -322,6 +357,13 @@ erf.dust.dust_diag_file = "dust_diag.dat"
 
 # EPA NAAQS PM2.5 and PM10 CSV [String]
 erf.dust.dust_naaqs_file = "dust_naaqs.csv"
+
+# The 24-hour PM averages and the STEL: window (the block mean of a ring of
+# 24 hourly slots, or 15 slots of the STEL period, the 40 CFR 50 form; the
+# exceedance flags compare once the window is full) or exponential (the
+# running mean until October 2026, 0.632 C after one window of a constant C)
+# [window or exponential]
+erf.dust.averaging = window
 
 # MSHA permissible exposure limit on the 8-hour TWA [mg/m³] [Real > 0]
 erf.dust.msha_pel_mg_m3 = 5.0
@@ -351,11 +393,15 @@ erf.dust.msha_shift_file = "msha_shift_summary.csv"
 # Critical-material budget CSV [String]
 erf.dust.cm_budget_file = "dust_cm_budget.csv"
 
+# Steps between critical-material budget rows [Integer > 0]
+erf.dust.cm_budget_int = 1
+
 # Koschmieder visibility from PM10 [Boolean]
 erf.dust.visibility_enable = false
 
-# Mass extinction coefficient [m²/kg] [Real > 0]
-erf.dust.visibility_k_ext = 4.0e3
+# Mass extinction coefficient [m²/kg]; 300-1000 for mineral dust (the
+# default was 4000 until October 2026, 4-13x above that range) [Real > 0]
+erf.dust.visibility_k_ext = 600.0
 
 # Haul-road closure threshold [m] [Real > 0]
 erf.dust.visibility_road_closure_m = 300.0

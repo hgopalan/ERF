@@ -6,13 +6,20 @@
  *   https://github.com/hgopalan/ERF/blob/ERF-Fire/Source/Fire/ERF_FireStatsOutput.H
  *
  * Writes per-step scalar diagnostics to dust_diag.dat:
- *   step, time[s], emission_total[kg/s], deposition_total[kg/m^2],
+ *   step, time[s], emission_total[kg/s], deposition_total[kg],
  *   ustar_max[m/s], flux_max[kg/m^2/s], conc_sfc_max[kg/m^3]
+ * The totals are integrals over the dust grid: the flux summed over every bin
+ * and every cell times the cell area, the deposited mass per area summed over
+ * the cells times the cell area. (Until October 2026 the "total" was the
+ * bin-0 flux summed over the cells with no area, 4e5x off on the 375 m
+ * canonical grid, and the deposition column was a cell sum of kg/m2.)
  *
  * Header written on first call (file does not exist).
  * Subsequent calls append one row.
  * Only IOProcessor writes; all ranks compute reductions.
  */
+#ifndef ERF_DUST_STATS_OUTPUT_H
+#define ERF_DUST_STATS_OUTPUT_H
 #ifdef ERF_USE_DUST
 #include <AMReX_MultiFab.H>
 #include <AMReX_ParallelDescriptor.H>
@@ -33,7 +40,7 @@ inline void write_dust_stats_header(const std::string& filename)
         return;
     }
     out << "# ERF-Dust diagnostic time series\n"
-        << "step,time_s,emission_total_kg_s,deposition_total_kg_m2,"
+        << "step,time_s,emission_total_kg_s,deposition_total_kg,"
         << "ustar_max_m_s,flux_max_kg_m2_s,conc_sfc_max_kg_m3\n";
 }
 
@@ -42,11 +49,16 @@ inline void append_dust_stats(int step, amrex::Real time_s,
                                const amrex::MultiFab* emission_flux,
                                const amrex::MultiFab* deposition_rate,
                                const amrex::MultiFab* ustar_in,
-                               const amrex::MultiFab* conc_sfc)
+                               const amrex::MultiFab* conc_sfc,
+                               amrex::Real cell_area)
 {
     // Compute domain scalars on all ranks then reduce.
-    amrex::Real em_sum  = emission_flux   ? emission_flux->sum(0)   : 0.0;
-    amrex::Real dep_sum = deposition_rate ? deposition_rate->sum(0) : 0.0;
+    amrex::Real em_sum = 0.0;
+    if (emission_flux) {
+        for (int b = 0; b < emission_flux->nComp(); ++b) em_sum += emission_flux->sum(b);
+        em_sum *= cell_area;                                   // [kg/s]
+    }
+    amrex::Real dep_sum = deposition_rate ? deposition_rate->sum(0) * cell_area : 0.0;   // [kg]
     amrex::Real us_max  = ustar_in        ? ustar_in->max(0)        : 0.0;
     amrex::Real fl_max  = emission_flux   ? emission_flux->max(0)   : 0.0;
     amrex::Real cs_max  = conc_sfc        ? conc_sfc->max(0)        : 0.0;
@@ -62,7 +74,7 @@ inline void append_dust_stats(int step, amrex::Real time_s,
     }
     if (!file_exists) {
         out << "# ERF-Dust diagnostic time series\n"
-            << "step,time_s,emission_total_kg_s,deposition_total_kg_m2,"
+            << "step,time_s,emission_total_kg_s,deposition_total_kg,"
             << "ustar_max_m_s,flux_max_kg_m2_s,conc_sfc_max_kg_m3\n";
     }
     out << step    << "," << time_s  << ","
@@ -71,3 +83,4 @@ inline void append_dust_stats(int step, amrex::Real time_s,
         << cs_max  << "\n";
 }
 #endif
+#endif // ERF_DUST_STATS_OUTPUT_H

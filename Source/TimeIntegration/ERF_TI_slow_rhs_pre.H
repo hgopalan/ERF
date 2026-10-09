@@ -140,14 +140,14 @@
         // ******************************************************************************
 #ifdef ERF_USE_DUST
         if (m_DustLayer && level == 0) {
-            const amrex::MultiFab* zphys_ptr = (z_phys_cc.size() > 0) ? z_phys_cc[level].get() : nullptr;
-            if (zphys_ptr) {
-                m_DustLayer->apply_to_cc_source(cc_src, *zphys_ptr, fine_geom);
-                m_DustLayer->apply_settling_to_cc_source(
-                    cc_src, S_data[IntVars::cons], *zphys_ptr, fine_geom);
-                m_DustLayer->apply_deposition_bc(cc_src, S_data[IntVars::cons],
-                                                  *zphys_ptr, fine_geom, slow_dt);
-            }
+            // the cell thickness is detJ dz (detJ_cc is 1 on a flat grid and is
+            // always allocated); the centre-to-centre spacing of z_phys_cc that
+            // the kernels used until October 2026 created mass on stretched grids
+            m_DustLayer->apply_to_cc_source(cc_src, *dJ_to_use, fine_geom);
+            m_DustLayer->apply_settling_to_cc_source(
+                cc_src, S_data[IntVars::cons], *dJ_to_use, fine_geom, slow_dt);
+            m_DustLayer->apply_deposition_bc(cc_src, S_data[IntVars::cons],
+                                              *dJ_to_use, fine_geom, slow_dt);
         }
 #endif
 

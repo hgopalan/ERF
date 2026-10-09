@@ -6148,25 +6148,26 @@ checked once at startup and abort with a message naming the input to fix.
 |                                              | box length must divide by it, and it must equal            |                          |                                    |
 |                                              | erf.fire.grid_ratio when the fire coupling is on           |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.n_size_bins**                     | Number of particle size bins; each bin is one component of | Integer > 0              | 3                                  |
-|                                              | the emission flux, which the bins share equally; give one  |                          |                                    |
-|                                              | erf.dust.bin_diameters entry per bin                       |                          |                                    |
+| **erf.dust.n_size_bins**                     | Number of particle size bins; each bin is one component of | Integer 1-8              | 3                                  |
+|                                              | the emission flux                                          |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.bin_diameters**                   | Per-bin diameter [m]; bin 0 sets the Bagnold base          | Reals                    | 7.0e-6 2.5e-6 50.0e-6              |
-|                                              | threshold, and all bins drive settling, deposition and PM  |                          |                                    |
-|                                              | classification; the last value repeats when shorter than   |                          |                                    |
-|                                              | n_size_bins                                                |                          |                                    |
+| **erf.dust.bin_diameters**                   | Per-bin diameter of the emitted dust [m], one per bin (the | Reals                    | 7.0e-6 2.5e-6 50.0e-6              |
+|                                              | count must equal n_size_bins); they drive settling,        |                          |                                    |
+|                                              | deposition and the PM classes, not the threshold (see      |                          |                                    |
+|                                              | saltation_diameter)                                        |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.particle_density**                | Bulk particle density [kg/m³]                              | Real > 0                 | 2650.0                             |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.rho_air**                         | Air density used in the threshold and saltation flux       | Real > 0                 | 1.225                              |
 |                                              | [kg/m³]                                                    |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.z0_dust**                         | Roughness length of the emitting surface [m], used by the  | Real > 0                 | 0.01                               |
-|                                              | log-law friction velocity of the terrain-corrected wind    |                          |                                    |
+| **erf.dust.z0_dust**                         | Roughness length of the emitting surface [m]: the log-law  | Real > 0                 | 0.01                               |
+|                                              | friction velocity with use_terrain_wind and terrain_ustar  |                          |                                    |
+|                                              | = loglaw; otherwise it only bounds zref (a warning says so |                          |                                    |
+|                                              | when a deck sets it)                                       |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.zref**                            | Height at which the wind is taken from the atmosphere [m]; | Real > 0                 | 10.0                               |
-|                                              | set equal to erf.most.zref                                 |                          |                                    |
+| **erf.dust.zref**                            | Height at which the wind is taken from the atmosphere [m]; | Real > z0_dust, below    | 10.0                               |
+|                                              | set equal to erf.most.zref                                 | the domain top           |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 
 
@@ -6184,16 +6185,30 @@ implemented.
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.crust_index**                     | Surface crust strength index; 0 loose, 1 fully crusted     | Real 0-1                 | 0.0                                |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.threshold_A_coeff**               | Bagnold fluid-threshold constant A [-] (0.1; 0.0123 is     | Real > 0                 | 0.1                                |
-|                                              | Shao and Lu's coefficient of a different formula and gave  |                          |                                    |
-|                                              | 8x too low a threshold)                                    |                          |                                    |
+| **erf.dust.threshold_model**                 | Base threshold formula for the saltating grains: shao_lu   | shao_lu or bagnold       | shao_lu                            |
+|                                              | (Shao and Lu 2000 with the cohesion term, 0.204 m/s at 75  |                          |                                    |
+|                                              | um) or bagnold (inertial branch only, valid above ~100 um) |                          |                                    |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| **erf.dust.saltation_diameter**              | Diameter of the saltating grains the threshold is          | Real > 0                 | 75.0e-6                            |
+|                                              | evaluated for [m]; the bin diameters are the emitted       |                          |                                    |
+|                                              | sizes. Until October 2026 the threshold was Bagnold's at   |                          |                                    |
+|                                              | the 7 um bin-0 diameter (0.0385 m/s), 13x too low          |                          |                                    |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| **erf.dust.shao_lu_A_N**                     | Shao and Lu (2000) coefficient A_N [-]                     | Real > 0                 | 0.0123                             |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| **erf.dust.shao_lu_gamma**                   | Shao and Lu (2000) cohesion parameter gamma [kg/s^2]       | Real >= 0                | 1.65e-4                            |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| **erf.dust.threshold_A_coeff**               | Bagnold fluid-threshold constant A [-] (threshold_model =  | Real > 0                 | 0.1                                |
+|                                              | bagnold)                                                   |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.ustar_t_base**                    | Base threshold friction velocity before the modifiers      | Real                     | -1.0                               |
-|                                              | [m/s]; negative computes the Bagnold value from bin 0 at   |                          |                                    |
-|                                              | startup                                                    |                          |                                    |
+|                                              | [m/s]; negative computes it from threshold_model at        |                          |                                    |
+|                                              | saltation_diameter at startup (0.0385 reproduces the       |                          |                                    |
+|                                              | pre-October-2026 runs)                                     |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.alpha_crust**                     | Crust factor on the threshold: f_chem carries (1 +         | Real >= 0                | 0.5                                |
-|                                              | alpha_crust * crust_index)                                 |                          |                                    |
+|                                              | alpha_crust * crust_index); every modifier multiplies the  |                          |                                    |
+|                                              | threshold                                                  |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.alpha_efflor**                    | Efflorescence factor on the threshold: (1 + alpha_efflor * | Real >= 0                | 0.3                                |
 |                                              | efflorescence)                                             |                          |                                    |
@@ -6225,8 +6240,14 @@ the ``test_*`` values are the placeholders used when no atmosphere is coupled.
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | Parameter                                    | Definition                                                 | Acceptable Values        | Default                            |
 +==============================================+============================================================+==========================+====================================+
-| **erf.dust.use_terrain_wind**                | Apply the FARSITE terrain correction to the wind at zref   | Boolean                  | false                              |
-|                                              | and recompute u* from it by the log law                    |                          |                                    |
+| **erf.dust.use_terrain_wind**                | Apply the FARSITE terrain correction to the wind at zref;  | Boolean                  | false                              |
+|                                              | u* follows it as terrain_ustar says                        |                          |                                    |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| **erf.dust.terrain_ustar**                   | How the friction velocity follows the terrain-corrected    | scale or loglaw          | scale                              |
+|                                              | wind: scale multiplies the surface layer's u* by           |                          |                                    |
+|                                              | U_corrected / U_raw; loglaw (the form until October 2026)  |                          |                                    |
+|                                              | re-derives u* = kappa U / ln(zref / z0_dust), a neutral    |                          |                                    |
+|                                              | law on another roughness that gave 0.70x on flat ground    |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.k_ridge**                         | Ridge speed-up factor of the terrain correction            | Real                     | 1.5                                |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
@@ -6268,12 +6289,11 @@ Sites give each mine its own table.
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.phreeqc_supp_var**                | Column holding the suppression modifier                    | String                   | ``"suppression_mod"``              |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.phreeqc_metal_var**               | Column holding the toxic-metal mass fraction of bin 0      | String                   | ``"metal_as_bin0"``                |
-+----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.site_names**                      | Names of the mine sites; empty means a single global table | Strings                  | none                               |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.site_phreeqc_files**              | Per-site PHREEQC table; an empty entry uses the global     | Strings                  | none                               |
-|                                              | table                                                      |                          |                                    |
+| **erf.dust.site_phreeqc_files**              | Per-site PHREEQC table read over that site's cells after   | Strings                  | none                               |
+|                                              | the global one; an empty entry (or no list) keeps the      |                          |                                    |
+|                                              | global table there                                         |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.site_x_lo**                       | Site bounding-box lower x [m], one per site                | Reals                    | none                               |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
@@ -6304,12 +6324,10 @@ are in :ref:`sec:DustSources`.
 +==============================================+============================================================+==========================+====================================+
 | **erf.dust.blast_schedule_file**             | Blast schedule CSV; empty means no blasts                  | String                   | ``""``                             |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.blast_reactivity**                | Multiplier on the injected blast mass for fresh surfaces   | Real >= 1                | 2.0                                |
-|                                              | [-]                                                        |                          |                                    |
+| **erf.dust.blast_reactivity**                | Multiplier on the injected blast mass for fresh surfaces   | Real >= 0                | 2.0                                |
+|                                              | [-]; below 1 injects less than the charge mass             |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.road_schedule_file**              | Haul road schedule CSV; empty means no road emission; a    | String                   | ``""``                             |
-|                                              | file that cannot be read, or a row with width <= 0,        |                          |                                    |
-|                                              | weight <= 0 or silt < 0, aborts                            |                          |                                    |
+| **erf.dust.road_schedule_file**              | Haul road schedule CSV; empty means no road emission       | String                   | ``""``                             |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.road_diag_file**                  | Per-road emission CSV                                      | String                   | ``"dust_road_diag.csv"``           |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
@@ -6332,11 +6350,18 @@ on the same scalar.
 |                                              | surface-only diagnostics                                   |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.transport_bins_separately**       | One 3D scalar per bin instead of a single total; the state | Boolean                  | false                              |
-|                                              | carries one dust scalar, so true needs n_size_bins = 1     |                          |                                    |
+|                                              | carries one dust scalar, so it is accepted only with       |                          |                                    |
+|                                              | n_size_bins = 1 (more aborts)                              |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.deposition_E0**                   | Surface collection efficiency of the dry-deposition        | Real >= 0                | 3.0e-3                             |
 |                                              | resistance [-]; 3e-3 bare mine surface, 1e-4 paved road,   |                          |                                    |
-|                                              | 1e-2 vegetation                                            |                          |                                    |
+|                                              | 1e-2 vegetation; 0 removes the collection term (v_d = v_s) |                          |                                    |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| **erf.dust.lumped_settling**                 | Settling and deposition velocity of the single transported | mean or bin0             | mean                               |
+|                                              | scalar: mean averages the bins' Stokes velocities weighted |                          |                                    |
+|                                              | by their shares of the mass emitted so far (equal until    |                          |                                    |
+|                                              | anything is emitted); bin0 (the form until October 2026)   |                          |                                    |
+|                                              | uses bin 0 alone                                           |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.loading_feedback_coeff**          | Shao (2001) loading feedback on the threshold [m³/kg]; 0   | Real >= 0                | 0.0                                |
 |                                              | disables                                                   |                          |                                    |
@@ -6362,13 +6387,19 @@ models are enabled; see :ref:`sec:DustFire`.
 | **erf.fire_dust_crust_reduction**            | Fraction of the baseline crust index removed in burned     | Real 0-1                 | 0.8                                |
 |                                              | cells each step                                            |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.fire_dust_wind_to_dust**               | Raise the dust u* to the log-law value of the fire's       | Boolean                  | true                               |
-|                                              | effective wind where that is larger                        |                          |                                    |
+| **erf.fire_dust_wind_to_dust**               | Inside the fire perimeter, raise the dust u* to the        | Boolean                  | true                               |
+|                                              | log-law value of the fire's reference wind (fire_wind_ref, |                          |                                    |
+|                                              | at erf.fire.wind_ref_ht) where that is larger; outside it  |                          |                                    |
+|                                              | the surface layer's u* stands                              |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.fire_dust_wind_z0**                    | Roughness length of that log law [m]                       | Real > 0                 | 0.1                                |
+| **erf.fire_dust_wind_z0**                    | Roughness length of that log law [m]; with the fire wind   | Real > 0                 | 0.1                                |
+|                                              | feeding the dust a value other than erf.most.z0 is warned  |                          |                                    |
+|                                              | about, otherwise the key is not read (warned)              |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.fire_dust_wind_zref**                  | Reference height of that log law [m]; match                | Real > fire_dust_wind_z0 | 6.1                                |
-|                                              | erf.fire.wind_ref_ht                                       |                          |                                    |
+| **erf.fire_dust_wind_zref**                  | Reference height of that log law [m]: follows              | = erf.fire.wind_ref_ht   | 6.1                                |
+|                                              | erf.fire.wind_ref_ht; with the fire wind feeding the dust  |                          |                                    |
+|                                              | a different value aborts, otherwise the key is not read    |                          |                                    |
+|                                              | (warned)                                                   |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.fire_dust_lofting_enabled**            | Multiply the emission flux by the convective lofting       | Boolean                  | false                              |
 |                                              | factor of the fire heat flux                               |                          |                                    |
@@ -6405,20 +6436,30 @@ MRF section of :ref:`PBLschemes`.
 Output and diagnostics
 ----------------------
 
-Every CSV is written by rank 0 and appended each step; paths are relative to
-the run directory. Formats are in :ref:`sec:DustOutput`.
+Every CSV is written by rank 0 and appended each step; a run without
+erf.restart removes these files first (the log says which), a restart drops
+the rows past the restart step and appends to them; paths are relative to the
+run directory. Formats are in :ref:`sec:DustOutput`.
 
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | Parameter                                    | Definition                                                 | Acceptable Values        | Default                            |
 +==============================================+============================================================+==========================+====================================+
-| **erf.dust.dust_plot_int**                   | Steps between dust plotfiles; -1 disables, 0 writes only   | Integer                  | -1                                 |
-|                                              | at the final step                                          |                          |                                    |
+| **erf.dust.dust_plot_int**                   | Steps between dust plotfiles; <= 0 writes only the final   | Integer                  | -1                                 |
+|                                              | step's plotfile (and the step-0 CSV row is written         |                          |                                    |
+|                                              | whatever the value)                                        |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.dust_plot_prefix**                | Dust plotfile prefix                                       | String                   | ``"plt_dust_"``                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.dust_diag_file**                  | Per-step domain statistics CSV                             | String                   | ``"dust_diag.dat"``                |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.dust_naaqs_file**                 | EPA NAAQS PM2.5 and PM10 CSV                               | String                   | ``"dust_naaqs.csv"``               |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| **erf.dust.averaging**                       | The 24-hour PM averages and the STEL: window (the block    | window or exponential    | window                             |
+|                                              | mean of a ring of 24 hourly slots, or 15 slots of the STEL |                          |                                    |
+|                                              | period, the 40 CFR 50 form; the exceedance flags compare   |                          |                                    |
+|                                              | once the window is full) or exponential (the running mean  |                          |                                    |
+|                                              | until October 2026, 0.632 C after one window of a constant |                          |                                    |
+|                                              | C)                                                         |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.msha_pel_mg_m3**                  | MSHA permissible exposure limit on the 8-hour TWA [mg/m³]  | Real > 0                 | 5.0                                |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
@@ -6439,9 +6480,13 @@ the run directory. Formats are in :ref:`sec:DustOutput`.
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.cm_budget_file**                  | Critical-material budget CSV                               | String                   | ``"dust_cm_budget.csv"``           |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| **erf.dust.cm_budget_int**                   | Steps between critical-material budget rows                | Integer > 0              | 1                                  |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.visibility_enable**               | Koschmieder visibility from PM10                           | Boolean                  | false                              |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.dust.visibility_k_ext**                | Mass extinction coefficient [m²/kg]                        | Real > 0                 | 4.0e3                              |
+| **erf.dust.visibility_k_ext**                | Mass extinction coefficient [m²/kg]; 300-1000 for mineral  | Real > 0                 | 600.0                              |
+|                                              | dust (the default was 4000 until October 2026, 4-13x above |                          |                                    |
+|                                              | that range)                                                |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.visibility_road_closure_m**       | Haul-road closure threshold [m]                            | Real > 0                 | 300.0                              |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+

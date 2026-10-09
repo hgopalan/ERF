@@ -2,9 +2,10 @@
  * @file ERF_DustSTEL.H
  * @brief 15-minute short-term exposure limit (STEL) for total dust.
  *
- * STEL_15min [mg/m³] = running average of PM10 [µg/m³]*1e-3 over 900 s.
- * Uses update_running_average() from ERF_DustPM.H with T_avg=900 s.
- * OSHA STEL nuisance dust: 10 mg/m³.
+ * STEL_15min [mg/m³] = mean of PM10 [µg/m³]*1e-3 over the last 900 s: a block
+ * mean over a ring of 15 one-minute means (erf.dust.averaging = window), or the
+ * exponential running mean used until October 2026 (averaging = exponential,
+ * 0.632 C after 900 s of a constant C). OSHA STEL nuisance dust: 10 mg/m³.
  *
  * References:
  *   OSHA 29 CFR 1910.1000 Table Z-1.
@@ -38,7 +39,8 @@ inline void update_stel_average(
     amrex::MultiFab&       stel_avg_mf,
     const amrex::MultiFab& pm10_mf,
     amrex::Real            dt,
-    amrex::Real            T_avg)
+    amrex::Real            T_avg,
+    DustWindowMean*        window = nullptr)
 {
     using namespace amrex;
 
@@ -56,19 +58,13 @@ inline void update_stel_average(
         });
     }
 
-    // Update STEL running average using exponential moving average
-    AMREX_ASSERT(T_avg > 0.0 && dt <= T_avg);
-    for (MFIter mfi(stel_avg_mf, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-        const Box& bx = mfi.tilebox();
-        auto stel = stel_avg_mf.array(mfi);
-        auto pm10_mg = pm10_mg_m3.const_array(mfi);
-
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-            // Running average: stel = stel * (1 - dt/T_avg) + pm10_mg * (dt/T_avg)
-            Real alpha = dt / T_avg;
-            stel(i,j,k) = stel(i,j,k) * (1.0 - alpha) + pm10_mg(i,j,k) * alpha;
-        });
+    if (window) {
+        window->update(pm10_mg_m3, dt, stel_avg_mf);
+        return;
     }
+    // exponential running mean, the weight clamped (a dt above T_avg aborted
+    // the Debug build and let the Release average alternate sign)
+    update_running_average(stel_avg_mf, pm10_mg_m3, dt, T_avg);
 }
 
 /**

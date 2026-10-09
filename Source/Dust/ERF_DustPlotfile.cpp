@@ -57,6 +57,8 @@ void WriteDustPlotfile(const std::string& plotfile_prefix,
 
     Vector<std::string> varnames = dust_plotfile_var_names();
     int ncomp = dust_plotfile_ncomp();
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE((int)varnames.size() == ncomp,
+        "[DUST] dust plotfile catalog: the name list and dust_plotfile_ncomp() disagree");
 
     // Assemble all fields into one MultiFab.
     // Null fields (e.g. dust_surf_moist when no moisture scheme) are zeroed.
@@ -99,6 +101,7 @@ void WriteDustPlotfile(const std::string& plotfile_prefix,
 
     // Phase 23: DOE Critical Materials Assessment
     copy_if(dust_layer.get_cm_flux(),         20);
+    copy_if(dust_layer.get_surf_moist(),      21);
 
 
     std::string plotfilename = Concatenate(plotfile_prefix, step, 5);

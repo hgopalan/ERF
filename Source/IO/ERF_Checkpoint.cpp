@@ -2805,16 +2805,27 @@ ERF::ReadCheckpointFileDust ()
     const std::string probe = restart_chkfile + "/Level_0/DustDepositionRate_H";
     if (!amrex::FileExists(probe)) {
         amrex::Print() << "[DUST] No dust state found in checkpoint; starting the dust"
-                       << " layer from its initial values.\n";
+                       << " layer from its initial values at the atmosphere's step and time.\n";
+        // the dust clock (blast windows, road start times, PHREEQC and MSHA
+        // intervals) follows the atmosphere's, not zero (it started at zero
+        // when dust was enabled on a restart until October 2026)
+        m_DustLayer->read_checkpoint_state(restart_chkfile, istep[0], t_new[0]);
+        // a fresh dust leg: stale CSVs of an earlier dust attempt are not continued
+        m_DustLayer->remove_outputs_for_fresh_start();
+        m_DustLayer->write_diag_header();
         return;
     }
     amrex::Print() << "[DUST] Restoring dust state from checkpoint " << restart_chkfile << "\n";
+    // the layout aborts first: VisMF::Read dies on a mismatched BoxArray or
+    // component count with no mention of dust
+    m_DustLayer->check_checkpoint_layout(restart_chkfile);
 
     // The ghost cells come back from the file as they were, with no boundary
-    // fill afterwards: the dust kernels read ghost cells at box edges that the
-    // run does not refill every step, so a fill here would hand the restarted
-    // run different edge values from the uninterrupted one on more than one
-    // rank.
+    // fill afterwards. No dust kernel reads a ghost cell of a checkpointed
+    // field (the only stencils, the terrain slopes and the FARSITE wind
+    // factors, work on fields built at start-up); if one is added, FillBoundary
+    // it after this read and in advance() alike, or the restarted run differs
+    // from the uninterrupted one at box edges.
     for (auto& nf : m_DustLayer->checkpoint_fields()) {
         const std::string header = restart_chkfile + "/Level_0/" + nf.first + "_H";
         if (!amrex::FileExists(header)) {
@@ -2825,6 +2836,7 @@ ERF::ReadCheckpointFileDust ()
         VisMF::Read(*nf.second, amrex::MultiFabFileFullPrefix(0, restart_chkfile, "Level_", nf.first));
     }
     m_DustLayer->read_checkpoint_state(restart_chkfile, istep[0], t_new[0]);
+    m_DustLayer->trim_outputs_after_restart(istep[0]);   // rows past the restart step go
 #ifdef ERF_USE_PARTICLES
     m_DustLayer->restart_particles(restart_chkfile);
 #endif

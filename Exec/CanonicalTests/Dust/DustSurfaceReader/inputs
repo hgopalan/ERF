@@ -77,7 +77,6 @@ erf.dust.grid_ratio                = 1
 erf.dust.particle_density          = 2650.0
 erf.dust.z0_dust                   = 0.01
 erf.dust.silt_fraction             = 0.10
-erf.dust.threshold_A_coeff         = 0.1
 erf.dust.crust_index               = 0.0
 erf.dust.phreeqc_update_interval_s = 86400.0
 erf.dust.phreeqc_output_file       = ""
