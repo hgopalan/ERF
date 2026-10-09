@@ -15,7 +15,7 @@ HaboobFireHill and HaboobFirePit run the same cold pool and fire over a
 | Background | `sounding_neutral_abl`: theta 300 K to 468 m, inversion to 308 K at 551 m, u = 5 m/s at all heights; `erf.abl_geo_wind = 5 0 0`; MRF PBL |
 | Cold pool | `erf.prob_name = "Bubble"`: -10 K air temperature (`prob.T_pert_is_airtemp = true`), cos^2 profile centred at (1500, 2000, 0) m with radii (1000, 4000, 600) m |
 | Fire | Fuel model 1 (short grass), 1-h moisture 0.04, ignition disc r = 150 m at (3500, 2000) m; level set with directional ROS, lagged two-way coupling, `source_mode = add`, `heat_flux_partition = cfbm`; `use_wind_limit = false`, `use_terrain_wind = false` |
-| Smoke, dust | Passive tracers. Three dust bins; emission from the surface-layer u*, raised by the fire wind and by plume lofting in burning cells (fire-dust coupling) |
+| Smoke, dust | Passive tracers. Three dust bins; emission from the surface-layer u*, raised by the fire wind inside the fire perimeter and by plume lofting in burning cells (fire-dust coupling) |
 | Terrain | none: `erf.terrain_type = StaticFittedMesh` with no terrain file, so the mesh type (VariableDz) and surface-layer treatment are those of the hill and pit decks |
 
 The surface layer uses ERF's default on a terrain-fitted mesh: local
@@ -57,12 +57,12 @@ the centre line y = 2 km and along y = 1 km. The dust ratio is the maximum of
 
 | t [s] | Front x, y = 2 km / 1 km [m] | Max first-cell u [m/s] | Dust max/median at y = 1 km | Highest emission |
 |-------|------------------------------|------------------------|-----------------------------|------------------|
-| 60    | 2656 / 2594 | 9.4  | 5.6  | burning cells |
-| 120   | 3156 / 3094 | 11.2 | 11.1 | behind the front, (2891, 1953) m |
-| 180   | 3656 / 3594 | 11.1 | 11.9 | burning cells |
-| 300   | 4656 / 4656 | 9.3  | 9.4  | burning cells |
-| 420   | 5656 / 5594 | 8.5  | 7.9  | burning cells |
-| 600   | 6906 / 6844 | 8.3  | 8.8  | behind the front, (6578, 3828) m |
+| 60    | 2656 / 2594 | 9.4  | 8.2  | burning cells |
+| 120   | 3156 / 3094 | 11.2 | 17.3 | burning cells |
+| 180   | 3656 / 3594 | 11.1 | 19.3 | burning cells |
+| 300   | 4656 / 4656 | 9.3  | 16.8 | burning cells |
+| 420   | 5656 / 5594 | 8.5  | 15.9 | burning cells |
+| 600   | 6906 / 6844 | 8.3  | 40.1 | behind the front, (6578, 3828) m |
 
 - Along y = 2 km the front moves at 8.2 m/s from 60 to 300 s and 7.4 m/s
   from 300 to 600 s. The table's first-cell wind includes the fire's
@@ -72,7 +72,7 @@ the centre line y = 2 km and along y = 1 km. The dust ratio is the maximum of
   the front crosses it, and falls to 0.26 m/s by 600 s. It burns 16.1 ha by
   600 s (7.4 ha at ignition).
 - Along y = 1 km the emission peak follows 80 to 270 m behind the front on
-  the same line until 510 s, at up to 12 times the median. Outside the fire
+  the same line until 510 s, at up to 19 times the median. Outside the fire
   the highest emission is just behind the front, except at about 210 s,
   when it is at the unburned edge of the fire head, 110 m ahead of the
   front.
@@ -82,18 +82,21 @@ Caveats:
   layer profile. It spins down: ahead of the front (x > 7.5 km) the
   first-cell u falls from 5.0 m/s to 3.8 to 4.0 m/s by 300 s, so the later
   front speeds and dust ratios include that decay.
-- The dust threshold friction velocity (0.040 to 0.054 m/s) is below u* in
-  more than 90 % of the dust cells at every output (all of them at 30 s),
-  so emission follows u* (about u*^3); the crust reduction of burned cells
-  changes little. In burning cells (fire heat flux above
+- The dust threshold friction velocity, 0.214 m/s in burned cells to 0.255 m/s elsewhere
+  (Shao-Lu at 75 um; 0.040 to 0.054 m/s until October 2026, 5x too low),
+  is below u* in 95 % of the dust cells at 30 s and 63 % at 600 s as the ambient wind
+  spins down, so the emission follows u* - u*_t rather than u*^3 alone and
+  the max/median ratios along y = 1 km are larger than before; the crust
+  reduction lowers the burned cells' threshold by 16 %. The fire wind's u*
+  applies inside the fire perimeter only. In burning cells (fire heat flux above
   550 W/m2) plume lofting multiplies the emission by 1 + `k_loft` = 3, which
   is why the highest emission is so often inside the fire.
 - The lid is a slip wall at 1.5 km with no damping layer, and turbulence is
   the MRF column scheme with no LES closure at 62.5 m, so the mixing at the
   head of the density current is not resolved.
 - Smoke and dust undershoot to small negative values at sharp edges (at
-  600 s about -1.6e-6 kg/m3 smoke and -2.7e-7 kg/m3 dust, against maxima
-  of 9e-6 and 2e-5). Deposition clamps them at zero, but linear colour maps
+  600 s about -1.1e-6 kg/m3 smoke and -3.2e-7 kg/m3 dust, against maxima
+  of 7.0e-6 and 2.2e-5). Deposition clamps them at zero, but linear colour maps
   show them.
 - These are single-run diagnostics, not a validation against observations.
 

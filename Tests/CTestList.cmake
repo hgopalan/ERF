@@ -2546,7 +2546,7 @@ add_test_fire_abort(DustRoadFileMissing_abort FireRestart           inputs_dust_
 add_test_fire_abort(DustTransportBins_abort   FireRestart           inputs_dust_straight
     "transport_bins_separately = true needs one state scalar per bin" "erf.dust.transport_bins_separately=true")
 add_test_fire_abort(FireDustWindZref_abort    FireRestart           inputs_dust_straight
-    "erf.fire_dust_wind_zref .* must exceed" "erf.fire_dust_wind_zref=0.05")
+    "erf.fire_dust_wind_zref .* must exceed" "erf.fire_dust_wind_z0=10.0")   # zref follows erf.fire.wind_ref_ht = 6.1
 # October 2026 validation: every new selector and range check, and the readers
 # that used to warn and run on with the uniform value, proved to stop
 add_test_fire_abort(DustThresholdModel_abort  FireRestart           inputs_dust_straight
