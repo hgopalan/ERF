@@ -193,13 +193,13 @@ TEST(CrownFront, CrownRateReachesTheBandAhead)
         ba.maxSize(IntVect(max_grid, ny, 1));
         DistributionMapping dm(ba);
         Geometry geom(domain, RealBox(0.0, 0.0, 0.0, nx * DX, ny * DX, 1.0), CoordSys::cartesian, {0, 1, 0});
-        MultiFab ros(ba, dm, 1, 0), surf(ba, dm, 1, 0), phi(ba, dm, 1, 0), cros(ba, dm, 1, 0), cact(ba, dm, 1, 0), fac(ba, dm, 1, 0);
+        MultiFab ros(ba, dm, 1, 0), surf(ba, dm, 1, 0), phi(ba, dm, 1, 0), crown_ros(ba, dm, 1, 0), cact(ba, dm, 1, 0), fac(ba, dm, 1, 0);
         fill(phi,  [] AMREX_GPU_DEVICE (int i, int) { return (i < 10) ? -1.0_rt : 1.0_rt; });
         fill(surf, [] AMREX_GPU_DEVICE (int, int)   { return 0.1_rt; });
         fill(cact, [] AMREX_GPU_DEVICE (int i, int) { return (i == 8 || i == 9) ? 1.0_rt : 0.0_rt; });
-        fill(cros, [] AMREX_GPU_DEVICE (int i, int) { return (i == 8 || i == 9) ? 1.0_rt : 0.0_rt; });
+        fill(crown_ros, [] AMREX_GPU_DEVICE (int i, int) { return (i == 8 || i == 9) ? 1.0_rt : 0.0_rt; });
         fill(ros,  [] AMREX_GPU_DEVICE (int i, int) { return (i == 8 || i == 9) ? 1.0_rt : 0.1_rt; });
-        const amrex::Long took = extend_crown_ros_to_front(ros, surf, phi, cros, cact, geom, 10.0_rt, fac);
+        const amrex::Long took = extend_crown_ros_to_front(ros, surf, phi, crown_ros, cact, geom, 10.0_rt, fac);
         EXPECT_EQ(took, 3 * ny) << "max_grid " << max_grid;
         MultiFab r = gather(ros, geom), f = gather(fac, geom);
         for (MFIter mfi(r); mfi.isValid(); ++mfi) {
@@ -225,16 +225,16 @@ TEST(CrownFront, AMaskStopsTheExtension)
     BoxArray ba(domain);
     DistributionMapping dm(ba);
     Geometry geom(domain, RealBox(0.0, 0.0, 0.0, nx * DX, ny * DX, 1.0), CoordSys::cartesian, {0, 1, 0});
-    MultiFab ros(ba, dm, 1, 0), surf(ba, dm, 1, 0), phi(ba, dm, 1, 0), cros(ba, dm, 1, 0), cact(ba, dm, 1, 0), fac(ba, dm, 1, 0), msk(ba, dm, 1, 0);
+    MultiFab ros(ba, dm, 1, 0), surf(ba, dm, 1, 0), phi(ba, dm, 1, 0), crown_ros(ba, dm, 1, 0), cact(ba, dm, 1, 0), fac(ba, dm, 1, 0), msk(ba, dm, 1, 0);
     fill(phi,  [] AMREX_GPU_DEVICE (int i, int) { return (i < 10) ? -1.0_rt : 1.0_rt; });
     // the mask column carries no surface rate (a non-burnable code): the
     // factor there is 1 from a floored divide, not 0/0
     fill(surf, [] AMREX_GPU_DEVICE (int i, int) { return (i == 11) ? 0.0_rt : 0.1_rt; });
     fill(cact, [] AMREX_GPU_DEVICE (int i, int) { return (i == 8 || i == 9) ? 1.0_rt : 0.0_rt; });
-    fill(cros, [] AMREX_GPU_DEVICE (int i, int) { return (i == 8 || i == 9) ? 1.0_rt : 0.0_rt; });
+    fill(crown_ros, [] AMREX_GPU_DEVICE (int i, int) { return (i == 8 || i == 9) ? 1.0_rt : 0.0_rt; });
     fill(ros,  [] AMREX_GPU_DEVICE (int i, int) { return (i == 8 || i == 9) ? 1.0_rt : (i == 11) ? 0.0_rt : 0.1_rt; });
     fill(msk,  [] AMREX_GPU_DEVICE (int i, int) { return (i == 11) ? 1.0_rt : 0.0_rt; });
-    const amrex::Long took = extend_crown_ros_to_front(ros, surf, phi, cros, cact, geom, 10.0_rt, fac, &msk);
+    const amrex::Long took = extend_crown_ros_to_front(ros, surf, phi, crown_ros, cact, geom, 10.0_rt, fac, &msk);
     EXPECT_EQ(took, ny) << "only i = 10";
     MultiFab r = gather(ros, geom), f = gather(fac, geom);
     for (MFIter mfi(r); mfi.isValid(); ++mfi) {
@@ -252,13 +252,13 @@ TEST(CrownFront, AMaskStopsTheExtension)
 TEST(CrownFront, NoCrownedCellLeavesEverythingAlone)
 {
     Grid g(N, false);
-    MultiFab ros(g.ba, g.dm, 1, 0), surf(g.ba, g.dm, 1, 0), phi(g.ba, g.dm, 1, 0), cros(g.ba, g.dm, 1, 0), cact(g.ba, g.dm, 1, 0), fac(g.ba, g.dm, 1, 0);
+    MultiFab ros(g.ba, g.dm, 1, 0), surf(g.ba, g.dm, 1, 0), phi(g.ba, g.dm, 1, 0), crown_ros(g.ba, g.dm, 1, 0), cact(g.ba, g.dm, 1, 0), fac(g.ba, g.dm, 1, 0);
     fill(phi,  [] AMREX_GPU_DEVICE (int i, int) { return (i < 10) ? -1.0_rt : 1.0_rt; });
     fill(surf, [] AMREX_GPU_DEVICE (int, int) { return 0.1_rt; });
     fill(ros,  [] AMREX_GPU_DEVICE (int, int) { return 0.1_rt; });
-    cros.setVal(2.0_rt);
+    crown_ros.setVal(2.0_rt);
     cact.setVal(0.0_rt);
-    EXPECT_EQ(extend_crown_ros_to_front(ros, surf, phi, cros, cact, g.geom, 10.0_rt, fac), 0);
+    EXPECT_EQ(extend_crown_ros_to_front(ros, surf, phi, crown_ros, cact, g.geom, 10.0_rt, fac), 0);
     EXPECT_NEAR(ros.max(0), 0.1, TOLP);
     EXPECT_NEAR(fac.min(0), 1.0, TOLP);
     EXPECT_NEAR(fac.max(0), 1.0, TOLP);

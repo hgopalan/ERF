@@ -61,19 +61,20 @@ its asymptotic behaviour.
 
 ## Expected Results
 
-One rank per deck. Rf = 1.70098 m/s; the Wulff-shape tip of the projection
-formula is 0.36793 m/s (22 % of Rf). Rates fitted over t >= 1050 s:
+Two ranks per deck (one rank gives the same numbers; re-measured 2026-10-09).
+Rf = 1.70098 m/s; the Wulff-shape tip of the projection formula is
+0.36793 m/s (22 % of Rf). Rates fitted over t >= 1050 s:
 
 | deck | x_head(2100 s) | head rate | vs Rf |
 |---|---|---|---|
-| `default` | 3616.09 m | 1.20891 m/s | 71.1 % (well below Rf, well above the Wulff tip) |
-| `projection` | 3616.09 m | 1.20891 m/s | same as `default`, bit for bit (`max\|phi_default - phi_projection\| = 0`) |
-| `advective` | 4091.58 m | 1.70098 m/s | 100.0 % |
+| `default` | 3219.00 m | 0.80557 m/s | 47.4 % (well below Rf, well above the Wulff tip) |
+| `projection` | 3219.00 m | 0.80557 m/s | same as `default`, bit for bit (`max\|phi_default - phi_projection\| = 0`) |
+| `advective` | 4095.56 m | 1.70183 m/s | 100.1 % |
 
-`advective` lands 28.9 points of Rf-fraction closer to Rf than `projection`.
+`advective` lands 52.7 points of Rf-fraction closer to Rf than `projection`.
 All 8 checks pass.
 
-Back rate is reported for reference (0.02342 m/s vs R0 = 0.02339 m/s,
+Back rate is reported for reference (0.02366 m/s vs R0 = 0.02339 m/s,
 essentially identical across all three decks, barely one fire cell over the
 run -- not checked quantitatively) and confirms the fix only changes how the
 wind/slope factor couples to the front-normal direction on the advancing
