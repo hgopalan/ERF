@@ -582,15 +582,22 @@ DustLayer::advance(
     fill_dust_wind_from_interpolation(
       *dust_wind_ref, *xvel_mf, *yvel_mf, *z_phys_cc_mf, m_dg, m_params.zref, nz);
     if (m_params.use_terrain_wind && dust_slopes && dust_curvature) {
+      // The FARSITE factors change the wind at zref; u* follows by the same
+      // factor (terrain_ustar = scale, u* linear in U in a neutral log law),
+      // so a flat cell keeps the surface layer's value. The former log law on
+      // z0_dust (terrain_ustar = loglaw) replaced it by a neutral one on
+      // another roughness, 0.70x on flat ground.
+      amrex::MultiFab wind_raw(dust_wind_ref->boxArray(), dust_wind_ref->DistributionMap(), 2, 0);
+      amrex::MultiFab::Copy(wind_raw, *dust_wind_ref, 0, 0, 2, 0);
       apply_farsite_terrain_wind(
         *dust_wind_ref, *dust_slopes, *dust_curvature, m_params.k_ridge,
         m_params.k_shelter, m_params.k_valley, m_params.k_deflect);
-      // Recompute dust_ustar_in from the terrain-corrected wind using log-profile.
-      // This ensures the FARSITE terrain wind corrections (ridge speed-up, lee sheltering,
-      // valley channeling) are properly reflected in the friction velocity used for
-      // dust emission calculations.
-      compute_dust_ustar_from_wind(
-        *dust_ustar_in, *dust_wind_ref, m_params.zref, m_params.z0_dust);
+      if (m_params.terrain_ustar == "loglaw") {
+        compute_dust_ustar_from_wind(
+          *dust_ustar_in, *dust_wind_ref, m_params.zref, m_params.z0_dust);
+      } else {
+        scale_dust_ustar_by_wind_ratio(*dust_ustar_in, *dust_wind_ref, wind_raw);
+      }
     }
     // Fire-dust coupling: the fire-grid wind raises u* where it is stronger. This
     // has to come after the fills above, which overwrite dust_ustar_in.

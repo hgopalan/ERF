@@ -13,7 +13,10 @@ At the start of each dust step the surface layer's friction velocity,
 surface temperature and boundary-layer height are copied to every dust cell
 of the column, and the horizontal wind is interpolated linearly in the
 vertical to the height :cpp:`erf.dust.zref` above the local surface from the
-cell-centred velocities. :cpp:`erf.dust.zref` should equal
+cell-centred velocities, clamped to the lowest and highest cell centres (a
+``zref`` below half the first cell thickness takes the first cell's wind and
+a start-up warning says so; until October 2026 that case fell through to the
+second-highest cell of the domain). :cpp:`erf.dust.zref` should equal
 :cpp:`erf.most.zref`. Without a coupled atmosphere (the placeholder path)
 :cpp:`erf.dust.test_ustar`, ``test_surf_temp_K`` and ``test_wind_speed`` are
 used instead, which is how the emission physics is tested in isolation.
@@ -28,16 +31,23 @@ always. With :cpp:`erf.dust.use_terrain_wind` the wind at ``zref`` also gets
 the FARSITE terrain correction shared with the fire model (ridge speed-up
 :cpp:`erf.dust.k_ridge`, lee sheltering ``k_shelter``, valley channelling
 ``k_valley`` and deflection toward the slope ``k_deflect``; see
-:ref:`sec:FireCoupling`), and the friction velocity is then recomputed from
-the corrected wind by the log law
+:ref:`sec:FireCoupling`), and the friction velocity follows by the same
+factor, :math:`u_* \to u_*\, |\mathbf{U}_\mathrm{corrected}| / |\mathbf{U}|`
+(:cpp:`erf.dust.terrain_ustar = scale`, the default: :math:`u_*` is linear in
+the wind in a neutral log law, so a flat cell keeps the surface layer's
+value). :cpp:`erf.dust.terrain_ustar = loglaw` is the form used until October
+2026, which re-derived
 
 .. math::
 
    u_* = \frac{\kappa\, U}{\ln(z_\mathrm{ref}/z_0)}, \qquad z_0 = \texttt{erf.dust.z0\_dust}
 
-which replaces the surface layer's value. As for the fire, these are
-empirical stand-ins for flow that a resolved simulation already contains;
-the flat-terrain cases set the four factors to 1.
+in every cell and so replaced the surface layer's stability-corrected
+:math:`u_*` on :cpp:`erf.most.z0` by a neutral one on another roughness:
+with ``zref`` 24 m, ``most.z0`` 0.1 m and ``z0_dust`` 0.01 m that is 0.70x
+on flat ground, emission 0.35x, before any terrain factor. As for the fire,
+the factors are empirical stand-ins for flow that a resolved simulation
+already contains; the flat-terrain cases set the four factors to 1.
 
 Injection into the atmosphere
 -----------------------------

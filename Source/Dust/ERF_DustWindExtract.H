@@ -60,6 +60,16 @@ void fill_dust_scalar_from_atm(
 // @param dust_wind_ref [in]  Wind vector (u,v) at reference height on dust grid [m/s]
 // @param z_ref        [in]  Reference height [m]
 // @param z0           [in]  Surface roughness length [m]
+/**
+ * @brief Multiply u* by |U_corrected| / |U_raw| cell by cell (the terrain
+ *        speed factor of erf.dust.use_terrain_wind, erf.dust.terrain_ustar = scale).
+ *        Cells with a calm raw wind keep their u*.
+ */
+void scale_dust_ustar_by_wind_ratio(
+    amrex::MultiFab&       dust_ustar_in,
+    const amrex::MultiFab& wind_corrected,
+    const amrex::MultiFab& wind_raw);
+
 void compute_dust_ustar_from_wind(
     amrex::MultiFab&       dust_ustar_in,
     const amrex::MultiFab& dust_wind_ref,

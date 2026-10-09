@@ -121,6 +121,11 @@ struct DustParams {
     amrex::Real test_wind_speed     = 5.0;     ///< 10 m wind speed placeholder [m/s].
                                            ///<   Phase 9 replaces with MRF 10m wind.
     bool use_terrain_wind           = false;   ///< Apply FARSITE-style terrain wind correction.
+    std::string terrain_ustar       = "scale"; ///< How u* follows the corrected wind with use_terrain_wind:
+                                                 ///<   "scale" (default) multiplies the surface layer's u* by
+                                                 ///<   |U_corrected| / |U_raw|; "loglaw" (the form until 2026-10)
+                                                 ///<   re-derives u* = kappa U / ln(zref / z0_dust), a neutral
+                                                 ///<   law on another roughness, 0.70x on flat ground.
     amrex::Real k_ridge             = 1.5;     ///< Ridge speed-up factor.
     amrex::Real k_shelter           = 0.6;     ///< Lee-side shelter factor.
     amrex::Real k_valley            = 0.8;     ///< Valley channeling factor.
@@ -298,6 +303,7 @@ struct DustParams {
         pp.query("test_surf_temp_K", test_surf_temp_K);
         pp.query("test_wind_speed",  test_wind_speed);
         pp.query("use_terrain_wind", use_terrain_wind);
+        pp.query("terrain_ustar",    terrain_ustar);
         pp.query("k_ridge",          k_ridge);
         pp.query("k_shelter",        k_shelter);
         pp.query("k_valley",         k_valley);
@@ -403,6 +409,10 @@ struct DustParams {
         if (threshold_model != "shao_lu" && threshold_model != "bagnold")
             fail("erf.dust.threshold_model must be shao_lu or bagnold, got " + threshold_model);
         positive("saltation_diameter", saltation_diameter);
+        if (terrain_ustar != "scale" && terrain_ustar != "loglaw")
+            fail("erf.dust.terrain_ustar must be scale or loglaw, got " + terrain_ustar);
+        if (pp.contains("terrain_ustar") && !use_terrain_wind)
+            amrex::Print() << "[DUST] WARNING: erf.dust.terrain_ustar is read only with erf.dust.use_terrain_wind = true\n";
         positive("shao_lu_A_N", shao_lu_A_N);
         if (shao_lu_gamma < 0.0) fail("erf.dust.shao_lu_gamma must be >= 0, got " + std::to_string(shao_lu_gamma));
         positive("rho_air",           rho_air);

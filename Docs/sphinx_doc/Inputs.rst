@@ -6183,6 +6183,13 @@ the ``test_*`` values are the placeholders used when no atmosphere is coupled.
 | **erf.dust.use_terrain_wind**                | Apply the FARSITE terrain correction to the wind at zref   | Boolean                  | false                              |
 |                                              | and recompute u* from it by the log law                    |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
+| **erf.dust.terrain_ustar**                   | How the friction velocity follows the terrain-corrected    | scale or loglaw          | scale                              |
+|                                              | wind: scale multiplies the surface layer's u* by           |                          |                                    |
+|                                              | |U_corrected| / |U_raw|; loglaw (the form until October    |                          |                                    |
+|                                              | 2026) re-derives u* = kappa U / ln(zref / z0_dust), a      |                          |                                    |
+|                                              | neutral law on another roughness that gave 0.70x on flat   |                          |                                    |
+|                                              | ground                                                     |                          |                                    |
++----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.k_ridge**                         | Ridge speed-up factor of the terrain correction            | Real                     | 1.5                                |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.k_shelter**                       | Lee-side shelter factor                                    | Real                     | 0.6                                |

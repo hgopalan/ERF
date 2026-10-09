@@ -112,7 +112,7 @@ the atmosphere's :math:`\Delta t`, in this order (``DustLayer::advance`` in
    :cpp:`erf.dust.zref` interpolated from the lowest cells, the surface
    temperature and the boundary-layer height. With
    :cpp:`erf.dust.use_terrain_wind` the wind gets the FARSITE terrain
-   correction and :math:`u_*` is recomputed from it by a log law. Without a
+   correction and :math:`u_*` is scaled by the same factor. Without a
    coupled atmosphere the ``test_*`` placeholders are used instead
    (:ref:`sec:DustCoupling`).
 3. **PHREEQC** tables are re-read when :cpp:`erf.dust.phreeqc_update_interval_s`

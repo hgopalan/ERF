@@ -291,6 +291,7 @@ if(ERF_ENABLE_DUST)
   target_sources(${erf_exe_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Dust/ERF_GTestDustColumn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Dust/ERF_GTestDustThreshold.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Dust/ERF_GTestDustWind.cpp
   )
 endif()
 if(ERF_DIM STREQUAL "3")
@@ -363,7 +364,7 @@ erf_register_gtest_suite(${erf_exe_name}
 if(ERF_ENABLE_FIRE)
   set(_fire_gtest_suites "BehaveScottBurgan.*:BehaveTransfer.*:CustomFuel.*:DirectionalShape.*:FarsiteFrontCell.*:FarsiteSpreadTest.*:Fbp.*:FireAcceleration.*:FireAnchorLevel.*:FireBoundaryGuard.*:FireDiagnosticsPerFuel.*:FirePrecip.*:FireSuppression.*:FuelMap.*:FuelMoisture.*:FuelMoistureEMC.*:FuelMoistureLive.*:FuelMoistureStick.*:LcpReader.*:LevelSetAdvection.*:LevelSetEllipse.*:PrescribedFire.*:SplitHamiltonianAdvection.*:StructureIgnition.*:WindLimit.*:FireModelReferences.*")
   if(ERF_ENABLE_DUST)
-    string(APPEND _fire_gtest_suites ":DustColumn.*:DustThreshold.*")
+    string(APPEND _fire_gtest_suites ":DustColumn.*:DustThreshold.*:DustWind.*")
   endif()
   add_test(NAME FireDustGTests_FpeTraps
     COMMAND ${erf_exe_name}
