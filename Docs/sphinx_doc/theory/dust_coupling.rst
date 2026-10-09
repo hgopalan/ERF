@@ -54,8 +54,8 @@ Injection into the atmosphere
 
 The dust rides in the passive scalar slot after the first
 (``RhoScalar_comp + 1``), one slot per bin with
-:cpp:`erf.dust.transport_bins_separately`, which the single-scalar state
-accepts only for one bin and a single total
+:cpp:`erf.dust.transport_bins_separately` (which the single-scalar state
+accepts for one bin only) and a single total
 otherwise. The per-bin emission flux is summed, averaged down to the
 atmosphere grid, and added to the slow right-hand side of the lowest cell as
 

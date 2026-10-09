@@ -121,9 +121,9 @@ inline void load_road_schedule(const std::string& filename,
                              + ": expected name x_lo y_lo x_hi y_hi width_m weight_t silt_pct vkt_per_h start_s end_s: \""
                              + line + "\"");
             }
-            // The AP-42 factor takes pow(silt/12, 0.9) and pow(weight/3, 0.45)
-            // road_width_m is validated for the file format and otherwise unused (the AP-42 mass does not depend on it)
-            // or a division by zero in every step the road is active.
+            // pow(silt/12, 0.9) and pow(weight/3, 0.45) are NaN for a negative
+            // field; road_width_m is checked for the file format only, the
+            // AP-42 mass does not depend on it
             if (!(ev.road_width_m > 0.0) || !(ev.vehicle_weight_t > 0.0) || !(ev.silt_pct >= 0.0)
                 || !(ev.vkt_per_h >= 0.0) || !(ev.end_time_s < 0.0 || ev.end_time_s >= ev.start_time_s)
                 || !(ev.x_hi > ev.x_lo || ev.y_hi > ev.y_lo)) {

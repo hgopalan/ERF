@@ -1592,6 +1592,47 @@ DustLayer::remove_outputs_for_fresh_start () const
 }
 
 void
+DustLayer::trim_outputs_after_restart (int step) const
+{
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        std::vector<std::string> files = {
+            m_params.dust_diag_file, m_params.dust_naaqs_file, m_params.msha_exposure_file,
+            m_params.stel_diag_file, m_params.silica_diag_file, m_params.visibility_diag_file,
+            m_params.cm_budget_file, m_params.road_diag_file };
+        for (const auto& name : m_params.msha_receptor_names) files.push_back("msha_receptor_" + name + ".csv");
+        for (const auto& fname : files) {
+            if (fname.empty()) continue;
+            std::ifstream in(fname);
+            if (!in) continue;
+            std::vector<std::string> keep;
+            std::string line;
+            bool keyed_by_step = false, seen_header = false;
+            int dropped = 0;
+            while (std::getline(in, line)) {
+                if (line.empty() || line[0] == '#') { keep.push_back(line); continue; }
+                if (!seen_header) {
+                    seen_header = true;
+                    keyed_by_step = (line.rfind("step", 0) == 0);
+                    keep.push_back(line);
+                    continue;
+                }
+                if (!keyed_by_step) { keep.push_back(line); continue; }
+                int s = 0;
+                try { s = std::stoi(line.substr(0, line.find(','))); } catch (...) { keep.push_back(line); continue; }
+                if (s <= step) keep.push_back(line); else ++dropped;
+            }
+            in.close();
+            if (!keyed_by_step || dropped == 0) continue;
+            std::ofstream out(fname, std::ios::out | std::ios::trunc);
+            for (const auto& l : keep) out << l << "\n";
+            amrex::Print() << "[DUST] restart: dropped " << dropped << " rows past step " << step
+                           << " from " << fname << "\n";
+        }
+    }
+    amrex::ParallelDescriptor::Barrier();
+}
+
+void
 DustLayer::check_checkpoint_layout (const std::string& restart_chkfile) const
 {
     std::ifstream f(restart_chkfile + "/DustState");
@@ -1670,7 +1711,7 @@ DustLayer::read_checkpoint_state (const std::string& restart_chkfile,
             else if (key == "last_phreeqc_write_step") { f >> m_last_phreeqc_write_step; }
             else if (key == "last_dust_plot_step")     { f >> m_last_dust_plot_step; }
             else if (key == "last_output_step")        { f >> m_last_output_step; }
-            else { std::string skip; f >> skip; }
+            else { std::string skip; std::getline(f, skip); }   // a future key: consume its line
         }
     } else {
         amrex::Print() << "[DUST] Checkpoint has no DustState; taking step and time"

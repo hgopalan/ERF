@@ -186,10 +186,12 @@ p("erf.fire_dust_wind_to_dust", "Inside the fire perimeter, raise the dust u* to
   "the log-law value of the fire's reference wind (fire_wind_ref, at "
   "erf.fire.wind_ref_ht) where that is larger; outside it the surface layer's u* "
   "stands", "Boolean", "true")
-p("erf.fire_dust_wind_z0", "Roughness length of that log law [m]; a value other "
-  "than erf.most.z0 is warned about", "Real > 0", "0.1")
+p("erf.fire_dust_wind_z0", "Roughness length of that log law [m]; with the fire "
+  "wind feeding the dust a value other than erf.most.z0 is warned about, "
+  "otherwise the key is not read (warned)", "Real > 0", "0.1")
 p("erf.fire_dust_wind_zref", "Reference height of that log law [m]: follows "
-  "erf.fire.wind_ref_ht, and a different value aborts", "= erf.fire.wind_ref_ht", "6.1")
+  "erf.fire.wind_ref_ht; with the fire wind feeding the dust a different value "
+  "aborts, otherwise the key is not read (warned)", "= erf.fire.wind_ref_ht", "6.1")
 p("erf.fire_dust_lofting_enabled", "Multiply the emission flux by the "
   "convective lofting factor of the fire heat flux", "Boolean", "false")
 p("erf.fire_dust_lofting_k_loft", "Maximum lofting enhancement [-]", "Real >= 0", "2.0")
@@ -209,7 +211,9 @@ p("erf.mrf_fire_t_excess_cap", "Cap on the thermal excess the fire adds [K]",
   "Real > 0", "50.0")
 
 grp("Output and diagnostics",
-    "Every CSV is written by rank 0 and appended each step; paths are "
+    "Every CSV is written by rank 0 and appended each step; a run without "
+    "erf.restart removes these files first (the log says which), a restart "
+    "drops the rows past the restart step and appends to them; paths are "
     "relative to the run directory. Formats are in :ref:`sec:DustOutput`.")
 p("dust_plot_int", "Steps between dust plotfiles; <= 0 writes only the final "
   "step's plotfile (and the step-0 CSV row is written whatever the value)",

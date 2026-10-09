@@ -251,6 +251,11 @@ public:
     /// earlier leg), so stale rows from another run or binary accumulated
     /// ahead of the new ones until October 2026.
     void remove_outputs_for_fresh_start () const;
+    /// On a restart, drop the CSV rows written after the restart step (a
+    /// restart from any checkpoint but the last duplicated the rows between
+    /// the checkpoint and the stop until October 2026). Files whose rows are
+    /// not keyed by the step (the shift summary) are left as they are.
+    void trim_outputs_after_restart (int step) const;
     /// (Re)write the dust_diag.dat header (a no-op on a non-empty file).
     void write_diag_header () const { write_dust_stats_header(m_params.dust_diag_file); }
 

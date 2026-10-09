@@ -9,13 +9,13 @@ A short-term exposure limit (STEL) on the surface dust: the 15-minute mean of th
 | Domain, grid | 3000 x 3000 x 1024 m, 8 x 8 x 64 cells (375 x 375 x 16 m), periodic in x and y, flat |
 | Run length | `max_step = 20` at `erf.fixed_dt = 0.5` s (10 s): a start-up regression run, seconds on one rank |
 | Dust | three bins {7, 2.5, 50} um carried as one scalar (`erf.dust.grid_ratio = 1`, the dust grid is the atmosphere's columns); Shao-Lu threshold at 75 um; deposition with `E_0 = 3e-3` |
-| Sources | the surface-layer u* against the threshold (the 15 m/s geostrophic wind gives u* about 1.1 m/s, 5x the threshold: this source dominates, about 8e2 kg over the run), the blast in `blast_schedule.csv` (about 1e2 kg), and the haul road in `road_schedule.csv` (AP-42 PM-10 mass rate over the covered cells, on bin 0; 2e-2 kg, 1e-5 of the emission) |
+| Sources | the surface-layer u* against the threshold (the 15 m/s geostrophic wind gives u* about 1.1 m/s, 5x the threshold: this source dominates, about 8e2 kg over the run), the blast in `blast_schedule.csv` (about 1e2 kg), and the haul road in `road_schedule.csv` (AP-42 PM-10 mass rate over the covered cells, on bin 0; 2e-2 kg, 2e-5 of the emission) |
 | Diagnostic | `erf.dust.stel_enable = true`, `stel_averaging_s` and `stel_threshold_mg_m3` as in `inputs`; the MSHA shift summary runs alongside with a 5 s shift so that a shift boundary falls inside the run |
 
 ## What to look at
 - `stel_diag.csv`: one row per step with the end-of-step time, the maximum 15-minute mean and the count of cells above the threshold; the mean rises with the wind-driven emission and is below the instantaneous maximum.
 - `msha_shift_summary.csv`: two shift rows at 5 s and 10 s (the boundary is found on the step that ends on it; it was found one step late until October 2026).
-- `dust_diag.dat`: `emission_total_kg_s` is the wind source plus the blast and the AP-42 road rate (the road is 1e-5 of it); the deposited mass column is in kg.
+- `dust_diag.dat`: `emission_total_kg_s` is the wind source plus the blast and the AP-42 road rate (the road is 2e-5 of it); the deposited mass column is in kg.
 
 ## Outputs
 The diagnostic CSVs (`stel_diag.csv`, `silica_diag.csv`, `visibility_diag.csv`, `dust_naaqs.csv`, `msha_exposure.csv`) are written by the run into the working directory; none is committed, because a committed copy from an older build cannot be reproduced and misleads (the copies removed in October 2026 carried concentrations at step 1 that the code never produces). Every row carries the end-of-step time, the same stamp as `dust_diag.dat`.

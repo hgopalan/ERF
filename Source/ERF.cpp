@@ -2206,7 +2206,13 @@ ERF::InitData_post ()
                                        << " m; inside the fire perimeter the fire wind u* (a neutral log law on"
                                           " fire_dust_wind_z0) is compared with the surface layer's u*\n";
                     }
-                    }   // coupling on and the fire wind feeding the dust
+                    } else {   // the keys are read only when the fire wind feeds the dust
+                        for (const char* k : {"fire_dust_wind_zref", "fire_dust_wind_z0"})
+                            if (pp.contains(k))
+                                amrex::Print() << "[FIRE-DUST] WARNING: erf." << k
+                                               << " is read only with erf.fire_dust_coupling = true and"
+                                                  " erf.fire_dust_wind_to_dust = true\n";
+                    }
                 }
                 pp.query("fire_dust_lofting_enabled",     m_fire_dust_coupling.fire_lofting_enabled);
                 pp.query("fire_dust_lofting_k_loft",      m_fire_dust_coupling.lofting_k_loft);

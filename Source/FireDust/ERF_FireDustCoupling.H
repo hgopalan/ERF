@@ -46,10 +46,10 @@ struct FireDustCoupling {
      */
     void apply_burned_area_to_crust(amrex::MultiFab& dust_crust_index) const;
 
-    // ── Phase 2: fire outflow wind → dust u* ──────────────────────────────────
+    // ── Phase 2: fire reference wind → dust u* inside the perimeter ──────────
     // When fire_wind_to_dust = true, the fire's wind at erf.fire.wind_ref_ht
     // (fire_wind_ref, the datum fire_wind_zref names; until October 2026 the
-    // WAF-reduced midflame wind fire_wind_ref was handed over as if it were
+    // WAF-reduced midflame wind fire_wind_eff was handed over as if it were
     // the 6.1 m wind, 0.36x for grass, so the coupling never won) is copied
     // onto the dust grid and converted to a friction velocity via log-law.
     // Inside the fire perimeter (level set below zero) the maximum of the
@@ -63,13 +63,15 @@ struct FireDustCoupling {
 
 
     /**
-     * @brief Interaction 2: fire outflow wind raises effective u* on dust grid.
+     * @brief Interaction 2: the fire's reference wind gives a log-law u* inside the perimeter.
      *
      * For each dust cell inside the fire perimeter (fire_phi_scratch < 0),
      * reads the fire's reference wind (fire_wind_ref on the dust grid, the
      * grid ratios are equal), derives u* via log-law
-     * (u* = U * kappa / ln(zref/z0)), and takes the maximum with the
-     * background MRF u* already in dust_ustar_in.
+     * (u* = U * kappa / ln(zref/z0)) and writes the larger of it and the
+     * field's current value into dust_ustar_in. ERF hands the zeroed
+     * fire-u* scratch (DustLayer::get_ustar_fire_mut), which advance() maxes
+     * into the dust u* after the surface-layer fill.
      *
      * MPI safety: fire_wind_ref_mf must already be copied into a scratch
      * MultiFab on the dust BoxArray/DM by the caller (ERF.cpp) before this

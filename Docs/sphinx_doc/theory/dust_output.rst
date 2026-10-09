@@ -81,6 +81,14 @@ Besides the AMReX ``Header`` and ``Level_0`` data it carries
 Statistics CSV
 --------------
 
+Every dust CSV is appended each step by rank 0. A run without
+:cpp:`erf.restart` removes the dust CSVs an earlier run left in the directory
+(the log names each one), so a stale file is never continued; a restart keeps
+its earlier leg, drops the rows past the restart step (a restart from any
+checkpoint but the last used to duplicate the rows between the checkpoint and
+the stop) and appends. The exception is a shift summary, whose rows are
+counted per shift, not per step, and is left as it is.
+
 :cpp:`erf.dust.dust_diag_file` gets one row per step: ``step``, ``time_s``,
 ``emission_total_kg_s`` (the flux summed over every bin and every cell times
 the cell area), ``deposition_total_kg`` (the deposited mass summed over the

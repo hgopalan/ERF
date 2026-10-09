@@ -6334,11 +6334,14 @@ models are enabled; see :ref:`sec:DustFire`.
 |                                              | at erf.fire.wind_ref_ht) where that is larger; outside it  |                          |                                    |
 |                                              | the surface layer's u* stands                              |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
-| **erf.fire_dust_wind_z0**                    | Roughness length of that log law [m]; a value other than   | Real > 0                 | 0.1                                |
-|                                              | erf.most.z0 is warned about                                |                          |                                    |
+| **erf.fire_dust_wind_z0**                    | Roughness length of that log law [m]; with the fire wind   | Real > 0                 | 0.1                                |
+|                                              | feeding the dust a value other than erf.most.z0 is warned  |                          |                                    |
+|                                              | about, otherwise the key is not read (warned)              |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.fire_dust_wind_zref**                  | Reference height of that log law [m]: follows              | = erf.fire.wind_ref_ht   | 6.1                                |
-|                                              | erf.fire.wind_ref_ht, and a different value aborts         |                          |                                    |
+|                                              | erf.fire.wind_ref_ht; with the fire wind feeding the dust  |                          |                                    |
+|                                              | a different value aborts, otherwise the key is not read    |                          |                                    |
+|                                              | (warned)                                                   |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.fire_dust_lofting_enabled**            | Multiply the emission flux by the convective lofting       | Boolean                  | false                              |
 |                                              | factor of the fire heat flux                               |                          |                                    |
@@ -6375,8 +6378,10 @@ MRF section of :ref:`PBLschemes`.
 Output and diagnostics
 ----------------------
 
-Every CSV is written by rank 0 and appended each step; paths are relative to
-the run directory. Formats are in :ref:`sec:DustOutput`.
+Every CSV is written by rank 0 and appended each step; a run without
+erf.restart removes these files first (the log says which), a restart drops
+the rows past the restart step and appends to them; paths are relative to the
+run directory. Formats are in :ref:`sec:DustOutput`.
 
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | Parameter                                    | Definition                                                 | Acceptable Values        | Default                            |

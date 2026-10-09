@@ -2751,6 +2751,9 @@ ERF::ReadCheckpointFileDust ()
         // intervals) follows the atmosphere's, not zero (it started at zero
         // when dust was enabled on a restart until October 2026)
         m_DustLayer->read_checkpoint_state(restart_chkfile, istep[0], t_new[0]);
+        // a fresh dust leg: stale CSVs of an earlier dust attempt are not continued
+        m_DustLayer->remove_outputs_for_fresh_start();
+        m_DustLayer->write_diag_header();
         return;
     }
     amrex::Print() << "[DUST] Restoring dust state from checkpoint " << restart_chkfile << "\n";
@@ -2774,6 +2777,7 @@ ERF::ReadCheckpointFileDust ()
         VisMF::Read(*nf.second, amrex::MultiFabFileFullPrefix(0, restart_chkfile, "Level_", nf.first));
     }
     m_DustLayer->read_checkpoint_state(restart_chkfile, istep[0], t_new[0]);
+    m_DustLayer->trim_outputs_after_restart(istep[0]);   // rows past the restart step go
 #ifdef ERF_USE_PARTICLES
     m_DustLayer->restart_particles(restart_chkfile);
 #endif
