@@ -70,16 +70,16 @@ the centre line y = 2 km and along y = 1 km. The dust ratio is the maximum of
 | 180   | 3656 / 3594 | 11.5 | 20.4 | burning cells |
 | 300   | 4719 / 4656 | 10.3 | 17.6 | burning cells |
 | 420   | 5844 / 5531 | 9.8  | 14.2 | burning cells |
-| 600   | 7281 / 6656 | 9.1  | 32.5 | behind the front, (6891, 2578) m |
+| 600   | 7281 / 6719 | 9.1  | 32.5 | behind the front, (6891, 2578) m |
 
-- Along y = 2 km the front moves at 8.3 m/s from 60 to 300 s and 8.6 m/s
-  from 300 to 600 s (flat: 8.2 and 7.4). While it crosses the pit, from 300
-  to 420 s, it averages 9.4 m/s (flat 8.3, hill 7.3). At 600 s it is 375 m
-  ahead of the flat-ground front along y = 2 km, but 190 m behind it along
+- Along y = 2 km the front moves at 8.6 m/s from 60 to 300 s and 8.5 m/s
+  from 300 to 600 s (flat: 8.6 and 7.3). While it crosses the pit, from 300
+  to 420 s, it averages 9.4 m/s (flat 7.8, hill 7.3). At 600 s it is 375 m
+  ahead of the flat-ground front along y = 2 km, but 125 m behind it along
   y = 1 km.
 - The fire's head rate of spread rises from 0.40 m/s to 2.26 m/s at 202 s as
   the front crosses it (flat: 2.11 m/s at 200 s). It burns 17.0 ha by 600 s,
-  against 16.1 ha over flat ground.
+  against 16.0 ha over flat ground.
 - Outside the fire the highest emission is just behind the front until
   240 s (at about 210 s it is at the unburned edge of the fire head, 50 m
   ahead of the front). From 270 to 330 s it sits on the pit's upwind slope, 330 to 580 m

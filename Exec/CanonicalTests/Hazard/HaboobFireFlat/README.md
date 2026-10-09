@@ -60,16 +60,16 @@ the centre line y = 2 km and along y = 1 km. The dust ratio is the maximum of
 | 60    | 2656 / 2594 | 9.4  | 8.2  | burning cells |
 | 120   | 3156 / 3094 | 11.2 | 17.3 | burning cells |
 | 180   | 3656 / 3594 | 11.1 | 19.3 | burning cells |
-| 300   | 4656 / 4656 | 9.3  | 16.8 | burning cells |
+| 300   | 4719 / 4656 | 9.3  | 16.8 | burning cells |
 | 420   | 5656 / 5594 | 8.5  | 15.9 | burning cells |
 | 600   | 6906 / 6844 | 8.3  | 40.1 | behind the front, (6578, 3828) m |
 
-- Along y = 2 km the front moves at 8.2 m/s from 60 to 300 s and 7.4 m/s
+- Along y = 2 km the front moves at 8.6 m/s from 60 to 300 s and 7.3 m/s
   from 300 to 600 s. The table's first-cell wind includes the fire's
   indraft: the 11.6 m/s maximum at 210 s is at the fire head, just ahead of
   the front.
 - The fire's head rate of spread rises from 0.40 m/s to 2.11 m/s at 200 s as
-  the front crosses it, and falls to 0.26 m/s by 600 s. It burns 16.1 ha by
+  the front crosses it, and falls to 0.26 m/s by 600 s. It burns 16.0 ha by
   600 s (7.4 ha at ignition).
 - Along y = 1 km the emission peak follows 80 to 270 m behind the front on
   the same line until 510 s, at up to 19 times the median. Outside the fire
