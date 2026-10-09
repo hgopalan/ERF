@@ -1,0 +1,9 @@
+FILE = inputs_base
+
+# wind5 with the fuel-class wind cap this code applied until 2026-10
+# (erf.fire.wind_limit = fuel_class): 300 ft/min (1.52 m/s) for fuel model 1,
+# which holds the head at or below 0.257 m/s at 5.5 % moisture whatever the
+# wind. Kept so the earlier results can be reproduced.
+erf.input_sounding_file = "input_sounding_u5"
+erf.fire.use_wind_limit = true
+erf.fire.wind_limit = "fuel_class"

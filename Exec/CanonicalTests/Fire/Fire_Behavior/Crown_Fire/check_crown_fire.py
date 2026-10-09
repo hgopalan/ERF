@@ -3,7 +3,8 @@
 
     python3 check_crown_fire.py [plt_fire_NNNNN] [--stats fire_stats.csv]
 
-With no plotfile the last plt_fire_????? in the directory is used; with no
+With no plotfile the last plt_fire*NNNNN in the directory is used (decks may set
+their own erf.fire_plot_file prefix); with no
 --stats every fire_stats*.csv present is checked. Each check prints PASS or FAIL
 and the script exits 1 if any fails, so it can follow the run in CTest:
 
@@ -67,9 +68,9 @@ def main():
 
     pf = args.plotfile
     if pf is None:
-        pfs = sorted(p for p in glob.glob("plt_fire_?????") if os.path.isdir(p))
+        pfs = sorted(p for p in glob.glob("plt_fire*[0-9][0-9][0-9][0-9][0-9]") if os.path.isdir(p))
         if not pfs:
-            print("  no plt_fire_????? plotfile here: FAIL")
+            print("  no plt_fire*NNNNN plotfile here: FAIL")
             sys.exit(1)
         pf = pfs[-1]
     ds, get = load(pf)

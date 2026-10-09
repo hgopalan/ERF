@@ -1,0 +1,6 @@
+FILE = inputs_base
+
+# The grass fit that ros_model = "cheney_gould" selected until 2026-10, kept
+# under its own name; isotropic level set.
+erf.fire.ros_model = "grass_simple"
+erf.fire.directional_ros = false

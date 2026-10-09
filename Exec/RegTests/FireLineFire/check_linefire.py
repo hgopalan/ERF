@@ -23,13 +23,13 @@ TOL = 0.10
 M_F = 0.055                       # the decks' fuel moisture (all dead classes)
 DT = 0.25                         # erf.fixed_dt of inputs_base: one wind sample per step
 FT_MIN_TO_M_S = 0.00508
-U_MEWS = 300.0 / 196.85           # erf.fire.use_wind_limit cap for fine fuels (sigma > 1000 1/ft) [m/s]
+U_MEWS = 300.0 / 196.85           # erf.fire.wind_limit = fuel_class: 300 ft/min for fine fuels (sigma > 1000 1/ft) [m/s]
 FM1 = dict(w0=0.034, sigma=3500.0, delta=1.0, Mx=0.12, h=8000.0, S_T=0.0555, S_e=0.010, rho_p=32.0)
 # Coen et al. 2013, coupled LES: NoWind crept outward at 0.02 m/s on every side (= R0); Control
 # ran a 0.22 m/s HEAD (backing not quoted; WRF-Fire sets it to R0); WSHi "four-fifths" faster.
 # The one-way heads here are meant to sit below these: the paper's plume doubles the head wind.
 COEN = {"nowind": ("NoWind", 0.02), "wind2p5": ("Control head", 0.22), "wind5": ("WSHi head", 0.40),
-        "wind5_cap": ("WSHi head", 0.40),
+        "wind5_cap": ("WSHi head", 0.40), "wind5_cap_fuel_class": ("WSHi head", 0.40),
         "nowind_2way": ("NoWind", 0.02),
         "wind2p5_2way": ("Control head", 0.22), "wind5_2way": ("WSHi head", 0.40)}
 
@@ -48,6 +48,17 @@ def rothermel_fm1(M_f, U_eff_ms):
     C = 7.47 * math.exp(-0.133 * s ** 0.55); B = 0.02526 * s ** 0.54; E = 0.715 * math.exp(-3.59e-4 * s)
     phi_w = C * (U_eff_ms * 196.85) ** B * br ** -E if U_eff_ms > 0 else 0.0
     return R0, R0 * (1 + phi_w), phi_w
+
+def rothermel_wind_limit_ms(M_f):
+    """Rothermel (1972) eq. 87, U <= 0.9 I_R ft/min (erf.fire.wind_limit = rothermel, the default) [m/s]."""
+    fp = FM1
+    w_n = fp['w0'] * (1 - fp['S_T']); rho_b = fp['w0'] / fp['delta']; beta = rho_b / fp['rho_p']; s = fp['sigma']
+    beta_op = 3.348 * s ** -0.8189; s15 = s ** 1.5; Gmax = s15 / (495 + 0.0594 * s15); A = 133 * s ** -0.7913
+    br = beta / beta_op; Gp = Gmax * br ** A * math.exp(A * (1 - br))
+    rm = min(M_f / fp['Mx'], 1.0); etaM = max(0.0, 1 - 2.59 * rm + 5.11 * rm ** 2 - 3.52 * rm ** 3)
+    etas = 0.174 * fp['S_e'] ** -0.19
+    IR = Gp * w_n * fp['h'] * etaM * etas
+    return 0.9 * IR / 196.85
 
 def parse(log):
     """Probe arrivals, and the effective and reference wind with the time of the step that reported it."""
@@ -86,8 +97,10 @@ def main():
     print(hdr); print("-" * len(hdr))
     for v in variants:
         probes, times, ueff, uref = parse(f"run_{v}.log")
-        if v.endswith("_cap"):
+        if v.endswith("_cap_fuel_class"):
             ueff = [min(u, U_MEWS) for u in ueff]
+        elif v.endswith("_cap"):
+            ueff = [min(u, rothermel_wind_limit_ms(M_F)) for u in ueff]
         if not ueff:
             times, ueff = [0.0], [0.0]
         U = sum(ueff) / len(ueff)

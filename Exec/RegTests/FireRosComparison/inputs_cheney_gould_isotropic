@@ -1,5 +1,7 @@
 FILE = inputs_base
 
-# Cheney-Gould (1998) grassland model, isotropic level set.
+# Cheney, Gould and Catchpole (1998) grassland model, isotropic level set. The
+# model reads the reference wind as its 10 m open wind; the base deck samples
+# it at 6.1 m, so the rate here is that of a 10 m wind equal to the 6.1 m wind.
 erf.fire.ros_model = "cheney_gould"
 erf.fire.directional_ros = false

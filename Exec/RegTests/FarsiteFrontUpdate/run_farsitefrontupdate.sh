@@ -8,7 +8,7 @@
 set -u
 EXE=${1:?usage: run_farsitefrontupdate.sh /path/to/erf_exec [extra args]}
 shift || true
-VARIANTS="front_cell legacy"
+VARIANTS="front_cell rectangle legacy"
 
 for v in $VARIANTS; do
     if [ "${SKIP_RUN:-0}" = "1" ] && [ -f "run_$v.log" ]; then continue; fi

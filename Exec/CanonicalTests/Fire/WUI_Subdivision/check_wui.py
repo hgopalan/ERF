@@ -46,7 +46,7 @@ def rothermel_fm1(mf=0.06, U_ftmin=0.0):
     phi_w = C * U_ftmin ** B * (beta / beta_op) ** -E
     return dict(R0_ftmin=R0, phi_w=phi_w, ROS_ftmin=R0 * (1 + phi_w), ROS_ms=R0 * (1 + phi_w) * 0.00508, I_R=I_R, C=C, B=B, E=E)
 
-MEWS_FTMIN = 300.0   # the model's maximum effective wind for fine fuels (SAV > 1000/ft)
+WIND_LIMIT_FACTOR = 0.9   # Rothermel (1972) eq. 87: U <= 0.9 I_R ft/min (erf.fire.wind_limit = rothermel)
 
 DX_FIRE = 5.0
 FM1_LOAD_KG_M2 = 0.166     # 0.74 ton/acre
@@ -87,10 +87,11 @@ at = F["fire_arrival_time"]
 t1, t2 = arrival(at, 400.0, 240.0), arrival(at, 470.0, 240.0)
 ros_model = 70.0 / (t2 - t1) if (t1 > 0 and t2 > 0 and t2 > t1) else float("nan")
 u_mid = waf_andrews() * 10.0                     # m/s at midflame from the 6.1 m wind
-u_eff = min(u_mid * 196.85, MEWS_FTMIN)          # ft/min, capped as the model caps it
+u_lim = WIND_LIMIT_FACTOR * rothermel_fm1(mf=0.06)["I_R"]   # ft/min, Rothermel's own limit
+u_eff = min(u_mid * 196.85, u_lim)               # ft/min, bounded as the model bounds it
 ref = rothermel_fm1(mf=0.06, U_ftmin=u_eff)["ROS_ms"]
 print(f"  arrival at x=400: {t1:.1f} s, x=470: {t2:.1f} s -> head ROS {ros_model:.3f} m/s")
-print(f"  Rothermel FM1, 6% moisture, midflame {u_mid:.2f} m/s (WAF {waf_andrews():.3f}), capped at {MEWS_FTMIN:.0f} ft/min: {ref:.4f} m/s")
+print(f"  Rothermel FM1, 6% moisture, midflame {u_mid:.2f} m/s (WAF {waf_andrews():.3f}), limit 0.9 I_R = {u_lim:.0f} ft/min: {ref:.4f} m/s")
 if not (0.85 * ref <= ros_model <= 1.15 * ref):
     fail(f"wildland head ROS {ros_model:.3f} m/s outside 15% of Rothermel {ref:.3f} m/s")
 t_wild_850 = arrival(at, 780.0, 240.0)
