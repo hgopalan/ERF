@@ -36,7 +36,7 @@ ComputeDiffusivityMYJ (double dt,
                        MultiFab& cons_in,
                        MultiFab& eddyViscosity,
                        const Geometry& geom,
-                       const TurbChoice& /*turbChoice*/,
+                       const TurbChoice& turbChoice,
                        std::unique_ptr<SurfaceLayer>& SurfLayer,
                        bool use_terrain_fitted_coords,
                        bool use_moisture,
@@ -47,6 +47,7 @@ ComputeDiffusivityMYJ (double dt,
                        const std::unique_ptr<MultiFab>& z_phys_cc,
                        const MoistureComponentIndices& moisture_indices)
 {
+    const StratType pbl_strat = turbChoice.pbl_strat_type;
     // Dirichlet flags to switch derivative stencil
     bool c_ext_dir_on_zlo = ( (bc_ptr[BCVars::cons_bc].lo(2) == ERFBCType::ext_dir) );
     bool c_ext_dir_on_zhi = ( (bc_ptr[BCVars::cons_bc].hi(2) == ERFBCType::ext_dir) );
@@ -242,7 +243,7 @@ ComputeDiffusivityMYJ (double dt,
                                               u_ext_dir_on_zlo, u_ext_dir_on_zhi,
                                               v_ext_dir_on_zlo, v_ext_dir_on_zhi,
                                               dthetavdz, dudz, dvdz,
-                                              moisture_indices);
+                                              moisture_indices, pbl_strat);
 
                 // Replace the resolved gradients in the first cell with the MOST
                 // profile gradients; see ApplySurfaceLayerGradientsPBL (ERF #4037)
@@ -339,7 +340,7 @@ ComputeDiffusivityMYJ (double dt,
                     Real RHSP1=(ARHS*ELOQ51+BRHS*ELOQ31+CRHS*ELOQ11)*RDEN1*RDEN1;
 
                     Real DTTURBL = static_cast<Real>(dt);
-                    Real ELOQ12 = amrex::max(ELOQ11+(DLOQ1-ELOQ11)*exp(RHSP1*DTTURBL),EPS1);
+                    Real ELOQ12 = amrex::max(ELOQ11+(DLOQ1-ELOQ11)*std::exp(RHSP1*DTTURBL),EPS1);
 
                     Real ELOQ22=ELOQ12*ELOQ12;
                     Real ELOQ32=ELOQ22*ELOQ12;
@@ -351,7 +352,7 @@ ComputeDiffusivityMYJ (double dt,
                     Real RHSP2= (ARHS*ELOQ52+BRHS*ELOQ32+CRHS*ELOQ12)*RDEN2*RDEN2;
                     Real RHST2=RHS2/RHSP2;
 
-                    Real ELOQ13 = amrex::max(ELOQ12-RHST2+(RHST2+DLOQ1-ELOQ12)*exp(RHSP2*DTTURBL),EPS1);
+                    Real ELOQ13 = amrex::max(ELOQ12-RHST2+(RHST2+DLOQ1-ELOQ12)*std::exp(RHSP2*DTTURBL),EPS1);
 
                     Real ELOQN=ELOQ13;
                     if (ELOQN>EPS1) {
