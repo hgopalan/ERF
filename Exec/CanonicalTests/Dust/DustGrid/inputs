@@ -64,8 +64,6 @@ erf.theta_ref       = 300.0
 
 # INITIALIZATION
 erf.init_type         = "uniform"
-erf.density_init_pert = 0.0
-erf.theta_init_pert   = 0.0
 
 # MRF PBL
 # Hong & Pan (1996), Mon. Wea. Rev., 124, 2322-2339.
