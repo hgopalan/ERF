@@ -2518,6 +2518,11 @@ add_test_fire_check(FireDustCoupling_check  FireDustCoupling      inputs        
 # each step's dust_diag.dat row written once across the final step and two restarts
 if(ERF_ENABLE_MPI AND NOT WIN32)
 add_test_fire_script(FireRestart_dust_rows  FireRestart           run_dust_rows.sh NRANKS 1)
+# one rank and one box against two ranks and four boxes: the same dust fields,
+# dust_diag.dat, CM budget and receptor sample (every dust CTest ran on one box
+# until October 2026, so the ParallelCopy, average_down, box-edge and reduction
+# paths had no coverage)
+add_test_fire_script(FireDustCoupling_parity FireDustCoupling     run_dust_parity.sh NRANKS 2)
 endif()
 # dust inputs the kernels cannot use stop at start-up
 add_test_fire_abort(DustBadBins_abort         FireRestart           inputs_dust_straight

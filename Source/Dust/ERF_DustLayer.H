@@ -204,6 +204,23 @@ public:
 #endif
 
     /**
+     * @brief Hand advance() the fire heat flux on the dust grid for the
+     *        convective lofting of this step. The multiply happens inside
+     *        advance(), right after the blast and road additions and BEFORE the
+     *        critical-material budget, the particle release and the diagnostics,
+     *        so every consumer of the emission flux sees the lofted value (it
+     *        was applied after advance() returned, so the budget and the
+     *        particles booked a third of what the atmosphere received in burning
+     *        cells). The pointer is dropped after use; set it every step.
+     */
+    void set_fire_lofting(const amrex::MultiFab* heat_on_dust_grid,
+                          amrex::Real k_loft, amrex::Real Q_threshold, amrex::Real Q_ref)
+    {
+        m_loft_heat = heat_on_dust_grid;
+        m_loft_k = k_loft; m_loft_Q_threshold = Q_threshold; m_loft_Q_ref = Q_ref;
+    }
+
+    /**
      * @brief Get the dust scalar component index.
      * @return Component index in cc_source for dust mass density.
      */
@@ -480,6 +497,9 @@ private:
 #if defined(ERF_ENABLE_FIRE) && defined(ERF_USE_DUST)
     const FireDustCoupling* m_fire_dust_coupling = nullptr;
 #endif
+
+    const amrex::MultiFab*                m_loft_heat = nullptr;   ///< Fire heat flux on the dust grid for this step's lofting (set_fire_lofting).
+    amrex::Real                           m_loft_k = 0.0, m_loft_Q_threshold = 0.0, m_loft_Q_ref = 0.0;
 
     int                                   m_step = 0;
     amrex::Real                           m_time = 0.0;

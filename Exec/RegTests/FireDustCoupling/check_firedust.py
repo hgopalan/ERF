@@ -12,8 +12,10 @@ the pure-Python reader erf_plotfile.py and checks:
             reduction. The reduction is applied to the baseline once per step; a
             compounded reduction gives 1 / (1 + a c) after a few steps.
   fire_u*   dust_ustar_in >= kappa |U_fire| / ln(zref / z0) in every cell, the
-            log-law u* of the fire-grid effective wind (kappa 0.4, the coupling's
-            constants). An overwritten coupling leaves cells below it.
+            log-law u* of the fire's wind at wind_ref_ht (fire_wind_ref; the
+            WAF-reduced fire_wind_eff was handed over until October 2026, 0.36x
+            for grass, so the coupling never won). An overwritten coupling leaves
+            cells below it.
   deposit   the deposition total of dust_diag.dat at the last step is within
             15 % of the reference measured after the once-per-step fix and never
             decreases (a per-stage accumulation is 1.83x larger).
@@ -83,7 +85,7 @@ def main():
         sys.exit(f"no common fire/dust plotfile steps (fire {sorted(fire)}, dust {sorted(dust)})")
 
     for n in common:
-        _, f = erf_plotfile.read_fields(fire[n], ["fire_phi", "fire_wind_eff_u", "fire_wind_eff_v"])
+        _, f = erf_plotfile.read_fields(fire[n], ["fire_phi", "fire_wind_ref_u", "fire_wind_ref_v"])
         _, d = erf_plotfile.read_fields(dust[n], ["dust_ustar_t", "dust_ustar_in"])
         phi, ut, ui = f["fire_phi"], d["dust_ustar_t"], d["dust_ustar_in"]
         nx, ny = len(phi), len(phi[0])
@@ -104,7 +106,7 @@ def main():
         worst = 0.0; nboost = 0
         for i in range(nx):
             for j in range(ny):
-                spd = math.hypot(f["fire_wind_eff_u"][i][j][0], f["fire_wind_eff_v"][i][j][0])
+                spd = math.hypot(f["fire_wind_ref_u"][i][j][0], f["fire_wind_ref_v"][i][j][0])
                 us_fire = spd * KAPPA / log_ratio
                 deficit = us_fire - ui[i][j][0]
                 worst = max(worst, deficit)

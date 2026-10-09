@@ -231,36 +231,42 @@ ERF::Evolve ()
         if (m_DustLayer) {
 #ifdef ERF_ENABLE_FIRE
             if (m_fire_dust_coupling.enabled && m_fire_layer) {
-                m_fire_dust_coupling.fire_phi_mf = m_fire_layer->get_levelset();
-                m_fire_dust_coupling.geom_fire   = m_fire_layer->get_fire_geom();
-                // The crust reduction is applied inside DustLayer::advance from the
-                // crust baseline (see set_fire_dust_coupling).
+                // Every fire field the dust step reads is copied onto the dust
+                // BoxArray by index overlap, with the DUST periodicity: the dust
+                // domain is the atmosphere's refined by the grid ratio, and with the
+                // atmosphere's periodicity the copy treated dust cells one atmosphere
+                // domain apart as periodic images and landed the fire wind and heat
+                // in the wrong place on more than one rank. The grid ratios are
+                // asserted equal at start-up, so the kernels read cell for cell.
+                const amrex::Periodicity& per = m_DustLayer->get_dust_geom().periodicity();
+                const amrex::BoxArray&            dust_ba = m_DustLayer->get_dust_ba();
+                const amrex::DistributionMapping& dust_dm = m_DustLayer->get_dust_dm();
 
-                // Phase 2: fire outflow wind raises dust u*
+                // Burned area for the crust reduction (applied inside DustLayer::advance
+                // from the crust baseline). The level set used to be gathered into a
+                // fire-domain-sized host vector and all-reduced every step.
+                if (m_fire_layer->get_levelset() != nullptr) {
+                    m_fire_phi_scratch_for_crust = amrex::MultiFab(dust_ba, dust_dm, 1, 0);
+                    m_fire_phi_scratch_for_crust.setVal(1.0_rt);   // unburned where no fire cell lands
+                    m_fire_phi_scratch_for_crust.ParallelCopy(
+                        *m_fire_layer->get_levelset(), 0, 0, 1, 0, 0, per);
+                    m_fire_dust_coupling.fire_phi_scratch = &m_fire_phi_scratch_for_crust;
+                } else {
+                    m_fire_dust_coupling.fire_phi_scratch = nullptr;
+                }
+
+                // Phase 2: fire wind raises dust u*. The wind at erf.fire.wind_ref_ht
+                // (fire_wind_ref), the datum erf.fire_dust_wind_zref names; the
+                // WAF-reduced midflame wind (fire_wind_eff) used to be handed over as
+                // if it were the 6.1 m wind, 0.36x for grass, so the fire path never
+                // exceeded the surface layer's u*.
                 if (m_fire_dust_coupling.fire_wind_to_dust &&
-                    m_fire_layer->get_wind_eff() != nullptr) {
-                    // MPI-safe cross-grid access (LNG_MPI_SKILLS Rule B3):
-                    // fire_wind_eff lives on the fire grid BoxArray/DM.
-                    // dust_ustar_in lives on the dust grid BoxArray/DM.
-                    // With grid_ratio > 1 and 2+ MPI ranks a dust tile on rank 0 may
-                    // need fire cells owned by rank 1. ParallelCopy into a scratch MultiFab
-                    // on the dust BA before the GPU kernel runs.
-                    //
-                    // The periodicity has to be the dust grid's, whose domain is the
-                    // atmosphere's refined by the grid ratio. With the atmosphere's the
-                    // copy treated dust cells one atmosphere domain apart as periodic
-                    // images of each other and landed the fire wind (and, below, the
-                    // fire heat) in the wrong place on more than one rank, so the
-                    // dust emission depended on the domain decomposition.
-                    const amrex::Periodicity& per = m_DustLayer->get_dust_geom().periodicity();
-                    amrex::MultiFab fire_wind_scratch(
-                        m_DustLayer->get_dust_ba(),
-                        m_DustLayer->get_dust_dm(),
-                        2, 1);   // 2 components (u,v), 1 ghost cell
+                    m_fire_layer->get_wind_ref() != nullptr) {
+                    amrex::MultiFab fire_wind_scratch(dust_ba, dust_dm, 2, 1);   // (u, v), 1 ghost cell
                     fire_wind_scratch.setVal(0.0_rt);
                     fire_wind_scratch.ParallelCopy(
-                        *m_fire_layer->get_wind_eff(), 0, 0, 2, 0, 1, per);
-                    fire_wind_scratch.FillBoundary(per);  // Rule B4: always pass periodicity
+                        *m_fire_layer->get_wind_ref(), 0, 0, 2, 0, 1, per);
+                    fire_wind_scratch.FillBoundary(per);
 
                     const int C = amrex::max(
                         m_fire_layer->get_grid_ratio() / m_DustLayer->get_grid_ratio(), 1);
@@ -278,25 +284,23 @@ ERF::Evolve ()
                             m_fire_dust_coupling.fire_wind_z0,
                             m_fire_dust_coupling.fire_wind_zref,
                             C);
-                        ustar_in->FillBoundary(m_DustLayer->get_dust_geom().periodicity());
+                        ustar_in->FillBoundary(per);
                     }
                 }
 
-                // Phase 3: Prepare fire heat flux scratch for lofting call (after advance)
-                m_fire_lofting_ready = false;
+                // Phase 3: fire heat flux for the convective lofting, applied inside
+                // DustLayer::advance before the budget and the particles read the flux
                 if (m_fire_dust_coupling.fire_lofting_enabled &&
                     m_fire_layer->get_heat_flux()) {
-                    // The dust grid's periodicity, as for the wind scratch above.
-                    const amrex::Periodicity& per = m_DustLayer->get_dust_geom().periodicity();
-                    m_fire_heat_scratch_for_lofting = amrex::MultiFab(
-                        m_DustLayer->get_dust_ba(),
-                        m_DustLayer->get_dust_dm(),
-                        1, 1);
+                    m_fire_heat_scratch_for_lofting = amrex::MultiFab(dust_ba, dust_dm, 1, 1);
                     m_fire_heat_scratch_for_lofting.setVal(0.0_rt);
                     m_fire_heat_scratch_for_lofting.ParallelCopy(
                         *m_fire_layer->get_heat_flux(), 0, 0, 1, 0, 1, per);
                     m_fire_heat_scratch_for_lofting.FillBoundary(per);
-                    m_fire_lofting_ready = true;
+                    m_DustLayer->set_fire_lofting(&m_fire_heat_scratch_for_lofting,
+                                                  m_fire_dust_coupling.lofting_k_loft,
+                                                  m_fire_dust_coupling.lofting_Q_threshold,
+                                                  m_fire_dust_coupling.lofting_Q_ref);
                 }
             }
 #endif
@@ -311,44 +315,6 @@ ERF::Evolve ()
                                  m_SurfaceLayer[Orientation::zlo()].get(),
                                  xvel_ptr, yvel_ptr, zvel_ptr, zphys_ptr, geom_atm, nz);
 
-#ifdef ERF_ENABLE_FIRE
-            if (m_fire_lofting_ready && m_DustLayer) {
-                apply_fire_lofting_to_emission_flux(
-                    *m_DustLayer->get_emission_flux_mut(),
-                    m_fire_heat_scratch_for_lofting,
-                    m_DustLayer->get_params().n_size_bins,
-                    m_fire_dust_coupling.lofting_k_loft,
-                    m_fire_dust_coupling.lofting_Q_threshold,
-                    m_fire_dust_coupling.lofting_Q_ref,
-                    m_DustLayer->get_params().dust_debug,
-                    step);
-                m_fire_lofting_ready = false;
-            }
-#endif
-
-            // Coarsen dust emission flux to atmospheric grid for injection at next step
-            // One-step explicit lag: flux from this step will be injected in next step
-            if (m_dust_flux_atm[0]) {
-                const DustParams& dust_params = m_DustLayer->get_params();
-
-                // Sum emission flux over all size bins into a temporary 1-component MultiFab
-                // on the dust grid, then coarsen to the atmospheric grid.
-                {
-                    amrex::MultiFab dust_flux_sum(m_DustLayer->get_emission_flux()->boxArray(),
-                                                   m_DustLayer->get_emission_flux()->DistributionMap(),
-                                                   1, amrex::IntVect(1, 1, 0));
-                    dust_flux_sum.setVal(0.0);
-                    for (int b = 0; b < dust_params.n_size_bins; ++b) {
-                        amrex::MultiFab::Add(dust_flux_sum, *m_DustLayer->get_emission_flux(),
-                                            b, 0, 1, amrex::IntVect(1, 1, 0));
-                    }
-
-                    // Coarsen summed flux from dust grid to atmospheric grid
-                    coarsen_dust_flux_to_atm(*m_dust_flux_atm[0], dust_flux_sum,
-                                             m_DustLayer->get_dust_geom(), geom[0],
-                                             m_DustLayer->get_dust_grid().grid_ratio);
-                }
-            }
         }
 #endif
 
@@ -2239,8 +2205,6 @@ ERF::InitData_post ()
                         }
                     }
                 }
-                m_fire_dust_coupling.fire_phi_mf = m_fire_layer->get_levelset();
-                m_fire_dust_coupling.geom_fire   = m_fire_layer->get_fire_geom();
                 m_fire_dust_coupling.debug       = dust_params.dust_debug;
                 // DustLayer::advance applies the burned-area crust reduction from its
                 // baseline each step; without this registration the reduction was
@@ -2259,23 +2223,6 @@ ERF::InitData_post ()
                 }
             }
 #endif
-
-            // Allocate coarsened dust flux for level 0 (dust coupling only at level 0)
-            {
-                amrex::BoxArray ba_atm = boxArray(0);
-                amrex::Vector<amrex::Box> bl;
-                for (int b = 0; b < ba_atm.size(); ++b) {
-                    amrex::Box bx = ba_atm[b];
-                    bx.setSmall(2, 0);
-                    bx.setBig(2, 0);
-                    bl.push_back(bx);
-                }
-                amrex::BoxArray ba_dust2d(amrex::BoxList(std::move(bl)));
-                m_dust_flux_atm.resize(1);
-                m_dust_flux_atm[0] = std::make_unique<amrex::MultiFab>(
-                    ba_dust2d, DistributionMap(0), 1, amrex::IntVect(1, 1, 0));
-                m_dust_flux_atm[0]->setVal(0.0);
-            }
 
             // On a restart the fields initialize() just built from the inputs are
             // replaced by the checkpointed ones, and the layer's counters resume.
@@ -2395,7 +2342,10 @@ if (m_DustLayer && restart_chkfile.empty()) {
     // Dust output before the initial checkpoint, as in WriteAtIntermediateTime,
     // so that chk00000 records step 0 as written
 #ifdef ERF_USE_DUST
-    if (m_DustLayer && m_DustLayer->get_params().dust_plot_int > 0)
+    // the step-0 CSV row and (when the interval asks for it) plotfile: used to be
+    // skipped entirely with dust_plot_int <= 0, so dust_diag.dat started at step 0
+    // or 1 depending on the plot interval
+    if (m_DustLayer)
         m_DustLayer->write_output(istep[0], t_new[0], /*is_final=*/false);
 #endif
 

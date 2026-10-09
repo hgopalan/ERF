@@ -15,6 +15,7 @@
 #include <ERF_DustSuppression.H>
 #include <ERF_DustWindExtract.H>
 #include <ERF_DustAtmCoupling.H>
+#include <ERF_DustFireLofting.H>
 #include <ERF_DustMSHA.H>
 #include <ERF_DustMSHAOutput.H>
 #include <ERF_FireWindExtract.H>
@@ -721,8 +722,7 @@ DustLayer::advance(
       // used to be setVal(crust_index), which wiped a crust raster.
       amrex::MultiFab::Copy(*dust_crust_index, *dust_crust_baseline, 0, 0, 1, dust_crust_index->nGrowVect());
       // Re-apply burned-area reduction using current fire phi field.
-      m_fire_dust_coupling->apply_burned_area_to_crust(
-          *dust_crust_index, m_dg.geom);
+      m_fire_dust_coupling->apply_burned_area_to_crust(*dust_crust_index);
       dust_crust_index->FillBoundary(m_dg.geom.periodicity());
   }
 #endif
@@ -798,6 +798,16 @@ DustLayer::advance(
   apply_road_schedule(*dust_emission_flux, m_dg.geom, m_road_schedule,
                       m_time, dt, m_params.dust_debug,
                       m_params.road_diag_file, m_step);
+
+  // Fire lofting of this step's flux, before the budget, the particles and the
+  // diagnostics read it (it used to be applied by ERF after advance() returned).
+  if (m_loft_heat) {
+    apply_fire_lofting_to_emission_flux(*dust_emission_flux, *m_loft_heat,
+                                        m_params.n_size_bins, m_loft_k,
+                                        m_loft_Q_threshold, m_loft_Q_ref,
+                                        m_params.dust_debug, m_step);
+    m_loft_heat = nullptr;
+  }
 
   // Phase 23: compute critical material flux and write budget.
   if (!m_params.cm_fractions.empty() && dust_emission_flux && dust_cm_flux) {

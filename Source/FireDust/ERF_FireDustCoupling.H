@@ -25,10 +25,14 @@ struct FireDustCoupling {
     amrex::Real post_fire_crust_reduction = 0.8;  // fraction of crust removed in burned cells
     bool        debug                     = false; // erf.dust.dust_debug: per-step coupling prints
 
-    // Fire level-set phi on the fire sub-grid (phi < 0 => burned).
-    const amrex::MultiFab* fire_phi_mf  = nullptr;
-    // Geometry of the fire sub-grid (needed for physical-coordinate mapping).
-    amrex::Geometry        geom_fire;
+    // Fire level set (phi < 0 => burned) copied onto the DUST BoxArray by ERF
+    // before every dust step (ParallelCopy with the dust periodicity, the same
+    // path as the fire wind and heat). The grid ratios are asserted equal at
+    // start-up, so the lookup is cell for cell. Until October 2026 the whole
+    // fire level set was gathered into a fire-domain-sized host vector,
+    // all-reduced across the ranks and copied to the device every step
+    // (134 MB per rank per step at 1024^2 x 4).
+    const amrex::MultiFab* fire_phi_scratch = nullptr;
 
     /**
      * @brief Reduce crust_index in burned cells, lowering u*_t and raising dust emission.
@@ -40,13 +44,14 @@ struct FireDustCoupling {
      * @param[in,out] dust_crust_index  Dust layer crust index MultiFab (dust grid)
      * @param[in]     geom_dust         Geometry of the dust sub-grid
      */
-    void apply_burned_area_to_crust(amrex::MultiFab&       dust_crust_index,
-                                    const amrex::Geometry& geom_dust) const;
+    void apply_burned_area_to_crust(amrex::MultiFab& dust_crust_index) const;
 
     // ── Phase 2: fire outflow wind → dust u* ──────────────────────────────────
-    // When fire_wind_to_dust = true, fire_wind_eff (computed by FireLayer each
-    // timestep) is averaged over the fire-to-dust grid ratio and converted to
-    // a friction velocity via log-law. The maximum of background MRF u* and the
+    // When fire_wind_to_dust = true, the fire's wind at erf.fire.wind_ref_ht
+    // (fire_wind_ref, the datum fire_wind_zref names; until October 2026 the
+    // WAF-reduced midflame wind fire_wind_eff was handed over as if it were
+    // the 6.1 m wind, 0.36x for grass, so the coupling never won) is copied
+    // onto the dust grid and converted to a friction velocity via log-law. The maximum of background MRF u* and the
     // fire-derived u* is written back to dust_ustar_in. Cells immediately
     // downwind of the fire perimeter see elevated u* above the MRF baseline,
     // triggering or enhancing dust emission that would not occur from background
@@ -55,13 +60,6 @@ struct FireDustCoupling {
     amrex::Real fire_wind_z0       = 0.1;  // surface roughness for log-law [m]
     amrex::Real fire_wind_zref     = 6.1;  // reference height matching fire wind_ref_ht [m]
 
-    // Pointer to fire effective wind field (u, v) on fire sub-grid.
-    // Set from FireLayer::get_wind_eff() each timestep before calling
-    // apply_fire_wind_to_dust_ustar.
-    const amrex::MultiFab* fire_wind_eff_mf = nullptr;
-    // Geometry of the fire sub-grid (needed for physical-coordinate mapping,
-    // same pattern as geom_fire used by apply_burned_area_to_crust).
-    amrex::Geometry geom_fire_wind;
 
     /**
      * @brief Interaction 2: fire outflow wind raises effective u* on dust grid.
