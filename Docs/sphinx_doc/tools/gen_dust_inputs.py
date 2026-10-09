@@ -57,13 +57,23 @@ grp("Surface state",
 p("silt_fraction", "Surface silt mass fraction [-]", "Real 0-1", "0.10")
 p("crust_index", "Surface crust strength index; 0 loose, 1 fully crusted",
   "Real 0-1", "0.0")
-p("threshold_A_coeff", "Bagnold fluid-threshold constant A [-] (0.1; 0.0123 is Shao and "
-  "Lu's coefficient of a different formula and gave 8x too low a threshold)", "Real > 0", "0.1")
+p("threshold_model", "Base threshold formula for the saltating grains: shao_lu "
+  "(Shao and Lu 2000 with the cohesion term, 0.204 m/s at 75 um) or bagnold "
+  "(inertial branch only, valid above ~100 um)", "shao_lu or bagnold", "shao_lu")
+p("saltation_diameter", "Diameter of the saltating grains the threshold is evaluated "
+  "for [m]; the bin diameters are the emitted sizes. Until October 2026 the "
+  "threshold was Bagnold's at the 7 um bin-0 diameter (0.0385 m/s), 13x too low",
+  "Real > 0", "75.0e-6")
+p("shao_lu_A_N", "Shao and Lu (2000) coefficient A_N [-]", "Real > 0", "0.0123")
+p("shao_lu_gamma", "Shao and Lu (2000) cohesion parameter gamma [kg/s^2]", "Real >= 0", "1.65e-4")
+p("threshold_A_coeff", "Bagnold fluid-threshold constant A [-] (threshold_model = bagnold)",
+  "Real > 0", "0.1")
 p("ustar_t_base", "Base threshold friction velocity before the modifiers "
-  "[m/s]; negative computes the Bagnold value from bin 0 at startup",
+  "[m/s]; negative computes it from threshold_model at saltation_diameter at "
+  "startup (0.0385 reproduces the pre-October-2026 runs)",
   "Real", "-1.0")
 p("alpha_crust", "Crust factor on the threshold: f_chem carries (1 + "
-  "alpha_crust * crust_index)", "Real >= 0", "0.5")
+  "alpha_crust * crust_index); every modifier multiplies the threshold", "Real >= 0", "0.5")
 p("alpha_efflor", "Efflorescence factor on the threshold: (1 + alpha_efflor "
   "* efflorescence)", "Real >= 0", "0.3")
 p("soil_type_file", "Soil type raster; codes 1-16 STATSGO, 100-104 mine "

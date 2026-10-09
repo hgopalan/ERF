@@ -60,10 +60,22 @@ struct DustParams {
                                                  ///<   Reference: Marticorena & Bergametti (1995),
                                                  ///<   J. Geophys. Res., 100, 16415-16430.
                                                  ///<   https://doi.org/10.1029/95JD00690
-    amrex::Real threshold_A_coeff  = 0.1;     ///< Bagnold fluid-threshold constant A [-]. Until 2026-09 the
-                                                 ///<   default was 0.0123, Shao & Lu's A_N, which belongs inside
-                                                 ///<   sqrt(A_N (rho_p g d / rho_a + gamma / (rho_a d))), so u*_t
-                                                 ///<   was 8x below Bagnold's value.
+    std::string threshold_model   = "shao_lu"; ///< Base threshold formula for the saltating grains:
+                                                 ///<   "shao_lu" (default, Shao & Lu 2000, with the cohesion
+                                                 ///<   term; 0.204 m/s at 75 um) or "bagnold" (Bagnold 1941,
+                                                 ///<   inertial branch only; 0.126 m/s at 75 um). Until
+                                                 ///<   2026-10 Bagnold was evaluated at the 7 um bin-0
+                                                 ///<   diameter (0.0385 m/s), which saturated every case;
+                                                 ///<   erf.dust.ustar_t_base = 0.0385 reproduces that.
+    amrex::Real saltation_diameter = 75.0e-6;   ///< Diameter of the saltating grains the threshold is
+                                                 ///<   evaluated for [m]; the bin diameters are the EMITTED
+                                                 ///<   sizes (settling, deposition, PM classes). Marticorena
+                                                 ///<   & Bergametti (1995) use the soil's coarse mode,
+                                                 ///<   60-100 um, the minimum of the Iversen-White curve.
+    amrex::Real shao_lu_A_N        = 0.0123;    ///< Shao & Lu (2000) A_N [-] (threshold_model = shao_lu).
+    amrex::Real shao_lu_gamma      = 1.65e-4;   ///< Shao & Lu (2000) cohesion gamma [kg/s^2].
+    amrex::Real threshold_A_coeff  = 0.1;     ///< Bagnold fluid-threshold constant A [-]
+                                                 ///<   (threshold_model = bagnold):
                                                  ///<   u*_t = A * sqrt(rho_p * g * d / rho_a)
                                                  ///<   Reference: Bagnold (1941), The Physics of Blown
                                                  ///<   Sand and Desert Dunes, Methuen, London.
@@ -82,8 +94,9 @@ struct DustParams {
                                          ///<   Reference: Marticorena & Bergametti (1995),
                                          ///<     https://doi.org/10.1029/95JD00690
     amrex::Real alpha_efflor    = 0.3;  ///< Efflorescence enhancement coefficient for u*_t [-].
-    amrex::Real ustar_t_base    = -1.0; ///< Base u*_t before chemistry [m/s].
-                                         ///<   Negative means compute from Bagnold at init.
+    amrex::Real ustar_t_base    = -1.0; ///< Base u*_t before the modifiers [m/s].
+                                         ///<   Negative (default) means compute it from threshold_model
+                                         ///<   at saltation_diameter at init.
     amrex::Real test_ustar      = 0.0;   ///< Placeholder u* [m/s] used in Phase 6 before
                                          ///<   Phase 9 extracts u* from the MRF surface layer.
                                          ///<   Set > 0 to test emission physics.
@@ -266,6 +279,10 @@ struct DustParams {
         pp.query("particle_density", particle_density);
         pp.query("z0_dust", z0_dust);
         pp.query("silt_fraction", silt_fraction);
+        pp.query("threshold_model",   threshold_model);
+        pp.query("saltation_diameter", saltation_diameter);
+        pp.query("shao_lu_A_N",       shao_lu_A_N);
+        pp.query("shao_lu_gamma",     shao_lu_gamma);
         pp.query("threshold_A_coeff", threshold_A_coeff);
         pp.query("crust_index", crust_index);
         pp.query("grid_ratio", grid_ratio);
@@ -383,6 +400,11 @@ struct DustParams {
         positive("particle_density",  particle_density);
         positive("z0_dust",           z0_dust);
         positive("threshold_A_coeff", threshold_A_coeff);
+        if (threshold_model != "shao_lu" && threshold_model != "bagnold")
+            fail("erf.dust.threshold_model must be shao_lu or bagnold, got " + threshold_model);
+        positive("saltation_diameter", saltation_diameter);
+        positive("shao_lu_A_N", shao_lu_A_N);
+        if (shao_lu_gamma < 0.0) fail("erf.dust.shao_lu_gamma must be >= 0, got " + std::to_string(shao_lu_gamma));
         positive("rho_air",           rho_air);
         positive("supp_tau_base_s",   supp_tau_base_s);
         if (!(zref > z0_dust)) fail("erf.dust.zref (" + std::to_string(zref) + ") must be above z0_dust (" + std::to_string(z0_dust) + ")");

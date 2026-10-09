@@ -86,26 +86,27 @@ DustLayer::initialize(
                    << dust_params.n_size_bins << " comp)\n";
   }
 
-  // Bin 0 diameter [m] from erf.dust.bin_diameters, the array settling, deposition
-  // and the PM classes use, so the threshold sees the same particle as the rest.
+  // The threshold belongs to the SALTATING grains (erf.dust.saltation_diameter,
+  // 75 um by default), not to the emitted dust bins: Bagnold's formula at the
+  // 7 um bin-0 diameter gave 0.0385 m/s, 13x below Shao-Lu at that size, and
+  // every case ran saturated. The deck's air density is the one the emission
+  // flux uses; erf.dust.ustar_t_base >= 0 replaces the formula.
   AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!dust_params.bin_diameters.empty(),
       "[DUST] erf.dust.bin_diameters must list at least one bin diameter [m]");
-  amrex::Real d_bin0 = dust_params.bin_diameters[0];
-  // Bagnold threshold for bin 0 with the deck's air density (the emission flux
-  // uses the same rho_air); erf.dust.ustar_t_base >= 0 replaces it.
-  amrex::Real ustar_t = compute_ustar_t_bagnold(dust_params.threshold_A_coeff,
-                                                dust_params.particle_density,
-                                                d_bin0, dust_params.rho_air);
+  const amrex::Real d_salt = dust_params.saltation_diameter;
+  amrex::Real ustar_t = (dust_params.threshold_model == "bagnold")
+      ? compute_ustar_t_bagnold(dust_params.threshold_A_coeff, dust_params.particle_density,
+                                d_salt, dust_params.rho_air)
+      : compute_ustar_t_shao_lu(dust_params.shao_lu_A_N, dust_params.shao_lu_gamma,
+                                dust_params.particle_density, d_salt, dust_params.rho_air);
   if (dust_params.ustar_t_base >= 0.0) ustar_t = dust_params.ustar_t_base;
   dust_ustar_t->setVal(ustar_t);
 
-  if (dust_params.dust_debug) {
-    amrex::Print()
-      << "[DUST DEBUG] Set dust_ustar_t (Bagnold threshold bin 0): " << "u*_t="
-      << ustar_t << " m/s, " << "d=" << d_bin0 * 1.0e6
-      << " um, " << "rho_p=" << dust_params.particle_density << " kg/m^3, "
-      << "A=" << dust_params.threshold_A_coeff << "\n";
-  }
+  amrex::Print() << "[DUST] Base threshold u*_t = " << ustar_t << " m/s ("
+                 << ((dust_params.ustar_t_base >= 0.0) ? std::string("erf.dust.ustar_t_base")
+                                                        : dust_params.threshold_model)
+                 << ", saltation diameter " << d_salt * 1.0e6 << " um, rho_p="
+                 << dust_params.particle_density << " kg/m^3, rho_a=" << dust_params.rho_air << ")\n";
 
   dust_soil_type->setVal(0.0);
   dust_silt_fraction->setVal(dust_params.silt_fraction);
@@ -729,7 +730,7 @@ DustLayer::advance(
   recompute_dust_ustar_t(
     *dust_ustar_t, *dust_ustar_base, *dust_crust_index, *dust_efflor,
     *dust_surf_moist, *dust_suppression, m_params.alpha_crust,
-    m_params.alpha_efflor, dust_slopes.get());
+    m_params.alpha_efflor, dust_slopes.get(), dust_wind_ref.get());
 
   if (m_params.dust_debug) {
     /*amrex::Print() << "[DUST DEBUG] Phase 7: crust_index before u*_t computation at step=" << m_step

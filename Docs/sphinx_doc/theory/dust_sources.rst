@@ -11,24 +11,40 @@ Threshold friction velocity
 
 Emission starts where the friction velocity exceeds a threshold
 :math:`u_{*t}` set by the grain size and everything that binds the surface.
-The base value is Bagnold's
+The base value belongs to the *saltating* grains, not to the emitted dust:
+Marticorena and Bergametti (1995) drive the sandblasting flux with the
+threshold of the soil's coarse mode (60-100 um), the minimum of the
+threshold-versus-size curve. With :cpp:`erf.dust.threshold_model = shao_lu`
+(the default) it is Shao and Lu's (2000) expression with the cohesion term,
 
 .. math::
 
-   u_{*t,\mathrm{base}} = A \sqrt{\frac{\rho_p\, g\, d}{\rho_a}}
+   u_{*t,\mathrm{base}} = \sqrt{A_N \left( \frac{\rho_p\, g\, d_s}{\rho_a}
+                          + \frac{\gamma}{\rho_a\, d_s} \right)}
 
-with :math:`A` = :cpp:`erf.dust.threshold_A_coeff` (0.1, Bagnold's fluid-threshold
-constant; the earlier default 0.0123 was Shao and Lu's coefficient of a different
-formula and gave a threshold 8x too low), :math:`\rho_p`
-= :cpp:`erf.dust.particle_density`, :math:`\rho_a` =
-:cpp:`erf.dust.rho_air` and :math:`d` the diameter of bin 0 in
-:cpp:`erf.dust.bin_diameters` (the same array settling and deposition use); :cpp:`erf.dust.ustar_t_base` overrides it
-when non-negative. The per-cell threshold (``compute_ustar_t_full`` in
-``ERF_DustThreshold.H``) is then
+with :math:`A_N` = :cpp:`erf.dust.shao_lu_A_N` (0.0123), :math:`\gamma` =
+:cpp:`erf.dust.shao_lu_gamma` (1.65e-4 kg/s^2), :math:`d_s` =
+:cpp:`erf.dust.saltation_diameter` (75 um), :math:`\rho_p` =
+:cpp:`erf.dust.particle_density` and :math:`\rho_a` = :cpp:`erf.dust.rho_air`:
+0.204 m/s for quartz in standard air. The curve is non-monotone in
+:math:`d_s`, the inertial term growing with the size and the cohesion term
+with its inverse. :cpp:`erf.dust.threshold_model = bagnold` gives Bagnold's
+(1941) inertial branch alone, :math:`A \sqrt{\rho_p g d_s / \rho_a}` with
+:math:`A` = :cpp:`erf.dust.threshold_A_coeff` (0.1), which is only valid
+above about 100 um. Until October 2026 the base was Bagnold's formula at the
+7 um diameter of bin 0, 0.0385 m/s, 13x below Shao-Lu at that size: every
+case ran with :math:`u_{*t}/u_* \approx 0.08`, where the Owen factor of the
+saltation flux still rises with the threshold, so crust, suppression and
+moisture changed the emission by a few percent with the wrong sign.
+:cpp:`erf.dust.ustar_t_base` overrides the formula when non-negative (0.0385
+reproduces the old runs). The bin diameters of :cpp:`erf.dust.bin_diameters`
+are the emitted sizes, used by settling, deposition and the PM classes only.
+The per-cell threshold (``compute_ustar_t_full`` in ``ERF_DustThreshold.H``)
+is then
 
 .. math::
 
-   u_{*t} = u_{*t,\mathrm{base}}\; \frac{f_\mathrm{chem}}{f_\mathrm{moist}\, f_\mathrm{supp}}\; f_\mathrm{slope}
+   u_{*t} = u_{*t,\mathrm{base}}\; f_\mathrm{chem}\, f_\mathrm{moist}\, f_\mathrm{supp}\; f_\mathrm{slope}
 
 .. math::
 
@@ -37,26 +53,36 @@ when non-negative. The per-cell threshold (``compute_ustar_t_full`` in
    f_\mathrm{supp}  = 1 + 6\, s
 
 where :math:`C_I` is the crust index, :math:`E_f` the efflorescence
-fraction, :math:`w` the moisture inhibition and :math:`s` the suppression
+fraction, :math:`w` the moisture flag and :math:`s` the suppression
 coverage, all clamped to [0, 1], with :math:`\alpha_c` =
 :cpp:`erf.dust.alpha_crust` and :math:`\alpha_e` =
-:cpp:`erf.dust.alpha_efflor`. Crust and efflorescence *raise* the threshold
-(a bound surface is harder to erode), which is why the fire coupling lowers
-emission by removing crust. Moisture and suppression divide the base in the
-code but are themselves greater than one, so they also raise the threshold.
-The slope factor is the upslope correction of Iversen and White (1982),
+:cpp:`erf.dust.alpha_efflor`. Every factor is at least one and *raises* the
+threshold: a crusted, salt-bound, wet or suppressant-treated surface is
+harder to erode. The fire coupling removes crust in burned cells, which
+lowers their threshold and raises their emission. (Until October 2026 the
+code divided by :math:`f_\mathrm{moist} f_\mathrm{supp}`, so a wet or treated
+cell emitted more than a dry one; the ``DustThreshold`` gtests pin the
+direction.) The moisture factor is an ad hoc linear form on the [0, 1] flag
+of the surface map, not Fecan et al.'s (1999)
+:math:`\sqrt{1 + 1.21 (w - w')^{0.68}}`, which needs a gravimetric soil
+moisture the module does not carry yet.
+The slope factor is the signed form of Iversen and Rasmussen (1994),
 
 .. math::
 
-   f_\mathrm{slope} = \sqrt{\max\!\left(0.1,\; \cos\beta + \frac{|\nabla z|}{\tan 35^\circ}\right)},
-   \qquad \cos\beta = \frac{1}{\sqrt{1 + |\nabla z|^2}}
+   f_\mathrm{slope} = \sqrt{\max\!\left(0.1,\; \cos\theta + \frac{\sin\theta}{\tan 35^\circ}\right)},
+   \qquad \tan\theta = \frac{\nabla z \cdot \mathbf{U}}{|\mathbf{U}|}
 
-from the terrain slope on the dust grid. The result is clamped to
+with :math:`\theta` the terrain slope along the wind at ``zref`` (positive
+where the wind blows uphill, negative on the lee face, so a 10 degree slope
+gives 1.11 windward and 0.86 in the lee); with no wind the magnitude
+:math:`|\nabla z|` is used. The result is clamped to
 [0.001, 5] m/s. Two feedbacks from the atmosphere follow when enabled: the
 Shao (2001) loading feedback :math:`u_{*t} \to u_{*t}(1 + \alpha_L C_\mathrm{sfc})`
 with :math:`\alpha_L` = :cpp:`erf.dust.loading_feedback_coeff` and
-:math:`C_\mathrm{sfc}` the dust density of the lowest atmosphere cell, and the
-Fecan (1999) dynamic moisture factor of :ref:`sec:DustCoupling`.
+:math:`C_\mathrm{sfc}` the dust density of the lowest atmosphere cell; the
+surface latent flux returned from the atmosphere is an output only
+(:ref:`sec:DustCoupling`).
 
 Saltation and vertical flux
 ---------------------------
