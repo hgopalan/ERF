@@ -832,6 +832,22 @@ step in (6.5e-4 degrees) moves in the fifth digit with it; the restart parity te
 against five, a checkpoint and five more. The flow has its own gold, shared
 by both libraries.
 
+``Conductors_RandomGusts`` and ``Conductors_EventGust`` (stub), with
+``Conductors_RandomGusts_MoorDyn`` and ``Conductors_EventGust_MoorDyn`` (real
+library), run the same lines in gusts from the RANS :math:`k`: random gusts
+per span and tower (``erf.conductors.gust_type = random``), and one travelling
+1 - cos gust that crosses x = 1000 m at 6 s along the wind
+(``gust_type = event``), both added to the wind the lines and towers take. The
+middle span of one line, ``conductors/towers.dat`` and
+``conductors/gust_series.dat`` with the gust at each span's middle and each
+tower's top are compared with golds of each library (the real library's to
+four digits, as above); the restart parity tests
+``Conductors_RandomGusts_Restart`` and ``Conductors_RandomGusts_Restart_MoorDyn``
+carry the random gusts' processes across the checkpoint, the checkpointing
+run going on past it so that the restarted run must drop the rows written
+after it. The flow is
+``Conductors_Terrain``'s gold, since nothing goes back into it.
+
 ``Conductors_MovingTowers`` (stub) and ``Conductors_MovingTowers_MoorDyn``
 (real library) run the same lines on towers that bend: each sways in its
 first mode, 2 Hz on a rigid foundation lowered to 1.67 Hz by footings that
@@ -919,13 +935,16 @@ message, on the ``Conductors_FlowWind`` deck: ``Conductors_SpansKeyAbort``
 gives ``erf.conductors.spans`` (not an input; the message names
 ``erf.conductors.lines``), and ``Conductors_AttachmentOutsideAbort`` moves
 ``end_b`` to x = 1600 m, outside the 1500 m domain (the message names the line
-end and its position). Three more stop runs that ask for gusts the code cannot give:
+end and its position). Five more stop runs that ask for gusts the code cannot give:
 ``Conductors_GustNeedsRANSAbort`` sets ``erf.conductors.gust_type = factor`` on
 the laminar ``Conductors_FlowWind`` deck (the message names
 ``erf.rans_type = kEqn``), ``Conductors_GustKeyAbort`` gives
-``gust_peak_factor`` there without ``gust_type = factor``, and
+``gust_peak_factor`` there without a ``gust_type``,
 ``Conductors_GustPrescribedWindAbort`` asks for gusts on the
-``Conductors_PrescribedWind`` deck, whose wind is prescribed.
+``Conductors_PrescribedWind`` deck, whose wind is prescribed, and on the
+``Conductors_Terrain`` deck ``Conductors_GustDragOnFlowAbort`` asks for random
+gusts with ``drag_on_flow`` and ``Conductors_GustEventTimeAbort`` for an event
+without ``gust_event_time``.
 
 The ``Linux GCC MoorDyn`` CI workflow
 runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with
@@ -933,7 +952,8 @@ runs the stub tests in one job and, after installing MoorDyn-C 2.7.1 with
 
 Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files/Conductors_FlowWind`_,
 `Tests/test_files/Conductors_DragOnFlow`_, `Tests/test_files/Conductors_Circuit`_,
-`Tests/test_files/Conductors_Terrain`_, `Tests/test_files/Conductors_MovingTowers`_,
+`Tests/test_files/Conductors_Terrain`_, `Tests/test_files/Conductors_RandomGusts`_,
+`Tests/test_files/Conductors_EventGust`_, `Tests/test_files/Conductors_MovingTowers`_,
 `Tests/test_files/Conductors_FrameTowers`_, `Tests/test_files/Conductors_GeneratedTowers`_,
 `Tests/test_files/Conductors_ImmersedHills`_
 
@@ -946,6 +966,10 @@ Test Locations: `Tests/test_files/Conductors_PrescribedWind`_, `Tests/test_files
 .. _`Tests/test_files/Conductors_Circuit`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_Circuit
 
 .. _`Tests/test_files/Conductors_Terrain`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_Terrain
+
+.. _`Tests/test_files/Conductors_RandomGusts`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_RandomGusts
+
+.. _`Tests/test_files/Conductors_EventGust`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_EventGust
 
 .. _`Tests/test_files/Conductors_MovingTowers`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Conductors_MovingTowers
 

@@ -2574,6 +2574,30 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
       DATALOG "conductors/L1_span2.dat ${_terrain_logs}"
       DATALOG_SIGDIGITS 10)
   set_tests_properties(${_terrain_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
+  # The same lines in random gusts (gust_type = random) and in one travelling 1 - cos gust
+  # (gust_type = event): every span and tower takes the RANS wind plus its gust. The middle span of
+  # L1, the towers' loads and the gusts at each span's middle and each tower's top must match their
+  # golds; the flow is Conductors_Terrain's, since nothing goes back into it. The restart parity
+  # carries the random gusts' processes across the checkpoint; its checkpointing run goes on past the
+  # checkpoint (OVERRUN), so the restarted run must also drop the gust rows written after it.
+  set(_gust_logs "conductors/towers.dat conductors/gust_series.dat")
+  if(ERF_MOORDYN_USE_STUB)
+    add_test_conductors(Conductors_RandomGusts Conductors_RandomGusts "plt00010" "conductors/L1_span2.dat"
+                        "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_gust_logs}" GOLD_SUFFIX ".gold")
+    add_test_conductors(Conductors_EventGust Conductors_EventGust "plt00010" "conductors/L1_span2.dat"
+                        "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_gust_logs}" GOLD_SUFFIX ".gold")
+    set(_gust_restart Conductors_RandomGusts_Restart)
+  else()
+    add_test_conductors(Conductors_RandomGusts_MoorDyn Conductors_RandomGusts "plt00010" "conductors/L1_span2.dat"
+                        "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_gust_logs}" GOLD_SUFFIX ".moordyn.gold")
+    add_test_conductors(Conductors_EventGust_MoorDyn Conductors_EventGust "plt00010" "conductors/L1_span2.dat"
+                        "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_gust_logs}" GOLD_SUFFIX ".moordyn.gold")
+    set(_gust_restart Conductors_RandomGusts_Restart_MoorDyn)
+  endif()
+  add_test_restart_parity(${_gust_restart} Conductors_RandomGusts 5 10
+      DATALOG "conductors/L1_span2.dat ${_gust_logs}"
+      DATALOG_SIGDIGITS 10 OVERRUN)
+  set_tests_properties(${_gust_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # The same lines on towers that bend: each tower sways in its first mode under its members' drag
   # and its line's pull, and MoorDyn moves the cross-arms as coupled points. The towers' loads and
   # cross-arm displacements, the statistics of the hilltop line's first tower and the middle span of
@@ -2701,8 +2725,8 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
                  "erf.conductors.lattice.member_file = missing.dat: cannot read the member design file 'missing.dat'"
                  "erf.conductors.lattice.member_file=missing.dat")
   # gusts from the RANS k: on a run without the k-equation RANS (the laminar flow-sampled span), a gust
-  # input given without gust_type = factor, and gusts with a prescribed wind each stop the run, naming
-  # the input
+  # input given without a gust_type, gusts with a prescribed wind, random gusts with the drag put into
+  # the flow, and an event without its time each stop the run, naming the input
   add_test_abort(Conductors_GustNeedsRANSAbort
                  ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_FlowWind
                  Conductors_FlowWind.i
@@ -2711,14 +2735,25 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   add_test_abort(Conductors_GustKeyAbort
                  ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_FlowWind
                  Conductors_FlowWind.i
-                 "erf.conductors.gust_peak_factor needs erf.conductors.gust_type = factor"
+                 "erf.conductors.gust_peak_factor needs an erf.conductors.gust_type"
                  "erf.conductors.gust_peak_factor=3")
   add_test_abort(Conductors_GustPrescribedWindAbort
                  ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_PrescribedWind
                  Conductors_PrescribedWind.i
                  "erf.conductors.gust_type = factor takes k from the flow, so it cannot be used with erf.conductors.prescribed_velocity"
                  "erf.conductors.gust_type=factor")
+  add_test_abort(Conductors_GustDragOnFlowAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_Terrain
+                 Conductors_Terrain.i
+                 "erf.conductors.gust_type = random adds its gust to the wind of the lines and towers only; it cannot be used"
+                 "erf.conductors.gust_type=random erf.conductors.drag_on_flow=1")
+  add_test_abort(Conductors_GustEventTimeAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_Terrain
+                 Conductors_Terrain.i
+                 "erf.conductors.gust_type = event needs erf.conductors.gust_event_time"
+                 "erf.conductors.gust_type=event erf.conductors.gust_event_speed=20")
   set_tests_properties(Conductors_SpansKeyAbort Conductors_AttachmentOutsideAbort Conductors_GeneratedFrameAbort
                        Conductors_MemberFileAbort Conductors_GustNeedsRANSAbort Conductors_GustKeyAbort
-                       Conductors_GustPrescribedWindAbort PROPERTIES LABELS "regression;conductors")
+                       Conductors_GustPrescribedWindAbort Conductors_GustDragOnFlowAbort Conductors_GustEventTimeAbort
+                       PROPERTIES LABELS "regression;conductors")
 endif()

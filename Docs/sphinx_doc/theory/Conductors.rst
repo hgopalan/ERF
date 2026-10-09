@@ -822,14 +822,16 @@ checks them.
 Gusts from the RANS turbulence
 ------------------------------
 
-A steady RANS wind gives the lines their mean load only. With
-``erf.conductors.gust_type = factor`` every span also gets a gust factor and a
-peak wind load from the mean wind and the turbulent kinetic energy :math:`k` of
-the k-equation RANS closure where it hangs (``Source/MovingBodies/Conductors/ERF_Gusts.H``).
-It needs ``erf.rans_type = kEqn`` on the conductors' anchor level and the
-flow's wind (not ``prescribed_velocity``), and every span needs a horizontal
-extent; the run stops otherwise, naming the input. The lines' motion is not
-changed: the gusts are a diagnostic.
+A steady RANS wind gives the lines their mean load only. With any
+``erf.conductors.gust_type`` (``factor``, ``event`` or ``random``) every span
+also gets a gust factor and a peak wind load from the mean wind and the
+turbulent kinetic energy :math:`k` of the k-equation RANS closure where it hangs
+(``Source/MovingBodies/Conductors/ERF_Gusts.H``). It needs
+``erf.rans_type = kEqn`` on the conductors' anchor level and the flow's wind
+(not ``prescribed_velocity``), and every span needs a horizontal extent; the run
+stops otherwise, naming the input. With ``factor`` the lines' motion is not
+changed: the factor is a diagnostic. ``event`` and ``random`` also add a gust to
+the wind the lines and towers take (below).
 
 The streamwise velocity fluctuation is :math:`\sigma_u = c \sqrt{k}`. In a
 neutral surface layer :math:`\sigma_u` is about :math:`2.5\,u_*`, and the RANS
@@ -886,6 +888,112 @@ is written before the first sample. The means are checkpointed with the other st
 a run restarted from a checkpoint written without gusts starts them at the
 restart.
 
+Travelling and random gusts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``gust_type = event`` and ``random`` add a fluctuation :math:`u'` to the RANS
+wind every line node and tower drag node takes, along the mean horizontal wind
+of the span, insulator string or tower it acts on (none where that mean is
+zero; the vertical wind is left alone); a negative gust larger than a low wind
+reverses it. The gust acts on the lines and towers only: these types cannot be
+used with ``drag_on_flow``, which would put the gust's drag into the RANS flow.
+Every step :math:`\sigma_u = c \sqrt{k}` is taken from the mean :math:`k` over
+each span's nodes and over each tower's drag nodes. An insulator string takes
+the mean amplitude (``event``) or the mean gust (``random``) of the two spans
+beside it; with independent random gusts on those spans its fluctuation is
+the smaller, which matters little for a string a few metres long next to spans
+of hundreds.
+
+``event`` is one travelling 1 - cos gust. A plane front moving at the speed
+:math:`c_g` (``gust_event_speed``) along the horizontal unit vector
+:math:`\mathbf{e}` (``gust_event_direction``, degrees counterclockwise from
+:math:`x`, default 0) crosses :math:`\mathbf{x}_0` (``gust_event_origin``,
+default the domain's centre) at :math:`t_0` (``gust_event_time``), so it reaches
+a point :math:`\mathbf{x}` at
+:math:`t_a = t_0 + \mathbf{e} \cdot (\mathbf{x} - \mathbf{x}_0) / c_g` and lasts
+:math:`D` there (``gust_event_duration``, default 10.5 s, the duration of IEC
+61400-1's extreme operating gust, not its shape or amplitude):
+
+.. math::
+
+   u' = g \sigma_u \frac{1 - \cos 2 \pi s}{2}, \qquad s = \frac{t - t_a}{D},
+   \qquad 0 \le s \le 1,
+
+and 0 outside, with :math:`g` the peak factor (``gust_peak_factor``). It is
+taken at the middle of each step, where the wind MoorDyn holds over the step
+is valid; where the front has already passed a point when the run starts, the
+gust acts there from the first step. The event is a point peak put on the whole
+front at once: unlike the random gusts and the factor it is not reduced by
+:math:`B`, so on a long span it is conservative. On a 400 m span crossed at
+right angles with :math:`I = 0.15` its peak load is 1.97 times the mean, where
+the factor gives 1.34.
+
+``random`` gives every span and every tower an Ornstein-Uhlenbeck process
+:math:`z` of unit variance and integral time scale :math:`T = L_u / U`,
+:math:`U` the root-mean-square horizontal wind over its nodes, stepped exactly
+over each step :math:`\Delta t`,
+
+.. math::
+
+   z' = z\, e^{-\Delta t / T} + \left(1 - e^{-2 \Delta t / T}\right)^{1/2} \xi,
+   \qquad u' = \sigma_u \sqrt{B}\, z,
+
+with :math:`\xi` standard normal. :math:`L_u` is ``gust_integral_length``, or
+the integral length of IEC 61400-1's Kaimal spectrum, :math:`8.1 \Lambda_1`
+with :math:`\Lambda_1 = 0.7 z` below 60 m and 42 m above, at the span's
+attachment height or the tower's mean drag-node height. :math:`B`, the part of
+the point fluctuation's variance the whole structure feels, is the span's
+:math:`B` above, and for a tower ASCE 74's
+:math:`B_t = 1 / (1 + 0.375 h / L_s)`, :math:`h` its highest drag node above
+its base. A line that shares another's towers (``share_towers``) takes the
+processes of that line's spans, and a line that names another in
+``erf.conductors.<line>.gust_with`` takes them too (a circuit on separate
+lines), so the conductors of a circuit move together; otherwise each line's
+gusts are independent of the others'. Each tower has its own process. :math:`\xi` comes from a hash of ``gust_seed``, the process
+and the step count alone, so every rank draws the same numbers, another seed
+gives another series, and a restart, which carries :math:`z`, continues the
+same series. The first step draws :math:`z` from its stationary law, so the
+series is stationary from the start. The model is the simplest with the right
+variance and correlation time: it has no spectrum, no coherence along a span
+beyond :math:`B`, and no lateral or vertical fluctuation.
+
+Every ``diagnostics_int`` steps ``<diagnostics_dir>/gust_series.dat`` gets a
+row, stamped with the step's start time, of the gust at each span's middle node
+and at each tower's highest drag node (the event's at the step's middle, half
+a step after the stamp). The unit tests ``Gusts.*`` check the
+shape and arrival of the event, the normal numbers, the exact step, and the
+variance and the autocorrelation :math:`e^{-\tau / T}` of a long series;
+``Conductors.AnEventGustPassesEveryNodeAndTowerWithItsFront``,
+``Conductors.RandomGustsFollowTheirProcessesAndACircuitSharesThem``,
+``Conductors.ALineTakesAnotherLinesGustsAndAChangedSharingDrawsAfresh`` and
+``Conductors.RandomGustsContinueAcrossARestart`` check the wind the lines and
+towers take, and ``Conductors.TheGustFactorRunsOnLinesWithLatticeTowers`` the
+factor on a section with lattice towers.
+
+``Exec/CanonicalTests/PowerLines/les/rans`` runs the clamped network of the
+ASCE 74 comparison in a k-equation RANS of the same hills: a terrain-fitted
+mesh of the LES's domain and spacing (the k-equation's wall distance is
+measured from the mesh's bottom, which an immersed terrain leaves flat), with
+the LES precursor's mean profile as the inflow.
+``Exec/CanonicalTests/PowerLines/les/compare_gusts.py`` compares every span with
+the LES over 600 s of each. The LES's :math:`\sigma_u` at mid-span (its resolved
+fluctuation and the precursor's subgrid energy at that height) over the RANS
+:math:`\sqrt{k}` along the span gives :math:`c` = 0.76 to 1.59 across the eight
+spans, median 1.09 (0.96 from the resolved part alone), where the default is 1.39.
+With the default the random gusts' peak span load over the mean is 1.16 times
+the LES's (median; 0.80 to 1.35) and the factor's :math:`G` 1.18 times (0.93 to
+1.71); with :math:`c` = 1.10 (``gust_sigma_factor``) they are 1.07 (0.73 to
+1.20) and 1.08 (0.84 to 1.48). The peak tensions agree with the LES's within
+3 % with either; the peak swing is 0.78 to 2.0 times the LES's (median 1.39 with
+the default; 2.0 on the 33 m span). The RANS mean load is 0.74 to 1.57 times the LES's, following the
+mean wind across each span, so the peak loads themselves are 1.31 (default)
+and 1.20 times the LES's (medians). On the two long spans of the line whose
+chords lie at about 22 degrees to the wind (262 and 230 m) the random gusts'
+peak over the mean falls below the LES's (0.80 and 0.89 with the default): they
+have no lateral fluctuation, which carries much of the load normal to such a
+span; on the same line's 33 m span, at the same angle, it is 1.25. The default is kept: these numbers come from one LES
+realization of one network over one terrain, and no test checks them.
+
 Restart
 -------
 
@@ -894,7 +1002,9 @@ MoorDyn state (node and free-point positions and velocities, internal forces
 and the time integrator's state, through MoorDyn's own save), the running
 statistics of every span, of each line's strings, of every pair of lines,
 transformer and tower, the gusts' per-span means (started afresh when the
-checkpoint has none), each moving tower's sway, the step count and the time.
+checkpoint has none), the random gusts' processes (drawn afresh at the
+restart's first step when the checkpoint has none, or other ones: another
+number, or lines taking each other's gusts differently), each moving tower's sway, the step count and the time.
 On a restart the line is created from the same inputs, initialised without the initial-shape solve and given that state, so
 it continues blown out exactly where the checkpoint left it, on MoorDyn's
 clock; the statistics go on accumulating, and the diagnostics continue on the
@@ -904,9 +1014,9 @@ the restart shows the source of the checkpointed step. The span and string
 logs, ``<output_root>_nodes.dat``, ``total_load.dat``, ``separation.dat``,
 ``transformers.dat`` and ``coupling.dat`` are appended to after the rows a run wrote beyond the
 checkpoint time are dropped, so a run that went on past its last checkpoint
-and is restarted from it leaves no duplicated stretch; ``towers.dat``, whose
-rows carry the time a step starts at, loses the row at the checkpoint time as
-well, since the restarted run writes it again.
+and is restarted from it leaves no duplicated stretch; ``towers.dat`` and
+``gust_series.dat``, whose rows carry the time a step starts at, lose the row at
+the checkpoint time as well, since the restarted run writes it again.
 
 The lines of a restart must be those of the run that wrote the checkpoint.
 The run stops, naming the line, when the checkpoint holds a different number

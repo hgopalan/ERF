@@ -36,10 +36,25 @@
 //     set_closure and conserved-state aborts.
 // GustsSwitchedOnAtARestartStartAfresh: a checkpoint written without gusts restarts with gust_type = factor, the
 //     gust statistics starting at the restart.
+// AnEventGustPassesEveryNodeAndTowerWithItsFront: with gust_type = event, the wind at every line node and tower drag
+//     node is the flow's plus g sigma_u times the 1 - cos shape at the node's phase at the step's middle, sigma_u from
+//     the mean k over the span's or tower's nodes; the origin defaults to the domain's centre; gust_series.dat.
+// RandomGustsFollowTheirProcessesAndACircuitSharesThem: with gust_type = random, every span's gust is
+//     sigma_u sqrt(B) z, z the Ornstein-Uhlenbeck process stepped with T = L_u / U, the phases and the shield wire on
+//     shared towers taking the owner's spans' processes; a string the mean of the spans beside it; each tower
+//     sigma_u sqrt(B_t) z of its own; gust_series.dat's columns.
+// RandomGustsContinueAcrossARestart: a restart continues the random gusts where the checkpoint left them, and a
+//     checkpoint written without gusts draws them afresh from the stationary law at the restart's first step.
+// TheGustFactorRunsOnLinesWithLatticeTowers: gust_type = factor on a section with lattice towers, whose drag nodes
+//     it does not sample, writes gusts.csv and no gust series.
+// ALineTakesAnotherLinesGustsAndAChangedSharingDrawsAfresh: a line naming another in gust_with takes its random
+//     gust, each along its span's mean horizontal wind in a wind that veers with the height; a restart whose lines
+//     share differently, with as many processes, draws them afresh.
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -1537,4 +1552,485 @@ TEST(Conductors, ARestartChecksTheTowerSwayAndTheSurfaceOffset)
     EXPECT_NE(erf_conductors::restart_mismatch(false, true, nan, 10000.0).find("holds no tower sway"), std::string::npos);
     EXPECT_NE(erf_conductors::restart_mismatch(true, false, nan, 10000.0).find("holds tower sway, but no tower type"), std::string::npos);
     EXPECT_NE(erf_conductors::restart_mismatch(false, false, 10000.0, 5000.0).find("erf.conductors.surface_offset"), std::string::npos);
+}
+
+namespace {
+// rho and rho k = rho (k0 + kz z) in every cell of a flat mesh: k linear in the height, which the cell sampler reproduces
+void fill_k (amrex::MultiFab& cons, const Mesh& m, Real k0, Real kz)
+{
+    cons.setVal(0.0);
+    const Real dz = m.H / m.nz;
+    for (amrex::MFIter mfi(cons); mfi.isValid(); ++mfi) {
+        auto ca = cons.array(mfi);
+        amrex::LoopOnCpu(mfi.growntilebox(), [&](int i, int j, int k) {
+            amrex::ignore_unused(i, j);
+            ca(i,j,k,Rho_comp) = 1.2;
+            ca(i,j,k,RhoKE_comp) = Real(1.2) * (k0 + kz * (k + Real(0.5)) * dz);
+        });
+    }
+}
+
+// the mean of k = k0 + kz z over the nodes [n0, n0 + nn) of the points pos (3 per point)
+double mean_k (const std::vector<Real>& pos, unsigned n0, unsigned nn, Real k0, Real kz)
+{
+    double k = 0.0;
+    for (unsigned n = n0; n < n0 + nn; ++n) { k += static_cast<double>(k0 + kz * pos[3*n+2]); }
+    return k / nn;
+}
+
+// the rows of a whitespace-separated log after its header, as numbers
+std::vector<std::vector<double>> read_rows (const std::string& fname, std::string& header)
+{
+    std::ifstream f(fname);
+    std::getline(f, header);
+    std::vector<std::vector<double>> rows;
+    for (std::string line; std::getline(f, line);) {
+        std::istringstream ls(line);
+        rows.emplace_back();
+        for (double x; ls >> x;) { rows.back().push_back(x); }
+    }
+    return rows;
+}
+} // namespace
+
+TEST(Conductors, AnEventGustPassesEveryNodeAndTowerWithItsFront)
+{
+    const std::string dir = scratch("gust_event");
+    set_towered_section(dir, "Tev");   // three spans along x from 100 to 1000 m, towers at 400 and 700 m
+    amrex::ParmParse pp("erf.conductors");
+    pp.remove("prescribed_velocity");
+    pp.add("gust_type", std::string("event"));
+    pp.add("gust_event_time", 1.0);
+    pp.add("gust_event_speed", 150.0);
+    pp.add("gust_event_duration", 2.0);
+    Mesh m(false);
+    m.fill_crosswind();
+    const Real k0 = 0.5, kz = 0.01;
+    amrex::MultiFab cons(m.ba, m.dm, RhoKE_comp + 1, 1);
+    fill_k(cons, m, k0, kz);
+    {
+        // without an origin the front crosses the domain's centre, moving along +x
+        auto c0 = Conductors::create(0);
+        ASSERT_TRUE(c0);
+        c0->set_closure(true, 0.5562);
+        c0->set_ground(nullptr, m.geom);
+        EXPECT_NEAR(c0->gust_event().x0, 600.0, 1e-9);
+        EXPECT_NEAR(c0->gust_event().y0, 500.0, 1e-9);
+        EXPECT_NEAR(c0->gust_event().ex, 1.0, 1e-15);
+        EXPECT_NEAR(c0->gust_event().ey, 0.0, 1e-15);
+    }
+    {
+        // a direction in degrees counterclockwise from +x: 90 moves the front along +y
+        pp.add("gust_event_direction", 90.0);
+        auto c90 = Conductors::create(0);
+        ASSERT_TRUE(c90);
+        c90->set_closure(true, 0.5562);
+        c90->set_ground(nullptr, m.geom);
+        EXPECT_NEAR(c90->gust_event().ex, 0.0, 1e-6);
+        EXPECT_NEAR(c90->gust_event().ey, 1.0, 1e-12);
+        pp.add("gust_event_direction", 0.0);
+    }
+    // the front crosses the line's first end at t = 1 s and its last at 7 s; it lasts 2 s at a point
+    pp.addarr("gust_event_origin", std::vector<Real>{100.0, 500.0});
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_closure(true, 0.5562);
+    c->set_ground(nullptr, m.geom);
+    EXPECT_NE(erf_gtest::abort_message([&] { c->advance(0, 0.0, 0.25, m.u, m.v, m.w, nullptr, nullptr, m.geom); })
+                  .find("gust_type = event needs the conserved state"), std::string::npos);
+    const auto& e = c->gust_event();
+    EXPECT_NEAR(e.x0, 100.0, 1e-9);
+    EXPECT_EQ(e.time, 1.0);
+    EXPECT_EQ(e.speed, 150.0);
+    EXPECT_EQ(e.duration, 2.0);
+    const double sf = c->gust_sigma_factor(), g = 2.7, dt = 0.25;
+    const auto& line = *c->lines().front();
+    ASSERT_EQ(c->towers().size(), 2u);
+    int during = 0, before = 0;
+    std::vector<double> mid_gust;   // the gust at span 1's middle node, step by step
+    const int steps = 40;
+    for (int s = 0; s < steps; ++s) {
+        const double tm = dt * s + 0.5 * dt;   // the wind is held at the step's middle
+        const std::vector<Real> where = line.kinematics_points();
+        c->advance(0, dt * s, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons);
+        for (int sp = 0; sp < line.num_spans(); ++sp) {
+            const unsigned n0 = line.span_first_node(sp), nn = line.span_num_nodes(sp);
+            const double A = g * sf * std::sqrt(mean_k(where, n0, nn, k0, kz));
+            for (unsigned n = n0; n < n0 + nn; ++n) {
+                const double phase = erf_conductors::gust_event_phase(e, where[3*n], where[3*n+1], tm);
+                const double gust = A * erf_conductors::gust_event_shape(phase);
+                const double expect = static_cast<double>(m.v_at(where[3*n+1], where[3*n+2])) + gust;
+                const auto uvw = line.wind_at_point(n);
+                ASSERT_NEAR(uvw[1], expect, roundoff * std::max(1.0, expect)) << "step " << s << " node " << n;
+                ASSERT_NEAR(uvw[0], 0.0, roundoff) << "along the +y wind only";
+                if (gust > 0.5) { ++during; } else if (phase < 0.0) { ++before; }
+                if (sp == 0 && n == n0 + (nn - 1) / 2) { mid_gust.push_back(gust); }
+            }
+        }
+        // the towers stand still: their drag nodes where they were built
+        for (std::size_t t = 0; t < 2; ++t) {
+            const auto& nodes = c->towers()[t].nodes();
+            double kk = 0.0;
+            for (const auto& nd : nodes) { kk += static_cast<double>(k0 + kz * nd.pos[2]); }
+            const double A = g * sf * std::sqrt(kk / nodes.size());
+            const auto& w = c->tower_winds()[t];
+            ASSERT_EQ(w.size(), 3 * nodes.size());
+            for (std::size_t j = 0; j < nodes.size(); ++j) {
+                const double phase = erf_conductors::gust_event_phase(e, nodes[j].pos[0], nodes[j].pos[1], tm);
+                const double gust = A * erf_conductors::gust_event_shape(phase);
+                const double expect = static_cast<double>(m.v_at(nodes[j].pos[1], nodes[j].pos[2])) + gust;
+                ASSERT_NEAR(w[3*j+1], expect, roundoff * std::max(1.0, expect)) << "tower " << t << " node " << j << " step " << s;
+            }
+        }
+    }
+    EXPECT_GT(during, 100) << "the gust must blow on the line for a while";
+    EXPECT_GT(before, 100) << "and not before its front";
+    // gust_series.dat: a row per step, the gust at each span's middle node and at each tower's highest drag node
+    std::string header;
+    const auto rows = read_rows(dir + "/gust_series.dat", header);
+    EXPECT_EQ(header, "time Tev_span1 Tev_span2 Tev_span3 Tev_t1 Tev_t2");
+    ASSERT_EQ(rows.size(), static_cast<std::size_t>(steps));
+    for (int s = 0; s < steps; ++s) {
+        const auto ss = static_cast<std::size_t>(s);
+        ASSERT_EQ(rows[ss].size(), 6u);
+        EXPECT_NEAR(rows[ss][0], dt * s, 1e-12) << "stamped with the step's start";
+        EXPECT_NEAR(rows[ss][1], mid_gust[ss], 1e-6 * std::max(1.0, mid_gust[ss]) + roundoff) << "step " << s;
+    }
+    clear_towered_section("Tev");
+}
+
+TEST(Conductors, RandomGustsFollowTheirProcessesAndACircuitSharesThem)
+{
+    const std::string dir = scratch("gust_random");
+    set_circuit(dir);   // C2 owns the towers; C1, C3 and the shield wire CS share them
+    amrex::ParmParse pp("erf.conductors");
+    pp.remove("prescribed_velocity");
+    pp.add("gust_type", std::string("random"));
+    pp.add("gust_seed", 11);
+    Mesh m(false);
+    m.fill_crosswind();
+    const Real k0 = 0.5, kz = 0.01;
+    amrex::MultiFab cons(m.ba, m.dm, RhoKE_comp + 1, 1);
+    fill_k(cons, m, k0, kz);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_closure(true, 0.5562);
+    c->set_ground(nullptr, m.geom);
+    ASSERT_EQ(c->lines().size(), 4u);
+    ASSERT_EQ(c->towers().size(), 2u);
+    EXPECT_NE(erf_gtest::abort_message([&] { c->advance(0, 0.0, 0.5, m.u, m.v, m.w, nullptr, nullptr, m.geom); })
+                  .find("gust_type = random needs the conserved state"), std::string::npos);
+    const double sf = c->gust_sigma_factor(), Ls = 67.056, dt = 0.5;
+    // the processes: C2's three spans (0 to 2), whose time scales come from C2's nodes, then the two towers (3, 4)
+    std::vector<double> z(5, 0.0);
+    const auto& C2 = *c->lines()[1];
+    double zmin = 0.0, zmax = 0.0;
+    const int steps = 12;
+    for (int s = 0; s < steps; ++s) {
+        const auto step = static_cast<std::uint64_t>(s + 1);   // the step count the draws take, from 1
+        std::vector<std::vector<Real>> where(4);
+        for (std::size_t i = 0; i < 4; ++i) { where[i] = c->lines()[i]->kinematics_points(); }
+        auto draw = [&] (std::size_t p, double height, double U) {
+            const double T = erf_conductors::gust_integral_length(height) / U;
+            const double xi = erf_conductors::gust_normal(11, p, step);
+            z[p] = (s == 0) ? xi : erf_conductors::gust_ou_step(z[p], dt, T, xi);
+        };
+        for (int sp = 0; sp < 3; ++sp) {
+            const unsigned n0 = C2.span_first_node(sp), nn = C2.span_num_nodes(sp);
+            double u2 = 0.0;
+            for (unsigned n = n0; n < n0 + nn; ++n) {
+                const double v = static_cast<double>(m.v_at(where[1][3*n+1], where[1][3*n+2]));
+                u2 += v * v;
+            }
+            // the span's height: the mean of the heights it hangs from (the strings' lower ends at the towers), the ground flat at 0
+            const double height = 0.5 * static_cast<double>(C2.inputs().conductor_point(sp)[2] + C2.inputs().conductor_point(sp + 1)[2]);
+            draw(static_cast<std::size_t>(sp), height, std::sqrt(u2 / nn));
+        }
+        for (std::size_t t = 0; t < 2; ++t) {
+            const auto& tw = c->towers()[t];
+            double u2 = 0.0, zm = 0.0;
+            for (const auto& nd : tw.nodes()) {
+                const double v = static_cast<double>(m.v_at(nd.pos[1], nd.pos[2]));
+                u2 += v * v;
+                zm += static_cast<double>(nd.pos[2] - tw.base()[2]);
+            }
+            draw(3 + t, zm / tw.nodes().size(), std::sqrt(u2 / tw.nodes().size()));
+        }
+        c->advance(0, dt * s, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons);
+        for (std::size_t i = 0; i < 4; ++i) {
+            const auto& L = *c->lines()[i];
+            std::vector<double> gust(3);
+            for (int sp = 0; sp < 3; ++sp) {
+                const unsigned n0 = L.span_first_node(sp), nn = L.span_num_nodes(sp);
+                const double sigma = sf * std::sqrt(mean_k(where[i], n0, nn, k0, kz));
+                const double B = erf_conductors::gust_background_factor(static_cast<double>(L.inputs().chord(sp)), Ls);
+                // every line's span takes C2's process of that span: the circuit's phases move together
+                gust[static_cast<std::size_t>(sp)] = sigma * std::sqrt(B) * z[static_cast<std::size_t>(sp)];
+                for (unsigned n = n0; n < n0 + nn; ++n) {
+                    const double expect = static_cast<double>(m.v_at(where[i][3*n+1], where[i][3*n+2])) +
+                                          gust[static_cast<std::size_t>(sp)];
+                    ASSERT_NEAR(L.wind_at_point(n)[1], expect, roundoff * std::max(1.0, expect))
+                        << L.name() << " step " << s << " node " << n;
+                }
+            }
+            // a string takes the mean of the spans beside it
+            for (int j = 0; j < L.num_insulators(); ++j) {
+                const double A = 0.5 * (gust[static_cast<std::size_t>(j)] + gust[static_cast<std::size_t>(j) + 1]);
+                for (unsigned n = L.string_first_node(j); n < L.string_first_node(j) + L.string_num_nodes(j); ++n) {
+                    const double expect = static_cast<double>(m.v_at(where[i][3*n+1], where[i][3*n+2])) + A;
+                    ASSERT_NEAR(L.wind_at_point(n)[1], expect, roundoff * std::max(1.0, expect))
+                        << L.name() << " string " << j << " node " << n;
+                }
+            }
+        }
+        for (std::size_t t = 0; t < 2; ++t) {
+            const auto& tw = c->towers()[t];
+            double kk = 0.0, top = 0.0;
+            for (const auto& nd : tw.nodes()) {
+                kk += static_cast<double>(k0 + kz * nd.pos[2]);
+                top = std::max(top, static_cast<double>(nd.pos[2] - tw.base()[2]));
+            }
+            const double gust = sf * std::sqrt(kk / tw.nodes().size()) *
+                                std::sqrt(erf_conductors::tower_background_factor(top, Ls)) * z[3 + t];
+            for (std::size_t j = 0; j < tw.nodes().size(); ++j) {
+                const double expect = static_cast<double>(m.v_at(tw.nodes()[j].pos[1], tw.nodes()[j].pos[2])) + gust;
+                ASSERT_NEAR(c->tower_winds()[t][3*j+1], expect, roundoff * std::max(1.0, expect)) << "tower " << t << " node " << j;
+            }
+        }
+        for (const double v : z) { zmin = std::min(zmin, v); zmax = std::max(zmax, v); }
+    }
+    EXPECT_LT(zmin, -0.3) << "the processes must swing both ways for the test to see the sign";
+    EXPECT_GT(zmax, 0.3);
+    std::string header;
+    const auto rows = read_rows(dir + "/gust_series.dat", header);
+    EXPECT_EQ(header, "time C1_span1 C1_span2 C1_span3 C2_span1 C2_span2 C2_span3 C3_span1 C3_span2 C3_span3 CS_span1 CS_span2 "
+                      "CS_span3 C2_t1 C2_t2");
+    ASSERT_EQ(rows.size(), static_cast<std::size_t>(steps));
+    for (const auto& r : rows) { EXPECT_EQ(r.size(), 15u); }
+    clear_circuit();
+}
+
+TEST(Conductors, RandomGustsContinueAcrossARestart)
+{
+    Mesh m(false);
+    m.fill_crosswind();
+    const Real k0 = 0.5, kz = 0.01;
+    amrex::MultiFab cons(m.ba, m.dm, RhoKE_comp + 1, 1);
+    fill_k(cons, m, k0, kz);
+    const double dt = 0.25;
+    auto setup = [] (const std::string& dir, const char* type) {
+        set_inputs(dir, "Trg", false);
+        amrex::ParmParse pp("erf.conductors");
+        pp.add("gust_type", std::string(type));
+        pp.remove("gust_seed");
+        if (std::string(type) == "random") { pp.add("gust_seed", 3); }
+    };
+    auto winds = [] (const Conductors& c) {
+        const auto& line = *c.lines().front();
+        std::vector<Real> w;
+        for (unsigned n = 0; n < line.num_nodes(); ++n) { const auto u = line.wind_at_point(n); w.insert(w.end(), {u[0], u[1], u[2]}); }
+        return w;
+    };
+    // six steps straight through
+    const std::string dir_a = scratch("gust_restart_a");
+    setup(dir_a, "random");
+    auto a = Conductors::create(0);
+    ASSERT_TRUE(a);
+    a->set_closure(true, 0.5562);
+    a->set_ground(nullptr, m.geom);
+    for (int s = 0; s < 6; ++s) { a->advance(0, dt * s, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons); }
+    const std::vector<Real> wind_a = winds(*a);
+    // three steps, a checkpoint, and a restart for the other three
+    const std::string dir_b = scratch("gust_restart_b");
+    setup(dir_b, "random");
+    auto b = Conductors::create(0);
+    ASSERT_TRUE(b);
+    b->set_closure(true, 0.5562);
+    b->set_ground(nullptr, m.geom);
+    for (int s = 0; s < 3; ++s) { b->advance(0, dt * s, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons); }
+    const std::string chk = dir_b + "/chk00003";
+    std::filesystem::create_directories(chk);
+    b->write_checkpoint(chk);
+    EXPECT_NE(slurp(chk + "/conductors/gust_processes").find("processes 1 set 1"), std::string::npos);
+    auto b2 = Conductors::create(0);
+    ASSERT_TRUE(b2);
+    b2->set_closure(true, 0.5562);
+    b2->set_ground(nullptr, m.geom, chk);
+    ASSERT_TRUE(b2->restored());
+    for (int s = 3; s < 6; ++s) { b2->advance(0, dt * s, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons); }
+    const std::vector<Real> wind_b = winds(*b2);
+    ASSERT_EQ(wind_a.size(), wind_b.size());
+    for (std::size_t i = 0; i < wind_a.size(); ++i) {
+        EXPECT_NEAR(wind_b[i], wind_a[i], roundoff * std::max(Real(1.0), std::abs(wind_a[i]))) << "component " << i;
+    }
+    std::string ha, hb;
+    const auto rows_a = read_rows(dir_a + "/gust_series.dat", ha);
+    const auto rows_b = read_rows(dir_b + "/gust_series.dat", hb);
+    EXPECT_EQ(ha, hb);
+    ASSERT_EQ(rows_b.size(), rows_a.size()) << "the restarted run continues the series from the checkpoint";
+    for (std::size_t r = 0; r < rows_a.size(); ++r) {
+        ASSERT_EQ(rows_b[r].size(), 2u);
+        EXPECT_NEAR(rows_b[r][1], rows_a[r][1], 1e-6) << "row " << r;
+    }
+    EXPECT_GT(std::abs(rows_a.back()[1]), 1.0e-3) << "a gust to compare";
+    // a checkpoint written without gusts: the restart draws the process afresh, from its stationary law, at its first step
+    const std::string dir_c = scratch("gust_restart_c");
+    setup(dir_c, "none");
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(nullptr, m.geom);
+    for (int s = 0; s < 3; ++s) { c->advance(0, dt * s, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom); }
+    const std::string chk_c = dir_c + "/chk00003";
+    std::filesystem::create_directories(chk_c);
+    c->write_checkpoint(chk_c);
+    EXPECT_FALSE(std::filesystem::exists(chk_c + "/conductors/gust_processes"));
+    {
+        amrex::ParmParse pp("erf.conductors");
+        pp.add("gust_type", std::string("random"));
+        pp.add("gust_seed", 3);
+    }
+    auto c2 = Conductors::create(0);
+    ASSERT_TRUE(c2);
+    c2->set_closure(true, 0.5562);
+    c2->set_ground(nullptr, m.geom, chk_c);
+    ASSERT_TRUE(c2->restored());
+    const auto& line = *c2->lines().front();
+    const std::vector<Real> where = line.kinematics_points();
+    c2->advance(0, dt * 3, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons);
+    const unsigned nn = line.span_num_nodes(0);
+    const double gust = c2->gust_sigma_factor() * std::sqrt(mean_k(where, 0, nn, k0, kz)) *
+                        std::sqrt(erf_conductors::gust_background_factor(static_cast<double>(line.inputs().chord(0)), 67.056)) *
+                        erf_conductors::gust_normal(3, 0, 4);
+    for (unsigned n = 0; n < nn; ++n) {
+        const double expect = static_cast<double>(m.v_at(where[3*n+1], where[3*n+2])) + gust;
+        ASSERT_NEAR(line.wind_at_point(n)[1], expect, roundoff * std::max(1.0, expect)) << "node " << n;
+    }
+}
+
+TEST(Conductors, TheGustFactorRunsOnLinesWithLatticeTowers)
+{
+    // gust_type = factor samples k at the line nodes only; the towers' drag nodes are not sampled
+    const std::string dir = scratch("gust_factor_towers");
+    set_towered_section(dir, "Tft");
+    amrex::ParmParse pp("erf.conductors");
+    pp.remove("prescribed_velocity");
+    pp.add("gust_type", std::string("factor"));
+    Mesh m(false);
+    m.fill_crosswind();
+    amrex::MultiFab cons(m.ba, m.dm, RhoKE_comp + 1, 1);
+    fill_k(cons, m, 0.5, 0.01);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_closure(true, 0.5562);
+    c->set_ground(nullptr, m.geom);
+    ASSERT_EQ(c->towers().size(), 2u);
+    for (int s = 0; s < 3; ++s) { c->advance(0, 0.25 * s, 0.25, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons); }
+    std::ifstream f(dir + "/gusts.csv");
+    std::string row;
+    int rows = 0;
+    while (std::getline(f, row)) { ++rows; }
+    EXPECT_EQ(rows, 4) << "the header and one row per span";
+    EXPECT_FALSE(std::filesystem::exists(dir + "/gust_series.dat")) << "the factor adds no gust to the wind";
+    clear_towered_section("Tft");
+}
+
+TEST(Conductors, ALineTakesAnotherLinesGustsAndAChangedSharingDrawsAfresh)
+{
+    // three parallel lines 6 m apart without lattice towers: Tgb takes Tga's random gusts (gust_with), Tgc its own
+    const std::string dir = scratch("gust_with");
+    set_inputs(dir, "Tga", false);
+    amrex::ParmParse pp("erf.conductors");
+    pp.addarr("lines", std::vector<std::string>{"Tga", "Tgb", "Tgc"});
+    for (const char* name : {"Tgb", "Tgc"}) {
+        amrex::ParmParse ps(std::string("erf.conductors.") + name);
+        const Real y = (std::string(name) == "Tgb") ? Real(506.0) : Real(512.0);
+        ps.addarr("end_a", std::vector<Real>{300.0, y, 30.0});
+        ps.addarr("end_b", std::vector<Real>{600.0, y, 30.0});
+        ps.add("length", 301.5);
+        ps.add("diameter", 0.0281);
+        ps.add("mass_per_length", 1.628);
+        ps.add("axial_stiffness", 3.0e7);
+    }
+    amrex::ParmParse("erf.conductors.Tgb").add("gust_with", std::string("Tga"));
+    pp.add("gust_type", std::string("random"));
+    pp.add("gust_seed", 5);
+    Mesh m(false);
+    m.fill_crosswind();
+    // a wind along x that grows with the height as well: the wind veers with the height, so a node's own direction
+    // differs from its span's mean direction
+    auto u_at = [] (Real z) { return Real(2.0) + Real(0.1) * z; };
+    {
+        const Real dz = m.H / m.nz;
+        for (amrex::MFIter mfi(m.u); mfi.isValid(); ++mfi) {
+            auto ua = m.u.array(mfi);
+            amrex::LoopOnCpu(mfi.growntilebox(), [&](int i, int j, int k) {
+                amrex::ignore_unused(i, j);
+                ua(i,j,k) = u_at((k + Real(0.5)) * dz);
+            });
+        }
+    }
+    const Real k0 = 0.5, kz = 0.01;
+    amrex::MultiFab cons(m.ba, m.dm, RhoKE_comp + 1, 1);
+    fill_k(cons, m, k0, kz);
+    const double dt = 0.25, Ls = 67.056;
+    // the expected wind at a line's nodes, the flow's plus gust along the span's mean horizontal wind
+    auto check = [&] (const Conductors& c, std::size_t i, const std::vector<Real>& where, double z, const std::string& what) {
+        const auto& L = *c.lines()[i];
+        const unsigned nn = L.span_num_nodes(0);
+        double mu = 0.0, mv = 0.0;
+        for (unsigned n = 0; n < nn; ++n) {
+            mu += static_cast<double>(u_at(where[3*n+2]));
+            mv += static_cast<double>(m.v_at(where[3*n+1], where[3*n+2]));
+        }
+        const double h = std::hypot(mu, mv);
+        const double gust = c.gust_sigma_factor() * std::sqrt(mean_k(where, 0, nn, k0, kz)) *
+                            std::sqrt(erf_conductors::gust_background_factor(static_cast<double>(L.inputs().chord(0)), Ls)) * z;
+        for (unsigned n = 0; n < nn; ++n) {
+            const double eu = static_cast<double>(u_at(where[3*n+2])) + gust * mu / h;
+            const double ev = static_cast<double>(m.v_at(where[3*n+1], where[3*n+2])) + gust * mv / h;
+            ASSERT_NEAR(L.wind_at_point(n)[0], eu, roundoff * std::max(1.0, std::abs(eu))) << what << " node " << n;
+            ASSERT_NEAR(L.wind_at_point(n)[1], ev, roundoff * std::max(1.0, std::abs(ev))) << what << " node " << n;
+        }
+    };
+    auto a = Conductors::create(0);
+    ASSERT_TRUE(a);
+    a->set_closure(true, 0.5562);
+    a->set_ground(nullptr, m.geom);
+    double z = 0.0;
+    for (int s = 0; s < 3; ++s) {
+        std::vector<std::vector<Real>> where{a->lines()[0]->kinematics_points(), a->lines()[1]->kinematics_points()};
+        // one process, Tga's span, its time scale from Tga's nodes
+        const unsigned nn = a->lines()[0]->span_num_nodes(0);
+        double u2 = 0.0;
+        for (unsigned n = 0; n < nn; ++n) {
+            const double u = static_cast<double>(u_at(where[0][3*n+2])), v = static_cast<double>(m.v_at(where[0][3*n+1], where[0][3*n+2]));
+            u2 += u * u + v * v;
+        }
+        const double T = erf_conductors::gust_integral_length(30.0) / std::sqrt(u2 / nn);
+        const double xi = erf_conductors::gust_normal(5, 0, static_cast<std::uint64_t>(s + 1));
+        z = (s == 0) ? xi : erf_conductors::gust_ou_step(z, dt, T, xi);
+        a->advance(0, dt * s, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons);
+        check(*a, 0, where[0], z, "Tga step " + std::to_string(s));
+        check(*a, 1, where[1], z, "Tgb step " + std::to_string(s));
+    }
+    const std::string chk = dir + "/chk00003";
+    std::filesystem::create_directories(chk);
+    a->write_checkpoint(chk);
+    EXPECT_NE(slurp(chk + "/conductors/gust_processes").find("Tgc_span1 "), std::string::npos);
+    // the restart has Tgc take Tga's gusts instead of Tgb: two processes again, but not the same ones (Tga's and
+    // Tgb's where the checkpoint holds Tga's and Tgc's), so both are drawn afresh, from the stationary law, at the
+    // restart's first step
+    amrex::ParmParse("erf.conductors.Tgb").remove("gust_with");
+    amrex::ParmParse("erf.conductors.Tgc").add("gust_with", std::string("Tga"));
+    auto b = Conductors::create(0);
+    ASSERT_TRUE(b);
+    b->set_closure(true, 0.5562);
+    b->set_ground(nullptr, m.geom, chk);
+    ASSERT_TRUE(b->restored());
+    std::vector<std::vector<Real>> where{b->lines()[0]->kinematics_points(), b->lines()[1]->kinematics_points(),
+                                         b->lines()[2]->kinematics_points()};
+    b->advance(0, dt * 3, dt, m.u, m.v, m.w, nullptr, nullptr, m.geom, &cons);
+    check(*b, 0, where[0], erf_conductors::gust_normal(5, 0, 4), "Tga after the restart");
+    check(*b, 1, where[1], erf_conductors::gust_normal(5, 1, 4), "Tgb after the restart");
+    check(*b, 2, where[2], erf_conductors::gust_normal(5, 0, 4), "Tgc after the restart, with Tga's gusts");
 }

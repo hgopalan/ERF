@@ -5073,18 +5073,28 @@ wind, which bend under their loads when the type has a ``frequency``.
 |                                                           |                                                          | tower_type of its    |                          |
 |                                                           |                                                          | own                  |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<line>.gust_with**                       | with gust_type = random the line takes this line's       | a line of            | none: its own, or those  |
+|                                                           | random gusts, span by span, so that the conductors of a  | erf.conductors.lines | of the line whose towers |
+|                                                           | circuit on separate lines move together                  | with as many spans   | it shares                |
+|                                                           |                                                          | that takes no other  |                          |
+|                                                           |                                                          | line's gusts; needs  |                          |
+|                                                           |                                                          | gust_type = random;  |                          |
+|                                                           |                                                          | not with             |                          |
+|                                                           |                                                          | share_towers         |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<line>.output_root**                     | prefix of the line's diagnostics files:                  | String, different    | <diagnostics_dir>/<line> |
-|                                                           | <output_root>.dat for a single span,                     | for every line       |                          |
-|                                                           | <output_root>_span<k>.dat per span of a section (k from  |                      |                          |
-|                                                           | 1 at end_a), <output_root>_insulators.dat,               |                      |                          |
-|                                                           | <output_root>_nodes.dat and the matching _stats.csv      |                      |                          |
-|                                                           | files                                                    |                      |                          |
+|                                                           | <output_root>.dat for a single span,                     | for every line; no   |                          |
+|                                                           | <output_root>_span<k>.dat per span of a section (k from  | log of the line may  |                          |
+|                                                           | 1 at end_a), <output_root>_insulators.dat,               | take the name of a   |                          |
+|                                                           | <output_root>_nodes.dat and the matching _stats.csv      | log the run writes   |                          |
+|                                                           | files                                                    | in diagnostics_dir   |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.diagnostics_dir**                        | directory of the MoorDyn input files                     | String               | conductors               |
 |                                                           | (<line>.moordyn.txt), ground.dat, total_load.dat,        |                      |                          |
 |                                                           | separation.dat, transformers.dat, towers.dat,            |                      |                          |
-|                                                           | coupling.dat, the statistics of pairs, transformers and  |                      |                          |
-|                                                           | towers, and the lines' default output_root               |                      |                          |
+|                                                           | coupling.dat, gusts.csv, gust_series.dat, the statistics |                      |                          |
+|                                                           | of pairs, transformers and towers, and the lines'        |                      |                          |
+|                                                           | default output_root                                      |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.diagnostics_int**                        | write a diagnostics row every this many steps of the     | Integer >= 1         | 1                        |
 |                                                           | anchor level (steps), and at the first step              |                      |                          |
@@ -5153,21 +5163,51 @@ wind, which bend under their loads when the type has a ``frequency``.
 | **erf.conductors.asce74_exposure**                        | ASCE 74's terrain exposure of that check: B (suburban or | B or C; needs        | C                        |
 |                                                           | wooded) or C (open country)                              | asce74_wind          |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.gust_type**                              | every span's gust factor and peak wind load from the     | none or factor; not  | none                     |
-|                                                           | mean wind and the k-equation RANS's k along it, written  | with                 |                          |
-|                                                           | to diagnostics_dir/gusts.csv (see Gusts from the RANS    | prescribed_velocity; |                          |
-|                                                           | turbulence in the conductor theory); factor needs        | every span needs a   |                          |
-|                                                           | erf.rans_type = kEqn on the anchor level and the flow's  | horizontal extent    |                          |
-|                                                           | wind                                                     |                      |                          |
+| **erf.conductors.gust_type**                              | none; factor: every span's gust factor and peak wind     | none, factor, event  | none                     |
+|                                                           | load from the mean wind and the k-equation RANS's k      | or random; not with  |                          |
+|                                                           | along it, written to diagnostics_dir/gusts.csv; event:   | prescribed_velocity; |                          |
+|                                                           | also one travelling 1 - cos gust, random: also a random  | every span needs a   |                          |
+|                                                           | gust per span and tower, added to the wind the lines and | horizontal extent;   |                          |
+|                                                           | towers take and written to                               | event and random not |                          |
+|                                                           | diagnostics_dir/gust_series.dat (see Gusts from the RANS | with drag_on_flow    |                          |
+|                                                           | turbulence in the conductor theory). Every type but none |                      |                          |
+|                                                           | needs erf.rans_type = kEqn on the anchor level and the   |                      |                          |
+|                                                           | flow's wind                                              |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.gust_sigma_factor**                      | c in sigma_u = c sqrt(k)                                 | Real > 0; needs      | 2.5 erf.Cmu0 (1.39)      |
-|                                                           |                                                          | gust_type = factor   |                          |
+| **erf.conductors.gust_sigma_factor**                      | c in sigma_u = c sqrt(k)                                 | Real > 0; needs a    | 2.5 erf.Cmu0 (1.39)      |
+|                                                           |                                                          | gust_type            |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.gust_peak_factor**                       | g in the gust factor 1 + 2 g I_n sqrt(B) and the point   | Real > 0; needs      | 2.7 (ASCE 74)            |
-|                                                           | gust U + g sigma_u                                       | gust_type = factor   |                          |
+| **erf.conductors.gust_peak_factor**                       | g in the gust factor 1 + 2 g I_n sqrt(B), the point gust | Real > 0; needs a    | 2.7 (ASCE 74)            |
+|                                                           | U + g sigma_u and the event's amplitude g sigma_u        | gust_type            |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.gust_span_length_scale**                 | L_s in B = 1/(1 + 0.8 L/L_s), L the span's chord (m);    | Real > 0; needs      | 67.056 (220 ft)          |
-|                                                           | the default is ASCE 74's exposure C (51.816 for B)       | gust_type = factor   |                          |
+| **erf.conductors.gust_span_length_scale**                 | L_s in the spans' B = 1/(1 + 0.8 L/L_s), L the span's    | Real > 0; needs a    | 67.056 (220 ft)          |
+|                                                           | chord, and the towers' B_t = 1/(1 + 0.375 h/L_s) (m);    | gust_type            |                          |
+|                                                           | the default is ASCE 74's exposure C (51.816 for B)       |                      |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.gust_event_time**                        | when the event's front crosses gust_event_origin (s)     | Real; needs and is   | must be set              |
+|                                                           |                                                          | needed by gust_type  |                          |
+|                                                           |                                                          | = event              |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.gust_event_speed**                       | how fast the event's front moves (m/s)                   | Real > 0; needs and  | must be set              |
+|                                                           |                                                          | is needed by         |                          |
+|                                                           |                                                          | gust_type = event    |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.gust_event_direction**                   | the way the front moves, degrees counterclockwise from   | Real; needs          | 0                        |
+|                                                           | +x                                                       | gust_type = event    |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.gust_event_origin**                      | a point x y the front crosses at gust_event_time (m)     | 2 Reals; needs       | the domain's centre      |
+|                                                           |                                                          | gust_type = event    |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.gust_event_duration**                    | how long the event lasts at a point (s); the default is  | Real > 0; needs      | 10.5                     |
+|                                                           | the duration of IEC 61400-1's extreme operating gust,    | gust_type = event    |                          |
+|                                                           | not its shape or amplitude                               |                      |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.gust_seed**                              | picks the random gusts' series                           | Integer >= 0; needs  | 1                        |
+|                                                           |                                                          | gust_type = random   |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.gust_integral_length**                   | the random gusts' integral length L_u (m); their time    | Real > 0; needs      | 8.1 Lambda_1 of IEC      |
+|                                                           | scale is L_u / U                                         | gust_type = random   | 61400-1 at each span's   |
+|                                                           |                                                          |                      | and tower's height       |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.tower_types**                            | names of the lattice tower types the lines' towers can   | Strings (not the     | none                     |
 |                                                           | be, each with its own block; needs erf.conductors.lines  | name of a line or    |                          |

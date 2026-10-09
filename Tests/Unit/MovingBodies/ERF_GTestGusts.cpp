@@ -1,6 +1,6 @@
-// Gusts on a conductor span from a RANS wind (ERF_Gusts.H).
+// Gusts on the conductors from a RANS wind (ERF_Gusts.H).
 //
-// Gusts.TheGustTypeParses: none and factor in any case; anything else is refused.
+// Gusts.TheGustTypeParses: none, factor, event and random in any case; anything else is refused.
 // Gusts.TheDefaultSigmaFactorGivesTwoAndAHalfUStar: c = 2.5 Cmu0, so at the RANS equilibrium near the ground,
 //   k = u*^2 / Cmu0^2, sigma_u = c sqrt(k) is 2.5 u*.
 // Gusts.TheBackgroundFactorFallsWithTheSpan: B = 1 / (1 + 0.8 L / L_s) is 1 for a vanishing span, 1/2 when
@@ -16,10 +16,24 @@
 //   at every height and span.
 // Gusts.CalmAirHasNoIntensityAndNoLoad: U = 0 leaves the intensity, the factor and the loads at 0, the point
 //   gust at g sigma_u.
+// Gusts.TheTowersBackgroundFactorIsASCE74s: B_t = 1 / (1 + 0.375 h / L_s) is 1/2 when 0.375 h = L_s and falls with h.
+// Gusts.TheIntegralLengthIsIECs: L_u = 8.1 Lambda_1, Lambda_1 = 0.7 z below 60 m and 42 m above, continuous at 60 m.
+// Gusts.TheEventIsOneMinusCosineAndArrivesWithItsFront: the shape is 0 at its ends and outside, 1 in the middle and
+//   symmetric; the front reaches a point along the gust's direction d / c after the origin, and a point beside it
+//   at the same time.
+// Gusts.TheNormalNumbersAreStandardAndIndependent: over 200000 steps of one stream the mean is 0, the variance 1
+//   and the fourth moment 3; neighbouring steps, two streams and two seeds are uncorrelated; the same arguments
+//   give the same number.
+// Gusts.TheOrnsteinUhlenbeckStepIsExact: one step against the formula, dt = 0 and T infinite hold z, dt >> T forgets it.
+// Gusts.TheRandomGustHasUnitVarianceAndExponentialCorrelation: a 200000-step series (dt = 1 s, T = 10 s) has
+//   variance 1 and the autocorrelation exp(-tau / T) at tau = 5, 10 and 20 s.
 // Gusts.BadArgumentsAbort: each refused argument aborts with its message.
 
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -38,7 +52,12 @@ TEST(Gusts, TheGustTypeParses)
     EXPECT_EQ(g, GustType::Factor);
     EXPECT_TRUE(parse_gust_type("NONE", g));
     EXPECT_EQ(g, GustType::None);
-    EXPECT_FALSE(parse_gust_type("event", g));
+    EXPECT_TRUE(parse_gust_type("Event", g));
+    EXPECT_EQ(g, GustType::Event);
+    EXPECT_TRUE(parse_gust_type("random", g));
+    EXPECT_EQ(g, GustType::Random);
+    EXPECT_TRUE(parse_gust_type("none", g));
+    EXPECT_FALSE(parse_gust_type("turbsim", g));
     EXPECT_FALSE(parse_gust_type("", g));
     EXPECT_EQ(g, GustType::None) << "a refused name leaves the type alone";
 }
@@ -140,6 +159,113 @@ TEST(Gusts, CalmAirHasNoIntensityAndNoLoad)
     EXPECT_NEAR(s.normal_sigma, gust_sigma_v_ratio * 1.39 * std::sqrt(0.5), 1e-12) << "calm air: no direction, the lateral part";
 }
 
+TEST(Gusts, TheTowersBackgroundFactorIsASCE74s)
+{
+    EXPECT_DOUBLE_EQ(tower_background_factor(67.056 / 0.375, 67.056), 0.5);
+    EXPECT_NEAR(tower_background_factor(40.0, 67.056), 0.817198011114, 1e-12);
+    EXPECT_GT(tower_background_factor(20.0, 67.056), tower_background_factor(60.0, 67.056));
+}
+
+TEST(Gusts, TheIntegralLengthIsIECs)
+{
+    EXPECT_NEAR(gust_integral_length(30.0), 170.1, 1e-12);
+    EXPECT_NEAR(gust_integral_length(59.9), 339.633, 1e-12);
+    EXPECT_NEAR(gust_integral_length(60.0), 340.2, 1e-12);
+    EXPECT_NEAR(gust_integral_length(150.0), 340.2, 1e-12);
+    EXPECT_NEAR(gust_integral_length(60.0 - 1e-9), gust_integral_length(60.0), 1e-6) << "continuous at 60 m";
+}
+
+TEST(Gusts, TheEventIsOneMinusCosineAndArrivesWithItsFront)
+{
+    EXPECT_EQ(gust_event_shape(-0.1), 0.0);
+    EXPECT_EQ(gust_event_shape(1.1), 0.0);
+    EXPECT_NEAR(gust_event_shape(0.0), 0.0, 1e-15);
+    EXPECT_NEAR(gust_event_shape(1.0), 0.0, 1e-15);
+    EXPECT_NEAR(gust_event_shape(0.5), 1.0, 1e-15);
+    EXPECT_NEAR(gust_event_shape(0.25), 0.5, 1e-15);
+    EXPECT_NEAR(gust_event_shape(0.3), gust_event_shape(0.7), 1e-15);
+    // a front crossing (500, 500) at t = 100 s, moving at 10 m/s towards 30 degrees, lasting 8 s at a point
+    GustEvent e;
+    e.time = 100.0; e.x0 = 500.0; e.y0 = 500.0; e.speed = 10.0; e.duration = 8.0;
+    const double a = 30.0 * 3.14159265358979323846 / 180.0;
+    e.ex = std::cos(a); e.ey = std::sin(a);
+    EXPECT_NEAR(gust_event_phase(e, 500.0, 500.0, 100.0), 0.0, 1e-12) << "the front at the origin at t0";
+    EXPECT_NEAR(gust_event_phase(e, 500.0, 500.0, 104.0), 0.5, 1e-12);
+    // 50 m on along the direction: 5 s later
+    EXPECT_NEAR(gust_event_phase(e, 500.0 + 50.0 * e.ex, 500.0 + 50.0 * e.ey, 105.0), 0.0, 1e-12);
+    EXPECT_NEAR(gust_event_phase(e, 500.0 + 50.0 * e.ex, 500.0 + 50.0 * e.ey, 109.0), 0.5, 1e-12);
+    // 80 m beside the origin, across the direction: with the origin
+    EXPECT_NEAR(gust_event_phase(e, 500.0 - 80.0 * e.ey, 500.0 + 80.0 * e.ex, 104.0), 0.5, 1e-12);
+    // 20 m before the origin: 2 s earlier
+    EXPECT_NEAR(gust_event_phase(e, 500.0 - 20.0 * e.ex, 500.0 - 20.0 * e.ey, 98.0), 0.0, 1e-12);
+}
+
+TEST(Gusts, TheNormalNumbersAreStandardAndIndependent)
+{
+    // sampling errors over N = 200000: the mean 0.0022, the variance 0.0032, the fourth moment 0.022, a correlation 0.0022
+    const int N = 200000;
+    std::vector<double> x(N), y(N);
+    for (int n = 0; n < N; ++n) {
+        x[static_cast<std::size_t>(n)] = gust_normal(1, 0, static_cast<std::uint64_t>(n));
+        y[static_cast<std::size_t>(n)] = gust_normal(1, 1, static_cast<std::uint64_t>(n));
+    }
+    auto mean = [&] (const std::vector<double>& v) { double s = 0.0; for (const double a : v) { s += a; } return s / N; };
+    const double mx = mean(x), my = mean(y);
+    double vx = 0.0, vy = 0.0, m4 = 0.0, lag = 0.0, cross = 0.0, seeds = 0.0;
+    for (std::size_t n = 0; n < x.size(); ++n) {
+        vx += (x[n] - mx) * (x[n] - mx);
+        vy += (y[n] - my) * (y[n] - my);
+        m4 += x[n] * x[n] * x[n] * x[n];
+        cross += (x[n] - mx) * (y[n] - my);
+        if (n + 1 < x.size()) { lag += (x[n] - mx) * (x[n+1] - mx); }
+        seeds += x[n] * gust_normal(2, 0, n);
+    }
+    vx /= N; vy /= N; m4 /= N;
+    EXPECT_NEAR(mx, 0.0, 0.01);
+    EXPECT_NEAR(vx, 1.0, 0.015);
+    EXPECT_NEAR(m4, 3.0, 0.1) << "Gaussian tails";
+    EXPECT_NEAR(lag / (N * vx), 0.0, 0.01) << "neighbouring steps";
+    EXPECT_NEAR(cross / (N * std::sqrt(vx * vy)), 0.0, 0.01) << "two streams";
+    EXPECT_NEAR(seeds / N, 0.0, 0.01) << "two seeds";
+    EXPECT_EQ(gust_normal(1, 0, 5), gust_normal(1, 0, 5));
+    EXPECT_NE(gust_normal(1, 0, 5), gust_normal(2, 0, 5));
+}
+
+TEST(Gusts, TheOrnsteinUhlenbeckStepIsExact)
+{
+    EXPECT_NEAR(gust_ou_step(0.7, 0.5, 5.0, -1.3), 0.079901750840029, 1e-14);
+    EXPECT_EQ(gust_ou_step(0.7, 0.0, 5.0, -1.3), 0.7) << "no time, no change";
+    EXPECT_EQ(gust_ou_step(0.7, 0.5, std::numeric_limits<double>::infinity(), -1.3), 0.7) << "an infinite time scale holds z";
+    EXPECT_NEAR(gust_ou_step(0.7, 500.0, 5.0, -1.3), -1.3, 1e-14) << "dt >> T forgets z";
+}
+
+TEST(Gusts, TheRandomGustHasUnitVarianceAndExponentialCorrelation)
+{
+    // about 10000 independent samples (N dt / 2T): sampling errors of about 0.015 in the variance and the correlations
+    const int N = 200000;
+    const double dt = 1.0, T = 10.0;
+    std::vector<double> z(N);
+    z[0] = gust_normal(7, 3, 0);
+    for (int n = 1; n < N; ++n) {
+        const auto i = static_cast<std::size_t>(n);
+        z[i] = gust_ou_step(z[i-1], dt, T, gust_normal(7, 3, static_cast<std::uint64_t>(n)));
+    }
+    double m = 0.0;
+    for (const double a : z) { m += a; }
+    m /= N;
+    double v = 0.0;
+    for (const double a : z) { v += (a - m) * (a - m); }
+    v /= N;
+    EXPECT_NEAR(m, 0.0, 0.05);
+    EXPECT_NEAR(v, 1.0, 0.05);
+    for (const int lag : {5, 10, 20}) {
+        double c = 0.0;
+        const auto L = static_cast<std::size_t>(lag);
+        for (std::size_t n = 0; n + L < z.size(); ++n) { c += (z[n] - m) * (z[n + L] - m); }
+        EXPECT_NEAR(c / (N * v), std::exp(-lag * dt / T), 0.04) << "lag " << lag << " s";
+    }
+}
+
 TEST(Gusts, BadArgumentsAbort)
 {
     using erf_gtest::abort_message;
@@ -156,6 +282,13 @@ TEST(Gusts, BadArgumentsAbort)
     EXPECT_NE(abort_message([] { span_gust(5.0, 4.0, 1.0, 100.0, 0.03, 1.0, 1.225, 0.0, 2.7, 67.0); })
                   .find("the sigma and peak factors"), std::string::npos);
     EXPECT_NE(abort_message([] { default_gust_sigma_factor(0.0); }).find("Cmu0 must be positive"), std::string::npos);
+    EXPECT_NE(abort_message([] { tower_background_factor(0.0, 67.0); }).find("the height must be positive"), std::string::npos);
+    EXPECT_NE(abort_message([] { tower_background_factor(30.0, 0.0); }).find("the length scale must be positive"), std::string::npos);
+    EXPECT_NE(abort_message([] { gust_integral_length(0.0); }).find("the height must be positive"), std::string::npos);
+    EXPECT_NE(abort_message([] { GustEvent e; e.speed = 0.0; gust_event_phase(e, 0.0, 0.0, 0.0); })
+                  .find("the speed and duration must be positive"), std::string::npos);
+    EXPECT_NE(abort_message([] { gust_ou_step(0.0, -1.0, 5.0, 0.0); }).find("dt must be finite"), std::string::npos);
+    EXPECT_NE(abort_message([] { gust_ou_step(0.0, 1.0, 0.0, 0.0); }).find("the time scale must be positive"), std::string::npos);
     // a normal wind above the speed by roundoff only is accepted
     EXPECT_TRUE(abort_message(gust(5.0, 5.0 * (1.0 + 1.0e-12), 1.0, 100.0, 67.0)).empty());
 }

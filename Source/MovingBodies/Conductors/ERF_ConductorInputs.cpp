@@ -2,7 +2,9 @@
 #include "ERF_ASCE74.H"
 #include "ERF_Gusts.H"
 
+#include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <limits>
 #include <set>
 #include <utility>
@@ -88,10 +90,21 @@ std::string LineInputs::span_name (int k) const
     return (num_spans() == 1) ? name : name + "_span" + std::to_string(k + 1);
 }
 
-bool ConductorInputs::gust_factor () const
+GustType ConductorInputs::gust () const
 {
     GustType g = GustType::None;
-    return parse_gust_type(gust_type, g) && g == GustType::Factor;
+    return parse_gust_type(gust_type, g) ? g : GustType::None;
+}
+
+const LineInputs& ConductorInputs::gust_owner (const LineInputs& s) const
+{
+    // a line sharing towers takes the gusts of the towers' owner, and so those of the line the owner names in
+    // gust_with; validate_settings refuses longer chains
+    const LineInputs& t = tower_owner(s);
+    const std::string& o = t.gust_with;
+    if (o.empty()) { return t; }
+    for (const auto& l : lines) { if (l.name == o) { return l; } }
+    return t;
 }
 
 const LineInputs& ConductorInputs::tower_owner (const LineInputs& s) const
@@ -307,7 +320,10 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
         {"surface_offset", in.surface_offset}, {"stats_start", in.stats_start}, {"epsilon", in.epsilon},
         {"flashover_distance", in.flashover_distance}, {"asce74_wind", in.asce74_wind},
         {"gust_sigma_factor", in.gust_sigma_factor}, {"gust_peak_factor", in.gust_peak_factor},
-        {"gust_span_length_scale", in.gust_span_length_scale}};
+        {"gust_span_length_scale", in.gust_span_length_scale}, {"gust_event_time", in.gust_event_time},
+        {"gust_event_speed", in.gust_event_speed}, {"gust_event_direction", in.gust_event_direction},
+        {"gust_event_duration", in.gust_event_duration}, {"gust_integral_length", in.gust_integral_length},
+        {"gust_event_origin", in.gust_event_origin[0]}, {"gust_event_origin", in.gust_event_origin[1]}};
     for (const auto& kv : scalars) {
         if (!std::isfinite(kv.second)) { return std::string("erf.conductors.") + kv.first + " must be finite"; }
     }
@@ -340,23 +356,71 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
     }
     GustType gust = GustType::None;
     if (!parse_gust_type(in.gust_type, gust)) {
-        return "erf.conductors.gust_type must be none or factor, not '" + in.gust_type + "'";
+        return "erf.conductors.gust_type must be none, factor, event or random, not '" + in.gust_type + "'";
     }
-    const std::pair<const char*, bool> gust_keys[] = {
-        {"gust_sigma_factor", in.has_gust_sigma_factor}, {"gust_peak_factor", in.has_gust_peak_factor},
-        {"gust_span_length_scale", in.has_gust_span_length_scale}};
+    // each gust key with the gust types that read it
+    const bool event = (gust == GustType::Event), random = (gust == GustType::Random);
+    const struct { const char* key; bool given; bool read; const char* needs; } gust_keys[] = {
+        {"gust_sigma_factor", in.has_gust_sigma_factor, gust != GustType::None, "an erf.conductors.gust_type"},
+        {"gust_peak_factor", in.has_gust_peak_factor, gust != GustType::None, "an erf.conductors.gust_type"},
+        {"gust_span_length_scale", in.has_gust_span_length_scale, gust != GustType::None, "an erf.conductors.gust_type"},
+        {"gust_event_time", in.has_gust_event_time, event, "erf.conductors.gust_type = event"},
+        {"gust_event_speed", in.has_gust_event_speed, event, "erf.conductors.gust_type = event"},
+        {"gust_event_direction", in.has_gust_event_direction, event, "erf.conductors.gust_type = event"},
+        {"gust_event_origin", in.has_gust_event_origin, event, "erf.conductors.gust_type = event"},
+        {"gust_event_duration", in.has_gust_event_duration, event, "erf.conductors.gust_type = event"},
+        {"gust_seed", in.has_gust_seed, random, "erf.conductors.gust_type = random"},
+        {"gust_integral_length", in.has_gust_integral_length, random, "erf.conductors.gust_type = random"}};
     for (const auto& kv : gust_keys) {
-        if (kv.second && gust != GustType::Factor) {
-            return std::string("erf.conductors.") + kv.first + " needs erf.conductors.gust_type = factor";
-        }
+        if (kv.given && !kv.read) { return std::string("erf.conductors.") + kv.key + " needs " + kv.needs; }
     }
     if (in.has_gust_sigma_factor && !(in.gust_sigma_factor > 0.0)) { return "erf.conductors.gust_sigma_factor must be positive"; }
     if (!(in.gust_peak_factor > 0.0)) { return "erf.conductors.gust_peak_factor must be positive"; }
     if (!(in.gust_span_length_scale > 0.0)) { return "erf.conductors.gust_span_length_scale must be positive (m)"; }
-    if (gust == GustType::Factor && in.has_prescribed_velocity) {
-        return "erf.conductors.gust_type = factor takes k from the flow, so it cannot be used with erf.conductors.prescribed_velocity";
+    if (event) {
+        if (!in.has_gust_event_time) {
+            return "erf.conductors.gust_type = event needs erf.conductors.gust_event_time, when the gust's front crosses "
+                   "gust_event_origin (s)";
+        }
+        if (!in.has_gust_event_speed) {
+            return "erf.conductors.gust_type = event needs erf.conductors.gust_event_speed, how fast its front moves (m/s)";
+        }
+        if (!(in.gust_event_speed > 0.0)) { return "erf.conductors.gust_event_speed must be positive (m/s)"; }
+        if (!(in.gust_event_duration > 0.0)) { return "erf.conductors.gust_event_duration must be positive (s)"; }
     }
-    if (gust == GustType::Factor) {
+    if (in.gust_seed < 0) { return "erf.conductors.gust_seed must be >= 0"; }
+    if (in.has_gust_integral_length && !(in.gust_integral_length > 0.0)) {
+        return "erf.conductors.gust_integral_length must be positive (m)";
+    }
+    if (gust != GustType::None && in.has_prescribed_velocity) {
+        return "erf.conductors.gust_type = " + in.gust_type + " takes k from the flow, so it cannot be used with "
+               "erf.conductors.prescribed_velocity";
+    }
+    if ((event || random) && in.drag_on_flow) {
+        return "erf.conductors.gust_type = " + in.gust_type + " adds its gust to the wind of the lines and towers only; "
+               "it cannot be used with erf.conductors.drag_on_flow, which would put the gust's drag into the RANS flow";
+    }
+    // a line taking another's random gusts: random only, another line of as many spans that takes no other's
+    for (const LineInputs& s : in.lines) {
+        if (s.gust_with.empty()) { continue; }
+        const std::string key = "erf.conductors." + s.name + ".gust_with";
+        if (!random) { return key + " needs erf.conductors.gust_type = random"; }
+        if (!s.share_towers.empty()) {
+            return key + ": the line shares " + s.share_towers + "'s towers and so already takes its gusts; drop gust_with";
+        }
+        const LineInputs* o = nullptr;
+        for (const LineInputs& l : in.lines) { if (l.name == s.gust_with) { o = &l; } }
+        if (o == nullptr || o == &s) { return key + " = " + s.gust_with + " is not another line of erf.conductors.lines"; }
+        if (!o->gust_with.empty() || !o->share_towers.empty()) {
+            return key + " = " + s.gust_with + ", which takes the gusts of " + (o->gust_with.empty() ? o->share_towers : o->gust_with) +
+                   "; name that line";
+        }
+        if (o->num_spans() != s.num_spans()) {
+            return key + ": the line has " + std::to_string(s.num_spans()) + " span(s) and " + s.gust_with + " has " +
+                   std::to_string(o->num_spans()) + "; it takes that line's gusts span by span";
+        }
+    }
+    if (gust != GustType::None) {
         // a line's gust statistics are <name>_gusts in the checkpoint and <output_root>_gusts_stats.csv: no other
         // line or span may carry those names
         for (const LineInputs& s : in.lines) {
@@ -378,8 +442,38 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
                 const auto b = s.conductor_point(k + 1);
                 if (!(std::hypot(b[0] - a[0], b[1] - a[1]) > Real(1.0e-6))) {
                     return "erf.conductors." + s.name + ": span " + std::to_string(k + 1) +
-                           " has no horizontal extent, so gust_type = factor has no wind normal to it";
+                           " has no horizontal extent, so the gusts have no wind normal to it";
                 }
+            }
+        }
+    }
+    // the logs the run writes itself in diagnostics_dir, the towers' frame logs among them: no line's log may take
+    // their names (the paths compared after lexical normalisation, so that conductors/./towers is conductors/towers)
+    std::vector<std::string> own{"total_load", "separation", "transformers", "ground"};
+    bool towers = false, moving = false;
+    for (const LineInputs& s : in.lines) {
+        const erf_towers::TowerType* type = in.tower_type(s);
+        towers = towers || type != nullptr;
+        moving = moving || (type != nullptr && type->moves());
+        if (type == nullptr || !type->has_frame() || !s.share_towers.empty()) { continue; }
+        for (std::size_t j = 1; j <= s.towers.size(); ++j) {
+            const std::string t = s.name + "_t" + std::to_string(j);
+            own.insert(own.end(), {"frame_" + t, "frame_" + t + "_members"});
+            if (in.node_output_int > 0) { own.push_back("tower_" + t + "_frame"); }
+        }
+    }
+    if (towers) { own.push_back("towers"); }
+    if (moving) { own.push_back("coupling"); }
+    if (in.gusts_in_wind()) { own.push_back("gust_series"); }
+    auto normal = [] (const std::string& f) { return std::filesystem::path(f).lexically_normal().string(); };
+    for (const LineInputs& s : in.lines) {
+        std::vector<std::string> logs{normal(s.output_root + "_nodes.dat"), normal(s.output_root + "_insulators.dat")};
+        for (int k = 0; k < s.num_spans(); ++k) { logs.push_back(normal(s.span_root(k) + ".dat")); }
+        for (const std::string& o : own) {
+            const std::string f = normal(in.diagnostics_dir + "/" + o + ".dat");
+            if (std::find(logs.begin(), logs.end(), f) != logs.end()) {
+                return "erf.conductors." + s.name + ": a log of the line would be " + f + ", which the run writes itself; "
+                       "rename the line or set its output_root";
             }
         }
     }
@@ -462,6 +556,20 @@ ConductorInputs ConductorInputs::read ()
     in.has_gust_sigma_factor = pp.query("gust_sigma_factor", in.gust_sigma_factor) != 0;
     in.has_gust_peak_factor = pp.query("gust_peak_factor", in.gust_peak_factor) != 0;
     in.has_gust_span_length_scale = pp.query("gust_span_length_scale", in.gust_span_length_scale) != 0;
+    in.has_gust_event_time = pp.query("gust_event_time", in.gust_event_time) != 0;
+    in.has_gust_event_speed = pp.query("gust_event_speed", in.gust_event_speed) != 0;
+    in.has_gust_event_direction = pp.query("gust_event_direction", in.gust_event_direction) != 0;
+    in.has_gust_event_duration = pp.query("gust_event_duration", in.gust_event_duration) != 0;
+    in.has_gust_seed = pp.query("gust_seed", in.gust_seed) != 0;
+    in.has_gust_integral_length = pp.query("gust_integral_length", in.gust_integral_length) != 0;
+    {
+        std::vector<Real> origin;
+        if (pp.queryarr("gust_event_origin", origin)) {
+            if (origin.size() != 2) { Abort("erf.conductors.gust_event_origin needs two coordinates, x y (m)"); }
+            in.has_gust_event_origin = true;
+            in.gust_event_origin = {{origin[0], origin[1]}};
+        }
+    }
     std::vector<Real> vel;
     if (pp.queryarr("prescribed_velocity", vel)) {
         if (vel.size() != 3) { Abort("erf.conductors.prescribed_velocity needs three components (m/s)"); }
@@ -488,6 +596,7 @@ ConductorInputs ConductorInputs::read ()
         ps.query("stringing_tension", s.stringing_tension);
         ps.query("tower_type", s.tower_type);
         ps.query("share_towers", s.share_towers);
+        ps.query("gust_with", s.gust_with);
         ps.get("diameter", s.diameter);
         ps.get("mass_per_length", s.mass_per_length);
         ps.get("axial_stiffness", s.axial_stiffness);

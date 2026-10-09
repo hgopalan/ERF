@@ -1,0 +1,6 @@
+# the RANS flow alone, 1500 s (about seven flow-throughs at 15 m/s)
+FILE = flow.inputs
+max_step       = 3750
+stop_time      = 1500.0
+erf.plot_int_1 = 625
+erf.check_int  = 3750

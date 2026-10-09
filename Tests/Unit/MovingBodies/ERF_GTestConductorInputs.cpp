@@ -6,9 +6,12 @@
 // EveryLineValueOutsideItsRangeIsRefusedByName: validate_line names the key of every bad value,
 //     non-finite values included.
 // SharedSettingsOutsideTheirRangeAreRefusedByName: validate_settings names the key, non-finite
-//     values, a conductor lighter than the air it displaces, the ASCE 74 check's gust and exposure, and the
-//     gusts' type and keys (only with gust_type = factor, positive, not with a prescribed wind, every span with a
-//     horizontal extent, no line named for another's gust statistics) included.
+//     values, a conductor lighter than the air it displaces, the ASCE 74 check's gust and exposure, the gusts'
+//     type and keys (each only with the types that read it, in range, event's time and speed required, not with
+//     a prescribed wind, event and random not with drag_on_flow, every span with a horizontal extent, no line
+//     named for another's gust statistics, gust_with only with random gusts and naming another line of as many
+//     spans that takes no other's), and a line whose log would take the name of one of the run's own logs (a
+//     tower's frame log, or the same path spelled differently) included.
 // AnchorLevelMustExistAndFpeTrapsAreRefused: validate_solver and resolve_anchor_level.
 // SurfaceOffsetMustHoldTheWholeDomain: validate_frame against the domain's top and bottom.
 // ASectionIsReadWithItsTowersLengthsAndInsulatorStrings: a section's towers, lengths and strings.
@@ -41,6 +44,7 @@
 #include "ERF_GTestThrowOnAbort.H"
 
 using erf_conductors::ConductorInputs;
+using erf_conductors::GustType;
 using erf_conductors::LineInputs;
 using erf_conductors::TransformerInputs;
 
@@ -210,13 +214,14 @@ TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
         c.asce74_exposure = "b";
         EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "an exposure in lower case is accepted";
     }
-    // the gusts: the type, each of its keys only with gust_type = factor and positive, and not with a prescribed wind
-    bad([](ConductorInputs& c) { c.gust_type = "event"; }, "gust_type must be none or factor");
+    // the gusts: the type, each of its keys only with the types that read it and in range, event's time and speed
+    // required, not with a prescribed wind, event and random not with the drag put into the flow
+    bad([](ConductorInputs& c) { c.gust_type = "turbsim"; }, "gust_type must be none, factor, event or random");
     bad([](ConductorInputs& c) { c.has_gust_sigma_factor = true; c.gust_sigma_factor = 1.2; },
-        "gust_sigma_factor needs erf.conductors.gust_type = factor");
-    bad([](ConductorInputs& c) { c.has_gust_peak_factor = true; }, "gust_peak_factor needs erf.conductors.gust_type = factor");
+        "gust_sigma_factor needs an erf.conductors.gust_type");
+    bad([](ConductorInputs& c) { c.has_gust_peak_factor = true; }, "gust_peak_factor needs an erf.conductors.gust_type");
     bad([](ConductorInputs& c) { c.has_gust_span_length_scale = true; },
-        "gust_span_length_scale needs erf.conductors.gust_type = factor");
+        "gust_span_length_scale needs an erf.conductors.gust_type");
     bad([](ConductorInputs& c) { c.gust_type = "factor"; c.has_gust_sigma_factor = true; c.gust_sigma_factor = 0.0; },
         "gust_sigma_factor must be positive");
     bad([](ConductorInputs& c) { c.gust_type = "factor"; c.has_gust_peak_factor = true; c.gust_peak_factor = -2.7; },
@@ -225,16 +230,192 @@ TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
         "gust_span_length_scale must be positive");
     bad([](ConductorInputs& c) { c.gust_type = "factor"; c.gust_peak_factor = std::numeric_limits<amrex::Real>::infinity(); },
         "gust_peak_factor must be finite");
-    bad([](ConductorInputs& c) { c.gust_type = "factor"; c.has_prescribed_velocity = true; },
-        "cannot be used with erf.conductors.prescribed_velocity");
+    for (const char* type : {"factor", "event", "random"}) {
+        bad([type](ConductorInputs& c) {
+                c.gust_type = type;
+                c.has_gust_event_time = c.has_gust_event_speed = (std::string(type) == "event");
+                c.gust_event_speed = 10.0;
+                c.has_prescribed_velocity = true;
+            }, "cannot be used with erf.conductors.prescribed_velocity");
+    }
+    // event's keys only with event, random's only with random
+    for (const char* type : {"none", "factor", "random"}) {
+        bad([type](ConductorInputs& c) { c.gust_type = type; c.has_gust_event_time = true; },
+            "gust_event_time needs erf.conductors.gust_type = event");
+        bad([type](ConductorInputs& c) { c.gust_type = type; c.has_gust_event_speed = true; },
+            "gust_event_speed needs erf.conductors.gust_type = event");
+        bad([type](ConductorInputs& c) { c.gust_type = type; c.has_gust_event_direction = true; },
+            "gust_event_direction needs erf.conductors.gust_type = event");
+        bad([type](ConductorInputs& c) { c.gust_type = type; c.has_gust_event_origin = true; },
+            "gust_event_origin needs erf.conductors.gust_type = event");
+        bad([type](ConductorInputs& c) { c.gust_type = type; c.has_gust_event_duration = true; },
+            "gust_event_duration needs erf.conductors.gust_type = event");
+    }
+    for (const char* type : {"none", "factor", "event"}) {
+        bad([type](ConductorInputs& c) {
+                c.gust_type = type;
+                c.has_gust_event_time = c.has_gust_event_speed = (std::string(type) == "event");
+                c.gust_event_speed = 10.0;
+                c.has_gust_seed = true;
+            }, "gust_seed needs erf.conductors.gust_type = random");
+        bad([type](ConductorInputs& c) {
+                c.gust_type = type;
+                c.has_gust_event_time = c.has_gust_event_speed = (std::string(type) == "event");
+                c.gust_event_speed = 10.0;
+                c.has_gust_integral_length = true;
+            }, "gust_integral_length needs erf.conductors.gust_type = random");
+    }
+    auto event = [] (ConductorInputs& c) {
+        c.gust_type = "event";
+        c.has_gust_event_time = c.has_gust_event_speed = true;
+        c.gust_event_time = 30.0;
+        c.gust_event_speed = 10.0;
+    };
+    bad([](ConductorInputs& c) { c.gust_type = "event"; c.has_gust_event_speed = true; c.gust_event_speed = 10.0; },
+        "gust_type = event needs erf.conductors.gust_event_time");
+    bad([](ConductorInputs& c) { c.gust_type = "event"; c.has_gust_event_time = true; },
+        "gust_type = event needs erf.conductors.gust_event_speed");
+    bad([event](ConductorInputs& c) { event(c); c.gust_event_speed = 0.0; }, "gust_event_speed must be positive");
+    bad([event](ConductorInputs& c) { event(c); c.has_gust_event_duration = true; c.gust_event_duration = 0.0; },
+        "gust_event_duration must be positive");
+    bad([event](ConductorInputs& c) { event(c); c.gust_event_time = std::numeric_limits<amrex::Real>::quiet_NaN(); },
+        "gust_event_time must be finite");
+    bad([event](ConductorInputs& c) {
+            event(c);
+            c.has_gust_event_direction = true;
+            c.gust_event_direction = std::numeric_limits<amrex::Real>::infinity();
+        },
+        "gust_event_direction must be finite");
+    bad([event](ConductorInputs& c) {
+            event(c);
+            c.has_gust_event_origin = true;
+            c.gust_event_origin[1] = std::numeric_limits<amrex::Real>::quiet_NaN();
+        },
+        "gust_event_origin must be finite");
+    bad([](ConductorInputs& c) { c.gust_type = "random"; c.has_gust_seed = true; c.gust_seed = -1; }, "gust_seed must be >= 0");
+    bad([](ConductorInputs& c) { c.gust_type = "random"; c.has_gust_integral_length = true; c.gust_integral_length = 0.0; },
+        "gust_integral_length must be positive");
+    bad([event](ConductorInputs& c) { event(c); c.drag_on_flow = true; }, "cannot be used with erf.conductors.drag_on_flow");
+    bad([](ConductorInputs& c) { c.gust_type = "random"; c.drag_on_flow = true; }, "cannot be used with erf.conductors.drag_on_flow");
     {
         ConductorInputs c = in;
-        EXPECT_FALSE(c.gust_factor()) << "gusts are off by default";
+        EXPECT_FALSE(c.gusts_on()) << "gusts are off by default";
+        EXPECT_EQ(c.gust(), GustType::None);
         c.gust_type = "Factor";
         c.has_gust_sigma_factor = c.has_gust_peak_factor = c.has_gust_span_length_scale = true;
         c.gust_sigma_factor = 1.39;
         EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "gust_type = factor with all its keys is accepted";
-        EXPECT_TRUE(c.gust_factor());
+        EXPECT_TRUE(c.gusts_on());
+        EXPECT_FALSE(c.gusts_in_wind()) << "the factor leaves the wind alone";
+        c.drag_on_flow = true;
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "the factor with the drag put into the flow is accepted";
+    }
+    {
+        ConductorInputs c = in;
+        event(c);
+        c.has_gust_event_direction = c.has_gust_event_origin = c.has_gust_event_duration = true;
+        c.gust_event_direction = 45.0;
+        c.gust_event_origin = {{100.0, 200.0}};
+        c.gust_event_duration = 6.0;
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "gust_type = event with all its keys is accepted";
+        EXPECT_EQ(c.gust(), GustType::Event);
+        EXPECT_TRUE(c.gusts_in_wind());
+    }
+    {
+        ConductorInputs c = in;
+        c.gust_type = "RANDOM";
+        c.has_gust_seed = c.has_gust_integral_length = true;
+        c.gust_seed = 0;
+        c.gust_integral_length = 150.0;
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "gust_type = random with all its keys, seed 0, is accepted";
+        EXPECT_EQ(c.gust(), GustType::Random);
+        EXPECT_TRUE(c.gusts_in_wind());
+    }
+    {
+        // a line whose log would be one of the run's own: refused, with any gust_type or none
+        ConductorInputs c = in;
+        for (const char* own : {"total_load", "separation", "transformers", "ground"}) {
+            c.lines.front().name = own;
+            c.lines.front().output_root = c.diagnostics_dir + "/" + own;
+            const std::string err = ConductorInputs::validate_settings(c);
+            EXPECT_NE(err.find("which the run writes itself"), std::string::npos) << own << ": " << err;
+        }
+        c.lines.front().output_root = c.diagnostics_dir + "/elsewhere";
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "its own output_root moves its logs away";
+        // the logs a run writes only with towers, moving towers or gusts in the wind: refused only then
+        c.lines.front().name = "gust_series";
+        c.lines.front().output_root = c.diagnostics_dir + "/gust_series";
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "no gust series without event or random gusts";
+        c.gust_type = "random";
+        EXPECT_NE(ConductorInputs::validate_settings(c).find("which the run writes itself"), std::string::npos);
+        c.gust_type = "none";
+        c.lines.front().name = "towers";
+        c.lines.front().output_root = c.diagnostics_dir + "/towers";
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << "no towers.dat without lattice towers";
+        // the same path spelled differently, and a tower's frame log
+        c.lines.front().output_root = c.diagnostics_dir + "/./total_load";
+        EXPECT_NE(ConductorInputs::validate_settings(c).find("which the run writes itself"), std::string::npos);
+        LineInputs towered = good_span();
+        towered.name = "L";
+        towered.towers = {{{250.0, 500.0, 30.0}}};
+        towered.lengths = {150.8, 150.8};
+        towered.tower_type = "lattice";
+        erf_towers::TowerType framed;
+        framed.name = "lattice";
+        framed.frame_panels = 8;
+        c.tower_types = {framed};
+        c.lines = {towered, good_span()};
+        c.lines[1].name = "frame_L_t1";
+        c.lines[1].output_root = c.diagnostics_dir + "/frame_L_t1";
+        EXPECT_NE(ConductorInputs::validate_settings(c).find("frame_L_t1.dat, which the run writes itself"), std::string::npos)
+            << ConductorInputs::validate_settings(c);
+        c.lines[1].name = "towers";
+        c.lines[1].output_root = c.diagnostics_dir + "/towers";
+        EXPECT_NE(ConductorInputs::validate_settings(c).find("towers.dat, which the run writes itself"), std::string::npos)
+            << "towers.dat with lattice towers";
+    }
+    {
+        // a line taking another's random gusts: random only, another line of as many spans that takes no other's,
+        // not with share_towers
+        ConductorInputs c = in;
+        c.gust_type = "random";
+        LineInputs b = good_span();
+        b.name = "S2";
+        b.output_root = "conductors/S2";
+        b.gust_with = "S";
+        c.lines.push_back(b);
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << ConductorInputs::validate_settings(c);
+        EXPECT_EQ(c.gust_owner(c.lines[1]).name, "S");
+        EXPECT_EQ(c.gust_owner(c.lines[0]).name, "S");
+        auto refused = [&] (auto mutate, const std::string& msg) {
+            ConductorInputs d = c;
+            mutate(d);
+            const std::string err = ConductorInputs::validate_settings(d);
+            EXPECT_NE(err.find(msg), std::string::npos) << err;
+        };
+        refused([](ConductorInputs& d) { d.gust_type = "event"; d.has_gust_event_time = d.has_gust_event_speed = true;
+                                         d.gust_event_speed = 10.0; }, "S2.gust_with needs erf.conductors.gust_type = random");
+        refused([](ConductorInputs& d) { d.lines[1].gust_with = "S2"; }, "gust_with = S2 is not another line");
+        refused([](ConductorInputs& d) { d.lines[1].gust_with = "X"; }, "gust_with = X is not another line");
+        refused([](ConductorInputs& d) { d.lines[0].gust_with = "S2"; }, "which takes the gusts of S; name that line");
+        refused([](ConductorInputs& d) { d.lines[1].share_towers = "S"; }, "already takes its gusts; drop gust_with");
+        refused([](ConductorInputs& d) { d.lines[1].towers = {{{250.0, 500.0, 30.0}}}; d.lines[1].lengths = {150.8, 150.8}; },
+                "the line has 2 span(s) and S has 1");
+    }
+    {
+        // a line sharing the towers of a line that takes another's gusts takes that line's, whatever the order of the lines
+        ConductorInputs c = in;
+        LineInputs x = good_span(), y = good_span(), s = good_span();
+        x.name = "X"; y.name = "Y"; s.name = "S3";
+        s.tower_type = "lattice";
+        s.gust_with = "X";
+        y.share_towers = "S3";
+        c.lines = {x, y, s};
+        EXPECT_EQ(c.gust_owner(c.lines[1]).name, "X") << "through the towers' owner";
+        EXPECT_EQ(c.gust_owner(c.lines[2]).name, "X");
+        EXPECT_EQ(c.gust_owner(c.lines[0]).name, "X");
+        c.lines[2].gust_with.clear();
+        EXPECT_EQ(c.gust_owner(c.lines[1]).name, "S3") << "the towers' owner when it takes no other's";
     }
     {
         // another line named for a line's gust statistics: refused with gusts, accepted without
@@ -256,6 +437,8 @@ TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
         c.gust_type = "factor";
         const std::string err = ConductorInputs::validate_settings(c);
         EXPECT_NE(err.find("span 1 has no horizontal extent"), std::string::npos) << err;
+        c.gust_type = "random";
+        EXPECT_NE(ConductorInputs::validate_settings(c).find("span 1 has no horizontal extent"), std::string::npos);
     }
     // every Real input must be finite
     const amrex::Real nan = std::numeric_limits<amrex::Real>::quiet_NaN();
