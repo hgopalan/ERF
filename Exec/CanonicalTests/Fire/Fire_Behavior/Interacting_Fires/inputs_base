@@ -1,0 +1,70 @@
+# Interacting_Fires: settings shared by the three decks in this folder, the
+# three ways fires meet in a wind: spot fires coalescing (inputs_coalescing),
+# two lines meeting at an angle, a junction fire (inputs_junction), and two
+# parallel lines burning towards each other (inputs_parallel).
+#
+# Short grass (Anderson model 1) at 8 % moisture on flat ground, Rothermel's
+# rate with the ellipse shape, 10 m fire cells. The fire is given a constant
+# 5 m/s westerly reference wind (erf.fire.prescribed_wind), reduced to midflame
+# height by the wind adjustment factor, so the head, flank and backing rates
+# are the same through the run and every deck is a pure fire-spread example:
+# the atmosphere is still and one-way. For a coupled run replace the
+# prescribed wind with a sounding or geostrophic wind and set
+# erf.fire.coupling_type = "lagged" (the feedback multiplier
+# erf.fire.fire_atm_feedback is 1 by default).
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 2000.0 2000.0 500.0
+amr.n_cell = 40 40 50                 # 50 m horizontal, 10 m vertical
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.max_grid_size = 20                # four boxes, for up to four ranks; lengths divide by the fire grid ratio
+amr.max_grid_size_z = 50              # the fire module forbids z-decomposition
+
+zlo.type = "surface_layer"            # the fire module needs the surface layer at the ground
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+erf.molec_diff_type = "ConstantAlpha"
+erf.dynamic_viscosity = 0.0
+erf.alpha_T = 0.0
+erf.alpha_C = 0.0
+erf.les_type = "None"
+erf.init_type = "uniform"
+erf.use_gravity = false               # a uniform state cannot carry gravity (erf.init_type = uniform)
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+
+erf.cfl = 0.5
+stop_time = 900.0
+max_step = 100000
+erf.sum_interval = -1
+erf.v = 0
+amr.v = 0
+erf.check_int = -1
+erf.plot_int_1 = -1
+erf.fire_plot_int = 150               # about every 33 s (the acoustic step is 0.09 s)
+
+erf.fire.enable = true
+erf.fire.grid_ratio = 5               # 10 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.ros_model = "rothermel"
+erf.fire.directional_ros = true
+erf.fire.directional_shape = "ellipse"   # Anderson's ellipse: flanks and back slower than the head
+erf.fire.coupling_type = "passive"    # one-way; "lagged" for two-way
+erf.fire.fuel_model_id = 1            # short grass
+erf.fire.moisture_1hr = 0.08
+erf.fire.moisture_10hr = 0.08
+erf.fire.moisture_100hr = 0.10
+erf.fire.moisture_dynamic = false
+erf.fire.prescribed_wind = true       # the fire sees this reference wind instead of the atmosphere's
+erf.fire.prescribed_wind_x = 5.0
+erf.fire.prescribed_wind_y = 0.0
+erf.fire.wind_ref_ht = 6.1
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = true
+erf.fire.use_terrain_wind = false
+erf.fire.write_fire_stats_csv = false

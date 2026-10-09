@@ -336,6 +336,8 @@ Where each feature is exercised:
      - canonical ``Verification/Moisture_Relaxation``, ``Core_Physics/Fuel_Moisture_Sensitivity``, ``Fire_Behavior/ROS_Models/behave_dynamic``
    * - Ignition schedule, polygon and polyline ignition
      - canonical ``Fire_Behavior/Ignition_Patterns``; ``Unit_Tests/test_ignition_schedule.py``
+   * - Fires that meet: coalescing spot fires, a junction fire, parallel lines from several perimeter files
+     - ``FireMergingFronts``; canonical ``Fire_Behavior/Interacting_Fires``; gtest ``PolygonIgnition``
    * - Startup acceleration
      - canonical ``Fire_Behavior/Acceleration``; ``Unit_Tests/test_fire_acceleration.py``
    * - Ember spotting, crown fire

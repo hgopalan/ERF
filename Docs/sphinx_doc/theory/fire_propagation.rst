@@ -522,7 +522,9 @@ Perimeter ignition with spin-up
 
 A fire can be started from an observed perimeter instead of a point:
 :cpp:`erf.fire.ignition.polygon_file` lists the vertices and the level set
-is set to the signed distance from that polygon. By default the polygon is
+is set to the signed distance from that polygon (the key takes several files,
+one perimeter each, stamped with the min rule so they are separate fires that
+merge as they grow). By default the polygon is
 stamped at initialisation. :cpp:`erf.fire.ignition.polygon_time` stamps it
 at that time instead, so the atmosphere spins up before the fire exists;
 this is WRF-SFIRE's perimeter time, the way the Community Fire Behavior

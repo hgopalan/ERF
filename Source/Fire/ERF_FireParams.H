@@ -322,13 +322,19 @@ struct FireParams
     //   priority: integer; higher priority events fire first within the same timestep
     //   Comment lines start with # or !
     //
-    // Polygon ignition (initial perimeter from a vertex file):
-    //   polygon_file: path to CSV of polygon vertices (x y per line)
-    //   polygon_type: "polygon" (closed) or "polyline" (open line fire)
-    //   polyline_width: half-width of line ignition zone [m]
+    // Polygon ignition (initial perimeter from one or more vertex files):
+    //   polygon_file: paths to CSVs of polygon vertices (x y per line); each
+    //                 file is one closed polygon or one open polyline, and
+    //                 every file is stamped with the min(phi, new) rule, so
+    //                 several files are several fires (two parallel lines,
+    //                 separate perimeters) that merge as they grow
+    //   polygon_type: "polygon" (closed) or "polyline" (open line fire), for every file
+    //   polyline_width: half-width of line ignition zone [m], for every file
     struct IgnitionParams {
         std::string   ignition_schedule_file  = "";         ///< Path to ignition schedule CSV; empty = disabled
-        std::string   polygon_file            = "";         ///< Path to polygon vertex CSV; empty = disabled
+        std::vector<std::string> polygon_files;             ///< Polygon vertex CSVs, one perimeter each; empty = disabled
+        /// A perimeter ignition is configured (at least one vertex file)
+        bool has_polygon () const { return !polygon_files.empty(); }
         std::string   polygon_type            = "polygon";  ///< "polygon" or "polyline"
         amrex::Real   polyline_width          = 10.0;       ///< Half-width of polyline ignition zone [m]
         // Observed-perimeter ignition with spin-up (WRF-SFIRE's perimeter
@@ -1175,11 +1181,16 @@ struct FireParams
        // Phase 11: multi-ignition schedule and polygon ignition
        auto& ig = ignition;
        pp.query("ignition.schedule_file", ig.ignition_schedule_file);
-       pp.query("ignition.polygon_file",  ig.polygon_file);
+       {
+           // One or more vertex files; an empty entry ("" in a template deck) is no file.
+           std::vector<std::string> files;
+           pp.queryarr("ignition.polygon_file", files);
+           for (const auto& f : files) { if (!f.empty()) { ig.polygon_files.push_back(f); } }
+       }
        pp.query("ignition.polygon_type",  ig.polygon_type);
        pp.query("ignition.polyline_width", ig.polyline_width);
        one_of("ignition.polygon_type", ig.polygon_type, {"polygon", "polyline"});
-       if (!ig.polygon_file.empty() && ig.polygon_type == "polyline") positive("ignition.polyline_width", ig.polyline_width);
+       if (ig.has_polygon() && ig.polygon_type == "polyline") positive("ignition.polyline_width", ig.polyline_width);
        pp.query("ignition.polygon_time",         ig.polygon_time);
        pp.query("ignition.polygon_interior_ros", ig.polygon_interior_ros);
        pp.query("ignition.polygon_interior_tau", ig.polygon_interior_tau);

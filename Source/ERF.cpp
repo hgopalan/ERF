@@ -2145,7 +2145,7 @@ ERF::InitData_post ()
         // A run driven only by erf.fire.prescribed_heat.flux has no front at
         // all, by design.
         const bool deferred_ignition =
-            (!m_fire_params.ignition.polygon_file.empty() && m_fire_params.ignition.polygon_time > 0.0)
+            (m_fire_params.ignition.has_polygon() && m_fire_params.ignition.polygon_time > 0.0)
             || !m_fire_params.ignition.ignition_schedule_file.empty()
             || (m_fire_params.prescribed_heat.flux > 0.0);
         if (const amrex::MultiFab* phi = m_fire_layer->get_levelset(); phi && !deferred_ignition) {
@@ -2154,7 +2154,9 @@ ERF::InitData_post ()
                 const amrex::Geometry& gf = m_fire_layer->get_fire_geom();
                 std::ostringstream msg;
                 msg << "[FIRE] Fire initialization failed: no cells were marked as burned. "
-                    << "Check ignition parameters (ignition_x, ignition_y, ignition_r): the fire grid "
+                    << "Check ignition parameters (ignition_x, ignition_y, ignition_r";
+                for (const auto& f : m_fire_params.ignition.polygon_files) { msg << ", " << f; }
+                msg << "): the fire grid "
                     << "on level " << fire_lev << " covers x " << gf.ProbLo(0) << " to " << gf.ProbHi(0)
                     << " m, y " << gf.ProbLo(1) << " to " << gf.ProbHi(1) << " m.";
                 amrex::Abort(msg.str());
