@@ -9,7 +9,7 @@ The Koschmieder visibility from the airborne dust: `visibility_diag.csv` reports
 | Domain, grid | 3000 x 3000 x 1024 m, 8 x 8 x 64 cells (375 x 375 x 16 m), periodic in x and y, flat |
 | Run length | `max_step = 20` at `erf.fixed_dt = 0.5` s (10 s): a start-up regression run, seconds on one rank |
 | Dust | three bins {7, 2.5, 50} um carried as one scalar (`erf.dust.grid_ratio = 1`, the dust grid is the atmosphere's columns); Shao-Lu threshold at 75 um; deposition with `E_0 = 3e-3` |
-| Sources | the surface-layer u* against the threshold, plus the haul road in `road_schedule.csv` (AP-42 PM-10 mass rate over the covered cells, stamped on bin 0) |
+| Sources | the surface-layer u* against the threshold (the 15 m/s geostrophic wind gives u* about 1.1 m/s, 5x the threshold: this source dominates, about 8e2 kg over the run), the blast in `blast_schedule.csv` (about 1e2 kg), and the haul road in `road_schedule.csv` (AP-42 PM-10 mass rate over the covered cells, on bin 0; 2e-2 kg, 1e-5 of the emission) |
 | Diagnostic | `erf.dust.visibility_enable = true`, `visibility_k_ext = 600`, `visibility_warning_m = 1000`, `visibility_road_closure_m = 300` |
 
 ## What to look at

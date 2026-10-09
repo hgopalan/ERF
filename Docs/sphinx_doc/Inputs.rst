@@ -6300,9 +6300,10 @@ on the same scalar.
 |                                              | 1e-2 vegetation; 0 removes the collection term (v_d = v_s) |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.lumped_settling**                 | Settling and deposition velocity of the single transported | mean or bin0             | mean                               |
-|                                              | scalar: mean averages the bins' Stokes velocities (they    |                          |                                    |
-|                                              | share the flux equally); bin0 (the form until October      |                          |                                    |
-|                                              | 2026) uses bin 0 alone                                     |                          |                                    |
+|                                              | scalar: mean averages the bins' Stokes velocities weighted |                          |                                    |
+|                                              | by their shares of the mass emitted so far (equal until    |                          |                                    |
+|                                              | anything is emitted); bin0 (the form until October 2026)   |                          |                                    |
+|                                              | uses bin 0 alone                                           |                          |                                    |
 +----------------------------------------------+------------------------------------------------------------+--------------------------+------------------------------------+
 | **erf.dust.loading_feedback_coeff**          | Shao (2001) loading feedback on the threshold [m³/kg]; 0   | Real >= 0                | 0.0                                |
 |                                              | disables                                                   |                          |                                    |

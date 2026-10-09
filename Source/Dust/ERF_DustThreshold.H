@@ -188,9 +188,11 @@ amrex::Real compute_slope_factor(amrex::Real slope_x, amrex::Real slope_y,
     const amrex::Real spd = std::sqrt(wind_u * wind_u + wind_v * wind_v);
     // slope along the wind (signed), or the magnitude with no wind. The
     // unselected arm's x/0 is speculated under the fpe traps at -O2 (see
-    // Tests/Unit/CMakeLists.txt), so the divisor is floored inside the select.
+    // Tests/Unit/CMakeLists.txt), so the divisor is floored inside the select;
+    // 1e-10 m/s keeps x / floor finite for any wind (numeric_limits::min()
+    // overflows above 4 m/s in both precisions).
     const amrex::Real s_along = (spd > 0.0)
-        ? (slope_x * wind_u + slope_y * wind_v) / amrex::max(spd, std::numeric_limits<amrex::Real>::min())
+        ? (slope_x * wind_u + slope_y * wind_v) / amrex::max(spd, amrex::Real(1.0e-10))
         : slope_mag;
     const amrex::Real hyp       = std::sqrt(amrex::Real(1.0) + s_along * s_along);
     const amrex::Real cos_theta = amrex::Real(1.0) / hyp;

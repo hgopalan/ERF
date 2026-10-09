@@ -53,8 +53,9 @@ Injection into the atmosphere
 -----------------------------
 
 The dust rides in the passive scalar slot after the first
-(``RhoScalar_comp + 1``), one slot per bin when
-:cpp:`erf.dust.transport_bins_separately` is true and a single total
+(``RhoScalar_comp + 1``), one slot per bin with
+:cpp:`erf.dust.transport_bins_separately`, which the single-scalar state
+accepts only for one bin and a single total
 otherwise. The per-bin emission flux is summed, averaged down to the
 atmosphere grid, and added to the slow right-hand side of the lowest cell as
 
@@ -96,9 +97,12 @@ by their shares of the mass emitted so far (:cpp:`erf.dust.lumped_settling =
 mean`; the shares are checkpointed; ``bin0`` is the form until October 2026,
 which settled the 50 µm third of the default bins at the 7 µm velocity, a
 residence of 5850 s in a 23 m cell instead of 117 s). The shares are those of
-the emission, not of the air: the coarse bins fall out first, so the airborne
-mix grows finer than the emitted one while the mean velocity stays at the
-emitted shares. A check at every step aborts when the explicit settling of
+the emission, not of the air, and one set serves the whole domain: the coarse
+bins fall out first (the 50 µm third of the default bins leaves a 100 m layer
+in about 8 minutes), after which the remaining fine dust still settles at the
+emitted mean, 17x its own velocity, so long-run PM2.5 means and exceedances
+are biased low wherever a coarse bin is emitted. The remedy is one
+transported scalar per bin, which the state does not carry yet. A check at every step aborts when the explicit settling of
 the coarsest bin is unstable at that step's :math:`\Delta t` on the thinnest
 first cell, :math:`\max v_s\, \Delta t / h_0 > 1` (until October 2026 the check
 ran once on the first RK stage's :math:`\Delta t / 3`, so it fired only above
@@ -136,7 +140,7 @@ the column: the dust density of the lowest atmosphere cell,
 ``dust_conc_sfc``, which drives the loading feedback of
 :ref:`sec:DustSources`, and the surface moisture flux from the microphysics
 (``Q1fx3`` at the bottom face), which is zero without a moisture scheme.
-The flux is carried to the dust plotfile as ``dust_surf_moist`` and is not
+The flux is carried to the dust plotfile as ``dust_surf_qflux_kg_m2_s`` (``dust_surf_moist`` is the moisture flag) and is not
 used by the threshold: the Fecan (1999) factor needs the gravimetric soil
 moisture, which a surface flux cannot give (the former dynamic-moisture
 option divided the flux by :math:`L_v \rho_a` and

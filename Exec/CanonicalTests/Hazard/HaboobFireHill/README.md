@@ -15,7 +15,7 @@ ground and over a pit; only the terrain differs.
 | Background | `sounding_neutral_abl`: theta 300 K to 468 m, inversion to 308 K at 551 m, u = 5 m/s at all heights; `erf.abl_geo_wind = 5 0 0`; MRF PBL |
 | Cold pool | `erf.prob_name = "Bubble"`: -10 K air temperature (`prob.T_pert_is_airtemp = true`), cos^2 profile centred at (1500, 2000, 0) m with radii (1000, 4000, 600) m |
 | Fire | Fuel model 1 (short grass), 1-h moisture 0.04, ignition disc r = 150 m at (3500, 2000) m; level set with directional ROS, lagged two-way coupling, `source_mode = add`, `heat_flux_partition = cfbm`; `use_wind_limit = false`, `use_terrain_wind = false` |
-| Smoke, dust | Passive tracers. Three dust bins; emission from the surface-layer u*, raised by the fire wind inside the fire perimeter and by plume lofting in burning cells (fire-dust coupling) |
+| Smoke, dust | Passive tracers. Three dust bins on the dust grid (`erf.dust.grid_ratio = 2`, 31.25 m cells); emission from the surface-layer u*, raised by the fire wind inside the fire perimeter and by plume lofting in burning cells (fire-dust coupling) |
 | Terrain | `haboob_hill_129x65.txt`: 200 m Gaussian hill, sigma 600 m, centred at (5000, 2000) m |
 
 The bubble uses the computational height, not the height above ground, so it
@@ -97,7 +97,7 @@ Caveats:
   layer profile. It spins down: ahead of the front (x > 7.5 km) the
   first-cell u falls from 5.0 m/s to 3.8 to 4.0 m/s by 300 s, so the later
   front speeds and dust ratios include that decay.
-- The dust threshold friction velocity, 0.213 m/s in burned cells to 0.287 m/s on the steepest flanks (0.255 on flat ground; the slope factor raises it up to 1.13x)
+- The dust threshold friction velocity, 0.213 m/s on unburned lee faces (0.214 in burned cells) to 0.287 m/s on the steepest windward flanks (0.255 on flat ground; the slope factor runs from 0.84x to 1.12x on the 11 degree slopes)
   (Shao-Lu at 75 um; 0.040 to 0.054 m/s until October 2026, 5x too low),
   is below u* in 95 % of the dust cells at 30 s and 50 % at 600 s as the ambient wind
   spins down, so the emission follows u* - u*_t rather than u*^3 alone and

@@ -231,7 +231,7 @@ void load_blast_schedule(const std::string& filename,
  * @param[in]     prev_time           Time at end of previous step [s].
  * @param[in]     dt_s                Current timestep duration [s].
  * @param[in]     n_size_bins         Number of size bins.
- * @param[in]     blast_reactivity    Reactivity multiplier for fresh surface [>= 1].
+ * @param[in]     blast_reactivity    Reactivity multiplier for fresh surface [>= 0].
  */
 inline
 void apply_blast_schedule(

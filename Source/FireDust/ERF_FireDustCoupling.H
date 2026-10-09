@@ -49,13 +49,14 @@ struct FireDustCoupling {
     // ── Phase 2: fire outflow wind → dust u* ──────────────────────────────────
     // When fire_wind_to_dust = true, the fire's wind at erf.fire.wind_ref_ht
     // (fire_wind_ref, the datum fire_wind_zref names; until October 2026 the
-    // WAF-reduced midflame wind fire_wind_eff was handed over as if it were
+    // WAF-reduced midflame wind fire_wind_ref was handed over as if it were
     // the 6.1 m wind, 0.36x for grass, so the coupling never won) is copied
-    // onto the dust grid and converted to a friction velocity via log-law. The maximum of background MRF u* and the
-    // fire-derived u* is written back to dust_ustar_in. Cells immediately
-    // downwind of the fire perimeter see elevated u* above the MRF baseline,
-    // triggering or enhancing dust emission that would not occur from background
-    // wind alone.
+    // onto the dust grid and converted to a friction velocity via log-law.
+    // Inside the fire perimeter (level set below zero) the maximum of the
+    // surface layer's u* and the fire-derived u* is kept; outside it the
+    // surface layer's u* stands (the fire value overrode it domain-wide until
+    // October 2026: the reference wind is the same atmospheric wind there and
+    // the neutral log law ignores the surface layer's roughness and stability).
     bool        fire_wind_to_dust  = true;
     amrex::Real fire_wind_z0       = 0.1;  // surface roughness for log-law [m]
     amrex::Real fire_wind_zref     = 6.1;  // reference height matching fire wind_ref_ht [m]
@@ -64,18 +65,19 @@ struct FireDustCoupling {
     /**
      * @brief Interaction 2: fire outflow wind raises effective u* on dust grid.
      *
-     * For each dust cell, averages fire_wind_eff over the C×C fire cells
-     * covering that dust cell, derives u* via log-law
+     * For each dust cell inside the fire perimeter (fire_phi_scratch < 0),
+     * reads the fire's reference wind (fire_wind_ref on the dust grid, the
+     * grid ratios are equal), derives u* via log-law
      * (u* = U * kappa / ln(zref/z0)), and takes the maximum with the
      * background MRF u* already in dust_ustar_in.
      *
-     * MPI safety: fire_wind_eff_mf must already be copied into a scratch
+     * MPI safety: fire_wind_ref_mf must already be copied into a scratch
      * MultiFab on the dust BoxArray/DM by the caller (ERF.cpp) before this
      * function is called — same pattern as LNG_MPI_SKILLS Rule B3. This
      * function receives the pre-copied scratch MultiFab as fire_wind_scratch.
      *
      * @param[in,out] dust_ustar_in      u* on dust grid [m/s] — modified in place
-     * @param[in]     fire_wind_scratch  fire_wind_eff already ParallelCopied onto
+     * @param[in]     fire_wind_scratch  fire_wind_ref already ParallelCopied onto
      *                                   the dust BoxArray/DM (2-comp: u, v) [m/s]
      * @param[in]     geom_dust          Geometry of the dust sub-grid
      * @param[in]     z0                 Surface roughness [m]

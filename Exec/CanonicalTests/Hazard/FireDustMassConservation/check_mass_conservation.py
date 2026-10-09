@@ -63,10 +63,12 @@ def budget(rows, times, masses, quiet=False):
     dt = rows[2][1] - rows[1][1]
     worst = 0.0
     emitted_total = 0.0
+    n_matched = 0
     for t, M in zip(times, masses):
         n = int(round(t / dt))
         if n not in by_step:
             continue
+        n_matched += 1
         emitted = sum(by_step[m][2] * dt for m in by_step if m < n)
         deposited = by_step[n][3]
         expected = emitted - deposited
@@ -78,7 +80,11 @@ def budget(rows, times, masses, quiet=False):
     check("deposited", by_step[max(by_step)][3] > 0.0,
           f"{by_step[max(by_step)][3]:.4e} kg deposited (settling at v_s, E_0 = 0)")
     check("budget", worst < TOL,
-          f"max |M_air - (emitted - deposited)| / emitted = {worst:.3e} over {len(masses)} prints (tol {TOL})")
+          f"max |M_air - (emitted - deposited)| / emitted = {worst:.3e} over {n_matched} matched prints (tol {TOL})")
+    # a print whose time rounds onto no diagnostics row is skipped above, so
+    # zero matches would pass the budget vacuously
+    check("matched", n_matched >= 3,
+          f"{n_matched} of {len(masses)} RHO DUST prints fall on a dust_diag.dat row (3 needed)")
     return results
 
 
@@ -91,8 +97,12 @@ def self_test():
     ok_pass = budget(rows, times, closed, quiet=True)
     leaky = [0.9 * M for M in closed]      # 10 % of the airborne mass lost
     ok_fail = budget(rows, times, leaky, quiet=True)
-    good = all(ok_pass) and ok_fail[:2] == [True, True] and ok_fail[2] is False
-    print(f"  self-test  {'PASS' if good else 'FAIL'}  closed budget {sum(ok_pass)}/3, 10 % leak fails the budget check: {not ok_fail[2]}")
+    shifted = [t + 1000.0 for t in times]   # prints beyond every row
+    ok_mis = budget(rows, shifted, closed, quiet=True)
+    good = (all(ok_pass) and ok_fail[:2] == [True, True] and ok_fail[2] is False and ok_fail[3] is True
+            and ok_mis[3] is False)
+    print(f"  self-test  {'PASS' if good else 'FAIL'}  closed budget {sum(ok_pass)}/4, 10 % leak fails the budget check: {not ok_fail[2]},"
+          f" prints off the rows fail the matched check: {not ok_mis[3]}")
     sys.exit(0 if good else 1)
 
 

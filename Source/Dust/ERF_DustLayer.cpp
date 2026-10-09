@@ -5,6 +5,7 @@
 
 #include <ERF_DustLayer.H>
 #include <fstream>
+#include <cstdio>
 #include <ERF_DustPrerequisites.H>
 #include <ERF_DustGrid.H>
 #include <ERF_DustSurfaceReader.H>
@@ -257,8 +258,8 @@ DustLayer::initialize(
                    dust_pm25_24h.get(), dust_pm10_24h.get(),
                    dust_pm25_exceed.get(), dust_pm10_exceed.get()})
     mf->setVal(0.0);
+  m_emitted_per_bin.assign(dust_params.n_size_bins, 0.0);   // whatever the averaging (it sat inside the window branch once)
   if (dust_params.averaging == "window") {
-    m_emitted_per_bin.assign(dust_params.n_size_bins, 0.0);
     m_pm25_window.define(m_dg.ba, m_dg.dm, 24, 86400.0);   // 24 hourly means
     m_pm10_window.define(m_dg.ba, m_dg.dm, 24, 86400.0);
     if (dust_params.stel_enable)
@@ -1044,7 +1045,7 @@ DustLayer::check_settling_stability (amrex::Real dt) const
     if (cfl > 1.0) {
         amrex::Abort("[DUST] explicit settling is unstable: max v_s * dt / h_0 = "
                      + std::to_string(cfl) + " (v_s = " + std::to_string(vs_max)
-                     + " m/s, dt = " + std::to_string(dt) + " s, thinnest first cell "
+                     + " m/s, dt = " + std::to_string(dt) + " s, thinnest cell "
                      + std::to_string(m_h0_min) + " m); shorten erf.fixed_dt or drop the coarse bin");
     }
 }
@@ -1102,7 +1103,21 @@ DustLayer::apply_settling_to_cc_source(
     // dt lives there; this hook sees the stage dt, dt/3 at the first stage,
     // which under-read the condition 3x until October 2026)
     if (m_h0_min < 0.0) {
-        m_h0_min = geom_atm.CellSize(2) * amrex::max(detJ_cc.min(0), amrex::Real(1.0e-10));
+        // the thinnest cell anywhere (a mid-level cell can be thinner than the
+        // surface cell on a fitted mesh): the smallest detJ above the kernels'
+        // floor, so that covered EB cells (detJ 0, treated as full cells by the
+        // kernels) neither abort the run nor hide a thin cut cell
+        amrex::Real dj = amrex::ReduceMin(detJ_cc, 0,
+            [=] AMREX_GPU_HOST_DEVICE (amrex::Box const& bx, amrex::Array4<amrex::Real const> const& a) -> amrex::Real {
+                amrex::Real m = 1.0e30;
+                amrex::Loop(bx, [&] (int i, int j, int k) {
+                    const amrex::Real v = a(i,j,k);
+                    if (v > 1.0e-10 && v < m) m = v;
+                });
+                return m;
+            });
+        amrex::ParallelAllReduce::Min(dj, amrex::ParallelContext::CommunicatorSub());
+        m_h0_min = geom_atm.CellSize(2) * ((dj < 1.0e29) ? dj : amrex::Real(1.0));
     }
     amrex::ignore_unused(dt);
 
@@ -1527,6 +1542,7 @@ DustLayer::read_window_state (const std::string& key, std::istream& f, DustWindo
         int n; f >> n;
         for (int s = 0; s < n; ++s) { amrex::Real v; f >> v; if (s < w.n_slots) w.slot_len[s] = v; }
     }
+    else { std::string skip; std::getline(f, skip); }   // a future key: consume its line, keep the parser aligned
 }
 
 void
@@ -1554,6 +1570,54 @@ DustLayer::write_checkpoint_state (const std::string& checkpointname) const
     write_window_state(f, "pm25_window", m_pm25_window);
     write_window_state(f, "pm10_window", m_pm10_window);
     write_window_state(f, "stel_window", m_stel_window);
+}
+
+void
+DustLayer::remove_outputs_for_fresh_start () const
+{
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        std::vector<std::string> files = {
+            m_params.dust_diag_file, m_params.dust_naaqs_file, m_params.msha_exposure_file,
+            m_params.msha_shift_file, m_params.stel_diag_file, m_params.silica_diag_file,
+            m_params.visibility_diag_file, m_params.cm_budget_file, m_params.road_diag_file,
+            m_params.phreeqc_feedback_file, m_params.phreeqc_site_summary_file };
+        for (const auto& name : m_params.msha_receptor_names) files.push_back("msha_receptor_" + name + ".csv");
+        for (const auto& f : files) {
+            if (f.empty()) continue;
+            if (std::remove(f.c_str()) == 0)
+                amrex::Print() << "[DUST] fresh start: removed the earlier " << f << "\n";
+        }
+    }
+    amrex::ParallelDescriptor::Barrier();
+}
+
+void
+DustLayer::check_checkpoint_layout (const std::string& restart_chkfile) const
+{
+    std::ifstream f(restart_chkfile + "/DustState");
+    if (!f) return;
+    std::string key;
+    while (f >> key) {
+        if (key == "n_size_bins") {
+            int n; f >> n;
+            if (n != m_params.n_size_bins)
+                amrex::Abort("[DUST] the checkpoint was written with erf.dust.n_size_bins = " + std::to_string(n)
+                             + ", the deck has " + std::to_string(m_params.n_size_bins)
+                             + "; the emission flux has one component per bin and cannot be reread");
+        } else if (key == "grid_ratio") {
+            int g; f >> g;
+            if (g != m_dg.grid_ratio)
+                amrex::Abort("[DUST] the checkpoint was written with erf.dust.grid_ratio = " + std::to_string(g)
+                             + ", the deck has " + std::to_string(m_dg.grid_ratio)
+                             + "; the dust fields live on that grid and cannot be reread");
+        } else if (key == "averaging") {
+            std::string a; f >> a;
+            if (a != m_params.averaging)
+                amrex::Abort("[DUST] the checkpoint was written with erf.dust.averaging = " + a
+                             + ", the deck has " + m_params.averaging + "; the 24-hour and STEL means"
+                             " cannot be carried across the change");
+        } else { std::string skip; std::getline(f, skip); }
+    }
 }
 
 void

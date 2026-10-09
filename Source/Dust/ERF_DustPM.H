@@ -12,8 +12,9 @@
  * if d <= threshold. No partial fractional attribution is applied
  * within a bin. With the bins transported as ONE scalar (the only layout
  * for n_size_bins > 1) the scalar's mass is apportioned by the bins' shares
- * of the emitted flux, which are equal: PM10 = C * n(d <= 10 um) / n_bins,
- * PM2.5 = C * n(d <= 2.5 um) / n_bins. Until October 2026 the bin-0 diameter
+ * of the mass emitted so far (equal until anything is emitted): PM10 =
+ * C * sum of the shares with d <= 10 um, PM2.5 likewise with d <= 2.5 um; a
+ * haul road alone (bin 0, 7 um) gives all PM10 and no PM2.5. Until October 2026 the bin-0 diameter
  * classified the whole lumped mass, so with the default bins {7, 2.5, 50} um
  * PM10 counted the 50 um third and PM2.5 was identically zero.
  *

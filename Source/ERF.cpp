@@ -2172,6 +2172,10 @@ ERF::InitData_post ()
         if (dust_params.enable) {
             m_DustLayer = std::make_unique<DustLayer>();
             m_DustLayer->initialize(*this, m_SurfaceLayer[Orientation::zlo()].get(), *z_phys_nd[0], dust_params);
+            if (restart_chkfile.empty()) {
+                m_DustLayer->remove_outputs_for_fresh_start();   // stale CSVs of an earlier run are not continued
+                m_DustLayer->write_diag_header();
+            }
 #ifdef ERF_ENABLE_FIRE
             if (m_fire_layer && m_DustLayer) {
                 amrex::ParmParse pp("erf");
@@ -2184,6 +2188,7 @@ ERF::InitData_post ()
                 {
                     amrex::Real wind_ref_ht = m_fire_layer->get_params().wind_ref_ht;
                     m_fire_dust_coupling.fire_wind_zref = wind_ref_ht;
+                    if (m_fire_dust_coupling.enabled && m_fire_dust_coupling.fire_wind_to_dust) {
                     amrex::Real zref_given = wind_ref_ht;
                     if (pp.query("fire_dust_wind_zref", zref_given) &&
                         std::abs(zref_given - wind_ref_ht) > 1.0e-6 * wind_ref_ht) {
@@ -2201,6 +2206,7 @@ ERF::InitData_post ()
                                        << " m; inside the fire perimeter the fire wind u* (a neutral log law on"
                                           " fire_dust_wind_z0) is compared with the surface layer's u*\n";
                     }
+                    }   // coupling on and the fire wind feeding the dust
                 }
                 pp.query("fire_dust_lofting_enabled",     m_fire_dust_coupling.fire_lofting_enabled);
                 pp.query("fire_dust_lofting_k_loft",      m_fire_dust_coupling.lofting_k_loft);

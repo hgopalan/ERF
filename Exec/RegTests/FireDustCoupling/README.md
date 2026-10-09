@@ -8,7 +8,7 @@ the three defects found in the September 2026 audit:
 | coupling | defect before the fix | check |
 |---|---|---|
 | burned area removes crust | applied every step on top of the previous step (crust 0.2^n) because the reset path in `DustLayer::advance` was never registered | u*_t burned / unburned = (1 + a c (1-r)) / (1 + a c) at steps 20 and 40 |
-| fire wind raises the dust u* | applied before `DustLayer::advance`, whose surface-layer fill overwrote it | dust u* >= log-law u* of the fire wind in every cell |
+| fire wind raises the dust u* | applied before `DustLayer::advance`, whose surface-layer fill overwrote it | dust u* >= log-law u* of the fire wind in every burned cell (phi < 0); unburned cells keep the surface layer's u* |
 | deposition accumulator | added at every RK stage with that stage's dt (1.83 dt per step) | deposition_total at step 40 within 15 % of the reference |
 
 ## Running

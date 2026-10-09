@@ -274,8 +274,9 @@ erf.dust.transport_bins_separately = false
 erf.dust.deposition_E0 = 3.0e-3
 
 # Settling and deposition velocity of the single transported scalar: mean
-# averages the bins' Stokes velocities (they share the flux equally); bin0
-# (the form until October 2026) uses bin 0 alone [mean or bin0]
+# averages the bins' Stokes velocities weighted by their shares of the mass
+# emitted so far (equal until anything is emitted); bin0 (the form until
+# October 2026) uses bin 0 alone [mean or bin0]
 erf.dust.lumped_settling = mean
 
 # Shao (2001) loading feedback on the threshold [m³/kg]; 0 disables [Real >=

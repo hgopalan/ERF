@@ -246,6 +246,19 @@ public:
 
     /// Restore those counters; step and time fall back to the atmosphere's when
     /// the file is absent. Blast events dated before the restart are marked fired.
+    /// A fresh start (no restart) removes the dust CSV outputs a previous run
+    /// left in the directory: every writer appends (a restart continues the
+    /// earlier leg), so stale rows from another run or binary accumulated
+    /// ahead of the new ones until October 2026.
+    void remove_outputs_for_fresh_start () const;
+    /// (Re)write the dust_diag.dat header (a no-op on a non-empty file).
+    void write_diag_header () const { write_dust_stats_header(m_params.dust_diag_file); }
+
+    /// Abort when the checkpoint's n_size_bins, grid_ratio or averaging differ
+    /// from the deck's: called before the fields are read, since VisMF::Read
+    /// would die on the mismatched layout first with no mention of dust.
+    void check_checkpoint_layout (const std::string& restart_chkfile) const;
+
     void read_checkpoint_state (const std::string& restart_chkfile,
                                 int step, amrex::Real time);
 

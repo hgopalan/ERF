@@ -11,7 +11,7 @@ the pure-Python reader erf_plotfile.py and checks:
             plotted step, with a = alpha_crust, c = crust_index, r = the crust
             reduction. The reduction is applied to the baseline once per step; a
             compounded reduction gives 1 / (1 + a c) after a few steps.
-  fire_u*   dust_ustar_in >= kappa |U_fire| / ln(zref / z0) in every cell, the
+  fire_u*   dust_ustar_in >= kappa |U_fire| / ln(zref / z0) in every burned cell (unburned cells keep the surface layer's u*), the
             log-law u* of the fire's wind at wind_ref_ht (fire_wind_ref; the
             WAF-reduced fire_wind_eff was handed over until October 2026, 0.36x
             for grass, so the coupling never won). An overwritten coupling leaves
@@ -26,7 +26,7 @@ the pure-Python reader erf_plotfile.py and checks:
 Exit 1 on any failure. The numbers are for the committed deck; the tolerances
 cover box-layout round-off, not model changes.
 """
-import argparse, glob, math, os, sys
+import argparse, glob, math, os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import erf_plotfile  # noqa: E402
 
@@ -66,7 +66,7 @@ def read_deck_value(key, default):
     try:
         for line in open("inputs"):
             s = line.split("#")[0].strip()
-            if s.startswith(key) and "=" in s:
+            if re.match(re.escape(key) + r"\s*=", s):   # the exact key (crust_index, not crust_index_file)
                 return float(s.split("=")[1].split()[0])
     except OSError:
         pass
@@ -83,7 +83,8 @@ def main():
     c = read_deck_value("erf.dust.crust_index", CRUST_INDEX)
     r = read_deck_value("erf.fire_dust_crust_reduction", REDUCTION)
     z0 = read_deck_value("erf.fire_dust_wind_z0", Z0)
-    zref = read_deck_value("erf.fire_dust_wind_zref", ZREF)
+    # the handed-over wind is at erf.fire.wind_ref_ht, which fire_dust_wind_zref follows
+    zref = read_deck_value("erf.fire.wind_ref_ht", read_deck_value("erf.fire_dust_wind_zref", ZREF))
     expected_ratio = (1.0 + a * c * (1.0 - r)) / (1.0 + a * c)
 
     fire = steps(args.fire_prefix); dust = steps(args.dust_prefix)
@@ -128,9 +129,9 @@ def main():
                     n_outside_kept += 1
         check(f"fireu*{n}", worst < 1.0e-6 and nboost > 0,
               f"step {n}: max(u*_fire - dust u*) = {worst:.3e} m/s over {nboost} burned cells with fire wind")
-        check(f"outside{n}", n_outside_kept > 0,
-              f"step {n}: {n_outside_kept} unburned cells keep a dust u* below the fire-wind value"
-              " (0 would mean the fire path still overrides the surface layer everywhere)")
+        check(f"outside{n}", n_outside_kept >= 0.9 * len(unburned),
+              f"step {n}: {n_outside_kept} of {len(unburned)} unburned cells keep a dust u* below the fire-wind value"
+              " (all 6284 took it before the perimeter mask; fewer than 90 % would mean the override is back)")
 
     # deposition accumulator: monotone, once per step
     try:

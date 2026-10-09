@@ -25,7 +25,8 @@
  * the deposition kernel's.
  *
  * With the bins transported as one scalar the settling velocity is the mean of
- * the per-bin velocities (the bins share the emitted flux equally):
+ * the per-bin velocities weighted by the bins' shares of the mass emitted so
+ * far (equal until anything is emitted):
  * erf.dust.lumped_settling = mean; bin0 is the form until October 2026, which
  * settled the 50 um third of the default bins at the 7 um velocity (residence
  * 5850 s in a 23 m cell instead of 117 s).

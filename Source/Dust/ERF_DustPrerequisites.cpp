@@ -146,7 +146,7 @@ void verify_dust_prerequisites(const ERF&          erf,
     }
 
     // Check 9: the dust wind-extraction height is the surface layer's reference
-    // height. The dust u* comes from a log law between z0_dust and erf.dust.zref
+    // height. The dust u* is the surface layer's (a log law between z0_dust and erf.dust.zref only with terrain_ustar = loglaw)
     // using the wind the surface layer sampled at erf.most.zref, so the two must
     // agree; with erf.most.zref unset the surface layer picks its own height
     // and the deck has to set erf.dust.zref to the same value.

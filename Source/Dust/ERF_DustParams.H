@@ -175,7 +175,8 @@ struct DustParams {
 
     std::string lumped_settling = "mean";       ///< Settling and deposition velocity of the single
                                                  ///<   transported scalar: "mean" (default) averages the Stokes
-                                                 ///<   velocities of the bins (they share the flux equally);
+                                                 ///<   velocities of the bins weighted by their shares of the
+                                                 ///<   mass emitted so far (equal until anything is emitted);
                                                  ///<   "bin0" (the form until 2026-10) uses bin 0 alone, which
                                                  ///<   settled the 50 um third at the 7 um velocity.
 
@@ -432,7 +433,7 @@ struct DustParams {
         for (auto d : bin_diameters) positive("bin_diameters", d);
         positive("particle_density",  particle_density);
         positive("z0_dust",           z0_dust);
-        positive("threshold_A_coeff", threshold_A_coeff);
+        if (threshold_model == "bagnold") positive("threshold_A_coeff", threshold_A_coeff);
         if (threshold_model != "shao_lu" && threshold_model != "bagnold")
             fail("erf.dust.threshold_model must be shao_lu or bagnold, got " + threshold_model);
         positive("saltation_diameter", saltation_diameter);

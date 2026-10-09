@@ -31,7 +31,8 @@ shift || true
 PY=${PYTHON:-python3}
 
 # amrex_fcompare sits next to the ERF build's AMReX tools
-FCOMPARE=$(dirname "$EXE")/../Submodules/AMReX/Tools/Plotfile/amrex_fcompare
+# FCOMPARE comes from CTest (the build's FCOMPARE_EXE, an external AMReX included); the submodule tool is the fallback for a hand run
+FCOMPARE=${FCOMPARE:-$(dirname "$EXE")/../Submodules/AMReX/Tools/Plotfile/amrex_fcompare}
 [ -x "$FCOMPARE" ] || FCOMPARE=$(dirname "$EXE")/../Submodules/AMReX/Tools/Plotfile/fcompare
 if [ ! -x "$FCOMPARE" ]; then
     echo "  dust parity: amrex_fcompare not found next to $EXE: FAIL"; exit 1

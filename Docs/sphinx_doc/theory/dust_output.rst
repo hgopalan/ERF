@@ -12,10 +12,10 @@ Dust plotfile
 The dust grid has its own box array and geometry, so its fields are written
 as a separate single-level plotfile, ``<prefix><step:05d>`` with
 :cpp:`erf.dust.dust_plot_prefix`, every :cpp:`erf.dust.dust_plot_int` steps
-and at the final step (``-1`` disables, ``0`` writes only the final step).
+and at the final step (any value at or below 0 writes only the final step).
 Besides the AMReX ``Header`` and ``Level_0`` data it carries
 ``DustMetadata.json`` with the time, step, grid ratio and field count. The
-21 fields, in order:
+22 fields, in order:
 
 .. list-table::
    :header-rows: 1

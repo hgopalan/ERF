@@ -165,8 +165,9 @@ p("deposition_E0", "Surface collection efficiency of the dry-deposition "
   "0 removes the collection term (v_d = v_s)",
   "Real >= 0", "3.0e-3")
 p("lumped_settling", "Settling and deposition velocity of the single transported "
-  "scalar: mean averages the bins' Stokes velocities (they share the flux "
-  "equally); bin0 (the form until October 2026) uses bin 0 alone",
+  "scalar: mean averages the bins' Stokes velocities weighted by their shares "
+  "of the mass emitted so far (equal until anything is emitted); bin0 (the "
+  "form until October 2026) uses bin 0 alone",
   "mean or bin0", "mean")
 p("loading_feedback_coeff", "Shao (2001) loading feedback on the threshold "
   "[m³/kg]; 0 disables", "Real >= 0", "0.0")

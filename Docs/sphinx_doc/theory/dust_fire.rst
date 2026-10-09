@@ -35,7 +35,7 @@ crusted surface the threshold in burned cells drops by the factor
 :math:`(1 + 0.5 \cdot 0.01)/(1 + 0.5)`, about a third, and emission rises
 there. ``FireDustInteraction1`` isolates this path.
 
-Fire outflow wind raises the friction velocity
+Fire wind and the friction velocity
 ----------------------------------------------
 
 With :cpp:`erf.fire_dust_wind_to_dust` (on by default once the coupling is
@@ -52,13 +52,15 @@ with :cpp:`erf.fire_dust_wind_zref` (which follows :cpp:`erf.fire.wind_ref_ht`)
 and :cpp:`erf.fire_dust_wind_z0`; inside the fire perimeter (level set below
 zero) the larger of it and the surface-layer value is kept, outside it the
 surface layer's :math:`u_*` stands. The fire's reference wind is the
-atmospheric wind at that height everywhere, so outside the perimeter it holds
-nothing the surface layer did not see, while the neutral log law on
-``fire_dust_wind_z0`` ignores the roughness and the stability the surface
-layer used: with ``erf.most.z0 = 0.01`` and the default ``z0 = 0.1`` the fire
-value is 1.5x the surface layer's in every cell, and until October 2026 it
-overrode the surface layer domain-wide (a warning now names a
-``fire_dust_wind_z0`` that differs from ``erf.most.z0``). Earlier still the
+atmospheric wind interpolated to that height, inside the perimeter as well as
+outside, so this path adds no wind the surface layer did not see: it is a
+neutral log law on ``fire_dust_wind_z0`` in place of the surface layer's
+stability-corrected :math:`u_*` at ``erf.most.zref``, kept as a stand-in for
+the fire-modified surface layer in burning cells. With ``erf.most.z0 = 0.01``
+and the default ``z0 = 0.1`` the fire value is 1.5x the surface layer's in
+every cell, and until October 2026 it overrode the surface layer domain-wide
+(a warning now names a ``fire_dust_wind_z0`` that differs from
+``erf.most.z0``). Earlier still the
 WAF-reduced midflame wind ``fire_wind_eff`` was handed over as if it were the
 wind at ``wind_ref_ht``, 0.36x for grass, so the fire path never exceeded the
 surface layer's :math:`u_*`.

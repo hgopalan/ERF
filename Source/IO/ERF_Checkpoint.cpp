@@ -2746,10 +2746,17 @@ ERF::ReadCheckpointFileDust ()
     const std::string probe = restart_chkfile + "/Level_0/DustDepositionRate_H";
     if (!amrex::FileExists(probe)) {
         amrex::Print() << "[DUST] No dust state found in checkpoint; starting the dust"
-                       << " layer from its initial values.\n";
+                       << " layer from its initial values at the atmosphere's step and time.\n";
+        // the dust clock (blast windows, road start times, PHREEQC and MSHA
+        // intervals) follows the atmosphere's, not zero (it started at zero
+        // when dust was enabled on a restart until October 2026)
+        m_DustLayer->read_checkpoint_state(restart_chkfile, istep[0], t_new[0]);
         return;
     }
     amrex::Print() << "[DUST] Restoring dust state from checkpoint " << restart_chkfile << "\n";
+    // the layout aborts first: VisMF::Read dies on a mismatched BoxArray or
+    // component count with no mention of dust
+    m_DustLayer->check_checkpoint_layout(restart_chkfile);
 
     // The ghost cells come back from the file as they were, with no boundary
     // fill afterwards. No dust kernel reads a ghost cell of a checkpointed

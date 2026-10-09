@@ -10,7 +10,6 @@
  */
 
 #include <ERF_DustWindExtract.H>
-#include <limits>
 
 #ifdef ERF_USE_DUST
 
@@ -154,7 +153,7 @@ void scale_dust_ustar_by_wind_ratio(
             const Real sr = std::sqrt(wr(i,j,k,0)*wr(i,j,k,0) + wr(i,j,k,1)*wr(i,j,k,1));
             // calm raw wind: no factor to apply (floored inside the select, the
             // unselected x/0 is speculated under the fpe traps)
-            const Real ratio = (sr > Real(0.0)) ? sc / amrex::max(sr, std::numeric_limits<Real>::min()) : Real(1.0);
+            const Real ratio = (sr > Real(0.0)) ? sc / amrex::max(sr, Real(1.0e-10)) : Real(1.0);   // 1e-10: finite for any |U_corr| (min() overflows above 4 m/s)
             ust(i,j,k) *= ratio;
         });
     }
