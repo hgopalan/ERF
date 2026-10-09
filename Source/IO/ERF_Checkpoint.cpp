@@ -2685,6 +2685,7 @@ ERF::ReadCheckpointFileFire ()
             amrex::MultiFab two(mf->boxArray(), mf->DistributionMap(), 2, mf->nGrowVect());
             VisMF::Read(two, prefix);
             mf->setVal(0.0);
+            mf->setVal(-1.0, 3, 1);   // the clock at burn: stamped by the next update from the restarted clock
             amrex::MultiFab::Copy(*mf, two, 0, 0, 2, 0);
             amrex::Print() << "[FIRE] Checkpoint FireDispAccum has 2 components (written before 2026-10);"
                            << " the FARSITE distance clock restarts from zero.\n";

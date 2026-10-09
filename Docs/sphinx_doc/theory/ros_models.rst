@@ -10,7 +10,7 @@ Rate-of-Spread Models
 Overview
 --------
 
-ERF-Fire provides five rate-of-spread models and a per-cell hybrid of any two, selected with the :cpp:`erf.fire.ros_model` parameter: Rothermel (1972, the default), the BEHAVE multi-class Rothermel, MacArthur (1966), Cheney-Gould (1998) and Balbi (2009 or 2020). All consume the same effective midflame wind and write to the same ``fire_ros`` MultiFab, so the propagation methods in :ref:`sec:FirePropagation` are independent of the choice.
+ERF-Fire provides seven rate-of-spread models and a per-cell hybrid of two of them, selected with the :cpp:`erf.fire.ros_model` parameter: Rothermel (1972, the default), the BEHAVE multi-class Rothermel, MacArthur (1966), Cheney-Gould (1998), its earlier ``grass_simple`` fit, the Canadian FBP system and Balbi (2009 or 2020), plus a prescribed field. All consume the same effective midflame wind and write to the same ``fire_ros`` MultiFab, so the propagation methods in :ref:`sec:FirePropagation` are independent of the choice.
 
 Sub-phase A adds per-fuel wind extraction height following WRF-SFIRE :cpp:`fcwh` convention. This is controlled by the :cpp:`erf.fire.use_per_fuel_wind_ht` parameter and is backward-compatible with the global wind reference height approach.
 
@@ -534,7 +534,9 @@ Setting :cpp:`erf.fire.ros_model = "hybrid"` evaluates two of the models above o
 
    R = (1 - w)\, R_{\text{primary}} + w\, R_{\text{secondary}}
 
-The primary and secondary models are named with :cpp:`erf.fire.hybrid.primary` and :cpp:`erf.fire.hybrid.secondary` and may be any two distinct values of :cpp:`ros_model`; each keeps its own parameter block (for example :cpp:`erf.fire.balbi.*`). Where :math:`w` is exactly 0 or 1 the blend reproduces the single-model result bit for bit, which is what the identity decks in ``Exec/RegTests/FireRosComparison`` check.
+The primary and secondary models are named with :cpp:`erf.fire.hybrid.primary` and :cpp:`erf.fire.hybrid.secondary` and may be any two distinct members of ``rothermel``, ``behave``, ``macarthur``, ``cheney_gould``, ``grass_simple``, ``fbp`` and ``balbi`` (not ``hybrid`` or ``prescribed``; ``cheney_gould`` and ``grass_simple`` share one grass state and may not be paired, which the run refuses at start-up); each keeps its own parameter block (for example :cpp:`erf.fire.balbi.*`). Where :math:`w` is exactly 0 or 1 the blend reproduces the single-model result bit for bit, which is what the identity decks in ``Exec/RegTests/FireRosComparison`` check.
+
+With an FBP member on the directional level-set path the subcycle is set from the larger of the blended field's maximum and the FBP scalar bound; a hybrid stage, :math:`w B_{FBP} + (1 - w) R_{other}`, can exceed that by a few percent where the FBP head is held below its bound by an opposing slope, which the default :cpp:`erf.fire.levelset.cfl` of 0.4 absorbs.
 
 The weight comes from :cpp:`erf.fire.hybrid.selector`:
 

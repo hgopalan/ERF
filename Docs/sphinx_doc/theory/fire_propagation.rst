@@ -107,16 +107,26 @@ Richards (1990) spread shape below. Each fire subcycle of length
    available to a source is the difference of a distance clock every cell
    accumulates as its own :math:`R\,\Delta t_f` (``fire_disp_accum``
    components 2 and 3, the clock and its value at the cell's burn), so a rate
-   that changes in time (the acceleration clocks) is integrated over the path
-   rather than applied at its current value; where the source's and the
+   that changes in time (the acceleration clocks) is integrated over the
+   direct path rather than applied at its current value (the segment update
+   still applies the mean of the current rate over its window, which dates a
+   cell early by up to a fraction of one fire substep under a rising rate,
+   bounded and not accumulating); where the source's and the
    cell's rates differ the distance is bounded by the source's own integral
    since it burned, which a path through the slower fuel cannot beat. The
    FARSITE path keeps the ellipse aligned with the wind; with the FBP model
    the head rate is that of the vector sum of the wind and the
    slope-equivalent wind, but the shape is not rotated toward it. If :math:`T`
    falls inside the subcycle the cell burns and :math:`T` becomes its
-   ``fire_arrival_time``. For a planar front it is exact: rows burn one at a
-   time, a row spacing along the normal over the normal speed apart.
+   ``fire_arrival_time``. A cell whose stencil holds any burned cell is a
+   candidate (with the ellipse; the rectangle and the disc keep the face
+   neighbours), since under an oblique wind the ellipse reaches the cells on
+   its axis before any face neighbour of theirs burns. The clocks grow as
+   :math:`R\,t` over the run; in single precision a 24 h run at 10 m/s
+   resolves them to 0.06 m. For a planar front aligned with the grid it is
+   exact: rows burn one at a time, a row spacing along the normal over the
+   normal speed apart; an oblique front is within one discrete-source offset
+   of a cell.
 4. **Rate.** :math:`\bar R` is the mean, since the first neighbour burned, of
    the larger of the cell's own rate of spread and those of its burned
    neighbours, accumulated in ``fire_disp_accum``. The burned side carries the

@@ -5765,9 +5765,9 @@ Hybrid model
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | Parameter                                      | Definition                                                 | Acceptable Values              | Default                |
 +================================================+============================================================+================================+========================+
-| **erf.fire.hybrid.primary**                    | Model used where the weight is 0                           | model name                     | "rothermel"            |
+| **erf.fire.hybrid.primary**                    | Model used where the weight is 0                           | a member model; see theory     | "rothermel"            |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.hybrid.secondary**                  | Model used where the weight is 1                           | model name                     | "balbi"                |
+| **erf.fire.hybrid.secondary**                  | Model used where the weight is 1                           | a member model; see theory     | "balbi"                |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.hybrid.selector**                   | How the per-cell weight is set                             | "region", "fuel", "structure", | "region"               |
 |                                                |                                                            | "wind"                         |                        |

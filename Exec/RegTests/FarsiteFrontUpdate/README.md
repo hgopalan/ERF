@@ -47,7 +47,7 @@ sounding's 3 m/s itself as the midflame wind:
 
 | update | head [m/s] | back [m/s] | flanks [m/s] | area at 600 s [ha] | area / hull |
 |---|---|---|---|---|---|
-| ellipse (Richards/Alexander) | 0.971 | 0.010 | 0.098 | | 1 |
+| ellipse (Richards/Alexander) | 0.971 | 0.010 | 0.098 | 12.4 (the 50 m disc swept by the ellipse) | 1 |
 | `front_cell` (ellipse, default) | 0.975 (+0.4 %) | 0.000 (-5 m over 540 s, under a cell) | 0.096 (-1.1 m) | 11.6 | 0.938 or more |
 | rectangle (Richards coefficients) | 0.971 | 0.194 | 0.116 | | 1 |
 | `rectangle` | 0.975 (+0.4 %) | 0.191 (-1.8 m) | 0.112 (-2.3 m) | 16.9 | 0.954 or more |

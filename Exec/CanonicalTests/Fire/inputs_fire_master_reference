@@ -410,6 +410,9 @@ erf.fire.prescribed.min_ros = 0.0
 # direction-dependent level-set path.
 # ============================================================================
 
+# Members: rothermel, behave, macarthur, cheney_gould, grass_simple, fbp, balbi
+# (two distinct ones; cheney_gould and grass_simple share one grass state and
+# may not be paired; hybrid and prescribed are not members)
 erf.fire.hybrid.primary   = "rothermel"   # model where w = 0
 erf.fire.hybrid.secondary = "balbi"       # model where w = 1 (uses erf.fire.balbi.*)
 

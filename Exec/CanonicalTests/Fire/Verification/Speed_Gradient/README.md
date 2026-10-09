@@ -28,8 +28,12 @@ ignition disc, exact to 0.06 s), and the front's extent along y = 200 at 150 s.
 On two ranks:
 
 - the rate field equals R(x) to 2e-16;
-- arrival time over 19680 cells: mean error +0.063, mean |e| 0.080, 95th
-  percentile 0.171 cell crossings (2 s at R0); up the gradient 0.085 / 0.176,
-  down it 0.071 / 0.153;
+- arrival time over 19680 cells: mean error +0.376, mean |e| 0.376, 95th
+  percentile 0.560 cell crossings (2 s at R0); up the gradient 0.361 / 0.464,
+  down it 0.423 / 0.616 (re-measured 2026-10-09: the arrival time is the
+  crossing interpolated within the substep, half a substep later on average
+  than the start-of-substep stamp of the code before, which gave +0.273 /
+  0.275 / 0.480 on the same decks; the +0.063 the README carried until then
+  predates both);
 - the front along the centre line at x = 399.0 m to the east (it has reached
   the edge) and 85.0 m to the west, both within 0.01 cells of ln(R/R0)/g.

@@ -139,20 +139,38 @@ TEST(RothermelCellMoisture, TheFuelMapEntersOnlyUnderPerFuel)
 TEST(RothermelCellMoisture, ACodeOutsideTheTableKeepsTheUniformFuel)
 {
     // the per-fuel table path keeps the uniform entry for a code it does not
-    // know; the coefficient field does the same (code 77 is in no table)
+    // know; the coefficient field does the same (code 77 is in no table). The
+    // uniform fuel is model 10, not the model 1 the Anderson lookup falls
+    // through to, so a field that looked the code up would give cell 0 the
+    // model-1 coefficients (R0 differs by a factor of about 30) and fail here.
     TwoCells g;
-    const FuelModelParams fp1 = get_fuel_params(1, FUEL_SET_ANDERSON13);
+    const FuelModelParams fp1  = get_fuel_params(1, FUEL_SET_ANDERSON13);
+    const FuelModelParams fp10 = get_fuel_params(10, FUEL_SET_ANDERSON13);
     MultiFab mc(g.ba, g.dm, 5, 0), rcc(g.ba, g.dm, ROTHERMEL_RC_NCOMP, 0), fuel(g.ba, g.dm, 1, 0);
     mc.setVal(0.06_rt, 0, 1); mc.setVal(0.07_rt, 1, 1); mc.setVal(0.08_rt, 2, 1); mc.setVal(0.0_rt, 3, 2);
     for (MFIter mfi(fuel); mfi.isValid(); ++mfi) { auto f = fuel.array(mfi); f(0, 0, 0) = 77.0_rt; f(1, 0, 0) = 1.0_rt; }
-    build_cell_rothermel_coefficients(rcc, mc, &fuel, nullptr, 0, FUEL_SET_ANDERSON13, -1.0_rt, fp1,
+    build_cell_rothermel_coefficients(rcc, mc, &fuel, nullptr, 0, FUEL_SET_ANDERSON13, -1.0_rt, fp10,
                                       true, fire_wind_limit::rothermel);
-    const RothermelComputed rc1 = rothermel_coefficients(fp1, 0.06_rt, 0.07_rt, 0.08_rt, true, fire_wind_limit::rothermel);
+    const RothermelComputed rc1  = rothermel_coefficients(fp1,  0.06_rt, 0.07_rt, 0.08_rt, true, fire_wind_limit::rothermel);
+    const RothermelComputed rc10 = rothermel_coefficients(fp10, 0.06_rt, 0.07_rt, 0.08_rt, true, fire_wind_limit::rothermel);
+    ASSERT_GT(std::abs(rc10.R0 - rc1.R0), 0.01 * rc1.R0) << "the two fuels must differ for the check to mean anything (9.6 % in R0)";
     for (MFIter mfi(rcc); mfi.isValid(); ++mfi) {
-        for (int i = 0; i < 2; ++i) {
-            const RothermelComputed rc = unpack_rothermel(rcc.const_array(mfi), i, 0);
-            EXPECT_NEAR(rc.R0, rc1.R0, REL * rc1.R0) << "cell " << i;
-        }
+        const RothermelComputed rc0 = unpack_rothermel(rcc.const_array(mfi), 0, 0);
+        const RothermelComputed rc1c = unpack_rothermel(rcc.const_array(mfi), 1, 0);
+        EXPECT_NEAR(rc0.R0,  rc10.R0, REL * rc10.R0) << "code 77 keeps the uniform model 10";
+        EXPECT_NEAR(rc1c.R0, rc1.R0,  REL * rc1.R0)  << "code 1 is looked up";
+    }
+    // the Scott-Burgan set falls through to GR1 (101): the uniform fuel GR4 (104) must stay
+    const FuelModelParams fp104 = get_fuel_params(104, FUEL_SET_SCOTT_BURGAN40);
+    const FuelModelParams fp101 = get_fuel_params(101, FUEL_SET_SCOTT_BURGAN40);
+    build_cell_rothermel_coefficients(rcc, mc, &fuel, nullptr, 0, FUEL_SET_SCOTT_BURGAN40, -1.0_rt, fp104,
+                                      true, fire_wind_limit::rothermel);
+    const RothermelComputed rc104 = rothermel_coefficients(fp104, 0.06_rt, 0.07_rt, 0.08_rt, true, fire_wind_limit::rothermel);
+    const RothermelComputed rc101 = rothermel_coefficients(fp101, 0.06_rt, 0.07_rt, 0.08_rt, true, fire_wind_limit::rothermel);
+    ASSERT_GT(std::abs(rc104.R0 - rc101.R0), 0.01 * rc101.R0);
+    for (MFIter mfi(rcc); mfi.isValid(); ++mfi) {
+        const RothermelComputed rc0 = unpack_rothermel(rcc.const_array(mfi), 0, 0);
+        EXPECT_NEAR(rc0.R0, rc104.R0, REL * rc104.R0) << "code 77 keeps the uniform GR4 under Scott-Burgan";
     }
 }
 

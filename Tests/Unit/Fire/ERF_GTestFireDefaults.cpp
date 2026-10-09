@@ -113,10 +113,13 @@ TEST(FireDefaults, AHybridMemberReadsItsKeys)
     deck.add("hybrid.wind_lo", 2.0);
     deck.add("hybrid.wind_hi", 4.0);
     deck.add("macarthur.ros_max", 3.0);
-    deck.add("rothermel_cell_moisture", true);
+    deck.add("rothermel_cell_moisture", false);
     FireParams fp;
+    // the abort guard is the McArthur half (the cap's model check aborted a
+    // hybrid before the fix); the moisture key only warned, so its half shows
+    // the key is read inside the hybrid (default true, set false)
     EXPECT_NEAR(fp.macarthur_ros_max, 3.0, 1.0e-12);
-    EXPECT_TRUE(fp.rothermel_cell_moisture);
+    EXPECT_FALSE(fp.rothermel_cell_moisture);
 }
 
 TEST(FireDefaults, GrassModelsAndTheirKeys)

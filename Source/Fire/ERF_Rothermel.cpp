@@ -127,7 +127,7 @@ void compute_ros_field(
             Real sx = slopes(i, j, k, 0);
             Real sy = slopes(i, j, k, 1);
 
-            const int code = has_codes ? static_cast<int>(fuel(i, j, k)) : -1;
+            const int code = has_codes ? static_cast<int>(fuel(i, j, k) + Real(0.5)) : -1;   // nearest integer, as every reader
             RothermelComputed rc = rc_default;
             if (per_cell_mc) {
                 rc = unpack_rothermel(rcc, i, j);

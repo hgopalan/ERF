@@ -2401,6 +2401,11 @@ add_test_fire_abort(FireCheneyKeyNoModel_abort FireRestart          inputs_level
     "erf.fire.cheney_gould.pasture needs erf.fire.ros_model = cheney_gould" "erf.fire.cheney_gould.pasture=grazed")
 add_test_fire_abort(FireMacArthurCap_abort    FireRestart           inputs_levelset_straight
     "erf.fire.macarthur.ros_max must be >= 0" "erf.fire.macarthur.ros_max=-1")
+# the model checks of the keys read only by one model
+add_test_fire_abort(FireMacArthurCapNoModel_abort FireRestart       inputs_levelset_straight
+    "erf.fire.macarthur.ros_max needs erf.fire.ros_model = macarthur" "erf.fire.ros_model=rothermel erf.fire.macarthur.ros_max=3")
+add_test_fire_abort(FireNetLoadNoBehave_abort FireRestart           inputs_levelset_straight
+    "erf.fire.behave.net_load needs erf.fire.ros_model = behave" "erf.fire.ros_model=rothermel erf.fire.behave.net_load=sum")
 add_test_fire_abort(FireBadWindBelow_abort    FireRestart           inputs_levelset_straight
     "erf.fire.wind_below_first_cell = \"linear\" is not one of" "erf.fire.wind_below_first_cell=linear")
 add_test_fire_abort(FireHybridGrassPair_abort FireRestart           inputs_levelset_straight

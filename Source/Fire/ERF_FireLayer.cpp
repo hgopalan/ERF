@@ -222,6 +222,10 @@ void FireLayer::initialize(const ERF& erf,
     fire_heat_flux->setVal(0.0_rt);
     fire_arrival_time->setVal(-1.0_rt);
     fire_disp_accum->setVal(0.0_rt);
+    // component 3, the FARSITE distance clock at a cell's burn, is -1 until
+    // the front-cell update stamps it: a spot landing or a scheduled polygon
+    // dates its cells without it and the update takes the clock at that time
+    fire_disp_accum->setVal(-1.0_rt, 3, 1);
     fire_surface_temp->setVal(0.0);
     fire_surface_rh->setVal(0.0);
     // Rain per fire cell: the atmosphere's rain per column (erf.fire.precip_source =
@@ -1480,7 +1484,9 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 m_has_spatial_fuel ? fire_fuel_model.get() : nullptr,
                 m_params.spotting.fuel_system,
                 m_params.fuel_model_id,
-                m_params.wind_ref_ht,
+                // the height the reference wind was sampled at: 6.096 m for every
+                // burnable cell under use_per_fuel_wind_ht, else wind_ref_ht
+                m_params.use_per_fuel_wind_ht ? amrex::Real(6.096) : m_params.wind_ref_ht,
                 m_params.wind_sample_z0,
                 m_params.fire_debug,
                 fire_surface_z.get(),
@@ -2508,7 +2514,7 @@ void FireLayer::fill_prescribed_ros(amrex::MultiFab& out) const
             const amrex::Real y = prob_lo[1] + (j + 0.5_rt) * dx[1];
             amrex::Real base = R_default;
             if (by_code) {
-                const int code = static_cast<int>(fuel(i, j, k));
+                const int code = static_cast<int>(fuel(i, j, k) + 0.5_rt);   // codes are read to the nearest integer everywhere
                 for (int n = 0; n < n_pairs; ++n) {
                     if (static_cast<int>(pairs[2 * n]) == code) { base = pairs[2 * n + 1]; break; }
                 }
@@ -2603,7 +2609,7 @@ void FireLayer::init_ros_weight()
             auto const& w    = fire_ros_weight->array(mfi);
             auto const& fuel = fire_fuel_model->const_array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                const int code = static_cast<int>(fuel(i, j, k));
+                const int code = static_cast<int>(fuel(i, j, k) + 0.5_rt);
                 amrex::Real wt = 0.0_rt;
                 for (int n = 0; n < n_codes; ++n) {
                     if (codes[n] == code) { wt = 1.0_rt; break; }
@@ -3028,7 +3034,7 @@ void FireLayer::build_nonburnable_mask()
             auto const& m    = fire_nonburnable->array(mfi);
             auto const& fuel = fire_fuel_model->const_array(mfi);
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                const int code = static_cast<int>(fuel(i, j, k));
+                const int code = static_cast<int>(fuel(i, j, k) + 0.5_rt);
                 for (int n = 0; n < n_codes; ++n) {
                     if (codes[n] == code) { m(i, j, k) = 1.0_rt; break; }
                 }

@@ -173,7 +173,9 @@ amrex::Real gauge (amrex::Real ddx, amrex::Real ddy, const Shape& s) noexcept
         if (s.ellipse) {
             const amrex::Real a2 = s.a * s.a;
             const amrex::Real b2 = s.b * s.b;
-            const amrex::Real A  = a2 * (s.b - s.c) * (s.b + s.c);   // > 0 (b > c), no cancelling difference at a large L/W
+            // > 0 (b > c); b - c = R/HB carries the same cancellation as b^2 - c^2
+            // (7e-6 relative in float at L/W = 8, 1e-14 in double: harmless)
+            const amrex::Real A  = a2 * (s.b - s.c) * (s.b + s.c);
             const amrex::Real B  = a2 * s.c * par;            // half the linear coefficient
             const amrex::Real C  = a2 * par * par + b2 * per * per;
             const amrex::Real D  = std::sqrt(B * B + A * C);
@@ -600,14 +602,17 @@ void advance_farsite_one_step_legacy(
 /**
  * @brief One FARSITE substep, erf.fire.farsite.front_update = "front_cell".
  *
- * Front cells are the unburned, burnable cells with a burned 4-neighbour. Each
+ * Front cells are the unburned, burnable cells with a burned 4-neighbour (with
+ * the ellipse, with any burned cell within nine cells). Each
  * gets an arrival time from the arrival times of those neighbours with the
  * Hopf-Lax update of farsite_front::quadrant_arrival, using the spread shape
  * (the Richards ellipse, or the rectangle) of its own midflame wind (the disc
  * without wind) and its slope, and burns
  * in this substep if that time falls inside it, taking that time, not the
  * substep's, as its arrival time. A planar front therefore moves one row per
- * row spacing along the normal over R times the Richards normal speed, and the
+ * row spacing along the normal over R times the Richards normal speed (exact
+ * for a front aligned with the grid, within one discrete-source offset of a
+ * cell otherwise), and the
  * burned region of a uniform case grows as the ignition swept by the spread
  * shape, which keeps a finite line's head flat and a disc convex.
  *
@@ -623,7 +628,10 @@ void advance_farsite_one_step_legacy(
  * the widest Anderson ellipse (L/W = 8). The rate over the path is taken from
  * a distance clock, component 2 of disp_accum, which every cell accumulates
  * as its own R dt from the start of the run; a cell that burns records the
- * clock at its arrival in component 3, so the distance available to a source
+ * clock at its arrival in component 3 (-1 until the update stamps it, so a
+ * cell dated by another writer, a spot landing or a scheduled polygon, takes
+ * the clock at its own arrival rather than the run's start), so the distance
+ * available to a source
  * S is clock(cell, t) - clock(S, T_S): the integral of the rate over the time
  * since S burned, exact for a rate that varies in time (the acceleration
  * clocks, a lull, a retardant factor) and uniform in space, rather than the
@@ -677,16 +685,23 @@ void advance_farsite_front_cells(
     const Real coef_b = amrex::max(fp.coeff_b, coef_min);
     const Real coef_c = amrex::max(fp.coeff_c, coef_min);
 
-    // An ignition, a spot landing or a restart can leave a cell burned (phi < 0)
-    // without an arrival time; it burns from the start of this substep.
+    // An ignition, a spot landing, a scheduled polygon or a restart can leave a
+    // cell burned (phi < 0) without an arrival time, or dated by its writer
+    // without the clock at its burn (component 3 stays -1 until this update
+    // stamps it; only this update writes it). A cell without a time burns from
+    // the start of this substep; the clock at burn is the clock now (before
+    // this substep's accumulation) less the rate over the time since the
+    // arrival, the clock at t0 for a cell dated t0.
     for (MFIter mfi(arrival_time); mfi.isValid(); ++mfi) {
         auto p   = phi.const_array(mfi);
         auto at  = arrival_time.array(mfi);
         auto acc = disp_accum.array(mfi);
+        auto R   = R_mf.const_array(mfi);
         ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            if (p(i, j, k) < 0.0_rt && at(i, j, k) < 0.0_rt) {
-                at(i, j, k) = t0;
-                acc(i, j, k, 3) = acc(i, j, k, 2);   // the clock at its burn, t0 (before this substep's accumulation)
+            if (p(i, j, k) < 0.0_rt && (at(i, j, k) < 0.0_rt || acc(i, j, k, 3) < -0.5_rt)) {
+                if (at(i, j, k) < 0.0_rt) { at(i, j, k) = t0; }
+                const Real since = amrex::max(t0 - at(i, j, k), 0.0_rt);
+                acc(i, j, k, 3) = amrex::max(acc(i, j, k, 2) - amrex::max(R(i, j, k), 0.0_rt) * since, 0.0_rt);
             }
         });
     }
@@ -717,11 +732,43 @@ void advance_farsite_front_cells(
     MultiFab::Copy(nbr, disp_accum,   2, 3, 1, 0);   // and its clock now
     fire_fill_boundary(nbr, geom_fire);
 
+    // With the ellipse a cell is a candidate when any burned cell lies within
+    // r_src cells, not only a face neighbour: under an oblique wind the ellipse
+    // reaches the cells on its axis long before a face neighbour of theirs
+    // burns (at L/W = 5 and a wind at 45 degrees to the grid the face test
+    // alone burned no cell of a point source in 1200 s). Two separable passes
+    // of the burned flag over the stencil, the first on the box grown in y.
+    MultiFab near_x(arrival_time.boxArray(), arrival_time.DistributionMap(), 1, IntVect(0, r_src, 0));
+    MultiFab near_f(arrival_time.boxArray(), arrival_time.DistributionMap(), 1, 0);
+    if (ellipse) {
+        for (MFIter mfi(near_x); mfi.isValid(); ++mfi) {
+            auto nb = nbr.const_array(mfi);
+            auto nx = near_x.array(mfi);
+            ParallelFor(mfi.growntilebox(IntVect(0, r_src, 0)), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                Real f = 0.0_rt;
+                for (int di = -r_src; di <= r_src; ++di) { if (nb(i + di, j, k, 0) >= 0.0_rt) { f = 1.0_rt; } }
+                nx(i, j, k) = f;
+            });
+        }
+        for (MFIter mfi(near_f); mfi.isValid(); ++mfi) {
+            auto nx = near_x.const_array(mfi);
+            auto nf = near_f.array(mfi);
+            ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+                Real f = 0.0_rt;
+                for (int dj = -r_src; dj <= r_src; ++dj) { if (nx(i, j + dj, k) > 0.5_rt) { f = 1.0_rt; } }
+                nf(i, j, k) = f;
+            });
+        }
+    } else {
+        near_f.setVal(0.0_rt);
+    }
+
     for (MFIter mfi(arrival_time); mfi.isValid(); ++mfi) {
         auto nb  = nbr.const_array(mfi);
         auto at  = arrival_time.array(mfi);
         auto acc = disp_accum.array(mfi);
         auto vel = vel_eff.const_array(mfi);
+        auto nf  = near_f.const_array(mfi);
         Array4<const Real> slp;
         if (use_terrain) { slp = slopes->const_array(mfi); }
         Array4<const Real> msk;
@@ -733,9 +780,11 @@ void advance_farsite_front_cells(
             const Real Txp = nb(i+1, j, k, 0);
             const Real Tym = nb(i, j-1, k, 0);
             const Real Typ = nb(i, j+1, k, 0);
+            const bool has_face = (Txm >= 0.0_rt || Txp >= 0.0_rt || Tym >= 0.0_rt || Typ >= 0.0_rt);
+            const bool near     = ellipse && (nf(i, j, k) > 0.5_rt);
             const bool front = (nb(i, j, k, 0) < 0.0_rt)
                             && !(use_mask && msk(i, j, k) > 0.5_rt)
-                            && (Txm >= 0.0_rt || Txp >= 0.0_rt || Tym >= 0.0_rt || Typ >= 0.0_rt);
+                            && (has_face || near);
             if (!front) {
                 acc(i, j, k, 0) = 0.0_rt;
                 acc(i, j, k, 1) = 0.0_rt;
@@ -750,14 +799,22 @@ void advance_farsite_front_cells(
             if (Typ >= 0.0_rt) { t_first = amrex::min(t_first, Typ); rate_now = amrex::max(rate_now, nb(i, j+1, k, 1)); }
             rate_now = amrex::max(rate_now, 0.0_rt);
 
-            // Distance covered at the head rate since the first neighbour burned
-            if (acc(i, j, k, 1) != 1.0_rt) {
-                acc(i, j, k, 0) = rate_now * amrex::max(t0 - t_first, 0.0_rt);
-                acc(i, j, k, 1) = 1.0_rt;
+            // Distance covered at the head rate since the first neighbour
+            // burned, for the quadrant paths; a cell with no burned face
+            // neighbour is reached by the direct sources only
+            Real rate = 0.0_rt;
+            if (has_face) {
+                if (acc(i, j, k, 1) != 1.0_rt) {
+                    acc(i, j, k, 0) = rate_now * amrex::max(t0 - t_first, 0.0_rt);
+                    acc(i, j, k, 1) = 1.0_rt;
+                }
+                acc(i, j, k, 0) += rate_now * dt_fire;
+                rate = acc(i, j, k, 0) / (t1 - t_first);
+            } else {
+                acc(i, j, k, 0) = 0.0_rt;
+                acc(i, j, k, 1) = 0.0_rt;
             }
-            acc(i, j, k, 0) += rate_now * dt_fire;
-            const Real rate = acc(i, j, k, 0) / (t1 - t_first);
-            if (!(rate > 0.0_rt)) { return; }
+            if (!(rate > 0.0_rt) && !ellipse) { return; }
 
             farsite_front::Shape s;
             const Real ux = vel(i, j, k, 0);
@@ -795,10 +852,12 @@ void advance_farsite_front_cells(
             s.sy = use_terrain ? slp(i, j, k, 1) : 0.0_rt;
 
             Real T_new = farsite_front::never();
-            T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txm, Tym,  dx[0],  dx[1], s, rate));
-            T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txp, Tym, -dx[0],  dx[1], s, rate));
-            T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txm, Typ,  dx[0], -dx[1], s, rate));
-            T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txp, Typ, -dx[0], -dx[1], s, rate));
+            if (rate > 0.0_rt) {
+                T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txm, Tym,  dx[0],  dx[1], s, rate));
+                T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txp, Tym, -dx[0],  dx[1], s, rate));
+                T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txm, Typ,  dx[0], -dx[1], s, rate));
+                T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txp, Typ, -dx[0], -dx[1], s, rate));
+            }
             if (ellipse) {
                 // direct Huygens sources, for the calm disc as well so that a
                 // vanishing wind changes nothing (the quadrant paths alone lag
@@ -837,7 +896,7 @@ void advance_farsite_front_cells(
                 acc(i, j, k, 0) = 0.0_rt;
                 acc(i, j, k, 1) = 0.0_rt;
                 // the clock at the arrival, read back from the end of the substep
-                acc(i, j, k, 3) = acc(i, j, k, 2) - amrex::max(nb(i, j, k, 1), 0.0_rt) * (t1 - at_new);
+                acc(i, j, k, 3) = amrex::max(acc(i, j, k, 2) - amrex::max(nb(i, j, k, 1), 0.0_rt) * (t1 - at_new), 0.0_rt);
             }
         });
     }

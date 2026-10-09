@@ -623,7 +623,7 @@ BalbiComputed balbi_state_at_cell(int i, int j, int k,
     // fuel_code is the raw code of the cell, idx its slot in the table (-1 outside).
     int fuel_code = -1, idx = -1;
     if (use_table) {
-        const int code = static_cast<int>(fuel_model(i, j, k));
+        const int code = static_cast<int>(fuel_model(i, j, k) + amrex::Real(0.5));   // nearest integer, as every reader
         const int t = fuel_table_index(code, fuel_set);
         if (t >= 0 && t < tbl_sz) { idx = t; fuel_code = (t == 0) ? 0 : code; }
     }

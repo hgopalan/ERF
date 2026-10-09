@@ -888,9 +888,6 @@ struct FireParams
                amrex::Abort("erf.fire.wind_sample_ht must exceed the target height (erf.fire.wind_ref_ht, or the"
                             " 6.096 m per-fuel height with erf.fire.use_per_fuel_wind_ht): sample above the target height");
            }
-           if (wind_sample_z0 <= 0.0 || wind_sample_z0 >= wind_ref_ht) {
-               amrex::Abort("erf.fire.wind_sample_z0 must be positive and below erf.fire.wind_ref_ht");
-           }
        } else if (pp.contains("wind_sample_ht") && wind_sample_ht < 0.0) {
            fail("erf.fire.wind_sample_ht must be > 0 (a sampling height) or 0 (off), got " + std::to_string(wind_sample_ht));
        }
@@ -1880,8 +1877,6 @@ struct FireParams
        if (pp.contains("rothermel_cell_moisture") && !uses_model("rothermel")) {
            amrex::Print() << "[FIRE] WARNING: erf.fire.rothermel_cell_moisture is read by the Rothermel kernels only;"
                           << " erf.fire.ros_model = " << ros_model << " ignores it\n";
-       }
-       {
        }
        if (uses_model("behave") && !(bh.dynamic_transfer_hi > bh.dynamic_transfer_lo)) {
            amrex::Abort("erf.fire.behave.dynamic_transfer_hi must be greater than dynamic_transfer_lo");

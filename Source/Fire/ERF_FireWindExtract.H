@@ -56,9 +56,8 @@
  *                             erf.fire.wind_below_first_cell = "clamp") takes the
  *                             lowest centre's wind as it is; true ("log") scales it
  *                             with a neutral log profile of roughness z0_log,
- *                             U(z) = U(z_1) ln(z/z0)/ln(z_1/z0);
- *                             false ("clamp") takes the lowest centre's wind as
- *                             it is (the behaviour before 2026-10)
+ *                             U(z) = U(z_1) ln(z/z0)/ln(z_1/z0); the clamp is
+ *                             the behaviour before 2026-10
  *
  * Algorithm per fire cell (i_f, j_f):
  * 1. Map to atmospheric column: i_a = i_f / C, j_a = j_f / C

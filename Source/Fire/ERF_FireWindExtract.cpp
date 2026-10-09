@@ -157,9 +157,8 @@ void apply_farsite_terrain_wind(
  * cell hands the fire the 10 m wind as its 6.1 m wind, 12 % high at z0 = 0.1 m),
  * or scaled down a neutral log profile of roughness z0_log (= log), U(z) =
  * U(z_1) ln(z/z0) / ln(z_1/z0), the recommended form for a first cell above the
- * reference height (a 20 m first cell, 12 % high at
- * z0 = 0.1 m). z_ground is the ground height the column heights are measured
- * from; z_target - z_ground is the height above ground.
+ * reference height. z_ground is the ground height the column heights are
+ * measured from; z_target - z_ground is the height above ground.
  */
 AMREX_GPU_DEVICE AMREX_FORCE_INLINE
 void column_wind_at_height(const Array4<const Real>& xvel,
@@ -292,7 +291,7 @@ void fill_fire_wind_from_interpolation(
             Real z_ref_cell = z_ref;  // default: global fallback
             if (fuel_model_mf != nullptr && d_fcwh != nullptr) {
                 // Per-fuel height lookup
-                const int fuel_code = static_cast<int>(fuel_model(i_f, j_f, 0));
+                const int fuel_code = static_cast<int>(fuel_model(i_f, j_f, 0) + Real(0.5));   // nearest integer, as every reader
                 // Table slot of the code (Anderson at its own code, Scott-Burgan
                 // above 13), unknown codes taking slot 1, clamped to the table.
                 int slot = fuel_slot(fuel_code);

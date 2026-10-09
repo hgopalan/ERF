@@ -53,7 +53,7 @@ MultiFab point_source (Real U, const FarsiteParams& fp, int nsteps)
     Geometry geom(domain, RealBox(0.0, 0.0, 0.0, 210.0, 210.0, 1.0), CoordSys::cartesian, {false, false, false});
     MultiFab phi(ba, dm, 1, 1), work(ba, dm, 2, 0), disp(ba, dm, 4, 0), at(ba, dm, 1, 0);
     MultiFab vel(ba, dm, 2, 0), ros(ba, dm, 1, 0);
-    phi.setVal(1.0_rt); work.setVal(0.0_rt); disp.setVal(0.0_rt); at.setVal(-1.0_rt);
+    phi.setVal(1.0_rt); work.setVal(0.0_rt); disp.setVal(0.0_rt); disp.setVal(-1.0_rt, 3, 1); at.setVal(-1.0_rt);
     vel.setVal(U, 0, 1); vel.setVal(0.0_rt, 1, 1); ros.setVal(0.1_rt);
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         phi.array(mfi)(10, 10, 0) = -1.0_rt;
@@ -134,9 +134,11 @@ TEST(FarsiteShape, HeadBackAndFlankFromAPointSource)
  * 41 x 41 cells of 10 m, R = 0.1 m/s, a 1.5 m/s wind (L/W = 2.09), 1200 s:
  * the head reaches 12 cells, the flank 3 rows.
  */
-void point_source_arrivals_are_exact (bool stamp_by_update)
+void point_source_arrivals_are_exact (bool stamp_by_update, Real angle_deg = 0.0_rt, Real U = 1.5_rt, int min_checked = 40)
 {
-    const Real U = 1.5_rt, R = 0.1_rt, h = 10.0_rt;
+    const Real R = 0.1_rt, h = 10.0_rt;
+    const Real cw = std::cos(angle_deg * 3.14159265358979323846_rt / 180.0_rt);
+    const Real sw = std::sin(angle_deg * 3.14159265358979323846_rt / 180.0_rt);
     Box domain(IntVect(0, 0, 0), IntVect(40, 40, 0));
     BoxArray ba(domain);
     ba.maxSize(IntVect(14, 14, 1));   // nine boxes: the sources cross box edges
@@ -144,8 +146,8 @@ void point_source_arrivals_are_exact (bool stamp_by_update)
     Geometry geom(domain, RealBox(0.0, 0.0, 0.0, 410.0, 410.0, 1.0), CoordSys::cartesian, {false, false, false});
     MultiFab phi(ba, dm, 1, 1), work(ba, dm, 2, 0), disp(ba, dm, 4, 0), at(ba, dm, 1, 0);
     MultiFab vel(ba, dm, 2, 0), ros(ba, dm, 1, 0);
-    phi.setVal(1.0_rt); work.setVal(0.0_rt); disp.setVal(0.0_rt); at.setVal(-1.0_rt);
-    vel.setVal(U, 0, 1); vel.setVal(0.0_rt, 1, 1); ros.setVal(R);
+    phi.setVal(1.0_rt); work.setVal(0.0_rt); disp.setVal(0.0_rt); disp.setVal(-1.0_rt, 3, 1); at.setVal(-1.0_rt);
+    vel.setVal(U * cw, 0, 1); vel.setVal(U * sw, 1, 1); ros.setVal(R);
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         if (mfi.validbox().contains(IntVect(20, 20, 0))) {
             phi.array(mfi)(20, 20, 0) = -1.0_rt;
@@ -162,7 +164,7 @@ void point_source_arrivals_are_exact (bool stamp_by_update)
     const double LB = anderson_lb(U * 2.237);
     const SpreadEllipse e = spread_ellipse_from_lw(1.0_rt, Real(LB));
     farsite_front::Shape s;
-    s.wx = 1.0_rt; s.wy = 0.0_rt; s.a = e.a; s.b = e.b; s.c = e.c; s.sx = 0.0_rt; s.sy = 0.0_rt;
+    s.wx = cw; s.wy = sw; s.a = e.a; s.b = e.b; s.c = e.c; s.sx = 0.0_rt; s.sy = 0.0_rt;
     s.isotropic = false; s.ellipse = true;
 
     BoxArray one(domain);
@@ -184,12 +186,14 @@ void point_source_arrivals_are_exact (bool stamp_by_update)
             }
         }
     }
-    EXPECT_GT(n_checked, 40);
+    EXPECT_GT(n_checked, min_checked);
     EXPECT_LT(err, 1.0e-6) << "every burned cell within the stencil carries its point-source arrival";
-    // the flank: the third row across the wind is reached (semi-minor rate
-    // a = 0.255 R puts it at 1180 s; the across-wind rate alone would need 4200 s)
-    EXPECT_GE(n_flank, 1) << "the ellipse's flank grows at its semi-minor rate";
-    EXPECT_NEAR(e.a, 0.255, 0.01);
+    if (angle_deg == 0.0_rt && U == 1.5_rt) {
+        // the flank: the third row across the wind is reached (semi-minor rate
+        // a = 0.255 R puts it at 1180 s; the across-wind rate alone would need 4200 s)
+        EXPECT_GE(n_flank, 1) << "the ellipse's flank grows at its semi-minor rate";
+        EXPECT_NEAR(e.a, 0.255, 0.01);
+    }
 }
 
 TEST(FarsiteShape, PointSourceArrivalsAreExactWithinTheStencil) { point_source_arrivals_are_exact(false); }
@@ -197,6 +201,83 @@ TEST(FarsiteShape, PointSourceArrivalsAreExactWithinTheStencil) { point_source_a
 /// The same from a cell the update itself dates (phi < 0, no arrival time):
 /// its clock at burn is the clock at t0, so the direct paths from it are exact
 TEST(FarsiteShape, ACellTheUpdateDatesIsAnExactSource) { point_source_arrivals_are_exact(true); }
+
+/// A wind at 45 degrees to the grid, 3 m/s (L/W = 5): the ellipse reaches the
+/// diagonal cell (21, 21) at 141 s, long before any face neighbour of it burns
+/// (the cell beside the source along x is reached at 1523 s), so a candidate
+/// test on the face neighbours alone burned nothing for 1200 s; the direct
+/// sources must be tried on every cell with a burned cell in its stencil
+TEST(FarsiteShape, AnObliqueWindReachesTheDiagonalCellsFirst)
+{
+    // 23 cells burn in 1200 s (the exact count); the defect burned none
+    point_source_arrivals_are_exact(false, 45.0_rt, 3.0_rt, 20);
+}
+
+/**
+ * A cell another writer dates (a spot landing stamps the arrival time itself, a
+ * scheduled polygon dates its interior) carries no clock at burn: the update
+ * must take it from the cell's own clock at that time, so that the direct
+ * paths from it start at its arrival. Until 2026-10 the stamp loop skipped
+ * every dated cell and the clock at burn stayed at its initial value, which
+ * credited the whole run's R t to the spot's neighbours: a brand landing at
+ * 1000 s burned its nine-cell stencil at once. 41 x 41 cells of 10 m, a
+ * point source at the centre from t = 0; at 1000 s a second cell far from
+ * the first fire is set burned and dated 1000 s with the clock at burn left
+ * at the -1 sentinel; its stencil must arrive at 1000 s + gauge / R.
+ */
+TEST(FarsiteShape, ACellDatedByAnotherWriterSpreadsFromItsOwnTime)
+{
+    const Real U = 1.5_rt, R = 0.1_rt, h = 10.0_rt, t_spot = 1000.0_rt;
+    Box domain(IntVect(0, 0, 0), IntVect(40, 40, 0));
+    BoxArray ba(domain);
+    ba.maxSize(IntVect(14, 14, 1));
+    DistributionMapping dm(ba);
+    Geometry geom(domain, RealBox(0.0, 0.0, 0.0, 410.0, 410.0, 1.0), CoordSys::cartesian, {false, false, false});
+    MultiFab phi(ba, dm, 1, 1), work(ba, dm, 2, 0), disp(ba, dm, 4, 0), at(ba, dm, 1, 0);
+    MultiFab vel(ba, dm, 2, 0), ros(ba, dm, 1, 0);
+    phi.setVal(1.0_rt); work.setVal(0.0_rt); disp.setVal(0.0_rt); at.setVal(-1.0_rt);
+    disp.setVal(-1.0_rt, 3, 1);   // the clock at burn: unset until the update stamps it, as FireLayer allocates it
+    vel.setVal(U, 0, 1); vel.setVal(0.0_rt, 1, 1); ros.setVal(R);
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        if (mfi.validbox().contains(IntVect(20, 20, 0))) { phi.array(mfi)(20, 20, 0) = -1.0_rt; at.array(mfi)(20, 20, 0) = 0.0_rt; }
+    }
+    FarsiteParams fp;
+    int n = 0;
+    for (; n < 100; ++n) { advance_fire_subcycle(phi, work, disp, at, vel, ros, geom, 10.0_rt, n * 10.0_rt, fp); }
+    // the second cell: 15 cells upwind and 15 across of the first, which the
+    // first fire (10 cells downwind, 3 rows across by now) never reaches
+    const int is = 5, js = 35;
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        if (mfi.validbox().contains(IntVect(is, js, 0))) { phi.array(mfi)(is, js, 0) = -1.0_rt; at.array(mfi)(is, js, 0) = t_spot; }
+    }
+    for (; n < 200; ++n) { advance_fire_subcycle(phi, work, disp, at, vel, ros, geom, 10.0_rt, n * 10.0_rt, fp); }
+    const double LB = anderson_lb(U * 2.237);
+    const SpreadEllipse e = spread_ellipse_from_lw(1.0_rt, Real(LB));
+    farsite_front::Shape s;
+    s.wx = 1.0_rt; s.wy = 0.0_rt; s.a = e.a; s.b = e.b; s.c = e.c; s.sx = 0.0_rt; s.sy = 0.0_rt;
+    s.isotropic = false; s.ellipse = true;
+    BoxArray one(domain);
+    MultiFab all(one, DistributionMapping(one), 1, 0);
+    all.ParallelCopy(at, 0, 0, 1);
+    int n_checked = 0;
+    Real err = 0.0_rt;
+    for (MFIter mfi(all); mfi.isValid(); ++mfi) {
+        auto a = all.const_array(mfi);
+        for (int dj = -5; dj <= 5; ++dj) {
+            for (int di = -5; di <= 9; ++di) {
+                const int i = is + di, j = js + dj;
+                if (i < 0 || j > 40 || (di == 0 && dj == 0) || a(i, j, 0) < 0.0_rt) { continue; }
+                const Real T_exact = t_spot + farsite_front::gauge(di * h, dj * h, s) / R;
+                err = amrex::max(err, std::abs(a(i, j, 0) - T_exact) / T_exact);
+                ++n_checked;
+            }
+        }
+    }
+    EXPECT_GT(n_checked, 20);
+    EXPECT_LT(err, 1.0e-6) << "the stencil of a cell dated by its writer arrives at its time plus the point-source travel time";
+    // the defect's signature: the cell three downwind arrived at 1000 or 1010 s
+    EXPECT_GT(arrival_at(at, is + 3, js), t_spot + 0.5_rt * farsite_front::gauge(3 * h, 0.0_rt, s) / R);
+}
 
 /**
  * A fuel boundary across the wind: slow fuel (R = 0.25 m/s) up to x = 300 m,
@@ -241,6 +322,42 @@ TEST(FarsiteShape, AFuelBoundaryDoesNotLendTheSlowFuelsClock)
         ASSERT_GE(T, 0.0_rt) << "cell " << 30 + k << " burned";
         EXPECT_NEAR(T, T30 + k * h / R_fast, 1.0e3 * tol_t) << "fast cell " << k << " runs at the fast fuel's rate from the boundary";
     }
+}
+
+/**
+ * A lull: the rate drops from 0.1 to 0.03 m/s at 600 s, uniformly. The direct
+ * sources credit the clock integral, so a cell the lull catches arrives at
+ * 600 s + (gauge - 60 m) / 0.03: cell (6, 2) from the source at 1488.8 s.
+ * A credit from the current rate over the time since the source burned
+ * (the form until 2026-10) dated it 1814 s, 325 s late.
+ */
+TEST(FarsiteShape, ALullIsIntegratedOverThePath)
+{
+    const Real U = 1.5_rt, R1 = 0.1_rt, R2 = 0.03_rt, h = 10.0_rt, t_lull = 600.0_rt;
+    Box domain(IntVect(0, 0, 0), IntVect(20, 20, 0));
+    BoxArray ba(domain);
+    DistributionMapping dm(ba);
+    Geometry geom(domain, RealBox(0.0, 0.0, 0.0, 210.0, 210.0, 1.0), CoordSys::cartesian, {false, false, false});
+    MultiFab phi(ba, dm, 1, 1), work(ba, dm, 2, 0), disp(ba, dm, 4, 0), at(ba, dm, 1, 0);
+    MultiFab vel(ba, dm, 2, 0), ros(ba, dm, 1, 0);
+    phi.setVal(1.0_rt); work.setVal(0.0_rt); disp.setVal(0.0_rt); disp.setVal(-1.0_rt, 3, 1); at.setVal(-1.0_rt);
+    vel.setVal(U, 0, 1); vel.setVal(0.0_rt, 1, 1); ros.setVal(R1);
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) { phi.array(mfi)(10, 10, 0) = -1.0_rt; at.array(mfi)(10, 10, 0) = 0.0_rt; }
+    FarsiteParams fp;
+    for (int n = 0; n < 200; ++n) {
+        if (n * 10.0_rt >= t_lull) { ros.setVal(R2); }
+        advance_fire_subcycle(phi, work, disp, at, vel, ros, geom, 10.0_rt, n * 10.0_rt, fp);
+    }
+    const double LB = anderson_lb(U * 2.237);
+    const SpreadEllipse e = spread_ellipse_from_lw(1.0_rt, Real(LB));
+    farsite_front::Shape s;
+    s.wx = 1.0_rt; s.wy = 0.0_rt; s.a = e.a; s.b = e.b; s.c = e.c; s.sx = 0.0_rt; s.sy = 0.0_rt;
+    s.isotropic = false; s.ellipse = true;
+    const Real need = farsite_front::gauge(6 * h, 2 * h, s);
+    ASSERT_GT(need, R1 * t_lull) << "the lull must catch the cell for the test to mean anything";
+    const Real T_exact = t_lull + (need - R1 * t_lull) / R2;
+    EXPECT_NEAR(arrival_at(at, 16, 12), T_exact, 1.0e-6 * T_exact) << "the clock integral dates the cell";
+    EXPECT_LT(arrival_at(at, 16, 12), 1700.0) << "a current-rate credit dated it 1814 s";
 }
 
 TEST(FarsiteShape, AVanishingWindIsTheDisc)
