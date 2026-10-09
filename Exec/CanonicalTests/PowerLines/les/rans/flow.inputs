@@ -1,0 +1,54 @@
+# The clamped conductor network of the ASCE 74 comparison (../README.md) in a k-equation RANS over the same hills, on a terrain-fitted
+# mesh of the LES's domain and spacing (3072 x 1536 x 768 m, 16 m cells; periodic in y as the LES). The inflow is the LES
+# precursor's mean profile over 7200-9000 s (u* 0.948 m/s), with k = u*^2/Cmu0^2 = 2.905 m^2/s^2; the precursor's
+# pressure gradient drives it as in the LES. The mesh is fitted rather than immersed because the k-equation's wall
+# distance (terrain_height) is measured from the mesh's bottom, which an immersed terrain leaves flat.
+geometry.prob_lo     = 0.    0.    0.
+geometry.prob_hi     = 3072. 1536. 768.
+amr.n_cell           = 192   96   48
+amr.max_level        = 0
+amr.max_grid_size    = 48
+amr.blocking_factor  = 4
+geometry.is_periodic = 0 1 0
+erf.fixed_dt         = 0.4                 # 25.4 m/s aloft on 16 m cells: Courant 0.64
+xlo.type           = "Inflow"
+xlo.dirichlet_file = "inflow_profile"
+xlo.KE             = 2.905
+xhi.type           = "Outflow"
+zhi.type           = "SlipWall"
+zlo.type           = "surface_layer"
+erf.most.z0        = 0.1
+erf.terrain_type      = StaticFittedMesh
+erf.terrain_smoothing = 0                  # the LES's hills as they are
+erf.terrain_file_name = "terrain_hills.txt"
+erf.wall_dist_type    = terrain_height
+erf.anelastic      = 1
+erf.anelastic_type = MidPoint
+erf.vert_implicit  = true
+erf.use_fft        = true
+erf.init_type           = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.prob_name           = "ABL"
+erf.use_gravity         = true
+erf.use_coriolis        = false
+erf.abl_driver_type     = "PressureGradient"
+erf.abl_pressure_grad   = -1.51e-3 0.0 0.0
+erf.dycore_horiz_adv_type  = "Upwind_5th"
+erf.dycore_vert_adv_type   = "Upwind_3rd"
+erf.dryscal_horiz_adv_type = "Upwind_5th"
+erf.dryscal_vert_adv_type  = "Upwind_3rd"
+erf.molec_diff_type        = "None"
+erf.les_type               = "None"
+erf.rans_type              = "kEqn"
+erf.dirichlet_k            = true
+erf.init_tke_from_ustar    = true
+erf.rans_consistent_diffusivities = true
+erf.rans_lscale_min        = 1.0
+erf.max_geom_lscale        = 31.0          # 0.1 kappa H for the 768 m layer
+erf.theta_ref              = 300.0
+amrex.fpe_trap_invalid = 0
+erf.v            = 1
+erf.sum_interval = 50
+erf.plot_file_1  = plt
+erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta KE Kmv z_phys
+erf.check_file   = chk

@@ -17,6 +17,7 @@
 
 #include <AMReX_REAL.H>
 
+#include "ERF_Gusts.H"
 #include "ERF_TowerInputs.H"
 
 namespace erf_conductors {
@@ -57,7 +58,9 @@ namespace erf_conductors {
  *   erf.conductors.S1.insulator_diameter = 0.254       (m, > 0, the disc diameter the wind acts on; default 0.254;
  *                                                       refused without insulator_length)
  *   erf.conductors.S1.output_root   = conductors/S1    (prefix of the line's diagnostics files, one per line;
- *                                                       default <diagnostics_dir>/<name>)
+ *                                                       default <diagnostics_dir>/<name>; no log of the line may
+ *                                                       take the name of a log the run writes there itself, such
+ *                                                       as total_load.dat, or towers.dat with lattice towers)
  *   erf.conductors.S1.tower_type    = lattice          (one of erf.conductors.tower_types: the suspension towers are
  *                                                       lattice towers of this type, loaded by the wind; needs towers;
  *                                                       default none: points only)
@@ -69,6 +72,12 @@ namespace erf_conductors {
  *                                                       tower's base instead of the terrain under the point, and each of
  *                                                       its tower points lies within arm_length/2 of the tower's axis
  *                                                       and between the base and the top, the cross-arm height + peak)
+ *   erf.conductors.S1.gust_with     = P2               (with gust_type = random the line takes the random gusts of line
+ *                                                       P2's spans, span by span, so that the conductors of a circuit
+ *                                                       on separate lines move together; default: its own, or those of
+ *                                                       the line whose towers it shares. P2 has as many spans and takes
+ *                                                       no other line's gusts; not with share_towers, which already
+ *                                                       shares them)
  *
  * Every Real input must be finite. Lines, transformers and tower types share the prefix
  * erf.conductors.<name>, so no name may be used twice.
@@ -95,6 +104,7 @@ struct LineInputs
     std::string output_root;                         //!< the prefix of the line's diagnostics files
     std::string tower_type;                          //!< the type of the suspension towers; empty: none
     std::string share_towers;                        //!< the line whose towers this one hangs from; empty: its own
+    std::string gust_with;                           //!< the line whose random gusts this one takes; empty: see gust_owner()
 
     /** Segments of each insulator string. */
     static constexpr int insulator_segments = 2;
@@ -267,18 +277,40 @@ std::string first_nonfinite (const std::vector<T>& v, std::size_t per_point, con
  *                                                   <diagnostics_dir>/asce74.csv at start-up; default 0: none)
  *   erf.conductors.asce74_exposure  = C            (B or C, ASCE 74's terrain exposure of that check; default C;
  *                                                   needs asce74_wind)
- *   erf.conductors.gust_type        = factor       (none or factor; default none. factor: every span's gust factor and
- *                                                   peak wind load from the mean wind and the k-equation RANS's k
- *                                                   along it (ERF_Gusts.H), in <diagnostics_dir>/gusts.csv; needs
- *                                                   erf.rans_type = kEqn on the anchor level and the flow's wind, not
- *                                                   prescribed_velocity, and every span with a horizontal extent)
+ *   erf.conductors.gust_type        = factor       (none, factor, event or random; default none (ERF_Gusts.H). Every
+ *                                                   type but none writes every span's gust factor and peak wind load
+ *                                                   from the mean wind and the k-equation RANS's k along it to
+ *                                                   <diagnostics_dir>/gusts.csv; event adds one travelling 1 - cos
+ *                                                   gust to the wind the lines and towers take, random a random gust
+ *                                                   per span and per tower, both written to
+ *                                                   <diagnostics_dir>/gust_series.dat. Needs erf.rans_type = kEqn on the
+ *                                                   anchor level and the flow's wind, not prescribed_velocity, and
+ *                                                   every span with a horizontal extent; event and random cannot be
+ *                                                   used with drag_on_flow)
  *   erf.conductors.gust_sigma_factor = 1.39        (> 0; c in sigma_u = c sqrt(k); default 2.5 Cmu0, Cmu0 the RANS
- *                                                   constant erf.Cmu0; needs gust_type = factor)
- *   erf.conductors.gust_peak_factor = 2.7          (> 0; g in the gust factor 1 + 2 g I_n sqrt(B) and the peak wind
- *                                                   U + g sigma_u; default ASCE 74's 2.7; needs gust_type = factor)
- *   erf.conductors.gust_span_length_scale = 67.056 (m, > 0; L_s in B = 1/(1 + 0.8 L/L_s); default ASCE 74's 220 ft
- *                                                   of open country, exposure C (51.816 m, 170 ft, for B); needs
- *                                                   gust_type = factor)
+ *                                                   constant erf.Cmu0; needs a gust_type)
+ *   erf.conductors.gust_peak_factor = 2.7          (> 0; g in the gust factor 1 + 2 g I_n sqrt(B), the peak wind
+ *                                                   U + g sigma_u and the event's amplitude g sigma_u; default ASCE
+ *                                                   74's 2.7; needs a gust_type)
+ *   erf.conductors.gust_span_length_scale = 67.056 (m, > 0; L_s in the spans' B = 1/(1 + 0.8 L/L_s) and the towers'
+ *                                                   B_t = 1/(1 + 0.375 h/L_s); default ASCE 74's 220 ft of open
+ *                                                   country, exposure C (51.816 m, 170 ft, for B); needs a gust_type)
+ *   erf.conductors.gust_event_time  = 600.         (s; when the event's front crosses gust_event_origin; needs and
+ *                                                   is needed by gust_type = event)
+ *   erf.conductors.gust_event_speed = 12.          (m/s, > 0; how fast the front moves; needs and is needed by
+ *                                                   gust_type = event)
+ *   erf.conductors.gust_event_direction = 0.       (degrees counterclockwise from +x, the way the front moves;
+ *                                                   default 0; needs gust_type = event)
+ *   erf.conductors.gust_event_origin = 600. 500.   (m, x y; a point the front crosses at gust_event_time; default
+ *                                                   the domain's centre; needs gust_type = event)
+ *   erf.conductors.gust_event_duration = 10.5      (s, > 0; how long the gust lasts at a point; default 10.5 s, the
+ *                                                   duration of IEC 61400-1's extreme operating gust, not its shape
+ *                                                   or amplitude; needs gust_type = event)
+ *   erf.conductors.gust_seed        = 1            (>= 0; picks the random gusts' series; default 1; needs
+ *                                                   gust_type = random)
+ *   erf.conductors.gust_integral_length = 170.     (m, > 0; the random gusts' integral length L_u; default IEC
+ *                                                   61400-1's 8.1 Lambda_1 at each span's attachment height and each
+ *                                                   tower's mean drag-node height; needs gust_type = random)
  *
  * Every Real input must be finite.
  */
@@ -312,16 +344,39 @@ struct ConductorInputs
     amrex::Real flashover_distance{1.0};                //!< (m)
     amrex::Real asce74_wind{0.0};                       //!< (m/s); 0: no ASCE 74 table
     std::string asce74_exposure;                        //!< B or C; empty: C
-    std::string gust_type{"none"};                      //!< none or factor
+    std::string gust_type{"none"};                      //!< none, factor, event or random
     bool has_gust_sigma_factor{false};
     amrex::Real gust_sigma_factor{0.0};                 //!< (-); not given: 2.5 Cmu0 of the k-equation RANS
     bool has_gust_peak_factor{false};
     amrex::Real gust_peak_factor{2.7};                  //!< (-)
     bool has_gust_span_length_scale{false};
     amrex::Real gust_span_length_scale{67.056};         //!< (m), 220 ft
-    /** Whether gust_type is factor (validate_settings() has checked that it parses). */
-    bool gust_factor () const;
+    bool has_gust_event_time{false};
+    amrex::Real gust_event_time{0.0};                   //!< (s)
+    bool has_gust_event_speed{false};
+    amrex::Real gust_event_speed{0.0};                  //!< (m/s)
+    bool has_gust_event_direction{false};
+    amrex::Real gust_event_direction{0.0};              //!< (degrees counterclockwise from +x)
+    bool has_gust_event_origin{false};
+    std::array<amrex::Real,2> gust_event_origin{{0.0, 0.0}};   //!< (m, x y); not given: the domain's centre
+    bool has_gust_event_duration{false};
+    amrex::Real gust_event_duration{10.5};              //!< (s)
+    bool has_gust_seed{false};
+    int gust_seed{1};
+    bool has_gust_integral_length{false};
+    amrex::Real gust_integral_length{0.0};              //!< (m); not given: IEC 61400-1's at each span's and tower's height
+    /** The gust type (validate_settings() has checked that it parses; None when it does not). */
+    GustType gust () const;
+    /** Whether gust_type is anything but none. */
+    bool gusts_on () const { return gust() != GustType::None; }
+    /** Whether a gust is added to the wind the lines and towers take: gust_type event or random. */
+    bool gusts_in_wind () const { return gust() == GustType::Event || gust() == GustType::Random; }
 
+    /**
+     * The line whose random gusts a line takes: its gust_with; else, for a line sharing towers, the towers' owner's
+     * gust_with or the owner itself; else itself. That line takes no other's.
+     */
+    const LineInputs& gust_owner (const LineInputs& s) const;
     /** The line a line's towers belong to: the line whose towers it shares, or itself. */
     const LineInputs& tower_owner (const LineInputs& s) const;
     /** The tower type of a line's towers (those of the line it shares them with), or null when they have none. */

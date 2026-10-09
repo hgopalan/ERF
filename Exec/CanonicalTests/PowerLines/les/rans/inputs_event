@@ -1,0 +1,17 @@
+# the lines in the converged RANS flow from 1500 s with one travelling 1 - cos gust along the wind: the front crosses the
+# network's middle (x = 2000 m) at 1700 s at 15 m/s and lasts 10.5 s at a point; statistics from 1600 s
+FILE = flow.inputs
+amr.restart    = chk03750
+max_step       = 5000
+stop_time      = 2000.0
+erf.plot_int_1 = -1
+erf.check_int  = -1
+erf.conductors.diagnostics_dir = conductors_event
+erf.conductors.diagnostics_int = 1
+erf.conductors.air_density     = 1.16
+erf.conductors.stats_start     = 1600.0
+FILE = network.inputs
+erf.conductors.gust_type        = event
+erf.conductors.gust_event_time  = 1700.
+erf.conductors.gust_event_speed = 15.
+erf.conductors.gust_event_origin = 2000. 768.

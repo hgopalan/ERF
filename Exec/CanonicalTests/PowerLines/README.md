@@ -44,7 +44,10 @@ took, `total_load.dat` with the air's drag on all lines and towers, and the runn
 
 Adding `erf.conductors.gust_type = factor` to `inputs_lines` (this case runs the k-equation RANS, which it
 needs) also writes `gusts.csv`: every span's gust factor and peak wind load from the mean wind and the RANS's
-turbulent kinetic energy along it (see "Gusts from the RANS turbulence" in `Docs/sphinx_doc/theory/Conductors.rst`).
+turbulent kinetic energy along it. `gust_type = random` also adds a random gust to the wind every span and
+tower takes, and `gust_type = event` one travelling 1 - cos gust (it needs `gust_event_time` and
+`gust_event_speed`); both write the gusts to `gust_series.dat` (see "Gusts from the RANS turbulence" in
+`Docs/sphinx_doc/theory/Conductors.rst`).
 
 ## The same lines in a turbulent wind
 

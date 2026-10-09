@@ -18,6 +18,7 @@
 #include "ERF_ConductorGeometry.H"
 #include "ERF_ConductorInputs.H"
 #include "ERF_ConductorLine.H"
+#include "ERF_Gusts.H"
 #include "ERF_RunningStats.H"
 #include "ERF_Transformer.H"
 #include "ERF_Tower.H"
@@ -38,7 +39,9 @@
  * frame model (a SubDyn file, or one generated from the type's dimensions) bend as that frame: MoorDyn
  * then takes their cross-arms as coupled points that ERF moves, and hands back the lines' pull on them.
  * A frame tower whose members' design data is known has every member checked against its strength
- * (ASCE 10-15) every step.
+ * (ASCE 10-15) every step. With an erf.conductors.gust_type the k-equation RANS's k sets the gusts
+ * (ERF_Gusts.H): every span's static gust factor, and with event or random a gust added to the wind
+ * the lines and towers take.
  */
 class Conductors
 {
@@ -50,14 +53,16 @@ public:
 
     /**
      * Tell the lines the turbulence closure of their anchor level, which ERF calls once after
-     * create(): whether it is the k-equation RANS, and its constant Cmu0. With
-     * erf.conductors.gust_type = factor this aborts unless it is the k-equation RANS (the gusts come
-     * from its k) and sets sigma_u / sqrt(k) to erf.conductors.gust_sigma_factor, or to 2.5 Cmu0 when
-     * that is not given (ERF_Gusts.H). advance() aborts with gusts on unless this was called.
+     * create(): whether it is the k-equation RANS, and its constant Cmu0. With an
+     * erf.conductors.gust_type this aborts unless it is the k-equation RANS (the gusts come from its
+     * k) and sets sigma_u / sqrt(k) to erf.conductors.gust_sigma_factor, or to 2.5 Cmu0 when that is
+     * not given (ERF_Gusts.H). advance() aborts with gusts on unless this was called.
      */
     void set_closure (bool keqn_rans, amrex::Real Cmu0);
-    /** sigma_u / sqrt(k) of the gusts once set_closure() has run; 0 without gust_type = factor. */
+    /** sigma_u / sqrt(k) of the gusts once set_closure() has run; 0 without a gust_type. */
     double gust_sigma_factor () const { return m_gust_sigma; }
+    /** With gust_type = event, the travelling gust, its origin placed once set_ground() has run. */
+    const erf_conductors::GustEvent& gust_event () const { return m_event; }
 
     /**
      * Place the attachment points on the terrain (z - geometry.prob_lo[2] is their height above the
@@ -105,8 +110,10 @@ public:
      * momentum sources of the next step.
      * Units: time, dt (s). U, V, W are the face velocities of level lev at the start of the step.
      * cons is the conserved state of level lev at the start of the step, with a filled ghost cell:
-     * with erf.conductors.gust_type = factor, k = (rho k) / rho is read from it at the line nodes,
-     * and a null cons aborts; it is not read otherwise.
+     * with an erf.conductors.gust_type, k = (rho k) / rho is read from it at the line nodes (and at
+     * the towers' drag nodes with gust_type event or random), and a null cons aborts; it is not read
+     * otherwise. With gust_type event or random the lines and towers take the flow's wind plus the
+     * gust (add_gusts).
      */
     void advance (int lev, double time, double dt,
                   const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
@@ -138,6 +145,8 @@ public:
     const std::vector<erf_conductors::Closest>& transformer_clearances () const { return m_tclear; }
     /** The lattice towers of the lines with a tower_type, with the wind's last load on their members. */
     const std::vector<erf_towers::Tower>& towers () const { return m_towers; }
+    /** Per tower, the wind (m/s, 3 per drag node, the order of its nodes()) its members took in the last step. */
+    const std::vector<std::vector<amrex::Real>>& tower_winds () const { return m_tower_wind; }
     /** The lines hanging from each tower, in the order of its attachments: (line, tower of that line from 0). */
     const std::vector<std::vector<std::pair<std::size_t,int>>>& tower_lines () const { return m_tower_lines; }
     /** Each tower's structural model, null for a tower that stands still. */
@@ -228,14 +237,45 @@ private:
     /** The running statistics of a line: one set per span, and one for its insulator strings. */
     void add_stats (const erf_conductors::LineInputs& s);
     /**
-     * With gust_type = factor, add one sample of every line's gust statistics, stamped t: per span, the
-     * root-mean-square over its nodes of the horizontal wind speed and of its component normal to the span's
-     * chord (from uvw[i], the wind at line i's nodes at pos[i]), and the mean of k = (rho k) / rho from cons
-     * at the same points (a negative value from extrapolation below the first cell centre counts as 0).
-     * rho and rho k are sampled at every line's nodes in one pass each.
+     * k = (rho k) / rho (m^2/s^2) from cons at the points pos (3 coordinates per point, m), one pass over
+     * rho and one over rho k; a negative value from extrapolation below the first cell centre counts as 0,
+     * and a point where the density is not positive gets NaN, for the caller to name.
      */
-    void sample_gusts (double t, const std::vector<std::vector<amrex::Real>>& pos, const std::vector<std::vector<amrex::Real>>& uvw,
-                       const amrex::MultiFab& cons, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
+    std::vector<double> sample_k (const std::vector<amrex::Real>& pos, const amrex::MultiFab& cons,
+                                  const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
+    /**
+     * With a gust_type, add one sample of every line's gust statistics, stamped t: per span, the
+     * root-mean-square over its nodes of the horizontal wind speed and of its component normal to the span's
+     * chord (from uvw[i], the flow's wind at line i's nodes), and the mean of k over them (k: per node of every
+     * line in order, from sample_k).
+     */
+    void sample_gusts (double t, const std::vector<std::vector<amrex::Real>>& uvw, const std::vector<double>& k);
+    /**
+     * Place gust_type = event's gust (its origin, unless given, the domain's centre) and number gust_type =
+     * random's processes: one per span (a line that shares another's towers or names it in gust_with takes
+     * the processes of that line's spans) and one per tower. set_ground() calls it once the towers stand.
+     */
+    void setup_gusts (const amrex::Geometry& geom);
+    /**
+     * With gust_type event or random, add the gust to the flow's wind of the step that starts at time: to
+     * uvw[i] (the wind at line i's kinematics points, its nodes at pos[i]; k, per node of every line in order)
+     * and to tuvw (the wind at every tower's drag nodes in order, at tpos; tk, k there). The gust acts along
+     * the mean horizontal wind of the span, string or tower, none where that is zero; sigma_u = c sqrt(k) is
+     * taken from the mean k over each span's nodes and over each tower's drag nodes. event: g sigma_u times
+     * the shape at the node's phase at the step's middle; random: sigma_u sqrt(B) z, z stepped by dt with
+     * T = L_u / U from the root-mean-square horizontal wind over the span's (the owner span's) or tower's
+     * nodes. A string takes the mean amplitude (event) or the mean gust (random) of the two spans beside it.
+     * The gust at each span's middle node and at each tower's highest drag node goes to m_gust_series.
+     */
+    void add_gusts (double time, double dt, const std::vector<std::vector<amrex::Real>>& pos,
+                    std::vector<std::vector<amrex::Real>>& uvw, const std::vector<double>& k,
+                    const std::vector<amrex::Real>& tpos, std::vector<amrex::Real>& tuvw, const std::vector<double>& tk);
+    /**
+     * Append the gusts of the step that starts at time to <diagnostics_dir>/gust_series.dat (I/O rank):
+     * the gust (m/s) at each span's middle node, then at each tower's highest drag node. first truncates the
+     * file; the header is written after truncating, or when appending to a missing or empty file.
+     */
+    void write_gust_series (double time, bool first) const;
     /** The unit normal (x, y) to the horizontal projection of line i's span k's chord. */
     std::array<double,2> span_normal (std::size_t i, int k) const;
     /**
@@ -312,10 +352,12 @@ private:
     void write_tower_frames (double time, bool first) const;
     /**
      * The wind (m/s) at every tower node (3 per node, the towers in order): the flow sampled there, or
-     * the prescribed velocity. Aborts on a sampled value that is not finite.
+     * the prescribed velocity. Aborts on a sampled value that is not finite. With nodes given, it
+     * receives the nodes' current positions (3 per node, m).
      */
     std::vector<amrex::Real> tower_wind (const amrex::MultiFab& U, const amrex::MultiFab& V, const amrex::MultiFab& W,
-                                         const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
+                                         const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom,
+                                         std::vector<amrex::Real>* nodes = nullptr) const;
     /** The members' drag from the wind at their nodes (held for the step) and their motion, handed to each tower, with the lines' pull. */
     void load_towers (const std::vector<amrex::Real>& wind);
     /** The members' drag on tower t from the wind held for the step, at the nodes' current velocities. */
@@ -361,6 +403,14 @@ private:
     std::vector<erf_actuator::RunningStats> m_gust_stats;
     bool m_closure_set{false};                                     //!< set_closure() has run
     double m_gust_sigma{0.0};                                      //!< sigma_u / sqrt(k) of the gusts
+    erf_conductors::GustEvent m_event;                             //!< gust_type = event: the travelling gust
+    //! gust_type = random: per line, per span, its process in m_gust_z (a line may take another's: gust_owner())
+    std::vector<std::vector<std::size_t>> m_span_process;
+    std::vector<std::pair<std::size_t,int>> m_process_span;        //!< per span process: the (line, span) it belongs to
+    std::vector<double> m_gust_z;          //!< the random processes (unit variance): the spans', then one per tower
+    std::vector<std::string> m_process_names;   //!< per process: <line>_span<k> of the span it belongs to, or the tower's name
+    bool m_gust_z_set{false};              //!< m_gust_z holds the last step's values (else the next step draws them)
+    std::vector<double> m_gust_series;     //!< this step's gust at each span's middle node, then at each tower's top (m/s)
     std::vector<std::pair<std::size_t,std::size_t>> m_pairs;        //!< the pairs of lines watched for clashes
     std::vector<erf_actuator::RunningStats> m_pair_stats;           //!< per pair: the closest approach and the clash flag
     std::vector<erf_conductors::Closest> m_sep;                     //!< per pair: the last closest approach

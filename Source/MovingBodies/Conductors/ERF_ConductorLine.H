@@ -75,6 +75,17 @@ public:
         check_span(k);
         return m_first[static_cast<std::size_t>(k) + 1] - m_first[static_cast<std::size_t>(k)];
     }
+    /** The first node (0-based over the line) of insulator string j (j from 0, the string at tower j+1) and the number of its nodes. */
+    unsigned string_first_node (int j) const
+    {
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(j >= 0 && j < num_insulators(), "ConductorLine::string_first_node: no such string");
+        return m_first[static_cast<std::size_t>(num_spans() + j)];
+    }
+    unsigned string_num_nodes (int j) const
+    {
+        const unsigned first = string_first_node(j);
+        return m_first[static_cast<std::size_t>(num_spans() + j) + 1] - first;
+    }
     /** The number of points MoorDyn takes the wind at (at least num_nodes(): the line nodes come first). */
     unsigned num_kinematics_points () const { return m_nkin; }
 

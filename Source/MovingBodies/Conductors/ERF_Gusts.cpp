@@ -1,4 +1,5 @@
-// Gusts on a conductor span from a RANS wind: a static gust factor per span from the mean wind and k.
+// Gusts on the conductors from a RANS wind: a static gust factor per span from the mean wind and k, and the
+// travelling and random gusts' formulas.
 
 #include "ERF_Gusts.H"
 
@@ -11,12 +12,18 @@
 
 namespace erf_conductors {
 
+namespace {
+constexpr double pi = 3.14159265358979323846;
+} // namespace
+
 bool parse_gust_type (const std::string& name, GustType& g)
 {
     std::string l = name;
     for (auto& ch : l) { ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch))); }
     if (l == "none")   { g = GustType::None;   return true; }
     if (l == "factor") { g = GustType::Factor; return true; }
+    if (l == "event")  { g = GustType::Event;  return true; }
+    if (l == "random") { g = GustType::Random; return true; }
     return false;
 }
 
@@ -63,6 +70,61 @@ SpanGust span_gust (double wind, double normal_wind, double k, double span, doub
         s.linear_valid = (normal_wind >= s.normal_sigma);
     }
     return s;
+}
+
+double tower_background_factor (double height, double length_scale)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(height > 0.0 && std::isfinite(height), "tower_background_factor: the height must be positive");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(length_scale > 0.0 && std::isfinite(length_scale),
+                                     "tower_background_factor: the length scale must be positive");
+    return 1.0 / (1.0 + 0.375 * height / length_scale);
+}
+
+double gust_integral_length (double height)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(height > 0.0 && std::isfinite(height), "gust_integral_length: the height must be positive");
+    return 8.1 * ((height < 60.0) ? 0.7 * height : 42.0);
+}
+
+double gust_event_shape (double s)
+{
+    if (!(s >= 0.0 && s <= 1.0)) { return 0.0; }
+    return 0.5 * (1.0 - std::cos(2.0 * pi * s));
+}
+
+double gust_event_phase (const GustEvent& e, double x, double y, double t)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(e.speed > 0.0 && e.duration > 0.0, "gust_event_phase: the speed and duration must be positive");
+    const double arrival = e.time + ((x - e.x0) * e.ex + (y - e.y0) * e.ey) / e.speed;
+    return (t - arrival) / e.duration;
+}
+
+namespace {
+// splitmix64's finaliser: a bijection of the 64-bit integers whose outputs pass the usual tests of independence
+std::uint64_t mix64 (std::uint64_t x)
+{
+    x += 0x9e3779b97f4a7c15ULL;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+    return x ^ (x >> 31);
+}
+} // namespace
+
+double gust_normal (std::uint64_t seed, std::uint64_t stream, std::uint64_t step)
+{
+    const std::uint64_t key = mix64(mix64(mix64(step) + stream * 0xd1b54a32d192ed03ULL) + seed * 0x9e3779b97f4a7c15ULL);
+    // u1 in (0, 1], so its logarithm is finite; u2 in [0, 1); 53 bits each
+    const double u1 = static_cast<double>((mix64(key ^ 1ULL) >> 11) + 1) * 0x1.0p-53;
+    const double u2 = static_cast<double>(mix64(key ^ 2ULL) >> 11) * 0x1.0p-53;
+    return std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * pi * u2);
+}
+
+double gust_ou_step (double z, double dt, double T, double xi)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dt >= 0.0 && std::isfinite(dt), "gust_ou_step: dt must be finite and >= 0");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(T > 0.0, "gust_ou_step: the time scale must be positive");
+    const double a = std::exp(-dt / T);
+    return a * z + std::sqrt(std::max(1.0 - a * a, 0.0)) * xi;
 }
 
 } // namespace erf_conductors

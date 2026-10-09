@@ -1,0 +1,16 @@
+# the lines in the converged RANS flow from 1500 s: 300 s to settle, statistics over 1800-2400 s (600 s, as the LES's)
+FILE = flow.inputs
+amr.restart    = chk03750
+max_step       = 6000
+stop_time      = 2400.0
+erf.plot_int_1 = -1
+erf.check_int  = -1
+erf.conductors.diagnostics_dir = conductors_random2
+erf.conductors.diagnostics_int = 1
+erf.conductors.air_density     = 1.16
+erf.conductors.stats_start     = 1800.0
+FILE = network.inputs
+erf.conductors.asce74_wind     = 40.
+erf.conductors.asce74_exposure = C
+erf.conductors.gust_type = random
+erf.conductors.gust_seed = 2
