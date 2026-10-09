@@ -325,6 +325,48 @@ TEST(FarsiteShape, AFuelBoundaryDoesNotLendTheSlowFuelsClock)
 }
 
 /**
+ * A one-cell fire line across the wind four cells downwind of a point source:
+ * the line's cells never burn, so nothing beyond it may burn either. The
+ * direct Huygens sources know nothing of what lies between source and
+ * target, and with every cell within nine cells of a burned cell a
+ * candidate (2026-10) the fire jumped the line until the straight path was
+ * checked for non-burnable and zero-rate cells (FireSuppression's farsite
+ * decks burned 249 m past a line held at 200 m).
+ */
+TEST(FarsiteShape, AFireLineBlocksTheDirectSources)
+{
+    const Real U = 1.5_rt, R = 0.1_rt;
+    Box domain(IntVect(0, 0, 0), IntVect(40, 40, 0));
+    BoxArray ba(domain);
+    ba.maxSize(IntVect(14, 14, 1));
+    DistributionMapping dm(ba);
+    Geometry geom(domain, RealBox(0.0, 0.0, 0.0, 410.0, 410.0, 1.0), CoordSys::cartesian, {false, false, false});
+    MultiFab phi(ba, dm, 1, 1), work(ba, dm, 2, 0), disp(ba, dm, 4, 0), at(ba, dm, 1, 0), msk(ba, dm, 1, 0);
+    MultiFab vel(ba, dm, 2, 0), ros(ba, dm, 1, 0);
+    phi.setVal(1.0_rt); work.setVal(0.0_rt); disp.setVal(0.0_rt); disp.setVal(-1.0_rt, 3, 1); at.setVal(-1.0_rt); msk.setVal(0.0_rt);
+    vel.setVal(U, 0, 1); vel.setVal(0.0_rt, 1, 1); ros.setVal(R);
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        if (mfi.validbox().contains(IntVect(20, 20, 0))) { phi.array(mfi)(20, 20, 0) = -1.0_rt; at.array(mfi)(20, 20, 0) = 0.0_rt; }
+        const Box& bx = mfi.validbox();
+        auto m = msk.array(mfi);
+        for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) { if (bx.contains(IntVect(24, j, 0))) { m(24, j, 0) = 1.0_rt; } }
+    }
+    FarsiteParams fp;
+    for (int n = 0; n < 120; ++n) { advance_fire_subcycle(phi, work, disp, at, vel, ros, geom, 10.0_rt, n * 10.0_rt, fp, nullptr, &msk); }
+    BoxArray one(domain);
+    MultiFab all(one, DistributionMapping(one), 1, 0);
+    all.ParallelCopy(at, 0, 0, 1);
+    int beyond = 0, before = 0;
+    for (MFIter mfi(all); mfi.isValid(); ++mfi) {
+        auto a = all.const_array(mfi);
+        for (int j = 0; j <= 40; ++j) { for (int i = 0; i <= 40; ++i) { if (a(i, j, 0) >= 0.0_rt) { if (i >= 24) { ++beyond; } else { ++before; } } } }
+    }
+    EXPECT_GT(before, 10) << "the fire runs up to the line";
+    EXPECT_GE(arrival_at(all, 23, 20), 0.0_rt) << "the cell before the line burns";
+    EXPECT_EQ(beyond, 0) << "no cell on or beyond the line burns";
+}
+
+/**
  * A lull: the rate drops from 0.1 to 0.03 m/s at 600 s, uniformly. The direct
  * sources credit the clock integral, so a cell the lull catches arrives at
  * 600 s + (gauge - 60 m) / 0.03: cell (6, 2) from the source at 1488.8 s.

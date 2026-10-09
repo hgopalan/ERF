@@ -625,7 +625,8 @@ void advance_farsite_one_step_legacy(
  * source about three cells upwind (the direction (c, a) = (2.7, 1)), and the
  * segment stencil alone gave a third of the flank rate. A direct source gives
  * the exact point-source arrival, and nine cells cover the source offset of
- * the widest Anderson ellipse (L/W = 8). The rate over the path is taken from
+ * the widest Anderson ellipse (L/W = 8); a source whose straight path to the
+ * cell crosses a non-burnable or zero-rate cell is not used. The rate over the path is taken from
  * a distance clock, component 2 of disp_accum, which every cell accumulates
  * as its own R dt from the start of the run; a cell that burns records the
  * clock at its arrival in component 3 (-1 until the update stamps it, so a
@@ -725,11 +726,12 @@ void advance_farsite_front_cells(
     const IntVect dhi = geom_fire.Domain().bigEnd();
     const bool per_x = geom_fire.isPeriodic(0);
     const bool per_y = geom_fire.isPeriodic(1);
-    MultiFab nbr(arrival_time.boxArray(), arrival_time.DistributionMap(), 4, IntVect(r_src, r_src, 0));
+    MultiFab nbr(arrival_time.boxArray(), arrival_time.DistributionMap(), 5, IntVect(r_src, r_src, 0));
     MultiFab::Copy(nbr, arrival_time, 0, 0, 1, 0);
     MultiFab::Copy(nbr, R_mf,         0, 1, 1, 0);
     MultiFab::Copy(nbr, disp_accum,   3, 2, 1, 0);   // the clock at burn of every burned cell
     MultiFab::Copy(nbr, disp_accum,   2, 3, 1, 0);   // and its clock now
+    if (use_mask) { MultiFab::Copy(nbr, *nonburnable, 0, 4, 1, 0); } else { nbr.setVal(0.0_rt, 4, 1, 0); }   // the mask, within the source stencil
     fire_fill_boundary(nbr, geom_fire);
 
     // With the ellipse a cell is a candidate when any burned cell lies within
@@ -875,6 +877,22 @@ void advance_farsite_front_cells(
                         const int ii = i + di;
                         if (!per_x && (ii < dlo[0] || ii > dhi[0])) { continue; }
                         if (nb(ii, jj, k, 0) < 0.0_rt) { continue; }
+                        // The straight path from the source must not cross a
+                        // non-burnable or zero-rate cell (a fire line, a
+                        // retardant drop at factor 0, a fuel-free strip): the
+                        // direct sources know nothing of what lies between,
+                        // and the candidates nine cells out jumped a one-cell
+                        // line. The cells nearest the segment, one per step.
+                        {
+                            const int nstep = amrex::max(std::abs(di), std::abs(dj));
+                            bool blocked = false;
+                            for (int m = 1; m < nstep && !blocked; ++m) {
+                                const int im = i + (2 * di * m + (di >= 0 ? nstep : -nstep)) / (2 * nstep);
+                                const int jm = j + (2 * dj * m + (dj >= 0 ? nstep : -nstep)) / (2 * nstep);
+                                if (nb(im, jm, k, 4) > 0.5_rt || !(nb(im, jm, k, 1) > 0.0_rt)) { blocked = true; }
+                            }
+                            if (blocked) { continue; }
+                        }
                         // The clock difference is the distance when both cells ran
                         // the same rate history; with a rate contrast (a fuel
                         // boundary, head against flank wind) it credits the
