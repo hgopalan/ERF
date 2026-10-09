@@ -312,7 +312,7 @@ public:
 
     /**
      * @brief Get the FARSITE sub-cell displacement accumulator.
-     * @return Pointer to fire_disp_accum MultiFab (2 components), or nullptr.
+     * @return Pointer to fire_disp_accum MultiFab (4 components), or nullptr.
      */
     const amrex::MultiFab* get_disp_accum() const
     {
@@ -676,6 +676,31 @@ public:
     /// Mutable access to the lagged latent flux buffer, for checkpoint restart.
     amrex::MultiFab* get_Q_lat_atm_prev_mut() { return m_Q_lat_atm_prev.get(); }
 
+    /// Heat-release diagnostic h (w0 - w) R [kW/m], the pre-2026-10 form of the
+    /// fireline intensity (ERF_FireDiagnostics.H); always allocated.
+    const amrex::MultiFab* get_heat_release() const { return fire_heat_release.get(); }
+    /// Initial fuel load per cell [kg/m2]: the uniform load, or each cell's own
+    /// model's with erf.fire.fuel_map.load_from_map.
+    const amrex::MultiFab* get_fuel_load_initial() const { return fire_fuel_load_initial.get(); }
+
+    /// Already-reported flags of the arrival-time probes and of the structure
+    /// exposure (first-arrival lines), carried by the checkpoint so a restart
+    /// does not print them again.
+    const std::vector<bool>& probe_reported() const { return m_probe_reported; }
+    void set_probe_reported(const std::vector<bool>& v)
+    {
+        if (v.size() != m_probe_reported.size()) {
+            amrex::Print() << "[FIRE] Checkpoint lists " << v.size() << " probe flags, this run has "
+                           << m_probe_reported.size() << " probes: matched by position\n";
+        }
+        for (std::size_t n = 0; n < v.size() && n < m_probe_reported.size(); ++n) { m_probe_reported[n] = v[n]; }
+    }
+    const std::vector<char>& exposure_reported() const { return m_exposure_reported; }
+    void set_exposure_reported(const std::vector<char>& v)
+    {
+        for (std::size_t n = 0; n < v.size() && n < m_exposure_reported.size(); ++n) { m_exposure_reported[n] = v[n]; }
+    }
+
     /// Set the fire step counter, for a restart: the spotting seed and the
     /// interval-based outputs derive from it.
     void set_step(int step) { m_step = step; }
@@ -819,7 +844,7 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_heat_flux;    // Heat flux [W/m2] on the fire grid
     std::unique_ptr<amrex::MultiFab>         fire_spread_vec;   // FARSITE scratch
     std::unique_ptr<amrex::MultiFab>         fire_arrival_time; // Fire arrival time [s]
-    std::unique_ptr<amrex::MultiFab>         fire_disp_accum;   // Persistent FARSITE accumulator (2 comp): displacement (legacy), or head-rate distance and front flag (front_cell)
+    std::unique_ptr<amrex::MultiFab>         fire_disp_accum;   // Persistent FARSITE accumulator (4 comp): displacement (legacy, 0-1), or head-rate distance, front flag, distance clock and clock at burn (front_cell)
     std::unique_ptr<amrex::MultiFab>         fire_surface_temp; // Surface temperature [K] (Phase 2)
     std::unique_ptr<amrex::MultiFab>         fire_surface_rh;   // Surface relative humidity [0-1] (Phase 2)
     std::unique_ptr<amrex::MultiFab>         fire_precip_rate;  // Rain rate wetting the dead classes [mm/hr]; null without a rain source
@@ -829,7 +854,9 @@ private:
     // from it. Fresh start: zero, where every scheme starts its accumulators.
     std::unique_ptr<amrex::MultiFab>         m_precip_accum_prev;
     bool                                     m_precip_prev_valid = true;
-    std::unique_ptr<amrex::MultiFab>         fire_fireline_intensity; // Byram fireline intensity [kW/m]
+    std::unique_ptr<amrex::MultiFab>         fire_fireline_intensity; // Byram fireline intensity h w0 R [kW/m]
+    std::unique_ptr<amrex::MultiFab>         fire_heat_release;       // h (w0 - w) R [kW/m], the intensity's pre-2026-10 form
+    std::unique_ptr<amrex::MultiFab>         fire_fuel_load_initial;  // Initial fuel load per cell [kg/m2]
     std::unique_ptr<amrex::MultiFab>         fire_flame_length;       // Thomas flame length [m]
     std::unique_ptr<amrex::MultiFab>         fire_flame_tilt;         // Flame tilt angle [deg from vertical] (Phase 9)
     std::unique_ptr<amrex::MultiFab>         fire_flame_temp;         // Flame temperature [K] (Phase 9)
@@ -840,6 +867,26 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_crown_ros_active;   // Active crown ROS [m/s], carried from
                                                                       // apply_crown_fire_ros() to the heat-flux pass
     std::unique_ptr<amrex::MultiFab>         fire_crown_fraction_burned; // Crown fraction burned [0-1] (Phase 9)
+    // Crown rate carried into the band the front can reach, as the factor
+    // R / R_surface the per-stage level-set paths apply (extend_crown_ros_to_front),
+    // and the surface-only scratch fields of apply_crown_fire_ros(), allocated once.
+    std::unique_ptr<amrex::MultiFab>         fire_crown_factor;
+    std::unique_ptr<amrex::MultiFab>         m_crown_surface_ros;
+    std::unique_ptr<amrex::MultiFab>         m_crown_surface_intensity;
+    std::unique_ptr<amrex::MultiFab>         m_crown_surface_flame_length;
+
+    // Level set at the start of each subcycle, for the arrival-time stamp
+    // interpolated in time (fire_levelset::stamp_arrival_time).
+    std::unique_ptr<amrex::MultiFab>         m_phi_prev;
+    // Stage fields of the level-set advection and reinitialisation, allocated
+    // once rather than on every subcycle.
+    fire_levelset::Scratch                   m_ls_scratch;
+
+    // Domain means of the five moisture classes, computed once per step after
+    // the moisture update (the Rothermel rebuild, the Balbi and Cheney-Gould
+    // states, the latent flux and the flux partition all read them; they were
+    // reduced three times per step each).
+    amrex::Real                              m_avg_mc[5] = {0.08, 0.08, 0.10, 0.60, 0.60};
 
     // Phase 8: Albini spotting diagnostics (4 comp, on fire grid)
     // comp 0: lofting height H_z [m], comp 1: brand count,
@@ -1004,6 +1051,22 @@ private:
 
     /// Rebuild m_d_rc_table at the given dead fuel moistures.
     void rebuild_rothermel_table(amrex::Real m1, amrex::Real m10, amrex::Real m100);
+
+    /// Domain means of the moisture classes into m_avg_mc (dead classes clamped
+    /// to [0.01, 0.40] as the Rothermel rebuild always clamped them).
+    void update_moisture_means();
+
+    /// The per-cell Rothermel coefficients (erf.fire.rothermel_cell_moisture),
+    /// inactive (null field) when the option or dynamic moisture is off.
+    RothermelCellInputs rothermel_cell_inputs() const;
+
+    /// Rebuild fire_rc_cell from each cell's own dead moistures, once per step
+    /// (the cell's fuel code only under rothermel_per_fuel, the uniform fuel otherwise).
+    void rebuild_cell_rothermel_coefficients();
+
+    /// Packed per-cell Rothermel coefficients, ROTHERMEL_RC_NCOMP components
+    /// (erf.fire.rothermel_cell_moisture with moisture_dynamic; else unset)
+    std::unique_ptr<amrex::MultiFab>         fire_rc_cell;
 
     // Phase 15: BEHAVE pre-computed state (set in initialize from domain-avg moisture,
     // updated in advance when moisture_dynamic = false)

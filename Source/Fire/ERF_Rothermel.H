@@ -212,22 +212,56 @@ FuelModelParams get_anderson_fuel_params(int model_id)
     return fp;
 }
 
+/// Which wind limit erf.fire.use_wind_limit applies, erf.fire.wind_limit
+namespace fire_wind_limit {
+    constexpr int rothermel  = 0;   ///< "rothermel": U_max = 0.9 I_R (Rothermel 1972 eq. 87; Andrews 2018)
+    constexpr int fuel_class = 1;   ///< "fuel_class": 300 ft/min for sigma > 1000 1/ft, 500 ft/min otherwise (this code's rule before 2026-10)
+}
+
 /**
- * @brief Midflame wind cap of the Rothermel wind factor [ft/min]
+ * @brief Rothermel's (1972) wind limit [ft/min]: U_max = 0.9 I_R
  *
- * 300 ft/min for fine fuels (sigma > 1000 1/ft) and 500 ft/min otherwise, or no
- * cap when erf.fire.use_wind_limit = false: the largest Real, which the kernels'
- * min() never selects.
+ * Eq. 87 of INT-115 (the "wind limit" of Andrews 2018, applied in BehavePlus
+ * and FARSITE): the effective wind speed in ft/min is limited to 0.9 times the
+ * reaction intensity in BTU/ft2/min. For short grass at 8 % moisture I_R is
+ * about 765 BTU/ft2/min, so the cap is 690 ft/min (3.5 m/s midflame), and it
+ * rises with drier or heavier fuel.
  *
- * @param[in] sigma           Characteristic surface-area-to-volume ratio [1/ft]
- * @param[in] use_wind_limit  erf.fire.use_wind_limit
+ * @param[in] I_R  Reaction intensity [BTU/ft2/min]
  * @return U_max [ft/min]
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real rothermel_wind_cap_ftmin(amrex::Real sigma, bool use_wind_limit) noexcept
+amrex::Real rothermel_wind_limit_ftmin(amrex::Real I_R) noexcept
+{
+    return amrex::Real(0.9) * amrex::max(I_R, amrex::Real(0.0));
+}
+
+/**
+ * @brief Midflame wind cap of the Rothermel wind factor [ft/min]
+ *
+ * With erf.fire.use_wind_limit = true (default) and erf.fire.wind_limit =
+ * "rothermel" (default) this is Rothermel's own U_max = 0.9 I_R; with
+ * wind_limit = "fuel_class" it is the absolute rule this code used until
+ * October 2026, 300 ft/min for fine fuels (sigma > 1000 1/ft) and 500 ft/min
+ * otherwise, which capped every grass fire above a 4.2 m/s reference wind.
+ * With use_wind_limit = false there is no cap: the largest Real, which the
+ * kernels' min() never selects.
+ *
+ * @param[in] sigma           Characteristic surface-area-to-volume ratio [1/ft]
+ * @param[in] I_R             Reaction intensity [BTU/ft2/min]
+ * @param[in] use_wind_limit  erf.fire.use_wind_limit
+ * @param[in] wind_limit_mode fire_wind_limit::rothermel or fire_wind_limit::fuel_class
+ * @return U_max [ft/min]
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real rothermel_wind_cap_ftmin(amrex::Real sigma, amrex::Real I_R, bool use_wind_limit,
+                                     int wind_limit_mode = fire_wind_limit::rothermel) noexcept
 {
     if (!use_wind_limit) { return std::numeric_limits<amrex::Real>::max(); }
-    return (sigma > amrex::Real(1000.0)) ? amrex::Real(300.0) : amrex::Real(500.0);
+    if (wind_limit_mode == fire_wind_limit::fuel_class) {
+        return (sigma > amrex::Real(1000.0)) ? amrex::Real(300.0) : amrex::Real(500.0);
+    }
+    return rothermel_wind_limit_ftmin(I_R);
 }
 
 /**
@@ -251,13 +285,156 @@ struct RothermelComputed
 };
 
 /**
+ * @brief Rothermel fuel/moisture coefficients, evaluable per cell on the device
+ *
+ * The body of compute_rothermel_params(): every quantity that depends on the
+ * fuel and the dead moistures but not on wind or slope. Host callers build one
+ * state per step through compute_rothermel_params(); the kernels build one per
+ * cell from the cell's own moistures with erf.fire.rothermel_cell_moisture
+ * (RothermelCellInputs), the way BEHAVE does.
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+RothermelComputed rothermel_coefficients(const FuelModelParams& fp,
+                                         amrex::Real moisture_1hr,
+                                         amrex::Real moisture_10hr,
+                                         amrex::Real moisture_100hr,
+                                         bool use_wind_limit = true,
+                                         int wind_limit_mode = fire_wind_limit::rothermel) noexcept
+{
+    using amrex::Real;
+    RothermelComputed rc;
+
+    // Unit conversions
+    const Real FT_MIN_TO_M_S = 0.00508;
+
+    // Standard mineral contents (Rothermel 1972)
+    const Real S_T = 0.0555;   // Total mineral content
+    const Real S_e = 0.010;    // Effective mineral content
+
+    // ===================================================================
+    // 1. Total fuel load and weighted moisture (single-class path)
+    // ===================================================================
+    Real w_0 = fp.w_d1 + fp.w_d10 + fp.w_d100 + fp.w_lh + fp.w_lw;  // total oven-dry load [lb/ft²]
+
+    // Compute weighted dead fuel moisture
+    Real w_d = fp.w_d1 + fp.w_d10 + fp.w_d100;
+    Real M_f = 0.0;  // weighted fuel moisture fraction
+    // floored dead load before the branch (a live-only custom fuel has
+    // w_d = 0 and the unselected 0/0 would be speculated under the traps)
+    const Real inv_w_d = 1.0 / amrex::max(w_d, Real(1.0e-6));
+    if (w_d > 1.0e-6) {
+        Real r_d1 = fp.w_d1 * inv_w_d;
+        Real r_d10 = fp.w_d10 * inv_w_d;
+        Real r_d100 = fp.w_d100 * inv_w_d;
+        M_f = r_d1 * moisture_1hr + r_d10 * moisture_10hr + r_d100 * moisture_100hr;
+    }
+
+    // ===================================================================
+    // 2. Net fuel load (Eq. 24)
+    // ===================================================================
+    Real w_n = w_0 * (1.0 - S_T);
+
+    // ===================================================================
+    // 3. Bulk density and packing ratio (Eq. 24)
+    // ===================================================================
+    Real rho_b = w_0 / fp.delta;  // lb/ft³
+    Real beta = rho_b / fp.rho_p;
+
+    // ===================================================================
+    // 4-7. Reaction velocity components (Eqs. 36-38)
+    // ===================================================================
+    // Use sigma_d1 as characteristic SAV
+    Real sigma = fp.sigma_d1;
+    sigma = amrex::max(static_cast<amrex::Real>(sigma), static_cast<amrex::Real>(100.0));  // Minimum SAV guard
+
+    Real beta_op = 3.348 * std::pow(sigma, -0.8189);           // Eq. 37: optimum packing ratio
+    Real sigma_1p5 = std::pow(sigma, 1.5);
+    Real Gamma_max = sigma_1p5 / (495.0 + 0.0594 * sigma_1p5); // Eq. 36: maximum reaction velocity
+    Real A = 133.0 * std::pow(sigma, -0.7913);                 // A coefficient, Albini (1976) revision of Rothermel Eq. 39
+    Real beta_ratio = beta / beta_op;
+    Real Gamma_prime = Gamma_max * std::pow(beta_ratio, A) * std::exp(A * (1.0 - beta_ratio)); // Eq. 38
+
+    // ===================================================================
+    // 8-10. Moisture damping (Eq. 29) and mineral damping (Eq. 30)
+    // ===================================================================
+    Real rm = amrex::min(static_cast<amrex::Real>(M_f / fp.Mx), static_cast<amrex::Real>(1.0));
+    Real eta_M = amrex::max(0.0, 1.0 - 2.59*rm + 5.11*rm*rm - 3.52*rm*rm*rm);  // Eq. 29
+    Real eta_s = 0.174 * std::pow(S_e, -0.19);                                  // Eq. 30
+
+    // ===================================================================
+    // 11. Reaction intensity (Eq. 27)
+    // ===================================================================
+    Real I_R = Gamma_prime * w_n * fp.heat_content * eta_M * eta_s;
+    I_R = amrex::max(static_cast<amrex::Real>(I_R), static_cast<amrex::Real>(0.01));
+
+    // ===================================================================
+    // 12-15. Propagating flux ratio, heating number, heat of preignition, and R0 (Eqs. 1, 12, 14, 42)
+    // ===================================================================
+    Real xi = std::exp((0.792 + 0.681 * std::sqrt(sigma)) * (beta + 0.1))
+              / (192.0 + 0.2595 * sigma);                                      // Eq. 42
+    Real eps_h = std::exp(-138.0 / sigma);                                     // Eq. 14
+    Real Q_ig = 250.0 + 1116.0 * M_f;                                          // Eq. 12: heat of preignition
+    Real R0_ft_min = (I_R * xi) / (rho_b * eps_h * Q_ig);                      // Eq. 1: no-wind ROS [ft/min]
+
+    // ===================================================================
+    // 16-18. Wind factor coefficients (Eqs. 47-49)
+    // ===================================================================
+    Real C = 7.47 * std::exp(-0.133 * std::pow(sigma, 0.55));           // Eq. 47 (Rothermel 1972, raw sigma path)
+    Real B = 0.02526 * std::pow(sigma, 0.54);                           // Eq. 48
+    Real E = 0.715 * std::exp(-3.59e-4 * sigma);                        // Eq. 49
+
+    // ===================================================================
+    // 19. Packing ratio wind factor
+    // ===================================================================
+    Real beta_ratio_E = std::pow(beta_ratio, -E);
+
+    // ===================================================================
+    // 20. Slope factor coefficient (Eq. 51)
+    // ===================================================================
+    Real phi_s_const = 5.275 * std::pow(beta, -0.3);
+
+    // ===================================================================
+    // 21. Wind limit
+    // ===================================================================
+    // Rothermel (1972) Eq. 87 caps the WIND SPEED at U_max [ft/min] = 0.9 I_R
+    // [BTU/ft²/min] (the "wind limit" of Andrews 2018), the default
+    // (erf.fire.wind_limit = "rothermel"). Until October 2026 this code used
+    // its own fuel-class rule instead, an absolute cap on the midflame wind
+    // (300 ft/min for sigma > 1000 ft⁻¹, 500 ft/min otherwise), which capped
+    // short grass above a 4.2 m/s reference wind at 2.3x below Rothermel's
+    // limit; it is kept as erf.fire.wind_limit = "fuel_class".
+    // erf.fire.use_wind_limit = false removes the cap (rothermel_wind_cap_ftmin).
+    Real U_max_ftmin = rothermel_wind_cap_ftmin(sigma, I_R, use_wind_limit, wind_limit_mode);
+
+    // ===================================================================
+    // Store results in RothermelComputed
+    // ===================================================================
+    rc.R0           = R0_ft_min * FT_MIN_TO_M_S;  // Convert ft/min → m/s
+    rc.C            = C;
+    rc.B            = B;
+    rc.beta_ratio_E = beta_ratio_E;
+    rc.beta         = beta;
+    rc.phi_s_const  = phi_s_const;
+    rc.U_max_ftmin  = U_max_ftmin;
+    rc.wind_conv    = 196.85;    // m/s → ft/min
+    rc.ros_conv     = 1.0;       // 1, not a unit factor: rc.R0 is already in m/s (ERF_AlbiniSpotting.H builds
+                                 // its own rc with 0.00508 when it needs ft/min)
+    rc.I_R          = I_R;
+
+    return rc;
+}
+
+
+/**
  * @brief Compute Rothermel fuel/moisture coefficients
  *
  * Precomputes all Rothermel intermediate quantities that depend only on
  * fuel type and moisture content (not on wind/slope).
  *
  * @param[in] fp FuelModelParams for selected fuel model
- * @param[in] use_wind_limit  Apply the MEWS cap (erf.fire.use_wind_limit)
+ * @param[in] use_wind_limit  Apply the wind limit (erf.fire.use_wind_limit)
+ * @param[in] wind_limit_mode Which limit (erf.fire.wind_limit): fire_wind_limit::rothermel
+ *                            (U_max = 0.9 I_R, default) or ::fuel_class (300/500 ft/min)
  * @return RothermelComputed with precomputed coefficients
  *
  * Implements the full Rothermel model:
@@ -265,13 +442,14 @@ struct RothermelComputed
  * - Propagating flux ratio Ξ and damping coefficients
  * - No-wind ROS R0 from I_R and fuel characteristics
  * - Wind and slope factor coefficients C, B, E
- * - MEWS cap U_max_ftmin (none when use_wind_limit is false)
+ * - Wind limit U_max_ftmin (none when use_wind_limit is false)
  */
 RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
                                            amrex::Real moisture_1hr,
                                            amrex::Real moisture_10hr,
                                            amrex::Real moisture_100hr,
-                                           bool use_wind_limit = true);
+                                           bool use_wind_limit = true,
+                                           int wind_limit_mode = fire_wind_limit::rothermel);
 
 /**
  * @brief Compute rate-of-spread for a single fire cell (GPU kernel)
@@ -309,9 +487,10 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
  *
  * Wind-speed cap:
  *   - U_eff above U_max_ftmin is replaced by U_max_ftmin in the wind factor
- *   - U_max_ftmin is this code's own fuel-class rule (300 ft/min for
- *     sigma > 1000 1/ft, 500 ft/min otherwise, rothermel_wind_cap_ftmin),
- *     not Rothermel's U_max = 0.9 I_R (Eq. 87; Andrews 2018 "wind limit")
+ *   - U_max_ftmin is Rothermel's U_max = 0.9 I_R (Eq. 87; Andrews 2018 "wind
+ *     limit") with erf.fire.wind_limit = "rothermel" (default), or this code's
+ *     earlier fuel-class rule (300 ft/min for sigma > 1000 1/ft, 500 ft/min
+ *     otherwise) with "fuel_class"; see rothermel_wind_cap_ftmin
  *   - With erf.fire.use_wind_limit = false U_max_ftmin is the largest Real
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -381,6 +560,78 @@ void compute_ros_field(
     const amrex::MultiFab& fire_slopes,
     const RothermelComputed& rc);
 
+/// Components of the packed per-cell coefficient field (pack_rothermel)
+inline constexpr int ROTHERMEL_RC_NCOMP = 10;
+
+/// Write a coefficient set into component 0.. of a cell of a packed field
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+void pack_rothermel(const RothermelComputed& rc, amrex::Array4<amrex::Real> const& a, int i, int j) noexcept
+{
+    a(i, j, 0, 0) = rc.R0;          a(i, j, 0, 1) = rc.C;           a(i, j, 0, 2) = rc.B;
+    a(i, j, 0, 3) = rc.beta_ratio_E; a(i, j, 0, 4) = rc.beta;       a(i, j, 0, 5) = rc.phi_s_const;
+    a(i, j, 0, 6) = rc.U_max_ftmin; a(i, j, 0, 7) = rc.wind_conv;   a(i, j, 0, 8) = rc.ros_conv;
+    a(i, j, 0, 9) = rc.I_R;
+}
+
+/// Read a cell's coefficient set back from a packed field
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+RothermelComputed unpack_rothermel(amrex::Array4<const amrex::Real> const& a, int i, int j) noexcept
+{
+    RothermelComputed rc;
+    rc.R0 = a(i, j, 0, 0);           rc.C = a(i, j, 0, 1);         rc.B = a(i, j, 0, 2);
+    rc.beta_ratio_E = a(i, j, 0, 3); rc.beta = a(i, j, 0, 4);      rc.phi_s_const = a(i, j, 0, 5);
+    rc.U_max_ftmin = a(i, j, 0, 6);  rc.wind_conv = a(i, j, 0, 7); rc.ros_conv = a(i, j, 0, 8);
+    rc.I_R = a(i, j, 0, 9);
+    return rc;
+}
+
+/**
+ * @struct RothermelCellInputs
+ * @brief The per-cell Rothermel coefficients (erf.fire.rothermel_cell_moisture
+ *        with erf.fire.moisture_dynamic): a packed field of ROTHERMEL_RC_NCOMP
+ *        components built once per fire step from each cell's own dead
+ *        moistures (build_cell_rothermel_coefficients), which the kernels
+ *        read instead of the uniform set or the per-fuel table. Inactive
+ *        (rc_cell null) the kernels take the coefficients they are handed.
+ */
+struct RothermelCellInputs
+{
+    const amrex::MultiFab* rc_cell = nullptr;   ///< packed coefficients per cell
+    bool active() const { return rc_cell != nullptr; }
+};
+
+/**
+ * @brief Build the packed per-cell coefficient field from the moisture field
+ *
+ * Each cell's coefficients come from its own dead moistures (components 0-2
+ * of fuel_mc, clamped to [0.01, 0.40] as the domain-mean rebuild clamps them)
+ * and its fuel: the code of fuel_model through the slot table when fuel_model
+ * is given (erf.fire.rothermel_per_fuel on a spatial fuel map), the uniform
+ * fuel otherwise. A cell whose fuel has no load (a non-burnable code) gets
+ * the zeroed set and cannot spread. Once per step, not per kernel call: the
+ * directional stages read the field at every substep.
+ *
+ * @param[out] rc_cell    ROTHERMEL_RC_NCOMP-component field on the fire grid
+ * @param[in]  fuel_mc    Moisture field (components 0-2 the dead classes)
+ * @param[in]  fuel_model Per-cell fuel code, or nullptr for the uniform fuel
+ * @param[in]  fp_tbl     Device fuel properties by slot (with fuel_model)
+ * @param[in]  fp_tbl_size Entries in fp_tbl
+ * @param[in]  fuel_set   FUEL_SET_ANDERSON13 or FUEL_SET_SCOTT_BURGAN40
+ * @param[in]  M_live     Live moisture for the Scott-Burgan transfer
+ * @param[in]  fp_uniform The uniform fuel
+ * @param[in]  use_wind_limit, wind_limit_mode  erf.fire.use_wind_limit, wind_limit
+ */
+void build_cell_rothermel_coefficients(amrex::MultiFab& rc_cell,
+                                       const amrex::MultiFab& fuel_mc,
+                                       const amrex::MultiFab* fuel_model,
+                                       const FuelModelParams* fp_tbl,
+                                       int fp_tbl_size,
+                                       int fuel_set,
+                                       amrex::Real M_live,
+                                       const FuelModelParams& fp_uniform,
+                                       bool use_wind_limit,
+                                       int wind_limit_mode);
+
 /// Entries in the per-fuel Rothermel table, one per fuel table slot.
 inline constexpr int ROTHERMEL_TABLE_SIZE = 70;   ///< FUEL_SLOT_COUNT: 0 non-burnable, 1-13 Anderson, 14-53 Scott-Burgan, 54-69 deck-defined
 ///< ERF_FuelModels.H static_asserts this against FUEL_SLOT_COUNT; this header cannot include it (it is included by it).
@@ -396,11 +647,12 @@ inline constexpr int ROTHERMEL_TABLE_SIZE = 70;   ///< FUEL_SLOT_COUNT: 0 non-bu
  * @param[in] moisture_1hr   1-hour dead fuel moisture [fraction]
  * @param[in] moisture_10hr  10-hour dead fuel moisture [fraction]
  * @param[in] moisture_100hr 100-hour dead fuel moisture [fraction]
- * @param[in] use_wind_limit Apply the MEWS cap (erf.fire.use_wind_limit)
+ * @param[in] use_wind_limit Apply the wind limit (erf.fire.use_wind_limit)
  * @param[in] fp_tbl         Fuel properties of every slot
  *                           (build_fuel_params_slot_table), which is how the
  *                           deck-defined models of ERF_CustomFuel.H reach the
  *                           coefficients; nullptr takes the published sets only
+ * @param[in] wind_limit_mode Which wind limit (erf.fire.wind_limit), fire_wind_limit::*
  * @return host-side vector of size ROTHERMEL_TABLE_SIZE
  */
 std::vector<RothermelComputed> build_fuel_rothermel_table(
@@ -410,7 +662,8 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
     int fuel_set = 0,
     amrex::Real moisture_live = -1.0,
     bool use_wind_limit = true,
-    const FuelModelParams* fp_tbl = nullptr);
+    const FuelModelParams* fp_tbl = nullptr,
+    int wind_limit_mode = fire_wind_limit::rothermel);
 
 /**
  * @brief Compute the rate-of-spread field with per-cell Rothermel coefficients
@@ -428,6 +681,9 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
  * @param[in]  table_size   Entries in table
  * @param[in]  fuel_set     Fuel model set the codes belong to (ERF_FuelModels.H); with
  *                          the Anderson set a code outside 0-13 falls to rc_default as before
+ * @param[in]  cell_mc      With fuel_mc set, rebuild the coefficients per cell from the
+ *                          cell's own dead moistures (and its own fuel on a map) instead
+ *                          of reading rc_default / the table
  */
 void compute_ros_field(
     amrex::MultiFab& fire_ros,
@@ -437,6 +693,7 @@ void compute_ros_field(
     const amrex::MultiFab* fuel_model,
     const RothermelComputed* table,
     int table_size,
-    int fuel_set = 0);
+    int fuel_set = 0,
+    const RothermelCellInputs* cell_mc = nullptr);
 
 #endif

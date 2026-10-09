@@ -6,6 +6,7 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_Gpu.H>
 #include <ERF_NumericalSchemes.H>
+#include <ERF_LevelSetAdvection.H>
 
 /**
  * @file ERF_Reinitialize.H
@@ -288,10 +289,13 @@ inline void reinitialize_phi_jiang_peng(amrex::MultiFab& phi,
                                          amrex::Real dtau,
                                          const amrex::MultiFab* mask = nullptr,
                                          bool wall_extrap = false,
-                                         amrex::Real sign_eps2_override = -1.0)
+                                         amrex::Real sign_eps2_override = -1.0,
+                                         Scratch* scratch = nullptr)
 {
     using namespace amrex;
-    const auto* dx = geom.CellSize();
+    // GpuArray by value: geom.CellSize() hands back a pointer into host Geometry
+    // members, which the device lambdas below cannot dereference.
+    const auto dx = geom.CellSizeArray();
     // Jiang & Peng (1997 CAM 97-29 / 2000 SIAM), Example 6: s = phi0/sqrt(phi0^2+delta)
     // with "delta comparable to the spatial step size" -- their delta is the term
     // ADDED to phi0^2 (area-scale, so delta~dx^2 is the only dimensionally consistent
@@ -302,13 +306,14 @@ inline void reinitialize_phi_jiang_peng(amrex::MultiFab& phi,
     const Real delta = std::sqrt(sign_eps2);
     const LevelSetGradient grad{LEVELSET_GRAD_WENO5Z, -1.0, -1.0, 0.0, 0.0};
 
-    MultiFab phi_in(phi.boxArray(), phi.DistributionMap(), 1, 3);
-    phi_in.ParallelCopy(phi);
-
-    MultiFab phi_work(phi.boxArray(), phi.DistributionMap(), 1, 3);
-    phi_work.ParallelCopy(phi);
-    MultiFab stage1(phi.boxArray(), phi.DistributionMap(), 1, 3);
-    MultiFab stage2(phi.boxArray(), phi.DistributionMap(), 1, 3);
+    Scratch local;
+    Scratch& sc = Scratch::select(scratch, local, phi);
+    MultiFab& phi_in   = sc.phi_in;
+    MultiFab& phi_work = sc.phi0;
+    MultiFab& stage1   = sc.stage;
+    MultiFab& stage2   = sc.stage2;
+    MultiFab::Copy(phi_in, phi, 0, 0, 1, 0);
+    MultiFab::Copy(phi_work, phi, 0, 0, 1, 0);
 
     for (int iter = 0; iter < n_iters; ++iter) {
         fire_fill_boundary(phi_work, geom);
@@ -374,7 +379,7 @@ inline void reinitialize_phi_jiang_peng(amrex::MultiFab& phi,
         });
     }
 
-    phi.ParallelCopy(phi_work);
+    MultiFab::Copy(phi, phi_work, 0, 0, 1, 0);
 }
 
 /**
@@ -407,16 +412,23 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
                               amrex::Real dtau,
                               amrex::Real band_m,
                               const amrex::MultiFab* mask = nullptr,
-                              bool wall_extrap = false)
+                              bool wall_extrap = false,
+                              Scratch* scratch = nullptr)
 {
     using namespace amrex;
-    const auto* dx = geom.CellSize();
+    // GpuArray by value, as above: the kernels read dx on the device.
+    const auto dx = geom.CellSizeArray();
     const Real threshold_HLu = band_m;
 
-    MultiFab phi_in(phi.boxArray(), phi.DistributionMap(), 1, 3);
-    phi_in.ParallelCopy(phi); // lfn_in: fixed for the whole call (final clamp reference)
+    Scratch local;
+    Scratch& sc = Scratch::select(scratch, local, phi);
+    MultiFab& phi_in = sc.phi_in;
+    MultiFab& S      = sc.S;
+    MultiFab& phi0   = sc.phi0;
+    MultiFab& stage  = sc.stage;
+    MultiFab& stage2 = sc.stage2;
+    MultiFab::Copy(phi_in, phi, 0, 0, 1, 0); // lfn_in: fixed for the whole call (final clamp reference)
 
-    MultiFab S(phi.boxArray(), phi.DistributionMap(), 1, 3);
     {
         // S(phi0) computed ONCE from the field at call entry, held fixed
         // across every outer iteration and every RK stage.
@@ -432,10 +444,7 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
         fire_fill_boundary(S, geom);
     }
 
-    MultiFab phi0(phi.boxArray(), phi.DistributionMap(), 1, 3);
-    MultiFab stage(phi.boxArray(), phi.DistributionMap(), 1, 3);
-    MultiFab stage2(phi.boxArray(), phi.DistributionMap(), 1, 3);
-    phi0.ParallelCopy(phi); // lfn_s3, the base each outer iteration's 3 RK stages advance from
+    MultiFab::Copy(phi0, phi, 0, 0, 1, 0); // lfn_s3, the base each outer iteration's 3 RK stages advance from
 
     for (int outer = 0; outer < n_outer; ++outer) {
         fire_fill_boundary(phi0, geom);
@@ -502,7 +511,7 @@ inline void reinitialize_phi(amrex::MultiFab& phi,
         });
     }
 
-    phi.ParallelCopy(phi0);
+    MultiFab::Copy(phi, phi0, 0, 0, 1, 0);
 }
 
 } // namespace fire_levelset

@@ -138,17 +138,15 @@
  */
 struct DirectionalRosState
 {
-    /// 0 = Rothermel, 1 = BEHAVE, 2 = MacArthur, 3 = Cheney-Gould, 4 = FBP
+    /// 0 = Rothermel, 1 = BEHAVE, 2 = MacArthur, 3 = Cheney-Gould (or grass_simple), 4 = FBP
     int model = 0;
 
     RothermelComputed   rc{};
     BehaveState         bs{};
-    CheneyGouldComputed cgc{};
+    CheneyGouldComputed cgc{};   ///< the 1998 model or the grass_simple fit, by cgc.model
     FbpComputed         fbp{};
 
-    /// Cheney-Gould inputs, which its per-cell function takes directly
-    amrex::Real cg_moisture = 10.0;   ///< Dead fine fuel moisture [%]
-    amrex::Real cg_curing   = 1.0;    ///< Degree of curing [0-1]
+    amrex::Real macarthur_ros_max = 6.0;   ///< erf.fire.macarthur.ros_max; <= 0 none
 };
 
 /// Model selectors, matching DirectionalRosState::model
@@ -216,9 +214,9 @@ amrex::Real directional_ros_cell(const DirectionalRosState& st,
         case DIRECTIONAL_ROS_BEHAVE:
             return behave_ros_cell(U, amrex::Real(0.0), s, amrex::Real(0.0), st.bs);
         case DIRECTIONAL_ROS_MACARTHUR:
-            return macarthur_ros(U);
+            return macarthur_ros(U, st.macarthur_ros_max);
         case DIRECTIONAL_ROS_CHENEY_GOULD:
-            return cheney_gould_ros(U, st.cgc.ros_backing, st.cg_moisture, st.cg_curing);
+            return cheney_gould_ros(U, st.cgc);
         case DIRECTIONAL_ROS_FBP:
             return fbp_ros(st.fbp, U, s);
         default:
@@ -397,6 +395,9 @@ amrex::Real directional_ellipse_speed(const DirectionalEllipse& d,
  * @param[in]  wind_coupling   DIRECTIONAL_WIND_COUPLING_PROJECTION (default) or
  *                     _ADVECTIVE; Rothermel-with-DIRECTIONAL_SHAPE_PROJECTION only,
  *                     see directional_ros_cell()
+ * @param[in]  cell_mc  With rc_cell set, the Rothermel coefficients are read per
+ *                     cell from the field built once per step from the cell's
+ *                     own dead moistures, erf.fire.rothermel_cell_moisture
  */
 inline void fill_directional_ros(amrex::MultiFab& R_mf,
                                  const amrex::MultiFab& phi,
@@ -413,7 +414,8 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
                                  const amrex::MultiFab* fuel_model = nullptr,
                                  const RothermelComputed* rc_tbl = nullptr,
                                  int rc_tbl_size = 0,
-                                 int fuel_set = 0)
+                                 int fuel_set = 0,
+                                 const RothermelCellInputs* cell_mc = nullptr)
 {
     const amrex::Real dx = geom.CellSize(0);
     const amrex::Real dy = geom.CellSize(1);
@@ -423,6 +425,11 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
     // Rothermel has a per-fuel coefficient table, so only its branch varies.
     const bool per_fuel = (rc_tbl != nullptr) && (rc_tbl_size > 0)
                         && (fuel_model != nullptr) && (st.model == DIRECTIONAL_ROS_ROTHERMEL);
+    // erf.fire.rothermel_cell_moisture: the coefficients of the cell's own
+    // dead moistures, from the packed field built once per step
+    const bool per_cell_mc = (cell_mc != nullptr) && cell_mc->active()
+                           && (st.model == DIRECTIONAL_ROS_ROTHERMEL);
+    const bool has_codes = (fuel_model != nullptr) && (st.model == DIRECTIONAL_ROS_ROTHERMEL);
 
     for (amrex::MFIter mfi(R_mf); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.validbox();
@@ -431,7 +438,9 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
         auto wind_arr   = wind.const_array(mfi);
         auto slopes_arr = slopes.const_array(mfi);
         amrex::Array4<const amrex::Real> fuel_arr;
-        if (per_fuel) { fuel_arr = fuel_model->const_array(mfi); }
+        if (has_codes) { fuel_arr = fuel_model->const_array(mfi); }
+        amrex::Array4<const amrex::Real> rcc_arr;
+        if (per_cell_mc) { rcc_arr = cell_mc->rc_cell->const_array(mfi); }
         const fire_levelset::WallStencil wall =
             fire_levelset::make_wall_stencil(mask, wall_extrap, mfi);
 
@@ -460,7 +469,9 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
             // an unknown code keeps the uniform entry, as the isotropic
             // compute_ros_field does.
             DirectionalRosState st_cell = st;
-            if (per_fuel) {
+            if (per_cell_mc) {
+                st_cell.rc = unpack_rothermel(rcc_arr, i, j);
+            } else if (per_fuel) {
                 const int code = static_cast<int>(fuel_arr(i, j, k) + amrex::Real(0.5));
                 const int idx  = fuel_table_index(code, fuel_set);
                 if (idx >= 0 && idx < rc_tbl_size) { st_cell.rc = rc_tbl[idx]; }
@@ -531,12 +542,15 @@ inline void fill_advective_VwVs(amrex::MultiFab& VwVs,
                                 const RothermelComputed* rc_tbl = nullptr,
                                 int rc_tbl_size = 0,
                                 int fuel_set = 0,
-                                const amrex::MultiFab* ros_scale = nullptr)
+                                const amrex::MultiFab* ros_scale = nullptr,
+                                const RothermelCellInputs* cell_mc = nullptr)
 {
     // erf.fire.rothermel_per_fuel on a spatial fuel map: the coefficients come
     // from the cell's own fuel model rather than erf.fire.fuel_model_id, as in
     // fill_directional_ros. An unknown code keeps the uniform entry.
     const bool per_fuel = (rc_tbl != nullptr) && (rc_tbl_size > 0) && (fuel_model != nullptr);
+    const bool per_cell_mc = (cell_mc != nullptr) && cell_mc->active();
+    const bool has_codes = (fuel_model != nullptr);
 
     for (amrex::MFIter mfi(VwVs); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.validbox();
@@ -544,7 +558,9 @@ inline void fill_advective_VwVs(amrex::MultiFab& VwVs,
         auto wind_arr = wind.const_array(mfi);
         auto slopes_arr = slopes.const_array(mfi);
         amrex::Array4<const amrex::Real> fuel_arr;
-        if (per_fuel) { fuel_arr = fuel_model->const_array(mfi); }
+        if (has_codes) { fuel_arr = fuel_model->const_array(mfi); }
+        amrex::Array4<const amrex::Real> rcc_arr;
+        if (per_cell_mc) { rcc_arr = cell_mc->rc_cell->const_array(mfi); }
         amrex::Array4<const amrex::Real> scale_arr;
         if (ros_scale != nullptr) { scale_arr = ros_scale->const_array(mfi); }
         const bool scaled = (ros_scale != nullptr);
@@ -553,7 +569,9 @@ inline void fill_advective_VwVs(amrex::MultiFab& VwVs,
             const int i = iv[0], j = iv[1], k = iv[2];
 
             RothermelComputed rc = st.rc;
-            if (per_fuel) {
+            if (per_cell_mc) {
+                rc = unpack_rothermel(rcc_arr, i, j);
+            } else if (per_fuel) {
                 const int code = static_cast<int>(fuel_arr(i, j, k) + amrex::Real(0.5));
                 const int idx  = fuel_table_index(code, fuel_set);
                 if (idx >= 0 && idx < rc_tbl_size) { rc = rc_tbl[idx]; }
@@ -624,25 +642,28 @@ inline void advect_levelset_directional_rk3_split(amrex::MultiFab& phi,
                                                    const RothermelComputed* rc_tbl = nullptr,
                                                    int rc_tbl_size = 0,
                                                    int fuel_set = 0,
-                                                   const amrex::MultiFab* ros_scale = nullptr)
+                                                   const amrex::MultiFab* ros_scale = nullptr,
+                                                   const RothermelCellInputs* cell_mc = nullptr,
+                                                   fire_levelset::Scratch* scratch = nullptr)
 {
     using namespace amrex;
 
     MultiFab VwVs(phi.boxArray(), phi.DistributionMap(), 5, 0);
-    fill_advective_VwVs(VwVs, wind, slopes, st, fuel_model, rc_tbl, rc_tbl_size, fuel_set, ros_scale);
+    fill_advective_VwVs(VwVs, wind, slopes, st, fuel_model, rc_tbl, rc_tbl_size, fuel_set, ros_scale, cell_mc);
 
-    const auto* dx = geom.CellSize();
-    const int nghost = 3;
-    MultiFab phi_n(phi.boxArray(), phi.DistributionMap(), 1, nghost);
-    MultiFab phi_star(phi.boxArray(), phi.DistributionMap(), 1, nghost);
-    MultiFab phi_hat(phi.boxArray(), phi.DistributionMap(), 1, nghost);
-    MultiFab rhs(phi.boxArray(), phi.DistributionMap(), 1, 0);
+    const auto dx = geom.CellSizeArray();
+    fire_levelset::Scratch local;
+    fire_levelset::Scratch& sc = fire_levelset::Scratch::select(scratch, local, phi);
+    MultiFab& phi_n    = sc.phi_n;
+    MultiFab& phi_star = sc.phi_star;
+    MultiFab& phi_hat  = sc.phi_hat;
+    MultiFab& rhs      = sc.rhs;
 
-    phi_n.ParallelCopy(phi);
+    MultiFab::Copy(phi_n, phi, 0, 0, 1, 0);
     fire_fill_boundary(phi_n, geom);
 
     // Stage 1
-    phi_star.ParallelCopy(phi_n);
+    MultiFab::Copy(phi_star, phi_n, 0, 0, 1, 0);
     fire_fill_boundary(phi_star, geom);
     fire_levelset::compute_levelset_rhs_split_advective(rhs, phi_star, VwVs, dx[0], dx[1],
         eps_visc, &slopes, nonburnable, wall_extrap, grad_scheme);
@@ -652,7 +673,7 @@ inline void advect_levelset_directional_rk3_split(amrex::MultiFab& phi,
     // Stage 2
     fire_levelset::compute_levelset_rhs_split_advective(rhs, phi_star, VwVs, dx[0], dx[1],
         eps_visc, &slopes, nonburnable, wall_extrap, grad_scheme);
-    phi_hat.ParallelCopy(phi_n);
+    MultiFab::Copy(phi_hat, phi_n, 0, 0, 1, 0);
     fire_levelset::rk3_stage2_update(phi_hat, phi_star, rhs, dt);
     fire_fill_boundary(phi_hat, geom);
 
@@ -701,14 +722,16 @@ inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,
                                             const amrex::MultiFab* fuel_model = nullptr,
                                             const RothermelComputed* rc_tbl = nullptr,
                                             int rc_tbl_size = 0,
-                                            int fuel_set = 0)
+                                            int fuel_set = 0,
+                                            const RothermelCellInputs* cell_mc = nullptr,
+                                            fire_levelset::Scratch* scratch = nullptr)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
             fill_directional_ros(R, phi_stage, wind, slopes, geom, st, nonburnable, wall_extrap, shape,
                                  ellipse_lw, ellipse_lw_max, wind_coupling,
-                                 fuel_model, rc_tbl, rc_tbl_size, fuel_set);
-        }, nonburnable, wall_extrap, grad_scheme, ros_scale);
+                                 fuel_model, rc_tbl, rc_tbl_size, fuel_set, cell_mc);
+        }, nonburnable, wall_extrap, grad_scheme, ros_scale, scratch);
 }
 
 #endif

@@ -580,6 +580,13 @@ struct BalbiFieldInputs
     const amrex::MultiFab* heat_flux    = nullptr;  ///< Surface heat flux [W/m²]
     const amrex::MultiFab* surface_temp = nullptr;  ///< Surface temperature [K]
     const amrex::MultiFab* fuel_mc      = nullptr;  ///< Fuel moisture state [fraction]
+    /// Domain-mean wind [m/s], the fallback for a cell whose wind is above
+    /// BALBI_MAX_WIND_SPEED or non-finite. The fire layer computes it once per
+    /// step for the wind the model consumes; the kernels used to reduce it
+    /// themselves (two global sums per call, three calls per subcycle on the
+    /// directional path). Zero when nothing fills it.
+    amrex::Real            ux_mean      = 0.0;
+    amrex::Real            uy_mean      = 0.0;
     FuelModelParams        fp{};                    ///< Uniform fuel, for per-cell rebuilds
     amrex::Real            M_f          = 0.0;      ///< Fuel moisture [fraction]
     int                    fuel_set     = 0;        ///< Fuel model set of the codes (ERF_FuelModels.H)
@@ -675,13 +682,10 @@ inline void fill_balbi_ros(
     const bool use_heat_flux = (bp.heat_flux_coupling && in.heat_flux != nullptr);
     const bool use_cell_mc   = (bp.use_cell_moisture && in.fuel_mc != nullptr);
 
-    // Domain-mean wind, used as the fallback for cells whose wind is
-    // unphysically large or non-finite.
-    const amrex::Long ncells = fire_wind_eff.boxArray().numPts();
-    const amrex::Real ux_mean = (ncells > 0) ? fire_wind_eff.sum(0) / amrex::Real(ncells)
-                                             : amrex::Real(0.0);
-    const amrex::Real uy_mean = (ncells > 0) ? fire_wind_eff.sum(1) / amrex::Real(ncells)
-                                             : amrex::Real(0.0);
+    // Domain-mean wind, the fallback for cells whose wind is unphysically
+    // large or non-finite (computed once per step by the fire layer).
+    const amrex::Real ux_mean = in.ux_mean;
+    const amrex::Real uy_mean = in.uy_mean;
 
     const BalbiComputed*  tbl        = in.table;
     const int             tbl_sz     = in.table_size;
@@ -791,11 +795,8 @@ inline void fill_balbi_ros_directional(
     const bool use_heat_flux = (bp.heat_flux_coupling && in.heat_flux != nullptr);
     const bool use_cell_mc   = (bp.use_cell_moisture && in.fuel_mc != nullptr);
 
-    const amrex::Long ncells = wind.boxArray().numPts();
-    const amrex::Real ux_mean = (ncells > 0) ? wind.sum(0) / amrex::Real(ncells)
-                                             : amrex::Real(0.0);
-    const amrex::Real uy_mean = (ncells > 0) ? wind.sum(1) / amrex::Real(ncells)
-                                             : amrex::Real(0.0);
+    const amrex::Real ux_mean = in.ux_mean;
+    const amrex::Real uy_mean = in.uy_mean;
 
     const amrex::Real dx = geom.CellSize(0);
     const amrex::Real dy = geom.CellSize(1);
@@ -917,13 +918,14 @@ inline void advect_levelset_balbi_rk3(amrex::MultiFab& phi,
                                       const amrex::MultiFab* nonburnable = nullptr,
                                       bool wall_extrap = false,
                                       const fire_levelset::LevelSetGradient& grad_scheme = fire_levelset::LevelSetGradient{},
-                                      const amrex::MultiFab* ros_scale = nullptr)
+                                      const amrex::MultiFab* ros_scale = nullptr,
+                                      fire_levelset::Scratch* scratch = nullptr)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
             fill_balbi_ros_directional(R, phi_stage, wind, slopes, geom, bc_default, bp, in,
                                        nonburnable, wall_extrap);
-        }, nonburnable, wall_extrap, grad_scheme, ros_scale);
+        }, nonburnable, wall_extrap, grad_scheme, ros_scale, scratch);
 }
 
 #endif

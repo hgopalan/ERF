@@ -7,6 +7,8 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <AMReX_Reduce.H>
+#include <AMReX_ParallelDescriptor.H>
 
 /**
  * @file ERF_FbpModel.H
@@ -32,8 +34,10 @@
  * slope, RSF = RSZ SF with SF = exp(3.533 (GS/100)^1.2) (GS the slope in
  * percent, capped at 70), is inverted to the ISI it implies, ISF, and that to
  * an equivalent wind WSE = ln(ISF / (0.208 f(F))) / 0.05039 (with the 2009
- * form above 40 km/h), which is added to the wind before the ISI is formed.
- * On the level-set path the wind and slope are the components along the front
+ * form above 40 km/h), which is added to the wind as a vector along the
+ * upslope direction before the ISI is formed (the system's net effective
+ * wind, eqs. 45-47 / Wotton 2009 eqs. 44-48; fbp_ros_vector). On the
+ * level-set path the wind and slope are the components along the front
  * normal, so the sum is the normal component of the system's vector sum.
  *
  * The system's inputs are daily indices, so FFMC, BUI, curing and the
@@ -202,10 +206,13 @@ amrex::Real fbp_slope_equivalent_wind(const FbpComputed& s, amrex::Real slope) n
     switch (s.type) {
         case FBP_M1:
         case FBP_M2: {
+            // Wotton et al. (2009) eqs. 42a/42b: M2 weights the D1 share by 0.2,
+            // as its rate does (fbp_rsi); M1 by the full (1 - w)
             const amrex::Real w = s.pc / 100.0;
+            const amrex::Real wd = (s.type == FBP_M2) ? 0.2 * (1.0 - w) : (1.0 - w);
             const amrex::Real rsf_c2 = fbp_rsi_basic(fbp_coeffs(FBP_C2), isz) * sf;
             const amrex::Real rsf_d1 = fbp_rsi_basic(fbp_coeffs(FBP_D1), isz) * sf;
-            isf = w * fbp_isf_basic(fbp_coeffs(FBP_C2), rsf_c2) + (1.0 - w) * fbp_isf_basic(fbp_coeffs(FBP_D1), rsf_d1);
+            isf = w * fbp_isf_basic(fbp_coeffs(FBP_C2), rsf_c2) + wd * fbp_isf_basic(fbp_coeffs(FBP_D1), rsf_d1);
             break;
         }
         case FBP_M3:
@@ -255,10 +262,83 @@ amrex::Real fbp_ros(const FbpComputed& s, amrex::Real U_mps, amrex::Real slope) 
 }
 
 /**
- * @brief Fill fire_ros [m/s] with the FBP rate from the wind magnitude and the
- *        slope along the wind (head rate everywhere; the level-set path's
- *        directional option evaluates the rate along the front normal instead).
+ * @brief FBP head rate [m/s] from the wind vector and the slope vector: the
+ *        system's net effective wind is the vector sum of the 10 m wind and the
+ *        slope-equivalent wind along the upslope direction (Forestry Canada 1992
+ *        eqs. 45-47; Wotton et al. 2009 eqs. 44-48), and the head runs along it.
+ *
+ * Until 2026-10 the isotropic fill added only the slope component along the
+ * wind, so a slope across the wind did nothing: for C2 at FFMC 90, 10 km/h and
+ * a 30 % slope perpendicular to the wind the head rate was 31 % low. Along a
+ * front normal n the directional rate 3.6 U.n + WSE(s.n) can exceed this
+ * magnitude (a wind blowing down the slope cancels in the vector sum but not
+ * along a normal that sees only one of the two, and WSE is capped at a 70 %
+ * slope), so the level-set timestep is set from fbp_ros_scalar_bound, the
+ * rate at 3.6 |U| + WSE(|s|), which no normal exceeds.
+ *
+ * @param[in]  st    precomputed state
+ * @param[in]  u, v  wind [m/s]
+ * @param[in]  sx, sy  terrain slope dz/dx, dz/dy
+ * @param[out] hx, hy  unit vector of the net effective wind (the head direction)
  */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real fbp_ros_vector(const FbpComputed& st, amrex::Real u, amrex::Real v,
+                           amrex::Real sx, amrex::Real sy,
+                           amrex::Real& hx, amrex::Real& hy) noexcept
+{
+    const amrex::Real S = std::sqrt(sx * sx + sy * sy);
+    const amrex::Real wse = fbp_slope_equivalent_wind(st, S);   // km/h, 0 without slope
+    // unit upslope vector from the floored magnitude, before the select (a
+    // flat cell gives 0/0 in the unselected arm, which the optimiser evaluates)
+    const amrex::Real inv_S = amrex::Real(1.0) / amrex::max(S, amrex::Real(1.0e-12));
+    amrex::Real wx = 3.6 * u, wy = 3.6 * v;                                 // the wind [km/h]
+    if (S > 1.0e-12) { wx += wse * sx * inv_S;     wy += wse * sy * inv_S; }   // WSE along the upslope
+    const amrex::Real W = std::sqrt(wx * wx + wy * wy);
+    const amrex::Real inv_W = amrex::Real(1.0) / amrex::max(W, amrex::Real(1.0e-12));
+    hx = (W > 1.0e-12) ? wx * inv_W : amrex::Real(1.0);
+    hy = (W > 1.0e-12) ? wy * inv_W : amrex::Real(0.0);
+    const amrex::Real isi = fbp_isi(st.fF, W);
+    return fbp_rsi(st, isi) * st.be / 60.0;
+}
+
+/**
+ * @brief Fill fire_ros [m/s] with the FBP head rate from the vector sum of the
+ *        wind and the slope-equivalent wind (fbp_ros_vector); the level-set
+ *        path's directional option evaluates the rate along the front normal
+ *        instead.
+ */
+/// The rate at 3.6 |U| + WSE(|s|) [m/s]: no direction's rate exceeds it
+/// (3.6 U.n <= 3.6 |U| and WSE(s.n) <= WSE(|s|), WSE being monotone), so the
+/// level-set timestep of the directional path is set from its maximum
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real fbp_ros_scalar_bound(const FbpComputed& st, amrex::Real u, amrex::Real v,
+                                 amrex::Real sx, amrex::Real sy) noexcept
+{
+    const amrex::Real S = std::sqrt(sx * sx + sy * sy);
+    const amrex::Real W = amrex::Real(3.6) * std::sqrt(u * u + v * v) + fbp_slope_equivalent_wind(st, S);
+    return fbp_rsi(st, fbp_isi(st.fF, W)) * st.be / 60.0;
+}
+
+/// Largest fbp_ros_scalar_bound over the fire grid, reduced over ranks
+inline amrex::Real max_fbp_ros_bound(const amrex::MultiFab& wind,
+                                     const amrex::MultiFab& slopes,
+                                     const FbpComputed& st)
+{
+    amrex::ReduceOps<amrex::ReduceOpMax> reduce_op;
+    amrex::ReduceData<amrex::Real> reduce_data(reduce_op);
+    using ReduceTuple = typename decltype(reduce_data)::Type;
+    for (amrex::MFIter mfi(wind, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        auto w = wind.const_array(mfi);
+        auto s = slopes.const_array(mfi);
+        reduce_op.eval(mfi.tilebox(), reduce_data, [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple {
+            return { fbp_ros_scalar_bound(st, w(i, j, k, 0), w(i, j, k, 1), s(i, j, k, 0), s(i, j, k, 1)) };
+        });
+    }
+    amrex::Real m = amrex::get<0>(reduce_data.value(reduce_op));
+    amrex::ParallelDescriptor::ReduceRealMax(m);
+    return m;
+}
+
 inline void fill_fbp_ros(amrex::MultiFab& fire_ros,
                          const amrex::MultiFab& wind,
                          const amrex::MultiFab& slopes,
@@ -271,12 +351,9 @@ inline void fill_fbp_ros(amrex::MultiFab& fire_ros,
         auto slope_arr = slopes.const_array(mfi);
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) {
             const int i = iv[0], j = iv[1], k = 0;
-            const amrex::Real u = wind_arr(i, j, k, 0), v = wind_arr(i, j, k, 1);
-            const amrex::Real U = std::sqrt(u * u + v * v);
-            // slope along the wind direction (uphill part counts)
-            amrex::Real s_along = 0.0;
-            if (U > 1.0e-6) { s_along = (slope_arr(i, j, k, 0) * u + slope_arr(i, j, k, 1) * v) / U; }
-            ros_arr(i, j, k, 0) = fbp_ros(st, U, s_along);
+            amrex::Real hx, hy;
+            ros_arr(i, j, k, 0) = fbp_ros_vector(st, wind_arr(i, j, k, 0), wind_arr(i, j, k, 1),
+                                                 slope_arr(i, j, k, 0), slope_arr(i, j, k, 1), hx, hy);
         });
     }
 }

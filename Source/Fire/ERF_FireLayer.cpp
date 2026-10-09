@@ -174,13 +174,21 @@ void FireLayer::initialize(const ERF& erf,
     fire_heat_flux  = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_spread_vec = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 0);
     fire_arrival_time = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
-    fire_disp_accum   = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 2, 0);
+    fire_disp_accum   = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 4, 0);
     fire_surface_temp = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_surface_rh   = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
 
     // Phase 5: Heat flux and diagnostics fields
     fire_fireline_intensity = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+    fire_heat_release = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+    fire_fuel_load_initial = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     fire_flame_length = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+    // The level set of the previous subcycle (arrival-time stamp) and the
+    // stage fields of the level-set drivers, allocated once.
+    if (m_params.propagation_method == "levelset") {
+        m_phi_prev = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        m_ls_scratch.define(m_fg.ba, m_fg.dm);
+    }
 
     // Phase 9 diagnostics
     fire_flame_temp = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
@@ -192,6 +200,11 @@ void FireLayer::initialize(const ERF& erf,
         fire_crown_active = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
         fire_crown_load = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
         fire_crown_ros_active = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        fire_crown_factor = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        fire_crown_factor->setVal(1.0_rt);
+        m_crown_surface_ros = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        m_crown_surface_intensity = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        m_crown_surface_flame_length = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     }
 
     fire_phi->setVal(1.0);
@@ -217,6 +230,7 @@ void FireLayer::initialize(const ERF& erf,
         fire_precip_rate->setVal(m_params.precip_source == "atmosphere" ? 0.0_rt : m_params.precip_rate_mm_hr);
     }
     fire_fireline_intensity->setVal(0.0_rt);
+    fire_heat_release->setVal(0.0_rt);
     fire_flame_length->setVal(0.0_rt);
     fire_flame_temp->setVal(0.0_rt);
     fire_crown_fraction_burned->setVal(0.0_rt);
@@ -311,7 +325,13 @@ void FireLayer::initialize(const ERF& erf,
     }
     fire_fuel_load->setVal((fp.w_d1+fp.w_d10+fp.w_d100+fp.w_lh+fp.w_lw)*4.88243);
     m_fuel_load_initial_kg_m2 = (fp.w_d1+fp.w_d10+fp.w_d100+fp.w_lh+fp.w_lw)*4.88243_rt;
+    fire_fuel_load_initial->setVal(m_fuel_load_initial_kg_m2);
     m_fuel_bed_depth_ft = fp.delta;
+    m_avg_mc[0] = fire_params.moisture_1hr;
+    m_avg_mc[1] = fire_params.moisture_10hr;
+    m_avg_mc[2] = fire_params.moisture_100hr;
+    m_avg_mc[3] = fire_params.moisture_live;
+    m_avg_mc[4] = fire_params.moisture_live;
 
     fire_fuel_mc->setVal(0.0);
     {
@@ -412,6 +432,9 @@ void FireLayer::initialize(const ERF& erf,
                                         m_params.fuel_map.sb40_active(),
                                         m_params.moisture_live,
                                         fuel_params_table(), fuel_params_table_size());
+                // the per-cell initial load the re-entry fraction of the
+                // spotting model and the diagnostics difference against
+                MultiFab::Copy(*fire_fuel_load_initial, *fire_fuel_load, 0, 0, 1, 0);
                 if (m_params.fire_debug) {
                     const Real dA = m_fg.geom.CellSize(0) * m_fg.geom.CellSize(1);
                     amrex::Print() << "[FIRE DEBUG] Fuel load from the map: " << fire_fuel_load->sum(0) * dA
@@ -470,11 +493,13 @@ void FireLayer::initialize(const ERF& erf,
     m_fp.gaussian_sigma     = fire_params.farsite_gaussian_sigma;
     m_fp.cfl_fire           = fire_params.farsite_cfl_fire;
     m_fp.front_update       = fire_params.farsite_front_update;
+    m_fp.shape              = fire_params.farsite_shape;
 
     m_rc = compute_rothermel_params(fp, fire_params.moisture_1hr,
                                     fire_params.moisture_10hr,
                                     fire_params.moisture_100hr,
-                                    fire_params.use_wind_limit);
+                                    fire_params.use_wind_limit,
+                                    fire_params.wind_limit_mode);
 
     // Phase 13A: Build the per-fuel wind height table and copy it to device.
     // When use_per_fuel_wind_ht = false, every fuel slot (1..FUEL_SLOT_COUNT-1;
@@ -543,12 +568,24 @@ void FireLayer::initialize(const ERF& erf,
                 }
             }
         }
-        if (m_params.uses_model("cheney_gould")) {
-            m_cgc = compute_cheney_gould_params(m_params.cheney_gould);
+        if (m_params.uses_model("cheney_gould") || m_params.uses_model("grass_simple")) {
+            const int cg_model = m_params.uses_model("cheney_gould") ? cheney_gould::model_cg98
+                                                                     : cheney_gould::model_grass_simple;
+            m_cgc = compute_cheney_gould_params(m_params.cheney_gould, cg_model,
+                                                m_params.cheney_gould.pasture,
+                                                m_params.cheney_gould.curing_curve);
             if (m_params.fire_debug) {
-                amrex::Print() << "[FIRE DEBUG] ROS model: Cheney-Gould (1998), "
-                               << "moisture=" << m_params.cheney_gould.moisture
-                               << "%, curing=" << m_params.cheney_gould.curing << "\n";
+                amrex::Print() << "[FIRE DEBUG] ROS model: "
+                               << (cg_model == cheney_gould::model_cg98
+                                   ? "Cheney, Gould and Catchpole (1998) grassland" : "grass_simple fit")
+                               << ", moisture=" << m_params.cheney_gould.moisture
+                               << "%, curing=" << m_params.cheney_gould.curing
+                               << ", phi_C=" << m_cgc.phi_C
+                               << (cg_model == cheney_gould::model_cg98
+                                   ? (m_params.cheney_gould.wind_source == 1 ? ", midflame wind" : ", reference wind (set wind_ref_ht = 10)")
+                                   : ", midflame wind")
+                               << "; head rate at 0 and 18 km/h: " << cheney_gould_ros(0.0_rt, m_cgc)
+                               << " " << cheney_gould_ros(5.0_rt, m_cgc) << " m/s\n";
             }
         }
         if (m_params.uses_model("behave")) {
@@ -563,7 +600,9 @@ void FireLayer::initialize(const ERF& erf,
                                                 m_params.moisture_live,
                                                 m_params.behave.dynamic_transfer_lo,
                                                 m_params.behave.dynamic_transfer_hi,
-                                                m_params.use_wind_limit);
+                                                m_params.use_wind_limit,
+                                                m_params.wind_limit_mode,
+                                                m_params.behave.net_load_mode);
             if (m_params.fire_debug) {
                 amrex::Print() << "[FIRE DEBUG] ROS model: BEHAVE multi-class Rothermel, "
                                << "R0=" << m_bs_default.r_0 << " m/s, live herbaceous transfer window "
@@ -774,7 +813,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                           m_params.wind_interp,
                                           wind_open ? m_open_frac_atm.get() : nullptr,
                                           wind_open ? m_roof_h_atm.get() : nullptr,
-                                          m_params.wind_sample_ht, m_params.wind_sample_z0);
+                                          m_params.wind_sample_ht, m_params.wind_sample_z0,
+                                          m_params.wind_below_first_log);
     }
     if (m_params.fire_debug) {
         if (m_params.wind_sample_ht > 0.0) {
@@ -801,7 +841,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
 
     if (m_params.use_terrain_wind) {
         if (m_params.fire_debug)
-            amrex::Print() << "[FIRE DEBUG] Applying FARSITE terrain wind corrections" << std::endl;
+            amrex::Print() << "[FIRE DEBUG] Applying the terrain wind factors (ridge, shelter, valley)" << std::endl;
         apply_farsite_terrain_wind(*fire_wind_eff, *fire_slopes, *fire_curvature,
                                    m_params.k_ridge, m_params.k_shelter,
                                    m_params.k_valley, m_params.k_deflect);
@@ -831,22 +871,21 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     }
 
     if (m_params.moisture_dynamic) {
-        amrex::Long nc = fire_fuel_mc->boxArray().numPts();
-        Real avg1   = (nc>0) ? fire_fuel_mc->sum(0)/Real(nc) : m_params.moisture_1hr;
-        Real avg10  = (nc>0) ? fire_fuel_mc->sum(1)/Real(nc) : m_params.moisture_10hr;
-        Real avg100 = (nc>0) ? fire_fuel_mc->sum(2)/Real(nc) : m_params.moisture_100hr;
-        avg1   = amrex::max(0.01_rt, amrex::min(avg1,   0.40_rt));
-        avg10  = amrex::max(0.01_rt, amrex::min(avg10,  0.40_rt));
-        avg100 = amrex::max(0.01_rt, amrex::min(avg100, 0.40_rt));
+        // the domain means once, for every consumer of this step
+        update_moisture_means();
+        const Real avg1 = m_avg_mc[0], avg10 = m_avg_mc[1], avg100 = m_avg_mc[2];
         FuelModelParams fp_cur = uniform_fuel_params();
-        m_rc = compute_rothermel_params(fp_cur, avg1, avg10, avg100, m_params.use_wind_limit);
+        m_rc = compute_rothermel_params(fp_cur, avg1, avg10, avg100, m_params.use_wind_limit, m_params.wind_limit_mode);
         if (!m_d_rc_table.empty()) {
             rebuild_rothermel_table(avg1, avg10, avg100);
         }
+        rebuild_cell_rothermel_coefficients();
         if (m_params.fire_debug)
             amrex::Print() << "[FIRE DEBUG] Updated Rothermel coefficients with avg moisture: "
                            << "M_1hr=" << avg1 << " M_10hr=" << avg10
-                           << " M_100hr=" << avg100 << " R0=" << m_rc.R0 << " m/s" << std::endl;
+                           << " M_100hr=" << avg100 << " R0=" << m_rc.R0 << " m/s"
+                           << (m_params.rothermel_cell_moisture ? " (the kernels use each cell's own moisture)" : "")
+                           << std::endl;
 
         // Phase 13B: Moisture coupling for Balbi and Cheney-Gould models
         if (m_params.moisture_dynamic && m_params.uses_model("balbi")) {
@@ -863,11 +902,12 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                  h_balbi.end(), m_d_balbi_table.begin());
             }
         }
-        if (m_params.moisture_dynamic && m_params.uses_model("cheney_gould")) {
-            // Update Cheney-Gould with current 1-hr moisture converted to percent
+        if (m_params.moisture_dynamic && (m_params.uses_model("cheney_gould") || m_params.uses_model("grass_simple"))) {
+            // Update the grass model with the current 1-hr moisture in percent
             FireParams::CheneyGouldParams cgp_cur = m_params.cheney_gould;
             cgp_cur.moisture = avg1 * 100.0_rt;  // fraction → percent
-            m_cgc = compute_cheney_gould_params(cgp_cur);
+            m_cgc = compute_cheney_gould_params(cgp_cur, m_cgc.model, m_cgc.pasture,
+                                                m_params.cheney_gould.curing_curve);
         }
         // Phase 15: Update BEHAVE state when dynamic moisture is enabled.
         if (m_params.moisture_dynamic && m_params.uses_model("behave")) {
@@ -878,9 +918,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             // moisture_live outside [0.30, 2.50] reaches both paths. "legacy"
             // keeps the clamp; its update holds the classes in [0.30, 0.40], so
             // the clamp only catches round-off in the average there.
-            amrex::Long nc_live = fire_fuel_mc->boxArray().numPts();
-            Real avg_lh  = (nc_live > 0) ? fire_fuel_mc->sum(3) / Real(nc_live) : m_params.moisture_live;
-            Real avg_lw  = (nc_live > 0) ? fire_fuel_mc->sum(4) / Real(nc_live) : m_params.moisture_live;
+            Real avg_lh = m_avg_mc[3];
+            Real avg_lw = m_avg_mc[4];
             if (m_params.moisture_live_model != "fixed") {
                 avg_lh = amrex::max(0.30_rt, amrex::min(avg_lh, 2.50_rt));
                 avg_lw = amrex::max(0.30_rt, amrex::min(avg_lw, 2.50_rt));
@@ -888,7 +927,9 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
             m_bs_default = compute_behave_state(fp_bh, avg1, avg10, avg100, avg_lh, avg_lw,
                                                 m_params.behave.dynamic_transfer_lo,
                                                 m_params.behave.dynamic_transfer_hi,
-                                                m_params.use_wind_limit);
+                                                m_params.use_wind_limit,
+                                                m_params.wind_limit_mode,
+                                                m_params.behave.net_load_mode);
         }
     }
 
@@ -946,9 +987,9 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
 
     // Temperature-threshold ignition: cells whose near-surface air is hotter
     // than erf.fire.ignition.threshold_temp ignite. fire_surface_temp is the
-    // k = 0 potential temperature mapped onto the fire grid by
-    // advance_fuel_moisture() above, so a coupled run sees the fire's own
-    // heating and a one-way run only the initial atmosphere. Stateless: the
+    // k = 0 air temperature (theta times the Exner function) mapped onto the
+    // fire grid by advance_fuel_moisture() above, so a coupled run sees the
+    // fire's own heating and a one-way run only the initial atmosphere. Stateless: the
     // ignited cells are ordinary burning cells from here on, and the arrival
     // time is set by the propagation step like any other new fire.
     if (m_params.ignition.threshold_enable && fire_phi && fire_surface_temp
@@ -1007,13 +1048,16 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         balbi_in.heat_flux    = fire_heat_flux.get();
 
         if (m_params.moisture_dynamic && fire_fuel_mc) {
-            amrex::Long nc_mc = fire_fuel_mc->boxArray().numPts();
-            if (nc_mc > 0) {
-                Real avg_mc = fire_fuel_mc->sum(0) / Real(nc_mc);
-                balbi_in.M_f = amrex::max(0.01_rt, amrex::min(avg_mc, 0.40_rt));
-            }
+            balbi_in.M_f = m_avg_mc[0];
         }
-
+        // the domain-mean wind the kernels fall back on, once per step for the
+        // wind the model consumes (not two global sums per kernel call)
+        {
+            const MultiFab& bw = (m_params.balbi.wind_source == 1) ? *fire_wind_ref : *fire_wind_eff;
+            const amrex::Long nc = bw.boxArray().numPts();
+            balbi_in.ux_mean = (nc > 0) ? bw.sum(0) / Real(nc) : 0.0_rt;
+            balbi_in.uy_mean = (nc > 0) ? bw.sum(1) / Real(nc) : 0.0_rt;
+        }
     }
 
     if (m_params.is_hybrid()) {
@@ -1040,7 +1084,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         m_params.fuel_map.blending_fraction > 0.0_rt &&
         fire_fuel_model && fire_ros) {
         apply_fuel_boundary_blending(*fire_ros, *fire_fuel_model,
-                                      m_params.fuel_map.blending_fraction);
+                                      m_params.fuel_map.blending_fraction, m_fg.geom);
     }
 
     fire_fill_boundary(*fire_phi, m_fg.geom);
@@ -1073,6 +1117,20 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     if (m_params.accel.enable && m_params.accel.use_temporal
         && m_params.accel.clock == accel_clock::front && fire_accel_state) {
         accel_factor = std::make_unique<amrex::MultiFab>(*fire_accel_state, amrex::make_alias, 2, 1);
+    }
+
+    // The crown rate, carried into the band the front can reach by
+    // apply_crown_fire_ros(), reaches the per-stage paths as the factor
+    // R / R_surface they multiply into the rate they rebuild.
+    if (fire_crown_factor && m_params.crown.enable) {
+        auto combined = std::make_unique<amrex::MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        if (accel_factor) {
+            amrex::MultiFab::Copy(*combined, *accel_factor, 0, 0, 1, 0);
+        } else {
+            combined->setVal(1.0_rt);
+        }
+        amrex::MultiFab::Multiply(*combined, *fire_crown_factor, 0, 0, 1, 0);
+        accel_factor = std::move(combined);
     }
 
     // A retardant drop with 0 < ros_factor < 1 multiplies the rate the front
@@ -1114,6 +1172,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         int n_ls_substeps = 0;
         while (time_remaining > 1.0e-14) {
             amrex::Real max_ros = fire_ros->max(0);
+            // FBP on the directional path: a normal that sees the wind but not
+            // the opposing slope-equivalent wind runs faster than the vector
+            // sum the field holds, so the step is set from the scalar bound
+            if (m_params.directional_ros && m_params.uses_model("fbp")) {
+                const MultiFab& fbp_wind = (m_params.fbp.wind_source == 1) ? *fire_wind_eff : *fire_wind_ref;
+                max_ros = amrex::max(max_ros, max_fbp_ros_bound(fbp_wind, *fire_slopes, m_fbp));
+            }
             // CFL step from a floored rate, computed before the select: before
             // the first cell burns max_ros is 0 and the unselected x/0 would be
             // speculated under amrex.fpe_trap_zero
@@ -1142,6 +1207,12 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 (m_params.ros_model != "balbi") && (m_params.ros_model != "prescribed");
             // Wall extrapolation only means something with a mask.
             const bool wall_extrap = m_params.levelset_wall_extrapolate && (fire_nonburnable != nullptr);
+            // erf.fire.rothermel_cell_moisture: the Rothermel kernels rebuild
+            // their coefficients from each cell's own dead moistures
+            const RothermelCellInputs cell_mc = rothermel_cell_inputs();
+            // the level set at the start of the subcycle, for the arrival-time
+            // stamp interpolated in time
+            amrex::MultiFab::Copy(*m_phi_prev, *fire_phi, 0, 0, 1, 0);
             // One-sided derivatives of the level set: the front band of the
             // hybrid scheme is a number of fire cells, phi is in metres here.
             fire_levelset::LevelSetGradient ls_grad;
@@ -1175,16 +1246,20 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                 spec.rc_tbl_size = hyb_per_fuel ? static_cast<int>(m_d_rc_table.size()) : 0;
                 spec.fuel_set    = m_params.fuel_map.fuel_set_id();
                 spec.wind_eff   = fire_wind_eff.get();
+                spec.wind_ref   = fire_wind_ref.get();
+                spec.cheney_uses_ref = (m_params.cheney_gould.wind_source == 0);
+                spec.fbp_uses_ref    = (m_params.fbp.wind_source == 0);
                 spec.balbi_wind = (m_params.balbi.wind_source == 1)
                                 ? fire_wind_ref.get() : fire_wind_eff.get();
                 spec.bc         = &m_bc_default;
                 spec.bp         = &m_params.balbi;
                 spec.balbi_in   = &balbi_in;
                 spec.weight     = fire_ros_weight.get();
+                spec.cell_mc    = cell_mc.active() ? &cell_mc : nullptr;
                 advect_levelset_hybrid_rk3(*fire_phi, *fire_slopes, m_fg.geom, dt_ls,
                                            m_params.levelset_eps_visc, spec,
                                            fire_nonburnable.get(), wall_extrap,
-                                           ls_grad, accel_factor.get());
+                                           ls_grad, accel_factor.get(), &m_ls_scratch);
             } else if (balbi_directional) {
                 advect_levelset_balbi_rk3(*fire_phi,
                                           (m_params.balbi.wind_source == 1)
@@ -1194,12 +1269,13 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                           m_params.levelset_eps_visc,
                                           m_bc_default, m_params.balbi, balbi_in,
                                           fire_nonburnable.get(), wall_extrap,
-                                          ls_grad, accel_factor.get());
+                                          ls_grad, accel_factor.get(), &m_ls_scratch);
             } else if (generic_directional) {
                 const DirectionalRosState dir_state = make_directional_state(m_params.ros_model);
-                // FBP reads the reference-height wind unless told otherwise;
-                // every other model takes the midflame wind.
-                const bool fbp_ref = (m_params.ros_model == "fbp") && (m_params.fbp.wind_source == 0);
+                // FBP and the Cheney-Gould model read the reference-height wind
+                // unless told otherwise; every other model takes the midflame wind.
+                const bool fbp_ref = ((m_params.ros_model == "fbp") && (m_params.fbp.wind_source == 0))
+                                  || ((m_params.ros_model == "cheney_gould") && (m_params.cheney_gould.wind_source == 0));
                 // erf.fire.rothermel_per_fuel: the front is advected with the
                 // cell's own coefficients, the same table the isotropic
                 // compute_ros_field uses. Without this the level-set path
@@ -1218,7 +1294,9 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                                     dir_per_fuel ? m_d_rc_table.data() : nullptr,
                                                     dir_per_fuel ? static_cast<int>(m_d_rc_table.size()) : 0,
                                                     m_params.fuel_map.fuel_set_id(),
-                                                    accel_factor.get());
+                                                    accel_factor.get(),
+                                                    cell_mc.active() ? &cell_mc : nullptr,
+                                                    &m_ls_scratch);
                 } else {
                     advect_levelset_directional_rk3(*fire_phi, fbp_ref ? *fire_wind_ref : *fire_wind_eff,
                                                     *fire_slopes, m_fg.geom, dt_ls,
@@ -1232,7 +1310,9 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                                     dir_per_fuel ? fire_fuel_model.get() : nullptr,
                                                     dir_per_fuel ? m_d_rc_table.data() : nullptr,
                                                     dir_per_fuel ? static_cast<int>(m_d_rc_table.size()) : 0,
-                                                    m_params.fuel_map.fuel_set_id());
+                                                    m_params.fuel_map.fuel_set_id(),
+                                                    cell_mc.active() ? &cell_mc : nullptr,
+                                                    &m_ls_scratch);
                 }
             } else if (m_params.levelset_ellipse) {
                 // Huygens ellipse: the model's rate is the head rate and the
@@ -1241,14 +1321,14 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                             *fire_slopes, m_fg.geom, dt_ls,
                                             m_params.levelset_eps_visc,
                                             m_params.levelset_ellipse_lw, m_params.levelset_ellipse_lw_max,
-                                            fire_nonburnable.get(), wall_extrap, ls_grad);
+                                            fire_nonburnable.get(), wall_extrap, ls_grad, &m_ls_scratch);
             } else {
                 fire_levelset::advect_levelset_weno5z_rk3(*fire_phi, *fire_wind_eff,
                                                 *fire_ros, m_fg.geom, dt_ls,
                                                 m_params.levelset_eps_visc,
                                                 fire_slopes.get(),
                                                 fire_nonburnable.get(), wall_extrap,
-                                                ls_grad);
+                                                ls_grad, &m_ls_scratch);
             }
             enforce_nonburnable_phi();
             fire_fill_boundary(*fire_phi, m_fg.geom);
@@ -1266,28 +1346,23 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                     fire_levelset::reinitialize_phi_jiang_peng(*fire_phi, m_fg.geom,
                                           m_params.levelset_reinit_iters, dtau,
                                           fire_nonburnable.get(), wall_extrap,
-                                          m_params.levelset_reinit_jp_sign_eps2);
+                                          m_params.levelset_reinit_jp_sign_eps2, &m_ls_scratch);
                 } else {
                     fire_levelset::reinitialize_phi(*fire_phi, m_fg.geom,
                                           m_params.levelset_reinit_iters, dtau,
                                           ls_grad.band,
-                                          fire_nonburnable.get(), wall_extrap);
+                                          fire_nonburnable.get(), wall_extrap, &m_ls_scratch);
                 }
                 enforce_nonburnable_phi();
                 fire_fill_boundary(*fire_phi, m_fg.geom);
             }
 
-            // Update arrival time for newly burned cells (phi < 0)
-            {
-                const amrex::Real t_now = m_current_time + (dt - time_remaining);
-                for (amrex::MFIter mfi(*fire_phi); mfi.isValid(); ++mfi) {
-                    auto p  = fire_phi->const_array(mfi);
-                    auto at = fire_arrival_time->array(mfi);
-                    amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) noexcept {
-                        if (p(iv) < 0.0_rt && at(iv) < 0.0_rt) at(iv) = t_now;
-                    });
-                }
-            }
+            // Arrival time of the cells that burned in this subcycle: the
+            // crossing time interpolated in time from the level set at its
+            // start and end (stamping the start dated every cell up to one
+            // subcycle early, a -0.2 h/R bias at the default CFL)
+            fire_levelset::stamp_arrival_time(*fire_arrival_time, *m_phi_prev, *fire_phi,
+                                              m_current_time + (dt - time_remaining), dt_ls);
             time_remaining -= dt_ls;
 
             // Mirrors the guard the FARSITE path has had all along. Without it a
@@ -1369,29 +1444,30 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     }
 
     // Phase 8: Albini ember spotting
-    // Apply stochastic spotting at the specified interval.
-    // fire_wind_eff provides the 2-D wind field for trajectory integration.
-    // fire_fuel_load provides residual fuel for re-entry filtering.
-    if (m_params.spotting.enable && fire_albini_data && fire_wind_eff) {
+    // Apply stochastic spotting at the specified interval (fire steps).
+    // The brands launch with the cell's own Byram intensity (h w0 R of its
+    // fuel), drift on the reference-height wind scaled to their height, and
+    // land against the landing cell's own fuel.
+    if (m_params.spotting.enable && fire_albini_data && fire_wind_ref) {
         if (m_step % m_params.spotting.spotting_interval == 0) {
             fire_albini_data->setVal(0.0_rt);
-            FuelModelParams fp_sp = uniform_fuel_params();
-            std::string fuel_sys  = m_params.spotting.fuel_system;
             compute_albini_spotting(
                 *fire_phi,
                 *fire_albini_data,
-                *fire_wind_eff,
-                *fire_ros,
+                *fire_wind_ref,
+                *fire_fireline_intensity,
                 m_fg.geom,
-                fp_sp,
                 m_params.spotting,
                 m_step,
                 fire_fuel_load.get(),
-                &fuel_sys,
-                m_params.fuel_model_id,
-                m_params.fire_debug,
-                fire_fuel_load.get(),
+                fire_fuel_load_initial.get(),
                 m_fuel_load_initial_kg_m2,
+                m_has_spatial_fuel ? fire_fuel_model.get() : nullptr,
+                m_params.spotting.fuel_system,
+                m_params.fuel_model_id,
+                m_params.wind_ref_ht,
+                m_params.wind_sample_z0,
+                m_params.fire_debug,
                 fire_surface_z.get(),
                 fire_nonburnable.get(),
                 fire_ember_landings.get(),
@@ -1484,7 +1560,8 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         append_fire_stats(*fire_phi, *fire_arrival_time, m_fg.geom,
                          m_step, m_current_time + m_dt_atm, m_params.fire_stats_csv_file,
                          fire_ros.get(), fire_heat_flux.get(), fire_albini_data.get(),
-                         m_n_edge_cells, m_edge_contact_time, fire_precip_rate.get());
+                         m_n_edge_cells, m_edge_contact_time, fire_precip_rate.get(),
+                         m_params.propagation_method != "levelset");
     }
 }
 
@@ -1760,8 +1837,9 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
             amrex::Print() << " (burn time / " << m_params.burnout_time_to_efold << ")\n";
             amrex::Print() << "[FIRE DEBUG] Burnout model sfire: uniform fuel model " << m_params.fuel_model_id
                            << " tau=" << burnout_tau_s(m_params.fuel_model_id) << " s, w0="
-                           << m_fuel_load_initial_kg_m2 << " kg/m2, fresh-cell heat flux w0 h / tau="
-                           << m_fuel_load_initial_kg_m2 * fp.heat_content * 2326.0_rt / burnout_tau_s(m_params.fuel_model_id)
+                           << m_fuel_load_initial_kg_m2 << " kg/m2, fresh-cell step-mean heat flux w0 h (1 - e^{-dt/tau}) / dt="
+                           << m_fuel_load_initial_kg_m2 * fp.heat_content * 2326.0_rt
+                              * (-std::expm1(-dt_fire_s / burnout_tau_s(m_params.fuel_model_id))) / amrex::max(dt_fire_s, 1.0e-30_rt)
                            << " W/m2\n";
         }
     }
@@ -1800,12 +1878,18 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
                 if (crown_active_arr(i, j, k) < 0.5_rt) { return; }
                 if (crown_load_arr(i, j, k) <= 0.0_rt)  { return; }
 
+                // The canopy load burns out with the e-folding time
+                // canopy_depth / R_crown (a depth over a horizontal rate: the
+                // time the crown front takes to cross a canopy depth); the
+                // step-mean flux, like the surface flux, hands the atmosphere
+                // exactly the heat of the load consumed in the step.
                 const Real R_active  = crown_ros_arr(i, j, k);
                 const Real tau_crown = amrex::max(canopy_depth / amrex::max(R_active, 1.0e-6_rt), 1.0_rt);
+                const Real w_crown   = crown_load_arr(i, j, k);
+                const Real decay     = std::exp(-dt_fire_s / tau_crown);
 
-                heat_flux_arr(i, j, k) += crown_load_arr(i, j, k) * h_crown_Jkg / tau_crown;
-                crown_load_arr(i, j, k) *= std::exp(-dt_fire_s / tau_crown);
-                crown_load_arr(i, j, k) = amrex::max(crown_load_arr(i, j, k), 0.0_rt);
+                heat_flux_arr(i, j, k) += w_crown * h_crown_Jkg * (1.0_rt - decay) / amrex::max(dt_fire_s, 1.0e-30_rt);
+                crown_load_arr(i, j, k) = amrex::max(w_crown * decay, 0.0_rt);
             });
         }
     }
@@ -1823,15 +1907,13 @@ void FireLayer::compute_heat_flux_and_diagnostics(Real dt_fire_s)
                           m_params.fuel_map.fuel_set_id(), m_params.moisture_live,
                           fuel_params_table(), fuel_params_table_size(),
                           m_params.fuel_map.load_from_map,
-                          m_params.fuel_map.sb40_active());
+                          m_params.fuel_map.sb40_active(),
+                          fire_heat_release.get());
 
     const Real dead_load = fp.w_d1 + fp.w_d10 + fp.w_d100;
     Real M_f = m_params.moisture_1hr;
     if (m_params.moisture_dynamic && fire_fuel_mc) {
-        const amrex::Long nc = fire_fuel_mc->boxArray().numPts();
-        const Real avg1 = (nc > 0) ? fire_fuel_mc->sum(0) / Real(nc) : m_params.moisture_1hr;
-        const Real avg10 = (nc > 0) ? fire_fuel_mc->sum(1) / Real(nc) : m_params.moisture_10hr;
-        const Real avg100 = (nc > 0) ? fire_fuel_mc->sum(2) / Real(nc) : m_params.moisture_100hr;
+        const Real avg1 = m_avg_mc[0], avg10 = m_avg_mc[1], avg100 = m_avg_mc[2];
         M_f = (dead_load > 1.0e-10_rt)
             ? (fp.w_d1 * avg1 + fp.w_d10 * avg10 + fp.w_d100 * avg100)
               / amrex::max(dead_load, std::numeric_limits<Real>::min())
@@ -1867,10 +1949,11 @@ void FireLayer::apply_crown_fire_ros()
 
     // Surface-only quantities: the crown criterion is driven by the surface
     // fireline intensity, so both are evaluated from fire_ros before this
-    // routine overwrites it with the crown-enhanced value.
-    MultiFab surface_ros(m_fg.ba, m_fg.dm, 1, 0);
-    MultiFab surface_intensity(m_fg.ba, m_fg.dm, 1, 0);
-    MultiFab surface_flame_length(m_fg.ba, m_fg.dm, 1, 0);
+    // routine overwrites it with the crown-enhanced value (member fields,
+    // allocated once rather than on every step).
+    MultiFab& surface_ros          = *m_crown_surface_ros;
+    MultiFab& surface_intensity    = *m_crown_surface_intensity;
+    MultiFab& surface_flame_length = *m_crown_surface_flame_length;
     MultiFab::Copy(surface_ros, *fire_ros, 0, 0, 1, 0);
 
     fill_fire_diagnostics(surface_intensity, surface_flame_length,
@@ -1967,6 +2050,19 @@ void FireLayer::apply_crown_fire_ros()
             crown_frac_arr(i, j, k) = compute_crown_fraction_burned(ros_arr(i, j, k), R_surface, R_active);
         });
     }
+
+    // Carry the crown rate into the unburned band the front can reach, so the
+    // level-set paths advance at it (the isotropic level set reads each cell's
+    // own rate, the directional paths the factor R / R_surface this writes).
+    const amrex::Long n_ext = extend_crown_ros_to_front(*fire_ros, surface_ros, *fire_phi,
+                                                        *fire_crown_ros_active, *fire_crown_active,
+                                                        m_fg.geom, m_dt_atm, *fire_crown_factor,
+                                                        fire_nonburnable.get());
+    if (m_params.fire_debug) {
+        amrex::Print() << "[FIRE DEBUG] Crown fire: " << std::lround(fire_crown_active->sum(0))
+                       << " crowned cells, crown rate carried into " << n_ext
+                       << " unburned cells ahead of them\n";
+    }
 }
 
 void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
@@ -1996,10 +2092,7 @@ void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
     const amrex::Real h_fuel_Jkg = fp.heat_content * 2326.0_rt;
     amrex::Real M_f = m_params.moisture_1hr;
     if (m_params.moisture_dynamic && fire_fuel_mc) {
-        amrex::Long nc = fire_fuel_mc->boxArray().numPts();
-        amrex::Real avg1   = (nc > 0) ? fire_fuel_mc->sum(0) / amrex::Real(nc) : m_params.moisture_1hr;
-        amrex::Real avg10  = (nc > 0) ? fire_fuel_mc->sum(1) / amrex::Real(nc) : m_params.moisture_10hr;
-        amrex::Real avg100 = (nc > 0) ? fire_fuel_mc->sum(2) / amrex::Real(nc) : m_params.moisture_100hr;
+        const amrex::Real avg1 = m_avg_mc[0], avg10 = m_avg_mc[1], avg100 = m_avg_mc[2];
         amrex::Real dead_load = fp.w_d1 + fp.w_d10 + fp.w_d100;
         M_f = (dead_load > 1e-10_rt)
             ? (fp.w_d1*avg1 + fp.w_d10*avg10 + fp.w_d100*avg100)
@@ -2207,7 +2300,8 @@ void FireLayer::apply_fire_coupling_to_cc_source(
         m_open_frac_atm.get(),
         m_roof_h_atm.get(),
         m_params.heat_open_fraction,
-        m_params.heat_tendency_density);
+        m_params.heat_tendency_density,
+        m_params.heat_tendency_exner);
 }
 
 void FireLayer::build_open_fraction(const amrex::Geometry& geom_atm)
@@ -2284,6 +2378,9 @@ void FireLayer::fill_ros_for_model(const std::string& model,
         fill_balbi_ros(out, balbi_wind, *fire_slopes,
                        m_bc_default, m_params.balbi, balbi_in);
     } else if (model == "cheney_gould") {
+        // the 1998 model's U10 is the reference-height wind unless told otherwise
+        fill_cheney_gould_ros(out, (m_params.cheney_gould.wind_source == 1) ? *fire_wind_eff : *fire_wind_ref, m_cgc);
+    } else if (model == "grass_simple") {
         fill_cheney_gould_ros(out, *fire_wind_eff, m_cgc);
     } else if (model == "behave") {
         // Phase 15: BEHAVE multi-class Rothermel model
@@ -2295,9 +2392,11 @@ void FireLayer::fill_ros_for_model(const std::string& model,
                         m_params.behave.dynamic_transfer_hi,
                         m_params.moisture_dynamic ? fire_fuel_mc.get() : nullptr,
                         m_params.moisture_dynamic,
-                        m_params.use_wind_limit);
+                        m_params.use_wind_limit,
+                        m_params.wind_limit_mode,
+                        m_params.behave.net_load_mode);
     } else if (model == "macarthur") {
-        fill_macarthur_ros(out, *fire_wind_eff);
+        fill_macarthur_ros(out, *fire_wind_eff, m_params.macarthur_ros_max);
     } else if (model == "fbp") {
         fill_fbp_ros(out, (m_params.fbp.wind_source == 1) ? *fire_wind_eff : *fire_wind_ref, *fire_slopes, m_fbp);
     } else if (model == "prescribed") {
@@ -2307,12 +2406,56 @@ void FireLayer::fill_ros_for_model(const std::string& model,
         // rothermel_per_fuel is set on a spatial fuel map, in which case the
         // overload falls through to the uniform kernel.
         const bool per_fuel = !m_d_rc_table.empty() && fire_fuel_model;
+        // the per-cell coefficient field already carries the cell's fuel where
+        // rothermel_per_fuel asked for it; the code field only selects the
+        // per-fuel table (the directional path makes the same choice)
+        const RothermelCellInputs cell_mc = rothermel_cell_inputs();
         compute_ros_field(out, *fire_wind_eff, *fire_slopes, m_rc,
                           per_fuel ? fire_fuel_model.get() : nullptr,
                           per_fuel ? m_d_rc_table.data() : nullptr,
                           per_fuel ? static_cast<int>(m_d_rc_table.size()) : 0,
-                          m_params.fuel_map.fuel_set_id());
+                          m_params.fuel_map.fuel_set_id(),
+                          cell_mc.active() ? &cell_mc : nullptr);
     }
+}
+
+void FireLayer::update_moisture_means()
+{
+    if (!fire_fuel_mc) { return; }
+    const amrex::Long nc = fire_fuel_mc->boxArray().numPts();
+    if (nc <= 0) { return; }
+    const Real defaults[5] = {m_params.moisture_1hr, m_params.moisture_10hr, m_params.moisture_100hr,
+                              m_params.moisture_live, m_params.moisture_live};
+    for (int c = 0; c < 5; ++c) {
+        m_avg_mc[c] = (c < fire_fuel_mc->nComp()) ? fire_fuel_mc->sum(c) / Real(nc) : defaults[c];
+    }
+    // the dead classes as the Rothermel rebuild always clamped them
+    for (int c = 0; c < 3; ++c) { m_avg_mc[c] = amrex::max(0.01_rt, amrex::min(m_avg_mc[c], 0.40_rt)); }
+}
+
+RothermelCellInputs FireLayer::rothermel_cell_inputs() const
+{
+    RothermelCellInputs in;
+    if (!(m_params.moisture_dynamic && m_params.rothermel_cell_moisture && fire_rc_cell)) { return in; }
+    in.rc_cell = fire_rc_cell.get();
+    return in;
+}
+
+void FireLayer::rebuild_cell_rothermel_coefficients()
+{
+    if (!(m_params.moisture_dynamic && m_params.rothermel_cell_moisture && fire_fuel_mc)) { return; }
+    if (!m_params.uses_model("rothermel")) { return; }
+    if (!fire_rc_cell) {
+        fire_rc_cell = std::make_unique<amrex::MultiFab>(fire_fuel_mc->boxArray(), fire_fuel_mc->DistributionMap(),
+                                                         ROTHERMEL_RC_NCOMP, 0);
+    }
+    // the cell's own fuel on a map under rothermel_per_fuel (the uniform
+    // fuel everywhere otherwise, as the one-coefficient-set path has it)
+    const amrex::MultiFab* codes = (m_params.rothermel_per_fuel && m_has_spatial_fuel) ? fire_fuel_model.get() : nullptr;
+    build_cell_rothermel_coefficients(*fire_rc_cell, *fire_fuel_mc, codes,
+                                      fuel_params_table(), fuel_params_table_size(),
+                                      m_params.fuel_map.fuel_set_id(), m_params.moisture_live,
+                                      uniform_fuel_params(), m_params.use_wind_limit, m_params.wind_limit_mode);
 }
 
 void FireLayer::fill_prescribed_ros(amrex::MultiFab& out) const
@@ -2386,7 +2529,8 @@ void FireLayer::add_prescribed_heat_flux()
 void FireLayer::rebuild_rothermel_table(amrex::Real m1, amrex::Real m10, amrex::Real m100)
 {
     auto h_table = build_fuel_rothermel_table(m1, m10, m100, m_params.fuel_map.fuel_set_id(), m_params.moisture_live,
-                                              m_params.use_wind_limit, fuel_params_table_host().data());
+                                              m_params.use_wind_limit, fuel_params_table_host().data(),
+                                              m_params.wind_limit_mode);
     m_d_rc_table.resize(h_table.size());
     amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_table.begin(), h_table.end(),
                      m_d_rc_table.begin());
@@ -2551,17 +2695,16 @@ DirectionalRosState FireLayer::make_directional_state(const std::string& model) 
         st.bs    = m_bs_default;
     } else if (model == "macarthur") {
         st.model = DIRECTIONAL_ROS_MACARTHUR;
+        st.macarthur_ros_max = m_params.macarthur_ros_max;
     } else if (model == "fbp") {
         st.model = DIRECTIONAL_ROS_FBP;
         st.fbp   = m_fbp;
-    } else if (model == "cheney_gould") {
-        st.model       = DIRECTIONAL_ROS_CHENEY_GOULD;
-        // moisture and curing from the computed state, so the dynamic
-        // 1-h moisture update (advance_fuel_moisture rebuilds m_cgc) reaches
-        // the directional path exactly as it reaches the isotropic fill
-        st.cgc         = m_cgc;
-        st.cg_moisture = m_cgc.moisture;
-        st.cg_curing   = m_cgc.curing;
+    } else if (model == "cheney_gould" || model == "grass_simple") {
+        st.model = DIRECTIONAL_ROS_CHENEY_GOULD;
+        // the computed state (model, pasture, moisture, curing, phi_C), so
+        // the dynamic 1-h moisture update (which rebuilds m_cgc) reaches the
+        // directional path exactly as it reaches the isotropic fill
+        st.cgc   = m_cgc;
     } else {
         st.model = DIRECTIONAL_ROS_ROTHERMEL;
         st.rc    = m_rc;

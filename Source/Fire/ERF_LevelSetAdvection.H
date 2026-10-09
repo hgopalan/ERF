@@ -21,6 +21,99 @@
 namespace fire_levelset {
 
 /**
+ * @struct Scratch
+ * @brief Stage fields of the SSP-RK3 advection and of the reinitialisation,
+ *        allocated once on the fire grid instead of on every subcycle
+ *
+ * Every advection call used to allocate five MultiFabs (three with three
+ * ghost cells) and ParallelCopy between them, and every reinitialisation
+ * four more, up to a thousand times per atmospheric step. FireLayer owns one
+ * Scratch per fire grid and hands it to the drivers; a caller that passes
+ * none (the unit tests) gets a local one.
+ */
+struct Scratch
+{
+    amrex::MultiFab phi_n, phi_star, phi_hat, rhs, R_dir;   ///< advection stages
+    amrex::MultiFab phi_in, S, phi0, stage, stage2;          ///< reinitialisation stages
+
+    void define (const amrex::BoxArray& ba, const amrex::DistributionMapping& dm)
+    {
+        const int ng = 3;
+        phi_n.define(ba, dm, 1, ng);
+        phi_star.define(ba, dm, 1, ng);
+        phi_hat.define(ba, dm, 1, ng);
+        rhs.define(ba, dm, 1, 0);
+        R_dir.define(ba, dm, 1, 0);
+        phi_in.define(ba, dm, 1, ng);
+        S.define(ba, dm, 1, ng);
+        phi0.define(ba, dm, 1, ng);
+        stage.define(ba, dm, 1, ng);
+        stage2.define(ba, dm, 1, ng);
+    }
+    bool defined () const { return phi_n.ok(); }
+
+    /// The scratch to use for phi: the given one (defined on phi's layout), or local
+    static Scratch& select (Scratch* given, Scratch& local, const amrex::MultiFab& phi)
+    {
+        Scratch& sc = given ? *given : local;
+        if (!sc.defined()) { sc.define(phi.boxArray(), phi.DistributionMap()); }
+        // the kernels index the stages by phi's MFIter (MultiFab::Copy's own assert)
+        AMREX_ALWAYS_ASSERT(sc.phi_n.boxArray() == phi.boxArray()
+                            && sc.phi_n.DistributionMap() == phi.DistributionMap());
+        return sc;
+    }
+};
+
+/**
+ * @brief Arrival time of a cell the front crossed within a substep
+ *
+ * phi_old > 0 >= phi_new over a substep of length dt from t0: the front passed
+ * the cell centre at t0 + dt phi_old / (phi_old - phi_new), the linear
+ * interpolation of phi in time, clamped to the substep. Stamping the start of
+ * the substep instead (the practice until 2026-10) dated every cell up to one
+ * substep early, a mean bias of -dt/2 = -0.2 h/R at the default CFL, of the
+ * size of the arrival-time errors the Verification cases measure.
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real levelset_crossing_time (amrex::Real t0, amrex::Real dt,
+                                    amrex::Real phi_old, amrex::Real phi_new) noexcept
+{
+    const amrex::Real drop = phi_old - phi_new;
+    // divide by the floored drop before the select (a cell that was already
+    // burned has drop ~ 0, and the unselected x/0 would be speculated)
+    const amrex::Real frac = phi_old / amrex::max(drop, amrex::Real(1.0e-30));
+    const amrex::Real f = (drop > amrex::Real(1.0e-30) && phi_old > amrex::Real(0.0))
+                        ? amrex::min(amrex::max(frac, amrex::Real(0.0)), amrex::Real(1.0))
+                        : amrex::Real(0.0);
+    return t0 + f * dt;
+}
+
+/**
+ * @brief Stamp the arrival time of the cells that burned during a substep
+ *
+ * @param[in,out] arrival  -1 until a cell burns
+ * @param[in]     phi_old  Level set at the start of the substep
+ * @param[in]     phi_new  Level set at its end
+ * @param[in]     t0, dt   Start and length of the substep
+ */
+inline void stamp_arrival_time (amrex::MultiFab& arrival,
+                                const amrex::MultiFab& phi_old,
+                                const amrex::MultiFab& phi_new,
+                                amrex::Real t0, amrex::Real dt)
+{
+    for (amrex::MFIter mfi(arrival, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        auto at = arrival.array(mfi);
+        auto po = phi_old.const_array(mfi);
+        auto pn = phi_new.const_array(mfi);
+        amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            if (pn(i, j, k) < amrex::Real(0.0) && at(i, j, k) < amrex::Real(0.0)) {
+                at(i, j, k) = levelset_crossing_time(t0, dt, po(i, j, k), pn(i, j, k));
+            }
+        });
+    }
+}
+
+/**
  * @brief Compute level-set RHS: ∂φ/∂t = −R * (|∇φ| − ε Δφ)
  *
  * Uses the Godunov upwind norm for |∇φ| and central differences for the
@@ -319,6 +412,7 @@ inline void rk3_stage3_update(amrex::MultiFab& phi, const amrex::MultiFab& phi_h
  *                          stencil (see WallStencil); needs a mask
  * @param[in]     ros_scale Optional per-cell factor applied to the ROS after
  *                          every fill (the front acceleration clock)
+ * @param[in]     scratch   Stage fields allocated once (FireLayer); null allocates locally
  */
 template <class FillRos>
 inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
@@ -330,24 +424,26 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
                                           const amrex::MultiFab* mask = nullptr,
                                           bool wall_extrap = false,
                                           const LevelSetGradient& grad_scheme = LevelSetGradient{},
-                                          const amrex::MultiFab* ros_scale = nullptr)
+                                          const amrex::MultiFab* ros_scale = nullptr,
+                                          Scratch* scratch = nullptr)
 {
     using namespace amrex;
 
-    const auto* dx = geom.CellSize();
+    const auto dx = geom.CellSizeArray();
 
-    const int nghost = 3;
-    MultiFab phi_n(phi.boxArray(), phi.DistributionMap(), 1, nghost);
-    MultiFab phi_star(phi.boxArray(), phi.DistributionMap(), 1, nghost);
-    MultiFab phi_hat(phi.boxArray(), phi.DistributionMap(), 1, nghost);
-    MultiFab rhs(phi.boxArray(), phi.DistributionMap(), 1, 0);
-    MultiFab R_dir(phi.boxArray(), phi.DistributionMap(), 1, 0);
+    Scratch local;
+    Scratch& sc = Scratch::select(scratch, local, phi);
+    MultiFab& phi_n    = sc.phi_n;
+    MultiFab& phi_star = sc.phi_star;
+    MultiFab& phi_hat  = sc.phi_hat;
+    MultiFab& rhs      = sc.rhs;
+    MultiFab& R_dir    = sc.R_dir;
 
-    phi_n.ParallelCopy(phi);
+    MultiFab::Copy(phi_n, phi, 0, 0, 1, 0);
     fire_fill_boundary(phi_n, geom);
 
     // Stage 1: phi* = phi^n + dt L(phi^n)
-    phi_star.ParallelCopy(phi_n);
+    MultiFab::Copy(phi_star, phi_n, 0, 0, 1, 0);
     fire_fill_boundary(phi_star, geom);
     fill_ros(R_dir, phi_star);
     scale_ros_field(R_dir, ros_scale);
@@ -361,7 +457,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
     scale_ros_field(R_dir, ros_scale);
     zero_ros_in_mask(R_dir, mask);
     compute_levelset_rhs(rhs, phi_star, R_dir, dx[0], dx[1], eps_visc, &slopes, mask, wall_extrap, grad_scheme);
-    phi_hat.ParallelCopy(phi_n);
+    MultiFab::Copy(phi_hat, phi_n, 0, 0, 1, 0);
     rk3_stage2_update(phi_hat, phi_star, rhs, dt);
     fire_fill_boundary(phi_hat, geom);
 
@@ -394,6 +490,7 @@ inline void advect_levelset_rk3_with_fill(amrex::MultiFab& phi,
  *                          map-view interpretation.
  * @param[in]     mask      Optional non-burnable mask, only read with wall_extrap
  * @param[in]     wall_extrap  Extrapolate phi into mask cells inside every stencil
+ * @param[in]     scratch   Stage fields allocated once (FireLayer); null allocates locally
  */
 inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
                                         const amrex::MultiFab& /*vel_eff*/,
@@ -404,29 +501,29 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
                                         const amrex::MultiFab* slopes = nullptr,
                                         const amrex::MultiFab* mask = nullptr,
                                         bool wall_extrap = false,
-                                        const LevelSetGradient& grad_scheme = LevelSetGradient{})
+                                        const LevelSetGradient& grad_scheme = LevelSetGradient{},
+                                        Scratch* scratch = nullptr)
 {
     using namespace amrex;
 
-    const auto* dx = geom.CellSize();
+    const auto dx = geom.CellSizeArray();
 
-    // Allocate stage MultiFabs with 3 ghost cells (the WENO5-Z stencil reads all three)
-    const int nghost = 3;
-    MultiFab phi_n(phi.boxArray(), phi.DistributionMap(), 1, nghost);
-    MultiFab phi_star(phi.boxArray(), phi.DistributionMap(), 1, nghost);
-    MultiFab phi_hat(phi.boxArray(), phi.DistributionMap(), 1, nghost);
-    MultiFab rhs(phi.boxArray(), phi.DistributionMap(), 1, 0);
+    // Stage MultiFabs with 3 ghost cells (the WENO5-Z stencil reads all three)
+    Scratch local;
+    Scratch& sc = Scratch::select(scratch, local, phi);
+    MultiFab& phi_n    = sc.phi_n;
+    MultiFab& phi_star = sc.phi_star;
+    MultiFab& phi_hat  = sc.phi_hat;
+    MultiFab& rhs      = sc.rhs;
 
     // Save initial phi (input)
-    phi_n.ParallelCopy(phi);
+    MultiFab::Copy(phi_n, phi, 0, 0, 1, 0);
     fire_fill_boundary(phi_n, geom);
 
     // Stage 1: φ* = φ^n + Δt L(φ^n)
-    phi_star.ParallelCopy(phi_n);
-    // ParallelCopy fills the valid region only, and phi_star was just allocated,
-    // so without this its three ghost cells are uninitialized -- and the gradient-Z
-    // stencil in compute_levelset_rhs reads all three. Stages 2 and 3 already
-    // fill before their RHS; stage 1 was the one that did not.
+    MultiFab::Copy(phi_star, phi_n, 0, 0, 1, 0);
+    // The copy fills the valid region only, so the three ghost cells the
+    // gradient-Z stencil in compute_levelset_rhs reads are refilled here.
     fire_fill_boundary(phi_star, geom);
     compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap, grad_scheme);
     for (MFIter mfi(phi_star); mfi.isValid(); ++mfi) {
@@ -441,7 +538,7 @@ inline void advect_levelset_weno5z_rk3(amrex::MultiFab& phi,
 
     // Stage 2: φ** = (3/4)φ^n + (1/4)(φ* + Δt L(φ*))
     compute_levelset_rhs(rhs, phi_star, R_mf, dx[0], dx[1], eps_visc, slopes, mask, wall_extrap, grad_scheme);
-    phi_hat.ParallelCopy(phi_n);
+    MultiFab::Copy(phi_hat, phi_n, 0, 0, 1, 0);
     for (MFIter mfi(phi_hat); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
         auto ph = phi_hat.array(mfi);

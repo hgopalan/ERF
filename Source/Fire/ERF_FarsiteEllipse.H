@@ -20,6 +20,12 @@ namespace farsite_front {
     constexpr int front_cell = 1;
 }
 
+namespace farsite_shape {
+    /// erf.fire.farsite.shape
+    constexpr int rectangle = 0;   ///< support function of [-c, a] x [-b, b] (this code before 2026-10)
+    constexpr int ellipse   = 1;   ///< Richards (1990) / Alexander (1985) Huygens ellipse (default)
+}
+
 struct FarsiteParams
 {
     amrex::Real phi_threshold   = 0.1;
@@ -30,6 +36,18 @@ struct FarsiteParams
     amrex::Real gaussian_sigma  = -1.0;
     amrex::Real cfl_fire        = 0.5;
     int         front_update    = farsite_front::front_cell;
+    int         shape           = farsite_shape::ellipse;
+};
+
+/// Shape of the spread ellipse from the head rate and the midflame wind
+/// (shared by the FARSITE path and erf.fire.levelset.ellipse).
+struct SpreadEllipse
+{
+    amrex::Real a = 0.0;   ///< semi-minor rate (flank) [m/s]
+    amrex::Real b = 0.0;   ///< semi-major rate [m/s]
+    amrex::Real c = 0.0;   ///< centre offset rate [m/s]
+    amrex::Real LB = 1.0;  ///< length-to-width ratio
+    amrex::Real HB = 1.0;  ///< head-to-back ratio
 };
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -54,6 +72,55 @@ void LW_ratio_to_richards_coefficients(amrex::Real LW_ratio,
     coeff_b = (coeff_a + coeff_c) / (2.0 * LW_ratio);
 }
 
+/**
+ * @brief Ellipse rates for a head rate R and a length-to-width ratio
+ *
+ * Alexander's (1985) head-to-back ratio HB = (LB + sqrt(LB^2 - 1)) / (LB -
+ * sqrt(LB^2 - 1)) and the Richards (1990) / Finney (1998) axes b = (R + R/HB) / 2
+ * along the wind, a = b / LB across it and the centre offset c = b - R/HB, so the
+ * head runs at b + c = R, the back at b - c = R/HB and the flanks at a. LB = 1
+ * is the disc of radius R.
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+SpreadEllipse spread_ellipse_from_lw(amrex::Real R, amrex::Real LB) noexcept
+{
+    SpreadEllipse e;
+    LB = amrex::max(amrex::Real(1.0), LB);
+    e.LB = LB;
+    const amrex::Real s = std::sqrt(amrex::max(static_cast<amrex::Real>(LB * LB - 1.0),  amrex::Real(0.0)));
+    // (LB + s)/(LB - s) = (LB + s)^2 (since (LB - s)(LB + s) = 1): no cancelling
+    // difference in the divisor, so a large LB cannot give 0/0 in single precision
+    e.HB = (LB - s > 1.0e-12) ? (LB + s) * (LB + s) : amrex::Real(1.0e12);
+    const amrex::Real Rb = R / e.HB;
+    e.b = 0.5 * (R + Rb);
+    e.a = e.b / LB;
+    e.c = e.b - Rb;
+    return e;
+}
+
+/**
+ * @brief Ellipse rates for a head rate R and a midflame wind speed.
+ * @param R        Head rate of spread [m/s]
+ * @param U_mps    Midflame wind speed [m/s]
+ * @param lw_fixed Length-to-width ratio to use when > 0, else Anderson (1983) from the wind
+ * @param lw_max   Cap on the length-to-width ratio (Anderson caps at 8)
+ */
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+SpreadEllipse spread_ellipse(amrex::Real R, amrex::Real U_mps,
+                             amrex::Real lw_fixed, amrex::Real lw_max) noexcept
+{
+    amrex::Real LB = (lw_fixed > 0.0) ? lw_fixed : anderson_LW_ratio(U_mps * 2.23694);
+    LB = amrex::max(amrex::Real(1.0), amrex::min(LB, lw_max));
+    return spread_ellipse_from_lw(R, LB);
+}
+
+/// Normal speed of the ellipse for an outward normal at angle theta to the wind.
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real ellipse_normal_speed(const SpreadEllipse& e, amrex::Real cos_th, amrex::Real sin_th) noexcept
+{
+    return e.c * cos_th + std::sqrt(e.b * e.b * cos_th * cos_th + e.a * e.a * sin_th * sin_th);
+}
+
 namespace farsite_front {
 
 /// Larger than any arrival time
@@ -63,23 +130,35 @@ constexpr amrex::Real never () noexcept { return std::numeric_limits<amrex::Real
 /**
  * Spread shape of one front cell at unit head rate.
  *
- * With wind the Richards (1990) normal speed, a cos + b |sin| ahead and
- * b |sin| - c cos behind the wind direction, is the support function of the
- * rectangle [-c, a] x [-b, b] in the wind frame. Without wind the normal speed
- * is the head rate in every direction and the shape is the unit disc.
+ * With erf.fire.farsite.shape = ellipse (default) and wind, the shape is the
+ * Huygens ellipse of Richards (1990): semi-axes b along the wind and a across
+ * it, centre offset c from the ignition point along the wind, all at unit head
+ * rate (b + c = 1), from Anderson's length-to-width ratio and Alexander's
+ * head-to-back ratio (spread_ellipse). With shape = rectangle the normal
+ * speed is a cos + b |sin| ahead and b |sin| - c cos behind the wind, the
+ * support function of the rectangle [-c, a] x [-b, b] in the wind frame, the
+ * reading of the Richards coefficients this code used until 2026-10. Without
+ * wind the normal speed is the head rate in every direction and the shape is
+ * the unit disc.
  */
 struct Shape
 {
     amrex::Real wx, wy;   ///< unit wind direction
-    amrex::Real a, b, c;  ///< head, flank and backing coefficients, all > 0
+    amrex::Real a, b, c;  ///< rectangle: head, flank and backing coefficients; ellipse: semi-minor, semi-major and offset, all > 0
     amrex::Real sx, sy;   ///< terrain slope dz/dx, dz/dy
     bool isotropic;       ///< no wind: the unit disc
+    bool ellipse;         ///< the ellipse (true) or the rectangle (false) with wind
 };
 
 /**
  * Time the shape takes to cover the map vector (ddx, ddy) at unit head rate:
  * its gauge, lengthened by the slope, since a step ds along the ground up a
  * slope of angle theta in that direction covers ds cos(theta) in map view.
+ *
+ * For the ellipse the gauge is the t with (par - c t)^2 / (b t)^2 + per^2 /
+ * (a t)^2 = 1, the positive root of a^2 (b^2 - c^2) t^2 + 2 a^2 c par t -
+ * (a^2 par^2 + b^2 per^2) = 0: par / (b + c) = par straight ahead, |par| / (b - c)
+ * = |par| HB straight behind.
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real gauge (amrex::Real ddx, amrex::Real ddy, const Shape& s) noexcept
@@ -91,7 +170,19 @@ amrex::Real gauge (amrex::Real ddx, amrex::Real ddy, const Shape& s) noexcept
     if (!s.isotropic) {
         const amrex::Real par = ddx * s.wx + ddy * s.wy;
         const amrex::Real per = std::abs(ddy * s.wx - ddx * s.wy);
-        g = amrex::max(amrex::max(par / s.a, -par / s.c), per / s.b);
+        if (s.ellipse) {
+            const amrex::Real a2 = s.a * s.a;
+            const amrex::Real b2 = s.b * s.b;
+            const amrex::Real A  = a2 * (b2 - s.c * s.c);      // > 0 (b > c)
+            const amrex::Real B  = a2 * s.c * par;            // half the linear coefficient
+            const amrex::Real C  = a2 * par * par + b2 * per * per;
+            const amrex::Real D  = std::sqrt(B * B + A * C);
+            // the root without the cancelling difference ahead of the wind
+            // (B > 0, A C << B^2 at a large L/W)
+            g = (B >= 0.0_rt) ? C / (B + D) : (D - B) / A;
+        } else {
+            g = amrex::max(amrex::max(par / s.a, -par / s.c), per / s.b);
+        }
     }
     const amrex::Real tan_theta = (s.sx * ddx + s.sy * ddy) / len;
     return g * std::sqrt(1.0_rt + tan_theta * tan_theta);
@@ -120,8 +211,9 @@ amrex::Real crossing (amrex::Real g0, amrex::Real g1) noexcept
  * row spacing along the normal over the normal speed, one row at a time. Along
  * the segment the objective is convex; for the rectangle it is piecewise linear,
  * so the minimum lies at an end or at a kink, and every kink is tried; for the
- * disc the stationary point has a closed form. The slope is left out of the
- * choice of the point and applied to the travel time from it.
+ * disc the stationary point has a closed form; for the ellipse it is smooth and
+ * found by a golden-section search. The slope is left out of the choice of the
+ * point and applied to the travel time from it.
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real quadrant_arrival (amrex::Real Tx, amrex::Real Ty,
@@ -139,6 +231,28 @@ amrex::Real quadrant_arrival (amrex::Real Tx, amrex::Real Ty,
 
     amrex::Real lam[6];
     int n = 0;
+    if (!s.isotropic && s.ellipse) {
+        // Smooth convex objective on the flat gauge: golden-section search on
+        // (0, 1), 32 steps (a bracket of 1e-7 of the segment); the slope is
+        // then applied to the travel time from the point found, as the other
+        // branches do (inside the search the slope factor would make the
+        // objective non-convex).
+        Shape flat = s;
+        flat.sx = 0.0_rt; flat.sy = 0.0_rt;
+        const amrex::Real gr = 0.6180339887498949_rt;
+        amrex::Real lo = 0.0_rt, hi = 1.0_rt;
+        amrex::Real x1 = hi - gr * (hi - lo), x2 = lo + gr * (hi - lo);
+        auto obj = [&] (amrex::Real l) {
+            return Tx + l * (Ty - Tx) + gauge((1.0_rt - l) * hx, l * hy, flat) * inv_rate;
+        };
+        amrex::Real f1 = obj(x1), f2 = obj(x2);
+        for (int it = 0; it < 32; ++it) {
+            if (f1 < f2) { hi = x2; x2 = x1; f2 = f1; x1 = hi - gr * (hi - lo); f1 = obj(x1); }
+            else         { lo = x1; x1 = x2; f1 = f2; x2 = lo + gr * (hi - lo); f2 = obj(x2); }
+        }
+        const amrex::Real l = (f1 < f2) ? x1 : x2;
+        return amrex::min(best, Tx + l * (Ty - Tx) + gauge((1.0_rt - l) * hx, l * hy, s) * inv_rate);
+    }
     if (s.isotropic) {
         // Tx + l (Ty - Tx) + |d(l)| / rate with d(l) = ((1 - l)|hx|, l |hy|) is
         // stationary where |hx| cos(p) - |hy| sin(p) = rate (Ty - Tx), p the angle of d.
@@ -262,9 +376,17 @@ void advance_farsite_one_step_legacy(
                     LW_ratio_to_richards_coefficients(
                         anderson_LW_ratio(wind_mag * 2.237), a, b, c);
                 }
-                scale = (cos_t > 0.0)
-                    ? a * cos_t + b * sin_t
-                    : b * sin_t - c * cos_t;
+                if (fp.shape == farsite_shape::ellipse) {
+                    // the ellipse of the Anderson ratio, or of the ratio the
+                    // given coefficients imply, (a + c) / (2 b)
+                    const Real LB = (fp.use_anderson_lw != 0) ? anderson_LW_ratio(wind_mag * 2.237)
+                                                              : (a + c) / (2.0 * amrex::max(b, Real(1.0e-6)));
+                    scale = ellipse_normal_speed(spread_ellipse_from_lw(Real(1.0), LB), cos_t, sin_t);
+                } else {
+                    scale = (cos_t > 0.0)
+                        ? a * cos_t + b * sin_t
+                        : b * sin_t - c * cos_t;
+                }
             }
 
             // Distance travelled along the terrain surface
@@ -480,13 +602,37 @@ void advance_farsite_one_step_legacy(
  *
  * Front cells are the unburned, burnable cells with a burned 4-neighbour. Each
  * gets an arrival time from the arrival times of those neighbours with the
- * Hopf-Lax update of farsite_front::quadrant_arrival, using the Richards shape
- * of its own midflame wind (or the disc without wind) and its slope, and burns
+ * Hopf-Lax update of farsite_front::quadrant_arrival, using the spread shape
+ * (the Richards ellipse, or the rectangle) of its own midflame wind (the disc
+ * without wind) and its slope, and burns
  * in this substep if that time falls inside it, taking that time, not the
  * substep's, as its arrival time. A planar front therefore moves one row per
  * row spacing along the normal over R times the Richards normal speed, and the
  * burned region of a uniform case grows as the ignition swept by the spread
  * shape, which keeps a finite line's head flat and a disc convex.
+ *
+ * With the ellipse every burned cell within nine cells is also tried as a
+ * direct Huygens source: the cell burns when the distance its own rate has
+ * accumulated since the source burned covers gauge(cell - src). The quadrant
+ * update interpolates the arrival time linearly along the segment between two
+ * face neighbours, which lags where the shape's characteristic is far from
+ * the grid directions: at L/W = 2.9 the flank of the ellipse grows from a
+ * source about three cells upwind (the direction (c, a) = (2.7, 1)), and the
+ * segment stencil alone gave a third of the flank rate. A direct source gives
+ * the exact point-source arrival, and nine cells cover the source offset of
+ * the widest Anderson ellipse (L/W = 8). The rate over the path is taken from
+ * a distance clock, component 2 of disp_accum, which every cell accumulates
+ * as its own R dt from the start of the run; a cell that burns records the
+ * clock at its arrival in component 3, so the distance available to a source
+ * S is clock(cell, t) - clock(S, T_S): the integral of the rate over the time
+ * since S burned, exact for a rate that varies in time (the acceleration
+ * clocks) and uniform in space, rather than the current rate applied over
+ * the whole path. Where the two cells' rates differ the difference credits
+ * the source's history to the target, so it is bounded by the slower of the
+ * two current rates times the wait, which a path through the slower fuel
+ * cannot beat (a two-fuel strip keeps the fast fuel's cells at T_boundary +
+ * k h / R_fast, ERF_GTestFarsiteShape). The rectangle and the disc keep the
+ * quadrant update alone, whose paths are grid-aligned or closed-form.
  *
  * The head rate R is the larger of the cell's own rate and those of its burned
  * neighbours: the burned side carries the crown-fire rate, which is only set in
@@ -519,6 +665,10 @@ void advance_farsite_front_cells(
     const bool use_terrain = (slopes != nullptr);
     const bool use_mask    = (nonburnable != nullptr);
     const int  use_anderson_lw = fp.use_anderson_lw;
+    const bool ellipse = (fp.shape == farsite_shape::ellipse);
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(disp_accum.nComp() >= 4,
+        "[FIRE] the FARSITE front-cell update needs a 4-component disp_accum (distance, front flag, distance clock, clock at burn)");
+
     // Coefficients divide the gauge; a zero one would mean no spread that way.
     const Real coef_min = 1.0e-6_rt;
     const Real coef_a = amrex::max(fp.coeff_a, coef_min);
@@ -528,18 +678,40 @@ void advance_farsite_front_cells(
     // An ignition, a spot landing or a restart can leave a cell burned (phi < 0)
     // without an arrival time; it burns from the start of this substep.
     for (MFIter mfi(arrival_time); mfi.isValid(); ++mfi) {
-        auto p  = phi.const_array(mfi);
-        auto at = arrival_time.array(mfi);
+        auto p   = phi.const_array(mfi);
+        auto at  = arrival_time.array(mfi);
+        auto acc = disp_accum.array(mfi);
         ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            if (p(i, j, k) < 0.0_rt && at(i, j, k) < 0.0_rt) { at(i, j, k) = t0; }
+            if (p(i, j, k) < 0.0_rt && at(i, j, k) < 0.0_rt) {
+                at(i, j, k) = t0;
+                acc(i, j, k, 3) = acc(i, j, k, 2);   // the clock at its burn, t0 (before this substep's accumulation)
+            }
         });
     }
 
-    // Arrival time and rate of spread with a ghost cell: each update reads its
-    // four neighbours, across box and periodic boundaries.
-    MultiFab nbr(arrival_time.boxArray(), arrival_time.DistributionMap(), 2, IntVect(1, 1, 0));
+    // The distance clock: every cell accumulates its own R dt (to t1), so
+    // that the distance available to a direct source is the clock difference
+    // since the source burned (see the comment above).
+    for (MFIter mfi(disp_accum); mfi.isValid(); ++mfi) {
+        auto acc = disp_accum.array(mfi);
+        auto R   = R_mf.const_array(mfi);
+        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            acc(i, j, k, 2) += amrex::max(R(i, j, k), 0.0_rt) * dt_fire;
+        });
+    }
+
+    // Arrival time and rate of spread with ghost cells: each update reads its
+    // four neighbours, and with the ellipse the direct sources within r_src
+    // cells, across box and periodic boundaries.
+    const int r_src = ellipse ? 9 : 1;
+    const IntVect dlo = geom_fire.Domain().smallEnd();
+    const IntVect dhi = geom_fire.Domain().bigEnd();
+    const bool per_x = geom_fire.isPeriodic(0);
+    const bool per_y = geom_fire.isPeriodic(1);
+    MultiFab nbr(arrival_time.boxArray(), arrival_time.DistributionMap(), 3, IntVect(r_src, r_src, 0));
     MultiFab::Copy(nbr, arrival_time, 0, 0, 1, 0);
     MultiFab::Copy(nbr, R_mf,         0, 1, 1, 0);
+    MultiFab::Copy(nbr, disp_accum,   3, 2, 1, 0);   // the clock at burn of every burned cell
     fire_fill_boundary(nbr, geom_fire);
 
     for (MFIter mfi(arrival_time); mfi.isValid(); ++mfi) {
@@ -589,6 +761,7 @@ void advance_farsite_front_cells(
             const Real uy = vel(i, j, k, 1);
             const Real wind_mag = std::sqrt(ux * ux + uy * uy);
             s.isotropic = !(wind_mag > 1.0e-10_rt);
+            s.ellipse = ellipse;
             s.wx = 1.0_rt; s.wy = 0.0_rt;
             s.a = 1.0_rt; s.b = 1.0_rt; s.c = 1.0_rt;
             // unit wind from the floored magnitude (calm cells give 0/0 in the
@@ -601,9 +774,19 @@ void advance_farsite_front_cells(
                 if (use_anderson_lw != 0) {
                     LW_ratio_to_richards_coefficients(anderson_LW_ratio(wind_mag * 2.237_rt), a, b, c);
                 }
-                s.a = amrex::max(a, coef_min);
-                s.b = amrex::max(b, coef_min);
-                s.c = amrex::max(c, coef_min);
+                if (ellipse) {
+                    // Anderson's ratio, or the ratio the given coefficients imply
+                    const Real LB = (use_anderson_lw != 0) ? anderson_LW_ratio(wind_mag * 2.237_rt)
+                                                           : (a + c) / (2.0_rt * amrex::max(b, coef_min));
+                    const SpreadEllipse e = spread_ellipse_from_lw(1.0_rt, LB);
+                    s.a = amrex::max(e.a, coef_min);
+                    s.b = amrex::max(e.b, coef_min);
+                    s.c = amrex::max(e.c, 0.0_rt);
+                } else {
+                    s.a = amrex::max(a, coef_min);
+                    s.b = amrex::max(b, coef_min);
+                    s.c = amrex::max(c, coef_min);
+                }
             }
             s.sx = use_terrain ? slp(i, j, k, 0) : 0.0_rt;
             s.sy = use_terrain ? slp(i, j, k, 1) : 0.0_rt;
@@ -613,10 +796,45 @@ void advance_farsite_front_cells(
             T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txp, Tym, -dx[0],  dx[1], s, rate));
             T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txm, Typ,  dx[0], -dx[1], s, rate));
             T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txp, Typ, -dx[0], -dx[1], s, rate));
+            if (ellipse) {
+                // direct Huygens sources, for the calm disc as well so that a
+                // vanishing wind changes nothing (the quadrant paths alone lag
+                // the disc's diagonals too): a burned cell within r_src cells and
+                // inside the domain (a non-periodic ghost is an extrapolated
+                // copy). The cell burns when the distance its clock has
+                // accumulated since the source burned covers the gauge; the
+                // time inside this substep comes from its current rate.
+                const Real clock_x = acc(i, j, k, 2);
+                const Real r_now   = amrex::max(nb(i, j, k, 1), 1.0e-30_rt);
+                for (int dj = -r_src; dj <= r_src; ++dj) {
+                    const int jj = j + dj;
+                    if (!per_y && (jj < dlo[1] || jj > dhi[1])) { continue; }
+                    for (int di = -r_src; di <= r_src; ++di) {
+                        const int ii = i + di;
+                        if (!per_x && (ii < dlo[0] || ii > dhi[0])) { continue; }
+                        const Real Ts = nb(ii, jj, k, 0);
+                        if (Ts < 0.0_rt) { continue; }
+                        // The clock difference is the distance when both cells ran
+                        // the same rate history; with a rate contrast (a fuel
+                        // boundary, head against flank wind) it credits the
+                        // source's history to the target, so it is bounded by the
+                        // slower of the two current rates over the whole wait,
+                        // which a path through slower fuel cannot beat.
+                        const Real R_s   = amrex::max(nb(ii, jj, k, 1), 0.0_rt);
+                        const Real bound = amrex::min(R_s, r_now) * (t1 - Ts);
+                        const Real covered = amrex::min(clock_x - nb(ii, jj, k, 2), bound);
+                        const Real need    = farsite_front::gauge(-di * dx[0], -dj * dx[1], s);
+                        if (covered >= need) { T_new = amrex::min(T_new, t1 - (covered - need) / r_now); }
+                    }
+                }
+            }
             if (T_new <= t1) {
-                at(i, j, k) = amrex::max(T_new, t0);
+                const Real at_new = amrex::max(T_new, t0);
+                at(i, j, k) = at_new;
                 acc(i, j, k, 0) = 0.0_rt;
                 acc(i, j, k, 1) = 0.0_rt;
+                // the clock at the arrival, read back from the end of the substep
+                acc(i, j, k, 3) = acc(i, j, k, 2) - amrex::max(nb(i, j, k, 1), 0.0_rt) * (t1 - at_new);
             }
         });
     }

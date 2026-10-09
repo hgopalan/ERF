@@ -303,7 +303,7 @@ Real farsite_head_advance (const AccelerationParams& ap, Real R_E, int nsteps, i
     constexpr int  IB = 10;
     constexpr Real H  = 5.0;
     Strip s(NX, H, 40);
-    MultiFab phi(s.ba, s.dm, 1, 1), work(s.ba, s.dm, 2, 0), disp(s.ba, s.dm, 2, 0);
+    MultiFab phi(s.ba, s.dm, 1, 1), work(s.ba, s.dm, 2, 0), disp(s.ba, s.dm, 4, 0);
     MultiFab arrival(s.ba, s.dm, 1, 0), vel(s.ba, s.dm, 2, 0), R(s.ba, s.dm, 1, 0);
     MultiFab state(s.ba, s.dm, 3, 0);
     set_burned_columns(phi, IB);

@@ -390,3 +390,40 @@ TEST(LevelSetAdvection, ReinitialisationRestoresUnitGradient)
         EXPECT_EQ(nonfinite_cells(phi), 0) << "stretch " << c.stretch;
     }
 }
+
+/**
+ * At the production setting (erf.fire.levelset.reinit_dtau auto = 0.01 dx,
+ * reinit_iters = 1, WRF-Fire's own) one call moves phi by at most 0.01 dx S (1
+ * - |grad phi|), and the correction of the gradient spreads from the front at
+ * unit pseudo-speed, 0.01 dx per call: a cell a few cells from the front
+ * keeps its stretched gradient. It is a nudge, which the doc now says, not a
+ * restoration of the signed distance; the test above restores it with dtau =
+ * 0.25 dx over 40 outer steps.
+ */
+TEST(LevelSetAdvection, ReinitialisationAtTheProductionStepIsANudge)
+{
+    FireGridFixture f;
+    MultiFab phi(f.ba, f.dm, 1, 3), phi0(f.ba, f.dm, 1, 3), R(f.ba, f.dm, 1, 0), rhs(f.ba, f.dm, 1, 0), ref(f.ba, f.dm, 1, 0);
+    R.setVal(1.0);
+    ref.setVal(-1.0);
+    const Real R0 = 50.0, stretch = 1.5;
+    const LevelSetGradient g = scheme(LEVELSET_GRAD_WENO5Z_FRONT, 3.0 * DX);
+    auto band = [&f, R0] (int i, int j) { const Real d = f.radius(i, j) - R0; return d > DX && d < 3.0 * DX; };
+
+    f.disc(phi, R0, stretch);
+    f.disc(phi0, R0, stretch);
+    compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, nullptr, nullptr, false, g);
+    const Real before = max_abs_diff(rhs, ref, band);   // about stretch - 1
+    EXPECT_NEAR(before, stretch - 1.0, 0.05);
+
+    reinitialize_phi(phi, f.geom, 1, 0.01 * DX, 4.0 * DX);
+    fire_fill_boundary(phi, f.geom);
+    compute_levelset_rhs(rhs, phi, R, DX, DX, 0.0, nullptr, nullptr, false, g);
+    const Real after = max_abs_diff(rhs, ref, band);
+    EXPECT_NEAR(after, before, 0.02 * before) << "the band's gradient error is unchanged to a few percent";
+    MultiFab moved(f.ba, f.dm, 1, 0);
+    MultiFab::Copy(moved, phi, 0, 0, 1, 0);
+    MultiFab::Subtract(moved, phi0, 0, 0, 1, 0);
+    EXPECT_LE(moved.norm0(), 0.01 * DX * (stretch - 1.0) * 1.0001) << "|dphi| <= dtau (|grad phi| - 1)";
+    EXPECT_EQ(burned_cells(phi), burned_cells(phi0));
+}

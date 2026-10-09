@@ -90,9 +90,10 @@ void initialize_ignition(
  * initialize_ignition(). The hot cell itself gets -radius (or -1).
  *
  * The temperature field is whatever the caller maps onto the fire grid; the
- * fire layer passes the k = 0 potential temperature it already holds for the
- * fuel-moisture update, so in a coupled run the fire's own heating can start
- * new fire and in a one-way run only the initial atmosphere can.
+ * fire layer passes the k = 0 air temperature (theta times the Exner function,
+ * compute_t_from_conservative) it already holds for the fuel-moisture update,
+ * so in a coupled run the fire's own heating can start new fire and in a
+ * one-way run only the initial atmosphere can.
  *
  * @param[in,out] phi         Level-set field on the fire grid
  * @param[in]     temp        Near-surface temperature on the fire grid [K]

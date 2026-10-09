@@ -120,6 +120,14 @@ write_fire_stats_header(const std::string& filename)
  * @param[in] edge_contact_time Time [s] the fire first entered the band, -1 until then.
  * @param[in] precip_mf         Optional rain rate per fire cell [mm/hr] (erf.fire.precip_source);
  *                              its maximum is the last column, 0 without a rain source.
+ * @param[in] phi_normalized    phi convention: the [-1, 1] indicator of the FARSITE
+ *                              path (true) or the signed distance in metres of the
+ *                              level set (false). active_front_cells counts the
+ *                              unburned cells with 0 <= phi < 0.1 on the indicator
+ *                              and 0 <= phi < min(dx) (one cell of the front) on
+ *                              the level set; before 2026-10 the 0.1 applied to
+ *                              both, which on the level set meant cells within
+ *                              10 cm of the front.
  */
 inline void
 append_fire_stats(const amrex::MultiFab& phi,
@@ -133,7 +141,8 @@ append_fire_stats(const amrex::MultiFab& phi,
                   const amrex::MultiFab* albini_mf = nullptr,
                   amrex::Long n_edge_cells = 0,
                   amrex::Real edge_contact_time = amrex::Real(-1.0),
-                  const amrex::MultiFab* precip_mf = nullptr)
+                  const amrex::MultiFab* precip_mf = nullptr,
+                  bool phi_normalized = true)
 {
     using namespace amrex;
 
@@ -141,6 +150,7 @@ append_fire_stats(const amrex::MultiFab& phi,
     // members, which a device lambda cannot dereference.
     const auto dx = geom.CellSizeArray();
     Real cell_area = dx[0] * dx[1];
+    const Real front_band = phi_normalized ? Real(0.1) : amrex::min(dx[0], dx[1]);
 
     Long n_burned = 0, n_active = 0;
     Real perim_m = Real(0.0);
@@ -162,8 +172,14 @@ append_fire_stats(const amrex::MultiFab& phi,
         ReduceData<unsigned long long, unsigned long long, Real, Real> reduce_data(reduce_op);
         using ReduceTuple = typename decltype(reduce_data)::Type;
         const bool has_R = (R_mf != nullptr);
+        // The neighbour tests stop at a non-periodic face; across a periodic
+        // one at_g holds the periodic image, so the seam is counted like any
+        // other edge (it was skipped before 2026-10, undercounting the
+        // perimeter along a periodic boundary).
         const IntVect lo = geom.Domain().smallEnd();
         const IntVect hi = geom.Domain().bigEnd();
+        const bool per_x = geom.isPeriodic(0);
+        const bool per_y = geom.isPeriodic(1);
         for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
             const Box& bx = mfi.validbox();
             auto const p  = phi.const_array(mfi);
@@ -187,22 +203,23 @@ append_fire_stats(const amrex::MultiFab& phi,
 
                     // Track head ROS for perimeter cells
                     bool on_perim = false;
-                    if (i > lo[0]) on_perim = on_perim || (at(i-1,j,k,0) < Real(0.0));
-                    if (i < hi[0]) on_perim = on_perim || (at(i+1,j,k,0) < Real(0.0));
-                    if (j > lo[1]) on_perim = on_perim || (at(i,j-1,k,0) < Real(0.0));
-                    if (j < hi[1]) on_perim = on_perim || (at(i,j+1,k,0) < Real(0.0));
+                    if (per_x || i > lo[0]) on_perim = on_perim || (at(i-1,j,k,0) < Real(0.0));
+                    if (per_x || i < hi[0]) on_perim = on_perim || (at(i+1,j,k,0) < Real(0.0));
+                    if (per_y || j > lo[1]) on_perim = on_perim || (at(i,j-1,k,0) < Real(0.0));
+                    if (per_y || j < hi[1]) on_perim = on_perim || (at(i,j+1,k,0) < Real(0.0));
 
                     if (on_perim && has_R) { ros = R_arr(i, j, k, 0); }
-                } else if (pv < Real(0.1) && pv >= Real(0.0)) {
-                    active_cnt = 1;  // unburned cells within threshold of front
+                } else if (pv < front_band && pv >= Real(0.0)) {
+                    active_cnt = 1;  // unburned cells within one cell of the front
                 }
 
-                // Edge-crossing perimeter (arrival_time boundary)
-                if (i < hi[0]) {
+                // Edge-crossing perimeter (arrival_time boundary); each edge is
+                // counted from its low side, the periodic seam from the last cell
+                if (per_x || i < hi[0]) {
                     const bool burned_n = (at(i+1, j, k, 0) >= Real(0.0));
                     if (burned != burned_n) perim += dx[1];
                 }
-                if (j < hi[1]) {
+                if (per_y || j < hi[1]) {
                     const bool burned_n = (at(i, j+1, k, 0) >= Real(0.0));
                     if (burned != burned_n) perim += dx[0];
                 }
@@ -225,11 +242,8 @@ append_fire_stats(const amrex::MultiFab& phi,
         ParallelDescriptor::ReduceRealMax(head_ros);
     }
 
-    Real Q_max = Q_mf ? Q_mf->max(0) : 0.0_rt;
-    if (Q_mf) {
-        ParallelDescriptor::ReduceRealMax(Q_max);
-    }
     // MultiFab::max() already reduces over ranks
+    const Real Q_max      = Q_mf ? Q_mf->max(0) : 0.0_rt;
     const Real precip_max = precip_mf ? precip_mf->max(0) : 0.0_rt;
 
     // Phase 8: Albini spotting statistics

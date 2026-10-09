@@ -2319,6 +2319,20 @@ add_test_fire(FireRestart_levelset_straight FireRestart           inputs_levelse
 add_test_fire(FireMrfThermalExcess          FireRestart           inputs_coupled_straight    40 NRANKS 1
     RUNTIME_OPTIONS "erf.pbl_type=MRF erf.pbl_mrf_fire_thermal_excess=true")
 add_test_fire(FireRosComparison_rothermel   FireRosComparison     inputs_rothermel_isotropic 40 NRANKS 1)
+# the defaults the 2026-10 validation changed, each next to the deck that keeps
+# the earlier form: the grass model (Cheney, Gould and Catchpole 1998 against
+# the fit it replaced), the BEHAVE net load (surface-area weighted against the
+# summed), the FARSITE spread shape (Richards ellipse against the rectangle)
+# and the wind limit (Rothermel's 0.9 I_R against the 300/500 ft/min rule)
+add_test_fire(FireRosComparison_cheney_gould FireRosComparison    inputs_cheney_gould_isotropic 40 NRANKS 1)
+add_test_fire(FireRosComparison_grass_simple FireRosComparison    inputs_grass_simple_isotropic 40 NRANKS 1)
+add_test_fire(FireRosComparison_behave      FireRosComparison     inputs_behave_isotropic    40 NRANKS 1)
+add_test_fire(FireRosComparison_behave_sum  FireRosComparison     inputs_behave_isotropic    40 NRANKS 1
+    RUNTIME_OPTIONS "erf.fire.behave.net_load=sum")
+add_test_fire(FireFarsiteShape_ellipse      FarsiteFrontUpdate    inputs_front_cell          40 NRANKS 1)
+add_test_fire(FireFarsiteShape_rectangle    FarsiteFrontUpdate    inputs_rectangle           40 NRANKS 1)
+add_test_fire(FireLineFire_wind5_cap        FireLineFire          inputs_wind5_cap           40 NRANKS 1)
+add_test_fire(FireLineFire_wind5_cap_fuel_class FireLineFire      inputs_wind5_cap_fuel_class 40 NRANKS 1)
 add_test_fire(FireScottBurgan_gr2           FireScottBurgan       inputs_sb_gr2              40)
 add_test_fire(FireCustomFuel_uniform        FireCustomFuel        inputs_custom_grass        40)
 add_test_fire(FireCustomFuel_map            FireCustomFuel        inputs_custom_map          40)
@@ -2376,6 +2390,19 @@ add_test_fire_abort(FireBadRosModel_abort     FireRestart           inputs_level
     "erf.fire.ros_model = \"rothermal\" is not one of" "erf.fire.ros_model=rothermal")
 add_test_fire_abort(FireBadCoupling_abort     FireRestart           inputs_levelset_straight
     "erf.fire.coupling_type = \"laged\" is not one of" "erf.fire.coupling_type=laged")
+# selectors and ranges of the keys the 2026-10 validation added
+add_test_fire_abort(FireBadWindLimit_abort    FireRestart           inputs_levelset_straight
+    "erf.fire.wind_limit = \"rothermal\" is not one of" "erf.fire.wind_limit=rothermal")
+add_test_fire_abort(FireBadFarsiteShape_abort FireRestart           inputs_levelset_straight
+    "erf.fire.farsite.shape = \"oval\" is not one of" "erf.fire.farsite.shape=oval")
+add_test_fire_abort(FireBadNetLoad_abort      FireRestart           inputs_levelset_straight
+    "erf.fire.behave.net_load = \"average\" is not one of" "erf.fire.ros_model=behave erf.fire.behave.net_load=average")
+add_test_fire_abort(FireCheneyKeyNoModel_abort FireRestart          inputs_levelset_straight
+    "erf.fire.cheney_gould.pasture needs erf.fire.ros_model = cheney_gould" "erf.fire.cheney_gould.pasture=grazed")
+add_test_fire_abort(FireMacArthurCap_abort    FireRestart           inputs_levelset_straight
+    "erf.fire.macarthur.ros_max must be >= 0" "erf.fire.macarthur.ros_max=-1")
+add_test_fire_abort(FireBadWindBelow_abort    FireRestart           inputs_levelset_straight
+    "erf.fire.wind_below_first_cell = \"linear\" is not one of" "erf.fire.wind_below_first_cell=linear")
 # start-up checks added by the October 2026 audit: a value the kernels cannot use,
 # or an input given without the switch that reads it, stops the run naming the key
 # (each of these ran on silently before: Balbi returned 15 m/s with no bisection

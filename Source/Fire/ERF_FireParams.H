@@ -44,7 +44,13 @@ struct FireParams
     bool              use_per_fuel_wind_ht = false; ///< Use per-fuel fcwh table for wind height
     bool              use_waf             = true;        ///< Apply Wind Adjustment Factor
     std::string       waf_formula         = "andrews";   ///< "andrews" or "behaviorplus"
-    bool              use_wind_limit      = true;        ///< Apply the MEWS midflame wind cap (Rothermel, BEHAVE)
+    bool              use_wind_limit      = true;        ///< Apply the wind limit to the midflame wind (Rothermel, BEHAVE)
+    // Which limit (erf.fire.wind_limit): "rothermel" (default) is Rothermel's
+    // (1972) eq. 87, U_max = 0.9 I_R [ft/min, I_R in BTU/ft2/min], the limit
+    // BehavePlus and FARSITE apply; "fuel_class" is the absolute rule this
+    // code used until 2026-10, 300 ft/min for sigma > 1000 1/ft and 500 ft/min
+    // otherwise, which capped short grass above a 4.2 m/s reference wind.
+    int               wind_limit_mode     = 0;           ///< fire_wind_limit::rothermel (0) or ::fuel_class (1)
     // Second-height wind sampling (the Community Fire Behavior Model's second
     // interpolation option): sample the atmospheric wind at wind_sample_ht
     // above the local ground, above the fire's own plume, and bring it down
@@ -53,8 +59,20 @@ struct FireParams
     //   U(z_ref) = U(z_sample) ln(z_ref / z0) / ln(z_sample / z0).
     // 0 (default) samples at the target height as before.
     amrex::Real       wind_sample_ht      = 0.0;         ///< Height [m] above ground to sample the wind; 0 = at the target height
-    amrex::Real       wind_sample_z0      = 0.1;         ///< Roughness length [m] of the log profile between the two heights
-    bool              use_terrain_wind    = true;        ///< Apply terrain corrections
+    amrex::Real       wind_sample_z0      = 0.1;         ///< Roughness length [m] of every neutral log profile the fire layer uses: the two-height resampling, the wind below the lowest cell centre, and the ember drift
+    // A target height below the lowest cell centre (a first cell thicker than
+    // twice wind_ref_ht): "clamp" (default) takes the lowest centre's wind as
+    // it is, the behaviour every deck sampling below its first centre carries
+    // its numbers with (12 % high for a 20 m first cell and z0 = 0.1 m); "log"
+    // scales the lowest centre's wind down a neutral log profile of roughness
+    // wind_sample_z0, the recommended setting for a first cell above the
+    // reference height.
+    bool              wind_below_first_log = false;      ///< erf.fire.wind_below_first_cell = "clamp" | "log"
+    // The ridge, shelter, valley and deflection factors below are empirical
+    // stand-ins for flow that a resolved atmosphere already contains (they are
+    // not FARSITE's, which takes gridded winds as given), and they step from 1
+    // to k_ridge at a 5 % slope; off by default since 2026-10.
+    bool              use_terrain_wind    = false;       ///< Apply the terrain wind factors
     amrex::Real       k_ridge             = 1.5;         ///< Ridge speed-up factor
     amrex::Real       k_shelter           = 0.6;         ///< Sheltered wind factor
     amrex::Real       k_valley            = 0.8;         ///< Valley channeling factor
@@ -134,6 +152,15 @@ struct FireParams
     // rebuild includes the first unburned row, so the front ran about twice the
     // rate of spread; kept to reproduce earlier results.
     int               farsite_front_update    = 1;
+    // Spread shape of the FARSITE path, erf.fire.farsite.shape (see
+    // ERF_FarsiteEllipse.H). "ellipse" (1, default since 2026-10): the Huygens
+    // ellipse of Richards (1990) with Anderson's (1983) length-to-width ratio
+    // and Alexander's (1985) head-to-back ratio, the shape FARSITE grows, a
+    // disc at zero wind. "rectangle" (0): the support function of the rectangle
+    // [-c, a] x [-b, b] with a = 1, c = 0.2 and b = 1.2 / (2 L/W), this code's
+    // reading of the Richards coefficients until 2026-10, whose back rate was
+    // 0.2 R at every wind (0.2 R in calm, 19x the ellipse's at L/W = 5).
+    int               farsite_shape           = 1;
 
     // Level-set propagation parameters
     std::string       propagation_method      = "farsite";   ///< "farsite" (default, Lagrangian) or "levelset" (PDE-based)
@@ -238,6 +265,12 @@ struct FireParams
     // fire flux (about 10-15% too much at sea level); kept to reproduce
     // coupled results from before 2026-09-03.
     bool              heat_tendency_density   = false;
+    // Divide the theta tendency by the Exner function Pi = (p/p0)^(R/cp) of
+    // the cell, so that the enthalpy cp rho Pi dtheta/dt dz integrates to the
+    // injected flux: without it the heating is short by 1 - Pi, 2-6 % at the
+    // surface and 4.5 % at 850 hPa. WRF-SFIRE omits the factor, and so does
+    // the default here; true keeps the energy exact.
+    bool              heat_tendency_exner     = false;
 
     // Phase 8: Albini (1983) ember spotting parameters
     struct SpottingParams {
@@ -347,8 +380,9 @@ struct FireParams
         amrex::Real   polygon_interior_ros    = 0.0;        ///< Spread rate [m/s] behind the interior arrival times; 0 = off
         amrex::Real   polygon_interior_tau    = 0.0;        ///< Burnout e-folding time [s] of the interior; 0 = dx_fire / polygon_interior_ros
         // Temperature-threshold ignition: every burnable, unburned fire cell
-        // whose near-surface air temperature (the k = 0 potential temperature
-        // the fuel-moisture update reads, mapped onto the fire grid) exceeds
+        // whose near-surface air temperature (the k = 0 air temperature
+        // theta * Exner the fuel-moisture update reads, mapped onto the fire
+        // grid) exceeds
         // threshold_temp is ignited as a disc of radius threshold_radius (one
         // fire cell when 0), from threshold_start_time on. In a coupled run
         // the fire's own heating can therefore start new fire ahead of the
@@ -474,8 +508,9 @@ struct FireParams
     // "fbp"          — Canadian Forest Fire Behavior Prediction System (ERF_FbpModel.H)
     // "hybrid"       — two of the above blended by a selector (ERF_HybridRos.H)
     // "prescribed"   — a prescribed rate for verification (ERF_PrescribedFire.H)
-    // "cheney_gould" — Cheney & Gould (1998) empirical grassland model
-    // "macarthur"    — McArthur grassland formula R = 0.18*exp(0.8424*U)
+    // "cheney_gould" — Cheney, Gould & Catchpole (1998) grassland model (ERF_CheneyGouldModel.H)
+    // "grass_simple" — the fit this code called cheney_gould until 2026-10, kept for reproduction
+    // "macarthur"    — McArthur grassland formula R = 0.18*exp(0.8424*U), capped at macarthur.ros_max
     std::string       ros_model = "rothermel";  ///< ROS model selector
 
     // Phase 13B: Balbi (2009) physical fire spread model parameters.
@@ -561,12 +596,23 @@ struct FireParams
         amrex::Real hf_ref_height      = 10.0;  ///< Reference height for v_b_Q [m]
     } balbi;
 
-    // Phase 13B: Cheney-Gould (1998) grassland model parameters.
-    // Only used when ros_model = "cheney_gould".
+    // Cheney, Gould and Catchpole (1998) grassland model parameters, used by
+    // ros_model = "cheney_gould" and (moisture and curing only) by the
+    // pre-2026-10 fit kept as ros_model = "grass_simple" (ERF_CheneyGouldModel.H).
     struct CheneyGouldParams {
         amrex::Real moisture = 10.0;  ///< Dead fine fuel moisture [%]
         amrex::Real curing   = 1.0;   ///< Degree of curing [0-1]; 1 = fully cured
+        int         pasture  = 0;     ///< cheney_gould::pasture_natural (0) or ::pasture_grazed (1)
+        int         curing_curve = 0; ///< cheney_gould::curing_cruz2015 (0) or ::curing_cheney1998 (1)
+        /// 0 = the reference-height wind (fire_wind_ref; set wind_ref_ht = 10, the
+        /// model's U10), 1 = the midflame wind after the Wind Adjustment Factor
+        int         wind_source = 0;
     } cheney_gould;
+
+    // McArthur (1966) grassland formula: cap on its rate [m/s], which grows as
+    // exp(0.8424 U) without one (12 m/s at a 5 m/s midflame wind); WRF-Fire
+    // caps the rate at 6 m/s. 0 removes the cap.
+    amrex::Real       macarthur_ros_max   = 6.0;
 
     // Canadian Forest Fire Behavior Prediction System (ros_model = "fbp";
     // see ERF_FbpModel.H). The system's inputs are daily indices, uniform
@@ -592,6 +638,10 @@ struct FireParams
     struct BehaveParams {
         amrex::Real dynamic_transfer_lo  = 0.30;  ///< Live herba moisture [fraction] at and below which the whole load transfers
         amrex::Real dynamic_transfer_hi  = 1.20;  ///< Live herba moisture [fraction] at and above which none transfers
+        /// erf.fire.behave.net_load: behave_net_load::weighted (0, default), the
+        /// surface-area-weighted net loads and heat sink of Rothermel (1972)
+        /// eqs. 53-57; ::sum (1), the plain class sum of the code before 2026-10
+        int         net_load_mode        = 0;
     } behave;
 
     // Hybrid rate of spread: two of the models above evaluated on every cell
@@ -713,10 +763,13 @@ struct FireParams
         } ignition;
     } structures;
 
-    // Firebreak cells stamped at initialization are also held in the
-    // non-burnable mask when true, so the level-set path cannot burn back
-    // into them after reinitialisation. Off by default (legacy behaviour).
-    bool firebreak_use_mask = false;
+    // Firebreak cells stamped at initialization are held in the non-burnable
+    // mask, so neither path can burn into them. On by default since 2026-10:
+    // without the mask the sentinel is only a value of the level set, which
+    // the FARSITE front_cell update rebuilds from the arrival time on every
+    // subcycle and the level-set advection erases within seconds, so a
+    // firebreak was a no-op on the default path. false keeps that behaviour.
+    bool firebreak_use_mask = true;
 
     // Evaluate the Rothermel coefficients per cell from the spatial fuel map
     // instead of the domain fuel_model_id. Off by default: the Rothermel
@@ -725,6 +778,14 @@ struct FireParams
     // burnout times, the WAF, the Byram diagnostics and the Balbi kernels
     // whatever the ROS model (see ERF_CustomFuel.H).
     bool rothermel_per_fuel = false;
+
+    // With erf.fire.moisture_dynamic, evaluate the Rothermel coefficients from
+    // each cell's own dead moistures (fire_fuel_mc) inside the kernels, on the
+    // isotropic and the directional level-set paths, as BEHAVE does. false
+    // rebuilds one set of coefficients per step from the domain-mean moistures,
+    // which averaged any moisture gradient (a shore, fire-dried air) over
+    // every cell of the grid (the behaviour before 2026-10).
+    bool rothermel_cell_moisture = true;
 
     // Phase 10: Firebreak barriers (up to 10, indexed by N=0..9)
     int n_firebreaks = 0;
@@ -837,6 +898,27 @@ struct FireParams
        pp.query("waf_formula", waf_formula);
        one_of("waf_formula", waf_formula, {"andrews", "behaviorplus"});
        pp.query("use_wind_limit", use_wind_limit);
+       {
+           std::string wl = (wind_limit_mode == 1) ? "fuel_class" : "rothermel";
+           pp.query("wind_limit", wl);
+           one_of("wind_limit", wl, {"rothermel", "fuel_class"});
+           wind_limit_mode = (wl == "fuel_class") ? 1 : 0;
+       }
+       keys_need("use_wind_limit", use_wind_limit, {"wind_limit"});
+       {
+           std::string wb = wind_below_first_log ? "log" : "clamp";
+           pp.query("wind_below_first_cell", wb);
+           one_of("wind_below_first_cell", wb, {"log", "clamp"});
+           wind_below_first_log = (wb == "log");
+       }
+       // the roughness of every log profile the layer uses (two-height
+       // resampling, the wind below the lowest centre, the ember drift): a
+       // roughness at or above the reference height would put every brand's
+       // profile factor at ln(z/z0)/ln(1.000001)
+       if (!(wind_sample_z0 > 0.0 && wind_sample_z0 < wind_ref_ht)) {
+           fail("erf.fire.wind_sample_z0 must be positive and below erf.fire.wind_ref_ht, got "
+                + std::to_string(wind_sample_z0) + " with wind_ref_ht = " + std::to_string(wind_ref_ht));
+       }
        pp.query("use_terrain_wind", use_terrain_wind);
        pp.query("k_ridge", k_ridge);
        pp.query("k_shelter", k_shelter);
@@ -848,10 +930,7 @@ struct FireParams
        positive("k_shelter", k_shelter);
        positive("k_valley",  k_valley);
        nonneg("k_deflect",   k_deflect);
-       if (!use_terrain_wind && (pp.contains("k_ridge") || pp.contains("k_shelter")
-                                 || pp.contains("k_valley") || pp.contains("k_deflect"))) {
-           fail("erf.fire.k_ridge/k_shelter/k_valley/k_deflect need erf.fire.use_terrain_wind = true");
-       }
+       keys_need("use_terrain_wind", use_terrain_wind, {"k_ridge", "k_shelter", "k_valley", "k_deflect"});
 
        // Fuel moisture control (Phase 4)
        pp.query("moisture_dynamic", moisture_dynamic);
@@ -897,7 +976,7 @@ struct FireParams
        if (!moisture_dynamic) {
            for (const char* k : {"moisture_model", "emc_model", "moisture_live_model", "precip_source",
                                  "stick.n_shells", "stick.radius_cm", "stick.rain_surface_moisture",
-                                 "stick.diffusivity_scale"}) {
+                                 "stick.diffusivity_scale", "rothermel_cell_moisture"}) {
                if (pp.contains(k)) {
                    fail(std::string("erf.fire.") + k + " is set but erf.fire.moisture_dynamic = false holds the"
                         " fuel moisture fixed; set erf.fire.moisture_dynamic = true or remove the key");
@@ -948,6 +1027,12 @@ struct FireParams
        pp.query("farsite.coeff_c", farsite_coeff_c);
        pp.query("farsite.gaussian_sigma", farsite_gaussian_sigma);
        pp.query("farsite.cfl_fire", farsite_cfl_fire);
+       {
+           std::string shape_str = (farsite_shape == 0) ? "rectangle" : "ellipse";
+           pp.query("farsite.shape", shape_str);
+           one_of("farsite.shape", shape_str, {"ellipse", "rectangle"});
+           farsite_shape = (shape_str == "rectangle") ? 0 : 1;
+       }
        // the Richards coefficients divide the gauge (a zero one is no spread
        // that way, a negative one a negative rate); phi_threshold is a distance
        positive("farsite.coeff_a", farsite_coeff_a);
@@ -1008,7 +1093,7 @@ struct FireParams
        if (propagation_method == "levelset") {
            for (const char* k : {"farsite.phi_threshold", "farsite.use_anderson_lw", "farsite.coeff_a",
                                  "farsite.coeff_b", "farsite.coeff_c", "farsite.gaussian_sigma",
-                                 "farsite.cfl_fire", "farsite.front_update"}) {
+                                 "farsite.cfl_fire", "farsite.front_update", "farsite.shape"}) {
                if (pp.contains(k)) {
                    amrex::Print() << "[FIRE] WARNING: erf.fire." << k
                                   << " is ignored with erf.fire.propagation_method = levelset\n";
@@ -1073,6 +1158,11 @@ struct FireParams
        }
        pp.query("heat_open_fraction", heat_open_fraction);
        pp.query("heat_tendency_density", heat_tendency_density);
+       pp.query("heat_tendency_exner", heat_tendency_exner);
+       if (pp.contains("heat_tendency_exner") && coupling_type == "passive") {
+           amrex::Print() << "[FIRE] WARNING: erf.fire.heat_tendency_exner is ignored with erf.fire.coupling_type = passive"
+                          << " (no heat is injected)\n";
+       }
 
        // Phase 4: smoke tracer parameters
        pp.query("smoke_enable", smoke_enable);
@@ -1288,8 +1378,18 @@ struct FireParams
 
        // Phase 13B: ROS model selection
        pp.query("ros_model", ros_model);
-       one_of("ros_model", ros_model, {"rothermel", "behave", "balbi", "fbp", "hybrid", "prescribed", "cheney_gould", "macarthur"});
+       one_of("ros_model", ros_model, {"rothermel", "behave", "balbi", "fbp", "hybrid", "prescribed", "cheney_gould", "grass_simple", "macarthur"});
        pp.query("rothermel_per_fuel", rothermel_per_fuel);
+       pp.query("rothermel_cell_moisture", rothermel_cell_moisture);
+       if (pp.contains("rothermel_cell_moisture") && !uses_model("rothermel")) {
+           amrex::Print() << "[FIRE] WARNING: erf.fire.rothermel_cell_moisture is read by the Rothermel kernels only;"
+                          << " erf.fire.ros_model = " << ros_model << " ignores it\n";
+       }
+       pp.query("macarthur.ros_max", macarthur_ros_max);
+       nonneg("macarthur.ros_max", macarthur_ros_max);   // 0 = no cap
+       if (pp.contains("macarthur.ros_max") && !uses_model("macarthur")) {
+           fail("erf.fire.macarthur.ros_max needs erf.fire.ros_model = macarthur (or a hybrid member)");
+       }
 
        // Hybrid ROS
        {
@@ -1318,11 +1418,11 @@ struct FireParams
            if (ros_model == "hybrid") {
                auto known = [](const std::string& m) {
                    return m == "rothermel" || m == "balbi" || m == "behave" ||
-                          m == "macarthur" || m == "cheney_gould" || m == "fbp";
+                          m == "macarthur" || m == "cheney_gould" || m == "grass_simple" || m == "fbp";
                };
                if (!known(hy.primary) || !known(hy.secondary)) {
                    amrex::Abort("erf.fire.hybrid.primary/secondary must each be one of "
-                                "rothermel, balbi, behave, macarthur, cheney_gould, fbp");
+                                "rothermel, balbi, behave, macarthur, cheney_gould, grass_simple, fbp");
                }
                if (hy.primary == hy.secondary) {
                    amrex::Abort("erf.fire.hybrid.primary and secondary must differ");
@@ -1695,7 +1795,8 @@ struct FireParams
        }
 
        // Cheney-Gould parameters: moisture [%] and curing [0-1] enter the
-       // backing rate and the moisture/curing factors of every ROS path
+       // moisture and curing coefficients of every ROS path (and the
+       // grass_simple backing rate)
        auto& cg = cheney_gould;
        pp.query("cheney_gould.moisture", cg.moisture);
        pp.query("cheney_gould.curing",   cg.curing);
@@ -1703,6 +1804,35 @@ struct FireParams
            fail("erf.fire.cheney_gould.moisture must be in [1, 40] %, got " + std::to_string(cg.moisture));
        }
        fraction("cheney_gould.curing", cg.curing);
+       {
+           std::string pasture = (cg.pasture == 1) ? "grazed" : "natural";
+           pp.query("cheney_gould.pasture", pasture);
+           one_of("cheney_gould.pasture", pasture, {"natural", "grazed"});
+           cg.pasture = (pasture == "grazed") ? 1 : 0;
+           std::string curve = (cg.curing_curve == 1) ? "cheney1998" : "cruz2015";
+           pp.query("cheney_gould.curing_curve", curve);
+           one_of("cheney_gould.curing_curve", curve, {"cruz2015", "cheney1998"});
+           cg.curing_curve = (curve == "cheney1998") ? 1 : 0;
+           std::string ws = (cg.wind_source == 1) ? "midflame" : "reference";
+           pp.query("cheney_gould.wind_source", ws);
+           one_of("cheney_gould.wind_source", ws, {"reference", "midflame"});
+           cg.wind_source = (ws == "midflame") ? 1 : 0;
+       }
+       // the 1998 model reads the reference wind as its 10 m open wind
+       if (uses_model("cheney_gould") && cg.wind_source == 0 && std::abs(wind_ref_ht - 10.0) > 1.0e-6) {
+           amrex::Print() << "[FIRE] WARNING: erf.fire.ros_model = cheney_gould reads the wind at erf.fire.wind_ref_ht = "
+                          << wind_ref_ht << " m as the model's 10 m open wind (cheney_gould.wind_source = reference);"
+                          << " set wind_ref_ht = 10 for the published fit\n";
+       }
+       // the 1998 model's pasture, curing curve and wind are read by it alone;
+       // grass_simple takes the moisture and curing only
+       if (!uses_model("cheney_gould")) {
+           for (const char* k : {"cheney_gould.pasture", "cheney_gould.curing_curve", "cheney_gould.wind_source"}) {
+               if (pp.contains(k)) {
+                   fail(std::string("erf.fire.") + k + " needs erf.fire.ros_model = cheney_gould (or a hybrid member)");
+               }
+           }
+       }
 
        auto& fb = fbp;
        pp.query("fbp.fuel_type", fb.fuel_type);
@@ -1733,6 +1863,15 @@ struct FireParams
        auto& bh = behave;
        pp.query("behave.dynamic_transfer_lo", bh.dynamic_transfer_lo);
        pp.query("behave.dynamic_transfer_hi", bh.dynamic_transfer_hi);
+       {
+           std::string nl = (bh.net_load_mode == 1) ? "sum" : "weighted";
+           pp.query("behave.net_load", nl);
+           one_of("behave.net_load", nl, {"weighted", "sum"});
+           bh.net_load_mode = (nl == "sum") ? 1 : 0;
+           if (pp.contains("behave.net_load") && !uses_model("behave")) {
+               fail("erf.fire.behave.net_load needs erf.fire.ros_model = behave (or a hybrid member)");
+           }
+       }
        if (uses_model("behave") && !(bh.dynamic_transfer_hi > bh.dynamic_transfer_lo)) {
            amrex::Abort("erf.fire.behave.dynamic_transfer_hi must be greater than dynamic_transfer_lo");
        }
@@ -1768,6 +1907,16 @@ struct FireParams
            firebreaks.push_back(brk);
        }
        n_firebreaks = static_cast<int>(firebreaks.size());
+       // Without the mask a firebreak is the sentinel value of the level set
+       // alone, which the FARSITE front_cell update rebuilds away on its first
+       // subcycle and the level-set advection erases within seconds: the fire
+       // crosses it. A deck that turns the mask off on purpose is told so.
+       if (n_firebreaks > 0 && !firebreak_use_mask) {
+           amrex::Print() << "[FIRE] WARNING: erf.fire.firebreak.use_mask = false with " << n_firebreaks
+                          << " firebreak(s): the sentinel is erased by the front update of both"
+                          << " propagation paths, so the fire can cross them; set use_mask = true"
+                          << " (the default) to hold them in the non-burnable mask\n";
+       }
 
        // The Huygens ellipse shapes the front itself, so it supersedes the
        // directional default; asking for both explicitly is a conflict.
@@ -1835,8 +1984,8 @@ struct FireParams
         if (is_hybrid()) { return hybrid.primary == m || hybrid.secondary == m; }
         if (m == "rothermel") {
             return ros_model != "balbi" && ros_model != "behave" &&
-                   ros_model != "macarthur" && ros_model != "cheney_gould" && ros_model != "fbp" &&
-                   ros_model != "prescribed";
+                   ros_model != "macarthur" && ros_model != "cheney_gould" && ros_model != "grass_simple" &&
+                   ros_model != "fbp" && ros_model != "prescribed";
         }
         return ros_model == m;
     }

@@ -21,9 +21,11 @@ using amrex::Real;
 
 namespace {
 
-BehaveState state(const FuelModelParams& fp, Real M_herb, Real lo, Real hi)
+BehaveState state(const FuelModelParams& fp, Real M_herb, Real lo, Real hi,
+                  int net_load = behave_net_load::weighted)
 {
-    return compute_behave_state(fp, Real(0.06), Real(0.08), Real(0.10), M_herb, Real(0.90), lo, hi);
+    return compute_behave_state(fp, Real(0.06), Real(0.08), Real(0.10), M_herb, Real(0.90), lo, hi,
+                                true, fire_wind_limit::rothermel, net_load);
 }
 
 void expect_close(Real a, Real b)
@@ -80,14 +82,24 @@ TEST(BehaveTransfer, WindowReachesState)
     expect_same_state(state(fp, M, Real(0.50), Real(1.00)), half);
     expect_same_state(state(fp, M, Real(0.60), Real(0.90)), half);
 
-    // Moving the window moves the load: all of it (M below lo), none (M above hi).
+    // Moving the window moves the load: all of it (M below lo), none (M above
+    // hi). The load bookkeeping is additive in the plain-sum form
+    // (erf.fire.behave.net_load = sum); with Albini's size-class weights the
+    // transferred load joins the 1-h class's group and the area fractions of
+    // the other classes shift with it, so only the ordering is checked there.
     const BehaveState all  = state(fp, M, Real(0.80), Real(1.20));
     const BehaveState none = state(fp, M, Real(0.10), Real(0.70));
-    const Real moved = fp.w_lh * Real(1.0 - 0.0555);          // net of mineral content
-    expect_close(all.wn_dead - none.wn_dead, moved);
-    expect_close(half.wn_dead - none.wn_dead, Real(0.5) * moved);
-    expect_close(all.wn_dead + all.wn_live, none.wn_dead + none.wn_live);
+    EXPECT_GT(all.wn_dead, none.wn_dead);
+    EXPECT_LT(all.wn_live, none.wn_live);
     EXPECT_GT(std::abs(all.r_0 - none.r_0), 0.01 * none.r_0);
+    const int sum = behave_net_load::sum;
+    const BehaveState all_s  = state(fp, M, Real(0.80), Real(1.20), sum);
+    const BehaveState none_s = state(fp, M, Real(0.10), Real(0.70), sum);
+    const BehaveState half_s = state(fp, M, Real(0.30), Real(1.20), sum);
+    const Real moved = fp.w_lh * Real(1.0 - 0.0555);          // net of mineral content
+    expect_close(all_s.wn_dead - none_s.wn_dead, moved);
+    expect_close(half_s.wn_dead - none_s.wn_dead, Real(0.5) * moved);
+    expect_close(all_s.wn_dead + all_s.wn_live, none_s.wn_dead + none_s.wn_live);
 
     // With the whole load transferred and no live woody load, the live
     // herbaceous moisture no longer enters the state.

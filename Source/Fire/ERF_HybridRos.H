@@ -45,8 +45,14 @@ struct HybridDirectionalSpec
     const RothermelComputed*  rc_tbl      = nullptr;  ///< Device table by slot
     int                       rc_tbl_size = 0;        ///< Entries in rc_tbl
     int                       fuel_set    = 0;        ///< Fuel model set of the codes
+    /// erf.fire.rothermel_cell_moisture: a Rothermel member rebuilds its
+    /// coefficients from the cell's own dead moistures
+    const RothermelCellInputs* cell_mc    = nullptr;
 
-    const amrex::MultiFab*         wind_eff   = nullptr;  ///< Effective wind [m/s]
+    const amrex::MultiFab*         wind_eff   = nullptr;  ///< Effective (midflame) wind [m/s]
+    const amrex::MultiFab*         wind_ref   = nullptr;  ///< Reference-height wind [m/s]
+    bool cheney_uses_ref = true;   ///< erf.fire.cheney_gould.wind_source = reference (the 1998 model only)
+    bool fbp_uses_ref    = true;   ///< erf.fire.fbp.wind_source = reference
     const amrex::MultiFab*         balbi_wind = nullptr;  ///< Wind the Balbi kernels consume
     const BalbiComputed*           bc         = nullptr;  ///< Balbi default coefficients
     const FireParams::BalbiParams* bp         = nullptr;  ///< Balbi parameters
@@ -90,10 +96,19 @@ inline void fill_hybrid_member_directional(amrex::MultiFab& R,
         fill_balbi_ros_directional(R, phi, *spec.balbi_wind, slopes, geom,
                                    *spec.bc, *spec.bp, *spec.balbi_in, mask, wall_extrap);
     } else {
-        fill_directional_ros(R, phi, *spec.wind_eff, slopes, geom, state, mask, wall_extrap,
+        // the 1998 grass model and FBP read the reference wind unless their
+        // wind_source says midflame, as on the isotropic and non-hybrid paths
+        const amrex::MultiFab* wind = spec.wind_eff;
+        if (spec.wind_ref != nullptr) {
+            if (state.model == DIRECTIONAL_ROS_CHENEY_GOULD && spec.cheney_uses_ref
+                && state.cgc.model == cheney_gould::model_cg98) { wind = spec.wind_ref; }
+            if (state.model == DIRECTIONAL_ROS_FBP && spec.fbp_uses_ref) { wind = spec.wind_ref; }
+        }
+        fill_directional_ros(R, phi, *wind, slopes, geom, state, mask, wall_extrap,
                              DIRECTIONAL_SHAPE_PROJECTION, DIRECTIONAL_ELLIPSE_LW_MODEL,
                              amrex::Real(8.0), DIRECTIONAL_WIND_COUPLING_PROJECTION,
-                             spec.fuel_model, spec.rc_tbl, spec.rc_tbl_size, spec.fuel_set);
+                             spec.fuel_model, spec.rc_tbl, spec.rc_tbl_size, spec.fuel_set,
+                             spec.cell_mc);
     }
 }
 
@@ -130,12 +145,13 @@ inline void advect_levelset_hybrid_rk3(amrex::MultiFab& phi,
                                        const amrex::MultiFab* nonburnable = nullptr,
                                        bool wall_extrap = false,
                                        const fire_levelset::LevelSetGradient& grad_scheme = fire_levelset::LevelSetGradient{},
-                                       const amrex::MultiFab* ros_scale = nullptr)
+                                       const amrex::MultiFab* ros_scale = nullptr,
+                                       fire_levelset::Scratch* scratch = nullptr)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
             fill_hybrid_directional_ros(R, phi_stage, slopes, geom, spec, nonburnable, wall_extrap);
-        }, nonburnable, wall_extrap, grad_scheme, ros_scale);
+        }, nonburnable, wall_extrap, grad_scheme, ros_scale, scratch);
 }
 
 #endif  // ERF_HYBRID_ROS_H

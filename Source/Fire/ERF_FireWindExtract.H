@@ -52,6 +52,12 @@
  *                             nullptr = use global z_ref
  * @param[in]  nfuelcats       Number of fuel categories (13 for Anderson FBFM13);
  *                             0 if d_fcwh is nullptr
+ * @param[in]  below_first_log Target below the lowest cell centre: true (default,
+ *                             erf.fire.wind_below_first_cell = "log") scales the
+ *                             lowest centre's wind with a neutral log profile of
+ *                             roughness z0_log, U(z) = U(z_1) ln(z/z0)/ln(z_1/z0);
+ *                             false ("clamp") takes the lowest centre's wind as
+ *                             it is (the behaviour before 2026-10)
  *
  * Algorithm per fire cell (i_f, j_f):
  * 1. Map to atmospheric column: i_a = i_f / C, j_a = j_f / C
@@ -67,8 +73,9 @@
  * 4. Compute target height: z_target = z_surf + z_ref_cell
  * 5. Bisection on the column's z_phys_cc profile for k_lo such that
  *    z_phys_cc(i_a, j_a, k_lo) <= z_target < z_phys_cc(i_a, j_a, k_lo+1),
- *    clamped to [0, nz-2] (a target below the first centre extrapolates
- *    from the lowest pair, above the top from the highest)
+ *    clamped to [0, nz-2]; a target above the top takes the highest centre,
+ *    a target below the first centre the lowest centre's wind scaled by the
+ *    log profile (below_first_log) or as it is
  * 6. Compute interpolation weight:
  *    alpha = (z_target - z_phys_cc(i_a, j_a, k_lo)) /
  *            (z_phys_cc(i_a, j_a, k_lo+1) - z_phys_cc(i_a, j_a, k_lo))
@@ -121,7 +128,8 @@ void fill_fire_wind_from_interpolation(
     const amrex::MultiFab* col_open       = nullptr,
     const amrex::MultiFab* col_roof       = nullptr,
     amrex::Real            z_sample       = 0.0,
-    amrex::Real            z0_log         = 0.1);
+    amrex::Real            z0_log         = 0.1,
+    bool                   below_first_log = true);
 
 /**
  * @brief Compute unsheltered Wind Adjustment Factor (Andrews/Albini & Baughman 1979)
@@ -194,33 +202,6 @@ amrex::Real compute_waf_canopy_exp(amrex::Real waf_open, amrex::Real f_c,
                                     amrex::Real alpha_c) noexcept
 {
     return waf_open * std::exp(-alpha_c * f_c);
-}
-
-/**
- * @brief Compute Maximum Effective Wind Speed cap (Rothermel MEWS)
- *
- * Derives the wind speed cap from Rothermel reaction intensity using
- * φ_w_max = 0.9 * I_R and the inverse of the wind factor formula.
- *
- * @param[in] I_R              Reaction intensity [BTU/ft²/min]
- * @param[in] C, B             Wind factor coefficients
- * @param[in] beta_ratio_E     (β/β_opt)^E factor
- * @return U_max [ft/min]
- */
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-amrex::Real compute_max_ews_ftmin(amrex::Real I_R, amrex::Real C,
-                                   amrex::Real B, amrex::Real beta_ratio_E) noexcept
-{
-    const amrex::Real phi_w_max = 0.9 * I_R;
-
-    // φ_w = C * U^B * (β/β_opt)^E  =>  U = (φ_w / (C * (β/β_opt)^E))^(1/B)
-    if (B > 0.0 && beta_ratio_E > 0.0 && C > 0.0) {
-        amrex::Real denom = C * beta_ratio_E;
-        amrex::Real base = phi_w_max / denom;
-        if (base <= 0.0) return 0.0;
-        return std::pow(base, 1.0 / B);
-    }
-    return 0.0;
 }
 
 /**
