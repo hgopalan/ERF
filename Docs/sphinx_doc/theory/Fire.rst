@@ -202,9 +202,9 @@ The principal state and diagnostic fields, all cell-centred on the fire grid:
    * - ``fire_heat_flux``, ``fire_latent_flux``
      - 1 each
      - Sensible and latent surface flux [W/m²]
-   * - ``fire_fireline_intensity``, ``fire_flame_length``, ``fire_flame_temp``, ``fire_flame_tilt``
+   * - ``fire_fireline_intensity``, ``fire_heat_release``, ``fire_flame_length``, ``fire_flame_temp``, ``fire_flame_tilt``
      - 1 each
-     - Byram intensity [kW/m], Thomas flame length [m], flame temperature [K], tilt [deg]
+     - Byram intensity :math:`h w_0 R` [kW/m], heat release :math:`h (w_0 - w) R` [kW/m], Thomas flame length [m], flame temperature [K], tilt [deg] (with ``erf.fire.compute_flame_tilt``)
    * - ``fire_ros_weight``, ``fire_structure_height``
      - 1 each
      - Hybrid model weight and sampled building height, present with the hybrid model or structures
@@ -359,7 +359,10 @@ Where each feature is exercised:
    * - The fire grid on a refined level: region, maps to the atmosphere, front, heat budget, restart, start-up checks
      - ``FireAnchorLevel``; gtest ``ERF_GTestFireAnchorLevel``
 
-Not yet covered by any test: restart of the spotting and crown-fire state.
+The restart of the spotting and crown-fire state is covered by the
+``FireRestart`` case script (``Exec/RegTests/FireRestart/run_restart.sh``;
+the registered CTest runs its level-set deck only), and the probe and
+exposure report flags are checkpointed with it.
 The fire-dust coupling has its own cases under ``Exec/CanonicalTests/Hazard``
 (:ref:`sec:DustFire`).
 

@@ -57,18 +57,29 @@ Richards (1990) spread shape below. Each fire subcycle of length
 
       L/W = 0.936\, e^{0.2566 U} + 0.461\, e^{-0.1548 U} - 0.397, \qquad 1 \le L/W \le 8,
 
-   and is converted to the Richards (1990) coefficients :math:`a = 1`,
-   :math:`c = 0.2a`, :math:`b = (a + c) / (2\, L/W)` when
-   :cpp:`erf.fire.farsite.use_anderson_lw` is 1. Setting it to 0 uses
-   :cpp:`erf.fire.farsite.coeff_a`, ``coeff_b`` and ``coeff_c`` directly.
-   Head, flank and backing rates are the head rate scaled by these
-   coefficients, oriented along the wind: the normal speed of a front whose
-   normal makes the angle :math:`\theta` with the wind is
+   when :cpp:`erf.fire.farsite.use_anderson_lw` is 1 (setting it to 0 takes
+   the ratio :math:`(a + c) / (2b)` of :cpp:`erf.fire.farsite.coeff_a`,
+   ``coeff_b`` and ``coeff_c``). With :cpp:`erf.fire.farsite.shape =
+   "ellipse"` (default) the shape is the Huygens ellipse of Richards (1990)
+   with Alexander's (1985) head-to-back ratio
+   :math:`HB = (L/W + \sqrt{(L/W)^2 - 1})^2`: semi-axes
+   :math:`b = (R + R/HB)/2` along the wind and :math:`a = b / (L/W)` across
+   it, centre offset :math:`c = b - R/HB`, so the head runs at
+   :math:`b + c = R`, the back at :math:`b - c = R/HB` and the flanks at
+   :math:`a`; the normal speed of a front whose normal makes the angle
+   :math:`\theta` with the wind is
+   :math:`c\cos\theta + \sqrt{b^2\cos^2\theta + a^2\sin^2\theta}`.
+   Without wind it is the disc of radius :math:`R`, and a vanishing wind
+   leaves the rates continuous. ``"rectangle"`` is the shape this path grew
+   until October 2026: head, flank and backing rates :math:`aR`, :math:`bR`
+   and :math:`cR` with the Richards coefficients :math:`a = 1`,
+   :math:`c = 0.2`, :math:`b = 1.2 / (2\, L/W)` read as a support function,
    :math:`R\,(a\cos\theta + b\,|\sin\theta|)` ahead and
-   :math:`R\,(b\,|\sin\theta| - c\cos\theta)` behind. That is the support
-   function of the rectangle :math:`[-cR, aR] \times [-bR, bR]` in the wind
-   frame, the shape a point fire grows into. Without wind the shape is the
-   disc of radius :math:`R`.
+   :math:`R\,(b\,|\sin\theta| - c\cos\theta)` behind, which is the
+   rectangle :math:`[-cR, aR] \times [-bR, bR]` in the wind frame, with a
+   head-to-back ratio of 5 at every wind, so a vanishing wind jumped the back
+   from :math:`R` to :math:`R/5`. ``ERF_GTestFarsiteShape`` checks the rates
+   of both from a point source and the continuity at zero wind.
 2. **Front cells** are the unburned, burnable cells with a burned neighbour
    across a face.
 3. **Arrival time.** A front cell burns when the shape grown from its burned
@@ -85,10 +96,24 @@ Richards (1990) spread shape below. Each fire subcycle of length
    vector :math:`\mathbf d` at unit head rate, lengthened by
    :math:`\sqrt{1 + (\nabla z \cdot \hat{\mathbf d})^2}` on a slope. This is
    the Hopf-Lax update of the arrival time, taken over the four quadrants (one
-   neighbour alone gives the end point). If :math:`T` falls inside the subcycle
-   the cell burns and :math:`T` becomes its ``fire_arrival_time``. For a planar
-   front it is exact: rows burn one at a time, a row spacing along the normal
-   over the normal speed apart.
+   neighbour alone gives the end point). With the ellipse every burned cell
+   within nine cells is also tried as a direct Huygens source,
+   :math:`T_{src} + \gamma(\mathbf x - \mathbf x_{src}) / \bar R`: the segment
+   update interpolates :math:`T` linearly between two face neighbours and lags
+   where the shape's characteristic is far from the grid directions (the
+   ellipse's flank grows from a source about :math:`L/W` cells upwind, and the
+   segment stencil alone gave a third of its rate), while a direct source gives
+   the exact point-source arrival (``ERF_GTestFarsiteShape``). The distance
+   available to a source is the difference of a distance clock every cell
+   accumulates as its own :math:`R\,\Delta t_f` (``fire_disp_accum``
+   components 2 and 3, the clock and its value at the cell's burn), so a rate
+   that changes in time (the acceleration clocks) is integrated over the path
+   rather than applied at its current value; where the source's and the
+   cell's rates differ the distance is bounded by the slower of the two times
+   the wait, which a path through the slower fuel cannot beat. If :math:`T`
+   falls inside the subcycle the cell burns and :math:`T` becomes its
+   ``fire_arrival_time``. For a planar front it is exact: rows burn one at a
+   time, a row spacing along the normal over the normal speed apart.
 4. **Rate.** :math:`\bar R` is the mean, since the first neighbour burned, of
    the larger of the cell's own rate of spread and those of its burned
    neighbours, accumulated in ``fire_disp_accum``. The burned side carries the
@@ -175,13 +200,21 @@ unchanged and widens the flanks by about 7% against the single value
 (4.96 ha burned at 1200 s against 4.83 ha): the viscosity acts where the
 front is curved. The Laplacian term is an artificial
 viscosity with coefficient :cpp:`erf.fire.levelset.eps_visc` (default 0.4)
-that keeps the front smooth at the grid scale. When terrain slopes are
+that keeps the front smooth at the grid scale. The coefficient is a length
+in metres (the term is :math:`R\,\varepsilon\,\nabla^2\phi` with
+:math:`\phi` in metres), so the smoothing in cells is
+:math:`\varepsilon / \Delta x` and a coarser grid is smoothed less. When terrain slopes are
 available, :math:`|\nabla \phi|` is projected onto the terrain surface so that
 :math:`R` is a rate along the ground rather than in map view.
 
 The subcycle length is :cpp:`erf.fire.levelset.cfl` (default 0.4) times the
-cell size over the maximum rate of spread. The field is periodically
-reinitialised, see below.
+cell size over the maximum rate of spread. A cell's ``fire_arrival_time`` is
+the time the front crossed its centre, interpolated in time within the
+subcycle from :math:`\phi` before and after it,
+:math:`t_0 + \Delta t_f\, \phi_{old} / (\phi_{old} - \phi_{new})`; until
+October 2026 it was the start of the subcycle, a bias of up to one subcycle
+(:math:`-0.2\, h/R` on average at the default cfl) that the verification
+tolerances now resolve. The field is periodically reinitialised, see below.
 
 Direction-dependent spread
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -375,8 +408,8 @@ Reinitialisation
 ~~~~~~~~~~~~~~~~
 
 Advection steepens and flattens :math:`\phi`, so every
-:cpp:`erf.fire.levelset.reinit_every` subcycles (default 5) it is restored to a
-metric signed distance, :math:`|\nabla\phi| = 1`, by
+:cpp:`erf.fire.levelset.reinit_every` subcycles (default 5) it is nudged
+toward a metric signed distance, :math:`|\nabla\phi| = 1`, by
 :cpp:`erf.fire.levelset.reinit_iters` (default 1) outer pseudo-time steps of
 
 .. math::
@@ -398,7 +431,15 @@ Hamilton-Jacobi form the advection also uses) rather than to :math:`\phi` in
 flux form, and the time integrator is third order for this right-hand side
 where Wicker-Skamarock is second. The pseudo-timestep
 :cpp:`erf.fire.levelset.reinit_dtau` defaults to :math:`0.01\,\Delta x` for
-both, WRF-Fire's value.
+both, WRF-Fire's value. At that setting one call moves :math:`\phi` by at
+most :math:`0.01\,\Delta x\,(1 - |\nabla\phi|)` and the correction spreads
+from the front at unit pseudo-speed, so it is WRF-Fire's 1 % nudge, not a
+restoration: a field stretched to :math:`|\nabla\phi| = 2` behind a fuel
+boundary stays stretched for hundreds of calls, and the band widths set in
+:math:`\phi` units (the WENO band, the two-value viscosity) are
+correspondingly narrower in cells there. ``reinit_dtau = 0.25 dx`` with 40
+iterations restores the unit gradient (``ERF_GTestLevelSetAdvection``
+checks both settings).
 
 Neither scheme corrects the distance in cells that straddle the front, and
 both keep :math:`\phi_{out} = \min(\phi_{out}, \phi_{in})`, so the burned area

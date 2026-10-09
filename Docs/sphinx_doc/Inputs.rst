@@ -5420,7 +5420,10 @@ Fuel and moisture
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.firebreak.N.cx/cy/radius**          | Circular firebreak centre and radius [m]                   | Reals                          | 0.0                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.firebreak.use_mask**                | Hold firebreak cells in the non-burnable mask              | Boolean                        | false                  |
+| **erf.fire.firebreak.use_mask**                | Hold firebreak cells in the non-burnable mask as well as   | Boolean                        | true                   |
+|                                                | stamping the sentinel; false (the form before 2026-10)     |                                |                        |
+|                                                | warns when firebreaks are configured, since the stamp can  |                                |                        |
+|                                                | erode                                                      |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.structures.enable**                 | Treat cells of the structure heightmap above min_height as | Boolean                        | false                  |
 |                                                | non-burnable                                               |                                |                        |
@@ -5497,8 +5500,9 @@ Ignition
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.ignition.polyline_width**           | Half-width of the polyline ignition zone [m]               | Real > 0                       | 10.0                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.ignition.threshold_enable**         | Ignite every burnable, unburned fire cell whose k = 0      | true, false                    | false                  |
-|                                                | potential temperature exceeds threshold_temp               |                                |                        |
+| **erf.fire.ignition.threshold_enable**         | Ignite every burnable, unburned fire cell whose k = 0 air  | true, false                    | false                  |
+|                                                | temperature (theta times the Exner function) exceeds       |                                |                        |
+|                                                | threshold_temp                                             |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.ignition.threshold_temp**           | Ignition temperature [K]                                   | Real > 0                       | 573.15                 |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -5532,7 +5536,15 @@ Wind
 | **erf.fire.wind_sample_ht**                    | Sample the wind at this height above ground and bring it   | Real > wind_ref_ht, or 0       | 0.0                    |
 |                                                | to wind_ref_ht with a log profile (CFBM); 0 = off          |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.wind_sample_z0**                    | Roughness length [m] of that log profile                   | 0 < Real < wind_ref_ht         | 0.1                    |
+| **erf.fire.wind_sample_z0**                    | Roughness length [m] of every log profile the fire reads:  | 0 < Real < wind_ref_ht         | 0.1                    |
+|                                                | the two-height resampling, the wind below the first cell   |                                |                        |
+|                                                | centre and the ember drift                                 |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.wind_below_first_cell**             | Wind at a target below the first cell centre: "clamp"      | "clamp", "log"                 | "clamp"                |
+|                                                | takes the centre's wind unchanged; "log" scales it by the  |                                |                        |
+|                                                | neutral log profile of wind_sample_z0 (recommended for a   |                                |                        |
+|                                                | first cell above wind_ref_ht; 12 % lower under a 20 m      |                                |                        |
+|                                                | first cell)                                                |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.wind_interp**                       | Horizontal mapping of atmospheric columns onto fire cells  | "bilinear", "nearest"          | "bilinear"             |
@@ -5543,10 +5555,17 @@ Wind
 |                                                | the domain model's on a uniform fuel, each cell's own      |                                |                        |
 |                                                | wherever a spatial fuel map is read                        |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.use_wind_limit**                    | Cap the midflame wind at Rothermel's maximum effective     | Boolean                        | true                   |
-|                                                | wind speed (Rothermel and BEHAVE kernels); false: no cap   |                                |                        |
+| **erf.fire.use_wind_limit**                    | Bound the midflame wind by Rothermel's (1972, eq. 87)      | Boolean                        | true                   |
+|                                                | limit U <= 0.9 I_R (Rothermel and BEHAVE kernels); false:  |                                |                        |
+|                                                | no limit                                                   |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.use_terrain_wind**                  | Apply the FARSITE terrain wind corrections                 | Boolean                        | true                   |
+| **erf.fire.wind_limit**                        | Which limit use_wind_limit applies: "rothermel" is 0.9 I_R | "rothermel",                   | "rothermel"            |
+|                                                | ft/min; "fuel_class" this code's earlier rule of 300 ft/min| "fuel_class"                   |                        |
+|                                                | above a SAV of 1000 1/ft and 500 below (the form before    |                                |                        |
+|                                                | 2026-10)                                                   |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.use_terrain_wind**                  | Apply the terrain wind factors (ridge, shelter, valley,    | Boolean                        | false                  |
+|                                                | deflection); default false since 2026-10                   |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.k_ridge**                           | Ridge speed-up factor (needs use_terrain_wind = true)      | Real > 0                       | 1.5                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -5567,11 +5586,18 @@ Rate of spread
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | Parameter                                      | Definition                                                 | Acceptable Values              | Default                |
 +================================================+============================================================+================================+========================+
-| **erf.fire.ros_model**                         | Rate-of-spread model                                       | "rothermel", "behave",         | "rothermel"            |
-|                                                |                                                            | "macarthur", "cheney_gould",   |                        |
-|                                                |                                                            | "fbp",                         |                        |
+| **erf.fire.ros_model**                         | Rate-of-spread model; "grass_simple" is the fit that       | "rothermel", "behave",         | "rothermel"            |
+|                                                | "cheney_gould" selected before 2026-10                     | "macarthur", "cheney_gould",   |                        |
+|                                                |                                                            | "grass_simple", "fbp",         |                        |
 |                                                |                                                            | "balbi", "hybrid",             |                        |
 |                                                |                                                            | "prescribed"                   |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.rothermel_cell_moisture**           | With moisture_dynamic, rebuild the Rothermel coefficients  | Boolean                        | true                   |
+|                                                | from each cell's own dead moistures; false takes the       |                                |                        |
+|                                                | domain-mean moistures everywhere (the form before 2026-10) |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.macarthur.ros_max**                 | Cap on the McArthur rate [m/s] (WRF-Fire's 6 m/s); 0       | Real >= 0                      | 6.0                    |
+|                                                | removes it                                                 |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.directional_ros**                   | Evaluate the rate along the front normal on the level-set  | Boolean                        | true                   |
 |                                                | path; false spreads the head rate in every direction       |                                |                        |
@@ -5619,6 +5645,15 @@ Rate of spread
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.cheney_gould.curing**               | Cheney-Gould degree of curing                              | Real 0-1                       | 1.0                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.cheney_gould.pasture**              | Cheney-Gould pasture coefficients                          | "natural", "grazed"            | "natural"              |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.cheney_gould.curing_curve**         | Curing coefficient: Cruz et al. (2015) or Cheney et al.    | "cruz2015",                    | "cruz2015"             |
+|                                                | (1998)                                                     | "cheney1998"                   |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.cheney_gould.wind_source**          | Wind the 1998 model reads: the reference wind at           | "reference",                   | "reference"            |
+|                                                | wind_ref_ht (set it to 10 m) or the WAF-reduced midflame   | "midflame"                     |                        |
+|                                                | wind                                                       |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.fbp.fuel_type**                     | Canadian FBP fuel type (ros_model = fbp)                   | C1-C7, D1, M1-M4, S1-S3,       | "C2"                   |
 |                                                |                                                            | O1A, O1B                       |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
@@ -5646,6 +5681,11 @@ Rate of spread
 |                                                | which none transfers; the share is (hi - M)/(hi - lo),     |                                |                        |
 |                                                | clamped to [0,1]. Aborts unless greater than               |                                |                        |
 |                                                | dynamic_transfer_lo                                        |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.behave.net_load**                   | Net fuel load of a BEHAVE category: "weighted" is          | "weighted", "sum"              | "weighted"             |
+|                                                | Rothermel's surface-area-weighted load with Albini's size  |                                |                        |
+|                                                | classes; "sum" the plain sum of the classes (the form      |                                |                        |
+|                                                | before 2026-10, 3.3x FM10's reaction intensity)            |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 
 
@@ -5769,11 +5809,17 @@ Propagation
 | **erf.fire.farsite.use_anderson_lw**           | Derive the ellipse coefficients from the Anderson length-  | 0, 1                           | 1                      |
 |                                                | to-width ratio                                             |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.farsite.coeff_a**                   | Richards head coefficient when use_anderson_lw = 0         | Real > 0                       | 0.5                    |
+| **erf.fire.farsite.coeff_a**                   | Richards head coefficient when use_anderson_lw = 0 (the    | Real > 0                       | 0.5                    |
+|                                                | rectangle's head rate a R; with farsite.shape = ellipse    |                                |                        |
+|                                                | only the ratio (a + c) / (2 b) is read, as the length-to-  |                                |                        |
+|                                                | width ratio)                                               |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.farsite.coeff_b**                   | Richards flank coefficient when use_anderson_lw = 0        | Real > 0                       | 0.25                   |
+| **erf.fire.farsite.coeff_b**                   | Richards flank coefficient when use_anderson_lw = 0 (the   | Real > 0                       | 0.25                   |
+|                                                | rectangle's flank rate b R; ellipse: see coeff_a)          |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.farsite.coeff_c**                   | Richards backing coefficient when use_anderson_lw = 0      | Real > 0                       | 0.1                    |
+| **erf.fire.farsite.coeff_c**                   | Richards backing coefficient when use_anderson_lw = 0 (the | Real > 0                       | 0.1                    |
+|                                                | rectangle's back rate c R; the ellipse's back is R / HB of |                                |                        |
+|                                                | the ratio, not c R)                                        |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.farsite.gaussian_sigma**            | Legacy update: stamp radius [m], < 0 single cell,          | Real                           | -1.0                   |
 |                                                | 0 automatic, > 0 fixed Gaussian                            |                                |                        |
@@ -5785,9 +5831,15 @@ Propagation
 |                                                | "legacy" is the stamping used before 2026-09, which        |                                |                        |
 |                                                | ran about twice the rate of spread                         |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.farsite.shape**                     | Spread shape of the front-cell update: the Richards (1990) | "ellipse", "rectangle"         | "ellipse"              |
+|                                                | ellipse with Alexander's head-to-back ratio, or the        |                                |                        |
+|                                                | rectangle of the Richards coefficients read as a support   |                                |                        |
+|                                                | function (the shape before 2026-10, head/back ratio 5)     |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.cfl**                      | CFL number of the level-set subcycle                       | Real > 0                       | 0.4                    |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.levelset.eps_visc**                 | Artificial viscosity coefficient                           | Real >= 0                      | 0.4                    |
+| **erf.fire.levelset.eps_visc**                 | Artificial viscosity coefficient [m]: a length, so the     | Real >= 0                      | 0.4                    |
+|                                                | smoothing in cells is eps_visc / dx                        |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.levelset.gradient**                 | One-sided derivatives of the level set: first-order        | "upwind" / "weno5z" /          | "weno5z_front"         |
 |                                                | everywhere, HJ-WENO5-Z everywhere, or HJ-WENO5-Z within    | "weno5z_front"                 |                        |
@@ -5913,6 +5965,11 @@ Heat flux and coupling
 |                                                | tendency (injects rho times the flux); false is energy-    |                                |                        |
 |                                                | consistent                                                 |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.heat_tendency_exner**               | Divide the rho theta tendency by the cell's Exner function | Boolean                        | false                  |
+|                                                | so the column enthalpy integrates to the fire flux; false  |                                |                        |
+|                                                | (WRF-SFIRE's form) injects Pi times the flux, 4.5 % short  |                                |                        |
+|                                                | at 850 hPa                                                 |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.smoke_enable**                      | Add the passive smoke tracer                               | Boolean                        | false                  |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.smoke_emission_factor**             | Smoke mass per unit fuel burned [kg/kg]                    | Real >= 0                      | 0.02                   |
@@ -5954,7 +6011,8 @@ Spotting
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.spotting.random_seed**              | Random seed; <= 0 seeds from the clock (not repeatable)    | Integer                        | 0                      |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.spotting.spotting_interval**        | Apply spotting every N fire subcycles                      | Integer > 0                    | 1                      |
+| **erf.fire.spotting.spotting_interval**        | Apply spotting every N fire steps (one per atmospheric     | Integer > 0                    | 1                      |
+|                                                | step)                                                      |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.spotting.fuel_system**              | Fuel system of the maximum-distance table                  | "13", "40"                     | "13"                   |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+

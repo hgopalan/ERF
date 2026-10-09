@@ -53,7 +53,7 @@ The acceleration constant is selected based on fire perimeter length:
 - :math:`A = A_{\text{point}}` when perimeter length &lt; :math:`L_{\text{perim}}` (point ignition)
 - :math:`A = A_{\text{line}}` when perimeter length ≥ :math:`L_{\text{perim}}` (line fire)
 
-The perimeter is the number of burned cells with an unburned neighbour, times the cell diagonal. Alexander et al. (1992) calibrated values are :math:`A_{\text{point}} = 0.115\ \text{min}^{-1}` and :math:`A_{\text{line}} = 0.886\ \text{min}^{-1}`.
+The perimeter is the number of burned cells with an unburned 4-neighbour over the whole fire grid (across box and rank boundaries, and across a periodic seam), times the cell diagonal. Alexander et al. (1992) calibrated values are :math:`A_{\text{point}} = 0.115\ \text{min}^{-1}` and :math:`A_{\text{line}} = 0.886\ \text{min}^{-1}`.
 
 The equation describes a fire growing from its ignition, so :math:`t` belongs to the fire, not to whichever cell happens to be burning. From a point ignition at a steady :math:`R_E`, the head of a fire that carries its ignition clock covers
 

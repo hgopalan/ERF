@@ -99,9 +99,11 @@ Reference: Finney, M.A. (1998). FARSITE: Fire Area Simulator. RMRS-RP-4.
 Firebreak cells are stamped into the level set once at initialisation. On
 the FARSITE path the level set is rebuilt from the arrival time every
 subcycle and on the level-set path reinitialisation clamps the sentinel, so
-a firebreak can be burned over later in a run. Setting
-:cpp:`erf.fire.firebreak.use_mask = true` keeps the firebreak cells in the
-non-burnable mask instead, which holds on both paths.
+a firebreak can be burned over later in a run. With
+:cpp:`erf.fire.firebreak.use_mask = true` (the default since October 2026)
+the firebreak cells are held in the non-burnable mask as well, which holds
+on both paths; ``false`` keeps only the sentinel stamp, and a deck that sets
+it with firebreaks configured is warned that its firebreaks may erode.
 
 Input Parameters
 ----------------

@@ -12,10 +12,20 @@ Flame diagnostics
 Computed every fire step on burned cells (:math:`\phi < 0`) and zero
 elsewhere:
 
-- **Byram fireline intensity** :math:`I_B = h\, w_{consumed}\, R` [kW/m],
-  with :math:`h` the heat content [kJ/kg], :math:`w_{consumed}` the fuel
-  consumed so far [kg/m²] and :math:`R` the rate of spread. It drives ember
-  lofting, crown-fire initiation and the flame diagnostics below.
+- **Byram fireline intensity** :math:`I_B = h\, w_0\, R` [kW/m], with
+  :math:`h` the heat content [kJ/kg], :math:`w_0` the fuel load the front
+  consumes [kg/m²] (the cell's initial load) and :math:`R` the rate of
+  spread, on burning cells; it is zero once the cell's remaining load falls
+  below 1 % of :math:`w_0` (burned out). It drives ember lofting, crown-fire
+  initiation and the flame diagnostics below. :math:`w_0` is the whole
+  load, dead and live, so on heavy fuels the intensity is above Byram's
+  :math:`I_R t_r R / 60` of the flaming front alone (BehavePlus): for
+  Anderson 10 the 100-h class is 0.23 lb/ft² of the 0.55 lb/ft² load, so
+  the crown criterion and ember launch trigger more readily there than
+  BehavePlus would. Until October 2026 it was
+  :math:`h\,(w_0 - w)\, R`, zero on the cell the front had just reached and
+  largest far behind it; that form is kept as the plotfile variable
+  ``fire_heat_release``.
 - **Thomas flame length** :math:`L = 0.0775\, I_B^{0.46}` [m].
 - **Flame temperature**, by :cpp:`erf.fire.flame_temp_method`:
   ``"byram_radiant"`` (default) :math:`T = T_a + 800\,(I_B/1000)^{0.25}`;
@@ -83,6 +93,9 @@ order; the optional blocks are present only when their feature is on:
    * - ``fire_fireline_intensity``, ``fire_flame_length``
      - kW/m, m
      - always
+   * - ``fire_heat_release``
+     - kW/m
+     - always (:math:`h\,(w_0 - w)\, R`, the intensity's form before 2026-10)
    * - ``fire_arrival_time``
      - s
      - always
@@ -97,7 +110,7 @@ order; the optional blocks are present only when their feature is on:
      - ``erf.fire.crown.enable``
    * - ``fire_flame_tilt``
      - deg
-     - crown fire on and ``erf.fire.compute_flame_tilt``
+     - ``erf.fire.compute_flame_tilt`` (crown fire on or off)
    * - ``fire_flame_temp``
      - K
      - ``erf.fire.crown.enable``

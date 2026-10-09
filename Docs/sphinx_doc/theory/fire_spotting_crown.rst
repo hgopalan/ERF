@@ -14,8 +14,8 @@ Ember spotting
 
 :cpp:`erf.fire.spotting.enable` turns on a stochastic firebrand model after
 Albini (1983). Every :cpp:`erf.fire.spotting.spotting_interval` fire
-subcycles (default every subcycle), on the host and with the same random
-draws on every rank:
+steps (one fire step per atmospheric step; default every step), with the
+same random draws on every rank whatever the decomposition:
 
 1. The launch set is identified. With :cpp:`erf.fire.spotting.launch_from =
    "burned"` (default) it is every burned cell (:math:`\phi < 0`) with a
@@ -25,7 +25,11 @@ draws on every rank:
    :cpp:`erf.fire.spotting.front_band` fire cells (default 2), the fireline
    Albini's model describes, so the count follows the fireline length.
 2. The Byram fireline intensity :math:`I_B` [kW/m] of each front cell is
-   formed from the rate of spread, the fuel load and the heat content.
+   formed from the rate of spread, the fuel load and the heat content
+   (:math:`h w_0 R` on every burning cell until its load is 1 % of the
+   initial, about :math:`4.6\,\tau` behind the front; the launch band of
+   ``"burned"`` and the :cpp:`P_base` calibration moved with this in
+   October 2026).
 3. Cells below :cpp:`erf.fire.spotting.I_B_min` (default 100 kW/m) launch
    nothing. Otherwise the lofting height is
 
@@ -37,12 +41,20 @@ draws on every rank:
 4. A brand is launched with probability :cpp:`erf.fire.spotting.P_base` per
    front cell per application (default 0.01).
 5. The brand falls at :cpp:`erf.fire.spotting.terminal_velocity` (default
-   0.5 m/s) while drifting with the effective wind, integrated by forward
-   Euler over :cpp:`erf.fire.spotting.n_traj_steps` sub-steps (default 20)
-   from :math:`H_z` to the terrain surface, which is interpolated under the
-   brand so that drift downslope lands farther away.
-6. The landing distance is capped at the per-fuel maximum spotting distance
-   of Scott (2006) and Albini for the fuel system selected by
+   0.5 m/s) while drifting with the wind at its height: the reference wind
+   of :cpp:`erf.fire.wind_ref_ht` scaled by the neutral log profile
+   :math:`\ln(z/z_0) / \ln(z_{ref}/z_0)` with :math:`z_0` =
+   :cpp:`erf.fire.wind_sample_z0`, so a brand lofted to 200 m rides a wind
+   about twice the 6.1 m wind (until October 2026 it drifted on the
+   WAF-reduced midflame wind, about a quarter of that). The fall is integrated by
+   forward Euler over :cpp:`erf.fire.spotting.n_traj_steps` sub-steps
+   (default 20) from :math:`H_z` to the terrain surface, which is
+   interpolated under the brand so that drift downslope lands farther away.
+6. The landing distance is capped at the maximum spotting distance of the
+   source cell's fuel (its code on a fuel map, the domain fuel otherwise; a
+   burning structure's footprint cell takes the map's code under it, the
+   tables' 500 m for a non-burnable code) from Scott (2006) and Albini, for
+   the fuel system selected by
    :cpp:`erf.fire.spotting.fuel_system`, ``"13"`` (Anderson) or ``"40"``
    (Scott and Burgan).
 7. The brand ignites with probability :cpp:`erf.fire.spotting.P_catch`
@@ -53,9 +65,12 @@ draws on every rank:
 8. A disc of radius :cpp:`erf.fire.spotting.spot_radius` (default 10 m) is
    stamped negative into :math:`\phi` at the landing point, in the
    convention of the propagation path: normalised by the radius on the
-   FARSITE path, as a signed distance in metres on the level-set path. A
-   brand that lands on a non-burnable cell is dropped and, with the
-   exposure diagnostics on, counted on that cell.
+   FARSITE path, as a signed distance in metres on the level-set path. The
+   landing removes no fuel: the spot burns its cells' load like any other
+   burning cell (until October 2026 it stripped 95 % of the load from every
+   cell of the disc, losing its heat). A brand that lands on a non-burnable
+   cell is dropped and, with the exposure diagnostics on, counted on that
+   cell.
 
 .. note::
 
@@ -110,8 +125,9 @@ not crown. Once a cell has crowned it stays crowned.
 
      R_{crown} = \frac{11.02}{60}\, U_{10}^{0.90}\, C_{BD}^{0.19}\, e^{-0.17\, M_{10}} \quad [\mathrm{m/s}],
 
-  with :math:`U_{10}` the 10 m wind in km/h (derived from the effective wind,
-  or fixed by :cpp:`erf.fire.crown.wind_10m_kmh` when positive) and
+  with :math:`U_{10}` the 10 m wind in km/h (the reference wind at
+  :cpp:`erf.fire.wind_ref_ht`, an open wind, not the WAF-reduced midflame
+  wind; or fixed by :cpp:`erf.fire.crown.wind_10m_kmh` when positive) and
   :math:`M_{10}` the 10-hour dead moisture in percent;
 - ``"rothermel1991"``, :math:`R_{crown} = 3.34\, R_{surface}`;
 - ``"van_wagner_proxy"``, :math:`R_{crown} = (3 / C_{BD})\, f(M_{fol}) / 60`.
@@ -119,14 +135,26 @@ not crown. Once a cell has crowned it stays crowned.
 With :cpp:`erf.fire.crown.use_passive_blend` the transition is continuous
 through the crowning fraction :math:`CF = \min\bigl((I_B/I_{crit})^{2/3}, 1\bigr)`,
 :math:`R = (1 - CF)\, R_{surface} + CF\, R_{crown}`; otherwise the crown rate
-replaces the surface rate in crowned cells. The crown fraction burned of
+replaces the surface rate in crowned cells. Crowned cells are burned, so
+the rate is also carried into the unburned band ahead of them, every cell
+within :math:`2 + \lceil R_{max}\Delta t / \Delta x \rceil` cells taking
+the largest crown rate of its burned or already reached neighbours when
+that exceeds its surface rate, and the ratio to the surface rate is a
+per-cell factor that the directional level-set stages multiply into the
+rate they rebuild, as the acceleration factor is (until October 2026 the
+crown rate reached the front only on the FARSITE path and the isotropic
+level set; the directional path, the default, rebuilt the surface rate at
+every stage). The crown fraction burned of
 Scott and Reinhardt (2001), :math:`(R - R_{surface}) / (R_{crown} - R_{surface})`,
 is written as ``fire_crown_fraction_burned``.
 
 **Heat release.** Crowned cells consume the canopy load
-:math:`C_{BD} \times` depth at the surface residence time and add its heat
-to the sensible flux, with the same exponential injection as the surface
-flux but the deeper canopy e-folding height. ``fire_crown_active`` and
+:math:`C_{BD} \times` depth with the e-folding time
+:math:`\mathrm{depth} / R_{crown}` (at least 1 s) and add its heat to the
+sensible flux as a step mean, :math:`w_c h_c (1 - e^{-\Delta t/\tau}) /
+\Delta t`, so the heat handed over is the heat of the canopy consumed; it
+enters the atmosphere with the same exponential injection and e-folding
+depth as the surface flux. ``fire_crown_active`` and
 ``fire_crown_load`` are checkpointed so crowned cells stay crowned across a
 restart.
 
