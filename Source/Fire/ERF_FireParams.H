@@ -3,6 +3,7 @@
 
 #include <AMReX_ParmParse.H>
 #include <ERF_FireBreak.H>
+#include <ERF_BurnCurve.H>
 #include <ERF_FireAcceleration.H>
 #include <string>
 #include <vector>
@@ -1553,13 +1554,12 @@ struct FireParams
            }
            // EN 1991-1-2 Annex E.4: the decay releases 30 % of the load, so the
            // t-squared growth (which releases peak * growth / 3) must leave room.
-           // Statement for statement the test of make_burn_curve (ERF_StructureIgnition.H,
-           // which includes this header, so it cannot be called from here): on a deck
-           // exactly on the boundary, 0.7 * load and load - 0.3 * load differ by one
-           // ulp, and the two tests have to agree.
-           const amrex::Real e_growth = st_ig.peak_flux_W_m2 * st_ig.growth_time_s / 3.0;
-           const amrex::Real e_decay  = 0.3 * st_ig.fuel_load_J_m2;
-           if (e_growth > st_ig.fuel_load_J_m2 - e_decay) {
+           // The decision is make_burn_curve's own (the positivity of the three
+           // inputs was checked above), so a deck that passes here always builds
+           // its curve: 0.7 * load and load - 0.3 * load differ by one ulp.
+           erf_structure_ignition::BurnCurve scratch_curve;
+           if (!erf_structure_ignition::make_burn_curve(st_ig.peak_flux_W_m2, st_ig.fuel_load_J_m2,
+                                                        st_ig.growth_time_s, scratch_curve)) {
                amrex::Abort("erf.fire.structures.ignition: peak_flux_W_m2 * growth_time_s / 3 exceeds "
                             "70 % of fuel_load_J_m2, so the growth phase alone would release more "
                             "than the EN 1991-1-2 curve allows; shorten growth_time_s or raise fuel_load_J_m2");

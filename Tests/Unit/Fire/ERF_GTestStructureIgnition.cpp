@@ -114,8 +114,9 @@ TEST(StructureIgnition, Names)
  * that builds its curve must pass start-up. On this triple the growth phase
  * releases exactly 70 % of the load (plateau 0): 0.7 * load and
  * load - 0.3 * load differ by one ulp in double, and a start-up test written as
- * "> 0.7 * load" refused a curve that make_burn_curve builds. The test skips
- * itself when the triple is not on that boundary in the build's precision.
+ * "> 0.7 * load" refused a curve that make_burn_curve builds. In double the
+ * triple is asserted to sit on that boundary; in single the test skips itself
+ * when it does not.
  */
 TEST(StructureIgnition, StartupCheckAgreesWithBurnCurveOnTheBoundary)
 {
@@ -125,10 +126,13 @@ TEST(StructureIgnition, StartupCheckAgreesWithBurnCurveOnTheBoundary)
 
     BurnCurve c;
     const bool curve_ok = make_burn_curve(peak, load, growth, c);
-    const bool old_form_rejects = (peak * growth / static_cast<amrex::Real>(3.0)
-                                   > static_cast<amrex::Real>(0.7) * load);
-    if (!(curve_ok && old_form_rejects)) {
-        GTEST_SKIP() << "triple is not on the one-ulp boundary in this precision";
+    // the old start-up statement, double literals included, as the compiler saw it
+    const bool old_form_rejects = (peak * growth / 3.0 > 0.7 * load);
+    if (sizeof(amrex::Real) == 8) {
+        ASSERT_TRUE(curve_ok)         << "make_burn_curve must accept the exact-boundary triple";
+        ASSERT_TRUE(old_form_rejects) << "the old start-up form must reject it, or the test guards nothing";
+    } else if (!(curve_ok && old_form_rejects)) {
+        GTEST_SKIP() << "triple is not on the one-ulp boundary in single precision";
     }
     EXPECT_NEAR(c.t_plateau, 0.0, TOL * growth) << "plateau of an exact-boundary curve";
 
