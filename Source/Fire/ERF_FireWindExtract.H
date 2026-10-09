@@ -52,10 +52,11 @@
  *                             nullptr = use global z_ref
  * @param[in]  nfuelcats       Number of fuel categories (13 for Anderson FBFM13);
  *                             0 if d_fcwh is nullptr
- * @param[in]  below_first_log Target below the lowest cell centre: true (default,
- *                             erf.fire.wind_below_first_cell = "log") scales the
- *                             lowest centre's wind with a neutral log profile of
- *                             roughness z0_log, U(z) = U(z_1) ln(z/z0)/ln(z_1/z0);
+ * @param[in]  below_first_log Target below the lowest cell centre: false (default,
+ *                             erf.fire.wind_below_first_cell = "clamp") takes the
+ *                             lowest centre's wind as it is; true ("log") scales it
+ *                             with a neutral log profile of roughness z0_log,
+ *                             U(z) = U(z_1) ln(z/z0)/ln(z_1/z0);
  *                             false ("clamp") takes the lowest centre's wind as
  *                             it is (the behaviour before 2026-10)
  *
@@ -129,7 +130,7 @@ void fill_fire_wind_from_interpolation(
     const amrex::MultiFab* col_roof       = nullptr,
     amrex::Real            z_sample       = 0.0,
     amrex::Real            z0_log         = 0.1,
-    bool                   below_first_log = true);
+    bool                   below_first_log = false);
 
 /**
  * @brief Compute unsheltered Wind Adjustment Factor (Andrews/Albini & Baughman 1979)

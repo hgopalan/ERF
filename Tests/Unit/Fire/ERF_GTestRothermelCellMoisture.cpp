@@ -136,6 +136,26 @@ TEST(RothermelCellMoisture, TheFuelMapEntersOnlyUnderPerFuel)
     EXPECT_NEAR(cell(ros, 1), r1, REL * r1) << "the timber cell keeps the uniform grass coefficients";
 }
 
+TEST(RothermelCellMoisture, ACodeOutsideTheTableKeepsTheUniformFuel)
+{
+    // the per-fuel table path keeps the uniform entry for a code it does not
+    // know; the coefficient field does the same (code 77 is in no table)
+    TwoCells g;
+    const FuelModelParams fp1 = get_fuel_params(1, FUEL_SET_ANDERSON13);
+    MultiFab mc(g.ba, g.dm, 5, 0), rcc(g.ba, g.dm, ROTHERMEL_RC_NCOMP, 0), fuel(g.ba, g.dm, 1, 0);
+    mc.setVal(0.06_rt, 0, 1); mc.setVal(0.07_rt, 1, 1); mc.setVal(0.08_rt, 2, 1); mc.setVal(0.0_rt, 3, 2);
+    for (MFIter mfi(fuel); mfi.isValid(); ++mfi) { auto f = fuel.array(mfi); f(0, 0, 0) = 77.0_rt; f(1, 0, 0) = 1.0_rt; }
+    build_cell_rothermel_coefficients(rcc, mc, &fuel, nullptr, 0, FUEL_SET_ANDERSON13, -1.0_rt, fp1,
+                                      true, fire_wind_limit::rothermel);
+    const RothermelComputed rc1 = rothermel_coefficients(fp1, 0.06_rt, 0.07_rt, 0.08_rt, true, fire_wind_limit::rothermel);
+    for (MFIter mfi(rcc); mfi.isValid(); ++mfi) {
+        for (int i = 0; i < 2; ++i) {
+            const RothermelComputed rc = unpack_rothermel(rcc.const_array(mfi), i, 0);
+            EXPECT_NEAR(rc.R0, rc1.R0, REL * rc1.R0) << "cell " << i;
+        }
+    }
+}
+
 TEST(RothermelCellMoisture, MoisturesAreClampedAsTheMeanIs)
 {
     TwoCells g;

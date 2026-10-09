@@ -279,7 +279,9 @@ amrex::Real fbp_ros(const FbpComputed& s, amrex::Real U_mps, amrex::Real slope) 
  * @param[in]  st    precomputed state
  * @param[in]  u, v  wind [m/s]
  * @param[in]  sx, sy  terrain slope dz/dx, dz/dy
- * @param[out] hx, hy  unit vector of the net effective wind (the head direction)
+ * @param[out] hx, hy  unit vector of the net effective wind (the head direction;
+ *                     the FARSITE path keeps its ellipse aligned with the wind
+ *                     and does not rotate it toward this direction)
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real fbp_ros_vector(const FbpComputed& st, amrex::Real u, amrex::Real v,

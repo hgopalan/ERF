@@ -160,8 +160,11 @@ void build_cell_rothermel_coefficients(MultiFab& rc_cell,
         Array4<const Real> fuel;
         if (has_codes) { fuel = fuel_model->const_array(mfi); }
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            const FuelModelParams fp_cell = has_codes
-                ? fuel_params_at_code(static_cast<int>(fuel(i, j, k) + Real(0.5)), fuel_set, M_live, fp_tbl, fp_tbl_size)
+            // a code outside the table keeps the uniform fuel, as the per-fuel
+            // table path keeps the uniform entry for it
+            const int code = has_codes ? static_cast<int>(fuel(i, j, k) + Real(0.5)) : -1;
+            const FuelModelParams fp_cell = (has_codes && fuel_table_index(code, fuel_set) >= 0)
+                ? fuel_params_at_code(code, fuel_set, M_live, fp_tbl, fp_tbl_size)
                 : fp_uniform;
             // the dead moistures as the domain-mean rebuild clamps them
             const Real m1   = amrex::max(Real(0.01), amrex::min(mc(i, j, k, 0), Real(0.40)));

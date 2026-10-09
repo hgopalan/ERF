@@ -109,8 +109,11 @@ Richards (1990) spread shape below. Each fire subcycle of length
    components 2 and 3, the clock and its value at the cell's burn), so a rate
    that changes in time (the acceleration clocks) is integrated over the path
    rather than applied at its current value; where the source's and the
-   cell's rates differ the distance is bounded by the slower of the two times
-   the wait, which a path through the slower fuel cannot beat. If :math:`T`
+   cell's rates differ the distance is bounded by the source's own integral
+   since it burned, which a path through the slower fuel cannot beat. The
+   FARSITE path keeps the ellipse aligned with the wind; with the FBP model
+   the head rate is that of the vector sum of the wind and the
+   slope-equivalent wind, but the shape is not rotated toward it. If :math:`T`
    falls inside the subcycle the cell burns and :math:`T` becomes its
    ``fire_arrival_time``. For a planar front it is exact: rows burn one at a
    time, a row spacing along the normal over the normal speed apart.

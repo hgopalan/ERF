@@ -100,6 +100,25 @@ TEST(FireDefaults, TheMcArthurCapIsReadWithItsModel)
     EXPECT_NEAR(fp.macarthur_ros_max, 0.0, 1.0e-12) << "0 removes the cap";
 }
 
+TEST(FireDefaults, AHybridMemberReadsItsKeys)
+{
+    // the model checks of the McArthur cap and the per-cell Rothermel moisture
+    // run after the hybrid members are read, so a hybrid with that member
+    // accepts the key (it aborted before the fix)
+    ScopedKeys deck;
+    deck.add("ros_model", std::string("hybrid"));
+    deck.add("hybrid.primary", std::string("macarthur"));
+    deck.add("hybrid.secondary", std::string("rothermel"));
+    deck.add("hybrid.selector", std::string("wind"));
+    deck.add("hybrid.wind_lo", 2.0);
+    deck.add("hybrid.wind_hi", 4.0);
+    deck.add("macarthur.ros_max", 3.0);
+    deck.add("rothermel_cell_moisture", true);
+    FireParams fp;
+    EXPECT_NEAR(fp.macarthur_ros_max, 3.0, 1.0e-12);
+    EXPECT_TRUE(fp.rothermel_cell_moisture);
+}
+
 TEST(FireDefaults, GrassModelsAndTheirKeys)
 {
     {

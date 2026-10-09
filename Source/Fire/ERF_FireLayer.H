@@ -872,6 +872,9 @@ private:
     // and the surface-only scratch fields of apply_crown_fire_ros(), allocated once.
     std::unique_ptr<amrex::MultiFab>         fire_crown_factor;
     std::unique_ptr<amrex::MultiFab>         m_crown_surface_ros;
+    /// The surface rate before a size-based or legacy-clock acceleration, the
+    /// denominator of the crown factor the per-stage paths multiply in
+    std::unique_ptr<amrex::MultiFab>         m_crown_surface_ros_pre_accel;
     std::unique_ptr<amrex::MultiFab>         m_crown_surface_intensity;
     std::unique_ptr<amrex::MultiFab>         m_crown_surface_flame_length;
 

@@ -173,7 +173,7 @@ amrex::Real gauge (amrex::Real ddx, amrex::Real ddy, const Shape& s) noexcept
         if (s.ellipse) {
             const amrex::Real a2 = s.a * s.a;
             const amrex::Real b2 = s.b * s.b;
-            const amrex::Real A  = a2 * (b2 - s.c * s.c);      // > 0 (b > c)
+            const amrex::Real A  = a2 * (s.b - s.c) * (s.b + s.c);   // > 0 (b > c), no cancelling difference at a large L/W
             const amrex::Real B  = a2 * s.c * par;            // half the linear coefficient
             const amrex::Real C  = a2 * par * par + b2 * per * per;
             const amrex::Real D  = std::sqrt(B * B + A * C);
@@ -626,13 +626,15 @@ void advance_farsite_one_step_legacy(
  * clock at its arrival in component 3, so the distance available to a source
  * S is clock(cell, t) - clock(S, T_S): the integral of the rate over the time
  * since S burned, exact for a rate that varies in time (the acceleration
- * clocks) and uniform in space, rather than the current rate applied over
- * the whole path. Where the two cells' rates differ the difference credits
- * the source's history to the target, so it is bounded by the slower of the
- * two current rates times the wait, which a path through the slower fuel
- * cannot beat (a two-fuel strip keeps the fast fuel's cells at T_boundary +
- * k h / R_fast, ERF_GTestFarsiteShape). The rectangle and the disc keep the
- * quadrant update alone, whose paths are grid-aligned or closed-form.
+ * clocks, a lull, a retardant factor) and uniform in space, rather than the
+ * current rate applied over the whole path. Where the two cells' rates
+ * differ the difference credits the source's history to the target, so it
+ * is bounded by the source's own integral since it burned, clock(S, t) -
+ * clock(S, T_S), which a path through the slower fuel cannot beat and which
+ * stays exact for any uniform time dependence (a two-fuel strip keeps the
+ * fast fuel's cells at T_boundary + k h / R_fast, ERF_GTestFarsiteShape).
+ * The rectangle and the disc keep the quadrant update alone, whose paths are
+ * grid-aligned or closed-form.
  *
  * The head rate R is the larger of the cell's own rate and those of its burned
  * neighbours: the burned side carries the crown-fire rate, which is only set in
@@ -708,10 +710,11 @@ void advance_farsite_front_cells(
     const IntVect dhi = geom_fire.Domain().bigEnd();
     const bool per_x = geom_fire.isPeriodic(0);
     const bool per_y = geom_fire.isPeriodic(1);
-    MultiFab nbr(arrival_time.boxArray(), arrival_time.DistributionMap(), 3, IntVect(r_src, r_src, 0));
+    MultiFab nbr(arrival_time.boxArray(), arrival_time.DistributionMap(), 4, IntVect(r_src, r_src, 0));
     MultiFab::Copy(nbr, arrival_time, 0, 0, 1, 0);
     MultiFab::Copy(nbr, R_mf,         0, 1, 1, 0);
     MultiFab::Copy(nbr, disp_accum,   3, 2, 1, 0);   // the clock at burn of every burned cell
+    MultiFab::Copy(nbr, disp_accum,   2, 3, 1, 0);   // and its clock now
     fire_fill_boundary(nbr, geom_fire);
 
     for (MFIter mfi(arrival_time); mfi.isValid(); ++mfi) {
@@ -812,17 +815,17 @@ void advance_farsite_front_cells(
                     for (int di = -r_src; di <= r_src; ++di) {
                         const int ii = i + di;
                         if (!per_x && (ii < dlo[0] || ii > dhi[0])) { continue; }
-                        const Real Ts = nb(ii, jj, k, 0);
-                        if (Ts < 0.0_rt) { continue; }
+                        if (nb(ii, jj, k, 0) < 0.0_rt) { continue; }
                         // The clock difference is the distance when both cells ran
                         // the same rate history; with a rate contrast (a fuel
                         // boundary, head against flank wind) it credits the
                         // source's history to the target, so it is bounded by the
-                        // slower of the two current rates over the whole wait,
-                        // which a path through slower fuel cannot beat.
-                        const Real R_s   = amrex::max(nb(ii, jj, k, 1), 0.0_rt);
-                        const Real bound = amrex::min(R_s, r_now) * (t1 - Ts);
-                        const Real covered = amrex::min(clock_x - nb(ii, jj, k, 2), bound);
+                        // source's own integral since it burned, which a path
+                        // through slower fuel cannot beat and which stays exact
+                        // for any uniform time dependence (a current-rate bound
+                        // would lose the direct paths under a falling rate).
+                        const Real clock_s_burn = nb(ii, jj, k, 2);
+                        const Real covered = amrex::min(clock_x - clock_s_burn, nb(ii, jj, k, 3) - clock_s_burn);
                         const Real need    = farsite_front::gauge(-di * dx[0], -dj * dx[1], s);
                         if (covered >= need) { T_new = amrex::min(T_new, t1 - (covered - need) / r_now); }
                     }

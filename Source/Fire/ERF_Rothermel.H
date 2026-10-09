@@ -607,8 +607,9 @@ struct RothermelCellInputs
  * of fuel_mc, clamped to [0.01, 0.40] as the domain-mean rebuild clamps them)
  * and its fuel: the code of fuel_model through the slot table when fuel_model
  * is given (erf.fire.rothermel_per_fuel on a spatial fuel map), the uniform
- * fuel otherwise. A cell whose fuel has no load (a non-burnable code) gets
- * the zeroed set and cannot spread. Once per step, not per kernel call: the
+ * fuel otherwise; a code outside the table keeps the uniform fuel, as the
+ * per-fuel table path does. A cell whose fuel has no load (a non-burnable
+ * code) gets the zeroed set and cannot spread. Once per step, not per kernel call: the
  * directional stages read the field at every substep.
  *
  * @param[out] rc_cell    ROTHERMEL_RC_NCOMP-component field on the fire grid

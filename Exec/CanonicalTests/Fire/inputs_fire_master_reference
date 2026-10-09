@@ -240,11 +240,11 @@ erf.fire.use_waf = true
 erf.fire.waf_formula = "andrews"
 
 
-# Cap the midflame wind at Rothermel's maximum effective wind speed (MEWS):
-# 300 ft/min (1.52 m/s) for fine fuels (SAV > 1000 1/ft), 500 ft/min otherwise.
-# Rothermel and BEHAVE kernels, including the per-fuel table and the directional path.
-# true: cap the wind factor at the MEWS
-# false: no cap, as in WRF-Fire (Exec/RegTests/FireLineFire)
+# Bound the midflame wind of the Rothermel and BEHAVE kernels (the per-fuel
+# table and the directional path included) by the limit erf.fire.wind_limit
+# selects below.
+# true: apply the limit
+# false: no limit, as in WRF-Fire (Exec/RegTests/FireLineFire)
 erf.fire.use_wind_limit = true
 # Which limit: "rothermel" (default) is Rothermel's (1972, eq. 87) U <= 0.9 I_R
 # ft/min, which scales with the fuel's reaction intensity (about 690 ft/min

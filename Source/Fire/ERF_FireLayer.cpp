@@ -203,6 +203,8 @@ void FireLayer::initialize(const ERF& erf,
         fire_crown_factor = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
         fire_crown_factor->setVal(1.0_rt);
         m_crown_surface_ros = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        m_crown_surface_ros_pre_accel = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
+        m_crown_surface_ros_pre_accel->setVal(0.0_rt);
         m_crown_surface_intensity = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
         m_crown_surface_flame_length = std::make_unique<MultiFab>(m_fg.ba, m_fg.dm, 1, 0);
     }
@@ -1097,6 +1099,15 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
     // Phase 12: Apply fire acceleration scaling to ROS.
     // Reduces ROS for small fires not yet at quasi-steady-state.
     // Returns immediately when accel.enable = false (zero cost when disabled).
+    // With the size-based or legacy clock the acceleration scales fire_ros
+    // but reaches no per-stage path, so the crown factor those paths multiply
+    // in has to be formed against the surface rate before the scaling (with
+    // the front clock the factor is carried through accel_factor instead).
+    const bool accel_non_front = m_params.accel.enable
+        && !(m_params.accel.use_temporal && m_params.accel.clock == accel_clock::front && fire_accel_state);
+    if (m_params.crown.enable && accel_non_front && m_crown_surface_ros_pre_accel && fire_ros) {
+        amrex::MultiFab::Copy(*m_crown_surface_ros_pre_accel, *fire_ros, 0, 0, 1, 0);
+    }
     if (m_params.accel.enable && fire_ros && fire_phi) {
         apply_fire_acceleration(*fire_ros, *fire_phi, m_fg.geom,
                                 m_params.accel, dt,
@@ -1170,15 +1181,19 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         // CFL-based subcycling (same structure as FARSITE)
         amrex::Real time_remaining = dt;
         int n_ls_substeps = 0;
+        // FBP on the directional path: a normal that sees the wind but not the
+        // opposing slope-equivalent wind runs faster than the vector sum the
+        // field holds, so the step is set from the scalar bound (the wind,
+        // slopes and state are fixed within the step: one reduction)
+        amrex::Real fbp_bound = 0.0_rt;
+        if (m_params.directional_ros && m_params.uses_model("fbp")) {
+            const MultiFab& fbp_wind = (m_params.fbp.wind_source == 1) ? *fire_wind_eff : *fire_wind_ref;
+            fbp_bound = max_fbp_ros_bound(fbp_wind, *fire_slopes, m_fbp);
+            // the stages multiply the crown factor into the surface rate
+            if (fire_crown_factor && m_params.crown.enable) { fbp_bound *= amrex::max(fire_crown_factor->max(0), 1.0_rt); }
+        }
         while (time_remaining > 1.0e-14) {
-            amrex::Real max_ros = fire_ros->max(0);
-            // FBP on the directional path: a normal that sees the wind but not
-            // the opposing slope-equivalent wind runs faster than the vector
-            // sum the field holds, so the step is set from the scalar bound
-            if (m_params.directional_ros && m_params.uses_model("fbp")) {
-                const MultiFab& fbp_wind = (m_params.fbp.wind_source == 1) ? *fire_wind_eff : *fire_wind_ref;
-                max_ros = amrex::max(max_ros, max_fbp_ros_bound(fbp_wind, *fire_slopes, m_fbp));
-            }
+            amrex::Real max_ros = amrex::max(fire_ros->max(0), fbp_bound);
             // CFL step from a floored rate, computed before the select: before
             // the first cell burns max_ros is 0 and the unselected x/0 would be
             // speculated under amrex.fpe_trap_zero
@@ -2054,7 +2069,12 @@ void FireLayer::apply_crown_fire_ros()
     // Carry the crown rate into the unburned band the front can reach, so the
     // level-set paths advance at it (the isotropic level set reads each cell's
     // own rate, the directional paths the factor R / R_surface this writes).
-    const amrex::Long n_ext = extend_crown_ros_to_front(*fire_ros, surface_ros, *fire_phi,
+    // the factor's denominator: the surface rate the per-stage paths rebuild,
+    // which is the rate before a size-based or legacy-clock acceleration
+    const bool accel_non_front = m_params.accel.enable
+        && !(m_params.accel.use_temporal && m_params.accel.clock == accel_clock::front && fire_accel_state);
+    const MultiFab& factor_surf = (accel_non_front && m_crown_surface_ros_pre_accel) ? *m_crown_surface_ros_pre_accel : surface_ros;
+    const amrex::Long n_ext = extend_crown_ros_to_front(*fire_ros, factor_surf, *fire_phi,
                                                         *fire_crown_ros_active, *fire_crown_active,
                                                         m_fg.geom, m_dt_atm, *fire_crown_factor,
                                                         fire_nonburnable.get());

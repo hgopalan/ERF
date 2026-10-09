@@ -152,10 +152,12 @@ void apply_farsite_terrain_wind(
  * cell-centre heights, averages the face velocities to cell centres at the two
  * bracketing levels, and interpolates linearly between them. A target above the
  * highest cell centre takes that level's wind. A target below the lowest cell
- * centre takes the lowest centre's wind scaled down a neutral log profile of
- * roughness z0_log (below_first_log, the default), U(z) = U(z_1) ln(z/z0) /
- * ln(z_1/z0), or that wind as it is (the clamp of earlier versions, which with a
- * 20 m first cell handed the fire the 10 m wind as its 6.1 m wind, 12 % high at
+ * centre takes the lowest centre's wind as it is (below_first_log = false, the
+ * deck default erf.fire.wind_below_first_cell = clamp, which with a 20 m first
+ * cell hands the fire the 10 m wind as its 6.1 m wind, 12 % high at z0 = 0.1 m),
+ * or scaled down a neutral log profile of roughness z0_log (= log), U(z) =
+ * U(z_1) ln(z/z0) / ln(z_1/z0), the recommended form for a first cell above the
+ * reference height (a 20 m first cell, 12 % high at
  * z0 = 0.1 m). z_ground is the ground height the column heights are measured
  * from; z_target - z_ground is the height above ground.
  */
@@ -166,7 +168,7 @@ void column_wind_at_height(const Array4<const Real>& xvel,
                            int ia, int ja, int nz,
                            Real z_target, Real z_ground,
                            Real& u_out, Real& v_out,
-                           bool below_first_log = true, Real z0_log = Real(0.1)) noexcept
+                           bool below_first_log = false, Real z0_log = Real(0.1)) noexcept
 {
     // Bracket by bisection; z_cc is monotonically increasing in k.
     int k_lo;

@@ -54,7 +54,7 @@ and BEHAVE kernels, on every path. For Anderson model 1 at 8 % moisture
 the head rate is 0.43 m/s against 0.22 m/s under the fuel-class rule.
 That rule, 300 ft/min for fuels with a surface-area-to-volume ratio above
 1000 ft⁻¹ and 500 ft/min otherwise, is not a published rule; it was this
-code's default until October 2026 and it is it is kept as :cpp:`erf.fire.wind_limit =
+code's default until October 2026 and it is kept as :cpp:`erf.fire.wind_limit =
 "fuel_class"`. ``ERF_GTestWindLimit`` checks both.
 
 MacArthur (1966) Australian Formula

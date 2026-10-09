@@ -54,8 +54,7 @@ sounding's 3 m/s itself as the midflame wind:
 | `legacy` (ellipse normal speed) | 1.828 (1.88 R) | 0.000 | 0.189 (1.93 a) | 25.2 | 0.658 at 60 s |
 
 Before 2026-10 the rectangle was the only shape (`front_cell` 0.975 / 0.191 /
-0.112 m/s, 19.2 ha, with the then-default log scaling absent; `legacy`
-1.828 / 0.382 / 0.354 m/s, 50.1 ha).
+0.112 m/s, 19.2 ha; `legacy` 1.828 / 0.382 / 0.354 m/s, 50.1 ha).
 
 `Tests/Unit/Fire/ERF_GTestFarsiteSpreadAccumulation.cpp` checks the same
 rates cell by cell, and that the arrival times do not depend on the box

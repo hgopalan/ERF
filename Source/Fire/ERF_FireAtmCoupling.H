@@ -6,10 +6,10 @@
 //   1. Builds a vertical flux profile with exponential decay:
 //        hfx(z) = (Q_sfc / Cp) * exp(-z / alfg)
 //      where z is the height above the lowest cell centre of the column (half
-//      a cell above the terrain: the profile is evaluated at cell centres and
-//      the first cell's share is e^{-dz/2a} - e^{-3dz/2a}, 0.100 for dz = 5 m
-//      and a = 45 m, against 1 - e^{-dz/a} = 0.105 from the ground; the column
-//      total is the same) and alfg is the e-folding scale [m].
+//      a cell above the terrain: the profile's datum is that centre, so the
+//      first cell takes the share 1 - e^{-dz/a}, 0.105 for dz = 5 m and
+//      a = 45 m, and nothing is lost below it) and alfg is the e-folding
+//      scale [m].
 //   2. Converts the flux profile to a theta tendency via flux divergence:
 //        d(RhoTheta)/dt = -rho * d(hfx)/dz
 //   3. Does the same for latent heat (grnqfx -> rqvfrten):

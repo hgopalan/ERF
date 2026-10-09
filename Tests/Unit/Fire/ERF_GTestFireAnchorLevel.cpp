@@ -349,7 +349,7 @@ TEST(FireAnchorLevel, WindIsSampledFromTheSurroundingColumns)
 
 /**
  * A target below the first cell centre takes the lowest centre's wind scaled
- * by the neutral log profile ln(z / z0) / ln(z1 / z0) (the default,
+ * by the neutral log profile ln(z / z0) / ln(z1 / z0) (the opt-in
  * erf.fire.wind_below_first_cell = log), not the centre's wind unchanged
  * (the default clamp).
  * Here z_ref = 10 m under a first centre at 12.5 m with z0 = 0.1 m: the

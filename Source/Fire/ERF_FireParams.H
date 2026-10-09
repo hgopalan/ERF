@@ -1381,15 +1381,9 @@ struct FireParams
        one_of("ros_model", ros_model, {"rothermel", "behave", "balbi", "fbp", "hybrid", "prescribed", "cheney_gould", "grass_simple", "macarthur"});
        pp.query("rothermel_per_fuel", rothermel_per_fuel);
        pp.query("rothermel_cell_moisture", rothermel_cell_moisture);
-       if (pp.contains("rothermel_cell_moisture") && !uses_model("rothermel")) {
-           amrex::Print() << "[FIRE] WARNING: erf.fire.rothermel_cell_moisture is read by the Rothermel kernels only;"
-                          << " erf.fire.ros_model = " << ros_model << " ignores it\n";
-       }
        pp.query("macarthur.ros_max", macarthur_ros_max);
        nonneg("macarthur.ros_max", macarthur_ros_max);   // 0 = no cap
-       if (pp.contains("macarthur.ros_max") && !uses_model("macarthur")) {
-           fail("erf.fire.macarthur.ros_max needs erf.fire.ros_model = macarthur (or a hybrid member)");
-       }
+       // (whether a model reads them is checked after the hybrid members are read)
 
        // Hybrid ROS
        {
@@ -1426,6 +1420,12 @@ struct FireParams
                }
                if (hy.primary == hy.secondary) {
                    amrex::Abort("erf.fire.hybrid.primary and secondary must differ");
+               }
+               // one grass state serves both members, built as the 1998 model
+               // whenever cheney_gould is a member
+               if ((hy.primary == "cheney_gould" && hy.secondary == "grass_simple") ||
+                   (hy.primary == "grass_simple" && hy.secondary == "cheney_gould")) {
+                   amrex::Abort("erf.fire.hybrid: cheney_gould and grass_simple share one grass state; pick one of them");
                }
                if (hy.selector == "region") {
                    if (!pp.contains("hybrid.region")) {
@@ -1871,6 +1871,17 @@ struct FireParams
            if (pp.contains("behave.net_load") && !uses_model("behave")) {
                fail("erf.fire.behave.net_load needs erf.fire.ros_model = behave (or a hybrid member)");
            }
+       }
+       // the McArthur cap and the per-cell Rothermel moisture are read by their
+       // kernels only; uses_model sees the hybrid members here
+       if (pp.contains("macarthur.ros_max") && !uses_model("macarthur")) {
+           fail("erf.fire.macarthur.ros_max needs erf.fire.ros_model = macarthur (or a hybrid member)");
+       }
+       if (pp.contains("rothermel_cell_moisture") && !uses_model("rothermel")) {
+           amrex::Print() << "[FIRE] WARNING: erf.fire.rothermel_cell_moisture is read by the Rothermel kernels only;"
+                          << " erf.fire.ros_model = " << ros_model << " ignores it\n";
+       }
+       {
        }
        if (uses_model("behave") && !(bh.dynamic_transfer_hi > bh.dynamic_transfer_lo)) {
            amrex::Abort("erf.fire.behave.dynamic_transfer_hi must be greater than dynamic_transfer_lo");
