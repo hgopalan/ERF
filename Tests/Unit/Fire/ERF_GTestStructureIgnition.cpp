@@ -107,3 +107,48 @@ TEST(StructureIgnition, Names)
     EXPECT_STREQ(state_name(Burning), "burning");
     EXPECT_STREQ(state_name(BurnedOut), "burned_out");
 }
+
+/**
+ * The start-up check in FireParams and make_burn_curve test the same EN 1991-1-2
+ * bound, so a deck that passes start-up must build its burn curve and a deck
+ * that builds its curve must pass start-up. On this triple the growth phase
+ * releases exactly 70 % of the load (plateau 0): 0.7 * load and
+ * load - 0.3 * load differ by one ulp in double, and a start-up test written as
+ * "> 0.7 * load" refused a curve that make_burn_curve builds. The test skips
+ * itself when the triple is not on that boundary in the build's precision.
+ */
+TEST(StructureIgnition, StartupCheckAgreesWithBurnCurveOnTheBoundary)
+{
+    const amrex::Real peak   = static_cast<amrex::Real>(2.5e5);
+    const amrex::Real load   = static_cast<amrex::Real>(1.68e8);
+    const amrex::Real growth = static_cast<amrex::Real>(1411.2);
+
+    BurnCurve c;
+    const bool curve_ok = make_burn_curve(peak, load, growth, c);
+    const bool old_form_rejects = (peak * growth / static_cast<amrex::Real>(3.0)
+                                   > static_cast<amrex::Real>(0.7) * load);
+    if (!(curve_ok && old_form_rejects)) {
+        GTEST_SKIP() << "triple is not on the one-ulp boundary in this precision";
+    }
+    EXPECT_NEAR(c.t_plateau, 0.0, TOL * growth) << "plateau of an exact-boundary curve";
+
+    // Aborted here with "exceeds 70 % of fuel_load_J_m2" before the start-up
+    // test used make_burn_curve's arithmetic.
+    amrex::ParmParse pp("erf.fire");
+    pp.add("structures.enable",                 true);
+    pp.add("structures.file",                   "unused_by_the_parameter_check");
+    pp.add("exposure.enable",                   true);
+    pp.add("structures.ignition.enable",        true);
+    pp.add("structures.ignition.peak_flux_W_m2", static_cast<double>(peak));
+    pp.add("structures.ignition.fuel_load_J_m2", static_cast<double>(load));
+    pp.add("structures.ignition.growth_time_s",  static_cast<double>(growth));
+    {
+        FireParams fp;
+        EXPECT_EQ(fp.structures.ignition.growth_time_s, growth);
+    }
+    for (const char* key : {"structures.enable", "structures.file", "exposure.enable",
+                            "structures.ignition.enable", "structures.ignition.peak_flux_W_m2",
+                            "structures.ignition.fuel_load_J_m2", "structures.ignition.growth_time_s"}) {
+        pp.remove(key);
+    }
+}

@@ -121,6 +121,8 @@ struct BurnCurve
  * The growth phase releases q_peak t_growth / 3, the decay 0.3 of the load;
  * the plateau takes what is left. Returns false when the growth phase alone
  * would release more than 70 % of the load, when no such curve exists.
+ * FireParams::FireParams() repeats this test statement for statement at
+ * start-up; keep the two identical.
  */
 inline bool make_burn_curve (amrex::Real q_peak, amrex::Real fuel_load_J_m2,
                              amrex::Real t_growth, BurnCurve& c)

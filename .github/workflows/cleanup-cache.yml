@@ -5,9 +5,11 @@ name: CleanUpCache
 # representative 20-hour window this workflow was 156 of 500 total runs and 129 of those were
 # cancelled. Pruning stale ccache entries is not correctness-critical and does not need to
 # happen six times per commit, so it now runs once after Linux GCC plus nightly.
+# The CUDA and HIP workflows are listed too: they are the only ones that run on a push
+# to ERF-Fire, the fork's merge branch, and each such push saves four ccache entries.
 on:
   workflow_run:
-    workflows: [Linux GCC]
+    workflows: [Linux GCC, ERF CI (cuda), ERF CI (hip)]
     types:
       - completed
   schedule:
@@ -47,12 +49,13 @@ jobs:
             pr_head_sha=${{ github.event.workflow_run.head_sha }}
             pr_number=$(gh pr list --search $pr_head_sha --json number --jq '.[0].number')
             echo "Clean up cache for PR ${pr_number}"
-            BRANCH=refs/pull/${pr_number}/merge
+            BRANCHES=refs/pull/${pr_number}/merge
           elif [[ -n $HEAD_BRANCH ]]; then
-            BRANCH=refs/heads/${HEAD_BRANCH}
+            BRANCHES=refs/heads/${HEAD_BRANCH}
           else
-            # schedule / workflow_dispatch: no workflow_run context to inherit
-            BRANCH=refs/heads/development
+            # schedule / workflow_dispatch: no workflow_run context to inherit, so sweep
+            # both branches that save caches (development, and ERF-Fire for cuda and hip)
+            BRANCHES="refs/heads/development refs/heads/ERF-Fire"
           fi
 
           # Setting this to not fail the workflow while deleting cache keys.
@@ -65,6 +68,9 @@ jobs:
           # run does the pruning it must sweep every workflow's keys.
           keyprefix="ccache-"
 
+          for BRANCH in $BRANCHES
+          do
+          echo "Clean up cache for ${BRANCH}"
           cached_jobs=$(gh actions-cache list -L 100 -R $REPO -B $BRANCH --key "$keyprefix" | awk -F '-git-' '{print $1}' | sort | uniq)
 
           # cached_jobs is something like "ccache-LinuxClang-configure-1d ccache-LinuxClang-configure-2d".
@@ -80,3 +86,4 @@ jobs:
             done
           done
           unset IFS
+          done
