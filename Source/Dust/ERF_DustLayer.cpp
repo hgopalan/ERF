@@ -158,6 +158,9 @@ DustLayer::initialize(
   dust_retreat_flag = std::make_unique<amrex::MultiFab>(
     m_dg.ba, m_dg.dm, 1, amrex::IntVect(1, 1, 0));
   dust_retreat_flag->setVal(0.0);
+  dust_treated_mask = std::make_unique<amrex::MultiFab>(
+    m_dg.ba, m_dg.dm, 1, amrex::IntVect(1, 1, 0));
+  dust_treated_mask->setVal(0.0);
 
   if (dust_params.dust_debug) {
     amrex::Print() << "[DUST DEBUG] Phase 8: dust_retreat_flag allocated, "
@@ -210,6 +213,9 @@ DustLayer::initialize(
   dust_deposition_rate = std::make_unique<amrex::MultiFab>(
     m_dg.ba, m_dg.dm, 1, amrex::IntVect(1,1,0));
   dust_deposition_rate->setVal(0.0);
+  ustar_atm = std::make_unique<amrex::MultiFab>(
+    dust_flux_atm->boxArray(), dust_flux_atm->DistributionMap(), 1, amrex::IntVect(0));
+  ustar_atm->setVal(0.0);
 
   dep_flux_atm = std::make_unique<amrex::MultiFab>(
     dust_flux_atm->boxArray(),
@@ -250,6 +256,12 @@ DustLayer::initialize(
                    dust_pm25_24h.get(), dust_pm10_24h.get(),
                    dust_pm25_exceed.get(), dust_pm10_exceed.get()})
     mf->setVal(0.0);
+  if (dust_params.averaging == "window") {
+    m_pm25_window.define(m_dg.ba, m_dg.dm, 24, 86400.0);   // 24 hourly means
+    m_pm10_window.define(m_dg.ba, m_dg.dm, 24, 86400.0);
+    if (dust_params.stel_enable)
+      m_stel_window.define(m_dg.ba, m_dg.dm, 15, dust_params.stel_averaging_s);   // 15 slots of the STEL window
+  }
 
   if (dust_params.dust_debug) {
     amrex::Print() << "[DUST DEBUG] Phase 17: PM2.5/PM10 MultiFabs allocated\n"
@@ -304,6 +316,17 @@ DustLayer::initialize(
   // Ensure ghost cells are synchronized after reading surface maps
   dust_crust_index->FillBoundary(m_dg.geom.periodicity());
   dust_silt_fraction->FillBoundary(m_dg.geom.periodicity());
+  // cells that were treated at all: the re-treatment flag is for them (a cell
+  // whose coverage decayed to zero used to lose the flag, and could not be
+  // told from one never treated)
+  for (amrex::MFIter mfi(*dust_treated_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+    const amrex::Box& bx = mfi.tilebox();
+    auto tm = dust_treated_mask->array(mfi);
+    auto sp = dust_suppression->const_array(mfi);
+    amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+      tm(i,j,k) = (sp(i,j,k) > amrex::Real(0.0)) ? amrex::Real(1.0) : amrex::Real(0.0);
+    });
+  }
 
   if (dust_params.dust_debug) {
     amrex::Print() << "[DUST DEBUG] Surface maps populated: "
@@ -526,12 +549,13 @@ DustLayer::advance(
   const amrex::MultiFab* zvel_mf,
   const amrex::MultiFab* z_phys_cc_mf,
   const amrex::Geometry* geom_atm,
-  int nz)
+  int nz,
+  const amrex::MultiFab* cons_mf)
 {
   // Used only in the ERF_USE_PARTICLES block near the end of this function, so
   // they are genuinely unused when particles are off. Naming them here keeps the
   // signature intact for both configurations.
-  amrex::ignore_unused(zvel_mf, geom_atm);
+  amrex::ignore_unused(zvel_mf);
 
   ++m_step;
   m_time += dt;
@@ -610,8 +634,36 @@ DustLayer::advance(
       dust_ustar_in->FillBoundary(m_dg.geom.periodicity());
       dust_ustar_fire->setVal(0.0);   // never reuse a stale fire wind
     }
-    if (surface_layer->get_t_surf(0))
-      fill_dust_scalar_from_atm(*dust_tsfc, *surface_layer->get_t_surf(0), m_dg);
+    if (surface_layer->get_t_surf(0)) {
+      // The surface layer's t_surf is a potential temperature; the suppression
+      // decay wants a temperature (exp(0.05 (T_s - 293.15))), and at a 1500 m
+      // mine theta_s - T_s = 14 K, a factor 2 on the decay rate from the site
+      // elevation alone. Convert with the Exner function of the lowest cell's
+      // pressure (half a cell above the surface, 0.05 % of it) when the state is
+      // at hand; without it the value is taken as a temperature.
+      if (cons_mf && geom_atm) {
+        amrex::MultiFab T_atm(surface_layer->get_t_surf(0)->boxArray(),
+                              surface_layer->get_t_surf(0)->DistributionMap(), 1, 0);
+        const int klo = geom_atm->Domain().smallEnd(2);
+        constexpr amrex::Real rdOcp = R_d / Cp_d;
+        for (amrex::MFIter mfi(T_atm, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+          const amrex::Box& bx = mfi.tilebox();
+          auto T   = T_atm.array(mfi);
+          auto th  = surface_layer->get_t_surf(0)->const_array(mfi);
+          auto S   = cons_mf->const_array(mfi);
+          amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            amrex::Real qv = amrex::Real(0.0);
+            if (RhoQ1_comp < S.nComp()) qv = S(i, j, klo, RhoQ1_comp) / S(i, j, klo, Rho_comp);
+            const amrex::Real p     = getPgivenRTh(S(i, j, klo, RhoTheta_comp), qv);
+            const amrex::Real exner = getExnergivenP(p, rdOcp);
+            T(i, j, k) = th(i, j, 0) * exner;
+          });
+        }
+        fill_dust_scalar_from_atm(*dust_tsfc, T_atm, m_dg);
+      } else {
+        fill_dust_scalar_from_atm(*dust_tsfc, *surface_layer->get_t_surf(0), m_dg);
+      }
+    }
     if (surface_layer->get_pblh(0))
       fill_dust_scalar_from_atm(*dust_pblh, *surface_layer->get_pblh(0), m_dg);
 
@@ -672,8 +724,19 @@ DustLayer::advance(
     if (dust_crust_baseline)
       amrex::MultiFab::Copy(*dust_crust_index, *dust_crust_baseline, 0, 0, 1, dust_crust_index->nGrowVect());
     update_dust_from_phreeqc(
-      *dust_ustar_t, *dust_ustar_base, *dust_crust_index, *dust_silt_fraction,
-      *dust_efflor, *dust_suppression, *dust_emission_flux, m_dg, dust_params);
+      *dust_crust_index, *dust_silt_fraction, *dust_efflor, *dust_suppression,
+      dust_site_id.get(), m_dg, dust_params);
+    dust_crust_index->FillBoundary(m_dg.geom.periodicity());
+    dust_silt_fraction->FillBoundary(m_dg.geom.periodicity());
+    // the table may have treated cells the raster did not
+    for (amrex::MFIter mfi(*dust_treated_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+      const amrex::Box& bx = mfi.tilebox();
+      auto tm = dust_treated_mask->array(mfi);
+      auto sp = dust_suppression->const_array(mfi);
+      amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+        if (sp(i,j,k) > amrex::Real(0.0)) tm(i,j,k) = amrex::Real(1.0);
+      });
+    }
     m_last_phreeqc_update = m_time;
     if (dust_crust_baseline)
       amrex::MultiFab::Copy(*dust_crust_baseline, *dust_crust_index, 0, 0, 1, dust_crust_index->nGrowVect());
@@ -686,7 +749,7 @@ DustLayer::advance(
 
   if (dt > 0.0) {
     advance_dust_suppression(
-      *dust_suppression, *dust_retreat_flag, T_sfc, u_10m, dt,
+      *dust_suppression, *dust_retreat_flag, *dust_treated_mask, T_sfc, u_10m, dt,
       m_params.supp_tau_base_s);
   }
 
@@ -773,6 +836,21 @@ DustLayer::advance(
     *dust_emission_flux, *dust_ustar_t, *dust_ustar_in, *dust_silt_fraction,
     m_params.n_size_bins, m_params.rho_air);
 
+  // Soil code 0 of a soil-type raster means "undefined: no emission"
+  // (dust_sources.rst), which nothing implemented; without a raster the field
+  // is 0 everywhere and means nothing.
+  if (!m_params.soil_type_file.empty()) {
+    for (amrex::MFIter mfi(*dust_emission_flux, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+      const amrex::Box& bx = mfi.tilebox();
+      auto fl = dust_emission_flux->array(mfi);
+      auto st = dust_soil_type->const_array(mfi);
+      const int nb = m_params.n_size_bins;
+      amrex::ParallelFor(bx, nb, [=] AMREX_GPU_DEVICE (int i, int j, int k, int b) noexcept {
+        if (st(i,j,k) < amrex::Real(0.5)) fl(i,j,k,b) = amrex::Real(0.0);
+      });
+    }
+  }
+
   if (m_params.dust_debug) {
     amrex::Print() << "[DUST DEBUG] Phase 6: emission_flux bin0 at step="
                    << m_step << " max=" << dust_emission_flux->max(0)
@@ -812,12 +890,13 @@ DustLayer::advance(
     // (bin 0 alone used to be counted when the bins travel together)
     compute_cm_flux(*dust_cm_flux, *dust_emission_flux,
                     m_params.cm_fractions, m_params.n_size_bins);
-    append_cm_budget(m_params.cm_budget_file,
-                     *dust_cm_flux,
-                     dust_site_id.get(),
-                     m_dg.geom,
-                     m_time, m_step,
-                     m_params.site_names);
+    if (m_step % m_params.cm_budget_int == 0)
+      append_cm_budget(m_params.cm_budget_file,
+                       *dust_cm_flux,
+                       dust_site_id.get(),
+                       m_dg.geom,
+                       m_time, m_step,
+                       m_params.site_names);
     if (m_params.dust_debug) {
       amrex::Real cm_max = dust_cm_flux->max(0);
       amrex::Real cm_sum = dust_cm_flux->sum(0);
@@ -827,8 +906,39 @@ DustLayer::advance(
     }
   }
 
-  compute_naaqs_diagnostics(dt, m_time - dt, m_step);
-  compute_msha_exposure(dt, m_time - dt, m_step);
+  // end-of-step time, the same stamp as dust_diag.dat (the start-of-step time
+  // was written next to an end-of-step concentration until October 2026, and
+  // the MSHA shift boundary was found one step late)
+  compute_naaqs_diagnostics(dt, m_time, m_step);
+  compute_msha_exposure(dt, m_time, m_step);
+
+  // Coarsen this step's emission flux and friction velocity to the atmosphere
+  // columns once; the RK stages used to redo both average_downs (with their
+  // allocations and, on a mismatched DM, a ParallelCopy) at every stage.
+  if (dust_flux_atm && m_params.atm_feedback > 0.0) {
+    amrex::MultiFab dust_bin_tmp(m_dg.ba, m_dg.dm, 1, amrex::IntVect(0));
+    dust_bin_tmp.setVal(0.0);
+    if (m_params.transport_bins_separately) {
+      amrex::MultiFab::Copy(dust_bin_tmp, *dust_emission_flux, 0, 0, 1, amrex::IntVect(0));
+    } else {
+      for (int bb = 0; bb < m_params.n_size_bins; ++bb)
+        amrex::MultiFab::Add(dust_bin_tmp, *dust_emission_flux, bb, 0, 1, amrex::IntVect(0));
+    }
+    amrex::Box atm_domain_2d = geom_atm ? geom_atm->Domain() : amrex::Box();
+    if (geom_atm) {
+      atm_domain_2d.setSmall(2, 0);
+      atm_domain_2d.setBig(2, 0);
+      amrex::RealBox prob_2d = geom_atm->ProbDomain();
+      prob_2d.setHi(2, prob_2d.lo(2) + 1.0);
+      amrex::Geometry geom_atm_2d(atm_domain_2d, prob_2d, amrex::CoordSys::cartesian, {false, false, false});
+      dust_flux_atm->setVal(0.0);
+      amrex::average_down(dust_bin_tmp, *dust_flux_atm, m_dg.geom, geom_atm_2d, 0, 1,
+                          amrex::IntVect(m_dg.grid_ratio, m_dg.grid_ratio, 1));
+      ustar_atm->setVal(0.0);
+      amrex::average_down(*dust_ustar_in, *ustar_atm, m_dg.geom, geom_atm_2d, 0, 1,
+                          amrex::IntVect(m_dg.grid_ratio, m_dg.grid_ratio, 1));
+    }
+  }
 #endif
 
 #if defined(ERF_USE_PARTICLES)
@@ -848,8 +958,9 @@ DustLayer::advance(
       && geom_atm && (m_step % m_params.particle_release_interval == 0)) {
     amrex::Real d_m   = m_params.bin_diameters.empty() ? 7.0e-6 : m_params.bin_diameters[0];
     amrex::Real rho_p = m_params.particle_density;
+    // a particle released every N steps carries N steps of emission
     m_dust_pc->ReleaseParticles(*dust_emission_flux, *geom_atm, m_dg.geom,
-                                 dt, d_m, rho_p);
+                                 dt * m_params.particle_release_interval, d_m, rho_p);
     if (dust_source_map) {
       m_dust_pc->AdvanceParticles(*xvel_mf, *yvel_mf, *zvel_mf,
                                    *dust_source_map, *geom_atm, m_dg.geom, dt);
@@ -877,56 +988,27 @@ DustLayer::apply_to_cc_source(
   if (!dust_flux_atm) return;
   if (m_params.atm_feedback <= 0.0) return;
 
+  // dust_flux_atm is the flux coarsened once per step in advance(); with the
+  // bins transported separately every scalar gets its own bin (the flux is
+  // coarsened per bin there).
   int n_active = m_params.transport_bins_separately ? m_params.n_size_bins : 1;
-
-  // Temporary 1-component MultiFab on the dust grid for bin summing.
-  // Needed when transport_bins_separately=false to sum all bins first
-  // before coarsening. Allocated once per call (small 2D slab, cheap).
-  amrex::MultiFab dust_bin_tmp(m_dg.ba, m_dg.dm, 1, amrex::IntVect(0));
-
   for (int b = 0; b < n_active; ++b) {
-    dust_bin_tmp.setVal(0.0);
-
-    if (m_params.transport_bins_separately) {
-      // Extract bin b from dust_emission_flux into the temporary.
-      amrex::MultiFab::Copy(dust_bin_tmp, *dust_emission_flux, b, 0, 1,
-                            amrex::IntVect(0));
-    } else {
-      // Sum all bins into the temporary (b==0 only; loop breaks below).
-      for (int bb = 0; bb < m_params.n_size_bins; ++bb) {
-        amrex::MultiFab::Add(dust_bin_tmp, *dust_emission_flux, bb, 0, 1,
-                             amrex::IntVect(0));
-      }
-    }
-
-    // FIX for grid_ratio > 1: average_down directly from the dust grid
-    // (dust_bin_tmp, m_dg.geom) to the atm 2D slab (dust_flux_atm, geom_atm_2d).
-    // Previously this called MultiFab::Copy(*dust_flux_atm, *dust_emission_flux,...)
-    // which fails when grid_ratio > 1 because the BoxArrays have different sizes.
-    dust_flux_atm->setVal(0.0);
-    {
-      // Build a 2D geometry for dust_flux_atm (same physical domain, atm resolution).
-      // geom_atm is 3D; we need the 2D slab version with z-extent = [0,0].
+    if (m_params.transport_bins_separately && b > 0) {
+      amrex::MultiFab dust_bin_tmp(m_dg.ba, m_dg.dm, 1, amrex::IntVect(0));
+      amrex::MultiFab::Copy(dust_bin_tmp, *dust_emission_flux, b, 0, 1, amrex::IntVect(0));
       amrex::Box atm_domain_2d = geom_atm.Domain();
       atm_domain_2d.setSmall(2, 0);
       atm_domain_2d.setBig(2, 0);
       amrex::RealBox prob_2d = geom_atm.ProbDomain();
-      prob_2d.setHi(2, prob_2d.lo(2) + 1.0); // dummy 1 m z-extent
-      amrex::Geometry geom_atm_2d(atm_domain_2d, prob_2d,
-                                   amrex::CoordSys::cartesian,
-                                   {false, false, false});
-
-      amrex::average_down(dust_bin_tmp, *dust_flux_atm,
-                          m_dg.geom, geom_atm_2d,
-                          0, 1,
+      prob_2d.setHi(2, prob_2d.lo(2) + 1.0);
+      amrex::Geometry geom_atm_2d(atm_domain_2d, prob_2d, amrex::CoordSys::cartesian, {false, false, false});
+      dust_flux_atm->setVal(0.0);
+      amrex::average_down(dust_bin_tmp, *dust_flux_atm, m_dg.geom, geom_atm_2d, 0, 1,
                           amrex::IntVect(m_dg.grid_ratio, m_dg.grid_ratio, 1));
     }
-
     apply_dust_tendency_to_cc_source(
       cc_source, *dust_flux_atm, detJ_cc, geom_atm,
       m_dust_scalar_comp + b, m_params.atm_feedback, m_params.dust_debug);
-
-    if (!m_params.transport_bins_separately) break;
   }
 
   if (m_params.dust_debug) {
@@ -1014,29 +1096,15 @@ DustLayer::apply_deposition_bc(
    const amrex::MultiFab& detJ_cc, const amrex::Geometry& geom_atm,
    amrex::Real /*dt*/)
 {
-   if (!dep_flux_atm || !dust_ustar_in) return;
+   if (!dep_flux_atm || !dust_ustar_in || !ustar_atm) return;
    if (m_params.atm_feedback <= 0.0) return;
 
    // The deposition kernel walks the atmosphere's cells, so it needs u* on the
    // atmosphere grid: the mean over the C x C dust cells of each atmosphere
-   // cell, coarsened the way the emission flux is in apply_to_cc_source. It
-   // used to be handed dust_ustar_in itself and read it with atmosphere
-   // indices, which with grid_ratio > 1 is the wrong dust cell on a single
-   // box and, on a box whose dust indices do not start at zero, a read
-   // outside the FAB, so the deposition depended on the domain decomposition.
-   amrex::MultiFab ustar_atm(dep_flux_atm->boxArray(), dep_flux_atm->DistributionMap(),
-                             1, amrex::IntVect(0));
-   {
-     amrex::Box atm_domain_2d = geom_atm.Domain();
-     atm_domain_2d.setSmall(2, 0);
-     atm_domain_2d.setBig(2, 0);
-     amrex::RealBox prob_2d = geom_atm.ProbDomain();
-     prob_2d.setHi(2, prob_2d.lo(2) + 1.0);
-     amrex::Geometry geom_atm_2d(atm_domain_2d, prob_2d, amrex::CoordSys::cartesian,
-                                 {false, false, false});
-     amrex::average_down(*dust_ustar_in, ustar_atm, m_dg.geom, geom_atm_2d, 0, 1,
-                         amrex::IntVect(m_dg.grid_ratio, m_dg.grid_ratio, 1));
-   }
+   // cell, coarsened once per step in advance() (ustar_atm). It used to be
+   // handed dust_ustar_in itself and read it with atmosphere indices, which
+   // with grid_ratio > 1 is the wrong dust cell, and then re-coarsened at
+   // every RK stage.
 
    int n_active = m_params.transport_bins_separately ? m_params.n_size_bins : 1;
 
@@ -1049,7 +1117,7 @@ DustLayer::apply_deposition_bc(
        int comp = m_dust_scalar_comp + b;
 
        apply_dust_deposition_bc(cc_source, *dep_flux_atm,
-                                 S_old, ustar_atm,
+                                 S_old, *ustar_atm,
                                  detJ_cc, geom_atm,
                                  bins, nb, rhop, E_0, comp,
                                  m_params.dust_debug);
@@ -1111,10 +1179,16 @@ DustLayer::compute_naaqs_diagnostics(amrex::Real dt, amrex::Real cur_time, int n
 
     compute_pm_concentrations(*dust_pm25, *dust_pm10,
                                *dust_conc_sfc,
-                               m_params.bin_diameters, n_active);
+                               m_params.bin_diameters, n_active,
+                               /*lumped=*/!m_params.transport_bins_separately);
 
-    update_running_average(*dust_pm25_24h, *dust_pm25, dt, 86400.0, nstep);
-    update_running_average(*dust_pm10_24h, *dust_pm10, dt, 86400.0, nstep);
+    if (m_params.averaging == "window") {
+        m_pm25_window.update(*dust_pm25, dt, *dust_pm25_24h);
+        m_pm10_window.update(*dust_pm10, dt, *dust_pm10_24h);
+    } else {
+        update_running_average(*dust_pm25_24h, *dust_pm25, dt, 86400.0);
+        update_running_average(*dust_pm10_24h, *dust_pm10, dt, 86400.0);
+    }
 
     compute_exceedance_flag(*dust_pm25_exceed, *dust_pm25_24h,
                              DustPMConst::PM25_24H_NAAQS);
@@ -1206,7 +1280,8 @@ DustLayer::compute_msha_exposure(amrex::Real dt, amrex::Real cur_time, int nstep
 
     // Phase 7: STEL diagnostics
     if (m_params.stel_enable && m_stel_avg && dust_pm10) {
-        update_stel_average(*m_stel_avg, *dust_pm10, dt, m_params.stel_averaging_s);
+        update_stel_average(*m_stel_avg, *dust_pm10, dt, m_params.stel_averaging_s,
+                            (m_params.averaging == "window") ? &m_stel_window : nullptr);
         write_stel_stats(nstep, cur_time, *m_stel_avg,
                          m_params.stel_threshold_mg_m3, m_params.stel_diag_file);
     }
@@ -1229,7 +1304,8 @@ DustLayer::write_output(int nstep, amrex::Real cur_time, bool is_final)
                           get_emission_flux(),
                           get_deposition_rate(),
                           get_ustar_in(),
-                          get_conc_sfc());
+                          get_conc_sfc(),
+                          m_dg.geom.CellSize(0) * m_dg.geom.CellSize(1));
     }
     m_last_output_step = nstep;
 
@@ -1257,8 +1333,8 @@ DustLayer::write_output(int nstep, amrex::Real cur_time, bool is_final)
         amrex::Real em = dust_emission_flux   ? dust_emission_flux->sum(0)   : 0.0;
         amrex::Real dp = dust_deposition_rate ? dust_deposition_rate->sum(0) : 0.0;
         amrex::Print() << "[DUST DEBUG] Phase 16: step=" << nstep
-                       << " emission_sum=" << em << " kg/s"
-                       << " dep_total=" << dp << " kg/m^2\n";
+                       << " emission_flux_sum(bin 0)=" << em << " kg/m^2/s"
+                       << " dep_sum=" << dp << " kg/m^2\n";
     }
 }
 
@@ -1335,6 +1411,7 @@ DustLayer::checkpoint_fields ()
     add("DustEfflor",         dust_efflor.get());
     add("DustSuppression",    dust_suppression.get());
     add("DustRetreatFlag",    dust_retreat_flag.get());
+    add("DustTreatedMask",    dust_treated_mask.get());
     // Accumulators, running averages and the flags derived from them.
     add("DustDepositionRate", dust_deposition_rate.get());
     add("DustPM25",           dust_pm25.get());
@@ -1348,6 +1425,14 @@ DustLayer::checkpoint_fields ()
     add("DustMSHAExceed",     dust_msha_exceed.get());
     add("DustMSHAShiftTWA",   dust_msha_shift_twa.get());
     add("DustSTELAvg",        m_stel_avg.get());
+    // the rings and open slots behind the window means (window averaging only)
+    if (m_pm25_window.ring.ok()) {
+        add("DustPM25Ring",   &m_pm25_window.ring);  add("DustPM25Accum", &m_pm25_window.accum);
+        add("DustPM10Ring",   &m_pm10_window.ring);  add("DustPM10Accum", &m_pm10_window.accum);
+    }
+    if (m_stel_window.ring.ok()) {
+        add("DustSTELRing",   &m_stel_window.ring);  add("DustSTELAccum", &m_stel_window.accum);
+    }
     // The dust step runs after the dycore of the same step, so the first dycore
     // after a restart injects the emission flux and deposits with the friction
     // velocity that the last step before the checkpoint computed, and reads the
@@ -1365,12 +1450,36 @@ DustLayer::checkpoint_fields ()
 }
 
 void
+DustLayer::write_window_state (std::ostream& f, const char* name, const DustWindowMean& w) const
+{
+    f << name << "_slot_elapsed " << w.slot_elapsed << "\n"
+      << name << "_slot_index "   << w.slot_index   << "\n"
+      << name << "_n_filled "     << w.n_filled     << "\n"
+      << name << "_slot_len";
+    for (int s = 0; s < w.n_slots; ++s) f << " " << w.slot_len[s];
+    f << "\n";
+}
+
+void
+DustLayer::read_window_state (const std::string& key, std::istream& f, DustWindowMean& w)
+{
+    if      (key.size() > 13 && key.compare(key.size() - 13, 13, "_slot_elapsed") == 0) { f >> w.slot_elapsed; }
+    else if (key.size() > 11 && key.compare(key.size() - 11, 11, "_slot_index") == 0)   { f >> w.slot_index; }
+    else if (key.size() >  9 && key.compare(key.size() -  9,  9, "_n_filled") == 0)     { f >> w.n_filled; }
+    else if (key.size() >  9 && key.compare(key.size() -  9,  9, "_slot_len") == 0)     { for (int s = 0; s < w.n_slots; ++s) f >> w.slot_len[s]; }
+}
+
+void
 DustLayer::write_checkpoint_state (const std::string& checkpointname) const
 {
     if (!amrex::ParallelDescriptor::IOProcessor()) { return; }
     std::ofstream f(checkpointname + "/DustState");
     f.precision(17);
-    f << "step " << m_step << "\n"
+    // the layout the fields were written with: a restart with another bin count
+    // or grid ratio used to die inside VisMF::Read with no mention of dust
+    f << "n_size_bins " << m_params.n_size_bins << "\n"
+      << "grid_ratio " << m_dg.grid_ratio << "\n"
+      << "step " << m_step << "\n"
       << "time " << m_time << "\n"
       << "last_phreeqc_update " << m_last_phreeqc_update << "\n"
       << "msha_shift_count " << m_msha_shift_count << "\n"
@@ -1378,6 +1487,9 @@ DustLayer::write_checkpoint_state (const std::string& checkpointname) const
       << "last_phreeqc_write_step " << m_last_phreeqc_write_step << "\n"
       << "last_dust_plot_step " << m_last_dust_plot_step << "\n"
       << "last_output_step " << m_last_output_step << "\n";
+    write_window_state(f, "pm25_window", m_pm25_window);
+    write_window_state(f, "pm10_window", m_pm10_window);
+    write_window_state(f, "stel_window", m_stel_window);
 }
 
 void
@@ -1394,7 +1506,24 @@ DustLayer::read_checkpoint_state (const std::string& restart_chkfile,
     if (f) {
         std::string key;
         while (f >> key) {
-            if      (key == "step")                    { f >> m_step; }
+            if      (key == "n_size_bins") {
+                int n; f >> n;
+                if (n != m_params.n_size_bins)
+                    amrex::Abort("[DUST] the checkpoint was written with erf.dust.n_size_bins = " + std::to_string(n)
+                                 + ", the deck has " + std::to_string(m_params.n_size_bins)
+                                 + "; the emission flux has one component per bin and cannot be reread");
+            }
+            else if (key == "grid_ratio") {
+                int g; f >> g;
+                if (g != m_dg.grid_ratio)
+                    amrex::Abort("[DUST] the checkpoint was written with erf.dust.grid_ratio = " + std::to_string(g)
+                                 + ", the deck has " + std::to_string(m_dg.grid_ratio)
+                                 + "; the dust fields live on that grid and cannot be reread");
+            }
+            else if (key.rfind("pm25_window", 0) == 0) { read_window_state(key, f, m_pm25_window); }
+            else if (key.rfind("pm10_window", 0) == 0) { read_window_state(key, f, m_pm10_window); }
+            else if (key.rfind("stel_window", 0) == 0) { read_window_state(key, f, m_stel_window); }
+            else if (key == "step")                    { f >> m_step; }
             else if (key == "time")                    { f >> m_time; }
             else if (key == "last_phreeqc_update")     { f >> m_last_phreeqc_update; }
             else if (key == "msha_shift_count")        { f >> m_msha_shift_count; }

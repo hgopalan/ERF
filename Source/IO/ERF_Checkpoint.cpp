@@ -2752,10 +2752,11 @@ ERF::ReadCheckpointFileDust ()
     amrex::Print() << "[DUST] Restoring dust state from checkpoint " << restart_chkfile << "\n";
 
     // The ghost cells come back from the file as they were, with no boundary
-    // fill afterwards: the dust kernels read ghost cells at box edges that the
-    // run does not refill every step, so a fill here would hand the restarted
-    // run different edge values from the uninterrupted one on more than one
-    // rank.
+    // fill afterwards. No dust kernel reads a ghost cell of a checkpointed
+    // field (the only stencils, the terrain slopes and the FARSITE wind
+    // factors, work on fields built at start-up); if one is added, FillBoundary
+    // it after this read and in advance() alike, or the restarted run differs
+    // from the uninterrupted one at box edges.
     for (auto& nf : m_DustLayer->checkpoint_fields()) {
         const std::string header = restart_chkfile + "/Level_0/" + nf.first + "_H";
         if (!amrex::FileExists(header)) {

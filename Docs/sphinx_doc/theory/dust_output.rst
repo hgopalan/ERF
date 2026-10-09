@@ -39,9 +39,10 @@ Besides the AMReX ``Header`` and ``Level_0`` data it carries
    * - ``dust_conc_sfc``
      - kg/m³
      - Dust density of the lowest atmosphere cell.
-   * - ``dust_surf_moist``
-     - -
-     - Moisture inhibition used by the threshold.
+   * - ``dust_surf_qflux_kg_m2_s``
+     - kg/m²/s
+     - Surface latent flux returned from the microphysics (zero without a
+       moisture scheme); an output only.
    * - ``dust_suppression``, ``dust_retreat_flag``
      - -
      - Suppression coverage and re-treatment flag.
@@ -70,30 +71,48 @@ Besides the AMReX ``Header`` and ``Level_0`` data it carries
    * - ``dust_cm_flux_kg_CM_m2_s``
      - kg/m²/s
      - Critical-material emission flux.
+   * - ``dust_surf_moist``
+     - -
+     - The [0, 1] moisture flag of the surface map that the threshold's
+       :math:`f_\mathrm{moist}` uses.
 
 Statistics CSV
 --------------
 
 :cpp:`erf.dust.dust_diag_file` gets one row per step: ``step``, ``time_s``,
-``emission_total_kg_s`` (domain integral of the flux),
-``deposition_total_kg_m2``, ``ustar_max_m_s``, ``flux_max_kg_m2_s`` and
-``conc_sfc_max_kg_m3``. Rank 0 writes every CSV below; all ranks take part in
-the reductions.
+``emission_total_kg_s`` (the flux summed over every bin and every cell times
+the cell area), ``deposition_total_kg`` (the deposited mass summed over the
+cells times the cell area), ``ustar_max_m_s``, ``flux_max_kg_m2_s`` (bin 0)
+and ``conc_sfc_max_kg_m3``. Until October 2026 the two totals were cell sums
+of the bin-0 flux and of kg/m² with no area, so the "kg/s" column was 4e5x off
+on the 375 m canonical grid. Every CSV of the module stamps its rows with the
+end-of-step time (the health CSVs carried the start-of-step time next to an
+end-of-step concentration until October 2026). Rank 0 writes every CSV below;
+all ranks take part in the reductions.
 
 EPA NAAQS
 ---------
 
 Each bin contributes its whole mass to PM10 when its diameter in
 :cpp:`erf.dust.bin_diameters` is at most 10 µm and to PM2.5 when at most
-2.5 µm (with a single transported scalar the bin-0 diameter decides). The
-24-hour averages are exponential running means,
+2.5 µm. With the bins transported as one scalar (the only layout for more
+than one bin) the scalar's mass is apportioned by the bins' equal shares of
+the emitted flux: with the default bins {7, 2.5, 50} µm PM10 is two thirds
+of the surface dust and PM2.5 one third (until October 2026 the bin-0 diameter
+classified the whole mass: PM10 counted the 50 µm third and PM2.5 was
+identically zero). The 24-hour averages are block means over a ring of 24
+hourly means (:cpp:`erf.dust.averaging = window`, the 40 CFR 50 Appendix K/N
+form; the ring and the open hour are checkpointed), exact for a constant and
+the window mean once the ring is full. :cpp:`erf.dust.averaging = exponential`
+is the running mean used until October 2026,
 
 .. math::
 
    \bar C \leftarrow \bar C\, \frac{T - \Delta t}{T} + C\, \frac{\Delta t}{T}, \qquad T = 86400\ \mathrm{s}
 
-and the flags mark cells above the 40 CFR 50 thresholds of 35 µg/m³ (PM2.5)
-and 150 µg/m³ (PM10). :cpp:`erf.dust.dust_naaqs_file` gets per step the
+which reports 0.632 C after 24 hours of a constant C, so a 50 µg/m³ day never
+flagged the 35 µg/m³ standard. The flags mark cells above the 40 CFR 50
+thresholds of 35 µg/m³ (PM2.5) and 150 µg/m³ (PM10). :cpp:`erf.dust.dust_naaqs_file` gets per step the
 instantaneous and 24-hour maxima of both classes and the number of cells
 above each threshold.
 
@@ -131,11 +150,13 @@ Three CSV-only diagnostics computed from PM10 every step:
   :cpp:`erf.dust.silica_fraction_rcs`, compared with
   :cpp:`erf.dust.silica_osha_pel_mg_m3` (29 CFR 1910.1053); the file holds
   ``step, time_s, rcs_max_mg_m3, rcs_mean_mg_m3, osha_pel_exceeded_cells``.
-- **Short-term exposure limit** (:cpp:`erf.dust.stel_enable`): the running
-  mean of PM10 over :cpp:`erf.dust.stel_averaging_s` (15 minutes by default),
-  compared with :cpp:`erf.dust.stel_threshold_mg_m3` (29 CFR 1910.1000); the
-  file holds ``step, time_s, stel_max_mg_m3, stel_mean_mg_m3,
-  stel_exceeded_cells``.
+- **Short-term exposure limit** (:cpp:`erf.dust.stel_enable`): the mean of
+  PM10 over the last :cpp:`erf.dust.stel_averaging_s` (15 minutes by default),
+  a block mean over a ring of 15 slot means with :cpp:`erf.dust.averaging =
+  window` (the exponential running mean of ``averaging = exponential`` gives
+  0.632 C after one window of a constant C), compared with
+  :cpp:`erf.dust.stel_threshold_mg_m3` (29 CFR 1910.1000); the file holds
+  ``step, time_s, stel_max_mg_m3, stel_mean_mg_m3, stel_exceeded_cells``.
 
 Critical materials
 ------------------

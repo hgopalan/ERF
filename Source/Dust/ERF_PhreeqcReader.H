@@ -25,16 +25,13 @@
  *   efflorescence    [0,1]     — salt efflorescence fraction.
  *   suppression_mod  [0,1]     — suppression agent binding modifier
  *                                from PHREEQC salt hygroscopicity.
- *   metal_as_bin0..N [kg/kg]   — toxic metal (As, Pb, Cd, Se) mass
- *                                fraction per size bin per cell.
+ * (A metal-fraction column was read until October 2026 and copied into the
+ * emission flux, which the next emission pass overwrote: a documented input
+ * with no effect. Critical-material fractions are erf.dust.cm_fractions.)
  *
- * Threshold friction velocity update:
- *   u*_t_new = u*_t_base * (1 + alpha_c * crust_index)
- *                        * (1 + alpha_e * efflorescence)
- *   where alpha_c and alpha_e are crust and efflorescence enhancement
- *   coefficients from DustParams. Higher crust increases u*_t (harder to emit).
- *   Reference: Marticorena & Bergametti (1995), J. Geophys. Res., 100,
- *     16415-16430. https://doi.org/10.1029/95JD00690
+ * The threshold friction velocity is recomputed by DustLayer::advance from
+ * the new crust and efflorescence (ERF_DustThreshold.H, alpha_crust and
+ * alpha_efflor from DustParams).
  *
  * I/O pattern follows ERF_FuelMap.H and ERF_FireTerrainReader.cpp:
  *   rank-0 reads -> ParallelDescriptor::Bcast -> Gpu::copy -> ParallelFor.
@@ -72,24 +69,6 @@ struct DustGrid;
  *   https://doi.org/10.1029/95JD00690
  */
 namespace PhreeqcDustConst {
-    /// Crust strength enhancement coefficient for u*_t [dimensionless].
-    /// Higher crust_index (fully crusted, protected soil) increases u*_t (harder to emit).
-    /// Lower crust_index (bare, uncrusted soil) decreases u*_t (easier to emit).
-    /// Formula: f_chem = (1 + ALPHA_CRUST * crust_index)
-    /// Reference: Marticorena & Bergametti (1995), https://doi.org/10.1029/95JD00690
-    constexpr amrex::Real ALPHA_CRUST       = 0.5;
-
-    /// Efflorescence enhancement coefficient for u*_t [dimensionless].
-    /// Higher efflorescence increases u*_t (protective effect).
-    /// Formula: f_efflor = (1 + ALPHA_EFFLOR * efflorescence)
-    constexpr amrex::Real ALPHA_EFFLOR      = 0.3;
-
-    /// Minimum allowed u*_t after crust/efflorescence modulation [m/s].
-    constexpr amrex::Real USTAR_T_MIN       = 0.05;
-
-    /// Suppression agent binding factor reduction per unit salt hygroscopicity.
-    constexpr amrex::Real SUPP_HYGRO_FACTOR = 0.2;
-
     /// Nodata fill value for CSV files when a cell entry is missing [-9999].
     constexpr amrex::Real NODATA_CSV        = -9999.0;
 }
@@ -130,52 +109,28 @@ bool read_phreeqc_netcdf(amrex::MultiFab&   mf,
                          amrex::Real        nodata_fill);
 
 /**
- * @brief Update u*_t from crust index and efflorescence using the
- * Marticorena & Bergametti (1995) enhancement formula:
+ * @brief Update the surface state from the PHREEQC output files.
  *
- *   u*_t_new = u*_t_base * (1 + alpha_c * crust_index)
- *                        * (1 + alpha_e * efflorescence)
+ * Selects the reader by file extension (.nc -> NetCDF, else CSV). Reads the
+ * global table (erf.dust.phreeqc_output_file) everywhere, then each site's own
+ * table (erf.dust.site_phreeqc_files) over the cells of that site. Called from
+ * DustLayer::advance when phreeqc_update_interval_s has elapsed; the threshold
+ * is recomputed afterwards from the new crust and efflorescence. A file or
+ * column that cannot be read aborts.
  *
- * clamped to [PhreeqcDustConst::USTAR_T_MIN, ...].
- * GPU kernel over dust grid cells. Called after crust_index and
- * efflorescence MultiFabs have been updated.
- * Higher crust and efflorescence both increase u*_t (harder to emit).
- *
- * @param[in,out] dust_ustar_t    Threshold friction velocity [m/s].
- * @param[in]     dust_ustar_base Base u*_t before chemistry [m/s].
- * @param[in]     dust_crust      Crust index MultiFab [0,1].
- * @param[in]     dust_efflor     Efflorescence fraction MultiFab [0,1].
- */
-void update_ustar_t_from_chemistry(amrex::MultiFab&       dust_ustar_t,
-                                   const amrex::MultiFab& dust_ustar_base,
-                                   const amrex::MultiFab& dust_crust,
-                                   const amrex::MultiFab& dust_efflor);
-
-/**
- * @brief Update all dust MultiFabs from PHREEQC output files.
- *
- * Selects reader by file extension (.nc -> NetCDF, else CSV).
- * Called from DustLayer::advance when phreeqc_update_interval_s has elapsed.
- * If phreeqc_output_file is empty, returns immediately without modification.
- *
- * @param[in,out] dust_ustar_t     Threshold friction velocity [m/s].
- * @param[in]     dust_ustar_base  Base u*_t MultiFab (retained from init).
  * @param[in,out] dust_crust_index Crust strength index [0,1].
  * @param[in,out] dust_silt_frac   Silt mass fraction [-].
  * @param[in,out] dust_efflor      Efflorescence fraction [0,1].
  * @param[in,out] dust_suppression Suppression coverage [-].
- * @param[in,out] dust_emission    Emission flux MultiFab (ncomp=n_size_bins).
- *                                 Component 0 updated with As mass fraction.
+ * @param[in]     dust_site_id     Per-cell site index (0 unassigned, 1..N), or null.
  * @param[in]     dg               DustGrid.
  * @param[in]     params           DustParams.
  */
-void update_dust_from_phreeqc(amrex::MultiFab&       dust_ustar_t,
-                              const amrex::MultiFab& dust_ustar_base,
-                              amrex::MultiFab&       dust_crust_index,
+void update_dust_from_phreeqc(amrex::MultiFab&       dust_crust_index,
                               amrex::MultiFab&       dust_silt_frac,
                               amrex::MultiFab&       dust_efflor,
                               amrex::MultiFab&       dust_suppression,
-                              amrex::MultiFab&       dust_emission,
+                              const amrex::MultiFab* dust_site_id,
                               const DustGrid&        dg,
                               const DustParams&      params);
 

@@ -205,14 +205,12 @@ erf.dust.phreeqc_efflor_var = "efflorescence"
 # Column holding the suppression modifier [String]
 erf.dust.phreeqc_supp_var = "suppression_mod"
 
-# Column holding the toxic-metal mass fraction of bin 0 [String]
-erf.dust.phreeqc_metal_var = "metal_as_bin0"
-
 # Names of the mine sites; empty means a single global table [Strings]
 # erf.dust.site_names =
 
-# Per-site PHREEQC table; an empty entry uses the global table [Strings]
-# erf.dust.site_phreeqc_files =
+# Per-site PHREEQC table read over that site's cells after the global one;
+# an empty entry (or no list) keeps the global table there [Strings]
+erf.dust.site_phreeqc_files = (none)
 
 # Site bounding-box lower x [m], one per site [Reals]
 # erf.dust.site_x_lo =
@@ -339,8 +337,8 @@ erf.mrf_fire_t_excess_cap = 50.0
 # ---------------------------------------------------------------------------
 # Output and diagnostics
 # ---------------------------------------------------------------------------
-# Steps between dust plotfiles; -1 disables, 0 writes only at the final step
-# [Integer]
+# Steps between dust plotfiles; <= 0 writes only the final step's plotfile
+# (and the step-0 CSV row is written whatever the value) [Integer]
 erf.dust.dust_plot_int = -1
 
 # Dust plotfile prefix [String]
@@ -351,6 +349,12 @@ erf.dust.dust_diag_file = "dust_diag.dat"
 
 # EPA NAAQS PM2.5 and PM10 CSV [String]
 erf.dust.dust_naaqs_file = "dust_naaqs.csv"
+
+# The 24-hour PM averages and the 15-minute STEL: window (block means over a
+# ring of hourly / one-minute means, the 40 CFR 50 form) or exponential (the
+# running mean until October 2026, 0.632 C after one window of a constant C)
+# [window or exponential]
+erf.dust.averaging = window
 
 # MSHA permissible exposure limit on the 8-hour TWA [mg/m³] [Real > 0]
 erf.dust.msha_pel_mg_m3 = 5.0
@@ -380,11 +384,15 @@ erf.dust.msha_shift_file = "msha_shift_summary.csv"
 # Critical-material budget CSV [String]
 erf.dust.cm_budget_file = "dust_cm_budget.csv"
 
+# Steps between critical-material budget rows [Integer > 0]
+erf.dust.cm_budget_int = 1
+
 # Koschmieder visibility from PM10 [Boolean]
 erf.dust.visibility_enable = false
 
-# Mass extinction coefficient [m²/kg] [Real > 0]
-erf.dust.visibility_k_ext = 4.0e3
+# Mass extinction coefficient [m²/kg]; 300-1000 for mineral dust (the
+# default was 4000 until October 2026, 4-13x above that range) [Real > 0]
+erf.dust.visibility_k_ext = 600.0
 
 # Haul-road closure threshold [m] [Real > 0]
 erf.dust.visibility_road_closure_m = 300.0

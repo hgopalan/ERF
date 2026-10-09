@@ -24,6 +24,9 @@ See the input-file header comments in this directory for the specific validation
 | `amr.n_cell` | `8 8 64` | Primary configuration value taken from `inputs`. |
 | `geometry.is_periodic` | `1 1 0` | Primary configuration value taken from `inputs`. |
 
+## Outputs
+The diagnostic CSVs (`stel_diag.csv`, `silica_diag.csv`, `visibility_diag.csv`, `dust_naaqs.csv`, `msha_exposure.csv`) are written by the run into the working directory; none is committed, because a committed copy from an older build cannot be reproduced and misleads (the copies removed in October 2026 carried concentrations at step 1 that the code never produces). Every row carries the end-of-step time, the same stamp as `dust_diag.dat`.
+
 ## References
 - Bagnold 1941, The Physics of Blown Sand and Desert Dunes.
 - Marticorena and Bergametti 1995, Modeling the atmospheric dust cycle.

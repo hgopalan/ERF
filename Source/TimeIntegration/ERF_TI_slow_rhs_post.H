@@ -76,20 +76,9 @@
                           cloud_chamber_budget.get(), auxiliary_inert_tracer.get(),
                           sbm_state_manager.get(), sbm_transport.get());
 
-        // Phase 13: Extract return fields from 3D solver to 2D dust grid
-#ifdef ERF_USE_DUST
-        if (m_DustLayer && level == 0) {
-            // Extract return fields from 3D solver to 2D dust grid.
-            // Pattern follows fill_fire_wind_from_interpolation call site
-            // in ERF_FireWindExtract.H (Source/Fire/).
-            // Q1fx3 = SFS_q1fx3_lev[lev].get(): null when moisture_type == None.
-            // fill_dust_moist_from_atm handles null safely (zeroes dust_surf_moist).
-            m_DustLayer->extract_atm_return_fields(
-                S_new[IntVars::cons],
-                Q1fx3,
-                fine_geom);
-        }
-#endif
+        // (the dust return fields are extracted once per step in ERF::Evolve,
+        // before DustLayer::advance; until October 2026 they were extracted
+        // here at every RK stage and only the last stage's survived)
 
         // Implicit diffusion of moisture
         #include "ERF_ImplicitPost.H"

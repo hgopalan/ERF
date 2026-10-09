@@ -132,14 +132,17 @@ the atmosphere's :math:`\Delta t`, in this order (``DustLayer::advance`` in
    multiplied by the convective factor of the fire heat flux.
 9. **Diagnostics on the surface grid**: critical-material flux and budget, PM
    classification with its 24-hour averages, MSHA dose, and the release and
-   advance of super-particles.
+   advance of super-particles, all from the lofted flux. The flux and the
+   friction velocity are coarsened to the atmosphere columns here, once per
+   step.
 10. **Coarsening** of the total flux to the atmosphere grid. It is injected at
     the lowest cell in the slow right-hand side of the *next* step, together
     with the settling tendency and the deposition boundary condition, so the
     coupling has a one-step lag like the fire's.
-11. **Return fields** after the slow right-hand side: the surface dust
-    concentration and the surface moisture flux come back to the dust grid for
-    the next step's threshold.
+11. **Return fields** once per step, after the dycore and before the next
+    dust step: the surface dust concentration and the surface latent flux come
+    back to the dust grid (the loading feedback reads the first; the second is
+    an output).
 12. **Output** at the end of the step: the statistics CSV every step, the dust
     plotfile at :cpp:`erf.dust.dust_plot_int`, the PHREEQC feedback files at
     their interval, and the visibility, silica and STEL diagnostics
@@ -310,9 +313,12 @@ and rasters as usual and the checkpointed values are read over it, so a
 checkpoint without dust fields, or one from an older build, still restarts.
 The emission flux and friction velocity of the last step are among the
 fields, because the dust step runs after the dycore of the same step and the
-first dycore after a restart still uses them. A restarted run reproduces the
-uninterrupted one bit for bit on one rank and on four; the ``dust`` row of
-``Exec/RegTests/FireRestart`` checks this with the fire coupling on.
+first dycore after a restart still uses them; the checkpoint also records the
+bin count and grid ratio and a restart with other values aborts naming them.
+A restarted run reproduces the uninterrupted one bit for bit; the ``dust`` row
+of ``Exec/RegTests/FireRestart`` checks this on one rank with the fire coupling
+on, and ``FireDustCoupling_parity`` checks that one rank with one box and two
+ranks with four boxes give the same dust fields and CSVs.
 
 The dust output of a step is written once. The step a run ends on (reached
 by the time loop and again by the final write) and the step a restart starts

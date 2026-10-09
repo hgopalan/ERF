@@ -101,7 +101,6 @@ erf.dust.phreeqc_crust_var         = "crust_index"
 erf.dust.phreeqc_silt_var          = "silt_fraction"
 erf.dust.phreeqc_efflor_var        = "efflorescence"
 erf.dust.phreeqc_supp_var          = "suppression_mod"
-erf.dust.phreeqc_metal_var         = "metal_as_bin0"
 erf.dust.alpha_crust               = 0.5
 erf.dust.alpha_efflor              = 0.3
 erf.dust.soil_type_file            = ""

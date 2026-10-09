@@ -131,7 +131,9 @@ public:
                  const amrex::MultiFab* zvel_mf = nullptr,
                  const amrex::MultiFab* z_phys_cc_mf = nullptr,
                  const amrex::Geometry* geom_atm = nullptr,
-                 int                    nz = 0);
+                 int                    nz = 0,
+                 const amrex::MultiFab* cons_mf = nullptr);   ///< the conserved state at the end of the step: the surface
+                                                               ///< Exner function converts the surface layer's theta_s to T_s
 
     // Const accessors for plotfile and diagnostic output
     const amrex::MultiFab* get_ustar_t()         const { return dust_ustar_t.get(); }
@@ -440,7 +442,9 @@ private:
     std::unique_ptr<amrex::MultiFab>      dust_crust_baseline; ///< Crust index before the burned-area reduction (inputs, rasters, PHREEQC).
     std::unique_ptr<amrex::MultiFab>      dep_flux_step;      ///< Sum over bins of the last stage's deposition flux on the atm slab.
     std::unique_ptr<amrex::MultiFab>      dust_ustar_in;
+    std::unique_ptr<amrex::MultiFab>      ustar_atm;          ///< u* coarsened to the atmosphere columns once per step (the deposition kernel reads it)
     std::unique_ptr<amrex::MultiFab>      dust_retreat_flag;
+    std::unique_ptr<amrex::MultiFab>      dust_treated_mask;  ///< 1 where the suppression coverage was ever > 0 (the re-treatment flag needs it)
     std::unique_ptr<amrex::MultiFab>      dust_slopes;     ///< Static terrain slopes on dust grid.
     std::unique_ptr<amrex::MultiFab>      dust_curvature;  ///< Static terrain curvature on dust grid.
 
@@ -467,6 +471,9 @@ private:
     std::unique_ptr<amrex::MultiFab>      dust_pm10_24h;   ///< 24-hour running average PM10.
     std::unique_ptr<amrex::MultiFab>      dust_pm25_exceed; ///< Exceedance flag PM2.5.
     std::unique_ptr<amrex::MultiFab>      dust_pm10_exceed; ///< Exceedance flag PM10.
+    DustWindowMean                        m_pm25_window;    ///< 24 hourly means behind dust_pm25_24h (averaging = window)
+    DustWindowMean                        m_pm10_window;
+    DustWindowMean                        m_stel_window;    ///< 15 one-minute means behind m_stel_avg
 
     // Phase 18: MSHA worker exposure MultiFabs on dust grid.
     std::unique_ptr<amrex::MultiFab>      dust_msha_dose;       ///< Cumulative dose [mg/m³/h].
@@ -514,6 +521,8 @@ private:
     int                                   m_last_phreeqc_write_step = -1;      ///< Step of last PHREEQC feedback write.
     amrex::Real                           m_last_phreeqc_update = -1.0e30;
     int                                   m_msha_shift_count = 0; ///< Phase 18: shift counter for MSHA.
+    void write_window_state (std::ostream& f, const char* name, const DustWindowMean& w) const;
+    void read_window_state (const std::string& key, std::istream& f, DustWindowMean& w);
 #ifdef ERF_USE_DUST
     BlastSchedule                         m_blast_schedule;
     bool                                  m_has_blast_schedule = false;

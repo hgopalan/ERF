@@ -20,8 +20,10 @@ CTest runs it as `FireDustCoupling_check`.
 
 ## Expected results
 See the check script's output; the deposition reference is recorded in
-`check_firedust.py` (`DEP_REF`). It was re-measured on 2026-10-06
-(5.1697e-02 kg/m², from 1.5596e-02) when the deposition kernel began reading
-the dust density of the state instead of the source tendency and the bins
-began sharing the emission flux. The kernels have known-answer gtests
-(`DustColumn`); this value guards the once-per-step accumulation.
+`check_firedust.py` (`DEP_REF`). Since October 2026 the column is the
+deposited mass in kg (the integral over the bins and the 625 m² cells); the
+reference is 31.591 kg, 2 % under the former cell sum of kg/m² (5.1697e-02,
+measured 2026-10-06 when the deposition kernel began reading the dust density
+of the state instead of the source tendency and the bins began sharing the
+emission flux) times the cell area. The kernels have known-answer gtests
+(`DustColumn`, `DustBudget`); this value guards the once-per-step accumulation.

@@ -138,7 +138,6 @@ struct DustParams {
     std::string phreeqc_silt_var     = "silt_fraction";  ///< Variable/column name for silt fraction.
     std::string phreeqc_efflor_var   = "efflorescence";  ///< Variable/column name for efflorescence.
     std::string phreeqc_supp_var     = "suppression_mod";///< Variable/column name for suppression modifier.
-    std::string phreeqc_metal_var    = "metal_as_bin0";  ///< Variable/column name for As mass fraction bin 0.
     std::string phreeqc_output_file = "";      ///< Path to PHREEQC output NetCDF; empty = disabled
     std::string soil_type_file      = "";      ///< Path to soil type raster (.asc or .nc).
                                                  ///<   Code 0 = undefined; 1-16 = STATSGO natural soils;
@@ -207,6 +206,11 @@ struct DustParams {
     // Phase 17: EPA NAAQS compliance output
     std::string dust_naaqs_file    = "dust_naaqs.csv"; ///< NAAQS compliance CSV output.
                                                         ///< 40 CFR Part 50.
+    std::string averaging          = "window";  ///< The 24-hour PM averages and the 15-minute STEL: "window"
+                                                 ///<   (default) are block means over a ring of hourly / one-minute
+                                                 ///<   means, the 40 CFR 50 form; "exponential" (the form until
+                                                 ///<   2026-10) is the exponential running mean, 0.632 C after one
+                                                 ///<   window of a constant C, which never flagged a 50 ug/m3 day.
 
     // Phase 18: MSHA worker exposure tracking
     amrex::Real msha_pel_mg_m3       = 5.0;            ///< PEL threshold [mg/m³], 30 CFR 56.5001
@@ -258,12 +262,15 @@ struct DustParams {
     //   https://www.energy.gov/eere/vehicles/articles/us-doe-critical-materials-assessment
     amrex::Vector<amrex::Real> cm_fractions;
     std::string cm_budget_file = "dust_cm_budget.csv"; ///< CM budget CSV.
+    int         cm_budget_int  = 1;                     ///< Steps between CM budget rows (the per-site sums are
+                                                        ///<   reductions over the dust grid every time).
 
     // Phase 7: Visibility and health exposure diagnostics
     bool        visibility_enable        = false;   ///< Enable Koschmieder visibility output
-    amrex::Real visibility_k_ext        = 4.0e3;   ///< Mass extinction coefficient [m²/kg]; an assumed value for
-                                                 ///< fine dust (3/(2 rho_p r_eff) gives 113 m²/kg at r_eff = 5 um,
-                                                 ///< 2650 kg/m³; literature 300-1000 m²/kg). Set it per case.
+    amrex::Real visibility_k_ext        = 600.0;   ///< Mass extinction coefficient [m²/kg], inside the literature
+                                                 ///< range for mineral dust (300-1000 m²/kg; 3/(2 rho_p r_eff) gives
+                                                 ///< 113 m²/kg at r_eff = 5 um). The default was 4000 until 2026-10,
+                                                 ///< 4-13x above that range. Set it per case.
     amrex::Real visibility_road_closure_m = 300.0; ///< Haul road closure threshold [m]
     amrex::Real visibility_warning_m    = 1000.0;  ///< Reduced visibility warning threshold [m]
     std::string visibility_diag_file    = "visibility_diag.csv"; ///< Output CSV
@@ -320,7 +327,10 @@ struct DustParams {
         pp.query("phreeqc_silt_var", phreeqc_silt_var);
         pp.query("phreeqc_efflor_var", phreeqc_efflor_var);
         pp.query("phreeqc_supp_var", phreeqc_supp_var);
-        pp.query("phreeqc_metal_var", phreeqc_metal_var);
+        if (pp.contains("phreeqc_metal_var"))
+            amrex::Abort("[DUST] erf.dust.phreeqc_metal_var was removed in October 2026: the column was copied into the"
+                         " emission flux and overwritten before it was read; use erf.dust.cm_fractions for the"
+                         " critical-material fractions");
         pp.query("phreeqc_output_file", phreeqc_output_file);
         pp.query("soil_type_file",     soil_type_file);
         pp.query("silt_fraction_file", silt_fraction_file);
@@ -336,6 +346,7 @@ struct DustParams {
         pp.query("dust_plot_prefix", dust_plot_prefix);
         pp.query("dust_diag_file",   dust_diag_file);
         pp.query("dust_naaqs_file",  dust_naaqs_file);
+        pp.query("averaging",        averaging);
         pp.query("msha_pel_mg_m3", msha_pel_mg_m3);
         pp.query("msha_shift_duration_s", msha_shift_duration_s);
         pp.query("msha_exposure_file", msha_exposure_file);
@@ -377,6 +388,7 @@ struct DustParams {
         // Phase 23: DOE Critical Materials Assessment
         pp.queryarr("cm_fractions",    cm_fractions);
         pp.query("cm_budget_file",     cm_budget_file);
+        pp.query("cm_budget_int",      cm_budget_int);
 
         // Phase 7: Visibility and health exposure diagnostics
         pp.query("visibility_enable", visibility_enable);
@@ -409,6 +421,9 @@ struct DustParams {
         if (n_size_bins < 1) fail("erf.dust.n_size_bins must be >= 1, got " + std::to_string(n_size_bins));
         if (n_size_bins > 8) fail("erf.dust.n_size_bins must be <= 8 (the settling kernels carry the bins by value), got "
                                   + std::to_string(n_size_bins));
+        if (averaging != "window" && averaging != "exponential")
+            fail("erf.dust.averaging must be window or exponential, got " + averaging);
+        if (cm_budget_int < 1) fail("erf.dust.cm_budget_int must be >= 1, got " + std::to_string(cm_budget_int));
         if (lumped_settling != "mean" && lumped_settling != "bin0")
             fail("erf.dust.lumped_settling must be mean or bin0, got " + lumped_settling);
         if (grid_ratio < 1)  fail("erf.dust.grid_ratio must be >= 1, got " + std::to_string(grid_ratio));

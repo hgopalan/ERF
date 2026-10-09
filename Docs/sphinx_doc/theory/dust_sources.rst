@@ -228,10 +228,15 @@ every :cpp:`erf.dust.phreeqc_update_interval_s` seconds from
 the columns; the rows follow the dust grid in row-major order (all i for
 j = 0, then j = 1, and so on). The columns named by
 :cpp:`erf.dust.phreeqc_crust_var`, ``phreeqc_silt_var``,
-``phreeqc_efflor_var``, ``phreeqc_supp_var`` and ``phreeqc_metal_var``
-replace the crust index, silt fraction, efflorescence, suppression modifier
-and bin-0 metal fraction, after which the threshold is recomputed with the
-factors above. A ``.nc`` path aborts. The deposition written back for the
+``phreeqc_efflor_var`` and ``phreeqc_supp_var`` replace the crust index,
+silt fraction, efflorescence and suppression modifier, after which the
+threshold is recomputed with the factors above (a ``phreeqc_metal_var``
+column was read until October 2026 and copied into the emission flux, which
+the next emission pass overwrote; critical-material fractions are
+:cpp:`erf.dust.cm_fractions`). With :cpp:`erf.dust.site_phreeqc_files` each
+site's own table is then read over the cells of that site (the global table
+covers the rest). A file or column that cannot be read aborts, as does a row
+count that is neither the dust grid nor a coarsening of it. A ``.nc`` path aborts. The deposition written back for the
 next PHREEQC run is described in :ref:`sec:DustOutput`.
 
 Mine sites

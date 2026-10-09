@@ -311,9 +311,15 @@ ERF::Evolve ()
                 (z_phys_cc.size() > 0) ? z_phys_cc[0].get() : nullptr;
             const amrex::Geometry* geom_atm = &geom[0];  // Phase 19
             int nz = geom[0].Domain().length(2);
+            // the return fields of the step just taken (the surface dust density,
+            // the surface latent flux), once; the slow-RHS hook extracted them at
+            // every RK stage and only the last survived
+            m_DustLayer->extract_atm_return_fields(vars_new[0][Vars::cons],
+                                                   SFS_q1fx3_lev[0].get(), geom[0]);
             m_DustLayer->advance(dt[0], m_DustLayer->get_params(),
                                  m_SurfaceLayer[Orientation::zlo()].get(),
-                                 xvel_ptr, yvel_ptr, zvel_ptr, zphys_ptr, geom_atm, nz);
+                                 xvel_ptr, yvel_ptr, zvel_ptr, zphys_ptr, geom_atm, nz,
+                                 &vars_new[0][Vars::cons]);
 
         }
 #endif

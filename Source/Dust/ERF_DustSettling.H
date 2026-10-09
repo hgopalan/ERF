@@ -12,7 +12,8 @@
  *   C_c = 1 + (2 * lambda / d) * (A1 + A2 * exp(-A3 * d / lambda))
  *   v_s_corrected = v_s * C_c
  * where lambda = 0.066 um (mean free path at STP),
- * A1=1.257, A2=0.400, A3=0.55 (Allen & Raabe 1985).
+ * A1=1.257, A2=0.400, A3=0.55: Davies (1945), the constants most references
+ * tabulate (Allen & Raabe 1985 give 1.142, 0.558, 0.999).
  * For d > 1 um the correction is < 15% and may be omitted for coarse bins.
  *
  * Vertical tendency (first-order upwind flux divergence):
@@ -34,6 +35,8 @@
  *
  * References:
  *   Stokes, G.G. (1851). Trans. Cambridge Phil. Soc., 9, 8-106.
+ *   Davies, C.N. (1945). Proc. Phys. Soc., 57, 259-270.
+ *     https://doi.org/10.1088/0959-5309/57/4/301
  *   Allen, M.D., & Raabe, O.G. (1985). Aerosol Sci. Tech., 4, 269-286.
  *     https://doi.org/10.1080/02786828508959055
  *   Seinfeld, J.H., & Pandis, S.N. (2006). Atmospheric Chemistry and Physics,
@@ -74,7 +77,7 @@ using DustBinDiameters = amrex::GpuArray<amrex::Real, DustSettlingConst::MAX_BIN
  *
  * C_c = 1 + (2*lambda/d) * (A1 + A2*exp(-A3*d/lambda))
  * For d >> lambda, C_c approaches 1.
- * Reference: Allen & Raabe (1985), https://doi.org/10.1080/02786828508959055
+ * Constants of Davies (1945); see the file header.
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real compute_cunningham_cc(amrex::Real d_m) noexcept

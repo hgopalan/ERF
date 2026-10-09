@@ -11,7 +11,7 @@ This case examines how a simple slope modifies near-surface winds and dust respo
 - Idealized terrain effects
 
 ## Expected Results
-See the input-file header comments in this directory for the specific validation target. In general, these cases should reproduce the documented analytical trend, qualitative regime change, or engineering diagnostic associated with the scenario.
+The raster slope is uniform (10 degrees rising along +x) and the geostrophic wind blows along +x, so every dust cell is windward and the case is a smoke test of a spatially uniform slope factor, not of a windward/lee contrast: the threshold is 1.11 times the flat value everywhere (Iversen and Rasmussen 1994, sqrt(cos 10 + sin 10 / tan 35)), the FARSITE wind factor is `k_ridge` everywhere when `use_terrain_wind` is on, and `max/min` of `dust_emission_flux` over the domain is 1. A windward/lee contrast needs the slope in the atmosphere as well (`DustGaussianHill`, `DustGaussianPit`).
 
 ## Key Parameters
 | Parameter | Value | Description |

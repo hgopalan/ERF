@@ -30,8 +30,9 @@ static bool read_terrain_onto_dust_grid(
     if (ParallelDescriptor::IOProcessor()) {
         std::ifstream file(fname);
         if (!file.is_open()) {
-            amrex::Warning("Could not open dust terrain file: " + fname);
-            ok = 0;
+            // abort, not warn: the slopes silently fell back to the atmosphere's
+            // terrain when erf.dust.terrain_file was misspelt
+            amrex::Abort("[DUST] erf.dust.terrain_file cannot be opened: " + fname);
         } else {
             file >> nx_terrain >> ny_terrain;
             x_coords.resize(nx_terrain);

@@ -34,13 +34,17 @@ ALPHA_CRUST = 0.5
 CRUST_INDEX = 1.0
 REDUCTION = 0.8
 KAPPA, Z0, ZREF = 0.4, 0.1, 6.1
-# deposition_total [kg/m2] at step 40 with the committed deck. Re-measured
-# 2026-10-06 after the deposition kernel read the dust density of the state
-# instead of the source tendency, the settling moved dust down instead of up,
-# and the bins shared the emission flux (1.5596e-02 before). The kernels
-# themselves are checked against known answers in the DustColumn gtests; this
-# value guards the once-per-step accumulation (per-stage would give 1.83x).
-DEP_REF = 5.1697e-02
+# deposition_total [kg] at step 40 with the committed deck: the integral over
+# the bins and the cell area (625 m2 here) since October 2026, when it was a
+# cell sum of kg/m2 (5.1697e-02, measured 2026-10-06 after the deposition
+# kernel read the dust density of the state instead of the source tendency,
+# the settling moved dust down instead of up, and the bins shared the emission
+# flux; 1.5596e-02 before that). Re-measured 2026-10-09 with the Shao-Lu
+# threshold, the u* scaling, v_d >= v_s and the mean settling of the lumped
+# bins: 31.591 kg, 2 % under the old sum times the area. The kernels themselves
+# are checked against known answers in the DustColumn and DustBudget gtests;
+# this value guards the once-per-step accumulation (per-stage would give 1.83x).
+DEP_REF = 3.1591e+01
 DEP_TOL = 0.15
 
 results = []
@@ -129,7 +133,7 @@ def main():
         dep = [float(r[3]) for r in rows]
         mono = all(b >= a - 1e-30 for a, b in zip(dep, dep[1:]))
         check("dep_mono", mono and len(dep) >= 2,
-              f"{len(dep)} rows" + (f", deposition_total {dep[0]:.4e} -> {dep[-1]:.4e} kg/m2" if dep else ""))
+              f"{len(dep)} rows" + (f", deposition_total {dep[0]:.4e} -> {dep[-1]:.4e} kg" if dep else ""))
         if DEP_REF is not None and dep:
             check("dep_ref", abs(dep[-1] - DEP_REF) <= DEP_TOL * DEP_REF,
                   f"deposition_total at the last step {dep[-1]:.6e}, reference {DEP_REF:.6e} +/- {DEP_TOL * 100:.0f}%"

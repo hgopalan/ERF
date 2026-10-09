@@ -5,11 +5,14 @@
  * Replaces the zero lower-boundary flux in ERF_DustSettling.H with the
  * dry deposition velocity v_d from Seinfeld & Pandis (2006) Chapter 19.
  *
- * v_d = v_s + 1 / (r_a + r_s + r_a * r_s * v_s)
- *   r_a = 1 / (u* * kappa)    aerodynamic resistance [s/m]
+ * v_d = v_s + 1 / (r_a + r_s + r_a * r_s * v_s)      (Seinfeld & Pandis eq. 19.7, Slinn 1982)
+ *   r_a = 1 / (u* * kappa)    aerodynamic resistance [s/m], neutral
  *   r_s = 1 / (u* * E_0)      surface resistance [s/m]
  *   kappa = 0.4 (von Karman)
- *   E_0 = 3e-3 (bare mine surface, Zhang et al. 2001)
+ *   E_0 = 3e-3 is this code's tuning constant for a bare mine surface: Zhang
+ *   et al. (2001) write the collection efficiency as epsilon_0 (= 3) times the
+ *   Brownian, impaction and interception efficiencies, which are not computed
+ *   here. v_d is never below v_s and shares its 1 m/s cap.
  *
  * Structural reference: ERF_FireAtmCoupling.H in Source/Fire/:
  *   https://github.com/hgopalan/ERF/blob/ecb9b7656bbb98fcc5d4f781e486825ee9478a73/
@@ -41,7 +44,7 @@
 
 namespace DustDepositionConst {
     constexpr amrex::Real KAPPA   = 0.4;      ///< von Karman constant [-]
-    constexpr amrex::Real E0_BARE = 3.0e-3;   ///< Collection efficiency for bare surface [-]
+    constexpr amrex::Real E0_BARE = 3.0e-3;   ///< Collection efficiency for bare surface [-] (a tuning constant, see above)
     constexpr amrex::Real R_MAX   = 1.0e6;    ///< Maximum resistance [s/m]
     constexpr amrex::Real VD_MAX  = DustSettlingConst::V_S_MAX; ///< Maximum deposition velocity [m/s]: at least the
                                                ///<   settling cap. Until October 2026 it was 0.1 m/s, below the

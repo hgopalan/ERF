@@ -94,7 +94,8 @@ erf.dust.site_y_lo          = 1500.0 0.0
 erf.dust.site_x_hi          = 3000.0 3000.0
 erf.dust.site_y_hi          = 3000.0 1500.0
 # Phase 23: critical material fractions per bin.
-# transport_bins_separately=false: only cm_fractions[0]=0.001 is used.
+# The budget sums every bin whichever way they are transported (bins share the
+# emitted flux equally): (0.001 + 0.005 + 0) F / 3 = 0.002 F per cell.
 erf.dust.cm_fractions  = 0.001 0.005 0.0
 erf.dust.cm_budget_file = "dust_cm_budget.csv"
 erf.dust.phreeqc_update_interval_s = 86400.0

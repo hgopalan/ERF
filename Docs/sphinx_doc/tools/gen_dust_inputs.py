@@ -121,12 +121,11 @@ p("phreeqc_efflor_var", "Column holding the efflorescence fraction", "String",
   '"efflorescence"')
 p("phreeqc_supp_var", "Column holding the suppression modifier", "String",
   '"suppression_mod"')
-p("phreeqc_metal_var", "Column holding the toxic-metal mass fraction of bin 0",
-  "String", '"metal_as_bin0"')
 p("site_names", "Names of the mine sites; empty means a single global table",
   "Strings", "none")
-p("site_phreeqc_files", "Per-site PHREEQC table; an empty entry uses the global "
-  "table", "Strings", "none")
+p("site_phreeqc_files", "Per-site PHREEQC table read over that site's cells after "
+  "the global one; an empty entry (or no list) keeps the global table there",
+  "Strings", "(none)")
 p("site_x_lo", "Site bounding-box lower x [m], one per site", "Reals", "none")
 p("site_y_lo", "Site bounding-box lower y [m]", "Reals", "none")
 p("site_x_hi", "Site bounding-box upper x [m]", "Reals", "none")
@@ -206,11 +205,16 @@ p("erf.mrf_fire_t_excess_cap", "Cap on the thermal excess the fire adds [K]",
 grp("Output and diagnostics",
     "Every CSV is written by rank 0 and appended each step; paths are "
     "relative to the run directory. Formats are in :ref:`sec:DustOutput`.")
-p("dust_plot_int", "Steps between dust plotfiles; -1 disables, 0 writes only "
-  "at the final step", "Integer", "-1")
+p("dust_plot_int", "Steps between dust plotfiles; <= 0 writes only the final "
+  "step's plotfile (and the step-0 CSV row is written whatever the value)",
+  "Integer", "-1")
 p("dust_plot_prefix", "Dust plotfile prefix", "String", '"plt_dust_"')
 p("dust_diag_file", "Per-step domain statistics CSV", "String", '"dust_diag.dat"')
 p("dust_naaqs_file", "EPA NAAQS PM2.5 and PM10 CSV", "String", '"dust_naaqs.csv"')
+p("averaging", "The 24-hour PM averages and the 15-minute STEL: window (block means "
+  "over a ring of hourly / one-minute means, the 40 CFR 50 form) or exponential "
+  "(the running mean until October 2026, 0.632 C after one window of a constant C)",
+  "window or exponential", "window")
 p("msha_pel_mg_m3", "MSHA permissible exposure limit on the 8-hour TWA "
   "[mg/m³]", "Real > 0", "5.0")
 p("msha_shift_duration_s", "Shift length after which the dose resets [s]",
@@ -224,8 +228,10 @@ p("msha_receptor_y", "Receptor y [m], one per name", "Reals", "none")
 p("cm_fractions", "Critical-material mass fraction per bin [kg/kg]; empty "
   "disables the budget, the last value repeats", "Reals", "none")
 p("cm_budget_file", "Critical-material budget CSV", "String", '"dust_cm_budget.csv"')
+p("cm_budget_int", "Steps between critical-material budget rows", "Integer > 0", "1")
 p("visibility_enable", "Koschmieder visibility from PM10", "Boolean", "false")
-p("visibility_k_ext", "Mass extinction coefficient [m²/kg]", "Real > 0", "4.0e3")
+p("visibility_k_ext", "Mass extinction coefficient [m²/kg]; 300-1000 for mineral dust "
+  "(the default was 4000 until October 2026, 4-13x above that range)", "Real > 0", "600.0")
 p("visibility_road_closure_m", "Haul-road closure threshold [m]", "Real > 0", "300.0")
 p("visibility_warning_m", "Reduced-visibility warning threshold [m]", "Real > 0",
   "1000.0")
