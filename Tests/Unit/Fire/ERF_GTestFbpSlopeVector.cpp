@@ -15,9 +15,9 @@
  *        slope-equivalent wind by 0.2, as its rate does.
  */
 
-namespace {
+using namespace amrex;
 
-constexpr double TOL = (sizeof(amrex::Real) == 8) ? 1e-10 : 1e-4;
+namespace {
 
 FbpComputed make (int type, double ffmc, double bui, double pc = 50.0)
 {
