@@ -42,6 +42,12 @@ void initialize_ignition(
 
     const auto prob_lo = geom_fire.ProbLoArray();
     const auto dx      = geom_fire.CellSizeArray();
+    // "No disc" on the level-set path: every cell the domain diagonal from a
+    // front, a finite distance the reinitialisation and the advection keep
+    // positive. The distance to the ignition point (the form until 2026-10)
+    // was a disc of zero radius that the advection grew from the first step.
+    const Real far = std::sqrt(geom_fire.ProbLength(0) * geom_fire.ProbLength(0)
+                             + geom_fire.ProbLength(1) * geom_fire.ProbLength(1));
 
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -73,7 +79,7 @@ void initialize_ignition(
             const Real sdf_n = amrex::max(amrex::min(sdf / amrex::max(radius, 1.0e-30_rt), 1.0_rt), -1.0_rt);
             p(i,j,k) = normalized
                      ? ((radius > 0.0_rt) ? sdf_n : 1.0_rt)
-                     : sdf;
+                     : ((radius > 0.0_rt) ? sdf : far);
         });
     }
 }

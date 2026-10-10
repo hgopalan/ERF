@@ -427,3 +427,29 @@ TEST(LevelSetAdvection, ReinitialisationAtTheProductionStepIsANudge)
     EXPECT_LE(moved.norm0(), 0.01 * DX * (stretch - 1.0) * 1.0001) << "|dphi| <= dtau (|grad phi| - 1)";
     EXPECT_EQ(burned_cells(phi), burned_cells(phi0));
 }
+
+#include <ERF_FireIgnition.H>
+
+/**
+ * erf.fire.ignition_r = 0 means "no disc": a scheduled, polygon or threshold
+ * ignition starts the fire. On the level-set path the initialiser wrote the
+ * distance to the ignition point, a disc of zero radius that the advection
+ * grew from the first step (the idealized Marshall decks burned 2 cells at
+ * 150 s of a 1200 s spin-up); it must leave every cell unburned, at least
+ * the domain diagonal from the front.
+ */
+TEST(LevelSetAdvection, ANoDiscIgnitionLeavesTheLevelSetUnburned)
+{
+    Box domain(IntVect(0, 0, 0), IntVect(19, 19, 0));
+    BoxArray ba(domain);
+    DistributionMapping dm(ba);
+    Geometry geom(domain, RealBox(0.0, 0.0, 0.0, 200.0, 200.0, 1.0), CoordSys::cartesian, {0, 0, 0});
+    MultiFab phi(ba, dm, 1, 1);
+    initialize_ignition(phi, geom, 100.0_rt, 100.0_rt, 0.0_rt, /*normalized=*/ false);
+    const Real diag = std::sqrt(200.0 * 200.0 + 200.0 * 200.0);
+    EXPECT_GE(phi.min(0), diag) << "no disc: every cell at least the domain diagonal from a front (the distance to the point until 2026-10)";
+    initialize_ignition(phi, geom, 100.0_rt, 100.0_rt, 0.0_rt, /*normalized=*/ true);
+    EXPECT_NEAR(phi.min(0), 1.0, 1.0e-12) << "the FARSITE indicator stays +1";
+    initialize_ignition(phi, geom, 100.0_rt, 100.0_rt, 30.0_rt, /*normalized=*/ false);
+    EXPECT_LT(phi.min(0), 0.0) << "a disc still burns";
+}
