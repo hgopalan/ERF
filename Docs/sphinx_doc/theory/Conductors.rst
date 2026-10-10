@@ -472,7 +472,13 @@ together.
 
 Each member is cut into drag nodes at the middle of equal segments:
 ``segments`` up the body to the cross-arm, as many on the ``peak`` as fit at
-that spacing (at least one), and four along the arm. A node stands for a
+that spacing (at least one), and four on the arm: two on each of its parts
+outside the body, at the middle of its face, half its depth below the cross-arm,
+from the body's half width at that height to the tip, so that only the body's
+nodes carry the wind where the arm passes through it (``arm_outside_shaft``, the
+default, which needs ``arm_length`` longer than the body is wide there; ``false``
+puts the four along the whole arm at the cross-arm's height, which counts that
+part twice). A node stands for a
 length :math:`\ell` (m) of member with axis :math:`\mathbf{e}` (a unit
 vector), and the wind :math:`\mathbf{U}` (m/s) loads it as a slender member
 does, by the flow normal to it, relative to the node's own velocity
@@ -490,7 +496,15 @@ the ``drag_coefficient`` or, by default, the force coefficient of a square
 lattice tower of flat-sided members on the projected area of one face,
 :math:`C_f = 4\sigma^2 - 5.9\sigma + 4` (ASCE 7, the load standard of the
 American Society of Civil Engineers), which counts the windward and the
-leeward face together: 2.98 at :math:`\sigma = 0.2`. A rotor-less tower in
+leeward face together: 2.98 at :math:`\sigma = 0.2`. Wind along a diagonal of
+the square body meets more of its members than wind normal to a face, so the
+body's and the peak's nodes take the factor :math:`1 + g \sin^2 2\theta`, with
+:math:`\theta` the angle of :math:`\mathbf{U}_n` from a face's normal and
+:math:`g = \min(0.75\sigma, 0.2)`: along the diagonal ASCE 7's
+:math:`1 + 0.75\sigma` (1.15 at :math:`\sigma = 0.2`), which ASCE 7 caps at 1.2,
+and in between the angular shape of IEC 60826's :math:`1 + 0.2 \sin^2 2\theta`
+(``diagonal_wind_factor``, the default; ``false``: no factor). The cross-arm
+takes no such factor. A rotor-less tower in
 AeroDyn is the same law with :math:`b` the tower's diameter. The wind is
 ERF's velocity sampled at the nodes with the lines' sampler at the start of
 each step, or the prescribed velocity; a node just above sloping ground,
@@ -584,8 +598,11 @@ a platform. The tower is a single mode, the same in :math:`x` and :math:`y`
 (``foundation_rotational_stiffness`` :math:`k_r` in N m/rad and
 ``foundation_lateral_stiffness`` :math:`k_l` in N/m, rigid when 0, the
 default), with the structural ``damping_ratio`` :math:`\zeta` (0.02 by
-default). Its mass, ``weight`` over gravity, is spread over the drag nodes by
-the length of member each stands for, :math:`m_i` (kg) at node :math:`i`. A
+default). Its mass, ``weight`` over gravity, is spread by length of member,
+:math:`m_i` (kg) at node :math:`i`: the shaft's over its drag nodes, and the
+whole cross-arm's (its full ``arm_length``) at the cross-arm's height, shared by
+the cross-arm's drag nodes, so where ``arm_outside_shaft`` puts those nodes does
+not change the mode's mass or stiffness. A
 node at height :math:`z` (m) above the base moves horizontally by
 :math:`\psi(z)` times the cross-arm's displacement :math:`x_a` (m),
 
@@ -599,10 +616,14 @@ the cantilever's bending, the footing's tilt and its slide, each in
 proportion to its compliance under a load at the cross-arm, :math:`z_a` (m)
 the cross-arm's height above the base and :math:`C` (m/N) the total
 compliance (a term with a stiffness of 0, a rigid foundation, is left out).
-The generalized mass is :math:`M_g = \sum m_i \psi_i^2` (kg) and the stiffness
+The generalized mass is :math:`M_g = \sum m_i \psi(\hat z_i)^2` (kg) and the stiffness
 :math:`K_g = 1/C` (N/m), the strain energy of that shape exactly, with the
-bending stiffness :math:`K_b = (2\pi f)^2 \sum m_i (z_i/z_a)^4` (N/m) that
-gives the type's frequency :math:`f` (Hz) on a rigid foundation; a foundation
+bending stiffness :math:`K_b = (2\pi f)^2 \sum m_i (\hat z_i/z_a)^4` (N/m) that
+gives the type's frequency :math:`f` (Hz) on a rigid foundation, :math:`\hat z_i`
+the height of node :math:`i`'s mass: its own height on the body, and
+:math:`z_a` for the cross-arm's nodes, whose mass is the cross-arm's at its
+height (their drag acts at their own height, :math:`\psi_i = \psi(z_i)` in
+:math:`Q` below, and their inertia reaches the foundation from :math:`z_a`); a foundation
 that gives lowers the frequency to :math:`\sqrt{K_g/M_g}/2\pi`. In each
 horizontal direction
 
@@ -822,15 +843,30 @@ B         7.0       1200 ft (365.8 m)   0.010              170 ft (51.8 m)
 C         9.5       900 ft (274.3 m)    0.005              220 ft (67.1 m)
 ========  ========  ==================  =================  ==================
 
-Under :math:`F` and its net weight :math:`W` per metre the span swings out of the
-vertical by :math:`\arctan(F/W)` and hangs as the elastic catenary (above) under
-:math:`\sqrt{F^2 + W^2}` in that plane: its sag in the plane, its end tension, and
-its mid-span's sideways blowout, the sag times the sine of the swing. A span's
-height is the mean of its two attachment points' heights above the ground under
-them (the bottoms of the insulator strings at the towers), its length its chord.
-This is the higher, conservative choice: design practice often takes a wire's
-effective height a third of its sag below its attachments, which on
-Conductors_Circuit's phase spans (13.8 m of sag) would lower the load about 3 %.
+Under :math:`F` and its net weight :math:`W` per metre the span swings about its
+chord by :math:`\arctan(F/(W\cos\beta))`, with :math:`\beta` the chord's angle to
+the horizontal: on an inclined chord the tension carries the weight's part along
+it, and only :math:`W\cos\beta` opposes the wind (``asce74_inclined_spans``, the
+default; ``false`` takes the span as level under the whole weight: the swing
+:math:`\arctan(F/W)`, and the sag and tension under :math:`\sqrt{F^2 + W^2}`
+without the upper end's share below; the still-air sag of the effective height
+below is the inclined chord's either way). It hangs as the elastic catenary (above)
+under :math:`\sqrt{F^2 + (W\cos\beta)^2}` across the chord, as a level span of the
+chord's length: its sag in the swung plane and its mid-span's sideways blowout,
+the sag times the sine of the swing. The tension is the upper end's: the two
+ends' tensions differ by the weight times the rise, :math:`W c \sin\beta`, since
+the wind does no work along the chord, and the level span's lies half way
+between them, so the upper end carries the level span's plus
+:math:`W c \sin\beta / 2`: against the exact inclined elastic catenary,
+within -0.7 to +0.8 % for chords of 50 to 800 m up to 30 degrees, slacks up to
+1 % and axial stiffnesses of :math:`10^7` N or more, falling to 1.7 % low at 3 %
+slack in still air (the level span's alone is 1 to 14 % low at 10 to 30
+degrees, more on the slacker spans). A span's height is the
+wire's effective height: the mean of its two attachment points' heights above the
+ground under them (the bottoms of the insulator strings at the towers), less a
+third of its sag in still air, measured vertically (``asce74_wire_height =
+effective``, the default; ``attachment``: the mean alone, the higher and more
+conservative height). Its length is its chord.
 At start-up ERF writes ``<diagnostics_dir>/asce74.csv``: per span its height,
 chord (between the points the conductor hangs from, the bottoms of the
 insulator strings at the towers, the chord its unstretched length spans),
@@ -859,7 +895,7 @@ feels, which is what :math:`G_w` models.
 
 On the hills' LES of the previous section, with the middle phase of each
 circuit clamped at fixed points where the towers stood (eight spans of 36 to
-265 m, 20 to 38 m up), over 600 s of statistics: the 3-second gust at mid-span
+265 m, 20 to 38 m up, the check at their effective heights of 20 to 36 m), over 600 s of statistics: the 3-second gust at mid-span
 is 1.2 to 1.5 times the mean wind across the span. On the spans the wind
 crosses (16 m/s across the 213 m span, 9 to 11 m/s across two of about 250 m) the
 whole span feels 0.74 to 0.83 of the point gust's load where :math:`G_w` gives
@@ -874,7 +910,7 @@ wind, :math:`q(\bar V)`, which is ASCE 74's own basis (the mean drag also holds
 the fluctuations' and the yaw's share), the LES's peak is 1.24 to 1.56 times it
 on the three crossed spans, and ASCE 74 is 10 % and 15 % above on two of them
 and 9 % short on the third (the 254 m span). The peak
-tensions agree within 2 %, and the LES's peak swing exceeds the quasi-static one
+tensions (the upper end's) agree within 2.1 %, and the LES's peak swing exceeds the quasi-static one
 by up to 5 degrees, the span overshooting as it swings. On the spans the wind
 runs nearly along (under 7 m/s across) the ratios scatter (ASCE 74 over the LES
 0.71 to 1.07 on the peak over the mean drag, the LES's span factor 0.80 to 1.41)
@@ -943,7 +979,8 @@ one step before ``stats_start``. Their running means per span are
 ``<output_root>_gusts_stats.csv`` of each line, and whenever the statistics
 are written ``<diagnostics_dir>/gusts.csv`` gets one row per span from them:
 its attachment height (the mean height above the ground of its two conductor
-points, as in ``asce74.csv``; the nodes sampled sag below it), chord (between
+points, ``asce74.csv``'s height with ``asce74_wire_height = attachment``; the
+nodes sampled sag below it), chord (between
 those points, as in ``asce74.csv``), wind,
 normal wind, :math:`k`, :math:`\sigma_u`, :math:`\sigma_n`, :math:`I_n`,
 :math:`G`, the point gust, the mean load, the peak load and ``valid``. Nothing
@@ -1007,8 +1044,8 @@ with :math:`\Lambda_1 = 0.7 z` below 60 m and 42 m above, at the span's
 attachment height or the tower's mean drag-node height. :math:`B`, the part of
 the point fluctuation's variance the whole structure feels, is the span's
 :math:`B` above, and for a tower ASCE 74's
-:math:`B_t = 1 / (1 + 0.375 h / L_s)`, :math:`h` its highest drag node above
-its base. A line that shares another's towers (``share_towers``) takes the
+:math:`B_t = 1 / (1 + 0.375 h / L_s)`, :math:`h` its height (the cross-arm's
+height plus the peak). A line that shares another's towers (``share_towers``) takes the
 processes of that line's spans, and a line that names another in
 ``erf.conductors.<line>.gust_with`` takes them too (a circuit on separate
 lines), so the conductors of a circuit move together; otherwise each line's
@@ -1108,6 +1145,12 @@ with: a restart that moves an end or a tower, or changes a length, a stringing
 tension or ``insulator_length``, stops, naming the line (checkpoints written
 before this check carry no such record). A frame tower's restart with another
 ``steel_temperature`` stops too (its frame and state would not match). The
+checkpoint records each tower's ``diagonal_wind_factor``, ``arm_outside_shaft``
+and ``angle_principal_axes`` (on a generated frame), from its type, which set the
+towers' drag nodes, drag and frame: a restart that changes one stops, naming the
+key, and a checkpoint without the record, written with the earlier forms,
+restarts only with ``diagonal_wind_factor`` and ``arm_outside_shaft`` set to
+``false``, and ``angle_principal_axes`` too on a generated frame. The
 checkpoint also carries the iterations and unconverged steps counted towards
 ``coupling.dat``'s next row. Other values that leave the counts unchanged (sizes,
 stiffnesses, drag coefficients) are not compared: the restarted run uses the

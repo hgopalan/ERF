@@ -2,6 +2,7 @@
 
 #include "ERF_MemberDrag.H"
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 
@@ -18,13 +19,27 @@ std::array<Real,3> member_drag (const MemberNode& n, const std::array<Real,3>& w
     const Real along = u[0] * n.axis[0] + u[1] * n.axis[1] + u[2] * n.axis[2];
     for (int d = 0; d < 3; ++d) { u[d] -= along * n.axis[d]; }
     const Real un = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
-    const Real k = Real(0.5) * rho * n.drag_coefficient * n.drag_width * n.length * un;
+    Real k = Real(0.5) * rho * n.drag_coefficient * n.drag_width * n.length * un;
+    if (n.diagonal_gain > Real(0.0)) {
+        // the direction factor from the angle of the normal flow's horizontal part to the face normal
+        const Real uh = std::sqrt(u[0] * u[0] + u[1] * u[1]);
+        if (uh > Real(0.0)) {
+            const Real c = (u[0] * n.face[0] + u[1] * n.face[1]) / uh;
+            const Real s = (n.face[0] * u[1] - n.face[1] * u[0]) / uh;
+            k *= Real(1.0) + n.diagonal_gain * (Real(2.0) * s * c) * (Real(2.0) * s * c);
+        }
+    }
     return {{k * u[0], k * u[1], k * u[2]}};
 }
 
 Real lattice_force_coefficient (Real phi)
 {
     return Real(4.0) * phi * phi - Real(5.9) * phi + Real(4.0);
+}
+
+Real lattice_diagonal_gain (Real phi)
+{
+    return std::min(Real(0.75) * phi, Real(0.2));
 }
 
 MemberDrag::MemberDrag (Real rho)

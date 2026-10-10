@@ -24,13 +24,24 @@ namespace erf_towers {
  *   erf.conductors.lattice.top_width  = 1.5    (m, the shaft's width at the cross-arm; required, in (0, base_width])
  *   erf.conductors.lattice.solidity   = 0.2    (-, the members' area over a face's outline, shaft and cross-arm;
  *                                               required, in (0, 1))
- *   erf.conductors.lattice.arm_length = 12.    (m, the cross-arm's length, centred on the shaft; required, > 0)
- *   erf.conductors.lattice.arm_depth  = 1.5    (m, the depth of the cross-arm's face; >= 0, default 0: top_width)
+ *   erf.conductors.lattice.arm_length = 12.    (m, the cross-arm's length, centred on the shaft; required, > 0,
+ *                                               and with arm_outside_shaft longer than the shaft is wide at the
+ *                                               middle of the arm's face, at least top_width)
+ *   erf.conductors.lattice.arm_depth  = 1.5    (m, the depth of the cross-arm's face; >= 0, default 0: top_width;
+ *                                               with arm_outside_shaft under twice the cross-arm's height)
  *   erf.conductors.lattice.peak       = 0.     (m, the shaft above the cross-arm, at top_width; >= 0, default 0)
  *   erf.conductors.lattice.drag_coefficient = 0. (-, the force coefficient on the members' area; >= 0,
  *                                                 default 0: 4 phi^2 - 5.9 phi + 4 from the solidity phi)
  *   erf.conductors.lattice.segments   = 10     (the number of equal segments of the shaft up to the cross-arm,
  *                                               one drag node at the middle of each; >= 1, default 10)
+ *   erf.conductors.lattice.diagonal_wind_factor = true (the shaft's and the peak's drag times 1 + g sin^2(2 theta), theta the
+ *                                               wind's angle from a face's normal and g = min(0.75 solidity, 0.2):
+ *                                               ASCE 7's factor along a diagonal; default true, false: none)
+ *   erf.conductors.lattice.arm_outside_shaft = true (the cross-arm's drag nodes on its two outer parts only, from
+ *                                               the shaft's half width at their height to the tips, at the middle
+ *                                               of its face, arm_face / 2 below the cross-arm; default true, and
+ *                                               then arm_length must exceed the shaft's width there; false: along
+ *                                               its whole length, through the shaft, at the cross-arm's height)
  *   erf.conductors.lattice.weight     = 9.0e4  (N, the tower's own weight on its foundation; >= 0, default 0;
  *                                               required > 0 when frequency > 0, since it sets the mass)
  *   erf.conductors.lattice.leg_spacing = 6.    (m, between the four legs' footings, a square; >= 0,
@@ -71,6 +82,11 @@ namespace erf_towers {
  *                                       from panel to panel; default crossed; only with frame_panels)
  *   erf.conductors.lattice.yield_strength = 3.45e8 (Pa, the generated frame's steel; > 0, default 0: 3.45e8;
  *                                          only with frame_panels)
+ *   erf.conductors.lattice.angle_principal_axes = true (turn every generated angle (SubDyn's MSpin) so that its
+ *                                          principal axes lie as on a real tower: a leg's or a chord's axis of
+ *                                          symmetry towards the corner it stands on, a brace's at 45 degrees to
+ *                                          its face; default true; false: MSpin 0, the hangers always; only with
+ *                                          frame_panels)
  *   erf.conductors.lattice.steel_temperature = 20. (C, the steel's temperature, which lowers its stiffness and
  *                                          yield strength by EN 1993-1-2; above -273.15 and below 1200, default 20;
  *                                          only with a frame model, frame_file or frame_panels)
@@ -106,9 +122,14 @@ struct TowerType
     std::string bracing;                               //!< crossed or single; empty: crossed
     amrex::Real yield_strength{0.0};                   //!< Pa; 0: 3.45e8
     amrex::Real steel_temperature{20.0};               //!< C
+    bool diagonal_wind_factor{true};                   //!< the shaft's and peak's wind-direction factor (lattice_diagonal_gain)
+    bool arm_outside_shaft{true};                      //!< the cross-arm's drag outside the shaft, at its face's middle
+    bool angle_principal_axes{true};                   //!< the generated angles turned to their principal axes
+    bool angle_axes_given{false};                      //!< angle_principal_axes was given (it needs frame_panels)
 
-    /** The number of drag nodes on the cross-arm, one at the middle of each of its equal segments. */
+    /** The number of drag nodes on the cross-arm, one at the middle of each of its equal segments (half on each side). */
     static constexpr int arm_segments = 4;
+    static_assert(arm_segments % 2 == 0, "the cross-arm's drag nodes come in pairs, one per side");
 
     /** The depth of the cross-arm's face (m): arm_depth, or top_width when arm_depth is 0. */
     amrex::Real arm_face () const { return arm_depth > 0.0 ? arm_depth : top_width; }

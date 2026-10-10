@@ -15,6 +15,9 @@
 //     x drag (the horizontal drag along z x the span's direction), not its y drag.
 // TheSpreadDragIntegratesToMinusTheDragOnTheLines: the momentum source integrates to minus the drag.
 // WithoutDragOnFlowNothingIsPutIntoTheFlow: drag_on_flow off leaves the sources empty.
+// TheASCE74CheckTakesTheWireAtItsEffectiveHeightOnItsInclinedChord: asce74.csv's height is the mean attachment
+//     height less a third of the still-air sag, and its swing that about the inclined chord against W cos beta;
+//     asce74_wire_height = attachment and asce74_inclined_spans = false give the attachment height and W.
 // ARestartCannotMoveALinesPointsOrChangeItsLength: the checkpoint records the placed points and lengths,
 //     and a restart whose inputs move an end or change a length stops, naming the line.
 // ARestartContinuesTheLinesTheirSourcesStatisticsAndLogs: a restart continues where the checkpoint left off.
@@ -39,7 +42,7 @@
 // SetGroundRefusesASurfaceOffsetBelowTheDomainTop: erf.conductors.surface_offset must hold the domain.
 // AnAttachmentOutsideTheDomainIsRefusedNamingItsKey: the abort names end_a, end_b or the tower.
 // ANonFiniteCouplingPullIsRefusedNotConverged: coupling_converged on NaN pulls; coupling_diverged at 20 in a row.
-// ARestartChecksTheTowerSwayAndTheSurfaceOffset: restart_mismatch.
+// ARestartChecksTheTowerSwayAndTheSurfaceOffset: restart_mismatch, and tower_forms_mismatch (the tower forms).
 // GustsComeFromTheRANSkAlongEachSpan: with gust_type = factor, per span the root-mean-square wind and normal wind
 //     over its nodes and the mean k = (rho k)/rho, from stats_start, sampled where the nodes are at each step's start;
 //     gusts.csv's columns for a line across the wind and one at 45 degrees to it; nothing before stats_start; the
@@ -65,9 +68,11 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -685,6 +690,59 @@ std::string slurp (const std::string& fname)
     return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 } // namespace
+
+// asce74.csv's wire: at the effective height, the mean attachment height less a third of the still-air sag
+// (vertical), and swinging about an inclined chord against W cos beta; the attachment height and the whole
+// weight with asce74_wire_height = attachment and asce74_inclined_spans = false
+TEST(Conductors, TheASCE74CheckTakesTheWireAtItsEffectiveHeightOnItsInclinedChord)
+{
+    const std::string dir = scratch("asce74");
+    // ends 30 m and 130 m above flat ground, 300 m apart: a chord inclined by asin(100 / 316.2), 18.4 degrees, steep
+    // enough that the sag's vertical part (1 / cos beta = 1.054) and W cos beta stand well clear of the tolerances
+    set_inputs(dir, "Tas", true, {{300.0, 500.0, 30.0}}, {{600.0, 500.0, 130.0}});
+    amrex::ParmParse("erf.conductors.Tas").add("length", 317.8);
+    amrex::ParmParse pp("erf.conductors");
+    pp.add("asce74_wind", 40.0);
+    Mesh m(false);
+    auto row = [&] () {
+        auto c = Conductors::create(0);
+        c->set_ground(nullptr, m.geom);
+        std::istringstream in(slurp(dir + "/asce74.csv"));
+        std::string hdr, line;
+        std::getline(in, hdr);
+        std::getline(in, line);
+        std::map<std::string, double> r;
+        std::istringstream h(hdr), l(line);
+        std::string name, value;
+        while (std::getline(h, name, ',') && std::getline(l, value, ',')) { r[name] = std::atof(value.c_str()); }
+        return r;
+    };
+    auto r = row();
+    const double c = std::hypot(300.0, 100.0), beta = std::asin(100.0 / c), L = 317.8, W = r["weight"], EA = 3.0e7;
+    // an independent still-air sag: the parabola of a span stretched by its mean tension H/EA (to well under 1 %)
+    double sag = 13.0;
+    for (int it = 0; it < 50; ++it) {
+        const double H = W * std::cos(beta) * c * c / (8.0 * sag);
+        sag = std::sqrt(3.0 * c * (L * (1.0 + H / EA) - c) / 8.0);
+    }
+    const double sag_v = sag / std::cos(beta);
+    EXPECT_NEAR(r["height"], 80.0 - sag_v / 3.0, 0.01 * sag_v / 3.0) << "mean attachment height 80 m less a third of the sag";
+    // the chord in Real: beta to a few units of its precision
+    const double swing_tol = std::is_same<Real, float>::value ? 1.0e-5 : 1.0e-8;
+    EXPECT_NEAR(std::tan(r["swing_deg"] * 3.14159265358979323846 / 180.0), r["load"] / (W * std::cos(beta)), swing_tol);
+    // the whole weight against the swing, the effective height still from the inclined chord's vertical sag
+    const double h_effective = r["height"];
+    pp.add("asce74_inclined_spans", false);
+    r = row();
+    EXPECT_EQ(r["height"], h_effective) << "the still-air sag does not depend on the swing's weight";
+    EXPECT_NEAR(std::tan(r["swing_deg"] * 3.14159265358979323846 / 180.0), r["load"] / W, swing_tol);
+    // the old forms
+    pp.add("asce74_wire_height", std::string("attachment"));
+    r = row();
+    EXPECT_NEAR(r["height"], 80.0, 1e-9);
+    EXPECT_NEAR(std::tan(r["swing_deg"] * 3.14159265358979323846 / 180.0), r["load"] / W, swing_tol);
+    for (const char* k : {"asce74_wind", "asce74_wire_height", "asce74_inclined_spans"}) { pp.remove(k); }
+}
 
 TEST(Conductors, ARestartCannotMoveALinesPointsOrChangeItsLength)
 {
@@ -1304,8 +1362,8 @@ TEST(Conductors, LatticeTowersStandAtTheSuspensionPointsAndCarryTheWindsDrag)
         ++rows;
     }
     EXPECT_EQ(rows, 3);
-    for (const char* q : {",drag_h,", ",line_h,", ",shear,", ",overturning,", ",max_compression,", ",max_uplift,", ",over_allowable,"}) {
-        EXPECT_NE(slurp(dir + "/tower_Tw_t1_stats.csv").find(q), std::string::npos) << q;
+    for (const char* column : {",drag_h,", ",line_h,", ",shear,", ",overturning,", ",max_compression,", ",max_uplift,", ",over_allowable,"}) {
+        EXPECT_NE(slurp(dir + "/tower_Tw_t1_stats.csv").find(column), std::string::npos) << column;
     }
     clear_towered_section("Tw");
 }
@@ -1350,6 +1408,47 @@ TEST(Conductors, TheTowersDragGoesIntoTheFlowWithTheLinesAndSurvivesARestart)
     for (step = 3; step < 6; ++step) { b->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
     EXPECT_EQ(slurp(dir + "/towers.dat"), log);
     EXPECT_EQ(slurp(dir + "/tower_Tf_t2_stats.csv"), stats);
+    // the checkpoint records the tower type's forms: a restart that changes one is refused, naming the key
+    amrex::ParmParse("erf.conductors.lat").add("arm_outside_shaft", false);
+    std::string msg = erf_gtest::abort_message([&] {
+        auto c = Conductors::create(0);
+        c->set_ground(m.znd.get(), m.geom, chk);
+    });
+    EXPECT_NE(msg.find("erf.conductors.lat.arm_outside_shaft = false"), std::string::npos) << msg;
+    amrex::ParmParse("erf.conductors.lat").remove("arm_outside_shaft");
+    // a checkpoint that records the forms but not a tower's, and an older one without the record, written with the
+    // earlier forms: both refused, the older naming the keys to set to false
+    auto restart_with = [&] (const std::string& state) {
+        std::ofstream(chk + "/conductors/state", std::ios::trunc) << state;
+        return erf_gtest::abort_message([&] {
+            auto c = Conductors::create(0);
+            c->set_ground(m.znd.get(), m.geom, chk);
+        });
+    };
+    const std::string state = slurp(chk + "/conductors/state");
+    ASSERT_NE(state.find("tower_forms_version 1\n"), std::string::npos) << state;
+    std::string without, older;
+    {
+        std::istringstream lines(state);
+        for (std::string l; std::getline(lines, l);) {
+            if (l.rfind("tower_forms ", 0) != 0) { without += l + "\n"; }
+            if (l.rfind("tower_forms", 0) != 0) { older += l + "\n"; }
+        }
+    }
+    msg = restart_with(without);
+    EXPECT_NE(msg.find("holds no forms of tower Tf_t"), std::string::npos) << msg;
+    msg = restart_with(older);
+    EXPECT_NE(msg.find("written before the tower forms were recorded"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("erf.conductors.lat.diagonal_wind_factor"), std::string::npos) << msg;
+    EXPECT_EQ(msg.find("angle_principal_axes"), std::string::npos) << "a tower without a generated frame: " << msg;
+    // with those forms set to false the older checkpoint restarts
+    amrex::ParmParse lat("erf.conductors.lat");
+    lat.add("diagonal_wind_factor", false);
+    lat.add("arm_outside_shaft", false);
+    EXPECT_TRUE(restart_with(older).empty()) << restart_with(older);
+    lat.remove("diagonal_wind_factor");
+    lat.remove("arm_outside_shaft");
+    std::ofstream(chk + "/conductors/state", std::ios::trunc) << state;
     clear_towered_section("Tf");
 }
 
@@ -1400,7 +1499,9 @@ TEST(Conductors, MovingTowersSettleWhereTheirStiffnessBalancesTheWindAndTheLine)
         }
         // (the real MoorDyn's conductors still swing slowly after 10 s, lightly damped, and the tower
         // follows their pull, hence the 2 % tolerance below)
-        const auto x = tw.arm_displacement();
+        // the cross-arm's displacement at its height (its drag nodes, half its face lower, move a little less)
+        std::array<Real,3> x{};
+        ASSERT_TRUE(model->arm_centre_displacement(x));
         EXPECT_GT(x[1], 1.0e-3) << tw.name() << " leans with the +y wind";
         EXPECT_NEAR(x[1] * model->stiffness() / Q[1], 1.0, 0.02) << tw.name();
         EXPECT_NEAR(x[0] * model->stiffness(), Q[0], 0.02 * Q[1]) << tw.name();
@@ -1803,6 +1904,20 @@ TEST(Conductors, ARestartChecksTheTowerSwayAndTheSurfaceOffset)
     EXPECT_NE(erf_conductors::restart_mismatch(false, true, nan, 10000.0).find("holds no tower sway"), std::string::npos);
     EXPECT_NE(erf_conductors::restart_mismatch(true, false, nan, 10000.0).find("holds tower sway, but no tower type"), std::string::npos);
     EXPECT_NE(erf_conductors::restart_mismatch(false, false, 10000.0, 5000.0).find("erf.conductors.surface_offset"), std::string::npos);
+    // the tower forms: the same continue; a change, or an older checkpoint (no record: every form 0) with a form on, is
+    // refused naming the keys
+    using erf_conductors::tower_forms_mismatch;
+    EXPECT_TRUE(tower_forms_mismatch("lattice", true, {{1, 1, 0}}, {{1, 1, 0}}).empty());
+    EXPECT_TRUE(tower_forms_mismatch("lattice", false, {{0, 0, 0}}, {{0, 0, 0}}).empty()) << "an older checkpoint, old forms";
+    const std::string changed = tower_forms_mismatch("lattice", true, {{1, 1, 1}}, {{1, 0, 1}});
+    EXPECT_NE(changed.find("erf.conductors.lattice.arm_outside_shaft = false"), std::string::npos) << changed;
+    EXPECT_EQ(changed.find("diagonal_wind_factor"), std::string::npos) << changed;
+    const std::string older = tower_forms_mismatch("lattice", false, {{0, 0, 0}}, {{1, 1, 1}});
+    for (const char* k : {"diagonal_wind_factor", "arm_outside_shaft", "angle_principal_axes"}) {
+        EXPECT_NE(older.find(std::string("erf.conductors.lattice.") + k), std::string::npos) << older;
+    }
+    EXPECT_NE(older.find("to false"), std::string::npos) << older;
+    EXPECT_EQ(older.find("= true"), std::string::npos) << "the keys alone: " << older;
 }
 
 namespace {
@@ -2036,11 +2151,10 @@ TEST(Conductors, RandomGustsFollowTheirProcessesAndACircuitSharesThem)
         }
         for (std::size_t t = 0; t < 2; ++t) {
             const auto& tw = c->towers()[t];
-            double kk = 0.0, top = 0.0;
-            for (const auto& nd : tw.nodes()) {
-                kk += static_cast<double>(k0 + kz * nd.pos[2]);
-                top = std::max(top, static_cast<double>(nd.pos[2] - tw.base()[2]));
-            }
+            // ASCE 74's h of the background factor is the tower's height, the cross-arm's plus the peak's
+            double kk = 0.0;
+            for (const auto& nd : tw.nodes()) { kk += static_cast<double>(k0 + kz * nd.pos[2]); }
+            const double top = static_cast<double>(tw.arm_height() + tw.type().peak);
             const double gust = sf * std::sqrt(kk / tw.nodes().size()) *
                                 std::sqrt(erf_conductors::tower_background_factor(top, Ls)) * z[3 + t];
             for (std::size_t j = 0; j < tw.nodes().size(); ++j) {

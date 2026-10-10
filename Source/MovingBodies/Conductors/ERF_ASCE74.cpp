@@ -52,10 +52,10 @@ double wire_gust_response_factor (Exposure e, double z, double span)
 }
 
 WireWindLoad wire_wind_load (Exposure e, double gust, double z, double chord, double diameter, double cf, double weight,
-                             double length, double EA, double air_density)
+                             double length, double EA, double air_density, double incline)
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(gust >= 0.0 && z > 0.0 && chord > 0.0 && diameter > 0.0 && cf >= 0.0 && weight > 0.0 &&
-                                     length > 0.0 && EA > 0.0 && air_density > 0.0,
+                                     length > 0.0 && EA > 0.0 && air_density > 0.0 && std::abs(incline) < 0.5 * 3.14159265358979323846,
                                      "wire_wind_load: an argument is out of range");
     WireWindLoad w;
     w.kz = exposure_factor(e, z);
@@ -63,12 +63,16 @@ WireWindLoad wire_wind_load (Exposure e, double gust, double z, double chord, do
     w.pressure = 0.5 * air_density * w.kz * gust * gust;
     w.load = w.pressure * w.gust_response * cf * diameter;
     w.weight = weight;
-    w.swing = std::atan2(w.load, weight);
-    // the span hangs in the plane swung out by the wind, under the resultant of its weight and the wind
+    // across an inclined chord only the weight's part normal to it opposes the wind
+    const double normal_weight = weight * std::cos(incline);
+    w.swing = std::atan2(w.load, normal_weight);
+    // the span hangs in the plane swung out by the wind, under the resultant of that weight and the wind
     const Catenary cat = elastic_catenary(static_cast<amrex::Real>(chord), static_cast<amrex::Real>(length),
-                                          static_cast<amrex::Real>(std::hypot(w.load, weight)), static_cast<amrex::Real>(EA));
+                                          static_cast<amrex::Real>(std::hypot(w.load, normal_weight)), static_cast<amrex::Real>(EA));
     w.sag = static_cast<double>(cat.sag);
-    w.tension = static_cast<double>(cat.end_tension);
+    // the upper end's: the end tensions differ by the weight times the rise, W chord sin(beta), the wind doing no
+    // work along the chord, and the level span's lies half way between them
+    w.tension = static_cast<double>(cat.end_tension) + 0.5 * weight * chord * std::abs(std::sin(incline));
     w.blowout = w.sag * std::sin(w.swing);
     w.solved = cat.solved;
     return w;

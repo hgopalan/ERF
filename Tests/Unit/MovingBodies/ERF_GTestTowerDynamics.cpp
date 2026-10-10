@@ -70,20 +70,41 @@ TEST(OneModeTower, OnARigidFoundationItSwaysAtItsTypesFrequencyInTheQuadraticSha
     EXPECT_NEAR(m.frequency() / 2.0, 1.0, tol);
     EXPECT_NEAR(m.stiffness() / m.bending_stiffness(), 1.0, 1.0e-14) << "nothing but the bending on a rigid foundation";
     double mass = 0.0, M = 0.0;
-    for (std::size_t i = 0; i < tw.nodes().size(); ++i) {
+    for (std::size_t i = 0; i < static_cast<std::size_t>(tw.num_body_nodes()); ++i) {
         const double z = (tw.nodes()[i].pos[2] - tw.base()[2]) / 30.0;
         EXPECT_NEAR(m.mode_shape(i), z * z, 1.0e-14) << i;
         mass += m.node_mass(i);
         M += m.node_mass(i) * z * z * z * z;
     }
+    // the cross-arm's mass, its whole length's share, at the cross-arm's height (shape 1)
+    for (std::size_t i = static_cast<std::size_t>(tw.num_body_nodes()); i < tw.nodes().size(); ++i) {
+        mass += m.node_mass(i);
+        M += m.node_mass(i);
+    }
     EXPECT_NEAR(mass, 9.0e4 / g, tol * mass) << "the type's weight over gravity";
     // both sums run in double over the same node masses and heights: equal to roundoff
     EXPECT_NEAR(m.generalized_mass(), M, 1.0e-12 * M);
     EXPECT_NEAR(m.stiffness(), M * std::pow(2.0 * pi * 2.0, 2), 1.0e-12 * m.stiffness());
-    // the cross-arm's nodes are at its height: they move as the cross-arm, phi = 1
+    // the cross-arm's drag nodes stand at the middle of its face, half its depth below the cross-arm: phi there,
+    // while the cross-arm itself, where the lines hang, moves with phi = 1, the modal displacement
+    const double za = (30.0 - 0.5 * static_cast<double>(tw.type().arm_face())) / 30.0;
     for (std::size_t i = static_cast<std::size_t>(tw.num_body_nodes()); i < tw.nodes().size(); ++i) {
-        EXPECT_NEAR(m.mode_shape(i), 1.0, 1.0e-14) << i;
+        EXPECT_NEAR(m.mode_shape(i), za * za, tol) << i;   // the node's height in Real
     }
+    // the drag nodes' layout leaves the mass where it is: the same modal mass and stiffness with the cross-arm's
+    // drag through the shaft at its height
+    TowerType through = swaying();
+    through.arm_outside_shaft = false;
+    const OneModeTower old_layout(standing(through), Real(g));
+    EXPECT_EQ(old_layout.generalized_mass(), m.generalized_mass());
+    EXPECT_EQ(old_layout.stiffness(), m.stiffness());
+    for (std::size_t i = 0; i < tw.nodes().size(); ++i) { EXPECT_EQ(old_layout.node_mass(i), m.node_mass(i)) << i; }
+    OneModeTower moved(tw, Real(g));
+    ASSERT_TRUE(moved.set_state({0.03, -0.01, 0.0, 0.0, 0.0, 0.0}));
+    P3 arm{};
+    ASSERT_TRUE(moved.arm_centre_displacement(arm));
+    EXPECT_EQ(arm[0], Real(0.03));
+    EXPECT_EQ(arm[1], Real(-0.01));
 }
 
 TEST(OneModeTower, AHeldLoadIsIntegratedExactlyHoweverTheTimeIsCut)
@@ -194,18 +215,31 @@ TEST(OneModeTower, TheFoundationTakesTheLoadsLessTheInertia)
         }
         tw.set_motion(x, v, a);
     };
-    // swaying freely at its extreme, q = 0.05 m, at rest: every node accelerates back at omega^2 phi q
+    // swaying freely at its extreme, q = 0.05 m, at rest: every mass accelerates back at omega^2 phi q, the cross-arm's
+    // at its height, where phi = 1
     ASSERT_TRUE(m.set_state({0.05, 0.0, 0.0, 0.0, 0.0, 0.0}));
     hand_over();
-    double sm = 0.0;
-    for (std::size_t i = 0; i < tw.nodes().size(); ++i) { sm += m.node_mass(i) * m.mode_shape(i); }
+    // and its moment about the base from where each mass is
+    double sm = 0.0, smz = 0.0;
+    for (std::size_t i = 0; i < tw.nodes().size(); ++i) {
+        const bool body = i < static_cast<std::size_t>(tw.num_body_nodes());
+        const double zm = body ? static_cast<double>(tw.nodes()[i].pos[2] - tw.base()[2]) : 30.0;
+        sm += m.node_mass(i) * (body ? m.mode_shape(i) : 1.0);
+        smz += m.node_mass(i) * (body ? m.mode_shape(i) : 1.0) * zm;
+    }
     const double w = 2.0 * pi * 2.0;
     const auto L = tw.foundation();
     EXPECT_NEAR(L.force[0] / (w * w * 0.05 * sm), 1.0, tol) << "the base shear of the sway";
+    EXPECT_NEAR(L.overturning / (w * w * 0.05 * smz), 1.0, tol) << "the overturning of the sway";
     EXPECT_NEAR(L.force[1], 0.0, 1.0e-9);
     EXPECT_NEAR(L.vertical, 9.0e4, 1.0e-9 * 9.0e4) << "the sway is horizontal";
-    EXPECT_NEAR(tw.arm_displacement()[0], 0.05, tol * 0.05);
-    EXPECT_NEAR(tw.current_nodes().back().pos[0], tw.nodes().back().pos[0] + Real(0.05), 1.0e-4);
+    // the cross-arm moves by q; its drag nodes, half its face below it, by phi q
+    P3 arm{};
+    ASSERT_TRUE(m.arm_centre_displacement(arm));
+    EXPECT_NEAR(arm[0], 0.05, tol * 0.05);
+    const double phi_arm = m.mode_shape(tw.nodes().size() - 1);
+    EXPECT_NEAR(tw.arm_displacement()[0], 0.05 * phi_arm, tol * 0.05);
+    EXPECT_NEAR(tw.current_nodes().back().pos[0], tw.nodes().back().pos[0] + Real(0.05 * phi_arm), 1.0e-4);
     // at rest under a held load the inertia is gone: the foundation takes the load, as a rigid tower's
     const P3 F{{Real(3000.0), Real(0.0), Real(-5000.0)}};
     m.step(Real(1000.0), no_load(tw), F);
@@ -233,7 +267,9 @@ TEST(OneModeTower, BetweenTwoPullsItMovesUnderTheMeanAndLoadsItsFootingsWithTheE
         const double a = (between.attachment_shape(0) * static_cast<double>(F1[d]) - 2.0 * zeta * w * M * between.v()[d] -
                           K * between.q()[d]) / M;
         for (std::size_t i = 0; i < tw.nodes().size(); ++i) {
-            const double expect = -between.node_mass(i) * between.mode_shape(i) * a;
+            // the cross-arm's mass is at its height, where the shape is 1
+            const double phi = (i < static_cast<std::size_t>(tw.num_body_nodes())) ? between.mode_shape(i) : 1.0;
+            const double expect = -between.node_mass(i) * phi * a;
             EXPECT_NEAR(static_cast<double>(between.inertial_force(i)[d]), expect, tol * (1.0 + std::abs(expect))) << i;
         }
     }

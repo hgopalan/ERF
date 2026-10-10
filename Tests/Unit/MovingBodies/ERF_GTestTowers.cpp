@@ -6,11 +6,15 @@
 //   the square-tower curve of ASCE 7 (American Society of Civil Engineers, minimum design loads).
 // - TowerType.EveryValueOutsideItsRangeIsRefusedByName: validate() names the key of every value
 //   outside its range, NaN and infinity included; the foundation stiffnesses and damping_ratio on a
-//   tower that stands still, leg_spacing with a frame, and a frame without damping are refused.
+//   tower that stands still, leg_spacing with a frame, a frame without damping, a cross-arm no longer than
+//   the top width with arm_outside_shaft, and angle_principal_axes without frame_panels are refused.
 // - Tower.TheBodyTapersUpToTheCrossArmWhichRunsAcrossTheLine: the shaft's drag nodes stand up the
-//   tapering shaft, the cross-arm's across the line at the conductor's height.
+//   tapering shaft with the direction factor's gain, the cross-arm's across the line outside the shaft at
+//   the middle of its face; arm_outside_shaft = false and diagonal_wind_factor = false give the old layout.
 // - Tower.InAUniformWindTheDragAndBaseMomentAreTheHandValues: the shaft's drag exactly (its width
-//   is linear in height), the base moment to the midpoint rule's known error.
+//   is linear in height), the base moment to the midpoint rule's known error, the cross-arm's outside the
+//   shaft at the middle of its face; along a diagonal the shaft's drag times ASCE 7's 1 + 0.75 phi, half
+//   that gain at 22.5 degrees.
 // - Tower.InALogLawWindTheDragIsTheFineIntegral: within the segments' quadrature error.
 // - Tower.TheLegsShareTheLoadAndResistTheOverturningMoment: the four legs share the downward load
 //   equally and the overturning moment linearly, in equilibrium, whichever way the tower faces;
@@ -18,7 +22,8 @@
 // - Tower.EachLegLoadIsFlaggedOverItsAllowable.
 // - Tower.EachLinePullsWhereItHangsAndTheFootingsTakeThemAll: several lines on one tower.
 // - Tower.ANonFiniteLinePullIsRefusedNamingTheTower and
-//   Tower.AFlatOrBadlyAimedTowerIsRefusedNamingIt: the preconditions abort with the tower's name.
+//   Tower.AFlatOrBadlyAimedTowerIsRefusedNamingIt: the preconditions abort with the tower's name, and a cross-arm
+//   no longer than the shaft's width at its face's middle, or whose face's middle is below the base, names its keys.
 
 #include <array>
 #include <cmath>
@@ -181,6 +186,14 @@ TEST(TowerType, EveryValueOutsideItsRangeIsRefusedByName)
     moving.foundation_rotational_stiffness = 1.0e9;
     moving.damping_given = true;
     EXPECT_TRUE(moving.validate().empty()) << moving.validate();
+    bad([](TowerType& t) { t.arm_length = 1.5; }, "arm_length must exceed top_width for arm_outside_shaft");
+    {
+        TowerType narrow = lattice();
+        narrow.arm_length = 1.5;
+        narrow.arm_outside_shaft = false;
+        EXPECT_TRUE(narrow.validate().empty()) << narrow.validate();
+    }
+    bad([](TowerType& t) { t.angle_axes_given = true; }, "angle_principal_axes needs erf.conductors.lattice.frame_panels");
     bad([](TowerType& t) { t.frame_panels = 4; t.leg_angle = {0.1, 0.01}; t.brace_angle = {0.08, 0.006}; t.leg_spacing = 5.0; },
         "leg_spacing is not given with a frame");
     // an undamped frame's higher modes grow under the members' drag
@@ -193,7 +206,9 @@ TEST(Tower, TheBodyTapersUpToTheCrossArmWhichRunsAcrossTheLine)
     TowerType t = lattice();
     t.peak = 4.5;
     const Tower tw("L1_t1", t, {{100.0, 200.0, 50.0}}, 30.0, {{0.0, 1.0, 0.0}});
-    // ten body segments of 3 m, two peak segments of 2.25 m, four arm segments of 3 m
+    // ten body segments of 3 m, two peak segments of 2.25 m, and the cross-arm outside the shaft: two segments of
+    // 2.6025 m on each side, at the middle of its 1.2 m face, 0.6 m below it, from 0.795 m (half the shaft's width
+    // there, 6 - 4.5 x 29.4 / 30 = 1.59 m) to 6 m
     ASSERT_EQ(tw.num_body_nodes(), 12);
     ASSERT_EQ(tw.nodes().size(), 16u);
     const auto& n0 = tw.nodes()[0];
@@ -205,14 +220,33 @@ TEST(Tower, TheBodyTapersUpToTheCrossArmWhichRunsAcrossTheLine)
     Real arm = 0.0;
     for (std::size_t i = 12; i < 16; ++i) {
         const auto& n = tw.nodes()[i];
-        EXPECT_NEAR(n.pos[2], 80.0, tol * 100);
+        EXPECT_NEAR(n.pos[2], 79.4, tol * 100);
         EXPECT_NEAR(n.pos[0], 100.0, tol * 100);
         EXPECT_EQ(n.axis, (P3{{0.0, 1.0, 0.0}}));
         EXPECT_NEAR(n.drag_width, 0.2 * 1.2, tol * 10);
+        EXPECT_NEAR(n.length, 2.6025, tol * 10);
+        EXPECT_GE(std::abs(n.pos[1] - 200.0), 0.795) << "outside the shaft";
+        EXPECT_EQ(n.diagonal_gain, 0.0) << "the cross-arm takes no shaft direction factor";
         arm += n.pos[1] - 200.0;
     }
     EXPECT_NEAR(arm, 0.0, tol * 1000) << "the arm is centred on the body";
-    EXPECT_NEAR(tw.nodes()[12].pos[1], 200.0 - 4.5, tol * 1000);
+    EXPECT_NEAR(tw.nodes()[12].pos[1], 200.0 - 4.69875, tol * 1000);
+    EXPECT_NEAR(tw.nodes()[13].pos[1], 200.0 - 2.09625, tol * 1000);
+    EXPECT_NEAR(tw.nodes()[14].pos[1], 200.0 + 2.09625, tol * 1000);
+    EXPECT_NEAR(tw.nodes()[15].pos[1], 200.0 + 4.69875, tol * 1000);
+    // the shaft's and the peak's nodes take the direction factor, with the cross-arm's face normal
+    EXPECT_NEAR(tw.nodes()[0].diagonal_gain, 0.15, tol) << "0.75 x solidity 0.2";
+    EXPECT_EQ(tw.nodes()[0].face, (P3{{0.0, 1.0, 0.0}}));
+    EXPECT_NEAR(tw.nodes()[11].diagonal_gain, 0.15, tol);
+    // the old forms: the cross-arm along its whole length at its height, no direction factor
+    t.arm_outside_shaft = false;
+    t.diagonal_wind_factor = false;
+    const Tower old("L1_t1", t, {{100.0, 200.0, 50.0}}, 30.0, {{0.0, 1.0, 0.0}});
+    EXPECT_NEAR(old.nodes()[12].pos[1], 200.0 - 4.5, tol * 1000);
+    EXPECT_NEAR(old.nodes()[13].pos[1], 200.0 - 1.5, tol * 1000);
+    EXPECT_NEAR(old.nodes()[12].pos[2], 80.0, tol * 100);
+    EXPECT_NEAR(old.nodes()[12].length, 3.0, tol * 10);
+    EXPECT_EQ(old.nodes()[0].diagonal_gain, 0.0);
 }
 
 TEST(Tower, InAUniformWindTheDragAndBaseMomentAreTheHandValues)
@@ -223,7 +257,10 @@ TEST(Tower, InAUniformWindTheDragAndBaseMomentAreTheHandValues)
     // wind along x, across the arm (along y): body and arm both loaded
     blow(tw, [&](Real) { return P3{{U, 0.0, 0.0}}; });
     const Real body = q * cf * phi * 0.5 * (t.base_width + t.top_width) * H;    // exact: the width is linear
-    const Real armF = q * cf * phi * t.arm_depth * t.arm_length;
+    // the cross-arm's two parts outside the shaft, at the middle of its face, where the shaft is w(za) wide
+    const Real za = H - 0.5 * t.arm_depth;
+    const Real wza = t.base_width + (t.top_width - t.base_width) * za / H;
+    const Real armF = q * cf * phi * t.arm_depth * (t.arm_length - wza);
     const auto F = tw.total_force();
     RecordProperty("body_drag_N", std::to_string(body));
     RecordProperty("arm_drag_N", std::to_string(armF));
@@ -235,12 +272,28 @@ TEST(Tower, InAUniformWindTheDragAndBaseMomentAreTheHandValues)
     const Real body_m = q * cf * phi * (t.base_width * H * H / 2.0 +
                                         (t.top_width - t.base_width) / H * (H * H * H / 3.0 - H * H * H / (12.0 * n * n)));
     const auto M = tw.base_moment();
-    EXPECT_NEAR(M[1], body_m + armF * H, 1.0e-6 * (body_m + armF * H) + tol);
+    EXPECT_NEAR(M[1], body_m + armF * za, 1.0e-6 * (body_m + armF * za) + tol);
     EXPECT_NEAR(M[0], 0.0, 1.0e-6 * M[1] + tol);
     // wind along the arm: only the body carries it
     blow(tw, [&](Real) { return P3{{0.0, U, 0.0}}; });
     EXPECT_NEAR(tw.total_force()[1], body, 1.0e-6 * body + tol);
     EXPECT_NEAR(tw.total_force()[0], 0.0, tol);
+    // wind along the shaft's diagonal: ASCE 7's 1 + 0.75 phi on the shaft (1.15 here), half way at 22.5 degrees
+    // (IEC 60826's sin^2 2 theta); the cross-arm takes the wind's part across it only
+    const Real gain = 0.75 * phi;
+    for (const Real deg : {Real(45.0), Real(22.5)}) {
+        const Real th = deg * Real(3.14159265358979323846) / Real(180.0);
+        blow(tw, [&](Real) { return P3{{U * std::cos(th), U * std::sin(th), 0.0}}; });
+        Real fx = 0.0, fy = 0.0;
+        for (int i = 0; i < tw.num_body_nodes(); ++i) {
+            fx += tw.loads()[static_cast<std::size_t>(3 * i)];
+            fy += tw.loads()[static_cast<std::size_t>(3 * i + 1)];
+        }
+        const Real s2 = std::sin(2.0 * th);
+        EXPECT_NEAR(std::hypot(fx, fy) / (body * (1.0 + gain * s2 * s2)), 1.0, 10.0 * tol) << deg << " degrees";
+        EXPECT_NEAR(std::atan2(fy, fx), th, 10.0 * tol) << "along the wind";
+    }
+    EXPECT_NEAR(erf_towers::lattice_diagonal_gain(0.5), 0.2, tol) << "ASCE 7's cap of 1.2";
 }
 
 TEST(Tower, InALogLawWindTheDragIsTheFineIntegral)
@@ -260,10 +313,11 @@ TEST(Tower, InALogLawWindTheDragIsTheFineIntegral)
         drag += k * w * u(z) * u(z) * H / N;
         mom += k * w * u(z) * u(z) * z * H / N;
     }
-    const Real arm = k * t.arm_depth * t.arm_length * u(H) * u(H);
+    const Real za = H - 0.5 * t.arm_depth;
+    const Real arm = k * t.arm_depth * (t.arm_length - (t.base_width + (t.top_width - t.base_width) * za / H)) * u(za) * u(za);
     // ten segments resolve the log law's curvature near the ground to about 1 %
     EXPECT_NEAR(tw.total_force()[0] / (drag + arm), 1.0, 0.01);
-    EXPECT_NEAR(tw.base_moment()[1] / (mom + arm * H), 1.0, 0.01);
+    EXPECT_NEAR(tw.base_moment()[1] / (mom + arm * za), 1.0, 0.01);
 }
 
 namespace {
@@ -409,5 +463,15 @@ TEST(Tower, AFlatOrBadlyAimedTowerIsRefusedNamingIt)
     bad.solidity = 0.0;
     msg = erf_gtest::abort_message([&] { Tower tw("T9", bad, P3{{0.0, 0.0, 0.0}}, Real(30.0), P3{{0.0, 1.0, 0.0}}); });
     EXPECT_NE(msg.find("erf.conductors.lattice.solidity"), std::string::npos) << msg;
+    // a cross-arm no longer than the shaft is wide at the middle of its face (1.59 m at 29.4 m), though longer
+    // than the top width, has no part outside the shaft
+    TowerType stub = t;
+    stub.arm_length = 1.55;
+    msg = erf_gtest::abort_message([&] { Tower tw("T9", stub, P3{{0.0, 0.0, 0.0}}, Real(30.0), P3{{0.0, 1.0, 0.0}}); });
+    EXPECT_NE(msg.find("erf.conductors.lattice.arm_length"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("arm_outside_shaft"), std::string::npos) << msg;
+    // a cross-arm whose face's middle would lie below the base
+    msg = erf_gtest::abort_message([&] { Tower tw("T9", t, P3{{0.0, 0.0, 0.0}}, Real(0.5), P3{{0.0, 1.0, 0.0}}); });
+    EXPECT_NE(msg.find("erf.conductors.lattice.arm_depth"), std::string::npos) << msg;
     EXPECT_TRUE(erf_gtest::abort_message([&] { Tower tw("T9", t, P3{{0.0, 0.0, 0.0}}, Real(30.0), P3{{0.0, 1.0, 0.0}}); }).empty());
 }

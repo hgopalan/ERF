@@ -60,8 +60,8 @@ so that every line hangs clamped at fixed points where its towers stood, and giv
     stop_time = 8100.0
     max_step  = 27100
 
-so that ERF writes `conductors/asce74.csv` (each span's height, chord, length and weight with the
-design check) and keeps 600 s of statistics from `stats_start` (7500 s), the window of the numbers
+so that ERF writes `conductors/asce74.csv` (each span's effective height, chord, length and weight with
+the design check) and keeps 600 s of statistics from `stats_start` (7500 s), the window of the numbers
 in the conductor theory.
 
 Then, in the run's directory,
@@ -71,7 +71,7 @@ Then, in the run's directory,
 For every span it takes the wind at mid-span normal to the span from the span's log, its mean and
 its peak 3-second average V3 (the gust at the span's height), and compares the span's peak load per
 metre with ASCE 74's (rho/2) Cf d V3^2 Gw, and its peak swing and tension with the quasi-static ones
-under that load, over the samples from `erf.conductors.stats_start`. It writes
+under that load (the swing about the span's inclined chord, the upper end's tension, as in `asce74.csv`), over the samples from `erf.conductors.stats_start`. It writes
 `asce74_comparison.csv` and `asce74_comparison.png`.
 
 ## The same lines in RANS gusts

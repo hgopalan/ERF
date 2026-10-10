@@ -28,17 +28,24 @@ OneModeTower::OneModeTower (const Tower& tower, Real gravity)
     const auto& nodes = tower.nodes();
     const double H = tower.arm_height();
     if (!(H > 0.0)) { amrex::Abort(who + "the cross-arm height above the base must be positive (m)"); }
+    // the mass is spread along the members by length: the shaft's at its drag nodes, and the cross-arm's whole length
+    // (the part within the shaft too) at the cross-arm's height, shared by its drag nodes, wherever arm_outside_shaft
+    // puts them; so the drag nodes' layout leaves the modal mass, and with it the stiffness, as they are
+    const auto nbody = static_cast<std::size_t>(tower.num_body_nodes());
+    const double arm_share = static_cast<double>(type.arm_length) / static_cast<double>(TowerType::arm_segments);
     double length = 0.0;
-    for (const auto& n : nodes) { length += n.length; }
+    for (std::size_t i = 0; i < nodes.size(); ++i) { length += (i < nbody) ? static_cast<double>(nodes[i].length) : arm_share; }
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(length > 0.0, "OneModeTower: the drag nodes stand for no length of member");
     // the bending shape's generalized mass on a rigid foundation sets the bending stiffness
     const double mass = static_cast<double>(type.weight) / static_cast<double>(gravity);
+    const Real arm_z = tower.base()[2] + tower.arm_height();
     double Mb = 0.0;
-    std::vector<double> zh(nodes.size());
+    std::vector<double> zh(nodes.size()), zm(nodes.size());
     for (std::size_t i = 0; i < nodes.size(); ++i) {
-        m_mass.push_back(mass * nodes[i].length / length);
+        m_mass.push_back(mass * ((i < nbody) ? static_cast<double>(nodes[i].length) : arm_share) / length);
         zh[i] = (nodes[i].pos[2] - tower.base()[2]) / H;
-        Mb += m_mass[i] * std::pow(zh[i], 4);
+        zm[i] = (i < nbody) ? zh[i] : (arm_z - tower.base()[2]) / H;
+        Mb += m_mass[i] * std::pow(zm[i], 4);
     }
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(Mb > 0.0, "OneModeTower: no drag node stands above the base");
     m_Kb = Mb * std::pow(two_pi * static_cast<double>(type.frequency), 2);
@@ -50,7 +57,8 @@ OneModeTower::OneModeTower (const Tower& tower, Real gravity)
     auto shape = [&] (double z) { return (cb * z * z + cr * z + cl) / c; };
     for (std::size_t i = 0; i < nodes.size(); ++i) {
         m_phi.push_back(shape(zh[i]));
-        m_M += m_mass[i] * m_phi[i] * m_phi[i];
+        m_phi_mass.push_back(shape(zm[i]));
+        m_M += m_mass[i] * m_phi_mass[i] * m_phi_mass[i];
     }
     // the lines hang from the tower's attachments, or from the centre of its cross-arm
     for (const auto& at : tower.attachments()) { m_phi_att.push_back(shape((at[2] - tower.base()[2]) / H)); }
@@ -124,7 +132,7 @@ std::array<Real,3> OneModeTower::velocity (std::size_t node) const
 std::array<Real,3> OneModeTower::inertial_force (std::size_t node) const
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node < m_phi.size(), "OneModeTower::inertial_force: no such drag node");
-    const double m = m_mass[node] * m_phi[node];
+    const double m = m_mass[node] * m_phi_mass[node];
     return {{static_cast<Real>(-m * acceleration(0)), static_cast<Real>(-m * acceleration(1)), Real(0.0)}};
 }
 
@@ -138,6 +146,12 @@ std::array<Real,3> OneModeTower::attachment_velocity (std::size_t a) const
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(a < m_phi_att.size(), "OneModeTower::attachment_velocity: no such attachment");
     return {{static_cast<Real>(m_phi_att[a] * m_v[0]), static_cast<Real>(m_phi_att[a] * m_v[1]), Real(0.0)}};
+}
+
+bool OneModeTower::arm_centre_displacement (std::array<Real,3>& x) const
+{
+    x = {{static_cast<Real>(m_q[0]), static_cast<Real>(m_q[1]), Real(0.0)}};
+    return true;
 }
 
 Real OneModeTower::frequency () const { return static_cast<Real>(m_omega / two_pi); }

@@ -9,8 +9,11 @@ samples from t_start (erf.conductors.stats_start by default):
         mean and its peak; the effective gust response factor, the peak load over (rho/2) Cf d V3^2;
         the largest swing angle either way and the peak tension.
   ASCE  74 with the same gust: the wire load Q kz V^2 Gw Cf d with kz V^2 = V3^2, the 3-second gust at
-        the span's height, so the predicted peak is (rho/2) Cf d V3^2 Gw(z, L); the swing atan(load / W)
-        and the end tension of the elastic catenary under the resultant load.
+        the span's height, so the predicted peak is (rho/2) Cf d V3^2 Gw(z, L); the swing about the chord,
+        atan(load / (W cos beta)) with beta the chord's angle to the horizontal, and the upper end's tension,
+        the elastic catenary's under the resultant across the chord plus W chord sin(beta) / 2, as ERF's
+        asce74.csv has them (asce74_inclined_spans read from the run's inputs file and its FILE includes,
+        not from the command line).
 
 The span's height z, chord L, unstretched length and weight W come from <diagnostics_dir>/asce74.csv, which ERF writes
 when erf.conductors.asce74_wind is given; this script checks its own kz and Gw against that file.
@@ -86,6 +89,8 @@ def main():
     t_start = args.t_start if args.t_start is not None else float(inputs_value(text, "erf.conductors.stats_start", "0"))
     v_design = float(inputs_value(text, "erf.conductors.asce74_wind", "0"))
     e = args.exposure.upper()
+    # erf.conductors.asce74_inclined_spans = false takes every span as level under the whole weight
+    inclined = inputs_value(net, "erf.conductors.asce74_inclined_spans", "true").lower() not in ("false", "0")
     if not v_design > 0:
         sys.exit("the run needs erf.conductors.asce74_wind for its asce74.csv (heights, chords, weights)")
 
@@ -106,7 +111,10 @@ def main():
         p = l.split()
         if p[1] == "transformer":
             continue
-        pts.setdefault(p[0], []).append((float(p[2]), float(p[3])))
+        # the conductor hangs from the bottom of the insulator string at a tower (point t<k>), from the end itself
+        # at end_a and end_b: the chord's incline is between those points, as in asce74.csv
+        drop = float(inputs_value(net, f"erf.conductors.{p[0]}.insulator_length", "0")) if p[1].startswith("t") else 0.0
+        pts.setdefault(p[0], []).append((float(p[2]), float(p[3]), float(p[5]) - drop))
 
     out = []
     series = {}
@@ -118,7 +126,8 @@ def main():
         d = np.loadtxt(f, skiprows=1)
         d = d[d[:, 0] >= t_start]
         c = {n: i for i, n in enumerate(h)}
-        (xa, ya), (xb, yb) = pts[line][k - 1], pts[line][k]
+        (xa, ya, za), (xb, yb, zb) = pts[line][k - 1], pts[line][k]
+        beta = math.asin(max(-1.0, min(1.0, (zb - za) / s["chord"]))) if inclined else 0.0
         L = math.hypot(xb - xa, yb - ya)
         n = np.array([-(yb - ya) / L, (xb - xa) / L])
         vn = d[:, c["mid_u"]] * n[0] + d[:, c["mid_v"]] * n[1]
@@ -134,8 +143,9 @@ def main():
         q0 = 0.5 * rho * cf * diam * v3 ** 2
         g = gw(e, s["z"], s["chord"])
         q_asce = q0 * g
-        swing_asce = math.degrees(math.atan2(q_asce, s["W"]))
-        tension_asce, _ = elastic_catenary(s["chord"], s["length"], math.hypot(q_asce, s["W"]), ea)
+        wn = s["W"] * math.cos(beta)
+        swing_asce = math.degrees(math.atan2(q_asce, wn))
+        tension_asce = elastic_catenary(s["chord"], s["length"], math.hypot(q_asce, wn), ea)[0] + 0.5 * s["W"] * s["chord"] * abs(math.sin(beta))
         out.append(dict(line=line, span=k, z=s["z"], chord=s["chord"], v_mean=vn.mean(), v3=v3, gust_factor=v3 / vn.mean(),
                         q_mean=q.mean(), q_peak=q.max(), gw_les=q.max() / q0, gw_asce=g, q_asce=q_asce,
                         swing_les=np.abs(d[:, c["swing_deg"]]).max(), swing_asce=swing_asce,

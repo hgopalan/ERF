@@ -30,30 +30,59 @@ Tower::Tower (std::string name, const TowerType& type, const std::array<Real,3>&
     }
     const Real phi = m_type.solidity;
     const Real cf = m_type.force_coefficient();
+    // the shaft is a square lattice whose faces lie along the cross-arm and across it: wind along a diagonal
+    // meets more of its members than wind normal to a face
+    const Real gain = m_type.diagonal_wind_factor ? lattice_diagonal_gain(phi) : Real(0.0);
     // the shaft up to the cross-arm, tapering, then the peak at the top width
     const int n = m_type.segments;
     const Real dz = m_arm_height / n;
     for (int i = 0; i < n; ++i) {
         const Real z = (Real(i) + Real(0.5)) * dz;
         const Real w = m_type.base_width + (m_type.top_width - m_type.base_width) * z / m_arm_height;
-        m_nodes.push_back(MemberNode{{{m_base[0], m_base[1], m_base[2] + z}}, {{0.0, 0.0, 1.0}}, dz, phi * w, cf});
+        m_nodes.push_back(MemberNode{{{m_base[0], m_base[1], m_base[2] + z}}, {{0.0, 0.0, 1.0}}, dz, phi * w, cf, m_across, gain});
     }
     if (m_type.peak > 0.0) {
         const int np = std::max(1, static_cast<int>(std::ceil(m_type.peak / dz)));
         const Real dp = m_type.peak / np;
         for (int i = 0; i < np; ++i) {
             const Real z = m_arm_height + (Real(i) + Real(0.5)) * dp;
-            m_nodes.push_back(MemberNode{{{m_base[0], m_base[1], m_base[2] + z}}, {{0.0, 0.0, 1.0}}, dp, phi * m_type.top_width, cf});
+            m_nodes.push_back(MemberNode{{{m_base[0], m_base[1], m_base[2] + z}}, {{0.0, 0.0, 1.0}}, dp, phi * m_type.top_width, cf,
+                                         m_across, gain});
         }
     }
     m_nbody = static_cast<int>(m_nodes.size());
-    // the cross-arm, centred on the shaft
+    // the cross-arm, centred on the shaft: with arm_outside_shaft its two parts outside the shaft (the shaft's
+    // nodes already carry the drag where the arm passes through it, the shaft as wide there as at the middle
+    // of the cross-arm's face), at the middle of its face, which hangs from the cross-arm's height; else along
+    // its whole length at that height
     const int na = TowerType::arm_segments;
-    const Real da = m_type.arm_length / na;
-    for (int i = 0; i < na; ++i) {
-        const Real s = -Real(0.5) * m_type.arm_length + (Real(i) + Real(0.5)) * da;
-        m_nodes.push_back(MemberNode{{{m_base[0] + s * m_across[0], m_base[1] + s * m_across[1], m_base[2] + m_arm_height}},
-                                     m_across, da, phi * m_type.arm_face(), cf});
+    const bool outside = m_type.arm_outside_shaft;
+    const std::string key = "erf.conductors." + m_type.name + ".";
+    const Real za = m_arm_height - (outside ? Real(0.5) * m_type.arm_face() : Real(0.0));
+    if (!(za > Real(0.0))) {
+        amrex::Abort("Tower " + m_name + ": the middle of the cross-arm's face lies " + std::to_string(-za) + " m below the base: " + key +
+                     "arm_depth (or top_width, when arm_depth is 0) must be under twice the cross-arm's height, or set " + key +
+                     "arm_outside_shaft = false");
+    }
+    const Real inner = outside ? Real(0.5) * (m_type.base_width + (m_type.top_width - m_type.base_width) * za / m_arm_height) : Real(0.0);
+    if (!(Real(0.5) * m_type.arm_length > inner)) {
+        amrex::Abort("Tower " + m_name + ": " + key + "arm_length (" + std::to_string(m_type.arm_length) + " m) must exceed the shaft's width " +
+                     "at the middle of the cross-arm's face (" + std::to_string(2.0 * inner) + " m) for " + key + "arm_outside_shaft");
+    }
+    auto arm_node = [&] (Real s, Real length) {
+        m_nodes.push_back(MemberNode{{{m_base[0] + s * m_across[0], m_base[1] + s * m_across[1], m_base[2] + za}},
+                                     m_across, length, phi * m_type.arm_face(), cf});
+    };
+    if (outside) {
+        // half the nodes on each side, from the tip inwards on the first, outwards on the second: the nodes run
+        // from one tip to the other
+        const int nside = na / 2;
+        const Real da = (Real(0.5) * m_type.arm_length - inner) / nside;
+        for (int i = 0; i < nside; ++i) { arm_node(-(Real(0.5) * m_type.arm_length - (Real(i) + Real(0.5)) * da), da); }
+        for (int i = 0; i < nside; ++i) { arm_node(inner + (Real(i) + Real(0.5)) * da, da); }
+    } else {
+        const Real da = m_type.arm_length / na;
+        for (int i = 0; i < na; ++i) { arm_node(-Real(0.5) * m_type.arm_length + (Real(i) + Real(0.5)) * da, da); }
     }
     m_force.assign(3 * m_nodes.size(), 0.0);
     m_disp.assign(3 * m_nodes.size(), 0.0);
@@ -149,9 +178,11 @@ FoundationLoad Tower::foundation () const
     FoundationLoad L;
     auto Fd = total_force();
     auto Md = base_moment();
-    // a moving tower's nodes also carry their inertial forces to the foundation
+    // a moving tower's nodes also carry their inertial forces to the foundation, the cross-arm's from its height,
+    // where its mass is (OneModeTower), wherever its drag nodes stand
     for (std::size_t i = 0; i < m_nodes.size(); ++i) {
-        const Real rx = m_nodes[i].pos[0] - m_base[0], ry = m_nodes[i].pos[1] - m_base[1], rz = m_nodes[i].pos[2] - m_base[2];
+        const Real rx = m_nodes[i].pos[0] - m_base[0], ry = m_nodes[i].pos[1] - m_base[1];
+        const Real rz = ((static_cast<int>(i) < m_nbody) ? m_nodes[i].pos[2] : m_base[2] + m_arm_height) - m_base[2];
         const Real fx = m_inertia[3*i], fy = m_inertia[3*i+1], fz = m_inertia[3*i+2];
         Fd[0] += fx; Fd[1] += fy; Fd[2] += fz;
         Md[0] += ry * fz - rz * fy;

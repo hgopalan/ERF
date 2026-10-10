@@ -44,6 +44,7 @@ struct LatticeSpec
     double peak{0.0};         //!< the shaft above the cross-arm (m, >= 0)
     int panels{0};            //!< the shaft's panels below the cross-arm (>= 1)
     bool crossed{true};       //!< crossed diagonals on every panel face, bolted where they cross; else one diagonal, alternating
+    bool principal_axes{true};//!< turn each angle (MSpin) so that its axis of symmetry lies as on a real tower; else MSpin 0
     double leg_b{0.0};        //!< the legs' and the cross-arms' chords' angle: leg width (m)
     double leg_t{0.0};        //!< and thickness (m)
     double brace_b{0.0};      //!< every other member's angle: leg width (m)

@@ -11,9 +11,12 @@
 # the gold <GOLD_DIR>/<file name><GOLD_SUFFIX>; a comma-separated table (.csv) is compared as a
 # whitespace-separated one.
 #
+# With OPTIONS (space-separated key=value inputs), the run takes them after the deck: a deck's
+# variant, such as its old forms of a model against golds written before the model changed.
+#
 # Variables: MPIEXEC, MPIEXEC_NUMPROC_FLAG, MPIEXEC_PREFLAGS, NRANKS, TEST_EXE, CONFIG, INPUT,
 # WORKING_DIRECTORY, FCOMPARE, PLTFILE, PLOT_GOLD, RTOL, ATOL, LOG, GOLD, SIGDIGITS, TOTALS,
-# EXTRA_LOGS, GOLD_DIR, GOLD_SUFFIX.
+# EXTRA_LOGS, GOLD_DIR, GOLD_SUFFIX, OPTIONS.
 
 cmake_minimum_required(VERSION 3.20)
 include("${CMAKE_CURRENT_LIST_DIR}/MPILauncher.cmake")
@@ -60,8 +63,9 @@ erf_mpi_launcher_command(launch_one
 set(log "${WORKING_DIRECTORY}/simulation.log")
 file(REMOVE "${WORKING_DIRECTORY}/${LOG}")
 file(REMOVE_RECURSE "${WORKING_DIRECTORY}/${PLTFILE}")
+separate_arguments(options UNIX_COMMAND "${OPTIONS}")
 execute_process(
-    COMMAND ${launcher} ${TEST_EXE} ${INPUT} amrex.call_addr2line=0
+    COMMAND ${launcher} ${TEST_EXE} ${INPUT} amrex.call_addr2line=0 ${options}
     WORKING_DIRECTORY "${WORKING_DIRECTORY}"
     OUTPUT_FILE "${log}"
     ERROR_FILE "${log}"

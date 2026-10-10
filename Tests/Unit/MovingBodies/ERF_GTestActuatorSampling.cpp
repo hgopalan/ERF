@@ -13,6 +13,7 @@
 //   (CoverZ::Footprint) the boxes' footprints must hold the reach across, at any height, and for the
 //   spreading (CoverZ::Column) the grids must hold it in every cell the heights within reach may lie in
 //   (from mesh_z_bounds, exact on a flat uniform mesh), or over the whole height without the bounds.
+//   Whether a point is covered does not depend on how the level is cut into boxes.
 // - wrap_periodic: a point a few ulps below a non-zero prob_lo lands on prob_lo, not on prob_hi.
 // - terrain_heights: the bilinear k = 0 node surface.
 
@@ -275,6 +276,42 @@ TEST(ActuatorSampling, CoverageByALevelIncludesTheReach)
     EXPECT_TRUE(erf_actuator::points_covered_by(whole, geom, {10.0, 10.0, 10.0, 2990.0, 1190.0, 590.0}, 400.0, outside));
     // an empty point list is covered
     EXPECT_TRUE(erf_actuator::points_covered_by(ba, geom, {}, 100.0, outside));
+}
+
+// Whether the grids cover a point does not depend on how the level is cut into boxes: the same region as one
+// box and as unequal, non-mirror boxes (at most 7 x 5 x 3 cells) gives the same answer for every point of a sweep
+// across its edges and seams, every reach and every z rule
+TEST(ActuatorSampling, CoverageIsIndependentOfTheBoxDecomposition)
+{
+    amrex::Box domain(amrex::IntVect(0, 0, 0), amrex::IntVect(59, 23, 11));
+    amrex::RealBox rb({0.0, 0.0, 0.0}, {3000.0, 1200.0, 600.0});
+    amrex::Geometry geom(domain, rb, 0, {1, 1, 0});
+    const amrex::Box region(amrex::IntVect(10, 6, 0), amrex::IntVect(29, 17, 8));
+    const amrex::BoxArray one(region);
+    amrex::BoxArray cut(region);
+    cut.maxSize(amrex::IntVect(7, 5, 3));
+    ASSERT_GT(cut.size(), 20);
+    int points = 0, covered = 0;
+    for (const auto z : {erf_actuator::CoverZ::Reach, erf_actuator::CoverZ::Footprint, erf_actuator::CoverZ::Column}) {
+        for (const amrex::Real reach : {amrex::Real(0.0), amrex::Real(60.0), amrex::Real(130.0)}) {
+            for (amrex::Real x = 380.0; x < 1650.0; x += 37.0) {
+                for (amrex::Real y = 190.0; y < 1010.0; y += 41.0) {
+                    for (amrex::Real h = 5.0; h < 560.0; h += 53.0) {
+                        std::string a, b;
+                        const bool ca = erf_actuator::points_covered_by(one, geom, {x, y, h}, reach, a, z);
+                        const bool cb = erf_actuator::points_covered_by(cut, geom, {x, y, h}, reach, b, z);
+                        ASSERT_EQ(ca, cb) << "(" << x << ", " << y << ", " << h << ") reach " << reach << " rule " << static_cast<int>(z);
+                        EXPECT_EQ(a, b);
+                        ++points;
+                        if (ca) { ++covered; }
+                    }
+                }
+            }
+        }
+    }
+    // the sweep holds points on both sides of the answer
+    EXPECT_GT(covered, points / 10);
+    EXPECT_LT(covered, points - points / 10);
 }
 
 // In a periodic direction the cells a point needs wrap across the seam: a level that covers part

@@ -809,7 +809,11 @@ checked by the restart parity tests ``Conductors_Circuit_Restart`` and
 checkpoint and five more, one binary against itself, together with the
 strings' log, the span logs and the statistics. Every span's ASCE 74 design
 check for a 40 m/s gust over open country (``conductors/asce74.csv``, the
-heights measured to the bottoms of the strings) is compared with a gold. The flow is
+heights measured to the bottoms of the strings) is compared with a gold.
+``Conductors_Circuit_Legacy`` and ``Conductors_Circuit_Legacy_MoorDyn`` run the
+same deck with the check's earlier forms (``asce74_wire_height = attachment``,
+``asce74_inclined_spans = false``) against the ``asce74.csv`` golds written
+before those changed. The flow is
 ``Conductors_FlowWind``'s gold, since nothing goes back into it.
 
 ``Conductors_Terrain`` (stub) and ``Conductors_Terrain_MoorDyn`` (real
@@ -858,8 +862,11 @@ hilltop line's first tower and the middle span of one line are compared with
 golds of each library (the real library's to four digits, as above); the
 restart parity tests ``Conductors_MovingTowers_Restart`` and
 ``Conductors_MovingTowers_Restart_MoorDyn`` carry the towers' sway across
-the checkpoint. The flow is ``Conductors_Terrain``'s gold, since nothing
-goes back into it.
+the checkpoint. ``Conductors_MovingTowers_Legacy`` and
+``Conductors_MovingTowers_Legacy_MoorDyn`` run the deck with the towers'
+earlier forms (``diagonal_wind_factor = false``, ``arm_outside_shaft = false``)
+against the golds written before those changed. The flow is
+``Conductors_Terrain``'s gold, since nothing goes back into it.
 
 ``Conductors_FrameTowers`` (stub) and ``Conductors_FrameTowers_MoorDyn``
 (real library) run the same lines on towers that bend as their frame model
@@ -891,7 +898,10 @@ parity tests ``Conductors_GeneratedTowers_Restart`` and
 ``Conductors_GeneratedTowers_Restart_MoorDyn`` carry the frames' state, the
 members' statistics and the frames' log across the checkpoint, the checkpointing
 run going on past it (``OVERRUN``), so every conductor log is also trimmed back to
-the checkpoint. The flow is
+the checkpoint. ``Conductors_GeneratedTowers_Legacy`` and
+``Conductors_GeneratedTowers_Legacy_MoorDyn`` run the deck with the towers'
+earlier forms (also ``angle_principal_axes = false``) against the towers' and
+first tower's golds written before those changed. The flow is
 ``Conductors_Terrain``'s gold.
 
 ``Conductors_ImmersedHills`` (stub) and ``Conductors_ImmersedHills_MoorDyn``

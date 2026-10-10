@@ -293,6 +293,14 @@ std::string first_nonfinite (const std::vector<T>& v, std::size_t per_point, con
  *                                                   <diagnostics_dir>/asce74.csv at start-up; default 0: none)
  *   erf.conductors.asce74_exposure  = C            (B or C, ASCE 74's terrain exposure of that check; default C;
  *                                                   needs asce74_wind)
+ *   erf.conductors.asce74_wire_height = effective  (effective or attachment, the wire height of that check: the mean
+ *                                                   of the span's attachment heights less a third of its still-air sag,
+ *                                                   or the attachment height alone; default effective; needs asce74_wind)
+ *   erf.conductors.asce74_inclined_spans = true    (the check's swing about an inclined chord against the weight's
+ *                                                   part normal to it, W cos beta, and the upper end's tension;
+ *                                                   default true, false: the level span's swing, sag and tension
+ *                                                   under the whole weight W, the effective height's still-air
+ *                                                   sag the inclined chord's either way; needs asce74_wind)
  *   erf.conductors.gust_type        = factor       (none, factor, event or random; default none (ERF_Gusts.H). Every
  *                                                   type but none writes every span's gust factor and peak wind load
  *                                                   from the mean wind and the k-equation RANS's k along it to
@@ -361,6 +369,10 @@ struct ConductorInputs
     amrex::Real flashover_distance{1.0};                //!< (m)
     amrex::Real asce74_wind{0.0};                       //!< (m/s); 0: no ASCE 74 table
     std::string asce74_exposure;                        //!< B or C; empty: C
+    std::string asce74_wire_height{"effective"};        //!< effective (attachment height less a third of the sag) or attachment
+    bool has_asce74_wire_height{false};                 //!< asce74_wire_height was given (it needs asce74_wind)
+    bool asce74_inclined_spans{true};                   //!< W cos(beta) across an inclined chord, the upper end's tension; false: level, W
+    bool has_asce74_inclined_spans{false};              //!< asce74_inclined_spans was given (it needs asce74_wind)
     std::string gust_type{"none"};                      //!< none, factor, event or random
     bool has_gust_sigma_factor{false};
     amrex::Real gust_sigma_factor{0.0};                 //!< (-); not given: 2.5 Cmu0 of the k-equation RANS

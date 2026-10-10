@@ -11,6 +11,9 @@
 // ASCE74.TheSpanSwingsAndStretchesUnderTheResultant: the load is Q k_z V^2 G_w C_f d; the swing is
 //   atan(load/weight); the sag and the tension are the elastic catenary's under the resultant; the
 //   blowout is the sag times sin(swing); no wind leaves the still-air catenary.
+// ASCE74.AnInclinedSpanSwingsAgainstTheWeightNormalToItsChord: on a chord inclined by beta,
+//   tan(swing) = F / (W cos beta) and the catenary hangs under sqrt(F^2 + (W cos beta)^2); the tension is the
+//   upper end's, an exact inclined elastic catenary's to 0.1 %; beta = 0 gives the level span's numbers.
 
 #include <cmath>
 #include <string>
@@ -101,4 +104,30 @@ TEST(ASCE74, TheSpanSwingsAndStretchesUnderTheResultant)
     EXPECT_NEAR(still.tension, static_cast<double>(air.end_tension), rel * still.tension);
     EXPECT_GT(w.tension, still.tension);
     EXPECT_GT(w.swing, 0.8);   // a 35 m/s gust blows a Drake span well out (about 50 degrees)
+}
+
+// On a chord inclined by beta the tension carries the weight's part along the chord: the span swings about its
+// chord against W cos beta, tan(swing) = F / (W cos beta), and hangs under sqrt(F^2 + (W cos beta)^2)
+TEST(ASCE74, AnInclinedSpanSwingsAgainstTheWeightNormalToItsChord)
+{
+    const double d = 0.0281, W = 15.97, chord = 300.0, length = 301.5, EA = 3.0e7, rho = 1.2, V = 30.0, z = 25.0;
+    const double beta = 15.0 * 3.14159265358979323846 / 180.0;
+    const auto level = wire_wind_load(Exposure::C, V, z, chord, d, 1.1, W, length, EA, rho);
+    const auto inclined = wire_wind_load(Exposure::C, V, z, chord, d, 1.1, W, length, EA, rho, beta);
+    EXPECT_EQ(inclined.load, level.load) << "the wind normal to the span loads it alike";
+    EXPECT_NEAR(std::tan(inclined.swing), std::tan(level.swing) / std::cos(beta), 1e-12);
+    EXPECT_GT(inclined.swing, level.swing);
+    const Catenary cat = elastic_catenary(amrex::Real(chord), amrex::Real(length),
+                                          amrex::Real(std::hypot(inclined.load, W * std::cos(beta))), amrex::Real(EA));
+    EXPECT_NEAR(inclined.sag, static_cast<double>(cat.sag), rel * inclined.sag);
+    EXPECT_NEAR(inclined.blowout, inclined.sag * std::sin(inclined.swing), 1e-12);
+    // the upper end's tension: the exact inclined elastic catenary under the same load (13.844 N/m across the chord)
+    // and weight gives 17920.0 N at the upper end and 16680.7 N at the lower (an independent 3D solve, the load per
+    // unstretched metre); the level span's alone would be 17291.8 N, 3.5 % low
+    EXPECT_NEAR(inclined.load, 13.844197, 1.0e-6);
+    EXPECT_NEAR(inclined.tension, 17920.0, 1.0e-3 * 17920.0);
+    // 0: the level span's numbers, bit for bit
+    const auto zero = wire_wind_load(Exposure::C, V, z, chord, d, 1.1, W, length, EA, rho, 0.0);
+    EXPECT_EQ(zero.swing, level.swing);
+    EXPECT_EQ(zero.sag, level.sag);
 }

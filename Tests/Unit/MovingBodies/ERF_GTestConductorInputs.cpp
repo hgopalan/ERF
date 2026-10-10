@@ -294,6 +294,9 @@ TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
     bad([](ConductorInputs& c) { c.asce74_wind = std::numeric_limits<amrex::Real>::quiet_NaN(); }, "asce74_wind must be finite");
     bad([](ConductorInputs& c) { c.asce74_wind = 40.0; c.asce74_exposure = "D"; }, "asce74_exposure must be B or C");
     bad([](ConductorInputs& c) { c.asce74_exposure = "B"; }, "asce74_exposure needs erf.conductors.asce74_wind");
+    bad([](ConductorInputs& c) { c.asce74_wind = 40.0; c.asce74_wire_height = "mid"; }, "asce74_wire_height must be effective or attachment");
+    bad([](ConductorInputs& c) { c.has_asce74_wire_height = true; }, "asce74_wire_height needs erf.conductors.asce74_wind");
+    bad([](ConductorInputs& c) { c.has_asce74_inclined_spans = true; }, "asce74_inclined_spans needs erf.conductors.asce74_wind");
     {
         ConductorInputs c = in;
         c.asce74_wind = 40.0;
@@ -996,7 +999,8 @@ std::string read_after (const std::function<void()>& setup)
     setup();
     const std::string msg = erf_gtest::abort_message([] { ConductorInputs::read(); });
     amrex::ParmParse pp("erf.conductors");
-    for (const char* key : {"lines", "transformers", "tower_types", "prescribed_velocity", "drag_on_flow", "epsilon"}) { pp.remove(key); }
+    for (const char* key : {"lines", "transformers", "tower_types", "prescribed_velocity", "drag_on_flow", "epsilon", "asce74_wind",
+                            "asce74_wire_height", "asce74_inclined_spans"}) { pp.remove(key); }
     return msg;
 }
 } // namespace
@@ -1071,6 +1075,32 @@ TEST(ConductorInputs, ReadRefusesMalformedInputsNamingTheKey)
             add_line_block("RP");
             pp.add("lines", std::string("RP"));
             pp.add("epsilon", 2.0);
+        }},
+        // keys that need another, given while it is not (a switch given at all, on or off, is refused)
+        {"erf.conductors.RU.angle_principal_axes needs erf.conductors.RU.frame_panels", [&] {
+            add_line_block("RS");
+            amrex::ParmParse ps("erf.conductors.RS");
+            ps.addarr("towers", std::vector<amrex::Real>{250.0, 500.0, 30.0});
+            ps.addarr("length", std::vector<amrex::Real>{150.75, 150.75});
+            ps.add("tower_type", std::string("RU"));
+            pp.add("lines", std::string("RS"));
+            pp.addarr("tower_types", std::vector<std::string>{"RU"});
+            amrex::ParmParse pt("erf.conductors.RU");
+            pt.add("base_width", 6.0);
+            pt.add("top_width", 1.5);
+            pt.add("solidity", 0.2);
+            pt.add("arm_length", 12.0);
+            pt.add("angle_principal_axes", false);
+        }},
+        {"erf.conductors.asce74_wire_height needs erf.conductors.asce74_wind", [&] {
+            add_line_block("RV");
+            pp.add("lines", std::string("RV"));
+            pp.add("asce74_wire_height", std::string("attachment"));
+        }},
+        {"erf.conductors.asce74_inclined_spans needs erf.conductors.asce74_wind", [&] {
+            add_line_block("RW");
+            pp.add("lines", std::string("RW"));
+            pp.add("asce74_inclined_spans", false);
         }},
         {"erf.conductors.RK.diameter must be finite", [&] {
             add_line_block("RK");
