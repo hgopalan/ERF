@@ -1,20 +1,20 @@
 name: ERF CI
 
-# MPICH on merge only, not PR
+# MPICH on merge only, not PR (merges into development, and into ERF-Fire, the fork's merge branch)
 on:
   push:
-    branches: [development]
+    branches: [development, ERF-Fire]
     paths-ignore:
       - Docs/**
       - README.rst
       - license.txt
   workflow_dispatch:
 
-# Each merge into development gets its own group (keyed on the commit), so a burst of
-# merges never cancels a still-pending development run: every merge writes its ccache.
+# Each merge into development or ERF-Fire gets its own group (keyed on the commit), so a burst
+# of merges never cancels a still-pending run on either branch: every merge writes its ccache.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.head_ref || github.sha }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/development' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/development' && github.ref != 'refs/heads/ERF-Fire' }}
 
 jobs:
 
@@ -62,10 +62,10 @@ jobs:
       run: Submodules/AMReX/.github/workflows/dependencies/dependencies_ccache.sh
 
     # Separate cache per matrix build configuration
-    # Only changes are recompiled from latest development CI run
-    # Looks for cache of exact commit, if not found then cache of latest commit in development branch
+    # Only changes are recompiled from the latest development or ERF-Fire CI run
+    # Looks for cache of exact commit, if not found then the newest cache of either branch
     # PRs restore from cache but do not save to cache
-    # Only merges into development (and manual runs on development) save to cache
+    # Only merges into development or ERF-Fire (and manual runs on them) save to cache
     - name: Restore Cache
       uses: actions/cache/restore@v6
       with:
@@ -124,7 +124,7 @@ jobs:
         du -hs ~/.cache/ccache
 
     - name: Save Cache
-      if: always() && github.ref_name == github.event.repository.default_branch
+      if: always() && (github.ref_name == github.event.repository.default_branch || github.ref == 'refs/heads/ERF-Fire')
       uses: actions/cache/save@v6
       with:
         path: ~/.cache/ccache

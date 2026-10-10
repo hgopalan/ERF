@@ -45,7 +45,7 @@ void FireDustCoupling::apply_burned_area_to_crust(MultiFab& dust_crust_index) co
 void FireDustCoupling::apply_fire_wind_to_dust_ustar(
     amrex::MultiFab&       dust_ustar_in,
     const amrex::MultiFab& fire_wind_scratch,
-    const amrex::MultiFab& fire_phi_scratch,
+    const amrex::MultiFab& fire_phi_scratch_in,
     const amrex::Geometry& /*geom_dust*/,
     amrex::Real            z0,
     amrex::Real            zref,
@@ -72,7 +72,7 @@ void FireDustCoupling::apply_fire_wind_to_dust_ustar(
         const amrex::Box& bx = mfi.tilebox();
         auto ustar = dust_ustar_in.array(mfi);
         auto wind  = fire_wind_scratch.const_array(mfi);
-        auto phi   = fire_phi_scratch.const_array(mfi);
+        auto phi   = fire_phi_scratch_in.const_array(mfi);
 
         amrex::ParallelFor(bx,
             [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {

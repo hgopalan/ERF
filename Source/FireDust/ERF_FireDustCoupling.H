@@ -89,7 +89,7 @@ struct FireDustCoupling {
     void apply_fire_wind_to_dust_ustar(
        amrex::MultiFab&       dust_ustar_in,
        const amrex::MultiFab& fire_wind_scratch,
-       const amrex::MultiFab& fire_phi_scratch,
+       const amrex::MultiFab& fire_phi_scratch_in,
        const amrex::Geometry& geom_dust,
        amrex::Real            z0,
        amrex::Real            zref,

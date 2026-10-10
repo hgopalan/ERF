@@ -282,6 +282,8 @@ if(ERF_ENABLE_FIRE)
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireSuppression.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestCustomFuel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireDiagnosticsPerFuel.cpp
+    # Motivation: several perimeter files in one deck must all be read and merged.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestPolygonIgnition.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireModelReferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireDefaults.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestBehaveNetLoad.cpp

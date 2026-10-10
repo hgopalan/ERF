@@ -5485,8 +5485,10 @@ Ignition
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.ignition.schedule_file**            | CSV of timed ignition events; empty disables               | String                         | ""                     |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
-| **erf.fire.ignition.polygon_file**             | CSV of perimeter vertices for a polygon or polyline        | String                         | ""                     |
-|                                                | ignition                                                   |                                |                        |
+| **erf.fire.ignition.polygon_file**             | One or more CSVs of perimeter vertices, each one polygon   | List of Strings                | ""                     |
+|                                                | or polyline ignition of the deck's polygon_type and        |                                |                        |
+|                                                | polyline_width; every file is stamped, so several files    |                                |                        |
+|                                                | are several fires that merge as they grow                  |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.ignition.polygon_type**             | Closed polygon or open line fire                           | "polygon", "polyline"          | "polygon"              |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+

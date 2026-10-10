@@ -3,6 +3,7 @@
 
 #include <AMReX_ParmParse.H>
 #include <ERF_FireBreak.H>
+#include <ERF_BurnCurve.H>
 #include <ERF_FireAcceleration.H>
 #include <string>
 #include <vector>
@@ -355,13 +356,19 @@ struct FireParams
     //   priority: integer; higher priority events fire first within the same timestep
     //   Comment lines start with # or !
     //
-    // Polygon ignition (initial perimeter from a vertex file):
-    //   polygon_file: path to CSV of polygon vertices (x y per line)
-    //   polygon_type: "polygon" (closed) or "polyline" (open line fire)
-    //   polyline_width: half-width of line ignition zone [m]
+    // Polygon ignition (initial perimeter from one or more vertex files):
+    //   polygon_file: paths to CSVs of polygon vertices (x y per line); each
+    //                 file is one closed polygon or one open polyline, and
+    //                 every file is stamped with the min(phi, new) rule, so
+    //                 several files are several fires (two parallel lines,
+    //                 separate perimeters) that merge as they grow
+    //   polygon_type: "polygon" (closed) or "polyline" (open line fire), for every file
+    //   polyline_width: half-width of line ignition zone [m], for every file
     struct IgnitionParams {
         std::string   ignition_schedule_file  = "";         ///< Path to ignition schedule CSV; empty = disabled
-        std::string   polygon_file            = "";         ///< Path to polygon vertex CSV; empty = disabled
+        std::vector<std::string> polygon_files;             ///< Polygon vertex CSVs, one perimeter each; empty = disabled
+        /// A perimeter ignition is configured (at least one vertex file)
+        bool has_polygon () const { return !polygon_files.empty(); }
         std::string   polygon_type            = "polygon";  ///< "polygon" or "polyline"
         amrex::Real   polyline_width          = 10.0;       ///< Half-width of polyline ignition zone [m]
         // Observed-perimeter ignition with spin-up (WRF-SFIRE's perimeter
@@ -1262,11 +1269,16 @@ struct FireParams
        // Phase 11: multi-ignition schedule and polygon ignition
        auto& ig = ignition;
        pp.query("ignition.schedule_file", ig.ignition_schedule_file);
-       pp.query("ignition.polygon_file",  ig.polygon_file);
+       {
+           // One or more vertex files; an empty entry ("" in a template deck) is no file.
+           std::vector<std::string> files;
+           pp.queryarr("ignition.polygon_file", files);
+           for (const auto& f : files) { if (!f.empty()) { ig.polygon_files.push_back(f); } }
+       }
        pp.query("ignition.polygon_type",  ig.polygon_type);
        pp.query("ignition.polyline_width", ig.polyline_width);
        one_of("ignition.polygon_type", ig.polygon_type, {"polygon", "polyline"});
-       if (!ig.polygon_file.empty() && ig.polygon_type == "polyline") positive("ignition.polyline_width", ig.polyline_width);
+       if (ig.has_polygon() && ig.polygon_type == "polyline") positive("ignition.polyline_width", ig.polyline_width);
        pp.query("ignition.polygon_time",         ig.polygon_time);
        pp.query("ignition.polygon_interior_ros", ig.polygon_interior_ros);
        pp.query("ignition.polygon_interior_tau", ig.polygon_interior_tau);
@@ -1538,17 +1550,17 @@ struct FireParams
        pp.query("structures.min_height", structures.min_height);
        pp.query("structures.wind_open_columns", structures.wind_open_columns);
        {
-           auto& ig = structures.ignition;
-           pp.query("structures.ignition.enable",             ig.enable);
-           pp.query("structures.ignition.heat_load_J_m2",     ig.heat_load_J_m2);
-           pp.query("structures.ignition.ember_count",        ig.ember_count);
-           pp.query("structures.ignition.intensity_kW_m",     ig.intensity_kW_m);
-           pp.query("structures.ignition.residence_s",        ig.residence_s);
-           pp.query("structures.ignition.peak_flux_W_m2",     ig.peak_flux_W_m2);
-           pp.query("structures.ignition.fuel_load_J_m2",     ig.fuel_load_J_m2);
-           pp.query("structures.ignition.growth_time_s",      ig.growth_time_s);
-           pp.query("structures.ignition.rad_fraction", ig.rad_fraction);
-           pp.query("structures.ignition.rad_radius_m", ig.rad_radius_m);
+           auto& st_ig = structures.ignition;
+           pp.query("structures.ignition.enable",             st_ig.enable);
+           pp.query("structures.ignition.heat_load_J_m2",     st_ig.heat_load_J_m2);
+           pp.query("structures.ignition.ember_count",        st_ig.ember_count);
+           pp.query("structures.ignition.intensity_kW_m",     st_ig.intensity_kW_m);
+           pp.query("structures.ignition.residence_s",        st_ig.residence_s);
+           pp.query("structures.ignition.peak_flux_W_m2",     st_ig.peak_flux_W_m2);
+           pp.query("structures.ignition.fuel_load_J_m2",     st_ig.fuel_load_J_m2);
+           pp.query("structures.ignition.growth_time_s",      st_ig.growth_time_s);
+           pp.query("structures.ignition.rad_fraction", st_ig.rad_fraction);
+           pp.query("structures.ignition.rad_radius_m", st_ig.rad_radius_m);
        }
        pp.queryarr("fuel_map.nonburnable_codes", fuel_map.nonburnable_codes);
        pp.query("fuel_map.fuel_set",       fuel_map.fuel_set);
@@ -1627,38 +1639,43 @@ struct FireParams
            amrex::Abort("erf.fire.heat_open_fraction needs erf.fire.structures.enable");
        }
        if (structures.ignition.enable) {
-           const auto& ig = structures.ignition;
+           const auto& st_ig = structures.ignition;
            if (!exposure.enable) {
                amrex::Abort("erf.fire.structures.ignition.enable needs erf.fire.exposure.enable "
                             "(the ignition rule reads the exposure accumulators)");
            }
-           if (ig.heat_load_J_m2 <= 0.0 && ig.ember_count <= 0 && ig.intensity_kW_m <= 0.0) {
+           if (st_ig.heat_load_J_m2 <= 0.0 && st_ig.ember_count <= 0 && st_ig.intensity_kW_m <= 0.0) {
                amrex::Abort("erf.fire.structures.ignition: at least one of heat_load_J_m2, ember_count "
                             "and intensity_kW_m must be positive, or no structure can ignite");
            }
-           if (ig.residence_s < 0.0) {
+           if (st_ig.residence_s < 0.0) {
                amrex::Abort("erf.fire.structures.ignition.residence_s must be >= 0");
            }
-           if (ig.peak_flux_W_m2 <= 0.0) {
+           if (st_ig.peak_flux_W_m2 <= 0.0) {
                amrex::Abort("erf.fire.structures.ignition.peak_flux_W_m2 must be > 0");
            }
-           if (ig.fuel_load_J_m2 <= 0.0) {
+           if (st_ig.fuel_load_J_m2 <= 0.0) {
                amrex::Abort("erf.fire.structures.ignition.fuel_load_J_m2 must be > 0");
            }
-           if (ig.growth_time_s < 0.0) {
+           if (st_ig.growth_time_s < 0.0) {
                amrex::Abort("erf.fire.structures.ignition.growth_time_s must be >= 0");
            }
            // EN 1991-1-2 Annex E.4: the decay releases 30 % of the load, so the
-           // t-squared growth (which releases peak * growth / 3) must leave room
-           if (ig.peak_flux_W_m2 * ig.growth_time_s / 3.0 > 0.7 * ig.fuel_load_J_m2) {
+           // t-squared growth (which releases peak * growth / 3) must leave room.
+           // The decision is make_burn_curve's own (the positivity of the three
+           // inputs was checked above), so a deck that passes here always builds
+           // its curve: 0.7 * load and load - 0.3 * load differ by one ulp.
+           erf_structure_ignition::BurnCurve scratch_curve;
+           if (!erf_structure_ignition::make_burn_curve(st_ig.peak_flux_W_m2, st_ig.fuel_load_J_m2,
+                                                        st_ig.growth_time_s, scratch_curve)) {
                amrex::Abort("erf.fire.structures.ignition: peak_flux_W_m2 * growth_time_s / 3 exceeds "
                             "70 % of fuel_load_J_m2, so the growth phase alone would release more "
                             "than the EN 1991-1-2 curve allows; shorten growth_time_s or raise fuel_load_J_m2");
            }
-           if (ig.rad_fraction < 0.0 || ig.rad_fraction > 1.0) {
+           if (st_ig.rad_fraction < 0.0 || st_ig.rad_fraction > 1.0) {
                amrex::Abort("erf.fire.structures.ignition.rad_fraction must be in [0, 1]");
            }
-           if (ig.rad_radius_m < 0.0) {
+           if (st_ig.rad_radius_m < 0.0) {
                amrex::Abort("erf.fire.structures.ignition.rad_radius_m must be >= 0");
            }
        }

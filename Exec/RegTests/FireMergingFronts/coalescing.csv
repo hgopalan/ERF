@@ -1,0 +1,6 @@
+# Four 6 m spot fires, all at t = 0: three 40 m apart on y = 60 m, one 28 m north of the middle
+# Format: time_s  cx  cy  radius  [source_type]  [priority]
+0   60.0  60.0  6.0  0  10
+0  100.0  60.0  6.0  0  10
+0  140.0  60.0  6.0  0  10
+0  100.0  88.0  6.0  0  10

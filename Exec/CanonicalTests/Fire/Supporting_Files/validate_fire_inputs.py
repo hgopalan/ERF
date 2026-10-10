@@ -209,12 +209,14 @@ def check(path, repo_root):
     # Referenced files must resolve.
     case_dir = os.path.dirname(path)
     for key in FILE_KEYS:
-        ref = d.get(key)
-        if not ref:
-            continue
-        if not any(os.path.exists(p) for p in
-                   (os.path.join(case_dir, ref), os.path.join(repo_root, ref), ref)):
-            problems.append(f"{key} -> '{ref}' not found relative to the case directory")
+        # erf.fire.ignition.polygon_file may list several files, each quoted
+        for ref in (d.get(key) or "").split():
+            ref = ref.strip('"')
+            if not ref:
+                continue
+            if not any(os.path.exists(p) for p in
+                       (os.path.join(case_dir, ref), os.path.join(repo_root, ref), ref)):
+                problems.append(f"{key} -> '{ref}' not found relative to the case directory")
 
     return problems
 

@@ -605,15 +605,17 @@ public:
     void allocate_stick_mc();
 
     /**
-     * @brief Stamp the perimeter polygon (or polyline) of
-     *        erf.fire.ignition.polygon_file into the level set.
+     * @brief Stamp every perimeter polygon (or polyline) file of
+     *        erf.fire.ignition.polygon_file into the level set, each with the
+     *        min(phi, new) rule, so several files are several merging fires.
      *
      * Called at initialisation when erf.fire.ignition.polygon_time is 0, or
      * from advance() on the step whose window contains that time. With
-     * erf.fire.ignition.polygon_interior_ros > 0 the cells the polygon
-     * newly ignites get the interior state of a fire that spread outward at
+     * erf.fire.ignition.polygon_interior_ros > 0 the cells the files
+     * newly ignite (the union of their perimeters, unburned before the
+     * call) get the interior state of a fire that spread outward at
      * that rate: arrival time t_ign - d / R and fuel reduced by
-     * exp(-d / (R tau)) with d the distance inside the perimeter and tau
+     * exp(-d / (R tau)) with d the depth inside the union and tau
      * erf.fire.ignition.polygon_interior_tau (dx_fire / R when 0).
      * @param t_ign Time [s] the perimeter is valid at.
      */

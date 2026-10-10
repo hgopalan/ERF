@@ -6,7 +6,7 @@ This directory collects related canonical ERF test cases under the Fire Behavior
 ## Physics / Model Features Exercised
 - Fire spread / ignition configuration
 - Atmospheric forcing and boundary-condition setup
-- Organizational grouping for: Acceleration, Crown_Fire, Ignition_Patterns, ROS_Models, Spatial_Fuel, Spotting
+- Organizational grouping for: Acceleration, Crown_Fire, Ignition_Patterns, Interacting_Fires, ROS_Models, Spatial_Fuel, Spotting
 
 ## Expected Results
 See the input-file header comments in this directory for the specific validation target. In general, these cases should reproduce the documented analytical trend, qualitative regime change, or engineering diagnostic associated with the scenario.

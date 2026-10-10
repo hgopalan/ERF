@@ -32,6 +32,24 @@ constexpr int NZ = 8;
 constexpr Real DZ = 20.0;   // cell centres at 10, 30, ..., 150 m
 
 /// One column: u(k) = k + 1 on the x faces, v = 0, z_cc(k) = 10 + 20 k.
+/// u = k + 1 on the x faces and the cell-centre heights. A free function: nvcc
+/// rejects an extended device lambda in a constructor.
+void init_wind_column (MultiFab& xvel, MultiFab& zcc)
+{
+    for (MFIter mfi(xvel); mfi.isValid(); ++mfi) {
+        auto u = xvel.array(mfi);
+        ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            u(i, j, k) = Real(k + 1);
+        });
+    }
+    for (MFIter mfi(zcc); mfi.isValid(); ++mfi) {
+        auto z = zcc.array(mfi);
+        ParallelFor(mfi.growntilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            z(i, j, k) = (k + Real(0.5)) * DZ;
+        });
+    }
+}
+
 struct WindColumn {
     Box domain{IntVect(0, 0, 0), IntVect(0, 0, NZ - 1)};
     Geometry geom{domain, RealBox({0.0, 0.0, 0.0}, {10.0, 10.0, NZ * DZ}), 0, {0, 0, 0}};
@@ -44,19 +62,8 @@ struct WindColumn {
 
     WindColumn ()
     {
-        for (MFIter mfi(xvel); mfi.isValid(); ++mfi) {
-            auto u = xvel.array(mfi);
-            ParallelFor(mfi.validbox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                u(i, j, k) = Real(k + 1);
-            });
-        }
+        init_wind_column(xvel, zcc);
         yvel.setVal(0.0);
-        for (MFIter mfi(zcc); mfi.isValid(); ++mfi) {
-            auto z = zcc.array(mfi);
-            ParallelFor(mfi.growntilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-                z(i, j, k) = (k + Real(0.5)) * DZ;
-            });
-        }
         // the dust grid is the 2-D slab of the same column (grid_ratio 1)
         Box slab = domain; slab.setBig(2, 0);
         dg.ba = BoxArray(slab);

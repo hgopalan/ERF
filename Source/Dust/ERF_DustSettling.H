@@ -133,7 +133,7 @@ amrex::Real compute_mean_settling(const DustBinDiameters& d_bins, const DustBinW
                                   amrex::Real rho_p, amrex::Real rho_a, amrex::Real mu_a) noexcept
 {
     amrex::Real sum = 0.0, wsum = 0.0;
-    const int n = amrex::max(1, amrex::min(nb, DustSettlingConst::MAX_BINS));
+    const int n = amrex::max(1, amrex::min(nb, int(DustSettlingConst::MAX_BINS)));   // prvalue: no reference to a host constexpr in device code
     for (int b = 0; b < n; ++b) {
         const amrex::Real w = amrex::max(w_bins[b], amrex::Real(0.0));
         sum  += w * compute_stokes_settling(d_bins[b], rho_p, rho_a, mu_a);
