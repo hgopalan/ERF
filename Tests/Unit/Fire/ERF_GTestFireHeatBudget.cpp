@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <cfenv>
 #include <cmath>
 #include <AMReX_REAL.H>
 
@@ -45,6 +46,22 @@ TEST(FireHeatBudget, TheInstantaneousFormOvershoots)
     EXPECT_NEAR(q_inst / q_mean, 1.0 / (1.0 - std::exp(-1.0)), 1.0e3 * REL) << "1.58x at dt = tau";
     // the step mean tends to the instantaneous power as dt -> 0
     EXPECT_NEAR(compute_heat_flux_cell(-1.0_rt, w0, h, tau, 1.0e-3_rt), q_inst, 1.0e-4 * q_inst);
+}
+
+// A non-positive step gives the instantaneous power without evaluating the
+// step mean at a positive exponent: e^{-dt/tau} with dt = -1e6 s overflowed
+// (raised FE_OVERFLOW, an abort under the FPE traps) before the select
+// discarded it (found by Copilot's review of hgopalan/ERF#501).
+TEST(FireHeatBudget, ANegativeStepGivesTheInstantaneousPowerWithoutOverflow)
+{
+    volatile Real dt = -1.0e6_rt;   // volatile: evaluated at run time, not folded
+    volatile Real tau = 2.0_rt;
+    const Real h = 1.8e7_rt, w = 0.5_rt;
+    std::feclearexcept(FE_OVERFLOW | FE_INVALID | FE_DIVBYZERO);
+    const Real q = compute_heat_flux_cell(-1.0_rt, w, h, tau, dt);
+    EXPECT_FALSE(std::fetestexcept(FE_OVERFLOW)) << "the step mean was evaluated at exp(+5e5)";
+    EXPECT_FALSE(std::fetestexcept(FE_INVALID | FE_DIVBYZERO));
+    EXPECT_NEAR(q, w * h / tau, REL * w * h / tau);
 }
 
 TEST(FireHeatBudget, UnburnedAndExhaustedCellsGiveNothing)
