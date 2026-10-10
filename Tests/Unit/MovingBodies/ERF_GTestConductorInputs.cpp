@@ -2,6 +2,9 @@
 //
 // ASingleSpanLineIsReadWithItsDefaultsAndDerivedGeometry: the defaults, the chord and the catenary sag.
 // ElasticCatenaryOfALevelSpan: the elastic catenary against an independent solution.
+// ElasticCatenaryOfShortSlackSpans: 50 to 200 m slack spans against Irvine's elastic catenary.
+// ElasticCatenaryOverASweepAndOutsideItsRange: 378 spans against Irvine; a 50 % stretch is flagged unsolved.
+// TheGustLengthScaleFollowsTheASCE74Exposure: L_s defaults to asce74_exposure's, else exposure C's.
 // NothingIsReadWithoutLines: an empty erf.conductors.lines switches the module off.
 // EveryLineValueOutsideItsRangeIsRefusedByName: validate_line names the key of every bad value,
 //     non-finite values included.
@@ -26,6 +29,7 @@
 // ALineSharesTheTowersOfAnotherLineWithATowerType: validate_shared_towers and tower_owner.
 // EveryLineNeedsAnOutputRootOfItsOwn: validate_output_roots.
 // TheFirstNonFiniteValueIsNamedWithItsPoint: first_nonfinite, used at the module's boundaries.
+// OnlyASpanAlongPlusXHasItsYDragAcrossIt: along_plus_x, which decides whether a drag_y statistic continues.
 // ReadRefusesMalformedInputsNamingTheKey: every abort of read() fires and names its key.
 
 #include <cmath>
@@ -125,6 +129,88 @@ TEST(ConductorInputs, ElasticCatenaryOfALevelSpan)
     const auto taut = erf_conductors::elastic_catenary(300.0, 300.0, w, 3.0e7);
     EXPECT_NEAR(taut.sag, std::cbrt(3.0 * w * std::pow(300.0, 4) / (64.0 * 3.0e7)), 0.01 * taut.sag);
     EXPECT_GT(taut.stretched_length, 300.0);
+}
+
+// Shorter slack spans, against Irvine's elastic catenary of a level span (the unstretched length L
+// and weight w per unstretched length): c = H L / EA + (2H / w) asinh(w L / 2H), sag
+// w L^2 / 8 EA + (H / w)(sqrt(1 + (w L / 2H)^2) - 1), solved here on its own. The two models differ
+// by the line's strain (1.5e-4 here); a 100 m span with 0.5 m of slack once gave a sag of 1e129 m
+TEST(ConductorInputs, ElasticCatenaryOfShortSlackSpans)
+{
+    const double EA = 3.0e7;
+    auto irvine = [&](double c, double L, double w, double& H, double& sag) {
+        double lo = 1.0e-6, hi = 1.0e12;
+        for (int it = 0; it < 300; ++it) {
+            const double mid = std::sqrt(lo * hi);
+            if (mid * L / EA + 2.0 * mid / w * std::asinh(w * L / (2.0 * mid)) < c) { lo = mid; } else { hi = mid; }
+        }
+        H = std::sqrt(lo * hi);
+        const double V = 0.5 * w * L;
+        sag = w * L * L / (8.0 * EA) + H / w * (std::sqrt(1.0 + (V / H) * (V / H)) - 1.0);
+    };
+    // Drake in still air (15.95 N/m) and under ASCE 74's 40 m/s wind (29.6 N/m resultant)
+    for (const double w : {15.95, 29.6}) {
+        for (const double c : {50.0, 100.0, 200.0}) {
+            const double L = 1.005 * c;
+            double H = 0.0, sag = 0.0;
+            irvine(c, L, w, H, sag);
+            const auto cat = erf_conductors::elastic_catenary(amrex::Real(c), amrex::Real(L), amrex::Real(w), amrex::Real(EA));
+            EXPECT_NEAR(cat.sag, sag, 1.0e-3 * sag) << "chord " << c << " m, " << w << " N/m";
+            EXPECT_NEAR(cat.horizontal_tension, H, 1.0e-3 * H) << "chord " << c << " m, " << w << " N/m";
+        }
+    }
+}
+
+// Over 378 spans (5 to 1500 m, slack 1e-5 to 300 %, 3 to 30 N/m, EA 3e6 to 1e8 N) the sag is Irvine's
+// to 1e-3 plus twice the end strain (the models differ by the strain); a guard at 3 EA instead of EA
+// fails two of them (a 10.2 m span with 177 % slack sags 5.6e6 m). A line stretched near 50 % and more
+// has no solution in this model, and says so.
+TEST(ConductorInputs, ElasticCatenaryOverASweepAndOutsideItsRange)
+{
+    auto irvine = [] (double c, double L, double w, double EA, double& sag, double& T) {
+        double lo = 1.0e-9, hi = 1.0e16;
+        for (int it = 0; it < 400; ++it) {
+            const double mid = std::sqrt(lo * hi);
+            if (mid * L / EA + 2.0 * mid / w * std::asinh(w * L / (2.0 * mid)) < c) { lo = mid; } else { hi = mid; }
+        }
+        const double H = std::sqrt(lo * hi), V = 0.5 * w * L;
+        sag = w * L * L / (8.0 * EA) + H / w * (std::sqrt(1.0 + (V / H) * (V / H)) - 1.0);
+        T = std::hypot(H, V);
+    };
+    // a float holds a 1500 m span's length to 1e-4 m, a part of the smallest slacks
+    const double rel = (std::is_same<amrex::Real, float>::value) ? 5.0e-3 : 0.0;
+    for (const double c : {5.0, 10.2, 40.0, 150.0, 600.0, 1500.0}) {
+        for (const double slack : {1.0e-5, 1.0e-3, 1.0e-2, 0.1, 1.0, 1.77, 3.0}) {
+            for (const double w : {3.0, 15.95, 30.0}) {
+                for (const double EA : {3.0e6, 3.0e7, 1.0e8}) {
+                    double sag = 0.0, T = 0.0;
+                    irvine(c, c * (1.0 + slack), w, EA, sag, T);
+                    const auto cat = erf_conductors::elastic_catenary(amrex::Real(c), amrex::Real(c * (1.0 + slack)),
+                                                                      amrex::Real(w), amrex::Real(EA));
+                    EXPECT_TRUE(cat.solved) << c << " m, slack " << slack << ", " << w << " N/m, EA " << EA;
+                    EXPECT_NEAR(cat.sag, sag, (1.0e-3 + 2.0 * T / EA + rel) * sag)
+                        << c << " m, slack " << slack << ", " << w << " N/m, EA " << EA;
+                }
+            }
+        }
+    }
+    // a 55 m span of 1000 N EA under 15.95 N/m stretches about 50 %: no solution, flagged
+    const auto over = erf_conductors::elastic_catenary(amrex::Real(55.09), amrex::Real(55.09 * 1.026), amrex::Real(15.95),
+                                                       amrex::Real(1000.0));
+    EXPECT_FALSE(over.solved);
+}
+
+TEST(ConductorInputs, TheGustLengthScaleFollowsTheASCE74Exposure)
+{
+    set_span("Sls");
+    amrex::ParmParse pp("erf.conductors");
+    EXPECT_NEAR(ConductorInputs::read().gust_span_length_scale, 67.056, 1e-4) << "exposure C's without an ASCE 74 check";
+    pp.add("asce74_wind", 40.0);
+    pp.add("asce74_exposure", std::string("B"));
+    EXPECT_NEAR(ConductorInputs::read().gust_span_length_scale, 51.816, 1e-4) << "asce74.csv and gusts.csv take one L_s";
+    pp.add("gust_type", std::string("factor"));
+    pp.add("gust_span_length_scale", 80.0);
+    EXPECT_NEAR(ConductorInputs::read().gust_span_length_scale, 80.0, 1e-4) << "a given L_s stands";
 }
 
 TEST(ConductorInputs, NothingIsReadWithoutLines)
@@ -373,6 +459,17 @@ TEST(ConductorInputs, SharedSettingsOutsideTheirRangeAreRefusedByName)
         c.lines[1].output_root = c.diagnostics_dir + "/towers";
         EXPECT_NE(ConductorInputs::validate_settings(c).find("towers.dat, which the run writes itself"), std::string::npos)
             << "towers.dat with lattice towers";
+        // statistics taking the name of a tower's (its checkpoint file) or the file of a pair of lines'
+        c.lines[1].name = "tower_L_t1";
+        c.lines[1].output_root = c.diagnostics_dir + "/elsewhere/tower_L_t1";
+        EXPECT_NE(ConductorInputs::validate_settings(c).find("the run's own tower_L_t1 statistics"), std::string::npos)
+            << ConductorInputs::validate_settings(c);
+        c.lines[1].name = "R";
+        c.lines[1].output_root = c.diagnostics_dir + "/separation_L-R";
+        EXPECT_NE(ConductorInputs::validate_settings(c).find("the run's own separation_L-R statistics"), std::string::npos)
+            << ConductorInputs::validate_settings(c);
+        c.lines[1].output_root = c.diagnostics_dir + "/R";
+        EXPECT_TRUE(ConductorInputs::validate_settings(c).empty()) << ConductorInputs::validate_settings(c);
     }
     {
         // a line taking another's random gusts: random only, another line of as many spans that takes no other's,
@@ -466,6 +563,9 @@ TEST(ConductorInputs, AnchorLevelMustExistAndFpeTrapsAreRefused)
     EXPECT_TRUE(ConductorInputs::validate_solver(1, 0, false).empty());
     EXPECT_NE(ConductorInputs::validate_solver(1, 2, false).find("anchor_level"), std::string::npos);
     EXPECT_NE(ConductorInputs::validate_solver(0, 0, true).find("fpe_trap"), std::string::npos);
+    // the drag goes into the anchor level only, so it must be the finest
+    EXPECT_TRUE(ConductorInputs::validate_solver(1, 1, false, true).empty());
+    EXPECT_NE(ConductorInputs::validate_solver(1, 0, false, true).find("drag_on_flow"), std::string::npos);
     EXPECT_EQ(ConductorInputs::resolve_anchor_level(-1, 2), 2);
     EXPECT_EQ(ConductorInputs::resolve_anchor_level(1, 2), 1);
 }
@@ -549,7 +649,8 @@ TEST(ConductorInputs, SectionValuesOutsideTheirRangeAreRefusedByName)
     bad([](LineInputs& s) { s.insulator_length = -1.0; }, "insulator_length");
     bad([](LineInputs& s) { s.insulator_mass = 0.0; }, "insulator_mass");
     bad([](LineInputs& s) { s.insulator_diameter = 0.0; }, "insulator_diameter");
-    bad([](LineInputs& s) { s.insulator_length = 31.0; }, "insulator_length");  // longer than the tower is high
+    // a string longer than its tower stands high is refused once the tower stands on the ground (set_ground,
+    // Conductors.AStringReachingBelowTheGroundIsRefused)
     // the attachment points either side of a tower at the same x, y: a string's across-line direction is undefined
     bad([](LineInputs& s) { s.towers[1] = {{100.0, 500.0, 30.0}}; s.lengths = {301.5, 301.5, 901.0}; },
         "towers: the attachment points either side of tower 1");
@@ -768,6 +869,19 @@ TEST(ConductorInputs, TowerTypesAreReadAndALinesTowerTypeMustNameOne)
     EXPECT_DOUBLE_EQ(t.allowable_compression, 0.0);
     EXPECT_DOUBLE_EQ(t.legs(), amrex::Real(6.0)) << "the legs at the base width";
     EXPECT_EQ(in.lines[0].tower_type, "suspension");
+    {
+        // damping_ratio on a tower that stands still: refused when frequency was never given, a warning with
+        // frequency = 0 given
+        pt.add("damping_ratio", 0.05);
+        const std::string msg = erf_gtest::abort_message([] { ConductorInputs::read(); });
+        EXPECT_NE(msg.find("damping_ratio needs a tower that moves"), std::string::npos) << msg;
+        pt.add("frequency", 0.0);
+        const std::string ok = erf_gtest::abort_message([] { ConductorInputs::read(); });
+        EXPECT_TRUE(ok.empty()) << ok;
+        EXPECT_TRUE(ConductorInputs::read().tower_types[0].frequency_given);
+        pt.remove("damping_ratio");
+        pt.remove("frequency");
+    }
     // a line's tower type must be one of the types, and the line must have towers
     LineInputs s = in.lines[0];
     EXPECT_TRUE(ConductorInputs::validate_tower_type(s, in.tower_types).empty());
@@ -882,7 +996,7 @@ std::string read_after (const std::function<void()>& setup)
     setup();
     const std::string msg = erf_gtest::abort_message([] { ConductorInputs::read(); });
     amrex::ParmParse pp("erf.conductors");
-    for (const char* key : {"lines", "transformers", "tower_types", "prescribed_velocity"}) { pp.remove(key); }
+    for (const char* key : {"lines", "transformers", "tower_types", "prescribed_velocity", "drag_on_flow", "epsilon"}) { pp.remove(key); }
     return msg;
 }
 } // namespace
@@ -953,6 +1067,11 @@ TEST(ConductorInputs, ReadRefusesMalformedInputsNamingTheKey)
             pt.addarr("position", std::vector<amrex::Real>{100.0, 500.0});
             pt.addarr("size", std::vector<amrex::Real>{8.0, 5.0});
         }},
+        {"erf.conductors.epsilon needs erf.conductors.drag_on_flow = true", [&] {
+            add_line_block("RP");
+            pp.add("lines", std::string("RP"));
+            pp.add("epsilon", 2.0);
+        }},
         {"erf.conductors.RK.diameter must be finite", [&] {
             add_line_block("RK");
             amrex::ParmParse("erf.conductors.RK").add("diameter", std::numeric_limits<double>::quiet_NaN());
@@ -965,4 +1084,22 @@ TEST(ConductorInputs, ReadRefusesMalformedInputsNamingTheKey)
     }
     // a well-formed line is read without an abort
     EXPECT_TRUE(read_after([&] { add_line_block("RL"); pp.add("lines", std::string("RL")); }).empty());
+    // epsilon with drag_on_flow switched off on purpose: a warning, not an abort
+    EXPECT_TRUE(read_after([&] {
+        add_line_block("RQ");
+        pp.add("lines", std::string("RQ"));
+        pp.add("drag_on_flow", false);
+        pp.add("epsilon", 2.0);
+    }).empty());
+}
+
+// Only along +x is a span's ERF-frame y drag its drag across the span (an older checkpoint's drag_y continues there)
+TEST(ConductorInputs, OnlyASpanAlongPlusXHasItsYDragAcrossIt)
+{
+    using A = std::array<amrex::Real,3>;
+    EXPECT_TRUE(erf_conductors::along_plus_x(A{{100.0, 500.0, 30.0}}, A{{400.0, 500.0, 20.0}}));
+    EXPECT_TRUE(erf_conductors::along_plus_x(A{{100.0, 500.0, 30.0}}, A{{400.0, 500.0001, 30.0}})) << "within 1e-6 of its run";
+    EXPECT_FALSE(erf_conductors::along_plus_x(A{{100.0, 500.0, 30.0}}, A{{400.0, 500.01, 30.0}}));
+    EXPECT_FALSE(erf_conductors::along_plus_x(A{{400.0, 500.0, 30.0}}, A{{100.0, 500.0, 30.0}})) << "along -x the sign flips";
+    EXPECT_FALSE(erf_conductors::along_plus_x(A{{100.0, 500.0, 30.0}}, A{{100.0, 800.0, 30.0}})) << "along y";
 }

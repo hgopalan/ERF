@@ -4993,7 +4993,8 @@ Transformers, named in ``erf.conductors.transformers`` with blocks
 ``erf.conductors.<transformer>.*``, are boxes on the terrain the lines end on;
 tower types, named in ``erf.conductors.tower_types`` with blocks
 ``erf.conductors.<type>.*``, make a line's towers lattice towers loaded by the
-wind, which bend under their loads when the type has a ``frequency``.
+wind, which bend under their loads when the type has a ``frequency`` or a frame
+(``frame_file`` or ``frame_panels``).
 
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | Parameter                                                 | Definition                                               | Acceptable Values    | Default                  |
@@ -5002,9 +5003,11 @@ wind, which bend under their loads when the type has a ``frequency``.
 |                                                           | absent. erf.conductors.spans is not an input: a run that |                      |                          |
 |                                                           | gives it stops, naming erf.conductors.lines              |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.<line>.end_a**                           | first dead-end attachment (m): x, y in ERF coordinates,  | 3 Reals inside the   | must be set              |
-|                                                           | z the height above the terrain surface at (x, y) (on a   | domain               |                          |
-|                                                           | flat mesh the absolute height)                           |                      |                          |
+| **erf.conductors.<line>.end_a**                           | first dead-end attachment (m): x, y in ERF coordinates;  | 3 Reals inside the   | must be set              |
+|                                                           | the point stands z less geometry.prob_lo[2] above the    | domain               |                          |
+|                                                           | terrain surface at (x, y) (with prob_lo[2] = 0, z is its |                      |                          |
+|                                                           | height above the terrain; on a flat mesh, its absolute   |                      |                          |
+|                                                           | height)                                                  |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<line>.end_b**                           | last dead-end attachment, as end_a                       | 3 Reals inside the   | must be set              |
 |                                                           |                                                          | domain               |                          |
@@ -5045,9 +5048,10 @@ wind, which bend under their loads when the type has a ``frequency``.
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<line>.segments**                        | segments per span (count; nodes per span = segments + 1) | Integer >= 2         | 20                       |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.<line>.insulator_length**                | length of the suspension insulator string the conductor  | Real >= 0, below the | 0                        |
-|                                                           | hangs from at each tower (m); 0: the conductor is        | towers' height;      |                          |
-|                                                           | clamped to the towers                                    | needs towers         |                          |
+| **erf.conductors.<line>.insulator_length**                | length of the suspension insulator string the conductor  | Real >= 0, its       | 0                        |
+|                                                           | hangs from at each tower (m); 0: the conductor is        | bottom above the     |                          |
+|                                                           | clamped to the towers                                    | ground under each    |                          |
+|                                                           |                                                          | tower; needs towers  |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<line>.insulator_mass**                  | mass of one insulator string (kg)                        | Real > 0; refused    | must be set with         |
 |                                                           |                                                          | when                 | insulator_length         |
@@ -5087,20 +5091,30 @@ wind, which bend under their loads when the type has a ``frequency``.
 |                                                           | <output_root>_span<k>.dat per span of a section (k from  | log of the line may  |                          |
 |                                                           | 1 at end_a), <output_root>_insulators.dat,               | take the name of a   |                          |
 |                                                           | <output_root>_nodes.dat and the matching _stats.csv      | log the run writes   |                          |
-|                                                           | files                                                    | in diagnostics_dir   |                          |
+|                                                           | files                                                    | in diagnostics_dir,  |                          |
+|                                                           |                                                          | nor its statistics   |                          |
+|                                                           |                                                          | the name or file of  |                          |
+|                                                           |                                                          | the run's own        |                          |
+|                                                           |                                                          | (towers,             |                          |
+|                                                           |                                                          | transformers, pairs  |                          |
+|                                                           |                                                          | of lines)            |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.diagnostics_dir**                        | directory of the MoorDyn input files                     | String               | conductors               |
 |                                                           | (<line>.moordyn.txt), ground.dat, total_load.dat,        |                      |                          |
 |                                                           | separation.dat, transformers.dat, towers.dat,            |                      |                          |
-|                                                           | coupling.dat, gusts.csv, gust_series.dat, the statistics |                      |                          |
-|                                                           | of pairs, transformers and towers, and the lines'        |                      |                          |
-|                                                           | default output_root                                      |                      |                          |
+|                                                           | coupling.dat, asce74.csv, gusts.csv, gust_series.dat,    |                      |                          |
+|                                                           | the generated frames (frame_<tower>.dat), the frame      |                      |                          |
+|                                                           | towers' logs (tower_<tower>_frame.dat,                   |                      |                          |
+|                                                           | tower_<tower>_members.csv), the statistics of pairs,     |                      |                          |
+|                                                           | transformers and towers, and the lines' default          |                      |                          |
+|                                                           | output_root                                              |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.diagnostics_int**                        | write a diagnostics row every this many steps of the     | Integer >= 1         | 1                        |
 |                                                           | anchor level (steps), and at the first step              |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.anchor_level**                           | the level the lines are stepped with (-1: the finest     | -1 .. amr.max_level  | -1                       |
-|                                                           | level)                                                   |                      |                          |
+| **erf.conductors.anchor_level**                           | the level the lines are stepped with (-1:                | -1 .. amr.max_level  | -1                       |
+|                                                           | amr.max_level); it must exist from the start and for the | (a level that exists)|                          |
+|                                                           | whole run, or the run stops                              |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.air_density**                            | the fluid density MoorDyn applies the drag with (kg/m^3) | Real > 0             | 1.225                    |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
@@ -5123,8 +5137,8 @@ wind, which bend under their loads when the type has a ``frequency``.
 |                                                           | domain bottom                                            | <                    |                          |
 |                                                           |                                                          | geometry.prob_lo[2]  |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.prescribed_velocity**                    | a uniform wind at every line node (m/s) instead of the   | 3 Reals              | none (the flow is        |
-|                                                           | flow's, for testing                                      |                      | sampled at the nodes)    |
+| **erf.conductors.prescribed_velocity**                    | a uniform wind at every line node and every tower drag   | 3 Reals              | none (the flow is        |
+|                                                           | node (m/s) instead of the flow's, for testing            |                      | sampled at the nodes)    |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.stats_start**                            | time (s) from which the running statistics start: of     | Real >= 0            | 0                        |
 |                                                           | every span (<output_root>_stats.csv, or                  |                      |                          |
@@ -5134,7 +5148,10 @@ wind, which bend under their loads when the type has a ``frequency``.
 |                                                           | of the air's drag), of the insulator strings, of the     |                      |                          |
 |                                                           | closest approach of every pair of lines, of the          |                      |                          |
 |                                                           | transformers' loads and clearances and of the towers'    |                      |                          |
-|                                                           | loads                                                    |                      |                          |
+|                                                           | loads. The conductors' times, here, in gust_event_time   |                      |                          |
+|                                                           | and in their logs, are ERF's elapsed time since the run  |                      |                          |
+|                                                           | began, which a restart continues (erf.start_time is not  |                      |                          |
+|                                                           | added)                                                   |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.node_output_int**                        | write every node of every line (position, clearance,     | Integer >= 0         | 0                        |
 |                                                           | tension, wind, drag) to <output_root>_nodes.dat, and     |                      |                          |
@@ -5142,13 +5159,15 @@ wind, which bend under their loads when the type has a ``frequency``.
 |                                                           | utilisations to diagnostics_dir/tower_<tower>_frame.dat, |                      |                          |
 |                                                           | every this many steps (steps); 0: never                  |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.drag_on_flow**                           | put the air's drag on the lines and the towers,          | Boolean              | false                    |
-|                                                           | reversed, back into the flow as a momentum source (and   |                      |                          |
-|                                                           | allow the plot variables conductor_fx, conductor_fy,     |                      |                          |
-|                                                           | conductor_fz)                                            |                      |                          |
+| **erf.conductors.drag_on_flow**                           | put the air's drag on the lines and the towers,          | Boolean; the anchor  | false                    |
+|                                                           | reversed, back into the flow as a momentum source on the | level must be        |                          |
+|                                                           | anchor level (and allow the plot variables conductor_fx, | amr.max_level        |                          |
+|                                                           | conductor_fy, conductor_fz)                              |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.epsilon**                                | width of the Gaussian that spreads the drag onto the     | Real > 0             | 2.0                      |
-|                                                           | momentum sources, in cells (dx)                          |                      |                          |
+|                                                           | momentum sources, in cells (dx); given without           |                      |                          |
+|                                                           | drag_on_flow it stops the run, and with drag_on_flow =   |                      |                          |
+|                                                           | false given it is ignored with a warning                 |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.flashover_distance**                     | two lines whose conductors come closer than this are     | Real > 0             | 1.0                      |
 |                                                           | flagged as clashing in separation.dat, and a conductor   |                      |                          |
@@ -5182,10 +5201,11 @@ wind, which bend under their loads when the type has a ``frequency``.
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.gust_span_length_scale**                 | L_s in the spans' B = 1/(1 + 0.8 L/L_s), L the span's    | Real > 0; needs a    | 67.056 (220 ft)          |
 |                                                           | chord, and the towers' B_t = 1/(1 + 0.375 h/L_s) (m);    | gust_type            |                          |
-|                                                           | the default is ASCE 74's exposure C (51.816 for B)       |                      |                          |
+|                                                           | the default is ASCE 74's for asce74_exposure when it is  |                      |                          |
+|                                                           | given, else exposure C's (51.816 for B)                  |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.gust_event_time**                        | when the event's front crosses gust_event_origin (s)     | Real; needs and is   | must be set              |
-|                                                           |                                                          | needed by gust_type  |                          |
+| **erf.conductors.gust_event_time**                        | when the event's front crosses gust_event_origin (s,     | Real; needs and is   | must be set              |
+|                                                           | ERF's time since the run began, as stats_start)          | needed by gust_type  |                          |
 |                                                           |                                                          | = event              |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.gust_event_speed**                       | how fast the event's front moves (m/s)                   | Real > 0; needs and  | must be set              |
@@ -5238,7 +5258,9 @@ wind, which bend under their loads when the type has a ``frequency``.
 | **erf.conductors.<type>.weight**                          | the tower's own weight on its foundation (N)             | Real >= 0            | 0                        |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.leg_spacing**                     | the spacing of the four legs' footings, a square (m)     | Real >= 0 (0:        | base_width               |
-|                                                           |                                                          | base_width)          |                          |
+|                                                           |                                                          | base_width); not     |                          |
+|                                                           |                                                          | with frame_file or   |                          |
+|                                                           |                                                          | frame_panels         |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.allowable_uplift**                | a footing's pull-out capacity (N); flagged in towers.dat | Real >= 0 (0: not    | 0                        |
 |                                                           | above it                                                 | checked)             |                          |
@@ -5247,19 +5269,25 @@ wind, which bend under their loads when the type has a ``frequency``.
 |                                                           |                                                          | checked)             |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.frequency**                       | the tower's first bending frequency on a rigid           | Real >= 0; > 0 needs | 0                        |
-|                                                           | foundation (Hz): the tower sways in that mode under its  | weight > 0           |                          |
-|                                                           | loads and MoorDyn moves its cross-arm as a coupled       |                      |                          |
-|                                                           | point; 0: the tower stands still and its attachments are |                      |                          |
-|                                                           | fixed MoorDyn points                                     |                      |                          |
+|                                                           | foundation (Hz): the tower sways in that mode under its  | weight > 0; not with |                          |
+|                                                           | loads and MoorDyn moves its cross-arm as a coupled       | frame_file or        |                          |
+|                                                           | point; 0 without a frame: the tower stands still and its | frame_panels         |                          |
+|                                                           | attachments are fixed MoorDyn points                     |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.<type>.damping_ratio**                   | the structural damping ratio (-, fraction of critical):  | Real in [0, 1)       | 0.02                     |
-|                                                           | of the one mode with frequency; with frame_file or       |                      |                          |
-|                                                           | frame_panels, the frame's Rayleigh damping at its first  |                      |                          |
-|                                                           | natural frequency and at ten times it                    |                      |                          |
+| **erf.conductors.<type>.damping_ratio**                   | the structural damping ratio (-, fraction of critical):  | Real in [0, 1); > 0  | 0.02                     |
+|                                                           | of the one mode with frequency; with frame_file or       | with frame_file or   |                          |
+|                                                           | frame_panels, the frame's Rayleigh damping at its first  | frame_panels; needs  |                          |
+|                                                           | natural frequency and at ten times it. On a tower that   | frequency,           |                          |
+|                                                           | stands still it stops the run, or with frequency = 0     | frame_file or        |                          |
+|                                                           | given is ignored with a warning                          | frame_panels         |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.<type>.foundation_rotational_stiffness** | the footing's resistance to tilting (N m/rad)            | Real >= 0 (0: rigid) | 0                        |
+| **erf.conductors.<type>.foundation_rotational_stiffness** | the footing's resistance to tilting (N m/rad); on a      | Real >= 0 (0:        | 0                        |
+|                                                           | tower that stands still as damping_ratio                 | rigid); > 0 needs    |                          |
+|                                                           |                                                          | frequency            |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.<type>.foundation_lateral_stiffness**    | the footing's resistance to sliding (N/m)                | Real >= 0 (0: rigid) | 0                        |
+| **erf.conductors.<type>.foundation_lateral_stiffness**    | the footing's resistance to sliding (N/m); on a tower    | Real >= 0 (0:        | 0                        |
+|                                                           | that stands still as damping_ratio                       | rigid); > 0 needs    |                          |
+|                                                           |                                                          | frequency            |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.frame_file**                      | a SubDyn input file of the tower's frame in tower-local  | File name; not with  | none                     |
 |                                                           | axes (origin at the base centre, x along the line, y     | frame_panels,        |                          |
@@ -5267,21 +5295,29 @@ wind, which bend under their loads when the type has a ``frequency``.
 |                                                           | model): the tower bends as that frame, which gives its   | the foundation       |                          |
 |                                                           | stiffness, mass and footing loads; MoorDyn moves its     | stiffnesses          |                          |
 |                                                           | cross-arm as a coupled point. Its four supports stand at |                      |                          |
-|                                                           | z = 0, one per quadrant, and every drag node and line    |                      |                          |
-|                                                           | attachment of the tower lies within base_width of a      |                      |                          |
-|                                                           | frame node                                               |                      |                          |
+|                                                           | z = 0, one per quadrant, its one interface joint is the  |                      |                          |
+|                                                           | cross-arm's centre at the tower's cross-arm height       |                      |                          |
+|                                                           | (within half the arm's face depth), every drag node and  |                      |                          |
+|                                                           | line attachment of the tower lies within base_width of a |                      |                          |
+|                                                           | frame node, and it has at most 6000 free degrees of      |                      |                          |
+|                                                           | freedom                                                  |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.member_file**                     | the design data of every member of frame_file's frame    | File name; needs     | none: no checks          |
 |                                                           | (role, yield strength, angle, net area, end conditions;  | frame_file           |                          |
 |                                                           | see the lattice tower frame model): each member is       |                      |                          |
 |                                                           | checked against its strength (ASCE 10-15) every step     |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.<type>.frame_panels**                    | generate the tower's frame from this type's dimensions,  | Integer in [0, 200]; | 0: none                  |
-|                                                           | with this many panels of the shaft below the cross-arm:  | not with frame_file, |                          |
-|                                                           | a lattice of equal-leg angles (see the lattice tower     | frequency, weight or |                          |
-|                                                           | frame model), one per type and cross-arm height, written | the foundation       |                          |
-|                                                           | to diagnostics_dir/frame_<tower>.dat as a SubDyn file;   | stiffnesses          |                          |
-|                                                           | its members are checked                                  |                      |                          |
+| **erf.conductors.<type>.frame_panels**                    | generate the tower's frame from this type's dimensions,  | Integer in [0, 200], | 0: none                  |
+|                                                           | with this many panels of the shaft below the cross-arm:  | and a frame of at    |                          |
+|                                                           | a lattice of equal-leg angles (see the lattice tower     | most 6000 free       |                          |
+|                                                           | frame model), one per type and cross-arm height, written | degrees of freedom   |                          |
+|                                                           | to diagnostics_dir/frame_<tower>.dat as a SubDyn file;   | (about 120 panels    |                          |
+|                                                           | its members are checked                                  | with crossed         |                          |
+|                                                           |                                                          | bracing); not with   |                          |
+|                                                           |                                                          | frame_file,          |                          |
+|                                                           |                                                          | frequency, weight or |                          |
+|                                                           |                                                          | the foundation       |                          |
+|                                                           |                                                          | stiffnesses          |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.leg_angle**                       | the leg width and thickness (m) of the equal-leg angle   | 2 Reals, 0 <         | must be set with         |
 |                                                           | of the generated frame's legs and cross-arm chords       | thickness < width;   | frame_panels             |
@@ -5302,7 +5338,9 @@ wind, which bend under their loads when the type has a ``frequency``.
 | **erf.conductors.<type>.steel_temperature**               | the steel's temperature (C): it lowers the frame's       | Real in (-273.15,    | 20                       |
 |                                                           | stiffness and its members' yield strength by EN 1993-1-2 | 1200); not 20 needs  |                          |
 |                                                           | Table 3.1                                                | frame_file or        |                          |
-|                                                           |                                                          | frame_panels         |                          |
+|                                                           |                                                          | frame_panels; a      |                          |
+|                                                           |                                                          | restart cannot       |                          |
+|                                                           |                                                          | change it            |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.transformers**                           | names of the transformers the lines end on: every line   | Strings, each the    | none                     |
 |                                                           | end whose x, y lies on a transformer's footprint is      | name of no line or   |                          |

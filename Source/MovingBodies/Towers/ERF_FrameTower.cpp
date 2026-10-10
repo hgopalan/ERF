@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 #include <utility>
 
@@ -141,7 +142,7 @@ std::array<double,3> RigidLink::motion (const std::vector<double>& u) const
 
 FrameTower::FrameTower (const Tower& tower, std::shared_ptr<const Frame> frame, double gravity,
                         std::shared_ptr<const std::vector<MemberDesign>> designs, const std::string& source,
-                        const std::vector<std::size_t>& link_nodes)
+                        const std::vector<std::size_t>& link_nodes, double first_frequency)
     : m_frame(std::move(frame)), m_name(tower.name()), m_designs(std::move(designs)), m_gravity(gravity)
 {
     const TowerType& type = tower.type();
@@ -171,6 +172,26 @@ FrameTower::FrameTower (const Tower& tower, std::shared_ptr<const Frame> frame, 
                          ", more than the base width; the cross-arm of the frame must be where the lines hang");
         }
     }
+    {
+        // the frame's cross-arm (its interface joint, the cross-arm's centre) at the tower's cross-arm height:
+        // a frame built for another height would tie the lines to the shaft
+        const auto& iface = m_frame->inputs().interface_joints;
+        if (iface.size() != 1) {
+            amrex::Abort("tower " + m_name + ": " + key + " has " + std::to_string(iface.size()) + " interface joints; a tower's "
+                         "frame has one, the cross-arm's centre, where the lines' pulls are tied");
+        }
+        const double zi = m_frame->node_position(m_frame->node_of_joint(iface.front()))[2];
+        const double za = static_cast<double>(tower.arm_height());
+        if (!(std::abs(zi - za) <= 0.5 * static_cast<double>(type.arm_face()))) {
+            amrex::Abort("tower " + m_name + ": its cross-arm stands " + std::to_string(za) + " m above the base, and the "
+                         "cross-arm of " + key + " (its interface joint " + std::to_string(iface.front()) + ") " + std::to_string(zi) +
+                         " m, more than half the cross-arm's face depth apart: the frame's interface joint must be its "
+                         "cross-arm's centre (not the peak, as SubDyn's own cases have it), and a frame is built for one "
+                         "cross-arm height; give a frame file per tower height, or frame_panels");
+        }
+    }
+    // the cross-arm's centre, on the tower's axis, for the cross-arm's displacement in the logs
+    m_arm.emplace_back(*m_frame, std::array<double,3>{{0.0, 0.0, static_cast<double>(tower.arm_height())}}, 4, &link_nodes);
     // the four supports, one per quadrant of the base, at z = 0
     const auto& sup = m_frame->inputs().supports;
     if (sup.size() != 4) { amrex::Abort("tower " + m_name + ": " + key + " has " + std::to_string(sup.size()) + " supports; a lattice tower stands on four legs"); }
@@ -200,10 +221,14 @@ FrameTower::FrameTower (const Tower& tower, std::shared_ptr<const Frame> frame, 
     m_static_force = s0.element_force;
     m_sag = s0.displacement;
     m_sag0 = m_sag;
-    FrameModes modes;
-    const std::string err = frame_modes(*m_frame, 1, modes);
-    if (!err.empty()) { amrex::Abort("tower " + m_name + ": " + key + ": " + err); }
-    m_f1 = modes.frequency[0];
+    if (first_frequency > 0.0) {
+        m_f1 = first_frequency;
+    } else {
+        FrameModes modes;
+        const std::string err = frame_modes(*m_frame, 1, modes);
+        if (!err.empty()) { amrex::Abort("tower " + m_name + ": " + key + ": " + err); }
+        m_f1 = modes.frequency[0];
+    }
     double a0 = 0.0, a1 = 0.0;
     const double zeta = static_cast<double>(type.damping_ratio);
     if (zeta > 0.0) { rayleigh_coefficients(m_f1, zeta, 10.0 * m_f1, zeta, a0, a1); }
@@ -241,6 +266,12 @@ void FrameTower::step (Real dt, const std::vector<Real>& node_force, const std::
     m_dyn->step(static_cast<double>(dt), load, 0.0);
     m_load = load;
     m_stepped = true;
+}
+
+void FrameTower::step_between (Real dt, const std::vector<Real>& node_force, const std::vector<std::array<Real,3>>& /*line_start*/,
+                               const std::vector<std::array<Real,3>>& line_end)
+{
+    step(dt, node_force, line_end);
 }
 
 std::array<Real,3> FrameTower::displacement (std::size_t node) const
@@ -283,6 +314,12 @@ std::array<double,3> FrameTower::moved (const RigidLink& link, const std::vector
     return p;
 }
 
+bool FrameTower::arm_centre_displacement (std::array<Real,3>& x) const
+{
+    x = to_erf(moved(m_arm.front(), m_dyn->displacement()));
+    return true;
+}
+
 std::vector<double> FrameTower::state () const
 {
     std::vector<double> s = m_dyn->state();
@@ -304,8 +341,24 @@ bool FrameTower::set_state (const std::vector<double>& s)
     }
     if (!m_dyn->set_state(std::vector<double>(s.begin(), s.begin() + static_cast<long>(1 + 3 * n)))) { return false; }
     m_load.assign(s.begin() + static_cast<long>(1 + 3 * n), s.begin() + static_cast<long>(1 + 4 * n));
-    m_stepped = true;
+    // a state from before the first step (time 0, the frame at rest) keeps the static footings
+    m_stepped = (s[0] > 0.0);
     return true;
+}
+
+std::string FrameTower::restart_mismatch (const std::vector<double>& saved) const
+{
+    const std::size_t n = m_frame->num_dofs();
+    if (saved.size() != 1 + 4 * n + m_theta.size()) { return std::string(); }
+    for (std::size_t m = 0; m < m_theta.size(); ++m) {
+        const double was = saved[1 + 4 * n + m];
+        if (was != m_theta[m]) {
+            return "its member " + std::to_string(m + 1) + " is at " + std::to_string(was) + " C in the checkpoint and " +
+                   std::to_string(m_theta[m]) + " C from the inputs; a restart cannot change the steel's temperature "
+                   "(steel_temperature of its type)";
+        }
+    }
+    return std::string();
 }
 
 std::vector<double> FrameTower::present_loads (const Tower& tower) const
@@ -385,13 +438,15 @@ bool FrameTower::foundation (const Tower& tower, FoundationLoad& L) const
     // per support, the reaction beyond the one under the frame's weight (frame axes)
     std::vector<std::array<double,6>> reaction(sup.size());
     if (m_stepped) {
-        // the dynamic reactions K u + a1 K v + M a - f at the supports
+        // the dynamic reactions at the supports: what the members (and concentrated masses) take
+        // from each support node, K u + a1 K v + M a, less the load applied there; a spring's force
+        // reaches the ground through the support, so the support springs and their masses stay out
         const auto& u = m_dyn->displacement();
         const auto& v = m_dyn->velocity();
         std::vector<double> w(n);
         for (std::size_t i = 0; i < n; ++i) { w[i] = u[i] + m_a1 * v[i]; }
-        const std::vector<double> kw = m_frame->apply_stiffness(w);
-        const std::vector<double> ma = m_frame->apply_mass(m_dyn->acceleration());
+        const std::vector<double> kw = m_frame->apply_stiffness(w, false);
+        const std::vector<double> ma = m_frame->apply_mass(m_dyn->acceleration(), false);
         for (std::size_t s = 0; s < sup.size(); ++s) {
             const std::size_t node = m_frame->node_of_joint(sup[s].joint);
             for (std::size_t d = 0; d < 6; ++d) { reaction[s][d] = kw[6 * node + d] + ma[6 * node + d] - m_load[6 * node + d]; }

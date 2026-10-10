@@ -243,4 +243,25 @@ std::string lattice_frame (const LatticeSpec& s, FrameInputs& in, std::vector<Me
     return in.validate();
 }
 
+std::vector<int> square_joints (const FrameInputs& in)
+{
+    const double deg = 3.14159265358979323846 / 180.0;
+    const double cmax = std::cos(20.0 * deg), cmin = std::sin(20.0 * deg);
+    std::vector<bool> square(in.joints.size(), false);
+    for (const auto& m : in.members) {
+        const int a = in.joint_index(m.joint_a), b = in.joint_index(m.joint_b);
+        if (a < 0 || b < 0) { continue; }
+        const auto& xa = in.joints[static_cast<std::size_t>(a)].x;
+        const auto& xb = in.joints[static_cast<std::size_t>(b)].x;
+        const double len = std::sqrt((xb[0] - xa[0]) * (xb[0] - xa[0]) + (xb[1] - xa[1]) * (xb[1] - xa[1]) +
+                                     (xb[2] - xa[2]) * (xb[2] - xa[2]));
+        if (!(len > 0.0)) { continue; }
+        const double ez = std::abs(xb[2] - xa[2]) / len;
+        if (ez >= cmax || ez <= cmin) { square[static_cast<std::size_t>(a)] = square[static_cast<std::size_t>(b)] = true; }
+    }
+    std::vector<int> ids;
+    for (std::size_t j = 0; j < in.joints.size(); ++j) { if (square[j]) { ids.push_back(in.joints[j].id); } }
+    return ids;
+}
+
 } // namespace erf_towers

@@ -143,7 +143,8 @@ bool
 WakeLines::read_state (const std::string& dir)
 {
     const std::string fname = dir + "/" + m_name + "_wake_avg.dat";
-    if (!FileExists(fname)) { return false; }
+    // decided on the I/O rank for every rank: the read below is collective
+    if (!file_exists_everywhere(fname)) { return false; }
     Vector<char> chars;
     ParallelDescriptor::ReadAndBcastFile(fname, chars);
     std::istringstream in(std::string(chars.dataPtr(), chars.size()));

@@ -14,10 +14,17 @@
 //   loads, and the legs on the downwind side are the more compressed.
 // FrameTower.BeforeItsFirstStepTheFootingsTakeTheStaticLoads: at rest, the footings take the tower's
 //   present drag and line pull exactly, as Tower::foundation() reckons a tower at rest.
+// FrameTower.OnSpringFootingsItsLegsCarryTheSpringForces: on vertical soil springs (with a spring
+//   mass), a damped tower settled under steady loads has the static solution's footing loads, the
+//   springs' force counted in each leg's reaction.
+// FrameTower.HeldByAStiffSpanItsSwayDecays: coupled to a spring three times its own stiffness at
+//   the cross-arm, iterated each step to the spring's end pull as the coupling with MoorDyn is, the
+//   tower's oscillation decays; given the mean of the start and end pulls it would grow.
 // FrameTower.TheStateRestoresTheSameMotion: a state saved and restored continues bit for bit.
 // FrameTower.RefusesAFrameThatDoesNotFitItsTowerOrItsType: a frame whose cross-arm is far from the
-//   lines' attachment aborts naming the frame file; a type giving a frame and a frequency, a weight or
-//   a foundation stiffness is refused.
+//   lines' attachment, or 1.5 m above or 7.5 m below the tower's cross-arm, or with two interface joints,
+//   aborts naming the frame file; a type giving a frame and a frequency, a weight or a foundation
+//   stiffness is refused.
 // FrameTower.ItsMembersAreCheckedUnderTheFramesForces: on a generated frame with design data, the
 //   members' checks before the first step and once settled under steady loads are those of the
 //   frame's static solution under the linked loads and the weight; without design data, none.
@@ -25,7 +32,12 @@
 //   cross-arm stays put, the first frequency drops by sqrt(k_E), and the tower settles where the hot
 //   frame's static solution puts it, its checks those of the hot steel; bad temperatures are refused.
 // FrameTower.ItsStateCarriesTheTemperatures: a cold tower restored from a heated one's state heats up
-//   and continues bit for bit; a state without temperatures keeps the present ones.
+//   and continues bit for bit; a state without temperatures keeps the present ones; a restart
+//   (restart_mismatch) refuses temperatures other than the inputs'.
+// FrameTower.AStateFromBeforeTheFirstStepKeepsTheStaticFootings: a step-0 state restores the static
+//   footings under the present loads.
+// FrameTower.ItsCrossArmDisplacementIsItsCentresWhenItTwists: twisted by opposite pulls at the arm's
+//   ends, the cross-arm's centre stays put while its ends swing.
 // TowerType.RefusesFrameKeysThatDoNotFit: frame_panels with frame_file, frame keys without their frame,
 //   angles without two values in order, an unknown bracing, a bad yield strength or temperature.
 
@@ -250,6 +262,90 @@ TEST(FrameTower, BeforeItsFirstStepTheFootingsTakeTheStaticLoads)
     EXPECT_NEAR(static_cast<double>(L.vertical), ft.mass() * g - F[2], 1e-6 * ft.mass() * g);
 }
 
+TEST(FrameTower, OnSpringFootingsItsLegsCarryTheSpringForces)
+{
+    // case T with every leg free to move vertically on a soil spring (Kzz, and a spring mass Mzz)
+    FrameInputs in;
+    const std::string rerr = read_subdyn(frame_file(), in);
+    ASSERT_TRUE(rerr.empty()) << rerr;
+    for (auto& sp : in.supports) {
+        sp.fixed[2] = false;
+        sp.stiffness[5] = 2.0e8;   // Kzz (N/m), the 6th of SubDyn's upper-triangle order
+        sp.mass[5] = 500.0;        // Mzz (kg)
+    }
+    std::string err;
+    const std::shared_ptr<const Frame> f = Frame::create(in, err);
+    ASSERT_TRUE(f) << err;
+    Tower tw = turned(framed(0.3));
+    FrameTower stepped(tw, f, g);
+    const FrameTower at_rest(tw, f, g);
+    const std::vector<Real> fd = drag(tw);
+    const double h = 1.0 / (20.0 * static_cast<double>(stepped.frequency()));
+    for (int n = 0; n < 1500; ++n) { stepped.step(static_cast<Real>(h), fd, std::vector<std::array<Real,3>>{pull}); }
+    tw.set_loads(fd);
+    tw.set_line_loads({pull}, {tw.attachments()[0]});
+    FoundationLoad dyn, stat;
+    ASSERT_TRUE(stepped.foundation(tw, dyn));
+    ASSERT_TRUE(at_rest.foundation(tw, stat));
+    // the legs' loads differ by about 30 kN from leg to leg here; the springs alone would lose that
+    EXPECT_GT(std::max({stat.legs[0], stat.legs[1], stat.legs[2], stat.legs[3]}) -
+              std::min({stat.legs[0], stat.legs[1], stat.legs[2], stat.legs[3]}), Real(1.0e4));
+    for (std::size_t l = 0; l < 4; ++l) { EXPECT_NEAR(dyn.legs[l], stat.legs[l], 1e-5 * 6.0e4) << "leg " << l; }
+    for (std::size_t d = 0; d < 3; ++d) {
+        EXPECT_NEAR(dyn.force[d], stat.force[d], 1e-5 * 2.0e4) << d;
+        EXPECT_NEAR(dyn.moment[d], stat.moment[d], 1e-5 * 6.0e5) << d;
+    }
+}
+
+TEST(FrameTower, HeldByAStiffSpanItsSwayDecays)
+{
+    const Tower tw = turned(framed());
+    const std::vector<Real> none(3 * tw.nodes().size(), Real(0.0));
+    // the cross-arm's stiffness along x: a steady pull, settled on a damped copy
+    double K = 0.0;
+    {
+        const Tower td = turned(framed(0.5));
+        FrameTower settle(td, frame_t(), g);
+        const double h = 1.0 / (20.0 * static_cast<double>(settle.frequency()));
+        const std::array<Real,3> P{{Real(1.0e4), Real(0.0), Real(0.0)}};
+        for (int n = 0; n < 1500; ++n) { settle.step(static_cast<Real>(h), none, std::vector<std::array<Real,3>>{P}); }
+        K = 1.0e4 / static_cast<double>(settle.attachment_displacement()[0]);
+    }
+    ASSERT_GT(K, 0.0);
+    // a span three times as stiff pulls the cross-arm toward x0; the pull at the end of each coupling
+    // step is found by fixed-point iteration from the start's, the tower's state restored each time
+    const double k = 3.0 * K, x0 = 0.01;
+    FrameTower ft(tw, frame_t(), g);
+    const double h = 1.0 / (20.0 * static_cast<double>(ft.frequency()));
+    auto pull_at = [&] () {
+        const double x = static_cast<double>(ft.attachment_displacement()[0]);
+        return std::array<Real,3>{{static_cast<Real>(-k * (x - x0)), Real(0.0), Real(0.0)}};
+    };
+    std::vector<double> x;
+    for (int n = 0; n < 600; ++n) {
+        const std::vector<double> s0 = ft.state();
+        const std::array<Real,3> F0 = pull_at();
+        std::array<Real,3> F = F0;
+        for (int it = 0; it < 50; ++it) {
+            ASSERT_TRUE(ft.set_state(s0));
+            ft.step_between(static_cast<Real>(h), none, {F0}, {F});
+            const std::array<Real,3> Fn = pull_at();
+            const bool done = std::abs(static_cast<double>(Fn[0] - F[0])) <= 1e-6 * k * x0;
+            F = Fn;
+            if (done) { break; }
+        }
+        x.push_back(static_cast<double>(ft.attachment_displacement()[0]));
+    }
+    // the swing about the equilibrium k x0 / (k + K) over the first and the last 100 steps
+    const double xe = k * x0 / (k + K);
+    double first = 0.0, last = 0.0;
+    for (std::size_t n = 0; n < 100; ++n) {
+        first = std::max(first, std::abs(x[n] - xe));
+        last = std::max(last, std::abs(x[x.size() - 1 - n] - xe));
+    }
+    EXPECT_LT(last, 0.5 * first) << "first " << first << " m, last " << last << " m";
+}
+
 TEST(FrameTower, TheStateRestoresTheSameMotion)
 {
     const Tower tw = turned(framed());
@@ -275,6 +371,25 @@ TEST(FrameTower, RefusesAFrameThatDoesNotFitItsTowerOrItsType)
     const std::string msg = erf_gtest::abort_message([&] { FrameTower ft(tall, frame_t(), g); });
     EXPECT_NE(msg.find("frame_file"), std::string::npos) << msg;
     EXPECT_NE(msg.find("from the nearest node of"), std::string::npos) << msg;
+    // 1.5 m above the frame's cross-arm (and its top): close enough to tie, but built for another height
+    const Tower raised = turned(framed(), Real(31.5));
+    const std::string higher = erf_gtest::abort_message([&] { FrameTower ft(raised, frame_t(), g); });
+    EXPECT_NE(higher.find("the frame's interface joint must be its cross-arm's centre"), std::string::npos) << higher;
+    // 22.5 m, a panel joint's height: close to frame nodes, but not to the frame's cross-arm
+    const Tower panel = turned(framed(), Real(22.5));
+    const std::string lower = erf_gtest::abort_message([&] { FrameTower ft(panel, frame_t(), g); });
+    EXPECT_NE(lower.find("a frame is built for one cross-arm height"), std::string::npos) << lower;
+    {
+        // a second interface joint: the lines' pulls are tied at one, the cross-arm's centre
+        FrameInputs in;
+        ASSERT_TRUE(read_subdyn(frame_file(), in).empty());
+        in.interface_joints.push_back(in.joints.front().id);
+        std::string err;
+        const std::shared_ptr<const Frame> two = Frame::create(in, err);
+        ASSERT_TRUE(two) << err;
+        const std::string msg = erf_gtest::abort_message([&] { FrameTower ft(turned(framed(), Real(30.0)), two, g); });
+        EXPECT_NE(msg.find("has 2 interface joints"), std::string::npos) << msg;
+    }
     TowerType t = framed();
     EXPECT_TRUE(t.validate().empty()) << t.validate();
     t.frequency = 2.0;
@@ -460,6 +575,53 @@ TEST(FrameTower, ItsStateCarriesTheTemperatures)
     std::vector<double> bad = a.state();
     bad.back() = std::numeric_limits<double>::quiet_NaN();
     EXPECT_FALSE(b.set_state(bad));
+    // a restart, though, cannot change the steel's temperature: a cold run refuses the heated checkpoint
+    FrameTower cold(tw, gen.frame, g, gen.designs, "case G", gen.links);
+    EXPECT_NE(cold.restart_mismatch(a.state()).find("a restart cannot change the steel's temperature"), std::string::npos);
+    EXPECT_TRUE(cold.restart_mismatch(cold.state()).empty());
+    EXPECT_TRUE(cold.restart_mismatch(short_state).empty()) << "a state without temperatures is not compared";
+}
+
+TEST(FrameTower, AStateFromBeforeTheFirstStepKeepsTheStaticFootings)
+{
+    // a checkpoint at step 0 holds the frame at rest: restored, its footings are the static ones under
+    // the present loads, as the run that wrote it had them, not the zero dynamic reactions
+    Tower tw = turned(framed());
+    const FrameTower first(tw, frame_t(), g);
+    FrameTower restored(tw, frame_t(), g);
+    ASSERT_TRUE(restored.set_state(first.state()));
+    tw.set_loads(drag(tw));
+    tw.set_line_loads({pull}, {tw.attachments()[0]});
+    FoundationLoad a, b;
+    ASSERT_TRUE(first.foundation(tw, a));
+    ASSERT_TRUE(restored.foundation(tw, b));
+    EXPECT_GT(a.shear, Real(1.0e3));
+    for (std::size_t l = 0; l < 4; ++l) { EXPECT_EQ(a.legs[l], b.legs[l]) << "leg " << l; }
+    EXPECT_EQ(a.shear, b.shear);
+}
+
+TEST(FrameTower, ItsCrossArmDisplacementIsItsCentresWhenItTwists)
+{
+    // two lines pulling opposite ways along the line at the arm's ends twist the frame: the arm's centre
+    // stays nearly put while the arm's ends swing; the cross-arm's displacement in the logs is the centre's
+    const double c = std::cos(0.5235987755982988), s = std::sin(0.5235987755982988);
+    const P3 across{{static_cast<Real>(-s), static_cast<Real>(c), 0.0}}, along{{static_cast<Real>(c), static_cast<Real>(s), 0.0}};
+    Tower tw("t1", framed(0.3), P3{{100.0, 200.0, 50.0}}, Real(30.0), across);
+    for (const double side : {-6.0, 6.0}) {
+        tw.add_attachment(P3{{static_cast<Real>(100.0 + side * across[0]), static_cast<Real>(200.0 + side * across[1]), Real(80.0)}});
+    }
+    FrameTower ft(tw, frame_t(), g);
+    const std::vector<Real> none(3 * tw.nodes().size(), Real(0.0));
+    const Real F = 5.0e3;
+    const std::vector<std::array<Real,3>> twist{{{F * along[0], F * along[1], 0.0}}, {{-F * along[0], -F * along[1], 0.0}}};
+    const double h = 1.0 / (20.0 * static_cast<double>(ft.frequency()));
+    for (int n = 0; n < 1500; ++n) { ft.step(static_cast<Real>(h), none, twist); }
+    std::array<Real,3> centre{};
+    ASSERT_TRUE(ft.arm_centre_displacement(centre));
+    const auto end = ft.attachment_displacement(0);
+    const double moved = std::hypot(static_cast<double>(end[0]), static_cast<double>(end[1]));
+    EXPECT_GT(moved, 1.0e-4) << "the arm's end must swing for the check to mean anything";
+    EXPECT_LT(std::hypot(static_cast<double>(centre[0]), static_cast<double>(centre[1])), 0.05 * moved);
 }
 
 TEST(TowerType, RefusesFrameKeysThatDoNotFit)

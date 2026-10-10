@@ -2,6 +2,7 @@
 // library, whichever the build links). "Line" here is a MoorDyn line; the input is one span.
 //
 // - VersionAndErrorNamesAreKnown.
+// - FpeTrapsAreReadAsAMReXReadsThem: amrex.fpe_trap_* given as true, false, 1 or 0.
 // - MissingInputFileIsReportedNotFatal; AnInputWithoutWaveKinIsRefusedAtCreation (both libraries);
 //   AMalformedStubInputIsReportedNotFatal (stub only).
 // - FixedSpanHangsBetweenItsPointsWithTheCatenarySag: no coupled degree of freedom, the end nodes on
@@ -24,12 +25,31 @@
 #include <string>
 #include <vector>
 
+#include <AMReX_ParmParse.H>
+
 #include <gtest/gtest.h>
 
+#include "../ERF_GTestTempDir.H"
 #include "ERF_GTestThrowOnAbort.H"
 #include "ERF_MoorDynSystem.H"
 
 namespace {
+
+// a scratch root drawn once per test process (ERF_GTestTempDir.H): the fixed names below it are this
+// process's alone, so ctest -j and the shuffled rerun never share them; removed when the process exits
+const std::filesystem::path& gtest_scratch_root ()
+{
+    struct Root {
+        std::filesystem::path p;
+        ~Root () { std::error_code ec; std::filesystem::remove_all(p, ec); }
+    };
+    static const Root root{[] {
+        const std::filesystem::path p = erf_gtest_temp_path("erf_gtest_moordynsystem");
+        std::filesystem::create_directories(p);
+        return p;
+    }()};
+    return root.p;
+}
 
 using erf_moordyn::MoorDynSystem;
 
@@ -93,7 +113,7 @@ std::string write_input (const std::filesystem::path& dir, const Span& s)
 
 std::unique_ptr<MoorDynSystem> make_span (const std::string& tag, const Span& s, bool compute_ic = true)
 {
-    const auto dir = std::filesystem::temp_directory_path() / ("erf_gtest_moordyn_" + tag);
+    const auto dir = gtest_scratch_root() / ("erf_gtest_moordyn_" + tag);
     const std::string fname = write_input(dir, s);
     std::string err;
     auto sys = MoorDynSystem::create(fname, "", MOORDYN_ERR_LEVEL, err);
@@ -123,6 +143,30 @@ std::array<double,3> mid_node (const MoorDynSystem& sys)
 double norm (const std::array<double,3>& v) { return std::sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]); }
 
 } // namespace
+
+TEST(MoorDynSystem, FpeTrapsAreReadAsAMReXReadsThem)
+{
+    // AMReX reads the traps as bool: "true" is valid, and an int query of it aborted on a type mismatch
+    // AMReX records the traps it read at start-up; they are switched off for the test, and every value
+    // restored after it (ParmParse takes the last value given)
+    amrex::ParmParse pp("amrex");
+    const std::vector<std::string> keys{"fpe_trap_invalid", "fpe_trap_zero", "fpe_trap_overflow"};
+    std::vector<int> was, had;
+    for (const auto& k : keys) {
+        bool b = false;
+        had.push_back(pp.contains(k.c_str()) ? 1 : 0);
+        pp.query(k.c_str(), b);
+        was.push_back(b ? 1 : 0);
+        pp.add(k.c_str(), false);
+    }
+    for (const auto& [value, on] : std::vector<std::pair<std::string, bool>>{{"true", true}, {"false", false}, {"1", true}, {"0", false}}) {
+        pp.add("fpe_trap_zero", value);
+        EXPECT_EQ(erf_moordyn::fpe_traps_requested(), on) << "amrex.fpe_trap_zero = " << value;
+    }
+    for (std::size_t i = 0; i < keys.size(); ++i) {
+        if (had[i] != 0) { pp.add(keys[i].c_str(), was[i] != 0); } else { pp.remove(keys[i].c_str()); }
+    }
+}
 
 TEST(MoorDynSystem, VersionAndErrorNamesAreKnown)
 {
@@ -277,7 +321,7 @@ TEST(MoorDynSystem, SavedStateContinuesIdenticallyInAFreshSystem)
         set_uniform_wind(*a, {{0.0, U, 0.0}}, t + 0.5 * dt);
         a->step({}, {}, f, t, dt);
     }
-    const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_moordyn_restart_a";
+    const auto dir = gtest_scratch_root() / "erf_gtest_moordyn_restart_a";
     const std::string state = (dir / "state.dat").string();
     a->save(state);
 
@@ -382,7 +426,7 @@ TEST(MoorDynSystem, AnInputWithoutWaveKinIsRefusedAtCreation)
         Span s;
         s.edit_from = "1             WaveKin";
         s.edit_to = row;
-        const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_moordyn_wavekin";
+        const auto dir = gtest_scratch_root() / "erf_gtest_moordyn_wavekin";
         const std::string fname = write_input(dir, s);
         std::string err;
         auto sys = MoorDynSystem::create(fname, "", MOORDYN_ERR_LEVEL, err);
@@ -401,7 +445,7 @@ TEST(MoorDynSystem, AMalformedStubInputIsReportedNotFatal)
         Span s;
         s.edit_from = edit[0];
         s.edit_to = edit[1];
-        const std::string fname = write_input(std::filesystem::temp_directory_path() / "erf_gtest_moordyn_malformed", s);
+        const std::string fname = write_input(gtest_scratch_root() / "erf_gtest_moordyn_malformed", s);
         std::string err;
         auto sys = MoorDynSystem::create(fname, "", MOORDYN_ERR_LEVEL, err);
         EXPECT_EQ(sys, nullptr) << edit[1];
@@ -415,7 +459,7 @@ TEST(MoorDynSystem, InitRefusesWrongSizesAndNonFiniteValues)
     Span s;
     s.edit_from = "2     Fixed     ";
     s.edit_to = "2     Coupled   ";
-    const std::string fname = write_input(std::filesystem::temp_directory_path() / "erf_gtest_moordyn_init", s);
+    const std::string fname = write_input(gtest_scratch_root() / "erf_gtest_moordyn_init", s);
     std::string err;
     auto sys = MoorDynSystem::create(fname, "", MOORDYN_ERR_LEVEL, err);
     ASSERT_TRUE(sys) << err;

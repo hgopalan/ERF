@@ -70,6 +70,13 @@ struct LatticeSpec
 std::string lattice_frame (const LatticeSpec& spec, FrameInputs& in, std::vector<MemberDesign>& designs,
                            std::vector<int>* load_joints = nullptr);
 
+/**
+ * The ids of the joints of a frame read from a file that a load on the tower may be tied to: those a
+ * member within 20 degrees of the vertical or of the horizontal meets (a leg, a chord or a strut),
+ * not the crossings of diagonals, which only the diagonals' bending holds out of their face.
+ */
+std::vector<int> square_joints (const FrameInputs& in);
+
 } // namespace erf_towers
 
 #endif

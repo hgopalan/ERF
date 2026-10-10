@@ -107,7 +107,7 @@ public:
      * Advance the lines by one step of the anchor level (other levels return at once): hand each its
      * wind, step it, measure its clearance to the terrain, update the statistics and the outputs, and,
      * with drag_on_flow, spread the force the lines and the towers' members exert on the air into the
-     * momentum sources of the next step.
+     * momentum sources ERF adds over this same step (ERF advances the lines before the flow).
      * Units: time, dt (s). U, V, W are the face velocities of level lev at the start of the step.
      * cons is the conserved state of level lev at the start of the step, with a filled ghost cell:
      * with an erf.conductors.gust_type, k = (rho k) / rho is read from it at the line nodes (and at
@@ -175,12 +175,25 @@ public:
      */
     static constexpr double coupling_tolerance = 1.0e-4;
     static constexpr int coupling_max_iterations = 50;
+    /**
+     * A group of lines and their towers whose coupling steps fail to converge this many times in a row, and
+     * at least two ERF steps' worth of them, are diverging: the run stops.
+     */
+    static constexpr int coupling_max_unconverged_in_a_row = 20;
     static constexpr double coupling_initial_relaxation = 0.5;
     /** The most iterations a coupling step took in the last step of the anchor level, and how many did not converge. */
     int coupling_iterations () const { return m_coupling_iterations; }
     int coupling_unconverged () const { return m_coupling_unconverged; }
 
     int anchor_level () const { return m_anchor; }
+    /** How far around each line or tower node the anchor level's grids must reach (m): the sampler's cells, and the drag's kernel. */
+    amrex::Real coverage_reach (const amrex::Geometry& geom) const;
+    /**
+     * Abort unless the anchor level exists (finest_level, the run's finest level now): the lines are
+     * placed on its terrain and stepped with it, so without it they would stand on flat ground and
+     * never move.
+     */
+    void require_anchor_level (int finest_level) const;
     const ConductorInputs_t& inputs () const { return m_in; }
     const std::vector<std::unique_ptr<erf_conductors::ConductorLine>>& lines () const { return m_lines; }
 
@@ -319,6 +332,8 @@ private:
     void write_asce74 () const;
     /** The towers' statistics, and their members' where they are checked. */
     void add_tower_stats ();
+    /** Tower t's cross-arm displacement (m, ERF frame): its centre's on a frame tower, else Tower::arm_displacement(). */
+    std::array<amrex::Real,3> arm_displacement (std::size_t t) const;
     /** A frame model built once and shared by the towers it fits, with its members' design data (null: none). */
     struct TowerFrame
     {
@@ -326,6 +341,7 @@ private:
         std::shared_ptr<const std::vector<erf_towers::MemberDesign>> designs;
         std::string source;     //!< where it came from, for messages
         std::vector<std::size_t> link_nodes;   //!< the nodes the towers' loads may be tied to (empty: every node)
+        double first_frequency{0.0};           //!< the frame's first natural frequency (Hz), found once for its towers
     };
     /**
      * The frame model of tower tw: read from its type's frame_file (with member_file's design data), or
@@ -428,6 +444,9 @@ private:
     std::vector<std::vector<std::size_t>> m_groups;                 //!< lines that step together: those sharing towers
     int m_coupling_iterations{0};                                   //!< the most iterations of a coupling step, this step
     int m_coupling_unconverged{0};                                  //!< coupling steps that did not converge, this step
+    int m_coupling_logged_iterations{0};                            //!< the most iterations since coupling.dat's last row
+    int m_coupling_logged_unconverged{0};                           //!< unconverged coupling steps since coupling.dat's last row
+    std::map<std::size_t,int> m_coupling_unconverged_in_a_row;      //!< per group (by its first line): unconverged coupling steps in a row
     bool m_coupling_warned{false};
     std::unique_ptr<amrex::FArrayBox> m_surface;                    //!< the terrain's height at the nodes, for an immersed terrain
     amrex::Geometry m_surface_geom;
@@ -468,9 +487,19 @@ std::string coupling_converged (const std::vector<double>& F0, const std::vector
                                 double tolerance, bool& converged);
 
 /**
+ * Count a coupling step that converged or did not in in_a_row (the unconverged steps in a row,
+ * reset by a converged one); true when the count reaches limit, the coupling diverging.
+ */
+inline bool coupling_diverged (bool converged, int& in_a_row, int limit)
+{
+    in_a_row = converged ? 0 : in_a_row + 1;
+    return in_a_row >= limit;
+}
+
+/**
  * Whether a conductor checkpoint fits the run restarted from it: an empty string, else the message.
  * saved_tower_motion: the checkpoint holds tower_motion; towers_move: some tower type of the run
- * has a frequency; saved_offset: the checkpoint's surface_offset (m), NaN when the checkpoint has
+ * moves (a frequency or a frame); saved_offset: the checkpoint's surface_offset (m), NaN when the checkpoint has
  * no surface_offset record (it is then not compared); surface_offset: the run's (m).
  */
 std::string restart_mismatch (bool saved_tower_motion, bool towers_move, double saved_offset, double surface_offset);

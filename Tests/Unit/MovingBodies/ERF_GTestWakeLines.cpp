@@ -17,10 +17,27 @@
 
 #include <gtest/gtest.h>
 
+#include "../ERF_GTestTempDir.H"
 #include "ERF_GTestThrowOnAbort.H"
 #include "ERF_WakeLines.H"
 
 namespace {
+
+// a scratch root drawn once per test process (ERF_GTestTempDir.H): the fixed names below it are this
+// process's alone, so ctest -j and the shuffled rerun never share them; removed when the process exits
+const std::filesystem::path& gtest_scratch_root ()
+{
+    struct Root {
+        std::filesystem::path p;
+        ~Root () { std::error_code ec; std::filesystem::remove_all(p, ec); }
+    };
+    static const Root root{[] {
+        const std::filesystem::path p = erf_gtest_temp_path("erf_gtest_wakelines");
+        std::filesystem::create_directories(p);
+        return p;
+    }()};
+    return root.p;
+}
 
 using amrex::Real;
 using erf_actuator::WakeLines;
@@ -101,7 +118,7 @@ TEST(WakeLines, VerticalLineIsClippedAtTheGround)
     EXPECT_NEAR(pos[3*(2*npts-1) + 2], 150.0 + 1.5 * 240.0, tol() * 240.0);    // vertical end
     for (int i = 0; i < 2 * npts; ++i) { EXPECT_GE(pos[3*i + 2], -tol()) << "point " << i << " below ground"; }
     // the file records the clipped offset of the first vertical point
-    const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_wake_clip";
+    const auto dir = gtest_scratch_root() / "erf_gtest_wake_clip";
     std::filesystem::create_directories(dir);
     WakeLines wf("T1", (dir / "T1").string(), hub, axis, 240.0, {2.0}, 1.5, npts, Real(0.0));
     wf.write_average();
@@ -152,7 +169,7 @@ TEST(WakeLines, RunningAverageRecoversTheAnalyticWake)
 
 TEST(WakeLines, StateRoundTripsThroughACheckpoint)
 {
-    const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_wake";
+    const auto dir = gtest_scratch_root() / "erf_gtest_wake";
     std::filesystem::create_directories(dir);
     const std::array<Real,3> hub{{0.0, 0.0, 150.0}};
     const std::array<Real,3> axis{{1.0, 0.0, 0.0}};
@@ -197,7 +214,7 @@ TEST(WakeLines, StateRoundTripsThroughACheckpoint)
 
 TEST(WakeLines, AMalformedCheckpointOrInputIsRefusedNamingIt)
 {
-    const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_wake_bad";
+    const auto dir = gtest_scratch_root() / "erf_gtest_wake_bad";
     std::filesystem::create_directories(dir);
     const std::array<Real,3> hub{{0.0, 0.0, 150.0}};
     const std::array<Real,3> axis{{1.0, 0.0, 0.0}};

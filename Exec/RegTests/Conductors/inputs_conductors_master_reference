@@ -1,0 +1,306 @@
+#------------------------------------------------------------------------------
+# inputs_conductors_master_reference
+#
+# PURPOSE:
+#   A complete reference of every ParmParse input of ERF's power-line model:
+#   the conductor lines (MoorDyn-C lines), their insulator strings, shield
+#   wires, transformers, lattice towers (equivalent lattice, one-mode bending
+#   towers and frame towers), the ASCE 74 design check and the gusts from the
+#   RANS turbulence, all under "erf.conductors.*".
+#
+#   This file is NOT a runnable case. It leaves out the flow, mesh and time
+#   stepping inputs of a run, and it sets some keys that exclude each other
+#   (each such key says what it excludes). Copy the lines a run needs into a
+#   full inputs file; runnable decks are Tests/test_files/Conductors_* and
+#   Exec/CanonicalTests/PowerLines.
+#
+#   Names, defaults, ranges and units follow
+#     - Source/MovingBodies/Conductors/ERF_ConductorInputs.cpp (ConductorInputs::read)
+#     - Source/MovingBodies/Conductors/ERF_ConductorInputs.H and
+#       Source/MovingBodies/Towers/ERF_TowerInputs.H (the defaults)
+#     - Docs/sphinx_doc/Inputs.rst ("Conductor lines (MoorDyn lines)")
+#   Model descriptions: Docs/sphinx_doc/theory/Conductors.rst and
+#   Docs/sphinx_doc/theory/TowerFrame.rst; building with MoorDyn:
+#   Docs/sphinx_doc/CouplingToMoorDyn.rst.
+#
+#   Build with -DERF_ENABLE_MOORDYN=ON. A build without MoorDyn stops when
+#   erf.conductors.lines is given. A run with lines refuses to start with
+#   amrex.fpe_trap_invalid, amrex.fpe_trap_zero or amrex.fpe_trap_overflow on.
+#   Every Real input must be finite: a NaN or an infinity stops the run.
+#
+#   "must be set" marks a key without a default; the value shown is an
+#   example. Every other value shown is the default.
+#
+#   ERF inputs outside erf.conductors that this model uses:
+#     erf.rans_type = kEqn         every gust_type but none needs it on the anchor level
+#     erf.Cmu0                     sets the default gust_sigma_factor (2.5 Cmu0)
+#     erf.plot_vars_1 += conductor_fx conductor_fy conductor_fz
+#                                  the momentum source of the lines and towers on the
+#                                  air (N/m^3); only with drag_on_flow = true
+#     erf.terrain_type, erf.terrain_file_name
+#                                  the attachments' z is the height above this terrain
+#------------------------------------------------------------------------------
+
+# ==============================================================================
+# SECTION 1: The lines, transformers and tower types
+# ==============================================================================
+# The model is off unless erf.conductors.lines is given. Every name below opens
+# its own block erf.conductors.<name>.*; a name may not be used twice across
+# lines, transformers and tower types.
+erf.conductors.lines        = L1 L1sw L2   # Strings. Default: none (the model is off). erf.conductors.spans is refused
+erf.conductors.transformers = T1 T2        # Strings. Default: none. Needs lines; every transformer needs a line end on it
+erf.conductors.tower_types  = lattice      # Strings. Default: none. Needs lines
+
+# ==============================================================================
+# SECTION 2: Shared settings
+# ==============================================================================
+erf.conductors.diagnostics_dir    = conductors  # String. Where the MoorDyn input files and every log go. Default: conductors
+erf.conductors.diagnostics_int    = 1           # Integer >= 1. A diagnostics row every this many anchor-level steps,
+                                                #   and at the first step. Default: 1
+erf.conductors.anchor_level       = -1          # -1 .. amr.max_level. The level the lines are stepped with; -1:
+                                                #   amr.max_level. It must exist from the start and for the whole
+                                                #   run, or the run stops. Default: -1
+erf.conductors.air_density        = 1.225       # Real > 0 (kg/m^3). The density MoorDyn applies the drag with. Default: 1.225
+erf.conductors.substeps           = 1           # Integer >= 1. MoorDyn calls per ERF step, the wind held over the step.
+                                                #   Default: 1
+erf.conductors.moordyn_dt         = 0.0         # Real >= 0 (s). Upper bound on MoorDyn's internal step; 0: none beyond
+                                                #   moordyn_cfl. Default: 0
+erf.conductors.moordyn_cfl        = 0.1         # Real in (0, 0.15]. Courant factor of MoorDyn's internal step. Default: 0.1
+erf.conductors.moordyn_log_level  = 2           # 0 debug, 1 messages, 2 warnings, 3 errors only. Default: 2
+erf.conductors.surface_offset     = 10000.0     # Real (m) > geometry.prob_hi[2], with -surface_offset < geometry.prob_lo[2]:
+                                                #   MoorDyn's free surface sits this far above z = 0 and its
+                                                #   bottom this far below. Default: 10000
+erf.conductors.stats_start        = 0.0         # Real >= 0 (s). Running statistics (the _stats.csv files) start here.
+                                                #   Default: 0
+erf.conductors.node_output_int    = 0           # Integer >= 0. Every node of every line (<output_root>_nodes.dat) and
+                                                #   every frame tower's nodes and member utilisations
+                                                #   (tower_<tower>_frame.dat) every this many steps; 0: never.
+                                                #   Default: 0
+erf.conductors.drag_on_flow       = false       # Boolean. Put the air's drag on the lines and towers, reversed, into the
+                                                #   flow as a momentum source on the anchor level, which must then
+                                                #   be amr.max_level. Not with gust_type event or random.
+                                                #   Default: false
+erf.conductors.epsilon            = 2.0         # Real > 0 (cells). Width of the Gaussian that spreads that drag.
+                                                #   Needs drag_on_flow = true; with drag_on_flow = false given it
+                                                #   is ignored with a warning. Default: 2.0
+erf.conductors.flashover_distance = 1.0         # Real > 0 (m). Two lines closer than this are flagged as clashing in
+                                                #   separation.dat, a conductor this close to a transformer in
+                                                #   transformers.dat. Default: 1.0
+erf.conductors.prescribed_velocity = 10.0 0.0 0.0  # 3 Reals (m/s). A uniform wind at every line node and tower drag
+                                                #   node instead of the flow's, for testing. Not with any gust_type. Default: none (the
+                                                #   flow is sampled at the nodes)
+
+# ==============================================================================
+# SECTION 3: ASCE 74 design check (written to <diagnostics_dir>/asce74.csv at start-up)
+# ==============================================================================
+erf.conductors.asce74_wind     = 0.0   # Real >= 0 (m/s). The 3-second gust at 10 m over open country; 0: no check.
+                                       #   Default: 0
+erf.conductors.asce74_exposure = C     # B (suburban or wooded) or C (open country). Needs asce74_wind. Default: C
+
+# ==============================================================================
+# SECTION 4: Gusts from the RANS turbulence
+# ==============================================================================
+# gust_type = none adds nothing. factor writes every span's gust factor and peak
+# load to <diagnostics_dir>/gusts.csv. event adds one travelling 1 - cos gust
+# and random a random gust per span and tower to the wind the lines and towers
+# take, both written to <diagnostics_dir>/gust_series.dat. Every type but none
+# needs erf.rans_type = kEqn on the anchor level, the flow's wind (not
+# prescribed_velocity) and a horizontal extent of every span; event and random
+# are refused with drag_on_flow. Each key below other than gust_type is refused
+# without a gust_type that uses it.
+erf.conductors.gust_type              = none    # none, factor, event or random. Default: none
+
+# --- any gust_type but none
+erf.conductors.gust_sigma_factor      = 1.39    # Real > 0. c in sigma_u = c sqrt(k). Default: 2.5 erf.Cmu0 (1.39)
+erf.conductors.gust_peak_factor       = 2.7     # Real > 0. g in the gust factor 1 + 2 g I sqrt(B), the point gust
+                                                #   U + g sigma_u and the event's amplitude. Default: 2.7 (ASCE 74)
+erf.conductors.gust_span_length_scale = 67.056  # Real > 0 (m). L_s of the spans' B = 1/(1 + 0.8 L/L_s) and the towers'
+                                                #   B_t = 1/(1 + 0.375 h/L_s). Default: ASCE 74's for asce74_exposure,
+                                                #   C without it (67.056; 51.816 for B)
+
+# --- gust_type = event only
+erf.conductors.gust_event_time        = 600.0   # Real (s). When the front crosses gust_event_origin. Must be set
+erf.conductors.gust_event_speed       = 15.0    # Real > 0 (m/s). How fast the front moves. Must be set
+erf.conductors.gust_event_direction   = 0.0     # Real (degrees counterclockwise from +x). The way the front moves.
+                                                #   Default: 0
+erf.conductors.gust_event_origin      = 1536.0 768.0  # 2 Reals (m). A point the front crosses at gust_event_time.
+                                                #   Default: the domain's centre
+erf.conductors.gust_event_duration    = 10.5    # Real > 0 (s). How long the event lasts at a point. Default: 10.5
+                                                #   (IEC 61400-1 extreme operating gust duration)
+
+# --- gust_type = random only
+erf.conductors.gust_seed              = 1       # Integer >= 0. Picks the random series. Default: 1
+erf.conductors.gust_integral_length   = 340.2   # Real > 0 (m). L_u; the gusts' time scale is L_u / U. Default:
+                                                #   8.1 Lambda_1 of IEC 61400-1 at each span's and tower's height
+                                                #   (340.2 m above 60 m)
+
+# ==============================================================================
+# SECTION 5: A line (erf.conductors.<line>.*), here L1
+# ==============================================================================
+# A line is one span between two dead-ends, or with towers a section of spans
+# over suspension towers. x, y are ERF coordinates inside the domain; a point
+# stands z less geometry.prob_lo[2] above the terrain at (x, y) (with
+# prob_lo[2] = 0, z is its height above the terrain; on a flat mesh, its
+# absolute height).
+erf.conductors.L1.end_a  = 100.0 768.0 10.0           # 3 Reals (m). First dead-end. Must be set
+erf.conductors.L1.end_b  = 1000.0 768.0 10.0          # 3 Reals (m). Last dead-end. Must be set
+erf.conductors.L1.towers = 400.0 768.0 30.0  700.0 768.0 30.0
+                                                      # 3 Reals per tower (m), in order from end_a. Default: none
+                                                      #   (a single span). With insulator strings the attachments
+                                                      #   either side of a tower may not share x, y
+
+# the sag: one of length or stringing_tension
+erf.conductors.L1.length            = 302.0 302.0 302.0  # Reals (m), one per span, each above its chord on the terrain.
+                                                         #   Must be set, or stringing_tension
+erf.conductors.L1.stringing_tension = 20000.0            # Real > 0 (N). Instead of length: every span's horizontal
+                                                         #   tension in still air. Default: none
+
+# the conductor (ACSR Drake here)
+erf.conductors.L1.diameter        = 0.0281     # Real > 0 (m). Must be set
+erf.conductors.L1.mass_per_length = 1.628      # Real (kg/m) > air_density pi diameter^2 / 4. Must be set
+erf.conductors.L1.axial_stiffness = 2.9e7      # Real > 0 (N). EA. Must be set
+erf.conductors.L1.drag_coefficient = 1.0       # Real >= 0. Normal to the line, on the diameter. Default: 1.0
+erf.conductors.L1.damping_ratio   = 0.5        # Real in (0, 1]. Internal damping of the line and its strings,
+                                               #   fraction of critical. Default: 0.5
+erf.conductors.L1.segments        = 20         # Integer >= 2. Segments per span. Default: 20
+
+# insulator strings at the towers (needs towers)
+erf.conductors.L1.insulator_length   = 0.0     # Real >= 0 (m), its bottom above the ground; 0: the conductor is clamped
+                                               #   to the towers. Default: 0
+erf.conductors.L1.insulator_mass     = 50.0    # Real > 0 (kg). One string. Must be set with insulator_length > 0;
+                                               #   refused when insulator_length is 0
+erf.conductors.L1.insulator_diameter = 0.254   # Real > 0 (m). The discs' diameter, which the wind acts on. Refused
+                                               #   when insulator_length is 0. Default: 0.254
+
+# the towers (needs towers)
+erf.conductors.L1.tower_type = lattice         # One of erf.conductors.tower_types: the towers are lattice towers of
+                                               #   that type. Default: none (the towers are points)
+
+# logs
+erf.conductors.L1.output_root = conductors/L1  # String, different for every line; no log of the line may take the name
+                                               #   of a log the run writes in diagnostics_dir, nor its statistics the
+                                               #   name or file of the run's own. Default: <diagnostics_dir>/<line>
+
+# ==============================================================================
+# SECTION 6: Lines on another line's towers, and lines sharing gusts
+# ==============================================================================
+# L1sw hangs from L1's towers (a circuit's other phases across the cross-arm,
+# or its shield wire on the peak): each of its towers points stands on L1's
+# tower at the same index, above the tower's base. It has no tower_type of its
+# own, as many towers as L1, and L1 shares its towers with no other owner.
+erf.conductors.L1sw.share_towers = L1          # A line with a tower_type. Default: none (its own towers)
+erf.conductors.L1sw.end_a  = 100.0 768.0 12.0
+erf.conductors.L1sw.towers = 400.0 768.0 34.0  700.0 768.0 34.0
+erf.conductors.L1sw.end_b  = 1000.0 768.0 12.0
+erf.conductors.L1sw.stringing_tension = 12000.0
+erf.conductors.L1sw.diameter          = 0.0114
+erf.conductors.L1sw.mass_per_length   = 0.406
+erf.conductors.L1sw.axial_stiffness   = 1.2e7
+
+# L2, a circuit's phase built as a separate line on towers of its own, takes
+# L1's random gusts span by span (needs gust_type = random, as many spans as
+# L1; not with share_towers; L1 takes no other line's gusts). A line on another
+# line's towers already takes that line's gusts.
+erf.conductors.L2.gust_with = L1               # A line of erf.conductors.lines. Default: none (its own gusts)
+erf.conductors.L2.end_a  = 100.0 780.0 10.0
+erf.conductors.L2.towers = 400.0 780.0 30.0  700.0 780.0 30.0
+erf.conductors.L2.end_b  = 1000.0 780.0 10.0
+erf.conductors.L2.stringing_tension = 20000.0
+erf.conductors.L2.diameter          = 0.0281
+erf.conductors.L2.mass_per_length   = 1.628
+erf.conductors.L2.axial_stiffness   = 2.9e7
+
+# ==============================================================================
+# SECTION 7: A transformer (erf.conductors.<transformer>.*), here T1
+# ==============================================================================
+# A box on the terrain; every line end whose x, y lies on its footprint is
+# dead-ended on it and must be above its top. Logged in transformers.dat.
+erf.conductors.T1.position         = 100.0 768.0   # 2 Reals (m). The footprint's centre. Must be set
+erf.conductors.T1.size             = 8.0 5.0 6.0   # 3 Reals > 0 (m). Length along x, width along y, height. Must be set
+erf.conductors.T1.allowable_force  = 0.0           # Real >= 0 (N). The lines' horizontal pull it may take, flagged
+                                                   #   above it; 0: not checked. Default: 0
+erf.conductors.T1.allowable_moment = 0.0           # Real >= 0 (N m). The overturning moment about its base centre it
+                                                   #   may take, flagged above it; 0: not checked. Default: 0
+erf.conductors.T2.position         = 1000.0 768.0
+erf.conductors.T2.size             = 8.0 5.0 6.0
+
+# ==============================================================================
+# SECTION 8: A tower type (erf.conductors.<type>.*), here lattice
+# ==============================================================================
+# A square lattice tower loaded by the wind on its members (an equivalent
+# lattice of drag nodes) and by the lines, on four footings (towers.dat).
+# How it moves:
+#   - still (the default): frequency = 0 and no frame; its attachments are
+#     fixed MoorDyn points
+#   - one-mode bending tower: frequency > 0 (8b)
+#   - frame tower: frame_file (8c) or frame_panels (8d); MoorDyn moves its
+#     cross-arm as a coupled point in every moving case
+
+# --- 8a: the outline, drag and footings (every tower type)
+erf.conductors.lattice.base_width       = 6.0     # Real > 0 (m). The body's width at the ground. Must be set
+erf.conductors.lattice.top_width        = 1.5     # Real in (0, base_width] (m). Its width at the cross-arm. Must be set
+erf.conductors.lattice.solidity         = 0.2     # Real in (0, 1). Members' area over a face's outline. Must be set
+erf.conductors.lattice.arm_length       = 12.0    # Real > 0 (m). The cross-arm's length across the line. Must be set
+erf.conductors.lattice.arm_depth        = 1.5     # Real >= 0 (m). The cross-arm face's depth; 0: top_width.
+                                                  #   Default: top_width
+erf.conductors.lattice.peak             = 0.0     # Real >= 0 (m). The body above the cross-arm. Default: 0
+erf.conductors.lattice.drag_coefficient = 0.0     # Real >= 0. On the members' area; 0: 4 phi^2 - 5.9 phi + 4 from the
+                                                  #   solidity phi. Default: 0
+erf.conductors.lattice.segments         = 10      # Integer >= 1. Drag nodes along the body up to the cross-arm.
+                                                  #   Default: 10
+erf.conductors.lattice.leg_spacing      = 0.0     # Real >= 0 (m). The four footings' square spacing; 0: base_width.
+                                                  #   Not with a frame (8c, 8d), whose supports are the footings.
+                                                  #   Default: base_width
+erf.conductors.lattice.allowable_uplift      = 0.0  # Real >= 0 (N). A footing's pull-out capacity, flagged above it;
+                                                    #   0: not checked. Default: 0
+erf.conductors.lattice.allowable_compression = 0.0  # Real >= 0 (N). A footing's bearing capacity, flagged above it;
+                                                    #   0: not checked. Default: 0
+erf.conductors.lattice.damping_ratio    = 0.02    # Real in [0, 1). Of the one mode with frequency; of a frame, its
+                                                  #   Rayleigh damping at its first frequency and ten times it.
+                                                  #   Needs a tower that moves (8b, 8c or 8d); > 0 for a frame,
+                                                  #   whose higher modes would grow under the members' drag.
+                                                  #   On a still tower it stops the run, or with frequency = 0
+                                                  #   given is ignored with a warning (so are the foundation
+                                                  #   stiffnesses). Default: 0.02
+
+# --- 8b: one-mode bending tower (not with frame_file or frame_panels)
+erf.conductors.lattice.frequency        = 0.0     # Real >= 0 (Hz). First bending frequency on a rigid foundation;
+                                                  #   > 0 needs weight > 0; 0: still. Default: 0
+erf.conductors.lattice.weight           = 0.0     # Real >= 0 (N). The tower's weight on its foundation. Default: 0
+erf.conductors.lattice.foundation_rotational_stiffness = 0.0  # Real >= 0 (N m/rad); 0: rigid; > 0 needs frequency.
+                                                              #   Default: 0
+erf.conductors.lattice.foundation_lateral_stiffness    = 0.0  # Real >= 0 (N/m); 0: rigid; > 0 needs frequency. Default: 0
+
+# --- 8c: frame tower from a SubDyn file (not with frame_panels, frequency, weight or the foundation stiffnesses)
+erf.conductors.lattice.frame_file  = lattice_frame.dat    # File name. A SubDyn input file in tower-local axes (origin
+                                                          #   at the base centre, x along the line, y along the
+                                                          #   cross-arm, z up), four supports at z = 0, one per
+                                                          #   quadrant, its one interface joint the cross-arm's centre
+                                                          #   at the tower's cross-arm height; format:
+                                                          #   Docs/sphinx_doc/theory/TowerFrame.rst.
+                                                          #   Default: none
+erf.conductors.lattice.member_file = lattice_members.dat  # File name. Every member's design data (role, yield
+                                                          #   strength, angle, net area, end conditions); each member is
+                                                          #   checked (ASCE 10-15) every step. Needs frame_file.
+                                                          #   Default: none (no checks)
+
+# --- 8d: frame tower generated from this type's dimensions (not with frame_file, frequency, weight or the
+#     foundation stiffnesses); written to <diagnostics_dir>/frame_<tower>.dat, its members checked
+erf.conductors.lattice.frame_panels   = 0            # Integer in [0, 200]. Panels of the shaft below the cross-arm;
+                                                     #   0: no generated frame. A frame (generated or from a file) may
+                                                     #   have at most 6000 free degrees of freedom (about 120 panels
+                                                     #   with crossed bracing; single bracing stays below it).
+                                                     #   Default: 0
+erf.conductors.lattice.leg_angle      = 0.15 0.012   # 2 Reals (m), 0 < thickness < width. Equal-leg angle of the legs
+                                                     #   and cross-arm chords. Must be set with frame_panels
+erf.conductors.lattice.brace_angle    = 0.10 0.008   # 2 Reals (m), 0 < thickness < width. Every other member. Must be
+                                                     #   set with frame_panels
+erf.conductors.lattice.bracing        = crossed      # crossed or single. Face bracing. Needs frame_panels.
+                                                     #   Default: crossed
+erf.conductors.lattice.yield_strength = 3.45e8       # Real >= 0 (Pa); 0: 3.45e8. Needs frame_panels. Default: 3.45e8
+
+# --- 8c and 8d
+erf.conductors.lattice.steel_temperature = 20.0      # Real in (-273.15, 1200) (C). Lowers the frame's stiffness and its
+                                                     #   members' yield strength (EN 1993-1-2 Table 3.1); other than
+                                                     #   20 needs frame_file or frame_panels; a restart cannot change
+                                                     #   it. Default: 20

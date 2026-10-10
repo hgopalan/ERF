@@ -78,17 +78,30 @@ public:
      * damping of the type's damping_ratio at that frequency and ten times it. designs, when not null,
      * holds the design data of every frame member in the frame's member order (match_designs()), for
      * member_checks(). link_nodes are the frame nodes (0-based) the drag nodes and attachments may be tied
-     * to (empty: every node). Aborts, naming the tower and its frame (source, for messages), when the
-     * frame does not fit the tower.
+     * to (empty: every node). first_frequency (Hz) is the frame's first natural frequency when its
+     * caller has found it for the towers that share the frame (0: found here). Aborts, naming the tower
+     * and its frame (source, for messages), when the frame does not fit the tower: a drag node or an
+     * attachment far from the frame, a frame with other than one interface joint, or its interface joint
+     * (its cross-arm's centre) more than half the cross-arm's face depth from the tower's cross-arm height
+     * (a frame built for another height).
      */
     FrameTower (const Tower& tower, std::shared_ptr<const Frame> frame, double gravity,
                 std::shared_ptr<const std::vector<MemberDesign>> designs = nullptr, const std::string& source = std::string(),
-                const std::vector<std::size_t>& link_nodes = {});
+                const std::vector<std::size_t>& link_nodes = {}, double first_frequency = 0.0);
 
     using TowerModel::step;
     std::size_t num_attachments () const override { return m_attach.size(); }
+    /** Advance by dt to the loads given, those at the end of the step (Newmark's method). */
     void step (amrex::Real dt, const std::vector<amrex::Real>& node_force,
                const std::vector<std::array<amrex::Real,3>>& line_force) override;
+    /**
+     * Newmark's method takes the loads at the end of the step, and with them the trapezoidal mean
+     * over it: the pulls at the end, not their mean, which would lag them by half a step (a
+     * negative damping of the line's stiffness times dt/2).
+     */
+    void step_between (amrex::Real dt, const std::vector<amrex::Real>& node_force,
+                       const std::vector<std::array<amrex::Real,3>>& line_start,
+                       const std::vector<std::array<amrex::Real,3>>& line_end) override;
     /** A drag node's displacement from where it stands under the frame's weight (m, ERF axes). */
     std::array<amrex::Real,3> displacement (std::size_t node) const override;
     std::array<amrex::Real,3> velocity (std::size_t node) const override;
@@ -103,7 +116,14 @@ public:
      * members' temperatures (C).
      */
     std::vector<double> state () const override;
-    /** Restore a state from state(), reheating the frame first when its members' temperatures differ from the present ones. */
+    /** The motion of the frame where the cross-arm's centre stands (the tower's axis at its arm height). */
+    bool arm_centre_displacement (std::array<amrex::Real,3>& x) const override;
+    /** Members heated differently from the inputs' (the steel_temperature of the type) cannot continue a restart. */
+    std::string restart_mismatch (const std::vector<double>& saved) const override;
+    /**
+     * Restore a state from state(), reheating the frame first when its members' temperatures differ from the
+     * present ones (heating within a run; a restart refuses different temperatures through restart_mismatch()).
+     */
     bool set_state (const std::vector<double>& s) override;
     /**
      * The footings' load from the frame's support reactions: the static reactions under its weight plus
@@ -162,6 +182,7 @@ private:
     std::array<double,3> m_along{}, m_across{};  //!< the tower-local x and y axes in ERF's axes
     std::vector<RigidLink> m_drag;               //!< per drag node of the tower
     std::vector<RigidLink> m_attach;             //!< per attachment of the tower
+    std::vector<RigidLink> m_arm;                //!< the cross-arm's centre (one link)
     std::array<std::size_t,4> m_leg_support{};   //!< per leg (Tower::foundation()'s order): the index into the frame's supports
     std::vector<std::array<double,6>> m_static;  //!< per support: the reaction under the frame's weight (N, N m; frame axes)
     std::vector<std::array<double,12>> m_static_force; //!< per element: its end forces under the frame's weight (local axes)

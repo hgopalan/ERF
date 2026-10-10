@@ -2,7 +2,9 @@
 // the point's force exactly on every component, on a uniform mesh, on a terrain-following mesh
 // with its cell volumes, when the kernel is cut off by the ground, across a periodic boundary,
 // for several points at once, and however the domain is split; the source is zero beyond the
-// kernel's reach; and a non-finite position or force aborts, naming the point.
+// kernel's reach; over a hill taller than the kernel's reach the source is centred on the point
+// (the faces are found by their physical heights, not their index times dz); and a non-finite
+// position or force aborts, naming the point.
 
 #include <algorithm>
 #include <array>
@@ -177,6 +179,38 @@ TEST(ActuatorSpreading, PointForceIntegratesBackOverTerrain)
     const std::vector<Real> pos = xyz(0.2 * m.Lx, 0.3 * m.Ly, 0.4 * m.H);
     const std::vector<Real> force = xyz(-1.5e6, 2.0e5, 4.0e4);
     expect_total(s.spread(pos, force, eps), {{force[0], force[1], force[2]}}, abs_sum(force));
+}
+
+// Over a 400 m hill on 40 levels (15 m apart at its crest, 25 m nominal) a point 120 m above the crest
+// sits at nominal index 20 but between the crest's levels 7 and 8: the kernel's faces are those within
+// 3 eps of it in physical height, so the source's centroid is the point's height
+TEST(ActuatorSpreading, OverATallHillTheSourceIsCentredOnThePoint)
+{
+    Mesh m;
+    m.nz = 40;
+    m.H = 1000.0;
+    m.hill = 400.0;
+    Sources s(m, true);
+    const Real eps = 0.5 * m.dx();
+    // the crest: x = 0, y = Ly / 4
+    const Real zp = m.hill + 120.0;
+    const std::vector<Real> pos = xyz(0.0, 0.25 * m.Ly, zp);
+    const std::vector<Real> force = xyz(-1.0e5, 0.0, 0.0);
+    expect_total(s.spread(pos, force, eps), {{force[0], force[1], force[2]}}, abs_sum(force));
+    // the x source's centroid in physical height, each face at the mean of its four nodes, weighted by its volume
+    double num = 0.0, den = 0.0;
+    for (amrex::MFIter mfi(s.sx, false); mfi.isValid(); ++mfi) {
+        const auto a = s.sx.const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            if (i == m.nx) { return; }   // the periodic image of face 0
+            const double zc = 0.25 * (m.z_node(i, j, k) + m.z_node(i, j + 1, k) + m.z_node(i, j, k + 1) + m.z_node(i, j + 1, k + 1));
+            const double wv = static_cast<double>(a(i,j,k)) * static_cast<double>(m.detj(i, j));
+            num += wv * zc;
+            den += wv;
+        });
+    }
+    ASSERT_NE(den, 0.0);
+    EXPECT_NEAR(num / den, static_cast<double>(zp), 0.1 * static_cast<double>(eps));
 }
 
 TEST(ActuatorSpreading, GroundCutKernelStillIntegratesToTheForce)

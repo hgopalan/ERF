@@ -3,17 +3,26 @@
 // AttachmentsArePlacedAboveTheTerrainUnderEachEnd: the attachment points stand at their height above
 //     the k = 0 node plane of z_phys_nd (bilinear between the nodes), as ground.dat records.
 // OnAUniformMeshTheHeightsAreAbsolute: without terrain the given heights are absolute.
-// LinesStepOnTheAnchorLevelOnlyAndLogEveryStep: other levels return at once; one row per step.
+// LinesStepOnTheAnchorLevelOnlyAndLogEveryStep: other levels return at once; one row per step; an anchor
+//     level that does not exist (yet, or any more) stops the run, naming erf.conductors.anchor_level.
 // TheFlowIsSampledAtTheLinesCurrentPosition: without a prescribed velocity, MoorDyn gets ERF's
 //     velocity at the line's current position, not where it hung.
 // ClearanceIsTheHeightAboveTheTerrainUnderEachNode: the clearance against the terrain under each node.
+// AStringReachingBelowTheGroundIsRefused: placed, a tower's string may not end below the ground.
+// TheGridsMustReachAsFarAsTheDragDoes: the coverage reach is a cell, and with drag_on_flow 3 epsilon cells.
+// TheDragNeedsTheGridsAsFarAsItReaches: with a prescribed wind, the spreading itself refuses a patch the drag outreaches.
+// TheSpansDragStatisticIsAcrossTheSpan: drag_normal of a span along +y in a wind along +x is minus its
+//     x drag (the horizontal drag along z x the span's direction), not its y drag.
 // TheSpreadDragIntegratesToMinusTheDragOnTheLines: the momentum source integrates to minus the drag.
 // WithoutDragOnFlowNothingIsPutIntoTheFlow: drag_on_flow off leaves the sources empty.
+// ARestartCannotMoveALinesPointsOrChangeItsLength: the checkpoint records the placed points and lengths,
+//     and a restart whose inputs move an end or change a length stops, naming the line.
 // ARestartContinuesTheLinesTheirSourcesStatisticsAndLogs: a restart continues where the checkpoint left off.
 // TrimmingALogKeepsTheHeaderAndTheRowsUpToTheCheckpoint: trim_log_after.
 // ASectionIsPlacedOnTheTerrainAtEveryTowerAndLogsEachSpan: a section's towers and per-span logs.
 // TheClosestApproachOfTwoLinesIsFlaggedAgainstTheFlashoverDistance: the exact separation and the flag.
-// ARestartContinuesASectionItsStringsAndTheSeparationOfTheLines: a section's restart.
+// ARestartContinuesASectionItsStringsAndTheSeparationOfTheLines: a section's restart; an older checkpoint's
+//     drag_y statistics continue on spans along +x; a restart that changes insulator_length stops.
 // TransformersTakeThePullOfTheLinesEndingOnThemAndContinueAcrossARestart: transformer loads,
 //     allowables, clearances, and their restart.
 // AStringingTensionSetsTheLengthsFromTheChordsOnTheTerrain: strung lengths from the placed chords.
@@ -21,14 +30,15 @@
 //     line's pull and the footing checks.
 // TheTowersDragGoesIntoTheFlowWithTheLinesAndSurvivesARestart: the towers' drag in the sources.
 // MovingTowersSettleWhereTheirStiffnessBalancesTheWindAndTheLine: bending towers at rest.
-// MovingTowersContinueAcrossARestart: bending towers' restart.
+// MovingTowersContinueAcrossARestart: bending towers' restart, coupling.dat's counts across a checkpoint
+//     between two of its rows included.
 // ACircuitHangsFromOneRowOfTowersEachLineAtItsOwnPoint: shared towers, points on the tower's base.
 // ACircuitOnBendingTowersMovesEveryLinesPoint: bending shared towers move every line's point.
 // AShortTautSpanOnBendingTowersStaysStable: the iterated coupling keeps a stiff span stable.
 // AnImmersedTerrainPlacesEverythingOnItsSurface: an immersed terrain on a flat mesh.
 // SetGroundRefusesASurfaceOffsetBelowTheDomainTop: erf.conductors.surface_offset must hold the domain.
 // AnAttachmentOutsideTheDomainIsRefusedNamingItsKey: the abort names end_a, end_b or the tower.
-// ANonFiniteCouplingPullIsRefusedNotConverged: coupling_converged on NaN pulls.
+// ANonFiniteCouplingPullIsRefusedNotConverged: coupling_converged on NaN pulls; coupling_diverged at 20 in a row.
 // ARestartChecksTheTowerSwayAndTheSurfaceOffset: restart_mismatch.
 // GustsComeFromTheRANSkAlongEachSpan: with gust_type = factor, per span the root-mean-square wind and normal wind
 //     over its nodes and the mean k = (rho k)/rho, from stats_start, sampled where the nodes are at each step's start;
@@ -73,6 +83,7 @@
 
 #include <gtest/gtest.h>
 
+#include "../ERF_GTestTempDir.H"
 #include "ERF_ActuatorSpreading.H"
 #include "ERF_Conductors.H"
 #include "ERF_Gusts.H"
@@ -81,6 +92,22 @@
 #include "ERF_MoorDynSystem.H"
 
 namespace {
+
+// a scratch root drawn once per test process (ERF_GTestTempDir.H): the fixed names below it are this
+// process's alone, so ctest -j and the shuffled rerun never share them; removed when the process exits
+const std::filesystem::path& gtest_scratch_root ()
+{
+    struct Root {
+        std::filesystem::path p;
+        ~Root () { std::error_code ec; std::filesystem::remove_all(p, ec); }
+    };
+    static const Root root{[] {
+        const std::filesystem::path p = erf_gtest_temp_path("erf_gtest_conductors");
+        std::filesystem::create_directories(p);
+        return p;
+    }()};
+    return root.p;
+}
 
 using amrex::Real;
 
@@ -149,7 +176,7 @@ struct Mesh {
 
 std::string scratch (const std::string& tag)
 {
-    const auto dir = std::filesystem::temp_directory_path() / ("erf_gtest_conductors_" + tag);
+    const auto dir = gtest_scratch_root() / ("erf_gtest_conductors_" + tag);
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     return dir.string();
@@ -232,6 +259,13 @@ TEST(Conductors, LinesStepOnTheAnchorLevelOnlyAndLogEveryStep)
     auto c = Conductors::create(1);   // two levels: the anchor is the finest, level 1
     ASSERT_TRUE(c);
     EXPECT_EQ(c->anchor_level(), 1);
+    {
+        // amr.max_level = 1 with no level 1 yet: the lines would stand on flat ground and never step
+        const std::string msg = erf_gtest::abort_message([&] { c->require_anchor_level(0); });
+        EXPECT_NE(msg.find("erf.conductors.anchor_level"), std::string::npos) << msg;
+        EXPECT_NE(msg.find("finest level is 0"), std::string::npos) << msg;
+        EXPECT_TRUE(erf_gtest::abort_message([&] { c->require_anchor_level(1); }).empty());
+    }
     c->set_ground(nullptr, m.geom);
     const auto& span = *c->lines().front();
     const Real off0 = span.mid_offset();
@@ -246,6 +280,96 @@ TEST(Conductors, LinesStepOnTheAnchorLevelOnlyAndLogEveryStep)
     int rows = 0;
     while (std::getline(f, line)) { if (!line.empty() && line.rfind("time", 0) != 0) { ++rows; } }
     EXPECT_EQ(rows, 4) << "the initial row and one per step";
+}
+
+TEST(Conductors, AStringReachingBelowTheGroundIsRefused)
+{
+    // on a flat mesh whose domain starts 5 m up, z is the absolute height: a tower at z = 6 m with a 4 m
+    // string passes the input check (6 > 4), but the string's bottom stands 3 m below the ground at 5 m
+    const std::string dir = scratch("string_ground");
+    set_inputs(dir, "Tsg", true, {{300.0, 500.0, 10.0}}, {{600.0, 500.0, 10.0}});
+    amrex::ParmParse ps("erf.conductors.Tsg");
+    ps.addarr("towers", std::vector<Real>{450.0, 500.0, 6.0});
+    ps.addarr("length", std::vector<Real>{151.0, 151.0});
+    ps.add("insulator_length", 4.0);
+    ps.add("insulator_mass", 50.0);
+    Mesh m(false);
+    const amrex::RealBox rb({AMREX_D_DECL(Real(0.0), Real(0.0), Real(5.0))}, {AMREX_D_DECL(m.Lx, m.Ly, m.H + Real(5.0))});
+    const std::array<int,3> periodic{{0, 0, 0}};
+    const amrex::Geometry raised(m.geom.Domain(), &rb, 0, periodic.data());
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    const std::string msg = erf_gtest::abort_message([&] { c->set_ground(nullptr, raised); });
+    EXPECT_NE(msg.find("erf.conductors.Tsg.towers"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("the insulator string's bottom lies 3.000000 m below the ground"), std::string::npos) << msg;
+}
+
+TEST(Conductors, TheGridsMustReachAsFarAsTheDragDoes)
+{
+    // the sampler needs the cells around a node; with drag_on_flow the drag reaches 3 epsilon cells
+    const std::string dir = scratch("reach");
+    set_inputs(dir, "Treach");
+    Mesh m(false);
+    const Real cell = std::max(static_cast<Real>(m.geom.CellSize(0)), static_cast<Real>(m.geom.CellSize(1)));
+    {
+        auto c = Conductors::create(0);
+        EXPECT_EQ(c->coverage_reach(m.geom), cell);
+    }
+    amrex::ParmParse pp("erf.conductors");
+    pp.add("drag_on_flow", true);
+    pp.add("epsilon", 2.0);
+    auto c = Conductors::create(0);
+    EXPECT_EQ(c->coverage_reach(m.geom), std::max(cell, Real(6.0) * static_cast<Real>(m.geom.CellSize(0))));
+}
+
+TEST(Conductors, TheDragNeedsTheGridsAsFarAsItReaches)
+{
+    // a prescribed wind samples nothing, so only the spreading can see that the level's patch (x 0 to 1000 m)
+    // stops 400 m past the span's end: beyond epsilon (200 m), inside the drag's reach of 3 epsilon cells (600 m)
+    const std::string dir = scratch("drag_reach");
+    set_inputs(dir, "Tdr");
+    amrex::ParmParse pp("erf.conductors");
+    pp.add("drag_on_flow", true);
+    pp.add("epsilon", 2.0);
+    Mesh m(false);
+    const amrex::BoxArray ba(amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(9, m.ny - 1, m.nz - 1)));
+    const amrex::DistributionMapping dm(ba);
+    amrex::MultiFab u(amrex::convert(ba, amrex::IntVect(1,0,0)), dm, 1, 1), v(amrex::convert(ba, amrex::IntVect(0,1,0)), dm, 1, 1),
+                    w(amrex::convert(ba, amrex::IntVect(0,0,1)), dm, 1, 1);
+    u.setVal(0.0); v.setVal(0.0); w.setVal(0.0);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(nullptr, m.geom);
+    const std::string msg = erf_gtest::abort_message([&] { c->advance(0, 0.0, 0.2, u, v, w, nullptr, nullptr, m.geom); });
+    EXPECT_NE(msg.find("is not covered, with its drag's reach of 3 epsilon cells"), std::string::npos) << msg;
+}
+
+TEST(Conductors, TheSpansDragStatisticIsAcrossTheSpan)
+{
+    const std::string dir = scratch("dragnormal");
+    set_inputs(dir, "Tdn", false, {{500.0, 300.0, 30.0}}, {{500.0, 600.0, 30.0}});
+    amrex::ParmParse("erf.conductors").addarr("prescribed_velocity", std::vector<Real>{10.0, 0.0, 0.0});
+    Mesh m(false);
+    auto c = Conductors::create(0);
+    ASSERT_TRUE(c);
+    c->set_ground(nullptr, m.geom);
+    c->advance(0, 0.0, 0.2, m.u, m.v, m.w, nullptr, nullptr, m.geom);
+    const auto D = c->lines().front()->span_drag(0);
+    ASSERT_GT(D[0], 1.0) << "the wind across the span drags it along +x";
+    std::ifstream st(dir + "/Tdn_stats.csv");
+    ASSERT_TRUE(st.good());
+    std::string row;
+    double mean = 0.0;
+    bool found = false;
+    while (std::getline(st, row)) {
+        std::stringstream ss(row);
+        std::string cell;
+        std::vector<std::string> cells;
+        while (std::getline(ss, cell, ',')) { cells.push_back(cell); }
+        if (cells.size() >= 5 && cells[3] == "drag_normal") { mean = std::stod(cells[4]); found = true; }
+    }
+    ASSERT_TRUE(found);
+    EXPECT_NEAR(mean, -static_cast<double>(D[0]), 1.0e-6 * std::abs(static_cast<double>(D[0]))) << "one sample: the drag across";
 }
 
 TEST(Conductors, TheFlowIsSampledAtTheLinesCurrentPosition)
@@ -481,7 +605,7 @@ TEST(Conductors, ClearanceIsTheHeightAboveTheTerrainUnderEachNode)
     std::ifstream st(dir + "/Tclear_stats.csv");
     ASSERT_TRUE(st.good());
     std::string all((std::istreambuf_iterator<char>(st)), std::istreambuf_iterator<char>());
-    for (const char* q : {"swing_deg", "mid_offset", "tension_a", "tension_b", "max_tension", "min_clearance", "drag_y"}) {
+    for (const char* q : {"swing_deg", "mid_offset", "tension_a", "tension_b", "max_tension", "min_clearance", "drag_normal"}) {
         EXPECT_NE(all.find(q), std::string::npos) << q;
     }
 }
@@ -561,6 +685,42 @@ std::string slurp (const std::string& fname)
     return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 } // namespace
+
+TEST(Conductors, ARestartCannotMoveALinesPointsOrChangeItsLength)
+{
+    const std::string dir = scratch("restart_moved");
+    set_inputs(dir, "Tmv");
+    Mesh m(true);
+    auto a = Conductors::create(0);
+    ASSERT_TRUE(a);
+    a->set_ground(m.znd.get(), m.geom);
+    for (int step = 0; step < 2; ++step) { a->advance(0, 0.2 * step, 0.2, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    const std::string chk = dir + "/chk00002";
+    std::filesystem::create_directories(chk);
+    a->write_checkpoint(chk);
+    EXPECT_NE(slurp(chk + "/conductors/state").find("geometry Tmv 1 "), std::string::npos);
+    amrex::ParmParse ps("erf.conductors.Tmv");
+    {
+        // the same inputs restart
+        auto b = Conductors::create(0);
+        EXPECT_TRUE(erf_gtest::abort_message([&] { b->set_ground(m.znd.get(), m.geom, chk); }).empty());
+    }
+    {
+        // end_b moved 1 m: the end segment would be stretched by 1 m at the first step
+        ps.addarr("end_b", std::vector<Real>{599.0, 500.0, 30.0});
+        auto b = Conductors::create(0);
+        const std::string msg = erf_gtest::abort_message([&] { b->set_ground(m.znd.get(), m.geom, chk); });
+        EXPECT_NE(msg.find("line Tmv's attachment point coordinate"), std::string::npos) << msg;
+        EXPECT_NE(msg.find("cannot move its points"), std::string::npos) << msg;
+        ps.addarr("end_b", std::vector<Real>{600.0, 500.0, 30.0});
+    }
+    {
+        ps.add("length", 302.0);
+        auto b = Conductors::create(0);
+        const std::string msg = erf_gtest::abort_message([&] { b->set_ground(m.znd.get(), m.geom, chk); });
+        EXPECT_NE(msg.find("line Tmv's unstretched length"), std::string::npos) << msg;
+    }
+}
 
 TEST(Conductors, ARestartContinuesTheLinesTheirSourcesStatisticsAndLogs)
 {
@@ -795,7 +955,8 @@ TEST(Conductors, ARestartContinuesASectionItsStringsAndTheSeparationOfTheLines)
     const std::string dir = scratch("restart_circuit");
     // a section on strings and a single span beside its middle span
     set_inputs(dir, "Rs", true, {{100.0, 500.0, 30.0}}, {{1000.0, 500.0, 30.0}});
-    set_inputs(dir, "Rp", true, {{400.0, 506.0, 30.0}}, {{700.0, 506.0, 30.0}});
+    // Rp runs along -x, so an older checkpoint's drag_y (its ERF-frame y drag) is not its drag across it
+    set_inputs(dir, "Rp", true, {{700.0, 506.0, 30.0}}, {{400.0, 506.0, 30.0}});
     amrex::ParmParse pp("erf.conductors");
     pp.addarr("lines", std::vector<std::string>{"Rs", "Rp"});
     amrex::ParmParse ps("erf.conductors.Rs");
@@ -830,6 +991,46 @@ TEST(Conductors, ARestartContinuesASectionItsStringsAndTheSeparationOfTheLines)
     for (std::size_t i = 0; i < files.size(); ++i) { EXPECT_EQ(slurp(dir + files[i]), before[i]) << files[i]; }
     EXPECT_NEAR(b->separations()[0].distance, sep, roundoff * sep);
     EXPECT_NEAR(b->lines()[0]->insulator_swing(0), a->lines()[0]->insulator_swing(0), roundoff);
+    {
+        // a checkpoint listing drag_y in drag_normal's place: Rs's spans run along +x, where the two are one, so
+        // their statistics continue; Rp runs along -x, so its start afresh
+        int renamed = 0;
+        for (const auto& e : std::filesystem::directory_iterator(chk + "/conductors")) {
+            const std::string f = e.path().string();
+            if (f.size() < 10 || f.compare(f.size() - 10, 10, "_stats.dat") != 0) { continue; }
+            std::string text = slurp(f);
+            const auto at = text.find("drag_normal ");
+            if (at == std::string::npos) { continue; }
+            text.replace(at, 12, "drag_y ");
+            std::ofstream(f, std::ios::trunc) << text;
+            ++renamed;
+        }
+        EXPECT_EQ(renamed, 4) << "Rs's three spans and Rp's";
+        auto c = Conductors::create(0);
+        EXPECT_TRUE(erf_gtest::abort_message([&] { c->set_ground(nullptr, m.geom, chk); }).empty());
+        // its checkpoint still counts the samples taken before (afresh, it would count none)
+        const std::string chk2 = dir + "/chk_renamed";
+        std::filesystem::create_directories(chk2);
+        c->write_checkpoint(chk2);
+        int continued = 0, afresh = 0;
+        for (const auto& e : std::filesystem::directory_iterator(chk2 + "/conductors")) {
+            const std::string text = slurp(e.path().string());
+            if (text.find("drag_normal ") == std::string::npos) { continue; }
+            const bool along_minus_x = e.path().filename().string().rfind("Rp", 0) == 0;
+            EXPECT_EQ(text.find("count = 0\n") != std::string::npos, along_minus_x) << e.path();
+            ++(along_minus_x ? afresh : continued);
+        }
+        EXPECT_EQ(continued, 3);
+        EXPECT_EQ(afresh, 1);
+    }
+    {
+        // the explicit lengths stay, the strings grow 0.5 m: the nodes would restart where shorter strings held them
+        ps.remove("insulator_length");
+        ps.add("insulator_length", 3.0);
+        auto c = Conductors::create(0);
+        const std::string msg = erf_gtest::abort_message([&] { c->set_ground(nullptr, m.geom, chk); });
+        EXPECT_NE(msg.find("line Rs's insulator_length was 2.5 and is 3"), std::string::npos) << msg;
+    }
     pp.addarr("lines", std::vector<std::string>{});
     ps.remove("towers");
     ps.remove("insulator_length");
@@ -1237,6 +1438,8 @@ TEST(Conductors, MovingTowersContinueAcrossARestart)
     const std::string dir = scratch("moving_restart");
     set_towered_section(dir, "Mr");
     make_towers_move(0.02);   // still swaying at the checkpoint
+    // coupling.dat every 2 steps, so the checkpoint falls between two rows
+    amrex::ParmParse("erf.conductors").add("diagnostics_int", 2);
     Mesh m(true);
     const double dt = 0.25;
     auto a = Conductors::create(0);
@@ -1247,7 +1450,17 @@ TEST(Conductors, MovingTowersContinueAcrossARestart)
     const std::string chk = dir + "/chk00003";
     std::filesystem::create_directories(chk);
     a->write_checkpoint(chk);
+    // the iterations counted towards coupling.dat's next row: a moving tower's step takes at least one
+    auto logged = [&] (const std::string& d) {
+        const std::string state = slurp(d + "/conductors/state");
+        const auto at = state.find("coupling_logged = ");
+        return (at == std::string::npos) ? std::string() : state.substr(at, state.find('\n', at) - at);
+    };
+    const std::string counted = logged(chk);
+    ASSERT_FALSE(counted.empty());
+    EXPECT_NE(counted.compare(0, 20, "coupling_logged = 0 "), 0) << "the checkpoint must fall between two rows: " << counted;
     for (; step < 6; ++step) { a->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
+    const std::string coupling = slurp(dir + "/coupling.dat");
     const auto* ma = dynamic_cast<const erf_towers::OneModeTower*>(a->tower_models()[1].get());
     ASSERT_NE(ma, nullptr);
     EXPECT_GT(std::abs(ma->v()[1]), 1.0e-4) << "the test needs the towers moving";
@@ -1259,6 +1472,14 @@ TEST(Conductors, MovingTowersContinueAcrossARestart)
     ASSERT_TRUE(b);
     b->set_ground(m.znd.get(), m.geom, chk);
     ASSERT_TRUE(b->restored());
+    {
+        // the restart takes the count up where the checkpoint left it (coupling.dat's max hides a lost count when
+        // the steps after the checkpoint take as many iterations)
+        const std::string again = dir + "/chk00003_again";
+        std::filesystem::create_directories(again);
+        b->write_checkpoint(again);
+        EXPECT_EQ(logged(again), counted);
+    }
     for (step = 3; step < 6; ++step) { b->advance(0, dt * step, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom); }
     const auto* mb = dynamic_cast<const erf_towers::OneModeTower*>(b->tower_models()[1].get());
     ASSERT_NE(mb, nullptr);
@@ -1267,6 +1488,8 @@ TEST(Conductors, MovingTowersContinueAcrossARestart)
     EXPECT_EQ(slurp(dir + "/towers.dat"), towers);
     EXPECT_EQ(slurp(dir + "/tower_Mr_t2_stats.csv"), stats);
     EXPECT_EQ(slurp(dir + "/Mr_span2.dat"), span);
+    EXPECT_FALSE(coupling.empty());
+    EXPECT_EQ(slurp(dir + "/coupling.dat"), coupling);
     clear_towered_section("Mr");
 }
 
@@ -1379,6 +1602,7 @@ TEST(Conductors, ACircuitOnBendingTowersMovesEveryLinesPoint)
 {
     const std::string dir = scratch("circuit_moving");
     set_circuit(dir, 0.3);
+    amrex::ParmParse("erf.conductors").add("diagnostics_int", 4);
     Mesh m(true);
     auto c = Conductors::create(0);
     ASSERT_TRUE(c);
@@ -1386,13 +1610,33 @@ TEST(Conductors, ACircuitOnBendingTowersMovesEveryLinesPoint)
     for (const auto& span : c->lines()) { EXPECT_TRUE(span->towers_move()) << span->name() << " moves with the towers it shares"; }
     const double dt = 0.25;
     int most = 0, unconverged = 0;
+    std::vector<int> per_step;
     for (int s = 0; s < 40; ++s) {
         c->advance(0, dt * s, dt, m.u, m.v, m.w, m.znd.get(), nullptr, m.geom);
         most = std::max(most, c->coupling_iterations());
+        per_step.push_back(c->coupling_iterations());
         unconverged += c->coupling_unconverged();
     }
     EXPECT_GE(most, 2) << "the coupling steps are iterated while the towers move";
     EXPECT_EQ(unconverged, 0);
+    // coupling.dat, every 4 steps, holds the most iterations over the 4 steps since its last row
+    {
+        std::istringstream log(slurp(dir + "/coupling.dat"));
+        std::string row;
+        std::getline(log, row);
+        std::size_t k = 0;
+        while (std::getline(log, row)) {
+            std::istringstream rs(row);
+            double t = 0.0;
+            int it = -1, bad = -1;
+            ASSERT_TRUE(static_cast<bool>(rs >> t >> it >> bad)) << row;
+            ASSERT_LT(4 * k + 3, per_step.size());
+            EXPECT_EQ(it, *std::max_element(per_step.begin() + static_cast<long>(4 * k), per_step.begin() + static_cast<long>(4 * k + 4)))
+                << "row " << k;
+            ++k;
+        }
+        EXPECT_EQ(k, 10u);
+    }
     for (std::size_t t = 0; t < 2; ++t) {
         const auto& tw = c->towers()[t];
         const auto* model = dynamic_cast<const erf_towers::OneModeTower*>(c->tower_models()[t].get());
@@ -1541,6 +1785,13 @@ TEST(Conductors, ANonFiniteCouplingPullIsRefusedNotConverged)
                                                                1.0e-4, converged);
     EXPECT_NE(err.find("is not finite"), std::string::npos) << err;
     EXPECT_FALSE(converged) << "a pull that is not finite never counts as converged";
+    // unconverged coupling steps in a row stop the run at the limit; a converged one starts the count again
+    int in_a_row = 0;
+    for (int n = 1; n < 20; ++n) { EXPECT_FALSE(erf_conductors::coupling_diverged(false, in_a_row, 20)) << n; }
+    EXPECT_FALSE(erf_conductors::coupling_diverged(true, in_a_row, 20));
+    EXPECT_EQ(in_a_row, 0);
+    for (int n = 1; n < 20; ++n) { EXPECT_FALSE(erf_conductors::coupling_diverged(false, in_a_row, 20)) << n; }
+    EXPECT_TRUE(erf_conductors::coupling_diverged(false, in_a_row, 20)) << "the 20th in a row";
 }
 
 TEST(Conductors, ARestartChecksTheTowerSwayAndTheSurfaceOffset)
@@ -1763,7 +2014,7 @@ TEST(Conductors, RandomGustsFollowTheirProcessesAndACircuitSharesThem)
             for (int sp = 0; sp < 3; ++sp) {
                 const unsigned n0 = L.span_first_node(sp), nn = L.span_num_nodes(sp);
                 const double sigma = sf * std::sqrt(mean_k(where[i], n0, nn, k0, kz));
-                const double B = erf_conductors::gust_background_factor(static_cast<double>(L.inputs().chord(sp)), Ls);
+                const double B = erf_conductors::gust_background_factor(static_cast<double>(L.inputs().conductor_chord(sp)), Ls);
                 // every line's span takes C2's process of that span: the circuit's phases move together
                 gust[static_cast<std::size_t>(sp)] = sigma * std::sqrt(B) * z[static_cast<std::size_t>(sp)];
                 for (unsigned n = n0; n < n0 + nn; ++n) {

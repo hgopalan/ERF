@@ -34,18 +34,21 @@ namespace erf_towers {
  *   erf.conductors.lattice.weight     = 9.0e4  (N, the tower's own weight on its foundation; >= 0, default 0;
  *                                               required > 0 when frequency > 0, since it sets the mass)
  *   erf.conductors.lattice.leg_spacing = 6.    (m, between the four legs' footings, a square; >= 0,
- *                                               default 0: base_width)
+ *                                               default 0: base_width; not with a frame, whose supports are its footings)
  *   erf.conductors.lattice.allowable_uplift      = 1.0e5 (N, a footing's pull-out capacity; >= 0, default 0: not checked)
  *   erf.conductors.lattice.allowable_compression = 3.0e5 (N, a footing's bearing capacity; >= 0, default 0: not checked)
  *   erf.conductors.lattice.frequency  = 2.0    (Hz, the first bending frequency on a rigid foundation; >= 0,
  *                                               default 0: the tower stands still and the lines hang from
  *                                               fixed MoorDyn points; > 0 needs weight > 0)
  *   erf.conductors.lattice.damping_ratio = 0.02 (-, the fraction of critical damping of that mode; in [0, 1),
- *                                               default 0.02)
+ *                                               default 0.02; needs a tower that moves, and > 0 with a frame;
+ *                                               on a still tower with frequency = 0 given: a warning)
  *   erf.conductors.lattice.foundation_rotational_stiffness = 1.0e9 (N m/rad, the footing's resistance to tilting;
- *                                                                   >= 0, default 0: rigid)
+ *                                                                   >= 0, default 0: rigid; > 0 needs frequency,
+ *                                                                   or with frequency = 0 given: a warning)
  *   erf.conductors.lattice.foundation_lateral_stiffness    = 1.0e8 (N/m, the footing's resistance to sliding;
- *                                                                   >= 0, default 0: rigid)
+ *                                                                   >= 0, default 0: rigid; > 0 needs frequency,
+ *                                                                   or with frequency = 0 given: a warning)
  *   erf.conductors.lattice.frame_file = tower.dat (a SubDyn input file of the tower's frame in tower-local axes:
  *                                       origin at the base centre, x along the line, y along the cross-arm,
  *                                       z up; default none. The tower then bends as that frame model, which
@@ -90,7 +93,9 @@ struct TowerType
     amrex::Real allowable_uplift{0.0};                 //!< N; 0: not checked
     amrex::Real allowable_compression{0.0};            //!< N; 0: not checked
     amrex::Real frequency{0.0};                        //!< Hz; 0: the tower stands still
+    bool frequency_given{false};                       //!< frequency was given (0 then turns the motion off on purpose)
     amrex::Real damping_ratio{0.02};                   //!< - (fraction of critical)
+    bool damping_given{false};                         //!< damping_ratio was given (it needs a tower that moves)
     amrex::Real foundation_rotational_stiffness{0.0};  //!< N m/rad; 0: rigid
     amrex::Real foundation_lateral_stiffness{0.0};     //!< N/m; 0: rigid
     std::string frame_file;                            //!< SubDyn input file of the tower's frame; empty: none
@@ -117,8 +122,13 @@ struct TowerType
     amrex::Real yield () const { return yield_strength > 0.0 ? yield_strength : amrex::Real(3.45e8); }
     /** The force coefficient on the members' area (-): drag_coefficient, or the lattice value of the solidity. */
     amrex::Real force_coefficient () const;
-    /** Check every range: returns an empty string when the type is acceptable, else the message, naming the key. */
+    /**
+     * Check every range: returns an empty string when the type is acceptable, else the message, naming the key.
+     * Keys of a tower's motion on a tower that stands still are refused when frequency was never given.
+     */
     std::string validate () const;
+    /** With frequency = 0 given and no frame, the keys of a tower's motion that are given but unused (a warning). */
+    std::string unused_on_a_still_tower () const;
 };
 
 } // namespace erf_towers

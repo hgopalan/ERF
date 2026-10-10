@@ -1,7 +1,8 @@
 // Contract of the conductor geometry: the closest points of two segments, for crossing, skew,
 // parallel, end-to-end and degenerate segments, and of two polylines, are the exact minimisers,
 // with the distance between them; and the closest approach of a segment or a polyline to a box is
-// the exact distance, over the box, past an edge, through it, and no larger than any sampled point's.
+// the exact distance, over the box, past an edge, through it, and no larger than any sampled point's;
+// the searches that skip far segments return what exhaustive ones do.
 
 #include <algorithm>
 #include <array>
@@ -158,4 +159,49 @@ TEST(ConductorGeometry, APolylineComesClosestToABoxWhereItsNearestSegmentDoes)
     const auto second = closest_segment_box({{9.0, 0.0, 104.0}}, {{60.0, 0.0, 112.0}}, lo, hi);
     EXPECT_NEAR(c.distance, std::min(first.distance, second.distance), tol * 100);
     EXPECT_LT(c.distance, 5.0);
+}
+
+// The searches skip segment pairs (and segments) whose bounding boxes lie farther apart than the closest
+// approach found so far: on random sagging polylines, near and far apart, and boxes, they return the
+// distance an exhaustive search over every pair gives.
+TEST(ConductorGeometry, ThePrunedSearchesFindWhatTheExhaustiveOnesDo)
+{
+    using erf_conductors::Closest;
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<double> u(-1.0, 1.0);
+    auto polyline = [&] (double x0, double y0, double z0, double dx, double dy) {
+        std::vector<amrex::Real> p;
+        for (int n = 0; n <= 20; ++n) {
+            const double s = n / 20.0;
+            p.insert(p.end(), {amrex::Real(x0 + s * dx + 2.0 * u(rng)), amrex::Real(y0 + s * dy + 2.0 * u(rng)),
+                               amrex::Real(z0 - 40.0 * s * (1.0 - s) + 2.0 * u(rng))});
+        }
+        return p;
+    };
+    auto at = [] (const std::vector<amrex::Real>& v, std::size_t i) {
+        return std::array<amrex::Real,3>{{v[3*i], v[3*i+1], v[3*i+2]}};
+    };
+    for (int trial = 0; trial < 50; ++trial) {
+        const double gap = (trial % 5) * 6.0;
+        const auto P = polyline(0.0, 0.0, 30.0, 300.0, 10.0 * u(rng));
+        const auto Q = polyline(20.0 * u(rng), gap, 30.0 + 5.0 * u(rng), 300.0, 200.0 * u(rng));
+        Closest brute;
+        for (std::size_t i = 0; i + 1 < P.size() / 3; ++i) {
+            for (std::size_t j = 0; j + 1 < Q.size() / 3; ++j) {
+                const Closest c = erf_conductors::closest_segments(at(P, i), at(P, i + 1), at(Q, j), at(Q, j + 1));
+                if (c.distance < brute.distance) { brute = c; }
+            }
+        }
+        // equal but for the last bits of a near tie, which a bound rounded up could skip
+        EXPECT_NEAR(erf_conductors::closest_polylines(P, Q).distance, brute.distance, 1.0e-6 * (1.0 + brute.distance)) << "trial " << trial;
+        const std::array<amrex::Real,3> lo{{amrex::Real(100.0 + 50.0 * u(rng)), amrex::Real(gap), 0.0}};
+        const std::array<amrex::Real,3> hi{{lo[0] + 8.0f, lo[1] + 5.0f, amrex::Real(6.0 + 20.0 * (trial % 3))}};
+        Closest bbox;
+        for (std::size_t i = 0; i + 1 < P.size() / 3; ++i) {
+            const Closest c = erf_conductors::closest_segment_box(at(P, i), at(P, i + 1), lo, hi);
+            if (c.distance < bbox.distance) { bbox = c; }
+        }
+        EXPECT_NEAR(erf_conductors::closest_polyline_box(P, lo, hi).distance, bbox.distance, 1.0e-6 * (1.0 + bbox.distance))
+            << "trial " << trial;
+    }
 }

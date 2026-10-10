@@ -100,9 +100,11 @@ forces, and MoorDyn's save and load of the whole system state for restarts.
 MoorDyn-C is not clean under floating-point traps: its stationary
 initial-condition solver overflows intermediate values, so a run with
 ``amrex.fpe_trap_overflow = 1`` ends with SIGILL inside ``MoorDyn_Init``
-(2.7.1; the invalid and zero traps pass). As for OpenFAST, a body that runs
+(2.7.1; the invalid and zero traps pass its start, but its time stepping has
+not been shown clean under them). As for OpenFAST, a body that runs
 MoorDyn refuses to start with ``amrex.fpe_trap_invalid``,
-``amrex.fpe_trap_zero`` or ``amrex.fpe_trap_overflow`` on;
+``amrex.fpe_trap_zero`` or ``amrex.fpe_trap_overflow`` on, and so does the
+stub build, so that a deck behaves alike in both builds;
 :cpp:`erf_moordyn::fpe_traps_requested()` is the check.
 
 MoorDyn reports the net force of the points it integrates (free and coupled

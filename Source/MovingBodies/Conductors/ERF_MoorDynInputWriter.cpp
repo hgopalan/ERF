@@ -22,8 +22,17 @@ std::string moordyn_input_text (const LineInputs& s, const ConductorInputs& in, 
     // tower's string
     auto hang = [&] (int k) { return (strings && k > 0 && k < N) ? N + 1 + k : k + 1; };
     std::ostringstream out;
-    // twelve digits, or as many as a Real holds: a single-precision build writes 0.0281, not 0.0280999993
+    // material constants to twelve digits, or as many as a Real holds: a single-precision build writes
+    // 0.0281, not 0.0280999993
     out << std::setprecision(std::min(12, std::numeric_limits<Real>::digits10));
+    // positions and lengths in double to twelve digits, so a single-precision build keeps every bit of
+    // them (at 30 km six digits would move a point by 5 cm, and 300.0104 m would become 300.01)
+    auto exact = [] (double v) {
+        std::ostringstream o;
+        o << std::setprecision(12) << v;
+        return o.str();
+    };
+    const double offset = static_cast<double>(in.surface_offset);
     out << "MoorDyn-C input written by ERF for conductor line " << s.name << " (erf.conductors." << s.name << ".*)\n"
         << "----------------------- LINE TYPES ------------------------------------------\n"
         << "TypeName   Diam     Mass/m     EA         BA/-zeta    EI         Cd     Ca     CdAx    CaAx\n"
@@ -43,13 +52,14 @@ std::string moordyn_input_text (const LineInputs& s, const ConductorInputs& in, 
     for (int k = 0; k <= N; ++k) {
         const auto& p = s.point(k);
         const char* type = (moving && k > 0 && k < N) ? "Coupled" : "Fixed  ";
-        out << k + 1 << "     " << type << "   " << p[0] << "   " << p[1] << "   " << p[2] - in.surface_offset << "   0   0   0   0\n";
+        out << k + 1 << "     " << type << "   " << exact(p[0]) << "   " << exact(p[1]) << "   "
+            << exact(static_cast<double>(p[2]) - offset) << "   0   0   0   0\n";
     }
     if (strings) {
         for (int k = 1; k < N; ++k) {
             const auto& p = s.point(k);
-            out << N + 1 + k << "     Free      " << p[0] << "   " << p[1] << "   " << p[2] - s.insulator_length - in.surface_offset
-                << "   0   0   0   0\n";
+            out << N + 1 + k << "     Free      " << exact(p[0]) << "   " << exact(p[1]) << "   "
+                << exact(static_cast<double>(p[2]) - static_cast<double>(s.insulator_length) - offset) << "   0   0   0   0\n";
         }
     }
     out << "---------------------- LINES ----------------------------------------\n"
@@ -57,7 +67,7 @@ std::string moordyn_input_text (const LineInputs& s, const ConductorInputs& in, 
         << "(#)   (name)     (#)      (#)       (m)       (-)     (-)\n";
     for (int k = 0; k < N; ++k) {
         out << k + 1 << "     " << s.name << "      " << hang(k) << "        " << hang(k + 1) << "         "
-            << s.lengths[static_cast<std::size_t>(k)] << "   " << s.segments << "   -\n";
+            << exact(s.lengths[static_cast<std::size_t>(k)]) << "   " << s.segments << "   -\n";
     }
     if (strings) {
         for (int k = 1; k < N; ++k) {
@@ -73,7 +83,7 @@ std::string moordyn_input_text (const LineInputs& s, const ConductorInputs& in, 
     out << in.moordyn_cfl << "   CFL           Courant factor that sets MoorDyn's internal step (erf.conductors.moordyn_cfl)\n"
         << gravity << "   g             gravity (m/s^2)\n"
         << in.air_density << "   WtrDnsty      the fluid is air (kg/m^3)\n"
-        << 2.0 * in.surface_offset << "   WtrDpth       flat bottom, far below the ground (m)\n"
+        << exact(2.0 * offset) << "   WtrDpth       flat bottom, far below the ground (m)\n"
         << "1             WaveKin       the fluid kinematics come through the API\n"
         << "0             ICgenDynamic  stationary initial-condition solver\n"
         << "1             disableOutput\n"

@@ -1,9 +1,10 @@
 # The coupled case of Conductors_FlowWind with the lines' drag put back into the flow
 # (erf.conductors.drag_on_flow): a 300 m conductor span across a sheared anelastic crosswind
 # v = 15 + 0.1 z m/s; each step the air's drag on every node, reversed, is spread with a Gaussian of
-# two cells into the momentum sources of the next step. In every row of conductors/total_load.dat
-# the integrated source must equal the force the lines put into the air; the span's log and the
-# plotfile, which carries the source (conductor_fx, _fy, _fz) and its wake, match their golds.
+# two cells into the momentum sources of the same step (ERF advances the lines before the flow). In
+# every row of conductors/total_load.dat the integrated source must equal the force the lines put
+# into the air; the span's log and the plotfile, which carries the source (conductor_fx, _fy, _fz)
+# and its wake, match their golds.
 
 max_step = 10
 stop_time = 5.0

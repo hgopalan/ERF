@@ -32,6 +32,7 @@
 
 #include <gtest/gtest.h>
 
+#include "../ERF_GTestTempDir.H"
 #include "ERF_ConductorInputs.H"
 #include "ERF_ConductorLine.H"
 #include "ERF_GTestThrowOnAbort.H"
@@ -43,6 +44,22 @@ using erf_conductors::ConductorLine;
 using erf_conductors::LineInputs;
 
 namespace {
+
+// a scratch root drawn once per test process (ERF_GTestTempDir.H): the fixed names below it are this
+// process's alone, so ctest -j and the shuffled rerun never share them; removed when the process exits
+const std::filesystem::path& gtest_scratch_root ()
+{
+    struct Root {
+        std::filesystem::path p;
+        ~Root () { std::error_code ec; std::filesystem::remove_all(p, ec); }
+    };
+    static const Root root{[] {
+        const std::filesystem::path p = erf_gtest_temp_path("erf_gtest_conductorline");
+        std::filesystem::create_directories(p);
+        return p;
+    }()};
+    return root.p;
+}
 
 constexpr double pi = 3.14159265358979323846;   // MSVC has no M_PI
 // positions of a few hundred metres carry a Real's spacing there: 3e-5 m at 500 m in single precision
@@ -58,7 +75,7 @@ LineInputs drake_span (const std::string& name)
     s.end_a = {{100.0, 500.0, 30.0}};
     s.end_b = {{400.0, 500.0, 30.0}};
     s.lengths = {301.5}; s.diameter = 0.0281; s.mass_per_length = 1.628; s.axial_stiffness = 3.0e7;
-    s.output_root = (std::filesystem::temp_directory_path() / "erf_gtest_conductor_span" / name).string();
+    s.output_root = (gtest_scratch_root() / "erf_gtest_conductor_span" / name).string();
     return s;
 }
 
@@ -66,7 +83,7 @@ ConductorInputs settings ()
 {
     ConductorInputs in;
     in.air_density = 1.2;
-    in.diagnostics_dir = (std::filesystem::temp_directory_path() / "erf_gtest_conductor_span").string();
+    in.diagnostics_dir = (gtest_scratch_root() / "erf_gtest_conductor_span").string();
     return in;
 }
 

@@ -68,6 +68,7 @@ struct WireWindLoad
     double sag{0.0};          //!< mid-span sag below the chord in the swung plane (m)
     double tension{0.0};      //!< end tension under the resultant load (N)
     double blowout{0.0};      //!< the mid-span's sideways displacement, sag sin(swing) (m)
+    bool solved{false};       //!< the elastic catenary under the resultant load has a solution (Catenary::solved)
 };
 
 /**

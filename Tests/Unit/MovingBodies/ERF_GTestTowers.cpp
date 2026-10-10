@@ -5,7 +5,8 @@
 // - MemberDrag.TheLatticeForceCoefficientIsTheSquareTowerCurve: the lattice force coefficient is
 //   the square-tower curve of ASCE 7 (American Society of Civil Engineers, minimum design loads).
 // - TowerType.EveryValueOutsideItsRangeIsRefusedByName: validate() names the key of every value
-//   outside its range, NaN and infinity included.
+//   outside its range, NaN and infinity included; the foundation stiffnesses and damping_ratio on a
+//   tower that stands still, leg_spacing with a frame, and a frame without damping are refused.
 // - Tower.TheBodyTapersUpToTheCrossArmWhichRunsAcrossTheLine: the shaft's drag nodes stand up the
 //   tapering shaft, the cross-arm's across the line at the conductor's height.
 // - Tower.InAUniformWindTheDragAndBaseMomentAreTheHandValues: the shaft's drag exactly (its width
@@ -161,6 +162,30 @@ TEST(TowerType, EveryValueOutsideItsRangeIsRefusedByName)
     TowerType d = lattice();
     d.arm_depth = 0.0;
     EXPECT_EQ(d.arm_face(), d.top_width) << "the arm's face defaults to the top width";
+    // keys of a tower's motion on a tower that stands still, and leg_spacing with a frame, would do nothing
+    bad([](TowerType& t) { t.foundation_rotational_stiffness = 1.0e9; },
+        "foundation_rotational_stiffness needs a tower that moves in one mode");
+    bad([](TowerType& t) { t.foundation_lateral_stiffness = 1.0e7; }, "foundation_lateral_stiffness needs a tower that moves in one mode");
+    bad([](TowerType& t) { t.damping_given = true; }, "damping_ratio needs a tower that moves");
+    {
+        // with frequency = 0 given the motion is off on purpose: the keys are unused, a warning
+        TowerType off = lattice();
+        off.frequency_given = true;
+        off.damping_given = true;
+        off.foundation_lateral_stiffness = 1.0e7;
+        EXPECT_TRUE(off.validate().empty()) << off.validate();
+        const std::string note = off.unused_on_a_still_tower();
+        EXPECT_NE(note.find("damping_ratio, foundation_lateral_stiffness not used"), std::string::npos) << note;
+        EXPECT_TRUE(lattice().unused_on_a_still_tower().empty());
+    }
+    moving.foundation_rotational_stiffness = 1.0e9;
+    moving.damping_given = true;
+    EXPECT_TRUE(moving.validate().empty()) << moving.validate();
+    bad([](TowerType& t) { t.frame_panels = 4; t.leg_angle = {0.1, 0.01}; t.brace_angle = {0.08, 0.006}; t.leg_spacing = 5.0; },
+        "leg_spacing is not given with a frame");
+    // an undamped frame's higher modes grow under the members' drag
+    bad([](TowerType& t) { t.frame_panels = 4; t.leg_angle = {0.1, 0.01}; t.brace_angle = {0.08, 0.006}; t.damping_ratio = 0.0; },
+        "damping_ratio must be positive for a frame");
 }
 
 TEST(Tower, TheBodyTapersUpToTheCrossArmWhichRunsAcrossTheLine)

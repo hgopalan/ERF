@@ -122,8 +122,10 @@ N m/rad), each line holding a value then its name.
 
 The weight of an element, :math:`w = \rho A g` per length (N/m), is applied as
 SubDyn's ``ElemG`` applies it: :math:`-wL/2` along :math:`z` at each node and the end
-moments :math:`\mp w L^2/12` of a uniformly loaded fixed-fixed beam about the
-horizontal axes. With these consistent loads the nodal displacements of a
+moments of a uniformly loaded fixed-fixed beam, :math:`\pm (L^2/12)\,\hat e \times \mathbf q`
+with :math:`\hat e` the element's axis and :math:`\mathbf q = (0, 0, -w)`: of magnitude
+:math:`w L^2 \sin\alpha / 12` for an element at :math:`\alpha` to the vertical (the
+part of the weight across it), about a horizontal axis. With these consistent loads the nodal displacements of a
 uniformly loaded beam are exact. A concentrated mass adds its weight at its joint
 and the moment of that weight about the joint when its centre is offset.
 
@@ -233,9 +235,14 @@ This section describes how a tower in a run stands on the frame
   these axes and ERF's.
 - Links: each drag node of the tower (the equivalent lattice that takes the
   wind, as for any tower) and each line attachment is tied rigidly to its four
-  nearest frame nodes, or to one node it lies on; on a generated frame, to its
-  nearest joints but the crossings of diagonals, so a panel's wind acts at its
-  leg joints. A force :math:`\mathbf F` at the
+  nearest frame nodes, or to one node it lies on, never to the crossings of
+  diagonals, so a panel's wind acts at its leg joints: on a generated frame
+  every joint but the crossings, on a frame from a file every joint a member
+  within 20 degrees of the vertical or the horizontal meets (a leg, a chord or
+  a strut). The frame has one interface joint, its cross-arm's centre, which must
+  stand within half the cross-arm's face depth of the tower's cross-arm height:
+  a frame built for another cross-arm height is refused (a line sharing the
+  tower may hang at any height on it). A force :math:`\mathbf F` at the
   point :math:`\mathbf p` is shared as
   :math:`\mathbf F_i = \mathbf F/n + \mathbf w \times \mathbf d_i`, with :math:`\mathbf d_i` the
   node's offset from the nodes' centroid :math:`\mathbf c`,
@@ -250,18 +257,35 @@ This section describes how a tower in a run stands on the frame
   legs.
 - Motion: the frame moves about its static equilibrium under its own weight,
   so the cross-arm starts where the lines were built. Each coupling step
-  advances it by Newmark's method with the drag and the lines' pull of that
-  step; the coupling resolves its first natural frequency, and Newmark's
-  method integrates the higher modes stably. The type's ``damping_ratio`` sets
-  the Rayleigh damping at the first natural frequency and at ten times it.
+  advances it by Newmark's method to the drag and the lines' pull at the
+  end of that step (the method averages them with those at its start); the
+  coupling resolves its first natural frequency, and Newmark's method
+  integrates the higher modes stably, the lines' pull included, since the
+  iterated coupling makes it implicit. That rests on the lines' own damping
+  (``damping_ratio`` of the line, 0.5 by default): a line mode with none,
+  coupled to the frame, could grow by about 5e-4 per coupling step. The
+  members' drag is held from the start of each coupling step, so the frame's
+  ``damping_ratio`` must be positive (its modes above about 6 times the first
+  frequency would otherwise grow under the drag). The type's ``damping_ratio`` sets
+  the Rayleigh damping at the first natural frequency and at ten times it;
+  between the two the damping ratio is lower, down to 0.575 times it at
+  :math:`\sqrt{10}` times the first frequency, where the second sway, torsion
+  and cross-arm modes often lie.
 - Footings: the reactions at the four supports are those under the weight
-  plus :math:`K\mathbf u + a_1 K \dot{\mathbf u} + M\ddot{\mathbf u} - \mathbf f` (the
-  mass-proportional damping excluded). Their resultant gives the base shear and
+  plus :math:`K\mathbf u + a_1 K \dot{\mathbf u} + M\ddot{\mathbf u} - \mathbf f` at their
+  nodes, with :math:`K` and :math:`M` those of the members and concentrated masses only
+  (the mass-proportional damping excluded). A support spring's force is part of
+  its support's reaction, as in the static solve; at a support on springs the
+  reaction so found also holds the springs' share of the stiffness-proportional
+  damping, the support mass's inertia and the mass-proportional damping at that
+  node. Their resultant gives the base shear and
   the overturning moment, and each support's upward reaction is its leg's
   compression. Before the first step the footings take the static reactions
   under the tower's present loads.
 - Restart: the checkpoint holds each frame's Newmark state, its last loads and
-  its members' temperatures.
+  its members' temperatures; a restart whose ``steel_temperature`` gives other
+  temperatures stops, naming the tower. A frame checkpointed before its first
+  step restarts with the static footings, as the run that wrote it had them.
 
 Generated lattice towers
 ------------------------
@@ -305,10 +329,17 @@ type's ``yield_strength`` (345 MPa by default).
 - Design data: the legs and chords are legs (bolted in both faces); every other
   member is bracing, or redundant for the struts between crossed diagonals,
   bolted by one leg with a normal framing eccentricity at both ends and no
-  rotational restraint.
+  rotational restraint. The net area is the gross area (``NetArea`` 1): the
+  tension checks take no bolt holes, which a member file can give (a typical
+  bolted angle has 0.85).
 
 One frame is built per tower type and cross-arm height (to the millimetre), for
-the first tower of that height, and shared by the others. It is written to
+the first tower of that height, and shared by the others, which share its first
+natural frequency too. The frame's stiffness and mass are dense matrices held on
+every rank, so a frame (generated or read) may have at most 6000 free degrees of
+freedom, about 120 panels with crossed bracing (48 free degrees of freedom a
+panel; single bracing, 24 a panel, stays below it up to the 200 panels
+``frame_panels`` allows); a larger one is refused. It is written to
 ``<diagnostics_dir>/frame_<tower>.dat`` as a SubDyn input file, which SubDyn's
 driver reads to the same stiffness, and its design data to
 ``frame_<tower>_members.dat`` in the member file layout of the next section.
@@ -428,7 +459,7 @@ FEA and Craig-Bampton parameters            ``FEMMod`` 1 or 3 (2 and 4 refused),
 Structure joints                            id and position; ``JointType`` must be 1 (cantilever)
 Base reaction joints                        six flags (1 fixed, 0 free) and an optional SSI file, relative
                                             to the SubDyn file's directory
-Interface joints                            ids, kept for reference
+Interface joints                            one id: the cross-arm's centre, where the lines are tied
 Members                                     ``MType`` 1/1c, 1r or 4 with the same property set at both
                                             ends and ``MSpin`` (deg); cables (2), rigid links (3) and
                                             springs (5) are refused

@@ -20,6 +20,7 @@
 
 #include <gtest/gtest.h>
 
+#include "../ERF_GTestTempDir.H"
 #include "ERF_ConductorInputs.H"
 #include "ERF_MoorDynInputWriter.H"
 #include "ERF_MoorDynSystem.H"
@@ -28,6 +29,22 @@ using erf_conductors::ConductorInputs;
 using erf_conductors::LineInputs;
 
 namespace {
+
+// a scratch root drawn once per test process (ERF_GTestTempDir.H): the fixed names below it are this
+// process's alone, so ctest -j and the shuffled rerun never share them; removed when the process exits
+const std::filesystem::path& gtest_scratch_root ()
+{
+    struct Root {
+        std::filesystem::path p;
+        ~Root () { std::error_code ec; std::filesystem::remove_all(p, ec); }
+    };
+    static const Root root{[] {
+        const std::filesystem::path p = erf_gtest_temp_path("erf_gtest_moordyninputwriter");
+        std::filesystem::create_directories(p);
+        return p;
+    }()};
+    return root.p;
+}
 
 // to_erf_frame returns Reals: positions of a few hundred metres carry a float's spacing, 3e-5 m at 500 m
 constexpr double ptol = (std::is_same<amrex::Real, float>::value) ? 1.0e-4 : 1.0e-6;
@@ -113,7 +130,7 @@ TEST(MoorDynInputWriter, ASingleSpanLineIsWrittenInMoorDynsFrameWithAirAndExtern
 
 TEST(MoorDynInputWriter, MoorDynAcceptsTheFileAndTheEndsComeBackInERFsFrame)
 {
-    const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_moordyn_writer";
+    const auto dir = gtest_scratch_root() / "erf_gtest_moordyn_writer";
     const std::string fname = (dir / "S1.moordyn.txt").string();
     const LineInputs s = span();
     const ConductorInputs in = settings();
@@ -167,7 +184,7 @@ TEST(MoorDynInputWriter, ASectionIsWrittenWithItsInsulatorStringsAndFreePoints)
 
     // MoorDyn hangs the line from the strings: the free points sit 2.5 m under the towers in still air
     in.moordyn_dt = 0.0;
-    const auto dir = std::filesystem::temp_directory_path() / "erf_gtest_moordyn_writer";
+    const auto dir = gtest_scratch_root() / "erf_gtest_moordyn_writer";
     std::filesystem::create_directories(dir);
     const std::string file = (dir / "section.txt").string();
     erf_conductors::write_moordyn_input(file, s, in, 9.81);

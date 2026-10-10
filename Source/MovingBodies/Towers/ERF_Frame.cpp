@@ -131,8 +131,10 @@ BeamProperties beam_properties (const FrameSection& s, BeamTheory theory)
         p.Iyy = s.Iyy;
         p.J0 = s.J0;
         p.Jt = s.Jt;
-        p.kappa_x = s.Asx / s.A;
-        p.kappa_y = s.Asy / s.A;
+        // Euler-Bernoulli beams take no shear area (SubDyn ignores it): 1, so that no shear
+        // ratio divides by zero, even where the compiler evaluates both sides of p.shear's test
+        p.kappa_x = p.shear ? s.Asx / s.A : 1.0;
+        p.kappa_y = p.shear ? s.Asy / s.A : 1.0;
     }
     return p;
 }
@@ -344,6 +346,13 @@ std::unique_ptr<Frame> Frame::create (const FrameInputs& in, std::string& err)
         if (!fixed[d]) { f->m_free_index[d] = static_cast<long>(f->m_free.size()); f->m_free.push_back(d); }
     }
     if (f->m_free.empty()) { err = in.file + ": every degree of freedom is fixed; nothing is left to solve"; return nullptr; }
+    if (f->m_free.size() > max_free_dofs) {
+        const double mb = 8.0 * static_cast<double>(f->m_free.size()) * static_cast<double>(f->m_free.size()) / 1.0e6;
+        err = in.file + ": the frame has " + std::to_string(f->m_free.size()) + " free degrees of freedom, more than the " +
+              std::to_string(max_free_dofs) + " the dense frame solver takes (each of its matrices would hold " +
+              std::to_string(static_cast<long>(mb)) + " MB on every rank); use fewer panels, members or NDiv";
+        return nullptr;
+    }
     // the stiffness of the free degrees of freedom: the elements, then the support springs
     const std::size_t nf = f->m_free.size();
     const std::vector<double> kf = f->assemble_free(1.0, 0.0);
@@ -398,7 +407,7 @@ std::vector<double> Frame::assemble_free (double cK, double cM) const
     return a;
 }
 
-std::vector<double> Frame::apply_stiffness (const std::vector<double>& u) const
+std::vector<double> Frame::apply_stiffness (const std::vector<double>& u, bool with_springs) const
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(u.size() == num_dofs(), "Frame::apply_stiffness: one value per degree of freedom is needed");
     std::vector<double> r(u.size(), 0.0);
@@ -410,6 +419,7 @@ std::vector<double> Frame::apply_stiffness (const std::vector<double>& u) const
             r[element_dof(e, i)] += s;
         }
     }
+    if (!with_springs) { return r; }
     const auto entries = ssi_entries();
     for (const auto& sp : m_in.supports) {
         const std::size_t node = static_cast<std::size_t>(m_in.joint_index(sp.joint));
@@ -425,7 +435,7 @@ std::vector<double> Frame::apply_stiffness (const std::vector<double>& u) const
     return r;
 }
 
-std::vector<double> Frame::apply_mass (const std::vector<double>& a) const
+std::vector<double> Frame::apply_mass (const std::vector<double>& a, bool with_springs) const
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(a.size() == num_dofs(), "Frame::apply_mass: one value per degree of freedom is needed");
     std::vector<double> r(a.size(), 0.0);
@@ -437,16 +447,18 @@ std::vector<double> Frame::apply_mass (const std::vector<double>& a) const
             r[element_dof(e, i)] += s;
         }
     }
-    const auto entries = ssi_entries();
-    for (const auto& sp : m_in.supports) {
-        const std::size_t node = static_cast<std::size_t>(m_in.joint_index(sp.joint));
-        for (std::size_t k = 0; k < 21; ++k) {
-            const double v = sp.mass[k];
-            if (v == 0.0) { continue; }
-            const std::size_t gi = 6 * node + static_cast<std::size_t>(entries[k].first);
-            const std::size_t gj = 6 * node + static_cast<std::size_t>(entries[k].second);
-            r[gi] += v * a[gj];
-            if (gi != gj) { r[gj] += v * a[gi]; }
+    if (with_springs) {
+        const auto entries = ssi_entries();
+        for (const auto& sp : m_in.supports) {
+            const std::size_t node = static_cast<std::size_t>(m_in.joint_index(sp.joint));
+            for (std::size_t k = 0; k < 21; ++k) {
+                const double v = sp.mass[k];
+                if (v == 0.0) { continue; }
+                const std::size_t gi = 6 * node + static_cast<std::size_t>(entries[k].first);
+                const std::size_t gj = 6 * node + static_cast<std::size_t>(entries[k].second);
+                r[gi] += v * a[gj];
+                if (gi != gj) { r[gj] += v * a[gi]; }
+            }
         }
     }
     for (const auto& c : m_in.masses) {
