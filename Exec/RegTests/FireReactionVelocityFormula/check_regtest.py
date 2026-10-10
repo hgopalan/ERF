@@ -11,9 +11,11 @@ the 1-h SAV as the bed SAV and w_n = w_0 (1 - S_T). It checks that the two
 options reach the solver on the uniform-fuel path and on the per-fuel table of
 a fuel map; it is not a comparison with WRF-Fire.
 
-Pass/fail: every run's relative error must be below TOL_PCT, and every pair of
-combinations at the same wind must differ by more than SEP_PCT, so a run that
-ignored an option cannot pass by sitting inside the tolerance of its neighbour.
+Pass/fail: every run's relative error must be below TOL_PCT. The case itself
+is checked too: for every pair of combinations, at least one wind must put
+their closed forms more than SEP_PCT apart (twice the tolerance), so a run that
+ignored an option lands outside the tolerance in at least one of its two runs.
+At 4.005 m/s the albini pair is only 0.006 % apart; the calm runs separate it.
 
     python3 check_regtest.py              # check the runs in this directory
     python3 check_regtest.py --self-test  # the checker's own pass/fail logic
@@ -28,8 +30,9 @@ import tempfile
 
 WINDS = {"calm": 0.0, "wind": 4.005}
 M1 = 0.06
-TOL_PCT = 0.01   # the CSV carries six significant digits
-SEP_PCT = 0.003  # the albini pair at 4.005 m/s differs by 0.006 %
+TOL_PCT = 0.01         # the CSV carries six significant digits
+SEP_PCT = 2 * TOL_PCT  # the smallest separation of a pair over the two winds
+COMBOS = ("albini", "albini_bmst", "rothermel", "rothermel_bmst")
 FM1 = dict(w0=0.034, sigma=3500.0, delta=1.0, Mx=0.12, h=8000.0, S_T=0.0555, S_e=0.010, rho_p=32.0)
 DECKS = {
     "albini":             ("albini", False),
@@ -92,12 +95,21 @@ def check(rates):
               f"ERF {ros:.6g} m/s  closed form {ref:.6g} m/s  error {err:.4f} %  {flag}")
         if err >= TOL_PCT:
             failures.append(f"{deck} {wind}: error {err:.4f} % >= {TOL_PCT} %")
-    for wind, u in WINDS.items():
-        refs = {d: rothermel_fm1(*DECKS[d], M1, u) for d in ("albini", "albini_bmst", "rothermel", "rothermel_bmst")}
-        for a, b in itertools.combinations(refs, 2):
-            sep = abs(refs[a] - refs[b]) / refs[a] * 100.0
-            if sep <= SEP_PCT:
-                failures.append(f"{a} and {b} {wind}: closed forms only {sep:.4f} % apart, test cannot tell them apart")
+    return failures + separation_failures(WINDS)
+
+
+def separation_failures(winds):
+    """Pairs of combinations that no wind in `winds` separates by more than
+    SEP_PCT: a run that ignored the option telling them apart would pass."""
+    failures = []
+    for a, b in itertools.combinations(COMBOS, 2):
+        seps = []
+        for u in winds.values():
+            ra, rb = rothermel_fm1(*DECKS[a], M1, u), rothermel_fm1(*DECKS[b], M1, u)
+            seps.append(abs(ra - rb) / ra * 100.0)
+        if max(seps) <= SEP_PCT:
+            failures.append(f"{a} and {b}: closed forms at most {max(seps):.4f} % apart over the winds, "
+                            f"the test cannot tell them apart")
     return failures
 
 
@@ -134,6 +146,11 @@ def self_test():
             passed = not run_checks(d)
         print(f"self-test: {name}: {'passed' if passed else 'failed'} (expected {'pass' if should_pass else 'fail'})")
         ok = ok and (passed == should_pass)
+    # the case check: the windy runs alone cannot separate the albini pair
+    blind = separation_failures({"wind": WINDS["wind"]})
+    print(f"self-test: windy runs only: {len(blind)} pair(s) not separated (expected at least 1)")
+    ok = ok and any(f.startswith("albini and albini_bmst") for f in blind)
+    ok = ok and not separation_failures(WINDS)
     return ok
 
 

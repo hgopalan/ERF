@@ -510,10 +510,12 @@ struct FireParams
     // With it on, compute_rothermel_params() deflates w_0 by (1-bmst), with
     // bmst from the dead-load-weighted moisture M_f, before the packing ratio,
     // bulk density, net load, reaction intensity and flux ratio are formed,
-    // as WRF-Fire does. It does NOT make ERF match WRF-Fire: ERF uses the 1-h
-    // SAV as the bed SAV, w_0*(1-S_T) for the net load, its own heat
-    // contents, the MEWS wind cap (use_wind_limit), and the fuel consumed and
-    // the heat released still use the full dry load. Same readers as above.
+    // as WRF-Fire does (the slope factor sees the deflated packing ratio too).
+    // It does NOT make ERF match WRF-Fire: ERF uses the 1-h SAV as the bed
+    // SAV, w_0*(1-S_T) for the net load, dead moisture only (WRF-Fire's
+    // average includes live fuel), its own heat contents and the MEWS wind cap
+    // (use_wind_limit) but no 6 m/s rate cap, and the fuel consumed and the
+    // heat released still use the full dry load. Same readers as above.
     bool              wrf_bmst_compat = false;
 
     // Phase 13B: Balbi (2009) physical fire spread model parameters.

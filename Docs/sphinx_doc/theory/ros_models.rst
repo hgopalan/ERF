@@ -43,8 +43,8 @@ The first is Albini's (1976) revision and the default; the second is
 Rothermel's (1972) Eq. 39, which WRF-Fire uses. :cpp:`erf.fire.reaction_velocity_formula = "rothermel"`
 selects it. The two cross near :math:`\sigma = 1800` ft\ :sup:`-1`; for
 Anderson's short grass (:math:`\sigma = 3500`) :math:`A` is 0.209 and 0.284,
-and the no-wind rate of the Anderson models changes by -8 % to +4 % at 6, 8 and
-10 % dead moisture. :math:`A_\mathrm{Rothermel}` has a pole at
+and the no-wind rate of the Anderson models changes by -8.3 % (FM9) to +3.5 %
+(FM13), whatever the moisture (the moisture terms are common to both forms). :math:`A_\mathrm{Rothermel}` has a pole at
 :math:`\sigma = (7.27/4.774)^{10} = 67.1`; the code clamps :math:`\sigma` to at
 least 100, above it. Only :math:`A` changes: the net load stays
 :math:`w_0 (1 - S_T)`.
@@ -54,14 +54,22 @@ water before Rothermel, :math:`w_0 \to (1 - b)\,w_0` with :math:`b = M/(1+M)`.
 :cpp:`erf.fire.wrf_bmst_compat = true` applies the same deflation, with
 :math:`M` the dead-load-weighted dead moisture, before the packing ratio, bulk
 density, net load, reaction intensity and propagating flux ratio are formed.
-ERF's fuel tables are oven-dry already, so this is a comparison option, not a
-correction. It does not make ERF reproduce WRF-Fire: ERF takes the 1-h SAV as
-the bed SAV, uses :math:`w_0(1-S_T)` for the net load (WRF-Fire
-:math:`w_0/(1+S_T)`), keeps its own heat contents and the MEWS wind cap
-(:cpp:`erf.fire.use_wind_limit`), and the fuel consumed and the heat released
-still use the full dry load. With a 4 m/s wind the lower load slows the no-wind
-rate but raises the wind factor through :math:`(\beta/\beta_{op})^{-E}`, so the
-head rate can move either way.
+The slope factor, :math:`5.275\,\beta^{-0.3}`, takes the deflated packing ratio
+too, as in WRF-Fire. ERF's fuel tables are oven-dry already, so this is a
+comparison option, not a correction. It does not make ERF reproduce WRF-Fire:
+
+- ERF takes the 1-h SAV as the bed SAV; WRF-Fire a per-category value.
+- ERF uses :math:`w_0(1-S_T)` for the net load; WRF-Fire :math:`w_0/(1+S_T)`.
+- ERF's :math:`M` is the dead moisture only, while it deflates the whole load,
+  live included; WRF-Fire's moisture average includes live fuel where there is
+  some (Anderson 2, 4, 5, 7, 10 and the GR, GS, SH and TU fuels).
+- ERF keeps its own heat contents and the MEWS wind cap
+  (:cpp:`erf.fire.use_wind_limit`); WRF-Fire caps the rate itself at 6 m/s.
+- The fuel consumed and the heat released still use the full dry load.
+
+A lower load changes the no-wind rate either way: it is slower for short grass
+(FM1) and faster for FM8, 9, 12 and 13. It also raises the wind factor through
+:math:`(\beta/\beta_{op})^{-E}`, so for FM1 at 4 m/s the two nearly cancel.
 
 Both options act wherever the Rothermel coefficients are built: the uniform
 fuel, the per-fuel table of a fuel map (deck-defined fuels included) and the

@@ -5588,7 +5588,7 @@ Rate of spread
 |                                                | weighted dead moisture, as WRF-Fire does to its load. Not  |                                |                        |
 |                                                | a physical correction (ERF's loads are oven-dry) and not   |                                |                        |
 |                                                | full WRF-Fire parity (bed SAV, net load, heat content and  |                                |                        |
-|                                                | wind cap still differ); fuel consumption and heat release  |                                |                        |
+|                                                | wind/rate caps differ); fuel consumption and heat release  |                                |                        |
 |                                                | keep the full load. Same readers as the row above          |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.directional_ros**                   | Evaluate the rate along the front normal on the level-set  | Boolean                        | true                   |

@@ -137,14 +137,28 @@ TEST(ReactionVelocityFormula, PerFuelTable)
     ASSERT_EQ(albini.size(), rothermel.size());
 
     EXPECT_EQ(albini[0].R0, Real(0.0));  // non-burnable slot stays zero
-    // The published sets. Seven Scott-Burgan fuels have sigma = 1800 ft^-1,
-    // next to where the two forms of A cross (about 1800.5), so their I_R
-    // differs only in the fifth digit; it still differs.
+    // The published sets: the I_R ratio of every slot is the closed-form
+    // ratio of its own A values. Seven Scott-Burgan fuels have
+    // sigma = 1800 ft^-1, next to where the two forms cross (about 1800.5),
+    // and GS4 also sits near beta_op, so its ratio is 1 - 9e-7: a float
+    // cannot tell the two apart there, and EXPECT_NE is kept for the slots
+    // whose predicted ratio is far from 1 at the build precision.
+    const auto fp_tbl = build_fuel_params_slot_table(0, Real(-1.0), CustomFuelTable{});
+    int n_distinct = 0;
     for (int slot = 1; slot < FUEL_SLOT_CUSTOM_BASE; ++slot) {
         SCOPED_TRACE(::testing::Message() << "slot " << slot);
         expect_rel_close(albini[slot].beta, rothermel[slot].beta);
-        EXPECT_NE(albini[slot].I_R, rothermel[slot].I_R);
+        const Real sigma = amrex::max(fp_tbl[slot].sigma_d1, Real(100.0));
+        const Real dA = rothermel_A(sigma) - albini_A(sigma);
+        const Real br = albini[slot].beta / (Real(3.348) * std::pow(sigma, Real(-0.8189)));
+        const Real predicted = std::pow(br, dA) * std::exp(dA * (Real(1.0) - br));
+        EXPECT_NEAR(rothermel[slot].I_R / albini[slot].I_R, predicted, Real(100.0) * TOL);
+        if (std::abs(predicted - Real(1.0)) > Real(1000.0) * TOL) {
+            EXPECT_NE(albini[slot].I_R, rothermel[slot].I_R);
+            ++n_distinct;
+        }
     }
+    EXPECT_GT(n_distinct, 40);  // all but the fuels next to the crossing
     // The deck-defined slots with no slot table handed in stay non-burnable.
     for (int slot = FUEL_SLOT_CUSTOM_BASE; slot < FUEL_SLOT_COUNT; ++slot) {
         SCOPED_TRACE(::testing::Message() << "slot " << slot);
