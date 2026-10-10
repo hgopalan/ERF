@@ -229,6 +229,33 @@ incident_flux_max_Wm2`` (the columns are absent when the option is off), the
 plotfile ``fire_structure_state``, ``fire_structure_ignition_time`` and
 ``fire_structure_rad_flux``, and the checkpoint ``FireStructureState``.
 
+Models in use
+-------------
+
+Every run prints, once at start-up and before the first step, the model or
+option it uses for each piece of fire physics, whatever
+:cpp:`erf.fire.fire_debug` says: the rate-of-spread model and its options,
+the front propagation and its directional options, the wind (interpolation,
+height, sampling, wind adjustment factor, terrain factors), the fuel, burnout
+and moisture models, the coupling to the atmosphere, the flame temperature,
+and whether acceleration, spotting, crown fire, threshold ignition, smoke,
+structures and suppression are on, with the ignition sources. Each line gives
+the ``erf.fire`` key, the value the run uses, and whether the inputs set it or
+it is the default; a value the code forced says so. An excerpt::
+
+  [FIRE] Models (erf.fire key = value; set in the inputs, or the default):
+  [FIRE]   Rate of spread                      ros_model = rothermel  (set)
+  [FIRE]     Rothermel reaction velocity       reaction_velocity_formula = albini  (default)
+  [FIRE]     midflame wind limit               use_wind_limit = true  (default)
+  [FIRE]     wind limit form                   wind_limit = rothermel  (default)
+  [FIRE]   Front propagation                   propagation_method = levelset  (set)
+
+An option is listed only when it acts in the run: a model's own options only
+when that model is in use (the Cheney-Gould pasture with ``ros_model =
+cheney_gould``, the level-set gradient with ``propagation_method = levelset``),
+the heat-injection options only when heat reaches the atmosphere, the wind
+interpolation only when the wind is not prescribed.
+
 Debug output
 ------------
 

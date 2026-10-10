@@ -5603,7 +5603,9 @@ Rate of spread
 |                                                | domain-mean moistures everywhere (the form before 2026-10) |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.macarthur.ros_max**                 | Cap on the McArthur rate [m/s] (WRF-Fire's 6 m/s); 0       | Real >= 0                      | 6.0                    |
-|                                                | removes it                                                 |                                |                        |
+|                                                | removes it. The exponent is bounded at 40 in every         |                                |                        |
+|                                                | case, so an uncapped rate stops growing at a 47.5 m/s      |                                |                        |
+|                                                | midflame wind (4e16 m/s, finite, long past physical)       |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.reaction_velocity_formula**         | Rothermel's reaction-velocity exponent A: Albini's (1976)  | "albini", "rothermel"          | "albini"               |
 |                                                | revision, A = 133 sigma^-0.7913 (ERF's form so far), or    |                                |                        |

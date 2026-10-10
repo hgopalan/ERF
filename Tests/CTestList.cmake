@@ -2526,6 +2526,10 @@ add_test_fire_abort(FireWindPerFuelUniform_extract FireLineFire inputs_wind2p5
     "Wind extraction height range: min=6.096 m  max=6.096 m" "erf.fire.wind_ref_ht=10 erf.fire.use_per_fuel_wind_ht=true max_step=1")
 add_test_fire_abort(FireWindRefHtPerFuel_warn FireLineFire inputs_wind2p5
     "WARNING: erf.fire.wind_ref_ht = 10 m is not used" "erf.fire.wind_ref_ht=10 erf.fire.use_per_fuel_wind_ht=true max_step=1")
+# the start-up summary of the models in use is printed with fire_debug off, and
+# marks a key the inputs set and one they do not
+add_test_fire_abort(FireModelSummary_print FireLineFire inputs_wind2p5
+    "Models \\(erf.fire key = value.*reaction_velocity_formula = albini  \\(default\\).*wind limit form +wind_limit = fuel_class  \\(set\\)" "erf.fire.fire_debug=false erf.fire.use_wind_limit=true erf.fire.wind_limit=fuel_class max_step=0")
 # the domain must be deeper than the wind's sampling height; until 2026-10 the
 # check compared the absolute top, so this 4 m deep domain at z = 156 to 160 m ran
 add_test_fire_abort(FireDomainDepth_abort FireLineFire inputs_nowind

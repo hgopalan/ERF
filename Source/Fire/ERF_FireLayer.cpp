@@ -1,4 +1,5 @@
 #include <ERF_FireLayer.H>
+#include "ERF_FireModelSummary.H"
 #include <ERF_PrescribedFire.H>
 #include <ERF.H>
 #include <ERF_SurfaceLayer.H>
@@ -764,6 +765,9 @@ void FireLayer::initialize(const ERF& erf,
     amrex::Print() << "[FIRE] FireLayer initialized: C=" << m_fg.C
                    << ", fuel_model=" << fire_params.fuel_model_id
                    << ", grid=" << m_fg.ba.size() << " boxes" << std::endl;
+    // every physics choice of the run, once, before the first step and
+    // whatever fire_debug says
+    print_fire_model_summary(m_params);
 
     if (m_params.fire_debug) {
         IntVect max_extent = m_fg.geom.Domain().size();
