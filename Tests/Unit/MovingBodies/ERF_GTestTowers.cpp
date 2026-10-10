@@ -186,7 +186,8 @@ TEST(TowerType, EveryValueOutsideItsRangeIsRefusedByName)
     moving.foundation_rotational_stiffness = 1.0e9;
     moving.damping_given = true;
     EXPECT_TRUE(moving.validate().empty()) << moving.validate();
-    bad([](TowerType& t) { t.arm_length = 1.5; }, "arm_length must exceed top_width for arm_outside_shaft");
+    bad([](TowerType& t) { t.arm_length = 1.5; }, "arm_length must exceed top_width for erf.conductors.lattice.arm_outside_shaft");
+    bad([](TowerType& t) { t.arm_length = 1.5; }, "arm_outside_shaft = false for a cross-arm within");
     {
         TowerType narrow = lattice();
         narrow.arm_length = 1.5;

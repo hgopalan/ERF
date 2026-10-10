@@ -31,8 +31,8 @@ std::string TowerType::validate () const
     if (!positive(arm_length)) { return key + "arm_length must be finite and positive (m)"; }
     if (arm_outside_shaft && !(arm_length > top_width)) {
         // the least it can be: each tower also needs it longer than the shaft is wide at the middle of the arm's face
-        return key + "arm_length must exceed top_width for arm_outside_shaft (the cross-arm's drag outside the shaft); "
-                     "set arm_outside_shaft = false for a cross-arm within the shaft's width";
+        return key + "arm_length must exceed top_width for " + key + "arm_outside_shaft (the cross-arm's drag outside the "
+                     "shaft); set " + key + "arm_outside_shaft = false for a cross-arm within the shaft's width";
     }
     if (!non_negative(arm_depth)) { return key + "arm_depth must be finite and >= 0 (m; 0: top_width)"; }
     if (!non_negative(peak)) { return key + "peak must be finite and >= 0 (m)"; }
