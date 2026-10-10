@@ -93,24 +93,24 @@ order; the optional blocks are present only when their feature is on:
    * - ``fire_fireline_intensity``, ``fire_flame_length``
      - kW/m, m
      - always
-   * - ``fire_heat_release``
-     - kW/m
-     - always (:math:`h\,(w_0 - w)\, R`, the intensity's form before 2026-10)
    * - ``fire_arrival_time``
      - s
      - always
+   * - ``fire_heat_release``
+     - kW/m
+     - always (:math:`h\,(w_0 - w)\, R`, the intensity's form before 2026-10)
    * - ``fire_fuel_mc_lh``, ``fire_fuel_mc_lw``
      - fraction
      - live moisture components present (BEHAVE path)
    * - ``fire_lofting_height``, ``fire_spot_brand_count``, ``fire_spot_max_dist``, ``fire_spot_active``
      - m, -, m, -
      - ``erf.fire.spotting.enable``
-   * - ``fire_crown_active``, ``fire_crown_load``, ``fire_crown_fraction_burned``
-     - -, kg/m², -
-     - ``erf.fire.crown.enable``
    * - ``fire_flame_tilt``
      - deg
      - ``erf.fire.compute_flame_tilt`` (crown fire on or off)
+   * - ``fire_crown_active``, ``fire_crown_load``, ``fire_crown_fraction_burned``
+     - -, kg/m², -
+     - ``erf.fire.crown.enable``
    * - ``fire_flame_temp``
      - K
      - ``erf.fire.crown.enable``
@@ -126,6 +126,12 @@ order; the optional blocks are present only when their feature is on:
    * - ``fire_nonburnable``
      - 0/1
      - structures, ``fuel_map.nonburnable_codes``, ``firebreak.use_mask`` or ``suppression.enable`` configured
+   * - ``fire_structure_id``, ``fire_heat_load``, ``fire_peak_intensity``, ``fire_ember_landings``
+     - -, J/m², kW/m, -
+     - ``erf.fire.exposure.enable`` (see below)
+   * - ``fire_structure_state``, ``fire_structure_ignition_time``, ``fire_structure_rad_flux``
+     - -, s, W/m²
+     - ``erf.fire.structures.ignition.enable`` (:doc:`wui_structure_ignition`)
    * - ``fire_precip_mm_hr``
      - mm/hr
      - dynamic dead-fuel moisture with ``erf.fire.precip_source = atmosphere`` or a positive ``erf.fire.precip_rate_mm_hr``

@@ -620,6 +620,23 @@ if(EXISTS "${ERF_NOAHMP_TABLE}")
   endif()
 endif()
 
+# The fire plotfile table in fire_output.rst lists the fields "in this fixed
+# order"; this checks it against the order ERF_FirePlotfileCatalog.H builds.
+# Plain Python, no ERF run; the self-test proves a swapped or missing row fails.
+if(ERF_TEST_PYTHON)
+  add_test(NAME FirePlotfileDoc_MatchesCatalog
+      COMMAND ${ERF_TEST_PYTHON} ${PROJECT_SOURCE_DIR}/Tests/check_fire_plotfile_doc.py
+              --catalog ${PROJECT_SOURCE_DIR}/Source/Fire/ERF_FirePlotfileCatalog.H
+              --doc ${PROJECT_SOURCE_DIR}/Docs/sphinx_doc/theory/fire_output.rst)
+  add_test(NAME FirePlotfileDoc_SelfTest
+      COMMAND ${ERF_TEST_PYTHON} ${PROJECT_SOURCE_DIR}/Tests/check_fire_plotfile_doc.py --self-test)
+  set_tests_properties(FirePlotfileDoc_MatchesCatalog FirePlotfileDoc_SelfTest
+      PROPERTIES
+      TIMEOUT 60
+      PROCESSORS 1
+      LABELS "unit;fire")
+endif()
+
 # Restart parity: run one deck straight, then to a checkpoint and on from it, and
 # require the plotfile at the end to be identical (no gold file). Every run has a
 # time limit; the default stays at 600, but an explicit RUN_TIMEOUT is forwarded
