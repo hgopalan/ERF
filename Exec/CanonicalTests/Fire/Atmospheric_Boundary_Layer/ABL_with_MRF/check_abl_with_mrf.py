@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Sanity checks on the fire output of the ABL_with_MRF tests.
 
-    python3 check_abl_with_mrf.py [plt_fire_NNNNN] [--stats fire_stats.csv]
+    python3 check_abl_with_mrf.py [plt_fire_<prefix>NNNNN] [--stats fire_stats.csv]
 
-With no plotfile the last plt_fire_????? in the directory is used; with no
+With no plotfile the last plt_fire*NNNNN in the directory is used (the decks
+set erf.fire_plot_file = plt_fire_abl_<case>_); with no
 --stats every fire_stats*.csv present is checked. Each check prints PASS or FAIL
 and the script exits 1 if any fails, so it can follow the run in CTest:
 
@@ -67,9 +68,9 @@ def main():
 
     pf = args.plotfile
     if pf is None:
-        pfs = sorted(p for p in glob.glob("plt_fire_?????") if os.path.isdir(p))
+        pfs = sorted(p for p in glob.glob("plt_fire*[0-9][0-9][0-9][0-9][0-9]") if os.path.isdir(p))
         if not pfs:
-            print("  no plt_fire_????? plotfile here: FAIL")
+            print("  no plt_fire*NNNNN plotfile here: FAIL")
             sys.exit(1)
         pf = pfs[-1]
     ds, get = load(pf)
@@ -105,7 +106,7 @@ def main():
         check("arrival", ok_b and ok_u, detail)
 
     if fuel is not None:
-        f0_pfs = sorted(p for p in glob.glob("plt_fire_00000") if os.path.isdir(p))
+        f0_pfs = sorted(p for p in glob.glob("plt_fire*00000") if os.path.isdir(p))
         ok_neg = float(np.nanmin(fuel)) >= -TOL
         if f0_pfs and f0_pfs[0] != pf:
             _, get0 = load(f0_pfs[0])

@@ -1,0 +1,8 @@
+FILE = inputs_base
+
+# Same as inputs_atmosphere but stops at step 27 (13.5 s, while it rains) and
+# writes chk00027, which must carry the precipitation snapshot FirePrecipAccumPrev.
+erf.fire.precip_source = "atmosphere"
+erf.fire.fire_stats_csv_file = "fire_stats_atmosphere_chk.csv"
+max_step = 27
+erf.check_int = 27

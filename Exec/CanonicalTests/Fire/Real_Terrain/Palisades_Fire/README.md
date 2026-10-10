@@ -85,9 +85,16 @@ to 6463 m) and the fire grid 800 x 800 (640,000). The demo quoted approximately
 four-GPU node, and box lengths that divide by the grid ratio of 10 as the fire
 module requires.
 
-The slow step is 0.2 s. The compressible limit on this fitted mesh is about
-0.217 s, so 0.3 s, which `Marshall_Fire` uses on its gentler 100 m mesh, is
-unstable here. `stop_time = 11268` is the demo's 3.13 hours, which is 56,340
+The slow step is 0.2 s. ERF reports terrain-aware estimates of 0.81 s advective
+and 0.41 s acoustic at start-up, and the automatic substepping takes the minimum
+of four acoustic substeps. A 30-minute run at 0.3 s is stable as well (all six
+checks pass and the advective estimate never drops below 0.79 s), but the spotting
+interval and the level-set reinitialisation are counted in steps, so at 0.3 s
+embers launch every 60 s instead of every 40 s and the fire burns less (a third
+less area at 30 minutes in a September 2026 run). The deck was first built on a sounding whose surface pressure was in
+Pa (see below), which put the acoustic estimate at 0.217 s; four substeps of
+0.075 s then exceeded the 0.072 s each may take, which is most likely why 0.3 s
+failed at the time. `stop_time = 11268` is the demo's 3.13 hours, which is 56,340
 steps: this is an overnight run on CPUs and the reason the demo used GPUs. For a
 first look set `stop_time = 1800`.
 
@@ -109,7 +116,7 @@ on ten ranks, and the same deck with grass instead of chaparral:
 
 | fuel | head ROS | burned at 30 min | perimeter |
 |---|---|---|---|
-| Anderson 4, chaparral, 3 % moisture (the deck) | 3.9 m/s | 1310 ha, 3236 acres | 31.4 km |
+| Anderson 4, chaparral, 3 % moisture (the deck) | 3.1 m/s | 1235 ha, 3051 acres | 27.2 km |
 | Anderson 1, short grass, 4 % moisture | 1.0 m/s | 69 ha, 170 acres | 7.7 km |
 
 - The atmosphere is stable at 0.2 s steps on the fitted mesh; the fire runs as a
@@ -133,11 +140,21 @@ hour, still ahead of the demo's average rate. Reproducing the 600 acres would
 need the demo's own fuel map, most likely one with the urban and irrigated parts
 of the Palisades marked non-burnable rather than a single model over all the
 vegetated land. Set `erf.fire.fuel_model_id = 1` with
-`erf.fire.rothermel_per_fuel = 0` for the grass row above; a real fuel map drops
+`erf.fire.rothermel_per_fuel = 0` and `erf.fire.moisture_1hr = 0.04` for the
+grass row above; a real fuel map drops
 into `erf.fire.fuel_map.file` in the same ESRI ASCII form `gen_palisades.py`
 writes.
 
 ## What building it found
+**The sounding's surface pressure was written in Pa.** ERF's `input_sounding`
+reads the first value of the first line in hPa, as WRF does, and multiplies it by
+100. `gen_palisades.py` wrote `101325.0`, so until 2026-09-11 the atmosphere
+started at about 100 atmospheres: the start-up log reported a surface dry air
+density of 31.45 kg/m^3, and theta = 300 K meant a temperature of about 1120 K.
+The sound speed that follows set the terrain-aware compressible estimate at
+0.217 s. The file now starts `1013.25`, the density is 1.17 kg/m^3 and the same
+estimate is 0.414 s.
+
 **The fire never read `erf.fire.terrain_file_name`.** `ERF_FireParams.H` queried
 `terrain_file_name` under the `erf` prefix only, so the fire silently used the
 atmosphere's raster and the deck parameter did nothing. It went unnoticed because

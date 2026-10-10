@@ -9,9 +9,11 @@
  * to phi = +dist_to_boundary (unburned). Boundary is determined by the winding
  * number test (point is inside if winding number != 0).
  *
- * Polyline mode: cells within half_width set to phi = -half_width (burned);
- * others set to distance from nearest segment. A polyline is an open path of
- * line segments (not closed).
+ * Polyline mode: phi = dist_to_nearest_segment - half_width everywhere (a
+ * true signed distance function shifted by the constant half_width, so
+ * |grad phi| = 1 from construction, matching how WRF-Fire's ignite_fire
+ * builds its level set: lfn_new = d - radius). A polyline is an open path
+ * of line segments (not closed).
  *
  * Both modes use min(phi, new_val) stamping, so ignitions merge with existing
  * fire state without overwriting it.
@@ -118,9 +120,10 @@ void read_polygon_vertices(const std::string& filename,
 /**
  * @brief Compute the winding number of a point relative to a polygon.
  *
- * Uses the ray-casting algorithm: count how many times a horizontal ray from
- * the point to infinity crosses the polygon boundary. Odd crossings mean the
- * point is inside.
+ * Sunday's winding-number algorithm: upward edges crossing the horizontal
+ * ray to the right of the point count +1, downward ones -1; the point is
+ * inside when the sum is non-zero (so a self-overlapping polygon counts its
+ * overlap as inside, unlike the parity rule).
  *
  * @param[in] px, py     Query point
  * @param[in] xs, ys     Polygon vertex arrays (device pointers)
@@ -189,8 +192,9 @@ amrex::Real segment_dist_sq(amrex::Real px, amrex::Real py,
         return dpx * dpx + dpy * dpy;
     }
 
-    // Parameter t of closest point on segment
-    amrex::Real t = ((px - ax) * dx + (py - ay) * dy) / len_sq;
+    // Parameter t of closest point on segment (floored length: the early
+    // return above does not stop the optimiser evaluating x/0)
+    amrex::Real t = ((px - ax) * dx + (py - ay) * dy) / amrex::max(len_sq, amrex::Real(1.0e-30));
     t = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(t))));
 
     amrex::Real cx = ax + t * dx;
@@ -281,9 +285,11 @@ void init_phi_from_polygon(
 /**
  * @brief Initialize level-set field from a polyline (open line fire).
  *
- * Sets phi for cells near a polyline segment sequence:
- * - phi = -half_width for cells within half_width of any segment
- * - phi = distance from segment for cells farther away
+ * Sets phi to a signed distance function shifted by half_width:
+ * - phi = dist_to_nearest_segment - half_width (negative inside the burned
+ *   band, positive outside, zero exactly half_width from the nearest
+ *   segment) -- a real ramp, not a flat clamp, so |grad phi| = 1 everywhere
+ *   from construction rather than only after the first reinitialization.
  * - Uses min(phi, new_val) semantics to merge with existing fire
  *
  * A polyline is an open path (not closed), defined by a sequence of vertices
@@ -342,8 +348,12 @@ void init_phi_from_polyline(
                 }
             }
 
-            // Set phi: negative within half_width, positive otherwise
-            Real new_phi = (min_dist <= half_width) ? -half_width : min_dist;
+            // True signed distance function shifted inward by half_width, so
+            // phi ramps continuously through zero at min_dist == half_width
+            // rather than jumping from a flat -half_width interior straight
+            // to +half_width outside (the old clamped version made |grad phi|
+            // blow up to ~1.5-1.8 right at that edge).
+            Real new_phi = min_dist - half_width;
 
             // Apply min() semantics to merge with existing fire
             p(i, j, k) = amrex::min(p(i, j, k), new_phi);

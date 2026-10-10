@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# The old path: the houses are exposed and reported, nothing ignites them.
+erf.fire_plot_file = "plt_fire_off_"
+erf.fire.fire_stats_csv_file = "fire_stats_off.csv"
+erf.fire.exposure.file = "exposure_off.csv"
+erf.fire.structures.ignition.enable = false

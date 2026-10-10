@@ -30,10 +30,13 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     // Compute weighted dead fuel moisture
     Real w_d = fp.w_d1 + fp.w_d10 + fp.w_d100;
     Real M_f = 0.0;  // weighted fuel moisture fraction
+    // floored dead load before the branch (a live-only custom fuel has
+    // w_d = 0 and the unselected 0/0 would be speculated under the traps)
+    const Real inv_w_d = 1.0 / amrex::max(w_d, Real(1.0e-6));
     if (w_d > 1.0e-6) {
-        Real r_d1 = fp.w_d1 / w_d;
-        Real r_d10 = fp.w_d10 / w_d;
-        Real r_d100 = fp.w_d100 / w_d;
+        Real r_d1 = fp.w_d1 * inv_w_d;
+        Real r_d10 = fp.w_d10 * inv_w_d;
+        Real r_d100 = fp.w_d100 * inv_w_d;
         M_f = r_d1 * moisture_1hr + r_d10 * moisture_10hr + r_d100 * moisture_100hr;
     }
 
@@ -121,17 +124,17 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     Real phi_s_const = 5.275 * std::pow(beta, -0.3);
 
     // ===================================================================
-    // 21. MEWS wind speed cap (Andrews 2018 / Rothermel 1972)
+    // 21. Wind speed cap
     // ===================================================================
-    // The formula phi_w_max = 0.9 * I_R mixes incompatible quantities:
-    // phi_w (dimensionless) and I_R (BTU/ft²/min ~500 for fine fuels).
-    // This produces a dimensionally incorrect cap of phi_w ~ 475 for FM1,
-    // giving unrealistically high ROS (ROS ~ wind speed × 2-3).
-    //
-    // Instead, use fuel-type-based absolute cap on midflame wind speed,
-    // consistent with published BEHAVE/BehavePlus validation tables:
+    // Rothermel (1972) Eq. 87 caps the WIND SPEED at U_max [ft/min] = 0.9 I_R
+    // [BTU/ft²/min] (the "wind limit" of Andrews 2018); an earlier version of
+    // this code applied that number to phi_w instead and read the result as
+    // a dimensional error. This code uses its own fuel-class rule, an
+    // absolute cap on the midflame wind:
     //   Fine fuels (sigma > 1000 ft⁻¹): cap at 300 ft/min (~1.5 m/s midflame)
     //   Coarse fuels (sigma <= 1000 ft⁻¹): cap at 500 ft/min (~2.5 m/s midflame)
+    // These are this code's choice, not a published rule; the
+    // Rothermel/Andrews limit is not implemented.
     // erf.fire.use_wind_limit = false removes the cap (rothermel_wind_cap_ftmin).
     Real U_max_ftmin = rothermel_wind_cap_ftmin(sigma, use_wind_limit);
 
@@ -146,7 +149,8 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     rc.phi_s_const  = phi_s_const;
     rc.U_max_ftmin  = U_max_ftmin;
     rc.wind_conv    = 196.85;    // m/s → ft/min
-    rc.ros_conv     = 1.0;       // No double conversion: rc.R0 is already in m/s
+    rc.ros_conv     = 1.0;       // 1, not a unit factor: rc.R0 is already in m/s (ERF_AlbiniSpotting.H builds
+                                 // its own rc with 0.00508 when it needs ft/min)
     rc.I_R          = I_R;
 
     return rc;
@@ -187,6 +191,7 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
     int fuel_set,
     Real moisture_live,
     bool use_wind_limit,
+    const FuelModelParams* fp_tbl,
     bool use_rothermel_a_formula,
     bool wrf_bmst_compat)
 {
@@ -196,10 +201,28 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
     // kernel returns zero spread whatever the wind and slope.
     table[0] = RothermelComputed{};
 
-    // Slots 1-13 hold the Anderson models at their own codes; 14-53 the Scott-Burgan models.
+    // Slots 1-13 hold the Anderson models at their own codes, 14-53 the
+    // Scott-Burgan models and 54-69 the deck-defined ones, which only the
+    // caller's slot table knows.
     for (int slot = 1; slot < ROTHERMEL_TABLE_SIZE; ++slot) {
-        table[slot] = compute_rothermel_params(get_fuel_params(fuel_code_from_slot(slot), (slot >= 14) ? 1 : fuel_set, moisture_live),
-                                              moisture_1hr, moisture_10hr, moisture_100hr, use_wind_limit,
+        if (fp_tbl == nullptr && slot >= FUEL_SLOT_CUSTOM_BASE) {
+            table[slot] = RothermelComputed{};   // no slot table, so no deck-defined fuel: no spread
+            continue;
+        }
+        const FuelModelParams fp = (fp_tbl != nullptr)
+            ? fp_tbl[slot]
+            : get_fuel_params(fuel_code_from_slot(slot),
+                              (slot >= FUEL_SLOT_SB40_BASE) ? FUEL_SET_SCOTT_BURGAN40 : fuel_set,
+                              moisture_live);
+        // A slot with no fuel gets the zeroed entry slot 0 carries rather than
+        // the coefficients of a zero load, which divide by the packing ratio and
+        // come out non-finite. Custom slots the deck leaves undefined are the
+        // case that reaches this; a zero-load entry can never spread anyway.
+        if (!(fuel_total_load_kg_m2(fp) > 0.0)) {
+            table[slot] = RothermelComputed{};
+            continue;
+        }
+        table[slot] = compute_rothermel_params(fp, moisture_1hr, moisture_10hr, moisture_100hr, use_wind_limit,
                                               use_rothermel_a_formula, wrf_bmst_compat);
     }
     return table;

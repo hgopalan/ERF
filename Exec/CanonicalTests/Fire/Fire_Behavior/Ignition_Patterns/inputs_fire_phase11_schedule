@@ -74,7 +74,3 @@ erf.fire.use_waf = true
 erf.fire.waf_formula = "andrews"
 erf.fire.use_wind_limit = true
 erf.fire.use_terrain_wind = false
-erf.fire.k_ridge = 1.5
-erf.fire.k_shelter = 0.6
-erf.fire.k_valley = 0.8
-erf.fire.k_deflect = 0.3

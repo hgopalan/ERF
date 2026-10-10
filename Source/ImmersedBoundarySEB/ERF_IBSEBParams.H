@@ -30,7 +30,7 @@ struct IBSEBParams
     std::string csv_file      = "ibseb_buildings.csv"; ///< Per-building report
     int         csv_int       = 100;                   ///< Steps between report rows; <= 0 disables
     bool        debug         = false;                 ///< [IBSEB DEBUG] prints: set description at build, per-step summary, per-building rows
-    std::string dump_faces_file;                       ///< Per-rank face dump at report time (empty = off)
+    std::string dump_faces_file;                       ///< Per-rank face dump at report time (empty = off); a refined level N adds ".levN"
     bool        dump_faces_tag_step = false;           ///< Name each dump by its step (keeps every one) instead of overwriting
 
     // ---- Radiation provider ------------------------------------------------
@@ -43,6 +43,10 @@ struct IBSEBParams
     // direct-normal and diffuse irradiances given below (analytic tests).
     // "solar": sun from the site and time; irradiances from the clear-sky
     // formulas.
+    // "two_stream": the sun of the two-stream radiation (erf.radiation_model =
+    // TwoStream following start_datetime): its declination, hour angle (no
+    // equation of time), site (erf.rad_cons_lat / lon) and top-of-atmosphere
+    // irradiance; the clear-sky formulas of "solar" then give the irradiances.
     std::string sun_mode      = "fixed";
     amrex::Real sun_zenith_deg    = 45.0;   ///< fixed: zenith angle [deg]
     amrex::Real sun_azimuth_deg   = 180.0;  ///< fixed: azimuth clockwise from north [deg]; 180 = sun in the south
@@ -53,8 +57,8 @@ struct IBSEBParams
     amrex::Real day_of_year       = 172.0;  ///< solar: day of year
     amrex::Real time_zero_utc_s   = 12.0 * 3600.0; ///< solar: seconds after 00:00 UTC at simulation time zero (the sun follows UTC and the longitude)
     amrex::Real solar_constant    = 1361.0; ///< solar: [W/m2]
-    amrex::Real sw_transmission   = 0.7;    ///< solar: bulk clear-sky transmission (Bird)
-    amrex::Real sw_diffuse_coeff  = 0.5;    ///< solar: share of the attenuated beam that arrives as diffuse light
+    amrex::Real sw_transmission   = 0.7;    ///< solar, two_stream: bulk clear-sky transmission (Bird)
+    amrex::Real sw_diffuse_coeff  = 0.5;    ///< solar, two_stream: share of the attenuated beam that arrives as diffuse light
     // Optical properties, uniform unless the material library below overrides them.
     amrex::Real albedo            = 0.3;    ///< Face shortwave albedo
     amrex::Real albedo_ground     = 0.2;    ///< Ground albedo for the reflected diffuse term
@@ -79,12 +83,16 @@ struct IBSEBParams
     // cell: u* from the tangential wind at half a cell from the wall with the
     // roughness length z0_wall, theta* from the skin-to-air difference with
     // z0h_wall; H = rho c_p u* theta* (positive out of the face). Neutral on
-    // every face unless stability_correction is set, which applies the
-    // surface layer's similarity functions on roofs. couple_heat = false
+    // every face unless stability_correction is set, which corrects the
+    // roofs for stability with stability_scheme: "iterative" (the surface
+    // layer's similarity functions on the face's own Obukhov length) or
+    // "louis" (Louis 1979 explicit factors on the bulk Richardson number).
+    // couple_heat = false
     // diagnoses H without adding it to the temperature equation.
     amrex::Real z0_wall           = 0.01;   ///< Momentum roughness of the faces [m]
     amrex::Real z0h_wall          = 0.001;  ///< Heat roughness of the faces [m]
     bool        stability_correction = false;
+    std::string stability_scheme  = "iterative";  ///< "iterative" or "louis" (with stability_correction)
     bool        couple_heat       = true;   ///< Add the face flux to the temperature equation
 
     // ---- Ground heat flux and materials -------------------------------------
@@ -93,8 +101,9 @@ struct IBSEBParams
     // slab's conductivity, heat capacity and thickness, and the face's albedo
     // and emissivity, come from the material library (SLUCM schema) when
     // material_file is given: material_default for every building, or one
-    // id per building in material_by_building (indexed by building id from
-    // 1). Without a file the uniform values below apply to every face.
+    // id per building in material_by_building (indexed by level 0's building
+    // id from 1; every level maps its buildings to level 0's). Without a file
+    // the uniform values below apply to every face.
     std::string material_file;
     int         material_default   = 1;
     std::vector<int> material_by_building;
@@ -184,6 +193,7 @@ struct IBSEBParams
         pp.query("z0_wall",          z0_wall);
         pp.query("z0h_wall",         z0h_wall);
         pp.query("stability_correction", stability_correction);
+        pp.query("stability_scheme", stability_scheme);
         pp.query("couple_heat",      couple_heat);
         pp.query("material_file",    material_file);
         pp.query("material_default", material_default);
@@ -209,8 +219,19 @@ struct IBSEBParams
             if (radiation != "prescribed") {
                 amrex::Abort("erf.ibseb.radiation: only \"prescribed\" is available in this build");
             }
-            if (sun_mode != "fixed" && sun_mode != "solar") {
-                amrex::Abort("erf.ibseb.sun_mode must be \"fixed\" or \"solar\"");
+            if (sun_mode != "fixed" && sun_mode != "solar" && sun_mode != "two_stream") {
+                amrex::Abort("erf.ibseb.sun_mode must be \"fixed\", \"solar\" or \"two_stream\"");
+            }
+            // The two-stream sun brings its own position, site, date and irradiance.
+            if (sun_mode == "two_stream") {
+                for (const char* k : {"latitude_deg", "longitude_deg", "day_of_year", "time_zero_utc_s", "solar_constant",
+                                      "sun_zenith_deg", "sun_azimuth_deg", "sw_direct_normal", "sw_diffuse"}) {
+                    if (pp.contains(k)) {
+                        amrex::Abort(std::string("erf.ibseb.") + k + " is not used with erf.ibseb.sun_mode = two_stream:"
+                                     " the faces take the two-stream sun (start_datetime, erf.rad_cons_lat / lon,"
+                                     " erf.fixed_total_solar_irradiance); remove it");
+                    }
+                }
             }
             if (sun_zenith_deg < 0.0 || sun_zenith_deg > 180.0) { amrex::Abort("erf.ibseb.sun_zenith_deg must be in [0, 180]"); }
             if (latitude_deg < -90.0 || latitude_deg > 90.0) { amrex::Abort("erf.ibseb.latitude_deg must be in [-90, 90]"); }
@@ -259,6 +280,15 @@ struct IBSEBParams
             }
             if (beta_conv <= 0.0 || z_i <= 0.0 || ri_crit <= 0.0) { amrex::Abort("erf.ibseb.beta_conv, z_i and ri_crit must be positive"); }
             if (obukhov_relax <= 0.0 || obukhov_relax > 1.0) { amrex::Abort("erf.ibseb.obukhov_relax must be in (0, 1]"); }
+            if (stability_scheme != "iterative" && stability_scheme != "louis") {
+                amrex::Abort("erf.ibseb.stability_scheme must be \"iterative\" or \"louis\"");
+            }
+            if (pp.contains("stability_scheme") && !stability_correction) {
+                amrex::Abort("erf.ibseb.stability_scheme selects the roofs' stability correction; set erf.ibseb.stability_correction = true or remove it");
+            }
+            if (stability_scheme == "louis" && (pp.contains("obukhov_seed") || pp.contains("obukhov_relax"))) {
+                amrex::Abort("erf.ibseb.obukhov_seed and obukhov_relax belong to stability_scheme = \"iterative\"; remove them with \"louis\"");
+            }
         }
     }
 };

@@ -190,6 +190,11 @@ The default subvolume inventory is documented on :ref:`sec:Plotfiles`.
 |                             | column)          |
 |                             | [m^2/s^2]        |
 +-----------------------------+------------------+
+| **vort_stretching**         | stretching of    |
+|                             | vertical         |
+|                             | vorticity        |
+|                             | [1/s^2]          |
++-----------------------------+------------------+
 | **magvel**                  | magnitude of     |
 |                             | velocity [m/s]   |
 |                             |                  |
@@ -548,6 +553,173 @@ The default subvolume inventory is documented on :ref:`sec:Plotfiles`.
 |                             | to be defined    |
 |                             | [count]          |
 +-----------------------------+------------------+
+| **Tau11**                   | Subgrid stress   |
+|                             | component 11.    |
+|                             | Only available   |
+|                             | when diffusion   |
+|                             | is enabled       |
+|                             | [kg/m/s^2]       |
++-----------------------------+------------------+
+| **Tau12**                   | Subgrid stress   |
+|                             | component 12.    |
+|                             | Only available   |
+|                             | when diffusion   |
+|                             | is enabled       |
+|                             | [kg/m/s^2]       |
++-----------------------------+------------------+
+| **Tau13**                   | Subgrid stress   |
+|                             | component 13.    |
+|                             | Only available   |
+|                             | when diffusion   |
+|                             | is enabled       |
+|                             | [kg/m/s^2]       |
++-----------------------------+------------------+
+| **Tau21**                   | Subgrid stress   |
+|                             | component 21.    |
+|                             | Only available   |
+|                             | when diffusion   |
+|                             | is enabled       |
+|                             | [kg/m/s^2]       |
++-----------------------------+------------------+
+| **Tau22**                   | Subgrid stress   |
+|                             | component 22.    |
+|                             | Only available   |
+|                             | when diffusion   |
+|                             | is enabled       |
+|                             | [kg/m/s^2]       |
++-----------------------------+------------------+
+| **Tau23**                   | Subgrid stress   |
+|                             | component 23.    |
+|                             | Only available   |
+|                             | when diffusion   |
+|                             | is enabled       |
+|                             | [kg/m/s^2]       |
++-----------------------------+------------------+
+| **Tau31**                   | Subgrid stress   |
+|                             | component 31.    |
+|                             | Only available   |
+|                             | when diffusion   |
+|                             | is enabled       |
+|                             | [kg/m/s^2]       |
++-----------------------------+------------------+
+| **Tau32**                   | Subgrid stress   |
+|                             | component 32.    |
+|                             | Only available   |
+|                             | when diffusion   |
+|                             | is enabled       |
+|                             | [kg/m/s^2]       |
++-----------------------------+------------------+
+| **Tau33**                   | Subgrid stress   |
+|                             | component 33.    |
+|                             | Only available   |
+|                             | when diffusion   |
+|                             | is enabled       |
+|                             | [kg/m/s^2]       |
++-----------------------------+------------------+
+| **hfx1**                    | Heat flux in     |
+|                             | x-direction.     |
+|                             | Written when     |
+|                             | requested.       |
+|                             | Nonzero with X   |
+|                             | surface layer or |
+|                             | rotated zlo flux;|
+|                             | zero otherwise.  |
+|                             | Surface-layer    |
+|                             | flux, not the    |
+|                             | full horizontal  |
+|                             | diffusive flux.  |
+|                             | [W/m^2]          |
++-----------------------------+------------------+
+| **hfx2**                    | Heat flux in     |
+|                             | y-direction.     |
+|                             | Written when     |
+|                             | requested.       |
+|                             | Nonzero with Y   |
+|                             | surface layer or |
+|                             | rotated zlo flux;|
+|                             | zero otherwise.  |
+|                             | Surface-layer    |
+|                             | flux, not the    |
+|                             | full horizontal  |
+|                             | diffusive flux.  |
+|                             | [W/m^2]          |
++-----------------------------+------------------+
+| **hfx3**                    | Heat flux in     |
+|                             | z-direction.     |
+|                             | Flux of the theta|
+|                             | diffusion at the |
+|                             | two z-faces of   |
+|                             | the cell,        |
+|                             | averaged (the    |
+|                             | full flux, also  |
+|                             | with the implicit|
+|                             | vertical solve;  |
+|                             | the surface-layer|
+|                             | flux at the      |
+|                             | bottom face).    |
+|                             | [W/m^2]          |
++-----------------------------+------------------+
+| **q1fx1**                   | Moisture flux 1  |
+|                             | in x-direction.  |
+|                             | Written when     |
+|                             | requested with   |
+|                             | moisture enabled.|
+|                             | Nonzero with X   |
+|                             | surface layer or |
+|                             | rotated zlo flux;|
+|                             | zero otherwise.  |
+|                             | Surface-layer    |
+|                             | flux, not the    |
+|                             | full horizontal  |
+|                             | diffusive flux.  |
+|                             | [kg/m^2/s]       |
++-----------------------------+------------------+
+| **q1fx2**                   | Moisture flux 1  |
+|                             | in y-direction.  |
+|                             | Written when     |
+|                             | requested with   |
+|                             | moisture enabled.|
+|                             | Nonzero with Y   |
+|                             | surface layer or |
+|                             | rotated zlo flux;|
+|                             | zero otherwise.  |
+|                             | Surface-layer    |
+|                             | flux, not the    |
+|                             | full horizontal  |
+|                             | diffusive flux.  |
+|                             | [kg/m^2/s]       |
++-----------------------------+------------------+
+| **q1fx3**                   | Moisture flux 1  |
+|                             | in z-direction.  |
+|                             | Written when     |
+|                             | requested with   |
+|                             | moisture enabled.|
+|                             | Flux of the qv   |
+|                             | diffusion at the |
+|                             | two z-faces of   |
+|                             | the cell,        |
+|                             | averaged (the    |
+|                             | full flux, also  |
+|                             | with the implicit|
+|                             | vertical solve;  |
+|                             | the surface-layer|
+|                             | flux at the      |
+|                             | bottom face).    |
+|                             | [kg/m^2/s]       |
++-----------------------------+------------------+
+| **q2fx3**                   | Moisture flux 2  |
+|                             | in z-direction.  |
+|                             | Only available   |
+|                             | with Z surface   |
+|                             | layers and       |
+|                             | moisture enabled |
+|                             | [kg/m^2/s]       |
++-----------------------------+------------------+
+
+The horizontal surface-layer flux variables ``hfx1``, ``hfx2``,
+``q1fx1``, and ``q1fx2`` do not represent the complete horizontal
+diffusive flux. Without a corresponding lateral surface layer or a
+rotated zlo surface flux, these variables are written as zero.
 
 The ``ibseb_*`` fields are selected only when the immersed-boundary surface
 energy balance is on (``erf.ibseb.enable = true``); without it the names are
@@ -558,6 +730,38 @@ cells rather than cell-centred fields.
 
 The ``qrain``, ``qsnow``, and ``qgraup`` rows are available when the active
 moisture scheme provides the corresponding rain, snow, or graupel component.
+
+Rotation diagnostics
+~~~~~~~~~~~~~~~~~~~~
+
+``vorticity_x``, ``vorticity_y``, and ``vorticity_z`` are the three components
+of :math:`\nabla \times \mathbf{u}`. ``local_helicity`` is the cell-by-cell
+product :math:`\zeta w`, and ``helicity`` is its integral over the 2 km to 5 km
+layer of each column, which is why ``helicity`` needs a grid that is not
+decomposed in the vertical.
+
+``vort_stretching`` is the stretching term in the vertical vorticity equation,
+
+.. math::
+
+   S = \zeta \, \frac{\partial w}{\partial z}, \qquad
+   \zeta = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y},
+
+with units of :math:`\mathrm{s}^{-2}`. It is positive where vertical stretching
+is amplifying vertical vorticity already present in the flow and negative where
+vertical compression is spinning it down, so it is a local, instantaneous
+measure of vortex intensification rather than an accumulated quantity. It is one
+term of :math:`D\zeta/Dt` and not the full tendency; in particular the tilting
+term :math:`\omega_x \, \partial w / \partial x + \omega_y \, \partial w /
+\partial y`, which converts horizontal vorticity into vertical vorticity, is not
+included and is not output separately.
+
+All of these fields are computed cell-by-cell from the cell-centered velocity
+using centered differences. The vertical derivative in ``vort_stretching`` and
+in ``vorticity_x`` and ``vorticity_y`` is taken with respect to the physical
+heights of the cell centers, so it is correct on a vertically stretched mesh;
+on a terrain-fitted mesh it omits the horizontal metric terms of the mapping, as
+the vorticity components themselves do.
 
 Moisture variable selection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -611,6 +815,9 @@ occupies:
    * - ``Kessler``
      - qv (Q1), qc (Q2), qr (Q3)
      - none
+   * - ``SBM``
+     - qv (Q1), qc (Q2 projection), qr (Q3 projection)
+     - none in the compact state
    * - ``SAM_NoPrecip_NoIce``
      - qv (Q1), qc (Q2)
      - none
@@ -635,6 +842,26 @@ occupies:
    * - ``SuperDroplets``
      - qv (Q1), qc (Q2), qi (Q3), qr (Q4), qs (Q5), qg (Q6)
      - none
+
+For ``SBM``, ``qc`` and ``qr`` are compatibility projections from the
+authoritative bin-resolved liquid-water mass. They are not independent liquid
+reservoirs.
+
+A two-moment SBM state also contains droplet-number density in every spectral
+bin, but those number components live in the auxiliary spectral state rather
+than in conventional ERF ``nc`` or ``nr`` conserved components. Individual SBM
+bin masses and bin numbers are not currently registered as standard 3D
+plotfile variables; the bin-resolved state is currently preserved through the
+SBM checkpoint state.
+
+For the current SBM layout, the aggregate moisture diagnostics therefore use
+
+* ``qt = qv + qc + qr``;
+* ``qn = qv + qc``; and
+* ``qp = qr``.
+
+See :ref:`sec:SpectralBinMicrophysics` for the distinction between the
+authoritative spectrum and these projected bulk fields.
 
 Note that ``nn``, the CCN / total aerosol number, is not a hydrometeor count:
 it is an aerosol reservoir with no companion mass species, and it takes the
@@ -664,9 +891,16 @@ arrays:
    * - ``SuperDroplets``
      - ``rain_accum``, ``snow_accum``
      - ``rel_humidity``, ``condensation_rate``
+   * - ``SBM``
+     - none
+     - none
    * - all others
      - none
      - none
+
+The current SBM fixture has no surface-precipitation accumulation or
+microphysical tendency diagnostics because sedimentation and cloud
+microphysical processes are not yet implemented.
 
 ``SuperDroplets`` allocates a graupel accumulation slot that nothing fills, so
 ``graup_accum`` is not offered for that scheme. ``SatAdj`` publishes no qmoist

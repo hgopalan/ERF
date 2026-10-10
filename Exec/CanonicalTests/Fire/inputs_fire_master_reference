@@ -129,6 +129,15 @@ erf.fire.moisture_live_model = "legacy"
 # 0.0 = no precipitation
 erf.fire.precip_rate_mm_hr = 0.0
 
+# Where the rain that wets the dead classes comes from (moisture_dynamic = true):
+#   "uniform"    (default) - precip_rate_mm_hr everywhere
+#   "atmosphere"           - the change per step of the microphysics surface
+#                            precipitation accumulation of each column [mm/hr];
+#                            needs a scheme with precipitation (Kessler, SAM,
+#                            Morrison, WSM6, WDM6) and precip_rate_mm_hr = 0.
+#                            Plotfile field fire_precip_mm_hr, CSV column precip_max_mm_hr.
+erf.fire.precip_source = "uniform"
+
 # Dead-class update with moisture_dynamic: "timelag" (default, one time constant
 # per class) or "stick" (radial diffusion in a cylindrical stick per class, the
 # Nelson 2000 framework, lag-calibrated diffusivity; shells checkpointed)
@@ -153,9 +162,6 @@ erf.fire.emc_model = "legacy"
 # true: advance moisture each timestep via ODEs based on RH, T, precipitation
 erf.fire.moisture_dynamic = false
 
-# Compute moisture of extinction dynamically from fuel SAV (Phase 4)
-# false: use default extinction moisture for fuel model
-
 # ============================================================================
 # IGNITION PARAMETERS
 # ============================================================================
@@ -167,8 +173,9 @@ erf.fire.ignition_y = 1000.0
 # Ignition source: circular patch radius [m]
 erf.fire.ignition_r = 30.0
 
-# Ignition from a perimeter polygon (CSV of x y vertices; "polygon" closed or
-# "polyline" open with half-width polyline_width); empty = disabled
+# Ignition from perimeter polygons (CSVs of x y vertices, one perimeter per
+# file, several files allowed; "polygon" closed or "polyline" open with
+# half-width polyline_width, the same for every file); empty = disabled
 erf.fire.ignition.polygon_file = ""
 
 # Timed point ignitions from a CSV (time x y radius per line); empty = disabled
@@ -260,8 +267,9 @@ erf.fire.wind_interp = "bilinear"
 # path, instead of applying one scalar rate in every direction. The wind and
 # slope are projected onto the normal and the selected model is evaluated with
 # the projected scalars, so head, flank and backing spread come from the model.
-# false (default) keeps the isotropic behaviour. No effect on the FARSITE path,
-# which gets its directionality from the Anderson ellipse.
+# true is the default (the WRF-Fire form); false keeps one scalar rate in every
+# direction, and this reference deck sets it off deliberately. No effect on the
+# FARSITE path, which gets its directionality from the Anderson ellipse.
 erf.fire.directional_ros = false
 
 # Form of the directional rate (needs directional_ros; not for balbi or hybrid).
@@ -286,6 +294,13 @@ erf.fire.directional_shape = "projection"
 # "advective"
 erf.fire.directional_wind_coupling = "projection"
 
+# Upwind the isotropic and the wind/slope terms of the advective Hamiltonian
+# separately, each wind/slope term by the sign of its own velocity, instead of
+# one front-normal flux. Removes the grid-orientation dependence at oblique
+# wind angles. Needs directional_wind_coupling = "advective", Rothermel and the
+# "projection" shape. false (default) keeps the front-normal flux.
+erf.fire.directional_split_hamiltonian = false
+
 # Flank rate of the "ellipse" shape (needs directional_shape = "ellipse").
 # "model" (default) keeps the model's no-wind, no-slope rate at the flanks, so
 #          the length-to-width ratio (R_h/R0 + 1)/2 is not capped
@@ -300,14 +315,19 @@ erf.fire.directional_ellipse_lw_max = 8.0
 erf.fire.propagation_method = "farsite"
 
 # Level-set numerics: subcycle CFL, artificial viscosity away from the front
-# (eps_visc_front below applies near it), and the Sussman reinitialisation
-# (every N subcycles, iterations, band half-width in m and pseudo-dt; <0 = auto)
+# (eps_visc_front below applies near it), and the reinitialisation (every N
+# subcycles, outer RK3 steps, pseudo-dt in m (<= 0 selects 0.01*dx), and scheme:
+# "wrf" (default, WRF-Fire's reinit_ls_rk3) or "jiang_peng" (Jiang and Peng's
+# HJ-WENO5 with SSP-RK3))
 erf.fire.levelset.cfl = 0.4
 erf.fire.levelset.eps_visc = 0.4
 erf.fire.levelset.reinit_every = 5
-erf.fire.levelset.reinit_iters = 10
-erf.fire.levelset.reinit_band_m = -1.0
+erf.fire.levelset.reinit_iters = 1
 erf.fire.levelset.reinit_dtau = -1.0
+erf.fire.levelset.reinit_scheme = "wrf"
+# jiang_peng only: term added to phi0^2 under the smoothed-sign square root;
+# <= 0 selects dx^2 (Jiang and Peng's "delta comparable to the spatial step size").
+erf.fire.levelset.reinit_jp_sign_eps2 = -1.0
 
 # Level-set path only: extrapolate the level set into non-burnable cells
 # inside every stencil (gradient, Laplacian, front normal, reinitialisation),
@@ -391,6 +411,7 @@ erf.fire.hybrid.region = 0.0 0.0 0.0 0.0       # x_lo y_lo x_hi y_hi [m]; requir
 erf.fire.hybrid.blend_width = 0.0             # linear ramp width across the region or structure edge [m]; 0 = step
 # erf.fire.hybrid.secondary_fuel_codes = 3    # required for "fuel"
 # erf.fire.hybrid.structure_file = ""         # ERF terrain-format building heightmap; default erf.buildings_file_name
+# erf.buildings_file_name = ""                # the core key both hybrid.structure_file and structures.file fall back to
 erf.fire.hybrid.structure_min_height = 0.5    # sampled height [m] above which a cell is a structure
 erf.fire.hybrid.structure_distance = 10.0     # cells within this distance of a structure take the secondary [m]
 erf.fire.hybrid.wind_lo = 8.0                 # effective wind speed [m/s] where w reaches 0
@@ -434,6 +455,31 @@ erf.fire.structures.min_height = 0.5      # sampled height [m] above which a cel
 # an immersed-forcing building does not leak into the wind of the fire cells
 # around it. Needs structures.enable; no effect with wind_interp = "nearest".
 erf.fire.structures.wind_open_columns = false
+# Structure ignition and house-to-house spread on the exposure accumulators
+# (needs exposure.enable). A structure ignites when the largest accumulated
+# heat load in its wall band reaches heat_load_J_m2, or ember_count brands
+# have landed on its footprint, or the largest fireline intensity in its band
+# has spent residence_s above intensity_kW_m; a threshold <= 0 turns that
+# criterion off. A burning structure releases heat on its footprint along the
+# EN 1991-1-2 Annex E.4 dwelling curve (t-squared growth to peak_flux_W_m2
+# over growth_time_s, a plateau until 70 % of fuel_load_J_m2 is out, a linear
+# decay), launches brands through the spotting model when it is on, and
+# spreads rad_fraction of its release as ground point sources onto the
+# cells within rad_radius_m, where it adds to the heat load; that is
+# how it ignites its neighbours. Adds fire_structure_state,
+# fire_structure_ignition_time and fire_structure_rad_flux to the fire
+# plotfile and five columns to the exposure CSV. The thresholds are
+# placeholders to calibrate; the curve is the Eurocode dwelling.
+erf.fire.structures.ignition.enable = false
+erf.fire.structures.ignition.heat_load_J_m2 = 6.0e6       # band heat load at ignition [J/m2]
+erf.fire.structures.ignition.ember_count = 50             # brands on the footprint at ignition
+erf.fire.structures.ignition.intensity_kW_m = 1000.0      # band intensity threshold [kW/m]
+erf.fire.structures.ignition.residence_s = 60.0           # time above it at ignition [s]
+erf.fire.structures.ignition.peak_flux_W_m2 = 2.5e5       # EN 1991-1-2 dwelling RHRf
+erf.fire.structures.ignition.fuel_load_J_m2 = 7.8e8       # EN 1991-1-2 dwelling fire load density
+erf.fire.structures.ignition.growth_time_s = 600.0        # time from ignition to the peak [s]
+erf.fire.structures.ignition.rad_fraction = 0.3     # share radiated onto the surroundings
+erf.fire.structures.ignition.rad_radius_m = 100.0   # reach of the incident flux [m]
 
 # Spatial fuel map on the fire grid: ESRI ASCII ("ascii") or FARSITE landscape
 # ("lcp") file; empty = the uniform fuel_model_id. blending_fraction blends the
@@ -456,9 +502,50 @@ erf.fire.fuel_map.fuel_set = "anderson13"
 erf.fire.fuel_map.sb40_crosswalk = false
 erf.fire.fuel_map.load_from_map = false
 
+# Fuel models described in this deck instead of a published set. The codes
+# listed take fuel table slots above the Anderson 13 and the Scott-Burgan 40,
+# are recognised under either set, and are read by every rate-of-spread model,
+# the heat flux, the per-cell fuel load and the burnout. Each code must be in
+# 1000-1015. Properties are in SI. w_1h_kg_m2, sav_1h_1_m, depth_m,
+# moisture_ext and heat_content_J_kg are required; the rest default as shown.
+# No code is defined unless erf.fire.custom_fuel.codes lists it.
+#   erf.fire.custom_fuel.codes = 1000
+#   erf.fire.custom_fuel.1000.name               = custom_1000
+#   erf.fire.custom_fuel.1000.w_1h_kg_m2         = 0.60    # [0, 500] kg/m2
+#   erf.fire.custom_fuel.1000.w_10h_kg_m2        = 0.0     # [0, 500] kg/m2
+#   erf.fire.custom_fuel.1000.w_100h_kg_m2       = 0.0     # [0, 500] kg/m2
+#   erf.fire.custom_fuel.1000.w_live_herb_kg_m2  = 0.0     # [0, 500] kg/m2, no curing transfer
+#   erf.fire.custom_fuel.1000.w_live_woody_kg_m2 = 0.0     # [0, 500] kg/m2
+#   erf.fire.custom_fuel.1000.sav_1h_1_m         = 5000.0  # [10, 12000] 1/m
+#   erf.fire.custom_fuel.1000.sav_live_herb_1_m  = 5000.0  # [10, 12000] 1/m, default sav_1h_1_m
+#   erf.fire.custom_fuel.1000.sav_live_woody_1_m = 5000.0  # [10, 12000] 1/m, default sav_1h_1_m
+#   erf.fire.custom_fuel.1000.depth_m            = 0.60    # (0.01, 50] m
+#   erf.fire.custom_fuel.1000.moisture_ext       = 0.25    # [0.01, 2] fraction
+#   erf.fire.custom_fuel.1000.heat_content_J_kg  = 1.86e7  # [5e6, 5e7] J/kg
+#   erf.fire.custom_fuel.1000.density_kg_m3      = 512.0   # [50, 2000] kg/m3
+#   erf.fire.custom_fuel.1000.burnout_time_s     = 0.0     # [0, 1e5] s, required with burnout_model = sfire
+
 # Hold the firebreak cells in the mask as well (they are otherwise only
 # stamped into phi once, which the level-set reinitialisation can erode)
 erf.fire.firebreak.use_mask = false
+
+# ============================================================================
+# SUPPRESSION: FIRE LINES, RETARDANT DROPS, HOLD TEST, BURNOUT
+# Actions read from a watched file (one per line, whitespace separated,
+# geometry in fire-grid metres):
+#   L1  line     3600  500 200 900 600   rate=0.5        -1    2.4   # polyline built at rate [m/s]; expiry_s (-1 = permanent); flame_limit_m (- = holds)
+#   D1  drop     5400  poly:x1,y1;x2,y2;x3,y3  ros_factor=0.0  1800  -   # polygon; factor 0 = barrier, 0 < f < 1 slows
+#   B1  burnout  4000  ref=L1            offset=20       -     -     # ignitions along the built part of L1, offset on the fire side
+# Built line cells and factor-0 drops join the non-burnable mask both
+# propagation paths read; a factor between 0 and 1 multiplies the rate of
+# spread. The file is re-read every poll_interval fire steps when its
+# modification time changed (0 = once at start); ids already read are
+# skipped. Events go to the log CSV. Adds fire_suppression_mask,
+# fire_ros_factor and fire_line_progress to the fire plotfile.
+erf.fire.suppression.enable = false
+# erf.fire.suppression.file = "suppression.txt"
+erf.fire.suppression.poll_interval = 10
+erf.fire.suppression.log = "suppression_log.csv"
 
 # ============================================================================
 # BALBI PHYSICAL MODEL (used only when ros_model = "balbi")
@@ -492,7 +579,7 @@ erf.fire.balbi.T_vap = 373.0      # Water vaporisation temperature [K]
 erf.fire.balbi.K1 = 130.0         # Drag coefficient [s/m]
 erf.fire.balbi.st = 17.0          # Air to pyrolysis-gas mass ratio [-]
 erf.fire.balbi.rho_a = 1.2        # Air density [kg/m3]
-erf.fire.balbi.sigma_B = 5.6e-8   # Stefan-Boltzmann constant [W/(m2 K4)]
+erf.fire.balbi.sigma_B = 5.670374e-8   # Stefan-Boltzmann constant [W/(m2 K4)]
 
 # Balbi (2020) root solve: R = Rb + Rc + Rr is solved by bisection
 erf.fire.balbi.max_iter = 40      # Iteration cap
@@ -598,9 +685,6 @@ erf.fire.burnout_model = "residence"
 erf.fire.burnout_time_to_efold = 0.8514
 #erf.fire.burnout_times_s = 7 7 7 180 100 100 100 900 900 900 900 900 900
 
-# Combustion fraction bounds for heat flux calculation
-# Fraction of fuel consumed: typically 0.2 (minimum) to 0.9 (maximum)
-
 # ============================================================================
 # LEVEL-SET ADVECTION (FARSITE Model, Phase 3)
 # ============================================================================
@@ -632,8 +716,7 @@ erf.fire.farsite.coeff_b = 0.25  # Flank fire coefficient
 erf.fire.farsite.coeff_c = 0.1   # Backing fire coefficient
 
 # Gaussian stamping radius for fire front [m] (legacy update only)
-# < 0: auto-compute from grid resolution
-# > 0: manual override (use for tuning)
+# < 0: single-cell stamp; 0: sigma = dx (automatic); > 0: fixed radius
 erf.fire.farsite.gaussian_sigma = -1.0
 
 # CFL number for fire advection (stability)
@@ -827,9 +910,6 @@ erf.fire.crown.canopy_depth = 10.0
 # 0.5 = 50% moisture (typical moist condition)
 erf.fire.crown.foliar_moisture = 1.0
 
-# Critical foliar moisture (Van Wagner 1977 threshold) [fraction]
-# Below this, crown fire impossible due to moisture
-
 # Canopy heat content (energy released when canopy burns) [BTU/lb]
 # Typical: 8000 BTU/lb (slightly lower than surface fuels due to moisture)
 erf.fire.crown.h_crown_BTU_lb = 8000.0
@@ -942,7 +1022,7 @@ erf.fire.accel.tau_wind = 60.0
 # Phase 9 flame tilt (when compute_flame_tilt = true):
 #   fire_flame_tilt (1 additional component)
 #
-# Phase 9 flame temp (always written):
+# Flame temperature (written with the crown block, crown.enable = true):
 #   fire_flame_temp (1 additional component)
 
 # ============================================================================
@@ -987,3 +1067,14 @@ erf.fire_dust_lofting_Q_ref = 500.0      # heat flux of unit lofting [W/m2]
 #   - Source/Fire/ERF_FireDiagnostics.H: diagnostic computations
 #   - Documentation: Docs/sphinx_doc/theory/Fire.rst and the pages it links
 # ============================================================================
+
+# ============================================================================
+# MRF PBL: FIRE HEAT FLUX IN THE THERMAL EXCESS (core keys, read by ERF_TurbStruct.H)
+# ============================================================================
+# With erf.pbl_type = "MRF" the fire's surface heat flux can boost the
+# convective velocity scale w* of the K profile (the PBL height itself is not
+# modified). Read only when the MRF scheme is selected; per level like the
+# other erf.pbl_* keys.
+# erf.pbl_mrf_fire_thermal_excess = false   # default false: fire flux left out of w*
+# erf.mrf_fire_q_threshold = 50.0           # fire heat flux [W/m2] below which no boost is applied
+# erf.mrf_fire_t_excess_cap = 50.0          # cap on the thermal excess [K] when the fire is active

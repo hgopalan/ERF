@@ -1,0 +1,9 @@
+# Burnout from a line. L1 at x = 241 m spans the whole domain (y = 0..400 m,
+# so the fire cannot go round its ends) and is complete at t = 4 s; B1 fires
+# out from it at t = 5 s, 4 m on the fire side (west, where the disc is), one
+# ignition point per fire cell along the built part. The strip at x = 237 m
+# burns to the line long before the main front, which would only reach it at
+# 29 s, and nothing burns beyond the line.
+FILE = inputs_base
+erf.fire.suppression.file = actions_burnout.txt
+erf.fire.suppression.log = suppression_burnout.csv

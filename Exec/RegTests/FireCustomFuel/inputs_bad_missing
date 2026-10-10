@@ -1,0 +1,13 @@
+FILE = inputs_base
+
+# A block missing its required sav_1h_1_m, so the fuel model is only half
+# described. Without the required-property check it would silently take a
+# zero surface-area-to-volume ratio.
+erf.fire.custom_fuel.codes = 1000
+erf.fire.custom_fuel.1000.w_1h_kg_m2             = 0.16600262
+erf.fire.custom_fuel.1000.depth_m                = 0.3048
+erf.fire.custom_fuel.1000.moisture_ext           = 0.12
+erf.fire.custom_fuel.1000.heat_content_J_kg      = 1.8608e7
+erf.fire.custom_fuel.1000.density_kg_m3 = 512.592
+
+erf.fire.fuel_model_id = 1000

@@ -5,15 +5,23 @@
  * Reads a CSV road schedule file and applies per-road vehicle
  * resuspension emission to dust_emission_flux each timestep.
  *
- * Emission formula (EPA AP-42 Chapter 13.2.2, unpaved roads):
- *   E_road [g/VKT] = k * (s/12)^a * (W/3)^b
- *   k=2.6, a=0.8, b=0.4 (TSP, AP-42 Table 13.2.2-2)
- *   F_vehicle [kg/m^2/s] = E_road * vmt_per_h / (road_width * road_length * 1e6 * 3600)
+ * Emission formula (EPA AP-42 Chapter 13.2.2, unpaved roads at industrial sites):
+ *   E_road [g/VKT] = k * (s/12)^a * (W/3)^b,  k = 423, a = 0.9, b = 0.45 (PM-10)
+ *   mass rate M [kg/s] = 1e-3 * E_road * vkt_per_h / 3600
+ *   F_cell [kg/m^2/s] = M / (n_cells * A_cell)
+ * stamped on every dust cell whose centre lies in the road's bounding box,
+ * n_cells of them (counted once at start-up, count_road_cells). Until October
+ * 2026 the flux was M / (width * length) stamped on every covered cell, so the
+ * emitted mass scaled with the covered cell area instead of the road area
+ * (37.5x the AP-42 rate for a 20 m road on 375 m cells), and a road box with no
+ * cell centre emitted nothing while the diagnostics reported a flux.
  *
  * CSV format:
  *   road_name, x_lo_m, y_lo_m, x_hi_m, y_hi_m,
- *   road_width_m, vehicle_weight_t, silt_pct, vmt_per_h,
+ *   road_width_m, vehicle_weight_t, silt_pct, vkt_per_h,
  *   start_time_s, end_time_s
+ *   (vehicle_weight_t in metric tonnes; AP-42's W is in US short tons, a
+ *   4 % difference in (W/3)^0.45 at 10 % lighter)
  *   Lines beginning with # or ! are comments.
  *   end_time_s = -1 means active for full simulation.
  *
@@ -51,7 +59,6 @@ namespace DustRoadConst {
     constexpr amrex::Real K_AP42   = 423.0; ///< AP-42 PM-10 emission factor k [g/VKT]
     constexpr amrex::Real A_AP42   = 0.9;   ///< AP-42 PM-10 silt exponent a
     constexpr amrex::Real B_AP42   = 0.45;  ///< AP-42 weight exponent b
-    constexpr amrex::Real FLUX_MAX = 1.0e-3;///< Maximum road flux [kg/m^2/s]
     constexpr amrex::Real G_PER_KG = 1.0e-3;///< g -> kg
     constexpr amrex::Real S_PER_H  = 3600.0;///< s/h
 }
@@ -62,9 +69,10 @@ struct RoadEvent {
     amrex::Real road_width_m;            ///< Road width [m]
     amrex::Real vehicle_weight_t;        ///< Mean vehicle weight [tons]
     amrex::Real silt_pct;                ///< Silt content [%]
-    amrex::Real vmt_per_h;              ///< Vehicle kilometres travelled per hour [VKT/h] (E is per VKT)
+    amrex::Real vkt_per_h;              ///< Vehicle kilometres travelled per hour [VKT/h] (E is per VKT)
     amrex::Real start_time_s;           ///< Activation start time [s]
     amrex::Real end_time_s;             ///< Activation end time [s]. -1 = whole sim.
+    amrex::Long n_cells = 0;            ///< Dust cells whose centre lies in the box (count_road_cells)
 };
 
 struct RoadSchedule {
@@ -92,25 +100,43 @@ inline void load_road_schedule(const std::string& filename,
     if (amrex::ParallelDescriptor::IOProcessor()) {
         std::ifstream in(filename);
         if (!in.is_open()) {
-            amrex::Print() << "[DUST] WARNING: Cannot open road schedule: "
-                           << filename << "\n";
-            return;
+            // Abort, not warn: returning here left every other rank waiting
+            // in the Bcast below (a hang on 2+ ranks), and a run without the
+            // roads it was given is not the run that was asked for.
+            amrex::Abort("[DUST] erf.dust.road_schedule_file cannot be opened: " + filename);
         }
         std::string line;
+        int line_no = 0;
         while (std::getline(in, line)) {
+            ++line_no;
             if (line.empty() || line[0] == '#' || line[0] == '!') continue;
             std::replace(line.begin(), line.end(), ',', ' ');
             std::istringstream iss(line);
             RoadEvent ev;
             iss >> ev.name >> ev.x_lo >> ev.y_lo >> ev.x_hi >> ev.y_hi
                 >> ev.road_width_m >> ev.vehicle_weight_t >> ev.silt_pct
-                >> ev.vmt_per_h >> ev.start_time_s >> ev.end_time_s;
-            if (!iss.fail()) {
+                >> ev.vkt_per_h >> ev.start_time_s >> ev.end_time_s;
+            if (iss.fail()) {
+                amrex::Abort("[DUST] " + filename + " line " + std::to_string(line_no)
+                             + ": expected name x_lo y_lo x_hi y_hi width_m weight_t silt_pct vkt_per_h start_s end_s: \""
+                             + line + "\"");
+            }
+            // pow(silt/12, 0.9) and pow(weight/3, 0.45) are NaN for a negative
+            // field; road_width_m is checked for the file format only, the
+            // AP-42 mass does not depend on it
+            if (!(ev.road_width_m > 0.0) || !(ev.vehicle_weight_t > 0.0) || !(ev.silt_pct >= 0.0)
+                || !(ev.vkt_per_h >= 0.0) || !(ev.end_time_s < 0.0 || ev.end_time_s >= ev.start_time_s)
+                || !(ev.x_hi > ev.x_lo || ev.y_hi > ev.y_lo)) {
+                amrex::Abort("[DUST] " + filename + " line " + std::to_string(line_no) + " (road " + ev.name
+                             + "): needs width_m > 0, weight_t > 0, silt_pct >= 0, vkt_per_h >= 0,"
+                             " end_s >= start_s (or < 0 for no end) and a non-degenerate x_lo..x_hi / y_lo..y_hi");
+            }
+            {
                 names.push_back(ev.name);
                 buf.push_back(ev.x_lo); buf.push_back(ev.y_lo);
                 buf.push_back(ev.x_hi); buf.push_back(ev.y_hi);
                 buf.push_back(ev.road_width_m); buf.push_back(ev.vehicle_weight_t);
-                buf.push_back(ev.silt_pct); buf.push_back(ev.vmt_per_h);
+                buf.push_back(ev.silt_pct); buf.push_back(ev.vkt_per_h);
                 buf.push_back(ev.start_time_s); buf.push_back(ev.end_time_s);
                 ++n_roads;
             }
@@ -132,7 +158,7 @@ inline void load_road_schedule(const std::string& filename,
         ev.x_lo            = buf[r*10+0]; ev.y_lo = buf[r*10+1];
         ev.x_hi            = buf[r*10+2]; ev.y_hi = buf[r*10+3];
         ev.road_width_m    = buf[r*10+4]; ev.vehicle_weight_t = buf[r*10+5];
-        ev.silt_pct        = buf[r*10+6]; ev.vmt_per_h = buf[r*10+7];
+        ev.silt_pct        = buf[r*10+6]; ev.vkt_per_h = buf[r*10+7];
         ev.start_time_s    = buf[r*10+8]; ev.end_time_s = buf[r*10+9];
     }
     schedule.loaded = true;
@@ -140,6 +166,52 @@ inline void load_road_schedule(const std::string& filename,
     if (amrex::ParallelDescriptor::IOProcessor())
         amrex::Print() << "[DUST] Road schedule loaded: " << n_roads
                        << " roads from " << filename << "\n";
+}
+
+/**
+ * @brief Count, for every road, the dust cells whose centre lies in its box.
+ *
+ * Called once at start-up; aborts when a road covers no cell centre (its
+ * emission could land nowhere). The count is a global reduction.
+ */
+inline void count_road_cells(RoadSchedule& schedule, const amrex::BoxArray& ba,
+                             const amrex::Geometry& geom_dust)
+{
+    if (!schedule.loaded) return;
+    const auto dxd = geom_dust.CellSizeArray();
+    const auto lod = geom_dust.ProbLoArray();
+    for (auto& ev : schedule.roads) {
+        amrex::Long n = 0;
+        // every rank counts the cells of every box (the box array is global);
+        // no reduction needed, and the count is rank-independent
+        for (int ib = 0; ib < ba.size(); ++ib) {
+            const amrex::Box& bx = ba[ib];
+            for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j) {
+                const amrex::Real yc = lod[1] + (j + 0.5) * dxd[1];
+                if (yc < ev.y_lo || yc > ev.y_hi) continue;
+                for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                    const amrex::Real xc = lod[0] + (i + 0.5) * dxd[0];
+                    if (xc >= ev.x_lo && xc <= ev.x_hi) ++n;
+                }
+            }
+        }
+        ev.n_cells = n;
+        if (n == 0) {
+            amrex::Abort("[DUST] road " + ev.name + " (" + std::to_string(ev.x_lo) + ".." + std::to_string(ev.x_hi)
+                         + " x " + std::to_string(ev.y_lo) + ".." + std::to_string(ev.y_hi)
+                         + " m) contains no dust cell centre; widen the box to cover a cell of "
+                         + std::to_string(dxd[0]) + " x " + std::to_string(dxd[1]) + " m");
+        }
+    }
+}
+
+/// AP-42 mass rate of a road [kg/s]: 1e-3 E [g/VKT] VKT/h / 3600.
+inline amrex::Real road_mass_rate_kg_s(const RoadEvent& ev)
+{
+    const amrex::Real E_road = DustRoadConst::K_AP42
+        * std::pow(ev.silt_pct / 12.0, DustRoadConst::A_AP42)
+        * std::pow(ev.vehicle_weight_t / 3.0, DustRoadConst::B_AP42);
+    return E_road * DustRoadConst::G_PER_KG * ev.vkt_per_h / DustRoadConst::S_PER_H;
 }
 
 /**
@@ -180,25 +252,18 @@ inline void apply_road_schedule(
     const auto lod = geom_dust.ProbLoArray();
     bool any_active = false;
 
+    const amrex::Real cell_area = dxd[0] * dxd[1];
+
     for (const auto& ev : schedule.roads) {
         bool active = (cur_time >= ev.start_time_s) &&
                       (ev.end_time_s < 0.0 || cur_time <= ev.end_time_s);
         if (!active) continue;
         any_active = true;
 
-        // EPA AP-42 Ch. 13.2.2 emission factor [g/VKT]
-        amrex::Real E_road = DustRoadConst::K_AP42
-            * std::pow(ev.silt_pct / 12.0, DustRoadConst::A_AP42)
-            * std::pow(ev.vehicle_weight_t / 3.0, DustRoadConst::B_AP42);
-
-        // Road length and flux conversion.
-        amrex::Real road_len = std::max(ev.x_hi - ev.x_lo, ev.y_hi - ev.y_lo);
-        if (road_len <= 0.0) continue;
-        // F_vehicle [kg/m^2/s]
-        amrex::Real F_v = E_road * DustRoadConst::G_PER_KG
-                        * ev.vmt_per_h
-                        / (ev.road_width_m * road_len * DustRoadConst::S_PER_H);
-        F_v = amrex::min(F_v, amrex::Real(DustRoadConst::FLUX_MAX));
+        // the AP-42 mass rate over the cells the box covers
+        const amrex::Real M_rate = road_mass_rate_kg_s(ev);
+        if (ev.n_cells <= 0) continue;   // count_road_cells aborts on this at start-up
+        const amrex::Real F_v = M_rate / (amrex::Real(ev.n_cells) * cell_area);
 
         const amrex::Real x_lo = ev.x_lo, y_lo = ev.y_lo;
         const amrex::Real x_hi = ev.x_hi, y_hi = ev.y_hi;
@@ -217,7 +282,8 @@ inline void apply_road_schedule(
         if (debug) {
             amrex::Print() << "[DUST DEBUG] Phase 22: road=" << ev.name
                            << " t=" << cur_time << " s"
-                           << " F_v=" << F_v << " kg/m^2/s\n";
+                           << " mass_rate=" << M_rate << " kg/s over " << ev.n_cells
+                           << " cells, F_cell=" << F_v << " kg/m^2/s\n";
         }
     }
 
@@ -228,22 +294,15 @@ inline void apply_road_schedule(
         std::ofstream out(diag_file, std::ios::app);
         if (!file_exists)
             out << "# EPA AP-42 Chapter 13.2.2 road emission diagnostics\n"
-                << "step,time_s,road_name,flux_add_kg_m2_s\n";
+                << "step,time_s,road_name,mass_rate_kg_s,flux_cell_kg_m2_s,n_cells\n";
         for (const auto& ev : schedule.roads) {
             bool active = (cur_time >= ev.start_time_s) &&
                           (ev.end_time_s < 0.0 || cur_time <= ev.end_time_s);
             if (!active) continue;
-            amrex::Real E_road = DustRoadConst::K_AP42
-                * std::pow(ev.silt_pct/12.0, DustRoadConst::A_AP42)
-                * std::pow(ev.vehicle_weight_t/3.0, DustRoadConst::B_AP42);
-            amrex::Real road_len = std::max(ev.x_hi-ev.x_lo, ev.y_hi-ev.y_lo);
-            amrex::Real F_v = (road_len > 0.0)
-                ? amrex::min(E_road * DustRoadConst::G_PER_KG * ev.vmt_per_h
-                             / (ev.road_width_m * road_len * DustRoadConst::S_PER_H),
-                             DustRoadConst::FLUX_MAX)
-                : 0.0;
+            const amrex::Real M_rate = road_mass_rate_kg_s(ev);
+            const amrex::Real F_v = (ev.n_cells > 0) ? M_rate / (amrex::Real(ev.n_cells) * cell_area) : amrex::Real(0.0);
             out << nstep << "," << cur_time << "," << ev.name << ","
-                << F_v << "\n";
+                << M_rate << "," << F_v << "," << ev.n_cells << "\n";
         }
     }
 }

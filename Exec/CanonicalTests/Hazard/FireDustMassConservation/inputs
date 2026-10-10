@@ -1,17 +1,24 @@
 # Check coupled fire-dust mass conservation.
 #
-# This hazard case verifies that fire-driven dust emission and transport remain mass-consistent in a coupled simulation, especially when dry deposition is disabled so airborne mass should not decrease spuriously.
+# The dust mass budget of a coupled fire-dust run closes: the airborne dust
+# mass (the "RHO DUST" volume integral printed every erf.sum_interval steps)
+# equals the emitted mass (dust_diag.dat, emission_total_kg_s summed over the
+# steps before the printed one, the documented one-step lag) minus the mass
+# deposited on the surface (deposition_total_kg). erf.dust.deposition_E0 = 0
+# reduces the deposition velocity to the settling velocity v_s; it does not
+# switch deposition off, so the airborne mass is not monotone.
 #
-# Expected result:
-#   - Airborne dust mass remains monotonic or otherwise consistent with the documented budget expectations.
-#   - Simulation completes the full coupled run without negative concentrations or NaNs.
+# Expected result (check_mass_conservation.py):
+#   - |M_air - (emitted - deposited)| / emitted < 2 % at every printed step;
+#   - dust is emitted and deposited (both totals positive);
+#   - the run completes without negative concentrations or NaNs.
 #
 # Configuration:
 #   - Fire and dust grid ratios are matched to satisfy coupling requirements.
-#   - Deposition is disabled except for any explicitly documented settling contribution.
+#   - Surface collection off (deposition_E0 = 0); settling at v_s remains.
 #
-# Notes:
-#   - The file already includes a detailed expected-results block; preserve it when adding headers.
+# Run:
+#   erf_exec inputs > run.log && python3 check_mass_conservation.py run.log dust_diag.dat
 
 erf.prob_name = "ABL"
 max_step = 100
@@ -44,7 +51,6 @@ erf.pbl_mrf_Ribcr = 0.5
 erf.pbl_mrf_const_b = 7.8
 erf.pbl_mrf_sf = 0.1
 erf.enable_mrf_countergradient = true
-erf.mrf_moistvars = false
 erf.use_coriolis = true
 erf.latitude = 45.0
 erf.abl_driver_type = "GeostrophicWind"
@@ -60,9 +66,8 @@ erf.dust.n_size_bins = 3
 erf.dust.particle_density = 2650.0
 erf.dust.z0_dust = 0.01
 erf.dust.silt_fraction = 0.10
-erf.dust.threshold_A_coeff = 0.1
-# crust_index = 1.0: start with fully crusted soil; burned cells will
-# be reduced to crust=0 over time by fire_dust_crust_reduction=0.8 each step.
+# crust_index = 1.0: start with fully crusted soil; burned cells take
+# (1 - fire_dust_crust_reduction) = 0.2 of the baseline once, not compounded.
 erf.dust.crust_index = 1.0
 erf.dust.alpha_crust = 0.5
 erf.dust.alpha_efflor = 0.3
@@ -75,7 +80,7 @@ erf.dust.test_wind_speed = 0.0
 erf.dust.atm_feedback = 1.0
 erf.dust.transport_bins_separately = false
 erf.dust.bin_diameters = 7.0e-6 2.5e-6 50.0e-6
-# deposition_E0 = 0.0: dry deposition disabled so airborne mass is non-decreasing
+# deposition_E0 = 0.0: no surface collection, v_d = v_s (settling still deposits)
 erf.dust.deposition_E0 = 0.0
 erf.dust.loading_feedback_coeff = 0.0
 # Terrain wind k-factors are neutral (1.0) since use_terrain_wind=false

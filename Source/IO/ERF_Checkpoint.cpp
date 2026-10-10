@@ -8,14 +8,20 @@
 #include "ERF_Constants.H"
 #include <fstream>
 #include <cmath>
+#include <sstream>
 #include <vector>
 #include <string>
 
 #include "ERF.H"
+#include "AMReX_ParmParse.H"
 #include "AMReX_PlotFileUtil.H"
 #include "ERF_ReadFromERFBdy.H"
 #include "ERF_Provenance.H"
 #include "ERF_IntervalMeansCheckpoint.H"
+#include "ERF_CheckpointSurfaceTemperature.H"
+#include "ERF_SBMStateManager.H"
+#include "ERF_SBMRestart.H"
+#include "ERF_SBMTransport.H"
 
 using namespace amrex;
 
@@ -23,6 +29,110 @@ namespace
 {
 
 bool provenance_warning_emitted = false;
+
+constexpr const char* surface_temperature_contract_file =
+    "surface_temperature_contract";
+
+void
+write_surface_temperature_contract (const std::string& checkpointname)
+{
+    const std::string filename = checkpointname + "/" + surface_temperature_contract_file;
+    std::ofstream output(filename, std::ofstream::out |
+                                   std::ofstream::trunc |
+                                   std::ofstream::binary);
+    if (!output.good()) {
+        amrex::FileOpenFailed(filename);
+    }
+    erf_checkpoint_surface_temperature::write_contract_version(output);
+}
+
+void
+validate_surface_temperature_contract (const std::string& checkpointname,
+                                       const int finest_level)
+{
+    const std::string marker_name = checkpointname + "/" + surface_temperature_contract_file;
+    const bool marker_present = amrex::FileExists(marker_name);
+
+    if (marker_present) {
+        amrex::Vector<char> marker_chars;
+        amrex::ParallelDescriptor::ReadAndBcastFile(marker_name, marker_chars);
+        std::istringstream marker_stream(std::string(marker_chars.dataPtr()),
+                                          std::istringstream::in);
+        int version = 0;
+        const auto status = erf_checkpoint_surface_temperature::read_contract_version(
+            marker_stream, version);
+        if (status == erf_checkpoint_surface_temperature::ContractReadStatus::Malformed) {
+            amrex::Abort("Malformed surface-temperature contract marker in '" + marker_name + "'");
+        }
+        if (status == erf_checkpoint_surface_temperature::ContractReadStatus::UnknownVersion) {
+            amrex::Abort("Unsupported surface-temperature contract version " +
+                         std::to_string(version) + " in '" + marker_name + "'");
+        }
+        return;
+    }
+
+    const int legacy_level = erf_checkpoint_surface_temperature::first_legacy_surface_temperature_level(
+        checkpointname, finest_level);
+    if (legacy_level < 0) {
+        return;
+    }
+
+    const std::string job_info_name = checkpointname + "/job_info";
+    erf_checkpoint_surface_temperature::LegacyInitType legacy_init_type =
+        erf_checkpoint_surface_temperature::LegacyInitType::Unknown;
+    if (amrex::FileExists(job_info_name)) {
+        amrex::Vector<char> job_info_chars;
+        amrex::ParallelDescriptor::ReadAndBcastFile(job_info_name, job_info_chars);
+        std::istringstream job_info_stream(std::string(job_info_chars.dataPtr()),
+                                            std::istringstream::in);
+        legacy_init_type =
+            erf_checkpoint_surface_temperature::parse_legacy_init_type_from_job_info(
+                job_info_stream);
+    }
+
+    if (legacy_init_type == erf_checkpoint_surface_temperature::LegacyInitType::Unknown) {
+        amrex::ParmParse pp_erf("erf");
+        constexpr const char* key = "legacy_surface_temperature_init_type";
+        if (pp_erf.countval(key) > 0) {
+            std::string asserted_source;
+            pp_erf.get(key, asserted_source);
+            const auto asserted_type =
+                erf_checkpoint_surface_temperature::parse_legacy_init_type_value(asserted_source);
+            if (asserted_type == erf_checkpoint_surface_temperature::LegacyInitType::Unknown) {
+                amrex::Abort("Invalid erf." + std::string(key) + " value '" + asserted_source +
+                             "'; accepted values are WRFInput and Metgrid (case-insensitive).");
+            }
+            legacy_init_type = asserted_type;
+            if (asserted_type == erf_checkpoint_surface_temperature::LegacyInitType::WRFInput) {
+                amrex::Print() << "WARNING: checkpoint '" << checkpointname
+                               << "' has no usable legacy surface-temperature provenance; "
+                               << "trusting the explicit erf." << key
+                               << " = WRFInput assertion.\n";
+            }
+        }
+    }
+
+    const auto compatibility =
+        erf_checkpoint_surface_temperature::classify_legacy_surface_temperature_checkpoint(
+            false, true, legacy_init_type);
+    if (compatibility ==
+        erf_checkpoint_surface_temperature::LegacySurfaceTemperatureCompatibility::UnsafeMetgrid) {
+        amrex::Abort("Legacy Metgrid checkpoint '" + checkpointname +
+                     "' contains SST_0/TSK_0 at AMR level " + std::to_string(legacy_level) +
+                     " without a surface-temperature contract marker; the legacy absolute-"
+                     "temperature arrays cannot be safely restored as the current potential-"
+                     "temperature representation.");
+    }
+    if (compatibility ==
+        erf_checkpoint_surface_temperature::LegacySurfaceTemperatureCompatibility::UnknownProvenance) {
+        amrex::Abort("Markerless checkpoint '" + checkpointname +
+                     "' contains SST_0/TSK_0 at AMR level " + std::to_string(legacy_level) +
+                     ", but the original initialization source cannot be established from checkpoint job_info. "
+                     "If and only if the old checkpoint was written from WRFInput, set "
+                     "erf.legacy_surface_temperature_init_type = WRFInput; legacy Metgrid arrays "
+                     "cannot be repaired from checkpoint contents.");
+    }
+}
 
 } // namespace
 
@@ -43,6 +153,11 @@ void
 ERF::WriteCheckpointFile () const
 {
     auto dCheckTime0 = amrex::second();
+
+    // Station rows are buffered, and a restart from this checkpoint appends to
+    // the station files: without this the rows between the last flush and the
+    // checkpoint would be missing from the series the restart continues.
+    flush_stations();
 
     // chk00010            write a checkpoint file with this root directory
     // chk00010/Header     this contains information you need to save (e.g., finest_level, t_new, etc.) and also
@@ -65,6 +180,23 @@ ERF::WriteCheckpointFile () const
     // ---- after all directories are built
     // ---- ParallelDescriptor::IOProcessor() creates the directories
     PreBuildDirectorHierarchy(checkpointname, "Level_", nlevels, true);
+
+    if (sbm_state_manager) {
+        const std::string schema_file = checkpointname + "/SBM_Schema";
+        if (ParallelDescriptor::IOProcessor()) {
+            std::ofstream schema(schema_file, std::ofstream::out |
+                                              std::ofstream::trunc |
+                                              std::ofstream::binary);
+            if (!schema.good()) FileOpenFailed(schema_file);
+            schema << erf_sbm::restart_schema(sbm_state_manager->layout());
+            if (!schema.good()) FileOpenFailed(schema_file);
+        }
+        ParallelDescriptor::Barrier();
+    }
+
+    if (ParallelDescriptor::IOProcessor()) {
+        write_surface_temperature_contract(checkpointname);
+    }
 
     int ncomp_cons = vars_new[0][Vars::cons].nComp();
 
@@ -95,6 +227,16 @@ ERF::WriteCheckpointFile () const
 
        // conservative, cell-centered vars
        HeaderFile << ncomp_cons << "\n";
+
+       // The passive-scalar block is compile-time (NSCALARS: base, plus the
+       // dust scalar with ERF_ENABLE_DUST, plus smoke with ERF_ENABLE_FIRE), so
+       // record it next to the header: a reader built with other modules would
+       // otherwise shift every component after it (and with a difference of one
+       // take the QKE backward-compatibility path below).
+       {
+           std::ofstream layout(checkpointname + "/ScalarLayout");
+           layout << "nscalars " << NSCALARS << "\n";
+       }
 
        // x-velocity on faces
        HeaderFile << 1 << "\n";
@@ -181,28 +323,43 @@ ERF::WriteCheckpointFile () const
        // filled would blend bogus_large_value into the next average.  Without this
        // file the filter simply starts over on restart, which is what checkpoints
        // written before this was added already did.
-       if (m_SurfaceLayer && m_SurfaceLayer->mac_avg_is_time_averaged()) {
-           std::string MostAvgFileName(checkpointname + "/most_time_average");
-           std::ofstream MostAvgFile;
-           MostAvgFile.open(MostAvgFileName.c_str(), std::ofstream::out   |
-                                                     std::ofstream::trunc |
-                                                     std::ofstream::binary);
-           if(! MostAvgFile.good()) {
-               FileOpenFailed(MostAvgFileName);
-           } else {
-               // Number of average components, then one line per level holding the
-               // initialization flag, how many plane averages follow (zero for the
-               // region policy, which keeps no plane averages), and those averages
-               MostAvgFile << m_SurfaceLayer->get_num_mac_avg() << "\n";
-               MostAvgFile.precision(17);
-               for (int lev = 0; lev <= finest_level; ++lev) {
-                   const Vector<Real> pavg = m_SurfaceLayer->get_mac_plane_avg(lev);
-                   MostAvgFile << (m_SurfaceLayer->mac_avg_is_initialized(lev) ? 1 : 0)
-                               << " " << pavg.size();
-                   for (int iavg(0); iavg < static_cast<int>(pavg.size()); ++iavg) {
-                       MostAvgFile << " " << pavg[iavg];
+       int n_faces = 0;
+       for (OrientationIter oit; oit; ++oit) {
+           Orientation ori = oit();
+           if (phys_bc_type[ori] == ERF_BC::surface_layer) {
+               n_faces += 1;
+           }
+       }
+       for (OrientationIter oit; oit; ++oit) {
+           Orientation ori = oit();
+           if (m_SurfaceLayer[ori] && m_SurfaceLayer[ori]->mac_avg_is_time_averaged()) {
+               std::string face = "_" + std::to_string(ori);
+               if (n_faces == 1 && static_cast<int>(ori) == Orientation::zlo()) {
+                   face = "";
+               }
+
+               std::string MostAvgFileName(checkpointname + "/most_time_average" + face);
+               std::ofstream MostAvgFile;
+               MostAvgFile.open(MostAvgFileName.c_str(), std::ofstream::out   |
+                                                         std::ofstream::trunc |
+                                                         std::ofstream::binary);
+               if(! MostAvgFile.good()) {
+                   FileOpenFailed(MostAvgFileName);
+               } else {
+                   // Number of average components, then one line per level holding the
+                   // initialization flag, how many plane averages follow (zero for the
+                   // region policy, which keeps no plane averages), and those averages
+                   MostAvgFile << m_SurfaceLayer[ori]->get_num_mac_avg() << "\n";
+                   MostAvgFile.precision(17);
+                   for (int lev = 0; lev <= finest_level; ++lev) {
+                       const Vector<Real> pavg = m_SurfaceLayer[ori]->get_mac_plane_avg(lev);
+                       MostAvgFile << (m_SurfaceLayer[ori]->mac_avg_is_initialized(lev) ? 1 : 0)
+                                   << " " << pavg.size();
+                       for (int iavg(0); iavg < static_cast<int>(pavg.size()); ++iavg) {
+                           MostAvgFile << " " << pavg[iavg];
+                       }
+                       MostAvgFile << "\n";
                    }
-                   MostAvgFile << "\n";
                }
            }
        }
@@ -244,6 +401,11 @@ ERF::WriteCheckpointFile () const
         MultiFab cons(grids[lev],dmap[lev],ncomp_cons,0);
         MultiFab::Copy(cons,vars_new[lev][Vars::cons],0,0,ncomp_cons,0);
         VisMF::Write(cons, MultiFabFileFullPrefix(lev, checkpointname, "Level_", "Cell"));
+
+        if (sbm_state_manager) {
+            VisMF::Write(sbm_state_manager->state(lev),
+                         MultiFabFileFullPrefix(lev, checkpointname, "Level_", "SBMSpectrum"));
+        }
 
         MultiFab xvel(convert(grids[lev],IntVect(1,0,0)),dmap[lev],1,0);
         MultiFab::Copy(xvel,vars_new[lev][Vars::xvel],0,0,1,0);
@@ -395,18 +557,27 @@ ERF::WriteCheckpointFile () const
                 VisMF::Write(lsm_vars, MultiFabFileFullPrefix(lev, checkpointname, "Level_", "LsmFlux" + std::to_string(iflux)));
             }
 
-            // Write the full LSM prognostic state (e.g. NoahMP soil/snow/canopy)
-            // to chk*/noahmp_restart/Level_<lev>.nc so a restart reproduces a
-            // cold-start trajectory bitwise (issue #3255). The LSM model writes
-            // its blocks collectively; no-op for models without such state.
-            // Create the subdir on rank 0 and barrier before the collective open
-            // so no rank races ahead of the directory existing.
-            std::string LsmRestartDir(checkpointname + "/noahmp_restart");
-            if (ParallelDescriptor::IOProcessor()) {
-                amrex::UtilCreateDirectory(LsmRestartDir, 0755);
+            if (solverChoice.lsm_type == LandSurfaceType::SLM) {
+                VisMF::Write(*precip[lev],
+                             MultiFabFileFullPrefix(lev, checkpointname, "Level_", "SlmPrecip"));
             }
-            ParallelDescriptor::Barrier();
-            lsm.Write_Lsm_Restart(lev, LsmRestartDir);
+
+            if (solverChoice.lsm_type == LandSurfaceType::SLM) {
+                lsm.WriteCheckpoint(lev, checkpointname);
+            } else if (solverChoice.lsm_type == LandSurfaceType::NOAHMP) {
+                // Write the full LSM prognostic state (e.g. NoahMP soil/snow/canopy)
+                // to chk*/noahmp_restart/Level_<lev>.nc so a restart reproduces a
+                // cold-start trajectory bitwise (issue #3255). The LSM model writes
+                // its blocks collectively; no-op for models without such state.
+                // Create the subdir on rank 0 and barrier before the collective open
+                // so no rank races ahead of the directory existing.
+                std::string LsmRestartDir(checkpointname + "/noahmp_restart");
+                if (ParallelDescriptor::IOProcessor()) {
+                    amrex::UtilCreateDirectory(LsmRestartDir, 0755);
+                }
+                ParallelDescriptor::Barrier();
+                lsm.Write_Lsm_Restart(lev, LsmRestartDir);
+            }
         }
 
         // Write the radiation heating rates
@@ -453,40 +624,56 @@ ERF::WriteCheckpointFile () const
         }
 #endif
 
-        if (m_SurfaceLayer)  {
-            amrex::Print() << "Writing SurfaceLayer variables at level " << lev << std::endl;
+        // Count number of surface layer boundaries to determine face prefix
+        int n_faces = 0;
+        for (OrientationIter oit; oit; ++oit) {
+            Orientation ori = oit();
+            if (phys_bc_type[ori] == ERF_BC::surface_layer) {
+                n_faces += 1;
+            }
+        }
 
-            // These MultiFabs live on a 2D BoxArray for planar terrain but on the full 3D
-            // BoxArray (with a z ghost cell) for EB terrain, so we write each one on its own
-            // BoxArray -- copying into a hard-wired 2D MultiFab would silently drop everything
-            // above k=0 for EB (issue #3560)
-            auto write_sl_var = [&] (MultiFab* src, const std::string& name) {
-                VisMF::Write(*src, MultiFabFileFullPrefix(lev, checkpointname, "Level_", name));
-            };
+        for (OrientationIter oit; oit; ++oit) {
+            Orientation ori = oit();
+            if (m_SurfaceLayer[ori])  {
+                amrex::Print() << "Writing SurfaceLayer variables at level " << lev << " for face " << ori << std::endl;
+                std::string face = "_" + std::to_string(ori);
+                // if we only use a single surface layer, don't add the face prefix
+                if (n_faces == 1 && static_cast<int>(ori) == Orientation::zlo()) {
+                    face = "";
+                }
 
-            write_sl_var(m_SurfaceLayer->get_u_star(lev), "Ustar");
-            write_sl_var(m_SurfaceLayer->get_w_star(lev), "Wstar");
-            write_sl_var(m_SurfaceLayer->get_t_star(lev), "Tstar");
-            write_sl_var(m_SurfaceLayer->get_q_star(lev), "Qstar");
-            write_sl_var(m_SurfaceLayer->get_olen(lev)  , "Olen");
-            write_sl_var(m_SurfaceLayer->get_q_surf(lev), "Qsurf");
-            write_sl_var(m_SurfaceLayer->get_pblh(lev)  , "PBLH");
-            write_sl_var(m_SurfaceLayer->get_z0(lev)    , "Z0");
-            write_sl_var(m_SurfaceLayer->get_t_surf(lev), "Tsurf");
+                // These MultiFabs live on a 2D BoxArray for planar terrain but on the full 3D
+                // BoxArray (with a z ghost cell) for EB terrain, so we write each one on its own
+                // BoxArray -- copying into a hard-wired 2D MultiFab would silently drop everything
+                // above k=0 for EB (issue #3560)
+                auto write_sl_var = [&] (MultiFab* src, const std::string& name) {
+                    VisMF::Write(*src, MultiFabFileFullPrefix(lev, checkpointname, "Level_", name));
+                };
 
-            // The exponentially filtered averages behind erf.most.time_average.  The
-            // region policy carries the filter state in these MultiFabs (the plane and
-            // EB policies carry it in the plane averages written to the
-            // most_time_average file above), so without them the filter history is lost
-            // across a restart and the first update falls back to the instantaneous
-            // average.
-            //
-            // NOTE: we only write these once the filter has been initialized; before
-            //       that they hold bogus_large_value, which must never be blended in.
-            if (m_SurfaceLayer->mac_avg_is_initialized(lev)) {
-                for (int iavg(0); iavg < m_SurfaceLayer->get_num_mac_avg(); ++iavg) {
-                    write_sl_var(m_SurfaceLayer->get_mac_avg_ptr(lev,iavg),
-                                 "MOSTAvg" + std::to_string(iavg));
+                write_sl_var(m_SurfaceLayer[ori]->get_u_star(lev), "Ustar" + face);
+                write_sl_var(m_SurfaceLayer[ori]->get_w_star(lev), "Wstar" + face);
+                write_sl_var(m_SurfaceLayer[ori]->get_t_star(lev), "Tstar" + face);
+                write_sl_var(m_SurfaceLayer[ori]->get_q_star(lev), "Qstar" + face);
+                write_sl_var(m_SurfaceLayer[ori]->get_olen(lev)  , "Olen"  + face);
+                write_sl_var(m_SurfaceLayer[ori]->get_q_surf(lev), "Qsurf" + face);
+                write_sl_var(m_SurfaceLayer[ori]->get_t_surf(lev), "Tsurf" + face);
+                write_sl_var(m_SurfaceLayer[ori]->get_pblh(lev)  , "PBLH"  + face);
+                write_sl_var(m_SurfaceLayer[ori]->get_z0(lev)    , "Z0"    + face);
+                // The exponentially filtered averages behind erf.most.time_average. The
+                // region policy carries the filter state in these MultiFabs (the plane and
+                // EB policies carry it in the plane averages written to the
+                // most_time_average file above), so without them the filter history is lost
+                // across a restart and the first update falls back to the instantaneous
+                // average.
+                //
+                // NOTE: we only write these once the filter has been initialized; before
+                //       that they hold bogus_large_value, which must never be blended in.
+                if (m_SurfaceLayer[ori]->mac_avg_is_initialized(lev)) {
+                    for (int iavg(0); iavg < m_SurfaceLayer[ori]->get_num_mac_avg(); ++iavg) {
+                        write_sl_var(m_SurfaceLayer[ori]->get_mac_avg_ptr(lev,iavg),
+                                     "MOSTAvg" + std::to_string(iavg) + face);
+                    }
                 }
             }
         }
@@ -529,6 +716,29 @@ ERF::WriteCheckpointFile () const
                 }
                 VisMF::Write(lmask_at_t, MultiFabFileFullPrefix(lev, checkpointname, "Level_",
                                                               "LMASK_" + std::to_string(nt)));
+
+                if (land_type_lev[lev][nt]) {
+                    MultiFab ltype_at_t = amrex::ToMultiFab(*land_type_lev[lev][nt]);
+                    VisMF::Write(ltype_at_t, MultiFabFileFullPrefix(lev, checkpointname, "Level_",
+                                                                    "LANDTYPE_" + std::to_string(nt)));
+                }
+
+                if (soil_type_lev[lev][nt]) {
+                    MultiFab stype_at_t = amrex::ToMultiFab(*soil_type_lev[lev][nt].get());
+                    VisMF::Write(stype_at_t, MultiFabFileFullPrefix(lev, checkpointname, "Level_",
+                                                                    "SOILTYPE_" + std::to_string(nt)));
+                }
+            }
+        }
+
+        if (urb_frac_lev[lev][0]) {
+            int ntimes = 1;
+            ng = vars_new[lev][Vars::cons].nGrowVect(); ng[2]=0;
+            MultiFab urbfrac_at_t(ba2d[lev],dmap[lev],1,ng);
+            for (int nt(0); nt<ntimes; ++nt) {
+                MultiFab::Copy(urbfrac_at_t,*urb_frac_lev[lev][nt],0,0,1,ng);
+                VisMF::Write(urbfrac_at_t, MultiFabFileFullPrefix(lev, checkpointname, "Level_",
+                                                                  "URBAN_FRAC_" + std::to_string(nt)));
             }
         }
 
@@ -604,6 +814,12 @@ ERF::WriteCheckpointFile () const
         if (const amrex::MultiFab* hf = m_fire_layer->get_heat_flux()) {
             VisMF::Write(*hf, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireHeatFlux"));
         }
+        // The suppression hold test reads the previous step's flame length before
+        // the step recomputes it; without it the first restarted step tested
+        // every line against zero flames and held lines that should have failed.
+        if (const amrex::MultiFab* fl = m_fire_layer->get_flame_length()) {
+            VisMF::Write(*fl, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireFlameLength"));
+        }
         if (const amrex::MultiFab* fuel = m_fire_layer->get_fuel_load()) {
             amrex::Print() << "Writing fire fuel load to checkpoint" << std::endl;
             VisMF::Write(*fuel, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireFuelLoad"));
@@ -642,6 +858,13 @@ ERF::WriteCheckpointFile () const
         if (const amrex::MultiFab* ql = m_fire_layer->get_Q_lat_atm_prev()) {
             VisMF::Write(*ql, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireQLatAtmPrev"));
         }
+        // The surface precipitation accumulation the rain per column is measured from
+        // (erf.fire.precip_source = atmosphere); without it the first restarted step
+        // would read the whole accumulation since t = 0 as one step's rain.
+        if (const amrex::MultiFab* pa = m_fire_layer->get_precip_accum_prev()) {
+            amrex::Print() << "Writing fire precipitation snapshot to checkpoint" << std::endl;
+            VisMF::Write(*pa, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FirePrecipAccumPrev"));
+        }
         // Exposure accumulators; all null unless erf.fire.exposure.enable.
         if (const amrex::MultiFab* hl = m_fire_layer->get_heat_load()) {
             amrex::Print() << "Writing fire exposure accumulators to checkpoint" << std::endl;
@@ -653,10 +876,17 @@ ERF::WriteCheckpointFile () const
         if (const amrex::MultiFab* em = m_fire_layer->get_ember_landings()) {
             VisMF::Write(*em, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireEmberLandings"));
         }
+        // Structure ignition state (state, ignition time, time above the
+        // intensity threshold, cause); null unless erf.fire.structures.ignition.enable.
+        if (const amrex::MultiFab* ss = m_fire_layer->get_structure_state()) {
+            amrex::Print() << "Writing fire structure ignition state to checkpoint" << std::endl;
+            VisMF::Write(*ss, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireStructureState"));
+        }
         // State that carries across steps but was not written before: the spotting
         // diagnostics, which are recomputed only every spotting interval and held
         // in between; the temporal acceleration state; and the crown ROS carried
-        // between steps with the crown fraction burned.
+        // between steps. The crown fraction burned is a per-step diagnostic,
+        // written only so the restart plotfile shows it.
         if (const amrex::MultiFab* ad = m_fire_layer->get_albini_data()) {
             VisMF::Write(*ad, MultiFabFileFullPrefix(fire_lev, checkpointname, "Level_", "FireAlbiniData"));
         }
@@ -682,11 +912,20 @@ ERF::WriteCheckpointFile () const
               // restart neither repeats the warning nor forgets that it fired
               << "edge_contact_time " << m_fire_layer->get_edge_contact_time() << "\n"
               << "edge_reach_checked " << (m_fire_layer->get_edge_reach_checked() ? 1 : 0) << "\n"
+              // the lower end of the next ignition window (start of the last step), so
+              // scheduled ignitions and the timed perimeter keep the (prev, current]
+              // window across the restart instead of the dt-reconstructed one
+              << "prev_window_end " << m_fire_layer->get_prev_window_end() << "\n"
               // where the fire grid is: its level and the lower corner of its region in
               // that level's index space, which a restart must reproduce
               << "anchor_level " << fire_lev << "\n"
               << "fire_region_lo_x " << m_fire_layer->get_fire_grid().atm_lo[0] << "\n"
               << "fire_region_lo_y " << m_fire_layer->get_fire_grid().atm_lo[1] << "\n";
+        }
+        // Suppression fields, per-line built length, applied-id set and the
+        // active actions (erf.fire.suppression.enable).
+        if (const FireSuppression* sp = m_fire_layer->get_suppression()) {
+            sp->write_checkpoint(checkpointname, fire_lev);
         }
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "[FIRE] Fire state written to checkpoint " << checkpointname << "\n";
@@ -713,6 +952,11 @@ ERF::WriteCheckpointFile () const
         }
     }
 #endif
+
+    if (m_SurfaceModel) {
+        m_SurfaceModel->WriteCheckpoint(checkpointname);
+    }
+
     // Write zlevels to its own directory and read it as well, similar to bdy data
     if (ParallelDescriptor::IOProcessor()) {
         std::string ZLevelsFileName(checkpointname + "/zlevels");
@@ -798,6 +1042,87 @@ ERF::WriteCheckpointFile () const
     }
 }
 
+//
+// Read one checkpoint MultiFab and deposit it into dst, which may live on different grids.
+// See the declaration in ERF.H for why the source's ghost cells are withheld by default.
+//
+void
+ERF::read_checkpoint_mf (MultiFab& dst,
+                         const std::string& mf_name,
+                         int lev,
+                         int scomp, int dcomp, int ncomp,
+                         const IntVect& dst_ghosts,
+                         bool src_ghosts)
+{
+    //
+    // Undefined on purpose: VisMF::Read defines it on the BoxArray the file records, which is
+    // the decomposition the checkpoint was written with and need not be this run's.
+    //
+    MultiFab src;
+    VisMF::Read(src, mf_name);
+
+    //
+    // A file written with fewer ghost cells than the destination holds cannot fill more than
+    // it has, and the destination cannot take more than it holds.
+    //
+    const IntVect ng_dst = amrex::min(dst_ghosts, dst.nGrowVect());
+
+    //
+    // The overwhelmingly common case: this level's grids ARE the grids the checkpoint was
+    // written on, so nothing has to move between boxes. Copy box to box, exactly as the
+    // reader did before the grids could differ, so that an ordinary restart stays
+    // byte-for-byte what it always was -- no periodic images, and no overlapping sources to
+    // be ambiguous about.
+    //
+    // The distribution still has to be matched: VisMF::Read gives the MultiFab it defines a
+    // DistributionMapping of its own, which is not this run's even when the BoxArray is.
+    // Redistribute is the box-to-box move for exactly that case.
+    //
+    if (src.boxArray() == dst.boxArray())
+    {
+        const IntVect ng_copy = src_ghosts ? amrex::min(ng_dst, src.nGrowVect()) : IntVect(0);
+
+        if (src.DistributionMap() == dst.DistributionMap()) {
+            MultiFab::Copy(dst, src, scomp, dcomp, ncomp, ng_copy);
+        } else {
+            MultiFab aligned(src.boxArray(), dst.DistributionMap(), src.nComp(), src.nGrowVect());
+            aligned.Redistribute(src, 0, 0, src.nComp(), src.nGrowVect());
+            MultiFab::Copy(dst, aligned, scomp, dcomp, ncomp, ng_copy);
+        }
+        return;
+    }
+
+    if (src_ghosts) {
+        //
+        // Two passes, as the MOST reader below does, and for the same reason. The first pass
+        // offers the file's halo so that destination ghost cells OUTSIDE the domain -- which
+        // no valid cell can reach -- get the values the checkpoint recorded for them. But a
+        // file's halo is not guaranteed to agree with its valid data, and offering it alone
+        // would let a stale ghost cell land in a valid cell through a box overlap or a
+        // periodic image, with no ordering guarantee between overlapping sources. So the
+        // second pass copies the valid cells on top, and they win wherever they reach.
+        //
+        const IntVect ng_src = amrex::min(ng_dst, src.nGrowVect());
+        dst.ParallelCopy(src, scomp, dcomp, ncomp, ng_src,     ng_dst, geom[lev].periodicity());
+        dst.ParallelCopy(src, scomp, dcomp, ncomp, IntVect(0), ng_dst, geom[lev].periodicity());
+    } else {
+        dst.ParallelCopy(src, scomp, dcomp, ncomp, IntVect(0), ng_dst, geom[lev].periodicity());
+    }
+}
+
+bool
+ERF::read_checkpoint_mf_if_present (MultiFab& dst,
+                                    const std::string& mf_name,
+                                    int lev,
+                                    int scomp, int dcomp, int ncomp,
+                                    const IntVect& dst_ghosts,
+                                    bool src_ghosts)
+{
+    if (!amrex::FileExists(mf_name + "_H")) { return false; }
+    read_checkpoint_mf(dst, mf_name, lev, scomp, dcomp, ncomp, dst_ghosts, src_ghosts);
+    return true;
+}
+
 /**
  * ERF function for reading data from a checkpoint file during restart.
  */
@@ -805,6 +1130,19 @@ void
 ERF::ReadCheckpointFile ()
 {
     Print() << "Restart from native checkpoint " << restart_chkfile << "\n";
+
+    if (sbm_state_manager) {
+        const std::string schema_file = restart_chkfile + "/SBM_Schema";
+        if (!FileExists(schema_file)) {
+            Abort("SBM restart is missing required exact-schema file '" + schema_file + "'");
+        }
+        Vector<char> schema_chars;
+        ParallelDescriptor::ReadAndBcastFile(schema_file, schema_chars);
+        const std::string persisted_schema(schema_chars.dataPtr());
+        if (!erf_sbm::restart_schema_matches(sbm_state_manager->layout(), persisted_schema)) {
+            Abort("SBM restart schema does not exactly match the active spectral layout and M3 transport identity");
+        }
+    }
 
     const auto provenance_result =
         erf_provenance::read_job_info_file(restart_chkfile + "/job_info");
@@ -854,6 +1192,8 @@ ERF::ReadCheckpointFile ()
     // read in finest_level
     is >> finest_level;
     GotoNextLine(is);
+
+    validate_surface_temperature_contract(restart_chkfile, finest_level);
 
     // read the number of components
     // for each variable we store
@@ -947,6 +1287,28 @@ ERF::ReadCheckpointFile ()
         } // zlevels file exists
     }
 
+    //
+    // Decide the level-0 grids BEFORE building the levels, so the checkpoint is read straight
+    // onto the grids this run will use.
+    //
+    // The alternative -- building the levels on the checkpoint's grids, reading onto those and
+    // re-making level 0 afterwards -- is what ERF::restart used to do, and it loses everything
+    // the checkpoint carries that RemakeLevel does not explicitly retain, because RemakeLevel
+    // rebuilds the level through init_stuff and init_stuff knows nothing about a checkpoint
+    // (issue 4225). Landing the data on the final grids removes that whole class of bug: there
+    // is no list of fields to keep in step with what the checkpoint holds, because every field
+    // is simply read onto the grids it will be used on.
+    //
+    // The level-0 grids move for two reasons: because the user asked
+    // (erf.regrid_level_0_on_restart), or because the checkpoint has fewer level-0 boxes than
+    // this run has ranks. A fresh start gives level 0 exactly NProcs() boxes, so the second
+    // case is "continued on more ranks than it was written with" -- which is a supported way
+    // to restart, not an accident.
+    //
+    regrid_level_0_on_restart_in_effect = false;
+    ba_chkfile.resize(finest_level+1);
+    dm_chkfile.resize(finest_level+1);
+
     for (int lev = 0; lev <= finest_level; ++lev) {
         // read in level 'lev' BoxArray from Header
         BoxArray ba;
@@ -956,7 +1318,95 @@ ERF::ReadCheckpointFile ()
         // create a distribution mapping
         DistributionMapping dm { ba, ParallelDescriptor::NProcs() };
 
-        MakeNewLevelFromScratch (lev, static_cast<Real>(t_new[lev]), ba, dm);
+        //
+        // The grids the checkpoint was written on. Every read below happens on these and is
+        // then redistributed onto the grids the level was actually built with, which for
+        // lev > 0 and for an unchanged level 0 are the same thing and the copy is local.
+        //
+        ba_chkfile[lev] = ba;
+        dm_chkfile[lev] = dm;
+
+        BoxArray            ba_target = ba;
+        DistributionMapping dm_target = dm;
+
+        if (lev == 0 &&
+            (regrid_level_0_on_restart || ba.size() < ParallelDescriptor::NProcs()))
+        {
+            //
+            // Coarsening before we split the grids ensures that each resulting
+            // grid will have an even number of cells in each direction.
+            //
+            BoxArray new_ba(amrex::coarsen(Geom(0).Domain(),2));
+            //
+            // Now split up into list of grids within max_grid_size[0] limit.
+            //
+            new_ba.maxSize(max_grid_size[0]/2);
+            //
+            // Now refine these boxes back to level zero
+            //
+            new_ba.refine(2);
+
+            if (refine_grid_layout) {
+                ChopGrids(0, new_ba, ParallelDescriptor::NProcs());
+            }
+
+            if (new_ba != ba) {
+                ba_target = new_ba;
+                dm_target = DistributionMapping(new_ba);
+                regrid_level_0_on_restart_in_effect = true;
+                //
+                // Not behind verbose: the grids a run continues on are not the grids it was
+                // written on, which is worth one line whether or not anyone asked for it --
+                // particularly on the automatic branch, where nobody did.
+                //
+                Print() << "RESTART: reading level 0 onto new grids -- the checkpoint has "
+                        << ba.size() << " boxes at level 0 and this run uses "
+                        << new_ba.size() << std::endl;
+            }
+        }
+
+        MakeNewLevelFromScratch (lev, static_cast<Real>(t_new[lev]), ba_target, dm_target);
+    }
+
+    //
+    // Refuse, before anything is read, the combinations whose readers have not yet been
+    // taught to redistribute. Those still read straight onto the grids the run uses, so with
+    // level 0 moved they would trip VisMF's BoxArray check part-way through the restart --
+    // an assertion in the middle of I/O rather than a statement of what is not supported.
+    //
+    // Each of these is a component that does its own checkpoint I/O rather than going through
+    // the loop below; converting them is the remaining work on issue 4225.
+    //
+    if (regrid_level_0_on_restart_in_effect) {
+        Vector<std::string> unsupported;
+
+        if (solverChoice.lsm_type != LandSurfaceType::None) {
+            unsupported.push_back("a land-surface model (its mapped fields, and SLM's canopy "
+                                  "and skin state, are still read onto the run's grids)");
+        }
+        if (solverChoice.rad_type == RadiationType::TwoStream) {
+            unsupported.push_back("two-stream radiation (its force-restore surface state is "
+                                  "still read onto the run's grids)");
+        }
+        if (sbm_state_manager) {
+            unsupported.push_back("spectral bin microphysics (its spectrum is still read onto "
+                                  "the run's grids)");
+        }
+
+        if (!unsupported.empty()) {
+            std::string msg("Restarting with the level-0 grids re-made -- which happens when "
+                            "erf.regrid_level_0_on_restart is set, or when the restart runs on "
+                            "more ranks than the checkpoint has level-0 boxes -- is not yet "
+                            "supported together with:");
+            for (const auto& item : unsupported) { msg += "\n  - " + item; }
+            msg += "\n\nRestart on the same number of ranks the checkpoint was written with, "
+                   "so that level 0 keeps its grids";
+            if (regrid_level_0_on_restart) {
+                msg += ", or drop erf.regrid_level_0_on_restart";
+            }
+            msg += ". See ERF issue 4225.";
+            Abort(msg);
+        }
     }
 
     // read in array of t_avg_cnt
@@ -1009,8 +1459,13 @@ ERF::ReadCheckpointFile ()
                 Abort("Invalid interval-mean checkpoint metadata in '" + metadata_name +
                       "': " + metadata_error);
             }
+            //
+            // Validate against the grids the checkpoint was WRITTEN on, not the ones this run
+            // will use: level 0's may have been re-decomposed when the levels were built, and
+            // the metadata records what was written.
+            //
             const std::string validation_error = erf_interval_means::validate_metadata(
-                parsed_metadata, finest_level + 1, 10, grids);
+                parsed_metadata, finest_level + 1, 10, ba_chkfile);
             if (!validation_error.empty()) {
                 Abort(validation_error + " in '" + metadata_name + "'");
             }
@@ -1026,7 +1481,8 @@ ERF::ReadCheckpointFile ()
                           std::to_string(lev));
                 }
                 AMREX_ALWAYS_ASSERT(interval_means[lev] != nullptr);
-                VisMF::Read(*interval_means[lev], mf_name);
+                read_checkpoint_mf(*interval_means[lev], mf_name, lev,
+                                   0, 0, interval_means[lev]->nComp(), IntVect(0));
                 t_mean_cnt[lev] = level_metadata.accumulation_count;
             }
         }
@@ -1036,8 +1492,35 @@ ERF::ReadCheckpointFile ()
     // NOTE: Data is written over ncomp, so check that we match the header file
     int ncomp_cons = vars_new[0][Vars::cons].nComp();
 
+    if (sbm_state_manager) {
+        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(chk_ncomp_cons == ncomp_cons,
+            "SBM restart requires an exact compact core component count");
+    }
+
+    // The passive-scalar block of the writer (ScalarLayout, written since
+    // 2026-10): a different NSCALARS means a build with other fire/dust modules,
+    // whose components would be read shifted.
+    {
+        std::ifstream layout(restart_chkfile + "/ScalarLayout");
+        std::string key; int nsc = -1;
+        if (layout >> key >> nsc && key == "nscalars") {
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(nsc == NSCALARS,
+                ("Checkpoint " + restart_chkfile + " was written with " + std::to_string(nsc)
+                 + " passive scalars but this build has " + std::to_string(NSCALARS)
+                 + " (ERF_ENABLE_FIRE adds the smoke scalar, ERF_ENABLE_DUST the dust scalar);"
+                 " restart with a build configured like the one that wrote it").c_str());
+        } else if (chk_ncomp_cons != ncomp_cons) {
+            amrex::Print() << "WARNING: checkpoint " << restart_chkfile << " has " << chk_ncomp_cons
+                           << " conserved components, this build " << ncomp_cons
+                           << "; it records no scalar layout, so a fire/dust build mismatch cannot be told"
+                           << " apart from the QKE backward-compatibility case\n";
+        }
+    }
+
     // NOTE: QKE was removed so this is for backward compatibility
-    AMREX_ASSERT((chk_ncomp_cons==ncomp_cons) || ((chk_ncomp_cons-1)==ncomp_cons));
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE((chk_ncomp_cons==ncomp_cons) || ((chk_ncomp_cons-1)==ncomp_cons),
+        ("Checkpoint has " + std::to_string(chk_ncomp_cons) + " conserved components, this build "
+         + std::to_string(ncomp_cons) + ": was it written by a build with other modules (fire, dust, moisture)?").c_str());
     //
     // See if we have a written separate file that tells how many components and how many ghost cells
     // we have of the base state
@@ -1067,65 +1550,90 @@ ERF::ReadCheckpointFile ()
     {
         // NOTE: For backward compatibility (chk file has QKE)
         if ((chk_ncomp_cons-1)==ncomp_cons) {
-            MultiFab cons(grids[lev],dmap[lev],chk_ncomp_cons,0);
+            MultiFab cons(ba_chkfile[lev],dm_chkfile[lev],chk_ncomp_cons,0);
             VisMF::Read(cons, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "Cell"));
 
             // Copy up to RhoKE_comp
-            MultiFab::Copy(vars_new[lev][Vars::cons],cons,0,0,(RhoKE_comp+1),0);
+            vars_new[lev][Vars::cons].ParallelCopy(cons,0,0,(RhoKE_comp+1),IntVect(0),IntVect(0));
 
             // Only if we have a PBL model do we need to copy QKE is src to KE in dst
             if ( (solverChoice.turbChoice[lev].pbl_type == PBLType::MYNN25) ||
                  (solverChoice.turbChoice[lev].pbl_type == PBLType::MYNNEDMF) ) {
-                MultiFab::Copy(vars_new[lev][Vars::cons],cons,(RhoKE_comp+1),RhoKE_comp,1,0);
+                vars_new[lev][Vars::cons].ParallelCopy(cons,(RhoKE_comp+1),RhoKE_comp,1,IntVect(0),IntVect(0));
                 vars_new[lev][Vars::cons].mult(myhalf,RhoKE_comp,1,0);
             }
 
             // Copy other components
             int ncomp_remainder = ncomp_cons - (RhoKE_comp + 1);
-            MultiFab::Copy(vars_new[lev][Vars::cons],cons,(RhoKE_comp+2),(RhoKE_comp+1),ncomp_remainder,0);
+            vars_new[lev][Vars::cons].ParallelCopy(cons,(RhoKE_comp+2),(RhoKE_comp+1),ncomp_remainder,IntVect(0),IntVect(0));
 
             vars_new[lev][Vars::cons].setBndry(bogus_large_value);
         } else {
-            MultiFab cons(grids[lev],dmap[lev],ncomp_cons,0);
+            MultiFab cons(ba_chkfile[lev],dm_chkfile[lev],ncomp_cons,0);
             VisMF::Read(cons, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "Cell"));
-            MultiFab::Copy(vars_new[lev][Vars::cons],cons,0,0,ncomp_cons,0);
+            vars_new[lev][Vars::cons].ParallelCopy(cons,0,0,ncomp_cons,IntVect(0),IntVect(0));
             vars_new[lev][Vars::cons].setBndry(bogus_large_value);
         }
 
-        MultiFab xvel(convert(grids[lev],IntVect(1,0,0)),dmap[lev],1,0);
+        if (sbm_state_manager) {
+            const std::string spectrum_file =
+                MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "SBMSpectrum");
+            if (!FileExists(spectrum_file + "_H")) {
+                Abort("SBM restart is missing authoritative spectrum for level " + std::to_string(lev));
+            }
+            auto& spectrum = sbm_state_manager->state(lev);
+            VisMF::Read(spectrum, spectrum_file);
+            std::string state_diagnostic;
+            if (!erf_sbm::authoritative_state_admissible(
+                    spectrum, sbm_state_manager->layout(), lev, &state_diagnostic)) {
+                Abort(state_diagnostic);
+            }
+            const int qc = solverChoice.moisture_indices.qc;
+            const int qr = solverChoice.moisture_indices.qr;
+            const erf_sbm::SBMBulkProjection projection(sbm_state_manager->layout());
+            if (!erf_sbm::restart_projection_matches(
+                    spectrum, vars_new[lev][Vars::cons], projection, qc, qr)) {
+                Abort("SBM restart compact qc/qr do not match the persisted authoritative spectrum");
+            }
+            // Compact fields are overwritten only after their persisted values
+            // have passed the consistency check above.
+            sbm_state_manager->project_to_core(lev, vars_new[lev][Vars::cons], qc, qr);
+        }
+
+        MultiFab xvel(convert(ba_chkfile[lev],IntVect(1,0,0)),dm_chkfile[lev],1,0);
         VisMF::Read(xvel, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "XFace"));
-        MultiFab::Copy(vars_new[lev][Vars::xvel],xvel,0,0,1,0);
+        vars_new[lev][Vars::xvel].ParallelCopy(xvel,0,0,1,IntVect(0),IntVect(0));
         vars_new[lev][Vars::xvel].setBndry(bogus_large_value);
 
-        MultiFab yvel(convert(grids[lev],IntVect(0,1,0)),dmap[lev],1,0);
+        MultiFab yvel(convert(ba_chkfile[lev],IntVect(0,1,0)),dm_chkfile[lev],1,0);
         VisMF::Read(yvel, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "YFace"));
-        MultiFab::Copy(vars_new[lev][Vars::yvel],yvel,0,0,1,0);
+        vars_new[lev][Vars::yvel].ParallelCopy(yvel,0,0,1,IntVect(0),IntVect(0));
         vars_new[lev][Vars::yvel].setBndry(bogus_large_value);
 
-        MultiFab zvel(convert(grids[lev],IntVect(0,0,1)),dmap[lev],1,0);
+        MultiFab zvel(convert(ba_chkfile[lev],IntVect(0,0,1)),dm_chkfile[lev],1,0);
         VisMF::Read(zvel, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "ZFace"));
-        MultiFab::Copy(vars_new[lev][Vars::zvel],zvel,0,0,1,0);
+        vars_new[lev][Vars::zvel].ParallelCopy(zvel,0,0,1,IntVect(0),IntVect(0));
         vars_new[lev][Vars::zvel].setBndry(bogus_large_value);
 
         if (solverChoice.anelastic[lev] == 1) {
-            MultiFab ppinc(grids[lev],dmap[lev],1,0);
+            MultiFab ppinc(ba_chkfile[lev],dm_chkfile[lev],1,0);
             VisMF::Read(ppinc, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "PP_Inc"));
-            MultiFab::Copy(pp_inc[lev],ppinc,0,0,1,0);
+            pp_inc[lev].ParallelCopy(ppinc,0,0,1,IntVect(0),IntVect(0));
             pp_inc[lev].FillBoundary(geom[lev].periodicity());
 
-            MultiFab gpx(convert(grids[lev],IntVect(1,0,0)),dmap[lev],1,0);
+            MultiFab gpx(convert(ba_chkfile[lev],IntVect(1,0,0)),dm_chkfile[lev],1,0);
             VisMF::Read(gpx, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "Gpx"));
-            MultiFab::Copy(gradp[lev][GpVars::gpx],gpx,0,0,1,0);
+            gradp[lev][GpVars::gpx].ParallelCopy(gpx,0,0,1,IntVect(0),IntVect(0));
             gradp[lev][GpVars::gpx].FillBoundary(geom[lev].periodicity());
 
-            MultiFab gpy(convert(grids[lev],IntVect(0,1,0)),dmap[lev],1,0);
+            MultiFab gpy(convert(ba_chkfile[lev],IntVect(0,1,0)),dm_chkfile[lev],1,0);
             VisMF::Read(gpy, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "Gpy"));
-            MultiFab::Copy(gradp[lev][GpVars::gpy],gpy,0,0,1,0);
+            gradp[lev][GpVars::gpy].ParallelCopy(gpy,0,0,1,IntVect(0),IntVect(0));
             gradp[lev][GpVars::gpy].FillBoundary(geom[lev].periodicity());
 
-            MultiFab gpz(convert(grids[lev],IntVect(0,0,1)),dmap[lev],1,0);
+            MultiFab gpz(convert(ba_chkfile[lev],IntVect(0,0,1)),dm_chkfile[lev],1,0);
             VisMF::Read(gpz, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "Gpz"));
-            MultiFab::Copy(gradp[lev][GpVars::gpz],gpz,0,0,1,0);
+            gradp[lev][GpVars::gpz].ParallelCopy(gpz,0,0,1,IntVect(0),IntVect(0));
             gradp[lev][GpVars::gpz].FillBoundary(geom[lev].periodicity());
         }
 
@@ -1148,9 +1656,9 @@ ERF::ReadCheckpointFile ()
                 const std::string name =
                     MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", tag);
                 if (amrex::FileExists(name + "_H")) {
-                    MultiFab tmp(convert(grids[lev],ixtype),dmap[lev],1,0);
+                    MultiFab tmp(convert(ba_chkfile[lev],ixtype),dm_chkfile[lev],1,0);
                     VisMF::Read(tmp, name);
-                    MultiFab::Copy(*dst,tmp,0,0,1,0);
+                    dst->ParallelCopy(tmp,0,0,1,IntVect(0),IntVect(0));
                     dst->FillBoundary(geom[lev].periodicity());
                     restored_any = true;
                 } else {
@@ -1184,8 +1692,9 @@ ERF::ReadCheckpointFile ()
             AMREX_ALWAYS_ASSERT(vel_t_avg[lev] != nullptr);
             const std::string vta_name =
                 MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "VelTimeAvg");
-            if (amrex::FileExists(vta_name + "_H")) {
-                VisMF::Read(*vel_t_avg[lev], vta_name);
+            if (read_checkpoint_mf_if_present(*vel_t_avg[lev], vta_name, lev,
+                                              0, 0, vel_t_avg[lev]->nComp(), IntVect(0))) {
+                // restored
             } else {
                 vel_t_avg[lev]->setVal(0.0);
                 t_avg_cnt[lev] = 0.0;
@@ -1196,10 +1705,14 @@ ERF::ReadCheckpointFile ()
 
         // The original base state only had 3 components and 1 ghost cell -- we read this
         // here to be consistent with the old style
-        MultiFab base(grids[lev],dmap[lev],ncomp_base_to_read,ng_base);
-        VisMF::Read(base, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "BaseState"));
-
-        MultiFab::Copy(base_state[lev],base,0,0,ncomp_base_to_read,ng_base);
+        //
+        // src_ghosts: the base state is written WITH its halo and FillBoundary'd before the
+        // write, so those cells are real data rather than the stale values a state array's
+        // halo holds. The exterior halo in particular cannot be rebuilt from valid cells.
+        //
+        read_checkpoint_mf(base_state[lev],
+                           MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "BaseState"),
+                           lev, 0, 0, ncomp_base_to_read, ng_base, /*src_ghosts=*/true);
 
         // Create theta0 from p0, rh0
         if (ncomp_base_to_read < 4) {
@@ -1232,21 +1745,51 @@ ERF::ReadCheckpointFile ()
 
         if (SolverChoice::mesh_type != MeshType::ConstantDz)  {
             // Note that we also read the ghost cells of z_phys_nd
+            //
+            // src_ghosts: the terrain heights are written with their halo and the halo is
+            // meaningful -- below the ground and outside the lateral boundaries it is what
+            // make_terrain_fitted_coords put there, and nothing downstream rebuilds it from
+            // the valid cells. Boxes must agree about those cells or a refined level, which
+            // interpolates from them, depends on the decomposition
+            // (see Terrain2Lev_Hill_BoxParity).
+            //
             IntVect ng = z_phys_nd[lev]->nGrowVect();
-            MultiFab z_height(convert(grids[lev],IntVect(1,1,1)),dmap[lev],1,ng);
-            VisMF::Read(z_height, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "Z_Phys_nd"));
-            MultiFab::Copy(*z_phys_nd[lev],z_height,0,0,1,ng);
+            read_checkpoint_mf(*z_phys_nd[lev],
+                               MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "Z_Phys_nd"),
+                               lev, 0, 0, 1, ng, /*src_ghosts=*/true);
             update_terrain_arrays(lev);
-
-            // Compute the min dz and pass to the micro model
-            Real dzmin = get_dzmin_terrain(*z_phys_nd[lev]);
-            micro->Set_dzmin(lev, dzmin);
 
 #if 0
             if ( (solverChoice.init_type != InitType::WRFInput) && (solverChoice.init_type != InitType::Metgrid) ) {
                 check_mesh_type(lev);
             }
 #endif
+        }
+
+        // Level creation may initially see placeholder metric fields. Rebuild
+        // M3's cached cell measure only after this level's
+        // checkpoint geometry and terrain arrays have been restored.
+        if (sbm_transport) {
+            AMREX_ALWAYS_ASSERT(sbm_transport->is_defined(lev));
+            AMREX_ALWAYS_ASSERT(detJ_cc[lev] != nullptr);
+            AMREX_ALWAYS_ASSERT(mapfac[lev][MapFacType::m_x] != nullptr);
+            AMREX_ALWAYS_ASSERT(mapfac[lev][MapFacType::m_y] != nullptr);
+            std::string diagnostic;
+            if (!sbm_transport->rebuild_static_measure(
+                    lev, *detJ_cc[lev], *mapfac[lev][MapFacType::m_x],
+                    *mapfac[lev][MapFacType::m_y], diagnostic)) {
+                amrex::Abort("SBM M3 restart mapped measure: " + diagnostic);
+            }
+        }
+
+        // The min dz the microphysics sizes its sedimentation substeps with, for
+        // every mesh type as init_zphys does on a fresh start. Set only on fitted
+        // meshes before, so a restart on a constant-dz mesh left Kessler's (and
+        // SAM's, Morrison's) dzmin uninitialised and the substep count unbounded:
+        // the first restarted step of a raining run never finished.
+        {
+            Real dzmin = get_dzmin_terrain(*z_phys_nd[lev]);
+            micro->Set_dzmin(lev, dzmin);
         }
 
         // Read in the moisture model restart variables
@@ -1257,9 +1800,9 @@ ERF::ReadCheckpointFile ()
         for (int var = 0; var < qmoist_nvar; var++) {
             const int ncomp  = 1;
             IntVect ng_moist = qmoist[lev][qmoist_indices[var]]->nGrowVect();
-            MultiFab moist_vars(grids[lev],dmap[lev],ncomp,ng_moist);
-            VisMF::Read(moist_vars, amrex::MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", qmoist_names[var]));
-            MultiFab::Copy(*(qmoist[lev][qmoist_indices[var]]),moist_vars,0,0,ncomp,ng_moist);
+            read_checkpoint_mf(*(qmoist[lev][qmoist_indices[var]]),
+                               amrex::MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", qmoist_names[var]),
+                               lev, 0, 0, ncomp, ng_moist, /*src_ghosts=*/true);
         }
 
 #if defined(ERF_USE_WINDFARM)
@@ -1267,9 +1810,9 @@ ERF::ReadCheckpointFile ()
            solverChoice.windfarm_type == WindFarmType::EWP or
            solverChoice.windfarm_type == WindFarmType::SimpleAD){
             IntVect ng = Nturb[lev].nGrowVect();
-            MultiFab mf_Nturb(grids[lev],dmap[lev],1,ng);
-            VisMF::Read(mf_Nturb, amrex::MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "NumTurb"));
-            MultiFab::Copy(Nturb[lev],mf_Nturb,0,0,1,ng);
+            read_checkpoint_mf(Nturb[lev],
+                               amrex::MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "NumTurb"),
+                               lev, 0, 0, 1, ng, /*src_ghosts=*/true);
         }
 #endif
 
@@ -1294,6 +1837,37 @@ ERF::ReadCheckpointFile ()
                 VisMF::Read(lsm_vars, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "LsmFlux" + std::to_string(iflux)));
                 MultiFab::Copy(*(lsm_flux[lev][iflux]),lsm_vars,0,0,nvar,ng);
             }
+
+            if (solverChoice.lsm_type == LandSurfaceType::SLM) {
+                const std::string precip_file =
+                    MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "SlmPrecip");
+                if (amrex::FileExists(precip_file + "_H")) {
+                    VisMF::Read(*precip[lev], precip_file);
+                } else {
+                    amrex::Warning("Checkpoint has no SLM precipitation baseline; "
+                                   "seeding it from the cumulative precipitation field");
+                    precip[lev]->setVal(0.0);
+                    const auto precip_sources = micro
+                        ? micro->Get_Surface_Precip_Accumulation_Ptrs(lev)
+                        : SurfacePrecipAccumulationSources{};
+                    const bool use_total = surface_precip_has_total_source(precip_sources);
+                    for (MFIter mfi(*precip[lev], TileNoZ()); mfi.isValid(); ++mfi) {
+                        const Box& box2d = mfi.tilebox();
+                        auto precip_arr = precip[lev]->array(mfi);
+                        const MultiFab* source = use_total ? precip_sources.total.accum
+                                                           : precip_sources.rain.accum;
+                        auto source_arr = source ? source->const_array(mfi) : Array4<const Real>{};
+                        const Real factor = use_total ? precip_sources.total.native_to_kg_m2
+                                                      : precip_sources.rain.native_to_kg_m2;
+                        ParallelFor(box2d, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                        {
+                            precip_arr(i,j,k) = source_arr ? source_arr(i,j,k) * factor : Real(0.0);
+                        });
+                    }
+                }
+            }
+
+            lsm.ReadCheckpoint(lev, restart_chkfile);
         }
 
         // Two-stream radiation: the force-restore surface state
@@ -1306,21 +1880,21 @@ ERF::ReadCheckpointFile ()
         if ((solverChoice.rad_type != RadiationType::None) && amrex::FileExists(RadFileName)) {
             amrex::Print() << "Reading radiation heating rates" << std::endl;
             int nrad = qheating_rates[lev]->nComp();
-            MultiFab mf_rad(grids[lev],dmap[lev],nrad,0);
-            VisMF::Read(mf_rad, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "Qrad"));
-            MultiFab::Copy(*qheating_rates[lev],mf_rad,0,0,nrad,0);
+            read_checkpoint_mf(*qheating_rates[lev],
+                               MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "Qrad"),
+                               lev, 0, 0, nrad, IntVect(0));
         }
 
         IntVect ng = mapfac[lev][MapFacType::m_x]->nGrowVect();
-        MultiFab mf_m(ba2d[lev],dmap[lev],1,ng);
-
+        //
+        // src_ghosts: the map factors are written with their halo and FillBoundary'd, and off
+        // the WRF pathway nothing recomputes them, so the file's halo is the only copy there is.
+        //
         std::string MapFacMFileName = MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "MapFactor_mx_H");
-        if (amrex::FileExists(MapFacMFileName)) {
-            VisMF::Read(mf_m, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "MapFactor_mx"));
-        } else {
-            VisMF::Read(mf_m, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "MapFactor_m"));
-        }
-        MultiFab::Copy(*mapfac[lev][MapFacType::m_x],mf_m,0,0,1,ng);
+        read_checkpoint_mf(*mapfac[lev][MapFacType::m_x],
+                           MultiFabFileFullPrefix(lev, restart_chkfile, "Level_",
+                                                  amrex::FileExists(MapFacMFileName) ? "MapFactor_mx" : "MapFactor_m"),
+                           lev, 0, 0, 1, ng, /*src_ghosts=*/true);
 
 #if 0
         if (MapFacType::m_x != MapFacType::m_y) {
@@ -1330,15 +1904,15 @@ ERF::ReadCheckpointFile ()
 #endif
 
         ng = mapfac[lev][MapFacType::u_x]->nGrowVect();
-        MultiFab mf_u(convert(ba2d[lev],IntVect(1,0,0)),dmap[lev],1,ng);
-
+        //
+        // src_ghosts: the map factors are written with their halo and FillBoundary'd, and off
+        // the WRF pathway nothing recomputes them, so the file's halo is the only copy there is.
+        //
         std::string MapFacUFileName = MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "MapFactor_ux_H");
-        if (amrex::FileExists(MapFacUFileName)) {
-            VisMF::Read(mf_u, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "MapFactor_ux"));
-        } else {
-            VisMF::Read(mf_u, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "MapFactor_u"));
-        }
-        MultiFab::Copy(*mapfac[lev][MapFacType::u_x],mf_u,0,0,1,ng);
+        read_checkpoint_mf(*mapfac[lev][MapFacType::u_x],
+                           MultiFabFileFullPrefix(lev, restart_chkfile, "Level_",
+                                                  amrex::FileExists(MapFacUFileName) ? "MapFactor_ux" : "MapFactor_u"),
+                           lev, 0, 0, 1, ng, /*src_ghosts=*/true);
 
 #if 0
         if (MapFacType::u_x != MapFacType::u_y) {
@@ -1348,15 +1922,15 @@ ERF::ReadCheckpointFile ()
 #endif
 
         ng = mapfac[lev][MapFacType::v_x]->nGrowVect();
-        MultiFab mf_v(convert(ba2d[lev],IntVect(0,1,0)),dmap[lev],1,ng);
-
+        //
+        // src_ghosts: the map factors are written with their halo and FillBoundary'd, and off
+        // the WRF pathway nothing recomputes them, so the file's halo is the only copy there is.
+        //
         std::string MapFacVFileName = MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "MapFactor_vx_H");
-        if (amrex::FileExists(MapFacVFileName)) {
-            VisMF::Read(mf_v, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "MapFactor_vx"));
-        } else {
-            VisMF::Read(mf_v, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "MapFactor_v"));
-        }
-        MultiFab::Copy(*mapfac[lev][MapFacType::v_x],mf_v,0,0,1,ng);
+        read_checkpoint_mf(*mapfac[lev][MapFacType::v_x],
+                           MultiFabFileFullPrefix(lev, restart_chkfile, "Level_",
+                                                  amrex::FileExists(MapFacVFileName) ? "MapFactor_vx" : "MapFactor_v"),
+                           lev, 0, 0, 1, ng, /*src_ghosts=*/true);
 
 #if 0
         if (MapFacType::v_x != MapFacType::v_y) {
@@ -1375,12 +1949,12 @@ ERF::ReadCheckpointFile ()
             amrex::Print() << "Reading SST data" << std::endl;
             int ntimes = 1;
             ng = vars_new[lev][Vars::cons].nGrowVect(); ng[2]=0;
-            MultiFab sst_at_t(ba2d[lev],dmap[lev],1,ng);
             sst_lev[lev][0] = std::make_unique<MultiFab>(ba2d[lev],dmap[lev],1,ng);
             for (int nt(0); nt<ntimes; ++nt) {
-                VisMF::Read(sst_at_t, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_",
-                                                             "SST_" + std::to_string(nt)));
-                MultiFab::Copy(*sst_lev[lev][nt],sst_at_t,0,0,1,ng);
+                read_checkpoint_mf(*sst_lev[lev][nt],
+                                   MultiFabFileFullPrefix(lev, restart_chkfile, "Level_",
+                                                          "SST_" + std::to_string(nt)),
+                                   lev, 0, 0, 1, ng, /*src_ghosts=*/true);
             }
         }
 
@@ -1391,12 +1965,12 @@ ERF::ReadCheckpointFile ()
             amrex::Print() << "Reading TSK data" << std::endl;
             int ntimes = 1;
             ng = vars_new[lev][Vars::cons].nGrowVect(); ng[2]=0;
-            MultiFab tsk_at_t(ba2d[lev],dmap[lev],1,ng);
             tsk_lev[lev][0] = std::make_unique<MultiFab>(ba2d[lev],dmap[lev],1,ng);
             for (int nt(0); nt<ntimes; ++nt) {
-                VisMF::Read(tsk_at_t, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_",
-                                                             "TSK_" + std::to_string(nt)));
-                MultiFab::Copy(*tsk_lev[lev][nt],tsk_at_t,0,0,1,ng);
+                read_checkpoint_mf(*tsk_lev[lev][nt],
+                                   MultiFabFileFullPrefix(lev, restart_chkfile, "Level_",
+                                                          "TSK_" + std::to_string(nt)),
+                                   lev, 0, 0, 1, ng, /*src_ghosts=*/true);
             }
         }
 
@@ -1409,8 +1983,15 @@ ERF::ReadCheckpointFile ()
             ng = vars_new[lev][Vars::cons].nGrowVect(); ng[2]=0;
             MultiFab lmask_at_t(ba2d[lev],dmap[lev],1,ng);
             for (int nt(0); nt<ntimes; ++nt) {
-                VisMF::Read(lmask_at_t, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_",
-                                                              "LMASK_" + std::to_string(nt)));
+                //
+                // Read onto the checkpoint's grids and redistribute into this temporary, which
+                // is on the grids the run uses, so the conversion loop below can iterate over
+                // source and destination together.
+                //
+                read_checkpoint_mf(lmask_at_t,
+                                   MultiFabFileFullPrefix(lev, restart_chkfile, "Level_",
+                                                          "LMASK_" + std::to_string(nt)),
+                                   lev, 0, 0, 1, ng, /*src_ghosts=*/true);
                 for (MFIter mfi(lmask_at_t); mfi.isValid(); ++mfi) {
                     const Box& bx = mfi.growntilebox();
                     Array4<int>  const& dst_arr = lmask_lev[lev][nt]->array(mfi);
@@ -1426,20 +2007,91 @@ ERF::ReadCheckpointFile ()
             lmask_lev[lev][0]->FillBoundary(geom[lev].periodicity());
         }
 
+        std::string LTypeFileName = MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "LANDTYPE_0_H");
+        if (amrex::FileExists(LTypeFileName))
+        {
+            amrex::Print() << "Reading LANDTYPE data" << std::endl;
+            int ntimes = 1;
+            ng = vars_new[lev][Vars::cons].nGrowVect(); ng[2]=0;
+            MultiFab ltype_at_t(ba2d[lev],dmap[lev],1,ng);
+            for (int nt(0); nt<ntimes; ++nt) {
+                //
+                // Read onto the checkpoint's grids and redistribute into this temporary, which
+                // is on the grids the run uses, so the conversion loop below can iterate over
+                // source and destination together.
+                //
+                read_checkpoint_mf(ltype_at_t,
+                                   MultiFabFileFullPrefix(lev, restart_chkfile, "Level_",
+                                                          "LANDTYPE_" + std::to_string(nt)),
+                                   lev, 0, 0, 1, ng, /*src_ghosts=*/true);
+                for (MFIter mfi(ltype_at_t); mfi.isValid(); ++mfi) {
+                    const Box& bx = mfi.growntilebox();
+                    Array4<int>  const& dst_arr = land_type_lev[lev][nt]->array(mfi);
+                    Array4<Real> const& src_arr = ltype_at_t.array(mfi);
+                    ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k)
+                    {
+                        dst_arr(i,j,k) = int(src_arr(i,j,k));
+                    });
+                }
+            }
+        }
+
+        std::string STypeFileName = MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "SOILTYPE_0_H");
+        if (amrex::FileExists(STypeFileName))
+        {
+            amrex::Print() << "Reading SOILTYPE data" << std::endl;
+            int ntimes = 1;
+            ng = vars_new[lev][Vars::cons].nGrowVect(); ng[2]=0;
+            MultiFab stype_at_t(ba2d[lev],dmap[lev],1,ng);
+            for (int nt(0); nt<ntimes; ++nt) {
+                //
+                // Read onto the checkpoint's grids and redistribute into this temporary, which
+                // is on the grids the run uses, so the conversion loop below can iterate over
+                // source and destination together.
+                //
+                read_checkpoint_mf(stype_at_t,
+                                   MultiFabFileFullPrefix(lev, restart_chkfile, "Level_",
+                                                          "SOILTYPE_" + std::to_string(nt)),
+                                   lev, 0, 0, 1, ng, /*src_ghosts=*/true);
+                for (MFIter mfi(stype_at_t); mfi.isValid(); ++mfi) {
+                    const Box& bx = mfi.growntilebox();
+                    Array4<int>  const& dst_arr = soil_type_lev[lev][nt]->array(mfi);
+                    Array4<Real> const& src_arr = stype_at_t.array(mfi);
+                    ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k)
+                    {
+                        dst_arr(i,j,k) = int(src_arr(i,j,k));
+                    });
+                }
+            }
+        }
+
+        std::string FirstUrbanFracFileName = MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "URBAN_FRAC_0_H");
+        if (amrex::FileExists(FirstUrbanFracFileName))
+        {
+            amrex::Print() << "Reading Urban fraction" << std::endl;
+            int ntimes = 1;
+            ng = vars_new[lev][Vars::cons].nGrowVect(); ng[2]=0;
+            urb_frac_lev[lev][0] = std::make_unique<MultiFab>(ba2d[lev],dmap[lev],1,ng);
+            for (int nt(0); nt<ntimes; ++nt) {
+                read_checkpoint_mf(*urb_frac_lev[lev][nt],
+                                   MultiFabFileFullPrefix(lev, restart_chkfile, "Level_",
+                                                          "URBAN_FRAC_" + std::to_string(nt)),
+                                   lev, 0, 0, 1, ng, /*src_ghosts=*/true);
+            }
+        }
+
         IntVect ngv = vars_new[lev][Vars::cons].nGrowVect(); ngv[2] = 0;
 
         // Read lat/lon if it exists
         std::string LatFileName = MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "LAT_H");
         if (amrex::FileExists(LatFileName)) {
             amrex::Print() << "Reading Lat/Lon variables" << std::endl;
-            MultiFab lat(ba2d[lev],dmap[lev],1,ngv);
-            MultiFab lon(ba2d[lev],dmap[lev],1,ngv);
-            VisMF::Read(lat, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "LAT"));
-            VisMF::Read(lon, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "LON"));
             lat_m[lev] = std::make_unique<MultiFab>(ba2d[lev],dmap[lev],1,ngv);
             lon_m[lev] = std::make_unique<MultiFab>(ba2d[lev],dmap[lev],1,ngv);
-            MultiFab::Copy(*lat_m[lev],lat,0,0,1,ngv);
-            MultiFab::Copy(*lon_m[lev],lon,0,0,1,ngv);
+            read_checkpoint_mf(*lat_m[lev], MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "LAT"),
+                               lev, 0, 0, 1, ngv, /*src_ghosts=*/true);
+            read_checkpoint_mf(*lon_m[lev], MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "LON"),
+                               lev, 0, 0, 1, ngv, /*src_ghosts=*/true);
         }
 
 #ifdef ERF_USE_NETCDF
@@ -1447,39 +2099,32 @@ ERF::ReadCheckpointFile ()
         std::string VarCorFileName = MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "SinPhi_H");
         if (amrex::FileExists(VarCorFileName)) {
             amrex::Print() << "Reading Coriolis factors" << std::endl;
-            MultiFab sphi(ba2d[lev],dmap[lev],1,ngv);
-            MultiFab cphi(ba2d[lev],dmap[lev],1,ngv);
-            VisMF::Read(sphi, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "SinPhi"));
-            VisMF::Read(cphi, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "CosPhi"));
             sinPhi_m[lev] = std::make_unique<MultiFab>(ba2d[lev],dmap[lev],1,ngv);
             cosPhi_m[lev] = std::make_unique<MultiFab>(ba2d[lev],dmap[lev],1,ngv);
-            MultiFab::Copy(*sinPhi_m[lev],sphi,0,0,1,ngv);
-            MultiFab::Copy(*cosPhi_m[lev],cphi,0,0,1,ngv);
+            read_checkpoint_mf(*sinPhi_m[lev], MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "SinPhi"),
+                               lev, 0, 0, 1, ngv, /*src_ghosts=*/true);
+            read_checkpoint_mf(*cosPhi_m[lev], MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "CosPhi"),
+                               lev, 0, 0, 1, ngv, /*src_ghosts=*/true);
         }
 
         if (solverChoice.use_real_bcs && solverChoice.init_type == InitType::WRFInput) {
             if (lev == 0) {
                 amrex::Print() << "Reading C1H/C2H/RDNW/MUB/PHB variables at level " << lev << std::endl;
-                MultiFab tmp1d(ba1d[0],dmap[0],1,0);
-
-                VisMF::Read(tmp1d, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "C1H"));
-                MultiFab::Copy(*wrf_C1H,tmp1d,0,0,1,0);
-
-                VisMF::Read(tmp1d, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "C2H"));
-                MultiFab::Copy(*wrf_C2H,tmp1d,0,0,1,0);
-
-                VisMF::Read(tmp1d, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "RDNW"));
-                MultiFab::Copy(*wrf_RDNW,tmp1d,0,0,1,0);
-
-                MultiFab tmp2d(ba2d[0],dmap[0],1,wrf_MUB->nGrowVect());
-
-                VisMF::Read(tmp2d, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "MUB"));
-                MultiFab::Copy(*wrf_MUB,tmp2d,0,0,1,wrf_MUB->nGrowVect());
-
-                MultiFab tmp3d(convert(grids[0],IntVect(0,0,1)),dmap[0],1,wrf_PHB->nGrowVect());
-
-                VisMF::Read(tmp3d, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "PHB"));
-                MultiFab::Copy(*wrf_PHB,tmp3d,0,0,1,wrf_PHB->nGrowVect());
+                //
+                // These are 1-D columns and 2-D/3-D fields on the level-0 grids; all of them
+                // are redistributed the same way, so a changed level-0 decomposition carries
+                // them rather than leaving them uninitialized.
+                //
+                read_checkpoint_mf(*wrf_C1H,  MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "C1H"),
+                                   lev, 0, 0, 1, IntVect(0), /*src_ghosts=*/true);
+                read_checkpoint_mf(*wrf_C2H,  MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "C2H"),
+                                   lev, 0, 0, 1, IntVect(0), /*src_ghosts=*/true);
+                read_checkpoint_mf(*wrf_RDNW, MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "RDNW"),
+                                   lev, 0, 0, 1, IntVect(0), /*src_ghosts=*/true);
+                read_checkpoint_mf(*wrf_MUB,  MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "MUB"),
+                                   lev, 0, 0, 1, wrf_MUB->nGrowVect(), /*src_ghosts=*/true);
+                read_checkpoint_mf(*wrf_PHB,  MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", "PHB"),
+                                   lev, 0, 0, 1, wrf_PHB->nGrowVect(), /*src_ghosts=*/true);
             }
         }
 #endif
@@ -1490,7 +2135,7 @@ ERF::ReadCheckpointFile ()
     // MakeNewLevelFromScratch has already reset itimestep to 0 (NoahmpIOVarInit);
     // override it here from the checkpoint. Older checkpoints without this file
     // restart with the legacy reset-to-zero behavior.
-    if (solverChoice.lsm_type != LandSurfaceType::None) {
+    if (solverChoice.lsm_type == LandSurfaceType::NOAHMP) {
         std::string LsmStepFileName(restart_chkfile + "/lsm_step");
         if (amrex::FileExists(LsmStepFileName)) {
             Vector<char> LsmStepCharPtr;
@@ -1669,7 +2314,7 @@ ERF::ReadCheckpointFile ()
 
             int ntimes_erfbdy;
             Vector<double> bdy_times;
-            bdy_time_interval = read_times_from_erfbdy(erfbdy_file,
+            bdy_time_interval = read_times_from_erfbdy(erfbdy_file, geom[0].Domain(),
                                                        ntimes_erfbdy, nvars_erfbdy, real_width,
                                                        bdy_times, start_bdy_time, final_bdy_time);
 
@@ -1749,115 +2394,139 @@ ERF::ReadVelsOnlyFromCheckpointFile (int lev_to_fill, std::string& chkfile_for_v
 void
 ERF::ReadCheckpointFileSurfaceLayer ()
 {
-    //
-    // State of the exponential time filter (erf.most.time_average), if this run uses it.
-    // A checkpoint written before this was persisted has no such file, in which case we
-    // leave the filter uninitialized and it starts over -- the behavior those files
-    // already had.  Anything unexpected in the file is likewise treated as "start over"
-    // rather than blending stale state into the average.
-    //
-    const bool most_time_avg = (m_SurfaceLayer && m_SurfaceLayer->mac_avg_is_time_averaged());
-    Vector<int>          most_avg_init;
-    Vector<Vector<Real>> most_plane_avg;
-    if (most_time_avg) {
-        const std::string MostAvgFile(restart_chkfile + "/most_time_average");
-        if (amrex::FileExists(MostAvgFile)) {
-            Vector<char> fileCharPtr;
-            ParallelDescriptor::ReadAndBcastFile(MostAvgFile, fileCharPtr);
-            std::string fileCharPtrString(fileCharPtr.dataPtr());
-            std::istringstream ism(fileCharPtrString, std::istringstream::in);
-
-            int navg_chk = 0;
-            ism >> navg_chk;
-            if (navg_chk == m_SurfaceLayer->get_num_mac_avg()) {
-                for (int lev = 0; lev <= finest_level; ++lev) {
-                    int is_init = 0, n_pavg = 0;
-                    if (!(ism >> is_init >> n_pavg)) { break; }
-                    Vector<Real> pavg(n_pavg);
-                    bool line_ok = true;
-                    for (int iavg(0); iavg < n_pavg; ++iavg) {
-                        if (!(ism >> pavg[iavg])) { line_ok = false; break; }
-                    }
-                    if (!line_ok) { break; }
-                    most_avg_init.push_back(is_init);
-                    most_plane_avg.push_back(pavg);
-                }
-            } else {
-                amrex::Print() << "NOTE: checkpoint holds " << navg_chk << " surface-layer "
-                                  "averages but this run expects "
-                               << m_SurfaceLayer->get_num_mac_avg()
-                               << "; the time filter will start over" << std::endl;
-            }
-        } else {
-            amrex::Print() << "NOTE: this checkpoint does not carry the surface-layer time "
-                              "filter state; the filtered averages will start over"
-                           << std::endl;
+    // Count number of surface layer boundaries to determine face prefix
+    int n_faces = 0;
+    for (OrientationIter oit; oit; ++oit) {
+        Orientation ori = oit();
+        if (phys_bc_type[ori] == ERF_BC::surface_layer) {
+            n_faces += 1;
         }
     }
 
-    for (int lev = 0; lev <= finest_level; ++lev)
-    {
-        amrex::Print() << "Reading MOST variables" << std::endl;
-
-        auto read_most_var = [&] (const std::string& name, MultiFab* dst) {
-            const std::string mf_name = MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", name);
-            if (amrex::FileExists(mf_name + "_H")) {
-                MultiFab m_var;
-                VisMF::Read(m_var, mf_name);
-                // The number of ghost cells depends on whether these live on a 2D or a 3D
-                // BoxArray (see WriteCheckpointFile), and a checkpoint written before the
-                // fix for issue #3560 may have fewer than the destination holds, so only
-                // fill as many ghost cells as both sides have
-                IntVect ng = amrex::min(m_var.nGrowVect(), dst->nGrowVect());
-                dst->ParallelCopy(m_var, 0, 0, 1, ng, ng, geom[lev].periodicity());
-                return true;
+    for (OrientationIter oit; oit; ++oit) {
+        Orientation ori = oit();
+        if (m_SurfaceLayer[ori])  {
+            std::string face = "_" + std::to_string(ori);
+            // if we only use a single surface layer, don't add the face prefix
+            if (n_faces == 1 && static_cast<int>(ori) == Orientation::zlo()) {
+                face = "";
             }
-            return false;
-        };
 
-        // U*
-        read_most_var("Ustar", m_SurfaceLayer->get_u_star(lev));
+            //
+            // State of the exponential time filter (erf.most.time_average), if this run uses it.
+            // A checkpoint written before this was persisted has no such file, in which case we
+            // leave the filter uninitialized and it starts over -- the behavior those files
+            // already had.  Anything unexpected in the file is likewise treated as "start over"
+            // rather than blending stale state into the average.
+            //
+            const bool most_time_avg = m_SurfaceLayer[ori]->mac_avg_is_time_averaged();
+            Vector<int>          most_avg_init;
+            Vector<Vector<Real>> most_plane_avg;
+            if (most_time_avg) {
+                const std::string MostAvgFile(restart_chkfile + "/most_time_average" + face);
+                if (amrex::FileExists(MostAvgFile)) {
+                    Vector<char> fileCharPtr;
+                    ParallelDescriptor::ReadAndBcastFile(MostAvgFile, fileCharPtr);
+                    std::string fileCharPtrString(fileCharPtr.dataPtr());
+                    std::istringstream ism(fileCharPtrString, std::istringstream::in);
 
-        // W*
-        read_most_var("Wstar", m_SurfaceLayer->get_w_star(lev));
-
-        // T*
-        read_most_var("Tstar", m_SurfaceLayer->get_t_star(lev));
-
-        // Q*
-        read_most_var("Qstar", m_SurfaceLayer->get_q_star(lev));
-
-        // Olen
-        read_most_var("Olen", m_SurfaceLayer->get_olen(lev));
-
-        // Qsurf
-        read_most_var("Qsurf", m_SurfaceLayer->get_q_surf(lev));
-
-        // PBLH
-        read_most_var("PBLH", m_SurfaceLayer->get_pblh(lev));
-
-        // Z0
-        read_most_var("Z0", m_SurfaceLayer->get_z0(lev));
-        // Surface temperature. Not every path rewrites it each step (a fixed
-        // surface temperature with no heating rate keeps whatever was set at
-        // initialization), so it has to come back from the checkpoint too.
-        read_most_var("Tsurf", m_SurfaceLayer->get_t_surf(lev));
-
-        // The exponentially filtered averages.  We only mark the filter as initialized
-        // if every piece of its state came back, so that a partial restore degrades to
-        // "start the average over" instead of blending in whatever the containers hold.
-        if (most_time_avg && (lev < static_cast<int>(most_avg_init.size())) && most_avg_init[lev]) {
-            bool restored_all = m_SurfaceLayer->set_mac_plane_avg(lev, most_plane_avg[lev]);
-            for (int iavg(0); iavg < m_SurfaceLayer->get_num_mac_avg(); ++iavg) {
-                restored_all = read_most_var("MOSTAvg" + std::to_string(iavg),
-                                             m_SurfaceLayer->get_mac_avg_ptr(lev,iavg)) && restored_all;
+                    int navg_chk = 0;
+                    ism >> navg_chk;
+                    if (navg_chk == m_SurfaceLayer[ori]->get_num_mac_avg()) {
+                        for (int lev = 0; lev <= finest_level; ++lev) {
+                            int is_init = 0, n_pavg = 0;
+                            if (!(ism >> is_init >> n_pavg)) { break; }
+                            Vector<Real> pavg(n_pavg);
+                            bool line_ok = true;
+                            for (int iavg(0); iavg < n_pavg; ++iavg) {
+                                if (!(ism >> pavg[iavg])) { line_ok = false; break; }
+                            }
+                            if (!line_ok) { break; }
+                            most_avg_init.push_back(is_init);
+                            most_plane_avg.push_back(pavg);
+                        }
+                    } else {
+                        amrex::Print() << "NOTE: checkpoint holds " << navg_chk << " surface-layer "
+                                          "averages but this run expects "
+                                       << m_SurfaceLayer[ori]->get_num_mac_avg()
+                                       << "; the time filter will start over" << std::endl;
+                    }
+                } else {
+                    amrex::Print() << "NOTE: this checkpoint does not carry the surface-layer time "
+                                      "filter state; the filtered averages will start over"
+                                   << std::endl;
+                }
             }
-            if (restored_all) {
-                m_SurfaceLayer->set_mac_avg_initialized(lev);
-            } else {
-                amrex::Print() << "NOTE: the surface-layer time filter state at level " << lev
-                               << " is incomplete in this checkpoint; the filtered averages "
-                                  "will start over" << std::endl;
+
+            for (int lev = 0; lev <= finest_level; ++lev)
+            {
+                amrex::Print() << "Reading MOST variables for face " << ori << std::endl;
+
+                auto read_most_var = [&] (const std::string& name, MultiFab* dst) {
+                    const std::string mf_name = MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", name);
+                    if (amrex::FileExists(mf_name + "_H")) {
+                        MultiFab m_var;
+                        VisMF::Read(m_var, mf_name);
+                        // The number of ghost cells depends on whether these live on a 2D or a 3D
+                        // BoxArray (see WriteCheckpointFile), and a checkpoint written before the
+                        // fix for issue #3560 may have fewer than the destination holds, so only
+                        // fill as many ghost cells as both sides have
+                        IntVect ng = amrex::min(m_var.nGrowVect(), dst->nGrowVect());
+                        dst->ParallelCopy(m_var, 0, 0, 1, ng, ng, geom[lev].periodicity());
+                        // The file's ghost cells may be stale (never filled before the
+                        // write). As copy sources they reach valid cells through periodic
+                        // images, so copy again from the valid cells alone; only
+                        // domain-boundary ghosts keep the file's values.
+                        dst->ParallelCopy(m_var, 0, 0, 1, IntVect(0), ng, geom[lev].periodicity());
+                        return true;
+                    }
+                    return false;
+                };
+
+                // U*
+                read_most_var("Ustar" + face, m_SurfaceLayer[ori]->get_u_star(lev));
+
+                // W*
+                read_most_var("Wstar" + face, m_SurfaceLayer[ori]->get_w_star(lev));
+
+                // T*
+                read_most_var("Tstar" + face, m_SurfaceLayer[ori]->get_t_star(lev));
+
+                // Q*
+                read_most_var("Qstar" + face, m_SurfaceLayer[ori]->get_q_star(lev));
+
+                // Olen
+                read_most_var("Olen" + face, m_SurfaceLayer[ori]->get_olen(lev));
+
+                // T*
+                read_most_var("Tsurf" + face, m_SurfaceLayer[ori]->get_t_surf(lev));
+
+                // Qsurf
+                read_most_var("Qsurf" + face, m_SurfaceLayer[ori]->get_q_surf(lev));
+
+                // PBLH
+                read_most_var("PBLH" + face, m_SurfaceLayer[ori]->get_pblh(lev));
+
+                // Z0
+                read_most_var("Z0" + face, m_SurfaceLayer[ori]->get_z0(lev));
+
+                // The exponentially filtered averages.  We only mark the filter as initialized
+                // if every piece of its state came back, so that a partial restore degrades to
+                // "start the average over" instead of blending in whatever the containers hold.
+                if (most_time_avg && (lev < static_cast<int>(most_avg_init.size())) && most_avg_init[lev]) {
+                    bool restored_all = m_SurfaceLayer[ori]->set_mac_plane_avg(lev, most_plane_avg[lev]);
+                    for (int iavg(0); iavg < m_SurfaceLayer[ori]->get_num_mac_avg(); ++iavg) {
+                        restored_all = read_most_var("MOSTAvg" + std::to_string(iavg) + face,
+                                                     m_SurfaceLayer[ori]->get_mac_avg_ptr(lev,iavg)) && restored_all;
+                    }
+                    if (restored_all) {
+                        m_SurfaceLayer[ori]->set_mac_avg_initialized(lev);
+                    } else {
+                        amrex::Print() << "NOTE: the surface-layer time filter state at level " << lev
+                                       << " is incomplete in this checkpoint; the filtered averages "
+                                          "will start over" << std::endl;
+                    }
+                }
             }
         }
     }
@@ -1954,7 +2623,19 @@ ERF::ReadCheckpointFileFire ()
                            << "; keeping the initialized values.\n";
             return;
         }
-        VisMF::Read(*mf, amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", name));
+        // A width set by an input (FireStickMC = 3 x erf.fire.stick.n_shells)
+        // that changed between the runs used to die inside VisMF::Read on an
+        // assert naming neither width nor the input.
+        const std::string prefix = amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", name);
+        const int ncomp_disk = VisMF(prefix).nComp();
+        if (ncomp_disk != mf->nComp()) {
+            amrex::Abort("[FIRE] checkpoint field " + std::string(name) + " has " + std::to_string(ncomp_disk)
+                         + " components but this run allocates " + std::to_string(mf->nComp())
+                         + (std::string(name) == "FireStickMC"
+                            ? " (3 x erf.fire.stick.n_shells: restart with the n_shells the checkpoint was written with)"
+                            : ""));
+        }
+        VisMF::Read(*mf, prefix);
     };
 
     restore_optional(m_fire_layer->get_fuel_mc_mut(),      "FireFuelMC");
@@ -1978,6 +2659,7 @@ ERF::ReadCheckpointFileFire ()
     restore_optional(m_fire_layer->get_crown_active_mut(), "FireCrownActive");
     restore_optional(m_fire_layer->get_crown_load_mut(),   "FireCrownLoad");
     restore_optional(m_fire_layer->get_heat_flux_mut(),      "FireHeatFlux");
+    restore_optional(m_fire_layer->get_flame_length_mut(),   "FireFlameLength");
     restore_optional(m_fire_layer->get_Q_atm_prev_mut(),     "FireQAtmPrev");
     restore_optional(m_fire_layer->get_Q_lat_atm_prev_mut(), "FireQLatAtmPrev");
     // Their ghost columns feed the MRF fire thermal excess. VisMF restores the
@@ -1985,9 +2667,30 @@ ERF::ReadCheckpointFileFire ()
     // so refill the ghosts the way update_atm_flux_buffer() does.
     if (amrex::MultiFab* q = m_fire_layer->get_Q_atm_prev_mut()) { fire_fill_boundary(*q, geom[fire_lev]); }
     if (amrex::MultiFab* q = m_fire_layer->get_Q_lat_atm_prev_mut()) { fire_fill_boundary(*q, geom[fire_lev]); }
+    // The precipitation snapshot (erf.fire.precip_source = atmosphere). A checkpoint
+    // without it (an older build, or a run that used the uniform rate) cannot give
+    // the first restarted step a rain rate: that step reports none and starts the
+    // snapshot from its own accumulation, instead of reading the accumulation since
+    // t = 0 as one step's rain.
+    if (amrex::MultiFab* pa = m_fire_layer->get_precip_accum_prev_mut()) {
+        const std::string header = restart_chkfile + "/Level_" + std::to_string(fire_lev) + "/FirePrecipAccumPrev_H";
+        if (amrex::FileExists(header)) {
+            VisMF::Read(*pa, amrex::MultiFabFileFullPrefix(fire_lev, restart_chkfile, "Level_", "FirePrecipAccumPrev"));
+        } else {
+            amrex::Print() << "[FIRE] Checkpoint has no FirePrecipAccumPrev; the first restarted step"
+                           << " reports no rain and starts the precipitation snapshot from its own accumulation.\n";
+            m_fire_layer->invalidate_precip_accum_prev();
+        }
+    }
     restore_optional(m_fire_layer->get_heat_load_mut(),      "FireHeatLoad");
     restore_optional(m_fire_layer->get_peak_intensity_mut(), "FirePeakIntensity");
     restore_optional(m_fire_layer->get_ember_landings_mut(), "FireEmberLandings");
+    // The per-structure state that drives the ignition rule is rebuilt from
+    // the field on every rank once it is read.
+    if (m_fire_layer->get_structure_state_mut() != nullptr) {
+        restore_optional(m_fire_layer->get_structure_state_mut(), "FireStructureState");
+        m_fire_layer->restore_structure_ignition_state();
+    }
     restore_optional(m_fire_layer->get_albini_data_mut(),           "FireAlbiniData");
     restore_optional(m_fire_layer->get_accel_state_mut(),           "FireAccelState");
     restore_optional(m_fire_layer->get_crown_ros_active_mut(),      "FireCrownRosActive");
@@ -2009,6 +2712,8 @@ ERF::ReadCheckpointFileFire ()
                     amrex::Real v; f >> v; m_fire_layer->set_edge_contact_time(v);
                 } else if (key == "edge_reach_checked") {
                     int v; f >> v; m_fire_layer->set_edge_reach_checked(v != 0);
+                } else if (key == "prev_window_end") {
+                    amrex::Real v; f >> v; m_fire_layer->set_prev_window_end(v);
                 } else {
                     std::string skip; f >> skip;
                 }
@@ -2017,6 +2722,11 @@ ERF::ReadCheckpointFileFire ()
             amrex::Print() << "[FIRE] Checkpoint has no FireState; the reinitialisation"
                            << " schedule restarts from the checkpoint step.\n";
         }
+    }
+    // Suppression: the checkpoint's actions (with geometry and state) replace the
+    // file's copies of the same ids; the file only adds new ids, as at start-up.
+    if (FireSuppression* sp = m_fire_layer->get_suppression_mut()) {
+        sp->read_checkpoint(restart_chkfile, fire_lev);
     }
 }
 #endif
@@ -2036,16 +2746,27 @@ ERF::ReadCheckpointFileDust ()
     const std::string probe = restart_chkfile + "/Level_0/DustDepositionRate_H";
     if (!amrex::FileExists(probe)) {
         amrex::Print() << "[DUST] No dust state found in checkpoint; starting the dust"
-                       << " layer from its initial values.\n";
+                       << " layer from its initial values at the atmosphere's step and time.\n";
+        // the dust clock (blast windows, road start times, PHREEQC and MSHA
+        // intervals) follows the atmosphere's, not zero (it started at zero
+        // when dust was enabled on a restart until October 2026)
+        m_DustLayer->read_checkpoint_state(restart_chkfile, istep[0], t_new[0]);
+        // a fresh dust leg: stale CSVs of an earlier dust attempt are not continued
+        m_DustLayer->remove_outputs_for_fresh_start();
+        m_DustLayer->write_diag_header();
         return;
     }
     amrex::Print() << "[DUST] Restoring dust state from checkpoint " << restart_chkfile << "\n";
+    // the layout aborts first: VisMF::Read dies on a mismatched BoxArray or
+    // component count with no mention of dust
+    m_DustLayer->check_checkpoint_layout(restart_chkfile);
 
     // The ghost cells come back from the file as they were, with no boundary
-    // fill afterwards: the dust kernels read ghost cells at box edges that the
-    // run does not refill every step, so a fill here would hand the restarted
-    // run different edge values from the uninterrupted one on more than one
-    // rank.
+    // fill afterwards. No dust kernel reads a ghost cell of a checkpointed
+    // field (the only stencils, the terrain slopes and the FARSITE wind
+    // factors, work on fields built at start-up); if one is added, FillBoundary
+    // it after this read and in advance() alike, or the restarted run differs
+    // from the uninterrupted one at box edges.
     for (auto& nf : m_DustLayer->checkpoint_fields()) {
         const std::string header = restart_chkfile + "/Level_0/" + nf.first + "_H";
         if (!amrex::FileExists(header)) {
@@ -2056,6 +2777,7 @@ ERF::ReadCheckpointFileDust ()
         VisMF::Read(*nf.second, amrex::MultiFabFileFullPrefix(0, restart_chkfile, "Level_", nf.first));
     }
     m_DustLayer->read_checkpoint_state(restart_chkfile, istep[0], t_new[0]);
+    m_DustLayer->trim_outputs_after_restart(istep[0]);   // rows past the restart step go
 #ifdef ERF_USE_PARTICLES
     m_DustLayer->restart_particles(restart_chkfile);
 #endif

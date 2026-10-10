@@ -40,8 +40,10 @@
 struct CheneyGouldComputed
 {
     amrex::Real ros_backing;  ///< Backing (into-wind) ROS [m/s]
-    amrex::Real ros_flank;    ///< Flank ROS [m/s]
-    amrex::Real gamma;        ///< Spread adjustment factor for slope effects
+    amrex::Real ros_flank;    ///< Flank ROS [m/s] (computed, read by nothing yet)
+    amrex::Real gamma;        ///< Spread adjustment factor for slope effects (1, read by nothing yet)
+    amrex::Real moisture;     ///< Dead fine fuel moisture [%] the coefficients were built with
+    amrex::Real curing;       ///< Degree of curing [0-1] the coefficients were built with
 };
 
 /**
@@ -50,8 +52,13 @@ struct CheneyGouldComputed
  * @param[in] cgp  CheneyGouldParams with moisture [%] and curing [0-1]
  * @return CheneyGouldComputed with precomputed coefficients
  *
- * Computes backing and flank ROS using CSIRO relations based on fuel moisture
- * and curing degree. Gamma factor is used for slope adjustments in fill_cheney_gould_ros().
+ * Computes the backing ROS from the fuel moisture and curing degree, and
+ * carries both inputs so that every ROS path (isotropic fill_cheney_gould_ros
+ * and the directional kernel) evaluates cheney_gould_ros with the same
+ * moisture and curing, including the dynamic-moisture update that rebuilds
+ * this struct each step. The inputs are range-checked in FireParams
+ * (moisture 1-40 %, curing 0-1); the clamps below only guard a struct built
+ * by hand.
  */
 inline CheneyGouldComputed compute_cheney_gould_params(
     const FireParams::CheneyGouldParams& cgp) noexcept
@@ -61,6 +68,8 @@ inline CheneyGouldComputed compute_cheney_gould_params(
     // Clamp inputs to valid ranges
     amrex::Real moisture = amrex::max(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(cgp.moisture), static_cast<amrex::Real>(40.0))));  // [%]
     amrex::Real curing   = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(cgp.curing), static_cast<amrex::Real>(1.0))));      // [0-1]
+    cgc.moisture = moisture;
+    cgc.curing   = curing;
 
     // CSIRO grassfire relations for backing ROS
     // Simplified empirical fit: ros_backing increases with curing, decreases with moisture
@@ -210,14 +219,15 @@ inline void fill_cheney_gould_ros(
             amrex::Real v = wind_arr(i, j, k, 1);
             amrex::Real wind_mag = std::sqrt(u*u + v*v);
 
-            // Compute Cheney-Gould ROS
-            // Simplified: no slope access here; could be added with fire_slopes parameter
-            // Currently uses wind effect only via cheney_gould_ros
+            // Compute Cheney-Gould ROS with the moisture and curing the
+            // coefficients were built with (the deck values, or the dynamic
+            // 1-h moisture), the same inputs the directional kernel uses.
+            // No slope here: fill_cheney_gould_ros_with_slope carries it.
             amrex::Real ros = cheney_gould_ros(
                 wind_mag,
                 cgc.ros_backing,
-                10.0,   // placeholder: default moisture [%]
-                1.0);   // placeholder: default curing [0-1]
+                cgc.moisture,
+                cgc.curing);
 
             ros = amrex::max(static_cast<amrex::Real>(ros), static_cast<amrex::Real>(0.0));
             ros_arr(i, j, k, 0) = ros;

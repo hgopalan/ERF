@@ -1,0 +1,102 @@
+# FirePrecipSource: where the rain that wets the dead fuel classes comes from
+# (erf.fire.precip_source). A grass fire under Kessler microphysics on the
+# FireRestart grid (2 x 2 km, 20 x 20 x 30 cells of 100 x 100 x 20 m, one
+# rank), with a cold column of air at the ground in the middle of the domain
+# (erf.prob_name = Bubble, -15 K) in a neutral sounding at 88 % relative
+# humidity near the ground: the column condenses at once and rains out within
+# the 20 s run, while the rest of the domain stays dry. The fire is passive,
+# so the atmosphere is the same in every variant and only the rain source
+# differs between them. The dead classes start at 0.06/0.07/0.09 and wet
+# toward the humid air's equilibrium everywhere; the rain adds to that under
+# the raining columns only (atmosphere) or everywhere (uniform).
+
+geometry.prob_lo = 0.0 0.0 0.0
+geometry.prob_hi = 2000.0 2000.0 600.0
+amr.n_cell = 20 20 30
+
+geometry.is_periodic = 1 1 0
+amr.max_level = 0
+amr.max_grid_size = 20      # box lengths must divide by grid_ratio
+amr.max_grid_size_z = 30    # fire module forbids z-decomposition
+
+zlo.type = "surface_layer"
+zhi.type = "SlipWall"
+erf.most.z0 = 0.1
+erf.most.surf_temp = 300.0
+erf.most.surf_heating_rate = 0.0
+
+# Constant molecular diffusion and no LES, so the atmosphere is cheap and
+# deterministic; the surface layer is on, as in every fire run.
+erf.molec_diff_type = "ConstantAlpha"
+erf.les_type = "None"
+erf.use_gravity = true
+erf.use_coriolis = false
+erf.theta_ref = 300.0
+
+erf.init_type = "input_sounding"
+erf.input_sounding_file = "input_sounding"
+erf.sounding_type = Ideal
+
+# Kessler warm rain: cloud water from the saturation adjustment of the cold
+# column, autoconversion and accretion to rain, sedimentation to the surface
+# accumulation rain_accum that the fire reads
+erf.moisture_model = "Kessler"
+
+# The cold column: an ellipsoid of -15 K air temperature centred on the
+# ground at the domain centre, 300 m across and 250 m high (cos^2 profile), so
+# the columns within about 200 m of the centre saturate and the others do not
+erf.prob_name = "Bubble"
+prob.x_c = 1000.0
+prob.y_c = 1000.0
+prob.z_c = 0.0
+prob.x_r = 300.0
+prob.y_r = 300.0
+prob.z_r = 250.0
+prob.T_pert = -15.0
+prob.T_pert_is_airtemp = true
+
+erf.fixed_dt = 0.5
+max_step = 40
+stop_time = 20.0
+
+erf.v = 0
+amr.v = 0
+erf.sum_interval = -1
+erf.check_int = -1
+# atmosphere plotfiles every step, so the check can difference rain_accum over
+# the last step against the fire grid's rain rate
+erf.plot_file_1 = plt
+erf.plot_int_1 = 1
+erf.plot_vars_1 = density theta qv qc qp rain_accum
+erf.fire_plot_int = 40
+
+erf.fire.enable = true
+erf.fire.fire_debug = true            # the [FIRE DEBUG] rain-rate lines
+erf.fire.grid_ratio = 4               # 25 m fire cells
+erf.fire.propagation_method = "levelset"
+erf.fire.directional_ros = true
+erf.fire.ros_model = "rothermel"
+erf.fire.coupling_type = "passive"    # the atmosphere is identical in every variant
+
+erf.fire.fuel_model_id = 1            # short grass
+erf.fire.moisture_1hr = 0.06
+erf.fire.moisture_10hr = 0.07
+erf.fire.moisture_100hr = 0.09
+erf.fire.moisture_dynamic = true
+erf.fire.moisture_model = "timelag"
+erf.fire.moisture_live_model = "fixed"
+
+# ignition away from the raining columns
+erf.fire.ignition_x = 500.0
+erf.fire.ignition_y = 1000.0
+erf.fire.ignition_r = 100.0
+
+erf.fire.wind_ref_ht = 6.1
+erf.fire.use_waf = true
+erf.fire.waf_formula = "andrews"
+erf.fire.use_wind_limit = true
+erf.fire.use_terrain_wind = false
+erf.fire.write_fire_stats_csv = true
+erf.fire.fire_stats_csv_file = "fire_stats.csv"
+
+erf.check_file = chk

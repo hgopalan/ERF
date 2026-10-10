@@ -41,8 +41,8 @@ def main(argv):
     rc.structural_checks(rep, z, p, Z0, L_G_MAX, allow_unstable=True, mode=mode)
 
     # column heat budget: sum rho (theta - theta_init) dz = rho_sfc F t. The deck
-    # runs the implicit column solve, so the smoke run already tests that the
-    # solve adds the surface heat flux once per step on both anelastic stages.
+    # runs the implicit column solve with the midpoint stages, so the smoke run
+    # tests that the solve adds the surface heat flux exactly once per step.
     t = hdr["time"]
     gained = sum(p["density"][k] * (p["theta"][k] - theta_init(z[k])) * dz for k in range(nz))
     rep.check("column heat gain / (rho_sfc F t)", gained / (p["density"][0] * SURF_FLUX * t), 1.0, 0.10)

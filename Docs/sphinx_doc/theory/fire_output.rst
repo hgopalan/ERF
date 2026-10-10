@@ -112,7 +112,19 @@ order; the optional blocks are present only when their feature is on:
      - ``erf.fire.structures.enable`` or the hybrid ``structure`` selector
    * - ``fire_nonburnable``
      - 0/1
-     - structures, ``fuel_map.nonburnable_codes`` or ``firebreak.use_mask`` configured
+     - structures, ``fuel_map.nonburnable_codes``, ``firebreak.use_mask`` or ``suppression.enable`` configured
+   * - ``fire_precip_mm_hr``
+     - mm/hr
+     - dynamic dead-fuel moisture with ``erf.fire.precip_source = atmosphere`` or a positive ``erf.fire.precip_rate_mm_hr``
+   * - ``fire_suppression_mask``
+     - -1/0/1
+     - ``erf.fire.suppression.enable``; 1 suppressed this step, -1 a line cell that failed its hold test
+   * - ``fire_ros_factor``
+     - 0-1
+     - ``erf.fire.suppression.enable``; the drop multiplier on the rate of spread, 1 outside drops
+   * - ``fire_line_progress``
+     - -
+     - ``erf.fire.suppression.enable``; ordinal of the line a built cell belongs to, 0 elsewhere
 
 Fire statistics CSV
 -------------------
@@ -123,7 +135,7 @@ fire step is appended to :cpp:`erf.fire.fire_stats_csv_file` (default
 
 ``step, time_s, burned_area_ha, perimeter_km, active_front_cells, head_ros_ms,
 major_axis_m, minor_axis_m, heat_flux_max_Wm2, spot_fires_this_step,
-max_spot_dist_m, edge_band_cells, edge_contact_time_s``.
+max_spot_dist_m, edge_band_cells, edge_contact_time_s, precip_max_mm_hr``.
 
 Burned area and perimeter come from the arrival-time field, the head rate is
 the maximum rate of spread over burning cells, and the axes are those of the
@@ -191,6 +203,13 @@ tilt of the band cells is the natural next step. ``Exec/RegTests/FireExposure``
 runs the obstacle scenario with and without immersed-forcing buildings and
 with spotting, and ``FireRestart`` checks that the CSV resumes exactly.
 
+With :cpp:`erf.fire.structures.ignition.enable` the structures ignite from
+these accumulators, burn and load their neighbours (:ref:`sec:WUIStructureIgnition`).
+The CSV then gains ``state, t_ignition_s, cause, structure_flux_Wm2,
+incident_flux_max_Wm2`` (the columns are absent when the option is off), the
+plotfile ``fire_structure_state``, ``fire_structure_ignition_time`` and
+``fire_structure_rad_flux``, and the checkpoint ``FireStructureState``.
+
 Debug output
 ------------
 
@@ -210,10 +229,14 @@ The atmospheric checkpoint carries the fire state as ``FirePhi``,
 ``FireQLatAtmPrev`` that the next step injects, with crown fire
 ``FireCrownActive`` and ``FireCrownLoad``, and with the exposure
 diagnostics ``FireHeatLoad``, ``FirePeakIntensity`` and
-``FireEmberLandings``. On restart the fire layer is initialised from the inputs
-first, so a spatial fuel map, firebreaks, a hybrid weight or a structure
-mask must still be available, and the checkpointed fields are then read
-over the initial ones. Diagnostics are recomputed on the first step.
+``FireEmberLandings``, and with suppression the four fields
+``FireSuppressionMask``, ``FireSuppressionFactor``,
+``FireSuppressionProgress`` and ``FireSuppressionFailed`` with the action
+state in ``FireSuppression`` (:ref:`sec:FireSuppression`). On restart the
+fire layer is initialised from the inputs first, so a spatial fuel map,
+firebreaks, a hybrid weight, a structure mask or a suppression action file
+must still be available, and the checkpointed fields are then read over the
+initial ones. Diagnostics are recomputed on the first step.
 
 References
 ----------

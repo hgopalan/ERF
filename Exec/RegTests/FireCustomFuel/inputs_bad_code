@@ -1,0 +1,4 @@
+FILE = inputs_custom_grass
+
+# A code outside the custom range: 900 is not one of 1000-1015.
+erf.fire.custom_fuel.codes = 900

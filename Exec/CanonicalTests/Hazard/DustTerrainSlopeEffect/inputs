@@ -44,7 +44,6 @@ erf.pbl_mrf_Ribcr = 0.5
 erf.pbl_mrf_const_b = 7.8
 erf.pbl_mrf_sf = 0.1
 erf.enable_mrf_countergradient = true
-erf.mrf_moistvars = false
 erf.use_coriolis = true
 erf.latitude = 45.0
 erf.abl_driver_type = "GeostrophicWind"
@@ -59,9 +58,11 @@ erf.dust.n_size_bins = 3
 erf.dust.particle_density = 2650.0
 erf.dust.z0_dust = 0.01
 erf.dust.silt_fraction = 0.10
-erf.dust.threshold_A_coeff = 0.1
-# crust_index = 1.0 set here but DustLayer resets crust to 0 internally
-# when no fire coupling is active (same behaviour as DustTerrainFlat).
+# crust_index = 1.0 is the crust everywhere (nothing resets it without the fire
+# coupling; the same value as DustTerrainFlat, so the two differ only in the
+# slope). The raster slope is uniform and along the wind, so every cell is
+# windward: the case is a smoke test of a spatially uniform slope factor
+# (threshold x 1.11 at 10 degrees), not of a windward/lee contrast.
 erf.dust.crust_index = 1.0
 erf.dust.alpha_crust = 0.5
 erf.dust.alpha_efflor = 0.3

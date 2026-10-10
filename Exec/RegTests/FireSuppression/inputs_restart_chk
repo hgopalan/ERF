@@ -1,0 +1,8 @@
+# Stops at step 23 (11.5 s, 57.5 m of the line built; not a multiple of the
+# reinitialisation interval) and writes chk00023.
+FILE = inputs_base
+erf.fire.suppression.file = actions_restart.txt
+erf.fire.suppression.log = suppression_restart_chk.csv
+max_step = 23
+erf.check_int = 23
+erf.check_file = chk

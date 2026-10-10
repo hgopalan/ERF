@@ -1,6 +1,7 @@
 #include <iomanip>
 
 #include "ERF.H"
+#include "ERF_TileNoZ.H"
 
 using namespace amrex;
 
@@ -64,6 +65,17 @@ ERF::volWgtSumMF (int lev,
     } // mfi
 
     if (lev < finest_level && finemask) {
+        // fine_mask[lev+1] lives on grids[lev] but is only rebuilt when level lev+1 is made,
+        // so any path that changes grids[lev] alone leaves it stale: RemakeLevel(0) on restart,
+        // and AmrMesh's iterate_grids pass, which remakes a level from scratch without
+        // remaking the unchanged level above it.  Rebuild it here if it no longer matches.
+        if (!fine_mask[lev+1] ||
+            fine_mask[lev+1]->boxArray()        != tmp.boxArray() ||
+            fine_mask[lev+1]->DistributionMap() != tmp.DistributionMap())
+        {
+            fine_mask[lev+1] = std::make_unique<MultiFab>(tmp.boxArray(), tmp.DistributionMap(), 1, 0);
+            build_fine_mask(lev+1, *fine_mask[lev+1]);
+        }
         MultiFab::Multiply(tmp, *fine_mask[lev+1].get(), 0, 0, 1, 0);
     }
 
@@ -97,10 +109,19 @@ ERF::volWgtColumnSum (int lev, const MultiFab& mf_to_be_summed, int comp,
 
     // The quantity that is conserved is not (rho S), but rather (rho S / m^2) where
     // m is the map scale factor at cell centers
+    //
+    // NOTE: TileNoZ, not TilingIfNotGPU: the atomic adds accumulate a whole column into
+    //       dst_arr(i,j,0), so if the grid were tiled in z the tiles covering one column
+    //       would add into the same entry concurrently.  On the host HostDevice::Atomic::Add
+    //       is "#pragma omp atomic" -- atomic but unordered -- so the column sum would then
+    //       depend on thread scheduling in its last bits.  Keeping each column inside a
+    //       single tile makes the k accumulation serial and the result independent of both
+    //       the tile size and the thread count.
+    //
 #ifdef _OPENMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
 #endif
-    for (MFIter mfi(mf_to_be_summed, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+    for (MFIter mfi(mf_to_be_summed, TileNoZ()); mfi.isValid(); ++mfi) {
         const Box& bx   = mfi.tilebox();
         const auto  dst_arr = mf_2d.array(mfi);
         const auto  src_arr = mf_to_be_summed.array(mfi);

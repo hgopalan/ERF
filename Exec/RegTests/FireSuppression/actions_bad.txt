@@ -1,0 +1,2 @@
+# A malformed line: the run must stop at start-up quoting it (FireSuppression_bad_line_abort)
+L1    line  0        221 100 221 300    rate=0   -1        -

@@ -167,6 +167,25 @@ option(ERF_ENABLE_HIP  "Enable HIP" OFF)
 option(ERF_ENABLE_SYCL "Enable SYCL" OFF)
 option(ERF_ENABLE_NVHPC "Enable NVHPC" OFF)
 
+# ERF builds for at most one parallel backend at a time. Mirror the GNU Make
+# guard in Exec/Make.ERF and reject a multi-backend selection here rather than
+# configuring it.
+set(ERF_BACKENDS_ENABLED "")
+foreach(_erf_backend OPENMP CUDA HIP SYCL)
+  if (ERF_ENABLE_${_erf_backend})
+    list(APPEND ERF_BACKENDS_ENABLED "ERF_ENABLE_${_erf_backend}")
+  endif()
+endforeach()
+list(LENGTH ERF_BACKENDS_ENABLED _erf_num_backends)
+if (_erf_num_backends GREATER 1)
+  string(REPLACE ";" ", " _erf_backend_list "${ERF_BACKENDS_ENABLED}")
+  message(FATAL_ERROR
+    "At most one of ERF_ENABLE_OPENMP, ERF_ENABLE_CUDA, ERF_ENABLE_HIP, ERF_ENABLE_SYCL may be ON; got ${_erf_backend_list}")
+endif()
+unset(_erf_backend)
+unset(_erf_num_backends)
+unset(_erf_backend_list)
+
 #Options for NOAH-MP
 option(ERF_ENABLE_NOAHMP "Enable Noah-MP" OFF)
 
@@ -241,14 +260,19 @@ if (${ERF_USE_INTERNAL_AMREX})
         CACHE STRING "Path to fcompare executable for regression tests")
       set(FEXTREMA_EXE ${PROJECT_BINARY_DIR}/Submodules/AMReX/Tools/Plotfile/*/amrex_fextrema.exe
         CACHE STRING "Path to fextrema executable for regression tests")
+      set(FEXTRACT_EXE ${PROJECT_BINARY_DIR}/Submodules/AMReX/Tools/Plotfile/*/amrex_fextract.exe
+        CACHE STRING "Path to fextract executable for regression tests")
     else()
       set(FCOMPARE_EXE ${PROJECT_BINARY_DIR}/Submodules/AMReX/Tools/Plotfile/amrex_fcompare
         CACHE STRING "Path to fcompare executable for regression tests")
       set(FEXTREMA_EXE ${PROJECT_BINARY_DIR}/Submodules/AMReX/Tools/Plotfile/amrex_fextrema
         CACHE STRING "Path to fextrema executable for regression tests")
+      set(FEXTRACT_EXE ${PROJECT_BINARY_DIR}/Submodules/AMReX/Tools/Plotfile/amrex_fextract
+        CACHE STRING "Path to fextract executable for regression tests")
     endif()
     message(VERBOSE "fcompare executable: ${FCOMPARE_EXE}")
     message(VERBOSE "fextrema executable: ${FEXTREMA_EXE}")
+    message(VERBOSE "fextract executable: ${FEXTRACT_EXE}")
 else()
     message(STATUS "Using external AMReX")
 
@@ -342,14 +366,19 @@ else()
         CACHE STRING "Path to fcompare executable for regression tests")
       set(FEXTREMA_EXE ${AMReX_DIR}/../../../*/amrex_fextrema.exe
         CACHE STRING "Path to fextrema executable for regression tests")
+      set(FEXTRACT_EXE ${AMReX_DIR}/../../../*/amrex_fextract.exe
+        CACHE STRING "Path to fextract executable for regression tests")
     else()
       set(FCOMPARE_EXE ${AMReX_DIR}/../../../bin/amrex_fcompare
         CACHE STRING "Path to fcompare executable for regression tests")
       set(FEXTREMA_EXE ${AMReX_DIR}/../../../bin/amrex_fextrema
         CACHE STRING "Path to fextrema executable for regression tests")
+      set(FEXTRACT_EXE ${AMReX_DIR}/../../../bin/amrex_fextract
+        CACHE STRING "Path to fextract executable for regression tests")
     endif()
     message(VERBOSE "fcompare executable: ${FCOMPARE_EXE}")
     message(VERBOSE "fextrema executable: ${FEXTREMA_EXE}")
+    message(VERBOSE "fextract executable: ${FEXTRACT_EXE}")
 
 endif()
 
@@ -357,7 +386,7 @@ list(POP_BACK CMAKE_MESSAGE_CONTEXT)
 
 ########################## EKAT ##################################
 
-if(ERF_ENABLE_RRTMGP OR ERF_ENABLE_EAMXX_SHOC OR ERF_ENABLE_P3)
+if(ERF_ENABLE_RRTMGP OR ERF_ENABLE_EAMXX_SHOC)
   set(ERF_ENABLE_EKAT ON)
 else()
   set(ERF_ENABLE_EKAT OFF)
@@ -622,8 +651,6 @@ if(ERF_ENABLE_RRTMGP)
   endif()
 
   message(VERBOSE "Building RRTMGP with Kokkos support")
-  add_compile_options(-Wno-c++11-narrowing)
-  message(DEBUG "Adding -Wno-c++11-narrowing for mo_gas_optics_rrtmgp issue on sycl/hip RRTMGP target")
 
   # Build the static rrtmgp library
   set(RRTMGP_BIN ${PROJECT_BINARY_DIR}/Submodules/rrtmgp)
@@ -633,6 +660,10 @@ if(ERF_ENABLE_RRTMGP)
   # Set up kokkos library and definitions
   set(RRTMGP_ENABLE_KOKKOS TRUE)
   target_compile_definitions(rrtmgp PUBLIC RRTMGP_ENABLE_KOKKOS)
+  target_compile_options(rrtmgp PRIVATE
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wno-unused-local-typedefs>
+    $<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:-Wno-c++11-narrowing>
+  )
   target_link_libraries(rrtmgp kokkos)
   message(DEBUG "Added Kokkos to RRTMGP target")
 
@@ -658,30 +689,25 @@ if(ERF_ENABLE_EAMXX_SHOC)
   message(VERBOSE "SHOC source files will be compiled directly")
 
   # E3SM Cloned Check
-  if(ERF_ENABLE_EAMXX_SHOC OR ERF_ENABLE_P3)
-    message(VERBOSE "Checking EAMxx files from E3SM")
+  message(VERBOSE "Checking EAMxx files from E3SM")
 
-    set(E3SM_EXPECTED_PATH "${PROJECT_SOURCE_DIR}/external/E3SM")
+  set(E3SM_EXPECTED_PATH "${PROJECT_SOURCE_DIR}/external/E3SM")
 
-    if(NOT EXISTS "${PROJECT_SOURCE_DIR}/external/E3SM/components/eamxx/src/physics")
-        message(FATAL_ERROR
-            "E3SM provides eamxx required for SHOC/P3 but not found.\n"
-            "\n"
-            "This requires specific EAMxx physics source files from E3SM at commit 2eb52d9.\n"
-            "\n"
-            "Option 1 - Use provided script (recommended):\n"
-            "  ${PROJECT_SOURCE_DIR}/Build/eamxx_clone.sh\n"
-            "\n"
-            "Option 2 - Symlink existing E3SM (not tested, must be at commit 2eb52d9b3d):\n"
-            "  ln -s /path/to/your/E3SM ${PROJECT_SOURCE_DIR}/external/E3SM\n"
-            "\n"
-            "Or disable features:\n"
-            "  cmake -DERF_ENABLE_EAMXX_SHOC=OFF -DERF_ENABLE_P3=OFF ..\n")
-    endif()
-  else()
-    message(DEBUG "EKAT physics not enabled, skipping E3SM check")
+  if(NOT EXISTS "${PROJECT_SOURCE_DIR}/external/E3SM/components/eamxx/src/physics")
+      message(FATAL_ERROR
+          "E3SM provides eamxx required for SHOC but not found.\n"
+          "\n"
+          "This requires specific EAMxx physics source files from E3SM at commit 2eb52d9.\n"
+          "\n"
+          "Option 1 - Use provided script (recommended):\n"
+          "  ${PROJECT_SOURCE_DIR}/Build/eamxx_clone.sh\n"
+          "\n"
+          "Option 2 - Symlink existing E3SM (not tested, must be at commit 2eb52d9b3d):\n"
+          "  ln -s /path/to/your/E3SM ${PROJECT_SOURCE_DIR}/external/E3SM\n"
+          "\n"
+          "Or disable features:\n"
+          "  cmake -DERF_ENABLE_EAMXX_SHOC=OFF ..\n")
   endif()
-
 
   message(STATUS "SHOC configuration complete")
   list(POP_BACK CMAKE_MESSAGE_CONTEXT)

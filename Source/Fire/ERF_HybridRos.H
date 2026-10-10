@@ -39,6 +39,13 @@ struct HybridDirectionalSpec
     int                 secondary_model = HYBRID_MODEL_BALBI;
     DirectionalRosState secondary_state{};
 
+    /// erf.fire.rothermel_per_fuel on a spatial map: the per-cell Rothermel
+    /// coefficients a generic member reads instead of its uniform state.
+    const amrex::MultiFab*    fuel_model  = nullptr;  ///< Per-cell fuel code
+    const RothermelComputed*  rc_tbl      = nullptr;  ///< Device table by slot
+    int                       rc_tbl_size = 0;        ///< Entries in rc_tbl
+    int                       fuel_set    = 0;        ///< Fuel model set of the codes
+
     const amrex::MultiFab*         wind_eff   = nullptr;  ///< Effective wind [m/s]
     const amrex::MultiFab*         balbi_wind = nullptr;  ///< Wind the Balbi kernels consume
     const BalbiComputed*           bc         = nullptr;  ///< Balbi default coefficients
@@ -83,7 +90,10 @@ inline void fill_hybrid_member_directional(amrex::MultiFab& R,
         fill_balbi_ros_directional(R, phi, *spec.balbi_wind, slopes, geom,
                                    *spec.bc, *spec.bp, *spec.balbi_in, mask, wall_extrap);
     } else {
-        fill_directional_ros(R, phi, *spec.wind_eff, slopes, geom, state, mask, wall_extrap);
+        fill_directional_ros(R, phi, *spec.wind_eff, slopes, geom, state, mask, wall_extrap,
+                             DIRECTIONAL_SHAPE_PROJECTION, DIRECTIONAL_ELLIPSE_LW_MODEL,
+                             amrex::Real(8.0), DIRECTIONAL_WIND_COUPLING_PROJECTION,
+                             spec.fuel_model, spec.rc_tbl, spec.rc_tbl_size, spec.fuel_set);
     }
 }
 

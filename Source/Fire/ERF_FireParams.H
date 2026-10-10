@@ -3,6 +3,7 @@
 
 #include <AMReX_ParmParse.H>
 #include <ERF_FireBreak.H>
+#include <ERF_BurnCurve.H>
 #include <ERF_FireAcceleration.H>
 #include <string>
 #include <vector>
@@ -29,7 +30,7 @@ struct FireParams
     // finer level the fire grid covers that level's refined region, which must be
     // one rectangle of full-height columns that never regrids.
     int               anchor_level        = -1;          ///< AMR level of the fire grid, -1 = the finest level
-    int               fuel_model_id       = 1;           ///< Anderson FBFM13 model (1-13)
+    int               fuel_model_id       = 1;           ///< Fuel model code: Anderson 1-13; 101-204 with fuel_map.fuel_set = scott_burgan40; 1000-1015 for deck-defined custom fuels
     amrex::Real       moisture_1hr        = 0.08;        ///< 1-hour fuel moisture [fraction]
     amrex::Real       moisture_10hr       = 0.08;        ///< 10-hour fuel moisture [fraction]
     amrex::Real       moisture_100hr      = 0.10;        ///< 100-hour fuel moisture [fraction]
@@ -79,6 +80,13 @@ struct FireParams
         amrex::Real              diffusivity_scale = 1.0;            ///< multiplier on the lag-calibrated diffusivity
     } stick;
     amrex::Real       precip_rate_mm_hr   = 0.0;         ///< Uniform precipitation rate [mm/hr]
+    // Where the rain that wets the dead classes comes from:
+    //   "uniform"    (default) - precip_rate_mm_hr everywhere, as always
+    //   "atmosphere"           - the change per step of the microphysics surface
+    //                            precipitation accumulation of each column, in
+    //                            mm/hr (ERF_FirePrecip.H); needs a scheme with
+    //                            precipitation and moisture_dynamic
+    std::string       precip_source       = "uniform";
     amrex::Real       moisture_live       = 0.60;        ///< Live fuel moisture [fraction]
     // How the live classes move when moisture_dynamic is on:
     //   "legacy" (default) — the dead-fuel time-lag update with the 100-h lag,
@@ -133,12 +141,13 @@ struct FireParams
     amrex::Real       levelset_cfl            = 0.4;   ///< CFL for level-set subcycle
     amrex::Real       levelset_eps_visc       = 0.4;   ///< Artificial viscosity coefficient ε
     int               levelset_reinit_every   = 5;     ///< Reinitialize φ every N fire subcycles
-    int               levelset_reinit_iters   = 10;    ///< Sussman reinitialization iterations
-    amrex::Real       levelset_reinit_band_m  = -1.0;  ///< Band half-width L [m] where |phi| reaches 1; <=0 selects 3*min(dx,dy)
-    amrex::Real       levelset_reinit_dtau    = -1.0;  ///< Reinitialization pseudo-dt (<0 = auto = 0.5*min(dx,dy))
+    int               levelset_reinit_iters   = 1;     ///< Outer RK3 pseudo-time steps per reinitialization (WRF's fire_lsm_reinit_iter; WRF's own comment: "1 iter each time step is enough")
+    amrex::Real       levelset_reinit_dtau    = -1.0;  ///< Reinitialization pseudo-dt [m] (<=0 = auto: 0.01*dx for both schemes, as in WRF-Fire)
+    std::string       levelset_reinit_scheme  = "wrf"; ///< "wrf" (default, port of WRF-Fire's reinit_ls_rk3) or "jiang_peng" (Jiang & Peng 2000 HJ-WENO5 + SSP-RK3); see ERF_Reinitialize.H
+    amrex::Real       levelset_reinit_jp_sign_eps2 = -1.0; ///< jiang_peng only: term added to phi0^2 under the smoothed-sign sqrt (<=0 = auto dx^2, Jiang & Peng's "delta comparable to the spatial step size" read as an area scale); set to dx to test the literal-linear reading
     std::string       levelset_gradient       = "weno5z_front"; ///< One-sided derivatives: "upwind" (first order), "weno5z" (HJ-WENO5-Z everywhere) or "weno5z_front" (WENO within weno_band_cells of the front, first order elsewhere; the WRF-Fire default)
     int               levelset_grad_scheme    = 2;     ///< levelset_gradient resolved: 0 upwind, 1 weno5z, 2 weno5z_front
-    int               levelset_weno_band_cells = 4;    ///< Half-width in fire cells of the front band that uses WENO with "weno5z_front" (WRF-Fire fire_lsm_band_ngp)
+    int               levelset_weno_band_cells = 4;    ///< Half-width in fire cells of the front band that uses WENO with "weno5z_front" (WRF-Fire fire_lsm_band_ngp), and the WENO5-vs-ENO1 band threshold for reinitialize_phi (ERF_FireLayer.cpp scales this same value by dx for both call sites)
     amrex::Real       levelset_eps_visc_front  = 0.1;  ///< Artificial viscosity within visc_front_cells of the front (WRF-Fire fire_viscosity_bg; Jimenez y Munoz et al. 2026 use 0.1); < 0 uses eps_visc everywhere
     int               levelset_visc_front_cells = 2;   ///< Half-width in fire cells of the near-front viscosity band (WRF-Fire fire_viscosity_ngp)
     amrex::Real       levelset_visc_transition_cells = 2.0; ///< Width in fire cells of the linear blend from eps_visc_front to eps_visc beyond that band (WRF-Fire: fire_viscosity_band x fire_lsm_band_ngp = 0.5 x 4)
@@ -213,6 +222,10 @@ struct FireParams
     // Rayleigh damping). "add" accumulates into the freshly rebuilt source,
     // once per stage, so nothing is lost and nothing is double counted.
     std::string       source_mode             = "overwrite";
+    // Whether the deck set source_mode. With the default (not given) a run whose
+    // atmosphere has another theta or vapour source aborts at start-up
+    // (ERF::initializeFire): the default would silently discard that source.
+    bool              source_mode_given       = false;
     // Place the injected heat only in the open part of each atmospheric column:
     // below the sampled roof height a cell's weight is scaled by its open
     // fraction (one minus the area covered by non-burnable structure cells),
@@ -305,17 +318,24 @@ struct FireParams
     // ignition_x/y/r is always applied at t=0 regardless of this setting.
     //
     // CSV format: time_s  cx  cy  radius  [source_type]  [priority]
-    //   source_type: "sphere" (default) or "polyline"
+    //   source_type: an integer, 0 = disc (the only type implemented; the
+    //                parser reads an int, so the word "sphere" would stop it)
     //   priority: integer; higher priority events fire first within the same timestep
     //   Comment lines start with # or !
     //
-    // Polygon ignition (initial perimeter from a vertex file):
-    //   polygon_file: path to CSV of polygon vertices (x y per line)
-    //   polygon_type: "polygon" (closed) or "polyline" (open line fire)
-    //   polyline_width: half-width of line ignition zone [m]
+    // Polygon ignition (initial perimeter from one or more vertex files):
+    //   polygon_file: paths to CSVs of polygon vertices (x y per line); each
+    //                 file is one closed polygon or one open polyline, and
+    //                 every file is stamped with the min(phi, new) rule, so
+    //                 several files are several fires (two parallel lines,
+    //                 separate perimeters) that merge as they grow
+    //   polygon_type: "polygon" (closed) or "polyline" (open line fire), for every file
+    //   polyline_width: half-width of line ignition zone [m], for every file
     struct IgnitionParams {
         std::string   ignition_schedule_file  = "";         ///< Path to ignition schedule CSV; empty = disabled
-        std::string   polygon_file            = "";         ///< Path to polygon vertex CSV; empty = disabled
+        std::vector<std::string> polygon_files;             ///< Polygon vertex CSVs, one perimeter each; empty = disabled
+        /// A perimeter ignition is configured (at least one vertex file)
+        bool has_polygon () const { return !polygon_files.empty(); }
         std::string   polygon_type            = "polygon";  ///< "polygon" or "polyline"
         amrex::Real   polyline_width          = 10.0;       ///< Half-width of polyline ignition zone [m]
         // Observed-perimeter ignition with spin-up (WRF-SFIRE's perimeter
@@ -419,6 +439,23 @@ struct FireParams
     // ignore this flag.
     int               directional_wind_coupling = 0;
 
+    // erf.fire.directional_split_hamiltonian (opt-in, default false; needs
+    // directional_wind_coupling = "advective", directional_shape =
+    // "projection" and ros_model = "rothermel" -- the only combination where
+    // R(n)|grad phi| reduces to R0|grad phi| + max(V.grad phi,0), a genuine
+    // two-term Hamiltonian). When false (default), R(n) is built from a front
+    // normal (fill_directional_ros) and multiplied by a single Godunov-upwinded
+    // |grad phi|. That is correct for the isotropic R0 term but upwinds the
+    // wind-driven max(V.grad phi,0) term along the front normal, whereas its
+    // information travels along V, including the component tangential to the
+    // front; the resulting error depends on the angle between V and the grid
+    // axes. When true, the terms are upwinded separately: R0's isotropic
+    // Godunov flux as before, plus each advective term upwinded by the sign of
+    // V component by component (ordinary linear-advection upwind; V is known
+    // from the wind and slope fields, not derived from phi's gradient). See
+    // advect_levelset_directional_rk3_split() in ERF_DirectionalRos.H.
+    bool              directional_split_hamiltonian = false;
+
     // Flank rule of that ellipse, erf.fire.directional_ellipse_lw. "model" (0,
     // default) keeps the model's no-wind, no-slope rate at the flanks, so the
     // length-to-width ratio (R_h/R0 + 1)/2 is not capped. "anderson" (1) sets the
@@ -437,12 +474,15 @@ struct FireParams
 
     // Phase 13B: Rate-of-spread model selection and parameters
 
-    // Phase 13B: Rate-of-spread model selection.
-    // "rothermel"    — Rothermel (1972) single-class model (default, Phases 1-12)
-    // "macarthur"    — MacArthur (1966) Australian formula R = 0.18*exp(0.8424*U)
-    // "balbi"        — Balbi (2009) physical model R = A*(1+sin α − cos α)
-    // "cheney_gould" — Cheney & Gould (1998) empirical grassland model
+    // Rate-of-spread model selection (one_of check below lists the same names).
+    // "rothermel"    — Rothermel (1972) single-class model (default)
+    // "behave"       — BEHAVE multi-class Rothermel (ERF_BehaveModel.H)
+    // "balbi"        — Balbi (2009 explicit form, or 2020) physical model (ERF_BalbiModel.H)
     // "fbp"          — Canadian Forest Fire Behavior Prediction System (ERF_FbpModel.H)
+    // "hybrid"       — two of the above blended by a selector (ERF_HybridRos.H)
+    // "prescribed"   — a prescribed rate for verification (ERF_PrescribedFire.H)
+    // "cheney_gould" — Cheney & Gould (1998) empirical grassland model
+    // "macarthur"    — McArthur grassland formula R = 0.18*exp(0.8424*U)
     std::string       ros_model = "rothermel";  ///< ROS model selector
 
     // The Rothermel/BEHAVE reaction-velocity exponent A (Gamma' = Gamma'_max *
@@ -499,7 +539,7 @@ struct FireParams
         amrex::Real C_pa     = 1150.0;   ///< Specific heat of air [J/(kg·K)]
         amrex::Real C_pw     = 4180.0;   ///< Specific heat of water [J/(kg·K)]
         amrex::Real T_vap    = 373.0;    ///< Water vaporisation temperature [K]
-        amrex::Real K1       = 130.0;    ///< Convective decay coefficient [-]
+        amrex::Real K1       = 130.0;    ///< Drag coefficient of the 2020 convective term [s/m] (exp(-K1 sqrt(beta) R))
         amrex::Real st       = 17.0;     ///< Stoichiometric coefficient [-]
         amrex::Real rho_a    = 1.2;      ///< Air density [kg/m³]
         amrex::Real sigma_B  = 5.670374e-8; ///< Stefan-Boltzmann constant [W/(m²·K⁴)]
@@ -679,6 +719,33 @@ struct FireParams
         // leaks into the wind of the fire cells around it. Off by default;
         // no effect with wind_interp = "nearest".
         bool        wind_open_columns = false;
+        // Structure ignition and burning on the exposure accumulators
+        // (erf.fire.structures.ignition.*; needs exposure.enable). A
+        // structure ignites when the largest accumulated heat load in its
+        // wall band reaches heat_load_J_m2, or ember_count brands have landed
+        // on its footprint, or the largest fireline intensity in its band has
+        // spent residence_s above intensity_kW_m (a threshold <= 0 turns that
+        // criterion off). A burning structure releases heat on its footprint
+        // following the EN 1991-1-2 Annex E.4 curve (t-squared growth to
+        // peak_flux_W_m2 over growth_time_s, a plateau until 70 % of
+        // fuel_load_J_m2 is released, a linear decay), launches brands
+        // through the spotting model when that is on, and spreads
+        // rad_fraction of its release as ground point sources onto the
+        // cells within rad_radius_m, where it adds to the heat-load
+        // accumulator; that is how it loads its neighbours. Off by default;
+        // see ERF_StructureIgnition.H for the sources of the defaults.
+        struct IgnitionParams {
+            bool        enable             = false;
+            amrex::Real heat_load_J_m2     = 6.0e6;   ///< Band heat load at ignition [J/m2]; <= 0 off
+            int         ember_count        = 50;      ///< Brands on the footprint at ignition; <= 0 off
+            amrex::Real intensity_kW_m     = 1000.0;  ///< Band intensity threshold [kW/m]; <= 0 off
+            amrex::Real residence_s        = 60.0;    ///< Time above intensity_kW_m at ignition [s]
+            amrex::Real peak_flux_W_m2     = 2.5e5;   ///< Peak heat release per unit footprint area [W/m2]
+            amrex::Real fuel_load_J_m2     = 7.8e8;   ///< Heat released over the whole burn [J/m2]
+            amrex::Real growth_time_s      = 600.0;   ///< Time from ignition to the peak flux [s]
+            amrex::Real rad_fraction = 0.3;     ///< Share of the release radiated onto the surroundings
+            amrex::Real rad_radius_m = 100.0;   ///< Reach of the incident radiant flux [m]; <= 0 off
+        } ignition;
     } structures;
 
     // Firebreak cells stamped at initialization are also held in the
@@ -688,13 +755,24 @@ struct FireParams
 
     // Evaluate the Rothermel coefficients per cell from the spatial fuel map
     // instead of the domain fuel_model_id. Off by default: the Rothermel
-    // kernel then spreads with the domain fuel everywhere, as it always has,
-    // and only the heat flux and the Balbi kernels see the map.
+    // kernel then spreads with the domain fuel everywhere, as it always has.
+    // The map still reaches the heat flux, the fuel load, the residence and
+    // burnout times, the WAF, the Byram diagnostics and the Balbi kernels
+    // whatever the ROS model (see ERF_CustomFuel.H).
     bool rothermel_per_fuel = false;
 
     // Phase 10: Firebreak barriers (up to 10, indexed by N=0..9)
     int n_firebreaks = 0;
     std::vector<FireBreak> firebreaks;
+
+    // Suppression actions (fire lines, retardant drops, burnout) read from a
+    // watched action file; see ERF_FireSuppression.H. Off by default.
+    struct SuppressionParams {
+        bool        enable        = false;
+        std::string file;                          ///< Action file (whitespace separated, # comments)
+        int         poll_interval = 10;            ///< Fire steps between mtime checks; 0 = read once
+        std::string log           = "suppression_log.csv"; ///< Event log (applied, expired, hold_failed, ...)
+    } suppression;
 
     // Phase 4: smoke tracer
     bool  smoke_enable           = false;
@@ -733,6 +811,22 @@ struct FireParams
        auto fraction = [&](const char* key, amrex::Real v) {
            if (!(v >= 0.0 && v <= 1.0)) fail(std::string("erf.fire.") + key + " must be in [0,1], got " + std::to_string(v));
        };
+       // Keys that only a switch reads, given with the switch off. A deck that
+       // never set the switch forgot it: abort, naming it. A deck that sets it
+       // to false explicitly is a variant switching the feature off on top of
+       // an included base: warn once per key and go on.
+       auto keys_need = [&](const char* sw, bool on, std::initializer_list<const char*> keys) {
+           if (on) { return; }
+           for (const char* k : keys) {
+               if (!pp.contains(k)) { continue; }
+               if (pp.contains(sw)) {
+                   amrex::Print() << "[FIRE] WARNING: erf.fire." << k << " is ignored with erf.fire."
+                                  << sw << " = false\n";
+               } else {
+                   fail(std::string("erf.fire.") + k + " needs erf.fire." + sw + " = true");
+               }
+           }
+       };
        pp.query("enable", enable);
        pp.query("fire_debug", fire_debug);
        pp.query("grid_ratio", grid_ratio);
@@ -759,16 +853,21 @@ struct FireParams
        positive("wind_ref_ht", wind_ref_ht);
        pp.query("wind_sample_ht", wind_sample_ht);
        pp.query("wind_sample_z0", wind_sample_z0);
+       // Per-fuel wind height: the log-law target is then the per-fuel fcwh
+       // (6.096 m for every tabulated fuel, ERF_FuelWindHeight.H), not wind_ref_ht
+       pp.query("use_per_fuel_wind_ht", use_per_fuel_wind_ht);
        if (wind_sample_ht > 0.0) {
-           if (wind_sample_ht <= wind_ref_ht) {
-               amrex::Abort("erf.fire.wind_sample_ht must exceed erf.fire.wind_ref_ht (sample above the target height)");
+           const amrex::Real target_ht = use_per_fuel_wind_ht ? amrex::max(wind_ref_ht, amrex::Real(6.096)) : wind_ref_ht;
+           if (wind_sample_ht <= target_ht) {
+               amrex::Abort("erf.fire.wind_sample_ht must exceed the target height (erf.fire.wind_ref_ht, or the"
+                            " 6.096 m per-fuel height with erf.fire.use_per_fuel_wind_ht): sample above the target height");
            }
            if (wind_sample_z0 <= 0.0 || wind_sample_z0 >= wind_ref_ht) {
                amrex::Abort("erf.fire.wind_sample_z0 must be positive and below erf.fire.wind_ref_ht");
            }
+       } else if (pp.contains("wind_sample_ht") && wind_sample_ht < 0.0) {
+           fail("erf.fire.wind_sample_ht must be > 0 (a sampling height) or 0 (off), got " + std::to_string(wind_sample_ht));
        }
-       // Phase 13A: Per-fuel wind height
-       pp.query("use_per_fuel_wind_ht", use_per_fuel_wind_ht);
        pp.query("use_waf", use_waf);
        pp.query("waf_formula", waf_formula);
        one_of("waf_formula", waf_formula, {"andrews", "behaviorplus"});
@@ -778,11 +877,40 @@ struct FireParams
        pp.query("k_shelter", k_shelter);
        pp.query("k_valley", k_valley);
        pp.query("k_deflect", k_deflect);
+       // the terrain-wind multipliers: a non-positive one would reverse or
+       // cancel the wind; they are read only with use_terrain_wind
+       positive("k_ridge",   k_ridge);
+       positive("k_shelter", k_shelter);
+       positive("k_valley",  k_valley);
+       nonneg("k_deflect",   k_deflect);
+       if (!use_terrain_wind && (pp.contains("k_ridge") || pp.contains("k_shelter")
+                                 || pp.contains("k_valley") || pp.contains("k_deflect"))) {
+           fail("erf.fire.k_ridge/k_shelter/k_valley/k_deflect need erf.fire.use_terrain_wind = true");
+       }
 
        // Fuel moisture control (Phase 4)
        pp.query("moisture_dynamic", moisture_dynamic);
        pp.query("precip_rate_mm_hr", precip_rate_mm_hr);
+       nonneg("precip_rate_mm_hr", precip_rate_mm_hr);
+       pp.query("precip_source", precip_source);
+       one_of("precip_source", precip_source, {"uniform", "atmosphere"});
+       if (precip_source == "atmosphere") {
+           if (!moisture_dynamic) {
+               fail("erf.fire.precip_source = atmosphere wets the dead fuel classes with the atmosphere's rain,"
+                    " but erf.fire.moisture_dynamic = false holds them fixed. Set erf.fire.moisture_dynamic = true"
+                    " or erf.fire.precip_source = uniform.");
+           }
+           if (precip_rate_mm_hr > 0.0) {
+               fail("erf.fire.precip_rate_mm_hr = " + std::to_string(precip_rate_mm_hr)
+                    + " is set with erf.fire.precip_source = atmosphere; the rain has one source, the uniform"
+                    " rate is not added to the atmosphere's. Remove one of the two.");
+           }
+       }
        pp.query("moisture_live", moisture_live);
+       // a fraction of dry mass; live fuels run to 250-300 %
+       if (!(moisture_live >= 0.0 && moisture_live <= 3.0)) {
+           fail("erf.fire.moisture_live must be in [0, 3] (fraction of dry mass), got " + std::to_string(moisture_live));
+       }
        pp.query("moisture_model", moisture_model);
        pp.query("emc_model", emc_model);
        if (emc_model != "legacy" && emc_model != "van_wagner") {
@@ -799,17 +927,42 @@ struct FireParams
        if (moisture_live_model != "legacy" && moisture_live_model != "fixed") {
            amrex::Abort("erf.fire.moisture_live_model must be \"legacy\" or \"fixed\"");
        }
+       // Every moisture-model key is read only by the dynamic update: given
+       // with erf.fire.moisture_dynamic = false it would be silently ignored.
+       if (!moisture_dynamic) {
+           for (const char* k : {"moisture_model", "emc_model", "moisture_live_model", "precip_source",
+                                 "stick.n_shells", "stick.radius_cm", "stick.rain_surface_moisture",
+                                 "stick.diffusivity_scale"}) {
+               if (pp.contains(k)) {
+                   fail(std::string("erf.fire.") + k + " is set but erf.fire.moisture_dynamic = false holds the"
+                        " fuel moisture fixed; set erf.fire.moisture_dynamic = true or remove the key");
+               }
+           }
+           if (precip_rate_mm_hr > 0.0) {
+               fail("erf.fire.precip_rate_mm_hr = " + std::to_string(precip_rate_mm_hr)
+                    + " but erf.fire.moisture_dynamic = false holds the dead classes fixed, so the rain"
+                    " wets nothing; set erf.fire.moisture_dynamic = true or remove the rate");
+           }
+       }
+       const bool stick_key_given = pp.contains("stick.n_shells") || pp.contains("stick.radius_cm")
+                                 || pp.contains("stick.rain_surface_moisture") || pp.contains("stick.diffusivity_scale");
        if (moisture_model == "stick") {
            if (stick.n_shells < 1 || stick.n_shells > 16) { amrex::Abort("erf.fire.stick.n_shells must be 1-16"); }
            if (stick.radius_cm.size() != 3) { amrex::Abort("erf.fire.stick.radius_cm needs 3 values (1-h, 10-h, 100-h)"); }
            for (auto r : stick.radius_cm) { if (r <= 0.0) amrex::Abort("erf.fire.stick.radius_cm must be positive"); }
            if (stick.diffusivity_scale <= 0.0) { amrex::Abort("erf.fire.stick.diffusivity_scale must be positive"); }
+           // the stick kernel clamps every shell to [0.01, 0.40] (FuelMoistureConst::M_MIN/M_MAX)
+           if (!(stick.rain_surface_moisture >= 0.01 && stick.rain_surface_moisture <= 0.40)) {
+               fail("erf.fire.stick.rain_surface_moisture must be in [0.01, 0.40], got "
+                    + std::to_string(stick.rain_surface_moisture));
+           }
+       } else if (stick_key_given) {
+           fail("erf.fire.stick.* keys need erf.fire.moisture_model = stick");
        }
 
-       // Moisture of extinction (Phase 4)
-
-       // Heat flux parameters (Phase 5)
+       // Heat flux parameters
        pp.query("tau_residence_s", tau_residence_s);
+       nonneg("tau_residence_s", tau_residence_s);   // 0 = derive from the fuel SAV
        pp.query("burnout_model", burnout_model);
        pp.queryarr("burnout_times_s", burnout_times_s);
        pp.query("burnout_time_to_efold", burnout_time_to_efold);
@@ -830,6 +983,12 @@ struct FireParams
        pp.query("farsite.coeff_c", farsite_coeff_c);
        pp.query("farsite.gaussian_sigma", farsite_gaussian_sigma);
        pp.query("farsite.cfl_fire", farsite_cfl_fire);
+       // the Richards coefficients divide the gauge (a zero one is no spread
+       // that way, a negative one a negative rate); phi_threshold is a distance
+       positive("farsite.coeff_a", farsite_coeff_a);
+       positive("farsite.coeff_b", farsite_coeff_b);
+       positive("farsite.coeff_c", farsite_coeff_c);
+       nonneg("farsite.phi_threshold", farsite_phi_threshold);
        {
            std::string front_update_str = (farsite_front_update == 0) ? "legacy" : "front_cell";
            pp.query("farsite.front_update", front_update_str);
@@ -849,8 +1008,10 @@ struct FireParams
        pp.query("levelset.eps_visc", levelset_eps_visc);
        pp.query("levelset.reinit_every", levelset_reinit_every);
        pp.query("levelset.reinit_iters", levelset_reinit_iters);
-       pp.query("levelset.reinit_band_m", levelset_reinit_band_m);
        pp.query("levelset.reinit_dtau", levelset_reinit_dtau);
+       pp.query("levelset.reinit_scheme", levelset_reinit_scheme);
+       one_of("levelset.reinit_scheme", levelset_reinit_scheme, {"wrf", "jiang_peng"});
+       pp.query("levelset.reinit_jp_sign_eps2", levelset_reinit_jp_sign_eps2);
        pp.query("levelset.wall_extrapolate", levelset_wall_extrapolate);
        pp.query("levelset.ellipse",        levelset_ellipse);
        pp.query("levelset.ellipse_lw",     levelset_ellipse_lw);
@@ -865,6 +1026,41 @@ struct FireParams
        pp.query("levelset.eps_visc_front", levelset_eps_visc_front);
        pp.query("levelset.visc_front_cells", levelset_visc_front_cells);
        pp.query("levelset.visc_transition_cells", levelset_visc_transition_cells);
+       // ranges of the level-set controls (cfl, reinit_every and reinit_iters
+       // are checked in verify_fire_prerequisites with the grid in hand)
+       // (levelset.reinit_dtau and reinit_jp_sign_eps2 take any value: <= 0
+       // selects the automatic 0.01 dx and dx^2, the defaults are -1)
+       nonneg("levelset.eps_visc", levelset_eps_visc);
+       if (levelset_eps_visc_front >= 0.0 && levelset_visc_front_cells < 0) {
+           fail("erf.fire.levelset.visc_front_cells must be >= 0, got " + std::to_string(levelset_visc_front_cells));
+       }
+       nonneg("levelset.visc_transition_cells", levelset_visc_transition_cells);
+       if (!levelset_ellipse && (pp.contains("levelset.ellipse_lw") || pp.contains("levelset.ellipse_lw_max"))) {
+           fail("erf.fire.levelset.ellipse_lw and ellipse_lw_max need erf.fire.levelset.ellipse = true");
+       }
+       // Keys of the other front method are read but never used; say so once
+       // rather than abort, since verification decks carry both families.
+       if (propagation_method == "levelset") {
+           for (const char* k : {"farsite.phi_threshold", "farsite.use_anderson_lw", "farsite.coeff_a",
+                                 "farsite.coeff_b", "farsite.coeff_c", "farsite.gaussian_sigma",
+                                 "farsite.cfl_fire", "farsite.front_update"}) {
+               if (pp.contains(k)) {
+                   amrex::Print() << "[FIRE] WARNING: erf.fire." << k
+                                  << " is ignored with erf.fire.propagation_method = levelset\n";
+               }
+           }
+       } else {
+           for (const char* k : {"levelset.cfl", "levelset.eps_visc", "levelset.reinit_every", "levelset.reinit_iters",
+                                 "levelset.reinit_dtau", "levelset.reinit_scheme", "levelset.reinit_jp_sign_eps2",
+                                 "levelset.wall_extrapolate", "levelset.ellipse", "levelset.ellipse_lw",
+                                 "levelset.ellipse_lw_max", "levelset.gradient", "levelset.weno_band_cells",
+                                 "levelset.eps_visc_front", "levelset.visc_front_cells", "levelset.visc_transition_cells"}) {
+               if (pp.contains(k)) {
+                   amrex::Print() << "[FIRE] WARNING: erf.fire." << k
+                                  << " is ignored with erf.fire.propagation_method = farsite\n";
+               }
+           }
+       }
        if (levelset_gradient == "upwind") {
            levelset_grad_scheme = 0;
        } else if (levelset_gradient == "weno5z") {
@@ -906,7 +1102,7 @@ struct FireParams
        if (heat_flux_partition != "legacy" && heat_flux_partition != "cfbm") {
            amrex::Abort("erf.fire.heat_flux_partition must be \"legacy\" or \"cfbm\"");
        }
-       pp.query("source_mode", source_mode);
+       source_mode_given = pp.query("source_mode", source_mode);
        if (source_mode != "overwrite" && source_mode != "add") {
            amrex::Abort("erf.fire.source_mode must be \"overwrite\" or \"add\"");
        }
@@ -949,7 +1145,15 @@ struct FireParams
            fraction("spotting.P_base", sp.P_base);
            fraction("spotting.P_catch", sp.P_catch);
            one_of("spotting.fuel_system", sp.fuel_system, {"13", "40"});
+           positive("spotting.spot_radius", sp.spot_radius);
+           fraction("spotting.reentry_fuel_thresh", sp.reentry_fuel_thresh);   // residual fraction of the initial load
+           // random_seed <= 0 seeds from the clock (a run that cannot be repeated)
        }
+       keys_need("spotting.enable", sp.enable,
+                 {"spotting.I_B_min", "spotting.P_base", "spotting.terminal_velocity",
+                  "spotting.n_traj_steps", "spotting.spot_radius", "spotting.launch_from",
+                  "spotting.front_band", "spotting.P_catch", "spotting.reentry_fuel_thresh",
+                  "spotting.random_seed", "spotting.spotting_interval"});
 
        // Phase 9: Crown fire initiation parameters
        auto& cr = crown;
@@ -963,16 +1167,37 @@ struct FireParams
        pp.query("crown.ros_model",       cr.ros_model);
        one_of("crown.ros_model", cr.ros_model, {"cruz", "rothermel1991", "van_wagner_proxy"});
        pp.query("crown.use_passive_blend", cr.use_passive_blend);
+       // the canopy geometry multiplies and divides in the Van Wagner / Cruz
+       // kernels; foliar moisture [%] and the 10 m wind [km/h] enter as given
+       positive("crown.canopy_base_ht",  cr.canopy_base_ht);
+       positive("crown.canopy_bulk_den", cr.canopy_bulk_den);
+       positive("crown.canopy_depth",    cr.canopy_depth);
+       positive("crown.h_crown_BTU_lb",  cr.h_crown_BTU_lb);
+       nonneg("crown.foliar_moisture",   cr.foliar_moisture);
+       nonneg("crown.wind_10m_kmh",      cr.wind_10m_kmh);
+       if (!cr.enable) {
+           // a surface-only control deck keeps the canopy keys; say they are idle
+           for (const char* k : {"crown.canopy_base_ht", "crown.canopy_bulk_den", "crown.canopy_depth",
+                                 "crown.foliar_moisture", "crown.h_crown_BTU_lb", "crown.wind_10m_kmh",
+                                 "crown.ros_model", "crown.use_passive_blend"}) {
+               if (pp.contains(k)) {
+                   amrex::Print() << "[FIRE] WARNING: erf.fire." << k << " is ignored with erf.fire.crown.enable = false\n";
+               }
+           }
+       }
 
-       // Phase 9: Flame temperature diagnostic
+       // Flame temperature diagnostic
        pp.query("flame_temp_method", flame_temp_method);
        one_of("flame_temp_method", flame_temp_method, {"byram_radiant", "mcalpine_heat", "nelson_emissivity"});
        pp.query("flame_temp_T_amb",  flame_temp_T_amb);
+       positive("flame_temp_T_amb", flame_temp_T_amb);   // [K], a divisor of the heat-balance forms
 
-       // Phase 9: Flame tilt angle diagnostic
+       // Flame tilt angle diagnostic
        pp.query("compute_flame_tilt", compute_flame_tilt);
        pp.query("flame_tilt_T_amb",   flame_tilt_T_amb);
        pp.query("flame_tilt_rho_air", flame_tilt_rho_air);
+       positive("flame_tilt_T_amb",   flame_tilt_T_amb);     // [K]
+       positive("flame_tilt_rho_air", flame_tilt_rho_air);   // [kg/m3]
 
        // Phase 10: fuel map
        auto& fm = fuel_map;
@@ -985,11 +1210,16 @@ struct FireParams
        // Phase 11: multi-ignition schedule and polygon ignition
        auto& ig = ignition;
        pp.query("ignition.schedule_file", ig.ignition_schedule_file);
-       pp.query("ignition.polygon_file",  ig.polygon_file);
+       {
+           // One or more vertex files; an empty entry ("" in a template deck) is no file.
+           std::vector<std::string> files;
+           pp.queryarr("ignition.polygon_file", files);
+           for (const auto& f : files) { if (!f.empty()) { ig.polygon_files.push_back(f); } }
+       }
        pp.query("ignition.polygon_type",  ig.polygon_type);
        pp.query("ignition.polyline_width", ig.polyline_width);
        one_of("ignition.polygon_type", ig.polygon_type, {"polygon", "polyline"});
-       if (!ig.polygon_file.empty() && ig.polygon_type == "polyline") positive("ignition.polyline_width", ig.polyline_width);
+       if (ig.has_polygon() && ig.polygon_type == "polyline") positive("ignition.polyline_width", ig.polyline_width);
        pp.query("ignition.polygon_time",         ig.polygon_time);
        pp.query("ignition.polygon_interior_ros", ig.polygon_interior_ros);
        pp.query("ignition.polygon_interior_tau", ig.polygon_interior_tau);
@@ -1014,6 +1244,16 @@ struct FireParams
        pp.query("accel.perim_limit",     ac.perim_limit);
        pp.query("accel.enable_wind_lag", ac.enable_wind_lag);
        pp.query("accel.tau_wind",        ac.tau_wind);
+       // L_acc [m] and the A rates [1/min] divide and exponentiate; tau_wind
+       // [s] is the lag time constant (a zero one divides by zero)
+       positive("accel.L_acc",   ac.L_acc);
+       positive("accel.A_point", ac.A_point);
+       positive("accel.A_line",  ac.A_line);
+       nonneg("accel.perim_limit", ac.perim_limit);
+       if (ac.enable_wind_lag) { positive("accel.tau_wind", ac.tau_wind); }
+       keys_need("accel.enable", ac.enable,
+                 {"accel.use_temporal", "accel.L_acc", "accel.A_point", "accel.A_line",
+                  "accel.perim_limit", "accel.enable_wind_lag", "accel.tau_wind", "accel.clock"});
        {
            std::string clock_str = (ac.clock == accel_clock::front) ? "front" : "legacy";
            pp.query("accel.clock", clock_str);
@@ -1054,6 +1294,7 @@ struct FireParams
            } else {
                amrex::Abort("erf.fire.directional_wind_coupling must be \"projection\" or \"advective\"");
            }
+           pp.query("directional_split_hamiltonian", directional_split_hamiltonian);
 
            std::string lw_str = (directional_ellipse_lw == 1) ? "anderson" : "model";
            pp.query("directional_ellipse_lw", lw_str);
@@ -1161,6 +1402,20 @@ struct FireParams
                if (hy.blend_width < 0.0) {
                    amrex::Abort("erf.fire.hybrid.blend_width must be >= 0");
                }
+               if (hy.structure_min_height < 0.0) {
+                   amrex::Abort("erf.fire.hybrid.structure_min_height must be >= 0");
+               }
+               if (hy.wind_lo < 0.0) {
+                   amrex::Abort("erf.fire.hybrid.wind_lo must be >= 0");
+               }
+           } else {
+               for (const char* k : {"hybrid.primary", "hybrid.secondary", "hybrid.selector", "hybrid.region",
+                                     "hybrid.secondary_fuel_codes", "hybrid.structure_file", "hybrid.structure_min_height",
+                                     "hybrid.structure_distance", "hybrid.wind_lo", "hybrid.wind_hi", "hybrid.blend_width"}) {
+                   if (pp.contains(k)) {
+                       fail(std::string("erf.fire.") + k + " needs erf.fire.ros_model = hybrid");
+                   }
+               }
            }
        }
 
@@ -1228,6 +1483,19 @@ struct FireParams
        pp.query("structures.file",       structures.file);
        pp.query("structures.min_height", structures.min_height);
        pp.query("structures.wind_open_columns", structures.wind_open_columns);
+       {
+           auto& st_ig = structures.ignition;
+           pp.query("structures.ignition.enable",             st_ig.enable);
+           pp.query("structures.ignition.heat_load_J_m2",     st_ig.heat_load_J_m2);
+           pp.query("structures.ignition.ember_count",        st_ig.ember_count);
+           pp.query("structures.ignition.intensity_kW_m",     st_ig.intensity_kW_m);
+           pp.query("structures.ignition.residence_s",        st_ig.residence_s);
+           pp.query("structures.ignition.peak_flux_W_m2",     st_ig.peak_flux_W_m2);
+           pp.query("structures.ignition.fuel_load_J_m2",     st_ig.fuel_load_J_m2);
+           pp.query("structures.ignition.growth_time_s",      st_ig.growth_time_s);
+           pp.query("structures.ignition.rad_fraction", st_ig.rad_fraction);
+           pp.query("structures.ignition.rad_radius_m", st_ig.rad_radius_m);
+       }
        pp.queryarr("fuel_map.nonburnable_codes", fuel_map.nonburnable_codes);
        pp.query("fuel_map.fuel_set",       fuel_map.fuel_set);
        pp.query("fuel_map.sb40_crosswalk", fuel_map.sb40_crosswalk);
@@ -1256,6 +1524,16 @@ struct FireParams
                amrex::Abort("erf.fire.fuel_model_id must be an Anderson (1-13) or Scott-Burgan (101-204) code with fuel_set = scott_burgan40");
            }
            if (fuel_map.sb40_crosswalk) { fuel_model_id = sb40_to_anderson(fuel_model_id); }
+       } else {
+           // Anderson set: 1-13, or a deck-defined custom code (ERF_CustomFuel.H,
+           // 1000-1015). Anything else used to fall silently to fuel model 1.
+           const bool ok13     = (fuel_model_id >= 1 && fuel_model_id <= 13);
+           const bool okcustom = (fuel_model_id >= 1000 && fuel_model_id <= 1015);
+           if (!ok13 && !okcustom) {
+               fail("erf.fire.fuel_model_id = " + std::to_string(fuel_model_id)
+                    + " is not an Anderson code (1-13) or a custom code (1000-1015); codes 101-204"
+                    " need erf.fire.fuel_map.fuel_set = scott_burgan40");
+           }
        }
        pp.query("firebreak.use_mask", firebreak_use_mask);
        if (structures.enable) {
@@ -1279,11 +1557,82 @@ struct FireParams
                amrex::Abort("erf.fire.exposure.enable needs erf.fire.structures.enable");
            }
            if (exposure.interval < 1) { amrex::Abort("erf.fire.exposure.interval must be >= 1"); }
-           if (exposure.ring < 1)     { amrex::Abort("erf.fire.exposure.ring must be >= 1"); }
+           // the band is the ghost width of the structure-id raster and the
+           // neighbour scan of the house-to-house rule keeps at most 8 ids
+           if (exposure.ring < 1 || exposure.ring > 4) {
+               amrex::Abort("erf.fire.exposure.ring must be 1-4 fire cells");
+           }
        }
+       keys_need("structures.ignition.enable", structures.ignition.enable,
+                 {"structures.ignition.heat_load_J_m2", "structures.ignition.ember_count",
+                  "structures.ignition.intensity_kW_m", "structures.ignition.residence_s",
+                  "structures.ignition.peak_flux_W_m2", "structures.ignition.fuel_load_J_m2",
+                  "structures.ignition.growth_time_s", "structures.ignition.rad_fraction",
+                  "structures.ignition.rad_radius_m"});
        if (heat_open_fraction && !structures.enable) {
            amrex::Abort("erf.fire.heat_open_fraction needs erf.fire.structures.enable");
        }
+       if (structures.ignition.enable) {
+           const auto& st_ig = structures.ignition;
+           if (!exposure.enable) {
+               amrex::Abort("erf.fire.structures.ignition.enable needs erf.fire.exposure.enable "
+                            "(the ignition rule reads the exposure accumulators)");
+           }
+           if (st_ig.heat_load_J_m2 <= 0.0 && st_ig.ember_count <= 0 && st_ig.intensity_kW_m <= 0.0) {
+               amrex::Abort("erf.fire.structures.ignition: at least one of heat_load_J_m2, ember_count "
+                            "and intensity_kW_m must be positive, or no structure can ignite");
+           }
+           if (st_ig.residence_s < 0.0) {
+               amrex::Abort("erf.fire.structures.ignition.residence_s must be >= 0");
+           }
+           if (st_ig.peak_flux_W_m2 <= 0.0) {
+               amrex::Abort("erf.fire.structures.ignition.peak_flux_W_m2 must be > 0");
+           }
+           if (st_ig.fuel_load_J_m2 <= 0.0) {
+               amrex::Abort("erf.fire.structures.ignition.fuel_load_J_m2 must be > 0");
+           }
+           if (st_ig.growth_time_s < 0.0) {
+               amrex::Abort("erf.fire.structures.ignition.growth_time_s must be >= 0");
+           }
+           // EN 1991-1-2 Annex E.4: the decay releases 30 % of the load, so the
+           // t-squared growth (which releases peak * growth / 3) must leave room.
+           // The decision is make_burn_curve's own (the positivity of the three
+           // inputs was checked above), so a deck that passes here always builds
+           // its curve: 0.7 * load and load - 0.3 * load differ by one ulp.
+           erf_structure_ignition::BurnCurve scratch_curve;
+           if (!erf_structure_ignition::make_burn_curve(st_ig.peak_flux_W_m2, st_ig.fuel_load_J_m2,
+                                                        st_ig.growth_time_s, scratch_curve)) {
+               amrex::Abort("erf.fire.structures.ignition: peak_flux_W_m2 * growth_time_s / 3 exceeds "
+                            "70 % of fuel_load_J_m2, so the growth phase alone would release more "
+                            "than the EN 1991-1-2 curve allows; shorten growth_time_s or raise fuel_load_J_m2");
+           }
+           if (st_ig.rad_fraction < 0.0 || st_ig.rad_fraction > 1.0) {
+               amrex::Abort("erf.fire.structures.ignition.rad_fraction must be in [0, 1]");
+           }
+           if (st_ig.rad_radius_m < 0.0) {
+               amrex::Abort("erf.fire.structures.ignition.rad_radius_m must be >= 0");
+           }
+       }
+
+       // Suppression (ERF_FireSuppression.H): every key is checked here, the
+       // action file itself at the first read.
+       pp.query("suppression.enable",        suppression.enable);
+       pp.query("suppression.file",          suppression.file);
+       pp.query("suppression.poll_interval", suppression.poll_interval);
+       pp.query("suppression.log",           suppression.log);
+       if (suppression.enable) {
+           if (suppression.file.empty()) {
+               amrex::Abort("erf.fire.suppression.enable needs erf.fire.suppression.file");
+           }
+           if (suppression.poll_interval < 0) {
+               amrex::Abort("erf.fire.suppression.poll_interval must be >= 0 (0 = read once at start)");
+           }
+           if (suppression.log.empty()) {
+               amrex::Abort("erf.fire.suppression.log must name a file");
+           }
+       }
+       keys_need("suppression.enable", suppression.enable,
+                 {"suppression.file", "suppression.poll_interval", "suppression.log"});
 
        // Balbi parameters
        auto& bl = balbi;
@@ -1350,11 +1699,58 @@ struct FireParams
        }
        pp.query("balbi.k_upward",                   bl.k_upward);
        pp.query("balbi.hf_ref_height",              bl.hf_ref_height);
+       // Ranges the Balbi kernels divide, root or exponentiate by. Checked
+       // whenever given, so a typo is caught before the model is selected.
+       positive("balbi.T_a",     bl.T_a);
+       positive("balbi.T_f",     bl.T_f);
+       positive("balbi.T_i",     bl.T_i);
+       positive("balbi.delta_H", bl.delta_H);
+       positive("balbi.C_pf",    bl.C_pf);
+       positive("balbi.r_00",    bl.r_00);
+       positive("balbi.tau_0",   bl.tau_0);
+       positive("balbi.C_pa",    bl.C_pa);
+       positive("balbi.C_pw",    bl.C_pw);
+       positive("balbi.T_vap",   bl.T_vap);
+       positive("balbi.K1",      bl.K1);
+       positive("balbi.rho_a",   bl.rho_a);
+       positive("balbi.sigma_B", bl.sigma_B);
+       positive("balbi.tol",     bl.tol);
+       nonneg("balbi.st",            bl.st);
+       nonneg("balbi.k_upward",      bl.k_upward);
+       nonneg("balbi.hf_ref_height", bl.hf_ref_height);
+       fraction("balbi.chi_0",       bl.chi_0);
+       fraction("balbi.herb_curing", bl.herb_curing);
+       if (bl.max_iter < 1) {
+           // with no bisection step the solver returns the bracket midpoint, 15 m/s
+           fail("erf.fire.balbi.max_iter must be >= 1, got " + std::to_string(bl.max_iter));
+       }
+       if (!(bl.T_i > bl.T_a)) {
+           fail("erf.fire.balbi.T_i (ignition temperature) must exceed erf.fire.balbi.T_a (ambient)");
+       }
+       if (uses_model("balbi")) {
+           if (bl.use_cell_moisture && !moisture_dynamic) {
+               fail("erf.fire.balbi.use_cell_moisture reads the per-cell fuel moisture, which needs"
+                    " erf.fire.moisture_dynamic = true");
+           }
+           if (bl.flame_temp_from_combustion && bl.formulation == 1) {
+               fail("erf.fire.balbi.flame_temp_from_combustion applies to the 2009 formulation only"
+                    " (erf.fire.balbi.formulation = 2009)");
+           }
+           if (bl.herb_curing > 0.0 && bl.formulation == 0) {
+               fail("erf.fire.balbi.herb_curing applies to the 2020 formulation only"
+                    " (erf.fire.balbi.formulation = 2020)");
+           }
+       }
 
-       // Cheney-Gould parameters
+       // Cheney-Gould parameters: moisture [%] and curing [0-1] enter the
+       // backing rate and the moisture/curing factors of every ROS path
        auto& cg = cheney_gould;
        pp.query("cheney_gould.moisture", cg.moisture);
        pp.query("cheney_gould.curing",   cg.curing);
+       if (!(cg.moisture >= 1.0 && cg.moisture <= 40.0)) {
+           fail("erf.fire.cheney_gould.moisture must be in [1, 40] %, got " + std::to_string(cg.moisture));
+       }
+       fraction("cheney_gould.curing", cg.curing);
 
        auto& fb = fbp;
        pp.query("fbp.fuel_type", fb.fuel_type);
@@ -1388,6 +1784,10 @@ struct FireParams
        if (uses_model("behave") && !(bh.dynamic_transfer_hi > bh.dynamic_transfer_lo)) {
            amrex::Abort("erf.fire.behave.dynamic_transfer_hi must be greater than dynamic_transfer_lo");
        }
+       // live herbaceous moisture fractions: the window is [0, 3] like moisture_live
+       if (!(bh.dynamic_transfer_lo >= 0.0 && bh.dynamic_transfer_hi <= 3.0)) {
+           fail("erf.fire.behave.dynamic_transfer_lo/hi must lie in [0, 3] (fractions of dry mass)");
+       }
 
        // Phase 10: firebreaks (indexed, stop at first missing)
        for (int nb = 0; nb < 10; ++nb) {
@@ -1405,6 +1805,14 @@ struct FireParams
            pp.query((pfx + "cx").c_str(),     brk.cx);
            pp.query((pfx + "cy").c_str(),     brk.cy);
            pp.query((pfx + "radius").c_str(), brk.radius);
+           // an empty rectangle or a zero-radius circle is a silent no-op
+           if (type_val[0] == 'r') {
+               if (!(brk.x_hi > brk.x_lo && brk.y_hi > brk.y_lo)) {
+                   fail("erf.fire." + pfx + "x_hi/y_hi must exceed x_lo/y_lo (an empty rectangle masks nothing)");
+               }
+           } else if (!(brk.radius > 0.0)) {
+               fail("erf.fire." + pfx + "radius must be > 0, got " + std::to_string(brk.radius));
+           }
            firebreaks.push_back(brk);
        }
        n_firebreaks = static_cast<int>(firebreaks.size());
@@ -1455,6 +1863,8 @@ struct FireParams
            if (is_hybrid() || !uses_model("rothermel")) {
                amrex::Abort("erf.fire.directional_wind_coupling = \"advective\" is implemented for erf.fire.ros_model = \"rothermel\" only, not hybrid or another model");
            }
+       } else if (directional_split_hamiltonian) {
+           amrex::Abort("erf.fire.directional_split_hamiltonian needs erf.fire.directional_wind_coupling = \"advective\"");
        }
     }
 
@@ -1465,8 +1875,8 @@ struct FireParams
      * @brief Whether a rate-of-spread model is evaluated in this run.
      *
      * Covers the single-model case and both members of a hybrid pair.
-     * "rothermel" is the fallback for any unrecognised ros_model string,
-     * matching the dispatch in FireLayer.
+     * ros_model is validated by one_of() in the constructor, so every
+     * string that reaches this function is one of the eight models.
      */
     bool uses_model(const std::string& m) const
     {

@@ -6,8 +6,10 @@
  * @brief Main include file for ERF fire module
  *
  * Includes all fire module headers for integration with ERF atmospheric solver.
- * The fire module implements Rothermel-based fire spread with FARSITE terrain
- * corrections on a 2D refined grid.
+ * The fire module advances a fire front (level set or FARSITE) on a 2D grid
+ * refined from the level it anchors to, with eight rate-of-spread models,
+ * fuel moisture, spotting, crown fire, suppression and structure ignition,
+ * coupled to the atmosphere through a lagged surface heat flux.
  */
 
 #ifdef ERF_ENABLE_FIRE

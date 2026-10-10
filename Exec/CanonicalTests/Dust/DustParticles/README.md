@@ -3,6 +3,11 @@
 ## Purpose
 This case verifies particle-size-bin configuration, including transport or diagnostics across multiple dust classes.
 
+## Build
+The deck sets `erf.dust.enable_particles = true`, so it needs a build with
+`-DERF_ENABLE_PARTICLES=ON` (and `ERF_ENABLE_DUST=ON`). Without particles it
+aborts at start-up instead of running without the Lagrangian dust.
+
 ## Physics / Model Features Exercised
 - Dust emission / transport / deposition controls
 - Exposure or air-quality diagnostics as configured

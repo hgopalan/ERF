@@ -1,0 +1,5 @@
+FILE = inputs_custom_grass
+
+# depth_m below the 0.01 m floor. The Balbi models return zero spread there
+# without a word, so the range check has to abort instead.
+erf.fire.custom_fuel.1000.depth_m = 0.005

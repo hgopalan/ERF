@@ -57,12 +57,16 @@ constexpr amrex::Real FIRE_SIGMA_D100 =  30.0;
  * residence time both use it; two of the four call sites used to drop the
  * 10-h and 100-h terms (FM10: 600 instead of 636.8 1/ft).
  */
-inline amrex::Real dead_fuel_weighted_sav (amrex::Real w_d1, amrex::Real w_d10, amrex::Real w_d100,
-                                           amrex::Real sigma_d1)
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+amrex::Real dead_fuel_weighted_sav (amrex::Real w_d1, amrex::Real w_d10, amrex::Real w_d100,
+                                    amrex::Real sigma_d1)
 {
     const amrex::Real dead_w = w_d1 + w_d10 + w_d100;
-    return (dead_w > 1.0e-10) ? (w_d1*sigma_d1 + w_d10*FIRE_SIGMA_D10 + w_d100*FIRE_SIGMA_D100) / dead_w
-                              : sigma_d1;
+    // floored denominator before the select: a non-burnable slot has zero
+    // loads and the unselected 0/0 is speculated under the fpe traps
+    const amrex::Real sav = (w_d1*sigma_d1 + w_d10*FIRE_SIGMA_D10 + w_d100*FIRE_SIGMA_D100)
+                          / amrex::max(dead_w, amrex::Real(1.0e-10));
+    return (dead_w > 1.0e-10) ? sav : sigma_d1;
 }
 
 /**
@@ -158,7 +162,14 @@ amrex::Real deplete_fuel_load(
  * @param[in] fire_ros            Rate-of-spread field [m/s]
  * @param[in] fp                  Fuel model parameters (Rothermel units)
  * @param[in] dx_fire             Fire grid cell size [m]
- * @param[in] tau_sav_floor       SAV-based residence time floor [s]
+ * @param[in] tau_sav_floor       SAV-based residence time floor [s], from the
+ *                                uniform fuel model or erf.fire.tau_residence_s
+ * @param[in] tau_from_fuel       Derive the floor per cell from the cell's own
+ *                                fuel model instead of tau_sav_floor. Set with
+ *                                a per-cell fuel table and no explicit
+ *                                erf.fire.tau_residence_s, so a per-fuel run
+ *                                does not take a residence time from
+ *                                erf.fire.fuel_model_id
  * @param[in] dt_fire_s           Atmospheric timestep [s]
  * @param[in] fuel_model_mf       Optional per-cell fuel model codes (nullptr = uniform)
  * @param[in] tau_burnout_uniform Fuel-model burnout e-folding time [s] replacing the
@@ -168,6 +179,10 @@ amrex::Real deplete_fuel_load(
  *                                a spatial fuel map; nullptr keeps the residence time
  * @param[in] fuel_set            Fuel model set of the map's codes (ERF_FuelModels.H)
  * @param[in] M_live              Live herbaceous moisture for the Scott-Burgan curing transfer
+ * @param[in] fp_tbl              Device fuel properties by slot, so the deck-defined
+ *                                models of ERF_CustomFuel.H carry their own heat
+ *                                content; nullptr reads the published sets only
+ * @param[in] fp_tbl_size         Entries in fp_tbl
  */
 inline void fill_fire_heat_flux(
     amrex::MultiFab& fire_heat_flux,
@@ -182,7 +197,10 @@ inline void fill_fire_heat_flux(
     amrex::Real tau_burnout_uniform = 0.0,
     const amrex::Real* d_tau_burnout = nullptr,
     int fuel_set = 0,
-    amrex::Real M_live = -1.0)
+    amrex::Real M_live = -1.0,
+    const FuelModelParams* fp_tbl = nullptr,
+    int fp_tbl_size = 0,
+    bool tau_from_fuel = false)
 {
     using namespace amrex;
 
@@ -216,13 +234,22 @@ inline void fill_fire_heat_flux(
 
                 // Get per-cell fuel code and look up heat content
                 int fuel_code = static_cast<int>(fuel_code_arr(i, j, k) + 0.5_rt);
-                FuelModelParams fp_cell = get_fuel_params(fuel_code, fuel_set, M_live);
+                FuelModelParams fp_cell = fuel_params_at_code(fuel_code, fuel_set, M_live, fp_tbl, fp_tbl_size);
                 Real h_fuel_cell = fp_cell.heat_content * 2326.0_rt;
 
                 // Per-cell residence time: floor ROS at 1e-6 m/s to avoid divide-by-zero;
                 // or the fuel model's burnout time when a table is given.
                 Real ros_cell  = amrex::max(ros_arr(i, j, k), 1.0e-6_rt);
-                Real tau_cell  = amrex::max(dx_fire / ros_cell, tau_sav_floor);
+                // With a per-cell fuel table the residence-time floor is the
+                // cell's own, not the uniform model's: a per-fuel run must not
+                // take a burn time from erf.fire.fuel_model_id.
+                Real tau_floor = tau_sav_floor;
+                if (tau_from_fuel) {
+                    const Real sigma_cell = dead_fuel_weighted_sav(fp_cell.w_d1, fp_cell.w_d10,
+                                                                   fp_cell.w_d100, fp_cell.sigma_d1);
+                    tau_floor = compute_residence_time_s(sigma_cell, fp_cell.rho_p);
+                }
+                Real tau_cell  = amrex::max(dx_fire / ros_cell, tau_floor);
                 if (d_tau_burnout != nullptr) {
                     int slot = fuel_slot(fuel_code);
                     if (slot < 1) slot = 1;   // unknown codes: model 1, as the heat content does

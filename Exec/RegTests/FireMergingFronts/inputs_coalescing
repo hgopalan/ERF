@@ -1,0 +1,9 @@
+FILE = inputs_base
+
+# Coalescing fires: four spot fires, 6 m discs from the ignition schedule, all
+# at t = 0. The three on y = 60 m are 40 m apart and touch at 14 s; the fourth,
+# 28 m north of the middle one, touches it at 8 s. Every point burns at
+# (distance to the nearest centre - 6 m) / (1 m/s) after the stamp.
+erf.fire_plot_file = "plt_fire_coalescing_"
+erf.fire.ignition_r = 0.0             # no disc of its own
+erf.fire.ignition.schedule_file = "coalescing.csv"

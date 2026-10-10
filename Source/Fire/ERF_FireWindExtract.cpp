@@ -75,10 +75,11 @@ void apply_farsite_terrain_wind(
 
             // Compute wind-upslope alignment: cos(angle between wind and slope gradient)
             // cos_upslope > 0 means wind pointing upslope (against gravity, climbing)
-            Real cos_upslope = 0.0;
-            if (slope_mag * wind_mag > 1.0e-10) {
-                cos_upslope = (sx*ux + sy*uy) / (slope_mag * wind_mag);
-            }
+            // (divide by the floored product before the test: the unselected
+            // 0/0 of a flat or calm cell would be speculated under the traps)
+            const Real sw = slope_mag * wind_mag;
+            const Real cos_raw = (sx*ux + sy*uy) / amrex::max(sw, Real(1.0e-10));
+            Real cos_upslope = (sw > 1.0e-10) ? cos_raw : Real(0.0);
 
             // Classify terrain position and compute speed factor.
             // Slope-based classification uses wind-slope alignment (cos_upslope)
@@ -116,11 +117,15 @@ void apply_farsite_terrain_wind(
             // Apply valley wind deflection toward slope aspect
             // Only when in valley (curv < -0.01) and on sloped terrain (slope_mag > 0.05)
             if (curv_val < -0.01 && slope_mag > 0.05) {
-                // Compute z-component of slope × wind cross product
+                // Compute z-component of slope × wind cross product. ux, uy
+                // already carry the speed factor, so the sine of the wind-slope
+                // angle is the cross product over |slope| |U_new|: one factor,
+                // not two (the earlier denominator had it twice, which divided
+                // the sine by the factor and over-deflected valley winds).
                 Real sin_cross = sx * uy - sy * ux;
 
                 // Compute deflection angle
-                Real denom = amrex::max(static_cast<amrex::Real>(slope_mag * wind_mag_new * factor), static_cast<amrex::Real>(1.0e-10));
+                Real denom = amrex::max(static_cast<amrex::Real>(slope_mag * wind_mag_new), static_cast<amrex::Real>(1.0e-10));
                 Real sin_cross_norm = amrex::max(-1.0_rt, amrex::min(1.0_rt, sin_cross / denom));
                 Real deflect_angle = k_deflect * std::asin(sin_cross_norm);
 

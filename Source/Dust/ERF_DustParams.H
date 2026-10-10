@@ -5,8 +5,7 @@
  * Parameters are read from the "erf.dust" ParmParse prefix at runtime.
  * Default values correspond to bare quartz soil at an arid site.
  *
- * Phase 1 creates this struct and registers it with CMake and GNUmake.
- * Phase 2 adds grid_ratio and uses this struct in ERF_DustGrid and ERF_DustLayer.
+ * Built with CMake only (ERF_ENABLE_DUST); used by ERF_DustGrid and ERF_DustLayer.
  *
  * References:
  *   Bagnold, R. A. (1941). The Physics of Blown Sand and Desert Dunes.
@@ -38,11 +37,13 @@ struct DustParams {
 
     bool        enable              = false;    ///< Enable dust module
     bool        dust_debug          = false;    ///< Print per-step dust diagnostics (stdout, IO rank)
-    int         n_size_bins         = 3;        ///< Number of particle size bins; each bin maps to
-                                                 ///<   one RhoQ*_comp scalar component in ERF.
-                                                 ///<   Bin 0: coarse  (2.5 um < d <= 10 um)
-                                                 ///<   Bin 1: PM10    (1.0 um < d <= 2.5 um)
-                                                 ///<   Bin 2: PM2.5   (d <= 1.0 um)
+    int         n_size_bins         = 3;        ///< Number of particle size bins. The state carries ONE
+                                                 ///<   dust scalar (RhoAdv_comp): the bins' fluxes are
+                                                 ///<   summed into it (transport_bins_separately needs
+                                                 ///<   n_size_bins = 1). The default diameters are
+                                                 ///<   bin_diameters = {7, 2.5, 50} um: bin 0 PM10-class,
+                                                 ///<   bin 1 PM2.5-class, bin 2 coarse; the PM classes
+                                                 ///<   come from the diameters (is_pm25 / is_pm10).
     int         grid_ratio          = 1;        ///< Refinement factor of dust grid relative to ERF
                                                  ///<   level-0 horizontal grid [dimensionless].
                                                  ///<   grid_ratio = 1 places one dust cell per
@@ -59,10 +60,22 @@ struct DustParams {
                                                  ///<   Reference: Marticorena & Bergametti (1995),
                                                  ///<   J. Geophys. Res., 100, 16415-16430.
                                                  ///<   https://doi.org/10.1029/95JD00690
-    amrex::Real threshold_A_coeff  = 0.1;     ///< Bagnold fluid-threshold constant A [-]. Until 2026-09 the
-                                                 ///<   default was 0.0123, Shao & Lu's A_N, which belongs inside
-                                                 ///<   sqrt(A_N (rho_p g d / rho_a + gamma / (rho_a d))), so u*_t
-                                                 ///<   was 8x below Bagnold's value.
+    std::string threshold_model   = "shao_lu"; ///< Base threshold formula for the saltating grains:
+                                                 ///<   "shao_lu" (default, Shao & Lu 2000, with the cohesion
+                                                 ///<   term; 0.204 m/s at 75 um) or "bagnold" (Bagnold 1941,
+                                                 ///<   inertial branch only; 0.126 m/s at 75 um). Until
+                                                 ///<   2026-10 Bagnold was evaluated at the 7 um bin-0
+                                                 ///<   diameter (0.0385 m/s), which saturated every case;
+                                                 ///<   erf.dust.ustar_t_base = 0.0385 reproduces that.
+    amrex::Real saltation_diameter = 75.0e-6;   ///< Diameter of the saltating grains the threshold is
+                                                 ///<   evaluated for [m]; the bin diameters are the EMITTED
+                                                 ///<   sizes (settling, deposition, PM classes). Marticorena
+                                                 ///<   & Bergametti (1995) use the soil's coarse mode,
+                                                 ///<   60-100 um, the minimum of the Iversen-White curve.
+    amrex::Real shao_lu_A_N        = 0.0123;    ///< Shao & Lu (2000) A_N [-] (threshold_model = shao_lu).
+    amrex::Real shao_lu_gamma      = 1.65e-4;   ///< Shao & Lu (2000) cohesion gamma [kg/s^2].
+    amrex::Real threshold_A_coeff  = 0.1;     ///< Bagnold fluid-threshold constant A [-]
+                                                 ///<   (threshold_model = bagnold):
                                                  ///<   u*_t = A * sqrt(rho_p * g * d / rho_a)
                                                  ///<   Reference: Bagnold (1941), The Physics of Blown
                                                  ///<   Sand and Desert Dunes, Methuen, London.
@@ -76,13 +89,15 @@ struct DustParams {
                                                  ///<   much slower than the atmospheric timestep.
     amrex::Real alpha_crust     = 0.5;  ///< Crust strength enhancement coefficient for u*_t [-].
                                          ///<   Higher crust (fully crusted, protected soil) increases u*_t (harder to emit).
-                                         ///<   u*_t_final = u*_t_base * (1 + alpha_crust * crust_index) / (f_moist * f_supp).
+                                         ///<   u*_t = u*_t_base * (1 + alpha_crust * crust_index) * f_moist * f_supp * f_slope
+                                         ///<   (every modifier multiplies and raises the threshold, ERF_DustThreshold.H).
                                          ///<   When fire reduces crust (e.g., 1.0 -> 0.01), u*_t decreases, raising emission.
                                          ///<   Reference: Marticorena & Bergametti (1995),
                                          ///<     https://doi.org/10.1029/95JD00690
     amrex::Real alpha_efflor    = 0.3;  ///< Efflorescence enhancement coefficient for u*_t [-].
-    amrex::Real ustar_t_base    = -1.0; ///< Base u*_t before chemistry [m/s].
-                                         ///<   Negative means compute from Bagnold at init.
+    amrex::Real ustar_t_base    = -1.0; ///< Base u*_t before the modifiers [m/s].
+                                         ///<   Negative (default) means compute it from threshold_model
+                                         ///<   at saltation_diameter at init.
     amrex::Real test_ustar      = 0.0;   ///< Placeholder u* [m/s] used in Phase 6 before
                                          ///<   Phase 9 extracts u* from the MRF surface layer.
                                          ///<   Set > 0 to test emission physics.
@@ -97,7 +112,8 @@ struct DustParams {
     amrex::Real blast_reactivity    = 2.0; ///< Reactivity multiplier for fresh blast
                                            ///<   surfaces relative to weathered tailings [-].
                                            ///<   Applied to injected mass flux.
-    amrex::Real supp_tau_base_s     = 3600.0; ///< Base suppression half-life [s].
+    amrex::Real supp_tau_base_s     = 3600.0; ///< Base suppression decay time [s]: the e-folding time of
+                                           ///<   coverage *= exp(-dt/tau) (half-life = 0.693 tau).
                                            ///<   Water: ~3600 s. MgCl2: ~43200 s.
                                            ///<   Reference: Gillies et al. (2005),
                                            ///<     https://doi.org/10.1080/10473289.2005.10464701
@@ -106,6 +122,11 @@ struct DustParams {
     amrex::Real test_wind_speed     = 5.0;     ///< 10 m wind speed placeholder [m/s].
                                            ///<   Phase 9 replaces with MRF 10m wind.
     bool use_terrain_wind           = false;   ///< Apply FARSITE-style terrain wind correction.
+    std::string terrain_ustar       = "scale"; ///< How u* follows the corrected wind with use_terrain_wind:
+                                                 ///<   "scale" (default) multiplies the surface layer's u* by
+                                                 ///<   |U_corrected| / |U_raw|; "loglaw" (the form until 2026-10)
+                                                 ///<   re-derives u* = kappa U / ln(zref / z0_dust), a neutral
+                                                 ///<   law on another roughness, 0.70x on flat ground.
     amrex::Real k_ridge             = 1.5;     ///< Ridge speed-up factor.
     amrex::Real k_shelter           = 0.6;     ///< Lee-side shelter factor.
     amrex::Real k_valley            = 0.8;     ///< Valley channeling factor.
@@ -118,7 +139,6 @@ struct DustParams {
     std::string phreeqc_silt_var     = "silt_fraction";  ///< Variable/column name for silt fraction.
     std::string phreeqc_efflor_var   = "efflorescence";  ///< Variable/column name for efflorescence.
     std::string phreeqc_supp_var     = "suppression_mod";///< Variable/column name for suppression modifier.
-    std::string phreeqc_metal_var    = "metal_as_bin0";  ///< Variable/column name for As mass fraction bin 0.
     std::string phreeqc_output_file = "";      ///< Path to PHREEQC output NetCDF; empty = disabled
     std::string soil_type_file      = "";      ///< Path to soil type raster (.asc or .nc).
                                                  ///<   Code 0 = undefined; 1-16 = STATSGO natural soils;
@@ -153,6 +173,13 @@ struct DustParams {
                                                    ///<   coarse bin (50 um).
                                                    ///<   Reference: Seinfeld & Pandis (2006), Ch. 9.
 
+    std::string lumped_settling = "mean";       ///< Settling and deposition velocity of the single
+                                                 ///<   transported scalar: "mean" (default) averages the Stokes
+                                                 ///<   velocities of the bins weighted by their shares of the
+                                                 ///<   mass emitted so far (equal until anything is emitted);
+                                                 ///<   "bin0" (the form until 2026-10) uses bin 0 alone, which
+                                                 ///<   settled the 50 um third at the 7 um velocity.
+
     // Phase 12: Dry deposition parameters
     amrex::Real deposition_E0 = 3.0e-3; ///< Surface collection efficiency [-].
                                         ///<   Zhang et al. (2001):
@@ -181,6 +208,11 @@ struct DustParams {
     // Phase 17: EPA NAAQS compliance output
     std::string dust_naaqs_file    = "dust_naaqs.csv"; ///< NAAQS compliance CSV output.
                                                         ///< 40 CFR Part 50.
+    std::string averaging          = "window";  ///< The 24-hour PM averages and the 15-minute STEL: "window"
+                                                 ///<   (default) are block means over a ring of hourly / one-minute
+                                                 ///<   means, the 40 CFR 50 form; "exponential" (the form until
+                                                 ///<   2026-10) is the exponential running mean, 0.632 C after one
+                                                 ///<   window of a constant C, which never flagged a 50 ug/m3 day.
 
     // Phase 18: MSHA worker exposure tracking
     amrex::Real msha_pel_mg_m3       = 5.0;            ///< PEL threshold [mg/m³], 30 CFR 56.5001
@@ -217,8 +249,8 @@ struct DustParams {
     std::string phreeqc_site_summary_file    = "dust_dep_site_summary.csv";
 
     // Phase 22: haul road vehicle schedule.
-    // CSV format: road_name, x_lo, y_lo, x_hi, y_hi, road_width_m,
-    //             vehicle_weight_t, silt_pct, vmt_per_h, start_time_s, end_time_s
+    // CSV format: road_name, x_lo, y_lo, x_hi, y_hi, road_width_m (carried, unused),
+    //             vehicle_weight_t, silt_pct, vkt_per_h, start_time_s, end_time_s
     // Reference: EPA AP-42 Ch. 13.2.2. https://www.epa.gov/air-emissions-factors-and-quantification/
     //            ap-42-compilation-air-emissions-factors
     std::string road_schedule_file  = "";             ///< Road schedule CSV. Empty = disabled.
@@ -232,12 +264,15 @@ struct DustParams {
     //   https://www.energy.gov/eere/vehicles/articles/us-doe-critical-materials-assessment
     amrex::Vector<amrex::Real> cm_fractions;
     std::string cm_budget_file = "dust_cm_budget.csv"; ///< CM budget CSV.
+    int         cm_budget_int  = 1;                     ///< Steps between CM budget rows (the per-site sums are
+                                                        ///<   reductions over the dust grid every time).
 
     // Phase 7: Visibility and health exposure diagnostics
     bool        visibility_enable        = false;   ///< Enable Koschmieder visibility output
-    amrex::Real visibility_k_ext        = 4.0e3;   ///< Mass extinction coefficient [m²/kg]; an assumed value for
-                                                 ///< fine dust (3/(2 rho_p r_eff) gives 113 m²/kg at r_eff = 5 um,
-                                                 ///< 2650 kg/m³; literature 300-1000 m²/kg). Set it per case.
+    amrex::Real visibility_k_ext        = 600.0;   ///< Mass extinction coefficient [m²/kg], inside the literature
+                                                 ///< range for mineral dust (300-1000 m²/kg; 3/(2 rho_p r_eff) gives
+                                                 ///< 113 m²/kg at r_eff = 5 um). The default was 4000 until 2026-10,
+                                                 ///< 4-13x above that range. Set it per case.
     amrex::Real visibility_road_closure_m = 300.0; ///< Haul road closure threshold [m]
     amrex::Real visibility_warning_m    = 1000.0;  ///< Reduced visibility warning threshold [m]
     std::string visibility_diag_file    = "visibility_diag.csv"; ///< Output CSV
@@ -264,6 +299,10 @@ struct DustParams {
         pp.query("particle_density", particle_density);
         pp.query("z0_dust", z0_dust);
         pp.query("silt_fraction", silt_fraction);
+        pp.query("threshold_model",   threshold_model);
+        pp.query("saltation_diameter", saltation_diameter);
+        pp.query("shao_lu_A_N",       shao_lu_A_N);
+        pp.query("shao_lu_gamma",     shao_lu_gamma);
         pp.query("threshold_A_coeff", threshold_A_coeff);
         pp.query("crust_index", crust_index);
         pp.query("grid_ratio", grid_ratio);
@@ -279,6 +318,7 @@ struct DustParams {
         pp.query("test_surf_temp_K", test_surf_temp_K);
         pp.query("test_wind_speed",  test_wind_speed);
         pp.query("use_terrain_wind", use_terrain_wind);
+        pp.query("terrain_ustar",    terrain_ustar);
         pp.query("k_ridge",          k_ridge);
         pp.query("k_shelter",        k_shelter);
         pp.query("k_valley",         k_valley);
@@ -289,7 +329,10 @@ struct DustParams {
         pp.query("phreeqc_silt_var", phreeqc_silt_var);
         pp.query("phreeqc_efflor_var", phreeqc_efflor_var);
         pp.query("phreeqc_supp_var", phreeqc_supp_var);
-        pp.query("phreeqc_metal_var", phreeqc_metal_var);
+        if (pp.contains("phreeqc_metal_var"))
+            amrex::Abort("[DUST] erf.dust.phreeqc_metal_var was removed in October 2026: the column was copied into the"
+                         " emission flux and overwritten before it was read; use erf.dust.cm_fractions for the"
+                         " critical-material fractions");
         pp.query("phreeqc_output_file", phreeqc_output_file);
         pp.query("soil_type_file",     soil_type_file);
         pp.query("silt_fraction_file", silt_fraction_file);
@@ -299,11 +342,13 @@ struct DustParams {
         pp.query("transport_bins_separately", transport_bins_separately);
         pp.query("atm_feedback", atm_feedback);
         pp.query("deposition_E0", deposition_E0);
+        pp.query("lumped_settling", lumped_settling);
         pp.query("loading_feedback_coeff", loading_feedback_coeff);
         pp.query("dust_plot_int",    dust_plot_int);
         pp.query("dust_plot_prefix", dust_plot_prefix);
         pp.query("dust_diag_file",   dust_diag_file);
         pp.query("dust_naaqs_file",  dust_naaqs_file);
+        pp.query("averaging",        averaging);
         pp.query("msha_pel_mg_m3", msha_pel_mg_m3);
         pp.query("msha_shift_duration_s", msha_shift_duration_s);
         pp.query("msha_exposure_file", msha_exposure_file);
@@ -345,6 +390,7 @@ struct DustParams {
         // Phase 23: DOE Critical Materials Assessment
         pp.queryarr("cm_fractions",    cm_fractions);
         pp.query("cm_budget_file",     cm_budget_file);
+        pp.query("cm_budget_int",      cm_budget_int);
 
         // Phase 7: Visibility and health exposure diagnostics
         pp.query("visibility_enable", visibility_enable);
@@ -375,20 +421,97 @@ struct DustParams {
             if (!(v >= 0.0 && v <= 1.0)) fail(std::string("erf.dust.") + key + " must be in [0,1], got " + std::to_string(v));
         };
         if (n_size_bins < 1) fail("erf.dust.n_size_bins must be >= 1, got " + std::to_string(n_size_bins));
+        if (n_size_bins > 8) fail("erf.dust.n_size_bins must be <= 8 (the settling kernels carry the bins by value), got "
+                                  + std::to_string(n_size_bins));
+        if (averaging != "window" && averaging != "exponential")
+            fail("erf.dust.averaging must be window or exponential, got " + averaging);
+        if (cm_budget_int < 1) fail("erf.dust.cm_budget_int must be >= 1, got " + std::to_string(cm_budget_int));
+        if (lumped_settling != "mean" && lumped_settling != "bin0")
+            fail("erf.dust.lumped_settling must be mean or bin0, got " + lumped_settling);
         if (grid_ratio < 1)  fail("erf.dust.grid_ratio must be >= 1, got " + std::to_string(grid_ratio));
         if (bin_diameters.empty()) fail("erf.dust.bin_diameters must list at least one diameter [m]");
         for (auto d : bin_diameters) positive("bin_diameters", d);
         positive("particle_density",  particle_density);
         positive("z0_dust",           z0_dust);
-        positive("threshold_A_coeff", threshold_A_coeff);
+        if (threshold_model == "bagnold") positive("threshold_A_coeff", threshold_A_coeff);
+        if (threshold_model != "shao_lu" && threshold_model != "bagnold")
+            fail("erf.dust.threshold_model must be shao_lu or bagnold, got " + threshold_model);
+        positive("saltation_diameter", saltation_diameter);
+        if (terrain_ustar != "scale" && terrain_ustar != "loglaw")
+            fail("erf.dust.terrain_ustar must be scale or loglaw, got " + terrain_ustar);
+        if (pp.contains("terrain_ustar") && !use_terrain_wind)
+            amrex::Print() << "[DUST] WARNING: erf.dust.terrain_ustar is read only with erf.dust.use_terrain_wind = true\n";
+        positive("shao_lu_A_N", shao_lu_A_N);
+        if (shao_lu_gamma < 0.0) fail("erf.dust.shao_lu_gamma must be >= 0, got " + std::to_string(shao_lu_gamma));
+        // keys read only inside another option's branch: say so when the branch is off
+        if (ustar_t_base >= 0.0) {
+            for (const char* k : {"threshold_model", "saltation_diameter", "shao_lu_A_N", "shao_lu_gamma", "threshold_A_coeff"})
+                if (pp.contains(k))
+                    amrex::Print() << "[DUST] WARNING: erf.dust." << k << " is not read with erf.dust.ustar_t_base >= 0"
+                                   << " (the base threshold is prescribed)\n";
+        } else if (threshold_model == "shao_lu") {
+            if (pp.contains("threshold_A_coeff"))
+                amrex::Print() << "[DUST] WARNING: erf.dust.threshold_A_coeff is read only with erf.dust.threshold_model = bagnold\n";
+        } else {
+            for (const char* k : {"shao_lu_A_N", "shao_lu_gamma"})
+                if (pp.contains(k))
+                    amrex::Print() << "[DUST] WARNING: erf.dust." << k << " is read only with erf.dust.threshold_model = shao_lu\n";
+        }
+        if (pp.contains("z0_dust") && !(use_terrain_wind && terrain_ustar == "loglaw"))
+            amrex::Print() << "[DUST] WARNING: erf.dust.z0_dust only sets the friction velocity with"
+                              " erf.dust.use_terrain_wind = true and erf.dust.terrain_ustar = loglaw"
+                              " (it still bounds erf.dust.zref)\n";
+        // the haul-road mass is the AP-42 PM-10 factor and is stamped on bin 0
+        if (!road_schedule_file.empty() && !bin_diameters.empty() && bin_diameters[0] > 10.0e-6)
+            fail("erf.dust.road_schedule_file puts the AP-42 PM-10 road mass into bin 0, whose diameter "
+                 + std::to_string(bin_diameters[0]) + " m is above 10 um; list a PM-10 size first in erf.dust.bin_diameters");
         positive("rho_air",           rho_air);
         positive("supp_tau_base_s",   supp_tau_base_s);
         if (!(zref > z0_dust)) fail("erf.dust.zref (" + std::to_string(zref) + ") must be above z0_dust (" + std::to_string(z0_dust) + ")");
         fraction("silt_fraction", silt_fraction);
         fraction("crust_index",   crust_index);
-        if (atm_feedback < 0.0)  fail("erf.dust.atm_feedback must be >= 0, got " + std::to_string(atm_feedback));
+        fraction("atm_feedback", atm_feedback);   // the share of the emitted mass that enters the air
+        // 0 = no surface collection (compute_r_s floors it at 1e-6, so v_d -> v_s);
+        // FireDustMassConservation uses that
         if (deposition_E0 < 0.0) fail("erf.dust.deposition_E0 must be >= 0, got " + std::to_string(deposition_E0));
         if (blast_reactivity < 0.0) fail("erf.dust.blast_reactivity must be >= 0, got " + std::to_string(blast_reactivity));
+        // Ranges Inputs.rst states for the remaining real inputs; a silent
+        // clamp or an unchecked negative sat behind each of them before.
+        if (alpha_crust  < 0.0) fail("erf.dust.alpha_crust must be >= 0, got "  + std::to_string(alpha_crust));
+        if (alpha_efflor < 0.0) fail("erf.dust.alpha_efflor must be >= 0, got " + std::to_string(alpha_efflor));
+        if (test_ustar   < 0.0) fail("erf.dust.test_ustar must be >= 0, got "   + std::to_string(test_ustar));
+        if (loading_feedback_coeff < 0.0)
+            fail("erf.dust.loading_feedback_coeff must be >= 0, got " + std::to_string(loading_feedback_coeff));
+        positive("msha_pel_mg_m3", msha_pel_mg_m3);
+        positive("msha_shift_duration_s", msha_shift_duration_s);
+        if (visibility_enable) {
+            positive("visibility_k_ext",          visibility_k_ext);
+            positive("visibility_road_closure_m", visibility_road_closure_m);
+            positive("visibility_warning_m",      visibility_warning_m);
+        }
+        if (silica_enable) positive("silica_osha_pel_mg_m3", silica_osha_pel_mg_m3);
+        if (stel_enable) {
+            positive("stel_threshold_mg_m3", stel_threshold_mg_m3);
+            positive("stel_averaging_s",     stel_averaging_s);   // the window ring divides by it
+        }
+        for (auto f : cm_fractions) fraction("cm_fractions", f);
+        if (phreeqc_feedback_interval_s < 0.0)
+            fail("erf.dust.phreeqc_feedback_interval_s must be >= 0, got " + std::to_string(phreeqc_feedback_interval_s));
+        if (static_cast<int>(bin_diameters.size()) != n_size_bins)
+            fail("erf.dust.bin_diameters lists " + std::to_string(bin_diameters.size()) + " diameters but erf.dust.n_size_bins = "
+                 + std::to_string(n_size_bins) + "; give one diameter per bin");
+        // The state carries ONE dust scalar (RhoAdv_comp, ERF_IndexDefines.H); a
+        // second transported bin would be written into the smoke or vapour slot.
+        if (transport_bins_separately && n_size_bins > 1)
+            fail("erf.dust.transport_bins_separately = true needs one state scalar per bin, and the state"
+                 " carries a single dust scalar (NSCALARS in ERF_IndexDefines.H); set n_size_bins = 1 or"
+                 " transport the bins together");
+        // (Particles are a Lagrangian diagnostic of where the emitted dust lands;
+        // they do not feed the atmosphere, so they coexist with atm_feedback > 0.)
+#ifndef ERF_USE_PARTICLES
+        if (enable_particles)
+            fail("erf.dust.enable_particles = true needs a build with ERF_ENABLE_PARTICLES=ON");
+#endif
         if (!phreeqc_output_file.empty()) positive("phreeqc_update_interval_s", phreeqc_update_interval_s);
         if (enable_particles && particle_release_interval < 1)
             fail("erf.dust.particle_release_interval must be >= 1, got " + std::to_string(particle_release_interval));

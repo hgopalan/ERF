@@ -5,6 +5,7 @@
 #include <string>
 #include <AMReX_Geometry.H>
 #include <memory>
+#include <vector>
 #include <ERF_FireParams.H>
 #include <ERF_FireGrid.H>
 #include <ERF_Rothermel.H>
@@ -20,6 +21,7 @@
 #include <ERF_ScottSpottingTable.H>
 #include <ERF_CrownFire.H>
 #include <ERF_FuelMap.H>
+#include <ERF_CustomFuel.H>
 #include <ERF_FireBreak.H>
 #include <ERF_FuelBlending.H>
 #include <ERF_IgnitionSchedule.H>
@@ -28,9 +30,11 @@
 #include <ERF_FuelModels.H>
 #include <ERF_FbpModel.H>
 #include <ERF_FuelMoistureStick.H>
+#include <ERF_FirePrecip.H>
 #include <ERF_FireAcceleration.H>
 // Phase 13A: Per-fuel wind height
 #include <ERF_FuelWindHeight.H>
+#include <ERF_StructureIgnition.H>
 // Phase 13B: ROS models
 #include <ERF_BalbiModel.H>
 #include <ERF_DirectionalRos.H>
@@ -42,6 +46,8 @@
 #include <ERF_NumericalSchemes.H>
 #include <ERF_Reinitialize.H>
 #include <ERF_LevelSetAdvection.H>
+// Suppression actions (fire lines, drops, burnout) from a watched file
+#include <ERF_FireSuppression.H>
 
 // Forward declarations
 class SurfaceLayer;
@@ -72,7 +78,7 @@ class ERF;
  * | Name           | ncomp | Description                                  |
  * |----------------|-------|----------------------------------------------|
  * | fire_phi       | 1     | Level-set: <0 burned, >0 unburned, ≈0 front  |
- * | fire_wind_ref  | 2     | u,v at z_ref (e.g., 6.1 m) from MOST        |
+ * | fire_wind_ref  | 2     | u,v at wind_ref_ht above ground, interpolated from the atmospheric columns |
  * | fire_wind_eff  | 2     | After WAF + terrain corrections              |
  * | fire_slopes    | 2     | dz/dx, dz/dy (static, computed at init)      |
  * | fire_surface_z | 1     | Ground elevation [m] of the atmospheric column |
@@ -129,7 +135,7 @@ public:
      *                               (fire_anchor_level(): erf.fire.anchor_level,
      *                               the finest level by default).
      * @param[in] surface_layer_ptr  Pointer to the SurfaceLayer owned by ERF
-     *                               (pass m_SurfaceLayer.get() at the call site).
+     *                               (pass m_SurfaceLayer[Orientation::zlo()].get() at the call site).
      *                               May be nullptr when called before the surface
      *                               layer is constructed (prereq check only).
      * @param[in] z_phys_nd_atm      Atmospheric nodal terrain-height MultiFab of
@@ -148,29 +154,41 @@ public:
     /**
      * @brief Advance fire simulation by one atmospheric timestep.
      *
-     * Called from ERF::Advance() each timestep.
-     * Executes the fire computation pipeline:
-     * 1. Extract wind from atmosphere at reference height
-     * 2. Apply Wind Adjustment Factor for canopy
-     * 3. Apply terrain wind corrections (FARSITE)
-     * 4. Update fuel moisture from atmospheric state (Phase 2)
-     * 5. Compute effective midflame wind
-     * 6. Compute rate-of-spread using Rothermel model
-     * 7. (Phase 3) Advance level-set using ROS and wind
-     * 8. (Phase 6) Compute heat flux to atmosphere
+     * Called from ERF::Advance() once per step of the level the fire grid
+     * refines, after that level's dycore, with `time` the START of the step
+     * (ERF passes t_old). The pipeline, in order:
+     * 1. wind at wind_ref_ht from the atmospheric columns, the WAF and the
+     *    terrain corrections (fire_wind_ref -> fire_wind_eff)
+     * 2. fuel moisture (time-lag or stick model, rain) when moisture_dynamic
+     * 3. per-step coefficient refresh of the ROS models that depend on moisture
+     * 4. ignitions due this step: timed perimeter polygon, suppression actions
+     *    and their burnout ignitions, the ignition schedule, threshold ignition
+     * 5. rate of spread for the selected model (hybrid wind weight first),
+     *    non-burnable mask, fuel blending, the edge-reach estimate, acceleration,
+     *    crown fire and the suppression rate factor
+     * 6. front update: level-set subcycles (with reinitialisation) or FARSITE
+     * 7. boundary guard, heat flux and burnout, structure heat sources,
+     *    exposure accumulators, spotting, probes, structure ignition, the
+     *    exposure and statistics CSV rows
+     * ERF then calls update_atm_flux_buffer for the lagged coupling.
      *
+     * @param[in]     time           Start time of the atmospheric step [s]
      * @param[in]     dt             Timestep [s]
-     * @param[in,out] surface_layer  SurfaceLayer with MOST diagnostics.
-     *                               Non-const because get_u_star / get_z0 /
-     *                               get_olen are not marked const in
-     *                               ERF_SurfaceLayer.H.
+     * @param[in,out] surface_layer  Unused (kept for interface symmetry with the
+     *                               dust layer; the fire samples the wind itself).
      * @param[in]     xvel           x-velocity on atmospheric grid [m/s]
      * @param[in]     yvel           y-velocity on atmospheric grid [m/s]
      * @param[in]     z_phys_cc      Cell-center terrain height on atmospheric grid [m]
-     * @param[in]     T_atm_k0       Atmospheric potential temperature at k=0 [K]
-     *                               On atmospheric grid (coarser than fire grid).
+     * @param[in]     T_atm_k0       Air temperature at k=0 [K] (theta * Exner, see
+     *                               compute_t_from_conservative). On the
+     *                               atmospheric grid (coarser than fire grid).
      * @param[in]     RH_atm_k0      Atmospheric relative humidity at k=0 [fraction 0-1]
      *                               On atmospheric grid (coarser than fire grid).
+     * @param[in]     precip_accum_k0 Surface precipitation accumulation of every
+     *                               column [kg/m2], on the atmospheric grid
+     *                               coarsened to one cell in z (ERF_FirePrecip.H);
+     *                               required with erf.fire.precip_source =
+     *                               atmosphere, ignored (may be null) otherwise.
      */
     void advance(amrex::Real time,
                  amrex::Real dt,
@@ -179,7 +197,8 @@ public:
                  const amrex::MultiFab& yvel,
                  const amrex::MultiFab& z_phys_cc,
                  const amrex::MultiFab& T_atm_k0,
-                 const amrex::MultiFab& RH_atm_k0);
+                 const amrex::MultiFab& RH_atm_k0,
+                 const amrex::MultiFab* precip_accum_k0 = nullptr);
 
     /**
      * @brief Get heat flux for atmospheric coupling.
@@ -383,7 +402,7 @@ public:
 
     /**
      * @brief Get fuel moisture content for plotfile output.
-     * @return Pointer to fire_fuel_mc MultiFab [M_1hr, M_10hr, M_100hr].
+     * @return Pointer to fire_fuel_mc MultiFab [M_1hr, M_10hr, M_100hr, M_lh, M_lw] (5 components).
      */
     const amrex::MultiFab* get_fuel_mc() const
     {
@@ -416,6 +435,33 @@ public:
     {
         return fire_surface_rh.get();
     }
+
+    /**
+     * @brief Rain rate per fire cell [mm/hr] that wets the dead classes this step
+     *        (erf.fire.precip_source: the atmosphere's rain per column, or the
+     *        uniform erf.fire.precip_rate_mm_hr), for the plotfile field
+     *        fire_precip_mm_hr and the statistics CSV.
+     * @return Pointer, or nullptr when the dead-fuel moisture is static or no rain
+     *         source is configured.
+     */
+    const amrex::MultiFab* get_precip_rate() const
+    {
+        return fire_precip_rate.get();
+    }
+
+    /// Surface precipitation accumulation [kg/m2] of every column of the fire
+    /// grid's level at the end of the previous fire step, the reference the
+    /// next step's rate is measured from; null unless erf.fire.precip_source =
+    /// atmosphere. Checkpointed as FirePrecipAccumPrev.
+    const amrex::MultiFab* get_precip_accum_prev() const
+    {
+        return m_precip_accum_prev.get();
+    }
+    /// Mutable access to the snapshot, for checkpoint restart.
+    amrex::MultiFab* get_precip_accum_prev_mut() { return m_precip_accum_prev.get(); }
+    /// A restart from a checkpoint without the snapshot: the first restarted
+    /// step reports no rain and takes the snapshot from its own accumulation.
+    void invalidate_precip_accum_prev() { m_precip_prev_valid = false; }
 
     /**
      * @brief Get fireline intensity for diagnostics and plotfile output.
@@ -501,7 +547,8 @@ public:
 
     /**
      * @brief Get coarsened sensible heat flux on atmospheric grid from previous timestep.
-     * @return Pointer to m_Q_atm_prev MultiFab (nullptr until first advance).
+     * @return Pointer to m_Q_atm_prev MultiFab (allocated and zeroed by initialize(),
+     *         so never null afterwards; zero until the first advance fills it).
      */
     const amrex::MultiFab* get_Q_atm_prev() const
     {
@@ -510,7 +557,8 @@ public:
 
     /**
      * @brief Get coarsened latent heat flux on atmospheric grid from previous timestep.
-     * @return Pointer to m_Q_lat_atm_prev MultiFab (nullptr until first advance).
+     * @return Pointer to m_Q_lat_atm_prev MultiFab (allocated and zeroed by
+     *         initialize(), so never null afterwards).
      */
     const amrex::MultiFab* get_Q_lat_atm_prev() const
     {
@@ -520,6 +568,9 @@ public:
     /// Mutable access to the lagged sensible flux buffer, for checkpoint restart.
     amrex::MultiFab* get_Q_atm_prev_mut() { return m_Q_atm_prev.get(); }
     amrex::MultiFab* get_heat_flux_mut()  { return fire_heat_flux.get(); }
+    /// The previous step's flame length is read by the suppression hold test
+    /// before advance() recomputes it, so it is checkpointed with the heat flux.
+    amrex::MultiFab* get_flame_length_mut() { return fire_flame_length.get(); }
     amrex::Real get_f_dry_prev() const { return m_f_dry_prev; }
     void set_f_dry_prev(amrex::Real f) { m_f_dry_prev = f; }
     /// The boundary guard (erf.fire.boundary_guard_*): when the fire first
@@ -527,6 +578,11 @@ public:
     /// so a restart neither repeats the warning nor forgets it fired.
     amrex::Real get_edge_contact_time() const { return m_edge_contact_time; }
     void set_edge_contact_time(amrex::Real t) { m_edge_contact_time = t; }
+    /// Lower end of the next step's ignition window (start of the last step
+    /// taken); checkpointed so a restart keeps the (prev, current] window.
+    bool        have_prev_window() const { return m_have_prev_window; }
+    amrex::Real get_prev_window_end() const { return m_prev_window_end; }
+    void set_prev_window_end(amrex::Real t) { m_prev_window_end = t; m_have_prev_window = true; }
     /// Whether the reach estimate (erf.fire.edge_reach_check) was printed.
     bool get_edge_reach_checked() const { return m_edge_reach_checked; }
     void set_edge_reach_checked(bool b) { m_edge_reach_checked = b; }
@@ -549,15 +605,17 @@ public:
     void allocate_stick_mc();
 
     /**
-     * @brief Stamp the perimeter polygon (or polyline) of
-     *        erf.fire.ignition.polygon_file into the level set.
+     * @brief Stamp every perimeter polygon (or polyline) file of
+     *        erf.fire.ignition.polygon_file into the level set, each with the
+     *        min(phi, new) rule, so several files are several merging fires.
      *
      * Called at initialisation when erf.fire.ignition.polygon_time is 0, or
      * from advance() on the step whose window contains that time. With
-     * erf.fire.ignition.polygon_interior_ros > 0 the cells the polygon
-     * newly ignites get the interior state of a fire that spread outward at
+     * erf.fire.ignition.polygon_interior_ros > 0 the cells the files
+     * newly ignite (the union of their perimeters, unburned before the
+     * call) get the interior state of a fire that spread outward at
      * that rate: arrival time t_ign - d / R and fuel reduced by
-     * exp(-d / (R tau)) with d the distance inside the perimeter and tau
+     * exp(-d / (R tau)) with d the depth inside the union and tau
      * erf.fire.ignition.polygon_interior_tau (dx_fire / R when 0).
      * @param t_ign Time [s] the perimeter is valid at.
      */
@@ -573,15 +631,33 @@ public:
      */
     amrex::Real burnout_tau_s(int fuel_code) const;
 
+    /// Device fuel properties by slot, or nullptr before initialize() builds them.
+    const FuelModelParams* fuel_params_table () const
+    {
+        return m_d_fuel_params.empty() ? nullptr : m_d_fuel_params.data();
+    }
+
+    /// Entries in fuel_params_table().
+    int fuel_params_table_size () const { return static_cast<int>(m_d_fuel_params.size()); }
+
+    /// The same fuel properties on the host, for the coefficient table builders.
+    const std::vector<FuelModelParams>& fuel_params_table_host () const { return m_h_fuel_params; }
+
     /// Parameters of the uniform fuel model, erf.fire.fuel_model_id, under the deck's fuel set.
     FuelModelParams uniform_fuel_params() const
     {
-        return get_fuel_params(m_params.fuel_model_id, m_params.fuel_map.fuel_set_id(), m_params.moisture_live);
+        return fuel_params_with_custom(m_params.fuel_model_id, m_params.fuel_map.fuel_set_id(),
+                                       m_params.moisture_live, m_custom_fuel);
     }
 
     /// The uniform fuel model's parameters for BEHAVE: the table without its curing transfer (behave_fuel_params).
     FuelModelParams uniform_behave_fuel_params() const
     {
+        // A deck-defined model has no live herbaceous class to transfer, so the
+        // BEHAVE parameters are the entry itself.
+        if (m_custom_fuel.has_code(m_params.fuel_model_id)) {
+            return m_custom_fuel.params(m_params.fuel_model_id);
+        }
         return behave_fuel_params(m_params.fuel_model_id, m_params.fuel_map.fuel_set_id());
     }
 
@@ -612,8 +688,9 @@ public:
     void set_levelset_subcycle_count(int n) { m_levelset_subcycle_count = n; }
     /// Fields that carry across steps and are checkpointed alongside the ones
     /// above: the spotting diagnostics (recomputed only every spotting interval),
-    /// the temporal acceleration state, the crown ROS carried between steps and
-    /// the crown fraction burned.
+    /// the temporal acceleration state and the crown ROS carried between steps.
+    /// The crown fraction burned is a per-step diagnostic (zeroed and recomputed
+    /// every step); it is checkpointed only so the restart plotfile shows it.
     const amrex::MultiFab* get_accel_state() const      { return fire_accel_state.get(); }
     const amrex::MultiFab* get_crown_ros_active() const { return fire_crown_ros_active.get(); }
     amrex::MultiFab* get_albini_data_mut()           { return fire_albini_data.get(); }
@@ -632,6 +709,34 @@ public:
     /// Embers that landed on each cell of a footprint; null unless exposure.enable.
     const amrex::MultiFab* get_ember_landings() const { return fire_ember_landings.get(); }
     amrex::MultiFab* get_ember_landings_mut() { return fire_ember_landings.get(); }
+
+    /// Structure ignition state field (state, ignition time, time above the
+    /// intensity threshold, cause; see erf_structure_ignition::Comp); null
+    /// unless erf.fire.structures.ignition.enable.
+    const amrex::MultiFab* get_structure_state() const
+    {
+        return m_struct_ign ? m_struct_ign->state_field() : nullptr;
+    }
+    amrex::MultiFab* get_structure_state_mut()
+    {
+        return m_struct_ign ? m_struct_ign->state_field_mut() : nullptr;
+    }
+    /// Incident radiant flux from burning structures [W/m2]; null unless ignition is on.
+    const amrex::MultiFab* get_structure_rad_flux() const
+    {
+        return m_struct_ign ? m_struct_ign->rad_flux() : nullptr;
+    }
+    /// The structure ignition module itself, for the diagnostics; null unless on.
+    const StructureIgnition* get_structure_ignition() const { return m_struct_ign.get(); }
+    /// Rebuild the per-structure ignition state from the restored field (checkpoint restart).
+    void restore_structure_ignition_state()
+    {
+        if (m_struct_ign && fire_structure_id) { m_struct_ign->restore_from_field(*fire_structure_id); }
+    }
+    /// The suppression actions (erf.fire.suppression.enable); null when off.
+    /// The checkpoint delegates to it and the plotfile reads its fields.
+    const FireSuppression* get_suppression() const { return m_suppression.get(); }
+    FireSuppression*       get_suppression_mut()   { return m_suppression.get(); }
 
     /**
      * @brief Get fire latent heat flux on fire grid.
@@ -657,9 +762,11 @@ public:
     /**
      * @brief Apply the previous-step fire fluxes to cc_source using WRF-Fire profile.
      *
-     * Injects the one-step-lagged fire flux from previous timestep into cc_source
-     * using the exponential distribution profile. Called from ERF::Advance()
-     * BEFORE advance_dycore().
+     * Injects the one-step-lagged fire flux from the previous timestep into
+     * cc_source using the exponential distribution profile. Called from the slow
+     * right-hand side at every RK stage (ERF_TI_slow_rhs_pre.H), after
+     * make_sources has rebuilt cc_source; m_Q_atm_prev is constant over the
+     * step, so every stage receives the same tendency.
      *
      * @param[in,out] cc_source    3D source array for conserved variables
      * @param[in]     S_old        atmospheric conserved state at time n (for density)
@@ -717,14 +824,19 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_disp_accum;   // Persistent FARSITE accumulator (2 comp): displacement (legacy), or head-rate distance and front flag (front_cell)
     std::unique_ptr<amrex::MultiFab>         fire_surface_temp; // Surface temperature [K] (Phase 2)
     std::unique_ptr<amrex::MultiFab>         fire_surface_rh;   // Surface relative humidity [0-1] (Phase 2)
+    std::unique_ptr<amrex::MultiFab>         fire_precip_rate;  // Rain rate wetting the dead classes [mm/hr]; null without a rain source
+    // erf.fire.precip_source = atmosphere: the surface precipitation accumulation
+    // [kg/m2] of every column of the fire grid's level (one slab per box of that
+    // level) at the end of the previous fire step; the step's rain is the change
+    // from it. Fresh start: zero, where every scheme starts its accumulators.
+    std::unique_ptr<amrex::MultiFab>         m_precip_accum_prev;
+    bool                                     m_precip_prev_valid = true;
     std::unique_ptr<amrex::MultiFab>         fire_fireline_intensity; // Byram fireline intensity [kW/m]
     std::unique_ptr<amrex::MultiFab>         fire_flame_length;       // Thomas flame length [m]
     std::unique_ptr<amrex::MultiFab>         fire_flame_tilt;         // Flame tilt angle [deg from vertical] (Phase 9)
     std::unique_ptr<amrex::MultiFab>         fire_flame_temp;         // Flame temperature [K] (Phase 9)
 
-    // Phase 9: Crown fire diagnostics (2 comp, on fire grid)
-    // comp 0: crown fire status (1.0 = active crown, 0.0 = surface),
-    // comp 1: remaining crown fuel load [kg/m²]
+    // Crown fire state: four single-component MultiFabs on the fire grid
     std::unique_ptr<amrex::MultiFab>         fire_crown_active;       // Crown fire status: 1=active, 0=surface (Phase 9)
     std::unique_ptr<amrex::MultiFab>         fire_crown_load;         // Remaining crown fuel load [kg/m²] (Phase 9)
     std::unique_ptr<amrex::MultiFab>         fire_crown_ros_active;   // Active crown ROS [m/s], carried from
@@ -736,8 +848,9 @@ private:
     // comp 2: max landing dist [m], comp 3: active spot flag
     std::unique_ptr<amrex::MultiFab>         fire_albini_data;
 
-    // Phase 12: Per-cell acceleration state for temporal model (3 components).
-    // comp 0: ROS_current [m/s], comp 1: elapsed_time [s], comp 2: ROS_equilibrium [m/s].
+    // Per-cell acceleration state for the temporal model (3 components).
+    // comp 0: ROS_current [m/s], comp 1: elapsed_time [s], comp 2: ROS_equilibrium
+    // [m/s] with accel.clock = legacy, the ramp factor [0-1] with accel.clock = front.
     // Only allocated when accel.enable = true AND accel.use_temporal = true.
     // nullptr when acceleration is disabled or size-based model is used.
     std::unique_ptr<amrex::MultiFab>  fire_accel_state;
@@ -747,9 +860,15 @@ private:
     amrex::Gpu::DeviceVector<int>            m_d_fuel_codes;   // device copy of integer codes
     bool                                     m_has_spatial_fuel = false;
 
-    // Phase 11: Multi-ignition schedule runtime state
+    // Multi-ignition schedule runtime state
     IgnitionSchedule  m_ignition_schedule;   // loaded from ignition_schedule_file
     bool              m_has_schedule = false;
+    // Start time of the previous fire step: the lower end of this step's
+    // ignition window (schedule events and the timed perimeter polygon are
+    // due in (m_prev_window_end, m_current_time]). Checkpointed in FireState;
+    // without it a restart falls back to m_current_time - dt.
+    amrex::Real       m_prev_window_end  = 0.0;
+    bool              m_have_prev_window = false;
 
     // Phase 6: fire-atmosphere coupling MultiFabs
     // Fire fluxes coarsened onto the atmospheric columns of the fire grid's level
@@ -802,11 +921,17 @@ private:
     // Initial fuel load [kg/m²] for diagnostics (Phase 5)
     amrex::Real                              m_fuel_load_initial_kg_m2 = 0.0;
 
-    // Phase 13A: Per-fuel wind height device tables
-    amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcwh;          // fcwh[0..13], device copy
+    // Phase 13A: Per-fuel wind height device table
+    amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcwh;          // fcwh[0..FUEL_SLOT_COUNT-1], device copy
     amrex::Gpu::DeviceVector<amrex::Real> m_d_burnout_tau;   ///< burnout e-folding time by fuel code (index 1-13) [s], erf.fire.burnout_model = sfire
-    amrex::Gpu::DeviceVector<amrex::Real>    m_d_fcz0;          // fcz0[0..13], device copy
     bool                                     m_use_per_fuel_wind_ht = false;
+
+    // Deck-defined fuel models (erf.fire.custom_fuel.*) and the slot table of
+    // fuel properties every ROS model, the heat flux and the fuel load read.
+    // Both are built from the inputs, so neither is checkpointed.
+    CustomFuelTable                              m_custom_fuel;
+    std::vector<FuelModelParams>                 m_h_fuel_params;
+    amrex::Gpu::DeviceVector<FuelModelParams>    m_d_fuel_params;
 
     // Phase 13B: Pre-computed ROS model coefficients (set in initialize, used in advance)
     BalbiComputed                            m_bc_default;      // Balbi global default (uniform fuel)
@@ -840,6 +965,12 @@ private:
     // (structures, fuel codes, masked firebreaks) is configured.
     std::unique_ptr<amrex::MultiFab>         fire_nonburnable;
 
+    // Suppression (erf.fire.suppression.enable): the action list and its
+    // per-cell fields live in the class; fire_nonburnable becomes the OR of
+    // the static mask kept here and the suppression mask, rebuilt every step.
+    std::unique_ptr<FireSuppression>         m_suppression;
+    std::unique_ptr<amrex::MultiFab>         fire_nonburnable_static;
+
     // Exposure diagnostics (erf.fire.exposure.enable). The id carries
     // exposure.ring ghost cells so the wall band can be found from any cell;
     // the three accumulators are restart state and are checkpointed.
@@ -849,6 +980,11 @@ private:
     std::unique_ptr<amrex::MultiFab>         fire_ember_landings;   // brands landed on a footprint
     int                                      m_n_structures = 0;
     std::vector<char>                        m_exposure_reported;   // first-arrival line printed
+
+    // Structure ignition and burning (erf.fire.structures.ignition.enable):
+    // per-structure state, the burning structures' heat and ember sources and
+    // the incident radiant flux on the fire grid (ERF_StructureIgnition.H).
+    std::unique_ptr<StructureIgnition>       m_struct_ign;
 
     /// Label the footprints of the structure heightmap and allocate the accumulators.
     void build_structure_ids();
@@ -884,12 +1020,6 @@ private:
     FireParams                               m_params;
 
 
-    /**
-     * @brief Apply Wind Adjustment Factor to the effective wind field.
-     *
-     * Multiplies fire_wind_eff by a scalar WAF. Used inside advance().
-     */
-    void apply_waf_to_wind();
     /// Reach estimate on the first step with a burning cell: distance to each
     /// non-periodic edge against ros_max times the time left in the run.
     void report_edge_reach(amrex::Real ros_max, amrex::Real dt);
@@ -901,6 +1031,15 @@ private:
     // protected class access, and every method below launches ParallelFor kernels, so
     // they are public even though only the fire layer calls them.
 public:
+
+    /**
+     * @brief Apply Wind Adjustment Factor to the effective wind field.
+     *
+     * Multiplies fire_wind_eff by the per-cell WAF (the uniform fuel's WAF, or
+     * the per-cell value on a fuel map) inside a ParallelFor; public for the
+     * nvcc rule above. Used inside advance().
+     */
+    void apply_waf_to_wind();
 
     /// Fill m_open_frac_atm and m_roof_h_atm from the mask and structure height.
     void build_open_fraction(const amrex::Geometry& geom_atm);
@@ -926,6 +1065,10 @@ public:
     /// Build fire_nonburnable from structures, fuel codes and firebreaks.
     void build_nonburnable_mask();
 
+    /// Suppression, once per fire step before the front update: apply the
+    /// actions, then rebuild fire_nonburnable as static mask OR suppression mask.
+    void apply_suppression();
+
     /**
      * @brief Apply the crown-fire rate-of-spread enhancement to fire_ros.
      *
@@ -940,16 +1083,21 @@ public:
     /**
      * @brief Update fire_fuel_mc and fire_mext for one atmospheric timestep.
      *
-     * Called from advance() before ComputeRothermellSpreadRate. Updates
-     * fuel moisture using time-lag ODEs and recomputes moisture of extinction.
+     * Called from advance() before the ROS dispatch (fill_ros_for_model).
+     * Updates the fuel moisture with the time-lag ODEs (or the stick model)
+     * and recomputes the moisture of extinction.
      *
      * @param[in] dt_s       Atmospheric timestep [seconds]
-     * @param[in] T_atm_k0   Atmospheric potential temperature at k=0 [K]
+     * @param[in] T_atm_k0   Air temperature at k=0 [K]
      * @param[in] RH_atm_k0  Atmospheric relative humidity at k=0 [fraction 0-1]
+     * @param[in] precip_accum_k0  Surface precipitation accumulation per column
+     *                       [kg/m2]; required with erf.fire.precip_source =
+     *                       atmosphere, ignored otherwise
      */
     void advance_fuel_moisture(amrex::Real dt_s,
                                const amrex::MultiFab& T_atm_k0,
-                               const amrex::MultiFab& RH_atm_k0);
+                               const amrex::MultiFab& RH_atm_k0,
+                               const amrex::MultiFab* precip_accum_k0);
 
     /**
      * @brief Compute heat flux and deplete fuel load for one atmospheric timestep (Phase 5).
@@ -960,7 +1108,9 @@ public:
      * - Byram fireline intensity [kW/m] in fire_fireline_intensity
      * - Thomas flame length [m] in fire_flame_length
      *
-     * @param[in] dt_fire_s  Last fire subcycle timestep [s]
+     * @param[in] dt_fire_s  The atmospheric step [s] (advance() passes dt): the
+     *                       burnout and the crown-load depletion are applied
+     *                       once per step over the whole step, not per subcycle
      */
     void compute_heat_flux_and_diagnostics(amrex::Real dt_fire_s);
 

@@ -237,19 +237,24 @@ void advance_farsite_one_step_legacy(
             Real dphi_dx = (phi_arr(i+1,j,k) - phi_arr(i-1,j,k)) * dxi * 0.5;
             Real dphi_dy = (phi_arr(i,j+1,k) - phi_arr(i,j-1,k)) * dyi * 0.5;
             Real grad_mag = std::sqrt(dphi_dx*dphi_dx + dphi_dy*dphi_dy);
+            // unit vectors from floored magnitudes, before the early returns
+            // (away from the front grad = 0, on calm cells wind = 0, and the
+            // unselected 0/0 would be speculated under the fpe traps)
+            const Real inv_grad = Real(1.0) / amrex::max(grad_mag, Real(1.0e-10));
             if (grad_mag < 1.0e-10) { return; }
 
-            Real nx = dphi_dx / grad_mag;
-            Real ny = dphi_dy / grad_mag;
+            Real nx = dphi_dx * inv_grad;
+            Real ny = dphi_dy * inv_grad;
 
             Real ux = vel_arr(iv, 0);
             Real uy = vel_arr(iv, 1);
             Real wind_mag = std::sqrt(ux*ux + uy*uy);
+            const Real inv_wind = Real(1.0) / amrex::max(wind_mag, Real(1.0e-10));
 
             Real scale = 1.0;
             if (wind_mag > 1.0e-10) {
-                Real wx = ux / wind_mag;
-                Real wy = uy / wind_mag;
+                Real wx = ux * inv_wind;
+                Real wy = uy * inv_wind;
                 Real cos_t = amrex::max(static_cast<amrex::Real>(-1.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(nx*wx + ny*wy), static_cast<amrex::Real>(1.0))));
                 Real sin_t = std::sqrt(1.0 - cos_t*cos_t);
                 Real a = fp.coeff_a, b = fp.coeff_b, c = fp.coeff_c;
@@ -586,9 +591,12 @@ void advance_farsite_front_cells(
             s.isotropic = !(wind_mag > 1.0e-10_rt);
             s.wx = 1.0_rt; s.wy = 0.0_rt;
             s.a = 1.0_rt; s.b = 1.0_rt; s.c = 1.0_rt;
+            // unit wind from the floored magnitude (calm cells give 0/0 in the
+            // unselected arm, which the optimiser evaluates)
+            const Real inv_wind = 1.0_rt / amrex::max(wind_mag, 1.0e-10_rt);
             if (!s.isotropic) {
-                s.wx = ux / wind_mag;
-                s.wy = uy / wind_mag;
+                s.wx = ux * inv_wind;
+                s.wy = uy * inv_wind;
                 Real a = coef_a, b = coef_b, c = coef_c;
                 if (use_anderson_lw != 0) {
                     LW_ratio_to_richards_coefficients(anderson_LW_ratio(wind_mag * 2.237_rt), a, b, c);
@@ -660,9 +668,11 @@ amrex::Real compute_fire_dt(
 {
     using namespace amrex;
     Real max_ros = R_mf.max(0);
-    if (max_ros < 1.0e-10) { return dt_atm; }
     const auto dx = geom_fire.CellSizeArray();
-    return cfl_fire * amrex::min(dx[0], dx[1]) / max_ros;
+    // floored rate before the early return (no burnable fuel: 0 -> x/0 speculated)
+    const Real dt_cfl = cfl_fire * amrex::min(dx[0], dx[1]) / amrex::max(max_ros, Real(1.0e-10));
+    if (max_ros < 1.0e-10) { return dt_atm; }
+    return dt_cfl;
 }
 
 inline

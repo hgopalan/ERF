@@ -1,0 +1,5 @@
+FILE = inputs_custom_grass
+
+# heat_content_J_kg given in BTU/lb by mistake (8000 instead of 1.8608e7),
+# the unit slip the SI bands exist to catch.
+erf.fire.custom_fuel.1000.heat_content_J_kg = 8000.0

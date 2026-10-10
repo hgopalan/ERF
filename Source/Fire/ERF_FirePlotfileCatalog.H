@@ -32,13 +32,26 @@
  *  17. fire_flame_length  (Thomas flame length [m])
  *  18. fire_arrival_time  (fire arrival time [s])
  *
- * Phase 8 spotting diagnostics append 4 components when spotting.enable = true:
- *   fire_lofting_height, fire_spot_brand_count, fire_spot_max_dist, fire_spot_active
- *
- * Phase 9 crown-fire diagnostics append 4 or 5 components when crown fire output
- * is enabled:
- *   fire_crown_active, fire_crown_load, fire_crown_fraction_burned,
- *   [optional] fire_flame_tilt, fire_flame_temp
+ * The optional blocks follow, in this order (fire_plotfile_var_names):
+ *   live moisture (2): fire_fuel_mc_lh, fire_fuel_mc_lw
+ *   spotting (4, spotting.enable): fire_lofting_height, fire_spot_brand_count,
+ *     fire_spot_max_dist, fire_spot_active
+ *   crown fire (4 or 5, crown.enable): fire_crown_active, fire_crown_load,
+ *     fire_crown_fraction_burned, [fire_flame_tilt with compute_flame_tilt],
+ *     fire_flame_temp (always written with the crown block, nowhere else)
+ *   fuel map (1): fire_fuel_model_code
+ *   hybrid ROS (1): fire_ros_model_weight
+ *   structures (1): fire_structure_height
+ *   non-burnable mask (1): fire_nonburnable
+ *   exposure (4, exposure.enable): fire_structure_id, fire_heat_load,
+ *     fire_peak_intensity, fire_ember_landings
+ *   structure ignition (3): fire_structure_state, fire_structure_ignition_time,
+ *     fire_structure_rad_flux
+ *   precipitation (1): fire_precip_mm_hr, when the dead-fuel moisture is dynamic
+ *     and the deck names a rain source (erf.fire.precip_source = atmosphere, or
+ *     a positive erf.fire.precip_rate_mm_hr)
+ *   suppression (3, suppression.enable): fire_suppression_mask,
+ *     fire_ros_factor, fire_line_progress
  */
 
 /**
@@ -52,6 +65,10 @@
  * @param[in] include_structure_height Append fire_structure_height when true (structures or hybrid structure selector).
  * @param[in] include_nonburnable Append fire_nonburnable when true (non-burnable mask active).
  * @param[in] include_exposure Append the four exposure fields when true (erf.fire.exposure.enable).
+ * @param[in] include_structure_ignition Append the three structure ignition fields when true
+ *            (erf.fire.structures.ignition.enable).
+ * @param[in] include_precip Append fire_precip_mm_hr when true (a rain source is configured).
+ * @param[in] include_suppression Append fire_suppression_mask, fire_ros_factor and fire_line_progress when true (erf.fire.suppression.enable).
  * @return Vector of variable name strings in canonical write order.
  */
 inline amrex::Vector<std::string> fire_plotfile_var_names(
@@ -63,7 +80,10 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
     bool include_ros_weight = false,
     bool include_structure_height = false,
     bool include_nonburnable = false,
-    bool include_exposure = false)
+    bool include_exposure = false,
+    bool include_structure_ignition = false,
+    bool include_precip = false,
+    bool include_suppression = false)
 {
     amrex::Vector<std::string> names{
         "fire_phi",
@@ -124,6 +144,19 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
         names.push_back("fire_peak_intensity");
         names.push_back("fire_ember_landings");
     }
+    if (include_structure_ignition) {
+        names.push_back("fire_structure_state");
+        names.push_back("fire_structure_ignition_time");
+        names.push_back("fire_structure_rad_flux");
+    }
+    if (include_precip) {
+        names.push_back("fire_precip_mm_hr");
+    }
+    if (include_suppression) {
+        names.push_back("fire_suppression_mask");
+        names.push_back("fire_ros_factor");
+        names.push_back("fire_line_progress");
+    }
     return names;
 }
 
@@ -149,6 +182,9 @@ inline amrex::Vector<std::string> fire_plotfile_var_names(
  * @param[in] include_structure_height Count fire_structure_height when true (structures or hybrid structure selector).
  * @param[in] include_nonburnable Count fire_nonburnable when true (non-burnable mask active).
  * @param[in] include_exposure Count the four exposure fields when true.
+ * @param[in] include_structure_ignition Count the three structure ignition fields when true.
+ * @param[in] include_precip Count fire_precip_mm_hr when true.
+ * @param[in] include_suppression Count the three suppression fields when true.
  * @return Number of scalar fire output variables.
  */
 inline int fire_plotfile_ncomp(
@@ -160,7 +196,10 @@ inline int fire_plotfile_ncomp(
     bool include_ros_weight = false,
     bool include_structure_height = false,
     bool include_nonburnable = false,
-    bool include_exposure = false)
+    bool include_exposure = false,
+    bool include_structure_ignition = false,
+    bool include_precip = false,
+    bool include_suppression = false)
 {
     return 19
         + (include_live_moisture ? 2 : 0)
@@ -170,7 +209,10 @@ inline int fire_plotfile_ncomp(
         + (include_ros_weight ? 1 : 0)
         + (include_structure_height ? 1 : 0)
         + (include_nonburnable ? 1 : 0)
-        + (include_exposure ? 4 : 0);
+        + (include_exposure ? 4 : 0)
+        + (include_structure_ignition ? 3 : 0)
+        + (include_precip ? 1 : 0)
+        + (include_suppression ? 3 : 0);
 }
 
 

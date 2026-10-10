@@ -50,7 +50,7 @@ MEWS_FTMIN = 300.0   # the model's maximum effective wind for fine fuels (SAV > 
 
 DX_FIRE = 5.0
 FM1_LOAD_KG_M2 = 0.166     # 0.74 ton/acre
-VARIANTS = ["wildland", "wildland_spotting", "subdivision", "defensible", "coupled"]
+VARIANTS = ["wildland", "wildland_spotting", "subdivision", "defensible", "coupled", "ignition"]
 ok_all = True
 
 def fail(msg):
@@ -206,11 +206,64 @@ for v in ["subdivision", "defensible", "coupled"]:
         if t850 <= 0:
             fail("coupled: the fire did not reach x = 780 m")
 
+# ---------------------------------------------------------------- ignition
+# The subdivision with structure ignition on: houses ignite from the exposure
+# accumulators, burn, and load their neighbours by radiation and brands.
+print("== ignition")
+pf = last_plotfile("ignition")
+if pf is None:
+    fail("no ignition plotfile")
+else:
+    F, t_end = fields(pf, ["fire_arrival_time", "fire_phi", "fire_fuel_load", "fire_structure_height",
+                           "fire_structure_state", "fire_structure_ignition_time", "fire_structure_id"])
+    house = F["fire_structure_height"] > 0.5
+    F0, _ = fields(sorted(glob.glob("plt_fire_ignition_?????"))[0], ["fire_fuel_load"])
+    fuel_lost_in_house = float((F0["fire_fuel_load"] - F["fire_fuel_load"])[house].max()) if house.any() else 0.0
+    burned_in_house = int(((F["fire_phi"] < 0) & house).sum())
+    if fuel_lost_in_house > 1e-12 or burned_in_house > 0:
+        fail("ignition: the level set or the fuel entered a footprint (a burning house is not a burning fuel cell)")
+    ex = exposure_rows("ignition")
+    if len(ex) != 24:
+        fail(f"ignition: expected 24 structures in the exposure CSV, found {len(ex)}")
+    if ex and "state" not in next(iter(ex.values())):
+        fail("ignition: the exposure CSV has no state column (structure ignition off?)")
+    else:
+        ign = {s: r for s, r in ex.items() if r["state"] != "unignited"}
+        causes = {}
+        for r in ign.values():
+            causes[r["cause"]] = causes.get(r["cause"], 0) + 1
+        t_ign = sorted(float(r["t_ignition_s"]) for r in ign.values())
+        print(f"  {len(ign)} of {len(ex)} houses ignited ({', '.join(f'{k}: {v}' for k, v in sorted(causes.items()))}); "
+              f"first at {t_ign[0] if t_ign else float('nan'):.0f} s, last at {t_ign[-1] if t_ign else float('nan'):.0f} s; "
+              f"{sum(1 for r in ign.values() if r['state'] == 'burned_out')} burned out")
+        if not ign:
+            fail("ignition: no house ignited")
+        # house-to-house: a house whose wall band the front never reached ignited anyway
+        second_hand = [s for s, r in ign.items() if float(r["t_first_s"]) < 0 or float(r["t_first_s"]) > float(r["t_ignition_s"])]
+        print(f"  ignited before the front reached their band (from a neighbour): {len(second_hand)} houses {sorted(second_hand)}")
+        if len(ign) >= 2 and t_ign[-1] <= t_ign[0]:
+            fail("ignition: no house ignited later than the first")
+        if len(ign) >= 2 and not second_hand:
+            fail("ignition: every ignited house had already been reached by the front; no house-to-house spread")
+        st = F["fire_structure_state"]; ti = F["fire_structure_ignition_time"]; sid = F["fire_structure_id"]
+        for s, r in ign.items():
+            cells = (sid == s)
+            if cells.any() and not (np.all(st[cells] > 0) and np.allclose(ti[cells], float(r["t_ignition_s"]))):
+                fail(f"ignition: the plotfile state of house {s} disagrees with the CSV")
+        s_sub = results.get("subdivision", {})
+        results["ignition"] = dict(t850=arrival(F["fire_arrival_time"], 780.0, 240.0),
+                                   burned=int(((F["fire_phi"] < 0) & ~house).sum()),
+                                   reached=sum(1 for r in ex.values() if float(r["t_first_s"]) >= 0),
+                                   hl_max=max((float(r["heat_load_max_MJm2"]) for r in ex.values()), default=0.0),
+                                   pk_max=max((float(r["peak_intensity_kWm"]) for r in ex.values()), default=0.0),
+                                   embers=sum(int(float(r["embers"])) for r in ex.values()),
+                                   ignited=len(ign))
+
 print("== summary")
-print(f"  {'variant':12s} {'t(850 m) s':>11s} {'burned':>7s} {'reached':>8s} {'peak kW/m':>10s} {'HL MJ/m2':>9s} {'embers':>7s}")
+print(f"  {'variant':12s} {'t(850 m) s':>11s} {'burned':>7s} {'reached':>8s} {'peak kW/m':>10s} {'HL MJ/m2':>9s} {'embers':>7s} {'ignited':>8s}")
 for v in VARIANTS:
     r = results.get(v)
     if not r: continue
-    print(f"  {v:12s} {r['t850']:11.1f} {r['burned']:7d} {r.get('reached', 0):8d} {r.get('pk_max', 0.0):10.0f} {r.get('hl_max', 0.0):9.2f} {r.get('embers', 0):7d}")
+    print(f"  {v:12s} {r['t850']:11.1f} {r['burned']:7d} {r.get('reached', 0):8d} {r.get('pk_max', 0.0):10.0f} {r.get('hl_max', 0.0):9.2f} {r.get('embers', 0):7d} {r.get('ignited', 0):8d}")
 print("RESULT:", "pass" if ok_all else "FAIL")
 sys.exit(0 if ok_all else 1)

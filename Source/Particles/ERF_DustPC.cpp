@@ -101,6 +101,15 @@ void ERFDustPC::AdvanceParticles(const amrex::MultiFab& xvel,
     const Box& dom_dust = geom_dust.Domain();
     const int i_dust_lo = dom_dust.smallEnd(0), i_dust_hi = dom_dust.bigEnd(0);
     const int j_dust_lo = dom_dust.smallEnd(1), j_dust_hi = dom_dust.bigEnd(1);
+    const int ni_dust = dom_dust.length(0);
+    const int nj_dust = dom_dust.length(1);
+
+    // Deposits are tallied per SOURCE cell, which can sit in another box (and
+    // on another rank) than the particle: a domain-sized host tally reduced
+    // across ranks, then added into every box's own cells. Writing through
+    // the particle's box at the source index (the earlier form) ran off the
+    // FAB whenever a particle had crossed a box boundary.
+    amrex::Vector<Real> deposit(static_cast<std::size_t>(ni_dust) * nj_dust, Real(0.0));
 
     for (ParIterType pti(*this, 0); pti.isValid(); ++pti) {
         auto& particles     = pti.GetArrayOfStructs();
@@ -109,7 +118,6 @@ void ERFDustPC::AdvanceParticles(const amrex::MultiFab& xvel,
         auto xvel_arr       = xvel.const_array(pti);
         auto yvel_arr       = yvel.const_array(pti);
         auto zvel_arr       = zvel.const_array(pti);
-        auto source_map_arr = source_map.array(pti);
 
         auto& soa         = pti.GetStructOfArrays();
         auto& mass_vec    = soa.GetRealData(DustParticleRealIdx::mass);
@@ -139,9 +147,11 @@ void ERFDustPC::AdvanceParticles(const amrex::MultiFab& xvel,
 
             Real u = 0.0, v_p = 0.0, w = 0.0;
 
-            if (i_cell >= i_lo && i_cell < i_hi &&
-                j_cell >= j_lo && j_cell < j_hi &&
-                k_cell >= k_lo && k_cell < k_hi) {
+            // every cell of the domain, the last one included (the face
+            // reads below fall back to the lower face at the upper edge)
+            if (i_cell >= i_lo && i_cell <= i_hi &&
+                j_cell >= j_lo && j_cell <= j_hi &&
+                k_cell >= k_lo && k_cell <= k_hi) {
 
                 Real u1 = xvel_arr(i_cell,   j_cell, k_cell);
                 Real u2 = (i_cell+1 <= i_hi) ? xvel_arr(i_cell+1, j_cell, k_cell) : u1;
@@ -165,7 +175,7 @@ void ERFDustPC::AdvanceParticles(const amrex::MultiFab& xvel,
             if (z < z_deposit) {
                 int src_i = amrex::max(i_dust_lo, amrex::min(i_dust_hi, int(src_i_f)));
                 int src_j = amrex::max(j_dust_lo, amrex::min(j_dust_hi, int(src_j_f)));
-                source_map_arr(src_i, src_j, 0) += mass;
+                deposit[static_cast<std::size_t>(src_j - j_dust_lo) * ni_dust + (src_i - i_dust_lo)] += mass;
                 particle.id() = -1;
             } else {
                 particle.pos(0) = x;
@@ -173,6 +183,16 @@ void ERFDustPC::AdvanceParticles(const amrex::MultiFab& xvel,
                 particle.pos(2) = z;
             }
         }
+    }
+
+    // every rank adds its deposits to every source cell it owns
+    ParallelDescriptor::ReduceRealSum(deposit.data(), static_cast<int>(deposit.size()));
+    for (MFIter mfi(source_map); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.validbox();
+        auto sm = source_map.array(mfi);
+        amrex::LoopOnCpu(bx, [&] (int i, int j, int k) {
+            sm(i, j, k) += deposit[static_cast<std::size_t>(j - j_dust_lo) * ni_dust + (i - i_dust_lo)];
+        });
     }
 
     Redistribute();

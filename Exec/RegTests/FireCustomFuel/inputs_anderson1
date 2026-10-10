@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# The baseline: Anderson short grass from the compiled table, the deck's default.
+# inputs_custom_grass reproduces it from the deck and must match line for line.

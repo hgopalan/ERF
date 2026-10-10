@@ -1,0 +1,13 @@
+plt*
+chk*
+Backtrace.*
+frames_*/
+*.mp4
+*_last.png
+fire_stats*.csv
+fuel_marshall_*.asc
+LF20*_*.tif
+*.tif.part
+precursor/inflow_*.txt
+precursor/sounding_mrf.txt
+precursor/sounding_ysunew.txt

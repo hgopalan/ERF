@@ -1,0 +1,9 @@
+FILE = inputs_base
+
+# Start-up check: every file in the list is read, so a second file that does
+# not exist stops the run (the first one alone is a valid line fire).
+erf.fire_plot_file = "plt_fire_missing_"
+erf.fire.ignition_r = 0.0             # no disc of its own
+erf.fire.ignition.polygon_file = "parallel_south.csv" "parallel_missing.csv"
+erf.fire.ignition.polygon_type = "polyline"
+erf.fire.ignition.polyline_width = 4.0

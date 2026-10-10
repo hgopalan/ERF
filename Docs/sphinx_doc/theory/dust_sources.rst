@@ -11,24 +11,40 @@ Threshold friction velocity
 
 Emission starts where the friction velocity exceeds a threshold
 :math:`u_{*t}` set by the grain size and everything that binds the surface.
-The base value is Bagnold's
+The base value belongs to the *saltating* grains, not to the emitted dust:
+Marticorena and Bergametti (1995) drive the sandblasting flux with the
+threshold of the soil's coarse mode (60-100 um), the minimum of the
+threshold-versus-size curve. With :cpp:`erf.dust.threshold_model = shao_lu`
+(the default) it is Shao and Lu's (2000) expression with the cohesion term,
 
 .. math::
 
-   u_{*t,\mathrm{base}} = A \sqrt{\frac{\rho_p\, g\, d}{\rho_a}}
+   u_{*t,\mathrm{base}} = \sqrt{A_N \left( \frac{\rho_p\, g\, d_s}{\rho_a}
+                          + \frac{\gamma}{\rho_a\, d_s} \right)}
 
-with :math:`A` = :cpp:`erf.dust.threshold_A_coeff` (0.1, Bagnold's fluid-threshold
-constant; the earlier default 0.0123 was Shao and Lu's coefficient of a different
-formula and gave a threshold 8x too low), :math:`\rho_p`
-= :cpp:`erf.dust.particle_density`, :math:`\rho_a` =
-:cpp:`erf.dust.rho_air` and :math:`d` the diameter of bin 0 in
-:cpp:`erf.dust.bin_diameters` (the same array settling and deposition use); :cpp:`erf.dust.ustar_t_base` overrides it
-when non-negative. The per-cell threshold (``compute_ustar_t_full`` in
-``ERF_DustThreshold.H``) is then
+with :math:`A_N` = :cpp:`erf.dust.shao_lu_A_N` (0.0123), :math:`\gamma` =
+:cpp:`erf.dust.shao_lu_gamma` (1.65e-4 kg/s^2), :math:`d_s` =
+:cpp:`erf.dust.saltation_diameter` (75 um), :math:`\rho_p` =
+:cpp:`erf.dust.particle_density` and :math:`\rho_a` = :cpp:`erf.dust.rho_air`:
+0.204 m/s for quartz in standard air. The curve is non-monotone in
+:math:`d_s`, the inertial term growing with the size and the cohesion term
+with its inverse. :cpp:`erf.dust.threshold_model = bagnold` gives Bagnold's
+(1941) inertial branch alone, :math:`A \sqrt{\rho_p g d_s / \rho_a}` with
+:math:`A` = :cpp:`erf.dust.threshold_A_coeff` (0.1), which is only valid
+above about 100 um. Until October 2026 the base was Bagnold's formula at the
+7 um diameter of bin 0, 0.0385 m/s, 13x below Shao-Lu at that size: every
+case ran with :math:`u_{*t}/u_* \approx 0.08`, where the Owen factor of the
+saltation flux still rises with the threshold, so crust, suppression and
+moisture changed the emission by a few percent with the wrong sign.
+:cpp:`erf.dust.ustar_t_base` overrides the formula when non-negative (0.0385
+reproduces the old runs). The bin diameters of :cpp:`erf.dust.bin_diameters`
+are the emitted sizes, used by settling, deposition and the PM classes only.
+The per-cell threshold (``compute_ustar_t_full`` in ``ERF_DustThreshold.H``)
+is then
 
 .. math::
 
-   u_{*t} = u_{*t,\mathrm{base}}\; \frac{f_\mathrm{chem}}{f_\mathrm{moist}\, f_\mathrm{supp}}\; f_\mathrm{slope}
+   u_{*t} = u_{*t,\mathrm{base}}\; f_\mathrm{chem}\, f_\mathrm{moist}\, f_\mathrm{supp}\; f_\mathrm{slope}
 
 .. math::
 
@@ -37,26 +53,36 @@ when non-negative. The per-cell threshold (``compute_ustar_t_full`` in
    f_\mathrm{supp}  = 1 + 6\, s
 
 where :math:`C_I` is the crust index, :math:`E_f` the efflorescence
-fraction, :math:`w` the moisture inhibition and :math:`s` the suppression
+fraction, :math:`w` the moisture flag and :math:`s` the suppression
 coverage, all clamped to [0, 1], with :math:`\alpha_c` =
 :cpp:`erf.dust.alpha_crust` and :math:`\alpha_e` =
-:cpp:`erf.dust.alpha_efflor`. Crust and efflorescence *raise* the threshold
-(a bound surface is harder to erode), which is why the fire coupling lowers
-emission by removing crust. Moisture and suppression divide the base in the
-code but are themselves greater than one, so they also raise the threshold.
-The slope factor is the upslope correction of Iversen and White (1982),
+:cpp:`erf.dust.alpha_efflor`. Every factor is at least one and *raises* the
+threshold: a crusted, salt-bound, wet or suppressant-treated surface is
+harder to erode. The fire coupling removes crust in burned cells, which
+lowers their threshold and raises their emission. (Until October 2026 the
+code divided by :math:`f_\mathrm{moist} f_\mathrm{supp}`, so a wet or treated
+cell emitted more than a dry one; the ``DustThreshold`` gtests pin the
+direction.) The moisture factor is an ad hoc linear form on the [0, 1] flag
+of the surface map, not Fecan et al.'s (1999)
+:math:`\sqrt{1 + 1.21 (w - w')^{0.68}}`, which needs a gravimetric soil
+moisture the module does not carry yet.
+The slope factor is the signed form of Iversen and Rasmussen (1994),
 
 .. math::
 
-   f_\mathrm{slope} = \sqrt{\max\!\left(0.1,\; \cos\beta + \frac{|\nabla z|}{\tan 35^\circ}\right)},
-   \qquad \cos\beta = \frac{1}{\sqrt{1 + |\nabla z|^2}}
+   f_\mathrm{slope} = \sqrt{\max\!\left(0.1,\; \cos\theta + \frac{\sin\theta}{\tan 35^\circ}\right)},
+   \qquad \tan\theta = \frac{\nabla z \cdot \mathbf{U}}{|\mathbf{U}|}
 
-from the terrain slope on the dust grid. The result is clamped to
+with :math:`\theta` the terrain slope along the wind at ``zref`` (positive
+where the wind blows uphill, negative on the lee face, so a 10 degree slope
+gives 1.11 windward and 0.86 in the lee); with no wind the magnitude
+:math:`|\nabla z|` is used. The result is clamped to
 [0.001, 5] m/s. Two feedbacks from the atmosphere follow when enabled: the
 Shao (2001) loading feedback :math:`u_{*t} \to u_{*t}(1 + \alpha_L C_\mathrm{sfc})`
 with :math:`\alpha_L` = :cpp:`erf.dust.loading_feedback_coeff` and
-:math:`C_\mathrm{sfc}` the dust density of the lowest atmosphere cell, and the
-Fecan (1999) dynamic moisture factor of :ref:`sec:DustCoupling`.
+:math:`C_\mathrm{sfc}` the dust density of the lowest atmosphere cell; the
+surface latent flux returned from the atmosphere is an output only
+(:ref:`sec:DustCoupling`).
 
 Saltation and vertical flux
 ---------------------------
@@ -69,11 +95,16 @@ as used by Marticorena and Bergametti (1995),
    Q_s = C_s\, \frac{\rho_a}{g}\, u_*^3 \left(1 - \frac{u_{*t}}{u_*}\right)
          \left(1 + \frac{u_{*t}}{u_*}\right)^2, \qquad C_s = 2.61
 
-and the vertical flux of every bin is the same sandblasting fraction of it,
+and the total vertical flux is a sandblasting fraction of it, shared equally
+between the :math:`N` = :cpp:`erf.dust.n_size_bins` bins (the blast schedule
+divides its mass the same way; before October 2026 every bin carried the
+whole flux, so the atmosphere received :math:`N` times it). The extra
+:math:`f_\mathrm{silt}` factor is this code's choice for mine tailings;
+Marticorena and Bergametti (1995) give :math:`F = \alpha Q_s`:
 
 .. math::
 
-   F_i = \alpha\, f_\mathrm{silt}\, Q_s, \qquad
+   F_i = \frac{\alpha\, f_\mathrm{silt}\, Q_s}{N}, \qquad
    \log_{10}\alpha_\mathrm{[cm^{-1}]} = 0.134\, (100 f_\mathrm{clay}) - 6, \qquad
    \alpha = 100\, \alpha_\mathrm{[cm^{-1}]}, \qquad
    f_\mathrm{clay} = 0.2\, f_\mathrm{silt}
@@ -102,7 +133,12 @@ within ``radius`` of (``cx``, ``cy``) receives, in every bin,
 
 with :math:`m` the mass per unit area, :math:`r_b` =
 :cpp:`erf.dust.blast_reactivity` and :math:`N_\mathrm{bins}` =
-:cpp:`erf.dust.n_size_bins`, clamped to :math:`10^{-2}` kg/m²/s per bin. The
+:cpp:`erf.dust.n_size_bins`, so that the sum over the bins of the flux times
+the step is the event's mass (a per-bin cap of :math:`10^{-2}` kg/m²/s
+applied until October 2026 dropped 85 % of a 0.05 kg/m² charge at
+:math:`\Delta t` = 0.5 s and made the delivered mass depend on the step).
+The flux of step :math:`n` is injected in step :math:`n+1`, so under an
+adaptive step the delivered mass is :math:`m r_b \Delta t_{n+1}/\Delta t_n`. The
 mineral type (0 quartz tailings, 1 lithium brine, 2 rare-earth tailings,
 3 copper tailings) is carried for diagnostics. Rank 0 reads the file and
 broadcasts it.
@@ -114,7 +150,7 @@ Haul roads
 
 .. code-block:: text
 
-   road_name  x_lo_m  y_lo_m  x_hi_m  y_hi_m  road_width_m  vehicle_weight_t  silt_pct  vmt_per_h  start_s  end_s
+   road_name  x_lo_m  y_lo_m  x_hi_m  y_hi_m  road_width_m  vehicle_weight_t  silt_pct  vkt_per_h  start_s  end_s
 
 A road is active from ``start_s`` to ``end_s`` (``-1`` means for the whole
 run); overlapping entries for one road give shift patterns. The emission
@@ -128,16 +164,27 @@ were 163x low),
    \quad [\mathrm{g/VKT}]
 
 with :math:`s` the silt content in percent and :math:`W` the vehicle mass in
-tons, spread over the road as
+tonnes (AP-42's :math:`W` is in US short tons, a 4 % difference in the
+weight factor). The column ``vkt_per_h`` is vehicle *kilometres* per hour,
+the unit of :math:`E`. The mass rate :math:`M = 10^{-3} E\, \mathrm{VKT}/3600`
+[kg/s] is spread over the :math:`n` dust cells whose centre lies in the
+bounding box, counted once at start-up,
 
 .. math::
 
-   F_\mathrm{road} = \frac{10^{-3}\, E\, \mathrm{VMT}}{W_\mathrm{road}\, L_\mathrm{road}\, 3600}
-   \quad [\mathrm{kg/m^2/s}]
+   F_\mathrm{road} = \frac{M}{n\, A_\mathrm{cell}} \quad [\mathrm{kg/m^2/s}]
 
-where :math:`L_\mathrm{road}` is the longer side of the bounding box. The flux
-is added to bin 0 of every cell in the box and clamped to :math:`10^{-3}`
-kg/m²/s; each active road appends a row to :cpp:`erf.dust.road_diag_file`.
+so the emitted mass is the AP-42 rate whatever cells the box covers; a box
+that contains no cell centre aborts at start-up. (Until October 2026 the flux
+per unit road area, :math:`M/(W_\mathrm{road} L_\mathrm{road})`, was stamped on
+every covered cell, 37.5x the AP-42 mass for a 20 m road on 375 m cells.)
+The ``road_width_m`` column is carried for the file format only: the AP-42
+mass does not depend on it. The flux is the PM-10 factor and is added to bin 0
+of the covered cells, which must therefore be a PM-10 size (at most 10 µm;
+start-up aborts otherwise); the bins' shares of the mass emitted so far, road
+included, weight the PM classes and the mean settling velocity of the lumped
+scalar (:ref:`sec:DustCoupling`). Each active road appends a row with its
+mass rate, per-cell flux and cell count to :cpp:`erf.dust.road_diag_file`.
 Wind, blast and road fluxes add in the same emission field.
 
 Suppression agents
@@ -185,10 +232,15 @@ every :cpp:`erf.dust.phreeqc_update_interval_s` seconds from
 the columns; the rows follow the dust grid in row-major order (all i for
 j = 0, then j = 1, and so on). The columns named by
 :cpp:`erf.dust.phreeqc_crust_var`, ``phreeqc_silt_var``,
-``phreeqc_efflor_var``, ``phreeqc_supp_var`` and ``phreeqc_metal_var``
-replace the crust index, silt fraction, efflorescence, suppression modifier
-and bin-0 metal fraction, after which the threshold is recomputed with the
-factors above. A ``.nc`` path aborts. The deposition written back for the
+``phreeqc_efflor_var`` and ``phreeqc_supp_var`` replace the crust index,
+silt fraction, efflorescence and suppression modifier, after which the
+threshold is recomputed with the factors above (a ``phreeqc_metal_var``
+column was read until October 2026 and copied into the emission flux, which
+the next emission pass overwrote; critical-material fractions are
+:cpp:`erf.dust.cm_fractions`). With :cpp:`erf.dust.site_phreeqc_files` each
+site's own table is then read over the cells of that site (the global table
+covers the rest). A file or column that cannot be read aborts, as does a row
+count that is neither the dust grid nor a coarsening of it. A ``.nc`` path aborts. The deposition written back for the
 next PHREEQC run is described in :ref:`sec:DustOutput`.
 
 Mine sites

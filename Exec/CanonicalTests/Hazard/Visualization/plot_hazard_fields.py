@@ -2,26 +2,28 @@
 """
 plot_hazard_fields.py — ERF-Hazard AMReX plotfile visualisation.
 
-Reads ERF AMReX plotfile directories (plt_NNNNN) and produces PNG figures
-for the Phase 5 canonical test cases: smoke plume plan view, vertical
+Reads ERF AMReX plotfile directories (plt_1_NNNNN) and produces PNG figures
+for the Hazard canonical test cases: smoke plume plan view, vertical
 cross-sections, wind speed maps, and dust emission maps.
 
 Requirements:
     pip install yt matplotlib numpy
 
 Usage:
-    python plot_hazard_fields.py --plotdir path/to/plt_00020 --case HaboobFireHill
-    python plot_hazard_fields.py --plotdir path/to/plt_00020 --case DustGaussianHill
-    python plot_hazard_fields.py --plotdir path/to/plt_00020 --case HaboobFirePit
-    python plot_hazard_fields.py --plotdir path/to/plt_00020 --case DustGaussianPit
-    python plot_hazard_fields.py --plotdir path/to/plt_00020 --case HaboobFireFlat
+    python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case HaboobFireHill
+    python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case DustGaussianHill
+    python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case HaboobFirePit
+    python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case DustGaussianPit
+    python plot_hazard_fields.py --plotdir path/to/plt_1_00020 --case HaboobFireFlat
 
 Outputs (in current directory):
-    <case>_smoke_plan.png       Smoke concentration plan view at k=0
+    <case>_smoke_plan.png       Smoke plan view at 2 % of the domain height
     <case>_smoke_xz.png         Smoke vertical cross-section (x-z plane)
-    <case>_wind_sfc.png         Horizontal wind speed at near-surface level
-    <case>_dust_emission.png    Dust emission flux at surface (if available)
-    <case>_wind_recirculation.png  Wind vectors in x-z (pit cases)
+    <case>_wind_sfc.png         x-velocity at 2 % of the domain height
+    <case>_dust_emission.png    Dust emission flux (from a plt_dust_* plotfile)
+    <case>_dust_xz.png          Dust density cross-section (x-z plane)
+    <case>_theta_xz.png         Potential temperature cross-section (x-z plane)
+    <case>_wind_recirculation.png  x-velocity in the x-z plane (pit cases)
 
 References:
     Koschmieder, H. (1924). Beitr. Phys. Atmos., 12, 33-55.
@@ -60,11 +62,11 @@ def safe_slice(ds, axis, field, center, width, cmap, log_scale,
         return False
 
     slc = yt.SlicePlot(ds, axis, ("boxlib", field),
-                       center=center, width=width)
+                       center=center, width=width, origin="native")
     slc.set_cmap(("boxlib", field), cmap)
     slc.set_log(("boxlib", field), log_scale)
     slc.set_colorbar_label(("boxlib", field), cbar_label)
-    slc.set_title(("boxlib", field), title)
+    slc.annotate_title(title)
     slc.save(outfile)
     print(f"  Saved {outfile}")
     return True
@@ -130,7 +132,7 @@ def plot_wind_sfc(ds, case):
         cmap="RdBu_r",
         log_scale=False,
         cbar_label="U [m/s]",
-        title=f"{case} — Surface Wind Speed",
+        title=f"{case} — Near-Surface x-Velocity",
         outfile=f"{case}_wind_sfc.png"
     )
 
@@ -150,7 +152,7 @@ def plot_wind_xz(ds, case):
         cmap="RdBu_r",
         log_scale=False,
         cbar_label="U [m/s]",
-        title=f"{case} — Wind x-z Cross-Section (recirculation)",
+        title=f"{case} — x-Velocity x-z Cross-Section",
         outfile=f"{case}_wind_recirculation.png"
     )
 
@@ -242,6 +244,7 @@ def make_plots(ds, case):
 
     elif case == "HaboobFirePit":
         plot_wind_xz(ds, case)
+        plot_dust_emission(ds, case)
         plot_smoke_xz(ds, case)
         plot_dust_concentration(ds, case)
         plot_theta(ds, case)
@@ -274,7 +277,7 @@ def main():
     )
     parser.add_argument(
         "--plotdir", required=True,
-        help="Path to AMReX plotfile directory (e.g. plt_00020)"
+        help="Path to AMReX plotfile directory (e.g. plt_1_00020)"
     )
     parser.add_argument(
         "--case", default="HaboobFireHill",
@@ -287,7 +290,13 @@ def main():
         sys.exit(f"ERROR: plotfile directory not found: {args.plotdir}")
 
     print(f"Loading plotfile: {args.plotdir}")
-    ds = yt.load(args.plotdir)
+    # ERF writes lengths in metres; yt's boxlib default length unit is the cm,
+    # which would make every metre width below 100 times too wide
+    ds = yt.load(args.plotdir, units_override={"length_unit": (1.0, "m")})
+    # x horizontal and z vertical on the x-z slices (yt's default is z, x)
+    for key in (1, "y"):
+        ds.coordinates.x_axis[key] = 0
+        ds.coordinates.y_axis[key] = 2
     make_plots(ds, args.case)
     print("\nDone.")
 

@@ -15,7 +15,8 @@
  *   radius       — blast affected radius [m]
  *   mass_kg_m2   — dust mass per unit area injected per blast [kg/m^2]
  *   mineral_type — integer: 0=quartz tailings (default), 1=lithium brine,
- *                  2=REE tailings, 3=copper tailings (matches soil type codes)
+ *                  2=REE tailings, 3=copper tailings (its own 0-3 list; the
+ *                  soil type raster uses codes 100-104, DustParams)
  *   priority     — integer; higher value fires first within the same timestep
  *
  * The blast injects mass_kg_m2 uniformly into all cells within radius of
@@ -62,9 +63,9 @@ namespace DustBlastConst {
     // weathered tailings. This factor scales the injected mass flux.
     constexpr amrex::Real BLAST_REACTIVITY_DEFAULT = 2.0;
 
-    // Maximum injected mass per blast per cell per timestep [kg/m^2/s].
-    // Prevents unreasonable values from a single blast event.
-    constexpr amrex::Real BLAST_FLUX_MAX = 1.0e-2;
+    // (A per-bin flux cap of 1e-2 kg/m^2/s was applied until October 2026; a
+    // 0.05 kg/m^2 charge at dt = 0.5 s lost 85 % of its mass to it, and the
+    // delivered mass depended on the time step.)
 }
 
 /**
@@ -213,10 +214,12 @@ void load_blast_schedule(const std::string& filename,
  *
  * where:
  *   blast_flux_per_bin = mass_kg_m2 * blast_reactivity_factor / (dt_s * n_size_bins)
- *   clamped to DustBlastConst::BLAST_FLUX_MAX per bin.
  *
  * This converts a total injected mass per unit area [kg/m^2] to a flux rate
- * [kg/m^2/s] over the current timestep duration dt_s.
+ * [kg/m^2/s] over the current timestep duration dt_s, so that the sum over the
+ * bins of the flux times dt_s is the event's mass (no cap). The flux computed
+ * in step n is injected during step n+1 (the documented one-step lag), so
+ * under an adaptive time step the delivered mass is m r dt_{n+1} / dt_n.
  *
  * Adapted from apply_scheduled_ignitions in ERF_IgnitionSchedule.H.
  * Uses host-side event loop + GPU ParallelFor per event, same pattern.
@@ -228,7 +231,7 @@ void load_blast_schedule(const std::string& filename,
  * @param[in]     prev_time           Time at end of previous step [s].
  * @param[in]     dt_s                Current timestep duration [s].
  * @param[in]     n_size_bins         Number of size bins.
- * @param[in]     blast_reactivity    Reactivity multiplier for fresh surface [>= 1].
+ * @param[in]     blast_reactivity    Reactivity multiplier for fresh surface [>= 0].
  */
 inline
 void apply_blast_schedule(
@@ -261,16 +264,17 @@ void apply_blast_schedule(
     // Prevent division by zero and very small timesteps
     amrex::Real dt_safe = (dt_s > 1.0e-16) ? dt_s : 1.0e-16;
 
-    // Get physical domain from dg
+    // Get physical domain from dg. GpuArrays by value: ProbLo()/CellSize()
+    // return pointers into the host Geometry, which a device kernel cannot
+    // dereference (the road schedule and the surface reader already copy).
     amrex::Geometry const& dust_geom = dg.geom;
-    auto const& plo = dust_geom.ProbLo();
-    auto const& dx = dust_geom.CellSize();
+    const auto plo = dust_geom.ProbLoArray();
+    const auto dx  = dust_geom.CellSizeArray();
 
     // Apply each event via GPU kernel
     for (auto evt : events_due) {
-        amrex::Real blast_flux_per_bin = evt->mass_kg_m2 * blast_reactivity
-                                        / (dt_safe * n_size_bins);
-        blast_flux_per_bin = std::min(blast_flux_per_bin, amrex::Real(DustBlastConst::BLAST_FLUX_MAX));
+        const amrex::Real blast_flux_per_bin = evt->mass_kg_m2 * blast_reactivity
+                                              / (dt_safe * n_size_bins);
         // Copy the event's numbers out: evt is a host pointer, not valid on the device.
         const amrex::Real evt_cx = evt->cx, evt_cy = evt->cy, evt_radius = evt->radius;
 

@@ -8,7 +8,7 @@ the three defects found in the September 2026 audit:
 | coupling | defect before the fix | check |
 |---|---|---|
 | burned area removes crust | applied every step on top of the previous step (crust 0.2^n) because the reset path in `DustLayer::advance` was never registered | u*_t burned / unburned = (1 + a c (1-r)) / (1 + a c) at steps 20 and 40 |
-| fire wind raises the dust u* | applied before `DustLayer::advance`, whose surface-layer fill overwrote it | dust u* >= log-law u* of the fire wind in every cell |
+| fire wind raises the dust u* | applied before `DustLayer::advance`, whose surface-layer fill overwrote it | dust u* >= log-law u* of the fire wind in every burned cell (phi < 0); unburned cells keep the surface layer's u* |
 | deposition accumulator | added at every RK stage with that stage's dt (1.83 dt per step) | deposition_total at step 40 within 15 % of the reference |
 
 ## Running
@@ -20,4 +20,13 @@ CTest runs it as `FireDustCoupling_check`.
 
 ## Expected results
 See the check script's output; the deposition reference is recorded in
-`check_firedust.py` (`DEP_REF`) with the measured pre-fix value.
+`check_firedust.py` (`DEP_REF`). Since October 2026 the column is the
+deposited mass in kg (the integral over the bins and the 625 m² cells); the
+reference is 24.159 kg: 31.591 kg with the fire wind's u* applied in every
+cell, 24 % less once it applies inside the fire perimeter only (the check
+`outside` counts the unburned cells that keep the surface layer's u*); 31.591
+was 2 % under the former cell sum of kg/m² (5.1697e-02,
+measured 2026-10-06 when the deposition kernel began reading the dust density
+of the state instead of the source tendency and the bins began sharing the
+emission flux) times the cell area. The kernels have known-answer gtests
+(`DustColumn`, `DustBudget`); this value guards the once-per-step accumulation.

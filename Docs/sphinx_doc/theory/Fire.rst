@@ -54,8 +54,10 @@ with a comment as a reference deck.
    Fire_FuelMoisture
    spatial_fuel
    multi_ignition
+   fire_suppression
    fire_coupling
    wui_validation
+   wui_structure_ignition
    line_fire_verification
    fire_verification
    fire_acceleration
@@ -208,7 +210,10 @@ The principal state and diagnostic fields, all cell-centred on the fire grid:
      - Hybrid model weight and sampled building height, present with the hybrid model or structures
    * - ``fire_nonburnable``
      - 1
-     - Non-burnable mask, present when structures, non-burnable fuel codes or masked firebreaks are configured
+     - Non-burnable mask, present when structures, non-burnable fuel codes, masked firebreaks or suppression are configured
+   * - ``fire_suppression_mask``, ``fire_ros_factor``, ``fire_line_progress``
+     - 1 each
+     - Suppression cells, rate factor and line ordinal, present only with ``erf.fire.suppression.enable`` (:ref:`sec:FireSuppression`)
    * - ``fire_crown_active``, ``fire_crown_load``, ``fire_crown_fraction_burned``
      - 1 each
      - Crown-fire state, present only with crown fire enabled
@@ -331,6 +336,8 @@ Where each feature is exercised:
      - canonical ``Verification/Moisture_Relaxation``, ``Core_Physics/Fuel_Moisture_Sensitivity``, ``Fire_Behavior/ROS_Models/behave_dynamic``
    * - Ignition schedule, polygon and polyline ignition
      - canonical ``Fire_Behavior/Ignition_Patterns``; ``Unit_Tests/test_ignition_schedule.py``
+   * - Fires that meet: coalescing spot fires, a junction fire, parallel lines from several perimeter files
+     - ``FireMergingFronts``; canonical ``Fire_Behavior/Interacting_Fires``; gtest ``PolygonIgnition``
    * - Startup acceleration
      - canonical ``Fire_Behavior/Acceleration``; ``Unit_Tests/test_fire_acceleration.py``
    * - Ember spotting, crown fire

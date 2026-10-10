@@ -1,0 +1,7 @@
+# Restarts from chk00023 and runs to step 40; its fire plotfile must equal
+# the straight run's in every field, suppression fields included.
+FILE = inputs_base
+erf.fire.suppression.file = actions_restart.txt
+erf.fire.suppression.log = suppression_restart_restart.csv
+erf.restart = chk00023
+erf.check_int = -1

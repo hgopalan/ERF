@@ -45,6 +45,9 @@ erf.sounding_type       = "Ideal"
 # scalars; momentum stays explicit, and its diffusivity here is far smaller.
 erf.fixed_dt      = 5.0
 erf.vert_implicit = true
+# Anelastic runs take the implicit column solve only with the midpoint
+# stages (first stage only); with RK2 the solve is turned off.
+erf.anelastic_type = MidPoint
 
 # DIAGNOSTICS & VERBOSITY
 erf.sum_interval = 10

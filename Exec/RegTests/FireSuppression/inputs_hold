@@ -1,0 +1,11 @@
+# The hold test. The prescribed rate grows northward, 1 + 0.03 (y - 200) m/s,
+# so the flame length of the cells reaching the line at x = 221 m grows with
+# y: about 2.7 m at y = 190 m, 3.1 m at 200 m and 3.3 m at 210 m (the Thomas
+# length goes with the 0.46 power of the rate). With flame_limit_m = 3.0 the
+# line fails where the hotter northern cells arrive (mask -1, the fire
+# crosses there) and holds to the south (mask 1, nothing burns beyond it).
+FILE = inputs_base
+erf.fire.prescribed.gradient = 0.0 0.03
+erf.fire.prescribed.origin = 200.0 200.0
+erf.fire.suppression.file = actions_hold.txt
+erf.fire.suppression.log = suppression_hold.csv

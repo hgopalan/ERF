@@ -5,11 +5,16 @@
  * Replaces the zero lower-boundary flux in ERF_DustSettling.H with the
  * dry deposition velocity v_d from Seinfeld & Pandis (2006) Chapter 19.
  *
- * v_d = v_s + 1 / (r_a + r_s + r_a * r_s * v_s)
- *   r_a = 1 / (u* * kappa)    aerodynamic resistance [s/m]
+ * v_d = v_s + 1 / (r_a + r_s + r_a * r_s * v_s)      (the Seinfeld & Pandis eq. 19.7 form, Slinn 1982)
+ *   r_a = 1 / (u* * kappa)    aerodynamic resistance [s/m]: the neutral form
+ *                             without its ln(z_r/z_0) factor (5-7 at z_r = 10 m);
+ *                             r_s dominates by 100x at E_0 = 3e-3, so v_d moves < 2 %
  *   r_s = 1 / (u* * E_0)      surface resistance [s/m]
  *   kappa = 0.4 (von Karman)
- *   E_0 = 3e-3 (bare mine surface, Zhang et al. 2001)
+ *   E_0 = 3e-3 is this code's tuning constant for a bare mine surface: Zhang
+ *   et al. (2001) write the collection efficiency as epsilon_0 (= 3) times the
+ *   Brownian, impaction and interception efficiencies, which are not computed
+ *   here. v_d is never below v_s and shares its 1 m/s cap.
  *
  * Structural reference: ERF_FireAtmCoupling.H in Source/Fire/:
  *   https://github.com/hgopalan/ERF/blob/ecb9b7656bbb98fcc5d4f781e486825ee9478a73/
@@ -41,9 +46,13 @@
 
 namespace DustDepositionConst {
     constexpr amrex::Real KAPPA   = 0.4;      ///< von Karman constant [-]
-    constexpr amrex::Real E0_BARE = 3.0e-3;   ///< Collection efficiency for bare surface [-]
+    constexpr amrex::Real E0_BARE = 3.0e-3;   ///< Collection efficiency for bare surface [-] (a tuning constant, see above)
     constexpr amrex::Real R_MAX   = 1.0e6;    ///< Maximum resistance [s/m]
-    constexpr amrex::Real VD_MAX  = 0.1;      ///< Maximum deposition velocity [m/s]
+    constexpr amrex::Real VD_MAX  = DustSettlingConst::V_S_MAX; ///< Maximum deposition velocity [m/s]: at least the
+                                               ///<   settling cap. Until October 2026 it was 0.1 m/s, below the
+                                               ///<   settling cap of 1 m/s, so coarse dust (v_s 0.2 m/s at 50 um)
+                                               ///<   arrived in the lowest cell faster than it could leave it and
+                                               ///<   piled up to twice the physical concentration.
     constexpr amrex::Real VD_MIN  = 0.0;      ///< Minimum deposition velocity [m/s]
 }
 
@@ -90,6 +99,8 @@ amrex::Real compute_deposition_velocity(amrex::Real v_s, amrex::Real u_star,
     amrex::Real rs    = compute_r_s(u_star, E_0);
     amrex::Real denom = ra + rs + ra * rs * v_s;
     amrex::Real vd    = (denom > 1.0e-10) ? v_s + 1.0/denom : v_s;
+    // never below the settling velocity: the surface takes at least what settles onto it
+    vd = amrex::max(vd, v_s);
     return amrex::min(amrex::max(vd, amrex::Real(DustDepositionConst::VD_MIN)),
                       amrex::Real(DustDepositionConst::VD_MAX));
 }
@@ -98,31 +109,30 @@ amrex::Real compute_deposition_velocity(amrex::Real v_s, amrex::Real u_star,
  * @brief Apply dry deposition tendency at k=klo and write deposition flux.
  *
  * At k=klo only:
- *   d(dust_comp)/dt += -v_d * RhoDust(k=klo) / dz_k0
+ *   d(dust_comp)/dt += -v_d * RhoDust(k=klo) / h_0,  h_0 = detJ(klo) dz
  *   dep_flux_out(i,j,0) = v_d * RhoDust(k=klo)   [kg/m^2/s]
  *
  * dep_flux_out is later mapped to the 2D dust grid by
  * apply_deposition_to_dust_grid. All k > klo: no change from this function.
  *
- * u_star is taken from ustar_atm (a 2D MultiFab at k=0 on the atm grid,
- * filled from SurfaceLayer::get_u_star(0) by fill_dust_ustar_from_surface_layer
- * in Phase 9). When grid_ratio=1, ustar_atm is on the same 2D BoxArray as
- * the dust grid and can be used directly.
+ * u_star is taken from ustar_atm, a 2D MultiFab on the atmospheric columns
+ * that DustLayer fills by average_down of dust_ustar_in (the surface layer's
+ * u*, raised by the fire wind where the coupling is on).
  */
 inline void apply_dust_deposition_bc(
     amrex::MultiFab&       cc_source,
     amrex::MultiFab&       dep_flux_out,
     const amrex::MultiFab& S_old,
     const amrex::MultiFab& ustar_atm,
-    const amrex::MultiFab& z_phys_cc,
+    const amrex::MultiFab& detJ,
     const amrex::Geometry& geom_atm,
-    amrex::Real d_m, amrex::Real rho_p, amrex::Real E_0,
+    const DustBinDiameters& d_bins, const DustBinWeights& w_bins, int nb,
+    amrex::Real rho_p, amrex::Real E_0,
     int dust_comp, bool dust_debug)
 {
     using namespace amrex;
     const Box& domain = geom_atm.Domain();
     const int klo = domain.smallEnd(2);
-    const int khi = domain.bigEnd(2);
     const Real dz_avg = geom_atm.CellSize(2);
 
     dep_flux_out.setVal(0.0);
@@ -135,28 +145,33 @@ inline void apply_dust_deposition_bc(
         auto dep = dep_flux_out.array(mfi);
         auto s   = S_old.const_array(mfi);
         auto us  = ustar_atm.const_array(mfi);
-        auto z   = z_phys_cc.const_array(mfi);
+        auto dj  = detJ.const_array(mfi);
 
         Box bx_sfc = bx; bx_sfc.setSmall(2,klo); bx_sfc.setBig(2,klo);
 
         const int   comp  = dust_comp;
-        const Real  dp    = d_m;
         const Real  rhop  = rho_p;
         const Real  e0    = E_0;
+        const DustBinDiameters bins = d_bins;
+        const DustBinWeights   w    = w_bins;
+        const int   nbins = nb;
 
         ParallelFor(bx_sfc, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
             Real rho_a = s(i,j,k,Rho_comp);
             if (rho_a <= 0.0) rho_a = 1.2;
 
-            Real dz = (k < khi) ? (z(i,j,k+1)-z(i,j,k)) : dz_avg;
+            // the lowest cell's thickness
+            Real dz = dj(i,j,k) * dz_avg;
             if (dz <= 1.0e-10) dz = dz_avg;
 
             Real u_star = amrex::max(static_cast<amrex::Real>(us(i,j,0)), static_cast<amrex::Real>(1.0e-4));
-            Real vs = compute_stokes_settling(dp, rhop, rho_a,
-                                              DustSettlingConst::MU_AIR_STD);
+            Real vs = compute_mean_settling(bins, w, nbins, rhop, rho_a,
+                                            DustSettlingConst::MU_AIR_STD);
             Real vd = compute_deposition_velocity(vs, u_star, e0);
 
-            Real rho_dust = amrex::max(static_cast<amrex::Real>(src(i,j,k,comp)), static_cast<amrex::Real>(0.0));
+            // the airborne dust density of the STATE at klo (not cc_source,
+            // which holds the tendency and gave a flux in kg/m3/s2 until 2026-10)
+            Real rho_dust = amrex::max(static_cast<amrex::Real>(s(i,j,k,comp)), static_cast<amrex::Real>(0.0));
             dep(i,j,0)    = vd * rho_dust;
             src(i,j,k,comp) -= vd * rho_dust / dz;
         });
@@ -164,12 +179,12 @@ inline void apply_dust_deposition_bc(
 
     if (dust_debug) {
         Real us_max  = ustar_atm.max(0);
-        Real vs_ref  = compute_stokes_settling(d_m, rho_p, 1.225,
-                                               DustSettlingConst::MU_AIR_STD);
+        Real vs_ref  = compute_mean_settling(d_bins, w_bins, nb, rho_p, 1.225,
+                                             DustSettlingConst::MU_AIR_STD);
         Real vd_ref  = compute_deposition_velocity(vs_ref, us_max, E_0);
         Real dep_max = dep_flux_out.max(0);
-        amrex::Print() << "[DUST DEPOSITION] d=" << d_m*1e6
-                       << " um  u*_max=" << us_max
+        amrex::Print() << "[DUST DEPOSITION] " << nb << " bin(s)"
+                       << "  u*_max=" << us_max
                        << " m/s  v_d=" << vd_ref
                        << " m/s  dep_flux_max=" << dep_max << " kg/m^2/s\n";
     }

@@ -1,0 +1,28 @@
+FILE = inputs_base
+
+# A fuel raster mixing a published set with a deck-defined model: GR2 (102)
+# over most of the domain, a deck-defined block (1000) around the ignition,
+# and the non-burnable urban and water codes. Each cell starts with its own
+# model's load, which is what check_custom_fuel.py sums.
+erf.fire.custom_fuel.codes = 1000
+erf.fire.custom_fuel.1000.name                   = coarse_woody_bed
+erf.fire.custom_fuel.1000.w_1h_kg_m2             = 2.0
+erf.fire.custom_fuel.1000.w_10h_kg_m2            = 20.0
+erf.fire.custom_fuel.1000.sav_1h_1_m             = 200.0
+erf.fire.custom_fuel.1000.depth_m                = 2.0
+erf.fire.custom_fuel.1000.moisture_ext           = 0.35
+erf.fire.custom_fuel.1000.heat_content_J_kg      = 1.86e7
+erf.fire.custom_fuel.1000.density_kg_m3 = 512.0
+erf.fire.custom_fuel.1000.burnout_time_s         = 600.0
+
+erf.fire.fuel_map.fuel_set = "scott_burgan40"
+erf.fire.fuel_map.file = "fuel_map_mixed.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.fuel_map.load_from_map = true
+erf.fire.rothermel_per_fuel = true
+erf.fire.moisture_live = 0.60
+
+# The ignition circle straddles the block edge at x = 140 m, so from the first
+# step the front is burning in GR2 to the west and in the deck-defined fuel to
+# the east. check_custom_fuel.py crossed compares the two sides.
+erf.fire.ignition_x = 140.0

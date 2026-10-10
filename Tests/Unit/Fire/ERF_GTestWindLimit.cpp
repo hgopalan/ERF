@@ -96,10 +96,19 @@ TEST(WindLimit, PerFuelTable)
     ASSERT_EQ(on.size(), off.size());
 
     EXPECT_EQ(off[0].R0, Real(0.0));                  // non-burnable slot stays zero
-    for (std::size_t slot = 1; slot < off.size(); ++slot) {
+
+    // The published sets: every slot is a real fuel, capped or not.
+    for (int slot = 1; slot < FUEL_SLOT_CUSTOM_BASE; ++slot) {
         EXPECT_TRUE(on[slot].U_max_ftmin == Real(300.0) || on[slot].U_max_ftmin == Real(500.0)) << "slot " << slot;
         EXPECT_EQ(off[slot].U_max_ftmin, UNCAPPED) << "slot " << slot;
         EXPECT_NEAR(off[slot].R0, on[slot].R0, TOL * std::max(Real(1.0), on[slot].R0)) << "slot " << slot;
+    }
+
+    // The deck-defined slots with no slot table handed in: non-burnable, so a
+    // custom code that reached the table without a deck block cannot spread.
+    for (int slot = FUEL_SLOT_CUSTOM_BASE; slot < FUEL_SLOT_COUNT; ++slot) {
+        EXPECT_EQ(on[slot].R0, Real(0.0))  << "slot " << slot;
+        EXPECT_EQ(off[slot].R0, Real(0.0)) << "slot " << slot;
     }
 }
 

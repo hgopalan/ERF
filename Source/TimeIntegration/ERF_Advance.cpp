@@ -4,6 +4,7 @@
 
 #ifdef ERF_ENABLE_FIRE
 #include <ERF_FireUtils.H>
+#include <ERF_FirePrecip.H>
 #endif
 
 #ifdef ERF_USE_WINDFARM
@@ -111,37 +112,44 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     }
 
     // configure SurfaceLayer params if needed
-    if (phys_bc_type[Orientation(Direction::z,Orientation::low)] == ERF_BC::surface_layer) {
-        if (m_SurfaceLayer) {
-            IntVect ng = Theta_prim[lev]->nGrowVect();
-            MultiFab::Copy(  *Theta_prim[lev], S_old, RhoTheta_comp, 0, 1, ng);
-            MultiFab::Divide(*Theta_prim[lev], S_old, Rho_comp     , 0, 1, ng);
-            if (solverChoice.moisture_type != MoistureType::None) {
-                ng = Qv_prim[lev]->nGrowVect();
+    bool updated_prim = false;
+    for (OrientationIter oit; oit; ++oit) {
+        Orientation ori = oit();
+        if (phys_bc_type[ori] == ERF_BC::surface_layer && m_SurfaceLayer[ori]) {
+            if (!updated_prim) {
+                // This only needs to be done once
+                IntVect ng = Theta_prim[lev]->nGrowVect();
+                MultiFab::Copy(  *Theta_prim[lev], S_old, RhoTheta_comp, 0, 1, ng);
+                MultiFab::Divide(*Theta_prim[lev], S_old, Rho_comp     , 0, 1, ng);
+                if (solverChoice.moisture_type != MoistureType::None) {
+                    ng = Qv_prim[lev]->nGrowVect();
 
-                MultiFab::Copy(  *Qv_prim[lev], S_old, RhoQ1_comp, 0, 1, ng);
-                MultiFab::Divide(*Qv_prim[lev], S_old, Rho_comp  , 0, 1, ng);
+                    MultiFab::Copy(  *Qv_prim[lev], S_old, RhoQ1_comp, 0, 1, ng);
+                    MultiFab::Divide(*Qv_prim[lev], S_old, Rho_comp  , 0, 1, ng);
 
-                if (solverChoice.moisture_indices.qr > -1) {
-                    MultiFab::Copy(  *Qr_prim[lev], S_old, solverChoice.moisture_indices.qr, 0, 1, ng);
-                    MultiFab::Divide(*Qr_prim[lev], S_old, Rho_comp  , 0, 1, ng);
-                } else {
-                    Qr_prim[lev]->setVal(0);
+                    if (solverChoice.moisture_indices.qr > -1) {
+                        MultiFab::Copy(  *Qr_prim[lev], S_old, solverChoice.moisture_indices.qr, 0, 1, ng);
+                        MultiFab::Divide(*Qr_prim[lev], S_old, Rho_comp  , 0, 1, ng);
+                    } else {
+                        Qr_prim[lev]->setVal(0);
+                    }
                 }
+                updated_prim = true;
             }
             // NOTE: std::swap above causes the field ptrs to be out of date.
             //       Reassign the field ptrs for MAC avg computation.
-            m_SurfaceLayer->update_mac_ptrs(lev, vars_old, Theta_prim, Qv_prim, Qr_prim);
-            m_SurfaceLayer->update_pblh(lev, vars_old, z_phys_cc[lev].get(),
-                                        solverChoice.moisture_indices);
+            m_SurfaceLayer[ori]->update_mac_ptrs(lev, vars_old, Theta_prim, Qv_prim, Qr_prim);
+            m_SurfaceLayer[ori]->update_pblh(lev, vars_old, z_phys_cc[lev].get(),
+                                             solverChoice.moisture_indices);
 
 #ifdef ERF_USE_NETCDF
             double elapsed_time_since_start_low = time + (start_time - start_low_time);
 #else
             double elapsed_time_since_start_low = time;
 #endif
-            m_SurfaceLayer->update_fluxes(lev, time, elapsed_time_since_start_low,
-                                          S_old, z_phys_nd[lev], walldist[lev]);
+            if (static_cast<int>(ori) == Orientation::zlo()) { set_surface_layer_skin(lev); }
+            m_SurfaceLayer[ori]->update_fluxes(lev, time, elapsed_time_since_start_low,
+                                               S_old, z_phys_nd[lev], walldist[lev]);
         }
     }
 
@@ -167,12 +175,12 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     // **************************************************************************************
     if (solverChoice.turbChoice[lev].uses_shoc_family()) {
         // Get SFC fluxes from SurfaceLayer
-        if (m_SurfaceLayer) {
+        if (m_SurfaceLayer[Orientation::zlo()]) {
             Vector<const MultiFab*> mfs = {&S_old, &U_old, &V_old, &W_old};
-            m_SurfaceLayer->impose_SurfaceLayer_bcs(lev, mfs, Tau[lev],
-                                                    SFS_hfx1_lev[lev].get() , SFS_hfx2_lev[lev].get() , SFS_hfx3_lev[lev].get(),
-                                                    SFS_q1fx1_lev[lev].get(), SFS_q1fx2_lev[lev].get(), SFS_q1fx3_lev[lev].get(),
-                                                    z_phys_nd[lev].get());
+            m_SurfaceLayer[Orientation::zlo()]->impose_SurfaceLayer_bcs(lev, mfs, Tau[lev],
+                                                                        SFS_hfx1_lev[lev].get() , SFS_hfx2_lev[lev].get() , SFS_hfx3_lev[lev].get(),
+                                                                        SFS_q1fx1_lev[lev].get(), SFS_q1fx2_lev[lev].get(), SFS_q1fx3_lev[lev].get(),
+                                                                        z_phys_nd[lev].get());
         }
 
         // Apply SHOC before the dycore so it sees a coherent state.
@@ -353,6 +361,18 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     double time_at_end_of_step = time+dt_lev;
     advance_lsm(lev, S_new, U_new, V_new, time_at_end_of_step, dt_lev);
 
+    // z_phys_nd is null for a ConstantDz mesh, so pass the pointer rather than dereferencing it
+    // here: advance_urban is called unconditionally and only returns early once inside.
+    advance_urban(lev, S_new, U_new, V_new, dt_lev, Geom(lev),
+                  z_phys_nd[lev].get(), *eddyDiffs_lev[lev]);
+
+    // Update the weighted average of land-surface and urban-model fields.  The models have now
+    // integrated, so whatever they registered holds computed values from here on.
+    if (m_SurfaceModel) {
+        m_SurfaceModel->calculate_weight_average(lev, urb_frac_lev[lev][0].get());
+        m_SurfaceModel->mark_fields_valid();
+    }
+
 #ifdef ERF_USE_PARTICLES
     // **************************************************************************************
     // Update the particle positions
@@ -452,14 +472,31 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
     // Advance the fire on the level its grid refines (erf.fire.anchor_level)
     if (m_fire_layer && lev == m_fire_layer->level()) {
 
-        // T and RH at k=0 for fuel moisture update, derived from pre-dycore state.
-        // This is used in both lagged and synchronous modes: the moisture ODE
-        // uses time-averaged T, and the change in T from fire heating within
-        // one atmospheric step is small relative to the moisture time lag.
+        // Air temperature and RH at k=0 for the fuel moisture update, derived
+        // from the pre-dycore state. This is used in both lagged and synchronous
+        // modes: the moisture ODE uses time-averaged T, and the change in T from
+        // fire heating within one atmospheric step is small relative to the
+        // moisture time lag. The temperature is theta * Exner(p) (the moisture
+        // curves, Balbi's T_a and the threshold ignition take an air
+        // temperature); the plain k = 0 potential temperature used here before
+        // was 14-16 K too warm at 840 hPa.
         MultiFab T_atm_k0(ba2d[lev], S_old.DistributionMap(), 1, 0);
-        fire_copy_k0_plane(T_atm_k0, *Theta_prim[lev]);
+        compute_t_from_conservative(T_atm_k0, S_old);
         MultiFab RH_atm_k0(ba2d[lev], S_old.DistributionMap(), 1, 0);
         compute_rh_from_conservative(RH_atm_k0, S_old, Geom(lev));
+
+        // Surface precipitation accumulation of every column after this step's
+        // microphysics, for the rain per column of the fuel moisture model
+        // (erf.fire.precip_source = atmosphere); the fire layer differences it
+        // against the accumulation it saw at its previous step.
+        std::unique_ptr<MultiFab> precip_accum_k0;
+        if (m_fire_layer->get_precip_accum_prev() != nullptr) {
+            const SurfacePrecipAccumulationSources precip_sources =
+                micro ? micro->Get_Surface_Precip_Accumulation_Ptrs(lev)
+                      : SurfacePrecipAccumulationSources{};
+            precip_accum_k0 = std::make_unique<MultiFab>(ba2d[lev], S_old.DistributionMap(), 1, 0);
+            fire_surface_precip_accum_k0(*precip_accum_k0, precip_sources, Geom(lev).Domain().smallEnd(2));
+        }
 
         // In passive and lagged modes, fire uses pre-dycore wind (vars_old).
         // In synchronous mode, fire uses post-dycore wind (vars_new) so that
@@ -470,32 +507,32 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
                 amrex::Print() << "[FIRE DEBUG] Fire advance using SYNCHRONOUS coupling with POST-dycore wind at t="
                                << time << ", dt=" << dt_lev << std::endl;
             }
-            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer,
+            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer[Orientation::zlo()],
                                   vars_new[lev][Vars::xvel],
                                   vars_new[lev][Vars::yvel],
                                   *z_phys_cc[lev],
-                                  T_atm_k0, RH_atm_k0);
+                                  T_atm_k0, RH_atm_k0, precip_accum_k0.get());
         } else if (m_fire_layer->get_params().is_lagged()) {
             if (m_fire_layer->get_params().fire_debug) {
                 amrex::Print() << "[FIRE DEBUG] Fire advance using LAGGED coupling with PRE-dycore wind at t="
                                << time << ", dt=" << dt_lev << std::endl;
             }
-            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer,
+            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer[Orientation::zlo()],
                                   vars_old[lev][Vars::xvel],
                                   vars_old[lev][Vars::yvel],
                                   *z_phys_cc[lev],
-                                  T_atm_k0, RH_atm_k0);
+                                  T_atm_k0, RH_atm_k0, precip_accum_k0.get());
         } else {
             // Passive mode
             if (m_fire_layer->get_params().fire_debug) {
                 amrex::Print() << "[FIRE DEBUG] Fire advance using PASSIVE coupling with PRE-dycore wind at t="
                                << time << ", dt=" << dt_lev << std::endl;
             }
-            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer,
+            m_fire_layer->advance(time, dt_lev, *m_SurfaceLayer[Orientation::zlo()],
                                   vars_old[lev][Vars::xvel],
                                   vars_old[lev][Vars::yvel],
                                   *z_phys_cc[lev],
-                                  T_atm_k0, RH_atm_k0);
+                                  T_atm_k0, RH_atm_k0, precip_accum_k0.get());
         }
 
         // Store current fire flux for injection at the next timestep via
@@ -519,11 +556,24 @@ ERF::Advance (int lev, double time, double dt_lev, int iteration, int /*ncycle*/
         const MultiFab* lat_ptr = nullptr;
         const MultiFab* lon_ptr = nullptr;
 #endif
-        const MultiFab* t_surf = (m_SurfaceLayer) ? m_SurfaceLayer->get_t_surf(lev) : nullptr;
+        const MultiFab* t_surf = (m_SurfaceLayer[Orientation::zlo()])
+                               ? m_SurfaceLayer[Orientation::zlo()]->get_t_surf(lev)
+                               : nullptr;
+        // The fluxes the surface layer applied to the air during this step: the
+        // H and LE the force-restore update removes from the ground.
+        const MultiFab* sfc_sens_flux = nullptr;
+        const MultiFab* sfc_laten_flux = nullptr;
+        seb_surface_layer_fluxes(lev, sfc_sens_flux, sfc_laten_flux);
+        Vector<const MultiFab*> radiation_inputs(6, nullptr);
+        const bool noahmp_active = solverChoice.lsm_type == LandSurfaceType::NOAHMP;
+        if (m_SurfaceModel) {
+            radiation_inputs = m_SurfaceModel->get_radiation_fields(lev);
+        }
         two_stream_rad.advance(lev, iteration, time + dt_lev, dt_lev, "post_dycore",
                                vars_old[lev][Vars::cons], z_phys_nd[lev].get(), geom[lev],
-                               lsm, qheating_rates[lev].get(), rad_fluxes[lev].get(),
-                               t_surf, lat_ptr, lon_ptr,
+                               lsm, radiation_inputs, noahmp_active,
+                               qheating_rates[lev].get(), rad_fluxes[lev].get(),
+                               t_surf, sfc_sens_flux, sfc_laten_flux, lat_ptr, lon_ptr,
                                time + dt_lev + start_time, use_datetime);
     }
     if (solverChoice.compute_mean_vars) {

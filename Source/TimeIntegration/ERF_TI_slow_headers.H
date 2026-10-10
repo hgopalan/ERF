@@ -24,6 +24,9 @@
  */
 class CloudChamberBudget;
 
+namespace erf_auxiliary { class AuxiliaryInertTracer; }
+namespace erf_sbm { class SBMStateManager; class SBMTransport; }
+
 /**
  * @brief Driver for the SHOC physics model.
  */
@@ -42,7 +45,7 @@ void erf_make_tau_terms (int level, int nrk,
                                amrex::MultiFab* eddyDiffs,
                          const amrex::Geometry geom,
                          const SolverChoice& solverChoice,
-                         std::unique_ptr<SurfaceLayer>& SurfLayer,
+                         const amrex::Vector<std::unique_ptr<SurfaceLayer>>& SurfLayer,
                          amrex::Gpu::DeviceVector<amrex::Real>& stretched_dz_d,
                          const amrex::MultiFab& detJ,
                          amrex::Vector<std::unique_ptr<amrex::MultiFab>>& mapfac,
@@ -94,7 +97,7 @@ void erf_slow_rhs_pre (int level, int finest_level, int nrk,
                             amrex::MultiFab* Hfx3_EB,
                       const amrex::Geometry geom,
                       const SolverChoice& solverChoice,
-                      std::unique_ptr<SurfaceLayer>& SurfLayer,
+                      const amrex::Vector<std::unique_ptr<SurfaceLayer>>& SurfLayer,
                       const amrex::Gpu::DeviceVector<amrex::BCRec>& domain_bcs_type_d,
                       const amrex::Vector<amrex::BCRec>& domain_bcs_type,
                       const amrex::MultiFab& z_phys_nd,
@@ -122,6 +125,9 @@ void erf_slow_rhs_pre (int level, int finest_level, int nrk,
  *
  */
 void erf_slow_rhs_post (int level, int finest_level, int nrk,
+                       double step_old_time,
+                       double input_time,
+                       double target_time,
                        double dt,
                        int n_qstate,
                        amrex::Vector<amrex::MultiFab>& S_rhs,
@@ -150,9 +156,11 @@ void erf_slow_rhs_post (int level, int finest_level, int nrk,
                              amrex::MultiFab* Q1fx3,
                              amrex::MultiFab* Q2fx3,
                              amrex::MultiFab* Diss,
+                             amrex::MultiFab* Tau13,
+                             amrex::MultiFab* Tau23,
                        const amrex::Geometry geom,
                        const SolverChoice& solverChoice,
-                       std::unique_ptr<SurfaceLayer>& SurfLayer,
+                       const amrex::Vector<std::unique_ptr<SurfaceLayer>>& SurfLayer,
                        const amrex::Gpu::DeviceVector<amrex::BCRec>& domain_bcs_type_d,
                        const amrex::Vector<amrex::BCRec>& domain_bcs_type,
                        std::unique_ptr<amrex::MultiFab>& z_phys_nd,
@@ -174,6 +182,9 @@ void erf_slow_rhs_post (int level, int finest_level, int nrk,
                        std::unique_ptr<ReadBndryPlanes>& m_r2d,
                        const amrex::MultiFab* cloud_chamber_base_state,
                        const erf_cloud_chamber::Config* cloud_chamber_config,
-                       CloudChamberBudget* cloud_budget);
+                       CloudChamberBudget* cloud_budget,
+                       erf_auxiliary::AuxiliaryInertTracer* auxiliary_inert_tracer,
+                       erf_sbm::SBMStateManager* sbm_state_manager,
+                       erf_sbm::SBMTransport* sbm_transport);
 
 #endif

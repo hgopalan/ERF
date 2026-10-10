@@ -9,7 +9,9 @@ Writes, in the current directory:
   inflow_yhi.txt           10 m above that face's mean ground, capped at 35 m/s,
                            from 285 degrees (a westerly with a small northerly
                            component); the north face likewise
-  sounding_marshall.txt    ERF input_sounding: neutral to 1500 m, 3 K/km above
+  sounding_marshall.txt    ERF input_sounding: 840 hPa at the floor (ERF reads
+                           the surface pressure in hPa), neutral to 1500 m,
+                           3 K/km above
   ignitions_marshall.csv   erf.fire.ignition.schedule_file: two more starts on
                            terrain of opposite curvature to the primary one
   marshall_domain.json     corner coordinates, floor elevation, ignition sites
@@ -173,7 +175,10 @@ for fname, zg in (("inflow_xlo.txt", z_west), ("inflow_yhi.txt", z_north)):
         for z in zin:
             u, v = uv(z); f.write(f"{zg + z:12.4f} {u:11.5f} {v:11.5f} {0.0:6.1f}\n")
 with open("sounding_marshall.txt", "w") as f:
-    f.write("84000.0 300.0 0.0\n")          # surface pressure [Pa] at 1600 m ASL, theta, qv
+    # First line: surface pressure [hPa], theta [K], qv [g/kg]. ERF reads the
+    # pressure in hPa, as WRF does; 84000 (Pa) here gave a 27.5 kg/m^3 surface
+    # density and a 1064 K atmosphere until 2026-09-11.
+    f.write("840.0 300.0 0.0\n")            # at the domain floor, 1510 m ASL
     for z in zin:
         u, v = uv(z)
         th = 300.0 + max(0.0, z - 1500.0) * 0.003

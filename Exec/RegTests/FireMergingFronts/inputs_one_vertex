@@ -1,0 +1,9 @@
+FILE = inputs_base
+
+# Start-up check: a polyline file with a single vertex has no segment and would
+# mark nothing, so the run stops naming the file.
+erf.fire_plot_file = "plt_fire_one_vertex_"
+erf.fire.ignition_r = 0.0             # no disc of its own
+erf.fire.ignition.polygon_file = "parallel_south.csv" "one_vertex.csv"
+erf.fire.ignition.polygon_type = "polyline"
+erf.fire.ignition.polyline_width = 4.0

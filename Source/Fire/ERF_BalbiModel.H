@@ -4,6 +4,7 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_Gpu.H>
 #include <cmath>
+#include <limits>
 #include <vector>
 #include <ERF_Rothermel.H>
 #include <ERF_FuelModels.H>
@@ -18,8 +19,12 @@
  * Two formulations are available, selected with
  * erf.fire.balbi.formulation = "2009" (default) or "2020".
  *
- * Balbi (2009) — steady explicit form. The rate of spread follows from the
- * radiant energy flux received by unburned fuel from a tilted flame front:
+ * "2009" — the steady explicit reduction used by wildfire_levelset, built from
+ * Balbi et al. (2009)'s radiant-flux picture. The paper's own rate equation is
+ * implicit (R = R_b + A R (1 + sin γ − cos γ)/(1 + R cos γ/(s r₀₀)), with a
+ * radiative base R_b); this form drops the base and the denominator. The
+ * rate follows from the radiant energy flux received by unburned fuel from a
+ * tilted flame front:
  *
  *   R       = A × (1 + sin α − cos α)                 [m/s]
  *   A       = χ σ_m δ_m / (2 τ₀ B*)                   [m/s]
@@ -160,8 +165,9 @@ inline constexpr amrex::Real BALBI_MAX_WIND_SPEED_MS = 25.0;
 inline constexpr amrex::Real BALBI_MAX_WIND_SPEED_SQ =
     BALBI_MAX_WIND_SPEED_MS * BALBI_MAX_WIND_SPEED_MS;
 
-/// Balbi table size: Anderson FBFM13 codes 1–13 plus index 0 (non-burnable).
-inline constexpr int BALBI_TABLE_SIZE = FUEL_SLOT_COUNT;   ///< 0 non-burnable, 1-13 Anderson, 14-53 Scott-Burgan
+/// Balbi table size: one entry per fuel slot (ERF_FuelModels.H fuel_slot):
+/// 0 non-burnable, 1-13 Anderson, 14-53 Scott-Burgan, 54-69 custom codes.
+inline constexpr int BALBI_TABLE_SIZE = FUEL_SLOT_COUNT;
 
 /// |∇φ| below which the front normal is taken as undefined and the isotropic
 /// wind and slope magnitudes are used instead.
@@ -245,16 +251,18 @@ BalbiComputed compute_balbi_params(
                           : bp.T_f;
 
     // Buoyancy velocity v_b = sqrt(g δ_m (T_f − T_a) / T_a)
+    // (sqrt of |dT_f| and a floored B* BEFORE the selects: the optimiser
+    // evaluates the unselected arm, and sqrt(negative) or x/0 would trip
+    // amrex.fpe_trap_invalid when T_f <= T_a or T_i <= T_a)
     const amrex::Real dT_f = T_f - T_a;
-    const amrex::Real v_b  = (dT_f > 0.0)
-                           ? std::sqrt(BALBI_GRAVITY * delta_m * dT_f / T_a)
-                           : BALBI_V_B_MIN;
+    const amrex::Real v_b_raw = std::sqrt(BALBI_GRAVITY * delta_m * std::abs(dT_f) / T_a);
+    const amrex::Real v_b  = (dT_f > 0.0) ? v_b_raw : amrex::Real(BALBI_V_B_MIN);
 
     // ROS amplitude coefficient. σ_m δ_m is dimensionless, so dividing by
     // τ₀ [s/m] leaves [m/s].
-    const amrex::Real A_coeff = (B_star > BALBI_B_STAR_MIN)
-                              ? chi_rad * sigma_m * delta_m / (2.0 * bp.tau_0 * B_star)
-                              : 0.0;
+    const amrex::Real A_raw = chi_rad * sigma_m * delta_m
+                            / (2.0 * bp.tau_0 * amrex::max(B_star, amrex::Real(BALBI_B_STAR_MIN)));
+    const amrex::Real A_coeff = (B_star > BALBI_B_STAR_MIN) ? A_raw : amrex::Real(0.0);
 
     bc.A_coeff = amrex::max(A_coeff, amrex::Real(0.0));
     bc.v_b     = amrex::max(v_b, amrex::Real(BALBI_V_B_MIN));
@@ -291,7 +299,7 @@ BalbiComputed compute_balbi_params(
             // the slope angle; ForeFire's Balbi2020 uses cos(alpha) and groups
             // the denominator as R s cos α / r₀₀, neither of which follows the
             // paper.
-            bc.chi_coef = (bc.s_r00 > 0.0) ? 1.0 / bc.s_r00 : 0.0;
+            bc.chi_coef = (bc.s_r00 > 0.0) ? 1.0 / amrex::max(bc.s_r00, std::numeric_limits<amrex::Real>::min()) : 0.0;
 
             bc.K1_sqrt_beta  = bp.K1 * std::sqrt(beta);                         // eq. 27
             bc.T_flame_coef  = h_si / (bp.C_pa * (bp.st + 1.0));                // eq. B11
@@ -304,13 +312,16 @@ BalbiComputed compute_balbi_params(
 /**
  * @brief Build a per-fuel-code lookup table of Balbi coefficients
  *
- * Mirrors build_fcwh_table(): the table is indexed by integer fuel code, with
- * index 0 reserved for the non-burnable code (zero spread) and 1–13 holding
- * the Anderson FBFM13 models.
+ * Mirrors build_fuel_rothermel_table(): the table is indexed by fuel SLOT
+ * (fuel_slot(code), ERF_FuelModels.H), slot 0 the non-burnable entry (zero
+ * spread), 1-13 the Anderson models, 14-53 Scott-Burgan, 54-69 custom codes.
  *
  * @param[in] bp    BalbiParams with thermal properties and constants
  * @param[in] M_f   Fuel moisture content [fraction]
  * @param[in] T_amb Ambient temperature [K]; values ≤ 0 select bp.T_a
+ * @param[in] fp_tbl Fuel properties of every slot (build_fuel_params_slot_table),
+ *                   which is how the deck-defined models of ERF_CustomFuel.H
+ *                   reach the coefficients; nullptr takes the published sets only
  * @return host-side vector of size BALBI_TABLE_SIZE
  */
 inline std::vector<BalbiComputed> build_fuel_balbi_table(
@@ -318,7 +329,8 @@ inline std::vector<BalbiComputed> build_fuel_balbi_table(
     amrex::Real M_f,
     amrex::Real T_amb = -1.0,
     int fuel_set = 0,
-    amrex::Real M_live = -1.0)
+    amrex::Real M_live = -1.0,
+    const FuelModelParams* fp_tbl = nullptr)
 {
     std::vector<BalbiComputed> table(BALBI_TABLE_SIZE);
 
@@ -326,10 +338,29 @@ inline std::vector<BalbiComputed> build_fuel_balbi_table(
     table[0] = BalbiComputed{};
     table[0].v_b = 1.0;
 
-    // Slots 1-13 hold the Anderson models at their own codes; 14-53 the Scott-Burgan models.
+    // Slots 1-13 hold the Anderson models at their own codes, 14-53 the
+    // Scott-Burgan models and 54-69 the deck-defined ones, which only the
+    // caller's slot table knows.
     for (int slot = 1; slot < BALBI_TABLE_SIZE; ++slot) {
-        table[slot] = compute_balbi_params(get_fuel_params(fuel_code_from_slot(slot), (slot >= 14) ? 1 : fuel_set, M_live),
-                                           bp, M_f, T_amb);
+        if (fp_tbl == nullptr && slot >= FUEL_SLOT_CUSTOM_BASE) {
+            table[slot] = BalbiComputed{};   // no slot table, so no deck-defined fuel: no spread
+            table[slot].v_b = 1.0;
+            continue;
+        }
+        const FuelModelParams fp = (fp_tbl != nullptr)
+            ? fp_tbl[slot]
+            : get_fuel_params(fuel_code_from_slot(slot),
+                              (slot >= FUEL_SLOT_SB40_BASE) ? FUEL_SET_SCOTT_BURGAN40 : fuel_set,
+                              M_live);
+        // As in build_fuel_rothermel_table: a zero-load slot takes slot 0's
+        // entry, since the coefficients of no fuel are not finite. Custom slots
+        // the deck leaves undefined are the case that reaches this.
+        if (!(fuel_total_load_kg_m2(fp) > 0.0)) {
+            table[slot] = BalbiComputed{};
+            table[slot].v_b = 1.0;
+            continue;
+        }
+        table[slot] = compute_balbi_params(fp, bp, M_f, T_amb);
     }
 
     return table;
@@ -400,9 +431,9 @@ amrex::Real balbi2020_rhs(const BalbiComputed& bc,
     const amrex::Real T_ratio = T / bc.T_a;
 
     // Flame height (eq. 23); a flame no hotter than ambient has none.
-    const amrex::Real H = (T_ratio > 1.0)
-                        ? u0 * u0 / (BALBI_GRAVITY * (T_ratio - 1.0))
-                        : 0.0;
+    const amrex::Real H_raw = u0 * u0
+        / (BALBI_GRAVITY * amrex::max(T_ratio - amrex::Real(1.0), std::numeric_limits<amrex::Real>::min()));
+    const amrex::Real H = (T_ratio > 1.0) ? H_raw : amrex::Real(0.0);
 
     const amrex::Real T2 = T * T;
     const amrex::Real Rb = bc.Rb_coef * T2 * T2;                                 // eq. 13
@@ -544,6 +575,8 @@ struct BalbiFieldInputs
     const amrex::MultiFab* fuel_model   = nullptr;  ///< Per-cell fuel code
     const BalbiComputed*   table        = nullptr;  ///< Device table by fuel code
     int                    table_size   = 0;        ///< Entries in table
+    const FuelModelParams* fp_table     = nullptr;  ///< Device fuel properties by slot (deck-defined models included)
+    int                    fp_table_size = 0;       ///< Entries in fp_table
     const amrex::MultiFab* heat_flux    = nullptr;  ///< Surface heat flux [W/m²]
     const amrex::MultiFab* surface_temp = nullptr;  ///< Surface temperature [K]
     const amrex::MultiFab* fuel_mc      = nullptr;  ///< Fuel moisture state [fraction]
@@ -576,7 +609,9 @@ BalbiComputed balbi_state_at_cell(int i, int j, int k,
                                   const amrex::Array4<const amrex::Real>& fuel_mc,
                                   bool use_cell_moisture,
                                   int fuel_set = 0,
-                                  amrex::Real M_live = -1.0) noexcept
+                                  amrex::Real M_live = -1.0,
+                                  const FuelModelParams* fp_tbl = nullptr,
+                                  int fp_tbl_size = 0) noexcept
 {
     // fuel_code is the raw code of the cell, idx its slot in the table (-1 outside).
     int fuel_code = -1, idx = -1;
@@ -601,7 +636,7 @@ BalbiComputed balbi_state_at_cell(int i, int j, int k,
                                 amrex::min(fuel_mc(i, j, k, 0), amrex::Real(0.40)));
         }
         const FuelModelParams fp = (fuel_code > 0)
-                                 ? get_fuel_params(fuel_code, fuel_set, M_live)
+                                 ? fuel_params_at_code(fuel_code, fuel_set, M_live, fp_tbl, fp_tbl_size)
                                  : fp_uniform;
         return compute_balbi_params(fp, bp, M_cell, T_amb);
     }
@@ -650,6 +685,8 @@ inline void fill_balbi_ros(
 
     const BalbiComputed*  tbl        = in.table;
     const int             tbl_sz     = in.table_size;
+    const FuelModelParams* fp_tbl    = in.fp_table;
+    const int             fp_tbl_sz  = in.fp_table_size;
     const int             fuel_set   = in.fuel_set;
     const amrex::Real     M_live     = in.M_live;
     const FuelModelParams fp_uniform = in.fp;
@@ -697,7 +734,8 @@ inline void fill_balbi_ros(
                                                          tbl, tbl_sz,
                                                          surf_temp, use_surf_temp,
                                                          fuel_mc, use_cell_mc,
-                                                         fuel_set, M_live);
+                                                         fuel_set, M_live,
+                                                         fp_tbl, fp_tbl_sz);
 
             const amrex::Real vz_extra = use_heat_flux
                                        ? balbi_induced_velocity(heat_flux(i, j, k), bp)
@@ -764,6 +802,8 @@ inline void fill_balbi_ros_directional(
 
     const BalbiComputed*  tbl        = in.table;
     const int             tbl_sz     = in.table_size;
+    const FuelModelParams* fp_tbl    = in.fp_table;
+    const int             fp_tbl_sz  = in.fp_table_size;
     const int             fuel_set   = in.fuel_set;
     const amrex::Real     M_live     = in.M_live;
     const FuelModelParams fp_uniform = in.fp;
@@ -816,10 +856,13 @@ inline void fill_balbi_ros_directional(
                                       - wall.at(phi_arr, i, j, k, 0, -1)) / (2.0 * dy);
             const amrex::Real grad = std::sqrt(dpdx*dpdx + dpdy*dpdy);
 
+            // unit normal from the floored gradient, before the branch (the
+            // unselected 0/0 away from the front would be speculated)
+            const amrex::Real inv_grad = amrex::Real(1.0) / amrex::max(grad, grad_min);
+            const amrex::Real nx = dpdx * inv_grad;
+            const amrex::Real ny = dpdy * inv_grad;
             amrex::Real U_n, tan_slope;
             if (grad > grad_min) {
-                const amrex::Real nx = dpdx / grad;
-                const amrex::Real ny = dpdy / grad;
                 U_n       = u*nx + v*ny;
                 tan_slope = dzdx*nx + dzdy*ny;
             } else {
@@ -833,7 +876,8 @@ inline void fill_balbi_ros_directional(
                                                          tbl, tbl_sz,
                                                          surf_temp, use_surf_temp,
                                                          fuel_mc, use_cell_mc,
-                                                         fuel_set, M_live);
+                                                         fuel_set, M_live,
+                                                         fp_tbl, fp_tbl_sz);
 
             const amrex::Real vz_extra = use_heat_flux
                                        ? balbi_induced_velocity(heat_flux(i, j, k), bp)

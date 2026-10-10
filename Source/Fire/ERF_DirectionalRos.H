@@ -229,8 +229,11 @@ amrex::Real directional_ros_cell(const DirectionalRosState& st,
                 // to 1 rather than dividing by (near) zero.
                 const amrex::Real Um = amrex::max(U_mag, U);
                 const amrex::Real sm = amrex::max(s_mag, s);
-                const amrex::Real cos_w = (Um > amrex::Real(1.0e-12)) ? U / Um : amrex::Real(1.0);
-                const amrex::Real cos_s = (sm > amrex::Real(1.0e-12)) ? s / sm : amrex::Real(1.0);
+                // divide by the floored magnitudes before the selects: a calm
+                // or flat cell has Um = 0 or sm = 0 and the unselected 0/0 is
+                // speculated under amrex.fpe_trap_invalid
+                const amrex::Real cos_w = (Um > amrex::Real(1.0e-12)) ? U / amrex::max(Um, amrex::Real(1.0e-12)) : amrex::Real(1.0);
+                const amrex::Real cos_s = (sm > amrex::Real(1.0e-12)) ? s / amrex::max(sm, amrex::Real(1.0e-12)) : amrex::Real(1.0);
                 return rothermel_ros_cell(Um, amrex::Real(0.0), sm, amrex::Real(0.0), st.rc, cos_w, cos_s);
             }
             return rothermel_ros_cell(U, amrex::Real(0.0), s, amrex::Real(0.0), st.rc);
@@ -268,9 +271,17 @@ amrex::Real directional_effective_wind(const DirectionalRosState& st, amrex::Rea
         const amrex::Real B    = behave ? st.bs.B            : st.rc.B;
         const amrex::Real Umax = behave ? st.bs.U_max_ftmin  : st.rc.U_max_ftmin;
         const amrex::Real conv = behave ? st.bs.wind_conv    : st.rc.wind_conv;
-        if (R0 <= zero_r || cE <= zero_r || B <= zero_r || R_h <= R0) { return zero_r; }
-        const amrex::Real U_ft = std::pow((R_h / R0 - one_r) / cE, one_r / B);
-        return amrex::min(U_ft, Umax) / conv;
+        // A non-burnable slot (R0 = cE = B = 0) or a rate below R0 gives no
+        // wind. The operands of the invalid case are replaced by benign ones
+        // (base 1, exponent 1) BEFORE the arithmetic, so nothing the optimiser
+        // evaluates for the unselected arm can raise a floating-point flag.
+        const bool valid = (R0 > zero_r && cE > zero_r && B > zero_r && R_h > R0);
+        const amrex::Real R0s = valid ? R0  : one_r;
+        const amrex::Real cEs = valid ? cE  : one_r;
+        const amrex::Real Bs  = valid ? B   : one_r;
+        const amrex::Real Rhs = valid ? R_h : amrex::Real(2.0);
+        const amrex::Real U_ft = std::pow((Rhs / R0s - one_r) / cEs, one_r / Bs);
+        return valid ? amrex::min(U_ft, Umax) / conv : zero_r;
     }
     amrex::Real lo = zero_r, hi = amrex::Real(30.0);
     if (directional_ros_cell(st, hi, zero_r) <= R_h) { return hi; }
@@ -322,15 +333,21 @@ DirectionalEllipse directional_ellipse_cell(const DirectionalRosState& st,
     const amrex::Real dR_s = amrex::max(directional_ros_cell(st, amrex::Real(0.0), S) - R0, amrex::Real(0.0));
     const amrex::Real dR   = amrex::max(directional_ros_cell(st, U, S) - R0, amrex::Real(0.0));
 
-    // The wind and slope increments as vectors along the wind and upslope
+    // The wind and slope increments as vectors along the wind and upslope.
+    // Unit vectors from floored magnitudes, computed unconditionally: on a
+    // calm or flat cell the unselected 0/0 would be speculated under the
+    // fpe traps, and (0, 0)/tiny = (0, 0) is the value the branch gives.
+    const amrex::Real inv_U = amrex::Real(1.0) / amrex::max(U, tiny);
+    const amrex::Real inv_S = amrex::Real(1.0) / amrex::max(S, tiny);
     amrex::Real px = 0.0, py = 0.0;
-    if (U > tiny) { px += dR_w * u / U;    py += dR_w * v / U; }
-    if (S > tiny) { px += dR_s * dzdx / S; py += dR_s * dzdy / S; }
+    if (U > tiny) { px += dR_w * u * inv_U;    py += dR_w * v * inv_U; }
+    if (S > tiny) { px += dR_s * dzdx * inv_S; py += dR_s * dzdy * inv_S; }
     const amrex::Real P = std::sqrt(px*px + py*py);
-    const amrex::Real g = (dR_w + dR_s > tiny) ? dR / (dR_w + dR_s) : amrex::Real(1.0);
+    const amrex::Real g = (dR_w + dR_s > tiny) ? dR / amrex::max(dR_w + dR_s, tiny) : amrex::Real(1.0);
 
     DirectionalEllipse d;
-    if (P > tiny) { d.hx = px / P; d.hy = py / P; }
+    const amrex::Real inv_P = amrex::Real(1.0) / amrex::max(P, tiny);
+    if (P > tiny) { d.hx = px * inv_P; d.hy = py * inv_P; }
     const amrex::Real R_h = R0 + g * P;
     d.e.b  = amrex::Real(0.5) * (R_h + R0);
     d.e.c  = amrex::Real(0.5) * (R_h - R0);
@@ -343,9 +360,9 @@ DirectionalEllipse directional_ellipse_cell(const DirectionalRosState& st,
         d.e.LB = LB;
     } else {
         d.e.a  = R0;
-        d.e.LB = (R0 > tiny) ? d.e.b / R0 : amrex::Real(1.0e12);
+        d.e.LB = (R0 > tiny) ? d.e.b / amrex::max(R0, tiny) : amrex::Real(1.0e12);
     }
-    d.e.HB = (R0 > tiny) ? R_h / R0 : amrex::Real(1.0e12);
+    d.e.HB = (R0 > tiny) ? R_h / amrex::max(R0, tiny) : amrex::Real(1.0e12);
     return d;
 }
 
@@ -392,10 +409,20 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
                                  int shape = DIRECTIONAL_SHAPE_PROJECTION,
                                  int ellipse_lw = DIRECTIONAL_ELLIPSE_LW_MODEL,
                                  amrex::Real ellipse_lw_max = amrex::Real(8.0),
-                                 int wind_coupling = DIRECTIONAL_WIND_COUPLING_PROJECTION)
+                                 int wind_coupling = DIRECTIONAL_WIND_COUPLING_PROJECTION,
+                                 const amrex::MultiFab* fuel_model = nullptr,
+                                 const RothermelComputed* rc_tbl = nullptr,
+                                 int rc_tbl_size = 0,
+                                 int fuel_set = 0)
 {
     const amrex::Real dx = geom.CellSize(0);
     const amrex::Real dy = geom.CellSize(1);
+
+    // erf.fire.rothermel_per_fuel on a spatial fuel map: the coefficients come
+    // from the cell's own fuel model rather than erf.fire.fuel_model_id. Only
+    // Rothermel has a per-fuel coefficient table, so only its branch varies.
+    const bool per_fuel = (rc_tbl != nullptr) && (rc_tbl_size > 0)
+                        && (fuel_model != nullptr) && (st.model == DIRECTIONAL_ROS_ROTHERMEL);
 
     for (amrex::MFIter mfi(R_mf); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.validbox();
@@ -403,6 +430,8 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
         auto phi_arr    = phi.const_array(mfi);
         auto wind_arr   = wind.const_array(mfi);
         auto slopes_arr = slopes.const_array(mfi);
+        amrex::Array4<const amrex::Real> fuel_arr;
+        if (per_fuel) { fuel_arr = fuel_model->const_array(mfi); }
         const fire_levelset::WallStencil wall =
             fire_levelset::make_wall_stencil(mask, wall_extrap, mfi);
 
@@ -426,13 +455,31 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
                                       - wall.at(phi_arr, i, j, k, 0, -1)) / (2.0 * dy);
             const amrex::Real grad = std::sqrt(dpdx*dpdx + dpdy*dpdy);
 
+            // The cell's own Rothermel coefficients, where a fuel map and the
+            // per-fuel table were given. The copy is made only on that path;
+            // an unknown code keeps the uniform entry, as the isotropic
+            // compute_ros_field does.
+            DirectionalRosState st_cell = st;
+            if (per_fuel) {
+                const int code = static_cast<int>(fuel_arr(i, j, k) + amrex::Real(0.5));
+                const int idx  = fuel_table_index(code, fuel_set);
+                if (idx >= 0 && idx < rc_tbl_size) { st_cell.rc = rc_tbl[idx]; }
+            }
+
+            // Unit normal from a floored gradient, computed before any select:
+            // away from the front grad = 0 and the unselected 0/0 would be
+            // speculated under the fpe traps (grad_min > 0 keeps it finite).
+            const amrex::Real inv_grad = amrex::Real(1.0) / amrex::max(grad, grad_min);
+            const amrex::Real nx = dpdx * inv_grad;
+            const amrex::Real ny = dpdy * inv_grad;
+
             if (shape == DIRECTIONAL_SHAPE_ELLIPSE) {
                 // Support function of the model's spread ellipse, and its head
                 // rate where the normal is undefined
-                const DirectionalEllipse de = directional_ellipse_cell(st, u, v, dzdx, dzdy,
+                const DirectionalEllipse de = directional_ellipse_cell(st_cell, u, v, dzdx, dzdy,
                                                                       ellipse_lw, ellipse_lw_max);
                 R_arr(i, j, k) = (grad > grad_min)
-                    ? directional_ellipse_speed(de, dpdx / grad, dpdy / grad)
+                    ? directional_ellipse_speed(de, nx, ny)
                     : de.e.b + de.e.c;
                 return;
             }
@@ -447,8 +494,6 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
 
             amrex::Real U_n, s_n;
             if (grad > grad_min) {
-                const amrex::Real nx = dpdx / grad;
-                const amrex::Real ny = dpdy / grad;
                 U_n = u*nx + v*ny;
                 s_n = dzdx*nx + dzdy*ny;
             } else {
@@ -456,9 +501,165 @@ inline void fill_directional_ros(amrex::MultiFab& R_mf,
                 s_n = s_mag;
             }
 
-            R_arr(i, j, k) = directional_ros_cell(st, U_n, s_n, wind_coupling, U_mag, s_mag);
+            R_arr(i, j, k) = directional_ros_cell(st_cell, U_n, s_n, wind_coupling, U_mag, s_mag);
         });
     }
+}
+
+/**
+ * @brief Fill the (Vwx,Vwy,Vsx,Vsy,R0) field used by the
+ * split-Hamiltonian advection path -- see
+ * compute_levelset_rhs_split_advective's doc comment (ERF_LevelSetAdvection.H)
+ * and advect_levelset_directional_rk3_split() below.
+ *
+ * Mirrors rothermel_ros_cell's own phi_w/phi_s formula exactly (same C, B,
+ * beta_ratio_E, wind_conv, U_max_ftmin, phi_s_const), but stops short of
+ * applying the direction cosine -- that is what the split RHS's per-axis
+ * upwind selection does instead of a cosine multiply. Component 4 is the
+ * cell's isotropic rate R0, which varies per cell when a per-fuel Rothermel
+ * table and a fuel map are given. All five are multiplied by ros_scale when
+ * one is given, as the baseline path scales its whole R. Independent of phi, so it only needs to be
+ * built once per advection call, not per RK stage.
+ * Rothermel only (matches directional_wind_coupling = "advective"'s own
+ * restriction).
+ */
+inline void fill_advective_VwVs(amrex::MultiFab& VwVs,
+                                const amrex::MultiFab& wind,
+                                const amrex::MultiFab& slopes,
+                                const DirectionalRosState& st,
+                                const amrex::MultiFab* fuel_model = nullptr,
+                                const RothermelComputed* rc_tbl = nullptr,
+                                int rc_tbl_size = 0,
+                                int fuel_set = 0,
+                                const amrex::MultiFab* ros_scale = nullptr)
+{
+    // erf.fire.rothermel_per_fuel on a spatial fuel map: the coefficients come
+    // from the cell's own fuel model rather than erf.fire.fuel_model_id, as in
+    // fill_directional_ros. An unknown code keeps the uniform entry.
+    const bool per_fuel = (rc_tbl != nullptr) && (rc_tbl_size > 0) && (fuel_model != nullptr);
+
+    for (amrex::MFIter mfi(VwVs); mfi.isValid(); ++mfi) {
+        const amrex::Box& bx = mfi.validbox();
+        auto v_arr = VwVs.array(mfi);
+        auto wind_arr = wind.const_array(mfi);
+        auto slopes_arr = slopes.const_array(mfi);
+        amrex::Array4<const amrex::Real> fuel_arr;
+        if (per_fuel) { fuel_arr = fuel_model->const_array(mfi); }
+        amrex::Array4<const amrex::Real> scale_arr;
+        if (ros_scale != nullptr) { scale_arr = ros_scale->const_array(mfi); }
+        const bool scaled = (ros_scale != nullptr);
+
+        amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (const amrex::IntVect& iv) {
+            const int i = iv[0], j = iv[1], k = iv[2];
+
+            RothermelComputed rc = st.rc;
+            if (per_fuel) {
+                const int code = static_cast<int>(fuel_arr(i, j, k) + amrex::Real(0.5));
+                const int idx  = fuel_table_index(code, fuel_set);
+                if (idx >= 0 && idx < rc_tbl_size) { rc = rc_tbl[idx]; }
+            }
+            const amrex::Real R0 = rc.R0;
+
+            const amrex::Real u = wind_arr(i, j, k, 0);
+            const amrex::Real v = wind_arr(i, j, k, 1);
+            const amrex::Real dzdx = slopes_arr(i, j, k, 0);
+            const amrex::Real dzdy = slopes_arr(i, j, k, 1);
+
+            const amrex::Real U_mag = std::sqrt(u*u + v*v);
+            const amrex::Real s_mag = std::sqrt(dzdx*dzdx + dzdy*dzdy);
+
+            const amrex::Real U_ftmin = amrex::min(U_mag * rc.wind_conv, rc.U_max_ftmin);
+            const amrex::Real phi_w = rc.C * std::pow(U_ftmin, rc.B) * rc.beta_ratio_E;
+            const amrex::Real tan_slope_sq = amrex::min(dzdx*dzdx + dzdy*dzdy, amrex::Real(32.0));
+            const amrex::Real phi_s = rc.phi_s_const * tan_slope_sq;
+
+            // unit vectors from floored magnitudes (calm / flat cells give
+            // 0/0 in the unselected arm, which the optimiser evaluates)
+            const amrex::Real inv_U = amrex::Real(1.0) / amrex::max(U_mag, amrex::Real(1.0e-12));
+            const amrex::Real inv_s = amrex::Real(1.0) / amrex::max(s_mag, amrex::Real(1.0e-12));
+            amrex::Real Vwx = 0.0, Vwy = 0.0, Vsx = 0.0, Vsy = 0.0;
+            if (U_mag > amrex::Real(1.0e-12)) { Vwx = R0*phi_w*u*inv_U; Vwy = R0*phi_w*v*inv_U; }
+            if (s_mag > amrex::Real(1.0e-12)) { Vsx = R0*phi_s*dzdx*inv_s; Vsy = R0*phi_s*dzdy*inv_s; }
+
+            // The baseline scales the whole rate R = R0 + wind + slope by this
+            // factor (front acceleration clock, suppression drops); scaling
+            // R0, Vw and Vs together is the same operation on the split terms.
+            const amrex::Real sc = scaled ? scale_arr(i, j, k) : amrex::Real(1.0);
+
+            v_arr(i, j, k, 0) = sc * Vwx;
+            v_arr(i, j, k, 1) = sc * Vwy;
+            v_arr(i, j, k, 2) = sc * Vsx;
+            v_arr(i, j, k, 3) = sc * Vsy;
+            v_arr(i, j, k, 4) = sc * R0;
+        });
+    }
+}
+
+/**
+ * @brief Advect the level set with Rothermel's advective wind coupling,
+ * upwinding the isotropic and wind/slope-advective terms of the Hamiltonian
+ * SEPARATELY instead of folding them into one scalar R(n) (see
+ * erf.fire.directional_split_hamiltonian's doc comment in ERF_FireParams.H
+ * and compute_levelset_rhs_split_advective's in ERF_LevelSetAdvection.H).
+ *
+ * V (Vw/Vs) depends only on wind/slope, not on phi, so it is built once
+ * before the RK3 stages rather than refilled every stage the way
+ * fill_directional_ros's R(n) is (R(n) depends on the front normal, which
+ * changes every stage; V does not).
+ *
+ * Rothermel + directional_shape = "projection" only -- the only combination
+ * where the physical R(n)|grad phi| is exactly this two-term Hamiltonian.
+ */
+inline void advect_levelset_directional_rk3_split(amrex::MultiFab& phi,
+                                                   const amrex::MultiFab& wind,
+                                                   const amrex::MultiFab& slopes,
+                                                   const amrex::Geometry& geom,
+                                                   amrex::Real dt,
+                                                   amrex::Real eps_visc,
+                                                   const DirectionalRosState& st,
+                                                   const amrex::MultiFab* nonburnable = nullptr,
+                                                   bool wall_extrap = false,
+                                                   const fire_levelset::LevelSetGradient& grad_scheme = fire_levelset::LevelSetGradient{},
+                                                   const amrex::MultiFab* fuel_model = nullptr,
+                                                   const RothermelComputed* rc_tbl = nullptr,
+                                                   int rc_tbl_size = 0,
+                                                   int fuel_set = 0,
+                                                   const amrex::MultiFab* ros_scale = nullptr)
+{
+    using namespace amrex;
+
+    MultiFab VwVs(phi.boxArray(), phi.DistributionMap(), 5, 0);
+    fill_advective_VwVs(VwVs, wind, slopes, st, fuel_model, rc_tbl, rc_tbl_size, fuel_set, ros_scale);
+
+    const auto* dx = geom.CellSize();
+    const int nghost = 3;
+    MultiFab phi_n(phi.boxArray(), phi.DistributionMap(), 1, nghost);
+    MultiFab phi_star(phi.boxArray(), phi.DistributionMap(), 1, nghost);
+    MultiFab phi_hat(phi.boxArray(), phi.DistributionMap(), 1, nghost);
+    MultiFab rhs(phi.boxArray(), phi.DistributionMap(), 1, 0);
+
+    phi_n.ParallelCopy(phi);
+    fire_fill_boundary(phi_n, geom);
+
+    // Stage 1
+    phi_star.ParallelCopy(phi_n);
+    fire_fill_boundary(phi_star, geom);
+    fire_levelset::compute_levelset_rhs_split_advective(rhs, phi_star, VwVs, dx[0], dx[1],
+        eps_visc, &slopes, nonburnable, wall_extrap, grad_scheme);
+    fire_levelset::rk3_stage1_update(phi_star, rhs, dt);
+    fire_fill_boundary(phi_star, geom);
+
+    // Stage 2
+    fire_levelset::compute_levelset_rhs_split_advective(rhs, phi_star, VwVs, dx[0], dx[1],
+        eps_visc, &slopes, nonburnable, wall_extrap, grad_scheme);
+    phi_hat.ParallelCopy(phi_n);
+    fire_levelset::rk3_stage2_update(phi_hat, phi_star, rhs, dt);
+    fire_fill_boundary(phi_hat, geom);
+
+    // Stage 3
+    fire_levelset::compute_levelset_rhs_split_advective(rhs, phi_hat, VwVs, dx[0], dx[1],
+        eps_visc, &slopes, nonburnable, wall_extrap, grad_scheme);
+    fire_levelset::rk3_stage3_update(phi, phi_hat, phi_n, rhs, dt);
 }
 
 /**
@@ -496,12 +697,17 @@ inline void advect_levelset_directional_rk3(amrex::MultiFab& phi,
                                             int ellipse_lw = DIRECTIONAL_ELLIPSE_LW_MODEL,
                                             amrex::Real ellipse_lw_max = amrex::Real(8.0),
                                             const amrex::MultiFab* ros_scale = nullptr,
-                                            int wind_coupling = DIRECTIONAL_WIND_COUPLING_PROJECTION)
+                                            int wind_coupling = DIRECTIONAL_WIND_COUPLING_PROJECTION,
+                                            const amrex::MultiFab* fuel_model = nullptr,
+                                            const RothermelComputed* rc_tbl = nullptr,
+                                            int rc_tbl_size = 0,
+                                            int fuel_set = 0)
 {
     fire_levelset::advect_levelset_rk3_with_fill(phi, slopes, geom, dt, eps_visc,
         [&](amrex::MultiFab& R, const amrex::MultiFab& phi_stage) {
             fill_directional_ros(R, phi_stage, wind, slopes, geom, st, nonburnable, wall_extrap, shape,
-                                 ellipse_lw, ellipse_lw_max, wind_coupling);
+                                 ellipse_lw, ellipse_lw_max, wind_coupling,
+                                 fuel_model, rc_tbl, rc_tbl_size, fuel_set);
         }, nonburnable, wall_extrap, grad_scheme, ros_scale);
 }
 

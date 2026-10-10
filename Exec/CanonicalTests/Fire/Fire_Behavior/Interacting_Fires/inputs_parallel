@@ -1,0 +1,11 @@
+FILE = inputs_base
+
+# Parallel fires: two 20 m wide lines along the wind, 60 m apart (y = 970 and
+# 1030 m), one vertex file each. Their heads run east together while their
+# inner flanks burn towards each other and close the 40 m strip between them
+# at about 720 s.
+erf.fire_plot_file = "plt_fire_parallel_"
+erf.fire.ignition_r = 0.0             # no disc of its own
+erf.fire.ignition.polygon_file = "parallel_south.csv" "parallel_north.csv"
+erf.fire.ignition.polygon_type = "polyline"
+erf.fire.ignition.polyline_width = 10.0   # half width: 20 m wide lines

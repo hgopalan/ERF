@@ -197,6 +197,9 @@ while the following tests are run nightly:
 | MovingTerrain_nosub           | 40  8  79   | Periodic | Periodic | SlipWall   | None  | terrain_type = MovingFittedMesh |
 |                               |             |          |          | SlipWall   |       |                                 |
 +-------------------------------+-------------+----------+----------+------------+-------+---------------------------------+
+| NoahMP_Ideal                  | 4  4  32    | Periodic | Periodic | SurfLay    | None  | Noah-MP land model, init from   |
+|                               |             |          |          | SlipWall   |       | input_sounding                  |
++-------------------------------+-------------+----------+----------+------------+-------+---------------------------------+
 | ParticlesOverWoA              | 256 8  64   | Inflow   | Periodic | SlipWall   | None  | particle                        |
 |                               |             | Outflow  |          | SlipWall   |       | advection                       |
 +-------------------------------+-------------+----------+----------+------------+-------+---------------------------------+
@@ -568,18 +571,203 @@ projection and are registered only when the build enables FFT
 A sixth case, ``Timestep_Limits``, measures the largest stable time step of
 the vertical eddy diffusion on a neutral 4 x 4 x 200 column (dx = 800 m,
 dz = 5 m) for the :math:`k` closure, Deardorff and MRF under explicit
-anelastic, implicit anelastic and implicit compressible integration. Its
+anelastic, implicit anelastic (``erf.anelastic_type = MidPoint``) and implicit
+compressible integration. Its
 driver spins each closure up for 1 h, restarts from the checkpoint over a
 ladder of time steps from 0.125 s to 1024 s, and checks that the explicit
-step lies within a factor 2 of :math:`\Delta z^2 / (2 K)` and that both
+step lies between 0.5 and 2.5 times :math:`\Delta z^2 / (2 K)` and that both
 implicit integrators reach at least eight times that step. Test names:
 ``RANS_Timestep_Limits_kEqn``, ``RANS_Timestep_Limits_Deardorff``,
 ``RANS_Timestep_Limits_MRF``; labels ``rans`` and ``dt_sweep``, not
 ``regression``, since each entry makes about 30 short ERF runs.
 
+``RANS_Checks_SelfTest`` tests the check scripts' own verdict logic rather
+than any physics: it states, for each kind of comparison the shared
+``rans_checks.py`` offers, what the check must decide for values inside and
+just outside the stated tolerance or band, and fails when a check disagrees.
+It also calls ``check_implicit_explicit_ke.py`` with malformed arguments (a
+missing or non-numeric ``--tol``, too few plotfiles), each of which must print
+the usage and exit with status 2 rather than fail with a traceback.
+It runs no ERF executable; labels ``rans`` and ``unit``. It is registered
+only when CMake finds a Python 3 interpreter, so a configuration without
+one simply does not have the test rather than failing the unit stage.
+
 Problem Location: `Exec/CanonicalTests/Canonical_RANS`_
 
 .. _`Exec/CanonicalTests/Canonical_RANS`: https://github.com/erf-model/ERF/tree/development/Exec/CanonicalTests/Canonical_RANS
+
+Restart parity
+--------------
+``MoistBubble_Kessler_Restart`` (MPI builds, not Windows) runs the moist bubble
+deck with Kessler rain (``erf.moisture_model=Kessler``, the rain fields in the
+plotfile) straight to step 8,
+again to a checkpoint at step 4, and from that checkpoint to step 8, and
+requires the two plotfiles at step 8 to be identical (``Tests/RunRestartParity.cmake``,
+no gold file; label ``restart-parity``). Every run has a time limit of its own,
+so a restart whose first step never finishes fails with a message. Until
+September 2026 the restart path handed the microphysics its minimum cell
+height only on terrain-fitted meshes; on a constant-dz mesh the sedimentation
+substep count of the first restarted step was computed from an uninitialised
+value and the step never finished. Only the schemes that size their
+sedimentation substeps from that height are affected, namely Kessler
+(``ERF_Kessler.cpp``) and SAM (``ERF_PrecipFall.cpp``, ``ERF_IceFall.cpp``);
+Morrison, WSM6 and WDM6 store the minimum cell height but never read it.
+
+Test Location: `Tests/test_files/MoistBubble_Kessler_Restart`_
+
+.. _`Tests/test_files/MoistBubble_Kessler_Restart`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/MoistBubble_Kessler_Restart
+
+``IBSEB_Cube_Restart``, ``IBSEB_RefinedLevels_Restart``,
+``ImmersedTerrain_Hill_Restart`` and ``ImmersedTerrain_Hill_TwoLevel_Restart``
+(MPI builds, not Windows) do the same for immersed forcing: the
+``IBSEB_Cube`` deck through a checkpoint at step 17 to step 40, with the
+velocities added to its plotfile; the two-level ``IBSEB_RefinedLevels`` deck
+through step 7 to step 20; and the ``TerrainHill`` deck with
+``erf.terrain_type = ImmersedForcing`` through step 7 to step 20, on one level
+and on the deck's two. All but one compare with zero tolerance.
+``IBSEB_RefinedLevels_Restart`` compares to 1e-8 relative: the restart leg
+writes a plotfile at the restart step and the straight leg does not, and on two
+levels writing a plotfile changes the solution at round-off (erf-model/ERF#4224;
+5e-15 relative in theta without buildings, 1.7e-10 relative in w in this deck by
+step 20); with plotfiles at the same steps in every leg that restart is
+bit-exact too.
+
+A restart rebuilds the immersed blanking (``terrain_IB_mask``) rather than
+reading it from the checkpoint, and ``erf.ibseb`` builds its faces from it.
+Until October 2026 the restart path built it without clearing the almost-fluid
+cells (solid fraction below ``eb2.small_volfrac``) as a fresh start does, so the
+restarted run applied the wall law in cells the straight run leaves alone: 0.2
+m/s in u on one level and 0.85 m/s on the refined level of the hill, and 6e-5
+m/s in u and 8e-6 K in the face skin temperatures of the cube (the faces
+themselves were the same; they take the cells with a blanking of at least 0.5).
+A fresh start, a regrid and a restart now build the blanking with the same
+function, ``ERF::make_terrain_blanking``.
+
+Test Location: `Tests/test_files/IBSEB_Cube`_, `Tests/test_files/IBSEB_RefinedLevels`_,
+`Tests/test_files/TerrainHill`_
+
+.. _`Tests/test_files/IBSEB_Cube`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/IBSEB_Cube
+
+.. _`Tests/test_files/IBSEB_RefinedLevels`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/IBSEB_RefinedLevels
+
+.. _`Tests/test_files/TerrainHill`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/TerrainHill
+
+Closure box, rank and tiling parity
+-----------------------------------
+The ``Closure_BoxParity_*`` tests (MPI builds, not Windows; label ``box-parity``)
+run the unstable, perturbed ABL deck of ``ABL_MRF_Tiling`` twice: on one box, on
+one rank, without tiling, and on four 16 x 16 x 32 boxes on two ranks with 8 x 8
+tiles. The plotfiles after 10 steps must agree to a relative tolerance of 1e-9
+(``Tests/RunBoxParity.cmake``, no gold file). The entries choose the physics on
+the command line: the Deardorff closure, once with ``erf.vert_implicit = false``
+and once with the implicit vertical solve that ERF uses by default; the k-eqn
+closure with its PBL-height length cap; the MYNN25, MYNNEDMF, MYJ and native
+SHOC PBL schemes; Kessler microphysics on a moist sounding; and Smagorinsky on a
+stretched mesh whose levels are chosen so that they sum to the top of the domain.
+With the FFT build, two more run the anelastic MidPoint integrator with the
+Deardorff closure and with Kessler microphysics.
+Until September 2026 the anelastic integrator copied the projected momentum
+into the fluxes of the slow scalars tile by tile inside the loop that advects
+them, so the turbulent kinetic energy, moisture and passive scalars of anelastic
+runs depended on the tile size. The boxes are never split in z, so the column
+solves apply. The moist sounding is supersaturated below 150 m so that Kessler
+condenses, autoconverts and sediments within the ten steps of the run; otherwise
+``qc`` and ``qp`` would be compared as zero against zero. MYNNEDMF computed its
+diffusivities on a box grown by one cell in the vertical, so its vertical-derivative
+stencil reached two cells outside the domain; it now uses the valid box, as MYNN25
+does. The ghost values it computed were discarded in any case, since
+``ComputeTurbulentViscosity`` refills every eddy-viscosity ghost cell after the
+scheme returns, and dropping them leaves the answer bit for bit unchanged.
+
+Test Location: `Tests/test_files/Closure_BoxParity`_
+
+.. _`Tests/test_files/Closure_BoxParity`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/Closure_BoxParity
+
+Station time series
+-------------------
+``StationSampling_BoxParity`` and ``StationSampling_Restart`` cover the station
+time series written by ``erf.station_names`` (see :ref:`sec:Inputs`). A station
+value is an interpolation from whichever level and whichever box happens to
+cover the point, so the two things most likely to break it are a change of
+decomposition and a restart, and both are checked against the run that does it
+in one piece. Beyond the plotfile comparison every parity test makes, each
+compares ``Output_Stations/Center.dat`` line by line, to the ten significant
+digits the series prints rather than the six a data log prints
+(``DATALOG_SIGDIGITS`` in ``Tests/RunBoxParity.cmake`` and
+``Tests/RunRestartParity.cmake``). ``Center.dat`` is the series compared because
+it is the one that varies; the stations in the still air away from the bubble
+would compare a constant against a constant. The restart comparison strips the
+comment lines first, since the restarted run marks the seam with a comment the
+straight run does not have.
+
+The deck is the Straka density current refined over the lower middle of the
+domain, with four stations chosen so that the run touches every path the sampler
+has: ``Center``, two locations inside the refined region with two heights each,
+so the values come from level 1 and the vertical interpolation runs; ``Edge``,
+inside the outer half cell of the non-periodic ``x`` boundary, where the
+horizontal stencil collapses onto the edge cell; ``Wrap``, inside the outer half
+cell of the periodic ``y`` boundary, where the stencil reaches across the
+periodic image; and ``Surface``, a 2D diagnostic, which has no height and is
+filled by the 2D plotfile path rather than the 3D one. The refined box stops
+halfway up the domain, so the deck also pins down the level test: a level
+supplies a station when it covers the column from the bottom of the domain up
+through the cells the vertical interpolation reads, not when it covers the whole
+column, and with ``erf.v = 1`` the sampler prints the level it chose for each
+station. The deck lowers ``erf.station_buffer_steps`` to 2, well below its
+default of 100, so that a ten-step run exercises the flush path and, on the
+restart, the header check that fires with the first flush of the restarted run.
+
+Test Location: `Tests/test_files/StationSampling`_
+
+.. _`Tests/test_files/StationSampling`: https://github.com/erf-model/ERF/tree/development/Tests/test_files/StationSampling
+
+Station output does not change the answer
+-----------------------------------------
+The two ``StationSampling_AnswerParity*`` tests (label ``option-parity``) hold
+the sampler to the claim made in :ref:`sec:Inputs`, that turning station output
+on does not change the solution. Each runs one deck twice, once with the
+stations off and once with them on, and requires the plotfile to be identical
+**bit for bit** -- ``--rel_tol 0 --abs_tol 0``, not the tolerances the gold-file
+tests use, because a diagnostic that moves the answer at all is a bug rather
+than a tolerance question (``Tests/RunOptionParity.cmake``, no gold file). Both
+legs run on the same number of ranks with the same decomposition, so anything
+that survives is the sampler's own doing. Each names a file the "on" leg must
+write and the "off" leg must not, so a misspelled option cannot pass as
+agreement, and the harness refuses two legs given the same options.
+
+The claim is not free, which is why it is tested. The sampler asks
+``BuildPlot3DScratch`` not to average the microphysics state down
+(``sync_solution = false``), since that call modifies the coarse solution. What
+it still does at every sampled step is fillpatch the state on every level up to
+the highest one a station is on, re-point the ``qmoist`` pointers on every
+level, and fill the requested variables over whole levels. Two decks cover the
+paths that could break:
+
+* ``StationSampling_AnswerParity`` on the ``StationSampling`` deck -- two
+  levels, dry. The one of the two whose station resolves to level 1, so it is
+  the case that exercises ``FillPatchFineLevel``.
+* ``StationSampling_AnswerParity_MOST`` on ``ABL_MOST`` -- the surface layer.
+  ``u_star`` and ``t_star`` are 2D diagnostics of the MOST path, so the "on" leg
+  reads what the surface layer computed as well as the 3D state.
+
+Two gaps are left open. The first is the configuration the
+``sync_solution = false`` argument exists for: Lagrangian microphysics on two
+levels with ``CouplingType::TwoWay``, where ``BuildPlot3DScratch`` would
+otherwise average the microphysics state down onto the coarse solution. No
+answer-parity test runs it, so that argument is held by reading rather than by
+measurement.
+
+The second is a run driven by time-dependent lateral boundary data, the
+remaining case where an extra fill at ``t_new`` could in principle matter.
+There is no ``nc_bdy_file`` fixture under ``Tests/test_files``, and the decks
+that read one
+(``Exec/RegTests/WPS_Test``, ``Exec/RegTests/MetGrid``, the Katrina inputs under
+``Exec/CanonicalTests/Hurricanes``) need NetCDF input that CI does not have. The
+argument that it is safe is that the boundary path reaches
+``ReadBndryPlanes::interp_in_time``, which memoizes on the requested time and is
+otherwise a pure function of it, so a second fill at ``t_new`` re-derives what
+the step already wrote rather than consuming a read. That is an argument, not a
+measurement.
 
 Ekman Spiral
 ---------------------------
@@ -598,11 +786,13 @@ Problem Location: `Exec/CanonicalTests/EkmanSpiral`_
 Fire and dust smoke tests
 -------------------------
 Every fire suite under ``Exec/RegTests`` (``FireAccelerationClock``, ``FireBurnout``,
-``FireDirectionalShape``, ``FireEmcModel``, ``FireExposure``, ``FireFbp``,
+``FireCustomFuel``, ``FireDirectionalShape``, ``FireEmcModel``,
+``FireExposure``, ``FireFbp``,
 ``FireFluxPartition``, ``FireHeatPlacement``, ``FireHybridObstacles``,
 ``FireLevelSetEllipse``, ``FireLiveMoisture``, ``FireNearWall``,
-``FirePerimeterIgnition``, ``FireRestart``, ``FireRosComparison``,
-``FireScottBurgan``, ``FireStickMoisture``, ``FireWindSampling``,
+``FirePerimeterIgnition``, ``FirePrecipSource``, ``FireRestart``,
+``FireRosComparison``, ``FireScottBurgan``, ``FireStickMoisture``,
+``FireStructureIgnition``, ``FireWindSampling``,
 ``FarsiteDefault`` and ``LevelSetPropagation``) registers one of its decks as
 a CTest smoke test carrying the ``fire`` and ``regression`` labels; the dust
 module is covered by the ``FireRestart`` dust deck when ``ERF_ENABLE_DUST`` is
@@ -636,6 +826,92 @@ southernmost: the map's first data row lies in its TL3 band and its last in the
 NB8 water. Until 2026-09-11 the reader put the first data row on the south edge,
 which fails both checks.
 
+``FireCustomFuel_uniform`` and ``FireCustomFuel_map`` run the deck-defined
+fuel models of :ref:`sec:ROS_CustomFuel`: a fuel model written out in SI in the
+deck, uniform and from a raster that mixes it with the Scott-Burgan 40, with
+``FireCustomFuel_map_altid`` (the same map with another ``fuel_model_id``) and
+``FireCustomFuel_nonburnable`` (an undeclared code held non-burnable). Seven
+abort tests cover the validation, each passing only when the run stops at
+start-up with the message naming its input: ``FireCustomFuelBadCode_abort`` (a
+code outside 1000-1015), ``FireCustomFuelMissing_abort`` (a block without its
+surface-area-to-volume ratio), ``FireCustomFuelBadDepth_abort`` (a bed depth
+under the 0.01 m floor, where the Balbi models return zero spread without a
+word), ``FireCustomFuelBadHeat_abort`` (a heat content left in BTU/lb),
+``FireCustomFuelBurnout_abort`` (``burnout_model = sfire`` with no burn time,
+which would otherwise fall to Anderson model 1's 7 s) and
+``FireCustomFuelUndeclared_abort`` (a raster code no block defines, which would
+otherwise burn as grass) and ``FireCustomFuelUniformCode_abort`` (a custom code
+as the uniform ``fuel_model_id`` without its block). ``run_custom_fuel.sh``
+adds the identity, per-cell load, spread-contrast and box-parity checks that
+are too long for CI.
+
+Start-up checks added by the October 2026 fire and dust audit each have an
+abort test on the ``FireRestart`` decks, passing only when the run stops with
+the message that names the input: ``FireBalbiMaxIter_abort``
+(``balbi.max_iter = 0``, which returned 15 m/s everywhere),
+``FireFuelModelId_abort`` (a code outside the fuel set, which burned as model
+1), ``FireAccelTauWind_abort`` (a zero wind-lag time constant, a division by
+zero), ``FireStickKeyNoStick_abort`` and ``FireSuppressionKeyNoEnable_abort``
+(keys given without the switch that reads them), ``FireMrfExcessNoFlux_abort``
+(the MRF fire thermal excess without an injecting fire),
+``FireSourceModeConflict_abort`` (the default ``source_mode = overwrite`` with
+Rayleigh damping of theta, which it would discard),
+``DustRoadFileMissing_abort`` (a missing road file, which left every rank but
+the IO rank waiting in a broadcast), ``DustTransportBins_abort`` (separately
+transported bins, which the single dust scalar cannot hold) and
+``FireDustWindZref_abort`` (a fire-wind reference height below the roughness
+length). ``FireMrfThermalExcess`` runs the MRF fire thermal excess on the
+coupled ``FireRestart`` deck, and ``FireBadRosModel_abort``,
+``FireBadCoupling_abort``, ``DustBadBins_abort`` and
+``DustZrefMismatch_abort`` check the selector and dust start-up messages.
+
+``FireDustGTests_FpeTraps`` (label ``unit``) runs the fire and dust gtests with
+``amrex.fpe_trap_invalid``, ``fpe_trap_zero`` and ``fpe_trap_overflow`` armed.
+At -O2 and above clang evaluates the unselected arm of a guarded division,
+log or square root, so a 0/0 the code never uses still raises the flag and
+kills the run; the plain unit run never arms the traps. Before the audit the
+BEHAVE gtests died here on the live-fuel weights of a fuel without live load.
+The ``FireModelReferences`` gtests check the fire models against their
+sources (the Anderson 1982 fuel table, Rothermel's live heating number, the FBP
+high-wind ISI) and the fixed defects, and the ``DustColumn`` gtests the dust
+settling, deposition and per-bin emission on a single column with a known
+answer.
+
+``FireSuppression_<scenario>_levelset`` and ``FireSuppression_<scenario>_farsite``
+run the ``FireSuppression`` decks (``line_early``, ``line_late``,
+``drop_hold``, ``drop_slow``, ``hold``, ``burnout``) for 40 steps on each
+propagation path and check the last fire plotfile and the suppression log
+with ``check_suppression.py``: the line built in time stops the head, the
+late line is overrun, the ``ros_factor = 0`` drop holds until its expiry
+and the head crosses afterwards, the ``0.3`` drop slows the head to the
+expected distance, the low flame limit fails on the hot side of a rate
+gradient and holds on the other, and the burnout fires the strip along the
+line. ``FireSuppression_bad_line_abort``, ``FireSuppression_duplicate_id_abort``
+and ``FireSuppression_no_file_abort`` pass when the start-up read stops on a
+malformed line, a duplicate id and a missing file name. On MPI builds (not
+Windows) ``FireSuppression_poll_levelset``, ``FireSuppression_poll_farsite``
+and ``FireSuppression_poll_2ranks`` run ``run_poll.sh``, which starts the
+run on an empty action file and appends the line while the run polls, and
+``FireSuppression_restart_levelset`` and ``FireSuppression_restart_farsite``
+run ``run_restart.sh``, which restarts with a line under construction and
+requires the straight run's fire plotfile in every field.
+
+``FirePrecipSource`` (MPI builds, not Windows) runs ``run_precip.sh`` on one
+rank: five 40-step runs of a passive grass fire under Kessler rain from a cold
+column of air, with the rain that wets the dead fuel taken from nowhere (the
+historical deck), from the uniform ``erf.fire.precip_rate_mm_hr``, and from
+the atmosphere's rain per column (``erf.fire.precip_source = atmosphere``),
+the last also to a checkpoint and restarted from it. ``check_precip.py``
+requires the atmosphere's rain to raise the 1-hour moisture under the raining
+columns only and the uniform rate everywhere, the fire-grid rate
+``fire_precip_mm_hr`` to equal the change of ``rain_accum`` over the last step
+times 3600 / dt on every fire cell, the checkpoint to carry the accumulation
+snapshot, and the restart to reproduce the straight run exactly.
+``FirePrecipSource_norain_abort``, ``FirePrecipSource_static_abort`` and
+``FirePrecipSource_two_sources_abort`` pass when the atmosphere source stops
+at start-up under ``Kessler_NoRain``, with static moisture, and with a uniform
+rate set as well.
+
 ``FireBoundaryGuard_warn`` and ``FireBoundaryGuard_far`` run the two
 ``FireBoundaryGuard`` decks for 40 steps and check the statistics CSV and the
 log with ``check_guard.py``; ``FireBoundaryGuard_abort`` passes when the deck
@@ -660,6 +936,24 @@ and, with ``ERF_ENABLE_DUST``, ``FireAnchorLevel_dust_abort`` pass when the
 matching start-up check of the fire grid's level stops the run: a level above
 the finest, a level that regrids, a refinement box short of the domain top, two
 separate patches, and the dust layer, which runs on level 0 only.
+
+``FireStructureIgnition`` (MPI builds, not Windows) runs
+``run_structure_ignition.sh`` on one rank: a grass fire lit against the wall
+of a house, with a second house 20 m downwind and a third 90 m further, for
+40 steps with structure ignition off and on, in a radiation-only variant and
+restarted from step 20 (:ref:`sec:WUIStructureIgnition`). It requires the
+first house to ignite from the heat load at its wall, a second house to
+ignite later (from the first's radiation alone in the radiation-only variant,
+where the front never reaches its wall band and the third house stays
+unignited), the first house to release its peak flux and burn out with zero
+release after, the plotfile state to agree with the CSV, the incident flux of
+the step-10 plotfile to equal the point-source sum recomputed in the checker,
+the restart to reproduce the last CSV rows, and the same checker to fail on
+the ignition-off run, whose CSV has no state column.
+``FireStructureIgnition_no_exposure_abort`` and
+``FireStructureIgnition_curve_abort`` pass when the run stops at start-up
+without the exposure accumulators the rule reads, and with a burn curve whose
+growth phase alone would release more than 70 % of the fuel load.
 
 PBL start-up check
 ------------------

@@ -44,7 +44,6 @@ erf.pbl_mrf_Ribcr = 0.5
 erf.pbl_mrf_const_b = 7.8
 erf.pbl_mrf_sf = 0.1
 erf.enable_mrf_countergradient = true
-erf.mrf_moistvars = false
 erf.use_coriolis = true
 erf.latitude = 45.0
 erf.abl_driver_type = "GeostrophicWind"
@@ -60,7 +59,6 @@ erf.dust.n_size_bins = 3
 erf.dust.particle_density = 2650.0
 erf.dust.z0_dust = 0.01
 erf.dust.silt_fraction = 0.10
-erf.dust.threshold_A_coeff = 0.1
 # crust_index = 1.0: start fully crusted; burned cells reduced each step
 # by fire_dust_crust_reduction=0.8 -> crust * (1-0.8) = 0.2 -> near 0 after n steps
 erf.dust.crust_index = 1.0

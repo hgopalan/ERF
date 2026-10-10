@@ -28,7 +28,7 @@
  * @param[in]  z_phys_nd      Nodal terrain height from ERF [m], or nullptr for
  *                            flat terrain (TerrainType::None), in which case the
  *                            slopes are set to zero
- * @param[in]  geom_atm       Atmospheric level-0 geometry
+ * @param[in]  geom_atm       Geometry of the level the fire grid refines (erf.fire.anchor_level)
  * @param[in]  fg             Fire grid structure
  * @param[in]  terrain_fname  Path to terrain file; empty string uses z_phys_nd (default: "")
  *
@@ -70,7 +70,7 @@ void compute_terrain_slopes(
  * @param[out] fire_surface_z  1-component MultiFab on the fire grid [m]
  * @param[in]  z_phys_nd       Nodal terrain height from ERF [m], or nullptr for
  *                             flat terrain, in which case the domain floor is used
- * @param[in]  geom_atm        Atmospheric level-0 geometry
+ * @param[in]  geom_atm        Geometry of the level the fire grid refines
  * @param[in]  fg              Fire grid structure
  *
  * Called once at FireLayer::initialize(); terrain is static.
@@ -98,7 +98,7 @@ void compute_fire_surface_height(
  * @param[out] fire_col_ground  4-component MultiFab on the fire grid [m]
  * @param[in]  z_phys_nd        Nodal terrain height from ERF [m], or nullptr for
  *                              flat terrain, in which case the domain floor is used
- * @param[in]  geom_atm         Atmospheric level-0 geometry
+ * @param[in]  geom_atm         Geometry of the level the fire grid refines
  * @param[in]  fg               Fire grid structure
  *
  * Called once at FireLayer::initialize(); terrain is static.

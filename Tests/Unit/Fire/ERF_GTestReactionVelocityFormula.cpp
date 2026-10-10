@@ -119,8 +119,8 @@ TEST(ReactionVelocityFormula, LowSigmaGuardPreventsWrfPole)
 
 TEST(ReactionVelocityFormula, PerFuelTable)
 {
-    const auto albini    = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, false);
-    const auto rothermel = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, true);
+    const auto albini    = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, nullptr, false);
+    const auto rothermel = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, nullptr, true);
     ASSERT_EQ(albini.size(), rothermel.size());
 
     EXPECT_EQ(albini[0].R0, Real(0.0));  // non-burnable slot stays zero
@@ -202,8 +202,8 @@ TEST(WrfBmstCompat, PerFuelTable)
     // go either direction and must not be asserted monotonic here (see
     // DeflatesPackingRatioByExactBmstFactor for the FM1 case where it does
     // decrease).
-    const auto off = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, false, false);
-    const auto on  = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, false, true);
+    const auto off = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, nullptr, false, false);
+    const auto on  = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true, nullptr, false, true);
     ASSERT_EQ(off.size(), on.size());
 
     const Real bmst = M_DEAD / (Real(1.0) + M_DEAD);

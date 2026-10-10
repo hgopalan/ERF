@@ -13,7 +13,8 @@
  * CSV file format:
  *   time_s  cx  cy  radius  [source_type]  [priority]
  *   # or ! lines are comments
- *   source_type: "sphere" (default, integer 0) or "polyline" (integer 1)
+ *   source_type: integer, 0 = disc (the only type implemented; the field is
+ *                read as an int, a word such as "sphere" stops the parse)
  *   priority: integer; higher priority events fire first within the same timestep
  *   suppress_if_burning: if 1, skip cells already on fire (phi < 0)
  *
@@ -31,6 +32,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 #include <sstream>
 #include <fstream>
 
@@ -44,7 +46,7 @@ struct IgnitionEvent
     amrex::Real cx;                     ///< Ignition center x [m]
     amrex::Real cy;                     ///< Ignition center y [m]
     amrex::Real radius;                 ///< Ignition sphere radius [m]
-    int source_type;                    ///< 0 = sphere, 1 = polyline (unused in Phase 11)
+    int source_type;                    ///< 0 = disc; parsed and broadcast, no other type is implemented (unused)
     int priority;                       ///< Priority; higher = fires first in same timestep
     bool suppress_if_burning;           ///< If true, skip cells with phi < 0
     mutable bool fired;                 ///< True after event has been applied
@@ -268,10 +270,19 @@ void load_ignition_schedule(const std::string& filename,
  *
  * Events are applied if their time_s falls in the interval (prev_time, current_time].
  * Within a single timestep, events are ordered by priority (higher first), then by
- * time (earlier first). Each event is stamped onto phi using:
- *   phi(i,j,k) = min(phi(i,j,k), -(radius - dist))
+ * time (earlier first). Each event is stamped onto phi with the convention of
+ * initialize_ignition (ERF_FireIgnition.H), selected by `normalized`:
+ *   normalized = false (level-set path): sdf = dist - radius in metres, unclamped,
+ *     so the stamp is a true signed distance that the advection, the Godunov
+ *     Hamiltonian and the reinitialisation can propagate; min-merged, it leaves
+ *     every cell farther than the disc untouched.
+ *   normalized = true (FARSITE path): sdf / radius clamped to [-1, 1], the
+ *     indicator the FARSITE front update expects.
+ *   phi(i,j,k) = min(phi(i,j,k), stamp)
+ * Clamping the metric distance to [-1, 1] m on the level-set path (the earlier
+ * form) flattened the signed-distance field of the whole domain to a 1 m
+ * plateau the moment any event fired.
  *
- * This SDF stamp convention (same as the primary ignition) ensures:
  * - Cells within radius of the ignition center become negative (burned)
  * - Cells outside the radius remain unaffected if they are positive (unburned)
  * - Multiple ignitions merge implicitly via min() accumulation
@@ -284,16 +295,20 @@ void load_ignition_schedule(const std::string& filename,
  * @param[in,out] phi         Level-set field (on fire grid)
  * @param[in]     geom_fire   Fire grid geometry
  * @param[in,out] schedule    IgnitionSchedule with events to apply
- * @param[in]     current_time Time at end of current step [seconds]
- * @param[in]     prev_time   Time at end of previous step [seconds]
+ * @param[in]     current_time End of the window [seconds]
+ * @param[in]     prev_time   Start of the window (exclusive) [seconds]
+ * @param[in]     normalized  false: signed distance in metres (level set);
+ *                            true: sdf/radius clamped to [-1, 1] (FARSITE)
+ * @return number of events applied in this call (on every rank)
  */
 inline
-void apply_scheduled_ignitions(
+int apply_scheduled_ignitions(
     amrex::MultiFab& phi,
     const amrex::Geometry& geom_fire,
     IgnitionSchedule& schedule,
     amrex::Real current_time,
-    amrex::Real prev_time)
+    amrex::Real prev_time,
+    bool normalized)
 {
     using namespace amrex;
 
@@ -338,9 +353,13 @@ void apply_scheduled_ignitions(
                 Real y = prob_lo[1] + (j + 0.5_rt) * dx[1];
                 Real dist = std::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
 
-                Real new_phi = -(radius - dist);
-                // Clamp to [-1, 1] to match primary ignition convention
-                new_phi = amrex::max(amrex::min(new_phi, 1.0_rt), -1.0_rt);
+                // Signed distance to the disc edge (metres); the FARSITE
+                // indicator divides by the radius and clamps, the level set
+                // keeps the metric value (see the function comment).
+                const Real sdf = dist - radius;
+                const Real new_phi = normalized
+                    ? amrex::max(amrex::min(sdf / amrex::max(radius, std::numeric_limits<Real>::min()), 1.0_rt), -1.0_rt)
+                    : sdf;
 
                 // Apply suppress_if_burning logic
                 if (suppress && p(i, j, k) < 0.0_rt) {
@@ -361,6 +380,7 @@ void apply_scheduled_ignitions(
                            << "), radius=" << radius << " m\n";
         }
     }
+    return static_cast<int>(events_to_fire.size());
 }
 
 #endif // ERF_IGNITION_SCHEDULE_H

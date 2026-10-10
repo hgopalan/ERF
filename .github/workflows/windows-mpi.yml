@@ -1,20 +1,21 @@
-name: Windows
+name: Windows MPI
 
+# Merge tier: builds the MS-MPI variants and the downloadable Windows binary when a PR
+# is merged into development. windows.yml (no MPI) still builds and tests on every PR.
 on:
   push:
-  pull_request:
-    types: [opened, synchronize, reopened, closed]
+    branches: [development]
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.event.pull_request.number || github.ref }}-${{ github.head_ref }}-windows-mpi
-  cancel-in-progress: true
+  group: ${{ github.event.pull_request.number || github.ref }}-${{ github.head_ref || github.sha }}-windows-mpi
+  cancel-in-progress: ${{ github.ref != 'refs/heads/development' }}
 
 jobs:
   WIN64-MSVC:
-    # The closed event exists only to cancel in-progress runs via concurrency.
-    if: github.event.action != 'closed'
     name: WIN64-MSVC - MPI ${{ matrix.mpi }} - Mesh ${{ matrix.mesh_precision }} Particles ${{ matrix.particles }} ${{ matrix.particles_precision }}
     runs-on: windows-latest
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -23,8 +24,13 @@ jobs:
         mesh_precision: [DOUBLE, SINGLE]
         mpi: [ON]
         exclude:
-          - particles: OFF
+          # Only matching mesh/particle precisions are tested, i.e. DOUBLE mesh
+          # with DOUBLE particles and SINGLE mesh with SINGLE particles.
+          - mesh_precision: DOUBLE
             particles_precision: SINGLE
+          - mesh_precision: SINGLE
+            particles_precision: DOUBLE
+          # SINGLE precision is only exercised in the particle-enabled build.
           - mesh_precision: SINGLE
             particles: OFF
 

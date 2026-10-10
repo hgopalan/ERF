@@ -140,14 +140,14 @@
         // ******************************************************************************
 #ifdef ERF_USE_DUST
         if (m_DustLayer && level == 0) {
-            const amrex::MultiFab* zphys_ptr = (z_phys_cc.size() > 0) ? z_phys_cc[level].get() : nullptr;
-            if (zphys_ptr) {
-                m_DustLayer->apply_to_cc_source(cc_src, *zphys_ptr, fine_geom);
-                m_DustLayer->apply_settling_to_cc_source(
-                    cc_src, S_data[IntVars::cons], *zphys_ptr, fine_geom);
-                m_DustLayer->apply_deposition_bc(cc_src, S_data[IntVars::cons],
-                                                  *zphys_ptr, fine_geom, slow_dt);
-            }
+            // the cell thickness is detJ dz (detJ_cc is 1 on a flat grid and is
+            // always allocated); the centre-to-centre spacing of z_phys_cc that
+            // the kernels used until October 2026 created mass on stretched grids
+            m_DustLayer->apply_to_cc_source(cc_src, *dJ_to_use, fine_geom);
+            m_DustLayer->apply_settling_to_cc_source(
+                cc_src, S_data[IntVars::cons], *dJ_to_use, fine_geom, slow_dt);
+            m_DustLayer->apply_deposition_bc(cc_src, S_data[IntVars::cons],
+                                              *dJ_to_use, fine_geom, slow_dt);
         }
 #endif
 
@@ -195,6 +195,12 @@
             level < static_cast<int>(m_ibseb.size()) && m_ibseb[level]) {
             m_ibseb[level]->add_heat_flux_to_source(cc_src, S_data[IntVars::cons], fine_geom,
                                                     solverChoice.c_p, solverChoice.rdOcp);
+        }
+
+        // Nudging of potential temperature towards observations at stations
+        if (solverChoice.nudging_from_observations && obs_nudging) {
+            obs_nudging->add_theta_source(level, old_stage_time, static_cast<Real>(slow_dt), fine_geom,
+                                          S_data[IntVars::cons], cc_src, zpn_to_use, terrain_blank);
         }
 
         // *****************************************************************************
@@ -266,8 +272,17 @@
                          dptr_wbar_sub, d_rayleigh_ptrs_at_lev, d_sinesq_at_lev, d_sinesq_stag_at_lev,
                          d_sponge_ptrs_at_lev,
                          (solverChoice.hindcast_lateral_forcing? &forecast_state_interp[level] : nullptr),
-                         input_sounding_data, lsf, lsf_data[level],
+                         sounding_at_level(level), lsf_at_level(level), lsf_data[level],
                          get_eb(level), true);
+
+        // Nudging of the velocity towards observations at stations
+        if (solverChoice.nudging_from_observations && obs_nudging) {
+            obs_nudging->add_momentum_sources(level, old_stage_time, static_cast<Real>(slow_dt), fine_geom,
+                                              S_data[IntVars::cons], xvel_new, yvel_new, zvel_new,
+                                              xmom_src, ymom_src, zmom_src, zpn_to_use,
+                                              terrain_blank_xface, terrain_blank_yface,
+                                              terrain_blank_zface);
+        }
 
         // *****************************************************************************
         // Add body sources if doing flow around a body

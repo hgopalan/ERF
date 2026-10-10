@@ -1,0 +1,6 @@
+# The same line started at t = 15 s: the front passed x = 221 m at 11 s, so
+# the line cells it would cover are burned and are skipped, and the head runs
+# on to x = 230 m as if there were no line.
+FILE = inputs_base
+erf.fire.suppression.file = actions_line_late.txt
+erf.fire.suppression.log = suppression_line_late.csv

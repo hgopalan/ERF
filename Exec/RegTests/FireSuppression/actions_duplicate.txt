@@ -1,0 +1,3 @@
+# Two actions with the same id: the run must stop at start-up (FireSuppression_duplicate_id_abort)
+L1    line  0        221 100 221 300    rate=50  -1        -
+L1    line  5        241 100 241 300    rate=50  -1        -

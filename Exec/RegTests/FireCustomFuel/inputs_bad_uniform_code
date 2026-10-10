@@ -1,0 +1,7 @@
+FILE = inputs_base
+
+# erf.fire.fuel_model_id in the custom range with no block defining it. The
+# fuel raster has its own guard, but this code never reaches a raster, and
+# before the check it fell through to the fuel set's unknown-code default and
+# burned as Anderson model 1 -- grass, with no message.
+erf.fire.fuel_model_id = 1000

@@ -13,7 +13,7 @@ using namespace amrex;
 void apply_dust_tendency_to_cc_source(
     MultiFab&       cc_source,
     const MultiFab& Q_dust_atm,
-    const MultiFab& z_phys_cc,
+    const MultiFab& detJ,
     const Geometry& geom_atm,
     int             dust_scalar_comp,
     Real            feedback,
@@ -22,28 +22,26 @@ void apply_dust_tendency_to_cc_source(
     if (feedback <= 0.0) return;
 
     const Box& domain = geom_atm.Domain();
-    int klo = domain.smallEnd(2);
-    int khi = domain.bigEnd(2);
-    const auto& dx = geom_atm.CellSize();
-    Real dz_avg = dx[2];
+    const int klo = domain.smallEnd(2);
+    const Real dz_avg = geom_atm.CellSize(2);
 
     for (MFIter mfi(cc_source, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
+        // one plane: the injection is at klo only (the kernel used to run over
+        // the whole tile and return in every other cell)
+        if (bx.smallEnd(2) > klo) continue;
+        Box bx_sfc = bx; bx_sfc.setSmall(2, klo); bx_sfc.setBig(2, klo);
         auto src_arr  = cc_source.array(mfi);
         auto q_arr    = Q_dust_atm.const_array(mfi);
-        auto z_arr    = z_phys_cc.const_array(mfi);
+        auto dj_arr   = detJ.const_array(mfi);
         const int comp = dust_scalar_comp;
         const Real fb  = feedback;
 
-        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
-            // Injection at k=0 only. Higher levels receive zero tendency here.
-            if (k != klo) return;
-
-            // Cell depth: use z_phys_cc if terrain is active, else dz_avg.
-            Real dz = (k < khi) ? (z_arr(i,j,k+1) - z_arr(i,j,k)) : dz_avg;
+        ParallelFor(bx_sfc, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            // the lowest cell's thickness
+            Real dz = dj_arr(i,j,k) * dz_avg;
             if (dz <= 1.0e-10) dz = dz_avg;
-
-            // d(RhoDust)/dt = F_dust * feedback / dz
+            // d(RhoDust)/dt = F_dust * feedback / h_0
             src_arr(i, j, k, comp) += fb * q_arr(i, j, 0) / dz;
         });
     }

@@ -11,6 +11,7 @@
 #include "ERF_IndexDefines.H"
 #include "ERF_SurfaceLayer.H"
 #include "ERF_EB.H"
+#include "ERF_ScalarDiffusion.H"
 
 /** \brief Add stress-divergence diffusion source terms to the momentum RHS. */
 void DiffusionSrcForMom (const amrex::Box& bxx, const amrex::Box& bxy, const amrex::Box& bxz,
@@ -68,7 +69,27 @@ void DiffusionSrcForMom_EB (const amrex::MFIter& mfi,
                             const eb_& ebfact,
                             [[maybe_unused]] const amrex::BCRec* bc_ptr);
 
-/** \brief Add state diffusion source terms on a uniform grid without terrain. */
+/**
+ * \brief Add regular-grid state diffusion on a uniform grid without terrain.
+ *
+ * This public routine is the native adapter: for each conserved component it
+ * resolves `scalar_comp = qty_comp - 1`, the coefficient/eddy category, BC
+ * slot, prescribed surface fluxes, diagnostic outputs, scratch `flux_comp`,
+ * and tendency `rhs_comp`. The component-explicit numerical face operators
+ * are declared in ERF_ScalarDiffusion.H and do not infer those selections
+ * from a conserved-state index. Their molecular coefficient is kinematic
+ * alpha with ConstantAlpha and density-weighted rhoAlpha with Constant.
+ * `rho_comp` selects density independently when ConstantAlpha is used;
+ * `eddy_h_comp` and `eddy_v_comp` select density-weighted turbulence
+ * coefficients independently of the scalar storage component.
+ *
+ * The raw vertical face flux is `F_z = -K d_z(chi)`. On terrain the
+ * transformed vertical numerator is
+ * `G_z = F_z - m_x h_xi Fbar_x - m_y h_eta Fbar_y`, and the mapped
+ * conservative transfer is `T_z = G_z/(m_x m_y)`. These quantities have
+ * distinct meanings. Semi-implicit integration scales only raw `F_z`; the
+ * terrain cross terms remain explicit.
+ */
 void DiffusionSrcForState_N (const amrex::Box& bx, const amrex::Box& domain,
                              int start_comp, int num_comp,
                              const amrex::Array4<const amrex::Real>& u,
@@ -80,79 +101,6 @@ void DiffusionSrcForState_N (const amrex::Box& bx, const amrex::Box& domain,
                              const amrex::Array4<amrex::Real>& yflux,
                              const amrex::Array4<amrex::Real>& zflux,
                              const amrex::GpuArray<amrex::Real, AMREX_SPACEDIM>& cellSizeInv,
-                             const amrex::Array4<const amrex::Real>& SmnSmn_a,
-                             const amrex::Array4<const amrex::Real>& mf_mx,
-                             const amrex::Array4<const amrex::Real>& mf_ux,
-                             const amrex::Array4<const amrex::Real>& mf_vx,
-                             const amrex::Array4<const amrex::Real>& mf_my,
-                             const amrex::Array4<const amrex::Real>& mf_uy,
-                             const amrex::Array4<const amrex::Real>& mf_vy,
-                                   amrex::Array4<      amrex::Real>& hfx_z,
-                                   amrex::Array4<      amrex::Real>& qfx1_z,
-                                   amrex::Array4<      amrex::Real>& qfx2_z,
-                                   amrex::Array4<      amrex::Real>& diss,
-                             const amrex::Array4<const amrex::Real>& mu_turb,
-                             const SolverChoice& solverChoice,
-                             const int level,
-                             const amrex::Array4<const amrex::Real>& tm_arr,
-                             const amrex::GpuArray<amrex::Real,AMREX_SPACEDIM> grav_gpu,
-                             const amrex::BCRec* bc_ptr,
-                             const bool use_SurfLayer,
-                             const amrex::Real implicit_fac);
-
-/** \brief Add state diffusion source terms on a vertically stretched grid. */
-void DiffusionSrcForState_S (const amrex::Box& bx, const amrex::Box& domain,
-                             int start_comp, int num_comp,
-                             const amrex::Array4<const amrex::Real>& u,
-                             const amrex::Array4<const amrex::Real>& v,
-                             const amrex::Array4<const amrex::Real>& cell_data,
-                             const amrex::Array4<const amrex::Real>& cell_prim,
-                             const amrex::Array4<amrex::Real>& cell_rhs,
-                             const amrex::Array4<amrex::Real>& xflux,
-                             const amrex::Array4<amrex::Real>& yflux,
-                             const amrex::Array4<amrex::Real>& zflux,
-                             const amrex::Gpu::DeviceVector<amrex::Real>& stretched_dz_d,
-                             const amrex::GpuArray<amrex::Real, AMREX_SPACEDIM>& dxInv,
-                             const amrex::Array4<const amrex::Real>& SmnSmn_a,
-                             const amrex::Array4<const amrex::Real>& mf_mx,
-                             const amrex::Array4<const amrex::Real>& mf_ux,
-                             const amrex::Array4<const amrex::Real>& mf_vx,
-                             const amrex::Array4<const amrex::Real>& mf_my,
-                             const amrex::Array4<const amrex::Real>& mf_uy,
-                             const amrex::Array4<const amrex::Real>& mf_vy,
-                                   amrex::Array4<      amrex::Real>& hfx_z,
-                                   amrex::Array4<      amrex::Real>& qfx1_z,
-                                   amrex::Array4<      amrex::Real>& qfx2_z,
-                                   amrex::Array4<      amrex::Real>& diss,
-                             const amrex::Array4<const amrex::Real>& mu_turb,
-                             const SolverChoice& solverChoice,
-                             const int level,
-                             const amrex::Array4<const amrex::Real>& tm_arr,
-                             const amrex::GpuArray<amrex::Real,AMREX_SPACEDIM> grav_gpu,
-                             const amrex::BCRec* bc_ptr,
-                             const bool use_SurfLayer,
-                             const amrex::Real implicit_fac);
-
-/** \brief Add state diffusion source terms on terrain-following coordinates. */
-void DiffusionSrcForState_T (const amrex::Box& bx, const amrex::Box& domain,
-                             int start_comp, int num_comp,
-                             const bool& rotate,
-                             const amrex::Array4<const amrex::Real>& u,
-                             const amrex::Array4<const amrex::Real>& v,
-                             const amrex::Array4<const amrex::Real>& cell_data,
-                             const amrex::Array4<const amrex::Real>& cell_prim,
-                             const amrex::Array4<amrex::Real>& cell_rhs,
-                             const amrex::Array4<amrex::Real>& xflux,
-                             const amrex::Array4<amrex::Real>& yflux,
-                             const amrex::Array4<amrex::Real>& zflux,
-                             const amrex::Array4<const amrex::Real>& z_nd,
-                             const amrex::Array4<const amrex::Real>& z_cc,
-                             const amrex::Array4<const amrex::Real>& ax,
-                             const amrex::Array4<const amrex::Real>& ay,
-                             const amrex::Array4<const amrex::Real>& az,
-                             const amrex::Array4<const amrex::Real>& detJ,
-                             const amrex::GpuArray<amrex::Real, AMREX_SPACEDIM>& dxInv,
-                             const amrex::Array4<const amrex::Real>& SmnSmn_a,
                              const amrex::Array4<const amrex::Real>& mf_mx,
                              const amrex::Array4<const amrex::Real>& mf_ux,
                              const amrex::Array4<const amrex::Real>& mf_vx,
@@ -166,14 +114,82 @@ void DiffusionSrcForState_T (const amrex::Box& bx, const amrex::Box& domain,
                                    amrex::Array4<      amrex::Real>& qfx1_y,
                                    amrex::Array4<      amrex::Real>& qfx1_z,
                                    amrex::Array4<      amrex::Real>& qfx2_z,
-                                   amrex::Array4<      amrex::Real>& diss,
                              const amrex::Array4<const amrex::Real>& mu_turb,
                              const SolverChoice& solverChoice,
                              const int level,
-                             const amrex::Array4<const amrex::Real>& tm_arr,
-                             const amrex::GpuArray<amrex::Real,AMREX_SPACEDIM> grav_gpu,
                              const amrex::BCRec* bc_ptr,
                              const bool use_SurfLayer,
+                             const amrex::Vector<std::unique_ptr<SurfaceLayer>>& SurfLayer,
+                             const amrex::Real implicit_fac);
+
+/** \brief Native adapter for regular scalar diffusion on a vertically stretched grid. */
+void DiffusionSrcForState_S (const amrex::Box& bx, const amrex::Box& domain,
+                             int start_comp, int num_comp,
+                             const amrex::Array4<const amrex::Real>& cell_data,
+                             const amrex::Array4<const amrex::Real>& cell_prim,
+                             const amrex::Array4<amrex::Real>& cell_rhs,
+                             const amrex::Array4<amrex::Real>& xflux,
+                             const amrex::Array4<amrex::Real>& yflux,
+                             const amrex::Array4<amrex::Real>& zflux,
+                             const amrex::Gpu::DeviceVector<amrex::Real>& stretched_dz_d,
+                             const amrex::GpuArray<amrex::Real, AMREX_SPACEDIM>& dxInv,
+                             const amrex::Array4<const amrex::Real>& mf_mx,
+                             const amrex::Array4<const amrex::Real>& mf_ux,
+                             const amrex::Array4<const amrex::Real>& mf_vx,
+                             const amrex::Array4<const amrex::Real>& mf_my,
+                             const amrex::Array4<const amrex::Real>& mf_uy,
+                             const amrex::Array4<const amrex::Real>& mf_vy,
+                                   amrex::Array4<      amrex::Real>& hfx_x,
+                                   amrex::Array4<      amrex::Real>& hfx_y,
+                                   amrex::Array4<      amrex::Real>& hfx_z,
+                                   amrex::Array4<      amrex::Real>& qfx1_x,
+                                   amrex::Array4<      amrex::Real>& qfx1_y,
+                                   amrex::Array4<      amrex::Real>& qfx1_z,
+                                   amrex::Array4<      amrex::Real>& qfx2_z,
+                             const amrex::Array4<const amrex::Real>& mu_turb,
+                             const SolverChoice& solverChoice,
+                             const int level,
+                             const amrex::BCRec* bc_ptr,
+                             const bool use_SurfLayer,
+                             const amrex::Vector<std::unique_ptr<SurfaceLayer>>& SurfLayer,
+                             const amrex::Real implicit_fac);
+
+/** \brief Native adapter for regular scalar diffusion on terrain-following coordinates. */
+void DiffusionSrcForState_T (const amrex::Box& bx, const amrex::Box& domain,
+                             int start_comp, int num_comp,
+                             const bool& rotate,
+                             const amrex::Array4<const amrex::Real>& cell_data,
+                             const amrex::Array4<const amrex::Real>& cell_prim,
+                             const amrex::Array4<amrex::Real>& cell_rhs,
+                             const amrex::Array4<amrex::Real>& xflux,
+                             const amrex::Array4<amrex::Real>& yflux,
+                             const amrex::Array4<amrex::Real>& zflux,
+                             const amrex::Array4<const amrex::Real>& z_nd,
+                             const amrex::Array4<const amrex::Real>& z_cc,
+                             const amrex::Array4<const amrex::Real>& ax,
+                             const amrex::Array4<const amrex::Real>& ay,
+                             const amrex::Array4<const amrex::Real>& az,
+                             const amrex::Array4<const amrex::Real>& detJ,
+                             const amrex::GpuArray<amrex::Real, AMREX_SPACEDIM>& dxInv,
+                             const amrex::Array4<const amrex::Real>& mf_mx,
+                             const amrex::Array4<const amrex::Real>& mf_ux,
+                             const amrex::Array4<const amrex::Real>& mf_vx,
+                             const amrex::Array4<const amrex::Real>& mf_my,
+                             const amrex::Array4<const amrex::Real>& mf_uy,
+                             const amrex::Array4<const amrex::Real>& mf_vy,
+                                   amrex::Array4<      amrex::Real>& hfx_x,
+                                   amrex::Array4<      amrex::Real>& hfx_y,
+                                   amrex::Array4<      amrex::Real>& hfx_z,
+                                   amrex::Array4<      amrex::Real>& qfx1_x,
+                                   amrex::Array4<      amrex::Real>& qfx1_y,
+                                   amrex::Array4<      amrex::Real>& qfx1_z,
+                                   amrex::Array4<      amrex::Real>& qfx2_z,
+                             const amrex::Array4<const amrex::Real>& mu_turb,
+                             const SolverChoice& solverChoice,
+                             const int level,
+                             const amrex::BCRec* bc_ptr,
+                             const bool use_SurfLayer,
+                             const amrex::Vector<std::unique_ptr<SurfaceLayer>>& SurfLayer,
                              const amrex::Real implicit_fac);
 
 /** \brief Add state diffusion source terms for embedded-boundary cells. */
@@ -204,7 +220,8 @@ void DiffusionSrcForState_EB (const amrex::Box& bx, const amrex::Box& domain,
                              const SolverChoice& solverChoice,
                              const int level,
                              const amrex::BCRec* bc_ptr,
-                             const bool use_SurfLayer);
+                             const bool use_SurfLayer,
+                             const amrex::Vector<std::unique_ptr<SurfaceLayer>>& SurfLayer);
 
 /** \brief Compute embedded-boundary stress components for constant viscosity. */
 void ComputeStressConsVisc_EB (amrex::Box bxcc,

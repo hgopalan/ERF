@@ -1,11 +1,13 @@
-// Fuel-dependent moisture of extinction (M_x).
+// Fuel-dependent moisture of extinction (M_x): a DIAGNOSTIC estimate.
 //
-// M_x varies with fuel surface-area-to-volume ratio (SAV) rather than
-// using the constant 0.30 value in the base Rothermel (1972) model.
-// Finer fuels (higher SAV) have lower M_x; coarser fuels (lower SAV)
-// have higher M_x.
+// M_x = 0.12 + 0.28 (sigma / 1739)^-0.3, clamped to [0.12, 0.45], is an
+// empirical fit of this code (finer fuels lower, coarser fuels higher) and is
+// not taken from a published source: Rothermel (1972) uses the fuel model's
+// tabulated M_x (0.12-0.40 for the Anderson models), which the ROS kernels
+// read directly. This estimate fills the fire_mext field only; no spread
+// model reads it.
 //
-// Reference:
+// Background references for the tabulated values:
 //   Rothermel, R.C. (1972). A mathematical model for predicting fire spread
 //     in wildland fuels. USDA Forest Service Research Paper INT-115.
 //   Anderson, H.E. (1970). Forest fuel ignitability. Fire Technology 6(4):312-319.
@@ -45,8 +47,8 @@ amrex::Real compute_moisture_of_extinction(
     // Sigma ratio
     amrex::Real sigma_ratio = sigma_fuel / sigma_ref;
 
-    // M_x = M_x_min + (M_x_max - M_x_min) × (σ_fuel / σ_ref)^exponent
-    // Simplified: M_x = 0.12 + 0.28 × (σ_fuel / σ_ref)^(-0.3)
+    // M_x = M_x_min + 0.28 × (σ_fuel / σ_ref)^(-0.3), then clamped to
+    // [M_x_min, 0.45] (the 0.28 is a fit coefficient, not M_x_max - M_x_min)
     amrex::Real M_x = M_x_min + 0.28 * std::pow(sigma_ratio, exponent);
 
     // Apply reasonable bounds
@@ -77,12 +79,13 @@ amrex::Real compute_weighted_moisture(
     amrex::Real w_d1, amrex::Real w_d10, amrex::Real w_d100) noexcept
 {
     const amrex::Real total_load = w_d1 + w_d10 + w_d100;
+    // floored load before the early return (the unselected 0/0 is speculated)
+    const amrex::Real M_f = (w_d1 * M_1hr + w_d10 * M_10hr + w_d100 * M_100hr)
+                          / amrex::max(total_load, amrex::Real(1.0e-30));
 
     if (total_load <= 0.0) {
         return M_1hr;  // Fallback if no dead fuel
     }
-
-    amrex::Real M_f = (w_d1 * M_1hr + w_d10 * M_10hr + w_d100 * M_100hr) / total_load;
 
     return M_f;
 }

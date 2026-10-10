@@ -3,8 +3,8 @@
 plot_hazard_timeseries.py — ERF-Hazard diagnostic time series plots.
 
 Reads plain-text CSV/DAT diagnostic files produced by ERF-Hazard
-(dust_diag.dat, smoke_diag.dat, etc.) and produces publication-quality
-line plots. No yt or AMReX dependency — only matplotlib and pandas.
+(dust_diag.dat; smoke_diag.dat is a user-written CSV, no ERF output writes it)
+and produces publication-quality line plots. No yt or AMReX dependency — only matplotlib and pandas.
 
 Requirements:
     pip install matplotlib pandas numpy
@@ -117,7 +117,7 @@ def plot_terrain_amplification(args):
             axes[1].plot(t, df["ustar_max_m_s"], color=color, label=label)
 
     axes[0].set_ylabel("Dust emission total [kg/s]")
-    axes[0].set_title("ERF-Hazard Phase 5 — Terrain Amplification of Dust Emission")
+    axes[0].set_title("ERF-Hazard — Dust Emission over Flat, Hill and Pit Terrain")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
 
@@ -140,12 +140,15 @@ def plot_dust_diag(args):
 
     channels = [
         ("emission_total_kg_s",  "Emission total [kg/s]",    "#F44336"),
-        ("deposition_total_kg_m2", "Deposition total [kg/m\u00b2]", "#2196F3"),
+        ("deposition_total_kg", "Deposition total [kg]", "#2196F3"),
         ("ustar_max_m_s",        "Max u* [m/s]",             "#FF9800"),
         ("flux_max_kg_m2_s",     "Max emission flux [kg/m\u00b2/s]", "#9C27B0"),
         ("conc_sfc_max_kg_m3",   "Max sfc concentration [kg/m\u00b3]", "#4CAF50"),
     ]
     available = [(col, lbl, col_c) for col, lbl, col_c in channels if col in df.columns]
+    for col, _, _ in channels:
+        if col not in df.columns:
+            print(f"  plot_hazard_timeseries: column {col} missing from the file (have {list(df.columns)})")
 
     if not available:
         sys.exit(f"No recognised columns found. Columns in file: {list(df.columns)}")
@@ -181,6 +184,9 @@ def plot_smoke_diag(args):
         ("smoke_total_mass",    "Total smoke mass [kg]",         "#3F51B5"),
     ]
     available = [(col, lbl, col_c) for col, lbl, col_c in channels if col in df.columns]
+    for col, _, _ in channels:
+        if col not in df.columns:
+            print(f"  plot_hazard_timeseries: column {col} missing from the file (have {list(df.columns)})")
 
     if not available:
         # Fall back to whatever columns are present

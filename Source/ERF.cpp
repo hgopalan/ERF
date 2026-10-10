@@ -12,6 +12,7 @@
 #include "ERF_EOS.H"
 #include "ERF.H"
 #include "AMReX_buildInfo.H"
+#include "AMReX_FileSystem.H"
 #include "AMReX_Random.H"
 #include "AMReX_WriteEBSurface.H"
 
@@ -75,6 +76,11 @@ Real ERF::change_max     = Real(1.1);
 double ERF::dt_max_initial = static_cast<double>(bogus_large_value);
 double ERF:: dt_max        = 1.0e9;
 
+// Explicit eddy-diffusion time-step check (ERF::ComputeDt)
+bool ERF::diffusive_dt_check = false;
+bool ERF::diffusive_dt_limit = false;
+Real ERF::diffusive_cfl      = myhalf;
+
 int  ERF::fixed_mri_dt_ratio = 0;
 
 // Dictate verbosity in screen output
@@ -106,7 +112,10 @@ double ERF::last_plot2d_file_time_2 = 0.0;
 double ERF::last_check_file_time    = 0.0;
 
 #ifdef ERF_ENABLE_FIRE
-double ERF::last_fire_plot_time = -1.0;   // double: writeNow() takes double&, as for the other plot times
+// double: writeNow() takes double&, as for the other plot times. Starts at 0 like
+// them (and is realigned on restart below), so fire plots land on k * fire_plot_per;
+// the earlier -1 put them at k * per - 1 s and at the first step of every restart.
+double ERF::last_fire_plot_time = 0.0;
 #endif
 
 bool ERF::plot_file_on_restart = true;
@@ -222,36 +231,47 @@ ERF::Evolve ()
         if (m_DustLayer) {
 #ifdef ERF_ENABLE_FIRE
             if (m_fire_dust_coupling.enabled && m_fire_layer) {
-                m_fire_dust_coupling.fire_phi_mf = m_fire_layer->get_levelset();
-                m_fire_dust_coupling.geom_fire   = m_fire_layer->get_fire_geom();
-                // The crust reduction is applied inside DustLayer::advance from the
-                // crust baseline (see set_fire_dust_coupling).
+                // Every fire field the dust step reads is copied onto the dust
+                // BoxArray by index overlap, with the DUST periodicity: the dust
+                // domain is the atmosphere's refined by the grid ratio, and with the
+                // atmosphere's periodicity the copy treated dust cells one atmosphere
+                // domain apart as periodic images and landed the fire wind and heat
+                // in the wrong place on more than one rank. The grid ratios are
+                // asserted equal at start-up, so the kernels read cell for cell.
+                const amrex::Periodicity& per = m_DustLayer->get_dust_geom().periodicity();
+                const amrex::BoxArray&            dust_ba = m_DustLayer->get_dust_ba();
+                const amrex::DistributionMapping& dust_dm = m_DustLayer->get_dust_dm();
 
-                // Phase 2: fire outflow wind raises dust u*
+                // Burned area for the crust reduction (applied inside DustLayer::advance
+                // from the crust baseline). The level set used to be gathered into a
+                // fire-domain-sized host vector and all-reduced every step.
+                // the three dust-grid scratch fields are defined once (the dust
+                // BoxArray never changes) and refilled every step
+                if (m_fire_layer->get_levelset() != nullptr) {
+                    if (!m_fire_phi_scratch_for_crust.ok())
+                        m_fire_phi_scratch_for_crust.define(dust_ba, dust_dm, 1, 0);
+                    m_fire_phi_scratch_for_crust.setVal(1.0_rt);   // unburned where no fire cell lands
+                    m_fire_phi_scratch_for_crust.ParallelCopy(
+                        *m_fire_layer->get_levelset(), 0, 0, 1, 0, 0, per);
+                    m_fire_dust_coupling.fire_phi_scratch = &m_fire_phi_scratch_for_crust;
+                } else {
+                    m_fire_dust_coupling.fire_phi_scratch = nullptr;
+                }
+
+                // Phase 2: fire wind raises dust u*. The wind at erf.fire.wind_ref_ht
+                // (fire_wind_ref), the datum erf.fire_dust_wind_zref names; the
+                // WAF-reduced midflame wind (fire_wind_eff) used to be handed over as
+                // if it were the 6.1 m wind, 0.36x for grass, so the fire path never
+                // exceeded the surface layer's u*.
                 if (m_fire_dust_coupling.fire_wind_to_dust &&
-                    m_fire_layer->get_wind_eff() != nullptr) {
-                    // MPI-safe cross-grid access (LNG_MPI_SKILLS Rule B3):
-                    // fire_wind_eff lives on the fire grid BoxArray/DM.
-                    // dust_ustar_in lives on the dust grid BoxArray/DM.
-                    // With grid_ratio > 1 and 2+ MPI ranks a dust tile on rank 0 may
-                    // need fire cells owned by rank 1. ParallelCopy into a scratch MultiFab
-                    // on the dust BA before the GPU kernel runs.
-                    //
-                    // The periodicity has to be the dust grid's, whose domain is the
-                    // atmosphere's refined by the grid ratio. With the atmosphere's the
-                    // copy treated dust cells one atmosphere domain apart as periodic
-                    // images of each other and landed the fire wind (and, below, the
-                    // fire heat) in the wrong place on more than one rank, so the
-                    // dust emission depended on the domain decomposition.
-                    const amrex::Periodicity& per = m_DustLayer->get_dust_geom().periodicity();
-                    amrex::MultiFab fire_wind_scratch(
-                        m_DustLayer->get_dust_ba(),
-                        m_DustLayer->get_dust_dm(),
-                        2, 1);   // 2 components (u,v), 1 ghost cell
+                    m_fire_layer->get_wind_ref() != nullptr &&
+                    m_fire_layer->get_levelset() != nullptr) {
+                    amrex::MultiFab& fire_wind_scratch = m_fire_wind_scratch_for_ustar;   // (u, v), 1 ghost cell
+                    if (!fire_wind_scratch.ok()) fire_wind_scratch.define(dust_ba, dust_dm, 2, 1);
                     fire_wind_scratch.setVal(0.0_rt);
                     fire_wind_scratch.ParallelCopy(
-                        *m_fire_layer->get_wind_eff(), 0, 0, 2, 0, 1, per);
-                    fire_wind_scratch.FillBoundary(per);  // Rule B4: always pass periodicity
+                        *m_fire_layer->get_wind_ref(), 0, 0, 2, 0, 1, per);
+                    fire_wind_scratch.FillBoundary(per);
 
                     const int C = amrex::max(
                         m_fire_layer->get_grid_ratio() / m_DustLayer->get_grid_ratio(), 1);
@@ -265,29 +285,29 @@ ERF::Evolve ()
                         m_fire_dust_coupling.apply_fire_wind_to_dust_ustar(
                             *ustar_in,
                             fire_wind_scratch,
+                            m_fire_phi_scratch_for_crust,   // inside the fire perimeter only
                             m_DustLayer->get_dust_geom(),
                             m_fire_dust_coupling.fire_wind_z0,
                             m_fire_dust_coupling.fire_wind_zref,
                             C);
-                        ustar_in->FillBoundary(m_DustLayer->get_dust_geom().periodicity());
+                        ustar_in->FillBoundary(per);
                     }
                 }
 
-                // Phase 3: Prepare fire heat flux scratch for lofting call (after advance)
-                m_fire_lofting_ready = false;
+                // Phase 3: fire heat flux for the convective lofting, applied inside
+                // DustLayer::advance before the budget and the particles read the flux
                 if (m_fire_dust_coupling.fire_lofting_enabled &&
                     m_fire_layer->get_heat_flux()) {
-                    // The dust grid's periodicity, as for the wind scratch above.
-                    const amrex::Periodicity& per = m_DustLayer->get_dust_geom().periodicity();
-                    m_fire_heat_scratch_for_lofting = amrex::MultiFab(
-                        m_DustLayer->get_dust_ba(),
-                        m_DustLayer->get_dust_dm(),
-                        1, 1);
+                    if (!m_fire_heat_scratch_for_lofting.ok())
+                        m_fire_heat_scratch_for_lofting.define(dust_ba, dust_dm, 1, 1);
                     m_fire_heat_scratch_for_lofting.setVal(0.0_rt);
                     m_fire_heat_scratch_for_lofting.ParallelCopy(
                         *m_fire_layer->get_heat_flux(), 0, 0, 1, 0, 1, per);
                     m_fire_heat_scratch_for_lofting.FillBoundary(per);
-                    m_fire_lofting_ready = true;
+                    m_DustLayer->set_fire_lofting(&m_fire_heat_scratch_for_lofting,
+                                                  m_fire_dust_coupling.lofting_k_loft,
+                                                  m_fire_dust_coupling.lofting_Q_threshold,
+                                                  m_fire_dust_coupling.lofting_Q_ref);
                 }
             }
 #endif
@@ -298,48 +318,16 @@ ERF::Evolve ()
                 (z_phys_cc.size() > 0) ? z_phys_cc[0].get() : nullptr;
             const amrex::Geometry* geom_atm = &geom[0];  // Phase 19
             int nz = geom[0].Domain().length(2);
+            // the return fields of the step just taken (the surface dust density,
+            // the surface latent flux), once; the slow-RHS hook extracted them at
+            // every RK stage and only the last survived
+            m_DustLayer->extract_atm_return_fields(vars_new[0][Vars::cons],
+                                                   SFS_q1fx3_lev[0].get(), geom[0]);
             m_DustLayer->advance(dt[0], m_DustLayer->get_params(),
-                                 m_SurfaceLayer.get(),
-                                 xvel_ptr, yvel_ptr, zvel_ptr, zphys_ptr, geom_atm, nz);
+                                 m_SurfaceLayer[Orientation::zlo()].get(),
+                                 xvel_ptr, yvel_ptr, zvel_ptr, zphys_ptr, geom_atm, nz,
+                                 &vars_new[0][Vars::cons]);
 
-#ifdef ERF_ENABLE_FIRE
-            if (m_fire_lofting_ready && m_DustLayer) {
-                apply_fire_lofting_to_emission_flux(
-                    *m_DustLayer->get_emission_flux_mut(),
-                    m_fire_heat_scratch_for_lofting,
-                    m_DustLayer->get_params().n_size_bins,
-                    m_fire_dust_coupling.lofting_k_loft,
-                    m_fire_dust_coupling.lofting_Q_threshold,
-                    m_fire_dust_coupling.lofting_Q_ref,
-                    m_DustLayer->get_params().dust_debug,
-                    step);
-                m_fire_lofting_ready = false;
-            }
-#endif
-
-            // Coarsen dust emission flux to atmospheric grid for injection at next step
-            // One-step explicit lag: flux from this step will be injected in next step
-            if (m_dust_flux_atm[0]) {
-                const DustParams& dust_params = m_DustLayer->get_params();
-
-                // Sum emission flux over all size bins into a temporary 1-component MultiFab
-                // on the dust grid, then coarsen to the atmospheric grid.
-                {
-                    amrex::MultiFab dust_flux_sum(m_DustLayer->get_emission_flux()->boxArray(),
-                                                   m_DustLayer->get_emission_flux()->DistributionMap(),
-                                                   1, amrex::IntVect(1, 1, 0));
-                    dust_flux_sum.setVal(0.0);
-                    for (int b = 0; b < dust_params.n_size_bins; ++b) {
-                        amrex::MultiFab::Add(dust_flux_sum, *m_DustLayer->get_emission_flux(),
-                                            b, 0, 1, amrex::IntVect(1, 1, 0));
-                    }
-
-                    // Coarsen summed flux from dust grid to atmospheric grid
-                    coarsen_dust_flux_to_atm(*m_dust_flux_atm[0], dust_flux_sum,
-                                             m_DustLayer->get_dust_geom(), geom[0],
-                                             m_DustLayer->get_dust_grid().grid_ratio);
-                }
-            }
         }
 #endif
 
@@ -381,11 +369,13 @@ ERF::Evolve ()
 
     WriteAtFinalTime();
 
+    flush_stations();
+
     BL_PROFILE_VAR_STOP(evolve);
 }
 
 void
-ERF::WriteAtIntermediateTime(int step, double cur_time)
+ERF::WriteAtIntermediateTime (int step, double cur_time)
 {
     int plotfiles_3d_written = 0;
     bool interval_diagnostic_consumed = false;
@@ -443,20 +433,22 @@ ERF::WriteAtIntermediateTime(int step, double cur_time)
         }
     }
 
+    // Dust output before the checkpoint, so a checkpoint of this step records
+    // the step's dust output as written and a restart from it does not repeat it
+#ifdef ERF_USE_DUST
+    if (m_DustLayer)
+        m_DustLayer->write_output(step+1, cur_time, /*is_final=*/false);
+#endif
+
     if (writeNow(cur_time, step+1, m_check_int, m_check_per, dt[0], last_check_file_time)) {
         last_check_file_step = step+1;
         WriteCheckpointFile();
         if (m_check_per > zero) {last_check_file_time += m_check_per;}
     }
-
-#ifdef ERF_USE_DUST
-    if (m_DustLayer)
-        m_DustLayer->write_output(step+1, cur_time, /*is_final=*/false);
-#endif
 }
 
 void
-ERF::WriteAtFinalTime()
+ERF::WriteAtFinalTime ()
 {
     // Write plotfiles at final time
     int plotfiles_3d_written = 0;
@@ -497,15 +489,16 @@ ERF::WriteAtFinalTime()
         }
     }
 
-    if ( (m_check_int > 0 || m_check_per > zero) && istep[0] > last_check_file_step) {
-        WriteCheckpointFile();
-        if (m_check_per > zero) {last_check_file_time += m_check_per;}
-    }
-
+    // Dust output before the checkpoint, as in WriteAtIntermediateTime
 #ifdef ERF_USE_DUST
     if (m_DustLayer)
         m_DustLayer->write_output(istep[0], t_new[0], /*is_final=*/true);
 #endif
+
+    if ( (m_check_int > 0 || m_check_per > zero) && istep[0] > last_check_file_step) {
+        WriteCheckpointFile();
+        if (m_check_per > zero) {last_check_file_time += m_check_per;}
+    }
 }
 
 void
@@ -531,6 +524,233 @@ ERF::ResetIntervalMeans ()
             t_mean_cnt[lev] = 0.0;
         }
     }
+}
+
+// True when a level takes its radiation fields from its parent instead of sweeping.
+//
+// The column sweep needs a whole column inside ONE box, so the question is whether every
+// box spans the domain in z, not whether the boxes together do. A bounding-box test gets
+// three layouts right and one wrong: a level tagged at genuinely different heights in
+// different horizontal regions has a bounding box reaching both domain ends while no single
+// box holds a column.
+//
+// RRTMGP records its own predicate at Init and it stays authoritative for that model. The
+// two-stream model has no IRadiation object -- reading rad[] would dereference a null
+// pointer -- so derive it from the grids.
+//
+// This lives here, rather than as a lambda in one caller, because three places have to
+// agree about it: advance_radiation (which routes such a level through
+// interp_rad_from_coarse), the two-stream solver's own early return, and post_timestep,
+// which must not average a surface state down off a level that never advanced it.
+bool
+ERF::rad_level_needs_interpolation (int lev) const
+{
+    if (lev <= 0) { return false; }
+    if (solverChoice.rad_uses_interface() && rad[lev]) { return rad[lev]->is_nested_patch(); }
+    const Box& dom = geom[lev].Domain();
+    for (int ibox = 0; ibox < grids[lev].size(); ++ibox) {
+        const Box& b = grids[lev][ibox];
+        if (b.smallEnd(2) != dom.smallEnd(2) || b.bigEnd(2) != dom.bigEnd(2)) { return true; }
+    }
+    return false;
+}
+
+// Two-way coupling of the two-stream surface energy balance with the zlo surface layer
+// (erf.radiation.seb_surface_layer_uses_skin): the surface layer takes its land surface
+// temperature from the balance's skin temperature, so the heat flux it applies -- and the
+// balance removes -- responds to the skin. Called before every update_fluxes on the zlo
+// face, and it sets the pointer every time, since RemakeLevel reallocates the skin field.
+//
+// A level that takes its radiation from its parent never evolves a skin of its own (see
+// rad_level_needs_interpolation), so its surface layer keeps its own temperature there.
+// That is warned once per level each time a level stops coupling, so a regrid that turns
+// another level into a nested patch is reported too.
+void
+ERF::set_surface_layer_skin (int lev)
+{
+    SurfaceLayer* surface_layer = m_SurfaceLayer[Orientation::zlo()].get();
+    if (!surface_layer) { return; }
+    if (solverChoice.rad_type != RadiationType::TwoStream ||
+        !solverChoice.radChoice.seb_surface_layer_uses_skin) {
+        surface_layer->set_skin_temperature(lev, nullptr);
+        surface_layer->set_skin_moisture(lev, nullptr);
+        return;
+    }
+    // The initial update_fluxes runs inside InitData_post, before InitData's own call.
+    if (!m_seb_surface_layer_checked) { check_seb_surface_layer(); }
+    if (lev >= static_cast<int>(m_skin_uncoupled_warned.size())) {
+        m_skin_uncoupled_warned.resize(lev + 1, 0);
+    }
+    if (rad_level_needs_interpolation(lev)) {
+        if (!m_skin_uncoupled_warned[lev]) {
+            Print() << "WARNING: erf.radiation.seb_surface_layer_uses_skin: level " << lev
+                    << " takes its radiation from its parent and evolves no skin temperature, "
+                       "so its surface layer keeps its own surface temperature.\n";
+            m_skin_uncoupled_warned[lev] = 1;
+        }
+        surface_layer->set_skin_temperature(lev, nullptr);
+        surface_layer->set_skin_moisture(lev, nullptr);
+        return;
+    }
+    m_skin_uncoupled_warned[lev] = 0;
+    surface_layer->set_skin_temperature(lev, two_stream_rad.seb_t_sfc(lev));
+    // With erf.radiation.seb_surface_layer_uses_moisture, also what the surface's mixing
+    // ratio is formed from: the balance's current soil water and, with a soil type, the
+    // soil's resistance (and with a vegetation type the canopy's too); nullptr when off.
+    const RadChoice& rc = solverChoice.radChoice;
+    const NoahMPVegetationParams* veg = (rc.seb_vegetation_type != 0)
+                                      ? noahmp_vegetation_params(rc.seb_vegetation_type) : nullptr;
+    surface_layer->set_skin_moisture(lev, two_stream_rad.seb_surface_moisture(lev),
+                                     rc.seb_soil_type != 0, veg ? veg->hs : Real(0.0));
+}
+
+// Start-up checks of the two-stream balance's coupling with the zlo surface layer, run
+// once: from InitData, from scratch and on restart alike (which is what catches a two-way
+// run with no zlo surface layer, where set_surface_layer_skin is never called), or from
+// the first set_surface_layer_skin, since the initial update_fluxes runs inside
+// InitData_post. RadChoice::init_params has already checked the radiation inputs.
+void
+ERF::check_seb_surface_layer ()
+{
+    m_seb_surface_layer_checked = true;
+    const RadChoice& rc = solverChoice.radChoice;
+    if (solverChoice.rad_type != RadiationType::TwoStream || !rc.seb_enable) { return; }
+    SurfaceLayer* surface_layer = m_SurfaceLayer[Orientation::zlo()].get();
+
+    // The balance takes H and LE from the surface layer wherever it has a flux field,
+    // which it has with any diffusion or closure -- an adiabatic surface layer included,
+    // whose flux is zero. A nonzero scalar default is then not used; say so, since the
+    // deck setting it most likely relied on it.
+    if (rc.seb_turbulent_flux_source == SEBTurbulentFluxSource::SurfaceLayer) {
+        const MultiFab* sens = nullptr;
+        const MultiFab* laten = nullptr;
+        seb_surface_layer_fluxes(0, sens, laten);
+        if (sens && rc.seb_hfx_default != 0.0) {
+            Print() << "WARNING: erf.radiation.seb_hfx_default = " << rc.seb_hfx_default
+                    << " is not used: the surface energy balance takes H from the zlo surface "
+                       "layer's applied flux (erf.radiation.seb_turbulent_flux_source = "
+                       "surface_layer). Set seb_turbulent_flux_source = defaults to use it.\n";
+        }
+        if (laten && rc.seb_lh_default != 0.0) {
+            Print() << "WARNING: erf.radiation.seb_lh_default = " << rc.seb_lh_default
+                    << " is not used: the surface energy balance takes LE from the zlo surface "
+                       "layer's applied flux (erf.radiation.seb_turbulent_flux_source = "
+                       "surface_layer). Set seb_turbulent_flux_source = defaults to use it.\n";
+        }
+        // Rotated with the terrain slope, the surface flux is split over hfx1/hfx2/hfx3;
+        // the balance (like sensible_heat_flux) reads the vertical face only.
+        if (sens && surface_layer->rotates_surface_fluxes()) {
+            Print() << "WARNING: erf.use_rotate_surface_flux: the surface energy balance removes "
+                       "only the vertical-face part of the surface layer's flux, cos(slope) of "
+                       "H and LE, as the sensible_heat_flux and latent_heat_flux outputs report.\n";
+        }
+    }
+
+    if (!rc.seb_surface_layer_uses_skin) { return; }
+    if (!surface_layer) {
+        Abort("erf.radiation.seb_surface_layer_uses_skin = true needs zlo.type = surface_layer");
+    }
+    const std::string conflict = surface_layer->skin_temperature_conflict();
+    if (!conflict.empty()) {
+        Abort("erf.radiation.seb_surface_layer_uses_skin = true cannot be used: " + conflict);
+    }
+    if (rc.seb_surface_layer_uses_moisture) {
+        const std::string moisture_conflict = surface_layer->skin_moisture_conflict();
+        if (!moisture_conflict.empty()) {
+            Abort("erf.radiation.seb_surface_layer_uses_moisture = true cannot be used: " +
+                  moisture_conflict);
+        }
+    }
+    if (solverChoice.lsm_type != LandSurfaceType::None || m_SurfaceModel) {
+        Abort("erf.radiation.seb_surface_layer_uses_skin = true cannot be used with a land-surface "
+              "or surface model: it owns the surface temperature, and the two-stream balance "
+              "does not advance its skin then");
+    }
+}
+
+// The fluxes the zlo surface layer applies to the air of level lev, for the two-stream
+// surface energy balance's H and LE where no land-surface model supplies them (see
+// ERF_SEBTurbulentFlux.H): the same fields the sensible_heat_flux and latent_heat_flux 2D
+// outputs report. nullptr, and so the scalar defaults, without a zlo surface layer, and on
+// EB terrain, where the surface layer writes its heat flux to hfx3_EB instead and the
+// SFS field would read as a zero flux.
+void
+ERF::seb_surface_layer_fluxes (int lev,
+                               const MultiFab*& sens_flux,
+                               const MultiFab*& laten_flux) const
+{
+    sens_flux = nullptr;
+    laten_flux = nullptr;
+    if (!m_SurfaceLayer[Orientation::zlo()] ||
+        solverChoice.terrain_type == TerrainType::EB) {
+        return;
+    }
+    surface_flux_sources(lev, sens_flux, laten_flux);
+}
+
+// Give a newly built level its surface-energy-balance state.
+//
+// define_level allocates t_sfc and q_sfc filled with the erf.radiation.seb_* scalar
+// defaults. For a level that is about to evolve them, that is wrong twice over: the
+// defaults are not this column's surface, and the level would radiate at them for its
+// first step. Interpolate from the parent instead, as the radiation heating rates are.
+//
+// The parent's covered values are the average of this level's own from the previous
+// step (post_timestep averages them down), so on a regrid this recovers the fine field's
+// cell means and loses only the sub-coarse-cell variation. On a level that never
+// existed before there is nothing finer to lose.
+void
+ERF::fill_seb_from_coarse (int lev)
+{
+    if (lev == 0) { return; }
+    if (solverChoice.rad_type != RadiationType::TwoStream) { return; }
+    if (!two_stream_rad.seb_prognostic_active()) { return; }
+
+    const IntVect rr2d(refRatio(lev-1)[0], refRatio(lev-1)[1], 1);
+    const Box& crse_dom = geom[lev-1].Domain();
+    auto fill_one = [&] (MultiFab* fine, MultiFab* crse)
+    {
+        if (!fine || !crse) { return; }
+        // The coarse halo feeds the interpolation stencil, so fill it first. FillBoundary
+        // covers the interior and periodic ghosts only; the slope stencil
+        // (0.5*(u(i+1)-u(i-1)), evaluated for every BC type) also reaches outside the
+        // domain at a non-periodic face. define_level setVal'd the whole array, so those
+        // cells still hold erf.rad_t_sfc while the interior has evolved, and a fine level
+        // abutting such a face would get its edge column interpolated from a stencil
+        // biased toward the scalar. Extend the surface outward by clamping into the valid
+        // region first -- the same zeroth-order extension init_from_wrfinput gives the
+        // fields whose halos this interpolater is documented to require.
+        //
+        // Only across a NON-periodic face. Across a periodic one FillBoundary has already
+        // put the periodic image there, and InterpFromCoarseLevel's ParallelCopy reads
+        // that cell twice -- from this halo and from the periodic image of the valid cell
+        // it mirrors. Clamping it would make the two sources disagree, and ParallelCopy
+        // does not say which one wins: the answer then depended on the box layout, and a
+        // level created mid-run came out different on 1 and 2 ranks.
+        crse->FillBoundary(geom[lev-1].periodicity());
+        const bool clamp_x = !geom[lev-1].isPeriodic(0);
+        const bool clamp_y = !geom[lev-1].isPeriodic(1);
+        for (MFIter mfi(*crse, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const Box& gbx = mfi.growntilebox();
+            const Array4<Real>& a = crse->array(mfi);
+            const auto dlo = lbound(crse_dom);
+            const auto dhi = ubound(crse_dom);
+            ParallelFor(gbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+            {
+                const int ic = clamp_x ? amrex::max(dlo.x, amrex::min(dhi.x, i)) : i;
+                const int jc = clamp_y ? amrex::max(dlo.y, amrex::min(dhi.y, j)) : j;
+                if (ic != i || jc != j) { a(i,j,k) = a(ic,jc,k); }
+            });
+        }
+        InterpFromCoarseLevel(*fine, fine->nGrowVect(),
+                              IntVect(0,0,0),          // no ghosts outside the domain
+                              *crse, 0, 0, 1,
+                              geom[lev-1], geom[lev],
+                              rr2d, &cell_cons_interp,
+                              domain_bcs_type, BCVars::cons_bc);
+    };
+    fill_one(two_stream_rad.seb_t_sfc(lev), two_stream_rad.seb_t_sfc(lev-1));
+    fill_one(two_stream_rad.seb_q_sfc(lev), two_stream_rad.seb_q_sfc(lev-1));
 }
 
 // Called after every coarse timestep
@@ -615,6 +835,44 @@ ERF::post_timestep (int nstep, double time, double dt_lev0)
             }
             int num_comp = ncomp - src_comp;
             AverageDownTo(lev,src_comp,num_comp);
+
+            // The two-stream surface energy balance's prognostic state, for the same
+            // reason and at the same moment as the state above: level lev+1 has just
+            // finished its subcycles, and every level evolves its own copy of t_sfc
+            // and q_sfc. Left alone those two estimates of one surface drift apart,
+            // and since that surface temperature IS the longwave boundary condition,
+            // the ground would radiate at two temperatures depending on which level
+            // asked.
+            //
+            // Inside the TwoWay block deliberately: under OneWay ERF does not correct
+            // a coarse level with its fine solution at all, and the surface should not
+            // be the one exception. The levels then keep independent surfaces, which
+            // is what OneWay means.
+            //
+            // The ratio is horizontal only -- these are 2D fields collapsed to a single
+            // z index. Note the force-restore ODE is nonlinear in T_s, so the mean of
+            // the fine temperatures is not the temperature the coarse column would have
+            // reached on its own; defining the coarse value as that mean is the ordinary
+            // AMR compromise.
+            // ... but only off a level that actually advanced it. A level no box of which
+            // spans the domain in z never sweeps: TwoStreamRadiation::advance returns at
+            // its top and advance_radiation interpolates that level's fields from its
+            // parent instead. Its t_sfc and q_sfc therefore sit frozen at whatever
+            // fill_seb_from_coarse wrote when the level was built, and averaging that down
+            // would overwrite the coarse level's own evolving surface underneath the nest
+            // -- pinning the longwave boundary condition there at its level-creation value.
+            if (solverChoice.rad_type == RadiationType::TwoStream &&
+                two_stream_rad.seb_prognostic_active() &&
+                !rad_level_needs_interpolation(lev+1))
+            {
+                const IntVect rr2d(refRatio(lev)[0], refRatio(lev)[1], 1);
+                MultiFab* t_crse = two_stream_rad.seb_t_sfc(lev);
+                MultiFab* t_fine = two_stream_rad.seb_t_sfc(lev+1);
+                if (t_crse && t_fine) { average_down(*t_fine, *t_crse, 0, 1, rr2d); }
+                MultiFab* q_crse = two_stream_rad.seb_q_sfc(lev);
+                MultiFab* q_fine = two_stream_rad.seb_q_sfc(lev+1);
+                if (q_crse && q_fine) { average_down(*q_fine, *q_crse, 0, 1, rr2d); }
+            }
         }
     }
 
@@ -719,6 +977,12 @@ ERF::post_timestep (int nstep, double time, double dt_lev0)
         plane_sampler->write_sample_data(t_new, istep, ref_ratio, geom);
     }
 
+    // Write station time series
+    if (station_sampler &&
+        is_it_time_for_action(nstep+1, time, dt_lev0, station_sampling_interval, station_sampling_per)) {
+        sample_stations(static_cast<Real>(time));
+    }
+
     // Moving terrain
     if ( solverChoice.terrain_type == TerrainType::MovingFittedMesh )
     {
@@ -738,7 +1002,6 @@ ERF::post_timestep (int nstep, double time, double dt_lev0)
 
         int levc=finest_level;
 
-        HurricaneEyeTracker(solverChoice);
 
         MultiFab& U_new = vars_new[levc][Vars::xvel];
         MultiFab& V_new = vars_new[levc][Vars::yvel];
@@ -746,6 +1009,8 @@ ERF::post_timestep (int nstep, double time, double dt_lev0)
 
         MultiFab mf_cc_vel(grids[levc], dmap[levc], AMREX_SPACEDIM, IntVect(0,0,0));
         average_face_to_cellcenter(mf_cc_vel,0,{AMREX_D_DECL(&U_new,&V_new,&W_new)},0);
+
+        HurricaneEyeTracker(solverChoice, mf_cc_vel);
 
         HurricaneMaxVelTracker(geom[levc],
                                mf_cc_vel,
@@ -780,6 +1045,7 @@ ERF::InitData ()
     BL_PROFILE_VAR("ERF::InitData()", InitData);
     InitData_pre();
     InitData_post();
+    if (!m_seb_surface_layer_checked) { check_seb_surface_layer(); }
     BL_PROFILE_VAR_STOP(InitData);
 }
 // This is called from main.cpp and handles all initialization, whether from start or restart
@@ -874,7 +1140,8 @@ ERF::InitData_post ()
                  (solverChoice.vert_implicit_fac[lev][1] > 0) ||
                  (solverChoice.vert_implicit_fac[lev][2] > 0) )
             {
-                Warning("Doing implicit solve for u, v, and w with terrain at level " << lev << " -- this has not been tested");
+                Warning("Doing implicit solve for u, v, and w with terrain at level " + std::to_string(lev) +
+                        " -- this has not been tested");
             }
         }
     }
@@ -1043,7 +1310,7 @@ ERF::InitData_post ()
 
                 update_sst_tsk(itime, geom[lev], ba2d[lev],
                                sst_lev[lev], tsk_lev[lev],
-                               m_SurfaceLayer, low_data_zlo,
+                               m_SurfaceLayer[Orientation(Direction::z, Orientation::low)], low_data_zlo,
                                vars_new[lev][Vars::cons], *mf_PSFC[lev],
                                solverChoice.rdOcp, lmask_lev[lev][0], use_moist);
             } // itime
@@ -1100,7 +1367,7 @@ ERF::InitData_post ()
             rhotheta_src[lev]->setVal(0.);
             prob->update_rhotheta_sources(t_new[0],
                                           rhotheta_src[lev].get(),
-                                          geom[lev], z_phys_cc[lev]);
+                                          geom[lev], z_phys_cc[lev], zlevels_stag[lev]);
         }
     }
 
@@ -1120,7 +1387,7 @@ ERF::InitData_post ()
                 prob->update_geostrophic_profile(t_new[0],
                                                  h_u_geos[lev], d_u_geos[lev],
                                                  h_v_geos[lev], d_v_geos[lev],
-                                                 geom[lev], z_phys_cc[lev]);
+                                                 geom[lev], z_phys_cc[lev], zlevels_stag[lev]);
             } else {
                 if (SolverChoice::mesh_type == MeshType::VariableDz) {
                     amrex::Print() << "Note: 1-D geostrophic wind profile input is not defined for real terrain" << std::endl;
@@ -1152,7 +1419,7 @@ ERF::InitData_post ()
             rhoqt_src[lev]->setVal(0.);
             prob->update_rhoqt_sources(t_new[0],
                                        rhoqt_src[lev].get(),
-                                       geom[lev], z_phys_cc[lev]);
+                                       geom[lev], z_phys_cc[lev], zlevels_stag[lev]);
         }
     }
 
@@ -1166,7 +1433,7 @@ ERF::InitData_post ()
             d_w_subsid[lev].resize(domlen, 0.0_rt);
             prob->update_w_subsidence(t_new[0],
                                       h_w_subsid[lev], d_w_subsid[lev], base_state[lev],
-                                      geom[lev], z_phys_nd[lev]);
+                                      geom[lev], z_phys_nd[lev], zlevels_stag[lev]);
         }
     }
 
@@ -1421,7 +1688,7 @@ ERF::InitData_post ()
     }
 
 #ifdef ERF_ENABLE_FIRE
-    // The fire layer is initialised inside the surface-layer block below (so its
+    // The fire layer is initialised after the surface layers are built (so its
     // own prerequisite checks run there), and ERF::Advance samples Theta_prim,
     // which is only allocated with a surface layer. Any other bottom boundary
     // used to skip both and crash on the first step, so stop here instead.
@@ -1433,195 +1700,484 @@ ERF::InitData_post ()
     }
 #endif
 
-    // Configure SurfaceLayer params if used
-    // NOTE: we must set up the MOST routine after calling FillPatch
-    //       in order to have lateral ghost cells filled (MOST + terrain interp).
-    if (phys_bc_type[Orientation(Direction::z,Orientation::low)] == ERF_BC::surface_layer)
-    {
-        bool has_diff = ( (solverChoice.diffChoice.molec_diff_type != MolecDiffType::None) ||
-                          (solverChoice.turbChoice[0].les_type  != LESType::None)          ||
-                          (solverChoice.turbChoice[0].rans_type != RANSType::None)         ||
-                          (solverChoice.turbChoice[0].pbl_type  != PBLType::None) );
-        AMREX_ALWAYS_ASSERT(has_diff);
+    if (solverChoice.lsm_type != LandSurfaceType::None ||
+        solverChoice.urban_type != UrbanType::None) {
+        m_SurfaceModel = std::make_unique<SurfaceModel>(finest_level+1, grids, geom, dmap, solverChoice, lmask_lev);
+        for (int lev = 0; lev <= finest_level; ++lev) {
+            m_SurfaceModel->initialize_for_level(lev, grids[lev], geom[lev], dmap[lev], lmask_lev[lev], domain_bcs_type, refRatio());
+        }
+        if (solverChoice.lsm_type != LandSurfaceType::None) {
+            for (int lev = 0; lev <= finest_level; ++lev) {
+                m_SurfaceModel->set_model_data(lev, lsm_data[lev], lsm_data_name, SurfaceModelType::LAND);
+                m_SurfaceModel->set_model_fluxes(lev, lsm_flux[lev], lsm_flux_name, SurfaceModelType::LAND);
+            }
 
-        bool rotate = solverChoice.use_rotate_surface_flux;
-        if (rotate) {
-            Print() << "Using surface layer model with stress rotations" << std::endl;
+            const int flux_offset = lsm_data[0].size();
+            const std::string tsurf_name = solverChoice.lsm_type == LandSurfaceType::SLM ? "tsurf" : "t_sfc";
+            m_SurfaceModel->set_model_fields(SurfaceModelType::LAND, amrex::Vector<int>{flux_offset + lsm.Get_FluxIdx(0, "tau13"),
+                                                                                        flux_offset + lsm.Get_FluxIdx(0, "tau23"),
+                                                                                        flux_offset + lsm.Get_FluxIdx(0, "t_flux"),
+                                                                                        flux_offset + lsm.Get_FluxIdx(0, "q_flux"),
+                                                                                        lsm.Get_DataIdx(0, tsurf_name)}, true);
+
         }
 
-        //
-        // This constructor will make the SurfaceLayer object but not allocate the arrays at each level.
-        //
-        // Build vector of eb pointers for all levels
-        amrex::Vector<const eb_*> eb_ptrs;
-        eb_ptrs.resize(finest_level + 1, nullptr);
-        if (solverChoice.terrain_type == TerrainType::EB) {
-            for (int lev = 0; lev <= finest_level; lev++) {
-                eb_ptrs[lev] = eb[lev] ? eb[lev].get() : nullptr;
+        if (solverChoice.urban_type != UrbanType::None) {
+            for (int lev = 0; lev <= finest_level; ++lev) {
+                if (solverChoice.urban_enabled_lev[lev] == 0) {
+                    continue;
+                }
+                m_SurfaceModel->set_model_data(lev, urban_data[lev], urban_data_name, SurfaceModelType::URBAN);
             }
         }
 
-        m_SurfaceLayer = std::make_unique<SurfaceLayer>(geom, rotate, pp_prefix, Qv_prim,
-                                                        z_phys_nd, zlevels_stag,
-                                                        solverChoice.mesh_type,
-                                                        solverChoice.terrain_type,
-                                                        solverChoice.turbChoice[finest_level],
-#ifdef ERF_USE_NETCDF
-                                                        start_low_time, final_low_time, low_time_interval,
-#else
-                                                        zero, zero, zero,
-#endif
-                                                        eb_ptrs);
-
-        // Must precede make_SurfaceLayer_at_level: coupled SST is one of the
-        // conditions that selects ThetaCalcType::SURFACE_TEMPERATURE there.
-        m_SurfaceLayer->set_coupled_sst_active(solverChoice.use_coupled_sst);
-
-        // This call will allocate the arrays at each level. If we regrid later, either changing
-        // the number of levels or just the grids at each existing level, we will call an update routine
-        // to redefine the internal arrays in m_SurfaceLayer.
-        for (int lev = 0; lev <= finest_level; lev++)
-        {
-            Vector<MultiFab*> mfv_old = {&vars_old[lev][Vars::cons], &vars_old[lev][Vars::xvel],
-                                         &vars_old[lev][Vars::yvel], &vars_old[lev][Vars::zvel]};
-            m_SurfaceLayer->make_SurfaceLayer_at_level(lev,finest_level+1,
-                                                       mfv_old, Theta_prim[lev], Qv_prim[lev],
-                                                       Qr_prim[lev], z_phys_nd[lev],
-                                                       Hwave[lev].get(),Lwave[lev].get(),eddyDiffs_lev[lev].get(),
-                                                       lsm_data[lev], lsm_data_name, lsm_flux[lev], lsm_flux_name,
-                                                       sst_lev[lev], tsk_lev[lev], lmask_lev[lev]);
+        if (phys_bc_type[Orientation::zlo()] == ERF_BC::surface_layer) {
+            m_SurfaceModel->request_surface_layer_outputs();
         }
 
-        // If initializing from an input_sounding, make sure the surface layer
-        // is using the same surface conditions
-        if (solverChoice.init_type == InitType::Input_Sounding) {
-            const Real theta0 = input_sounding_data.theta_ref_inp_sound;
-            const Real qv0    = input_sounding_data.qv_ref_inp_sound;
-            for (int lev = 0; lev <= finest_level; lev++) {
-                m_SurfaceLayer->set_t_surf(lev, theta0);
-                m_SurfaceLayer->set_q_surf(lev, qv0);
+        if (solverChoice.lsm_type == LandSurfaceType::SLM) {
+            m_SurfaceModel->register_radiation_input("tskin", {lsm.Get_DataIdx(0, "tsurf"), -1});
+            m_SurfaceModel->register_radiation_input("emiss", {lsm.Get_DataIdx(0, "emis_sfc"), -1});
+            m_SurfaceModel->register_radiation_input("albedo_vis", {lsm.Get_DataIdx(0, "alb_vis_sfc"), -1});
+            m_SurfaceModel->register_radiation_input("albedo_nir", {lsm.Get_DataIdx(0, "alb_nir_sfc"), -1});
+            m_SurfaceModel->register_radiation_input("albedo_vis_diff", {lsm.Get_DataIdx(0, "alb_vis_sfc_diff"), -1});
+            m_SurfaceModel->register_radiation_input("albedo_nir_diff", {lsm.Get_DataIdx(0, "alb_nir_sfc_diff"), -1});
+            if (solverChoice.rad_feeds_lsm()) {
+                const amrex::Vector<std::string> rad_output_names = {
+                    "cos_zenith_angle", "sw_flux_dn", "sw_flux_dn_dir_vis",
+                    "sw_flux_dn_dir_nir", "sw_flux_dn_dif_vis", "sw_flux_dn_dif_nir",
+                    "lw_flux_dn"};
+                const auto& slm_output_map = lsm.get_model_lev<SLM>(0)->get_rad_output_map();
+                for (const auto& output_name : rad_output_names) {
+                    const auto output_it = slm_output_map.find(output_name);
+                    if (output_it != slm_output_map.end() && !output_it->second.empty()) {
+                        m_SurfaceModel->register_radiation_output(
+                            output_name, {lsm.Get_DataIdx(0, output_it->second), -1});
+                    }
+                }
+            }
+        } else if (solverChoice.lsm_type != LandSurfaceType::None) {
+            const amrex::Vector<std::pair<std::string, std::string>> rad_inputs = {
+                {"tskin", "t_sfc"}, {"emiss", "sfc_emis"},
+                {"albedo_vis", "sfc_alb_dir_vis"}, {"albedo_nir", "sfc_alb_dir_nir"},
+                {"albedo_vis_diff", "sfc_alb_dif_vis"}, {"albedo_nir_diff", "sfc_alb_dif_nir"}};
+            for (const auto& input : rad_inputs) {
+                const int idx = lsm.Get_DataIdx(0, input.second);
+                if (idx >= 0) { m_SurfaceModel->register_radiation_input(input.first, {idx, -1}); }
+            }
+            if (solverChoice.rad_feeds_lsm()) {
+                // RRTMGP writes all seven. The two-stream model is broadband and writes
+                // the three Noah-MP integrates on (TwoStreamRadiation::write_land_forcing);
+                // registering the spectral split as well would publish outputs that nothing
+                // ever fills.
+                const amrex::Vector<std::string> rad_output_names =
+                    (solverChoice.rad_type == RadiationType::TwoStream)
+                    ? amrex::Vector<std::string>{"cos_zenith_angle", "sw_flux_dn", "lw_flux_dn"}
+                    : amrex::Vector<std::string>{
+                          "cos_zenith_angle", "sw_flux_dn", "sw_flux_dn_dir_vis",
+                          "sw_flux_dn_dir_nir", "sw_flux_dn_dif_vis", "sw_flux_dn_dif_nir",
+                          "lw_flux_dn"};
+                for (const auto& output_name : rad_output_names) {
+                    const int idx = lsm.Get_DataIdx(0, output_name);
+                    if (idx >= 0) { m_SurfaceModel->register_radiation_output(output_name, {idx, -1}); }
+                }
+            }
+        }
+
+        // Populate weighted outputs after all active surface models are registered.
+        for (int lev = 0; lev <= finest_level; ++lev) {
+            if (solverChoice.lsm_type == LandSurfaceType::None &&
+                (solverChoice.urban_type == UrbanType::None ||
+                 solverChoice.urban_enabled_lev[lev] == 0)) {
+                continue;
+            }
+            m_SurfaceModel->calculate_weight_average(lev, urb_frac_lev[lev][0].get());
+        }
+
+        // Define surface value mapping between SLM and BEM_BEP
+        if (solverChoice.lsm_type == LandSurfaceType::SLM) {
+            amrex::Vector<amrex::MultiFab*> olen_ptrs_slm(finest_level+1);
+            amrex::Vector<amrex::MultiFab*> olen_ptrs_urb(finest_level+1);
+            for (int lev = 0; lev <= finest_level; ++lev) {
+                olen_ptrs_slm[lev] = lsm_flux[lev][lsm.Get_FluxIdx(lev, "olen")];
+                olen_ptrs_urb[lev] = nullptr;
+            }
+            /*
+            if (solverChoice.urban_type == UrbanType::BEM_BEP) {
+                m_SurfaceModel->register_field_map("tskin", {lsm.Get_DataIdx(0, "tsurf"), UrbanVar_BEP::tsk});
+                m_SurfaceModel->register_field_map("emiss", {lsm.Get_DataIdx(0, "emis_sfc"), UrbanVar_BEP::emiss});
+                m_SurfaceModel->register_field_map("albedo_vis", {lsm.Get_DataIdx(0, "alb_vis_sfc"), -1});
+                m_SurfaceModel->register_field_map("albedo_nir", {lsm.Get_DataIdx(0, "alb_nir_sfc"), -1});
+                m_SurfaceModel->register_field_map("albedo_vis_diff", {lsm.Get_DataIdx(0, "alb_vis_sfc_diff"), -1});
+                m_SurfaceModel->register_field_map("albedo_nir_diff", {lsm.Get_DataIdx(0, "alb_nir_sfc_diff"), -1});
+                m_SurfaceModel->register_field_map("ustar", {lsm.Get_DataIdx(0, "ustar"), UrbanVar_BEP::ustar}, true);
+                m_SurfaceModel->register_field_map("tstar", {lsm.Get_DataIdx(0, "tstar"), -1}, true);
+                m_SurfaceModel->register_field_map("qstar", {lsm.Get_DataIdx(0, "qstar"), -1}, true);
+                m_SurfaceModel->register_field_map("olen", olen_ptrs_slm, olen_ptrs_urb, true);
+            } else {
+            */
+            // Flux-based models do not consume these MOST mappings.  Keep them
+            // registered for regridding and the non-flux path; their storage remains
+            // lazy until a consumer activates them.
+            m_SurfaceModel->register_field_map("ustar", {lsm.Get_DataIdx(0, "ustar"), -1}, true);
+            m_SurfaceModel->register_field_map("tstar", {lsm.Get_DataIdx(0, "tstar"), -1}, true);
+            m_SurfaceModel->register_field_map("qstar", {lsm.Get_DataIdx(0, "qstar"), -1}, true);
+            m_SurfaceModel->register_field_map("olen", olen_ptrs_slm, olen_ptrs_urb, true);
+            if (!m_SurfaceModel->are_fluxes()) {
+                m_SurfaceModel->activate_all_field_maps();
+            }
+            //}
+            for (int lev = 0; lev <= finest_level; ++lev) {
+                // Seed olen to > 0 so that a surface model which exports u*/t*/q* directly
+                // (rather than fluxes) does not hand the PBL a weight-averaged olen of 0 on the
+                // first MOST compute_fluxes call, before the urban fraction has been set.
+                //
+                // NOTE: every model registered today calls set_model_fields with use_fluxes =
+                // true, so are_fluxes() is always true and the block in
+                // SurfaceLayer::update_fluxes that reads these "ustar"/"tstar"/"qstar"/"olen"
+                // maps never runs.  This setVal, and the four register_field_map calls above,
+                // therefore have no effect on any current configuration; they are kept for the
+                // non-flux path.  The intended wiring needs confirming before that path is used.
+                if (!m_SurfaceModel->are_fluxes()) {
+                    m_SurfaceModel->get_field("olen", lev)->setVal(1.0E3);
+                }
             }
         }
 
         if (restart_chkfile != "") {
             // Update surface fields if needed (and available)
-            ReadCheckpointFileSurfaceLayer();
+            const std::string surface_model_header = restart_chkfile + "/SurfaceModel_Header";
+            if (amrex::FileExists(surface_model_header)) {
+                m_SurfaceModel->ReadCheckpoint(restart_chkfile);
+            } else {
+                amrex::Warning("Checkpoint has no SurfaceModel state; rebuilding it from LSM fields");
+            }
+            for (int lev = 0; lev <= finest_level; ++lev) {
+                m_SurfaceModel->calculate_weight_average(lev, urb_frac_lev[lev][0].get());
+            }
+        }
+    }
+
+    // Configure SurfaceLayer params if used
+    // NOTE: we must set up the MOST routine after calling FillPatch
+    //       in order to have lateral ghost cells filled (MOST + terrain interp).
+    bool updated_prim = false;
+    // Count number of surface layer boundaries to determine correct parser prefix
+    int n_faces = 0;
+    amrex::GpuArray<int, AMREX_SPACEDIM*2> surface_layer_faces{};
+    for (OrientationIter oit; oit; ++oit) {
+        Orientation ori = oit();
+        if (phys_bc_type[ori] == ERF_BC::surface_layer) {
+            n_faces += 1;
+            surface_layer_faces[static_cast<int>(ori)] = 1;
+        }
+    }
+
+    // With multiple surface-layer faces, face-qualified prefixes are normally
+    // required.  Preserve the historical unqualified zlo inputs when a user adds
+    // another surface-layer face.  What the user actually wrote is read from the
+    // snapshot taken in ReadParameters; see has_surface_layer_inputs for why the
+    // live ParmParse table cannot be asked this question here.
+    bool use_legacy_zlo_prefix = false;
+    if (n_faces > 1 &&
+        phys_bc_type[Orientation::zlo()] == ERF_BC::surface_layer) {
+        const bool has_legacy_inputs = has_surface_layer_inputs(pp_prefix);
+        const bool has_zlo_inputs = has_surface_layer_inputs(
+            pp_prefix + "." + BoundaryFaceName[Orientation::zlo()]);
+
+        if (has_legacy_inputs && has_zlo_inputs) {
+            Abort("Both legacy unqualified and zlo-qualified surface-layer inputs "
+                  "are present. Use only erf.zlo.most.* and/or "
+                  "erf.zlo.surface_layer.* when multiple surface-layer faces "
+                  "are enabled.");
         }
 
-        // We now configure ABLMost params here so that we can print the averages at t=0
-        // Note we don't fill ghost cells here because this is just for diagnostics
-        for (int lev = 0; lev <= finest_level; ++lev)
-        {
-            IntVect ng = Theta_prim[lev]->nGrowVect();
+        if (has_legacy_inputs) {
+            use_legacy_zlo_prefix = true;
+            Warning("Multiple surface-layer faces are enabled while using legacy "
+                    "unqualified surface-layer inputs. Applying erf.most.* and "
+                    "erf.surface_layer.* to zlo; migrate them to erf.zlo.most.* "
+                    "and erf.zlo.surface_layer.*.");
+        }
+    }
 
-            MultiFab::Copy(  *Theta_prim[lev], vars_new[lev][Vars::cons], RhoTheta_comp, 0, 1, ng);
-            MultiFab::Divide(*Theta_prim[lev], vars_new[lev][Vars::cons],      Rho_comp, 0, 1, ng);
+    bool any_surface_layer = false;
+    for (OrientationIter oit; oit; ++oit) {
+        Orientation ori = oit();
+        if (phys_bc_type[ori] == ERF_BC::surface_layer) {
+            any_surface_layer = true;
+            bool has_diff = ( (solverChoice.diffChoice.molec_diff_type != MolecDiffType::None) ||
+                              (solverChoice.turbChoice[0].les_type  != LESType::None)          ||
+                              (solverChoice.turbChoice[0].rans_type != RANSType::None)         ||
+                              (solverChoice.turbChoice[0].pbl_type  != PBLType::None) );
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(has_diff,
+                "A surface_layer boundary applies its fluxes through the diffusion operator, so it "
+                "needs a diffusive closure: set erf.molec_diff_type, erf.les_type, erf.rans_type "
+                "or erf.pbl_type.");
 
-            if (solverChoice.moisture_type != MoistureType::None) {
-                ng = Qv_prim[lev]->nGrowVect();
+            bool rotate = solverChoice.use_rotate_surface_flux;
+            if (rotate) {
+                Print() << "Using surface layer model with stress rotations" << std::endl;
+                AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ori.coordDir() == 2 && ori.faceDir() == Orientation::Side::low,
+                                                 "Surface layer with stress rotations can only be enabled for the bottom z face");
+            }
 
-                MultiFab::Copy(  *Qv_prim[lev], vars_new[lev][Vars::cons], RhoQ1_comp, 0, 1, ng);
-                MultiFab::Divide(*Qv_prim[lev], vars_new[lev][Vars::cons],   Rho_comp, 0, 1, ng);
-
-                int rhoqr_comp = solverChoice.moisture_indices.qr;
-                if (rhoqr_comp > -1) {
-                    MultiFab::Copy(  *Qr_prim[lev], vars_new[lev][Vars::cons], rhoqr_comp, 0, 1, ng);
-                    MultiFab::Divide(*Qr_prim[lev], vars_new[lev][Vars::cons],   Rho_comp, 0, 1, ng);
-                } else {
-                    Qr_prim[lev]->setVal(0.0);
+            //
+            // This constructor will make the SurfaceLayer object but not allocate the arrays at each level.
+            //
+            // Build vector of eb pointers for all levels
+            amrex::Vector<const eb_*> eb_ptrs;
+            eb_ptrs.resize(finest_level + 1, nullptr);
+            if (solverChoice.terrain_type == TerrainType::EB) {
+                AMREX_ALWAYS_ASSERT_WITH_MESSAGE(ori.coordDir() == 2 && ori.faceDir() == Orientation::Side::low,
+                                                 "Surface layer with EB can only be enabled for the bottom z face");
+                for (int lev = 0; lev <= finest_level; lev++) {
+                    eb_ptrs[lev] = eb[lev] ? eb[lev].get() : nullptr;
                 }
             }
-            m_SurfaceLayer->update_mac_ptrs(lev, vars_new, Theta_prim, Qv_prim, Qr_prim);
 
-            if (restart_chkfile == "") {
-                // Only do this if starting from scratch; if restarting, then
-                // we don't want to call update_fluxes multiple times because
-                // it will change u* and theta* from their previous values
-                m_SurfaceLayer->update_pblh(lev, vars_new, z_phys_cc[lev].get(),
-                                            solverChoice.moisture_indices);
+            // Keep the historical unqualified prefix for a single zlo face,
+            // and for multiple faces when legacy zlo inputs were detected.
+            std::string face_pp_prefix(pp_prefix + "." + BoundaryFaceName[ori]);
+            if ((n_faces == 1 || use_legacy_zlo_prefix) &&
+                static_cast<int>(ori) == Orientation::zlo()) {
+                face_pp_prefix = pp_prefix;
+            }
+            m_SurfaceLayer[ori] = std::make_unique<SurfaceLayer>(ori, geom, rotate, face_pp_prefix, Qv_prim,
+                                                                 z_phys_nd,
+                                                                 zlevels_stag,
+                                                                 solverChoice.mesh_type,
+                                                                 solverChoice.terrain_type,
+                                                                 solverChoice.turbChoice[finest_level],
+                                                                 solverChoice.rdOcp,
 #ifdef ERF_USE_NETCDF
-                double elapsed_time_since_start_low = t_new[lev] + (start_time - start_low_time);
+                                                                 start_low_time, final_low_time, low_time_interval,
 #else
-                double elapsed_time_since_start_low = t_new[lev] + start_time;
+                                                                 zero, zero, zero,
 #endif
-                m_SurfaceLayer->update_fluxes(lev, t_new[lev], elapsed_time_since_start_low,
-                                              vars_new[lev][Vars::cons],
-                                              z_phys_nd[lev],
-                                              walldist[lev]);
+                                                                 eb_ptrs,
+                                                                 (static_cast<int>(ori) == Orientation::zlo())
+                                                                     ? m_SurfaceModel.get() : nullptr);
+            m_SurfaceLayer[ori]->set_surface_layer_faces(surface_layer_faces);
+            // The two-stream balance's land roughness (Noah-MP's tables), where erf.most.z0
+            // is not given; before the levels below take z0. seb_land_roughness is -1 when
+            // it is not derived, and positive when it is (RadChoice::init_params).
+            if (static_cast<int>(ori) == Orientation::zlo() &&
+                solverChoice.rad_type == RadiationType::TwoStream &&
+                solverChoice.radChoice.seb_land_roughness > 0.0) {
+                const Real z0 = solverChoice.radChoice.seb_land_roughness;
+                const bool taken = m_SurfaceLayer[ori]->set_default_roughness(z0);
+                Print() << "NOTE: the zlo surface layer's land roughness is "
+                        << m_SurfaceLayer[ori]->roughness() << " m"
+                        << (taken ? ", from Noah-MP's tables for the surface energy balance's "
+                                    "soil and vegetation"
+                                  : " as given (erf.most.z0); Noah-MP's tables for the surface "
+                                    "energy balance's soil and vegetation give " + std::to_string(z0))
+                        << ".\n";
+            }
+            m_SurfaceLayer[ori]->set_coupled_sst_active(solverChoice.use_coupled_sst &&
+                                                        static_cast<int>(ori) == Orientation::zlo());
 
-                // Initialize tke(x,y,z) as a function of u*(x,y)
-                if (solverChoice.turbChoice[lev].init_tke_from_ustar) {
-                    Real qkefac = one;
-                    if (solverChoice.turbChoice[lev].pbl_type == PBLType::MYNN25 ||
-                        solverChoice.turbChoice[lev].pbl_type == PBLType::MYNNEDMF)
-                    {
-                        // https://github.com/NCAR/MYNN-EDMF/blob/90f36c25259ec1960b24325f5b29ac7c5adeac73/module_bl_mynnedmf.F90#L1325-L1333
-                        const Real B1 = solverChoice.turbChoice[lev].pbl_mynn.B1;
-                        qkefac = Real(1.5) * std::pow(B1, two/three);
-                    } else if (solverChoice.turbChoice[lev].init_tke_at_wall_value) {
-                        const Real Cmu0 = solverChoice.turbChoice[lev].Cmu0;
-                        qkefac = one / (Cmu0 * Cmu0);
+            // This call will allocate the arrays at each level. If we regrid later, either changing
+            // the number of levels or just the grids at each existing level, we will call an update routine
+            // to redefine the internal arrays in m_SurfaceLayer.
+            for (int lev = 0; lev <= finest_level; lev++)
+            {
+                Vector<MultiFab*> mfv_old = {&vars_old[lev][Vars::cons], &vars_old[lev][Vars::xvel],
+                                             &vars_old[lev][Vars::yvel], &vars_old[lev][Vars::zvel]};
+                m_SurfaceLayer[ori]->make_SurfaceLayer_at_level(lev,finest_level+1,
+                                                                mfv_old, Theta_prim[lev], Qv_prim[lev],
+                                                                Qr_prim[lev], z_phys_nd[lev],
+                                                                Hwave[lev].get(),Lwave[lev].get(),eddyDiffs_lev[lev].get(),
+                                                                lsm_data[lev], lsm_data_name, lsm_flux[lev], lsm_flux_name,
+                                                                sst_lev[lev], tsk_lev[lev], lmask_lev[lev]);
+            }
+
+            // The custom and rico flux types prescribe u*, T* and q* directly: these are
+            // not MOST scales and no Obukhov length is computed, so olen keeps its initial
+            // bogus value. PBL schemes that build near-surface gradients from u* and L
+            // assume MOST consistency, so they cannot be used with these types.
+            // Note: this check must come after make_SurfaceLayer_at_level(), which is where
+            // most.use_sfc_fluxes promotes flux_type to CUSTOM.
+            if (m_SurfaceLayer[ori]->flux_type == SurfaceLayer::FluxCalcType::CUSTOM ||
+                m_SurfaceLayer[ori]->flux_type == SurfaceLayer::FluxCalcType::RICO) {
+                for (const auto& tc : solverChoice.turbChoice) {
+                    if (tc.pbl_type != PBLType::None && !tc.uses_shoc_family()) {
+                        Abort("erf.pbl_type = " + std::string(amrex::getEnumNameString(tc.pbl_type)) +
+                              " requires a MOST-consistent u* and Obukhov length;"
+                              " it cannot be combined with surface_layer.flux_type = custom or rico"
+                              " (note that most.use_sfc_fluxes selects the custom flux type)");
                     }
-                    m_SurfaceLayer->init_tke_from_ustar(lev, vars_new[lev][Vars::cons], z_phys_nd[lev], qkefac);
                 }
             }
 
-            // Initialize the fire layer once the surface layer exists on every level,
-            // on the level its grid refines: erf.fire.anchor_level, the finest level
-            // when unset (level 0 on a single-level run).
-            // This runs on a clean start and on a restart alike: on a restart the
-            // fields are allocated and set up from the inputs here, then overwritten
-            // from the checkpoint by ReadCheckpointFileFire().
-#ifdef ERF_ENABLE_FIRE
-            // z_phys_nd[fire_lev] is null on flat terrain; the fire
-            // layer handles that case itself, so it must not gate initialization.
-            if (lev == finest_level && m_fire_layer) {
-                const int fire_lev = fire_anchor_level(m_fire_params, finest_level);
-                m_fire_layer->initialize(*this, fire_lev, m_SurfaceLayer.get(), z_phys_nd[fire_lev].get(), m_fire_params);
-                // For the reach estimate at ignition: max_step counts level-0 steps, and the
-                // fire takes one step per step of its own level.
-                int fire_steps_per_coarse_step = 1;
-                for (int l = 1; l <= fire_lev; ++l) { fire_steps_per_coarse_step *= nsubsteps[l]; }
-                m_fire_layer->set_run_end(stop_time, max_step, fire_steps_per_coarse_step);
-
-                // Verify that at least one cell was marked during fire initialization,
-                // unless the ignition is deferred or absent on purpose: a perimeter polygon stamped at
-                // erf.fire.ignition.polygon_time > 0 (spin-up first) or a timed
-                // ignition schedule, either of which legitimately leaves the domain
-                // unburned at t = 0.
-                // A run driven only by erf.fire.prescribed_heat.flux has no front at
-                // all, by design.
-                const bool deferred_ignition =
-                    (!m_fire_params.ignition.polygon_file.empty() && m_fire_params.ignition.polygon_time > 0.0)
-                    || !m_fire_params.ignition.ignition_schedule_file.empty()
-                    || (m_fire_params.prescribed_heat.flux > 0.0);
-                if (const amrex::MultiFab* phi = m_fire_layer->get_levelset(); phi && !deferred_ignition) {
-                    Real phi_min = phi->min(0);
-                    if (!(phi_min < 0.0_rt)) {
-                        const amrex::Geometry& gf = m_fire_layer->get_fire_geom();
-                        std::ostringstream msg;
-                        msg << "[FIRE] Fire initialization failed: no cells were marked as burned. "
-                            << "Check ignition parameters (ignition_x, ignition_y, ignition_r): the fire grid "
-                            << "on level " << fire_lev << " covers x " << gf.ProbLo(0) << " to " << gf.ProbHi(0)
-                            << " m, y " << gf.ProbLo(1) << " to " << gf.ProbHi(1) << " m.";
-                        amrex::Abort(msg.str());
+            // If initializing from an input_sounding, make sure the surface layer
+            // is using the same surface conditions
+            // Note: do this only if using a single face on zlo, otherwise this will overwrite user specified wall values
+            if (n_faces == 1 && static_cast<int>(ori) == Orientation::zlo()) {
+                if (solverChoice.init_type == InitType::Input_Sounding) {
+                    const Real theta0 = input_sounding_data.theta_ref_inp_sound;
+                    const Real qv0    = input_sounding_data.qv_ref_inp_sound;
+                    for (int lev = 0; lev <= finest_level; lev++) {
+                        m_SurfaceLayer[ori]->set_t_surf(lev, theta0);
+                        m_SurfaceLayer[ori]->set_q_surf(lev, qv0);
                     }
                 }
+            }
 
-                if (restart_chkfile != "") {
-                    ReadCheckpointFileFire();
+            // We now configure ABLMost params here so that we can print the averages at t=0
+            // Note we don't fill ghost cells here because this is just for diagnostics
+            for (int lev = 0; lev <= finest_level; ++lev)
+            {
+                IntVect ng = Theta_prim[lev]->nGrowVect();
+
+                if (!updated_prim) {
+                    // This only needs to be done once (Theta,Qv_prim,Qr_prim should only be calculated once and reused for other faces)
+                    MultiFab::Copy(  *Theta_prim[lev], vars_new[lev][Vars::cons], RhoTheta_comp, 0, 1, ng);
+                    MultiFab::Divide(*Theta_prim[lev], vars_new[lev][Vars::cons],      Rho_comp, 0, 1, ng);
+
+                    if (solverChoice.moisture_type != MoistureType::None) {
+                        ng = Qv_prim[lev]->nGrowVect();
+
+                        MultiFab::Copy(  *Qv_prim[lev], vars_new[lev][Vars::cons], RhoQ1_comp, 0, 1, ng);
+                        MultiFab::Divide(*Qv_prim[lev], vars_new[lev][Vars::cons],   Rho_comp, 0, 1, ng);
+
+                        int rhoqr_comp = solverChoice.moisture_indices.qr;
+                        if (rhoqr_comp > -1) {
+                            MultiFab::Copy(  *Qr_prim[lev], vars_new[lev][Vars::cons], rhoqr_comp, 0, 1, ng);
+                            MultiFab::Divide(*Qr_prim[lev], vars_new[lev][Vars::cons],   Rho_comp, 0, 1, ng);
+                        } else {
+                            Qr_prim[lev]->setVal(0.0);
+                        }
+                    }
+                }
+                m_SurfaceLayer[ori]->update_mac_ptrs(lev, vars_new, Theta_prim, Qv_prim, Qr_prim);
+
+                if (restart_chkfile == "") {
+                    // Only do this if starting from scratch; if restarting, then
+                    // we don't want to call update_fluxes multiple times because
+                    // it will change u* and theta* from their previous values
+                    m_SurfaceLayer[ori]->update_pblh(lev, vars_new, z_phys_cc[lev].get(),
+                                                     solverChoice.moisture_indices);
+#ifdef ERF_USE_NETCDF
+                    double elapsed_time_since_start_low = t_new[lev] + (start_time - start_low_time);
+#else
+                    double elapsed_time_since_start_low = t_new[lev] + start_time;
+#endif
+                    if (static_cast<int>(ori) == Orientation::zlo()) { set_surface_layer_skin(lev); }
+                    m_SurfaceLayer[ori]->update_fluxes(lev, t_new[lev], elapsed_time_since_start_low,
+                                                       vars_new[lev][Vars::cons],
+                                                       z_phys_nd[lev],
+                                                       walldist[lev]);
+
+                    if (ori.coordDir() == 2 && ori.faceDir() == Orientation::Side::low) {
+                        // Initialize tke(x,y,z) as a function of u*(x,y)
+                        if (solverChoice.turbChoice[lev].init_tke_from_ustar) {
+                            Real qkefac = one;
+                            if (solverChoice.turbChoice[lev].pbl_type == PBLType::MYNN25 ||
+                                solverChoice.turbChoice[lev].pbl_type == PBLType::MYNNEDMF)
+                            {
+                                // https://github.com/NCAR/MYNN-EDMF/blob/90f36c25259ec1960b24325f5b29ac7c5adeac73/module_bl_mynnedmf.F90#L1325-L1333
+                                const Real B1 = solverChoice.turbChoice[lev].pbl_mynn.B1;
+                                qkefac = Real(1.5) * std::pow(B1, two/three);
+                            } else if (solverChoice.turbChoice[lev].init_tke_at_wall_value) {
+                                const Real Cmu0 = solverChoice.turbChoice[lev].Cmu0;
+                                qkefac = one / (Cmu0 * Cmu0);
+                            }
+                            m_SurfaceLayer[ori]->init_tke_from_ustar(lev, vars_new[lev][Vars::cons], z_phys_nd[lev], qkefac);
+                        }
+                    }
                 }
             }
-#endif
+            updated_prim = true;
+        } else {
+            m_SurfaceLayer[ori] = nullptr;
         }
     } // end if (phys_bc_type[Orientation(Direction::z,Orientation::low)] == ERF_BC::surface_layer)
 
+    // A land-surface model hands its fluxes to the atmosphere only through the surface
+    // layer (make_SurfaceLayer_at_level is the one consumer of lsm_flux). Without a
+    // surface_layer boundary the land model still runs and still computes fluxes, but
+    // nothing applies them: the atmosphere never sees the land surface.
+    if (solverChoice.lsm_type != LandSurfaceType::None && !any_surface_layer) {
+        amrex::Print() << "WARNING: erf.land_surface_model = "
+                       << amrex::getEnumNameString(solverChoice.lsm_type)
+                       << " but no boundary is a surface_layer. The land model's heat, "
+                          "moisture and momentum fluxes reach the atmosphere only through "
+                          "the surface layer, so they will not be applied; set "
+                          "zlo.type = \"surface_layer\".\n";
+    }
+
+    if (!restart_chkfile.empty()) {
+        // All active faces now exist, so restore every surface-layer field once.
+        ReadCheckpointFileSurfaceLayer();
+    }
+
+    // Initialize the fire layer once every surface layer exists (on a restart,
+    // after their fields are restored), on the level its grid refines:
+    // erf.fire.anchor_level, the finest level when unset (level 0 on a
+    // single-level run).
+    // This runs on a clean start and on a restart alike: on a restart the
+    // fields are allocated and set up from the inputs here, then overwritten
+    // from the checkpoint by ReadCheckpointFileFire().
+#ifdef ERF_ENABLE_FIRE
+    // z_phys_nd[fire_lev] is null on flat terrain; the fire
+    // layer handles that case itself, so it must not gate initialization.
+    if (m_fire_layer) {
+        const int fire_lev = fire_anchor_level(m_fire_params, finest_level);
+        m_fire_layer->initialize(*this, fire_lev, m_SurfaceLayer[Orientation::zlo()].get(), z_phys_nd[fire_lev].get(), m_fire_params);
+        // erf.fire.precip_source = atmosphere needs the microphysics accumulators of the
+        // fire grid's level, which exist now that every level is built.
+        verify_fire_precip_source(m_fire_params,
+                                  micro ? micro->Get_Surface_Precip_Accumulation_Ptrs(fire_lev)
+                                        : SurfacePrecipAccumulationSources{});
+        // For the reach estimate at ignition: max_step counts level-0 steps, and the
+        // fire takes one step per step of its own level.
+        int fire_steps_per_coarse_step = 1;
+        for (int l = 1; l <= fire_lev; ++l) { fire_steps_per_coarse_step *= nsubsteps[l]; }
+        m_fire_layer->set_run_end(stop_time, max_step, fire_steps_per_coarse_step);
+
+        // Verify that at least one cell was marked during fire initialization,
+        // unless the ignition is deferred or absent on purpose: a perimeter polygon stamped at
+        // erf.fire.ignition.polygon_time > 0 (spin-up first) or a timed
+        // ignition schedule, either of which legitimately leaves the domain
+        // unburned at t = 0.
+        // A run driven only by erf.fire.prescribed_heat.flux has no front at
+        // all, by design.
+        const bool deferred_ignition =
+            (m_fire_params.ignition.has_polygon() && m_fire_params.ignition.polygon_time > 0.0)
+            || !m_fire_params.ignition.ignition_schedule_file.empty()
+            || (m_fire_params.prescribed_heat.flux > 0.0);
+        if (const amrex::MultiFab* phi = m_fire_layer->get_levelset(); phi && !deferred_ignition) {
+            Real phi_min = phi->min(0);
+            if (!(phi_min < 0.0_rt)) {
+                const amrex::Geometry& gf = m_fire_layer->get_fire_geom();
+                std::ostringstream msg;
+                msg << "[FIRE] Fire initialization failed: no cells were marked as burned. "
+                    << "Check ignition parameters (ignition_x, ignition_y, ignition_r";
+                for (const auto& f : m_fire_params.ignition.polygon_files) { msg << ", " << f; }
+                msg << "): the fire grid "
+                    << "on level " << fire_lev << " covers x " << gf.ProbLo(0) << " to " << gf.ProbHi(0)
+                    << " m, y " << gf.ProbLo(1) << " to " << gf.ProbHi(1) << " m.";
+                amrex::Abort(msg.str());
+            }
+        }
+
+        if (restart_chkfile != "") {
+            ReadCheckpointFileFire();
+        }
+    }
+#endif
 #ifdef ERF_USE_DUST
     {
         DustParams dust_params;  // reads all erf.dust.* from ParmParse
         if (dust_params.enable) {
             m_DustLayer = std::make_unique<DustLayer>();
-            m_DustLayer->initialize(*this, m_SurfaceLayer.get(), *z_phys_nd[0], dust_params);
+            m_DustLayer->initialize(*this, m_SurfaceLayer[Orientation::zlo()].get(), *z_phys_nd[0], dust_params);
+            if (restart_chkfile.empty()) {
+                m_DustLayer->remove_outputs_for_fresh_start();   // stale CSVs of an earlier run are not continued
+                m_DustLayer->write_diag_header();
+            }
 #ifdef ERF_ENABLE_FIRE
             if (m_fire_layer && m_DustLayer) {
                 amrex::ParmParse pp("erf");
@@ -1629,13 +2185,75 @@ ERF::InitData_post ()
                 pp.query("fire_dust_crust_reduction", m_fire_dust_coupling.post_fire_crust_reduction);
                 pp.query("fire_dust_wind_to_dust",   m_fire_dust_coupling.fire_wind_to_dust);
                 pp.query("fire_dust_wind_z0",        m_fire_dust_coupling.fire_wind_z0);
-                pp.query("fire_dust_wind_zref",      m_fire_dust_coupling.fire_wind_zref);
+                // the datum of the wind handed over is erf.fire.wind_ref_ht: the
+                // dust-side height follows it, and a different value aborts
+                {
+                    amrex::Real wind_ref_ht = m_fire_layer->get_params().wind_ref_ht;
+                    m_fire_dust_coupling.fire_wind_zref = wind_ref_ht;
+                    if (m_fire_dust_coupling.enabled && m_fire_dust_coupling.fire_wind_to_dust) {
+                    amrex::Real zref_given = wind_ref_ht;
+                    if (pp.query("fire_dust_wind_zref", zref_given) &&
+                        std::abs(zref_given - wind_ref_ht) > 1.0e-6 * wind_ref_ht) {
+                        amrex::Abort("[FIRE-DUST] erf.fire_dust_wind_zref = " + std::to_string(zref_given)
+                                     + " m must match erf.fire.wind_ref_ht = " + std::to_string(wind_ref_ht)
+                                     + " m, the height of the wind the fire hands over (fire_wind_ref);"
+                                     " leave it unset to follow wind_ref_ht");
+                    }
+                    amrex::ParmParse pp_most("erf.most");
+                    amrex::Real most_z0 = -1.0;
+                    if (pp_most.query("z0", most_z0) && most_z0 > 0.0 &&
+                        std::abs(most_z0 - m_fire_dust_coupling.fire_wind_z0) > 1.0e-6 * most_z0) {
+                        amrex::Print() << "[FIRE-DUST] WARNING: erf.fire_dust_wind_z0 = " << m_fire_dust_coupling.fire_wind_z0
+                                       << " m differs from erf.most.z0 = " << most_z0
+                                       << " m; inside the fire perimeter the fire wind u* (a neutral log law on"
+                                          " fire_dust_wind_z0) is compared with the surface layer's u*\n";
+                    }
+                    } else {   // the keys are read only when the fire wind feeds the dust
+                        for (const char* k : {"fire_dust_wind_zref", "fire_dust_wind_z0"})
+                            if (pp.contains(k))
+                                amrex::Print() << "[FIRE-DUST] WARNING: erf." << k
+                                               << " is read only with erf.fire_dust_coupling = true and"
+                                                  " erf.fire_dust_wind_to_dust = true\n";
+                    }
+                }
                 pp.query("fire_dust_lofting_enabled",     m_fire_dust_coupling.fire_lofting_enabled);
                 pp.query("fire_dust_lofting_k_loft",      m_fire_dust_coupling.lofting_k_loft);
                 pp.query("fire_dust_lofting_Q_threshold", m_fire_dust_coupling.lofting_Q_threshold);
                 pp.query("fire_dust_lofting_Q_ref",       m_fire_dust_coupling.lofting_Q_ref);
-                m_fire_dust_coupling.fire_phi_mf = m_fire_layer->get_levelset();
-                m_fire_dust_coupling.geom_fire   = m_fire_layer->get_fire_geom();
+                // Ranges the coupling kernels divide by or take as fractions;
+                // the keys are read only with erf.fire_dust_coupling = true.
+                {
+                    auto& c = m_fire_dust_coupling;
+                    auto fail = [](const std::string& m) { amrex::Abort("[FIRE-DUST] " + m); };
+                    if (!(c.post_fire_crust_reduction >= 0.0 && c.post_fire_crust_reduction <= 1.0)) {
+                        fail("erf.fire_dust_crust_reduction must be in [0, 1], got " + std::to_string(c.post_fire_crust_reduction));
+                    }
+                    if (!(c.fire_wind_z0 > 0.0)) {
+                        fail("erf.fire_dust_wind_z0 must be > 0 m, got " + std::to_string(c.fire_wind_z0));
+                    }
+                    if (!(c.fire_wind_zref > c.fire_wind_z0)) {
+                        fail("erf.fire_dust_wind_zref (" + std::to_string(c.fire_wind_zref) + " m) must exceed"
+                             " erf.fire_dust_wind_z0 (" + std::to_string(c.fire_wind_z0) + " m); the fire wind u* is"
+                             " kappa |U| / ln(zref/z0)");
+                    }
+                    if (!(c.lofting_k_loft >= 0.0)) {
+                        fail("erf.fire_dust_lofting_k_loft must be >= 0, got " + std::to_string(c.lofting_k_loft));
+                    }
+                    if (!(c.lofting_Q_threshold >= 0.0)) {
+                        fail("erf.fire_dust_lofting_Q_threshold must be >= 0 W/m2, got " + std::to_string(c.lofting_Q_threshold));
+                    }
+                    // (erf.fire_dust_lofting_Q_ref <= 0 is the documented off switch:
+                    // apply_fire_lofting_to_emission returns before any division)
+                    if (!c.enabled) {
+                        for (const char* k : {"fire_dust_crust_reduction", "fire_dust_wind_to_dust", "fire_dust_wind_z0",
+                                              "fire_dust_wind_zref", "fire_dust_lofting_enabled", "fire_dust_lofting_k_loft",
+                                              "fire_dust_lofting_Q_threshold", "fire_dust_lofting_Q_ref"}) {
+                            if (pp.contains(k)) {
+                                fail(std::string("erf.") + k + " needs erf.fire_dust_coupling = true");
+                            }
+                        }
+                    }
+                }
                 m_fire_dust_coupling.debug       = dust_params.dust_debug;
                 // DustLayer::advance applies the burned-area crust reduction from its
                 // baseline each step; without this registration the reduction was
@@ -1654,23 +2272,6 @@ ERF::InitData_post ()
                 }
             }
 #endif
-
-            // Allocate coarsened dust flux for level 0 (dust coupling only at level 0)
-            {
-                amrex::BoxArray ba_atm = boxArray(0);
-                amrex::Vector<amrex::Box> bl;
-                for (int b = 0; b < ba_atm.size(); ++b) {
-                    amrex::Box bx = ba_atm[b];
-                    bx.setSmall(2, 0);
-                    bx.setBig(2, 0);
-                    bl.push_back(bx);
-                }
-                amrex::BoxArray ba_dust2d(amrex::BoxList(std::move(bl)));
-                m_dust_flux_atm.resize(1);
-                m_dust_flux_atm[0] = std::make_unique<amrex::MultiFab>(
-                    ba_dust2d, DistributionMap(0), 1, amrex::IntVect(1, 1, 0));
-                m_dust_flux_atm[0]->setVal(0.0);
-            }
 
             // On a restart the fields initialize() just built from the inputs are
             // replaced by the checkpointed ones, and the layer's counters resume.
@@ -1706,6 +2307,18 @@ if (m_DustLayer && restart_chkfile.empty()) {
             const amrex::MultiFab* base = solverChoice.anelastic[lev] ? &base_state[lev] : nullptr;
             micro->Update_Micro_Vars_Lev(lev, vars_new[lev][Vars::cons], base);
             micro->FinishInit(lev, vars_new[lev][Vars::cons], z_phys_nd);
+        }
+    }
+
+    // Update LSM with initial condition
+    if (solverChoice.lsm_type != LandSurfaceType::None) {
+        for (int lev = 0; lev <= finest_level; ++lev) {
+            if (solverChoice.lsm_type == LandSurfaceType::SLM) {
+                lsm.get_model_lev<SLM>(lev)->set_dt(dt[lev]); // set SLM dt
+            }
+            lsm.set_LSM_terrain_inputs(lev, tsk_lev, lmask_lev);
+            lsm.Update_Lsm_Vars_Lev(lev, vars_new[lev][Vars::cons],
+                                     vars_new[lev][Vars::xvel], vars_new[lev][Vars::yvel]);
         }
     }
 
@@ -1775,6 +2388,16 @@ if (m_DustLayer && restart_chkfile.empty()) {
     const std::string& pv2d_1 = "plot2d_vars_1"; appendPlotVariables(pv2d_1,plot2d_var_names_1);
     const std::string& pv2d_2 = "plot2d_vars_2"; appendPlotVariables(pv2d_2,plot2d_var_names_2);
 
+    // Dust output before the initial checkpoint, as in WriteAtIntermediateTime,
+    // so that chk00000 records step 0 as written
+#ifdef ERF_USE_DUST
+    // the step-0 CSV row and (when the interval asks for it) plotfile: used to be
+    // skipped entirely with dust_plot_int <= 0, so dust_diag.dat started at step 0
+    // or 1 depending on the plot interval
+    if (m_DustLayer)
+        m_DustLayer->write_output(istep[0], t_new[0], /*is_final=*/false);
+#endif
+
     if ( restart_chkfile.empty() && (m_check_int > 0 || m_check_per > zero) )
     {
         WriteCheckpointFile();
@@ -1837,11 +2460,6 @@ if (m_DustLayer && restart_chkfile.empty()) {
             }
         }
     }
-
-#ifdef ERF_USE_DUST
-    if (m_DustLayer && m_DustLayer->get_params().dust_plot_int > 0)
-        m_DustLayer->write_output(istep[0], t_new[0], /*is_final=*/false);
-#endif
 
     // Set these up here because we need to know which MPI rank "cell" is on...
     ParmParse pp("erf");
@@ -2028,6 +2646,43 @@ if (m_DustLayer && restart_chkfile.empty()) {
         plane_sampler = std::make_unique<PlaneSampler>();
     }
 
+    // Create the object that writes station time series if any stations are named
+    {
+        // Naming stations turns the output on; an explicit erf.do_station_sampling
+        // = false turns it back off, so a deck can keep its stations and have the
+        // output switched off from the command line.
+        bool do_station = (pp.countval("station_names") > 0);
+        pp.queryAdd("do_station_sampling", do_station);
+        if (do_station && pp.countval("station_names") == 0) {
+            Abort("erf.do_station_sampling is true but erf.station_names is empty, "
+                  "so there is nothing to sample");
+        }
+        if (do_station) {
+            if (station_sampling_interval < 0 && station_sampling_per < 0) {
+                // No default, as for the line and plane samplers above.  A
+                // sample costs a fillpatch and a fill of every requested
+                // variable over every level that hosts a station, so defaulting
+                // to every step would make a run with a one-second time step
+                // pay for output nobody asked for, and write a row a second.
+                Abort("Need to specify station_sampling_interval or station_sampling_per");
+            }
+            station_sampler = std::make_unique<StationSampler>(pp_prefix);
+            station_sampler->setRestart(!restart_chkfile.empty());
+            init_stations();
+            // Start the series at the initial condition, as WRF's tslist does.
+            // A restart does not repeat it: the row at that time is already in
+            // the file the earlier run wrote.
+            if (restart_chkfile.empty()) {
+                sample_stations(static_cast<Real>(t_new[0]));
+            }
+        }
+    }
+
+    // Nudging towards observations at stations
+    if (solverChoice.nudging_from_observations) {
+        init_obs_nudging();
+    }
+
     if ( solverChoice.terrain_type == TerrainType::EB ||
          solverChoice.terrain_type == TerrainType::ImmersedForcing  ||
          solverChoice.buildings_type == BuildingsType::ImmersedForcing )
@@ -2048,11 +2703,38 @@ if (m_DustLayer && restart_chkfile.empty()) {
     if (m_fire_params.enable) {
         m_fire_layer = std::make_unique<FireLayer>();
         m_fire_layer->initialize(*this,
-                         m_SurfaceLayer.get(),
+                         m_SurfaceLayer[Orientation::zlo()].get(),
                          *z_phys_nd[0],
                          m_fire_params);
     }
 #endif*/
+}
+
+//
+// Build the observation nudging: read the stations, place them on the grid and
+// set the rotation of their winds.  The latitude/longitude arrays exist by now
+// on every initialization path that has them, restarts included.
+//
+void
+ERF::init_obs_nudging ()
+{
+    AMREX_ALWAYS_ASSERT(solverChoice.nudging_from_observations);
+
+    obs_nudging = std::make_unique<ObsNudging>(solverChoice.terrain_type, prob.get(),
+                                               use_datetime, start_time);
+
+    const bool have_latlon = (lat_m[0] != nullptr && lon_m[0] != nullptr);
+    std::unique_ptr<LatLonMap> latlon;
+    if (have_latlon && obs_nudging->wants_latlon()) {
+        latlon = std::make_unique<LatLonMap>(*lat_m[0], *lon_m[0], ba2d[0], dmap[0], geom[0]);
+    }
+    obs_nudging->resolve_positions(geom[0], latlon.get());
+    obs_nudging->print_summary();
+
+    for (int lev = 0; lev <= finest_level; ++lev) {
+        obs_nudging->prepare_level(lev, geom[lev], vars_new[lev][Vars::cons],
+                                   z_phys_nd[lev].get(), t_new[lev]);
+    }
 }
 
 //
@@ -2149,7 +2831,8 @@ ERF::interp_mapfac_from_coarse (int lev)
 // *this* level -- ever fills it.  A level created by tagging therefore never had a
 // surface pressure at all, and a level that did read a file lost it at the next regrid.
 // update_sst_tsk uses it to convert the sea surface temperature from the wrflowinp file
-// into a potential temperature for the surface layer, and the LSM reads it as well.
+// into a potential temperature for the surface layer, and the active land-surface model
+// consumes it as well.
 //
 void
 ERF::interp_psfc_from_coarse (int lev)
@@ -2324,6 +3007,16 @@ ERF::Interp2DArrays (int lev, const BoxArray& my_ba2d, const DistributionMapping
         interp_mapfac_from_coarse(lev);
         interp_psfc_from_coarse(lev);
         interp_land_masks_from_coarse(lev);
+    }
+
+    if (solverChoice.lsm_type == LandSurfaceType::SLM &&
+        precip[lev-1] && precip[lev]) {
+        IntVect ngv = precip[lev]->nGrowVect(); ngv[2] = 0;
+        InterpFromCoarseLevel(*precip[lev], ngv, IntVect(0,0,0),
+                              *precip[lev-1], 0, 0, 1,
+                              geom[lev-1], geom[lev],
+                              rr2d, &cell_cons_interp,
+                              domain_bcs_type, BCVars::cons_bc);
     }
 
     if (lon_m[lev-1] && !lon_m[lev]) {
@@ -2561,6 +3254,7 @@ ERF::initializeMicrophysics (const int& a_nlevsmax /*!< number of AMR levels */)
     }
 
     qmoist.resize(a_nlevsmax);
+    precip.resize(a_nlevsmax);
     return;
 }
 
@@ -2580,6 +3274,79 @@ ERF::initializeFire (const int& /*a_nlevsmax*/ /*!< number of AMR levels */)
     }
 #endif
 #ifdef ERF_ENABLE_FIRE
+    // Contracts between the fire inputs and the solver inputs, checked here
+    // where ReadParameters() has filled solverChoice and before any level is
+    // built (the grid-dependent checks stay in verify_fire_prerequisites).
+    if (m_fire_params.enable) {
+        // The smoke tracer is a transported scalar: without the scalar
+        // transport its emission is injected and dropped every stage.
+        if (m_fire_params.smoke_enable && !solverChoice.transport_scalar) {
+            amrex::Abort("[FIRE] erf.fire.smoke_enable = true needs erf.transport_scalar = true"
+                         " (the smoke tracer is advected with the scalars)");
+        }
+        // erf.fire.source_mode = overwrite (the default) REPLACES the theta (and,
+        // with latent heat, the vapour) slots of the cell source on the fire
+        // level every stage, discarding whatever make_sources put there. With
+        // no other source that is the legacy result; with one it silently
+        // drops physics. Make the choice explicit in that case.
+        if (m_fire_params.injects_flux() && !m_fire_params.source_mode_given) {
+            std::string others;
+            auto add = [&others] (bool on, const char* what) {
+                if (on) { others += (others.empty() ? "" : ", ") + std::string(what); }
+            };
+            add(solverChoice.rad_type != RadiationType::None,        "radiation (erf.radiation_model)");
+            add(solverChoice.four_stream_radiation,                   "erf.four_stream_radiation");
+            add(solverChoice.dampingChoice.rayleigh_damp_T,           "erf.rayleigh_damp_T");
+            add(solverChoice.custom_rhotheta_forcing,                 "erf.add_custom_rhotheta_forcing");
+            add(solverChoice.custom_w_subsidence,                     "erf.add_custom_w_subsidence");
+            add(solverChoice.custom_moisture_forcing && m_fire_params.inject_latent,
+                                                                      "erf.add_custom_moisture_forcing");
+            // immersed forcing meets the fire tendency only on the slow step; on
+            // the acoustic substeps (erf.immersed_forcing_substep, the
+            // compressible default) the two modes are identical
+            const bool if_slow = !solverChoice.immersed_forcing_substep;
+            add(if_slow && solverChoice.terrain_type == TerrainType::ImmersedForcing,
+                "slow-step immersed-forcing terrain");
+            add(if_slow && solverChoice.buildings_type == BuildingsType::ImmersedForcing,
+                "slow-step immersed-forcing buildings");
+            if (!others.empty()) {
+                amrex::Abort("[FIRE] the default erf.fire.source_mode = overwrite replaces the theta source on"
+                             " the fire level and would discard: " + others + ". Set erf.fire.source_mode ="
+                             " add to keep them (recommended), or = overwrite to keep the legacy behaviour.");
+            }
+        }
+    }
+    // erf.pbl_mrf_fire_thermal_excess adds the lagged fire flux to the MRF
+    // thermal excess; it is inert without an injecting fire or another PBL.
+    // TurbChoice reads it only under erf.pbl_type = MRF, so with any other PBL
+    // the key was silently ignored: check the deck for it directly.
+    {
+        amrex::ParmParse pp_erf("erf");
+        bool any_mrf = false;
+        for (int lev = 0; lev <= max_level; ++lev) {
+            any_mrf = any_mrf || (solverChoice.turbChoice[lev].pbl_type == PBLType::MRF);
+        }
+        if (!any_mrf && pp_erf.contains("pbl_mrf_fire_thermal_excess")) {
+            amrex::Abort("[FIRE] erf.pbl_mrf_fire_thermal_excess is set but no level runs erf.pbl_type = MRF;"
+                         " the key is read only by the MRF scheme");
+        }
+    }
+    for (int lev = 0; lev <= max_level; ++lev) {
+        const auto& tc = solverChoice.turbChoice[lev];
+        if (!tc.mrf_fire_thermal_excess) { continue; }
+        if (!m_fire_params.enable || !m_fire_params.injects_flux()) {
+            amrex::Abort("[FIRE] erf.pbl_mrf_fire_thermal_excess = true on level " + std::to_string(lev)
+                         + " needs erf.fire.enable = true with erf.fire.coupling_type = lagged or synchronous"
+                         " (the fire flux it adds)");
+        }
+        // the lagged flux carries 5 halo columns (FireLayer::initialize); the
+        // smoothing stencil must fit them, and used to abort at the first step
+        if (tc.enable_pblh_smoothing && tc.pblh_smoothing_passes > 5) {
+            amrex::Abort("[FIRE] erf.pbl_mrf_fire_thermal_excess reads the lagged fire flux in a halo of 5 columns;"
+                         " erf.pblh_smoothing_passes = " + std::to_string(tc.pblh_smoothing_passes) + " needs more."
+                         " Use at most 5 passes with the fire thermal excess.");
+        }
+    }
     if (m_fire_params.enable) {
         m_fire_layer = std::make_unique<FireLayer>();
         amrex::Print() << "[FIRE] Fire module enabled (grid_ratio="
@@ -2594,7 +3361,7 @@ ERF::initializeFire (const int& /*a_nlevsmax*/ /*!< number of AMR levels */)
 
 #ifdef ERF_USE_WINDFARM
 void
-ERF::initializeWindFarm(const int& a_nlevsmax/*!< number of AMR levels */ )
+ERF::initializeWindFarm (const int& a_nlevsmax/*!< number of AMR levels */ )
 {
     windfarm = std::make_unique<WindFarm>(a_nlevsmax, solverChoice.windfarm_type);
 }
@@ -2616,34 +3383,6 @@ ERF::restart ()
     restore_base_state_params_on_restart();
 #endif
 
-    // Force regrid on level 0 if more procs than boxes are requested
-    regrid_level_0_on_restart = ( regrid_level_0_on_restart ||
-                                  grids[0].size() < ParallelDescriptor::NProcs() );
-
-    if (regrid_level_0_on_restart) {
-        //
-        // Coarsening before we split the grids ensures that each resulting
-        // grid will have an even number of cells in each direction.
-        //
-        BoxArray new_ba(amrex::coarsen(Geom(0).Domain(),2));
-        //
-        // Now split up into list of grids within max_grid_size[0] limit.
-        //
-        new_ba.maxSize(max_grid_size[0]/2);
-        //
-        // Now refine these boxes back to level zero
-        //
-        new_ba.refine(2);
-
-        if (refine_grid_layout) {
-            ChopGrids(0, new_ba, ParallelDescriptor::NProcs());
-        }
-
-        if (new_ba != grids[0]) {
-            DistributionMapping new_dm(new_ba);
-            RemakeLevel(0,static_cast<Real>(t_new[0]),new_ba,new_dm);
-        }
-    }
 
 #ifdef ERF_USE_PARTICLES
     // We call this here without knowing whether the particles have already been initialized or not
@@ -2656,6 +3395,11 @@ ERF::restart ()
     if (m_plot2d_per_2 > zero) {last_plot2d_file_time_2 = std::floor(cur_time/m_plot2d_per_2) * m_plot2d_per_2;}
     if (m_plot3d_per_1 > zero) {last_plot3d_file_time_1 = std::floor(cur_time/m_plot3d_per_1) * m_plot3d_per_1;}
     if (m_plot3d_per_2 > zero) {last_plot3d_file_time_2 = std::floor(cur_time/m_plot3d_per_2) * m_plot3d_per_2;}
+#ifdef ERF_ENABLE_FIRE
+    // the fire plot clock is realigned like the others, so a restart keeps the
+    // k * fire_plot_per instants instead of writing at its first step
+    if (m_fire_plot_per > zero) {last_fire_plot_time = std::floor(cur_time/m_fire_plot_per) * m_fire_plot_per;}
+#endif
 
     for (int i = 0; i < m_subvol_per.size(); i++) {
         if (m_subvol_per[i] > zero) {last_subvol_time[i] = std::floor(cur_time/m_subvol_per[i]) * m_subvol_per[i];}
@@ -2882,6 +3626,12 @@ ERF::init_only (int lev, double elapsed_time)
 void
 ERF::ReadParameters ()
 {
+    // Record the inputs table before anything below can modify it.  Every query
+    // here and in the classes built afterwards is a queryAdd, which inserts the
+    // default it was handed when the key is absent, so this is the only point at
+    // which "the key is in the table" still means "the user wrote it".
+    user_specified_inputs = ParmParse::getEntries(pp_prefix);
+
     std::string prob_name = "Undefined";
     ParmParse pp_pn("erf");
     pp_pn.queryAdd("prob_name", prob_name);
@@ -2935,6 +3685,19 @@ ERF::ReadParameters ()
         pp.queryAdd("dt_max_initial", dt_max_initial);
         pp.queryAdd("dt_max", dt_max);
 
+        // Explicit eddy-diffusion time-step check
+        const bool diffusive_cfl_given = pp.contains("diffusive_cfl");
+        pp.queryAdd("diffusive_dt_check", diffusive_dt_check);
+        pp.queryAdd("diffusive_dt_limit", diffusive_dt_limit);
+        pp.queryAdd("diffusive_cfl", diffusive_cfl);
+        if (!(diffusive_cfl > zero && diffusive_cfl <= one)) {
+            Abort("erf.diffusive_cfl must be in (0, 1]");
+        }
+        if (diffusive_cfl_given && !diffusive_dt_check && !diffusive_dt_limit) {
+            Abort("erf.diffusive_cfl is used only with erf.diffusive_dt_check = true "
+                  "or erf.diffusive_dt_limit = true");
+        }
+
         fixed_dt.resize(max_level+1,-one);
         fixed_fast_dt.resize(max_level+1,-one);
 
@@ -2944,6 +3707,7 @@ ERF::ReadParameters ()
         int nlevs_max = max_level + 1;
         istep.resize(nlevs_max, 0);
         nsubsteps.resize(nlevs_max, 1);
+        rad_interp_from_coarse_pending.resize(nlevs_max, 0);
         // This is the default
         for (int lev = 1; lev <= max_level; ++lev) {
             nsubsteps[lev] = MaxRefRatio(lev-1);
@@ -3043,6 +3807,7 @@ ERF::ReadParameters ()
         //       solverChoice.init_type, which is not known until init_params() runs
         //       below, so it is parsed further down once that default has been chosen.
         pp.queryAdd("erfbdy_file",              erfbdy_file);
+        pp.queryAdd("use_erfbdy",               use_erfbdy);
 
         // Set default to FullState for now ... later we will try Perturbation
         interpolation_type = StateInterpType::FullState;
@@ -3220,6 +3985,7 @@ ERF::ReadParameters ()
         pp.queryAdd("destag_profiles", destag_profiles);
 
         pp.queryAdd("plot_lsm", plot_lsm);
+
 #ifdef ERF_USE_RRTMGP
         pp.queryAdd("plot_rad", plot_rad);
 #endif
@@ -3237,6 +4003,8 @@ ERF::ReadParameters ()
         pp.queryAdd("line_sampling_interval", line_sampling_interval);
         pp.queryAdd("plane_sampling_per", plane_sampling_per);
         pp.queryAdd("plane_sampling_interval", plane_sampling_interval);
+        pp.queryAdd("station_sampling_per", station_sampling_per);
+        pp.queryAdd("station_sampling_interval", station_sampling_interval);
 
         // Specify information about outputting planes of data
         pp.queryAdd("output_bndry_planes", output_bndry_planes);
@@ -3269,10 +4037,54 @@ ERF::ReadParameters ()
 
     solverChoice.init_params(max_level,pp_prefix);
 
+    // SurfaceModel output is opt-in for single-provider runs.  When both
+    // providers are active, retain the useful combined diagnostic output
+    // by default, while allowing an explicit false to disable it.
+    bool urban_active = false;
+    for (const int enabled : solverChoice.urban_enabled_lev) {
+        urban_active = urban_active || (enabled != 0);
+    }
+    plot_surfmodel = solverChoice.lsm_type != LandSurfaceType::None &&
+                     solverChoice.urban_type != UrbanType::None &&
+                     urban_active;
+    pp.queryAdd("plot_surfmodel", plot_surfmodel);
+
+    // Implicit acoustic substepping inverts one tridiagonal system per column, so it is
+    // only well posed if no column is chopped between boxes.  That does not require one
+    // box per column: a level may have several boxes over the same (i,j) -- as it does
+    // where the refined region is a staircase in z, or covers two separate layers -- as
+    // long as they do not touch, so that each contiguous run of cells in the column is
+    // solved by itself.  What must not happen is two boxes sharing a face normal to z,
+    // which would split one column into pieces solved separately, with spurious internal
+    // boundaries at the seam and an answer that depends on the decomposition.
+    // amr.no_box_split_dir = 2 -- the ERF default, set in add_par -- is what rules that
+    // out: the grid generator merges the boxes it makes along z, so no two of them share
+    // a face normal to z.  Refuse to run with any other value while a level substeps
+    // implicitly.
+    for (int lev = 0; lev <= max_level; lev++) {
+        if ( (solverChoice.substepping_type[lev] == SubsteppingType::Implicit) &&
+             (no_box_split_dir != 2) )
+        {
+            Abort("erf.substepping_type = Implicit at level " + std::to_string(lev) +
+                  " requires amr.no_box_split_dir = 2 (the ERF default), so that no two grids "
+                  "share a face normal to z: the implicit substep solve inverts one tridiagonal "
+                  "system per column, and a column chopped at such a seam would instead be "
+                  "solved in pieces, giving an answer that depends on the grid decomposition.  "
+                  "(Boxes stacked over the same column are fine as long as they do not touch.)  "
+                  "Either remove amr.no_box_split_dir = " +
+                  std::to_string(no_box_split_dir) + " from the inputs file, or set "
+                  "erf.substepping_type = None.");
+        }
+    }
+
     // Set a default value for write_erfbdy following these rules.
     // Prioritize write_erfbdy provided by user.
     // write_erfbdy must be false for restarts.
-    // write_erfbdy defaults to true for clean starts of the metgrid or wrfinput pathways.
+    // write_erfbdy defaults to true for clean starts of the metgrid pathway, which
+    //     requires the erfbdy file in order to restart.
+    // write_erfbdy defaults to false for the wrfinput pathway, which reads the boundary
+    //     data from the wrfbdy file named in the inputs file as the data are needed, and
+    //     which stores the boundary data in the checkpoint file when it writes one.
     //
     // The context-dependent default is chosen FIRST and the user's value is parsed on
     // top of it, so that "did the user set this" never has to be asked.  It must not be
@@ -3284,8 +4096,7 @@ ERF::ReadParameters ()
     {
         ParmParse pp_erfbdy(pp_prefix);
         const bool is_restart = !restart_chkfile.empty();
-        if (!is_restart &&
-            ((solverChoice.init_type == InitType::Metgrid) || (solverChoice.init_type == InitType::WRFInput))) {
+        if (!is_restart && (solverChoice.init_type == InitType::Metgrid)) {
             write_erfbdy = true;
         }
 
@@ -3310,9 +4121,8 @@ ERF::ReadParameters ()
                 start_datetime += ":00"; // add seconds
             }
             if (start_datetime.length() != 19) {
-                Print() << "Got start_datetime = \"" << start_datetime
-                    << "\", format should be " << datetime_format << std::endl;
-                exit(0);
+                Abort("Got start_datetime = \"" + start_datetime +
+                      "\", format should be " + datetime_format);
             }
             start_time = static_cast<double>(getEpochTime(start_datetime, datetime_format));
 
@@ -3375,13 +4185,12 @@ ERF::ReadParameters ()
                 stop_datetime += ":00"; // add seconds
             }
             if (stop_datetime.length() != 19) {
-                Print() << "Got stop_datetime = \"" << stop_datetime
-                    << "\", format should be " << datetime_format << std::endl;
-                exit(0);
+                Abort("Got stop_datetime = \"" + stop_datetime +
+                      "\", format should be " + datetime_format);
             }
 
             stop_time = static_cast<double>(getEpochTime(stop_datetime, datetime_format));
-            Print() << "Stop  datetime : " << start_datetime << std::endl;
+            Print() << "Stop  datetime : " << stop_datetime << std::endl;
 
         } else {
 
@@ -3503,7 +4312,29 @@ ERF::ReadParameters ()
         for (int j = 0; j < num_files; j++) {
             AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!nc_init_file[0][j].empty(), "Valid file name must be present at level 0 for init type WRFInput, Metgrid or NCFile.");
         } //j
+
+        // Fail here, rather than inside the NetCDF calls, if any of the files we have been
+        // given don't actually exist -- this way the user is told which name is at fault
+        for (int lev = 0; lev < static_cast<int>(nc_init_file.size()); lev++) {
+            for (int j = 0; j < static_cast<int>(nc_init_file[lev].size()); j++) {
+                const std::string& fname = nc_init_file[lev][j];
+                if (!fname.empty() && !FileSystem::Exists(fname)) {
+                    Abort("Could not find the file \"" + fname + "\" given as erf.nc_init_file_" +
+                          std::to_string(lev) + " (entry " + std::to_string(j) + ")");
+                }
+            } // j
+        } // lev
     } // InitType
+
+    // Same check for the lateral (wrfbdy) and lower (wrflow) boundary files, which are
+    // used whenever a name has been given for them
+    if (!nc_bdy_file.empty() && !FileSystem::Exists(nc_bdy_file)) {
+        Abort("Could not find the file \"" + nc_bdy_file + "\" given as erf.nc_bdy_file");
+    }
+
+    if (!nc_low_file.empty() && !FileSystem::Exists(nc_low_file)) {
+        Abort("Could not find the file \"" + nc_low_file + "\" given as erf.nc_low_file");
+    }
 
     // What type of land surface model to use
     // NOTE: Must be checked after init_params
@@ -3522,6 +4353,9 @@ ERF::ReadParameters ()
         Abort("Dont know this LandSurfaceType!") ;
     }
 
+    urban.ReSize(max_level+1, solverChoice.urban_enabled_lev);
+    urban.SetModel<NullUrban>();
+
     if (verbose > 0) {
         solverChoice.display(max_level,pp_prefix);
     }
@@ -3534,6 +4368,21 @@ void
 ERF::ParameterSanityChecks ()
 {
     AMREX_ALWAYS_ASSERT(cfl > zero || fixed_dt[0] > zero);
+
+    if (diffusive_dt_limit) {
+        if (fixed_dt[0] > zero) {
+            Abort("erf.diffusive_dt_limit = true cannot change erf.fixed_dt; "
+                  "remove one of them (erf.diffusive_dt_check still reports the Fourier number)");
+        }
+        bool any_kturb = false;
+        for (int lev = 0; lev <= max_level; ++lev) {
+            any_kturb = any_kturb || solverChoice.turbChoice[lev].use_kturb;
+        }
+        if (!any_kturb) {
+            Abort("erf.diffusive_dt_limit = true needs an eddy-diffusivity closure "
+                  "(erf.les_type, erf.rans_type or erf.pbl_type)");
+        }
+    }
 
     // We don't allow use_real_bcs to be true if init_type is not either InitType::WRFInput or InitType::Metgrid
     AMREX_ALWAYS_ASSERT( !solverChoice.use_real_bcs ||
@@ -3758,9 +4607,12 @@ ERF::MakeDiagnosticAverage (Vector<Real>& h_havg, MultiFab& S, int n)
     h_havg.resize(size_z, 0.0_rt);
 
     // Get the cell centered data and construct sums
-#ifdef _OPENMP
-#pragma omp parallel if (Gpu::notInLaunchRegion())
-#endif
+    //
+    // NOTE: deliberately not threaded.  Every iteration does "h_havg[k] += ..." into the
+    //       same shared Vector with no atomic and no per-thread partials, so threading it
+    //       would be an outright data race on top of an order-dependent sum.  The body is
+    //       a pure reduction, so running it serially costs little.
+    //
     for (MFIter mfi(S); mfi.isValid(); ++mfi) {
         const Box& box = mfi.validbox();
         const IntVect& se = box.smallEnd();
@@ -3843,8 +4695,8 @@ ERF::Define_ERFFillPatchers (int lev)
 }
 
 bool
-ERF::writeNow(double cur_time, const int nstep, const int plot_int, const double plot_per,
-              const double dt_0, double& next_file_time)
+ERF::writeNow (double cur_time, const int nstep, const int plot_int, const double plot_per,
+               const double dt_0, double& next_file_time)
 {
     bool write_now = false;
 
@@ -3931,34 +4783,22 @@ ERF::check_state_for_nans (MultiFab const& S)
 }
 
 void
-ERF::check_vels_for_nans(MultiFab const& xvel, MultiFab const& yvel, MultiFab const& zvel)
+ERF::check_vels_for_nans (MultiFab const& xvel, MultiFab const& yvel, MultiFab const& zvel)
 {
     //
     // Test at the end of every full timestep whether the solution data contains NaNs
     //
-    bool any_have_nans = false;
-    if (xvel.contains_nan(0,1,0))
-    {
-        amrex::Print() << "x-velocity contains NaNs " << '\n';
-        any_have_nans = true;
-    }
-    if (yvel.contains_nan(0,1,0))
-    {
-        amrex::Print() << "y-velocity contains NaNs" << '\n';
-        any_have_nans = true;
-    }
-    if (zvel.contains_nan(0,1,0))
-    {
-        amrex::Print() << "z-velocity contains NaNs" << '\n';
-        any_have_nans = true;
-    }
-    if (any_have_nans) {
-        exit(0);
+    std::string have_nans;
+    if (xvel.contains_nan(0,1,0)) { have_nans += " x-velocity"; }
+    if (yvel.contains_nan(0,1,0)) { have_nans += " y-velocity"; }
+    if (zvel.contains_nan(0,1,0)) { have_nans += " z-velocity"; }
+    if (!have_nans.empty()) {
+        amrex::Abort("NaNs found in" + have_nans);
     }
 }
 
 void
-ERF::check_for_low_temp(amrex::MultiFab& S)
+ERF::check_for_low_temp (amrex::MultiFab& S)
 {
     // *****************************************************************************
     // Test for low temp (low is defined as beyond the microphysics range of validity)
@@ -3993,7 +4833,7 @@ ERF::check_for_low_temp(amrex::MultiFab& S)
 }
 
 void
-ERF::check_for_negative_theta(amrex::MultiFab& S)
+ERF::check_for_negative_theta (amrex::MultiFab& S)
 {
     // *****************************************************************************
     // Test for negative (rho theta)
@@ -4032,7 +4872,7 @@ ERF::check_for_negative_theta(amrex::MultiFab& S)
 
 
 void
-ERF::check_mesh_type(int lev)
+ERF::check_mesh_type (int lev)
 {
    if (SolverChoice::mesh_type == MeshType::VariableDz) {
        MultiFab z_slab(convert(ba2d[lev],IntVect(1,1,1)),dmap[lev],1,0);
@@ -4057,4 +4897,32 @@ ERF::check_mesh_type(int lev)
            }
        }
    }
+}
+
+/**
+ * Whether the user wrote any surface-layer input under the given prefix.
+ *
+ * This asks the snapshot taken in ReadParameters, not the live ParmParse table.
+ * The live table cannot answer the question: ERF_InputSoundingData.H queries
+ * erf.most.surf_temp and erf.most.surf_moist with queryAdd while reading the
+ * sounding, which runs during InitData_pre and leaves both keys in the table
+ * holding their negative sentinels.  Testing the live table would therefore
+ * report unqualified MOST inputs for every input_sounding run, whether or not
+ * the user wrote any.
+ *
+ * @param[in] prefix the prefix to test, e.g. "erf" or "erf.zlo"
+ */
+bool
+ERF::has_surface_layer_inputs (const std::string& prefix) const
+{
+    const std::string most_prefix = prefix + ".most.";
+    const std::string surface_layer_prefix = prefix + ".surface_layer.";
+
+    for (const auto& key : user_specified_inputs) {
+        if (key.compare(0, most_prefix.size(), most_prefix) == 0 ||
+            key.compare(0, surface_layer_prefix.size(), surface_layer_prefix) == 0) {
+            return true;
+        }
+    }
+    return false;
 }

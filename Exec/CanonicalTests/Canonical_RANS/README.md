@@ -14,7 +14,7 @@ numbers and tolerances for each case are in that case's README.
 | `Convective_ABL_Flat` | flat, 8 x 8 x 100 | 4 h | column heat budget, inversion height, mixed layer, wall k with buoyancy |
 | `Neutral_Hill_2D` | fitted, 128 x 1 x 64 | 6 h | wall distance vs the exact ridge distance, crest speed-up, upstream log law |
 | `Neutral_Hill_3D` | fitted, 64 x 64 x 20 | 4 h | wall distance vs the exact hill distance, crest speed-up, upstream log law |
-| `Timestep_Limits` | flat, 4 x 4 x 200 | none (step sweep) | largest stable dt of kEqn, Deardorff and MRF under explicit anelastic, implicit anelastic and implicit compressible |
+| `Timestep_Limits` | flat, 4 x 4 x 200 | none (step sweep) | largest stable dt of kEqn, Deardorff and MRF under explicit anelastic, implicit anelastic (midpoint stages) and implicit compressible |
 
 ## Rules
 

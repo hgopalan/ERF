@@ -236,7 +236,7 @@ The distinction matters because the WAF is a Rothermel construct: it reduces the
      - kg/m³
      - Air density (2020)
    * - :cpp:`erf.fire.balbi.sigma_B`
-     - 5.6e-8
+     - 5.670374e-8
      - W/(m²·K⁴)
      - Stefan-Boltzmann constant (2020)
    * - :cpp:`erf.fire.balbi.max_iter`
@@ -311,7 +311,7 @@ This model is calibrated for Australian open grassland fuels and is based on emp
 
 where :math:`R_b` is the backing rate [m/s], :math:`U` is wind speed [m/s], :math:`M` is dead fine fuel moisture [%], and curing ∈ [0, 1].
 
-The current implementation uses domain-average moisture and curing values inside the GPU kernel (see lines 218-220 of ``ERF_CheneyGouldModel.H``). Per-cell moisture from the Phase 4 ODE system is not yet coupled.
+The kernel takes :math:`M` and the curing from :cpp:`erf.fire.cheney_gould.moisture` and :cpp:`erf.fire.cheney_gould.curing`, or, with :cpp:`erf.fire.moisture_dynamic = true`, the domain-average 1-h moisture, on both the isotropic and the directional path. (Before October 2026 the isotropic path passed fixed 10 % and 1.0, so the two paths disagreed for any other value.) Per-cell moisture is not passed into the kernel.
 
 **Not appropriate for forest or shrub fuels (FM4-FM13).**
 
@@ -349,7 +349,14 @@ The multi-class form of Rothermel's model (Andrews, 2018) carries the dead
 1-h, 10-h and 100-h classes, the live herbaceous and live woody classes, and a
 dead herbaceous class that receives cured live herbaceous fuel, with separate
 dead and live moisture damping and a live moisture of extinction from the
-ratio of dead to live load (``ERF_BehaveModel.H``). With
+ratio of dead to live load (``ERF_BehaveModel.H``):
+:math:`W' = \sum_\mathrm{dead} w\, e^{-138/\sigma} / \sum_\mathrm{live} w\, e^{-500/\sigma}`
+and :math:`M_{x,\mathrm{live}} = 2.9\, W' (1 - M'_f / M_{x,\mathrm{dead}}) - 0.226`
+(Rothermel 1972, Eq. 88; the live sum used :math:`e^{-138/\sigma}` before
+October 2026, which lowered :math:`W'` by about 25 % and damped live fuel
+too strongly), evaluated here with the category-mean SAVs. The fuel-bed SAV
+of the reaction velocity is the dead category's, not the area-weighted mean
+over both categories that BehavePlus uses. With
 :cpp:`erf.fire.moisture_dynamic = true` the state is rebuilt in every fire
 cell from that cell's moistures, and the directional level-set path reads a
 state rebuilt each step from the domain-average moistures; otherwise it is
@@ -420,54 +427,12 @@ Enabling :cpp:`erf.fire.use_per_fuel_wind_ht = true` causes wind extraction to u
 
 WRF-SFIRE defaults are 6.096 m for all 13 Anderson fuel models, which is identical to the :cpp:`wind_ref_ht` default of 6.1 m. Enabling this flag has no practical effect unless the :cpp:`fcwh` table is modified.
 
-**Fuel model roughness lengths (fcz0):**
-
-.. list-table::
-   :widths: 10 40 15
-   :header-rows: 1
-
-   * - Fuel Model
-     - Name
-     - fcz0 [m]
-   * - FM1
-     - Short Grass
-     - 0.0396
-   * - FM2
-     - Timber Grass and Understory
-     - 0.0396
-   * - FM3
-     - Tall Grass
-     - 0.100
-   * - FM4
-     - Chaparral
-     - 0.2378
-   * - FM5
-     - Timber Litter
-     - 0.0793
-   * - FM6
-     - Logging Slash and Blowdown
-     - 0.0991
-   * - FM7
-     - Timber Litter and Understory
-     - 0.0991
-   * - FM8
-     - Closed Timber Litter
-     - 0.0079
-   * - FM9
-     - Hardwood Litter
-     - 0.0079
-   * - FM10
-     - Timber Litter and Grass
-     - 0.0396
-   * - FM11
-     - Intermediate Fuel Load Timber Litter
-     - 0.0396
-   * - FM12
-     - High Load Conifer Litter
-     - 0.0911
-   * - FM13
-     - Heavy Logging Slash
-     - 0.1188
+**Surface roughness:** the fire model does not carry a per-fuel roughness length.
+The roughness of the wind profile is the surface-layer value :cpp:`erf.most.z0`,
+and the two-height log interpolation of the sampled wind uses
+:cpp:`erf.fire.wind_sample_z0`. The canopy reduction from the reference height to
+the midflame wind is the Wind Adjustment Factor (:cpp:`erf.fire.waf_formula`),
+which is a function of fuel bed depth, not of roughness.
 
 **References:**
 
@@ -658,7 +623,7 @@ Limitations
 
 - All ROS models except Balbi with :cpp:`wind_source = "reference"` consume the midflame wind after the Wind Adjustment Factor, which is a Rothermel calibration construct.
 
-- The Cheney-Gould kernel uses placeholder domain-average moisture and curing values (10.0 % and 1.0 respectively) inside the GPU kernel. Use :cpp:`erf.fire.cheney_gould.moisture` and :cpp:`erf.fire.cheney_gould.curing` for domain-averaged values. Per-cell moisture from the Phase 4 ODE system is not yet passed into the kernel.
+- The Cheney-Gould kernel uses domain-wide moisture and curing values (the deck's, or the domain-average 1-h moisture with dynamic moisture); per-cell moisture is not passed into the kernel.
 
 - Per-fuel wind height (:cpp:`use_per_fuel_wind_ht = true`) uses WRF-SFIRE default :math:`\text{fcwh} = 6.096` m for all 13 Anderson fuel models, which produces the same result as :cpp:`wind_ref_ht = 6.096` m unless the table is customised. Custom :cpp:`fcwh` values are not yet exposed through ParmParse.
 
@@ -697,9 +662,13 @@ O1b grass). The surface rate is
 .. math::
 
    R = a\bigl(1 - e^{-b\,\mathrm{ISI}}\bigr)^c \, \mathrm{BE}, \qquad
-   \mathrm{ISI} = 0.208\, f(F)\, e^{0.05039\, W},
+   \mathrm{ISI} = 0.208\, f(F)\, f(W), \qquad
+   f(W) = \begin{cases} e^{0.05039\, W} & W \le 40 \\
+                        12\,\bigl(1 - e^{-0.0818 (W - 28)}\bigr) & W > 40 \end{cases}
 
-with :math:`W` the 10 m open wind in km/h, :math:`f(F)` the function of the
+(FBP 1992 eq. 53, Wotton et al. 2009 eq. 53a; the high-wind branch was
+missing before October 2026, so ISI kept growing exponentially above
+40 km/h), with :math:`W` the 10 m open wind in km/h, :math:`f(F)` the function of the
 Fine Fuel Moisture Code :cpp:`erf.fire.fbp.ffmc`, and the buildup effect
 :math:`\mathrm{BE} = \exp[50 \ln q\,(1/\mathrm{BUI} - 1/\mathrm{BUI}_0)]`
 from :cpp:`erf.fire.fbp.bui` (none for grass). The mixedwood types are
@@ -763,3 +732,96 @@ model's fuel load instead of the uniform model's, which matters as soon as
 the map mixes light and heavy fuels. ``Exec/RegTests/FireScottBurgan``
 checks the table, the per-cell loads, the non-burnable codes and the
 crosswalk.
+
+.. _sec:ROS_CustomFuel:
+
+Fuel models defined in the deck
+-------------------------------
+
+A fuel complex in neither published set is described in the input deck.
+:cpp:`erf.fire.custom_fuel.codes` lists the codes to define, each of which
+must lie in 1000 to 1015, and one block per code gives its properties:
+
+.. code-block:: python
+
+   erf.fire.custom_fuel.codes = 1000 1001
+   erf.fire.custom_fuel.1000.name                   = coastal_scrub
+   erf.fire.custom_fuel.1000.w_1h_kg_m2             = 0.60
+   erf.fire.custom_fuel.1000.sav_1h_1_m             = 5000.0
+   erf.fire.custom_fuel.1000.depth_m                = 0.60
+   erf.fire.custom_fuel.1000.moisture_ext           = 0.25
+   erf.fire.custom_fuel.1000.heat_content_J_kg      = 1.86e7
+   erf.fire.custom_fuel.1000.density_kg_m3 = 512.0
+
+The properties are given in SI, the units a fuel measurement is reported
+in, and converted once to the units ``FuelModelParams`` carries
+internally, so a deck never states a load in lb/ft² or a
+surface-area-to-volume ratio in ft⁻¹. ``w_1h_kg_m2``, ``sav_1h_1_m``,
+``depth_m``, ``moisture_ext`` and ``heat_content_J_kg`` are required; the
+10-h, 100-h, live herbaceous and live woody loads, the live
+surface-area-to-volume ratios, the particle density and the flaming burn
+time default. Every property is range-checked at start-up against the
+range the input table below states, and a value outside it stops the run
+naming the input rather than being clamped. A bed depth at or below
+0.01 m is rejected in particular, since the Balbi models return zero
+spread there without a word.
+
+A deck-defined code takes a fuel table slot above the published sets
+(1000 maps to slot 54) and is recognised under either fuel set, so one fuel
+raster may mix deck-defined codes with the Anderson 13 or with the Scott
+and Burgan 40 and one front crosses between them with no seam.
+
+How far the code reaches depends on how it is used. As the uniform model,
+:cpp:`erf.fire.fuel_model_id`, it is a published model's equal: all six
+rate-of-spread models build their uniform state from the same
+``FuelModelParams`` and respond to it. Per cell from a fuel map, only the
+models with a per-fuel coefficient table evaluate it — Rothermel under
+:cpp:`erf.fire.rothermel_per_fuel`, on the isotropic and the level-set
+paths alike, and Balbi. BEHAVE, MacArthur, Cheney-Gould and FBP hold one
+uniform state for the whole grid whatever the map says, so a code in a
+raster does not change their rate; that is a limit of those models'
+plumbing rather than of the fuel table. The heat flux, the per-cell fuel
+load, the flame residence time and the burnout time read the slot tables per
+cell in every case.
+
+The wind adjustment factor is a field on a fuel map, not a scalar. Both
+formulas (:cpp:`erf.fire.waf_formula`) are a function of the fuel bed depth
+alone, so a 1 ft grass bed and a 2.3 ft slash bed do not see the same
+midflame wind; taking the depth from :cpp:`erf.fire.fuel_model_id` reduced
+the whole grid by one factor that the raster could not change. Wherever a
+fuel map is read the factor now comes from the cell's own bed depth, whatever
+rate-of-spread model is in use, and the rate of spread carries it.
+
+The Byram fireline intensity and the Thomas flame length that follows it
+likewise come from the cell's own model: the heat content wherever a map is
+read, and, under :cpp:`erf.fire.fuel_map.load_from_map`, the initial load
+each cell was started with. Byram's :math:`I_B = h\,(w_0 - w)\,R` differences
+the initial load against the remaining one, so a uniform :math:`w_0` against
+a per-cell :math:`w` was not a scaling error but a different fire: where the
+uniform model was the lighter of the two the difference clamped and the
+intensity came out exactly zero. This is not confined to the plot file —
+:cpp:`fire_fireline_intensity` launches the Albini embers, sets the flame
+temperature and the flame tilt, and is the surface intensity the crown
+criterion is tested against. With :cpp:`load_from_map` off every cell still
+starts at the load of :cpp:`erf.fire.fuel_model_id`, which is then the
+correct initial load to difference against.
+
+A code in the custom range that no block defines is rejected: the raster is
+checked when it is read, and :cpp:`erf.fire.fuel_model_id` when the uniform
+properties are first taken, so it can never fall through to a published
+model's unknown-code default and burn as grass. A code listed in
+:cpp:`erf.fire.fuel_map.nonburnable_codes` is exempt from the raster check,
+since a fuel that never spreads needs no properties.
+
+Two differences from a published model are worth stating. A deck-defined
+model has no herbaceous curing transfer: the loads given are the loads
+used, whatever :cpp:`erf.fire.moisture_live` is, and the BEHAVE path reads
+the same entry. And :cpp:`erf.fire.burnout_model = "sfire"` has no
+published burn time to fall back on, so a deck-defined code used with it
+must set ``burnout_time_s``; the run stops if it does not.
+
+``Exec/RegTests/FireCustomFuel`` checks that a deck-defined model written
+out in SI from the Anderson table reproduces the compiled model, that a
+raster mixing a published set with a deck-defined code starts with each
+cell's own load and burns both with their own rates, that a coarse woody
+bed spreads more slowly than grass, and that every range check aborts.

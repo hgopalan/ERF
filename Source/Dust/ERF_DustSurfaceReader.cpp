@@ -16,7 +16,8 @@
 using namespace amrex;
 
 bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
-                            const std::string& filename, Real nodata_fill)
+                            const std::string& filename, Real nodata_fill,
+                            bool nearest)
 {
     // Return false if filename is empty
     if (filename.empty()) {
@@ -34,8 +35,9 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
     if (ParallelDescriptor::IOProcessor()) {
         std::ifstream file(filename);
         if (!file.is_open()) {
-            amrex::Print() << "[DUST] WARNING: Could not open file: " << filename << "\n";
-            ok = 0;
+            // abort, not warn: a misspelt raster used to run with the uniform
+            // value in silence (the road loader already aborted)
+            amrex::Abort("[DUST] surface raster cannot be opened: " + filename);
         }
         if (ok) {
 
@@ -92,14 +94,18 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
             if (found) nodata_value = val;
         }
 
+        // the bilinear stencil reads column i+1 and row j+1
+        if (ncols < 2 || nrows < 2 || !(cellsize > 0.0)) {
+            amrex::Abort("[DUST] surface raster " + filename + ": needs ncols >= 2, nrows >= 2 and cellsize > 0 (got "
+                         + std::to_string(ncols) + ", " + std::to_string(nrows) + ", " + std::to_string(cellsize) + ")");
+        }
         // Read data rows
-        data.resize(ncols * nrows);
+        data.resize(static_cast<std::size_t>(ncols) * static_cast<std::size_t>(nrows));
         for (int j = 0; j < nrows && ok; ++j) {
             for (int i = 0; i < ncols && ok; ++i) {
-                if (!(file >> data[j * ncols + i])) {
-                    amrex::Print() << "[DUST] ERROR: Could not read data at row " << j << ", col " << i << "\n";
-                    file.close();
-                    ok = 0;
+                if (!(file >> data[static_cast<std::size_t>(j) * ncols + i])) {
+                    amrex::Abort("[DUST] surface raster " + filename + " is short: no value at row "
+                                 + std::to_string(j) + ", column " + std::to_string(i));
                 }
             }
         }
@@ -107,7 +113,7 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
 
         // Row reversal: file row 0 is northernmost; domain row 0 is southernmost.
         // Matches ERF_FuelMap.H convention.
-        std::vector<Real> data_reversed(ncols * nrows);
+        std::vector<Real> data_reversed(static_cast<std::size_t>(ncols) * static_cast<std::size_t>(nrows));
         for (int j = 0; j < nrows; ++j) {
             for (int i = 0; i < ncols; ++i) {
                 Real val = data[j * ncols + i];
@@ -122,6 +128,7 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
     }
     ParallelDescriptor::Bcast(&ok, 1, ParallelDescriptor::IOProcessorNumber());
     if (!ok) { return false; }
+    // (nearest is an argument every rank passes alike; nothing to broadcast)
 
     // Broadcast dimensions from rank 0
     ParallelDescriptor::Bcast(&ncols, 1, ParallelDescriptor::IOProcessorNumber());
@@ -175,6 +182,8 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
         const Real* x_src_ptr = x_src.data();
         const Real* y_src_ptr = y_src.data();
 
+        const Real inv_cs = 1.0 / cellsize;
+        const bool use_nearest = nearest;
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
             // Compute dust-grid cell center
             Real x_dust = prob_lo[0] + (i + 0.5) * dx[0];
@@ -189,24 +198,13 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
             x_dust = amrex::max(amrex::min(x_dust, x_src_max), x_src_min);
             y_dust = amrex::max(amrex::min(y_dust, y_src_max), y_src_min);
 
-            // Find bounding source cells
-            int i_left = 0, j_bottom = 0;
-
-            // Linear search for x
-            for (int ii = 0; ii < ncols - 1; ++ii) {
-                if (x_dust >= x_src_ptr[ii] && x_dust <= x_src_ptr[ii + 1]) {
-                    i_left = ii;
-                    break;
-                }
-            }
-
-            // Linear search for y
-            for (int jj = 0; jj < nrows - 1; ++jj) {
-                if (y_dust >= y_src_ptr[jj] && y_dust <= y_src_ptr[jj + 1]) {
-                    j_bottom = jj;
-                    break;
-                }
-            }
+            // The source grid is uniform: the bounding cells follow from the
+            // cell size in O(1) (a linear search per dust cell ran until
+            // October 2026, and read past the arrays for a one-row raster).
+            int i_left   = static_cast<int>(std::floor((x_dust - x_src_min) * inv_cs));
+            int j_bottom = static_cast<int>(std::floor((y_dust - y_src_min) * inv_cs));
+            i_left   = amrex::max(0, amrex::min(i_left,   ncols - 2));
+            j_bottom = amrex::max(0, amrex::min(j_bottom, nrows - 2));
 
             // Get four corner values
             Real v00 = d_data_ptr[j_bottom * ncols + i_left];
@@ -215,15 +213,23 @@ bool read_ascii_surface_map(MultiFab& mf, const DustGrid& dg,
             Real v11 = d_data_ptr[(j_bottom + 1) * ncols + i_left + 1];
 
             // Bilinear interpolation weights
-            Real dx_cell = x_src_ptr[i_left + 1] - x_src_ptr[i_left];
-            Real dy_cell = y_src_ptr[j_bottom + 1] - y_src_ptr[j_bottom];
+            Real wx = (x_dust - x_src_ptr[i_left]) * inv_cs;
+            Real wy = (y_dust - y_src_ptr[j_bottom]) * inv_cs;
+            wx = amrex::max(Real(0.0), amrex::min(Real(1.0), wx));
+            wy = amrex::max(Real(0.0), amrex::min(Real(1.0), wy));
 
-            Real wx = (x_dust - x_src_ptr[i_left]) / dx_cell;
-            Real wy = (y_dust - y_src_ptr[j_bottom]) / dy_cell;
-
-            Real v0 = v00 * (1.0 - wx) + v10 * wx;
-            Real v1 = v01 * (1.0 - wx) + v11 * wx;
-            Real v = v0 * (1.0 - wy) + v1 * wy;
+            Real v;
+            if (use_nearest) {
+                // categorical codes (soil type): the nearest raster cell, never a
+                // blend (16 and 100 averaged to 58 until October 2026)
+                const int ii = (wx < 0.5) ? i_left : i_left + 1;
+                const int jj = (wy < 0.5) ? j_bottom : j_bottom + 1;
+                v = d_data_ptr[jj * ncols + ii];
+            } else {
+                Real v0 = v00 * (1.0 - wx) + v10 * wx;
+                Real v1 = v01 * (1.0 - wx) + v11 * wx;
+                v = v0 * (1.0 - wy) + v1 * wy;
+            }
 
             arr(i, j, k, 0) = v;
         });
@@ -262,17 +268,17 @@ void populate_dust_surface_maps(MultiFab& soil, MultiFab& silt,
 {
     // Select reader by file extension: .nc -> NetCDF, else ESRI ASCII.
     auto read_map = [&](MultiFab& mf, const std::string& fname,
-                        Real fill, const std::string& vname) {
+                        Real fill, const std::string& vname, bool nearest = false) {
         if (fname.empty()) return;
         bool nc = fname.size() >= 3 &&
                   fname.substr(fname.size()-3) == ".nc";
         bool ok = nc ? read_netcdf_surface_map(mf, dg, fname, vname, fill)
-                     : read_ascii_surface_map(mf, dg, fname, fill);
+                     : read_ascii_surface_map(mf, dg, fname, fill, nearest);
         if (ok) amrex::Print() << "[DUST] Loaded " << vname
                                << " from: " << fname << "\n";
     };
 
-    read_map(soil,  p.soil_type_file,     0.0,           "soil_type");
+    read_map(soil,  p.soil_type_file,     0.0,           "soil_type", /*nearest=*/true);
     read_map(silt,  p.silt_fraction_file, p.silt_fraction,"silt_fraction");
     read_map(crust, p.crust_index_file,   p.crust_index,  "crust_index");
     read_map(moist, p.moisture_flag_file, 0.0,            "moisture_flag");

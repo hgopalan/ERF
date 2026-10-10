@@ -18,20 +18,18 @@
 /**
  * @brief Initialize the level-set field phi for a circular ignition point.
  *
- * Sets phi = -(r - dist(x,y, cx, cy)) / r for cells within r metres of (cx, cy),
- * and phi = +1 elsewhere. This gives a smooth signed-distance initialisation
- * within the ignition circle and +1 (unburned) outside.
- *
- * Parameters read from ParmParse("erf.fire"):
- *   erf.fire.ignition_x   [m]
- *   erf.fire.ignition_y   [m]
- *   erf.fire.ignition_r   [m]  (default 20.0)
+ * Stamps the signed distance to the disc edge, sdf = dist(x,y; cx,cy) - r:
+ * with normalized = true (FARSITE) sdf / r clamped to [-1, 1], with
+ * normalized = false (level set) sdf in metres, unclamped (see the comment in
+ * the kernel). The caller passes the centre and radius it read from
+ * erf.fire.ignition_x/y/r; nothing is read from ParmParse here.
  *
  * @param[in,out] phi     Level-set field to initialize
  * @param[in]     geom_fire Fire grid geometry
  * @param[in]     cx      Ignition center x [m]
  * @param[in]     cy      Ignition center y [m]
- * @param[in]     radius  Ignition radius [m]
+ * @param[in]     radius  Ignition radius [m]; <= 0 means no disc
+ * @param[in]     normalized  true: sdf / r clamped to [-1, 1]; false: sdf in metres
  */
 inline
 void initialize_ignition(
@@ -63,15 +61,18 @@ void initialize_ignition(
             //
             // normalized = false : the true signed distance in metres, unclamped.
             //   The level-set solver needs this. Its advection, its Godunov
-            //   Hamiltonian and the Russo-Smereka subcell term are all derived
+            //   Hamiltonian and the reinitialisation are all derived
             //   for |grad phi| = 1 with phi in metres, and clamping flattens the
             //   field outside the band so the front eventually advances into
             //   ground carrying no gradient information.
             const Real sdf = dist - radius;
             // radius <= 0 is "no disc" (the schedule, polygon or line ignites
             // instead): unburned everywhere, and no division by the radius.
+            // (floored radius inside the division: the unselected sdf/0 of
+            // the "no disc" case would be speculated under the fpe traps)
+            const Real sdf_n = amrex::max(amrex::min(sdf / amrex::max(radius, 1.0e-30_rt), 1.0_rt), -1.0_rt);
             p(i,j,k) = normalized
-                     ? ((radius > 0.0_rt) ? amrex::max(amrex::min(sdf / radius, 1.0_rt), -1.0_rt) : 1.0_rt)
+                     ? ((radius > 0.0_rt) ? sdf_n : 1.0_rt)
                      : sdf;
         });
     }
@@ -141,7 +142,7 @@ amrex::Long apply_threshold_ignition(
     // distance to the nearest flagged centre, min-merged with the fire it
     // already carries. Cells that turn from unburned to burning are counted.
     ReduceOps<ReduceOpSum> reduce_op;
-    ReduceData<long> reduce_data(reduce_op);
+    ReduceData<amrex::Long> reduce_data(reduce_op);   // amrex::Long: `long` is 32-bit on MSVC
     using ReduceTuple = typename decltype(reduce_data)::Type;
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -159,14 +160,16 @@ amrex::Long apply_threshold_ignition(
                         }
                     }
                 }
-                if (dmin >= radius) { return {0L}; }
+                if (dmin >= radius) { return {amrex::Long(0)}; }
                 const Real old   = p(i, j, k);
                 const Real sdf   = dmin - radius;
+                // floored radius (threshold_radius = 0 means one cell and the
+                // unselected sdf/0 would be speculated under the fpe traps)
                 const Real stamp = normalized
-                                 ? amrex::max(amrex::min(sdf / radius, 1.0_rt), -1.0_rt)
+                                 ? amrex::max(amrex::min(sdf / amrex::max(radius, 1.0e-30_rt), 1.0_rt), -1.0_rt)
                                  : sdf;
                 p(i, j, k) = amrex::min(old, stamp);
-                return {(old >= 0.0_rt && p(i, j, k) < 0.0_rt) ? 1L : 0L};
+                return {(old >= 0.0_rt && p(i, j, k) < 0.0_rt) ? amrex::Long(1) : amrex::Long(0)};
             });
     }
     amrex::Long n_ignited = amrex::get<0>(reduce_data.value(reduce_op));

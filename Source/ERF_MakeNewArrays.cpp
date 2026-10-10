@@ -281,34 +281,30 @@ ERF::init_stuff (int lev, const BoxArray& ba, const DistributionMapping& dm,
     // ********************************************************************************************
     // Initialize flux registers whenever we create/re-create a level
     // ********************************************************************************************
-    if (solverChoice.coupling_type == CouplingType::TwoWay) {
-        if (lev == 0) {
-            advflux_reg[0] = nullptr;
-        } else {
-            int ncomp_reflux = vars_new[0][Vars::cons].nComp();
-            advflux_reg[lev] = new YAFluxRegister(ba       , grids[lev-1],
-                                                  dm       ,  dmap[lev-1],
-                                                  geom[lev],  geom[lev-1],
-                                                  ref_ratio[lev-1], lev, ncomp_reflux);
-        }
-    }
+    make_flux_register(lev);
 
     // ********************************************************************************************
     // Define Theta_prim storage if using surface_layer BC
     // ********************************************************************************************
-    if (phys_bc_type[Orientation(Direction::z,Orientation::low)] == ERF_BC::surface_layer) {
-        Theta_prim[lev] = std::make_unique<MultiFab>(ba,dm,1,IntVect(ngrow_state,ngrow_state,1));
-        if (solverChoice.moisture_type != MoistureType::None) {
-            Qv_prim[lev]    = std::make_unique<MultiFab>(ba,dm,1,IntVect(ngrow_state,ngrow_state,1));
-            Qr_prim[lev]    = std::make_unique<MultiFab>(ba,dm,1,IntVect(ngrow_state,ngrow_state,1));
-        } else {
-            Qv_prim[lev]    = nullptr;
-            Qr_prim[lev]    = nullptr;
+    Theta_prim[lev] = nullptr;
+    Qv_prim[lev]    = nullptr;
+    Qr_prim[lev]    = nullptr;
+
+    for (OrientationIter oit; oit; ++oit) {
+        Orientation ori = oit();
+        if (phys_bc_type[ori] == ERF_BC::surface_layer) {
+            amrex::Print() << " Found MOST at face " << ori << " : Constructing primitive vars for MOST.." << std::endl;
+            Theta_prim[lev] = std::make_unique<MultiFab>(ba,dm,1,IntVect(ngrow_state,ngrow_state,1));
+            if (solverChoice.moisture_type != MoistureType::None) {
+                Qv_prim[lev]    = std::make_unique<MultiFab>(ba,dm,1,IntVect(ngrow_state,ngrow_state,1));
+                Qr_prim[lev]    = std::make_unique<MultiFab>(ba,dm,1,IntVect(ngrow_state,ngrow_state,1));
+            } else {
+                Qv_prim[lev]    = nullptr;
+                Qr_prim[lev]    = nullptr;
+            }
+            // these only need to be defined once
+            break;
         }
-    } else {
-        Theta_prim[lev] = nullptr;
-        Qv_prim[lev]    = nullptr;
-        Qr_prim[lev]    = nullptr;
     }
 
     // ********************************************************************************************
@@ -372,6 +368,13 @@ ERF::init_stuff (int lev, const BoxArray& ba, const DistributionMapping& dm,
         for (int i = 0; i < mapfac[lev].size(); i++) {
             mapfac[lev][i]->setVal(one);
         }
+    }
+
+    if (solverChoice.lsm_type == LandSurfaceType::SLM) {
+        BoxList precip_bl = ba.boxList();
+        for (auto& b : precip_bl) { b.setRange(2, b.smallEnd(2)); }
+        precip[lev] = std::make_unique<MultiFab>(BoxArray(std::move(precip_bl)), dm, 1, ngrow_state);
+        precip[lev]->setVal(0.0);
     }
 
     if (solverChoice.nudging_from_input_sounding) {
@@ -509,20 +512,32 @@ ERF::init_stuff (int lev, const BoxArray& ba, const DistributionMapping& dm,
     // way whichever one erf.radiation_model selects.
     if (solverChoice.rad_type != RadiationType::None)
     {
-        qheating_rates[lev] = std::make_unique<MultiFab>(ba, dm, 2, 0);
+        // Allocate with 1 ghost cell for interpolation stencil (cell_cons_interp)
+        // and FillBoundary operations (needed for nested patches)
+        qheating_rates[lev] = std::make_unique<MultiFab>(ba, dm, 2, 1);
         // Level layout (RRTMGP's): index k holds the fluxes at the lower
         // interface of layer k, and the top-of-atmosphere interface sits in
         // the z-ghost cell above the top layer (k = khi + 1), which is why
         // the array carries one ghost cell in z. See ERF.H.
-        rad_fluxes[lev]     = std::make_unique<MultiFab>(ba, dm, 4, IntVect(0,0,1));
+        //
+        // The ghost cells in x and y are not part of that layout. They are here so that
+        // this array can be the coarse source of an InterpFromCoarseLevel, exactly as
+        // qheating_rates is: that overload asserts that the coarse source itself carries
+        // the ghost cells the interpolation stencil reads, and its ParallelCopy then
+        // reads them. See the note in ERF_AdvanceRadiation.cpp.
+        rad_fluxes[lev]     = std::make_unique<MultiFab>(ba, dm, 4, IntVect(1,1,1));
         qheating_rates[lev]->setVal(zero);
+        // Zeroing the ghost cells too is load-bearing, not tidiness: the ghost cells that
+        // lie outside the physical domain are never written by anything else, and they are
+        // read as interpolation-stencil neighbors when this level is a parent.
         rad_fluxes[lev]->setVal(zero);
     }
 
     // Two-stream radiation: the model owns its 2D surface and SEB fields.
     if (solverChoice.rad_type == RadiationType::TwoStream)
     {
-        two_stream_rad.define_level(lev, solverChoice.radChoice, ba2d[lev], dm);
+        two_stream_rad.define_level(lev, solverChoice.radChoice, solverChoice.rdOcp, ba2d[lev], dm,
+                                    ba, geom[lev].Domain(), solverChoice.rad_feeds_lsm());
     }
 
     //*********************************************************
@@ -663,6 +678,22 @@ ERF::define_column_kextent (int lev, const BoxArray& ba, const DistributionMappi
     column_kextent[lev]->FillBoundary(geom[lev].periodicity());
 }
 
+// The flux register at lev sits on the lev-1 / lev interface, so it must be rebuilt
+// whenever the grids at either lev or lev-1 change.
+void
+ERF::make_flux_register (int lev)
+{
+    if (solverChoice.coupling_type != CouplingType::TwoWay || lev == 0) {
+        advflux_reg[lev].reset();
+        return;
+    }
+    int ncomp_reflux = vars_new[0][Vars::cons].nComp();
+    advflux_reg[lev] = std::make_unique<YAFluxRegister>(grids[lev], grids[lev-1],
+                                                        dmap[lev] ,  dmap[lev-1],
+                                                        geom[lev] ,  geom[lev-1],
+                                                        ref_ratio[lev-1], lev, ncomp_reflux);
+}
+
 void
 ERF::update_diffusive_arrays (int lev, const BoxArray& ba, const DistributionMapping& dm)
 {
@@ -677,6 +708,9 @@ ERF::update_diffusive_arrays (int lev, const BoxArray& ba, const DistributionMap
     bool l_need_SmnSmn = solverChoice.turbChoice[lev].use_keqn;
     bool l_use_moist   = (  solverChoice.moisture_type != MoistureType::None  );
     bool l_rotate      = (  solverChoice.use_rotate_surface_flux  );
+    bool l_Surf_X      = phys_bc_type[Orientation::xlo()] == ERF_BC::surface_layer || phys_bc_type[Orientation::xhi()] == ERF_BC::surface_layer;
+    bool l_Surf_Y      = phys_bc_type[Orientation::ylo()] == ERF_BC::surface_layer || phys_bc_type[Orientation::yhi()] == ERF_BC::surface_layer;
+
 
     bool l_implicit_diff = (solverChoice.vert_implicit_fac[lev][0] > 0 ||
                             solverChoice.vert_implicit_fac[lev][1] > 0 ||
@@ -725,7 +759,7 @@ ERF::update_diffusive_arrays (int lev, const BoxArray& ba, const DistributionMap
         Tau[lev][TauType::tau12] = std::make_unique<MultiFab>( ba12, dm, 1, IntVect(1,1,1) ); Tau[lev][TauType::tau12]->setVal(zero);
         Tau[lev][TauType::tau13] = std::make_unique<MultiFab>( ba13, dm, 1, IntVect(1,1,1) ); Tau[lev][TauType::tau13]->setVal(zero);
         Tau[lev][TauType::tau23] = std::make_unique<MultiFab>( ba23, dm, 1, IntVect(1,1,1) ); Tau[lev][TauType::tau23]->setVal(zero);
-        if (l_use_terrain) {
+        if (l_use_terrain || (l_Surf_X || l_Surf_Y)) {
             Tau[lev][TauType::tau21] = std::make_unique<MultiFab>( ba12, dm, 1, IntVect(1,1,1) ); Tau[lev][TauType::tau21]->setVal(zero);
             Tau[lev][TauType::tau31] = std::make_unique<MultiFab>( ba13, dm, 1, IntVect(1,1,1) ); Tau[lev][TauType::tau31]->setVal(zero);
             Tau[lev][TauType::tau32] = std::make_unique<MultiFab>( ba23, dm, 1, IntVect(1,1,1) ); Tau[lev][TauType::tau32]->setVal(zero);
@@ -801,7 +835,7 @@ ERF::update_diffusive_arrays (int lev, const BoxArray& ba, const DistributionMap
             SFS_q2fx3_lev[lev] = std::make_unique<MultiFab>( convert(ba,IntVect(0,0,1)), dm, 1, IntVect(1,1,1) );
             SFS_q1fx3_lev[lev]->setVal(zero);
             SFS_q2fx3_lev[lev]->setVal(zero);
-            if (l_rotate) {
+            if (l_rotate || (l_Surf_X || l_Surf_Y)) {
                 SFS_q1fx1_lev[lev] = std::make_unique<MultiFab>( convert(ba,IntVect(1,0,0)), dm, 1, IntVect(1,1,1) );
                 SFS_q1fx2_lev[lev] = std::make_unique<MultiFab>( convert(ba,IntVect(0,1,0)), dm, 1, IntVect(1,1,1) );
                 SFS_q1fx1_lev[lev]->setVal(zero);
@@ -821,6 +855,8 @@ ERF::update_diffusive_arrays (int lev, const BoxArray& ba, const DistributionMap
             Tau[lev][i] = nullptr;
         }
         SFS_hfx1_lev[lev] = nullptr; SFS_hfx2_lev[lev] = nullptr; SFS_hfx3_lev[lev] = nullptr;
+        SFS_q1fx1_lev[lev] = nullptr; SFS_q1fx2_lev[lev] = nullptr; SFS_q1fx3_lev[lev] = nullptr;
+        SFS_q2fx3_lev[lev] = nullptr;
         SFS_diss_lev[lev] = nullptr;
     }
 
@@ -987,76 +1023,13 @@ ERF::init_zphys (int lev, double elapsed_time)
         }
     } // init_type
 
+    if (solverChoice.flat_terrain) {
+        validate_flat_terrain(lev, *z_phys_nd[lev], zlevels_stag[lev]);
+    }
+
     if (solverChoice.terrain_type == TerrainType::ImmersedForcing ||
         solverChoice.buildings_type == BuildingsType::ImmersedForcing) {
-        // Read the small_volfrac threshold from eb2 namespace
-        Real small_volfrac = 0.005;
-        ParmParse pp_eb2("eb2");
-        pp_eb2.queryAdd("small_volfrac", small_volfrac);
-
-        // Cell-centered terrain blanking
-        terrain_blanking[lev]->setVal(one);
-        const int ng_sub = std::min(ComputeGhostCells(solverChoice) + 2, EBFactory(lev).getVolFrac().nGrow());
-        MultiFab::Subtract(*terrain_blanking[lev], EBFactory(lev).getVolFrac(), 0, 0, 1, ng_sub);
-
-        // Clip small terrain_blanking values (almost fluid cells) using same threshold as eb2.small_volfrac
-        if (small_volfrac > zero) {
-            for (MFIter mfi(*terrain_blanking[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                const Box& bx = mfi.tilebox();
-                auto const& tblank = terrain_blanking[lev]->array(mfi);
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
-                    if (tblank(i,j,k) < small_volfrac) { tblank(i,j,k) = zero; }
-                });
-            }
-        }
-        terrain_blanking[lev]->FillBoundary(geom[lev].periodicity());
-
-#if USE_FC_FACTORY
-        // Face-centered terrain blanking from face-centered EB volume fractions
-        terrain_blanking_xface[lev]->setVal(one);
-        terrain_blanking_yface[lev]->setVal(one);
-        terrain_blanking_zface[lev]->setVal(one);
-
-        // Check if face factories are available before using them
-        auto const* u_factory = eb[lev]->get_u_const_factory();
-        auto const* v_factory = eb[lev]->get_v_const_factory();
-        auto const* w_factory = eb[lev]->get_w_const_factory();
-
-        if (u_factory && v_factory && w_factory) {
-            MultiFab::Subtract(*terrain_blanking_xface[lev], u_factory->getVolFrac(), 0, 0, 1, ng_sub);
-            MultiFab::Subtract(*terrain_blanking_yface[lev], v_factory->getVolFrac(), 0, 0, 1, ng_sub);
-            MultiFab::Subtract(*terrain_blanking_zface[lev], w_factory->getVolFrac(), 0, 0, 1, ng_sub);
-
-            // Clip small terrain_blanking values on faces (almost fluid cells) using same threshold
-            if (small_volfrac > zero) {
-                for (MFIter mfi(*terrain_blanking_xface[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                    const Box& xbx = mfi.tilebox();
-                    auto const& tblank_x = terrain_blanking_xface[lev]->array(mfi);
-                    ParallelFor(xbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
-                        if (tblank_x(i,j,k) < small_volfrac) { tblank_x(i,j,k) = zero; }
-                    });
-                }
-                for (MFIter mfi(*terrain_blanking_yface[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                    const Box& ybx = mfi.tilebox();
-                    auto const& tblank_y = terrain_blanking_yface[lev]->array(mfi);
-                    ParallelFor(ybx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
-                        if (tblank_y(i,j,k) < small_volfrac) { tblank_y(i,j,k) = zero; }
-                    });
-                }
-                for (MFIter mfi(*terrain_blanking_zface[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                    const Box& zbx = mfi.tilebox();
-                    auto const& tblank_z = terrain_blanking_zface[lev]->array(mfi);
-                    ParallelFor(zbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
-                        if (tblank_z(i,j,k) < small_volfrac) { tblank_z(i,j,k) = zero; }
-                    });
-                }
-            }
-        }
-
-        terrain_blanking_xface[lev]->FillBoundary(geom[lev].periodicity());
-        terrain_blanking_yface[lev]->FillBoundary(geom[lev].periodicity());
-        terrain_blanking_zface[lev]->FillBoundary(geom[lev].periodicity());
-#endif
+        make_terrain_blanking(lev);
 
         init_immersed_forcing(lev); // needed for real cases
 
@@ -1172,87 +1145,97 @@ ERF::remake_zphys (int lev, Real time, std::unique_ptr<MultiFab>& temp_zphys_nd)
 
     if (solverChoice.terrain_type == TerrainType::ImmersedForcing ||
         solverChoice.buildings_type == BuildingsType::ImmersedForcing) {
-        //
         // This assumes we have already remade the EBGeometry
-        //
-        // Read the small_volfrac threshold from eb2 namespace
-        Real small_volfrac = 0.005;
-        ParmParse pp_eb2("eb2");
-        pp_eb2.queryAdd("small_volfrac", small_volfrac);
-
-        terrain_blanking[lev]->setVal(one);
-        MultiFab::Subtract(*terrain_blanking[lev], EBFactory(lev).getVolFrac(), 0, 0, 1, z_phys_nd[lev]->nGrowVect());
-
-        // Clip small terrain_blanking values (almost fluid cells) using same threshold as eb2.small_volfrac
-        if (small_volfrac > zero) {
-            for (MFIter mfi(*terrain_blanking[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                const Box& bx = mfi.tilebox();
-                auto const& tblank = terrain_blanking[lev]->array(mfi);
-                ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
-                    if (tblank(i,j,k) < small_volfrac) {
-                        tblank(i,j,k) = zero;
-                    }
-                });
-            }
-        }
-
-#if USE_FC_FACTORY
-    // Face-centered terrain blanking from face-centered EB volume fractions
-        const int ng_sub = std::min(ComputeGhostCells(solverChoice) + 2, EBFactory(lev).getVolFrac().nGrow());
-
-        terrain_blanking_xface[lev]->setVal(one);
-        terrain_blanking_yface[lev]->setVal(one);
-        terrain_blanking_zface[lev]->setVal(one);
-        // Check if face factories are available before using them
-        auto const* u_factory = eb[lev]->get_u_const_factory();
-        auto const* v_factory = eb[lev]->get_v_const_factory();
-        auto const* w_factory = eb[lev]->get_w_const_factory();
-
-        if (u_factory && v_factory && w_factory) {
-            MultiFab::Subtract(*terrain_blanking_xface[lev],
-                               u_factory->getVolFrac(), 0, 0, 1, ng_sub);
-            MultiFab::Subtract(*terrain_blanking_yface[lev],
-                               v_factory->getVolFrac(), 0, 0, 1, ng_sub);
-            MultiFab::Subtract(*terrain_blanking_zface[lev],
-                               w_factory->getVolFrac(), 0, 0, 1, ng_sub);
-
-            // Clip small terrain_blanking values on faces (almost fluid cells) using same threshold
-            if (small_volfrac > zero) {
-                for (MFIter mfi(*terrain_blanking_xface[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                    const Box& xbx = mfi.tilebox();
-                    auto const& tblank_x = terrain_blanking_xface[lev]->array(mfi);
-                    ParallelFor(xbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
-                        if (tblank_x(i,j,k) < small_volfrac) {
-                            tblank_x(i,j,k) = zero;
-                        }
-                    });
-                }
-                for (MFIter mfi(*terrain_blanking_yface[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                    const Box& ybx = mfi.tilebox();
-                    auto const& tblank_y = terrain_blanking_yface[lev]->array(mfi);
-                    ParallelFor(ybx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
-                        if (tblank_y(i,j,k) < small_volfrac) {
-                            tblank_y(i,j,k) = zero;
-                        }
-                    });
-                }
-                for (MFIter mfi(*terrain_blanking_zface[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-                    const Box& zbx = mfi.tilebox();
-                    auto const& tblank_z = terrain_blanking_zface[lev]->array(mfi);
-                    ParallelFor(zbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
-                        if (tblank_z(i,j,k) < small_volfrac) {
-                            tblank_z(i,j,k) = zero;
-                        }
-                    });
-                }
-            }
-        }
-#endif
+        make_terrain_blanking(lev);
     }
 
     // Compute the min dz and pass to the micro model
     Real dzmin = get_dzmin_terrain(*z_phys_nd[lev]);
     micro->Set_dzmin(lev, dzmin);
+}
+
+/**
+ * The immersed terrain's (or buildings') solid fraction on level lev, one minus the EB volume
+ * fraction, with fractions below eb2.small_volfrac (almost fluid cells) set to zero in the valid
+ * cells and in the ghost cells FillBoundary fills; with the face-centred factories, the same on
+ * the faces. A fresh start, a regrid and a restart all build it here, so a restarted run forces
+ * the same cells as the run it continues.
+ *
+ * @param lev Integer specifying the level
+ */
+void
+ERF::make_terrain_blanking (int lev)
+{
+    // Read the small_volfrac threshold from eb2 namespace. The EB build (ERF::initializeEB, in
+    // the constructor) has already recorded it, with AMReX's own default when the inputs do not
+    // set it, so the 0.005 here is not what a deck without the key gets.
+    Real small_volfrac = 0.005;
+    ParmParse pp_eb2("eb2");
+    pp_eb2.queryAdd("small_volfrac", small_volfrac);
+
+    // Cell-centered terrain blanking
+    terrain_blanking[lev]->setVal(one);
+    const int ng_sub = std::min(ComputeGhostCells(solverChoice) + 2, EBFactory(lev).getVolFrac().nGrow());
+    MultiFab::Subtract(*terrain_blanking[lev], EBFactory(lev).getVolFrac(), 0, 0, 1, ng_sub);
+
+    // Clip small terrain_blanking values (almost fluid cells) using same threshold as eb2.small_volfrac
+    if (small_volfrac > zero) {
+        for (MFIter mfi(*terrain_blanking[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+            const Box& bx = mfi.tilebox();
+            auto const& tblank = terrain_blanking[lev]->array(mfi);
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
+                if (tblank(i,j,k) < small_volfrac) { tblank(i,j,k) = zero; }
+            });
+        }
+    }
+    terrain_blanking[lev]->FillBoundary(geom[lev].periodicity());
+
+#if USE_FC_FACTORY
+    // Face-centered terrain blanking from face-centered EB volume fractions
+    terrain_blanking_xface[lev]->setVal(one);
+    terrain_blanking_yface[lev]->setVal(one);
+    terrain_blanking_zface[lev]->setVal(one);
+
+    // Check if face factories are available before using them
+    auto const* u_factory = eb[lev]->get_u_const_factory();
+    auto const* v_factory = eb[lev]->get_v_const_factory();
+    auto const* w_factory = eb[lev]->get_w_const_factory();
+
+    if (u_factory && v_factory && w_factory) {
+        MultiFab::Subtract(*terrain_blanking_xface[lev], u_factory->getVolFrac(), 0, 0, 1, ng_sub);
+        MultiFab::Subtract(*terrain_blanking_yface[lev], v_factory->getVolFrac(), 0, 0, 1, ng_sub);
+        MultiFab::Subtract(*terrain_blanking_zface[lev], w_factory->getVolFrac(), 0, 0, 1, ng_sub);
+
+        // Clip small terrain_blanking values on faces (almost fluid cells) using same threshold
+        if (small_volfrac > zero) {
+            for (MFIter mfi(*terrain_blanking_xface[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+                const Box& xbx = mfi.tilebox();
+                auto const& tblank_x = terrain_blanking_xface[lev]->array(mfi);
+                ParallelFor(xbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
+                    if (tblank_x(i,j,k) < small_volfrac) { tblank_x(i,j,k) = zero; }
+                });
+            }
+            for (MFIter mfi(*terrain_blanking_yface[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+                const Box& ybx = mfi.tilebox();
+                auto const& tblank_y = terrain_blanking_yface[lev]->array(mfi);
+                ParallelFor(ybx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
+                    if (tblank_y(i,j,k) < small_volfrac) { tblank_y(i,j,k) = zero; }
+                });
+            }
+            for (MFIter mfi(*terrain_blanking_zface[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+                const Box& zbx = mfi.tilebox();
+                auto const& tblank_z = terrain_blanking_zface[lev]->array(mfi);
+                ParallelFor(zbx, [=] AMREX_GPU_DEVICE (int i, int j, int k) {
+                    if (tblank_z(i,j,k) < small_volfrac) { tblank_z(i,j,k) = zero; }
+                });
+            }
+        }
+    }
+
+    terrain_blanking_xface[lev]->FillBoundary(geom[lev].periodicity());
+    terrain_blanking_yface[lev]->FillBoundary(geom[lev].periodicity());
+    terrain_blanking_zface[lev]->FillBoundary(geom[lev].periodicity());
+#endif
 }
 
 void
@@ -1290,6 +1273,7 @@ ERF::initialize_integrator (int lev, MultiFab& cons_mf, MultiFab& vel_mf)
     mri_integrator_mem[lev] = std::make_unique<MRISplitIntegrator<Vector<MultiFab> > >(int_state);
     mri_integrator_mem[lev]->setNoSubstepping((solverChoice.substepping_type[lev] == SubsteppingType::None));
     mri_integrator_mem[lev]->setAnelastic(solverChoice.anelastic[lev]);
+    mri_integrator_mem[lev]->setAnelasticType(solverChoice.anelastic_type[lev]);
     mri_integrator_mem[lev]->setNcompCons(ncomp_cons);
     mri_integrator_mem[lev]->setForceFirstStageSingleSubstep(solverChoice.force_stage1_single_substep);
 }
@@ -1309,12 +1293,16 @@ ERF::make_physbcs (int lev)
 
     physbcs_cons[lev] = std::make_unique<ERFPhysBCFunct_cons> (lev, geom[lev], domain_bcs_type, domain_bcs_type_d,
                                                                m_bc_extdir_vals, m_bc_neumann_vals,
-                                                               z_phys_nd[lev], l_use_real_bcs, th_bc_data[lev].data());
+                                                               solverChoice.terrain_type,
+                                                               z_phys_nd[lev], l_use_real_bcs, th_bc_data[lev].data(),
+                                                               m_th_file_face);
     physbcs_u[lev]    = std::make_unique<ERFPhysBCFunct_u> (lev, geom[lev], domain_bcs_type, domain_bcs_type_d,
                                                             m_bc_extdir_vals, m_bc_neumann_vals,
+                                                            solverChoice.terrain_type,
                                                             z_phys_nd[lev], l_use_real_bcs, xvel_bc_data[lev].data());
     physbcs_v[lev]    = std::make_unique<ERFPhysBCFunct_v> (lev, geom[lev], domain_bcs_type, domain_bcs_type_d,
                                                             m_bc_extdir_vals, m_bc_neumann_vals,
+                                                            solverChoice.terrain_type,
                                                             z_phys_nd[lev], l_use_real_bcs, yvel_bc_data[lev].data());
     physbcs_w[lev]    = std::make_unique<ERFPhysBCFunct_w> (lev, geom[lev], domain_bcs_type, domain_bcs_type_d,
                                                             m_bc_extdir_vals, m_bc_neumann_vals,

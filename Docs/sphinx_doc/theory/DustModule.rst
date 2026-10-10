@@ -106,13 +106,15 @@ the atmosphere's :math:`\Delta t`, in this order (``DustLayer::advance`` in
 
 1. **Fire pre-step** (ERF-Hazard, when :cpp:`erf.fire_dust_coupling` is on):
    the burned area of the fire level set reduces the crust index and, if
-   :cpp:`erf.fire_dust_wind_to_dust` is on, the fire's effective wind raises
-   the friction velocity of the cells it covers (:ref:`sec:DustFire`).
+   :cpp:`erf.fire_dust_wind_to_dust` is on, the fire's reference wind at
+   :cpp:`erf.fire.wind_ref_ht` gives a neutral log-law :math:`u_*` for the
+   cells inside the fire perimeter, merged with the surface layer's
+   :math:`u_*` in step 2 (:ref:`sec:DustFire`).
 2. **Atmosphere fields**: :math:`u_*` from the surface layer, the wind at
    :cpp:`erf.dust.zref` interpolated from the lowest cells, the surface
    temperature and the boundary-layer height. With
    :cpp:`erf.dust.use_terrain_wind` the wind gets the FARSITE terrain
-   correction and :math:`u_*` is recomputed from it by a log law. Without a
+   correction and :math:`u_*` is scaled by the same factor. Without a
    coupled atmosphere the ``test_*`` placeholders are used instead
    (:ref:`sec:DustCoupling`).
 3. **PHREEQC** tables are re-read when :cpp:`erf.dust.phreeqc_update_interval_s`
@@ -122,9 +124,10 @@ the atmosphere's :math:`\Delta t`, in this order (``DustLayer::advance`` in
    uniform input value and the burned-area reduction is applied again, so the
    crust follows the current fire perimeter rather than decaying step after
    step.
-6. **Threshold friction velocity** from the Bagnold base, the chemistry,
-   moisture, suppression and slope factors, then the loading feedback and the
-   dynamic moisture inhibition when enabled (:ref:`sec:DustSources`).
+6. **Threshold friction velocity** from the Shao-Lu base (Bagnold with
+   :cpp:`erf.dust.threshold_model = bagnold`), the chemistry,
+   moisture, suppression and slope factors, then the loading feedback when
+   enabled (:ref:`sec:DustSources`).
 7. **Emission flux** per bin from the saltation model where
    :math:`u_* > u_{*t}`, plus the blast events due in this step and the active
    haul roads.
@@ -132,15 +135,14 @@ the atmosphere's :math:`\Delta t`, in this order (``DustLayer::advance`` in
    multiplied by the convective factor of the fire heat flux.
 9. **Diagnostics on the surface grid**: critical-material flux and budget, PM
    classification with its 24-hour averages, MSHA dose, and the release and
-   advance of super-particles.
-10. **Coarsening** of the total flux to the atmosphere grid. It is injected at
-    the lowest cell in the slow right-hand side of the *next* step, together
-    with the settling tendency and the deposition boundary condition, so the
-    coupling has a one-step lag like the fire's.
-11. **Return fields** after the slow right-hand side: the surface dust
-    concentration and the surface moisture flux come back to the dust grid for
-    the next step's threshold.
-12. **Output** at the end of the step: the statistics CSV every step, the dust
+   advance of super-particles, all from the lofted flux. The flux and the
+   friction velocity are coarsened to the atmosphere columns here, once per
+   step.
+10. **Return fields** once per step, after the dycore and before the next
+    dust step: the surface dust concentration and the surface latent flux come
+    back to the dust grid (the loading feedback reads the first; the second is
+    an output).
+11. **Output** at the end of the step: the statistics CSV every step, the dust
     plotfile at :cpp:`erf.dust.dust_plot_int`, the PHREEQC feedback files at
     their interval, and the visibility, silica and STEL diagnostics
     (:ref:`sec:DustOutput`).
@@ -164,7 +166,8 @@ component unless noted.
      - Threshold friction velocity after every modifier.
    * - ``dust_ustar_base``
      - m/s
-     - Bagnold base threshold from bin 0, or :cpp:`erf.dust.ustar_t_base`.
+     - Base threshold of :cpp:`erf.dust.threshold_model` at
+       :cpp:`erf.dust.saltation_diameter`, or :cpp:`erf.dust.ustar_t_base`.
    * - ``dust_ustar_in``
      - m/s
      - Friction velocity seen by the emission model: from the surface layer,
@@ -303,15 +306,27 @@ evolve, the deposition accumulator, the PM averages and flags, the MSHA
 dose, TWA and shift state, the STEL average, the surface concentration the
 next step reads, and the super-particle source map. The layer's counters
 (its step and time, the PHREEQC read and write times, the MSHA shift
-number, the last plotfile step) go to ``DustState`` and the super-particles
+number, the last plotfile step and the last step written to
+``dust_diag_file``) go to ``DustState`` and the super-particles
 to ``DustParticles``. On restart the layer is initialised from the inputs
 and rasters as usual and the checkpointed values are read over it, so a
 checkpoint without dust fields, or one from an older build, still restarts.
 The emission flux and friction velocity of the last step are among the
 fields, because the dust step runs after the dycore of the same step and the
-first dycore after a restart still uses them. A restarted run reproduces the
-uninterrupted one bit for bit on one rank and on four; the ``dust`` row of
-``Exec/RegTests/FireRestart`` checks this with the fire coupling on.
+first dycore after a restart still uses them; the checkpoint also records the
+bin count and grid ratio and a restart with other values aborts naming them.
+A restarted run reproduces the uninterrupted one bit for bit; the ``dust`` row
+of ``Exec/RegTests/FireRestart`` checks this on one rank with the fire coupling
+on, and ``FireDustCoupling_parity`` checks that one rank with one box and two
+ranks with four boxes give the same dust fields and CSVs.
+
+The dust output of a step is written once. The step a run ends on (reached
+by the time loop and again by the final write) and the step a restart starts
+on (written by the original run, reached again at start-up) add no second
+row to ``dust_diag_file``, and the dust plotfile interval does not rewrite a
+plotfile it already wrote. The dust output comes before the checkpoint write,
+so a checkpoint counts its own step as written. ``FireRestart_dust_rows``
+checks this across a run end and two restarts.
 
 Limitations
 -----------

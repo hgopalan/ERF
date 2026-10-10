@@ -4,8 +4,9 @@
  *
  * Extracts atmospheric wind at reference height and surface fields
  * from the 3D atmospheric solver onto the 2D dust grid each timestep.
- * The wind interpolation algorithm copies fill_fire_wind_from_interpolation
- * from Source/Fire/ERF_FireWindExtract.cpp, with DustGrid substituted for FireGrid.
+ * The wind interpolation follows column_wind_at_height in
+ * Source/Fire/ERF_FireWindExtract.cpp (bisection bracket, clamped to the lowest
+ * and highest cell centres), with DustGrid substituted for FireGrid.
  */
 
 #include <ERF_DustWindExtract.H>
@@ -51,17 +52,28 @@ void fill_dust_wind_from_interpolation(
             // Compute target height
             Real z_target = z_surf + zref;
 
-            // Find vertical level bracket.
-            // Initialize k_lo to the top interval (nz-2) so that if z_target
-            // is above all levels, the topmost wind values are used.
-            int k_lo = nz - 2;
-            for (int k = 0; k < nz - 1; ++k) {
-                if (z_phys_cc(i_a, j_a, k) <= z_target &&
-                    z_target < z_phys_cc(i_a, j_a, k + 1)) {
-                    k_lo = k;
-                    break;
+            // Bracket the target height by bisection on the column's cell-centre
+            // heights, clamped to the lowest and highest cell centres. The linear
+            // scan this replaces (copied from the fire before its own fix) left
+            // k_lo at nz-2 whenever z_target was below the first cell centre, so
+            // with zref < dz/2 (or any terrain or stretching that raises the
+            // first centre above zref) every dust cell got the wind of the
+            // second-highest cell in the domain.
+            int k_lo;
+            if (z_target <= z_phys_cc(i_a, j_a, 0)) {
+                k_lo = 0;
+            } else if (z_target >= z_phys_cc(i_a, j_a, nz - 1)) {
+                k_lo = nz - 2;
+            } else {
+                int lo = 0;
+                int hi = nz - 1;
+                while (hi - lo > 1) {
+                    const int mid = (lo + hi) / 2;
+                    if (z_phys_cc(i_a, j_a, mid) <= z_target) { lo = mid; } else { hi = mid; }
                 }
+                k_lo = lo;
             }
+            k_lo = amrex::max(0, amrex::min(k_lo, nz - 2));
 
             // Compute interpolation weight
             Real z_lo = z_phys_cc(i_a, j_a, k_lo);
@@ -69,7 +81,7 @@ void fill_dust_wind_from_interpolation(
             Real alpha = 0.0;
             if (z_hi > z_lo) {
                 alpha = (z_target - z_lo) / (z_hi - z_lo);
-                alpha = amrex::max(static_cast<amrex::Real>(0.0), static_cast<amrex::Real>(amrex::min(static_cast<amrex::Real>(1.0), static_cast<amrex::Real>(alpha))));
+                alpha = amrex::max(Real(0.0), amrex::min(Real(1.0), alpha));
             }
 
             int k_hi = k_lo + 1;
@@ -116,6 +128,33 @@ void fill_dust_scalar_from_atm(
         auto af = atm_field.const_array(mfi);
         ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
             df(i,j,k) = af(i/C, j/C, 0);
+        });
+    }
+}
+
+void scale_dust_ustar_by_wind_ratio(
+    MultiFab&       dust_ustar_in,
+    const MultiFab& wind_corrected,
+    const MultiFab& wind_raw)
+{
+    // u* is linear in the wind speed in a neutral log law, so the terrain
+    // correction factor of the wind is the factor of u*. Re-deriving u* from the
+    // corrected wind with a log law on z0_dust (the option before October 2026,
+    // erf.dust.terrain_ustar = loglaw) replaced the surface layer's stability-
+    // corrected u* on erf.most.z0 by a neutral one on erf.dust.z0_dust, 0.70x
+    // on flat ground where the factor is 1.
+    for (MFIter mfi(dust_ustar_in, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.tilebox();
+        auto ust = dust_ustar_in.array(mfi);
+        auto wc  = wind_corrected.const_array(mfi);
+        auto wr  = wind_raw.const_array(mfi);
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
+            const Real sc = std::sqrt(wc(i,j,k,0)*wc(i,j,k,0) + wc(i,j,k,1)*wc(i,j,k,1));
+            const Real sr = std::sqrt(wr(i,j,k,0)*wr(i,j,k,0) + wr(i,j,k,1)*wr(i,j,k,1));
+            // calm raw wind: no factor to apply (floored inside the select, the
+            // unselected x/0 is speculated under the fpe traps)
+            const Real ratio = (sr > Real(0.0)) ? sc / amrex::max(sr, Real(1.0e-10)) : Real(1.0);   // 1e-10: finite for any |U_corr| (min() overflows above 4 m/s)
+            ust(i,j,k) *= ratio;
         });
     }
 }

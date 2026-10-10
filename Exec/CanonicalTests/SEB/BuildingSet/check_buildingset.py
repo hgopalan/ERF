@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check the building-set morning.
 
-    python3 check_buildingset.py ibseb_set.csv faces/set run_set.log
+    python3 check_buildingset.py ibseb_set.csv faces/set run_set.log mean_profiles
 
 From the per-building CSV (one row a minute), the face dumps (one every
 five minutes) and the run log:
@@ -19,7 +19,11 @@ five minutes) and the run log:
   6. the wall function beyond neutral is active: w* is positive on sunlit
      faces and most roofs are unstable by the end;
   7. the run log's timing line is reported (faces per rank, seconds per
-     step of the balance), for estimating city-scale cost.
+     step of the balance), for estimating city-scale cost;
+  8. the nudging holds the westerly: the horizontal-mean wind between
+     the tallest roof and mid-depth stays between 2 and 4 m/s all morning
+     and is steady over the second half of the run (a fitted trend under
+     0.2 m/s per hour; a constant pressure gradient drifts 0.9 m/s per hour).
 """
 import sys, glob, re
 import numpy as np
@@ -42,7 +46,7 @@ def report(name, ok, detail):
     print(f"  {name}: {'PASS' if ok else 'FAIL'} ({detail})"); return ok
 
 def main():
-    csv, prefix, log = sys.argv[1:4]
+    csv, prefix, log, prof = sys.argv[1:5]
     c = np.genfromtxt(csv, delimiter=",", names=True)
     steps, files = load_steps(prefix); th = 5.0 + steps * 0.5 / 3600.0   # solar time [h] of each dump (the state after that many steps), run starts at 05:00
     d0 = load(files[0]); dl = load(files[-1])
@@ -93,6 +97,18 @@ def main():
     # 7. timing
     tl = re.findall(r"\[IBSEB\] cost: (.*)", open(log).read())
     ok &= report("cost line reported", len(tl) > 0, tl[-1].strip() if tl else "no cost line in the log")
+    # 8. the nudging holds the wind: mean_profiles columns are time z u v w ...;
+    # the horizontal mean between the tallest roof (60 m) and mid-depth, where
+    # no solid cell enters the average.
+    p = np.loadtxt(prof, usecols=(0, 1, 2))
+    band = (p[:, 1] > 70.0) & (p[:, 1] < 150.0)
+    times = np.unique(p[:, 0])
+    ub = np.array([p[band & (p[:, 0] == tt), 2].mean() for tt in times])
+    late = times >= 0.5 * times[-1]
+    trend = np.polyfit(times[late], ub[late], 1)[0] * 3600.0 if late.sum() > 1 else 0.0
+    ok &= report("the nudging holds the westerly above the roofs all morning, steady",
+                 ub.min() > 2.0 and ub.max() < 4.0 and abs(trend) < 0.2,
+                 f"mean u at 70-150 m {ub.min():.2f}-{ub.max():.2f} m/s over {len(times)} profiles, {ub[-1]:.2f} m/s at {5.0 + times[-1] / 3600.0:.1f} h, trend {trend:+.2f} m/s per hour over the second half")
     print("building set:", "PASS" if ok else "FAIL"); sys.exit(0 if ok else 1)
 
 if __name__ == "__main__":

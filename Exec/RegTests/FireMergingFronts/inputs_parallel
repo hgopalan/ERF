@@ -1,0 +1,10 @@
+FILE = inputs_base
+
+# Parallel fires: two 8 m wide lines along x, 40 m apart (y = 40 and 80 m),
+# each from its own vertex file. The strip between them closes on y = 60 m at
+# 16 s, where the two inner fronts meet.
+erf.fire_plot_file = "plt_fire_parallel_"
+erf.fire.ignition_r = 0.0             # no disc of its own
+erf.fire.ignition.polygon_file = "parallel_south.csv" "parallel_north.csv"
+erf.fire.ignition.polygon_type = "polyline"
+erf.fire.ignition.polyline_width = 4.0   # half width: 8 m wide lines

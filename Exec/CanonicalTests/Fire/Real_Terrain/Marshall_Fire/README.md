@@ -11,6 +11,8 @@ SRTM1 (1 arc second) elevation from the four tiles around 40 N, 105 W, box-avera
 ## Wind
 A neutral log law over z0 = 0.1 m, 20 m/s at 10 m above ground and held at 35 m/s above the height where the law reaches it, from 285 degrees: a westerly with the small northerly component that carried the fire east-south-east. ERF reads the inflow file's heights as absolute, so each inflow face has its own file with the profile anchored at that face's mean ground (`inflow_xlo.txt`, `inflow_yhi.txt`). The interior starts from the same profile as a sounding, neutral to 1500 m above the floor and 3 K/km above that, at a surface pressure of 840 hPa. Rayleigh damping of w in the top 500 m absorbs mountain waves; there is no inflow sponge.
 
+ERF's `input_sounding` reads that first pressure in hPa, as WRF does. Until 2026-09-11 `gen_marshall.py` wrote it in Pa (`84000.0`), so the atmosphere started at about 83 atmospheres: the start-up log reported a surface dry air density of 27.5 kg/m^3 instead of 1.03, and theta = 300 K meant a temperature of 1064 K. Uniformly scaled density largely cancels in this passive, neutral case, but the sound speed does not: the terrain-aware compressible estimate read 0.11 s instead of 0.20 s and the automatic acoustic substepping took 8 substeps per slow step instead of 4.
+
 ## Fire
 Short grass (Anderson fuel model 1) at 4 % dead moisture everywhere, Rothermel with the Andrews wind adjustment factor and the model's wind limit, on a 25 m fire grid that reads the same 50 m raster. The wind limit is what keeps a grass fire in a 35 m/s wind at the observed order of 1 m/s. Three ignitions:
 
@@ -36,7 +38,7 @@ The deck's fuel is uniform grass. `Exec/Tools/make_landfire_fuel_map.py` puts LA
 ## Expected Results
 From the 30-minute run on eight ranks (0.85 to 1.0 s per step, 6000 steps):
 
-- The atmosphere runs stable at 0.3 s steps with 8 acoustic substeps; the fire-grid wind reaches 4 to 5 m/s at midflame near the origin and follows the terrain, accelerating over the mesa rims and turning in the drainages.
+- The atmosphere runs stable at 0.3 s steps with 8 acoustic substeps (4 with the corrected 840 hPa sounding); the fire-grid wind reaches 4 to 5 m/s at midflame near the origin and follows the terrain, accelerating over the mesa rims and turning in the drainages.
 - The three fires burn 370 ha at 30 minutes (22 ha at 6 min, 146 ha at 18 min), with a perimeter of 18.7 km and one to three spot fires ahead of the fronts at any time.
 - The origin fire's head advances at 0.44 m/s including its spot fires (0.3 to 0.6 m/s on the ROS field), the order the event averaged over its 10 km run.
 - Those figures are from a run with `erf.fire.directional_ros = false`, the isotropic level set, which also backed the fires into the wind at 0.18 m/s; the committed deck uses the directional default, which keeps the head rate, holds the backing fire at the no-wind rate, and grows each fire as a downwind lobe with a smaller area.

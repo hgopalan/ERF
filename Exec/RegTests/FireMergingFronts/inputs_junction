@@ -1,0 +1,11 @@
+FILE = inputs_base
+
+# Junction fire: two 70 m fire lines meeting at 60 degrees, apex at (30, 60) m
+# opening towards +x, stamped as one 8 m wide polyline. Inside the wedge the two
+# inner fronts meet on the bisector, and the meeting point runs along it at
+# R / sin(30 deg) = 2 m/s, twice the rate of spread.
+erf.fire_plot_file = "plt_fire_junction_"
+erf.fire.ignition_r = 0.0             # no disc of its own
+erf.fire.ignition.polygon_file = "junction_v60.csv"
+erf.fire.ignition.polygon_type = "polyline"
+erf.fire.ignition.polyline_width = 4.0   # half width: an 8 m wide line

@@ -18,19 +18,23 @@ of the choice.
 Level set and ignition
 ----------------------
 
-``fire_phi`` is a normalised signed distance: zero on the front, negative
-inside the burned region, positive outside, clamped to :math:`[-1, 1]`. The
-disc ignition sets
+``fire_phi`` is zero on the front, negative inside the burned region and
+positive outside. On the level-set path it is a signed distance in metres,
+unclamped (the advection, the Godunov Hamiltonian and the reinitialisation
+assume :math:`|\nabla\phi| = 1`); on the FARSITE path it is a normalised
+indicator clamped to :math:`[-1, 1]`. The disc ignition sets
 
 .. math::
 
-   \phi = -\frac{r - d}{r} \quad (d \le r), \qquad \phi = +1 \quad (d > r),
+   \phi = d - r \quad \text{(level set)}, \qquad
+   \phi = \max\!\left(-1, \min\!\left(1, \frac{d - r}{r}\right)\right) \quad \text{(FARSITE)},
 
 where :math:`d` is the distance from the ignition centre
 :cpp:`erf.fire.ignition_x`, :cpp:`erf.fire.ignition_y` and :math:`r` is
-:cpp:`erf.fire.ignition_r`. Polygon, polyline and scheduled ignitions
-(:ref:`sec:MultiIgnition`) and ember landings (:ref:`sec:FireSpottingCrown`)
-stamp negative values with the same convention. Firebreaks
+:cpp:`erf.fire.ignition_r`. Polygon, polyline, threshold and scheduled
+ignitions (:ref:`sec:MultiIgnition`) and ember landings
+(:ref:`sec:FireSpottingCrown`) stamp with the same convention of the path,
+min-merged into the field. Firebreaks
 (:ref:`sec:SpatialFuel`) stamp a large positive sentinel.
 
 ``fire_arrival_time`` starts at :math:`-1` everywhere and is set to the
@@ -292,6 +296,27 @@ way, so for Rothermel the two options happen to agree.
 on a finite ignition line, where the projection's wedge shows at the line's
 ends rather than a point.
 
+With the advective coupling the equation is a genuine two-term Hamiltonian,
+:math:`\phi_t + R_0|\nabla\phi| + \max(\mathbf V\cdot\nabla\phi, 0) = 0`, but the
+default scheme still builds one scalar :math:`R(\hat n)` from an estimated front
+normal and multiplies it by a single Godunov-upwinded :math:`|\nabla\phi|`. That
+upwinds the wind-driven term along the front normal, while its information
+travels along :math:`\mathbf V`, including the component tangential to the
+front, and the error depends on the angle between :math:`\mathbf V` and the grid
+axes: none for a grid-aligned wind, a wing on the flanks for an oblique one.
+:cpp:`erf.fire.directional_split_hamiltonian = true` (default ``false``) upwinds
+the terms separately: :math:`R_0|\nabla\phi|` with the Godunov flux, and each of
+the wind and slope terms by the sign of its own velocity components
+(ordinary linear-advection upwind), with :math:`R_0`, :math:`\mathbf V_w` and
+:math:`\mathbf V_s` built once per advection call. It needs the same
+combination as the advective coupling (Rothermel, ``projection`` shape) and
+takes the per-fuel coefficient table and the acceleration and suppression
+scale factor the default path takes. The unit test
+``ERF_GTestSplitHamiltonianAdvection`` checks the head rate, per-fuel
+coefficients, a mixed fuel map and the scale factor, and
+``Exec/RegTests/FireSplitHamiltonian`` compares the two schemes on a line fire
+at 0 and 34 degrees to the wind.
+
 Flanks at :math:`R_0` are the projection's claim, not an observation, and give
 a length-to-width ratio far above the observed one: 5.7 for short grass in a
 1.5 m/s wind, where Anderson (1983) gives 1.5.
@@ -350,24 +375,37 @@ Reinitialisation
 ~~~~~~~~~~~~~~~~
 
 Advection steepens and flattens :math:`\phi`, so every
-:cpp:`erf.fire.levelset.reinit_every` subcycles (default 5) it is restored to
-a signed distance by :cpp:`erf.fire.levelset.reinit_iters` (default 10)
-pseudo-time iterations of a band-normalised Sussman update,
+:cpp:`erf.fire.levelset.reinit_every` subcycles (default 5) it is restored to a
+metric signed distance, :math:`|\nabla\phi| = 1`, by
+:cpp:`erf.fire.levelset.reinit_iters` (default 1) outer pseudo-time steps of
 
 .. math::
 
-   \frac{\partial \phi}{\partial \tau} = \operatorname{sgn}(\phi_0)\,\frac{1 - L\,|\nabla\phi|}{L},
+   \frac{\partial \phi}{\partial \tau} = S(\phi_0)\,(1 - |\nabla\phi|),
+   \qquad S(\phi_0) = \frac{\phi_0}{\sqrt{\phi_0^2 + \Delta x^2}},
 
-whose fixed point is :math:`|\nabla \phi| = 1/L`: :math:`\phi` varies linearly
-from 0 at the front to :math:`\pm 1` at the band half-width :math:`L`, which is
-:cpp:`erf.fire.levelset.reinit_band_m` or three cells when that is not
-positive. Cells whose neighbourhood straddles the interface use the Russo and
-Smereka (2000) subcell correction, which fixes the front from :math:`\phi_0`
-instead of letting the iteration move it; without it every pass would erode
-the burned area, and the level-set path never rebuilds :math:`\phi` from the
-arrival time. The pseudo-timestep :cpp:`erf.fire.levelset.reinit_dtau`
-defaults to a quarter of the cell size, half the Sussman stability limit.
-:math:`\phi` is clamped to :math:`[-1, 1]` after every iteration.
+with the smoothed sign :math:`S` computed once from the field at call entry.
+:cpp:`erf.fire.levelset.reinit_scheme` selects the discretisation.
+
+``"wrf"`` (default) is WRF-Fire's :cpp:`reinit_ls_rk3`: the Wicker and
+Skamarock (2002) three-stage Runge-Kutta scheme, every stage advancing from the
+field at call entry; flux-form WENO5 on :math:`\phi` within
+:cpp:`erf.fire.levelset.weno_band_cells` of the front and first-order ENO
+elsewhere, its upwind side chosen by the sign of :math:`S` times a fourth-order
+central difference. ``"jiang_peng"`` is Jiang and Peng's (2000) HJ-WENO5 with
+third-order SSP-RK3: WENO is applied to one-sided divided differences (the
+Hamilton-Jacobi form the advection also uses) rather than to :math:`\phi` in
+flux form, and the time integrator is third order for this right-hand side
+where Wicker-Skamarock is second. The pseudo-timestep
+:cpp:`erf.fire.levelset.reinit_dtau` defaults to :math:`0.01\,\Delta x` for
+both, WRF-Fire's value.
+
+Neither scheme corrects the distance in cells that straddle the front, and
+both keep :math:`\phi_{out} = \min(\phi_{out}, \phi_{in})`, so the burned area
+never shrinks; non-burnable cells are left unchanged and their neighbours are
+read through the wall stencil. Both build the gradient from independent
+:math:`x` and :math:`y` one-sided derivatives, which leaves a small error that
+depends on the front's angle to the grid axes.
 
 Non-burnable cells
 ------------------
@@ -432,7 +470,10 @@ masked results are unchanged; it has no effect without a mask.
 The mask is written to the fire plotfile as ``fire_nonburnable``. A fire
 approaching a masked footprint goes around it through whatever burnable
 cells remain; ``Exec/RegTests/FireHybridObstacles`` compares the same
-obstacle deck with the mask off and on.
+obstacle deck with the mask off and on. Suppression actions
+(:ref:`sec:FireSuppression`) add a time-dependent source to the same mask:
+fire lines built at a rate and retardant drops, rebuilt every step and
+combined with the static sources by OR before either path reads it.
 
 Choosing a path
 ---------------
@@ -481,7 +522,9 @@ Perimeter ignition with spin-up
 
 A fire can be started from an observed perimeter instead of a point:
 :cpp:`erf.fire.ignition.polygon_file` lists the vertices and the level set
-is set to the signed distance from that polygon. By default the polygon is
+is set to the signed distance from that polygon (the key takes several files,
+one perimeter each, stamped with the min rule so they are separate fires that
+merge as they grow). By default the polygon is
 stamped at initialisation. :cpp:`erf.fire.ignition.polygon_time` stamps it
 at that time instead, so the atmosphere spins up before the fire exists;
 this is WRF-SFIRE's perimeter time, the way the Community Fire Behavior

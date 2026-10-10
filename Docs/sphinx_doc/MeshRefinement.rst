@@ -77,8 +77,9 @@ that region, i.e. the grids are not decomposed in the z direction; see
    **The vertical decomposition of that region into individual grids** -- whether
    the region is chopped in z into several boxes so that they can be distributed
    across processors -- is yet another question, controlled by
-   ``amr.max_grid_size_z`` and ``amr.refine_grid_layout_z``; see
-   :ref:`subsec:no-vertical-decomposition`.
+   ``amr.no_box_split_dir``, which ERF sets to 2 by default so that no such
+   chopping occurs, and, when that is disabled, by ``amr.max_grid_size_z`` and
+   ``amr.refine_grid_layout_z``; see :ref:`subsec:no-vertical-decomposition`.
 
    A level can therefore be created with the same dz as its parent, spanning the
    full depth of the domain, in boxes that are not split vertically -- and each of
@@ -390,32 +391,6 @@ do so is ``amr.refine_whole_domain_dir = 2``, which makes the fine grids span th
 domain in z wherever the criterion fires; see
 :ref:`subsec:refine-whole-domain-dir`.
 
-The same effect can be obtained with the vertical buffer ``amr.n_error_buf_z``,
-which predates that option.  Before the grids are generated, the set of tagged
-cells is grown by ``amr.n_error_buf`` cells in each direction, and that buffer
-may be set per direction.  If the vertical buffer is at least as large as the
-number of cells in the z direction at the level being tagged, then every tagged
-cell is grown into a full column and the resulting boxes reach from the bottom of
-the domain to the top.  For a domain with 64 cells in the vertical, for example,
-
-::
-
-          amr.n_error_buf_x = 2
-          amr.n_error_buf_y = 2
-          amr.n_error_buf_z = 64
-
-This is the more expensive of the two mechanisms -- the tag arrays are allocated
-with ``n_error_buf`` ghost cells and the buffering is redone at every regrid, so a
-large vertical buffer costs both memory and time -- and the value has to be
-revisited whenever the number of cells in the vertical changes, so
-``amr.refine_whole_domain_dir`` is preferred for new inputs files.
-
-This technique applies only to dynamic refinement: ERF aborts with
-``Don't use n_error_buf > 0 when setting the box explicitly`` if a nonzero
-``n_error_buf`` is combined with an explicitly specified refinement box.  For
-static refinement, use the two-value form described in
-:ref:`subsec:full-depth-refinement` instead.
-
 .. _subsec:refine-whole-domain-dir:
 
 Refining the Whole Domain in One Direction
@@ -448,11 +423,14 @@ Because the clustering is then carried out in one fewer dimension,
 perpendicular to that direction -- here, the fraction of tagged columns in the
 x-y plane.
 
-The region covering the domain in z may still be *chopped* in z into several
-boxes by ``amr.max_grid_size_z`` and ``amr.refine_grid_layout_z``: their union
-always covers the full depth, but an individual box then does not.  With the ERF
-defaults for those two parameters (see :ref:`subsec:no-vertical-decomposition`)
-no such chopping occurs, so each box by itself reaches from the bottom of the
+If splitting in z is allowed -- that is, if ``amr.no_box_split_dir`` is set to
+-1 rather than left at its ERF default of 2, which ERF permits only when no level
+uses implicit acoustic substepping -- then the region covering the
+domain in z may still be *chopped* in z into several boxes by
+``amr.max_grid_size_z`` and ``amr.refine_grid_layout_z``: their union always
+covers the full depth, but an individual box then does not.  With the ERF
+defaults for those parameters (see :ref:`subsec:no-vertical-decomposition`) no
+such chopping occurs, so each box by itself reaches from the bottom of the
 domain to the top, which is what the PBL models and the column-integral
 diagnostics require.
 

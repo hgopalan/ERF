@@ -37,18 +37,19 @@ p("grid_ratio", "Dust grid refinement factor in x and y; every atmosphere box "
   "length must divide by it, and it must equal erf.fire.grid_ratio when the "
   "fire coupling is on", "Integer > 0", "1")
 p("n_size_bins", "Number of particle size bins; each bin is one component of "
-  "the emission flux", "Integer > 0", "3")
-p("bin_diameters", "Per-bin diameter [m]; bin 0 sets the Bagnold base threshold, "
-  "and all bins drive settling, deposition and PM classification; the last "
-  "value repeats when shorter than n_size_bins",
+  "the emission flux", "Integer 1-8", "3")
+p("bin_diameters", "Per-bin diameter of the emitted dust [m], one per bin "
+  "(the count must equal n_size_bins); they drive settling, deposition and "
+  "the PM classes, not the threshold (see saltation_diameter)",
   "Reals", "7.0e-6 2.5e-6 50.0e-6")
 p("particle_density", "Bulk particle density [kg/m³]", "Real > 0", "2650.0")
 p("rho_air", "Air density used in the threshold and saltation flux [kg/m³]",
   "Real > 0", "1.225")
-p("z0_dust", "Roughness length of the emitting surface [m], used by the "
-  "log-law friction velocity of the terrain-corrected wind", "Real > 0", "0.01")
+p("z0_dust", "Roughness length of the emitting surface [m]: the log-law "
+  "friction velocity with use_terrain_wind and terrain_ustar = loglaw; otherwise "
+  "it only bounds zref (a warning says so when a deck sets it)", "Real > 0", "0.01")
 p("zref", "Height at which the wind is taken from the atmosphere [m]; set "
-  "equal to erf.most.zref", "Real > 0", "10.0")
+  "equal to erf.most.zref", "Real > z0_dust, below the domain top", "10.0")
 
 grp("Surface state",
     "Uniform values apply wherever no raster is given. Rasters are ESRI "
@@ -57,13 +58,23 @@ grp("Surface state",
 p("silt_fraction", "Surface silt mass fraction [-]", "Real 0-1", "0.10")
 p("crust_index", "Surface crust strength index; 0 loose, 1 fully crusted",
   "Real 0-1", "0.0")
-p("threshold_A_coeff", "Bagnold fluid-threshold constant A [-] (0.1; 0.0123 is Shao and "
-  "Lu's coefficient of a different formula and gave 8x too low a threshold)", "Real > 0", "0.1")
+p("threshold_model", "Base threshold formula for the saltating grains: shao_lu "
+  "(Shao and Lu 2000 with the cohesion term, 0.204 m/s at 75 um) or bagnold "
+  "(inertial branch only, valid above ~100 um)", "shao_lu or bagnold", "shao_lu")
+p("saltation_diameter", "Diameter of the saltating grains the threshold is evaluated "
+  "for [m]; the bin diameters are the emitted sizes. Until October 2026 the "
+  "threshold was Bagnold's at the 7 um bin-0 diameter (0.0385 m/s), 13x too low",
+  "Real > 0", "75.0e-6")
+p("shao_lu_A_N", "Shao and Lu (2000) coefficient A_N [-]", "Real > 0", "0.0123")
+p("shao_lu_gamma", "Shao and Lu (2000) cohesion parameter gamma [kg/s^2]", "Real >= 0", "1.65e-4")
+p("threshold_A_coeff", "Bagnold fluid-threshold constant A [-] (threshold_model = bagnold)",
+  "Real > 0", "0.1")
 p("ustar_t_base", "Base threshold friction velocity before the modifiers "
-  "[m/s]; negative computes the Bagnold value from bin 0 at startup",
+  "[m/s]; negative computes it from threshold_model at saltation_diameter at "
+  "startup (0.0385 reproduces the pre-October-2026 runs)",
   "Real", "-1.0")
 p("alpha_crust", "Crust factor on the threshold: f_chem carries (1 + "
-  "alpha_crust * crust_index)", "Real >= 0", "0.5")
+  "alpha_crust * crust_index); every modifier multiplies the threshold", "Real >= 0", "0.5")
 p("alpha_efflor", "Efflorescence factor on the threshold: (1 + alpha_efflor "
   "* efflorescence)", "Real >= 0", "0.3")
 p("soil_type_file", "Soil type raster; codes 1-16 STATSGO, 100-104 mine "
@@ -83,7 +94,12 @@ grp("Wind and terrain",
     "surface layer; the ``test_*`` values are the placeholders used when "
     "no atmosphere is coupled.")
 p("use_terrain_wind", "Apply the FARSITE terrain correction to the wind at "
-  "zref and recompute u* from it by the log law", "Boolean", "false")
+  "zref; u* follows it as terrain_ustar says", "Boolean", "false")
+p("terrain_ustar", "How the friction velocity follows the terrain-corrected wind: "
+  "scale multiplies the surface layer's u* by U_corrected / U_raw; loglaw "
+  "(the form until October 2026) re-derives u* = kappa U / ln(zref / z0_dust), "
+  "a neutral law on another roughness that gave 0.70x on flat ground",
+  "scale or loglaw", "scale")
 p("k_ridge", "Ridge speed-up factor of the terrain correction", "Real", "1.5")
 p("k_shelter", "Lee-side shelter factor", "Real", "0.6")
 p("k_valley", "Valley channelling factor", "Real", "0.8")
@@ -106,12 +122,11 @@ p("phreeqc_efflor_var", "Column holding the efflorescence fraction", "String",
   '"efflorescence"')
 p("phreeqc_supp_var", "Column holding the suppression modifier", "String",
   '"suppression_mod"')
-p("phreeqc_metal_var", "Column holding the toxic-metal mass fraction of bin 0",
-  "String", '"metal_as_bin0"')
 p("site_names", "Names of the mine sites; empty means a single global table",
   "Strings", "none")
-p("site_phreeqc_files", "Per-site PHREEQC table; an empty entry uses the global "
-  "table", "Strings", "none")
+p("site_phreeqc_files", "Per-site PHREEQC table read over that site's cells after "
+  "the global one; an empty entry (or no list) keeps the global table there",
+  "Strings", "none")
 p("site_x_lo", "Site bounding-box lower x [m], one per site", "Reals", "none")
 p("site_y_lo", "Site bounding-box lower y [m]", "Reals", "none")
 p("site_x_hi", "Site bounding-box upper x [m]", "Reals", "none")
@@ -129,7 +144,7 @@ grp("Scheduled sources and suppression",
     "layouts are in :ref:`sec:DustSources`.")
 p("blast_schedule_file", "Blast schedule CSV; empty means no blasts", "String", '""')
 p("blast_reactivity", "Multiplier on the injected blast mass for fresh "
-  "surfaces [-]", "Real >= 1", "2.0")
+  "surfaces [-]; below 1 injects less than the charge mass", "Real >= 0", "2.0")
 p("road_schedule_file", "Haul road schedule CSV; empty means no road "
   "emission", "String", '""')
 p("road_diag_file", "Per-road emission CSV", "String", '"dust_road_diag.csv"')
@@ -143,10 +158,17 @@ grp("Atmosphere coupling",
 p("atm_feedback", "Scale on the injected flux; 0 disables injection for "
   "surface-only diagnostics", "Real 0-1", "1.0")
 p("transport_bins_separately", "One 3D scalar per bin instead of a single "
-  "total; only bin 0 is returned to the surface at present", "Boolean", "false")
+  "total; the state carries one dust scalar, so it is accepted only with "
+  "n_size_bins = 1 (more aborts)", "Boolean", "false")
 p("deposition_E0", "Surface collection efficiency of the dry-deposition "
-  "resistance [-]; 3e-3 bare mine surface, 1e-4 paved road, 1e-2 vegetation",
-  "Real > 0", "3.0e-3")
+  "resistance [-]; 3e-3 bare mine surface, 1e-4 paved road, 1e-2 vegetation; "
+  "0 removes the collection term (v_d = v_s)",
+  "Real >= 0", "3.0e-3")
+p("lumped_settling", "Settling and deposition velocity of the single transported "
+  "scalar: mean averages the bins' Stokes velocities weighted by their shares "
+  "of the mass emitted so far (equal until anything is emitted); bin0 (the "
+  "form until October 2026) uses bin 0 alone",
+  "mean or bin0", "mean")
 p("loading_feedback_coeff", "Shao (2001) loading feedback on the threshold "
   "[m³/kg]; 0 disables", "Real >= 0", "0.0")
 p("erf.dust_mrf_Sc_t", "Turbulent Schmidt number of the dust scalar in the "
@@ -160,11 +182,16 @@ p("erf.fire_dust_coupling", "Enable the fire-dust coupling; requires "
   "erf.dust.grid_ratio = erf.fire.grid_ratio", "Boolean", "false")
 p("erf.fire_dust_crust_reduction", "Fraction of the baseline crust index removed in "
   "burned cells each step", "Real 0-1", "0.8")
-p("erf.fire_dust_wind_to_dust", "Raise the dust u* to the log-law value of "
-  "the fire's effective wind where that is larger", "Boolean", "true")
-p("erf.fire_dust_wind_z0", "Roughness length of that log law [m]", "Real > 0", "0.1")
-p("erf.fire_dust_wind_zref", "Reference height of that log law [m]; match "
-  "erf.fire.wind_ref_ht", "Real > 0", "6.1")
+p("erf.fire_dust_wind_to_dust", "Inside the fire perimeter, raise the dust u* to "
+  "the log-law value of the fire's reference wind (fire_wind_ref, at "
+  "erf.fire.wind_ref_ht) where that is larger; outside it the surface layer's u* "
+  "stands", "Boolean", "true")
+p("erf.fire_dust_wind_z0", "Roughness length of that log law [m]; with the fire "
+  "wind feeding the dust a value other than erf.most.z0 is warned about, "
+  "otherwise the key is not read (warned)", "Real > 0", "0.1")
+p("erf.fire_dust_wind_zref", "Reference height of that log law [m]: follows "
+  "erf.fire.wind_ref_ht; with the fire wind feeding the dust a different value "
+  "aborts, otherwise the key is not read (warned)", "= erf.fire.wind_ref_ht", "6.1")
 p("erf.fire_dust_lofting_enabled", "Multiply the emission flux by the "
   "convective lofting factor of the fire heat flux", "Boolean", "false")
 p("erf.fire_dust_lofting_k_loft", "Maximum lofting enhancement [-]", "Real >= 0", "2.0")
@@ -184,13 +211,21 @@ p("erf.mrf_fire_t_excess_cap", "Cap on the thermal excess the fire adds [K]",
   "Real > 0", "50.0")
 
 grp("Output and diagnostics",
-    "Every CSV is written by rank 0 and appended each step; paths are "
+    "Every CSV is written by rank 0 and appended each step; a run without "
+    "erf.restart removes these files first (the log says which), a restart "
+    "drops the rows past the restart step and appends to them; paths are "
     "relative to the run directory. Formats are in :ref:`sec:DustOutput`.")
-p("dust_plot_int", "Steps between dust plotfiles; -1 disables, 0 writes only "
-  "at the final step", "Integer", "-1")
+p("dust_plot_int", "Steps between dust plotfiles; <= 0 writes only the final "
+  "step's plotfile (and the step-0 CSV row is written whatever the value)",
+  "Integer", "-1")
 p("dust_plot_prefix", "Dust plotfile prefix", "String", '"plt_dust_"')
 p("dust_diag_file", "Per-step domain statistics CSV", "String", '"dust_diag.dat"')
 p("dust_naaqs_file", "EPA NAAQS PM2.5 and PM10 CSV", "String", '"dust_naaqs.csv"')
+p("averaging", "The 24-hour PM averages and the STEL: window (the block mean of "
+  "a ring of 24 hourly slots, or 15 slots of the STEL period, the 40 CFR 50 form; "
+  "the exceedance flags compare once the window is full) or exponential "
+  "(the running mean until October 2026, 0.632 C after one window of a constant C)",
+  "window or exponential", "window")
 p("msha_pel_mg_m3", "MSHA permissible exposure limit on the 8-hour TWA "
   "[mg/m³]", "Real > 0", "5.0")
 p("msha_shift_duration_s", "Shift length after which the dose resets [s]",
@@ -204,8 +239,10 @@ p("msha_receptor_y", "Receptor y [m], one per name", "Reals", "none")
 p("cm_fractions", "Critical-material mass fraction per bin [kg/kg]; empty "
   "disables the budget, the last value repeats", "Reals", "none")
 p("cm_budget_file", "Critical-material budget CSV", "String", '"dust_cm_budget.csv"')
+p("cm_budget_int", "Steps between critical-material budget rows", "Integer > 0", "1")
 p("visibility_enable", "Koschmieder visibility from PM10", "Boolean", "false")
-p("visibility_k_ext", "Mass extinction coefficient [m²/kg]", "Real > 0", "4.0e3")
+p("visibility_k_ext", "Mass extinction coefficient [m²/kg]; 300-1000 for mineral dust "
+  "(the default was 4000 until October 2026, 4-13x above that range)", "Real > 0", "600.0")
 p("visibility_road_closure_m", "Haul-road closure threshold [m]", "Real > 0", "300.0")
 p("visibility_warning_m", "Reduced-visibility warning threshold [m]", "Real > 0",
   "1000.0")

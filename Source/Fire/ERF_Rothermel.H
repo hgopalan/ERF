@@ -76,12 +76,21 @@ FuelModelParams get_anderson_fuel_params(int model_id)
 {
     FuelModelParams fp;
 
-    // All fuel loads in lb/ft² (standard Anderson 1982)
-    // SAV in 1/ft (characteristic for 1-hour dead fuel; 10-hr = 109, 100-hr = 30 ft⁻¹ fixed)
+    // All fuel loads in lb/ft² (Anderson 1982, Table 1: t/ac x 2000/43560)
+    // SAV in 1/ft: sigma_d1 is the 1-hour class value of Anderson's Table 1
+    // for every model. The single-class Rothermel path uses it as the fuel-bed
+    // SAV; the BEHAVE path derives the characteristic SAV from the classes
+    // itself (10-hr = 109, 100-hr = 30 ft⁻¹ there). Albini's (1976) tabulated
+    // characteristic SAVs (FM4 1739, FM5 1683, FM7 1552) are NOT used.
+    // The live load of FM2, 4, 5, 7 and 10 is carried in the herbaceous class
+    // (w_lh), with live SAV 1500 1/ft, so the BEHAVE transfer window acts on
+    // it; BehavePlus treats the 13 models as static (no transfer) and files
+    // the live load of FM4, 5, 7 and 10 as woody: a deliberate departure of
+    // this code (the single-class Rothermel path sums the two live classes).
     // Heat content in BTU/lb
     // Particle density in lb/ft³
     // Depth in ft
-    // Reference: wildfire_levelset/src/fuel_database.H (Anderson 13 fuel models)
+    // Reference: Anderson (1982) GTR INT-122, Table 1 (also Albini 1976, Table 7)
 
     switch (model_id) {
     case 1:  // Short grass (1 ft)
@@ -92,8 +101,8 @@ FuelModelParams get_anderson_fuel_params(int model_id)
         fp.rho_p = 32.0;
         break;
 
-    case 2:  // Timber (Grass and Understory)
-        fp.w_d1 = 0.046;   fp.w_d10 = 0.023;  fp.w_d100 = 0.023;
+    case 2:  // Timber (Grass and Understory): 2.00 / 1.00 / 0.50 t/ac dead, 0.50 live
+        fp.w_d1 = 0.092;   fp.w_d10 = 0.046;  fp.w_d100 = 0.023;
         fp.w_lh = 0.023;   fp.w_lw = 0.0;
         fp.sigma_d1 = 3000.0;  fp.sigma_lh = 1500.0;  fp.sigma_lw = 0.0;
         fp.delta = 1.0;    fp.Mx = 0.15;      fp.heat_content = 8000.0;
@@ -108,34 +117,34 @@ FuelModelParams get_anderson_fuel_params(int model_id)
         fp.rho_p = 32.0;
         break;
 
-    case 4:  // Chaparral (6 ft)
+    case 4:  // Chaparral (6 ft): 1-h SAV 2000 (1739 is Albini's characteristic value)
         fp.w_d1 = 0.230;   fp.w_d10 = 0.184;  fp.w_d100 = 0.092;
         fp.w_lh = 0.230;   fp.w_lw = 0.0;
-        fp.sigma_d1 = 1739.0;  fp.sigma_lh = 1500.0;  fp.sigma_lw = 0.0;
+        fp.sigma_d1 = 2000.0;  fp.sigma_lh = 1500.0;  fp.sigma_lw = 0.0;
         fp.delta = 6.0;    fp.Mx = 0.20;      fp.heat_content = 8000.0;
         fp.rho_p = 32.0;
         break;
 
-    case 5:  // Brush (2 ft)
+    case 5:  // Brush (2 ft): 1-h SAV 2000 (1683 is Albini's characteristic value)
         fp.w_d1 = 0.046;   fp.w_d10 = 0.023;  fp.w_d100 = 0.0;
         fp.w_lh = 0.092;   fp.w_lw = 0.0;
-        fp.sigma_d1 = 1739.0;  fp.sigma_lh = 1500.0;  fp.sigma_lw = 0.0;
+        fp.sigma_d1 = 2000.0;  fp.sigma_lh = 1500.0;  fp.sigma_lw = 0.0;
         fp.delta = 2.0;    fp.Mx = 0.20;      fp.heat_content = 8000.0;
         fp.rho_p = 32.0;
         break;
 
-    case 6:  // Dormant Brush, Hardwood Slash
-        fp.w_d1 = 0.069;   fp.w_d10 = 0.115;  fp.w_d100 = 0.115;
+    case 6:  // Dormant Brush, Hardwood Slash: 1.50 / 2.50 / 2.00 t/ac
+        fp.w_d1 = 0.069;   fp.w_d10 = 0.115;  fp.w_d100 = 0.092;
         fp.w_lh = 0.0;     fp.w_lw = 0.0;
         fp.sigma_d1 = 1750.0;  fp.sigma_lh = 1500.0;  fp.sigma_lw = 0.0;
         fp.delta = 2.5;    fp.Mx = 0.25;      fp.heat_content = 8000.0;
         fp.rho_p = 32.0;
         break;
 
-    case 7:  // Southern Rough
+    case 7:  // Southern Rough: 1.13 / 1.87 / 1.50 t/ac dead, ONE live class of 0.37 t/ac
         fp.w_d1 = 0.052;   fp.w_d10 = 0.086;  fp.w_d100 = 0.069;
-        fp.w_lh = 0.017;   fp.w_lw = 0.017;
-        fp.sigma_d1 = 1550.0;  fp.sigma_lh = 1550.0;  fp.sigma_lw = 0.0;
+        fp.w_lh = 0.017;   fp.w_lw = 0.0;
+        fp.sigma_d1 = 1750.0;  fp.sigma_lh = 1500.0;  fp.sigma_lw = 0.0;
         fp.delta = 2.5;    fp.Mx = 0.40;      fp.heat_content = 8000.0;
         fp.rho_p = 32.0;
         break;
@@ -231,9 +240,9 @@ amrex::Real rothermel_wind_cap_ftmin(amrex::Real sigma, bool use_wind_limit) noe
 struct RothermelComputed
 {
     amrex::Real R0;              ///< No-wind, no-slope ROS [m/s]
-    amrex::Real C, B;            ///< Wind factor φ_w = C * U^B
-    amrex::Real beta_ratio_E;    ///< (β/β_opt)^E packing ratio factor
-    amrex::Real beta;            ///< Packing ratio
+    amrex::Real C, B;            ///< Wind factor φ_w = C * U^B * (β/β_op)^-E
+    amrex::Real beta_ratio_E;    ///< (β/β_op)^-E packing ratio factor (Rothermel Eq. 47)
+    amrex::Real beta;            ///< Packing ratio (stored for diagnostics; the kernels read beta_ratio_E and phi_s_const)
     amrex::Real phi_s_const;     ///< Base slope factor (before terrain effects)
     amrex::Real U_max_ftmin;     ///< MEWS wind speed cap [ft/min]
     amrex::Real wind_conv;       ///< m/s to ft/min conversion factor
@@ -289,8 +298,8 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
  *
  * Computes ROS = R0 * (1 + φ_w + φ_s) where:
  * - φ_w is wind factor (uses effective midflame wind after WAF and terrain)
- * - φ_s is slope factor (vectorial combination with wind direction)
- * - Includes MEWS cap on effective wind speed
+ * - φ_s is the slope factor of the slope magnitude (Rothermel Eq. 51)
+ * - Includes the wind-speed cap on the effective wind speed
  *
  * @param[in] ux_eff, uy_eff   Effective midflame wind [m/s] after WAF and terrain
  * @param[in] sx, sy           Terrain slopes [dz/dx, dz/dy]
@@ -308,19 +317,21 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
  *                             (no-op) for the isotropic call sites.
  * @return ROS [m/s]
  *
- * Wind factor:
- *   φ_w = C * U_eff^B * (β/β_opt)^E   where U_eff is effective wind speed [ft/min]
+ * Wind factor (Rothermel Eq. 47):
+ *   φ_w = C * U_eff^B * (β/β_op)^-E   where U_eff is the effective wind speed [ft/min]
+ *   times cos_theta_wind (1 for the isotropic call sites)
  *
- * Slope factor (vectorial combination):
- *   - Compute slope angle θ = atan(|∇z|)
- *   - Project slope elevation gradient in wind direction
- *   - φ_s = tan(θ) * cos(angle_between_wind_and_slope_gradient)
- *   - If slope opposes wind (e.g., upslope): φ_s can be negative (downwind spread)
- *   - φ_s is computed locally; actual terrain forcing comes from terrain wind corrections
+ * Slope factor (Rothermel Eq. 51):
+ *   φ_s = 5.275 β^-0.3 tan²(θ) with tan²θ = |∇z|² capped at 32, times
+ *   cos_theta_slope (1 for the isotropic call sites); never negative. Which
+ *   way the slope faces relative to the spread direction enters only through
+ *   the directional callers (ERF_DirectionalRos.H), not here.
  *
- * MEWS cap:
- *   - If U_eff exceeds U_max_ftmin, use U_max_ftmin for wind factor only
- *   - Preserves steady-state behavior: E ≤ 0.9 * I_R always
+ * Wind-speed cap:
+ *   - U_eff above U_max_ftmin is replaced by U_max_ftmin in the wind factor
+ *   - U_max_ftmin is this code's own fuel-class rule (300 ft/min for
+ *     sigma > 1000 1/ft, 500 ft/min otherwise, rothermel_wind_cap_ftmin),
+ *     not Rothermel's U_max = 0.9 I_R (Eq. 87; Andrews 2018 "wind limit")
  *   - With erf.fire.use_wind_limit = false U_max_ftmin is the largest Real
  */
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -390,20 +401,26 @@ void compute_ros_field(
     const amrex::MultiFab& fire_slopes,
     const RothermelComputed& rc);
 
-/// Entries in the per-fuel Rothermel table: code 0 (non-burnable) plus FBFM 1-13.
-inline constexpr int ROTHERMEL_TABLE_SIZE = 54;   ///< FUEL_SLOT_COUNT: 0 non-burnable, 1-13 Anderson, 14-53 Scott-Burgan
+/// Entries in the per-fuel Rothermel table, one per fuel table slot.
+inline constexpr int ROTHERMEL_TABLE_SIZE = 70;   ///< FUEL_SLOT_COUNT: 0 non-burnable, 1-13 Anderson, 14-53 Scott-Burgan, 54-69 deck-defined
+///< ERF_FuelModels.H static_asserts this against FUEL_SLOT_COUNT; this header cannot include it (it is included by it).
 
 /**
  * @brief Build a per-fuel-code lookup table of Rothermel coefficients
  *
- * Mirrors build_fuel_balbi_table(): indexed by integer fuel code, with index 0
- * holding a zeroed entry (R0 = 0, no spread) and 1-13 the Anderson models at
- * the given dead fuel moistures.
+ * Mirrors build_fuel_balbi_table(): indexed by fuel table slot, with index 0
+ * holding a zeroed entry (R0 = 0, no spread), 1-13 the Anderson models, 14-53
+ * the Scott-Burgan models and 54-69 the deck-defined ones, at the given dead
+ * fuel moistures.
  *
  * @param[in] moisture_1hr   1-hour dead fuel moisture [fraction]
  * @param[in] moisture_10hr  10-hour dead fuel moisture [fraction]
  * @param[in] moisture_100hr 100-hour dead fuel moisture [fraction]
  * @param[in] use_wind_limit Apply the MEWS cap (erf.fire.use_wind_limit)
+ * @param[in] fp_tbl         Fuel properties of every slot
+ *                           (build_fuel_params_slot_table), which is how the
+ *                           deck-defined models of ERF_CustomFuel.H reach the
+ *                           coefficients; nullptr takes the published sets only
  * @param[in] use_rothermel_a_formula Select the reaction-velocity A formula;
  *                        see compute_rothermel_params()
  *                        (erf.fire.reaction_velocity_formula = "rothermel")
@@ -418,6 +435,7 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
     int fuel_set = 0,
     amrex::Real moisture_live = -1.0,
     bool use_wind_limit = true,
+    const FuelModelParams* fp_tbl = nullptr,
     bool use_rothermel_a_formula = false,
     bool wrf_bmst_compat = false);
 
