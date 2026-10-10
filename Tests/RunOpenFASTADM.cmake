@@ -12,7 +12,10 @@
 #
 # Variables: MPIEXEC, MPIEXEC_NUMPROC_FLAG, MPIEXEC_PREFLAGS, NRANKS, TEST_EXE, CONFIG, INPUT,
 # WORKING_DIRECTORY, FCOMPARE, PLTFILE, PLOT_GOLD, RTOL, ATOL, FLOW_CSV, FLOW_GOLD, SIGDIGITS,
-# TURBINE_CSV, SOURCE_CSV, and optionally FORCE_COLUMN (default thrust_x) and LOG_COLUMNS (the
+# TURBINE_CSV, SOURCE_CSV, and optionally ZERO_EXPONENT (log values below 10^this count as zero,
+# default -6: the transverse velocities and forces that are roundoff on one machine and a few
+# digits of roundoff on another, against a 10 m/s flow and loads of meganewtons), FORCE_COLUMN
+# (default thrust_x) and LOG_COLUMNS (the
 # columns of FLOW_CSV compared with the gold, a ;-list; default all). FORCE_COLUMN = none is for a
 # turbine that adds no forcing (mode = none): SOURCE_CSV must then not be written, and thrust_x in
 # TURBINE_CSV must be non-zero in every row, so the turbine was stepped and carried a load.
@@ -32,6 +35,9 @@ if(NOT DEFINED NRANKS OR "${NRANKS}" STREQUAL "")
 endif()
 if(NOT DEFINED SIGDIGITS OR "${SIGDIGITS}" STREQUAL "")
     set(SIGDIGITS 10)
+endif()
+if(NOT DEFINED ZERO_EXPONENT OR "${ZERO_EXPONENT}" STREQUAL "")
+    set(ZERO_EXPONENT -6)
 endif()
 if(NOT DEFINED FORCE_COLUMN OR "${FORCE_COLUMN}" STREQUAL "")
     set(FORCE_COLUMN "thrust_x")
@@ -127,7 +133,7 @@ if(NOT "${LOG_COLUMNS}" STREQUAL "")
     set(_gold "${WORKING_DIRECTORY}/log_gold_columns.txt")
     set(_run "${WORKING_DIRECTORY}/log_run_columns.txt")
 endif()
-erf_compare_data_logs("${_gold}" "${_run}" ${SIGDIGITS} 2 logs_agree log_message)
+erf_compare_data_logs("${_gold}" "${_run}" ${SIGDIGITS} 2 logs_agree log_message "${ZERO_EXPONENT}")
 if(NOT logs_agree)
     file(READ "${WORKING_DIRECTORY}/${FLOW_CSV}" contents)
     message(FATAL_ERROR "RunOpenFASTADM.cmake: ${FLOW_CSV} differs from the gold log: ${log_message}\n${contents}")
