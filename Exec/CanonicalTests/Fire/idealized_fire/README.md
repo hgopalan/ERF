@@ -44,14 +44,19 @@ rotation, so this equals running the precursor with the rotated geostrophic wind
 
 The two columns settle differently under the same 67 m/s forcing:
 
-| | MRF | YSUNew |
+| | MRF (2026-10-09) | YSUNew (2026-09) |
 |---|---|---|
-| 10 m wind after 24 h | 24.61 m/s | 28.40 m/s |
-| 80 m wind | 35.88 m/s | 37.94 m/s |
-| friction velocity | 2.186 m/s | 2.524 m/s |
-| diagnosed PBL height | 3392 m | 2851 m |
-| rotated geostrophic wind for the deck | `61.23815 -27.18252` | `60.18186 -29.44731` |
-| wall time, 1 rank | 170 s | 177 s |
+| 10 m wind after 24 h | 25.72 m/s | 28.40 m/s |
+| 80 m wind | 41.32 m/s | 37.94 m/s |
+| friction velocity | 2.279 m/s | 2.524 m/s |
+| diagnosed PBL height | 4513 m | 2851 m |
+| rotated geostrophic wind for the deck | `64.81900 -16.95574` | `60.18186 -29.44731` |
+| wall time, 1 rank | 210 s (shared machine) | 177 s |
+
+The MRF column and the committed `inflow_mrf.txt` / `sounding_mrf.txt` were regenerated
+2026-10-09 on the validated code; the column this README carried until then (24.61 m/s,
+u* 2.186 m/s, a 3392 m PBL) was measured in 2026-09 on the code of that date and the
+difference was not traced to a change. The YSUNew column was not rerun.
 
 Both are far windier and deeper than the HRRR analysis below. YSUNew mixes momentum down
 harder, which is why its 10 m wind is 15 % stronger and its fire runs faster.
