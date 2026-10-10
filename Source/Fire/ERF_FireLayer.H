@@ -63,7 +63,9 @@ class ERF;
  * pipeline each timestep.
  *
  * Owned by ERF as std::unique_ptr<FireLayer> m_fire_layer, created in
- * ERF::InitData_post() if erf.fire.enable = true.
+ * ERF::initializeFire() (from the ERF constructor) if erf.fire.enable = true,
+ * and set up by initialize() in ERF::InitData_post(); nothing may read its
+ * fire inputs (m_params) in between.
  */
 
 /**
@@ -1024,7 +1026,7 @@ private:
     amrex::Real                              m_ignition_r = 20.0;
 
     // Configuration
-    FireParams                               m_params;
+    FireParams                               m_params{FireParams::DefaultsOnly{}};  ///< set by initialize()
 
 
     /// Reach estimate on the first step with a burning cell: distance to each

@@ -790,6 +790,18 @@ struct FireParams
     // the lagged flux lives on the atmospheric grid without the fuel codes.
     bool  smoke_heat_from_fuel   = false;
 
+    /// Tag for a FireParams that keeps the defaults above and reads no input.
+    struct DefaultsOnly {};
+
+    /**
+     * @brief The defaults, without reading ParmParse
+     *
+     * For a copy that is overwritten before use (FireLayer's, set by
+     * FireLayer::initialize from ERF's): reading the inputs again would run
+     * every start-up check and print every warning a second time.
+     */
+    explicit FireParams(DefaultsOnly) {}
+
     /**
      * @brief Construct FireParams from ParmParse
      *
