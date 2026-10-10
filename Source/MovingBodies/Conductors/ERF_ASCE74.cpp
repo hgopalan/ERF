@@ -70,6 +70,7 @@ WireWindLoad wire_wind_load (Exposure e, double gust, double z, double chord, do
     w.sag = static_cast<double>(cat.sag);
     w.tension = static_cast<double>(cat.end_tension);
     w.blowout = w.sag * std::sin(w.swing);
+    w.solved = cat.solved;
     return w;
 }
 

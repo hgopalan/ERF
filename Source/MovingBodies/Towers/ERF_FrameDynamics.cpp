@@ -6,6 +6,10 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
+#include <iterator>
+#include <tuple>
+#include <memory>
+#include <map>
 
 #include <AMReX.H>
 #include <AMReX_BLassert.H>
@@ -13,6 +17,32 @@
 namespace erf_towers {
 
 namespace {
+
+/**
+ * K_eff = K (1 + 2 a1/h) + M (4/h^2 + 2 a0/h) of frame f factored, shared by every FrameDynamics of the
+ * same frame, damping and step: the towers of one type step with one factorisation, not one each. The
+ * cache holds weak pointers, so a factorisation lives as long as a FrameDynamics uses it. Not thread-safe:
+ * the towers are stepped one after another on each rank.
+ */
+std::shared_ptr<const DenseCholesky> effective_stiffness (const Frame& f, double a0, double a1, double h)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(std::isfinite(a0) && std::isfinite(a1) && std::isfinite(h),
+                                     "FrameDynamics: the Rayleigh coefficients and the step must be finite");
+    using Key = std::tuple<const Frame*, double, double, double>;
+    static std::map<Key, std::weak_ptr<const DenseCholesky>> cache;
+    const Key key{&f, a0, a1, h};
+    const auto found = cache.find(key);
+    if (found != cache.end()) {
+        if (auto k = found->second.lock()) { return k; }
+    }
+    for (auto it = cache.begin(); it != cache.end();) { it = it->second.expired() ? cache.erase(it) : std::next(it); }
+    const double c0 = 4.0 / (h * h), c1 = 2.0 / h;
+    auto k = std::make_shared<DenseCholesky>();
+    const long bad = k->factor(f.assemble_free(1.0 + c1 * a1, c0 + c1 * a0), f.num_free_dofs());
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(bad < 0, "FrameDynamics::step: the effective stiffness is not positive definite");
+    cache[key] = k;
+    return k;
+}
 
 constexpr double two_pi = 2.0 * 3.14159265358979323846;
 
@@ -284,9 +314,8 @@ void FrameDynamics::step (double h, const std::vector<double>& node_loads, doubl
 {
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(std::isfinite(h) && h > 0.0, "FrameDynamics::step: the step must be finite and positive (s)");
     const double c0 = 4.0 / (h * h), c1 = 2.0 / h, c2 = 4.0 / h;
-    if (!(std::abs(h - m_h) <= 1.0e-14 * h)) {
-        const long bad = m_keff.factor(m_frame.assemble_free(1.0 + c1 * m_a1, c0 + c1 * m_a0), m_frame.num_free_dofs());
-        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(bad < 0, "FrameDynamics::step: the effective stiffness is not positive definite");
+    if (!m_keff || !(std::abs(h - m_h) <= 1.0e-14 * h)) {
+        m_keff = effective_stiffness(m_frame, m_a0, m_a1, h);
         m_h = h;
     }
     const std::size_t n = m_u.size();
@@ -303,7 +332,7 @@ void FrameDynamics::step (double h, const std::vector<double>& node_loads, doubl
     std::vector<double> r(n);
     for (std::size_t i = 0; i < n; ++i) { r[i] = f[i] + mw[i] + kw[i]; }
     std::vector<double> b = to_free(r);
-    m_keff.solve(b);
+    m_keff->solve(b);
     const std::vector<double> un = to_full(b);
     for (std::size_t i = 0; i < n; ++i) {
         const double an = c0 * (un[i] - m_u[i]) - c2 * m_v[i] - m_a[i];

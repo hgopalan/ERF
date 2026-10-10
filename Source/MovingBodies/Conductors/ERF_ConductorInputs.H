@@ -132,6 +132,11 @@ struct LineInputs
     /** The straight distance between the attachment points of span k (k from 0) (m). */
     amrex::Real chord (int k = 0) const;
     /**
+     * The straight distance between the points the conductor of span k hangs from (conductor_point:
+     * the bottoms of the insulator strings at the towers), the chord its unstretched length spans (m).
+     */
+    amrex::Real conductor_chord (int k = 0) const;
+    /**
      * With stringing_tension, set every span's unstretched length so that it hangs in still air with
      * that horizontal tension H, as a line is strung. Between the points the conductor hangs from
      * (the bottoms of the insulator strings at the towers), a chord c over a horizontal distance h,
@@ -197,6 +202,7 @@ struct Catenary
     amrex::Real horizontal_tension{0.0}; //!< H (N)
     amrex::Real end_tension{0.0};        //!< tension at the attachments (N)
     amrex::Real stretched_length{0.0};   //!< the line's length under its own weight (m)
+    bool solved{false};                  //!< a tension matching the length was found (false: strains near 50 % and above)
 };
 
 /**
@@ -204,13 +210,21 @@ struct Catenary
  * stiffness EA hanging between two points at the same height a chord c apart: the catenary
  * parameter a = H / w solves 2 a sinh(c / 2a) = L_s, where the stretched length L_s exceeds L by
  * the strain integrated along the span, (H / EA) (c/2 + (a/2) sinh(c/a)). The unstretched length
- * this gives falls as H grows, so H is found by bisection, for a slack span (L > c) or a taut one
- * held by its stretch (L <= c) alike. Used to check MoorDyn's still-air shape.
+ * this gives falls as H grows where the line can hang (end tensions below EA; above it a slack
+ * span's turns back down and counts as too slack), so H is found by bisection, for a slack span
+ * (L > c) or a taut one held by its stretch (L <= c) alike; `solved` is false when no H matches L
+ * (strains near 50 % and above). Used to check MoorDyn's still-air shape.
  * Units: chord, length (m); weight_per_length (N/m, net of the air's buoyancy); axial_stiffness (N).
  * Returns: all zeros when any argument is not positive.
  */
 Catenary elastic_catenary (amrex::Real chord, amrex::Real length, amrex::Real weight_per_length,
                            amrex::Real axial_stiffness);
+
+/**
+ * Whether the horizontal chord from a to b runs along +x (its y extent within 1e-6 of its x extent):
+ * there a span's ERF-frame y drag is its drag across the span, so the two statistics are one.
+ */
+bool along_plus_x (const std::array<amrex::Real,3>& a, const std::array<amrex::Real,3>& b);
 
 /**
  * The first entry of v that is not finite, with v read as points of per_point components each: an
@@ -241,8 +255,8 @@ std::string first_nonfinite (const std::vector<T>& v, std::size_t per_point, con
  *   erf.conductors.lines            = S1 S2        (the conductor lines' names; absent or empty: the module is off)
  *   erf.conductors.diagnostics_dir  = conductors   (where the MoorDyn input files and the diagnostics go)
  *   erf.conductors.diagnostics_int  = 1            (>= 1; write a diagnostics row every this many steps)
- *   erf.conductors.anchor_level     = -1           (0 .. amr.max_level, or -1: the finest; the level the lines are
- *                                                   stepped on and the wind is sampled on)
+ *   erf.conductors.anchor_level     = -1           (0 .. amr.max_level, or -1: amr.max_level; the level the lines are
+ *                                                   stepped on and the wind is sampled on, which must exist)
  *   erf.conductors.air_density      = 1.225        (kg/m^3, > 0, the fluid density MoorDyn applies the drag with)
  *   erf.conductors.substeps         = 1            (>= 1; MoorDyn calls per ERF step for lines on fixed supports, the
  *                                                   wind held over the step; lines on moving towers take at least
@@ -262,9 +276,11 @@ std::string first_nonfinite (const std::vector<T>& v, std::size_t per_point, con
  *   erf.conductors.node_output_int  = 0            (>= 0; write every node of every line, insulator strings included,
  *                                                   to <output_root>_nodes.dat every this many steps; 0: never)
  *   erf.conductors.drag_on_flow     = false        (put the force the lines and the towers' members exert on the air,
- *                                                   minus the air's drag on them, into the flow as a momentum source)
+ *                                                   minus the air's drag on them, into the flow as a momentum source
+ *                                                   on the anchor level, which must then be amr.max_level)
  *   erf.conductors.epsilon          = 2.0          (> 0; the radius eps of the kernel exp(-r^2/eps^2) that spreads that
- *                                                   force, cut off at 3 eps, in units of the anchor level's x spacing dx)
+ *                                                   force, cut off at 3 eps, in units of the anchor level's x spacing dx;
+ *                                                   needs drag_on_flow = true, a warning with drag_on_flow = false given)
  *   erf.conductors.flashover_distance = 1.0        (m, > 0; two lines closer than this are flagged as clashing, and a
  *                                                   conductor this close to a transformer)
  *   erf.conductors.transformers     = T1 T2        (boxes on the terrain the lines end on, each with its own block;
@@ -294,7 +310,8 @@ std::string first_nonfinite (const std::vector<T>& v, std::size_t per_point, con
  *                                                   74's 2.7; needs a gust_type)
  *   erf.conductors.gust_span_length_scale = 67.056 (m, > 0; L_s in the spans' B = 1/(1 + 0.8 L/L_s) and the towers'
  *                                                   B_t = 1/(1 + 0.375 h/L_s); default ASCE 74's 220 ft of open
- *                                                   country, exposure C (51.816 m, 170 ft, for B); needs a gust_type)
+ *                                                   country, exposure C, or that of asce74_exposure when it is
+ *                                                   given (51.816 m, 170 ft, for B); needs a gust_type)
  *   erf.conductors.gust_event_time  = 600.         (s; when the event's front crosses gust_event_origin; needs and
  *                                                   is needed by gust_type = event)
  *   erf.conductors.gust_event_speed = 12.          (m/s, > 0; how fast the front moves; needs and is needed by
@@ -381,7 +398,7 @@ struct ConductorInputs
     const LineInputs& tower_owner (const LineInputs& s) const;
     /** The tower type of a line's towers (those of the line it shares them with), or null when they have none. */
     const erf_towers::TowerType* tower_type (const LineInputs& s) const;
-    /** Whether a line's towers move (their type has a frequency): MoorDyn then takes their cross-arms as coupled points. */
+    /** Whether a line's towers move (their type has a frequency or a frame): MoorDyn then takes their cross-arms as coupled points. */
     bool towers_move (const LineInputs& s) const
     {
         const erf_towers::TowerType* t = tower_type(s);
@@ -430,8 +447,9 @@ struct ConductorInputs
      * @param max_level amr.max_level
      * @param anchor_level the level the lines are stepped on, already resolved (not -1)
      * @param fpe_traps an amrex.fpe_trap_* input is on (MoorDyn's initial-condition solver overflows under a trap)
+     * @param drag_on_flow erf.conductors.drag_on_flow, which needs the anchor level to be the finest
      */
-    static std::string validate_solver (int max_level, int anchor_level, bool fpe_traps);
+    static std::string validate_solver (int max_level, int anchor_level, bool fpe_traps, bool drag_on_flow = false);
     /**
      * Whether MoorDyn's frame holds the whole domain: surface_offset must exceed prob_hi_z, so that
      * every node lies below MoorDyn's free surface at ERF z = surface_offset (MoorDyn applies no fluid
@@ -439,7 +457,8 @@ struct ConductorInputs
      * flat bottom at ERF z = -surface_offset. Units: m. Returns an empty string, else the message.
      */
     static std::string validate_frame (amrex::Real surface_offset, amrex::Real prob_lo_z, amrex::Real prob_hi_z);
-    /** The level the lines are stepped on: requested, or max_level when requested is -1. */
+    /** The level the lines are stepped on: requested, or max_level when requested is -1; Conductors::require_anchor_level
+     *  checks that it exists. */
     static int resolve_anchor_level (int requested, int max_level) { return requested < 0 ? max_level : requested; }
 };
 

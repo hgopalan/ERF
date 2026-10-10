@@ -1996,6 +1996,7 @@ ERF::InitData_post ()
     // the lines from the checkpoint, and with drag_on_flow the force the lines and the towers'
     // members exert on the air is spread again as it was at the checkpoint
     if (conductors && !conductors->ground_set()) {
+        conductors->require_anchor_level(finest_level);
         const int lev = conductors->anchor_level();
         if (solverChoice.terrain_type == TerrainType::ImmersedForcing) {
             // an immersed terrain stands on a flat mesh: the lines take the terrain's height from the

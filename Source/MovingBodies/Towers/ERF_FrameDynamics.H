@@ -9,6 +9,7 @@
  */
 
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -47,7 +48,8 @@ void rayleigh_coefficients (double f1, double zeta1, double f2, double zeta2, do
  * vibration keeps its energy exactly; each mode advances at the angular frequency
  * (2/h) atan(omega h/2) per step h. The damping is Rayleigh's, C = a0 M + a1 K. The loads (forces on
  * the nodes, gravity) are those at the end of each step. The effective stiffness
- * K + (2/h) C + (4/h^2) M is factored once per step size.
+ * K + (2/h) C + (4/h^2) M is factored once per step size, and shared by every FrameDynamics of the same
+ * frame, Rayleigh coefficients and step (the towers of a type share one frame).
  *
  * State vectors hold one value per degree of freedom (num_dofs(); fixed ones 0), frame axes:
  * displacement (m, rad), velocity (m/s, rad/s), acceleration (m/s^2, rad/s^2).
@@ -74,6 +76,8 @@ public:
     const std::vector<double>& displacement () const { return m_u; }
     const std::vector<double>& velocity () const { return m_v; }
     const std::vector<double>& acceleration () const { return m_a; }
+    /** The factorisation of K_eff the last step used (null before the first): shared by the dynamics of one frame and step. */
+    const DenseCholesky* effective_stiffness_factor () const { return m_keff.get(); }
     /** The kinetic energy v^T M v / 2 (J). */
     double kinetic_energy () const;
     /** The strain energy u^T K u / 2 (J), the support springs included. */
@@ -94,7 +98,7 @@ private:
     double m_t{0.0};
     std::vector<double> m_u, m_v, m_a;
     double m_h{0.0};                  //!< the step the effective stiffness is factored for (s); 0: none yet
-    DenseCholesky m_keff;
+    std::shared_ptr<const DenseCholesky> m_keff;   //!< K_eff factored for m_h, shared with the dynamics of the same frame
 };
 
 } // namespace erf_towers

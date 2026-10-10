@@ -2530,6 +2530,23 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
     add_test_conductors(Conductors_DragOnFlow_MoorDyn Conductors_DragOnFlow "plt00010" "S1.dat"
                         "S1.dat.moordyn.gold" 6 Conductors_DragOnFlow_MoorDyn TOTALS "conductors/total_load.dat")
   endif()
+  # The same span on a refined level: a static level-1 box that stops below the domain's top, its
+  # steps subcycled; the lines step on it, take its wind and put their drag into its flow. The
+  # source must integrate to the force on the air, the span's log and the two-level plotfile match
+  # their golds, and the restart parity (its checkpointing run going on past the checkpoint) carries
+  # the lines and their source across the checkpoint.
+  if(ERF_MOORDYN_USE_STUB)
+    add_test_conductors(Conductors_TwoLevel Conductors_TwoLevel "plt00010" "S1.dat"
+                        "S1.dat.gold" 8 Conductors_TwoLevel TOTALS "conductors/total_load.dat")
+    set(_two_level_restart Conductors_TwoLevel_Restart)
+  else()
+    add_test_conductors(Conductors_TwoLevel_MoorDyn Conductors_TwoLevel "plt00010" "S1.dat"
+                        "S1.dat.moordyn.gold" 6 Conductors_TwoLevel_MoorDyn TOTALS "conductors/total_load.dat")
+    set(_two_level_restart Conductors_TwoLevel_Restart_MoorDyn)
+  endif()
+  add_test_restart_parity(${_two_level_restart} Conductors_TwoLevel 5 10
+      DATALOG "S1.dat conductors/total_load.dat" DATALOG_SIGDIGITS 10 OVERRUN)
+  set_tests_properties(${_two_level_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # A circuit: three phases 6 m apart hanging from insulator strings over two suspension towers,
   # and a shield wire clamped above them, across the same sheared crosswind. The middle phase's
   # middle span, its strings and their statistics, the shield wire's middle span and the
@@ -2602,7 +2619,8 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # and its line's pull, and MoorDyn moves the cross-arms as coupled points. The towers' loads and
   # cross-arm displacements, the statistics of the hilltop line's first tower and the middle span of
   # L1 must match their golds; the flow is Conductors_Terrain's, since nothing goes back into it. The
-  # restart parity carries the towers' sway across the checkpoint.
+  # restart parity carries the towers' sway and the coupling's log across the checkpoint; its
+  # checkpointing run goes on past the checkpoint (OVERRUN), so the restart must drop those rows.
   set(_moving_logs "conductors/towers.dat conductors/tower_L1_t1_stats.csv")
   if(ERF_MOORDYN_USE_STUB)
     add_test_conductors(Conductors_MovingTowers Conductors_MovingTowers "plt00010" "conductors/L1_span2.dat"
@@ -2613,30 +2631,37 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
                         "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_moving_logs}" GOLD_SUFFIX ".moordyn.gold")
     set(_moving_restart Conductors_MovingTowers_Restart_MoorDyn)
   endif()
+  # coupling.dat every 2 steps: the row after the step-5 checkpoint counts steps 5 and 6 across the restart
   add_test_restart_parity(${_moving_restart} Conductors_MovingTowers 5 10
-      DATALOG "conductors/L1_span2.dat conductors/towers.dat conductors/tower_L1_t1_stats.csv"
-      DATALOG_SIGDIGITS 10)
+      DATALOG "conductors/L1_span2.dat conductors/towers.dat conductors/tower_L1_t1_stats.csv conductors/coupling.dat"
+      DATALOG_SIGDIGITS 10 OVERRUN COMMON_OPTIONS "erf.conductors.diagnostics_int=2")
   set_tests_properties(${_moving_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # The same lines on towers that bend as their frame model: every lattice tower stands on the
   # SubDyn frame of lattice_frame.dat (76 beam members on four fixed legs), its members' drag and
   # its line's pull carried onto the frame's nodes, and MoorDyn moves the cross-arms as coupled
   # points; lattice_members.dat gives the members' design data, so each is checked against its
-  # strength. The towers' loads, footings (from the frame's support reactions), cross-arm
-  # displacements and largest member utilisation, the statistics of L1's first tower and the middle
-  # span of L1 must match their golds; the flow is Conductors_Terrain's. The restart parity carries
-  # the frames' Newmark state across the checkpoint.
+  # strength. Case T has no joints where its diagonals cross, so its 9 m X diagonals are over the
+  # bracing limit (KL/r 200), flagged, and govern on the elastic buckling branch at a utilisation
+  # above 1: the gold tests the checks, not a sound design (Conductors_GeneratedTowers bolts its
+  # diagonals where they cross). The towers' loads, footings (from the frame's support reactions), cross-arm
+  # displacements and largest member utilisation, the statistics of L1's first tower, its members'
+  # design strengths and the middle span of L1 must match their golds; the flow is
+  # Conductors_Terrain's. The restart parity carries the frames' Newmark state, the members'
+  # statistics and the coupling's log across the checkpoint, past which its checkpointing run goes on.
+  set(_frame_logs "${_moving_logs} conductors/tower_L1_t1_members.csv")
   if(ERF_MOORDYN_USE_STUB)
     add_test_conductors(Conductors_FrameTowers Conductors_FrameTowers "plt00010" "conductors/L1_span2.dat"
-                        "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_moving_logs}" GOLD_SUFFIX ".gold")
+                        "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_frame_logs}" GOLD_SUFFIX ".gold")
     set(_frame_restart Conductors_FrameTowers_Restart)
   else()
     add_test_conductors(Conductors_FrameTowers_MoorDyn Conductors_FrameTowers "plt00010" "conductors/L1_span2.dat"
-                        "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_moving_logs}" GOLD_SUFFIX ".moordyn.gold")
+                        "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_frame_logs}" GOLD_SUFFIX ".moordyn.gold")
     set(_frame_restart Conductors_FrameTowers_Restart_MoorDyn)
   endif()
+  set(_frame_parity_logs "conductors/L1_span2.dat conductors/towers.dat conductors/tower_L1_t1_stats.csv")
+  string(APPEND _frame_parity_logs " conductors/tower_L1_t1_members_stats.csv conductors/coupling.dat")
   add_test_restart_parity(${_frame_restart} Conductors_FrameTowers 5 10
-      DATALOG "conductors/L1_span2.dat conductors/towers.dat conductors/tower_L1_t1_stats.csv"
-      DATALOG_SIGDIGITS 10)
+      DATALOG "${_frame_parity_logs}" DATALOG_SIGDIGITS 10 OVERRUN)
   set_tests_properties(${_frame_restart} PROPERTIES LABELS "regression;restart-parity;conductors")
   # The same lines on towers that bend as a frame ERF generates from the lattice type's dimensions
   # (8 panels of angles with crossed bracing and a cross-arm truss) with the steel at 500 C, every
@@ -2752,8 +2777,21 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
                  Conductors_Terrain.i
                  "erf.conductors.gust_type = event needs erf.conductors.gust_event_time"
                  "erf.conductors.gust_type=event erf.conductors.gust_event_speed=20")
+  # the lines' drag goes into the anchor level only: a finer level would neither feel it nor keep it
+  add_test_abort(Conductors_DragOnCoarseAnchorAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_TwoLevel
+                 Conductors_TwoLevel.i
+                 "erf.conductors.drag_on_flow puts the lines' drag into the flow of the anchor level only, level 0"
+                 "erf.conductors.anchor_level=0")
+  # amr.max_level = 1 with nothing tagged: the lines' level does not exist at the start
+  add_test_abort(Conductors_AnchorLevelMissingAbort
+                 ${CMAKE_CURRENT_SOURCE_DIR}/test_files/Conductors_TwoLevel
+                 Conductors_TwoLevel.i
+                 "which does not exist now .the finest level is 0."
+                 "erf.box1.max_level=0")
   set_tests_properties(Conductors_SpansKeyAbort Conductors_AttachmentOutsideAbort Conductors_GeneratedFrameAbort
                        Conductors_MemberFileAbort Conductors_GustNeedsRANSAbort Conductors_GustKeyAbort
                        Conductors_GustPrescribedWindAbort Conductors_GustDragOnFlowAbort Conductors_GustEventTimeAbort
+                       Conductors_DragOnCoarseAnchorAbort Conductors_AnchorLevelMissingAbort
                        PROPERTIES LABELS "regression;conductors")
 endif()

@@ -79,8 +79,21 @@ inline Closest closest_polylines (const std::vector<amrex::Real>& P, const std::
     Closest best;
     const std::size_t np = P.size() / 3, nq = Q.size() / 3;
     auto at = [] (const std::vector<Real>& v, std::size_t i) { return std::array<Real,3>{{v[3*i], v[3*i+1], v[3*i+2]}}; };
+    // a segment pair whose bounding boxes lie farther apart than the closest approach found so far cannot
+    // come closer: skipped, without changing the answer (lines far apart cost one box test per pair)
+    auto box_gap = [&] (std::size_t i, std::size_t j) {
+        Real g2 = 0.0;
+        for (std::size_t d = 0; d < 3; ++d) {
+            const Real plo = std::min(P[3*i+d], P[3*(i+1)+d]), phi = std::max(P[3*i+d], P[3*(i+1)+d]);
+            const Real qlo = std::min(Q[3*j+d], Q[3*(j+1)+d]), qhi = std::max(Q[3*j+d], Q[3*(j+1)+d]);
+            const Real g = std::max({Real(0.0), qlo - phi, plo - qhi});
+            g2 += g * g;
+        }
+        return std::sqrt(g2);
+    };
     for (std::size_t i = 0; i + 1 < np; ++i) {
         for (std::size_t j = 0; j + 1 < nq; ++j) {
+            if (box_gap(i, j) > best.distance) { continue; }
             const Closest c = closest_segments(at(P, i), at(P, i + 1), at(Q, j), at(Q, j + 1));
             if (c.distance < best.distance) { best = c; }
         }
@@ -142,6 +155,14 @@ inline Closest closest_polyline_box (const std::vector<amrex::Real>& P,
     Closest best;
     auto at = [&] (std::size_t i) { return std::array<Real,3>{{P[3*i], P[3*i+1], P[3*i+2]}}; };
     for (std::size_t i = 0; i + 1 < P.size() / 3; ++i) {
+        // a segment whose bounding box lies farther from the box than the closest approach so far is skipped
+        Real g2 = 0.0;
+        for (std::size_t d = 0; d < 3; ++d) {
+            const Real slo = std::min(P[3*i+d], P[3*(i+1)+d]), shi = std::max(P[3*i+d], P[3*(i+1)+d]);
+            const Real g = std::max({Real(0.0), lo[d] - shi, slo - hi[d]});
+            g2 += g * g;
+        }
+        if (std::sqrt(g2) > best.distance) { continue; }
         const Closest c = closest_segment_box(at(i), at(i + 1), lo, hi);
         if (c.distance < best.distance) { best = c; }
     }

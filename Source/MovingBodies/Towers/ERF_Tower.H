@@ -94,8 +94,9 @@ public:
     const std::vector<amrex::Real>& node_velocities () const { return m_vel; }
     /**
      * The horizontal displacement of the cross-arm (m, ERF frame), taken from its first drag node
-     * (every cross-arm node moves alike in OneModeTower). A line hanging from an attachment at
-     * another height moves by TowerModel::attachment_displacement() instead.
+     * (every cross-arm node moves alike in OneModeTower; a frame tower's cross-arm twists, and its
+     * centre's displacement is TowerModel::arm_centre_displacement()). A line hanging from an
+     * attachment at another height moves by TowerModel::attachment_displacement() instead.
      */
     std::array<amrex::Real,3> arm_displacement () const;
 

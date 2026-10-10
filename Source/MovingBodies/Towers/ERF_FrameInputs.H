@@ -93,7 +93,7 @@ struct FrameInputs
     std::vector<FrameSection> sections;
     std::vector<FrameMember> members;
     std::vector<FrameSupport> supports;
-    std::vector<int> interface_joints;           //!< SubDyn's INTERFACE JOINTS ids, kept for reference
+    std::vector<int> interface_joints;           //!< SubDyn's INTERFACE JOINTS ids (a tower's frame: one, its cross-arm's centre)
     std::vector<FrameMass> masses;
     /**
      * The steel's temperature of each member (C, input order; empty: 20 C everywhere), which reduces its
@@ -111,13 +111,21 @@ struct FrameInputs
 };
 
 /**
+ * Read a whole text file into text: the I/O rank reads it and broadcasts it, so every rank parses the
+ * same contents and the file system serves one reader. Collective: every rank calls it. False, on
+ * every rank, when the file cannot be read.
+ */
+bool read_text_file (const std::string& path, std::string& text);
+
+/**
  * Read a SubDyn input file (OpenFAST 5.0 layout). Returns an empty string on success, else a
  * message naming the file, the section and the problem. Read: FEMMod (1 or 3) and NDiv; joints
  * (cantilever joints only); base reaction joints with fixed or free DOFs and an optional SSI file
  * (relative to the SubDyn file's directory); interface joints; beam members of type 1/1c, 1r and 4
  * with equal property sets at both ends; the circular, rectangular and arbitrary property tables;
  * concentrated masses. Cable, rigid-link and spring members are refused; their tables, the
- * direction cosine matrices, the damping inputs and the output sections are skipped.
+ * direction cosine matrices, the damping inputs and the output sections are skipped. Collective:
+ * the files are read through read_text_file().
  */
 std::string read_subdyn (const std::string& path, FrameInputs& in);
 

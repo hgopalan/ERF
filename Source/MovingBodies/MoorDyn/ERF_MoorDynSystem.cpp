@@ -66,9 +66,10 @@ bool fpe_traps_requested ()
     amrex::ParmParse pp("amrex");
     bool traps = false;
     for (const char* key : {"fpe_trap_invalid", "fpe_trap_zero", "fpe_trap_overflow"}) {
-        int trap = 0;
+        // a bool, as AMReX reads it: true, false, 1 and 0 all parse (an int query refused "true")
+        bool trap = false;
         pp.query(key, trap);
-        traps = traps || (trap != 0);
+        traps = traps || trap;
     }
     return traps;
 }

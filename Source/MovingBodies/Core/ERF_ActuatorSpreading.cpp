@@ -108,12 +108,14 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
     const bool has_detj = (detJ_cc != nullptr);
 
     // Work per point over the faces within its reach, so the cost is npts x (6 eps / dx)^3
-    // rather than nfaces x npts. A point near a periodic boundary is visited again as its
+    // (npts x (6 eps / dx)^2 x nz with z_phys_nd) rather than nfaces x npts. A point near a periodic boundary is visited again as its
     // periodic image(s), which is how the kernel wraps.
     const int reach_cells[3] = {static_cast<int>(std::ceil(Real(3.0) * epsilon / dx[0])) + 1,
                                 static_cast<int>(std::ceil(Real(3.0) * epsilon / dx[1])) + 1,
                                 static_cast<int>(std::ceil(Real(3.0) * epsilon / dx[2])) + 1};
-    // the index box of the faces of grid dir within reach of a point at (px,py,pz)
+    // the index box of the faces of grid dir within reach of a point at (px,py,pz); with z_phys_nd
+    // (terrain-following or stretched) a face's height is not its index times dz, so the box takes
+    // every k and kernel_weight's cut-off at 3 eps, measured in physical heights, picks the faces
     auto reach_box = [&](int dir, Real px, Real py, Real pz) {
         const Real pc[3] = {px, py, pz};
         IntVect lo, hi;
@@ -121,6 +123,10 @@ spread_forces (const std::vector<Real>& pos, const std::vector<Real>& force, Rea
             const Real fi = (pc[d] - plo[d]) / dx[d] - ((d == dir) ? Real(0.0) : Real(0.5));
             lo[d] = static_cast<int>(std::floor(fi)) - reach_cells[d];
             hi[d] = static_cast<int>(std::floor(fi)) + reach_cells[d] + 1;
+        }
+        if (has_znd) {
+            lo[2] = dlo[2];
+            hi[2] = dhi[2] + 1;
         }
         return Box(lo, hi, IntVect::TheDimensionVector(dir));
     };

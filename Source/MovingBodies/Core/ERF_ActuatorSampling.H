@@ -27,9 +27,10 @@ namespace erf_actuator {
  * Every rank interpolates the points whose containing cell lies in one of its valid boxes,
  * reading the neighbours from the ghost cells, and the results are summed across ranks; the
  * velocity fields must therefore have at least one filled ghost cell, and z_phys_nd one ghost
- * node, on the velocities' boxes and distribution. A point outside the domain, or one found by no
- * rank or by more than one, aborts with its coordinates: the caller owns the points and must keep
- * them inside the domain.
+ * node, on the velocities' boxes and distribution. In a periodic direction a point is moved by
+ * whole periods into the domain; a point on the domain's upper x or y face belongs to the last
+ * cell. A point outside the domain otherwise, or one found by no rank or by more than one, aborts
+ * with its coordinates: the caller owns the points and must keep them inside the domain.
  *
  * @param[in] U,V,W face-centred velocities on one level, ghost cells filled (m/s)
  * @param[in] z_phys_nd nodal physical heights (m), or nullptr on a uniform-dz mesh
@@ -44,6 +45,13 @@ void sample_velocity (const amrex::MultiFab& U,
                       const amrex::Geometry& geom,
                       const std::vector<amrex::Real>& pos,
                       std::vector<amrex::Real>& vel);
+
+/**
+ * The points (3 coordinates each, m) with their coordinates in every periodic direction moved by
+ * whole periods into [prob_lo, prob_hi): the image the boxes hold, so that a point that has crossed
+ * a periodic seam is sampled on the far side.
+ */
+std::vector<amrex::Real> wrap_periodic (const std::vector<amrex::Real>& pos, const amrex::Geometry& geom);
 
 /**
  * Sample one component of a cell-centred field at a set of points: bilinear between the four
@@ -68,8 +76,8 @@ void sample_cell_scalar (const amrex::MultiFab& mf, int comp,
  * Return the height of the terrain surface (the k = 0 node plane of z_phys_nd, bilinear between
  * the four mesh nodes around each point's (x, y)) under a set of points; prob_lo z everywhere on
  * a uniform-dz mesh (z_phys_nd null), where no point is checked. Otherwise the same ownership
- * rules and reduction as sample_velocity(): the points must lie inside the domain horizontally,
- * a point on the domain's upper x or y face belonging to the last cell; z is ignored.
+ * rules, periodic images and reduction as sample_velocity(): the points must lie inside the domain
+ * horizontally, a point on the domain's upper x or y face belonging to the last cell; z is ignored.
  *
  * @param[in] pos 3*n positions (m)
  * @param[out] h n terrain heights (m), the same on every rank on return
@@ -83,10 +91,31 @@ void terrain_heights (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& g
  * and the spreader the kernel's reach, and on a refined level that is not the whole domain. In a
  * periodic direction the needed cells wrap across the seam to the domain's other side; in a
  * non-periodic one they are clamped to the domain. Returns false and names the first point
- * outside in `first_outside`.
+ * outside in `first_outside`. On a terrain-following or stretched mesh a point's k is not its
+ * height over dz, so z is checked as `z` says: Reach (the cells within reach of the height over dz,
+ * for a flat, uniform mesh), Footprint (the reach across only, at any height: the sampler then finds
+ * a point above or below the grids by itself), or Column (for the spreading, whose kernel would
+ * otherwise be cut where the grids stop: the reach across over every cell the heights within reach
+ * may lie in, from the mesh's bounds `zb` (mesh_z_bounds), or over the whole height without them).
+ * Not with a periodic z.
  */
+enum class CoverZ { Reach, Footprint, Column };
+
+/** The lowest and highest ground and the smallest and largest spacing of the levels (m) of a mesh. */
+struct ZBounds {
+    amrex::Real ground_lo{0.0}, ground_hi{0.0}, dz_lo{0.0}, dz_hi{0.0};
+};
+
+/**
+ * The bounds of a terrain-following or stretched level's heights, from its z_phys_nd (nodal, one
+ * component, on every rank alike): a height Z lies in a cell k with floor((Z - ground_hi) / dz_hi)
+ * <= k <= floor((Z - ground_lo) / dz_lo).
+ */
+ZBounds mesh_z_bounds (const amrex::MultiFab& z_phys_nd, const amrex::Geometry& geom);
+
 bool points_covered_by (const amrex::BoxArray& ba, const amrex::Geometry& geom,
-                        const std::vector<amrex::Real>& pos, amrex::Real reach, std::string& first_outside);
+                        const std::vector<amrex::Real>& pos, amrex::Real reach, std::string& first_outside,
+                        CoverZ z = CoverZ::Reach, const ZBounds* zb = nullptr);
 
 } // namespace erf_actuator
 

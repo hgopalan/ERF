@@ -26,7 +26,9 @@ tower-local axes: origin at the base centre, x along the line, y along the cross
 interface joint is the cross-arm's centre (joint 21), the point the test's lines hang from.
 `caseT/towerT_members.dat`, written by `make_cases.py`, is its member design file for ERF's member
 checks (`ERF_MemberChecks.H`), copied to the test as `lattice_members.dat`: angles whose areas are
-within 2.5 % of the arbitrary sections'.
+within 2.5 % of the arbitrary sections'. Case T has no joints where its diagonals cross, so its 9 m X
+diagonals are over the bracing slenderness limit and govern on the elastic buckling branch, at a
+utilisation above 1: the file tests the checks, not a sound design.
 
 Cases A, B and C have one interface joint, the peak (joint 17), locked to the transition piece, and
 the driver's reference point is at that joint. Cases T and G have theirs at the cross-arm's centre,

@@ -8,6 +8,9 @@ Writes, into the output directory:
   input_sounding      the same profile as ERF's input sounding (surface pressure in hPa)
   network.inputs      the erf.conductors block: the tower type, the transformers and the lines between them
 
+With --network_only it writes only terrain_hills.txt and network.inputs, for a directory whose runs
+bring their own inflow and sounding (the LES of les/).
+
 Hills are Gaussian bumps at random places; transformers stand on some hilltops and on flat ground
 at random places, and a minimum spanning tree of lines joins them. Each line is a section dead-ended
 on its two transformers, hanging from insulator strings (clamped to the towers with --insulator 0)
@@ -236,6 +239,8 @@ def write_line(f, a, nm, r, owner, kind):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=".", help="directory the four files are written to")
+    ap.add_argument("--network_only", action="store_true",
+                    help="write only terrain_hills.txt and network.inputs, keeping the directory's inflow_profile and input_sounding")
     ap.add_argument("--seed", type=int, default=2026, help="random seed: the same arguments and seed give the same case")
     ap.add_argument("--lx", type=float, default=3000.0, help="domain length along x (m)")
     ap.add_argument("--ly", type=float, default=2000.0, help="domain length along y (m)")
@@ -305,13 +310,14 @@ def main():
     zl = np.minimum(zs, a.inversion)
     u = ustar / KAPPA * np.log((zl + a.z0) / a.z0)
     th = 300.0 + a.lapse * np.maximum(zs - a.inversion, 0.0)
-    with open(os.path.join(a.out, "inflow_profile"), "w") as f:
-        for zz, uu, tt in zip(zs, u, th):
-            f.write(f"{zz:.1f} {uu:.6f} 0.0 0.0 {tt:.4f}\n")
-    with open(os.path.join(a.out, "input_sounding"), "w") as f:
-        f.write("1000.0 300.0 0.0\n")
-        for zz, uu, tt in zip(zs, u, th):
-            f.write(f"{zz:.1f} {tt:.4f} 0.0 {uu:.6f} 0.0\n")
+    if not a.network_only:
+        with open(os.path.join(a.out, "inflow_profile"), "w") as f:
+            for zz, uu, tt in zip(zs, u, th):
+                f.write(f"{zz:.1f} {uu:.6f} 0.0 0.0 {tt:.4f}\n")
+        with open(os.path.join(a.out, "input_sounding"), "w") as f:
+            f.write("1000.0 300.0 0.0\n")
+            for zz, uu, tt in zip(zs, u, th):
+                f.write(f"{zz:.1f} {tt:.4f} 0.0 {uu:.6f} 0.0\n")
 
     pts = make_transformers(rng, a, hills)
     edges = spanning_tree(pts)

@@ -27,6 +27,7 @@
 
 #include <gtest/gtest.h>
 
+#include "../ERF_GTestTempDir.H"
 #include "ERF_ConductorInputs.H"
 #include "ERF_ConductorLine.H"
 #include "ERF_MoorDynSystem.H"
@@ -36,6 +37,22 @@ using erf_conductors::ConductorLine;
 using erf_conductors::LineInputs;
 
 namespace {
+
+// a scratch root drawn once per test process (ERF_GTestTempDir.H): the fixed names below it are this
+// process's alone, so ctest -j and the shuffled rerun never share them; removed when the process exits
+const std::filesystem::path& gtest_scratch_root ()
+{
+    struct Root {
+        std::filesystem::path p;
+        ~Root () { std::error_code ec; std::filesystem::remove_all(p, ec); }
+    };
+    static const Root root{[] {
+        const std::filesystem::path p = erf_gtest_temp_path("erf_gtest_conductorverification");
+        std::filesystem::create_directories(p);
+        return p;
+    }()};
+    return root.p;
+}
 
 constexpr double pi = 3.14159265358979323846;   // MSVC has no M_PI
 constexpr double g = 9.81;
@@ -47,14 +64,14 @@ LineInputs drake (const std::string& name)
     s.end_a = {{100.0, 500.0, 30.0}};
     s.end_b = {{400.0, 500.0, 30.0}};
     s.lengths = {301.5}; s.diameter = 0.0281; s.mass_per_length = 1.628; s.axial_stiffness = 3.0e7;
-    s.output_root = (std::filesystem::temp_directory_path() / "erf_gtest_conductor_verification" / name).string();
+    s.output_root = (gtest_scratch_root() / "erf_gtest_conductor_verification" / name).string();
     return s;
 }
 
 std::unique_ptr<ConductorLine> make (const std::string& name, ConductorInputs& in)
 {
     in.air_density = 1.2;
-    in.diagnostics_dir = (std::filesystem::temp_directory_path() / "erf_gtest_conductor_verification").string();
+    in.diagnostics_dir = (gtest_scratch_root() / "erf_gtest_conductor_verification").string();
     return std::make_unique<ConductorLine>(drake(name), in, g, in.diagnostics_dir + "/" + name + ".moordyn.txt");
 }
 
@@ -136,11 +153,12 @@ TEST(ConductorVerification, SuspensionStringsSwingToTheWindSpanOverWeightSpanAng
     if (erf_moordyn::is_stub()) { GTEST_SKIP() << "needs the real MoorDyn-C: the stub hangs its strings at the span's swing"; }
     // three equal spans over two suspension towers: each string carries half of each span next to
     // it, and the spans either side balance their pull along the line, so the string swings across
-    // the line to tan(theta) = (q L + q_i L_i / 2) / (w L + W_i / 2), the transverse load of its wind
-    // span over the vertical load of its weight span, plus half the string's own wind load and weight
+    // the line to tan(theta) = (q L + q_i L_i cos(theta) / 2) / (w L + W_i / 2), the moments about the
+    // string's top of its wind span and weight span, its own weight, and its own drag q_i L_i cos^2(theta)
+    // normal to it at half its length (the swung string sees the normal wind U cos(theta))
     ConductorInputs in;
     in.air_density = 1.2;
-    in.diagnostics_dir = (std::filesystem::temp_directory_path() / "erf_gtest_conductor_verification").string();
+    in.diagnostics_dir = (gtest_scratch_root() / "erf_gtest_conductor_verification").string();
     LineInputs s = drake("section");
     s.end_b = {{1000.0, 500.0, 30.0}};
     s.towers = {{{400.0, 500.0, 30.0}}, {{700.0, 500.0, 30.0}}};
@@ -166,12 +184,13 @@ TEST(ConductorVerification, SuspensionStringsSwingToTheWindSpanOverWeightSpanAng
     const double w = (s.mass_per_length - rho * 0.25 * pi * s.diameter * s.diameter) * g;
     const double qi = 0.5 * rho * LineInputs::insulator_drag_coefficient * s.insulator_diameter * U * U;
     const double Wi = (s.insulator_mass - rho * 0.25 * pi * s.insulator_diameter * s.insulator_diameter * Li) * g;
-    const double theta = std::atan((q * L + 0.5 * qi * Li) / (w * L + 0.5 * Wi));
+    double theta = std::atan((q * L + 0.5 * qi * Li) / (w * L + 0.5 * Wi));
+    for (int it = 0; it < 50; ++it) { theta = std::atan((q * L + 0.5 * qi * Li * std::cos(theta)) / (w * L + 0.5 * Wi)); }
     const double mean = sum / n;
     RecordProperty("string_swing_deg", std::to_string(mean * 180.0 / pi));
     RecordProperty("wind_span_over_weight_span_deg", std::to_string(theta * 180.0 / pi));
     RecordProperty("largest_along_line_deg", std::to_string(along * 180.0 / pi));
-    EXPECT_NEAR(mean / theta, 1.0, 0.01) << "mean string swing " << mean * 180.0 / pi << " deg, wind span / weight span "
+    EXPECT_NEAR(mean / theta, 1.0, 0.002) << "mean string swing " << mean * 180.0 / pi << " deg, wind span / weight span "
                                          << theta * 180.0 / pi << " deg";
     EXPECT_LT(along, 0.01) << "the spans either side balance the pull along the line";
 }
@@ -205,7 +224,7 @@ TEST(ConductorVerification, ASuspensionTowerTakesTheWindSpanAndTheWeightSpan)
     // it takes half of each, with nothing shifted onto a dead end
     ConductorInputs in;
     in.air_density = 1.2;
-    in.diagnostics_dir = (std::filesystem::temp_directory_path() / "erf_gtest_conductor_verification").string();
+    in.diagnostics_dir = (gtest_scratch_root() / "erf_gtest_conductor_verification").string();
     LineInputs s = drake("tower_loads");
     s.end_b = {{1300.0, 500.0, 30.0}};
     s.towers = {{{400.0, 500.0, 30.0}}, {{700.0, 500.0, 30.0}}, {{1000.0, 500.0, 30.0}}};

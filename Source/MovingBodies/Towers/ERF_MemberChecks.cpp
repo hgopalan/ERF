@@ -261,8 +261,9 @@ const char* role_name (MemberRole role)
 
 std::string read_member_designs (const std::string& path, std::vector<MemberDesign>& designs)
 {
-    std::ifstream f(path);
-    if (!f) { return "cannot read the member design file '" + path + "'"; }
+    std::string text;
+    if (!read_text_file(path, text)) { return "cannot read the member design file '" + path + "'"; }
+    std::istringstream f(text);
     designs.clear();
     std::string line;
     std::size_t ln = 0;

@@ -12,6 +12,8 @@
 #include <sstream>
 #include <utility>
 
+#include <AMReX_ParallelDescriptor.H>
+
 namespace erf_towers {
 
 namespace {
@@ -153,21 +155,33 @@ std::string read_ssi (const std::string& path, FrameSupport& s)
 {
     static const char* knames[21] = {"KXX", "KXY", "KYY", "KXZ", "KYZ", "KZZ", "KXTX", "KYTX", "KZTX", "KTXTX", "KXTY",
                                      "KYTY", "KZTY", "KTXTY", "KTYTY", "KXTZ", "KYTZ", "KZTZ", "KTXTZ", "KTYTZ", "KTZTZ"};
-    std::ifstream f(path);
-    if (!f) { return "cannot read the SSI file '" + path + "'"; }
+    std::string text;
+    if (!read_text_file(path, text)) { return "cannot read the SSI file '" + path + "'"; }
+    std::istringstream f(text);
     std::string line;
+    int line_no = 0, entries = 0;
     while (std::getline(f, line)) {
+        ++line_no;
         const auto t = tokens(line);
-        if (t.size() < 2) { continue; }
+        if (t.empty()) { continue; }
         double v = 0.0;
+        // comment and header lines start with text; an entry is a value then its name
         if (!to_number(t[0], v)) { continue; }
-        std::string name = upper(t[1]);
+        std::string name = (t.size() >= 2) ? upper(t[1]) : std::string();
         const bool is_mass = !name.empty() && name[0] == 'M';
         if (is_mass) { name[0] = 'K'; }
+        bool known = false;
         for (int i = 0; i < 21; ++i) {
-            if (name == knames[i]) { (is_mass ? s.mass : s.stiffness)[static_cast<std::size_t>(i)] = v; }
+            if (name == knames[i]) { (is_mass ? s.mass : s.stiffness)[static_cast<std::size_t>(i)] = v; known = true; }
         }
+        if (!known) {
+            return "the SSI file '" + path + "', line " + std::to_string(line_no) + ": '" + (t.size() >= 2 ? t[1] : std::string()) +
+                   "' is not one of Kxx Kxy Kyy Kxz Kyz Kzz Kxtx Kytx Kztx Ktxtx Kxty Kyty Kzty Ktxty Ktyty Kxtz Kytz Kztz Ktxtz "
+                   "Ktytz Ktztz or their M names";
+        }
+        ++entries;
     }
+    if (entries == 0) { return "the SSI file '" + path + "' holds no stiffness or mass entry (a value then its name per line)"; }
     return std::string();
 }
 
@@ -185,10 +199,30 @@ const FrameSection* FrameInputs::section (int id, SectionShape shape) const
     return nullptr;
 }
 
+bool read_text_file (const std::string& path, std::string& text)
+{
+    long n = -1;
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        std::ifstream f(path, std::ios::binary);
+        if (f) {
+            std::ostringstream all;
+            all << f.rdbuf();
+            text = all.str();
+            n = static_cast<long>(text.size());
+        }
+    }
+    amrex::ParallelDescriptor::Bcast(&n, 1, amrex::ParallelDescriptor::IOProcessorNumber());
+    if (n < 0) { return false; }
+    text.resize(static_cast<std::size_t>(n));
+    if (n > 0) { amrex::ParallelDescriptor::Bcast(&text[0], static_cast<std::size_t>(n), amrex::ParallelDescriptor::IOProcessorNumber()); }
+    return true;
+}
+
 std::string read_subdyn (const std::string& path, FrameInputs& in)
 {
-    std::ifstream f(path);
-    if (!f) { return "cannot read the SubDyn file '" + path + "'"; }
+    std::string text;
+    if (!read_text_file(path, text)) { return "cannot read the SubDyn file '" + path + "'"; }
+    std::istringstream f(text);
     std::vector<std::string> lines;
     std::string line;
     while (std::getline(f, line)) { if (!line.empty() && line.back() == '\r') { line.pop_back(); } lines.push_back(line); }
@@ -340,7 +374,12 @@ std::string read_subdyn (const std::string& path, FrameInputs& in)
     for (std::size_t i = 0; i < rows.size(); ++i) {
         FrameMass m;
         double v[10] = {};
+        // SubDyn's 5 columns (joint, mass, three inertias) or 11 (the products of inertia and the centre's offset too)
         const std::size_t nv = (rows[i].size() >= 11) ? 10 : 4;
+        if (rows[i].size() != 5 && rows[i].size() < 11) {
+            return at_line(path, row_lines[i]) + "a concentrated mass row has " + std::to_string(rows[i].size()) +
+                   " values; give 5 (joint id, JMass, JMXX JMYY JMZZ) or 11 (also JMXY JMXZ JMYZ MCGX MCGY MCGZ)";
+        }
         if (!to_int(rows[i][0], m.joint) || !numbers(rows[i], 1, nv, v)) {
             return at_line(path, row_lines[i]) +
                    "a concentrated mass row needs a joint id, JMass and JMXX JMYY JMZZ (and optionally JMXY JMXZ JMYZ MCGX MCGY MCGZ)";
@@ -426,6 +465,11 @@ std::string FrameInputs::validate () const
         if (joint_index(s.joint) < 0) { return key + "is not in STRUCTURE JOINTS"; }
         if (!sj.insert(s.joint).second) { return key + "appears twice"; }
         for (const double k : s.stiffness) { if (!std::isfinite(k)) { return key + "has a non-finite SSI stiffness"; } }
+        for (const double k : s.mass) { if (!std::isfinite(k)) { return key + "has a non-finite SSI mass"; } }
+        if (std::none_of(s.fixed.begin(), s.fixed.end(), [] (bool b) { return b; }) &&
+            std::all_of(s.stiffness.begin(), s.stiffness.end(), [] (double k) { return k == 0.0; })) {
+            return key + "restrains nothing: every DOF is free (flag 0) and it has no SSI spring";
+        }
         if (!s.ssi_file.empty() && std::all_of(s.fixed.begin(), s.fixed.end(), [] (bool b) { return b; })) {
             return key + "has an SSI file but no free DOF: the spring acts on free DOFs only (flag 0)";
         }
@@ -453,6 +497,11 @@ std::string FrameInputs::validate () const
         for (const double v : m.offset) {
             if (!std::isfinite(v)) {
                 return where + ": the concentrated mass at joint " + std::to_string(m.joint) + " has a non-finite offset";
+            }
+        }
+        for (const double v : m.inertia) {
+            if (!std::isfinite(v)) {
+                return where + ": the concentrated mass at joint " + std::to_string(m.joint) + " has a non-finite inertia";
             }
         }
     }

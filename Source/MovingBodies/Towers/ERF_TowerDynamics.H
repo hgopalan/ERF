@@ -47,6 +47,22 @@ public:
     {
         step(dt, node_force, std::vector<std::array<amrex::Real,3>>{line_force});
     }
+    /**
+     * Advance by dt with the lines' pulls at the start and at the end of the step (the drag
+     * held over it), as the coupling with MoorDyn gives them. By default the tower takes the
+     * mean pull held over the step, which a model that integrates a held load exactly
+     * (OneModeTower) needs; a model whose integrator takes the end-of-step load overrides it.
+     */
+    virtual void step_between (amrex::Real dt, const std::vector<amrex::Real>& node_force,
+                               const std::vector<std::array<amrex::Real,3>>& line_start,
+                               const std::vector<std::array<amrex::Real,3>>& line_end)
+    {
+        std::vector<std::array<amrex::Real,3>> mean(line_end.size());
+        for (std::size_t a = 0; a < mean.size(); ++a) {
+            for (std::size_t d = 0; d < 3; ++d) { mean[a][d] = amrex::Real(0.5) * (line_start[a][d] + line_end[a][d]); }
+        }
+        step(dt, node_force, mean);
+    }
     /** A drag node's displacement from where it stands unloaded (m, ERF frame; horizontal only, z = 0, in OneModeTower). */
     virtual std::array<amrex::Real,3> displacement (std::size_t node) const = 0;
     /** A drag node's velocity (m/s, ERF frame; horizontal only in OneModeTower). */
@@ -63,8 +79,19 @@ public:
      * For OneModeTower, the frequency of its one mode on its compliant foundation, sqrt(K/M) / (2 pi).
      */
     virtual amrex::Real frequency () const = 0;
-    /** The state to checkpoint. OneModeTower: {q_x, q_y, v_x, v_y, Q_x, Q_y} (m, m/s, N). */
+    /** The state to checkpoint. OneModeTower: {q_x, q_y, v_x, v_y, Q_x, Q_y, Q_end_x, Q_end_y} (m, m/s, N). */
     virtual std::vector<double> state () const = 0;
+    /**
+     * The displacement of the cross-arm's centre (m, ERF frame) into x: false when the model leaves it to
+     * Tower::arm_displacement() (OneModeTower, whose cross-arm nodes all move alike).
+     */
+    virtual bool arm_centre_displacement (std::array<amrex::Real,3>& /*x*/) const { return false; }
+    /**
+     * Why a checkpointed state cannot continue this run although it fits the model (state() of the run
+     * that wrote it): an empty string when it can. A frame tower refuses members heated differently from
+     * the inputs'; a one-mode tower takes any state that fits.
+     */
+    virtual std::string restart_mismatch (const std::vector<double>& /*saved*/) const { return std::string(); }
     /** Restore a state from state(): returns false, changing nothing, when the values do not fit the model or are not finite. */
     virtual bool set_state (const std::vector<double>& s) = 0;
     /**
@@ -124,6 +151,13 @@ public:
     /** Aborts naming the tower when dt is not positive or the generalized load is not finite. */
     void step (amrex::Real dt, const std::vector<amrex::Real>& node_force,
                const std::vector<std::array<amrex::Real,3>>& line_force) override;
+    /**
+     * The mean pull held over the step, integrated exactly; the inertia the footings take at the
+     * step's end (inertial_force()) is that under the end pull, the load the foundation sees then.
+     */
+    void step_between (amrex::Real dt, const std::vector<amrex::Real>& node_force,
+                       const std::vector<std::array<amrex::Real,3>>& line_start,
+                       const std::vector<std::array<amrex::Real,3>>& line_end) override;
     std::array<amrex::Real,3> displacement (std::size_t node) const override;
     std::array<amrex::Real,3> velocity (std::size_t node) const override;
     std::array<amrex::Real,3> inertial_force (std::size_t node) const override;
@@ -151,7 +185,11 @@ public:
     const std::array<double,2>& v () const { return m_v; }
 
 private:
-    double acceleration (int d) const { return (m_Q[d] - 2.0 * m_zeta * m_omega * m_M * m_v[d] - m_K * m_q[d]) / m_M; }
+    /** The generalized force of the drag on the nodes and the lines' pull at the attachments (N); aborts when not finite. */
+    std::array<double,2> generalized_force (const std::vector<amrex::Real>& node_force,
+                                            const std::vector<std::array<amrex::Real,3>>& line_force) const;
+    /** The acceleration of the mode at the end of the last step, under the load then (m/s^2). */
+    double acceleration (int d) const { return (m_Q_end[d] - 2.0 * m_zeta * m_omega * m_M * m_v[d] - m_K * m_q[d]) / m_M; }
 
     std::string m_name;                    //!< the tower's name, for messages
     std::string m_type;                    //!< its type's name, for messages
@@ -166,6 +204,7 @@ private:
     std::array<double,2> m_q{{0.0, 0.0}};  //!< cross-arm displacement (m)
     std::array<double,2> m_v{{0.0, 0.0}};  //!< cross-arm velocity (m/s)
     std::array<double,2> m_Q{{0.0, 0.0}};  //!< generalized force held over the last step (N)
+    std::array<double,2> m_Q_end{{0.0, 0.0}};  //!< generalized force at the end of the last step (N)
 };
 
 } // namespace erf_towers

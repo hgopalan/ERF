@@ -127,10 +127,16 @@ public:
     /**
      * Build and factor the frame, each member's E and G reduced for its temperature (FrameInputs::temperature,
      * EN 1993-1-2's k_E). Returns null with err set when the inputs are invalid
-     * (FrameInputs::validate) or the structure is a mechanism, naming the joint (or member node)
-     * and the degree of freedom that nothing holds.
+     * (FrameInputs::validate), the structure is a mechanism, naming the joint (or member node)
+     * and the degree of freedom that nothing holds, or it has more than max_free_dofs free degrees of
+     * freedom.
      */
     static std::unique_ptr<Frame> create (const FrameInputs& in, std::string& err);
+    /**
+     * The most free degrees of freedom a frame may have: its stiffness and mass are dense matrices, a
+     * few of them held at once on every rank (288 MB each at this size) and factored in O(n^3).
+     */
+    static constexpr std::size_t max_free_dofs = 6000;
 
     const FrameInputs& inputs () const { return m_in; }
     std::size_t num_nodes () const { return m_x.size(); }
@@ -156,10 +162,16 @@ public:
      * and the support springs' masses.
      */
     std::vector<double> assemble_free (double cK, double cM) const;
-    /** K u for a displacement u of every degree of freedom (num_dofs(); springs included): N, N m. */
-    std::vector<double> apply_stiffness (const std::vector<double>& u) const;
-    /** M a for an acceleration a of every degree of freedom (num_dofs(); concentrated and spring masses included): N, N m. */
-    std::vector<double> apply_mass (const std::vector<double>& a) const;
+    /**
+     * K u for a displacement u of every degree of freedom (num_dofs()): N, N m. The support springs
+     * are included unless with_springs is false.
+     */
+    std::vector<double> apply_stiffness (const std::vector<double>& u, bool with_springs = true) const;
+    /**
+     * M a for an acceleration a of every degree of freedom (num_dofs(), concentrated masses
+     * included): N, N m. The support springs' masses are included unless with_springs is false.
+     */
+    std::vector<double> apply_mass (const std::vector<double>& a, bool with_springs = true) const;
     /**
      * The load on every degree of freedom (num_dofs(), N and N m): node_loads (empty: none) and,
      * when gravity > 0 (m/s^2), the members' weight as element loads and the concentrated masses'

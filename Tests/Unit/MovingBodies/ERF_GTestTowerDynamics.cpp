@@ -8,6 +8,8 @@
 //   F (1/K_b + H^2/k_r + 1/k_l).
 // - ALoadSpreadUpTheBodyDrivesItByTheShape: the hand value of the midpoint sum of p (z/H)^2.
 // - TheFoundationTakesTheLoadsLessTheInertia: swaying freely, its base shear is omega^2 q sum m phi.
+// - BetweenTwoPullsItMovesUnderTheMeanAndLoadsItsFootingsWithTheEnd: step_between integrates the mean
+//   of the start and end pulls held over the step, and the inertia it reports is that under the end pull.
 // - TheWindDampsItsSwayByTheDragRelativeToTheMembers: by sum phi^2 rho Cf w L U / (2 M omega) more.
 // - ItsStateRestoresTheSameMotion, and a non-finite state is refused.
 // - ALineOnThePeakMovesAndPullsByTheShapeThere.
@@ -212,6 +214,35 @@ TEST(OneModeTower, TheFoundationTakesTheLoadsLessTheInertia)
     const auto R = tw.foundation();
     EXPECT_NEAR(R.force[0] / 3000.0, 1.0, 1.0e-6);
     EXPECT_NEAR(R.overturning / (3000.0 * 30.0), 1.0, 1.0e-6);
+}
+
+TEST(OneModeTower, BetweenTwoPullsItMovesUnderTheMeanAndLoadsItsFootingsWithTheEnd)
+{
+    const Tower tw = standing(swaying());
+    OneModeTower between(tw, Real(g)), held(tw, Real(g));
+    const P3 F0{{Real(0.0), Real(0.0), Real(0.0)}}, F1{{Real(4000.0), Real(-1000.0), Real(0.0)}};
+    const P3 mean{{Real(2000.0), Real(-500.0), Real(0.0)}};
+    for (int s = 0; s < 3; ++s) {
+        between.step_between(Real(0.05), no_load(tw), {F0}, {F1});
+        held.step(Real(0.05), no_load(tw), mean);
+    }
+    for (int d = 0; d < 2; ++d) { EXPECT_EQ(between.q()[d], held.q()[d]); EXPECT_EQ(between.v()[d], held.v()[d]); }
+    // the acceleration at the step's end, under the pull then: (phi_a F1 - 2 zeta omega M v - K q) / M
+    const double M = between.generalized_mass(), K = between.stiffness(), w = std::sqrt(K / M), zeta = 0.02;
+    for (int d = 0; d < 2; ++d) {
+        const double a = (between.attachment_shape(0) * static_cast<double>(F1[d]) - 2.0 * zeta * w * M * between.v()[d] -
+                          K * between.q()[d]) / M;
+        for (std::size_t i = 0; i < tw.nodes().size(); ++i) {
+            const double expect = -between.node_mass(i) * between.mode_shape(i) * a;
+            EXPECT_NEAR(static_cast<double>(between.inertial_force(i)[d]), expect, tol * (1.0 + std::abs(expect))) << i;
+        }
+    }
+    EXPECT_NE(between.inertial_force(tw.nodes().size() - 1)[0], held.inertial_force(tw.nodes().size() - 1)[0])
+        << "the held tower's inertia is under the mean pull";
+    // its state carries the end pull: restored, it reports the same inertia
+    OneModeTower restored(tw, Real(g));
+    ASSERT_TRUE(restored.set_state(between.state()));
+    EXPECT_EQ(restored.inertial_force(0)[0], between.inertial_force(0)[0]);
 }
 
 TEST(OneModeTower, TheWindDampsItsSwayByTheDragRelativeToTheMembers)

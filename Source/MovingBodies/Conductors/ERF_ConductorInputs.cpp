@@ -43,6 +43,15 @@ Real LineInputs::chord (int k) const
     return std::sqrt(c2);
 }
 
+Real LineInputs::conductor_chord (int k) const
+{
+    const auto a = conductor_point(k);
+    const auto b = conductor_point(k + 1);
+    Real c2 = 0.0;
+    for (int d = 0; d < 3; ++d) { c2 += (b[d] - a[d]) * (b[d] - a[d]); }
+    return std::sqrt(c2);
+}
+
 std::array<Real,3> LineInputs::conductor_point (int k) const
 {
     std::array<Real,3> p = point(k);
@@ -69,7 +78,7 @@ void LineInputs::lengths_from_stringing_tension (Real w)
 
 Real LineInputs::catenary_sag (int k) const
 {
-    const Real c = chord(k);
+    const Real c = conductor_chord(k);
     const Real L = lengths[static_cast<std::size_t>(k)];
     return (L > c) ? std::sqrt(Real(3.0) * c * (L - c) / Real(8.0)) : Real(0.0);
 }
@@ -150,19 +159,29 @@ std::string ConductorInputs::validate_shared_towers (const std::vector<LineInput
     return std::string();
 }
 
+bool along_plus_x (const std::array<Real,3>& a, const std::array<Real,3>& b)
+{
+    const Real ax = b[0] - a[0], ay = b[1] - a[1];
+    return ax > Real(0.0) && std::abs(ay) <= Real(1.0e-6) * ax;
+}
+
 Catenary elastic_catenary (Real chord, Real length, Real w, Real EA)
 {
     Catenary cat;
     if (!(chord > 0.0 && length > 0.0 && w > 0.0 && EA > 0.0)) { return cat; }
     // for a horizontal tension H the catenary parameter is a = H / w, the stretched length
-    // L_s = 2 a sinh(c / 2a), and the unstretched length L_s - (H / EA) (c/2 + (a/2) sinh(c/a));
-    // the latter falls as H grows, slack line or taut, so the H that gives the line's length is
-    // found by bisection (on log H, in double precision whatever Real is)
+    // L_s = 2 a sinh(c / 2a), and the unstretched length L_s - (H / EA) (c/2 + (a/2) sinh(c/a)).
+    // Where the line could hang, its end tension H cosh(c / 2a) is far below EA, and there the
+    // unstretched length falls as H grows; on the slack side it turns back down once the stretch
+    // term outgrows the arc (at end tensions from about EA to tens of EA), so every slack H whose
+    // end tension reaches EA counts as too slack. The H that gives the line's length is then found by bisection (on
+    // log H, in double precision whatever Real is)
     const double c = chord, L = length;
     auto unstretched = [&](double H) {
         const double a = H / static_cast<double>(w);
         const double x = c / (2.0 * a);
         if (x > 300.0) { return std::numeric_limits<double>::max(); }   // so slack that sinh overflows
+        if (x > 1.0 && H * std::cosh(x) > static_cast<double>(EA)) { return std::numeric_limits<double>::max(); }
         return 2.0 * a * std::sinh(x) - H / static_cast<double>(EA) * (0.5 * c + 0.5 * a * std::sinh(c / a));
     };
     double lo = std::log(1.0e-6 * static_cast<double>(w) * c), hi = std::log(1.0e3 * static_cast<double>(EA));
@@ -172,6 +191,9 @@ Catenary elastic_catenary (Real chord, Real length, Real w, Real EA)
     }
     const double H = std::exp(0.5 * (lo + hi));
     const double a = H / static_cast<double>(w);
+    // an answer on a bracket's edge or on the guard's seam is no answer: the model's stretch has no root
+    // there (strains near 50 % and above), and the caller must not take it for a sag
+    cat.solved = std::abs(unstretched(H) - L) <= 1.0e-6 * L;
     cat.horizontal_tension = static_cast<Real>(H);
     cat.sag = static_cast<Real>(a * (std::cosh(c / (2.0 * a)) - 1.0));
     cat.end_tension = static_cast<Real>(H * std::cosh(c / (2.0 * a)));
@@ -266,12 +288,7 @@ std::string ConductorInputs::validate_line (const LineInputs& s, bool check_slac
         }
         if (!(s.insulator_mass > 0.0)) { return key + "insulator_mass must be positive (kg per string) with insulator_length"; }
         if (!(s.insulator_diameter > 0.0)) { return key + "insulator_diameter must be positive (m)"; }
-        for (std::size_t t = 0; t < s.towers.size(); ++t) {
-            if (!(s.towers[t][2] > s.insulator_length)) {
-                return key + "insulator_length (" + std::to_string(s.insulator_length) + " m) must be less than the height of tower " +
-                       std::to_string(t + 1) + " above the terrain (" + std::to_string(s.towers[t][2]) + " m)";
-            }
-        }
+        // whether each string's bottom clears the ground is checked once the towers stand on it (set_ground)
         // a string swings across the line, normal to the direction between the attachment points either side of its tower
         for (int j = 0; j + 2 <= s.num_spans(); ++j) {
             const auto& a = s.point(j);
@@ -331,7 +348,7 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
         return "erf.conductors.prescribed_velocity must be finite";
     }
     if (in.diagnostics_int < 1) { return "erf.conductors.diagnostics_int must be >= 1"; }
-    if (in.anchor_level < -1) { return "erf.conductors.anchor_level must be a level (0 .. amr.max_level) or -1 for the finest"; }
+    if (in.anchor_level < -1) { return "erf.conductors.anchor_level must be a level (0 .. amr.max_level) or -1 for amr.max_level"; }
     if (!(in.air_density > 0.0)) { return "erf.conductors.air_density must be positive (kg/m^3)"; }
     if (in.substeps < 1) { return "erf.conductors.substeps must be >= 1"; }
     if (in.moordyn_dt < 0.0) { return "erf.conductors.moordyn_dt must be >= 0 (s; 0: no bound beyond moordyn_cfl)"; }
@@ -477,6 +494,35 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
             }
         }
     }
+    // the statistics the run keeps itself (transformers, pairs of lines, towers and their members), named in the
+    // checkpoint and written to <diagnostics_dir>/<name>_stats.csv: no line's statistics may take either
+    std::vector<std::string> own_stats;
+    for (const auto& t : in.transformers) { own_stats.push_back("transformer_" + t.name); }
+    for (std::size_t i = 0; i < in.lines.size(); ++i) {
+        for (std::size_t j = i + 1; j < in.lines.size(); ++j) {
+            own_stats.push_back("separation_" + in.lines[i].name + "-" + in.lines[j].name);
+        }
+    }
+    for (const LineInputs& s : in.lines) {
+        if (in.tower_type(s) == nullptr || !s.share_towers.empty()) { continue; }
+        for (std::size_t j = 1; j <= s.towers.size(); ++j) {
+            const std::string t = "tower_" + s.name + "_t" + std::to_string(j);
+            own_stats.insert(own_stats.end(), {t, t + "_members"});
+        }
+    }
+    for (const LineInputs& s : in.lines) {
+        std::vector<std::pair<std::string, std::string>> mine{{s.name + "_insulators", s.output_root + "_insulators"},
+                                                              {s.name + "_gusts", s.output_root + "_gusts"}};
+        for (int k = 0; k < s.num_spans(); ++k) { mine.emplace_back(s.span_name(k), s.span_root(k)); }
+        for (const auto& [name, root] : mine) {
+            for (const std::string& o : own_stats) {
+                if (name == o || normal(root + "_stats.csv") == normal(in.diagnostics_dir + "/" + o + "_stats.csv")) {
+                    return "erf.conductors." + s.name + ": its statistics " + name + " would take the name or the file of "
+                           "the run's own " + o + " statistics; rename the line or set its output_root";
+                }
+            }
+        }
+    }
     // a conductor lighter than the air it displaces has no still-air shape (and no elastic catenary)
     for (const LineInputs& s : in.lines) {
         const Real displaced = in.air_density * Real(0.25) * Real(3.14159265358979323846) * s.diameter * s.diameter;
@@ -504,11 +550,19 @@ std::string ConductorInputs::validate_frame (Real surface_offset, Real prob_lo_z
     return std::string();
 }
 
-std::string ConductorInputs::validate_solver (int max_level, int anchor_level, bool fpe_traps)
+std::string ConductorInputs::validate_solver (int max_level, int anchor_level, bool fpe_traps, bool drag_on_flow)
 {
     if (anchor_level < 0 || anchor_level > max_level) {
         return "erf.conductors.anchor_level = " + std::to_string(anchor_level) + " is not a level of this run (0 .. " +
                std::to_string(max_level) + ")";
+    }
+    if (drag_on_flow && anchor_level < max_level) {
+        // the drag is spread on the anchor level only: a finer level never feels it, and its flow,
+        // averaged down, replaces the coarse flow under it
+        return "erf.conductors.drag_on_flow puts the lines' drag into the flow of the anchor level only, level " +
+               std::to_string(anchor_level) + ", and amr.max_level = " + std::to_string(max_level) +
+               " allows a finer level whose flow never feels it; step the lines on the finest level "
+               "(erf.conductors.anchor_level = -1) or switch drag_on_flow off";
     }
     if (fpe_traps) {
         return "erf.conductors: MoorDyn's initial-condition solver overflows an intermediate value and is killed by a "
@@ -547,8 +601,15 @@ ConductorInputs ConductorInputs::read ()
     pp.query("surface_offset", in.surface_offset);
     pp.query("stats_start", in.stats_start);
     pp.query("node_output_int", in.node_output_int);
-    pp.query("drag_on_flow", in.drag_on_flow);
-    pp.query("epsilon", in.epsilon);
+    const bool drag_given = pp.query("drag_on_flow", in.drag_on_flow) != 0;
+    if (pp.query("epsilon", in.epsilon) != 0 && !in.drag_on_flow) {
+        // the width the drag is spread over: nothing to act on without drag_on_flow
+        if (drag_given) {
+            Print() << "erf.conductors: WARNING: epsilon is not used: drag_on_flow is false\n";
+        } else {
+            Abort("erf.conductors.epsilon needs erf.conductors.drag_on_flow = true (the width the drag is spread over)");
+        }
+    }
     pp.query("flashover_distance", in.flashover_distance);
     pp.query("asce74_wind", in.asce74_wind);
     pp.query("asce74_exposure", in.asce74_exposure);
@@ -556,6 +617,11 @@ ConductorInputs ConductorInputs::read ()
     in.has_gust_sigma_factor = pp.query("gust_sigma_factor", in.gust_sigma_factor) != 0;
     in.has_gust_peak_factor = pp.query("gust_peak_factor", in.gust_peak_factor) != 0;
     in.has_gust_span_length_scale = pp.query("gust_span_length_scale", in.gust_span_length_scale) != 0;
+    if (!in.has_gust_span_length_scale && !in.asce74_exposure.empty()) {
+        // without an L_s of their own the gusts take the exposure of the run's ASCE 74 check, as asce74.csv does
+        Exposure e = Exposure::C;
+        if (parse_exposure(in.asce74_exposure, e)) { in.gust_span_length_scale = static_cast<Real>(exposure_constants(e).Ls); }
+    }
     in.has_gust_event_time = pp.query("gust_event_time", in.gust_event_time) != 0;
     in.has_gust_event_speed = pp.query("gust_event_speed", in.gust_event_speed) != 0;
     in.has_gust_event_direction = pp.query("gust_event_direction", in.gust_event_direction) != 0;
@@ -636,8 +702,8 @@ ConductorInputs ConductorInputs::read ()
         pt.query("leg_spacing", t.leg_spacing);
         pt.query("allowable_uplift", t.allowable_uplift);
         pt.query("allowable_compression", t.allowable_compression);
-        pt.query("frequency", t.frequency);
-        pt.query("damping_ratio", t.damping_ratio);
+        t.frequency_given = pt.query("frequency", t.frequency) != 0;
+        t.damping_given = pt.query("damping_ratio", t.damping_ratio) != 0;
         pt.query("foundation_rotational_stiffness", t.foundation_rotational_stiffness);
         pt.query("foundation_lateral_stiffness", t.foundation_lateral_stiffness);
         pt.query("frame_file", t.frame_file);
@@ -650,6 +716,8 @@ ConductorInputs ConductorInputs::read ()
         pt.query("steel_temperature", t.steel_temperature);
         const std::string terr = t.validate();
         if (!terr.empty()) { Abort(terr); }
+        const std::string unused = t.unused_on_a_still_tower();
+        if (!unused.empty()) { Print() << "WARNING: " << unused << "\n"; }
         in.tower_types.push_back(t);
     }
     for (const LineInputs& s : in.lines) {

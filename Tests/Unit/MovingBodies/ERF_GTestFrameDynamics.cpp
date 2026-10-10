@@ -20,6 +20,9 @@
 //   cantilever's tip follows cos(n 2 atan(omega h/2)) and the energy stays constant.
 // FrameDynamics.RayleighDampingDecaysAModeAsTheOscillatorItIs: with Rayleigh damping, the mode follows
 //   Newmark's recursion for the damped one-degree-of-freedom oscillator of its frequency and ratio.
+// FrameDynamics.AChangingStepFollowsTheOscillatorOfEachStep: one dynamics stepping h1, h2, h1, ... and
+//   another on the same frame stepping h2 throughout (sharing its factorisation) each follow the modal
+//   oscillator's Newmark recursion with their own steps, and share the factorisation of a step they both take.
 // FrameDynamics.AStepLoadSettlesAtTheStaticResponse: a damped tower under a sudden load and gravity
 //   comes to rest at the static solution.
 // FrameDynamics.TheStateRestoresTheSameMotion: a state saved and restored continues bit for bit.
@@ -358,6 +361,50 @@ TEST(FrameDynamics, RayleighDampingDecaysAModeAsTheOscillatorItIs)
         EXPECT_NEAR(tip_x(*f, dyn.displacement()), amp * q, 1e-5 * std::abs(amp)) << "step " << n;
     }
     EXPECT_LT(std::abs(q), 0.4) << "the mode must have decayed over its 10 periods: the check is not vacuous";
+}
+
+TEST(FrameDynamics, AChangingStepFollowsTheOscillatorOfEachStep)
+{
+    auto f = build(cantilever(10.0, 10, arbitrary(4.0e-3, 1.2e-5, 0.6e-5, 1.8e-5, 4.0e-7)));
+    ASSERT_TRUE(f);
+    FrameModes modes;
+    ASSERT_TRUE(frame_modes(*f, 3, modes).empty());
+    double a0 = 0.0, a1 = 0.0;
+    rayleigh_coefficients(modes.frequency[0], 0.02, modes.frequency[2], 0.05, a0, a1);
+    const double w = 2.0 * pi * modes.frequency[0];
+    const double zeta = 0.5 * (a0 / w + a1 * w);
+    const double h1 = (2.0 * pi / w) / 25.0, h2 = 0.7 * h1;
+    std::vector<double> u0 = modes.shape[0];
+    for (double& x : u0) { x *= 0.01; }
+    const double amp = tip_x(*f, u0);
+    FrameDynamics changing(*f, a0, a1), steady(*f, a0, a1);
+    ASSERT_TRUE(changing.start(u0, std::vector<double>(u0.size(), 0.0), {}, 0.0).empty());
+    ASSERT_TRUE(steady.start(u0, std::vector<double>(u0.size(), 0.0), {}, 0.0).empty());
+    // Newmark's step of the modal oscillator q'' + 2 zeta w q' + w^2 q = 0
+    struct Osc { double q{1.0}, qd{0.0}, qdd{0.0}; };
+    auto advance = [&] (Osc& o, double h) {
+        const double c0 = 4.0 / (h * h), c1 = 2.0 / h, c2 = 4.0 / h;
+        const double qn = (c0 * o.q + c2 * o.qd + o.qdd + 2.0 * zeta * w * (c1 * o.q + o.qd)) / (w * w + c1 * 2.0 * zeta * w + c0);
+        const double qddn = c0 * (qn - o.q) - c2 * o.qd - o.qdd;
+        o.qd += 0.5 * h * (o.qdd + qddn);
+        o.qdd = qddn;
+        o.q = qn;
+    };
+    Osc a, b;
+    a.qdd = b.qdd = -w * w;
+    for (int n = 1; n <= 200; ++n) {
+        const double h = (n % 2) ? h1 : h2;
+        changing.step(h, {}, 0.0);
+        steady.step(h2, {}, 0.0);
+        advance(a, h);
+        advance(b, h2);
+        EXPECT_NEAR(tip_x(*f, changing.displacement()), amp * a.q, 1e-5 * std::abs(amp)) << "step " << n;
+        EXPECT_NEAR(tip_x(*f, steady.displacement()), amp * b.q, 1e-5 * std::abs(amp)) << "step " << n;
+    }
+    EXPECT_GT(std::abs(a.q - b.q), 1e-3) << "the two step sequences must part: the check is not vacuous";
+    // both took h2 last: one factorisation serves the two
+    ASSERT_NE(steady.effective_stiffness_factor(), nullptr);
+    EXPECT_EQ(changing.effective_stiffness_factor(), steady.effective_stiffness_factor());
 }
 
 TEST(FrameDynamics, AStepLoadSettlesAtTheStaticResponse)

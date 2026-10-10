@@ -60,15 +60,10 @@ OneModeTower::OneModeTower (const Tower& tower, Real gravity)
     m_zeta = type.damping_ratio;
 }
 
-void OneModeTower::step (Real dt, const std::vector<Real>& node_force, const std::vector<std::array<Real,3>>& line_force)
+std::array<double,2> OneModeTower::generalized_force (const std::vector<Real>& node_force,
+                                                      const std::vector<std::array<Real,3>>& line_force) const
 {
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node_force.size() == 3 * m_phi.size(), "OneModeTower::step: 3 forces per drag node are needed");
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(line_force.size() == m_phi_att.size(),
-                                     "OneModeTower::step: one line pull per attachment is needed");
-    if (!(std::isfinite(dt) && dt > 0.0)) {
-        amrex::Abort("OneModeTower " + m_name + ": the step must be finite and positive (s), " + std::to_string(dt) + " given");
-    }
-    // the generalized force: each node's horizontal load and each line's pull by the shape where it acts
+    // each node's horizontal load and each line's pull by the shape where it acts
     std::array<double,2> Q{{0.0, 0.0}};
     for (int d = 0; d < 2; ++d) {
         for (std::size_t a = 0; a < m_phi_att.size(); ++a) { Q[d] += m_phi_att[a] * line_force[a][d]; }
@@ -78,7 +73,28 @@ void OneModeTower::step (Real dt, const std::vector<Real>& node_force, const std
         amrex::Abort("tower " + m_name + ": the generalized load on its mode is not finite (the lines' pull or the members' drag); "
                      "MoorDyn's line integration may have diverged: reduce erf.conductors.moordyn_cfl or erf.conductors.moordyn_dt");
     }
-    m_Q = Q;
+    return Q;
+}
+
+void OneModeTower::step_between (Real dt, const std::vector<Real>& node_force, const std::vector<std::array<Real,3>>& line_start,
+                                 const std::vector<std::array<Real,3>>& line_end)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(line_start.size() == m_phi_att.size() && line_end.size() == m_phi_att.size(),
+                                     "OneModeTower::step_between: one start and one end pull per attachment are needed");
+    TowerModel::step_between(dt, node_force, line_start, line_end);
+    m_Q_end = generalized_force(node_force, line_end);
+}
+
+void OneModeTower::step (Real dt, const std::vector<Real>& node_force, const std::vector<std::array<Real,3>>& line_force)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(node_force.size() == 3 * m_phi.size(), "OneModeTower::step: 3 forces per drag node are needed");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(line_force.size() == m_phi_att.size(),
+                                     "OneModeTower::step: one line pull per attachment is needed");
+    if (!(std::isfinite(dt) && dt > 0.0)) {
+        amrex::Abort("OneModeTower " + m_name + ": the step must be finite and positive (s), " + std::to_string(dt) + " given");
+    }
+    m_Q = generalized_force(node_force, line_force);
+    m_Q_end = m_Q;
     // the damped oscillation about the static displacement Q / K, exact for a load held over the step:
     // a = zeta omega (1/s), wd = omega sqrt(1 - zeta^2) (rad/s), x0 the offset from Q/K (m)
     const double h = dt;
@@ -128,16 +144,18 @@ Real OneModeTower::frequency () const { return static_cast<Real>(m_omega / two_p
 
 std::vector<double> OneModeTower::state () const
 {
-    return {m_q[0], m_q[1], m_v[0], m_v[1], m_Q[0], m_Q[1]};
+    return {m_q[0], m_q[1], m_v[0], m_v[1], m_Q[0], m_Q[1], m_Q_end[0], m_Q_end[1]};
 }
 
 bool OneModeTower::set_state (const std::vector<double>& s)
 {
-    if (s.size() != 6) { return false; }
+    // a state without the end load (6 values, an older checkpoint) takes the held one
+    if (s.size() != 8 && s.size() != 6) { return false; }
     for (const double x : s) { if (!std::isfinite(x)) { return false; } }
     m_q = {{s[0], s[1]}};
     m_v = {{s[2], s[3]}};
     m_Q = {{s[4], s[5]}};
+    m_Q_end = (s.size() == 8) ? std::array<double,2>{{s[6], s[7]}} : m_Q;
     return true;
 }
 

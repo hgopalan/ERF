@@ -7,6 +7,7 @@
 #include <string>
 
 #include <AMReX.H>
+#include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Utility.H>
 
 namespace erf_actuator {
@@ -30,6 +31,18 @@ inline bool open_log (std::ofstream& out, const std::string& fname, bool truncat
     out.open(fname, truncate ? std::ios::trunc : std::ios::app);
     if (!out) { amrex::Abort("cannot open moving-bodies diagnostics file '" + fname + "'"); }
     return need_header;
+}
+
+/**
+ * Whether fname exists, as the I/O rank sees it, on every rank: a checkpoint read that every rank
+ * enters (ParallelDescriptor::ReadAndBcastFile) must be decided alike everywhere, whatever a
+ * parallel file system shows each node.
+ */
+inline bool file_exists_everywhere (const std::string& fname)
+{
+    int exists = amrex::ParallelDescriptor::IOProcessor() ? (amrex::FileExists(fname) ? 1 : 0) : 0;
+    amrex::ParallelDescriptor::Bcast(&exists, 1, amrex::ParallelDescriptor::IOProcessorNumber());
+    return exists != 0;
 }
 
 } // namespace erf_actuator

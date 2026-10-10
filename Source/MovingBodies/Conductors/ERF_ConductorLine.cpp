@@ -43,7 +43,8 @@ ConductorLine::ConductorLine (const LineInputs& s, const ConductorInputs& in, Re
         const auto& p = s.towers[j];
         for (int d = 0; d < 3; ++d) {
             const Real moved = tower_displacement.empty() ? Real(0.0) : tower_displacement[3*j+d];
-            m_x.push_back(static_cast<double>(p[d] + moved - (d == 2 ? m_offset : Real(0.0))));
+            // in double: a float sum of a 30 km coordinate and a millimetre sway would round the sway
+            m_x.push_back(static_cast<double>(p[d]) + static_cast<double>(moved) - (d == 2 ? static_cast<double>(m_offset) : 0.0));
         }
     }
     m_f.assign(m_x.size(), 0.0);
@@ -115,7 +116,7 @@ std::vector<Real> ConductorLine::kinematics_points () const
     for (std::size_t p = 0; p < r.size() / 3; ++p) {
         out[3*p]   = static_cast<Real>(r[3*p]);
         out[3*p+1] = static_cast<Real>(r[3*p+1]);
-        out[3*p+2] = static_cast<Real>(r[3*p+2]) + m_offset;
+        out[3*p+2] = static_cast<Real>(r[3*p+2] + static_cast<double>(m_offset));
     }
     return out;
 }
@@ -237,7 +238,8 @@ void ConductorLine::step_coupled (double time, double dt, const std::vector<Real
     for (std::size_t j = 0; j < m_x.size() / 3; ++j) {
         const auto& p = m_in.towers[j];
         for (int d = 0; d < 3; ++d) {
-            m_x[3*j+d] = static_cast<double>(p[d] + displacement[3*j+d] - (d == 2 ? m_offset : Real(0.0)));
+            m_x[3*j+d] = static_cast<double>(p[d]) + static_cast<double>(displacement[3*j+d]) -
+                         (d == 2 ? static_cast<double>(m_offset) : 0.0);
             xd[3*j+d] = static_cast<double>(velocity[3*j+d]);
         }
     }

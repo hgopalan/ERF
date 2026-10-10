@@ -7,6 +7,9 @@
 // FrameSubDyn.RefusesWhatTheFrameCannotModelNamingIt: cables, rigid links, tapered members,
 //   FEMMod 2, NDiv 0, non-cantilever joints, unknown joints, a missing SSI file, a negative
 //   modulus and a short table are each refused with a message naming the item.
+// FrameSubDyn.RefusesSpringsMassesAndSupportsThatDoNotReadWhole: an SSI entry with an unknown name, an
+//   SSI file without entries or with a non-finite mass, a support that restrains nothing, and a
+//   concentrated-mass row of neither 5 nor 11 values or with a non-finite inertia are refused.
 // FrameSubDyn.TheStiffnessAtThePeakIsSubDyns: for cases A and B (Euler-Bernoulli with arbitrary
 //   sections; Timoshenko with circular, rectangular and spun arbitrary sections, two elements per
 //   member and a coupled spring base) the 6 x 6 stiffness at the peak, and for case T (the
@@ -18,12 +21,14 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "ERF_Frame.H"
+#include "../ERF_GTestTempDir.H"
 
 using namespace erf_towers;
 
@@ -39,21 +44,36 @@ std::string slurp (const std::string& path)
     return s.str();
 }
 
-/** Write case A with one piece of text replaced, read it, and return the reader's or the checks' message. */
-std::string read_edited (const std::string& from, const std::string& to, const std::string& name)
+/**
+ * Write case A with pieces of text replaced, and beside it the files given (name, contents), in a
+ * directory of its own; read it, and return the reader's or the checks' message.
+ */
+std::string read_edits (const std::vector<std::pair<std::string, std::string>>& edits, const std::string& name,
+                        const std::vector<std::pair<std::string, std::string>>& files = {})
 {
     std::string text = slurp(case_file("A"));
-    const auto p = text.find(from);
-    EXPECT_NE(p, std::string::npos) << "the edit '" << from << "' does not apply to case A";
-    if (p == std::string::npos) { return "edit not applied"; }
-    text.replace(p, from.size(), to);
-    const std::string path = "frame_subdyn_" + name + ".dat";
+    for (const auto& [from, to] : edits) {
+        const auto p = text.find(from);
+        EXPECT_NE(p, std::string::npos) << "the edit '" << from << "' does not apply to case A";
+        if (p == std::string::npos) { return "edit not applied"; }
+        text.replace(p, from.size(), to);
+    }
+    const std::filesystem::path dir = erf_gtest_temp_path("frame_subdyn_" + name);
+    std::filesystem::create_directories(dir);
+    const std::string path = (dir / "tower.dat").string();
     { std::ofstream f(path); f << text; }
+    for (const auto& [fname, contents] : files) { std::ofstream f(dir / fname); f << contents; }
     FrameInputs in;
     std::string err = read_subdyn(path, in);
     if (err.empty()) { err = in.validate(); }
-    std::remove(path.c_str());
+    std::filesystem::remove_all(dir);
     return err;
+}
+
+/** read_edits() with one piece of text replaced. */
+std::string read_edited (const std::string& from, const std::string& to, const std::string& name)
+{
+    return read_edits({{from, to}}, name);
 }
 
 /** SubDyn's KBBt as tower<case>_kbbt.txt holds it: 6 rows of 6, '#' lines skipped. */
@@ -168,6 +188,32 @@ TEST(FrameSubDyn, RefusesWhatTheFrameCannotModelNamingIt)
     }
     FrameInputs in;
     EXPECT_NE(read_subdyn("no_such_subdyn_file.dat", in).find("cannot read"), std::string::npos);
+}
+
+TEST(FrameSubDyn, RefusesSpringsMassesAndSupportsThatDoNotReadWhole)
+{
+    // joint 1 free vertically on a spring file beside the frame's
+    const std::string fixed = "   1          1           1           1           1           1           1";
+    const std::string on_spring = "   1          1           1           0           1           1           1        \"ssi.dat\"";
+    auto ssi = [&] (const std::string& contents, const std::string& name) {
+        return read_edits({{fixed, on_spring}}, name, {{"ssi.dat", contents}});
+    };
+    EXPECT_TRUE(ssi("! a vertical spring\n   2.0E+08   Kzz\n   5.0E+02   Mzz\n", "ssi_ok").empty());
+    // a misspelt name once left its entry at 0 without a word
+    EXPECT_NE(ssi("   2.0E+08   Kzzz\n", "ssi_name").find("'Kzzz' is not one of"), std::string::npos);
+    EXPECT_NE(ssi("! nothing but comments\n", "ssi_empty").find("holds no stiffness or mass entry"), std::string::npos);
+    EXPECT_NE(ssi("   2.0E+08   Kzz\n   nan   Mzz\n", "ssi_nan").find("non-finite SSI mass"), std::string::npos);
+    // a support free in every DOF without a spring holds nothing
+    EXPECT_NE(read_edited(fixed, "   1          0           0           0           0           0           0", "free")
+                  .find("restrains nothing"), std::string::npos);
+    // a concentrated-mass row of 8 values once dropped its products of inertia
+    const std::pair<std::string, std::string> one{"             0   NCmass", "             1   NCmass"};
+    const std::string next = "\n---------------------------- OUTPUT: SUMMARY";
+    EXPECT_NE(read_edits({one, {next, "\n   5   100.0   1.0   1.0   1.0   0.2   0.0   0.0" + next}}, "cmass8")
+                  .find("has 8 values"), std::string::npos);
+    EXPECT_TRUE(read_edits({one, {next, "\n   5   100.0   1.0   1.0   1.0" + next}}, "cmass5").empty());
+    EXPECT_NE(read_edits({one, {next, "\n   5   100.0   nan   1.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0" + next}}, "cmass_nan")
+                  .find("non-finite inertia"), std::string::npos);
 }
 
 TEST(FrameSubDyn, TheStiffnessAtThePeakIsSubDyns)

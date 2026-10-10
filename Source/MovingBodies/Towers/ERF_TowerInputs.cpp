@@ -89,7 +89,41 @@ std::string TowerType::validate () const
         return key + "foundation_rotational_stiffness must be finite and >= 0 (N m/rad; 0: rigid)";
     }
     if (!non_negative(foundation_lateral_stiffness)) { return key + "foundation_lateral_stiffness must be finite and >= 0 (N/m; 0: rigid)"; }
+    if (!moves() && !frequency_given) {
+        // a tower that stands still has no motion for these to act on (with frequency = 0 given, a warning:
+        // unused_on_a_still_tower)
+        if (damping_given) { return key + "damping_ratio needs a tower that moves: " + key + "frequency, frame_file or frame_panels"; }
+        const std::pair<const char*, bool> footing[] = {
+            {"foundation_rotational_stiffness", foundation_rotational_stiffness != 0.0},
+            {"foundation_lateral_stiffness", foundation_lateral_stiffness != 0.0}};
+        for (const auto& kv : footing) {
+            // a frame's supports are its footings: only a one-mode tower takes these
+            if (kv.second) { return key + kv.first + " needs a tower that moves in one mode: " + key + "frequency"; }
+        }
+    }
+    if (has_frame() && !(damping_ratio > 0.0)) {
+        // the members' drag is held from the start of each coupling step and handed to Newmark's method at its
+        // end: a damping force one step late, which an undamped frame's higher modes (from 6.4 times the first
+        // natural frequency at 20 coupling steps a period) grow under
+        return key + "damping_ratio must be positive for a frame (frame_file or frame_panels): without structural "
+                     "damping the members' drag makes its higher modes grow";
+    }
+    if (has_frame() && leg_spacing != 0.0) {
+        return key + "leg_spacing is not given with a frame: the frame's supports are its footings";
+    }
     return std::string();
+}
+
+std::string TowerType::unused_on_a_still_tower () const
+{
+    if (moves() || !frequency_given) { return std::string(); }
+    std::string keys;
+    auto add = [&] (const char* k) { keys += (keys.empty() ? "" : ", ") + std::string(k); };
+    if (damping_given) { add("damping_ratio"); }
+    if (foundation_rotational_stiffness != 0.0) { add("foundation_rotational_stiffness"); }
+    if (foundation_lateral_stiffness != 0.0) { add("foundation_lateral_stiffness"); }
+    if (keys.empty()) { return keys; }
+    return "erf.conductors." + name + ": " + keys + " not used: frequency = 0 and no frame, so the tower stands still";
 }
 
 } // namespace erf_towers

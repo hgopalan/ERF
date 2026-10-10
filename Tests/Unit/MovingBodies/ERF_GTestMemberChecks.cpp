@@ -25,15 +25,20 @@
 // LatticeFrame.ItsMembersBalanceTheLoadAtEveryLevel: under a lateral load at the cross-arm, the end
 //   forces of the elements cut by a horizontal plane balance the load above it (forces and moments),
 //   and the legs carry most of the overturning moment (over three quarters), as a truss.
+// LatticeFrame.AFileFramesLoadsAvoidTheCrossingsAsAGeneratedOnes: square_joints() of a frame without roles
+//   finds the joints the generator lists for loads, every one but the diagonals' crossings.
+// LatticeFrame.AFrameTooLargeForTheDenseSolverIsRefused: 80 panels, over Frame::max_free_dofs, are refused.
 // LatticeFrame.TheWrittenSubDynFileReadsBackTheSameFrame: write_subdyn then read_subdyn gives the same
 //   joints, members and sections, so the same stiffness.
 // LatticeFrame.TheStiffnessAtTheCrossArmIsSubDyns: the generated case G, as SubDyn reads the file it
 //   was written to, has SubDyn's KBBt at the cross-arm's centre and its lowest natural frequencies.
 // HeatedFrame.DeflectsByOneOverKE: a frame at a uniform 600 C moves 1/k_E as far under the same loads.
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -43,6 +48,7 @@
 
 #include "ERF_Frame.H"
 #include "ERF_FrameDynamics.H"
+#include "../ERF_GTestTempDir.H"
 #include "ERF_FrameTower.H"
 #include "ERF_LatticeFrame.H"
 #include "ERF_MemberChecks.H"
@@ -231,6 +237,13 @@ TEST(MemberChecks, TensionAndCompressionStrengths)
     const double fy = local_buckling_stress(c.w_t, d.yield, E);
     EXPECT_NEAR(c.compression_capacity, compression_stress(c.effective, fy, E) * a.A, 1e-9 * c.compression_capacity);
     EXPECT_NEAR(c.utilisation, 5.0e4 / c.compression_capacity, 1e-12);
+    // the same member by hand (an independent script, not this code's functions): r_v 17.8006 mm,
+    // KL/r 116.178, w/t 11.857 over (w/t)_1 11.311 so F_cr 333.72 MPa, C_c 108.765 below KL/r, so the
+    // elastic F_a = pi^2 E/(KL/r)^2 = 146.246 MPa on 1211 mm^2: 177.104 kN
+    EXPECT_NEAR(a.rv, 0.0178006, 1e-6);
+    EXPECT_NEAR(c.effective, 116.1778, 1e-3);
+    EXPECT_NEAR(fy, 3.337199e8, 1e3);
+    EXPECT_NEAR(c.compression_capacity, 1.771036e5, 1.0);
     EXPECT_FALSE(c.slender);
     EXPECT_FALSE(c.thin);
     // a long member is slender, a thin one has w/t over 25
@@ -262,7 +275,9 @@ TEST(MemberChecks, TheDesignFileRoundTripsAndItsErrorsNameTheLine)
     designs[5].ends = EndLoading::OneEccentric;
     designs[6].restraint = EndRestraint::BothEnds;
     designs[7].role = MemberRole::Redundant;
-    const std::string path = "member_checks_designs.dat";
+    const std::filesystem::path dir = erf_gtest_temp_path("member_checks_designs");
+    std::filesystem::create_directories(dir);
+    const std::string path = (dir / "designs.dat").string();
     ASSERT_TRUE(write_member_designs(path, designs, "test"));
     std::vector<MemberDesign> back;
     const std::string err = read_member_designs(path, back);
@@ -306,7 +321,7 @@ TEST(MemberChecks, TheDesignFileRoundTripsAndItsErrorsNameTheLine)
     bad_row("1 leg 3.45e8 0.09 0.007 1 one twice none", "Ends must be");
     bad_row("1 leg 3.45e8 0.09 0.007 1 one both partly", "Restraint must be");
     bad_row("1.5 leg 3.45e8 0.09 0.007 1 one both none", "integer");
-    std::remove(path.c_str());
+    std::filesystem::remove_all(dir);
 }
 
 TEST(MemberChecks, AColumnCarriesItsLoadAxially)
@@ -491,6 +506,34 @@ TEST(LatticeFrame, ItsMembersBalanceTheLoadAtEveryLevel)
     }
 }
 
+TEST(LatticeFrame, AFileFramesLoadsAvoidTheCrossingsAsAGeneratedOnes)
+{
+    // read from a file, the generated frame has no roles: the joints a leg, chord or strut meets are
+    // exactly those the generator lists, every one but the crossings of the diagonals
+    FrameInputs in;
+    std::vector<MemberDesign> designs;
+    std::vector<int> listed;
+    ASSERT_TRUE(lattice_frame(case_g(), in, designs, &listed).empty());
+    std::vector<int> found = square_joints(in);
+    std::sort(listed.begin(), listed.end());
+    std::sort(found.begin(), found.end());
+    ASSERT_LT(found.size(), in.joints.size()) << "the crossed bracing has crossings to leave out";
+    EXPECT_EQ(found, listed);
+}
+
+TEST(LatticeFrame, AFrameTooLargeForTheDenseSolverIsRefused)
+{
+    // about 49 free degrees of freedom a panel: 150 panels are over 7000
+    LatticeSpec s = case_g();
+    s.panels = 150;
+    FrameInputs in;
+    std::vector<MemberDesign> designs;
+    ASSERT_TRUE(lattice_frame(s, in, designs).empty());
+    std::string err;
+    EXPECT_FALSE(Frame::create(in, err));
+    EXPECT_NE(err.find("more than the 6000 the dense frame solver takes"), std::string::npos) << err;
+}
+
 TEST(LatticeFrame, TheWrittenSubDynFileReadsBackTheSameFrame)
 {
     FrameInputs in;
@@ -505,7 +548,9 @@ TEST(LatticeFrame, TheWrittenSubDynFileReadsBackTheSameFrame)
     cm.joint = in.interface_joints[0]; cm.mass = 300.0; cm.inertia = {{10.0, 20.0, 30.0, 1.0, 0.5, 0.25}}; cm.offset = {{0.1, 0.0, -1.5}};
     in.masses.push_back(cm);
     in.members[3].spin = 0.3;
-    const std::string path = "lattice_frame_written.dat";
+    const std::filesystem::path dir = erf_gtest_temp_path("lattice_frame_written");
+    std::filesystem::create_directories(dir);
+    const std::string path = (dir / "frame.dat").string();
     std::string err = write_subdyn(in, path, "test");
     ASSERT_TRUE(err.empty()) << err;
     FrameInputs back;
@@ -537,8 +582,7 @@ TEST(LatticeFrame, TheWrittenSubDynFileReadsBackTheSameFrame)
     EXPECT_EQ(back.masses[0].inertia, cm.inertia);
     EXPECT_EQ(back.masses[0].offset, cm.offset);
     EXPECT_EQ(back.interface_joints, in.interface_joints);
-    std::remove(path.c_str());
-    std::remove("lattice_frame_written_ssi_2.dat");
+    std::filesystem::remove_all(dir);
 }
 
 TEST(LatticeFrame, TheStiffnessAtTheCrossArmIsSubDyns)

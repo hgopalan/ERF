@@ -43,7 +43,9 @@ void write_moordyn_input (const std::string& fname, const LineInputs& s, const C
 /** A position (m) in ERF's frame from MoorDyn's: z_erf = z_md + surface_offset. */
 inline std::array<amrex::Real,3> to_erf_frame (const std::array<double,3>& p, amrex::Real surface_offset)
 {
-    return {{static_cast<amrex::Real>(p[0]), static_cast<amrex::Real>(p[1]), static_cast<amrex::Real>(p[2]) + surface_offset}};
+    // the offset added in double: in a single-precision build MoorDyn's z, near -surface_offset, holds only centimetres
+    return {{static_cast<amrex::Real>(p[0]), static_cast<amrex::Real>(p[1]),
+             static_cast<amrex::Real>(p[2] + static_cast<double>(surface_offset))}};
 }
 
 } // namespace erf_conductors
