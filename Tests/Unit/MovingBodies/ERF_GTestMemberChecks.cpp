@@ -27,11 +27,16 @@
 //   and the legs carry most of the overturning moment (over three quarters), as a truss.
 // LatticeFrame.AFileFramesLoadsAvoidTheCrossingsAsAGeneratedOnes: square_joints() of a frame without roles
 //   finds the joints the generator lists for loads, every one but the diagonals' crossings.
-// LatticeFrame.AFrameTooLargeForTheDenseSolverIsRefused: 80 panels, over Frame::max_free_dofs, are refused.
+// LatticeFrame.AFrameTooLargeForTheDenseSolverIsRefused: 150 panels, over Frame::max_free_dofs, are refused.
 // LatticeFrame.TheWrittenSubDynFileReadsBackTheSameFrame: write_subdyn then read_subdyn gives the same
 //   joints, members and sections, so the same stiffness.
-// LatticeFrame.TheStiffnessAtTheCrossArmIsSubDyns: the generated case G, as SubDyn reads the file it
-//   was written to, has SubDyn's KBBt at the cross-arm's centre and its lowest natural frequencies.
+// LatticeFrame.TheAnglesLieOnTheirPrincipalAxes: every shaft leg's major principal axis (its axis of symmetry)
+//   points to its corner and every shaft face brace's lies at 45 degrees to its (tapering) face; on the
+//   cross-arms, whose bottom and sides slope to the tips, every chord's points between its two faces and
+//   every face member's lies at 45 degrees to its face; without principal_axes every MSpin is 0.
+// LatticeFrame.TheStiffnessAtTheCrossArmIsSubDyns: the generated case G has the file's joints (to 1e-12 m; the
+//   file was written on another machine) and, as SubDyn reads that file, SubDyn's KBBt at the cross-arm's
+//   centre and its lowest natural frequencies.
 // HeatedFrame.DeflectsByOneOverKE: a frame at a uniform 600 C moves 1/k_E as far under the same loads.
 
 #include <algorithm>
@@ -585,18 +590,178 @@ TEST(LatticeFrame, TheWrittenSubDynFileReadsBackTheSameFrame)
     std::filesystem::remove_all(dir);
 }
 
+TEST(LatticeFrame, TheAnglesLieOnTheirPrincipalAxes)
+{
+    for (const bool crossed : {true, false}) {
+        SCOPED_TRACE(crossed ? "crossed bracing" : "single bracing");
+        const LatticeSpec g = case_g(crossed);
+        FrameInputs in;
+        std::vector<MemberDesign> designs;
+        ASSERT_TRUE(lattice_frame(g, in, designs).empty());
+        auto at = [&] (int id) { return in.joints[static_cast<std::size_t>(in.joint_index(id))].x; };
+        // the shaft's half width at a height, and a vector's part normal to a unit axis, made unit
+        auto half = [&] (double z) { return 0.5 * (g.base_width + std::min(z, g.arm_height) / g.arm_height * (g.top_width - g.base_width)); };
+        auto normal_to = [] (std::array<double,3> v, const std::array<double,3>& e) {
+            const double d = v[0] * e[0] + v[1] * e[1] + v[2] * e[2];
+            for (int i = 0; i < 3; ++i) { v[static_cast<std::size_t>(i)] -= d * e[static_cast<std::size_t>(i)]; }
+            const double n = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            for (auto& c : v) { c /= n; }
+            return v;
+        };
+        int legs = 0, peak_legs = 0, braces = 0;
+        for (std::size_t m = 0; m < in.members.size(); ++m) {
+            const auto& mem = in.members[m];
+            const auto a = at(mem.joint_a), b = at(mem.joint_b);
+            const std::array<double,9> d = direction_cosines(a, b, mem.spin);
+            const std::array<double,3> x{{d[0], d[3], d[6]}}, e{{d[2], d[5], d[8]}};
+            // on the shaft or its peak: within its width at both ends (the peak keeps the top width)
+            const bool on_shaft = std::abs(a[0]) <= half(a[2]) + 1.0e-9 && std::abs(a[1]) <= half(a[2]) + 1.0e-9 &&
+                                  std::abs(b[0]) <= half(b[2]) + 1.0e-9 && std::abs(b[1]) <= half(b[2]) + 1.0e-9;
+            if (designs[m].role == MemberRole::Leg && std::abs(e[2]) > 0.9 && on_shaft) {
+                // a shaft leg: its axis of symmetry towards its corner
+                const auto r = normal_to({{a[0] > 0.0 ? 1.0 : -1.0, a[1] > 0.0 ? 1.0 : -1.0, 0.0}}, e);
+                EXPECT_NEAR(std::abs(x[0] * r[0] + x[1] * r[1] + x[2] * r[2]), 1.0, 1.0e-12) << "leg " << mem.id;
+                ++((std::min(a[2], b[2]) < g.arm_height - 1.0e-9) ? legs : peak_legs);
+                continue;
+            }
+            // a brace in a shaft face x = +-half(z) or y = +-half(z): its axis of symmetry at 45 degrees to the face
+            for (int c = 0; c < 2; ++c) {
+                const double sa = a[static_cast<std::size_t>(c)] / half(a[2]), sb = b[static_cast<std::size_t>(c)] / half(b[2]);
+                if (!on_shaft || designs[m].role == MemberRole::Leg || std::abs(sa - sb) > 1.0e-9 || std::abs(std::abs(sa) - 1.0) > 1.0e-9) {
+                    continue;
+                }
+                // the face's outward normal, leaning in with the taper below the cross-arm, upright on the peak; a
+                // strut takes the face of the panel below it
+                const bool strut = std::abs(a[2] - b[2]) < 1.0e-9;
+                const bool leans = strut ? a[2] <= g.arm_height + 1.0e-9 : std::min(a[2], b[2]) < g.arm_height - 1.0e-9;
+                std::array<double,3> n{{0.0, 0.0, leans ? 0.5 * (g.base_width - g.top_width) / g.arm_height : 0.0}};
+                n[static_cast<std::size_t>(c)] = sa;
+                const auto np = normal_to(n, e);
+                EXPECT_NEAR(std::abs(n[0] * e[0] + n[1] * e[1] + n[2] * e[2]), 0.0, 1.0e-9) << "brace " << mem.id << " lies in its face";
+                EXPECT_NEAR(std::abs(x[0] * np[0] + x[1] * np[1] + x[2] * np[2]), std::sqrt(0.5), 1.0e-9) << "brace " << mem.id;
+                ++braces;
+            }
+        }
+        EXPECT_EQ(legs, 4 * g.panels + 4) << "every panel's four legs and the cross-arm's";
+        EXPECT_GE(peak_legs, 4) << "the peak's";
+        EXPECT_GT(braces, (crossed ? 4 : 1) * 4 * g.panels) << "the diagonals (halves when crossed) and the struts";
+        // the cross-arms, along y to their tips (0, +-arm_length/2, arm_height), from the shaft's corners at arm_height and
+        // arm_depth below it (where the tapering shaft is wider): four plane faces per side through the tip, the top level,
+        // the bottom rising to the tip, the sides closing in on it. Their outward normals from the spec: a chord's axis
+        // of symmetry between its two faces' normals, a face member's at 45 degrees to its face
+        const double H = g.arm_height, hw = 0.5 * g.top_width, hb = half(H - g.arm_depth);
+        auto plane = [] (const std::array<double,3>& p, const std::array<double,3>& q, const std::array<double,3>& t,
+                         const std::array<double,3>& out) {
+            const std::array<double,3> u{{q[0] - p[0], q[1] - p[1], q[2] - p[2]}}, v{{t[0] - p[0], t[1] - p[1], t[2] - p[2]}};
+            std::array<double,3> n{{u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]}};
+            const double l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) * ((n[0] * out[0] + n[1] * out[1] + n[2] * out[2] < 0.0) ? -1.0 : 1.0);
+            for (auto& c : n) { c /= l; }
+            return n;
+        };
+        int chords = 0, arm_braces = 0;
+        for (int sy = -1; sy <= 1; sy += 2) {
+            const std::array<double,3> tip{{0.0, sy * 0.5 * g.arm_length, H}};
+            const std::array<double,3> t0{{-hw, sy * hw, H}}, t1{{hw, sy * hw, H}}, b0{{-hb, sy * hb, H - g.arm_depth}}, b1{{hb, sy * hb, H - g.arm_depth}};
+            // the top, the bottom, the x < 0 side and the x > 0 side
+            const std::array<std::array<double,3>,4> fn{{plane(t0, t1, tip, {{0.0, 0.0, 1.0}}), plane(b0, b1, tip, {{0.0, 0.0, -1.0}}),
+                                                         plane(t0, b0, tip, {{-1.0, 0.0, 0.0}}), plane(t1, b1, tip, {{1.0, 0.0, 0.0}})}};
+            auto in_face = [&] (const std::array<double,3>& p, std::size_t f) {
+                return std::abs(fn[f][0] * (p[0] - tip[0]) + fn[f][1] * (p[1] - tip[1]) + fn[f][2] * (p[2] - tip[2])) < 1.0e-9;
+            };
+            for (std::size_t m = 0; m < in.members.size(); ++m) {
+                const auto& mem = in.members[m];
+                const auto a = at(mem.joint_a), b = at(mem.joint_b);
+                // on this side's cross-arm: from its root corners out, one end past the shaft
+                if (std::min(a[2], b[2]) < H - g.arm_depth - 1.0e-9 || std::max(a[2], b[2]) > H + 1.0e-9) { continue; }
+                if (sy * a[1] < hw - 1.0e-9 || sy * b[1] < hw - 1.0e-9 || std::max(sy * a[1], sy * b[1]) < hb + 1.0e-9) { continue; }
+                const std::array<double,9> d = direction_cosines(a, b, mem.spin);
+                const std::array<double,3> x{{d[0], d[3], d[6]}}, e{{d[2], d[5], d[8]}};
+                std::vector<std::size_t> faces;
+                for (std::size_t f = 0; f < 4; ++f) { if (in_face(a, f) && in_face(b, f)) { faces.push_back(f); } }
+                if (faces.size() == 2) {
+                    // a chord, on the edge of two faces
+                    const auto& p = fn[faces[0]];
+                    const auto& q = fn[faces[1]];
+                    const auto rs = normal_to({{p[0] + q[0], p[1] + q[1], p[2] + q[2]}}, e);
+                    EXPECT_NEAR(std::abs(x[0] * rs[0] + x[1] * rs[1] + x[2] * rs[2]), 1.0, 1.0e-9) << "chord " << mem.id;
+                    ++chords;
+                } else if (faces.size() == 1) {
+                    const auto np = normal_to(fn[faces[0]], e);
+                    EXPECT_NEAR(std::abs(x[0] * np[0] + x[1] * np[1] + x[2] * np[2]), std::sqrt(0.5), 1.0e-9) << "arm brace " << mem.id;
+                    ++arm_braces;
+                }
+            }
+        }
+        EXPECT_GT(chords, 8) << "every cross-arm panel's four chords, both sides";
+        EXPECT_GT(arm_braces, 8) << "the cross-arms' struts and face diagonals";
+        // the turned angles keep the frame as symmetric as its members are: at the cross-arm's centre, a load along x
+        // moves it along x, with y and a twist only as much as the frame with every MSpin 0 (the stiffness's
+        // couplings, against its diagonal)
+        {
+            const auto f = make(in);
+            ASSERT_TRUE(f);
+            const auto k = condensed(*f, in.interface_joints[0]);
+            auto coupling = [&] (std::size_t i, std::size_t j) { return std::abs(k[6 * i + j]) / std::sqrt(k[7 * i] * k[7 * j]); };
+            RecordProperty(crossed ? "kxy_crossed" : "kxy_single", std::to_string(coupling(0, 1)));
+            RecordProperty(crossed ? "kxrx_crossed" : "kxrx_single", std::to_string(coupling(0, 3)));
+            RecordProperty(crossed ? "kxrz_crossed" : "kxrz_single", std::to_string(coupling(0, 5)));
+            // the same couplings with every MSpin 0, for comparison
+            LatticeSpec plain = g;
+            plain.principal_axes = false;
+            FrameInputs pin;
+            ASSERT_TRUE(lattice_frame(plain, pin, designs).empty());
+            const auto pf = make(pin);
+            ASSERT_TRUE(pf);
+            const auto k0 = condensed(*pf, pin.interface_joints[0]);
+            auto coupling0 = [&] (std::size_t i, std::size_t j) { return std::abs(k0[6 * i + j]) / std::sqrt(k0[7 * i] * k0[7 * j]); };
+            RecordProperty(crossed ? "kxy0_crossed" : "kxy0_single", std::to_string(coupling0(0, 1)));
+            RecordProperty(crossed ? "kxrx0_crossed" : "kxrx0_single", std::to_string(coupling0(0, 3)));
+            if (crossed) {
+                // crossed bracing: within the generated frame's own asymmetry (the members without a mirror image,
+                // each cross-arm station's one inner diagonal and the cross-arms' top and bottom diagonals), 2.2e-5
+                // with every MSpin 0; angles turned without regard to the mirror images couple x with the twist
+                // about x at 9e-5
+                EXPECT_LT(coupling(0, 1), 1.0e-5) << "x with y";
+                EXPECT_LT(coupling(0, 3), 1.0e-5) << "x with the twist about x";
+                EXPECT_LT(coupling(0, 5), 1.0e-5) << "x with the twist about z";
+                EXPECT_LT(coupling(1, 5), 1.0e-5) << "y with the twist about z";
+                EXPECT_LT(coupling(1, 4), std::max(1.0e-5, coupling0(1, 4))) << "y with the twist about y";
+            } else {
+                // single bracing alternates its diagonals, which couples the frame by itself: the angles add little
+                EXPECT_LT(coupling(0, 1), 1.5 * coupling0(0, 1)) << "x with y";
+                EXPECT_LT(coupling(0, 3), 1.5 * coupling0(0, 3)) << "x with the twist about x";
+            }
+        }
+    }
+    const LatticeSpec g = case_g();
+    std::vector<MemberDesign> designs;
+    // without principal_axes every angle keeps MSpin 0
+    LatticeSpec flat = g;
+    flat.principal_axes = false;
+    FrameInputs zero;
+    ASSERT_TRUE(lattice_frame(flat, zero, designs).empty());
+    for (const auto& mem : zero.members) { EXPECT_EQ(mem.spin, 0.0) << mem.id; }
+}
+
 TEST(LatticeFrame, TheStiffnessAtTheCrossArmIsSubDyns)
 {
-    // case G was written by write_subdyn from case_g() and run through SubDyn's driver
+    // case G was written by write_subdyn from case_g() with every MSpin 0 and run through SubDyn's driver:
+    // this checks the frame's stiffness against SubDyn's for the same members (the angles' turning is
+    // LatticeFrame.TheAnglesLieOnTheirPrincipalAxes's)
     FrameInputs in;
     std::vector<MemberDesign> designs;
-    ASSERT_TRUE(lattice_frame(case_g(), in, designs).empty());
+    LatticeSpec g = case_g();
+    g.principal_axes = false;
+    ASSERT_TRUE(lattice_frame(g, in, designs).empty());
     FrameInputs theirs;
     const std::string dir = std::string(ERF_FRAME_TEST_FILES) + "/caseG/";
     const std::string err = read_subdyn(dir + "towerG.dat", theirs);
     ASSERT_TRUE(err.empty()) << err;
     ASSERT_EQ(theirs.joints.size(), in.joints.size());
-    for (std::size_t j = 0; j < in.joints.size(); ++j) { EXPECT_EQ(theirs.joints[j].x, in.joints[j].x) << "joint " << j + 1; }
+    // the file was written on another machine, where a coordinate can round one bit apart: the joints agree to 1e-12 m
+    for (std::size_t j = 0; j < in.joints.size(); ++j) {
+        for (std::size_t d = 0; d < 3; ++d) { EXPECT_NEAR(theirs.joints[j].x[d], in.joints[j].x[d], 1.0e-12) << "joint " << j + 1; }
+    }
     ASSERT_EQ(theirs.members.size(), in.members.size());
     const auto f = make(in);
     ASSERT_TRUE(f);

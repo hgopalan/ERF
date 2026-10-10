@@ -371,6 +371,15 @@ std::string ConductorInputs::validate_settings (const ConductorInputs& in)
         }
         if (!(in.asce74_wind > 0.0)) { return "erf.conductors.asce74_exposure needs erf.conductors.asce74_wind, the gust it applies to"; }
     }
+    if (in.asce74_wire_height != "effective" && in.asce74_wire_height != "attachment") {
+        return "erf.conductors.asce74_wire_height must be effective or attachment, not '" + in.asce74_wire_height + "'";
+    }
+    for (const auto& kv : {std::make_pair("asce74_wire_height", in.has_asce74_wire_height),
+                           std::make_pair("asce74_inclined_spans", in.has_asce74_inclined_spans)}) {
+        if (kv.second && !(in.asce74_wind > 0.0)) {
+            return std::string("erf.conductors.") + kv.first + " needs erf.conductors.asce74_wind, the check it applies to";
+        }
+    }
     GustType gust = GustType::None;
     if (!parse_gust_type(in.gust_type, gust)) {
         return "erf.conductors.gust_type must be none, factor, event or random, not '" + in.gust_type + "'";
@@ -613,6 +622,8 @@ ConductorInputs ConductorInputs::read ()
     pp.query("flashover_distance", in.flashover_distance);
     pp.query("asce74_wind", in.asce74_wind);
     pp.query("asce74_exposure", in.asce74_exposure);
+    in.has_asce74_wire_height = pp.query("asce74_wire_height", in.asce74_wire_height) != 0;
+    in.has_asce74_inclined_spans = pp.query("asce74_inclined_spans", in.asce74_inclined_spans) != 0;
     pp.query("gust_type", in.gust_type);
     in.has_gust_sigma_factor = pp.query("gust_sigma_factor", in.gust_sigma_factor) != 0;
     in.has_gust_peak_factor = pp.query("gust_peak_factor", in.gust_peak_factor) != 0;
@@ -714,6 +725,9 @@ ConductorInputs ConductorInputs::read ()
         pt.query("bracing", t.bracing);
         pt.query("yield_strength", t.yield_strength);
         pt.query("steel_temperature", t.steel_temperature);
+        pt.query("diagonal_wind_factor", t.diagonal_wind_factor);
+        pt.query("arm_outside_shaft", t.arm_outside_shaft);
+        t.angle_axes_given = pt.query("angle_principal_axes", t.angle_principal_axes) != 0;
         const std::string terr = t.validate();
         if (!terr.empty()) { Abort(terr); }
         const std::string unused = t.unused_on_a_still_tower();

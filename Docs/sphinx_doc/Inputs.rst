@@ -5182,6 +5182,17 @@ wind, which bend under their loads when the type has a ``frequency`` or a frame
 | **erf.conductors.asce74_exposure**                        | ASCE 74's terrain exposure of that check: B (suburban or | B or C; needs        | C                        |
 |                                                           | wooded) or C (open country)                              | asce74_wind          |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.asce74_wire_height**                     | the wire height of that check: effective, the mean of    | effective or         | effective                |
+|                                                           | the span's attachment heights above the ground less a    | attachment; needs    |                          |
+|                                                           | third of its still-air sag (vertical), or attachment,    | asce74_wind          |                          |
+|                                                           | the mean alone                                           |                      |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.asce74_inclined_spans**                  | the check's swing about an inclined chord against the    | Boolean; needs       | true                     |
+|                                                           | weight's part normal to it, W cos(beta), and the upper   | asce74_wind          |                          |
+|                                                           | end's tension (false: the level span's swing, sag and    |                      |                          |
+|                                                           | tension under the whole weight W; the effective height's |                      |                          |
+|                                                           | still-air sag is the inclined chord's either way)        |                      |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.gust_type**                              | none; factor: every span's gust factor and peak wind     | none, factor, event  | none                     |
 |                                                           | load from the mean wind and the k-equation RANS's k      | or random; not with  |                          |
 |                                                           | along it, written to diagnostics_dir/gusts.csv; event:   | prescribed_velocity; |                          |
@@ -5241,11 +5252,18 @@ wind, which bend under their loads when the type has a ``frequency`` or a frame
 | **erf.conductors.<type>.solidity**                        | the members' area over the outline of a face, of the     | Real in (0, 1)       | must be set              |
 |                                                           | body and the cross-arm (-)                               |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
-| **erf.conductors.<type>.arm_length**                      | the cross-arm's length across the line, centred on the   | Real > 0             | must be set              |
-|                                                           | body (m)                                                 |                      |                          |
+| **erf.conductors.<type>.arm_length**                      | the cross-arm's length across the line, centred on the   | Real > 0; with       | must be set              |
+|                                                           | body (m)                                                 | arm_outside_shaft >  |                          |
+|                                                           |                                                          | the body's width at  |                          |
+|                                                           |                                                          | the middle of the    |                          |
+|                                                           |                                                          | arm's face (at least |                          |
+|                                                           |                                                          | top_width)           |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.arm_depth**                       | the depth of the cross-arm's face (m)                    | Real >= 0 (0:        | top_width                |
-|                                                           |                                                          | top_width)           |                          |
+|                                                           |                                                          | top_width); with     |                          |
+|                                                           |                                                          | arm_outside_shaft    |                          |
+|                                                           |                                                          | under twice the      |                          |
+|                                                           |                                                          | cross-arm's height   |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.peak**                            | the body above the cross-arm, at the top width (m)       | Real >= 0            | 0                        |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
@@ -5254,6 +5272,18 @@ wind, which bend under their loads when the type has a ``frequency`` or a frame
 |                                                           | lattice tower)                                           |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.segments**                        | drag nodes along the body up to the cross-arm (count)    | Integer >= 1         | 10                       |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.diagonal_wind_factor**            | the body's and the peak's drag times 1 + g sin^2(2       | Boolean              | true                     |
+|                                                           | theta), theta the wind's angle from a face's normal and  |                      |                          |
+|                                                           | g = min(0.75 solidity, 0.2): ASCE 7's factor along a     |                      |                          |
+|                                                           | diagonal (false: none)                                   |                      |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.arm_outside_shaft**               | the cross-arm's drag nodes on its two parts outside the  | Boolean; true needs  | true                     |
+|                                                           | body, from the body's half width at their height to the  | arm_length > the     |                          |
+|                                                           | tips, at the middle of its face, half the face's depth   | body's width there   |                          |
+|                                                           | (arm_depth, or top_width when that is 0) below the       | (> top_width)        |                          |
+|                                                           | cross-arm (false: along its whole length at the          |                      |                          |
+|                                                           | cross-arm's height)                                      |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.weight**                          | the tower's own weight on its foundation (N)             | Real >= 0            | 0                        |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
@@ -5334,6 +5364,12 @@ wind, which bend under their loads when the type has a ``frequency`` or a frame
 | **erf.conductors.<type>.yield_strength**                  | the yield strength of the generated frame's steel (Pa)   | Real >= 0 (0:        | 3.45e8                   |
 |                                                           |                                                          | 3.45e8); needs       |                          |
 |                                                           |                                                          | frame_panels         |                          |
++-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
+| **erf.conductors.<type>.angle_principal_axes**            | turn each generated angle (MSpin) so that its axis of    | Boolean; only with   | true                     |
+|                                                           | symmetry, its major principal axis, lies as on a tower:  | frame_panels         |                          |
+|                                                           | a leg's or a cross-arm chord's towards its corner, a     |                      |                          |
+|                                                           | face member's at 45 degrees to its face (false: every    |                      |                          |
+|                                                           | MSpin 0)                                                 |                      |                          |
 +-----------------------------------------------------------+----------------------------------------------------------+----------------------+--------------------------+
 | **erf.conductors.<type>.steel_temperature**               | the steel's temperature (C): it lowers the frame's       | Real in (-273.15,    | 20                       |
 |                                                           | stiffness and its members' yield strength by EN 1993-1-2 | 1200); not 20 needs  |                          |

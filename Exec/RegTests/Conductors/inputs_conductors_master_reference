@@ -96,6 +96,12 @@ erf.conductors.prescribed_velocity = 10.0 0.0 0.0  # 3 Reals (m/s). A uniform wi
 erf.conductors.asce74_wind     = 0.0   # Real >= 0 (m/s). The 3-second gust at 10 m over open country; 0: no check.
                                        #   Default: 0
 erf.conductors.asce74_exposure = C     # B (suburban or wooded) or C (open country). Needs asce74_wind. Default: C
+erf.conductors.asce74_wire_height = effective  # effective or attachment. The check's wire height: the mean of the
+                                               #   attachment heights less a third of the still-air sag, or the
+                                               #   mean alone. Needs asce74_wind. Default: effective
+erf.conductors.asce74_inclined_spans = true    # Boolean. The swing about an inclined chord against W cos(beta) and
+                                               #   the upper end's tension; false: the level span's swing, sag and
+                                               #   tension under W. Needs asce74_wind. Default: true
 
 # ==============================================================================
 # SECTION 4: Gusts from the RANS turbulence
@@ -240,7 +246,9 @@ erf.conductors.T2.size             = 8.0 5.0 6.0
 erf.conductors.lattice.base_width       = 6.0     # Real > 0 (m). The body's width at the ground. Must be set
 erf.conductors.lattice.top_width        = 1.5     # Real in (0, base_width] (m). Its width at the cross-arm. Must be set
 erf.conductors.lattice.solidity         = 0.2     # Real in (0, 1). Members' area over a face's outline. Must be set
-erf.conductors.lattice.arm_length       = 12.0    # Real > 0 (m). The cross-arm's length across the line. Must be set
+erf.conductors.lattice.arm_length       = 12.0    # Real > 0 (m); with arm_outside_shaft > the body's width at the
+                                                  #   middle of the arm's face (at least top_width). The cross-arm's
+                                                  #   length across the line. Must be set
 erf.conductors.lattice.arm_depth        = 1.5     # Real >= 0 (m). The cross-arm face's depth; 0: top_width.
                                                   #   Default: top_width
 erf.conductors.lattice.peak             = 0.0     # Real >= 0 (m). The body above the cross-arm. Default: 0
@@ -248,6 +256,14 @@ erf.conductors.lattice.drag_coefficient = 0.0     # Real >= 0. On the members' a
                                                   #   solidity phi. Default: 0
 erf.conductors.lattice.segments         = 10      # Integer >= 1. Drag nodes along the body up to the cross-arm.
                                                   #   Default: 10
+erf.conductors.lattice.diagonal_wind_factor = true  # Boolean. The body's and peak's drag times 1 + g sin^2(2 theta), g =
+                                                    #   min(0.75 solidity, 0.2): ASCE 7's factor along a diagonal;
+                                                    #   false: none. Default: true
+erf.conductors.lattice.arm_outside_shaft = true     # Boolean. The cross-arm's drag on its parts outside the body, at
+                                                    #   the middle of its face; false: along its whole length at the
+                                                    #   cross-arm's height. true needs arm_length > the body's width
+                                                    #   at the middle of the arm's face (> top_width).
+                                                    #   Default: true
 erf.conductors.lattice.leg_spacing      = 0.0     # Real >= 0 (m). The four footings' square spacing; 0: base_width.
                                                   #   Not with a frame (8c, 8d), whose supports are the footings.
                                                   #   Default: base_width
@@ -298,6 +314,9 @@ erf.conductors.lattice.brace_angle    = 0.10 0.008   # 2 Reals (m), 0 < thicknes
 erf.conductors.lattice.bracing        = crossed      # crossed or single. Face bracing. Needs frame_panels.
                                                      #   Default: crossed
 erf.conductors.lattice.yield_strength = 3.45e8       # Real >= 0 (Pa); 0: 3.45e8. Needs frame_panels. Default: 3.45e8
+erf.conductors.lattice.angle_principal_axes = true   # Boolean. Each generated angle turned (MSpin) to its principal
+                                                     #   axes as on a tower; false: every MSpin 0. Needs
+                                                     #   frame_panels. Default: true
 
 # --- 8c and 8d
 erf.conductors.lattice.steel_temperature = 20.0      # Real in (-273.15, 1200) (C). Lowers the frame's stiffness and its

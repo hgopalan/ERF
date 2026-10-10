@@ -29,6 +29,11 @@ std::string TowerType::validate () const
     if (!(positive(top_width) && top_width <= base_width)) { return key + "top_width must be finite, positive and at most base_width (m)"; }
     if (!(solidity > 0.0 && solidity < 1.0)) { return key + "solidity must be in (0, 1): the members' area over a face's outline"; }
     if (!positive(arm_length)) { return key + "arm_length must be finite and positive (m)"; }
+    if (arm_outside_shaft && !(arm_length > top_width)) {
+        // the least it can be: each tower also needs it longer than the shaft is wide at the middle of the arm's face
+        return key + "arm_length must exceed top_width for " + key + "arm_outside_shaft (the cross-arm's drag outside the "
+                     "shaft); set " + key + "arm_outside_shaft = false for a cross-arm within the shaft's width";
+    }
     if (!non_negative(arm_depth)) { return key + "arm_depth must be finite and >= 0 (m; 0: top_width)"; }
     if (!non_negative(peak)) { return key + "peak must be finite and >= 0 (m)"; }
     if (!non_negative(drag_coefficient)) { return key + "drag_coefficient must be finite and >= 0 (0: from the solidity)"; }
@@ -110,6 +115,9 @@ std::string TowerType::validate () const
     }
     if (has_frame() && leg_spacing != 0.0) {
         return key + "leg_spacing is not given with a frame: the frame's supports are its footings";
+    }
+    if (angle_axes_given && frame_panels == 0) {
+        return key + "angle_principal_axes needs " + key + "frame_panels (a generated frame; a frame_file sets each member's MSpin)";
     }
     return std::string();
 }

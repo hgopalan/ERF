@@ -93,10 +93,10 @@ public:
     /** The drag nodes' velocities (3 per node, m/s, ERF frame), zero for a tower that stands still. */
     const std::vector<amrex::Real>& node_velocities () const { return m_vel; }
     /**
-     * The horizontal displacement of the cross-arm (m, ERF frame), taken from its first drag node
-     * (every cross-arm node moves alike in OneModeTower; a frame tower's cross-arm twists, and its
-     * centre's displacement is TowerModel::arm_centre_displacement()). A line hanging from an
-     * attachment at another height moves by TowerModel::attachment_displacement() instead.
+     * The displacement of the cross-arm's first drag node (m, ERF frame), which stands at the middle of the
+     * cross-arm's face (arm_outside_shaft) or at the cross-arm's height; the tower models give the cross-arm
+     * centre's displacement at its height (TowerModel::arm_centre_displacement()), which the logs report. A line
+     * hanging from an attachment moves by TowerModel::attachment_displacement().
      */
     std::array<amrex::Real,3> arm_displacement () const;
 

@@ -209,6 +209,9 @@ TEST(ActuatorSpreading, OverATallHillTheSourceIsCentredOnThePoint)
             den += wv;
         });
     }
+    // every rank's boxes: a rank may hold none near the point
+    amrex::ParallelDescriptor::ReduceRealSum(num);
+    amrex::ParallelDescriptor::ReduceRealSum(den);
     ASSERT_NE(den, 0.0);
     EXPECT_NEAR(num / den, static_cast<double>(zp), 0.1 * static_cast<double>(eps));
 }

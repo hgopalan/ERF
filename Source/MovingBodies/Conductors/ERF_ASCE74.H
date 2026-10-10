@@ -18,9 +18,13 @@
  * Transmission and Substation Structures Conference 2009, Tables 1 and 2):
  *   B (suburban, wooded): alpha = 7.0, z_g = 1200 ft, kappa = 0.010, L_s = 170 ft;
  *   C (open country):     alpha = 9.5, z_g =  900 ft, kappa = 0.005, L_s = 220 ft.
- * The span then swings out of the vertical by atan(F / W), W its net weight per length, and hangs
- * as an elastic catenary under the resultant sqrt(F^2 + W^2) in that plane: its sag in the plane,
- * its end tension and its mid-span's sideways blowout, the sag times sin(swing).
+ * The span then swings about its chord by atan(F / (W cos beta)), W its net weight per length and
+ * beta the chord's angle to the horizontal (the weight's part along an inclined chord is carried by
+ * the tension, not by the swing), and hangs as an elastic catenary under the resultant
+ * sqrt(F^2 + (W cos beta)^2) across the chord, as a level span of the chord's length: its sag in
+ * the swung plane, its mid-span's sideways blowout, the sag times sin(swing), and its upper end's
+ * tension, the level span's plus W chord sin(beta) / 2 (the two ends' tensions differ by the weight
+ * times the rise).
  *
  * SI units (m, N, Pa) throughout; the feet of ASCE 74's constants are converted.
  */
@@ -64,9 +68,9 @@ struct WireWindLoad
     double pressure{0.0};     //!< Q k_z V^2 (Pa)
     double load{0.0};         //!< the wind load per length, Q k_z V^2 G_w C_f d (N/m)
     double weight{0.0};       //!< the net weight per length (N/m)
-    double swing{0.0};        //!< the span's swing out of the vertical, atan(load / weight) (rad)
+    double swing{0.0};        //!< the span's swing about its chord, atan(load / (weight cos(incline))) (rad)
     double sag{0.0};          //!< mid-span sag below the chord in the swung plane (m)
-    double tension{0.0};      //!< end tension under the resultant load (N)
+    double tension{0.0};      //!< the upper end's tension under the resultant load, on the chord's incline given (N)
     double blowout{0.0};      //!< the mid-span's sideways displacement, sag sin(swing) (m)
     bool solved{false};       //!< the elastic catenary under the resultant load has a solution (Catenary::solved)
 };
@@ -84,9 +88,10 @@ struct WireWindLoad
  * @param length       the span's unstretched length (m, > 0)
  * @param EA           axial stiffness (N, > 0)
  * @param air_density  rho (kg/m^3, > 0)
+ * @param incline      beta, the chord's angle to the horizontal (rad, in (-pi/2, pi/2); 0: a level span)
  */
 WireWindLoad wire_wind_load (Exposure e, double gust, double z, double chord, double diameter, double cf, double weight,
-                             double length, double EA, double air_density);
+                             double length, double EA, double air_density, double incline = 0.0);
 
 } // namespace erf_conductors
 

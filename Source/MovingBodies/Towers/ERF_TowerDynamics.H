@@ -82,8 +82,9 @@ public:
     /** The state to checkpoint. OneModeTower: {q_x, q_y, v_x, v_y, Q_x, Q_y, Q_end_x, Q_end_y} (m, m/s, N). */
     virtual std::vector<double> state () const = 0;
     /**
-     * The displacement of the cross-arm's centre (m, ERF frame) into x: false when the model leaves it to
-     * Tower::arm_displacement() (OneModeTower, whose cross-arm nodes all move alike).
+     * The displacement of the cross-arm's centre at the cross-arm's height (m, ERF frame) into x: false when the
+     * model leaves it to Tower::arm_displacement(). OneModeTower: its modal displacement, the mode shape being 1
+     * at the cross-arm; FrameTower: the frame's cross-arm centre.
      */
     virtual bool arm_centre_displacement (std::array<amrex::Real,3>& /*x*/) const { return false; }
     /**
@@ -108,8 +109,10 @@ public:
 
 /**
  * One tower bending in its first mode, the same way in x and y (a square tower), on a foundation
- * that can tilt and slide. Its mass, the type's weight over gravity, is spread over the drag nodes
- * by the length of member each stands for. A drag node at height z above the base moves
+ * that can tilt and slide. Its mass, the type's weight over gravity, is spread by length of member:
+ * the shaft's over its drag nodes, and the whole cross-arm's (arm_length, the part within the shaft
+ * too) at the cross-arm's height, shared by the cross-arm's drag nodes wherever they stand, so the
+ * drag nodes' layout (arm_outside_shaft) leaves the mode's mass as it is. A drag node at height z above the base moves
  * horizontally by phi(z) times the cross-arm's displacement q, where
  *
  *   phi(z) = a_b (z/H)^2 + a_r z/H + a_l,   H the cross-arm's height,
@@ -163,6 +166,7 @@ public:
     std::array<amrex::Real,3> inertial_force (std::size_t node) const override;
     std::array<amrex::Real,3> attachment_displacement (std::size_t a = 0) const override;
     std::array<amrex::Real,3> attachment_velocity (std::size_t a = 0) const override;
+    bool arm_centre_displacement (std::array<amrex::Real,3>& x) const override;
     amrex::Real frequency () const override;
     std::vector<double> state () const override;
     bool set_state (const std::vector<double>& s) override;
@@ -195,6 +199,7 @@ private:
     std::string m_type;                    //!< its type's name, for messages
     std::vector<double> m_mass;            //!< per drag node (kg)
     std::vector<double> m_phi;             //!< the mode shape at each drag node (-)
+    std::vector<double> m_phi_mass;        //!< the mode shape where each drag node's mass is (the cross-arm's at its height) (-)
     std::vector<double> m_phi_att;         //!< the mode shape at each attachment (-)
     double m_M{0.0};                       //!< generalized mass (kg)
     double m_K{0.0};                       //!< generalized stiffness (N/m)

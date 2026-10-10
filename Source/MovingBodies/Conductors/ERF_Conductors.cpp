@@ -35,6 +35,13 @@ using erf_conductors::LineInputs;
 using erf_conductors::Transformer;
 
 namespace {
+// a tower type's forms, 1 or 0 each: the wind-direction factor, the cross-arm's drag outside the shaft, and the
+// generated angles on their principal axes (only a generated frame has them)
+std::array<int,3> tower_forms (const erf_towers::TowerType& t)
+{
+    return {{t.diagonal_wind_factor ? 1 : 0, t.arm_outside_shaft ? 1 : 0, (t.angle_principal_axes && t.frame_panels > 0) ? 1 : 0}};
+}
+
 constexpr Real rad2deg = Real(180.0 / 3.14159265358979323846);
 
 // the input key of attachment point k of a line: end_a, end_b or one of its towers (k from 1)
@@ -342,15 +349,29 @@ Conductors::write_asce74 () const
         const double w = static_cast<double>((s.mass_per_length - m_in.air_density * Real(0.25) * Real(3.14159265358979323846) *
                                               s.diameter * s.diameter) * CONST_GRAV);
         for (int k = 0; k < s.num_spans(); ++k) {
-            // the height of the conductor above the ground at each end of the span, averaged
-            const double z = span_height(i, k);
-            if (!(z > 0.0)) { Abort("erf.conductors." + s.name + ": span " + std::to_string(k + 1) + " is not above the ground"); }
-            // the chord the conductor's unstretched length spans: between the strings' bottoms at the towers
+            // the chord the conductor's unstretched length spans: between the strings' bottoms at the towers, and its
+            // angle to the horizontal
             const double chord = static_cast<double>(s.conductor_chord(k));
+            const auto pa = s.conductor_point(k), pb = s.conductor_point(k + 1);
+            const double beta = std::asin(static_cast<double>(pb[2] - pa[2]) / chord);
+            const double length = static_cast<double>(s.lengths[static_cast<std::size_t>(k)]);
+            // the wire's height: the conductor's height above the ground at each end of the span, averaged, and with
+            // the effective height a third of its still-air sag (vertical) lower; a span with no still-air shape keeps
+            // the attachment height, and the check below then stops on it (the wind's load stretches it further)
+            double z = span_height(i, k);
+            if (m_in.asce74_wire_height == "effective") {
+                const erf_conductors::Catenary still =
+                    erf_conductors::elastic_catenary(static_cast<Real>(chord), static_cast<Real>(length),
+                                                     static_cast<Real>(w * std::cos(beta)), s.axial_stiffness);
+                if (still.solved) { z -= static_cast<double>(still.sag) / std::cos(beta) / 3.0; }
+            }
+            // the swing about the inclined chord against the weight's part normal to it, or against the whole weight
+            const double incline = m_in.asce74_inclined_spans ? beta : 0.0;
+            if (!(z > 0.0)) { Abort("erf.conductors." + s.name + ": span " + std::to_string(k + 1) + " is not above the ground"); }
             const auto L = erf_conductors::wire_wind_load(e, static_cast<double>(m_in.asce74_wind), z, chord,
                                                           static_cast<double>(s.diameter), static_cast<double>(s.drag_coefficient), w,
-                                                          static_cast<double>(s.lengths[static_cast<std::size_t>(k)]),
-                                                          static_cast<double>(s.axial_stiffness), static_cast<double>(m_in.air_density));
+                                                          length, static_cast<double>(s.axial_stiffness),
+                                                          static_cast<double>(m_in.air_density), incline);
             if (!L.solved) {
                 Abort("erf.conductors." + s.name + ": span " + std::to_string(k + 1) + " has no elastic catenary under the ASCE 74 load "
                       "(axial_stiffness " + std::to_string(s.axial_stiffness) + " N would stretch it near 50 % or more)");
@@ -506,6 +527,7 @@ Conductors::make_frame (const erf_towers::Tower& tw) const
         spec.peak = static_cast<double>(type.peak);
         spec.panels = type.frame_panels;
         spec.crossed = (type.bracing != "single");
+        spec.principal_axes = type.angle_principal_axes;
         spec.leg_b = static_cast<double>(type.leg_angle[0]);
         spec.leg_t = static_cast<double>(type.leg_angle[1]);
         spec.brace_b = static_cast<double>(type.brace_angle[0]);
@@ -1108,8 +1130,9 @@ void
 Conductors::restore (const std::string& dir)
 {
     // the state file: "step = ", "time = ", "clock_offset = ", "surface_offset = " and "coupling_logged = "
-    // (both absent in older checkpoints), one "line <name> <nodes>" record per line, in input order, and
-    // one "geometry" record per line (absent in older checkpoints)
+    // (both absent in older checkpoints), one "line <name> <nodes>" record per line, in input order, a
+    // "tower_forms_version 1" marker and one "tower_forms <tower> <d> <a> <p>" record per tower (absent in older
+    // checkpoints), and one "geometry" record per line (absent in older checkpoints)
     Vector<char> chars;
     ParallelDescriptor::ReadAndBcastFile(dir + "/state", chars);
     std::istringstream in(std::string(chars.dataPtr(), chars.size()));
@@ -1117,6 +1140,8 @@ Conductors::restore (const std::string& dir)
     bool have_step = false, have_time = false, have_t0 = false;
     double saved_offset = std::numeric_limits<double>::quiet_NaN();
     std::vector<std::pair<std::string,unsigned>> saved;
+    std::map<std::string,std::array<int,3>> saved_forms;
+    bool forms_recorded = false;
     while (std::getline(in, line)) {
         std::istringstream ls(line);
         std::string key, eq;
@@ -1141,6 +1166,13 @@ Conductors::restore (const std::string& dir)
             unsigned nodes = 0;
             if (!(ls >> name >> nodes)) { Abort("malformed " + key + " line in '" + dir + "/state'"); }
             saved.emplace_back(name, nodes);
+        } else if (key == "tower_forms_version") {   // absent in older checkpoints, which had the earlier forms
+            forms_recorded = true;
+        } else if (key == "tower_forms") {
+            std::string name;
+            std::array<int,3> f{{0, 0, 0}};
+            if (!(ls >> name >> f[0] >> f[1] >> f[2])) { Abort("malformed tower_forms line in '" + dir + "/state'"); }
+            saved_forms[name] = f;
         } else if (key == "geometry") {
             // absent in older checkpoints; the line's nodes restart where they were, so its points and
             // lengths must be those they hung from
@@ -1178,6 +1210,17 @@ Conductors::restore (const std::string& dir)
     }
     if (!have_step || !have_time || !have_t0) {
         Abort("no step count, time or clock offset in the conductor checkpoint '" + dir + "/state'");
+    }
+    for (const auto& tw : m_towers) {
+        const auto it = saved_forms.find(tw.name());
+        if (forms_recorded && it == saved_forms.end()) {
+            Abort("the conductor checkpoint '" + dir + "' holds no forms of tower " + tw.name() + "; the lines' towers must match "
+                  "the run being restarted");
+        }
+        const std::string err = erf_conductors::tower_forms_mismatch(tw.type().name, forms_recorded,
+                                                                      forms_recorded ? it->second : std::array<int,3>{{0, 0, 0}},
+                                                                      tower_forms(tw.type()));
+        if (!err.empty()) { Abort("the conductor checkpoint '" + dir + "': tower " + tw.name() + ": " + err); }
     }
     {
         const bool moving = std::any_of(m_models.begin(), m_models.end(), [] (const auto& m) { return m != nullptr; });
@@ -1299,9 +1342,9 @@ Conductors::restore (const std::string& dir)
     }
     if (!m_towers.empty()) {
         // the members' last drag, so that the restored drag on the flow is the checkpointed step's
-        Vector<char> chars;
-        ParallelDescriptor::ReadAndBcastFile(dir + "/tower_loads", chars);
-        std::istringstream tl(std::string(chars.dataPtr(), chars.size()));
+        Vector<char> lchars;
+        ParallelDescriptor::ReadAndBcastFile(dir + "/tower_loads", lchars);
+        std::istringstream tl(std::string(lchars.dataPtr(), lchars.size()));
         for (auto& t : m_towers) {
             std::vector<Real> f(3 * t.nodes().size());
             for (auto& v : f) {
@@ -1351,6 +1394,12 @@ Conductors::write_checkpoint (const std::string& chkdir) const
             // what coupling.dat's next row counts so far (a restart continues the count)
             << "\ncoupling_logged = " << m_coupling_logged_iterations << " " << m_coupling_logged_unconverged << "\n";
         for (const auto& line : m_lines) { out << "line " << line->name() << " " << line->num_nodes() << "\n"; }
+        // each tower's forms, which a restart may not change, after a marker that this checkpoint records them
+        out << "tower_forms_version 1\n";
+        for (const auto& tw : m_towers) {
+            const auto f = tower_forms(tw.type());
+            out << "tower_forms " << tw.name() << " " << f[0] << " " << f[1] << " " << f[2] << "\n";
+        }
         // each line's placed attachment points, its spans' unstretched lengths and its strings' length, which a
         // restart may not change
         for (const LineInputs& s : m_placed) {
@@ -1851,7 +1900,7 @@ Conductors::add_gusts (double time, double dt, const std::vector<std::vector<Rea
         first += line.num_nodes();
     }
     // per tower, over its drag nodes: the mean k, the root-mean-square horizontal wind, the mean height above the
-    // base and the highest node
+    // base and the highest node (whose gust the series logs)
     const std::size_t nt = m_towers.size();
     std::vector<double> ktow(nt, 0.0), utow(nt, 0.0), zmean(nt, 0.0), ztop(nt, 0.0);
     std::vector<std::size_t> top(nt, 0);
@@ -1942,7 +1991,8 @@ Conductors::add_gusts (double time, double dt, const std::vector<std::vector<Rea
     for (std::size_t t = 0; t < nt; ++t) {
         const double sigma = c * std::sqrt(ktow[t]);
         const double A = event ? g * sigma
-                               : sigma * std::sqrt(erf_conductors::tower_background_factor(ztop[t], Ls)) *
+                               : sigma * std::sqrt(erf_conductors::tower_background_factor(
+                                             static_cast<double>(m_towers[t].arm_height() + m_towers[t].type().peak), Ls)) *
                                  m_gust_z[m_process_span.size() + t];
         const auto d = direction(tuvw, first, m_towers[t].nodes().size());
         for (std::size_t j = 0; j < m_towers[t].nodes().size(); ++j) {
@@ -2196,6 +2246,27 @@ std::string restart_mismatch (bool saved_tower_motion, bool towers_move, double 
                std::to_string(saved_offset) + " m), the frame MoorDyn's saved state is in";
     }
     return std::string();
+}
+
+std::string tower_forms_mismatch (const std::string& type_name, bool recorded, const std::array<int,3>& saved,
+                                  const std::array<int,3>& now)
+{
+    static const char* keys[3] = {"diagonal_wind_factor", "arm_outside_shaft", "angle_principal_axes"};
+    const std::string key = "erf.conductors." + type_name + ".";
+    std::string changed, names;
+    for (std::size_t i = 0; i < 3; ++i) {
+        if (saved[i] == now[i]) { continue; }
+        changed += (changed.empty() ? "" : ", ") + key + keys[i] + (now[i] ? " = true" : " = false");
+        names += (names.empty() ? "" : ", ") + key + keys[i];
+    }
+    if (changed.empty()) { return std::string(); }
+    if (!recorded) {
+        return "it was written before the tower forms were recorded, so with the earlier ones; a restart from it needs them: "
+               "set " + names + " to false";
+    }
+    return "tower type " + type_name + " was written with other forms than the inputs give (" + changed + "); they set the "
+           "towers' drag nodes, drag and frame, which the checkpoint's sway, statistics and node forces belong to, so a restart "
+           "cannot change them";
 }
 
 } // namespace erf_conductors

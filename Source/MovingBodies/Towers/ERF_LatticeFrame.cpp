@@ -1,6 +1,7 @@
 // A lattice tower's frame model generated from its dimensions.
 
 #include "ERF_LatticeFrame.H"
+#include "ERF_Frame.H"
 
 #include <algorithm>
 #include <array>
@@ -82,13 +83,51 @@ std::string lattice_frame (const LatticeSpec& s, FrameInputs& in, std::vector<Me
 
     std::vector<Point> x;
     auto joint = [&] (const Point& p) { x.push_back(p); return static_cast<int>(x.size()); };
-    auto member = [&] (int a, int b, bool leg, MemberRole role = MemberRole::Bracing) {
+    // the spin that turns a member's local x (the axis of Ixx, an angle's major axis: its axis of symmetry)
+    // towards sym, projected normal to the member; 0 without principal_axes or a direction
+    auto spin_towards = [&] (int a, int b, const Point& sym) {
+        if (!s.principal_axes || (sym[0] == 0.0 && sym[1] == 0.0 && sym[2] == 0.0)) { return 0.0; }
+        const std::array<double,9> d = direction_cosines(x[static_cast<std::size_t>(a - 1)], x[static_cast<std::size_t>(b - 1)], 0.0);
+        const double px = sym[0] * d[0] + sym[1] * d[3] + sym[2] * d[6];
+        const double py = sym[0] * d[1] + sym[1] * d[4] + sym[2] * d[7];
+        return std::atan2(py, px);
+    };
+    // a face member's axis of symmetry: half way between the face's outward normal and the face's direction
+    // normal to the member (one leg flat on the face, the other standing out of it), both normal to the member
+    auto face_sym = [&] (int a, int b, const Point& normal, std::size_t h) {
+        const Point& pa = x[static_cast<std::size_t>(a - 1)];
+        const Point& pb = x[static_cast<std::size_t>(b - 1)];
+        Point e{{pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]}};
+        const double le = std::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+        for (auto& v : e) { v /= le; }
+        const double ne = normal[0] * e[0] + normal[1] * e[1] + normal[2] * e[2];
+        Point n{{normal[0] - ne * e[0], normal[1] - ne * e[1], normal[2] - ne * e[2]}};
+        const double ln = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        for (auto& v : n) { v /= ln; }
+        Point p{{n[1] * e[2] - n[2] * e[1], n[2] * e[0] - n[0] * e[2], n[0] * e[1] - n[1] * e[0]}};
+        // the leg flat on the face points away from the member, along p or -p: the same way for a member and its mirror
+        // images in the tower's planes of symmetry x = 0 and y = 0, so the frame keeps the tower's symmetry. Towards
+        // the face's line of symmetry, across the horizontal axis h (0: x, 1: y) the face's own layout gives (y on a
+        // shaft face facing x and on a cross-arm's side, x on a shaft face facing y and on a cross-arm's top and
+        // bottom); for a member centred on it, down; for a level one, out along the other horizontal axis g
+        const std::size_t g = 1 - h;
+        const double mh = 0.5 * (pa[h] + pb[h]), mg = 0.5 * (pa[g] + pb[g]);
+        constexpr double tiny = 1.0e-9;
+        double sense = 1.0;
+        if (std::abs(mh) > tiny && std::abs(p[h]) > tiny) { sense = (p[h] * mh < 0.0) ? 1.0 : -1.0; }
+        else if (std::abs(p[2]) > tiny) { sense = (p[2] < 0.0) ? 1.0 : -1.0; }
+        else if (std::abs(mg) > tiny) { sense = (p[g] * mg > 0.0) ? 1.0 : -1.0; }
+        for (auto& v : p) { v *= sense; }
+        return Point{{n[0] + p[0], n[1] + p[1], n[2] + p[2]}};
+    };
+    auto member = [&] (int a, int b, bool leg, MemberRole role = MemberRole::Bracing, const Point& sym = Point{{0.0, 0.0, 0.0}}) {
         FrameMember m;
         m.id = static_cast<int>(in.members.size()) + 1;
         m.joint_a = a;
         m.joint_b = b;
         m.section = leg ? 1 : 2;
         m.shape = SectionShape::Arbitrary;
+        m.spin = spin_towards(a, b, sym);
         in.members.push_back(m);
         MemberDesign d;
         d.member = m.id;
@@ -165,15 +204,31 @@ std::string lattice_frame (const LatticeSpec& s, FrameInputs& in, std::vector<Me
     }
     for (const auto& p : x) { FrameJoint j; j.id = static_cast<int>(in.joints.size()) + 1; j.x = p; in.joints.push_back(j); }
 
-    // legs
+    // the outward normal of the face between corners c and c + 1 of the panel above level k: leaning in with the
+    // shaft's taper below the cross-arm, upright on the peak
+    const double lean = 0.5 * (s.base_width - s.top_width) / H;
+    auto face_normal = [&] (int c, int k) {
+        const int n = (c + 1) % 4;
+        const double nx = 0.5 * (sx[c] + sx[n]), ny = 0.5 * (sy[c] + sy[n]);
+        const double nz = (z[static_cast<std::size_t>(k)] < H - 1.0e-9) ? lean : 0.0;
+        const double l = std::sqrt(nx * nx + ny * ny + nz * nz);
+        return Point{{nx / l, ny / l, nz / l}};
+    };
+    // the horizontal axis along the face between corners c and c + 1: y on a face facing x, x on one facing y
+    auto face_axis = [&] (int c) { return (sx[c] == sx[(c + 1) % 4]) ? std::size_t(1) : std::size_t(0); };
+    // legs, their axis of symmetry towards the corner they stand on
     for (int k = 0; k + 1 < levels; ++k) {
-        for (int c = 0; c < 4; ++c) { member(corner[static_cast<std::size_t>(k)][c], corner[static_cast<std::size_t>(k + 1)][c], true); }
+        for (int c = 0; c < 4; ++c) {
+            member(corner[static_cast<std::size_t>(k)][c], corner[static_cast<std::size_t>(k + 1)][c], true, MemberRole::Leg,
+                   Point{{static_cast<double>(sx[c]), static_cast<double>(sy[c]), 0.0}});
+        }
     }
     // struts at every level above the ground: redundant between crossed diagonals, which carry the shear without them
     const MemberRole strut = s.crossed ? MemberRole::Redundant : MemberRole::Bracing;
     for (int k = 1; k < levels; ++k) {
         for (int c = 0; c < 4; ++c) {
-            member(corner[static_cast<std::size_t>(k)][c], corner[static_cast<std::size_t>(k)][(c + 1) % 4], false, strut);
+            const int a = corner[static_cast<std::size_t>(k)][c], b = corner[static_cast<std::size_t>(k)][(c + 1) % 4];
+            member(a, b, false, strut, face_sym(a, b, face_normal(c, k - 1), face_axis(c)));   // in the face of the panel below
         }
     }
     // face bracing: crossed diagonals in halves, or one diagonal per face, alternating panel by panel
@@ -182,16 +237,18 @@ std::string lattice_frame (const LatticeSpec& s, FrameInputs& in, std::vector<Me
         const auto& hi = corner[static_cast<std::size_t>(k + 1)];
         for (int c = 0; c < 4; ++c) {
             const int n = (c + 1) % 4;
+            const Point fn = face_normal(c, k);
+            auto brace = [&] (int a, int b) { member(a, b, false, MemberRole::Bracing, face_sym(a, b, fn, face_axis(c))); };
             if (s.crossed) {
                 const int xc = cross[static_cast<std::size_t>(k)][c];
-                member(lo[c], xc, false);
-                member(xc, hi[n], false);
-                member(lo[n], xc, false);
-                member(xc, hi[c], false);
+                brace(lo[c], xc);
+                brace(xc, hi[n]);
+                brace(lo[n], xc);
+                brace(xc, hi[c]);
             } else if (k % 2 == 0) {
-                member(lo[c], hi[n], false);
+                brace(lo[c], hi[n]);
             } else {
-                member(lo[n], hi[c], false);
+                brace(lo[n], hi[c]);
             }
         }
     }
@@ -202,28 +259,54 @@ std::string lattice_frame (const LatticeSpec& s, FrameInputs& in, std::vector<Me
     // faces' diagonals of every panel but the last (whose faces the chords and the struts triangulate)
     for (int side = 0; side < 2; ++side) {
         const auto& st = station[static_cast<std::size_t>(side)];
+        // the corners the side's chords start from: (top c0, top c1, bottom c0, bottom c1), and the outward normals
+        // of its faces (top, bottom, the c0 side, the c1 side). Each face is a plane through two chords that meet at
+        // the tip: the top is level, the bottom rises to the tip and the sides close in on it
+        const int c0 = (side == 0) ? 0 : 2, c1 = (side == 0) ? 1 : 3;
+        const std::array<Point,4> outward{{Point{{0.0, 0.0, 1.0}}, Point{{0.0, 0.0, -1.0}},
+                                           Point{{static_cast<double>(sx[c0]), 0.0, 0.0}}, Point{{static_cast<double>(sx[c1]), 0.0, 0.0}}}};
+        static constexpr int face_corners[4][2] = {{0, 1}, {2, 3}, {0, 2}, {1, 3}};
+        // the faces' horizontal axes for face_sym: across the cross-arm (x) on its top and bottom, along it (y) on its sides
+        static constexpr std::array<std::size_t,4> arm_axis{{0, 0, 1, 1}};
+        std::array<Point,4> normal;
+        for (std::size_t f = 0; f < 4; ++f) {
+            const Point& pa = x[static_cast<std::size_t>(st[0][static_cast<std::size_t>(face_corners[f][0])] - 1)];
+            const Point& pb = x[static_cast<std::size_t>(st[0][static_cast<std::size_t>(face_corners[f][1])] - 1)];
+            const Point& pt = x[static_cast<std::size_t>(tip[static_cast<std::size_t>(side)] - 1)];
+            const Point u{{pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]}}, v{{pt[0] - pa[0], pt[1] - pa[1], pt[2] - pa[2]}};
+            Point n{{u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]}};
+            const double l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+            const double sense = (n[0] * outward[f][0] + n[1] * outward[f][1] + n[2] * outward[f][2] < 0.0) ? -1.0 : 1.0;
+            for (auto& c : n) { c *= sense / l; }
+            normal[f] = n;
+        }
+        // a chord's axis of symmetry towards the cross-arm's corner it runs along, between its two faces' normals
+        auto between = [] (const Point& p, const Point& q) { return Point{{p[0] + q[0], p[1] + q[1], p[2] + q[2]}}; };
+        const std::array<Point,4> corner_sym{{between(normal[0], normal[2]), between(normal[0], normal[3]),
+                                              between(normal[1], normal[2]), between(normal[1], normal[3])}};
         for (int j = 1; j <= arm_panels; ++j) {
             for (std::size_t q = 0; q < 4; ++q) {
                 const int to = (j < arm_panels) ? st[static_cast<std::size_t>(j)][q] : tip[static_cast<std::size_t>(side)];
-                member(st[static_cast<std::size_t>(j - 1)][q], to, true);
+                member(st[static_cast<std::size_t>(j - 1)][q], to, true, MemberRole::Leg, corner_sym[q]);
             }
         }
         for (int j = 1; j < arm_panels; ++j) {
             const auto& p = st[static_cast<std::size_t>(j)];
-            member(p[0], p[1], false);
-            member(p[2], p[3], false);
-            member(p[0], p[2], false);
-            member(p[1], p[3], false);
+            member(p[0], p[1], false, MemberRole::Bracing, face_sym(p[0], p[1], normal[0], arm_axis[0]));
+            member(p[2], p[3], false, MemberRole::Bracing, face_sym(p[2], p[3], normal[1], arm_axis[1]));
+            member(p[0], p[2], false, MemberRole::Bracing, face_sym(p[0], p[2], normal[2], arm_axis[2]));
+            member(p[1], p[3], false, MemberRole::Bracing, face_sym(p[1], p[3], normal[3], arm_axis[3]));
             member(p[0], p[3], false);
         }
         // the four faces of the cross-arm: (top 0, top 1), (bottom 0, bottom 1), (top 0, bottom 0), (top 1, bottom 1)
-        static constexpr int faces[4][2] = {{0, 1}, {2, 3}, {0, 2}, {1, 3}};
+        const auto& faces = face_corners;
         for (int j = 1; j < arm_panels; ++j) {
             const auto& a = st[static_cast<std::size_t>(j - 1)];
             const auto& b = st[static_cast<std::size_t>(j)];
-            for (const auto& f : faces) {
-                if (j % 2 == 1) { member(a[f[0]], b[f[1]], false); }
-                else { member(a[f[1]], b[f[0]], false); }
+            for (std::size_t f = 0; f < 4; ++f) {
+                const int u = (j % 2 == 1) ? a[faces[f][0]] : a[faces[f][1]];
+                const int v = (j % 2 == 1) ? b[faces[f][1]] : b[faces[f][0]];
+                member(u, v, false, MemberRole::Bracing, face_sym(u, v, normal[f], arm_axis[f]));
             }
         }
     }

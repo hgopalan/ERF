@@ -26,12 +26,16 @@ struct MemberNode
     amrex::Real length{0.0};             //!< length of member the node stands for (m)
     amrex::Real drag_width{0.0};         //!< width the wind acts on, the area per unit length (m)
     amrex::Real drag_coefficient{1.0};   //!< drag coefficient on drag_width (-)
+    std::array<amrex::Real,3> face{{0.0, 0.0, 0.0}};   //!< a square lattice's face normal (horizontal unit vector), for diagonal_gain
+    amrex::Real diagonal_gain{0.0};      //!< g of the direction factor 1 + g sin^2(2 theta) (lattice_diagonal_gain); 0: none
 };
 
 /**
  * Return the drag on one drag node: 1/2 rho Cd w L |U_n| U_n, where U_n is the wind relative to
  * the node with its component along the member's axis removed (only the normal flow loads a
- * slender member), w the drag width and L the node's length of member.
+ * slender member), w the drag width and L the node's length of member. A node of a square lattice
+ * shaft (diagonal_gain > 0) takes the factor 1 + g sin^2(2 theta), theta the angle of U_n's
+ * horizontal part from the node's face normal: 1 for wind normal to a face, 1 + g along a diagonal.
  *
  * @param node      the drag node
  * @param wind      fluid velocity at the node (m/s, ERF frame)
@@ -51,6 +55,14 @@ std::array<amrex::Real,3> member_drag (const MemberNode& node, const std::array<
  * dynamic pressure (Pa) and A the outline area of one face (m^2).
  */
 amrex::Real lattice_force_coefficient (amrex::Real solidity);
+
+/**
+ * Return g of a square lattice shaft's wind-direction factor 1 + g sin^2(2 theta) from its faces'
+ * solidity phi: g = min(0.75 phi, 0.2). Along a diagonal the factor is ASCE 7's 1 + 0.75 phi, which
+ * ASCE 7 caps at 1.2; between a face and a diagonal it varies as IEC 60826's 1 + 0.2 sin^2(2 theta),
+ * whose 0.2 is that cap.
+ */
+amrex::Real lattice_diagonal_gain (amrex::Real solidity);
 
 /**
  * The aerodynamics of a structure's members behind a narrow interface: the drag nodes, the wind

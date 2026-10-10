@@ -2474,10 +2474,12 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # MoorDyn swings about it, so each library has its own gold logs. TOTALS names the totals file
   # whose source integral is checked; EXTRA_LOGS lists further logs (space separated), each
   # compared with the gold of its file name followed by GOLD_SUFFIX (".gold" for the stub,
-  # ".moordyn.gold" for the real library). RunConductors.cmake compares the components of one
+  # ".moordyn.gold" for the real library). OPTIONS (space-separated key=value inputs) follow the deck
+  # on the command line: a variant of the deck, such as its old forms of a model against the golds
+  # written before the model changed. RunConductors.cmake compares the components of one
   # vector, a tower's loads say, normwise (Tests/ConductorLogGroups.cmake).
   function(add_test_conductors TEST_NAME TEST_FILES_DIR PLTFILE LOG GOLD_LOG SIGDIGITS PLOT_GOLD_NAME)
-      cmake_parse_arguments(ATC "" "TOTALS;EXTRA_LOGS;GOLD_SUFFIX" "" ${ARGN})
+      cmake_parse_arguments(ATC "" "TOTALS;EXTRA_LOGS;GOLD_SUFFIX;OPTIONS" "" ${ARGN})
       setup_test()
       set(PLOT_GOLD ${ERF_TEST_GOLD_FILES_DIRECTORY}/${PLOT_GOLD_NAME})
       resolve_test_exe("" "erf_exec" TEST_EXE)
@@ -2502,6 +2504,7 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
           "-DEXTRA_LOGS=${ATC_EXTRA_LOGS}"
           "-DGOLD_DIR=${CURRENT_TEST_SOURCE_DIR}"
           "-DGOLD_SUFFIX=${ATC_GOLD_SUFFIX}"
+          "-DOPTIONS=${ATC_OPTIONS}"
           -P ${PROJECT_SOURCE_DIR}/Tests/RunConductors.cmake)
       set_tests_properties(${TEST_NAME}
           PROPERTIES
@@ -2556,13 +2559,20 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # restart parity (one binary) and the unit tests, not to a gold.
   set(_circuit_logs "P2_insulators.dat P2_insulators_stats.csv SW_span2.dat conductors/separation_P1-P2_stats.csv conductors/separation_P2-SW_stats.csv")
   string(APPEND _circuit_logs " conductors/asce74.csv")
+  set(_asce74_old_forms "erf.conductors.asce74_wire_height=attachment erf.conductors.asce74_inclined_spans=false")
   if(ERF_MOORDYN_USE_STUB)
     add_test_conductors(Conductors_Circuit Conductors_Circuit "plt00010" "P2_span2.dat"
                         "P2_span2.dat.gold" 8 Conductors_FlowWind EXTRA_LOGS "${_circuit_logs}" GOLD_SUFFIX ".gold")
+    # the old forms of the ASCE 74 check (the attachment height, the whole weight on an inclined chord) give
+    # the asce74.csv written before they changed
+    add_test_conductors(Conductors_Circuit_Legacy Conductors_Circuit "plt00010" "conductors/asce74.csv"
+                        "asce74.csv.legacy.gold" 8 Conductors_FlowWind OPTIONS "${_asce74_old_forms}")
     set(_circuit_restart Conductors_Circuit_Restart)
   else()
     add_test_conductors(Conductors_Circuit_MoorDyn Conductors_Circuit "plt00010" "P2_span2.dat"
                         "P2_span2.dat.moordyn.gold" 6 Conductors_FlowWind EXTRA_LOGS "${_circuit_logs}" GOLD_SUFFIX ".moordyn.gold")
+    add_test_conductors(Conductors_Circuit_Legacy_MoorDyn Conductors_Circuit "plt00010" "conductors/asce74.csv"
+                        "asce74.csv.legacy.moordyn.gold" 6 Conductors_FlowWind OPTIONS "${_asce74_old_forms}")
     set(_circuit_restart Conductors_Circuit_Restart_MoorDyn)
   endif()
   add_test_restart_parity(${_circuit_restart} Conductors_Circuit 5 10
@@ -2621,14 +2631,26 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # L1 must match their golds; the flow is Conductors_Terrain's, since nothing goes back into it. The
   # restart parity carries the towers' sway and the coupling's log across the checkpoint; its
   # checkpointing run goes on past the checkpoint (OVERRUN), so the restart must drop those rows.
+  # The towers' old forms, for the legacy tests against the golds written before they changed.
+  set(_tower_drag_old_forms "erf.conductors.lattice.diagonal_wind_factor=false erf.conductors.lattice.arm_outside_shaft=false")
   set(_moving_logs "conductors/towers.dat conductors/tower_L1_t1_stats.csv")
   if(ERF_MOORDYN_USE_STUB)
     add_test_conductors(Conductors_MovingTowers Conductors_MovingTowers "plt00010" "conductors/L1_span2.dat"
                         "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_moving_logs}" GOLD_SUFFIX ".gold")
+    # the old forms of the one-mode towers (no wind-direction factor, the cross-arm's drag through the shaft at
+    # its height) give the towers' loads and sway and the span written before they changed
+    add_test_conductors(Conductors_MovingTowers_Legacy Conductors_MovingTowers "plt00010" "conductors/towers.dat"
+                        "towers.dat.legacy.gold" 8 Conductors_Terrain
+                        EXTRA_LOGS "conductors/L1_span2.dat conductors/tower_L1_t1_stats.csv" GOLD_SUFFIX ".legacy.gold"
+                        OPTIONS "${_tower_drag_old_forms}")
     set(_moving_restart Conductors_MovingTowers_Restart)
   else()
     add_test_conductors(Conductors_MovingTowers_MoorDyn Conductors_MovingTowers "plt00010" "conductors/L1_span2.dat"
                         "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_moving_logs}" GOLD_SUFFIX ".moordyn.gold")
+    add_test_conductors(Conductors_MovingTowers_Legacy_MoorDyn Conductors_MovingTowers "plt00010" "conductors/towers.dat"
+                        "towers.dat.legacy.moordyn.gold" 4 Conductors_Terrain
+                        EXTRA_LOGS "conductors/L1_span2.dat conductors/tower_L1_t1_stats.csv" GOLD_SUFFIX ".legacy.moordyn.gold"
+                        OPTIONS "${_tower_drag_old_forms}")
     set(_moving_restart Conductors_MovingTowers_Restart_MoorDyn)
   endif()
   # coupling.dat every 2 steps: the row after the step-5 checkpoint counts steps 5 and 6 across the restart
@@ -2672,13 +2694,24 @@ if(ERF_ENABLE_MOORDYN AND ERF_ENABLE_FFT AND ERF_ENABLE_MPI AND NOT WIN32)
   # statistics and the frames' log across the checkpoint; its checkpointing run goes on past the
   # checkpoint (OVERRUN), so the restarted run must also drop the rows written after it.
   set(_generated_logs "conductors/towers.dat conductors/tower_L1_t1_stats.csv conductors/tower_L1_t1_members.csv")
+  set(_tower_old_forms "${_tower_drag_old_forms} erf.conductors.lattice.angle_principal_axes=false")
   if(ERF_MOORDYN_USE_STUB)
     add_test_conductors(Conductors_GeneratedTowers Conductors_GeneratedTowers "plt00010" "conductors/L1_span2.dat"
                         "L1_span2.dat.gold" 8 Conductors_Terrain EXTRA_LOGS "${_generated_logs}" GOLD_SUFFIX ".gold")
+    # the old forms of the towers (no wind-direction factor, the cross-arm's drag through the shaft at its
+    # height, every generated angle at MSpin 0) give the towers' loads and sway written before they changed
+    add_test_conductors(Conductors_GeneratedTowers_Legacy Conductors_GeneratedTowers "plt00010" "conductors/towers.dat"
+                        "towers.dat.legacy.gold" 8 Conductors_Terrain
+                        EXTRA_LOGS "conductors/tower_L1_t1_stats.csv" GOLD_SUFFIX ".legacy.gold"
+                        OPTIONS "${_tower_old_forms}")
     set(_generated_restart Conductors_GeneratedTowers_Restart)
   else()
     add_test_conductors(Conductors_GeneratedTowers_MoorDyn Conductors_GeneratedTowers "plt00010" "conductors/L1_span2.dat"
                         "L1_span2.dat.moordyn.gold" 4 Conductors_Terrain EXTRA_LOGS "${_generated_logs}" GOLD_SUFFIX ".moordyn.gold")
+    add_test_conductors(Conductors_GeneratedTowers_Legacy_MoorDyn Conductors_GeneratedTowers "plt00010" "conductors/towers.dat"
+                        "towers.dat.legacy.moordyn.gold" 4 Conductors_Terrain
+                        EXTRA_LOGS "conductors/tower_L1_t1_stats.csv" GOLD_SUFFIX ".legacy.moordyn.gold"
+                        OPTIONS "${_tower_old_forms}")
     set(_generated_restart Conductors_GeneratedTowers_Restart_MoorDyn)
   endif()
   set(_generated_parity_logs "conductors/L1_span2.dat conductors/towers.dat conductors/tower_L1_t1_stats.csv")

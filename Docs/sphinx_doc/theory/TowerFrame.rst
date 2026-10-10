@@ -325,7 +325,20 @@ type's ``yield_strength`` (345 MPa by default).
   thickness, m), every other member ``brace_angle``. An angle :math:`b \times t`
   without its root fillet has the area :math:`t(2b - t)`, the principal second
   moments of its two legs as rectangles meeting at the heel, the torsion constant
-  :math:`(2b - t)t^3/3` and the least radius of gyration :math:`r_v`.
+  :math:`(2b - t)t^3/3` and the least radius of gyration :math:`r_v`. The major
+  principal axis is the angle's axis of symmetry, and each angle is turned
+  (``MSpin``) so that it lies as on a tower: a leg's, or a cross-arm chord's,
+  towards the corner it stands on, between its two faces' normals, and a face
+  member's at 45 degrees to its face, one leg flat on the face and the other
+  standing out of it, the flat leg towards the face's line of symmetry (or down,
+  or out along the cross-arm, for a member centred on it), so that mirror images
+  in the tower's planes of symmetry are turned alike (``angle_principal_axes``,
+  the default). The faces are the
+  true planes: the shaft's lean in with its taper, and the cross-arm's bottom
+  and sides slope to its tip. The hangers and the stations' inner diagonals keep
+  ``MSpin`` 0, as does every member with ``angle_principal_axes = false``, whose
+  major axes then lie as SubDyn's default orientation puts them (for a tapering
+  leg, horizontal and across its corner, so the weak axis points to the corner).
 - Design data: the legs and chords are legs (bolted in both faces); every other
   member is bracing, or redundant for the struts between crossed diagonals,
   bolted by one leg with a normal framing eccentricity at both ends and no
@@ -525,9 +538,12 @@ This section lists what the unit tests ``DirectionCosines``, ``BeamElement``,
   more compressed; a frame whose cross-arm is far from the lines' attachment is
   refused.
 - Generated towers: a generated 30 m tower with a peak (case G,
-  ``Tests/test_files/FrameSubDynTower/caseG``, written by ``write_subdyn()``) has
-  SubDyn's ``KBBt`` at the cross-arm's centre and its 10 lowest natural
-  frequencies, to SubDyn's 7 digits; its geometry (corners, taper, crossings,
+  ``Tests/test_files/FrameSubDynTower/caseG``, written by ``write_subdyn()`` with
+  ``angle_principal_axes = false``) has SubDyn's ``KBBt`` at the cross-arm's
+  centre and its 10 lowest natural frequencies, to SubDyn's 7 digits (SubDyn's
+  ``MSpin`` sense itself is checked on case B's turned diagonals); every
+  generated angle lies on its principal axes as described, on the shaft and on
+  the cross-arms; its geometry (corners, taper, crossings,
   tips) and member counts are those described; under a lateral load at the
   cross-arm, the members cut by any horizontal plane balance the load above it,
   the legs carrying more than three quarters of the overturning moment; a written file

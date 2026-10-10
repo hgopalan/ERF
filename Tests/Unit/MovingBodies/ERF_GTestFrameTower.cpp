@@ -387,8 +387,8 @@ TEST(FrameTower, RefusesAFrameThatDoesNotFitItsTowerOrItsType)
         std::string err;
         const std::shared_ptr<const Frame> two = Frame::create(in, err);
         ASSERT_TRUE(two) << err;
-        const std::string msg = erf_gtest::abort_message([&] { FrameTower ft(turned(framed(), Real(30.0)), two, g); });
-        EXPECT_NE(msg.find("has 2 interface joints"), std::string::npos) << msg;
+        const std::string twice = erf_gtest::abort_message([&] { FrameTower ft(turned(framed(), Real(30.0)), two, g); });
+        EXPECT_NE(twice.find("has 2 interface joints"), std::string::npos) << twice;
     }
     TowerType t = framed();
     EXPECT_TRUE(t.validate().empty()) << t.validate();
@@ -436,12 +436,12 @@ Generated generated (double theta = 20.0)
     EXPECT_TRUE(gerr.empty()) << gerr;
     if (theta != 20.0) { in.temperature.assign(in.members.size(), theta); }
     std::string err;
-    Generated g;
-    g.frame = Frame::create(in, err);
-    EXPECT_TRUE(g.frame) << err;
-    g.designs = std::make_shared<const std::vector<MemberDesign>>(d);
-    for (const int id : load_joints) { g.links.push_back(g.frame->node_of_joint(id)); }
-    return g;
+    Generated gen;
+    gen.frame = Frame::create(in, err);
+    EXPECT_TRUE(gen.frame) << err;
+    gen.designs = std::make_shared<const std::vector<MemberDesign>>(d);
+    for (const int id : load_joints) { gen.links.push_back(gen.frame->node_of_joint(id)); }
+    return gen;
 }
 
 /**
@@ -536,7 +536,7 @@ TEST(FrameTower, HeatingKeepsItsPlaceThenSettlesOnTheSofterFrame)
     const auto checks = ft.member_checks(tw);
     const auto expected_checks = check_members(*hot.frame, *hot.designs, s_hot.element_force, hot.frame->inputs().temperature);
     double umax = 0.0;
-    for (const auto& c : expected_checks) { umax = std::max(umax, c.utilisation); }
+    for (const auto& ck : expected_checks) { umax = std::max(umax, ck.utilisation); }
     for (std::size_t m = 0; m < checks.size(); ++m) {
         EXPECT_NEAR(checks[m].utilisation, expected_checks[m].utilisation, 1e-5 * umax + tol * umax) << m + 1;
     }

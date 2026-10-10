@@ -325,14 +325,15 @@ private:
     /** Stand a lattice tower at every suspension point of the lines with a tower_type. */
     void build_towers ();
     /**
-     * Write <diagnostics_dir>/asce74.csv when erf.conductors.asce74_wind is given: per span its height (the mean of
-     * its two attachment points' heights above the ground under them), chord, unstretched length, and ASCE 74's
-     * quasi-static wind load, swing, sag, blowout and tension under that gust (ERF_ASCE74.H).
+     * Write <diagnostics_dir>/asce74.csv when erf.conductors.asce74_wind is given: per span its wire height (the mean
+     * of the conductor's heights above the ground at its two ends, less a third of its still-air vertical sag with
+     * asce74_wire_height = effective), chord, unstretched length, and ASCE 74's quasi-static wind load, swing, sag,
+     * blowout and tension under that gust (ERF_ASCE74.H), the swing about an inclined chord with asce74_inclined_spans.
      */
     void write_asce74 () const;
     /** The towers' statistics, and their members' where they are checked. */
     void add_tower_stats ();
-    /** Tower t's cross-arm displacement (m, ERF frame): its centre's on a frame tower, else Tower::arm_displacement(). */
+    /** Tower t's cross-arm displacement (m, ERF frame): its centre's at the cross-arm's height from its tower model, else zero. */
     std::array<amrex::Real,3> arm_displacement (std::size_t t) const;
     /** A frame model built once and shared by the towers it fits, with its members' design data (null: none). */
     struct TowerFrame
@@ -503,6 +504,16 @@ inline bool coupling_diverged (bool converged, int& in_a_row, int limit)
  * no surface_offset record (it is then not compared); surface_offset: the run's (m).
  */
 std::string restart_mismatch (bool saved_tower_motion, bool towers_move, double saved_offset, double surface_offset);
+
+/**
+ * Whether a tower's forms in a conductor checkpoint fit the run restarted from it: an empty string, else the
+ * message naming the keys of the tower's type, whose name is type_name. The forms are (diagonal_wind_factor, arm_outside_shaft,
+ * angle_principal_axes on a generated frame), 1 or 0 each; recorded: the checkpoint records the forms (an older
+ * checkpoint does not, and was written with every form 0). They decide the drag nodes, the drag and the frame
+ * the checkpoint's sway, statistics and node forces belong to, so a restart cannot change them.
+ */
+std::string tower_forms_mismatch (const std::string& type_name, bool recorded, const std::array<int,3>& saved,
+                                  const std::array<int,3>& now);
 } // namespace erf_conductors
 
 #endif
