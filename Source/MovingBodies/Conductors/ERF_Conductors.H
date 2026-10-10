@@ -507,7 +507,7 @@ std::string restart_mismatch (bool saved_tower_motion, bool towers_move, double 
 
 /**
  * Whether a tower's forms in a conductor checkpoint fit the run restarted from it: an empty string, else the
- * message naming the keys of its type type_name. The forms are (diagonal_wind_factor, arm_outside_shaft,
+ * message naming the keys of the tower's type, whose name is type_name. The forms are (diagonal_wind_factor, arm_outside_shaft,
  * angle_principal_axes on a generated frame), 1 or 0 each; recorded: the checkpoint records the forms (an older
  * checkpoint does not, and was written with every form 0). They decide the drag nodes, the drag and the frame
  * the checkpoint's sway, statistics and node forces belong to, so a restart cannot change them.
