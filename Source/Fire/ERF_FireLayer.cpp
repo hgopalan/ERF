@@ -442,10 +442,10 @@ void FireLayer::initialize(const ERF& erf,
         }
     }
 
-    // Phase 11: Polygon ignition (initial fire perimeter from vertex file).
+    // Phase 11: Polygon ignition (initial fire perimeters from the vertex files).
     // Applied at t=0 as part of initialization, before the schedule, unless
     // erf.fire.ignition.polygon_time defers it to advance().
-    if (!m_params.ignition.polygon_file.empty() && m_params.ignition.polygon_time <= 0.0) {
+    if (m_params.ignition.has_polygon() && m_params.ignition.polygon_time <= 0.0) {
         apply_polygon_ignition(0.0);
     }
 
@@ -906,12 +906,12 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
                                          : -std::numeric_limits<Real>::max());
     const Real window_hi = m_current_time;
 
-    // Observed-perimeter ignition with spin-up: the polygon of
-    // erf.fire.ignition.polygon_file is stamped on the step whose window
+    // Observed-perimeter ignition with spin-up: the perimeter files of
+    // erf.fire.ignition.polygon_file are stamped on the step whose window
     // contains polygon_time. After a restart past that time the window never
     // contains it, so the perimeter restored from the checkpoint is not
     // stamped again.
-    if (!m_params.ignition.polygon_file.empty() && !m_polygon_applied && fire_phi
+    if (m_params.ignition.has_polygon() && !m_polygon_applied && fire_phi
         && m_params.ignition.polygon_time > 0.0
         && m_params.ignition.polygon_time > window_lo
         && m_params.ignition.polygon_time <= window_hi) {
@@ -2056,11 +2056,6 @@ void FireLayer::update_atm_flux_buffer(const amrex::Geometry& geom_atm)
 
 void FireLayer::apply_polygon_ignition(amrex::Real t_ign)
 {
-    std::vector<amrex::Real> xs, ys;
-    // Vertex file is read on rank 0 only; broadcast to all ranks inside
-    // read_polygon_vertices() before returning.
-    read_polygon_vertices(m_params.ignition.polygon_file, xs, ys);
-
     const amrex::Real R   = m_params.ignition.polygon_interior_ros;
     const bool interior   = (R > 0.0);
     // Cells the polygon newly ignites are those that were unburned before it.
@@ -2070,11 +2065,29 @@ void FireLayer::apply_polygon_ignition(amrex::Real t_ign)
         amrex::MultiFab::Copy(*phi_before, *fire_phi, 0, 0, 1, 0);
     }
 
-    if (m_params.ignition.polygon_type == "polyline") {
-        init_phi_from_polyline(*fire_phi, m_fg.geom, xs, ys,
-                               m_params.ignition.polyline_width);
-    } else {
-        init_phi_from_polygon(*fire_phi, m_fg.geom, xs, ys);
+    // Every file is one perimeter, stamped with min(phi, new): several files
+    // are several fires that merge as they grow (two parallel lines, a set of
+    // separate perimeters). Each vertex file is read on rank 0 only and
+    // broadcast to all ranks inside read_polygon_vertices() before returning.
+    for (const auto& file : m_params.ignition.polygon_files) {
+        std::vector<amrex::Real> xs, ys;
+        read_polygon_vertices(file, xs, ys);
+        // A polyline needs a segment and a polygon an area; with fewer vertices
+        // the stamp marks nothing, which a deferred stamp would never report.
+        const bool polyline = (m_params.ignition.polygon_type == "polyline");
+        const std::size_t n_min = polyline ? 2 : 3;
+        if (xs.size() < n_min) {
+            amrex::Abort("[FIRE] erf.fire.ignition.polygon_file '" + file + "' has "
+                         + std::to_string(xs.size()) + " vertices; a "
+                         + m_params.ignition.polygon_type + " needs at least "
+                         + std::to_string(n_min));
+        }
+        if (polyline) {
+            init_phi_from_polyline(*fire_phi, m_fg.geom, xs, ys,
+                                   m_params.ignition.polyline_width);
+        } else {
+            init_phi_from_polygon(*fire_phi, m_fg.geom, xs, ys);
+        }
     }
     fire_fill_boundary(*fire_phi, m_fg.geom);
     m_polygon_applied = true;
@@ -2112,9 +2125,9 @@ void FireLayer::apply_polygon_ignition(amrex::Real t_ign)
         }
     }
     if (m_params.fire_debug) {
-        amrex::Print() << "[FIRE DEBUG] Polygon ignition applied from '"
-                       << m_params.ignition.polygon_file << "' ("
-                       << m_params.ignition.polygon_type << ") at t=" << t_ign << " s\n";
+        amrex::Print() << "[FIRE DEBUG] Polygon ignition applied from";
+        for (const auto& file : m_params.ignition.polygon_files) { amrex::Print() << " '" << file << "'"; }
+        amrex::Print() << " (" << m_params.ignition.polygon_type << ") at t=" << t_ign << " s\n";
     }
 }
 

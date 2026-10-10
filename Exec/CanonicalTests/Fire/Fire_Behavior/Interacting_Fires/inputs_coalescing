@@ -1,0 +1,10 @@
+FILE = inputs_base
+
+# Coalescing fires: five spot fires of 15 m radius lit over the first four
+# minutes from the ignition schedule, 40 to 60 m apart. Each grows into a
+# wind-driven ellipse with its head to the east; the heads run into the spots
+# downwind within a few minutes and the flanks into the spots beside them
+# more slowly (the last pair meets at 620 s).
+erf.fire_plot_file = "plt_fire_coalescing_"
+erf.fire.ignition_r = 0.0             # no disc of its own
+erf.fire.ignition.schedule_file = "coalescing.csv"

@@ -2436,6 +2436,23 @@ endif()
 # the fire at the edge of the fire grid: the guard band records the first contact in the
 # statistics CSV and warns (warn), never fires on a fire far from every wall (far), or
 # stops the run on a disc that starts inside the band (abort)
+# The three ways fires meet (FireMergingFronts): spot fires coalescing from the
+# schedule, two lines meeting at an angle (a junction fire, one V polyline) and two
+# parallel lines from two perimeter files (erf.fire.ignition.polygon_file takes a
+# list). Still air, a prescribed 1 m/s, so every arrival time follows from the
+# distance to the nearest ignition; the checker compares the whole field and the
+# cells where the fronts meet, and that every ignition is stamped (with one file
+# read, as the code did before the list, the north line of the parallel pair is
+# unburned and the strip between the lines arrives 20 s late).
+add_test_fire_check(FireMergingFronts_coalescing FireMergingFronts inputs_coalescing 40 check_merging_fronts.py)
+add_test_fire_check(FireMergingFronts_junction   FireMergingFronts inputs_junction   40 check_merging_fronts.py)
+add_test_fire_check(FireMergingFronts_parallel   FireMergingFronts inputs_parallel   40 check_merging_fronts.py)
+# every file of the list is read: a second file that does not exist stops the run
+add_test_fire_abort(FireMergingFronts_missing_file_abort FireMergingFronts inputs_missing_file
+    "Cannot open polygon vertex file: parallel_missing.csv" "")
+# a polyline file with one vertex has no segment and would mark nothing: stop naming it
+add_test_fire_abort(FireMergingFronts_one_vertex_abort FireMergingFronts inputs_one_vertex
+    "'one_vertex.csv' has 1 vertices; a polyline needs at least 2" "")
 # Suppression (erf.fire.suppression.*): each scenario on the level-set and the
 # FARSITE path, checked from the last fire plotfile and the suppression log
 add_test_fire_check(FireSuppression_line_early_levelset FireSuppression inputs_line_early 40 check_suppression.py NRANKS 1)

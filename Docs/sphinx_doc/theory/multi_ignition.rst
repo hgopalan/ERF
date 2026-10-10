@@ -233,8 +233,8 @@ All multi-ignition parameters use the ``erf.fire.ignition.*`` prefix in the Parm
      - Path to ignition schedule CSV file; empty = disabled
      - ""
    * - ``ignition.polygon_file``
-     - string
-     - Path to polygon vertex CSV file; empty = disabled
+     - string(s)
+     - One or more polygon vertex CSV files, each one perimeter; empty = disabled
      - ""
    * - ``ignition.polygon_type``
      - string
@@ -264,6 +264,9 @@ All multi-ignition parameters use the ``erf.fire.ignition.*`` prefix in the Parm
 Example Input File Snippet
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+A disc with timed spot fires on top (a key may appear once per deck, so
+the alternatives below are separate decks):
+
 .. code-block:: text
 
    # Primary ignition (always applied at t=0)
@@ -274,13 +277,68 @@ Example Input File Snippet
    # Schedule-based secondary ignitions
    erf.fire.ignition.schedule_file = "Supporting_Files/ignition_schedule_phase11.csv"
 
-   # Alternative: polygon ignition
+A closed perimeter instead of the disc:
+
+.. code-block:: text
+
+   erf.fire.ignition_r = 0.0
    erf.fire.ignition.polygon_file = "Supporting_Files/polygon_phase11.csv"
    erf.fire.ignition.polygon_type = "polygon"
 
-   # Or: polyline ignition with 20 m half-width
+A line fire 40 m wide:
+
+.. code-block:: text
+
+   erf.fire.ignition_r = 0.0
+   erf.fire.ignition.polygon_file = "Supporting_Files/polyline_phase11.csv"
    erf.fire.ignition.polygon_type = "polyline"
    erf.fire.ignition.polyline_width = 20.0
+
+Two parallel line fires, one vertex file each, both of the same width:
+
+.. code-block:: text
+
+   erf.fire.ignition_r = 0.0
+   erf.fire.ignition.polygon_file = "line_south.csv" "line_north.csv"
+   erf.fire.ignition.polygon_type = "polyline"
+   erf.fire.ignition.polyline_width = 4.0
+
+Several perimeters: coalescing, junction and parallel fires
+-------------------------------------------------------------
+
+Fires meet in three ways: separate fires grow into each other (coalescing
+fires), two lines meet at an angle (a junction fire) and two parallel lines
+burn towards each other. All three are set up from the ignitions above, and
+none needs special handling once lit, because every ignition is stamped into
+the level set with the rule :math:`\phi \leftarrow \min(\phi, \phi_{new})`:
+the burned region is the union of the regions each ignition would burn on its
+own, so fronts that touch simply share the level set and the neck between
+them fills at the rate of spread.
+
+- **Coalescing fires**: list the spot fires in the ignition schedule, one row
+  each, at the times and places they start. A line of fire can be added with a
+  polyline file.
+- **A junction fire**: one polyline file whose vertices trace the V (the two
+  arms and the apex). Inside the wedge the two inner fronts meet on the
+  bisector and their meeting point runs at :math:`R / \sin(\theta/2)`, faster
+  the narrower the angle :math:`\theta`.
+- **Parallel fires**: ``erf.fire.ignition.polygon_file`` takes a list of files,
+  one perimeter each, all of the ``polygon_type`` and ``polyline_width`` of the
+  deck. Two files with one straight line each give two parallel line fires; a
+  list of closed polygons gives separate perimeters.
+
+The convective interaction between the fires, which in a laboratory junction
+fire makes the meeting point faster still (Viegas et al., 2012), is not in a
+one-way run. A coupled run (``erf.fire.coupling_type = lagged`` or
+``synchronous``, with the feedback multiplier ``erf.fire.fire_atm_feedback``
+at its default of 1) carries the bulk inflow the fires induce and can show
+part of the effect, through the wind the fire samples, when the atmospheric
+grid resolves that inflow; the flame-scale indraft Viegas attributes it to is
+below any grid the model runs on. The regression test ``FireMergingFronts``
+runs the three setups at a prescribed rate in still air, where every arrival
+time follows from the distance to the nearest ignition, and the canonical case
+``Fire_Behavior/Interacting_Fires`` runs them on grass fuel with a prescribed
+reference wind.
 
 Limitations
 -----------
