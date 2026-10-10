@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+# ERF's own default formula, WRF compatibility off (both left at their
+# compiled defaults on purpose -- this deck is the baseline).

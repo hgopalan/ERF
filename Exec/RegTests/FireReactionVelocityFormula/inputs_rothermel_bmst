@@ -1,0 +1,4 @@
+FILE = inputs_base
+
+erf.fire.reaction_velocity_formula = "rothermel"
+erf.fire.wrf_bmst_compat = true

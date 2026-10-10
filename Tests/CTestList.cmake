@@ -2510,6 +2510,31 @@ add_test_fire_abort(FireStructureIgnition_no_exposure_abort FireStructureIgnitio
     "needs erf.fire.exposure.enable" "erf.fire.exposure.enable=false")
 add_test_fire_abort(FireStructureIgnition_curve_abort FireStructureIgnition inputs_on
     "exceeds 70 % of fuel_load_J_m2" "erf.fire.structures.ignition.growth_time_s=100.0")
+# the Rothermel reaction-velocity exponent (erf.fire.reaction_velocity_formula) and
+# the WRF-Fire fuel-load deflation (erf.fire.wrf_bmst_compat): the head rate of each
+# combination, calm and windy, against its closed form, on the uniform-fuel path and
+# through a fuel map's per-fuel table; and the checker's own pass/fail logic, where a
+# run that ignored either option must fail
+if(ERF_ENABLE_MPI AND NOT WIN32)
+add_test_fire_script(FireReactionVelocityFormula FireReactionVelocityFormula run_regtest.sh NRANKS 1)
+endif()
+add_test(FireReactionVelocityFormula_SelfTest ${ERF_RANS_PYTHON}
+    ${PROJECT_SOURCE_DIR}/Exec/RegTests/FireReactionVelocityFormula/check_regtest.py --self-test)
+set_tests_properties(FireReactionVelocityFormula_SelfTest
+    PROPERTIES
+    TIMEOUT 60
+    PROCESSORS 1
+    LABELS "fire;unit")
+# both keys are ignored by a model that is not Rothermel, and the run says so,
+# once: FireLayer's copy of the fire inputs used to read them again, so every
+# start-up warning of FireParams was printed twice
+add_test_fire_abort(FireReactionVelocityFormula_behave_warning FireReactionVelocityFormula inputs_rothermel_bmst
+    "erf.fire.wrf_bmst_compat is ignored with erf.fire.ros_model = behave" "erf.fire.ros_model=behave")
+set_tests_properties(FireReactionVelocityFormula_behave_warning PROPERTIES
+    FAIL_REGULAR_EXPRESSION "wrf_bmst_compat is ignored.*wrf_bmst_compat is ignored")
+# and a misspelt formula stops at start-up
+add_test_fire_abort(FireReactionVelocityFormula_bad_abort FireReactionVelocityFormula inputs_albini
+    "erf.fire.reaction_velocity_formula = \"rothermal\" is not one of" "erf.fire.reaction_velocity_formula=rothermal")
 # every documented fire/dust key is read, every read key is documented, no deck sets an unread key.
 # Labelled unit as well as docs: no CI job runs "ctest -L docs", so on the docs label alone this
 # test went red for a whole PR without anyone seeing it (erf.fire.custom_fuel.*). It is pure
@@ -2551,6 +2576,12 @@ add_test_fire_script(FireRestart_dust_rows  FireRestart           run_dust_rows.
 add_test_fire_script(FireDustCoupling_parity FireDustCoupling     run_dust_parity.sh NRANKS 2)
 endif()
 # dust inputs the kernels cannot use stop at start-up
+# a dust start-up warning is printed once: DustLayer's copy of the dust inputs used
+# to read them again, so every DustParams warning appeared twice
+add_test_fire_abort(DustWarningOnce           FireRestart           inputs_dust_straight
+    "erf.dust.threshold_A_coeff is read only with erf.dust.threshold_model = bagnold" "erf.dust.threshold_A_coeff=0.1")
+set_tests_properties(DustWarningOnce PROPERTIES
+    FAIL_REGULAR_EXPRESSION "threshold_A_coeff is read only.*threshold_A_coeff is read only")
 add_test_fire_abort(DustBadBins_abort         FireRestart           inputs_dust_straight
     "erf.dust.n_size_bins must be >= 1" "erf.dust.n_size_bins=0")
 add_test_fire_abort(DustZrefMismatch_abort    FireRestart           inputs_dust_straight

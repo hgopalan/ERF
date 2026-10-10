@@ -1,0 +1,3 @@
+FILE = inputs_base
+
+erf.fire.wrf_bmst_compat = true

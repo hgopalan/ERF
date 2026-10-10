@@ -277,6 +277,7 @@ if(ERF_ENABLE_FIRE)
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestDirectionalShape.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestSplitHamiltonianAdvection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestWindLimit.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestReactionVelocityFormula.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFuelMap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestStructureIgnition.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Fire/ERF_GTestFireSuppression.cpp
@@ -366,7 +367,7 @@ erf_register_gtest_suite(${erf_exe_name}
 # 2026 audit BehaveTransfer.WindowReachesState died here with SIGILL in the
 # BEHAVE live-weight 0/0 of a fuel without live load).
 if(ERF_ENABLE_FIRE)
-  set(_fire_gtest_suites "BehaveScottBurgan.*:BehaveTransfer.*:CustomFuel.*:DirectionalShape.*:FarsiteFrontCell.*:FarsiteSpreadTest.*:Fbp.*:FireAcceleration.*:FireAnchorLevel.*:FireBoundaryGuard.*:FireDiagnosticsPerFuel.*:FirePrecip.*:FireSuppression.*:FuelMap.*:FuelMoisture.*:FuelMoistureEMC.*:FuelMoistureLive.*:FuelMoistureStick.*:LcpReader.*:LevelSetAdvection.*:LevelSetEllipse.*:PrescribedFire.*:SplitHamiltonianAdvection.*:StructureIgnition.*:WindLimit.*:FireModelReferences.*")
+  set(_fire_gtest_suites "BehaveScottBurgan.*:BehaveTransfer.*:CustomFuel.*:DirectionalShape.*:FarsiteFrontCell.*:FarsiteSpreadTest.*:Fbp.*:FireAcceleration.*:FireAnchorLevel.*:FireBoundaryGuard.*:FireDiagnosticsPerFuel.*:FirePrecip.*:FireSuppression.*:FuelMap.*:FuelMoisture.*:FuelMoistureEMC.*:FuelMoistureLive.*:FuelMoistureStick.*:LcpReader.*:LevelSetAdvection.*:LevelSetEllipse.*:PrescribedFire.*:SplitHamiltonianAdvection.*:StructureIgnition.*:WindLimit.*:ReactionVelocityFormula.*:WrfBmstCompat.*:FireModelReferences.*")
   if(ERF_ENABLE_DUST)
     string(APPEND _fire_gtest_suites ":DustColumn.*:DustThreshold.*:DustWind.*:DustBudget.*:DustDiagnostics.*")
   endif()

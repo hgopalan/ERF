@@ -471,10 +471,9 @@ void FireLayer::initialize(const ERF& erf,
     m_fp.cfl_fire           = fire_params.farsite_cfl_fire;
     m_fp.front_update       = fire_params.farsite_front_update;
 
-    m_rc = compute_rothermel_params(fp, fire_params.moisture_1hr,
-                                    fire_params.moisture_10hr,
-                                    fire_params.moisture_100hr,
-                                    fire_params.use_wind_limit);
+    m_rc = rothermel_coefficients(fp, fire_params.moisture_1hr,
+                                  fire_params.moisture_10hr,
+                                  fire_params.moisture_100hr);
 
     // Phase 13A: Build the per-fuel wind height table and copy it to device.
     // When use_per_fuel_wind_ht = false, every fuel slot (1..FUEL_SLOT_COUNT-1;
@@ -839,7 +838,7 @@ void FireLayer::advance(Real time, Real dt, SurfaceLayer& surface_layer,
         avg10  = amrex::max(0.01_rt, amrex::min(avg10,  0.40_rt));
         avg100 = amrex::max(0.01_rt, amrex::min(avg100, 0.40_rt));
         FuelModelParams fp_cur = uniform_fuel_params();
-        m_rc = compute_rothermel_params(fp_cur, avg1, avg10, avg100, m_params.use_wind_limit);
+        m_rc = rothermel_coefficients(fp_cur, avg1, avg10, avg100);
         if (!m_d_rc_table.empty()) {
             rebuild_rothermel_table(avg1, avg10, avg100);
         }
@@ -2399,10 +2398,18 @@ void FireLayer::add_prescribed_heat_flux()
 void FireLayer::rebuild_rothermel_table(amrex::Real m1, amrex::Real m10, amrex::Real m100)
 {
     auto h_table = build_fuel_rothermel_table(m1, m10, m100, m_params.fuel_map.fuel_set_id(), m_params.moisture_live,
-                                              m_params.use_wind_limit, fuel_params_table_host().data());
+                                              m_params.use_wind_limit, fuel_params_table_host().data(),
+                                              m_params.use_rothermel_a_formula, m_params.wrf_bmst_compat);
     m_d_rc_table.resize(h_table.size());
     amrex::Gpu::copy(amrex::Gpu::hostToDevice, h_table.begin(), h_table.end(),
                      m_d_rc_table.begin());
+}
+
+RothermelComputed FireLayer::rothermel_coefficients(const FuelModelParams& fp, amrex::Real m1,
+                                                    amrex::Real m10, amrex::Real m100) const
+{
+    return compute_rothermel_params(fp, m1, m10, m100, m_params.use_wind_limit,
+                                    m_params.use_rothermel_a_formula, m_params.wrf_bmst_compat);
 }
 
 void FireLayer::init_ros_weight()

@@ -287,6 +287,17 @@ struct DustParams {
     amrex::Real stel_averaging_s        = 900.0;   ///< Averaging period [s]
     std::string stel_diag_file          = "stel_diag.csv"; ///< Output CSV
 
+    /// Tag for a DustParams that keeps the defaults above and reads no input.
+    struct DefaultsOnly {};
+
+    /**
+     * The defaults, without reading ParmParse: for a copy that is overwritten
+     * before use (DustLayer's, set by DustLayer::initialize from ERF's).
+     * Reading the inputs again would run every start-up check and print every
+     * warning a second time.
+     */
+    explicit DustParams(DefaultsOnly) {}
+
     /**
      * Constructor that reads all parameters from ParmParse.
      */

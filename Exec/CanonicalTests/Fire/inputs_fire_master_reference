@@ -367,6 +367,22 @@ erf.fire.ros_model = "rothermel"
 # of the domain fuel_model_id. No effect without erf.fire.fuel_map.file.
 erf.fire.rothermel_per_fuel = false
 
+# Rothermel reaction-velocity exponent A (read when a Rothermel model runs:
+# ros_model = "rothermel", or a hybrid with a rothermel member; BEHAVE keeps
+# its own Albini form and other models ignore the key with a warning):
+# "albini"    (default) Albini's (1976, GTR-INT-30) revision,
+#             A = 133*sigma^-0.7913
+# "rothermel" Rothermel's (1972) Eq. 39, A = 1/(4.774*sigma^0.1-7.27), the
+#             form WRF-Fire uses; its pole at sigma = 67.1 ft^-1 lies below
+#             the clamp of sigma to at least 100 ft^-1
+erf.fire.reaction_velocity_formula = "albini"
+
+# WRF-Fire comparison: deflate the fuel load fed to the Rothermel coefficients
+# by 1 - M/(1+M) (M the dead-load-weighted dead moisture), as WRF-Fire does to
+# its load. Not a physical correction and not full WRF-Fire parity; the fuel
+# consumed and the heat released keep the full load. Same readers as above.
+erf.fire.wrf_bmst_compat = false
+
 # ============================================================================
 # PRESCRIBED RATE OF SPREAD (used only when ros_model = "prescribed")
 # ============================================================================
