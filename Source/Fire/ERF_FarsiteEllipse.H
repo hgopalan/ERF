@@ -860,7 +860,11 @@ void advance_farsite_front_cells(
                 T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txm, Typ,  dx[0], -dx[1], s, rate));
                 T_new = amrex::min(T_new, farsite_front::quadrant_arrival(Txp, Typ, -dx[0], -dx[1], s, rate));
             }
-            if (ellipse) {
+            // a target with no rate of its own (a drop at factor 0, a fuel-free
+            // cell) is never a direct target: its clock can be ahead of the
+            // sources' from an earlier, faster rate, and the 1e-30 floor below
+            // would date it at the step's start
+            if (ellipse && nb(i, j, k, 1) > 0.0_rt) {
                 // direct Huygens sources, for the calm disc as well so that a
                 // vanishing wind changes nothing (the quadrant paths alone lag
                 // the disc's diagonals too): a burned cell within r_src cells and

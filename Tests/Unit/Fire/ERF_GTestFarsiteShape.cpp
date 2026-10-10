@@ -367,6 +367,51 @@ TEST(FarsiteShape, AFireLineBlocksTheDirectSources)
 }
 
 /**
+ * A cell with no rate of its own is never a direct Huygens target, even when
+ * its distance clock ran ahead of its sources' (it sat in faster fuel before
+ * its rate fell to 0). The direct sources checked the cells between source
+ * and target but not the target, so once a diagonal source's own clock
+ * covered the gauge the target took an arrival at the step's start through
+ * the 1e-30 rate floor (Copilot's review of hgopalan/ERF#501). Here the cell
+ * at (24, 20) has rate 0 and a clock far ahead, and its four face neighbours
+ * are non-burnable, so only the direct sources from its diagonal neighbours
+ * can reach it.
+ */
+TEST(FarsiteShape, AZeroRateCellIsNeverADirectTarget)
+{
+    const Real U = 1.5_rt, R = 0.1_rt;
+    Box domain(IntVect(0, 0, 0), IntVect(40, 40, 0));
+    BoxArray ba(domain);
+    ba.maxSize(IntVect(14, 14, 1));
+    DistributionMapping dm(ba);
+    Geometry geom(domain, RealBox(0.0, 0.0, 0.0, 410.0, 410.0, 1.0), CoordSys::cartesian, {false, false, false});
+    MultiFab phi(ba, dm, 1, 1), work(ba, dm, 2, 0), disp(ba, dm, 4, 0), at(ba, dm, 1, 0), msk(ba, dm, 1, 0);
+    MultiFab vel(ba, dm, 2, 0), ros(ba, dm, 1, 0);
+    phi.setVal(1.0_rt); work.setVal(0.0_rt); disp.setVal(0.0_rt); disp.setVal(-1.0_rt, 3, 1); at.setVal(-1.0_rt); msk.setVal(0.0_rt);
+    vel.setVal(U, 0, 1); vel.setVal(0.0_rt, 1, 1); ros.setVal(R);
+    const IntVect target(24, 20, 0);
+    for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+        if (mfi.validbox().contains(IntVect(20, 20, 0))) { phi.array(mfi)(20, 20, 0) = -1.0_rt; at.array(mfi)(20, 20, 0) = 0.0_rt; }
+        const Box& bx = mfi.validbox();
+        if (bx.contains(target)) {
+            ros.array(mfi)(target) = 0.0_rt;          // no rate of its own
+            disp.array(mfi)(target, 2) = 1.0e6_rt;    // a clock far ahead of any source
+        }
+        for (const IntVect& f : {IntVect(23, 20, 0), IntVect(25, 20, 0), IntVect(24, 19, 0), IntVect(24, 21, 0)}) {
+            if (bx.contains(f)) { msk.array(mfi)(f) = 1.0_rt; }
+        }
+    }
+    FarsiteParams fp;
+    for (int n = 0; n < 120; ++n) { advance_fire_subcycle(phi, work, disp, at, vel, ros, geom, 10.0_rt, n * 10.0_rt, fp, nullptr, &msk); }
+    BoxArray one(domain);
+    MultiFab all(one, DistributionMapping(one), 1, 0);
+    all.ParallelCopy(at, 0, 0, 1);
+    ASSERT_GE(arrival_at(all, 23, 21), 0.0_rt) << "a diagonal neighbour of the target burns";
+    ASSERT_GE(arrival_at(all, 25, 21), 0.0_rt) << "the fire passes the target on both sides";
+    EXPECT_LT(arrival_at(all, 24, 20), 0.0_rt) << "the zero-rate cell never burns";
+}
+
+/**
  * A lull: the rate drops from 0.1 to 0.03 m/s at 600 s, uniformly. The direct
  * sources credit the clock integral, so a cell the lull catches arrives at
  * 600 s + (gauge - 60 m) / 0.03: cell (6, 2) from the source at 1488.8 s.

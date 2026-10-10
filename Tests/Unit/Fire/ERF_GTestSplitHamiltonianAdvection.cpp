@@ -157,6 +157,10 @@ struct CapsuleFixture
     void capsule (MultiFab& phi) const
     {
         const Real cxL = cx, cyL = cy, pxL = px, pyL = py;
+        // a local copy, captured by value: amrex::Clamp takes its bounds by
+        // reference, and nvcc has no device copy of an anonymous-namespace
+        // constant ("HALF_LEN is undefined in device code")
+        const Real half_len = HALF_LEN;
         for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
             auto p = phi.array(mfi);
             const Box& gbx = mfi.growntilebox();
@@ -164,7 +168,7 @@ struct CapsuleFixture
                 const Real x = (i + Real(0.5)) * DX;
                 const Real y = (j + Real(0.5)) * DX;
                 const Real rx = x - cxL, ry = y - cyL;
-                const Real t = amrex::Clamp(rx * pxL + ry * pyL, -HALF_LEN, HALF_LEN);
+                const Real t = amrex::Clamp(rx * pxL + ry * pyL, -half_len, half_len);
                 const Real dx0 = rx - t * pxL, dy0 = ry - t * pyL;
                 p(i, j, k) = std::sqrt(dx0 * dx0 + dy0 * dy0) - HALF_WIDTH;
             });
