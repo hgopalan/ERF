@@ -22,7 +22,8 @@
  * grassland and open forest fuels. Not appropriate for complex terrain or
  * high-fuel-complexity environments. The rate is capped at
  * erf.fire.macarthur.ros_max (6 m/s by default, as WRF-Fire caps it), since
- * the exponential has no limit of its own.
+ * the exponential has no limit of its own; the wind is bounded where the rate
+ * reaches the cap, before the exponential, so no wind overflows it.
  *
  * References:
  *   Clark, T.L., Coen, J.L. & Latham, D. (2004). Description of a coupled
@@ -47,9 +48,18 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 amrex::Real macarthur_ros(amrex::Real wind_speed_ms, amrex::Real ros_max = amrex::Real(6.0)) noexcept
 {
     constexpr amrex::Real backing = 0.18;
-    const amrex::Real wind_contribution = backing * (std::exp(0.8424 * amrex::max(static_cast<amrex::Real>(wind_speed_ms), static_cast<amrex::Real>(0.0))) - 1.0);
+    const amrex::Real x = amrex::Real(0.8424) * amrex::max(static_cast<amrex::Real>(wind_speed_ms), amrex::Real(0.0));
+    // The exponent is bounded before exp(): at the cap's own exponent
+    // ln(ros_max / 0.18) (4.16 m/s for the 6 m/s cap), past which the rate is
+    // the cap, or, uncapped, at 80, where exp() is still finite in single
+    // precision (88.7 overflows). The floor inside the log keeps the
+    // unselected branch finite when ros_max <= 0.
+    const bool capped = ros_max > amrex::Real(0.0);
+    const amrex::Real x_cap = capped ? std::log(amrex::max(ros_max, amrex::Real(1.0e-30)) / backing)
+                                     : amrex::Real(80.0);
+    const amrex::Real wind_contribution = backing * (std::exp(amrex::min(x, x_cap)) - amrex::Real(1.0));
     const amrex::Real ros = backing + wind_contribution;
-    return (ros_max > amrex::Real(0.0)) ? amrex::min(ros, ros_max) : ros;
+    return (capped && x >= x_cap) ? ros_max : (capped ? amrex::min(ros, ros_max) : ros);
 }
 
 /**

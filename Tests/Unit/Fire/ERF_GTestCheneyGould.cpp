@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <cfenv>
 #include <cmath>
 #include <AMReX_REAL.H>
 
@@ -130,4 +131,24 @@ TEST(MacArthurCap, RateIsCappedAtSixMetresPerSecond)
     EXPECT_NEAR(macarthur_ros(5.0), 6.0, TOL);
     EXPECT_NEAR(macarthur_ros(5.0, 2.0), 2.0, TOL);
     EXPECT_NEAR(macarthur_ros(5.0, 0.0), 0.18 * std::exp(0.8424 * 5.0), 1.0e3 * TOL) << "0 removes the cap";
+}
+
+// The cap is reached at U = ln(6/0.18)/0.8424 = 4.16 m/s, so a stronger wind
+// must not evaluate the exponential: e^{0.8424 U} overflowed at U = 1000 m/s
+// in double (about 105 m/s in single), raising FE_OVERFLOW (an abort under the
+// FPE traps) before min() took the cap (Copilot's review of hgopalan/ERF#501).
+TEST(MacArthurCap, AWindBeyondTheCapDoesNotOverflow)
+{
+    volatile Real u = 1000.0_rt;
+    std::feclearexcept(FE_OVERFLOW | FE_INVALID | FE_DIVBYZERO);
+    volatile Real r = macarthur_ros(u);
+    volatile Real r_neg_cap = macarthur_ros(u, -1.0_rt);   // uncapped: bounded, not infinite
+    EXPECT_FALSE(std::fetestexcept(FE_OVERFLOW | FE_INVALID | FE_DIVBYZERO));
+    EXPECT_EQ(r, 6.0_rt) << "the cap, exactly";
+    EXPECT_TRUE(std::isfinite(r_neg_cap));
+    // below the cap the rate is the formula's, unchanged
+    for (Real w : {0.0_rt, 1.0_rt, 3.0_rt, 4.15_rt}) {
+        const Real old_form = 0.18_rt + 0.18_rt * (std::exp(0.8424_rt * w) - 1.0_rt);
+        EXPECT_NEAR(macarthur_ros(w), old_form, 10.0 * TOL * old_form) << "U = " << w;
+    }
 }
