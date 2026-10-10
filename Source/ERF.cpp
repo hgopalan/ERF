@@ -12,6 +12,7 @@
 #include "ERF_EOS.H"
 #include "ERF.H"
 #include "AMReX_buildInfo.H"
+#include "AMReX_FileSystem.H"
 #include "AMReX_Random.H"
 #include "AMReX_WriteEBSurface.H"
 
@@ -62,6 +63,11 @@ Real ERF::init_shrink    = one;
 Real ERF::change_max     = Real(1.1);
 double ERF::dt_max_initial = static_cast<double>(bogus_large_value);
 double ERF:: dt_max        = 1.0e9;
+
+// Explicit eddy-diffusion time-step check (ERF::ComputeDt)
+bool ERF::diffusive_dt_check = false;
+bool ERF::diffusive_dt_limit = false;
+Real ERF::diffusive_cfl      = myhalf;
 
 int  ERF::fixed_mri_dt_ratio = 0;
 
@@ -236,7 +242,7 @@ ERF::Evolve ()
 }
 
 void
-ERF::WriteAtIntermediateTime(int step, double cur_time)
+ERF::WriteAtIntermediateTime (int step, double cur_time)
 {
     int plotfiles_3d_written = 0;
     bool interval_diagnostic_consumed = false;
@@ -293,7 +299,7 @@ ERF::WriteAtIntermediateTime(int step, double cur_time)
 }
 
 void
-ERF::WriteAtFinalTime()
+ERF::WriteAtFinalTime ()
 {
     // Write plotfiles at final time
     int plotfiles_3d_written = 0;
@@ -412,6 +418,7 @@ ERF::set_surface_layer_skin (int lev)
     if (solverChoice.rad_type != RadiationType::TwoStream ||
         !solverChoice.radChoice.seb_surface_layer_uses_skin) {
         surface_layer->set_skin_temperature(lev, nullptr);
+        surface_layer->set_skin_moisture(lev, nullptr);
         return;
     }
     // The initial update_fluxes runs inside InitData_post, before InitData's own call.
@@ -427,10 +434,19 @@ ERF::set_surface_layer_skin (int lev)
             m_skin_uncoupled_warned[lev] = 1;
         }
         surface_layer->set_skin_temperature(lev, nullptr);
+        surface_layer->set_skin_moisture(lev, nullptr);
         return;
     }
     m_skin_uncoupled_warned[lev] = 0;
     surface_layer->set_skin_temperature(lev, two_stream_rad.seb_t_sfc(lev));
+    // With erf.radiation.seb_surface_layer_uses_moisture, also what the surface's mixing
+    // ratio is formed from: the balance's current soil water and, with a soil type, the
+    // soil's resistance (and with a vegetation type the canopy's too); nullptr when off.
+    const RadChoice& rc = solverChoice.radChoice;
+    const NoahMPVegetationParams* veg = (rc.seb_vegetation_type != 0)
+                                      ? noahmp_vegetation_params(rc.seb_vegetation_type) : nullptr;
+    surface_layer->set_skin_moisture(lev, two_stream_rad.seb_surface_moisture(lev),
+                                     rc.seb_soil_type != 0, veg ? veg->hs : Real(0.0));
 }
 
 // Start-up checks of the two-stream balance's coupling with the zlo surface layer, run
@@ -482,6 +498,13 @@ ERF::check_seb_surface_layer ()
     const std::string conflict = surface_layer->skin_temperature_conflict();
     if (!conflict.empty()) {
         Abort("erf.radiation.seb_surface_layer_uses_skin = true cannot be used: " + conflict);
+    }
+    if (rc.seb_surface_layer_uses_moisture) {
+        const std::string moisture_conflict = surface_layer->skin_moisture_conflict();
+        if (!moisture_conflict.empty()) {
+            Abort("erf.radiation.seb_surface_layer_uses_moisture = true cannot be used: " +
+                  moisture_conflict);
+        }
     }
     if (solverChoice.lsm_type != LandSurfaceType::None || m_SurfaceModel) {
         Abort("erf.radiation.seb_surface_layer_uses_skin = true cannot be used with a land-surface "
@@ -962,7 +985,8 @@ ERF::InitData_post ()
                  (solverChoice.vert_implicit_fac[lev][1] > 0) ||
                  (solverChoice.vert_implicit_fac[lev][2] > 0) )
             {
-                Warning("Doing implicit solve for u, v, and w with terrain at level " << lev << " -- this has not been tested");
+                Warning("Doing implicit solve for u, v, and w with terrain at level " + std::to_string(lev) +
+                        " -- this has not been tested");
             }
         }
     }
@@ -1188,7 +1212,7 @@ ERF::InitData_post ()
             rhotheta_src[lev]->setVal(0.);
             prob->update_rhotheta_sources(t_new[0],
                                           rhotheta_src[lev].get(),
-                                          geom[lev], z_phys_cc[lev]);
+                                          geom[lev], z_phys_cc[lev], zlevels_stag[lev]);
         }
     }
 
@@ -1208,7 +1232,7 @@ ERF::InitData_post ()
                 prob->update_geostrophic_profile(t_new[0],
                                                  h_u_geos[lev], d_u_geos[lev],
                                                  h_v_geos[lev], d_v_geos[lev],
-                                                 geom[lev], z_phys_cc[lev]);
+                                                 geom[lev], z_phys_cc[lev], zlevels_stag[lev]);
             } else {
                 if (SolverChoice::mesh_type == MeshType::VariableDz) {
                     amrex::Print() << "Note: 1-D geostrophic wind profile input is not defined for real terrain" << std::endl;
@@ -1240,7 +1264,7 @@ ERF::InitData_post ()
             rhoqt_src[lev]->setVal(0.);
             prob->update_rhoqt_sources(t_new[0],
                                        rhoqt_src[lev].get(),
-                                       geom[lev], z_phys_cc[lev]);
+                                       geom[lev], z_phys_cc[lev], zlevels_stag[lev]);
         }
     }
 
@@ -1254,7 +1278,7 @@ ERF::InitData_post ()
             d_w_subsid[lev].resize(domlen, 0.0_rt);
             prob->update_w_subsidence(t_new[0],
                                       h_w_subsid[lev], d_w_subsid[lev], base_state[lev],
-                                      geom[lev], z_phys_nd[lev]);
+                                      geom[lev], z_phys_nd[lev], zlevels_stag[lev]);
         }
     }
 
@@ -1767,8 +1791,25 @@ ERF::InitData_post ()
                                                                  (static_cast<int>(ori) == Orientation::zlo())
                                                                      ? m_SurfaceModel.get() : nullptr);
             m_SurfaceLayer[ori]->set_surface_layer_faces(surface_layer_faces);
+            // The two-stream balance's land roughness (Noah-MP's tables), where erf.most.z0
+            // is not given; before the levels below take z0. seb_land_roughness is -1 when
+            // it is not derived, and positive when it is (RadChoice::init_params).
+            if (static_cast<int>(ori) == Orientation::zlo() &&
+                solverChoice.rad_type == RadiationType::TwoStream &&
+                solverChoice.radChoice.seb_land_roughness > 0.0) {
+                const Real z0 = solverChoice.radChoice.seb_land_roughness;
+                const bool taken = m_SurfaceLayer[ori]->set_default_roughness(z0);
+                Print() << "NOTE: the zlo surface layer's land roughness is "
+                        << m_SurfaceLayer[ori]->roughness() << " m"
+                        << (taken ? ", from Noah-MP's tables for the surface energy balance's "
+                                    "soil and vegetation"
+                                  : " as given (erf.most.z0); Noah-MP's tables for the surface "
+                                    "energy balance's soil and vegetation give " + std::to_string(z0))
+                        << ".\n";
+            }
             m_SurfaceLayer[ori]->set_coupled_sst_active(solverChoice.use_coupled_sst &&
                                                         static_cast<int>(ori) == Orientation::zlo());
+
             // This call will allocate the arrays at each level. If we regrid later, either changing
             // the number of levels or just the grids at each existing level, we will call an update routine
             // to redefine the internal arrays in m_SurfaceLayer.
@@ -1782,6 +1823,24 @@ ERF::InitData_post ()
                                                                 Hwave[lev].get(),Lwave[lev].get(),eddyDiffs_lev[lev].get(),
                                                                 lsm_data[lev], lsm_data_name, lsm_flux[lev], lsm_flux_name,
                                                                 sst_lev[lev], tsk_lev[lev], lmask_lev[lev]);
+            }
+
+            // The custom and rico flux types prescribe u*, T* and q* directly: these are
+            // not MOST scales and no Obukhov length is computed, so olen keeps its initial
+            // bogus value. PBL schemes that build near-surface gradients from u* and L
+            // assume MOST consistency, so they cannot be used with these types.
+            // Note: this check must come after make_SurfaceLayer_at_level(), which is where
+            // most.use_sfc_fluxes promotes flux_type to CUSTOM.
+            if (m_SurfaceLayer[ori]->flux_type == SurfaceLayer::FluxCalcType::CUSTOM ||
+                m_SurfaceLayer[ori]->flux_type == SurfaceLayer::FluxCalcType::RICO) {
+                for (const auto& tc : solverChoice.turbChoice) {
+                    if (tc.pbl_type != PBLType::None && !tc.uses_shoc_family()) {
+                        Abort("erf.pbl_type = " + std::string(amrex::getEnumNameString(tc.pbl_type)) +
+                              " requires a MOST-consistent u* and Obukhov length;"
+                              " it cannot be combined with surface_layer.flux_type = custom or rico"
+                              " (note that most.use_sfc_fluxes selects the custom flux type)");
+                    }
+                }
             }
 
             // If initializing from an input_sounding, make sure the surface layer
@@ -2826,7 +2885,7 @@ ERF::initializeMicrophysics (const int& a_nlevsmax /*!< number of AMR levels */)
 
 #ifdef ERF_USE_WINDFARM
 void
-ERF::initializeWindFarm(const int& a_nlevsmax/*!< number of AMR levels */ )
+ERF::initializeWindFarm (const int& a_nlevsmax/*!< number of AMR levels */ )
 {
     windfarm = std::make_unique<WindFarm>(a_nlevsmax, solverChoice.windfarm_type);
 }
@@ -2848,34 +2907,6 @@ ERF::restart ()
     restore_base_state_params_on_restart();
 #endif
 
-    // Force regrid on level 0 if more procs than boxes are requested
-    regrid_level_0_on_restart = ( regrid_level_0_on_restart ||
-                                  grids[0].size() < ParallelDescriptor::NProcs() );
-
-    if (regrid_level_0_on_restart) {
-        //
-        // Coarsening before we split the grids ensures that each resulting
-        // grid will have an even number of cells in each direction.
-        //
-        BoxArray new_ba(amrex::coarsen(Geom(0).Domain(),2));
-        //
-        // Now split up into list of grids within max_grid_size[0] limit.
-        //
-        new_ba.maxSize(max_grid_size[0]/2);
-        //
-        // Now refine these boxes back to level zero
-        //
-        new_ba.refine(2);
-
-        if (refine_grid_layout) {
-            ChopGrids(0, new_ba, ParallelDescriptor::NProcs());
-        }
-
-        if (new_ba != grids[0]) {
-            DistributionMapping new_dm(new_ba);
-            RemakeLevel(0,static_cast<Real>(t_new[0]),new_ba,new_dm);
-        }
-    }
 
 #ifdef ERF_USE_PARTICLES
     // We call this here without knowing whether the particles have already been initialized or not
@@ -3155,6 +3186,19 @@ ERF::ReadParameters ()
         pp.queryAdd("dt_max_initial", dt_max_initial);
         pp.queryAdd("dt_max", dt_max);
 
+        // Explicit eddy-diffusion time-step check
+        const bool diffusive_cfl_given = pp.contains("diffusive_cfl");
+        pp.queryAdd("diffusive_dt_check", diffusive_dt_check);
+        pp.queryAdd("diffusive_dt_limit", diffusive_dt_limit);
+        pp.queryAdd("diffusive_cfl", diffusive_cfl);
+        if (!(diffusive_cfl > zero && diffusive_cfl <= one)) {
+            Abort("erf.diffusive_cfl must be in (0, 1]");
+        }
+        if (diffusive_cfl_given && !diffusive_dt_check && !diffusive_dt_limit) {
+            Abort("erf.diffusive_cfl is used only with erf.diffusive_dt_check = true "
+                  "or erf.diffusive_dt_limit = true");
+        }
+
         fixed_dt.resize(max_level+1,-one);
         fixed_fast_dt.resize(max_level+1,-one);
 
@@ -3264,6 +3308,7 @@ ERF::ReadParameters ()
         //       solverChoice.init_type, which is not known until init_params() runs
         //       below, so it is parsed further down once that default has been chosen.
         pp.queryAdd("erfbdy_file",              erfbdy_file);
+        pp.queryAdd("use_erfbdy",               use_erfbdy);
 
         // Set default to FullState for now ... later we will try Perturbation
         interpolation_type = StateInterpType::FullState;
@@ -3529,7 +3574,11 @@ ERF::ReadParameters ()
     // Set a default value for write_erfbdy following these rules.
     // Prioritize write_erfbdy provided by user.
     // write_erfbdy must be false for restarts.
-    // write_erfbdy defaults to true for clean starts of the metgrid or wrfinput pathways.
+    // write_erfbdy defaults to true for clean starts of the metgrid pathway, which
+    //     requires the erfbdy file in order to restart.
+    // write_erfbdy defaults to false for the wrfinput pathway, which reads the boundary
+    //     data from the wrfbdy file named in the inputs file as the data are needed, and
+    //     which stores the boundary data in the checkpoint file when it writes one.
     //
     // The context-dependent default is chosen FIRST and the user's value is parsed on
     // top of it, so that "did the user set this" never has to be asked.  It must not be
@@ -3541,8 +3590,7 @@ ERF::ReadParameters ()
     {
         ParmParse pp_erfbdy(pp_prefix);
         const bool is_restart = !restart_chkfile.empty();
-        if (!is_restart &&
-            ((solverChoice.init_type == InitType::Metgrid) || (solverChoice.init_type == InitType::WRFInput))) {
+        if (!is_restart && (solverChoice.init_type == InitType::Metgrid)) {
             write_erfbdy = true;
         }
 
@@ -3758,7 +3806,29 @@ ERF::ReadParameters ()
         for (int j = 0; j < num_files; j++) {
             AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!nc_init_file[0][j].empty(), "Valid file name must be present at level 0 for init type WRFInput, Metgrid or NCFile.");
         } //j
+
+        // Fail here, rather than inside the NetCDF calls, if any of the files we have been
+        // given don't actually exist -- this way the user is told which name is at fault
+        for (int lev = 0; lev < static_cast<int>(nc_init_file.size()); lev++) {
+            for (int j = 0; j < static_cast<int>(nc_init_file[lev].size()); j++) {
+                const std::string& fname = nc_init_file[lev][j];
+                if (!fname.empty() && !FileSystem::Exists(fname)) {
+                    Abort("Could not find the file \"" + fname + "\" given as erf.nc_init_file_" +
+                          std::to_string(lev) + " (entry " + std::to_string(j) + ")");
+                }
+            } // j
+        } // lev
     } // InitType
+
+    // Same check for the lateral (wrfbdy) and lower (wrflow) boundary files, which are
+    // used whenever a name has been given for them
+    if (!nc_bdy_file.empty() && !FileSystem::Exists(nc_bdy_file)) {
+        Abort("Could not find the file \"" + nc_bdy_file + "\" given as erf.nc_bdy_file");
+    }
+
+    if (!nc_low_file.empty() && !FileSystem::Exists(nc_low_file)) {
+        Abort("Could not find the file \"" + nc_low_file + "\" given as erf.nc_low_file");
+    }
 
     // What type of land surface model to use
     // NOTE: Must be checked after init_params
@@ -3792,6 +3862,21 @@ void
 ERF::ParameterSanityChecks ()
 {
     AMREX_ALWAYS_ASSERT(cfl > zero || fixed_dt[0] > zero);
+
+    if (diffusive_dt_limit) {
+        if (fixed_dt[0] > zero) {
+            Abort("erf.diffusive_dt_limit = true cannot change erf.fixed_dt; "
+                  "remove one of them (erf.diffusive_dt_check still reports the Fourier number)");
+        }
+        bool any_kturb = false;
+        for (int lev = 0; lev <= max_level; ++lev) {
+            any_kturb = any_kturb || solverChoice.turbChoice[lev].use_kturb;
+        }
+        if (!any_kturb) {
+            Abort("erf.diffusive_dt_limit = true needs an eddy-diffusivity closure "
+                  "(erf.les_type, erf.rans_type or erf.pbl_type)");
+        }
+    }
 
     // We don't allow use_real_bcs to be true if init_type is not either InitType::WRFInput or InitType::Metgrid
     AMREX_ALWAYS_ASSERT( !solverChoice.use_real_bcs ||
@@ -4104,8 +4189,8 @@ ERF::Define_ERFFillPatchers (int lev)
 }
 
 bool
-ERF::writeNow(double cur_time, const int nstep, const int plot_int, const double plot_per,
-              const double dt_0, double& next_file_time)
+ERF::writeNow (double cur_time, const int nstep, const int plot_int, const double plot_per,
+               const double dt_0, double& next_file_time)
 {
     bool write_now = false;
 
@@ -4192,7 +4277,7 @@ ERF::check_state_for_nans (MultiFab const& S)
 }
 
 void
-ERF::check_vels_for_nans(MultiFab const& xvel, MultiFab const& yvel, MultiFab const& zvel)
+ERF::check_vels_for_nans (MultiFab const& xvel, MultiFab const& yvel, MultiFab const& zvel)
 {
     //
     // Test at the end of every full timestep whether the solution data contains NaNs
@@ -4207,7 +4292,7 @@ ERF::check_vels_for_nans(MultiFab const& xvel, MultiFab const& yvel, MultiFab co
 }
 
 void
-ERF::check_for_low_temp(amrex::MultiFab& S)
+ERF::check_for_low_temp (amrex::MultiFab& S)
 {
     // *****************************************************************************
     // Test for low temp (low is defined as beyond the microphysics range of validity)
@@ -4242,7 +4327,7 @@ ERF::check_for_low_temp(amrex::MultiFab& S)
 }
 
 void
-ERF::check_for_negative_theta(amrex::MultiFab& S)
+ERF::check_for_negative_theta (amrex::MultiFab& S)
 {
     // *****************************************************************************
     // Test for negative (rho theta)
@@ -4280,7 +4365,7 @@ ERF::check_for_negative_theta(amrex::MultiFab& S)
 
 
 void
-ERF::check_mesh_type(int lev)
+ERF::check_mesh_type (int lev)
 {
    if (SolverChoice::mesh_type == MeshType::VariableDz) {
        MultiFab z_slab(convert(ba2d[lev],IntVect(1,1,1)),dmap[lev],1,0);

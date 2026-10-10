@@ -16,6 +16,7 @@
 #include "ERF_Utils.H"
 #include "ERF_ProbCommon.H"
 #include "ERF_SBMStateManager.H"
+#include "ERF_SBMTransport.H"
 
 using namespace amrex;
 
@@ -40,8 +41,7 @@ void ERF::MakeNewLevelFromScratch (int lev, Real time, const BoxArray& ba_in,
     if (sbm_state_manager) {
         for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
             AMREX_ALWAYS_ASSERT_WITH_MESSAGE(geom[lev].isPeriodic(dir),
-                "SBM zero-transport fixture requires triply periodic geometry; "
-                "spectral physical boundary filling is not implemented at M1");
+                "SBM M3 currently requires triply periodic geometry; spectral physical boundary filling is not implemented");
         }
     }
     //
@@ -132,19 +132,19 @@ void ERF::MakeNewLevelFromScratch (int lev, Real time, const BoxArray& ba_in,
     // *******************************************************************************************
     init_stuff(lev, ba, dm, lev_new, lev_old, base_state[lev], z_phys_nd[lev]);
     if (auxiliary_inert_tracer) {
-        AMREX_ALWAYS_ASSERT(detJ_cc[lev] != nullptr);
-        AMREX_ALWAYS_ASSERT(mapfac[lev][MapFacType::m_x] != nullptr);
-        AMREX_ALWAYS_ASSERT(mapfac[lev][MapFacType::m_y] != nullptr);
-        auxiliary_inert_tracer->define(lev, ba, dm, *detJ_cc[lev],
-                                       *mapfac[lev][MapFacType::m_x],
-                                       *mapfac[lev][MapFacType::m_y]);
+        auxiliary_inert_tracer->define(lev, ba, dm);
     }
     if (sbm_state_manager) {
-        sbm_state_manager->define(lev, ba, dm);
+        const double sbm_initial_time = restart_chkfile.empty()
+                                            ? static_cast<double>(time)
+                                            : t_new[lev];
+        sbm_state_manager->define(lev, ba, dm, sbm_initial_time);
         for (int comp = 0; comp < static_cast<int>(solverChoice.sbm_fixture_initial_state.size()); ++comp) {
-            sbm_state_manager->state(lev).setVal(
+            sbm_state_manager->new_state_for_initialization(lev).setVal(
                 solverChoice.sbm_fixture_initial_state[static_cast<std::size_t>(comp)], comp, 1, 0);
         }
+        AMREX_ALWAYS_ASSERT(sbm_transport != nullptr);
+        sbm_transport->define(lev, ba, dm);
     }
 
     // define_level (inside init_stuff) filled the two-stream SEB state with the scalar
@@ -295,20 +295,42 @@ void ERF::MakeNewLevelFromScratch (int lev, Real time, const BoxArray& ba_in,
             }
         }
 
-        // We re-create terrain_blanking on restart rather than storing it in the checkpoint
+        // We re-create terrain_blanking on restart rather than storing it in the checkpoint,
+        // exactly as a fresh start makes it (the almost-fluid cells cleared), so the restarted
+        // run forces the same cells
         if (solverChoice.terrain_type == TerrainType::ImmersedForcing ||
             solverChoice.buildings_type == BuildingsType::ImmersedForcing) {
-            int ngrow = ComputeGhostCells(solverChoice) + 2;
-            terrain_blanking[lev]->setVal(1.0);
-            MultiFab::Subtract(*terrain_blanking[lev], EBFactory(lev).getVolFrac(), 0, 0, 1, ngrow);
-            terrain_blanking[lev]->FillBoundary(geom[lev].periodicity());
+            make_terrain_blanking(lev);
         }
     }
 
     // Initialize the non-cons auxiliary tracer only after the host atmospheric
     // density has been initialized from the selected problem configuration.
     if (auxiliary_inert_tracer) {
+        AMREX_ALWAYS_ASSERT(detJ_cc[lev] != nullptr);
+        AMREX_ALWAYS_ASSERT(mapfac[lev][MapFacType::m_x] != nullptr);
+        AMREX_ALWAYS_ASSERT(mapfac[lev][MapFacType::m_y] != nullptr);
+        std::string measure_diagnostic;
+        if (!auxiliary_inert_tracer->rebuild_static_measure(
+                lev, *detJ_cc[lev], *mapfac[lev][MapFacType::m_x],
+                *mapfac[lev][MapFacType::m_y], measure_diagnostic)) {
+            amrex::Abort("M2 auxiliary inert tracer static measure: " + measure_diagnostic);
+        }
         auxiliary_inert_tracer->initialize(lev, lev_new[Vars::cons], geom[lev]);
+    }
+    // Checkpoint geometry is restored after this level-creation routine. Leave
+    // the restart measure unready until ReadCheckpointFile rebuilds it from
+    // the restored geometry and terrain metrics.
+    if (sbm_transport && restart_chkfile.empty()) {
+        AMREX_ALWAYS_ASSERT(detJ_cc[lev] != nullptr);
+        AMREX_ALWAYS_ASSERT(mapfac[lev][MapFacType::m_x] != nullptr);
+        AMREX_ALWAYS_ASSERT(mapfac[lev][MapFacType::m_y] != nullptr);
+        std::string measure_diagnostic;
+        if (!sbm_transport->rebuild_static_measure(
+                lev, *detJ_cc[lev], *mapfac[lev][MapFacType::m_x],
+                *mapfac[lev][MapFacType::m_y], measure_diagnostic)) {
+            amrex::Abort("SBM M3 static mapped measure: " + measure_diagnostic);
+        }
     }
 
      // Read in tables needed for windfarm simulations
@@ -395,7 +417,7 @@ ERF::MakeNewLevelFromCoarse (int lev, Real time, const BoxArray& ba,
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!auxiliary_inert_tracer,
         "M2 auxiliary inert tracer fixture does not support coarse-to-fine initialization");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!sbm_state_manager,
-        "SBM M1 zero-transport fixture does not support coarse-to-fine auxiliary initialization");
+        "SBM M3 does not support coarse-to-fine spectral initialization");
     //
     // Note that "time" here is elapsed time
     //
@@ -819,7 +841,7 @@ ERF::RemakeLevel (int lev, Real time, const BoxArray& ba, const DistributionMapp
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!auxiliary_inert_tracer,
         "M2 auxiliary inert tracer fixture does not support regrid/remake");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!sbm_state_manager,
-        "SBM M1 zero-transport fixture does not support regridding or auxiliary remap");
+        "SBM M3 does not support regridding or spectral remap");
     //
     // Note that "time" here is elapsed time
     //
@@ -928,6 +950,13 @@ ERF::RemakeLevel (int lev, Real time, const BoxArray& ba, const DistributionMapp
     //      terrain arrays and metrics, and base state.
     // *******************************************************************************************
     init_stuff(lev, ba, dm, temp_lev_new, temp_lev_old, temp_base_state, temp_zphys_nd);
+
+    // init_stuff rebuilds the flux register on the lev-1 / lev interface, but the one on the
+    // lev / lev+1 interface also holds this level's grids. AmrCore::regrid remakes lev+1 after
+    // lev and rebuilds it there, but a direct call (e.g. the level-0 regrid in restart) does not.
+    if (lev < finest_level && !grids[lev+1].empty()) {
+        make_flux_register(lev+1);
+    }
 
     //
     // Restore the map factors onto the new grids.  At lev > 0 we interpolate from the parent
@@ -1137,15 +1166,44 @@ ERF::RemakeLevel (int lev, Real time, const BoxArray& ba, const DistributionMapp
                           {&temp_lev_new[Vars::cons],&rU_new[lev],&rV_new[lev],&rW_new[lev]},
                            base_state[lev], temp_base_state, false);
     } else {
+        //
+        // The base state may be copied from its halo as well as its valid region: the
+        // checkpoint carries base_state WITH ghost cells and ReadCheckpointFile
+        // FillBoundary's them (Source/IO/ERF_Checkpoint.cpp), so every cell offered here
+        // holds real data.
+        //
         temp_base_state.ParallelCopy(base_state[lev],0,0,base_state[lev].nComp(),
                                      base_state[lev].nGrowVect(),base_state[lev].nGrowVect());
-        temp_lev_new[Vars::cons].ParallelCopy(vars_new[lev][Vars::cons],0,0,ncomp_cons,ngrow_state,ngrow_state);
-        temp_lev_new[Vars::xvel].ParallelCopy(vars_new[lev][Vars::xvel],0,0,         1,ngrow_vels,ngrow_vels);
-        temp_lev_new[Vars::yvel].ParallelCopy(vars_new[lev][Vars::yvel],0,0,         1,ngrow_vels,ngrow_vels);
+
+        //
+        // Valid cells only as the SOURCE for the state, for the same reason as the
+        // prognostic surface fields above, and with a sharper edge: ReadCheckpointFile
+        // reads only the valid region of cons/xvel/yvel/zvel and then deliberately poisons
+        // their halos with bogus_large_value (Source/IO/ERF_Checkpoint.cpp -- the only
+        // setBndry calls on state in the code).  An old box's interior halo overlaps its
+        // neighbour's valid region, and ParallelCopy intersects the GROWN source box with
+        // the grown destination boxes with no exclusion and no ordering guarantee between
+        // overlapping sources.  Offering those halos would therefore land 1e150 in valid
+        // cells of the new grids -- which is how a level-0 regrid on restart used to reach
+        // estTimeStep with a sound speed of ~1e32 and trap on the cast of
+        // fixed_dt/dt_sub_max to long.
+        //
+        // Poison the new halos up front so this keeps exactly the state a restart without
+        // a regrid leaves behind.  Nothing reads them before they are refilled: physbcs_*
+        // runs on all four arrays with do_fb = true once restart() returns (ERF.cpp), and
+        // the FillPatchers follow.
+        //
+        temp_lev_new[Vars::cons].setBndry(bogus_large_value);
+        temp_lev_new[Vars::xvel].setBndry(bogus_large_value);
+        temp_lev_new[Vars::yvel].setBndry(bogus_large_value);
+
+        temp_lev_new[Vars::cons].ParallelCopy(vars_new[lev][Vars::cons],0,0,ncomp_cons,IntVect(0),ngrow_state);
+        temp_lev_new[Vars::xvel].ParallelCopy(vars_new[lev][Vars::xvel],0,0,         1,          0,ngrow_vels);
+        temp_lev_new[Vars::yvel].ParallelCopy(vars_new[lev][Vars::yvel],0,0,         1,          0,ngrow_vels);
 
         temp_lev_new[Vars::zvel].setVal(0.);
         temp_lev_new[Vars::zvel].ParallelCopy(vars_new[lev][Vars::zvel],0,0,         1,
-                                              IntVect(ngrow_vels,ngrow_vels,0),IntVect(ngrow_vels,ngrow_vels,0));
+                                              IntVect(0),IntVect(ngrow_vels,ngrow_vels,0));
     }
 
     // Now swap the pointers since we needed both old and new in the FillPatch
@@ -1335,17 +1393,29 @@ ERF::RemakeLevel (int lev, Real time, const BoxArray& ba, const DistributionMapp
     // then indexed with an MFIter over the new grids -- an out-of-bounds device read on the
     // level's first step after the regrid.
     //
-    // At lev > 0 this is cheap and lossless: NOAHMP::Advance calls interp_from_lev0 every
-    // step, so a fine level carries no prognostic state of its own.  At level 0 the state
-    // lives in the per-box Fortran NoahmpIO_type objects, which Init() rebuilds from the land
-    // file and for which no redistribution onto a new decomposition exists -- so refuse
-    // rather than silently cold-start the soil column.  (Level 0 is only ever remade from
-    // ERF::restart, not from regrid, which starts at lbase+1.)
+    // At lev > 0 this is cheap and lossless when the level takes its land state from level 0:
+    // NOAHMP::Advance calls interp_from_lev0 every step, so such a level carries no
+    // prognostic state of its own.  A level that runs the driver on a land setup file of its
+    // own (level 0 always; a finer level with erf.nc_init_file_<lev>, or in an idealized run
+    // with ERF_SETUP_FILE_0<lev+1> in namelist.erf) keeps its state in the per-box Fortran
+    // NoahmpIO_type objects, for which no redistribution onto a new decomposition exists.
+    // At level 0 Init() would rebuild them from the land file, silently cold-starting the
+    // soil column.  At a finer level the driver's block array cannot even be reallocated
+    // (NoahmpIO_vector::resize stops with the generic "Noah-MP fatal error", its reason on
+    // standard error).  Refuse in both cases, naming the cause.  (Level 0 is only ever
+    // remade from ERF::restart, not from regrid, which starts at lbase+1.)
     // ********************************************************************************************
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(
         !((lev == 0) && (solverChoice.lsm_type == LandSurfaceType::NOAHMP)),
         "RemakeLevel at level 0 would cold-start the Noah-MP soil state: "
         "NoahmpIO_type redistribution onto a new DistributionMapping is not implemented");
+    if (lev > 0 && solverChoice.lsm_type == LandSurfaceType::NOAHMP && lsm.Runs_Own_Land_Driver(lev)) {
+        Abort("Regridding level " + std::to_string(lev) + " would rebuild its Noah-MP land "
+              "state: the level runs the land model on a setup file of its own, and "
+              "NoahmpIO_type redistribution onto new grids is not implemented. Keep that "
+              "level's grids fixed (a refinement box that does not move, or erf.regrid_int "
+              "< 0), or drop its setup file so it takes its land state from level 0.");
+    }
 
     // Rebuild SLM arrays after the atmospheric arrays have been remade. The SLM transfer
     // path preserves its existing state while rebuilding fields on the new grids; ERF's
@@ -1456,6 +1526,9 @@ ERF::ClearLevel (int lev)
     if (sbm_state_manager && sbm_state_manager->is_defined(lev)) {
         sbm_state_manager->destroy(lev);
     }
+    if (sbm_transport && sbm_transport->is_defined(lev)) {
+        sbm_transport->destroy(lev);
+    }
     for (int var_idx = 0; var_idx < Vars::NumTypes; ++var_idx) {
         vars_new[lev][var_idx].clear();
         vars_old[lev][var_idx].clear();
@@ -1497,10 +1570,8 @@ ERF::ClearLevel (int lev)
     physbcs_w[lev].reset();
     physbcs_base[lev].reset();
 
-    // Clears the flux register array (only allocated for TwoWay coupling)
-    if (advflux_reg[lev]) {
-        advflux_reg[lev]->reset();
-    }
+    // Frees the flux register (only allocated for TwoWay coupling)
+    advflux_reg[lev].reset();
 
     // Clears the 2D arrays
     if (sst_lev[lev][0]) {
