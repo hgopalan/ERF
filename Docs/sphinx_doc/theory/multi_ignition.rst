@@ -266,7 +266,7 @@ Example Input File Snippet
 
 .. code-block:: text
 
-   # Primary ignition (always applied at t=0)
+   # Primary ignition (always applied at t=0; ignition_r = 0 for none)
    erf.fire.ignition_x = 500.0
    erf.fire.ignition_y = 1000.0
    erf.fire.ignition_r = 30.0

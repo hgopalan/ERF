@@ -170,7 +170,8 @@ erf.fire.moisture_dynamic = false
 erf.fire.ignition_x = 500.0
 erf.fire.ignition_y = 1000.0
 
-# Ignition source: circular patch radius [m]
+# Ignition source: circular patch radius [m]; 0 = no disc (a schedule, polygon,
+# line or threshold ignition starts the fire)
 erf.fire.ignition_r = 30.0
 
 # Ignition from a perimeter polygon (CSV of x y vertices; "polygon" closed or

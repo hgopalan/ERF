@@ -2147,6 +2147,7 @@ ERF::InitData_post ()
         const bool deferred_ignition =
             (!m_fire_params.ignition.polygon_file.empty() && m_fire_params.ignition.polygon_time > 0.0)
             || !m_fire_params.ignition.ignition_schedule_file.empty()
+            || m_fire_params.ignition.threshold_enable
             || (m_fire_params.prescribed_heat.flux > 0.0);
         if (const amrex::MultiFab* phi = m_fire_layer->get_levelset(); phi && !deferred_ignition) {
             Real phi_min = phi->min(0);

@@ -2410,6 +2410,9 @@ add_test_fire_abort(FireBadWindBelow_abort    FireRestart           inputs_level
     "erf.fire.wind_below_first_cell = \"linear\" is not one of" "erf.fire.wind_below_first_cell=linear")
 add_test_fire_abort(FireHybridGrassPair_abort FireRestart           inputs_levelset_straight
     "cheney_gould and grass_simple share one grass state" "erf.fire.ros_model=hybrid erf.fire.hybrid.primary=cheney_gould erf.fire.hybrid.secondary=grass_simple")
+# a threshold ignition with no disc (erf.fire.ignition_r = 0) is a deferred ignition: the
+# start-up must not abort for "no cells were marked as burned" (it did until 2026-10)
+add_test_fire(FireThresholdNoDisc FireThresholdIgnition inputs_on 5 RUNTIME_OPTIONS "erf.fire.ignition_r=0")
 # start-up checks added by the October 2026 audit: a value the kernels cannot use,
 # or an input given without the switch that reads it, stops the run naming the key
 # (each of these ran on silently before: Balbi returned 15 m/s with no bisection

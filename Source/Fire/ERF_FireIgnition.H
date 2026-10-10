@@ -44,10 +44,22 @@ void initialize_ignition(
     const auto dx      = geom_fire.CellSizeArray();
     // "No disc" on the level-set path: every cell the domain diagonal from a
     // front, a finite distance the reinitialisation and the advection keep
-    // positive. The distance to the ignition point (the form until 2026-10)
-    // was a disc of zero radius that the advection grew from the first step.
-    const Real far = std::sqrt(geom_fire.ProbLength(0) * geom_fire.ProbLength(0)
-                             + geom_fire.ProbLength(1) * geom_fire.ProbLength(1));
+    // positive (the advection moves nothing on a uniform field; the
+    // reinitialisation raises it by dtau an iteration, which no consumer of
+    // the magnitude reads before an ignition stamps a distance field over
+    // it). The distance to the ignition point (the form until 2026-10) was a
+    // disc of zero radius that the advection grew from the first step. A
+    // scheduled or polygon ignition min-merges a whole-grid distance field;
+    // a threshold ignition stamps its disc only within a few cells of the hot
+    // cell, so the field steps from the disc to this value there and the
+    // front crosses that ring over ln(far/dx)/CFL steps instead of 1/CFL, as
+    // it did over ln(dist/dx) with the distance to the point.
+    // Capped at 100 km: the firebreak mask reads phi >= 5e5 as the firebreak
+    // sentinel (ERF_FireBreak.H), and the field only needs |grad phi| = 0 and
+    // a value no ignition can reach before it is stamped over.
+    const Real far = amrex::min(std::sqrt(geom_fire.ProbLength(0) * geom_fire.ProbLength(0)
+                                        + geom_fire.ProbLength(1) * geom_fire.ProbLength(1)),
+                                Real(1.0e5));
 
     for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.validbox();
@@ -72,7 +84,7 @@ void initialize_ignition(
             //   field outside the band so the front eventually advances into
             //   ground carrying no gradient information.
             const Real sdf = dist - radius;
-            // radius <= 0 is "no disc" (the schedule, polygon or line ignites
+            // radius <= 0 is "no disc" (the schedule, polygon, line or threshold ignites
             // instead): unburned everywhere, and no division by the radius.
             // (floored radius inside the division: the unselected sdf/0 of
             // the "no disc" case would be speculated under the fpe traps)

@@ -134,16 +134,25 @@ script then checks:
 
 Burned area and head distance from the ignition, from `check_idealized_fire.py`. Both decks
 carry a fixed spotting seed, so these are reproducible on the same build and rank count.
+The MRF column was re-measured 2026-10-09 on the validated code (four ranks, 7 of 7 checks,
+751 burned cells, arrivals in [1200, 3896] s) with the regenerated MRF inflow; the YSUNew
+column is the 2026-09 measurement until its rerun lands.
 
-| fire minutes | MRF acres | MRF head | YSUNew acres | YSUNew head |
+| fire minutes | MRF acres | MRF head | YSUNew acres (2026-09) | YSUNew head (2026-09) |
 |---|---|---|---|---|
-| 5 | 20 | 0.42 km | 28 | 0.54 km |
-| 15 | 89 | 1.54 km | 126 | 1.74 km |
-| 30 | 210 | 2.55 km | 311 | 3.31 km |
-| 45 | 404 | 3.71 km | 678 | 4.66 km |
+| 5 | 21 | 0.38 km | 28 | 0.54 km |
+| 15 | 60 | 1.02 km | 126 | 1.74 km |
+| 30 | 183 | 1.98 km | 311 | 3.31 km |
+| 45 | 297 | 2.83 km | 678 | 4.66 km |
 
-Both pass all seven checks. YSUNew burns 1.7 times the area of MRF and its head runs 0.95 km
-further, entirely because of the stronger 10 m wind its column settles to.
+The MRF table this README carried until 2026-10 (20, 89, 210 and 404 acres; head 0.42 to
+3.71 km) came from the 2026-09 inflow and precursor. Until 2026-10 the level set also
+carried a disc of zero radius at the ignition point from t = 0 (`erf.fire.ignition_r = 0`
+wrote the distance to the point), which on this 40 m fire grid burned two cells by 150 s
+and 70 acres by the scheduled ignition at 1200 s; the fix (every cell starts the domain
+diagonal from a front) is what makes the arrivals start at 1200 s. YSUNew burned 1.7 times
+the area of MRF in the 2026-09 pair, entirely because of the stronger 10 m wind its column
+settles to.
 
 A useful sanity check on the pair: the Superior Costco sits about 5.5 km east-southeast of the
 ignition and was being evacuated roughly 75 minutes in. Extending the MRF deck to a 90 minute

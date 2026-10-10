@@ -446,10 +446,35 @@ TEST(LevelSetAdvection, ANoDiscIgnitionLeavesTheLevelSetUnburned)
     Geometry geom(domain, RealBox(0.0, 0.0, 0.0, 200.0, 200.0, 1.0), CoordSys::cartesian, {0, 0, 0});
     MultiFab phi(ba, dm, 1, 1);
     initialize_ignition(phi, geom, 100.0_rt, 100.0_rt, 0.0_rt, /*normalized=*/ false);
-    const Real diag = std::sqrt(200.0 * 200.0 + 200.0 * 200.0);
-    EXPECT_GE(phi.min(0), diag) << "no disc: every cell at least the domain diagonal from a front (the distance to the point until 2026-10)";
+    const Real diag = std::sqrt(Real(200.0) * Real(200.0) + Real(200.0) * Real(200.0));
+    // within the precision-aware TOL: the float sqrt sits 7e-8 below the double one
+    EXPECT_GE(phi.min(0), diag * (Real(1.0) - TOL)) << "no disc: every cell at least the domain diagonal from a front (the distance to the point until 2026-10)";
+    EXPECT_NEAR(phi.max(0), diag, diag * TOL) << "and the field is uniform";
+    // the advection and the reinitialisation keep it there: 20 substeps of the
+    // production scheme at R = 1 m/s with a reinitialisation every fifth,
+    // nothing burns and the field is the diagonal to the bit (the reinit's
+    // +dtau rise is removed by its min clamp)
+    {
+        MultiFab vel(ba, dm, 2, 0), R(ba, dm, 1, 0);
+        vel.setVal(0.0_rt); R.setVal(1.0_rt);
+        fire_fill_boundary(phi, geom);
+        const Real dx10 = 10.0_rt;
+        for (int step = 0; step < 20; ++step) {
+            advect_levelset_weno5z_rk3(phi, vel, R, geom, 0.4_rt * dx10, 0.4_rt, nullptr, nullptr, false,
+                                       scheme(LEVELSET_GRAD_WENO5Z_FRONT, 3.0 * dx10));
+            fire_fill_boundary(phi, geom);
+            if ((step + 1) % 5 == 0) {
+                reinitialize_phi(phi, geom, 1, 0.01 * dx10, 4.0 * dx10);
+                fire_fill_boundary(phi, geom);
+            }
+        }
+        EXPECT_EQ(nonfinite_cells(phi), 0);
+        EXPECT_NEAR(phi.min(0), diag, diag * TOL) << "no cell moved off the diagonal (a zero-radius disc burned by now)";
+        EXPECT_NEAR(phi.max(0), diag, diag * TOL);
+    }
     initialize_ignition(phi, geom, 100.0_rt, 100.0_rt, 0.0_rt, /*normalized=*/ true);
     EXPECT_NEAR(phi.min(0), 1.0, 1.0e-12) << "the FARSITE indicator stays +1";
+    EXPECT_NEAR(phi.max(0), 1.0, 1.0e-12);
     initialize_ignition(phi, geom, 100.0_rt, 100.0_rt, 30.0_rt, /*normalized=*/ false);
     EXPECT_LT(phi.min(0), 0.0) << "a disc still burns";
 }

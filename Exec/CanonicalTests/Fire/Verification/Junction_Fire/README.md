@@ -38,8 +38,8 @@ On two ranks, arrival errors in cell-crossing times (h/R = 2 s):
 
 | deck | whole field mean \|e\| / 95th pct | bisector mean \|e\| / 95th pct | meeting-point speed |
 |---|---|---|---|
-| `v30` | 0.098 / 0.252 | 0.086 / 0.137 | 3.842 m/s (-0.55 %) |
-| `v60` | 0.143 / 0.444 | 0.128 / 0.249 | 1.989 m/s (-0.56 %) |
+| `v30` | 0.098 / 0.251 | 0.086 / 0.137 | 3.842 m/s (-0.55 %) |
+| `v60` | 0.146 / 0.444 | 0.128 / 0.249 | 1.989 m/s (-0.56 %) |
 | `v90` | 0.074 / 0.223 | 0.142 / 0.304 | 1.406 m/s (-0.56 %) |
 
 Re-measured 2026-10-09 (the code before it: 0.089 / 0.206, 0.124 / 0.334 and
