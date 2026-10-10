@@ -6,8 +6,9 @@
 With no plotfile the highest step of the plt_fire*NNNNN plotfiles in the
 directory is used (decks may set their own erf.fire_plot_file prefix). When
 plotfiles of more than one prefix are present, name the plotfile or the
-prefix (--prefix PREFIX): the check refuses to guess which deck's output to
-read. With no
+prefix (--prefix PREFIX): the check refuses to guess between
+prefixes. Decks that share a prefix overwrite each other's plotfiles, so run
+each in its own folder; a prefix that ends in a digit needs --prefix. With no
 --stats every fire_stats*.csv present is checked. Each check prints PASS or FAIL
 and the script exits 1 if any fails, so it can follow the run in CTest:
 
@@ -58,16 +59,20 @@ def load(pf):
     return ds, get
 
 def pick_plotfile(prefix=None):
-    """The highest-step plt_fire*NNNNN directory here, of `prefix` if given;
-    (None, why) when there is none or when more than one prefix is present."""
+    """The highest-step plt_fire*NNNNN directory here, of `prefix` if given
+    (the name is the prefix and then only digits); (None, why) when there is
+    none or, with no prefix, when more than one prefix is present."""
     pfs = [p for p in glob.glob("plt_fire*[0-9][0-9][0-9][0-9][0-9]") if os.path.isdir(p)]
+    if prefix is not None:
+        files = [p for p in pfs if p.startswith(prefix) and p[len(prefix):].isdigit()]
+        if not files:
+            return None, f"no plt_fire*NNNNN plotfile with prefix {prefix} here"
+        return max(files, key=lambda p: int(p[len(prefix):])), ""
     by_prefix = {}
     for p in pfs:
         by_prefix.setdefault(p.rstrip("0123456789"), []).append(p)
-    if prefix is not None:
-        by_prefix = {k: v for k, v in by_prefix.items() if k == prefix}
     if not by_prefix:
-        return None, "no plt_fire*NNNNN plotfile" + (f" with prefix {prefix}" if prefix else "") + " here"
+        return None, "no plt_fire*NNNNN plotfile here"
     if len(by_prefix) > 1:
         return None, ("plotfiles of several prefixes here (" + ", ".join(sorted(by_prefix))
                       + "): name the plotfile or pass --prefix")
@@ -127,7 +132,8 @@ def main():
 
     if fuel is not None:
         # the same deck's start: the chosen plotfile's prefix at step 0
-        f0_pfs = [p for p in [pf.rstrip("/").rstrip("0123456789") + "00000"] if os.path.isdir(p)]
+        pre = args.prefix if args.prefix is not None else pf.rstrip("/").rstrip("0123456789")
+        f0_pfs = [p for p in [pre + "00000"] if os.path.isdir(p)]
         ok_neg = float(np.nanmin(fuel)) >= -TOL
         if f0_pfs and f0_pfs[0] != pf:
             _, get0 = load(f0_pfs[0])
@@ -135,7 +141,7 @@ def main():
             grew = int((fuel > f0 + 1.0e-9).sum()) if f0 is not None else 0
             check("fuel", ok_neg and grew == 0, f"min {np.nanmin(fuel):.4g}, {grew} cells above their start")
         else:
-            check("fuel", ok_neg, f"min {np.nanmin(fuel):.4g} kg/m2")
+            check("fuel", ok_neg, f"min {np.nanmin(fuel):.4g} kg/m2 (no start plotfile {pre}00000: growth not checked)")
 
     stats = args.stats or sorted(glob.glob("fire_stats*.csv"))
     for sf in stats:

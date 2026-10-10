@@ -9,7 +9,7 @@ These cases contrast canopy-enabled and surface-only fire behavior to verify cro
 
 ## Expected Results
 `check_crown_fire.py` on the two decks (`inputs_fire_phase9_surface_only`,
-`inputs_fire_phase9_crown`), four ranks, measured 2026-10-09 on the validated
+`inputs_fire_phase9_crown`, each in its own folder: both write `plt_fire_`), four ranks, measured 2026-10-09 on the validated
 code: both reach `plt_fire_04400` at t = 893.8 s with every field finite,
 33 burned cells, a rate of spread within [0.00620, 0.00638] m/s, arrival
 times in [0, 693] s with the sentinel on the unburned cells, the fuel load

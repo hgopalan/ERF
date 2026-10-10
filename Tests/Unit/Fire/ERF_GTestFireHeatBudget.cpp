@@ -51,17 +51,28 @@ TEST(FireHeatBudget, TheInstantaneousFormOvershoots)
 // A non-positive step gives the instantaneous power without evaluating the
 // step mean at a positive exponent: e^{-dt/tau} with dt = -1e6 s overflowed
 // (raised FE_OVERFLOW, an abort under the FPE traps) before the select
-// discarded it (found by Copilot's review of hgopalan/ERF#501).
+// discarded it (found by Copilot's review of hgopalan/ERF#501). An optimised
+// build drops the unselected branch, so the flag shows the old code's
+// overflow only in an unoptimised (Debug) build; the power is checked in both.
 TEST(FireHeatBudget, ANegativeStepGivesTheInstantaneousPowerWithoutOverflow)
 {
     volatile Real dt = -1.0e6_rt;   // volatile: evaluated at run time, not folded
     volatile Real tau = 2.0_rt;
     const Real h = 1.8e7_rt, w = 0.5_rt;
     std::feclearexcept(FE_OVERFLOW | FE_INVALID | FE_DIVBYZERO);
-    const Real q = compute_heat_flux_cell(-1.0_rt, w, h, tau, dt);
+    volatile Real q = compute_heat_flux_cell(-1.0_rt, w, h, tau, dt);   // computed before the flag test
     EXPECT_FALSE(std::fetestexcept(FE_OVERFLOW)) << "the step mean was evaluated at exp(+5e5)";
     EXPECT_FALSE(std::fetestexcept(FE_INVALID | FE_DIVBYZERO));
     EXPECT_NEAR(q, w * h / tau, REL * w * h / tau);
+}
+
+// A step below the 1e-30 floor of the divide is still a step: the rate is
+// 1/tau, not dt/(1e-30 tau) (0.05 instead of 0.5 at dt = 1e-31 s, tau = 2 s)
+TEST(FireHeatBudget, ATinyStepGivesTheInstantaneousPower)
+{
+    volatile Real dt = 1.0e-31_rt;
+    const Real h = 1.8e7_rt, w = 0.5_rt, tau = 2.0_rt;
+    EXPECT_NEAR(compute_heat_flux_cell(-1.0_rt, w, h, tau, dt), w * h / tau, REL * w * h / tau);
 }
 
 TEST(FireHeatBudget, UnburnedAndExhaustedCellsGiveNothing)

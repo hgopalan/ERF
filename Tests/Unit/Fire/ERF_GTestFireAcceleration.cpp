@@ -6,6 +6,7 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_ParallelDescriptor.H>
+#include <cfenv>
 #include <cmath>
 #include <string>
 
@@ -143,6 +144,22 @@ TEST(FireAcceleration, StepMeanFactorIntegratesExactly)
     const Real exact = t + std::expm1(-A * t) / A;
     EXPECT_NEAR(dist, exact, (sizeof(Real) == 8 ? 1.0e-10 : 1.0e-4) * t);
     EXPECT_NEAR(accel_step_mean_factor(2.0_rt, 0.0_rt), 1.0 - std::exp(-2.0), TOL);
+}
+
+// A non-positive clock increment takes the early return without evaluating
+// e^{-a} at a positive exponent (a = -800 overflowed before the return at -O0),
+// and an increment below the 1e-30 floor of the divide is still an increment:
+// the factor is about a/2, not 1 - 1e-31/1e-30 = 0.9 (Copilot's review of
+// hgopalan/ERF#501 found the pattern in compute_heat_flux_cell)
+TEST(FireAcceleration, StepMeanFactorAtANonPositiveOrTinyIncrement)
+{
+    volatile Real a_neg = -800.0_rt;
+    std::feclearexcept(FE_OVERFLOW | FE_INVALID | FE_DIVBYZERO);
+    volatile Real f_neg = accel_step_mean_factor(0.5_rt, a_neg);
+    EXPECT_FALSE(std::fetestexcept(FE_OVERFLOW | FE_INVALID | FE_DIVBYZERO));
+    EXPECT_NEAR(f_neg, 1.0 - std::exp(-0.5), TOL);
+    volatile Real a_tiny = 1.0e-31_rt;
+    EXPECT_NEAR(accel_step_mean_factor(0.0_rt, a_tiny), 0.0, TOL) << "1 - (1 - e^{-a})/a = a/2 at s0 = 0";
 }
 
 TEST(FireAcceleration, FrontClockIsZeroBeforeIgnition)

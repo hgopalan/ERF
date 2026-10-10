@@ -356,8 +356,12 @@ amrex::Real accel_step_mean_factor(amrex::Real s0, amrex::Real a) noexcept
 {
     using namespace amrex::literals;
     const amrex::Real e0 = std::exp(-s0);
-    // floored a before the early return (0/0 of a = 0 would be speculated)
-    const amrex::Real ratio = (-std::expm1(-a)) / amrex::max(a, amrex::Real(1.0e-30));
+    // evaluated before the early return, so a non-positive a must not reach it
+    // as it is (0/0 of a = 0 would be speculated, e^{+large} of a < 0 is
+    // evaluated outright at -O0): a floored at 0 in the exponent, the divisor
+    // chosen between two values so that no increment is floored
+    const amrex::Real a_pos = amrex::max(a, amrex::Real(0.0));
+    const amrex::Real ratio = (-std::expm1(-a_pos)) / ((a_pos > 0.0_rt) ? a_pos : amrex::Real(1.0));
     if (a <= 0.0_rt) { return 1.0_rt - e0; }
     return 1.0_rt - e0 * ratio;
 }

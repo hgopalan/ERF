@@ -116,12 +116,13 @@ amrex::Real compute_heat_flux_cell(
     if (phi >= 0.0)              return 0.0;
     if (fuel_load_remain <= 0.0) return 0.0;
     if (tau_res_s <= 0.0)        return 0.0;
-    // dt floored at 0 in the exponent and at 1e-30 in the divide, before the
-    // select: both forms are evaluated (an unselected x/0 or e^{+large} would
-    // be speculated, and is evaluated outright at -O0), so a non-positive dt
-    // must not reach either as it is
+    // dt floored at 0 in the exponent, and the divide by 1 at dt = 0, before
+    // the select: both forms are evaluated (an unselected x/0 or e^{+large}
+    // would be speculated, and is evaluated outright at -O0), so a
+    // non-positive dt must not reach either as it is. The divisor is chosen
+    // between two values, so no step, however small, is floored.
     const amrex::Real dt_pos = amrex::max(dt_s, amrex::Real(0.0));
-    const amrex::Real step_mean = -std::expm1(-dt_pos / tau_res_s) / amrex::max(dt_pos, amrex::Real(1.0e-30));
+    const amrex::Real step_mean = -std::expm1(-dt_pos / tau_res_s) / ((dt_pos > 0.0) ? dt_pos : amrex::Real(1.0));
     const amrex::Real rate = (dt_s > 0.0) ? step_mean : amrex::Real(1.0) / tau_res_s;
     return amrex::max(amrex::Real(0.0), fuel_load_remain * h_fuel_J_per_kg * rate);
 }
