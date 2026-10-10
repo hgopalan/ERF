@@ -43,6 +43,25 @@ constexpr Real STRETCH = 1.1;       // geometric stretching ratio
 
 /// Column with cells of thickness h_k = DZ0 STRETCH^k, uniform in index space
 /// (dz = mean thickness), detJ(k) = h_k / dz.
+/// detJ of the stretched column: cell k carries h[k] / dz, the ghost rows the
+/// end values. A free function: nvcc rejects an extended device lambda in a
+/// constructor.
+void init_stretched_detj (MultiFab& detJ, const Real* h, Real dz)
+{
+    const Real v_lo = h[0] / dz, v_hi = h[NZ - 1] / dz;
+    for (MFIter mfi(detJ); mfi.isValid(); ++mfi) {
+        auto dj = detJ.array(mfi);
+        for (int k = 0; k < NZ; ++k) {
+            const Real v = h[k] / dz;
+            ParallelFor(mfi.growntilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int kk) noexcept {
+                if (kk == k) dj(i, j, kk) = v;
+                if (kk < 0) dj(i, j, kk) = v_lo;
+                if (kk >= NZ) dj(i, j, kk) = v_hi;
+            });
+        }
+    }
+}
+
 struct StretchedColumn {
     Box domain{IntVect(0, 0, 0), IntVect(0, 0, NZ - 1)};
     Real ztop = 0.0;
@@ -62,18 +81,7 @@ struct StretchedColumn {
         S.setVal(0.0);
         S.setVal(1.225, Rho_comp, 1);
         src.setVal(0.0);
-        const Real v_lo = h[0] / dz, v_hi = h[NZ - 1] / dz;
-        for (MFIter mfi(detJ); mfi.isValid(); ++mfi) {
-            auto dj = detJ.array(mfi);
-            for (int k = 0; k < NZ; ++k) {
-                const Real v = h[k] / dz;
-                ParallelFor(mfi.growntilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int kk) noexcept {
-                    if (kk == k) dj(i, j, kk) = v;
-                    if (kk < 0) dj(i, j, kk) = v_lo;
-                    if (kk >= NZ) dj(i, j, kk) = v_hi;
-                });
-            }
-        }
+        init_stretched_detj(detJ, h, dz);
     }
     void put_dust (int k_dust, Real value)
     {
