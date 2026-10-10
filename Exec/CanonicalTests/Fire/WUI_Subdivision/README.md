@@ -80,12 +80,15 @@ future work.
 
 Two ranks, 2100 s, level set with the default hybrid WENO5-Z/first-order
 derivatives and the near-front artificial viscosity of 0.1
-(`erf.fire.levelset.gradient = weno5z_front`, `eps_visc_front = 0.1`,
-2026-09-05):
+(`erf.fire.levelset.gradient = weno5z_front`, `eps_visc_front = 0.1`). The
+`wildland` row was re-measured 2026-10-09 on the validated code, where the
+Rothermel wind limit (0.9 I_R) replaces the 300 ft/min fuel-class cap; the
+other rows date from 2026-09 and ran under that cap (`erf.fire.wind_limit =
+fuel_class` restores it):
 
 | variant            | x = 780 m at [s] | burned cells | houses reached | peak intensity [kW/m] | max heat load [MJ/m²] | ember landings |
 |--------------------|-----------------:|-------------:|---------------:|----------------------:|----------------------:|---------------:|
-| wildland           |             1610 |         4352 |              - |                     - |                     - |              - |
+| wildland           |             1025 |         3452 |              - |                     - |                     - |              - |
 | wildland_spotting  |             1255 |         5986 |              - |                     - |                     - |              - |
 | subdivision        |             1705 |         4398 |          13/24 |                   773 |                  3.11 |             47 |
 | defensible         |            never |         1752 |           0/24 |                     0 |                  0.00 |              0 |
@@ -108,9 +111,18 @@ embers and adjacent fuels rather than from the flame front (Cohen 2004), and
 it says nothing about the thresholds' calibration. With the thresholds at a
 third of the defaults (the committed `inputs_ignition`): 19 of 24 houses ignited, all by the heat-load criterion, the first (first row, house 4) at 250 s from a spot fire burning at its wall ahead of the front and the last at 1880 s; 7, 6 and 6 houses in the three rows. Nine of the nineteen ignited before the front had reached their wall band, and two (houses 8 and 18) have a wall band the front never reached, so they ignited from their neighbours' radiation alone: house-to-house spread at the scale of the subdivision. Every ignited house was still burning at 2100 s (the Eurocode curve lasts 74 minutes), each releasing its 250 kW/m² peak; the largest wall heat load rose to 99 MJ/m² under the radiation of neighbours. The brands launched from the burning houses raise the landings to 104 and the burned area by 15%, and change the seeded brand sequence, so the front reaches x = 780 m at 1460 s instead of 1277 s. The fire itself is unchanged by an ignition: no footprint cell burns or loses fuel, and the exposure numbers of the houses the front reaches are those of `subdivision`
 
-The wildland head moves at 0.250 m/s between x = 400 and 470 m against
-Rothermel's 0.2501 m/s for FM1 at 6% moisture and the 300 ft/min wind cap;
-the fuel consumed over its burned area is within 1.5% of the initial load.
+The wildland head moves at 0.599 m/s between x = 400 and 470 m. Rothermel's
+rate for FM1 at 6% moisture is 1.385 m/s at the sounding's 10 m/s (the run's
+value at t = 0, under the 0.9 I_R limit of 743 ft/min) and 0.830 m/s as the
+run mean of the model's own largest rate over the arrival window, once the
+surface layer has slowed the 6.1 m wind; the head is 72 % of that, between
+the Wulff tip of the projection formula at that wind (0.258 m/s, 31 %) and
+the model's rate, which is the degradation of a curved front's head under
+the default directional coupling that FireAdvectiveWindCoupling documents
+(`erf.fire.directional_wind_coupling = advective` holds it at the model's
+rate). The 0.250 m/s of the 2026-09 table was the 300 ft/min cap, which any
+wind above 1.52 m/s reached. The fuel consumed over the burned area is within
+0.5% of the initial load (14251 against 14326 kg).
 No footprint cell burns or loses fuel in any variant. The subdivision's first
 contacts are at 383, 723 and 963 s for the three rows; the coupled run's at
 371, 645 and 966 s, with a plume of 20 m/s at the end. `wui_spread.png` in

@@ -155,13 +155,15 @@ The midflame wind cap
 ~~~~~~~~~~~~~~~~~~~~~
 
 Until ``erf.fire.use_wind_limit = false`` was honoured (the flag was parsed
-and ignored), every deck here ran with Rothermel's maximum effective wind
-speed cap, 300 ft/min (1.52 m/s) for fuel model 1, which holds the head at or
-below 0.257 m/s at 5.5 % moisture. ``wind5_cap`` keeps that cap and shows the
-ceiling: its first three probe pairs move at 0.256 to 0.258 m/s while the wind
-is above the cap, and the last at 0.245 m/s once the wind has fallen below it.
-Its head is the 0.2541 m/s that ``wind5`` reported before; uncapped, ``wind5``
-runs at 0.3104 m/s.
+and ignored), every deck here ran with the fuel-class cap on the midflame
+wind, 300 ft/min (1.52 m/s) for fuel model 1, which holds the head at or
+below 0.257 m/s at 5.5 % moisture. Since 2026-10 the limit is Rothermel's own,
+0.9 I_R (eq. 87), 743 ft/min for this fuel and moisture, and the fuel-class
+cap is ``erf.fire.wind_limit = fuel_class``. ``wind5_cap`` keeps the default
+limit, which the 5 m/s sounding's midflame wind never reaches, so its head is
+``wind5``'s 0.3109 m/s; ``wind5_cap_fuel_class`` shows the old ceiling: its
+head is 0.2542 m/s, and its probe pairs move at 0.254 m/s while the wind is
+above the cap.
 
 The two-way decks
 ~~~~~~~~~~~~~~~~~

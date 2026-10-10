@@ -67,7 +67,8 @@ can show (it is for fine fire grids: on the 5 m grid of the WUI wildland
 case, `WUI_Subdivision`, 1200 s, the near-front value of 0.1 leaves the
 head at 0.250 m/s on every segment and lets the flanks spread a little
 more, 150 m wide at x = 450 m against 140 m, 4.96 ha burned against
-4.83 ha). The table this README carried until 2026-10 (64 cells for the
+4.83 ha). The code before this branch gives the same counts on these decks to
+the cell; the table this README carried until 2026-10 (64 cells for the
 first-order scheme and 52 for WENO at 600 s) was measured on a 25 m grid
 with the previous reinitialisation and never on these decks.
 
