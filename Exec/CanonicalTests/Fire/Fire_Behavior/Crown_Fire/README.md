@@ -8,7 +8,17 @@ These cases contrast canopy-enabled and surface-only fire behavior to verify cro
 - Atmospheric forcing and boundary-condition setup
 
 ## Expected Results
-See the input-file header comments in this directory for the specific validation target. In general, these cases should reproduce the documented analytical trend, qualitative regime change, or engineering diagnostic associated with the scenario.
+`check_crown_fire.py` on the two decks (`inputs_fire_phase9_surface_only`,
+`inputs_fire_phase9_crown`), four ranks, measured 2026-10-09 on the validated
+code: both reach `plt_fire_04400` at t = 893.8 s with every field finite,
+33 burned cells, a rate of spread within [0.00620, 0.00638] m/s, arrival
+times in [0, 693] s with the sentinel on the unburned cells, the fuel load
+at least 0.445 of its start and never rising, and a burned area that grows
+from 0.32 to 0.33 ha without a decrease over the 4431 rows of
+`fire_stats_phase9_*.csv` (7 of 7 checks). The two decks give the same
+numbers: at this surface rate the crown-initiation criterion is never met,
+so the canopy of the crown deck never takes part; the case checks that the
+crown module leaves a surface fire untouched, not a transition.
 
 ## Key Parameters
 | Parameter | Value | Description |
