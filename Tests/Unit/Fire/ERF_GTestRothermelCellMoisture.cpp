@@ -189,3 +189,33 @@ TEST(RothermelCellMoisture, MoisturesAreClampedAsTheMeanIs)
         EXPECT_NEAR(rc.R0, rc_floor.R0, REL * rc_floor.R0);
     }
 }
+
+/**
+ * The per-cell coefficients (erf.fire.rothermel_cell_moisture, on by default
+ * with moisture_dynamic) honour erf.fire.reaction_velocity_formula and
+ * erf.fire.wrf_bmst_compat (#439) as the one-coefficient-set path does: the
+ * wet cell's packed coefficients are those of rothermel_coefficients() with
+ * both options at its own moistures, and differ from the build without them.
+ */
+TEST(RothermelCellMoisture, TheCoefficientOptionsReachEveryCell)
+{
+    TwoCells g;
+    const FuelModelParams fp10 = get_fuel_params(10, FUEL_SET_ANDERSON13);
+    MultiFab mc(g.ba, g.dm, 5, 0), rc_on(g.ba, g.dm, ROTHERMEL_RC_NCOMP, 0), rc_off(g.ba, g.dm, ROTHERMEL_RC_NCOMP, 0);
+    set_moistures(mc);
+    build_cell_rothermel_coefficients(rc_on, mc, nullptr, nullptr, 0, FUEL_SET_ANDERSON13, -1.0_rt, fp10,
+                                      true, fire_wind_limit::rothermel, /*rothermel A*/ true, /*bmst*/ true);
+    build_cell_rothermel_coefficients(rc_off, mc, nullptr, nullptr, 0, FUEL_SET_ANDERSON13, -1.0_rt, fp10,
+                                      true, fire_wind_limit::rothermel);
+    const RothermelComputed want = rothermel_coefficients(fp10, 0.20_rt, 0.21_rt, 0.22_rt, true,
+                                                          fire_wind_limit::rothermel, true, true);
+    for (MFIter mfi(rc_on); mfi.isValid(); ++mfi) {
+        const RothermelComputed on  = unpack_rothermel(rc_on.const_array(mfi), 1, 0);
+        const RothermelComputed off = unpack_rothermel(rc_off.const_array(mfi), 1, 0);
+        EXPECT_EQ(on.I_R, want.I_R);
+        EXPECT_EQ(on.R0, want.R0);
+        EXPECT_EQ(on.beta, want.beta);
+        EXPECT_NE(on.I_R, off.I_R) << "the options change the per-cell coefficients";
+        EXPECT_NE(on.beta, off.beta) << "wrf_bmst_compat deflates the load, so the packing ratio";
+    }
+}

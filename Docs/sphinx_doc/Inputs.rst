@@ -5601,6 +5601,24 @@ Rate of spread
 | **erf.fire.macarthur.ros_max**                 | Cap on the McArthur rate [m/s] (WRF-Fire's 6 m/s); 0       | Real >= 0                      | 6.0                    |
 |                                                | removes it                                                 |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.reaction_velocity_formula**         | Rothermel's reaction-velocity exponent A: Albini's (1976)  | "albini", "rothermel"          | "albini"               |
+|                                                | revision, A = 133 sigma^-0.7913 (ERF's form so far), or    |                                |                        |
+|                                                | Rothermel's (1972) Eq. 39, A = 1/(4.774 sigma^0.1 - 7.27), |                                |                        |
+|                                                | the form WRF-Fire uses. Only A changes, and through I_R    |                                |                        |
+|                                                | the default wind limit 0.9 I_R (wind_limit = rothermel).   |                                |                        |
+|                                                | Read by every run that evaluates Rothermel (ros_model =    |                                |                        |
+|                                                | rothermel, or a hybrid with a rothermel member); BEHAVE    |                                |                        |
+|                                                | keeps its own Albini form; other models ignore it with a   |                                |                        |
+|                                                | warning                                                    |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
+| **erf.fire.wrf_bmst_compat**                   | WRF-Fire comparison: deflate the fuel load fed to the      | Boolean                        | false                  |
+|                                                | Rothermel coefficients by 1 - M/(1+M), M the dead-load-    |                                |                        |
+|                                                | weighted dead moisture, as WRF-Fire does to its load. Not  |                                |                        |
+|                                                | a physical correction (ERF's loads are oven-dry) and not   |                                |                        |
+|                                                | full WRF-Fire parity (bed SAV, net load, heat content and  |                                |                        |
+|                                                | wind/rate caps differ); fuel consumption and heat release  |                                |                        |
+|                                                | keep the full load. Same readers as the row above          |                                |                        |
++------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+
 | **erf.fire.directional_ros**                   | Evaluate the rate along the front normal on the level-set  | Boolean                        | true                   |
 |                                                | path; false spreads the head rate in every direction       |                                |                        |
 +------------------------------------------------+------------------------------------------------------------+--------------------------------+------------------------+

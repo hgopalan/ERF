@@ -1,0 +1,4 @@
+# Finite ignition line: 250 m long at x = 300 m, from y = 250 to 500 m in a
+# 1500 x 750 m domain, so it does not span the periodic y extent.
+300.0 250.0
+300.0 500.0

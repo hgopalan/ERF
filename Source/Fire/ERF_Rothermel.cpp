@@ -10,9 +10,12 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
                                            Real moisture_10hr,
                                            Real moisture_100hr,
                                            bool use_wind_limit,
-                                           int wind_limit_mode)
+                                           int wind_limit_mode,
+                                           bool use_rothermel_a_formula,
+                                           bool wrf_bmst_compat)
 {
-    return rothermel_coefficients(fp, moisture_1hr, moisture_10hr, moisture_100hr, use_wind_limit, wind_limit_mode);
+    return rothermel_coefficients(fp, moisture_1hr, moisture_10hr, moisture_100hr, use_wind_limit, wind_limit_mode,
+                                  use_rothermel_a_formula, wrf_bmst_compat);
 }
 
 
@@ -51,7 +54,9 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
     Real moisture_live,
     bool use_wind_limit,
     const FuelModelParams* fp_tbl,
-    int wind_limit_mode)
+    int wind_limit_mode,
+    bool use_rothermel_a_formula,
+    bool wrf_bmst_compat)
 {
     std::vector<RothermelComputed> table(ROTHERMEL_TABLE_SIZE);
 
@@ -80,7 +85,8 @@ std::vector<RothermelComputed> build_fuel_rothermel_table(
             table[slot] = RothermelComputed{};
             continue;
         }
-        table[slot] = compute_rothermel_params(fp, moisture_1hr, moisture_10hr, moisture_100hr, use_wind_limit, wind_limit_mode);
+        table[slot] = compute_rothermel_params(fp, moisture_1hr, moisture_10hr, moisture_100hr, use_wind_limit,
+                                              wind_limit_mode, use_rothermel_a_formula, wrf_bmst_compat);
     }
     return table;
 }
@@ -149,7 +155,9 @@ void build_cell_rothermel_coefficients(MultiFab& rc_cell,
                                        Real M_live,
                                        const FuelModelParams& fp_uniform,
                                        bool use_wind_limit,
-                                       int wind_limit_mode)
+                                       int wind_limit_mode,
+                                       bool use_rothermel_a_formula,
+                                       bool wrf_bmst_compat)
 {
     AMREX_ALWAYS_ASSERT(rc_cell.nComp() >= ROTHERMEL_RC_NCOMP);
     const bool has_codes = (fuel_model != nullptr);
@@ -172,7 +180,8 @@ void build_cell_rothermel_coefficients(MultiFab& rc_cell,
             const Real m100 = amrex::max(Real(0.01), amrex::min(mc(i, j, k, 2), Real(0.40)));
             // a fuel with no load (a non-burnable code) cannot spread
             const RothermelComputed rc = (fuel_total_load_kg_m2(fp_cell) > 0.0)
-                ? rothermel_coefficients(fp_cell, m1, m10, m100, use_wind_limit, wind_limit_mode)
+                ? rothermel_coefficients(fp_cell, m1, m10, m100, use_wind_limit, wind_limit_mode,
+                                         use_rothermel_a_formula, wrf_bmst_compat)
                 : RothermelComputed{};
             pack_rothermel(rc, rcc, i, j);
         });

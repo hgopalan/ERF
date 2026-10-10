@@ -29,7 +29,61 @@ The default single-class empirical model implemented in Phases 1-12. This model 
 
 **Key parameter:** :cpp:`ros_model = "rothermel"`
 
-**Reference:** Rothermel, R.C. (1972). A Mathematical Model for Predicting Fire Spread in Wildland Fuels. USDA Forest Service Research Paper INT-115.
+**Reaction-velocity exponent.** The optimum reaction velocity is
+:math:`\Gamma' = \Gamma'_{max} (\beta/\beta_{op})^A \exp[A(1-\beta/\beta_{op})]`.
+Two published forms of the exponent :math:`A` exist, with :math:`\sigma` the
+fuel-bed surface-area-to-volume ratio in ft\ :sup:`-1`:
+
+.. math::
+
+   A_\mathrm{Albini} = 133\,\sigma^{-0.7913}, \qquad
+   A_\mathrm{Rothermel} = \frac{1}{4.774\,\sigma^{0.1} - 7.27}.
+
+The first is Albini's (1976) revision and the default; the second is
+Rothermel's (1972) Eq. 39, which WRF-Fire uses. :cpp:`erf.fire.reaction_velocity_formula = "rothermel"`
+selects it. The two cross near :math:`\sigma = 1800` ft\ :sup:`-1`; for
+Anderson's short grass (:math:`\sigma = 3500`) :math:`A` is 0.209 and 0.284,
+and the no-wind rate of the Anderson models changes by -8.3 % (FM9) to +3.5 %
+(FM13), whatever the moisture (the moisture terms are common to both forms). :math:`A_\mathrm{Rothermel}` has a pole at
+:math:`\sigma = (7.27/4.774)^{10} = 67.1`; the code clamps :math:`\sigma` to at
+least 100, above it. Only :math:`A` changes: the net load stays
+:math:`w_0 (1 - S_T)`.
+
+**WRF-Fire fuel load.** WRF-Fire takes its fuel load as wet mass and removes the
+water before Rothermel, :math:`w_0 \to (1 - b)\,w_0` with :math:`b = M/(1+M)`.
+:cpp:`erf.fire.wrf_bmst_compat = true` applies the same deflation, with
+:math:`M` the dead-load-weighted dead moisture, before the packing ratio, bulk
+density, net load, reaction intensity and propagating flux ratio are formed.
+The slope factor, :math:`5.275\,\beta^{-0.3}`, takes the deflated packing ratio
+too, as in WRF-Fire. ERF's fuel tables are oven-dry already, so this is a
+comparison option, not a correction. It does not make ERF reproduce WRF-Fire:
+
+- ERF takes the 1-h SAV as the bed SAV; WRF-Fire a per-category value.
+- ERF uses :math:`w_0(1-S_T)` for the net load; WRF-Fire :math:`w_0/(1+S_T)`.
+- ERF's :math:`M` is the dead moisture only, while it deflates the whole load,
+  live included; WRF-Fire's moisture average includes live fuel where there is
+  some (Anderson 2, 4, 5, 7, 10 and the GR, GS, SH and TU fuels).
+- ERF keeps its own heat contents and its wind limit
+  (:cpp:`erf.fire.use_wind_limit`, by default Rothermel's
+  :math:`U \le 0.9\,I_R`, which the reaction-velocity option also moves
+  through :math:`I_R`); WRF-Fire caps the rate itself at 6 m/s.
+- The fuel consumed and the heat released still use the full dry load.
+
+A lower load changes the no-wind rate either way: it is slower for short grass
+(FM1) and faster for FM8, 9, 12 and 13. It also raises the wind factor through
+:math:`(\beta/\beta_{op})^{-E}`, so for FM1 at 4 m/s the two nearly cancel.
+
+Both options act wherever the Rothermel coefficients are built: the uniform
+fuel, the per-fuel table of a fuel map (deck-defined fuels included) and the
+rebuild with :cpp:`erf.fire.moisture_dynamic`; that covers a hybrid with a
+Rothermel member. BEHAVE keeps its own Albini form, and the other models ignore
+both keys with a warning. ``Exec/RegTests/FireReactionVelocityFormula`` checks
+the head rate of each combination.
+
+**References:**
+
+- Rothermel, R.C. (1972). A Mathematical Model for Predicting Fire Spread in Wildland Fuels. USDA Forest Service Research Paper INT-115.
+- Albini, F.A. (1976). Estimating wildfire behavior and effects. USDA Forest Service General Technical Report INT-30.
 
 **Per-cell moisture.** With :cpp:`erf.fire.moisture_dynamic` the dead
 moistures differ between cells, and with

@@ -536,7 +536,7 @@ private:
     int                                   m_dust_scalar_comp = -1; ///< cc_source component index for dust mass.
                                                                      ///< Set during initialize from ERF_IndexDefines.H.
 
-    DustParams                            m_params;
+    DustParams                            m_params{DustParams::DefaultsOnly{}};  ///< set by initialize()
 #if defined(ERF_ENABLE_FIRE) && defined(ERF_USE_DUST)
     const FireDustCoupling* m_fire_dust_coupling = nullptr;
 #endif
