@@ -160,6 +160,16 @@ audit_geometry (const TurbineState& t, const MovingBodyInputs& b, Real epsilon,
             f.push_back({false, "only " + fmt(D / dmin) + " cells across the rotor diameter (" + fmt(D) + " m over " + fmt(dmin) +
                                 " m cells); the rotor is under-resolved below about 8"});
         }
+        // the actuator-disk rings: their points at the tip must overlap, or the disk becomes a ring of blobs
+        if (b.mode == "adm" && b.num_points_t > 0) {
+            const Real ring_spacing = Real(2.0) * Real(3.14159265358979323846) * R / static_cast<Real>(b.num_points_t);
+            if (ring_spacing > Real(2.0) * epsilon) {
+                f.push_back({false, "actuator-disk ring points " + fmt(ring_spacing) + " m apart at the tip are more than two kernel "
+                                    "widths (" + fmt(epsilon) + " m) apart, so the disk's force is lumpy there; raise num_points_t to "
+                                    "about " + std::to_string(static_cast<int>(std::ceil(Real(3.14159265358979323846) * R / epsilon))) +
+                                    " so the disk is smooth"});
+            }
+        }
         if (b.mode == "alm" && t.num_force_pts_blade > 0) {
             const Real spacing = R / static_cast<Real>(t.num_force_pts_blade);
             if (spacing > epsilon) {

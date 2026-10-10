@@ -1,7 +1,7 @@
-# The OpenFAST_ADM_Uniform case with wake sampling lines 2, 4 and 7 diameters behind the
-# stub rotor (a lateral and a vertical line of 41 points spanning +-1.5 D at each): the lines
-# are sampled every two steps from 2 s on and averaged; the running average T1_wake_avg.csv
-# must match its gold, and the plotfile its gold.
+# The OpenFAST_ADM_Uniform case, with the default sampling (disk_corrected), and wake sampling lines
+# 2, 4 and 7 diameters behind the stub rotor (a lateral and a vertical line of 41 points spanning
+# +-1.5 D at each): the lines are sampled every two steps from 2 s on and averaged; the running
+# average T1_wake_avg.csv must match its gold, and the plotfile its gold.
 
 max_step = 10
 stop_time = 5.0
@@ -38,6 +38,9 @@ erf.plot_int_1   = 10
 erf.plot_vars_1  = density x_velocity y_velocity z_velocity theta
 
 # an IEA-15-MW-sized stub rotor, sampling the flow, its loads on the flow as a disk
+# The default sampling (disk_corrected) recovers the free stream; with epsilon = 2 cells of 50 m its
+# filter width is about 2 rotor radii, past the 1.25 the factor was fitted for (the start-up log
+# warns). That is fine for a regression of this feature; the calibrated set-up is OpenFAST_ADM_DiskCorrected.
 erf.moving_bodies.bodies                     = T1
 erf.moving_bodies.T1.type                    = openfast_turbine
 erf.moving_bodies.T1.mode                    = adm

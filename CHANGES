@@ -11,6 +11,13 @@
 
     -- Canonical cases with golds, box-parity and restart-parity tests, OpenFAST-stub CI job
 
+    -- Audit of the whole area: the corrected disk's free-stream update is under-relaxed
+       from its loop gain and held to a time scale by default (correction_relax,
+       correction_time); restart
+       checks (same bodies and inputs, step, OpenFAST stop time) and log trimming; runs
+       that stop at stop_datetime; finer levels over the bodies abort; input checks
+       (finite values, ranges, unused keys); start-up abort and restart-abort tests
+
 #26.09
     -- Surface Layer restart w/ input_sounding fix (#3956)
 

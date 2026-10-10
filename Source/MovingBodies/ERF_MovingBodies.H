@@ -42,22 +42,29 @@ public:
      * Read erf.moving_bodies.*, check the solver settings and initialise the bodies.
      * Returns nullptr when no bodies are given.
      * @param fixed_dt ERF's fixed step on every level (the anchor level's is OpenFAST's coupling step)
+     * @param stop_elapsed the seconds from the start to ERF's stop time, used when the run stops
+     *        at stop_datetime (stop_time, or max_step times erf.fixed_dt, otherwise)
      */
     static std::unique_ptr<MovingBodies> create (const SolverChoice& sc, int max_level,
-                                                 const amrex::Vector<double>& fixed_dt, bool restarting);
+                                                 const amrex::Vector<double>& fixed_dt, bool restarting,
+                                                 double stop_elapsed);
 
     /**
-     * Write the bodies' state into ERF's checkpoint directory: <chkdir>/moving_bodies/state
-     * (the step count) and each OpenFAST turbine's own checkpoint <chkdir>/moving_bodies/<name>.chkp.
+     * Write the bodies' state into ERF's checkpoint directory: <chkdir>/moving_bodies/state (the
+     * step count, the time the bodies started, OpenFAST's stop time, whether OpenFAST's first
+     * solution was taken, the anchor level and step, and one record of every body's placing and
+     * forcing inputs) and each OpenFAST turbine's own checkpoint <chkdir>/moving_bodies/<name>.chkp.
      */
     void write_checkpoint (const std::string& chkdir) const;
 
     /**
      * Restore the state written by write_checkpoint() from <chkdir>; called once, on a restart,
-     * before the first step. The momentum sources are not stored: they are rebuilt from the
+     * before the first step, with ERF's time. A changed body or setting aborts naming the input; the
+     * logs lose the rows written after the checkpoint. A checkpoint without bodies (a precursor)
+     * starts the bodies at that time. The momentum sources are not stored: they are rebuilt from the
      * restored OpenFAST loads at the first step, as in the run being continued.
      */
-    void read_checkpoint (const std::string& chkdir);
+    void read_checkpoint (const std::string& chkdir, double time);
 
     /**
      * Place the bodies on the terrain: the height of the terrain surface (the k = 0 node plane
@@ -66,9 +73,9 @@ public:
      * added). Called once by ERF when the mesh exists: on a fresh start from InitData, before
      * the step-0 checkpoint or plotfile (it then initialises OpenFAST); on a restart before
      * read_checkpoint(), once the mesh is read. The heights are written to
-     * <diagnostics_dir>/ground.csv.
+     * <diagnostics_dir>/ground.csv. Aborts when the anchor level has no grids (finest_level below it).
      */
-    void set_ground (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
+    void set_ground (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom, double time, int finest_level);
     bool ground_set () const { return m_ground_set; }
 
     /**
@@ -97,12 +104,25 @@ public:
 
     bool has_sources () const { return m_src_defined; }
 
-    /** The level the bodies are sampled and forced on: the finest unless erf.moving_bodies.anchor_level says otherwise. */
+    /**
+     * Called by ERF at every coarse step: abort when the anchor level has no grids, or when a level
+     * finer than the anchor covers part of a rotor or disk with the kernel's reach (the force lives on
+     * the anchor level only, and ERF's average-down would overwrite it there).
+     */
+    void check_levels (int finest_level, const amrex::Vector<amrex::BoxArray>& grids,
+                       const amrex::Vector<amrex::Geometry>& geoms) const;
+
+    /** The level the bodies are sampled and forced on: amr.max_level unless erf.moving_bodies.anchor_level says otherwise. */
     int anchor_level () const { return m_anchor; }
     const MovingBodiesInputs& inputs () const { return m_in; }
 
 private:
     MovingBodies (MovingBodiesInputs in, int anchor, double dt, double t_max, bool restarting);
+
+    /** The bodies start at ERF time `time`: OpenFAST runs from there to the stop time, a whole number of steps. */
+    void start_bodies (double time);
+    /** Abort unless the span from time to the stop time is a whole number of erf.fixed_dt steps. */
+    void check_whole_steps (double time) const;
 
     /**
      * Sample (or prescribe) the flow at every body's velocity nodes and hand it to the bodies;
@@ -115,12 +135,19 @@ private:
     MovingBodiesInputs m_in;
     int m_anchor{0};
     double m_dt{0.0};
-    double m_t_max{0.0};
+    double m_t_max{0.0};          //!< ERF's stop time (s)
+    bool m_disk_density_checked{false};
+    bool m_steps_end_first{false};      //!< max_step * erf.fixed_dt ends the run before the stop time (no step is cut) //!< the disks' air_density checked against ERF's density in this run
+    double m_input_fixed_dt{0.0}; //!< erf.fixed_dt as given (the anchor level's step is it over the sub-cycling ratios)
+    double m_t0{0.0};             //!< ERF time at which the bodies started (0 on a fresh start; a precursor's time)
+    double m_openfast_tmax{0.0};  //!< OpenFAST's stop time on its own clock, which starts at m_t0 (s)
     int m_step{0};
     bool m_restarting{false};   //!< created for a restart: read_checkpoint() must follow
     bool m_ground_set{false};   //!< set_ground() done: the bases sit on the terrain
+    bool m_fitted{false};       //!< the anchor level has z_phys_nd (terrain-following or stretched): a cell's height is not k dz
     std::vector<amrex::Real> m_ground;   //!< per body: the terrain height under its base (m)
-    bool m_restored{false};
+    bool m_restored{false};   //!< read_checkpoint() done
+    bool m_resumed{false};    //!< the checkpoint held the bodies' state: their logs continue rather than start afresh
     bool m_logs_reopened{false};
     std::vector<std::unique_ptr<erf_actuator::BodyMotion>> m_motion;  //!< one per body
     erf_actuator::ActuatorPoints m_points;                             //!< all bodies' velocity nodes
@@ -129,7 +156,6 @@ private:
     std::vector<MovingBodyInputs> m_turbine_in;                        //!< per OpenFAST turbine: its inputs (nacelle, density)
     std::vector<int> m_turbine_points_t;                               //!< ring points per turbine (adm)
     amrex::Real m_epsilon_dx{2.0};                                     //!< spreading width, dx units
-    bool m_axis_checked{false};
     bool m_src_defined{false};
     amrex::MultiFab m_src_x, m_src_y, m_src_z;                         //!< anchor-level momentum sources
 
@@ -152,7 +178,9 @@ private:
 
     /** Build the wake lines from the rotors' current hub, axis and diameter; abort if a point leaves the domain or the anchor level's grids. */
     void build_wake_lines (const amrex::BoxArray& level_grids, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
-    bool m_disk_coverage_checked{false};
+    /** Abort unless every body's points, with the kernel's reach, lie on the anchor level's grids (at the first step and after a regrid). */
+    void check_coverage (const amrex::BoxArray& level_grids, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
+    amrex::BoxArray m_audited_grids;   //!< the anchor grids the coverage was checked on: checked again when they change
     /** Sample the wake lines, accumulate the running averages and write both files. */
     void write_wake_diagnostics (double time, const amrex::MultiFab& U, const amrex::MultiFab& V,
                                  const amrex::MultiFab& W, const amrex::MultiFab* z_phys_nd,
@@ -175,7 +203,7 @@ private:
      * then the density at the hubs and the facing once the flow at the nodes is known. Each
      * part prints its findings together and a fatal one aborts.
      */
-    void audit_turbines_setup (const amrex::BoxArray& level_grids, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
+    void audit_turbines_setup (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
     //! the terrain height under each turbine's hub (prob_lo z on a flat mesh), for the audit and the wake lines
     std::vector<amrex::Real> hub_ground (const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom) const;
     //! where turbine i's node velocities are sampled: its nodes, or (sampling = upstream) the nodes shifted
@@ -184,6 +212,7 @@ private:
     void audit_turbines_flow (const amrex::MultiFab& cons, const amrex::MultiFab* z_phys_nd, const amrex::Geometry& geom);
     bool m_audited_setup{false};
     bool m_audited_flow{false};
+    bool m_axis_checked{false};
     /** Build the lifting-line correction of every turbine that asks for it, once the node layout and chords are known. */
     void build_fllc (const amrex::Geometry& geom);
     /** Correct the blade velocity nodes of turbine i in uvw (3 per velocity node) with its lifting-line correction. */
@@ -199,6 +228,7 @@ private:
     std::vector<amrex::Real> m_corr_uinf;                     //!< per turbine: the corrected free stream of the previous step (checkpointed)
     std::vector<erf_actuator::DiskCorrection> m_corr_last;    //!< per turbine: the last correction, for the diagnostics
     bool m_corr_written{false};
+    std::vector<bool> m_corr_clamp_warned;                    //!< per turbine: the Ct clamp was reported
     std::vector<std::vector<std::unique_ptr<erf_actuator::FLLC>>> m_fllc;   //!< per turbine, one per blade (empty: off)
     bool m_fllc_built{false};
     bool m_fllc_written{false};

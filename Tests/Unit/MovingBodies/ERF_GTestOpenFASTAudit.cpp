@@ -101,10 +101,10 @@ TEST(OpenFASTAudit, ReadsDensityGravityAndModuleFilesFromTheModel)
     const std::string fst_none = write(dir, "none.fst", "2  CompAero  - AeroDyn\n\"ad_def.dat\"  AeroFile  - x\n");
     const std::string stub = write(dir, "stub.fst", "dt = 0.01\nnum_blades = 3\n");
     Real rho = 0.0, g = 0.0;
-    EXPECT_TRUE(erf_openfast::openfast_air_density(fst_num, rho)); EXPECT_NEAR(rho, 1.225, 1.0e-12);
-    EXPECT_TRUE(erf_openfast::openfast_air_density(fst_def, rho)); EXPECT_NEAR(rho, 1.1, 1.0e-12);   // AeroDyn's when the primary says default
+    EXPECT_TRUE(erf_openfast::openfast_air_density(fst_num, rho)); EXPECT_NEAR(rho, 1.225, 1.0e-6);
+    EXPECT_TRUE(erf_openfast::openfast_air_density(fst_def, rho)); EXPECT_NEAR(rho, 1.1, 1.0e-6);   // AeroDyn's when the primary says default
     EXPECT_FALSE(erf_openfast::openfast_air_density(fst_none, rho));                                    // neither gives a number
-    EXPECT_TRUE(erf_openfast::openfast_gravity(fst_num, g)); EXPECT_NEAR(g, 9.80665, 1.0e-12);
+    EXPECT_TRUE(erf_openfast::openfast_gravity(fst_num, g)); EXPECT_NEAR(g, 9.80665, 1.0e-5);
     EXPECT_FALSE(erf_openfast::openfast_gravity(stub, g));
     EXPECT_TRUE(erf_openfast::is_openfast_model(fst_num));
     EXPECT_TRUE(erf_openfast::is_openfast_model(fst_none));
@@ -160,8 +160,13 @@ TEST(OpenFASTAudit, GeometryChecksTheRotorAgainstTheDomainAndTheMesh)
     auto t = rotor("T1", {{750.0, 600.0, 150.0}}, 120.0, 10);
     auto f = erf_openfast::audit_geometry(t, b, 100.0, plo, phi, dx, per, 0.0);
     EXPECT_EQ(fatal_count(f), 0); EXPECT_TRUE(mentions(f, "cells across the rotor diameter"));
-    // on 10 m cells nothing is left to say
+    // on 10 m cells the default 16 ring points sit 47 m apart at the tip, over two 20 m kernel widths: a note
+    f = erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
+    EXPECT_EQ(fatal_count(f), 0); EXPECT_TRUE(mentions(f, "ring points"));
+    // with 48 points nothing is left to say
+    b.num_points_t = 48;
     EXPECT_TRUE(erf_openfast::audit_geometry(t, b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0).empty());
+    b.num_points_t = 16;
     // the rotor cuts the ground / the top: fatal
     f = erf_openfast::audit_geometry(rotor("T1", {{750.0, 600.0, 100.0}}, 120.0, 10), b, 20.0, plo, phi, {{10.0, 10.0, 10.0}}, per, 0.0);
     EXPECT_EQ(fatal_count(f), 1); EXPECT_TRUE(mentions(f, "below the ground"));

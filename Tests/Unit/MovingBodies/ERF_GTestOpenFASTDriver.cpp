@@ -15,6 +15,7 @@
 
 #include <gtest/gtest.h>
 
+#include "ERF_GTestThrowOnAbort.H"
 #include "ERF_MovingBodiesInputs.H"
 #include "ERF_OpenFASTDriver.H"
 
@@ -259,6 +260,24 @@ TEST(OpenFASTDriver, InitReportsTheStubNodeLayout)
     EXPECT_NEAR(t.rotor_speed, d.omega(), 1.0e-6);
 }
 
+// OpenFAST takes the steps that fit before the stop time it was started with, and past it reports
+// "Simulation completed." as information only while the loads stay frozen: the driver must stop there.
+TEST(OpenFASTDriver, SteppingPastTheOpenFASTStopTimeAborts)
+{
+    const StubDeck d;
+    const auto dir = scratch_dir("tmax");
+    const std::string fst = write_stub_deck(dir, d);
+    erf_openfast::OpenFASTDriver driver({one_turbine(fst, dir)});
+    driver.init(0.05, 0.1);   // two ERF steps of five OpenFAST steps each fit before TMax
+    driver.set_uniform_velocity({{10.0, 0.0, 0.0}});
+    driver.solution0();
+    driver.step();
+    driver.step();
+    EXPECT_EQ(driver.turbines()[0].time_index, 10);
+    const std::string msg = erf_gtest::abort_message([&] { driver.step(); });
+    EXPECT_NE(msg.find("Simulation completed"), std::string::npos) << msg;
+}
+
 TEST(OpenFASTDriver, CheckpointAndRestartReproduceTheUninterruptedRun)
 {
     // a run of five ERF steps, checkpointed after three; a second driver restored from that
@@ -292,7 +311,7 @@ TEST(OpenFASTDriver, CheckpointAndRestartReproduceTheUninterruptedRun)
 
     // the stub's turbines are re-allocated by the second driver, so the first is gone by now
     erf_openfast::OpenFASTDriver b(std::vector<MovingBodyInputs>{one_turbine(fst, dir)});
-    b.restart(prefix, 0.05);
+    b.restart(prefix, 0.05, true);
     EXPECT_TRUE(b.initialized());
     EXPECT_TRUE(b.solved0());
     EXPECT_EQ(b.turbines()[0].time_index, 15);

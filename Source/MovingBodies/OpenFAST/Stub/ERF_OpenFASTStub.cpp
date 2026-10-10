@@ -59,6 +59,7 @@ struct StubTurbine {
     double tower_cd = 0.0;
     double azimuth = 0.0;       // rad, blade 0
     int time_index = 0;
+    int n_tmax_m1 = -1;         // the last step index OpenFAST takes (from TMax, kept across checkpoints); -1: no limit
     ExtInfw_InputType_t* to_cfd = nullptr;
     ExtInfw_OutputType_t* from_cfd = nullptr;
 
@@ -317,6 +318,7 @@ bool write_checkpoint (const StubTurbine& t, const std::string& root, std::strin
         << "num_force_pts_blade = " << t.num_force_pts_blade << "\n"
         << "num_force_pts_tower = " << t.num_force_pts_tower << "\n"
         << "time_index = " << t.time_index << "\n"
+        << "n_tmax_m1 = " << t.n_tmax_m1 << "\n"
         << "azimuth = " << t.azimuth << "\n";
     return static_cast<bool>(out);
 }
@@ -344,7 +346,7 @@ void FAST_DeallocateTurbines (int* ErrStat, char* ErrMsg)
     set_ok(ErrStat, ErrMsg);
 }
 
-void FAST_ExtInfw_Init (int* iTurb, double* /*TMax*/, const char* InputFileName, int* /*TurbIDforName*/, char* OutFileRoot,
+void FAST_ExtInfw_Init (int* iTurb, double* TMax, const char* InputFileName, int* /*TurbIDforName*/, char* OutFileRoot,
                         int* NumActForcePtsBlade, int* NumActForcePtsTower, float* TurbinePosition, int* AbortErrLev,
                         double* /*dtDriver*/, double* dt, int* InflowType, int* NumBl, int* NumBlElem, int* NumTwrElem, int* /*NodeClusterType*/,
                         ExtInfw_InputType_t* ExtInfw_Input, ExtInfw_OutputType_t* ExtInfw_Output,
@@ -371,6 +373,8 @@ void FAST_ExtInfw_Init (int* iTurb, double* /*TMax*/, const char* InputFileName,
     allocate_interface(*t);
     t->azimuth = 0.0;
     t->time_index = 0;
+    // as OpenFAST: the steps that fit before TMax, and that limit lives in the checkpoint
+    t->n_tmax_m1 = static_cast<int>(std::ceil((*TMax / t->dt) * (1.0 - 1.0e-12))) - 1;
     update_positions(*t);
 
     *AbortErrLev = ErrID_Fatal;
@@ -403,6 +407,7 @@ void FAST_ExtInfw_Restart (int* iTurb, const char* CheckpointRootName, int* Abor
         else if (key == "num_force_pts_blade") { ss >> t->num_force_pts_blade; }
         else if (key == "num_force_pts_tower") { ss >> t->num_force_pts_tower; }
         else if (key == "time_index") { ss >> t->time_index; }
+        else if (key == "n_tmax_m1") { ss >> t->n_tmax_m1; }
         else if (key == "azimuth") { ss >> t->azimuth; }
     }
     std::string err;
@@ -444,6 +449,11 @@ void FAST_CFD_Step (int* iTurb, int* ErrStat, char* ErrMsg)
             return;
         }
     }
+    // OpenFAST past its stop time: no step, and the last turbine reports it as information only
+    if (t->n_tmax_m1 >= 0 && t->time_index > t->n_tmax_m1) {
+        set_error(ErrStat, ErrMsg, ErrID_Info, "Simulation completed.");
+        return;
+    }
     t->azimuth = std::fmod(t->azimuth + t->rotor_speed * t->dt, 2.0 * pi);
     ++t->time_index;
     update_positions(*t);
@@ -464,6 +474,11 @@ void FAST_HubPosition (int* iTurb, float* absolute_position, float* rotation_veo
     rotation_veocity[2] = 0.0f;
     for (int i = 0; i < 9; ++i) { orientation_dcm[i] = (i % 4 == 0) ? 1.0 : 0.0; }
     set_ok(ErrStat, ErrMsg);
+}
+
+void FAST_End (int* /*iTurb*/, bool* /*stopThisProgram*/)
+{
+    // the stub writes no output files to close
 }
 
 void FAST_CreateCheckpoint (int* iTurb, const char* CheckpointRootName, int* ErrStat, char* ErrMsg)

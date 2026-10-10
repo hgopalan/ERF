@@ -2161,8 +2161,9 @@ ERF::ReadCheckpointFile ()
     // bases are placed on the terrain before the turbines are restored
     if (moving_bodies) {
         const int lev = moving_bodies->anchor_level();
-        moving_bodies->set_ground(z_phys_nd[lev].get(), Geom(lev));
-        moving_bodies->read_checkpoint(restart_chkfile);
+        moving_bodies->set_ground((lev <= finest_level) ? z_phys_nd[lev].get() : nullptr, Geom(std::min(lev, finest_level)),
+                                  t_new[0], finest_level);
+        moving_bodies->read_checkpoint(restart_chkfile, t_new[0]);
     }
 #endif
 }

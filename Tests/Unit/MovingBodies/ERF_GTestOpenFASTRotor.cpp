@@ -358,19 +358,19 @@ TEST(OpenFASTRotor, UpstreamSamplingPositionsShiftEveryNodeAlongTheAxis)
     ASSERT_EQ(up.size(), t.vel_pos.size());
     const Real shift = 1.5 * 2.0 * R;
     for (std::size_t n = 0; n + 2 < up.size(); n += 3) {
-        for (int d = 0; d < 3; ++d) { EXPECT_NEAR(up[n+d] - t.vel_pos[n+d], -shift * t.hub_axis[d], 1.0e-9); }
+        for (int d = 0; d < 3; ++d) { EXPECT_NEAR(up[n+d] - t.vel_pos[n+d], -shift * t.hub_axis[d], tol() * 1.0e3); }
         // the radius about the shifted hub is unchanged
         Real r0 = 0.0, r1 = 0.0;
         for (int d = 0; d < 3; ++d) {
             const Real a = t.vel_pos[n+d] - hub[d], b = up[n+d] - (hub[d] - shift * t.hub_axis[d]);
             r0 += a * a; r1 += b * b;
         }
-        EXPECT_NEAR(std::sqrt(r0), std::sqrt(r1), 1.0e-9);
+        EXPECT_NEAR(std::sqrt(r0), std::sqrt(r1), tol() * 1.0e3);
     }
     // the hub node (node 0) leads by the shift along the axis
     Real lead = 0.0;
     for (int d = 0; d < 3; ++d) { lead += (hub[d] - up[d]) * t.hub_axis[d]; }
-    EXPECT_NEAR(lead, shift, 1.0e-9);
+    EXPECT_NEAR(lead, shift, tol() * 1.0e3);
     // zero diameters: the nodes themselves
     EXPECT_EQ(erf_actuator::upstream_sampling_positions(t, 0.0), t.vel_pos);
 }
@@ -379,7 +379,7 @@ TEST(OpenFASTRotor, UpstreamSamplingPositionsShiftEveryNodeAlongTheAxis)
 TEST(OpenFASTRotor, FilteredDiskFactorMatchesShapiroEq25)
 {
     // Ct' = 1, Delta/R = 1: M = 1 / (1 + 0.25 / sqrt(3 pi))
-    EXPECT_NEAR(erf_actuator::filtered_disk_factor(1.0, 1.0), 1.0 / (1.0 + 0.25 / std::sqrt(3.0 * pi)), 1.0e-12);
+    EXPECT_NEAR(erf_actuator::filtered_disk_factor(1.0, 1.0), 1.0 / (1.0 + 0.25 / std::sqrt(3.0 * pi)), tol());
     EXPECT_NEAR(erf_actuator::filtered_disk_factor(1.0, 1.0), 0.924698, 1.0e-6);
     // no thrust or a vanishing filter width: no correction
     EXPECT_DOUBLE_EQ(erf_actuator::filtered_disk_factor(0.0, 1.0), 1.0);
@@ -387,7 +387,7 @@ TEST(OpenFASTRotor, FilteredDiskFactorMatchesShapiroEq25)
     // a wider kernel corrects more
     EXPECT_LT(erf_actuator::filtered_disk_factor(1.5, 1.2), erf_actuator::filtered_disk_factor(1.5, 0.6));
     // ERF's kernel exp(-r^2/eps^2) is the paper's filter with Delta = sqrt(6) eps
-    EXPECT_NEAR(erf_actuator::filter_width_from_eps(40.0), std::sqrt(6.0) * 40.0, 1.0e-12);
+    EXPECT_NEAR(erf_actuator::filter_width_from_eps(40.0), std::sqrt(6.0) * 40.0, tol() * 100.0);
 }
 
 TEST(OpenFASTRotor, FilteredDiskCorrectionRecoversTheFreeStreamAtTheFixedPoint)
@@ -402,12 +402,12 @@ TEST(OpenFASTRotor, FilteredDiskCorrectionRecoversTheFreeStreamAtTheFixedPoint)
     const Real u_disk = U * (1.0 - a) / M;
     const Real thrust = 0.5 * rho * pi * Rr * Rr * U * U * ct;
     const auto c = erf_actuator::filtered_disk_correction(u_disk, thrust, U, rho, Rr, eps);
-    EXPECT_NEAR(c.ct, ct, 1.0e-12);
-    EXPECT_NEAR(c.a, a, 1.0e-12);
-    EXPECT_NEAR(c.ct_prime, ct_prime, 1.0e-12);
-    EXPECT_NEAR(c.M, M, 1.0e-12);
-    EXPECT_NEAR(c.u_inf, U, 1.0e-9);
-    EXPECT_NEAR(c.factor, U / u_disk, 1.0e-12);
+    EXPECT_NEAR(c.ct, ct, tol());
+    EXPECT_NEAR(c.a, a, tol());
+    EXPECT_NEAR(c.ct_prime, ct_prime, tol());
+    EXPECT_NEAR(c.M, M, tol());
+    EXPECT_NEAR(c.u_inf, U, tol() * 10.0);
+    EXPECT_NEAR(c.factor, U / u_disk, tol());
     EXPECT_GT(c.factor, 1.0);
     // a smaller previous free stream raises Ct and the correction; the fixed point is stable from below
     const auto c_low = erf_actuator::filtered_disk_correction(u_disk, thrust, 0.9 * U, rho, Rr, eps);
@@ -420,7 +420,7 @@ TEST(OpenFASTRotor, FilteredDiskCorrectionRecoversTheFreeStreamAtTheFixedPoint)
     EXPECT_DOUBLE_EQ(erf_actuator::filtered_disk_correction(u_disk, thrust, 0.0, rho, Rr, eps).factor, 1.0);
     // an absurd thrust is clamped to Ct = 0.96 and stays finite
     const auto c_big = erf_actuator::filtered_disk_correction(u_disk, 1.0e3 * thrust, U, rho, Rr, eps);
-    EXPECT_NEAR(c_big.ct, 0.96, 1.0e-12);
+    EXPECT_NEAR(c_big.ct, 0.96, tol());
     EXPECT_TRUE(std::isfinite(c_big.u_inf));
 }
 
@@ -447,11 +447,186 @@ TEST(OpenFASTRotor, DiskAxialVelocityWeightsTheBladeNodesByRadius)
         for (int d = 0; d < 3; ++d) { uvw[3*nd+d] = 7.0 * r / Rn * t.hub_axis[d] + 3.0 * perp[d]; }
     }
     // radii (i + 1/2) / 5 R: the radius-weighted mean of 7 r / R is 7 sum r^2 / (R sum r) = 4.62
-    EXPECT_NEAR(erf_actuator::disk_axial_velocity(t, uvw), 4.62, 1.0e-9);
+    EXPECT_NEAR(erf_actuator::disk_axial_velocity(t, uvw), 4.62, tol() * 10.0);
     // a uniform axial flow is returned unchanged
     for (int nd = 0; nd < t.num_vel_nodes; ++nd) { for (int d = 0; d < 3; ++d) { uvw[3*nd+d] = 8.5 * t.hub_axis[d]; } }
-    EXPECT_NEAR(erf_actuator::disk_axial_velocity(t, uvw), 8.5, 1.0e-9);
+    EXPECT_NEAR(erf_actuator::disk_axial_velocity(t, uvw), 8.5, tol() * 10.0);
     // no blade nodes: zero
     t.num_blade_elem = 0;
     EXPECT_DOUBLE_EQ(erf_actuator::disk_axial_velocity(t, uvw), 0.0);
+}
+
+// The upstream points follow the horizontal projection of a tilted shaft: two diameters ahead along the
+// shaft itself would lift them by 2 D sin(tilt), into faster air in a sheared boundary layer.
+TEST(OpenFASTRotor, UpstreamSamplingKeepsTheNodeHeightsUnderATiltedShaft)
+{
+    const std::array<Real,3> hub{{600.0, 600.0, 150.0}};
+    const Real tilt = 6.0 * pi / 180.0;
+    std::array<Real,3> axis{{std::cos(tilt), 0.0, -std::sin(tilt)}};
+    TurbineState t = make_rotor(hub, axis, 6, 120.0, 1.0e4, 1.0e3);
+    t.vel_pos = t.force_pos;
+    t.num_vel_nodes = t.num_force_nodes;
+    const Real R = erf_actuator::tip_radius(t);
+    const std::vector<Real> up = erf_actuator::upstream_sampling_positions(t, 2.0);
+    const Real shift = 2.0 * 2.0 * R;
+    for (std::size_t n = 0; n + 2 < up.size(); n += 3) {
+        EXPECT_NEAR(up[n+2], t.vel_pos[n+2], tol() * 1.0e3) << "node " << n / 3 << " moved vertically";
+        EXPECT_NEAR(t.vel_pos[n] - up[n], shift, tol() * 1.0e3);
+        EXPECT_NEAR(up[n+1], t.vel_pos[n+1], tol() * 1.0e3);
+    }
+}
+
+// For nodes at the centres of n equal elements over [0, R] the weights give the disk's area average of
+// an axial velocity equal to r, int_0^R r^2 dr / int_0^R r dr = 2R/3, to within 1/(4 n^2).
+TEST(OpenFASTRotor, DiskAxialVelocityIsTheAreaAverageForElementCentres)
+{
+    const Real R = 120.0;
+    const int n = 20;
+    TurbineState t;
+    t.num_blades = 1;
+    t.num_blade_elem = n;
+    t.hub_pos = {{0.0, 0.0, 150.0}};
+    t.hub_axis = {{1.0, 0.0, 0.0}};
+    t.vel_pos = {0.0, 0.0, 150.0};
+    std::vector<Real> uvw(3 * (n + 1), 0.0);
+    for (int k = 0; k < n; ++k) {
+        const Real r = (k + 0.5) * R / n;
+        t.vel_pos.insert(t.vel_pos.end(), {0.0, r, 150.0});
+        uvw[3*(k+1)] = r;
+    }
+    t.num_vel_nodes = n + 1;
+    const Real exact = 2.0 * R / 3.0;
+    EXPECT_NEAR(erf_actuator::disk_axial_velocity(t, uvw), exact, exact / (4.0 * n * n) + tol() * exact);
+    EXPECT_GT(std::abs(erf_actuator::disk_axial_velocity(t, uvw) - exact), 0.5 * exact / (4.0 * n * n));
+}
+
+// With unequal node spacing each blade node stands for r dr of the disk, its share of the span: the
+// mean of an axial velocity equal to r is then not the plain radius-weighted sum r^2 / sum r.
+TEST(OpenFASTRotor, DiskAxialVelocityWeightsUnequalSpacingByArea)
+{
+    const std::array<Real,3> hub{{0.0, 0.0, 150.0}};
+    TurbineState t;
+    t.num_blades = 1;
+    t.num_blade_elem = 4;
+    t.hub_pos = hub;
+    t.hub_axis = {{1.0, 0.0, 0.0}};
+    const std::vector<Real> radii{10.0, 20.0, 60.0, 100.0};   // clustered at the root, as in older models
+    t.vel_pos = {hub[0], hub[1], hub[2]};
+    for (const Real r : radii) { t.vel_pos.insert(t.vel_pos.end(), {hub[0], hub[1] + r, hub[2]}); }
+    t.num_vel_nodes = 5;
+    std::vector<Real> uvw(15, 0.0);
+    for (int k = 0; k < 4; ++k) { uvw[3*(k+1)] = radii[k]; }
+    // dr: 10 (one-sided), (60-10)/2 = 25, (100-20)/2 = 40, 40 (one-sided)
+    const Real dr[4] = {10.0, 25.0, 40.0, 40.0};
+    Real num = 0.0, den = 0.0;
+    for (int k = 0; k < 4; ++k) { num += radii[k] * dr[k] * radii[k]; den += radii[k] * dr[k]; }
+    EXPECT_NEAR(erf_actuator::disk_axial_velocity(t, uvw), num / den, tol() * 100.0);
+    // the old radius-only weighting gives sum r^2 / sum r, which this is not
+    Real n0 = 0.0, d0 = 0.0;
+    for (const Real r : radii) { n0 += r * r; d0 += r; }
+    EXPECT_GT(std::abs(erf_actuator::disk_axial_velocity(t, uvw) - n0 / d0), 1.0);
+}
+
+namespace {
+// A model of the disk_corrected loop, independent of the code's gain formula: the rotor holds its
+// thrust coefficient Ct on the velocity it is fed, the flow induces (1 - delta) of the thin-disk
+// induction for the thrust it feels, and the correction maps the sampled disk velocity back with the
+// Ct taken on the previous estimate. Returns the next estimate of the free stream (U = 1).
+Real model_update (Real u_fed, Real ct, Real delta_over_R, Real relax)
+{
+    const Real delta = delta_over_R / std::sqrt(3.0 * pi);
+    const Real ct_true = ct * u_fed * u_fed;                    // the thrust the flow feels, on U = 1
+    const Real a_true = 0.5 * (1.0 - std::sqrt(1.0 - std::min(ct_true, Real(0.99))));
+    const Real u_disk = 1.0 - (1.0 - delta) * a_true;           // what the filtered disk samples
+    const Real a = 0.5 * (1.0 - std::sqrt(1.0 - ct));           // the correction's Ct is the rotor's own
+    const Real ct_prime = 4.0 * a / (1.0 - a);
+    const Real M = erf_actuator::filtered_disk_factor(ct_prime, delta_over_R);
+    const Real u_new = M * u_disk / (1.0 - a);
+    return (1.0 - relax) * u_fed + relax * u_new;
+}
+}
+
+// The gain of the update against a finite difference of the model loop, and the relaxation that
+// makes it converge where the plain update grows step by step (Ct 0.85 with a one-cell kernel on an
+// 8 m mesh, Delta/R 0.16).
+TEST(OpenFASTRotor, DiskCorrectionGainAndRelaxation)
+{
+    for (const Real ct : {0.6, 0.75, 0.85, 0.9}) {
+        for (const Real dR : {0.16, 0.4, 0.81, 1.25}) {
+            const Real a = 0.5 * (1.0 - std::sqrt(1.0 - ct));
+            const Real h = 1.0e-4;
+            const Real fd = (model_update(1.0 + h, ct, dR, 1.0) - model_update(1.0 - h, ct, dR, 1.0)) / (2.0 * h);
+            EXPECT_NEAR(erf_actuator::disk_correction_gain(a, dR), fd, (sizeof(Real) == 8) ? 1.0e-5 : 2.0e-2)
+                << "Ct " << ct << ", Delta/R " << dR;
+        }
+    }
+    // the fixed point is U = 1 for any relaxation
+    EXPECT_NEAR(model_update(1.0, 0.85, 0.16, 1.0), 1.0, tol() * 10.0);
+    // |G| > 1 at Ct 0.85, Delta/R 0.16: the plain update grows, the relaxed one converges
+    const Real a = 0.5 * (1.0 - std::sqrt(1.0 - 0.85));
+    const Real G = erf_actuator::disk_correction_gain(a, 0.16);
+    EXPECT_LT(G, -1.0);
+    const Real w = erf_actuator::disk_correction_relax(G);
+    EXPECT_NEAR(w, 1.0 / (1.0 - G), tol());
+    Real u_plain = 1.02, u_relax = 1.02;
+    for (int n = 0; n < 20; ++n) {
+        u_plain = model_update(u_plain, 0.85, 0.16, 1.0);
+        u_relax = model_update(u_relax, 0.85, 0.16, w);
+    }
+    EXPECT_GT(std::abs(u_plain - 1.0), 0.02);    // grew (or rang) away from the fixed point
+    EXPECT_LT(std::abs(u_relax - 1.0), 1.0e-3);   // settled
+    // the relaxation is 1 for a gain of 0 and held at 0.2 for a large gain
+    EXPECT_NEAR(erf_actuator::disk_correction_relax(0.0), 1.0, tol());
+    EXPECT_NEAR(erf_actuator::disk_correction_relax(-100.0), 0.2, tol());
+    // the time scale holds it at dt / tau, and none is applied for tau <= 0
+    EXPECT_NEAR(erf_actuator::disk_correction_relax(G, 0.1, 12.0), 0.1 / (12.0 * (1.0 - G)), tol());
+    EXPECT_NEAR(erf_actuator::disk_correction_relax(G, 0.1, 0.0), w, tol());
+    EXPECT_NEAR(erf_actuator::disk_correction_relax(0.0, 20.0, 12.0), 1.0, tol());
+}
+
+namespace {
+// The same loop with the flow answering a change of thrust only after a delay and a first-order lag,
+// as a resolved flow does: the disk velocity relaxes over lag_s towards what the thrust of delay_s
+// ago induces. Steps n_steps of dt from u0 with the given relaxation (tau <= 0: the one-step factor
+// alone) and returns the largest deviation from U = 1 over the second half.
+Real delayed_loop (Real ct, Real delta_over_R, Real dt, Real delay_s, Real lag_s, Real tau, Real u0, int n_steps)
+{
+    const Real delta = delta_over_R / std::sqrt(3.0 * pi);
+    const int nd = static_cast<int>(std::lround(delay_s / dt));
+    // the correction clamps its Ct at 0.96; the flow's own induction is not clamped
+    auto a_of = [] (Real c) { return Real(0.5) * (Real(1.0) - std::sqrt(Real(1.0) - std::min(c, Real(0.96)))); };
+    auto a_flow = [] (Real c) { return Real(0.5) * (Real(1.0) - std::sqrt(Real(1.0) - std::min(c, Real(0.999)))); };
+    std::vector<Real> thrust(static_cast<std::size_t>(nd) + 1, ct * u0 * u0);   // thrust history, on U = 1
+    Real u = u0;
+    Real u_disk = Real(1.0) - (Real(1.0) - delta) * a_of(ct);
+    Real dev = 0.0;
+    for (int n = 0; n < n_steps; ++n) {
+        const Real target = Real(1.0) - (Real(1.0) - delta) * a_flow(thrust[thrust.size() - 1 - static_cast<std::size_t>(nd)]);
+        u_disk += (dt / lag_s) * (target - u_disk);
+        const Real a = a_of(ct);                                       // Ct on the previous estimate: the rotor's own
+        const Real M = erf_actuator::filtered_disk_factor(Real(4.0) * a / (Real(1.0) - a), delta_over_R);
+        const Real w = erf_actuator::disk_correction_relax(erf_actuator::disk_correction_gain(a, delta_over_R), dt, tau);
+        u = (Real(1.0) - w) * u + w * M * u_disk / (Real(1.0) - a);
+        thrust.push_back(ct * u * u);
+        if (n >= n_steps / 2) { dev = std::max(dev, std::abs(u - Real(1.0))); }
+    }
+    return dev;
+}
+}
+
+// A flow that answers the thrust after a delay (2 s, lag 0.3 s, dt 0.1 s, Ct 0.85, Delta/R 0.16) makes the
+// update ring at the delay's period even with its one-step gain cancelled; holding the relaxation at
+// dt / tau with tau the rotor radius over the free stream (12 s here) damps it.
+TEST(OpenFASTRotor, DiskCorrectionRelaxationTimeScaleDampsADelayedFlow)
+{
+    const Real ringing = delayed_loop(0.85, 0.16, 0.1, 2.0, 0.3, 0.0, 1.02, 3000);
+    const Real damped = delayed_loop(0.85, 0.16, 0.1, 2.0, 0.3, 12.0, 1.02, 3000);
+    EXPECT_GT(ringing, 0.02);
+    EXPECT_LT(damped, 1.0e-3);
+    // with no delay both settle
+    EXPECT_LT(delayed_loop(0.85, 0.16, 0.1, 0.0, 0.1, 0.0, 1.02, 3000), 1.0e-3);
+    // at the 0.96 clamp (gain -3.6) with a 6 s delay the error must still decay on tau (11.3 s, the
+    // IEA 15 MW's R / U): a bound of dt / tau alone, without the gain, rings there by some 4 %
+    EXPECT_LT(delayed_loop(0.96, 0.2, 0.2, 6.0, 1.0, 11.3, 1.03, 3000), 1.0e-3);
+    EXPECT_LT(delayed_loop(0.96, 0.2, 0.2, 10.0, 1.0, 11.3, 1.03, 3000), 1.0e-3);
 }

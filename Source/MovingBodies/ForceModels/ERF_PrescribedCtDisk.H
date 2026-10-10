@@ -26,6 +26,10 @@ public:
     explicit PrescribedCtDisk (const MovingBodyInputs& in);
 
     const std::string& name () const { return m_name; }
+
+    /** The prefix of this disk's diagnostics files (erf.moving_bodies.<name>.output_root). */
+
+    const std::string& output_root () const { return m_output_root; }
     int num_points () const { return static_cast<int>(m_area.size()); }
 
     /** 3*n positions of the disk points (the force points). */
@@ -54,11 +58,10 @@ public:
     /** Raise the disk and its sampling points by dz (m): the terrain height under the base, at start-up. */
     void shift_z (amrex::Real dz);
 
-    /** Write the header of <output_root>_disk.csv (truncating it). */
     /** Open <output_root>_disk.csv: truncated for a fresh run, appended to after a restart. */
     void open_diagnostics (bool truncate) const;
     /** Append one row: time, u_inf, u_disk, thrust, power, plus the integrated source total. */
-    void write_diagnostics (amrex::Real time, amrex::Real spread_total) const;
+    void write_diagnostics (double time, amrex::Real spread_total) const;
 
 private:
     std::string m_name;

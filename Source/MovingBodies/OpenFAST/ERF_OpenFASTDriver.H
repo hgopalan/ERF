@@ -38,8 +38,9 @@ int owner_rank_for (int turbine_index, int nprocs);
  */
 std::string check_induction_off (const std::string& fst_file);
 /**
- * Like check_induction_off when want_off is true; with want_off false (sampling = upstream feeds the free
- * stream) the AeroDyn file must instead keep its own induction model (Wake_Mod != 0).
+ * Like check_induction_off when want_off is true; with want_off false (sampling = upstream or
+ * disk_corrected, which feed OpenFAST the free stream) the AeroDyn file must instead keep its own
+ * induction model (Wake_Mod != 0).
  */
 std::string check_induction (const std::string& fst_file, bool want_off);
 
@@ -98,8 +99,9 @@ struct TurbineState
  * Drives one or more OpenFAST turbines through the ExtInfw C API. Each turbine is owned by one
  * MPI rank (owner_rank_for), which alone runs its OpenFAST instance; after every step the node
  * positions and forces are broadcast so every rank can use them. A farm therefore costs each
- * rank only the turbines it owns, and the result does not depend on the rank count. This version initialises, steps and reports; the flow velocity at the nodes is
- * uniform and prescribed by the caller.
+ * rank only the turbines it owns, and the result does not depend on the rank count. The caller
+ * hands it the flow velocity at the velocity nodes each step (sampled from ERF's flow, or the
+ * prescribed velocity) and spreads the forces it returns.
  */
 class OpenFASTDriver
 {
@@ -122,10 +124,11 @@ public:
 
     /**
      * Instead of init(): restore every turbine from the OpenFAST checkpoint <prefix><name>.chkp
-     * written by create_checkpoint(), and take the time index from it. The first solution is
-     * then already taken; the next call is step().
+     * written by create_checkpoint(), and take the time index from it; the next call is step().
+     * @param solved0 whether the run being continued had taken OpenFAST's first solution (false for
+     *        a checkpoint written at step 0, whose first step must take it)
      */
-    void restart (const std::string& prefix, double dt_cfd);
+    void restart (const std::string& prefix, double dt_cfd, bool solved0);
 
     /** Write every turbine's OpenFAST checkpoint as <prefix><name>.chkp (its owner rank writes). */
     void create_checkpoint (const std::string& prefix) const;

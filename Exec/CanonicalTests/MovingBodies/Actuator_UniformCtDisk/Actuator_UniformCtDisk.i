@@ -44,4 +44,5 @@ erf.moving_bodies.D1.rotor_radius = 120.
 erf.moving_bodies.D1.hub_height   = 150.
 erf.moving_bodies.D1.ct           = 0.75
 erf.moving_bodies.D1.epsilon      = 2.0
+erf.moving_bodies.D1.air_density  = 1.0     # ERF's density here (prob.rho_0): the thrust is 1/2 rho Ct U^2 A on it
 erf.moving_bodies.D1.output_root  = D1

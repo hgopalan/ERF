@@ -2543,15 +2543,44 @@ Moving Bodies (OpenFAST turbines)
 ---------------------------------
 
 The moving-bodies framework couples ERF to OpenFAST turbines through OpenFAST's
-external-inflow interface; see :ref:`sec:MovingBodies` for the coupling. It is
-built with ``-DERF_ENABLE_OPENFAST=ON`` (cmake) and requires the anelastic solver,
-a fixed time step (``erf.fixed_dt``) that is a whole multiple of the OpenFAST
-time step, a single level (``amr.max_level = 0``) and no floating-point traps
-(``amrex.fpe_trap_invalid``, ``amrex.fpe_trap_zero`` and ``amrex.fpe_trap_overflow``
-off, since OpenFAST raises exceptions of its own during initialisation); the run
-aborts at start-up otherwise. Bodies are named in ``erf.moving_bodies.bodies``; each body has its own
-``erf.moving_bodies.<name>.*`` block. The velocity at each body's nodes is sampled
-from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is given.
+external-inflow interface, and also drives prescribed-Ct disks that need no OpenFAST; see
+:ref:`sec:MovingBodies` for the coupling. The framework and the ``ct_disk`` bodies are built
+with ``-DERF_ENABLE_MOVING_BODIES=ON`` (cmake; ``USE_MOVING_BODIES = TRUE`` with GNU Make);
+``openfast_turbine`` bodies need ``-DERF_ENABLE_OPENFAST=ON`` as well, which switches the
+framework on by itself (GNU Make: ``USE_OPENFAST = TRUE`` with ``USE_MOVING_BODIES = TRUE`` and
+``OPENFAST_HOME`` set to the OpenFAST install prefix).
+
+The run aborts at start-up, naming the input, unless it has:
+
+- the anelastic solver and a fixed time step (``erf.fixed_dt``) whose step on the bodies' level
+  (``erf.fixed_dt`` over the sub-cycling ratios down to it) is a whole multiple of every OpenFAST
+  model's time step;
+- a known stop time: ``stop_time``, or ``max_step`` times ``erf.fixed_dt``, or
+  ``stop_datetime`` (ERF then ignores ``stop_time``, and the bodies use the seconds to the stop
+  date); the span from the start to the stop time must be a whole number of ``erf.fixed_dt``
+  steps, since ERF would cut the last one, unless ``max_step`` ends the run first;
+- the bodies on one level, the anchor level (``erf.moving_bodies.anchor_level``), whose grids
+  cover every body point with the kernel's reach; no finer level may cover any of them, since
+  the average-down would overwrite the force there;
+- with an ``openfast_turbine``, no floating-point traps (``amrex.fpe_trap_invalid``,
+  ``amrex.fpe_trap_zero`` and ``amrex.fpe_trap_overflow`` all off), since OpenFAST raises
+  exceptions of its own; runs with ``ct_disk`` bodies only may trap.
+
+Every real input must be finite. Bodies are named in ``erf.moving_bodies.bodies``; each body
+has its own ``erf.moving_bodies.<name>.*`` block. The common cases of a key that the chosen
+options do not use (``fllc_relax`` with ``fllc = false``, say) are reported with a warning;
+``amrex.parmparse.verbose = 1`` lists every input that was never read. The velocity at each
+body's nodes is sampled from the flow every step unless ``erf.moving_bodies.prescribed_velocity``
+is given.
+
+A restart continues the same bodies with the same inputs: the bodies, the keys of their blocks
+that place or force them under the chosen options (base_pos, epsilon, air_density, the model
+file, mode, sampling and its keys, the force points, the nacelle, the FLLC keys; a ct_disk's
+geometry, Ct and sampling distance), the anchor level and its step must match the checkpoint, and
+with OpenFAST turbines the stop time must not lie past the one they were started with (OpenFAST
+keeps it in its own checkpoint); the run aborts otherwise, naming the changed input. The diagnostics files keep
+their rows up to the checkpoint and continue from there. A run started from a checkpoint
+written without bodies (a precursor) starts the bodies afresh at the checkpoint's time.
 
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | Parameter                                              | Definition                                               | Acceptable Values        | Default                  |
@@ -2566,19 +2595,19 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 |                                                        | k = 0 face there (on a flat mesh the absolute height);   |                          |                          |
 |                                                        | 0 puts the base on the ground                            |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.epsilon**                   | Gaussian width of the force spreading, in units of dx;   | Real > 0                 | 2.0                      |
-|                                                        | every body must use the same value                       |                          |                          |
+| **erf.moving_bodies.<name>.epsilon**                   | Gaussian width of the force spreading, in units of the   | Real > 0                 | 2.0                      |
+|                                                        | anchor level's x cell size; every body must use the      |                          |                          |
+|                                                        | same value                                               |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.output_root**               | prefix of the body's diagnostics files:                  | String                   | <diagnostics_dir>/<name> |
-|                                                        | ``<output_root>_erf.csv`` (time, rotor speed, thrust,    |                          |                          |
-|                                                        | torque, power, hub axis) and ``<output_root>_flow.csv``  |                          |                          |
-|                                                        | (sampled hub and blade-mean velocity) for a turbine,     |                          |                          |
-|                                                        | ``<output_root>_disk.csv`` (time, upstream speed, disk   |                          |                          |
-|                                                        | speed, thrust, power, integrated source) for a disk      |                          |                          |
+| **erf.moving_bodies.<name>.output_root**               | prefix of the body's diagnostics files, one per body     | String                   | <diagnostics_dir>/<name> |
+|                                                        | (two bodies with one prefix abort); the files are        |                          |                          |
+|                                                        | listed after this table                                  |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.fst_file**                  | openfast_turbine: OpenFAST primary input file; it must   | String                   | must be set              |
-|                                                        | set ``CompInflow = 2`` (external inflow) and, unless     |                          |                          |
-|                                                        | ``mode = none``, ``Wake_Mod = 0`` in its AeroDyn file    |                          |                          |
+|                                                        | set ``CompInflow = 2`` (external inflow). Unless         |                          |                          |
+|                                                        | ``mode = none``, its AeroDyn ``Wake_Mod`` must be 0 with |                          |                          |
+|                                                        | ``sampling = disk`` (the actuator line, or a plain       |                          |                          |
+|                                                        | disk) and not 0 with ``upstream`` or ``disk_corrected``  |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.mode**                      | openfast_turbine: how the OpenFAST loads reach the flow; | adm, alm, none           | adm                      |
 |                                                        | ``adm`` spreads each blade node's force as a ring about  |                          |                          |
@@ -2586,7 +2615,7 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 |                                                        | node itself, ``none`` lets the turbine see the flow      |                          |                          |
 |                                                        | without forcing it                                       |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.num_force_points_blade**    | openfast_turbine: actuator force points per blade        | Int > 0                  | 50                       |
+| **erf.moving_bodies.<name>.num_force_points_blade**    | openfast_turbine: actuator force points per blade        | Int > 0 (>= 2 with fllc) | 50                       |
 |                                                        | requested from OpenFAST                                  |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.num_force_points_tower**    | openfast_turbine: actuator force points on the tower     | Int >= 0                 | 0                        |
@@ -2594,28 +2623,46 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 |                                                        | spread into the flow (0: the tower puts no force in it)  |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.nacelle_cd**                | openfast_turbine: drag coefficient of a nacelle drag     | Real >= 0                | 0                        |
-|                                                        | point at the hub (0: no nacelle drag)                    |                          |                          |
+|                                                        | point at the hub (0: no nacelle drag), on the velocity   |                          |                          |
+|                                                        | at the hub and with air_density                          |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.nacelle_area**              | openfast_turbine: frontal area of the nacelle (m^2);     | Real >= 0                | 0                        |
 |                                                        | must be positive when nacelle_cd is                      |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.sampling**                  | openfast_turbine, mode = adm: where the node velocities  | disk, upstream,          | disk_corrected           |
-|                                                        | handed to OpenFAST are sampled: disk (at the nodes;      | disk_corrected           |                          |
-|                                                        | AeroDyn Wake_Mod must be 0); upstream                    |                          |                          |
+| **erf.moving_bodies.<name>.sampling**                  | openfast_turbine: where the node velocities handed to    | disk, upstream,          | disk_corrected (adm),    |
+|                                                        | OpenFAST are sampled: disk (at the nodes); upstream      | disk_corrected           | disk (alm, none)         |
 |                                                        | (sample_diameters_upstream diameters ahead of the hub    |                          |                          |
 |                                                        | along the shaft, the free stream); or disk_corrected     |                          |                          |
 |                                                        | (at the nodes, the free stream recovered from the disk   |                          |                          |
 |                                                        | velocity with the filtered-disk factor of Shapiro et al. |                          |                          |
-|                                                        | 2019 and momentum theory on the previous step's thrust). |                          |                          |
-|                                                        | With upstream and disk_corrected, Wake_Mod must be 1 so  |                          |                          |
-|                                                        | OpenFAST applies its own induction                       |                          |                          |
+|                                                        | 2019 and momentum theory on the previous step's thrust,  |                          |                          |
+|                                                        | under-relaxed by correction_relax). upstream and         |                          |                          |
+|                                                        | disk_corrected need mode = adm; see fst_file for the     |                          |                          |
+|                                                        | Wake_Mod each needs                                      |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.correction_relax**          | sampling = disk_corrected: under-relaxation factor f of  | -1, or 0 < Real <= 1     | -1                       |
+|                                                        | the recovered free stream, new = (1 - f) old + f update; |                          |                          |
+|                                                        | -1 takes f = 1 / (1 - G) from the update's loop gain G   |                          |                          |
+|                                                        | (clamped to [0.2, 1]), which stops the step-to-step      |                          |                          |
+|                                                        | overshoot above Ct of about 0.75, held at most           |                          |                          |
+|                                                        | dt / (correction_time (1 - G)); a value in (0, 1] is     |                          |                          |
+|                                                        | used as given, and 1 is the unrelaxed update             |                          |                          |
++--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+| **erf.moving_bodies.<name>.correction_time**           | with correction_relax = -1: the time scale (s) on which  | -1, 0, or Real > 0       | -1                       |
+|                                                        | an error of the free stream decays, so the update does   |                          |                          |
+|                                                        | not ring at the delay with which the flow answers the    |                          |                          |
+|                                                        | thrust; -1 is the rotor radius over the free stream, 0   |                          |                          |
+|                                                        | none                                                     |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.fllc**                      | openfast_turbine, mode alm: filtered lifting-line        | true, false              | true (alm), false (adm)  |
 |                                                        | correction of the velocities the blades are given        |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.fllc_relax**                | relaxation factor of the correction                      | 0 < Real <= 1            | 0.1                      |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.fllc_start_time**           | time (s) from which the correction is applied            | Real >= 0                | 0                        |
+| **erf.moving_bodies.<name>.fllc_start_time**           | ERF's simulation time (s) from which the correction is   | Real >= 0                | 0                        |
+|                                                        | applied: the time a restart or a precursor start         |                          |                          |
+|                                                        | carries on (7200 s, say), not the time since the         |                          |                          |
+|                                                        | bodies started                                           |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.fllc_eps_chord**            | optimal kernel width in chords (OpenFAST's chord at each | Real > 0                 | 0.25                     |
 |                                                        | force node)                                              |                          |                          |
@@ -2636,24 +2683,30 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.num_points_r**              | ct_disk: rings of the polar point grid                   | Int > 0                  | 8                        |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.<name>.num_points_t**              | points per ring: of the ct_disk polar grid, or of the    | Int > 0                  | 16                       |
+| **erf.moving_bodies.<name>.num_points_t**              | points per ring: of the ct_disk polar grid, or of the    | Int >= 2                 | 16                       |
 |                                                        | rings an openfast_turbine's blade nodes are spread over  |                          |                          |
+|                                                        | (mode = adm); the audit notes a ring spacing above       |                          |                          |
+|                                                        | two kernel widths                                        |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.sample_diameters_upstream** | ct_disk, and openfast_turbine with sampling = upstream:  | Real > 0                 | 1.0 (ct_disk),           |
 |                                                        | where the free stream is sampled, in diameters ahead     |                          | 2.0 (turbine)            |
 |                                                        | along the normal / shaft axis                            |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.<name>.air_density**               | density in the ct_disk thrust and in the nacelle drag    | Real > 0                 | 1.225                    |
-|                                                        | (kg/m^3)                                                 |                          |                          |
+|                                                        | (kg/m^3); for a ct_disk the run aborts when it differs   |                          |                          |
+|                                                        | from ERF's density at the disk centre by more than       |                          |                          |
+|                                                        | density_tolerance                                        |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.diagnostics_int**                  | write a diagnostics row every this many steps            | Int > 0                  | 1                        |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.diagnostics_dir**                  | directory of the default diagnostics files and of        | String                   | moving_bodies            |
-|                                                        | ``momentum_source.csv`` (time, integrated source vector) |                          |                          |
-|                                                        | and of ``<name>_stats.csv`` (running statistics)         |                          |                          |
+| **erf.moving_bodies.diagnostics_dir**                  | directory of the default diagnostics files and of the    | String                   | moving_bodies            |
+|                                                        | run's own files (listed after this table)                |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.prescribed_velocity**              | testing aid: the uniform velocity given to every body    | 3 Reals                  | none (0 0 0 is used)     |
-|                                                        | node instead of the flow velocity                        |                          |                          |
+| **erf.moving_bodies.prescribed_velocity**              | testing aid: the uniform velocity given to every body    | 3 Reals                  | none (velocities sampled |
+|                                                        | node instead of the flow velocity; the sampling          |                          | from the flow)           |
+|                                                        | correction and the FLLC still apply to it, so with       |                          |                          |
+|                                                        | disk_corrected OpenFAST receives the recovered free      |                          |                          |
+|                                                        | stream, not this velocity; no wake lines are sampled     |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.wake.lines_xD**                    | wake sampling lines behind every rotor at these          | Reals > 0                | none (no wake lines)     |
 |                                                        | distances along its axis, in rotor diameters             |                          |                          |
@@ -2662,23 +2715,51 @@ from the flow every step unless ``erf.moving_bodies.prescribed_velocity`` is giv
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.wake.num_points**                  | points per line                                          | Int >= 2                 | 61                       |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.wake.int**                         | sample the lines every this many steps                   | Int >= 1                 | diagnostics_int          |
+| **erf.moving_bodies.wake.int**                         | sample the lines every this many steps (0: every         | Int >= 0                 | diagnostics_int          |
+|                                                        | diagnostics_int steps)                                   |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.avg_start**                        | time (s) from which the wake running averages and the    | Real >= 0                | 0                        |
-|                                                        | bodies' statistics accumulate                            |                          |                          |
+| **erf.moving_bodies.avg_start**                        | ERF's simulation time (s) from which the wake running    | Real >= 0                | 0                        |
+|                                                        | averages and the bodies' statistics accumulate (like     |                          |                          |
+|                                                        | fllc_start_time, not the time since the bodies           |                          |                          |
+|                                                        | started)                                                 |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
-| **erf.moving_bodies.anchor_level**                     | the level the bodies are sampled and forced on; coarser  | 0 .. amr.max_level, or   | -1 (the finest level)    |
-|                                                        | levels see them through the average-down of the state    | -1                       |                          |
+| **erf.moving_bodies.anchor_level**                     | the level the bodies are sampled and forced on; coarser  | 0 .. amr.max_level, or   | -1 (amr.max_level)       |
+|                                                        | levels see them through the average-down of the state,   | -1                       |                          |
+|                                                        | and no finer level may cover them                        |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.density_tolerance**                | relative difference allowed between ERF's density at a   | Real >= 0                | 0.05                     |
-|                                                        | hub and the OpenFAST model's AirDens; the run aborts     |                          |                          |
-|                                                        | above it                                                 |                          |                          |
+|                                                        | hub and the OpenFAST model's AirDens, and at a ct_disk   |                          |                          |
+|                                                        | centre and its air_density; the run aborts above it      |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
 | **erf.moving_bodies.alm_max_tip_cells**                | actuator line: the most cells a blade tip may sweep in   | Real > 0                 | 1.0                      |
-|                                                        | one step (rotor speed times tip radius times dt over the |                          |                          |
-|                                                        | smallest cell size); the run aborts above it, naming the |                          |                          |
-|                                                        | largest ``erf.fixed_dt`` that passes                     |                          |                          |
+|                                                        | one step (rotor speed times tip radius times the bodies' |                          |                          |
+|                                                        | step over the smallest cell size); the run aborts above  |                          |                          |
+|                                                        | it, naming the largest ``erf.fixed_dt`` that passes      |                          |                          |
 +--------------------------------------------------------+----------------------------------------------------------+--------------------------+--------------------------+
+
+The diagnostics files are listed below; they are written every ``diagnostics_int`` steps. The
+rows of ``_erf.csv``, ``_flow.csv`` and ``total_load.csv`` carry the time at the end of their
+step, and their first row holds the start-up state; the rows of the other files carry the time
+at the start of the step whose forcing they describe.
+
+- ``<output_root>_erf.csv`` (turbine): time, rotor speed (signed like the torque about the
+  shaft), thrust vector, torque, power, hub axis, tower force, nacelle force and total load.
+- ``<output_root>_flow.csv`` (turbine): the velocity handed to OpenFAST at the hub and its blade
+  mean, after the sampling correction and the FLLC (not the raw sampled velocity).
+- ``<output_root>_correction.csv`` (``disk_corrected``): disk velocity, inferred thrust
+  coefficients, induction, filtered-disk factor, recovered free stream, the update's loop gain
+  and the relaxation used.
+- ``<output_root>_fllc.csv`` (FLLC): the correction's size.
+- ``<output_root>_disk.csv`` (ct_disk): time, upstream speed, disk speed, thrust, power and the
+  integrated source.
+- ``<output_root>_wake.csv`` and ``<output_root>_wake_avg.csv`` (wake lines): the instantaneous
+  and running-averaged velocity along the lines.
+- ``<output_root>_stats.csv``: running statistics from ``avg_start`` on, rewritten whole at each
+  write.
+- ``<diagnostics_dir>/momentum_source.csv`` (the integrated momentum source, equal to minus the
+  bodies' loads),
+  ``total_load.csv`` (in a build with OpenFAST: the bodies' total load) and ``ground.csv`` (the terrain
+  height under each body).
 
 .. _sec:ConstantMassFluxInputs:
 

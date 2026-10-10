@@ -2,7 +2,7 @@
 # Download, build and install the OpenFAST version ERF's turbine coupling links against.
 #
 #   Build/setup_openfast.sh [--version 5.0.0] [--prefix DIR] [--src DIR] [--jobs N]
-#                           [--fortran gfortran] [--configure-only]
+#                           [--fortran gfortran] [--configure-only] [--force]
 #
 # Clones the release tag into <src>/openfast-<version>, configures it the way ERF needs
 # (shared libraries, double precision, the C/C++ API on, no tests), builds and installs it under
@@ -21,7 +21,7 @@ configure_only=0
 force=0
 repo="https://github.com/OpenFAST/openfast"
 
-usage() { sed -n '2,13p' "$0"; exit "${1:-0}"; }
+usage() { sed -n '2,12p' "$0"; exit "${1:-0}"; }
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version)        version="$2"; shift 2 ;;

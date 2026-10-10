@@ -103,7 +103,7 @@ PrescribedCtDisk::open_diagnostics (bool truncate) const
 }
 
 void
-PrescribedCtDisk::write_diagnostics (Real time, Real spread_total) const
+PrescribedCtDisk::write_diagnostics (double time, Real spread_total) const
 {
     if (!ParallelDescriptor::IOProcessor()) { return; }
     std::ofstream out(m_output_root + "_disk.csv", std::ios::app);

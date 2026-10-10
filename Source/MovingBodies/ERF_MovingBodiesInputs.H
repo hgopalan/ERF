@@ -15,7 +15,7 @@ struct MovingBodyInputs
     std::string name;
     std::string type;                        //!< openfast_turbine | ct_disk
     std::array<amrex::Real,3> base_pos{{0.0, 0.0, 0.0}}; //!< tower base in ERF coordinates (m)
-    amrex::Real epsilon{2.0};                //!< Gaussian spreading width in units of dx
+    amrex::Real epsilon{2.0};                //!< Gaussian spreading width in cells of the anchor level (its x spacing)
     std::string output_root;                 //!< prefix of the per-body diagnostics files
     // openfast_turbine
     std::string fst_file;                    //!< OpenFAST primary input file
@@ -32,7 +32,7 @@ struct MovingBodyInputs
     amrex::Real fllc_relax{0.1};             //!< relaxation factor of the correction, in (0, 1]
     amrex::Real fllc_start_time{0.0};        //!< the correction starts at this time (s)
     amrex::Real fllc_eps_chord{0.25};        //!< optimal kernel width in chords
-    amrex::Real fllc_eps_dr{1.0};            //!< fine-grid spacing of the correction as a fraction of the optimal kernel width
+    amrex::Real fllc_eps_dr{1.0};            //!< the optimal kernel width over the fine-grid spacing of the correction (spacing = eps_opt / fllc_eps_dr)
     // ct_disk
     amrex::Real rotor_radius{0.0};           //!< disk radius (m)
     amrex::Real hub_height{0.0};             //!< disk centre above the base (m)
@@ -41,7 +41,9 @@ struct MovingBodyInputs
     int num_points_r{8};                     //!< polar grid: rings
     int num_points_t{16};                    //!< points per ring (ct_disk grid, and the turbine's actuator-disk rings)
     amrex::Real sample_diameters_upstream{1.0}; //!< where the free-stream speed is sampled (ct_disk 1 D; turbines default to 2 D)
-    amrex::Real air_density{1.225};          //!< density in the ct_disk thrust and the nacelle drag (kg/m^3)
+    amrex::Real correction_relax{-1.0};     //!< disk_corrected: relaxation of the free-stream update (-1: from its gain; (0,1]: fixed, 1 = none)
+    amrex::Real correction_time{-1.0};      //!< with correction_relax = -1: the update's time scale, s (-1: rotor radius / free stream; 0: none)
+    amrex::Real air_density{1.225};          //!< air density (kg/m^3): ct_disk thrust; turbines: nacelle drag, lifting-line correction, disk_corrected momentum theory (must equal the model's AirDens)
 };
 
 /**

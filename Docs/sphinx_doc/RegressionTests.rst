@@ -580,8 +580,12 @@ OpenFAST driver
 The body is an IEA-15-MW-sized rotor of the bundled OpenFAST stub library,
 driven by a prescribed uniform velocity and adding no forcing to the flow, so
 the plotfile must equal the gold file, which is the same deck run without the
-``erf.moving_bodies`` block. The turbine's diagnostics file ``T1_erf.csv``
-(time, rotor speed, thrust, torque, power, hub axis) is written alongside.
+``erf.moving_bodies`` block. Since that holds even if the turbine never ran,
+with MPI ``Tests/RunOpenFASTADM.cmake`` also compares the turbine's diagnostics
+file ``T1_erf.csv`` with its gold (time, rotor speed, axial thrust, torque,
+power and hub axis to six digits, the precision OpenFAST hands its loads back
+in), requires a non-zero thrust in every row and requires that no momentum
+source was written.
 
 Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_DriverOnly`_
 
@@ -665,8 +669,13 @@ step's thrust, logged in ``T1_correction.csv`` (with OpenFAST this mode requires
 the range the factor was derived for. The same three checks apply;
 ``OpenFASTADM_DiskCorrected_BoxParity`` is the one-box-versus-split twin, and
 ``OpenFAST_ADM_DiskCorrected_Restart`` runs it straight to step 10 and again
-through a checkpoint at step 5, requiring the plotfiles and the correction logs
-to agree: the recovered free stream is part of the moving-bodies checkpoint.
+through a checkpoint at step 5, requiring the plotfiles and every log to agree:
+the recovered free stream is part of the moving-bodies checkpoint. Since the
+relaxation of the update became the default, this deck's golds (and those of
+the other decks that run ``disk_corrected``) hold the relaxed update;
+``OpenFAST_ADM_DiskCorrected_OldUpdate`` runs the deck with
+``correction_relax = 1`` and must reproduce the gold of the unrelaxed update to
+1e-8.
 
 Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_DiskCorrected`_
 
@@ -802,8 +811,22 @@ from that checkpoint to step 10 (``Tests/RunRestartParity.cmake``). The turbine
 is restored from its OpenFAST checkpoint under ``chk00005/moving_bodies``, the
 momentum source is rebuilt from the restored loads and the wake running
 average continues from its checkpointed sums, so the restarted run's plotfile
-must equal the straight run's with zero tolerance and its wake average
-``T1_wake_avg.csv`` must match to ten significant digits.
+must equal the straight run's with zero tolerance and its logs (the wake
+average, the correction, the turbine, flow and statistics logs, the momentum
+source and the total load) must match to ten significant digits. The run that
+writes the checkpoint goes on to step 10 (``OVERRUN``), so its logs already
+hold rows past the checkpoint, which the restart must drop; the four OpenFAST
+restart-parity tests all run this way.
+
+``MovingBodies_Restart_ChangedBodyKey``, ``_ChangedStep``, ``_LaterStopTime``
+and ``_AddedBody`` (``Tests/RunRestartAbort.cmake``) restart the same
+checkpoint with one change each (a body's ``num_points_t``, ``erf.fixed_dt``,
+a stop time past the one OpenFAST was started with, a second body) and require
+the restart to stop with a message naming it. ``MovingBodies_CtDisk_Restart`` does the
+same restart-parity check (with ``OVERRUN``) for the prescribed-Ct disk, asking
+for a later stop time on restart, which a run without turbines may do, and
+``MovingBodies_Restart_ChangedDiskDensity`` requires a changed ``air_density`` to
+stop the restart.
 
 Test Location: `Exec/CanonicalTests/MovingBodies/OpenFAST_ADM_Restart`_
 

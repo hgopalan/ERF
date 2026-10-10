@@ -61,9 +61,11 @@ std::array<amrex::Real,3> nacelle_corrected_velocity (const std::array<amrex::Re
 amrex::Real tip_radius (const erf_openfast::TurbineState& t);
 
 /**
- * The velocity nodes shifted upstream along the shaft axis by diameters * 2 * tip_radius, where the
- * flow is the free stream: there OpenFAST's own induction model applies (sampling = upstream). Every
- * node moves by the same vector, so the blade nodes keep their radii and the hub node leads them.
+ * The velocity nodes shifted upstream by diameters * 2 * tip_radius along the horizontal projection
+ * of the shaft axis, where the flow is the free stream: there OpenFAST's own induction model applies
+ * (sampling = upstream). The shaft's tilt is left out, so the nodes sample the free stream at their
+ * own heights (a 6 degree tilt over two diameters of the IEA 15 MW would lift them by about 50 m).
+ * Every node moves by the same vector, so the blade nodes keep their radii and the hub node leads them.
  */
 std::vector<amrex::Real> upstream_sampling_positions (const erf_openfast::TurbineState& t, amrex::Real diameters);
 
@@ -89,7 +91,32 @@ struct DiskCorrection
     amrex::Real M{1.0};          //!< filtered-disk factor
     amrex::Real u_inf{0.0};      //!< corrected free stream M u_disk / (1 - a)
     amrex::Real factor{1.0};     //!< u_inf / u_disk applied to the sampled node velocities
+    amrex::Real gain{0.0};       //!< linear gain of the unrelaxed update (disk_correction_gain): unstable beyond -1
+    amrex::Real relax{1.0};      //!< the relaxation factor the update used
+    bool clamped{false};         //!< Ct was clamped to 0.96
 };
+
+/**
+ * The linear gain of the disk_corrected update U_new = M u_disk / (1 - a) with Ct taken from the previous
+ * step, for induction a and filter width Delta/R, with the flow induced as (1 - delta) of the thin disk
+ * (delta = (Delta/R)/sqrt(3 pi)): G = -2 a (1 - a)(1 - delta) / ((1 - 2a)(1 - a + delta a)). |G| > 1 means the
+ * unrelaxed update oscillates and grows: Ct above about 0.75 + 0.11 Delta/R.
+ */
+amrex::Real disk_correction_gain (amrex::Real a, amrex::Real delta_over_R);
+
+/**
+ * The relaxation factor that makes the linear error of the update vanish in one step,
+ * 1 / (1 - G) for the (negative) gain G, held in [0.2, 1].
+ */
+amrex::Real disk_correction_relax (amrex::Real gain);
+
+/**
+ * The same factor, held at most dt / (tau (1 - G)) as well, so an error of the estimate decays on
+ * the time scale tau (s; none when tau <= 0): the flow answers a change of thrust only after a
+ * delay, and an update faster than that can ring at the delay's period however its one-step gain
+ * is cancelled.
+ */
+amrex::Real disk_correction_relax (amrex::Real gain, amrex::Real dt, amrex::Real tau);
 
 /**
  * The corrected free stream from the disk velocity u_disk, the rotor thrust of the previous step
@@ -101,9 +128,13 @@ DiskCorrection filtered_disk_correction (amrex::Real u_disk, amrex::Real thrust,
                                          amrex::Real rho, amrex::Real tip_radius, amrex::Real eps);
 
 /**
- * Radius-weighted mean of the axial (shaft-axis) velocity over the blade velocity nodes, each node
- * weighted by its distance from the hub axis (an annulus of equal radial spacing); the hub and
- * tower nodes carry no weight. Zero for a rotor without blade nodes.
+ * Area-weighted mean of the axial (shaft-axis) velocity over the blade velocity nodes: each node
+ * weighted by r dr, its distance r from the hub axis times its share dr of the blade (half the span
+ * to its neighbours on the same blade; the full spacing to its one neighbour at either end). The hub
+ * and tower nodes carry no weight. Zero for a rotor without blade nodes. This takes the nodes as the
+ * centres of the blade's elements, as OpenFAST's actuator points are: for equal elements it is the
+ * area average to 1/(4 n^2) of n nodes. Nodes placed at the root and the tip would count the end
+ * nodes double (for 50 nodes, +0.4 to +1 % for a velocity rising towards the tip).
  */
 amrex::Real disk_axial_velocity (const erf_openfast::TurbineState& t, const std::vector<amrex::Real>& uvw);
 
