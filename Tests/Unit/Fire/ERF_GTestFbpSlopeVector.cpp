@@ -19,6 +19,8 @@ using namespace amrex;
 
 namespace {
 
+constexpr double TOL = (sizeof(Real) == 8) ? 1e-10 : 1e-4;
+
 FbpComputed make (int type, double ffmc, double bui, double pc = 50.0)
 {
     FbpComputed s;

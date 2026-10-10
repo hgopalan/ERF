@@ -11,7 +11,7 @@
  * Defines the canonical output component names for fire plotfiles.
  * All variables are on the native fire grid (C x finer than atmospheric grid).
  *
- * Base output order (19 components, indices 0–18):
+ * Base output order (20 components, indices 0–19):
  *   0. fire_phi           (level-set)
  *   1. fire_ros           (rate of spread [m/s])
  *   2. fire_wind_eff_u    (component 0 of fire_wind_eff)
