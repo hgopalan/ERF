@@ -161,16 +161,21 @@ void verify_fire_prerequisites(const ERF& erf,
         "[FIRE] Domain x and y require start at index 0: the fire-to-atmosphere "
         "index mapping assumes a zero-based domain");
 
-    // Check 12: Domain depth > the height the wind is sampled at. The depth,
-    // not the top: a height above ground compared with the absolute top let
-    // a domain from z = 156 to 160 m pass a 6.1 m sampling height.
+    // Check 12: Domain depth > the height the wind is sampled at: the target
+    // height, or erf.fire.wind_sample_ht when the wind is sampled there and
+    // brought down. The depth, not the top: a height above ground compared
+    // with the absolute top let a domain from z = 156 to 160 m pass a 6.1 m
+    // sampling height. Necessary, not sufficient: over terrain the column
+    // above the highest ground is shallower than the depth.
     Real depth_z = erf.Geom(lev).ProbHi(2) - erf.Geom(lev).ProbLo(2);
+    Real sample_z = amrex::max(fire_params.sampled_wind_ht(), fire_params.wind_sample_ht);
     std::string msg12 = std::string("[FIRE] Domain depth ")
                       + std::to_string(depth_z)
                       + " m (geometry.prob_hi(2) - geometry.prob_lo(2)) should exceed the wind's sampling height "
-                      + std::to_string(fire_params.sampled_wind_ht())
-                      + " m (erf.fire.wind_ref_ht, or 6.096 m with erf.fire.use_per_fuel_wind_ht)";
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(depth_z > fire_params.sampled_wind_ht(), msg12.c_str());
+                      + std::to_string(sample_z)
+                      + " m (erf.fire.wind_ref_ht, or 6.096 m with erf.fire.use_per_fuel_wind_ht,"
+                        " or erf.fire.wind_sample_ht when set)";
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(depth_z > sample_z, msg12.c_str());
 
     // Check 13: divisors and step sizes read straight from the inputs file.
     // ParmParse applies no bounds, and a zero reaches the solver as an integer

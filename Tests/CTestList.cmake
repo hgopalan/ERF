@@ -2530,6 +2530,10 @@ add_test_fire_abort(FireWindRefHtPerFuel_warn FireLineFire inputs_wind2p5
 # check compared the absolute top, so this 4 m deep domain at z = 156 to 160 m ran
 add_test_fire_abort(FireDomainDepth_abort FireLineFire inputs_nowind
     "Domain depth 4.0+ m .* should exceed the wind's sampling height 6.1" "geometry.prob_lo=0\ 0\ 156 geometry.prob_hi=400\ 80\ 160 max_step=1")
+# with erf.fire.wind_sample_ht the wind is sampled there: a 15 m deep domain
+# cannot sample at 20 m (the check compared the 6.1 m target until 2026-10)
+add_test_fire_abort(FireDomainDepthSample_abort FireLineFire inputs_wind2p5
+    "Domain depth 15.0+ m .* should exceed the wind's sampling height 20" "geometry.prob_lo=0\ 0\ 145 geometry.prob_hi=400\ 80\ 160 erf.fire.wind_sample_ht=20 max_step=1")
 
 # A firebreak with a t = 0 polyline ignition stays in the non-burnable mask: all
 # 750 break cells. Until 2026-10 the mask read the break back from phi after the

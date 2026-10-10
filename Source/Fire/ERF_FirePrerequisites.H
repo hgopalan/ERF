@@ -21,7 +21,8 @@ class ERF;
  * - No z-direction MPI decomposition (all z-levels on same rank)
  * - The level's boxes cover one rectangle
  * - Grid divisibility by refinement factor
- * - Domain height is sufficient for wind extraction
+ * - The domain is deeper than the wind's sampling height (necessary, not
+ *   sufficient: terrain is not included)
  *
  * All checks use AMREX_ALWAYS_ASSERT_WITH_MESSAGE for actionable diagnostics.
  */
@@ -74,7 +75,8 @@ void verify_fire_precip_source(const FireParams& fire_params,
  * 9. All boxes divisible by grid_ratio in x and y
  * 10. Distribution map size matches grid size
  * 11. Domain z, x and y indices start at 0
- * 12. Domain depth (prob_hi - prob_lo in z) > the wind's sampling height (FireParams::sampled_wind_ht)
+ * 12. Domain depth (prob_hi - prob_lo in z) > the wind's sampling height (FireParams::sampled_wind_ht,
+ *     or erf.fire.wind_sample_ht when set); terrain is not included
  * 13-14. Level-set and FARSITE divisors and step sizes
  */
 void verify_fire_prerequisites(const ERF& erf,

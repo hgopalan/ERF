@@ -126,7 +126,7 @@ This model implements the MacArthur (1966) Mark 5 Forest Fire Danger Meter formu
 
    R = R_b \cdot \exp(0.8424 \cdot \max(U,\,0))
 
-where :math:`R_b = 0.18\ \text{m/s}` is the backing (no-wind) rate of spread and :math:`U` is the effective midflame wind speed [m/s]. The exponential is capped at :cpp:`erf.fire.macarthur.ros_max` (default 6 m/s, WRF-Fire's cap; it would reach 12 m/s at a 5 m/s midflame wind); 0 removes the cap. The wind is bounded where the rate reaches the cap before the exponential is taken, so no wind overflows it; uncapped, the exponent is bounded at 80, where the exponential is still finite in single precision.
+where :math:`R_b = 0.18\ \text{m/s}` is the backing (no-wind) rate of spread and :math:`U` is the effective midflame wind speed [m/s]. The exponential is capped at :cpp:`erf.fire.macarthur.ros_max` (default 6 m/s, WRF-Fire's cap; it would reach 12 m/s at a 5 m/s midflame wind); 0 removes the cap. The wind is bounded where the rate reaches the cap before the exponential is taken, and the exponent at 40 in every case (a rate of 4e16 m/s, finite with its square in single precision), so no wind and no cap overflows it; uncapped, the rate is finite there but not physical.
 
 The model is appropriate for Australian grassland and open forest fuels. It is not calibrated for North American FBFM13 fuel models.
 

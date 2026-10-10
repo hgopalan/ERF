@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <cfenv>
 #include <cmath>
+#include <limits>
 #include <AMReX_REAL.H>
 
 #include "ERF_FireParams.H"   // ERF_CheneyGouldModel.H reads FireParams without including it
@@ -135,7 +136,7 @@ TEST(MacArthurCap, RateIsCappedAtSixMetresPerSecond)
 
 // The cap is reached at U = ln(6/0.18)/0.8424 = 4.16 m/s, so a stronger wind
 // must not evaluate the exponential: e^{0.8424 U} overflowed at U = 1000 m/s
-// in double (about 105 m/s in single), raising FE_OVERFLOW (an abort under the
+// in double (about 107 m/s in single), raising FE_OVERFLOW (an abort under the
 // FPE traps) before min() took the cap (Copilot's review of hgopalan/ERF#501).
 TEST(MacArthurCap, AWindBeyondTheCapDoesNotOverflow)
 {
@@ -143,9 +144,23 @@ TEST(MacArthurCap, AWindBeyondTheCapDoesNotOverflow)
     std::feclearexcept(FE_OVERFLOW | FE_INVALID | FE_DIVBYZERO);
     volatile Real r = macarthur_ros(u);
     volatile Real r_neg_cap = macarthur_ros(u, -1.0_rt);   // uncapped: bounded, not infinite
+    // a cap past the largest Real / 0.18 made ros_max / 0.18 overflow and the
+    // bound infinite (both precisions): U = 1000 m/s is past even that cap's
+    // wind, so the rate is the cap; at 60 m/s under a 1e30 cap the exponent
+    // (50.5) is past the bound of 40 but short of the cap's (70.8), so the
+    // rate is the bounded uncapped one
+    const Real huge = 0.5_rt * std::numeric_limits<Real>::max();
+    volatile Real r_huge_cap = macarthur_ros(u, huge);
+    volatile Real u60 = 60.0_rt;
+    volatile Real r_far_cap = macarthur_ros(u60, 1.0e30_rt);
+    volatile Real r_uncapped60 = macarthur_ros(u60, 0.0_rt);
+    volatile Real r_sq = r_neg_cap * r_neg_cap;   // the rate times itself stays finite too
     EXPECT_FALSE(std::fetestexcept(FE_OVERFLOW | FE_INVALID | FE_DIVBYZERO));
     EXPECT_EQ(r, 6.0_rt) << "the cap, exactly";
     EXPECT_TRUE(std::isfinite(r_neg_cap));
+    EXPECT_TRUE(std::isfinite(r_sq));
+    EXPECT_EQ(r_huge_cap, huge);
+    EXPECT_EQ(r_far_cap, r_uncapped60) << "a cap the bounded rate does not reach leaves it";
     // below the cap the rate is the formula's, unchanged
     for (Real w : {0.0_rt, 1.0_rt, 3.0_rt, 4.15_rt}) {
         const Real old_form = 0.18_rt + 0.18_rt * (std::exp(0.8424_rt * w) - 1.0_rt);
