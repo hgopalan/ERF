@@ -1007,6 +1007,13 @@ private:
     /// Rebuild m_d_rc_table at the given dead fuel moistures.
     void rebuild_rothermel_table(amrex::Real m1, amrex::Real m10, amrex::Real m100);
 
+    /// Rothermel coefficients of one fuel at the given dead fuel moistures,
+    /// with the deck's coefficient options (use_wind_limit,
+    /// reaction_velocity_formula, wrf_bmst_compat). Every m_rc goes through
+    /// here, so the start-up and moisture_dynamic paths cannot differ.
+    RothermelComputed rothermel_coefficients(const FuelModelParams& fp, amrex::Real m1,
+                                             amrex::Real m10, amrex::Real m100) const;
+
     // Phase 15: BEHAVE pre-computed state (set in initialize from domain-avg moisture,
     // updated in advance when moisture_dynamic = false)
     BehaveState                              m_bs_default;

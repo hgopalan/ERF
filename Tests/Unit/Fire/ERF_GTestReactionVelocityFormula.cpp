@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cmath>
 #include <AMReX_REAL.H>
 
@@ -7,6 +8,7 @@ static constexpr double TOL = (sizeof(amrex::Real) == 8) ? 1e-12 : 1e-5;
 
 #include "ERF_Rothermel.H"
 #include "ERF_FuelModels.H"
+#include "ERF_CustomFuel.H"
 
 /**
  * @file ERF_GTestReactionVelocityFormula.cpp
@@ -20,10 +22,18 @@ using amrex::Real;
 
 static constexpr Real M_DEAD = 0.055;  ///< Coen et al. (2013) moisture, matches ERF_GTestWindLimit.cpp
 
-/// Relative closeness at the build precision.
+/// Closeness at the build precision, absolute for values below one.
 static void expect_close(Real a, Real b)
 {
     EXPECT_NEAR(a, b, TOL * std::max(Real(1.0), std::abs(b)));
+}
+
+/// Relative closeness at the build precision, for small values such as the
+/// packing ratio (about 1e-3), where the absolute form above would accept a
+/// 1% error in single precision.
+static void expect_rel_close(Real a, Real b)
+{
+    EXPECT_NEAR(a, b, TOL * std::abs(b));
 }
 
 /// Independent re-evaluation of Eq. 38's A coefficient, both published forms.
@@ -67,11 +77,11 @@ TEST(ReactionVelocityFormula, OnlyChangesReactionPath)
 
 TEST(ReactionVelocityFormula, MagnitudeDifferenceMatchesPublishedFormulas)
 {
-    // FM1 (sigma_d1 = 3500): confirm the two forms' documented ~36% split in
-    // A (ERF_fire_reaction_velocity/CLAUDE.md) propagates through Gamma_prime
-    // into I_R/R0 by exactly the closed-form ratio predicted from A and
-    // beta_ratio alone -- everything else in Eq. 38 (Gamma_max, w_n,
-    // heat_content, eta_M, eta_s) is common to both and cancels.
+    // FM1 (sigma_d1 = 3500 ft^-1): the two forms of A differ by about 36%
+    // here, and that difference must reach I_R and R0 by exactly the ratio
+    // predicted from A and beta_ratio alone -- everything else in Eq. 38
+    // (Gamma_max, w_n, heat_content, eta_M, eta_s) is common to both and
+    // cancels.
     const FuelModelParams fp = get_fuel_params(1, 0);
     const RothermelComputed rc_albini    = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, false);
     const RothermelComputed rc_rothermel = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, true);
@@ -79,8 +89,11 @@ TEST(ReactionVelocityFormula, MagnitudeDifferenceMatchesPublishedFormulas)
     const Real sigma = amrex::max(fp.sigma_d1, Real(100.0));
     const Real A_a = albini_A(sigma);
     const Real A_r = rothermel_A(sigma);
-    EXPECT_NEAR(A_a, Real(0.209), 1.0e-3);  // matches CLAUDE.md's documented FM1 table
-    EXPECT_NEAR(A_r, Real(0.284), 1.0e-3);
+    // Hand values at sigma = 3500: 133 * 3500^-0.7913 = 0.2087 (Albini 1976)
+    // and 1 / (4.774 * 3500^0.1 - 7.27) = 0.2836 (Rothermel 1972, Eq. 39;
+    // WRF-Fire module_fr_fire_phys.F uses the same constants).
+    EXPECT_NEAR(A_a, Real(0.2087), 1.0e-4);
+    EXPECT_NEAR(A_r, Real(0.2836), 1.0e-4);
     EXPECT_GT(A_r, A_a);
 
     const Real beta_op = Real(3.348) * std::pow(sigma, Real(-0.8189));  // Eq. 37
@@ -124,11 +137,51 @@ TEST(ReactionVelocityFormula, PerFuelTable)
     ASSERT_EQ(albini.size(), rothermel.size());
 
     EXPECT_EQ(albini[0].R0, Real(0.0));  // non-burnable slot stays zero
-    for (std::size_t slot = 1; slot < albini.size(); ++slot) {
+    // The published sets. Seven Scott-Burgan fuels have sigma = 1800 ft^-1,
+    // next to where the two forms of A cross (about 1800.5), so their I_R
+    // differs only in the fifth digit; it still differs.
+    for (int slot = 1; slot < FUEL_SLOT_CUSTOM_BASE; ++slot) {
         SCOPED_TRACE(::testing::Message() << "slot " << slot);
-        expect_close(albini[slot].beta, rothermel[slot].beta);
+        expect_rel_close(albini[slot].beta, rothermel[slot].beta);
         EXPECT_NE(albini[slot].I_R, rothermel[slot].I_R);
     }
+    // The deck-defined slots with no slot table handed in stay non-burnable.
+    for (int slot = FUEL_SLOT_CUSTOM_BASE; slot < FUEL_SLOT_COUNT; ++slot) {
+        SCOPED_TRACE(::testing::Message() << "slot " << slot);
+        EXPECT_EQ(albini[slot].R0, Real(0.0));
+        EXPECT_EQ(rothermel[slot].R0, Real(0.0));
+    }
+}
+
+// The slot table is how deck-defined (custom) fuels reach the coefficients:
+// both options must act on a custom slot exactly as on the same fuel computed
+// directly. Before the slot table existed the loop above covered every slot;
+// this guards the custom path the merge with the slot table added.
+TEST(ReactionVelocityFormula, CustomSlotGetsBothOptions)
+{
+    auto tbl = build_fuel_params_slot_table(0, Real(-1.0), CustomFuelTable{});
+    const FuelModelParams fm1 = get_fuel_params(1, 0);
+    tbl[FUEL_SLOT_CUSTOM_BASE] = fm1;   // a deck-defined fuel with FM1's properties
+
+    for (bool a_rothermel : {false, true}) {
+        for (bool bmst : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << "rothermel A " << a_rothermel << ", bmst " << bmst);
+            const auto table = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true,
+                                                          tbl.data(), a_rothermel, bmst);
+            const RothermelComputed direct = compute_rothermel_params(fm1, M_DEAD, M_DEAD, M_DEAD,
+                                                                      true, a_rothermel, bmst);
+            EXPECT_EQ(table[FUEL_SLOT_CUSTOM_BASE].R0,   direct.R0);
+            EXPECT_EQ(table[FUEL_SLOT_CUSTOM_BASE].I_R,  direct.I_R);
+            EXPECT_EQ(table[FUEL_SLOT_CUSTOM_BASE].beta, direct.beta);
+        }
+    }
+    // and the options do change that slot
+    const auto plain = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true,
+                                                  tbl.data(), false, false);
+    const auto both  = build_fuel_rothermel_table(M_DEAD, M_DEAD, M_DEAD, 0, -1.0, true,
+                                                  tbl.data(), true, true);
+    EXPECT_NE(plain[FUEL_SLOT_CUSTOM_BASE].I_R, both[FUEL_SLOT_CUSTOM_BASE].I_R);
+    EXPECT_NE(plain[FUEL_SLOT_CUSTOM_BASE].beta, both[FUEL_SLOT_CUSTOM_BASE].beta);
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +223,7 @@ TEST(WrfBmstCompat, DeflatesPackingRatioByExactBmstFactor)
     const RothermelComputed rc_on  = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, false, true);
 
     const Real bmst = M_DEAD / (Real(1.0) + M_DEAD);
-    expect_close(rc_on.beta, rc_off.beta * (Real(1.0) - bmst));
+    expect_rel_close(rc_on.beta, rc_off.beta * (Real(1.0) - bmst));
 
     // Less fuel available to burn -> weaker reaction intensity -> slower R0.
     EXPECT_LT(rc_on.I_R, rc_off.I_R);
@@ -187,7 +240,7 @@ TEST(WrfBmstCompat, IndependentOfReactionVelocityFormula)
     const RothermelComputed rc_on  = compute_rothermel_params(fp, M_DEAD, M_DEAD, M_DEAD, true, true, true);
 
     const Real bmst = M_DEAD / (Real(1.0) + M_DEAD);
-    expect_close(rc_on.beta, rc_off.beta * (Real(1.0) - bmst));
+    expect_rel_close(rc_on.beta, rc_off.beta * (Real(1.0) - bmst));
 }
 
 TEST(WrfBmstCompat, PerFuelTable)
@@ -208,9 +261,15 @@ TEST(WrfBmstCompat, PerFuelTable)
 
     const Real bmst = M_DEAD / (Real(1.0) + M_DEAD);
     EXPECT_EQ(off[0].R0, Real(0.0));  // non-burnable slot stays zero
-    for (std::size_t slot = 1; slot < off.size(); ++slot) {
+    for (int slot = 1; slot < FUEL_SLOT_CUSTOM_BASE; ++slot) {
         SCOPED_TRACE(::testing::Message() << "slot " << slot);
-        expect_close(on[slot].beta, off[slot].beta * (Real(1.0) - bmst));
+        expect_rel_close(on[slot].beta, off[slot].beta * (Real(1.0) - bmst));
         EXPECT_NE(on[slot].R0, off[slot].R0);
+    }
+    // deck-defined slots with no slot table: non-burnable either way
+    for (int slot = FUEL_SLOT_CUSTOM_BASE; slot < FUEL_SLOT_COUNT; ++slot) {
+        SCOPED_TRACE(::testing::Message() << "slot " << slot);
+        EXPECT_EQ(on[slot].R0, Real(0.0));
+        EXPECT_EQ(off[slot].R0, Real(0.0));
     }
 }

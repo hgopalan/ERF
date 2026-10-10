@@ -1,0 +1,11 @@
+FILE = inputs_base
+
+# inputs_rothermel_bmst through the per-fuel coefficient table: a fuel map of
+# FM1 everywhere with erf.fire.rothermel_per_fuel = true. The table is built by
+# build_fuel_rothermel_table(), not the uniform-fuel path, so the two options
+# must reach it too; the head rate must equal inputs_rothermel_bmst's.
+erf.fire.reaction_velocity_formula = "rothermel"
+erf.fire.wrf_bmst_compat = true
+erf.fire.fuel_map.file = "fuel_map_fm1.asc"
+erf.fire.fuel_map.format = "ascii"
+erf.fire.rothermel_per_fuel = true

@@ -261,7 +261,7 @@ struct RothermelComputed
  * @param[in] use_rothermel_a_formula  Select the reaction-velocity exponent A:
  *                        false (default) Albini's (1976, GTR-INT-30) form,
  *                        A = 133*sigma^-0.7913 (ERF's original behavior);
- *                        true WRF-Fire's Rothermel (1972) original form,
+ *                        true Rothermel's (1972) Eq. 39, used by WRF-Fire,
  *                        A = 1/(4.774*sigma^0.1-7.27)
  *                        (erf.fire.reaction_velocity_formula = "rothermel").
  *                        The WRF form has a pole at sigma ~= 67 ft^-1; this
@@ -269,7 +269,7 @@ struct RothermelComputed
  *                        every call safely above it.
  * @param[in] wrf_bmst_compat  Deflate the total dry fuel load w_0 by
  *                        (1-bmst), bmst = M_f/(1+M_f), before it feeds
- *                        w_n/rho_b/beta/I_R/xi/R0 -- reproduces WRF-Fire's
+ *                        w_n/rho_b/beta/I_R/xi/R0, as WRF-Fire's
  *                        fuelloadm = (1-bmst)*fgip (module_fr_fire_phys.F),
  *                        which treats its (Anderson-derived) fgip as a wet
  *                        mass and strips adsorbed water before Rothermel.

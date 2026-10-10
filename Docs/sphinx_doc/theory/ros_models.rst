@@ -29,7 +29,51 @@ The default single-class empirical model implemented in Phases 1-12. This model 
 
 **Key parameter:** :cpp:`ros_model = "rothermel"`
 
-**Reference:** Rothermel, R.C. (1972). A Mathematical Model for Predicting Fire Spread in Wildland Fuels. USDA Forest Service Research Paper INT-115.
+**Reaction-velocity exponent.** The optimum reaction velocity is
+:math:`\Gamma' = \Gamma'_{max} (\beta/\beta_{op})^A \exp[A(1-\beta/\beta_{op})]`.
+Two published forms of the exponent :math:`A` exist, with :math:`\sigma` the
+fuel-bed surface-area-to-volume ratio in ft\ :sup:`-1`:
+
+.. math::
+
+   A_\mathrm{Albini} = 133\,\sigma^{-0.7913}, \qquad
+   A_\mathrm{Rothermel} = \frac{1}{4.774\,\sigma^{0.1} - 7.27}.
+
+The first is Albini's (1976) revision and the default; the second is
+Rothermel's (1972) Eq. 39, which WRF-Fire uses. :cpp:`erf.fire.reaction_velocity_formula = "rothermel"`
+selects it. The two cross near :math:`\sigma = 1800` ft\ :sup:`-1`; for
+Anderson's short grass (:math:`\sigma = 3500`) :math:`A` is 0.209 and 0.284,
+and the no-wind rate of the Anderson models changes by -8 % to +4 % at 6, 8 and
+10 % dead moisture. :math:`A_\mathrm{Rothermel}` has a pole at
+:math:`\sigma = (7.27/4.774)^{10} = 67.1`; the code clamps :math:`\sigma` to at
+least 100, above it. Only :math:`A` changes: the net load stays
+:math:`w_0 (1 - S_T)`.
+
+**WRF-Fire fuel load.** WRF-Fire takes its fuel load as wet mass and removes the
+water before Rothermel, :math:`w_0 \to (1 - b)\,w_0` with :math:`b = M/(1+M)`.
+:cpp:`erf.fire.wrf_bmst_compat = true` applies the same deflation, with
+:math:`M` the dead-load-weighted dead moisture, before the packing ratio, bulk
+density, net load, reaction intensity and propagating flux ratio are formed.
+ERF's fuel tables are oven-dry already, so this is a comparison option, not a
+correction. It does not make ERF reproduce WRF-Fire: ERF takes the 1-h SAV as
+the bed SAV, uses :math:`w_0(1-S_T)` for the net load (WRF-Fire
+:math:`w_0/(1+S_T)`), keeps its own heat contents and the MEWS wind cap
+(:cpp:`erf.fire.use_wind_limit`), and the fuel consumed and the heat released
+still use the full dry load. With a 4 m/s wind the lower load slows the no-wind
+rate but raises the wind factor through :math:`(\beta/\beta_{op})^{-E}`, so the
+head rate can move either way.
+
+Both options act wherever the Rothermel coefficients are built: the uniform
+fuel, the per-fuel table of a fuel map (deck-defined fuels included) and the
+rebuild with :cpp:`erf.fire.moisture_dynamic`; that covers a hybrid with a
+Rothermel member. BEHAVE keeps its own Albini form, and the other models ignore
+both keys with a warning. ``Exec/RegTests/FireReactionVelocityFormula`` checks
+the head rate of each combination.
+
+**References:**
+
+- Rothermel, R.C. (1972). A Mathematical Model for Predicting Fire Spread in Wildland Fuels. USDA Forest Service Research Paper INT-115.
+- Albini, F.A. (1976). Estimating wildfire behavior and effects. USDA Forest Service General Technical Report INT-30.
 
 MacArthur (1966) Australian Formula
 ------------------------------------

@@ -485,32 +485,35 @@ struct FireParams
     // "macarthur"    — McArthur grassland formula R = 0.18*exp(0.8424*U)
     std::string       ros_model = "rothermel";  ///< ROS model selector
 
-    // The Rothermel/BEHAVE reaction-velocity exponent A (Gamma' = Gamma'_max *
-    // (beta/beta_op)^A * exp(A*(1-beta/beta_op))) has two non-equivalent
-    // published forms, erf.fire.reaction_velocity_formula:
-    //   "albini" (default, backward compatible) — Albini's (1976, GTR-INT-30)
-    //                        reformulation, A = 133 * sigma^-0.7913, ERF's
-    //                        form since this was first implemented.
-    //   "rothermel"        — Rothermel's (1972) original form,
-    //                        A = 1 / (4.774 * sigma^0.1 - 7.27), as used by
-    //                        WRF-Fire (module_fr_fire_phys.F). This form has a
-    //                        pole at sigma ~= 67 ft^-1, below which A goes
-    //                        negative; ERF_Rothermel.cpp's minimum-SAV guard
-    //                        (sigma >= 100) keeps every call safely above it.
-    // Only affects ros_model = "rothermel"; BEHAVE (ERF_BehaveModel.H) keeps
-    // its own independent copy of the Albini form regardless of this option.
+    // The Rothermel reaction-velocity exponent A (Gamma' = Gamma'_max *
+    // (beta/beta_op)^A * exp(A*(1-beta/beta_op))) has two published forms,
+    // erf.fire.reaction_velocity_formula:
+    //   "albini" (default) — Albini's (1976, GTR-INT-30) revision,
+    //                        A = 133 * sigma^-0.7913, ERF's form so far.
+    //   "rothermel"        — Rothermel's (1972) Eq. 39,
+    //                        A = 1 / (4.774 * sigma^0.1 - 7.27), the form
+    //                        WRF-Fire uses (module_fr_fire_phys.F). It has a
+    //                        pole at sigma = (7.27/4.774)^10 = 67.1 ft^-1;
+    //                        compute_rothermel_params() clamps sigma to at
+    //                        least 100 ft^-1, above the pole.
+    // Only A changes; the net load stays w_0*(1-S_T). Read by every run that
+    // evaluates Rothermel (ros_model = "rothermel", or a hybrid with a
+    // rothermel member). BEHAVE keeps its own Albini form; any other model
+    // ignores the key, with a warning.
     std::string       reaction_velocity_formula = "albini";
+    bool              use_rothermel_a_formula = false;  ///< reaction_velocity_formula == "rothermel"
 
-    // WRF-Fire compatibility: WRF-Fire's fgip is nominally the same
-    // Anderson-table oven-dry load ERF uses for w_d1/w_d10/w_d100/w_lh/w_lw,
-    // but module_fr_fire_phys.F treats it as a *wet* mass (dry fuel plus
-    // adsorbed moisture) and strips a water fraction out before it ever
-    // reaches Rothermel: fuelloadm = (1-bmst)*fgip, bmst = fmc_g/(1+fmc_g).
-    // Since Anderson's tables are already oven-dry, this is a WRF-specific
-    // deflation of the fuel load actually fed to Rothermel, not a physical
-    // correction -- default false so ERF's own fuel load stays the true dry
-    // value. Set true (erf.fire.wrf_bmst_compat) to reproduce WRF-Fire's ROS
-    // bit-for-bit given otherwise-identical fuel-table/heat-content inputs.
+    // WRF-Fire takes its fuel load as wet mass and removes the water before
+    // Rothermel: fuelloadm = (1-bmst)*fgip, bmst = fmc_g/(1+fmc_g). ERF's
+    // fuel tables are oven-dry already, so this is a WRF-comparison option,
+    // not a physical correction (erf.fire.wrf_bmst_compat, default false).
+    // With it on, compute_rothermel_params() deflates w_0 by (1-bmst), with
+    // bmst from the dead-load-weighted moisture M_f, before the packing ratio,
+    // bulk density, net load, reaction intensity and flux ratio are formed,
+    // as WRF-Fire does. It does NOT make ERF match WRF-Fire: ERF uses the 1-h
+    // SAV as the bed SAV, w_0*(1-S_T) for the net load, its own heat
+    // contents, the MEWS wind cap (use_wind_limit), and the fuel consumed and
+    // the heat released still use the full dry load. Same readers as above.
     bool              wrf_bmst_compat = false;
 
     // Phase 13B: Balbi (2009) physical fire spread model parameters.
@@ -1331,6 +1334,7 @@ struct FireParams
        one_of("ros_model", ros_model, {"rothermel", "behave", "balbi", "fbp", "hybrid", "prescribed", "cheney_gould", "macarthur"});
        pp.query("reaction_velocity_formula", reaction_velocity_formula);
        one_of("reaction_velocity_formula", reaction_velocity_formula, {"albini", "rothermel"});
+       use_rothermel_a_formula = (reaction_velocity_formula == "rothermel");
        pp.query("wrf_bmst_compat", wrf_bmst_compat);
        pp.query("rothermel_per_fuel", rothermel_per_fuel);
 
@@ -1865,6 +1869,19 @@ struct FireParams
            }
        } else if (directional_split_hamiltonian) {
            amrex::Abort("erf.fire.directional_split_hamiltonian needs erf.fire.directional_wind_coupling = \"advective\"");
+       }
+
+       // The two Rothermel coefficient options do nothing when no Rothermel
+       // model runs (ros_model left unset is Rothermel, so this is always an
+       // explicit choice of another model): warn rather than stop, as for
+       // other keys whose switch a deck turned off.
+       if (!uses_model("rothermel")) {
+           for (const char* k : {"reaction_velocity_formula", "wrf_bmst_compat"}) {
+               if (pp.contains(k)) {
+                   amrex::Print() << "[FIRE] WARNING: erf.fire." << k << " is ignored with erf.fire.ros_model = "
+                                  << ros_model << " (it changes the Rothermel coefficients only)\n";
+               }
+           }
        }
     }
 

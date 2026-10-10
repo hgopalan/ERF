@@ -1,4 +1,5 @@
 plt_*/
 fire_stats_*.csv
+run_*.log
 __pycache__/
 *.pyc

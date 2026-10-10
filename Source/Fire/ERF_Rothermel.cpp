@@ -40,13 +40,12 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
         M_f = r_d1 * moisture_1hr + r_d10 * moisture_10hr + r_d100 * moisture_100hr;
     }
 
-    // WRF-Fire compatibility: WRF's fgip is nominally the same Anderson
-    // oven-dry load as w_0, but module_fr_fire_phys.F treats it as a wet
-    // mass and strips out an adsorbed-water fraction before Rothermel:
-    // fuelloadm = (1-bmst)*fgip, bmst = fmc_g/(1+fmc_g). Applying the same
-    // deflation to w_0 here -- before w_n/rho_b/beta/I_R/xi/R0 are formed --
-    // reproduces that behavior exactly through every downstream nonlinear
-    // step, not just I_R's numerator.
+    // WRF-Fire comparison (erf.fire.wrf_bmst_compat): WRF-Fire takes its fuel
+    // load as wet mass and removes the water before Rothermel,
+    // fuelloadm = (1-bmst)*fgip, bmst = fmc_g/(1+fmc_g)
+    // (module_fr_fire_phys.F). The deflation is applied to w_0 here, before
+    // w_n, rho_b, beta, I_R, xi and R0 are formed, as WRF-Fire uses the
+    // deflated load for all of them. M_f is the dead-load-weighted moisture.
     if (wrf_bmst_compat) {
         Real bmst = M_f / (1.0 + M_f);
         w_0 *= (1.0 - bmst);
@@ -73,7 +72,7 @@ RothermelComputed compute_rothermel_params(const FuelModelParams& fp,
     Real beta_op = 3.348 * std::pow(sigma, -0.8189);           // Eq. 37: optimum packing ratio
     Real sigma_1p5 = std::pow(sigma, 1.5);
     Real Gamma_max = sigma_1p5 / (495.0 + 0.0594 * sigma_1p5); // Eq. 36: maximum reaction velocity
-    // A coefficient (Eq. 38): Albini's (1976) reformulation (ERF's original
+    // A coefficient (Eq. 39): Albini's (1976) reformulation (ERF's original
     // form) or WRF-Fire's original Rothermel (1972) form, selected by
     // erf.fire.reaction_velocity_formula. The WRF form has a pole at
     // sigma ~= 67 ft^-1 = (7.27/4.774)^10, below which A goes negative; the
