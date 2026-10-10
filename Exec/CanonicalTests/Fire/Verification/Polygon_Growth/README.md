@@ -29,16 +29,24 @@ time along the diagonals out of the four inner corners, T = d / (sqrt(2) R).
 
 ## Expected Results
 
-On two ranks:
+On two ranks, re-measured 2026-10-09:
 
 | deck | area error at 10 s ... 60 s | arrival mean \|e\| / 95th pct | inner-corner diagonals |
 |---|---|---|---|
-| `square` | -0.06 ... -0.21 cell widths of perimeter | 0.144 / 0.338 | |
-| `cross` | -0.05 ... -0.28 | 0.138 / 0.342 | mean e -0.237, 95th pct 0.250 |
+| `square` | -0.07 ... -0.28 cell widths of perimeter | 0.179 / 0.506 | |
+| `cross` | -0.06 ... -0.37 | 0.198 / 0.508 | mean e -0.043, 95th pct 0.140 |
+
+The code before this one (2026-10) gives the same areas, arrival errors of
+0.143 / 0.423 and 0.160 / 0.425 and inner corners at -0.218 / 0.250; the
+numbers this README carried until then (-0.06 ... -0.21, 0.144 / 0.338)
+predate both. The arrival time is now the crossing interpolated within the
+substep, half a substep later on average than the start-of-substep stamp,
+which is what moves the mean error from +0.09 to +0.18 crossings and takes
+the early bias off the inner corners.
 
 Arrival errors are in cell-crossing times (2 s). The area falls slowly behind
-the formula, by up to a quarter of a cell times the perimeter at 60 s, the
+the formula, by up to a third of a cell times the perimeter at 60 s, the
 artificial viscosity of the default level set on the rounded outer corners; the
-inner corners arrive a quarter of a cell early, so they are kept sharp, not
-rounded. The checks allow half a cell width of perimeter on the area and half a
+inner corners arrive within 0.05 cell of the exact time, so they are kept
+sharp, not rounded. The checks allow half a cell width of perimeter on the area and half a
 cell (one at the 95th percentile) on the arrival time.

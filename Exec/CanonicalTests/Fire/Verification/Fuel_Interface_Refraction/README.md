@@ -42,8 +42,13 @@ On two ranks, arrival errors in cell-crossing times h/R:
 
 | deck | first fuel mean \|e\| / 95th pct | second fuel mean \|e\| / 95th pct | transmitted \|grad T\| | transmitted angle |
 |---|---|---|---|---|
-| `fast_to_slow` | 0.100 / 0.228 | 0.108 / 0.170 | 1.98643 s/m (1/R2 = 2) | 18.999 deg |
-| `slow_to_fast` | 0.149 / 0.262 | 0.108 / 0.233 | 0.99980 s/m (1/R2 = 1) | 57.746 deg |
+| `fast_to_slow` | 0.317 / 0.720 | 0.991 / 1.425 (fails the half-cell check) | 2.00628 s/m (1/R2 = 2) | 18.964 deg |
+| `slow_to_fast` | 0.237 / 0.490 | 0.181 / 0.427 | 1.00081 s/m (1/R2 = 1) | 58.045 deg |
 
-The refracted front leaves at Snell's angle to a quarter of a degree and at the
-second fuel's rate to 0.7 %.
+Re-measured 2026-10-09: 7 of the 8 checks pass. The refracted front leaves at
+Snell's angle to 0.35 deg and at the second fuel's rate to 0.3 %, but behind
+the interface where the rate halves it runs one crossing of the slow fuel
+late (mean +0.99, 4 s), beyond the half-cell tolerance; the code before this
+one fails the same check at +0.93 (its other errors 0.235 / 0.607, 0.186 /
+0.433 and 0.133 / 0.328), and the 0.100 / 0.228 and 0.108 / 0.170 this
+README carried until then predate both. The lag at a rate step is open.

@@ -37,14 +37,24 @@ at E_d from about 6100 s; a binary from before the fix fails 44 of the 48 checks
 
 ## Expected Results
 
-On one rank, T = 26.85 C and tau_eff = 0.9024 h:
+On one rank, T = 26.85 C and tau_eff = 0.9024 h, the checker expects:
 
-- every class matches the stepwise solution to 1e-16 and the closed form to
+- every class to match the stepwise solution to 1e-16 and the closed form to
   5e-5 at every plotfile;
-- the 1-hour class reads 0.1062 at one hour and 0.0753 at two hours, still
+- the 1-hour class to read 0.1062 at one hour and 0.0753 at two hours, still
   drying toward E_d (the reversed choice read 0.0895, then held at 0.0600);
-- the rate of spread is zero (Rothermel's floor) until the 1-hour class crosses
-  12 % at t = 2754 s, and matches Rothermel at the 1-hour moisture to six digits
-  at every plotfile after that;
-- the burned radius follows r_ig plus the integral of the rate to 0.09 cells,
+- the rate of spread to be zero (Rothermel's floor) until the 1-hour class
+  crosses 12 % at t = 2754 s, and to match Rothermel at the 1-hour moisture to
+  six digits at every plotfile after that;
+- the burned radius to follow r_ig plus the integral of the rate to 0.09 cells,
   reaching 76.2 m at two hours.
+
+Measured 2026-10-09 on two ranks, 5 of the 48 checks pass, and the code before
+this one gives the same numbers to every digit: the classes sit 1.0e-2 to
+1.2e-2 from the stepwise and the closed-form solutions (the 1-hour class
+0.0821, 0.0784 and 0.0753 at the three plotfiles), the rate of spread is
+0.0161 to 0.0188 m/s against Rothermel's 0.0197 to 0.0212 at the 1-hour
+moisture, and the burned radius is 9 to 12 cells short of r_ig plus the
+integral of R0 dt (52.8 m against 76.1 m at two hours). The expectations
+above, which this README stated as results until 2026-10, are not met by the
+code on either side of this branch; the discrepancy is open.
